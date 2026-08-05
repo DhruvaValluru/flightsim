@@ -37,6 +37,10 @@ python3 -m venv .venv && .venv/bin/pip install jsbsim==1.2.4 numpy pytest pyyaml
 .venv/bin/python experiments/gate4_terrain.py
 ```
 
+```bash
+.venv/bin/python experiments/gate7_sweep.py
+```
+
 Gate 5 needs the Unreal host. Check whether this machine can build it:
 
 ```bash
@@ -68,6 +72,7 @@ core/            zero Unreal dependency (§2.9)
   telemetry/     read-only observers
   terrain/       DEM ingestion, spectral synthesis, heightfield query, Landscape export
 experiments/     gates, sweeps, analysis, validation
+docs/vva/        V&V plan, report, accreditation statement
 ue/              Unreal project                    (Phase 5)
 docs/            VALIDITY.md, JSBSIM_CORRECTIONS.md, vva/
 tests/

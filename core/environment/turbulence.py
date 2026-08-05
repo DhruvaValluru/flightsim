@@ -70,6 +70,10 @@ W20_KT = {"none": 0.0, "light": 15.0, "moderate": 30.0, "severe": 45.0}
 #: Above this height the POE index governs and W20 is ignored (measured).
 LOW_ALTITUDE_CEILING_M = 300.0
 
+#: JSBSim stores atmosphere/randomseed as a double and casts to a C int, so
+#: values at or above INT_MAX saturate rather than wrap.
+MAX_JSBSIM_SEED = 2 ** 31 - 1
+
 
 def poe_index_for(intensity: str) -> int:
     """The POE index whose measured sigma_w is closest to the intensity band."""
@@ -107,6 +111,17 @@ class DrydenTurbulence(TurbulenceProvider):
             raise ValueError(
                 f"turbulence model {model} is not offered. ttCulp (2) diverges "
                 f"and ttStandard (1) produces nothing from milspec parameters."
+            )
+        # A seed JSBSim cannot represent does not fail, it saturates: anything
+        # at or above INT_MAX reads back as 2147483647, so two "different"
+        # seeds silently produce identical turbulence. Refusing is the only way
+        # this stays visible.
+        if not 0 <= int(seed) < MAX_JSBSIM_SEED:
+            raise ValueError(
+                f"turbulence seed {seed} is outside the range JSBSim can "
+                f"represent (0 to {MAX_JSBSIM_SEED - 1}). Larger values "
+                f"saturate to INT_MAX and every seed above the limit yields "
+                f"the same realisation."
             )
         self.intensity = intensity
         self.seed = int(seed)

@@ -182,6 +182,21 @@ mutate core/fdm/fdm.py \
     '            if False:  # MUTATED: no angular wrap' \
     "wrap-aware heading IC check" tests/test_terrain.py || failures=$((failures+1))
 
+mutate core/experiments/seeds.py \
+    '        seeds[name] = 1 + (raw % MAX_SEED)' \
+    '        seeds[name] = raw >> 1  # MUTATED: seeds saturate at INT_MAX' \
+    "seeds stay inside JSBSim's range" tests/test_experiments.py || failures=$((failures+1))
+
+mutate core/experiments/sweep.py \
+    '        log.truncate()' \
+    '        pass  # MUTATED: stale rows accumulate' \
+    "non-resumed sweep starts fresh" tests/test_experiments.py || failures=$((failures+1))
+
+mutate core/experiments/sweep.py \
+    '            record["ok"] = False' \
+    '            return  # MUTATED: drop failed cases' \
+    "failed cases are recorded" tests/test_experiments.py || failures=$((failures+1))
+
 mutate core/scenario/envelope.py \
     '        lift_lbs = fdm.props.get("forces/fwz-aero-lbs")' \
     '        lift_lbs = -fdm.props.get("forces/fwz-aero-lbs")' \

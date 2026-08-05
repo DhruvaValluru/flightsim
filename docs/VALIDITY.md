@@ -1,6 +1,6 @@
 # What this simulation can and cannot support
 
-Status: **Phases 0-4 complete. Phase 5 BLOCKED on the build toolchain.** This document grows with each phase. Everything
+Status: **Phases 0-4 and 7 complete. Phases 5-6 BLOCKED on the build toolchain.** This document grows with each phase. Everything
 below is scoped to what has actually been built and measured; nothing here is
 aspirational.
 
@@ -132,6 +132,19 @@ What is **not** established, and must not be claimed:
   whether the two hosts agree. Gate 5 reports **BLOCKED** with its own exit
   code, distinct from pass and fail, and refuses to report a pass on the
   headless half alone.
+
+Phase 7 adds the research machinery: resumable parameter sweeps, per-subsystem
+seed derivation, provenance manifests, variance attribution, a validation report
+and a NASA-STD-7009A credibility scorecard. Measured, Gate 7:
+
+* an 18-case factorial sweep completes; killed at case 7 and resumed, it
+  produces a **case-for-case identical dataset**
+* the run **reproduces bit-identically** from its manifest across all 18 cases
+* wind speed explains **99.4%** of mean-airspeed variance and 93.0% of altitude
+  excursion (η²), with dispersion reported at every level
+* the validation report is **mostly inconclusive**, which is the honest result
+
+The V&V document set is at [vva/](vva/): plan, report, accreditation statement.
 
 That is the whole of it. There is no rendering.
 
@@ -284,7 +297,29 @@ runtime rather than calibrated.
 about 1.5 cm. Reported as `quantisation_m` and used to derive round-trip
 tolerances rather than assumed negligible.
 
-### 2.11 Not yet built
+### 2.11 Validation is mostly inconclusive, and that is the finding
+
+Of six validation targets, one is validated at u_val (B747 stall speed, against
+a specification figure with deliberately wide u_D), one is validated
+(turbulence σ_w reproduces MIL-F-8785C's low-altitude relation), two are
+**inconclusive for want of any referent**, one was **not attempted** (modal
+damping needs linearisation this build does not do), and one is not applicable.
+
+A validation suite that returned PASS on this evidence base would be comparing
+the model to itself. See [vva/VV_REPORT.md](vva/VV_REPORT.md).
+
+### 2.12 The credibility scorecard is mostly below its own threshold
+
+Published at `runs/gate7/scorecard.txt` against a threshold of **2**, declared
+before scoring. Many factors score 0–1, and `sensors` scores 0 across the board
+because no EO/IR modelling exists. That is the expected state and it is
+published rather than withheld — a scorecard exists to say where the model is
+weak.
+
+Rendering is absent from the scorecard entirely, because there is nothing to
+score.
+
+### 2.13 Not yet built
 
 No verified Unreal integration (see above), no rendering
 (Phase 3) -- a spec requesting turbulence is refused rather than run in smooth
