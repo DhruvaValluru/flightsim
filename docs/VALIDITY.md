@@ -1,6 +1,6 @@
 # What this simulation can and cannot support
 
-Status: **Phase 0 complete.** This document grows with each phase. Everything
+Status: **Phases 0-1 complete.** This document grows with each phase. Everything
 below is scoped to what has actually been built and measured; nothing here is
 aspirational.
 
@@ -23,8 +23,23 @@ run with mass held constant over >= 3 phugoid periods:
 * altitude oscillation **shrinking** in every case (growth -0.47 to -1.71 m),
   so the phugoid is damped rather than merely slow
 
-That is the whole of it. There is no control law, no environment model beyond
-the standard atmosphere, no terrain, and no rendering.
+Phase 1 adds the path from a sentence to that run: a prompt compiles to a
+scenario spec in which every field records whether a human stated it, whether it
+was inferred from a vague phrase, or whether it was defaulted; the spec is
+rendered as a table, edited, validated, and only then run. Measured, Gate 1:
+
+* the same spec runs **bit-identically** twice (equal SHA-256 over all recorded
+  telemetry)
+* the digest is content-addressed -- two different sentences commanding the same
+  simulation hash the same, and any changed value changes the digest
+* impossible requests are rejected by **name**: `altitude.terrain_clearance`,
+  `airspeed.stall_margin`, `envelope.trim_feasible`
+
+Steady wind is applied and is verifiable in the output (crab angle moves 0.00 to
+6.44 degrees under a 25 kt crosswind and returns when it is removed).
+
+That is the whole of it. There is no control law, no turbulence, no terrain
+model, and no rendering.
 
 ---
 
@@ -72,13 +87,43 @@ recorded in `FlightDynamics.provenance()["mass_held_constant"]` so a mass-held
 result can never be reported as a realistic one. **Both numbers are published
 for every Gate 0 condition.**
 
-### 2.4 Not yet built
+### 2.4 Derived speeds describe the model, not the aircraft
 
-No control laws (Phase 2), no wind/turbulence/orographic coupling (Phase 3), no
-terrain (Phase 4), no Unreal integration (Phase 5), no rendering (Phase 6), no
-validation against published reference data and no credibility scorecard
-(Phase 7). Nothing in this repository currently supports a claim about
-aircraft response to environmental conditions.
+Vs, Vref and Vr are measured from each model's own lift curve rather than taken
+from a table (`core/scenario/envelope.py`), because the question validation asks
+is whether *the thing being simulated* can fly the scenario. Measured clean
+CLmax: B747 1.192, 737 1.182, global5000 0.998.
+
+The B747's resulting Vs of 155 kt at 250 t falls inside the published clean 1 g
+band of roughly 150-165 kt. **That agreement is a sanity check, not a
+validation.** It is one point, on one airframe, against a figure quoted from
+memory rather than from a controlled reference document, and §2.1 still applies.
+Vref uses 1.30 x Vs by operational convention and Vr 1.10 x Vs as an envelope
+bound; neither is a performance calculation.
+
+### 2.5 A rule-based parser is not language understanding
+
+The NL compiler is regular expressions over a fixed vocabulary. It is
+deterministic, which is the property the reproducibility claim needs, and it is
+narrow. It will misread sentence shapes it has not seen. Two consequences:
+
+* Anything it does not recognise is reported in `spec.notes` rather than
+  dropped, and cinematic terms are explicitly listed as ignored.
+* The rendered table exists so a human checks the interpretation **before** the
+  run. A spec is not evidence that the prompt was understood; it is evidence of
+  what will be simulated.
+
+### 2.6 Not yet built
+
+No control laws (Phase 2), so nothing yet commands altitude or airspeed and the
+closure assertion of §2.8 does not exist. No turbulence or orographic coupling
+(Phase 3) -- a spec requesting turbulence is refused rather than run in smooth
+air. No terrain model (Phase 4), no Unreal integration (Phase 5), no rendering
+(Phase 6), no validation against published reference data and no credibility
+scorecard (Phase 7).
+
+Nothing in this repository currently supports a claim about aircraft response to
+environmental conditions.
 
 ### 2.5 No EO/IR sensor fidelity exists
 

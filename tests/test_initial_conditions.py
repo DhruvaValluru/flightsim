@@ -63,6 +63,48 @@ def test_ic_application_order_is_independent_of_dict_order(fdm):
     assert fdm.props.get("velocities/vc-kts") == pytest.approx(250.0, abs=0.5)
 
 
+def test_heading_survives_sideslip(fdm):
+    """Regression for the ic/beta-deg clobber.
+
+    Setting sideslip re-derives the velocity vector's orientation and resets
+    true heading to zero, so sideslip must be applied before heading. Requested
+    heading 270 silently became 000.
+    """
+    fdm.set_initial_conditions(
+        {"h-sl-ft": u.m_to_ft(4500), "vc-kts": 280, "psi-true-deg": 270.0,
+         "beta-deg": 0.0, "phi-deg": 0.0, "gamma-deg": 0.0,
+         "lat-geod-deg": 0.0, "long-gc-deg": 0.0, "terrain-elevation-ft": 0.0}
+    )
+    assert fdm.props.get("attitude/psi-deg") == pytest.approx(270.0, abs=0.5)
+
+
+def test_every_initial_condition_is_achieved_simultaneously(fdm):
+    """The ordering is verified as a whole rather than reasoned about.
+
+    Each field is set to a distinct non-default value, so any pair that
+    interferes shows up here rather than in whichever scenario happens to
+    trigger it months later.
+    """
+    wanted = {
+        "lat-geod-deg": 47.0, "long-gc-deg": 8.0, "terrain-elevation-ft": 1000.0,
+        "h-sl-ft": u.m_to_ft(4500), "phi-deg": 0.0, "beta-deg": 0.0,
+        "psi-true-deg": 270.0, "gamma-deg": 0.0, "vc-kts": 280.0,
+    }
+    fdm.set_initial_conditions(wanted)
+    achieved = {
+        "lat-geod-deg": "position/lat-geod-deg",
+        "long-gc-deg": "position/long-gc-deg",
+        "terrain-elevation-ft": "position/terrain-elevation-asl-ft",
+        "h-sl-ft": "position/h-sl-ft", "phi-deg": "attitude/phi-deg",
+        "beta-deg": "aero/beta-deg", "psi-true-deg": "attitude/psi-deg",
+        "gamma-deg": "flight-path/gamma-deg", "vc-kts": "velocities/vc-kts",
+    }
+    for key, prop in achieved.items():
+        assert fdm.props.get(prop) == pytest.approx(
+            wanted[key], rel=1e-3, abs=1e-3
+        ), f"{key} was not achieved"
+
+
 def test_unachievable_initial_condition_is_rejected(fdm):
     """The post-condition check must fire, not just the ordering fix.
 

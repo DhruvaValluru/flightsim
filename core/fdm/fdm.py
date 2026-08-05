@@ -47,27 +47,44 @@ DEFAULT_RATE_HZ = 120.0
 # matters only for sweep log volume, which Phase 7 will address.
 
 #: Initial conditions are order-dependent. Lower rank is applied first.
-#: Geodetic latitude drives the geoid radius and therefore the atmosphere
-#: lookup, so it must be set before any airspeed is converted; airspeed is
-#: applied last so nothing can re-derive it afterwards. Anything unlisted lands
-#: in the middle, which is safe for attitude and environment terms.
+#:
+#: Two dependencies were found by measurement, not by reading source, and both
+#: silently produce a condition nobody asked for:
+#:
+#:   * ``ic/lat-geod-deg`` re-derives the velocity state and reinterprets an
+#:     already-converted true airspeed as calibrated, so position must precede
+#:     any speed. Requested 300 kt CAS at 10 km became Mach 1.28.
+#:   * ``ic/beta-deg`` re-derives the velocity vector's orientation and resets
+#:     true heading to zero, so sideslip must precede heading. Requested
+#:     heading 270 became 000.
+#:
+#: The resulting order is verified as a whole rather than reasoned about: the
+#: ordering test sets every field to a distinct non-default value and asserts
+#: all of them are achieved simultaneously. Both alternative orderings that
+#: seem equally reasonable fail it.
 _IC_PRIORITY = {
+    # geometry first
     "ic/lat-geod-deg": 0,
     "ic/lat-gc-deg": 0,
     "ic/long-gc-deg": 1,
     "ic/terrain-elevation-ft": 2,
     "ic/h-sl-ft": 3,
     "ic/h-agl-ft": 3,
-    # velocity and flight-path terms, strictly last
-    "ic/alpha-deg": 8,
-    "ic/beta-deg": 8,
-    "ic/gamma-deg": 8,
-    "ic/roc-fpm": 8,
-    "ic/vt-kts": 9,
-    "ic/vc-kts": 9,
-    "ic/mach": 9,
+    # attitude, with sideslip strictly before heading
+    "ic/phi-deg": 4,
+    "ic/beta-deg": 5,
+    "ic/psi-true-deg": 6,
+    # flight-path terms
+    "ic/alpha-deg": 7,
+    "ic/theta-deg": 7,
+    "ic/gamma-deg": 7,
+    "ic/roc-fpm": 7,
+    # speed strictly last, so nothing can re-derive it
+    "ic/vt-kts": 8,
+    "ic/vc-kts": 8,
+    "ic/mach": 8,
 }
-_IC_DEFAULT_RANK = 5
+_IC_DEFAULT_RANK = 4
 
 
 def _ic_rank(name: str) -> int:

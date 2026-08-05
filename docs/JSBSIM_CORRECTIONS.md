@@ -32,10 +32,15 @@ Test: `tests/test_properties.py::test_ic_wind_ned_components_are_read_only`.
 
 ---
 
-## 2. `ic/vc-kts` is silently overwritten by `ic/lat-geod-deg`
+## 2. Initial conditions silently overwrite each other
 
-**The most dangerous finding.** Initial conditions are order-dependent. Setting
-geodetic latitude *after* an airspeed re-derives the velocity state and
+**The most dangerous finding**, and there are two instances of it. Initial
+conditions are order-dependent, JSBSim applies them in the order written, and a
+clobbered field is reported nowhere.
+
+### 2a. `ic/lat-geod-deg` overwrites `ic/vc-kts`
+
+Setting geodetic latitude *after* an airspeed re-derives the velocity state and
 reinterprets the already-converted true airspeed as calibrated, applying the
 density conversion twice.
 
@@ -52,15 +57,32 @@ At 10 km the requested transport cruise point became **supersonic**. Trim then
 fails, and the failure looks like a solver problem rather than a bad initial
 condition. Only geodetic latitude does this — `ic/long-gc-deg` does not.
 
-Guarded by two independent mechanisms, because ordering alone rots the moment a
-new IC key is added:
-1. `_IC_PRIORITY` in `core/fdm/fdm.py` fixes a safe order (position first,
-   velocity last).
-2. `_verify_initial_conditions` compares every requested condition against the
-   state actually achieved and raises on a mismatch.
+### 2b. `ic/beta-deg` overwrites `ic/psi-true-deg`
 
-Test: `tests/test_initial_conditions.py` (parametrised over four altitudes,
-plus a deliberately hostile dict order).
+Found later, by the verification below rather than by inspection. Setting
+sideslip re-derives the velocity vector's orientation and resets true heading to
+zero: a requested heading of 270 becomes 000, silently. Only sideslip does this
+— `phi`, `gamma`, `alpha` and `vc` all leave heading alone.
+
+### The guard
+
+Two independent mechanisms, because ordering alone rots the moment a new IC key
+is added — and 2b is exactly that, discovered *after* the ordering fix for 2a
+was already in place:
+
+1. `_IC_PRIORITY` in `core/fdm/fdm.py` fixes a safe order: position, then
+   attitude with **sideslip strictly before heading**, then flight-path terms,
+   then speed last so nothing can re-derive it.
+2. `_verify_initial_conditions` compares every requested condition against the
+   state actually achieved and raises on a mismatch. This is what caught 2b.
+
+The order is verified *as a whole* rather than reasoned about:
+`test_every_initial_condition_is_achieved_simultaneously` sets nine fields to
+distinct non-default values and asserts all nine are achieved at once. Both
+alternative orderings that seem equally reasonable — heading before sideslip,
+and speed first — fail it.
+
+Tests: `tests/test_initial_conditions.py`.
 
 ---
 
@@ -142,6 +164,54 @@ airborne trim with engines stopped.
   checked names, the exception being the `[0]` subscript artifact above.
 * **`gear/unit/wheel-speed-fps` confirmed** (the §6.1 `[VERIFY]` item), with the
   index-0 caveat.
+
+---
+
+## 6. Lift is `+forces/fwz-aero-lbs`, and the sign is silent
+
+Wind-frame Z carries lift with a positive sign on the pinned build. Getting it
+backwards does not raise: an inverted lift curve still yields a CLmax and a
+stall speed, just at the wrong end of the alpha sweep. Measured on the B747, the
+inverted form reported CLmax 0.104 at the sweep minimum and a stall speed of
+**526 kt**; the correct form gives CLmax 1.192 at 13.5 deg and Vs 155 kt.
+
+The guard is the `clipped` flag on `LiftCurve`: a CLmax landing on a sweep edge
+means the stall was never bracketed, which is true both of an inverted curve and
+of a sweep that simply did not reach far enough.
+
+Measured lift curves, clean configuration:
+
+| Model | CLmax | alpha at CLmax | Vs at reference mass, sea level |
+|---|---:|---:|---|
+| B747 | 1.192 | 13.5 deg | 155 kt @ 250,000 kg |
+| 737 | 1.182 | 12.9 deg | 151 kt @ 48,534 kg |
+| global5000 | 0.998 | 13.4 deg | 152 kt @ 36,339 kg |
+
+The B747 figure sits inside the published clean 1 g band of roughly 150-165 kt
+at that weight. That is a sanity check on the model, **not** a validation of the
+aircraft — see docs/VALIDITY.md.
+
+---
+
+## 7. Environment hazard: bytecode is cached outside the repo
+
+Not a JSBSim issue, but it corrupted a mutation-test result here and would
+corrupt any reproducibility claim, so it is recorded with the rest.
+
+macOS system Python sets `sys.pycache_prefix`:
+
+```
+sys.pycache_prefix -> /Users/<user>/Library/Caches/com.apple.python
+```
+
+Bytecode therefore lives at `<prefix>/<absolute-path-to-source>.pyc` and **not**
+in `__pycache__` inside the tree, so `find . -name __pycache__ -delete` purges
+nothing. A mutation that swaps two digits leaves the file size unchanged, and a
+restored source was shadowed by stale bytecode compiled from the mutated
+version: a correct fix appeared to fail, and the module's own dict disagreed
+with its own source text in the same process.
+
+`scripts/mutation_check.sh` purges both locations around every mutation.
 
 ---
 
