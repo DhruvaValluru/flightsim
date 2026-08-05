@@ -1,0 +1,12 @@
+{
+  "plugin_source": "https://github.com/JSBSim-Team/jsbsim.git (UnrealEngine/Plugins/JSBSimFlightDynamicsModel)",
+  "plugin_commit": "9a0b0282a3414409123f783e8b766ff002bb5fc9",
+  "jsbsim_version": "v1.2.4",
+  "jsbsim_matches_headless_core": true,
+  "host_platform": "Darwin",
+  "ue_platform": "Mac",
+  "library": "Lib/Mac/libJSBSim.dylib",
+  "library_sha256": "93062bd4492b532e5b56115ba371a276f1f80adc9469f1ccad05d7f8d804ece8",
+  "header_count": 126,
+  "note": "Built by scripts/vendor_ue_plugin.sh. The upstream repository ships no prebuilt library for any platform; the Windows instructions build one from JSBSimForUnreal.sln and this script builds the Unix equivalent with CMake."
+}

@@ -1,0 +1,16 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1",
+	"FriendlyName": "FlightSimBridge",
+	"Description": "Spec loading, observers, unparented cameras and control-surface binding over the official JSBSim plugin.",
+	"Category": "Simulation",
+	"CreatedBy": "flightsim",
+	"CanContainContent": false,
+	"Modules": [
+		{ "Name": "FlightSimBridge", "Type": "Runtime", "LoadingPhase": "Default" }
+	],
+	"Plugins": [
+		{ "Name": "JSBSimFlightDynamicsModel", "Enabled": true }
+	]
+}

@@ -1,6 +1,6 @@
 # What this simulation can and cannot support
 
-Status: **Phases 0-4 complete.** This document grows with each phase. Everything
+Status: **Phases 0-4 complete. Phase 5 BLOCKED on the build toolchain.** This document grows with each phase. Everything
 below is scoped to what has actually been built and measured; nothing here is
 aspirational.
 
@@ -101,6 +101,37 @@ independent variable rather than a change of code path (§3.2). Measured, Gate 4
 Cesium is *not* queried for physics. Its height query is asynchronous and its
 answer depends on which LOD happens to be streamed in; a ground callback needs a
 deterministic answer every tick.
+
+**Phase 5 is blocked and Gate 5 has not run.** The Unreal host cannot be
+compiled on this machine: UnrealBuildTool refuses to register Mac as a buildable
+platform because the installed Xcode (26.6) is outside the range UE 5.5 accepts
+(15.2–16.9). This is a compiler-version check — not a macOS limitation, and not
+a plugin limitation.
+
+What *was* established, and is real:
+
+* The official Epic JSBSim plugin **does support macOS**. Its own
+  `JSBSim.Build.cs` lists `UnrealTargetPlatform.Mac` and routes it through
+  `SetupUnixPlatform()`. §3.1's MSVC/`.sln` instructions are the documented
+  path, not the only one.
+* A universal **arm64 + x86_64 `libJSBSim.dylib` was built** from JSBSim v1.2.4
+  — the same version the headless core runs, so §2.9's "identical physics in
+  either host" is testable rather than aspirational. The upstream repository
+  ships no prebuilt library for any platform; the Windows instructions build one
+  and `scripts/vendor_ue_plugin.sh` builds the Unix equivalent.
+* The plugin is vendored reproducibly with commit, version and library hash
+  recorded in `VENDORED.json`.
+
+What is **not** established, and must not be claimed:
+
+* **None of the bridge C++ has ever been compiled.** The camera director,
+  surface animator and telemetry recorder are written against the plugin's API
+  as read from its headers, and are unverified. Treat them as a design, not as
+  working code.
+* No trajectory has been produced by the Unreal host, so nothing is known about
+  whether the two hosts agree. Gate 5 reports **BLOCKED** with its own exit
+  code, distinct from pass and fail, and refuses to report a pass on the
+  headless half alone.
 
 That is the whole of it. There is no rendering.
 
@@ -255,7 +286,7 @@ tolerances rather than assumed negligible.
 
 ### 2.11 Not yet built
 
-No Unreal integration
+No verified Unreal integration (see above), no rendering
 (Phase 3) -- a spec requesting turbulence is refused rather than run in smooth
 air. No terrain model (Phase 4), no Unreal integration (Phase 5), no rendering
 (Phase 6), no validation against published reference data and no credibility

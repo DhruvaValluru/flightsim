@@ -37,6 +37,12 @@ python3 -m venv .venv && .venv/bin/pip install jsbsim==1.2.4 numpy pytest pyyaml
 .venv/bin/python experiments/gate4_terrain.py
 ```
 
+Gate 5 needs the Unreal host. Check whether this machine can build it:
+
+```bash
+./scripts/ue_preflight.sh
+```
+
 ## Run the tests
 
 ```bash

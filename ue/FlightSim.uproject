@@ -1,0 +1,18 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.5",
+	"Category": "",
+	"Description": "Research flight simulation: visualisation host for the core FDM.",
+	"Modules": [
+		{
+			"Name": "FlightSim",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{ "Name": "JSBSimFlightDynamicsModel", "Enabled": true },
+		{ "Name": "FlightSimBridge", "Enabled": true },
+		{ "Name": "GeoReferencing", "Enabled": true }
+	]
+}
