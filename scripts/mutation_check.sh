@@ -157,6 +157,31 @@ mutate core/control/autopilot.py \
     '            achieved_hdg = sum(settled_headings) / n  # MUTATED: arithmetic mean' \
     "circular mean for heading" tests/test_control.py || failures=$((failures+1))
 
+mutate core/terrain/dem.py \
+    '    if crop_to_valid and mask.any():' \
+    '    if False:  # MUTATED: keep fabricated reprojection corners' \
+    "DEM cropped to real data" tests/test_terrain.py || failures=$((failures+1))
+
+mutate core/terrain/landscape.py \
+    '        scale_y=pixel_y_m * UE_CM_PER_M,' \
+    '        scale_y=pixel_x_m * UE_CM_PER_M,  # MUTATED: one scale for both axes' \
+    "per-axis Landscape scale" tests/test_terrain.py || failures=$((failures+1))
+
+mutate core/terrain/landscape.py \
+    '    return relief_m * UE_CM_PER_M * UE_HEIGHT_UNIT' \
+    '    return relief_m * UE_CM_PER_M  # MUTATED: dropped the 1/512 constant' \
+    "Landscape Z-scale constant" tests/test_terrain.py || failures=$((failures+1))
+
+mutate core/terrain/heightfield.py \
+    '        if field.digest() != meta["sha256"]:' \
+    '        if False:  # MUTATED: no integrity check' \
+    "heightfield integrity check" tests/test_terrain.py || failures=$((failures+1))
+
+mutate core/fdm/fdm.py \
+    '            if name in IC_WRAPPED_360:' \
+    '            if False:  # MUTATED: no angular wrap' \
+    "wrap-aware heading IC check" tests/test_terrain.py || failures=$((failures+1))
+
 mutate core/scenario/envelope.py \
     '        lift_lbs = fdm.props.get("forces/fwz-aero-lbs")' \
     '        lift_lbs = -fdm.props.get("forces/fwz-aero-lbs")' \

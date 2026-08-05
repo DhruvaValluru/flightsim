@@ -91,6 +91,10 @@ def _ic_rank(name: str) -> int:
     return _IC_PRIORITY.get(name, _IC_DEFAULT_RANK)
 
 
+#: Initial conditions that live on a circle, where 0 and 360 are the same
+#: value. Compared with wrapping rather than by subtraction.
+IC_WRAPPED_360 = frozenset({"ic/psi-true-deg"})
+
 #: Requested initial condition -> the state property that proves it took.
 #: Used by :meth:`FlightDynamics._verify_initial_conditions`.
 IC_ACHIEVED = {
@@ -284,8 +288,17 @@ class FlightDynamics:
             if achieved_prop is None or not self.props.has(achieved_prop):
                 continue  # nothing to check this against; not an error
             got = self.props.get(achieved_prop)
-            scale = max(1.0, abs(wanted))
-            if abs(got - wanted) > tolerance * scale:
+            if name in IC_WRAPPED_360:
+                # Headings wrap: a requested 0 achieved as 360 is the same
+                # heading, and reporting it as a 360-degree error would abort a
+                # perfectly good run. Surfaced by a scenario placed at a
+                # non-zero longitude, where JSBSim returns 360.0 for north.
+                error = abs((got - wanted + 180.0) % 360.0 - 180.0)
+                scale = 1.0
+            else:
+                error = abs(got - wanted)
+                scale = max(1.0, abs(wanted))
+            if error > tolerance * scale:
                 problems.append(
                     f"{name}: requested {wanted:.4f}, achieved "
                     f"{got:.4f} (via {achieved_prop})"

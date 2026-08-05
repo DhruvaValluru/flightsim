@@ -1,6 +1,6 @@
 # What this simulation can and cannot support
 
-Status: **Phases 0-3 complete.** This document grows with each phase. Everything
+Status: **Phases 0-4 complete.** This document grows with each phase. Everything
 below is scoped to what has actually been built and measured; nothing here is
 aspirational.
 
@@ -84,7 +84,25 @@ justifies 120 Hz as the integration rate.
 and it is the bar the previous build failed. Whether these models are *right* is
 Phase 7's question.
 
-That is the whole of it. There is no terrain model and no rendering.
+Phase 4 adds terrain. Real DEMs and synthesised terrain are baked into the
+**same** 16-bit raster format, with the same georeferencing conventions, and
+reach the FDM through the same query — so terrain statistics are a controllable
+independent variable rather than a change of code path (§3.2). Measured, Gate 4:
+
+* ingested DEM elevations match the source to **8.6 m mean / 17.8 m max** against
+  a tolerance of 80 m derived from the surface's own local curvature at the
+  60 m resample
+* Landscape round trip returns **0.008 m max error** and preserves relief to
+  **0.000 m** and aspect ratio to 1 part in 10⁹
+* synthesised slope distribution is prescribable: RMS-slope targets of 10/20/30°
+  give medians of 8.9/17.5/26.4° with p99 below 45°
+* orographic lift now runs over the baked raster for both terrain kinds
+
+Cesium is *not* queried for physics. Its height query is asynchronous and its
+answer depends on which LOD happens to be streamed in; a ground callback needs a
+deterministic answer every tick.
+
+That is the whole of it. There is no rendering.
 
 ---
 
@@ -208,9 +226,36 @@ a single defensible number.
 Turbulence is deliberately **not active during trim** — a stochastic
 disturbance makes the trim solver chase noise.
 
-### 2.10 Not yet built
+### 2.10 Terrain caveats
 
-No terrain model
+**The ingested DEM is cropped, not extended.** Reprojecting a lat/lon rectangle
+into a metric CRS leaves empty corners. Filling them extends the nearest real
+elevation outward and leaves a cliff along the seam — measured on the Gate 4
+fixture, 10,781 pixels (7% of the raster) producing slopes to 84.9° where p99 of
+the real data is 23.3°. The raster is therefore cropped to the largest
+all-valid rectangle, so **the baked area is smaller than the source DEM**.
+
+**Genuine interior voids are still filled** by neighbour interpolation and the
+count is recorded. Filled pixels are interpolation, not measurement.
+
+**Synthesised terrain is not a model of anywhere.** It has prescribed
+statistics — Hurst exponent, RMS slope, autocorrelation length — and erosion
+that produces drainage networks. That makes it a controlled experimental
+surface, not a replica of any real landscape, and results over it describe
+response to *terrain statistics*, not to a place.
+
+**The erosion is qualitative.** Stream-power incision with m/n = 0.5 produces
+plausible drainage, but no attempt has been made to match measured erosion
+rates, and the iteration count and strength are chosen for appearance and
+runtime rather than calibrated.
+
+**Elevations quantise to 16 bits.** A raster spanning 1000 m of relief resolves
+about 1.5 cm. Reported as `quantisation_m` and used to derive round-trip
+tolerances rather than assumed negligible.
+
+### 2.11 Not yet built
+
+No Unreal integration
 (Phase 3) -- a spec requesting turbulence is refused rather than run in smooth
 air. No terrain model (Phase 4), no Unreal integration (Phase 5), no rendering
 (Phase 6), no validation against published reference data and no credibility

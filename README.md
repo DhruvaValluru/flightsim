@@ -10,8 +10,10 @@ scenario spec.
 ## Setup
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install jsbsim==1.2.4 numpy pytest
+python3 -m venv .venv && .venv/bin/pip install jsbsim==1.2.4 numpy pytest pyyaml rasterio pyproj
 ```
+
+`rasterio` ships GDAL in its wheel, so no separate GDAL build is needed.
 
 ## Run the gates
 
@@ -21,6 +23,18 @@ python3 -m venv .venv && .venv/bin/pip install jsbsim==1.2.4 numpy pytest
 
 ```bash
 .venv/bin/python experiments/gate1_spec.py
+```
+
+```bash
+.venv/bin/python experiments/gate2_control.py
+```
+
+```bash
+.venv/bin/python experiments/gate3_null_tests.py
+```
+
+```bash
+.venv/bin/python experiments/gate4_terrain.py
 ```
 
 ## Run the tests
@@ -41,12 +55,12 @@ the guard they cover:
 ```
 core/            zero Unreal dependency (§2.9)
   fdm/           JSBSim wrapper, trim, checked property I/O, read-only state
-  environment/   environment providers            (Phase 3)
-  control/       TECS + lateral, compiled to JSBSim XML autopilot  (Phase 2)
-  scenario/      spec schema, validation, provenance   (Phase 1)
+  environment/   wind, boundary layer, turbulence, gusts, orographic lift
+  control/       TECS as a JSBSim XML system, run at FDM rate
+  scenario/      spec schema, validation, provenance, run harness
   nl/            prompt -> spec compiler. Emits a spec, never runs anything.
   telemetry/     read-only observers
-  terrain/       DEM ingestion, procedural generation, heightfield query
+  terrain/       DEM ingestion, spectral synthesis, heightfield query, Landscape export
 experiments/     gates, sweeps, analysis, validation
 ue/              Unreal project                    (Phase 5)
 docs/            VALIDITY.md, JSBSIM_CORRECTIONS.md, vva/

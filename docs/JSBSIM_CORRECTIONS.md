@@ -310,7 +310,20 @@ throughout.
 
 ---
 
-## 11. Environment hazard: bytecode is cached outside the repo
+## 11. `attitude/psi-deg` returns 360.0 for north at some positions
+
+The initial-condition check compares each requested value against the state
+achieved. For heading that comparison has to wrap: a requested 0 came back as
+**360.0** — the same heading — and a plain subtraction reported a 360-degree
+error and aborted the run.
+
+It does not reproduce at the equator/prime-meridian origin used by most tests;
+it surfaced only once a scenario was placed at a real longitude from a DEM's
+centre. Any angular initial condition needs wrap-aware comparison.
+
+---
+
+## 12. Environment hazard: bytecode is cached outside the repo
 
 Not a JSBSim issue, but it corrupted a mutation-test result here and would
 corrupt any reproducibility claim, so it is recorded with the rest.
