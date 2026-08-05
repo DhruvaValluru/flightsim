@@ -103,8 +103,11 @@ mutate core/nl/compiler.py \
     "terrain-clause stripping" tests/test_nl_compiler.py || failures=$((failures+1))
 
 mutate core/scenario/runner.py \
-    '    if turbulence not in ("none", "0", "0.0"):' \
-    '    if False:' \
+    '    except ValueError as exc:
+        raise UnimplementedConditionError(' \
+    '    except ValueError as exc:
+        stack.add(DrydenTurbulence("moderate"))  # MUTATED: silently substitute
+        _unused = UnimplementedConditionError(' \
     "unimplemented-condition guard" tests/test_validation_and_run.py || failures=$((failures+1))
 
 mutate core/control/autopilot.py \
@@ -128,6 +131,31 @@ mutate core/control/derive.py \
     '    lines = []
     for i in range(min(engine_count, 1)):  # MUTATED: only engine 0' \
     "throttle drives every engine" tests/test_control.py || failures=$((failures+1))
+
+mutate core/environment/stack.py \
+    '        for provider in self.turbulence:
+            writes.update(provider.configure())' \
+    '        for provider in []:  # MUTATED: turbulence never configured
+            writes.update(provider.configure())' \
+    "turbulence reaches the FDM" tests/test_environment.py || failures=$((failures+1))
+
+mutate core/environment/stack.py \
+    '        wind = self.wind_at(position, time_s)' \
+    '        from .base import WindNED
+        wind = WindNED()  # MUTATED: wind never applied' \
+    "wind reaches the FDM" tests/test_environment.py || failures=$((failures+1))
+
+mutate core/environment/terrain_field.py \
+    '        w_up = (updraught - sink) * self.decay(position.agl_m)' \
+    '        w_up = 0.0  # MUTATED: orographic lift never applied' \
+    "orographic lift reaches the FDM" tests/test_environment.py || failures=$((failures+1))
+
+mutate core/control/autopilot.py \
+    '            sin_mean = sum(math.sin(math.radians(h)) for h in settled_headings) / n
+            cos_mean = sum(math.cos(math.radians(h)) for h in settled_headings) / n
+            achieved_hdg = math.degrees(math.atan2(sin_mean, cos_mean)) % 360.0' \
+    '            achieved_hdg = sum(settled_headings) / n  # MUTATED: arithmetic mean' \
+    "circular mean for heading" tests/test_control.py || failures=$((failures+1))
 
 mutate core/scenario/envelope.py \
     '        lift_lbs = fdm.props.get("forces/fwz-aero-lbs")' \

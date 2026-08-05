@@ -23,6 +23,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from ..control.autopilot import Autopilot, ClosureReport, ClosureTolerance
+from ..environment.stack import EnvironmentStack
+from ..environment.turbulence import DrydenTurbulence
+from ..environment.wind import SteadyWind
 from ..fdm import FlightDynamics, TrimMode, mode_for
 from ..fdm import units as u
 from ..telemetry.recorder import Recorder
@@ -40,10 +43,34 @@ SURFACES = {
 class UnimplementedConditionError(Exception):
     """The spec requests a condition this build does not implement.
 
-    Deliberately fatal. A spec that asks for turbulence and runs without it is
+    Deliberately fatal. A spec that asks for a condition and runs without it is
     the previous build's central failure -- conditions advertised and never
     delivered (§1.6, §2.7). Silence here would reproduce it exactly.
     """
+
+
+def environment_for(spec: ScenarioSpec) -> EnvironmentStack:
+    """Build the provider stack a spec asks for.
+
+    Turbulence is a real provider from Phase 3 onward, so it is no longer
+    refused -- but an intensity word the provider does not know still is,
+    rather than being quietly rounded to something it does know.
+    """
+    stack = EnvironmentStack()
+    wind_speed = float(spec.wind_speed.value)
+    if wind_speed > 0.0:
+        stack.add(SteadyWind(u.kt_to_mps(wind_speed),
+                             float(spec.wind_direction.value)))
+
+    intensity = str(spec.turbulence.value)
+    try:
+        stack.add(DrydenTurbulence(intensity, seed=int(spec.seed.value)))
+    except ValueError as exc:
+        raise UnimplementedConditionError(
+            f"spec requests {intensity!r} turbulence, which no provider "
+            f"implements: {exc}"
+        ) from exc
+    return stack
 
 
 @dataclass(frozen=True)
@@ -78,15 +105,6 @@ def configure_from_spec(spec: ScenarioSpec) -> FlightDynamics:
     separate setup paths would drift, and a validator that passes a scenario the
     runner then fails to trim is worse than no validator.
     """
-    turbulence = str(spec.turbulence.value)
-    if turbulence not in ("none", "0", "0.0"):
-        raise UnimplementedConditionError(
-            f"spec requests {turbulence!r} turbulence, which this build does "
-            f"not implement (Phase 3). Refusing to run: a spec that asks for "
-            f"turbulence and runs in smooth air would report a condition it "
-            f"does not have. Set turbulence to 'none' or wait for Phase 3."
-        )
-
     wind_speed = float(spec.wind_speed.value)
     # A spec that commands a state needs the controller; one that only sets an
     # initial condition does not. Building the derived airframe unconditionally
@@ -108,8 +126,10 @@ def configure_from_spec(spec: ScenarioSpec) -> FlightDynamics:
         }
     )
 
-    # Environment is written before trim so the aircraft is trimmed *in* the
-    # conditions it will fly, not dropped into them afterwards.
+    # Steady wind is written before trim so the aircraft is trimmed *in* the
+    # conditions it will fly rather than dropped into them afterwards.
+    # Turbulence is deliberately NOT active during trim: a stochastic
+    # disturbance makes the trim solver chase noise.
     north_fps, east_fps = wind_components_fps(wind_speed, float(spec.wind_direction.value))
     fdm.props.set_many(
         {
@@ -136,6 +156,11 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         report.raise_if_invalid()
 
     fdm = configure_from_spec(spec)
+    environment = environment_for(spec)
+    # Turbulence seeds a stochastic process, so it is configured once, after
+    # trim and before stepping. Re-writing it inside the loop would re-seed the
+    # generator every frame and destroy the correlated noise.
+    environment.configure(fdm)
 
     autopilot = None
     if bool(spec.hold_state.value):
@@ -146,12 +171,13 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
     recorder.sample(force=True)
     recorder.mark("trimmed" if autopilot is None else "trimmed, autopilot engaged")
     if autopilot is None:
-        recorder.run_for(float(spec.duration.value))
+        environment.run_for(fdm, float(spec.duration.value), recorder)
     else:
         # Guidance runs at 2 Hz; the control laws run at FDM rate inside JSBSim.
         steps = int(round(float(spec.duration.value) * fdm.rate_hz))
         every = max(1, int(round(0.5 * fdm.rate_hz)))
         for i in range(steps):
+            environment.apply(fdm)
             fdm.step()
             if i % every == 0:
                 autopilot.update()
@@ -175,6 +201,7 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         "spec_digest": spec.digest(),
         "spec": spec.to_dict(),
         "fdm": fdm.provenance(),
+        "environment": environment.provenance(),
         "output_digest": output_digest,
         "samples": len(recorder),
         "validation": {

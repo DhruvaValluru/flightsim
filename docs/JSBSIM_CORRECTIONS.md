@@ -239,7 +239,78 @@ Two related notes on `<system>` XML, both of which cost debugging time:
 
 ---
 
-## 9. Environment hazard: bytecode is cached outside the repo
+## 9. Turbulence: the enum, the POE ladder, and a fatal way to drive it
+
+Both §6.2 items flagged `[VERIFY]` are now measured.
+
+**Enum confirmed**: `ttNone=0, ttStandard=1, ttCulp=2, ttMilspec=3, ttTustin=4`
+(0 and 5 produce nothing; 3 and 4 are the Dryden pair). Two are unusable:
+`ttStandard` produces zero turbulence from milspec parameters, and **`ttCulp`
+diverged**, reaching a load factor of 1.5e9 before the run was killed.
+
+**Never re-seed inside the step loop.** `atmosphere/randomseed` seeds a
+stochastic process with internal state. Re-writing it every step restarts the
+generator each frame and destroys the correlated noise:
+
+| | peak turbulence | peak &#124;Nz−1&#124; |
+|---|---:|---:|
+| seed written once | 37.6 fps | 0.40 g |
+| re-seeded every step | 566 fps | **515 g** |
+
+This does not look like a bug in the output — it looks like violent turbulence.
+
+**Intensity is set two different ways depending on altitude**, and §6.2
+describes only one of them. Measured σ_w:
+
+| altitude AGL | W20=15 | W20=30 | W20=60 |
+|---|---:|---:|---:|
+| 60 m | 1.606 | 3.204 | 6.741 |
+| 150 m | 1.634 | 3.269 | 6.543 |
+| 300 m | 1.619 | 3.239 | 6.486 |
+| 1000 m | 10.876 | 10.876 | 10.876 |
+
+Below roughly 300 m, σ_w ≈ 0.107·W20 — the standard's σ_w = 0.1·W20, reproduced.
+Above it **W20 has no effect whatsoever** and the probability-of-exceedence
+index governs. A vocabulary built on W20 alone would therefore have produced
+turbulence that silently ignored its own intensity setting at altitude.
+
+Measured POE ladder (ttMilspec, 1000 m, σ_w in ft/s):
+
+| index | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| σ_w | 0.000 | 1.785 | 3.603 | 7.729 | 10.953 | 15.905 | 22.240 | 27.168 |
+
+§6.2's suggested mapping (3=light, 4=moderate, 6=severe) does not match the
+conventional intensity bands against these numbers. `core/environment/turbulence.py`
+instead targets σ_w directly and picks the nearest index, publishing both.
+
+---
+
+## 10. A wind set once at init is NOT overwritten
+
+§5 Phase 3 states that "JSBSim's atmosphere model overwrites wind properties if
+you set them once at init". On the pinned build it does not. Measured after 10 s:
+
+| | commanded east | total-wind east |
+|---|---:|---:|
+| turbulence off, set once | 42.20 fps | 42.20 fps |
+| turbulence off, rewritten each step | 42.20 | 42.20 |
+| turbulence on, set once | 42.20 | 42.20 |
+| turbulence on, rewritten each step | 42.20 | 42.20 |
+
+Writing every step is still required here, but for a different reason: the
+providers are functions of position and time, so a boundary-layer profile, an
+orographic field or a gust must be re-evaluated as the aircraft moves. A uniform
+wind is the single case where it does not matter — which is exactly why testing
+only that case would prove nothing.
+
+Note also that `atmosphere/wind-mag-fps` with `atmosphere/psiw-rad` produced the
+**opposite sign** to the equivalent NED components, so the NED route is used
+throughout.
+
+---
+
+## 11. Environment hazard: bytecode is cached outside the repo
 
 Not a JSBSim issue, but it corrupted a mutation-test result here and would
 corrupt any reproducibility claim, so it is recorded with the rest.

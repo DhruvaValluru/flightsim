@@ -1,6 +1,6 @@
 # What this simulation can and cannot support
 
-Status: **Phases 0-2 complete.** This document grows with each phase. Everything
+Status: **Phases 0-3 complete.** This document grows with each phase. Everything
 below is scoped to what has actually been built and measured; nothing here is
 aspirational.
 
@@ -59,8 +59,32 @@ The closure assertion (§2.8) is wired into the run harness and is demonstrated
 failing as well as passing: a command the aircraft is given no time to reach
 produces no output rather than a clean recording of a failure.
 
-That is the whole of it. There is no turbulence, no terrain model, and no
-rendering.
+Phase 3 adds the environment tier: steady wind, a boundary-layer profile,
+Dryden turbulence, discrete gusts, and orographic lift. Every one is a pure
+function of position and time; wind contributions sum, because velocity fields
+superpose (§2.4).
+
+The null-test ladder (Gate 3) runs each feature on and off and diffs the
+trajectories. All five show a measurable difference, so each one reaches the
+equations of motion:
+
+| feature | peak altitude diff | peak track diff | magnitude check |
+|---|---:|---:|---|
+| steady wind | 6.4 m | 364 m | settled crab **4.96°** vs atan(25/288) = **4.96°** predicted |
+| boundary layer | 8.2 m | 192 m | 25.0 kt at 10 m → 38.0 kt at 200 m |
+| turbulence | 37.5 m | 786 m | load-factor RMS 0.0061 g → 0.0774 g |
+| discrete gust | 8.1 m | 3.7 m | Nz peaks at t=10.8 s, gust peaks at t=10.9 s |
+| orographic lift | 14.4 m | 7.0 m | w reverses ±5.40 m/s across the crest |
+
+Timestep convergence: peak altitude difference 0.098 m between 1/60 and 1/120,
+and 0.048 m between 1/120 and 1/240 — halving as the step refines, which is what
+justifies 120 Hz as the integration rate.
+
+**A null test proves connection, not correctness.** It is a deliberately low bar
+and it is the bar the previous build failed. Whether these models are *right* is
+Phase 7's question.
+
+That is the whole of it. There is no terrain model and no rendering.
 
 ---
 
@@ -157,9 +181,36 @@ Settling criteria are therefore referenced to 1.5× the measured phugoid period,
 the same way Gate 0's hands-off window is. This is a documented deviation, not
 a met criterion.
 
-### 2.8 Not yet built
+### 2.8 The orographic model is the weakest thing in the repository
 
-No turbulence or orographic coupling
+Ridge lift is the linearised lower boundary condition w = U·∇h (Smith 1979).
+It assumes small slopes, steady neutral flow and no separation, so above a
+slope of 0.35 the result is **saturated rather than believed**.
+
+Lee sink and rotor are worse. Separation is assumed wherever a crest is
+upstream, with no dependence on lee-slope angle, Froude number or inversion
+strength — all of which control whether a real rotor forms at all. The
+1.3× gain and the 4-crest-height decay are documented middle choices from
+FAA AC 00-57 and Doyle & Durran 2002, **not measured values**.
+
+It also currently runs against an analytic sinusoidal ridge. Until Phase 4
+couples it to a real DEM, "ridge lift over this ridge" is a precise number
+about nothing.
+
+### 2.9 Turbulence intensity words are a mapping, not a measurement
+
+"Moderate" resolves to a target σ_w of 6 ft/s, and the POE index whose
+*measured* σ_w is nearest is selected. Both the target and the achieved value
+are published in the vocabulary report and the run manifest. The conventional
+intensity bands themselves are an operational convention, not a standard with
+a single defensible number.
+
+Turbulence is deliberately **not active during trim** — a stochastic
+disturbance makes the trim solver chase noise.
+
+### 2.10 Not yet built
+
+No terrain model
 (Phase 3) -- a spec requesting turbulence is refused rather than run in smooth
 air. No terrain model (Phase 4), no Unreal integration (Phase 5), no rendering
 (Phase 6), no validation against published reference data and no credibility

@@ -329,7 +329,19 @@ class Autopilot:
         commanded_tas = u.fps_to_kt(props.get("ap/tas-setpoint-fps"))
         commanded_hdg = props.get("ap/heading-setpoint-deg")
 
-        achieved_hdg = mean(headings_deg)
+        # Circular mean. Headings wrap at 360, so an aircraft holding north and
+        # jittering either side of it produces samples near 359.8 and 0.2 whose
+        # arithmetic mean is 180 -- a heading error of 180 degrees invented
+        # entirely by the averaging. Calm air hides this, because the heading
+        # sits exactly on 0; turbulence exposes it immediately.
+        settled_headings = headings_deg[cut:]
+        if settled_headings:
+            n = len(settled_headings)
+            sin_mean = sum(math.sin(math.radians(h)) for h in settled_headings) / n
+            cos_mean = sum(math.cos(math.radians(h)) for h in settled_headings) / n
+            achieved_hdg = math.degrees(math.atan2(sin_mean, cos_mean)) % 360.0
+        else:
+            achieved_hdg = commanded_hdg
         heading_error = (achieved_hdg - commanded_hdg + 180.0) % 360.0 - 180.0
 
         return ClosureReport(

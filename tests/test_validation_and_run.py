@@ -54,10 +54,27 @@ def test_running_an_invalid_scenario_raises_rather_than_running():
 
 
 def test_requesting_an_unimplemented_condition_is_fatal():
-    """A spec that asks for turbulence must not run in smooth air (§1.6)."""
-    spec = compile_prompt("fly the 747 at 6000 m and 280 kt in moderate turbulence")
-    with pytest.raises(UnimplementedConditionError, match="Phase 3"):
+    """A spec must never run without a condition it asked for (§1.6).
+
+    Turbulence itself became a real provider in Phase 3, so it is no longer
+    refused. What must still be refused is an intensity no provider implements:
+    quietly rounding it to the nearest one it does know would produce a run
+    that reports a condition it does not have.
+    """
+    spec = compile_prompt("fly the 747 at 6000 m and 280 kt")
+    spec.set("turbulence", "apocalyptic")
+    with pytest.raises(UnimplementedConditionError, match="no provider"):
         run_spec(spec)
+
+
+def test_turbulence_is_now_delivered_rather_than_refused():
+    """The Phase 3 counterpart: a requested condition must actually arrive."""
+    calm = compile_prompt("fly the 747 at 3000 m and 250 kt for 40 seconds")
+    rough = compile_prompt(
+        "fly the 747 at 3000 m and 250 kt in moderate turbulence for 40 seconds"
+    )
+    assert str(rough.turbulence.value) == "moderate"
+    assert run_spec(rough).output_digest != run_spec(calm).output_digest
 
 
 def test_same_spec_produces_the_same_output_digest():

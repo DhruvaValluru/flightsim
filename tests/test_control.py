@@ -262,6 +262,27 @@ def test_closure_fails_a_command_that_was_not_achieved():
         report.raise_if_failed()
 
 
+def test_closure_heading_uses_a_circular_mean():
+    """Headings wrap at 360, and an arithmetic mean of them is meaningless.
+
+    An aircraft holding north jitters either side of it, producing samples near
+    359.8 and 0.2 whose arithmetic mean is 180 -- a heading error of 180 degrees
+    invented entirely by the averaging. Calm air hides this because the heading
+    sits exactly on zero; turbulence exposed it immediately, failing closure on
+    runs whose altitude and airspeed were both well inside tolerance.
+    """
+    fdm = flying()
+    ap = Autopilot(fdm)
+    ap.engage()
+    ap.command(heading_deg=0.0)
+    jittering = [359.5, 0.4, 359.7, 0.6, 359.8, 0.2] * 4
+    report = ap.closure([6000.0] * 24, [373.0] * 24, jittering, [0.0] * 24)
+    heading = next(c for c in report.checks if c.name == "heading")
+    assert abs(heading.error) < 1.0, (
+        f"circular mean gave {heading.error:+.1f} deg of heading error"
+    )
+
+
 def test_closure_rejects_a_state_that_crosses_its_target_while_diverging():
     """Matching the target for an instant is not achieving it.
 
