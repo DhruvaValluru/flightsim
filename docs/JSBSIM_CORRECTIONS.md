@@ -193,7 +193,53 @@ aircraft — see docs/VALIDITY.md.
 
 ---
 
-## 7. Environment hazard: bytecode is cached outside the repo
+## 7. JSBSim imposes no control-sign convention
+
+Each aircraft's own `<flight_control>` decides whether a positive
+`fcs/*-cmd-norm` command pitches up or down. Measured on the B747:
+
+| command | +0.05 for 3 s | meaning |
+|---|---|---|
+| elevator | pitch 2.60 -> 1.05 deg, q −0.32 deg/s | positive = nose **DOWN** |
+| aileron | roll 0.00 -> 2.44 deg, p +1.04 deg/s | positive = roll right |
+| rudder | r −0.25 deg/s | positive = yaw **LEFT** |
+
+A controller that hardcodes one convention does not fail loudly on an airframe
+using the other — it closes the loop with positive feedback. The first TECS run
+here pitched down through 2676 m and hit NaN in 89 s.
+
+`core/control/signs.py` measures the convention per airframe on a throwaway
+instance and writes `ap/sign/*` for the XML to multiply through. A control that
+produces no measurable response is an error, not a defaulted +1.
+
+---
+
+## 8. JSBSim FCS channels run whether or not your autopilot is "engaged"
+
+Every `<channel>` is evaluated from the moment the model loads. Gating only the
+*output* leaves the PIDs integrating continuously, and while disengaged the
+setpoints are zero, so the errors are enormous. Engaging then applies the
+accumulated integrator state in a single frame: measured here, elevator
+`0.000 -> +0.398` and throttle `0.689 -> 0.539`, costing 33 m of altitude.
+
+JSBSim's `<trigger>` semantics are the fix — **zero runs normally, positive
+holds, negative resets to zero** — so the trigger is driven to −1 while
+disengaged. Worst engage excursion after the fix: **0.04 m**.
+
+Two related notes on `<system>` XML, both of which cost debugging time:
+
+* **XML comments cannot contain `--`.** Dashed separator rules inside `<!-- -->`
+  are a parse error, and JSBSim reports it only as a line number.
+* An output switch whose `<default>` reads a *different* property than it writes
+  is not a no-op. Defaulting the throttle switch to a separate "passthrough"
+  property that was zero before engage silently zeroed all four throttles every
+  frame, and the trim solver reported `Sorry, udot doesn't appear to be
+  trimmable` on an airframe that trims fine without the controller. The
+  disengaged path must write each actuator's *current* command back to it.
+
+---
+
+## 9. Environment hazard: bytecode is cached outside the repo
 
 Not a JSBSim issue, but it corrupted a mutation-test result here and would
 corrupt any reproducibility claim, so it is recorded with the rest.

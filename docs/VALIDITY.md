@@ -1,6 +1,6 @@
 # What this simulation can and cannot support
 
-Status: **Phases 0-1 complete.** This document grows with each phase. Everything
+Status: **Phases 0-2 complete.** This document grows with each phase. Everything
 below is scoped to what has actually been built and measured; nothing here is
 aspirational.
 
@@ -38,8 +38,29 @@ rendered as a table, edited, validated, and only then run. Measured, Gate 1:
 Steady wind is applied and is verifiable in the output (crab angle moves 0.00 to
 6.44 degrees under a 25 kt crosswind and returns when it is removed).
 
-That is the whole of it. There is no control law, no turbulence, no terrain
-model, and no rendering.
+Phase 2 adds closed-loop control. TECS runs inside JSBSim's XML at FDM rate,
+not in Python, so it reproduces identically in either host. Measured, Gate 2
+(B747, 6000 m, 280 kt CAS):
+
+| channel | step | rise | overshoot | settling | steady-state error |
+|---|---|---|---|---|---|
+| altitude | +100 m | 20.5 s | 10.1% | 96.5 s (rate limited) | +0.000 m |
+| airspeed | +15 kt | 11.0 s | 6.2% | 53.5 s | +0.000 kt |
+| heading | +30 deg | 37.5 s | 0.0% | 102.0 s | −0.000 deg |
+| bank | +30 deg | 2.8 s | 2.8% | 43.8 s | +0.040 deg |
+
+The decoupling test — the direct regression for §1.2 — commands an altitude and
+an airspeed step simultaneously. Altitude overshoot goes 10.1% to 12.8% and
+airspeed overshoot *falls* from 6.1% to 1.1% while its settling stretches 53.5 s
+to 70 s. Both channels still meet the criteria they met alone. That is a shared
+energy budget, not two loops fighting.
+
+The closure assertion (§2.8) is wired into the run harness and is demonstrated
+failing as well as passing: a command the aircraft is given no time to reach
+produces no output rather than a clean recording of a failure.
+
+That is the whole of it. There is no turbulence, no terrain model, and no
+rendering.
 
 ---
 
@@ -113,10 +134,32 @@ narrow. It will misread sentence shapes it has not seen. Two consequences:
   run. A spec is not evidence that the prompt was understood; it is evidence of
   what will be simulated.
 
-### 2.6 Not yet built
+### 2.6 Control gains are tuned for one airframe at one condition
 
-No control laws (Phase 2), so nothing yet commands altitude or airspeed and the
-closure assertion of §2.8 does not exist. No turbulence or orographic coupling
+Every gain in `core/control/systems/tecs.xml` was measured by sweep on the
+**B747 at 6000 m / 280 kt CAS**. They are not scheduled with altitude, speed or
+mass, and they have not been checked on the 737 or global5000. A gain set that
+works at one point of one envelope is not a validated controller.
+
+No gain or phase margins have been measured. §6.5 asks for ≥6 dB and ≥45°;
+that requires linearisation which this build does not do, so the margin
+criteria are **unverified**, not met.
+
+### 2.7 Settling criteria deviate from §6.5, deliberately
+
+§6.5 asks for altitude settling in 3–5·τ, which at τ = 5 s is 15–25 s. That is
+not achievable for a 250-tonne transport holding a ±2 m band, and the limit is
+not the controller: sweeping the pitch inner-loop gains over twelve
+combinations moved altitude settling by less than a second, leaving it at 96 s
+throughout. What governs it is the phugoid, period ≈87 s here.
+
+Settling criteria are therefore referenced to 1.5× the measured phugoid period,
+the same way Gate 0's hands-off window is. This is a documented deviation, not
+a met criterion.
+
+### 2.8 Not yet built
+
+No turbulence or orographic coupling
 (Phase 3) -- a spec requesting turbulence is refused rather than run in smooth
 air. No terrain model (Phase 4), no Unreal integration (Phase 5), no rendering
 (Phase 6), no validation against published reference data and no credibility

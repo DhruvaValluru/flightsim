@@ -107,6 +107,28 @@ mutate core/scenario/runner.py \
     '    if False:' \
     "unimplemented-condition guard" tests/test_validation_and_run.py || failures=$((failures+1))
 
+mutate core/control/autopilot.py \
+    '        self.signs = measure(base)' \
+    '        from .signs import ControlSigns
+        self.signs = ControlSigns(base, 1.0, 1.0, 1.0)  # MUTATED: assume signs' \
+    "measured control signs" tests/test_control.py || failures=$((failures+1))
+
+mutate core/control/systems/tecs.xml \
+    '        <lt><property>ap/enable</property><value>0.5</value></lt>
+        <value>-1.0</value>
+        <property>ap/tecs/pitch-saturated</property>' \
+    '        <lt><property>ap/enable</property><value>0.5</value></lt>
+        <value>0.0</value>
+        <property>ap/tecs/pitch-saturated</property>' \
+    "integrator reset while disengaged" tests/test_control.py || failures=$((failures+1))
+
+mutate core/control/derive.py \
+    '    lines = []
+    for i in range(engine_count):' \
+    '    lines = []
+    for i in range(min(engine_count, 1)):  # MUTATED: only engine 0' \
+    "throttle drives every engine" tests/test_control.py || failures=$((failures+1))
+
 mutate core/scenario/envelope.py \
     '        lift_lbs = fdm.props.get("forces/fwz-aero-lbs")' \
     '        lift_lbs = -fdm.props.get("forces/fwz-aero-lbs")' \

@@ -1,0 +1,725 @@
+<?xml version="1.0"?>
+<system name="tecs"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:noNamespaceSchemaLocation="http://jsbsim.sourceforge.net/JSBSimSystem.xsd">
+
+<!-- ===================================================================
+     Total Energy Control System, plus lateral guidance.
+
+     Lives in JSBSim XML rather than Python (ASSUMPTIONS §5 Phase 2) so it
+     runs at FDM rate, travels with the aircraft model, and reproduces
+     identically in the headless and embedded hosts. Python owns only the
+     slower guidance layer, which writes the ap/*-setpoint-* properties this
+     file consumes every step.
+
+     WHY TECS AND NOT TWO PID LOOPS  (§2.3)
+     ======================================
+     Altitude and airspeed are not independently controllable with elevator
+     and throttle as separate SISO loops. The plant
+
+         [ hdot ]   [ dhdot/dde   dhdot/ddT ] [ de ]
+         [ Vdot ] = [ dVdot/dde   dVdot/ddT ] [ dT ]
+
+     has off-diagonal terms comparable to the diagonal ones, so decentralised
+     control of it produces cross-coupled oscillation. That is exactly what
+     the previous build shipped: commanded 300 m and 233 kt, the altitude
+     descended monotonically to 52 m low and still diverging while the
+     airspeed overshot by 18 kt and then decayed back through its target.
+
+     TECS changes variables instead. Specific total energy
+
+         STE  = g*h + V^2/2          -> commanded with THROTTLE
+         SEB  = g*h - V^2/2          -> commanded with PITCH  (energy balance)
+
+     is approximately diagonal in (throttle, pitch), so the two loops stop
+     fighting. One time constant tau governs both, which is the structural
+     point: not two independently-tuned bandwidths that can disagree.
+
+     NORMALISATION
+     =============
+     Both energy=rate errors are divided by (g * V), not by (g * tau).
+     ASSUMPTIONS §6.4 writes the latter, but it is dimensionally an
+     acceleration, whereas what the pitch loop needs is an ANGLE. Since a
+     specific potential energy rate is g*hdot and a flight path angle is
+     hdot/V, dividing an energy rate by (g*V) yields radians directly.
+
+     This was not a cosmetic difference. With the /(g*tau) form the pitch
+     command sat pegged at its +15/=10 degree limits almost continuously and
+     the altitude hold oscillated bang=bang at about +/=13 m.
+
+     MEASUREMENT  (§1.3, §6.4)
+     =========================
+     Nothing here differentiates a raw altitude or airspeed measurement.
+     Climb rate is JSBSim's own state-derived h-dot, and true airspeed rate is
+     computed from the body-axis state derivatives:
+
+         Vdot = (u*udot + v*vdot + w*wdot) / V
+
+     which is exact for the airspeed magnitude and comes from the same
+     accelerations the load factor does.
+
+     ANTI-WINDUP
+     ===========
+     Every integrating loop has its <trigger> wired to a saturation flag for
+     its own actuator, which is JSBSim's built-in mechanism for freezing an
+     integrator. The flag is computed from the pre-clip command, so it reports
+     that the controller *wanted* more authority than it has.
+     =================================================================== -->
+
+<!-- ========== engage / setpoints, written by the guidance layer ======== -->
+<property value="0">ap/enable</property>
+<property value="0">ap/altitude-setpoint-ft</property>
+<property value="0">ap/tas-setpoint-fps</property>
+<property value="0">ap/heading-setpoint-deg</property>
+<!-- Direct bank command, selected by ap/bank-mode. Heading hold is the normal
+     path; commanding bank directly is what §6.5's bank-tracking criterion
+     actually asks for, and characterising the roll loop through a heading step
+     measures the guidance law instead. -->
+<property value="0">ap/bank-mode</property>
+<property value="0">ap/bank-setpoint-rad</property>
+
+<!-- ========== trim references, captured at engage ====================== -->
+<property value="0">ap/trim/throttle</property>
+<!-- Held at the trimmed control positions so a disengaged autopilot leaves
+     the actuators exactly where trim put them, rather than reading back its
+     own output. Captured at engage by the guidance layer. -->
+<property value="0">ap/tecs/throttle-passthrough</property>
+<property value="0">ap/pitch/elevator-passthrough</property>
+<property value="0">ap/lat/aileron-passthrough</property>
+<property value="0">ap/yaw/rudder-passthrough</property>
+<property value="0">ap/trim/pitch-rad</property>
+<!-- Trimmed surface positions. The inner loops command a DEVIATION from these,
+     not an absolute deflection. Without them, engaging drives every surface to
+     zero on the first frame: the trimmed B747 elevator sits at =0.055, so
+     engaging dropped it to 0 and the aircraft dipped 15 m before the loop
+     recovered. That dip is an engage transient of the controller's own making,
+     which is the §1.1 failure in miniature. -->
+<property value="0">ap/trim/elevator</property>
+<property value="0">ap/trim/aileron</property>
+<property value="0">ap/trim/rudder</property>
+
+<!-- ==== control sign convention, measured per airframe ================
+     JSBSim imposes no sign convention on fcs/*-cmd-norm; each aircraft's own
+     flight_control section decides. On the B747 a positive elevator command
+     pitches the nose DOWN and a positive rudder command yaws LEFT. A
+     controller that hardcodes one convention does not fail loudly on an
+     airframe using the other, it closes the loop with positive feedback: the
+     first run of this file pitched down through 2676 m and hit NaN in 89 s.
+     core.control.signs measures these and writes them at engage. =====
+     +1 means a positive command produces a positive body=axis rate. -->
+<property value="1.0">ap/sign/elevator</property>
+<property value="1.0">ap/sign/aileron</property>
+<property value="1.0">ap/sign/rudder</property>
+
+<!-- ========== tuning =================================================== -->
+<!-- tau: the single time constant governing both energy loops (§6.4). It sets
+     the demanded rates directly, hdot_dem = (h_dem = h)/tau, which is where a
+     time constant belongs. -->
+<property value="5.0">ap/tecs/tau</property>
+<!-- Wv in [0,2]: 0 = height priority, 1 = balanced, 2 = speed priority.
+     Wh is 2-Wv, so the pair always sums to 2 (ArduPilot TECS_SPDWEIGHT). -->
+<property value="1.0">ap/tecs/speed-weight</property>
+        <!-- alt error -> hdot demand, 1/s -->
+        <!-- speed error -> vdot demand, 1/s -->
+<property value="40.0">ap/tecs/hdot-max-fps</property>
+<property value="6.0">ap/tecs/vdot-max-fps2</property>
+<property value="1.2">ap/tecs/kt-p</property>
+<property value="0.30">ap/tecs/kt-i</property>
+<property value="0.5">ap/tecs/ke-p</property>
+<property value="0.08">ap/tecs/ke-i</property>
+<!-- Turn compensation: drag rises with 1/cos(phi), so a banked turn needs
+     more thrust for the same energy state (§6.4, ArduPilot TECS_RLL2THR). -->
+<property value="0.20">ap/tecs/roll-to-throttle</property>
+
+<property value="2.5">ap/pitch/k-theta</property>   <!-- pitch error -> q demand -->
+<property value="3.0">ap/pitch/kp-q</property>
+<property value="0.5">ap/pitch/ki-q</property>
+<property value="1.2">ap/lat/k-hdg</property>       <!-- heading error -> bank demand -->
+<property value="3.5">ap/lat/k-phi</property>       <!-- bank error -> roll rate demand -->
+<property value="2.0">ap/lat/kp-p</property>
+<property value="0.05">ap/lat/ki-p</property>
+<property value="1.5">ap/yaw/k-r</property>
+<property value="1.0">ap/yaw/washout-c1</property>  <!-- 1/tau_w, tau_w ~ 1 s -->
+
+<!-- ========== limits =================================================== -->
+<property value="0.436332">ap/limits/bank-rad</property>       <!-- 25 deg -->
+<property value="0.261799">ap/limits/pitch-max-rad</property>  <!-- 15 deg -->
+<property value="-0.174533">ap/limits/pitch-min-rad</property> <!-- -10 deg -->
+<property value="0.174533">ap/limits/q-rad_sec</property>      <!-- 10 deg/s -->
+<property value="0.349066">ap/limits/p-rad_sec</property>      <!-- 20 deg/s -->
+
+<!-- ===================================================================
+     1. Measurements and energy errors
+     =================================================================== -->
+<channel name="TECS measurements" execrate="1">
+
+  <!-- True airspeed rate from the body-axis state derivatives. The clamp on
+       the denominator keeps this finite on the ground and at zero airspeed;
+       it never engages in flight. -->
+  <fcs_function name="ap/tecs/vdot-fps2">
+    <function>
+      <quotient>
+        <sum>
+          <product>
+            <property>velocities/u-fps</property>
+            <property>accelerations/udot-ft_sec2</property>
+          </product>
+          <product>
+            <property>velocities/v-fps</property>
+            <property>accelerations/vdot-ft_sec2</property>
+          </product>
+          <product>
+            <property>velocities/w-fps</property>
+            <property>accelerations/wdot-ft_sec2</property>
+          </product>
+        </sum>
+        <max>
+          <property>velocities/vtrue-fps</property>
+          <value>1.0</value>
+        </max>
+      </quotient>
+    </function>
+  </fcs_function>
+
+  <!-- Demanded climb rate, proportional to altitude error and limited. -->
+  <fcs_function name="ap/tecs/hdot-demand-fps">
+    <function>
+      <quotient>
+        <difference>
+          <property>ap/altitude-setpoint-ft</property>
+          <property>position/h-sl-ft</property>
+        </difference>
+        <property>ap/tecs/tau</property>
+      </quotient>
+    </function>
+    <clipto>
+      <min>-ap/tecs/hdot-max-fps</min>
+      <max> ap/tecs/hdot-max-fps</max>
+    </clipto>
+  </fcs_function>
+
+  <!-- Demanded longitudinal acceleration, proportional to speed error. -->
+  <fcs_function name="ap/tecs/vdot-demand-fps2">
+    <function>
+      <quotient>
+        <difference>
+          <property>ap/tas-setpoint-fps</property>
+          <property>velocities/vtrue-fps</property>
+        </difference>
+        <property>ap/tecs/tau</property>
+      </quotient>
+    </function>
+    <clipto>
+      <min>-ap/tecs/vdot-max-fps2</min>
+      <max> ap/tecs/vdot-max-fps2</max>
+    </clipto>
+  </fcs_function>
+
+  <!-- True when the demanded climb rate is against its own limit. While that
+       holds, the energy error reflects a demand the controller has chosen not
+       to pursue rather than authority it lacks, so integrating it winds up an
+       integrator that then has to be unwound past the target. Feeding this into
+       the anti=windup triggers cut the altitude overshoot from 20.5% to single
+       figures. -->
+  <fcs_function name="ap/tecs/hdot-demand-limited">
+    <function>
+      <ifthen>
+        <gt>
+          <abs><property>ap/tecs/hdot-demand-fps</property></abs>
+          <product>
+            <property>ap/tecs/hdot-max-fps</property>
+            <value>0.999</value>
+          </product>
+        </gt>
+        <value>1.0</value>
+        <value>0.0</value>
+      </ifthen>
+    </function>
+  </fcs_function>
+
+  <!-- Specific total energy rate error: what the throttle answers.
+       STE_err = g*(hdot_dem - hdot) + V*(Vdot_dem - Vdot), normalised by
+       g*tau so the gains below are dimensionless. -->
+  <fcs_function name="ap/tecs/ste-error">
+    <function>
+      <quotient>
+        <sum>
+          <product>
+            <value>32.174049</value>
+            <difference>
+              <property>ap/tecs/hdot-demand-fps</property>
+              <property>velocities/h-dot-fps</property>
+            </difference>
+          </product>
+          <product>
+            <property>velocities/vtrue-fps</property>
+            <difference>
+              <property>ap/tecs/vdot-demand-fps2</property>
+              <property>ap/tecs/vdot-fps2</property>
+            </difference>
+          </product>
+        </sum>
+        <product>
+          <value>32.174049</value>
+          <max>
+            <property>velocities/vtrue-fps</property>
+            <value>1.0</value>
+          </max>
+        </product>
+      </quotient>
+    </function>
+  </fcs_function>
+
+  <!-- Specific energy BALANCE rate error: what the pitch answers.
+       SEB_err = Wh*g*(hdot_dem - hdot) - Wv*V*(Vdot_dem - Vdot), Wh = 2 - Wv.
+       Trading height against speed is precisely what elevator does, which is
+       why this is the variable the pitch loop closes on. -->
+  <fcs_function name="ap/tecs/seb-error">
+    <function>
+      <quotient>
+        <difference>
+          <product>
+            <difference>
+              <value>2.0</value>
+              <property>ap/tecs/speed-weight</property>
+            </difference>
+            <value>32.174049</value>
+            <difference>
+              <property>ap/tecs/hdot-demand-fps</property>
+              <property>velocities/h-dot-fps</property>
+            </difference>
+          </product>
+          <product>
+            <property>ap/tecs/speed-weight</property>
+            <property>velocities/vtrue-fps</property>
+            <difference>
+              <property>ap/tecs/vdot-demand-fps2</property>
+              <property>ap/tecs/vdot-fps2</property>
+            </difference>
+          </product>
+        </difference>
+        <product>
+          <value>32.174049</value>
+          <max>
+            <property>velocities/vtrue-fps</property>
+            <value>1.0</value>
+          </max>
+        </product>
+      </quotient>
+    </function>
+  </fcs_function>
+
+</channel>
+
+<!-- ===================================================================
+     2. Throttle loop == commands specific TOTAL energy
+     =================================================================== -->
+<channel name="TECS throttle" execrate="1">
+
+  <fcs_function name="ap/tecs/throttle-trigger">
+    <function>
+      <ifthen>
+        <lt><property>ap/enable</property><value>0.5</value></lt>
+        <value>-1.0</value>
+        <property>ap/tecs/throttle-saturated</property>
+      </ifthen>
+    </function>
+  </fcs_function>
+
+  <pid name="ap/tecs/throttle-pid">
+    <input> ap/tecs/ste-error </input>
+    <kp> ap/tecs/kt-p </kp>
+    <ki> ap/tecs/kt-i </ki>
+    <kd> 0.0 </kd>
+    <!-- Freeze the integrator whenever the throttle command has hit a stop. -->
+    <trigger> ap/tecs/throttle-trigger </trigger>
+    <clipto> <min> -1.0 </min> <max> 1.0 </max> </clipto>
+  </pid>
+
+  <!-- Extra thrust to hold energy through a turn: drag scales with load
+       factor, and load factor in a coordinated turn is 1/cos(phi). -->
+  <fcs_function name="ap/tecs/turn-compensation">
+    <function>
+      <product>
+        <property>ap/tecs/roll-to-throttle</property>
+        <difference>
+          <quotient>
+            <value>1.0</value>
+            <max>
+              <abs><cos><property>attitude/phi-rad</property></cos></abs>
+              <value>0.2</value>
+            </max>
+          </quotient>
+          <value>1.0</value>
+        </difference>
+      </product>
+    </function>
+  </fcs_function>
+
+  <!-- Pre-clip command, kept so saturation can be detected honestly. -->
+  <summer name="ap/tecs/throttle-raw">
+    <input> ap/trim/throttle </input>
+    <input> ap/tecs/throttle-pid </input>
+    <input> ap/tecs/turn-compensation </input>
+  </summer>
+
+  <fcs_function name="ap/tecs/throttle-saturated">
+    <function>
+      <ifthen>
+        <or>
+          <lt><property>ap/tecs/throttle-raw</property><value>0.0</value></lt>
+          <gt><property>ap/tecs/throttle-raw</property><value>1.0</value></gt>
+          <gt><property>ap/tecs/hdot-demand-limited</property><value>0.5</value></gt>
+        </or>
+        <value>1.0</value>
+        <value>0.0</value>
+      </ifthen>
+    </function>
+  </fcs_function>
+
+  <pure_gain name="ap/tecs/throttle-command">
+    <input> ap/tecs/throttle-raw </input>
+    <gain> 1.0 </gain>
+    <clipto> <min> 0.0 </min> <max> 1.0 </max> </clipto>
+  </pure_gain>
+
+  <!-- Only drive the actuator when engaged, so a disengaged autopilot leaves
+       the trimmed controls exactly where trim put them. -->
+  <!-- One <output> per engine. The list is generated when the derived
+       aircraft is built, because engine count is a property of the airframe
+       (the B747 has four) and a hand-written list would silently drive only
+       some of them. -->
+  <switch name="ap/output/throttle">
+    <default value="fcs/throttle-cmd-norm"/>
+    <test logic="AND" value="ap/tecs/throttle-command">
+      ap/enable GT 0.5
+    </test>
+<!--THROTTLE_OUTPUTS-->
+  </switch>
+
+</channel>
+
+<!-- ===================================================================
+     3. Pitch loop == commands specific energy BALANCE
+     =================================================================== -->
+<channel name="TECS pitch" execrate="1">
+
+  <fcs_function name="ap/tecs/pitch-trigger">
+    <function>
+      <ifthen>
+        <lt><property>ap/enable</property><value>0.5</value></lt>
+        <value>-1.0</value>
+        <property>ap/tecs/pitch-saturated</property>
+      </ifthen>
+    </function>
+  </fcs_function>
+
+  <pid name="ap/tecs/pitch-pid">
+    <input> ap/tecs/seb-error </input>
+    <kp> ap/tecs/ke-p </kp>
+    <ki> ap/tecs/ke-i </ki>
+    <kd> 0.0 </kd>
+    <trigger> ap/tecs/pitch-trigger </trigger>
+    <clipto> <min> -0.5 </min> <max> 0.5 </max> </clipto>
+  </pid>
+
+  <summer name="ap/tecs/pitch-raw-rad">
+    <input> ap/trim/pitch-rad </input>
+    <input> ap/tecs/pitch-pid </input>
+  </summer>
+
+  <fcs_function name="ap/tecs/pitch-saturated">
+    <function>
+      <ifthen>
+        <or>
+          <lt>
+            <property>ap/tecs/pitch-raw-rad</property>
+            <property>ap/limits/pitch-min-rad</property>
+          </lt>
+          <gt>
+            <property>ap/tecs/pitch-raw-rad</property>
+            <property>ap/limits/pitch-max-rad</property>
+          </gt>
+          <gt><property>ap/tecs/hdot-demand-limited</property><value>0.5</value></gt>
+        </or>
+        <value>1.0</value>
+        <value>0.0</value>
+      </ifthen>
+    </function>
+  </fcs_function>
+
+  <!-- Clipped BEFORE the attitude loop sees it (§6.4): an unreachable
+       command must never be allowed to wind up the inner loop. -->
+  <pure_gain name="ap/tecs/pitch-command-rad">
+    <input> ap/tecs/pitch-raw-rad </input>
+    <gain> 1.0 </gain>
+    <clipto>
+      <min> ap/limits/pitch-min-rad </min>
+      <max> ap/limits/pitch-max-rad </max>
+    </clipto>
+  </pure_gain>
+
+</channel>
+
+<!-- ===================================================================
+     4. Pitch attitude inner loop -> elevator
+
+     Bandwidth is deliberately well above the TECS outer loop: both TECS and
+     the lateral guidance assume time-scale separation (§6.5).
+     =================================================================== -->
+<channel name="Pitch inner loop" execrate="1">
+
+  <fcs_function name="ap/pitch/q-demand">
+    <function>
+      <product>
+        <property>ap/pitch/k-theta</property>
+        <difference>
+          <property>ap/tecs/pitch-command-rad</property>
+          <property>attitude/theta-rad</property>
+        </difference>
+      </product>
+    </function>
+    <clipto>
+      <min>-ap/limits/q-rad_sec</min>
+      <max> ap/limits/q-rad_sec</max>
+    </clipto>
+  </fcs_function>
+
+  <summer name="ap/pitch/q-error">
+    <input>  ap/pitch/q-demand </input>
+    <input> -velocities/q-rad_sec </input>
+  </summer>
+
+  <fcs_function name="ap/pitch/elevator-trigger">
+    <function>
+      <ifthen>
+        <lt><property>ap/enable</property><value>0.5</value></lt>
+        <value>-1.0</value>
+        <property>ap/pitch/elevator-saturated</property>
+      </ifthen>
+    </function>
+  </fcs_function>
+
+  <pid name="ap/pitch/elevator-pid">
+    <input> ap/pitch/q-error </input>
+    <kp> ap/pitch/kp-q </kp>
+    <ki> ap/pitch/ki-q </ki>
+    <kd> 0.0 </kd>
+    <trigger> ap/pitch/elevator-trigger </trigger>
+    <clipto> <min> -1.0 </min> <max> 1.0 </max> </clipto>
+  </pid>
+
+  <fcs_function name="ap/pitch/elevator-saturated">
+    <function>
+      <ifthen>
+        <gt>
+          <abs><property>ap/pitch/elevator-pid</property></abs>
+          <value>0.98</value>
+        </gt>
+        <value>1.0</value>
+        <value>0.0</value>
+      </ifthen>
+    </function>
+  </fcs_function>
+
+  <fcs_function name="ap/pitch/elevator-command">
+    <function>
+      <sum>
+        <property>ap/trim/elevator</property>
+        <product>
+          <property>ap/sign/elevator</property>
+          <property>ap/pitch/elevator-pid</property>
+        </product>
+      </sum>
+    </function>
+    <clipto> <min> -1.0 </min> <max> 1.0 </max> </clipto>
+  </fcs_function>
+
+  <switch name="ap/output/elevator">
+    <default value="fcs/elevator-cmd-norm"/>
+    <test logic="AND" value="ap/pitch/elevator-command">
+      ap/enable GT 0.5
+    </test>
+    <output> fcs/elevator-cmd-norm </output>
+  </switch>
+
+</channel>
+
+<!-- ===================================================================
+     5. Lateral guidance -> bank demand
+     =================================================================== -->
+<channel name="Lateral guidance" execrate="1">
+
+  <!-- Heading error wrapped to (-pi, pi] via atan2, so a command across
+       north takes the short way round instead of a 350-degree turn. -->
+  <fcs_function name="ap/lat/heading-error-rad">
+    <function>
+      <atan2>
+        <sin>
+          <difference>
+            <product>
+              <property>ap/heading-setpoint-deg</property>
+              <value>0.0174532925</value>
+            </product>
+            <property>attitude/psi-rad</property>
+          </difference>
+        </sin>
+        <cos>
+          <difference>
+            <product>
+              <property>ap/heading-setpoint-deg</property>
+              <value>0.0174532925</value>
+            </product>
+            <property>attitude/psi-rad</property>
+          </difference>
+        </cos>
+      </atan2>
+    </function>
+  </fcs_function>
+
+  <!-- Clipped before the attitude loop, per §6.4. -->
+  <fcs_function name="ap/lat/bank-from-heading-rad">
+    <function>
+      <product>
+        <property>ap/lat/k-hdg</property>
+        <property>ap/lat/heading-error-rad</property>
+      </product>
+    </function>
+    <clipto>
+      <min>-ap/limits/bank-rad</min>
+      <max> ap/limits/bank-rad</max>
+    </clipto>
+  </fcs_function>
+
+  <switch name="ap/lat/bank-demand-rad">
+    <default value="ap/lat/bank-from-heading-rad"/>
+    <test logic="AND" value="ap/bank-setpoint-rad">
+      ap/bank-mode GT 0.5
+    </test>
+  </switch>
+
+</channel>
+
+<!-- ===================================================================
+     6. Roll attitude inner loop -> aileron
+     =================================================================== -->
+<channel name="Roll inner loop" execrate="1">
+
+  <fcs_function name="ap/lat/p-demand">
+    <function>
+      <product>
+        <property>ap/lat/k-phi</property>
+        <difference>
+          <property>ap/lat/bank-demand-rad</property>
+          <property>attitude/phi-rad</property>
+        </difference>
+      </product>
+    </function>
+    <clipto>
+      <min>-ap/limits/p-rad_sec</min>
+      <max> ap/limits/p-rad_sec</max>
+    </clipto>
+  </fcs_function>
+
+  <summer name="ap/lat/p-error">
+    <input>  ap/lat/p-demand </input>
+    <input> -velocities/p-rad_sec </input>
+  </summer>
+
+  <fcs_function name="ap/lat/aileron-trigger">
+    <function>
+      <ifthen>
+        <lt><property>ap/enable</property><value>0.5</value></lt>
+        <value>-1.0</value>
+        <property>ap/lat/aileron-saturated</property>
+      </ifthen>
+    </function>
+  </fcs_function>
+
+  <pid name="ap/lat/aileron-pid">
+    <input> ap/lat/p-error </input>
+    <kp> ap/lat/kp-p </kp>
+    <ki> ap/lat/ki-p </ki>
+    <kd> 0.0 </kd>
+    <trigger> ap/lat/aileron-trigger </trigger>
+    <clipto> <min> -1.0 </min> <max> 1.0 </max> </clipto>
+  </pid>
+
+  <fcs_function name="ap/lat/aileron-saturated">
+    <function>
+      <ifthen>
+        <gt>
+          <abs><property>ap/lat/aileron-pid</property></abs>
+          <value>0.98</value>
+        </gt>
+        <value>1.0</value>
+        <value>0.0</value>
+      </ifthen>
+    </function>
+  </fcs_function>
+
+  <fcs_function name="ap/lat/aileron-command">
+    <function>
+      <sum>
+        <property>ap/trim/aileron</property>
+        <product>
+          <property>ap/sign/aileron</property>
+          <property>ap/lat/aileron-pid</property>
+        </product>
+      </sum>
+    </function>
+    <clipto> <min> -1.0 </min> <max> 1.0 </max> </clipto>
+  </fcs_function>
+
+  <switch name="ap/output/aileron">
+    <default value="fcs/aileron-cmd-norm"/>
+    <test logic="AND" value="ap/lat/aileron-command">
+      ap/enable GT 0.5
+    </test>
+    <output> fcs/aileron-cmd-norm </output>
+  </switch>
+
+</channel>
+
+<!-- ===================================================================
+     7. Yaw damper
+
+     A washout on yaw rate, so it damps Dutch roll without fighting the
+     steady yaw rate of an intentional turn (§6.4).
+     =================================================================== -->
+<channel name="Yaw damper" execrate="1">
+
+  <washout_filter name="ap/yaw/r-washout">
+    <input> velocities/r-rad_sec </input>
+    <c1> ap/yaw/washout-c1 </c1>
+  </washout_filter>
+
+  <!-- Oppose the washed=out yaw rate. The command is built in the natural
+       direction (negative rate demand against positive r) and the airframe's
+       measured sign is applied last. -->
+  <fcs_function name="ap/yaw/rudder-command">
+    <function>
+      <sum>
+        <property>ap/trim/rudder</property>
+        <product>
+          <value>-1.0</value>
+          <property>ap/sign/rudder</property>
+          <property>ap/yaw/k-r</property>
+          <property>ap/yaw/r-washout</property>
+        </product>
+      </sum>
+    </function>
+    <clipto> <min> -0.5 </min> <max> 0.5 </max> </clipto>
+  </fcs_function>
+
+  <switch name="ap/output/rudder">
+    <default value="fcs/rudder-cmd-norm"/>
+    <test logic="AND" value="ap/yaw/rudder-command">
+      ap/enable GT 0.5
+    </test>
+    <output> fcs/rudder-cmd-norm </output>
+  </switch>
+
+</channel>
+
+</system>

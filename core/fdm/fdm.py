@@ -132,6 +132,9 @@ class FlightDynamics:
         rate_hz: float = DEFAULT_RATE_HZ,
         root_dir: Optional[Path] = None,
         debug_level: int = 0,
+        engine_path: Optional[Path] = None,
+        systems_path: Optional[Path] = None,
+        derived: Optional[object] = None,
     ) -> None:
         if rate_hz <= 0.0:
             raise ValueError(f"rate_hz must be positive, got {rate_hz}")
@@ -139,9 +142,18 @@ class FlightDynamics:
         self.model = ac.resolve(aircraft, root_dir)
         self.rate_hz = float(rate_hz)
         self.dt = 1.0 / self.rate_hz
+        #: Set when this instance runs a generated TECS-equipped airframe, so
+        #: the manifest can name both the stock model and the derivation.
+        self.derived = derived
 
         self._exec = jsbsim.FGFDMExec(root_dir=str(self.model.root_dir))
         self._exec.set_debug_level(debug_level)
+        # A derived aircraft lives outside the JSBSim data root, so engines and
+        # shared systems still have to be resolved against the stock tree.
+        if engine_path is not None:
+            self._exec.set_engine_path(str(engine_path))
+        if systems_path is not None:
+            self._exec.set_systems_path(str(systems_path))
 
         if not self._exec.load_model(self.model.name):
             raise SimulationError(
@@ -163,11 +175,42 @@ class FlightDynamics:
         self._engines_started = False
         self._frozen_tanks: Optional[Dict[str, float]] = None
 
+    @classmethod
+    def with_tecs(
+        cls,
+        base_aircraft: str,
+        rate_hz: float = DEFAULT_RATE_HZ,
+        root_dir: Optional[Path] = None,
+        debug_level: int = 0,
+    ) -> "FlightDynamics":
+        """Load ``base_aircraft`` with the TECS controller attached.
+
+        The stock model is never modified; a derived airframe is generated and
+        both hashes are recorded (see :mod:`core.control.derive`).
+        """
+        from ..control.derive import derive
+
+        spec = derive(base_aircraft, root_dir=root_dir)
+        return cls(
+            spec.name,
+            rate_hz=rate_hz,
+            root_dir=spec.aircraft_path.parent,
+            debug_level=debug_level,
+            engine_path=spec.engine_path,
+            systems_path=spec.systems_path,
+            derived=spec,
+        )
+
     # -- identity ------------------------------------------------------
 
     @property
     def aircraft_name(self) -> str:
         return self.model.name
+
+    @property
+    def has_autopilot(self) -> bool:
+        """True if the loaded model exposes the TECS control surface."""
+        return self.props.has("ap/enable")
 
     @property
     def sim_time(self) -> float:

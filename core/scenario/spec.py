@@ -50,6 +50,7 @@ class ScenarioSpec:
     rate: Quantity
     seed: Quantity
     mass_held: Quantity
+    hold_state: Quantity
     wind_speed: Quantity
     wind_direction: Quantity
     turbulence: Quantity
@@ -76,6 +77,7 @@ class ScenarioSpec:
         ("run", "rate"),
         ("run", "seed"),
         ("run", "mass_held"),
+        ("run", "hold_state"),
     )
 
     # -- access --------------------------------------------------------

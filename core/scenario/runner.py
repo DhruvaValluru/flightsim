@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from ..control.autopilot import Autopilot, ClosureReport, ClosureTolerance
 from ..fdm import FlightDynamics, TrimMode, mode_for
 from ..fdm import units as u
 from ..telemetry.recorder import Recorder
@@ -52,6 +53,7 @@ class RunResult:
     telemetry: Recorder
     validation: ValidationReport
     manifest: Dict[str, Any]
+    closure: Optional[ClosureReport] = None
 
     def write(self, directory) -> Path:
         directory = Path(directory)
@@ -86,7 +88,12 @@ def configure_from_spec(spec: ScenarioSpec) -> FlightDynamics:
         )
 
     wind_speed = float(spec.wind_speed.value)
-    fdm = FlightDynamics(str(spec.aircraft.value), rate_hz=float(spec.rate.value))
+    # A spec that commands a state needs the controller; one that only sets an
+    # initial condition does not. Building the derived airframe unconditionally
+    # would change the model hash of every run for no reason.
+    build = (FlightDynamics.with_tecs if bool(spec.hold_state.value)
+             else FlightDynamics)
+    fdm = build(str(spec.aircraft.value), rate_hz=float(spec.rate.value))
     fdm.set_initial_conditions(
         {
             "h-sl-ft": u.m_to_ft(float(spec.altitude.value)),
@@ -121,7 +128,8 @@ def configure_from_spec(spec: ScenarioSpec) -> FlightDynamics:
     return fdm
 
 
-def run_spec(spec: ScenarioSpec, validate_first: bool = True) -> RunResult:
+def run_spec(spec: ScenarioSpec, validate_first: bool = True,
+             assert_closure: bool = True) -> RunResult:
     """Run a scenario. Raises rather than running something it cannot deliver."""
     report = validate(spec) if validate_first else ValidationReport(spec.digest())
     if validate_first:
@@ -129,10 +137,38 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True) -> RunResult:
 
     fdm = configure_from_spec(spec)
 
+    autopilot = None
+    if bool(spec.hold_state.value):
+        autopilot = Autopilot(fdm)
+        autopilot.engage()
+
     recorder = Recorder(fdm, interval_s=0.1, extra=SURFACES)
     recorder.sample(force=True)
-    recorder.mark("trimmed")
-    recorder.run_for(float(spec.duration.value))
+    recorder.mark("trimmed" if autopilot is None else "trimmed, autopilot engaged")
+    if autopilot is None:
+        recorder.run_for(float(spec.duration.value))
+    else:
+        # Guidance runs at 2 Hz; the control laws run at FDM rate inside JSBSim.
+        steps = int(round(float(spec.duration.value) * fdm.rate_hz))
+        every = max(1, int(round(0.5 * fdm.rate_hz)))
+        for i in range(steps):
+            fdm.step()
+            if i % every == 0:
+                autopilot.update()
+            recorder.sample()
+
+    # The closure assertion (§2.8). A run that did not reach what it was
+    # commanded produces no output, rather than a clean recording of a failure.
+    closure: Optional[ClosureReport] = None
+    if autopilot is not None:
+        closure = autopilot.closure(
+            recorder.series("altitude_m"),
+            recorder.series("tas_kt"),
+            recorder.series("heading_deg"),
+            recorder.series("climb_rate_mps"),
+        )
+        if assert_closure:
+            closure.raise_if_failed()
 
     output_digest = _digest_telemetry(recorder)
     manifest = {
@@ -146,8 +182,24 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True) -> RunResult:
             "warnings": list(report.warnings),
             "derived_speeds": report.speeds.summary() if report.speeds else None,
         },
+        "closure": None if closure is None else {
+            "ok": closure.ok,
+            "checks": [
+                {"name": c.name, "commanded": c.commanded, "achieved": c.achieved,
+                 "tolerance": c.tolerance, "unit": c.unit, "ok": c.ok}
+                for c in closure.checks
+            ],
+        },
     }
-    return RunResult(spec.digest(), output_digest, recorder, report, manifest)
+    if fdm.derived is not None:
+        manifest["fdm"]["derivation"] = fdm.derived.provenance()
+    if autopilot is not None:
+        manifest["control"] = {
+            "signs": autopilot.signs.as_properties(),
+            "gains": autopilot.gains(),
+        }
+    return RunResult(spec.digest(), output_digest, recorder, report, manifest,
+                     closure)
 
 
 def _digest_telemetry(recorder: Recorder) -> str:

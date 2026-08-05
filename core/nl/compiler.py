@@ -271,6 +271,10 @@ def compile_prompt(prompt: str, name: Optional[str] = None) -> ScenarioSpec:
         seed=Quantity.default(0, "dimensionless",
                               frm="deterministic; no stochastic subsystem active yet"),
         mass_held=Quantity.default(False, frm="realistic fuel burn"),
+        # Whether the autopilot is engaged to HOLD the commanded state, or the
+        # aircraft is merely trimmed at it and left alone. Holding is what makes
+        # the closure assertion meaningful, so it is the default.
+        hold_state=Quantity.default(True, frm="hold the commanded state"),
         wind_speed=wind_speed,
         wind_direction=wind_direction,
         turbulence=_turbulence(text),
