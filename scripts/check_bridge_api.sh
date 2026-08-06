@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Check the bridge's assumptions about the plugin API, without a compiler.
+#
+# The bridge C++ is written against headers rather than against a compiler's
+# opinion, and on this machine it cannot be compiled at all. This does what can
+# be done without one: confirm every plugin symbol the bridge calls actually
+# exists, with the signature assumed, and that every module and plugin
+# dependency it declares resolves.
+#
+# It does NOT establish that the code compiles. It establishes that the first
+# compile will fail on ordinary C++ mistakes rather than on structural
+# mismatches, and it re-runs if the plugin is ever re-vendored at a different
+# version, which is when these assumptions would silently rot.
+set -uo pipefail
+cd "$(dirname "$0")/.."
+
+UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.5}"
+PLUGIN="ue/Plugins/JSBSimFlightDynamicsModel"
+BRIDGE="ue/Plugins/FlightSimBridge"
+STATUS=0
+
+ok()   { printf '  %-42s %s\n' "$1" "ok  $2"; }
+bad()  { printf '  %-42s %s\n' "$1" "FAIL $2"; STATUS=1; }
+
+echo "Bridge API check (no compiler involved)"
+echo
+
+# -- the one plugin call the bridge makes -----------------------------------
+MC="$PLUGIN/Source/JSBSimFlightDynamicsModel/Public/JSBSimMovementComponent.h"
+if [ -f "$MC" ]; then
+    if grep -q 'void CommandConsole(FString Property, FString InValue, FString & OutValue)' "$MC"; then
+        ok "UJSBSimMovementComponent::CommandConsole" "signature matches"
+    else
+        bad "UJSBSimMovementComponent::CommandConsole" "signature changed upstream"
+    fi
+    grep -q 'class JSBSIMFLIGHTDYNAMICSMODEL_API UJSBSimMovementComponent : public UActorComponent' "$MC" \
+        && ok "UJSBSimMovementComponent" "is an exported UActorComponent" \
+        || bad "UJSBSimMovementComponent" "class or base changed"
+else
+    bad "JSBSimMovementComponent.h" "not found -- plugin not vendored?"
+fi
+
+# -- engine types the bridge builds on --------------------------------------
+CC="$UE_ROOT/Engine/Source/Runtime/CinematicCamera/Public/CineCameraComponent.h"
+if [ -f "$CC" ]; then
+    # RootComponent must be a USceneComponent; UCineCameraComponent reaches it
+    # through UCameraComponent.
+    grep -q 'class UCineCameraComponent : public UCameraComponent' "$CC" \
+        && ok "UCineCameraComponent" "derives from UCameraComponent (a USceneComponent)" \
+        || bad "UCineCameraComponent" "base class changed"
+else
+    bad "CineCameraComponent.h" "not found in $UE_ROOT"
+fi
+
+# -- every module the bridge declares ---------------------------------------
+for m in $(grep -oE '"[A-Za-z]+"' "$BRIDGE/Source/FlightSimBridge/FlightSimBridge.Build.cs" \
+           | tr -d '"' | sort -u); do
+    case "$m" in Core|CoreUObject|Engine) continue ;; esac
+    if find "$UE_ROOT/Engine" "$PLUGIN" -name "$m.Build.cs" 2>/dev/null | grep -q .; then
+        ok "module $m" "resolves"
+    else
+        bad "module $m" "no $m.Build.cs anywhere"
+    fi
+done
+
+# -- plugin dependencies must be enabled in the uproject --------------------
+MISSING=$(python3 - <<'PY'
+import json
+plugin = json.load(open("ue/Plugins/JSBSimFlightDynamicsModel/JSBSimFlightDynamicsModel.uplugin"))
+project = json.load(open("ue/FlightSim.uproject"))
+enabled = {p["Name"] for p in project.get("Plugins", []) if p.get("Enabled", True)}
+required = {p["Name"] for p in plugin.get("Plugins", [])}
+print(",".join(sorted(required - enabled)))
+PY
+)
+if [ -z "$MISSING" ]; then
+    ok "plugin dependencies" "all enabled in FlightSim.uproject"
+else
+    bad "plugin dependencies" "not enabled: $MISSING"
+fi
+
+echo
+if [ "$STATUS" -eq 0 ]; then
+    echo "API surface matches. This is NOT a compile -- it means the first build"
+    echo "should fail on ordinary C++ errors, not on structural mismatches."
+else
+    echo "API surface has drifted. Fix before spending a build."
+fi
+exit "$STATUS"

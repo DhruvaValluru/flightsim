@@ -66,6 +66,15 @@ else
     fail "flightsim bridge" "no sources"
 fi
 
+# -- the bridge's API assumptions, checkable without a compiler -------------
+if [ -x scripts/check_bridge_api.sh ]; then
+    if scripts/check_bridge_api.sh >/dev/null 2>&1; then
+        say "bridge API surface" "matches the vendored plugin (not a compile)"
+    else
+        fail "bridge API surface" "drifted -- run scripts/check_bridge_api.sh"
+    fi
+fi
+
 # -- the toolchain, which is the part that actually blocks ------------------
 if ! command -v xcodebuild >/dev/null; then
     fail "xcode" "not installed"
