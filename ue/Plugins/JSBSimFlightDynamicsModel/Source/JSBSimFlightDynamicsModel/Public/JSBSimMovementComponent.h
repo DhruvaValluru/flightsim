@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -192,7 +192,7 @@ public:
 
 	// Flight Control Commands and State
 	
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Commands")
+	UPROPERTY(Transient, BlueprintReadWrite, EditAnywhere, Category = "Commands")
 	FFlightControlCommands Commands;
 
 	UPROPERTY(Transient, BlueprintReadOnly, VisibleAnywhere, Category = "State")
@@ -243,13 +243,8 @@ public:
   *     otherwise you will override the system value! */
 	UFUNCTION(BlueprintCallable, DisplayName = "Command Console Batch")
     void CommandConsoleBatch(TArray<FString> Property, TArray<FString> InValue, TArray<FString>& OutValue);
-	/**
-	 * Set environmental wind parameters
-	 *
-	 */
-	UFUNCTION(BlueprintCallable, DisplayName = "Set Winds")
-	void SetWind(FSimpleWindState WindState);
-	
+
+
 protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;
@@ -346,9 +341,6 @@ private:
 	void InitEnginesCommandAndStates();
 	void GetEnginesStates();
 
-
-	//aircrafts
-	void CrashedEvent();
 
 	/////////// Logging and Debugging Methods
 	void LogInitialization();

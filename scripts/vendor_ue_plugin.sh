@@ -1,127 +1,138 @@
 #!/usr/bin/env bash
-# Vendor the official Epic JSBSim UE plugin and build its native library.
+# Vendor the official Epic JSBSim UE plugin, using upstream's own build script.
 #
-# §3.1 says to use the official plugin rather than rebuild it, and its
-# documented build path is Windows-only: build JSBSimForUnreal.sln in
-# Release/x64, with MSVC v143 toolchain v14.38.
+# §3.1 says to use the official plugin rather than rebuild it. That extends to
+# how it is built: this script runs upstream's JSBSimForUnrealMac.sh (or the
+# Linux equivalent) rather than reimplementing its cmake invocation, so there is
+# no parallel build recipe here to drift out of step with theirs.
 #
-# That documentation is narrower than the plugin. Source/ThirdParty/JSBSim.Build.cs
-# reads:
+# The one thing this adds is a version pin. Upstream's script builds whatever
+# checkout it sits in; we run it inside a checkout of the SAME JSBSim version
+# the headless core uses (1.2.4). §2.9 requires a scenario to produce identical
+# physics in either host, and two JSBSim versions would make that untestable by
+# construction. Conveniently the tag carries the plugin, the build script and
+# the runtime aircraft data together, so plugin and library come from one commit.
 #
-#     bool bJSBSimSupported = Target.Platform == UnrealTargetPlatform.Win64 ||
-#                             Target.Platform == UnrealTargetPlatform.Mac || ...
-#     if (Target.Platform == UnrealTargetPlatform.Win64) SetupWindowsPlatform();
-#     else SetupUnixPlatform();
+# Two things the earlier hand-rolled version of this script got wrong, both
+# found by reading upstream's README-Unix.md properly:
 #
-# and SetupUnixPlatform looks for Lib/<Platform>/libJSBSim.dylib. So the plugin
-# supports macOS; what is missing from the repository is the built library,
-# which the Windows .sln would otherwise produce. This script produces the
-# macOS equivalent with CMake.
-#
-# The JSBSim version is pinned to the SAME version the headless core runs
-# (1.2.4). §2.9 requires a scenario to produce identical physics in either
-# host, and two different JSBSim versions would make that untestable by
-# construction.
+#   1. It never copied Resources/JSBSim -- the aircraft, engine and systems
+#      data the plugin stages at runtime. The UE host would have had no
+#      aircraft to load.
+#   2. It did not notice that the plugin's Build.cs stages that data through a
+#      Windows path literal. See the patch below.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO="$PWD"
 
 JSBSIM_VERSION="v1.2.4"
-PLUGIN_REPO="https://github.com/JSBSim-Team/jsbsim.git"
+UPSTREAM="https://github.com/JSBSim-Team/jsbsim.git"
 WORK="${TMPDIR:-/tmp}/flightsim-vendor"
 DEST="$REPO/ue/Plugins/JSBSimFlightDynamicsModel"
 
 command -v cmake >/dev/null || { echo "cmake is required: brew install cmake"; exit 1; }
 
-mkdir -p "$WORK"
-
-# -- 1. the plugin itself, from the JSBSim repository's UnrealEngine folder ---
-if [ ! -d "$WORK/plugin-src" ]; then
-    echo "==> fetching plugin source"
-    git clone --depth 1 --filter=blob:none --sparse "$PLUGIN_REPO" "$WORK/plugin-src" >/dev/null 2>&1
-    ( cd "$WORK/plugin-src" && git sparse-checkout set UnrealEngine >/dev/null 2>&1 )
-fi
-PLUGIN_COMMIT=$( cd "$WORK/plugin-src" && git rev-parse HEAD )
-
-# -- 2. JSBSim itself, pinned to the headless core's version -----------------
-if [ ! -d "$WORK/jsbsim" ]; then
-    echo "==> fetching JSBSim $JSBSIM_VERSION"
-    git clone --depth 1 --branch "$JSBSIM_VERSION" "$PLUGIN_REPO" "$WORK/jsbsim" >/dev/null 2>&1
-fi
-
-PLATFORM="$(uname -s)"
-case "$PLATFORM" in
-    Darwin) UE_PLATFORM="Mac"; LIB_EXT="dylib" ;;
-    Linux)  UE_PLATFORM="Linux"; LIB_EXT="so" ;;
-    *) echo "unsupported host platform $PLATFORM"; exit 1 ;;
+case "$(uname -s)" in
+    Darwin) UE_PLATFORM="Mac";   BUILD_SCRIPT="JSBSimForUnrealMac.sh";   LIB_EXT="dylib" ;;
+    Linux)  UE_PLATFORM="Linux"; BUILD_SCRIPT="JSBSimForUnrealLinux.sh"; LIB_EXT="so" ;;
+    *) echo "unsupported host platform $(uname -s)"; exit 1 ;;
 esac
 
-if [ ! -f "$WORK/jsbsim/build/src/libJSBSim.$LIB_EXT" ]; then
-    echo "==> building libJSBSim.$LIB_EXT (universal where supported)"
-    mkdir -p "$WORK/jsbsim/build"
-    ( cd "$WORK/jsbsim/build" && cmake .. \
-        -DBUILD_SHARED_LIBS=ON \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
-        -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
-        -DBUILD_DOCS=OFF -DBUILD_PYTHON_MODULE=OFF -DBUILD_MATLAB_SFUNCTION=OFF \
-        -DCMAKE_POLICY_VERSION_MINIMUM=3.5 >/dev/null \
-      && cmake --build . --config Release -j "$(sysctl -n hw.ncpu 2>/dev/null || nproc)" >/dev/null )
+SRC="$WORK/jsbsim-$JSBSIM_VERSION"
+if [ ! -d "$SRC" ]; then
+    echo "==> fetching JSBSim $JSBSIM_VERSION (plugin, build script and data)"
+    mkdir -p "$WORK"
+    git clone --depth 1 --branch "$JSBSIM_VERSION" "$UPSTREAM" "$SRC" >/dev/null 2>&1
+fi
+COMMIT=$( cd "$SRC" && git rev-parse HEAD )
+
+PLUGIN_SRC="$SRC/UnrealEngine/Plugins/JSBSimFlightDynamicsModel"
+if [ ! -f "$PLUGIN_SRC/Source/ThirdParty/JSBSim/Lib/$UE_PLATFORM/libJSBSim.$LIB_EXT" ]; then
+    echo "==> running upstream $BUILD_SCRIPT (builds the library, stages headers and data)"
+    ( cd "$SRC" && chmod +x "$BUILD_SCRIPT" && ./"$BUILD_SCRIPT" >/dev/null 2>&1 )
 fi
 
-# -- 3. assemble the vendored plugin ----------------------------------------
 echo "==> vendoring into ue/Plugins"
 rm -rf "$DEST"
-mkdir -p "$DEST"
-cp -R "$WORK/plugin-src/UnrealEngine/Plugins/JSBSimFlightDynamicsModel/." "$DEST/"
+mkdir -p "$(dirname "$DEST")"
+cp -R "$PLUGIN_SRC" "$DEST"
 
 THIRD_PARTY="$DEST/Source/ThirdParty/JSBSim"
-mkdir -p "$THIRD_PARTY/Include" "$THIRD_PARTY/Lib/$UE_PLATFORM"
+LIB="$THIRD_PARTY/Lib/$UE_PLATFORM/libJSBSim.$LIB_EXT"
 
-# Headers keep their src-relative layout: the plugin includes them as
-# "models/FGAircraft.h", not by a flattened name.
-( cd "$WORK/jsbsim/src" && find . -name "*.h" -o -name "*.hxx" ) | while read -r header; do
-    mkdir -p "$THIRD_PARTY/Include/$(dirname "$header")"
-    cp "$WORK/jsbsim/src/$header" "$THIRD_PARTY/Include/$header"
-done
-# JSBSim generates its version header at configure time, so it lives in the
-# build tree rather than in src.
-find "$WORK/jsbsim/build" -name "JSBSim_version.h" -exec cp {} "$THIRD_PARTY/Include/" \; 2>/dev/null || true
+# Upstream's script copies every produced dylib, including the versioned
+# symlink targets. Keep the one the Build.cs actually links against.
+if [ ! -f "$LIB" ]; then
+    CANDIDATE=$(find "$THIRD_PARTY/Lib/$UE_PLATFORM" -name "libJSBSim*.$LIB_EXT" | head -1)
+    [ -n "$CANDIDATE" ] && cp "$CANDIDATE" "$LIB"
+fi
+[ -f "$LIB" ] || { echo "no libJSBSim.$LIB_EXT produced"; exit 1; }
 
-cp "$WORK/jsbsim/build/src/libJSBSim.$LIB_EXT" "$THIRD_PARTY/Lib/$UE_PLATFORM/"
-
-# The dylib records its own install name; without rewriting it the packaged
-# binary looks for it at the build path, which will not exist on any other
-# machine.
-if [ "$PLATFORM" = "Darwin" ]; then
-    install_name_tool -id "@rpath/libJSBSim.dylib" \
-        "$THIRD_PARTY/Lib/$UE_PLATFORM/libJSBSim.dylib" 2>/dev/null || true
+# ---------------------------------------------------------------- patch ----
+# UPSTREAM BUG. JSBSimFlightDynamicsModel.Build.cs stages the runtime aircraft
+# data with a Windows path literal:
+#
+#     Path.Combine(PluginDirectory, @"Resources\JSBSim\*")
+#
+# On macOS and Linux that yields a single filename containing backslashes,
+# which matches nothing, so the aircraft/engine/systems data is silently not
+# staged -- on the platforms upstream's own README lists as Supported. Patched
+# here to a portable Path.Combine, and recorded in VENDORED.json so the
+# deviation from upstream is visible rather than buried.
+BUILD_CS="$DEST/Source/JSBSimFlightDynamicsModel/JSBSimFlightDynamicsModel.Build.cs"
+PATCHED="no"
+if grep -q 'Resources\\JSBSim' "$BUILD_CS" 2>/dev/null; then
+    python3 - "$BUILD_CS" <<'PYEOF'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+src = src.replace(
+    'Path.Combine(PluginDirectory, @"Resources\\JSBSim\\*")',
+    'Path.Combine(PluginDirectory, "Resources", "JSBSim", "*")')
+open(path, "w").write(src)
+PYEOF
+    PATCHED="yes"
 fi
 
-# -- 4. record what was vendored --------------------------------------------
-LIB_SHA=$(shasum -a 256 "$THIRD_PARTY/Lib/$UE_PLATFORM/libJSBSim.$LIB_EXT" | cut -d' ' -f1)
-HEADER_COUNT=$(find "$THIRD_PARTY/Include" -name "*.h" | wc -l | tr -d ' ')
+# The dylib records its own install name; without rewriting it a packaged build
+# looks for the library at the machine it was built on.
+if [ "$UE_PLATFORM" = "Mac" ]; then
+    install_name_tool -id "@rpath/libJSBSim.dylib" "$LIB" 2>/dev/null || true
+fi
+
+# ------------------------------------------------------------ provenance ----
+LIB_SHA=$(shasum -a 256 "$LIB" | cut -d' ' -f1)
+HEADERS=$(find "$THIRD_PARTY/Include" -name "*.h" 2>/dev/null | wc -l | tr -d ' ')
+AIRCRAFT=$(find "$DEST/Resources/JSBSim/aircraft" -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
 cat > "$DEST/VENDORED.json" <<EOF
 {
-  "plugin_source": "$PLUGIN_REPO (UnrealEngine/Plugins/JSBSimFlightDynamicsModel)",
-  "plugin_commit": "$PLUGIN_COMMIT",
-  "jsbsim_version": "$JSBSIM_VERSION",
+  "upstream": "$UPSTREAM",
+  "tag": "$JSBSIM_VERSION",
+  "commit": "$COMMIT",
+  "built_with": "upstream $BUILD_SCRIPT (not a reimplementation)",
   "jsbsim_matches_headless_core": true,
-  "host_platform": "$PLATFORM",
   "ue_platform": "$UE_PLATFORM",
-  "library": "Lib/$UE_PLATFORM/libJSBSim.$LIB_EXT",
+  "library": "Source/ThirdParty/JSBSim/Lib/$UE_PLATFORM/libJSBSim.$LIB_EXT",
   "library_sha256": "$LIB_SHA",
-  "header_count": $HEADER_COUNT,
-  "note": "Built by scripts/vendor_ue_plugin.sh. The upstream repository ships no prebuilt library for any platform; the Windows instructions build one from JSBSimForUnreal.sln and this script builds the Unix equivalent with CMake."
+  "header_count": $HEADERS,
+  "aircraft_staged": $((AIRCRAFT > 0 ? AIRCRAFT - 1 : 0)),
+  "local_patches": [
+    {
+      "file": "Source/JSBSimFlightDynamicsModel/JSBSimFlightDynamicsModel.Build.cs",
+      "applied": "$PATCHED",
+      "reason": "upstream stages Resources/JSBSim via a Windows path literal (@\\"Resources\\\\JSBSim\\\\*\\"), which matches nothing on macOS or Linux, so the runtime aircraft data is silently not staged",
+      "change": "portable Path.Combine(PluginDirectory, \\"Resources\\", \\"JSBSim\\", \\"*\\")"
+    }
+  ]
 }
 EOF
 
 echo
-echo "vendored plugin      $DEST"
-echo "  plugin commit      $PLUGIN_COMMIT"
-echo "  jsbsim             $JSBSIM_VERSION (matches headless core)"
-echo "  library            Lib/$UE_PLATFORM/libJSBSim.$LIB_EXT"
-if [ "$PLATFORM" = "Darwin" ]; then
-    echo "  architectures      $(lipo -archs "$THIRD_PARTY/Lib/$UE_PLATFORM/libJSBSim.dylib" 2>/dev/null)"
-fi
-echo "  headers            $HEADER_COUNT"
+echo "vendored             $DEST"
+echo "  tag                $JSBSIM_VERSION @ ${COMMIT:0:12}"
+echo "  built with         upstream $BUILD_SCRIPT"
+echo "  library            libJSBSim.$LIB_EXT"
+[ "$UE_PLATFORM" = "Mac" ] && echo "  architectures      $(lipo -archs "$LIB" 2>/dev/null)"
+echo "  headers            $HEADERS"
+echo "  aircraft staged    $((AIRCRAFT > 0 ? AIRCRAFT - 1 : 0))"
+echo "  Build.cs patched   $PATCHED (Windows path literal -> portable)"

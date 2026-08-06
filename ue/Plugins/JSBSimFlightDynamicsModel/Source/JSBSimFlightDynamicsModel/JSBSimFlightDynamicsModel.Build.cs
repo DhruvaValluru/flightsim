@@ -52,7 +52,7 @@ public class JSBSimFlightDynamicsModel : ModuleRules
 			
 			
 		// Stage JSBSim data files
-		string JSBSimRedistFolder = Path.Combine(PluginDirectory, @"Resources\JSBSim\*");
+		string JSBSimRedistFolder = Path.Combine(PluginDirectory, "Resources", "JSBSim", "*");
 		RuntimeDependencies.Add(JSBSimRedistFolder, StagedFileType.NonUFS);
 	}
 }

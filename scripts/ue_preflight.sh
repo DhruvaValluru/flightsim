@@ -31,12 +31,28 @@ fi
 # -- the vendored plugin ----------------------------------------------------
 PLUGIN="ue/Plugins/JSBSimFlightDynamicsModel"
 if [ -f "$PLUGIN/VENDORED.json" ]; then
+    # The path in VENDORED.json is relative to the plugin root.
     LIB=$(python3 -c "import json;print(json.load(open('$PLUGIN/VENDORED.json'))['library'])")
-    if [ -f "$PLUGIN/Source/ThirdParty/JSBSim/$LIB" ]; then
-        ARCHS=$(lipo -archs "$PLUGIN/Source/ThirdParty/JSBSim/$LIB" 2>/dev/null || echo "n/a")
-        say "jsbsim plugin" "vendored, $LIB ($ARCHS)"
+    TAG=$(python3 -c "import json;print(json.load(open('$PLUGIN/VENDORED.json'))['tag'])")
+    if [ -f "$PLUGIN/$LIB" ]; then
+        ARCHS=$(lipo -archs "$PLUGIN/$LIB" 2>/dev/null || echo "n/a")
+        say "jsbsim plugin" "vendored $TAG ($ARCHS)"
     else
         fail "jsbsim plugin" "vendored but $LIB is missing"
+    fi
+    AIRCRAFT=$(python3 -c "import json;print(json.load(open('$PLUGIN/VENDORED.json'))['aircraft_staged'])")
+    if [ "$AIRCRAFT" -gt 0 ]; then
+        say "jsbsim runtime data" "$AIRCRAFT aircraft staged in Resources/JSBSim"
+    else
+        fail "jsbsim runtime data" "Resources/JSBSim is empty -- the host would have no aircraft to load"
+    fi
+    # Both hosts must run the same JSBSim, or §2.9's parity claim is untestable.
+    CORE=$(.venv/bin/python -c "import jsbsim,re;print(re.search(r'commit ([0-9a-f]+)', jsbsim.FGJSBBase().get_version()).group(1))" 2>/dev/null)
+    VENDORED_COMMIT=$(python3 -c "import json;print(json.load(open('$PLUGIN/VENDORED.json'))['commit'])")
+    if [ "$CORE" = "$VENDORED_COMMIT" ]; then
+        say "jsbsim parity" "both hosts at ${CORE:0:12}"
+    else
+        fail "jsbsim parity" "headless ${CORE:0:12} != plugin ${VENDORED_COMMIT:0:12}"
     fi
 else
     fail "jsbsim plugin" "not vendored -- run scripts/vendor_ue_plugin.sh"
@@ -87,9 +103,11 @@ else
        This is the conservative option: UE 5.5 is the version the Cesium and
        JSBSim plugin compatibility intersection was pinned to (§3).
 
-    2. Move to a newer engine whose supported range includes this Xcode.
-       That re-opens the plugin compatibility question §3 settled, so it should
-       be a deliberate decision rather than a workaround.
+    2. A newer engine is NOT the easy way out. The plugin's own README states
+       "compatible with engine versions UE5.6 - UE5.0", so UE5.6 is the ceiling
+       -- and UE5.6 predates Xcode 26, so it almost certainly rejects it for
+       the same reason. Escaping the check means UE5.7+, which is outside the
+       range the plugin supports at all.
 
 EOF
     fi

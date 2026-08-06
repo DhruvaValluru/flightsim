@@ -336,7 +336,7 @@ struct FFlightControlCommands
 		DebugMessage += FString::Printf(TEXT("        Flight : Elevator %.3f   Aileron    %.3f  Rudder  %.3f  YawTrim %.3f PitchTrim %.3f  RollTrim %.3f"), Elevator, Aileron, Rudder, YawTrim, PitchTrim, RollTrim) + LINE_TERMINATOR;
 		DebugMessage += FString::Printf(TEXT("        Brakes : Left     %.3f   Right      %.3f  Center  %.3f  Parking %.3f"), LeftBrake, RightBrake, CenterBrake, ParkingBrake) + LINE_TERMINATOR;
 		DebugMessage += FString::Printf(TEXT("        Wheels : Steer    %.3f   GearDown   %.3f"), Steer, GearDown) + LINE_TERMINATOR;
-		DebugMessage += FString::Printf(TEXT("        Wings  : Flap     %.3f   SpeedBrake %.3f  Spoiler %.3f"), Flap, SpeedBrake, Spoiler) + LINE_TERMINATOR;
+		DebugMessage += FString::Printf(TEXT("        Wings  : Flap     %.3f   SpeedBrake %.3f  Spoiler %.3f"), Flap, SpeedBrake, Spoiler, ParkingBrake) + LINE_TERMINATOR;
 
 		return DebugMessage;
 	}
@@ -411,10 +411,10 @@ struct FAircraftState
 	{
 		FString DebugMessage;
 		DebugMessage += TEXT("Aircraft State :"); DebugMessage += LINE_TERMINATOR;
-		DebugMessage += FString::Printf(TEXT("        Elevator %.2f     Left Aileron %.2f     Right Aileron %.2f     Rudder   %.2f     (Degree)"), ElevatorPosition, LeftAileronPosition, RightAileronPosition, RudderPosition) + LINE_TERMINATOR;
+		DebugMessage += FString::Printf(TEXT("        Elevator %.2f     Left Aileron %.2f     Right Aileron %.2f     Rudder   %.2f     (Degree)"), ElevatorPosition, LeftAileronPosition, RightAileronPosition) + LINE_TERMINATOR;
 		DebugMessage += FString::Printf(TEXT("        Flap     %.2f     SpeedBrake   %.2f     Spoilers      %.2f"), FlapPosition, SpeedBrakePosition, SpoilersPosition) + LINE_TERMINATOR;
 		DebugMessage += FString::Printf(TEXT("        CAS      %.2f (kt)     GroundSpeed %.2f (kt)     VelocityNED %s (ft/s)"), CalibratedAirSpeedKts, GroundSpeedKts, *VelocityNEDfps.ToString()) + LINE_TERMINATOR;
-		DebugMessage += FString::Printf(TEXT("        AltitudeASL %.2f (ft)     AltitudeAGL %.2f (ft)     AltitudeRateFtps %.2f (ft/s)     StallWarning %.1f"), AltitudeASLFt, AltitudeAGLFt, AltitudeRateFtps, StallWarning) + LINE_TERMINATOR;
+		DebugMessage += FString::Printf(TEXT("        AltitudeASL %.2f (ft)     AltitudeAGL %.2f (ft)     AltitudeRateFtps %.2f (ft/s)     StallWarning %d"), AltitudeASLFt, AltitudeAGLFt, AltitudeRateFtps, StallWarning) + LINE_TERMINATOR;
 		DebugMessage += FString::Printf(TEXT("        ECEFLocation %s      Latitude %.3f      Longitude %.3f"), *ECEFLocation.ToString(), Latitude, Longitude) + LINE_TERMINATOR;
 		DebugMessage += FString::Printf(TEXT("        Yaw %.5f (%.5f)      Pitch %.5f (%.5f)     Roll %.5f (%.5f) (Degrees) "), LocalEulerAngles.Yaw, EulerRates.X, LocalEulerAngles.Pitch, EulerRates.Y, LocalEulerAngles.Roll, EulerRates.Z) + LINE_TERMINATOR;
 
@@ -433,70 +433,3 @@ struct FAircraftState
 		SpoilersPosition = 0;
 	}
 };
-
-//ue TurbType
-UENUM(BlueprintType)
-enum class ETurbType:uint8
-{
-	//No turbulence model is used. The aircraft will not experience any random wind effects. This mode can be beneficial for initial testing or when the influence of wind needs to be simplified.
-	None = 0 UMETA(DisplayName ="turbulence disabled"),
-	//A basic turbulence model that uses standard statistical characteristics to simulate wind fluctuations. This model is generally used for simple flight simulations.
-	Standard UMETA(DisplayName = "Ordinary turbulence"),
-	//The Culp turbulence model typically provides a more detailed simulation of turbulence (considering factors such as turbulence intensity and frequency). The Culp model adapts well to different aircraft and flight conditions, making it suitable for more complex simulations.
-	Culp UMETA(DisplayName = "Culp turbulence model"),
-	//This model uses the Dryden spectrum to simulate turbulence, adhering to the guidelines set in the MIL-F-8785C document. The parameters are designed differently for flights at altitudes below 1000 feet and above 2000 feet, with linear interpolation applied for altitudes in between. This model is well-suited for military applications and scenarios where specific turbulence characteristics are required.
-	Milspec UMETA(DisplayName = "Milspec turbulence model (Dryden spectrum)"),
-	//Similar to ttMilspec, this model also uses the Dryden spectrum. The main difference lies in how the transfer functions are implemented based on the specifications in the military document. It helps in simulating realistic turbulence under similar conditions as the Milspec model.
-	Tustin UMETA(DisplayName = "Tustin turbulence model (Dryden spectrum)") ,
-	
-};
-/*
- * Wind State
- * I hope that in the future there will be a new class that can provide more settings. However, this data is sufficient for now.
- */
-USTRUCT(BlueprintType)
-struct JSBSIMFLIGHTDYNAMICSMODEL_API FSimpleWindState
-{
-	GENERATED_BODY()
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Wind")
-	ETurbType TurbType = ETurbType::None;
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Wind")
-	double TurbGain = 0.0;
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Wind")
-	double TurbRate = 0.0;
-	//unit knots
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Wind")
-	FVector WindNED = FVector::ZeroVector;
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Wind")
-	double ProbabilityOfExceedence = 0.0;
-
-	FSimpleWindState() = default;
-
-	FSimpleWindState(ETurbType InTurbType, double InTurbGain, double InTurbRate, FVector InWindNED,
-		double InProbabilityOfExceedence) : TurbType(InTurbType), TurbGain(InTurbGain), TurbRate(InTurbRate),
-		WindNED(InWindNED),
-		ProbabilityOfExceedence(InProbabilityOfExceedence)
-	{
-
-	}
-	FString GetDebugMessage()const
-	{
-		FString DebugMessage;
-		DebugMessage += FString::Printf(TEXT("TurbType %d     TurbGain %.2f     TurbRate %.2f     WindNED %s     ProbabilityOfExceedence %.2f"), TurbType, TurbGain, TurbRate, *WindNED.ToString(), ProbabilityOfExceedence);
-		return DebugMessage;
-	}
-
-		static const FSimpleWindState Calm;
-		// East wind, a wind speed that people perceive as relatively strong.
-		static const FSimpleWindState StandardEastZephyr;
-		// West wind, a wind speed that people perceive as relatively strong.
-		static const FSimpleWindState StandardWestZephyr;
-		//North wind, a wind speed that people perceive as relatively strong.
-		static const FSimpleWindState StandardNorthZephyr;
-		//South wind, a wind speed that people perceive as relatively strong.
-		static const FSimpleWindState StandardSouthZephyr;
-	
-	
-	
-};
-

@@ -52,11 +52,6 @@ FJSBSimMovementCompVisualizer::~FJSBSimMovementCompVisualizer()
 void FJSBSimMovementCompVisualizer::DrawVisualization(const UActorComponent* Component, const FSceneView* View, FPrimitiveDrawInterface* PDI)
 {
 	const UJSBSimMovementComponent* MovementComponent = Cast<UJSBSimMovementComponent>(Component);
-	if (!MovementComponent)
-	{
-		return;
-	}
-
 	AActor* Owner = Component->GetOwner();
 
 	// Make sure we are ready to visualize this component
@@ -106,11 +101,6 @@ void FJSBSimMovementCompVisualizer::DrawVisualization(const UActorComponent* Com
 void FJSBSimMovementCompVisualizer::DrawVisualizationHUD(const UActorComponent* Component, const FViewport* Viewport, const FSceneView* View, FCanvas* Canvas)
 {
 	const UJSBSimMovementComponent* MovementComponent = Cast<UJSBSimMovementComponent>(Component);
-	if (!MovementComponent)
-	{
-		return;
-	}
-
 	AActor* Owner = MovementComponent->GetOwner();
 
 	FVector2D PixelLocation;

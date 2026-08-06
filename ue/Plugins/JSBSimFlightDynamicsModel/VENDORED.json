@@ -1,12 +1,20 @@
 {
-  "plugin_source": "https://github.com/JSBSim-Team/jsbsim.git (UnrealEngine/Plugins/JSBSimFlightDynamicsModel)",
-  "plugin_commit": "9a0b0282a3414409123f783e8b766ff002bb5fc9",
-  "jsbsim_version": "v1.2.4",
+  "upstream": "https://github.com/JSBSim-Team/jsbsim.git",
+  "tag": "v1.2.4",
+  "commit": "e07a7d810d4f1048039d42545d008b8a998636fa",
+  "built_with": "upstream JSBSimForUnrealMac.sh (not a reimplementation)",
   "jsbsim_matches_headless_core": true,
-  "host_platform": "Darwin",
   "ue_platform": "Mac",
-  "library": "Lib/Mac/libJSBSim.dylib",
-  "library_sha256": "93062bd4492b532e5b56115ba371a276f1f80adc9469f1ccad05d7f8d804ece8",
+  "library": "Source/ThirdParty/JSBSim/Lib/Mac/libJSBSim.dylib",
+  "library_sha256": "b42d47cc3daee56d09ecb348203afb1b7d7e00efac90961ee5dc2fabdc0ae448",
   "header_count": 126,
-  "note": "Built by scripts/vendor_ue_plugin.sh. The upstream repository ships no prebuilt library for any platform; the Windows instructions build one from JSBSimForUnreal.sln and this script builds the Unix equivalent with CMake."
+  "aircraft_staged": 60,
+  "local_patches": [
+    {
+      "file": "Source/JSBSimFlightDynamicsModel/JSBSimFlightDynamicsModel.Build.cs",
+      "applied": "yes",
+      "reason": "upstream stages Resources/JSBSim via a Windows path literal (@\"Resources\\JSBSim\\*\"), which matches nothing on macOS or Linux, so the runtime aircraft data is silently not staged",
+      "change": "portable Path.Combine(PluginDirectory, \"Resources\", \"JSBSim\", \"*\")"
+    }
+  ]
 }
