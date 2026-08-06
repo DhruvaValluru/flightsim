@@ -15,6 +15,12 @@
       "applied": "yes",
       "reason": "upstream stages Resources/JSBSim via a Windows path literal (@\"Resources\\JSBSim\\*\"), which matches nothing on macOS or Linux, so the runtime aircraft data is silently not staged",
       "change": "portable Path.Combine(PluginDirectory, \"Resources\", \"JSBSim\", \"*\")"
+    },
+    {
+      "file": "Source/JSBSimFlightDynamicsModel/Private/JSBSimMovementComponent.cpp",
+      "applied": "yes",
+      "reason": "declares FGPropertyNode*, a type absent from JSBSim 1.2.4; FGPropertyManager::GetNode returns SGPropertyNode*. The plugin is written against an older JSBSim than the library in the same repository, and does not compile without this.",
+      "change": "FGPropertyNode* node -> SGPropertyNode* node (2 occurrences)"
     }
   ]
 }

@@ -59,9 +59,10 @@ else
 fi
 
 # -- the bridge -------------------------------------------------------------
-BRIDGE_SOURCES=$(find ue/Plugins/FlightSimBridge -name "*.cpp" 2>/dev/null | wc -l | tr -d ' ')
+# Source only: Intermediate/ fills with generated .cpp once a build has run.
+BRIDGE_SOURCES=$(find ue/Plugins/FlightSimBridge/Source -name "*.cpp" 2>/dev/null | wc -l | tr -d ' ')
 if [ "$BRIDGE_SOURCES" -gt 0 ]; then
-    say "flightsim bridge" "$BRIDGE_SOURCES translation units (UNCOMPILED)"
+    say "flightsim bridge" "$BRIDGE_SOURCES translation units"
 else
     fail "flightsim bridge" "no sources"
 fi
@@ -75,51 +76,58 @@ if [ -x scripts/check_bridge_api.sh ]; then
     fi
 fi
 
-# -- the toolchain, which is the part that actually blocks ------------------
-if ! command -v xcodebuild >/dev/null; then
-    fail "xcode" "not installed"
-else
-    XCODE_VERSION=$(xcodebuild -version 2>/dev/null | head -1 | awk '{print $2}')
-    MAJOR=${XCODE_VERSION%%.*}
-    # UE 5.5 accepts Xcode 15.2 through 16.9; UBT reports this itself as
-    # "Found Sdk Version=..., MinRequired=15.2.0, MaxRequired=16.9.0".
-    if [ "$MAJOR" -ge 15 ] && [ "$MAJOR" -le 16 ]; then
-        say "xcode" "$XCODE_VERSION (within UE 5.5's 15.2-16.9 range)"
-    else
-        fail "xcode" "$XCODE_VERSION is OUTSIDE UE 5.5's supported range 15.2-16.9"
-        cat <<'EOF'
+# -- the toolchain ----------------------------------------------------------
+# UE 5.5 accepts Xcode 15.2 through 16.9 and hard-refuses anything else; UBT
+# reports this itself as "Found Sdk Version=..., MaxRequired=16.9.0". macOS 26
+# ships Xcode 26, which is outside that range, so a second Xcode is needed.
+#
+# It does NOT have to be the system default. DEVELOPER_DIR overrides the
+# toolchain per process, so `sudo xcode-select` is unnecessary and the machine's
+# default Xcode is left alone for everything else.
+#
+# Note also that macOS 26 refuses to LAUNCH Xcode 16.4's GUI ("not compatible
+# with macOS Tahoe"). That dialog is irrelevant here: UE never launches Xcode,
+# it invokes clang and xcodebuild, and those run fine.
+USABLE=""
+for candidate in "${DEVELOPER_DIR:-}" \
+                 /Applications/Xcode_16.app/Contents/Developer \
+                 "$(xcode-select -p 2>/dev/null)"; do
+    [ -n "$candidate" ] && [ -x "$candidate/usr/bin/xcodebuild" ] || continue
+    V=$("$candidate/usr/bin/xcodebuild" -version 2>/dev/null | head -1 | awk '{print $2}')
+    MAJOR=${V%%.*}
+    if [ -n "$MAJOR" ] && [ "$MAJOR" -ge 15 ] && [ "$MAJOR" -le 16 ]; then
+        USABLE="$candidate"
+        say "xcode (build toolchain)" "$V at $candidate"
+        break
+    fi
+done
 
-  This is the blocker. UnrealBuildTool refuses to register Mac as a buildable
-  platform, so the project cannot compile and Gate 5 cannot run:
+if [ -z "$USABLE" ]; then
+    fail "xcode (build toolchain)" "no Xcode in UE 5.5's supported range 15.2-16.9"
+    cat <<'EOF'
 
-      Unable to find valid SDK(s) for Mac:
-        Found Sdk Version=26.6, MinRequired=15.2.0, MaxRequired=16.9.0.
-      Registering build platform: Mac - buildable: False
+  Install Xcode 16.x alongside the system one -- it does not need to become the
+  default. Then build with:
 
-  It is a compiler-version check, not a macOS limitation and not a plugin
-  limitation. The plugin's own JSBSim.Build.cs lists Mac as supported, and
-  scripts/vendor_ue_plugin.sh has already built a universal arm64+x86_64
-  libJSBSim.dylib for it.
+      export DEVELOPER_DIR=/Applications/Xcode_16.app/Contents/Developer
 
-  Neither -IgnoreSDKCheck on the command line nor bIgnoreSDKCheck in
-  BuildConfiguration.xml is honoured by UBT 5.5; both were tried.
-
-  Two ways forward, both of which are the operator's call because they cost
-  disk and require an Apple ID:
-
-    1. Install Xcode 16.x alongside the current one and point the build at it:
-         sudo xcode-select -s /Applications/Xcode_16.app
-       This is the conservative option: UE 5.5 is the version the Cesium and
-       JSBSim plugin compatibility intersection was pinned to (§3).
-
-    2. A newer engine is NOT the easy way out. The plugin's own README states
-       "compatible with engine versions UE5.6 - UE5.0", so UE5.6 is the ceiling
-       -- and UE5.6 predates Xcode 26, so it almost certainly rejects it for
-       the same reason. Escaping the check means UE5.7+, which is outside the
-       range the plugin supports at all.
+  A newer engine is NOT the easy way out: the plugin states "compatible with
+  engine versions UE5.6 - UE5.0", and UE5.6 predates Xcode 26, so it almost
+  certainly rejects it too.
 
 EOF
-    fi
+else
+    SYSTEM=$(xcodebuild -version 2>/dev/null | head -1 | awk '{print $2}')
+    [ "$USABLE" = "$(xcode-select -p 2>/dev/null)" ] || \
+        say "" "system default is still $SYSTEM; build with DEVELOPER_DIR=$USABLE"
+fi
+
+# -- did it actually build? -------------------------------------------------
+BRIDGE_DYLIB="ue/Plugins/FlightSimBridge/Binaries/Mac/UnrealEditor-FlightSimBridge.dylib"
+if [ -f "$BRIDGE_DYLIB" ]; then
+    say "bridge binary" "built ($(lipo -archs "$BRIDGE_DYLIB" 2>/dev/null))"
+else
+    fail "bridge binary" "not built yet -- run scripts/build_ue.sh"
 fi
 
 echo

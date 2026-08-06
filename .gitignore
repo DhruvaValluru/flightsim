@@ -5,3 +5,9 @@ __pycache__/
 runs/
 data/dem/
 build/
+ue/Intermediate/
+ue/Binaries/
+ue/Saved/
+ue/DerivedDataCache/
+ue/Plugins/*/Intermediate/
+ue/Plugins/*/Binaries/

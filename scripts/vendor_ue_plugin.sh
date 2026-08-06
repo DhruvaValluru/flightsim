@@ -81,6 +81,7 @@ fi
 # deviation from upstream is visible rather than buried.
 BUILD_CS="$DEST/Source/JSBSimFlightDynamicsModel/JSBSimFlightDynamicsModel.Build.cs"
 PATCHED="no"
+PATCHED_NODE="no"
 if grep -q 'Resources\\JSBSim' "$BUILD_CS" 2>/dev/null; then
     python3 - "$BUILD_CS" <<'PYEOF'
 import sys
@@ -92,6 +93,25 @@ src = src.replace(
 open(path, "w").write(src)
 PYEOF
     PATCHED="yes"
+fi
+
+# UPSTREAM BUG 2. JSBSimMovementComponent.cpp declares the property node as
+# FGPropertyNode*, a type that does not exist in JSBSim 1.2.4 -- the plugin is
+# written against an older JSBSim than the library shipped beside it in the very
+# same repository. FGPropertyManager::GetNode returns SGPropertyNode*, and
+# upstream's own commented-out code in the same function already refers to
+# SGPropertyNode::Attribute, so the intended type is not in doubt. Without this
+# the plugin does not compile at all on the Unix path.
+MOVEMENT_CPP="$DEST/Source/JSBSimFlightDynamicsModel/Private/JSBSimMovementComponent.cpp"
+if grep -q 'FGPropertyNode\* node' "$MOVEMENT_CPP" 2>/dev/null; then
+    python3 - "$MOVEMENT_CPP" <<'PYEOF'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+src = src.replace("FGPropertyNode* node", "SGPropertyNode* node")
+open(path, "w").write(src)
+PYEOF
+    PATCHED_NODE="yes"
 fi
 
 # The dylib records its own install name; without rewriting it a packaged build
@@ -122,6 +142,12 @@ cat > "$DEST/VENDORED.json" <<EOF
       "applied": "$PATCHED",
       "reason": "upstream stages Resources/JSBSim via a Windows path literal (@\\"Resources\\\\JSBSim\\\\*\\"), which matches nothing on macOS or Linux, so the runtime aircraft data is silently not staged",
       "change": "portable Path.Combine(PluginDirectory, \\"Resources\\", \\"JSBSim\\", \\"*\\")"
+    },
+    {
+      "file": "Source/JSBSimFlightDynamicsModel/Private/JSBSimMovementComponent.cpp",
+      "applied": "$PATCHED_NODE",
+      "reason": "declares FGPropertyNode*, a type absent from JSBSim 1.2.4; FGPropertyManager::GetNode returns SGPropertyNode*. The plugin is written against an older JSBSim than the library in the same repository, and does not compile without this.",
+      "change": "FGPropertyNode* node -> SGPropertyNode* node (2 occurrences)"
     }
   ]
 }
@@ -136,3 +162,4 @@ echo "  library            libJSBSim.$LIB_EXT"
 echo "  headers            $HEADERS"
 echo "  aircraft staged    $((AIRCRAFT > 0 ? AIRCRAFT - 1 : 0))"
 echo "  Build.cs patched   $PATCHED (Windows path literal -> portable)"
+echo "  node type patched  $PATCHED_NODE (FGPropertyNode -> SGPropertyNode)"
