@@ -1,8 +1,12 @@
 # What this simulation can and cannot support
 
-Status: **Phases 0-7: every gate passes.** Phase 6's gate passes on its four
-measurable clauses with a placeholder airframe and a default terrain material —
-the section below is precise about what that does and does not establish. This
+Status: **Phases 0-7: every gate passes. Phase 6B is built and measured**: real
+aircraft meshes flying their matching FDMs, real named terrain from Copernicus
+GLO-30 at true position, Dryden turbulence delivered inside the Unreal host
+(null-tested; same-seed host parity measured and REFUSED), orographic wind
+coupled to the real ridges in the render path (port cross-checked to 1e-15),
+and a rendered condition matrix. Section 1.6b below is precise about each of
+those claims; the un-established parts are listed right next to them. This
 document grows with each phase. Everything below is scoped to what has actually
 been built and measured; nothing here is aspirational.
 
@@ -541,11 +545,126 @@ No EO/IR sensor modelling (§2.5 below). No validation against published
 reference data beyond the two targets §2.11 records, and the credibility
 scorecard is mostly below its own threshold (§2.12).
 
+### 1.6b Phase 6B: real meshes, real terrain, turbulence and wind in the host
+
+**Real aircraft meshes, held to Gate 5's own bar.** Two properly-licensed
+FlightGear airframes replace the boxes when a render passes `-mesh=`:
+the 747-400 (GPL-2.0, FGMEMBERS/747-400 @ 887ff474, Gijs de Rooy et al.) flying
+the staged `B747` FDM whose `<fdm_config>` names itself **B747-400**, and the
+c172p (GPL-2.0, c172p-team/c172p @ a15d83d1) flying the staged `c172p` FDM.
+The pairing is enforced twice — at conversion (`assets_pipeline/convert.py`
+refuses a mesh whose config does not match the FDM's own name) and at render
+(the commandlet refuses a manifest naming a different FDM than the card
+flies) — because "FDM JSBSIM F16 - MODEL F-15" is §1.4 and the failure this
+repository exists to prevent. Measured by `experiments/gate5_realmesh.py`,
+same harness code as Gate 5:
+
+| clause | B747-400 mesh | C172P mesh |
+|---|---|---|
+| frames show the aircraft | 2.66–4.71% of frame | 0.78–4.43% |
+| camera never inherits roll | 0.000000° | 0.000000° |
+| surfaces articulate (off the components) | 7 bound, 7 moved (ailerons 10.03°, elevators 5.55°, rudder 1.07°) | 6 bound, 4 moved (ailerons 3.50°, elevators 4.30°) |
+| pixels track FDM roll | **r = 0.99918** | **r = 0.99931** |
+
+Gate 5 proper still runs on the boxes, unchanged, and still passes.
+
+Not established about the meshes: they are community art, not engineering
+geometry — no claim of dimensional accuracy beyond overall proportions
+(measured spans/lengths match the type to a few percent). Hinge lines and
+deflection senses are taken from the FlightGear models' own animation tables;
+magnitude and correlation are measured from the pixels, sense was checked
+visually, not instrumented. The c172p's propeller is rendered static; the
+747's gear is extended because the FDM flies gear-down. Imported surfaces are
+flat-shaded where the source model relied on FlightGear-specific effects.
+
+**Real Earth terrain, as measured — with its limits stated.** Copernicus
+GLO-30 tiles (public AWS bucket, no auth; tile IDs and sha256 recorded in
+every bake's sidecar and every render manifest) are ingested through the
+EXISTING Phase 4 pipeline and verified per bake by
+`core/terrain/glo30.py`: 400 independent point comparisons against the source
+mosaic through the full CRS chain (Matterhorn scene: mean +0.40 m, p95 27.9 m
+on 30–50° alpine slopes; Yosemite: mean +0.82 m, p95 17.0 m), plus a
+named-summit identity check (Matterhorn, Dufourspitze, Dom; Half Dome,
+El Capitan, Clouds Rest). A bake that fails either check refuses to exist.
+
+The dataset's own limits, which are not defects of the pipeline:
+
+* GLO-30 is a 30 m **surface** model. Canopy and buildings are in the
+  elevations, and summits smooth: the source data itself tops the Matterhorn
+  at **4329 m against the surveyed 4478 m** (measured; the bake reproduces the
+  source to within resampling tolerance). Finer detail than 30 m does not
+  exist in the data, and the render mesh is built at stride 2 (60 m posting)
+  with normals from the full 30 m raster.
+* Heights are EGM2008 orthometric treated as ellipsoidal by the scene's
+  georeferencing, so absolute ECEF placement is off by the local geoid
+  undulation (~+50 m Alps, ~−30 m Sierra). Relative geometry within a scene —
+  aircraft against ridgeline — is unaffected, which is what the frames show.
+* Terrain colouring is a slope/altitude classification (rock, scrub, valley
+  floor, snow above the location's approximate snowline) written into vertex
+  colours. It is labeled **approximated** in every manifest; it is not land
+  cover data. Beyond the raster a flat matte plane stands in for the
+  surrounding lowlands — scenery, carrying no claim.
+
+**The georeferencing is real**: the spec's latitude/longitude is the scene
+origin, and every terrain vertex goes through the same PROJ transform chain
+that places the aircraft, so the ridgelines in frame are the raster's
+ridgelines at their true position and height relative to the flight.
+
+**What the gear model feels is still the spec's flat slab.** The visual
+terrain carries no collision, headless ground queries still answer from the
+spec's flat terrain elevation, and every clip manifest says so
+(`physics_ground`). The stretch goal — real collision in the host plus
+matching heightfield ground queries headless, with AGL parity shown over the
+ridge — was **not done**; visual mountains must not be read as terrain the
+gear ever felt. The ONE physics coupling to the real raster is the wind:
+
+**Orographic wind over the real ridge, in the render path.** The C++ port of
+`core/environment/terrain_field.py` samples its field at 49 grid points at
+startup and writes them into the manifest; the harness recomputes them
+through the original Python provider over the same baked raster — measured
+max |difference| **1.78 × 10⁻¹⁵ m/s** (`experiments/orographic_ue.py`). The
+Gate 3-style null test in the render path: with the coupling active the FDM's
+own wind-down property shows **2.58 fps RMS** of ridge-forced vertical wind;
+with `-NoOrographic` severing it, **0.00000 fps**. Every §2.8 caveat about
+the orographic model itself still applies — the port being faithful makes it
+exactly as crude as the original.
+
+**Turbulence in the Unreal host, and an honest parity verdict.** The card
+carries the headless Dryden provider's EXACT property writes (turb-type,
+seed, severity, W20 — computed once in Python, applied once after trim, never
+per step). Null test (`experiments/turbulence_ue.py`): load-factor RMS about
+its mean is **0.00024** calm against **0.07643** turbulent — a ×323 rise, so
+the stochastic process demonstrably reaches the FDM inside Unreal. Same-seed
+host parity was then **measured and refused**: with seed 424242 the two hosts
+diverge from the first flown sample (max |n_z| difference 0.19 against the
+0.05 tolerance), while each host is bit-repeatable with its own seed — a
+per-process RNG stream offset, not nondeterminism. Consequently the parity
+path (telemetry commandlet without `-AllowNonParityEnvironment`, and the
+parity matrix) still **refuses** turbulent cards, and every turbulent clip is
+labeled **visual-only** with its seed recorded. Nothing about turbulence
+realisations is claimed to agree across hosts.
+
+**Gusts exist exactly once.** The "gusty headwind" cells carry a per-step
+wind schedule precomputed by the headless providers (steady wind plus
+MIL-F-8785C 1-cosine gusts, pure functions of time); the host writes those
+floats verbatim. There is no second gust model to drift.
+
+**The condition matrix** (`experiments/showcase_matrix.py`) renders
+{calm, 25 kt crosswind, 15 kt gusty headwind, moderate turbulence w/ seed} ×
+{clear, hazy} × {dawn, noon} on both airframes over Matterhorn/Zermatt,
+Yosemite, and a synthesised control ridge — 720p30, 22 s clips, each manifest
+row carrying spec digest, terrain tiles + sha256, mesh + license, conditions
+and seed. Time of day is a stated sun-geometry approximation, not an
+ephemeris; haze is a fog-density parameter; exposure is manual per §6.6 with
+a per-scene bias recorded in the manifest. Cells that cannot render honestly
+are skipped with the reason recorded, never approximated.
+
 Claims about aircraft response to environmental conditions are supported only
-to the extent Phases 3 and 4 measured them, and only in the headless host: the
-Unreal host has been compared against it in **still air over flat terrain
-only**, because the commandlet refuses wind and turbulence rather than
-approximating them.
+to the extent Phases 3 and 4 measured them. The Unreal host's parity with the
+headless host covers **still air and steady wind over flat terrain**
+(Gate 5 and the parity matrix); turbulence reaches its FDM but its
+realisation is per-host (measured, above); orographic wind in the host is the
+verified port of an unvalidated model (§2.8).
 
 ### 2.5 No EO/IR sensor fidelity exists
 

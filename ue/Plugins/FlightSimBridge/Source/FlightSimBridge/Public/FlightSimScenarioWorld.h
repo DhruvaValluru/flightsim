@@ -14,6 +14,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FlightSimHeightfield.h"
+#include "FlightSimOrographic.h"
 
 class AActor;
 class AGeoReferencingSystem;
@@ -58,6 +60,44 @@ struct FFlightSimScenarioCard
 	double WindFromDegrees = 0.0;
 	//: Empty for the parity scenario, which is hands off from trim.
 	TArray<FFlightSimControlInput> ControlInputs;
+
+	// -- turbulence (Phase 6B.3) ------------------------------------------
+	// The intensity word, for the manifest. "none" means still.
+	FString Turbulence = TEXT("none");
+	// The EXACT property writes core/environment/turbulence.py's configure()
+	// produces for this spec (turb-type, randomseed, severity, W20), computed
+	// once in Python and carried here so the two hosts cannot derive
+	// different numbers from the same word. Written once after trim -- never
+	// per step, which would re-seed the generator (docs/JSBSIM_CORRECTIONS).
+	TArray<FString> TurbulenceProperties;
+	TArray<FString> TurbulenceValues;
+	int64 TurbulenceSeed = 0;
+
+	// -- time-varying wind schedule (gusts) -------------------------------
+	// Per-step NED wind in fps, precomputed by the headless providers (steady
+	// + 1-cosine gusts are pure functions of time), so the host writes the
+	// same floats the headless stack writes rather than re-deriving a gust
+	// model. Entries are held until the next time, like control inputs.
+	TArray<double> WindScheduleTimes;
+	TArray<double> WindScheduleNorthFps;
+	TArray<double> WindScheduleEastFps;
+	TArray<double> WindScheduleDownFps;
+
+	// -- orographic lift over real terrain (Phase 6B.2) -------------------
+	bool bOrographic = false;
+	FString OrographicTerrainPath;
+	double OrographicWindSpeedMps = 0.0;
+	double OrographicWindFromDeg = 0.0;
+	// Modelling parameters with judgment in them, computed once in Python
+	// (terrain_field_from's wavelength, the provider's decay clamp) and
+	// carried so both hosts use identical values.
+	double OrographicDecayHeightMetres = 0.0;
+	double OrographicWavelengthMetres = 0.0;
+	bool bOrographicLee = true;
+	// Scene origin of the local north/east frame, in the raster's own
+	// projected CRS -- projected once in Python from the spec's lat/lon.
+	double OrographicOriginXMetres = 0.0;
+	double OrographicOriginYMetres = 0.0;
 };
 
 class FLIGHTSIMBRIDGE_API FFlightSimScenarioWorld
@@ -96,6 +136,23 @@ public:
 	// per-tick write is a no-op.
 	void LatchTrimmedControls(bool bMassHeld);
 
+	// Turbulence configuration: the card's exact property writes, once, after
+	// trim and latch, mirroring EnvironmentStack.configure. Never call inside
+	// the step loop -- re-seeding per step destroys the correlated noise
+	// (measured: 0.40 g peak load factor became 515 g).
+	void ConfigureTurbulence(const FFlightSimScenarioCard& Card);
+
+	// The orographic wind field, when the card enables it. Public so the
+	// render commandlet can sample it for the manifest's selftest block.
+	const FFlightSimOrographicWind* GetOrographic() const
+	{
+		return bOrographicReady ? &Orographic : nullptr;
+	}
+	const FFlightSimHeightfield* GetOrographicTerrain() const
+	{
+		return bOrographicReady ? &OrographicTerrain : nullptr;
+	}
+
 	// Applies whichever scripted input is current at ``TimeSeconds``, then
 	// advances one fixed frame. Fails on a crash rather than continuing to
 	// record a frozen state.
@@ -118,4 +175,16 @@ private:
 	// same conversion chain the headless stack uses. Empty in still air.
 	TArray<FString> WindProperties;
 	TArray<FString> WindValues;
+	// The same steady wind as doubles, for composition with a schedule or an
+	// orographic contribution. The still-air steady path keeps writing the
+	// precomputed strings above, byte-identical to what Gate 5 measured.
+	double SteadyWindNorthFps = 0.0;
+	double SteadyWindEastFps = 0.0;
+	int32 ScheduleIndex = -1;
+
+	// Real-terrain orographic wind (Phase 6B.2). The heightfield is the same
+	// baked raster the visual pass draws and the sha in the manifest names.
+	FFlightSimHeightfield OrographicTerrain;
+	FFlightSimOrographicWind Orographic;
+	bool bOrographicReady = false;
 };

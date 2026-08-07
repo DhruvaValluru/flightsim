@@ -50,6 +50,46 @@ int32 UFlightSimScenarioCommandlet::Main(const FString& Params)
 		return 1;
 	}
 
+	// This commandlet is the parity path: its output is what gets compared
+	// against the headless reference under Gate 5's tolerances. Conditions
+	// whose host parity has NOT been established (turbulence realisations, a
+	// gust schedule, orographic coupling) are refused here unless the caller
+	// explicitly says this run is a measurement of those conditions rather
+	// than a parity sample. The flag is a statement of intent, not a bypass:
+	// experiments pass it, the parity matrix never does.
+	const bool bAllowNonParityEnvironment =
+		FParse::Param(*Params, TEXT("AllowNonParityEnvironment"));
+	if (!bAllowNonParityEnvironment)
+	{
+		if (Card.Turbulence != TEXT("none"))
+		{
+			UE_LOG(LogFlightSimScenario, Error,
+			       TEXT("this card requests '%s' turbulence. Whether both hosts ")
+			       TEXT("produce the same realisation from the same seed is a ")
+			       TEXT("measured question, not an assumption; until the harness ")
+			       TEXT("establishes it, the parity path refuses turbulent cards. ")
+			       TEXT("Pass -AllowNonParityEnvironment for a null-test or ")
+			       TEXT("measurement run."), *Card.Turbulence);
+			return 1;
+		}
+		if (Card.WindScheduleTimes.Num() > 0)
+		{
+			UE_LOG(LogFlightSimScenario, Error,
+			       TEXT("this card carries a wind schedule; the parity matrix ")
+			       TEXT("compares steady-wind scenarios only. Pass ")
+			       TEXT("-AllowNonParityEnvironment for a measurement run."));
+			return 1;
+		}
+		if (Card.bOrographic)
+		{
+			UE_LOG(LogFlightSimScenario, Error,
+			       TEXT("this card couples wind to terrain; the parity matrix ")
+			       TEXT("does not cover that coupling. Pass ")
+			       TEXT("-AllowNonParityEnvironment for a measurement run."));
+			return 1;
+		}
+	}
+
 	UE_LOG(LogFlightSimScenario, Display, TEXT("scenario %s"), *Card.SpecDigest);
 	UE_LOG(LogFlightSimScenario, Display,
 	       TEXT("  %s at %.1f m / %.1f kt CAS, heading %.1f, %.6f/%.6f, %.1f s at %.0f Hz"),
@@ -78,6 +118,8 @@ int32 UFlightSimScenarioCommandlet::Main(const FString& Params)
 
 	UE_LOG(LogFlightSimScenario, Display, TEXT("latching trimmed controls"));
 	Scenario.LatchTrimmedControls(Card.bMassHeld);
+	// Once, after trim and latch -- a no-op for calm cards.
+	Scenario.ConfigureTurbulence(Card);
 
 	Recorder->StartRecording(TelemetryPath);
 

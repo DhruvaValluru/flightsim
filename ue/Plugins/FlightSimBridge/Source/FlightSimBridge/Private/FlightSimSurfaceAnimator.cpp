@@ -36,6 +36,17 @@ void UFlightSimSurfaceAnimator::ApplyDefaultBindings()
 	Add(TEXT("gear/gear-pos-norm"),         TEXT("gear"),       90.0f,    FVector(0, 1, 0));
 }
 
+void UFlightSimSurfaceAnimator::AddBinding(const FString& Property, FName Bone,
+                                           float DegreesPerUnit, const FVector& Axis)
+{
+	FFlightSimSurfaceBinding Binding;
+	Binding.PropertyName = Property;
+	Binding.BoneName = Bone;
+	Binding.DegreesPerUnit = DegreesPerUnit;
+	Binding.RotationAxis = Axis;
+	Bindings.Add(Binding);
+}
+
 void UFlightSimSurfaceAnimator::TickComponent(
 	float DeltaTime, ELevelTick TickType,
 	FActorComponentTickFunction* ThisTickFunction)

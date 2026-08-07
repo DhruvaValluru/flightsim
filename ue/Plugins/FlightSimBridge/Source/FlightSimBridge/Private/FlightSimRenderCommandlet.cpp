@@ -1,6 +1,7 @@
 #include "FlightSimRenderCommandlet.h"
 
 #include "FlightSimCameraDirector.h"
+#include "FlightSimOrographic.h"
 #include "FlightSimVisualScene.h"
 #include "FlightSimScenarioWorld.h"
 #include "FlightSimSurfaceAnimator.h"
@@ -22,6 +23,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
+#include "AssetCompilingManager.h"
 #include "RenderingThread.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -104,6 +106,182 @@ namespace
 		OutPixel.Y = Height * 0.5 * (1.0 - (Local.Z / Local.X) / HalfHeightTan);
 		return OutPixel.X >= 0 && OutPixel.X < Width &&
 		       OutPixel.Y >= 0 && OutPixel.Y < Height;
+	}
+
+	// A real aircraft mesh, assembled from the converter's manifest: one
+	// static mesh for the body and one per control surface, each surface
+	// under a hinge scene component at the hinge line the FlightGear model
+	// XML states -- the same attach pattern the placeholder boxes use, so
+	// UFlightSimSurfaceAnimator drives real geometry through the identical
+	// code path Gate 5 measured.
+	struct FMeshAirframe
+	{
+		bool bLoaded = false;
+		FString Name;
+		FString FdmName;
+		FString MeshAirframe;
+		FString License;
+		FString Repo;
+		FString Commit;
+	};
+
+	bool BuildMeshAirframe(AActor* Aircraft, UFlightSimSurfaceAnimator* Animator,
+	                       const FString& ManifestPath, const FString& CardAircraft,
+	                       FMeshAirframe& Out, FString& Error)
+	{
+		FString Text;
+		if (!FFileHelper::LoadFileToString(Text, *ManifestPath))
+		{
+			Error = FString::Printf(TEXT("cannot read mesh manifest '%s'"), *ManifestPath);
+			return false;
+		}
+		TSharedPtr<FJsonObject> Manifest;
+		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Text);
+		if (!FJsonSerializer::Deserialize(Reader, Manifest) || !Manifest.IsValid())
+		{
+			Error = FString::Printf(TEXT("'%s' is not valid JSON"), *ManifestPath);
+			return false;
+		}
+		FString Magic;
+		Manifest->TryGetStringField(TEXT("magic"), Magic);
+		if (Magic != TEXT("flightsim-aircraft-mesh"))
+		{
+			Error = FString::Printf(TEXT("'%s' is not an aircraft mesh manifest"),
+			                        *ManifestPath);
+			return false;
+		}
+
+		// §1.4, enforced where the pairing actually happens: the mesh's FDM
+		// must be the FDM this card flies. "FDM JSBSIM F16 - MODEL F-15" is
+		// the failure this repository exists to prevent, and it is prevented
+		// here, not in a comment.
+		Manifest->TryGetStringField(TEXT("fdm"), Out.FdmName);
+		Manifest->TryGetStringField(TEXT("name"), Out.Name);
+		Manifest->TryGetStringField(TEXT("mesh_airframe"), Out.MeshAirframe);
+		if (Out.FdmName != CardAircraft)
+		{
+			Error = FString::Printf(
+				TEXT("REFUSING the pairing: mesh manifest '%s' is for FDM '%s' ")
+				TEXT("but this card flies '%s'. One mesh per airframe flown."),
+				*ManifestPath, *Out.FdmName, *CardAircraft);
+			return false;
+		}
+		const TSharedPtr<FJsonObject>* Source = nullptr;
+		if (Manifest->TryGetObjectField(TEXT("source"), Source))
+		{
+			(*Source)->TryGetStringField(TEXT("license_name"), Out.License);
+			(*Source)->TryGetStringField(TEXT("repo"), Out.Repo);
+			(*Source)->TryGetStringField(TEXT("commit"), Out.Commit);
+		}
+		if (Out.License.IsEmpty())
+		{
+			Error = FString::Printf(
+				TEXT("mesh manifest '%s' records no license (§3.3); refusing to ")
+				TEXT("render an asset whose terms are unrecorded"), *ManifestPath);
+			return false;
+		}
+
+		FString AssetRoot;
+		Manifest->TryGetStringField(TEXT("asset_path_root"), AssetRoot);
+		USceneComponent* Root = Aircraft->GetRootComponent();
+
+		auto LoadPart = [&](const FString& Part) -> UStaticMesh*
+		{
+			const FString Path = FString::Printf(TEXT("%s/%s.%s"), *AssetRoot, *Part, *Part);
+			return LoadObject<UStaticMesh>(nullptr, *Path);
+		};
+
+		UStaticMesh* Body = LoadPart(TEXT("body"));
+		if (Body == nullptr)
+		{
+			Error = FString::Printf(
+				TEXT("mesh asset %s/body did not load. Run the import step ")
+				TEXT("(scripts/ue_import_aircraft.py) -- a missing asset must not ")
+				TEXT("fall back to the placeholder boxes silently."), *AssetRoot);
+			return false;
+		}
+		UStaticMeshComponent* BodyComponent =
+			NewObject<UStaticMeshComponent>(Aircraft, TEXT("MeshBody"));
+		BodyComponent->SetupAttachment(Root);
+		BodyComponent->SetMobility(EComponentMobility::Movable);
+		BodyComponent->SetStaticMesh(Body);
+		BodyComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		BodyComponent->RegisterComponent();
+
+		// A manifest airframe replaces the whole binding table: its bones are
+		// its own (both elevators, split ailerons), and mixing them with the
+		// stock table would make bone lookup ambiguous.
+		Animator->ClearBindings();
+
+		const TArray<TSharedPtr<FJsonValue>>* Surfaces = nullptr;
+		if (!Manifest->TryGetArrayField(TEXT("surfaces"), Surfaces) || Surfaces == nullptr)
+		{
+			Error = FString::Printf(TEXT("'%s' has no surfaces"), *ManifestPath);
+			return false;
+		}
+		for (const TSharedPtr<FJsonValue>& Value : *Surfaces)
+		{
+			const TSharedPtr<FJsonObject>* Entry = nullptr;
+			if (!Value->TryGetObject(Entry) || Entry == nullptr)
+			{
+				Error = TEXT("surfaces must be objects");
+				return false;
+			}
+			FString Bone, Part, Property;
+			(*Entry)->TryGetStringField(TEXT("bone"), Bone);
+			(*Entry)->TryGetStringField(TEXT("part"), Part);
+			(*Entry)->TryGetStringField(TEXT("property"), Property);
+			double Scale = 0.0;
+			(*Entry)->TryGetNumberField(TEXT("scale_deg_per_unit"), Scale);
+			const TArray<TSharedPtr<FJsonValue>>* Hinge = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Axis = nullptr;
+			if (!(*Entry)->TryGetArrayField(TEXT("hinge_mid_cm"), Hinge) ||
+			    !(*Entry)->TryGetArrayField(TEXT("axis_ue"), Axis) ||
+			    Hinge->Num() != 3 || Axis->Num() != 3)
+			{
+				Error = FString::Printf(TEXT("surface '%s' lacks hinge/axis"), *Bone);
+				return false;
+			}
+			const FVector HingeMid((*Hinge)[0]->AsNumber(), (*Hinge)[1]->AsNumber(),
+			                       (*Hinge)[2]->AsNumber());
+			const FVector RotationAxis((*Axis)[0]->AsNumber(), (*Axis)[1]->AsNumber(),
+			                           (*Axis)[2]->AsNumber());
+
+			UStaticMesh* SurfaceMesh = LoadPart(Part);
+			if (SurfaceMesh == nullptr)
+			{
+				Error = FString::Printf(TEXT("mesh asset %s/%s did not load"),
+				                        *AssetRoot, *Part);
+				return false;
+			}
+			USceneComponent* HingeComponent = NewObject<USceneComponent>(
+				Aircraft, *FString::Printf(TEXT("%sHinge"), *Bone));
+			HingeComponent->SetupAttachment(Root);
+			HingeComponent->SetMobility(EComponentMobility::Movable);
+			HingeComponent->RegisterComponent();
+			HingeComponent->SetRelativeLocation(HingeMid);
+
+			UStaticMeshComponent* SurfaceComponent = NewObject<UStaticMeshComponent>(
+				Aircraft, *FString::Printf(TEXT("%sMesh"), *Bone));
+			SurfaceComponent->SetupAttachment(HingeComponent);
+			SurfaceComponent->SetMobility(EComponentMobility::Movable);
+			SurfaceComponent->SetStaticMesh(SurfaceMesh);
+			SurfaceComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			SurfaceComponent->RegisterComponent();
+			// The surface OBJ is exported in place (actor frame); parenting it
+			// to a hinge at HingeMid means offsetting it back by the same.
+			SurfaceComponent->SetRelativeLocation(-HingeMid);
+
+			Animator->AddBinding(Property, FName(*Bone),
+			                     static_cast<float>(Scale), RotationAxis);
+			Animator->BindSurfaceComponent(FName(*Bone), HingeComponent);
+		}
+		Out.bLoaded = true;
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("mesh airframe '%s' (%s) [%s, %s@%s]: %d surfaces bound"),
+		       *Out.Name, *Out.MeshAirframe, *Out.License, *Out.Repo,
+		       *Out.Commit.Left(12), Surfaces->Num());
+		return true;
 	}
 
 	FPlaceholderAirframe BuildAirframe(AActor* Aircraft, UStaticMesh* Cube)
@@ -199,6 +377,30 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	double SecondsOverride = 0.0;
 	FParse::Value(*Params, TEXT("seconds="), SecondsOverride);
 
+	// -- Phase 6B controls -------------------------------------------------
+	// A real aircraft mesh manifest; absent means the placeholder boxes,
+	// byte-for-byte as Gate 5 measured them.
+	FString MeshManifestPath;
+	FParse::Value(*Params, TEXT("mesh="), MeshManifestPath);
+	// Georeferenced single-instance terrain at its true position.
+	const bool bGeorefTerrain = FParse::Param(*Params, TEXT("GeorefTerrain"));
+	// Sun as a time-of-day parameter (dawn / noon / low sun are elevation and
+	// azimuth choices made by the harness and recorded in the manifest).
+	double SunElevationDeg = 0.0, SunAzimuthDeg = 0.0;
+	const bool bSunOverride =
+		FParse::Value(*Params, TEXT("sun-elev="), SunElevationDeg) &&
+		FParse::Value(*Params, TEXT("sun-azim="), SunAzimuthDeg);
+	double FogDensity = 0.0025;
+	FParse::Value(*Params, TEXT("fog-density="), FogDensity);
+	double ExposureBias = 11.0;
+	FParse::Value(*Params, TEXT("exposure-bias="), ExposureBias);
+	// Chase offset override, metres: a 747 framed at -170 m puts a Cessna
+	// eleven pixels wide; the harness knows the airframe, so it chooses.
+	FString ChaseSpec;
+	FParse::Value(*Params, TEXT("chase="), ChaseSpec);
+	// The orographic null-test control: same card, coupling severed.
+	const bool bNoOrographic = FParse::Param(*Params, TEXT("NoOrographic"));
+
 	if (GDynamicRHI == nullptr || !FApp::CanEverRender())
 	{
 		UE_LOG(LogFlightSimRender, Error,
@@ -216,6 +418,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		UE_LOG(LogFlightSimRender, Error, TEXT("%s"), *Error);
 		return 1;
+	}
+	if (bNoOrographic)
+	{
+		// The null-test control severs the terrain-wind coupling and nothing
+		// else. Recorded in the manifest so the control run cannot be quoted
+		// as the coupled one.
+		Card.bOrographic = false;
 	}
 
 	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
@@ -245,6 +454,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		FFlightSimVisualSceneOptions SceneOptions;
 		SceneOptions.TerrainPath = TerrainPath;
 		SceneOptions.bDynamicShadows = !bNoShadows;
+		SceneOptions.FogDensity = static_cast<float>(FogDensity);
+		if (bGeorefTerrain)
+		{
+			SceneOptions.bGeoreferenced = true;
+			SceneOptions.GeoReferencing = Scenario.GeoReferencing;
+			SceneOptions.bClassifiedMaterial = true;
+		}
 		// The aircraft flies toward -Y in the engine frame (measured off the
 		// first probe's landmark projections; heading north maps there through
 		// the plugin's yaw-90 convention). The ridge goes ahead of it, and the
@@ -263,6 +479,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		SceneOptions.SunRotation = bShadowShot
 			? FRotator(-40.0, -140.0, 0.0)
 			: FRotator(-12.0, 180.0, 0.0);   // low sun: long cast shadows
+		if (bSunOverride)
+		{
+			// Time of day as a parameter: pitch is -elevation, yaw is the
+			// direction the LIGHT TRAVELS (sun azimuth + 180), both recorded
+			// in the manifest as the approximation they are.
+			SceneOptions.SunRotation =
+				FRotator(-SunElevationDeg, SunAzimuthDeg + 180.0, 0.0);
+		}
 		if (!VisualScene.Build(World, SceneOptions, Error)) { return Fail(Error); }
 	}
 	else
@@ -277,16 +501,28 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Sky->GetLightComponent()->SetIntensity(1.1f);
 	}
 
-	const FPlaceholderAirframe Frame = BuildAirframe(Scenario.Aircraft, Cube);
-
 	UFlightSimSurfaceAnimator* Animator =
 		NewObject<UFlightSimSurfaceAnimator>(Scenario.Aircraft, TEXT("Surfaces"));
 	Animator->Movement = Scenario.Movement;
 	Animator->RegisterComponent();
-	Animator->BindSurfaceComponent(TEXT("elevator"), Frame.ElevatorHinge);
-	Animator->BindSurfaceComponent(TEXT("aileron_l"), Frame.LeftAileronHinge);
-	Animator->BindSurfaceComponent(TEXT("aileron_r"), Frame.RightAileronHinge);
-	Animator->BindSurfaceComponent(TEXT("rudder"), Frame.RudderHinge);
+
+	FMeshAirframe MeshAirframe;
+	if (!MeshManifestPath.IsEmpty())
+	{
+		if (!BuildMeshAirframe(Scenario.Aircraft, Animator, MeshManifestPath,
+		                       Card.Aircraft, MeshAirframe, Error))
+		{
+			return Fail(Error);
+		}
+	}
+	else
+	{
+		const FPlaceholderAirframe Frame = BuildAirframe(Scenario.Aircraft, Cube);
+		Animator->BindSurfaceComponent(TEXT("elevator"), Frame.ElevatorHinge);
+		Animator->BindSurfaceComponent(TEXT("aileron_l"), Frame.LeftAileronHinge);
+		Animator->BindSurfaceComponent(TEXT("aileron_r"), Frame.RightAileronHinge);
+		Animator->BindSurfaceComponent(TEXT("rudder"), Frame.RudderHinge);
+	}
 	if (Animator->GetBoundSurfaceCount() == 0)
 	{
 		return Fail(TEXT("no surface binding is attached to anything; the animator "
@@ -304,6 +540,24 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	Director->ChaseOffsetMetres = bShadowShot
 		? FVector(-400.0f, 0.0f, 200.0f)    // high, looking down at the ground
 		: FVector(-170.0f, 0.0f, 16.0f);    // level, terrain and sky in shot
+	if (!ChaseSpec.IsEmpty())
+	{
+		// Colon-separated because FParse::Value stops at a comma (measured:
+		// "-chase=-170,0,16" arrives here as "-170").
+		TArray<FString> Parts;
+		ChaseSpec.ParseIntoArray(Parts, TEXT(":"));
+		if (Parts.Num() == 3)
+		{
+			Director->ChaseOffsetMetres = FVector(
+				FCString::Atod(*Parts[0]), FCString::Atod(*Parts[1]),
+				FCString::Atod(*Parts[2]));
+		}
+		else
+		{
+			return Fail(FString::Printf(
+				TEXT("-chase expects x:y:z metres, got '%s'"), *ChaseSpec));
+		}
+	}
 	// Start it where it will settle. A spring-lagged camera that begins at the
 	// world origin -- three kilometres below the aircraft -- spends its first
 	// seconds catching up, and those frames are of empty sky. They would be
@@ -343,7 +597,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	Capture->FOVAngle = bVisual ? 55.0f : 24.0f;
 	if (bVisual && !bAutoExposure)
 	{
-		FFlightSimVisualScene::ApplyManualExposure(Capture);
+		FFlightSimVisualScene::ApplyManualExposure(Capture,
+			static_cast<float>(ExposureBias));
 	}
 	if (bNoShadows)
 	{
@@ -359,12 +614,51 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	if (!Scenario.TrimInWind(Card, Error)) { return Fail(Error); }
 	if (!Scenario.VerifyTrimmedCondition(Card, Error)) { return Fail(Error); }
 	Scenario.LatchTrimmedControls(Card.bMassHeld);
+	// After trim and latch, once, mirroring EnvironmentStack.configure. The
+	// render path accepts turbulence (the seed goes in the manifest); the
+	// PARITY path's policy lives in the telemetry commandlet and the harness.
+	Scenario.ConfigureTurbulence(Card);
+
+	// The orographic cross-implementation check: sample the C++ field at a
+	// fixed grid around the origin and write the values into the manifest.
+	// The Python harness recomputes the same points through the original
+	// provider over the same raster; a port that drifted fails there.
+	TArray<TSharedPtr<FJsonValue>> OrographicSelftest;
+	if (const FFlightSimOrographicWind* Orographic = Scenario.GetOrographic())
+	{
+		const double Offsets[] = {-6000.0, -3000.0, -900.0, 0.0, 900.0, 3000.0, 6000.0};
+		const double Agls[] = {120.0, 600.0, 1800.0};
+		int32 Index = 0;
+		for (double North : Offsets)
+		{
+			for (double East : Offsets)
+			{
+				const double Agl = Agls[Index++ % UE_ARRAY_COUNT(Agls)];
+				TSharedPtr<FJsonObject> Sample = MakeShared<FJsonObject>();
+				Sample->SetNumberField(TEXT("north_m"), North);
+				Sample->SetNumberField(TEXT("east_m"), East);
+				Sample->SetNumberField(TEXT("agl_m"), Agl);
+				Sample->SetNumberField(TEXT("elevation_m"),
+				                       Orographic->ElevationMetres(North, East));
+				Sample->SetNumberField(TEXT("wind_down_mps"),
+				                       Orographic->WindDownMps(North, East, Agl));
+				OrographicSelftest.Add(MakeShared<FJsonValueObject>(Sample));
+			}
+		}
+	}
 
 	if (GShaderCompilingManager != nullptr)
 	{
 		UE_LOG(LogFlightSimRender, Display, TEXT("waiting for shader compilation"));
 		GShaderCompilingManager->FinishAllCompilation();
 	}
+	// Static meshes above a size threshold build their render data
+	// asynchronously, and a commandlet never ticks the compiling manager --
+	// so a large imported mesh stays "compiling" forever and draws NOTHING
+	// while every capture reports success (measured: the 747 body was absent
+	// from every frame while its 26-triangle ailerons rendered fine). Finish
+	// the builds before the first capture, exactly as with shaders above.
+	FAssetCompilingManager::Get().FinishAllCompilation();
 
 	// Discarded warm-up captures. The first CaptureScene after the component is
 	// registered resolves nothing -- the scene proxies exist, but the capture's
@@ -456,6 +750,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Record->SetNumberField(TEXT("aileron_cmd"), Scenario.Movement->Commands.Aileron);
 		Record->SetNumberField(TEXT("camera_roll_deg"), Director->GetCameraRollDegrees());
 		Record->SetNumberField(TEXT("lit_pixels"), Lit);
+		// Load factor and the wind actually inside the FDM this frame -- the
+		// null tests (turbulence reached the FDM; the ridge's wind reached
+		// the FDM) read these, not the scene.
+		Record->SetNumberField(TEXT("n_z"),
+		                       Scenario.ReadProperty(TEXT("accelerations/Nz")));
+		Record->SetNumberField(TEXT("wind_down_fps"),
+		                       Scenario.ReadProperty(TEXT("atmosphere/wind-down-fps")));
 
 		// What the animator actually applied to geometry, read back off the
 		// bindings rather than recomputed -- so a binding that computed a
@@ -531,7 +832,25 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetStringField(TEXT("host"), TEXT("unreal"));
 	Root->SetStringField(TEXT("spec_digest"), Card.SpecDigest);
-	Root->SetStringField(TEXT("airframe"), TEXT("placeholder boxes, not a visual asset"));
+	if (MeshAirframe.bLoaded)
+	{
+		Root->SetStringField(TEXT("airframe"),
+		                     FString::Printf(TEXT("%s (FDM %s)"),
+		                                     *MeshAirframe.MeshAirframe,
+		                                     *MeshAirframe.FdmName));
+		TSharedPtr<FJsonObject> Mesh = MakeShared<FJsonObject>();
+		Mesh->SetStringField(TEXT("name"), MeshAirframe.Name);
+		Mesh->SetStringField(TEXT("mesh_airframe"), MeshAirframe.MeshAirframe);
+		Mesh->SetStringField(TEXT("fdm"), MeshAirframe.FdmName);
+		Mesh->SetStringField(TEXT("license"), MeshAirframe.License);
+		Mesh->SetStringField(TEXT("repo"), MeshAirframe.Repo);
+		Mesh->SetStringField(TEXT("commit"), MeshAirframe.Commit);
+		Root->SetObjectField(TEXT("mesh"), Mesh);
+	}
+	else
+	{
+		Root->SetStringField(TEXT("airframe"), TEXT("placeholder boxes, not a visual asset"));
+	}
 	Root->SetNumberField(TEXT("width"), Width);
 	Root->SetNumberField(TEXT("height"), Height);
 	Root->SetNumberField(TEXT("frames"), Captured);
@@ -557,14 +876,65 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	Scene->SetBoolField(TEXT("dynamic_shadows"), !bNoShadows);
 	Scene->SetBoolField(TEXT("aircraft_hidden"), bHideAircraft);
 	Scene->SetStringField(TEXT("exposure"), (bVisual && !bAutoExposure)
-		? TEXT("manual, AutoExposureBias 11.0")
+		? *FString::Printf(TEXT("manual, AutoExposureBias %.1f"), ExposureBias)
 		: TEXT("auto (default metering)"));
 	if (bVisual && !TerrainPath.IsEmpty())
 	{
 		Scene->SetStringField(TEXT("terrain_sha256"), VisualScene.TerrainSha256);
 		Scene->SetNumberField(TEXT("terrain_peak_m"), VisualScene.TerrainPeakMetres);
+		Scene->SetBoolField(TEXT("terrain_georeferenced"), bGeorefTerrain);
+		if (bGeorefTerrain)
+		{
+			Scene->SetStringField(TEXT("terrain_crs"), VisualScene.TerrainCrs);
+			Scene->SetStringField(TEXT("terrain_name"), VisualScene.TerrainName);
+			Scene->SetStringField(TEXT("terrain_material"),
+				TEXT("slope/altitude classified vertex colours (approximated)"));
+			// Honesty label carried per clip: the mountains on screen are the
+			// real raster, the ground the GEAR model feels is still the
+			// spec's flat slab. Wind coupling is separate and stated below.
+			Scene->SetStringField(TEXT("physics_ground"),
+				TEXT("flat slab at spec terrain_elevation; visual terrain "
+				     "carries no collision"));
+		}
+	}
+	if (bVisual)
+	{
+		Scene->SetNumberField(TEXT("fog_density"), FogDensity);
+		if (bSunOverride)
+		{
+			Scene->SetNumberField(TEXT("sun_elevation_deg"), SunElevationDeg);
+			Scene->SetNumberField(TEXT("sun_azimuth_deg"), SunAzimuthDeg);
+		}
 	}
 	Root->SetObjectField(TEXT("scene"), Scene);
+
+	// Environmental couplings, stated per run rather than assumed.
+	TSharedPtr<FJsonObject> Environment = MakeShared<FJsonObject>();
+	Environment->SetStringField(TEXT("turbulence"), Card.Turbulence);
+	if (Card.Turbulence != TEXT("none"))
+	{
+		Environment->SetNumberField(TEXT("turbulence_seed"),
+		                            static_cast<double>(Card.TurbulenceSeed));
+		Environment->SetStringField(TEXT("turbulence_parity"),
+			TEXT("visual/telemetry run; host parity for turbulence is decided "
+			     "by the harness, not assumed here"));
+	}
+	Environment->SetNumberField(TEXT("wind_speed_kt"), Card.WindSpeedKnots);
+	Environment->SetNumberField(TEXT("wind_from_deg"), Card.WindFromDegrees);
+	Environment->SetBoolField(TEXT("wind_schedule"),
+	                          Card.WindScheduleTimes.Num() > 0);
+	Environment->SetBoolField(TEXT("orographic"), Card.bOrographic);
+	if (bNoOrographic)
+	{
+		Environment->SetStringField(TEXT("orographic_note"),
+			TEXT("null-test control: card's orographic coupling severed by "
+			     "-NoOrographic"));
+	}
+	if (OrographicSelftest.Num() > 0)
+	{
+		Environment->SetArrayField(TEXT("orographic_selftest"), OrographicSelftest);
+	}
+	Root->SetObjectField(TEXT("environment"), Environment);
 	Root->SetArrayField(TEXT("frame_records"), FrameRecords);
 
 	FString Output;

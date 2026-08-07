@@ -13,6 +13,7 @@
 	"Plugins": [
 		{ "Name": "JSBSimFlightDynamicsModel", "Enabled": true },
 		{ "Name": "FlightSimBridge", "Enabled": true },
-		{ "Name": "GeoReferencing", "Enabled": true }
+		{ "Name": "GeoReferencing", "Enabled": true },
+		{ "Name": "PythonScriptPlugin", "Enabled": true }
 	]
 }

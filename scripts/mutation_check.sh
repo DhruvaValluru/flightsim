@@ -331,6 +331,53 @@ mutate experiments/gate6_visual.py \
     "exposure control must trip the metric" tests/test_gate6_visual.py \
     || failures=$((failures+1))
 
+# -- Phase 6B guards ------------------------------------------------------
+
+mutate assets_pipeline/convert.py \
+    '    if fdm_name not in config["fdm_match"]:' \
+    '    if False:  # MUTATED: any mesh may fly any FDM' \
+    "a mesh must match the FDM it flies (1.4)" tests/test_phase6b.py \
+    || failures=$((failures+1))
+
+mutate assets_pipeline/convert.py \
+    '                    if uv_area < 1e-9:' \
+    '                    if False:  # MUTATED: degenerate UVs pass through' \
+    "degenerate UVs corrupt the mesh build" tests/test_phase6b.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/glo30.py \
+    '    report["ok"] = bool(report["samples"] >= samples * 0.9
+                        and abs(report["mean_m"]) < 5.0
+                        and report["p95_abs_m"] < 30.0)' \
+    '    report["ok"] = True  # MUTATED: every bake verifies' \
+    "a bake must match its source DEM" tests/test_phase6b.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/glo30.py \
+    '            "ok": bool(abs(best - surveyed) < 250.0),' \
+    '            "ok": True,  # MUTATED: any raster is the named mountain' \
+    "a named summit must be where the raster says" tests/test_phase6b.py \
+    || failures=$((failures+1))
+
+mutate experiments/turbulence_ue.py \
+    '        "ok": bool(turbulent_rms >= NULL_TEST["min_turbulent_rms"]
+                   and ratio >= NULL_TEST["min_rms_ratio"]),' \
+    '        "ok": True,  # MUTATED: still air counts as turbulence' \
+    "UE turbulence must reach the FDM" tests/test_phase6b.py \
+    || failures=$((failures+1))
+
+mutate experiments/orographic_ue.py \
+    '        "ok": bool(worst <= THRESHOLDS["max_port_difference_mps"]),' \
+    '        "ok": True,  # MUTATED: a drifted port still verifies' \
+    "the orographic port must match the original" tests/test_phase6b.py \
+    || failures=$((failures+1))
+
+mutate experiments/gate5_ue_parity.py \
+    '    if str(spec.turbulence.value) != "none":' \
+    '    if False:  # MUTATED: turbulent cards carry no provider writes' \
+    "turbulent cards carry the provider's exact writes" tests/test_phase6b.py \
+    || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

@@ -1,0 +1,157 @@
+{
+  "name": "c172p",
+  "fdm": "c172p",
+  "fdm_match": [
+    "c172",
+    "Cessna C-172 Skyhawk II"
+  ],
+  "mesh_airframe": "Cessna 172P Skyhawk (FlightGear c172p-team model)",
+  "source_dir": "../aircraft_src/c172p",
+  "license": {
+    "license_name": "GPL-2.0",
+    "file": "LICENSE",
+    "repo": "https://github.com/c172p-team/c172p",
+    "commit": "a15d83d1d56b5ecd9117ce83f5808c5a095f56c1",
+    "authors_file": "README.md"
+  },
+  "parts": [
+    {
+      "file": "Models/c172-common.ac"
+    }
+  ],
+  "exclude": [
+    ".*HotSpot.*",
+    "TieDown.*",
+    "Tiedown.*",
+    "Propeller\\.Fast",
+    "panel_blocker",
+    ".*hotspot.*",
+    "Beacon.*",
+    "RearNavLight",
+    "nav-light.*"
+  ],
+  "surfaces": {
+    "aileron_l": {
+      "bone": "aileron_l",
+      "objects": [
+        "leftaileron"
+      ],
+      "property": "fcs/left-aileron-pos-rad",
+      "scale_deg_per_unit": 57.29578,
+      "hinge_m": [
+        [
+          0.862,
+          -5.464,
+          0.459
+        ],
+        [
+          1.158,
+          -2.616,
+          0.337
+        ]
+      ]
+    },
+    "aileron_r": {
+      "bone": "aileron_r",
+      "objects": [
+        "rightaileron"
+      ],
+      "property": "fcs/right-aileron-pos-rad",
+      "scale_deg_per_unit": -57.29578,
+      "hinge_m": [
+        [
+          1.158,
+          2.616,
+          0.337
+        ],
+        [
+          0.862,
+          5.464,
+          0.459
+        ]
+      ]
+    },
+    "elevator_l": {
+      "bone": "elevator_l",
+      "objects": [
+        "elevatorleft"
+      ],
+      "property": "fcs/elevator-pos-rad",
+      "scale_deg_per_unit": 57.29578,
+      "hinge_m": [
+        [
+          4.87869,
+          -0.135,
+          -0.42222
+        ],
+        [
+          4.7439,
+          -1.7279,
+          -0.4222
+        ]
+      ]
+    },
+    "elevator_r": {
+      "bone": "elevator_r",
+      "objects": [
+        "elevatorright",
+        "elevatortrim"
+      ],
+      "property": "fcs/elevator-pos-rad",
+      "scale_deg_per_unit": -57.29578,
+      "hinge_m": [
+        [
+          4.7439,
+          1.7279,
+          -0.4222
+        ],
+        [
+          4.87869,
+          0.135,
+          -0.42222
+        ]
+      ]
+    },
+    "rudder": {
+      "bone": "rudder",
+      "objects": [
+        "rudder",
+        "rudder_1"
+      ],
+      "property": "fcs/rudder-pos-rad",
+      "scale_deg_per_unit": 57.29578,
+      "hinge_m": [
+        [
+          4.918,
+          0.0,
+          -0.31
+        ],
+        [
+          5.805,
+          -0.013,
+          1.007
+        ]
+      ]
+    },
+    "flaps_l": {
+      "bone": "flaps_l",
+      "objects": [
+        "flaps"
+      ],
+      "property": "fcs/flap-pos-deg",
+      "scale_deg_per_unit": 1.0,
+      "hinge_m": [
+        [
+          1.152,
+          -0.53,
+          0.32
+        ],
+        [
+          1.152,
+          0.47,
+          0.32
+        ]
+      ]
+    }
+  }
+}

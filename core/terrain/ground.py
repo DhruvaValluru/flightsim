@@ -101,6 +101,30 @@ class TerrainGround:
         }
 
 
+def terrain_field_at(heightfield: Heightfield, origin_x_m: float,
+                     origin_y_m: float, wavelength_m: Optional[float] = None):
+    """A :class:`TerrainField` in local metres about a stated projected origin.
+
+    Same adapter as :func:`terrain_field_from`, but the origin is the caller's
+    -- the scenario's own origin -- rather than the raster centre. The UE
+    host's orographic port works in exactly this frame (card carries the same
+    origin), so the cross-implementation check compares the same function of
+    the same data at the same points.
+    """
+    from ..environment.terrain_field import TerrainField
+
+    def elevation(north_m: float, east_m: float) -> float:
+        return heightfield.elevation_at(origin_x_m + east_m,
+                                        origin_y_m + north_m)
+
+    if wavelength_m is None:
+        width_m, _ = heightfield.extent_m
+        wavelength_m = max(width_m / 8.0, 200.0)
+
+    return TerrainField(elevation, wavelength_m=wavelength_m,
+                        name=f"{heightfield.name} (baked raster)")
+
+
 def terrain_field_from(heightfield: Heightfield,
                        wavelength_m: Optional[float] = None):
     """Adapt a baked raster to the interface the orographic provider expects.

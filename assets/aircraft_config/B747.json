@@ -1,0 +1,210 @@
+{
+  "name": "B747",
+  "fdm": "B747",
+  "fdm_match": [
+    "B747-400"
+  ],
+  "mesh_airframe": "Boeing 747-400 (FlightGear model by Gijs de Rooy et al.)",
+  "source_dir": "../aircraft_src/747-400",
+  "license": {
+    "license_name": "GPL-2.0",
+    "file": "COPYING",
+    "repo": "https://github.com/FGMEMBERS/747-400",
+    "commit": "887ff4746c373e7167e664457200165fb6dfaa22",
+    "authors_file": "AUTHORS"
+  },
+  "parts": [
+    {
+      "file": "Models/747-400_fuselage.ac"
+    },
+    {
+      "file": "Models/747-400_wings.ac"
+    },
+    {
+      "file": "Models/747-400_gear.ac"
+    },
+    {
+      "file": "Models/GE_CF6-80C2B1F.ac",
+      "offset_m": [
+        4.83,
+        -21.23,
+        -1.99
+      ]
+    },
+    {
+      "file": "Models/GE_CF6-80C2B1F.ac",
+      "offset_m": [
+        -2.67,
+        -13.46,
+        -2.6
+      ]
+    },
+    {
+      "file": "Models/GE_CF6-80C2B1F.ac",
+      "offset_m": [
+        -2.67,
+        13.46,
+        -2.6
+      ]
+    },
+    {
+      "file": "Models/GE_CF6-80C2B1F.ac",
+      "offset_m": [
+        4.83,
+        21.23,
+        -1.99
+      ]
+    }
+  ],
+  "exclude": [
+    "LHwiper.*",
+    "RHwiper.*",
+    "Plane",
+    "GreenLight",
+    "RedLight",
+    "StrobeLight.*",
+    "Beacon.*"
+  ],
+  "surfaces": {
+    "aileron_l_outer": {
+      "bone": "aileron_l_outer",
+      "objects": [
+        "aileron_left_outer(_\\d+)?"
+      ],
+      "property": "fcs/left-aileron-pos-rad",
+      "scale_deg_per_unit": 57.29578,
+      "hinge_m": [
+        [
+          12.88,
+          -21.6,
+          0.2
+        ],
+        [
+          17.11,
+          -28.4,
+          0.74
+        ]
+      ]
+    },
+    "aileron_l_inner": {
+      "bone": "aileron_l_inner",
+      "objects": [
+        "aileron_left_inner(_\\d+)?"
+      ],
+      "property": "fcs/left-aileron-pos-rad",
+      "scale_deg_per_unit": 57.29578,
+      "hinge_m": [
+        [
+          7.23,
+          -11.25,
+          -1.14
+        ],
+        [
+          7.23,
+          -13.02,
+          -0.99
+        ]
+      ]
+    },
+    "aileron_r_inner": {
+      "bone": "aileron_r_inner",
+      "objects": [
+        "aileron_right_inner(_\\d+)?"
+      ],
+      "property": "fcs/right-aileron-pos-rad",
+      "scale_deg_per_unit": -57.29578,
+      "hinge_m": [
+        [
+          7.23,
+          11.25,
+          -1.14
+        ],
+        [
+          7.23,
+          13.02,
+          -0.99
+        ]
+      ]
+    },
+    "aileron_r_outer": {
+      "bone": "aileron_r_outer",
+      "objects": [
+        "aileron_right_outer(_\\d+)?"
+      ],
+      "property": "fcs/right-aileron-pos-rad",
+      "scale_deg_per_unit": -57.29578,
+      "hinge_m": [
+        [
+          12.88,
+          21.6,
+          0.2
+        ],
+        [
+          17.11,
+          28.4,
+          0.74
+        ]
+      ]
+    },
+    "elevator_l": {
+      "bone": "elevator_l",
+      "objects": [
+        "elevator_left"
+      ],
+      "property": "fcs/elevator-pos-rad",
+      "scale_deg_per_unit": -57.29578,
+      "hinge_m": [
+        [
+          34.9,
+          -0.95,
+          2.35
+        ],
+        [
+          38.95,
+          -9.3,
+          3.5
+        ]
+      ]
+    },
+    "elevator_r": {
+      "bone": "elevator_r",
+      "objects": [
+        "elevator_right"
+      ],
+      "property": "fcs/elevator-pos-rad",
+      "scale_deg_per_unit": 57.29578,
+      "hinge_m": [
+        [
+          34.9,
+          0.95,
+          2.35
+        ],
+        [
+          38.95,
+          9.3,
+          3.5
+        ]
+      ]
+    },
+    "rudder": {
+      "bone": "rudder",
+      "objects": [
+        "rudder(\\.\\d+)?"
+      ],
+      "property": "fcs/rudder-pos-rad",
+      "scale_deg_per_unit": -57.29578,
+      "hinge_m": [
+        [
+          33.0,
+          0.0,
+          3.86
+        ],
+        [
+          39.5,
+          0.0,
+          13.24
+        ]
+      ]
+    }
+  }
+}

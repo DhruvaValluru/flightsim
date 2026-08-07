@@ -7,22 +7,30 @@
 // no MRQ) are recorded in docs/VALIDITY.md, not silently absorbed.
 //
 // The terrain is NOT modelled here. It is read from the same baked .r16 + JSON
-// heightfield the physics pipeline produces (§3.2): the harness synthesises a
-// ridge through core/terrain/synthesis.py and this class only turns that
-// raster into triangles. Rendering a terrain the physics pipeline never saw
-// would reintroduce the two-lookup failure §1.4 is about, one tier up.
+// heightfield the physics pipeline produces (§3.2) and only turned into
+// triangles. Two placements exist:
 //
-// The visual terrain carries NO collision. The flown scenario is the spec's --
-// flat terrain at the spec's elevation, answered by the invisible query slab --
-// and the ridge is scenery placed away from the flight path. A colliding
-// visual ridge would silently change the ground the FDM feels mid-run.
+// * Gate 6's: the raster twice, at stated offsets, for the extinction
+//   measurement. Byte-for-byte the geometry Gate 6 passed on.
+// * Georeferenced (Phase 6B.2): the raster once, at its TRUE position --
+//   every vertex through the GeoReferencingSystem's projected-CRS transform,
+//   so the ridgelines in frame are the real mountain's ridgelines at the real
+//   mountain's heights relative to the flight, not scenery dropped nearby.
+//
+// The visual terrain carries NO collision in either mode. The flown scenario
+// is the spec's -- flat terrain at the spec's elevation, answered by the
+// invisible query slab. What IS coupled to the real raster in windy scenarios
+// is the wind field (FlightSimOrographic); docs/VALIDITY.md states exactly
+// which coupling exists and which does not.
 
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FlightSimHeightfield.h"
 
 class AActor;
 class ADirectionalLight;
+class AGeoReferencingSystem;
 class UProceduralMeshComponent;
 class USceneCaptureComponent2D;
 class UWorld;
@@ -43,6 +51,19 @@ struct FFlightSimVisualSceneOptions
 	// ahead-right of it, inside the chase framing.
 	FRotator SunRotation = FRotator(-20.0, -45.0, 0.0);
 	bool bDynamicShadows = true;
+
+	// -- Phase 6B ---------------------------------------------------------
+	// Georeferenced single-instance placement at the raster's true position.
+	bool bGeoreferenced = false;
+	AGeoReferencingSystem* GeoReferencing = nullptr;
+	// Slope/altitude-driven vertex colours (rock / scrub / valley floor /
+	// snow above the sidecar's recorded snowline). An approximation and
+	// recorded as one in the manifest; requires the M_VertexColor asset that
+	// scripts/ue_create_materials.py builds.
+	bool bClassifiedMaterial = false;
+	// Exponential height fog density: 0.0025 is Gate 6's clear day; the
+	// showcase's "hazy" raises it. Recorded in the manifest.
+	float FogDensity = 0.0025f;
 };
 
 class FLIGHTSIMBRIDGE_API FFlightSimVisualScene
@@ -55,26 +76,29 @@ public:
 	           FString& Error);
 
 	// §6.6: manual exposure. Applied to the capture, because the capture is
-	// the camera of record in this pipeline.
-	static void ApplyManualExposure(USceneCaptureComponent2D* Capture);
+	// the camera of record in this pipeline. Bias is per-scene (Gate 6's
+	// low-sun value is the default) and constant over any one clip.
+	static void ApplyManualExposure(USceneCaptureComponent2D* Capture,
+	                                float Bias = 11.0f);
 
 	ADirectionalLight* Sun = nullptr;
 	double TerrainPeakMetres = 0.0;   // highest elevation of the placed raster
 	FString TerrainSha256;            // from the sidecar, for the manifest
+	FString TerrainCrs;
+	FString TerrainName;
 	// World positions (cm) of the raster's peak sample in each instance --
-	// the landmarks the harness samples for the extinction measurement.
+	// the landmarks the harness samples for the extinction measurement. In
+	// georeferenced mode only the near (single) instance exists.
 	FVector NearPeakWorldCm = FVector::ZeroVector;
 	FVector FarPeakWorldCm = FVector::ZeroVector;
 
 private:
 	bool BuildTerrainInstance(UWorld* World, const FString& Name,
 	                          const FVector2D& OriginMetres, FString& Error);
+	bool BuildGeoreferencedTerrain(UWorld* World,
+	                               const FFlightSimVisualSceneOptions& Options,
+	                               FString& Error);
 
-	// Parsed once, shared by both instances.
-	TArray<uint16> Samples;
-	int32 RasterWidth = 0;
-	int32 RasterHeight = 0;
-	double PixelSizeMetres = 0.0;
-	double ScaleMetres = 0.0;
-	double OffsetMetres = 0.0;
+	// Parsed once, shared by both placements.
+	FFlightSimHeightfield Terrain;
 };

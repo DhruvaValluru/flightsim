@@ -16,14 +16,16 @@ cd "$(dirname "$0")/.."
 UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.5}"
 EDITOR="$UE_ROOT/Engine/Binaries/Mac/UnrealEditor-Cmd"
 
-if [ "$#" -ne 2 ]; then
-    echo "usage: $0 <run-card.json> <telemetry-out.json>" >&2
+if [ "$#" -lt 2 ]; then
+    echo "usage: $0 <run-card.json> <telemetry-out.json> [extra commandlet flags]" >&2
+    echo "e.g. -AllowNonParityEnvironment for a turbulence measurement run" >&2
     exit 2
 fi
 
 CARD="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 OUT_DIR="$(cd "$(dirname "$2")" && pwd)"
 OUT="$OUT_DIR/$(basename "$2")"
+shift 2
 
 [ -x "$EDITOR" ] || { echo "no editor at $EDITOR (set UE_ROOT)" >&2; exit 1; }
 [ -f "$CARD" ] || { echo "no run card at $CARD" >&2; exit 1; }
@@ -39,7 +41,8 @@ STATUS=0
     -run=FlightSimBridge.FlightSimScenario \
     -scenario="$CARD" \
     -telemetry="$OUT" \
-    -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput || STATUS=$?
+    -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput \
+    "$@" || STATUS=$?
 
 if [ "$STATUS" -ne 0 ]; then
     echo "commandlet exited $STATUS -- no telemetry" >&2

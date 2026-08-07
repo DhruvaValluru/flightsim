@@ -244,7 +244,9 @@ RENDER_DURATION_S = 22.0
 
 def write_run_card(spec: ScenarioSpec, path: Path,
                    control_inputs: Sequence[Dict[str, float]] = (),
-                   duration_s: Optional[float] = None) -> Path:
+                   duration_s: Optional[float] = None,
+                   wind_schedule: Optional[Sequence[Dict[str, float]]] = None,
+                   orographic: Optional[Dict[str, object]] = None) -> Path:
     """Write the spec in the form the UE commandlet reads.
 
     A projection of the spec, not a second copy of it. Every field is taken
@@ -253,6 +255,19 @@ def write_run_card(spec: ScenarioSpec, path: Path,
     headless one. The commandlet refuses -- loudly, with the reason -- any field
     it cannot honour exactly, which is why this can be a flat projection rather
     than a translation layer that decides what to drop.
+
+    Phase 6B additions follow the same rule -- computed once here, applied
+    verbatim there:
+
+    * a spec with turbulence gets the EXACT property writes the headless
+      Dryden provider produces (``turbulence_properties``), so the UE host
+      never derives Dryden parameters from a word;
+    * ``wind_schedule`` carries per-step NED wind in fps, precomputed from
+      the headless providers (steady + 1-cosine gusts are pure functions of
+      time), so the gust model exists exactly once;
+    * ``orographic`` carries the terrain path plus every modelling parameter
+      (decay height, wavelength, projected origin) so the C++ port derives
+      nothing.
     """
     card = {
         "spec_digest": spec.digest(),
@@ -274,6 +289,16 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         "hold_state": bool(spec.hold_state.value),
         "control_inputs": [dict(entry) for entry in control_inputs],
     }
+    if str(spec.turbulence.value) != "none":
+        from core.environment.turbulence import DrydenTurbulence
+
+        provider = DrydenTurbulence(str(spec.turbulence.value),
+                                    seed=int(spec.seed.value))
+        card["turbulence_properties"] = provider.configure()
+    if wind_schedule:
+        card["wind_schedule"] = [dict(entry) for entry in wind_schedule]
+    if orographic:
+        card["orographic"] = dict(orographic)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(card, indent=1))
     return path

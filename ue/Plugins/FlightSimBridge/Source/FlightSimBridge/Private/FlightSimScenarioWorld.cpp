@@ -131,17 +131,72 @@ bool FFlightSimScenarioWorld::ReadCard(const FString& Path,
 		return false;
 	}
 
-	FString Turbulence;
-	if (!ReadString(Root, TEXT("turbulence"), Turbulence, Error)) { return false; }
-	if (Turbulence != TEXT("none"))
+	// Turbulence (Phase 6B.3). A card asking for it must carry the exact
+	// property writes the headless provider produced -- this host applies the
+	// same floats rather than re-deriving them from the intensity word.
+	// Whether a given commandlet ACCEPTS a turbulent card is that
+	// commandlet's policy (the parity path refuses what parity has not been
+	// established for); the card format itself is shared.
+	if (!ReadString(Root, TEXT("turbulence"), Out.Turbulence, Error)) { return false; }
+	if (Out.Turbulence != TEXT("none"))
 	{
-		Error = FString::Printf(
-			TEXT("spec requests %s turbulence. The headless host runs its own ")
-			TEXT("Dryden provider (core/environment/turbulence.py); this host has ")
-			TEXT("no equivalent, and the plugin's built-in turbulence is a ")
-			TEXT("different stochastic process. Comparing them would compare two ")
-			TEXT("noise realisations."), *Turbulence);
-		return false;
+		const TSharedPtr<FJsonObject>* TurbulenceWrites = nullptr;
+		if (!Root->TryGetObjectField(TEXT("turbulence_properties"), TurbulenceWrites)
+		    || TurbulenceWrites == nullptr)
+		{
+			Error = FString::Printf(
+				TEXT("spec requests %s turbulence but the card carries no ")
+				TEXT("turbulence_properties block. This host refuses to derive ")
+				TEXT("Dryden parameters from a word: the headless provider is the ")
+				TEXT("single source of those numbers."), *Out.Turbulence);
+			return false;
+		}
+		// Fixed write order, matching DrydenTurbulence.configure()'s dict
+		// exactly. Iterating the JSON map would make the order an accident of
+		// container internals, and property write order against a stateful
+		// model is not something to leave to accident.
+		const TCHAR* OrderedKeys[] = {
+			TEXT("atmosphere/turb-type"),
+			TEXT("atmosphere/randomseed"),
+			TEXT("atmosphere/turbulence/milspec/severity"),
+			TEXT("atmosphere/turbulence/milspec/windspeed_at_20ft_AGL-fps"),
+		};
+		if ((*TurbulenceWrites)->Values.Num() != UE_ARRAY_COUNT(OrderedKeys))
+		{
+			Error = FString::Printf(
+				TEXT("turbulence_properties carries %d entries; this host knows ")
+				TEXT("exactly the 4 the Dryden provider writes. An extra or ")
+				TEXT("missing property would be silently un-applied."),
+				(*TurbulenceWrites)->Values.Num());
+			return false;
+		}
+		for (const TCHAR* Key : OrderedKeys)
+		{
+			double Value = 0.0;
+			if (!(*TurbulenceWrites)->TryGetNumberField(Key, Value))
+			{
+				Error = FString::Printf(
+					TEXT("turbulence_properties is missing '%s'"), Key);
+				return false;
+			}
+			Out.TurbulenceProperties.Add(Key);
+			Out.TurbulenceValues.Add(FString::Printf(TEXT("%.17g"), Value));
+			if (FCString::Strcmp(Key, TEXT("atmosphere/randomseed")) == 0)
+			{
+				Out.TurbulenceSeed = static_cast<int64>(Value);
+			}
+		}
+		// The seed-saturation guard, re-checked at the door: JSBSim stores the
+		// seed as a double and casts to int, so anything at or above INT_MAX
+		// saturates and different seeds silently produce identical noise.
+		if (Out.TurbulenceSeed < 0 || Out.TurbulenceSeed >= 2147483647LL)
+		{
+			Error = FString::Printf(
+				TEXT("turbulence seed %lld is outside what JSBSim can represent ")
+				TEXT("(0 to INT_MAX-1); values at the cap saturate and alias."),
+				Out.TurbulenceSeed);
+			return false;
+		}
 	}
 
 	// Steady wind is implemented, not refused. The refusal this replaced said
@@ -169,6 +224,63 @@ bool FFlightSimScenarioWorld::ReadCard(const FString& Path,
 			TEXT("wind initial condition is integral, so the trim would quietly ")
 			TEXT("use a different direction than the run."), Out.WindFromDegrees);
 		return false;
+	}
+
+	// Optional per-step wind schedule (gusts). The values are the headless
+	// providers' own output -- steady wind plus 1-cosine gusts are pure
+	// functions of time, so precomputing them in Python and writing the same
+	// floats here means there is exactly one gust model, not two.
+	const TArray<TSharedPtr<FJsonValue>>* Schedule = nullptr;
+	if (Root->TryGetArrayField(TEXT("wind_schedule"), Schedule) && Schedule != nullptr)
+	{
+		double PreviousTime = -1.0;
+		for (const TSharedPtr<FJsonValue>& Value : *Schedule)
+		{
+			const TSharedPtr<FJsonObject>* Entry = nullptr;
+			if (!Value->TryGetObject(Entry) || Entry == nullptr)
+			{
+				Error = TEXT("wind_schedule must be a list of objects");
+				return false;
+			}
+			double T = 0.0, N = 0.0, E = 0.0, D = 0.0;
+			if (!ReadNumber(*Entry, TEXT("t_s"), T, Error) ||
+			    !ReadNumber(*Entry, TEXT("north_fps"), N, Error) ||
+			    !ReadNumber(*Entry, TEXT("east_fps"), E, Error) ||
+			    !ReadNumber(*Entry, TEXT("down_fps"), D, Error))
+			{
+				return false;
+			}
+			if (T <= PreviousTime)
+			{
+				Error = TEXT("wind_schedule times must be strictly increasing");
+				return false;
+			}
+			PreviousTime = T;
+			Out.WindScheduleTimes.Add(T);
+			Out.WindScheduleNorthFps.Add(N);
+			Out.WindScheduleEastFps.Add(E);
+			Out.WindScheduleDownFps.Add(D);
+		}
+	}
+
+	// Optional orographic block (Phase 6B.2): wind over a real baked ridge
+	// produces the updraughts and sink the headless physics models. All the
+	// modelling parameters arrive computed; this host derives none of them.
+	const TSharedPtr<FJsonObject>* Orographic = nullptr;
+	if (Root->TryGetObjectField(TEXT("orographic"), Orographic) && Orographic != nullptr)
+	{
+		Out.bOrographic = true;
+		if (!ReadString(*Orographic, TEXT("terrain"), Out.OrographicTerrainPath, Error) ||
+		    !ReadNumber(*Orographic, TEXT("wind_speed_mps"), Out.OrographicWindSpeedMps, Error) ||
+		    !ReadNumber(*Orographic, TEXT("wind_from_deg"), Out.OrographicWindFromDeg, Error) ||
+		    !ReadNumber(*Orographic, TEXT("decay_height_m"), Out.OrographicDecayHeightMetres, Error) ||
+		    !ReadNumber(*Orographic, TEXT("wavelength_m"), Out.OrographicWavelengthMetres, Error) ||
+		    !ReadNumber(*Orographic, TEXT("origin_x_m"), Out.OrographicOriginXMetres, Error) ||
+		    !ReadNumber(*Orographic, TEXT("origin_y_m"), Out.OrographicOriginYMetres, Error))
+		{
+			return false;
+		}
+		(*Orographic)->TryGetBoolField(TEXT("lee"), Out.bOrographicLee);
 	}
 
 	bool bHoldState = false;
@@ -266,7 +378,46 @@ bool FFlightSimScenarioWorld::Build(const FFlightSimScenarioCard& Card, FString&
 	GeoReferencing->OriginLatitude = Card.LatitudeDegrees;
 	GeoReferencing->OriginLongitude = Card.LongitudeDegrees;
 	GeoReferencing->OriginAltitude = Card.TerrainElevationMetres;
+
+	// Real-terrain cards work in the raster's own projected CRS: the
+	// orographic wind queries it per step and the visual pass places terrain
+	// through ProjectedToEngine. Both go through this one PROJ context, so
+	// the mountain the wind comes off and the mountain on screen cannot be
+	// two different projections of the data.
+	if (Card.bOrographic)
+	{
+		if (!OrographicTerrain.Load(Card.OrographicTerrainPath, Error))
+		{
+			return false;
+		}
+		if (OrographicTerrain.Crs.IsEmpty() || !OrographicTerrain.bProjected)
+		{
+			Error = FString::Printf(
+				TEXT("orographic terrain '%s' carries no projected CRS; the ")
+				TEXT("aircraft's position cannot be mapped onto it honestly."),
+				*Card.OrographicTerrainPath);
+			return false;
+		}
+		GeoReferencing->ProjectedCRS = OrographicTerrain.Crs;
+	}
 	GeoReferencing->ApplySettings();
+
+	if (Card.bOrographic)
+	{
+		Orographic.Init(&OrographicTerrain,
+		                Card.OrographicWindSpeedMps, Card.OrographicWindFromDeg,
+		                Card.OrographicDecayHeightMetres,
+		                Card.OrographicWavelengthMetres, Card.bOrographicLee,
+		                Card.OrographicOriginXMetres, Card.OrographicOriginYMetres);
+		bOrographicReady = true;
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("orographic wind over '%s' (%s): %.1f m/s from %.0f deg, ")
+		       TEXT("decay %.0f m, wavelength %.0f m, lee %s"),
+		       *OrographicTerrain.Name, *OrographicTerrain.Crs,
+		       Card.OrographicWindSpeedMps, Card.OrographicWindFromDeg,
+		       Card.OrographicDecayHeightMetres, Card.OrographicWavelengthMetres,
+		       Card.bOrographicLee ? TEXT("on") : TEXT("off"));
+	}
 
 	// -- ground ------------------------------------------------------------
 	// The plugin answers JSBSim's ground queries with a line trace against
@@ -365,6 +516,8 @@ bool FFlightSimScenarioWorld::Build(const FFlightSimScenarioCard& Card, FString&
 		const double Radians = FMath::DegreesToRadians(Card.WindFromDegrees);
 		const double NorthFps = (-SpeedMps * FMath::Cos(Radians)) / 0.3048;
 		const double EastFps = (-SpeedMps * FMath::Sin(Radians)) / 0.3048;
+		SteadyWindNorthFps = NorthFps;
+		SteadyWindEastFps = EastFps;
 		WindProperties = {TEXT("atmosphere/wind-north-fps"),
 		                  TEXT("atmosphere/wind-east-fps"),
 		                  TEXT("atmosphere/wind-down-fps")};
@@ -376,6 +529,24 @@ bool FFlightSimScenarioWorld::Build(const FFlightSimScenarioCard& Card, FString&
 		       Card.WindSpeedKnots, Card.WindFromDegrees, NorthFps, EastFps);
 	}
 	return true;
+}
+
+void FFlightSimScenarioWorld::ConfigureTurbulence(const FFlightSimScenarioCard& Card)
+{
+	if (Card.TurbulenceProperties.Num() == 0)
+	{
+		return;
+	}
+	// Once, after trim and latch, exactly as EnvironmentStack.configure does
+	// headless. The batch is the provider's own writes in the provider's own
+	// order; nothing here decides what turbulence means.
+	TArray<FString> Unused;
+	Movement->CommandConsoleBatch(Card.TurbulenceProperties,
+	                              Card.TurbulenceValues, Unused);
+	UE_LOG(LogFlightSimScenario, Display,
+	       TEXT("turbulence '%s' configured once after trim (seed %lld); the ")
+	       TEXT("seed is never re-written inside the step loop"),
+	       *Card.Turbulence, Card.TurbulenceSeed);
 }
 
 bool FFlightSimScenarioWorld::BeginPlay(FString& Error)
@@ -554,7 +725,57 @@ bool FFlightSimScenarioWorld::Step(const FFlightSimScenarioCard& Card,
 	// this looks redundant -- until something inside JSBSim (a future gust or
 	// turbulence hook, a re-trim) rewrites the wind state and one host keeps
 	// flying it while the other corrects it.
-	if (WindProperties.Num() > 0)
+	const bool bComposedWind =
+		Card.WindScheduleTimes.Num() > 0 || bOrographicReady;
+	if (bComposedWind)
+	{
+		// Base horizontal wind: the schedule entry current at this time
+		// (held until the next, like control inputs), or the steady wind.
+		double NorthFps = SteadyWindNorthFps;
+		double EastFps = SteadyWindEastFps;
+		double DownFps = 0.0;
+		if (Card.WindScheduleTimes.Num() > 0)
+		{
+			int32 Current = ScheduleIndex < 0 ? 0 : ScheduleIndex;
+			while (Current + 1 < Card.WindScheduleTimes.Num() &&
+			       Card.WindScheduleTimes[Current + 1] <= TimeSeconds)
+			{
+				++Current;
+			}
+			ScheduleIndex = Current;
+			NorthFps = Card.WindScheduleNorthFps[Current];
+			EastFps = Card.WindScheduleEastFps[Current];
+			DownFps = Card.WindScheduleDownFps[Current];
+		}
+
+		// Orographic contribution from the aircraft's ACTUAL position this
+		// step -- not a precomputed track, because the whole point is that
+		// the response is emergent. Position maps into the raster's CRS
+		// through the same PROJ context that placed the terrain.
+		if (bOrographicReady)
+		{
+			const double Latitude = ReadProperty(TEXT("position/lat-geod-deg"));
+			const double Longitude = ReadProperty(TEXT("position/long-gc-deg"));
+			const double AglMetres = ReadProperty(TEXT("position/h-agl-ft")) * FeetToMetres;
+			FVector Projected;
+			GeoReferencing->GeographicToProjected(
+				FGeographicCoordinates(Longitude, Latitude, 0.0), Projected);
+			const double East = Projected.X - Orographic.OriginXMetres;
+			const double North = Projected.Y - Orographic.OriginYMetres;
+			DownFps += Orographic.WindDownMps(North, East, AglMetres) / 0.3048;
+		}
+
+		const TArray<FString> Properties = {TEXT("atmosphere/wind-north-fps"),
+		                                    TEXT("atmosphere/wind-east-fps"),
+		                                    TEXT("atmosphere/wind-down-fps")};
+		const TArray<FString> Values = {
+			FString::Printf(TEXT("%.17g"), NorthFps),
+			FString::Printf(TEXT("%.17g"), EastFps),
+			FString::Printf(TEXT("%.17g"), DownFps)};
+		TArray<FString> Unused;
+		Movement->CommandConsoleBatch(Properties, Values, Unused);
+	}
+	else if (WindProperties.Num() > 0)
 	{
 		TArray<FString> Unused;
 		Movement->CommandConsoleBatch(WindProperties, WindValues, Unused);

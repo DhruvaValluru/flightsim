@@ -85,6 +85,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "FlightSim")
 	void ApplyDefaultBindings();
 
+	// Replace the stock set with an empty table. A real aircraft mesh brings
+	// its own binding table from its manifest (several surfaces can share one
+	// property -- both elevators, inner and outer ailerons); mixing that with
+	// the defaults would leave same-named bones ambiguous.
+	UFUNCTION(BlueprintCallable, Category = "FlightSim")
+	void ClearBindings() { Bindings.Empty(); }
+
+	// One binding from a mesh manifest: which property, which bone, how many
+	// degrees per unit (sign carries the FG model's hinge sense), about which
+	// axis. Axis is in the actor frame, as the manifest states it.
+	UFUNCTION(BlueprintCallable, Category = "FlightSim")
+	void AddBinding(const FString& Property, FName Bone, float DegreesPerUnit,
+	                const FVector& Axis);
+
 	// Largest absolute deflection across all surfaces this frame. The burn-in
 	// asserts this is non-zero over a run: a clip in which no surface ever
 	// moved is the §1.5 failure, and it is silent unless something looks.
