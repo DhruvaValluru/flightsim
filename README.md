@@ -4,8 +4,11 @@ A research-grade flight simulation system: defensible physics data and credible
 visual output, driven by natural language through a validated, reproducible
 scenario spec.
 
-**Status: Phases 0-1 complete. Gate 0 passed 9/9, Gate 1 passed 4/4.** See
-[docs/VALIDITY.md](docs/VALIDITY.md) for what that does and does not support.
+**Status: Phases 0-7 — every gate passes.** Gate 5 measured across both hosts
+(trajectory parity to 1e-4 of tolerance, on-screen clauses read back from the
+pixels), Gate 6 on its four measurable clauses with a placeholder airframe. See
+[docs/VALIDITY.md](docs/VALIDITY.md) for exactly what that does and does not
+support — the scope statements are the point of this project.
 
 ## Setup
 
@@ -41,10 +44,52 @@ python3 -m venv .venv && .venv/bin/pip install jsbsim==1.2.4 numpy pytest pyyaml
 .venv/bin/python experiments/gate7_sweep.py
 ```
 
-Gate 5 needs the Unreal host. Check whether this machine can build it:
+```bash
+.venv/bin/python experiments/gate6_visual.py
+```
+
+Gate 6 renders the §6.6 scene offscreen and measures its four clauses from the
+PNGs — extinction, valley shadows, the aircraft's ground shadow, and manual
+exposure (validated against an auto-exposure negative control every run). The
+criteria are quoted verbatim, with provenance, in `docs/BRIEF_PHASE6.md`.
+
+Gate 5 needs the Unreal host. Check whether this machine can build it, build it,
+then fly the same spec in both hosts and compare:
 
 ```bash
 ./scripts/ue_preflight.sh
+```
+
+```bash
+./scripts/build_ue.sh
+```
+
+```bash
+.venv/bin/python experiments/gate5_ue_parity.py
+```
+
+```bash
+./scripts/run_ue_scenario.sh runs/gate5/ue_scenario.json runs/gate5/unreal.json
+```
+
+```bash
+./scripts/render_ue_scenario.sh runs/gate5/ue_render_scenario.json runs/gate5/frames
+```
+
+```bash
+.venv/bin/python experiments/gate5_ue_parity.py --unreal-telemetry runs/gate5/unreal.json --unreal-render runs/gate5/frames/render.json
+```
+
+All three of its clauses pass, each measured — trajectory parity from the two
+telemetry files, and the two on-screen clauses by reading the rendered PNGs
+back. The rendered aircraft is a placeholder built from boxes; visual realism is
+Phase 6. See `docs/VALIDITY.md`.
+
+The same comparison across three airframes and four envelope points — not a
+gate, the breadth behind Gate 5's single case:
+
+```bash
+.venv/bin/python experiments/host_parity_matrix.py
 ```
 
 ## Run the tests

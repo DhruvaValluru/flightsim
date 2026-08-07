@@ -1,8 +1,10 @@
 # What this simulation can and cannot support
 
-Status: **Phases 0-4 and 7 complete. Phases 5-6 BLOCKED on the build toolchain.** This document grows with each phase. Everything
-below is scoped to what has actually been built and measured; nothing here is
-aspirational.
+Status: **Phases 0-7: every gate passes.** Phase 6's gate passes on its four
+measurable clauses with a placeholder airframe and a default terrain material —
+the section below is precise about what that does and does not establish. This
+document grows with each phase. Everything below is scoped to what has actually
+been built and measured; nothing here is aspirational.
 
 Read this before quoting any number this system produces.
 
@@ -102,13 +104,16 @@ Cesium is *not* queried for physics. Its height query is asynchronous and its
 answer depends on which LOD happens to be streamed in; a ground callback needs a
 deterministic answer every tick.
 
-**Phase 5 is blocked and Gate 5 has not run.** The Unreal host cannot be
-compiled on this machine: UnrealBuildTool refuses to register Mac as a buildable
-platform because the installed Xcode (26.6) is outside the range UE 5.5 accepts
-(15.2–16.9). This is a compiler-version check — not a macOS limitation, and not
-a plugin limitation.
+**Phase 5: the two hosts have now been compared, and they agree.** The build
+constraint that blocked this is a compiler-version check and nothing more —
+UE 5.5 accepts Xcode 15.2–16.9, macOS 26 ships Xcode 26, and a second Xcode
+installed alongside it and selected per process through `DEVELOPER_DIR` is
+enough. No `sudo`, no `xcode-select`, and the machine's default toolchain is
+untouched. macOS 26 also refuses to *launch* Xcode 16.4's GUI, which is
+irrelevant: UE invokes `clang` and `xcodebuild`, and those run.
 
-What *was* established, and is real:
+What was established before any of that, and is still what makes the comparison
+meaningful:
 
 * The official Epic JSBSim plugin **does support macOS**. Its own
   `JSBSim.Build.cs` lists `UnrealTargetPlatform.Mac` and routes it through
@@ -121,17 +126,193 @@ What *was* established, and is real:
   and `scripts/vendor_ue_plugin.sh` builds the Unix equivalent.
 * The plugin is vendored reproducibly with commit, version and library hash
   recorded in `VENDORED.json`.
+* The **aircraft and engine data are byte-identical** between the two hosts.
+  `B747.xml`, `GE-CF6-80C2-B1F.xml` and `direct.xml` hash the same in the
+  jsbsim wheel and in the plugin's staged `Resources/JSBSim`. Same engine, same
+  model, same numbers: a divergence could only be the integration path.
+
+`FlightSimScenarioCommandlet` drives a scenario through the Unreal host with no
+editor and no window — it builds a world, pins the georeferencing origin at the
+spec's ground point, spawns a query-only ground slab so JSBSim's ground callback
+has something to hit, places the aircraft by its centre of gravity at the spec's
+initial conditions, and steps at a fixed 1/120 s. Measured, Gate 5 (B747, 3000 m,
+250 kt CAS, 60 s, hands off from trim in both hosts, mass held):
+
+| channel | max difference | stated tolerance |
+|---|---|---|
+| altitude | 3.6 × 10⁻⁴ m | 5 m |
+| true airspeed | 4.2 × 10⁻⁵ kt | 2 kt |
+| roll | 2.1 × 10⁻⁸ ° | 1° |
+| pitch | 1.1 × 10⁻⁵ ° | 1° |
+| heading | 7.9 × 10⁻⁸ ° | 1° |
+| load factor | 2.2 × 10⁻⁷ | 0.05 |
+
+The two hosts also trim to the same solution independently: throttle 0.579150 in
+Unreal against 0.579149769 headless, pitch trim −0.276739 against −0.27673930.
+
+Three things about this result are worth stating plainly.
+
+* **The tolerances were not tight.** Agreement is four orders of magnitude
+  inside them. That is the expected outcome when both hosts step the same
+  library at the same rate from the same trim, and it means the tolerances would
+  not have caught a small integration error. What they would catch — a substep
+  accumulator dropping frames, an ECEF round trip losing precision — is absent
+  at the 10⁻⁴ level, which is a stronger statement than the tolerance asks for.
+* **The comparison is on the recorded clock, not the sample index.** The two
+  recorders have the same nominal 0.1 s period and do not sample at the same
+  times: the headless one comes out at ~0.1075 s and the Unreal one at 0.1 s
+  exactly, a 7% stretch that reaches four seconds of skew over a 60 s run.
+  Comparing by index would have compared 60 s of one host against 56 s of the
+  other. On this nearly flat cruise that would have cost tolerance rather than
+  failing outright; on a climbing scenario it would have failed a correct host.
+* **Both hosts fly open loop.** The headless host can hold a commanded state
+  with TECS; the Unreal host has no autopilot. The parity spec therefore sets
+  `hold_state` false, so the comparison is of two uncontrolled aircraft. That is
+  also the sharper test — there is no feedback loop pulling the hosts back
+  together.
+
+### The two on-screen clauses
+
+§5 Phase 5 has three clauses and the other two are about what a viewer sees:
+"control surfaces visibly articulate" and "commanded roll is visible on screen".
+No number in a telemetry file can answer either.
+
+`FlightSimRenderCommandlet` flies the same spec plus a scripted roll doublet
+with the renderer up — Metal, offscreen, no window — and writes PNG frames.
+`experiments/gate5_ue_parity.py --unreal-render` reads those PNGs back and
+measures them. It does not read what the engine said about them: a run that
+wrote the right numbers into its manifest and the wrong pixels into its frames
+has to fail, and only an independent read of the frames can make it.
+
+Measured over 110 frames at 5 Hz, 960×540:
+
+| clause | measurement |
+|---|---|
+| frames show the aircraft | aircraft covers 2.77–3.79% of every frame |
+| camera never inherits roll | max \|camera roll\| **0.000000°** |
+| control surfaces articulate | 4 bound to geometry, 4 moved: ailerons 10.03° of travel each, elevator 5.55°, rudder 1.07° |
+| commanded roll is visible | apparent bank **in the pixels** tracks FDM roll at **r = 0.99923**, over −1.9…+17.0° against the FDM's −2.2…+16.8° |
+
+That last row is the direct regression for §1.5, which is worth restating
+because of how quietly it passes every other kind of check: the previous build's
+chase camera was rigidly parented to the aircraft, so a real roll of +7° to −7°
+happened and was **invisible**. Every telemetry number in that clip was correct.
+The test therefore cannot be "the camera was configured with the right preset" —
+it has to be a measurement of the pixels, and it has to fail when the pixels do
+not move. `tests/test_on_screen.py` demonstrates it failing on a render where
+the FDM rolls and the image does not, and on one where the image rotates the
+opposite way.
+
+The surface deflections are read off the scene components' transforms — the
+poses the renderer drew — rather than recomputed from the JSBSim properties. The
+distinction is the whole point: `UFlightSimSurfaceAnimator` originally computed
+deflections and rotated nothing, which is §1.5's "no control surface moved
+anywhere in the clip" reproduced exactly, and a check that recomputed the
+property would have passed it.
 
 What is **not** established, and must not be claimed:
 
-* **None of the bridge C++ has ever been compiled.** The camera director,
-  surface animator and telemetry recorder are written against the plugin's API
-  as read from its headers, and are unverified. Treat them as a design, not as
-  working code.
-* No trajectory has been produced by the Unreal host, so nothing is known about
-  whether the two hosts agree. Gate 5 reports **BLOCKED** with its own exit
-  code, distinct from pass and fail, and refuses to report a pass on the
-  headless half alone.
+* **The rendered aircraft is a placeholder built from boxes.** It is not a
+  visual asset and nothing here is a claim about visual realism, which is
+  Phase 6. What the frames establish is that a JSBSim surface position moves
+  geometry a viewer would see, and that attitude is legible in frame. They
+  establish nothing about whether any of it looks like a 747.
+* The rendered scenario is **not** the parity scenario. It carries a scripted
+  aileron doublet, because this host has no autopilot and a commanded roll has
+  to be commanded by something. The telemetry commandlet refuses a card with
+  control inputs for that reason, so the two can never be confused.
+### Breadth: the same comparison across the envelope, and in wind
+
+Gate 5's verdict rests on one scenario. `experiments/host_parity_matrix.py` runs
+the same comparison over three airframes at four envelope points — Gate 0's
+three points plus one — and, for every airframe, two steady-wind cases: a 25 kt
+pure crosswind and a 15 kt quartering headwind. Every case is held to the
+tolerances Gate 5 declared, plus two channels added with the wind work: ground
+track (latitude and longitude, 1e-4 degrees ≈ 11 m). Position is what closes
+the loop on wind acting in *both* hosts — a uniform wind changes no air-relative
+quantity, so a host silently flying the wind case in still air matches every
+attitude channel and misses the other's ground track by hundreds of metres
+inside a minute. The matrix is **not** a gate and does not change Gate 5's
+verdict; it is the evidence that Gate 5's single-case result was not a
+single-case coincidence.
+
+| | |
+|---|---|
+| ran in both hosts | **16 of 18** |
+| agree within the Gate 5 tolerances | **16 of 16** |
+| worst channel anywhere | latitude, at **16%** of its tolerance — a constant 1.24 m north phase equal to exactly one 1/120 s step of position (the headless host integrates one extra step during engine start) |
+| still-air channels | 1e-8 – 1e-4 of tolerance, as before |
+| wind-case attitude channels | within 0.08° roll, 0.008 kt TAS, 0.03° heading |
+
+How wind is driven in the Unreal host, and two things learned doing it:
+
+* The plugin's own wind initial condition is **not used**: measured, its
+  `SetWindMagKtsIC` re-derives the velocity state and a commanded 250 kt CAS
+  comes out of RunIC at 206 kt — the same family of silent IC interaction the
+  headless host's `_IC_PRIORITY` ordering exists to defeat. Instead the
+  commandlet reproduces the headless sequence: calm RunIC, wind written
+  directly to the FGWinds properties, a full re-trim in the wind through
+  JSBSim's own `simulation/do_simple_trim`, then the same NED wind properties
+  re-written every step — the same floating-point values, from the same
+  conversion chain.
+* The comparison starts at each host's **second** sample. The first sample is
+  the trim snapshot, which the headless recorder takes before its environment
+  loop has applied wind — measured, 288 kt TAS against 301 kt one sample later
+  in a 13 kt headwind. Grading that instant grades the switch-on artifact
+  (§1.1's initialisation-transient mistake in miniature). Exactly one sample
+  is exempt per host, mutation-checked from both directions: a divergence
+  living only in samples 2–4 still fails, and a comparison that skipped five
+  samples fails the guard.
+* Heading is compared **on the circle**. A crosswind case's heading wanders
+  across north within seconds, and a number-line comparison of two identical
+  headings straddling 0/360 reports up to 360 degrees of divergence that never
+  happened. Both series are unwrapped before interpolation and differenced
+  with wrapping; the still-air scenarios never crossed the seam, which is the
+  only reason the original comparison got away without this.
+
+The two that never ran are `737` and `B747` at 10000 m / 240 kt, both refused by
+the spec validator's stall-margin constraint (the B747 by 34 kt). That refusal
+is correct — Gate 0 reaches those points by building an FDM directly and never
+sees the validator — and it is reported by name rather than dropped. The fourth
+point, 8000 m / 280 kt, exists because without it the top of the envelope would
+have been covered by one airframe out of three while the matrix still said "all
+conditions agree". Wind directions are whole degrees by construction: the
+commandlet refuses fractions because the plugin's wind IC field is an int32 and
+a fractional direction would trim one wind and fly another.
+
+### A third upstream plugin bug, found by the achieved-condition check
+
+`UJSBSimMovementComponent::GetAGLevel` builds the downward ray for JSBSim's
+ground query with its start point in **centimetres** and its end point in
+**metres**, three lines apart in the same function. The intended reach is the
+aircraft's altitude plus 5% of the ellipsoid radius — about 319 km — and what is
+actually cast is 319 km of *centimetres*, so the ray is **3.19 km** long.
+
+Above roughly 3.2 km AGL the trace therefore hits nothing, `GetAGLevel` returns
+its miss value of 0.0, and JSBSim is told the aircraft is exactly on the deck.
+Nothing reports an error. The gear and ground-reaction model simply run against
+a fiction, at cruise altitude — which is every altitude that matters.
+
+It was found because the commandlet checks the trimmed aircraft against the
+condition that was commanded, including its height above terrain, rather than
+assuming the placement worked: the 3000 m case answered correctly (the 3.19 km
+ray still reached) and the 6000 m case reported height above terrain 0.0 m. It
+is patched, recorded in `VENDORED.json` alongside the other two, re-applied by
+`scripts/vendor_ue_plugin.sh`, and asserted by `scripts/check_bridge_api.sh` so
+a re-vendor cannot silently drop it.
+
+What is **not** established, and must not be claimed:
+
+* Every case in the matrix is **flat terrain, 60 seconds, hands off from
+  trim**; wind cases are steady and uniform. It says nothing about agreement
+  under turbulence, wind shear, terrain, manoeuvring, or over longer runs. The
+  commandlets **refuse** turbulence and a held state rather than approximating
+  them, so those cases cannot be silently mistaken for tested. Steady wind is
+  the only environmental condition both hosts implement.
+* Agreement between the hosts is agreement about the **integration**, not about
+  reality. Both hosts run the same alpha-release B747 model, whose own header
+  says it "may not even properly load, and probably will not fly as expected."
+  Two hosts agreeing on an unvalidated model is exactly as unvalidated as one.
 
 Phase 7 adds the research machinery: resumable parameter sweeps, per-subsystem
 seed derivation, provenance manifests, variance attribution, a validation report
@@ -316,19 +497,55 @@ because no EO/IR modelling exists. That is the expected state and it is
 published rather than withheld — a scorecard exists to say where the model is
 weak.
 
-Rendering is absent from the scorecard entirely, because there is nothing to
-score.
+Rendering is scored at 0. Frames now exist -- Gate 5's on-screen clauses are
+measured on them -- but they show a placeholder box airframe, and a scorecard
+factor for visual fidelity would be scoring a stand-in.
 
 ### 2.13 Not yet built
 
-No verified Unreal integration (see above), no rendering
-(Phase 3) -- a spec requesting turbulence is refused rather than run in smooth
-air. No terrain model (Phase 4), no Unreal integration (Phase 5), no rendering
-(Phase 6), no validation against published reference data and no credibility
-scorecard (Phase 7).
+**Phase 6: Gate 6 passes, measured from the pixels.** The criteria were
+recovered verbatim from the originating brief and recorded with provenance in
+[BRIEF_PHASE6.md](BRIEF_PHASE6.md); the scene follows its §6.6 settings (real
+Earth atmosphere values, multiscattering, both documented SkyAtmosphere
+gotchas, height fog with max opacity below 1, manual exposure). Measured by
+`experiments/gate6_visual.py`, which reads the PNGs back rather than trusting
+the engine:
 
-Nothing in this repository currently supports a claim about aircraft response to
-environmental conditions.
+| clause | measurement |
+|---|---|
+| distant terrain shows range-based extinction | the **same raster** placed at ~10 km and ~30 km: sky-contrast 102.1 vs 27.8 (ratio 0.27, threshold 0.75) |
+| peaks shadow the valley | shadows-on/off null test: **18,699 px** of the terrain band darken (threshold 10,000) |
+| the aircraft has a ground shadow | aircraft-hidden null test, body pixels excluded: **1,181 px** of ground darken (threshold 300) |
+| exposure does not breathe | sky band moves **4.9/255** across a 17.3° roll sweep (threshold 8) |
+| — metric self-validation | the same flight rendered with auto-exposure pumps the sky **34.4/255**; every gate run must trip its own metric on this control or the pass is void |
+
+The side-by-side against the old footage is produced
+(`runs/gate6/side_by_side.png`) and the likeness judgment is explicitly the
+reader's. What the measurements establish is that the four properties the
+brief named as missing from the old footage are present.
+
+What Gate 6 does **not** establish, and the Phase 6 work that remains:
+
+* The airframe is still placeholder boxes; there is no aircraft asset.
+* The terrain material is the engine default — no land-cover-driven
+  materials, no foliage (both named Phase 6 items in the brief).
+* MRQ with temporal sub-sampling is not used: the frames come from the
+  offscreen commandlet, which MRQ does not drive. Recorded as a deviation.
+* Shadows are dynamic CSM, not Virtual Shadow Maps — §6.6's own fallback,
+  because VSM wants Nanite and a runtime procedural mesh is not Nanite.
+* The visual terrain carries no collision and sits away from the flight
+  path; the flown scenario remains the spec's flat terrain, answered by the
+  invisible query slab. The mountains are honest scenery, not physics.
+
+No EO/IR sensor modelling (§2.5 below). No validation against published
+reference data beyond the two targets §2.11 records, and the credibility
+scorecard is mostly below its own threshold (§2.12).
+
+Claims about aircraft response to environmental conditions are supported only
+to the extent Phases 3 and 4 measured them, and only in the headless host: the
+Unreal host has been compared against it in **still air over flat terrain
+only**, because the commandlet refuses wind and turbulence rather than
+approximating them.
 
 ### 2.5 No EO/IR sensor fidelity exists
 

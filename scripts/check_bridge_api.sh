@@ -40,6 +40,52 @@ else
     bad "JSBSimMovementComponent.h" "not found -- plugin not vendored?"
 fi
 
+# -- upstream behaviours the commandlet compensates for ---------------------
+# These are not API signatures, they are quirks. Each one is a place where
+# FlightSimScenarioCommandlet does something that looks arbitrary until you read
+# the plugin, and where a re-vendor at a different version would leave the
+# compensation in place, still compiling, quietly wrong.
+MCC="$PLUGIN/Source/JSBSimFlightDynamicsModel/Private/JSBSimMovementComponent.cpp"
+if [ -f "$MCC" ]; then
+    # Why the aircraft actor is placed by its centre of gravity, not its origin.
+    grep -q 'FVector CGWorldPosition = Parent->GetTransform().TransformPosition(CGLocalPosition);' "$MCC" \
+        && ok "IC derived from the CG" "still the CG, not the actor origin" \
+        || bad "IC derived from the CG" "PrepareJSBSim changed how it locates the aircraft"
+
+    # Why the actor yaw is set to heading - 90.
+    grep -q 'IC->SetPsiDegIC(PsiThetaPhi.Yaw + 90);' "$MCC" \
+        && ok "heading convention" "plugin still adds 90 deg to actor yaw" \
+        || bad "heading convention" "the +90 the commandlet subtracts is gone"
+
+    # Why LatchTrimmedControls exists at all: the trimmed throttle is thrown
+    # away before the first tick, and the command struct is re-sent every tick.
+    grep -q 'EngineCommands\[i\].Throttle = 0.0;' "$MCC" \
+        && ok "throttle zeroed after trim" "still zeroed; latching is still needed" \
+        || bad "throttle zeroed after trim" "upstream may have fixed this -- re-read LatchTrimmedControls"
+
+    # Why the latched rudder and yaw trim are negated.
+    grep -q 'FCS->SetDrCmd(-Commands.Rudder);' "$MCC" \
+        && ok "rudder sign" "plugin still negates rudder on the way in" \
+        || bad "rudder sign" "the negation the commandlet mirrors has changed"
+
+    # Why the commandlet spawns a ground slab: with no world geometry the
+    # ground query reports height-above-terrain 0 at any altitude, which puts a
+    # cruising aircraft's gear in permanent contact.
+    grep -q 'double HAT = 0.0;' "$MCC" \
+        && ok "ground query fallback" "still 0.0 on a missed trace" \
+        || bad "ground query fallback" "GetAGLevel's miss behaviour changed"
+
+    # Upstream bug 3 must be patched, or the ground query silently reports the
+    # aircraft on the deck above ~3.2 km AGL. A re-vendor that skipped this
+    # would leave every cruise scenario running its gear model against a
+    # fiction, with nothing reporting an error.
+    grep -qF 'GetGeographicEllipsoidMaxRadius()) * 100.0 * Up;' "$MCC" \
+        && ok "ground ray units" "patched to centimetres (319 km reach)" \
+        || bad "ground ray units" "unpatched -- run scripts/vendor_ue_plugin.sh"
+else
+    bad "JSBSimMovementComponent.cpp" "not found -- plugin not vendored?"
+fi
+
 # -- engine types the bridge builds on --------------------------------------
 CC="$UE_ROOT/Engine/Source/Runtime/CinematicCamera/Public/CineCameraComponent.h"
 if [ -f "$CC" ]; then

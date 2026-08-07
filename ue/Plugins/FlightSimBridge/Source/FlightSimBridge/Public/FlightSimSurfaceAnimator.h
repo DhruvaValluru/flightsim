@@ -46,6 +46,22 @@ struct FFlightSimSurfaceBinding
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FlightSim")
 	float DeflectionDegrees = 0.0f;
+
+	// The thing that actually moves on screen. A binding with no target and no
+	// skeletal mesh computes a number and rotates nothing, which is precisely
+	// the failure §1.5 describes -- so the animator counts how many bindings
+	// are attached to something and the burn-in checks it.
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category = "FlightSim")
+	TObjectPtr<USceneComponent> TargetComponent = nullptr;
+
+	// Where the surface sits at zero deflection. Deflection is applied as an
+	// offset from here, so a surface mounted at an angle stays mounted at it.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightSim")
+	FRotator NeutralRotation = FRotator::ZeroRotator;
+
+	// Largest absolute deflection this binding has reached over the run.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FlightSim")
+	float PeakDeflectionDegrees = 0.0f;
 };
 
 UCLASS(ClassGroup = (FlightSim), meta = (BlueprintSpawnableComponent))
@@ -77,6 +93,17 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "FlightSim")
 	bool AnySurfaceHasMoved() const { return bAnySurfaceMoved; }
+
+	// Attach a binding to something that will be drawn. Named by the bone name
+	// the binding already carries, so the same binding table serves a skeletal
+	// mesh and a component-built airframe.
+	UFUNCTION(BlueprintCallable, Category = "FlightSim")
+	bool BindSurfaceComponent(FName Surface, USceneComponent* Component);
+
+	// How many bindings will move something on screen. Zero means the animator
+	// is computing deflections into the void.
+	UFUNCTION(BlueprintPure, Category = "FlightSim")
+	int32 GetBoundSurfaceCount() const;
 
 private:
 	bool bAnySurfaceMoved = false;

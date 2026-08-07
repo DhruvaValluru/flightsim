@@ -1,5 +1,6 @@
 #include "FlightSimSurfaceAnimator.h"
 
+#include "Components/SceneComponent.h"
 #include "JSBSimMovementComponent.h"
 
 UFlightSimSurfaceAnimator::UFlightSimSurfaceAnimator()
@@ -61,8 +62,21 @@ void UFlightSimSurfaceAnimator::TickComponent(
 		}
 		Binding.CurrentValue = FCString::Atof(*Value);
 		Binding.DeflectionDegrees = Binding.CurrentValue * Binding.DegreesPerUnit;
+		Binding.PeakDeflectionDegrees = FMath::Max(Binding.PeakDeflectionDegrees,
+		                                           FMath::Abs(Binding.DeflectionDegrees));
 		PeakDeflection = FMath::Max(PeakDeflection,
 		                            FMath::Abs(Binding.DeflectionDegrees));
+
+		// The line that makes this an animator rather than a meter. Everything
+		// above reads; this is the only write, and it writes to the scene, not
+		// to the FDM.
+		if (Binding.TargetComponent != nullptr)
+		{
+			const FQuat Hinge(Binding.RotationAxis.GetSafeNormal(),
+			                  FMath::DegreesToRadians(Binding.DeflectionDegrees));
+			Binding.TargetComponent->SetRelativeRotation(
+				Binding.NeutralRotation.Quaternion() * Hinge);
+		}
 	}
 
 	if (PeakDeflection > 0.01f)
@@ -74,4 +88,33 @@ void UFlightSimSurfaceAnimator::TickComponent(
 float UFlightSimSurfaceAnimator::GetPeakDeflectionDegrees() const
 {
 	return PeakDeflection;
+}
+
+bool UFlightSimSurfaceAnimator::BindSurfaceComponent(FName Surface,
+                                                     USceneComponent* Component)
+{
+	for (FFlightSimSurfaceBinding& Binding : Bindings)
+	{
+		if (Binding.BoneName == Surface)
+		{
+			Binding.TargetComponent = Component;
+			Binding.NeutralRotation =
+				Component ? Component->GetRelativeRotation() : FRotator::ZeroRotator;
+			return true;
+		}
+	}
+	return false;
+}
+
+int32 UFlightSimSurfaceAnimator::GetBoundSurfaceCount() const
+{
+	int32 Count = 0;
+	for (const FFlightSimSurfaceBinding& Binding : Bindings)
+	{
+		if (Binding.TargetComponent != nullptr)
+		{
+			++Count;
+		}
+	}
+	return Count;
 }

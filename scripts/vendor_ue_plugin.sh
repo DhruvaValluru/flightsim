@@ -114,6 +114,38 @@ PYEOF
     PATCHED_NODE="yes"
 fi
 
+# UPSTREAM BUG 3. UJSBSimMovementComponent::GetAGLevel builds the downward ray
+# for JSBSim's ground query in centimetres at the start point and in METRES at
+# the end point:
+#
+#     LineCheckStart = StartEngineLocation + AGLThresholdMeters * 100 * Up;
+#     LineCheckEnd   = StartEngineLocation - (alt_m + 0.05 * R_m) * Up;
+#
+# The start converts, three lines above; the end does not. The intended reach is
+# the aircraft's altitude plus 5% of the ellipsoid radius -- about 319 km -- and
+# what is actually cast is 319 km of CENTIMETRES, so the ray is 3.19 km long.
+#
+# Above roughly 3.2 km AGL the trace therefore reaches nothing, GetAGLevel
+# returns its miss value of 0.0, and JSBSim is told the aircraft is exactly on
+# the deck. Nothing reports an error: the gear and ground reaction model simply
+# run against a fiction, at cruise altitude, which is every altitude that
+# matters. Measured here: the same scenario at 3000 m answered correctly and at
+# 6000 m reported height above terrain 0.0 m.
+PATCHED_AGL="no"
+AGL_OLD='+ 0.05 * GeoReferencingSystem->GetGeographicEllipsoidMaxRadius()) * Up;'
+if grep -qF "$AGL_OLD" "$MOVEMENT_CPP" 2>/dev/null; then
+    python3 - "$MOVEMENT_CPP" <<'PYEOF'
+import sys
+path = sys.argv[1]
+src = open(path).read()
+old = "+ 0.05 * GeoReferencingSystem->GetGeographicEllipsoidMaxRadius()) * Up;"
+new = "+ 0.05 * GeoReferencingSystem->GetGeographicEllipsoidMaxRadius()) * 100.0 * Up;"
+assert src.count(old) == 1, f"expected one ground-ray end point, found {src.count(old)}"
+open(path, "w").write(src.replace(old, new))
+PYEOF
+    PATCHED_AGL="yes"
+fi
+
 # The dylib records its own install name; without rewriting it a packaged build
 # looks for the library at the machine it was built on.
 if [ "$UE_PLATFORM" = "Mac" ]; then
@@ -148,6 +180,12 @@ cat > "$DEST/VENDORED.json" <<EOF
       "applied": "$PATCHED_NODE",
       "reason": "declares FGPropertyNode*, a type absent from JSBSim 1.2.4; FGPropertyManager::GetNode returns SGPropertyNode*. The plugin is written against an older JSBSim than the library in the same repository, and does not compile without this.",
       "change": "FGPropertyNode* node -> SGPropertyNode* node (2 occurrences)"
+    },
+    {
+      "file": "Source/JSBSimFlightDynamicsModel/Private/JSBSimMovementComponent.cpp",
+      "applied": "$PATCHED_AGL",
+      "reason": "GetAGLevel casts the ground-query ray with its start point in centimetres and its end point in metres, three lines apart in the same function. The intended ~319 km reach is cast as 319 km of centimetres, i.e. 3.19 km, so above roughly 3.2 km AGL the trace hits nothing and JSBSim is silently told the aircraft is on the deck. Measured: correct at 3000 m, height above terrain 0.0 m at 6000 m.",
+      "change": "LineCheckEnd ... ) * Up -> ... ) * 100.0 * Up"
     }
   ]
 }
@@ -163,3 +201,4 @@ echo "  headers            $HEADERS"
 echo "  aircraft staged    $((AIRCRAFT > 0 ? AIRCRAFT - 1 : 0))"
 echo "  Build.cs patched   $PATCHED (Windows path literal -> portable)"
 echo "  node type patched  $PATCHED_NODE (FGPropertyNode -> SGPropertyNode)"
+echo "  ground ray patched $PATCHED_AGL (metres -> centimetres; 3.19 km reach -> 319 km)"

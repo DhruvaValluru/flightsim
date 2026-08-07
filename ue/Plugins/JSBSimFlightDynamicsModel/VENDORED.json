@@ -21,6 +21,12 @@
       "applied": "yes",
       "reason": "declares FGPropertyNode*, a type absent from JSBSim 1.2.4; FGPropertyManager::GetNode returns SGPropertyNode*. The plugin is written against an older JSBSim than the library in the same repository, and does not compile without this.",
       "change": "FGPropertyNode* node -> SGPropertyNode* node (2 occurrences)"
+    },
+    {
+      "file": "Source/JSBSimFlightDynamicsModel/Private/JSBSimMovementComponent.cpp",
+      "applied": "yes",
+      "reason": "GetAGLevel casts the ground-query ray with its start point in centimetres and its end point in metres, three lines apart in the same function. The intended ~319 km reach is cast as 319 km of centimetres, i.e. 3.19 km, so above roughly 3.2 km AGL the trace hits nothing and JSBSim is silently told the aircraft is on the deck. Measured: correct at 3000 m, height above terrain 0.0 m at 6000 m.",
+      "change": "LineCheckEnd ... ) * Up -> ... ) * 100.0 * Up"
     }
   ]
 }

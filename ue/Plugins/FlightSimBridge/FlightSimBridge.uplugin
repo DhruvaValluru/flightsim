@@ -11,6 +11,7 @@
 		{ "Name": "FlightSimBridge", "Type": "Runtime", "LoadingPhase": "Default" }
 	],
 	"Plugins": [
-		{ "Name": "JSBSimFlightDynamicsModel", "Enabled": true }
+		{ "Name": "JSBSimFlightDynamicsModel", "Enabled": true },
+		{ "Name": "ProceduralMeshComponent", "Enabled": true }
 	]
 }

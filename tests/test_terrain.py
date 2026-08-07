@@ -298,64 +298,6 @@ def test_both_terrain_kinds_drive_orographic_lift_identically(procedural,
         assert 0.0 < provider.decay_height_m <= 1500.0
 
 
-# -- Gate 5 host-parity comparator ---------------------------------------
-
-
-def test_parity_comparator_detects_a_divergence(tmp_path):
-    """The comparator must fail on data that differs, or it proves nothing.
-
-    Gate 5 itself is blocked on this machine (the installed Xcode is outside
-    UE 5.5's supported range), so the comparator is exercised against synthetic
-    trajectories. A comparison harness that has never been seen to reject
-    anything is not evidence that the hosts agree.
-    """
-    import json
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "experiments"))
-    from gate5_ue_parity import TOLERANCE, compare
-
-    def write(path, altitude):
-        path.write_text(json.dumps({
-            "columns": {
-                "altitude_m": altitude,
-                "tas_kt": [250.0] * len(altitude),
-                "roll_deg": [0.0] * len(altitude),
-                "pitch_deg": [2.0] * len(altitude),
-                "heading_deg": [0.0] * len(altitude),
-                "n_z": [1.0] * len(altitude),
-            }
-        }))
-        return path
-
-    a = write(tmp_path / "a.json", [3000.0, 3000.1, 3000.2])
-    same = write(tmp_path / "b.json", [3000.0, 3000.1, 3000.2])
-    assert all(r.ok for r in compare(a, same))
-
-    # A ~50 m divergence is ten times the declared 5 m tolerance. The peak
-    # difference is 3050.0 - 3000.2 = 49.8, not 50: the reference is drifting
-    # too.
-    diverged = write(tmp_path / "c.json", [3000.0, 3025.0, 3050.0])
-    results = {r.channel: r for r in compare(a, diverged)}
-    assert not results["altitude_m"].ok
-    assert results["altitude_m"].max_difference == pytest.approx(49.8)
-    assert results["tas_kt"].ok          # unaffected channels still pass
-
-
-def test_parity_reports_a_missing_channel_as_infinite(tmp_path):
-    """A channel the UE recorder failed to write must not silently pass."""
-    import json
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "experiments"))
-    from gate5_ue_parity import compare
-
-    a = tmp_path / "a.json"
-    a.write_text(json.dumps({"columns": {"altitude_m": [3000.0]}}))
-    b = tmp_path / "b.json"
-    b.write_text(json.dumps({"columns": {}}))
-    results = {r.channel: r for r in compare(a, b)}
-    assert not results["altitude_m"].ok
-    assert results["altitude_m"].max_difference == float("inf")
+# The Gate 5 host-parity comparator used to be tested here, from the days when
+# it was the only part of Gate 5 that could run. It now has a home of its own:
+# tests/test_host_parity.py.

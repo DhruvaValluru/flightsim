@@ -37,6 +37,12 @@ SURFACES = {
     "aileron_deg": lambda f: math.degrees(f.props.get("fcs/left-aileron-pos-rad")),
     "rudder_deg": lambda f: math.degrees(f.props.get("fcs/rudder-pos-rad")),
     "throttle_cmd": lambda f: f.props.get("fcs/throttle-cmd-norm"),
+    # Ground track, named to match the UE recorder's columns so Gate 5's host
+    # comparison can hold position as well as attitude. Position is the channel
+    # that catches a wind acting in one host and not the other -- a uniform
+    # wind changes no air-relative quantity, only where the aircraft ends up.
+    "lat_deg": lambda f: f.props.get("position/lat-geod-deg"),
+    "lon_deg": lambda f: f.props.get("position/long-gc-deg"),
 }
 
 

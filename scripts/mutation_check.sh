@@ -202,6 +202,135 @@ mutate core/scenario/envelope.py \
     '        lift_lbs = -fdm.props.get("forces/fwz-aero-lbs")' \
     "lift-curve sign" tests/test_validation_and_run.py || failures=$((failures+1))
 
+mutate experiments/gate5_ue_parity.py \
+    '            worst = max(
+                (abs(_interpolate(at, a[channel], t) - _interpolate(bt, b[channel], t))
+                 for t in grid),
+                default=math.inf,
+            )' \
+    '            worst = max(  # MUTATED: back to comparing by sample index
+                (abs(a[channel][i] - b[channel][i])
+                 for i in range(min(len(a[channel]), len(b[channel])))),
+                default=math.inf,
+            )' \
+    "host parity compared on the recorded clock" tests/test_host_parity.py \
+    || failures=$((failures+1))
+
+mutate experiments/gate5_ue_parity.py \
+    '        return self.fraction >= MIN_OVERLAP_FRACTION' \
+    '        return True  # MUTATED: a partial UE run counts as a full one' \
+    "UE run must cover the scenario" tests/test_host_parity.py || failures=$((failures+1))
+
+mutate experiments/gate5_ue_parity.py \
+    '    spec.set("hold_state", False, frm="open loop in both hosts")' \
+    '    pass  # MUTATED: headless flies closed loop, UE flies open loop' \
+    "both hosts fly open loop" tests/test_host_parity.py || failures=$((failures+1))
+
+mutate experiments/gate5_ue_parity.py \
+    '            raise ValueError(
+                f"the {name} trajectory has no '"'"'t'"'"' column, so the two runs "' \
+    '            columns["t"] = list(range(len(next(iter(columns.values())))))  # MUTATED
+            _unused = (
+                f"the {name} trajectory has no '"'"'t'"'"' column, so the two runs "' \
+    "a trajectory with no clock is refused" tests/test_host_parity.py \
+    || failures=$((failures+1))
+
+mutate experiments/gate5_ue_parity.py \
+    '    return math.degrees(0.5 * math.atan2(2.0 * cxy, cxx - cyy)), fraction' \
+    '    return 0.0, fraction  # MUTATED: the pixels are never measured' \
+    "apparent bank measured from the pixels" tests/test_on_screen.py \
+    || failures=$((failures+1))
+
+mutate experiments/gate5_ue_parity.py \
+    '        correlation >= ON_SCREEN["min_bank_correlation"],' \
+    '        True,  # MUTATED: any pixels count as a visible roll' \
+    "image bank must track FDM roll" tests/test_on_screen.py \
+    || failures=$((failures+1))
+
+mutate experiments/gate5_ue_parity.py \
+    '        camera_roll <= ON_SCREEN["max_camera_roll_deg"],' \
+    '        True,  # MUTATED: a camera welded to the airframe passes' \
+    "camera never inherits roll" tests/test_on_screen.py || failures=$((failures+1))
+
+mutate experiments/gate5_ue_parity.py \
+    '        len(moving) >= ON_SCREEN["min_moving_surfaces"],' \
+    '        True,  # MUTATED: surfaces that never moved count as articulating' \
+    "surfaces must actually move geometry" tests/test_on_screen.py \
+    || failures=$((failures+1))
+
+mutate experiments/gate5_ue_parity.py \
+    '        bool(records) and worst >= ON_SCREEN["min_lit_fraction"],' \
+    '        True,  # MUTATED: a blank frame counts as a frame' \
+    "a blank frame is not evidence" tests/test_on_screen.py || failures=$((failures+1))
+
+mutate experiments/host_parity_matrix.py \
+    '    if achieved != wanted:' \
+    '    if False:  # MUTATED: the row may name a condition it did not run' \
+    "matrix rows run what they claim" tests/test_parity_matrix.py \
+    || failures=$((failures+1))
+
+mutate experiments/host_parity_matrix.py \
+    '        elif _sha256(source) != _sha256(target):' \
+    '        elif False:  # MUTATED: the hosts may load different aircraft files' \
+    "both hosts load identical model XML" tests/test_parity_matrix.py \
+    || failures=$((failures+1))
+
+mutate experiments/host_parity_matrix.py \
+    '    return passed == len(compared) and bool(compared)' \
+    '    return passed == len(compared)  # MUTATED: an empty matrix passes' \
+    "an empty matrix is not a pass" tests/test_parity_matrix.py \
+    || failures=$((failures+1))
+
+mutate experiments/gate5_ue_parity.py \
+    '            series_a = _unwrap_degrees(a[channel])
+            series_b = _unwrap_degrees(b[channel])' \
+    '            series_a = list(a[channel])  # MUTATED: raw wrapped series
+            series_b = list(b[channel])' \
+    "heading compared on the circle" tests/test_host_parity.py \
+    || failures=$((failures+1))
+
+mutate experiments/gate5_ue_parity.py \
+    '    first_a = at[1] if len(at) > 1 else at[0]
+    first_b = bt[1] if len(bt) > 1 else bt[0]' \
+    '    first_a = at[0]  # MUTATED: the trim snapshot is graded as flight
+    first_b = bt[0]' \
+    "trim snapshot exempt, flight graded" tests/test_host_parity.py \
+    || failures=$((failures+1))
+
+mutate experiments/gate5_ue_parity.py \
+    '    first_a = at[1] if len(at) > 1 else at[0]
+    first_b = bt[1] if len(bt) > 1 else bt[0]' \
+    '    first_a = at[5] if len(at) > 5 else at[0]  # MUTATED: shave five samples
+    first_b = bt[5] if len(bt) > 5 else bt[0]' \
+    "exactly one sample is exempt" tests/test_host_parity.py \
+    || failures=$((failures+1))
+
+mutate experiments/gate6_visual.py \
+    '        ratio <= THRESHOLDS["max_extinction_ratio"],' \
+    '        True,  # MUTATED: a crisp far ridge counts as extinction' \
+    "extinction must fade the far ridge" tests/test_gate6_visual.py \
+    || failures=$((failures+1))
+
+mutate experiments/gate6_visual.py \
+    '        area >= THRESHOLDS["min_valley_shadow_px"],
+        f"{area} px of the terrain band darken when cast shadows are on "' \
+    '        True,  # MUTATED: any sliver of shadow shadows the valley
+        f"{area} px of the terrain band darken when cast shadows are on "' \
+    "valley shadow needs real area" tests/test_gate6_visual.py \
+    || failures=$((failures+1))
+
+mutate experiments/gate6_visual.py \
+    '    area = int((darkened & ~body).sum())' \
+    '    area = int(darkened.sum())  # MUTATED: the dark body counts as its shadow' \
+    "aircraft body is not its shadow" tests/test_gate6_visual.py \
+    || failures=$((failures+1))
+
+mutate experiments/gate6_visual.py \
+    '        excursion >= THRESHOLDS["min_control_excursion"],' \
+    '        True,  # MUTATED: a metric nothing can trip still validates' \
+    "exposure control must trip the metric" tests/test_gate6_visual.py \
+    || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
