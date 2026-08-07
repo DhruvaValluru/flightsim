@@ -36,7 +36,7 @@ namespace
 {
 	// The engine's unit cube is 100 cm across, so a scale of N gives an N-metre
 	// box and every size below reads directly in metres.
-	constexpr double CmPerMetre = 100.0;
+	constexpr double RenderCmPerMetre = 100.0;   // unity-unique name
 	constexpr double RadiansToDegrees = 57.29577951308232;
 
 	// A placeholder airframe: boxes, roughly 747-shaped, with real hinges.
@@ -64,7 +64,7 @@ namespace
 		Box->SetStaticMesh(Cube);
 		Box->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Box->RegisterComponent();
-		Box->SetRelativeLocation(CentreMetres * CmPerMetre);
+		Box->SetRelativeLocation(CentreMetres * RenderCmPerMetre);
 		Box->SetRelativeScale3D(SizeMetres);
 		return Box;
 	}
@@ -82,7 +82,7 @@ namespace
 		Hinge->SetupAttachment(Parent);
 		Hinge->SetMobility(EComponentMobility::Movable);
 		Hinge->RegisterComponent();
-		Hinge->SetRelativeLocation(HingeMetres * CmPerMetre);
+		Hinge->SetRelativeLocation(HingeMetres * RenderCmPerMetre);
 		AddBox(Owner, Hinge, MeshName, Cube, OffsetMetres, SizeMetres);
 		return Hinge;
 	}
@@ -569,7 +569,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		const FRotator HeadingOnly(0.0, Scenario.Aircraft->GetActorRotation().Yaw, 0.0);
 		const FVector Station = Scenario.Aircraft->GetActorLocation() +
-			HeadingOnly.RotateVector(FVector(Director->ChaseOffsetMetres) * CmPerMetre);
+			HeadingOnly.RotateVector(FVector(Director->ChaseOffsetMetres) * RenderCmPerMetre);
 		FRotator Look = (Scenario.Aircraft->GetActorLocation() - Station).Rotation();
 		Look.Roll = 0.0;
 		Director->SetActorLocationAndRotation(Station, Look.Quaternion());
@@ -757,6 +757,24 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		                       Scenario.ReadProperty(TEXT("accelerations/Nz")));
 		Record->SetNumberField(TEXT("wind_down_fps"),
 		                       Scenario.ReadProperty(TEXT("atmosphere/wind-down-fps")));
+		// The flight-state channels the telemetry panel draws: what the FDM
+		// actually did, per frame, to stand next to what the spec commanded.
+		// Read from the FDM like everything else here -- never derived from
+		// the scene.
+		Record->SetNumberField(TEXT("altitude_m"),
+		                       Scenario.ReadProperty(TEXT("position/h-sl-meters")));
+		Record->SetNumberField(TEXT("cas_kt"),
+		                       Scenario.ReadProperty(TEXT("velocities/vc-kts")));
+		Record->SetNumberField(TEXT("tas_kt"),
+		                       Scenario.ReadProperty(TEXT("velocities/vtrue-kts")));
+		Record->SetNumberField(TEXT("heading_deg"),
+		                       Scenario.ReadProperty(TEXT("attitude/psi-rad")) * RadiansToDegrees);
+		Record->SetNumberField(TEXT("agl_m"),
+		                       Scenario.ReadProperty(TEXT("position/h-agl-ft")) * 0.3048);
+		Record->SetNumberField(TEXT("wind_north_fps"),
+		                       Scenario.ReadProperty(TEXT("atmosphere/wind-north-fps")));
+		Record->SetNumberField(TEXT("wind_east_fps"),
+		                       Scenario.ReadProperty(TEXT("atmosphere/wind-east-fps")));
 
 		// What the animator actually applied to geometry, read back off the
 		// bindings rather than recomputed -- so a binding that computed a

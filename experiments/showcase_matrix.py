@@ -67,6 +67,14 @@ SHOWCASE_DOUBLET = (
 #: Wind conditions. Directions are chosen per terrain (crosswind = heading
 #: +90, headwind = heading) so the words stay true whatever the flight path.
 CONDITIONS = ("calm", "crosswind25", "gusty15", "turb_moderate")
+
+#: The complex cells: combined conditions, every constituent delivered by the
+#: machinery already null-tested alone (steady wind + schedule + Dryden +
+#: orographic coexist in one card). Rendered over a reduced visibility/time
+#: sub-grid to keep the matrix's wall clock finite -- the reduction is a
+#: stated plan, not a silent skip.
+COMPLEX_CONDITIONS = ("turb_severe", "crosswind25_turb", "storm25")
+COMPLEX_SUBGRID = (("clear", "dawn"), ("hazy", "noon"))
 VISIBILITY = {"clear": 0.0025, "hazy": 0.012}
 #: Time of day as sun geometry plus an exposure bias for the §6.6 manual
 #: exposure. Approximations, recorded as such in every manifest.
@@ -157,26 +165,31 @@ def ensure_terrains(out_dir: Path) -> Dict[str, Dict]:
     return terrains
 
 
-def gust_schedule(heading_deg: float, steady_kt: float, rate_hz: float,
-                  duration_s: float, airspeed_mps: float) -> List[Dict[str, float]]:
-    """Per-step NED wind for the gusty-headwind cell, from the real providers.
+def gust_schedule(from_deg: float, steady_kt: float, rate_hz: float,
+                  duration_s: float, airspeed_mps: float,
+                  surge_kt: Sequence[float] = (12.0, 8.0, 10.0),
+                  down_peak_mps: float = 3.0) -> List[Dict[str, float]]:
+    """Per-step NED wind for a gusty cell, from the real providers.
 
-    The horizontal speed is the steady headwind modulated by 1-cosine gusts
-    (DiscreteGust.magnitude_at -- the provider's own shape function), plus a
-    vertical gust mid-run. The card carries the resulting floats; the UE host
-    writes them verbatim, so the gust model exists exactly once.
+    The horizontal speed is the steady wind (blowing FROM ``from_deg``)
+    modulated by 1-cosine gusts (DiscreteGust.magnitude_at -- the provider's
+    own shape function), plus a vertical gust mid-run. The card carries the
+    resulting floats; the UE host writes them verbatim, so the gust model
+    exists exactly once. ``surge_kt`` scales the three surges so a storm cell
+    can gust harder than a 15 kt afternoon.
     """
-    steady = SteadyWind(u.kt_to_mps(steady_kt), heading_deg)
+    steady = SteadyWind(u.kt_to_mps(steady_kt), from_deg)
     surges = [
-        DiscreteGust(peak_mps=u.kt_to_mps(12.0), start_s=3.0,
+        DiscreteGust(peak_mps=u.kt_to_mps(surge_kt[0]), start_s=3.0,
                      gradient_m=120.0, airspeed_mps=airspeed_mps, axis="north"),
-        DiscreteGust(peak_mps=u.kt_to_mps(8.0), start_s=9.0,
+        DiscreteGust(peak_mps=u.kt_to_mps(surge_kt[1]), start_s=9.0,
                      gradient_m=350.0, airspeed_mps=airspeed_mps, axis="north"),
-        DiscreteGust(peak_mps=u.kt_to_mps(10.0), start_s=16.0,
+        DiscreteGust(peak_mps=u.kt_to_mps(surge_kt[2]), start_s=16.0,
                      gradient_m=120.0, airspeed_mps=airspeed_mps, axis="north"),
     ]
-    down_gust = DiscreteGust(peak_mps=3.0, start_s=12.0, gradient_m=120.0,
-                             airspeed_mps=airspeed_mps, axis="down")
+    down_gust = DiscreteGust(peak_mps=down_peak_mps, start_s=12.0,
+                             gradient_m=120.0, airspeed_mps=airspeed_mps,
+                             axis="down")
     steps = int(round(duration_s * rate_hz))
     schedule = []
     for step in range(steps):
@@ -185,7 +198,7 @@ def gust_schedule(heading_deg: float, steady_kt: float, rate_hz: float,
         # from-bearing; the vertical gust rides on top.
         surge = sum(g.magnitude_at(t) for g in surges)
         speed = steady.speed_mps + surge
-        radians = math.radians(heading_deg)
+        radians = math.radians(from_deg)
         schedule.append({
             "t_s": round(t, 6),
             "north_fps": u.mps_to_fps(-speed * math.cos(radians)),
@@ -208,36 +221,63 @@ def build_cell_card(out: Path, airframe_key: str, terrain_key: str,
              frm="baked raster at origin (flat physics slab at this height)")
 
     heading = terrain["heading"]
+    airspeed_mps = u.kt_to_mps(float(spec.airspeed.value))
     control_inputs: Sequence[Dict[str, float]] = SHOWCASE_DOUBLET
     wind_schedule = None
     orographic = None
     wind_note = "calm"
+
+    def set_steady_wind(speed_kt: float, direction: float, why: str):
+        spec.set("wind_speed", speed_kt, frm="condition matrix")
+        spec.set("wind_direction", round(direction), frm=why)
+        return orographic_card_block(terrain["path"], terrain["lat"],
+                                     terrain["lon"], speed_kt, round(direction))
+
+    def set_turbulence(intensity: str):
+        spec.set("turbulence", intensity, frm="condition matrix")
+        spec.set("seed", seed, frm="condition matrix")
+        return (f"{intensity} Dryden turbulence, seed {seed} (visual-only: "
+                f"measured same-seed realisations differ between hosts)")
+
     if condition == "crosswind25":
         direction = (heading + 90.0) % 360.0
-        spec.set("wind_speed", 25.0, frm="condition matrix")
-        spec.set("wind_direction", round(direction), frm="crosswind = heading + 90")
-        orographic = orographic_card_block(
-            terrain["path"], terrain["lat"], terrain["lon"], 25.0,
-            round(direction))
+        orographic = set_steady_wind(25.0, direction, "crosswind = heading + 90")
         wind_note = f"25 kt crosswind from {round(direction)}"
     elif condition == "gusty15":
-        spec.set("wind_speed", 15.0, frm="condition matrix")
-        spec.set("wind_direction", round(heading), frm="headwind = heading")
-        airspeed_mps = u.kt_to_mps(float(spec.airspeed.value))
+        orographic = set_steady_wind(15.0, heading, "headwind = heading")
         wind_schedule = gust_schedule(round(heading), 15.0,
                                       float(spec.rate.value), DURATION_S,
                                       airspeed_mps)
-        orographic = orographic_card_block(
-            terrain["path"], terrain["lat"], terrain["lon"], 15.0,
-            round(heading))
         control_inputs = ()
         wind_note = f"15 kt gusty headwind from {round(heading)} (1-cosine gusts)"
     elif condition == "turb_moderate":
-        spec.set("turbulence", "moderate", frm="condition matrix")
-        spec.set("seed", seed, frm="condition matrix")
+        wind_note = set_turbulence("moderate")
         control_inputs = ()
-        wind_note = f"moderate Dryden turbulence, seed {seed} (visual-only: " \
-                    f"measured same-seed realisations differ between hosts)"
+    elif condition == "turb_severe":
+        wind_note = set_turbulence("severe")
+        control_inputs = ()
+    elif condition == "crosswind25_turb":
+        direction = (heading + 90.0) % 360.0
+        orographic = set_steady_wind(25.0, direction, "crosswind = heading + 90")
+        turbulence_note = set_turbulence("moderate")
+        control_inputs = ()
+        wind_note = (f"25 kt crosswind from {round(direction)} + "
+                     f"{turbulence_note}")
+    elif condition == "storm25":
+        # The kitchen sink, every constituent individually null-tested: a
+        # 25 kt gusting crosswind (surges to ~+18 kt, 5 m/s vertical gust),
+        # severe Dryden turbulence, and the ridge coupling.
+        direction = (heading + 90.0) % 360.0
+        orographic = set_steady_wind(25.0, direction, "storm crosswind")
+        wind_schedule = gust_schedule(round(direction), 25.0,
+                                      float(spec.rate.value), DURATION_S,
+                                      airspeed_mps,
+                                      surge_kt=(18.0, 12.0, 15.0),
+                                      down_peak_mps=5.0)
+        turbulence_note = set_turbulence("severe")
+        control_inputs = ()
+        wind_note = (f"storm: 25 kt gusting crosswind from {round(direction)} "
+                     f"(surges to ~43 kt, 5 m/s vertical gust) + {turbulence_note}")
 
     card_path = write_run_card(spec, out, control_inputs=control_inputs,
                                duration_s=DURATION_S,
@@ -355,11 +395,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     for key, terrain in terrains.items():
         print(f"  {key:11s} {terrain['title']}  sha {terrain['sha256'][:12]}")
 
-    airframe_keys = args.airframes.split(",")
-    terrain_keys = args.terrains.split(",")
-    condition_keys = args.conditions.split(",")
-    visibility_keys = args.visibility.split(",")
-    tod_keys = args.time_of_day.split(",")
+    airframe_keys = [k for k in args.airframes.split(",") if k]
+    terrain_keys = [k for k in args.terrains.split(",") if k]
+    # An empty --conditions renders only the complex sub-grid cells; an
+    # unknown condition name would silently fall through to calm, so refuse.
+    condition_keys = [k for k in args.conditions.split(",") if k]
+    known = set(CONDITIONS) | set(COMPLEX_CONDITIONS)
+    unknown = [k for k in condition_keys if k not in known]
+    if unknown:
+        print(f"unknown conditions {unknown}; known: {sorted(known)}")
+        return 2
+    visibility_keys = [k for k in args.visibility.split(",") if k]
+    tod_keys = [k for k in args.time_of_day.split(",") if k]
 
     cells = []
     for airframe_key in airframe_keys:
@@ -369,7 +416,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     for tod in tod_keys:
                         cells.append((airframe_key, terrain_key, condition,
                                       visibility, tod))
-    print(f"\n{RULE}\n2. the matrix: {len(cells)} cells\n{RULE}")
+            # The complex combined conditions, on their stated sub-grid.
+            for condition in COMPLEX_CONDITIONS:
+                for visibility, tod in COMPLEX_SUBGRID:
+                    if visibility in visibility_keys and tod in tod_keys:
+                        cells.append((airframe_key, terrain_key, condition,
+                                      visibility, tod))
+    print(f"\n{RULE}\n2. the matrix: {len(cells)} cells "
+          f"({len(COMPLEX_CONDITIONS)} complex conditions on the "
+          f"{len(COMPLEX_SUBGRID)}-combo sub-grid)\n{RULE}")
 
     rows: List[Dict] = []
     skipped: List[Dict] = []
@@ -400,13 +455,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                       f"SKIPPED -- {reason}")
                 skipped.append({"clip_id": clip_id, "reason": reason})
                 continue
-            if not encode_clip(frames, clip):
+            raw_clip = frames / "raw.mp4"
+            if not encode_clip(frames, raw_clip):
                 reason = "ffmpeg encode failed"
                 print(f"  [{index + 1:3d}/{len(cells)}] {clip_id}: "
                       f"SKIPPED -- {reason}")
                 skipped.append({"clip_id": clip_id, "reason": reason})
                 continue
-            print(f"  [{index + 1:3d}/{len(cells)}] {clip_id}: rendered + encoded")
+            # The deliverable clip carries the telemetry panel: the plan (the
+            # card) against the FDM's recorded per-frame state.
+            from experiments.showcase_panel import build_panel_clip
+            if not build_panel_clip(Path(cell["card"]),
+                                    frames / "render.json", cell,
+                                    raw_clip, clip, fps=FPS):
+                reason = "panel composite failed"
+                print(f"  [{index + 1:3d}/{len(cells)}] {clip_id}: "
+                      f"SKIPPED -- {reason}")
+                skipped.append({"clip_id": clip_id, "reason": reason})
+                continue
+            print(f"  [{index + 1:3d}/{len(cells)}] {clip_id}: "
+                  f"rendered + panel + encoded")
 
         manifest = json.loads((frames / "render.json").read_text())
         card = json.loads((out / "cards" / f"{clip_id}.json").read_text()) \
@@ -457,6 +525,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "physics ground the gear model feels is the spec's flat slab "
                 "at the stated elevation"),
             "resolution": f"{WIDTH}x{HEIGHT}@{FPS}",
+            "panel": ("1280x300 telemetry strip composited below the frame: "
+                      "the card's commanded values against the FDM's recorded "
+                      "per-frame state (deltas, surfaces, wind, strip charts). "
+                      "Drawn only from recorded evidence; nothing recomputed."),
             "duration_s": DURATION_S,
         })
 

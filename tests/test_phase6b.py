@@ -428,6 +428,40 @@ def test_crosswind_cell_wind_is_heading_plus_ninety(tmp_path):
         pytest.approx(25.0 * 1852.0 / 3600.0)
 
 
+def test_combined_cell_carries_every_constituent(tmp_path):
+    # crosswind25_turb: steady wind + orographic + Dryden, one card. Each
+    # constituent is the machinery already null-tested alone; the honesty
+    # labels must survive the combination.
+    terrain = _fake_terrain(tmp_path)
+    cell = build_cell_card(tmp_path / "card.json", "B747", "control",
+                           terrain, "crosswind25_turb", 63200)
+    card = json.loads((tmp_path / "card.json").read_text())
+    assert card["wind_speed_kt"] == 25.0
+    assert card["wind_direction_deg"] == 135.0
+    assert card["turbulence"] == "moderate"
+    assert card["turbulence_properties"]["atmosphere/randomseed"] == 63200.0
+    assert "orographic" in card
+    assert card["control_inputs"] == []
+    assert "visual-only" in cell["wind_note"]
+
+
+def test_storm_cell_gusts_harder_and_is_severe(tmp_path):
+    terrain = _fake_terrain(tmp_path)
+    cell = build_cell_card(tmp_path / "card.json", "B747", "control",
+                           terrain, "storm25", 63201)
+    card = json.loads((tmp_path / "card.json").read_text())
+    assert card["turbulence"] == "severe"
+    assert card["wind_speed_kt"] == 25.0
+    assert len(card["wind_schedule"]) > 1000
+    assert "orographic" in card
+    # The storm's surges must exceed the plain gusty cell's.
+    from core.fdm import units as u
+    storm_peak = max(math.hypot(r["north_fps"], r["east_fps"])
+                     for r in card["wind_schedule"])
+    assert storm_peak > u.mps_to_fps(u.kt_to_mps(25.0 + 15.0))
+    assert "storm" in cell["wind_note"]
+
+
 def test_gust_schedule_reduces_to_steady_wind_between_gusts():
     from core.fdm import units as u
 

@@ -21,7 +21,10 @@
 
 namespace
 {
-	constexpr double CmPerMetre = 100.0;
+	// Named distinctly from the near-identical constant in the sibling
+	// files: a unity build merges these anonymous namespaces into one
+	// translation unit, where same-named definitions collide.
+	constexpr double SceneCmPerMetre = 100.0;
 
 	// Triangle budget for the Gate 6 offset instances: the raster is
 	// decimated to at most this many vertices per side. 257^2 verts is ~130k
@@ -90,7 +93,7 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 	// No Nanite in a procedural-mesh scene, so per §6.6's own fallback this
 	// is plain dynamic CSM rather than Virtual Shadow Maps. Push the dynamic
 	// shadow range far enough to cover the near ridge.
-	SunLight->SetDynamicShadowDistanceMovableLight(20000.0f * CmPerMetre);
+	SunLight->SetDynamicShadowDistanceMovableLight(20000.0f * SceneCmPerMetre);
 	SunLight->SetDynamicShadowCascades(6);
 
 	// -- atmosphere --------------------------------------------------------
@@ -126,7 +129,7 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 	FogComponent->SetFogDensity(Options.FogDensity);
 	FogComponent->SetFogHeightFalloff(0.0002f);
 	FogComponent->SetFogMaxOpacity(0.92f);
-	FogComponent->SetStartDistance(1500.0f * CmPerMetre);
+	FogComponent->SetStartDistance(1500.0f * SceneCmPerMetre);
 	Fog->SetActorLocation(FVector(0, 0, 0));
 
 	// -- sky light ---------------------------------------------------------
@@ -253,9 +256,9 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 	{
 		auto PeakWorld = [&](const FVector2D& OriginMetres)
 		{
-			return FVector((OriginMetres.X + PeakColumn * Terrain.PixelSizeMetres) * CmPerMetre,
-			               (OriginMetres.Y + (Terrain.Height - 1 - PeakRow) * Terrain.PixelSizeMetres) * CmPerMetre,
-			               TerrainPeakMetres * CmPerMetre);
+			return FVector((OriginMetres.X + PeakColumn * Terrain.PixelSizeMetres) * SceneCmPerMetre,
+			               (OriginMetres.Y + (Terrain.Height - 1 - PeakRow) * Terrain.PixelSizeMetres) * SceneCmPerMetre,
+			               TerrainPeakMetres * SceneCmPerMetre);
 		};
 		NearPeakWorldCm = PeakWorld(Options.NearTerrainOriginMetres);
 		FarPeakWorldCm = PeakWorld(Options.FarTerrainOriginMetres);
@@ -288,7 +291,7 @@ bool FFlightSimVisualScene::BuildTerrainInstance(UWorld* World, const FString& N
 
 	auto ElevationCm = [this](int32 Row, int32 Column) -> double
 	{
-		return Terrain.SampleMetres(Row, Column) * CmPerMetre;
+		return Terrain.SampleMetres(Row, Column) * SceneCmPerMetre;
 	};
 
 	TArray<FVector> Vertices;
@@ -304,9 +307,9 @@ bool FFlightSimVisualScene::BuildTerrainInstance(UWorld* World, const FString& N
 	{
 		for (int32 Column = 0; Column < Terrain.Width; Column += Stride)
 		{
-			const double X = (OriginMetres.X + Column * Terrain.PixelSizeMetres) * CmPerMetre;
+			const double X = (OriginMetres.X + Column * Terrain.PixelSizeMetres) * SceneCmPerMetre;
 			const double Y = (OriginMetres.Y +
-				(Terrain.Height - 1 - Row) * Terrain.PixelSizeMetres) * CmPerMetre;
+				(Terrain.Height - 1 - Row) * Terrain.PixelSizeMetres) * SceneCmPerMetre;
 			Vertices.Add(FVector(X, Y, ElevationCm(Row, Column)));
 			UV0.Add(FVector2D(Column / double(Terrain.Width),
 			                  Row / double(Terrain.Height)));
@@ -318,9 +321,9 @@ bool FFlightSimVisualScene::BuildTerrainInstance(UWorld* World, const FString& N
 			const int32 ColW = FMath::Max(Column - Stride, 0);
 			const int32 ColE = FMath::Min(Column + Stride, Terrain.Width - 1);
 			const double DzDx = (ElevationCm(Row, ColE) - ElevationCm(Row, ColW)) /
-				((ColE - ColW) * Terrain.PixelSizeMetres * CmPerMetre);
+				((ColE - ColW) * Terrain.PixelSizeMetres * SceneCmPerMetre);
 			const double DzDy = (ElevationCm(RowN, Column) - ElevationCm(RowS, Column)) /
-				((RowS - RowN) * Terrain.PixelSizeMetres * CmPerMetre);
+				((RowS - RowN) * Terrain.PixelSizeMetres * SceneCmPerMetre);
 			Normals.Add(FVector(-DzDx, -DzDy, 1.0).GetSafeNormal());
 		}
 	}
