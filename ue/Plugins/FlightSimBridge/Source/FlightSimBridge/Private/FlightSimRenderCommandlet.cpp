@@ -37,7 +37,7 @@ namespace
 	// The engine's unit cube is 100 cm across, so a scale of N gives an N-metre
 	// box and every size below reads directly in metres.
 	constexpr double RenderCmPerMetre = 100.0;   // unity-unique name
-	constexpr double RadiansToDegrees = 57.29577951308232;
+	constexpr double RenderRadiansToDegrees = 57.29577951308232;   // unity-unique name
 
 	// A placeholder airframe: boxes, roughly 747-shaped, with real hinges.
 	//
@@ -744,9 +744,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Record->SetStringField(TEXT("frame"), FrameName);
 		Record->SetNumberField(TEXT("t"), Scenario.ReadProperty(TEXT("simulation/sim-time-sec")));
 		Record->SetNumberField(TEXT("roll_deg"),
-		                       Scenario.ReadProperty(TEXT("attitude/phi-rad")) * RadiansToDegrees);
+		                       Scenario.ReadProperty(TEXT("attitude/phi-rad")) * RenderRadiansToDegrees);
 		Record->SetNumberField(TEXT("pitch_deg"),
-		                       Scenario.ReadProperty(TEXT("attitude/theta-rad")) * RadiansToDegrees);
+		                       Scenario.ReadProperty(TEXT("attitude/theta-rad")) * RenderRadiansToDegrees);
 		Record->SetNumberField(TEXT("aileron_cmd"), Scenario.Movement->Commands.Aileron);
 		Record->SetNumberField(TEXT("camera_roll_deg"), Director->GetCameraRollDegrees());
 		Record->SetNumberField(TEXT("lit_pixels"), Lit);
@@ -768,7 +768,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Record->SetNumberField(TEXT("tas_kt"),
 		                       Scenario.ReadProperty(TEXT("velocities/vtrue-kts")));
 		Record->SetNumberField(TEXT("heading_deg"),
-		                       Scenario.ReadProperty(TEXT("attitude/psi-rad")) * RadiansToDegrees);
+		                       Scenario.ReadProperty(TEXT("attitude/psi-rad")) * RenderRadiansToDegrees);
 		Record->SetNumberField(TEXT("agl_m"),
 		                       Scenario.ReadProperty(TEXT("position/h-agl-ft")) * 0.3048);
 		Record->SetNumberField(TEXT("wind_north_fps"),

@@ -652,12 +652,27 @@ floats verbatim. There is no second gust model to drift.
 **The condition matrix** (`experiments/showcase_matrix.py`) renders
 {calm, 25 kt crosswind, 15 kt gusty headwind, moderate turbulence w/ seed} ×
 {clear, hazy} × {dawn, noon} on both airframes over Matterhorn/Zermatt,
-Yosemite, and a synthesised control ridge — 720p30, 22 s clips, each manifest
+Yosemite, and a synthesised control ridge, plus three complex combined
+conditions on a stated clear/dawn + hazy/noon sub-grid — severe turbulence;
+crosswind + turbulence + ridge coupling; and a storm cell (25 kt crosswind
+gusting to ~43 kt, 5 m/s vertical gust, severe turbulence, ridge coupling) —
+every constituent of a combined cell being machinery that was null-tested
+alone before being combined. 132 cells, 720p30, 22 s clips, each manifest
 row carrying spec digest, terrain tiles + sha256, mesh + license, conditions
 and seed. Time of day is a stated sun-geometry approximation, not an
 ephemeris; haze is a fog-density parameter; exposure is manual per §6.6 with
 a per-scene bias recorded in the manifest. Cells that cannot render honestly
 are skipped with the reason recorded, never approximated.
+
+**Every clip carries a telemetry panel** (`experiments/showcase_panel.py`):
+a strip below the frame showing the run card's commanded values against the
+FDM's recorded per-frame state — live deltas, the wind actually inside the
+FDM, surface deflections measured off the scene components, and full-clip
+strip charts. The panel draws EXCLUSIVELY from recorded evidence (the card
+and the render manifest); it recomputes no physics and reads no pixels, and
+the honesty labels — turbulence seed with the visual-only verdict, ridge
+coupling, the flat physics slab — are printed on every frame of every clip
+rather than kept in a file nobody opens.
 
 Claims about aircraft response to environmental conditions are supported only
 to the extent Phases 3 and 4 measured them. The Unreal host's parity with the

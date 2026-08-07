@@ -61,10 +61,13 @@ Full claims and non-claims: docs/VALIDITY.md §1.6b. Summary:
   done — the gear still feels the flat slab, every manifest says so.
 * **Condition matrix.** `showcase_matrix.py`: {calm, crosswind25, gusty15,
   turb_moderate} x {clear, hazy} x {dawn, noon} x {B747, c172p} x
-  {matterhorn, yosemite, control} = 96 clips, 720p30 22 s, mp4 + contact
-  sheet + manifest rows (spec digest, tile IDs + sha, mesh + license,
-  conditions, seed). Gusts are precomputed per-step wind schedules from the
-  headless providers — one gust model, not two.
+  {matterhorn, yosemite, control}, plus complex combined cells (turb_severe,
+  crosswind25_turb, storm25) on the clear/dawn + hazy/noon sub-grid = 132
+  clips, 720p30 22 s, mp4 + contact sheet + manifest rows (spec digest, tile
+  IDs + sha, mesh + license, conditions, seed). Gusts are precomputed
+  per-step wind schedules from the headless providers — one gust model, not
+  two. Every clip carries the `showcase_panel.py` telemetry strip: commanded
+  vs achieved, from recorded evidence only.
 
 ## Toolchain facts that cost hours (do not rediscover)
 

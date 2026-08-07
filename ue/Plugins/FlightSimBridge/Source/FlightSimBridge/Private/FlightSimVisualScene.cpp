@@ -43,24 +43,34 @@ namespace
 	// stated as approximated in every manifest: rock above the slope limit,
 	// snow above the sidecar's snowline where it can settle, scrub in a band
 	// below the snowline, valley vegetation under it.
+	//
+	// The palette was CALIBRATED against rendered frames rather than derived:
+	// the mesh sRGB-encodes vertex colours on store, the material reads the
+	// bytes back raw, and at 5-20 km the atmosphere and fog add blue
+	// in-scatter on top -- so a theoretically-correct albedo rendered navy
+	// (measured) and the naive linear palette rendered mint (measured). The
+	// values below are the middle that reads as rock / forest / snow in the
+	// actual scene, and the classification is labeled approximated in every
+	// manifest regardless.
 	FLinearColor ClassifyVertex(double ElevationMetres, double SlopeDegrees,
 	                            double SnowlineMetres)
 	{
-		const FLinearColor Snow(0.90f, 0.92f, 0.95f);
-		const FLinearColor Rock(0.30f, 0.28f, 0.26f);
-		const FLinearColor Scrub(0.28f, 0.30f, 0.22f);
-		const FLinearColor Valley(0.13f, 0.22f, 0.10f);
+		const FLinearColor Snow(0.75f, 0.78f, 0.82f);
+		const FLinearColor Rock(0.068f, 0.060f, 0.053f);
+		const FLinearColor Scrub(0.058f, 0.068f, 0.034f);
+		const FLinearColor Valley(0.030f, 0.078f, 0.022f);
 
 		if (SnowlineMetres > 0.0 && ElevationMetres > SnowlineMetres - 150.0 &&
 		    SlopeDegrees < 52.0)
 		{
 			// Blend across a 300 m band around the snowline so the line is a
-			// transition, not a contour cut.
+			// transition, not a contour cut. A plain linear-space lerp: the
+			// HSV route rotated olive-to-white through mint.
 			const float Blend = FMath::Clamp(
 				static_cast<float>((ElevationMetres - (SnowlineMetres - 150.0)) / 300.0),
 				0.0f, 1.0f);
 			const FLinearColor Under = SlopeDegrees > 34.0 ? Rock : Scrub;
-			return FLinearColor::LerpUsingHSV(Under, Snow, Blend);
+			return FMath::Lerp(Under, Snow, Blend);
 		}
 		if (SlopeDegrees > 34.0)
 		{

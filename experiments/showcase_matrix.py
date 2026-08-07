@@ -68,6 +68,11 @@ SHOWCASE_DOUBLET = (
 #: +90, headwind = heading) so the words stay true whatever the flight path.
 CONDITIONS = ("calm", "crosswind25", "gusty15", "turb_moderate")
 
+#: Fog density per visibility word. Gate 6's 0.0025 suits its 300 m-altitude
+#: scene; from showcase altitudes the slant paths are kilometres longer and
+#: the same density reads as a blue veil over everything (measured on the
+#: Yosemite noon cell), so "clear" is thinner here. Recorded per clip.
+
 #: The complex cells: combined conditions, every constituent delivered by the
 #: machinery already null-tested alone (steady wind + schedule + Dryden +
 #: orographic coexist in one card). Rendered over a reduced visibility/time
@@ -75,7 +80,7 @@ CONDITIONS = ("calm", "crosswind25", "gusty15", "turb_moderate")
 #: stated plan, not a silent skip.
 COMPLEX_CONDITIONS = ("turb_severe", "crosswind25_turb", "storm25")
 COMPLEX_SUBGRID = (("clear", "dawn"), ("hazy", "noon"))
-VISIBILITY = {"clear": 0.0025, "hazy": 0.012}
+VISIBILITY = {"clear": 0.0012, "hazy": 0.010}
 #: Time of day as sun geometry plus an exposure bias for the §6.6 manual
 #: exposure. Approximations, recorded as such in every manifest.
 TIME_OF_DAY = {
@@ -342,6 +347,15 @@ def contact_sheet(rows: List[Dict], out_path: Path, columns: int = 8) -> Path:
 
     tile_w, tile_h, label_h = 320, 180, 34
     count = len(rows)
+    if count == 0:
+        # A zero-row sheet is a zero-height image PIL cannot even save;
+        # deliver an explicit empty marker instead of a crash after the
+        # skips were already reported.
+        empty = Image.new("RGB", (columns * tile_w, tile_h), (12, 12, 16))
+        ImageDraw.Draw(empty).text((16, tile_h // 2),
+                                   "no clips were delivered", fill=(255, 80, 80))
+        empty.save(out_path)
+        return out_path
     grid_rows = (count + columns - 1) // columns
     sheet = Image.new("RGB", (columns * tile_w, grid_rows * (tile_h + label_h)),
                       (12, 12, 16))
