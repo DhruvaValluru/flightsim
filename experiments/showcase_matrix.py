@@ -78,8 +78,22 @@ CONDITIONS = ("calm", "crosswind25", "gusty15", "turb_moderate")
 #: orographic coexist in one card). Rendered over a reduced visibility/time
 #: sub-grid to keep the matrix's wall clock finite -- the reduction is a
 #: stated plan, not a silent skip.
-COMPLEX_CONDITIONS = ("turb_severe", "crosswind25_turb", "storm25")
+COMPLEX_CONDITIONS = ("turb_severe", "crosswind25_turb", "storm25",
+                      "microburst")
 COMPLEX_SUBGRID = (("clear", "dawn"), ("hazy", "noon"))
+
+#: Microburst encounter parameters per airframe: the field is scaled so the
+#: slower aircraft is not parked inside the core for the whole clip. AGL is
+#: the classic low-level-encounter regime (Delta 191 was at ~250 m).
+MICROBURST = {
+    "agl_m": 300.0,
+    "ambient_headwind_kt": 10.0,
+    "encounter_t_s": 11.0,
+    "B747": {"core_radius_m": 1000.0, "outflow_max_mps": 12.0,
+             "outflow_height_m": 150.0},
+    "c172p": {"core_radius_m": 600.0, "outflow_max_mps": 8.0,
+              "outflow_height_m": 120.0},
+}
 VISIBILITY = {"clear": 0.0012, "hazy": 0.010}
 #: Time of day as sun geometry plus an exposure bias for the §6.6 manual
 #: exposure. Approximations, recorded as such in every manifest.
@@ -213,19 +227,106 @@ def gust_schedule(from_deg: float, steady_kt: float, rate_hz: float,
     return schedule
 
 
+class CellUnrenderable(Exception):
+    """This cell cannot be staged honestly; skip it loudly."""
+
+
+def microburst_track(terrain: Dict, altitude_m: float,
+                     airspeed_mps: float) -> float:
+    """A heading whose nominal 300 m AGL track clears the visual terrain.
+
+    The physics ground is the flat slab either way; this check is about the
+    PICTURE -- a low-level run that visually tunnels through a mountainside
+    would be nonsense on screen. Candidate headings are scanned and the one
+    with the most clearance above the baked raster along the whole track
+    wins; if none clears, the cell is refused rather than rendered wrong.
+    """
+    baked = Heightfield.read(terrain["path"])
+    from pyproj import Transformer
+
+    transformer = Transformer.from_crs("EPSG:4326", baked.georeference.crs,
+                                       always_xy=True)
+    origin_x, origin_y = transformer.transform(terrain["lon"], terrain["lat"])
+    track_length = airspeed_mps * (DURATION_S + 4.0) + 2000.0
+
+    best_heading, best_clearance = None, -1e9
+    candidates = [terrain["heading"]] + list(range(0, 360, 30))
+    for heading in candidates:
+        radians = math.radians(heading)
+        clearance = 1e9
+        for step in range(0, int(track_length), 300):
+            x = origin_x + step * math.sin(radians)
+            y = origin_y + step * math.cos(radians)
+            clearance = min(clearance, altitude_m - baked.elevation_at(x, y))
+        if clearance > best_clearance:
+            best_heading, best_clearance = float(heading), clearance
+    if best_clearance < 60.0:
+        raise CellUnrenderable(
+            f"no heading gives a {MICROBURST['agl_m']:.0f} m AGL track over "
+            f"{terrain['title']} with 60 m of visual terrain clearance "
+            f"(best {best_clearance:.0f} m); refusing to render an aircraft "
+            f"tunnelling through a mountainside")
+    return best_heading
+
+
+def microburst_schedule(heading_deg: float, airspeed_mps: float,
+                        rate_hz: float, airframe_key: str) -> List[Dict[str, float]]:
+    """Ambient headwind + the downburst field along the nominal track.
+
+    Like the discrete gusts, the field is evaluated as a function of time on
+    the NOMINAL track (constant speed and heading from the origin). The
+    field itself is spatial and divergence-free (core/environment/downburst);
+    the along-track evaluation is the same approximation MIL-style discrete
+    gusts use, and it is labeled on the clip.
+    """
+    from core.environment.downburst import Downburst
+
+    parameters = MICROBURST[airframe_key]
+    radians = math.radians(heading_deg)
+    distance = airspeed_mps * MICROBURST["encounter_t_s"]
+    burst = Downburst(
+        centre_north_m=distance * math.cos(radians),
+        centre_east_m=distance * math.sin(radians),
+        **parameters)
+    ambient = SteadyWind(u.kt_to_mps(MICROBURST["ambient_headwind_kt"]),
+                         heading_deg)
+
+    steps = int(round(DURATION_S * rate_hz))
+    schedule = []
+    for step in range(steps):
+        t = step * (1.0 / rate_hz)
+        north = airspeed_mps * t * math.cos(radians)
+        east = airspeed_mps * t * math.sin(radians)
+        wind = burst.wind_components(north, east, MICROBURST["agl_m"])
+        base = ambient.wind_at(None, t)
+        schedule.append({
+            "t_s": round(t, 6),
+            "north_fps": u.mps_to_fps(base.north + wind.north),
+            "east_fps": u.mps_to_fps(base.east + wind.east),
+            "down_fps": u.mps_to_fps(wind.down),
+        })
+    return schedule
+
+
 def build_cell_card(out: Path, airframe_key: str, terrain_key: str,
                     terrain: Dict, condition: str, seed: int) -> Dict:
     """One cell's spec + run card, with every honesty label computed here."""
     airframe = AIRFRAMES[airframe_key]
     altitude = airframe["altitude"][terrain_key]
+    flight_heading = terrain["heading"]
+    airspeed_for_track = u.kt_to_mps(250.0 if airframe_key == "B747" else 100.0)
+    if condition == "microburst":
+        # The low-level encounter: altitude and heading are the condition's.
+        altitude = terrain["ground_m"] + MICROBURST["agl_m"]
+        flight_heading = microburst_track(terrain, altitude, airspeed_for_track)
     spec = reference_spec(airframe["prompt"].format(alt=int(altitude)))
     spec.set("latitude", terrain["lat"], frm=f"{terrain_key} scene origin")
     spec.set("longitude", terrain["lon"], frm=f"{terrain_key} scene origin")
-    spec.set("heading", terrain["heading"], frm=f"{terrain_key} flight path")
+    spec.set("heading", flight_heading, frm=f"{terrain_key} flight path")
     spec.set("terrain_elevation", terrain["ground_m"],
              frm="baked raster at origin (flat physics slab at this height)")
 
-    heading = terrain["heading"]
+    heading = flight_heading
     airspeed_mps = u.kt_to_mps(float(spec.airspeed.value))
     control_inputs: Sequence[Dict[str, float]] = SHOWCASE_DOUBLET
     wind_schedule = None
@@ -283,6 +384,24 @@ def build_cell_card(out: Path, airframe_key: str, terrain_key: str,
         control_inputs = ()
         wind_note = (f"storm: 25 kt gusting crosswind from {round(direction)} "
                      f"(surges to ~43 kt, 5 m/s vertical gust) + {turbulence_note}")
+    elif condition == "microburst":
+        # The low-level wind-shear encounter: headwind surge, downdraft core,
+        # tailwind switch (core/environment/downburst -- Vicroy shaping,
+        # divergence-free by construction). Ambient headwind keeps the
+        # orographic coupling alive; the burst rides the schedule.
+        orographic = set_steady_wind(MICROBURST["ambient_headwind_kt"],
+                                     heading, "ambient headwind")
+        wind_schedule = microburst_schedule(heading, airspeed_for_track,
+                                            float(spec.rate.value),
+                                            airframe_key)
+        control_inputs = ()
+        parameters = MICROBURST[airframe_key]
+        wind_note = (
+            f"microburst: {parameters['outflow_max_mps']:g} m/s outflow, core "
+            f"R {parameters['core_radius_m']:g} m, crossed ~t="
+            f"{MICROBURST['encounter_t_s']:g} s at {MICROBURST['agl_m']:g} m "
+            f"AGL, + {MICROBURST['ambient_headwind_kt']:g} kt ambient "
+            f"(field evaluated on the NOMINAL track; labeled)")
 
     card_path = write_run_card(spec, out, control_inputs=control_inputs,
                                duration_s=DURATION_S,
@@ -455,9 +574,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 (frames / "render.json").is_file():
             print(f"  [{index + 1:3d}/{len(cells)}] {clip_id}: kept")
         else:
-            cell = build_cell_card(out / "cards" / f"{clip_id}.json",
-                                   airframe_key, terrain_key, terrain,
-                                   condition, seed)
+            try:
+                cell = build_cell_card(out / "cards" / f"{clip_id}.json",
+                                       airframe_key, terrain_key, terrain,
+                                       condition, seed)
+            except CellUnrenderable as why:
+                print(f"  [{index + 1:3d}/{len(cells)}] {clip_id}: "
+                      f"SKIPPED -- {why}")
+                skipped.append({"clip_id": clip_id, "reason": str(why)})
+                continue
             ok = render_cell(
                 Path(cell["card"]), frames, terrain["path"],
                 (root / AIRFRAMES[airframe_key]["manifest"]).resolve(),

@@ -139,6 +139,15 @@ mutate core/environment/stack.py \
             writes.update(provider.configure())' \
     "turbulence reaches the FDM" tests/test_environment.py || failures=$((failures+1))
 
+mutate core/environment/downburst.py \
+    '        ratio_sq = (r_m / self.core_radius_m) ** 2
+        integral = self.outflow_height_m * _shaping_integral(zeta)
+        return -self._lambda * (1.0 - ratio_sq) * math.exp(-ratio_sq) * integral' \
+    '        ratio_sq = (r_m / self.core_radius_m) ** 2
+        integral = self.outflow_height_m * _shaping_integral(zeta)
+        return -self._lambda * math.exp(-ratio_sq) * integral  # MUTATED: continuity factor dropped' \
+    "downburst vertical velocity obeys continuity" tests/test_downburst.py || failures=$((failures+1))
+
 mutate core/environment/stack.py \
     '        wind = self.wind_at(position, time_s)' \
     '        from .base import WindNED

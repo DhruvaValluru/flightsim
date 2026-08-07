@@ -664,6 +664,20 @@ ephemeris; haze is a fog-density parameter; exposure is manual per §6.6 with
 a per-scene bias recorded in the manifest. Cells that cannot render honestly
 are skipped with the reason recorded, never approximated.
 
+**The microburst cells** (`core/environment/downburst.py`) stage the classic
+low-level wind-shear encounter at 300 m AGL: headwind surge, downdraft core,
+tailwind reversal. The field is axisymmetric and EXACTLY divergence-free —
+the vertical velocity is derived from incompressible continuity, checked
+numerically in the tests and mutation-guarded — with Vicroy's vertical
+shaping constants (NASA TM-104053) and a Gaussian radial envelope of
+convenience; magnitudes (12 m/s outflow, ~14 m/s core downdraft for the 747
+cell) sit inside JAWS/Fujita measured envelopes and are recorded per clip.
+Two stated approximations: the field is evaluated along the NOMINAL track as
+a function of time (the same approximation MIL-style discrete gusts make),
+and the encounter altitude/heading are chosen by an automatic visual-terrain
+clearance check that REFUSES the cell if no heading keeps the low-level track
+60 m clear of the visual terrain.
+
 **Every clip carries a telemetry panel** (`experiments/showcase_panel.py`):
 a strip below the frame showing the run card's commanded values against the
 FDM's recorded per-frame state — live deltas, the wind actually inside the

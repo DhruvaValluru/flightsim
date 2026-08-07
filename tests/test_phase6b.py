@@ -32,7 +32,9 @@ from core.terrain.heightfield import Heightfield
 from core.terrain import dem
 from experiments.gate5_ue_parity import reference_spec, write_run_card
 from experiments.orographic_ue import verify_port
-from experiments.showcase_matrix import build_cell_card, gust_schedule
+from experiments.showcase_matrix import (
+    CellUnrenderable, build_cell_card, gust_schedule, microburst_track,
+)
 from experiments.turbulence_ue import compare_realisations, null_test
 
 REPO = Path(__file__).resolve().parents[1]
@@ -373,11 +375,11 @@ def test_orographic_port_check_catches_a_drifted_port(tmp_path):
 
 # -- the condition matrix's honesty labels -------------------------------
 
-def _fake_terrain(tmp_path):
+def _fake_terrain(tmp_path, base_elevation_m=500.0, rms_slope_deg=20.0):
     from core.terrain.synthesis import TerrainStatistics, generate
     field = generate(size=96, pixel_size_m=30.0,
-                     statistics=TerrainStatistics(rms_slope_deg=20.0),
-                     seed=3, base_elevation_m=500.0, name="cellridge")
+                     statistics=TerrainStatistics(rms_slope_deg=rms_slope_deg),
+                     seed=3, base_elevation_m=base_elevation_m, name="cellridge")
     field.write(tmp_path / "cellridge")
     from pyproj import Transformer
     inverse = Transformer.from_crs(field.georeference.crs, "EPSG:4326",
@@ -460,6 +462,53 @@ def test_storm_cell_gusts_harder_and_is_severe(tmp_path):
                      for r in card["wind_schedule"])
     assert storm_peak > u.mps_to_fps(u.kt_to_mps(25.0 + 15.0))
     assert "storm" in cell["wind_note"]
+
+
+def test_microburst_cell_stages_the_reversal(tmp_path):
+    # The classic encounter, checkable from the card alone: low altitude,
+    # headwind component surging before the core, tailwind after it, the
+    # downdraft peaking near the crossing time, and the honesty label on the
+    # note. The field itself is verified in test_downburst; this test checks
+    # the STAGING.
+    # Gentle terrain: the staging is under test here, not the clearance
+    # refusal (that has its own test below).
+    terrain = _fake_terrain(tmp_path, rms_slope_deg=5.0)
+    cell = build_cell_card(tmp_path / "card.json", "B747", "control",
+                           terrain, "microburst", 63300)
+    card = json.loads((tmp_path / "card.json").read_text())
+    assert card["altitude_m"] == terrain["ground_m"] + 300.0
+    assert card["wind_speed_kt"] == 10.0
+    assert "orographic" in card
+    assert card["control_inputs"] == []
+    schedule = card["wind_schedule"]
+
+    import math as m
+    heading = m.radians(card["heading_deg"])
+    along = [r["north_fps"] * m.cos(heading) + r["east_fps"] * m.sin(heading)
+             for r in schedule]
+    downs = [r["down_fps"] for r in schedule]
+    times = [r["t_s"] for r in schedule]
+    # Along-track wind: more negative than ambient alone before the core
+    # (headwind blows against the track), positive after it.
+    encounter = 11.0
+    before = min(a for a, t in zip(along, times) if t < encounter)
+    after = max(a for a, t in zip(along, times) if t > encounter)
+    assert before < -20.0          # ambient ~-17 fps plus the outflow
+    assert after > 5.0             # tailwind despite the ambient headwind
+    # Downdraft peaks near the crossing, not at the edges.
+    peak_time = times[downs.index(max(downs))]
+    assert abs(peak_time - encounter) < 3.0
+    assert max(downs) > 20.0       # a real sink, in fps
+    assert "NOMINAL track" in cell["wind_note"]
+
+
+def test_microburst_track_refuses_a_wall(tmp_path):
+    # A terrain the flight cannot clear at 300 m AGL in any direction must
+    # refuse the cell rather than render an aircraft inside a mountainside.
+    # Raise every elevation ~2.3 km above the declared origin ground.
+    terrain = _fake_terrain(tmp_path, base_elevation_m=2800.0)
+    with pytest.raises(CellUnrenderable):
+        microburst_track(terrain, terrain["ground_m"] + 300.0, 128.0)
 
 
 def test_gust_schedule_reduces_to_steady_wind_between_gusts():
