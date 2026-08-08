@@ -14,6 +14,7 @@
 #include "GeoReferencingSystem.h"
 #include "HAL/ThreadManager.h"
 #include "Misc/FileHelper.h"
+#include "ProceduralMeshComponent.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
@@ -297,6 +298,136 @@ bool FFlightSimScenarioWorld::ReadCard(const FString& Path,
 		(*Orographic)->TryGetBoolField(TEXT("lee"), Out.bOrographicLee);
 	}
 
+	// Optional downburst block (Phase 7 2.3): the microburst field evaluated
+	// at the aircraft's actual position, replacing the labeled nominal-track
+	// delivery. Same projected local frame as the orographic field.
+	const TSharedPtr<FJsonObject>* DownburstJson = nullptr;
+	if (Root->TryGetObjectField(TEXT("downburst"), DownburstJson) && DownburstJson != nullptr)
+	{
+		Out.bDownburst = true;
+		if (!ReadNumber(*DownburstJson, TEXT("origin_x_m"), Out.DownburstOriginXMetres, Error) ||
+		    !ReadNumber(*DownburstJson, TEXT("origin_y_m"), Out.DownburstOriginYMetres, Error) ||
+		    !ReadNumber(*DownburstJson, TEXT("centre_north_m"), Out.DownburstCentreNorthMetres, Error) ||
+		    !ReadNumber(*DownburstJson, TEXT("centre_east_m"), Out.DownburstCentreEastMetres, Error) ||
+		    !ReadNumber(*DownburstJson, TEXT("core_radius_m"), Out.DownburstCoreRadiusMetres, Error) ||
+		    !ReadNumber(*DownburstJson, TEXT("outflow_max_mps"), Out.DownburstOutflowMaxMps, Error) ||
+		    !ReadNumber(*DownburstJson, TEXT("outflow_height_m"), Out.DownburstOutflowHeightMetres, Error))
+		{
+			return false;
+		}
+	}
+
+	// Optional rotor block (Phase 7 1.3): per-step W20 coupled to the lee
+	// sink. Requires the orographic block -- the rotor is ITS lee field.
+	const TSharedPtr<FJsonObject>* RotorJson = nullptr;
+	if (Root->TryGetObjectField(TEXT("rotor"), RotorJson) && RotorJson != nullptr)
+	{
+		Out.bRotor = true;
+		if (!ReadNumber(*RotorJson, TEXT("sigma_gain"), Out.RotorSigmaGain, Error) ||
+		    !ReadNumber(*RotorJson, TEXT("sigma_per_w20"), Out.RotorSigmaPerW20, Error) ||
+		    !ReadNumber(*RotorJson, TEXT("w20_cap_fps"), Out.RotorW20CapFps, Error) ||
+		    !ReadNumber(*RotorJson, TEXT("background_w20_fps"), Out.RotorBackgroundW20Fps, Error))
+		{
+			return false;
+		}
+		if (!Out.bOrographic)
+		{
+			Error = TEXT("rotor block without an orographic block: the rotor "
+			             "is the orographic field's lee turbulence and cannot "
+			             "exist without it");
+			return false;
+		}
+	}
+
+	// Optional log-profile block (Phase 7 2.1).
+	const TSharedPtr<FJsonObject>* LogProfileJson = nullptr;
+	if (Root->TryGetObjectField(TEXT("log_profile"), LogProfileJson) && LogProfileJson != nullptr)
+	{
+		Out.bLogProfile = true;
+		if (!ReadNumber(*LogProfileJson, TEXT("reference_speed_mps"), Out.LogProfileReferenceSpeedMps, Error) ||
+		    !ReadNumber(*LogProfileJson, TEXT("from_deg"), Out.LogProfileFromDegrees, Error) ||
+		    !ReadNumber(*LogProfileJson, TEXT("reference_height_m"), Out.LogProfileReferenceHeightMetres, Error) ||
+		    !ReadNumber(*LogProfileJson, TEXT("z0_m"), Out.LogProfileZ0Metres, Error) ||
+		    !ReadNumber(*LogProfileJson, TEXT("surface_layer_top_m"), Out.LogProfileSurfaceLayerTopMetres, Error))
+		{
+			return false;
+		}
+	}
+
+	// Optional thermals block (Phase 7 2.2): Allen's field, every position
+	// drawn in Python from the spec seed and carried verbatim.
+	const TSharedPtr<FJsonObject>* ThermalsJson = nullptr;
+	if (Root->TryGetObjectField(TEXT("thermals"), ThermalsJson) && ThermalsJson != nullptr)
+	{
+		Out.bThermals = true;
+		if (!ReadNumber(*ThermalsJson, TEXT("wstar_mps"), Out.ThermalsWstarMps, Error) ||
+		    !ReadNumber(*ThermalsJson, TEXT("zi_m"), Out.ThermalsZiMetres, Error) ||
+		    !ReadNumber(*ThermalsJson, TEXT("area_north_m"), Out.ThermalsAreaNorthMetres, Error) ||
+		    !ReadNumber(*ThermalsJson, TEXT("area_east_m"), Out.ThermalsAreaEastMetres, Error) ||
+		    !ReadNumber(*ThermalsJson, TEXT("origin_x_m"), Out.ThermalsOriginXMetres, Error) ||
+		    !ReadNumber(*ThermalsJson, TEXT("origin_y_m"), Out.ThermalsOriginYMetres, Error))
+		{
+			return false;
+		}
+		const TArray<TSharedPtr<FJsonValue>>* Positions = nullptr;
+		if (!(*ThermalsJson)->TryGetArrayField(TEXT("positions_m"), Positions) ||
+		    Positions == nullptr || Positions->Num() == 0)
+		{
+			Error = TEXT("thermals block has no positions_m array");
+			return false;
+		}
+		for (const TSharedPtr<FJsonValue>& Value : *Positions)
+		{
+			const TArray<TSharedPtr<FJsonValue>>* Pair = nullptr;
+			if (!Value->TryGetArray(Pair) || Pair == nullptr || Pair->Num() != 2)
+			{
+				Error = TEXT("thermals positions_m entries must be [north, east] pairs");
+				return false;
+			}
+			Out.ThermalNorthMetres.Add((*Pair)[0]->AsNumber());
+			Out.ThermalEastMetres.Add((*Pair)[1]->AsNumber());
+		}
+	}
+
+	// Optional W20 schedule (Phase 7 3.1). W20 fps ONLY: mid-run severity
+	// changes deliver 2-5x the commanded sigma_w on this JSBSim build, and
+	// per-step seed writes are the 515 g failure (JSBSIM_CORRECTIONS §9/§13).
+	const TSharedPtr<FJsonObject>* TurbSchedule = nullptr;
+	if (Root->TryGetObjectField(TEXT("turbulence_schedule"), TurbSchedule) && TurbSchedule != nullptr)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Times = nullptr;
+		const TArray<TSharedPtr<FJsonValue>>* W20 = nullptr;
+		if (!(*TurbSchedule)->TryGetArrayField(TEXT("times_s"), Times) || Times == nullptr ||
+		    !(*TurbSchedule)->TryGetArrayField(TEXT("w20_fps"), W20) || W20 == nullptr ||
+		    Times->Num() == 0 || Times->Num() != W20->Num())
+		{
+			Error = TEXT("turbulence_schedule needs equal-length times_s and w20_fps arrays");
+			return false;
+		}
+		for (int32 i = 0; i < Times->Num(); ++i)
+		{
+			Out.TurbulenceScheduleTimes.Add((*Times)[i]->AsNumber());
+			Out.TurbulenceScheduleW20Fps.Add((*W20)[i]->AsNumber());
+		}
+		if (Out.bRotor)
+		{
+			Error = TEXT("a card cannot carry both a rotor coupling and a W20 "
+			             "schedule: both drive the same property");
+			return false;
+		}
+	}
+	Root->TryGetBoolField(TEXT("orographic_follow_schedule"), Out.bOrographicFollowSchedule);
+	if (Out.bOrographicFollowSchedule &&
+	    (!Out.bOrographic || Out.WindScheduleTimes.Num() == 0))
+	{
+		Error = TEXT("orographic_follow_schedule needs both an orographic block "
+		             "and a wind schedule to follow");
+		return false;
+	}
+
+	// Optional real heightfield collision (Phase 7 1.2).
+	Root->TryGetStringField(TEXT("collision_terrain"), Out.CollisionTerrainPath);
+
 	bool bHoldState = false;
 	if (!Root->TryGetBoolField(TEXT("hold_state"), bHoldState))
 	{
@@ -414,6 +545,28 @@ bool FFlightSimScenarioWorld::Build(const FFlightSimScenarioCard& Card, FString&
 		}
 		GeoReferencing->ProjectedCRS = OrographicTerrain.Crs;
 	}
+	if (!Card.CollisionTerrainPath.IsEmpty())
+	{
+		if (!CollisionTerrain.Load(Card.CollisionTerrainPath, Error))
+		{
+			return false;
+		}
+		if (CollisionTerrain.Crs.IsEmpty() || !CollisionTerrain.bProjected)
+		{
+			Error = FString::Printf(
+				TEXT("collision terrain '%s' carries no projected CRS; the ")
+				TEXT("ground cannot be placed honestly."),
+				*Card.CollisionTerrainPath);
+			return false;
+		}
+		if (Card.bOrographic && CollisionTerrain.Crs != OrographicTerrain.Crs)
+		{
+			Error = TEXT("collision and orographic terrain disagree about the "
+			             "CRS; refusing two different grounds");
+			return false;
+		}
+		GeoReferencing->ProjectedCRS = CollisionTerrain.Crs;
+	}
 	GeoReferencing->ApplySettings();
 
 	if (Card.bOrographic)
@@ -433,27 +586,109 @@ bool FFlightSimScenarioWorld::Build(const FFlightSimScenarioCard& Card, FString&
 		       Card.bOrographicLee ? TEXT("on") : TEXT("off"));
 	}
 
+	// Phase 7 environment couplings. Each one needs only the parameters the
+	// card carries; the projection context is the one that placed the terrain.
+	if (Card.bDownburst)
+	{
+		Downburst.Init(Card.DownburstCentreNorthMetres,
+		               Card.DownburstCentreEastMetres,
+		               Card.DownburstCoreRadiusMetres,
+		               Card.DownburstOutflowMaxMps,
+		               Card.DownburstOutflowHeightMetres);
+		bDownburstReady = true;
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("downburst at local (%.0f, %.0f) m: core %.0f m, outflow ")
+		       TEXT("%.1f m/s peaking at %.0f m AGL -- POSITION-COUPLED"),
+		       Card.DownburstCentreNorthMetres, Card.DownburstCentreEastMetres,
+		       Card.DownburstCoreRadiusMetres, Card.DownburstOutflowMaxMps,
+		       Card.DownburstOutflowHeightMetres);
+	}
+	if (Card.bRotor)
+	{
+		RotorCard.SigmaGain = Card.RotorSigmaGain;
+		RotorCard.SigmaPerW20 = Card.RotorSigmaPerW20;
+		RotorCard.W20CapFps = Card.RotorW20CapFps;
+		RotorCard.BackgroundW20Fps = Card.RotorBackgroundW20Fps;
+		bRotorReady = true;
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("lee-rotor turbulence: W20 = clamp(gain %.2f x lee sink / ")
+		       TEXT("%.3f, background %.1f fps, cap %.1f fps), written per step ")
+		       TEXT("-- W20 only, seed and severity stay configure-time (§13)"),
+		       Card.RotorSigmaGain, Card.RotorSigmaPerW20,
+		       Card.RotorBackgroundW20Fps, Card.RotorW20CapFps);
+	}
+	if (Card.bLogProfile)
+	{
+		LogProfileCard.ReferenceSpeedMps = Card.LogProfileReferenceSpeedMps;
+		LogProfileCard.ReferenceHeightMetres = Card.LogProfileReferenceHeightMetres;
+		LogProfileCard.Z0Metres = Card.LogProfileZ0Metres;
+		LogProfileCard.SurfaceLayerTopMetres = Card.LogProfileSurfaceLayerTopMetres;
+		const double Radians = FMath::DegreesToRadians(Card.LogProfileFromDegrees);
+		LogProfileCard.NorthUnit = -FMath::Cos(Radians);
+		LogProfileCard.EastUnit = -FMath::Sin(Radians);
+		bLogProfileReady = true;
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("log-profile surface layer: %.1f m/s at %.0f m ref, z0 %.4f m, ")
+		       TEXT("held above %.0f m AGL"),
+		       Card.LogProfileReferenceSpeedMps,
+		       Card.LogProfileReferenceHeightMetres, Card.LogProfileZ0Metres,
+		       Card.LogProfileSurfaceLayerTopMetres);
+	}
+	if (Card.bThermals)
+	{
+		ThermalsCard.WstarMps = Card.ThermalsWstarMps;
+		ThermalsCard.ZiMetres = Card.ThermalsZiMetres;
+		ThermalsCard.AreaNorthMetres = Card.ThermalsAreaNorthMetres;
+		ThermalsCard.AreaEastMetres = Card.ThermalsAreaEastMetres;
+		ThermalsCard.OriginXMetres = Card.ThermalsOriginXMetres;
+		ThermalsCard.OriginYMetres = Card.ThermalsOriginYMetres;
+		ThermalsCard.NorthMetres = Card.ThermalNorthMetres;
+		ThermalsCard.EastMetres = Card.ThermalEastMetres;
+		bThermalsReady = true;
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("thermals (Allen TM-2006-214019): %d updrafts, w* %.2f m/s, ")
+		       TEXT("zi %.0f m over %.0f x %.0f m"),
+		       Card.ThermalNorthMetres.Num(), Card.ThermalsWstarMps,
+		       Card.ThermalsZiMetres, Card.ThermalsAreaNorthMetres,
+		       Card.ThermalsAreaEastMetres);
+	}
+
 	// -- ground ------------------------------------------------------------
 	// The plugin answers JSBSim's ground queries with a line trace against
 	// world geometry (UEGroundCallback). With nothing to hit it reports height
 	// above terrain 0.0 everywhere, which puts a cruising aircraft's landing
-	// gear in permanent ground contact. A query-only slab is the smallest thing
-	// that makes the ground model tell the truth.
-	const double TrackMetres = Card.AirspeedKnots * KnotsToMetresPerSecond * Card.DurationSeconds;
-	const double HalfExtentCm = (5000.0 + 2.0 * TrackMetres) * MetresToCentimetres;
-	const double HalfThicknessCm = 500.0 * MetresToCentimetres;
+	// gear in permanent ground contact.
+	if (!Card.CollisionTerrainPath.IsEmpty())
+	{
+		// Phase 7 1.2: real heightfield collision, built from the SAME baked
+		// raster the visuals draw and the orographic field samples -- one
+		// raster, one sha, all three uses. Replaces the flat slab entirely
+		// for this card; VerifyTrimmedCondition checks against the raster.
+		if (!BuildTerrainCollision(Card, Error))
+		{
+			return false;
+		}
+	}
+	else
+	{
+		// A query-only slab is the smallest thing that makes the ground
+		// model tell the truth over abstract terrain.
+		const double TrackMetres = Card.AirspeedKnots * KnotsToMetresPerSecond * Card.DurationSeconds;
+		const double HalfExtentCm = (5000.0 + 2.0 * TrackMetres) * MetresToCentimetres;
+		const double HalfThicknessCm = 500.0 * MetresToCentimetres;
 
-	AActor* Ground = World->SpawnActor<AActor>();
-	UBoxComponent* Slab = NewObject<UBoxComponent>(Ground, TEXT("GroundSlab"));
-	Ground->SetRootComponent(Slab);
-	Slab->SetBoxExtent(FVector(HalfExtentCm, HalfExtentCm, HalfThicknessCm), false);
-	Slab->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-	Slab->SetCollisionObjectType(ECC_WorldStatic);
-	Slab->SetCollisionResponseToAllChannels(ECR_Block);
-	Slab->RegisterComponent();
-	// Top face at engine Z = 0, which the georeferencing origin puts at the
-	// spec's terrain elevation.
-	Ground->SetActorLocation(FVector(0.0, 0.0, -HalfThicknessCm));
+		AActor* Ground = World->SpawnActor<AActor>();
+		UBoxComponent* Slab = NewObject<UBoxComponent>(Ground, TEXT("GroundSlab"));
+		Ground->SetRootComponent(Slab);
+		Slab->SetBoxExtent(FVector(HalfExtentCm, HalfExtentCm, HalfThicknessCm), false);
+		Slab->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		Slab->SetCollisionObjectType(ECC_WorldStatic);
+		Slab->SetCollisionResponseToAllChannels(ECR_Block);
+		Slab->RegisterComponent();
+		// Top face at engine Z = 0, which the georeferencing origin puts at
+		// the spec's terrain elevation.
+		Ground->SetActorLocation(FVector(0.0, 0.0, -HalfThicknessCm));
+	}
 
 	// -- the aircraft ------------------------------------------------------
 	Aircraft = World->SpawnActor<AActor>();
@@ -623,7 +858,26 @@ bool FFlightSimScenarioWorld::VerifyTrimmedCondition(const FFlightSimScenarioCar
 	const double AchievedLatitude = ReadProperty(TEXT("position/lat-geod-deg"));
 	const double AchievedLongitude = ReadProperty(TEXT("position/long-gc-deg"));
 	const double AchievedAboveGround = ReadProperty(TEXT("position/h-agl-ft")) * FeetToMetres;
-	const double ExpectedAboveGround = Card.AltitudeMetres - Card.TerrainElevationMetres;
+	// Over real collision terrain the RIGHT claim is height above the raster
+	// under the aircraft, not above the spec's flat elevation: an aircraft
+	// trimmed at 3600 m MSL over rising ground has a different AGL at every
+	// point, and checking the flat number would either fail correct runs or
+	// pass wrong ones depending on where the flight starts (Phase 7 1.2).
+	double ExpectedAboveGround = Card.AltitudeMetres - Card.TerrainElevationMetres;
+	if (bCollisionTerrainReady)
+	{
+		FVector Projected;
+		GeoReferencing->GeographicToProjected(
+			FGeographicCoordinates(Card.LongitudeDegrees, Card.LatitudeDegrees, 0.0),
+			Projected);
+		const double RasterElevation =
+			CollisionTerrain.ElevationAt(Projected.X, Projected.Y);
+		ExpectedAboveGround = Card.AltitudeMetres - RasterElevation;
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("AGL check against the collision raster: elevation under ")
+		       TEXT("the start point %.1f m (spec's flat value %.1f m)"),
+		       RasterElevation, Card.TerrainElevationMetres);
+	}
 
 	UE_LOG(LogFlightSimScenario, Display, TEXT("trimmed state"));
 	UE_LOG(LogFlightSimScenario, Display,
@@ -708,6 +962,224 @@ void FFlightSimScenarioWorld::LatchTrimmedControls(bool bMassHeld)
 	       Movement->Commands.GearDown);
 }
 
+bool FFlightSimScenarioWorld::BuildTerrainCollision(
+	const FFlightSimScenarioCard& Card, FString& Error)
+{
+	// The same vertex chain as the VISUAL terrain (projected CRS ->
+	// ProjectedToEngine through the one PROJ context), so the ground the
+	// gear feels and the ground on screen cannot be two projections of the
+	// data. Stride 1: collision carries the raster's FULL 30 m grid (the
+	// render mesh's stride 2 is presentation), so the only parity gap left
+	// against the headless bilinear lookup is triangle-vs-bilinear
+	// interpolation inside a cell -- and the AGL parity measurement
+	// quantifies that rather than assuming it away.
+	const int32 Stride = 1;
+	const int32 Columns = (CollisionTerrain.Width - 1) / Stride + 1;
+	const int32 Rows = (CollisionTerrain.Height - 1) / Stride + 1;
+
+	TArray<FVector> Vertices;
+	Vertices.Reserve(Rows * Columns);
+	for (int32 Row = 0; Row < CollisionTerrain.Height; Row += Stride)
+	{
+		for (int32 Column = 0; Column < CollisionTerrain.Width; Column += Stride)
+		{
+			const double X = CollisionTerrain.OriginXMetres
+			                 + Column * CollisionTerrain.PixelSizeMetres;
+			const double Y = CollisionTerrain.OriginYMetres
+			                 - Row * CollisionTerrain.PixelSizeMetres;
+			const double Elevation = CollisionTerrain.SampleMetres(Row, Column);
+			FVector Engine;
+			GeoReferencing->ProjectedToEngine(FVector(X, Y, Elevation), Engine);
+			Vertices.Add(Engine);
+		}
+	}
+	TArray<int32> Triangles;
+	Triangles.Reserve((Rows - 1) * (Columns - 1) * 6);
+	for (int32 Row = 0; Row < Rows - 1; ++Row)
+	{
+		for (int32 Column = 0; Column < Columns - 1; ++Column)
+		{
+			const int32 A = Row * Columns + Column;
+			const int32 B = A + 1;
+			const int32 C = A + Columns;
+			const int32 D = C + 1;
+			Triangles.Append({A, C, B, B, C, D});
+		}
+	}
+
+	AActor* Ground = World->SpawnActor<AActor>();
+	UProceduralMeshComponent* Mesh =
+		NewObject<UProceduralMeshComponent>(Ground, TEXT("TerrainCollision"));
+	Ground->SetRootComponent(Mesh);
+	Mesh->SetMobility(EComponentMobility::Movable);
+	Mesh->bUseComplexAsSimpleCollision = true;
+	Mesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, {}, {}, {},
+	                                    {}, true /* collision */);
+	Mesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	Mesh->SetCollisionObjectType(ECC_WorldStatic);
+	Mesh->SetCollisionResponseToAllChannels(ECR_Block);
+	Mesh->SetVisibility(false);          // physics geometry, not scenery
+	Mesh->SetCastShadow(false);
+	Mesh->RegisterComponent();
+	Ground->SetActorLocation(FVector::ZeroVector);
+
+	bCollisionTerrainReady = true;
+	UE_LOG(LogFlightSimScenario, Display,
+	       TEXT("terrain collision from '%s' (%s, sha %s): %d verts, %d ")
+	       TEXT("triangles at stride %d -- the flat slab is GONE for this run"),
+	       *CollisionTerrain.Name, *CollisionTerrain.Crs,
+	       *CollisionTerrain.Sha256.Left(12), Vertices.Num(),
+	       Triangles.Num() / 3, Stride);
+	return true;
+}
+
+void FFlightSimScenarioWorld::LocalSceneCoords(double OriginXMetres,
+                                               double OriginYMetres,
+                                               double& OutNorthMetres,
+                                               double& OutEastMetres,
+                                               double& OutAglMetres) const
+{
+	const double Latitude = ReadProperty(TEXT("position/lat-geod-deg"));
+	const double Longitude = ReadProperty(TEXT("position/long-gc-deg"));
+	OutAglMetres = ReadProperty(TEXT("position/h-agl-ft")) * FeetToMetres;
+	FVector Projected;
+	GeoReferencing->GeographicToProjected(
+		FGeographicCoordinates(Longitude, Latitude, 0.0), Projected);
+	OutEastMetres = Projected.X - OriginXMetres;
+	OutNorthMetres = Projected.Y - OriginYMetres;
+}
+
+double FFlightSimScenarioWorld::RotorW20Fps(double NorthMetres,
+                                            double EastMetres,
+                                            double AglMetres) const
+{
+	// core/environment/rotor.py w20_kt_at, in fps end to end: sigma_w =
+	// gain x local (height-decayed) lee sink; W20 = sigma_w / 0.107;
+	// floor at the background word, cap at "severe". All four constants
+	// arrive in the card; this host derives none of them.
+	const double SinkMps = Orographic.LeeSinkMps(NorthMetres, EastMetres)
+	                       * Orographic.Decay(AglMetres);
+	const double SigmaFps = RotorCard.SigmaGain * SinkMps / 0.3048;
+	const double RotorFps = SigmaFps / RotorCard.SigmaPerW20;
+	return FMath::Min(FMath::Max(RotorCard.BackgroundW20Fps, RotorFps),
+	                  RotorCard.W20CapFps);
+}
+
+double FFlightSimScenarioWorld::LogProfileSpeedMps(double AglMetres) const
+{
+	// LogProfileWind.speed_at, line for line.
+	const double Z = FMath::Min(FMath::Max(AglMetres, 0.0),
+	                            LogProfileCard.SurfaceLayerTopMetres);
+	if (Z <= LogProfileCard.Z0Metres)
+	{
+		return 0.0;
+	}
+	return LogProfileCard.ReferenceSpeedMps
+	       * FMath::Loge(Z / LogProfileCard.Z0Metres)
+	       / FMath::Loge(LogProfileCard.ReferenceHeightMetres
+	                     / LogProfileCard.Z0Metres);
+}
+
+double FFlightSimScenarioWorld::ThermalWMps(double NorthMetres,
+                                            double EastMetres,
+                                            double AglMetres) const
+{
+	// AllenThermals.w_at, line for line (NASA/TM-2006-214019 Appendix B).
+	if (AglMetres <= 0.0)
+	{
+		return 0.0;
+	}
+	const double Zi = ThermalsCard.ZiMetres;
+	const double Zzi = AglMetres / Zi;
+
+	int32 Nearest = 0;
+	double BestSq = TNumericLimits<double>::Max();
+	for (int32 i = 0; i < ThermalsCard.NorthMetres.Num(); ++i)
+	{
+		const double Dn = NorthMetres - ThermalsCard.NorthMetres[i];
+		const double De = EastMetres - ThermalsCard.EastMetres[i];
+		const double DistSq = Dn * Dn + De * De;
+		if (DistSq < BestSq)
+		{
+			BestSq = DistSq;
+			Nearest = i;
+		}
+	}
+	const double Dist = FMath::Sqrt(BestSq);
+
+	// eq 12, floored at 10 m.
+	double R2 = 10.0;
+	if (Zzi > 0.0)
+	{
+		R2 = FMath::Max(10.0, 0.102 * FMath::Pow(Zzi, 1.0 / 3.0)
+		                      * (1.0 - 0.25 * Zzi) * Zi);
+	}
+	const double R1R2 = R2 < 600.0 ? 0.0011 * R2 + 0.14 : 0.8;
+	const double R1 = R1R2 * R2;
+	// eq 11.
+	const double WBar = Zzi <= 0.0 ? 0.0
+		: ThermalsCard.WstarMps * FMath::Pow(Zzi, 1.0 / 3.0) * (1.0 - 1.1 * Zzi);
+	const double Wc = (3.0 * WBar * (R2 * R2 * R2 - R2 * R2 * R1))
+	                  / (R2 * R2 * R2 - R1 * R1 * R1);
+	const double Rr2 = Dist / R2;
+
+	// eq 16 with the Appendix B constants (columns 1-4; the paper's Table 3
+	// disagrees with its own code -- the code's values are the check case).
+	static const double R1R2Shape[7] =
+		{0.14, 0.25, 0.36, 0.47, 0.58, 0.69, 0.80};
+	static const double KShape[7][4] = {
+		{1.5352, 2.5826, -0.0113, -0.1950},
+		{1.5265, 3.6054, -0.0176, -0.1265},
+		{1.4866, 4.8356, -0.0320, -0.0818},
+		{1.2042, 7.7904, 0.0848, -0.0445},
+		{0.8816, 13.9720, 0.3404, -0.0216},
+		{0.7067, 23.9940, 0.5689, -0.0099},
+		{0.6189, 42.7965, 0.7157, -0.0033}};
+	double Ws = 0.0;
+	if (Zzi < 1.0)
+	{
+		int32 Row = 6;
+		for (int32 i = 0; i < 6; ++i)
+		{
+			if (R1R2 < 0.5 * (R1R2Shape[i] + R1R2Shape[i + 1]))
+			{
+				Row = i;
+				break;
+			}
+		}
+		const double K1 = KShape[Row][0], K2 = KShape[Row][1];
+		const double K3 = KShape[Row][2], K4 = KShape[Row][3];
+		Ws = 1.0 / (1.0 + FMath::Pow(FMath::Abs(K1 * Rr2 + K3), K2)) + K4 * Rr2;
+		Ws = FMath::Max(Ws, 0.0);
+	}
+
+	// eqs 17-18: the toroidal edge downdraft, never positive.
+	double W1 = 0.0;
+	if (Dist > R1 && Rr2 < 2.0)
+	{
+		W1 = (PI / 6.0) * FMath::Sin(PI * Rr2);
+	}
+	double Swd = 0.0, Wd = 0.0;
+	if (Zzi > 0.5 && Zzi <= 0.9)
+	{
+		Swd = 2.5 * (Zzi - 0.5);
+		Wd = FMath::Min(Swd * W1, 0.0);
+	}
+	const double W2 = Ws * Wc + Wd * WBar;
+
+	// eq 21: environment sink, never positive.
+	const double Area = ThermalsCard.AreaNorthMetres * ThermalsCard.AreaEastMetres;
+	const double At = ThermalsCard.NorthMetres.Num() * PI * R2 * R2;
+	const double We = FMath::Min(-(At * WBar * (1.0 - Swd)) / (Area - At), 0.0);
+
+	// eq 23: blend to the sink outside the core.
+	if (Dist > R1 && Wc != 0.0)
+	{
+		return W2 * (1.0 - We / Wc) + We;
+	}
+	return W2;
+}
+
 bool FFlightSimScenarioWorld::Step(const FFlightSimScenarioCard& Card,
                                    double TimeSeconds, double DeltaSeconds,
                                    FString& Error)
@@ -743,7 +1215,8 @@ bool FFlightSimScenarioWorld::Step(const FFlightSimScenarioCard& Card,
 	// turbulence hook, a re-trim) rewrites the wind state and one host keeps
 	// flying it while the other corrects it.
 	const bool bComposedWind =
-		Card.WindScheduleTimes.Num() > 0 || bOrographicReady;
+		Card.WindScheduleTimes.Num() > 0 || bOrographicReady
+		|| bDownburstReady || bLogProfileReady || bThermalsReady;
 	if (bComposedWind)
 	{
 		// Base horizontal wind: the schedule entry current at this time
@@ -771,15 +1244,64 @@ bool FFlightSimScenarioWorld::Step(const FFlightSimScenarioCard& Card,
 		// through the same PROJ context that placed the terrain.
 		if (bOrographicReady)
 		{
-			const double Latitude = ReadProperty(TEXT("position/lat-geod-deg"));
-			const double Longitude = ReadProperty(TEXT("position/long-gc-deg"));
-			const double AglMetres = ReadProperty(TEXT("position/h-agl-ft")) * FeetToMetres;
-			FVector Projected;
-			GeoReferencing->GeographicToProjected(
-				FGeographicCoordinates(Longitude, Latitude, 0.0), Projected);
-			const double East = Projected.X - Orographic.OriginXMetres;
-			const double North = Projected.Y - Orographic.OriginYMetres;
+			// Evolving conditions (Phase 7 3.1): when the card says so, the
+			// orographic forcing wind follows the schedule's horizontal
+			// vector rather than staying at its initial value -- otherwise a
+			// building storm would blow over the ridge while the ridge kept
+			// answering for the dawn calm.
+			if (Card.bOrographicFollowSchedule)
+			{
+				const double SpeedMps =
+					FMath::Sqrt(NorthFps * NorthFps + EastFps * EastFps) * 0.3048;
+				const double FromDeg = FMath::RadiansToDegrees(
+					FMath::Atan2(-EastFps, -NorthFps));
+				Orographic.Init(&OrographicTerrain, SpeedMps, FromDeg,
+				                Orographic.DecayHeightMetres,
+				                Orographic.WavelengthMetres,
+				                Orographic.bEnableLee,
+				                Orographic.OriginXMetres,
+				                Orographic.OriginYMetres);
+			}
+			double North = 0.0, East = 0.0, AglMetres = 0.0;
+			LocalSceneCoords(Orographic.OriginXMetres, Orographic.OriginYMetres,
+			                 North, East, AglMetres);
 			DownFps += Orographic.WindDownMps(North, East, AglMetres) / 0.3048;
+		}
+
+		// Downburst from the actual position (Phase 7 2.3): the nominal-track
+		// label comes off because the field is now spatial in this host too.
+		if (bDownburstReady)
+		{
+			double North = 0.0, East = 0.0, AglMetres = 0.0;
+			LocalSceneCoords(Card.DownburstOriginXMetres,
+			                 Card.DownburstOriginYMetres, North, East, AglMetres);
+			double BurstNorthMps = 0.0, BurstEastMps = 0.0, BurstDownMps = 0.0;
+			Downburst.WindNedMps(North, East, AglMetres,
+			                     BurstNorthMps, BurstEastMps, BurstDownMps);
+			NorthFps += BurstNorthMps / 0.3048;
+			EastFps += BurstEastMps / 0.3048;
+			DownFps += BurstDownMps / 0.3048;
+		}
+
+		// Log-profile shear (Phase 7 2.1): horizontal wind from the aircraft's
+		// height above ground, the surface-layer law.
+		if (bLogProfileReady)
+		{
+			const double AglMetres =
+				ReadProperty(TEXT("position/h-agl-ft")) * FeetToMetres;
+			const double SpeedMps = LogProfileSpeedMps(AglMetres);
+			NorthFps += SpeedMps * LogProfileCard.NorthUnit / 0.3048;
+			EastFps += SpeedMps * LogProfileCard.EastUnit / 0.3048;
+		}
+
+		// Thermals (Phase 7 2.2): Allen's field at the actual position. The
+		// thermal frame's origin is in the same projected local frame.
+		if (bThermalsReady)
+		{
+			double North = 0.0, East = 0.0, AglMetres = 0.0;
+			LocalSceneCoords(ThermalsCard.OriginXMetres,
+			                 ThermalsCard.OriginYMetres, North, East, AglMetres);
+			DownFps += -ThermalWMps(North, East, AglMetres) / 0.3048;
 		}
 
 		const TArray<FString> Properties = {TEXT("atmosphere/wind-north-fps"),
@@ -796,6 +1318,38 @@ bool FFlightSimScenarioWorld::Step(const FFlightSimScenarioCard& Card,
 	{
 		TArray<FString> Unused;
 		Movement->CommandConsoleBatch(WindProperties, WindValues, Unused);
+	}
+
+	// Per-step turbulence INTENSITY (Phase 7 1.3 / 3.1): W20 only, exactly
+	// as TurbulenceProvider.step_writes documents -- never the seed (§9's
+	// 515 g failure), never the POE severity (§13's 2-5x overshoot).
+	{
+		double W20Fps = -1.0;
+		if (bRotorReady)
+		{
+			double North = 0.0, East = 0.0, AglMetres = 0.0;
+			LocalSceneCoords(Orographic.OriginXMetres, Orographic.OriginYMetres,
+			                 North, East, AglMetres);
+			W20Fps = RotorW20Fps(North, East, AglMetres);
+		}
+		else if (Card.TurbulenceScheduleTimes.Num() > 0)
+		{
+			int32 Current = TurbulenceScheduleIndex < 0 ? 0 : TurbulenceScheduleIndex;
+			while (Current + 1 < Card.TurbulenceScheduleTimes.Num() &&
+			       Card.TurbulenceScheduleTimes[Current + 1] <= TimeSeconds)
+			{
+				++Current;
+			}
+			TurbulenceScheduleIndex = Current;
+			W20Fps = Card.TurbulenceScheduleW20Fps[Current];
+		}
+		if (W20Fps >= 0.0)
+		{
+			FString Out;
+			Movement->CommandConsole(
+				TEXT("atmosphere/turbulence/milspec/windspeed_at_20ft_AGL-fps"),
+				FString::Printf(TEXT("%.17g"), W20Fps), Out);
+		}
 	}
 
 	World->Tick(LEVELTICK_All, static_cast<float>(DeltaSeconds));

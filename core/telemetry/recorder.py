@@ -25,6 +25,7 @@ from ..fdm.state import AircraftState
 DEFAULT_CHANNELS = (
     "t",
     "altitude_m",
+    "agl_m",
     "cas_kt",
     "tas_kt",
     "mach",

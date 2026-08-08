@@ -61,6 +61,13 @@ struct FFlightSimVisualSceneOptions
 	// recorded as one in the manifest; requires the M_VertexColor asset that
 	// scripts/ue_create_materials.py builds.
 	bool bClassifiedMaterial = false;
+	// Path to a drape sidecar (<key>_imagery.json beside its PNG) produced
+	// and VERIFIED by core/terrain/imagery.py. Non-empty replaces the
+	// classification with true-colour satellite imagery on the georeferenced
+	// terrain; the sidecar's license, attribution and sha ride into the
+	// manifest. Refused if the file or its texture cannot be loaded --
+	// falling back to classification silently would mislabel the surface.
+	FString ImagerySidecarPath;
 	// Exponential height fog density: 0.0025 is Gate 6's clear day; the
 	// showcase's "hazy" raises it. Recorded in the manifest.
 	float FogDensity = 0.0025f;
@@ -86,6 +93,12 @@ public:
 	FString TerrainSha256;            // from the sidecar, for the manifest
 	FString TerrainCrs;
 	FString TerrainName;
+	// Imagery drape provenance, read from its sidecar when a drape is used.
+	FString ImageryFile;
+	FString ImagerySha256;
+	FString ImageryLicense;
+	FString ImageryAttribution;
+	FString ImageryDataset;
 	// World positions (cm) of the raster's peak sample in each instance --
 	// the landmarks the harness samples for the extinction measurement. In
 	// georeferenced mode only the near (single) instance exists.

@@ -390,8 +390,21 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	const bool bSunOverride =
 		FParse::Value(*Params, TEXT("sun-elev="), SunElevationDeg) &&
 		FParse::Value(*Params, TEXT("sun-azim="), SunAzimuthDeg);
+	// Sun ANIMATION (Phase 7 3.1): end-of-clip elevation/azimuth. The sun
+	// interpolates linearly over the clip -- a presentation parameter like
+	// the static sun, recorded start and end in the manifest. Requires the
+	// static override as the start point.
+	double SunElevationEndDeg = 0.0, SunAzimuthEndDeg = 0.0;
+	const bool bSunAnimated = bSunOverride &&
+		FParse::Value(*Params, TEXT("sun-elev-end="), SunElevationEndDeg) &&
+		FParse::Value(*Params, TEXT("sun-azim-end="), SunAzimuthEndDeg);
 	double FogDensity = 0.0025;
 	FParse::Value(*Params, TEXT("fog-density="), FogDensity);
+	// True-colour imagery drape (Phase 7 1.1): path to the drape sidecar
+	// produced and verified by core/terrain/imagery.py. Replaces the
+	// approximated classification for the real locations.
+	FString ImagerySidecar;
+	FParse::Value(*Params, TEXT("imagery="), ImagerySidecar);
 	double ExposureBias = 11.0;
 	FParse::Value(*Params, TEXT("exposure-bias="), ExposureBias);
 	// Chase offset override, metres: a 747 framed at -170 m puts a Cessna
@@ -460,6 +473,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			SceneOptions.bGeoreferenced = true;
 			SceneOptions.GeoReferencing = Scenario.GeoReferencing;
 			SceneOptions.bClassifiedMaterial = true;
+			SceneOptions.ImagerySidecarPath = ImagerySidecar;
+		}
+		else if (!ImagerySidecar.IsEmpty())
+		{
+			return Fail(TEXT("-imagery requires -GeorefTerrain: the drape is "
+			                 "aligned to the georeferenced raster grid"));
 		}
 		// The aircraft flies toward -Y in the engine frame (measured off the
 		// first probe's landmark projections; heading north maps there through
@@ -647,6 +666,94 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 	}
 
+	// The same cross-implementation discipline for every Phase 7 port: grid
+	// samples of the C++ field into the manifest, recomputed by the original
+	// Python provider in the harness. A port that drifts fails there.
+	TArray<TSharedPtr<FJsonValue>> DownburstSelftest;
+	if (const FFlightSimDownburst* Burst = Scenario.GetDownburst())
+	{
+		const double Radii[] = {0.0, 300.0, 700.0, 1000.0, 1400.0, 2500.0};
+		const double Agls[] = {30.0, 150.0, 300.0, 600.0};
+		for (double Radius : Radii)
+		{
+			for (double Agl : Agls)
+			{
+				// Sample along north from the centre; axisymmetry is the
+				// field's own claim and the Python recompute checks the full
+				// NED vector at these points.
+				double NorthMps = 0.0, EastMps = 0.0, DownMps = 0.0;
+				Burst->WindNedMps(Burst->CentreNorthMetres + Radius,
+				                  Burst->CentreEastMetres, Agl,
+				                  NorthMps, EastMps, DownMps);
+				TSharedPtr<FJsonObject> Sample = MakeShared<FJsonObject>();
+				Sample->SetNumberField(TEXT("radius_m"), Radius);
+				Sample->SetNumberField(TEXT("agl_m"), Agl);
+				Sample->SetNumberField(TEXT("north_mps"), NorthMps);
+				Sample->SetNumberField(TEXT("east_mps"), EastMps);
+				Sample->SetNumberField(TEXT("down_mps"), DownMps);
+				DownburstSelftest.Add(MakeShared<FJsonValueObject>(Sample));
+			}
+		}
+	}
+
+	TArray<TSharedPtr<FJsonValue>> RotorSelftest;
+	if (Scenario.RotorReady())
+	{
+		const double Offsets[] = {-3000.0, -900.0, 0.0, 900.0, 3000.0};
+		const double Agls[] = {60.0, 150.0, 280.0};
+		int32 Index = 0;
+		for (double North : Offsets)
+		{
+			for (double East : Offsets)
+			{
+				const double Agl = Agls[Index++ % UE_ARRAY_COUNT(Agls)];
+				TSharedPtr<FJsonObject> Sample = MakeShared<FJsonObject>();
+				Sample->SetNumberField(TEXT("north_m"), North);
+				Sample->SetNumberField(TEXT("east_m"), East);
+				Sample->SetNumberField(TEXT("agl_m"), Agl);
+				Sample->SetNumberField(TEXT("w20_fps"),
+				                       Scenario.RotorW20Fps(North, East, Agl));
+				RotorSelftest.Add(MakeShared<FJsonValueObject>(Sample));
+			}
+		}
+	}
+
+	TArray<TSharedPtr<FJsonValue>> LogProfileSelftest;
+	if (Card.bLogProfile)
+	{
+		const double Agls[] = {0.0, 5.0, 10.0, 30.0, 100.0, 200.0, 300.0, 500.0};
+		for (double Agl : Agls)
+		{
+			TSharedPtr<FJsonObject> Sample = MakeShared<FJsonObject>();
+			Sample->SetNumberField(TEXT("agl_m"), Agl);
+			Sample->SetNumberField(TEXT("speed_mps"),
+			                       Scenario.LogProfileSpeedMps(Agl));
+			LogProfileSelftest.Add(MakeShared<FJsonValueObject>(Sample));
+		}
+	}
+
+	TArray<TSharedPtr<FJsonValue>> ThermalsSelftest;
+	if (Scenario.ThermalsReady())
+	{
+		const double Offsets[] = {-900.0, -300.0, 0.0, 150.0, 300.0, 900.0};
+		const double Agls[] = {150.0, 400.0, 900.0};
+		int32 Index = 0;
+		for (double North : Offsets)
+		{
+			for (double East : Offsets)
+			{
+				const double Agl = Agls[Index++ % UE_ARRAY_COUNT(Agls)];
+				TSharedPtr<FJsonObject> Sample = MakeShared<FJsonObject>();
+				Sample->SetNumberField(TEXT("north_m"), North);
+				Sample->SetNumberField(TEXT("east_m"), East);
+				Sample->SetNumberField(TEXT("agl_m"), Agl);
+				Sample->SetNumberField(TEXT("w_up_mps"),
+				                       Scenario.ThermalWMps(North, East, Agl));
+				ThermalsSelftest.Add(MakeShared<FJsonValueObject>(Sample));
+			}
+		}
+	}
+
 	if (GShaderCompilingManager != nullptr)
 	{
 		UE_LOG(LogFlightSimRender, Display, TEXT("waiting for shader compilation"));
@@ -703,6 +810,17 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			continue;
 		}
 
+		// The animated sun (Phase 7 3.1): linear in time across the clip,
+		// same convention as the static override (pitch = -elevation, yaw =
+		// direction the light TRAVELS).
+		if (bSunAnimated && VisualScene.Sun != nullptr && Duration > 0.0)
+		{
+			const double Fraction = FMath::Clamp(Time / Duration, 0.0, 1.0);
+			const double Elev = FMath::Lerp(SunElevationDeg, SunElevationEndDeg, Fraction);
+			const double Azim = FMath::Lerp(SunAzimuthDeg, SunAzimuthEndDeg, Fraction);
+			VisualScene.Sun->SetActorRotation(FRotator(-Elev, Azim + 180.0, 0.0));
+		}
+
 		// Component render-state updates are queued and flushed at end of
 		// frame. A hand-driven loop has to flush them itself, or the capture
 		// sees the scene from before the aircraft and its surfaces moved.
@@ -757,6 +875,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		                       Scenario.ReadProperty(TEXT("accelerations/Nz")));
 		Record->SetNumberField(TEXT("wind_down_fps"),
 		                       Scenario.ReadProperty(TEXT("atmosphere/wind-down-fps")));
+		// Phase 7 evidence channels: the turbulence realisation the FDM
+		// integrated and the W20 the intensity coupling wrote.
+		Record->SetNumberField(TEXT("turb_down_fps"),
+		                       Scenario.ReadProperty(TEXT("atmosphere/turb-down-fps")));
+		Record->SetNumberField(TEXT("w20_fps"),
+		                       Scenario.ReadProperty(
+		                           TEXT("atmosphere/turbulence/milspec/windspeed_at_20ft_AGL-fps")));
 		// The flight-state channels the telemetry panel draws: what the FDM
 		// actually did, per frame, to stand next to what the spec commanded.
 		// Read from the FDM like everything else here -- never derived from
@@ -905,8 +1030,23 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			Scene->SetStringField(TEXT("terrain_crs"), VisualScene.TerrainCrs);
 			Scene->SetStringField(TEXT("terrain_name"), VisualScene.TerrainName);
-			Scene->SetStringField(TEXT("terrain_material"),
-				TEXT("slope/altitude classified vertex colours (approximated)"));
+			if (!VisualScene.ImagerySha256.IsEmpty())
+			{
+				Scene->SetStringField(TEXT("terrain_material"),
+					TEXT("true-colour satellite imagery drape (see imagery_* "
+					     "fields; acquisition-date and resolution limits in "
+					     "VALIDITY.md)"));
+				Scene->SetStringField(TEXT("imagery_dataset"), VisualScene.ImageryDataset);
+				Scene->SetStringField(TEXT("imagery_file"), VisualScene.ImageryFile);
+				Scene->SetStringField(TEXT("imagery_sha256"), VisualScene.ImagerySha256);
+				Scene->SetStringField(TEXT("imagery_license"), VisualScene.ImageryLicense);
+				Scene->SetStringField(TEXT("imagery_attribution"), VisualScene.ImageryAttribution);
+			}
+			else
+			{
+				Scene->SetStringField(TEXT("terrain_material"),
+					TEXT("slope/altitude classified vertex colours (approximated)"));
+			}
 			// Honesty label carried per clip: the mountains on screen are the
 			// real raster, the ground the GEAR model feels is still the
 			// spec's flat slab. Wind coupling is separate and stated below.
@@ -922,6 +1062,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			Scene->SetNumberField(TEXT("sun_elevation_deg"), SunElevationDeg);
 			Scene->SetNumberField(TEXT("sun_azimuth_deg"), SunAzimuthDeg);
+		}
+		Scene->SetBoolField(TEXT("sun_animated"), bSunAnimated);
+		if (bSunAnimated)
+		{
+			Scene->SetNumberField(TEXT("sun_elevation_end_deg"), SunElevationEndDeg);
+			Scene->SetNumberField(TEXT("sun_azimuth_end_deg"), SunAzimuthEndDeg);
 		}
 	}
 	Root->SetObjectField(TEXT("scene"), Scene);
@@ -952,6 +1098,52 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		Environment->SetArrayField(TEXT("orographic_selftest"), OrographicSelftest);
 	}
+	Environment->SetBoolField(TEXT("downburst"), Card.bDownburst);
+	if (Card.bDownburst)
+	{
+		Environment->SetStringField(TEXT("downburst_delivery"),
+			TEXT("position-coupled: field evaluated at the aircraft's actual "
+			     "position each step (the nominal-track label is obsolete for "
+			     "this clip)"));
+		Environment->SetNumberField(TEXT("downburst_core_radius_m"),
+		                            Card.DownburstCoreRadiusMetres);
+		Environment->SetNumberField(TEXT("downburst_outflow_max_mps"),
+		                            Card.DownburstOutflowMaxMps);
+		Environment->SetNumberField(TEXT("downburst_outflow_height_m"),
+		                            Card.DownburstOutflowHeightMetres);
+		Environment->SetArrayField(TEXT("downburst_selftest"), DownburstSelftest);
+	}
+	Environment->SetBoolField(TEXT("rotor"), Card.bRotor);
+	if (Card.bRotor)
+	{
+		Environment->SetStringField(TEXT("rotor_delivery"),
+			TEXT("per-step W20 from the lee-sink field; seed and pinned "
+			     "severity written once (JSBSIM_CORRECTIONS §13); coupling "
+			     "valid below 300 m AGL"));
+		Environment->SetArrayField(TEXT("rotor_selftest"), RotorSelftest);
+	}
+	Environment->SetBoolField(TEXT("log_profile"), Card.bLogProfile);
+	if (Card.bLogProfile)
+	{
+		Environment->SetArrayField(TEXT("log_profile_selftest"), LogProfileSelftest);
+	}
+	Environment->SetBoolField(TEXT("thermals"), Card.bThermals);
+	if (Card.bThermals)
+	{
+		Environment->SetNumberField(TEXT("thermals_count"),
+		                            Card.ThermalNorthMetres.Num());
+		Environment->SetArrayField(TEXT("thermals_selftest"), ThermalsSelftest);
+	}
+	Environment->SetBoolField(TEXT("turbulence_schedule"),
+	                          Card.TurbulenceScheduleTimes.Num() > 0);
+	if (Card.TurbulenceScheduleTimes.Num() > 0)
+	{
+		Environment->SetStringField(TEXT("turbulence_schedule_delivery"),
+			TEXT("per-step W20 only, held until the next entry; the seed and "
+			     "the pinned severity are written exactly once (§13)"));
+	}
+	Environment->SetBoolField(TEXT("orographic_follow_schedule"),
+	                          Card.bOrographicFollowSchedule);
 	Root->SetObjectField(TEXT("environment"), Environment);
 	Root->SetArrayField(TEXT("frame_records"), FrameRecords);
 

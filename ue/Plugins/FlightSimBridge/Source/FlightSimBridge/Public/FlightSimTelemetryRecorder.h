@@ -58,6 +58,7 @@ private:
 
 	TArray<double> Times;
 	TArray<double> AltitudeMetres;
+	TArray<double> AglMetres;
 	TArray<double> LatitudeDegrees;
 	TArray<double> LongitudeDegrees;
 	TArray<double> TrueAirspeedKnots;

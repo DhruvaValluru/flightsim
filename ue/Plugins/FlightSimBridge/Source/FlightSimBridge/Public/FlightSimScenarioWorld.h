@@ -14,6 +14,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FlightSimDownburst.h"
 #include "FlightSimHeightfield.h"
 #include "FlightSimOrographic.h"
 
@@ -101,6 +102,73 @@ struct FFlightSimScenarioCard
 	// projected CRS -- projected once in Python from the spec's lat/lon.
 	double OrographicOriginXMetres = 0.0;
 	double OrographicOriginYMetres = 0.0;
+
+	// -- position-coupled downburst (Phase 7, 2.3) ------------------------
+	// The microburst field evaluated at the aircraft's ACTUAL position each
+	// step (replacing the labeled nominal-track schedule). Centre and origin
+	// are in the same projected-CRS local frame the orographic field uses.
+	bool bDownburst = false;
+	double DownburstOriginXMetres = 0.0;
+	double DownburstOriginYMetres = 0.0;
+	double DownburstCentreNorthMetres = 0.0;
+	double DownburstCentreEastMetres = 0.0;
+	double DownburstCoreRadiusMetres = 0.0;
+	double DownburstOutflowMaxMps = 0.0;
+	double DownburstOutflowHeightMetres = 0.0;
+
+	// -- lee-rotor turbulence (Phase 7, 1.3) ------------------------------
+	// Per-step W20 writes coupled to the orographic lee-sink field. W20
+	// ONLY: the seed and the pinned severity are configure()-time writes
+	// (JSBSIM_CORRECTIONS §13). Every constant is computed in Python
+	// (core/environment/rotor.py) and carried here.
+	bool bRotor = false;
+	double RotorSigmaGain = 0.0;
+	double RotorSigmaPerW20 = 0.0;
+	double RotorW20CapFps = 0.0;
+	double RotorBackgroundW20Fps = 0.0;
+
+	// -- log-profile surface layer (Phase 7, 2.1) -------------------------
+	// u(z) = U_ref ln(z/z0)/ln(z_ref/z0), held above the surface-layer top,
+	// zero at and below z0 (core/environment/wind.py LogProfileWind).
+	bool bLogProfile = false;
+	double LogProfileReferenceSpeedMps = 0.0;
+	double LogProfileFromDegrees = 0.0;
+	double LogProfileReferenceHeightMetres = 10.0;
+	double LogProfileZ0Metres = 0.03;
+	double LogProfileSurfaceLayerTopMetres = 300.0;
+
+	// -- convective thermals (Phase 7, 2.2) -------------------------------
+	// Allen NASA/TM-2006-214019; every position and scale computed in
+	// Python (deterministic from the spec seed) and carried here.
+	bool bThermals = false;
+	double ThermalsWstarMps = 0.0;
+	double ThermalsZiMetres = 0.0;
+	double ThermalsAreaNorthMetres = 0.0;
+	double ThermalsAreaEastMetres = 0.0;
+	// Projected-CRS origin of the local frame the positions are in, exactly
+	// like the downburst's.
+	double ThermalsOriginXMetres = 0.0;
+	double ThermalsOriginYMetres = 0.0;
+	TArray<double> ThermalNorthMetres;
+	TArray<double> ThermalEastMetres;
+
+	// -- evolving-conditions schedules (Phase 7, 3.1) ---------------------
+	// Turbulence intensity over time, delivered as W20 fps ONLY -- the
+	// measured-sane route (§13). Entries held until the next time. The seed
+	// and pinned severity stay configure()-time.
+	TArray<double> TurbulenceScheduleTimes;
+	TArray<double> TurbulenceScheduleW20Fps;
+	// When true, the orographic forcing wind follows the wind schedule's
+	// horizontal vector each step instead of staying at its initial value.
+	bool bOrographicFollowSchedule = false;
+
+	// -- real heightfield collision (Phase 7, 1.2) ------------------------
+	// Path to the SAME baked raster the visuals draw. When set, the ground
+	// query slab is replaced by collision geometry built from this raster
+	// (one raster, one sha, both uses), and VerifyTrimmedCondition checks
+	// AGL against the raster elevation under the aircraft rather than the
+	// spec's flat terrain elevation -- the right claim for real ground.
+	FString CollisionTerrainPath;
 };
 
 class FLIGHTSIMBRIDGE_API FFlightSimScenarioWorld
@@ -156,6 +224,27 @@ public:
 		return bOrographicReady ? &OrographicTerrain : nullptr;
 	}
 
+	// The downburst field, when the card enables it -- for the selftest.
+	const FFlightSimDownburst* GetDownburst() const
+	{
+		return bDownburstReady ? &Downburst : nullptr;
+	}
+
+	// The rotor W20 at a local scene point, fps -- the exact per-step write,
+	// exposed so the commandlet can grid-sample it for the selftest.
+	double RotorW20Fps(double NorthMetres, double EastMetres,
+	                   double AglMetres) const;
+	bool RotorReady() const { return bRotorReady; }
+
+	// The log-profile horizontal speed at a height, m/s -- for the selftest.
+	double LogProfileSpeedMps(double AglMetres) const;
+
+	// The thermal field's vertical velocity (positive up, m/s) -- for the
+	// selftest. Mirrors AllenThermals.w_at.
+	double ThermalWMps(double NorthMetres, double EastMetres,
+	                   double AglMetres) const;
+	bool ThermalsReady() const { return bThermalsReady; }
+
 	// Applies whichever scripted input is current at ``TimeSeconds``, then
 	// advances one fixed frame. Fails on a crash rather than continuing to
 	// record a frozen state.
@@ -190,4 +279,60 @@ private:
 	FFlightSimHeightfield OrographicTerrain;
 	FFlightSimOrographicWind Orographic;
 	bool bOrographicReady = false;
+
+	// Phase 7 environment couplings, all evaluated at the aircraft's actual
+	// position inside Step(). Parameters come verbatim from the card and are
+	// copied here at Build so the evaluators need no card reference.
+	FFlightSimDownburst Downburst;
+	bool bDownburstReady = false;
+	bool bRotorReady = false;
+	bool bLogProfileReady = false;
+	bool bThermalsReady = false;
+	int32 TurbulenceScheduleIndex = -1;
+
+	struct
+	{
+		double SigmaGain = 0.0;
+		double SigmaPerW20 = 0.107;
+		double W20CapFps = 0.0;
+		double BackgroundW20Fps = 0.0;
+	} RotorCard;
+
+	struct
+	{
+		double ReferenceSpeedMps = 0.0;
+		double ReferenceHeightMetres = 10.0;
+		double Z0Metres = 0.03;
+		double SurfaceLayerTopMetres = 300.0;
+		// Unit NED components of the meteorological FROM direction.
+		double NorthUnit = 0.0;
+		double EastUnit = 0.0;
+	} LogProfileCard;
+
+	struct
+	{
+		double WstarMps = 0.0;
+		double ZiMetres = 0.0;
+		double AreaNorthMetres = 0.0;
+		double AreaEastMetres = 0.0;
+		double OriginXMetres = 0.0;
+		double OriginYMetres = 0.0;
+		TArray<double> NorthMetres;
+		TArray<double> EastMetres;
+	} ThermalsCard;
+
+	// Maps the aircraft's present geographic position into the projected
+	// local frame about the given origin. Shared by every position-coupled
+	// provider so they cannot disagree about where the aircraft is.
+	void LocalSceneCoords(double OriginXMetres, double OriginYMetres,
+	                      double& OutNorthMetres, double& OutEastMetres,
+	                      double& OutAglMetres) const;
+
+	// Real heightfield collision (Phase 7 1.2): the same baked raster the
+	// visuals draw, cooked into query-only collision geometry replacing the
+	// flat slab. Kept loaded so VerifyTrimmedCondition can check AGL against
+	// the raster elevation under the aircraft.
+	bool BuildTerrainCollision(const FFlightSimScenarioCard& Card, FString& Error);
+	FFlightSimHeightfield CollisionTerrain;
+	bool bCollisionTerrainReady = false;
 };

@@ -288,7 +288,15 @@ def write_run_card(spec: ScenarioSpec, path: Path,
                    control_inputs: Sequence[Dict[str, float]] = (),
                    duration_s: Optional[float] = None,
                    wind_schedule: Optional[Sequence[Dict[str, float]]] = None,
-                   orographic: Optional[Dict[str, object]] = None) -> Path:
+                   orographic: Optional[Dict[str, object]] = None,
+                   downburst: Optional[Dict[str, object]] = None,
+                   rotor: Optional[Dict[str, object]] = None,
+                   log_profile: Optional[Dict[str, object]] = None,
+                   thermals: Optional[Dict[str, object]] = None,
+                   turbulence_schedule: Optional[Dict[str, object]] = None,
+                   orographic_follow_schedule: bool = False,
+                   collision_terrain: Optional[str] = None,
+                   turbulence_provider=None) -> Path:
     """Write the spec in the form the UE commandlet reads.
 
     A projection of the spec, not a second copy of it. Every field is taken
@@ -334,7 +342,12 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # full rich kills a force-started piston above ~3 km density altitude.
         "engine_mixture": discovered_engine_mixture(spec),
     }
-    if str(spec.turbulence.value) != "none":
+    if turbulence_provider is not None:
+        # A Phase 7 turbulence provider (lee rotor, or a scheduled Dryden)
+        # supplies its own configure() writes -- e.g. the rotor's pinned
+        # severity of 1 with intensity delivered per step through W20.
+        card["turbulence_properties"] = turbulence_provider.configure()
+    elif str(spec.turbulence.value) != "none":
         from core.environment.turbulence import DrydenTurbulence
 
         provider = DrydenTurbulence(str(spec.turbulence.value),
@@ -344,6 +357,22 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         card["wind_schedule"] = [dict(entry) for entry in wind_schedule]
     if orographic:
         card["orographic"] = dict(orographic)
+    # Phase 7 blocks: every parameter computed here, in the providers'
+    # own modules, and carried verbatim -- the C++ ports derive nothing.
+    if downburst:
+        card["downburst"] = dict(downburst)
+    if rotor:
+        card["rotor"] = dict(rotor)
+    if log_profile:
+        card["log_profile"] = dict(log_profile)
+    if thermals:
+        card["thermals"] = dict(thermals)
+    if turbulence_schedule:
+        card["turbulence_schedule"] = dict(turbulence_schedule)
+    if orographic_follow_schedule:
+        card["orographic_follow_schedule"] = True
+    if collision_terrain:
+        card["collision_terrain"] = str(collision_terrain)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(card, indent=1))
     return path

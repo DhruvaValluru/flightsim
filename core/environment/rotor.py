@@ -166,9 +166,26 @@ class LeeRotorTurbulence(DrydenTurbulence):
                        f"(JSBSIM_CORRECTIONS §13)")),
         ]
 
+    def card_block(self) -> Dict[str, float]:
+        """The run card's ``rotor`` block: the constants of the coupling.
+
+        The C++ mirror computes W20 from the SAME lee-sink field (its
+        FFlightSimOrographicWind port, cross-checked separately) and these
+        four numbers; the manifest's rotor selftest grid pins the combined
+        result against :meth:`w20_kt_at` point by point. The configure()
+        writes (pinned severity, seed, model) travel separately as
+        turbulence_properties.
+        """
+        return {
+            "sigma_gain": ROTOR_SIGMA_GAIN,
+            "sigma_per_w20": SIGMA_W_PER_W20,
+            "w20_cap_fps": u.kt_to_fps(W20_CAP_KT),
+            "background_w20_fps": u.kt_to_fps(self.background_w20_kt),
+        }
+
     def provenance(self) -> Dict[str, Any]:
         return {**super().provenance(),
-                "coupling": "lee_sink -> W20 (per-step), severity pinned 0",
+                "coupling": "lee_sink -> W20 (per-step), severity pinned 1",
                 "rotor_sigma_gain": ROTOR_SIGMA_GAIN,
                 "sigma_w_per_w20": SIGMA_W_PER_W20,
                 "w20_cap_kt": W20_CAP_KT,

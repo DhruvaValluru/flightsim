@@ -14,10 +14,16 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GeoReferencingSystem.h"
+#include "ImageUtils.h"
 #include "MaterialDomain.h"
 #include "Materials/Material.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "ProceduralMeshComponent.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
 namespace
 {
@@ -387,7 +393,65 @@ bool FFlightSimVisualScene::BuildGeoreferencedTerrain(
 
 	UMaterialInterface* Material =
 		UMaterial::GetDefaultMaterial(EMaterialDomain::MD_Surface);
-	if (Options.bClassifiedMaterial)
+	const bool bImagery = !Options.ImagerySidecarPath.IsEmpty();
+	if (bImagery)
+	{
+		// True-colour drape (Phase 7 1.1). The sidecar names the verified
+		// PNG and carries the provenance the manifest must repeat; a drape
+		// that cannot be loaded refuses the run rather than silently
+		// rendering the approximated classification under an imagery label.
+		FString SidecarText;
+		if (!FFileHelper::LoadFileToString(SidecarText, *Options.ImagerySidecarPath))
+		{
+			Error = FString::Printf(TEXT("imagery sidecar '%s' unreadable"),
+			                        *Options.ImagerySidecarPath);
+			return false;
+		}
+		TSharedPtr<FJsonObject> Sidecar;
+		const TSharedRef<TJsonReader<>> Reader =
+			TJsonReaderFactory<>::Create(SidecarText);
+		if (!FJsonSerializer::Deserialize(Reader, Sidecar) || !Sidecar.IsValid())
+		{
+			Error = FString::Printf(TEXT("imagery sidecar '%s' is not valid JSON"),
+			                        *Options.ImagerySidecarPath);
+			return false;
+		}
+		const TSharedPtr<FJsonObject>* TextureInfo = nullptr;
+		if (!Sidecar->TryGetObjectField(TEXT("texture"), TextureInfo))
+		{
+			Error = TEXT("imagery sidecar has no texture block");
+			return false;
+		}
+		ImageryFile = (*TextureInfo)->GetStringField(TEXT("file"));
+		ImagerySha256 = (*TextureInfo)->GetStringField(TEXT("sha256"));
+		ImageryLicense = Sidecar->GetStringField(TEXT("license"));
+		ImageryAttribution = Sidecar->GetStringField(TEXT("attribution"));
+		ImageryDataset = Sidecar->GetStringField(TEXT("dataset"));
+
+		const FString PngPath = FPaths::Combine(
+			FPaths::GetPath(Options.ImagerySidecarPath), ImageryFile);
+		UTexture2D* Texture = FImageUtils::ImportFileAsTexture2D(PngPath);
+		if (Texture == nullptr)
+		{
+			Error = FString::Printf(TEXT("imagery texture '%s' failed to load"),
+			                        *PngPath);
+			return false;
+		}
+		UMaterialInterface* ImageryBase = LoadObject<UMaterialInterface>(
+			nullptr, TEXT("/Game/FlightSim/M_TerrainImagery.M_TerrainImagery"));
+		if (ImageryBase == nullptr)
+		{
+			Error = TEXT(
+				"/Game/FlightSim/M_TerrainImagery is missing. Run "
+				"scripts/ue_create_materials.py (build-time asset step).");
+			return false;
+		}
+		UMaterialInstanceDynamic* Instance =
+			UMaterialInstanceDynamic::Create(ImageryBase, World);
+		Instance->SetTextureParameterValue(TEXT("Imagery"), Texture);
+		Material = Instance;
+	}
+	else if (Options.bClassifiedMaterial)
 	{
 		UMaterialInterface* VertexColour = LoadObject<UMaterialInterface>(
 			nullptr, TEXT("/Game/FlightSim/M_VertexColor.M_VertexColor"));

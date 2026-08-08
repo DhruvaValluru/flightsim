@@ -155,8 +155,15 @@ def configure_from_spec(spec: ScenarioSpec) -> FlightDynamics:
 
 
 def run_spec(spec: ScenarioSpec, validate_first: bool = True,
-             assert_closure: bool = True) -> RunResult:
-    """Run a scenario. Raises rather than running something it cannot deliver."""
+             assert_closure: bool = True, terrain_ground=None) -> RunResult:
+    """Run a scenario. Raises rather than running something it cannot deliver.
+
+    ``terrain_ground`` (Phase 7 1.2): a :class:`core.terrain.ground.
+    TerrainGround` gives the FDM real elevation under the aircraft every
+    step, replacing the spec's flat terrain elevation exactly as the UE
+    host's heightfield collision replaces its slab -- both answer from the
+    same baked raster.
+    """
     report = validate(spec) if validate_first else ValidationReport(spec.digest())
     if validate_first:
         report.raise_if_invalid()
@@ -176,7 +183,7 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
     recorder = Recorder(fdm, interval_s=0.1, extra=SURFACES)
     recorder.sample(force=True)
     recorder.mark("trimmed" if autopilot is None else "trimmed, autopilot engaged")
-    if autopilot is None:
+    if autopilot is None and terrain_ground is None:
         environment.run_for(fdm, float(spec.duration.value), recorder)
     else:
         # Guidance runs at 2 Hz; the control laws run at FDM rate inside JSBSim.
@@ -184,8 +191,10 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         every = max(1, int(round(0.5 * fdm.rate_hz)))
         for i in range(steps):
             environment.apply(fdm)
+            if terrain_ground is not None:
+                terrain_ground.apply(fdm)
             fdm.step()
-            if i % every == 0:
+            if autopilot is not None and i % every == 0:
                 autopilot.update()
             recorder.sample()
 
@@ -208,6 +217,9 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         "spec": spec.to_dict(),
         "fdm": fdm.provenance(),
         "environment": environment.provenance(),
+        "physics_ground": ("flat slab (spec terrain elevation)"
+                           if terrain_ground is None
+                           else terrain_ground.provenance()),
         "output_digest": output_digest,
         "samples": len(recorder),
         "validation": {

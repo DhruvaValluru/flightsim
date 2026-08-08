@@ -143,6 +143,16 @@ class LogProfileWind(WindProvider):
             for terrain, z0 in self.ROUGHNESS_M.items()
         ]
 
+    def card_block(self) -> Dict[str, float]:
+        """The run card's ``log_profile`` block for the UE host's port."""
+        return {
+            "reference_speed_mps": self.reference_speed_mps,
+            "from_deg": self.from_deg,
+            "reference_height_m": self.reference_height_m,
+            "z0_m": self.z0_m,
+            "surface_layer_top_m": self.SURFACE_LAYER_TOP_M,
+        }
+
     def provenance(self) -> Dict[str, Any]:
         return {**super().provenance(),
                 "reference_speed_mps": self.reference_speed_mps,

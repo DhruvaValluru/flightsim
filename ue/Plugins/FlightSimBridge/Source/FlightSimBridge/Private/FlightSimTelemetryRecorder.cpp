@@ -63,6 +63,7 @@ void UFlightSimTelemetryRecorder::TickComponent(
 
 	Times.Add(ReadProperty(TEXT("simulation/sim-time-sec")));
 	AltitudeMetres.Add(ReadProperty(TEXT("position/h-sl-meters")));
+	AglMetres.Add(ReadProperty(TEXT("position/h-agl-ft")) * 0.3048);
 	LatitudeDegrees.Add(ReadProperty(TEXT("position/lat-geod-deg")));
 	LongitudeDegrees.Add(ReadProperty(TEXT("position/long-gc-deg")));
 	TrueAirspeedKnots.Add(ReadProperty(TEXT("velocities/vtrue-kts")));
@@ -97,6 +98,7 @@ bool UFlightSimTelemetryRecorder::WriteToDisk()
 	// Column names match core/telemetry/recorder.py exactly.
 	AddColumn(TEXT("t"), Times);
 	AddColumn(TEXT("altitude_m"), AltitudeMetres);
+	AddColumn(TEXT("agl_m"), AglMetres);
 	AddColumn(TEXT("lat_deg"), LatitudeDegrees);
 	AddColumn(TEXT("lon_deg"), LongitudeDegrees);
 	AddColumn(TEXT("tas_kt"), TrueAirspeedKnots);

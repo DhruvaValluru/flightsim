@@ -177,6 +177,26 @@ class Downburst(WindProvider):
                  note="the reversal is the hazard: energy lowest as it arrives"),
         ]
 
+    def card_block(self, origin_x_m: float, origin_y_m: float) -> Dict[str, float]:
+        """The run card's ``downburst`` block for the UE host's port.
+
+        Every parameter the C++ side needs, computed here; the port derives
+        only the closed-form lambda, and the manifest's selftest grid pins
+        that derivation against this provider point by point. The origin is
+        the projected-CRS anchor of the local north/east frame -- the same
+        convention as the orographic block, so the two hosts cannot disagree
+        about where the aircraft is.
+        """
+        return {
+            "origin_x_m": float(origin_x_m),
+            "origin_y_m": float(origin_y_m),
+            "centre_north_m": self.centre_north_m,
+            "centre_east_m": self.centre_east_m,
+            "core_radius_m": self.core_radius_m,
+            "outflow_max_mps": self.outflow_max_mps,
+            "outflow_height_m": self.outflow_height_m,
+        }
+
     def provenance(self) -> Dict[str, Any]:
         return {**super().provenance(),
                 "centre_north_m": self.centre_north_m,
