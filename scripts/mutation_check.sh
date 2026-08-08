@@ -421,6 +421,26 @@ mutate core/environment/wind.py \
     "the log law must be held at the surface-layer top" tests/test_environment.py \
     || failures=$((failures+1))
 
+# -- Allen thermals (Phase 7) --------------------------------------------
+
+mutate core/environment/thermals.py \
+    '        we = min(-(at * w_bar * (1.0 - swd)) / (area - at), 0.0)' \
+    '        we = 0.0  # MUTATED: no environment sink, mass not conserved' \
+    "the environment sink must balance the updraft flux" tests/test_thermals.py \
+    || failures=$((failures+1))
+
+mutate core/environment/thermals.py \
+    '        return self.wstar_mps * zzi ** (1.0 / 3.0) * (1.0 - 1.1 * zzi)' \
+    '        return self.wstar_mps * zzi ** (1.0 / 3.0) * (1.0 - 0.1 * zzi)  # MUTATED' \
+    "eq 11 profile must match the TM check case" tests/test_thermals.py \
+    || failures=$((failures+1))
+
+mutate core/fdm/fdm.py \
+    '            if rpm_props and all(self.props.get(p) > 500.0 for p in rpm_props):' \
+    '            if rpm_props and all(self.props.get(p) > 0.0 for p in rpm_props):  # MUTATED' \
+    "piston cranking must wait for combustion, not the starter" tests/test_thermals.py \
+    || failures=$((failures+1))
+
 # -- lee-rotor turbulence: the §13 contract ------------------------------
 
 mutate core/environment/rotor.py \

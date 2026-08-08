@@ -463,6 +463,23 @@ a single defensible number.
 Turbulence is deliberately **not active during trim** — a stochastic
 disturbance makes the trim solver chase noise.
 
+### 2.9b Thermals are Allen's model, pinned to its own check case
+
+Convective updrafts (Phase 7) implement NASA/TM-2006-214019 equations
+11–23 plus its Appendix B reference code, and the suite pins the
+implementation to the paper's own worked example (r2 = 79.4 m, five
+updrafts, 2.7 m/s centre velocity, −0.13 m/s ambient sink). Two honesty
+notes: the paper's Table 3 and its Appendix B disagree about the k4 shape
+constants (five printed columns, the code reads four) — the code's values
+are used because the code produced the paper's verified check case, and
+the discrepancy is recorded in the module. And the model's own limits
+hold: fitted to Desert Rock, Nevada soundings; nearest-updraft field (no
+superposition); no wind drift, merging, terrain coupling or time
+evolution; placement re-drawn every ~20 min in the paper but static here
+(clips are far shorter), deterministic from the spec seed. The
+conservation the physics offers — area-mean w ≈ 0 through the environment
+sink — is a suite check.
+
 ### 2.10 Terrain caveats
 
 **The ingested DEM is cropped, not extended.** Reprojecting a lat/lon rectangle

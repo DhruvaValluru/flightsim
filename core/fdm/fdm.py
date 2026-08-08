@@ -365,6 +365,16 @@ class FlightDynamics:
         # Advance one step so the propulsion model evaluates at the new state.
         self.step()
 
+        # A piston engine ignores a bare set-running: ignition and fuel gate
+        # it, and the write silently fails to latch (measured on c172p --
+        # set-running reads back 0.0 with no diagnostic). The real sequence
+        # works headless: mixture rich, magnetos both, starter engaged,
+        # ~2 s of cranking, after which the engine catches and set-running
+        # latches by itself.
+        if (any(self.props.get(n) < 0.5 for n in running)
+                and self.props.has("propulsion/magneto_cmd")):
+            self._crank_piston_engines(running)
+
         stopped = []
         for i, name in enumerate(running):
             if self.props.get(name) < 0.5:
@@ -380,6 +390,36 @@ class FlightDynamics:
                 f"The aircraft would trim as an unpowered glider."
             )
         self._engines_started = True
+
+    def _crank_piston_engines(self, running: tuple,
+                              crank_limit_s: float = 5.0) -> None:
+        """Mixture rich, magnetos both, starter on, crank until it catches.
+
+        The catch is observed, not assumed: cranking continues until
+        engine-rpm clears 500 -- measured on c172p, breaking off the crank
+        at 400 rpm leaves an engine that is still motoring on the starter
+        and whose set-running write does NOT latch, while by ~530 rpm
+        combustion is sustaining and it does. If the limit passes without a
+        catch the caller's verification reports the stopped engine -- this
+        method never fakes a latch.
+        """
+        for i in range(len(running)):
+            suffix = "" if i == 0 else f"[{i}]"
+            mixture = f"fcs/mixture-cmd-norm{suffix}"
+            if self.props.has(mixture):
+                self.props.set(mixture, 1.0)
+        self.props.set("propulsion/magneto_cmd", 3.0)
+        self.props.set("propulsion/starter_cmd", 1.0)
+
+        rpm_props = [p for p in ("propulsion/engine/engine-rpm",)
+                     if self.props.has(p)]
+        for _ in range(int(crank_limit_s * self.rate_hz)):
+            self.step()
+            if rpm_props and all(self.props.get(p) > 500.0 for p in rpm_props):
+                break
+        for name in running:
+            self.props.set(name, 1.0)
+        self.step()
 
     @property
     def engines_running(self) -> bool:
