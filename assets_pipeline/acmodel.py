@@ -156,6 +156,7 @@ def parse_ac(path) -> ACModel:
         return line
 
     def parse_object() -> ACObject:
+        nonlocal index
         header = take().split()
         if not header or header[0] != "OBJECT":
             raise ACParseError(f"{path}: expected OBJECT, got {header!r}")
@@ -178,10 +179,16 @@ def parse_ac(path) -> ACModel:
                 obj.loc = (float(tokens[1]), float(tokens[2]), float(tokens[3]))
             elif key == "data":
                 # Raw data block: the next line(s) hold that many bytes.
+                # CRLF-authored files (measured: the FGMEMBERS p51d) count
+                # the \r bytes in the total while splitlines() strips them;
+                # without the slack the skip eats real keyword lines and the
+                # parse desyncs into a bogus "expected OBJECT" error.
                 count = int(tokens[1])
                 taken = 0
-                while taken < count:
+                lines_taken = 0
+                while taken < count - lines_taken:
                     taken += len(take()) + 1
+                    lines_taken += 1
             elif key == "numvert":
                 for _ in range(int(tokens[1])):
                     vt = take().split()
@@ -208,6 +215,20 @@ def parse_ac(path) -> ACModel:
                                                   refs=refs))
             elif key == "kids":
                 for _ in range(int(tokens[1])):
+                    # Tolerate stray duplicated "kids 0" terminators between
+                    # children -- measured on the FGMEMBERS p51d, which
+                    # doubles some of them; read strictly, the stray line
+                    # lands where the next child's OBJECT header should be.
+                    while index < len(lines) and (
+                            not lines[index].split()
+                            or lines[index].split() == ["kids", "0"]):
+                        index += 1
+                    if index >= len(lines):
+                        # The same file also DECLARES more children than it
+                        # contains; FlightGear's own loader tolerates the
+                        # shortfall, so geometry that exists is kept rather
+                        # than the whole model refused for a bad count.
+                        return obj
                     obj.kids.append(parse_object())
                 return obj
             # Unknown keys (crease, texrep, texoff, subdiv, hidden, locked,
@@ -218,18 +239,33 @@ def parse_ac(path) -> ACModel:
         index += 1
         tokens = shlex.split(line)
         # MATERIAL "name" rgb r g b amb r g b emis r g b spec r g b shi s trans t
-        def triple(word: str) -> Tuple[float, float, float]:
-            i = tokens.index(word)
+        # Keyword searches start AFTER the name token: a material may be
+        # NAMED after a keyword -- measured on the FGMEMBERS dhc6, whose
+        # MATERIAL "trans" made index("trans") find the name and read "rgb"
+        # as a number.
+        def find(word: str) -> int:
+            try:
+                return tokens.index(word, 2)
+            except ValueError:
+                return -1
+
+        def triple(word: str, default) -> Tuple[float, float, float]:
+            i = find(word)
+            if i < 0:
+                return default
             return (float(tokens[i + 1]), float(tokens[i + 2]), float(tokens[i + 3]))
 
+        rgb_index = find("rgb")
+        if rgb_index < 0:
+            raise ACParseError(f"{path}: MATERIAL line without rgb: {line!r}")
         materials.append(ACMaterial(
             name=tokens[1],
-            rgb=triple("rgb"),
-            ambient=triple("amb") if "amb" in tokens else (0.2, 0.2, 0.2),
-            emissive=triple("emis") if "emis" in tokens else (0.0, 0.0, 0.0),
-            specular=triple("spec") if "spec" in tokens else (0.0, 0.0, 0.0),
-            shininess=float(tokens[tokens.index("shi") + 1]) if "shi" in tokens else 0.0,
-            transparency=float(tokens[tokens.index("trans") + 1]) if "trans" in tokens else 0.0,
+            rgb=triple("rgb", None),
+            ambient=triple("amb", (0.2, 0.2, 0.2)),
+            emissive=triple("emis", (0.0, 0.0, 0.0)),
+            specular=triple("spec", (0.0, 0.0, 0.0)),
+            shininess=float(tokens[find("shi") + 1]) if find("shi") >= 0 else 0.0,
+            transparency=float(tokens[find("trans") + 1]) if find("trans") >= 0 else 0.0,
         ))
 
     root = parse_object()

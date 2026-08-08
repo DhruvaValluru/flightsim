@@ -223,6 +223,45 @@ def test_poe_ladder_is_monotone():
     assert poe_index_for("severe") > poe_index_for("light")
 
 
+def test_scheduled_turbulence_is_w20_only_with_pinned_severity():
+    """The evolving-conditions machinery (Phase 7 3.1) may move ONLY W20:
+    per-step seed writes are the 515 g failure and mid-run severity changes
+    deliver 2-5x the commanded sigma_w (JSBSIM_CORRECTIONS §9/§13)."""
+    from core.environment.turbulence import ScheduledDrydenTurbulence
+
+    schedule = ScheduledDrydenTurbulence(
+        [(0.0, "none"), (40.0, "light"), (80.0, "moderate"), (115.0, "severe")],
+        seed=11)
+    writes = schedule.configure()
+    assert writes["atmosphere/turbulence/milspec/severity"] == 1.0
+    assert writes["atmosphere/randomseed"] == 11.0
+
+    step = schedule.step_writes(HERE, 100.0)
+    assert set(step) == {
+        "atmosphere/turbulence/milspec/windspeed_at_20ft_AGL-fps"}
+
+    assert schedule.w20_fps_at(0.0) == 0.0
+    assert schedule.w20_fps_at(50.0) == pytest.approx(u.kt_to_fps(15.0))
+    assert schedule.w20_fps_at(114.9) == pytest.approx(u.kt_to_fps(30.0))
+    assert schedule.w20_fps_at(140.0) == pytest.approx(u.kt_to_fps(45.0))
+
+    card = schedule.card_schedule()
+    assert card["times_s"] == [0.0, 40.0, 80.0, 115.0]
+    assert card["w20_fps"][-1] == pytest.approx(u.kt_to_fps(45.0))
+
+
+def test_scheduled_turbulence_refuses_bad_schedules():
+    from core.environment.turbulence import ScheduledDrydenTurbulence
+
+    with pytest.raises(ValueError, match="t=0"):
+        ScheduledDrydenTurbulence([(5.0, "light")], seed=1)
+    with pytest.raises(ValueError, match="increasing"):
+        ScheduledDrydenTurbulence([(0.0, "light"), (10.0, "severe"),
+                                   (5.0, "none")], seed=1)
+    with pytest.raises(ValueError, match="unknown intensity"):
+        ScheduledDrydenTurbulence([(0.0, "hurricane")], seed=1)
+
+
 def test_low_altitude_turbulence_scales_with_w20():
     """MIL-F-8785C's low-altitude relation, sigma_w = 0.1 * W20."""
     moderate = DrydenTurbulence("moderate")

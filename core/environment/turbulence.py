@@ -177,3 +177,93 @@ class DrydenTurbulence(TurbulenceProvider):
                 "jsbsim_turb_type": self.model, "poe_index": self.poe_index,
                 "w20_kt": self.w20_kt,
                 "measured_sigma_w_fps": POE_SIGMA_W_FPS[self.poe_index]}
+
+
+class ScheduledDrydenTurbulence(DrydenTurbulence):
+    """Turbulence intensity following the clock: the evolving-conditions card.
+
+    Segments are (start_s, intensity word); the current word's W20 is
+    written every step, held until the next segment -- and NOTHING else
+    moves. The seed is written once (§9's 515 g failure), and severity is
+    pinned to the nonzero constant 1.0 forever, because severity 0 is a
+    measured master off-switch and mid-run severity changes deliver 2-5x
+    the commanded sigma_w (docs/JSBSIM_CORRECTIONS.md §13). The W20 route
+    governs below ~300 m AGL only; a schedule flown above the ceiling
+    delivers the constant POE index-1 floor instead, so schedule scenarios
+    fly low and the vocabulary says so.
+    """
+
+    name = "scheduled_dryden_turbulence"
+
+    def __init__(self, segments, seed: int) -> None:
+        segments = [(float(t), str(word)) for t, word in segments]
+        if not segments:
+            raise ValueError("a turbulence schedule needs at least one segment")
+        if segments[0][0] != 0.0:
+            raise ValueError("the first schedule segment must start at t=0")
+        times = [t for t, _ in segments]
+        if times != sorted(times):
+            raise ValueError("schedule segments must be in increasing time order")
+        for _, word in segments:
+            if word not in W20_KT:
+                raise ValueError(f"unknown intensity word {word!r} in schedule")
+        # The strongest word sets the provider's nominal intensity (for the
+        # manifest); delivery is per step through W20.
+        strongest = max(segments,
+                        key=lambda seg: TARGET_SIGMA_W_FPS[seg[1]])[1]
+        super().__init__(intensity=strongest if strongest != "none" else "light",
+                         seed=seed, model=TURB_TUSTIN)
+        self.segments = segments
+
+    #: Severity pin: nonzero constant, written once (see class docstring).
+    PINNED_SEVERITY = 1.0
+
+    def w20_fps_at(self, time_s: float) -> float:
+        word = self.segments[0][1]
+        for start, name in self.segments:
+            if time_s >= start:
+                word = name
+        return u.kt_to_fps(W20_KT[word])
+
+    def configure(self) -> Dict[str, float]:
+        return {
+            "atmosphere/turb-type": float(TURB_TUSTIN),
+            "atmosphere/randomseed": float(self.seed),
+            "atmosphere/turbulence/milspec/severity": self.PINNED_SEVERITY,
+            "atmosphere/turbulence/milspec/windspeed_at_20ft_AGL-fps":
+                self.w20_fps_at(0.0),
+        }
+
+    def step_writes(self, position, time_s: float) -> Dict[str, float]:
+        """W20 only, held until the next segment (§13)."""
+        return {"atmosphere/turbulence/milspec/windspeed_at_20ft_AGL-fps":
+                self.w20_fps_at(time_s)}
+
+    def expected_sigma_w_mps(self, agl_m: float,
+                             time_s: float = 0.0) -> float:
+        if agl_m > LOW_ALTITUDE_CEILING_M:
+            return u.fps_to_mps(POE_SIGMA_W_FPS[int(self.PINNED_SEVERITY)])
+        return u.fps_to_mps(0.107 * self.w20_fps_at(time_s))
+
+    def card_schedule(self) -> Dict[str, Any]:
+        """The run card's ``turbulence_schedule`` block: times + W20 fps only."""
+        return {
+            "times_s": [t for t, _ in self.segments],
+            "w20_fps": [u.kt_to_fps(W20_KT[word]) for _, word in self.segments],
+        }
+
+    def vocabulary(self) -> List[Term]:
+        terms = super().vocabulary()
+        terms.append(Term(
+            "schedule", " -> ".join(f"{t:g}s {w}" for t, w in self.segments),
+            None, INTENSITY_STANDARD,
+            note=(f"delivered per step as W20 only, severity pinned "
+                  f"{self.PINNED_SEVERITY:g}, seed written once; the W20 "
+                  f"route governs below {LOW_ALTITUDE_CEILING_M:g} m AGL "
+                  f"(JSBSIM_CORRECTIONS §13)")))
+        return terms
+
+    def provenance(self) -> Dict[str, Any]:
+        return {**super().provenance(),
+                "schedule": [[t, w] for t, w in self.segments],
+                "delivery": "per-step W20, severity pinned, seed once (§13)"}

@@ -170,8 +170,34 @@ class PanelRenderer:
         scene = self.manifest.get("scene", {})
         rows.append((f"terrain {scene.get('terrain_name', 'gate6 ridge')} "
                      f"[{scene.get('terrain_sha256', '')[:8]}]", DIM))
-        rows.append(("physics ground: flat slab", DIM))
-        rows.append((f"at {self.card['terrain_elevation_m']:.0f} m (declared)", DIM))
+        if str(scene.get("terrain_material", "")).startswith("true-colour"):
+            rows.append(("surface: satellite imagery", DIM))
+            rows.append((f"  [{scene.get('imagery_sha256', '')[:8]}] "
+                         f"{scene.get('imagery_license', '')}", DIM))
+        if self.card.get("collision_terrain"):
+            # Only cards that carry heightfield collision AND whose AGL
+            # parity measurement passed may drop the slab label; the caller
+            # states which through the conditions dict.
+            if self.conditions.get("agl_parity_ok"):
+                rows.append(("physics ground: heightfield", GOOD))
+                rows.append(("  (AGL parity measured)", DIM))
+            else:
+                rows.append(("physics ground: heightfield", TEXT))
+                rows.append(("  (parity not established)", DIM))
+        else:
+            rows.append(("physics ground: flat slab", DIM))
+            rows.append((f"at {self.card['terrain_elevation_m']:.0f} m (declared)", DIM))
+        # Evolving-conditions clips narrate their current phase (Phase 7 3.1),
+        # from the schedule the card carries -- a plan annotation, drawn next
+        # to the recorded state that must bear it out.
+        phases = self.conditions.get("phases") or []
+        if phases:
+            t = float(record.get("t", 0.0))
+            current = phases[0][1]
+            for start, label in phases:
+                if t >= float(start):
+                    current = label
+            rows.append((f"phase: {current}", ACCENT))
         for line, colour in rows:
             draw.text((x, y), line[:38], font=self.small, fill=colour)
             y += 17

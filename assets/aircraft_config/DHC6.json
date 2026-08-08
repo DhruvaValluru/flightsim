@@ -1,0 +1,157 @@
+{
+  "name": "DHC6",
+  "fdm": "DHC6",
+  "fdm_match": [
+    "DHC6",
+    "DHC-6"
+  ],
+  "mesh_airframe": "de Havilland Canada DHC-6 Twin Otter (FGMEMBERS dhc6 model)",
+  "source_dir": "../aircraft_src/dhc6",
+  "license": {
+    "license_name": "GPL-2.0",
+    "file": "COPYING",
+    "repo": "https://github.com/FGMEMBERS/dhc6",
+    "commit": "ed826b950acfe9aed737808f24ddb26a4f9a8c78",
+    "authors_file": "README.md"
+  },
+  "parts": [
+    {
+      "file": "Models/dhc-6.ac"
+    },
+    {
+      "file": "Models/wheels.ac"
+    }
+  ],
+  "exclude": [
+    ".*[Ll]ight.*",
+    ".*[Bb]eacon.*",
+    ".*[Ss]trobe.*",
+    ".*hotspot.*",
+    "shadow.*",
+    "Lprop\\.disk",
+    "Rprop\\.disk"
+  ],
+  "hinge_note": "hinge lines estimated from each surface's own leading-edge geometry (assets_pipeline/estimate_hinges.py); verified on screen by gate5_realmesh, not assumed",
+  "surfaces": {
+    "aileron_l": {
+      "bone": "aileron_l",
+      "objects": [
+        "L.aileron"
+      ],
+      "property": "fcs/left-aileron-pos-rad",
+      "scale_deg_per_unit": 57.29578,
+      "hinge_m": [
+        [
+          0.5342,
+          -6.0397,
+          1.1919
+        ],
+        [
+          0.533,
+          -9.4836,
+          1.3727
+        ]
+      ]
+    },
+    "aileron_r": {
+      "bone": "aileron_r",
+      "objects": [
+        "R.aileron"
+      ],
+      "property": "fcs/right-aileron-pos-rad",
+      "scale_deg_per_unit": -57.29578,
+      "hinge_m": [
+        [
+          0.5342,
+          6.0397,
+          1.1919
+        ],
+        [
+          0.533,
+          9.4836,
+          1.3727
+        ]
+      ]
+    },
+    "elevator": {
+      "bone": "elevator",
+      "objects": [
+        "Elevator"
+      ],
+      "property": "fcs/elevator-pos-rad",
+      "scale_deg_per_unit": 57.29578,
+      "hinge_m": [
+        [
+          7.0629,
+          -2.8635,
+          1.0782
+        ],
+        [
+          7.0629,
+          2.8635,
+          1.0782
+        ]
+      ]
+    },
+    "rudder": {
+      "bone": "rudder",
+      "objects": [
+        "rudder"
+      ],
+      "property": "fcs/rudder-pos-rad",
+      "scale_deg_per_unit": 57.29578,
+      "hinge_m": [
+        [
+          7.713,
+          0.0,
+          -0.0509
+        ],
+        [
+          8.0881,
+          0.0,
+          3.5861
+        ]
+      ]
+    },
+    "flaps_l": {
+      "bone": "flaps_l",
+      "objects": [
+        "L.flap"
+      ],
+      "property": "fcs/flap-pos-deg",
+      "scale_deg_per_unit": 1.0,
+      "hinge_m": [
+        [
+          0.5344,
+          -6.0319,
+          1.1916
+        ],
+        [
+          0.5358,
+          -0.9131,
+          0.9224
+        ]
+      ]
+    },
+    "flaps_r": {
+      "bone": "flaps_r",
+      "objects": [
+        "R.flap"
+      ],
+      "property": "fcs/flap-pos-deg",
+      "scale_deg_per_unit": 1.0,
+      "hinge_m": [
+        [
+          0.5358,
+          0.9131,
+          0.9224
+        ],
+        [
+          0.5344,
+          6.0319,
+          1.1916
+        ]
+      ]
+    }
+  }
+}

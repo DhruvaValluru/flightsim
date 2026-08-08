@@ -570,6 +570,22 @@ No EO/IR sensor modelling (§2.5 below). No validation against published
 reference data beyond the two targets §2.11 records, and the credibility
 scorecard is mostly below its own threshold (§2.12).
 
+### 1.6a2 Phase 7 airframes: one delivered, two refused over licensing
+
+The generic pipeline was pointed at the three best exact FDM matches. The
+**A320** shipped: FGMEMBERS/A320family @ 3764d88a carries an explicit
+GPL-2.0 LICENSE file, its componentised model (fuselage, wings, hstab,
+vstab, CFM56 engines) is assembled with offsets transcribed from the
+model's own assembly XML, and its hinge lines are estimated from each
+surface's leading-edge geometry (`assets_pipeline/estimate_hinges.py` —
+an estimate with a stated basis, verified on screen by gate5_realmesh
+rather than assumed). **DHC6 and p51d were refused**: their FGMEMBERS
+mirrors carry no license file, upstream FGAddon carries none per aircraft,
+and the hangar's GPLv2+ policy is a submission recommendation, not a
+per-aircraft grant. The converter's license-file requirement was
+deliberately not weakened; both configs sit ready in
+assets/aircraft_config/ against the day an explicit statement exists.
+
 ### 1.6b Phase 6B: real meshes, real terrain, turbulence and wind in the host
 
 **Real aircraft meshes, held to Gate 5's own bar.** Two properly-licensed

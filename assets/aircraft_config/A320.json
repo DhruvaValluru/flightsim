@@ -1,0 +1,216 @@
+{
+  "name": "A320",
+  "fdm": "A320",
+  "fdm_match": [
+    "A320",
+    "A320-200"
+  ],
+  "mesh_airframe": "Airbus A320-200 CFM (FGMEMBERS A320family / IDG-A32X model)",
+  "source_dir": "../aircraft_src/A320family",
+  "license": {
+    "license_name": "GPL-2.0",
+    "file": "LICENSE",
+    "repo": "https://github.com/FGMEMBERS/A320family",
+    "commit": "3764d88a8863f2833706fe3abdc89a8b8307581d",
+    "authors_file": "README.md"
+  },
+  "parts": [
+    {
+      "file": "Models/Fuselages/A320/res/fuselage.ac"
+    },
+    {
+      "file": "Models/Wings/res/a320.wings.ac",
+      "offset_m": [
+        15.28,
+        0.0,
+        -1.06019
+      ]
+    },
+    {
+      "file": "Models/Wings/a320.winglets.ac",
+      "offset_m": [
+        15.28,
+        0.0,
+        -1.06019
+      ]
+    },
+    {
+      "file": "Models/Fuselages/A320/res/hstab.ac",
+      "offset_m": [
+        34.1512207,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "file": "Models/Fuselages/A320/res/vstab.ac",
+      "offset_m": [
+        32.2535728,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "file": "Models/Engines/Models/cfm56.ac",
+      "offset_m": [
+        13.6412088,
+        -5.755,
+        -2.0772087
+      ]
+    },
+    {
+      "file": "Models/Engines/Models/cfm56.ac",
+      "offset_m": [
+        13.6412088,
+        5.755,
+        -2.0772087
+      ]
+    },
+    {
+      "file": "Models/Engines/Models/a320.nacelle.cfm.ac",
+      "offset_m": [
+        13.6412088,
+        -5.755,
+        -2.0772087
+      ]
+    },
+    {
+      "file": "Models/Engines/Models/a320.nacelle.cfm.ac",
+      "offset_m": [
+        13.6412088,
+        5.755,
+        -2.0772087
+      ]
+    },
+    {
+      "file": "Models/Engines/Models/a320.pylon.cfm.left.ac",
+      "offset_m": [
+        13.6412088,
+        -5.755,
+        -2.0772087
+      ]
+    },
+    {
+      "file": "Models/Engines/Models/a320.pylon.cfm.right.ac",
+      "offset_m": [
+        13.6412088,
+        5.755,
+        -2.0772087
+      ]
+    }
+  ],
+  "part_offset_note": "offsets transcribed from the model's own assembly XML (A320-200-CFM.xml and its nested wing/engine XMLs); the parts are modelled about local origins",
+  "exclude": [
+    ".*[Ll]ight.*",
+    ".*[Bb]eacon.*",
+    ".*[Ss]trobe.*",
+    ".*hotspot.*",
+    ".*LOD.*",
+    ".*[Ll]ogo.*"
+  ],
+  "hinge_note": "hinge lines estimated from each surface's own leading-edge geometry plus the part offset (assets_pipeline/estimate_hinges.py); verified on screen by gate5_realmesh, not assumed",
+  "surfaces": {
+    "aileron_l": {
+      "bone": "aileron_l",
+      "objects": [
+        "AileronL"
+      ],
+      "property": "fcs/left-aileron-pos-rad",
+      "scale_deg_per_unit": 57.29578,
+      "hinge_m": [
+        [
+          22.9449,
+          -13.4039,
+          -0.0935
+        ],
+        [
+          24.003,
+          -16.3269,
+          0.1914
+        ]
+      ]
+    },
+    "aileron_r": {
+      "bone": "aileron_r",
+      "objects": [
+        "AileronR"
+      ],
+      "property": "fcs/right-aileron-pos-rad",
+      "scale_deg_per_unit": -57.29578,
+      "hinge_m": [
+        [
+          22.9449,
+          13.4077,
+          -0.0935
+        ],
+        [
+          24.003,
+          16.3307,
+          0.1914
+        ]
+      ]
+    },
+    "elevator_l": {
+      "bone": "elevator_l",
+      "objects": [
+        "ElevatorL"
+      ],
+      "property": "fcs/elevator-pos-rad",
+      "scale_deg_per_unit": -57.29578,
+      "hinge_m": [
+        [
+          37.0281,
+          -0.9603,
+          0.6905
+        ],
+        [
+          38.9271,
+          -6.1819,
+          1.2958
+        ]
+      ]
+    },
+    "elevator_r": {
+      "bone": "elevator_r",
+      "objects": [
+        "ElevatorR"
+      ],
+      "property": "fcs/elevator-pos-rad",
+      "scale_deg_per_unit": 57.29578,
+      "hinge_m": [
+        [
+          37.0281,
+          0.9603,
+          0.6905
+        ],
+        [
+          38.9271,
+          6.1819,
+          1.2958
+        ]
+      ]
+    },
+    "rudder": {
+      "bone": "rudder",
+      "objects": [
+        "Rudder",
+        "Rudder_0",
+        "Rudder_1"
+      ],
+      "property": "fcs/rudder-pos-rad",
+      "scale_deg_per_unit": -57.29578,
+      "hinge_m": [
+        [
+          36.0555,
+          0.0,
+          1.9895
+        ],
+        [
+          38.6804,
+          0.0,
+          7.7622
+        ]
+      ]
+    }
+  }
+}

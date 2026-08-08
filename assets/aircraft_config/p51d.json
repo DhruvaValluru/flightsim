@@ -1,0 +1,153 @@
+{
+  "name": "p51d",
+  "fdm": "p51d",
+  "fdm_match": [
+    "p51d",
+    "P-51D",
+    "P-51D (JSBSim)"
+  ],
+  "mesh_airframe": "North American P-51D Mustang (FGMEMBERS p51d model)",
+  "source_dir": "../aircraft_src/p51d",
+  "license": {
+    "license_name": "GPL-2.0",
+    "file": "COPYING",
+    "repo": "https://github.com/FGMEMBERS/p51d",
+    "commit": "cb3bcd6ef41182f6b1bae91395f38d0dadd974e5",
+    "authors_file": "README.md"
+  },
+  "parts": [
+    {
+      "file": "Models/P-51D-25NA.ac"
+    }
+  ],
+  "exclude": [
+    ".*[Ll]ight.*",
+    ".*[Bb]eacon.*",
+    ".*hotspot.*",
+    "shadow.*",
+    ".*[Pp]lacard.*"
+  ],
+  "hinge_note": "hinge lines estimated from each surface's own leading-edge geometry (assets_pipeline/estimate_hinges.py); verified on screen by gate5_realmesh, not assumed",
+  "surfaces": {
+    "aileron_l": {
+      "bone": "aileron_l",
+      "objects": [
+        "aileronLeft"
+      ],
+      "property": "fcs/left-aileron-pos-rad",
+      "scale_deg_per_unit": 57.29578,
+      "hinge_m": [
+        [
+          3.3106,
+          -3.3167,
+          -0.4205
+        ],
+        [
+          3.0995,
+          -5.4265,
+          -0.2298
+        ]
+      ]
+    },
+    "aileron_r": {
+      "bone": "aileron_r",
+      "objects": [
+        "aileronRight"
+      ],
+      "property": "fcs/right-aileron-pos-rad",
+      "scale_deg_per_unit": -57.29578,
+      "hinge_m": [
+        [
+          3.3259,
+          3.3103,
+          -0.4083
+        ],
+        [
+          3.1189,
+          5.4198,
+          -0.2133
+        ]
+      ]
+    },
+    "elevator": {
+      "bone": "elevator",
+      "objects": [
+        "elevator"
+      ],
+      "property": "fcs/elevator-pos-rad",
+      "scale_deg_per_unit": 57.29578,
+      "hinge_m": [
+        [
+          7.665,
+          -1.6136,
+          0.2942
+        ],
+        [
+          7.6651,
+          1.6133,
+          0.2953
+        ]
+      ]
+    },
+    "rudder": {
+      "bone": "rudder",
+      "objects": [
+        "rudder"
+      ],
+      "property": "fcs/rudder-pos-rad",
+      "scale_deg_per_unit": 57.29578,
+      "hinge_m": [
+        [
+          8.2395,
+          0.0,
+          -0.0974
+        ],
+        [
+          8.3581,
+          0.0,
+          5.0695
+        ]
+      ]
+    },
+    "flaps_l": {
+      "bone": "flaps_l",
+      "objects": [
+        "flapsLeft"
+      ],
+      "property": "fcs/flap-pos-deg",
+      "scale_deg_per_unit": 1.0,
+      "hinge_m": [
+        [
+          3.1668,
+          -3.2263,
+          -0.4656
+        ],
+        [
+          3.4864,
+          -0.5493,
+          -0.7012
+        ]
+      ]
+    },
+    "flaps_r": {
+      "bone": "flaps_r",
+      "objects": [
+        "flapsRight"
+      ],
+      "property": "fcs/flap-pos-deg",
+      "scale_deg_per_unit": 1.0,
+      "hinge_m": [
+        [
+          3.4887,
+          0.5448,
+          -0.7006
+        ],
+        [
+          3.1803,
+          3.2225,
+          -0.4576
+        ]
+      ]
+    }
+  }
+}
