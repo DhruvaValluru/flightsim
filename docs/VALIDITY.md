@@ -668,13 +668,23 @@ origin, and every terrain vertex goes through the same PROJ transform chain
 that places the aircraft, so the ridgelines in frame are the raster's
 ridgelines at their true position and height relative to the flight.
 
-**What the gear model feels is still the spec's flat slab.** The visual
-terrain carries no collision, headless ground queries still answer from the
-spec's flat terrain elevation, and every clip manifest says so
-(`physics_ground`). The stretch goal — real collision in the host plus
-matching heightfield ground queries headless, with AGL parity shown over the
-ridge — was **not done**; visual mountains must not be read as terrain the
-gear ever felt. The ONE physics coupling to the real raster is the wind:
+**Real ground is now available to both hosts, and its parity is measured**
+(Phase 7 1.2). A card carrying `collision_terrain` replaces the UE host's
+flat query slab with query-only collision geometry built from the SAME
+baked raster the visuals draw, at the raster's full 30 m grid, through the
+same PROJ chain that places the aircraft; the headless runner gets the
+matching ground from `TerrainGround` (bilinear on the same raster) wired
+into `run_spec`. Measured over the Matterhorn massif with 1415 m of ground
+relief along a 30 s hands-off track (`experiments/agl_parity.py`,
+tolerances stated before measuring): |Δ AGL| between hosts p50 **1.30 m**,
+p95 **4.77 m**, max **6.46 m** against bars of 8 and 20 m — the residual
+being triangle-vs-bilinear interpolation inside a 30 m cell plus permitted
+trajectory divergence. VerifyTrimmedCondition checks such cards against the
+raster elevation under the aircraft (the right claim), and the panel labels
+them "physics ground: heightfield (AGL parity measured)". Cards WITHOUT
+`collision_terrain` — including every Phase 6B showcase clip — still fly
+the labeled flat slab, and their manifests still say so. The wind coupling
+to the raster is separate:
 
 **Orographic wind over the real ridge, in the render path.** The C++ port of
 `core/environment/terrain_field.py` samples its field at 49 grid points at
