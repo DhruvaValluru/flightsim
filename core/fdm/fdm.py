@@ -430,7 +430,14 @@ class FlightDynamics:
                 if caught():
                     break
             if caught():
-                break
+                # A catch on the starter is not sustained combustion: full
+                # rich at 2600 m catches and then dies (measured -- it cost
+                # four glider clips). Hold the setting for three seconds and
+                # believe the rpm only if it is still there.
+                for _ in range(int(3.0 * self.rate_hz)):
+                    self.step()
+                if caught():
+                    break
         for name in running:
             self.props.set(name, 1.0)
         self.step()

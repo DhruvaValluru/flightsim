@@ -247,18 +247,22 @@ _MIXTURE_CACHE: Dict[tuple, float] = {}
 
 
 def discovered_engine_mixture(spec: ScenarioSpec) -> float:
-    """The engine-start mixture the UE host must use, measured not assumed.
+    """The engine-start mixture the UE host must use, verified in ITS sequence.
 
-    A piston force-started full rich above ~3 km density altitude dies
-    within seconds (VENDORED.json local patch 4; measured on c172p at
-    3600 m). The headless host discovers a sustainable mixture by actually
-    cranking the same JSBSim at the card's altitude
-    (FlightDynamics._crank_piston_engines sweeps rich to lean until
-    combustion sustains); the card carries that verified value so both
-    hosts start the same engine the same way. Turbines return 1.0 without
-    cranking -- the sweep exists only where magnetos do.
+    A piston force-started full rich above ~2 km density altitude dies
+    (VENDORED.json local patch 4; measured on c172p: at 3600 m it dies in
+    seconds, at 2600 m it decays through 531 rpm and the trim solves a
+    glider). The first version of this discovery swept a CRANK -- and full
+    rich CATCHES on the starter at 2600 m while still failing to sustain,
+    so four Yosemite cells rendered as gliders before the gap was measured.
+    The criterion is now the UE host's own sequence, exactly: RunIC,
+    InitRunning(-1), the candidate mixture written to the FCS, a tFull trim,
+    and the engine still turning after five settled seconds. The first
+    mixture that passes is the card's. Turbines return 1.0 untested -- the
+    sweep exists only where magnetos do.
     """
-    from core.fdm import FlightDynamics
+    import jsbsim
+
     from core.fdm import units as u
 
     aircraft = str(spec.aircraft.value)
@@ -267,21 +271,58 @@ def discovered_engine_mixture(spec: ScenarioSpec) -> float:
     if key in _MIXTURE_CACHE:
         return _MIXTURE_CACHE[key]
 
-    fdm = FlightDynamics(aircraft, rate_hz=float(spec.rate.value))
-    fdm.set_initial_conditions(
-        {"h-sl-ft": u.m_to_ft(altitude_m),
-         "vc-kts": float(spec.airspeed.value),
-         "gamma-deg": 0.0, "phi-deg": 0.0, "psi-true-deg": 0.0,
-         "beta-deg": 0.0, "lat-geod-deg": 0.0, "long-gc-deg": 0.0,
-         "terrain-elevation-ft": u.m_to_ft(float(spec.terrain_elevation.value))}
-    )
-    if not fdm.props.has("propulsion/magneto_cmd"):
-        mixture = 1.0
-    else:
-        fdm.start_engines()   # raises if no mixture sustains: an honest refusal
-        mixture = fdm.props.get("fcs/mixture-cmd-norm")
-    _MIXTURE_CACHE[key] = mixture
-    return mixture
+    def attempt(mixture: float):
+        fdm = jsbsim.FGFDMExec(jsbsim.get_default_root_dir())
+        fdm.load_model(aircraft)
+        fdm.set_dt(1.0 / float(spec.rate.value))
+        # _IC_PRIORITY's safe order: position, attitude (beta before psi),
+        # then speed last (docs/JSBSIM_CORRECTIONS.md §2).
+        for name, value in (
+                ("ic/lat-geod-deg", float(spec.latitude.value)),
+                ("ic/long-gc-deg", float(spec.longitude.value)),
+                ("ic/terrain-elevation-ft",
+                 u.m_to_ft(float(spec.terrain_elevation.value))),
+                ("ic/h-sl-ft", u.m_to_ft(altitude_m)),
+                ("ic/beta-deg", 0.0),
+                ("ic/psi-true-deg", float(spec.heading.value)),
+                ("ic/phi-deg", 0.0), ("ic/gamma-deg", 0.0),
+                ("ic/vc-kts", float(spec.airspeed.value))):
+            fdm.set_property_value(name, value)
+        fdm.run_ic()
+        # The catalog decides piston vs turbine; reading a made-up property
+        # would silently create it (docs/JSBSIM_CORRECTIONS.md §3).
+        if not any("propulsion/magneto_cmd" in entry
+                   for entry in fdm.get_property_catalog()):
+            return "turbine"
+        fdm.get_propulsion().init_running(-1)
+        fdm.set_property_value("fcs/mixture-cmd-norm", mixture)
+        try:
+            fdm.do_trim(1)
+        except jsbsim.TrimFailureError:
+            return None
+        for _ in range(int(5.0 * float(spec.rate.value))):
+            fdm.run()
+        if fdm.get_property_value("propulsion/engine/engine-rpm") < 500.0:
+            return None
+        return mixture
+
+    probe = attempt(1.0)
+    if probe == "turbine":
+        _MIXTURE_CACHE[key] = 1.0
+        return 1.0
+    mixture = probe
+    if mixture is None:
+        for candidate in (0.85, 0.75, 0.65, 0.55, 0.45):
+            mixture = attempt(candidate)
+            if mixture is not None:
+                break
+    if mixture is None:
+        raise RuntimeError(
+            f"{aircraft} at {altitude_m:.0f} m: no mixture sustains the "
+            f"force-started engine through trim. Refusing to write a card "
+            f"that would fly a glider under a powered label.")
+    _MIXTURE_CACHE[key] = float(mixture)
+    return float(mixture)
 
 
 def write_run_card(spec: ScenarioSpec, path: Path,
