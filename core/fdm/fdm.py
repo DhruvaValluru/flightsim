@@ -399,23 +399,37 @@ class FlightDynamics:
         engine-rpm clears 500 -- measured on c172p, breaking off the crank
         at 400 rpm leaves an engine that is still motoring on the starter
         and whose set-running write does NOT latch, while by ~530 rpm
-        combustion is sustaining and it does. If the limit passes without a
-        catch the caller's verification reports the stopped engine -- this
-        method never fakes a latch.
+        combustion is sustaining and it does. Mixture is swept rich to
+        lean across attempts because full rich does not fire at altitude
+        (measured: the same c172p that catches at 500 m with mixture 1.0
+        never catches at 3600 m until leaned). If every setting fails the
+        caller's verification reports the stopped engine -- this method
+        never fakes a latch.
         """
+        mixtures = []
         for i in range(len(running)):
             suffix = "" if i == 0 else f"[{i}]"
-            mixture = f"fcs/mixture-cmd-norm{suffix}"
-            if self.props.has(mixture):
-                self.props.set(mixture, 1.0)
+            name = f"fcs/mixture-cmd-norm{suffix}"
+            if self.props.has(name):
+                mixtures.append(name)
         self.props.set("propulsion/magneto_cmd", 3.0)
-        self.props.set("propulsion/starter_cmd", 1.0)
 
         rpm_props = [p for p in ("propulsion/engine/engine-rpm",)
                      if self.props.has(p)]
-        for _ in range(int(crank_limit_s * self.rate_hz)):
-            self.step()
-            if rpm_props and all(self.props.get(p) > 500.0 for p in rpm_props):
+
+        def caught() -> bool:
+            return bool(rpm_props) and all(self.props.get(p) > 500.0
+                                           for p in rpm_props)
+
+        for setting in (1.0, 0.8, 0.65, 0.5, 0.35):
+            for name in mixtures:
+                self.props.set(name, setting)
+            self.props.set("propulsion/starter_cmd", 1.0)
+            for _ in range(int(crank_limit_s * self.rate_hz)):
+                self.step()
+                if caught():
+                    break
+            if caught():
                 break
         for name in running:
             self.props.set(name, 1.0)
