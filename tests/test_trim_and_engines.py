@@ -95,3 +95,29 @@ def test_fuel_burn_moves_mass_when_not_held():
     before = fdm.state().weight_kg
     fdm.run_for(60)
     assert fdm.state().weight_kg < before
+
+
+def test_discovered_mixture_refuses_full_rich_at_altitude():
+    """The card's engine-start mixture is verified in the UE host's own
+    sequence (InitRunning + mixture + trim + 5 s sustain). At 2600 m a
+    force-started engine at full rich decays through 531 rpm and trims a
+    glider (measured -- it cost four glider clips), so the discovery must
+    come back leaned. A discovery that skips the sustain check settles at
+    1.0 here, which is the regression this test pins. (The crank-start
+    path is different: with the starter assisting, full rich stabilises at
+    a sick ~500 rpm idle -- measured -- so the crank cannot discriminate
+    and the DISCOVERY is the load-bearing check for cards.)"""
+    from experiments.gate5_ue_parity import (
+        _MIXTURE_CACHE, discovered_engine_mixture, reference_spec,
+    )
+
+    _MIXTURE_CACHE.clear()
+    spec = reference_spec("fly the c172 at 2600 m and 100 kt for 30 seconds")
+    spec.set("latitude", 37.7275, frm="test")
+    spec.set("longitude", -119.61, frm="test")
+    spec.set("heading", 73.0, frm="test")
+    spec.set("terrain_elevation", 1230.9, frm="test")
+    mixture = discovered_engine_mixture(spec)
+    assert mixture < 1.0, (
+        "the discovery accepted full rich at a density altitude where the "
+        "force-started engine cannot sustain it")

@@ -382,8 +382,8 @@ mutate experiments/orographic_ue.py \
     || failures=$((failures+1))
 
 mutate experiments/gate5_ue_parity.py \
-    '    if str(spec.turbulence.value) != "none":' \
-    '    if False:  # MUTATED: turbulent cards carry no provider writes' \
+    '    elif str(spec.turbulence.value) != "none":' \
+    '    elif False:  # MUTATED: turbulent cards carry no provider writes' \
     "turbulent cards carry the provider's exact writes" tests/test_phase6b.py \
     || failures=$((failures+1))
 
@@ -435,10 +435,16 @@ mutate core/environment/thermals.py \
     "eq 11 profile must match the TM check case" tests/test_thermals.py \
     || failures=$((failures+1))
 
-mutate core/fdm/fdm.py \
-    '            if rpm_props and all(self.props.get(p) > 500.0 for p in rpm_props):' \
-    '            if rpm_props and all(self.props.get(p) > 0.0 for p in rpm_props):  # MUTATED' \
-    "piston cranking must wait for combustion, not the starter" tests/test_thermals.py \
+mutate experiments/gate5_ue_parity.py \
+    '        try:
+            fdm.do_trim(1)
+        except jsbsim.TrimFailureError:
+            return None' \
+    '        try:
+            fdm.do_trim(1)
+        except jsbsim.TrimFailureError:
+            pass  # MUTATED: a glider trim is accepted' \
+    "the mixture discovery must refuse a failed trim" tests/test_trim_and_engines.py \
     || failures=$((failures+1))
 
 # -- the evolving-conditions schedule (Phase 7 3.1) ----------------------
