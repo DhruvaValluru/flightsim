@@ -11,77 +11,94 @@
 | 4 terrain | 4 | PASS 7/7 |
 | 5 Unreal | 5 | PASS 3/3 clauses, each measured |
 | 6 visual realism | 6 | PASS 4/4 measured clauses + side-by-side |
-| 6B real assets/terrain/turbulence/matrix | — | **DELIVERED, all verdicts measured** |
-| 7 imagery/coupling/atmosphere | — | next: docs/BRIEF_PHASE7.md |
+| 6B real assets/terrain/turbulence/matrix | — | DELIVERED |
+| 7 imagery/coupling/atmosphere | — | **DELIVERED, every verdict measured** (docs/BRIEF_PHASE7.md) |
 
 ```bash
-.venv/bin/pytest                          # 261 tests
-./scripts/mutation_check.sh               # 49 guards, all load-bearing
+.venv/bin/pytest                          # 307 tests
+./scripts/mutation_check.sh               # 62 guards, all load-bearing
 ./scripts/ue_preflight.sh                 # "Preflight OK"
 ./scripts/build_ue.sh                     # builds the UE host
-.venv/bin/python experiments/gate5_ue_parity.py    # gate 5 end to end (see below)
+.venv/bin/python experiments/gate5_ue_parity.py    # gate 5 end to end
 .venv/bin/python experiments/gate6_visual.py       # gate 6 (~4 min)
-.venv/bin/python experiments/gate5_realmesh.py     # gate 5 on-screen, real meshes
-.venv/bin/python experiments/turbulence_ue.py --skip-runs    # re-verdict from disk
-.venv/bin/python experiments/orographic_ue.py --skip-renders # port check from disk
-.venv/bin/python experiments/showcase_matrix.py    # the 144-cell matrix (resumable)
+.venv/bin/python experiments/gate5_realmesh.py     # on-screen: B747 + c172p + A320
+.venv/bin/python experiments/turbulence_ue.py --skip-runs
+.venv/bin/python experiments/orographic_ue.py --skip-renders
+.venv/bin/python experiments/environment_ue.py     # 4 Phase 7 ports + null evidence
+.venv/bin/python experiments/agl_parity.py         # heightfield-collision parity
+.venv/bin/python experiments/imagery_drape.py      # drape on geometry
+.venv/bin/python experiments/evolving_flight.py    # the 150 s clip + phase checks
+.venv/bin/python experiments/zermatt_run.py        # scripted valley run + cameras
+.venv/bin/python experiments/showcase_matrix.py    # the matrix (resumable)
+.venv/bin/python experiments/turb_perstep_measure.py  # the §13 measurement
 ```
 
-## Phase 6B: what exists now and what was measured
+## Phase 7: what exists now and what was measured
 
-* **Real airframes.** FlightGear GPL-2.0 meshes (commits pinned in
-  assets/aircraft_config/*.json): 747-400 (FGMEMBERS) on the B747 FDM
-  (which names itself B747-400) and the c172p-team Cessna on c172p. §1.4 is
-  enforced twice: the converter refuses a mesh whose fdm_config name is not
-  allowed, and the render commandlet refuses a manifest whose fdm differs
-  from the card's aircraft. Pipeline: assets_pipeline/convert.py (.ac → per-
-  part OBJ + hinge manifest, frames measured not assumed: model.x=ac.x,
-  model.y=-ac.z, model.z=ac.y; UE negates X, winding reversed once) →
-  scripts/ue_import_aircraft.py (UE pythonscript commandlet) →
-  UFlightSimSurfaceAnimator bindings from the manifest. Gate 5 on-screen
-  clauses re-measured on the real meshes: B747 bank-tracking r=0.9997,
-  c172p r=0.9909 (runs/gate5_realmesh/report.json). Boxes path untouched;
-  Gate 5 proper unchanged.
-* **Real Earth terrain.** Copernicus GLO-30 via core/terrain/glo30.py:
-  fetch (public bucket, no auth) → mosaic/crop → the EXISTING Phase 4
-  dem.ingest → verify vs source (400 pts, p95 |Δ| 28 m Alps / 17 m Sierra)
-  → summit identity checks → provenance (tiles+sha, EGM2008 note, DSM
-  smoothing: the Matterhorn's own source data tops at 4329 m vs 4478
-  surveyed — dataset limit, recorded). Scenes: matterhorn, yosemite +
-  synthesised control ridge. Rendered georeferenced: every vertex through
-  the GeoReferencingSystem's projected CRS (ProjectedToEngine), true
-  position and heights; slope/altitude vertex-colour classification
-  (labeled approximated), calibrated palette (see gotchas).
-* **Turbulence in the UE host.** Card carries the exact Dryden property
-  writes (turbulence_properties) computed by core/environment/turbulence.py;
-  ConfigureTurbulence writes them once after trim+latch. Null test: n_z RMS
-  ×323 over calm. Same-seed parity MEASURED AND FAILED: each host
-  bit-repeatable alone, realisations diverge from the first flown sample
-  (per-process RNG stream offset) → verdict **visual-only, seed recorded**
-  (runs/turbulence_ue/report.json); telemetry commandlet refuses turbulent
-  cards without -AllowNonParityEnvironment.
-* **Orographic wind in the render path.** FlightSimOrographic.cpp is a
-  line-for-line port of terrain_field.py; every parameter (wavelength,
-  decay, projected origin) computed once in Python and carried in the card.
-  Cross-check: 49-point selftest grid in every manifest, max |Py−C++| =
-  1.78e-15 m/s. Null test: coupled RMS 2.58 fps vertical wind in the FDM,
-  severed control exactly 0 (runs/orographic_ue/report.json).
-* **Microburst.** core/environment/downburst.py: Vicroy vertical shaping,
-  vertical velocity DERIVED from continuity (numerically checked,
-  mutation-guarded), JAWS/Fujita magnitudes. Matrix cell at 300 m AGL with
-  automatic visual-terrain clearance check (refuses rather than tunnels);
-  field evaluated on the NOMINAL track (labeled — position-coupling is a
-  Phase 7 item).
-* **Condition matrix.** experiments/showcase_matrix.py: 144 cells = {calm,
-  crosswind25, gusty15, turb_moderate} × {clear, hazy} × {dawn, noon} ×
-  {B747, c172p} × {matterhorn, yosemite, control} + complex cells
-  (turb_severe, crosswind25_turb, storm25, microburst) on the clear/dawn +
-  hazy/noon sub-grid. 720p30 × 22 s; every clip composited with the
-  telemetry panel (experiments/showcase_panel.py — commanded vs achieved
-  from recorded evidence only). Resumable (skip-existing). Deliverables:
-  runs/showcase/clips/*.mp4, contact_sheet.png, showcase_manifest.json.
-* **Docs.** VALIDITY.md updated throughout; BRIEF_PHASE6B.md is history,
-  BRIEF_PHASE7.md is next.
+* **Sentinel-2 imagery drape** (core/terrain/imagery.py): EOX s2cloudless
+  2016 (the CC-BY-SA 4.0 release; year-suffixed layers are CC-BY-NC-SA and
+  REFUSED, mutation-guarded). Texel grid shares the bake's CRS/origin/extent
+  by construction (10 m = 30 m/3); verified vs source (Matterhorn p95 9.3
+  counts / Yosemite 11.3) and ON GEOMETRY by landmark projection
+  (runs/imagery_drape: summit texel 2.38x texture median, rendered summit
+  1.70x frame median, A/B vs classification 22.2). `-imagery=<sidecar>`
+  loads the PNG at runtime into M_TerrainImagery; provenance in every
+  manifest. Control ridge keeps the labeled classification.
+* **Heightfield collision + AGL parity** (Phase 7 1.2): `collision_terrain`
+  in the card replaces the slab with the raster's FULL 30 m grid;
+  TerrainGround wired into run_spec. Measured (runs/agl_parity): |ΔAGL|
+  p50 1.30 / p95 4.77 / max 6.46 m over 1415 m of relief (bars 8/20).
+  Slab-era clips keep their label; VerifyTrimmedCondition checks such cards
+  against the raster under the aircraft.
+* **JSBSIM_CORRECTIONS §13** (turb_perstep_measure.py): per-step intensity
+  is sane ONLY as W20 below the 300 m AGL ceiling (ramps track
+  0.107·W20(t)); mid-run POE severity changes overshoot sigma_w 2-5x,
+  fractional severity floors, severity 0 is a master off-switch. Everything
+  below drives W20 only, severity pinned 1.0, seed written once.
+* **Lee-rotor turbulence** (core/environment/rotor.py + per-step W20 in the
+  UE Step()): sigma_w = 1.0 x lee sink (Doyle & Durran anchor), W20 capped
+  at "severe". Port cross-check 1.4e-14; null: 0.200 fps turb RMS coupled
+  vs 0.00000 severed; headless lee-vs-windward null in the suite.
+* **Position-coupled downburst** (FlightSimDownburst): port EXACT (0.0 over
+  the grid); 26 fps outflow in the FDM vs 0 control. Matrix microburst
+  cells now carry the block ("position-coupled" label).
+* **Log-profile surface layer** (LogProfileWind, Stull Table 9-6 z0): port
+  exact; held above 300 m; FDM null in suite. **Allen thermals**
+  (NASA/TM-2006-214019 + its Appendix B, pinned to the paper's own check
+  case; Table 3 vs code discrepancy recorded): port 4.6e-10; c172p climb
+  event null test. Composed shear+thermals: 56.6 fps wind RMS vs 0 control.
+* **Evolving-conditions 150 s flight** (runs/evolving_flight): schedule
+  machinery COMPLETE (ScheduledDrydenTurbulence + card turbulence_schedule
+  + orographic follow_schedule + sun animation). Verified from the
+  recording: n_z RMS 0.0034/0.0160/0.0642/0.1136 g rising by phase, wind
+  tracks the schedule to 0.133 fps, W20 to 0.000 fps.
+* **Airframes**: A320 through the generic pipeline (gate5_realmesh
+  r=0.9999). DHC6 + p51d REFUSED over licensing (no license file in mirror
+  or upstream; converter refusal not weakened; configs ready) — VALIDITY
+  1.6a2.
+* **Zermatt valley run** (runs/zermatt_run): scripted S-turns, every number
+  measured (torque bias 0.033 by sweep; counter-pulses; headless clearance
+  gate 312 m); banks on screen ±; chase camera 0.000000 deg roll; the NEW
+  CockpitShoulder preset is the one declared roll-inheriting camera
+  (33.2 deg, manifest records camera_inherits_roll).
+* **Propeller** spins via continuous animator bindings (rpm x 6 deg/s,
+  318 deg accumulated measured on screen); excluded from the
+  peak-deflection clause.
+* **Engine-start mixture** (vendored patch 4 + card engine_mixture): the
+  plugin force-started pistons FULL RICH; at altitude the engine dies and
+  trims a glider (measured — it produced 8 false clips before the fix, all
+  deleted and re-rendered). discovered_engine_mixture verifies the UE
+  host's exact sequence (InitRunning + mixture + tFull trim + 5 s sustain);
+  c172p 0.85 at 2600-3600 m.
+* **Same-seed parity: PERMANENTLY visual-only** (decided + recorded in
+  VALIDITY): the isolated-RNG patch would fork the pinned JSBSim under one
+  host or both. **Von Kármán: stays not-modelled**, stated.
+* **The matrix**: 139/144 clips + contact sheet + manifest
+  (runs/showcase). 5 recorded refusals: 4x B747 microburst over real
+  terrain (no 300 m AGL track clears the mountains — the clearance scan's
+  own refusal) and 1x c172p yosemite storm at clear dawn (35 frames
+  legitimately below the blank-frame floor in deep dawn shadow; the check
+  was not weakened; the hazy_noon sibling exists).
 
 ## Operational gotchas (each cost real time; do not rediscover)
 
@@ -150,14 +167,20 @@ the parity discipline, and the do-not-regress list)
 * docs/JSBSIM_CORRECTIONS.md before writing property code;
   docs/VALIDITY.md for what may be claimed.
 
-## Next task: Phase 7 — docs/BRIEF_PHASE7.md
+## Phase 7 gotchas (continuing the numbering)
 
-Owner authorized 2026-08-07, autonomous end to end. Step 0: finish the
-matrix if incomplete (resumable, one command) and deliver clips + contact
-sheet. Then Tier 1 (Sentinel-2 imagery drape, terrain collision + AGL
-parity, lee-rotor turbulence measure-first), Tier 2 (boundary-layer shear,
-thermals, position-coupled microburst, optional von Kármán), Tier 3 (the
-evolving-conditions long flight — re-implement the reverted schedule
-machinery COMPLETELY or not at all —, more airframes, paths/propellers/
-cameras, same-seed RNG investigation). The brief carries the details and
-the honesty bars for each.
+13. **FFileHelper::SaveStringToFile switches to UTF-16** if any manifest
+    string contains a non-ANSI character ("§" cost a render day). Manifest
+    strings stay ASCII.
+14. **The card's `turbulence` word gates turbulence_properties**: a card
+    with writes but word "none" flies still air. Phase 7 providers carry
+    card_word.
+15. **Georeferenced landmarks project AFTER the terrain build** aligns the
+    CRS: calm cards never set a CRS via orographic, and projecting before
+    put the summit tens of km wrong.
+16. **The 10-minute Bash cap kills foreground renders** — long renders run
+    nohup-detached with a Monitor.
+17. **Piston engines at altitude**: full rich kills a force-started engine;
+    a crank-started one stabilises at a sick ~500 rpm idle under starter
+    assist, so only the discovery's trim-refusal discriminates. Every
+    piston card carries its verified engine_mixture.
