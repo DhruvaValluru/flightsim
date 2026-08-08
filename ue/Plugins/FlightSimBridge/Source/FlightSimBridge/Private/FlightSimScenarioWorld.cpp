@@ -116,6 +116,20 @@ bool FFlightSimScenarioWorld::ReadCard(const FString& Path,
 		return false;
 	}
 
+	// Optional: the engine-start mixture, computed and VERIFIED by the
+	// headless host (the card builder cranks the same JSBSim at the card's
+	// altitude and records a mixture that sustains combustion). Absent means
+	// full rich, which is only correct near sea level for pistons -- see
+	// VENDORED.json local patch 4.
+	Out.EngineMixture = 1.0;
+	Root->TryGetNumberField(TEXT("engine_mixture"), Out.EngineMixture);
+	if (Out.EngineMixture <= 0.0 || Out.EngineMixture > 1.0)
+	{
+		Error = FString::Printf(
+			TEXT("engine_mixture %.3f is outside (0, 1]"), Out.EngineMixture);
+		return false;
+	}
+
 	// Conditions this host does not implement. Each one is refused rather than
 	// approximated: a spec that asks for turbulence and silently gets still air
 	// would make the parity comparison a comparison of two different scenarios,
@@ -455,6 +469,9 @@ bool FFlightSimScenarioWorld::Build(const FFlightSimScenarioCard& Card, FString&
 	Movement->bStartWithGearDown = true;   // matches the headless host, which
 	                                       // leaves JSBSim's gear default alone
 	Movement->bStartWithEngineRunning = true;
+	// The card's verified mixture: full rich kills a force-started piston at
+	// altitude (VENDORED.json local patch 4; measured on c172p at 3600 m).
+	Movement->InitialMixture = Card.EngineMixture;
 	Movement->FlapPositionAtStart = 0.0;
 	Movement->InitialCalibratedAirSpeedKts = Card.AirspeedKnots;
 	// Deliberately NOT the plugin's wind initial condition. Measured on this

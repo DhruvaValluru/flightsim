@@ -58,6 +58,9 @@ struct FFlightSimScenarioCard
 	// wind initial condition is an int32; ReadCard refuses fractions).
 	double WindSpeedKnots = 0.0;
 	double WindFromDegrees = 0.0;
+	// Engine-start mixture, verified sustainable by the headless host at the
+	// card's altitude (VENDORED.json local patch 4). 1.0 = full rich.
+	double EngineMixture = 1.0;
 	//: Empty for the parity scenario, which is hands off from trim.
 	TArray<FFlightSimControlInput> ControlInputs;
 

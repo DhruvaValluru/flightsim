@@ -82,6 +82,14 @@ if [ -f "$MCC" ]; then
     grep -qF 'GetGeographicEllipsoidMaxRadius()) * 100.0 * Up;' "$MCC" \
         && ok "ground ray units" "patched to centimetres (319 km reach)" \
         || bad "ground ray units" "unpatched -- run scripts/vendor_ue_plugin.sh"
+
+    # Local patch 4 must be present, or every piston aircraft force-started at
+    # altitude dies full rich within seconds and trims (or verifies!) as a
+    # glider -- measured on c172p at 3600 m, calm cells verified an untrimmed
+    # state and windy cells failed trim outright.
+    grep -q 'EngineCommands\[i\].Mixture = InitialMixture;' "$MCC" \
+        && ok "start mixture" "card-carried mixture (piston-at-altitude patch)" \
+        || bad "start mixture" "hardcoded full rich -- run scripts/vendor_ue_plugin.sh"
 else
     bad "JSBSimMovementComponent.cpp" "not found -- plugin not vendored?"
 fi

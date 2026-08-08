@@ -242,6 +242,48 @@ ROLL_DOUBLET = (
 RENDER_DURATION_S = 22.0
 
 
+#: (aircraft, altitude rounded to 100 m) -> verified engine-start mixture.
+_MIXTURE_CACHE: Dict[tuple, float] = {}
+
+
+def discovered_engine_mixture(spec: ScenarioSpec) -> float:
+    """The engine-start mixture the UE host must use, measured not assumed.
+
+    A piston force-started full rich above ~3 km density altitude dies
+    within seconds (VENDORED.json local patch 4; measured on c172p at
+    3600 m). The headless host discovers a sustainable mixture by actually
+    cranking the same JSBSim at the card's altitude
+    (FlightDynamics._crank_piston_engines sweeps rich to lean until
+    combustion sustains); the card carries that verified value so both
+    hosts start the same engine the same way. Turbines return 1.0 without
+    cranking -- the sweep exists only where magnetos do.
+    """
+    from core.fdm import FlightDynamics
+    from core.fdm import units as u
+
+    aircraft = str(spec.aircraft.value)
+    altitude_m = float(spec.altitude.value)
+    key = (aircraft, round(altitude_m / 100.0))
+    if key in _MIXTURE_CACHE:
+        return _MIXTURE_CACHE[key]
+
+    fdm = FlightDynamics(aircraft, rate_hz=float(spec.rate.value))
+    fdm.set_initial_conditions(
+        {"h-sl-ft": u.m_to_ft(altitude_m),
+         "vc-kts": float(spec.airspeed.value),
+         "gamma-deg": 0.0, "phi-deg": 0.0, "psi-true-deg": 0.0,
+         "beta-deg": 0.0, "lat-geod-deg": 0.0, "long-gc-deg": 0.0,
+         "terrain-elevation-ft": u.m_to_ft(float(spec.terrain_elevation.value))}
+    )
+    if not fdm.props.has("propulsion/magneto_cmd"):
+        mixture = 1.0
+    else:
+        fdm.start_engines()   # raises if no mixture sustains: an honest refusal
+        mixture = fdm.props.get("fcs/mixture-cmd-norm")
+    _MIXTURE_CACHE[key] = mixture
+    return mixture
+
+
 def write_run_card(spec: ScenarioSpec, path: Path,
                    control_inputs: Sequence[Dict[str, float]] = (),
                    duration_s: Optional[float] = None,
@@ -288,6 +330,9 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         "mass_held": bool(spec.mass_held.value),
         "hold_state": bool(spec.hold_state.value),
         "control_inputs": [dict(entry) for entry in control_inputs],
+        # Verified by cranking the same JSBSim at this altitude (patch 4):
+        # full rich kills a force-started piston above ~3 km density altitude.
+        "engine_mixture": discovered_engine_mixture(spec),
     }
     if str(spec.turbulence.value) != "none":
         from core.environment.turbulence import DrydenTurbulence

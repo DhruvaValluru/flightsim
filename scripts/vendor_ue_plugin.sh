@@ -146,6 +146,55 @@ PYEOF
     PATCHED_AGL="yes"
 fi
 
+# LOCAL EXTENSION 4. bStartWithEngineRunning force-starts every engine with
+# mixture hardcoded FULL RICH. A piston engine force-started full rich above
+# roughly 3 km density altitude cannot sustain combustion: measured on c172p
+# at 3600 m, InitRunning leaves it at 2799 rpm and it dies to 0 rpm within
+# seconds, after which every trim solves a glider and fails (or worse,
+# verifies an untrimmed state). The scenario card carries a leaned value the
+# headless host verified sustains combustion; the patch makes the start
+# mixture a component property the bridge sets from the card.
+PATCHED_MIXTURE="no"
+MOVEMENT_H="$DEST/Source/JSBSimFlightDynamicsModel/Public/JSBSimMovementComponent.h"
+if grep -q 'EngineCommands\[i\].Mixture = 1.0;' "$MOVEMENT_CPP" 2>/dev/null; then
+    python3 - "$MOVEMENT_CPP" "$MOVEMENT_H" <<'PYEOF'
+import sys
+cpp, header = sys.argv[1], sys.argv[2]
+src = open(cpp).read()
+old = "EngineCommands[i].Mixture = 1.0;"
+assert src.count(old) == 1, f"expected one hardcoded start mixture, found {src.count(old)}"
+src = src.replace(old,
+    "// LOCAL PATCH (VENDORED.json): upstream's 1.0 kills a piston\n"
+    "\t\t\t// engine at altitude; the card carries a sustainable mixture.\n"
+    "\t\t\t// Written to the FCS HERE as well, because the trim below runs\n"
+    "\t\t\t// before any EngineCommands application and would otherwise\n"
+    "\t\t\t// solve with whatever mixture InitRunning left.\n"
+    "\t\t\tEngineCommands[i].Mixture = InitialMixture;\n"
+    "\t\t\tFCS->SetMixtureCmd(i, InitialMixture);\n"
+    "\t\t\tFCS->SetMixturePos(i, InitialMixture);")
+open(cpp, "w").write(src)
+
+hdr = open(header).read()
+anchor = ('\tUPROPERTY(BlueprintReadWrite, EditAnywhere, Category = '
+          '"Initial Conditions|Atmosphere")\n\tbool ControlFDMAtmosphere = false;')
+assert anchor in hdr, "atmosphere anchor not found in JSBSimMovementComponent.h"
+prop = (
+    "\t/**\n"
+    "\t * Mixture command applied to every engine when bStartWithEngineRunning\n"
+    "\t * force-starts them. LOCAL PATCH (see VENDORED.json): upstream hardcodes\n"
+    "\t * full rich, and a piston engine force-started full rich above roughly\n"
+    "\t * 3 km density altitude cannot sustain combustion -- measured on c172p\n"
+    "\t * at 3600 m, the engine dies within seconds and every subsequent trim\n"
+    "\t * solves a glider. The scenario card carries the leaned value.\n"
+    "\t */\n"
+    "\tUPROPERTY(BlueprintReadWrite, EditAnywhere, Category = \"Initial Conditions\", "
+    "meta = (UIMin = \"0\", ClampMin = \"0\", UIMax = \"1\", ClampMax = \"1\"))\n"
+    "\tdouble InitialMixture = 1.0;\n\n")
+open(header, "w").write(hdr.replace(anchor, prop + anchor))
+PYEOF
+    PATCHED_MIXTURE="yes"
+fi
+
 # The dylib records its own install name; without rewriting it a packaged build
 # looks for the library at the machine it was built on.
 if [ "$UE_PLATFORM" = "Mac" ]; then
@@ -186,6 +235,12 @@ cat > "$DEST/VENDORED.json" <<EOF
       "applied": "$PATCHED_AGL",
       "reason": "GetAGLevel casts the ground-query ray with its start point in centimetres and its end point in metres, three lines apart in the same function. The intended ~319 km reach is cast as 319 km of centimetres, i.e. 3.19 km, so above roughly 3.2 km AGL the trace hits nothing and JSBSim is silently told the aircraft is on the deck. Measured: correct at 3000 m, height above terrain 0.0 m at 6000 m.",
       "change": "LineCheckEnd ... ) * Up -> ... ) * 100.0 * Up"
+    },
+    {
+      "file": "Source/JSBSimFlightDynamicsModel/Private/JSBSimMovementComponent.cpp + Public/JSBSimMovementComponent.h",
+      "applied": "$PATCHED_MIXTURE",
+      "reason": "bStartWithEngineRunning force-starts engines with mixture hardcoded full rich. A piston force-started full rich above ~3 km density altitude cannot sustain combustion: measured on c172p at 3600 m, the engine dies from 2799 rpm to 0 within seconds and every subsequent trim solves a glider (calm cells VERIFIED an untrimmed state; windy cells failed trim outright).",
+      "change": "EngineCommands[i].Mixture = 1.0 -> = InitialMixture (new component property, default 1.0, set by the bridge from the scenario card's engine_mixture)"
     }
   ]
 }

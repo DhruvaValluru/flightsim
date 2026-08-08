@@ -27,6 +27,12 @@
       "applied": "yes",
       "reason": "GetAGLevel casts the ground-query ray with its start point in centimetres and its end point in metres, three lines apart in the same function. The intended ~319 km reach is cast as 319 km of centimetres, i.e. 3.19 km, so above roughly 3.2 km AGL the trace hits nothing and JSBSim is silently told the aircraft is on the deck. Measured: correct at 3000 m, height above terrain 0.0 m at 6000 m.",
       "change": "LineCheckEnd ... ) * Up -> ... ) * 100.0 * Up"
+    },
+    {
+      "file": "Source/JSBSimFlightDynamicsModel/Private/JSBSimMovementComponent.cpp + Public/JSBSimMovementComponent.h",
+      "applied": "yes",
+      "reason": "bStartWithEngineRunning force-starts engines with mixture hardcoded full rich. A piston force-started full rich above ~3 km density altitude cannot sustain combustion: measured on c172p at 3600 m, the engine dies from 2799 rpm to 0 within seconds and every subsequent trim solves a glider (calm cells VERIFIED an untrimmed state; windy cells failed trim outright).",
+      "change": "EngineCommands[i].Mixture = 1.0 -> = InitialMixture (new component property, default 1.0, set by the bridge from the scenario card's engine_mixture)"
     }
   ]
 }

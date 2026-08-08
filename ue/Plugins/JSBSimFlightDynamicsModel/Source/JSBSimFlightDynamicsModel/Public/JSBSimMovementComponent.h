@@ -150,7 +150,18 @@ public:
 		double WindIntensityKts = 0;
 
 	/**
-	 * If false, the atmosphere model will be the one from JSBSim. 
+	 * Mixture command applied to every engine when bStartWithEngineRunning
+	 * force-starts them. LOCAL PATCH (see VENDORED.json): upstream hardcodes
+	 * full rich, and a piston engine force-started full rich above roughly
+	 * 3 km density altitude cannot sustain combustion -- measured on c172p
+	 * at 3600 m, the engine dies within seconds and every subsequent trim
+	 * solves a glider. The scenario card carries the leaned value.
+	 */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Initial Conditions", meta = (UIMin = "0", ClampMin = "0", UIMax = "1", ClampMax = "1"))
+	double InitialMixture = 1.0;
+
+	/**
+	 * If false, the atmosphere model will be the one from JSBSim.
 	 * If true, you can define it with custom properties
 	*/
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Initial Conditions|Atmosphere")

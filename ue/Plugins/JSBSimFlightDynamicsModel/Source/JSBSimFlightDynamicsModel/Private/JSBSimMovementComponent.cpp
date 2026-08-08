@@ -524,7 +524,14 @@ void UJSBSimMovementComponent::PrepareJSBSim()
 		for (int32 i = 0; i < EngineCount; i++)
 		{
 			EngineCommands[i].Throttle = 0.0;
-			EngineCommands[i].Mixture = 1.0;
+			// LOCAL PATCH (VENDORED.json): upstream's 1.0 kills a piston
+			// engine at altitude; the card carries a sustainable mixture.
+			// Written to the FCS HERE as well, because the trim below runs
+			// before any EngineCommands application and would otherwise
+			// solve with whatever mixture InitRunning left.
+			EngineCommands[i].Mixture = InitialMixture;
+			FCS->SetMixtureCmd(i, InitialMixture);
+			FCS->SetMixturePos(i, InitialMixture);
             EngineCommands[i].Magnetos = EMagnetosMode::Both;
 			EngineCommands[i].Running = true;
 		}
