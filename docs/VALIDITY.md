@@ -440,6 +440,14 @@ strength — all of which control whether a real rotor forms at all. The
 1.3× gain and the 4-crest-height decay are documented middle choices from
 FAA AC 00-57 and Doyle & Durran 2002, **not measured values**.
 
+Rotor *turbulence* (Phase 7) inherits all of the above plus its own anchors:
+σ_w = 1.0 × the local lee descent is an order-of-magnitude statement from
+Doyle & Durran's simulated rotor circulations, not a calibration, and the
+delivery mechanism is bounded by what the pinned build measurably supports
+(JSBSIM_CORRECTIONS §13): W20-driven only, coupling valid below 300 m AGL,
+the constant POE index-1 floor above, W20 capped at the "severe" word. The
+lee-vs-windward null test proves connectivity, not correctness.
+
 It also currently runs against an analytic sinusoidal ridge. Until Phase 4
 couples it to a real DEM, "ridge lift over this ridge" is a precise number
 about nothing.

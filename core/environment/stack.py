@@ -121,6 +121,10 @@ class EnvironmentStack:
         }
         for provider in self.atmosphere:
             writes.update(provider.properties(position, time_s))
+        # Turbulence *intensity* writes only (W20). The seed and severity are
+        # configure()-time and never appear here: see TurbulenceProvider.
+        for provider in self.turbulence:
+            writes.update(provider.step_writes(position, time_s))
         fdm.props.set_many(writes)
         return wind
 

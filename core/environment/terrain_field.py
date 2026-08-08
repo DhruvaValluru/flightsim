@@ -223,9 +223,11 @@ class OrographicWind(WindProvider):
             Term("lee sink", LEE_SINK_GAIN, "x windward ascent", LEE_STANDARD,
                  (0.0, 3.0),
                  note=f"fades over {LEE_DECAY_RIDGE_HEIGHTS:g} crest prominences"),
-            Term("rotor", "not modelled as turbulence here", None, LEE_STANDARD,
+            Term("rotor", "see lee_rotor_turbulence", None, LEE_STANDARD,
                  note="separation is assumed wherever a crest is upstream, with "
-                      "no Froude number or inversion dependence"),
+                      "no Froude number or inversion dependence; the rotor's "
+                      "turbulence is modelled by core.environment.rotor, "
+                      "coupled to this lee-sink field"),
         ]
 
     def provenance(self) -> Dict[str, Any]:

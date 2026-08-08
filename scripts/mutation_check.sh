@@ -387,6 +387,39 @@ mutate experiments/gate5_ue_parity.py \
     "turbulent cards carry the provider's exact writes" tests/test_phase6b.py \
     || failures=$((failures+1))
 
+# -- lee-rotor turbulence: the §13 contract ------------------------------
+
+mutate core/environment/rotor.py \
+    '            "atmosphere/turbulence/milspec/severity": PINNED_SEVERITY,' \
+    '            "atmosphere/turbulence/milspec/severity": 0.0,  # MUTATED' \
+    "rotor severity pin must be nonzero (0 is a master off-switch)" \
+    tests/test_rotor.py || failures=$((failures+1))
+
+mutate core/environment/rotor.py \
+    '        return {W20_PROP: u.kt_to_fps(self.w20_kt_at(position))}' \
+    '        return {W20_PROP: u.kt_to_fps(self.w20_kt_at(position)), "atmosphere/randomseed": float(self.seed)}  # MUTATED' \
+    "rotor per-step writes must never touch the seed" \
+    tests/test_rotor.py || failures=$((failures+1))
+
+mutate core/environment/rotor.py \
+    '        return min(max(self.background_w20_kt, rotor_w20_kt), W20_CAP_KT)' \
+    '        return max(self.background_w20_kt, rotor_w20_kt)  # MUTATED: uncapped' \
+    "rotor W20 must stay on the measured ladder (severe cap)" \
+    tests/test_rotor.py || failures=$((failures+1))
+
+mutate core/environment/rotor.py \
+    'ROTOR_SIGMA_GAIN = 1.0' \
+    'ROTOR_SIGMA_GAIN = 0.0  # MUTATED: rotor decoupled' \
+    "rotor sigma must couple to the lee-sink field" \
+    tests/test_rotor.py || failures=$((failures+1))
+
+mutate core/environment/stack.py \
+    '        for provider in self.turbulence:
+            writes.update(provider.step_writes(position, time_s))' \
+    '        pass  # MUTATED: per-step intensity writes never reach the FDM' \
+    "the stack must deliver per-step turbulence intensity writes" \
+    tests/test_rotor.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

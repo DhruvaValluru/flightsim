@@ -156,6 +156,17 @@ class TurbulenceProvider(Provider):
         0.40 g to 515 g. See docs/JSBSIM_CORRECTIONS.md.
         """
 
+    def step_writes(self, position: Position, time_s: float) -> Dict[str, float]:
+        """Per-step intensity writes, for providers whose intensity moves.
+
+        Empty by default: a constant-intensity process needs nothing inside
+        the loop. A provider that overrides this may write **W20 only** --
+        never the seed (§9's 515 g failure) and never the POE severity, whose
+        mid-run changes deliver 2-5x the commanded sigma_w (measured,
+        docs/JSBSIM_CORRECTIONS.md §13).
+        """
+        return {}
+
     @abstractmethod
     def expected_sigma_w_mps(self, agl_m: float) -> float:
         """Predicted vertical RMS gust velocity, for the null test to check."""

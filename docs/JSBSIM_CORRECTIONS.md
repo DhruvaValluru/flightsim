@@ -382,10 +382,20 @@ was never commanded. **Fractional severity does not interpolate**: constant
 severity 2.5 delivers σ_w 3.61 fps, identical to 2.0 (floored), so a smooth
 coupling cannot even be expressed on this axis.
 
+**Severity 0 is a master off-switch, and its nonzero value is irrelevant
+below the ceiling.** Measured at 150 m AGL with W20 = 30 kt: severity 0
+delivers σ_w = 0.000 fps — it silences the W20 route as well — while
+severity 1 and severity 3 both deliver the identical 5.481 fps
+(= 0.108·W20, the low-altitude relation). A W20-driven provider must
+therefore pin severity to a nonzero constant (1 is the floor) at configure
+time and never touch it again.
+
 Consequence: any provider that varies turbulence intensity mid-run drives
-**W20 only** and is valid **below the 300 m AGL ceiling only**; above it,
-where W20 is ignored (§9), the provider must refuse rather than write
-severity steps whose output does not mean what it says.
+**W20 only**, with severity pinned to a nonzero constant, and the coupling
+is valid **below the 300 m AGL ceiling only**; above it, where W20 is
+ignored (§9), the process delivers the constant POE ladder value of the
+pinned severity (1.785 fps at index 1) — a stated boundary the provider's
+vocabulary must carry, not a claim the coupling still holds.
 
 ---
 
