@@ -345,6 +345,50 @@ with its own source text in the same process.
 
 ---
 
+## 13. Turbulence intensity may move mid-run ONLY via W20, below 300 m AGL
+
+Phase 7's lee-rotor coupling and evolving-conditions schedule both need
+turbulence intensity to change while the process runs (seed written once —
+§9's re-seed failure stands). Whether the pinned build supports that was
+measured before anything depended on it: `experiments/turb_perstep_measure.py`,
+report in `runs/turb_perstep/report.json`.
+
+**Re-writing severity/W20 every step with unchanged values is an exact
+no-op** in both regimes: max |Δ turb-down| = 0.0 fps against the write-once
+run, bit-identical realisation. Per-step writes as such are safe.
+
+**The W20 route (below the ~300 m AGL ceiling) is sane.** Stepped schedule
+none → light → moderate → severe, seed once, windowed σ_w vs a
+constant-intensity run of the same seed: ratios 1.00×, 1.03×, 0.97×. A
+*continuous* W20 ramp 15 → 45 kt tracks σ_w ≈ 0.107·W20(t) window by window
+(4.52/4.06, 6.32/6.10, 8.15/8.13 fps measured/expected), peak |n_z−1|
+0.60 g. No overshoot, no restart artifacts.
+
+**The POE route (above the ceiling) is NOT sane for mid-run changes.**
+Changes *from* severity 0 land exactly (first schedule block ratio 0.9999);
+every subsequent nonzero → nonzero change overshoots. Measured at 1000 m,
+seed 17, σ_w over the 4–20 s window after the switch:
+
+| transition | commanded index (ladder σ_w) | measured σ_w | settles |
+|---|---|---:|---|
+| 0 → 3 at t=20 | 3 (7.729 fps) | 9.03 fps | already correct |
+| 2 → 3 at t=20 | 3 (7.729 fps) | **22.43 fps** | 7.93 fps by t=40–60 |
+| 0 → 2 → 3 | 3 (7.729 fps) | **39.98 fps** | 9.08 fps by t=40–60 |
+| ramp 2 → 4 over 40 s | 3–4 (7.7–11.0 fps) | **29.17 fps** | still 14.9 fps 20 s after |
+
+The overshoot is 2–5× the commanded level and takes tens of seconds to
+decay — indistinguishable, from inside a run, from severe turbulence that
+was never commanded. **Fractional severity does not interpolate**: constant
+severity 2.5 delivers σ_w 3.61 fps, identical to 2.0 (floored), so a smooth
+coupling cannot even be expressed on this axis.
+
+Consequence: any provider that varies turbulence intensity mid-run drives
+**W20 only** and is valid **below the 300 m AGL ceiling only**; above it,
+where W20 is ignored (§9), the provider must refuse rather than write
+severity steps whose output does not mean what it says.
+
+---
+
 ## Model envelope boundaries (measured, not published)
 
 Where each stock model's aero tables give out, from `experiments/envelope_probe.py`.
