@@ -441,6 +441,16 @@ mutate core/fdm/fdm.py \
     "piston cranking must wait for combustion, not the starter" tests/test_thermals.py \
     || failures=$((failures+1))
 
+# -- the evolving-conditions schedule (Phase 7 3.1) ----------------------
+
+mutate core/environment/turbulence.py \
+    '    #: Severity pin: nonzero constant, written once (see class docstring).
+    PINNED_SEVERITY = 1.0' \
+    '    #: Severity pin: nonzero constant, written once (see class docstring).
+    PINNED_SEVERITY = 0.0  # MUTATED: the measured master off-switch' \
+    "the schedule's severity pin must be nonzero" tests/test_environment.py \
+    || failures=$((failures+1))
+
 # -- lee-rotor turbulence: the §13 contract ------------------------------
 
 mutate core/environment/rotor.py \
