@@ -51,6 +51,107 @@ class SteadyWind(WindProvider):
                 "down_mps": self.down_mps}
 
 
+class LogProfileWind(WindProvider):
+    """Surface-layer wind shear by the logarithmic law, with a roughness length.
+
+    The log law is the similarity-theory result for the neutrally stratified
+    surface layer:
+
+        u(z) = (u* / k) * ln(z / z0)
+
+    (Stull 1988, *An Introduction to Boundary Layer Meteorology*, §9.7;
+    Monin-Obukhov similarity in the neutral limit). Parameterised here by a
+    reference wind at a reference height, which eliminates the friction
+    velocity:
+
+        u(z) = U_ref * ln(z / z0) / ln(z_ref / z0)
+
+    Validity, stated: the surface layer -- roughly the lowest 10% of the
+    boundary layer, taken here as :data:`SURFACE_LAYER_TOP_M` = 300 m AGL.
+    Above it the profile is HELD at u(300): the free-atmosphere wind is the
+    steady provider's business, and pretending the log law extends upward
+    would be using the formula outside its derivation. Below z0 the wind is
+    zero (aerodynamically, the flow is between roughness elements). Neutral
+    stratification is assumed; stability corrections (Monin-Obukhov psi
+    terms) are NOT modelled, and docs/VALIDITY.md says so.
+
+    Distinct from :class:`BoundaryLayerWind` (the engineering power law with
+    an exponent): this is the form the brief's microburst regime wants
+    composed with the downburst outflow, where the shear in the lowest
+    hundred metres is the phenomenon.
+    """
+
+    name = "log_profile_wind"
+
+    #: Davenport-Wieringa roughness classes, z0 in metres (Stull 1988,
+    #: Table 9-6; WMO Guide No. 8). A subset with unambiguous words.
+    ROUGHNESS_M = {
+        "water": 0.0002,
+        "open": 0.03,          # open flat terrain, grass
+        "suburban": 0.5,
+        "forest": 1.0,
+    }
+    STANDARD = ("log wind profile u(z) = (u*/k) ln(z/z0), neutral surface "
+                "layer; z0 from Davenport-Wieringa roughness classes "
+                "(Stull 1988 Table 9-6)")
+
+    #: The surface layer: where the log law is derived and where it stays.
+    SURFACE_LAYER_TOP_M = 300.0
+
+    def __init__(
+        self,
+        reference_speed_mps: float,
+        from_deg: float,
+        reference_height_m: float = 10.0,
+        terrain: str = "open",
+    ) -> None:
+        if terrain not in self.ROUGHNESS_M:
+            raise ValueError(
+                f"unknown terrain {terrain!r}; known: {sorted(self.ROUGHNESS_M)}"
+            )
+        z0 = self.ROUGHNESS_M[terrain]
+        if reference_height_m <= z0:
+            raise ValueError(
+                f"reference height {reference_height_m} m must sit above the "
+                f"roughness length z0 = {z0} m"
+            )
+        self.reference_speed_mps = float(reference_speed_mps)
+        self.from_deg = float(from_deg) % 360.0
+        self.reference_height_m = float(reference_height_m)
+        self.terrain = terrain
+        self.z0_m = z0
+
+    def speed_at(self, agl_m: float) -> float:
+        """Wind speed at a height above ground, m/s."""
+        z = min(max(agl_m, 0.0), self.SURFACE_LAYER_TOP_M)
+        if z <= self.z0_m:
+            return 0.0
+        return (self.reference_speed_mps
+                * math.log(z / self.z0_m)
+                / math.log(self.reference_height_m / self.z0_m))
+
+    def wind_at(self, position: Position, time_s: float) -> WindNED:
+        return WindNED.from_meteorological(self.speed_at(position.agl_m),
+                                           self.from_deg)
+
+    def vocabulary(self) -> List[Term]:
+        return [
+            Term(f"{terrain} terrain", z0, "m", self.STANDARD, (0.0001, 2.0),
+                 note="roughness length z0; profile held above "
+                      f"{self.SURFACE_LAYER_TOP_M:g} m AGL, zero below z0, "
+                      "neutral stratification assumed")
+            for terrain, z0 in self.ROUGHNESS_M.items()
+        ]
+
+    def provenance(self) -> Dict[str, Any]:
+        return {**super().provenance(),
+                "reference_speed_mps": self.reference_speed_mps,
+                "reference_height_m": self.reference_height_m,
+                "from_deg": self.from_deg, "terrain": self.terrain,
+                "z0_m": self.z0_m,
+                "surface_layer_top_m": self.SURFACE_LAYER_TOP_M}
+
+
 class BoundaryLayerWind(WindProvider):
     """Wind shear through the atmospheric boundary layer.
 

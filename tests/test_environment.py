@@ -22,7 +22,7 @@ from core.environment.turbulence import (
     DrydenTurbulence,
     poe_index_for,
 )
-from core.environment.wind import BoundaryLayerWind, SteadyWind
+from core.environment.wind import BoundaryLayerWind, LogProfileWind, SteadyWind
 from core.fdm import FlightDynamics, TrimMode
 from core.fdm import units as u
 
@@ -100,6 +100,18 @@ def test_null_boundary_layer_differs_from_uniform_wind():
     uniform = altitudes(EnvironmentStack([SteadyWind(speed, 270.0)]), altitude_m=200.0)
     sheared = altitudes(
         EnvironmentStack([BoundaryLayerWind(speed, 270.0, terrain="open")]),
+        altitude_m=200.0,
+    )
+    assert peak_diff(uniform, sheared) > 1.0
+
+
+def test_null_log_profile_differs_from_uniform_wind():
+    """Phase 7's surface-layer law must reach the FDM as its own shape."""
+    speed = u.kt_to_mps(25.0)
+    uniform = altitudes(EnvironmentStack([SteadyWind(speed, 270.0)]),
+                        altitude_m=200.0)
+    sheared = altitudes(
+        EnvironmentStack([LogProfileWind(speed, 270.0, terrain="open")]),
         altitude_m=200.0,
     )
     assert peak_diff(uniform, sheared) > 1.0
@@ -259,6 +271,82 @@ def test_rougher_terrain_gives_more_shear():
     open_country = BoundaryLayerWind(10.0, 270.0, terrain="open")
     urban = BoundaryLayerWind(10.0, 270.0, terrain="urban")
     assert urban.speed_at(2.0) < open_country.speed_at(2.0)
+
+
+# -- the log profile (Phase 7): the surface-layer law with a stated z0 ---
+
+
+def test_log_profile_matches_its_reference_and_is_log_linear():
+    profile = LogProfileWind(10.0, 270.0, reference_height_m=10.0,
+                             terrain="open")
+    assert profile.speed_at(10.0) == pytest.approx(10.0)
+    # The shape check: u is linear in ln z, so equal ln-steps give equal
+    # speed increments -- the property that IS the log law.
+    z0 = profile.z0_m
+    heights = [1.0, 10.0, 100.0]     # equal factors of 10
+    speeds = [profile.speed_at(z) for z in heights]
+    assert speeds[2] - speeds[1] == pytest.approx(speeds[1] - speeds[0])
+
+
+def test_log_profile_is_zero_at_and_below_z0():
+    profile = LogProfileWind(10.0, 270.0, terrain="forest")
+    assert profile.speed_at(profile.z0_m) == 0.0
+    assert profile.speed_at(0.0) == 0.0
+
+
+def test_log_profile_holds_above_the_surface_layer():
+    """The log law is not extended beyond its derivation: held at 300 m."""
+    profile = LogProfileWind(10.0, 270.0, terrain="open")
+    top = profile.speed_at(LogProfileWind.SURFACE_LAYER_TOP_M)
+    assert profile.speed_at(1000.0) == pytest.approx(top)
+    assert profile.speed_at(5000.0) == pytest.approx(top)
+
+
+def test_log_profile_rougher_terrain_gives_more_shear():
+    """At the same reference wind, forest bends the profile harder than
+    water: below the reference height it is slower, above it faster."""
+    water = LogProfileWind(10.0, 270.0, terrain="water")
+    forest = LogProfileWind(10.0, 270.0, terrain="forest")
+    assert forest.speed_at(2.0) < water.speed_at(2.0)
+    assert forest.speed_at(200.0) > water.speed_at(200.0)
+
+
+def test_log_profile_refuses_reference_below_z0():
+    with pytest.raises(ValueError, match="roughness length"):
+        LogProfileWind(10.0, 270.0, reference_height_m=0.5, terrain="forest")
+
+
+def test_log_profile_vocabulary_cites_the_standard():
+    terms = LogProfileWind(10.0, 270.0).vocabulary()
+    assert all("Stull" in t.standard for t in terms)
+    z0 = {t.phrase: t.value for t in terms}
+    assert z0["water terrain"] < z0["open terrain"] < z0["forest terrain"]
+
+
+def test_log_profile_composes_with_the_downburst():
+    """The microburst regime: outflow + surface-layer shear sum in the stack,
+    and the composed field keeps both structures (§2.4 superposition)."""
+    from core.environment.downburst import Downburst
+
+    shear = LogProfileWind(u.kt_to_mps(15.0), 270.0, terrain="open")
+    burst = Downburst(core_radius_m=600.0, outflow_max_mps=10.0,
+                      centre_north_m=0.0, centre_east_m=0.0)
+    stack = EnvironmentStack([shear, burst])
+    inside = Position(latitude_deg=0.0, longitude_deg=600.0 / 111_320.0,
+                      altitude_m=80.0, agl_m=80.0, terrain_elevation_m=0.0)
+    far = Position(latitude_deg=0.0, longitude_deg=0.5,
+                   altitude_m=80.0, agl_m=80.0, terrain_elevation_m=0.0)
+    composed_inside = stack.wind_at(inside, 0.0)
+    composed_far = stack.wind_at(far, 0.0)
+    # Far from the cell only the shear profile remains...
+    assert composed_far.horizontal_speed == pytest.approx(
+        shear.speed_at(80.0), rel=1e-6)
+    # ...inside it the two contributions are literally summed.
+    burst_only = burst.wind_at(inside, 0.0)
+    shear_only = shear.wind_at(inside, 0.0)
+    assert composed_inside.east == pytest.approx(
+        burst_only.east + shear_only.east)
+    assert composed_inside.down == pytest.approx(burst_only.down)
 
 
 def test_gust_is_exactly_zero_outside_its_window():

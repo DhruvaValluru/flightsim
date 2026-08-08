@@ -403,6 +403,24 @@ mutate core/terrain/imagery.py \
     "only the CC-BY-SA 2016 layer may be fetched" tests/test_imagery.py \
     || failures=$((failures+1))
 
+# -- log-profile surface layer (Phase 7) ---------------------------------
+
+mutate core/environment/wind.py \
+    '        return (self.reference_speed_mps
+                * math.log(z / self.z0_m)
+                / math.log(self.reference_height_m / self.z0_m))' \
+    '        return (self.reference_speed_mps
+                * (z / self.z0_m)
+                / (self.reference_height_m / self.z0_m))  # MUTATED: linear' \
+    "the log profile must actually be the log law" tests/test_environment.py \
+    || failures=$((failures+1))
+
+mutate core/environment/wind.py \
+    '        z = min(max(agl_m, 0.0), self.SURFACE_LAYER_TOP_M)' \
+    '        z = max(agl_m, 0.0)  # MUTATED: extended past its derivation' \
+    "the log law must be held at the surface-layer top" tests/test_environment.py \
+    || failures=$((failures+1))
+
 # -- lee-rotor turbulence: the §13 contract ------------------------------
 
 mutate core/environment/rotor.py \
