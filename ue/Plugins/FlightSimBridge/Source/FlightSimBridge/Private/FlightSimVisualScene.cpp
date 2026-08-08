@@ -227,16 +227,22 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 				*Options.TerrainPath);
 			return false;
 		}
+		if (!BuildGeoreferencedTerrain(World, Options, Error))
+		{
+			return false;
+		}
 		// The raster peak's true engine position, for the manifest landmark.
+		// Projected AFTER the terrain build, which is what aligns the
+		// georeferencing system's projected CRS with the raster's -- a calm
+		// card never told the scenario world the CRS, and projecting through
+		// the default put the landmark tens of kilometres wrong (measured:
+		// the summit landmark of a calm Matterhorn card reported bearings no
+		// 4000er occupies).
 		const double PeakX = Terrain.OriginXMetres + PeakColumn * Terrain.PixelSizeMetres;
 		const double PeakY = Terrain.OriginYMetres - PeakRow * Terrain.PixelSizeMetres;
 		Options.GeoReferencing->ProjectedToEngine(
 			FVector(PeakX, PeakY, TerrainPeakMetres), NearPeakWorldCm);
 		FarPeakWorldCm = FVector::ZeroVector;
-		if (!BuildGeoreferencedTerrain(World, Options, Error))
-		{
-			return false;
-		}
 
 		// Beyond the raster's 40 km the world would otherwise be empty
 		// atmosphere, which reads as ocean around an island. A matte plane
