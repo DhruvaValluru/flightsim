@@ -41,6 +41,7 @@ AIRCRAFT_WORDS: Tuple[Tuple[str, str], ...] = (
     ("global 5000", "global5000"), ("global5000", "global5000"),
     ("business jet", "global5000"), ("bizjet", "global5000"),
     ("c172", "c172p"), ("cessna", "c172p"),
+    ("a320", "A320"), ("airbus", "A320"),
     ("f-16", "f16"), ("f16", "f16"),
     ("f-15", "f15"), ("f15", "f15"),
 )

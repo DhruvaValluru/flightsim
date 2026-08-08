@@ -195,6 +195,9 @@ class ScheduledDrydenTurbulence(DrydenTurbulence):
 
     name = "scheduled_dryden_turbulence"
 
+    #: The card's ``turbulence`` word (see LeeRotorTurbulence.card_word).
+    card_word = "scheduled"
+
     def __init__(self, segments, seed: int) -> None:
         segments = [(float(t), str(word)) for t, word in segments]
         if not segments:

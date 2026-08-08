@@ -1147,7 +1147,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		Environment->SetStringField(TEXT("rotor_delivery"),
 			TEXT("per-step W20 from the lee-sink field; seed and pinned "
-			     "severity written once (JSBSIM_CORRECTIONS §13); coupling "
+			     "severity written once (JSBSIM_CORRECTIONS section 13); coupling "
 			     "valid below 300 m AGL"));
 		Environment->SetArrayField(TEXT("rotor_selftest"), RotorSelftest);
 	}
@@ -1169,7 +1169,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		Environment->SetStringField(TEXT("turbulence_schedule_delivery"),
 			TEXT("per-step W20 only, held until the next entry; the seed and "
-			     "the pinned severity are written exactly once (§13)"));
+			     "the pinned severity are written exactly once (section 13)"));
 	}
 	Environment->SetBoolField(TEXT("orographic_follow_schedule"),
 	                          Card.bOrographicFollowSchedule);

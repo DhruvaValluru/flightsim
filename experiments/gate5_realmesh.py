@@ -64,8 +64,23 @@ AIRFRAMES = (
         "prompt": "fly the c172 at 1500 m and 100 kt for 60 seconds",
         "manifest": "assets/generated/c172p/mesh_manifest.json",
         "chase": "-40:0:5",
-        "min_bound_surfaces": 6,
+        # Six hinged control surfaces plus the continuous propeller binding
+        # (Phase 7 3.3).
+        "min_bound_surfaces": 7,
         "doublet": LIGHT_DOUBLET,
+    },
+    {
+        # Phase 7 3.2: the generic pipeline's third airframe. The FDM names
+        # itself A320-200; §1.4 pairing is enforced by converter and
+        # commandlet exactly as for the first two.
+        "name": "A320",
+        "prompt": "fly the a320 at 3000 m and 250 kt for 60 seconds",
+        "manifest": "assets/generated/A320/mesh_manifest.json",
+        # A 37 m airframe at the 747's 170 m chase covers 0.45% of frame
+        # (measured, under the 0.5% floor); framed like the mid-size it is.
+        "chase": "-110:0:11",
+        "min_bound_surfaces": 5,
+        "doublet": ROLL_DOUBLET,
     },
 )
 

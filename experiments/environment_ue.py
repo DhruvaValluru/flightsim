@@ -48,7 +48,20 @@ from core.terrain.glo30 import LOCATIONS, orographic_card_block  # noqa: E402
 from core.terrain.ground import terrain_field_at  # noqa: E402
 from core.terrain.heightfield import Heightfield  # noqa: E402
 from experiments.gate5_ue_parity import reference_spec, write_run_card  # noqa: E402
-from experiments.orographic_ue import render  # noqa: E402
+from experiments.orographic_ue import render as _base_render  # noqa: E402
+
+
+def render(card: Path, frames: Path, terrain: Path,
+           extra: Sequence[str]) -> None:
+    """orographic_ue's render, under showcase noon light: the low-altitude
+    Yosemite scene under the terrain shot's default side light is a
+    silhouette against a shadowed wall, and its final frame legitimately
+    drops below the blank-frame floor (measured: max luminance 13). The sun
+    is a recorded presentation parameter; the couplings under test are
+    physics."""
+    _base_render(card, frames, terrain,
+                 ["-sun-elev=50.0", "-sun-azim=180.0", "-exposure-bias=9.5",
+                  *extra])
 
 RULE = "=" * 96
 
@@ -283,6 +296,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     control = json.loads(Path(card).read_text())
     control.pop("rotor")
     control.pop("turbulence_properties")
+    control["turbulence"] = "none"   # the word gates the writes (measured)
     control_card.write_text(json.dumps(control, indent=1))
     if not args.skip_renders:
         render(Path(card), r_out / "coupled", matterhorn, [])

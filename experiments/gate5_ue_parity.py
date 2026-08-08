@@ -386,8 +386,13 @@ def write_run_card(spec: ScenarioSpec, path: Path,
     if turbulence_provider is not None:
         # A Phase 7 turbulence provider (lee rotor, or a scheduled Dryden)
         # supplies its own configure() writes -- e.g. the rotor's pinned
-        # severity of 1 with intensity delivered per step through W20.
+        # severity of 1 with intensity delivered per step through W20 --
+        # and its own card word: the UE host applies turbulence_properties
+        # only for a word other than "none" (measured the hard way: a rotor
+        # card labeled "none" flew in still air while writing W20 into a
+        # process that was never switched on).
         card["turbulence_properties"] = turbulence_provider.configure()
+        card["turbulence"] = turbulence_provider.card_word
     elif str(spec.turbulence.value) != "none":
         from core.environment.turbulence import DrydenTurbulence
 

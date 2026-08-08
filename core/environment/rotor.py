@@ -87,6 +87,11 @@ class LeeRotorTurbulence(DrydenTurbulence):
 
     name = "lee_rotor_turbulence"
 
+    #: The card's ``turbulence`` word. Anything but "none" tells the UE host
+    #: to apply the carried configure() writes; the word itself is the
+    #: honest description the panel shows.
+    card_word = "lee-rotor"
+
     def __init__(self, orographic: OrographicWind, seed: int,
                  background_intensity: str = "none") -> None:
         super().__init__(intensity=background_intensity, seed=seed,
