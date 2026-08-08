@@ -330,6 +330,7 @@ def build_cell_card(out: Path, airframe_key: str, terrain_key: str,
     airspeed_mps = u.kt_to_mps(float(spec.airspeed.value))
     control_inputs: Sequence[Dict[str, float]] = SHOWCASE_DOUBLET
     wind_schedule = None
+    downburst = None
     orographic = None
     wind_note = "calm"
 
@@ -388,25 +389,36 @@ def build_cell_card(out: Path, airframe_key: str, terrain_key: str,
         # The low-level wind-shear encounter: headwind surge, downdraft core,
         # tailwind switch (core/environment/downburst -- Vicroy shaping,
         # divergence-free by construction). Ambient headwind keeps the
-        # orographic coupling alive; the burst rides the schedule.
+        # orographic coupling alive. Phase 7 2.3: the field is POSITION-
+        # COUPLED -- the card carries the downburst block and the UE host's
+        # cross-checked port evaluates it at the aircraft's actual position
+        # each step, replacing the labeled nominal-track schedule.
+        from core.environment.downburst import Downburst
+
         orographic = set_steady_wind(MICROBURST["ambient_headwind_kt"],
                                      heading, "ambient headwind")
-        wind_schedule = microburst_schedule(heading, airspeed_for_track,
-                                            float(spec.rate.value),
-                                            airframe_key)
-        control_inputs = ()
         parameters = MICROBURST[airframe_key]
+        radians = math.radians(heading)
+        encounter_m = airspeed_for_track * MICROBURST["encounter_t_s"]
+        burst = Downburst(
+            centre_north_m=encounter_m * math.cos(radians),
+            centre_east_m=encounter_m * math.sin(radians),
+            **parameters)
+        downburst = burst.card_block(orographic["origin_x_m"],
+                                     orographic["origin_y_m"])
+        control_inputs = ()
         wind_note = (
             f"microburst: {parameters['outflow_max_mps']:g} m/s outflow, core "
             f"R {parameters['core_radius_m']:g} m, crossed ~t="
             f"{MICROBURST['encounter_t_s']:g} s at {MICROBURST['agl_m']:g} m "
             f"AGL, + {MICROBURST['ambient_headwind_kt']:g} kt ambient "
-            f"(field evaluated on the NOMINAL track; labeled)")
+            f"(position-coupled; port selftest in the manifest)")
 
     card_path = write_run_card(spec, out, control_inputs=control_inputs,
                                duration_s=DURATION_S,
                                wind_schedule=wind_schedule,
-                               orographic=orographic)
+                               orographic=orographic,
+                               downburst=downburst)
     return {
         "spec_digest": spec.digest(),
         "card": str(card_path),

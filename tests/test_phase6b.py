@@ -467,9 +467,11 @@ def test_storm_cell_gusts_harder_and_is_severe(tmp_path):
 def test_microburst_cell_stages_the_reversal(tmp_path):
     # The classic encounter, checkable from the card alone: low altitude,
     # headwind component surging before the core, tailwind after it, the
-    # downdraft peaking near the crossing time, and the honesty label on the
-    # note. The field itself is verified in test_downburst; this test checks
-    # the STAGING.
+    # downdraft peaking near the crossing. Phase 7 2.3: the card carries the
+    # DOWNBURST BLOCK (position-coupled in the UE host through the
+    # cross-checked port) instead of a precomputed nominal-track schedule.
+    # The staging is verified by evaluating the block's own field along the
+    # intended track -- the same field the host evaluates at the flown one.
     # Gentle terrain: the staging is under test here, not the clearance
     # refusal (that has its own test below).
     terrain = _fake_terrain(tmp_path, rms_slope_deg=5.0)
@@ -480,26 +482,43 @@ def test_microburst_cell_stages_the_reversal(tmp_path):
     assert card["wind_speed_kt"] == 10.0
     assert "orographic" in card
     assert card["control_inputs"] == []
-    schedule = card["wind_schedule"]
+    assert "wind_schedule" not in card, "the nominal-track delivery is gone"
 
     import math as m
+
+    from core.environment.downburst import Downburst
+    from core.fdm import units as u
+
+    block = card["downburst"]
+    assert block["origin_x_m"] == card["orographic"]["origin_x_m"]
+    burst = Downburst(centre_north_m=block["centre_north_m"],
+                      centre_east_m=block["centre_east_m"],
+                      core_radius_m=block["core_radius_m"],
+                      outflow_max_mps=block["outflow_max_mps"],
+                      outflow_height_m=block["outflow_height_m"])
     heading = m.radians(card["heading_deg"])
-    along = [r["north_fps"] * m.cos(heading) + r["east_fps"] * m.sin(heading)
-             for r in schedule]
-    downs = [r["down_fps"] for r in schedule]
-    times = [r["t_s"] for r in schedule]
-    # Along-track wind: more negative than ambient alone before the core
-    # (headwind blows against the track), positive after it.
+    speed_mps = u.kt_to_mps(250.0)
+    ambient_along_fps = -u.mps_to_fps(u.kt_to_mps(card["wind_speed_kt"]))
+
     encounter = 11.0
+    along, downs, times = [], [], []
+    for step in range(0, 2200):
+        t = step * 0.01
+        north = speed_mps * t * m.cos(heading)
+        east = speed_mps * t * m.sin(heading)
+        wind = burst.wind_components(north, east, 300.0)
+        along.append(ambient_along_fps + u.mps_to_fps(
+            wind.north * m.cos(heading) + wind.east * m.sin(heading)))
+        downs.append(u.mps_to_fps(wind.down))
+        times.append(t)
     before = min(a for a, t in zip(along, times) if t < encounter)
     after = max(a for a, t in zip(along, times) if t > encounter)
     assert before < -20.0          # ambient ~-17 fps plus the outflow
     assert after > 5.0             # tailwind despite the ambient headwind
-    # Downdraft peaks near the crossing, not at the edges.
     peak_time = times[downs.index(max(downs))]
     assert abs(peak_time - encounter) < 3.0
     assert max(downs) > 20.0       # a real sink, in fps
-    assert "NOMINAL track" in cell["wind_note"]
+    assert "position-coupled" in cell["wind_note"]
 
 
 def test_microburst_track_refuses_a_wall(tmp_path):
