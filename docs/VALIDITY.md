@@ -607,11 +607,28 @@ The dataset's own limits, which are not defects of the pipeline:
   georeferencing, so absolute ECEF placement is off by the local geoid
   undulation (~+50 m Alps, ~−30 m Sierra). Relative geometry within a scene —
   aircraft against ridgeline — is unaffected, which is what the frames show.
-* Terrain colouring is a slope/altitude classification (rock, scrub, valley
-  floor, snow above the location's approximate snowline) written into vertex
-  colours. It is labeled **approximated** in every manifest; it is not land
-  cover data. Beyond the raster a flat matte plane stands in for the
-  surrounding lowlands — scenery, carrying no claim.
+* Terrain colouring on the **control ridge** (and as fallback) is a
+  slope/altitude classification (rock, scrub, valley floor, snow above the
+  location's approximate snowline) written into vertex colours. It is
+  labeled **approximated** in every manifest; it is not land cover data.
+  Beyond the raster a flat matte plane stands in for the surrounding
+  lowlands — scenery, carrying no claim.
+* The **real locations** drape true-colour satellite imagery instead
+  (Phase 7): EOX Sentinel-2 cloudless, the 2016 release (WMTS layer
+  `s2cloudless`), which is the CC-BY-SA 4.0 one — later releases are
+  CC-BY-NC-SA and deliberately unused. Its limits are the composite's: 10 m
+  native resolution, assembled from 2016–2017 acquisitions with **no single
+  acquisition date**, so scene lighting, snow cover and glacier extent are
+  the composite's (roughly a decade old) and do not respond to the render's
+  sun position. Every fetched tile's sha256, the license and the
+  attribution ride in the drape sidecar and every render manifest. The
+  texel grid shares the bake's CRS/origin/extent by construction (10 m =
+  30 m / 3) and the drape is verified texel-by-texel against the source
+  mosaic (Matterhorn mean |Δ| 2.5 counts, p95 9.3; Yosemite 3.2 / 11.3 —
+  resampling noise, where a CRS or axis error measures hundreds), plus an
+  independent physical cross-check (Matterhorn brightness 194 above the
+  3100 m snowline vs 96 below). On-geometry alignment is verified by
+  landmark projection on a rendered frame (experiments/imagery_drape.py).
 
 **The georeferencing is real**: the spec's latitude/longitude is the scene
 origin, and every terrain vertex goes through the same PROJ transform chain

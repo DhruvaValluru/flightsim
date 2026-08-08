@@ -387,6 +387,22 @@ mutate experiments/gate5_ue_parity.py \
     "turbulent cards carry the provider's exact writes" tests/test_phase6b.py \
     || failures=$((failures+1))
 
+# -- imagery drape: verification and license pin -------------------------
+
+mutate core/terrain/imagery.py \
+    '    report["ok"] = bool(report["samples"] >= samples * 0.9
+                        and report["mean_abs_counts"] < 8.0
+                        and report["p95_abs_counts"] < 30.0)' \
+    '    report["ok"] = True  # MUTATED: every drape verifies' \
+    "a draped texture must match its source imagery" tests/test_imagery.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/imagery.py \
+    'LAYER = "s2cloudless"' \
+    'LAYER = "s2cloudless-2018"  # MUTATED: the NC-licensed layer' \
+    "only the CC-BY-SA 2016 layer may be fetched" tests/test_imagery.py \
+    || failures=$((failures+1))
+
 # -- lee-rotor turbulence: the §13 contract ------------------------------
 
 mutate core/environment/rotor.py \
