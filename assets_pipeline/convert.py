@@ -240,7 +240,7 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
         mid_cm = tuple((a + b) / 2.0 * CM_PER_M for a, b in zip(p1, p2))
         obj_path = out_dir / f"{surface_name}.obj"
         writer.write(obj_path)
-        manifest_surfaces.append({
+        record = {
             "bone": surface["bone"],
             "part": surface_name,
             "property": surface["property"],
@@ -248,7 +248,13 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
             "hinge_mid_cm": mid_cm,
             "axis_ue": axis,
             "triangles": counts[surface_name],
-        })
+        }
+        # Continuous bindings (Phase 7 3.3): the value is a RATE, not an
+        # angle -- a propeller's rpm integrates into rotation instead of
+        # deflecting to it. scale is then degrees per second per unit.
+        if surface.get("continuous"):
+            record["continuous"] = True
+        manifest_surfaces.append(record)
 
     writers["body"].write(out_dir / "body.obj")
 

@@ -702,6 +702,28 @@ parity matrix) still **refuses** turbulent cards, and every turbulent clip is
 labeled **visual-only** with its seed recorded. Nothing about turbulence
 realisations is claimed to agree across hosts.
 
+**Phase 7 decision: permanently visual-only.** The investigation weighed the
+one remaining route to same-seed parity — a vendored patch giving JSBSim's
+turbulence an isolated, seed-owned RNG in both hosts. It would mean forking
+the pinned library's `FGWinds` internals inside the plugin's `libJSBSim`
+(rebuilt from source by `vendor_ue_plugin.sh`) while the headless host runs
+the unpatched PyPI wheel of the SAME version — either the two hosts run
+different JSBSim builds (breaking the §2.9 identical-physics premise more
+deeply than the RNG offset does) or the wheel must be forked too, which is a
+maintenance liability out of proportion to a property already measured,
+labeled, and refused where it matters. The measured verdict stands as the
+permanent one: each host bit-repeatable alone, realisations never claimed to
+agree, turbulent cards refused by the parity path, every turbulent clip
+labeled with its seed. Revisit only if JSBSim upstream adds a seedable
+per-instance RNG.
+
+**Von Kármán turbulence remains not-modelled** (Phase 7 ranked it last and
+optional). JSBSim ships only Dryden; an honest von Kármán needs the
+certification-preferred spectrum's filter running at FDM rate inside the
+step loop of BOTH hosts, verified against the analytic PSD — a real
+numerical project that was not attempted. It is listed here rather than
+approximated with harness-rate noise.
+
 **Gusts exist exactly once.** The "gusty headwind" cells carry a per-step
 wind schedule precomputed by the headless providers (steady wind plus
 MIL-F-8785C 1-cosine gusts, pure functions of time); the host writes those

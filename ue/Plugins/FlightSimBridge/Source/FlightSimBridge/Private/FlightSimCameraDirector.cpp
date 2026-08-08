@@ -46,6 +46,10 @@ bool AFlightSimCameraDirector::PresetKeepsHorizonLevel() const
 	case EFlightSimCameraPreset::Wingman:
 	case EFlightSimCameraPreset::Tower:
 		return true;
+	case EFlightSimCameraPreset::CockpitShoulder:
+		// The declared exception (§1.5): body-fixed, roll inherited ON
+		// PURPOSE, and the manifest must say so for any clip that uses it.
+		return false;
 	default:
 		return false;
 	}
@@ -87,6 +91,9 @@ void AFlightSimCameraDirector::Tick(float DeltaSeconds)
 	case EFlightSimCameraPreset::Wingman:
 		UpdateWingman(DeltaSeconds, TargetTransform);
 		break;
+	case EFlightSimCameraPreset::CockpitShoulder:
+		UpdateCockpitShoulder(TargetTransform);
+		break;
 	case EFlightSimCameraPreset::LaggedChase:
 	default:
 		UpdateLaggedChase(DeltaSeconds, TargetTransform);
@@ -118,6 +125,21 @@ void AFlightSimCameraDirector::UpdateLaggedChase(float DeltaSeconds,
 	FRotator Look = (SmoothedAimPoint - SmoothedLocation).Rotation();
 	Look.Roll = 0.0f;                 // never inherit roll
 	SetActorRotation(Look);
+}
+
+void AFlightSimCameraDirector::UpdateCockpitShoulder(
+	const FTransform& TargetTransform)
+{
+	// Body-fixed, no smoothing: the camera IS part of the airframe for this
+	// preset, so lagging it would invent relative motion that does not
+	// exist. Full rotation applied -- roll inherited, BY DECLARATION
+	// (PresetKeepsHorizonLevel() is false; the manifest records it). In this
+	// frame the aircraft never moves and the world banks; nothing recorded
+	// from this camera may be graded as aircraft motion.
+	const FQuat Rotation = TargetTransform.GetRotation();
+	SetActorLocation(TargetTransform.GetLocation()
+	                 + Rotation.RotateVector(ShoulderOffsetMetres * CmPerMetre));
+	SetActorRotation(Rotation);
 }
 
 void AFlightSimCameraDirector::UpdateFixedPoint(float DeltaSeconds,

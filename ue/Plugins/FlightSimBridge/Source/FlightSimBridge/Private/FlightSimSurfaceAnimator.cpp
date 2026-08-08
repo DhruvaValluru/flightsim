@@ -37,13 +37,15 @@ void UFlightSimSurfaceAnimator::ApplyDefaultBindings()
 }
 
 void UFlightSimSurfaceAnimator::AddBinding(const FString& Property, FName Bone,
-                                           float DegreesPerUnit, const FVector& Axis)
+                                           float DegreesPerUnit, const FVector& Axis,
+                                           bool bContinuous)
 {
 	FFlightSimSurfaceBinding Binding;
 	Binding.PropertyName = Property;
 	Binding.BoneName = Bone;
 	Binding.DegreesPerUnit = DegreesPerUnit;
 	Binding.RotationAxis = Axis;
+	Binding.bContinuous = bContinuous;
 	Bindings.Add(Binding);
 }
 
@@ -72,11 +74,30 @@ void UFlightSimSurfaceAnimator::TickComponent(
 			continue;
 		}
 		Binding.CurrentValue = FCString::Atof(*Value);
-		Binding.DeflectionDegrees = Binding.CurrentValue * Binding.DegreesPerUnit;
+		if (Binding.bContinuous)
+		{
+			// A rate, integrated: rpm x (deg/s per rpm) x dt, wrapped so the
+			// float never grows without bound over a long clip.
+			Binding.AccumulatedDegrees = FMath::Fmod(
+				Binding.AccumulatedDegrees
+					+ Binding.CurrentValue * Binding.DegreesPerUnit * DeltaTime,
+				360.0f);
+			Binding.DeflectionDegrees = Binding.AccumulatedDegrees;
+		}
+		else
+		{
+			Binding.DeflectionDegrees = Binding.CurrentValue * Binding.DegreesPerUnit;
+		}
 		Binding.PeakDeflectionDegrees = FMath::Max(Binding.PeakDeflectionDegrees,
 		                                           FMath::Abs(Binding.DeflectionDegrees));
-		PeakDeflection = FMath::Max(PeakDeflection,
-		                            FMath::Abs(Binding.DeflectionDegrees));
+		// Continuous bindings do not participate in the peak-deflection
+		// clause: a spinning propeller must not let a frozen elevator pass
+		// the something-moved check.
+		if (!Binding.bContinuous)
+		{
+			PeakDeflection = FMath::Max(PeakDeflection,
+			                            FMath::Abs(Binding.DeflectionDegrees));
+		}
 
 		// The line that makes this an animator rather than a meter. Everything
 		// above reads; this is the only write, and it writes to the scene, not

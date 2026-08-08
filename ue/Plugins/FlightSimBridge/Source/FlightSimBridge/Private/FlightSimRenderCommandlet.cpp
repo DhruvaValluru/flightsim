@@ -272,8 +272,11 @@ namespace
 			// to a hinge at HingeMid means offsetting it back by the same.
 			SurfaceComponent->SetRelativeLocation(-HingeMid);
 
+			bool bContinuous = false;
+			(*Entry)->TryGetBoolField(TEXT("continuous"), bContinuous);
 			Animator->AddBinding(Property, FName(*Bone),
-			                     static_cast<float>(Scale), RotationAxis);
+			                     static_cast<float>(Scale), RotationAxis,
+			                     bContinuous);
 			Animator->BindSurfaceComponent(FName(*Bone), HingeComponent);
 		}
 		Out.bLoaded = true;
@@ -556,6 +559,29 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	AFlightSimCameraDirector* Director = World->SpawnActor<AFlightSimCameraDirector>();
 	Director->Target = Scenario.Aircraft;
 	Director->Preset = EFlightSimCameraPreset::LaggedChase;
+	// Camera preset (Phase 7 3.3). Every preset keeps the §1.5 rule: the
+	// camera never inherits roll unless the preset SAYS it does, and the
+	// manifest records which one flew and whether roll was inherited.
+	FString CameraPreset = TEXT("chase");
+	FParse::Value(*Params, TEXT("camera="), CameraPreset);
+	if (CameraPreset == TEXT("wingman"))
+	{
+		Director->Preset = EFlightSimCameraPreset::Wingman;
+	}
+	else if (CameraPreset == TEXT("tower"))
+	{
+		Director->Preset = EFlightSimCameraPreset::Tower;
+	}
+	else if (CameraPreset == TEXT("shoulder"))
+	{
+		Director->Preset = EFlightSimCameraPreset::CockpitShoulder;
+	}
+	else if (CameraPreset != TEXT("chase"))
+	{
+		return Fail(FString::Printf(
+			TEXT("unknown camera preset '%s' (chase|wingman|tower|shoulder)"),
+			*CameraPreset));
+	}
 	Director->ChaseOffsetMetres = bShadowShot
 		? FVector(-400.0f, 0.0f, 200.0f)    // high, looking down at the ground
 		: FVector(-170.0f, 0.0f, 16.0f);    // level, terrain and sky in shot
@@ -1070,6 +1096,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Scene->SetNumberField(TEXT("sun_azimuth_end_deg"), SunAzimuthEndDeg);
 		}
 	}
+	Scene->SetStringField(TEXT("camera_preset"), CameraPreset);
+	Scene->SetBoolField(TEXT("camera_inherits_roll"),
+	                    !Director->PresetKeepsHorizonLevel());
 	Root->SetObjectField(TEXT("scene"), Scene);
 
 	// Environmental couplings, stated per run rather than assumed.

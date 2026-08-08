@@ -62,6 +62,16 @@ struct FFlightSimSurfaceBinding
 	// Largest absolute deflection this binding has reached over the run.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FlightSim")
 	float PeakDeflectionDegrees = 0.0f;
+
+	// Continuous binding (Phase 7 3.3): the property is a RATE and the angle
+	// integrates -- a propeller's rpm becomes rotation about the shaft,
+	// DegreesPerUnit meaning degrees per second per unit (rpm wants 6.0).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightSim")
+	bool bContinuous = false;
+
+	// Accumulated angle of a continuous binding, degrees.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "FlightSim")
+	float AccumulatedDegrees = 0.0f;
 };
 
 UCLASS(ClassGroup = (FlightSim), meta = (BlueprintSpawnableComponent))
@@ -97,7 +107,7 @@ public:
 	// axis. Axis is in the actor frame, as the manifest states it.
 	UFUNCTION(BlueprintCallable, Category = "FlightSim")
 	void AddBinding(const FString& Property, FName Bone, float DegreesPerUnit,
-	                const FVector& Axis);
+	                const FVector& Axis, bool bContinuous = false);
 
 	// Largest absolute deflection across all surfaces this frame. The burn-in
 	// asserts this is non-zero over a run: a clip in which no surface ever

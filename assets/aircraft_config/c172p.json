@@ -152,6 +152,28 @@
           0.32
         ]
       ]
+    },
+    "propeller": {
+      "bone": "propeller",
+      "objects": [
+        "Propeller",
+        "Spinner"
+      ],
+      "property": "propulsion/engine/engine-rpm",
+      "scale_deg_per_unit": 6.0,
+      "continuous": true,
+      "hinge_m": [
+        [
+          -2.141,
+          0.001,
+          -0.052
+        ],
+        [
+          -1.727,
+          0.001,
+          -0.052
+        ]
+      ]
     }
   }
 }

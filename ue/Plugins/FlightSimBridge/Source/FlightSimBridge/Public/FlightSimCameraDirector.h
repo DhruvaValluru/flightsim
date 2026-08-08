@@ -41,6 +41,14 @@ enum class EFlightSimCameraPreset : uint8
 
 	// Fixed high point, slow pan. The classic tower view.
 	Tower            UMETA(DisplayName = "Tower"),
+
+	// Over the pilot's shoulder, body-fixed: the ONE preset that inherits
+	// roll, and it says so -- PresetKeepsHorizonLevel() is false and the
+	// manifest records camera_inherits_roll=true for any clip using it
+	// (§1.5: never inherited silently). In this frame the aircraft is by
+	// construction static and the WORLD banks; that is the honest meaning
+	// of a cockpit view and must never be graded as aircraft motion.
+	CockpitShoulder  UMETA(DisplayName = "Cockpit shoulder"),
 };
 
 UCLASS(Blueprintable)
@@ -67,6 +75,11 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightSim|Camera")
 	FVector WingmanOffsetMetres = FVector(-15.0f, 25.0f, 0.0f);
+
+	// Body-frame offset for the cockpit-shoulder preset, metres. Slightly
+	// behind and above the cockpit, offset toward the left seat.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightSim|Camera")
+	FVector ShoulderOffsetMetres = FVector(-6.0f, -0.5f, 1.6f);
 
 	// Spring-arm lag. Larger is looser; zero would weld the camera to the
 	// aircraft's motion and reintroduce the failure this class exists to avoid.
@@ -103,6 +116,7 @@ public:
 
 private:
 	void UpdateLaggedChase(float DeltaSeconds, const FTransform& TargetTransform);
+	void UpdateCockpitShoulder(const FTransform& TargetTransform);
 	void UpdateFixedPoint(float DeltaSeconds, const FVector& WorldLocation,
 	                      const FVector& TargetLocation);
 	void UpdateWingman(float DeltaSeconds, const FTransform& TargetTransform);
