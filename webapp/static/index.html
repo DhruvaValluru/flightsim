@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>flightsim</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font: 14px/1.5 "SF Mono", Menlo, monospace; background: #101418;
+         color: #d8dde2; max-width: 980px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.1rem; letter-spacing: .12em; color: #9fb4c7; }
+  small, .dim { color: #7d8a93; }
+  textarea { width: 100%; height: 3.6rem; background: #171d24; color: #e6ecf1;
+             border: 1px solid #2c3947; border-radius: 6px; padding: .6rem;
+             font: inherit; resize: vertical; }
+  button { background: #2b5d8c; color: #eaf2f9; border: 0; border-radius: 6px;
+           padding: .5rem 1.2rem; font: inherit; cursor: pointer; }
+  button:disabled { background: #2c3947; color: #7d8a93; cursor: default; }
+  button.run { background: #2f7d4f; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { text-align: left; padding: .28rem .6rem; border-bottom:
+           1px solid #222b34; }
+  th { color: #7d8a93; font-weight: normal; }
+  td input { background: #171d24; color: inherit; border: 1px solid #2c3947;
+             border-radius: 4px; font: inherit; padding: .15rem .4rem;
+             width: 9rem; }
+  .src-user     { color: #7fd08f; }
+  .src-inferred { color: #e0b452; }
+  .src-default  { color: #7d8a93; }
+  .src-edited   { color: #6fb3e0; }
+  .verdict-ok      { color: #7fd08f; }
+  .verdict-refused { color: #e07a6f; }
+  .card { background: #151b22; border: 1px solid #232d38; border-radius: 8px;
+          padding: 1rem; margin: 1rem 0; }
+  .badge { display: inline-block; background: #1d2733; border-radius: 4px;
+           padding: .1rem .5rem; margin-right: .5rem; color: #9fb4c7; }
+  video { width: 100%; border-radius: 8px; margin-top: .6rem; }
+  #status { white-space: pre-wrap; }
+  ul { margin: .3rem 0 .3rem 1.2rem; padding: 0; }
+</style>
+</head>
+<body>
+<h1>FLIGHTSIM &mdash; prompt to simulation</h1>
+<p class="dim">Describe a scenario. The interpreted spec is shown, with every
+field's provenance, before anything runs. Impossible requests are refused by
+name. Rendered clips carry the telemetry panel; turbulence realisations are
+visual-only per host (measured).</p>
+
+<textarea id="prompt"
+  placeholder="simulate a plane in rough wind conditions over mountains"></textarea>
+<p>
+  <button id="compile">Interpret</button>
+  <span id="compileState" class="dim"></span>
+</p>
+
+<div id="specArea" style="display:none" class="card">
+  <div id="compilerLine"></div>
+  <div id="notes"></div>
+  <table id="specTable">
+    <thead><tr><th>field</th><th>value</th><th>source</th>
+    <th>provenance</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <div id="verdict"></div>
+  <p>
+    <button id="run" class="run">Run</button>
+    <span class="dim">re-validated server-side before anything renders;
+    clip capped at 22 s</span>
+  </p>
+</div>
+
+<div id="runArea" style="display:none" class="card">
+  <div id="status"></div>
+  <div id="clipArea"></div>
+</div>
+
+<script>
+"use strict";
+let compiled = null;   // last /compile payload
+let activeRun = null;
+
+const $ = id => document.getElementById(id);
+
+function sourceClass(s) { return "src-" + s; }
+
+function renderSpec(payload) {
+  compiled = payload;
+  const spec = payload.spec;
+  $("specArea").style.display = "";
+  $("compilerLine").innerHTML =
+    `<span class="badge">compiler: ${payload.compiler}</span>` +
+    (payload.model ? `<span class="badge">model: ${payload.model}</span>` : "") +
+    `<span class="badge">digest: ${spec.digest.slice(0, 16)}</span>` +
+    (payload.llm_note
+      ? `<div class="dim">llm fallback reason: ${payload.llm_note}</div>` : "");
+  $("notes").innerHTML = spec.notes.length
+    ? `<div class="dim">notes:<ul>` +
+      spec.notes.map(n => `<li>${n}</li>`).join("") + `</ul></div>`
+    : "";
+
+  const body = $("specTable").querySelector("tbody");
+  body.innerHTML = "";
+  for (const f of spec.fields) {
+    const row = document.createElement("tr");
+    const editable = !["airspeed_kind", "mass_held", "hold_state"]
+      .includes(f.name);
+    const value = typeof f.value === "number" && !Number.isInteger(f.value)
+      ? f.value : f.value;
+    row.innerHTML =
+      `<td>${f.section}.${f.name}</td>` +
+      `<td>${editable
+         ? `<input data-name="${f.name}" value="${value}">`
+         : `${value}`}${f.unit ? " " + f.unit : ""}</td>` +
+      `<td class="${sourceClass(f.source)}" data-src="${f.name}">` +
+      `${f.source}</td>` +
+      `<td class="dim">${f.from || ""}${f.std ? " &mdash; " + f.std : ""}</td>`;
+    body.appendChild(row);
+  }
+  body.querySelectorAll("input").forEach(input => {
+    input.addEventListener("change", () => {
+      const cell = body.querySelector(`[data-src="${input.dataset.name}"]`);
+      cell.textContent = "user (edited)";
+      cell.className = "src-edited";
+    });
+  });
+  renderVerdict(payload.validation);
+}
+
+function renderVerdict(v) {
+  if (v.ok) {
+    $("verdict").innerHTML =
+      `<div class="verdict-ok">VALID` +
+      (v.derived_speeds ? ` &mdash; ${v.derived_speeds}` : "") + `</div>` +
+      (v.warnings.length
+        ? `<div class="dim">warnings: ${v.warnings.join("; ")}</div>` : "");
+    $("run").disabled = false;
+  } else {
+    $("verdict").innerHTML =
+      `<div class="verdict-refused">REFUSED &mdash; by name:</div><ul>` +
+      v.violations.map(x =>
+        `<li><b>[${x.constraint}]</b> ${x.message}` +
+        (x.actual != null && x.limit != null
+          ? ` (requested ${x.actual}${x.unit ? " " + x.unit : ""}, ` +
+            `limit ${x.limit})` : "") + `</li>`).join("") + `</ul>`;
+    $("run").disabled = true;
+  }
+}
+
+function editedSpecDict() {
+  // Apply the table's edits onto the compiled spec dict; an edited field
+  // becomes source "user" with the edit recorded, exactly like spec.set().
+  const dict = JSON.parse(JSON.stringify(compiled.spec.dict));
+  const sections = {};
+  for (const f of compiled.spec.fields) sections[f.name] = f.section;
+  document.querySelectorAll("#specTable input").forEach(input => {
+    const name = input.dataset.name, section = sections[name];
+    const entry = dict[section][name];
+    const parsed = parseFloat(input.value);
+    const value = Number.isNaN(parsed) ? input.value : parsed;
+    if (String(entry.value) !== String(value)) {
+      entry.value = value;
+      entry.source = "user";
+      entry.from = "edited in the web UI";
+    }
+  });
+  return dict;
+}
+
+$("compile").addEventListener("click", async () => {
+  $("compileState").textContent = "compiling...";
+  $("compile").disabled = true;
+  try {
+    const response = await fetch("/compile", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({prompt: $("prompt").value}),
+    });
+    const payload = await response.json();
+    if (payload.error) { $("compileState").textContent = payload.error; return; }
+    $("compileState").textContent = "";
+    renderSpec(payload);
+  } finally { $("compile").disabled = false; }
+});
+
+$("run").addEventListener("click", async () => {
+  const response = await fetch("/run", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      spec: editedSpecDict(),
+      provenance: {compiler: compiled.compiler, model: compiled.model},
+    }),
+  });
+  const payload = await response.json();
+  $("runArea").style.display = "";
+  if (payload.refused === "validation") {
+    renderVerdict(payload);
+    $("status").innerHTML =
+      `<span class="verdict-refused">the edited spec was refused ` +
+      `server-side; see the verdict above</span>`;
+    return;
+  }
+  if (payload.refused) {
+    $("status").innerHTML =
+      `<span class="verdict-refused">refused: ${payload.refused}</span>`;
+    return;
+  }
+  activeRun = payload.run_id;
+  $("status").textContent = `run ${activeRun} started (spec ` +
+    `${payload.digest.slice(0, 16)})`;
+  $("clipArea").innerHTML = "";
+  poll();
+});
+
+async function poll() {
+  if (!activeRun) return;
+  const response = await fetch(`/runs/${activeRun}`);
+  const run = await response.json();
+  const line = run.events.map(e =>
+    `${new Date(e.t * 1000).toLocaleTimeString()}  ${e.status}` +
+    (e.detail ? ` — ${e.detail}` : "")).join("\n");
+  $("status").textContent = line;
+  if (run.status === "done") {
+    $("clipArea").innerHTML =
+      `<div class="dim">scene: ${run.scene.label || run.scene.kind}</div>` +
+      `<video controls src="/runs/${activeRun}/clip.mp4"></video>` +
+      `<div class="dim"><a style="color:#6fb3e0" ` +
+      `href="/runs/${activeRun}/provenance.json">provenance</a></div>`;
+  } else if (run.status !== "failed") {
+    setTimeout(poll, 2000);
+  }
+}
+</script>
+</body>
+</html>
