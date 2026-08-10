@@ -34,7 +34,7 @@ from core.nl.compiler import compile_prompt  # noqa: E402
 from core.nl.llm_compiler import LLMCompileError, compile_prompt_llm  # noqa: E402
 from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import validate  # noqa: E402
-from webapp.runs import RunManager  # noqa: E402
+from webapp.runs import RunManager, derive_seed, project_for_ue_host  # noqa: E402
 
 app = FastAPI(title="flightsim", docs_url=None, redoc_url=None)
 manager = RunManager()
@@ -123,6 +123,14 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     except (ValueError, KeyError) as exc:
         return JSONResponse({"error": f"spec did not parse: {exc}"},
                             status_code=400)
+
+    # The recorded transformations happen BEFORE the digest is answered, so
+    # the response content-addresses exactly what will run: the derived
+    # turbulence seed and the UE-host projection (open loop, mass held) are
+    # spec edits with provenance, and the digest of the projected spec is
+    # the one the card, the manifest and the provenance sidecar all carry.
+    derive_seed(spec)
+    project_for_ue_host(spec)
 
     # Validation governs the edited spec too: the run endpoint re-validates
     # everything it is handed, whatever the page claimed.

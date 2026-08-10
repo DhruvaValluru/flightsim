@@ -127,16 +127,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               f"compiler={provenance.get('compiler')}")
         check("spec digest content-addresses the run",
               provenance["spec_digest"] == card["spec_digest"]
-              == started["digest"],
+              == started["digest"] == manifest["spec_digest"],
               card["spec_digest"][:16])
         check("edited duration reached the card",
               abs(float(card["duration_s"]) - 20.0) < 1e-9,
               f"card duration_s={card['duration_s']}")
-        terrain = manifest.get("terrain") or {}
+        scene_block = manifest.get("scene") or {}
         check("manifest carries terrain + sha256",
-              bool(terrain.get("sha256")) if provenance["scene"]["terrain"]
-              else True,
-              f"scene={provenance['scene']['key']}")
+              bool(scene_block.get("terrain_sha256"))
+              if provenance["scene"]["terrain"] else True,
+              f"scene={provenance['scene']['key']}, sha "
+              f"{str(scene_block.get('terrain_sha256'))[:12]}")
+        check("manifest carries the physics-ground label",
+              "physics_ground" in scene_block,
+              str(scene_block.get("physics_ground"))[:60])
         check("clip exists with the panel",
               (run_dir / "clip.mp4").is_file(),
               str(run_dir / "clip.mp4"))
