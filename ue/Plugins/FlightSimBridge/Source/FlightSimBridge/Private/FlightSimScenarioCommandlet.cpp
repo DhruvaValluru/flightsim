@@ -121,6 +121,9 @@ int32 UFlightSimScenarioCommandlet::Main(const FString& Params)
 	// Once, after trim and latch -- a no-op for calm cards.
 	Scenario.ConfigureTurbulence(Card);
 
+	// hazard 1: a channel property missing from this model must refuse the
+	// run loudly, never record NaN forever.
+	if (!Recorder->SelftestProperties(Error)) { return Fail(Error); }
 	Recorder->StartRecording(TelemetryPath);
 
 	const double DeltaSeconds = 1.0 / Card.RateHz;

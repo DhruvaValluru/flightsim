@@ -7,6 +7,17 @@
 //
 // Observer tier (§2.1): everything here READS. CommandConsole is called with an
 // empty input value, which is a read; nothing in this class writes to the FDM.
+//
+// The aero block (Phase 8 panel) records what the air is doing TO the
+// aircraft -- the FDM's own aerodynamic state (alpha/beta, qbar, body- and
+// wind-axis aero forces, flight-path angle, the total wind and NED velocity).
+// JSBSim is coefficient tables, not CFD: no flow field exists and none is
+// recorded. Every property name in the channel table was verified against
+// the live property catalog of the pinned JSBSim (hazard 1,
+// docs/JSBSIM_CORRECTIONS.md §3: reading an unknown property fails SILENTLY
+// with an empty result) -- and SelftestProperties() re-verifies at host
+// startup so a renamed property fails the run loudly instead of recording
+// NaN forever.
 
 #pragma once
 
@@ -15,6 +26,18 @@
 #include "FlightSimTelemetryRecorder.generated.h"
 
 class UJSBSimMovementComponent;
+
+// One recorded channel: a JSON column, the JSBSim property it reads, and a
+// pure unit-conversion scale. bRequired channels must exist on every
+// airframe; optional ones (surface positions a model may not define) are
+// sampled as NaN when absent, which keeps a missing channel visibly missing.
+struct FFlightSimTelemetryChannel
+{
+	const TCHAR* Column;
+	const TCHAR* Property;
+	double Scale;
+	bool bRequired;
+};
 
 UCLASS(ClassGroup = (FlightSim), meta = (BlueprintSpawnableComponent))
 class FLIGHTSIMBRIDGE_API UFlightSimTelemetryRecorder : public UActorComponent
@@ -38,6 +61,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightSim")
 	FString OutputPath;
 
+	// The full channel table. Sampling, the selftest and the writer all
+	// iterate THIS, so a channel cannot be sampled without being selftested
+	// and cannot be selftested without being written.
+	static TArrayView<const FFlightSimTelemetryChannel> ChannelTable();
+
+	// hazard 1: read every required channel once and demand a finite value.
+	// Hosts call this after trim, before recording, and REFUSE the run on
+	// failure -- a missing property must never record zeros/NaN forever.
+	bool SelftestProperties(FString& Error);
+
 	UFUNCTION(BlueprintCallable, Category = "FlightSim")
 	void StartRecording(const FString& InOutputPath);
 
@@ -48,7 +81,10 @@ public:
 	bool WriteToDisk();
 
 	UFUNCTION(BlueprintPure, Category = "FlightSim")
-	int32 GetSampleCount() const { return Times.Num(); }
+	int32 GetSampleCount() const
+	{
+		return Columns.Num() > 0 ? Columns[0].Num() : 0;
+	}
 
 private:
 	double ReadProperty(const FString& Name);
@@ -56,16 +92,6 @@ private:
 	bool bRecording = false;
 	float TimeSinceLastSample = 0.0f;
 
-	TArray<double> Times;
-	TArray<double> AltitudeMetres;
-	TArray<double> AglMetres;
-	TArray<double> LatitudeDegrees;
-	TArray<double> LongitudeDegrees;
-	TArray<double> TrueAirspeedKnots;
-	TArray<double> RollDegrees;
-	TArray<double> PitchDegrees;
-	TArray<double> HeadingDegrees;
-	TArray<double> LoadFactor;
-	TArray<double> ElevatorPositionRadians;
-	TArray<double> AileronPositionRadians;
+	// One array per channel, parallel to ChannelTable().
+	TArray<TArray<double>> Columns;
 };

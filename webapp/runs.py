@@ -73,6 +73,11 @@ class RunState:
     clip: Optional[str] = None  # path when done
     started: float = field(default_factory=time.time)
     events: List[Dict] = field(default_factory=list)
+    # For the aero panel: the model's measured reference speeds (display
+    # marks with provenance) and the run's honesty strip (turbulence word +
+    # seed + visual-only label, wind, physics ground).
+    reference: Optional[Dict] = None
+    conditions: Dict = field(default_factory=dict)
 
     def push(self, status: str, detail: str = "") -> None:
         self.status = status
@@ -84,7 +89,8 @@ class RunState:
         return {"run_id": self.run_id, "status": self.status,
                 "detail": self.detail, "spec_digest": self.spec_digest,
                 "scene": self.scene, "clip": self.clip,
-                "started": self.started, "events": self.events[-20:]}
+                "started": self.started, "events": self.events[-20:],
+                "reference": self.reference, "conditions": self.conditions}
 
 
 def editor_running() -> bool:
@@ -196,7 +202,7 @@ class RunManager:
 
     @staticmethod
     def _render(card: Path, frames: Path, scene: Dict, mesh: Path,
-                aircraft: str) -> bool:
+                aircraft: str, telemetry: Optional[Path] = None) -> bool:
         """The showcase render command, with terrain/imagery conditional.
 
         Same flags render_cell passes (gotcha 1: absolute paths, -stdout,
@@ -227,6 +233,11 @@ class RunManager:
             command += [f"-imagery={scene['imagery']}"]
         if mesh.is_file():
             command += [f"-mesh={mesh}"]
+        if telemetry is not None:
+            # The SHARED recorder's own file (same component all three hosts
+            # use), stamping the FDM's clock -- the aero panel reads it
+            # verbatim, no resampling.
+            command += [f"-telemetry={telemetry}"]
         log = frames.parent / "render.log"
         with log.open("w") as sink:
             subprocess.run(command, stdout=sink, stderr=subprocess.STDOUT,
@@ -261,22 +272,60 @@ class RunManager:
                 float(spec.longitude.value), wind_kt,
                 round(float(spec.wind_direction.value)))
         calm = wind_kt == 0.0 and str(spec.turbulence.value) == "none"
+        # The model's own measured reference speeds (§2.4), carried on the
+        # card for the HUD/panel stall-margin marks. Display-only; a spec
+        # the envelope machinery cannot measure simply omits the block.
+        reference = None
+        try:
+            from core.scenario.validate import validate
+
+            report = validate(spec)
+            if report.speeds is not None:
+                speeds = report.speeds
+                reference = {
+                    "vs_kt": round(speeds.vs_kt, 1),
+                    "cl_max": round(speeds.cl_max, 3),
+                    "alpha_stall_deg": (
+                        round(speeds.alpha_stall_deg, 1)
+                        if speeds.alpha_stall_deg is not None
+                        and not speeds.clipped else None),
+                    "basis": (f"{speeds.aircraft} model, CLmax "
+                              f"{speeds.cl_max:.3f}, {speeds.mass_kg:.0f} kg"
+                              + (" (CLmax not bracketed; Vs is a lower bound)"
+                                 if speeds.clipped else "")),
+                }
+        except Exception:
+            reference = None   # marks are optional; the run is not
+        run.reference = reference
+        run.conditions = {
+            "wind_note": (f"{wind_kt:g} kt from "
+                          f"{float(spec.wind_direction.value):g} deg"
+                          if wind_kt > 0 else "calm"),
+            "turbulence": str(spec.turbulence.value),
+            "turbulence_seed": (int(spec.seed.value)
+                                if str(spec.turbulence.value) != "none"
+                                else None),
+            "physics_ground": scene["label"],
+        }
         card = write_run_card(
             spec, out / "card.json",
             control_inputs=SHOWCASE_DOUBLET if calm else (),
             duration_s=min(float(spec.duration.value), CLIP_SECONDS),
             orographic=orographic,
+            reference_speeds=reference,
         )
         # Prompt/model provenance in a Python-written UTF-8 sidecar; the
         # UE-written manifest stays ASCII (gotcha 13).
         (out / "provenance.json").write_text(json.dumps({
             **provenance, "spec_digest": spec.digest(),
             "scene": scene, "clip_seconds_cap": CLIP_SECONDS,
+            "reference_speeds": reference,
         }, indent=1))
 
         run.push("rendering", "editor is rendering frames (a few minutes)")
         frames = out / "frames"
-        if not self._render(card, frames, scene, mesh, aircraft):
+        if not self._render(card, frames, scene, mesh, aircraft,
+                            telemetry=out / "telemetry.json"):
             run.push("failed", "the render commandlet wrote no manifest; "
                                f"see {out / 'render.log'}")
             return

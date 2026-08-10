@@ -654,6 +654,28 @@ live window exactly as to a clip. Keyboard/joystick flying is not in v1;
 when it lands, sessions with human input are labeled human-in-loop and
 replay parity is explicitly NOT claimed for them.
 
+**The aerodynamics panel displays recorded FDM state; no flow field is
+modelled or shown.** JSBSim is coefficient tables, not CFD: the panel (web
+side panel beside the clip, and the interactive HUD's aero block) shows
+what the air is doing TO the aircraft -- alpha/beta, dynamic pressure, the
+FDM's own body- and wind-axis aero force outputs (lift and drag are
+`forces/fw{z,x}-aero-lbs`, recorded, never a transform performed by this
+repository), flight-path angle, the total wind in the FDM and the NED
+velocity. Every displayed quantity is a recorded telemetry sample or
+arithmetic on recorded samples with the formula stated on the panel; the
+time axis is the recorder's own FDM clock mapped 1:1 to the clip. The
+channels were proven to respond to physics by a discrete-gust null test
+(quiet before the gust, moving after -- the Gate 3 pattern, in the suite),
+and every property name was verified against the live catalog of the
+pinned JSBSim before first use (hazard 1). Reference marks (stall alpha,
+Vs) come from the MODEL's own measured lift curve with the basis printed
+beside them (§2.4) and are omitted where not measured -- never a generic
+number. The Gate 5 replay-parity channel set did NOT grow: the aero
+channels are recorded, not graded, and a test freezes the graded list.
+§2.1 applies to every number on the panel: these are the model's
+aerodynamics, not validated aircraft performance. Turbulent runs keep
+their seed + visual-only labels on this panel too.
+
 ### 1.6a2 Phase 7 airframes: one delivered, two refused over licensing
 
 The generic pipeline was pointed at the three best exact FDM matches. The

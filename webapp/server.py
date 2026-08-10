@@ -197,6 +197,18 @@ def run_clip(run_id: str):
     return FileResponse(run.clip, media_type="video/mp4")
 
 
+@app.get("/runs/{run_id}/telemetry.json")
+def run_telemetry(run_id: str):
+    """The run's recorded telemetry: the shared recorder's own file, passed
+    through verbatim -- no resampling, no smoothing; t is FDM sim time as
+    recorded. 404 until the run completes, like the clip."""
+    run = manager.get(run_id)
+    path = manager.out_root / run_id / "telemetry.json"
+    if run is None or run.status != "done" or not path.is_file():
+        return JSONResponse({"error": "no telemetry"}, status_code=404)
+    return FileResponse(path, media_type="application/json")
+
+
 @app.get("/runs/{run_id}/provenance.json")
 def run_provenance(run_id: str):
     path = manager.out_root / run_id / "provenance.json"

@@ -324,3 +324,36 @@ def test_llm_matterhorn_response_lands_on_the_real_bake(monkeypatch):
         assert "GLO-30" in scene["kind"]
     else:
         assert scene["key"] in ("control", "flat")
+
+
+def test_run_telemetry_served_only_after_completion(client, tmp_path,
+                                                    monkeypatch):
+    """The aero panel's data source: the recorder's own file, passed through
+    verbatim, 404 before the run completes (like the clip)."""
+    from webapp.runs import RunState
+    from webapp.server import manager
+
+    monkeypatch.setattr(manager, "out_root", tmp_path)
+    run = RunState(run_id="teletest")
+    manager.runs["teletest"] = run
+    try:
+        run.status = "rendering"
+        telemetry = tmp_path / "teletest" / "telemetry.json"
+        telemetry.parent.mkdir(parents=True)
+        telemetry.write_text('{"columns": {"t": [0.0, 0.1], '
+                             '"alpha_deg": [2.5, 2.6]}}')
+        # Not done yet -> 404 even though the file exists on disk.
+        assert client.get("/runs/teletest/telemetry.json").status_code == 404
+
+        run.status = "done"
+        response = client.get("/runs/teletest/telemetry.json")
+        assert response.status_code == 200
+        payload = response.json()
+        # The recorder's own samples, unresampled.
+        assert payload["columns"]["t"] == [0.0, 0.1]
+        assert payload["columns"]["alpha_deg"] == [2.5, 2.6]
+
+        telemetry.unlink()
+        assert client.get("/runs/teletest/telemetry.json").status_code == 404
+    finally:
+        del manager.runs["teletest"]

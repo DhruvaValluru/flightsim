@@ -542,6 +542,20 @@ mutate core/nl/llm_compiler.py \
     "a bake missing from the locations block fails at import" \
     tests/test_llm_compiler.py || failures=$((failures+1))
 
+# -- Phase 8 aero panel: property selftest + frozen graded channels ------
+
+mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimInteractiveMode.cpp \
+    '		if (!Recorder->SelftestProperties(Error)) { return false; }' \
+    '		if (false) { return false; }  // MUTATED: selftest skipped' \
+    "the interactive host refuses a run whose channels cannot be read" \
+    tests/test_aero_channels.py || failures=$((failures+1))
+
+mutate experiments/gate5_ue_parity.py \
+    '    "lon_deg": 1e-4,' \
+    '    "lon_deg": 1e-4, "alpha_deg": 1.0,  # MUTATED: graded set grew' \
+    "the Gate 5 graded channel set does not grow by drive-by" \
+    tests/test_aero_channels.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

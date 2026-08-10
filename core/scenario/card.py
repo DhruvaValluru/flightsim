@@ -121,7 +121,8 @@ def write_run_card(spec: ScenarioSpec, path: Path,
                    turbulence_schedule: Optional[Dict[str, object]] = None,
                    orographic_follow_schedule: bool = False,
                    collision_terrain: Optional[str] = None,
-                   turbulence_provider=None) -> Path:
+                   turbulence_provider=None,
+                   reference_speeds: Optional[Dict[str, object]] = None) -> Path:
     """Write the spec in the form the UE commandlet reads.
 
     A projection of the spec, not a second copy of it. Every field is taken
@@ -183,6 +184,12 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         provider = DrydenTurbulence(str(spec.turbulence.value),
                                     seed=int(spec.seed.value))
         card["turbulence_properties"] = provider.configure()
+    if reference_speeds:
+        # Display-only (the HUD/panel stall-margin marks): the MODEL's own
+        # measured Vs and CLmax with their basis string (§2.4), so the marks
+        # are per-aircraft with provenance, never a generic number. Feeds no
+        # physics; hosts without the block simply omit the marks.
+        card["reference_speeds"] = dict(reference_speeds)
     if wind_schedule:
         card["wind_schedule"] = [dict(entry) for entry in wind_schedule]
     if orographic:

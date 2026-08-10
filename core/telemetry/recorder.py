@@ -42,6 +42,25 @@ DEFAULT_CHANNELS = (
     "crab_deg",
     "wind_speed_mps",
     "weight_kg",
+    # -- the aero block (Phase 8 panel): the FDM's own aerodynamic state.
+    # qbar and the six force components are direct JSBSim outputs (lift and
+    # drag come from the FDM's wind-axis resolution, not a transform here);
+    # gamma is the state's flight-path property. Recorded, NOT graded: the
+    # Gate 5 comparison channel set does not grow (frozen by test).
+    "qbar_pa",
+    "f_aero_x_n",
+    "f_aero_y_n",
+    "f_aero_z_n",
+    "drag_n",
+    "side_force_n",
+    "lift_n",
+    "flight_path_angle_deg",
+    "wind_north_mps",
+    "wind_east_mps",
+    "wind_down_mps",
+    "v_north_mps",
+    "v_east_mps",
+    "v_down_mps",
 )
 
 

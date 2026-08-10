@@ -42,6 +42,13 @@
   .badge { display: inline-block; background: #1d2733; border-radius: 4px;
            padding: .1rem .5rem; margin-right: .5rem; color: #9fb4c7; }
   video { width: 100%; border-radius: 8px; margin-top: .6rem; }
+  .clipRow { display: flex; gap: 1rem; align-items: flex-start;
+             flex-wrap: wrap; }
+  .clipRow .clipMain { flex: 1 1 480px; min-width: 320px; }
+  .clipRow .aeroSide { flex: 0 0 360px; }
+  #aeroCanvas { background: #10151b; border: 1px solid #232d38;
+                border-radius: 8px; width: 100%; }
+  .formula { font-size: 11px; color: #7d8a93; margin-top: .4rem; }
   #status { white-space: pre-wrap; }
   ul { margin: .3rem 0 .3rem 1.2rem; padding: 0; }
 </style>
@@ -325,13 +332,296 @@ async function poll() {
   $("status").textContent = line;
   if (run.status === "done") {
     $("clipArea").innerHTML =
+      `<div class="clipRow"><div class="clipMain">` +
       `<div class="dim">scene: ${run.scene.label || run.scene.kind}</div>` +
-      `<video controls src="/runs/${activeRun}/clip.mp4"></video>` +
+      `<video id="clipVideo" controls src="/runs/${activeRun}/clip.mp4">` +
+      `</video>` +
       `<div class="dim"><a style="color:#6fb3e0" ` +
-      `href="/runs/${activeRun}/provenance.json">provenance</a></div>`;
+      `href="/runs/${activeRun}/provenance.json">provenance</a> · ` +
+      `<a style="color:#6fb3e0" ` +
+      `href="/runs/${activeRun}/telemetry.json">telemetry</a></div>` +
+      `</div><div class="aeroSide" id="aeroSide"></div></div>`;
+    initAeroPanel(activeRun, run);
   } else if (run.status !== "failed") {
     setTimeout(poll, 2000);
   }
+}
+
+// ===================== the aerodynamics side panel ========================
+// Shows what the air is doing TO the aircraft: the FDM's own recorded state
+// (JSBSim is coefficient tables, not CFD -- there is no flow field and none
+// is drawn). Every number is a recorded telemetry sample or arithmetic on
+// recorded samples with the formula stated below the canvas. Time mapping:
+// video currentTime maps 1:1 to recorded FDM t (the clip starts at t = 0);
+// the nearest recorded sample is shown.
+
+async function initAeroPanel(runId, run) {
+  const side = $("aeroSide");
+  let telemetry = null;
+  try {
+    const response = await fetch(`/runs/${runId}/telemetry.json`);
+    if (response.ok) telemetry = await response.json();
+  } catch (error) { /* panel is optional; the clip is not */ }
+  if (!telemetry || !telemetry.columns || !telemetry.columns.t
+      || telemetry.columns.t.length === 0) {
+    side.innerHTML = `<div class="dim">no recorded telemetry for this run ` +
+      `(older run, or the recorder was not enabled) — aero panel omitted ` +
+      `rather than approximated</div>`;
+    return;
+  }
+  const columns = telemetry.columns;
+  const reference = run.reference || null;
+  const conditions = run.conditions || {};
+
+  side.innerHTML =
+    `<canvas id="aeroCanvas" width="360" height="560"></canvas>` +
+    `<div class="formula">` +
+    `panel time = video time mapped 1:1 to recorded FDM t (clip starts at ` +
+    `t=0; nearest of ${columns.t.length} samples at ` +
+    `${telemetry.interval_s}s). ` +
+    `lift/drag = the FDM's own wind-axis force outputs ` +
+    `forces/fw{z,x}-aero-lbs, recorded. ` +
+    `track = atan2(v_east, v_north) from recorded NED velocity. ` +
+    `crab = track − heading. ` +
+    (reference && reference.alpha_stall_deg != null
+      ? `stall alpha mark = alpha at measured CLmax (${reference.basis}). `
+      : `stall alpha mark omitted: not measured for this model. `) +
+    `All quantities describe the MODEL's aerodynamics (per-aircraft ` +
+    `coefficient tables), not validated aircraft performance (§2.1).</div>`;
+
+  const canvas = $("aeroCanvas");
+  const video = $("clipVideo");
+
+  const sampleAt = t => {
+    const interval = telemetry.interval_s || 0.1;
+    let index = Math.round(t / interval);
+    return Math.max(0, Math.min(columns.t.length - 1, index));
+  };
+  const col = (name, index) => {
+    const series = columns[name];
+    return series && series[index] != null ? series[index] : null;
+  };
+
+  function draw() {
+    const index = sampleAt(video.currentTime || 0);
+    const context = canvas.getContext("2d");
+    const W = canvas.width, H = canvas.height;
+    context.clearRect(0, 0, W, H);
+    context.font = "11px Menlo, monospace";
+
+    const grey = "#8a97a1", green = "#7fd08f", yellow = "#e0b452",
+          red = "#e07a6f", blue = "#6fb3e0";
+
+    // -- header: t + condition strip (the honesty core) -------------------
+    context.fillStyle = grey;
+    context.fillText(`t = ${(col("t", index) ?? 0).toFixed(2)} s  ` +
+                     `(sample ${index + 1}/${columns.t.length})`, 10, 16);
+    let y = 30;
+    context.fillText(`wind: ${conditions.wind_note || "unknown"}`, 10, y);
+    y += 14;
+    if (conditions.turbulence && conditions.turbulence !== "none") {
+      context.fillStyle = yellow;
+      context.fillText(`turb '${conditions.turbulence}' seed ` +
+        `${conditions.turbulence_seed} — VISUAL-ONLY (measured)`, 10, y);
+      y += 14;
+    }
+    context.fillStyle = grey;
+    const ground = String(conditions.physics_ground || "");
+    context.fillText(ground.slice(0, 58), 10, y);
+    y += 20;
+
+    // -- alpha / beta dials ----------------------------------------------
+    const alpha = col("alpha_deg", index), beta = col("beta_deg", index);
+    const dial = (cx, cy, radius, value, range, label, stallDeg) => {
+      context.strokeStyle = "#2c3947";
+      context.beginPath();
+      context.arc(cx, cy, radius, Math.PI, 2 * Math.PI);
+      context.stroke();
+      if (stallDeg != null && stallDeg <= range) {
+        // Stall region: from the model's own measured stall alpha to the
+        // dial edge. Drawn only when measured -- never a generic number.
+        const from = Math.PI + (stallDeg + range) / (2 * range) * Math.PI;
+        context.strokeStyle = red;
+        context.lineWidth = 3;
+        context.beginPath();
+        context.arc(cx, cy, radius, from, 2 * Math.PI);
+        context.stroke();
+        context.lineWidth = 1;
+      }
+      if (value != null) {
+        const clamped = Math.max(-range, Math.min(range, value));
+        const angle = Math.PI + (clamped + range) / (2 * range) * Math.PI;
+        context.strokeStyle =
+          (stallDeg != null && value >= stallDeg) ? red : green;
+        context.beginPath();
+        context.moveTo(cx, cy);
+        context.lineTo(cx + radius * Math.cos(angle),
+                       cy + radius * Math.sin(angle));
+        context.stroke();
+      }
+      context.fillStyle = grey;
+      context.fillText(`${label} ${value != null ? value.toFixed(2) : "—"}°`,
+                       cx - radius, cy + 14);
+    };
+    dial(70, y + 50, 44, alpha, 20,  "alpha",
+         reference ? reference.alpha_stall_deg : null);
+    dial(200, y + 50, 44, beta, 20, "beta", null);
+    y += 80;
+
+    // -- stall margin gauge ----------------------------------------------
+    const cas = col("cas_kt", index);
+    if (reference && reference.vs_kt && cas != null) {
+      const vs = reference.vs_kt;
+      const scale = (W - 20) / (vs * 2.2);
+      context.fillStyle = "#1d2733";
+      context.fillRect(10, y, W - 20, 12);
+      const vsX = 10 + vs * scale;
+      context.fillStyle = red;
+      context.fillRect(10, y, vs * scale, 12);
+      context.fillStyle = cas > vs * 1.15 ? green : yellow;
+      context.fillRect(vsX, y, Math.max(0, (cas - vs) * scale), 12);
+      context.fillStyle = grey;
+      context.fillText(
+        `cas ${cas.toFixed(1)} kt vs Vs ${vs.toFixed(0)} kt`, 10, y + 24);
+      context.fillText(`(${reference.basis})`.slice(0, 52), 10, y + 38);
+      y += 50;
+    } else {
+      context.fillStyle = grey;
+      context.fillText(`cas ${cas != null ? cas.toFixed(1) : "—"} kt ` +
+        `(no measured Vs carried for this run)`, 10, y + 10);
+      y += 24;
+    }
+
+    // -- wind triangle ----------------------------------------------------
+    // The classic diagram from recorded values: air vector (heading, TAS),
+    // recorded FDM wind, ground vector (recorded NED velocity).
+    const cx = 90, cy = y + 70, triangleRadius = 60;
+    context.strokeStyle = "#2c3947";
+    context.beginPath();
+    context.arc(cx, cy, triangleRadius, 0, 2 * Math.PI);
+    context.stroke();
+    context.fillStyle = grey;
+    context.fillText("N", cx - 3, cy - triangleRadius - 3);
+    const heading = col("heading_deg", index), tas = col("tas_kt", index);
+    const vN = col("v_north_mps", index), vE = col("v_east_mps", index);
+    const windN = col("wind_north_mps", index),
+          windE = col("wind_east_mps", index);
+    const KT_PER_MPS = 1.9438444924406046;
+    const speeds = [tas || 0,
+                    Math.hypot(vN || 0, vE || 0) * KT_PER_MPS,
+                    Math.hypot(windN || 0, windE || 0) * KT_PER_MPS * 4];
+    const maxSpeed = Math.max(1, ...speeds);
+    const vector = (nKt, eKt, colour) => {
+      context.strokeStyle = colour;
+      context.beginPath();
+      context.moveTo(cx, cy);
+      context.lineTo(cx + (eKt / maxSpeed) * triangleRadius,
+                     cy - (nKt / maxSpeed) * triangleRadius);
+      context.stroke();
+    };
+    if (heading != null && tas != null) {
+      const rad = heading * Math.PI / 180;
+      vector(tas * Math.cos(rad), tas * Math.sin(rad), blue);
+    }
+    if (vN != null && vE != null) {
+      vector(vN * KT_PER_MPS, vE * KT_PER_MPS, green);
+    }
+    if (windN != null && windE != null) {
+      // Wind drawn at 4x scale so a 25 kt wind is visible beside a 250 kt
+      // airspeed -- scaling stated here and in the legend.
+      vector(windN * KT_PER_MPS * 4, windE * KT_PER_MPS * 4, yellow);
+    }
+    const track = (vN != null && vE != null)
+      ? (Math.atan2(vE, vN) * 180 / Math.PI + 360) % 360 : null;
+    const crab = (track != null && heading != null)
+      ? ((track - heading + 540) % 360) - 180 : null;
+    context.fillStyle = blue;
+    context.fillText(`air: hdg ${heading != null ? heading.toFixed(1) : "—"}° ` +
+      `tas ${tas != null ? tas.toFixed(0) : "—"} kt`, 175, cy - 30);
+    context.fillStyle = green;
+    context.fillText(`ground: trk ${track != null ? track.toFixed(1) : "—"}°`,
+                     175, cy - 16);
+    context.fillStyle = yellow;
+    context.fillText(`wind (×4): ` +
+      `${windN != null ? (Math.hypot(windN, windE) * KT_PER_MPS).toFixed(1) : "—"} kt`,
+      175, cy - 2);
+    context.fillStyle = grey;
+    context.fillText(`crab ${crab != null ? crab.toFixed(2) : "—"}°`,
+                     175, cy + 12);
+    y = cy + triangleRadius + 20;
+
+    // -- force bars: lift / drag (FDM wind-axis outputs) + n_z ------------
+    const lift = col("lift_n", index), drag = col("drag_n", index),
+          nz = col("n_z", index);
+    const bar = (label, value, unit, maxValue, colour, formatted) => {
+      context.fillStyle = grey;
+      context.fillText(label, 10, y + 9);
+      context.fillStyle = "#1d2733";
+      context.fillRect(70, y, W - 150, 10);
+      if (value != null && maxValue > 0) {
+        const width = Math.min(1, Math.abs(value) / maxValue) * (W - 150);
+        context.fillStyle = colour;
+        context.fillRect(70, y, width, 10);
+      }
+      context.fillStyle = grey;
+      context.fillText(formatted, W - 74, y + 9);
+      y += 18;
+    };
+    const finite = series => (series || []).filter(v => v != null
+      && Number.isFinite(v)).map(Math.abs);
+    const liftMax = Math.max(1, ...finite(columns.lift_n));
+    const dragMax = Math.max(1, ...finite(columns.drag_n));
+    bar("lift", lift, "kN", liftMax, green,
+        lift != null ? `${(lift / 1000).toFixed(1)} kN` : "—");
+    bar("drag", drag, "kN", dragMax, yellow,
+        drag != null ? `${(drag / 1000).toFixed(1)} kN` : "—");
+    bar("n_z", nz, "g", 2.5, nz != null && (nz > 1.5 || nz < 0.5)
+        ? yellow : green, nz != null ? `${nz.toFixed(2)} g` : "—");
+    y += 8;
+
+    // -- surface positions (same recorded source the clip panel uses) -----
+    const surface = (label, name) => {
+      const value = col(name, index);
+      context.fillStyle = grey;
+      context.fillText(label, 10, y + 9);
+      context.fillStyle = "#1d2733";
+      context.fillRect(70, y, W - 150, 10);
+      const mid = 70 + (W - 150) / 2;
+      context.strokeStyle = "#2c3947";
+      context.beginPath();
+      context.moveTo(mid, y); context.lineTo(mid, y + 10);
+      context.stroke();
+      if (value != null) {
+        const extent = Math.max(-1, Math.min(1, value / 0.35))
+          * (W - 150) / 2;
+        context.fillStyle = blue;
+        if (extent >= 0) context.fillRect(mid, y, extent, 10);
+        else context.fillRect(mid + extent, y, -extent, 10);
+        context.fillStyle = grey;
+        context.fillText(`${(value * 57.2958).toFixed(1)}°`, W - 74, y + 9);
+      } else {
+        context.fillStyle = grey;
+        context.fillText("n/a", W - 74, y + 9);
+      }
+      y += 16;
+    };
+    surface("elevator", "elevator_pos_rad");
+    surface("aileron", "aileron_pos_rad");
+    surface("rudder", "rudder_pos_rad");
+  }
+
+  let rafActive = false;
+  const loop = () => {
+    draw();
+    if (!video.paused && !video.ended) requestAnimationFrame(loop);
+    else rafActive = false;
+  };
+  video.addEventListener("play", () => {
+    if (!rafActive) { rafActive = true; requestAnimationFrame(loop); }
+  });
+  video.addEventListener("timeupdate", draw);
+  video.addEventListener("seeked", draw);
+  draw();
 }
 </script>
 </body>

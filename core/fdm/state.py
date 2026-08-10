@@ -62,6 +62,16 @@ REQUIRED_PROPERTIES = (
     "aero/alpha-deg",
     "aero/beta-deg",
     "aero/qbar-psf",
+    # Aero force components, body axes (fb*) and wind axes (fw*: fwx drag,
+    # fwy side force, fwz lift). All six verified against the live catalog
+    # (hazard 1) -- lift and drag are the FDM's own outputs, never a
+    # transform this repo performs.
+    "forces/fbx-aero-lbs",
+    "forces/fby-aero-lbs",
+    "forces/fbz-aero-lbs",
+    "forces/fwx-aero-lbs",
+    "forces/fwy-aero-lbs",
+    "forces/fwz-aero-lbs",
     "accelerations/Nx",
     "accelerations/Ny",
     "accelerations/Nz",
@@ -148,6 +158,16 @@ class AircraftState:
     alpha_deg: float
     beta_deg: float
     qbar_pa: float                # dynamic pressure
+
+    # -- aero force on the aircraft: body axes, and the FDM's own wind-axis
+    #    resolution (drag along the relative wind, lift normal to it). All
+    #    read from JSBSim's force outputs, never recomputed here.
+    f_aero_x_n: float
+    f_aero_y_n: float
+    f_aero_z_n: float
+    drag_n: float
+    side_force_n: float
+    lift_n: float
 
     # -- accelerometer-derived (never finite-differenced; §1.3)
     n_x: float
@@ -257,6 +277,12 @@ class AircraftState:
             alpha_deg=g("aero/alpha-deg"),
             beta_deg=g("aero/beta-deg"),
             qbar_pa=u.psf_to_pa(g("aero/qbar-psf")),
+            f_aero_x_n=u.lbf_to_n(g("forces/fbx-aero-lbs")),
+            f_aero_y_n=u.lbf_to_n(g("forces/fby-aero-lbs")),
+            f_aero_z_n=u.lbf_to_n(g("forces/fbz-aero-lbs")),
+            drag_n=u.lbf_to_n(g("forces/fwx-aero-lbs")),
+            side_force_n=u.lbf_to_n(g("forces/fwy-aero-lbs")),
+            lift_n=u.lbf_to_n(g("forces/fwz-aero-lbs")),
             n_x=g("accelerations/Nx"),
             n_y=g("accelerations/Ny"),
             n_z=g("accelerations/Nz"),

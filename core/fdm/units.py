@@ -29,6 +29,9 @@ KGM3_PER_SLUGFT3 = 515.378818393      # 1 slug/ft^3
 # Pressure -- lbf/ft^2 to pascals
 PA_PER_PSF = 47.880258980336          # 1 lbf/ft^2
 
+# Force -- pound-force to newtons
+N_PER_LBF = 4.4482216152605           # 1 lbf (exact from lb x g0)
+
 # Temperature -- Rankine to Kelvin
 K_PER_R = 5.0 / 9.0
 
@@ -86,3 +89,7 @@ def slugft3_to_kgm3(s: float) -> float:
 
 def psf_to_pa(psf: float) -> float:
     return psf * PA_PER_PSF
+
+
+def lbf_to_n(lbf: float) -> float:
+    return lbf * N_PER_LBF

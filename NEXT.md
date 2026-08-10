@@ -31,6 +31,25 @@
   clauses (-screenshot-at= is wired). Everything else about the
   interactive host -- substep ledger, replay parity, HUD, recorder,
   manifest -- is measured and PASSED via the commandlet wall-clock path.
+  The on-screen clause checklist now also includes the HUD's AERO BLOCK
+  (alpha/beta/qbar/lift/drag/n_z + stall margin with the model's own Vs
+  and basis): grade it legible from the same screenshot pass; it must not
+  displace or shrink the existing honesty items.
+
+**Aero panel (this session).** The shared recorder (all three hosts, one
+channel table) records the aero block -- alpha/beta, qbar, body- AND
+wind-axis aero forces (lift = fwz, drag = fwx: the FDM's own outputs),
+gamma, total wind, NED velocity -- property names verified live (gotcha
+22), with a startup SelftestProperties refusal in every host (hazard 1).
+The render path takes `-telemetry=` and the webapp passes it, so every
+clip run writes `telemetry.json` served at `GET /runs/{id}/telemetry.json`
+(404 until done; the recorder's own file, no resampling). The page shows
+an aero side panel beside the video, indexed by the video clock (mapping
+stated on the panel), with model-specific stall/Vs marks from the card's
+`reference_speeds` block (write_run_card optional arg; ReadCard optional
+parse; display-only). Gust null test + frozen Gate 5 graded set + selftest
+wiring are suite members (tests/test_aero_channels.py); two new mutation
+guards (selftest refusal, graded-set freeze).
 
 
 ```bash
@@ -54,6 +73,7 @@
 .venv/bin/python experiments/interactive_replay.py # Gate 8.2 replay parity
 .venv/bin/python experiments/gate8_compiler.py     # Gate 8.1 (BLOCKED without ANTHROPIC_API_KEY)
 .venv/bin/pytest tests/test_llm_compiler.py tests/test_webapp.py  # compiler v2: questions/preflight/locations (fast)
+.venv/bin/pytest tests/test_aero_channels.py   # aero panel: schema sync, selftest wiring, gust null, frozen graded set
 .venv/bin/uvicorn webapp.server:app --port 8008    # the web front door (manual)
 ```
 
@@ -250,3 +270,14 @@ the parity discipline, and the do-not-regress list)
     on the raster) around t=52 s on heading 236 -- with heightfield
     collision that is a crash, not scenery. Long runs over the massif use
     the showcase altitude (B747: 5200 m).
+22. **Verified JSBSim aero property names (do not re-guess; hazard 1).**
+    `aero/alpha-deg`, `aero/beta-deg`, `aero/qbar-psf`,
+    `forces/fb{x,y,z}-aero-lbs` (BODY-axis aero force),
+    `forces/fw{x,y,z}-aero-lbs` (WIND axis: fwx = drag, fwy = side force,
+    fwz = lift -- the FDM resolves lift/drag itself; never transform by
+    hand), `flight-path/gamma-deg` -- all verified against the live
+    property catalog of the pinned JSBSim on 2026-08-10. NOT present:
+    `velocities/flight-path-gamma-rad`, `aero/fl-aero-lbs`,
+    `aero/fd-aero-lbs`. The UE recorder's channel table and the headless
+    REQUIRED_PROPERTIES carry these names; tests/test_aero_channels.py
+    pins them and the SelftestProperties refusal in all three hosts.

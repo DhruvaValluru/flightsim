@@ -131,6 +131,16 @@ bool FFlightSimScenarioWorld::ReadCard(const FString& Path,
 		return false;
 	}
 
+	// Optional: the model's measured reference speeds, display-only (the
+	// HUD's stall-margin marks). Absent on older cards; nothing refuses.
+	const TSharedPtr<FJsonObject>* ReferenceSpeeds = nullptr;
+	if (Root->TryGetObjectField(TEXT("reference_speeds"), ReferenceSpeeds))
+	{
+		(*ReferenceSpeeds)->TryGetNumberField(TEXT("vs_kt"), Out.ReferenceVsKnots);
+		(*ReferenceSpeeds)->TryGetNumberField(TEXT("cl_max"), Out.ReferenceClMax);
+		(*ReferenceSpeeds)->TryGetStringField(TEXT("basis"), Out.ReferenceBasis);
+	}
+
 	// Conditions this host does not implement. Each one is refused rather than
 	// approximated: a spec that asks for turbulence and silently gets still air
 	// would make the parity comparison a comparison of two different scenarios,

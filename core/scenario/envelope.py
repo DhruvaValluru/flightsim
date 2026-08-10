@@ -91,6 +91,10 @@ class ReferenceSpeeds:
     vref_kt: float
     vr_kt: float
     clipped: bool
+    #: Alpha at the measured CLmax, degrees -- the model's own stall alpha,
+    #: carried so a panel can mark the stall region with per-aircraft
+    #: provenance instead of a generic number. None on old call sites.
+    alpha_stall_deg: Optional[float] = None
 
     def summary(self) -> str:
         return (
@@ -194,4 +198,5 @@ def reference_speeds(
         vref_kt=vs_kt * VREF_FACTOR,
         vr_kt=vs_kt * VR_FACTOR,
         clipped=curve.clipped,
+        alpha_stall_deg=curve.alpha_at_cl_max_deg,
     )

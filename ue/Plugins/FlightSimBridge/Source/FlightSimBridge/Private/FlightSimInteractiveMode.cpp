@@ -119,6 +119,9 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 		Recorder->SampleIntervalSeconds =
 			static_cast<float>(Card.SampleIntervalSeconds);
 		Recorder->RegisterComponent();
+		// hazard 1: a channel property missing from this model refuses the
+		// session loudly, never records NaN forever.
+		if (!Recorder->SelftestProperties(Error)) { return false; }
 		Recorder->StartRecording(TelemetryPath);
 	}
 
@@ -375,6 +378,34 @@ TArray<FFlightSimHudLine> AFlightSimInteractiveMode::HudLines() const
 	Lines.Add({FString::Printf(
 		TEXT("wind in FDM (NED fps): %+7.2f %+7.2f %+7.2f"),
 		WindNorth, WindEast, WindDown), Grey});
+
+	// The aero block: what the air is doing TO the aircraft -- the FDM's own
+	// aerodynamic state (JSBSim is coefficient tables, not CFD; no flow
+	// field exists and none is claimed). Same live property reads as every
+	// line here, display-only -- the recorder stays the evidence path.
+	// Lift/drag are the FDM's OWN wind-axis force outputs
+	// (forces/fw{z,x}-aero-lbs), not a transform done on screen.
+	const double AlphaDeg = Read(TEXT("aero/alpha-deg"));
+	const double BetaDeg = Read(TEXT("aero/beta-deg"));
+	const double QbarPa = Read(TEXT("aero/qbar-psf")) * 47.880259;
+	const double LiftKn = Read(TEXT("forces/fwz-aero-lbs")) * 4.4482216153e-3;
+	const double DragKn = Read(TEXT("forces/fwx-aero-lbs")) * 4.4482216153e-3;
+	const double LoadG = Read(TEXT("accelerations/Nz"));
+	Lines.Add({FString::Printf(
+		TEXT("aero (FDM state): alpha %+6.2f deg  beta %+6.2f deg  ")
+		TEXT("qbar %6.0f Pa  lift %8.1f kN  drag %7.1f kN  n_z %5.2f g"),
+		AlphaDeg, BetaDeg, QbarPa, LiftKn, DragKn, LoadG), Grey});
+	if (Card.ReferenceVsKnots > 0.0)
+	{
+		// Stall margin against THIS model's measured Vs (§2.4): the basis
+		// travels on the card so the provenance is on screen, and a card
+		// without the block shows nothing rather than a generic number.
+		const double MarginKt = CasKt - Card.ReferenceVsKnots;
+		Lines.Add({FString::Printf(
+			TEXT("stall margin: cas %5.1f kt vs Vs %5.1f kt (%+5.1f kt) -- %s"),
+			CasKt, Card.ReferenceVsKnots, MarginKt, *Card.ReferenceBasis),
+			MarginKt < 0.15 * Card.ReferenceVsKnots ? Yellow : Grey});
+	}
 
 	// Honesty labels: turbulence seed + verdict, physics ground, camera.
 	if (Card.Turbulence != TEXT("none"))

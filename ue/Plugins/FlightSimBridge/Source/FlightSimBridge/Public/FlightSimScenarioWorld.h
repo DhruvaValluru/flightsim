@@ -162,6 +162,17 @@ struct FFlightSimScenarioCard
 	// horizontal vector each step instead of staying at its initial value.
 	bool bOrographicFollowSchedule = false;
 
+	// -- model reference speeds (Phase 8 aero panel) ----------------------
+	// Measured from the MODEL's own lift curve by the validation machinery
+	// (core/scenario/envelope.py, §2.4) and carried for DISPLAY: the HUD's
+	// stall-margin readout shows per-aircraft reference marks with their
+	// provenance, never a generic number. VsKnots <= 0 means the card does
+	// not carry the block and the HUD omits the marks -- display-only, so
+	// an absent block refuses nothing and feeds no physics.
+	double ReferenceVsKnots = 0.0;
+	double ReferenceClMax = 0.0;
+	FString ReferenceBasis;
+
 	// -- real heightfield collision (Phase 7, 1.2) ------------------------
 	// Path to the SAME baked raster the visuals draw. When set, the ground
 	// query slab is replaced by collision geometry built from this raster

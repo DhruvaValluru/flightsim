@@ -380,6 +380,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	FParse::Value(*Params, TEXT("terrain="), TerrainPath);
 	double SecondsOverride = 0.0;
 	FParse::Value(*Params, TEXT("seconds="), SecondsOverride);
+	// Full-run telemetry through the SHARED recorder (the same component
+	// the telemetry commandlet and the interactive host use), stamping the
+	// FDM's own clock. The web app's aero panel reads this file verbatim.
+	FString RunTelemetryPath;
+	FParse::Value(*Params, TEXT("telemetry="), RunTelemetryPath);
 
 	// -- Phase 6B controls -------------------------------------------------
 	// A real aircraft mesh manifest; absent means the placeholder boxes,
@@ -840,6 +845,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			ProbeRecorder->SampleIntervalSeconds =
 				static_cast<float>(Card.SampleIntervalSeconds);
 			ProbeRecorder->RegisterComponent();
+			// hazard 1: refuse rather than record NaN forever.
+			if (!ProbeRecorder->SelftestProperties(Error))
+			{
+				return Fail(Error);
+			}
 			ProbeRecorder->StartRecording(ProbeTelemetryPath);
 		}
 		const double SubstepSeconds = 1.0 / Card.RateHz;
@@ -963,6 +973,22 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	}
 
 	// -- the run -----------------------------------------------------------
+	UFlightSimTelemetryRecorder* RunRecorder = nullptr;
+	if (!RunTelemetryPath.IsEmpty())
+	{
+		RunRecorder = NewObject<UFlightSimTelemetryRecorder>(
+			Scenario.Aircraft, TEXT("RunRecorder"));
+		RunRecorder->Movement = Scenario.Movement;
+		RunRecorder->SampleIntervalSeconds =
+			static_cast<float>(Card.SampleIntervalSeconds);
+		RunRecorder->RegisterComponent();
+		// hazard 1: refuse rather than record NaN forever.
+		if (!RunRecorder->SelftestProperties(Error))
+		{
+			return Fail(Error);
+		}
+		RunRecorder->StartRecording(RunTelemetryPath);
+	}
 	const double DeltaSeconds = 1.0 / Card.RateHz;
 	const double Duration = SecondsOverride > 0.0
 		? FMath::Min(SecondsOverride, Card.DurationSeconds)
@@ -1329,6 +1355,16 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	                          Card.bOrographicFollowSchedule);
 	Root->SetObjectField(TEXT("environment"), Environment);
 	Root->SetArrayField(TEXT("frame_records"), FrameRecords);
+
+	if (RunRecorder != nullptr && !RunRecorder->WriteToDisk())
+	{
+		return Fail(FString::Printf(TEXT("run telemetry did not write to '%s'"),
+		                            *RunTelemetryPath));
+	}
+	if (RunRecorder != nullptr)
+	{
+		Root->SetStringField(TEXT("telemetry"), RunTelemetryPath);
+	}
 
 	FString Output;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Output);
