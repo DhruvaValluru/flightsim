@@ -570,6 +570,61 @@ No EO/IR sensor modelling (§2.5 below). No validation against published
 reference data beyond the two targets §2.11 records, and the credibility
 scorecard is mostly below its own threshold (§2.12).
 
+### 2.14 The interactive tier (Phase 8): what real time costs, measured
+
+Phase 8 adds a prompt-to-simulation front door (LLM compiler + web app)
+and a windowed interactive host. What each is and is not:
+
+**The LLM compiler moves no claim.** §2.6 stands exactly as written: the
+spec is the reproducible unit and the prompt a historical note. The LLM
+adds nondeterminism on the prompt->spec edge ONLY; its output is parsed
+strictly against a schema generated from the spec's own fields (unknown
+fields, out-of-vocabulary values and claimed-default provenance are
+errors shown to the user, never patched), untouched fields default
+BIT-IDENTICALLY to the regex compiler's, and the existing validator still
+refuses infeasible specs by name. The provenance record (prompt, model
+id, compiler, raw response) lives in a Python-written UTF-8 sidecar;
+UE-written manifests stay ASCII. The regex compiler remains the offline
+fallback and the UI states which compiler ran. Nothing the LLM writes is
+evidence; the spec-review table is the control for misinterpretation.
+
+**One clock rule for the interactive host.** JSBSim never sees a dt other
+than 1/120 s: the movement component's own tick is disabled and the host
+steps whole substeps from a wall-clock accumulator (the engine's frame
+delta is NOT trusted -- DefaultEngine.ini pins it for the offline hosts).
+Catch-up is capped at 250 ms; excess is dropped and COUNTED, so overload
+appears as time dilation with an on-screen RUNNING BEHIND state and a
+deficit ledger in the manifest, never as a stretched dt. Measured
+(runs/fps_probe/report.json, full Matterhorn scene -- 30 m heightfield
+collision + Sentinel-2 drape + converted B747 mesh, 1280x720): fps mean
+**171.3**, frame ms p50 5.8 / p95 7.3 / max 41.8; **60.0 s of sim flown
+in 60.0 s of wall**, substep ledger exact (7199 == 7199), zero caps.
+That number is the OFFSCREEN loop (one scene render per frame, no
+readback): window compositing and HUD draw are excluded, because -game
+mode cannot start under a locked console session (measured; NEXT.md
+gotcha 18) and the machine was locked. The stated GO threshold was
+30 fps; headroom is ~5.7x, so the exclusions are not load-bearing. The
+windowed figure gets measured the first time a user session is unlocked.
+
+**Claims come from the replay, not the window.** Every interactive
+session records its card and telemetry with the same recorder the
+commandlets use, stamping the FDM's own clock; the headless host re-flies
+the card and the comparison runs under Gate 5's unchanged discipline
+(same channels and tolerances, recorded clock, trim snapshot exempt,
+heading on the circle). Still-air and steady-wind sessions must match; a
+TURBULENT session is checked only for the divergence the permanent
+visual-only verdict predicts (§1.6b) -- the HUD and the manifest both
+carry the seed and the label. Interactive rendering itself is even less
+reproducible than offline rendering (§3) and no claim rides on its
+pixels beyond the on-screen clauses.
+
+**Not established, and must not be claimed:** the interactive tier adds
+no physics. Every §2 caveat -- unvalidated airframes, the orographic
+model's crudeness, visual-only turbulence realisations -- applies to a
+live window exactly as to a clip. Keyboard/joystick flying is not in v1;
+when it lands, sessions with human input are labeled human-in-loop and
+replay parity is explicitly NOT claimed for them.
+
 ### 1.6a2 Phase 7 airframes: one delivered, two refused over licensing
 
 The generic pipeline was pointed at the three best exact FDM matches. The

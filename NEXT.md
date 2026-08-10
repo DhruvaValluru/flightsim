@@ -13,6 +13,7 @@
 | 6 visual realism | 6 | PASS 4/4 measured clauses + side-by-side |
 | 6B real assets/terrain/turbulence/matrix | — | DELIVERED |
 | 7 imagery/coupling/atmosphere | — | **DELIVERED, every verdict measured** (docs/BRIEF_PHASE7.md) |
+| 8 prompt-to-simulation interface | 8.1-8.3 | IN PROGRESS (docs/BRIEF_PHASE8.md; 8A+8B done, 8C code done, gates partial -- see below) |
 
 ```bash
 .venv/bin/pytest                          # 307 tests
@@ -31,6 +32,10 @@
 .venv/bin/python experiments/zermatt_run.py        # scripted valley run + cameras
 .venv/bin/python experiments/showcase_matrix.py    # the matrix (resumable)
 .venv/bin/python experiments/turb_perstep_measure.py  # the §13 measurement
+.venv/bin/python experiments/fps_probe.py          # 8B.0 real-time frame cost (GO: 171 fps)
+.venv/bin/python experiments/interactive_replay.py # Gate 8.2 replay parity
+.venv/bin/python experiments/gate8_compiler.py     # Gate 8.1 (BLOCKED without ANTHROPIC_API_KEY)
+.venv/bin/uvicorn webapp.server:app --port 8008    # the web front door (manual)
 ```
 
 ## Phase 7: what exists now and what was measured
@@ -184,3 +189,32 @@ the parity discipline, and the do-not-regress list)
     a crank-started one stabilises at a sick ~500 rpm idle under starter
     assist, so only the discovery's trim-refusal discriminates. Every
     piston card carries its verified engine_mixture.
+
+## Phase 8 gotchas (continuing the numbering)
+
+18. **-game mode NEVER starts under a locked console session.** Both editor
+    binaries (UnrealEditor and UnrealEditor-Cmd) park in the AppKit event
+    loop forever (sampled: main thread in -[NSApplication run], ~6% CPU, no
+    log progress past plugin mounting). Commandlets (-run=) are unaffected.
+    The windowed interactive host therefore needs a person at the machine;
+    the fps probe and the replay experiment fall back to the render
+    commandlet's real-time probe loop (-probe-wall-seconds=, same
+    Scenario.Step path, same wall-clock substep accumulator) and LABEL the
+    exclusion in their artifacts. Related: a first -game launch invokes UBT
+    -Mode=QueryTargets, which wedges without DEVELOPER_DIR; pre-generate
+    the cache once with Build.sh -Mode=QueryTargets
+    -Project=ue/FlightSim.uproject
+    -Output=ue/Intermediate/TargetInfo.json -IncludeAllTargets.
+19. **DefaultEngine.ini's bUseFixedFrameRate pins the engine frame delta**
+    (load-bearing for the offline hosts, gotcha 8). The interactive host
+    disables it at RUNTIME (config untouched) and measures wall time with
+    FPlatformTime -- trusting DeltaSeconds would silently dilate sim time
+    against the wall clock and report a fake 120 fps.
+20. **The editor-lock check matches "Binaries/Mac/UnrealEditor"**, never
+    plain "UnrealEditor" -- the broad pattern also matches the always-on
+    UnrealEditorServices helper and the Epic launcher's EpicWebHelper and
+    refuses runs that are actually safe (cost one probe run).
+21. **A Matterhorn track at 3600 m flies INTO the massif** (tops at 4540 m
+    on the raster) around t=52 s on heading 236 -- with heightfield
+    collision that is a crash, not scenery. Long runs over the massif use
+    the showcase altitude (B747: 5200 m).
