@@ -55,7 +55,7 @@ def test_stated_and_inferred_fields_overlay_with_provenance():
             "wind_speed": entry(25.0, "inferred", "rough wind"),
             "turbulence": entry("moderate", "inferred", "rough wind"),
         },
-        "notes": [],
+        "notes": [], "questions": [],
     })
     result = compile_prompt_llm(
         "simulate the cessna at 2600 m in rough wind", client=client)
@@ -86,7 +86,7 @@ def test_untouched_fields_are_bit_identical_to_regex_defaults():
     if the two compilers defaulted differently, the validator could judge
     the same prompt differently depending on who compiled it.
     """
-    client = fake_client({"fields": {}, "notes": []})
+    client = fake_client({"fields": {}, "notes": [], "questions": []})
     llm_spec = compile_prompt_llm("a prompt saying nothing usable",
                                   client=client).spec
     regex_spec = compile_prompt("")
@@ -99,6 +99,7 @@ def test_prompt_is_retained_and_notes_carried():
         "fields": {},
         "notes": ["ignored cinematic term 'epic flyby'",
                   "unknown aircraft 'SR-71' cannot be expressed"],
+        "questions": [],
     })
     result = compile_prompt_llm("epic flyby of an SR-71", client=client)
     assert result.spec.prompt == "epic flyby of an SR-71"
@@ -109,7 +110,7 @@ def test_prompt_is_retained_and_notes_carried():
 def test_spec_round_trips_and_digest_is_stable():
     client = fake_client({
         "fields": {"altitude": entry(3000.0, "user", "3000 m")},
-        "notes": [],
+        "notes": [], "questions": [],
     })
     spec = compile_prompt_llm("fly at 3000 m", client=client).spec
     again = ScenarioSpec.from_yaml(spec.to_yaml())
@@ -117,7 +118,7 @@ def test_spec_round_trips_and_digest_is_stable():
 
 
 def test_request_carries_schema_and_no_sampling_params():
-    client = fake_client({"fields": {}, "notes": []})
+    client = fake_client({"fields": {}, "notes": [], "questions": []})
     compile_prompt_llm("anything", client=client)
     request = client.captured
     assert request["model"] == "claude-opus-5"
@@ -135,7 +136,7 @@ def test_validation_refuses_llm_specs_by_name():
             "altitude": entry(500.0, "user", "500 m"),
             "terrain_elevation": entry(2000.0, "inferred", "mountains"),
         },
-        "notes": [],
+        "notes": [], "questions": [],
     })
     spec = compile_prompt_llm("fly at 500 m over the mountains",
                               client=client).spec
@@ -156,6 +157,7 @@ def test_malformed_json_is_an_error():
 def test_unknown_field_is_an_error():
     client = fake_client({
         "fields": {"camera_angle": entry("chase")}, "notes": [],
+        "questions": [],
     })
     with pytest.raises(LLMCompileError, match="unknown field 'camera_angle'"):
         compile_prompt_llm("anything", client=client)
@@ -165,7 +167,7 @@ def test_model_cannot_claim_default_provenance():
     client = fake_client({
         "fields": {"altitude": {"value": 3000.0, "source": "default",
                                 "from": "made up"}},
-        "notes": [],
+        "notes": [], "questions": [],
     })
     with pytest.raises(LLMCompileError, match="source"):
         compile_prompt_llm("anything", client=client)
@@ -174,7 +176,7 @@ def test_model_cannot_claim_default_provenance():
 def test_out_of_vocabulary_enum_is_an_error():
     client = fake_client({
         "fields": {"turbulence": entry("apocalyptic", "inferred", "hell")},
-        "notes": [],
+        "notes": [], "questions": [],
     })
     with pytest.raises(LLMCompileError, match="outside the vocabulary"):
         compile_prompt_llm("anything", client=client)
@@ -184,7 +186,7 @@ def test_unknown_aircraft_cannot_be_guessed_into_a_field():
     assert "SR71" not in FIELD_VALUE_SCHEMAS["aircraft"]["enum"]
     client = fake_client({
         "fields": {"aircraft": entry("SR71", "user", "the blackbird")},
-        "notes": [],
+        "notes": [], "questions": [],
     })
     with pytest.raises(LLMCompileError, match="outside the vocabulary"):
         compile_prompt_llm("anything", client=client)
@@ -193,7 +195,7 @@ def test_unknown_aircraft_cannot_be_guessed_into_a_field():
 def test_boolean_is_not_a_number():
     client = fake_client({
         "fields": {"altitude": {"value": True, "source": "user", "from": "x"}},
-        "notes": [],
+        "notes": [], "questions": [],
     })
     with pytest.raises(LLMCompileError, match="not a number"):
         compile_prompt_llm("anything", client=client)
@@ -202,20 +204,20 @@ def test_boolean_is_not_a_number():
 def test_missing_provenance_phrase_is_an_error():
     client = fake_client({
         "fields": {"altitude": {"value": 3000.0, "source": "user", "from": "  "}},
-        "notes": [],
+        "notes": [], "questions": [],
     })
     with pytest.raises(LLMCompileError, match="no provenance phrase"):
         compile_prompt_llm("anything", client=client)
 
 
 def test_extra_top_level_keys_are_an_error():
-    client = fake_client({"fields": {}, "notes": [], "confidence": 0.9})
+    client = fake_client({"fields": {}, "notes": [], "questions": [], "confidence": 0.9})
     with pytest.raises(LLMCompileError, match="top-level keys"):
         compile_prompt_llm("anything", client=client)
 
 
 def test_refusal_stop_reason_is_an_error():
-    client = fake_client({"fields": {}, "notes": []}, stop_reason="refusal")
+    client = fake_client({"fields": {}, "notes": [], "questions": []}, stop_reason="refusal")
     with pytest.raises(LLMCompileError, match="refusal"):
         compile_prompt_llm("anything", client=client)
 
@@ -257,3 +259,199 @@ def test_aircraft_vocabulary_matches_regex_compiler():
 
     regex_models = {model for _, model in AIRCRAFT_WORDS}
     assert set(AIRCRAFT_MODELS) == regex_models
+
+
+# -- clarifying questions: one round, strict, bounded ----------------------
+
+def question(qid="mountains", text="Which mountains?",
+             options=("Matterhorn / Zermatt", "Yosemite Valley",
+                      "a generic ridge")):
+    return {"id": qid, "question": text, "options": list(options)}
+
+
+def test_question_round_returns_questions_and_partial_fields():
+    client = fake_client({
+        "fields": {"wind_speed": entry(25.0, "inferred", "windy")},
+        "notes": [],
+        "questions": [question()],
+    })
+    result = compile_prompt_llm(
+        "simulate an aircraft under windy conditions on a mountain",
+        client=client)
+    assert len(result.questions) == 1
+    assert result.questions[0]["id"] == "mountains"
+    assert result.questions[0]["options"][0] == "Matterhorn / Zermatt"
+    # A question round is not an empty round: confident fields arrived and
+    # the partial spec is honest to run as-is.
+    assert float(result.spec.wind_speed.value) == 25.0
+    assert str(result.spec.wind_speed.source) == "inferred"
+    assert result.transcript is None
+
+
+def test_answer_round_sends_the_transcript_and_finishes():
+    questions = [question()]
+    answer_from = 'answer to "Which mountains?": "Matterhorn"'
+    client = fake_client({
+        "fields": {
+            "latitude": {"value": 46.005, "source": "user",
+                         "from": answer_from},
+            "longitude": {"value": 7.72, "source": "user",
+                          "from": answer_from},
+        },
+        "notes": [], "questions": [],
+    })
+    result = compile_prompt_llm(
+        "windy on a mountain", client=client, questions=questions,
+        answers=[{"id": "mountains", "answer": "Matterhorn"}])
+
+    # The conversation carried prompt, question turn, answer turn -- the
+    # API-idiomatic shape, with the model's questions echoed verbatim.
+    messages = client.captured["messages"]
+    assert [m["role"] for m in messages] == ["user", "assistant", "user"]
+    assert json.loads(messages[1]["content"])["questions"] == questions
+    assert "Matterhorn" in messages[2]["content"]
+    # An answered field is the user speaking, Q&A recorded in "from".
+    assert str(result.spec.latitude.source) == "user"
+    assert result.spec.latitude.frm == answer_from
+    assert float(result.spec.latitude.value) == 46.005
+    assert result.questions == ()
+    assert result.transcript is not None and len(result.transcript) == 3
+
+
+def test_second_round_questions_are_rejected_by_name():
+    client = fake_client({"fields": {}, "notes": [],
+                          "questions": [question()]})
+    with pytest.raises(LLMCompileError, match="exactly one question round"):
+        compile_prompt_llm("x", client=client, questions=[question()],
+                           answers=[{"id": "mountains",
+                                     "answer": "Matterhorn"}])
+
+
+def test_more_than_three_questions_is_an_error():
+    questions = [question(f"q{i}") for i in range(4)]
+    client = fake_client({"fields": {}, "notes": [], "questions": questions})
+    with pytest.raises(LLMCompileError, match="exceed the cap"):
+        compile_prompt_llm("x", client=client)
+
+
+def test_question_with_empty_options_is_an_error():
+    bad = {"id": "q", "question": "Which?", "options": []}
+    client = fake_client({"fields": {}, "notes": [], "questions": [bad]})
+    with pytest.raises(LLMCompileError, match="no usable options"):
+        compile_prompt_llm("x", client=client)
+
+
+def test_question_missing_id_is_an_error():
+    bad = {"question": "Which?", "options": ["a"]}
+    client = fake_client({"fields": {}, "notes": [], "questions": [bad]})
+    with pytest.raises(LLMCompileError, match="id/question/options"):
+        compile_prompt_llm("x", client=client)
+
+
+def test_missing_questions_key_is_an_error():
+    client = fake_client({"fields": {}, "notes": []})
+    with pytest.raises(LLMCompileError, match="top-level keys"):
+        compile_prompt_llm("x", client=client)
+
+
+def test_answered_field_cannot_claim_inferred():
+    client = fake_client({
+        "fields": {"latitude": {
+            "value": 46.005, "source": "inferred",
+            "from": 'answer to "Which mountains?": "Matterhorn"'}},
+        "notes": [], "questions": [],
+    })
+    with pytest.raises(LLMCompileError, match="the user speaking"):
+        compile_prompt_llm("x", client=client, questions=[question()],
+                           answers=[{"id": "mountains",
+                                     "answer": "Matterhorn"}])
+
+
+def test_answers_without_questions_is_an_error():
+    client = fake_client({"fields": {}, "notes": [], "questions": []})
+    with pytest.raises(LLMCompileError, match="without the questions"):
+        compile_prompt_llm("x", client=client,
+                           answers=[{"id": "a", "answer": "b"}])
+
+
+def test_same_final_spec_digests_identically_with_or_without_questions():
+    """Determinism re-assert: the question round is prompt->spec plumbing;
+    the SPEC stays the reproducible unit however it was arrived at."""
+    final_fields = {
+        "latitude": {"value": 46.005, "source": "user",
+                     "from": 'answer to "Which mountains?": "Matterhorn"'},
+        "wind_speed": {"value": 25.0, "source": "inferred", "from": "windy"},
+    }
+    direct = compile_prompt_llm(
+        "windy on a mountain",
+        client=fake_client({"fields": final_fields, "notes": [],
+                            "questions": []})).spec
+    answered = compile_prompt_llm(
+        "windy on a mountain",
+        client=fake_client({"fields": final_fields, "notes": [],
+                            "questions": []}),
+        questions=[question()],
+        answers=[{"id": "mountains", "answer": "Matterhorn"}]).spec
+    assert direct.digest() == answered.digest()
+
+
+# -- key preflight: named, actionable, never leaking -----------------------
+
+def test_missing_key_preflight_names_the_fix(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with pytest.raises(LLMCompileError) as err:
+        compile_prompt_llm("anything")   # client=None: the real entry path
+    message = str(err.value)
+    assert "ANTHROPIC_API_KEY" in message
+    assert "flightsim-web" in message and "uvicorn" in message
+    assert "regex" in message            # the offline fallback is named
+    # Presence-only check: no key exists here, and nothing key-shaped may
+    # ever appear in the message.
+    assert "sk-" not in message
+
+
+def test_transport_error_text_carries_no_key_material(monkeypatch):
+    sentinel = "sk-ant-TEST-SENTINEL-VALUE"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", sentinel)
+
+    def create(**kwargs):
+        raise ConnectionError("boom")
+
+    client = SimpleNamespace(messages=SimpleNamespace(create=create))
+    with pytest.raises(LLMCompileError) as err:
+        compile_prompt_llm("anything", client=client)
+    assert sentinel not in str(err.value)
+
+
+def test_llm_available_is_a_presence_check(monkeypatch):
+    from core.nl.llm_compiler import llm_available
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert llm_available() is False
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-TEST")
+    assert llm_available() is True       # the SDK is installed in the venv
+
+
+# -- the world the compiler can render --------------------------------------
+
+def test_system_prompt_carries_every_bake_with_exact_origins():
+    from core.nl.llm_compiler import LOCATION_ALIASES, SYSTEM_PROMPT
+    from core.terrain.glo30 import LOCATIONS
+
+    for key, location in LOCATIONS.items():
+        assert key in SYSTEM_PROMPT
+        assert str(location.origin_lat) in SYSTEM_PROMPT
+        assert str(location.origin_lon) in SYSTEM_PROMPT
+        for alias in LOCATION_ALIASES[key]:
+            assert alias in SYSTEM_PROMPT
+    # A place the system cannot render is never in the block.
+    assert "atlantis" not in SYSTEM_PROMPT.lower()
+
+
+def test_locations_coverage_assert_fires_on_a_missing_bake():
+    from core.nl.llm_compiler import (LOCATION_ALIASES,
+                                      _assert_locations_covered)
+
+    _assert_locations_covered({"matterhorn"}, LOCATION_ALIASES)
+    with pytest.raises(AssertionError, match="atlantis"):
+        _assert_locations_covered({"atlantis"}, LOCATION_ALIASES)

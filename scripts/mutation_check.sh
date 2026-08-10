@@ -516,6 +516,32 @@ mutate webapp/server.py \
     "the run endpoint re-validates whatever the page hands it" \
     tests/test_webapp.py || failures=$((failures+1))
 
+# -- Phase 8 LLM compiler v2: questions, cap, provenance, geography ------
+
+mutate core/nl/llm_compiler.py \
+    '    if questions and not allow_questions:' \
+    '    if False:  # MUTATED: a second question round is accepted' \
+    "the answer round rejects further questions (one round only)" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
+mutate core/nl/llm_compiler.py \
+    '    if len(questions) > MAX_QUESTIONS:' \
+    '    if False:  # MUTATED: unlimited questions accepted' \
+    "the 3-question cap is enforced in parsing, not just requested" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
+mutate core/nl/llm_compiler.py \
+    '        if entry["from"].strip().startswith("answer to") and entry["source"] != "user":' \
+    '        if False:  # MUTATED: answered fields may claim any source' \
+    "a field decided by an answer is the user speaking (source user)" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
+mutate core/nl/llm_compiler.py \
+    '    missing = set(location_keys) - set(table)' \
+    '    missing = set()  # MUTATED: bake coverage never checked' \
+    "a bake missing from the locations block fails at import" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

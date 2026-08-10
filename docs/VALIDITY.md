@@ -588,6 +588,24 @@ UE-written manifests stay ASCII. The regex compiler remains the offline
 fallback and the UI states which compiler ran. Nothing the LLM writes is
 evidence; the spec-review table is the control for misinterpretation.
 
+**Clarifying questions are a second control, not a claim.** The compiler may
+ask ONE round of at most three questions -- both bounds enforced in the
+strict parser, not just requested in the prompt -- and only where the prompt
+is ambiguous in a way that materially changes the scenario with no basis to
+infer (which mountains, which aircraft; never anything the documented
+vocabulary already maps). A field decided by an answer is the user speaking:
+source `user` with the question and answer recorded verbatim in its
+provenance. The system prompt's geography block is GENERATED from
+`core.terrain.glo30.LOCATIONS` at import (asserted, mutation-guarded), so a
+named bake lands on its exact origin and a place the system cannot render is
+never given invented coordinates -- it becomes a question or a note. The
+Q&A transcript joins the prompt in the Python-written UTF-8 provenance
+sidecar as a historical note; it is not evidence, it moves no claim, and
+the reproducible unit remains the spec (§2.6 verbatim). The offline regex
+fallback never asks and never sees answers: a mid-flow LLM failure compiles
+the ORIGINAL prompt, stated as such. Questions reduce guessing; the
+spec-review table remains the control the run flows through.
+
 **One clock rule for the interactive host.** JSBSim never sees a dt other
 than 1/120 s: the movement component's own tick is disabled and the host
 steps whole substeps from a wall-clock accumulator (the engine's frame

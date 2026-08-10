@@ -180,3 +180,147 @@ def test_run_manager_projects_the_spec_for_the_ue_host():
     assert bool(spec.hold_state.value) is False
     assert "no autopilot" in spec.hold_state.frm
     assert bool(spec.mass_held.value) is True
+
+
+# -- clarifying questions through the front door ---------------------------
+
+def test_status_reports_llm_availability(client):
+    payload = client.get("/status").json()
+    assert isinstance(payload["llm_available"], bool)
+
+
+def test_compile_question_round_trip(client, monkeypatch):
+    from core.nl.llm_compiler import LLMCompileResult
+
+    calls = {}
+
+    def fake_llm(prompt, questions=None, answers=None, **kwargs):
+        calls["questions"], calls["answers"] = questions, answers
+        spec = compile_prompt(prompt)
+        if answers is None:
+            spec.set("wind_speed", 25.0, frm="windy")
+            return LLMCompileResult(
+                spec=spec, model="test-model", raw_response="{}",
+                questions=({"id": "mountains",
+                            "question": "Which mountains?",
+                            "options": ["Matterhorn / Zermatt",
+                                        "a generic ridge"]},))
+        spec.set("latitude", 46.005,
+                 frm='answer to "Which mountains?": "Matterhorn"')
+        return LLMCompileResult(
+            spec=spec, model="test-model", raw_response="{}",
+            transcript=({"role": "user", "content": prompt},
+                        {"role": "assistant", "content": "q"},
+                        {"role": "user", "content": "a"}))
+
+    monkeypatch.setattr("webapp.server.compile_prompt_llm", fake_llm)
+
+    first = client.post("/compile", json={
+        "prompt": "windy on a mountain"}).json()
+    assert first["needs_clarification"] is True
+    assert first["questions"][0]["id"] == "mountains"
+    assert first["questions"][0]["options"][0] == "Matterhorn / Zermatt"
+    # The partial spec/verdict payload rides under the questions.
+    assert first["spec"]["fields"] and first["validation"]
+    assert first["transcript"] is None
+
+    second = client.post("/compile", json={
+        "prompt": "windy on a mountain",
+        "questions": first["questions"],
+        "answers": [{"id": "mountains", "answer": "Matterhorn"}]}).json()
+    assert calls["questions"] == first["questions"]
+    assert calls["answers"] == [{"id": "mountains", "answer": "Matterhorn"}]
+    assert second["needs_clarification"] is False
+    assert second["questions"] == []
+    assert len(second["transcript"]) == 3
+    latitude = next(f for f in second["spec"]["fields"]
+                    if f["name"] == "latitude")
+    assert latitude["source"] == "user"
+    assert latitude["from"].startswith("answer to")
+
+
+def test_llm_death_on_answer_round_falls_back_to_the_original_prompt(
+        client, monkeypatch):
+    """The regex compiler never asks and never sees answers: a mid-flow LLM
+    failure compiles the ORIGINAL prompt offline, stated as such."""
+    from core.nl.llm_compiler import LLMCompileError
+
+    def dead(prompt, **kwargs):
+        raise LLMCompileError("the key vanished between rounds")
+
+    monkeypatch.setattr("webapp.server.compile_prompt_llm", dead)
+    payload = client.post("/compile", json={
+        "prompt": "fly the 747 at 3000 m and 250 kt",
+        "questions": [{"id": "q", "question": "?", "options": ["a"]}],
+        "answers": [{"id": "q", "answer": "a"}]}).json()
+    assert payload["compiler"] == "regex (llm unavailable)"
+    assert "vanished" in payload["llm_note"]
+    assert payload["needs_clarification"] is False
+    altitude = next(f for f in payload["spec"]["fields"]
+                    if f["name"] == "altitude")
+    assert altitude["value"] == 3000.0   # the original prompt, regex-parsed
+
+
+def test_run_forwards_the_transcript_into_provenance(client, monkeypatch):
+    from webapp.server import manager
+
+    captured = {}
+
+    def fake_start(spec, provenance):
+        captured.update(provenance)
+        return {"run_id": "test"}
+
+    monkeypatch.setattr(manager, "start", fake_start)
+    compiled = client.post("/compile", json={
+        "prompt": "fly the 747 at 3000 m and 250 kt",
+        "compiler": "regex"}).json()
+    response = client.post("/run", json={
+        "spec": compiled["spec"]["dict"],
+        "provenance": {"compiler": "llm", "model": "m",
+                       "transcript": [{"role": "user", "content": "hi"}],
+                       "evil_extra": 1}})
+    assert response.status_code == 200
+    assert captured["transcript"] == [{"role": "user", "content": "hi"}]
+    assert "evil_extra" not in captured
+
+
+def test_llm_matterhorn_response_lands_on_the_real_bake(monkeypatch):
+    """A mocked 'Matterhorn' response uses the generated locations block's
+    exact origin, so the spec lands inside pick_scene's tolerance window and
+    the real bake is selected (when baked on this machine)."""
+    import json as jsonlib
+    from types import SimpleNamespace
+
+    from core.nl.llm_compiler import compile_prompt_llm
+    from core.terrain.glo30 import LOCATIONS
+    from webapp.runs import LOCATION_TOLERANCE_DEG, REPO
+
+    location = LOCATIONS["matterhorn"]
+    payload = jsonlib.dumps({
+        "fields": {
+            "latitude": {"value": location.origin_lat, "source": "inferred",
+                         "from": "the matterhorn"},
+            "longitude": {"value": location.origin_lon, "source": "inferred",
+                          "from": "the matterhorn"},
+            "terrain_elevation": {"value": 1860.0, "source": "inferred",
+                                  "from": "the matterhorn"},
+        },
+        "notes": [], "questions": []})
+    response = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text=payload)],
+        stop_reason="end_turn", model="test-model")
+    mock = SimpleNamespace(messages=SimpleNamespace(
+        create=lambda **kwargs: response))
+
+    spec = compile_prompt_llm("a cessna over the matterhorn",
+                              client=mock).spec
+    assert abs(float(spec.latitude.value) - location.origin_lat) \
+        <= LOCATION_TOLERANCE_DEG
+    assert abs(float(spec.longitude.value) - location.origin_lon) \
+        <= LOCATION_TOLERANCE_DEG
+    scene = pick_scene(spec)
+    if (REPO / "runs" / "terrain" / "matterhorn.r16").is_file():
+        assert scene["key"] == "matterhorn"
+        assert "GLO-30" in scene["kind"]
+    else:
+        assert scene["key"] in ("control", "flat")

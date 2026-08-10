@@ -18,7 +18,13 @@
 **Phase 8 remaining evidence, blocked on things only a person can provide:**
 * **Gate 8.1 (live LLM corpus)** needs `ANTHROPIC_API_KEY` in the env, then
   `.venv/bin/python experiments/gate8_compiler.py`. The mocked half
-  (tests/test_llm_compiler.py, 20 tests) is green; BLOCKED != passed.
+  (tests/test_llm_compiler.py, 35 tests) is green; BLOCKED != passed. The
+  corpus now includes clarify entries (must ask, scripted answers close the
+  round) and determined entries (must NOT ask), plus on-bake geography
+  assertions against LOCATIONS origins. A missing key is now a NAMED
+  preflight error (set the key in the environment of the SERVER process --
+  the flightsim-web launch.json entry or the uvicorn shell); GET /status
+  reports llm_available so the page states the compiler up front.
 * **The windowed run** needs an UNLOCKED console session (gotcha 18):
   launch via `experiments/fps_probe.py` (it auto-detects the lock) or the
   webapp, and re-measure the windowed fps figure + Gate 8.2's on-screen
@@ -47,8 +53,22 @@
 .venv/bin/python experiments/fps_probe.py          # 8B.0 real-time frame cost (GO: 171 fps)
 .venv/bin/python experiments/interactive_replay.py # Gate 8.2 replay parity
 .venv/bin/python experiments/gate8_compiler.py     # Gate 8.1 (BLOCKED without ANTHROPIC_API_KEY)
+.venv/bin/pytest tests/test_llm_compiler.py tests/test_webapp.py  # compiler v2: questions/preflight/locations (fast)
 .venv/bin/uvicorn webapp.server:app --port 8008    # the web front door (manual)
 ```
+
+**LLM compiler v2 (this session): geography + clarifying questions.** The
+system prompt carries a locations block GENERATED from
+`core.terrain.glo30.LOCATIONS` (import-time assert, mutation-guarded): a
+prompt naming a bake lands on its exact origin so `pick_scene` selects the
+real terrain; unknown places are never given invented coordinates (question
+or note). One round of at most 3 clarifying questions, both bounds enforced
+in `_parse_payload`; answers arrive as a structured Q&A conversation
+(prompt / assistant questions / user answers); an answered field is source
+`user` with `answer to "<question>": "<answer>"` recorded; the transcript
+goes into the UTF-8 provenance sidecar via /run. The regex fallback never
+asks and compiles the ORIGINAL prompt on any LLM failure. VALIDITY §2.14
+carries the claims paragraph.
 
 ## Phase 7: what exists now and what was measured
 

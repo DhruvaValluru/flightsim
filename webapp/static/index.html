@@ -31,6 +31,14 @@
   .verdict-refused { color: #e07a6f; }
   .card { background: #151b22; border: 1px solid #232d38; border-radius: 8px;
           padding: 1rem; margin: 1rem 0; }
+  .question { border: 1px solid #2c3947; border-radius: 6px; padding: .7rem;
+              margin: .6rem 0; }
+  button.opt { background: #1d2733; color: #d8dde2; margin: .15rem .3rem
+               .15rem 0; }
+  button.opt.selected { background: #2b5d8c; color: #eaf2f9; }
+  input.free { background: #171d24; color: inherit; border: 1px solid
+               #2c3947; border-radius: 4px; font: inherit;
+               padding: .25rem .5rem; width: 16rem; }
   .badge { display: inline-block; background: #1d2733; border-radius: 4px;
            padding: .1rem .5rem; margin-right: .5rem; color: #9fb4c7; }
   video { width: 100%; border-radius: 8px; margin-top: .6rem; }
@@ -49,8 +57,17 @@ visual-only per host (measured).</p>
   placeholder="simulate a plane in rough wind conditions over mountains"></textarea>
 <p>
   <button id="compile">Interpret</button>
+  <span id="llmState" class="badge">compiler: checking&hellip;</span>
   <span id="compileState" class="dim"></span>
 </p>
+
+<div id="questionArea" style="display:none" class="card">
+  <div class="dim">The interpreter needs clarification (one round only).
+  Pick an option or answer free-text; unanswered questions keep the
+  documented defaults. The table below already shows what is decided.</div>
+  <div id="questionCards"></div>
+  <p><button id="answer">Answer &amp; re-interpret</button></p>
+</div>
 
 <div id="specArea" style="display:none" class="card">
   <div id="compilerLine"></div>
@@ -75,12 +92,74 @@ visual-only per host (measured).</p>
 
 <script>
 "use strict";
-let compiled = null;   // last /compile payload
+let compiled = null;          // last /compile payload
+let pendingQuestions = null;  // question round's questions, echoed on answer
 let activeRun = null;
 
 const $ = id => document.getElementById(id);
 
 function sourceClass(s) { return "src-" + s; }
+
+// Compiler state up front (Task 0): the page states which compiler WILL run
+// before the first Interpret, instead of discovering a fallback after a spin.
+(async () => {
+  try {
+    const status = await (await fetch("/status")).json();
+    $("llmState").textContent = status.llm_available
+      ? "compiler: llm available"
+      : "compiler: offline regex (no ANTHROPIC_API_KEY in the server " +
+        "process; set it where uvicorn runs)";
+  } catch (error) { $("llmState").textContent = "compiler: server unreachable"; }
+})();
+
+function renderQuestions(payload) {
+  pendingQuestions = payload.questions;
+  $("questionArea").style.display = "";
+  const holder = $("questionCards");
+  holder.innerHTML = "";
+  for (const q of payload.questions) {
+    const card = document.createElement("div");
+    card.className = "question";
+    card.dataset.qid = q.id;
+    const title = document.createElement("div");
+    const bold = document.createElement("b");
+    bold.textContent = q.question;
+    title.appendChild(bold);
+    card.appendChild(title);
+    const row = document.createElement("div");
+    for (const option of q.options) {
+      const button = document.createElement("button");
+      button.className = "opt";
+      button.textContent = option;
+      button.addEventListener("click", () => {
+        row.querySelectorAll(".opt").forEach(x =>
+          x.classList.toggle("selected", x === button));
+        row.querySelector(".free").value = "";
+      });
+      row.appendChild(button);
+    }
+    const free = document.createElement("input");
+    free.className = "free";
+    free.placeholder = "or answer free-text";
+    free.addEventListener("input", () =>
+      row.querySelectorAll(".opt").forEach(x =>
+        x.classList.remove("selected")));
+    row.appendChild(free);
+    card.appendChild(row);
+    holder.appendChild(card);
+  }
+}
+
+function collectAnswers() {
+  const answers = [];
+  document.querySelectorAll("#questionCards .question").forEach(card => {
+    const free = card.querySelector(".free").value.trim();
+    const picked = card.querySelector(".opt.selected");
+    const answer = free || (picked ? picked.textContent : "");
+    if (answer) answers.push({id: card.dataset.qid, answer});
+  });
+  return answers;
+}
 
 function renderSpec(payload) {
   compiled = payload;
@@ -165,17 +244,24 @@ function editedSpecDict() {
   return dict;
 }
 
-$("compile").addEventListener("click", async () => {
+async function doCompile(body) {
   $("compileState").textContent = "compiling...";
   $("compile").disabled = true;
+  $("answer").disabled = true;
   try {
     const response = await fetch("/compile", {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({prompt: $("prompt").value}),
+      body: JSON.stringify(body),
     });
     const payload = await response.json();
     if (payload.error) { $("compileState").textContent = payload.error; return; }
     $("compileState").textContent = "";
+    if (payload.needs_clarification) {
+      renderQuestions(payload);
+    } else {
+      pendingQuestions = null;
+      $("questionArea").style.display = "none";
+    }
     renderSpec(payload);
   } catch (error) {
     // A dead fetch used to leave "compiling..." up forever -- which reads
@@ -185,7 +271,18 @@ $("compile").addEventListener("click", async () => {
       `cannot reach the server (${error}). Start it with: ` +
       `.venv/bin/uvicorn webapp.server:app --port 8008  and open ` +
       `http://127.0.0.1:8008/ -- not the raw index.html file.`;
-  } finally { $("compile").disabled = false; }
+  } finally { $("compile").disabled = false; $("answer").disabled = false; }
+}
+
+$("compile").addEventListener("click", () =>
+  doCompile({prompt: $("prompt").value}));
+
+$("answer").addEventListener("click", () => {
+  // One round: the original prompt plus the model's questions (echoed back)
+  // and the user's answers. The server keeps no conversation state.
+  doCompile({prompt: $("prompt").value,
+             questions: pendingQuestions,
+             answers: collectAnswers()});
 });
 
 $("run").addEventListener("click", async () => {
@@ -193,7 +290,8 @@ $("run").addEventListener("click", async () => {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       spec: editedSpecDict(),
-      provenance: {compiler: compiled.compiler, model: compiled.model},
+      provenance: {compiler: compiled.compiler, model: compiled.model,
+                   transcript: compiled.transcript || null},
     }),
   });
   const payload = await response.json();

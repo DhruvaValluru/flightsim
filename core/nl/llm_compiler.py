@@ -22,6 +22,19 @@ NOT add is trust:
   this module never pre-judges feasibility.
 * Anything the prompt mentions that the schema cannot express goes to
   ``spec.notes``, not the bin -- the same rule the regex compiler follows.
+* The model knows exactly which real terrain bakes exist: a locations block
+  is GENERATED into the system prompt from :data:`core.terrain.glo30.LOCATIONS`
+  (same generated-not-hand-copied discipline as the schema), so a prompt
+  naming the Matterhorn lands on the real bake's origin exactly, and a place
+  the system cannot render is never given invented coordinates.
+* The model may ask AT MOST one round of AT MOST three clarifying questions,
+  and only where the prompt is ambiguous in a way that materially changes
+  the scenario with no basis to infer (which mountains; which aircraft).
+  Both bounds are enforced in parsing, not just requested in the prompt. A
+  field decided by an answer is the user speaking: source ``user`` with the
+  question and answer recorded in ``from``. Questions are a control against
+  misinterpretation; they add no claims, and the Q&A transcript is a
+  historical note beside the prompt (§2.6 unchanged).
 
 The reproducibility claim does not move. The spec is the reproducible unit;
 the prompt is a historical note (§2.6 was written for exactly this moment).
@@ -37,11 +50,13 @@ to any manifest.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..scenario.fields import Quantity, Source
 from ..scenario.spec import ScenarioSpec
+from ..terrain.glo30 import LOCATIONS
 from .compiler import TURBULENCE_STD, TURBULENCE_WORDS, compile_prompt, _name_from
 
 #: The model the compiler asks for. Recorded verbatim in the result so the
@@ -58,6 +73,56 @@ AIRCRAFT_MODELS = ("737", "A320", "B747", "c172p", "f15", "f16", "global5000")
 TURBULENCE_LABELS = {
     "none": 0.0, "light": 15.0, "moderate": 30.0, "severe": 45.0,
 }
+
+#: Hard cap on clarifying questions per response, enforced in parsing.
+MAX_QUESTIONS = 3
+
+#: Human names that should land on each real terrain bake. Keyed by
+#: ``LOCATIONS``' own keys; :func:`_assert_locations_covered` keeps this
+#: table and the bake list from drifting apart at import time.
+LOCATION_ALIASES: Dict[str, Tuple[str, ...]] = {
+    "matterhorn": ("Matterhorn", "Zermatt", "the Alps", "Pennine Alps",
+                   "Swiss Alps", "Monte Rosa"),
+    "yosemite": ("Yosemite", "Yosemite Valley", "Sierra Nevada",
+                 "Half Dome", "El Capitan"),
+}
+
+#: Ground elevation at each bake's origin, metres MSL -- the showcase
+#: matrix's own ``ground_m`` convention, measured from the bake raster
+#: (matterhorn 1859.2, yosemite 1230.9, rounded). NOT summit height: the
+#: spec's terrain_elevation is the flat physics slab / clearance datum.
+LOCATION_TERRAIN_ELEVATION_M: Dict[str, float] = {
+    "matterhorn": 1860.0,
+    "yosemite": 1230.0,
+}
+
+
+def _assert_locations_covered(location_keys, table) -> None:
+    """Every renderable bake must appear in the generated locations block.
+
+    Called at import against both per-location tables so a bake added to
+    ``LOCATIONS`` without prompt coverage fails here, not silently in a
+    session where the model guesses coordinates for a place it should know.
+    """
+    missing = set(location_keys) - set(table)
+    assert not missing, (f"terrain bakes missing from the LLM prompt's "
+                         f"locations block: {sorted(missing)}")
+
+
+_assert_locations_covered(LOCATIONS, LOCATION_ALIASES)
+_assert_locations_covered(LOCATIONS, LOCATION_TERRAIN_ELEVATION_M)
+
+
+def llm_available() -> bool:
+    """SDK importable and a key present. Presence check only -- the value is
+    never read, stored or logged by this module."""
+    if "ANTHROPIC_API_KEY" not in os.environ:
+        return False
+    try:
+        import anthropic  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 class LLMCompileError(Exception):
@@ -77,12 +142,21 @@ class LLMCompileResult:
     ``raw_response`` is the model's verbatim JSON text and ``model`` the id
     that produced it; both belong in the run's provenance sidecar (never in
     a UE-written manifest string -- the prompt may contain non-ASCII).
+
+    ``questions`` is non-empty when the model needs one round of
+    clarification; ``spec`` is then the PARTIAL spec (confident fields over
+    the documented defaults), honest to run as-is if the user declines to
+    answer. ``transcript`` is the messages list actually sent on an answer
+    round -- prompt, question turn, answer turn -- and joins the prompt in
+    the UTF-8 provenance sidecar as a historical note, never as evidence.
     """
 
     spec: ScenarioSpec
     model: str
     raw_response: str
     compiler: str = "llm"
+    questions: Tuple[Dict[str, Any], ...] = ()
+    transcript: Optional[Tuple[Dict[str, str], ...]] = None
 
 
 # -- the schema, generated from the spec's own fields ---------------------
@@ -133,10 +207,25 @@ _SPEC_FIELDS = {name for _, name in ScenarioSpec.FIELD_ORDER}
 _unknown = set(FIELD_VALUE_SCHEMAS) - _SPEC_FIELDS
 assert not _unknown, f"llm_compiler schema names non-spec fields: {_unknown}"
 
+#: One clarifying question: an id the answer round refers back to, the
+#: question itself, and concrete options (the UI always also allows
+#: free text; options are never a closed set).
+QUESTION_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["id", "question", "options"],
+    "properties": {
+        "id": {"type": "string"},
+        "question": {"type": "string"},
+        "options": {"type": "array", "items": {"type": "string"},
+                    "minItems": 1},
+    },
+}
+
 RESPONSE_SCHEMA: Dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["fields", "notes"],
+    "required": ["fields", "notes", "questions"],
     "properties": {
         "fields": {
             "type": "object",
@@ -151,8 +240,34 @@ RESPONSE_SCHEMA: Dict[str, Any] = {
             "items": {"type": "string"},
             "description": "Prompt content the schema cannot express.",
         },
+        "questions": {
+            "type": "array",
+            "items": QUESTION_SCHEMA,
+            "maxItems": MAX_QUESTIONS,
+            "description": "Clarifying questions; [] when nothing needs "
+                           "asking. One round only.",
+        },
     },
 }
+
+def _locations_block() -> str:
+    """The world the system can actually render, generated from LOCATIONS.
+
+    Generated, never hand-copied (the schema's own discipline): a bake added
+    to ``core.terrain.glo30.LOCATIONS`` appears here on the next import or
+    the import-time assert above fails.
+    """
+    lines = ["Real terrain bakes -- the ONLY named places that render real "
+             "ground (Copernicus GLO-30 + satellite imagery):"]
+    for key, location in LOCATIONS.items():
+        aliases = ", ".join(LOCATION_ALIASES[key])
+        lines.append(
+            f'- {key} ({location.title}; names that mean this place: '
+            f'{aliases}): latitude {location.origin_lat}, longitude '
+            f'{location.origin_lon}, terrain_elevation '
+            f'{LOCATION_TERRAIN_ELEVATION_M[key]:g}')
+    return "\n".join(lines)
+
 
 SYSTEM_PROMPT = """\
 You compile flight-simulation prompts into a condition schema. Extract ONLY
@@ -171,15 +286,49 @@ Rules:
   both a strong wind (25 kt) and moderate turbulence unless stated otherwise.
 - Relative wind ("headwind", "crosswind") is a bearing offset from the
   aircraft heading (head 0, cross 90, tail 180), meteorological convention.
-- "mountains"/"alpine"/"ridge" with no numbers: terrain_elevation 2000,
-  inferred. A named real place you are confident of may set latitude,
-  longitude and terrain_elevation, inferred, with the place name in "from".
 - Do not judge feasibility. If the prompt commands something impossible,
   extract it literally -- the validator refuses it by name, which is the
   designed path. Never soften or "fix" a stated number.
 - Anything you cannot express in the schema -- unknown aircraft, cinematic
   or camera language, weather the vocabulary lacks -- goes into "notes"
   verbatim, never guessed into a field.
+
+""" + _locations_block() + """
+
+Geography rules:
+- A prompt naming a listed place (by key or any of its names) sets latitude,
+  longitude and terrain_elevation EXACTLY to that place's listed values --
+  never rounded, never adjusted -- source "inferred" with the place name in
+  "from". The exact coordinates are what lands the scenario on the real bake.
+- A named place NOT in the list: NEVER invent coordinates. Ask which listed
+  place (or the generic ridge) fits, or record the place name verbatim in
+  "notes". Coordinates you were not given do not exist.
+- "mountains"/"alpine"/"ridge" with no name and no numbers: set
+  terrain_elevation 2000, inferred (the generic-ridge fallback) -- and this
+  is the canonical case for a clarifying question ("which mountains?") with
+  the listed real places plus "a generic ridge" as the options.
+
+Clarifying questions:
+- Ask (in "questions") ONLY when the prompt is ambiguous in a way that
+  materially changes the scenario AND gives no basis to infer: which
+  mountains when mountains are unnamed, which aircraft when nothing in the
+  prompt constrains the choice. At most 3 questions, one round ever.
+- NEVER ask about anything the rules above already map ("windy" -> 25 kt is
+  the documented inference, not a question) or where the documented default
+  is fine (heading, duration, time of day).
+- Each question carries an id, the question text, and concrete options (the
+  user may also answer free-text). Fields you ARE confident of must still
+  arrive in "fields" in the same response -- a question round is not an
+  empty round; every non-question field is extracted as usual.
+- "questions" is [] when nothing needs asking.
+- When the conversation already contains your questions and the user's
+  answers: produce the final complete response with "questions": [] --
+  never ask again. A field decided by an answer is source "user" with
+  "from" recording both, exactly this shape:
+  answer to "<question>": "<answer>"
+  A field read from the original prompt keeps its ordinary user/inferred
+  tag. An answer that names a listed place follows the geography rules
+  (exact listed coordinates).
 """
 
 
@@ -191,12 +340,15 @@ def _fail(reason: str) -> "LLMCompileError":
         f"not built; re-run, rephrase, or use the offline compiler.")
 
 
-def _parse_payload(text: str) -> Dict[str, Any]:
+def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]:
     """Parse the model's JSON strictly against the schema's intent.
 
     The API already constrains the shape, but this module does not trust the
     transport: everything is re-checked here so a malformed response -- from
     a mock, a cached file, or a future API change -- fails identically.
+    ``allow_questions=False`` is the answer round: a model that asks again
+    is rejected by name, which is what keeps the protocol to one round
+    without any server-side state machine.
     """
     try:
         payload = json.loads(text)
@@ -204,14 +356,39 @@ def _parse_payload(text: str) -> Dict[str, Any]:
         raise _fail(f"not valid JSON ({exc})") from None
     if not isinstance(payload, dict):
         raise _fail("top level is not an object")
-    if set(payload) != {"fields", "notes"}:
-        raise _fail(f"top-level keys {sorted(payload)} != ['fields', 'notes']")
+    if set(payload) != {"fields", "notes", "questions"}:
+        raise _fail(f"top-level keys {sorted(payload)} != "
+                    f"['fields', 'notes', 'questions']")
     fields, notes = payload["fields"], payload["notes"]
     if not isinstance(fields, dict):
         raise _fail("'fields' is not an object")
     if not (isinstance(notes, list)
             and all(isinstance(n, str) for n in notes)):
         raise _fail("'notes' is not a list of strings")
+
+    questions = payload["questions"]
+    if not isinstance(questions, list):
+        raise _fail("'questions' is not a list")
+    if questions and not allow_questions:
+        raise _fail("the model asked questions in the answer round; the "
+                    "protocol allows exactly one question round")
+    if len(questions) > MAX_QUESTIONS:
+        raise _fail(f"{len(questions)} questions exceed the cap of "
+                    f"{MAX_QUESTIONS}")
+    for question in questions:
+        if not (isinstance(question, dict)
+                and set(question) == {"id", "question", "options"}):
+            raise _fail("each question must carry exactly id/question/options")
+        if not (isinstance(question["id"], str) and question["id"].strip()):
+            raise _fail("a question has no id")
+        if not (isinstance(question["question"], str)
+                and question["question"].strip()):
+            raise _fail(f"question {question['id']!r} has no text")
+        options = question["options"]
+        if not (isinstance(options, list) and options
+                and all(isinstance(o, str) and o.strip() for o in options)):
+            raise _fail(f"question {question['id']!r} has no usable options "
+                        f"(a non-empty list of strings is required)")
 
     for name, entry in fields.items():
         if name not in FIELD_VALUE_SCHEMAS:
@@ -223,6 +400,12 @@ def _parse_payload(text: str) -> Dict[str, Any]:
                         f"only 'user' or 'inferred' may be claimed by a model")
         if not (isinstance(entry["from"], str) and entry["from"].strip()):
             raise _fail(f"field {name!r} has no provenance phrase")
+        # A field decided by a clarifying answer is the USER speaking: the
+        # 'answer to "...": "..."' shape may only carry source "user".
+        if entry["from"].strip().startswith("answer to") and entry["source"] != "user":
+            raise _fail(f"field {name!r} was filled from a clarifying answer "
+                        f"but claims source {entry['source']!r}; an answered "
+                        f"field is the user speaking, source 'user'")
         value_schema = FIELD_VALUE_SCHEMAS[name]
         value = entry["value"]
         if value_schema["type"] == "number":
@@ -261,15 +444,34 @@ def _overlay(spec: ScenarioSpec, name: str, entry: Dict[str, Any]) -> None:
 
 def compile_prompt_llm(prompt: str, name: Optional[str] = None,
                        client: Any = None,
-                       model: str = DEFAULT_MODEL) -> LLMCompileResult:
+                       model: str = DEFAULT_MODEL,
+                       questions: Optional[Sequence[Dict[str, Any]]] = None,
+                       answers: Optional[Sequence[Dict[str, str]]] = None,
+                       ) -> LLMCompileResult:
     """Turn a prompt into a spec via the Claude API. Does not run anything.
 
     ``client`` is an ``anthropic.Anthropic``-compatible object; the suite
     injects a mock here so no test touches the network. Left ``None``, the
     real SDK client is constructed and resolves its key from the
-    environment.
+    environment (checked for PRESENCE first so a missing key is a named,
+    actionable error rather than a TypeError from client construction).
+
+    ``answers`` makes this the answer round: the conversation becomes the
+    original prompt, the model's own ``questions`` (which the caller echoes
+    back), and the user's answers -- and a response that asks again is
+    rejected. Round-ness is carried entirely by whether ``answers`` was
+    supplied; there is no other state.
     """
     if client is None:
+        # Presence check only -- the value is never read, stored or logged.
+        if "ANTHROPIC_API_KEY" not in os.environ:
+            raise LLMCompileError(
+                "ANTHROPIC_API_KEY is not set in this process's environment, "
+                "so the LLM compiler is unavailable. Set it in the "
+                "environment of the SERVER process -- the flightsim-web "
+                "launch.json entry, or the shell that runs uvicorn -- and "
+                "recompile. The offline regex compiler remains available "
+                "meanwhile.")
         try:
             import anthropic
         except ImportError as exc:
@@ -278,12 +480,27 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
                 "unavailable. Use the offline regex compiler.") from exc
         client = anthropic.Anthropic()
 
+    answering = answers is not None
+    if answering and not questions:
+        raise LLMCompileError(
+            "answers were supplied without the questions they answer; the "
+            "answer round must echo the question round's questions back")
+
+    messages: List[Dict[str, str]] = [{"role": "user", "content": prompt}]
+    if answering:
+        # The API-idiomatic shape: the model's question turn re-enters the
+        # conversation as an assistant message, the answers as a user one.
+        messages.append({"role": "assistant",
+                         "content": json.dumps({"questions": list(questions)})})
+        messages.append({"role": "user",
+                         "content": json.dumps({"answers": list(answers)})})
+
     try:
         response = client.messages.create(
             model=model,
             max_tokens=16000,
             system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             # A short structured extraction behind a UI button: low effort
             # cuts the interactive latency substantially and this size of
             # task does not need deep reasoning. The schema constraint and
@@ -305,7 +522,7 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
     except StopIteration:
         raise _fail("the response carries no text block") from None
 
-    payload = _parse_payload(text)
+    payload = _parse_payload(text, allow_questions=not answering)
 
     # Defaults come from the regex compiler run on an EMPTY prompt, so an
     # untouched field is bit-identical between the two compilers and the
@@ -317,8 +534,12 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
     for field_name, entry in payload["fields"].items():
         _overlay(spec, field_name, entry)
 
-    return LLMCompileResult(spec=spec, model=str(getattr(response, "model", model)),
-                            raw_response=text)
+    return LLMCompileResult(
+        spec=spec, model=str(getattr(response, "model", model)),
+        raw_response=text,
+        questions=tuple(dict(q) for q in payload["questions"]),
+        transcript=tuple(dict(m) for m in messages) if answering else None,
+    )
 
 
 if __name__ == "__main__":   # pragma: no cover -- the live smoke, run by hand

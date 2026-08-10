@@ -34,18 +34,33 @@ from core.nl.compiler import compile_prompt  # noqa: E402
 from core.nl.llm_compiler import LLMCompileError, compile_prompt_llm  # noqa: E402
 from core.scenario.runner import run_spec  # noqa: E402
 from core.scenario.validate import validate  # noqa: E402
+from core.terrain.glo30 import LOCATIONS  # noqa: E402
+from webapp.runs import LOCATION_TOLERANCE_DEG  # noqa: E402
 
 RULE = "=" * 96
 
 #: The corpus. ``kind`` decides what is asserted:
 #:   vocabulary  -- inside the regex compiler's documented vocabulary; the
 #:                  validator must judge both compilers' specs identically
-#:                  (same ok flag, same violated-constraint names).
+#:                  (same ok flag, same violated-constraint names). A
+#:                  vocabulary prompt must never trigger a question (the
+#:                  documented mapping is the answer).
 #:   extended    -- sentence shapes the regex compiler cannot parse; the LLM
 #:                  spec must parse, carry provenance, and validate or be
 #:                  refused by name. This is the capability Phase 8 adds.
 #:   adversarial -- impossible, unknown or non-scenario content; the outcome
 #:                  must be a named refusal or a note, never a silent guess.
+#:   clarify     -- ambiguous in a way that materially changes the scenario;
+#:                  MUST trigger a question round, which the runner answers
+#:                  from the entry's scripted ``answers`` (matched by
+#:                  substring against the question text) and asserts the
+#:                  final spec.
+#:   determined  -- fully determined; must trigger ZERO questions.
+#: Optional per-entry assertions: ``expect_questions`` (bool),
+#: ``expect_location`` (a LOCATIONS key the final spec must land on, within
+#: the run manager's tolerance window), ``answers`` (question-substring ->
+#: scripted answer). Questions on entries without scripted answers are
+#: answered with the question's first option, recorded in the report.
 CORPUS: List[Dict] = [
     # -- vocabulary (the regex compiler's own documented forms) -----------
     {"kind": "vocabulary", "prompt": "fly the 747 at 3000 m and 250 kt for 60 seconds"},
@@ -86,6 +101,25 @@ CORPUS: List[Dict] = [
      "expect": "named refusal or note"},
     {"kind": "adversarial", "prompt": "land the 747 on the matterhorn summit",
      "expect": "named refusal or note"},
+    # -- clarify (must ask; scripted answers close the round) -------------
+    {"kind": "clarify",
+     "prompt": "simulate an aircraft under windy conditions on a mountain",
+     "expect_questions": True,
+     "answers": {"mountain": "Matterhorn", "aircraft": "c172p"},
+     "expect_location": "matterhorn"},
+    {"kind": "clarify", "prompt": "windy on a mountain",
+     "expect_questions": True,
+     "answers": {"mountain": "Matterhorn"},
+     "expect_location": "matterhorn"},
+    # -- determined (must NOT ask) ----------------------------------------
+    {"kind": "determined",
+     "prompt": "simulate a B747 at 250 kt over the Matterhorn in strong wind",
+     "expect_questions": False,
+     "expect_location": "matterhorn"},
+    {"kind": "determined",
+     "prompt": "a c172p at 2600 m and 100 kt over Yosemite, calm",
+     "expect_questions": False,
+     "expect_location": "yosemite"},
 ]
 
 
@@ -132,7 +166,68 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             rows.append(row)
             continue
 
+        # A question round: answer from the entry's script (matched by
+        # substring against the question text) or the first option, then
+        # close the round. One round only -- the parser enforces it.
+        asked = [dict(q) for q in result.questions]
+        if asked:
+            row["questions"] = [q["question"] for q in asked]
+            scripted = case.get("answers", {})
+            answers = []
+            for q in asked:
+                answer = next((text for needle, text in scripted.items()
+                               if needle.lower() in q["question"].lower()),
+                              q["options"][0])
+                answers.append({"id": q["id"], "answer": answer})
+            row["answers"] = answers
+            print(f"        asked {len(asked)} question(s); answering: "
+                  f"{[a['answer'] for a in answers]}")
+            try:
+                result = compile_prompt_llm(prompt, questions=asked,
+                                            answers=answers)
+            except LLMCompileError as exc:
+                row["compile_error"] = str(exc)
+                row["outcome"] = "FAILED (answer round)"
+                print(f"        FAILED on the answer round: {exc}")
+                failures += 1
+                rows.append(row)
+                continue
+
+        # Question expectations: clarify entries MUST ask; determined and
+        # vocabulary entries must not (the documented mapping is the
+        # answer, not a question).
+        expect_q = case.get("expect_questions")
+        if expect_q is None and case["kind"] == "vocabulary":
+            expect_q = False
+        if expect_q is True and not asked:
+            print("        EXPECTED a clarifying question; none came")
+            row["question_miss"] = "expected, none asked"
+            failures += 1
+        elif expect_q is False and asked:
+            print(f"        UNEXPECTED question(s): {row['questions']}")
+            row["question_miss"] = "asked on a determined prompt"
+            failures += 1
+
         spec = result.spec
+
+        # Geography: the final spec must land on the named bake's origin
+        # inside the run manager's tolerance window -- the property that
+        # makes pick_scene choose the real terrain.
+        target = case.get("expect_location")
+        if target:
+            location = LOCATIONS[target]
+            on_bake = (
+                abs(float(spec.latitude.value) - location.origin_lat)
+                <= LOCATION_TOLERANCE_DEG
+                and abs(float(spec.longitude.value) - location.origin_lon)
+                <= LOCATION_TOLERANCE_DEG)
+            row["on_bake"] = on_bake
+            if not on_bake:
+                print(f"        OFF-BAKE: spec at "
+                      f"({float(spec.latitude.value):.4f}, "
+                      f"{float(spec.longitude.value):.4f}) vs {target} "
+                      f"origin ({location.origin_lat}, {location.origin_lon})")
+                failures += 1
         row["model"] = result.model
         row["digest"] = spec.digest()
         row["notes"] = list(spec.notes)
