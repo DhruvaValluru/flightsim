@@ -127,6 +127,20 @@ def pick_scene(spec: ScenarioSpec) -> Dict:
                      "elevation"}
 
 
+def project_for_ue_host(spec: ScenarioSpec) -> None:
+    """The UE hosts have no autopilot: a held state cannot be honoured and
+    the commandlet refuses it (correctly -- measured by Gate 8.3's first
+    run). Same projection reference_spec applies for every gate: open
+    loop, mass held so the clip shows trim quality rather than fuel burn.
+    Both edits are recorded in the spec's own provenance."""
+    if bool(spec.hold_state.value):
+        spec.set("hold_state", False,
+                 frm="open loop: the render host has no autopilot")
+    if not bool(spec.mass_held.value):
+        spec.set("mass_held", True,
+                 frm="rendered-clip convention (see reference_spec)")
+
+
 def derive_seed(spec: ScenarioSpec) -> None:
     """A turbulent spec with the default seed gets one from its digest."""
     if (str(spec.turbulence.value) != "none"
@@ -234,6 +248,7 @@ class RunManager:
         run.scene = scene
 
         derive_seed(spec)
+        project_for_ue_host(spec)
         spec.write(out / "scenario.yaml")
 
         aircraft = str(spec.aircraft.value)

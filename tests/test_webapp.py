@@ -165,3 +165,18 @@ def test_manager_refuses_second_concurrent_run(monkeypatch):
     assert "run_id" in first
     second = local.start(spec, provenance={})
     assert "refused" in second
+
+
+def test_run_manager_projects_the_spec_for_the_ue_host():
+    """A compiled spec defaults hold_state True (the headless closure
+    default); the UE hosts have no autopilot and refuse a held state
+    (measured -- Gate 8.3's first run). The projection is reference_spec's
+    own, applied and recorded."""
+    from webapp.runs import project_for_ue_host
+
+    spec = compile_prompt("fly the 747 at 3000 m and 250 kt")
+    assert bool(spec.hold_state.value) is True
+    project_for_ue_host(spec)
+    assert bool(spec.hold_state.value) is False
+    assert "no autopilot" in spec.hold_state.frm
+    assert bool(spec.mass_held.value) is True
