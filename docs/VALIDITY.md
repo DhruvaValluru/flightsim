@@ -611,10 +611,21 @@ session records its card and telemetry with the same recorder the
 commandlets use, stamping the FDM's own clock; the headless host re-flies
 the card and the comparison runs under Gate 5's unchanged discipline
 (same channels and tolerances, recorded clock, trim snapshot exempt,
-heading on the circle). Still-air and steady-wind sessions must match; a
-TURBULENT session is checked only for the divergence the permanent
-visual-only verdict predicts (§1.6b) -- the HUD and the manifest both
-carry the seed and the label. Interactive rendering itself is even less
+heading on the circle). Measured (runs/interactive_replay/report.json,
+30 s wall-clock-paced sessions):
+
+| session | verdict | worst channel |
+|---|---|---|
+| still air | **matches** | altitude 3.6e-4 m -- four orders inside tolerance |
+| 25 kt crosswind | **matches** | roll 0.021 deg, heading 0.020 deg |
+| moderate turbulence, seed 424242 | **diverges, as predicted** | altitude 26.3 m, TAS 18.4 kt |
+
+Each session's substep ledger was exact (3601 steps == 30.01 s x 120 Hz)
+with zero catch-up caps: sim time tracked wall time to the sample. The
+turbulent divergence is the PREDICTION -- the permanent visual-only
+verdict (§1.6b) confirmed through the new path; agreement would have
+been the suspicious outcome. The HUD and the manifest both carry the
+seed and the label. Interactive rendering itself is even less
 reproducible than offline rendering (§3) and no claim rides on its
 pixels beyond the on-screen clauses.
 
