@@ -13,7 +13,19 @@
 | 6 visual realism | 6 | PASS 4/4 measured clauses + side-by-side |
 | 6B real assets/terrain/turbulence/matrix | — | DELIVERED |
 | 7 imagery/coupling/atmosphere | — | **DELIVERED, every verdict measured** (docs/BRIEF_PHASE7.md) |
-| 8 prompt-to-simulation interface | 8.1-8.3 | IN PROGRESS (docs/BRIEF_PHASE8.md; 8A+8B done, 8C code done, gates partial -- see below) |
+| 8 prompt-to-simulation interface | 8.1-8.3 | 8.3 PASS end to end; 8.2 replay+substep PASS (locked-session path); 8.1 live corpus + windowed clauses BLOCKED -- see below |
+
+**Phase 8 remaining evidence, blocked on things only a person can provide:**
+* **Gate 8.1 (live LLM corpus)** needs `ANTHROPIC_API_KEY` in the env, then
+  `.venv/bin/python experiments/gate8_compiler.py`. The mocked half
+  (tests/test_llm_compiler.py, 20 tests) is green; BLOCKED != passed.
+* **The windowed run** needs an UNLOCKED console session (gotcha 18):
+  launch via `experiments/fps_probe.py` (it auto-detects the lock) or the
+  webapp, and re-measure the windowed fps figure + Gate 8.2's on-screen
+  clauses (-screenshot-at= is wired). Everything else about the
+  interactive host -- substep ledger, replay parity, HUD, recorder,
+  manifest -- is measured and PASSED via the commandlet wall-clock path.
+
 
 ```bash
 .venv/bin/pytest                          # 307 tests
