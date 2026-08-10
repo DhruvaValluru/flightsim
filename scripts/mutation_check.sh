@@ -381,7 +381,7 @@ mutate experiments/orographic_ue.py \
     "the orographic port must match the original" tests/test_phase6b.py \
     || failures=$((failures+1))
 
-mutate experiments/gate5_ue_parity.py \
+mutate core/scenario/card.py \
     '    elif str(spec.turbulence.value) != "none":' \
     '    elif False:  # MUTATED: turbulent cards carry no provider writes' \
     "turbulent cards carry the provider's exact writes" tests/test_phase6b.py \
@@ -435,7 +435,7 @@ mutate core/environment/thermals.py \
     "eq 11 profile must match the TM check case" tests/test_thermals.py \
     || failures=$((failures+1))
 
-mutate experiments/gate5_ue_parity.py \
+mutate core/scenario/card.py \
     '        try:
             fdm.do_trim(1)
         except jsbsim.TrimFailureError:

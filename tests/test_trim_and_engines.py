@@ -107,9 +107,8 @@ def test_discovered_mixture_refuses_full_rich_at_altitude():
     path is different: with the starter assisting, full rich stabilises at
     a sick ~500 rpm idle -- measured -- so the crank cannot discriminate
     and the DISCOVERY is the load-bearing check for cards.)"""
-    from experiments.gate5_ue_parity import (
-        _MIXTURE_CACHE, discovered_engine_mixture, reference_spec,
-    )
+    from core.scenario.card import _MIXTURE_CACHE, discovered_engine_mixture
+    from experiments.gate5_ue_parity import reference_spec
 
     _MIXTURE_CACHE.clear()
     spec = reference_spec("fly the c172 at 2600 m and 100 kt for 30 seconds")
