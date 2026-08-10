@@ -177,6 +177,14 @@ $("compile").addEventListener("click", async () => {
     if (payload.error) { $("compileState").textContent = payload.error; return; }
     $("compileState").textContent = "";
     renderSpec(payload);
+  } catch (error) {
+    // A dead fetch used to leave "compiling..." up forever -- which reads
+    // as slowness when the real problem is that this page was opened as a
+    // bare file with no backend behind it.
+    $("compileState").textContent =
+      `cannot reach the server (${error}). Start it with: ` +
+      `.venv/bin/uvicorn webapp.server:app --port 8008  and open ` +
+      `http://127.0.0.1:8008/ -- not the raw index.html file.`;
   } finally { $("compile").disabled = false; }
 });
 

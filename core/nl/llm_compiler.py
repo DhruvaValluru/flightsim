@@ -284,7 +284,12 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
             max_tokens=16000,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
-            output_config={"format": {"type": "json_schema",
+            # A short structured extraction behind a UI button: low effort
+            # cuts the interactive latency substantially and this size of
+            # task does not need deep reasoning. The schema constraint and
+            # the strict parse are the correctness rails either way.
+            output_config={"effort": "low",
+                           "format": {"type": "json_schema",
                                       "schema": RESPONSE_SCHEMA}},
         )
     except LLMCompileError:
