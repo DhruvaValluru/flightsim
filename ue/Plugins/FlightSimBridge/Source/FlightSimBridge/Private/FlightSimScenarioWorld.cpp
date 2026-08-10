@@ -506,6 +506,27 @@ bool FFlightSimScenarioWorld::Build(const FFlightSimScenarioCard& Card, FString&
 	Context.SetCurrentWorld(World);
 	GameInstance->Init();
 
+	return Populate(Card, Error, /*bLiveWorld=*/false);
+}
+
+bool FFlightSimScenarioWorld::BuildInto(UWorld* LiveWorld,
+                                        const FFlightSimScenarioCard& Card,
+                                        FString& Error)
+{
+	if (LiveWorld == nullptr || !LiveWorld->HasBegunPlay())
+	{
+		Error = TEXT("BuildInto needs a live, already-playing world; a world "
+		             "this class should own goes through Build() instead");
+		return false;
+	}
+	World = LiveWorld;
+	bExternalWorld = true;
+	return Populate(Card, Error, /*bLiveWorld=*/true);
+}
+
+bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
+                                       FString& Error, bool bLiveWorld)
+{
 	// -- georeferencing ----------------------------------------------------
 	// Round planet with the UE origin pinned at the spec's ground point, so
 	// engine Z=0 is the spec's terrain elevation and the engine frame is the
@@ -691,7 +712,15 @@ bool FFlightSimScenarioWorld::Build(const FFlightSimScenarioCard& Card, FString&
 	}
 
 	// -- the aircraft ------------------------------------------------------
-	Aircraft = World->SpawnActor<AActor>();
+	// In a live world SpawnActor dispatches BeginPlay inside the call, and
+	// the plugin would load and trim an aircraft whose initial condition is
+	// not yet set. Deferred spawning holds BeginPlay until FinishSpawning,
+	// after the placement below. In a not-yet-playing commandlet world the
+	// plain spawn is kept byte-identical to what every gate measured.
+	Aircraft = bLiveWorld
+		? World->SpawnActorDeferred<AActor>(AActor::StaticClass(),
+		                                    FTransform::Identity)
+		: World->SpawnActor<AActor>();
 	USceneComponent* Root = NewObject<USceneComponent>(Aircraft, TEXT("Root"));
 	Aircraft->SetRootComponent(Root);
 	Root->SetMobility(EComponentMobility::Movable);
@@ -754,7 +783,23 @@ bool FFlightSimScenarioWorld::Build(const FFlightSimScenarioCard& Card, FString&
 	// Solve for the actor origin that puts the CG on the commanded point.
 	const FVector Origin =
 		TargetCentreOfGravity - Attitude.RotateVector(Movement->CGLocalPosition);
-	Aircraft->SetActorLocationAndRotation(Origin, Attitude.Quaternion());
+	if (bLiveWorld)
+	{
+		// Dispatches the plugin's BeginPlay: aircraft load, calm RunIC, trim.
+		// A failed load or trim surfaces at VerifyTrimmedCondition, which
+		// checks the ACHIEVED state -- the same net that caught the 3.19 km
+		// ground-ray bug.
+		Aircraft->FinishSpawning(FTransform(Attitude.Quaternion(), Origin));
+		// The interactive host drives fixed 1/120 s substeps by hand; the
+		// component's own registered tick would step the FDM a second time
+		// per frame with the engine's variable delta driving its internal
+		// accumulator. One stepping code path, exactly like the commandlets.
+		Movement->SetComponentTickEnabled(false);
+	}
+	else
+	{
+		Aircraft->SetActorLocationAndRotation(Origin, Attitude.Quaternion());
+	}
 
 	// -- per-step wind -----------------------------------------------------
 	// Precomputed with the same conversion chain the headless stack uses
@@ -1180,9 +1225,8 @@ double FFlightSimScenarioWorld::ThermalWMps(double NorthMetres,
 	return W2;
 }
 
-bool FFlightSimScenarioWorld::Step(const FFlightSimScenarioCard& Card,
-                                   double TimeSeconds, double DeltaSeconds,
-                                   FString& Error)
+void FFlightSimScenarioWorld::ApplyStepWrites(
+	const FFlightSimScenarioCard& Card, double TimeSeconds)
 {
 	// Scripted control input. Held until the next entry, so the aircraft is
 	// flying a step input rather than an impulse, and applied as an offset on
@@ -1352,27 +1396,50 @@ bool FFlightSimScenarioWorld::Step(const FFlightSimScenarioCard& Card,
 		}
 	}
 
+}
+
+bool FFlightSimScenarioWorld::Crashed(double TimeSeconds, FString& Error) const
+{
+	// The plugin suspends integration on a crash and keeps ticking. Without
+	// this a recorder (or the interactive window) would keep sampling a
+	// frozen state and the output would look like a completed run.
+	if (Movement != nullptr && Movement->AircraftState.Crashed)
+	{
+		Error = FString::Printf(TEXT("aircraft crashed at %.3f s"), TimeSeconds);
+		return true;
+	}
+	return false;
+}
+
+bool FFlightSimScenarioWorld::Step(const FFlightSimScenarioCard& Card,
+                                   double TimeSeconds, double DeltaSeconds,
+                                   FString& Error)
+{
+	ApplyStepWrites(Card, TimeSeconds);
+
 	World->Tick(LEVELTICK_All, static_cast<float>(DeltaSeconds));
 	GFrameCounter++;
 	FTSTicker::GetCoreTicker().Tick(static_cast<float>(DeltaSeconds));
 	FThreadManager::Get().Tick();
 	FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
 
-	// The plugin suspends integration on a crash and keeps ticking. Without
-	// this a recorder would keep sampling a frozen state and the output would
-	// look like a completed run.
-	if (Movement->AircraftState.Crashed)
-	{
-		Error = FString::Printf(TEXT("aircraft crashed at %.3f s"), TimeSeconds);
-		return false;
-	}
-	return true;
+	return !Crashed(TimeSeconds, Error);
 }
 
 void FFlightSimScenarioWorld::Teardown()
 {
 	if (World == nullptr)
 	{
+		return;
+	}
+	if (bExternalWorld)
+	{
+		// The engine owns a live world; tearing it down here would pull the
+		// viewport's world out from under it. Forget the pointers only.
+		World = nullptr;
+		Aircraft = nullptr;
+		Movement = nullptr;
+		GeoReferencing = nullptr;
 		return;
 	}
 	World->BeginTearingDown();

@@ -181,6 +181,35 @@ public:
 	// off the aircraft before the first frame rather than after it.
 	bool Build(const FFlightSimScenarioCard& Card, FString& Error);
 
+	// Populate an EXISTING, already-playing game world -- the interactive
+	// host's (Phase 8). Same actors, same configuration, same wind
+	// precomputation as Build; the one structural difference is that the
+	// aircraft is spawned DEFERRED, because in a live world a plain
+	// SpawnActor dispatches BeginPlay mid-configuration and the plugin would
+	// trim an aircraft whose initial condition is not yet set. After this
+	// returns, the plugin has loaded and trimmed (its BeginPlay ran inside
+	// FinishSpawning); call TrimInWind / VerifyTrimmedCondition /
+	// LatchTrimmedControls / ConfigureTurbulence as usual, but NOT
+	// this class's BeginPlay(), which is for worlds it owns. The movement
+	// component's own tick is disabled here: the interactive host drives
+	// fixed 1/120 s substeps itself and no other code path may step the FDM.
+	bool BuildInto(UWorld* LiveWorld, const FFlightSimScenarioCard& Card,
+	               FString& Error);
+
+	// The write phase of Step(), alone: scripted control inputs, per-step
+	// wind (steady / schedule / orographic / downburst / log-profile /
+	// thermals) and per-step turbulence W20. The commandlets never call this
+	// directly -- Step() is this plus the manual world tick -- but the
+	// interactive host calls it once per fixed substep and then ticks the
+	// movement component itself, so both hosts write the same properties in
+	// the same order from the same code.
+	void ApplyStepWrites(const FFlightSimScenarioCard& Card, double TimeSeconds);
+
+	// True (with Error set) when the plugin has suspended integration on a
+	// crash. Shared by Step() and the interactive host so a frozen state can
+	// never keep being recorded as flight in either.
+	bool Crashed(double TimeSeconds, FString& Error) const;
+
 	// Dispatches actor BeginPlay, which is where the plugin loads the aircraft
 	// for real and trims it -- in calm air.
 	bool BeginPlay(FString& Error);
@@ -261,6 +290,16 @@ public:
 	UJSBSimMovementComponent* Movement = nullptr;
 
 private:
+	// Everything after world creation: georeferencing, ground, aircraft,
+	// wind precompute. Shared verbatim by Build (own world) and BuildInto
+	// (live world); bLiveWorld selects the deferred aircraft spawn.
+	bool Populate(const FFlightSimScenarioCard& Card, FString& Error,
+	              bool bLiveWorld);
+
+	// True when World belongs to the engine's play session rather than this
+	// class; Teardown then forgets it instead of destroying it.
+	bool bExternalWorld = false;
+
 	int32 AppliedInputIndex = -1;
 
 	// The exact per-step wind writes, precomputed once from the card with the

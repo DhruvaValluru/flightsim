@@ -490,6 +490,32 @@ mutate core/environment/stack.py \
     "the stack must deliver per-step turbulence intensity writes" \
     tests/test_rotor.py || failures=$((failures+1))
 
+# -- Phase 8: the LLM compiler and the web front door --------------------
+
+mutate core/nl/llm_compiler.py \
+    '        if entry["source"] not in ("user", "inferred"):' \
+    '        if False:  # MUTATED: a model may claim default provenance' \
+    "the model cannot claim provenance it does not have" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
+mutate core/nl/llm_compiler.py \
+    '        elif "enum" in value_schema and value not in value_schema["enum"]:' \
+    '        elif False:  # MUTATED: out-of-vocabulary values accepted' \
+    "out-of-vocabulary values are refused, never patched" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '            if editor_running():' \
+    '            if False:  # MUTATED: concurrent editor runs allowed' \
+    "the web app enforces the single-editor lock" \
+    tests/test_webapp.py || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '    if not verdict["ok"]:' \
+    '    if False:  # MUTATED: an invalid edited spec runs anyway' \
+    "the run endpoint re-validates whatever the page hands it" \
+    tests/test_webapp.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
