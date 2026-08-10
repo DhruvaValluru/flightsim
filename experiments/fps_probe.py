@@ -39,12 +39,22 @@ from core.terrain.ground import TerrainGround  # noqa: E402
 from core.terrain.heightfield import Heightfield  # noqa: E402
 from experiments.gate5_ue_parity import reference_spec, write_run_card  # noqa: E402
 
+REPO = Path(__file__).resolve().parents[1]
+
 RULE = "=" * 96
 
 THRESHOLDS = {"go_fps_mean": 30.0, "go_frame_ms_p95": 50.0,
               "marginal_fps_mean": 20.0}
 
-EDITOR = Path("/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor")
+#: The GUI binary parks in the AppKit event loop when the console session
+#: is locked (sampled: main thread in -[NSApplication run] forever, even
+#: with -RenderOffScreen). The -Cmd binary runs the same engine without
+#: NSApplication and works in a locked session -- it is what every
+#: commandlet invocation in this repo already uses.
+EDITOR_WINDOWED = Path(
+    "/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor")
+EDITOR_OFFSCREEN = Path(
+    "/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor-Cmd")
 PROJECT = Path(__file__).resolve().parents[1] / "ue" / "FlightSim.uproject"
 MAP_URL = "/Engine/Maps/Entry?game=/Script/FlightSimBridge.FlightSimInteractiveMode"
 
@@ -99,7 +109,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # raster, real relief along the track, hands off from trim.
     location = LOCATIONS["matterhorn"]
     ground = TerrainGround(Heightfield.read(terrain))
-    spec = reference_spec("fly the 747 at 3600 m and 250 kt for 300 seconds")
+    # 5200 m: the showcase's own B747 Matterhorn altitude, above every peak
+    # of the raster (tops at 4540 m) -- the 3600 m first attempt flew INTO
+    # the massif at t=51.8 s and crashed the probe.
+    spec = reference_spec("fly the 747 at 5200 m and 250 kt for 300 seconds")
     spec.set("latitude", location.origin_lat, frm="matterhorn scene origin")
     spec.set("longitude", location.origin_lon, frm="matterhorn scene origin")
     spec.set("heading", 236.0, frm="toward the Matterhorn massif")
@@ -123,15 +136,41 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                   "loop runs offscreen.\n  The number excludes window "
                   "compositing; re-run unlocked for the windowed figure.")
         report_path.unlink(missing_ok=True)
-        command = [
-            str(EDITOR), str(PROJECT), MAP_URL, "-game",
-            f"-card={card}", f"-imagery={imagery}",
-            f"-probe-seconds={args.seconds:.0f}", f"-report={report_path}",
-            "-camera=chase",
-            f"-ResX={args.width}", f"-ResY={args.height}",
-            "-nosplash", "-stdout", "-FullStdOutLogOutput",
-        ]
-        command += (["-RenderOffScreen"] if offscreen else ["-windowed"])
+        if offscreen:
+            # -game cannot run under a locked console session on Mac (both
+            # editor binaries park in the AppKit event loop; sampled). The
+            # commandlet probe loop measures the same scene through the same
+            # stepping path with one CaptureScene per frame, no readback --
+            # the report's "display" field states what that excludes.
+            scratch = out / "probe_frames"
+            scratch.mkdir(exist_ok=True)
+            mesh = REPO / "assets" / "generated" / "B747" / "mesh_manifest.json"
+            command = [
+                str(EDITOR_OFFSCREEN), str(PROJECT),
+                "-run=FlightSimBridge.FlightSimRender",
+                f"-scenario={card}", f"-frames={scratch}",
+                "-Visual", "-GeorefTerrain", "-shot=showcase",
+                f"-terrain={terrain}", f"-imagery={imagery}",
+                f"-mesh={mesh}", "-chase=-170:0:16",
+                f"-width={args.width}", f"-height={args.height}",
+                "-sun-elev=50", "-sun-azim=180", "-exposure-bias=9.5",
+                "-fog-density=0.0012",
+                f"-probe-wall-seconds={args.seconds:.0f}",
+                f"-probe-report={report_path}",
+                "-unattended", "-nopause", "-nosplash",
+                "-stdout", "-FullStdOutLogOutput",
+                "-RenderOffScreen", "-AllowCommandletRendering",
+            ]
+        else:
+            command = [
+                str(EDITOR_WINDOWED), str(PROJECT), MAP_URL, "-game",
+                f"-card={card}", f"-imagery={imagery}",
+                f"-probe-seconds={args.seconds:.0f}",
+                f"-report={report_path}",
+                "-camera=chase", "-windowed",
+                f"-ResX={args.width}", f"-ResY={args.height}",
+                "-nosplash", "-stdout", "-FullStdOutLogOutput",
+            ]
         log = out / "probe.log"
         print(f"  launching windowed host (log: {log})")
         with log.open("w") as sink:

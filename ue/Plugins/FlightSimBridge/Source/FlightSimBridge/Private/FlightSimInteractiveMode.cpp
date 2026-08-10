@@ -1,9 +1,11 @@
 #include "FlightSimInteractiveMode.h"
 
-#include "FlightSimCameraDirector.h"
+#include "FlightSimInteractiveHUD.h"
+#include "FlightSimTelemetryRecorder.h"
 #include "JSBSimMovementComponent.h"
 
 #include "CineCameraComponent.h"
+#include "Components/InputComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Engine.h"
@@ -13,17 +15,20 @@
 #include "Misc/CommandLine.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
+#include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "UnrealClient.h"
 
 AFlightSimInteractiveMode::AFlightSimInteractiveMode()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	// No pawn: the viewer watches through the camera director, exactly like
 	// the render commandlet's capture. Flying by keyboard is the 8C stretch
-	// goal and arrives with its own recorder labeling.
+	// goal and arrives with its own human-in-loop recorder labeling.
 	DefaultPawnClass = nullptr;
 	bStartPlayersAsSpectators = true;
+	HUDClass = AFlightSimInteractiveHUD::StaticClass();
 }
 
 void AFlightSimInteractiveMode::StartPlay()
@@ -62,11 +67,30 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 	{
 		Error = TEXT("usage: -game -card=<run-card.json> [-imagery=<sidecar>] ")
 		        TEXT("[-camera=chase|wingman|tower|shoulder] ")
+		        TEXT("[-telemetry=<out.json>] [-manifest=<out.json>] ")
+		        TEXT("[-screenshot-at=a:b:c -screenshot-dir=<dir>] ")
 		        TEXT("[-probe-seconds=N -report=<out.json>]");
 		return false;
 	}
 	FParse::Value(CommandLine, TEXT("probe-seconds="), ProbeSeconds);
 	FParse::Value(CommandLine, TEXT("report="), ReportPath);
+	FParse::Value(CommandLine, TEXT("telemetry="), TelemetryPath);
+	FParse::Value(CommandLine, TEXT("manifest="), ManifestPath);
+	FParse::Value(CommandLine, TEXT("screenshot-dir="), ScreenshotDirectory);
+	FString ScreenshotSpec;
+	FParse::Value(CommandLine, TEXT("screenshot-at="), ScreenshotSpec);
+	if (!ScreenshotSpec.IsEmpty())
+	{
+		TArray<FString> Parts;
+		// Colon-separated: FParse::Value stops at a comma (measured on the
+		// render commandlet's -chase argument).
+		ScreenshotSpec.ParseIntoArray(Parts, TEXT(":"));
+		for (const FString& Part : Parts)
+		{
+			ScreenshotAtSeconds.Add(FCString::Atod(*Part));
+		}
+		ScreenshotAtSeconds.Sort();
+	}
 
 	if (!FFlightSimScenarioWorld::ReadCard(CardPath, Card, Error))
 	{
@@ -85,9 +109,20 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 	Scenario.LatchTrimmedControls(Card.bMassHeld);
 	Scenario.ConfigureTurbulence(Card);
 
+	// The same recorder the telemetry commandlet uses, stamping the FDM's
+	// own clock -- the replay comparison runs on that recorded clock.
+	if (!TelemetryPath.IsEmpty())
+	{
+		Recorder = NewObject<UFlightSimTelemetryRecorder>(Scenario.Aircraft,
+		                                                  TEXT("Recorder"));
+		Recorder->Movement = Scenario.Movement;
+		Recorder->SampleIntervalSeconds =
+			static_cast<float>(Card.SampleIntervalSeconds);
+		Recorder->RegisterComponent();
+		Recorder->StartRecording(TelemetryPath);
+	}
+
 	// -- visuals -----------------------------------------------------------
-	// The full scene the probe must price: georeferenced terrain from the
-	// card's raster, the imagery drape when given, sky, fog, sun.
 	FString TerrainPath = !Card.CollisionTerrainPath.IsEmpty()
 		? Card.CollisionTerrainPath : Card.OrographicTerrainPath;
 	FParse::Value(CommandLine, TEXT("terrain="), TerrainPath);
@@ -117,9 +152,9 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 	}
 
 	// Placeholder airframe so the camera has a subject: one box, the Gate 5
-	// stand-in. The converted mesh + surface animators join in 8C.1; the
-	// probe report records the airframe as placeholder so nobody reads the
-	// fps number as covering the real mesh.
+	// stand-in. The converted mesh + surface animators join later; every
+	// artifact this session writes records the airframe as placeholder so
+	// nobody reads the session as covering the real mesh.
 	if (UStaticMesh* Cube = LoadObject<UStaticMesh>(
 	        nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")))
 	{
@@ -134,8 +169,7 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 	}
 
 	// -- camera ------------------------------------------------------------
-	CameraDirector =
-		GetWorld()->SpawnActor<AFlightSimCameraDirector>();
+	CameraDirector = GetWorld()->SpawnActor<AFlightSimCameraDirector>();
 	CameraDirector->Target = Scenario.Aircraft;
 	CameraDirector->Preset = EFlightSimCameraPreset::LaggedChase;
 	FParse::Value(CommandLine, TEXT("camera="), CameraPresetName);
@@ -180,7 +214,57 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 		return false;
 	}
 	Controller->SetViewTarget(CameraDirector);
+
+	// Camera preset keys. The number keys mirror the -camera argument; the
+	// HUD names the active preset (and its roll-inheritance) either way.
+	if (Controller->InputComponent != nullptr)
+	{
+		Controller->InputComponent->BindKey(
+			EKeys::One, IE_Pressed, this,
+			&AFlightSimInteractiveMode::SelectCameraChase);
+		Controller->InputComponent->BindKey(
+			EKeys::Two, IE_Pressed, this,
+			&AFlightSimInteractiveMode::SelectCameraWingman);
+		Controller->InputComponent->BindKey(
+			EKeys::Three, IE_Pressed, this,
+			&AFlightSimInteractiveMode::SelectCameraTower);
+		Controller->InputComponent->BindKey(
+			EKeys::Four, IE_Pressed, this,
+			&AFlightSimInteractiveMode::SelectCameraShoulder);
+	}
 	return true;
+}
+
+void AFlightSimInteractiveMode::ApplyCameraPreset(EFlightSimCameraPreset Preset,
+                                                  const TCHAR* Name)
+{
+	if (CameraDirector != nullptr)
+	{
+		CameraDirector->Preset = Preset;
+		CameraPresetName = Name;
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("interactive: camera preset -> %s"), Name);
+	}
+}
+
+void AFlightSimInteractiveMode::SelectCameraChase()
+{
+	ApplyCameraPreset(EFlightSimCameraPreset::LaggedChase, TEXT("chase"));
+}
+
+void AFlightSimInteractiveMode::SelectCameraWingman()
+{
+	ApplyCameraPreset(EFlightSimCameraPreset::Wingman, TEXT("wingman"));
+}
+
+void AFlightSimInteractiveMode::SelectCameraTower()
+{
+	ApplyCameraPreset(EFlightSimCameraPreset::Tower, TEXT("tower"));
+}
+
+void AFlightSimInteractiveMode::SelectCameraShoulder()
+{
+	ApplyCameraPreset(EFlightSimCameraPreset::CockpitShoulder, TEXT("shoulder"));
 }
 
 void AFlightSimInteractiveMode::Tick(float DeltaSeconds)
@@ -212,6 +296,7 @@ void AFlightSimInteractiveMode::Tick(float DeltaSeconds)
 		DeficitEvents += 1;
 		DeficitSeconds += Accumulator - CatchUpCapSeconds;
 		Accumulator = CatchUpCapSeconds;
+		LastCapWallTime = Now;
 	}
 	FString Error;
 	while (Accumulator >= SubstepSeconds)
@@ -232,21 +317,18 @@ void AFlightSimInteractiveMode::Tick(float DeltaSeconds)
 		}
 	}
 
-	// -- honesty line on screen -------------------------------------------
-	// The full HUD is 8C.2; the probe shows the substep ledger and says when
-	// the sim is running behind, because that state must never be silent.
-	if (GEngine != nullptr)
+	// -- scheduled with-UI screenshots (Gate 8.2 on-screen clauses) -------
+	if (NextScreenshotIndex < ScreenshotAtSeconds.Num()
+	    && WallSeconds >= ScreenshotAtSeconds[NextScreenshotIndex])
 	{
-		const double Fps = WallDelta > 0.0 ? 1.0 / WallDelta : 0.0;
-		GEngine->AddOnScreenDebugMessage(
-			0, 0.5f, DeficitSeconds > 0.0 ? FColor::Yellow : FColor::Green,
-			FString::Printf(
-				TEXT("%s  |  %.0f fps  sim t=%.1f s  substeps %llu  ")
-				TEXT("behind %.2f s (%llu caps)  seed %lld turbulence %s ")
-				TEXT("(visual-only)"),
-				*Card.Aircraft, Fps, SimTimeSeconds, SubstepCount,
-				DeficitSeconds, DeficitEvents, Card.TurbulenceSeed,
-				*Card.Turbulence));
+		const FString Directory = ScreenshotDirectory.IsEmpty()
+			? FPaths::ProjectSavedDir() / TEXT("Screenshots")
+			: ScreenshotDirectory;
+		const FString Name = Directory / FString::Printf(
+			TEXT("interactive_%02d.png"), NextScreenshotIndex);
+		FScreenshotRequest::RequestScreenshot(Name, /*bInShowUI=*/true,
+		                                      /*bAddFilenameSuffix=*/false);
+		++NextScreenshotIndex;
 	}
 
 	if (ProbeSeconds > 0.0 && WallSeconds >= ProbeSeconds)
@@ -259,7 +341,79 @@ void AFlightSimInteractiveMode::Tick(float DeltaSeconds)
 	}
 }
 
-void AFlightSimInteractiveMode::WriteReport(const FString& Outcome)
+TArray<FFlightSimHudLine> AFlightSimInteractiveMode::HudLines() const
+{
+	TArray<FFlightSimHudLine> Lines;
+	if (!bRunning || Scenario.Movement == nullptr)
+	{
+		return Lines;
+	}
+	const FLinearColor Grey(0.75f, 0.78f, 0.80f);
+	const FLinearColor Green(0.45f, 0.85f, 0.50f);
+	const FLinearColor Yellow(0.95f, 0.80f, 0.25f);
+
+	auto Read = [this](const TCHAR* Name) -> double
+	{
+		return Scenario.ReadProperty(Name);
+	};
+
+	// Commanded vs achieved -- the panel's first row, live.
+	const double AltitudeM = Read(TEXT("position/h-sl-meters"));
+	const double CasKt = Read(TEXT("velocities/vc-kts"));
+	const double HeadingDeg = Read(TEXT("attitude/psi-deg"));
+	const double AglM = Read(TEXT("position/h-agl-ft")) * 0.3048;
+	Lines.Add({FString::Printf(
+		TEXT("%s  |  alt %6.0f m (cmd %6.0f)  cas %5.1f kt (cmd %5.1f)  ")
+		TEXT("hdg %5.1f (cmd %5.1f)  agl %6.0f m"),
+		*Card.Aircraft, AltitudeM, Card.AltitudeMetres, CasKt,
+		Card.AirspeedKnots, HeadingDeg, Card.HeadingDegrees, AglM), Grey});
+
+	// The wind actually inside the FDM, not the wind anyone asked for.
+	const double WindNorth = Read(TEXT("atmosphere/wind-north-fps"));
+	const double WindEast = Read(TEXT("atmosphere/wind-east-fps"));
+	const double WindDown = Read(TEXT("atmosphere/wind-down-fps"));
+	Lines.Add({FString::Printf(
+		TEXT("wind in FDM (NED fps): %+7.2f %+7.2f %+7.2f"),
+		WindNorth, WindEast, WindDown), Grey});
+
+	// Honesty labels: turbulence seed + verdict, physics ground, camera.
+	if (Card.Turbulence != TEXT("none"))
+	{
+		Lines.Add({FString::Printf(
+			TEXT("turbulence '%s' seed %lld -- VISUAL-ONLY (measured: ")
+			TEXT("same-seed realisations differ between hosts)"),
+			*Card.Turbulence, Card.TurbulenceSeed), Yellow});
+	}
+	Lines.Add({Card.CollisionTerrainPath.IsEmpty()
+		? FString::Printf(TEXT("physics ground: flat slab at %.1f m ")
+		                  TEXT("(visual terrain is scenery)"),
+		                  Card.TerrainElevationMetres)
+		: FString(TEXT("physics ground: heightfield raster ")
+		          TEXT("(AGL parity measured)")), Grey});
+	const bool bInheritsRoll = CameraDirector != nullptr
+		&& !CameraDirector->PresetKeepsHorizonLevel();
+	Lines.Add({FString::Printf(
+		TEXT("camera [1-4]: %s%s"), *CameraPresetName,
+		bInheritsRoll
+			? TEXT("  -- INHERITS ROLL: the world banks, not the aircraft")
+			: TEXT("  (horizon-stable; roll on screen is aircraft roll)")),
+		bInheritsRoll ? Yellow : Grey});
+
+	// The substep ledger, with RUNNING BEHIND as an explicit state.
+	const bool bRecentCap =
+		LastCapWallTime > 0.0
+		&& FPlatformTime::Seconds() - LastCapWallTime < 2.0;
+	Lines.Add({FString::Printf(
+		TEXT("sim t %7.2f s  wall %7.2f s  substeps %llu @ %.0f Hz  ")
+		TEXT("behind %+.3f s (%llu caps)%s"),
+		SimTimeSeconds, WallSeconds, SubstepCount, 1.0 / SubstepSeconds,
+		DeficitSeconds, DeficitEvents,
+		bRecentCap ? TEXT("  << SIM RUNNING BEHIND") : TEXT("")),
+		(bRecentCap || DeficitSeconds > 0.0) ? Yellow : Green});
+	return Lines;
+}
+
+void AFlightSimInteractiveMode::WriteProbeReport(const FString& Outcome)
 {
 	if (ReportPath.IsEmpty() || FrameSeconds.Num() == 0)
 	{
@@ -301,7 +455,7 @@ void AFlightSimInteractiveMode::WriteReport(const FString& Outcome)
 	// What this number does NOT cover, stated in the artifact itself.
 	Report->SetStringField(
 		TEXT("airframe"),
-		TEXT("placeholder box; converted-mesh and HUD cost not in this measurement"));
+		TEXT("placeholder box; converted-mesh cost not in this measurement"));
 
 	FString Payload;
 	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Payload);
@@ -313,6 +467,60 @@ void AFlightSimInteractiveMode::WriteReport(const FString& Outcome)
 	       *ReportPath);
 }
 
+void AFlightSimInteractiveMode::WriteManifest(const FString& Outcome)
+{
+	if (ManifestPath.IsEmpty())
+	{
+		return;
+	}
+	TSharedPtr<FJsonObject> Manifest = MakeShared<FJsonObject>();
+	Manifest->SetStringField(TEXT("host"), TEXT("interactive"));
+	Manifest->SetStringField(TEXT("outcome"), Outcome);
+	Manifest->SetStringField(TEXT("spec_digest"), Card.SpecDigest);
+	Manifest->SetStringField(TEXT("aircraft"), Card.Aircraft);
+	Manifest->SetStringField(
+		TEXT("airframe_visual"),
+		TEXT("placeholder box (converted mesh not yet wired in this host)"));
+	Manifest->SetStringField(TEXT("camera_preset"), CameraPresetName);
+	Manifest->SetBoolField(TEXT("camera_inherits_roll"),
+	                       CameraDirector != nullptr
+	                       && !CameraDirector->PresetKeepsHorizonLevel());
+	Manifest->SetStringField(TEXT("turbulence"), Card.Turbulence);
+	if (Card.Turbulence != TEXT("none"))
+	{
+		Manifest->SetNumberField(TEXT("turbulence_seed"),
+		                         static_cast<double>(Card.TurbulenceSeed));
+		Manifest->SetStringField(
+			TEXT("turbulence_parity"),
+			TEXT("visual-only (measured; see runs/turbulence_ue/report.json)"));
+	}
+	Manifest->SetStringField(
+		TEXT("physics_ground"),
+		Card.CollisionTerrainPath.IsEmpty()
+			? TEXT("flat slab at the spec elevation")
+			: TEXT("heightfield raster (AGL parity measured)"));
+	Manifest->SetStringField(TEXT("terrain"), Visual.TerrainName);
+	Manifest->SetStringField(TEXT("terrain_sha256"), Visual.TerrainSha256);
+	Manifest->SetStringField(TEXT("imagery_dataset"), Visual.ImageryDataset);
+	Manifest->SetStringField(TEXT("imagery_sha256"), Visual.ImagerySha256);
+	Manifest->SetStringField(TEXT("imagery_license"), Visual.ImageryLicense);
+	Manifest->SetNumberField(TEXT("sim_seconds"), SimTimeSeconds);
+	Manifest->SetNumberField(TEXT("wall_seconds"), WallSeconds);
+	Manifest->SetNumberField(TEXT("substeps"),
+	                         static_cast<double>(SubstepCount));
+	Manifest->SetNumberField(TEXT("substep_rate_hz"), 1.0 / SubstepSeconds);
+	Manifest->SetNumberField(TEXT("deficit_events"),
+	                         static_cast<double>(DeficitEvents));
+	Manifest->SetNumberField(TEXT("deficit_seconds"), DeficitSeconds);
+	Manifest->SetStringField(TEXT("telemetry"), TelemetryPath);
+	FString Payload;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Payload);
+	FJsonSerializer::Serialize(Manifest.ToSharedRef(), Writer);
+	FFileHelper::SaveStringToFile(Payload, *ManifestPath);   // ASCII only
+	UE_LOG(LogFlightSimScenario, Display, TEXT("interactive manifest -> %s"),
+	       *ManifestPath);
+}
+
 void AFlightSimInteractiveMode::FinishAndQuit(const FString& Outcome)
 {
 	if (bFinished) { return; }
@@ -320,7 +528,14 @@ void AFlightSimInteractiveMode::FinishAndQuit(const FString& Outcome)
 	UE_LOG(LogFlightSimScenario, Display, TEXT("interactive: %s after %.1f s ")
 	       TEXT("wall / %.1f s sim, %llu substeps, behind %.3f s"),
 	       *Outcome, WallSeconds, SimTimeSeconds, SubstepCount, DeficitSeconds);
-	WriteReport(Outcome);
+	if (Recorder != nullptr && !Recorder->WriteToDisk())
+	{
+		UE_LOG(LogFlightSimScenario, Error,
+		       TEXT("interactive: telemetry did NOT write to '%s'"),
+		       *TelemetryPath);
+	}
+	WriteProbeReport(Outcome);
+	WriteManifest(Outcome);
 	if (GEngine != nullptr)
 	{
 		GEngine->Exec(GetWorld(), TEXT("QUIT"));
@@ -333,7 +548,8 @@ void AFlightSimInteractiveMode::FailAndQuit(const FString& Why)
 	bFinished = true;
 	bRunning = false;
 	UE_LOG(LogFlightSimScenario, Error, TEXT("interactive: %s"), *Why);
-	WriteReport(FString::Printf(TEXT("FAILED: %s"), *Why));
+	WriteProbeReport(FString::Printf(TEXT("FAILED: %s"), *Why));
+	WriteManifest(FString::Printf(TEXT("FAILED: %s"), *Why));
 	if (GEngine != nullptr)
 	{
 		GEngine->Exec(GetWorld(), TEXT("QUIT"));

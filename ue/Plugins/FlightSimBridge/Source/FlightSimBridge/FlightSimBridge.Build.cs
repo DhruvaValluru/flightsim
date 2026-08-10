@@ -9,6 +9,8 @@ public class FlightSimBridge : ModuleRules
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core", "CoreUObject", "Engine",
+			// Camera-preset keys in the interactive host (EKeys).
+			"InputCore",
 			"JSBSimFlightDynamicsModel",
 			"GeoReferencing",
 			"Json", "JsonUtilities",

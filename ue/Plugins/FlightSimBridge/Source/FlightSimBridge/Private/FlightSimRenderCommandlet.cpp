@@ -4,6 +4,7 @@
 #include "FlightSimOrographic.h"
 #include "FlightSimVisualScene.h"
 #include "FlightSimScenarioWorld.h"
+#include "FlightSimTelemetryRecorder.h"
 #include "FlightSimSurfaceAnimator.h"
 #include "JSBSimMovementComponent.h"
 
@@ -806,6 +807,159 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		FlushRenderingCommands();
 		Capture->CaptureScene();
 		FlushRenderingCommands();
+	}
+
+	// -- Phase 8B.0: the real-time probe loop ------------------------------
+	// The interactive host cannot run under a locked console session (both
+	// editor binaries park -game mode in the AppKit event loop; sampled), so
+	// the go/no-go frame cost is measured HERE: the same scene, the same
+	// stepping path, a wall-clock substep accumulator identical to the
+	// interactive host's, and one CaptureScene per iteration with NO pixel
+	// readback and NO png encode. FlushRenderingCommands serializes the GPU
+	// into the measurement, so the number is conservative. What it excludes
+	// -- window compositing, slate/HUD draw -- is stated in the report.
+	double ProbeWallSeconds = 0.0;
+	FParse::Value(*Params, TEXT("probe-wall-seconds="), ProbeWallSeconds);
+	if (ProbeWallSeconds > 0.0)
+	{
+		FString ProbeReportPath;
+		FParse::Value(*Params, TEXT("probe-report="), ProbeReportPath);
+		// Replay-parity outputs (Gate 8.2, locked-session path): the same
+		// recorder the telemetry commandlet uses, sampling on the FDM's own
+		// clock while THIS loop paces the FDM by the wall clock -- the
+		// stepping and clocking the interactive host uses, minus the window.
+		FString ProbeTelemetryPath, ProbeManifestPath;
+		FParse::Value(*Params, TEXT("probe-telemetry="), ProbeTelemetryPath);
+		FParse::Value(*Params, TEXT("probe-manifest="), ProbeManifestPath);
+		UFlightSimTelemetryRecorder* ProbeRecorder = nullptr;
+		if (!ProbeTelemetryPath.IsEmpty())
+		{
+			ProbeRecorder = NewObject<UFlightSimTelemetryRecorder>(
+				Scenario.Aircraft, TEXT("ProbeRecorder"));
+			ProbeRecorder->Movement = Scenario.Movement;
+			ProbeRecorder->SampleIntervalSeconds =
+				static_cast<float>(Card.SampleIntervalSeconds);
+			ProbeRecorder->RegisterComponent();
+			ProbeRecorder->StartRecording(ProbeTelemetryPath);
+		}
+		const double SubstepSeconds = 1.0 / Card.RateHz;
+		const double CatchUpCapSeconds = 0.25;
+		double Accumulator = 0.0;
+		double SimTime = 0.0;
+		double DeficitSeconds = 0.0;
+		uint64 Substeps = 0, DeficitEvents = 0;
+		TArray<float> ProbeFrameSeconds;
+		double WallStart = FPlatformTime::Seconds();
+		double LastFrame = WallStart;
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("probe: real-time loop for %.0f s wall at %dx%d"),
+		       ProbeWallSeconds, Width, Height);
+		while (FPlatformTime::Seconds() - WallStart < ProbeWallSeconds
+		       && SimTime < Card.DurationSeconds)
+		{
+			const double Now = FPlatformTime::Seconds();
+			const double WallDelta = Now - LastFrame;
+			LastFrame = Now;
+			ProbeFrameSeconds.Add(static_cast<float>(WallDelta));
+			Accumulator += WallDelta;
+			if (Accumulator > CatchUpCapSeconds)
+			{
+				DeficitEvents += 1;
+				DeficitSeconds += Accumulator - CatchUpCapSeconds;
+				Accumulator = CatchUpCapSeconds;
+			}
+			while (Accumulator >= SubstepSeconds)
+			{
+				if (!Scenario.Step(Card, SimTime, SubstepSeconds, Error))
+				{
+					return Fail(Error + TEXT("; probe aborted"));
+				}
+				SimTime += SubstepSeconds;
+				Accumulator -= SubstepSeconds;
+				++Substeps;
+			}
+			World->SendAllEndOfFrameUpdates();
+			FlushRenderingCommands();
+			Capture->CaptureScene();
+			FlushRenderingCommands();
+		}
+		const double WallTotal = FPlatformTime::Seconds() - WallStart;
+		if (ProbeRecorder != nullptr && !ProbeRecorder->WriteToDisk())
+		{
+			return Fail(TEXT("probe telemetry did not write"));
+		}
+		if (!ProbeManifestPath.IsEmpty())
+		{
+			TSharedPtr<FJsonObject> Manifest = MakeShared<FJsonObject>();
+			Manifest->SetStringField(TEXT("host"),
+				TEXT("interactive-equivalent (commandlet wall-clock loop; ")
+				TEXT("locked-session path -- no window)"));
+			Manifest->SetStringField(TEXT("spec_digest"), Card.SpecDigest);
+			Manifest->SetStringField(TEXT("aircraft"), Card.Aircraft);
+			Manifest->SetStringField(TEXT("turbulence"), Card.Turbulence);
+			Manifest->SetNumberField(TEXT("turbulence_seed"),
+			                         static_cast<double>(Card.TurbulenceSeed));
+			Manifest->SetNumberField(TEXT("sim_seconds"), SimTime);
+			Manifest->SetNumberField(TEXT("wall_seconds"), WallTotal);
+			Manifest->SetNumberField(TEXT("substeps"),
+			                         static_cast<double>(Substeps));
+			Manifest->SetNumberField(TEXT("substep_rate_hz"), Card.RateHz);
+			Manifest->SetNumberField(TEXT("deficit_events"),
+			                         static_cast<double>(DeficitEvents));
+			Manifest->SetNumberField(TEXT("deficit_seconds"), DeficitSeconds);
+			Manifest->SetStringField(TEXT("telemetry"), ProbeTelemetryPath);
+			FString ManifestPayload;
+			const TSharedRef<TJsonWriter<>> ManifestWriter =
+				TJsonWriterFactory<>::Create(&ManifestPayload);
+			FJsonSerializer::Serialize(Manifest.ToSharedRef(), ManifestWriter);
+			FFileHelper::SaveStringToFile(ManifestPayload, *ProbeManifestPath);
+		}
+		if (!ProbeReportPath.IsEmpty() && ProbeFrameSeconds.Num() > 0)
+		{
+			TArray<float> Sorted = ProbeFrameSeconds;
+			Sorted.Sort();
+			auto Percentile = [&Sorted](double P) -> double
+			{
+				const int32 Index = FMath::Clamp(
+					static_cast<int32>(P * (Sorted.Num() - 1)), 0, Sorted.Num() - 1);
+				return static_cast<double>(Sorted[Index]);
+			};
+			TSharedPtr<FJsonObject> Probe = MakeShared<FJsonObject>();
+			Probe->SetStringField(TEXT("outcome"), TEXT("probe complete"));
+			Probe->SetStringField(TEXT("spec_digest"), Card.SpecDigest);
+			Probe->SetStringField(TEXT("aircraft"), Card.Aircraft);
+			Probe->SetNumberField(TEXT("frames"), ProbeFrameSeconds.Num());
+			Probe->SetNumberField(TEXT("wall_seconds"), WallTotal);
+			Probe->SetNumberField(TEXT("fps_mean"),
+			                      ProbeFrameSeconds.Num() / WallTotal);
+			Probe->SetNumberField(TEXT("frame_ms_p50"), Percentile(0.50) * 1000.0);
+			Probe->SetNumberField(TEXT("frame_ms_p95"), Percentile(0.95) * 1000.0);
+			Probe->SetNumberField(TEXT("frame_ms_max"),
+			                      static_cast<double>(Sorted.Last()) * 1000.0);
+			Probe->SetNumberField(TEXT("sim_seconds"), SimTime);
+			Probe->SetNumberField(TEXT("substeps"), static_cast<double>(Substeps));
+			Probe->SetNumberField(TEXT("substep_rate_hz"), Card.RateHz);
+			Probe->SetNumberField(TEXT("deficit_events"),
+			                      static_cast<double>(DeficitEvents));
+			Probe->SetNumberField(TEXT("deficit_seconds"), DeficitSeconds);
+			Probe->SetStringField(TEXT("terrain"), VisualScene.TerrainName);
+			Probe->SetStringField(TEXT("terrain_sha256"), VisualScene.TerrainSha256);
+			Probe->SetStringField(TEXT("imagery_dataset"), VisualScene.ImageryDataset);
+			Probe->SetStringField(TEXT("display"),
+				TEXT("offscreen commandlet loop: SceneCapture per frame, no ")
+				TEXT("readback; window compositing and HUD draw excluded"));
+			Probe->SetStringField(TEXT("airframe"),
+				TEXT("as rendered by this commandlet (mesh if -mesh was given)"));
+			FString Payload;
+			const TSharedRef<TJsonWriter<>> Writer =
+				TJsonWriterFactory<>::Create(&Payload);
+			FJsonSerializer::Serialize(Probe.ToSharedRef(), Writer);
+			FFileHelper::SaveStringToFile(Payload, *ProbeReportPath);
+			UE_LOG(LogFlightSimRender, Display, TEXT("probe report -> %s"),
+			       *ProbeReportPath);
+		}
+		Scenario.Teardown();
+		return 0;
 	}
 
 	// -- the run -----------------------------------------------------------
