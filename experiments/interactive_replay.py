@@ -40,7 +40,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.scenario.runner import run_spec  # noqa: E402
 from experiments.fps_probe import (  # noqa: E402
     EDITOR_OFFSCREEN,
-    MAP_URL,
     PROJECT,
     editor_already_running,
 )
@@ -72,13 +71,30 @@ SESSIONS = (
 
 def fly_interactive(card: Path, telemetry: Path, manifest: Path,
                     log: Path, timeout_s: float) -> None:
+    """The locked-session path: the commandlet's wall-clock probe loop.
+
+    -game mode never starts under a locked console session (gotcha 18), so
+    the session is flown by the render commandlet's probe loop -- the SAME
+    Scenario.Step stepping paced by the same wall-clock substep accumulator
+    the interactive window uses, with the same recorder. What is absent is
+    only the window itself; when a user session is unlocked, the windowed
+    host produces the same artifacts via -telemetry=/-manifest= and this
+    experiment re-runs against them unchanged.
+    """
     telemetry.unlink(missing_ok=True)
     manifest.unlink(missing_ok=True)
+    scratch = telemetry.parent / (telemetry.stem + "_frames")
+    scratch.mkdir(exist_ok=True)
     command = [
-        str(EDITOR_OFFSCREEN), str(PROJECT), MAP_URL, "-game",
-        f"-card={card}", f"-telemetry={telemetry}", f"-manifest={manifest}",
-        "-camera=chase", "-RenderOffScreen",
-        "-nosplash", "-stdout", "-FullStdOutLogOutput",
+        str(EDITOR_OFFSCREEN), str(PROJECT),
+        "-run=FlightSimBridge.FlightSimRender",
+        f"-scenario={card}", f"-frames={scratch}",
+        "-width=640", "-height=360",   # replay grades physics, not pixels
+        f"-probe-wall-seconds={timeout_s:.0f}",
+        f"-probe-telemetry={telemetry}", f"-probe-manifest={manifest}",
+        "-unattended", "-nopause", "-nosplash",
+        "-stdout", "-FullStdOutLogOutput",
+        "-RenderOffScreen", "-AllowCommandletRendering",
     ]
     with log.open("w") as sink:
         proc = subprocess.Popen(command, stdout=sink,
