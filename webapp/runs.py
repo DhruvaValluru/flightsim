@@ -133,6 +133,36 @@ def pick_scene(spec: ScenarioSpec) -> Dict:
                      "elevation"}
 
 
+def place_on_scene(spec: ScenarioSpec) -> None:
+    """A spec that earns the control ridge flies AT the control ridge.
+
+    The synthesised ridge is georeferenced at an arbitrary position (it is
+    not a place); a mountainous spec carrying the default 0,0 origin would
+    fly hundreds of km from the mesh and render empty sky (measured: run
+    96147222ef39 -- 'why is there no mountains'). Same convention as the
+    showcase matrix: the flight origin moves to the raster centre, recorded
+    in the spec's own provenance, and -- like every recorded transformation
+    -- BEFORE the digest is answered. Real bakes are untouched: their specs
+    already sit on the bake or they would not have earned it.
+    """
+    scene = pick_scene(spec)
+    if scene["key"] != "control":
+        return
+    from pyproj import Transformer
+
+    from core.terrain.heightfield import Heightfield
+
+    baked = Heightfield.read(Path(scene["terrain"]))
+    min_x, min_y, max_x, max_y = baked.bounds_m()
+    centre_x, centre_y = (min_x + max_x) / 2.0, (min_y + max_y) / 2.0
+    inverse = Transformer.from_crs(baked.georeference.crs, "EPSG:4326",
+                                   always_xy=True)
+    lon, lat = inverse.transform(centre_x, centre_y)
+    frm = "control ridge centre (synthesised terrain is not a place)"
+    spec.set("latitude", round(float(lat), 6), frm=frm)
+    spec.set("longitude", round(float(lon), 6), frm=frm)
+
+
 def project_for_ue_host(spec: ScenarioSpec) -> None:
     """The UE hosts have no autopilot: a held state cannot be honoured and
     the commandlet refuses it (correctly -- measured by Gate 8.3's first

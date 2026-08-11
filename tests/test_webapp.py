@@ -385,3 +385,27 @@ def test_completed_run_survives_a_server_restart(tmp_path):
     assert RunManager(out_root=tmp_path).get("abc123def456") is None
     # Path safety: ids are hex only.
     assert fresh.get("../../etc") is None
+
+
+def test_control_ridge_spec_is_placed_on_the_ridge():
+    """A mountainous spec with the default 0,0 origin moves to the control
+    ridge's centre (measured: it rendered empty sky from 500 km away),
+    recorded in provenance; specs that earn a real bake or the flat slab
+    are untouched."""
+    from webapp.runs import REPO, place_on_scene
+
+    if not (REPO / "runs" / "terrain" / "control_ridge.r16").is_file():
+        pytest.skip("no control ridge baked on this machine")
+
+    spec = compile_prompt("fly the 747 at 4000 m over 2000 m mountains")
+    assert float(spec.latitude.value) == 0.0
+    place_on_scene(spec)
+    assert float(spec.latitude.value) != 0.0 or float(spec.longitude.value) != 0.0
+    assert "control ridge centre" in spec.latitude.frm
+    # The placed spec still earns the same scene.
+    assert pick_scene(spec)["key"] == "control"
+
+    flat = compile_prompt("fly the 747 at 3000 m and 250 kt")
+    place_on_scene(flat)
+    assert float(flat.latitude.value) == 0.0
+    assert str(flat.latitude.source) == "default"

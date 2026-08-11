@@ -38,7 +38,12 @@ from core.nl.llm_compiler import (  # noqa: E402
 )
 from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import validate  # noqa: E402
-from webapp.runs import RunManager, derive_seed, project_for_ue_host  # noqa: E402
+from webapp.runs import (  # noqa: E402
+    RunManager,
+    derive_seed,
+    place_on_scene,
+    project_for_ue_host,
+)
 
 app = FastAPI(title="flightsim", docs_url=None, redoc_url=None)
 manager = RunManager()
@@ -154,6 +159,7 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # spec edits with provenance, and the digest of the projected spec is
     # the one the card, the manifest and the provenance sidecar all carry.
     derive_seed(spec)
+    place_on_scene(spec)
     project_for_ue_host(spec)
 
     # Validation governs the edited spec too: the run endpoint re-validates
