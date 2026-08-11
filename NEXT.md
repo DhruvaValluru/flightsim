@@ -16,9 +16,18 @@
 | 8 prompt-to-simulation interface | 8.1-8.3 | 8.3 PASS end to end; 8.2 replay+substep PASS (locked-session path); 8.1 live corpus + windowed clauses BLOCKED -- see below |
 
 **Phase 8 remaining evidence, blocked on things only a person can provide:**
-* **Gate 8.1 (live LLM corpus)** needs `ANTHROPIC_API_KEY` in the env, then
+* **Gate 8.1 (live LLM corpus)**: UNBLOCKED by the provider layer and RUN
+  live against the free local model (2026-08-11, qwen2.5:14b via ollama):
+  **FAIL (6)** -- runs/gate8_compiler/report.json. The verdict measures
+  THAT model, not the machinery: determinism came back IDENTICAL, the
+  clarify entries passed (asked once, answered, landed on the bake), and
+  all six failures are model-quality misses (asked questions on 3
+  vocabulary prompts + 1 determined prompt where the documented mapping
+  is the answer; 1 adversarial silent guess; 1 off-bake miss). A PASS is
+  expected from a frontier model: set ANTHROPIC_API_KEY (or a strong
+  FLIGHTSIM_LLM=openai endpoint) and rerun
   `.venv/bin/python experiments/gate8_compiler.py`. The mocked half
-  (tests/test_llm_compiler.py, 35 tests) is green; BLOCKED != passed. The
+  (tests/test_llm_compiler.py, 39 tests) is green. The
   corpus now includes clarify entries (must ask, scripted answers close the
   round) and determined entries (must NOT ask), plus on-bake geography
   assertions against LOCATIONS origins. A missing key is now a NAMED

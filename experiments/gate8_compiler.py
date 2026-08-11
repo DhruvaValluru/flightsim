@@ -271,21 +271,37 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"\n{RULE}\ndeterminism: the same SPEC runs bit-identically\n{RULE}")
     deterministic = None
     for row in rows:
-        if row.get("verdict", {}).get("ok") and row["kind"] == "extended":
-            result = compile_prompt_llm(row["prompt"])
-            spec = result.spec
-            spec.set("duration", 10.0, frm="gate 8.1 determinism check")
-            spec.set("mass_held", True, frm="gate 8.1 determinism check")
+        if not (row.get("verdict", {}).get("ok") and row["kind"] == "extended"):
+            continue
+        result = compile_prompt_llm(row["prompt"])
+        if result.questions:
+            # A fresh compile of this prompt asked a question this time;
+            # pick a spec that compiles straight through instead.
+            continue
+        spec = result.spec
+        spec.set("duration", 10.0, frm="gate 8.1 determinism check")
+        spec.set("mass_held", True, frm="gate 8.1 determinism check")
+        try:
             first = run_spec(spec).output_digest
             second = run_spec(spec).output_digest
-            deterministic = first == second
-            print(f"  \"{row['prompt'][:50]}\": {first[:16]} vs {second[:16]} "
-                  f"-> {'identical' if deterministic else 'DIVERGENT'}")
-            if not deterministic:
-                failures += 1
-            break
+        except Exception as exc:
+            # A spec that validates can still fail at runtime (e.g. the
+            # closure check refuses a run that never reached its commanded
+            # state -- correctly: such a run is not evidence). Recorded,
+            # never swallowed; the next valid spec carries the check.
+            print(f"  \"{row['prompt'][:50]}\": run refused "
+                  f"({type(exc).__name__}); trying the next valid spec")
+            row["determinism_run_refused"] = f"{type(exc).__name__}: {exc}"
+            continue
+        deterministic = first == second
+        print(f"  \"{row['prompt'][:50]}\": {first[:16]} vs {second[:16]} "
+              f"-> {'identical' if deterministic else 'DIVERGENT'}")
+        if not deterministic:
+            failures += 1
+        break
     if deterministic is None:
-        print("  no valid extended-corpus spec to run; determinism unasserted")
+        print("  no valid extended-corpus spec completed a run; determinism "
+              "unasserted")
         failures += 1
 
     report = {"corpus": rows, "failures": failures,
