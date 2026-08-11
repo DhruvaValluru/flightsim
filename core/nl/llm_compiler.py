@@ -114,8 +114,15 @@ _assert_locations_covered(LOCATIONS, LOCATION_TERRAIN_ELEVATION_M)
 
 
 def llm_available() -> bool:
-    """SDK importable and a key present. Presence check only -- the value is
-    never read, stored or logged by this module."""
+    """A provider is configured. Presence check only -- no secret value is
+    ever read, stored or logged by this module.
+
+    True when an alternate provider is selected via ``FLIGHTSIM_LLM``
+    (e.g. a local Ollama model -- see :mod:`core.nl.providers`) or when
+    the Anthropic SDK path is usable (key present, SDK importable).
+    """
+    if os.environ.get("FLIGHTSIM_LLM", "").strip():
+        return True
     if "ANTHROPIC_API_KEY" not in os.environ:
         return False
     try:
@@ -266,6 +273,17 @@ def _locations_block() -> str:
             f'{aliases}): latitude {location.origin_lat}, longitude '
             f'{location.origin_lon}, terrain_elevation '
             f'{LOCATION_TERRAIN_ELEVATION_M[key]:g}')
+    # A worked example, generated from the first bake: naming a listed
+    # place must set ALL THREE fields, and smaller models in particular
+    # follow the example where they skim the rule.
+    key, location = next(iter(LOCATIONS.items()))
+    lines.append(
+        f'Example: a prompt (or a clarifying answer) naming the {key} sets '
+        f'ALL THREE fields together -- latitude {location.origin_lat} '
+        f'(inferred), longitude {location.origin_lon} (inferred), '
+        f'terrain_elevation {LOCATION_TERRAIN_ELEVATION_M[key]:g} '
+        f'(inferred), each with the place name in "from" -- never just one '
+        f'of them.')
     return "\n".join(lines)
 
 
@@ -463,22 +481,38 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
     supplied; there is no other state.
     """
     if client is None:
-        # Presence check only -- the value is never read, stored or logged.
-        if "ANTHROPIC_API_KEY" not in os.environ:
-            raise LLMCompileError(
-                "ANTHROPIC_API_KEY is not set in this process's environment, "
-                "so the LLM compiler is unavailable. Set it in the "
-                "environment of the SERVER process -- the flightsim-web "
-                "launch.json entry, or the shell that runs uvicorn -- and "
-                "recompile. The offline regex compiler remains available "
-                "meanwhile.")
+        # An explicitly selected alternate provider (FLIGHTSIM_LLM= --
+        # e.g. a free local Ollama model) wins over a present Anthropic
+        # key: choosing a provider is a statement, not a fallback.
+        from .providers import resolve_client
+
         try:
-            import anthropic
-        except ImportError as exc:
+            resolved = resolve_client()
+        except ValueError as exc:      # misconfigured provider, fix named
+            raise LLMCompileError(str(exc)) from exc
+        if resolved is not None:
+            client, provider_model = resolved
+            if model == DEFAULT_MODEL:
+                model = provider_model
+        # Presence check only -- no secret value is read, stored or logged.
+        elif "ANTHROPIC_API_KEY" not in os.environ:
             raise LLMCompileError(
-                "the anthropic SDK is not installed; the LLM compiler is "
-                "unavailable. Use the offline regex compiler.") from exc
-        client = anthropic.Anthropic()
+                "no LLM provider is configured in this process's "
+                "environment, so the LLM compiler is unavailable. In the "
+                "environment of the SERVER process -- the flightsim-web "
+                "launch.json entry, or the shell that runs uvicorn -- either "
+                "set ANTHROPIC_API_KEY (Claude API), or set "
+                "FLIGHTSIM_LLM=ollama for a free local model (with the "
+                "ollama service running). The offline regex compiler "
+                "remains available meanwhile.")
+        else:
+            try:
+                import anthropic
+            except ImportError as exc:
+                raise LLMCompileError(
+                    "the anthropic SDK is not installed; the LLM compiler "
+                    "is unavailable. Use the offline regex compiler.") from exc
+            client = anthropic.Anthropic()
 
     answering = answers is not None
     if answering and not questions:

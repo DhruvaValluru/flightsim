@@ -90,6 +90,15 @@ goes into the UTF-8 provenance sidecar via /run. The regex fallback never
 asks and compiles the ORIGINAL prompt on any LLM failure. VALIDITY §2.14
 carries the claims paragraph.
 
+**LLM providers.** The compiler is provider-independent
+(core/nl/providers.py): `FLIGHTSIM_LLM=ollama` runs a free LOCAL model
+(default qwen2.5:7b via the ollama service, grammar-constrained by the
+compiler's own RESPONSE_SCHEMA), `FLIGHTSIM_LLM=openai` any
+OpenAI-compatible endpoint, else ANTHROPIC_API_KEY -> Claude API. Config
+lives in ~/.flightsim.env, sourced by the flightsim-web launch entry.
+Gate 8.1 runs against whichever provider is configured and records it;
+a local-model verdict measures THAT model, not the machinery.
+
 ## Phase 7: what exists now and what was measured
 
 * **Sentinel-2 imagery drape** (core/terrain/imagery.py): EOX s2cloudless

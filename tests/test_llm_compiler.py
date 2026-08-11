@@ -399,6 +399,7 @@ def test_same_final_spec_digests_identically_with_or_without_questions():
 
 def test_missing_key_preflight_names_the_fix(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("FLIGHTSIM_LLM", raising=False)
     with pytest.raises(LLMCompileError) as err:
         compile_prompt_llm("anything")   # client=None: the real entry path
     message = str(err.value)
@@ -427,9 +428,13 @@ def test_llm_available_is_a_presence_check(monkeypatch):
     from core.nl.llm_compiler import llm_available
 
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("FLIGHTSIM_LLM", raising=False)
     assert llm_available() is False
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-TEST")
     assert llm_available() is True       # the SDK is installed in the venv
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    monkeypatch.setenv("FLIGHTSIM_LLM", "ollama")
+    assert llm_available() is True       # an alternate provider counts
 
 
 # -- the world the compiler can render --------------------------------------
@@ -455,3 +460,86 @@ def test_locations_coverage_assert_fires_on_a_missing_bake():
     _assert_locations_covered({"matterhorn"}, LOCATION_ALIASES)
     with pytest.raises(AssertionError, match="atlantis"):
         _assert_locations_covered({"atlantis"}, LOCATION_ALIASES)
+
+
+# -- alternate providers: same schema, same strict parse --------------------
+
+def test_ollama_client_maps_the_anthropic_interface(monkeypatch):
+    """The adapter carries system/messages/schema into Ollama's native API
+    and returns the anthropic-shaped response the compiler reads."""
+    from core.nl.providers import OllamaClient
+
+    captured = {}
+
+    def fake_post(self, path, payload):
+        captured["path"], captured["payload"] = path, payload
+        return {"message": {"content": '{"fields": {}, "notes": [], '
+                                       '"questions": []}'},
+                "model": "qwen2.5:7b"}
+
+    monkeypatch.setattr(OllamaClient, "_post", fake_post)
+    result = compile_prompt_llm("anything", client=OllamaClient(),
+                                model="qwen2.5:7b")
+    assert captured["path"] == "/api/chat"
+    payload = captured["payload"]
+    assert payload["model"] == "qwen2.5:7b"
+    assert payload["messages"][0]["role"] == "system"
+    assert payload["messages"][-1] == {"role": "user", "content": "anything"}
+    # The compiler's OWN schema grammar-constrains the local model.
+    assert payload["format"] is RESPONSE_SCHEMA
+    assert payload["options"]["temperature"] == 0.0
+    assert result.model == "qwen2.5:7b"
+    # Defaults stay bit-identical to the regex compiler's, provider-agnostic.
+    assert result.spec.digest() == compile_prompt("").digest()
+
+
+def test_ollama_output_still_faces_the_strict_parser(monkeypatch):
+    """A local model that ignores the schema is rejected exactly like a
+    malformed Claude response -- the provider changes quality, not trust."""
+    from core.nl.providers import OllamaClient
+
+    monkeypatch.setattr(
+        OllamaClient, "_post",
+        lambda self, path, payload: {"message": {"content": "not json {"}})
+    with pytest.raises(LLMCompileError, match="not valid JSON"):
+        compile_prompt_llm("anything", client=OllamaClient())
+
+
+def test_resolve_client_is_env_driven(monkeypatch):
+    from core.nl.providers import OllamaClient, resolve_client
+
+    monkeypatch.delenv("FLIGHTSIM_LLM", raising=False)
+    assert resolve_client() is None
+    monkeypatch.setenv("FLIGHTSIM_LLM", "ollama")
+    client, model = resolve_client()
+    assert isinstance(client, OllamaClient)
+    assert model == "qwen2.5:7b"
+    monkeypatch.setenv("FLIGHTSIM_LLM_MODEL", "qwen2.5:14b")
+    assert resolve_client()[1] == "qwen2.5:14b"
+    monkeypatch.setenv("FLIGHTSIM_LLM", "openai")
+    with pytest.raises(ValueError, match="OPENAI_BASE_URL"):
+        resolve_client()
+    monkeypatch.setenv("FLIGHTSIM_LLM", "banana")
+    with pytest.raises(ValueError, match="unknown FLIGHTSIM_LLM"):
+        resolve_client()
+
+
+def test_openai_compat_client_maps_the_interface(monkeypatch):
+    from core.nl.providers import OpenAICompatClient
+
+    captured = {}
+
+    def fake_post(self, path, payload):
+        captured["path"], captured["payload"] = path, payload
+        return {"choices": [{"message": {"content":
+                '{"fields": {}, "notes": [], "questions": []}'}}],
+                "model": "llama-3.3-70b"}
+
+    monkeypatch.setattr(OpenAICompatClient, "_post", fake_post)
+    client = OpenAICompatClient("https://example.invalid/v1", api_key=None)
+    result = compile_prompt_llm("anything", client=client,
+                                model="llama-3.3-70b")
+    assert captured["path"] == "/chat/completions"
+    schema = captured["payload"]["response_format"]["json_schema"]["schema"]
+    assert schema is RESPONSE_SCHEMA
+    assert result.model == "llama-3.3-70b"

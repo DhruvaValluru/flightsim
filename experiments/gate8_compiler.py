@@ -137,12 +137,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
 
     print(f"\n{RULE}\nGate 8.1: the LLM compiler against the corpus\n{RULE}")
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("  [BLOCKED] no ANTHROPIC_API_KEY in the environment.")
+    from core.nl.llm_compiler import llm_available
+
+    if not llm_available():
+        print("  [BLOCKED] no LLM provider configured (ANTHROPIC_API_KEY or")
+        print("  FLIGHTSIM_LLM=ollama in the environment).")
         print("  The mocked half of this gate (tests/test_llm_compiler.py)")
         print("  is green; the live half has no evidence. §5: not passed,")
         print("  not failed on the merits.")
         return 2
+    provider = os.environ.get("FLIGHTSIM_LLM", "").strip() or "anthropic"
+    print(f"  provider: {provider} -- the verdict below is a measurement of")
+    print("  THIS provider's model; the machinery is provider-independent.")
 
     rows: List[Dict] = []
     failures = 0

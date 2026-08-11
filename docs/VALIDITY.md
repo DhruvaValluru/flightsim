@@ -606,6 +606,19 @@ fallback never asks and never sees answers: a mid-flow LLM failure compiles
 the ORIGINAL prompt, stated as such. Questions reduce guessing; the
 spec-review table remains the control the run flows through.
 
+**The compiler is provider-independent, and that moves no claim either.**
+The correctness rails -- the schema generated from the spec's own fields,
+the strict parser, the bit-identical defaults, the validator -- sit
+downstream of ANY model. `core/nl/providers.py` lets the same
+`compile_prompt_llm` run against a local Ollama model (grammar-constrained
+by the SAME schema) or any OpenAI-compatible endpoint, selected explicitly
+by environment; the model id, provider included, is recorded in provenance
+exactly as before. A weaker model produces worse extractions and worse
+questions -- and fails the strict parse loudly, with the regex compiler as
+the stated fallback; it cannot inject an unvalidated spec. Gate 8.1's live
+corpus is therefore a measurement OF the configured provider's model, and
+its report names which one ran.
+
 **One clock rule for the interactive host.** JSBSim never sees a dt other
 than 1/120 s: the movement component's own tick is disabled and the host
 steps whole substeps from a wall-clock accumulator (the engine's frame
