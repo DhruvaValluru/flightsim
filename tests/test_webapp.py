@@ -357,3 +357,31 @@ def test_run_telemetry_served_only_after_completion(client, tmp_path,
         assert client.get("/runs/teletest/telemetry.json").status_code == 404
     finally:
         del manager.runs["teletest"]
+
+
+def test_completed_run_survives_a_server_restart(tmp_path):
+    """A finished clip on disk is served by a FRESH manager (measured: a
+    restart landed mid-run and orphaned the page's poll)."""
+    import json as jsonlib
+
+    out = tmp_path / "abc123def456"
+    out.mkdir()
+    (out / "clip.mp4").write_bytes(b"not-a-real-clip")
+    (out / "provenance.json").write_text(jsonlib.dumps({
+        "spec_digest": "d" * 64,
+        "scene": {"key": "flat", "label": "flat slab"},
+        "reference_speeds": {"vs_kt": 176.0},
+        "conditions": {"wind_note": "calm"},
+    }))
+    fresh = RunManager(out_root=tmp_path)
+    run = fresh.get("abc123def456")
+    assert run is not None and run.status == "done"
+    assert run.clip.endswith("clip.mp4")
+    assert run.reference == {"vs_kt": 176.0}
+    assert run.conditions == {"wind_note": "calm"}
+    # An interrupted run (no clip) is NOT resurrected -- there is no
+    # worker thread to resume it, and pretending otherwise would lie.
+    (out / "clip.mp4").unlink()
+    assert RunManager(out_root=tmp_path).get("abc123def456") is None
+    # Path safety: ids are hex only.
+    assert fresh.get("../../etc") is None

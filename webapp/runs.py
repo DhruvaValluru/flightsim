@@ -175,7 +175,41 @@ class RunManager:
         }
 
     def get(self, run_id: str) -> Optional[RunState]:
-        return self.runs.get(run_id)
+        run = self.runs.get(run_id)
+        if run is not None:
+            return run
+        return self._recover_from_disk(run_id)
+
+    def _recover_from_disk(self, run_id: str) -> Optional[RunState]:
+        """A COMPLETED run outlives the process that ran it.
+
+        A server restart kills the manager's in-memory state; without this,
+        a finished clip on disk becomes unreachable and the page polls a
+        run the new process never heard of (measured: a restart landed
+        mid-run and orphaned it). Only runs with a finished clip are
+        reconstructed -- an interrupted run has no worker thread to resume
+        and stays absent, which the page reports honestly.
+        """
+        if not run_id.isalnum():          # run ids are hex; no path tricks
+            return None
+        out = self.out_root / run_id
+        clip = out / "clip.mp4"
+        if not clip.is_file():
+            return None
+        run = RunState(run_id=run_id, status="done",
+                       detail="clip ready (recovered after a server restart)")
+        run.clip = str(clip)
+        provenance_path = out / "provenance.json"
+        if provenance_path.is_file():
+            provenance = json.loads(provenance_path.read_text())
+            run.spec_digest = provenance.get("spec_digest", "")
+            run.scene = provenance.get("scene") or {}
+            run.reference = provenance.get("reference_speeds")
+            run.conditions = provenance.get("conditions") or {}
+        run.events.append({"t": run.started, "status": "done",
+                           "detail": "recovered after a server restart"})
+        self.runs[run_id] = run
+        return run
 
     def start(self, spec: ScenarioSpec, provenance: Dict) -> Dict:
         """Refuses (with the reason) or starts a run and returns its id."""
@@ -320,6 +354,8 @@ class RunManager:
             **provenance, "spec_digest": spec.digest(),
             "scene": scene, "clip_seconds_cap": CLIP_SECONDS,
             "reference_speeds": reference,
+            # Also read back by _recover_from_disk after a server restart.
+            "conditions": run.conditions,
         }, indent=1))
 
         run.push("rendering", "editor is rendering frames (a few minutes)")
