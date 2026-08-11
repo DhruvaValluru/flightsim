@@ -1,5 +1,10 @@
 # Resume here
 
+**Fresh session? Read docs/CONTEXT_PHASE8B_SESSION.md first** -- the
+2026-08-11 session narrative (LLM compiler v2, aero panel, free local
+LLM provider, terrain-coordinated runs, and the two honesty bugs the
+user caught). Then this file's gotchas 1-24.
+
 ## State
 
 | Phase | Gate | Status |
@@ -299,3 +304,16 @@ the parity discipline, and the do-not-regress list)
     `aero/fd-aero-lbs`. The UE recorder's channel table and the headless
     REQUIRED_PROPERTIES carry these names; tests/test_aero_channels.py
     pins them and the SelftestProperties refusal in all three hosts.
+23. **Do not restart the uvicorn server while a run is active.** The
+    worker thread dies with the process; the render subprocess finishes
+    orphaned and the page polls a run the new process never heard of
+    (measured -- cost the user a 30-minute "rendering" freeze).
+    Completed runs now recover from disk (RunManager._recover_from_disk)
+    but interrupted ones are honestly gone. Check /status busy first.
+24. **The control ridge is georeferenced at ~(0.14 N, 10.65 E) -- it is
+    not at the spec's default 0,0.** Any flight meant to see it must be
+    placed on it (place_on_scene does this, recorded); and terrain that
+    is only scenery lets the aircraft fly THROUGH peaks -- terrain runs
+    now carry collision_terrain and a pre-flown clearance plan
+    (plan_terrain_flight: defaulted altitude raised + recorded, stated
+    altitude refused by name).
