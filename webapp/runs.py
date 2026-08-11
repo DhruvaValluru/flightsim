@@ -39,6 +39,7 @@ sys.path.insert(0, str(REPO))
 
 from core.scenario.card import write_run_card  # noqa: E402
 from core.scenario.spec import ScenarioSpec  # noqa: E402
+from core.scenario.validate import MIN_CLEARANCE_M  # noqa: E402
 from core.terrain.glo30 import LOCATIONS, orographic_card_block  # noqa: E402
 from experiments.showcase_matrix import (  # noqa: E402
     AIRFRAMES,
@@ -117,7 +118,9 @@ def pick_scene(spec: ScenarioSpec) -> Dict:
                 "terrain": str(terrain_dir / key),
                 "imagery": str(imagery) if imagery.is_file() else None,
                 "label": f"georeferenced {key} raster at true position; "
-                         f"physics ground is the spec's flat slab",
+                         f"physics ground is the heightfield raster "
+                         f"(AGL parity measured); track pre-flown for "
+                         f"clearance",
             }
     if float(spec.terrain_elevation.value) > 0.0:
         if (terrain_dir / "control_ridge.r16").is_file():
@@ -126,7 +129,9 @@ def pick_scene(spec: ScenarioSpec) -> Dict:
                 "terrain": str(terrain_dir / "control_ridge"),
                 "imagery": None,
                 "label": "synthesised ridge (prescribed statistics, not a "
-                         "place); physics ground is the spec's flat slab",
+                         "place); physics ground is the heightfield raster "
+                         "(AGL parity measured); track pre-flown for "
+                         "clearance",
             }
     return {"key": "flat", "kind": "flat", "terrain": None, "imagery": None,
             "label": "no terrain requested; flat slab at the spec's "
@@ -161,6 +166,136 @@ def place_on_scene(spec: ScenarioSpec) -> None:
     frm = "control ridge centre (synthesised terrain is not a place)"
     spec.set("latitude", round(float(lat), 6), frm=frm)
     spec.set("longitude", round(float(lon), 6), frm=frm)
+
+
+#: AGL the planner AIMS for when it may move a defaulted altitude:
+#: comfortably above the validator's bare margin, in showcase territory.
+PLANNED_CLEARANCE_M = 300.0
+
+
+def _fly_clearance_track(spec: ScenarioSpec, ground, script,
+                         seconds: float):
+    """The scripted flight on the same JSBSim, for the clearance gate.
+
+    The Zermatt valley run's fly_headless, generalised: the SAME control
+    script the card will carry (deltas on the trimmed aileron, held until
+    the next entry -- the parity-tested convention) and the SAME steady
+    wind, so drift shapes the track that gets checked. Turbulence is not
+    modelled here (visual-only realisations; the clearance margin covers
+    the excursion scale the recordings show).
+    """
+    from core.fdm import FlightDynamics, mode_for
+    from core.fdm import units as u
+    from core.scenario.runner import wind_components_fps
+
+    fdm = FlightDynamics(str(spec.aircraft.value),
+                         rate_hz=float(spec.rate.value))
+    fdm.set_initial_conditions(
+        {"h-sl-ft": u.m_to_ft(float(spec.altitude.value)),
+         "vc-kts": float(spec.airspeed.value), "gamma-deg": 0.0,
+         "phi-deg": 0.0, "psi-true-deg": float(spec.heading.value),
+         "beta-deg": 0.0, "lat-geod-deg": float(spec.latitude.value),
+         "long-gc-deg": float(spec.longitude.value),
+         "terrain-elevation-ft": u.m_to_ft(
+             float(spec.terrain_elevation.value))})
+    wind_kt = float(spec.wind_speed.value)
+    if wind_kt > 0.0:
+        north_fps, east_fps = wind_components_fps(
+            wind_kt, float(spec.wind_direction.value))
+        fdm.props.set_many({"atmosphere/wind-north-fps": north_fps,
+                            "atmosphere/wind-east-fps": east_fps,
+                            "atmosphere/wind-down-fps": 0.0})
+    fdm.start_engines()
+    fdm.trim(mode_for(crosswind=wind_kt > 0.0))
+    fdm.hold_mass(True)
+    trimmed_aileron = fdm.props.get("fcs/aileron-cmd-norm")
+
+    track = []
+    applied = -1
+    for i in range(int(round(seconds * fdm.rate_hz))):
+        t = fdm.sim_time
+        current = applied
+        for j, entry in enumerate(script):
+            if entry["t_s"] <= t:
+                current = j
+        if current != applied:
+            applied = current
+            fdm.set_controls(aileron=trimmed_aileron
+                             + script[applied]["aileron"])
+        fdm.step()
+        if i % 12 == 0:
+            s = fdm.state()
+            terrain = (ground.elevation_at(s.lat_deg, s.lon_deg)
+                       if ground.contains(s.lat_deg, s.lon_deg) else 0.0)
+            track.append({"terrain_m": terrain,
+                          "clearance_m": s.altitude_m - terrain})
+    return track
+
+
+def plan_terrain_flight(spec: ScenarioSpec) -> Optional[Dict]:
+    """Terrain scenes fly IN COORDINATION with the terrain, verifiably.
+
+    Measured complaint: with a flat physics slab under visual mountains,
+    a hands-off straight run at a defaulted 3000 m passed THROUGH ridge
+    peaks (control ridge tops at 3299 m). This planner is the Zermatt
+    discipline applied to every terrain run: the banked S-turn script the
+    card will carry is pre-flown headlessly over the scene's own raster,
+    wind included; a DEFAULTED altitude is raised to clear the track's
+    terrain by the showcase margin (a recorded spec edit, before the
+    digest is answered); a USER-stated altitude is never silently moved
+    -- a track that cannot keep the validator's clearance is refused by
+    name, exactly like the showcase matrix's clearance-scan refusals.
+    Returns None (clear) or the violation dict for the refusal.
+    """
+    scene = pick_scene(spec)
+    if not scene.get("terrain"):
+        return None
+    from core.terrain.ground import TerrainGround
+    from core.terrain.heightfield import Heightfield
+
+    ground = TerrainGround(Heightfield.read(Path(scene["terrain"])))
+    seconds = min(float(spec.duration.value), CLIP_SECONDS)
+    from experiments.showcase_matrix import SHOWCASE_DOUBLET
+
+    try:
+        track = _fly_clearance_track(spec, ground, SHOWCASE_DOUBLET,
+                                     seconds)
+    except Exception:
+        # A spec that cannot even trim (e.g. commanded below its own flat
+        # terrain) is not this planner's refusal to make: validate() runs
+        # next in the same request and refuses by name, and the render
+        # commandlet's VerifyTrimmedCondition guards the same ground.
+        return None
+    min_clearance = min(p["clearance_m"] for p in track)
+    if min_clearance >= MIN_CLEARANCE_M \
+            and str(spec.altitude.source) != "default":
+        return None
+    if str(spec.altitude.source) == "default":
+        peak = max(p["terrain_m"] for p in track)
+        planned = float(round(peak + PLANNED_CLEARANCE_M))
+        if planned > float(spec.altitude.value) \
+                or min_clearance < MIN_CLEARANCE_M:
+            spec.set("altitude", max(planned, float(spec.altitude.value)),
+                     frm=f"raised to clear the terrain under the planned "
+                         f"track (peak {peak:.0f} m + "
+                         f"{PLANNED_CLEARANCE_M:.0f} m)")
+            try:
+                track = _fly_clearance_track(spec, ground,
+                                             SHOWCASE_DOUBLET, seconds)
+                min_clearance = min(p["clearance_m"] for p in track)
+            except Exception:
+                min_clearance = float("-inf")   # unverifiable = not clear
+        if min_clearance >= MIN_CLEARANCE_M:
+            return None
+    return {
+        "constraint": "terrain.clearance",
+        "message": "the planned track descends below the clearance margin "
+                   "over the scene's terrain (pre-flown headlessly on the "
+                   "scene's own raster, wind included)",
+        "actual": round(min_clearance, 1),
+        "limit": MIN_CLEARANCE_M,
+        "unit": "m AGL",
+    }
 
 
 def project_for_ue_host(spec: ScenarioSpec) -> None:
@@ -336,6 +471,12 @@ class RunManager:
                 float(spec.longitude.value), wind_kt,
                 round(float(spec.wind_direction.value)))
         calm = wind_kt == 0.0 and str(spec.turbulence.value) == "none"
+        # Terrain runs bank through the scene (the same S-turn script the
+        # clearance planner pre-flew) and carry the raster as the PHYSICS
+        # ground -- the picture and the physics agree, and the commandlet
+        # verifies AGL against the raster under the aircraft.
+        scripted = calm or bool(scene.get("terrain"))
+        collision = scene.get("terrain")
         # The model's own measured reference speeds (§2.4), carried on the
         # card for the HUD/panel stall-margin marks. Display-only; a spec
         # the envelope machinery cannot measure simply omits the block.
@@ -373,9 +514,10 @@ class RunManager:
         }
         card = write_run_card(
             spec, out / "card.json",
-            control_inputs=SHOWCASE_DOUBLET if calm else (),
+            control_inputs=SHOWCASE_DOUBLET if scripted else (),
             duration_s=min(float(spec.duration.value), CLIP_SECONDS),
             orographic=orographic,
+            collision_terrain=str(collision) if collision else None,
             reference_speeds=reference,
         )
         # Prompt/model provenance in a Python-written UTF-8 sidecar; the

@@ -409,3 +409,35 @@ def test_control_ridge_spec_is_placed_on_the_ridge():
     place_on_scene(flat)
     assert float(flat.latitude.value) == 0.0
     assert str(flat.latitude.source) == "default"
+
+
+def test_terrain_run_is_planned_for_clearance():
+    """Terrain runs fly in coordination with the terrain (measured: a
+    3000 m default flew THROUGH 3299 m ridge peaks over a flat slab): a
+    DEFAULTED altitude is raised to clear the pre-flown track, recorded;
+    a USER-stated altitude that cannot keep the margin is refused by
+    name, never silently moved."""
+    from webapp.runs import (REPO, place_on_scene, plan_terrain_flight,
+                             pick_scene)
+
+    if not (REPO / "runs" / "terrain" / "control_ridge.r16").is_file():
+        pytest.skip("no control ridge baked on this machine")
+
+    spec = compile_prompt(
+        "fly the 747 at 250 kt over 2000 m mountains in a strong crosswind")
+    assert str(spec.altitude.source) == "default"
+    place_on_scene(spec)
+    assert plan_terrain_flight(spec) is None
+    assert "raised to clear" in spec.altitude.frm
+    assert float(spec.altitude.value) > 3000.0
+
+    stated = compile_prompt(
+        "fly the 747 at 2500 m and 250 kt over 2000 m mountains")
+    place_on_scene(stated)
+    refusal = plan_terrain_flight(stated)
+    assert refusal is not None
+    assert refusal["constraint"] == "terrain.clearance"
+    assert float(stated.altitude.value) == 2500.0   # never silently moved
+
+    flat = compile_prompt("fly the 747 at 3000 m and 250 kt")
+    assert plan_terrain_flight(flat) is None        # no terrain, no plan

@@ -42,6 +42,7 @@ from webapp.runs import (  # noqa: E402
     RunManager,
     derive_seed,
     place_on_scene,
+    plan_terrain_flight,
     project_for_ue_host,
 )
 
@@ -160,11 +161,18 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # the one the card, the manifest and the provenance sidecar all carry.
     derive_seed(spec)
     place_on_scene(spec)
+    # Terrain scenes: pre-fly the scripted track over the scene's own
+    # raster (a defaulted altitude may be raised, recorded; a stated
+    # altitude that cannot keep clearance refuses by name below).
+    clearance_refusal = plan_terrain_flight(spec)
     project_for_ue_host(spec)
 
     # Validation governs the edited spec too: the run endpoint re-validates
     # everything it is handed, whatever the page claimed.
     verdict = _validation_payload(spec)
+    if clearance_refusal is not None:
+        verdict["ok"] = False
+        verdict["violations"].append(clearance_refusal)
     if not verdict["ok"]:
         return JSONResponse({"refused": "validation", **verdict},
                             status_code=409)
