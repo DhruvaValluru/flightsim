@@ -318,3 +318,31 @@ pilot-view deliverable is the abeam flyby, where the funnel crosses the
 windscreen while the horizon rolls (roll-inheriting BY DECLARATION --
 nothing from this camera may be graded as aircraft motion). Rendered
 via -camera=shoulder on an existing card; not yet a webapp page option.
+
+### Sharing & LLM tiers (2026-08-13 session close) -- RESUME HERE
+
+* Repo is PUBLIC: github.com/DhruvaValluru/flightsim. History rewritten
+  by Dhruva (sole author, no co-author trailers -- KEEP IT THAT WAY on
+  every future commit; git config in-repo is his identity). Android
+  file-server token scrubbed from HEAD before publishing (still in old
+  history; negligible risk, offer full erase if asked).
+* Quick start shipped: requirements.txt + scripts/setup.sh + README
+  rewrite. Compiler TIERS in core/nl/providers.py resolve_client():
+  llm7 (hosted, KEYLESS, verified live end to end -- the zero-setup
+  fail-safe), ollama (local), groq/openrouter (free-key presets),
+  openai (any compatible endpoint), Anthropic key. Tests pin the wiring.
+* Dhruva has an OpenAI key with ~$35 credits (gpt-4.1-mini is the agreed
+  cheap model, ~half a cent per compile). THE KEY IS NOT in the repo,
+  not in ~/.flightsim.env yet (the write was interrupted), and MUST
+  NEVER be committed (public repo -> auto-revocation + theft). He will
+  paste it in-session when needed.
+* NEXT AGREED TASK -- the Vercel relay: a small serverless function
+  under his Vercel account holding the key as an env-var secret;
+  pins model gpt-4.1-mini, per-IP rate limit; repo then ships
+  OPENAI_BASE_URL pointing at the relay so any cloner compiles through
+  his credits with zero setup, falling back to llm7/regex when it dies.
+  Also pending: wire his key into ~/.flightsim.env locally (ask first),
+  camera picker on the web page, 9.4 city buildings, task 12 clouds/
+  precipitation visuals, NOAA HRRR.
+* Google Doc build report exists in his Drive ("FLIGHTSIM -- Complete
+  Build Report").
