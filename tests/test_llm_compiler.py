@@ -580,3 +580,26 @@ def test_llm7_preset_is_keyless(monkeypatch):
     client, model = resolve_client()
     assert client.base_url == "https://api.llm7.io/v1"
     assert model == "gemini-3.1-flash-lite"
+
+
+def test_relay_preset_is_keyless(monkeypatch):
+    """The author-funded zero-setup tier: FLIGHTSIM_LLM=relay resolves with
+    NO key in the environment (the OpenAI key lives server-side on the
+    deployed relay, which pins the model itself; verified live against
+    https://flightsim-relay.vercel.app on 2026-08-13 -- a request naming
+    gpt-4o was served by gpt-4.1-mini. This test pins the wiring, not the
+    network)."""
+    from core.nl.providers import resolve_client
+
+    monkeypatch.setenv("FLIGHTSIM_LLM", "relay")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("FLIGHTSIM_RELAY_URL", raising=False)
+    client, model = resolve_client()
+    assert client.base_url == "https://flightsim-relay.vercel.app/v1"
+    assert client._api_key is None
+    assert model == "gpt-4.1-mini"
+
+    # Pointing at your own deployment is one env var.
+    monkeypatch.setenv("FLIGHTSIM_RELAY_URL", "https://example.dev/")
+    client, model = resolve_client()
+    assert client.base_url == "https://example.dev/v1"

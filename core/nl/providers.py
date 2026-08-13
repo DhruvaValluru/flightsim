@@ -17,6 +17,9 @@ Provider selection is env-driven and explicit:
   (default ``qwen2.5:7b``). Ollama's structured-output ``format`` field
   carries the SAME RESPONSE_SCHEMA, so the local model is grammar-
   constrained exactly as the Claude API is.
+* ``FLIGHTSIM_LLM=relay`` -> the repo's own hosted relay (relay/ deployed
+  on the author's Vercel account): keyless for the client, model pinned
+  server-side to gpt-4.1-mini, per-IP rate-limited.
 * ``FLIGHTSIM_LLM=openai`` -> any OpenAI-compatible endpoint
   (``OPENAI_BASE_URL``, ``OPENAI_API_KEY``, ``FLIGHTSIM_LLM_MODEL``) --
   Groq, Gemini's OpenAI layer, OpenRouter, a second Ollama, etc.
@@ -50,6 +53,14 @@ from typing import Any, Dict, List, Optional, Tuple
 #: schema-constrained JSON. Override with FLIGHTSIM_LLM_MODEL.
 DEFAULT_OLLAMA_MODEL = "qwen2.5:7b"
 DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
+
+#: The hosted relay (relay/ in this repo, deployed on the author's Vercel
+#: account): OpenAI-compatible, keyless for the CLIENT -- the OpenAI key
+#: lives server-side as a deployment secret, the model is pinned there to
+#: gpt-4.1-mini, and requests are rate-limited per IP. Override with
+#: FLIGHTSIM_RELAY_URL to point at your own deployment.
+DEFAULT_RELAY_URL = "https://flightsim-relay.vercel.app"
+RELAY_MODEL = "gpt-4.1-mini"
 
 
 def _text_response(text: str, model: str):
@@ -187,6 +198,17 @@ def resolve_client() -> Optional[Tuple[Any, str]]:
         return (OpenAICompatClient(
             "https://api.llm7.io/v1",
             os.environ.get("LLM7_API_KEY") or None), model)
+    if provider == "relay":
+        # The AUTHOR-FUNDED zero-setup tier: the repo's own relay/ function
+        # on the author's Vercel account. No key here -- the relay holds it
+        # server-side and pins the model itself (the model id below is what
+        # the relay declares, recorded in provenance like any other; the
+        # relay would serve its pin even if this string drifted). Per-IP
+        # rate-limited and budget-capped upstream, so it can refuse or
+        # vanish: llm7/ollama and the regex floor remain the fallbacks.
+        base_url = (os.environ.get("FLIGHTSIM_RELAY_URL", "").strip()
+                    or DEFAULT_RELAY_URL)
+        return OpenAICompatClient(base_url.rstrip("/") + "/v1"), RELAY_MODEL
     if provider in ("groq", "openrouter"):
         # The NO-DOWNLOAD fail-safe: free hosted endpoints, OpenAI-compatible.
         # Both need a free account key (no credit card at signup) -- a truly
@@ -224,6 +246,7 @@ def resolve_client() -> Optional[Tuple[Any, str]]:
                                    os.environ.get("OPENAI_API_KEY")), model)
     raise ValueError(
         f"unknown FLIGHTSIM_LLM provider {provider!r}; supported: "
-        f"'llm7' (hosted, keyless), 'ollama' (local, free), 'groq' / "
-        f"'openrouter' (hosted, free tier, key needed), 'openai' (any "
-        f"OpenAI-compatible endpoint)")
+        f"'relay' (hosted, keyless, author-funded), 'llm7' (hosted, "
+        f"keyless), 'ollama' (local, free), 'groq' / 'openrouter' (hosted, "
+        f"free tier, key needed), 'openai' (any OpenAI-compatible "
+        f"endpoint)")

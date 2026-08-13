@@ -29,6 +29,12 @@ API, and the natural-language compiler has three tiers -- pick one:
   whole documented vocabulary (aircraft, altitudes, winds, turbulence,
   surfaces, storms, tornadoes, dates). Only place *names* need AI --
   state coordinates instead ("at 27.99, 86.92").
+* **Hosted relay (zero setup, author-funded):** set
+  `FLIGHTSIM_LLM=relay` in `~/.flightsim.env` and compiles run through
+  [relay/](relay/) -- a small Vercel function holding the author's own
+  OpenAI key server-side, pinned to `gpt-4.1-mini`, rate-limited to 40
+  requests/hour per IP. Best-effort on a personal budget; if it refuses
+  or dies, every other tier below still works.
 * **Free local model (one-time download):** `brew install ollama`, then
   `ollama pull qwen2.5:7b` (~4.7 GB) or `qwen2.5:14b` (~9 GB, better);
   set `FLIGHTSIM_LLM=ollama` in `~/.flightsim.env`. Runs fully offline
