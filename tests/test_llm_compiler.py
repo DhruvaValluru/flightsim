@@ -543,3 +543,27 @@ def test_openai_compat_client_maps_the_interface(monkeypatch):
     schema = captured["payload"]["response_format"]["json_schema"]["schema"]
     assert schema is RESPONSE_SCHEMA
     assert result.model == "llama-3.3-70b"
+
+
+def test_hosted_free_provider_presets(monkeypatch):
+    """The no-download fail-safe: FLIGHTSIM_LLM=groq/openrouter resolve to
+    the right OpenAI-compatible endpoint with the key read from the named
+    env var -- and refuse BY NAME with the signup URL when the key is
+    absent, never guessing."""
+    from core.nl.providers import resolve_client
+
+    monkeypatch.setenv("FLIGHTSIM_LLM", "groq")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="GROQ_API_KEY.*console.groq.com"):
+        resolve_client()
+
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    client, model = resolve_client()
+    assert client.base_url == "https://api.groq.com/openai/v1"
+    assert model == "llama-3.3-70b-versatile"
+
+    monkeypatch.setenv("FLIGHTSIM_LLM", "openrouter")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    client, model = resolve_client()
+    assert client.base_url == "https://openrouter.ai/api/v1"
+    assert model.endswith(":free")

@@ -176,6 +176,28 @@ def resolve_client() -> Optional[Tuple[Any, str]]:
     if provider == "ollama":
         model = os.environ.get("FLIGHTSIM_LLM_MODEL", DEFAULT_OLLAMA_MODEL)
         return OllamaClient(), model
+    if provider in ("groq", "openrouter"):
+        # The NO-DOWNLOAD fail-safe: free hosted endpoints, OpenAI-compatible.
+        # Both need a free account key (no credit card at signup) -- a truly
+        # keyless hosted LLM does not legitimately exist, and a shared key in
+        # a public repo would be revoked. The key is read from the named env
+        # var, never logged, never stored.
+        presets = {
+            "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY",
+                     "llama-3.3-70b-versatile"),
+            "openrouter": ("https://openrouter.ai/api/v1",
+                           "OPENROUTER_API_KEY",
+                           "meta-llama/llama-3.3-70b-instruct:free"),
+        }
+        base_url, key_var, default_model = presets[provider]
+        api_key = os.environ.get(key_var, "").strip()
+        if not api_key:
+            raise ValueError(
+                f"FLIGHTSIM_LLM={provider} needs {key_var} in the server "
+                f"process's environment (free account at "
+                f"{'console.groq.com' if provider == 'groq' else 'openrouter.ai'})")
+        model = os.environ.get("FLIGHTSIM_LLM_MODEL", default_model)
+        return OpenAICompatClient(base_url, api_key), model
     if provider == "openai":
         base_url = os.environ.get("OPENAI_BASE_URL", "").strip()
         if not base_url:
@@ -191,4 +213,5 @@ def resolve_client() -> Optional[Tuple[Any, str]]:
                                    os.environ.get("OPENAI_API_KEY")), model)
     raise ValueError(
         f"unknown FLIGHTSIM_LLM provider {provider!r}; supported: "
-        f"'ollama' (local, free), 'openai' (any OpenAI-compatible endpoint)")
+        f"'ollama' (local, free), 'groq' / 'openrouter' (hosted, free "
+        f"tier, no download), 'openai' (any OpenAI-compatible endpoint)")
