@@ -336,13 +336,23 @@ via -camera=shoulder on an existing card; not yet a webapp page option.
   not in ~/.flightsim.env yet (the write was interrupted), and MUST
   NEVER be committed (public repo -> auto-revocation + theft). He will
   paste it in-session when needed.
-* NEXT AGREED TASK -- the Vercel relay: a small serverless function
-  under his Vercel account holding the key as an env-var secret;
-  pins model gpt-4.1-mini, per-IP rate limit; repo then ships
-  OPENAI_BASE_URL pointing at the relay so any cloner compiles through
-  his credits with zero setup, falling back to llm7/regex when it dies.
-  Also pending: wire his key into ~/.flightsim.env locally (ask first),
-  camera picker on the web page, 9.4 city buildings, task 12 clouds/
-  precipitation visuals, NOAA HRRR.
+* DONE 2026-08-13 -- the Vercel relay (`1e62a4f`, `3c54e60`): relay/ in
+  the repo, deployed at https://flightsim-relay.vercel.app (Vercel
+  project flightsim-relay, key ONLY in the project's OPENAI_API_KEY env
+  var), pins gpt-4.1-mini server-side (verified: a request naming gpt-4o
+  was served by 4.1-mini), 40 req/hour/IP (in-memory limiter, per-
+  instance scope stated in the code). FLIGHTSIM_LLM=relay preset in
+  resolve_client() (FLIGHTSIM_RELAY_URL overrides), README tier entry,
+  test pins the wiring. Two measured strict-mode fixes: OpenAI's
+  json_schema strict:true 400s on RESPONSE_SCHEMA's optional fields, so
+  the relay downgrades strict server-side AND OpenAICompatClient sends
+  strict:false (the strict parser is the rail either way). His key is
+  wired into ~/.flightsim.env (FLIGHTSIM_LLM=openai direct, gpt-4.1-mini;
+  ollama + relay presets kept commented) -- verified live end to end on
+  both paths. REMIND HIM: set a hard usage limit at
+  platform.openai.com/settings if not already -- the relay's limiter is
+  per-instance, not a billing guarantee.
+  Still pending: camera picker on the web page, 9.4 city buildings,
+  task 12 clouds/precipitation visuals, NOAA HRRR.
 * Google Doc build report exists in his Drive ("FLIGHTSIM -- Complete
   Build Report").
