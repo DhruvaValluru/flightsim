@@ -29,7 +29,13 @@ UTF-8 encoding enforced statically (test_platform.py); UE refuses
 `ue.platform` by name off-mac (scripts exit 3, webapp 409, /status
 reports render_available); setup.ps1 + README matrix; CI matrix
 (.github/workflows/ci.yml) runs pytest on ubuntu/windows/macos --
-the off-mac legs ARE the acceptance measurement. DELIBERATE DEFERRAL:
+the off-mac legs ARE the acceptance measurement. MEASURED VERDICT:
+CI matrix GREEN on ubuntu/windows/macos at fe36f81 (run 31754830177),
+after its first two runs caught five real gaps (httpx missing,
+anthropic missing, the platform refusal preempting two lock-logic
+tests -- now covered on every OS instead of skipped -- one incidental
+closure assertion, and a per-platform-libm turbulence ratio; fixes in
+2e725e2 + fe36f81, no mac coverage loosened). DELIBERATE DEFERRAL:
 porting the UE host off macOS is out of scope -- every render gotcha
 was measured on Metal only; do not claim render support nobody
 measured.
