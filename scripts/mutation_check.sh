@@ -638,7 +638,7 @@ mutate core/environment/tornado.py \
 
 mutate webapp/runs.py \
     '    if (str(spec.weather_event.value) == "thunderstorm"
-            and str(spec.turbulence.source) == "default"):' \
+            and str(spec.turbulence.source) in ("default", "derived")):' \
     '    if str(spec.weather_event.value) == "thunderstorm":  # MUTATED: stated words moved' \
     "the thunderstorm composition never moves a stated turbulence word" \
     tests/test_weather_events.py || failures=$((failures+1))

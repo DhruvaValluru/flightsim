@@ -138,10 +138,15 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         spec = compile_prompt(prompt)
         compiler_used = "regex"
 
-    # DEFAULTED numbers are planned into the flyable envelope BEFORE the
-    # table and verdict are built: a prompt whose every number the system
-    # chose must not be refused over the system's own choices. Recorded
-    # edits (source becomes ``derived``); stated values never move.
+    # Planning happens BEFORE the table and verdict are built, so what the
+    # user reviews is what will run: the weather event's documented
+    # composition edits (a tornado descends a defaulted altitude into the
+    # vortex band; a thunderstorm sets the defaulted turbulence word),
+    # then the envelope floors -- a prompt whose numbers the system chose
+    # must not be refused over the system's own choices. Every move is a
+    # recorded edit (source becomes ``derived``); stated values never
+    # move. /run applies the same planners again: value-idempotent.
+    apply_weather_event(spec)
     plan_flyable_defaults(spec)
 
     payload = {

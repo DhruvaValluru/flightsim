@@ -680,10 +680,10 @@ def apply_weather_event(spec: ScenarioSpec) -> None:
     vortex's modelled depth (plan_weather_event); stated fields never move.
     """
     if (str(spec.weather_event.value) == "thunderstorm"
-            and str(spec.turbulence.source) == "default"):
-        spec.set("turbulence", "severe",
-                 frm="thunderstorm composition (documented): microburst + "
-                     "severe turbulence + storm look")
+            and str(spec.turbulence.source) in ("default", "derived")):
+        spec.plan("turbulence", "severe",
+                  frm="thunderstorm composition (documented): microburst + "
+                      "severe turbulence + storm look")
     plan_weather_event(spec)
 
 
@@ -740,10 +740,13 @@ def plan_weather_event(spec: ScenarioSpec) -> None:
     """
     if (str(spec.weather_event.value) == "tornado"
             and str(spec.altitude.source) == "default"):
-        spec.set("altitude", 800.0,
-                 frm="lowered into the vortex's full-strength band (the "
-                     "model fades from 1500 m AGL; a stated altitude is "
-                     "never moved)")
+        # Only a still-DEFAULT altitude descends: an altitude another
+        # planner already derived (terrain datum floor) stays -- the
+        # vortex band is AGL and the terrain floor already sits inside it.
+        spec.plan("altitude", 800.0,
+                  frm="lowered into the vortex's full-strength band (the "
+                      "model fades from 1500 m AGL; a stated altitude is "
+                      "never moved)")
 
 
 def coupling_needs_seed(spec: ScenarioSpec) -> bool:

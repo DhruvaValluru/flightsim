@@ -418,6 +418,30 @@ def test_control_ridge_spec_is_placed_on_the_ridge():
     assert str(flat.latitude.source) == "default"
 
 
+def test_compile_table_shows_weather_event_planning(client):
+    """What the user reviews is what will run: the tornado's defaulted-
+    altitude descent (and a thunderstorm's turbulence word) appear in the
+    /compile table as recorded derived edits, not as silent run-time
+    surprises. Ambient wind stays honestly untouched -- the vortex is a
+    position-coupled field, not a uniform wind."""
+    payload = client.post("/compile", json={
+        "prompt": "fly the c172p through a tornado",
+        "compiler": "regex"}).json()
+    fields = {f["name"]: f for f in payload["spec"]["fields"]}
+    assert fields["altitude"]["value"] == 800.0
+    assert fields["altitude"]["source"] == "derived"
+    assert "vortex" in fields["altitude"]["from"]
+    assert fields["wind_speed"]["value"] == 0.0          # not a uniform wind
+    assert payload["validation"]["ok"], payload["validation"]["violations"]
+
+    storm = client.post("/compile", json={
+        "prompt": "fly the b747 through a thunderstorm",
+        "compiler": "regex"}).json()
+    sf = {f["name"]: f for f in storm["spec"]["fields"]}
+    assert sf["turbulence"]["value"] == "severe"
+    assert sf["turbulence"]["source"] == "derived"
+
+
 def test_flyable_defaults_are_planned_not_refused():
     """A prompt whose every number the SYSTEM chose is never refused over
     the system's own choices (measured 2026-08-13: everest raised a
