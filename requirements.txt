@@ -1,0 +1,9 @@
+jsbsim==1.2.4
+numpy==2.0.2
+pyproj==3.6.1
+rasterio==1.4.3
+pillow==11.3.0
+fastapi==0.128.8
+uvicorn==0.39.0
+PyYAML==6.0.3
+pytest==8.4.2

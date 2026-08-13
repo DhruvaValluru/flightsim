@@ -10,11 +10,31 @@ pixels), Gate 6 on its four measurable clauses with a placeholder airframe. See
 [docs/VALIDITY.md](docs/VALIDITY.md) for exactly what that does and does not
 support — the scope statements are the point of this project.
 
-## Setup
+## Quick start (any machine, ~2 minutes)
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install jsbsim==1.2.4 numpy pytest pyyaml rasterio pyproj
+git clone https://github.com/DhruvaValluru/flightsim.git
+cd flightsim
+./scripts/setup.sh
+.venv/bin/uvicorn webapp.server:app --port 8008
 ```
+
+Open http://127.0.0.1:8008, type a scenario ("fly the c172p through a
+tornado over the prairie"), review the compiled spec, and run. **No API
+keys or accounts are needed for anything**: terrain elevation comes from
+the public Copernicus bucket, historical weather from the free Open-Meteo
+API, and the natural-language compiler runs on a free local model
+(`brew install ollama && ollama pull qwen2.5:14b`, then set
+`FLIGHTSIM_LLM=ollama`) or falls back to the built-in deterministic
+parser.
+
+The physics, compiler, tests and web app run anywhere Python 3.9+ runs.
+**Rendering video clips** additionally needs a Mac with Unreal Engine 5.5
+(free from the Epic Games Launcher) and Xcode: then
+`./scripts/vendor_ue_plugin.sh && ./scripts/build_ue.sh`, create materials
+with `scripts/ue_create_materials.py`, and import aircraft with
+`scripts/ue_import_aircraft.py`. Read `NEXT.md` for operational state and
+the 26 recorded gotchas before deep work.
 
 `rasterio` ships GDAL in its wheel, so no separate GDAL build is needed.
 
