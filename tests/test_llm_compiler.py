@@ -398,8 +398,13 @@ def test_same_final_spec_digests_identically_with_or_without_questions():
 # -- key preflight: named, actionable, never leaking -----------------------
 
 def test_missing_key_preflight_names_the_fix(monkeypatch):
+    # A BARE env no longer reaches this preflight -- it resolves to the
+    # hosted relay (see test_resolve_client_is_env_driven). The named
+    # missing-key error is now the opt-out path's: FLIGHTSIM_LLM=none
+    # with no Anthropic key. (Never run this bare: the suite must not
+    # touch the network.)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("FLIGHTSIM_LLM", raising=False)
+    monkeypatch.setenv("FLIGHTSIM_LLM", "none")
     with pytest.raises(LLMCompileError) as err:
         compile_prompt_llm("anything")   # client=None: the real entry path
     message = str(err.value)
@@ -429,7 +434,10 @@ def test_llm_available_is_a_presence_check(monkeypatch):
 
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("FLIGHTSIM_LLM", raising=False)
-    assert llm_available() is False
+    assert llm_available() is True       # nothing set -> the hosted relay
+    monkeypatch.setenv("FLIGHTSIM_LLM", "none")
+    assert llm_available() is False      # the explicit opt-out
+    monkeypatch.delenv("FLIGHTSIM_LLM")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-TEST")
     assert llm_available() is True       # the SDK is installed in the venv
     monkeypatch.delenv("ANTHROPIC_API_KEY")
@@ -509,6 +517,18 @@ def test_resolve_client_is_env_driven(monkeypatch):
     from core.nl.providers import OllamaClient, resolve_client
 
     monkeypatch.delenv("FLIGHTSIM_LLM", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    # Nothing set at all: the zero-config default is the hosted relay,
+    # so a fresh clone compiles through a real LLM from the first prompt.
+    client, model = resolve_client()
+    assert client.base_url == "https://flightsim-relay.vercel.app/v1"
+    assert model == "gpt-4.1-mini"
+    # An explicit Anthropic key keeps the SDK path's priority.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-TEST")
+    assert resolve_client() is None
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    # The explicit opt-out: no provider, regex parser only.
+    monkeypatch.setenv("FLIGHTSIM_LLM", "none")
     assert resolve_client() is None
     monkeypatch.setenv("FLIGHTSIM_LLM", "ollama")
     client, model = resolve_client()

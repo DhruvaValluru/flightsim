@@ -23,8 +23,12 @@ Provider selection is env-driven and explicit:
 * ``FLIGHTSIM_LLM=openai`` -> any OpenAI-compatible endpoint
   (``OPENAI_BASE_URL``, ``OPENAI_API_KEY``, ``FLIGHTSIM_LLM_MODEL``) --
   Groq, Gemini's OpenAI layer, OpenRouter, a second Ollama, etc.
-* neither set -> the Anthropic SDK path in ``llm_compiler`` (needs
-  ``ANTHROPIC_API_KEY``).
+* ``FLIGHTSIM_LLM`` unset + ``ANTHROPIC_API_KEY`` present -> the
+  Anthropic SDK path in ``llm_compiler``.
+* nothing set at all -> the hosted relay (the ZERO-CONFIG DEFAULT: a
+  fresh clone compiles through a real LLM from the first prompt).
+* ``FLIGHTSIM_LLM=none`` -> no provider at all (regex parser only,
+  unless an Anthropic key is present).
 
 An explicit ``FLIGHTSIM_LLM`` wins over a present ``ANTHROPIC_API_KEY``:
 choosing a provider is a statement, not a fallback.
@@ -187,8 +191,21 @@ def resolve_client() -> Optional[Tuple[Any, str]]:
     no base URL) raises with the fix named, matching the preflight style.
     """
     provider = os.environ.get("FLIGHTSIM_LLM", "").strip().lower()
-    if not provider:
+    if provider in ("none", "off"):
+        # Explicit opt-out of the hosted default: no alternate provider.
+        # Without an ANTHROPIC_API_KEY the compiler then reports itself
+        # unavailable and the regex parser is the whole story.
         return None
+    if not provider:
+        if os.environ.get("ANTHROPIC_API_KEY", "").strip():
+            # An explicitly provided key is a statement: the Anthropic SDK
+            # path keeps priority over the hosted default.
+            return None
+        # ZERO-CONFIG DEFAULT: a fresh clone with no env at all compiles
+        # through the hosted relay from the very first prompt -- keyless
+        # for the client, model pinned server-side. FLIGHTSIM_LLM=none
+        # opts out; any other tier is one env var away.
+        provider = "relay"
     if provider == "ollama":
         model = os.environ.get("FLIGHTSIM_LLM_MODEL", DEFAULT_OLLAMA_MODEL)
         return OllamaClient(), model

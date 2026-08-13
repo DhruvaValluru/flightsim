@@ -23,18 +23,19 @@ Open http://127.0.0.1:8008, type a scenario ("fly the c172p through a
 tornado over the prairie"), review the compiled spec, and run. **No API
 keys or accounts are needed for anything**: terrain elevation comes from
 the public Copernicus bucket, historical weather from the free Open-Meteo
-API, and the natural-language compiler has three tiers -- pick one:
+API, and the natural-language compiler **works out of the box** -- with
+nothing configured, prompts compile through [relay/](relay/), a small
+Vercel function holding the author's own OpenAI key server-side, pinned
+to `gpt-4.1-mini`, rate-limited to 40 requests/hour per IP. Best-effort
+on a personal budget; if it refuses or dies, the deterministic parser
+below catches the prompt and every other tier is one env var away:
 
-* **No AI (zero setup):** the built-in deterministic parser covers the
-  whole documented vocabulary (aircraft, altitudes, winds, turbulence,
-  surfaces, storms, tornadoes, dates). Only place *names* need AI --
-  state coordinates instead ("at 27.99, 86.92").
-* **Hosted relay (zero setup, author-funded):** set
-  `FLIGHTSIM_LLM=relay` in `~/.flightsim.env` and compiles run through
-  [relay/](relay/) -- a small Vercel function holding the author's own
-  OpenAI key server-side, pinned to `gpt-4.1-mini`, rate-limited to 40
-  requests/hour per IP. Best-effort on a personal budget; if it refuses
-  or dies, every other tier below still works.
+* **No AI (`FLIGHTSIM_LLM=none` in `~/.flightsim.env`):** the built-in
+  deterministic parser covers the whole documented vocabulary (aircraft,
+  altitudes, winds, turbulence, surfaces, storms, tornadoes, dates).
+  Only place *names* need AI -- state coordinates instead
+  ("at 27.99, 86.92"). This parser is also the automatic fallback
+  whenever any LLM tier fails.
 * **Free local model (one-time download):** `brew install ollama`, then
   `ollama pull qwen2.5:7b` (~4.7 GB) or `qwen2.5:14b` (~9 GB, better);
   set `FLIGHTSIM_LLM=ollama` in `~/.flightsim.env`. Runs fully offline

@@ -131,13 +131,20 @@ def llm_available() -> bool:
     ever read, stored or logged by this module.
 
     True when an alternate provider is selected via ``FLIGHTSIM_LLM``
-    (e.g. a local Ollama model -- see :mod:`core.nl.providers`) or when
-    the Anthropic SDK path is usable (key present, SDK importable).
+    (e.g. a local Ollama model -- see :mod:`core.nl.providers`), when
+    the Anthropic SDK path is usable (key present, SDK importable), or --
+    the zero-config default -- when nothing is set at all: an unset
+    ``FLIGHTSIM_LLM`` with no Anthropic key resolves to the hosted relay,
+    which needs no client-side secret. ``FLIGHTSIM_LLM=none`` opts out.
+    This mirrors ``providers.resolve_client`` exactly.
     """
-    if os.environ.get("FLIGHTSIM_LLM", "").strip():
+    provider = os.environ.get("FLIGHTSIM_LLM", "").strip().lower()
+    if provider in ("none", "off"):
+        return False
+    if provider:
         return True
     if "ANTHROPIC_API_KEY" not in os.environ:
-        return False
+        return True                     # the hosted relay default
     try:
         import anthropic  # noqa: F401
     except ImportError:
