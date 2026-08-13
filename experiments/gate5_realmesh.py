@@ -131,7 +131,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(f"  {name}: render did not complete -- BLOCKED")
                 return 2
 
-        manifest = json.loads((frames / "render.json").read_text())
+        manifest = json.loads((frames / "render.json").read_text(encoding="utf-8"))
         mesh = manifest.get("mesh", {})
         print(f"  mesh {mesh.get('mesh_airframe')} [{mesh.get('license')}] "
               f"fdm {mesh.get('fdm')}")
@@ -154,7 +154,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         }
         all_ok = all_ok and summary[name]["ok"]
 
-    (out / "report.json").write_text(json.dumps(summary, indent=1))
+    (out / "report.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
     print(f"\n{RULE}\nGATE 5 ON-SCREEN, REAL MESHES\n{RULE}")
     for name, entry in summary.items():
         print(f"  [{'PASS' if entry['ok'] else 'FAIL'}] {name}")

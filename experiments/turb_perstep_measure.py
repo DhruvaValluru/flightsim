@@ -413,7 +413,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         },
     }
     path = out / "report.json"
-    path.write_text(json.dumps(report, indent=2))
+    path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"\n{RULE}\n  MEASURED: W20 route {'SANE' if w20_route_sane else 'NOT SANE'}; "
           f"POE route {'SANE' if poe_route_sane else 'NOT SANE'} -> {path}\n{RULE}")
     return 0

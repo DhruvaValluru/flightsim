@@ -135,7 +135,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     location = LOCATIONS["matterhorn"]
     baked = Heightfield.read(terrain)
-    sidecar = json.loads(sidecar_path.read_text())
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
     texture = np.asarray(Image.open(
         sidecar_path.parent / sidecar["texture"]["file"]).convert("RGB"))
 
@@ -165,8 +165,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not args.skip_renders:
         render(card, out / "imagery", terrain, sidecar_path)
         render(card, out / "classified", terrain, None)
-    imagery_m = json.loads((out / "imagery" / "render.json").read_text())
-    classified_m = json.loads((out / "classified" / "render.json").read_text())
+    imagery_m = json.loads((out / "imagery" / "render.json").read_text(encoding="utf-8"))
+    classified_m = json.loads((out / "classified" / "render.json").read_text(encoding="utf-8"))
 
     assert imagery_m["scene"]["imagery_sha256"] == sidecar["texture"]["sha256"], \
         "the manifest's imagery sha must be the sidecar's"
@@ -239,7 +239,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "thresholds": CHECKS,
         "ok": all(checks.values()),
     }
-    (out / "report.json").write_text(json.dumps(report, indent=1))
+    (out / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(f"\n  IMAGERY DRAPE ON GEOMETRY: "
           f"{'PASS' if report['ok'] else 'FAIL'} -> {out / 'report.json'}")
     return 0 if report["ok"] else 1

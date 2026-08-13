@@ -95,7 +95,7 @@ def run():
         FAILURES.append("usage: ue_import_aircraft.py <mesh_manifest.json> [...]")
         return
     for manifest_path in sys.argv[1:]:
-        manifest = json.load(open(manifest_path))
+        manifest = json.load(open(manifest_path, encoding="utf-8"))
         if manifest.get("magic") != "flightsim-aircraft-mesh":
             FAILURES.append(f"{manifest_path} is not a mesh manifest")
             continue

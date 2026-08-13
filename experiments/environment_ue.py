@@ -265,14 +265,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     d_out.mkdir(parents=True, exist_ok=True)
     spec, card, burst = downburst_scenario(d_out, matterhorn)
     control_card = d_out / "card_control.json"
-    control = json.loads(Path(card).read_text())
+    control = json.loads(Path(card).read_text(encoding="utf-8"))
     control.pop("downburst")
-    control_card.write_text(json.dumps(control, indent=1))
+    control_card.write_text(json.dumps(control, indent=1), encoding="utf-8")
     if not args.skip_renders:
         render(Path(card), d_out / "coupled", matterhorn, [])
         render(control_card, d_out / "control", matterhorn, [])
-    coupled = json.loads((d_out / "coupled" / "render.json").read_text())
-    control_m = json.loads((d_out / "control" / "render.json").read_text())
+    coupled = json.loads((d_out / "coupled" / "render.json").read_text(encoding="utf-8"))
+    control_m = json.loads((d_out / "control" / "render.json").read_text(encoding="utf-8"))
     report["downburst_port"] = verify_downburst(coupled, burst)
     peak = max(abs(r["wind_north_fps"]) + abs(r["wind_east_fps"])
                for r in coupled["frame_records"])
@@ -293,16 +293,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     r_out.mkdir(parents=True, exist_ok=True)
     spec, card, provider, block = rotor_scenario(r_out, matterhorn)
     control_card = r_out / "card_control.json"
-    control = json.loads(Path(card).read_text())
+    control = json.loads(Path(card).read_text(encoding="utf-8"))
     control.pop("rotor")
     control.pop("turbulence_properties")
     control["turbulence"] = "none"   # the word gates the writes (measured)
-    control_card.write_text(json.dumps(control, indent=1))
+    control_card.write_text(json.dumps(control, indent=1), encoding="utf-8")
     if not args.skip_renders:
         render(Path(card), r_out / "coupled", matterhorn, [])
         render(control_card, r_out / "control", matterhorn, [])
-    coupled = json.loads((r_out / "coupled" / "render.json").read_text())
-    control_m = json.loads((r_out / "control" / "render.json").read_text())
+    coupled = json.loads((r_out / "coupled" / "render.json").read_text(encoding="utf-8"))
+    control_m = json.loads((r_out / "control" / "render.json").read_text(encoding="utf-8"))
     report["rotor_port"] = verify_rotor(coupled, provider)
     coupled_rms = rms([r["turb_down_fps"] for r in coupled["frame_records"]])
     control_rms = rms([r["turb_down_fps"] for r in control_m["frame_records"]])
@@ -322,15 +322,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     s_out.mkdir(parents=True, exist_ok=True)
     spec, card, shear, thermals = surface_scenario(s_out, yosemite)
     control_card = s_out / "card_control.json"
-    control = json.loads(Path(card).read_text())
+    control = json.loads(Path(card).read_text(encoding="utf-8"))
     control.pop("log_profile")
     control.pop("thermals")
-    control_card.write_text(json.dumps(control, indent=1))
+    control_card.write_text(json.dumps(control, indent=1), encoding="utf-8")
     if not args.skip_renders:
         render(Path(card), s_out / "coupled", yosemite, [])
         render(control_card, s_out / "control", yosemite, [])
-    coupled = json.loads((s_out / "coupled" / "render.json").read_text())
-    control_m = json.loads((s_out / "control" / "render.json").read_text())
+    coupled = json.loads((s_out / "coupled" / "render.json").read_text(encoding="utf-8"))
+    control_m = json.loads((s_out / "control" / "render.json").read_text(encoding="utf-8"))
     report["log_profile_port"] = verify_log_profile(coupled, shear)
     report["thermals_port"] = verify_thermals(coupled, thermals)
     wind_rms = rms([math.hypot(r["wind_north_fps"], r["wind_east_fps"])
@@ -350,7 +350,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             and ok):
         failures.append("surface")
 
-    (out / "report.json").write_text(json.dumps(report, indent=1))
+    (out / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(f"\n  wrote {out / 'report.json'}")
     if failures:
         print(f"\n  ENVIRONMENT COUPLINGS: FAIL ({', '.join(failures)})")

@@ -256,13 +256,13 @@ class Heightfield:
         # Little-endian explicitly: a raster written on one machine and read on
         # another must not silently change elevation.
         self.samples.astype("<u2").tofile(raw)
-        path.with_suffix(".json").write_text(json.dumps(self.metadata(), indent=1))
+        path.with_suffix(".json").write_text(json.dumps(self.metadata(), indent=1), encoding="utf-8")
         return raw
 
     @classmethod
     def read(cls, path) -> "Heightfield":
         path = Path(path).with_suffix("")
-        meta = json.loads(path.with_suffix(".json").read_text())
+        meta = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
         if meta.get("magic") != cls.MAGIC:
             raise ValueError(f"{path} is not a flightsim heightfield")
         if meta.get("version") != cls.VERSION:

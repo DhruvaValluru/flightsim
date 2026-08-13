@@ -50,7 +50,12 @@ from experiments.orographic_ue import verify_port  # noqa: E402
 
 RULE = "=" * 96
 EDITOR = Path("/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor-Cmd")
-FFMPEG = Path("/opt/homebrew/bin/ffmpeg")
+try:
+    from core.util.platform import find_ffmpeg as _find_ffmpeg
+
+    FFMPEG = _find_ffmpeg()
+except Exception:       # ffmpeg.missing: the startup check below states it
+    FFMPEG = Path("ffmpeg")
 
 DURATION_S = 22.0
 WIDTH, HEIGHT, FPS = 1280, 720, 30
@@ -627,8 +632,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"  [{index + 1:3d}/{len(cells)}] {clip_id}: "
                   f"rendered + panel + encoded")
 
-        manifest = json.loads((frames / "render.json").read_text())
-        card = json.loads((out / "cards" / f"{clip_id}.json").read_text()) \
+        manifest = json.loads((frames / "render.json").read_text(encoding="utf-8"))
+        card = json.loads((out / "cards" / f"{clip_id}.json").read_text(encoding="utf-8")) \
             if (out / "cards" / f"{clip_id}.json").is_file() else {}
 
         # The render must be of the spec the row claims (§1.4, per clip).
@@ -696,7 +701,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         "(c) Airbus Defence and Space GmbH 2014-2018; "
                         "aircraft models: GPL-2.0 (FlightGear community), "
                         "see per-clip mesh blocks"),
-    }, indent=1))
+    }, indent=1), encoding="utf-8")
     print(f"  {len(rows)} clips in {out / 'clips'}")
     print(f"  contact sheet {sheet}")
     print(f"  manifest {manifest_path}")

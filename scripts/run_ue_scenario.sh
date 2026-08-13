@@ -10,6 +10,16 @@
 #
 # No Xcode is involved -- this runs an already-built editor. Building is
 # scripts/build_ue.sh, and that is the only step with a toolchain constraint.
+
+# The UE half is macOS-only for now: every render gotcha was measured on
+# Metal/macOS. Off-mac, refuse BY NAME with a pointer to the headless path.
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "REFUSED ue.platform: rendered clips currently require macOS."
+  echo "The compiler, headless physics, telemetry and the webapp run on"
+  echo "this OS -- see README \"Platform support\"."
+  exit 3
+fi
+
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

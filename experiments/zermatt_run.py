@@ -196,7 +196,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if not (frames / "render.json").is_file():
                 raise RuntimeError(f"{preset} render wrote no manifest (exit "
                                    f"{proc.returncode}); see {log}")
-        renders[preset] = json.loads((frames / "render.json").read_text())
+        renders[preset] = json.loads((frames / "render.json").read_text(encoding="utf-8"))
 
     print(f"\n{RULE}\n3. verification from the recordings\n{RULE}")
     checks = {}
@@ -227,7 +227,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "checks": checks,
         "ok": all(checks.values()),
     }
-    (out / "report.json").write_text(json.dumps(report, indent=1))
+    (out / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(f"\n  ZERMATT RUN: {'PASS' if report['ok'] else 'FAIL'} -> "
           f"{out / 'report.json'}")
     return 0 if report["ok"] else 1

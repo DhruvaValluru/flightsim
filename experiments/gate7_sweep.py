@@ -108,7 +108,7 @@ def run_with_interruption(design: Design, base: ScenarioSpec, out: Path,
     log = ResultLog(directory / "dataset.jsonl")
     surviving = [r for r in log.rows() if r.get("ok")]
     log.path.write_text("".join(json.dumps(r, sort_keys=True) + "\n"
-                                for r in surviving))
+                                for r in surviving), encoding="utf-8")
     first_pass = len(surviving)
 
     resumed = run_sweep(design, base, evaluate, directory, resume=True)
@@ -371,8 +371,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"\n{RULE}\n5. validation report\n{RULE}")
     report = validation_report()
     print(report.render())
-    (out / "validation_report.txt").write_text(report.render())
-    (out / "validation_report.json").write_text(json.dumps(report.to_dict(), indent=1))
+    (out / "validation_report.txt").write_text(report.render(), encoding="utf-8")
+    (out / "validation_report.json").write_text(json.dumps(report.to_dict(), indent=1), encoding="utf-8")
     # The report must exist AND state limits: a report with no inconclusive
     # rows, given this evidence base, would be overclaiming.
     honest = (report.counts()[Verdict.INCONCLUSIVE.value] > 0
@@ -383,7 +383,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     card = scorecard()
     print(card.render())
     card.write(out / "scorecard.json")
-    (out / "scorecard.txt").write_text(card.render())
+    (out / "scorecard.txt").write_text(card.render(), encoding="utf-8")
     results.append(("scorecard published with a threshold declared in advance",
                     card.threshold is not None and bool(card.subsystems)))
 

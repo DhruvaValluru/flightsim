@@ -146,7 +146,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     block = orographic_card_block(terrain, location.origin_lat,
                                   location.origin_lon, WIND_KT, WIND_FROM_DEG)
     card_path = write_run_card(spec, out / "card.json", orographic=block)
-    card = json.loads(card_path.read_text())
+    card = json.loads(card_path.read_text(encoding="utf-8"))
     print(f"  spec {spec.digest()[:16]}, wind {WIND_KT:g} kt from "
           f"{WIND_FROM_DEG:g}, decay {block['decay_height_m']:.0f} m, "
           f"wavelength {block['wavelength_m']:.0f} m")
@@ -157,8 +157,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         render(card_path, out / "control", terrain, ["-NoOrographic"])
         print("  both rendered")
 
-    coupled = json.loads((out / "coupled" / "render.json").read_text())
-    control = json.loads((out / "control" / "render.json").read_text())
+    coupled = json.loads((out / "coupled" / "render.json").read_text(encoding="utf-8"))
+    control = json.loads((out / "control" / "render.json").read_text(encoding="utf-8"))
 
     print(f"\n{RULE}\n3. the port, checked against the original\n{RULE}")
     port = verify_port(coupled, card)
@@ -190,7 +190,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "ok": bool(null_ok),
         },
     }
-    (out / "report.json").write_text(json.dumps(report, indent=1))
+    (out / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(f"\n  wrote {out / 'report.json'}")
 
     if port["ok"] and null_ok:

@@ -126,10 +126,14 @@ function provenanceNote(f) {
 (async () => {
   try {
     const status = await (await fetch("/status")).json();
-    $("llmState").textContent = status.llm_available
+    $("llmState").textContent = (status.llm_available
       ? "compiler: llm available"
       : "compiler: offline regex (no ANTHROPIC_API_KEY in the server " +
-        "process; set it where uvicorn runs)";
+        "process; set it where uvicorn runs)")
+      + (status.render_available === false
+         ? " · rendered clips need macOS: runs here deliver the " +
+           "headless half (spec, validation, telemetry)"
+         : "");
   } catch (error) { $("llmState").textContent = "compiler: server unreachable"; }
 })();
 

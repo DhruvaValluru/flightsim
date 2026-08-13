@@ -101,7 +101,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                        "model": compiled.get("model")}}).json()
     check("run accepted with edit", "run_id" in started, str(started))
     if "run_id" not in started:
-        (out / "report.json").write_text(json.dumps({"checks": checks}, indent=1))
+        (out / "report.json").write_text(json.dumps({"checks": checks}, indent=1), encoding="utf-8")
         return 1
     run_id = started["run_id"]
 
@@ -118,9 +118,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if state.get("status") == "done":
         run_dir = manager.out_root / run_id
-        provenance = json.loads((run_dir / "provenance.json").read_text())
-        manifest = json.loads((run_dir / "frames" / "render.json").read_text())
-        card = json.loads((run_dir / "card.json").read_text())
+        provenance = json.loads((run_dir / "provenance.json").read_text(encoding="utf-8"))
+        manifest = json.loads((run_dir / "frames" / "render.json").read_text(encoding="utf-8"))
+        card = json.loads((run_dir / "card.json").read_text(encoding="utf-8"))
         check("provenance carries prompt + compiler",
               provenance.get("prompt") == PROMPT
               and "compiler" in provenance,
@@ -166,7 +166,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     report = {"prompt": PROMPT, "compiler": compiled["compiler"],
               "model": compiled.get("model"), "checks": checks,
               "failures": failures}
-    (out / "report.json").write_text(json.dumps(report, indent=1))
+    (out / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(f"\n  wrote {out / 'report.json'}")
     print(f"\n  GATE 8.3: {'PASS' if failures == 0 else f'FAIL ({failures})'}"
           + ("" if compiler == "llm" else

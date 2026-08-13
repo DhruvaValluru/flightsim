@@ -60,7 +60,7 @@ def rms_about_mean(values: Sequence[float]) -> float:
 
 
 def load_nz(telemetry_path: Path) -> List[float]:
-    data = json.loads(Path(telemetry_path).read_text())
+    data = json.loads(Path(telemetry_path).read_text(encoding="utf-8"))
     return [float(v) for v in data["columns"]["n_z"]]
 
 
@@ -162,8 +162,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
           f"and x{NULL_TEST['min_rms_ratio']:.0f})")
 
     print(f"\n{RULE}\n5. same-seed parity, measured not assumed\n{RULE}")
-    ue = json.loads((out / "ue_turbulent.json").read_text())
-    headless = json.loads((out / "headless_turbulent.json").read_text())
+    ue = json.loads((out / "ue_turbulent.json").read_text(encoding="utf-8"))
+    headless = json.loads((out / "headless_turbulent.json").read_text(encoding="utf-8"))
     parity = compare_realisations(
         [float(v) for v in headless["columns"]["n_z"]],
         [float(v) for v in headless["columns"]["t"]],
@@ -216,7 +216,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "divergence_measured_why": why,
         "verdict": verdict,
     }
-    (out / "report.json").write_text(json.dumps(report, indent=1))
+    (out / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(f"\n  wrote {out / 'report.json'}")
 
     if not null["ok"]:

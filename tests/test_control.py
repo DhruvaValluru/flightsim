@@ -57,7 +57,7 @@ def test_throttle_outputs_cover_every_engine():
     """A hand-written output list would silently drive only some of them."""
     spec = derive("B747")
     assert spec.engine_count == 4
-    system = (spec.xml_path.parent / "Systems" / "tecs.xml").read_text()
+    system = (spec.xml_path.parent / "Systems" / "tecs.xml").read_text(encoding="utf-8")
     assert system.count("<output> fcs/throttle-cmd-norm") == 4
     assert "<!--THROTTLE_OUTPUTS-->" not in system
 

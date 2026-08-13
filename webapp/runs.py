@@ -99,7 +99,13 @@ class RunState:
 def editor_running() -> bool:
     """Gotcha 9. Matches the engine's editor binaries only -- not the
     UnrealEditorServices helper or the Epic launcher, which live at other
-    paths and hold no editor lock."""
+    paths and hold no editor lock. Off-mac there is no editor to lock
+    (the UE half refuses by name before this matters) and no pgrep to
+    call on Windows."""
+    from core.util.platform import is_mac
+
+    if not is_mac():
+        return False
     probe = subprocess.run(["pgrep", "-f", "Binaries/Mac/UnrealEditor"],
                            capture_output=True, text=True)
     return probe.returncode == 0 and probe.stdout.strip() != ""
@@ -978,6 +984,15 @@ class RunManager:
 
     def start(self, spec: ScenarioSpec, provenance: Dict) -> Dict:
         """Refuses (with the reason) or starts a run and returns its id."""
+        from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
+
+        if not ue_available():
+            # The named platform refusal, not a 500: every render gotcha
+            # was measured on Metal/macOS only. The headless half (spec,
+            # provenance, validation, telemetry via run_spec) already
+            # happened or remains available on this OS.
+            return {"refused": UE_PLATFORM_REFUSAL,
+                    "constraint": "ue.platform"}
         with self._lock:
             active = self.runs.get(self._active) if self._active else None
             if active is not None and active.status not in ("done", "failed"):

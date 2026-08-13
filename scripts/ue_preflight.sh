@@ -5,6 +5,16 @@
 # diagnosing precisely rather than reporting "Unreal does not work". Every other
 # element of the integration -- the plugin's macOS support, the native library,
 # the bridge sources -- is in place. What is missing is a compiler version.
+
+# The UE half is macOS-only for now: every render gotcha was measured on
+# Metal/macOS. Off-mac, refuse BY NAME with a pointer to the headless path.
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "REFUSED ue.platform: rendered clips currently require macOS."
+  echo "The compiler, headless physics, telemetry and the webapp run on"
+  echo "this OS -- see README \"Platform support\"."
+  exit 3
+fi
+
 set -uo pipefail
 cd "$(dirname "$0")/.."
 

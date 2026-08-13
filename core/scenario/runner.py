@@ -152,7 +152,7 @@ class RunResult:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         self.telemetry.write_json(directory / "telemetry.json")
-        (directory / "manifest.json").write_text(json.dumps(self.manifest, indent=1))
+        (directory / "manifest.json").write_text(json.dumps(self.manifest, indent=1), encoding="utf-8")
         return directory
 
 

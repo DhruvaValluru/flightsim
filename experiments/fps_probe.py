@@ -190,7 +190,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               f"the probe. See {out / 'probe.log'}")
         return 1
 
-    report = json.loads(report_path.read_text())
+    report = json.loads(report_path.read_text(encoding="utf-8"))
     fps = float(report.get("fps_mean", 0.0))
     p95 = float(report.get("frame_ms_p95", 1e9))
     outcome = str(report.get("outcome", ""))
@@ -234,7 +234,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     report["thresholds"] = THRESHOLDS
     report["verdict"] = verdict
     report["substep_ledger_consistent"] = bool(accounted)
-    report_path.write_text(json.dumps(report, indent=1))
+    report_path.write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(f"\n  8B.0 VERDICT: {verdict}")
     return 0 if accounted else 1
 

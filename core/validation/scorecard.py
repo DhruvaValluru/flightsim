@@ -196,5 +196,5 @@ class Scorecard:
     def write(self, path) -> Path:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict(), indent=1))
+        path.write_text(json.dumps(self.to_dict(), indent=1), encoding="utf-8")
         return path

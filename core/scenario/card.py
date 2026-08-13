@@ -222,5 +222,5 @@ def write_run_card(spec: ScenarioSpec, path: Path,
     if collision_terrain:
         card["collision_terrain"] = str(collision_terrain)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(card, indent=1))
+    path.write_text(json.dumps(card, indent=1), encoding="utf-8")
     return path

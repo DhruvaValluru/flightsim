@@ -151,8 +151,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("  flying the UE host with heightfield collision...")
         run_ue(out / "card.json", unreal_path)
 
-    headless = json.loads(headless_path.read_text())
-    unreal = json.loads(unreal_path.read_text())
+    headless = json.loads(headless_path.read_text(encoding="utf-8"))
+    unreal = json.loads(unreal_path.read_text(encoding="utf-8"))
     verdict = compare_agl(headless, unreal)
 
     relief_ok = verdict["ground_relief_m"] >= TOLERANCE["min_ground_relief_m"]
@@ -173,7 +173,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "carry collision_terrain" if verdict["ok"] else
         "AGL parity NOT established: the flat-slab label stays, these "
         "numbers are the published measurement")
-    (out / "report.json").write_text(json.dumps(verdict, indent=1))
+    (out / "report.json").write_text(json.dumps(verdict, indent=1), encoding="utf-8")
     print(f"\n  wrote {out / 'report.json'}")
     print(f"\n  AGL PARITY: {'PASS' if verdict['ok'] else 'FAIL'}")
     return 0 if verdict["ok"] else 1

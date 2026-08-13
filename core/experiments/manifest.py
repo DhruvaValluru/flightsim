@@ -145,12 +145,12 @@ class RunManifest:
     def write(self, path) -> Path:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict(), indent=1, sort_keys=True))
+        path.write_text(json.dumps(self.to_dict(), indent=1, sort_keys=True), encoding="utf-8")
         return path
 
     @staticmethod
     def read(path) -> Dict[str, Any]:
-        return json.loads(Path(path).read_text())
+        return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def verify_reproduction(manifest_path, produced: Dict[str, str]

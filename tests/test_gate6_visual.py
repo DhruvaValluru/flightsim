@@ -41,7 +41,7 @@ def manifest_for(tmp_path, records):
         "frames": len(records),
         "scene": {"visual": True, "exposure": "manual, AutoExposureBias 11.0"},
         "frame_records": records,
-    }))
+    }), encoding="utf-8")
     return tmp_path
 
 
@@ -81,9 +81,9 @@ def test_a_far_ridge_as_crisp_as_the_near_one_is_not(tmp_path):
 
 def test_a_peak_out_of_frame_is_not_silently_passed(tmp_path):
     directory = extinction_scene(tmp_path, (122, 138, 185))
-    manifest = json.loads((directory / "render.json").read_text())
+    manifest = json.loads((directory / "render.json").read_text(encoding="utf-8"))
     manifest["frame_records"][-1]["landmarks"]["far_peak"]["visible"] = False
-    (directory / "render.json").write_text(json.dumps(manifest))
+    (directory / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
     check = measure_extinction(directory)
     assert not check.ok
     assert "not in frame" in check.detail
@@ -168,10 +168,10 @@ def test_a_sky_that_pumps_with_bank_breathes(tmp_path):
 
 def test_the_clause_is_vacuous_without_banking(tmp_path):
     directory = exposure_run(tmp_path, lambda t, roll: 128)
-    manifest = json.loads((directory / "render.json").read_text())
+    manifest = json.loads((directory / "render.json").read_text(encoding="utf-8"))
     for record in manifest["frame_records"]:
         record["roll_deg"] = 0.1
-    (directory / "render.json").write_text(json.dumps(manifest))
+    (directory / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
     check = measure_exposure(directory)
     assert not check.ok
     assert "without any banking" in check.detail
@@ -180,18 +180,18 @@ def test_the_clause_is_vacuous_without_banking(tmp_path):
 def test_the_control_must_actually_pump(tmp_path):
     """A flat auto-exposure control proves the metric measures nothing."""
     directory = exposure_run(tmp_path, lambda t, roll: 128)
-    manifest = json.loads((directory / "render.json").read_text())
+    manifest = json.loads((directory / "render.json").read_text(encoding="utf-8"))
     manifest["scene"]["exposure"] = "auto (default metering)"
-    (directory / "render.json").write_text(json.dumps(manifest))
+    (directory / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
     check = measure_exposure_control(directory)
     assert not check.ok
 
     directory2 = tmp_path / "pump"
     directory2.mkdir()
     exposure_run(directory2, lambda t, roll: 128 + int(2.5 * abs(roll)))
-    manifest = json.loads((directory2 / "render.json").read_text())
+    manifest = json.loads((directory2 / "render.json").read_text(encoding="utf-8"))
     manifest["scene"]["exposure"] = "auto (default metering)"
-    (directory2 / "render.json").write_text(json.dumps(manifest))
+    (directory2 / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
     check = measure_exposure_control(directory2)
     assert check.ok, check.detail
 

@@ -218,7 +218,7 @@ def write_reference(spec: ScenarioSpec, out_dir: Path) -> Path:
         "columns": result.telemetry.columns,
     }
     path = out_dir / "headless.json"
-    path.write_text(json.dumps(payload, indent=1))
+    path.write_text(json.dumps(payload, indent=1), encoding="utf-8")
     return path
 
 
@@ -298,8 +298,8 @@ def compare(headless: Path, unreal: Path) -> Tuple[List[Parity], Overlap]:
     one host against 56 s of the other and reported the difference as a
     physics divergence. Both recorders write a ``t`` column; this uses it.
     """
-    a = json.loads(headless.read_text())["columns"]
-    b = json.loads(unreal.read_text())["columns"]
+    a = json.loads(headless.read_text(encoding="utf-8"))["columns"]
+    b = json.loads(unreal.read_text(encoding="utf-8"))["columns"]
 
     for name, columns in (("headless", a), ("unreal", b)):
         if "t" not in columns or not columns["t"]:
@@ -403,7 +403,7 @@ def measure_frames(manifest_path: Path) -> List[Check]:
     """Read the rendered run back and decide the two on-screen clauses."""
     import numpy as np
 
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     records = manifest["frame_records"]
     directory = manifest_path.parent
 
@@ -507,7 +507,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"\n{RULE}\n1. headless reference trajectory\n{RULE}")
     spec = reference_spec(args.prompt)
     reference = write_reference(spec, out)
-    payload = json.loads(reference.read_text())
+    payload = json.loads(reference.read_text(encoding="utf-8"))
     card = write_run_card(spec, out / "ue_scenario.json")
     render_card = write_run_card(spec, out / "ue_render_scenario.json",
                                  control_inputs=ROLL_DOUBLET,
@@ -550,7 +550,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("  §5: do not mark a gate passed on partial evidence.")
         return 2
 
-    unreal_payload = json.loads(unreal_path.read_text())
+    unreal_payload = json.loads(unreal_path.read_text(encoding="utf-8"))
     print(f"  trajectory  {unreal_path} ({unreal_payload.get('samples')} samples)")
 
     print(f"\n{RULE}\n3. host parity\n{RULE}")
@@ -567,7 +567,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     on_screen: List[Check] = []
     if render_path is not None and render_path.is_file():
         print(f"\n{RULE}\n4. on screen\n{RULE}")
-        manifest = json.loads(render_path.read_text())
+        manifest = json.loads(render_path.read_text(encoding="utf-8"))
         print(f"  {manifest['frames']} frames at {manifest['width']}x"
               f"{manifest['height']}, airframe: {manifest['airframe']}")
         on_screen = measure_frames(render_path)

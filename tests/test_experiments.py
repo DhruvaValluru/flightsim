@@ -127,7 +127,7 @@ def test_log_survives_a_truncated_final_line(tmp_path):
     path = tmp_path / "dataset.jsonl"
     path.write_text('{"case_id": "aaa", "ok": true}\n'
                     '{"case_id": "bbb", "ok": true}\n'
-                    '{"case_id": "ccc", "ok"')
+                    '{"case_id": "ccc", "ok"', encoding="utf-8")
     log = ResultLog(path)
     assert log.completed_ids() == {"aaa", "bbb"}
     assert len(log.rows()) == 2
@@ -238,11 +238,11 @@ def test_replicate_precision_reports_n_and_half_width():
 
 def test_manifest_records_inputs_outputs_and_git(tmp_path):
     payload = tmp_path / "dataset.jsonl"
-    payload.write_text('{"case_id": "a"}\n')
+    payload.write_text('{"case_id": "a"}\n', encoding="utf-8")
     manifest = RunManifest(name="test")
     manifest.add_input_text("spec", "hello").add_output("dataset", payload)
     data = manifest.write(tmp_path / "manifest.json")
-    recorded = json.loads(data.read_text())
+    recorded = json.loads(data.read_text(encoding="utf-8"))
     assert recorded["inputs"]["spec"] == sha256_text("hello")
     assert "commit" in recorded["git"]
     assert recorded["host"]["jsbsim"]
@@ -252,14 +252,14 @@ def test_manifest_records_inputs_outputs_and_git(tmp_path):
 def test_verify_reproduction_detects_a_changed_output(tmp_path):
     """A manifest nobody has reproduced from is an assertion."""
     payload = tmp_path / "dataset.jsonl"
-    payload.write_text("original\n")
+    payload.write_text("original\n", encoding="utf-8")
     manifest = RunManifest(name="test").add_output("dataset", payload)
     path = manifest.write(tmp_path / "manifest.json")
 
     from core.experiments.manifest import sha256_file
     assert verify_reproduction(path, {"dataset": sha256_file(payload)})["ok"]
 
-    payload.write_text("tampered\n")
+    payload.write_text("tampered\n", encoding="utf-8")
     check = verify_reproduction(path, {"dataset": sha256_file(payload)})
     assert not check["ok"]
     assert check["mismatched"] == ["dataset"]

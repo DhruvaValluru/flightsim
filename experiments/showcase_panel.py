@@ -37,7 +37,12 @@ GOOD = (120, 220, 140)
 BAD = (255, 130, 110)
 ACCENT = (255, 200, 90)
 
-FFMPEG = Path("/opt/homebrew/bin/ffmpeg")
+def _ffmpeg() -> Path:
+    """Resolved at the point of use: a missing ffmpeg is a NAMED refusal
+    (ffmpeg.missing) and everything short of encoding still works."""
+    from core.util.platform import find_ffmpeg
+
+    return find_ffmpeg()
 
 #: Compact display names for the surface bars; anything unlisted shows its
 #: manifest bone name truncated.
@@ -52,17 +57,9 @@ SURFACE_LABELS = {
 
 
 def _fonts():
-    from PIL import ImageFont
+    from core.util.platform import mono_fonts
 
-    for path in ("/System/Library/Fonts/Menlo.ttc",
-                 "/System/Library/Fonts/Monaco.ttf"):
-        try:
-            return (ImageFont.truetype(path, 15), ImageFont.truetype(path, 12),
-                    ImageFont.truetype(path, 11))
-        except OSError:
-            continue
-    default = ImageFont.load_default()
-    return default, default, default
+    return tuple(mono_fonts((15, 12, 11)))
 
 
 def wrap_delta(a: float, b: float) -> float:
@@ -274,8 +271,8 @@ def build_panel_clip(card_path: Path, manifest_path: Path, conditions: Dict,
                      raw_clip: Path, out_clip: Path, fps: int = 30,
                      work_dir: Optional[Path] = None) -> bool:
     """Panel frames + vstack composite. Returns False loudly on any failure."""
-    card = json.loads(Path(card_path).read_text())
-    manifest = json.loads(Path(manifest_path).read_text())
+    card = json.loads(Path(card_path).read_text(encoding="utf-8"))
+    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
     renderer = PanelRenderer(card, manifest, conditions)
 
     work = Path(work_dir) if work_dir else out_clip.parent / (out_clip.stem + "_panel")
@@ -287,7 +284,7 @@ def build_panel_clip(card_path: Path, manifest_path: Path, conditions: Dict,
 
     out_clip.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run([
-        str(FFMPEG), "-y",
+        str(_ffmpeg()), "-y",
         "-i", str(raw_clip),
         "-framerate", str(fps), "-i", str(work / "panel_%04d.png"),
         "-filter_complex", "[0:v][1:v]vstack=inputs=2",

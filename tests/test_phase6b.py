@@ -86,7 +86,7 @@ kids 0
 
 def test_ac_parser_reads_objects_materials_and_nested_loc(tmp_path):
     path = tmp_path / "model.ac"
-    path.write_text(AC_FIXTURE)
+    path.write_text(AC_FIXTURE, encoding="utf-8")
     model = parse_ac(path)
     assert [m.name for m in model.materials] == ["white", "red"]
     named = {obj.name: verts for obj, verts in world_vertices(model)}
@@ -110,8 +110,8 @@ def _write_config(tmp_path, fdm="B747", fdm_match=("B747-400",),
                   license_file="COPYING"):
     source = tmp_path / "src"
     source.mkdir(exist_ok=True)
-    (source / "model.ac").write_text(AC_FIXTURE)
-    (source / "COPYING").write_text("GNU GENERAL PUBLIC LICENSE\n")
+    (source / "model.ac").write_text(AC_FIXTURE, encoding="utf-8")
+    (source / "COPYING").write_text("GNU GENERAL PUBLIC LICENSE\n", encoding="utf-8")
     config = {
         "name": "testcraft",
         "fdm": fdm,
@@ -132,13 +132,13 @@ def _write_config(tmp_path, fdm="B747", fdm_match=("B747-400",),
         },
     }
     config_path = tmp_path / "testcraft.json"
-    config_path.write_text(json.dumps(config))
+    config_path.write_text(json.dumps(config), encoding="utf-8")
     return config_path
 
 
 def test_converter_writes_parts_and_manifest(tmp_path):
     manifest_path = convert(_write_config(tmp_path), tmp_path / "out", REPO)
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["magic"] == "flightsim-aircraft-mesh"
     assert manifest["fdm_config_name"] == "B747-400"
     assert (tmp_path / "out" / "testcraft" / "body.obj").is_file()
@@ -164,9 +164,9 @@ def test_converter_refuses_a_missing_license(tmp_path):
 
 def test_converter_refuses_an_empty_surface(tmp_path):
     config_path = _write_config(tmp_path)
-    config = json.loads(config_path.read_text())
+    config = json.loads(config_path.read_text(encoding="utf-8"))
     config["surfaces"]["aileron_l"]["objects"] = ["no_such_object"]
-    config_path.write_text(json.dumps(config))
+    config_path.write_text(json.dumps(config), encoding="utf-8")
     with pytest.raises(ConvertError, match="matched no geometry"):
         convert(config_path, tmp_path / "out", REPO)
 
@@ -176,7 +176,7 @@ def test_converter_replaces_degenerate_uvs(tmp_path):
     # triangle in the output must have non-zero UV area or MikkTSpace
     # corrupts the whole asset (measured: the 747 body did not render).
     convert(_write_config(tmp_path), tmp_path / "out", REPO)
-    text = (tmp_path / "out" / "testcraft" / "aileron_l.obj").read_text()
+    text = (tmp_path / "out" / "testcraft" / "aileron_l.obj").read_text(encoding="utf-8")
     uvs, faces = [], []
     for line in text.splitlines():
         if line.startswith("vt "):
@@ -287,14 +287,14 @@ def test_turbulent_card_carries_the_providers_exact_writes(tmp_path):
     spec = reference_spec("fly the 747 at 3000 m and 250 kt for 30 seconds")
     spec.set("turbulence", "moderate", frm="test")
     spec.set("seed", 777, frm="test")
-    card = json.loads(write_run_card(spec, tmp_path / "card.json").read_text())
+    card = json.loads(write_run_card(spec, tmp_path / "card.json").read_text(encoding="utf-8"))
     assert card["turbulence_properties"] == \
         DrydenTurbulence("moderate", seed=777).configure()
 
 
 def test_calm_card_is_unchanged_by_the_new_fields(tmp_path):
     spec = reference_spec("fly the 747 at 3000 m and 250 kt for 30 seconds")
-    card = json.loads(write_run_card(spec, tmp_path / "card.json").read_text())
+    card = json.loads(write_run_card(spec, tmp_path / "card.json").read_text(encoding="utf-8"))
     assert "turbulence_properties" not in card
     assert "wind_schedule" not in card
     assert "orographic" not in card
@@ -398,7 +398,7 @@ def test_turbulent_cell_is_hands_off_with_recorded_seed(tmp_path):
     terrain = _fake_terrain(tmp_path)
     cell = build_cell_card(tmp_path / "card.json", "c172p", "control",
                            terrain, "turb_moderate", 63123)
-    card = json.loads((tmp_path / "card.json").read_text())
+    card = json.loads((tmp_path / "card.json").read_text(encoding="utf-8"))
     assert card["turbulence"] == "moderate"
     assert card["turbulence_properties"]["atmosphere/randomseed"] == 63123.0
     assert card["control_inputs"] == []
@@ -411,7 +411,7 @@ def test_gusty_cell_carries_schedule_and_orographic(tmp_path):
     terrain = _fake_terrain(tmp_path)
     build_cell_card(tmp_path / "card.json", "B747", "control",
                     terrain, "gusty15", 63124)
-    card = json.loads((tmp_path / "card.json").read_text())
+    card = json.loads((tmp_path / "card.json").read_text(encoding="utf-8"))
     assert card["wind_speed_kt"] == 15.0
     assert card["wind_direction_deg"] == 45.0     # headwind = heading
     assert len(card["wind_schedule"]) > 1000
@@ -423,7 +423,7 @@ def test_crosswind_cell_wind_is_heading_plus_ninety(tmp_path):
     terrain = _fake_terrain(tmp_path)
     build_cell_card(tmp_path / "card.json", "B747", "control",
                     terrain, "crosswind25", 63125)
-    card = json.loads((tmp_path / "card.json").read_text())
+    card = json.loads((tmp_path / "card.json").read_text(encoding="utf-8"))
     assert card["wind_speed_kt"] == 25.0
     assert card["wind_direction_deg"] == 135.0
     assert card["orographic"]["wind_speed_mps"] == \
@@ -437,7 +437,7 @@ def test_combined_cell_carries_every_constituent(tmp_path):
     terrain = _fake_terrain(tmp_path)
     cell = build_cell_card(tmp_path / "card.json", "B747", "control",
                            terrain, "crosswind25_turb", 63200)
-    card = json.loads((tmp_path / "card.json").read_text())
+    card = json.loads((tmp_path / "card.json").read_text(encoding="utf-8"))
     assert card["wind_speed_kt"] == 25.0
     assert card["wind_direction_deg"] == 135.0
     assert card["turbulence"] == "moderate"
@@ -451,7 +451,7 @@ def test_storm_cell_gusts_harder_and_is_severe(tmp_path):
     terrain = _fake_terrain(tmp_path)
     cell = build_cell_card(tmp_path / "card.json", "B747", "control",
                            terrain, "storm25", 63201)
-    card = json.loads((tmp_path / "card.json").read_text())
+    card = json.loads((tmp_path / "card.json").read_text(encoding="utf-8"))
     assert card["turbulence"] == "severe"
     assert card["wind_speed_kt"] == 25.0
     assert len(card["wind_schedule"]) > 1000
@@ -477,7 +477,7 @@ def test_microburst_cell_stages_the_reversal(tmp_path):
     terrain = _fake_terrain(tmp_path, rms_slope_deg=5.0)
     cell = build_cell_card(tmp_path / "card.json", "B747", "control",
                            terrain, "microburst", 63300)
-    card = json.loads((tmp_path / "card.json").read_text())
+    card = json.loads((tmp_path / "card.json").read_text(encoding="utf-8"))
     assert card["altitude_m"] == terrain["ground_m"] + 300.0
     assert card["wind_speed_kt"] == 10.0
     assert "orographic" in card

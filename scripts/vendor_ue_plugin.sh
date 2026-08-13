@@ -21,6 +21,16 @@
 #      aircraft to load.
 #   2. It did not notice that the plugin's Build.cs stages that data through a
 #      Windows path literal. See the patch below.
+
+# The UE half is macOS-only for now: every render gotcha was measured on
+# Metal/macOS. Off-mac, refuse BY NAME with a pointer to the headless path.
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "REFUSED ue.platform: rendered clips currently require macOS."
+  echo "The compiler, headless physics, telemetry and the webapp run on"
+  echo "this OS -- see README \"Platform support\"."
+  exit 3
+fi
+
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO="$PWD"

@@ -1,0 +1,31 @@
+# The platform story as a MEASUREMENT, not a claim: the headless half
+# (compiler, physics, telemetry, webapp, planners) must stay green on all
+# three OSes on every push. No UE on CI -- mac-only render coverage skips
+# visibly under the shared mac_ue marker / artifact-existence checks.
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  pytest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pytest -q
+        env:
+          # No LLM keys on CI: llm_available() still reports True (the
+          # zero-config relay default) but no test calls the network --
+          # the suite injects mock clients everywhere.
+          FLIGHTSIM_LLM: none

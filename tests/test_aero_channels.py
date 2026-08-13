@@ -87,7 +87,7 @@ def test_aero_force_properties_are_required_headless():
 def _ue_channel_table():
     """Parse the UE recorder's channel table from its source, so schema
     drift between the two recorders fails a test rather than a comparison."""
-    text = RECORDER_CPP.read_text()
+    text = RECORDER_CPP.read_text(encoding="utf-8")
     rows = re.findall(
         r'\{TEXT\("([^"]+)"\),\s*TEXT\("([^"]+)"\),\s*[^,]+,\s*(true|false)\}',
         text)
@@ -121,7 +121,7 @@ def test_ue_hosts_refuse_on_selftest_failure():
     """Each host must call SelftestProperties and REFUSE the run on failure
     -- a missing property records nothing, loudly, never NaN forever."""
     for source in HOST_SOURCES:
-        text = source.read_text()
+        text = source.read_text(encoding="utf-8")
         assert re.search(r"if \(!\w*Recorder->SelftestProperties\(Error\)\)",
                          text), f"{source.name} does not refuse on selftest"
 
@@ -129,7 +129,7 @@ def test_ue_hosts_refuse_on_selftest_failure():
 def test_ue_recorder_selftest_reads_the_channel_table():
     """The selftest must iterate the SAME table sampling uses -- a channel
     cannot be sampled without being selftested."""
-    text = RECORDER_CPP.read_text()
+    text = RECORDER_CPP.read_text(encoding="utf-8")
     selftest = text.split("SelftestProperties", 2)[-1]
     assert "ChannelTable()" in selftest.split("TickComponent")[0]
 

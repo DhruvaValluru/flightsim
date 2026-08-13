@@ -124,7 +124,7 @@ def test_tornado_run_output_differs_from_plain_run():
 
 
 def test_ue_tornado_port_mirrors_the_python_field():
-    text = (BRIDGE / "FlightSimScenarioWorld.cpp").read_text()
+    text = (BRIDGE / "FlightSimScenarioWorld.cpp").read_text(encoding="utf-8")
     body = text.split("FFlightSimScenarioWorld::TornadoWindMps", 1)[-1]
     head = body.split("bool FFlightSimScenarioWorld::Crashed", 1)[0]
     assert "Vt * (De / R) * Fade" in head          # cyclonic sense
@@ -133,7 +133,7 @@ def test_ue_tornado_port_mirrors_the_python_field():
 
 
 def test_funnel_is_labeled_a_visual_marker():
-    text = (BRIDGE / "FlightSimScenarioWorld.cpp").read_text()
+    text = (BRIDGE / "FlightSimScenarioWorld.cpp").read_text(encoding="utf-8")
     assert "VISUAL marker of" in text
     assert "not condensation" in text
     # And the mesh never enters the physics: no collision on the funnel.

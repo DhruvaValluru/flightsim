@@ -1,9 +1,38 @@
 # Resume here
 
-**Fresh session? Read docs/CONTEXT_PHASE8B_SESSION.md first** -- the
-2026-08-11 session narrative (LLM compiler v2, aero panel, free local
-LLM provider, terrain-coordinated runs, and the two honesty bugs the
-user caught). Then this file's gotchas 1-25.
+**Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
+docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
+
+**Scene director + cross-platform (2026-08-13, two commits -- the full
+narrative is docs/CONTEXT_SCENE_DIRECTOR_SESSION.md).** The LLM now
+fills EVERY field it can justify under the new provenance source
+`model` (declared guess, quoted phrase REQUIRED, plannable like a
+default; SPEC_VERSION 5). PLANNABLE_SOURCES = (default, model, derived)
+is the load-bearing line: user/inferred never move. New planners:
+plan_terrain_environment (cross-ridge wind + along-ridge heading from
+the raster's structure-tensor ridge axis, WHOLE degrees -- the UE wind
+IC is integral), aircraft-aware default airspeed, plan_trim_recovery
+(one recorded re-plan to documented cruise when the trim probe refuses
+a plannable speed), guessed-tas -> cas in project_for_ue_host. Planner
+ORDER is stated + pinned in server.py /run. Gate 8.1 gained the vague
+coherent-and-declared category; verdict on gpt-4.1-mini after five
+measured iterations (12 -> 7 -> 6 -> 4): **FAIL (4), determinism
+IDENTICAL** -- all four misses are model shape/quality stumbles (empty
+question options, a 4-question overflow, one 'windspeed' key typo, one
+terrain-phrasing parity miss), recorded in runs/gate8_compiler/
+report.json; the machinery rails all held. Acceptance measured: "storm
+chasing in a small plane over Kansas" rendered END TO END
+(runs/webapp/3ed4d58bc9ff); mountains-vs-flat rough wind measurably
+differ (wind FROM 118 vs 8 deg, vertical air +-2.9 vs one-sided).
+Platform story: core/util/platform.py is the ONE OS-dispatch home;
+UTF-8 encoding enforced statically (test_platform.py); UE refuses
+`ue.platform` by name off-mac (scripts exit 3, webapp 409, /status
+reports render_available); setup.ps1 + README matrix; CI matrix
+(.github/workflows/ci.yml) runs pytest on ubuntu/windows/macos --
+the off-mac legs ARE the acceptance measurement. DELIBERATE DEFERRAL:
+porting the UE host off macOS is out of scope -- every render gotcha
+was measured on Metal only; do not claim render support nobody
+measured.
 
 **Planned defaults (2026-08-13 -- "simple prompts must just fly").**
 Measured: "rough wind over mountains" + everest refused over numbers the

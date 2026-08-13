@@ -189,7 +189,7 @@ def measure_extinction(frames_dir: Path) -> Check:
     """
     import numpy as np
 
-    manifest = json.loads((frames_dir / "render.json").read_text())
+    manifest = json.loads((frames_dir / "render.json").read_text(encoding="utf-8"))
     record = manifest["frame_records"][-1]
     landmarks = record.get("landmarks", {})
     near = landmarks.get("near_peak", {})
@@ -266,7 +266,7 @@ def measure_aircraft_shadow(shadow_still: Path, hidden_still: Path) -> Check:
 
 def measure_exposure(frames_dir: Path) -> Check:
     """The sky must not re-meter while the aircraft banks under it."""
-    manifest = json.loads((frames_dir / "render.json").read_text())
+    manifest = json.loads((frames_dir / "render.json").read_text(encoding="utf-8"))
     records = manifest["frame_records"]
     rolls = [record["roll_deg"] for record in records]
     sweep = max(rolls) - min(rolls)
@@ -286,7 +286,7 @@ def measure_exposure(frames_dir: Path) -> Check:
 
 def sky_excursion(frames_dir: Path) -> float:
     """Peak-to-peak sky-band luminance inside the doublet window."""
-    manifest = json.loads((frames_dir / "render.json").read_text())
+    manifest = json.loads((frames_dir / "render.json").read_text(encoding="utf-8"))
     means = [float(luminance(load_rgb(frames_dir / record["frame"]))
                    [SKY_BAND_ROWS[0]:SKY_BAND_ROWS[1], :].mean())
              for record in manifest["frame_records"]
@@ -302,7 +302,7 @@ def measure_exposure_control(control_dir: Path) -> Check:
     has to trip on it. If it does not, the manual run's pass says nothing,
     and the clause fails on the instrument rather than the image.
     """
-    manifest = json.loads((control_dir / "render.json").read_text())
+    manifest = json.loads((control_dir / "render.json").read_text(encoding="utf-8"))
     exposure = manifest.get("scene", {}).get("exposure", "")
     if not exposure.startswith("auto"):
         return Check("exposure metric discriminates", False,
@@ -421,7 +421,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # The terrain the commandlet drew must be the raster baked above (§1.4:
     # one lookup, verified after load -- the renderer's version of it).
     for name in runs:
-        manifest = json.loads((out / name / "render.json").read_text())
+        manifest = json.loads((out / name / "render.json").read_text(encoding="utf-8"))
         rendered_sha = manifest.get("scene", {}).get("terrain_sha256", "")
         if rendered_sha != field.digest():
             print(f"\n  {name} rendered terrain {rendered_sha[:16]}, but the "

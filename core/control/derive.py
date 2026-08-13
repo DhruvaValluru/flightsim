@@ -131,8 +131,8 @@ def derive(
     base = ac.resolve(base_aircraft, root_dir)
     build_dir = Path(build_dir) if build_dir else DEFAULT_BUILD_DIR
 
-    base_text = base.xml_path.read_text()
-    template_text = TECS_TEMPLATE.read_text()
+    base_text = base.xml_path.read_text(encoding="utf-8")
+    template_text = TECS_TEMPLATE.read_text(encoding="utf-8")
 
     engine_count = _count_engines(base_text)
     if engine_count == 0:
@@ -157,8 +157,8 @@ def derive(
     systems_dir.mkdir(parents=True, exist_ok=True)
 
     xml_path = aircraft_dir / f"{name}.xml"
-    xml_path.write_text(derived_text)
-    (systems_dir / "tecs.xml").write_text(system_text)
+    xml_path.write_text(derived_text, encoding="utf-8")
+    (systems_dir / "tecs.xml").write_text(system_text, encoding="utf-8")
 
     # Aircraft-local files the stock model may reference by relative name.
     for sibling in base.xml_path.parent.iterdir():

@@ -158,7 +158,7 @@ def test_ue_step_replaces_base_wind_only_for_carries_base_cards():
 
     cpp = (Path(__file__).resolve().parents[1] / "ue" / "Plugins"
            / "FlightSimBridge" / "Source" / "FlightSimBridge" / "Private"
-           / "FlightSimScenarioWorld.cpp").read_text()
+           / "FlightSimScenarioWorld.cpp").read_text(encoding="utf-8")
     assert "if (Card.bLogProfileCarriesBase)" in cpp
     body = cpp.split("Card.bLogProfileCarriesBase)", 1)[-1]
     assert "NorthFps = SpeedMps" in body.split("else")[0]

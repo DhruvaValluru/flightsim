@@ -224,7 +224,7 @@ def export(field: Heightfield, path, resolution: Optional[int] = None
         covered_x_m=covered_x_m,
         covered_y_m=covered_y_m,
     )
-    path.with_suffix(".json").write_text(json.dumps(spec.to_dict(), indent=1))
+    path.with_suffix(".json").write_text(json.dumps(spec.to_dict(), indent=1), encoding="utf-8")
     return spec
 
 

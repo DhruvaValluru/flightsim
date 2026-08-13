@@ -52,8 +52,8 @@ def staged_pair(tmp_path, wheel_text, staged_text):
     staged = tmp_path / "staged" / "T1"
     wheel.mkdir(parents=True)
     staged.mkdir(parents=True)
-    (wheel / "T1.xml").write_text(wheel_text)
-    (staged / "T1.xml").write_text(staged_text)
+    (wheel / "T1.xml").write_text(wheel_text, encoding="utf-8")
+    (staged / "T1.xml").write_text(staged_text, encoding="utf-8")
     return tmp_path / "wheel", tmp_path / "staged"
 
 
@@ -79,7 +79,7 @@ def test_identical_files_are_accepted(tmp_path):
 
 def test_a_model_file_the_plugin_never_staged_is_caught(tmp_path):
     wheel, staged = staged_pair(tmp_path, "<fdm_config/>", "<fdm_config/>")
-    (wheel / "T1" / "extra.xml").write_text("<system/>")
+    (wheel / "T1" / "extra.xml").write_text("<system/>", encoding="utf-8")
     ok, detail = model_files_match("T1", wheel, staged)
     assert not ok
     assert "extra.xml missing from the plugin" in detail

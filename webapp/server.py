@@ -263,8 +263,14 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
 def status_endpoint() -> JSONResponse:
     # llm_available is a presence check (SDK + key in THIS process's
     # environment) so the page can state the compiler up front instead of
-    # discovering a fallback after a spin.
-    return JSONResponse({**manager.status(), "llm_available": llm_available()})
+    # discovering a fallback after a spin. platform/render_available are
+    # the same pattern for the UE half: off-mac the page says so up front
+    # and a run refuses ue.platform by name instead of 500ing.
+    from core.util.platform import os_name, ue_available
+
+    return JSONResponse({**manager.status(), "llm_available": llm_available(),
+                         "platform": os_name(),
+                         "render_available": ue_available()})
 
 
 @app.get("/runs/{run_id}")

@@ -192,19 +192,19 @@ def test_run_spec_over_clear_terrain_records_the_contact_claim():
 
 
 def test_ue_step_refuses_on_airframe_impact():
-    text = (BRIDGE / "FlightSimScenarioWorld.cpp").read_text()
+    text = (BRIDGE / "FlightSimScenarioWorld.cpp").read_text(encoding="utf-8")
     assert ("return !Crashed(TimeSeconds, Error) "
             "&& !AirframeImpact(TimeSeconds, Error);") in text
 
 
 def test_interactive_host_refuses_on_airframe_impact():
-    text = (BRIDGE / "FlightSimInteractiveMode.cpp").read_text()
+    text = (BRIDGE / "FlightSimInteractiveMode.cpp").read_text(encoding="utf-8")
     assert "Scenario.AirframeImpact(SimTimeSeconds, Error)" in text
 
 
 def test_ue_stations_match_the_python_stations():
     """One station table in two languages: change one, change both."""
-    text = (BRIDGE / "FlightSimScenarioWorld.cpp").read_text()
+    text = (BRIDGE / "FlightSimScenarioWorld.cpp").read_text(encoding="utf-8")
     body = text.split("FFlightSimScenarioWorld::AirframeImpact", 1)[-1]
     for name, fraction in STATION_FRACTIONS:
         assert f'TEXT("{name}"), {fraction}' in body, name

@@ -158,7 +158,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             fly_interactive(card, telemetry, manifest_path,
                             out / f"{key}.log", args.timeout)
 
-        manifest = json.loads(manifest_path.read_text())
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         ledger = substep_ledger_ok(manifest)
         print(f"    substeps {manifest['substeps']} over "
               f"{manifest['sim_seconds']:.2f} s sim "
@@ -203,7 +203,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                      "manifest": manifest})
 
     report = {"tolerance": TOLERANCE, "sessions": rows, "failures": failures}
-    (out / "report.json").write_text(json.dumps(report, indent=1))
+    (out / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(f"\n  wrote {out / 'report.json'}")
     print(f"\n  INTERACTIVE REPLAY: {'PASS' if failures == 0 else 'FAIL'}")
     return 0 if failures == 0 else 1

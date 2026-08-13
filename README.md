@@ -54,8 +54,44 @@ below catches the prompt and every other tier is one env var away:
 
 The page states which tier is active next to the Interpret button.
 
-The physics, compiler, tests and web app run anywhere Python 3.9+ runs.
-**Rendering video clips** additionally needs a Mac with Unreal Engine 5.5
+## Platform support
+
+One codebase, platform dispatch inside it (`core/util/platform.py`):
+
+| | macOS | Linux | Windows |
+|---|---|---|---|
+| Prompt → LLM compile → spec → validate | ✓ | ✓ | ✓ |
+| Headless JSBSim physics + telemetry | ✓ | ✓ | ✓ |
+| Web app on localhost:8008, terrain baking, effect reports | ✓ | ✓ | ✓ |
+| Rendered video clips (Unreal Engine host) | ✓ | refused by name | refused by name |
+
+Everything in the first three rows is pure Python and is exercised by CI
+on all three OSes. The UE render half currently requires macOS -- every
+render calibration was measured on Metal/macOS only, and claiming more
+would be claiming what was never measured -- so off-mac it refuses as
+`ue.platform` with a pointer here, and the web app still delivers the
+headless half (spec, provenance, validation, telemetry).
+
+Per-OS setup notes:
+
+* **macOS / Linux**: `./scripts/setup.sh`. **Windows**:
+  `.\scripts\setup.ps1` (PowerShell), then
+  `.\.venv\Scripts\python.exe -m uvicorn webapp.server:app --port 8008`.
+* **ffmpeg** (only for encoding clips/panels): `brew install ffmpeg` /
+  `sudo apt install ffmpeg` / `winget install ffmpeg`. Missing ffmpeg is
+  a named refusal (`ffmpeg.missing`); nothing else needs it. Override
+  the binary with `FLIGHTSIM_FFMPEG=/path/to/ffmpeg`.
+* **Ollama** (the free local LLM tier): `brew install ollama` on macOS;
+  the installer from ollama.com on Linux/Windows.
+* **Env config**: `~/.flightsim.env` is a POSIX convention sourced by
+  whatever shell launches uvicorn. On Windows, set the same variables
+  for the server process instead (`$env:FLIGHTSIM_LLM = "relay"` in the
+  PowerShell session that starts uvicorn, or System Properties).
+* The `FLIGHTSIM_LLM=relay` default and the keyless `llm7` tier need
+  ZERO setup on any OS: a fresh clone compiles a prompt before
+  installing anything optional.
+
+**Rendering video clips** needs a Mac with Unreal Engine 5.5
 (free from the Epic Games Launcher) and Xcode: then
 `./scripts/vendor_ue_plugin.sh && ./scripts/build_ue.sh`, create materials
 with `scripts/ue_create_materials.py`, and import aircraft with

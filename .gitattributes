@@ -1,0 +1,13 @@
+# Shell scripts must stay LF: a CRLF-mangled setup.sh is the classic
+# first-clone failure on Windows.
+*.sh text eol=lf
+*.ps1 text eol=crlf
+# Sane text defaults; binary artifacts stay untouched.
+* text=auto
+*.png binary
+*.jpg binary
+*.mp4 binary
+*.r16 binary
+*.tif binary
+*.ttc binary
+*.ttf binary

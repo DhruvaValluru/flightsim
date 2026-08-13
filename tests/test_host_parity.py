@@ -39,7 +39,7 @@ def trajectory(path, period, duration, *, offset=0.0, start=None):
     for i, channel in enumerate(COMPARED):
         columns[channel] = [float(i) + offset for _ in times]
     path.write_text(json.dumps({"host": "test", "samples": len(times),
-                                "interval_s": period, "columns": columns}))
+                                "interval_s": period, "columns": columns}), encoding="utf-8")
     return path
 
 
@@ -56,8 +56,8 @@ def test_compare_uses_the_recorded_clock_not_the_sample_index(tmp_path):
     """
     a = trajectory(tmp_path / "headless.json", 0.1075, 60.0)
     b = trajectory(tmp_path / "unreal.json", 0.1, 60.0)
-    assert len(json.loads(a.read_text())["columns"]["t"]) != \
-           len(json.loads(b.read_text())["columns"]["t"])
+    assert len(json.loads(a.read_text(encoding="utf-8"))["columns"]["t"]) != \
+           len(json.loads(b.read_text(encoding="utf-8"))["columns"]["t"])
 
     results, overlap = compare(a, b)
     assert overlap.ok
@@ -86,12 +86,12 @@ def test_index_alignment_would_have_reported_a_divergence_that_is_not_there(tmp_
         columns = {"t": times}
         for channel in COMPARED:
             columns[channel] = [3000.0 + 3.0 * x for x in times]
-        path.write_text(json.dumps({"columns": columns}))
+        path.write_text(json.dumps({"columns": columns}), encoding="utf-8")
         return path
 
     a, b = ramp(tmp_path / "h.json", 0.1075), ramp(tmp_path / "u.json", 0.1)
-    ha = json.loads(a.read_text())["columns"]
-    ub = json.loads(b.read_text())["columns"]
+    ha = json.loads(a.read_text(encoding="utf-8"))["columns"]
+    ub = json.loads(b.read_text(encoding="utf-8"))["columns"]
 
     # What comparing by index would have said, on identical physics.
     n = min(len(ha["altitude_m"]), len(ub["altitude_m"]))
@@ -121,7 +121,7 @@ def test_the_trim_snapshot_is_not_graded_but_the_flight_is(tmp_path):
         for channel in COMPARED:
             columns[channel] = [0.0] * len(times)
         columns["tas_kt"] = [first_tas] + [301.0] * (len(times) - 1)
-        path.write_text(json.dumps({"columns": columns}))
+        path.write_text(json.dumps({"columns": columns}), encoding="utf-8")
         return path
 
     a = write(tmp_path / "h.json", 288.0)    # pre-wind trim snapshot
@@ -139,7 +139,7 @@ def test_a_divergence_from_the_second_sample_onward_is_not_forgiven(tmp_path):
         for channel in COMPARED:
             columns[channel] = [0.0] * len(times)
         columns["tas_kt"] = tas
-        path.write_text(json.dumps({"columns": columns}))
+        path.write_text(json.dumps({"columns": columns}), encoding="utf-8")
         return path
 
     a = write(tmp_path / "h.json", [288.0] + [301.0] * 99)
@@ -180,7 +180,7 @@ def test_heading_is_compared_on_the_circle_not_the_number_line(tmp_path):
         # 0.5 deg -> through 0/360 -> 359.5 deg, smoothly. The seam is crossed
         # at t = 10.0 exactly.
         columns["heading_deg"] = [(0.5 - 0.05 * x) % 360.0 for x in times]
-        path.write_text(json.dumps({"columns": columns}))
+        path.write_text(json.dumps({"columns": columns}), encoding="utf-8")
         return path
 
     # Periods chosen so a grid point PROVABLY lands inside the other host's
@@ -204,7 +204,7 @@ def test_a_real_heading_divergence_near_the_seam_is_still_reported(tmp_path):
         for channel in COMPARED:
             columns[channel] = [0.0] * len(times)
         columns["heading_deg"] = [heading % 360.0] * len(times)
-        path.write_text(json.dumps({"columns": columns}))
+        path.write_text(json.dumps({"columns": columns}), encoding="utf-8")
         return path
 
     a = steady(tmp_path / "h.json", 359.2)
@@ -216,10 +216,10 @@ def test_a_real_heading_divergence_near_the_seam_is_still_reported(tmp_path):
 
 def test_compare_refuses_a_trajectory_with_no_clock(tmp_path):
     a = trajectory(tmp_path / "headless.json", 0.1, 10.0)
-    columns = json.loads(a.read_text())["columns"]
+    columns = json.loads(a.read_text(encoding="utf-8"))["columns"]
     del columns["t"]
     b = tmp_path / "unreal.json"
-    b.write_text(json.dumps({"columns": columns}))
+    b.write_text(json.dumps({"columns": columns}), encoding="utf-8")
 
     with pytest.raises(ValueError, match="common time base"):
         compare(a, b)
@@ -250,7 +250,7 @@ def test_compare_reports_the_peak_divergence_of_one_channel_only(tmp_path):
             columns[channel] = [0.0] * 3
         columns["altitude_m"] = altitude
         columns["tas_kt"] = [250.0] * 3
-        path.write_text(json.dumps({"columns": columns}))
+        path.write_text(json.dumps({"columns": columns}), encoding="utf-8")
         return path
 
     a = write(tmp_path / "a.json", [3000.0, 3000.1, 3000.2])
@@ -266,10 +266,10 @@ def test_compare_reports_the_peak_divergence_of_one_channel_only(tmp_path):
 
 def test_a_missing_channel_is_infinite_difference_not_a_pass(tmp_path):
     a = trajectory(tmp_path / "headless.json", 0.1, 10.0)
-    payload = json.loads(a.read_text())
+    payload = json.loads(a.read_text(encoding="utf-8"))
     del payload["columns"]["n_z"]
     b = tmp_path / "unreal.json"
-    b.write_text(json.dumps(payload))
+    b.write_text(json.dumps(payload), encoding="utf-8")
 
     results, _ = compare(a, b)
     missing = [r for r in results if r.channel == "n_z"]
@@ -319,7 +319,7 @@ def test_the_parity_scenario_is_open_loop_and_mass_held_in_both_hosts():
 
 def test_the_run_card_commands_the_same_scenario_as_the_spec(tmp_path):
     spec = reference_spec("fly the 747 at 3000 m and 250 kt for 60 seconds")
-    card = json.loads(write_run_card(spec, tmp_path / "ue_scenario.json").read_text())
+    card = json.loads(write_run_card(spec, tmp_path / "ue_scenario.json").read_text(encoding="utf-8"))
 
     assert card["spec_digest"] == spec.digest()
     assert card["aircraft"] == str(spec.aircraft.value)

@@ -109,7 +109,7 @@ def render_run(tmp_path, rolls, image_angles=None, camera_roll=0.0,
         "camera_preset": "LaggedChase",
         "airframe": "synthetic bar",
         "frame_records": records,
-    }))
+    }), encoding="utf-8")
     return manifest
 
 

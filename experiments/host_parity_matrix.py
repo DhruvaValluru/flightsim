@@ -229,7 +229,7 @@ def run_case(case: Case, out_dir: Path, runner: Path) -> CaseResult:
         "samples": len(result.telemetry),
         "interval_s": result.telemetry.interval_s,
         "columns": result.telemetry.columns,
-    }, indent=1))
+    }, indent=1), encoding="utf-8")
     spec.write(directory / "scenario.yaml")
 
     card = write_run_card(spec, directory / "ue_scenario.json")

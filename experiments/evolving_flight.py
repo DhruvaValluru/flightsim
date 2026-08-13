@@ -204,9 +204,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             raise RuntimeError(f"render wrote no manifest (exit "
                                f"{proc.returncode}); see {log}")
 
-    manifest = json.loads((frames / "render.json").read_text())
+    manifest = json.loads((frames / "render.json").read_text(encoding="utf-8"))
     records = manifest["frame_records"]
-    card = json.loads(card_path.read_text())
+    card = json.loads(card_path.read_text(encoding="utf-8"))
 
     print(f"\n{RULE}\n3. the phases, verified from the recording\n{RULE}")
     report: Dict = {"phases": []}
@@ -256,8 +256,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     import subprocess
 
     raw = out / "evolving_raw.mp4"
+    from core.util.platform import find_ffmpeg
+
     subprocess.run([
-        "/opt/homebrew/bin/ffmpeg", "-y", "-framerate", str(FPS),
+        str(find_ffmpeg()), "-y", "-framerate", str(FPS),
         "-i", str(frames / "frame_%04d.png"),
         "-c:v", "libx264", "-preset", "medium", "-crf", "19",
         "-pix_fmt", "yuv420p", str(raw),
@@ -277,7 +279,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "w20_max_error_fps": w20_err,
         "checks": CHECKS, "sun": sun, "ok": bool(ok),
     })
-    (out / "report.json").write_text(json.dumps(report, indent=1))
+    (out / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(f"\n  EVOLVING FLIGHT: {'PASS' if ok else 'FAIL'} -> {out / 'report.json'}")
     return 0 if ok else 1
 

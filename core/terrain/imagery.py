@@ -378,5 +378,5 @@ def drape(location: Location, baked_path, cache_dir, out_dir,
     }
     sidecar["texture"]["sha256"] = sha256_of(png_path)
     sidecar_path = out_dir / f"{location.key}_imagery.json"
-    sidecar_path.write_text(json.dumps(sidecar, indent=2))
+    sidecar_path.write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
     return png_path, verification

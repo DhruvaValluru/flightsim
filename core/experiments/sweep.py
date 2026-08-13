@@ -182,7 +182,7 @@ class ResultLog:
         if not self.path.exists():
             return set()
         done = set()
-        with self.path.open() as fh:
+        with self.path.open(encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
                 if not line:
@@ -207,7 +207,7 @@ class ResultLog:
             self.path.unlink()
 
     def append(self, record: Dict[str, Any]) -> None:
-        with self.path.open("a") as fh:
+        with self.path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, sort_keys=True) + "\n")
             fh.flush()
 
@@ -215,7 +215,7 @@ class ResultLog:
         if not self.path.exists():
             return []
         out = []
-        with self.path.open() as fh:
+        with self.path.open(encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
                 if not line:
@@ -277,7 +277,7 @@ def run_sweep(
         log.truncate()
         done = set()
 
-    (out_dir / "design.json").write_text(json.dumps(design.to_dict(), indent=1))
+    (out_dir / "design.json").write_text(json.dumps(design.to_dict(), indent=1), encoding="utf-8")
 
     completed = skipped = failed = 0
     for index, case in enumerate(design.cases(), start=1):
