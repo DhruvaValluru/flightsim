@@ -452,6 +452,14 @@ It also currently runs against an analytic sinusoidal ridge. Until Phase 4
 couples it to a real DEM, "ridge lift over this ridge" is a precise number
 about nothing.
 
+Since 2026-08-11 every webapp terrain run **with wind** carries this field
+(and its lee-rotor turbulence) by default, and the clearance pre-flight flies
+through the same field the card records — a wider *application* of the model,
+not a stronger claim about it: every caveat above applies to every such run.
+A **calm** terrain run carries neither, and its conditions strip states why
+("orographic forcing is wind over terrain") rather than implying the
+mountains shaped air they physically could not have.
+
 ### 2.9 Turbulence intensity words are a mapping, not a measurement
 
 "Moderate" resolves to a target σ_w of 6 ft/s, and the POE index whose
@@ -506,6 +514,56 @@ runtime rather than calibrated.
 **Elevations quantise to 16 bits.** A raster spanning 1000 m of relief resolves
 about 1.5 cm. Reported as `quantisation_m` and used to derive round-trip
 tolerances rather than assumed negligible.
+
+**Airframe terrain contact is four point samples, not a mesh intersection**
+(2026-08-11, core/terrain/contact.py + the UE hosts' `AirframeImpact`). The
+span stations — each wingtip and each mid-semi-span point — are placed from
+the FDM's own wingspan (`metrics/bw-ft`, verified against the live property
+catalog) and the aircraft's attitude, and a station below the raster surface
+ends the run as a named terrain impact in all three hosts; the webapp's
+clearance pre-flight plans against the same stations. What is NOT modelled:
+the fuselage, nose and tail (JSBSim carries no length metric, and inventing
+one would be fabrication); terrain between stations (a spire narrower than
+half a semi-span can pass between samples); and any post-contact dynamics —
+contact is detected and the run refuses to continue, there is no structural
+or crash model. "The wings feel the mountain" means exactly this and no
+more. The CG itself is deliberately not a station: terrain under the
+aircraft is the ground model's existing job (heightfield collision, AGL
+parity measured).
+
+### 2.10b Surface classes are two documented couplings, not ground cover
+
+A surface word (grassland / desert / ocean / forest / city, Phase 9.1)
+changes the air in exactly two modelled ways: the neutral surface-layer log
+profile with z0 from the Davenport-Wieringa classes (Stull 1988 Table 9-6),
+and Allen thermal forcing with (w*, zi) taken from NASA/TM-2006-214019's
+own Table 2 Desert Rock climatology — used directly for desert (the TM's
+site is desert) and AS A STATED PROXY for every other land class; the
+ocean gets no thermals rather than an invented weak value. Not modelled,
+stated per class: stability corrections (the profile is neutral-layer),
+the urban heat island (the city class's basis string says so), canopy
+flow, sea state, and ANY ground-cover visuals — a flat scene still renders
+the labeled slab. The shear carries the whole horizontal wind with its
+reference at the 300 m layer top, so cruise flight sees exactly the
+spec's wind; trim uses the spec wind everywhere, a stated approximation
+below 300 m AGL.
+
+### 2.10c Severe weather: one composition and one kinematic vortex
+
+A **thunderstorm** (Phase 9.2) is a COMPOSITION of parts that carry their
+own sections: the position-coupled microburst (2.13/Phase 7), severe
+turbulence (2.9), and a probe-calibrated dark rendering look (visual,
+labeled). Nothing new is modelled; no electrification, precipitation
+physics, or cell life-cycle exists. A **tornado** (Phase 9.3) is the
+kinematic Rankine combined vortex with a schematic core updraft and an
+EF2-band peak wind as a documented middle choice -- not a simulated
+tornado: no dynamics, no pressure deficit, no debris; the wind is
+point-sampled at the CG, so a vortex narrower than the wingspan produces
+no differential airloads across the span; the funnel on screen is a
+procedural marker of the modelled core and says so. The clearance
+pre-flight does not include event winds (stated here). Measured: the
+vortex defeats the held-state autopilot's closure assertion -- that
+refusal is correct behaviour, not a defect.
 
 ### 2.11 Validation is mostly inconclusive, and that is the finding
 

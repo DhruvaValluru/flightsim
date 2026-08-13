@@ -3,7 +3,57 @@
 **Fresh session? Read docs/CONTEXT_PHASE8B_SESSION.md first** -- the
 2026-08-11 session narrative (LLM compiler v2, aero panel, free local
 LLM provider, terrain-coordinated runs, and the two honesty bugs the
-user caught). Then this file's gotchas 1-24.
+user caught). Then this file's gotchas 1-25.
+
+**Terrain physics (2026-08-11, second session -- "not taking all
+mountain surfaces into physics consideration").** Two features, all
+three hosts:
+
+* **Airframe contact** (core/terrain/contact.py; `AirframeImpact` in
+  FlightSimScenarioWorld.cpp; wired into Step(), the interactive
+  substep loop, and run_spec): four span stations (wingtips +
+  mid-semi-span) from the FDM's own `metrics/bw-ft` and attitude,
+  checked every step against the raster; a station below the surface
+  ends the run as a NAMED terrain impact (headless raises
+  TerrainImpactError; UE hosts refuse like Crashed). Point samples,
+  not a mesh intersection -- VALIDITY 2.10 carries the limits
+  (no fuselage/nose/tail, no between-station spires, no crash model).
+  The webapp clearance pre-flight plans against the same stations
+  (clearance_m = min over stations, strictly tighter in a bank).
+* **Terrain-driven airflow**: webapp terrain runs with wind now carry
+  lee-rotor turbulence riding the same orographic field the card
+  records (card word "lee-rotor" -- gotcha 14 respected; seed derived
+  even when the spec word is "none"), and the clearance pre-flight
+  flies through that same orographic field. Calm terrain runs carry
+  neither and the conditions strip states why (orographic forcing is
+  wind over terrain -- VALIDITY 2.8 note). Tests:
+  tests/test_terrain_contact.py + new tests in test_webapp.py; 5 new
+  mutation guards (77 total).
+* **Conditions-effect report**: every coupled run's page ends with
+  "what the conditions did" -- a headless still-air baseline of the same
+  spec beside the run's telemetry (_effect_report; GET
+  /runs/{id}/effect.json, 404 for uncoupled runs; initEffectReport in
+  the page). Cross-host claim stated (Gate 5 parity); optional step,
+  the clip survives its failure. Standalone A/B in runs/ab_terrain_air/.
+
+**Phase 9 (2026-08-11, in progress -- docs/BRIEF_PHASE9.md governs the
+storm/tornado/city features):** DELIVERED so far: 9.1 surface classes
+(grassland/desert/ocean/forest/city; environment.surface); FOUR new
+curated bakes (fuji / everest / grand_canyon / flint_hills -- everest
+needed the N28 tile and the SLOPE-AWARE source verification, see
+glo30.verify_against_source); ON-DEMAND GLO-30 baking for any
+coordinates (POST /bake; "terrain.unbaked" refusal; dynamic scene
+registry runs/terrain/dynamic); ERA5 HISTORICAL WEATHER
+(environment.weather_date, SPEC_VERSION 3, Open-Meteo archive, stated
+wind always wins, control ridge refuses). 9.2 STORMS + 9.3 TORNADO DELIVERED
+(environment.weather_event, SPEC_VERSION 4: thunderstorm = documented
+composition, tornado = Rankine vortex both hosts + funnel VISUAL
+marker + probe-calibrated STORM_LOOK; card scene_crs for flat-scene
+position-coupled blocks; measured run e81cea71ff89: c172p rolled to
+-42.5 deg, n_z 0.66-1.64 g at 2.5 core radii). NEXT UP: 9.4 city
+building collision, UE volumetric clouds + Niagara precipitation as
+LABELED VISUAL-ONLY (task 12), NOAA HRRR deferred; WRF and trueSKY
+refused (recorded).
 
 ## State
 
@@ -67,8 +117,8 @@ guards (selftest refusal, graded-set freeze).
 
 
 ```bash
-.venv/bin/pytest                          # 307 tests
-./scripts/mutation_check.sh               # 62 guards, all load-bearing
+.venv/bin/pytest                          # 395 tests
+./scripts/mutation_check.sh               # 77 guards, all load-bearing
 ./scripts/ue_preflight.sh                 # "Preflight OK"
 ./scripts/build_ue.sh                     # builds the UE host
 .venv/bin/python experiments/gate5_ue_parity.py    # gate 5 end to end
@@ -317,3 +367,23 @@ the parity discipline, and the do-not-regress list)
     now carry collision_terrain and a pre-flown clearance plan
     (plan_terrain_flight: defaulted altitude raised + recorded, stated
     altitude refused by name).
+25. **Contact-check the trimmed state BEFORE the first step.** An aircraft
+    whose spec puts a wing inside the terrain integrates one full step of
+    ground-reaction chaos (metres of gear compression -> enormous forces)
+    before any per-step check can fire; run_spec therefore checks the
+    trimmed initial state at t=0 and refuses immediately. Also: the span
+    stations skip out-of-raster positions on purpose -- the heightfield's
+    edge CLAMP would otherwise manufacture a boundary cliff and kill
+    every run that grazes the raster edge.
+
+26. **The funnel mesh renders BLACK under both vertex-colour materials**
+    (lit AND the new M_VertexColorUnlit) while the terrain renders its
+    vertex colours fine -- five probes, bit-identical frames, colours
+    never reached the shading. Open question (procedural-section colour
+    path?); the funnel ships on the DEFAULT material (solid grey,
+    provably visible in the storm light). Frame-45 pixel sampling also
+    misled for a while: diff a no-tornado card at FRAME 0 (before
+    physics diverges) to isolate what the funnel contributes. The
+    wall-cloud disc was removed (a 700 m disc at chase distance reads
+    as a screen-filling artifact); funnel spin runs at the model's own
+    core rate omega = v_max/r_core from SIM time (replay-identical).

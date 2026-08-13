@@ -313,7 +313,8 @@ void AFlightSimInteractiveMode::Tick(float DeltaSeconds)
 		SimTimeSeconds += SubstepSeconds;
 		Accumulator -= SubstepSeconds;
 		++SubstepCount;
-		if (Scenario.Crashed(SimTimeSeconds, Error))
+		if (Scenario.Crashed(SimTimeSeconds, Error)
+		    || Scenario.AirframeImpact(SimTimeSeconds, Error))
 		{
 			FailAndQuit(Error);
 			return;

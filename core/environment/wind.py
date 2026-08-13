@@ -87,9 +87,11 @@ class LogProfileWind(WindProvider):
     #: Table 9-6; WMO Guide No. 8). A subset with unambiguous words.
     ROUGHNESS_M = {
         "water": 0.0002,
+        "smooth": 0.005,       # featureless land: desert, beaches, ice
         "open": 0.03,          # open flat terrain, grass
         "suburban": 0.5,
         "forest": 1.0,
+        "city": 2.0,           # centres of large towns and cities
     }
     STANDARD = ("log wind profile u(z) = (u*/k) ln(z/z0), neutral surface "
                 "layer; z0 from Davenport-Wieringa roughness classes "
@@ -143,15 +145,25 @@ class LogProfileWind(WindProvider):
             for terrain, z0 in self.ROUGHNESS_M.items()
         ]
 
-    def card_block(self) -> Dict[str, float]:
-        """The run card's ``log_profile`` block for the UE host's port."""
-        return {
+    def card_block(self, carries_base: bool = False) -> Dict[str, float]:
+        """The run card's ``log_profile`` block for the UE host's port.
+
+        ``carries_base`` (Phase 9.1 surface classes): the profile IS the
+        horizontal wind -- its reference sits at the surface-layer top so
+        cruise flight sees exactly the spec's wind -- and the UE step
+        REPLACES the base wind with it instead of adding. Phase 7 cards
+        omit the key and stay additive, byte-identical.
+        """
+        block = {
             "reference_speed_mps": self.reference_speed_mps,
             "from_deg": self.from_deg,
             "reference_height_m": self.reference_height_m,
             "z0_m": self.z0_m,
             "surface_layer_top_m": self.SURFACE_LAYER_TOP_M,
         }
+        if carries_base:
+            block["carries_base"] = True
+        return block
 
     def provenance(self) -> Dict[str, Any]:
         return {**super().provenance(),

@@ -292,7 +292,9 @@ $("answer").addEventListener("click", () => {
              answers: collectAnswers()});
 });
 
-$("run").addEventListener("click", async () => {
+$("run").addEventListener("click", () => startRun(true));
+
+async function startRun(mayBake) {
   const response = await fetch("/run", {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
@@ -310,9 +312,32 @@ $("run").addEventListener("click", async () => {
       `server-side; see the verdict above</span>`;
     return;
   }
+  if (payload.refused === "terrain.unbaked" && mayBake) {
+    // Stated coordinates with no bake yet: fetch + verify that terrain
+    // (GLO-30 on-demand), then run again. Once per click -- a second
+    // refusal is a real error, not a retry loop.
+    $("status").textContent =
+      `baking GLO-30 terrain for ${payload.latitude.toFixed(3)}, ` +
+      `${payload.longitude.toFixed(3)} — first fetch downloads elevation ` +
+      `tiles and can take a few minutes...`;
+    const baked = await fetch("/bake", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({latitude: payload.latitude,
+                            longitude: payload.longitude}),
+    });
+    const scene = await baked.json();
+    if (!baked.ok) {
+      $("status").innerHTML = `<span class="verdict-refused">terrain ` +
+        `bake failed: ${scene.error}</span>`;
+      return;
+    }
+    $("status").textContent = `baked and verified: ${scene.title}`;
+    return startRun(false);
+  }
   if (payload.refused) {
     $("status").innerHTML =
-      `<span class="verdict-refused">refused: ${payload.refused}</span>`;
+      `<span class="verdict-refused">refused: ${payload.refused}` +
+      (payload.message ? ` — ${payload.message}` : "") + `</span>`;
     return;
   }
   activeRun = payload.run_id;
@@ -320,7 +345,7 @@ $("run").addEventListener("click", async () => {
     `${payload.digest.slice(0, 16)})`;
   $("clipArea").innerHTML = "";
   poll();
-});
+}
 
 async function poll() {
   if (!activeRun) return;
@@ -340,8 +365,10 @@ async function poll() {
       `href="/runs/${activeRun}/provenance.json">provenance</a> · ` +
       `<a style="color:#6fb3e0" ` +
       `href="/runs/${activeRun}/telemetry.json">telemetry</a></div>` +
-      `</div><div class="aeroSide" id="aeroSide"></div></div>`;
+      `</div><div class="aeroSide" id="aeroSide"></div></div>` +
+      `<div id="effectArea"></div>`;
     initAeroPanel(activeRun, run);
+    initEffectReport(activeRun);
   } else if (run.status !== "failed") {
     setTimeout(poll, 2000);
   }
@@ -428,7 +455,13 @@ async function initAeroPanel(runId, run) {
     context.fillStyle = grey;
     const ground = String(conditions.physics_ground || "");
     context.fillText(ground.slice(0, 58), 10, y);
-    y += 20;
+    y += 14;
+    if (conditions.surface) {
+      // Phase 9.1 ground-cover class: roughness + thermal basis, stated.
+      context.fillText(String(conditions.surface).slice(0, 58), 10, y);
+      y += 14;
+    }
+    y += 6;
 
     // -- alpha / beta dials ----------------------------------------------
     const alpha = col("alpha_deg", index), beta = col("beta_deg", index);
@@ -622,6 +655,113 @@ async function initAeroPanel(runId, run) {
   video.addEventListener("timeupdate", draw);
   video.addEventListener("seeked", draw);
   draw();
+}
+
+// ===================== the conditions-effect report =======================
+// Baseline vs actual for terrain-coupled runs: the server flies the SAME
+// spec headlessly with the terrain-air coupling severed and serves both
+// series at /runs/{id}/effect.json. Runs without coupling have no report
+// (404) and this section simply does not appear -- nothing is approximated.
+
+async function initEffectReport(runId) {
+  const area = $("effectArea");
+  if (!area) return;
+  let effect = null;
+  try {
+    const response = await fetch(`/runs/${runId}/effect.json`);
+    if (response.ok) effect = await response.json();
+  } catch (error) { /* the report is optional; the clip is not */ }
+  if (!effect || !effect.channels || !effect.channels.t) return;
+
+  const t = effect.channels.t;
+  const stats = effect.stats;
+  const ratio = (ch) => {
+    const b = stats[ch].baseline.rms, a = stats[ch].actual.rms;
+    if (b <= 1e-9) return null;
+    const r = a / b;
+    // A near-perfectly-smooth baseline makes the quotient true but
+    // unreadable ("4566x"); past 99x the honest statement is the pair.
+    return r > 99 ? null : r;
+  };
+  const lost = (s) => (s.max - s.min);
+  const fmt = (x, d) => x == null ? "n/a" : x.toFixed(d);
+
+  const wind = stats.wind_down_mps.actual;
+  const tiles = [
+    [`${fmt(-wind.max, 2)} … ${fmt(-wind.min, 2)} m/s`,
+     "terrain-driven vertical air (+ up); baseline is exactly 0"],
+    [ratio("n_z") != null ? `${fmt(ratio("n_z"), 1)}×`
+       : `${fmt(stats.n_z.baseline.rms, 3)} → ${fmt(stats.n_z.actual.rms, 3)} g`,
+     `load-factor roughness (n_z RMS${ratio("n_z") != null ? "" :
+       "; still-air baseline is near-perfectly smooth"})`],
+    [ratio("alpha_deg") != null ? `${fmt(ratio("alpha_deg"), 1)}×`
+       : `${fmt(stats.alpha_deg.baseline.rms, 3)} → ` +
+         `${fmt(stats.alpha_deg.actual.rms, 3)}°`,
+     `angle-of-attack jitter (RMS${ratio("alpha_deg") != null ? ", deg" :
+       "; still-air baseline is near-perfectly smooth"})`],
+    [`${fmt(lost(stats.altitude_m.actual), 1)} m vs ` +
+     `${fmt(lost(stats.altitude_m.baseline), 1)} m`,
+     "altitude band flown, coupled vs baseline"],
+  ];
+
+  area.innerHTML =
+    `<div class="card" style="margin-top:.8rem">` +
+    `<h3 style="margin:.1rem 0 .5rem">what the conditions did` +
+    `<span class="dim" style="font-weight:normal"> — this run vs the same ` +
+    `flight in still air over the same terrain</span></h3>` +
+    `<div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem">` +
+    tiles.map(([v, k]) =>
+      `<div style="flex:1;min-width:150px;background:#10151b;border:1px ` +
+      `solid #232d38;border-radius:6px;padding:.45rem .6rem">` +
+      `<div style="font-size:16px;color:#e0b452">${v}</div>` +
+      `<div class="dim" style="font-size:11px">${k}</div></div>`).join("") +
+    `</div>` +
+    `<div style="display:flex;gap:.8rem;flex-wrap:wrap">` +
+    `<canvas id="fxWind" width="440" height="150"></canvas>` +
+    `<canvas id="fxNz" width="440" height="150"></canvas>` +
+    `<canvas id="fxAlt" width="440" height="150"></canvas>` +
+    `</div>` +
+    `<div class="formula">baseline (blue) = ${effect.claim} ` +
+    `${effect.samples} samples at ${effect.interval_s}s.</div></div>`;
+
+  const drawPair = (id, title, unit, b, a, flip) => {
+    const canvas = document.getElementById(id);
+    const context = canvas.getContext("2d");
+    const W = canvas.width, H = canvas.height, L = 44, R = 6, T = 18, B = 16;
+    const bb = flip ? b.map(x => -x) : b, aa = flip ? a.map(x => -x) : a;
+    let lo = Math.min(...bb, ...aa), hi = Math.max(...bb, ...aa);
+    const pad = ((hi - lo) || 1) * 0.1; lo -= pad; hi += pad;
+    const x = i => L + (W - L - R) * t[i] / t[t.length - 1];
+    const y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+    context.clearRect(0, 0, W, H);
+    context.font = "10px Menlo, monospace";
+    context.fillStyle = "#8a97a1";
+    context.fillText(title + " (" + unit + ")", L, 11);
+    context.strokeStyle = "#232d38";
+    context.fillStyle = "#7d8a93";
+    [lo + pad, (lo + hi) / 2, hi - pad].forEach(v => {
+      context.beginPath();
+      context.moveTo(L, y(v)); context.lineTo(W - R, y(v)); context.stroke();
+      const label = v.toPrecision(4)
+        .replace(/\.(\d*?)0+$/, ".$1").replace(/\.$/, "");
+      context.fillText(label, 2, y(v) + 3);
+    });
+    const line = (s, colour) => {
+      context.strokeStyle = colour; context.lineWidth = 1.5;
+      context.beginPath();
+      s.forEach((v, i) => i ? context.lineTo(x(i), y(v))
+                            : context.moveTo(x(0), y(v)));
+      context.stroke();
+    };
+    line(bb, "#6fb3e0");   // baseline
+    line(aa, "#e0b452");   // actual
+  };
+  const ch = effect.channels;
+  drawPair("fxWind", "vertical air, + up", "m/s",
+           ch.wind_down_mps.baseline, ch.wind_down_mps.actual, true);
+  drawPair("fxNz", "load factor", "g", ch.n_z.baseline, ch.n_z.actual, false);
+  drawPair("fxAlt", "altitude", "m", ch.altitude_m.baseline,
+           ch.altitude_m.actual, false);
 }
 </script>
 </body>

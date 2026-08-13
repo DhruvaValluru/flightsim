@@ -249,15 +249,21 @@ class AllenThermals(WindProvider):
                       f"(area-mean w ~ 0)"))
         return terms
 
-    def card_block(self, origin_x_m: float, origin_y_m: float) -> Dict[str, Any]:
+    def card_block(self, origin_x_m: float, origin_y_m: float,
+                   crs: Optional[str] = None) -> Dict[str, Any]:
         """The run card's ``thermals`` block for the UE host's port.
 
         The origin anchors the local frame in the projected CRS (the same
         convention as every other coupling); positions were drawn once, from
         the spec seed, at construction and travel verbatim. The manifest's
         thermals selftest grid pins the C++ field against :meth:`w_at`.
+
+        ``crs`` (Phase 9.1): a flat-scene surface run has no terrain block
+        to declare the projection, so this block may carry it (the spec
+        origin's UTM zone); the UE host applies it only when no terrain
+        already set one.
         """
-        return {
+        block = {
             "wstar_mps": self.wstar_mps,
             "zi_m": self.zi_m,
             "area_north_m": self.area_north_m,
@@ -266,6 +272,9 @@ class AllenThermals(WindProvider):
             "origin_y_m": float(origin_y_m),
             "positions_m": [list(p) for p in self.positions],
         }
+        if crs:
+            block["crs"] = str(crs)
+        return block
 
     def provenance(self) -> Dict[str, Any]:
         return {**super().provenance(),

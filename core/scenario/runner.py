@@ -63,10 +63,70 @@ def environment_for(spec: ScenarioSpec) -> EnvironmentStack:
     rather than being quietly rounded to something it does know.
     """
     stack = EnvironmentStack()
+    from ..environment.surface import surface_class
+
+    surface = surface_class(str(spec.surface.value))
     wind_speed = float(spec.wind_speed.value)
-    if wind_speed > 0.0:
+    if surface is not None and wind_speed > 0.0:
+        # The surface-layer log profile CARRIES the whole horizontal wind
+        # (reference at the layer top): at and above 300 m AGL it is held at
+        # exactly the spec's wind, so cruise flight is unchanged; below, the
+        # wind honestly decays toward the class's roughness length. Trim
+        # still happens in the spec wind (configure_from_spec) -- correct at
+        # cruise, a stated approximation below 300 m (BRIEF_PHASE9 9.1).
+        from ..environment.wind import LogProfileWind
+
+        stack.add(LogProfileWind(
+            u.kt_to_mps(wind_speed), float(spec.wind_direction.value),
+            reference_height_m=LogProfileWind.SURFACE_LAYER_TOP_M,
+            terrain=surface.roughness))
+    elif wind_speed > 0.0:
         stack.add(SteadyWind(u.kt_to_mps(wind_speed),
                              float(spec.wind_direction.value)))
+    if surface is not None and surface.thermals is not None:
+        # Thermal forcing is buoyancy: it works in calm air too. (w*, zi)
+        # and their basis (a stated TM Table 2 anchor or proxy) come from
+        # the class table; the ocean's None attaches nothing.
+        from ..environment.thermals import AllenThermals
+
+        wstar, zi = surface.thermals
+        stack.add(AllenThermals(
+            wstar_mps=wstar, zi_m=zi,
+            area_north_m=4000.0, area_east_m=4000.0,
+            origin_north_m=-2000.0, origin_east_m=-2000.0,
+            seed=int(spec.seed.value)))
+
+    event = str(spec.weather_event.value)
+    if event in ("thunderstorm", "tornado"):
+        # Phase 9.2/9.3: the severe-weather feature placed ahead on the
+        # track (45% of the still-air run) exactly as the webapp places its
+        # card blocks -- the headless host honours the spec's event rather
+        # than flying without it (§1.6). Frame: the provider's own
+        # tangent-plane scene coords about the geographic origin.
+        import math as _math
+
+        metres_per_degree = 111_320.0
+        lat = float(spec.latitude.value)
+        lon = float(spec.longitude.value)
+        n0 = lat * metres_per_degree
+        e0 = (lon * metres_per_degree * _math.cos(_math.radians(lat)))
+        seconds = float(spec.duration.value)
+        ahead = 0.45 * u.kt_to_mps(float(spec.airspeed.value)) * seconds
+        hdg = _math.radians(float(spec.heading.value))
+        centre_n = n0 + ahead * _math.cos(hdg)
+        centre_e = e0 + ahead * _math.sin(hdg)
+        if event == "tornado":
+            from ..environment.tornado import R_CORE_M, TornadoVortex
+
+            aim = str(spec.weather_event.detail.get("aim", "abeam"))
+            offset = 0.0 if aim == "core" else 2.5 * R_CORE_M
+            stack.add(TornadoVortex(
+                centre_n + offset * _math.cos(hdg + _math.pi / 2),
+                centre_e + offset * _math.sin(hdg + _math.pi / 2)))
+        else:
+            from ..environment.downburst import Downburst
+
+            stack.add(Downburst(centre_n, centre_e))
 
     intensity = str(spec.turbulence.value)
     try:
@@ -169,6 +229,21 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         report.raise_if_invalid()
 
     fdm = configure_from_spec(spec)
+    contact = None
+    if terrain_ground is not None:
+        # The wings feel the terrain, not just the CG (core.terrain.contact):
+        # span stations from the FDM's own metrics/bw-ft, checked every step.
+        # A station below the surface raises TerrainImpactError -- an impact
+        # is a crash, and a crash produces no clean telemetry.
+        from ..terrain.contact import AirframeContact, TerrainImpactError
+
+        contact = AirframeContact.from_fdm(terrain_ground, fdm)
+        # The trimmed initial state is checked before the first step: a run
+        # that BEGINS with a wing inside the mountain refuses immediately
+        # rather than integrating one step of ground-reaction chaos first.
+        impact = contact.check(fdm.state(), 0.0)
+        if impact is not None:
+            raise TerrainImpactError(impact)
     environment = environment_for(spec)
     # Turbulence seeds a stochastic process, so it is configured once, after
     # trim and before stepping. Re-writing it inside the loop would re-seed the
@@ -194,6 +269,12 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
             if terrain_ground is not None:
                 terrain_ground.apply(fdm)
             fdm.step()
+            if contact is not None:
+                impact = contact.check(fdm.state(), (i + 1) / fdm.rate_hz)
+                if impact is not None:
+                    from ..terrain.contact import TerrainImpactError
+
+                    raise TerrainImpactError(impact)
             if autopilot is not None and i % every == 0:
                 autopilot.update()
             recorder.sample()
@@ -220,6 +301,8 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         "physics_ground": ("flat slab (spec terrain elevation)"
                            if terrain_ground is None
                            else terrain_ground.provenance()),
+        "airframe_contact": (None if contact is None
+                             else contact.provenance()),
         "output_digest": output_digest,
         "samples": len(recorder),
         "validation": {

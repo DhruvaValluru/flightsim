@@ -40,7 +40,13 @@ from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import validate  # noqa: E402
 from webapp.runs import (  # noqa: E402
     RunManager,
+    apply_historical_weather,
+    apply_weather_event,
+    bake_on_demand,
+    coupling_needs_seed,
     derive_seed,
+    needs_dynamic_bake,
+    pick_scene,
     place_on_scene,
     plan_terrain_flight,
     project_for_ue_host,
@@ -159,8 +165,32 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # turbulence seed and the UE-host projection (open loop, mass held) are
     # spec edits with provenance, and the digest of the projected spec is
     # the one the card, the manifest and the provenance sidecar all carry.
-    derive_seed(spec)
+    # USER-stated coordinates with no bake yet refuse by name BEFORE any
+    # spec edit: the page bakes via POST /bake and simply runs again --
+    # never a silent flat slab standing in for a real place the user named.
+    unbaked = needs_dynamic_bake(spec)
+    if unbaked is not None:
+        return JSONResponse({"refused": "terrain.unbaked", **unbaked},
+                            status_code=409)
     place_on_scene(spec)
+    # Severe-weather composition edits (thunderstorm -> severe turbulence
+    # when the word was defaulted): recorded, pre-digest, like every other
+    # transformation.
+    apply_weather_event(spec)
+    # Historical weather (ERA5) applies AFTER placement (coordinates are
+    # final) and BEFORE the seed/digest: the reanalysis wind is a recorded
+    # spec edit like every other transformation, or a named refusal.
+    weather_refusal = apply_historical_weather(spec)
+    if weather_refusal is not None:
+        return JSONResponse({"refused": "weather", **weather_refusal},
+                            status_code=409)
+    # The seed derives BEFORE the digest is answered. A run can be
+    # stochastic even with turbulence word "none" -- lee-rotor over windy
+    # terrain, or surface thermals whose positions draw from the seed --
+    # and coupling_needs_seed is the ONE predicate both this endpoint and
+    # the render flow consult, so the card's digest is always the digest
+    # this response advertises.
+    derive_seed(spec, terrain_coupled=coupling_needs_seed(spec))
     # Terrain scenes: pre-fly the scripted track over the scene's own
     # raster (a defaulted altitude may be raised, recorded; a stated
     # altitude that cannot keep clearance refuses by name below).
@@ -220,6 +250,39 @@ def run_telemetry(run_id: str):
     path = manager.out_root / run_id / "telemetry.json"
     if run is None or run.status != "done" or not path.is_file():
         return JSONResponse({"error": "no telemetry"}, status_code=404)
+    return FileResponse(path, media_type="application/json")
+
+
+class BakeRequest(BaseModel):
+    latitude: float
+    longitude: float
+
+
+@app.post("/bake")
+def bake_endpoint(request: BakeRequest) -> JSONResponse:
+    """Fetch + bake + verify GLO-30 for arbitrary coordinates (the page
+    calls this when /run refuses terrain.unbaked). Synchronous: the first
+    fetch downloads 1x1 degree tiles and takes minutes; cached afterwards.
+    Failure is a named error -- open ocean has no tiles, an unverified
+    bake is never written."""
+    try:
+        entry = bake_on_demand(request.latitude, request.longitude)
+    except Exception as exc:
+        return JSONResponse(
+            {"error": f"{type(exc).__name__}: {exc}"}, status_code=502)
+    return JSONResponse(entry)
+
+
+@app.get("/runs/{run_id}/effect.json")
+def run_effect(run_id: str):
+    """The conditions-effect report: this run's telemetry against a headless
+    still-air baseline of the same spec (written only for terrain runs with
+    wind -- the coupled ones). 404 until the run completes, or when the run
+    carries no coupling to report on."""
+    run = manager.get(run_id)
+    path = manager.out_root / run_id / "effect.json"
+    if run is None or run.status != "done" or not path.is_file():
+        return JSONResponse({"error": "no effect report"}, status_code=404)
     return FileResponse(path, media_type="application/json")
 
 

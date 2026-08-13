@@ -13,6 +13,8 @@
 #include "GameFramework/WorldSettings.h"
 #include "GeoReferencingSystem.h"
 #include "HAL/ThreadManager.h"
+#include "MaterialDomain.h"
+#include "Materials/Material.h"
 #include "Misc/FileHelper.h"
 #include "ProceduralMeshComponent.h"
 #include "Serialization/JsonReader.h"
@@ -327,6 +329,27 @@ bool FFlightSimScenarioWorld::ReadCard(const FString& Path,
 		}
 	}
 
+	// Optional tornado block (Phase 9.3): kinematic Rankine vortex, every
+	// parameter computed in Python (core/environment/tornado.py card_block);
+	// this host derives nothing.
+	const TSharedPtr<FJsonObject>* TornadoJson = nullptr;
+	if (Root->TryGetObjectField(TEXT("tornado"), TornadoJson) && TornadoJson != nullptr)
+	{
+		Out.bTornado = true;
+		if (!ReadNumber(*TornadoJson, TEXT("origin_x_m"), Out.TornadoOriginXMetres, Error) ||
+		    !ReadNumber(*TornadoJson, TEXT("origin_y_m"), Out.TornadoOriginYMetres, Error) ||
+		    !ReadNumber(*TornadoJson, TEXT("centre_north_m"), Out.TornadoCentreNorthMetres, Error) ||
+		    !ReadNumber(*TornadoJson, TEXT("centre_east_m"), Out.TornadoCentreEastMetres, Error) ||
+		    !ReadNumber(*TornadoJson, TEXT("v_max_mps"), Out.TornadoVMaxMps, Error) ||
+		    !ReadNumber(*TornadoJson, TEXT("r_core_m"), Out.TornadoRCoreMetres, Error) ||
+		    !ReadNumber(*TornadoJson, TEXT("w_max_mps"), Out.TornadoWMaxMps, Error) ||
+		    !ReadNumber(*TornadoJson, TEXT("top_m"), Out.TornadoTopMetres, Error) ||
+		    !ReadNumber(*TornadoJson, TEXT("fade_top_m"), Out.TornadoFadeTopMetres, Error))
+		{
+			return false;
+		}
+	}
+
 	// Optional rotor block (Phase 7 1.3): per-step W20 coupled to the lee
 	// sink. Requires the orographic block -- the rotor is ITS lee field.
 	const TSharedPtr<FJsonObject>* RotorJson = nullptr;
@@ -362,6 +385,12 @@ bool FFlightSimScenarioWorld::ReadCard(const FString& Path,
 		{
 			return false;
 		}
+		// Phase 9.1 surface classes: when true the profile CARRIES the whole
+		// horizontal wind (reference at the layer top = the spec's wind) and
+		// Step() REPLACES the base instead of adding. Absent on Phase 7
+		// cards, whose additive behaviour stays byte-identical.
+		(*LogProfileJson)->TryGetBoolField(TEXT("carries_base"),
+		                                   Out.bLogProfileCarriesBase);
 	}
 
 	// Optional thermals block (Phase 7 2.2): Allen's field, every position
@@ -379,6 +408,11 @@ bool FFlightSimScenarioWorld::ReadCard(const FString& Path,
 		{
 			return false;
 		}
+		// Phase 9.1: a flat-scene surface run has no terrain to declare the
+		// projected CRS, so the thermals block may carry it (the UTM zone of
+		// the spec origin, chosen in Python). Populate() applies it only
+		// when no terrain block already did.
+		(*ThermalsJson)->TryGetStringField(TEXT("crs"), Out.ThermalsCrs);
 		const TArray<TSharedPtr<FJsonValue>>* Positions = nullptr;
 		if (!(*ThermalsJson)->TryGetArrayField(TEXT("positions_m"), Positions) ||
 		    Positions == nullptr || Positions->Num() == 0)
@@ -437,6 +471,7 @@ bool FFlightSimScenarioWorld::ReadCard(const FString& Path,
 
 	// Optional real heightfield collision (Phase 7 1.2).
 	Root->TryGetStringField(TEXT("collision_terrain"), Out.CollisionTerrainPath);
+	Root->TryGetStringField(TEXT("scene_crs"), Out.SceneCrs);
 
 	bool bHoldState = false;
 	if (!Root->TryGetBoolField(TEXT("hold_state"), bHoldState))
@@ -598,6 +633,17 @@ bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
 		}
 		GeoReferencing->ProjectedCRS = CollisionTerrain.Crs;
 	}
+	if ((!Card.SceneCrs.IsEmpty() || !Card.ThermalsCrs.IsEmpty())
+	    && !Card.bOrographic && Card.CollisionTerrainPath.IsEmpty())
+	{
+		// Phase 9: a flat-scene run has no terrain to anchor the
+		// projection, so the card declares it (the spec origin's UTM zone,
+		// chosen in Python; card-level scene_crs, with the thermals
+		// block's own crs honoured for older cards) -- one frame for both
+		// hosts rather than a reliance on the plugin's default.
+		GeoReferencing->ProjectedCRS = Card.SceneCrs.IsEmpty()
+			? Card.ThermalsCrs : Card.SceneCrs;
+	}
 	GeoReferencing->ApplySettings();
 
 	if (Card.bOrographic)
@@ -719,6 +765,155 @@ bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
 		// Top face at engine Z = 0, which the georeferencing origin puts at
 		// the spec's terrain elevation.
 		Ground->SetActorLocation(FVector(0.0, 0.0, -HalfThicknessCm));
+	}
+
+	// -- tornado funnel marker (Phase 9.3, VISUAL) -------------------------
+	// A dark tapered tube at the vortex axis, ground to top_m: a SCHEMATIC
+	// MARKER of where the modelled core is, not condensation physics -- the
+	// wind field above cares nothing for this mesh, and the conditions
+	// strip labels it. Vertex-coloured procedural mesh like the terrain
+	// (gotcha 6: the colour was picked by probe render, not theory).
+	if (Card.bTornado)
+	{
+		// A ragged, sinuous, ROTATING funnel hanging from a wall-cloud disc,
+		// with a dust skirt at ground contact. Still a schematic marker of
+		// the modelled core (no condensation physics, no collision, stated
+		// on the conditions strip) -- but it now moves like the model: the
+		// mesh spins at the vortex's own solid-body core rate
+		// omega = v_max / r_core, driven by SIM time in ApplyStepWrites so
+		// replays reproduce it frame for frame. All shape noise is
+		// deterministic trigonometry seeded from the card's seed.
+		const int32 Segments = 24;
+		const int32 Rings = 20;
+		const double RCore = Card.TornadoRCoreMetres;
+		const double Phase = FMath::Fmod(static_cast<double>(Card.TurbulenceSeed), 6.28);
+		double GroundMetres = 0.0;
+		FVector CentreProjected(
+			Card.TornadoOriginXMetres + Card.TornadoCentreEastMetres,
+			Card.TornadoOriginYMetres + Card.TornadoCentreNorthMetres, 0.0);
+		if (bCollisionTerrainReady)
+		{
+			GroundMetres = CollisionTerrain.ElevationAt(CentreProjected.X,
+			                                            CentreProjected.Y);
+		}
+		FVector AxisEngine;
+		GeoReferencing->ProjectedToEngine(
+			FVector(CentreProjected.X, CentreProjected.Y, GroundMetres),
+			AxisEngine);
+
+		TArray<FVector> Vertices;
+		TArray<FVector> Normals;
+		TArray<FLinearColor> Colours;
+		TArray<int32> Triangles;
+		auto AddRing = [&](double RadiusMetres, double ElevationMetres,
+		                   double WobbleMetres, const FLinearColor& Colour,
+		                   double Ragged)
+		{
+			const double F = ElevationMetres / Card.TornadoTopMetres;
+			const double OffsetX = WobbleMetres
+				* FMath::Sin(2.2 * PI * F + Phase);
+			const double OffsetY = WobbleMetres
+				* FMath::Cos(1.7 * PI * F + Phase * 0.7);
+			for (int32 Segment = 0; Segment < Segments; ++Segment)
+			{
+				const double Angle = 2.0 * PI * Segment / Segments;
+				const double R = RadiusMetres
+					* (1.0 + Ragged * 0.10 * FMath::Sin(3.0 * Angle + 7.0 * F + Phase)
+					       + Ragged * 0.06 * FMath::Sin(5.0 * Angle - 11.0 * F));
+				FVector Engine;
+				GeoReferencing->ProjectedToEngine(
+					FVector(CentreProjected.X + OffsetX + R * FMath::Cos(Angle),
+					        CentreProjected.Y + OffsetY + R * FMath::Sin(Angle),
+					        GroundMetres + ElevationMetres), Engine);
+				Vertices.Add(Engine - AxisEngine);
+				// Radial normal, computed THROUGH the projection so the
+				// engine-frame direction is right by construction (a mesh
+				// with no normals lights black -- measured on the first
+				// probe of this funnel).
+				FVector Outward;
+				GeoReferencing->ProjectedToEngine(
+					FVector(CentreProjected.X + OffsetX
+					            + (R + 1.0) * FMath::Cos(Angle),
+					        CentreProjected.Y + OffsetY
+					            + (R + 1.0) * FMath::Sin(Angle),
+					        GroundMetres + ElevationMetres), Outward);
+				Normals.Add((Outward - Engine).GetSafeNormal());
+				Colours.Add(Colour);
+			}
+		};
+		auto Stitch = [&](int32 RingA, int32 RingB)
+		{
+			for (int32 Segment = 0; Segment < Segments; ++Segment)
+			{
+				const int32 A = RingA * Segments + Segment;
+				const int32 B = RingA * Segments + (Segment + 1) % Segments;
+				const int32 C = RingB * Segments + Segment;
+				const int32 D = RingB * Segments + (Segment + 1) % Segments;
+				// Both windings: reads from every side, no two-sided material.
+				Triangles.Append({A, B, C, B, D, C});
+				Triangles.Append({A, C, B, B, C, D});
+			}
+		};
+		int32 RingIndex = 0;
+		// Dust skirt: wide brown-grey cone at ground contact.
+		AddRing(2.2 * RCore, 0.0, 0.0,
+		        FLinearColor(0.30f, 0.24f, 0.185f, 1.0f), 0.8);
+		AddRing(0.45 * RCore, 0.055 * Card.TornadoTopMetres, 0.0,
+		        FLinearColor(0.24f, 0.20f, 0.165f, 1.0f), 0.6);
+		Stitch(RingIndex, RingIndex + 1); RingIndex += 2;
+		// The funnel: concave profile, narrow at ground, flaring to the top.
+		const int32 FunnelFirstRing = RingIndex;
+		for (int32 Ring = 0; Ring < Rings; ++Ring)
+		{
+			const double F = static_cast<double>(Ring) / (Rings - 1);
+			const double Radius = RCore * (0.26 + 0.92 * FMath::Pow(F, 1.8));
+			const float Shade = 0.14f + 0.20f * static_cast<float>(F);
+			AddRing(Radius, F * Card.TornadoTopMetres, 0.35 * RCore * F,
+			        FLinearColor(Shade, Shade, Shade * 1.05f, 1.0f), 1.0);
+			if (Ring > 0)
+			{
+				Stitch(FunnelFirstRing + Ring - 1, FunnelFirstRing + Ring);
+			}
+		}
+		RingIndex += Rings;
+		// No wall-cloud disc: at chase-camera distances a 700 m disc reads
+		// as a screen-filling artifact, not a cloud (probe-measured). The
+		// funnel flares wide at its top instead; real cloud cover is task
+		// 12's volumetric pass.
+
+		AActor* Funnel = World->SpawnActor<AActor>();
+		UProceduralMeshComponent* FunnelMesh =
+			NewObject<UProceduralMeshComponent>(Funnel, TEXT("TornadoFunnel"));
+		Funnel->SetRootComponent(FunnelMesh);
+		FunnelMesh->SetMobility(EComponentMobility::Movable);
+		FunnelMesh->CreateMeshSection_LinearColor(0, Vertices, Triangles,
+		                                          Normals, {}, Colours, {},
+		                                          false);
+		FunnelMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		FunnelMesh->SetCastShadow(false);
+		// The DEFAULT material, on purpose: both vertex-colour materials
+		// rendered this mesh black under the storm sun (probe-measured,
+		// lit AND unlit -- the vertex-colour path for procedural sections
+		// is an open question recorded in NEXT.md), while the default
+		// grid material provably reads as a solid grey funnel in this
+		// exact light. Visible and honest beats subtle and invisible.
+		FunnelMesh->SetMaterial(0, UMaterial::GetDefaultMaterial(
+			EMaterialDomain::MD_Surface));
+		FunnelMesh->RegisterComponent();
+		// Vertices are relative to the ground axis point, so rotating the
+		// actor spins the funnel about its own axis.
+		Funnel->SetActorLocation(AxisEngine);
+		TornadoFunnel = Funnel;
+		TornadoOmegaDegPerSec = FMath::RadiansToDegrees(
+			Card.TornadoVMaxMps / Card.TornadoRCoreMetres);
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("tornado: Rankine vortex v_max %.1f m/s, core %.0f m at ")
+		       TEXT("local (%.0f, %.0f) m; funnel mesh is a VISUAL marker of ")
+		       TEXT("the modelled core (rotating at the core rate ")
+		       TEXT("%.1f deg/s), not condensation"),
+		       Card.TornadoVMaxMps, Card.TornadoRCoreMetres,
+		       Card.TornadoCentreNorthMetres, Card.TornadoCentreEastMetres,
+		       TornadoOmegaDegPerSec);
 	}
 
 	// -- the aircraft ------------------------------------------------------
@@ -1238,6 +1433,16 @@ double FFlightSimScenarioWorld::ThermalWMps(double NorthMetres,
 void FFlightSimScenarioWorld::ApplyStepWrites(
 	const FFlightSimScenarioCard& Card, double TimeSeconds)
 {
+	// The funnel marker spins at the vortex core's own rate, as a function
+	// of SIM time -- deterministic, replay-identical, and honest about
+	// what it is (the modelled core's rotation made visible).
+	if (TornadoFunnel != nullptr)
+	{
+		TornadoFunnel->SetActorRotation(FRotator(
+			0.0, FMath::Fmod(TimeSeconds * TornadoOmegaDegPerSec, 360.0),
+			0.0));
+	}
+
 	// Scripted control input. Held until the next entry, so the aircraft is
 	// flying a step input rather than an impulse, and applied as an offset on
 	// top of the latched trim rather than replacing it -- replacing it would
@@ -1270,7 +1475,8 @@ void FFlightSimScenarioWorld::ApplyStepWrites(
 	// flying it while the other corrects it.
 	const bool bComposedWind =
 		Card.WindScheduleTimes.Num() > 0 || bOrographicReady
-		|| bDownburstReady || bLogProfileReady || bThermalsReady;
+		|| bDownburstReady || bLogProfileReady || bThermalsReady
+		|| Card.bTornado;
 	if (bComposedWind)
 	{
 		// Base horizontal wind: the schedule entry current at this time
@@ -1337,15 +1543,44 @@ void FFlightSimScenarioWorld::ApplyStepWrites(
 			DownFps += BurstDownMps / 0.3048;
 		}
 
+		// Tornado (Phase 9.3): the Rankine vortex at the aircraft's ACTUAL
+		// position this step, same emergent-response convention as the
+		// downburst.
+		if (Card.bTornado)
+		{
+			double North = 0.0, East = 0.0, AglMetres = 0.0;
+			LocalSceneCoords(Card.TornadoOriginXMetres,
+			                 Card.TornadoOriginYMetres, North, East, AglMetres);
+			double VortexNorthMps = 0.0, VortexEastMps = 0.0,
+			       VortexDownMps = 0.0;
+			TornadoWindMps(Card, North, East, AglMetres, VortexNorthMps,
+			               VortexEastMps, VortexDownMps);
+			NorthFps += VortexNorthMps / 0.3048;
+			EastFps += VortexEastMps / 0.3048;
+			DownFps += VortexDownMps / 0.3048;
+		}
+
 		// Log-profile shear (Phase 7 2.1): horizontal wind from the aircraft's
-		// height above ground, the surface-layer law.
+		// height above ground, the surface-layer law. Phase 9.1 surface
+		// classes set carries_base: the profile IS the horizontal wind (its
+		// reference is the layer top, so at cruise it equals the card's
+		// steady wind) and REPLACES the base -- adding it on top would
+		// double-count. Phase 7 cards stay additive, byte-identical.
 		if (bLogProfileReady)
 		{
 			const double AglMetres =
 				ReadProperty(TEXT("position/h-agl-ft")) * FeetToMetres;
 			const double SpeedMps = LogProfileSpeedMps(AglMetres);
-			NorthFps += SpeedMps * LogProfileCard.NorthUnit / 0.3048;
-			EastFps += SpeedMps * LogProfileCard.EastUnit / 0.3048;
+			if (Card.bLogProfileCarriesBase)
+			{
+				NorthFps = SpeedMps * LogProfileCard.NorthUnit / 0.3048;
+				EastFps = SpeedMps * LogProfileCard.EastUnit / 0.3048;
+			}
+			else
+			{
+				NorthFps += SpeedMps * LogProfileCard.NorthUnit / 0.3048;
+				EastFps += SpeedMps * LogProfileCard.EastUnit / 0.3048;
+			}
 		}
 
 		// Thermals (Phase 7 2.2): Allen's field at the actual position. The
@@ -1408,6 +1643,51 @@ void FFlightSimScenarioWorld::ApplyStepWrites(
 
 }
 
+void FFlightSimScenarioWorld::TornadoWindMps(
+	const FFlightSimScenarioCard& Card, double NorthMetres, double EastMetres,
+	double AglMetres, double& OutNorthMps, double& OutEastMps,
+	double& OutDownMps)
+{
+	// core/environment/tornado.py wind_components, line for line: Rankine
+	// tangential profile (solid-body core, 1/r exterior), schematic core
+	// updraft, linear fade between top_m and fade_top_m. Counter-clockwise
+	// seen from above: (north, east) = v_t * (de, -dn) / r.
+	OutNorthMps = OutEastMps = OutDownMps = 0.0;
+	double Fade = 1.0;
+	if (AglMetres >= Card.TornadoFadeTopMetres)
+	{
+		return;
+	}
+	if (AglMetres > Card.TornadoTopMetres)
+	{
+		Fade = 1.0 - (AglMetres - Card.TornadoTopMetres)
+		       / (Card.TornadoFadeTopMetres - Card.TornadoTopMetres);
+	}
+	const double Dn = NorthMetres - Card.TornadoCentreNorthMetres;
+	const double De = EastMetres - Card.TornadoCentreEastMetres;
+	const double R = FMath::Sqrt(Dn * Dn + De * De);
+	if (R < 1e-9)
+	{
+		OutDownMps = -Card.TornadoWMaxMps * Fade;
+		return;
+	}
+	double Vt, WUp;
+	if (R <= Card.TornadoRCoreMetres)
+	{
+		Vt = Card.TornadoVMaxMps * (R / Card.TornadoRCoreMetres);
+		WUp = Card.TornadoWMaxMps
+		      * (1.0 - FMath::Square(R / Card.TornadoRCoreMetres));
+	}
+	else
+	{
+		Vt = Card.TornadoVMaxMps * (Card.TornadoRCoreMetres / R);
+		WUp = 0.0;
+	}
+	OutNorthMps = Vt * (De / R) * Fade;
+	OutEastMps = Vt * (-Dn / R) * Fade;
+	OutDownMps = -WUp * Fade;
+}
+
 bool FFlightSimScenarioWorld::Crashed(double TimeSeconds, FString& Error) const
 {
 	// The plugin suspends integration on a crash and keeps ticking. Without
@@ -1417,6 +1697,77 @@ bool FFlightSimScenarioWorld::Crashed(double TimeSeconds, FString& Error) const
 	{
 		Error = FString::Printf(TEXT("aircraft crashed at %.3f s"), TimeSeconds);
 		return true;
+	}
+	return false;
+}
+
+bool FFlightSimScenarioWorld::AirframeImpact(double TimeSeconds,
+                                             FString& Error) const
+{
+	// core/terrain/contact.py is the reference: the same four span stations
+	// (fractions of the semi-span), the body vector (0, y, 0) rotated to NED
+	// by the ZYX Euler DCM's second column, the same bilinear elevation
+	// lookup, the same outside-the-raster skip. The CG is deliberately not a
+	// station -- terrain under the aircraft is the collision mesh's job, and
+	// its verdict arrives through Crashed(). Point samples, not a mesh
+	// intersection: a spire between stations, or the fuselage, is not felt.
+	if (!bCollisionTerrainReady)
+	{
+		return false;
+	}
+	static const struct { const TCHAR* Name; double Fraction; } Stations[] = {
+		{TEXT("left wingtip"), -1.0},
+		{TEXT("left mid-span"), -0.5},
+		{TEXT("right mid-span"), 0.5},
+		{TEXT("right wingtip"), 1.0},
+	};
+	const double HalfSpanMetres =
+		ReadProperty(TEXT("metrics/bw-ft")) * FeetToMetres / 2.0;
+	const double Phi = ReadProperty(TEXT("attitude/phi-rad"));
+	const double Theta = ReadProperty(TEXT("attitude/theta-rad"));
+	const double Psi = ReadProperty(TEXT("attitude/psi-rad"));
+	const double SinPhi = FMath::Sin(Phi), CosPhi = FMath::Cos(Phi);
+	const double SinTheta = FMath::Sin(Theta), CosTheta = FMath::Cos(Theta);
+	const double SinPsi = FMath::Sin(Psi), CosPsi = FMath::Cos(Psi);
+	const double Latitude = ReadProperty(TEXT("position/lat-geod-deg"));
+	const double Longitude = ReadProperty(TEXT("position/long-gc-deg"));
+	const double AltitudeMetres = ReadProperty(TEXT("position/h-sl-meters"));
+	FVector Projected;
+	GeoReferencing->GeographicToProjected(
+		FGeographicCoordinates(Longitude, Latitude, 0.0), Projected);
+
+	for (const auto& Station : Stations)
+	{
+		const double Y = Station.Fraction * HalfSpanMetres;
+		const double North = Y * (SinTheta * SinPhi * CosPsi - CosPhi * SinPsi);
+		const double East = Y * (SinTheta * SinPhi * SinPsi + CosPhi * CosPsi);
+		const double Down = Y * (CosTheta * SinPhi);
+		const double XMetres = Projected.X + East;
+		const double YMetres = Projected.Y + North;
+		// Heightfield.contains: inside the raster, or there is nothing to
+		// check against (the edge clamp would manufacture a boundary cliff).
+		const double Column = (XMetres - CollisionTerrain.OriginXMetres)
+		                      / CollisionTerrain.PixelSizeMetres;
+		const double Row = (CollisionTerrain.OriginYMetres - YMetres)
+		                   / CollisionTerrain.PixelSizeMetres;
+		if (Column < 0.0 || Column > CollisionTerrain.Width - 1
+		    || Row < 0.0 || Row > CollisionTerrain.Height - 1)
+		{
+			continue;
+		}
+		const double TerrainMetres = CollisionTerrain.ElevationAt(XMetres, YMetres);
+		const double StationAltitudeMetres = AltitudeMetres - Down;
+		if (StationAltitudeMetres < TerrainMetres)
+		{
+			Error = FString::Printf(
+				TEXT("terrain impact: %s %.1f m below the surface at ")
+				TEXT("t=%.2f s (station %.0f m MSL, terrain %.0f m MSL at ")
+				TEXT("%.5f N, %.5f E)"),
+				Station.Name, TerrainMetres - StationAltitudeMetres,
+				TimeSeconds, StationAltitudeMetres, TerrainMetres,
+				Latitude, Longitude);
+			return true;
+		}
 	}
 	return false;
 }
@@ -1433,7 +1784,7 @@ bool FFlightSimScenarioWorld::Step(const FFlightSimScenarioCard& Card,
 	FThreadManager::Get().Tick();
 	FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
 
-	return !Crashed(TimeSeconds, Error);
+	return !Crashed(TimeSeconds, Error) && !AirframeImpact(TimeSeconds, Error);
 }
 
 void FFlightSimScenarioWorld::Teardown()

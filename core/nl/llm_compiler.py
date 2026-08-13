@@ -54,6 +54,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from ..environment.surface import SURFACE_CLASSES
 from ..scenario.fields import Quantity, Source
 from ..scenario.spec import ScenarioSpec
 from ..terrain.glo30 import LOCATIONS
@@ -85,6 +86,13 @@ LOCATION_ALIASES: Dict[str, Tuple[str, ...]] = {
                    "Swiss Alps", "Monte Rosa"),
     "yosemite": ("Yosemite", "Yosemite Valley", "Sierra Nevada",
                  "Half Dome", "El Capitan"),
+    "fuji": ("Mount Fuji", "Fuji", "Fujisan", "Japan volcano"),
+    "everest": ("Everest", "Mount Everest", "the Himalayas", "Himalaya",
+                "Lhotse", "Sagarmatha"),
+    "grand_canyon": ("Grand Canyon", "the canyon", "Colorado River canyon",
+                     "Vishnu Temple"),
+    "flint_hills": ("Flint Hills", "Kansas prairie", "tallgrass prairie",
+                    "the prairie"),
 }
 
 #: Ground elevation at each bake's origin, metres MSL -- the showcase
@@ -94,6 +102,11 @@ LOCATION_ALIASES: Dict[str, Tuple[str, ...]] = {
 LOCATION_TERRAIN_ELEVATION_M: Dict[str, float] = {
     "matterhorn": 1860.0,
     "yosemite": 1230.0,
+    # Phase 9 bakes, measured from each raster at its origin (2026-08-11):
+    "fuji": 1465.0,
+    "everest": 4720.0,
+    "grand_canyon": 1340.0,
+    "flint_hills": 413.0,
 }
 
 
@@ -206,6 +219,16 @@ FIELD_VALUE_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "description": "degrees, meteorological (the bearing the wind is FROM)",
     },
     "turbulence": {"type": "string", "enum": sorted(TURBULENCE_LABELS)},
+    "surface": {"type": "string", "enum": sorted(SURFACE_CLASSES)},
+    "weather_event": {
+        "type": "string", "enum": ["none", "thunderstorm", "tornado"],
+    },
+    "weather_date": {
+        "type": "string",
+        "description": "ISO date YYYY-MM-DD ONLY when the prompt states a "
+                       "date; that day's ERA5 reanalysis wind applies. "
+                       "Never invent a date.",
+    },
 }
 
 # The schema is generated FROM the spec's field list; a field added to one
@@ -284,6 +307,11 @@ def _locations_block() -> str:
         f'terrain_elevation {LOCATION_TERRAIN_ELEVATION_M[key]:g} '
         f'(inferred), each with the place name in "from" -- never just one '
         f'of them.')
+    lines.append(
+        'Any OTHER real place: never invent coordinates. Ask ONE clarifying '
+        'question for latitude/longitude instead -- explicit coordinates '
+        '(from the prompt or the answer, source "user") are fetched and '
+        'baked on demand from the same verified GLO-30 pipeline.')
     return "\n".join(lines)
 
 
@@ -307,6 +335,12 @@ Rules:
 - Do not judge feasibility. If the prompt commands something impossible,
   extract it literally -- the validator refuses it by name, which is the
   designed path. Never soften or "fix" a stated number.
+- Ground cover maps to the surface vocabulary: grasslands/prairie/plains
+  -> "grassland", desert/dunes -> "desert", ocean/sea/open water ->
+  "ocean", forest/woods -> "forest", city/urban/downtown -> "city".
+  Each class is a documented roughness + thermal model; ground cover the
+  vocabulary lacks (swamp, tundra, ice shelf) goes to "notes", never to
+  the nearest-looking class.
 - Anything you cannot express in the schema -- unknown aircraft, cinematic
   or camera language, weather the vocabulary lacks -- goes into "notes"
   verbatim, never guessed into a field.

@@ -25,7 +25,13 @@ import yaml
 
 from .fields import Quantity, Source
 
-SPEC_VERSION = 1
+# 2 (2026-08-11): environment.surface added (Phase 9.1 ground-cover
+# classes). from_dict refuses version-1 dicts by design -- completed runs
+# recover from provenance.json, never by re-parsing an old spec.
+# 3 (2026-08-11): environment.weather_date added (ERA5 historical weather).
+# 4 (2026-08-11): environment.weather_event added (Phase 9.2/9.3 storm cell
+# and tornado -- composed/kinematic condition models, refused when unknown).
+SPEC_VERSION = 4
 
 
 @dataclass
@@ -54,6 +60,16 @@ class ScenarioSpec:
     wind_speed: Quantity
     wind_direction: Quantity
     turbulence: Quantity
+    #: Ground-cover class (core.environment.surface): roughness + thermal
+    #: forcing, or "unspecified" for no surface coupling.
+    surface: Quantity
+    #: ISO date for ERA5 historical weather (core.environment.era5), or
+    #: "none" -- the reanalysis mean wind applies as a recorded edit.
+    weather_date: Quantity
+    #: Severe-weather event: "none", "thunderstorm" (a COMPOSITION of the
+    #: existing microburst + gust front + severe turbulence), or "tornado"
+    #: (core.environment.tornado, a kinematic Rankine vortex).
+    weather_event: Quantity
 
     name: str = "scenario"
     #: Retained for provenance only. Never re-parsed to reproduce a run.
@@ -73,6 +89,9 @@ class ScenarioSpec:
         ("environment", "wind_speed"),
         ("environment", "wind_direction"),
         ("environment", "turbulence"),
+        ("environment", "surface"),
+        ("environment", "weather_date"),
+        ("environment", "weather_event"),
         ("run", "duration"),
         ("run", "rate"),
         ("run", "seed"),

@@ -145,10 +145,17 @@ def _airspeed(text: str) -> Tuple[Quantity, Quantity]:
             Quantity.inferred(float(m.group(1)), "mach", frm=m.group(0).strip()),
             Quantity.user("mach", frm="stated in prompt"),
         )
-    return (
-        Quantity.default(250.0, "kt", frm="typical transport cruise"),
-        Quantity.default("cas"),
-    )
+    return (None, None)   # defaulted per aircraft by the caller
+
+
+#: Defaulted cruise speed PER AIRCRAFT -- "typical transport cruise" was
+#: 250 kt for everything, which a c172p cannot fly, so a bare "fly the
+#: c172p through a tornado" refused on trim before the tornado ever
+#: mattered. Values sit mid-envelope for each model.
+CRUISE_DEFAULT_KT: Dict[str, float] = {
+    "B747": 250.0, "737": 250.0, "A320": 250.0, "global5000": 250.0,
+    "c172p": 100.0, "f16": 350.0, "f15": 350.0,
+}
 
 
 def _terrain(text: str) -> Quantity:
@@ -205,6 +212,64 @@ def _wind(text: str, heading: float) -> Tuple[Quantity, Quantity]:
     return speed, direction
 
 
+#: Surface vocabulary: word variants -> the modelled class
+#: (core.environment.surface.SURFACE_CLASSES). Unlisted ground cover is
+#: simply not set -- never guessed.
+SURFACE_WORDS = {
+    "grassland": ("grasslands", "grassland", "prairie", "plains", "meadow"),
+    "desert": ("desert", "dunes"),
+    "ocean": ("ocean", "the sea", "open water"),
+    "forest": ("forest", "woods", "woodland"),
+    "city": ("city", "urban", "downtown", "skyline"),
+}
+
+
+def _surface(text: str) -> Quantity:
+    for word, variants in SURFACE_WORDS.items():
+        for variant in variants:
+            if _search(rf"{variant}", text):
+                return Quantity.inferred(
+                    word, frm=f"ground cover {variant!r}: roughness + "
+                              f"thermal class (surface vocabulary)")
+    return Quantity.default("unspecified",
+                            frm="no ground cover stated; no surface coupling")
+
+
+#: Severe-weather words -> the modelled event.
+WEATHER_EVENT_WORDS = {
+    "thunderstorm": ("thunderstorm", "storm cell", "storm"),
+    "tornado": ("tornado", "twister"),
+}
+
+
+def _weather_event(text: str) -> Quantity:
+    for event, variants in WEATHER_EVENT_WORDS.items():
+        for variant in variants:
+            if _search(rf"\b{variant}", text):
+                # "through/into" aims the event's core AT the track (the
+                # aim rides in the quantity's detail, so it is recorded,
+                # serialized and digest-relevant like any other value);
+                # anything else is the standard abeam flyby.
+                aim = ("core" if _search(
+                    rf"(?:through|into)\s+(?:a|the)?\s*{variant}", text)
+                    else "abeam")
+                return Quantity.inferred(
+                    event, frm=f"severe weather {variant!r}, aim {aim} "
+                               f"(documented composition/model; see "
+                               f"conditions strip)", aim=aim)
+    return Quantity.default("none", frm="no severe weather requested")
+
+
+def _weather_date(text: str) -> Quantity:
+    """An ISO date in the prompt asks for that day's ERA5 reanalysis wind."""
+    match = _search(r"\b(20\d{2}-[01]\d-[0-3]\d)\b", text)
+    if match:
+        return Quantity.inferred(
+            match.group(1), frm=f"historical weather date {match.group(1)} "
+                                f"(ERA5 reanalysis applies at /run)")
+    return Quantity.default("none", frm="no date stated; spec wind as given")
+
+
 def _turbulence(text: str) -> Quantity:
     for word, w20 in TURBULENCE_WORDS.items():
         if _search(rf"{word}\s+(?:turbulence|chop|air)", text) or (
@@ -254,6 +319,12 @@ def compile_prompt(prompt: str, name: Optional[str] = None) -> ScenarioSpec:
 
     heading = _heading(text)
     airspeed, airspeed_kind = _airspeed(text)
+    if airspeed is None:
+        model = str(_aircraft(text).value)
+        airspeed = Quantity.default(
+            CRUISE_DEFAULT_KT.get(model, 250.0), "kt",
+            frm=f"typical cruise for the {model}")
+        airspeed_kind = Quantity.default("cas")
     wind_speed, wind_direction = _wind(text, float(heading.value))
 
     spec = ScenarioSpec(
@@ -279,6 +350,9 @@ def compile_prompt(prompt: str, name: Optional[str] = None) -> ScenarioSpec:
         wind_speed=wind_speed,
         wind_direction=wind_direction,
         turbulence=_turbulence(text),
+        surface=_surface(text),
+        weather_date=_weather_date(text),
+        weather_event=_weather_event(text),
     )
 
     ignored = [w for w in CINEMATIC_WORDS if w in text]

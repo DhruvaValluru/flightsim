@@ -122,7 +122,9 @@ def write_run_card(spec: ScenarioSpec, path: Path,
                    orographic_follow_schedule: bool = False,
                    collision_terrain: Optional[str] = None,
                    turbulence_provider=None,
-                   reference_speeds: Optional[Dict[str, object]] = None) -> Path:
+                   reference_speeds: Optional[Dict[str, object]] = None,
+                   tornado: Optional[Dict[str, object]] = None,
+                   scene_crs: Optional[str] = None) -> Path:
     """Write the spec in the form the UE commandlet reads.
 
     A projection of the spec, not a second copy of it. Every field is taken
@@ -200,6 +202,15 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         card["downburst"] = dict(downburst)
     if rotor:
         card["rotor"] = dict(rotor)
+    if tornado:
+        # Phase 9.3: the Rankine vortex, every constant computed in Python
+        # (core/environment/tornado.py card_block); the host derives nothing.
+        card["tornado"] = dict(tornado)
+    if scene_crs:
+        # Phase 9: a flat scene has no terrain to declare the projected
+        # frame the position-coupled blocks (thermals, downburst, tornado)
+        # work in; the card declares it (the spec origin's UTM zone).
+        card["scene_crs"] = str(scene_crs)
     if log_profile:
         card["log_profile"] = dict(log_profile)
     if thermals:

@@ -301,3 +301,51 @@ def test_both_terrain_kinds_drive_orographic_lift_identically(procedural,
 # The Gate 5 host-parity comparator used to be tested here, from the days when
 # it was the only part of Gate 5 that could run. It now has a home of its own:
 # tests/test_host_parity.py.
+
+
+def test_phase9_bakes_are_pickable_and_their_table_matches_the_raster():
+    """Every Phase 9 location with a bake on this machine: pick_scene
+    selects it from its own origin, and the LLM prompt's terrain-elevation
+    table entry matches the raster at that origin (measured, not typed)."""
+    from pathlib import Path
+
+    from core.nl.compiler import compile_prompt
+    from core.nl.llm_compiler import LOCATION_TERRAIN_ELEVATION_M
+    from core.terrain.glo30 import LOCATIONS
+    from core.terrain.ground import TerrainGround
+    from webapp.runs import REPO, pick_scene
+
+    checked = 0
+    for key in ("fuji", "everest", "grand_canyon", "flint_hills"):
+        raster = REPO / "runs" / "terrain" / f"{key}.r16"
+        if not raster.is_file():
+            continue
+        location = LOCATIONS[key]
+        spec = compile_prompt("fly the 747 at 9000 m and 250 kt")
+        spec.set("latitude", location.origin_lat, frm="test")
+        spec.set("longitude", location.origin_lon, frm="test")
+        scene = pick_scene(spec)
+        assert scene["key"] == key, (key, scene["key"])
+        ground = TerrainGround(Heightfield.read(raster.with_suffix("")))
+        measured = ground.elevation_at(location.origin_lat,
+                                       location.origin_lon)
+        table = LOCATION_TERRAIN_ELEVATION_M[key]
+        assert abs(measured - table) < 2.0, (key, measured, table)
+        checked += 1
+    if checked == 0:
+        pytest.skip("no Phase 9 bakes on this machine")
+
+
+def test_source_verification_is_slope_aware_not_loosened():
+    """The verification gate excuses exactly the slope-proportional
+    resampling regime (|grad h| x half-pixel per sample) and nothing else:
+    flat ground still faces the original 30 m gate, and the mean gate that
+    caught the out-of-coverage-zeros bake is untouched."""
+    import inspect
+
+    from core.terrain import glo30
+
+    source = inspect.getsource(glo30.verify_against_source)
+    assert 'report["p95_excess_m"] < 30.0' in source
+    assert 'abs(report["mean_m"]) < 5.0' in source
+    assert "pixel_size_m / 2.0" in source

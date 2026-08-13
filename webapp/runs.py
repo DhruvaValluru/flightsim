@@ -40,7 +40,9 @@ sys.path.insert(0, str(REPO))
 from core.scenario.card import write_run_card  # noqa: E402
 from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import MIN_CLEARANCE_M  # noqa: E402
-from core.terrain.glo30 import LOCATIONS, orographic_card_block  # noqa: E402
+from core.terrain.glo30 import (  # noqa: E402
+    LOCATIONS, bake, dynamic_location, orographic_card_block, utm_zone_crs,
+)
 from experiments.showcase_matrix import (  # noqa: E402
     AIRFRAMES,
     EDITOR,
@@ -103,6 +105,69 @@ def editor_running() -> bool:
     return probe.returncode == 0 and probe.stdout.strip() != ""
 
 
+def _dynamic_scenes(dynamic_dir: Path) -> List[Dict]:
+    """Registry of on-demand GLO-30 bakes: one .scene.json per bake,
+    written by bake_on_demand after verification passed. Scanned fresh on
+    every call -- a bake finished mid-session is pickable immediately."""
+    scenes = []
+    if not Path(dynamic_dir).is_dir():
+        return scenes
+    for sidecar in sorted(Path(dynamic_dir).glob("*.scene.json")):
+        entry = json.loads(sidecar.read_text())
+        raster = Path(dynamic_dir) / f"{entry['key']}.r16"
+        if raster.is_file():
+            entry["terrain"] = str(raster.with_suffix(""))
+            scenes.append(entry)
+    return scenes
+
+
+def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
+    """None, or the named refusal for USER-stated coordinates that no bake
+    covers yet.
+
+    Stated coordinates mean "fly at that real place": defaulted and
+    placed-on-scene coordinates never trigger (this runs BEFORE
+    place_on_scene), and coordinates already on a curated or dynamic bake
+    pass through. The /bake endpoint clears the refusal; nothing here
+    downloads anything -- an HTTP /run stays fast and its digest stays the
+    digest of what actually runs.
+    """
+    if (str(spec.latitude.source) != "user"
+            or str(spec.longitude.source) != "user"):
+        return None
+    if pick_scene(spec).get("terrain") is not None:
+        return None
+    lat = float(spec.latitude.value)
+    lon = float(spec.longitude.value)
+    return {
+        "constraint": "terrain.unbaked",
+        "message": f"no GLO-30 bake covers the stated coordinates "
+                   f"({lat:.4f}, {lon:.4f}); POST /bake with them to fetch "
+                   f"and verify that terrain (first fetch downloads tiles, "
+                   f"a few minutes), then run again",
+        "latitude": lat, "longitude": lon,
+    }
+
+
+def bake_on_demand(lat: float, lon: float) -> Dict:
+    """Fetch, bake and verify GLO-30 for arbitrary coordinates; register
+    the scene. Raises (DEMError / URLError by name) rather than writing an
+    unverified or empty bake -- open ocean has no tiles and says so."""
+    location = dynamic_location(lat, lon)
+    dynamic_dir = REPO / "runs" / "terrain" / "dynamic"
+    raster = dynamic_dir / f"{location.key}.r16"
+    if not raster.is_file():
+        bake(location, REPO / "data" / "glo30", dynamic_dir)
+    sidecar = dynamic_dir / f"{location.key}.scene.json"
+    entry = {"key": location.key, "title": location.title,
+             "origin_lat": location.origin_lat,
+             "origin_lon": location.origin_lon, "crs": location.crs,
+             "identity": "source-verified only (no named summits)"}
+    sidecar.write_text(json.dumps(entry, indent=1))
+    entry["terrain"] = str(raster.with_suffix(""))
+    return entry
+
+
 def pick_scene(spec: ScenarioSpec) -> Dict:
     """Choose the scene the spec's geography earns -- never silently."""
     lat = float(spec.latitude.value)
@@ -121,6 +186,19 @@ def pick_scene(spec: ScenarioSpec) -> Dict:
                          f"physics ground is the heightfield raster "
                          f"(AGL parity measured); track pre-flown for "
                          f"clearance",
+            }
+    for scene in _dynamic_scenes(terrain_dir / "dynamic"):
+        if (abs(lat - scene["origin_lat"]) <= LOCATION_TOLERANCE_DEG
+                and abs(lon - scene["origin_lon"]) <= LOCATION_TOLERANCE_DEG):
+            return {
+                "key": scene["key"], "kind": "real (Copernicus GLO-30, "
+                                             "on-demand bake)",
+                "terrain": scene["terrain"], "imagery": None,
+                "label": f"GLO-30 bake near {scene['origin_lat']:.3f}, "
+                         f"{scene['origin_lon']:.3f}; identity "
+                         f"source-verified only (no named summits); "
+                         f"physics ground is the heightfield raster (AGL "
+                         f"parity measured); track pre-flown for clearance",
             }
     if float(spec.terrain_elevation.value) > 0.0:
         if (terrain_dir / "control_ridge.r16").is_file():
@@ -174,7 +252,7 @@ PLANNED_CLEARANCE_M = 300.0
 
 
 def _fly_clearance_track(spec: ScenarioSpec, ground, script,
-                         seconds: float):
+                         seconds: float, orographic=None):
     """The scripted flight on the same JSBSim, for the clearance gate.
 
     The Zermatt valley run's fly_headless, generalised: the SAME control
@@ -183,10 +261,23 @@ def _fly_clearance_track(spec: ScenarioSpec, ground, script,
     wind, so drift shapes the track that gets checked. Turbulence is not
     modelled here (visual-only realisations; the clearance margin covers
     the excursion scale the recordings show).
+
+    Two couplings the real run enforces are pre-flown here too:
+
+    * ``orographic`` (an OrographicWind built from the SAME card block the
+      run will carry) writes the terrain-forced vertical wind every step,
+      so a plan through lee sink descends in the plan the way the aircraft
+      will descend in the run;
+    * clearance_m is the MINIMUM over the airframe's span stations (the
+      same stations, rotation and lookup as core.terrain.contact -- the
+      check that ends the real run), not just the CG: a bank that lowers a
+      wingtip toward a slope tightens the planned clearance. Sampled every
+      12th step; the run checks every step.
     """
     from core.fdm import FlightDynamics, mode_for
     from core.fdm import units as u
     from core.scenario.runner import wind_components_fps
+    from core.terrain.contact import station_offsets_ned
 
     fdm = FlightDynamics(str(spec.aircraft.value),
                          rate_hz=float(spec.rate.value))
@@ -209,6 +300,14 @@ def _fly_clearance_track(spec: ScenarioSpec, ground, script,
     fdm.trim(mode_for(crosswind=wind_kt > 0.0))
     fdm.hold_mass(True)
     trimmed_aileron = fdm.props.get("fcs/aileron-cmd-norm")
+    span_m = u.ft_to_m(fdm.props.get("metrics/bw-ft"))
+    origin_x = origin_y = 0.0
+    if orographic is not None:
+        # The provider's local frame is north/east about the card origin --
+        # the raster centre after place_on_scene -- exactly the UE host's
+        # LocalSceneCoords frame.
+        origin_x, origin_y = ground.project(float(spec.latitude.value),
+                                            float(spec.longitude.value))
 
     track = []
     applied = -1
@@ -222,14 +321,163 @@ def _fly_clearance_track(spec: ScenarioSpec, ground, script,
             applied = current
             fdm.set_controls(aileron=trimmed_aileron
                              + script[applied]["aileron"])
+        if orographic is not None:
+            s = fdm.state()
+            x, y = ground.project(s.lat_deg, s.lon_deg)
+            agl = s.altitude_m - ground.heightfield.elevation_at(x, y)
+            north, east = y - origin_y, x - origin_x
+            w_up = ((orographic.linear_updraught(north, east)
+                     - orographic.lee_sink(north, east))
+                    * orographic.decay(agl))
+            fdm.props.set("atmosphere/wind-down-fps", -w_up / 0.3048)
         fdm.step()
         if i % 12 == 0:
             s = fdm.state()
             terrain = (ground.elevation_at(s.lat_deg, s.lon_deg)
                        if ground.contains(s.lat_deg, s.lon_deg) else 0.0)
+            clearance = s.altitude_m - terrain
+            x, y = ground.project(s.lat_deg, s.lon_deg)
+            for _, north, east, down in station_offsets_ned(
+                    s.roll_deg, s.pitch_deg, s.heading_deg, span_m):
+                px, py = x + east, y + north
+                if not ground.heightfield.contains(px, py):
+                    continue
+                clearance = min(
+                    clearance, (s.altitude_m - down)
+                    - ground.heightfield.elevation_at(px, py))
             track.append({"terrain_m": terrain,
-                          "clearance_m": s.altitude_m - terrain})
+                          "cg_clearance_m": s.altitude_m - terrain,
+                          "clearance_m": clearance})
     return track
+
+
+def _orographic_provider(spec: ScenarioSpec, scene: Dict):
+    """The SAME orographic field the run card will carry, for the pre-flight.
+
+    Built from orographic_card_block's own numbers (wind, wavelength, decay
+    height, projected origin), so the plan and the run cannot model two
+    different mountains. None in calm air: orographic forcing is wind over
+    terrain, and with no wind there is honestly nothing to couple -- the
+    conditions strip says so rather than inventing airflow.
+    """
+    wind_kt = float(spec.wind_speed.value)
+    if not scene.get("terrain") or wind_kt <= 0.0:
+        return None
+    from core.environment.terrain_field import OrographicWind
+    from core.terrain.ground import terrain_field_at
+    from core.terrain.heightfield import Heightfield
+
+    block = orographic_card_block(
+        Path(scene["terrain"]), float(spec.latitude.value),
+        float(spec.longitude.value), wind_kt,
+        round(float(spec.wind_direction.value)))
+    field = terrain_field_at(Heightfield.read(Path(scene["terrain"])),
+                             block["origin_x_m"], block["origin_y_m"],
+                             wavelength_m=block["wavelength_m"])
+    return OrographicWind(field, wind_speed_mps=block["wind_speed_mps"],
+                          wind_from_deg=block["wind_from_deg"],
+                          decay_height_m=block["decay_height_m"])
+
+
+#: Channels the effect report compares, all recorded by both sources.
+EFFECT_CHANNELS = ("altitude_m", "agl_m", "n_z", "roll_deg", "pitch_deg",
+                   "alpha_deg", "wind_down_mps", "tas_kt")
+
+
+def _effect_report(spec: ScenarioSpec, scene: Dict, script, seconds: float,
+                   telemetry_path: Path, out_path: Path) -> None:
+    """Baseline-vs-actual: what the terrain-air coupling did to this run.
+
+    The baseline is the SAME spec -- same trim, same steady wind, same
+    control script, same raster under the ground model -- flown headlessly
+    with the coupling severed (no orographic lift/sink, no lee-rotor), and
+    sampled on the same 0.1 s clock as the run's telemetry. The comparison
+    is cross-host by construction (the clip's telemetry comes from the UE
+    host, the baseline from the headless one); the two hosts step the same
+    JSBSim through the parity discipline Gate 5 measured, and the report
+    says so rather than hiding it.
+    """
+    from core.fdm import FlightDynamics, mode_for
+    from core.fdm import units as u
+    from core.scenario.runner import wind_components_fps
+    from core.terrain.ground import TerrainGround
+    from core.terrain.heightfield import Heightfield
+
+    ground = (TerrainGround(Heightfield.read(Path(scene["terrain"])))
+              if scene.get("terrain") else None)
+    fdm = FlightDynamics(str(spec.aircraft.value),
+                         rate_hz=float(spec.rate.value))
+    fdm.set_initial_conditions(
+        {"h-sl-ft": u.m_to_ft(float(spec.altitude.value)),
+         "vc-kts": float(spec.airspeed.value), "gamma-deg": 0.0,
+         "phi-deg": 0.0, "psi-true-deg": float(spec.heading.value),
+         "beta-deg": 0.0, "lat-geod-deg": float(spec.latitude.value),
+         "long-gc-deg": float(spec.longitude.value),
+         "terrain-elevation-ft": u.m_to_ft(
+             float(spec.terrain_elevation.value))})
+    wind_kt = float(spec.wind_speed.value)
+    if wind_kt > 0.0:
+        north_fps, east_fps = wind_components_fps(
+            wind_kt, float(spec.wind_direction.value))
+        fdm.props.set_many({"atmosphere/wind-north-fps": north_fps,
+                            "atmosphere/wind-east-fps": east_fps,
+                            "atmosphere/wind-down-fps": 0.0})
+    fdm.start_engines()
+    fdm.trim(mode_for(crosswind=wind_kt > 0.0))
+    fdm.hold_mass(True)
+    trimmed_aileron = fdm.props.get("fcs/aileron-cmd-norm")
+
+    every = max(1, int(round(0.1 * fdm.rate_hz)))
+    baseline: Dict[str, List[float]] = {ch: [] for ch in
+                                        ("t",) + EFFECT_CHANNELS}
+    applied = -1
+    for i in range(int(round(seconds * fdm.rate_hz))):
+        if i % every == 0:
+            s = fdm.state()
+            baseline["t"].append(round(i / fdm.rate_hz, 3))
+            for ch in EFFECT_CHANNELS:
+                baseline[ch].append(round(float(getattr(s, ch)), 5))
+        t = fdm.sim_time
+        current = applied
+        for j, entry in enumerate(script):
+            if entry["t_s"] <= t:
+                current = j
+        if current != applied:
+            applied = current
+            fdm.set_controls(aileron=trimmed_aileron
+                             + script[applied]["aileron"])
+        if ground is not None:
+            ground.apply(fdm)
+        fdm.step()
+
+    actual = json.loads(Path(telemetry_path).read_text())["columns"]
+    n = min(len(baseline["t"]), len(actual["t"]))
+
+    def stats(xs):
+        import math
+        mean = sum(xs) / len(xs)
+        return {"mean": round(mean, 5), "min": round(min(xs), 5),
+                "max": round(max(xs), 5),
+                "rms": round(math.sqrt(sum((x - mean) ** 2
+                                           for x in xs) / len(xs)), 5)}
+
+    channels, report = {"t": baseline["t"][:n]}, {}
+    for ch in EFFECT_CHANNELS:
+        b, a = baseline[ch][:n], [float(v) for v in actual[ch][:n]]
+        channels[ch] = {"baseline": b, "actual": a}
+        report[ch] = {"baseline": stats(b), "actual": stats(a)}
+    out_path.write_text(json.dumps({
+        "claim": "baseline = the same spec (same trim, steady wind, control "
+                 "script, same ground model) flown HEADLESSLY with every "
+                 "terrain- and surface-air coupling severed (no orographic "
+                 "lift/sink, no lee-rotor, no surface shear or thermals); "
+                 "actual = this clip's own recorded telemetry (UE host). "
+                 "Cross-host comparison under the Gate 5 parity discipline. "
+                 "The models' limits (VALIDITY 2.8, 2.10) apply to "
+                 "everything shown.",
+        "interval_s": 0.1, "samples": n,
+        "channels": channels, "stats": report,
+    }))
 
 
 def plan_terrain_flight(spec: ScenarioSpec) -> Optional[Dict]:
@@ -257,9 +505,10 @@ def plan_terrain_flight(spec: ScenarioSpec) -> Optional[Dict]:
     seconds = min(float(spec.duration.value), CLIP_SECONDS)
     from experiments.showcase_matrix import SHOWCASE_DOUBLET
 
+    orographic = _orographic_provider(spec, scene)
     try:
         track = _fly_clearance_track(spec, ground, SHOWCASE_DOUBLET,
-                                     seconds)
+                                     seconds, orographic=orographic)
     except Exception:
         # A spec that cannot even trim (e.g. commanded below its own flat
         # terrain) is not this planner's refusal to make: validate() runs
@@ -281,7 +530,8 @@ def plan_terrain_flight(spec: ScenarioSpec) -> Optional[Dict]:
                          f"{PLANNED_CLEARANCE_M:.0f} m)")
             try:
                 track = _fly_clearance_track(spec, ground,
-                                             SHOWCASE_DOUBLET, seconds)
+                                             SHOWCASE_DOUBLET, seconds,
+                                             orographic=orographic)
                 min_clearance = min(p["clearance_m"] for p in track)
             except Exception:
                 min_clearance = float("-inf")   # unverifiable = not clear
@@ -291,7 +541,9 @@ def plan_terrain_flight(spec: ScenarioSpec) -> Optional[Dict]:
         "constraint": "terrain.clearance",
         "message": "the planned track descends below the clearance margin "
                    "over the scene's terrain (pre-flown headlessly on the "
-                   "scene's own raster, wind included)",
+                   "scene's own raster -- steady wind and orographic "
+                   "lift/sink included, clearance taken as the minimum over "
+                   "the airframe's span stations, not just the CG)",
         "actual": round(min_clearance, 1),
         "limit": MIN_CLEARANCE_M,
         "unit": "m AGL",
@@ -312,12 +564,142 @@ def project_for_ue_host(spec: ScenarioSpec) -> None:
                  frm="rendered-clip convention (see reference_spec)")
 
 
-def derive_seed(spec: ScenarioSpec) -> None:
-    """A turbulent spec with the default seed gets one from its digest."""
-    if (str(spec.turbulence.value) != "none"
+def derive_seed(spec: ScenarioSpec, terrain_coupled: bool = False) -> None:
+    """A stochastic spec with the default seed gets one from its digest.
+
+    ``terrain_coupled``: a terrain run with wind carries lee-rotor
+    turbulence even when the turbulence word is "none", so it needs a
+    recorded seed for the same reason a worded spec does.
+    """
+    if ((str(spec.turbulence.value) != "none" or terrain_coupled)
             and str(spec.seed.source) == "default"):
         seed = int(spec.digest()[:8], 16) % 1_000_000
         spec.set("seed", seed, frm="derived from spec digest")
+
+
+#: The storm look: dim low sun + dense grey fog, values probe-calibrated
+#: (gotcha 6/7 -- picked by rendering frames, not theory). VISUAL ONLY and
+#: labeled so; the storm's physics arrive as card blocks.
+STORM_LOOK = {"sun_elev": 10.0, "sun_azim": 180.0, "exposure_bias": 9.6,
+              "fog_density": 0.007}
+
+
+def _projected_origin(spec: ScenarioSpec, scene: Dict):
+    """(origin_x, origin_y, scene_crs_for_card): the projected anchor of
+    the local north/east frame every position-coupled block uses. Terrain
+    scenes project into the raster's own CRS (the terrain declares it to
+    the UE host -> card crs None); flat scenes use the spec origin's UTM
+    zone and DECLARE it on the card (scene_crs)."""
+    from pyproj import Transformer
+
+    if scene.get("terrain"):
+        from core.terrain.heightfield import Heightfield
+
+        crs = Heightfield.read(Path(scene["terrain"])).georeference.crs
+        declared = None
+    else:
+        crs = utm_zone_crs(float(spec.latitude.value),
+                           float(spec.longitude.value))
+        declared = crs
+    transformer = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+    ox, oy = transformer.transform(float(spec.longitude.value),
+                                   float(spec.latitude.value))
+    return float(ox), float(oy), declared
+
+
+def apply_weather_event(spec: ScenarioSpec) -> None:
+    """The thunderstorm COMPOSITION's spec edits, pre-digest and recorded.
+
+    A thunderstorm is severe-turbulence air by the documented composition
+    (microburst + severe turbulence + storm look); the word is set only
+    when the spec's own word is still the default -- a stated turbulence
+    word is never moved. A tornado with a DEFAULTED altitude descends into the
+    vortex's modelled depth (plan_weather_event); stated fields never move.
+    """
+    if (str(spec.weather_event.value) == "thunderstorm"
+            and str(spec.turbulence.source) == "default"):
+        spec.set("turbulence", "severe",
+                 frm="thunderstorm composition (documented): microburst + "
+                     "severe turbulence + storm look")
+    plan_weather_event(spec)
+
+
+def apply_historical_weather(spec: ScenarioSpec) -> Optional[Dict]:
+    """ERA5 reanalysis wind for a dated spec, as recorded pre-digest edits.
+
+    None (applied, or nothing to do) or a named refusal dict. Rules, in
+    order: no date -> nothing; a USER-stated wind is never moved (the date
+    goes to notes instead); the synthesised control ridge is NOT A PLACE,
+    so a dated spec there refuses by name; an unreachable archive refuses
+    by name rather than guessing a wind.
+    """
+    date = str(spec.weather_date.value)
+    if date == "none":
+        return None
+    if (str(spec.wind_speed.source) == "user"
+            or str(spec.wind_direction.source) == "user"):
+        spec.notes.append(
+            f"weather_date {date}: the stated wind wins; ERA5 not applied "
+            f"(a stated value is never silently moved)")
+        return None
+    if pick_scene(spec)["key"] == "control":
+        return {
+            "constraint": "weather.not_a_place",
+            "message": "historical weather needs a real place; the "
+                       "synthesised control ridge is not one. Name a real "
+                       "location or state coordinates.",
+        }
+    from core.environment.era5 import (
+        WeatherUnavailableError, fetch_reanalysis_wind,
+    )
+
+    try:
+        wx = fetch_reanalysis_wind(
+            float(spec.latitude.value), float(spec.longitude.value),
+            date, float(spec.altitude.value))
+    except WeatherUnavailableError as exc:
+        return {"constraint": "weather.unavailable", "message": str(exc)}
+    frm = (f"historical weather {date} {wx['hour_utc']:02d}Z at "
+           f"{wx['level_note']}; {wx['source']}")
+    spec.set("wind_speed", wx["speed_kt"], frm=frm)
+    spec.set("wind_direction", wx["from_deg"], frm=frm)
+    return None
+
+
+def plan_weather_event(spec: ScenarioSpec) -> None:
+    """A tornado's modelled depth tops out at 3000 m AGL (linear fade from
+    1500 m): the DEFAULT 3000 m cruise would fly over a vortex that
+    honestly cannot reach it, and the clip would show a tornado doing
+    nothing. A DEFAULTED altitude drops into the full-strength band,
+    recorded like every planner edit; a STATED altitude is never moved --
+    flying above a tornado is a legitimate request and the effect report
+    will honestly show near-zero coupling.
+    """
+    if (str(spec.weather_event.value) == "tornado"
+            and str(spec.altitude.source) == "default"):
+        spec.set("altitude", 800.0,
+                 frm="lowered into the vortex's full-strength band (the "
+                     "model fades from 1500 m AGL; a stated altitude is "
+                     "never moved)")
+
+
+def coupling_needs_seed(spec: ScenarioSpec) -> bool:
+    """True when the run is stochastic even with turbulence word "none":
+    a terrain scene with wind (lee-rotor) or a surface class with thermals
+    (updraft positions are drawn from the seed). Both the /run endpoint and
+    the render flow use THIS predicate, so the seed always derives before
+    the digest is answered."""
+    from core.environment.surface import surface_class
+
+    try:
+        surface = surface_class(str(spec.surface.value))
+    except ValueError:
+        surface = None      # validation refuses it by name; not our job
+    scene = pick_scene(spec)
+    return ((bool(scene["terrain"]) and float(spec.wind_speed.value) > 0.0)
+            or (surface is not None and surface.thermals is not None))
+
+
 
 
 class RunManager:
@@ -401,7 +783,9 @@ class RunManager:
 
     @staticmethod
     def _render(card: Path, frames: Path, scene: Dict, mesh: Path,
-                aircraft: str, telemetry: Optional[Path] = None) -> bool:
+                aircraft: str, telemetry: Optional[Path] = None,
+                look: Optional[Dict] = None,
+                camera: str = "chase") -> bool:
         """The showcase render command, with terrain/imagery conditional.
 
         Same flags render_cell passes (gotcha 1: absolute paths, -stdout,
@@ -412,16 +796,17 @@ class RunManager:
         project = REPO / "ue" / "FlightSim.uproject"
         frames.mkdir(parents=True, exist_ok=True)
         (frames / "render.json").unlink(missing_ok=True)
-        tod = TIME_OF_DAY["noon"]
+        tod = look or TIME_OF_DAY["noon"]
         command = [
             str(EDITOR), str(project), "-run=FlightSimBridge.FlightSimRender",
             f"-scenario={card}", f"-frames={frames}",
             "-Visual", "-shot=showcase",
             f"-chase={AIRFRAMES.get(aircraft, {}).get('chase', '-170:0:16')}",
+            f"-camera={camera}",
             f"-fps={FPS}", f"-width={WIDTH}", f"-height={HEIGHT}",
             f"-sun-elev={tod['sun_elev']}", f"-sun-azim={tod['sun_azim']}",
             f"-exposure-bias={tod['exposure_bias']}",
-            f"-fog-density={VISIBILITY['clear']}",
+            f"-fog-density={(look or {}).get('fog_density', VISIBILITY['clear'])}",
             "-unattended", "-nopause", "-nosplash",
             "-stdout", "-FullStdOutLogOutput",
             "-RenderOffScreen", "-AllowCommandletRendering",
@@ -457,7 +842,7 @@ class RunManager:
         scene = pick_scene(spec)
         run.scene = scene
 
-        derive_seed(spec)
+        derive_seed(spec, terrain_coupled=coupling_needs_seed(spec))
         project_for_ue_host(spec)
         spec.write(out / "scenario.yaml")
 
@@ -470,6 +855,111 @@ class RunManager:
                 Path(scene["terrain"]), float(spec.latitude.value),
                 float(spec.longitude.value), wind_kt,
                 round(float(spec.wind_direction.value)))
+        scene_crs = None
+        rotor_provider = None
+        if orographic is not None:
+            # The mountains shape the turbulence too, not just the mean
+            # wind: lee-rotor W20 riding the SAME orographic field the card
+            # carries, background floor = the spec's own turbulence word.
+            # In calm air there is no orographic field and honestly no
+            # rotor -- the conditions strip states the reason.
+            from core.environment.rotor import LeeRotorTurbulence
+
+            rotor_provider = LeeRotorTurbulence(
+                _orographic_provider(spec, scene),
+                seed=int(spec.seed.value),
+                background_intensity=str(spec.turbulence.value))
+        # Phase 9.1 surface class: roughness shear (the log profile CARRIES
+        # the base wind -- reference at the layer top, so cruise flies the
+        # spec's wind) and thermal forcing, both from the class table with
+        # their basis strings. The ocean attaches no thermals.
+        from core.environment.surface import surface_class
+
+        surface = surface_class(str(spec.surface.value))
+        log_profile = None
+        thermals_block = None
+        surface_note = None
+        if surface is not None:
+            from core.fdm import units as u_
+            if wind_kt > 0.0:
+                from core.environment.wind import LogProfileWind
+
+                shear = LogProfileWind(
+                    u_.kt_to_mps(wind_kt),
+                    float(spec.wind_direction.value),
+                    reference_height_m=LogProfileWind.SURFACE_LAYER_TOP_M,
+                    terrain=surface.roughness)
+                log_profile = shear.card_block(carries_base=True)
+            if surface.thermals is not None:
+                from core.environment.thermals import AllenThermals
+
+                wstar, zi = surface.thermals
+                thermals = AllenThermals(
+                    wstar_mps=wstar, zi_m=zi,
+                    area_north_m=4000.0, area_east_m=4000.0,
+                    origin_north_m=-2000.0, origin_east_m=-2000.0,
+                    seed=int(spec.seed.value))
+                ox, oy, declared = _projected_origin(spec, scene)
+                scene_crs = scene_crs or declared
+                thermals_block = thermals.card_block(ox, oy)
+            thermal_note = ("no thermals modelled over water"
+                            if surface.thermals is None else
+                            f"thermals w* {surface.thermals[0]:g} m/s, "
+                            f"zi {surface.thermals[1]:g} m "
+                            f"({surface.thermal_basis})")
+            surface_note = (f"{surface.word}: z0 {surface.z0_m:g} m "
+                            f"(Stull Table 9-6); {thermal_note}")
+        # Phase 9.2/9.3 severe-weather events: card blocks placed ahead on
+        # the track, physics through the same position-coupled machinery as
+        # Phase 7; the STORM LOOK is visual and labeled.
+        event = str(spec.weather_event.value)
+        tornado_block = None
+        downburst_block = None
+        event_note = None
+        if event in ("thunderstorm", "tornado"):
+            import math as _math
+
+            from core.fdm import units as u2
+
+            seconds_ = min(float(spec.duration.value), CLIP_SECONDS)
+            ahead = (0.45 * u2.kt_to_mps(float(spec.airspeed.value))
+                     * seconds_)
+            hdg = _math.radians(float(spec.heading.value))
+            centre_n = ahead * _math.cos(hdg)
+            centre_e = ahead * _math.sin(hdg)
+            ox, oy, declared = _projected_origin(spec, scene)
+            scene_crs = scene_crs or declared
+            if event == "tornado":
+                from core.environment.tornado import R_CORE_M, TornadoVortex
+
+                # Abeam offset: the track clips the core's edge rather
+                # than spearing the axis.
+                # Placement follows the spec's recorded aim: "core" (the
+                # prompt said through/into) puts the axis ON the track --
+                # the camera will cross the funnel mesh and the frames
+                # honestly show the inside of the marker; "abeam" is the
+                # 2.5-core-radii flyby (at 1.2 radii the chase camera
+                # lived inside the mesh, probe-measured).
+                aim = str(spec.weather_event.detail.get("aim", "abeam"))
+                offset = 0.0 if aim == "core" else 2.5 * R_CORE_M
+                vortex = TornadoVortex(
+                    centre_n + offset * _math.cos(hdg + _math.pi / 2),
+                    centre_e + offset * _math.sin(hdg + _math.pi / 2))
+                tornado_block = vortex.card_block(ox, oy)
+                event_note = ("tornado: Rankine vortex (EF2-band, v_max "
+                              "50 m/s, core 150 m) abeam the track; funnel "
+                              "mesh is a VISUAL marker, not condensation; "
+                              "wind point-sampled at the CG -- no "
+                              "span-differential airloads")
+            else:
+                from core.environment.downburst import Downburst
+
+                burst = Downburst(centre_n, centre_e)
+                downburst_block = burst.card_block(ox, oy)
+                event_note = ("thunderstorm (documented composition): "
+                              "microburst 1000 m core / 12 m/s outflow "
+                              "ahead on the track + severe turbulence + "
+                              "storm look (VISUAL)")
         calm = wind_kt == 0.0 and str(spec.turbulence.value) == "none"
         # Terrain runs bank through the scene (the same S-turn script the
         # clearance planner pre-flew) and carry the raster as the PHYSICS
@@ -505,18 +995,36 @@ class RunManager:
         run.conditions = {
             "wind_note": (f"{wind_kt:g} kt from "
                           f"{float(spec.wind_direction.value):g} deg"
-                          if wind_kt > 0 else "calm"),
-            "turbulence": str(spec.turbulence.value),
+                          if wind_kt > 0 else
+                          ("calm; no terrain-driven airflow (orographic "
+                           "forcing is wind over terrain)"
+                           if scene["terrain"] else "calm")),
+            "turbulence": (f"lee-rotor over terrain (background "
+                           f"{spec.turbulence.value})"
+                           if rotor_provider is not None
+                           else str(spec.turbulence.value)),
             "turbulence_seed": (int(spec.seed.value)
-                                if str(spec.turbulence.value) != "none"
+                                if rotor_provider is not None
+                                or thermals_block is not None
+                                or str(spec.turbulence.value) != "none"
                                 else None),
             "physics_ground": scene["label"],
+            **({"surface": surface_note} if surface_note else {}),
+            **({"weather": event_note} if event_note else {}),
         }
         card = write_run_card(
             spec, out / "card.json",
             control_inputs=SHOWCASE_DOUBLET if scripted else (),
             duration_s=min(float(spec.duration.value), CLIP_SECONDS),
             orographic=orographic,
+            rotor=(rotor_provider.card_block()
+                   if rotor_provider is not None else None),
+            turbulence_provider=rotor_provider,
+            log_profile=log_profile,
+            thermals=thermals_block,
+            downburst=downburst_block,
+            tornado=tornado_block,
+            scene_crs=scene_crs,
             collision_terrain=str(collision) if collision else None,
             reference_speeds=reference,
         )
@@ -532,8 +1040,21 @@ class RunManager:
 
         run.push("rendering", "editor is rendering frames (a few minutes)")
         frames = out / "frames"
+                # A through-the-core tornado flight is watched from the tower:
+        # the chase camera would spend seconds INSIDE the funnel mesh
+        # and the blank-frame floor (correctly, never weakened) refused
+        # those frames -- measured on run c33db2c326e0.
+        camera = "chase"
+        if (str(spec.weather_event.value) == "tornado"
+                and str(spec.weather_event.detail.get("aim")) == "core"):
+            camera = "tower"
+            run.conditions["camera"] = ("tower (through-the-core "
+                                        "flight; the chase camera "
+                                        "would sit inside the funnel)")
         if not self._render(card, frames, scene, mesh, aircraft,
-                            telemetry=out / "telemetry.json"):
+                            telemetry=out / "telemetry.json",
+                            look=STORM_LOOK if event_note else None,
+                            camera=camera):
             run.push("failed", "the render commandlet wrote no manifest; "
                                f"see {out / 'render.log'}")
             return
@@ -547,7 +1068,8 @@ class RunManager:
         run.push("panel", "compositing the telemetry panel")
         manifest = frames / "render.json"
         seed = int(spec.seed.value)
-        turbulent = str(spec.turbulence.value) != "none"
+        turbulent = (str(spec.turbulence.value) != "none"
+                     or rotor_provider is not None)
         conditions = {
             "wind_note": (f"{wind_kt:g} kt from "
                           f"{float(spec.wind_direction.value):g} deg"
@@ -560,5 +1082,22 @@ class RunManager:
             run.push("failed", "panel composition failed")
             return
         raw_clip.unlink(missing_ok=True)
+        if (rotor_provider is not None or log_profile is not None
+                or thermals_block is not None or tornado_block is not None
+                or downburst_block is not None):
+            # The conditions-effect report: what the coupling DID, measured
+            # against a headless still-air-over-terrain baseline of the same
+            # spec. Optional -- the clip stands on its own if this fails.
+            run.push("report", "measuring the conditions' effect against a "
+                               "still-air baseline (headless)")
+            try:
+                _effect_report(spec, scene,
+                               SHOWCASE_DOUBLET if scripted else (),
+                               min(float(spec.duration.value), CLIP_SECONDS),
+                               out / "telemetry.json", out / "effect.json")
+            except Exception as exc:
+                run.push("report", f"effect report unavailable "
+                                   f"({type(exc).__name__}: {exc}); the "
+                                   f"clip stands on its own")
         run.clip = str(clip)
         run.push("done", "clip ready")

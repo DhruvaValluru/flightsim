@@ -189,6 +189,24 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
                       "wind direction must lie in [0, 360] degrees",
                       actual=direction, limit=360.0, unit="deg")
         )
+    try:
+        from ..environment.surface import surface_class
+
+        surface_class(str(spec.surface.value))
+    except ValueError as exc:
+        # An unmodelled ground cover refuses by name rather than running
+        # as if its roughness and thermals were modelled (§1.6).
+        report.violations.append(
+            Violation("environment.surface", str(exc))
+        )
+    event = str(spec.weather_event.value)
+    if event not in ("none", "thunderstorm", "tornado"):
+        report.violations.append(
+            Violation("environment.weather_event",
+                      f"unknown severe-weather event {event!r}; modelled: "
+                      f"thunderstorm (microburst + gust front + severe "
+                      f"turbulence composition), tornado (Rankine vortex)")
+        )
 
     # -- the definitive check: can this actually be trimmed? -----------
     # Skipped when geometry is already impossible, since trimming below ground

@@ -581,6 +581,23 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	else if (CameraPreset == TEXT("shoulder"))
 	{
 		Director->Preset = EFlightSimCameraPreset::CockpitShoulder;
+		// The default shoulder offset is B747-scale; on a c172p it sat
+		// INSIDE the fuselage and recorded overexposed paint
+		// (probe-measured). Scale by the model's own span, with a floor
+		// so small airframes keep the camera above the cabin roof.
+		const double SpanMetres =
+			Scenario.ReadProperty(TEXT("metrics/bw-ft")) * 0.3048;
+		const double Scale = FMath::Clamp(SpanMetres / 64.4, 0.3, 1.0);
+		Director->ShoulderOffsetMetres.X *= Scale;
+		Director->ShoulderOffsetMetres.Y *= Scale;
+		Director->ShoulderOffsetMetres.Z =
+			FMath::Max(Director->ShoulderOffsetMetres.Z * Scale, 1.3);
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("shoulder camera scaled by span %.1f m: offset ")
+		       TEXT("(%.2f, %.2f, %.2f) m"), SpanMetres,
+		       Director->ShoulderOffsetMetres.X,
+		       Director->ShoulderOffsetMetres.Y,
+		       Director->ShoulderOffsetMetres.Z);
 	}
 	else if (CameraPreset != TEXT("chase"))
 	{

@@ -171,3 +171,150 @@ tests/test_{llm_compiler,webapp,aero_channels}.py;
 experiments/gate8_compiler.py (needs the ollama service; verdict is the
 local model's). All green at `799e094` except the two user-blocked
 items.
+
+## Addendum: second 2026-08-11 session -- terrain physics
+
+User's complaint, verbatim shape: "it's not taking all mountain surfaces
+and everything into physics consideration." Diagnosis confirmed two real
+gaps: (1) JSBSim's ground model is one ray straight down from the CG, so
+a banked wingtip could pass through a slope unfelt; (2) mountains only
+shaped the air when a card happened to carry an orographic block, and
+never shaped turbulence in webapp runs.
+
+What shipped (see NEXT.md "Terrain physics" block for the operative
+summary):
+
+1. **core/terrain/contact.py** -- AirframeContact: four span stations
+   (wingtips, mid-semi-span) from `metrics/bw-ft` (verified live against
+   the pinned JSBSim's catalog, with attitude/{phi,theta,psi}-rad) rotated
+   by the ZYX DCM's second column; a station below the raster ends the
+   run. run_spec raises TerrainImpactError (and checks the trimmed t=0
+   state BEFORE the first step -- gotcha 25); both UE hosts refuse via
+   `AirframeImpact` (same stations, same math, source-pinned by
+   tests/test_terrain_contact.py so the tables cannot drift apart).
+2. **Wingspan-aware clearance planning** -- _fly_clearance_track's
+   clearance_m is now min over stations (cg_clearance_m kept alongside);
+   plan_terrain_flight's refusal message states the claim.
+3. **Terrain-driven airflow** -- webapp terrain runs with wind carry
+   lee-rotor turbulence (LeeRotorTurbulence as turbulence_provider, card
+   word "lee-rotor", background = the spec's own word, seed derived even
+   for word "none"); the pre-flight flies through the SAME OrographicWind
+   the card records (_orographic_provider builds it from
+   orographic_card_block's own numbers). Calm terrain runs carry neither;
+   the conditions strip states why. VALIDITY 2.8 gained the
+   wider-application note, 2.10 the contact-model limits paragraph.
+
+Suite: 395 tests (was 376), 77 mutation guards (was 72). UE host
+rebuilt clean. Valley-following flight remains the open feature thread.
+
+### Conditions-effect report on the run page (same session, user request)
+
+Every terrain-coupled run now ends with a "what the conditions did" section
+under the clip: after the panel composites, the server flies the SAME spec
+headlessly with the coupling severed (_effect_report in webapp/runs.py,
+sampled on the run's own 0.1 s clock) and serves both series at
+GET /runs/{id}/effect.json (404 until done; absent for uncoupled runs --
+nothing approximated). The page (initEffectReport) draws tiles (vertical-air
+range, n_z roughness x, alpha jitter x, altitude band) and three canvas
+charts (vertical air, n_z, altitude), with the cross-host claim stated in
+the formula line: baseline is the headless host, actual is the UE recording,
+compared under the Gate 5 parity discipline; VALIDITY 2.8 applies. The
+report step is optional -- a failure logs to the events feed and the clip
+still delivers. Backfilled for c6ed0ac4c80a. A standalone A/B pair (UE
+baseline render, fuller report.html) lives in runs/ab_terrain_air/.
+
+### Phase 9.1 surface classes (same session; BRIEF_PHASE9 governs)
+
+`environment.surface` spec field (SPEC_VERSION 1 -> 2; from_dict refuses
+old dicts by design, recovery reads provenance.json). Classes in
+core/environment/surface.py: grassland/desert/ocean/forest/city =
+Davenport z0 (ROUGHNESS_M grew "smooth" 0.005 and "city" 2.0) + Allen
+(w*, zi) from the TM's own Table 2 (desert = July directly; others
+stated proxies; ocean = None). Wind composition: the log profile CARRIES
+the base wind (card flag carries_base -> UE Step REPLACES instead of
+adds; Phase 7 cards byte-identical). Flat-scene thermals declare their
+CRS in the thermals block (spec origin's UTM zone; UE applies it only
+when no terrain set one). Webapp: blocks on the card, surface line in
+the conditions strip + aero panel, coupling_needs_seed() shared by /run
+and the render flow (digest correctness), effect report covers surface
+coupling with a widened claim. tests/test_surface.py (12) + 3 mutation
+guards (80 total). Remaining Phase 9: 9.2 storm word, 9.3 tornado,
+9.4 city geometry -- BRIEF_PHASE9.md has the settled designs.
+
+### Phase 9 terrain + weather expansion (same session, continued)
+
+* **Four new curated bakes** (all summit/datum identity-verified, values
+  web-verified before entry): fuji (volcano cone, origin 1465 m),
+  everest (extreme relief, origin 4720 m -- needed TWO fixes:
+  a missing N28 tile whose absence merged zeros above 28 N and was
+  caught by the mean gate, and a SLOPE-AWARE verification tolerance:
+  per-sample allowance |grad h| x half-pixel, p95 of the EXCESS faces
+  the same 30 m gate, flat ground unchanged -- p95_excess 12.1 m PASS),
+  grand_canyon (canyon, three butte anchors), flint_hills (prairie,
+  town-datum anchors ~10 m -- DSM sees rooftops).
+* **On-demand GLO-30 baking**: dynamic_location() computes tiles/UTM/bbox
+  for ANY coordinates; /run refuses "terrain.unbaked" for user-stated
+  coordinates with no bake; the page POSTs /bake (sync fetch+verify,
+  cached in runs/terrain/dynamic with .scene.json registry) and re-runs.
+  Identity: source-verified only, labeled. LLM prompt: unknown places
+  ask ONE question for coordinates, never invent them.
+* **ERA5 historical weather** (SPEC_VERSION 3, environment.weather_date):
+  an ISO date fetches that day's reanalysis mean wind (Open-Meteo
+  archive, ERA5-derived, free, ~25 km hourly) at the nearest standard
+  pressure level; applied as recorded pre-digest spec edits; stated
+  wind always wins; control ridge refuses (not a place); offline
+  refuses by name. NO gusts/turbulence claimed from reanalysis.
+  User's plugin list adjudicated: ERA5 done, HRRR deferred, WRF and
+  trueSKY refused, UE clouds/Niagara queued as labeled visual-only
+  (task list).
+* Guards now 85. Suite ~430 tests.
+
+### Phase 9.2/9.3: storms + tornado (same session)
+
+environment.weather_event (SPEC_VERSION 4): "thunderstorm" = documented
+COMPOSITION (microburst 1000 m/12 m/s ahead on track + severe turbulence
+when the word was defaulted -- never moves a stated word -- + storm
+look); "tornado" = kinematic Rankine vortex (core/environment/tornado.py:
+solid-body core/1-over-r exterior per Davies-Jones 1986, schematic core
+updraft, EF2-band constants, linear fade 1500-3000 m AGL), C++ port
+TornadoWindMps line-for-line, placed 45% ahead + 2.5 core radii abeam
+(1.2 put the chase camera INSIDE the funnel mesh -- probe-measured grey
+frames). Funnel = dark procedural tube, VISUAL marker labeled, no
+collision. STORM_LOOK probe-calibrated (sun 10 / bias 9.6 / fog 0.007;
+0.02 fog greyed out everything, 8.9 bias was night). Card scene_crs
+declares the flat-scene frame for ALL position-coupled blocks. Headless
+environment_for honours the event too (§1.6). Measured on camera + in
+telemetry (run e81cea71ff89): c172p rolled -42.5..+29.2 deg, n_z
+0.66-1.64 g, peak vortex wind 49.9 m/s, thrown +255 m in altitude.
+Closure honestly fails under a held-state tornado (autopilot defeated).
+tests/test_weather_events.py; 87 guards. Remaining: 9.4 city, clouds/
+precipitation visuals (task 12), HRRR.
+
+### "Through a tornado" (user request, same session)
+
+"through/into a tornado" records aim=core in weather_event.detail
+(digest-relevant); both hosts place the vortex axis ON the track (near =
+2.5-radii abeam unchanged). A DEFAULTED altitude descends to 800 m via
+plan_weather_event (the vortex fades out by the 3000 m default; stated
+altitudes never move). Airspeed defaults are per-aircraft now
+(CRUISE_DEFAULT_KT: the old universal 250 kt made a bare c172p prompt
+refuse on trim). Core-aim runs render from the TOWER camera: the chase
+camera sat inside the funnel and the blank-frame floor correctly refused
+the run (c33db2c326e0) -- the floor was not weakened, the camera moved.
+Measured core transit (run 1f7ae4097959): roll to -71.9 deg, 0.61-1.72 g,
+heading spun 52+ deg off, CAS bled 7 kt in the core, 20 fps downdraft on
+exit side. Funnel now renders genuinely tornado-like from the tower
+(lit/shadow sides, sinuous taper).
+
+### Pilot view (user request): shoulder camera fixed for small airframes
+
+The CockpitShoulder offset was B747-scale and sat INSIDE the c172p's
+fuselage (probe: overexposed paint). The render commandlet now scales it
+by the model's own span (clamped 0.3-1.0 of B747 scale, Z floored at
+1.3 m to clear small cabins) and logs the result. The through-the-core
+shoulder render was REFUSED by the blank-frame floor over exactly ONE
+frame (inside the funnel = honest darkness; floor not weakened); the
+pilot-view deliverable is the abeam flyby, where the funnel crosses the
+windscreen while the horizon rolls (roll-inheriting BY DECLARATION --
+nothing from this camera may be graded as aircraft motion). Rendered
+via -camera=shoulder on an existing card; not yet a webapp page option.

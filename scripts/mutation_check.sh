@@ -357,9 +357,9 @@ mutate assets_pipeline/convert.py \
 mutate core/terrain/glo30.py \
     '    report["ok"] = bool(report["samples"] >= samples * 0.9
                         and abs(report["mean_m"]) < 5.0
-                        and report["p95_abs_m"] < 30.0)' \
+                        and report["p95_excess_m"] < 30.0)' \
     '    report["ok"] = True  # MUTATED: every bake verifies' \
-    "a bake must match its source DEM" tests/test_phase6b.py \
+    "a bake must match its source DEM" tests/test_phase6b.py tests/test_terrain.py \
     || failures=$((failures+1))
 
 mutate core/terrain/glo30.py \
@@ -555,6 +555,87 @@ mutate experiments/gate5_ue_parity.py \
     '    "lon_deg": 1e-4, "alpha_deg": 1.0,  # MUTATED: graded set grew' \
     "the Gate 5 graded channel set does not grow by drive-by" \
     tests/test_aero_channels.py || failures=$((failures+1))
+
+# -- Phase 8B airframe contact + terrain-driven airflow ------------------
+
+mutate core/terrain/contact.py \
+    '            if station_altitude_m < terrain_m:' \
+    '            if False:  # MUTATED: wings never feel the terrain' \
+    "a wingtip below the surface is an impact, not a fly-through" \
+    tests/test_terrain_contact.py || failures=$((failures+1))
+
+mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimScenarioWorld.cpp \
+    '	return !Crashed(TimeSeconds, Error) && !AirframeImpact(TimeSeconds, Error);' \
+    '	return !Crashed(TimeSeconds, Error);  // MUTATED: wings ignored' \
+    "the UE step refuses on airframe impact, not just on crash" \
+    tests/test_terrain_contact.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '            turbulence_provider=rotor_provider,' \
+    '            turbulence_provider=None,  # MUTATED: rotor word dropped' \
+    "the rotor card word travels with its pinned turbulence writes" \
+    tests/test_webapp.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '                clearance = min(' \
+    '                clearance = max(  # MUTATED: tips never tighten the plan' \
+    "the clearance plan is the minimum over span stations" \
+    tests/test_webapp.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '            fdm.props.set("atmosphere/wind-down-fps", -w_up / 0.3048)' \
+    '            pass  # MUTATED: orographic sink never reaches the plan' \
+    "the pre-flight flies through the orographic field" \
+    tests/test_webapp.py || failures=$((failures+1))
+
+# -- Phase 9.1 surface classes -------------------------------------------
+
+mutate core/scenario/validate.py \
+    '        surface_class(str(spec.surface.value))' \
+    '        pass  # MUTATED: unmodelled ground cover runs anyway' \
+    "an unmodelled surface word refuses by name" \
+    tests/test_surface.py || failures=$((failures+1))
+
+mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimScenarioWorld.cpp \
+    '				NorthFps = SpeedMps * LogProfileCard.NorthUnit / 0.3048;' \
+    '				NorthFps += SpeedMps * LogProfileCard.NorthUnit / 0.3048;  // MUTATED: double-counted' \
+    "carries_base replaces the base wind instead of double-counting" \
+    tests/test_surface.py || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '    if surface is not None and wind_speed > 0.0:' \
+    '    if False:  # MUTATED: surface shear never attaches' \
+    "a surface class attaches its roughness shear" \
+    tests/test_surface.py || failures=$((failures+1))
+
+# -- Phase 9 dynamic terrain + historical weather ------------------------
+
+mutate webapp/server.py \
+    '    unbaked = needs_dynamic_bake(spec)' \
+    '    unbaked = None  # MUTATED: stated places run on a flat slab' \
+    "stated coordinates without a bake refuse instead of faking a slab" \
+    tests/test_webapp.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '    if (str(spec.wind_speed.source) == "user"' \
+    '    if False and (str(spec.wind_speed.source) == "user"' \
+    "a stated wind is never overwritten by reanalysis" \
+    tests/test_webapp.py || failures=$((failures+1))
+
+# -- Phase 9.2/9.3 storm + tornado ---------------------------------------
+
+mutate core/environment/tornado.py \
+    '            v_t = self.v_max_mps * (self.r_core_m / r)' \
+    '            v_t = self.v_max_mps  # MUTATED: no 1/r decay outside the core' \
+    "the vortex decays as 1/r outside the core" \
+    tests/test_weather_events.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '    if (str(spec.weather_event.value) == "thunderstorm"
+            and str(spec.turbulence.source) == "default"):' \
+    '    if str(spec.weather_event.value) == "thunderstorm":  # MUTATED: stated words moved' \
+    "the thunderstorm composition never moves a stated turbulence word" \
+    tests/test_weather_events.py || failures=$((failures+1))
 
 echo
 purge_cache

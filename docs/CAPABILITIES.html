@@ -1,0 +1,125 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FLIGHTSIM — everything you can fly</title><style>
+:root { color-scheme: light dark; }
+.viz-root { color-scheme: light;
+  --s1:#fcfcfb; --s2:#f2f1ee; --bd:#dcdbd6; --t1:#0b0b0b; --t2:#52514e; --tm:#7a7974;
+  --blue:#2a78d6; --orange:#eb6834;
+  font: 15px/1.55 -apple-system, "Segoe UI", sans-serif;
+  background: var(--s1); color: var(--t1);
+  max-width: 900px; margin: 0 auto; padding: 26px 20px 60px; }
+@media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) .viz-root {
+  color-scheme: dark; --s1:#16181c; --s2:#1e2126; --bd:#32363d; --t1:#e8e6e3;
+  --t2:#b8b6b0; --tm:#8a8880; --blue:#3987e5; --orange:#d95926; } }
+:root[data-theme="dark"] .viz-root { color-scheme: dark; --s1:#16181c; --s2:#1e2126;
+  --bd:#32363d; --t1:#e8e6e3; --t2:#b8b6b0; --tm:#8a8880; --blue:#3987e5; --orange:#d95926; }
+h1 { font-size: 1.45rem; margin: 0 0 2px; }
+h2 { font-size: 1.05rem; margin: 26px 0 8px; border-bottom: 1px solid var(--bd); padding-bottom: 4px; }
+.sub { color: var(--t2); margin: 0 0 16px; }
+table { border-collapse: collapse; width: 100%; font-size: .89rem; margin: 6px 0 10px; }
+th, td { text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--bd); vertical-align: top; }
+thead th { color: var(--t2); font-weight: 600; font-size: .82rem; }
+code, .p { background: var(--s2); border: 1px solid var(--bd); border-radius: 5px;
+  padding: 1px 6px; font-family: ui-monospace, Menlo, monospace; font-size: .86em; }
+.p { display: inline-block; margin: 2px 0; }
+.dim { color: var(--tm); font-size: .85em; }
+.note { color: var(--t2); font-size: .88rem; border-left: 3px solid var(--bd);
+  padding-left: 12px; margin: 8px 0; }
+.ok { color: var(--blue); font-weight: 600; } .no { color: var(--orange); font-weight: 600; }
+</style></head><body><div class="viz-root">
+<h1>FLIGHTSIM &mdash; everything you can fly</h1>
+<p class="sub">Type a sentence on the page; it compiles to a spec you can review and edit,
+gets validated (impossible requests refuse <i>by name</i>, never silently), then renders.
+Everything below is read from the live vocabulary tables.</p>
+
+<h2>Aircraft</h2>
+<table><thead><tr><th>Model</th><th>Say</th><th>Default cruise</th></tr></thead><tbody>
+<tr><td>Boeing 747</td><td><code>747</code>, <code>jumbo</code></td><td>250 kt</td></tr>
+<tr><td>Boeing 737</td><td><code>737</code></td><td>250 kt</td></tr>
+<tr><td>Airbus A320</td><td><code>a320</code>, <code>airbus</code></td><td>250 kt</td></tr>
+<tr><td>Cessna 172</td><td><code>c172</code>, <code>cessna</code></td><td>100 kt</td></tr>
+<tr><td>Global 5000 bizjet</td><td><code>business jet</code>, <code>global 5000</code></td><td>250 kt</td></tr>
+<tr><td>F-15 / F-16</td><td><code>f15</code> / <code>f16</code></td><td>350 kt</td></tr>
+</tbody></table>
+<p class="dim">Each flies its own aerodynamic tables with measured stall speeds; the validator
+refuses speeds/altitudes the model cannot reach. DHC-6 and P-51D exist but are refused over
+mesh licensing.</p>
+
+<h2>Terrain &mdash; six real places, one synthetic, or anywhere on Earth</h2>
+<table><thead><tr><th>Name it</th><th>What it is</th><th>Origin ground</th></tr></thead><tbody>
+<tr><td><code>Matterhorn</code> / <code>Zermatt</code> / <code>the Alps</code></td><td>Pennine Alps, real satellite imagery draped</td><td>1860 m</td></tr>
+<tr><td><code>Everest</code> / <code>the Himalayas</code></td><td>Everest + Lhotse, the most extreme relief on Earth</td><td>4720 m</td></tr>
+<tr><td><code>Yosemite</code> / <code>Half Dome</code></td><td>Yosemite Valley, Sierra Nevada</td><td>1230 m</td></tr>
+<tr><td><code>Mount Fuji</code> / <code>Fujisan</code></td><td>Volcano cone, Japan</td><td>1465 m</td></tr>
+<tr><td><code>Grand Canyon</code></td><td>Cape Royal reach, canyon flying</td><td>1340 m</td></tr>
+<tr><td><code>Flint Hills</code> / <code>the prairie</code></td><td>Kansas tallgrass prairie, rolling</td><td>413 m</td></tr>
+<tr><td><code>over 2000 m mountains</code></td><td>Synthesised control ridge (statistics, not a place)</td><td>&mdash;</td></tr>
+<tr><td><b>any coordinates</b></td><td>State lat/lon (or answer the compiler&rsquo;s question) and that terrain
+bakes on demand from Copernicus GLO-30 &mdash; first fetch takes minutes, then cached forever</td><td>&mdash;</td></tr>
+</tbody></table>
+<p class="dim">All real terrain is 30 m elevation data verified against surveyed summits. Mountains are
+physics: the ground collides (wingtips included), clearance is pre-flown, and wind flows over the real ridges.</p>
+
+<h2>Ground cover (changes the air, not just the view)</h2>
+<table><thead><tr><th>Say</th><th>Roughness z0</th><th>Thermals (w*, zi)</th></tr></thead><tbody>
+<tr><td><code>grasslands</code> / <code>prairie</code> / <code>plains</code></td><td>0.03 m</td><td>2.0 m/s, 1213 m</td></tr>
+<tr><td><code>desert</code> / <code>dunes</code></td><td>0.005 m</td><td>2.7 m/s, 1975 m (strongest)</td></tr>
+<tr><td><code>ocean</code> / <code>sea</code></td><td>0.0002 m</td><td>none &mdash; honestly</td></tr>
+<tr><td><code>forest</code> / <code>woods</code></td><td>1.0 m</td><td>1.8 m/s, 893 m</td></tr>
+<tr><td><code>city</code> / <code>urban</code></td><td>2.0 m</td><td>2.0 m/s, 1213 m</td></tr>
+</tbody></table>
+<p class="dim">Wind decays toward the ground by the surface&rsquo;s roughness (Stull Table 9-6);
+thermals lift the plane by NASA&rsquo;s measured climatology. Visuals for these are still the flat slab &mdash; labeled.</p>
+
+<h2>Wind &amp; turbulence</h2>
+<p><span class="p">15 kt crosswind</span> <span class="p">strong headwind</span>
+<span class="p">wind 270 at 25</span> <span class="p">gale tailwind</span> &mdash;
+words map as light 8 / moderate 15 / strong 25 / severe 40 kt; head/cross/tail are relative to your heading.</p>
+<p><span class="p">light chop</span> <span class="p">moderate turbulence</span>
+<span class="p">severe turbulence</span> &mdash; MIL-spec seeded turbulence, reproducible per seed.</p>
+<p class="dim">Over terrain with wind you also get ridge lift, lee sink, and lee-rotor turbulence from
+the actual mountain shapes &mdash; automatically.</p>
+
+<h2>Severe weather</h2>
+<table><thead><tr><th>Say</th><th>What happens</th></tr></thead><tbody>
+<tr><td><code>thunderstorm</code> / <code>storm</code></td><td>Microburst cell ahead on your track + severe
+turbulence + dark storm light</td></tr>
+<tr><td><code>near a tornado</code></td><td>EF2 Rankine vortex (50 m/s core) beside your track &mdash;
+expect to get pulled in</td></tr>
+<tr><td><code>through a tornado</code></td><td>The vortex core ON your track. Defaulted altitude descends
+to 800 m (into its reach); rendered from the tower because inside the funnel there is honestly nothing to see</td></tr>
+</tbody></table>
+
+<h2>Historical weather &mdash; fly a real day</h2>
+<p>Add a date: <span class="p">over Everest on 2024-01-15</span> &mdash; the plane flies the wind that
+actually blew there (archived weather-model analyses from 2022 on; ERA5 surface wind before that, labeled).
+A wind you state yourself always wins.</p>
+
+<h2>Cameras</h2>
+<table><thead><tr><th>Preset</th><th>View</th></tr></thead><tbody>
+<tr><td><code>chase</code></td><td>Behind the plane, horizon-stable, any distance (the close-up flyby was 12 m)</td></tr>
+<tr><td><code>shoulder</code></td><td>On the airframe &mdash; pilot view, horizon rolls with the plane (scales to any aircraft)</td></tr>
+<tr><td><code>tower</code></td><td>Fixed ground observer watching the whole flight</td></tr>
+<tr><td><code>wingman</code></td><td>Flying alongside</td></tr>
+</tbody></table>
+
+<h2>What every run gives you</h2>
+<p>The rendered clip with its honesty panel &bull; a live aero side panel (angle of attack, lift/drag,
+stall margin, wind in the FDM) &bull; the <b>&ldquo;what the conditions did&rdquo;</b> report &mdash; your flight
+vs the same flight in still air &bull; full telemetry + provenance downloads &mdash; every number traceable
+to what you asked for.</p>
+
+<h2>What it refuses (on purpose)</h2>
+<p class="note">Speeds below stall or beyond the tables &bull; altitudes that hit terrain (checked under the
+wingtips, not just the fuselage) &bull; unknown surfaces/aircraft/places (it asks for coordinates rather than
+guessing) &bull; unbaked terrain (it offers to bake) &bull; weather data it cannot fetch &bull; renders where
+frames show nothing. Every refusal is named. Not modelled and stated: airframe damage, icing, rain physics,
+debris, wet runways.</p>
+
+<h2>Mix anything with anything</h2>
+<p><span class="p">fly the 747 through a thunderstorm over Everest on 2024-01-15</span><br>
+<span class="p">fly the c172p at 500 m over the desert in a gale crosswind</span><br>
+<span class="p">fly the f16 at 200 m through the Grand Canyon</span><br>
+<span class="p">fly the cessna near a tornado over the prairie</span><br>
+<span class="p">fly the a320 at 36.09, -112.0 in moderate turbulence</span></p>
+</div></body></html>

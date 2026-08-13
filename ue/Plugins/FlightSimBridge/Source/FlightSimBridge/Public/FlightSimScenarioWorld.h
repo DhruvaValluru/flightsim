@@ -127,6 +127,21 @@ struct FFlightSimScenarioCard
 	double RotorW20CapFps = 0.0;
 	double RotorBackgroundW20Fps = 0.0;
 
+	// -- tornado (Phase 9.3) ----------------------------------------------
+	// Kinematic Rankine vortex + schematic core updraft
+	// (core/environment/tornado.py is the reference; this host derives
+	// nothing). Point-sampled at the CG like every wind field here.
+	bool bTornado = false;
+	double TornadoOriginXMetres = 0.0;
+	double TornadoOriginYMetres = 0.0;
+	double TornadoCentreNorthMetres = 0.0;
+	double TornadoCentreEastMetres = 0.0;
+	double TornadoVMaxMps = 0.0;
+	double TornadoRCoreMetres = 0.0;
+	double TornadoWMaxMps = 0.0;
+	double TornadoTopMetres = 0.0;
+	double TornadoFadeTopMetres = 0.0;
+
 	// -- log-profile surface layer (Phase 7, 2.1) -------------------------
 	// u(z) = U_ref ln(z/z0)/ln(z_ref/z0), held above the surface-layer top,
 	// zero at and below z0 (core/environment/wind.py LogProfileWind).
@@ -136,6 +151,9 @@ struct FFlightSimScenarioCard
 	double LogProfileReferenceHeightMetres = 10.0;
 	double LogProfileZ0Metres = 0.03;
 	double LogProfileSurfaceLayerTopMetres = 300.0;
+	// Phase 9.1 surface classes: true = the profile IS the horizontal wind
+	// (Step replaces the base instead of adding). Absent on Phase 7 cards.
+	bool bLogProfileCarriesBase = false;
 
 	// -- convective thermals (Phase 7, 2.2) -------------------------------
 	// Allen NASA/TM-2006-214019; every position and scale computed in
@@ -151,6 +169,10 @@ struct FFlightSimScenarioCard
 	double ThermalsOriginYMetres = 0.0;
 	TArray<double> ThermalNorthMetres;
 	TArray<double> ThermalEastMetres;
+	// Phase 9.1: flat-scene surface runs declare the projected CRS here
+	// (the spec origin's UTM zone); applied only when no terrain block set
+	// one. Empty on Phase 7 cards.
+	FString ThermalsCrs;
 
 	// -- evolving-conditions schedules (Phase 7, 3.1) ---------------------
 	// Turbulence intensity over time, delivered as W20 fps ONLY -- the
@@ -180,6 +202,9 @@ struct FFlightSimScenarioCard
 	// AGL against the raster elevation under the aircraft rather than the
 	// spec's flat terrain elevation -- the right claim for real ground.
 	FString CollisionTerrainPath;
+	// Phase 9: projected CRS for flat-scene position-coupled blocks
+	// (thermals / downburst / tornado); empty when terrain declares one.
+	FString SceneCrs;
 };
 
 class FLIGHTSIMBRIDGE_API FFlightSimScenarioWorld
@@ -220,6 +245,20 @@ public:
 	// crash. Shared by Step() and the interactive host so a frozen state can
 	// never keep being recorded as flight in either.
 	bool Crashed(double TimeSeconds, FString& Error) const;
+
+	// True (with Error set) when a sampled span station is below the terrain
+	// surface (core/terrain/contact.py is the reference implementation --
+	// same span stations, same ZYX rotation, same bilinear lookup). Only
+	// meaningful when bCollisionTerrainReady; a no-op otherwise. Point
+	// samples at span stations, not a mesh intersection.
+	bool AirframeImpact(double TimeSeconds, FString& Error) const;
+
+	// Rankine-vortex wind at a local position (Phase 9.3), from the card's
+	// own constants -- mirrors TornadoVortex.wind_components exactly.
+	static void TornadoWindMps(const FFlightSimScenarioCard& Card,
+	                           double NorthMetres, double EastMetres,
+	                           double AglMetres, double& OutNorthMps,
+	                           double& OutEastMps, double& OutDownMps);
 
 	// Dispatches actor BeginPlay, which is where the plugin loads the aircraft
 	// for real and trims it -- in calm air.
@@ -385,4 +424,10 @@ private:
 	bool BuildTerrainCollision(const FFlightSimScenarioCard& Card, FString& Error);
 	FFlightSimHeightfield CollisionTerrain;
 	bool bCollisionTerrainReady = false;
+
+	// The tornado funnel actor (visual marker) and the vortex core's own
+	// angular rate: ApplyStepWrites yaws the mesh by SIM time so the spin
+	// is deterministic and replay-identical.
+	AActor* TornadoFunnel = nullptr;
+	double TornadoOmegaDegPerSec = 0.0;
 };

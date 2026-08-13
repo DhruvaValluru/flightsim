@@ -79,5 +79,37 @@ def create_terrain_imagery():
     print(f"MATERIAL-CREATED: {full}")
 
 
+
+
+def create_vertex_colour_unlit():
+    """The tornado funnel's material: a MARKER must read from every side
+    under any sun, so it is UNLIT -- vertex colour straight into emissive.
+    (Measured: the lit vertex-colour material rendered the funnel black
+    whenever the camera faced its unlit side, i.e. most of every chase
+    shot in the storm look's low sun.)"""
+    full = f"{PATH}/M_VertexColorUnlit"
+    if unreal.EditorAssetLibrary.does_asset_exist(full):
+        print(f"MATERIAL-EXISTS: {full}")
+        return
+
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    material = tools.create_asset("M_VertexColorUnlit", PATH, unreal.Material,
+                                  unreal.MaterialFactoryNew())
+    if material is None:
+        raise SystemExit("could not create material asset")
+
+    material.set_editor_property("shading_model",
+                                 unreal.MaterialShadingModel.MSM_UNLIT)
+    lib = unreal.MaterialEditingLibrary
+    vertex = lib.create_material_expression(
+        material, unreal.MaterialExpressionVertexColor, -350, 0)
+    lib.connect_material_property(vertex, "",
+                                  unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    lib.recompile_material(material)
+    unreal.EditorAssetLibrary.save_asset(full)
+    print(f"MATERIAL-CREATED: {full}")
+
+
 create_vertex_colour()
 create_terrain_imagery()
+create_vertex_colour_unlit()
