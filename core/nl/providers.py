@@ -176,6 +176,17 @@ def resolve_client() -> Optional[Tuple[Any, str]]:
     if provider == "ollama":
         model = os.environ.get("FLIGHTSIM_LLM_MODEL", DEFAULT_OLLAMA_MODEL)
         return OllamaClient(), model
+    if provider == "llm7":
+        # The TRUE keyless fail-safe: llm7.io serves OpenAI-compatible chat
+        # completions with NO account or key (verified live 2026-08-13; a
+        # key via LLM7_API_KEY raises the anonymous rate limits but is
+        # optional). Anonymous services can change terms or vanish -- the
+        # compiler's strict parsing and loud refusal already cover a dead
+        # or degraded endpoint, and the regex parser remains the floor.
+        model = os.environ.get("FLIGHTSIM_LLM_MODEL", "gemini-3.1-flash-lite")
+        return (OpenAICompatClient(
+            "https://api.llm7.io/v1",
+            os.environ.get("LLM7_API_KEY") or None), model)
     if provider in ("groq", "openrouter"):
         # The NO-DOWNLOAD fail-safe: free hosted endpoints, OpenAI-compatible.
         # Both need a free account key (no credit card at signup) -- a truly
@@ -213,5 +224,6 @@ def resolve_client() -> Optional[Tuple[Any, str]]:
                                    os.environ.get("OPENAI_API_KEY")), model)
     raise ValueError(
         f"unknown FLIGHTSIM_LLM provider {provider!r}; supported: "
-        f"'ollama' (local, free), 'groq' / 'openrouter' (hosted, free "
-        f"tier, no download), 'openai' (any OpenAI-compatible endpoint)")
+        f"'llm7' (hosted, keyless), 'ollama' (local, free), 'groq' / "
+        f"'openrouter' (hosted, free tier, key needed), 'openai' (any "
+        f"OpenAI-compatible endpoint)")

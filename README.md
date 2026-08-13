@@ -33,6 +33,10 @@ API, and the natural-language compiler has three tiers -- pick one:
   `ollama pull qwen2.5:7b` (~4.7 GB) or `qwen2.5:14b` (~9 GB, better);
   set `FLIGHTSIM_LLM=ollama` in `~/.flightsim.env`. Runs fully offline
   afterwards; ~16 GB RAM recommended for the 14b.
+* **Keyless hosted model (no download, no account, nothing):** set
+  `FLIGHTSIM_LLM=llm7` in `~/.flightsim.env` -- llm7.io serves free
+  OpenAI-compatible models anonymously. Rate-limited and best-effort (an
+  anonymous service can change); the tiers below are sturdier.
 * **Free hosted model (no download, 2-minute signup):** make a free
   account at console.groq.com (no credit card), create an API key, then
   set `FLIGHTSIM_LLM=groq` and `GROQ_API_KEY=...` in `~/.flightsim.env`.

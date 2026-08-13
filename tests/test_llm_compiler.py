@@ -567,3 +567,16 @@ def test_hosted_free_provider_presets(monkeypatch):
     client, model = resolve_client()
     assert client.base_url == "https://openrouter.ai/api/v1"
     assert model.endswith(":free")
+
+
+def test_llm7_preset_is_keyless(monkeypatch):
+    """The true zero-setup fail-safe: FLIGHTSIM_LLM=llm7 resolves with NO
+    key in the environment (verified live against the real endpoint on
+    2026-08-13; this test pins the wiring, not the network)."""
+    from core.nl.providers import resolve_client
+
+    monkeypatch.setenv("FLIGHTSIM_LLM", "llm7")
+    monkeypatch.delenv("LLM7_API_KEY", raising=False)
+    client, model = resolve_client()
+    assert client.base_url == "https://api.llm7.io/v1"
+    assert model == "gemini-3.1-flash-lite"
