@@ -82,9 +82,23 @@ def test_thunderstorm_composition_never_moves_a_stated_word():
     apply_weather_event(stated)
     assert str(stated.turbulence.value) == "light"    # never moved
 
+    # A tornado brings its environment: system-chosen ambient fields are
+    # planned to the composition's documented figures (source derived) --
+    # the vortex is still the position-coupled field on top.
     twister = compile_prompt("fly the 747 near a tornado at 1000 m")
     apply_weather_event(twister)
-    assert str(twister.turbulence.value) == "none"    # tornado edits nothing
+    assert str(twister.turbulence.value) == "severe"
+    assert str(twister.turbulence.source) == "derived"
+    assert float(twister.wind_speed.value) == 25.0    # vocabulary 'strong'
+    assert str(twister.wind_speed.source) == "derived"
+
+    # Stated conditions are never moved by the composition.
+    calm_stated = compile_prompt(
+        "fly the 747 near a tornado at 1000 m with 5 kt wind and "
+        "light turbulence")
+    apply_weather_event(calm_stated)
+    assert float(calm_stated.wind_speed.value) == 5.0
+    assert str(calm_stated.turbulence.value) == "light"
 
 
 # -- the physics reaches the FDM -----------------------------------------

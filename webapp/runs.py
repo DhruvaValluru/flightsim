@@ -684,6 +684,26 @@ def apply_weather_event(spec: ScenarioSpec) -> None:
         spec.plan("turbulence", "severe",
                   frm="thunderstorm composition (documented): microburst + "
                       "severe turbulence + storm look")
+    # A tornado also rides violent air, not the smooth-air default: the
+    # environment composition plans the SYSTEM-CHOSEN ambient fields to
+    # match the event, from the vocabulary's own documented figures. The
+    # vortex itself stays a position-coupled field on top of this
+    # background -- these edits are the air AROUND it. Stated words and
+    # numbers are never moved (plan() refuses them by name).
+    if (str(spec.weather_event.value) == "tornado"
+            and str(spec.turbulence.source) in ("default", "derived")):
+        spec.plan("turbulence", "severe",
+                  frm="tornado environment (documented composition): the "
+                      "vortex rides supercell air, not smooth air; a "
+                      "stated turbulence word is never moved")
+    if (str(spec.weather_event.value) in ("thunderstorm", "tornado")
+            and str(spec.wind_speed.source) in ("default", "derived")):
+        from core.nl.compiler import WIND_STRENGTH
+
+        spec.plan("wind_speed", WIND_STRENGTH["strong"],
+                  frm=f"{spec.weather_event.value} environment (documented "
+                      f"composition): background inflow at the vocabulary's "
+                      f"own 'strong' figure; a stated wind is never moved")
     plan_weather_event(spec)
 
 

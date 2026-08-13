@@ -419,11 +419,11 @@ def test_control_ridge_spec_is_placed_on_the_ridge():
 
 
 def test_compile_table_shows_weather_event_planning(client):
-    """What the user reviews is what will run: the tornado's defaulted-
-    altitude descent (and a thunderstorm's turbulence word) appear in the
-    /compile table as recorded derived edits, not as silent run-time
-    surprises. Ambient wind stays honestly untouched -- the vortex is a
-    position-coupled field, not a uniform wind."""
+    """What the user reviews is what will run: the event's environment
+    composition (altitude descent, background inflow wind, turbulence
+    word) appears in the /compile table as recorded derived edits, not as
+    silent run-time surprises. The vortex itself remains a position-
+    coupled field on top of this planned background."""
     payload = client.post("/compile", json={
         "prompt": "fly the c172p through a tornado",
         "compiler": "regex"}).json()
@@ -431,7 +431,9 @@ def test_compile_table_shows_weather_event_planning(client):
     assert fields["altitude"]["value"] == 800.0
     assert fields["altitude"]["source"] == "derived"
     assert "vortex" in fields["altitude"]["from"]
-    assert fields["wind_speed"]["value"] == 0.0          # not a uniform wind
+    assert fields["wind_speed"]["value"] == 25.0         # composed background
+    assert fields["wind_speed"]["source"] == "derived"
+    assert fields["turbulence"]["value"] == "severe"
     assert payload["validation"]["ok"], payload["validation"]["violations"]
 
     storm = client.post("/compile", json={

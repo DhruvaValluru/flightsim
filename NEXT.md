@@ -20,7 +20,12 @@ and their refusals stand. Wired into /compile (both compilers) and /run
 (re-plan after the raster track raise). Also: `_parse_payload` defaults
 ABSENT notes/questions to [] (measured: gpt-4.1-mini omits empty lists
 when the schema is guidance, not grammar; every other rail unchanged).
-Suite 428 tests, 88 guards.
+Weather events now compose their ENVIRONMENT too, visible at /compile:
+a tornado/thunderstorm with system-chosen ambient fields plans
+background wind to the vocabulary's 'strong' 25 kt and turbulence to
+'severe' (the vortex/microburst stays position-coupled ON TOP); a
+tornado still descends a defaulted altitude to 800 m. Stated words and
+numbers are never moved. Suite 429 tests, 88 guards.
 
 **Terrain physics (2026-08-11, second session -- "not taking all
 mountain surfaces into physics consideration").** Two features, all
