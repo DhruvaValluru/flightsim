@@ -493,7 +493,7 @@ mutate core/environment/stack.py \
 # -- Phase 8: the LLM compiler and the web front door --------------------
 
 mutate core/nl/llm_compiler.py \
-    '        if entry["source"] not in ("user", "inferred"):' \
+    '        if entry["source"] not in ("user", "inferred", "model"):' \
     '        if False:  # MUTATED: a model may claim default provenance' \
     "the model cannot claim provenance it does not have" \
     tests/test_llm_compiler.py || failures=$((failures+1))
@@ -520,6 +520,26 @@ mutate webapp/runs.py \
     '    if float(spec.airspeed.value) < speeds.vs_kt * STALL_MARGIN:' \
     '    if False:  # MUTATED: defaulted airspeed never planned' \
     "a defaulted airspeed is planned to the measured envelope" \
+    tests/test_webapp.py || failures=$((failures+1))
+
+# -- the scene director's rails (2026-08-13) ------------------------------
+
+mutate core/nl/llm_compiler.py \
+    '        if not (isinstance(entry["from"], str) and entry["from"].strip()):' \
+    '        if False:  # MUTATED: undeclared guesses accepted' \
+    "a model guess with no declared reason is refused" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    'PLANNABLE_SOURCES = ("default", "model", "derived")' \
+    'PLANNABLE_SOURCES = ("default", "model", "derived", "user", "inferred")  # MUTATED' \
+    "planners never move a user-stated value" \
+    tests/test_webapp.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '            "wind_direction", float(round((axis + 90.0) % 360.0)),' \
+    '            "wind_direction", 0.0,  # MUTATED: ridge axis ignored' \
+    "the planned wind blows across the computed ridge axis" \
     tests/test_webapp.py || failures=$((failures+1))
 
 # -- Phase 8 LLM compiler v2: questions, cap, provenance, geography ------
@@ -638,7 +658,7 @@ mutate core/environment/tornado.py \
 
 mutate webapp/runs.py \
     '    if (str(spec.weather_event.value) == "thunderstorm"
-            and str(spec.turbulence.source) in ("default", "derived")):' \
+            and str(spec.turbulence.source) in PLANNABLE_SOURCES):' \
     '    if str(spec.weather_event.value) == "thunderstorm":  # MUTATED: stated words moved' \
     "the thunderstorm composition never moves a stated turbulence word" \
     tests/test_weather_events.py || failures=$((failures+1))

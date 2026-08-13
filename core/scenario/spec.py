@@ -31,7 +31,13 @@ from .fields import Quantity, Source
 # 3 (2026-08-11): environment.weather_date added (ERA5 historical weather).
 # 4 (2026-08-11): environment.weather_event added (Phase 9.2/9.3 storm cell
 # and tornado -- composed/kinematic condition models, refused when unknown).
-SPEC_VERSION = 4
+# 5 (2026-08-13): provenance source "model" added (the scene director's
+# declared interpretation). The field list is unchanged, but a version-5
+# dict may carry a source value version-4 builds refuse (Source("model")
+# raises), so the refuse-old-dicts convention applies in BOTH directions:
+# bumping keeps the failure a named version error instead of a KeyError
+# deep in Quantity. Completed runs recover from provenance.json as always.
+SPEC_VERSION = 5
 
 
 @dataclass
@@ -127,15 +133,18 @@ class ScenarioSpec:
         The planners' edit step (terrain clearance, envelope floors): the
         result is the system's own computation, not the user's words, so
         the source becomes ``derived`` -- and, unlike a ``set()``, a later
-        planner may move it again. Only defaulted or derived fields may be
-        planned; a user-stated or inferred value is never silently moved
-        (§2.6) -- planners refuse by name instead.
+        planner may move it again. Only defaulted, derived or
+        model-sourced fields may be planned (a model guess is the
+        system's choice too -- declared, and overridable by physics); a
+        user-stated or inferred value is never silently moved (§2.6) --
+        planners refuse by name instead.
         """
         current = getattr(self, name)
-        if current.source not in (Source.DEFAULT, Source.DERIVED):
+        if current.source not in (Source.DEFAULT, Source.DERIVED,
+                                  Source.MODEL):
             raise ValueError(
-                f"plan() only moves defaulted/derived fields; {name} is "
-                f"{current.source.value!r} -- a stated value is never "
+                f"plan() only moves defaulted/derived/model fields; {name} "
+                f"is {current.source.value!r} -- a stated value is never "
                 f"silently moved")
         setattr(
             self,
@@ -193,12 +202,12 @@ class ScenarioSpec:
     def write(self, path) -> Path:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(self.to_yaml())
+        path.write_text(self.to_yaml(), encoding="utf-8")
         return path
 
     @classmethod
     def read(cls, path) -> "ScenarioSpec":
-        return cls.from_yaml(Path(path).read_text())
+        return cls.from_yaml(Path(path).read_text(encoding="utf-8"))
 
     # -- identity -------------------------------------------------------
 

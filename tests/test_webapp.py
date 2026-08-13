@@ -348,7 +348,7 @@ def test_run_telemetry_served_only_after_completion(client, tmp_path,
         telemetry = tmp_path / "teletest" / "telemetry.json"
         telemetry.parent.mkdir(parents=True)
         telemetry.write_text('{"columns": {"t": [0.0, 0.1], '
-                             '"alpha_deg": [2.5, 2.6]}}')
+                             '"alpha_deg": [2.5, 2.6]}}', encoding="utf-8")
         # Not done yet -> 404 even though the file exists on disk.
         assert client.get("/runs/teletest/telemetry.json").status_code == 404
 
@@ -379,7 +379,7 @@ def test_completed_run_survives_a_server_restart(tmp_path):
         "scene": {"key": "flat", "label": "flat slab"},
         "reference_speeds": {"vs_kt": 176.0},
         "conditions": {"wind_note": "calm"},
-    }))
+    }), encoding="utf-8")
     fresh = RunManager(out_root=tmp_path)
     run = fresh.get("abc123def456")
     assert run is not None and run.status == "done"
@@ -482,6 +482,140 @@ def test_flyable_defaults_are_planned_not_refused():
     # plan() itself refuses to touch the user's words.
     with pytest.raises(ValueError, match="never.*moved"):
         stated.plan("airspeed", 300.0, frm="should refuse")
+
+
+def test_ridge_axis_math_on_synthetic_rasters():
+    """The axis computation is pinned on rasters whose orientation is
+    KNOWN by construction: elevation varying only east-west is a
+    north-south ridge (axis 0), only north-south an east-west ridge
+    (axis 90), and the anti-diagonal ridge (col == row, which runs
+    south-east as rows grow southward) sits at 135."""
+    import numpy as np
+
+    from webapp.runs import _ridge_axis_deg
+
+    x = np.abs(np.arange(200) - 100)[None, :] * np.ones((200, 1))
+    ns = (1000 - x * 5).clip(0).astype(np.uint16)
+    assert abs(_ridge_axis_deg(ns, 1.0) - 0.0) < 0.5
+
+    y = np.abs(np.arange(200) - 100)[:, None] * np.ones((1, 200))
+    ew = (1000 - y * 5).clip(0).astype(np.uint16)
+    assert abs(_ridge_axis_deg(ew, 1.0) - 90.0) < 0.5
+
+    d = np.abs(np.arange(200)[None, :] - np.arange(200)[:, None])
+    diag = (1000 - d * 5).clip(0).astype(np.uint16)
+    assert abs(_ridge_axis_deg(diag, 1.0) - 135.0) < 0.5
+
+
+def test_terrain_environment_planned_across_the_ridge():
+    """Mountains-with-wind is physically different from flatland: the
+    SYSTEM-CHOSEN wind is planned ACROSS the scene's principal ridge axis
+    and the heading ALONG it, both recorded derived edits. A user-stated
+    direction never moves, a calm spec gets no invented wind direction,
+    and a flat scene is a no-op."""
+    from webapp.runs import (REPO, place_on_scene, plan_terrain_environment,
+                             _ridge_axis_deg)
+
+    if not (REPO / "runs" / "terrain" / "control_ridge.r16").is_file():
+        pytest.skip("no control ridge baked on this machine")
+
+    from core.terrain.heightfield import Heightfield
+
+    axis = _ridge_axis_deg(
+        *(lambda hf: (hf.samples, hf.scale_m))(
+            Heightfield.read(REPO / "runs" / "terrain" / "control_ridge.r16")))
+
+    spec = compile_prompt(
+        "fly the 747 at 5000 m and 250 kt over 2000 m mountains in a "
+        "strong wind")
+    assert str(spec.wind_direction.source) == "default"
+    place_on_scene(spec)
+    plan_terrain_environment(spec)
+    assert str(spec.wind_direction.source) == "derived"
+    assert "across ridge axis" in spec.wind_direction.frm
+    assert abs(float(spec.wind_direction.value)
+               - (axis + 90.0) % 360.0) < 0.51
+    assert str(spec.heading.source) == "derived"
+    assert "along ridge axis" in spec.heading.frm
+
+    stated = compile_prompt(
+        "fly the 747 at 5000 m and 250 kt over 2000 m mountains with "
+        "wind from 270 at 25 kt heading 045")
+    assert str(stated.wind_direction.source) == "user"
+    place_on_scene(stated)
+    plan_terrain_environment(stated)
+    assert float(stated.wind_direction.value) == 270.0   # never moved
+    assert float(stated.heading.value) == 45.0           # never moved
+
+    calm = compile_prompt(
+        "fly the 747 at 5000 m and 250 kt over 2000 m mountains")
+    place_on_scene(calm)
+    plan_terrain_environment(calm)
+    assert str(calm.wind_direction.source) == "default"  # no invented wind
+
+    flat = compile_prompt("fly the 747 at 3000 m and 250 kt")
+    plan_terrain_environment(flat)
+    assert str(flat.heading.source) == "default"         # flat: no-op
+
+
+def test_default_airspeed_follows_a_model_chosen_aircraft():
+    """The defaulted cruise is filled before the model decides the
+    aircraft: 'a plane' -> c172p must not keep a B747's 250 kt default
+    (measured -- TrimError). The still-default airspeed is re-planned to
+    THIS airframe's documented cruise default."""
+    from core.scenario.fields import Quantity, Source
+    from webapp.runs import plan_flyable_defaults
+
+    spec = compile_prompt("fly a plane at 2000 m")
+    spec.aircraft = Quantity("c172p", None, Source.MODEL, frm="a plane")
+    assert float(spec.airspeed.value) == 250.0    # the pre-aircraft default
+    plan_flyable_defaults(spec)
+    assert float(spec.airspeed.value) == 100.0    # c172p's own default
+    assert str(spec.airspeed.source) == "derived"
+    assert "documented cruise default" in spec.airspeed.frm
+
+
+def test_trim_recovery_replans_an_unflyable_guess_once():
+    """Physics keeps the last word over guesses: a model-guessed 120 kt
+    is beyond the c172p's level-flight power at 2500 m (the stall floor
+    cannot see an upper-envelope miss); ONE recorded re-plan to the
+    documented cruise makes it fly. A user-stated condition is never
+    touched -- its named refusal stands."""
+    from core.scenario.fields import Quantity, Source
+    from core.scenario.validate import validate
+    from webapp.runs import plan_trim_recovery
+
+    spec = compile_prompt("a small plane over the ridge")
+    spec.aircraft = Quantity("c172p", None, Source.MODEL, frm="small plane")
+    spec.altitude = Quantity(2500.0, "m", Source.MODEL, frm="over the ridge")
+    spec.airspeed = Quantity(120.0, "kt", Source.MODEL, frm="a plane")
+    assert not validate(spec).ok                  # the measured miss
+    plan_trim_recovery(spec)
+    assert float(spec.airspeed.value) == 100.0
+    assert "could not be trimmed" in spec.airspeed.frm
+    assert validate(spec).ok
+
+    stated = compile_prompt("fly the c172p at 2500 m and 120 kt")
+    assert str(stated.airspeed.source) == "user"
+    plan_trim_recovery(stated)
+    assert float(stated.airspeed.value) == 120.0  # never moved
+    report = validate(stated)
+    assert not report.ok                          # the refusal stands
+
+
+def test_model_sourced_values_are_plannable():
+    """A declared model guess is the system's choice: the planners may
+    move it exactly like a default, and the guess plus the plan are both
+    on record afterwards."""
+    from core.scenario.fields import Quantity, Source
+    from webapp.runs import plan_flyable_defaults
+
+    spec = compile_prompt("fly the 747")
+    spec.altitude = Quantity(100.0, "m", Source.MODEL, frm="right on the deck")
+    spec.set("terrain_elevation", 4750.0, frm="test: everest datum")
+    plan_flyable_defaults(spec)
+    assert float(spec.altitude.value) == 5050.0
+    assert str(spec.altitude.source) == "derived"
 
 
 def test_terrain_run_is_planned_for_clearance():
@@ -592,7 +726,7 @@ def test_windy_terrain_run_card_carries_the_rotor(tmp_path, monkeypatch):
 
     def fake_render(card, frames, scene, mesh, aircraft, telemetry=None, look=None, camera="chase"):
         frames.mkdir(parents=True, exist_ok=True)
-        (frames / "render.json").write_text("{}")
+        (frames / "render.json").write_text("{}", encoding="utf-8")
         if telemetry is not None:
             # A plausible recorded run: the effect report needs the actual
             # telemetry to compare its headless baseline against.
@@ -600,7 +734,7 @@ def test_windy_terrain_run_card_carries_the_rotor(tmp_path, monkeypatch):
             columns = {"t": [round(0.1 * i, 1) for i in range(220)]}
             for name in EFFECT_CHANNELS:
                 columns[name] = [1.0 + 0.01 * (i % 7) for i in range(220)]
-            telemetry.write_text(jsonlib.dumps({"columns": columns}))
+            telemetry.write_text(jsonlib.dumps({"columns": columns}), encoding="utf-8")
         return True
 
     monkeypatch.setattr(RunManager, "_render", staticmethod(fake_render))
@@ -614,7 +748,7 @@ def test_windy_terrain_run_card_carries_the_rotor(tmp_path, monkeypatch):
     local._render_flow(run, spec, provenance={})
     assert run.status == "done", run.detail
 
-    card = jsonlib.loads((tmp_path / "rotortest" / "card.json").read_text())
+    card = jsonlib.loads((tmp_path / "rotortest" / "card.json").read_text(encoding="utf-8"))
     assert card["turbulence"] == "lee-rotor"
     assert card["rotor"]["sigma_gain"] > 0.0
     assert card["turbulence_properties"]     # the provider's pinned writes
@@ -626,7 +760,7 @@ def test_windy_terrain_run_card_carries_the_rotor(tmp_path, monkeypatch):
     # The conditions-effect report: a headless still-air baseline of the
     # same spec beside the run's own telemetry, with the cross-host claim
     # stated. Coupled runs carry it; the calm test below asserts absence.
-    effect = jsonlib.loads((tmp_path / "rotortest" / "effect.json").read_text())
+    effect = jsonlib.loads((tmp_path / "rotortest" / "effect.json").read_text(encoding="utf-8"))
     assert effect["samples"] > 0
     assert "severed" in effect["claim"] and "Gate 5" in effect["claim"]
     wind = effect["channels"]["wind_down_mps"]
@@ -650,7 +784,7 @@ def test_calm_terrain_run_states_why_the_air_is_still(tmp_path, monkeypatch):
 
     def fake_render(card, frames, scene, mesh, aircraft, telemetry=None, look=None, camera="chase"):
         frames.mkdir(parents=True, exist_ok=True)
-        (frames / "render.json").write_text("{}")
+        (frames / "render.json").write_text("{}", encoding="utf-8")
         return True
 
     monkeypatch.setattr(RunManager, "_render", staticmethod(fake_render))
@@ -664,7 +798,7 @@ def test_calm_terrain_run_states_why_the_air_is_still(tmp_path, monkeypatch):
     local._render_flow(run, spec, provenance={})
     assert run.status == "done", run.detail
 
-    card = jsonlib.loads((tmp_path / "calmtest" / "card.json").read_text())
+    card = jsonlib.loads((tmp_path / "calmtest" / "card.json").read_text(encoding="utf-8"))
     assert "rotor" not in card and "orographic" not in card
     assert "no terrain-driven airflow" in run.conditions["wind_note"]
     # No coupling, no effect report -- a baseline identical to the run
@@ -750,7 +884,7 @@ def test_effect_report_served_only_after_completion(client, tmp_path,
         run.status = "report"
         path = tmp_path / "fxtest" / "effect.json"
         path.parent.mkdir(parents=True)
-        path.write_text('{"channels": {"t": [0.0]}, "samples": 1}')
+        path.write_text('{"channels": {"t": [0.0]}, "samples": 1}', encoding="utf-8")
         assert client.get("/runs/fxtest/effect.json").status_code == 404
 
         run.status = "done"
@@ -805,7 +939,7 @@ def test_bake_endpoint_registers_a_pickable_scene(client, monkeypatch,
     (dynamic_dir / f"{location.key}.scene.json").write_text(jsonlib.dumps({
         "key": location.key, "title": location.title,
         "origin_lat": 51.5, "origin_lon": -0.1, "crs": location.crs,
-        "identity": "source-verified only (no named summits)"}))
+        "identity": "source-verified only (no named summits)"}), encoding="utf-8")
     scenes = _dynamic_scenes(dynamic_dir)
     assert len(scenes) == 1
     assert scenes[0]["key"] == location.key

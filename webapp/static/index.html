@@ -25,6 +25,8 @@
              width: 9rem; }
   .src-user     { color: #7fd08f; }
   .src-inferred { color: #e0b452; }
+  .src-model    { color: #6fb3e0; }
+  .src-derived  { color: #b48ce0; }
   .src-default  { color: #7d8a93; }
   .src-edited   { color: #6fb3e0; }
   .verdict-ok      { color: #7fd08f; }
@@ -84,6 +86,7 @@ visual-only per host (measured).</p>
     <th>provenance</th></tr></thead>
     <tbody></tbody>
   </table>
+  <div id="srcLegend" class="dim" style="margin:.4rem 0"></div>
   <div id="verdict"></div>
   <p>
     <button id="run" class="run">Run</button>
@@ -106,6 +109,17 @@ let activeRun = null;
 const $ = id => document.getElementById(id);
 
 function sourceClass(s) { return "src-" + s; }
+
+// The provenance column reads like director's notes: a model row shows
+// the QUOTED phrase the guess interprets, an inferred row the quoted
+// vocabulary phrase, others their plain origin.
+function provenanceNote(f) {
+  const frm = f.from || "";
+  if (!frm) return "";
+  if (f.source === "model") return `interpreting &ldquo;${frm}&rdquo;`;
+  if (f.source === "inferred") return `&ldquo;${frm}&rdquo;`;
+  return frm;
+}
 
 // Compiler state up front (Task 0): the page states which compiler WILL run
 // before the first Interpret, instead of discovering a fallback after a spin.
@@ -198,9 +212,18 @@ function renderSpec(payload) {
          : `${value}`}${f.unit ? " " + f.unit : ""}</td>` +
       `<td class="${sourceClass(f.source)}" data-src="${f.name}">` +
       `${f.source}</td>` +
-      `<td class="dim">${f.from || ""}${f.std ? " &mdash; " + f.std : ""}</td>`;
+      `<td class="dim">${provenanceNote(f)}` +
+      `${f.std ? " &mdash; " + f.std : ""}</td>`;
     body.appendChild(row);
   }
+  // Director's-notes legend: what each source means, in one line.
+  $("srcLegend").innerHTML =
+    `<span class="src-user">user</span> you said it &middot; ` +
+    `<span class="src-inferred">inferred</span> your words, the documented ` +
+    `mapping &middot; <span class="src-model">model</span> the director's ` +
+    `interpretation (quoted) &middot; <span class="src-derived">derived` +
+    `</span> the planners computed it &middot; ` +
+    `<span class="src-default">default</span> documented default`;
   body.querySelectorAll("input").forEach(input => {
     input.addEventListener("change", () => {
       const cell = body.querySelector(`[data-src="${input.dataset.name}"]`);

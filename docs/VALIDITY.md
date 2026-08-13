@@ -677,6 +677,25 @@ the stated fallback; it cannot inject an unvalidated spec. Gate 8.1's live
 corpus is therefore a measurement OF the configured provider's model, and
 its report names which one ran.
 
+**Declared model interpretation (the scene director) moves no claim.**
+The compiler may fill ANY spec field from the prompt's implications, not
+only its explicit statements, under a fourth provenance source:
+``model``. What IS claimed of a model-sourced value: that the guess is
+DECLARED -- the strict parser refuses a model row whose "from" does not
+carry a non-empty quoted phrase (a silent guess is a parse failure, not
+a spec) -- and that it is overridable: the deterministic planners treat
+``model`` exactly like a default (moved via recorded ``plan()`` edits,
+physics keeping the last word), while user-stated values still never
+move and their named refusals stand. What is NOT claimed: that the
+interpretation is correct, calibrated, or reproducible across model
+versions -- a model row is an editable proposal shown in the review
+table, the same control every inference flows through, and nothing the
+model writes is evidence (§2.6 verbatim). The terrain-aware environment
+planner is deterministic and claim-free the same way: the ridge axis is
+a numpy statistic of the baked raster, the cross-ridge wind and
+along-ridge heading it plans are recorded derived edits on
+system-chosen fields only, and orographic claims remain exactly §2.8's.
+
 **One clock rule for the interactive host.** JSBSim never sees a dt other
 than 1/120 s: the movement component's own tick is disabled and the host
 steps whole substeps from a wall-clock accumulator (the engine's frame

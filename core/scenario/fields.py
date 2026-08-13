@@ -26,12 +26,19 @@ from typing import Any, Dict, Optional
 
 
 class Source(str, Enum):
-    """Where a value came from. Ordered by how much it can be trusted."""
+    """Where a value came from. Ordered by how much it can be trusted:
+    user > inferred > model > derived > default. ``inferred`` is the
+    documented vocabulary mapping the user's own phrase (deterministic,
+    table-controlled); ``model`` is the language model's OWN declared
+    interpretation of the prompt -- always carrying the quoted phrase it
+    interpreted, and plannable exactly like a default (the planners may
+    move it; a user-stated value never moves)."""
 
     USER = "user"          #: stated explicitly in the prompt
-    INFERRED = "inferred"  #: derived from a vague phrase ("strong crosswind")
+    INFERRED = "inferred"  #: a vague phrase mapped by the documented table
+    MODEL = "model"        #: the model's declared interpretation (quoted)
+    DERIVED = "derived"    #: computed from the flight model / a planner
     DEFAULT = "default"    #: nobody mentioned it
-    DERIVED = "derived"    #: computed from the flight model itself
 
     def __str__(self) -> str:
         return self.value
@@ -124,7 +131,8 @@ class Quantity:
         """The provenance, rendered for the right-hand column of the table."""
         bits = []
         if self.frm:
-            bits.append(f'"{self.frm}"' if self.source is Source.INFERRED else self.frm)
+            quoted = self.source in (Source.INFERRED, Source.MODEL)
+            bits.append(f'"{self.frm}"' if quoted else self.frm)
         if self.std:
             bits.append(self.std)
         for key in sorted(self.detail):

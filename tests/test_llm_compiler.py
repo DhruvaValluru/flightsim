@@ -348,6 +348,78 @@ def test_question_missing_id_is_an_error():
         compile_prompt_llm("x", client=client)
 
 
+def test_model_source_is_a_declared_guess():
+    """The scene director may guess -- declared. Source 'model' lands on
+    the spec as Source.MODEL with the quoted phrase; a model-sourced
+    field with an empty reason is a SILENT guess and is refused by name;
+    an unknown source is refused as before."""
+    result = compile_prompt_llm("skimming along at treetop level",
+                                client=fake_client({"fields": {"altitude": {
+                                    "value": 150, "source": "model",
+                                    "from": "treetop level"}},
+                                    "notes": [], "questions": []}))
+    assert str(result.spec.altitude.source) == "model"
+    assert result.spec.altitude.frm == "treetop level"
+    assert float(result.spec.altitude.value) == 150.0
+    # The rendered note quotes the interpreted phrase (director's notes).
+    assert '"treetop level"' in result.spec.altitude.note()
+
+    with pytest.raises(LLMCompileError, match="no declared reason"):
+        compile_prompt_llm("x", client=fake_client({"fields": {"altitude": {
+            "value": 150, "source": "model", "from": "   "}},
+            "notes": [], "questions": []}))
+
+    with pytest.raises(LLMCompileError, match="claims source"):
+        compile_prompt_llm("x", client=fake_client({"fields": {"altitude": {
+            "value": 150, "source": "director", "from": "y"}},
+            "notes": [], "questions": []}))
+
+
+def test_redundant_canonical_unit_tolerated_wrong_unit_refused():
+    """A redundant "unit" key stating the CANONICAL unit is a true
+    statement (measured: gpt-4.1-mini writes it at temp 0); any other
+    unit is a claim of a non-canonical unit and refuses loudly."""
+    result = compile_prompt_llm("x", client=fake_client({"fields": {
+        "altitude": {"value": 1500, "source": "model", "from": "up high",
+                     "unit": "m"}}, "notes": [], "questions": []}))
+    assert float(result.spec.altitude.value) == 1500.0
+
+    with pytest.raises(LLMCompileError, match="canonical"):
+        compile_prompt_llm("x", client=fake_client({"fields": {
+            "altitude": {"value": 5000, "source": "model", "from": "y",
+                         "unit": "ft"}}, "notes": [], "questions": []}))
+
+
+def test_model_sourced_coordinates_are_dropped():
+    """Coordinates are never guessed into a spec: a model-sourced
+    latitude is an invented place, the exact thing the geography rules
+    prevent. The guess is dropped like a null -- the scene honestly has
+    no location -- while the rest of the response survives."""
+    result = compile_prompt_llm("over the sahara",
+                                client=fake_client({"fields": {
+        "latitude": {"value": 23.0, "source": "model", "from": "sahara"},
+        "surface": {"value": "desert", "source": "inferred",
+                    "from": "sahara"}}, "notes": [], "questions": []}))
+    assert str(result.spec.latitude.source) == "default"   # guess dropped
+    assert float(result.spec.latitude.value) == 0.0
+    assert str(result.spec.surface.value) == "desert"      # rest kept
+
+
+def test_null_valued_fields_are_omission():
+    """"latitude": null is JSON's spelling of omission (measured:
+    gpt-4.1-mini writes it for an unknown place). The entry is dropped --
+    the documented default stands -- and every actually-claimed value
+    still faces the full checks."""
+    result = compile_prompt_llm("somewhere", client=fake_client({
+        "fields": {
+            "latitude": {"value": None, "source": "model", "from": "x"},
+            "altitude": {"value": 1500, "source": "model",
+                         "from": "somewhere"}},
+        "notes": [], "questions": []}))
+    assert str(result.spec.latitude.source) == "default"   # dropped
+    assert float(result.spec.altitude.value) == 1500.0     # kept
+
+
 def test_absent_list_keys_default_but_other_shapes_still_refuse():
     """An ABSENT notes/questions key carries the same claim as an empty
     list (measured: gpt-4.1-mini omits empty lists when the schema is

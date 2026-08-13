@@ -113,7 +113,7 @@ def _dynamic_scenes(dynamic_dir: Path) -> List[Dict]:
     if not Path(dynamic_dir).is_dir():
         return scenes
     for sidecar in sorted(Path(dynamic_dir).glob("*.scene.json")):
-        entry = json.loads(sidecar.read_text())
+        entry = json.loads(sidecar.read_text(encoding="utf-8"))
         raster = Path(dynamic_dir) / f"{entry['key']}.r16"
         if raster.is_file():
             entry["terrain"] = str(raster.with_suffix(""))
@@ -163,7 +163,7 @@ def bake_on_demand(lat: float, lon: float) -> Dict:
              "origin_lat": location.origin_lat,
              "origin_lon": location.origin_lon, "crs": location.crs,
              "identity": "source-verified only (no named summits)"}
-    sidecar.write_text(json.dumps(entry, indent=1))
+    sidecar.write_text(json.dumps(entry, indent=1), encoding="utf-8")
     entry["terrain"] = str(raster.with_suffix(""))
     return entry
 
@@ -253,6 +253,12 @@ PLANNED_CLEARANCE_M = 300.0
 #: by the same envelope code; 1.25 x sits between the validator's refusal
 #: line (1.05 x) and Vref, and the definitive trim probe still runs after.
 PLANNED_SPEED_MARGIN = 1.25
+#: Sources the planners may move: the system's own choices. "default"
+#: (nobody said it), "model" (the scene director's declared guess) and
+#: "derived" (an earlier planner). NEVER "user" or "inferred" -- those are
+#: the user's words, and a value they command that cannot fly is refused
+#: by name, not silently moved. This line is load-bearing.
+PLANNABLE_SOURCES = ("default", "model", "derived")
 
 
 def _fly_clearance_track(spec: ScenarioSpec, ground, script,
@@ -454,7 +460,7 @@ def _effect_report(spec: ScenarioSpec, scene: Dict, script, seconds: float,
             ground.apply(fdm)
         fdm.step()
 
-    actual = json.loads(Path(telemetry_path).read_text())["columns"]
+    actual = json.loads(Path(telemetry_path).read_text(encoding="utf-8"))["columns"]
     n = min(len(baseline["t"]), len(actual["t"]))
 
     def stats(xs):
@@ -481,7 +487,79 @@ def _effect_report(spec: ScenarioSpec, scene: Dict, script, seconds: float,
                  "everything shown.",
         "interval_s": 0.1, "samples": n,
         "channels": channels, "stats": report,
-    }))
+    }), encoding="utf-8")
+
+
+def _ridge_axis_deg(samples, scale_m: float) -> float:
+    """Gradient-weighted principal ridge axis, degrees true in [0, 180).
+
+    The structure-tensor doubled-angle trick: every pixel's elevation
+    gradient is a vector pointing ACROSS the local slope; summing
+    w*sin(2b) / w*cos(2b) with w = |g|^2 averages the 180-deg-ambiguous
+    gradient bearings coherently, and the ridge AXIS is perpendicular to
+    that mean gradient. Row 0 is northernmost (Heightfield's own
+    convention), so north = -d/drow; bearing b of (east, north) has
+    w*sin(2b) = 2*ge*gn and w*cos(2b) = gn^2 - ge^2 -- no per-pixel atan.
+    Deterministic: pure numpy on the baked raster, no RNG.
+    """
+    import math
+
+    import numpy as np
+
+    z = samples.astype(np.float64) * float(scale_m)
+    # Orientation only: subsample large rasters (everest is ~3600^2); the
+    # principal axis is a bulk statistic and survives a stride.
+    stride = max(1, max(z.shape) // 512)
+    z = z[::stride, ::stride]
+    g_row, g_col = np.gradient(z)
+    ge, gn = g_col, -g_row
+    s2 = float(2.0 * (ge * gn).sum())
+    c2 = float((gn * gn - ge * ge).sum())
+    grad_bearing = math.degrees(0.5 * math.atan2(s2, c2)) % 180.0
+    return (grad_bearing + 90.0) % 180.0
+
+
+def plan_terrain_environment(spec: ScenarioSpec) -> None:
+    """Mountains with wind are PHYSICALLY different from flatland with
+    wind, not just relabeled: orographic lift/sink and lee rotors exist
+    only for flow ACROSS the ridges (VALIDITY 2.8), and a track that
+    never crosses the relief measures nothing. This planner points the
+    SYSTEM-CHOSEN wind across the scene raster's principal ridge axis and
+    the SYSTEM-CHOSEN heading along it, so the pre-flown clearance track
+    (which flies this same wind through the same orographic field)
+    actually samples what the prompt asked for.
+
+    Rules, same discipline as every planner: flat scenes are a no-op;
+    only PLANNABLE_SOURCES move (via spec.plan, recorded, re-plannable);
+    a user-stated wind direction or heading is NEVER moved; a calm spec
+    (wind 0) gets no invented wind direction. The along-axis heading is
+    deliberately the seed of the open valley-following thread: a heading
+    SCHEDULE derived from the raster is the natural extension of this
+    exact computation.
+    """
+    scene = pick_scene(spec)
+    if not scene.get("terrain"):
+        return
+    from core.terrain.heightfield import Heightfield
+
+    heightfield = Heightfield.read(Path(scene["terrain"]))
+    axis = _ridge_axis_deg(heightfield.samples, heightfield.scale_m)
+    if (float(spec.wind_speed.value) > 0.0
+            and str(spec.wind_direction.source) in PLANNABLE_SOURCES):
+        # WHOLE degrees: the UE plugin's wind initial condition is
+        # integral and the commandlet refuses fractional directions by
+        # name (measured); a bulk raster statistic has no sub-degree
+        # precision to lose.
+        spec.plan(
+            "wind_direction", float(round((axis + 90.0) % 360.0)),
+            frm=f"across ridge axis {axis:.0f} deg computed from the "
+                f"scene raster -- orographic forcing requires cross-ridge "
+                f"flow (VALIDITY 2.8); a stated direction is never moved")
+    if str(spec.heading.source) in PLANNABLE_SOURCES:
+        spec.plan(
+            "heading", float(round(axis)),
+            frm=f"along ridge axis {axis:.0f} deg computed from the scene "
+                f"raster, so the track samples the relief")
 
 
 def plan_flyable_defaults(spec: ScenarioSpec) -> None:
@@ -517,7 +595,7 @@ def plan_flyable_defaults(spec: ScenarioSpec) -> None:
     from core.scenario.envelope import reference_speeds
     from core.scenario.validate import STALL_MARGIN
 
-    plannable = ("default", "derived")
+    plannable = PLANNABLE_SOURCES
     terrain = float(spec.terrain_elevation.value)
     if (str(spec.altitude.source) in plannable
             and float(spec.altitude.value) < terrain + MIN_CLEARANCE_M):
@@ -527,6 +605,20 @@ def plan_flyable_defaults(spec: ScenarioSpec) -> None:
                       f"planned clearance)")
     if str(spec.airspeed.source) not in plannable:
         return
+    # The defaulted cruise is filled BEFORE the model decides the
+    # aircraft: "a plane" -> c172p leaves a B747's 250 kt default on a
+    # Cessna (measured -- TrimError). A still-default airspeed is
+    # re-planned to THIS airframe's own documented cruise default first.
+    from core.nl.compiler import CRUISE_DEFAULT_KT
+
+    aircraft = str(spec.aircraft.value)
+    cruise = CRUISE_DEFAULT_KT.get(aircraft)
+    if (str(spec.airspeed.source) == "default" and cruise is not None
+            and float(spec.airspeed.value) != cruise):
+        spec.plan("airspeed", cruise,
+                  frm=f"the {aircraft}'s documented cruise default (the "
+                      f"airspeed default was filled before the aircraft "
+                      f"was decided)")
     try:
         mass_kg = FlightDynamics(str(spec.aircraft.value)).state().weight_kg
         speeds = reference_speeds(str(spec.aircraft.value), mass_kg,
@@ -539,6 +631,34 @@ def plan_flyable_defaults(spec: ScenarioSpec) -> None:
                   frm=f"raised to {PLANNED_SPEED_MARGIN:g} x the measured "
                       f"stall speed ({speeds.vs_kt:.0f} kt CAS) at "
                       f"{float(spec.altitude.value):.0f} m")
+
+
+def plan_trim_recovery(spec: ScenarioSpec) -> None:
+    """Physics keeps the last word over guesses: a PLANNABLE airspeed the
+    aero tables cannot trim (measured -- a model-guessed 120 kt is beyond
+    the c172p's level-flight power at 2500 m; the stall floor cannot see
+    an upper-envelope miss) is re-planned ONCE to the airframe's own
+    documented mid-envelope cruise, recorded. If the trim probe still
+    refuses, or the condition was user-stated, the named refusal stands
+    untouched -- this is a single recovery step, never a search.
+    """
+    if str(spec.airspeed.source) not in PLANNABLE_SOURCES:
+        return
+    from core.nl.compiler import CRUISE_DEFAULT_KT
+    from core.scenario.validate import validate
+
+    cruise = CRUISE_DEFAULT_KT.get(str(spec.aircraft.value))
+    if cruise is None or float(spec.airspeed.value) == cruise:
+        return
+    report = validate(spec)
+    if report.ok or not any(v.constraint == "envelope.trim_feasible"
+                            for v in report.violations):
+        return
+    old = float(spec.airspeed.value)
+    spec.plan("airspeed", cruise,
+              frm=f"the {old:g} kt condition could not be trimmed at "
+                  f"{float(spec.altitude.value):g} m; re-planned to the "
+                  f"airframe's documented mid-envelope cruise")
 
 
 def plan_terrain_flight(spec: ScenarioSpec) -> Optional[Dict]:
@@ -577,9 +697,10 @@ def plan_terrain_flight(spec: ScenarioSpec) -> Optional[Dict]:
         # commandlet's VerifyTrimmedCondition guards the same ground.
         return None
     min_clearance = min(p["clearance_m"] for p in track)
-    # System-chosen altitudes (default, or derived by an earlier planner)
-    # may be raised; a user-stated altitude is never moved -- refusal below.
-    plannable = str(spec.altitude.source) in ("default", "derived")
+    # System-chosen altitudes (default, a model guess, or derived by an
+    # earlier planner) may be raised; a user-stated altitude is never
+    # moved -- refusal below.
+    plannable = str(spec.altitude.source) in PLANNABLE_SOURCES
     if min_clearance >= MIN_CLEARANCE_M and not plannable:
         return None
     if plannable:
@@ -625,6 +746,16 @@ def project_for_ue_host(spec: ScenarioSpec) -> None:
     if not bool(spec.mass_held.value):
         spec.set("mass_held", True,
                  frm="rendered-clip convention (see reference_spec)")
+    # The plugin's only speed initial condition is CALIBRATED airspeed;
+    # the commandlet refuses "tas" by name (measured). A GUESSED kind is
+    # plannable like any guess -- re-planned to what the host can honour,
+    # recorded; a user-stated "true airspeed" keeps its named refusal.
+    if (str(spec.airspeed_kind.value) == "tas"
+            and str(spec.airspeed_kind.source) in PLANNABLE_SOURCES):
+        spec.plan("airspeed_kind", "cas",
+                  frm="the render host sets calibrated airspeed only; the "
+                      "guessed kind was re-planned (a stated 'true "
+                      "airspeed' refuses instead)")
 
 
 def derive_seed(spec: ScenarioSpec, terrain_coupled: bool = False) -> None:
@@ -680,7 +811,7 @@ def apply_weather_event(spec: ScenarioSpec) -> None:
     vortex's modelled depth (plan_weather_event); stated fields never move.
     """
     if (str(spec.weather_event.value) == "thunderstorm"
-            and str(spec.turbulence.source) in ("default", "derived")):
+            and str(spec.turbulence.source) in PLANNABLE_SOURCES):
         spec.plan("turbulence", "severe",
                   frm="thunderstorm composition (documented): microburst + "
                       "severe turbulence + storm look")
@@ -691,13 +822,13 @@ def apply_weather_event(spec: ScenarioSpec) -> None:
     # background -- these edits are the air AROUND it. Stated words and
     # numbers are never moved (plan() refuses them by name).
     if (str(spec.weather_event.value) == "tornado"
-            and str(spec.turbulence.source) in ("default", "derived")):
+            and str(spec.turbulence.source) in PLANNABLE_SOURCES):
         spec.plan("turbulence", "severe",
                   frm="tornado environment (documented composition): the "
                       "vortex rides supercell air, not smooth air; a "
                       "stated turbulence word is never moved")
     if (str(spec.weather_event.value) in ("thunderstorm", "tornado")
-            and str(spec.wind_speed.source) in ("default", "derived")):
+            and str(spec.wind_speed.source) in PLANNABLE_SOURCES):
         from core.nl.compiler import WIND_STRENGTH
 
         spec.plan("wind_speed", WIND_STRENGTH["strong"],
@@ -759,10 +890,11 @@ def plan_weather_event(spec: ScenarioSpec) -> None:
     will honestly show near-zero coupling.
     """
     if (str(spec.weather_event.value) == "tornado"
-            and str(spec.altitude.source) == "default"):
-        # Only a still-DEFAULT altitude descends: an altitude another
-        # planner already derived (terrain datum floor) stays -- the
-        # vortex band is AGL and the terrain floor already sits inside it.
+            and str(spec.altitude.source) in ("default", "model")):
+        # A still-DEFAULT altitude (or the director's guess) descends; an
+        # altitude another planner already derived (terrain datum floor)
+        # stays -- the vortex band is AGL and the terrain floor already
+        # sits inside it.
         spec.plan("altitude", 800.0,
                   frm="lowered into the vortex's full-strength band (the "
                       "model fades from 1500 m AGL; a stated altitude is "
@@ -834,7 +966,7 @@ class RunManager:
         run.clip = str(clip)
         provenance_path = out / "provenance.json"
         if provenance_path.is_file():
-            provenance = json.loads(provenance_path.read_text())
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
             run.spec_digest = provenance.get("spec_digest", "")
             run.scene = provenance.get("scene") or {}
             run.reference = provenance.get("reference_speeds")
@@ -1122,7 +1254,7 @@ class RunManager:
             "reference_speeds": reference,
             # Also read back by _recover_from_disk after a server restart.
             "conditions": run.conditions,
-        }, indent=1))
+        }, indent=1), encoding="utf-8")
 
         run.push("rendering", "editor is rendering frames (a few minutes)")
         frames = out / "frames"

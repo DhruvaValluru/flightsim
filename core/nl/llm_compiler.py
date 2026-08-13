@@ -91,8 +91,8 @@ LOCATION_ALIASES: Dict[str, Tuple[str, ...]] = {
                 "Lhotse", "Sagarmatha"),
     "grand_canyon": ("Grand Canyon", "the canyon", "Colorado River canyon",
                      "Vishnu Temple"),
-    "flint_hills": ("Flint Hills", "Kansas prairie", "tallgrass prairie",
-                    "the prairie"),
+    "flint_hills": ("Flint Hills", "Kansas", "Kansas prairie",
+                    "tallgrass prairie", "the prairie"),
 }
 
 #: Ground elevation at each bake's origin, metres MSL -- the showcase
@@ -197,11 +197,17 @@ def _field_schema(value_schema: Dict[str, Any]) -> Dict[str, Any]:
         "properties": {
             "value": value_schema,
             # "default" is deliberately absent: a defaulted field is an
-            # OMITTED field. The model may only claim what the prompt said.
-            "source": {"type": "string", "enum": ["user", "inferred"]},
+            # OMITTED field. "user" is what the prompt states, "inferred"
+            # the documented vocabulary mapping of its phrase, "model" the
+            # director's own interpretation -- a declared guess, which the
+            # planners may later move exactly like a default.
+            "source": {"type": "string",
+                       "enum": ["user", "inferred", "model"]},
             "from": {
                 "type": "string",
-                "description": "The prompt phrase this value was read from.",
+                "description": "The prompt phrase this value was read from "
+                               "(for source 'model': the quoted phrase the "
+                               "guess interprets -- REQUIRED, never empty).",
             },
         },
     }
@@ -243,6 +249,14 @@ FIELD_VALUE_SCHEMAS: Dict[str, Dict[str, Any]] = {
 _SPEC_FIELDS = {name for _, name in ScenarioSpec.FIELD_ORDER}
 _unknown = set(FIELD_VALUE_SCHEMAS) - _SPEC_FIELDS
 assert not _unknown, f"llm_compiler schema names non-spec fields: {_unknown}"
+
+#: Canonical unit per numeric field -- a redundant "unit" key in a model
+#: response is tolerated ONLY when it states exactly this.
+CANONICAL_UNITS: Dict[str, str] = {
+    "altitude": "m", "airspeed": "kt", "heading": "deg",
+    "latitude": "deg", "longitude": "deg", "terrain_elevation": "m",
+    "duration": "s", "wind_speed": "kt", "wind_direction": "deg",
+}
 
 #: One clarifying question: an id the answer round refers back to, the
 #: question itself, and concrete options (the UI always also allows
@@ -323,33 +337,81 @@ def _locations_block() -> str:
 
 
 SYSTEM_PROMPT = """\
-You compile flight-simulation prompts into a condition schema. Extract ONLY
-what the prompt states or clearly implies; omit every field the prompt does
-not mention (omitted fields get the system's documented defaults).
+You are the scene DIRECTOR for a flight-simulation compiler. Turn the
+prompt into a COHERENT scene: fill every field the prompt justifies --
+aircraft, place, altitude, airspeed, heading, wind speed AND direction,
+turbulence, surface, weather event, date -- so that the fields agree with
+each other and with what the prompt evokes. Every value you write
+declares how it was chosen; a guess you do not declare is the one
+failure this protocol cannot forgive.
 
-Rules:
-- source "user" for explicit numbers ("250 kt" -> airspeed 250); source
-  "inferred" for vague phrases ("strong wind" -> wind_speed 25). Record the
-  exact prompt phrase in "from" either way.
+Respond with EXACTLY this top-level shape -- three keys, no others:
+{"fields": {"<field name>": {"value": ..., "source": "...", "from": "..."},
+ ...}, "notes": [...], "questions": [...]}
+"notes" and "questions" are TOP-LEVEL keys beside "fields", never inside
+"fields"; "fields" contains ONLY schema field names. Each field object
+carries EXACTLY value/source/from -- no "unit", no extra keys. "from" is
+ONLY the quoted prompt phrase, no commentary around it. A value is never
+null, and a field is never written just to state absence ("none",
+"unspecified", "no X mentioned") -- omit it instead.
+
+The three sources you may claim:
+- "user": the prompt states it explicitly ("250 kt" -> airspeed 250).
+- "inferred": the documented vocabulary maps the prompt's own phrase
+  ("strong wind" -> wind_speed 25; the mappings below are the control).
+- "model": YOUR interpretation, where the prompt implies a value neither
+  stated nor in the vocabulary. Allowed and encouraged -- "treetop
+  level" -> altitude 150, "screaming along" -> a high fraction of that
+  airframe's envelope -- but "from" MUST quote the prompt phrase you are
+  interpreting. Prefer a vocabulary word where one exists; go numeric
+  only where vocabulary cannot express the implication.
+A field the prompt gives NO basis for at all is OMITTED: the documented
+defaults and the deterministic planners fill it. OMISSION IS THE ONLY
+WAY to say "not specified" -- NEVER write null, "none" or an empty
+value into a field (surface has no "none" word: unspecified ground
+cover means the field is absent; an unknown location means latitude/
+longitude/terrain_elevation are absent, never null). Mountainous
+terrain is terrain_elevation, not a surface class. Downstream planners
+may move "model" values into the flyable envelope exactly as they move
+defaults; "user" values are never moved -- infeasible ones are refused
+by name, which is the designed path.
+
+Coherence rules:
+- Fields must agree ACROSS the scene, each row quoting its own phrase:
+  "storm chasing in a small plane over Kansas" -> c172p (small plane) +
+  flint_hills (Kansas) + low altitude (chasing) + weather_event
+  thunderstorm (storm) + strong wind + heading toward the activity.
+  Never a coherent-sounding contradiction (a desert surface on an ocean
+  prompt; a jet for "puttering around").
+- Do not judge feasibility. If the prompt commands something impossible,
+  extract it literally -- the validator refuses it by name. Never soften
+  or "fix" a stated number.
+
+Extraction rules:
 - Canonical units only: metres for altitude/terrain elevation, knots for
   speeds, degrees for angles, seconds for duration. Convert stated units
   (feet, minutes, flight levels) and keep the original phrase in "from".
-- Vague wind strength maps as: light/gentle 8 kt, moderate 15 kt,
-  strong/stiff 25 kt, severe/gale 40 kt. "rough"/"turbulent" wind implies
-  both a strong wind (25 kt) and moderate turbulence unless stated otherwise.
+- airspeed_kind: set ONLY when the prompt says "true airspeed"/"TAS".
+  Never guess it -- calibrated is the default and the render host can
+  honour nothing else.
+- Vague wind strength maps as: light/gentle 8 kt, breezy 12 kt,
+  moderate 15 kt, gusty 18 kt, strong/stiff/rough 25 kt,
+  severe/gale/violent/howling 40 kt. "rough"/"turbulent" wind implies
+  both a strong wind (25 kt) and moderate turbulence unless stated
+  otherwise.
+- Turbulence words: smooth/calm -> none, bumpy/choppy/mild -> light,
+  rough (air) -> moderate, violent/heavy -> severe.
 - Relative wind ("headwind", "crosswind") is a bearing offset from the
-  aircraft heading (head 0, cross 90, tail 180), meteorological convention.
-- Do not judge feasibility. If the prompt commands something impossible,
-  extract it literally -- the validator refuses it by name, which is the
-  designed path. Never soften or "fix" a stated number.
+  aircraft heading (head 0, cross 90, tail 180), meteorological
+  convention (the bearing the wind is FROM).
 - Ground cover maps to the surface vocabulary: grasslands/prairie/plains
   -> "grassland", desert/dunes -> "desert", ocean/sea/open water ->
   "ocean", forest/woods -> "forest", city/urban/downtown -> "city".
   Each class is a documented roughness + thermal model; ground cover the
   vocabulary lacks (swamp, tundra, ice shelf) goes to "notes", never to
   the nearest-looking class.
-- Anything you cannot express in the schema -- unknown aircraft, cinematic
-  or camera language, weather the vocabulary lacks -- goes into "notes"
+- Anything the schema cannot express -- unknown aircraft, cinematic or
+  camera language, weather the vocabulary lacks -- goes into "notes"
   verbatim, never guessed into a field.
 
 """ + _locations_block() + """
@@ -359,6 +421,9 @@ Geography rules:
   longitude and terrain_elevation EXACTLY to that place's listed values --
   never rounded, never adjusted -- source "inferred" with the place name in
   "from". The exact coordinates are what lands the scenario on the real bake.
+- Coordinates NEVER carry source "model": a listed place is "inferred",
+  stated coordinates are "user", and any model-sourced coordinate is
+  DISCARDED as an invented place.
 - A named place NOT in the list: NEVER invent coordinates. Ask which listed
   place (or the generic ridge) fits, or record the place name verbatim in
   "notes". Coordinates you were not given do not exist.
@@ -366,15 +431,22 @@ Geography rules:
   terrain_elevation 2000, inferred (the generic-ridge fallback) -- and this
   is the canonical case for a clarifying question ("which mountains?") with
   the listed real places plus "a generic ridge" as the options.
+- A prompt that STATES a terrain height ("over 2000 m terrain") is
+  determined: generic ridge at that stated elevation, NO question.
 
 Clarifying questions:
-- Ask (in "questions") ONLY when the prompt is ambiguous in a way that
-  materially changes the scenario AND gives no basis to infer: which
-  mountains when mountains are unnamed, which aircraft when nothing in the
-  prompt constrains the choice. At most 3 questions, one round ever.
+- Guess freely in DECLARED space; ask (in "questions") ONLY when a wrong
+  guess would misrepresent what the clip IS: which mountains when
+  mountains are unnamed, which aircraft when nothing in the prompt
+  constrains the choice. At most 3 questions, one round ever.
 - NEVER ask about anything the rules above already map ("windy" -> 25 kt is
-  the documented inference, not a question) or where the documented default
-  is fine (heading, duration, time of day).
+  the documented inference, not a question), anything a declared "model"
+  guess covers honestly (altitude, speed, sun, heading), or where the
+  documented default is fine (duration, integration rate).
+- A prompt that mentions NO place gets NO location question: flat
+  default ground IS the documented default. Ask about location only
+  when the prompt implies terrain ("mountains", a named place) without
+  determining it. Never ask for a heading.
 - Each question carries an id, the question text, and concrete options (the
   user may also answer free-text). Fields you ARE confident of must still
   arrive in "fields" in the same response -- a question round is not an
@@ -458,15 +530,53 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
             raise _fail(f"question {question['id']!r} has no usable options "
                         f"(a non-empty list of strings is required)")
 
+    # A null value is JSON's spelling of omission (measured: gpt-4.1-mini
+    # writes "latitude": null for an unknown place despite the rules).
+    # Dropping the ENTRY carries exactly the claim omission does -- the
+    # documented default -- while every actually-claimed value below still
+    # faces the full vocabulary/type/source checks.
+    for name in [n for n, e in fields.items()
+                 if isinstance(e, dict) and e.get("value") is None]:
+        del fields[name]
+    # Coordinates are never GUESSED into a spec: a model-sourced
+    # latitude/longitude is an invented place, the exact thing the
+    # geography rules exist to prevent (listed-bake origins arrive as
+    # "inferred", explicit coordinates as "user"). The guess is dropped
+    # like a null -- the scene honestly has no location -- rather than
+    # sinking the whole compile over one overreach (measured: gpt-4.1-mini
+    # invents coordinates even for placeless prompts).
+    for name in ("latitude", "longitude"):
+        entry = fields.get(name)
+        if isinstance(entry, dict) and entry.get("source") == "model":
+            del fields[name]
     for name, entry in fields.items():
         if name not in FIELD_VALUE_SCHEMAS:
             raise _fail(f"unknown field {name!r}")
-        if not isinstance(entry, dict) or set(entry) != {"value", "source", "from"}:
+        if not isinstance(entry, dict):
             raise _fail(f"field {name!r} must carry exactly value/source/from")
-        if entry["source"] not in ("user", "inferred"):
+        # A redundant "unit" key stating the CANONICAL unit is a true
+        # statement, tolerated and dropped (measured: gpt-4.1-mini writes
+        # it at temp 0 despite the rules); any OTHER unit is a real claim
+        # of a non-canonical unit and refuses loudly.
+        if set(entry) == {"value", "source", "from", "unit"}:
+            if entry["unit"] != CANONICAL_UNITS.get(name):
+                raise _fail(f"field {name!r} claims unit {entry['unit']!r}; "
+                            f"canonical is {CANONICAL_UNITS.get(name)!r}")
+            entry = {k: v for k, v in entry.items() if k != "unit"}
+            fields[name] = entry
+        if set(entry) != {"value", "source", "from"}:
+            raise _fail(f"field {name!r} must carry exactly value/source/from")
+        if entry["source"] not in ("user", "inferred", "model"):
             raise _fail(f"field {name!r} claims source {entry['source']!r}; "
-                        f"only 'user' or 'inferred' may be claimed by a model")
+                        f"only 'user', 'inferred' or 'model' may be claimed")
         if not (isinstance(entry["from"], str) and entry["from"].strip()):
+            # The load-bearing rail for guesses: a model-sourced value with
+            # no declared reason is a SILENT guess, the graded failure the
+            # scene director exists to prevent.
+            if entry["source"] == "model":
+                raise _fail(f"field {name!r} is a model guess with no "
+                            f"declared reason; a guess must quote the "
+                            f"prompt phrase it interprets")
             raise _fail(f"field {name!r} has no provenance phrase")
         # A field decided by a clarifying answer is the USER speaking: the
         # 'answer to "...": "..."' shape may only carry source "user".
@@ -489,7 +599,8 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
 
 def _overlay(spec: ScenarioSpec, name: str, entry: Dict[str, Any]) -> None:
     """Set one spec field from a parsed model entry, with provenance."""
-    source = Source.USER if entry["source"] == "user" else Source.INFERRED
+    source = {"user": Source.USER, "inferred": Source.INFERRED,
+              "model": Source.MODEL}[entry["source"]]
     frm = entry["from"].strip()
     value = entry["value"]
     schema = FIELD_VALUE_SCHEMAS[name]

@@ -49,7 +49,9 @@ from webapp.runs import (  # noqa: E402
     pick_scene,
     place_on_scene,
     plan_flyable_defaults,
+    plan_terrain_environment,
     plan_terrain_flight,
+    plan_trim_recovery,
     project_for_ue_host,
 )
 
@@ -104,7 +106,7 @@ def _validation_payload(spec: ScenarioSpec) -> Dict[str, Any]:
 
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
-    return (STATIC / "index.html").read_text()
+    return (STATIC / "index.html").read_text(encoding="utf-8")
 
 
 @app.post("/compile")
@@ -147,7 +149,16 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
     # recorded edit (source becomes ``derived``); stated values never
     # move. /run applies the same planners again: value-idempotent.
     apply_weather_event(spec)
+    # Terrain-aware environment (cross-ridge wind, along-ridge heading):
+    # shown in the review table when the scene's raster is already baked
+    # locally; /run applies the same planner, so run-time is never a
+    # surprise relative to the table.
+    try:
+        plan_terrain_environment(spec)
+    except (OSError, ValueError):
+        pass    # no local raster yet (dynamic bake): /run plans it after /bake
     plan_flyable_defaults(spec)
+    plan_trim_recovery(spec)
 
     payload = {
         "compiler": compiler_used, "model": model, "llm_note": llm_note,
@@ -196,6 +207,19 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     if weather_refusal is not None:
         return JSONResponse({"refused": "weather", **weather_refusal},
                             status_code=409)
+    # PLANNER ORDER (load-bearing, pinned by tests): place_on_scene ->
+    # apply_weather_event -> apply_historical_weather ->
+    # plan_terrain_environment -> derive_seed -> plan_terrain_flight ->
+    # plan_flyable_defaults -> plan_trim_recovery -> project_for_ue_host
+    # -> validate.
+    # Rationale: placement fixes coordinates; the event composes its
+    # environment; DATED real weather wins over composition (ERA5 wind is
+    # source user, so the terrain planner then refuses to touch it);
+    # cross-ridge wind and along-ridge heading must exist BEFORE the
+    # clearance pre-flight so the track is flown through the SAME planned
+    # wind and orographic field it will record; envelope floors come last
+    # because they depend on the final altitude.
+    plan_terrain_environment(spec)
     # The seed derives BEFORE the digest is answered. A run can be
     # stochastic even with turbulence word "none" -- lee-rotor over windy
     # terrain, or surface thermals whose positions draw from the seed --
@@ -209,8 +233,10 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     clearance_refusal = plan_terrain_flight(spec)
     # The track planner may have raised a system-chosen altitude into air
     # where the system-chosen airspeed no longer flies: re-plan the
-    # defaults at the final altitude (stated values still never move).
+    # defaults at the final altitude (stated values still never move),
+    # then give physics the last word over any surviving guess.
     plan_flyable_defaults(spec)
+    plan_trim_recovery(spec)
     project_for_ue_host(spec)
 
     # Validation governs the edited spec too: the run endpoint re-validates
@@ -307,7 +333,7 @@ def run_provenance(run_id: str):
     path = manager.out_root / run_id / "provenance.json"
     if not path.is_file():
         return JSONResponse({"error": "no provenance"}, status_code=404)
-    return JSONResponse(json.loads(path.read_text()))
+    return JSONResponse(json.loads(path.read_text(encoding="utf-8")))
 
 
 @app.websocket("/telemetry")

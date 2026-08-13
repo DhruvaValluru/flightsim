@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
@@ -56,6 +57,13 @@ RULE = "=" * 96
 #:                  substring against the question text) and asserts the
 #:                  final spec.
 #:   determined  -- fully determined; must trigger ZERO questions.
+#:   vague       -- fuzzy/evocative; graded coherent-and-declared, not
+#:                  exact-match: every model-sourced (and claimed-user)
+#:                  value must quote a phrase actually in the prompt, the
+#:                  scene must fill >= ``min_filled`` non-default fields,
+#:                  per-entry ``expect_fields`` pin coherence, and the spec
+#:                  must validate after the webapp's own default planning.
+#:                  A silent numeric guess or a contradictory fill fails.
 #: Optional per-entry assertions: ``expect_questions`` (bool),
 #: ``expect_location`` (a LOCATIONS key the final spec must land on, within
 #: the run manager's tolerance window), ``answers`` (question-substring ->
@@ -101,6 +109,28 @@ CORPUS: List[Dict] = [
      "expect": "named refusal or note"},
     {"kind": "adversarial", "prompt": "land the 747 on the matterhorn summit",
      "expect": "named refusal or note"},
+    # -- vague/holistic (the scene director: coherent-and-declared) --------
+    # Graded on coherence and DECLARATION, not exact-match: every model-
+    # sourced guess must quote a phrase that actually appears in the
+    # prompt, claimed-user values must too (a fabricated "user" claim is
+    # the silent guess in disguise), the scene must fill enough of itself
+    # to be a scene, and the planned spec must fly.
+    {"kind": "vague", "prompt": "storm chasing in a small plane over Kansas",
+     "expect_location": "flint_hills",
+     "expect_fields": {"aircraft": "c172p", "weather_event": "thunderstorm"},
+     "min_filled": 5},
+    {"kind": "vague",
+     "prompt": "screaming along at treetop level over the desert",
+     "expect_fields": {"surface": "desert"}, "min_filled": 3},
+    {"kind": "vague",
+     "prompt": "a lazy sightseeing loop over the Grand Canyon on a gusty "
+               "afternoon",
+     "expect_location": "grand_canyon", "min_filled": 4},
+    {"kind": "vague",
+     "prompt": "a jumbo jet plowing through violent air high over the "
+               "Himalayas",
+     "expect_location": "everest",
+     "expect_fields": {"aircraft": "B747"}, "min_filled": 5},
     # -- clarify (must ask; scripted answers close the round) -------------
     {"kind": "clarify",
      "prompt": "simulate an aircraft under windy conditions on a mountain",
@@ -264,14 +294,75 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if not honest:
                 print("        SILENT GUESS: validated clean with no notes")
                 failures += 1
+        elif case["kind"] == "vague":
+            # 1. Every guess DECLARED with a fair quote: model rows (and
+            #    claimed-user rows -- a fabricated "user" claim is a silent
+            #    guess in disguise) must carry a phrase that appears in the
+            #    prompt. Answer-round provenance is exempt by shape.
+            unquoted = []
+            for _, fname, q in spec.quantities():
+                if str(q.source) not in ("user", "model"):
+                    continue
+                phrase = (q.frm or "").strip().strip('"').lower()
+                if phrase.startswith("answer to"):
+                    continue
+                # A fair quote: the whole reason appears in the prompt, or
+                # the reason carries a quoted segment that does.
+                candidates = [phrase] + [s.lower() for s in
+                                         re.findall(r"['\"]([^'\"]+)['\"]",
+                                                    q.frm or "")]
+                if not phrase or not any(c and c in prompt.lower()
+                                         for c in candidates):
+                    unquoted.append((fname, q.frm))
+            row["unquoted"] = unquoted
+            if unquoted:
+                print(f"        UNDECLARED/UNFAITHFUL QUOTE: {unquoted}")
+                failures += 1
+            # 2. Coherence breadth: an evocative prompt must fill a scene,
+            #    not two fields and defaults.
+            filled = len(row["non_default_fields"])
+            needed = case.get("min_filled", 3)
+            row["filled"] = filled
+            if filled < needed:
+                print(f"        TOO SPARSE: {filled} fields filled, "
+                      f"expected >= {needed}")
+                failures += 1
+            # 3. Specific coherence pins (contradiction check).
+            for fname, expected in (case.get("expect_fields") or {}).items():
+                actual = getattr(spec, fname).value
+                if actual != expected:
+                    print(f"        INCOHERENT: {fname} = {actual!r}, "
+                          f"expected {expected!r}")
+                    row.setdefault("incoherent", []).append(fname)
+                    failures += 1
+            # 4. The scene must FLY: grade the verdict after the same
+            #    planning the webapp applies (declared guesses are
+            #    plannable; physics keeps the last word).
+            from webapp.runs import (apply_weather_event,
+                                     plan_flyable_defaults,
+                                     plan_trim_recovery)
+            apply_weather_event(spec)
+            plan_flyable_defaults(spec)
+            plan_trim_recovery(spec)
+            row["verdict"] = verdict_names(spec)
+            if not row["verdict"]["ok"]:
+                print(f"        UNFLYABLE after planning: "
+                      f"{row['verdict']['violations']}")
+                failures += 1
         row["outcome"] = "ok"
         rows.append(row)
 
     # -- determinism through the new path ---------------------------------
     print(f"\n{RULE}\ndeterminism: the same SPEC runs bit-identically\n{RULE}")
     deterministic = None
-    for row in rows:
-        if not (row.get("verdict", {}).get("ok") and row["kind"] == "extended"):
+    # Extended specs first (the capability under test), vocabulary specs
+    # as the fallback pool: model-guessed conditions increasingly carry
+    # weather that legitimately defeats the closure check, and the claim
+    # here is about the SPEC->run edge, not about any one prompt.
+    candidates = ([r for r in rows if r["kind"] == "extended"]
+                  + [r for r in rows if r["kind"] == "vocabulary"])
+    for row in candidates:
+        if not row.get("verdict", {}).get("ok"):
             continue
         result = compile_prompt_llm(row["prompt"])
         if result.questions:
@@ -306,7 +397,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     report = {"corpus": rows, "failures": failures,
               "deterministic": deterministic}
-    (out / "report.json").write_text(json.dumps(report, indent=1))
+    (out / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(f"\n  wrote {out / 'report.json'}")
     print(f"\n  GATE 8.1: {'PASS' if failures == 0 else f'FAIL ({failures})'}")
     return 0 if failures == 0 else 1

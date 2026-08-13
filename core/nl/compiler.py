@@ -52,18 +52,24 @@ AIRCRAFT_WORDS: Tuple[Tuple[str, str], ...] = (
 TURBULENCE_WORDS: Dict[str, float] = {
     "none": 0.0, "calm": 0.0, "smooth": 0.0,
     "light": 15.0, "mild": 15.0, "chop": 15.0,
-    "moderate": 30.0,
+    "bumpy": 15.0, "choppy": 15.0,
+    "moderate": 30.0, "rough": 30.0,
+    "violent": 45.0,
     "severe": 45.0, "heavy": 45.0,
 }
 TURBULENCE_STD = "MIL-F-8785C Fig.7 (W20, wind speed at 20 ft AGL)"
 
-#: Vague wind strength -> knots.
+#: Vague wind strength -> knots. THIS TABLE IS THE CONTROL: a model
+#: mapping one of these words to any other number is a measurable error,
+#: not a matter of opinion (Gate 8.1 grades against it).
 WIND_STRENGTH: Dict[str, float] = {
     "calm": 0.0, "no wind": 0.0,
     "light": 8.0, "gentle": 8.0,
+    "breezy": 12.0,
     "moderate": 15.0,
-    "strong": 25.0, "stiff": 25.0,
-    "severe": 40.0, "gale": 40.0,
+    "gusty": 18.0,
+    "strong": 25.0, "stiff": 25.0, "rough": 25.0,
+    "severe": 40.0, "gale": 40.0, "violent": 40.0, "howling": 40.0,
 }
 
 #: Relative wind direction words, as a bearing offset from the aircraft heading.

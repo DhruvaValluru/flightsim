@@ -54,6 +54,35 @@ def test_every_numeric_field_carries_a_unit(spec):
             assert q.unit is not None, f"{name} has no unit"
 
 
+def test_spec_version_5_and_the_model_source(spec):
+    """SPEC_VERSION is 5: the field list is version 4's, but the
+    provenance vocabulary gained source "model" (the scene director's
+    declared interpretation), which version-4 builds refuse -- so the
+    refuse-old-dicts convention applies in both directions. A
+    model-sourced quantity round-trips; plan() may move it (the guess is
+    the system's choice) and the source becomes derived; user and
+    inferred values stay immovable."""
+    from core.scenario.spec import SPEC_VERSION
+
+    assert SPEC_VERSION == 5
+
+    spec.altitude = Quantity(150.0, "m", Source.MODEL, frm="treetop level")
+    reread = ScenarioSpec.from_dict(spec.to_dict())
+    assert reread.altitude.source is Source.MODEL
+    assert reread.altitude.frm == "treetop level"
+
+    spec.plan("altitude", 300.0, frm="planner raised the declared guess")
+    assert spec.altitude.source is Source.DERIVED
+
+    with pytest.raises(ValueError, match="never.*moved"):
+        spec.plan("airspeed", 300.0, frm="airspeed is user-stated here")
+
+    old = spec.to_dict()
+    old["spec_version"] = 4
+    with pytest.raises(ValueError, match="not supported"):
+        ScenarioSpec.from_dict(old)
+
+
 def test_unsupported_spec_version_is_refused(spec):
     data = spec.to_dict()
     data["spec_version"] = 99
