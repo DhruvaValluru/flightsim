@@ -162,10 +162,15 @@ class OpenAICompatClient:
         }
         schema = ((output_config or {}).get("format") or {}).get("schema")
         if schema is not None:
+            # strict=False by measurement: OpenAI's strict:true accepts only
+            # its own schema subset (every property required) and 400s on
+            # RESPONSE_SCHEMA, whose fields are optional by design. The
+            # schema is guidance here; the compiler's strict _parse_payload
+            # is the enforcement on every provider (SS2.14).
             payload["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {"name": "scenario_fields", "schema": schema,
-                                "strict": True},
+                                "strict": False},
             }
         data = self._post("/chat/completions", payload)
         choices = data.get("choices") or [{}]
