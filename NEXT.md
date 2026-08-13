@@ -5,6 +5,23 @@
 LLM provider, terrain-coordinated runs, and the two honesty bugs the
 user caught). Then this file's gotchas 1-25.
 
+**Planned defaults (2026-08-13 -- "simple prompts must just fly").**
+Measured: "rough wind over mountains" + everest refused over numbers the
+system itself had chosen (defaulted altitude raised into air where the
+defaulted 250 kt sits under the B747's Vs). Now `plan_flyable_defaults`
+(webapp/runs.py) floors SYSTEM-CHOSEN numbers into the flyable envelope
+before the verdict: defaulted altitude below the location's terrain
+datum -> datum + 300 m; defaulted airspeed under the stall margin ->
+1.25 x the measured Vs at the final altitude, rounded up to 5 kt. Edits
+use the new `ScenarioSpec.plan()` (source becomes `derived`, movable by
+later planners -- plan_terrain_flight now treats default|derived as
+plannable and plans rather than set()s); user-stated values never move
+and their refusals stand. Wired into /compile (both compilers) and /run
+(re-plan after the raster track raise). Also: `_parse_payload` defaults
+ABSENT notes/questions to [] (measured: gpt-4.1-mini omits empty lists
+when the schema is guidance, not grammar; every other rail unchanged).
+Suite 428 tests, 88 guards.
+
 **Terrain physics (2026-08-11, second session -- "not taking all
 mountain surfaces into physics consideration").** Two features, all
 three hosts:

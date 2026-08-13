@@ -418,6 +418,46 @@ def test_control_ridge_spec_is_placed_on_the_ridge():
     assert str(flat.latitude.source) == "default"
 
 
+def test_flyable_defaults_are_planned_not_refused():
+    """A prompt whose every number the SYSTEM chose is never refused over
+    the system's own choices (measured 2026-08-13: everest raised a
+    defaulted altitude into air where the defaulted 250 kt sits below the
+    B747's measured Vs, and the page dead-ended). Planned defaults are
+    recorded pre-digest edits with source ``derived``; a stated value is
+    never moved and its refusal stands."""
+    from core.scenario.validate import validate
+    from webapp.runs import plan_flyable_defaults
+
+    # Altitude floor: the location's terrain datum, raster-free.
+    spec = compile_prompt("fly the 747")
+    spec.set("terrain_elevation", 4750.0, frm="test: everest datum")
+    plan_flyable_defaults(spec)
+    assert float(spec.altitude.value) == 5050.0     # datum + 300 m planned
+    assert str(spec.altitude.source) == "derived"   # still system-chosen
+
+    # Airspeed floor: the model's own measured Vs at the final altitude.
+    high = compile_prompt("fly the 747 at 9200 m")
+    assert str(high.airspeed.source) == "default"
+    plan_flyable_defaults(high)
+    assert str(high.airspeed.source) == "derived"
+    assert float(high.airspeed.value) > 260.0       # above 1.05 x Vs(9200 m)
+    assert "measured stall speed" in high.airspeed.frm
+    report = validate(high)                          # trim has the last word
+    assert report.ok, report.violations
+
+    # A STATED airspeed is never moved: the refusal is the answer.
+    stated = compile_prompt("fly the 747 at 9200 m at 250 kt")
+    plan_flyable_defaults(stated)
+    assert float(stated.airspeed.value) == 250.0
+    report = validate(stated, check_feasibility=False)
+    assert not report.ok
+    assert report.violations[0].constraint == "airspeed.stall_margin"
+
+    # plan() itself refuses to touch the user's words.
+    with pytest.raises(ValueError, match="never.*moved"):
+        stated.plan("airspeed", 300.0, frm="should refuse")
+
+
 def test_terrain_run_is_planned_for_clearance():
     """Terrain runs fly in coordination with the terrain (measured: a
     3000 m default flew THROUGH 3299 m ridge peaks over a flat slab): a

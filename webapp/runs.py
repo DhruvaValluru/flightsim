@@ -249,6 +249,10 @@ def place_on_scene(spec: ScenarioSpec) -> None:
 #: AGL the planner AIMS for when it may move a defaulted altitude:
 #: comfortably above the validator's bare margin, in showcase territory.
 PLANNED_CLEARANCE_M = 300.0
+#: The planned cruise floor over the measured stall speed. Vref is 1.3 x Vs
+#: by the same envelope code; 1.25 x sits between the validator's refusal
+#: line (1.05 x) and Vref, and the definitive trim probe still runs after.
+PLANNED_SPEED_MARGIN = 1.25
 
 
 def _fly_clearance_track(spec: ScenarioSpec, ground, script,
@@ -480,6 +484,63 @@ def _effect_report(spec: ScenarioSpec, scene: Dict, script, seconds: float,
     }))
 
 
+def plan_flyable_defaults(spec: ScenarioSpec) -> None:
+    """DEFAULTED numbers are planned into the flyable envelope, recorded.
+
+    Measured complaint (2026-08-13): "rough wind over mountains" with the
+    everest answer left the defaulted altitude/airspeed pair outside the
+    B747's measured envelope, and the page refused a scenario whose every
+    number the system itself had chosen. The discipline is
+    plan_terrain_flight's: only system-chosen fields (source default or
+    derived) move, every move is a recorded pre-digest edit
+    (``spec.plan``: the source becomes ``derived``, and a later planner
+    may refine it again), and a user-stated value is never touched -- its
+    refusals stand, by name.
+
+    Two floors, in dependency order:
+
+    * altitude: a defaulted altitude below the location's terrain datum is
+      raised to datum + PLANNED_CLEARANCE_M. This is the cheap, raster-free
+      floor from the spec's own terrain_elevation field; the run's
+      plan_terrain_flight still pre-flies the real track and raises further
+      for the actual peaks.
+    * airspeed: a defaulted airspeed below the validator's stall-margin
+      line at the (possibly raised) altitude is raised to
+      PLANNED_SPEED_MARGIN x the model's own measured Vs, rounded up to
+      5 kt. The measurement is reference_speeds -- the same envelope code
+      the validator refuses with -- and validate()'s trim probe still has
+      the last word.
+    """
+    import math
+
+    from core.fdm import FDMError, FlightDynamics
+    from core.scenario.envelope import reference_speeds
+    from core.scenario.validate import STALL_MARGIN
+
+    plannable = ("default", "derived")
+    terrain = float(spec.terrain_elevation.value)
+    if (str(spec.altitude.source) in plannable
+            and float(spec.altitude.value) < terrain + MIN_CLEARANCE_M):
+        spec.plan("altitude", float(round(terrain + PLANNED_CLEARANCE_M)),
+                  frm=f"raised for the location's terrain datum "
+                      f"({terrain:.0f} m + {PLANNED_CLEARANCE_M:.0f} m "
+                      f"planned clearance)")
+    if str(spec.airspeed.source) not in plannable:
+        return
+    try:
+        mass_kg = FlightDynamics(str(spec.aircraft.value)).state().weight_kg
+        speeds = reference_speeds(str(spec.aircraft.value), mass_kg,
+                                  max(float(spec.altitude.value), 0.0))
+    except (FDMError, ValueError):
+        return          # validate() names the real problem next
+    if float(spec.airspeed.value) < speeds.vs_kt * STALL_MARGIN:
+        planned = math.ceil(speeds.vs_kt * PLANNED_SPEED_MARGIN / 5.0) * 5.0
+        spec.plan("airspeed", planned,
+                  frm=f"raised to {PLANNED_SPEED_MARGIN:g} x the measured "
+                      f"stall speed ({speeds.vs_kt:.0f} kt CAS) at "
+                      f"{float(spec.altitude.value):.0f} m")
+
+
 def plan_terrain_flight(spec: ScenarioSpec) -> Optional[Dict]:
     """Terrain scenes fly IN COORDINATION with the terrain, verifiably.
 
@@ -516,18 +577,20 @@ def plan_terrain_flight(spec: ScenarioSpec) -> Optional[Dict]:
         # commandlet's VerifyTrimmedCondition guards the same ground.
         return None
     min_clearance = min(p["clearance_m"] for p in track)
-    if min_clearance >= MIN_CLEARANCE_M \
-            and str(spec.altitude.source) != "default":
+    # System-chosen altitudes (default, or derived by an earlier planner)
+    # may be raised; a user-stated altitude is never moved -- refusal below.
+    plannable = str(spec.altitude.source) in ("default", "derived")
+    if min_clearance >= MIN_CLEARANCE_M and not plannable:
         return None
-    if str(spec.altitude.source) == "default":
+    if plannable:
         peak = max(p["terrain_m"] for p in track)
         planned = float(round(peak + PLANNED_CLEARANCE_M))
         if planned > float(spec.altitude.value) \
                 or min_clearance < MIN_CLEARANCE_M:
-            spec.set("altitude", max(planned, float(spec.altitude.value)),
-                     frm=f"raised to clear the terrain under the planned "
-                         f"track (peak {peak:.0f} m + "
-                         f"{PLANNED_CLEARANCE_M:.0f} m)")
+            spec.plan("altitude", max(planned, float(spec.altitude.value)),
+                      frm=f"raised to clear the terrain under the planned "
+                          f"track (peak {peak:.0f} m + "
+                          f"{PLANNED_CLEARANCE_M:.0f} m)")
             try:
                 track = _fly_clearance_track(spec, ground,
                                              SHOWCASE_DOUBLET, seconds,

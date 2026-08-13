@@ -48,6 +48,7 @@ from webapp.runs import (  # noqa: E402
     needs_dynamic_bake,
     pick_scene,
     place_on_scene,
+    plan_flyable_defaults,
     plan_terrain_flight,
     project_for_ue_host,
 )
@@ -137,6 +138,12 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         spec = compile_prompt(prompt)
         compiler_used = "regex"
 
+    # DEFAULTED numbers are planned into the flyable envelope BEFORE the
+    # table and verdict are built: a prompt whose every number the system
+    # chose must not be refused over the system's own choices. Recorded
+    # edits (source becomes ``derived``); stated values never move.
+    plan_flyable_defaults(spec)
+
     payload = {
         "compiler": compiler_used, "model": model, "llm_note": llm_note,
         "llm_available": llm_available(),
@@ -195,6 +202,10 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # raster (a defaulted altitude may be raised, recorded; a stated
     # altitude that cannot keep clearance refuses by name below).
     clearance_refusal = plan_terrain_flight(spec)
+    # The track planner may have raised a system-chosen altitude into air
+    # where the system-chosen airspeed no longer flies: re-plan the
+    # defaults at the final altitude (stated values still never move).
+    plan_flyable_defaults(spec)
     project_for_ue_host(spec)
 
     # Validation governs the edited spec too: the run endpoint re-validates

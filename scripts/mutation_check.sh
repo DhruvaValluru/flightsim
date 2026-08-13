@@ -516,6 +516,12 @@ mutate webapp/server.py \
     "the run endpoint re-validates whatever the page hands it" \
     tests/test_webapp.py || failures=$((failures+1))
 
+mutate webapp/runs.py \
+    '    if float(spec.airspeed.value) < speeds.vs_kt * STALL_MARGIN:' \
+    '    if False:  # MUTATED: defaulted airspeed never planned' \
+    "a defaulted airspeed is planned to the measured envelope" \
+    tests/test_webapp.py || failures=$((failures+1))
+
 # -- Phase 8 LLM compiler v2: questions, cap, provenance, geography ------
 
 mutate core/nl/llm_compiler.py \

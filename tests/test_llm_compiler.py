@@ -348,10 +348,24 @@ def test_question_missing_id_is_an_error():
         compile_prompt_llm("x", client=client)
 
 
-def test_missing_questions_key_is_an_error():
-    client = fake_client({"fields": {}, "notes": []})
+def test_absent_list_keys_default_but_other_shapes_still_refuse():
+    """An ABSENT notes/questions key carries the same claim as an empty
+    list (measured: gpt-4.1-mini omits empty lists when the schema is
+    guidance, not grammar). Everything else about the top level stays
+    strict: no 'fields', or any unknown key, refuses loudly."""
+    result = compile_prompt_llm("x", client=fake_client(
+        {"fields": {}, "notes": []}))            # questions absent -> ()
+    assert result.questions == ()
+
+    result = compile_prompt_llm("x", client=fake_client({"fields": {}}))
+    assert result.questions == ()                # both lists absent
+
     with pytest.raises(LLMCompileError, match="top-level keys"):
-        compile_prompt_llm("x", client=client)
+        compile_prompt_llm("x", client=fake_client(
+            {"notes": [], "questions": []}))     # no 'fields'
+    with pytest.raises(LLMCompileError, match="top-level keys"):
+        compile_prompt_llm("x", client=fake_client(
+            {"fields": {}, "notes": [], "questions": [], "extra": 1}))
 
 
 def test_answered_field_cannot_claim_inferred():

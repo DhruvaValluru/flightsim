@@ -415,6 +415,15 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
         raise _fail(f"not valid JSON ({exc})") from None
     if not isinstance(payload, dict):
         raise _fail("top level is not an object")
+    # An ABSENT notes/questions key carries exactly the claim an empty
+    # list does, and OpenAI-compatible endpoints receive the schema as
+    # guidance rather than grammar (their strict mode rejects this
+    # schema's optional fields -- measured: gpt-4.1-mini omits the empty
+    # lists). Defaulting the two list keys keeps every real rail -- the
+    # fields vocabulary, types, sources and bounds below -- exactly as
+    # strict as before; any OTHER unknown or missing key still refuses.
+    payload.setdefault("notes", [])
+    payload.setdefault("questions", [])
     if set(payload) != {"fields", "notes", "questions"}:
         raise _fail(f"top-level keys {sorted(payload)} != "
                     f"['fields', 'notes', 'questions']")
