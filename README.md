@@ -23,10 +23,20 @@ Open http://127.0.0.1:8008, type a scenario ("fly the c172p through a
 tornado over the prairie"), review the compiled spec, and run. **No API
 keys or accounts are needed for anything**: terrain elevation comes from
 the public Copernicus bucket, historical weather from the free Open-Meteo
-API, and the natural-language compiler runs on a free local model
-(`brew install ollama && ollama pull qwen2.5:14b`, then set
-`FLIGHTSIM_LLM=ollama`) or falls back to the built-in deterministic
-parser.
+API, and the natural-language compiler has three tiers -- pick one:
+
+* **No AI (zero setup):** the built-in deterministic parser covers the
+  whole documented vocabulary (aircraft, altitudes, winds, turbulence,
+  surfaces, storms, tornadoes, dates). Only place *names* need AI --
+  state coordinates instead ("at 27.99, 86.92").
+* **Free local model (one-time download):** `brew install ollama`, then
+  `ollama pull qwen2.5:7b` (~4.7 GB) or `qwen2.5:14b` (~9 GB, better);
+  set `FLIGHTSIM_LLM=ollama` in `~/.flightsim.env`. Runs fully offline
+  afterwards; ~16 GB RAM recommended for the 14b.
+* **Anthropic API key (no download, paid):** set `ANTHROPIC_API_KEY`
+  and the app uses it automatically.
+
+The page states which tier is active next to the Interpret button.
 
 The physics, compiler, tests and web app run anywhere Python 3.9+ runs.
 **Rendering video clips** additionally needs a Mac with Unreal Engine 5.5
