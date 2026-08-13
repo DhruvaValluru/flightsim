@@ -74,6 +74,11 @@ def test_run_revalidates_and_refuses_by_name(client):
 
 
 def test_run_refuses_while_editor_is_owned(client, monkeypatch):
+    # The lock logic is platform-independent CODE and stays covered on
+    # every OS: force the platform gate open so the ue.platform refusal
+    # (tested in test_platform.py) does not preempt the editor refusal.
+    import core.util.platform as plat
+    monkeypatch.setattr(plat, "ue_available", lambda: True)
     monkeypatch.setattr(runs_module, "editor_running", lambda: True)
     # Belt and braces: if the refusal is ever broken (the mutation check
     # breaks it ON PURPOSE), the accepted run must die here in the stub --
@@ -161,6 +166,10 @@ def test_derive_seed_only_touches_defaulted_turbulent_specs():
 
 
 def test_manager_refuses_second_concurrent_run(monkeypatch):
+    # Same platform-gate override as the editor-lock test: the
+    # concurrency rail is code under test on every OS.
+    import core.util.platform as plat
+    monkeypatch.setattr(plat, "ue_available", lambda: True)
     monkeypatch.setattr(runs_module, "editor_running", lambda: False)
     local = RunManager()
     spec = compile_prompt("fly the 747 at 3000 m and 250 kt")

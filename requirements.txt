@@ -8,3 +8,4 @@ uvicorn==0.39.0
 PyYAML==6.0.3
 pytest==8.4.2
 httpx==0.28.1
+anthropic==0.121.0
