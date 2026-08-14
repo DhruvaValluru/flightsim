@@ -1142,6 +1142,11 @@ class RunManager:
             "-stdout", "-FullStdOutLogOutput",
             "-RenderOffScreen", "-AllowCommandletRendering",
         ]
+        if camera == "wingman":
+            # Wide formation slot: the default 25 m sits INSIDE a tornado
+            # funnel during a core transit (measured: 2 blank frames,
+            # floor refused). 250 m follows from outside the vortex.
+            command += ["-wingman-abeam=250"]
         if scene.get("terrain"):
             command += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
         if scene.get("imagery"):

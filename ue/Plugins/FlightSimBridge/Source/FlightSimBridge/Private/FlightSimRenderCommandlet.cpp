@@ -573,6 +573,23 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	if (CameraPreset == TEXT("wingman"))
 	{
 		Director->Preset = EFlightSimCameraPreset::Wingman;
+		// -wingman-abeam=<metres>: the default 25 m formation slot sits
+		// INSIDE a tornado funnel during a core transit (measured: 2 of
+		// 660 frames blank, floor refused). A wider slot keeps the
+		// camera following the aircraft from outside the vortex; the
+		// behind distance scales with it so the aircraft stays framed.
+		double AbeamMetres = 0.0;
+		if (FParse::Value(*Params, TEXT("wingman-abeam="), AbeamMetres)
+		    && AbeamMetres > 0.0)
+		{
+			Director->WingmanOffsetMetres.Y = AbeamMetres;
+			Director->WingmanOffsetMetres.X =
+				-FMath::Max(15.0, AbeamMetres * 0.25);
+			UE_LOG(LogFlightSimRender, Display,
+			       TEXT("wingman abeam widened to %.0f m (behind %.0f m)"),
+			       Director->WingmanOffsetMetres.Y,
+			       -Director->WingmanOffsetMetres.X);
+		}
 	}
 	else if (CameraPreset == TEXT("tower"))
 	{
