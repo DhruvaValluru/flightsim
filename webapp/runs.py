@@ -359,17 +359,24 @@ def _fly_clearance_track(spec: ScenarioSpec, ground, script,
                        if ground.contains(s.lat_deg, s.lon_deg) else 0.0)
             clearance = s.altitude_m - terrain
             x, y = ground.project(s.lat_deg, s.lon_deg)
-            for _, north, east, down in station_offsets_ned(
+            if not track:
+                origin_xy = (x, y)      # start position: the frame the
+            for _, north, east, down in station_offsets_ned(  # card's
                     s.roll_deg, s.pitch_deg, s.heading_deg, span_m):
-                px, py = x + east, y + north
-                if not ground.heightfield.contains(px, py):
+                px, py = x + east, y + north                  # event
+                if not ground.heightfield.contains(px, py):   # blocks use
                     continue
                 clearance = min(
                     clearance, (s.altitude_m - down)
                     - ground.heightfield.elevation_at(px, py))
             track.append({"terrain_m": terrain,
                           "cg_clearance_m": s.altitude_m - terrain,
-                          "clearance_m": clearance})
+                          "clearance_m": clearance,
+                          # Position relative to the start, so an event
+                          # aimed at the track can be placed ON the track
+                          # the banked script actually flies.
+                          "north_m": y - origin_xy[1],
+                          "east_m": x - origin_xy[0]})
     return track
 
 
@@ -1251,6 +1258,30 @@ class RunManager:
             hdg = _math.radians(float(spec.heading.value))
             centre_n = ahead * _math.cos(hdg)
             centre_e = ahead * _math.sin(hdg)
+            if scene.get("terrain"):
+                # Scripted terrain runs BANK (the S-turn doublet), so the
+                # straight-line 45%-ahead point misses the curved track.
+                # Measured on a 'through the tornado' Fuji run: closest
+                # approach ~410 m to a 150 m core -- peak sampled wind
+                # 18.3 m/s, exactly the 1/r field at that radius. Place
+                # the event on the PRE-FLOWN track instead: same script,
+                # same wind, same orographic field the clearance planner
+                # flies. An untrimmable spec keeps the straight-line
+                # placement and validate() rules next.
+                try:
+                    from core.terrain.ground import TerrainGround
+                    from core.terrain.heightfield import Heightfield
+
+                    ground_ = TerrainGround(
+                        Heightfield.read(Path(scene["terrain"])))
+                    track_ = _fly_clearance_track(
+                        spec, ground_, SHOWCASE_DOUBLET, seconds_,
+                        orographic=_orographic_provider(spec, scene))
+                    point = track_[int(0.45 * (len(track_) - 1))]
+                    centre_n = float(point["north_m"])
+                    centre_e = float(point["east_m"])
+                except Exception:
+                    pass
             ox, oy, declared = _projected_origin(spec, scene)
             scene_crs = scene_crs or declared
             if event == "tornado":
