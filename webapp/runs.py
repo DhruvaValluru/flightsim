@@ -141,7 +141,13 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
     if (str(spec.latitude.source) != "user"
             or str(spec.longitude.source) != "user"):
         return None
-    if pick_scene(spec).get("terrain") is not None:
+    scene = pick_scene(spec)
+    # The synthesised control ridge is NOT a place (the ERA5 doctrine):
+    # stated coordinates that fall on no real bake refuse here even when
+    # a leftover terrain_elevation would otherwise select the control
+    # scene (measured: a scene-set spec whose coordinates were then
+    # edited to London silently picked the control ridge).
+    if scene.get("terrain") is not None and scene.get("key") != "control":
         return None
     lat = float(spec.latitude.value)
     lon = float(spec.longitude.value)
@@ -566,6 +572,61 @@ def plan_terrain_environment(spec: ScenarioSpec) -> None:
             "heading", float(round(axis)),
             frm=f"along ridge axis {axis:.0f} deg computed from the scene "
                 f"raster, so the track samples the relief")
+
+
+#: Scene-setting: surface class -> the curated bake that stages it.
+#: city has no bake (flat + the city roughness class is the honest scene)
+#: and ocean opts out entirely.
+SCENE_SETTING_BAKES = {"desert": "grand_canyon", "grassland": "flint_hills",
+                       "forest": "yosemite"}
+#: Prompt words that opt OUT of scene-setting: the user asked for the flat
+#: slab (or water) and gets exactly that.
+SCENE_SETTING_OPT_OUT = ("flat", "featureless", "ocean", "open sea",
+                         "over the sea", "over water", "offshore")
+
+
+def plan_scene_setting(spec: ScenarioSpec) -> None:
+    """No featureless slabs unless asked for (user request 2026-08-13:
+    "have the llm not infer flat land"). A spec whose location NOBODY
+    chose -- coordinates still source default -- is placed on the
+    best-fitting curated bake DETERMINISTICALLY from the spec's own
+    fields, because the model proved erratic at this exact judgment
+    (measured: it staged 'fly over flat ground' and left 'over the
+    desert' flat, in the same session). Rules:
+
+    * any stated/inferred/model/derived location wins -- this planner
+      only ever touches all-default coordinates;
+    * a prompt asking for flat/featureless/ocean ground opts out, as
+      does an ocean surface (no ocean bake -- the flat slab IS the
+      honest stage there, stated);
+    * unnamed mountains keep their existing scene (the generic ridge
+      via inferred terrain_elevation -- placed by place_on_scene);
+    * surface class picks the bake (desert -> grand_canyon, grassland ->
+      flint_hills, forest -> yosemite); anything else -- including a
+      bare technical prompt -- gets the gentle prairie as the neutral
+      stage. Recorded via spec.plan (derived, re-plannable, visible in
+      the table with the opt-out stated).
+    """
+    if (str(spec.latitude.source) != "default"
+            or str(spec.longitude.source) != "default"):
+        return
+    if str(spec.terrain_elevation.source) != "default":
+        return          # unnamed mountains: the generic ridge is the scene
+    prompt = (spec.prompt or "").lower()
+    if any(word in prompt for word in SCENE_SETTING_OPT_OUT):
+        return
+    surface = str(spec.surface.value)
+    if surface == "ocean" or surface == "city":
+        return
+    key = SCENE_SETTING_BAKES.get(surface, "flint_hills")
+    location = LOCATIONS[key]
+    from core.nl.llm_compiler import LOCATION_TERRAIN_ELEVATION_M
+
+    frm = (f"scene-setting: no place stated, so the {key} bake stages the "
+           f"scene (surface {surface!r}); say 'flat ground' to opt out")
+    spec.plan("latitude", location.origin_lat, frm=frm)
+    spec.plan("longitude", location.origin_lon, frm=frm)
+    spec.plan("terrain_elevation", LOCATION_TERRAIN_ELEVATION_M[key], frm=frm)
 
 
 def plan_flyable_defaults(spec: ScenarioSpec) -> None:

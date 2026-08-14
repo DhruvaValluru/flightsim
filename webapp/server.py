@@ -49,6 +49,7 @@ from webapp.runs import (  # noqa: E402
     pick_scene,
     place_on_scene,
     plan_flyable_defaults,
+    plan_scene_setting,
     plan_terrain_environment,
     plan_terrain_flight,
     plan_trim_recovery,
@@ -148,6 +149,7 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
     # must not be refused over the system's own choices. Every move is a
     # recorded edit (source becomes ``derived``); stated values never
     # move. /run applies the same planners again: value-idempotent.
+    plan_scene_setting(spec)
     apply_weather_event(spec)
     # Terrain-aware environment (cross-ridge wind, along-ridge heading):
     # shown in the review table when the scene's raster is already baked
@@ -191,6 +193,10 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # USER-stated coordinates with no bake yet refuse by name BEFORE any
     # spec edit: the page bakes via POST /bake and simply runs again --
     # never a silent flat slab standing in for a real place the user named.
+    # Scene-setting first (idempotent: a compile-planned location arrives
+    # source derived and is left alone), so the placement, bake check and
+    # every later planner see the staged scene like any named one.
+    plan_scene_setting(spec)
     unbaked = needs_dynamic_bake(spec)
     if unbaked is not None:
         return JSONResponse({"refused": "terrain.unbaked", **unbaked},

@@ -493,6 +493,44 @@ def test_flyable_defaults_are_planned_not_refused():
         stated.plan("airspeed", 300.0, frm="should refuse")
 
 
+def test_scene_setting_stages_unlocated_scenes():
+    """No featureless slabs unless asked for: all-default coordinates are
+    placed DETERMINISTICALLY on the fitting curated bake (the model
+    proved erratic at this judgment). Stated places, flat/ocean opt-outs,
+    and the unnamed-mountains generic ridge are untouched."""
+    from core.terrain.glo30 import LOCATIONS
+    from webapp.runs import plan_scene_setting
+
+    bare = compile_prompt("fly the 747 at 3000 m and 250 kt")
+    plan_scene_setting(bare)
+    assert float(bare.latitude.value) == LOCATIONS["flint_hills"].origin_lat
+    assert str(bare.latitude.source) == "derived"
+    assert "scene-setting" in bare.latitude.frm
+
+    desert = compile_prompt("fly the c172p over the desert at 2500 m")
+    plan_scene_setting(desert)
+    assert float(desert.latitude.value) == \
+        LOCATIONS["grand_canyon"].origin_lat
+
+    flat = compile_prompt("fly the 747 over flat ground at 3000 m")
+    plan_scene_setting(flat)
+    assert str(flat.latitude.source) == "default"      # asked for flat
+
+    ocean = compile_prompt("fly the 747 over the ocean at 3000 m")
+    plan_scene_setting(ocean)
+    assert str(ocean.latitude.source) == "default"     # no ocean bake
+
+    named = compile_prompt("fly the 747 at 5200 m")
+    named.set("latitude", 45.9764, frm="stated place")
+    named.set("longitude", 7.6586, frm="stated place")
+    plan_scene_setting(named)
+    assert float(named.latitude.value) == 45.9764      # stated place wins
+
+    peaks = compile_prompt("fly the 747 at 5000 m over 2000 m mountains")
+    plan_scene_setting(peaks)
+    assert str(peaks.latitude.source) == "default"     # generic ridge kept
+
+
 def test_ridge_axis_math_on_synthetic_rasters():
     """The axis computation is pinned on rasters whose orientation is
     KNOWN by construction: elevation varying only east-west is a

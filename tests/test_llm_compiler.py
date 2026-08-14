@@ -408,19 +408,46 @@ def test_redundant_canonical_unit_tolerated_wrong_unit_refused():
                          "unit": "ft"}}, "notes": [], "questions": []}))
 
 
-def test_model_sourced_coordinates_are_dropped():
-    """Coordinates are never guessed into a spec: a model-sourced
-    latitude is an invented place, the exact thing the geography rules
-    prevent. The guess is dropped like a null -- the scene honestly has
-    no location -- while the rest of the response survives."""
+def test_model_sourced_coordinates_listed_bakes_only():
+    """Coordinates are never INVENTED: a model-sourced pair off the
+    listed-bake origins is dropped like a null (the scene honestly has
+    no location). But the director may CHOOSE a listed bake as a
+    declared guess -- scene-setting -- and that pair is kept, because it
+    is real verified terrain, not an invention."""
     result = compile_prompt_llm("over the sahara",
                                 client=fake_client({"fields": {
         "latitude": {"value": 23.0, "source": "model", "from": "sahara"},
+        "longitude": {"value": 5.0, "source": "model", "from": "sahara"},
         "surface": {"value": "desert", "source": "inferred",
                     "from": "sahara"}}, "notes": [], "questions": []}))
-    assert str(result.spec.latitude.source) == "default"   # guess dropped
+    assert str(result.spec.latitude.source) == "default"   # invented: dropped
     assert float(result.spec.latitude.value) == 0.0
     assert str(result.spec.surface.value) == "desert"      # rest kept
+
+    from core.terrain.glo30 import LOCATIONS
+
+    place = LOCATIONS["flint_hills"]
+    chosen = compile_prompt_llm("storm country flying",
+                                client=fake_client({"fields": {
+        "latitude": {"value": place.origin_lat, "source": "model",
+                     "from": "storm country"},
+        "longitude": {"value": place.origin_lon, "source": "model",
+                      "from": "storm country"}},
+        "notes": [], "questions": []}))
+    assert float(chosen.spec.latitude.value) == place.origin_lat  # kept
+    assert str(chosen.spec.latitude.source) == "model"            # declared
+
+
+def test_model_sourced_dates_are_dropped():
+    """A date is DATA, not vibes: a model-sourced weather_date would pull
+    a real day's ERA5 reanalysis the user never asked about (measured:
+    gpt-4.1-mini wrote 2023-06-01 from the word 'evening'). Dropped as
+    invented; stated dates (user/inferred) stand."""
+    result = compile_prompt_llm("an evening flight",
+                                client=fake_client({"fields": {
+        "weather_date": {"value": "2023-06-01", "source": "model",
+                         "from": "evening"}}, "notes": [], "questions": []}))
+    assert str(result.spec.weather_date.value) == "none"
 
 
 def test_null_valued_fields_are_omission():

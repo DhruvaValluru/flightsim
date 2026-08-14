@@ -428,6 +428,13 @@ Geography rules:
   prairie" -> flint_hills) sets BOTH: the surface class AND the place's
   exact coordinates. Ground cover alone never suppresses a place the
   list can render.
+- You MAY choose a listed bake as a declared guess (source "model",
+  EXACT listed coordinates, quoting the phrase that guided it) when the
+  prompt strongly evokes one: desert/canyon -> grand_canyon,
+  prairie/plains -> flint_hills, valley -> yosemite, volcano -> fuji.
+  When nothing evokes a place, leave the location fields absent -- the
+  deterministic scene planner places unlocated scenes on a fitting
+  bake; that is not your job to force.
 - A named place NOT in the list: NEVER invent coordinates. Ask which listed
   place (or the generic ridge) fits, or record the place name verbatim in
   "notes". Coordinates you were not given do not exist.
@@ -542,17 +549,41 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
     for name in [n for n, e in fields.items()
                  if isinstance(e, dict) and e.get("value") is None]:
         del fields[name]
-    # Coordinates are never GUESSED into a spec: a model-sourced
-    # latitude/longitude is an invented place, the exact thing the
-    # geography rules exist to prevent (listed-bake origins arrive as
-    # "inferred", explicit coordinates as "user"). The guess is dropped
-    # like a null -- the scene honestly has no location -- rather than
-    # sinking the whole compile over one overreach (measured: gpt-4.1-mini
-    # invents coordinates even for placeless prompts).
-    for name in ("latitude", "longitude"):
-        entry = fields.get(name)
-        if isinstance(entry, dict) and entry.get("source") == "model":
-            del fields[name]
+    # Coordinates are never INVENTED into a spec -- but the director may
+    # CHOOSE a listed bake as a declared guess ("scene-setting": a windy
+    # evocative prompt lands on real terrain instead of a featureless
+    # slab). The line: a model-sourced latitude/longitude pair is kept
+    # ONLY when it sits exactly on a listed bake's origin (the world the
+    # system can actually render); anything else is an invented place and
+    # is dropped like a null (measured: gpt-4.1-mini invents Sahara
+    # coordinates for placeless prompts).
+    lat_entry, lon_entry = fields.get("latitude"), fields.get("longitude")
+
+    def _model_sourced(entry):
+        return isinstance(entry, dict) and entry.get("source") == "model"
+
+    if _model_sourced(lat_entry) or _model_sourced(lon_entry):
+        on_listed_origin = False
+        try:
+            lat, lon = float(lat_entry["value"]), float(lon_entry["value"])
+            on_listed_origin = any(
+                abs(lat - loc.origin_lat) <= 0.05
+                and abs(lon - loc.origin_lon) <= 0.05
+                for loc in LOCATIONS.values())
+        except (TypeError, KeyError, ValueError):
+            on_listed_origin = False
+        if not on_listed_origin:
+            for name in ("latitude", "longitude", "terrain_elevation"):
+                if _model_sourced(fields.get(name)):
+                    del fields[name]
+    # A DATE is data, not vibes: the prompt rules already say never
+    # invent one, and the mechanical rail backs them up (measured:
+    # gpt-4.1-mini wrote weather_date 2023-06-01 from the word
+    # "evening", which would pull a real day's ERA5 reanalysis the user
+    # never asked about). A model-sourced date is dropped as invented;
+    # stated dates arrive as "user"/"inferred" and stand.
+    if _model_sourced(fields.get("weather_date")):
+        del fields["weather_date"]
     for name, entry in fields.items():
         if name not in FIELD_VALUE_SCHEMAS:
             raise _fail(f"unknown field {name!r}")
