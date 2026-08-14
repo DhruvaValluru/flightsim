@@ -265,6 +265,10 @@ PLANNED_CLEARANCE_M = 300.0
 #: by the same envelope code; 1.25 x sits between the validator's refusal
 #: line (1.05 x) and Vref, and the definitive trim probe still runs after.
 PLANNED_SPEED_MARGIN = 1.25
+#: Webapp chase offsets, TIGHTER than the showcase's (user preference
+#: 2026-08-14: the view stays close to the aircraft). behind:right:up
+#: metres; the showcase matrix keeps its own measured framing.
+WEBAPP_CHASE = {"B747": "-110:0:12", "A320": "-95:0:10", "c172p": "-28:0:4"}
 #: Sources the planners may move: the system's own choices. "default"
 #: (nobody said it), "model" (the scene director's declared guess) and
 #: "derived" (an earlier planner). NEVER "user" or "inferred" -- those are
@@ -1132,7 +1136,7 @@ class RunManager:
             str(EDITOR), str(project), "-run=FlightSimBridge.FlightSimRender",
             f"-scenario={card}", f"-frames={frames}",
             "-Visual", "-shot=showcase",
-            f"-chase={AIRFRAMES.get(aircraft, {}).get('chase', '-170:0:16')}",
+            f"-chase={WEBAPP_CHASE.get(aircraft, '-110:0:12')}",
             f"-camera={camera}",
             f"-fps={FPS}", f"-width={WIDTH}", f"-height={HEIGHT}",
             f"-sun-elev={tod['sun_elev']}", f"-sun-azim={tod['sun_azim']}",
@@ -1143,10 +1147,11 @@ class RunManager:
             "-RenderOffScreen", "-AllowCommandletRendering",
         ]
         if camera == "wingman":
-            # Wide formation slot: the default 25 m sits INSIDE a tornado
-            # funnel during a core transit (measured: 2 blank frames,
-            # floor refused). 250 m follows from outside the vortex.
-            command += ["-wingman-abeam=250"]
+            # Formation slot outside the vortex: the default 25 m sat
+            # INSIDE the funnel (measured: 2 blank frames, floor
+            # refused); 180 m clears the 150 m core while keeping the
+            # aircraft large in frame (user: closer, always).
+            command += ["-wingman-abeam=180"]
         if scene.get("terrain"):
             command += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
         if scene.get("imagery"):
