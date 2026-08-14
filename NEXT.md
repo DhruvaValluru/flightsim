@@ -24,7 +24,13 @@ report.json; the machinery rails all held. Acceptance measured: "storm
 chasing in a small plane over Kansas" rendered END TO END
 (runs/webapp/3ed4d58bc9ff); mountains-vs-flat rough wind measurably
 differ (wind FROM 118 vs 8 deg, vertical air +-2.9 vs one-sided).
-Platform story: core/util/platform.py is the ONE OS-dispatch home;
+Scene-setting (user request, same day): plan_scene_setting stages
+all-default coordinates on a fitting curated bake DETERMINISTICALLY
+(desert -> grand_canyon, else flint_hills as the neutral stage;
+'flat ground'/ocean opts out; stated places win; model may only choose
+listed origins, never invent coordinates or dates -- parser rails).
+needs_dynamic_bake refuses stated coords that fall on the control ridge
+(not a place). Platform story: core/util/platform.py is the ONE OS-dispatch home;
 UTF-8 encoding enforced statically (test_platform.py); UE refuses
 `ue.platform` by name off-mac (scripts exit 3, webapp 409, /status
 reports render_available); setup.ps1 + README matrix; CI matrix
