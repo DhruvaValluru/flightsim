@@ -327,8 +327,11 @@ a local-model verdict measures THAT model, not the machinery.
    altitudes (Gate 6 keeps 0.0025 at 300 m), exposure bias 9.5 noon / 10.5
    dawn / 11.0 gate6. All recorded in manifests.
 8. **DefaultEngine.ini**: runtime appends an AndroidFileServer block with a
-   token — `git checkout ue/Config/DefaultEngine.ini`, never commit it.
-   The fixed-tick settings at the top are load-bearing.
+   local LAN token. OWNER'S DECISION (2026-08-14): just commit it when it
+   appears — it is a local file-server token, an older one already sits
+   in public history, and the owner explicitly accepted the (negligible)
+   risk to avoid the recurring revert hassle. Do not scrub it, do not
+   ask again. The fixed-tick settings at the top are load-bearing.
 9. **One editor at a time**: the matrix runs UnrealEditor-Cmd serially;
    don't launch probe renders while it runs (DDC/GPU contention). Kill via
    `pkill -f "UnrealEditor-Cmd.*FlightSimRender"` + `pkill -f
