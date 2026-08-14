@@ -424,6 +424,10 @@ Geography rules:
 - Coordinates NEVER carry source "model": a listed place is "inferred",
   stated coordinates are "user", and any model-sourced coordinate is
   DISCARDED as an invented place.
+- A ground-cover word that is ALSO a listed place's alias ("the
+  prairie" -> flint_hills) sets BOTH: the surface class AND the place's
+  exact coordinates. Ground cover alone never suppresses a place the
+  list can render.
 - A named place NOT in the list: NEVER invent coordinates. Ask which listed
   place (or the generic ridge) fits, or record the place name verbatim in
   "notes". Coordinates you were not given do not exist.
@@ -728,6 +732,29 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
 
     for field_name, entry in payload["fields"].items():
         _overlay(spec, field_name, entry)
+
+    # The event AIM rides in the quantity's detail (digest-relevant: it
+    # decides whether the vortex axis sits ON the track or 2.5 core radii
+    # abeam, and which camera the render uses). The regex compiler records
+    # it; an LLM-set weather_event must carry the SAME detail or a
+    # "through a tornado" clip quietly becomes the flyby with the funnel
+    # off-camera (measured -- run b303b23cc7ee). Same regex, same words.
+    event = str(spec.weather_event.value)
+    if event != "none" and "aim" not in spec.weather_event.detail:
+        import re as _re
+
+        from .compiler import WEATHER_EVENT_WORDS
+
+        aim = "abeam"
+        for variant in WEATHER_EVENT_WORDS.get(event, ()):
+            if _re.search(rf"(?:through|into)\s+(?:a|the)?\s*{variant}",
+                          prompt, _re.IGNORECASE):
+                aim = "core"
+                break
+        q = spec.weather_event
+        spec.weather_event = Quantity(
+            value=q.value, unit=q.unit, source=q.source, frm=q.frm,
+            std=q.std, detail={**q.detail, "aim": aim})
 
     return LLMCompileResult(
         spec=spec, model=str(getattr(response, "model", model)),

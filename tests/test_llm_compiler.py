@@ -348,6 +348,24 @@ def test_question_missing_id_is_an_error():
         compile_prompt_llm("x", client=client)
 
 
+def test_llm_weather_event_carries_the_aim_detail():
+    """'through a tornado' aims the core AT the track (digest-relevant
+    detail deciding vortex placement and camera). The regex compiler
+    records it; the LLM path must too, or the clip quietly becomes the
+    abeam flyby with the funnel off-camera (measured, run b303b23cc7ee)."""
+    event = {"fields": {"weather_event": {
+        "value": "tornado", "source": "user", "from": "through a tornado"}},
+        "notes": [], "questions": []}
+    through = compile_prompt_llm("fly the c172p through a tornado",
+                                 client=fake_client(event))
+    assert through.spec.weather_event.detail["aim"] == "core"
+
+    near = compile_prompt_llm("fly the c172p near a tornado",
+                              client=fake_client(event))
+    assert near.spec.weather_event.detail["aim"] == "abeam"
+    assert through.spec.digest() != near.spec.digest()
+
+
 def test_model_source_is_a_declared_guess():
     """The scene director may guess -- declared. Source 'model' lands on
     the spec as Source.MODEL with the quoted phrase; a model-sourced
