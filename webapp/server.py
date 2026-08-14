@@ -54,6 +54,7 @@ from webapp.runs import (  # noqa: E402
     plan_terrain_flight,
     plan_trim_recovery,
     project_for_ue_host,
+    refuse_placeholder_mesh,
 )
 
 app = FastAPI(title="flightsim", docs_url=None, redoc_url=None)
@@ -200,6 +201,12 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     unbaked = needs_dynamic_bake(spec)
     if unbaked is not None:
         return JSONResponse({"refused": "terrain.unbaked", **unbaked},
+                            status_code=409)
+    # Placeholder airframes never render (owner's rule): refuse by name
+    # before anything starts, naming the aircraft that CAN render here.
+    mesh_refusal = refuse_placeholder_mesh(spec)
+    if mesh_refusal is not None:
+        return JSONResponse({"refused": "aircraft.mesh", **mesh_refusal},
                             status_code=409)
     place_on_scene(spec)
     # Severe-weather composition edits (thunderstorm -> severe turbulence

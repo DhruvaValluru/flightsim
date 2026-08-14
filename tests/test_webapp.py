@@ -493,6 +493,33 @@ def test_flyable_defaults_are_planned_not_refused():
         stated.plan("airspeed", 300.0, frm="should refuse")
 
 
+def test_placeholder_airframes_never_render(client, monkeypatch):
+    """Owner's rule: on a machine with imported meshes, an aircraft
+    without a real licensed 3-D model refuses to render BY NAME instead
+    of showing blocks (measured: an F-15 run rendered the placeholder).
+    A machine with no meshes at all is untouched."""
+    from webapp.runs import refuse_placeholder_mesh, renderable_aircraft
+
+    if renderable_aircraft():
+        spec = compile_prompt("fly the f15 at 5000 m and 350 kt")
+        refusal = refuse_placeholder_mesh(spec)
+        assert refusal is not None
+        assert refusal["constraint"] == "aircraft.mesh"
+        assert "f15" in refusal["message"]
+        real = compile_prompt("fly the 747 at 3000 m and 250 kt")
+        assert refuse_placeholder_mesh(real) is None
+
+    # The endpoint wires the refusal as a named 409, whatever machine.
+    import webapp.server as server_module
+    monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
+                        lambda spec: {"constraint": "aircraft.mesh",
+                                      "message": "no real 3-D model"})
+    spec = compile_prompt("fly the f15 at 5000 m and 350 kt")
+    reply = client.post("/run", json={"spec": spec.to_dict()})
+    assert reply.status_code == 409
+    assert reply.json()["refused"] == "aircraft.mesh"
+
+
 def test_scene_setting_stages_unlocated_scenes():
     """No featureless slabs unless asked for: all-default coordinates are
     placed DETERMINISTICALLY on the fitting curated bake (the model

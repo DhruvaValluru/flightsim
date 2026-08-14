@@ -394,6 +394,11 @@ Extraction rules:
 - airspeed_kind: set ONLY when the prompt says "true airspeed"/"TAS".
   Never guess it -- calibrated is the default and the render host can
   honour nothing else.
+- Aircraft with real licensed 3-D models: B747, A320, c172p -- prefer
+  these for GUESSES ("small plane" -> c172p, "airliner/jet" -> A320 or
+  B747). 737, global5000, f15 and f16 have real flight physics but no
+  3-D model: use them ONLY when the prompt names them (the render will
+  refuse them with the reason; placeholder airframes never render).
 - Vague wind strength maps as: light/gentle 8 kt, breezy 12 kt,
   moderate 15 kt, gusty 18 kt, strong/stiff/rough 25 kt,
   severe/gale/violent/howling 40 kt. "rough"/"turbulent" wind implies

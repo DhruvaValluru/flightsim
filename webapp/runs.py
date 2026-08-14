@@ -585,6 +585,36 @@ SCENE_SETTING_OPT_OUT = ("flat", "featureless", "ocean", "open sea",
                          "over the sea", "over water", "offshore")
 
 
+def renderable_aircraft() -> List[str]:
+    """Aircraft with a REAL licensed 3-D model imported on this machine
+    (a mesh_manifest.json under assets/generated). Everything else is
+    physics-only: real JSBSim aerodynamics, no honest picture."""
+    return sorted(p.parent.name for p in
+                  (REPO / "assets" / "generated").glob("*/mesh_manifest.json"))
+
+
+def refuse_placeholder_mesh(spec: ScenarioSpec) -> Optional[Dict]:
+    """OWNER'S RULE (2026-08-14): a placeholder airframe never renders.
+
+    On a machine with imported meshes, a render request for an aircraft
+    without one refuses BY NAME instead of showing blocks (measured: an
+    F-15 run rendered the placeholder and the owner rejected it). A
+    machine with NO meshes imported (fresh clone, CI) is untouched --
+    the render pipeline reports its own missing-assets state there.
+    """
+    have = renderable_aircraft()
+    aircraft = str(spec.aircraft.value)
+    if not have or aircraft in have:
+        return None
+    return {
+        "constraint": "aircraft.mesh",
+        "message": f"the {aircraft} has real flight physics but no "
+                   f"licensed 3-D model, and placeholder airframes never "
+                   f"render. Renderable aircraft on this machine: "
+                   f"{', '.join(have)}.",
+    }
+
+
 def plan_scene_setting(spec: ScenarioSpec) -> None:
     """No featureless slabs unless asked for (user request 2026-08-13:
     "have the llm not infer flat land"). A spec whose location NOBODY
