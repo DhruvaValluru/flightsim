@@ -327,6 +327,18 @@ def bake_endpoint(request: BakeRequest) -> JSONResponse:
     return JSONResponse(entry)
 
 
+@app.get("/runs/{run_id}/card.json")
+def run_card(run_id: str):
+    """The run card, verbatim: what the hosts were actually handed. The
+    page's flight-path chart reads the tornado/downburst placement from
+    it (positions the card computed, never re-derived client-side)."""
+    run = manager.get(run_id)
+    path = manager.out_root / run_id / "card.json"
+    if run is None or run.status != "done" or not path.is_file():
+        return JSONResponse({"error": "no card"}, status_code=404)
+    return FileResponse(path, media_type="application/json")
+
+
 @app.get("/runs/{run_id}/effect.json")
 def run_effect(run_id: str):
     """The conditions-effect report: this run's telemetry against a headless

@@ -368,15 +368,35 @@ async function startRun(mayBake) {
     return;
   }
   activeRun = payload.run_id;
+  try { localStorage.setItem("flightsim.lastRun", activeRun); } catch (e) {}
   $("status").textContent = `run ${activeRun} started (spec ` +
     `${payload.digest.slice(0, 16)})`;
   $("clipArea").innerHTML = "";
   poll();
 }
 
+// A reload (or a server restart) does not lose the last run: completed
+// runs recover from disk server-side, and the page re-attaches to the
+// id it remembered. An interrupted run 404s and the message says so.
+(() => {
+  let last = null;
+  try { last = localStorage.getItem("flightsim.lastRun"); } catch (e) {}
+  if (last && !activeRun) {
+    activeRun = last;
+    $("runArea").style.display = "";
+    poll();
+  }
+})();
+
 async function poll() {
   if (!activeRun) return;
   const response = await fetch(`/runs/${activeRun}`);
+  if (!response.ok) {
+    $("status").textContent = `run ${activeRun} is not recoverable ` +
+      `(interrupted, or its files were removed)`;
+    activeRun = null;
+    return;
+  }
   const run = await response.json();
   const line = run.events.map(e =>
     `${new Date(e.t * 1000).toLocaleTimeString()}  ${e.status}` +
@@ -392,9 +412,11 @@ async function poll() {
       `href="/runs/${activeRun}/provenance.json">provenance</a> · ` +
       `<a style="color:#6fb3e0" ` +
       `href="/runs/${activeRun}/telemetry.json">telemetry</a></div>` +
+      `<div id="pathArea"></div>` +
       `</div><div class="aeroSide" id="aeroSide"></div></div>` +
       `<div id="effectArea"></div>`;
     initAeroPanel(activeRun, run);
+    initFlightPath(activeRun, run);
     initEffectReport(activeRun);
   } else if (run.status !== "failed") {
     setTimeout(poll, 2000);
@@ -408,6 +430,142 @@ async function poll() {
 // recorded samples with the formula stated below the canvas. Time mapping:
 // video currentTime maps 1:1 to recorded FDM t (the clip starts at t = 0);
 // the nearest recorded sample is shown.
+
+async function initFlightPath(runId, run) {
+  // Top-down ground track from the RECORDED lat/lon channels (the
+  // recorder's own position samples -- nothing integrated or recomputed),
+  // projected to metres about the first sample, with the run card's own
+  // tornado placement overlaid. Optional like the aero panel: absent
+  // telemetry omits the chart rather than approximating one.
+  const holder = $("pathArea");
+  if (!holder) return;
+  let tele = null, card = null;
+  try {
+    const r = await fetch(`/runs/${runId}/telemetry.json`);
+    if (r.ok) tele = await r.json();
+    const c = await fetch(`/runs/${runId}/card.json`);
+    if (c.ok) card = await c.json();
+  } catch (e) { return; }
+  const cols = tele && tele.columns;
+  if (!cols || !cols.lat_deg || cols.lat_deg.length < 2) return;
+
+  const lat0 = cols.lat_deg[0], lon0 = cols.lon_deg[0];
+  const mLat = 111320.0;
+  const mLon = 111320.0 * Math.cos(lat0 * Math.PI / 180);
+  const north = cols.lat_deg.map(v => (v - lat0) * mLat);
+  const east = cols.lon_deg.map(v => (v - lon0) * mLon);
+  const tornado = card && card.tornado ? {
+    n: card.tornado.centre_north_m, e: card.tornado.centre_east_m,
+    r: card.tornado.r_core_m } : null;
+
+  // Bounds: the whole track plus the vortex (core + fade ring), padded.
+  let lo = [Math.min(...east), Math.min(...north)];
+  let hi = [Math.max(...east), Math.max(...north)];
+  if (tornado) {
+    lo = [Math.min(lo[0], tornado.e - 2.5 * tornado.r),
+          Math.min(lo[1], tornado.n - 2.5 * tornado.r)];
+    hi = [Math.max(hi[0], tornado.e + 2.5 * tornado.r),
+          Math.max(hi[1], tornado.n + 2.5 * tornado.r)];
+  }
+  const span = Math.max(hi[0] - lo[0], hi[1] - lo[1], 100) * 1.15;
+  const cx = (lo[0] + hi[0]) / 2, cy = (lo[1] + hi[1]) / 2;
+
+  const W = 620, H = 420;
+  holder.innerHTML =
+    `<div class="dim" style="margin-top:.6rem"><b style="color:#e1e4e8">` +
+    `flight path</b> — top-down ground track, north up</div>` +
+    `<canvas id="pathCanvas" width="${W}" height="${H}" ` +
+    `style="max-width:100%"></canvas>` +
+    `<canvas id="profileCanvas" width="${W}" height="130" ` +
+    `style="max-width:100%"></canvas>` +
+    `<div class="formula">ground track = the recorder's own lat/lon ` +
+    `channels (${cols.t.length} samples at ${tele.interval_s}s), ` +
+    `projected to metres about the first sample; colour runs start ` +
+    `(blue) to end (amber); altitude profile from recorded altitude_m` +
+    (tornado ? `; tornado core position and radius from the run card ` +
+      `(solid = core, dashed = 2.5 radii)` : "") +
+    `. Nothing here is recomputed from physics.</div>`;
+
+  const scale = Math.min(W, H) / span;
+  const X = e => W / 2 + (e - cx) * scale;
+  const Y = n => H / 2 - (n - cy) * scale;
+  const ctx = $("pathCanvas").getContext("2d");
+  ctx.fillStyle = "#10151b"; ctx.fillRect(0, 0, W, H);
+
+  // 500 m grid
+  ctx.strokeStyle = "#1d2530"; ctx.lineWidth = 1;
+  const step = span > 6000 ? 1000 : 500;
+  for (let g = Math.floor((cx - span) / step) * step; g < cx + span; g += step) {
+    ctx.beginPath(); ctx.moveTo(X(g), 0); ctx.lineTo(X(g), H); ctx.stroke();
+  }
+  for (let g = Math.floor((cy - span) / step) * step; g < cy + span; g += step) {
+    ctx.beginPath(); ctx.moveTo(0, Y(g)); ctx.lineTo(W, Y(g)); ctx.stroke();
+  }
+
+  if (tornado) {
+    ctx.beginPath();
+    ctx.arc(X(tornado.e), Y(tornado.n), 2.5 * tornado.r * scale, 0, 7);
+    ctx.strokeStyle = "#8a4a42"; ctx.setLineDash([5, 4]); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(X(tornado.e), Y(tornado.n), tornado.r * scale, 0, 7);
+    ctx.fillStyle = "rgba(224, 122, 111, 0.25)"; ctx.fill();
+    ctx.strokeStyle = "#e07a6f"; ctx.stroke();
+    ctx.fillStyle = "#e07a6f"; ctx.font = "11px ui-monospace, monospace";
+    ctx.fillText(`tornado core (${tornado.r.toFixed(0)} m)`,
+                 X(tornado.e) + 8, Y(tornado.n) - tornado.r * scale - 6);
+  }
+
+  // The track, coloured start->end.
+  const n = north.length;
+  for (let i = 1; i < n; i++) {
+    const f = i / n;
+    ctx.strokeStyle = `hsl(${210 - 170 * f}, 75%, 62%)`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(X(east[i - 1]), Y(north[i - 1]));
+    ctx.lineTo(X(east[i]), Y(north[i]));
+    ctx.stroke();
+  }
+  ctx.beginPath(); ctx.arc(X(east[0]), Y(north[0]), 4, 0, 7);
+  ctx.fillStyle = "#7fd08f"; ctx.fill();
+  ctx.font = "11px ui-monospace, monospace";
+  ctx.fillText("start", X(east[0]) + 7, Y(north[0]) + 4);
+  ctx.beginPath(); ctx.arc(X(east[n - 1]), Y(north[n - 1]), 4, 0, 7);
+  ctx.fillStyle = "#ffc861"; ctx.fill();
+  ctx.fillText(`t=${cols.t[n - 1].toFixed(0)}s`,
+               X(east[n - 1]) + 7, Y(north[n - 1]) + 4);
+
+  // Scale bar + north arrow.
+  const bar = step * scale;
+  ctx.strokeStyle = "#7d8a93"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(12, H - 14); ctx.lineTo(12 + bar, H - 14);
+  ctx.stroke();
+  ctx.fillStyle = "#7d8a93";
+  ctx.fillText(`${step} m`, 14, H - 20);
+  ctx.beginPath(); ctx.moveTo(W - 20, 30); ctx.lineTo(W - 20, 12);
+  ctx.stroke();
+  ctx.fillText("N", W - 24, 42);
+
+  // Altitude profile vs time.
+  const p = $("profileCanvas").getContext("2d");
+  p.fillStyle = "#10151b"; p.fillRect(0, 0, W, 130);
+  const alt = cols.altitude_m;
+  const aLo = Math.min(...alt), aHi = Math.max(...alt);
+  const pad = Math.max((aHi - aLo) * 0.15, 5);
+  const AY = a => 118 - 100 * (a - aLo + pad) / (aHi - aLo + 2 * pad);
+  p.strokeStyle = "#6fb3e0"; p.lineWidth = 1.5; p.beginPath();
+  for (let i = 0; i < n; i++) {
+    const x = 34 + (W - 44) * i / (n - 1);
+    if (i === 0) p.moveTo(x, AY(alt[i])); else p.lineTo(x, AY(alt[i]));
+  }
+  p.stroke();
+  p.fillStyle = "#7d8a93"; p.font = "10px ui-monospace, monospace";
+  p.fillText("altitude m (MSL) vs t", 34, 12);
+  p.fillText(aHi.toFixed(0), 2, AY(aHi) + 3);
+  p.fillText(aLo.toFixed(0), 2, AY(aLo) + 3);
+}
+
 
 async function initAeroPanel(runId, run) {
   const side = $("aeroSide");
