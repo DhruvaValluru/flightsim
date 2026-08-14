@@ -1498,6 +1498,33 @@ void FFlightSimScenarioWorld::ApplyStepWrites(
 			DownFps = Card.WindScheduleDownFps[Current];
 		}
 
+		// Log-profile shear (Phase 7 2.1) comes FIRST among the field
+		// contributions: with Phase 9.1 carries_base it REPLACES the base
+		// horizontal wind (the profile IS the wind; adding would double-
+		// count), so it must run before anything that ADDS -- measured
+		// 2026-08-14 (run 4e8b0b79c9e3): with the replacement last, a
+		// dead-centre tornado transit (28 m from the axis) recorded the
+		// vortex UPDRAFT but none of its 50 m/s swirl, because this block
+		// overwrote the tornado's horizontal contribution. The headless
+		// stack superposes fields and was never wrong; order restores the
+		// same composition here.
+		if (bLogProfileReady)
+		{
+			const double LogAglMetres =
+				ReadProperty(TEXT("position/h-agl-ft")) * FeetToMetres;
+			const double SpeedMps = LogProfileSpeedMps(LogAglMetres);
+			if (Card.bLogProfileCarriesBase)
+			{
+				NorthFps = SpeedMps * LogProfileCard.NorthUnit / 0.3048;
+				EastFps = SpeedMps * LogProfileCard.EastUnit / 0.3048;
+			}
+			else
+			{
+				NorthFps += SpeedMps * LogProfileCard.NorthUnit / 0.3048;
+				EastFps += SpeedMps * LogProfileCard.EastUnit / 0.3048;
+			}
+		}
+
 		// Orographic contribution from the aircraft's ACTUAL position this
 		// step -- not a precomputed track, because the whole point is that
 		// the response is emergent. Position maps into the raster's CRS
@@ -1560,28 +1587,8 @@ void FFlightSimScenarioWorld::ApplyStepWrites(
 			DownFps += VortexDownMps / 0.3048;
 		}
 
-		// Log-profile shear (Phase 7 2.1): horizontal wind from the aircraft's
-		// height above ground, the surface-layer law. Phase 9.1 surface
-		// classes set carries_base: the profile IS the horizontal wind (its
-		// reference is the layer top, so at cruise it equals the card's
-		// steady wind) and REPLACES the base -- adding it on top would
-		// double-count. Phase 7 cards stay additive, byte-identical.
-		if (bLogProfileReady)
-		{
-			const double AglMetres =
-				ReadProperty(TEXT("position/h-agl-ft")) * FeetToMetres;
-			const double SpeedMps = LogProfileSpeedMps(AglMetres);
-			if (Card.bLogProfileCarriesBase)
-			{
-				NorthFps = SpeedMps * LogProfileCard.NorthUnit / 0.3048;
-				EastFps = SpeedMps * LogProfileCard.EastUnit / 0.3048;
-			}
-			else
-			{
-				NorthFps += SpeedMps * LogProfileCard.NorthUnit / 0.3048;
-				EastFps += SpeedMps * LogProfileCard.EastUnit / 0.3048;
-			}
-		}
+		// (Log-profile shear applied above, BEFORE the additive fields --
+		// see the ordering note there.)
 
 		// Thermals (Phase 7 2.2): Allen's field at the actual position. The
 		// thermal frame's origin is in the same projected local frame.

@@ -1402,10 +1402,18 @@ class RunManager:
         camera = "chase"
         if (str(spec.weather_event.value) == "tornado"
                 and str(spec.weather_event.detail.get("aim")) == "core"):
-            camera = "tower"
-            run.conditions["camera"] = ("tower (through-the-core "
-                                        "flight; the chase camera "
-                                        "would sit inside the funnel)")
+            # User's standing preference (2026-08-14): the view follows
+            # the aircraft, never a fixed ground tower where the plane is
+            # a dot. Wingman flies abeam-and-behind, so it tracks the
+            # plane INTO the vortex without trailing straight through the
+            # funnel mesh the way the chase camera did (measured: chase
+            # sat inside the funnel and the blank-frame floor refused,
+            # run c33db2c326e0 -- the floor stands; if wingman frames
+            # ever trip it, the render fails loudly, never silently).
+            camera = "wingman"
+            run.conditions["camera"] = ("wingman (follows the aircraft "
+                                        "through the core; chase would "
+                                        "sit inside the funnel)")
         if not self._render(card, frames, scene, mesh, aircraft,
                             telemetry=out / "telemetry.json",
                             look=STORM_LOOK if event_note else None,

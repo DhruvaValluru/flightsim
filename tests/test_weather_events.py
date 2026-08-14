@@ -123,6 +123,22 @@ def test_tornado_run_output_differs_from_plain_run():
 # -- the UE port (source-pinned) -----------------------------------------
 
 
+def test_ue_wind_composition_order_base_before_fields():
+    """The carries_base log profile REPLACES the base horizontal wind, so
+    it must be applied BEFORE the additive position-coupled fields --
+    measured (run 4e8b0b79c9e3): with the replacement last, a dead-centre
+    tornado transit felt the updraft but none of the 50 m/s swirl. The
+    headless stack superposes and was never wrong; this pins the UE Step
+    to the same composition."""
+    text = (BRIDGE / "FlightSimScenarioWorld.cpp").read_text(encoding="utf-8")
+    step = text.split("const bool bComposedWind", 1)[-1]
+    log_profile = step.index("Card.bLogProfileCarriesBase")
+    tornado = step.index("TornadoWindMps(Card")
+    downburst = step.index("Downburst.WindNedMps")
+    assert log_profile < downburst, "log profile must precede the downburst"
+    assert log_profile < tornado, "log profile must precede the tornado"
+
+
 def test_ue_tornado_port_mirrors_the_python_field():
     text = (BRIDGE / "FlightSimScenarioWorld.cpp").read_text(encoding="utf-8")
     body = text.split("FFlightSimScenarioWorld::TornadoWindMps", 1)[-1]
