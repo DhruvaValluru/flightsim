@@ -208,6 +208,13 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
                       f"turbulence composition), tornado (Rankine vortex)")
         )
 
+    # -- cameras: the scene-free half (Camera Phase 1) -----------------
+    # Imported here: core.capture.validate produces THIS module's
+    # Violation type, so a module-scope import would be a cycle.
+    from ..capture.validate import validate_cameras
+
+    report.violations.extend(validate_cameras(spec))
+
     # -- the definitive check: can this actually be trimmed? -----------
     # Skipped when geometry is already impossible, since trimming below ground
     # would fail for a reason that has nothing to do with the aero tables.

@@ -45,6 +45,7 @@ from webapp.runs import (  # noqa: E402
     apply_historical_weather,
     apply_weather_event,
     bake_on_demand,
+    camera_scene_violations,
     coupling_needs_seed,
     derive_seed,
     needs_dynamic_bake,
@@ -319,6 +320,14 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     if clearance_refusal is not None:
         verdict["ok"] = False
         verdict["violations"].append(clearance_refusal)
+    # Scene-coupled camera checks (Camera Phase 1): world-anchored
+    # cameras against the scene raster, its bounds and the modelled
+    # tornado core -- the plan_terrain_flight pattern, refused by name
+    # in the same verdict before any editor time is spent.
+    camera_refusals = camera_scene_violations(spec, pick_scene(spec))
+    if camera_refusals:
+        verdict["ok"] = False
+        verdict["violations"].extend(camera_refusals)
     if not verdict["ok"]:
         return JSONResponse({"refused": "validation", **verdict},
                             status_code=409)

@@ -663,6 +663,107 @@ mutate webapp/runs.py \
     "the thunderstorm composition never moves a stated turbulence word" \
     tests/test_weather_events.py || failures=$((failures+1))
 
+# -- Camera Phase 1 ------------------------------------------------------
+
+mutate core/scenario/spec.py \
+    '        version = data.get("spec_version")
+        if version != SPEC_VERSION:' \
+    '        version = data.get("spec_version")
+        if False:  # MUTATED: old spec versions load anyway' \
+    "a wrong spec_version refuses by name" \
+    tests/test_camera_spec.py tests/test_scenario_spec.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/camera.py \
+    '        if current.source not in (Source.DEFAULT, Source.DERIVED,
+                                  Source.MODEL):' \
+    '        if False:  # MUTATED: stated camera fields silently move' \
+    "a stated camera field is never silently moved" \
+    tests/test_camera_spec.py || failures=$((failures+1))
+
+mutate core/capture/poses.py \
+    '            roll.append(0.0)                       # never inherit roll' \
+    '            roll.append(air_roll[i])  # MUTATED: chase inherits roll' \
+    "only the cockpit preset inherits roll" \
+    tests/test_camera_poses.py || failures=$((failures+1))
+
+mutate core/capture/poses.py \
+    'def _heading_only(heading_deg, forward, right, up):
+    """Rotate an offset in the heading-only frame (yaw applied, pitch
+    and roll DISCARDED -- the §1.5 rule)."""
+    y = math.radians(heading_deg)' \
+    'def _heading_only(heading_deg, forward, right, up):
+    """MUTATED: tilted frame."""
+    heading_deg = heading_deg + 0.0
+    up = up + forward * 0.26  # MUTATED: pitch leaks into the offset
+    y = math.radians(heading_deg)' \
+    "chase offsets live in the heading-only frame" \
+    tests/test_camera_poses.py || failures=$((failures+1))
+
+mutate core/capture/schedule.py \
+    '        if count > n:' \
+    '        if False:  # MUTATED: unreachable counts schedule anyway' \
+    "an unreachable capture count refuses by name" \
+    tests/test_camera_schedule.py || failures=$((failures+1))
+
+mutate core/capture/schedule.py \
+    '    if trigger != "interval" and count > 0 and len(indices) != count:' \
+    '    if False:  # MUTATED: the count contract is not enforced' \
+    "a stated capture count is a contract, not a hint" \
+    tests/test_camera_schedule.py || failures=$((failures+1))
+
+mutate core/capture/schedule.py \
+    '        if last is None or t[i] - last >= refractory:' \
+    '        if True:  # MUTATED: refractory ignored, one capture per sample' \
+    "the refractory period collapses bursts" \
+    tests/test_camera_schedule.py || failures=$((failures+1))
+
+mutate core/capture/validate.py \
+    '    if not 0.0 < focal <= MAX_FOCAL_MM:' \
+    '    if False:  # MUTATED: non-physical lenses pass' \
+    "a non-physical focal length refuses" \
+    tests/test_camera_validate.py || failures=$((failures+1))
+
+mutate core/capture/validate.py \
+    '        if worst is not None and worst < CAMERA_MIN_CLEARANCE_M:
+            out.append(Violation(
+                "camera.terrain_clearance",
+                f"{who}: the solved pose track descends' \
+    '        if False:  # MUTATED: buried track cameras pass
+            out.append(Violation(
+                "camera.terrain_clearance",
+                f"{who}: the solved pose track descends' \
+    "the solved track is clearance-checked against the raster" \
+    tests/test_camera_validate.py || failures=$((failures+1))
+
+mutate core/capture/validate.py \
+    '        if outside:
+            out.append(Violation(
+                "camera.scene_bounds",
+                f"{who}: {outside} of {len(track)} solved poses fall' \
+    '        if False:  # MUTATED: off-raster poses pass
+            out.append(Violation(
+                "camera.scene_bounds",
+                f"{who}: {outside} of {len(track)} solved poses fall' \
+    "poses off the scene raster refuse" \
+    tests/test_camera_validate.py || failures=$((failures+1))
+
+mutate core/capture/validate.py \
+    '        if inside:
+            out.append(Violation(
+                "camera.hazard_intersection",' \
+    '        if False:  # MUTATED: cameras inside the vortex pass
+            out.append(Violation(
+                "camera.hazard_intersection",' \
+    "poses inside the tornado core refuse" \
+    tests/test_camera_validate.py || failures=$((failures+1))
+
+mutate core/scenario/validate.py \
+    '    report.violations.extend(validate_cameras(spec))' \
+    '    pass  # MUTATED: camera checks never reach the verdict' \
+    "camera refusals ride the core validation surface" \
+    tests/test_camera_validate.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

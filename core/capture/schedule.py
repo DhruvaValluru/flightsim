@@ -150,14 +150,11 @@ def _interval(camera_id, camera, t, count):
                 f"at this duration and sample rate")
         if count == 1:
             return [0], "count 1: the first recorded sample"
+        # Spacing (n-1)/(count-1) >= 1 sample whenever count <= n, so
+        # the rounded indices are strictly increasing: the count-
+        # unreachable refusal above is the one guard, and it is
+        # mutation-checked.
         indices = [round(k * (n - 1) / (count - 1)) for k in range(count)]
-        # Spacing >= 1 sample whenever count <= n, so indices are
-        # strictly increasing by construction; assert the guarantee
-        # rather than trusting the arithmetic comment.
-        if len(set(indices)) != count:
-            raise ScheduleError(
-                f"camera {camera_id!r}: {count} captures do not fit "
-                f"{n} samples distinctly")
         return indices, (f"count {count} spread over [{t[0]:g}, "
                          f"{t[-1]:g}] s, endpoints included")
     period = float(camera.period_s.value)

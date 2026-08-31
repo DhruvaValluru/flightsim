@@ -1072,6 +1072,93 @@ def plan_weather_event(spec: ScenarioSpec) -> None:
                       "never moved)")
 
 
+def severe_event_centre(spec: ScenarioSpec, scene: Dict,
+                        seconds: float):
+    """(north_m, east_m) of the severe-weather feature on the track.
+
+    ONE placement for the card blocks, the render flow and the camera
+    hazard check, so they cannot model two different storms: the
+    straight-line 45%-ahead point, replaced on terrain scenes by the
+    same point of the PRE-FLOWN track (the banked S-turn misses the
+    straight line; measured on the Fuji core run -- closest approach
+    ~410 m to a 150 m core). An untrimmable spec keeps the straight
+    line and validate() rules next.
+    """
+    import math as _math
+
+    from core.fdm import units as u2
+
+    ahead = 0.45 * u2.kt_to_mps(float(spec.airspeed.value)) * seconds
+    hdg = _math.radians(float(spec.heading.value))
+    centre_n = ahead * _math.cos(hdg)
+    centre_e = ahead * _math.sin(hdg)
+    if scene.get("terrain"):
+        try:
+            from core.terrain.ground import TerrainGround
+            from core.terrain.heightfield import Heightfield
+
+            ground_ = TerrainGround(
+                Heightfield.read(Path(scene["terrain"])))
+            track_ = _fly_clearance_track(
+                spec, ground_, SHOWCASE_DOUBLET, seconds,
+                orographic=_orographic_provider(spec, scene))
+            point = track_[int(0.45 * (len(track_) - 1))]
+            centre_n = float(point["north_m"])
+            centre_e = float(point["east_m"])
+        except Exception:
+            pass
+    return centre_n, centre_e
+
+
+def tornado_axis(spec: ScenarioSpec, scene: Dict, seconds: float):
+    """(north_m, east_m) of the vortex AXIS: the event centre plus the
+    recorded aim's abeam offset (core = on the track; abeam = the
+    2.5-core-radii flyby)."""
+    import math as _math
+
+    from core.environment.tornado import R_CORE_M
+
+    centre_n, centre_e = severe_event_centre(spec, scene, seconds)
+    hdg = _math.radians(float(spec.heading.value))
+    aim = str(spec.weather_event.detail.get("aim", "abeam"))
+    offset = 0.0 if aim == "core" else 2.5 * R_CORE_M
+    return (centre_n + offset * _math.cos(hdg + _math.pi / 2),
+            centre_e + offset * _math.sin(hdg + _math.pi / 2))
+
+
+def camera_scene_violations(spec: ScenarioSpec, scene: Dict) -> List[Dict]:
+    """Scene-coupled camera refusals for /run, the plan_terrain_flight
+    pattern: computed where the scene raster is known, returned as
+    violation dicts for the verdict. World-anchored cameras (scene or
+    geographic placement, keyframes included) are fixed geometry and
+    are checked against the raster, its bounds and the modelled tornado
+    core BEFORE any editor time; offset cameras ride the aircraft,
+    whose track the flight planners already clear, and their solved
+    tracks are re-checked wherever telemetry exists."""
+    if not spec.cameras:
+        return []
+    from core.capture.poses import SceneFrame
+    from core.capture.validate import static_camera_violations
+    from core.terrain.heightfield import Heightfield
+
+    heightfield = (Heightfield.read(Path(scene["terrain"]))
+                   if scene.get("terrain") else None)
+    frame = SceneFrame.for_spec(spec, heightfield)
+    tornado_block = None
+    if str(spec.weather_event.value) == "tornado":
+        from core.environment.tornado import FADE_TOP_M, R_CORE_M
+
+        seconds = min(float(spec.duration.value), CLIP_SECONDS)
+        axis_n, axis_e = tornado_axis(spec, scene, seconds)
+        tornado_block = {"centre_north_m": axis_n, "centre_east_m": axis_e,
+                         "r_core_m": R_CORE_M, "fade_top_m": FADE_TOP_M}
+    violations = static_camera_violations(spec, heightfield, frame,
+                                          tornado_block)
+    return [{"constraint": v.constraint, "message": v.message,
+             "actual": v.actual, "limit": v.limit, "unit": v.unit}
+            for v in violations]
+
+
 def coupling_needs_seed(spec: ScenarioSpec) -> bool:
     """True when the run is stochastic even with turbulence word "none":
     a terrain scene with wind (lee-rotor) or a surface class with thermals
@@ -1321,58 +1408,27 @@ class RunManager:
         downburst_block = None
         event_note = None
         if event in ("thunderstorm", "tornado"):
-            import math as _math
-
-            from core.fdm import units as u2
-
             seconds_ = min(float(spec.duration.value), CLIP_SECONDS)
-            ahead = (0.45 * u2.kt_to_mps(float(spec.airspeed.value))
-                     * seconds_)
-            hdg = _math.radians(float(spec.heading.value))
-            centre_n = ahead * _math.cos(hdg)
-            centre_e = ahead * _math.sin(hdg)
-            if scene.get("terrain"):
-                # Scripted terrain runs BANK (the S-turn doublet), so the
-                # straight-line 45%-ahead point misses the curved track.
-                # Measured on a 'through the tornado' Fuji run: closest
-                # approach ~410 m to a 150 m core -- peak sampled wind
-                # 18.3 m/s, exactly the 1/r field at that radius. Place
-                # the event on the PRE-FLOWN track instead: same script,
-                # same wind, same orographic field the clearance planner
-                # flies. An untrimmable spec keeps the straight-line
-                # placement and validate() rules next.
-                try:
-                    from core.terrain.ground import TerrainGround
-                    from core.terrain.heightfield import Heightfield
-
-                    ground_ = TerrainGround(
-                        Heightfield.read(Path(scene["terrain"])))
-                    track_ = _fly_clearance_track(
-                        spec, ground_, SHOWCASE_DOUBLET, seconds_,
-                        orographic=_orographic_provider(spec, scene))
-                    point = track_[int(0.45 * (len(track_) - 1))]
-                    centre_n = float(point["north_m"])
-                    centre_e = float(point["east_m"])
-                except Exception:
-                    pass
+            # ONE placement, shared with the /run camera hazard check
+            # (severe_event_centre): straight-line 45% ahead, replaced
+            # on terrain scenes by the same point of the pre-flown
+            # banked track. The tornado branch resolves its axis through
+            # tornado_axis (centre + recorded abeam offset) so the
+            # pre-flight runs once either way.
             ox, oy, declared = _projected_origin(spec, scene)
             scene_crs = scene_crs or declared
             if event == "tornado":
-                from core.environment.tornado import R_CORE_M, TornadoVortex
+                from core.environment.tornado import TornadoVortex
 
-                # Abeam offset: the track clips the core's edge rather
-                # than spearing the axis.
                 # Placement follows the spec's recorded aim: "core" (the
                 # prompt said through/into) puts the axis ON the track --
                 # the camera will cross the funnel mesh and the frames
                 # honestly show the inside of the marker; "abeam" is the
                 # 2.5-core-radii flyby (at 1.2 radii the chase camera
-                # lived inside the mesh, probe-measured).
-                aim = str(spec.weather_event.detail.get("aim", "abeam"))
-                offset = 0.0 if aim == "core" else 2.5 * R_CORE_M
-                vortex = TornadoVortex(
-                    centre_n + offset * _math.cos(hdg + _math.pi / 2),
-                    centre_e + offset * _math.sin(hdg + _math.pi / 2))
+                # lived inside the mesh, probe-measured). tornado_axis
+                # applies the offset; the hazard check uses the same one.
+                vortex = TornadoVortex(*tornado_axis(spec, scene,
+                                                     seconds_))
                 tornado_block = vortex.card_block(ox, oy)
                 event_note = ("tornado: Rankine vortex (EF2-band, v_max "
                               "50 m/s, core 150 m) abeam the track; funnel "
@@ -1382,7 +1438,8 @@ class RunManager:
             else:
                 from core.environment.downburst import Downburst
 
-                burst = Downburst(centre_n, centre_e)
+                burst = Downburst(*severe_event_centre(spec, scene,
+                                                       seconds_))
                 downburst_block = burst.card_block(ox, oy)
                 event_note = ("thunderstorm (documented composition): "
                               "microburst 1000 m core / 12 m/s outflow "
