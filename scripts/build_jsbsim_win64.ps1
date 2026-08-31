@@ -72,8 +72,17 @@ Write-Host "==> building JSBSimForUnreal.sln 1_Release x64 (upstream's own build
 # Upstream names its solution configurations 1_Release / 2_Debug (the digit
 # prefixes order them in the VS dropdown); "Release" is only the project-level
 # name and msbuild rejects it at the solution level (measured: MSB4126).
-& $MsBuild (Join-Path $Src "JSBSimForUnreal.sln") /m /p:Configuration=1_Release /p:Platform=x64 `
-    /p:PlatformToolset=$Toolset /p:WindowsTargetPlatformVersion=10.0
+# JSBSim 1.2.4 is C++17 code (std::optional in FGWinds.h/FGSensor.h) but the
+# vcxproj sets no LanguageStandard, leaving MSVC at its C++14 default
+# (measured: C2039 'optional' is not a member of 'std', C2429 requires
+# /std:c++17). The CL env var prepends options to every cl.exe invocation.
+$env:CL = "/std:c++17"
+try {
+    & $MsBuild (Join-Path $Src "JSBSimForUnreal.sln") /m /p:Configuration=1_Release /p:Platform=x64 `
+        /p:PlatformToolset=$Toolset /p:WindowsTargetPlatformVersion=10.0
+} finally {
+    Remove-Item Env:CL -ErrorAction SilentlyContinue
+}
 if ($LASTEXITCODE -ne 0) { throw "msbuild failed (exit $LASTEXITCODE)" }
 
 # Release x64's OutDir is upstream's own plugin Lib folder; take the two
