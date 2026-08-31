@@ -115,6 +115,18 @@ def test_webapp_refuses_ue_platform_off_mac(monkeypatch):
     from webapp.server import app
 
     monkeypatch.setattr(plat, "ue_available", lambda: False)
+    # About the platform refusal, not the scene or the mesh rule: pin the
+    # flat scene and hold the mesh gate open so the test measures the
+    # same thing on a machine with or without local bakes and models.
+    import webapp.runs as runs_module
+    import webapp.server as server_module
+
+    monkeypatch.setattr(runs_module, "pick_scene",
+                        lambda spec: {"key": "flat", "kind": "flat",
+                                      "terrain": None, "imagery": None,
+                                      "label": "flat (test)"})
+    monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
+                        lambda spec: None)
     spec = compile_prompt("fly the 747 at 3000 m and 250 kt")
     client = TestClient(app)
     reply = client.post("/run", json={"spec": spec.to_dict()})

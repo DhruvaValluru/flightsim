@@ -214,6 +214,49 @@ def _synthetic_location():
     )
 
 
+def test_every_aircraft_config_is_shippable_or_says_why_not():
+    """Section 3.3, enforced on the CONFIGS, not just at convert time.
+
+    Every config either points at a license path that its own fetched
+    source tree can actually contain, or declares license.unavailable
+    with the reason. Measured 2026-08-31: DHC6 named "COPYING" while
+    upstream ships it at "docs/COPYING", so the import died at the guard
+    mid-batch; p51d names a COPYING that exists nowhere in its tree, and
+    now says so instead of failing forever. This test keeps a silently
+    wrong path from coming back, and keeps an unavailable airframe from
+    being quietly "fixed" by pointing at a non-license file.
+    """
+    repo = Path(__file__).resolve().parents[1]
+    configs = sorted((repo / "assets" / "aircraft_config").glob("*.json"))
+    assert configs, "no aircraft configs at all"
+    problems = []
+    for path in configs:
+        config = json.loads(path.read_text(encoding="utf-8"))
+        license_block = config["license"]
+        for required in ("license_name", "repo", "commit"):
+            if not license_block.get(required):
+                problems.append(f"{path.name}: no {required}")
+        if license_block.get("unavailable"):
+            # An unavailable airframe must give a REASON, and must not
+            # also claim a license file that would let it slip through.
+            if len(str(license_block["unavailable"])) < 40:
+                problems.append(f"{path.name}: unavailable without a reason")
+            continue
+        if not license_block.get("file"):
+            problems.append(f"{path.name}: no license file and not marked "
+                            f"unavailable")
+            continue
+        # A fetched source tree is not present on every machine; when it
+        # IS present the path must resolve, which is what caught DHC6.
+        source_dir = (path.parent / config["source_dir"]).resolve()
+        if source_dir.is_dir():
+            if not (source_dir / license_block["file"]).is_file():
+                problems.append(
+                    f"{path.name}: license file {license_block['file']!r} "
+                    f"missing from the fetched source at {source_dir}")
+    assert not problems, "; ".join(problems)
+
+
 def test_glo30_locations_are_well_formed():
     for location in LOCATIONS.values():
         lat_min, lat_max, lon_min, lon_max = location.bbox

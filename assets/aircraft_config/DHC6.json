@@ -9,10 +9,10 @@
   "source_dir": "../aircraft_src/dhc6",
   "license": {
     "license_name": "GPL-2.0",
-    "file": "COPYING",
+    "file": "docs/COPYING",
     "repo": "https://github.com/FGMEMBERS/dhc6",
     "commit": "ed826b950acfe9aed737808f24ddb26a4f9a8c78",
-    "authors_file": "README.md"
+    "authors_file": "docs/README.txt"
   },
   "parts": [
     {
