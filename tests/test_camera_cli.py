@@ -75,3 +75,36 @@ def test_refusal_example_refuses_by_name(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "camera.terrain_clearance" in out
     assert not (tmp_path / "refused" / "capture_manifest.json").exists()
+
+
+def test_card_carries_the_solved_pose_tracks(tmp_path):
+    """python -m flightsim.capture --card: the run card's cameras block
+    is the pose solver's own output, verbatim (the consume-verbatim
+    contract's producing half)."""
+    out = tmp_path / "carded"
+    assert capture_main([str(EXAMPLES / "cameras_multi.yaml"),
+                         "--out", str(out), "--max-previews", "0",
+                         "--card"]) == 0
+    card = json.loads((out / "card.json").read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (out / "capture_manifest.json").read_text(encoding="utf-8"))
+    assert card["spec_digest"] == manifest["spec_digest"]
+    assert len(card["cameras"]) == 2
+    block = card["cameras"][0]
+    assert block["camera_id"] == "chase0"
+    poses = block["poses"]
+    n = len(poses["t_s"])
+    assert n == manifest["frames"][0]["sample_index"] + len(
+        json.loads((out / "telemetry.json").read_text(
+            encoding="utf-8"))["columns"]["t"]) - manifest["frames"][0][
+                "sample_index"]
+    for key in ("north_m", "east_m", "alt_m", "yaw_deg", "pitch_deg",
+                "roll_deg", "focal_length_mm"):
+        assert len(poses[key]) == n
+    # Strictly increasing times: the commandlet refuses anything else.
+    assert all(b > a for a, b in zip(poses["t_s"], poses["t_s"][1:]))
+    # The capture times are the schedule's, sample-aligned.
+    assert len(block["capture_times_s"]) == 24
+    assert block["origin_x_m"] == manifest["frame"]["origin_x_m"]
+    # Flat scene: the card declares the projected frame.
+    assert card["scene_crs"] == manifest["frame"]["crs"]

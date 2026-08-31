@@ -86,6 +86,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--max-previews", type=int, default=None,
                         help="cap preview images per run (default: one "
                              "per scheduled frame)")
+    parser.add_argument("--card", action="store_true",
+                        help="also write card.json carrying each camera's "
+                             "solved pose track, for the UE commandlet's "
+                             "consume-poses mode on a render-capable "
+                             "machine (-camera-index=N, one pass per "
+                             "camera)")
     args = parser.parse_args(argv)
 
     from core.capture.manifest import (
@@ -175,6 +181,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "output_digest": result.output_digest,
         "samples": len(result.telemetry),
     }, indent=1), encoding="utf-8")
+
+    if args.card:
+        # The run-card projection with the cameras block: spec fields +
+        # solved pose tracks, computed HERE, consumed verbatim by the
+        # commandlet's consume-poses mode. The commandlet's own named
+        # refusals still govern anything it cannot honour (hold_state,
+        # airspeed_kind, a track that does not cover the run).
+        from core.scenario.card import write_run_card
+
+        write_run_card(
+            spec, out / "card.json",
+            cameras=[track.card_block(camera, schedule, frame)
+                     for camera, track, schedule
+                     in zip(cameras, tracks, schedules)],
+            scene_crs=frame.crs if frame.declared else None)
+        print(f"  card:     {out / 'card.json'} (consume-poses; one "
+              f"commandlet pass per camera via -camera-index=N)")
 
     previews = render_previews(manifest, out, heightfield=heightfield,
                                scene_frame=frame,

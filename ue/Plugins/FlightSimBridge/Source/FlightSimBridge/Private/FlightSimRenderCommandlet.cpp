@@ -21,9 +21,11 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "ImageUtils.h"
+#include "GeoReferencingSystem.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
 #include "AssetCompilingManager.h"
 #include "RenderingThread.h"
 #include "Serialization/JsonSerializer.h"
@@ -660,6 +662,119 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Director->SetActorLocationAndRotation(Station, Look.Quaternion());
 	}
 
+	// -- consume-poses mode (Camera Phase 1) -------------------------------
+	// A card carrying a "cameras" block was solved in Python
+	// (core/capture/poses.py): per-sample positions in local scene metres
+	// about the block's own projected origin, aerospace yaw/pitch/roll.
+	// This pass consumes ONE camera's track verbatim (-camera-index=N; the
+	// harness runs one invocation per camera, each with its own -frames=
+	// directory); the presets above keep flying cards without the block,
+	// byte-identically. Conversion here is the plugin's own established
+	// mapping: ProjectedToEngine for position, actor yaw = true heading
+	// - 90 (the aircraft placement convention), pitch/roll as-is.
+	bool bConsumePoses = false;
+	int32 ConsumedCameraIndex = 0;
+	double CameraOriginXMetres = 0.0;
+	double CameraOriginYMetres = 0.0;
+	{
+		FParse::Value(*Params, TEXT("camera-index="), ConsumedCameraIndex);
+		FString CardText;
+		TSharedPtr<FJsonObject> CardRoot;
+		if (FFileHelper::LoadFileToString(CardText, *ScenarioPath))
+		{
+			const TSharedRef<TJsonReader<>> CardReader =
+				TJsonReaderFactory<>::Create(CardText);
+			FJsonSerializer::Deserialize(CardReader, CardRoot);
+		}
+		const TArray<TSharedPtr<FJsonValue>>* CamerasJson = nullptr;
+		if (CardRoot.IsValid() &&
+		    CardRoot->TryGetArrayField(TEXT("cameras"), CamerasJson) &&
+		    CamerasJson != nullptr && CamerasJson->Num() > 0)
+		{
+			if (!CamerasJson->IsValidIndex(ConsumedCameraIndex))
+			{
+				return Fail(FString::Printf(
+					TEXT("-camera-index=%d but the card carries %d camera(s)"),
+					ConsumedCameraIndex, CamerasJson->Num()));
+			}
+			const TSharedPtr<FJsonObject> CameraJson =
+				(*CamerasJson)[ConsumedCameraIndex]->AsObject();
+			const TSharedPtr<FJsonObject>* PosesJson = nullptr;
+			if (!CameraJson.IsValid() ||
+			    !CameraJson->TryGetNumberField(TEXT("origin_x_m"), CameraOriginXMetres) ||
+			    !CameraJson->TryGetNumberField(TEXT("origin_y_m"), CameraOriginYMetres) ||
+			    !CameraJson->TryGetObjectField(TEXT("poses"), PosesJson))
+			{
+				return Fail(TEXT("cameras block is missing origin_x_m/"
+				                 "origin_y_m/poses; refusing to guess the frame"));
+			}
+			const TArray<TSharedPtr<FJsonValue>>* Times = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Norths = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Easts = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Alts = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Yaws = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Pitches = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Rolls = nullptr;
+			if (!(*PosesJson)->TryGetArrayField(TEXT("t_s"), Times) ||
+			    !(*PosesJson)->TryGetArrayField(TEXT("north_m"), Norths) ||
+			    !(*PosesJson)->TryGetArrayField(TEXT("east_m"), Easts) ||
+			    !(*PosesJson)->TryGetArrayField(TEXT("alt_m"), Alts) ||
+			    !(*PosesJson)->TryGetArrayField(TEXT("yaw_deg"), Yaws) ||
+			    !(*PosesJson)->TryGetArrayField(TEXT("pitch_deg"), Pitches) ||
+			    !(*PosesJson)->TryGetArrayField(TEXT("roll_deg"), Rolls))
+			{
+				return Fail(TEXT("camera pose track is missing one of "
+				                 "t_s/north_m/east_m/alt_m/yaw_deg/pitch_deg/"
+				                 "roll_deg"));
+			}
+			const int32 Count = Times->Num();
+			if (Norths->Num() != Count || Easts->Num() != Count ||
+			    Alts->Num() != Count || Yaws->Num() != Count ||
+			    Pitches->Num() != Count || Rolls->Num() != Count)
+			{
+				return Fail(TEXT("camera pose track arrays disagree about "
+				                 "their length; refusing a misaligned track"));
+			}
+			TArray<double> TrackTimes;
+			TArray<FVector> TrackLocations;
+			TArray<FRotator> TrackRotations;
+			TrackTimes.Reserve(Count);
+			TrackLocations.Reserve(Count);
+			TrackRotations.Reserve(Count);
+			for (int32 i = 0; i < Count; ++i)
+			{
+				TrackTimes.Add((*Times)[i]->AsNumber());
+				const FVector Projected(
+					CameraOriginXMetres + (*Easts)[i]->AsNumber(),
+					CameraOriginYMetres + (*Norths)[i]->AsNumber(),
+					(*Alts)[i]->AsNumber());
+				FVector Engine;
+				Scenario.GeoReferencing->ProjectedToEngine(Projected, Engine);
+				TrackLocations.Add(Engine);
+				TrackRotations.Add(FRotator(
+					(*Pitches)[i]->AsNumber(),
+					(*Yaws)[i]->AsNumber() - 90.0,
+					(*Rolls)[i]->AsNumber()));
+			}
+			if (!Director->SetPoseTrack(MoveTemp(TrackTimes),
+			                            MoveTemp(TrackLocations),
+			                            MoveTemp(TrackRotations), Error))
+			{
+				return Fail(Error);
+			}
+			bConsumePoses = true;
+			UE_LOG(LogFlightSimRender, Display,
+			       TEXT("consume-poses: camera %d of %d, %d solved samples"),
+			       ConsumedCameraIndex, CamerasJson->Num(), Count);
+			// Place the camera at its first solved pose before the warm-up
+			// captures, replacing the chase settle-in placement above.
+			if (!Director->ApplyPoseAtTime(0.0, Error))
+			{
+				return Fail(Error);
+			}
+		}
+	}
+
 	UTextureRenderTarget2D* RenderTarget = NewObject<UTextureRenderTarget2D>();
 	RenderTarget->RenderTargetFormat = RTF_RGBA8_SRGB;
 	RenderTarget->ClearColor = FLinearColor::Black;
@@ -1061,6 +1176,20 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			VisualScene.Sun->SetActorRotation(FRotator(-Elev, Azim + 180.0, 0.0));
 		}
 
+		// Consume-poses: drive the camera by SIMULATION time before the
+		// render-state flush, so the capture sees the solved pose for this
+		// exact frame. A track that does not cover the run fails loudly
+		// here (never extrapolated), as does any applied-vs-solved drift.
+		if (bConsumePoses)
+		{
+			if (!Director->ApplyPoseAtTime(
+				Scenario.ReadProperty(TEXT("simulation/sim-time-sec")),
+				Error))
+			{
+				return Fail(Error);
+			}
+		}
+
 		// Component render-state updates are queued and flushed at end of
 		// frame. A hand-driven loop has to flush them itself, or the capture
 		// sees the scene from before the aircraft and its surfaces moved.
@@ -1107,6 +1236,33 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		                       Scenario.ReadProperty(TEXT("attitude/theta-rad")) * RenderRadiansToDegrees);
 		Record->SetNumberField(TEXT("aileron_cmd"), Scenario.Movement->Commands.Aileron);
 		Record->SetNumberField(TEXT("camera_roll_deg"), Director->GetCameraRollDegrees());
+		if (bConsumePoses)
+		{
+			// Additive Camera Phase 1 fields (ASCII only -- gotcha 13; the
+			// camera's id string stays in the Python-written manifest): the
+			// pose ACTUALLY APPLIED, expressed back in the card's own local
+			// frame so the Python verifier grades applied-vs-solved without
+			// knowing engine units. The inverse of the placement mapping
+			// above: EngineToProjected, then true heading = engine yaw + 90.
+			FVector AppliedProjected;
+			Scenario.GeoReferencing->EngineToProjected(
+				Director->GetActorLocation(), AppliedProjected);
+			const FRotator AppliedRotation = Director->GetActorRotation();
+			Record->SetNumberField(TEXT("camera_index"),
+			                       static_cast<double>(ConsumedCameraIndex));
+			Record->SetNumberField(TEXT("camera_applied_north_m"),
+			                       AppliedProjected.Y - CameraOriginYMetres);
+			Record->SetNumberField(TEXT("camera_applied_east_m"),
+			                       AppliedProjected.X - CameraOriginXMetres);
+			Record->SetNumberField(TEXT("camera_applied_alt_m"),
+			                       AppliedProjected.Z);
+			Record->SetNumberField(TEXT("camera_applied_yaw_deg"),
+			                       FMath::Fmod(AppliedRotation.Yaw + 90.0 + 360.0, 360.0));
+			Record->SetNumberField(TEXT("camera_applied_pitch_deg"),
+			                       AppliedRotation.Pitch);
+			Record->SetNumberField(TEXT("camera_applied_roll_deg"),
+			                       AppliedRotation.Roll);
+		}
 		Record->SetNumberField(TEXT("lit_pixels"), Lit);
 		// Load factor and the wind actually inside the FDM this frame -- the
 		// null tests (turbulence reached the FDM; the ridge's wind reached
@@ -1253,6 +1409,15 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	Root->SetObjectField(TEXT("surface_peak_deg"), Peaks);
 	Root->SetStringField(TEXT("camera_preset"), TEXT("LaggedChase"));
 	Root->SetBoolField(TEXT("camera_keeps_horizon_level"), Director->PresetKeepsHorizonLevel());
+	// Camera Phase 1, additive: which solved camera this pass consumed
+	// (numbers only -- gotcha 13; camera id strings live in the
+	// Python-written capture manifest).
+	Root->SetBoolField(TEXT("camera_consume_poses"), bConsumePoses);
+	if (bConsumePoses)
+	{
+		Root->SetNumberField(TEXT("camera_index"),
+		                     static_cast<double>(ConsumedCameraIndex));
+	}
 	TSharedPtr<FJsonObject> Scene = MakeShared<FJsonObject>();
 	Scene->SetBoolField(TEXT("visual"), bVisual);
 	Scene->SetStringField(TEXT("shot"), Shot);

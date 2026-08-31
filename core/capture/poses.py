@@ -323,6 +323,43 @@ class PoseTrack:
                 h.update(repr(value).encode())
         return h.hexdigest()
 
+    def card_block(self, camera: CameraSpec, schedule,
+                   frame: "SceneFrame") -> Dict[str, object]:
+        """The run card's ``cameras[]`` entry: spec fields AND the
+        solved per-sample pose track, computed here and consumed
+        VERBATIM by the render host's consume-poses mode (the wind-
+        schedule discipline applied to cameras). Positions ride as
+        local north/east about the same projected origin every
+        position-coupled block uses; orientation as aerospace
+        yaw/pitch/roll degrees. The host derives nothing and refuses a
+        track that does not cover the run.
+        """
+        return {
+            "camera_id": self.camera_id,
+            "preset": self.preset,
+            "horizon_stable": self.horizon_stable,
+            "origin_x_m": frame.origin_x_m,
+            "origin_y_m": frame.origin_y_m,
+            "width_px": self.width_px,
+            "height_px": self.height_px,
+            "sensor_width_mm": self.sensor_width_mm,
+            "sensor_height_mm": self.sensor_height_mm,
+            "near_m": self.near_m,
+            "far_m": self.far_m,
+            "spec": camera.to_dict(),
+            "poses": {
+                "t_s": list(self.t),
+                "north_m": list(self.north_m),
+                "east_m": list(self.east_m),
+                "alt_m": list(self.alt_m),
+                "yaw_deg": list(self.yaw_deg),
+                "pitch_deg": list(self.pitch_deg),
+                "roll_deg": list(self.roll_deg),
+                "focal_length_mm": list(self.focal_length_mm),
+            },
+            "capture_times_s": list(schedule.times),
+        }
+
     def sample(self, index: int) -> Dict[str, object]:
         """One pose as the manifest's per-frame mapping."""
         return {

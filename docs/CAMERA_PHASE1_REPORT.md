@@ -113,18 +113,33 @@ named `ue.platform` refusal. The engine-consumption half (package G) is
 **additive and deliberately thin on this branch**:
 
 * `write_run_card` accepts an optional `cameras` block (spec fields +
-  solved per-sample pose tracks at the card's `SAMPLE_INTERVAL_S`),
-  computed in Python, consumed verbatim.
-* The C++ consume-poses mode (`FlightSimCameraDirector` interpolating
-  the card's track; per-camera render passes; solved-vs-applied pose
-  parity that FAILS LOUDLY beyond tolerance; ASCII-only additive
-  `render.json` fields — gotcha 13) **could not be compiled or run in
-  this environment** (no macOS, no engine). The verification step for a
-  macOS session: build via `scripts/build_ue.sh`, render
-  `examples/cameras_multi.yaml` through the webapp flow, and check the
-  commandlet's applied-vs-solved parity plus the aircraft projecting
-  into each frame within the manifest's tolerance (the reprojection
-  machinery in `core/capture/verify.py` is ready to grade it).
+  solved per-sample pose tracks + capture times + the projected
+  origin), computed in Python, consumed verbatim.
+  `python -m flightsim.capture ... --card` writes it
+  (`PoseTrack.card_block`), so an off-mac machine produces everything a
+  render-capable one consumes.
+* The C++ consume-poses mode is implemented additively and mirrors the
+  existing card-block style: `FlightSimCameraDirector::SetPoseTrack` /
+  `ApplyPoseAtTime` interpolates the card's track (linear position,
+  slerp rotation), REFUSES a track that does not cover the run (never
+  extrapolates), and fails loudly when the applied pose differs from
+  the solved one beyond 10 cm; the render commandlet reads the card's
+  `cameras` block itself (`-camera-index=N`, one invocation per camera
+  with its own `-frames=` directory), places poses through the
+  plugin's own `ProjectedToEngine` + yaw−90 mapping, and adds
+  ASCII-only applied-pose fields to `render.json` (gotcha 13). Preset
+  cards without the block fly byte-identically.
+* **These C++ changes could not be compiled or run in this
+  environment** (no macOS, no engine; `scripts/check_bridge_api.sh`
+  output is unchanged by them, engine-absent failures aside). The
+  verification step for a macOS session: build via
+  `scripts/build_ue.sh`, run
+  `python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo --card`,
+  render `runs/demo/card.json` once per camera with `-camera-index=N`,
+  and grade the frames against `capture_manifest.json`: the
+  commandlet's own applied-vs-solved parity must stay silent, and the
+  aircraft must project into each frame where
+  `core/capture/verify.py`'s reprojection says it should.
 
 ## Known limitations
 

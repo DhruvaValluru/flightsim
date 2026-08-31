@@ -3,6 +3,26 @@
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
 
+**Camera Phase 1 (2026-08-31 -- docs/CAMERA_PHASE1_REPORT.md is the
+full report).** The camera is a spec element now: SPEC_VERSION 6,
+cameras as provenanced CameraSpec blocks (core/scenario/camera.py),
+digest-relevant, editable in the review table, addressable via
+set()/plan() as cameras[0].<field>; an EMPTY list drives the render
+flow byte-identically to the preset build (pinned by test). New
+core/capture/ package: deterministic pose solver (five UE presets
+ported; only cockpit inherits roll), telemetry-only capture scheduling
+(exact counts are contracts), camera.* refusals on the Violation
+surface (scene-free in validate(), scene-coupled in /run and the CLI),
+capture_manifest.json with full per-frame recoverable geometry, and an
+independent verifier whose every check is shown to fail on corruption.
+CLI: python -m flightsim.capture / flightsim.verify (examples/
+*.yaml). MUST-VERIFY ON A MAC: the additive consume-poses C++
+(CameraDirector SetPoseTrack/ApplyPoseAtTime + commandlet
+-camera-index= pass reading the card's cameras block, written by
+capture --card) compiles logically but was never built or rendered --
+the report's engine-boundary section carries the exact verification
+steps. Suite 558 tests collected, 107 mutation guards.
+
 **Scene director + cross-platform (2026-08-13, two commits -- the full
 narrative is docs/CONTEXT_SCENE_DIRECTOR_SESSION.md).** The LLM now
 fills EVERY field it can justify under the new provenance source
