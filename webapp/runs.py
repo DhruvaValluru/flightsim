@@ -37,6 +37,9 @@ import sys
 
 sys.path.insert(0, str(REPO))
 
+from core.scenario.camera import (  # noqa: E402
+    CHASE_OFFSETS, CameraSpec, default_cameras,
+)
 from core.scenario.card import write_run_card  # noqa: E402
 from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import MIN_CLEARANCE_M  # noqa: E402
@@ -278,9 +281,57 @@ PLANNED_CLEARANCE_M = 300.0
 #: line (1.05 x) and Vref, and the definitive trim probe still runs after.
 PLANNED_SPEED_MARGIN = 1.25
 #: Webapp chase offsets, TIGHTER than the showcase's (user preference
-#: 2026-08-14: the view stays close to the aircraft). behind:right:up
-#: metres; the showcase matrix keeps its own measured framing.
-WEBAPP_CHASE = {"B747": "-110:0:12", "A320": "-95:0:10", "c172p": "-28:0:4"}
+#: 2026-08-14: the view stays close to the aircraft). forward:right:up
+#: metres; the showcase matrix keeps its own measured framing. The
+#: table itself now lives on the camera spec (core.scenario.camera.
+#: CHASE_OFFSETS) so the spec's default cameras and this flag cannot
+#: drift apart; this is the same numbers in the flag's own spelling.
+WEBAPP_CHASE = {aircraft: f"{f:g}:{r:g}:{u:g}"
+                for aircraft, (f, r, u) in CHASE_OFFSETS.items()}
+#: Spec camera preset -> the commandlet's -camera= word. "ground" and
+#: "explicit" have no render-preset pass in the current commandlet
+#: (package G consumes solved pose tracks); they refuse by name rather
+#: than approximating with the nearest-looking preset.
+COMMANDLET_CAMERA_WORDS = {"chase": "chase", "wingman": "wingman",
+                           "tower": "tower", "cockpit": "shoulder"}
+
+
+def camera_render_flags(spec: ScenarioSpec):
+    """(inline_flags, trailing_flags) for the render command, from the
+    spec's OWN cameras -- default_cameras(spec) when none are stated.
+
+    A camera-less spec must drive the commandlet with BYTE-IDENTICAL
+    arguments to the pre-camera build (pinned by test): the -chase=
+    triple always carries the airframe's chase offset (the commandlet
+    uses ChaseOffsetMetres for the initial placement of EVERY preset,
+    so changing it for a wingman camera would change the settle-in
+    frames), the -camera= word maps through COMMANDLET_CAMERA_WORDS,
+    and a wingman camera carries its abeam distance.
+    """
+    cameras = spec.cameras or default_cameras(spec)
+    camera = cameras[0]
+    preset = str(camera.preset.value)
+    word = COMMANDLET_CAMERA_WORDS.get(preset)
+    if word is None:
+        raise ValueError(
+            f"camera.preset: the render commandlet has no {preset!r} "
+            f"pass; this preset renders through the solved pose track "
+            f"(engine consumption not wired in this build)")
+    aircraft = str(spec.aircraft.value)
+    if preset == "chase":
+        chase = (f"{float(camera.offset_forward_m.value):g}:"
+                 f"{float(camera.offset_right_m.value):g}:"
+                 f"{float(camera.offset_up_m.value):g}")
+    else:
+        chase = WEBAPP_CHASE.get(aircraft, "-110:0:12")
+    inline = [f"-chase={chase}", f"-camera={word}"]
+    trailing = []
+    if word == "wingman":
+        trailing.append(
+            f"-wingman-abeam={float(camera.offset_right_m.value):g}")
+    return inline, trailing
+
+
 #: Sources the planners may move: the system's own choices. "default"
 #: (nobody said it), "model" (the scene director's declared guess) and
 #: "derived" (an earlier planner). NEVER "user" or "inferred" -- those are
@@ -1132,24 +1183,29 @@ class RunManager:
     def _render(card: Path, frames: Path, scene: Dict, mesh: Path,
                 aircraft: str, telemetry: Optional[Path] = None,
                 look: Optional[Dict] = None,
-                camera: str = "chase") -> bool:
+                camera_flags=None) -> bool:
         """The showcase render command, with terrain/imagery conditional.
 
         Same flags render_cell passes (gotcha 1: absolute paths, -stdout,
         -RenderOffScreen, -AllowCommandletRendering); the terrain, imagery
         and mesh arguments appear only when the scene earned them, so a flat
         spec renders the labeled slab rather than failing on an empty path.
+        The camera flags come from the SPEC's cameras via
+        camera_render_flags (default cameras when none stated -- pinned
+        byte-identical to the old hardcoded selection).
         """
         project = REPO / "ue" / "FlightSim.uproject"
         frames.mkdir(parents=True, exist_ok=True)
         (frames / "render.json").unlink(missing_ok=True)
         tod = look or TIME_OF_DAY["noon"]
+        inline, trailing = camera_flags or (
+            [f"-chase={WEBAPP_CHASE.get(aircraft, '-110:0:12')}",
+             "-camera=chase"], [])
         command = [
             str(EDITOR), str(project), "-run=FlightSimBridge.FlightSimRender",
             f"-scenario={card}", f"-frames={frames}",
             "-Visual", "-shot=showcase",
-            f"-chase={WEBAPP_CHASE.get(aircraft, '-110:0:12')}",
-            f"-camera={camera}",
+            *inline,
             f"-fps={FPS}", f"-width={WIDTH}", f"-height={HEIGHT}",
             f"-sun-elev={tod['sun_elev']}", f"-sun-azim={tod['sun_azim']}",
             f"-exposure-bias={tod['exposure_bias']}",
@@ -1158,12 +1214,7 @@ class RunManager:
             "-stdout", "-FullStdOutLogOutput",
             "-RenderOffScreen", "-AllowCommandletRendering",
         ]
-        if camera == "wingman":
-            # Formation slot outside the vortex: the default 25 m sat
-            # INSIDE the funnel (measured: 2 blank frames, floor
-            # refused); 180 m clears the 150 m core while keeping the
-            # aircraft large in frame (user: closer, always).
-            command += ["-wingman-abeam=180"]
+        command += list(trailing)
         if scene.get("terrain"):
             command += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
         if scene.get("imagery"):
@@ -1417,29 +1468,22 @@ class RunManager:
 
         run.push("rendering", "editor is rendering frames (a few minutes)")
         frames = out / "frames"
-                # A through-the-core tornado flight is watched from the tower:
-        # the chase camera would spend seconds INSIDE the funnel mesh
-        # and the blank-frame floor (correctly, never weakened) refused
-        # those frames -- measured on run c33db2c326e0.
-        camera = "chase"
-        if (str(spec.weather_event.value) == "tornado"
-                and str(spec.weather_event.detail.get("aim")) == "core"):
-            # User's standing preference (2026-08-14): the view follows
-            # the aircraft, never a fixed ground tower where the plane is
-            # a dot. Wingman flies abeam-and-behind, so it tracks the
-            # plane INTO the vortex without trailing straight through the
-            # funnel mesh the way the chase camera did (measured: chase
-            # sat inside the funnel and the blank-frame floor refused,
-            # run c33db2c326e0 -- the floor stands; if wingman frames
-            # ever trip it, the render fails loudly, never silently).
-            camera = "wingman"
+        # The camera comes from the SPEC now (Camera Phase 1): stated
+        # cameras verbatim, default_cameras otherwise -- which carries
+        # the measured through-the-core tornado rule (wingman follows
+        # the aircraft into the vortex; the chase camera sat INSIDE the
+        # funnel mesh and the blank-frame floor refused, run
+        # c33db2c326e0 -- the floor stands, never weakened).
+        camera_flags = camera_render_flags(spec)
+        flown = spec.cameras or default_cameras(spec)
+        if str(flown[0].preset.value) == "wingman":
             run.conditions["camera"] = ("wingman (follows the aircraft "
                                         "through the core; chase would "
                                         "sit inside the funnel)")
         if not self._render(card, frames, scene, mesh, aircraft,
                             telemetry=out / "telemetry.json",
                             look=STORM_LOOK if event_note else None,
-                            camera=camera):
+                            camera_flags=camera_flags):
             run.push("failed", "the render commandlet wrote no manifest; "
                                f"see {out / 'render.log'}")
             return

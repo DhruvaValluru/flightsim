@@ -95,9 +95,25 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
             "source": str(quantity.source), "from": quantity.frm,
             "std": quantity.std, "detail": quantity.detail,
         })
+    # Cameras render as their own labeled blocks with per-field sources,
+    # editable exactly like the scalar rows (the page writes edits into
+    # dict.cameras[i] and /run re-parses the whole spec).
+    cameras = []
+    for index, camera in enumerate(spec.cameras):
+        cameras.append({
+            "index": index,
+            "camera_id": str(camera.camera_id.value),
+            "fields": [{
+                "name": name, "value": quantity.value,
+                "unit": quantity.unit, "source": str(quantity.source),
+                "from": quantity.frm, "std": quantity.std,
+                "detail": quantity.detail,
+            } for name, quantity in camera.quantities()],
+            "moves": [dict(m) for m in camera.moves],
+        })
     return {"digest": spec.digest(), "name": spec.name,
             "prompt": spec.prompt, "notes": spec.notes,
-            "fields": fields, "dict": spec.to_dict(),
+            "fields": fields, "cameras": cameras, "dict": spec.to_dict(),
             "table": spec.render_table()}
 
 

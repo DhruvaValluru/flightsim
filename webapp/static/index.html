@@ -231,6 +231,28 @@ function renderSpec(payload) {
       `${f.std ? " &mdash; " + f.std : ""}</td>`;
     body.appendChild(row);
   }
+  // Camera blocks (Camera Phase 1): each camera is a labeled block of
+  // provenanced, editable rows, exactly like the scalar fields above.
+  for (const cam of (spec.cameras || [])) {
+    const head = document.createElement("tr");
+    head.innerHTML = `<td colspan="4"><b>camera[${cam.index}] ` +
+      `${cam.camera_id}</b></td>`;
+    body.appendChild(head);
+    for (const f of cam.fields) {
+      const row = document.createElement("tr");
+      const key = `cameras[${cam.index}].${f.name}`;
+      row.innerHTML =
+        `<td>&nbsp;&nbsp;${f.name}</td>` +
+        `<td><input data-name="${key}" data-camera="${cam.index}" ` +
+        `data-field="${f.name}" value="${f.value}">` +
+        `${f.unit ? " " + f.unit : ""}</td>` +
+        `<td class="${sourceClass(f.source)}" data-src="${key}">` +
+        `${f.source}</td>` +
+        `<td class="dim">${provenanceNote(f)}` +
+        `${f.std ? " &mdash; " + f.std : ""}</td>`;
+      body.appendChild(row);
+    }
+  }
   // Director's-notes legend: what each source means, in one line.
   $("srcLegend").innerHTML =
     `<span class="src-user">user</span> you said it &middot; ` +
@@ -276,8 +298,11 @@ function editedSpecDict() {
   const sections = {};
   for (const f of compiled.spec.fields) sections[f.name] = f.section;
   document.querySelectorAll("#specTable input").forEach(input => {
-    const name = input.dataset.name, section = sections[name];
-    const entry = dict[section][name];
+    const name = input.dataset.name;
+    // Camera rows edit dict.cameras[i][field]; same source rule.
+    const entry = input.dataset.camera !== undefined
+      ? dict.cameras[+input.dataset.camera][input.dataset.field]
+      : dict[sections[name]][name];
     const parsed = parseFloat(input.value);
     const value = Number.isNaN(parsed) ? input.value : parsed;
     if (String(entry.value) !== String(value)) {
