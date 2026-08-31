@@ -68,11 +68,23 @@ if ($vendored.commit -ne $commit) {
 # them; it maps to the project's Release|x64) -- plain "Release" fails
 # with MSB4126.
 Write-Host "==> building JSBSimForUnreal.sln (1_Release x64, v143 toolset)"
+$errLog = Join-Path $work "msbuild-errors.log"
+Remove-Item $errLog -ErrorAction SilentlyContinue
 & $msbuild (Join-Path $src "JSBSimForUnreal.sln") `
     /p:Configuration=1_Release /p:Platform=x64 `
     /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 `
-    /m /v:minimal
-if ($LASTEXITCODE -ne 0) { throw "MSBuild failed ($LASTEXITCODE)" }
+    /m /v:minimal "/flp:logfile=$errLog;errorsonly"
+if ($LASTEXITCODE -ne 0) {
+    # The compile errors scroll off screen in a long build; restate them
+    # so the failure is readable where the throw lands.
+    if ((Test-Path $errLog) -and (Get-Item $errLog).Length -gt 0) {
+        Write-Host ""
+        Write-Host "--- MSBuild errors ($errLog) ---"
+        Get-Content $errLog | Write-Host
+        Write-Host "---"
+    }
+    throw "MSBuild failed ($LASTEXITCODE) -- the errors are restated above"
+}
 
 $builtLib = Join-Path $src "UnrealEngine\Plugins\JSBSimFlightDynamicsModel\Source\ThirdParty\JSBSim\Lib"
 foreach ($f in "JSBSim.dll", "JSBSim.lib") {
