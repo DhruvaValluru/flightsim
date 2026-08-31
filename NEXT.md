@@ -21,7 +21,16 @@ CLI: python -m flightsim.capture / flightsim.verify (examples/
 -camera-index= pass reading the card's cameras block, written by
 capture --card) compiles logically but was never built or rendered --
 the report's engine-boundary section carries the exact verification
-steps. Suite 558 tests collected, 107 mutation guards.
+steps. Suite 558 tests collected, 108 mutation guards. Measured on a
+raster-less clone (no runs/terrain bakes): 104 guards fire; the FOUR
+terrain-coupled planner guards (ridge-axis wind, rotor card word,
+span-station clearance minimum, orographic pre-flight) report WEAK
+there because their test_webapp tests silently take the flat path
+without a baked raster -- bisected to the pre-camera base commit, so
+it is an environment artifact of guard MEASUREMENT, not a regression;
+they fire on a machine with the bakes. Worth fixing by giving those
+tests a synthetic raster fixture (the camera tests' make_mountain
+pattern) so every guard is machine-independent.
 
 **Scene director + cross-platform (2026-08-13, two commits -- the full
 narrative is docs/CONTEXT_SCENE_DIRECTOR_SESSION.md).** The LLM now
