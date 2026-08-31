@@ -63,14 +63,18 @@ One codebase, platform dispatch inside it (`core/util/platform.py`):
 | Prompt → LLM compile → spec → validate | ✓ | ✓ | ✓ |
 | Headless JSBSim physics + telemetry | ✓ | ✓ | ✓ |
 | Web app on localhost:8008, terrain baking, effect reports | ✓ | ✓ | ✓ |
-| Rendered video clips (Unreal Engine host) | ✓ | refused by name | refused by name |
+| Rendered video clips (Unreal Engine host) | ✓ | refused by name | ✓ (setup: `docs/WINDOWS.md`) |
 
 Everything in the first three rows is pure Python and is exercised by CI
-on all three OSes. The UE render half currently requires macOS -- every
-render calibration was measured on Metal/macOS only, and claiming more
-would be claiming what was never measured -- so off-mac it refuses as
-`ue.platform` with a pointer here, and the web app still delivers the
-headless half (spec, provenance, validation, telemetry).
+on all three OSes. The UE render half runs wherever an Unreal editor is
+actually FOUND (`core/util/platform.py` searches `UNREAL_EDITOR_EXE`,
+`UE_ROOT`, then the default UE 5.5 install locations); on a machine with
+no editor it refuses as `ue.platform` by name, and the web app still
+delivers the headless half (spec, provenance, validation, telemetry).
+One honesty note: every render calibration (exposure, fog, framing) was
+measured on Metal/macOS first, so the first Windows/D3D12 clips may read
+slightly differently -- that is tuning, not breakage, and it is stated
+here rather than hidden.
 
 Per-OS setup notes:
 
@@ -91,12 +95,16 @@ Per-OS setup notes:
   ZERO setup on any OS: a fresh clone compiles a prompt before
   installing anything optional.
 
-**Rendering video clips** needs a Mac with Unreal Engine 5.5
-(free from the Epic Games Launcher) and Xcode: then
+**Rendering video clips** needs Unreal Engine 5.5 (free from the Epic
+Games Launcher) plus the platform toolchain. On a Mac (Xcode):
 `./scripts/vendor_ue_plugin.sh && ./scripts/build_ue.sh`, create materials
 with `scripts/ue_create_materials.py`, and import aircraft with
-`scripts/ue_import_aircraft.py`. Read `NEXT.md` for operational state and
-the 26 recorded gotchas before deep work.
+`scripts/ue_import_aircraft.py`. On Windows (Visual Studio 2022 with the
+"Game development with C++" workload): follow `docs/WINDOWS.md` -- the
+one extra step there is building the Win64 JSBSim library locally
+(`.\scripts\build_jsbsim_win64.ps1`; the repo ships only the Mac one).
+Read `NEXT.md` for operational state and the 26 recorded gotchas before
+deep work.
 
 `rasterio` ships GDAL in its wheel, so no separate GDAL build is needed.
 

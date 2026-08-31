@@ -3,8 +3,9 @@
 The platform story is code, not luck: OS dispatch lives in
 core/util/platform.py alone, missing tools refuse by name with the
 per-OS fix, fonts degrade honestly instead of crashing, the UE half
-refuses ue.platform off-mac, and the UTF-8 discipline is enforced
-statically so it cannot rot.
+refuses ue.platform wherever no Unreal editor is FOUND (capability,
+not OS name), and the UTF-8 discipline is enforced statically so it
+cannot rot.
 """
 
 import re
@@ -66,9 +67,44 @@ def test_font_chain_and_honest_degradation(monkeypatch, tmp_path, capsys):
     assert "WARNING" in capsys.readouterr().out
 
 
-def test_webapp_refuses_ue_platform_off_mac(monkeypatch):
-    """Off-mac a render request is the NAMED ue.platform refusal on the
-    page, never a 500; the headless half stays available."""
+def test_editor_finder_env_override_wins(monkeypatch, tmp_path):
+    """UNREAL_EDITOR_EXE names the -Cmd binary itself and wins everywhere;
+    an override pointing at nothing resolves to None rather than a path
+    that fails later with a worse message."""
+    fake = tmp_path / "UnrealEditor-Cmd"
+    fake.write_text("", encoding="utf-8")
+    monkeypatch.setenv("UNREAL_EDITOR_EXE", str(fake))
+    assert plat.find_unreal_editor_cmd() == fake
+    assert plat.ue_available()
+
+    monkeypatch.setenv("UNREAL_EDITOR_EXE", str(tmp_path / "missing"))
+    assert plat.find_unreal_editor_cmd() is None
+
+
+def test_editor_finder_ue_root_and_defaults(monkeypatch, tmp_path):
+    """UE_ROOT is an engine install root, searched with the per-OS binary
+    suffix; with nothing set and no default install, the finder answers
+    None and ue_available() is False -- the capability gate."""
+    monkeypatch.delenv("UNREAL_EDITOR_EXE", raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    editor = (tmp_path / "Engine" / "Binaries" / "Win64"
+              / "UnrealEditor-Cmd.exe")
+    editor.parent.mkdir(parents=True)
+    editor.write_text("", encoding="utf-8")
+    monkeypatch.setenv("UE_ROOT", str(tmp_path))
+    assert plat.find_unreal_editor_cmd() == editor
+
+    monkeypatch.delenv("UE_ROOT", raising=False)
+    monkeypatch.setattr(plat, "_UE_ROOT_FALLBACKS",
+                        {k: () for k in plat._UE_ROOT_FALLBACKS})
+    assert plat.find_unreal_editor_cmd() is None
+    assert not plat.ue_available()
+
+
+def test_webapp_refuses_ue_platform_without_editor(monkeypatch):
+    """With no Unreal editor found, a render request is the NAMED
+    ue.platform refusal on the page, never a 500; the headless half
+    stays available."""
     from fastapi.testclient import TestClient
 
     from core.nl.compiler import compile_prompt
@@ -81,7 +117,7 @@ def test_webapp_refuses_ue_platform_off_mac(monkeypatch):
     assert reply.status_code == 409
     body = reply.json()
     assert body.get("constraint") == "ue.platform"
-    assert "macOS" in body["refused"]
+    assert "Unreal editor" in body["refused"]
 
     status = client.get("/status").json()
     assert status["platform"] in ("mac", "linux", "windows")

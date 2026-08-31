@@ -20,3 +20,9 @@ ue/Saved/
 ue/DerivedDataCache/
 ue/Plugins/*/Intermediate/
 ue/Plugins/*/Binaries/
+# The Win64 JSBSim library is built per machine by
+# scripts/build_jsbsim_win64.ps1 (from the tag pinned in VENDORED.json),
+# never committed -- the repo vendors only the Mac dylib it was born with.
+ue/Plugins/JSBSimFlightDynamicsModel/Source/ThirdParty/JSBSim/Lib/*.lib
+ue/Plugins/JSBSimFlightDynamicsModel/Source/ThirdParty/JSBSim/Lib/*.dll
+ue/Plugins/JSBSimFlightDynamicsModel/Source/ThirdParty/JSBSim/LibDebug/

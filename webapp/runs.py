@@ -99,12 +99,19 @@ class RunState:
 def editor_running() -> bool:
     """Gotcha 9. Matches the engine's editor binaries only -- not the
     UnrealEditorServices helper or the Epic launcher, which live at other
-    paths and hold no editor lock. Off-mac there is no editor to lock
-    (the UE half refuses by name before this matters) and no pgrep to
-    call on Windows."""
-    from core.util.platform import is_mac
+    paths (macOS) / other image names (Windows) and hold no editor lock.
+    On macOS the pgrep pattern is the engine's own binaries path; on
+    Windows tasklist filters on the UnrealEditor* image names
+    (UnrealEditor.exe, UnrealEditor-Cmd.exe). On Linux there is no
+    editor to lock -- the UE half refuses by name before this matters."""
+    from core.util.platform import os_name
 
-    if not is_mac():
+    if os_name() == "windows":
+        probe = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq UnrealEditor*"],
+            capture_output=True, text=True)
+        return "UnrealEditor" in probe.stdout
+    if os_name() != "mac":
         return False
     probe = subprocess.run(["pgrep", "-f", "Binaries/Mac/UnrealEditor"],
                            capture_output=True, text=True)
@@ -1089,10 +1096,10 @@ class RunManager:
         from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
 
         if not ue_available():
-            # The named platform refusal, not a 500: every render gotcha
-            # was measured on Metal/macOS only. The headless half (spec,
-            # provenance, validation, telemetry via run_spec) already
-            # happened or remains available on this OS.
+            # The named platform refusal, not a 500: no Unreal editor was
+            # FOUND on this machine (capability gate, not OS name). The
+            # headless half (spec, provenance, validation, telemetry via
+            # run_spec) already happened or remains available here.
             return {"refused": UE_PLATFORM_REFUSAL,
                     "constraint": "ue.platform"}
         with self._lock:

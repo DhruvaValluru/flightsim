@@ -7,6 +7,14 @@
   "ue_platform": "Mac",
   "library": "Source/ThirdParty/JSBSim/Lib/Mac/libJSBSim.dylib",
   "library_sha256": "b42d47cc3daee56d09ecb348203afb1b7d7e00efac90961ee5dc2fabdc0ae448",
+  "windows_library": {
+    "expected": [
+      "Source/ThirdParty/JSBSim/Lib/JSBSim.lib",
+      "Source/ThirdParty/JSBSim/Lib/JSBSim.dll"
+    ],
+    "vendored": false,
+    "built_by": "scripts/build_jsbsim_win64.ps1: upstream's own JSBSimForUnreal.sln (Release x64) inside a checkout verified against the tag/commit above, built locally per machine and gitignored -- same version pin, same no-reimplementation rule as the Mac build"
+  },
   "header_count": 126,
   "aircraft_staged": 60,
   "local_patches": [
