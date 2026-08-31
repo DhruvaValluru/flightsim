@@ -52,8 +52,11 @@ if ($Actual -ne $Commit) {
     throw "checkout at $Actual but VENDORED.json pins $Commit -- refusing to build a different JSBSim than the headless core runs"
 }
 
-Write-Host "==> building JSBSimForUnreal.sln Release x64 (upstream's own build; a few minutes)"
-& $MsBuild (Join-Path $Src "JSBSimForUnreal.sln") /m /p:Configuration=Release /p:Platform=x64
+Write-Host "==> building JSBSimForUnreal.sln 1_Release x64 (upstream's own build; a few minutes)"
+# Upstream names its solution configurations 1_Release / 2_Debug (the digit
+# prefixes order them in the VS dropdown); "Release" is only the project-level
+# name and msbuild rejects it at the solution level (measured: MSB4126).
+& $MsBuild (Join-Path $Src "JSBSimForUnreal.sln") /m /p:Configuration=1_Release /p:Platform=x64
 if ($LASTEXITCODE -ne 0) { throw "msbuild failed (exit $LASTEXITCODE)" }
 
 # Release x64's OutDir is upstream's own plugin Lib folder; take the two
