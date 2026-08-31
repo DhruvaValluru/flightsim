@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -39,6 +40,7 @@ from core.nl.llm_compiler import (  # noqa: E402
 from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import validate  # noqa: E402
 from webapp.runs import (  # noqa: E402
+    CLIP_SECONDS,
     RunManager,
     apply_historical_weather,
     apply_weather_event,
@@ -71,6 +73,12 @@ class CompileRequest(BaseModel):
     # ``answers`` being present -- the server keeps no conversation state.
     questions: Optional[List[Dict[str, Any]]] = None
     answers: Optional[List[Dict[str, str]]] = None
+    #: The answer round echoes round 1's compiled spec (payload spec.dict)
+    #: so nothing that round decided can silently revert to a default.
+    prior_spec: Optional[Dict[str, Any]] = None
+    #: Clip length selector: an explicit UI choice, applied as a USER edit
+    #: of the run duration. None = whatever the prompt/default says.
+    clip_seconds: Optional[float] = None
 
 
 class RunRequest(BaseModel):
@@ -141,6 +149,43 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
     else:
         spec = compile_prompt(prompt)
         compiler_used = "regex"
+
+    # The answer round must never LOSE the question round. The protocol is
+    # stateless: round 2 re-extracts everything from the whole conversation,
+    # so a field the model drops -- or the WHOLE round, when the LLM dies
+    # and the regex fallback compiles the original prompt -- silently
+    # reverts to its default (measured: an answered location question came
+    # back with the first round's settings gone). The page echoes round 1's
+    # spec; any field that round DECIDED (user/inferred/model) and this
+    # round left at default is restored with its provenance intact. A field
+    # this round decided wins -- an answer legitimately changes things --
+    # and derived fields are left to the planners below to re-derive.
+    if request.answers and request.prior_spec is not None:
+        try:
+            prior = ScenarioSpec.from_dict(request.prior_spec)
+        except (ValueError, KeyError):
+            prior = None        # a malformed echo restores nothing
+        if prior is not None:
+            for _section, name, current in list(spec.quantities()):
+                previous = getattr(prior, name)
+                if (str(current.source) == "default"
+                        and str(previous.source) in ("user", "inferred",
+                                                     "model")):
+                    setattr(spec, name, replace(
+                        previous,
+                        frm=f"{previous.frm} (kept from the question round)"))
+
+    # Clip length selector: the clip is min(duration, CLIP_SECONDS), so a
+    # shorter scenario renders proportionally fewer frames. An explicit UI
+    # choice is a USER edit of the duration, provenance and all -- it wins
+    # over a duration stated in the prompt, and the table shows that.
+    if request.clip_seconds is not None:
+        seconds = float(request.clip_seconds)
+        if not (0.0 < seconds <= CLIP_SECONDS):
+            return JSONResponse(
+                {"error": f"clip length must be in (0, {CLIP_SECONDS:g}] s"},
+                status_code=400)
+        spec.set("duration", seconds, frm="clip length selector (web UI)")
 
     # Planning happens BEFORE the table and verdict are built, so what the
     # user reviews is what will run: the weather event's documented

@@ -21,6 +21,58 @@ def client():
 
 # -- /compile --------------------------------------------------------------
 
+def test_clip_selector_is_a_user_edit_of_duration(client):
+    """The UI's clip-length choice is an explicit USER edit of the run
+    duration (the clip is min(duration, CLIP_SECONDS)), it wins over a
+    duration stated in the prompt, and an out-of-range value refuses by
+    name instead of clamping silently."""
+    payload = client.post("/compile", json={
+        "prompt": "fly the 747 at 3000 m and 250 kt for 90 seconds",
+        "compiler": "regex", "clip_seconds": 6}).json()
+    duration = next(f for f in payload["spec"]["fields"]
+                    if f["name"] == "duration")
+    assert duration["value"] == 6.0
+    assert duration["source"] == "user"
+    assert "selector" in duration["from"]
+
+    refused = client.post("/compile", json={
+        "prompt": "fly the 747", "compiler": "regex", "clip_seconds": 99})
+    assert refused.status_code == 400
+    assert "clip length" in refused.json()["error"]
+
+
+def test_answer_round_keeps_the_question_rounds_decisions(client):
+    """The protocol is stateless: round 2 re-extracts everything, so a
+    field the model drops -- or the WHOLE round, when the LLM dies and the
+    regex fallback compiles the original prompt -- silently reverted to
+    its default (measured: an answered location question came back with
+    round 1's settings gone). The page echoes round 1's spec; anything
+    that round decided and round 2 left at default is restored with its
+    provenance intact, and a fresh compile (no answers) ignores the echo.
+    """
+    round1 = client.post("/compile", json={
+        "prompt": "fly the 747 at 5100 m and 260 kt",
+        "compiler": "regex"}).json()
+
+    round2 = client.post("/compile", json={
+        "prompt": "fly the 747",
+        "compiler": "regex",
+        "answers": [{"id": "place", "answer": "the mountains"}],
+        "prior_spec": round1["spec"]["dict"]}).json()
+    altitude = next(f for f in round2["spec"]["fields"]
+                    if f["name"] == "altitude")
+    assert altitude["value"] == 5100.0
+    assert altitude["source"] == "user"
+    assert "kept from the question round" in altitude["from"]
+
+    fresh = client.post("/compile", json={
+        "prompt": "fly the 747", "compiler": "regex",
+        "prior_spec": round1["spec"]["dict"]}).json()
+    altitude = next(f for f in fresh["spec"]["fields"]
+                    if f["name"] == "altitude")
+    assert altitude["source"] != "user"
+
+
 def test_compile_returns_provenanced_fields_and_verdict(client):
     response = client.post("/compile", json={
         "prompt": "fly the 747 at 3000 m and 250 kt in a strong crosswind",

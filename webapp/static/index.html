@@ -66,6 +66,17 @@ visual-only per host (measured).</p>
   placeholder="simulate a plane in rough wind conditions over mountains"></textarea>
 <p>
   <button id="compile">Interpret</button>
+  <label class="dim" title="The clip is min(duration, 22 s); a shorter clip renders proportionally fewer frames. Overrides a duration stated in the prompt, shown as a user edit in the table.">
+    clip <select id="clipSeconds">
+      <option value="">prompt</option>
+      <option value="3">3 s</option>
+      <option value="6">6 s</option>
+      <option value="10">10 s</option>
+      <option value="15">15 s</option>
+      <option value="20">20 s</option>
+      <option value="22">22 s</option>
+    </select>
+  </label>
   <span id="llmState" class="badge">compiler: checking&hellip;</span>
   <span id="compileState" class="dim"></span>
 </p>
@@ -308,15 +319,26 @@ async function doCompile(body) {
   } finally { $("compile").disabled = false; $("answer").disabled = false; }
 }
 
+// "" = no override: the prompt (or the documented default) decides.
+function clipSeconds() {
+  const v = $("clipSeconds").value;
+  return v === "" ? null : parseFloat(v);
+}
+
 $("compile").addEventListener("click", () =>
-  doCompile({prompt: $("prompt").value}));
+  doCompile({prompt: $("prompt").value, clip_seconds: clipSeconds()}));
 
 $("answer").addEventListener("click", () => {
   // One round: the original prompt plus the model's questions (echoed back)
   // and the user's answers. The server keeps no conversation state.
+  // prior_spec: the question round's full spec, echoed so nothing it
+  // decided can silently revert to a default in the answer round (the
+  // server restores dropped fields, provenance intact).
   doCompile({prompt: $("prompt").value,
              questions: pendingQuestions,
-             answers: collectAnswers()});
+             answers: collectAnswers(),
+             clip_seconds: clipSeconds(),
+             prior_spec: compiled ? compiled.spec.dict : null});
 });
 
 $("run").addEventListener("click", () => startRun(true));
