@@ -1486,16 +1486,16 @@ void FFlightSimScenarioWorld::ApplyStepWrites(
 		double DownFps = 0.0;
 		if (Card.WindScheduleTimes.Num() > 0)
 		{
-			int32 Current = ScheduleIndex < 0 ? 0 : ScheduleIndex;
-			while (Current + 1 < Card.WindScheduleTimes.Num() &&
-			       Card.WindScheduleTimes[Current + 1] <= TimeSeconds)
+			int32 WindEntry = ScheduleIndex < 0 ? 0 : ScheduleIndex;
+			while (WindEntry + 1 < Card.WindScheduleTimes.Num() &&
+			       Card.WindScheduleTimes[WindEntry + 1] <= TimeSeconds)
 			{
-				++Current;
+				++WindEntry;
 			}
-			ScheduleIndex = Current;
-			NorthFps = Card.WindScheduleNorthFps[Current];
-			EastFps = Card.WindScheduleEastFps[Current];
-			DownFps = Card.WindScheduleDownFps[Current];
+			ScheduleIndex = WindEntry;
+			NorthFps = Card.WindScheduleNorthFps[WindEntry];
+			EastFps = Card.WindScheduleEastFps[WindEntry];
+			DownFps = Card.WindScheduleDownFps[WindEntry];
 		}
 
 		// Log-profile shear (Phase 7 2.1) comes FIRST among the field
@@ -1630,14 +1630,14 @@ void FFlightSimScenarioWorld::ApplyStepWrites(
 		}
 		else if (Card.TurbulenceScheduleTimes.Num() > 0)
 		{
-			int32 Current = TurbulenceScheduleIndex < 0 ? 0 : TurbulenceScheduleIndex;
-			while (Current + 1 < Card.TurbulenceScheduleTimes.Num() &&
-			       Card.TurbulenceScheduleTimes[Current + 1] <= TimeSeconds)
+			int32 TurbulenceEntry = TurbulenceScheduleIndex < 0 ? 0 : TurbulenceScheduleIndex;
+			while (TurbulenceEntry + 1 < Card.TurbulenceScheduleTimes.Num() &&
+			       Card.TurbulenceScheduleTimes[TurbulenceEntry + 1] <= TimeSeconds)
 			{
-				++Current;
+				++TurbulenceEntry;
 			}
-			TurbulenceScheduleIndex = Current;
-			W20Fps = Card.TurbulenceScheduleW20Fps[Current];
+			TurbulenceScheduleIndex = TurbulenceEntry;
+			W20Fps = Card.TurbulenceScheduleW20Fps[TurbulenceEntry];
 		}
 		if (W20Fps >= 0.0)
 		{

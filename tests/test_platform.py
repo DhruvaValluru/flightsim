@@ -128,6 +128,51 @@ def test_webapp_refuses_ue_platform_off_mac(monkeypatch):
     assert isinstance(status["render_available"], bool)
 
 
+def test_no_shadowed_locals_in_the_bridge():
+    """MSVC's C4456 is an ERROR under UE's warnings-as-errors, and clang
+    on mac does not raise it: two shadowed `Current` index variables in
+    FlightSimScenarioWorld.cpp compiled clean for the whole life of the
+    mac-only build and stopped the first Windows build dead. Enforced
+    statically here because the bridge cannot be compiled on CI (no
+    engine), so nothing else would catch a reintroduction until someone
+    with a Windows machine hit it again.
+    """
+    decl = re.compile(
+        r"^\s*(?:const\s+)?(?:static\s+)?"
+        r"(?:int32|int|uint32|double|float|bool|FString|FVector|FRotator"
+        r"|FText|FName|auto|TArray<[^;]*?>|TMap<[^;]*?>)\s+(\w+)\s*(?:=|;|\()")
+
+    def without_comments(text):
+        text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+        return "\n".join(re.sub(r"//.*$", "", ln) for ln in text.split("\n"))
+
+    offenders = []
+    source = REPO / "ue" / "Plugins" / "FlightSimBridge" / "Source"
+    for path in sorted(source.rglob("*.cpp")):
+        scopes = [{}]
+        for number, line in enumerate(
+                without_comments(path.read_text(encoding="utf-8")).split("\n"),
+                start=1):
+            match = decl.match(line)
+            if match:
+                name = match.group(1)
+                for outer in scopes[:-1]:
+                    if name in outer and len(scopes) > 1:
+                        offenders.append(
+                            f"{path.relative_to(REPO)}:{number}: '{name}' "
+                            f"hides the declaration at line {outer[name]}")
+                        break
+                scopes[-1][name] = number
+            for _ in range(line.count("{")):
+                scopes.append({})
+            for _ in range(line.count("}")):
+                if len(scopes) > 1:
+                    scopes.pop()
+    assert not offenders, (
+        "shadowed locals (MSVC C4456 is an error under UE's "
+        "warnings-as-errors): " + ", ".join(offenders))
+
+
 def test_no_text_io_without_utf8_encoding():
     """The Windows-twin of gotcha 13, enforced statically: every
     text-mode file read/write call in core/, webapp/, experiments/,
