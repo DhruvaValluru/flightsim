@@ -64,19 +64,35 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 }
 
 # --- a Python with wheels for every pin --------------------------------
+# Probe a native command with its stderr discarded SAFELY: under
+# $ErrorActionPreference = "Stop", PS 5.1 turns a redirected stderr line
+# into a terminating error -- measured when the Microsoft Store's fake
+# python.exe stub printed "Python was not found" and killed the deploy.
+function Probe {
+    param([string]$exe, [string[]]$probeArgs)
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { return & $exe @probeArgs 2>$null }
+    catch { $global:LASTEXITCODE = 1; return $null }
+    finally { $ErrorActionPreference = $old }
+}
+
 # Returns @(exe, args...); splat everything after [0] so PS 5.1 and 7
 # both pass the launcher's version flag through cleanly.
 function Find-Python {
     if (Get-Command py -ErrorAction SilentlyContinue) {
         foreach ($v in $acceptable) {
-            & py "-$v" -c "pass" 2>$null
+            $null = Probe "py" @("-$v", "-c", "pass")
             if ($LASTEXITCODE -eq 0) { return , @("py", "-$v") }
         }
     }
-    $plain = Get-Command python -ErrorAction SilentlyContinue
-    if ($plain) {
-        $ver = & python -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null
-        if ($acceptable -contains $ver) { return , @("python") }
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        # The Store alias stub also lives here: it fails the probe with a
+        # nonzero exit, so requiring exit 0 rejects it.
+        $ver = Probe "python" @("-c", "import sys; print('%d.%d' % sys.version_info[:2])")
+        if ($LASTEXITCODE -eq 0 -and $acceptable -contains $ver) {
+            return , @("python")
+        }
     }
     return $null
 }
