@@ -95,13 +95,13 @@ foreach ($Name in $Aircraft) {
 Write-Host ""
 Write-Host "== 2/3 import into the Unreal project =="
 Write-Host "  creating materials (full log: runs\setup_visuals_materials.log)..."
-# Forward slashes and repo-relative paths, exactly as the scripts' own
-# docstrings invoke them: a backslashed absolute path loses its \u
-# sequence somewhere in the command-line handoff (measured:
-# 'scripts\ue_import_aircraft.py' arrived as 'scripts_import_aircraft.py'
-# and the commandlet could not load it). Relative paths resolve against
-# the CWD, which this script pins to the repo root.
-& $Editor $Project -run=pythonscript -script="scripts/ue_create_materials.py" `
+# ABSOLUTE paths with FORWARD slashes -- both measured failures rule out
+# the alternatives: a backslashed absolute path loses its \u sequence in
+# the command-line handoff ('scripts\ue_import_aircraft.py' arrived as
+# 'scripts_import_aircraft.py'), and a relative path resolves against the
+# editor's own Binaries\Win64 directory, not the CWD.
+$Root = (Get-Location).Path -replace '\\', '/'
+& $Editor $Project -run=pythonscript -script="$Root/scripts/ue_create_materials.py" `
     -unattended -nopause -nosplash -stdout *> "runs\setup_visuals_materials.log"
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  ue_create_materials exited $LASTEXITCODE; log tail:"
@@ -113,7 +113,7 @@ foreach ($Name in $Aircraft) {
     if (-not (Test-Path $Manifest)) { Write-Host "  $Name : no manifest, skipped"; continue }
     $ImportLog = "runs\setup_visuals_import_$Name.log"
     Write-Host "  $Name : importing meshes (full log: $ImportLog)..."
-    & $Editor $Project -run=pythonscript -script="scripts/ue_import_aircraft.py $Manifest" `
+    & $Editor $Project -run=pythonscript -script="$Root/scripts/ue_import_aircraft.py $Root/$Manifest" `
         -unattended -nopause -nosplash -stdout *> $ImportLog
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  $Name : IMPORT FAILED (exit $LASTEXITCODE); log tail:"
