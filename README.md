@@ -63,14 +63,19 @@ One codebase, platform dispatch inside it (`core/util/platform.py`):
 | Prompt → LLM compile → spec → validate | ✓ | ✓ | ✓ |
 | Headless JSBSim physics + telemetry | ✓ | ✓ | ✓ |
 | Web app on localhost:8008, terrain baking, effect reports | ✓ | ✓ | ✓ |
-| Rendered video clips (Unreal Engine host) | ✓ | refused by name | refused by name |
+| Rendered video clips (Unreal Engine host) | ✓ | refused by name | ✓ after the build below |
 
 Everything in the first three rows is pure Python and is exercised by CI
-on all three OSes. The UE render half currently requires macOS -- every
-render calibration was measured on Metal/macOS only, and claiming more
-would be claiming what was never measured -- so off-mac it refuses as
-`ue.platform` with a pointer here, and the web app still delivers the
-headless half (spec, provenance, validation, telemetry).
+on all three OSes. The UE render half runs on macOS (where every render
+calibration was measured, on Metal) and on Windows once the build steps
+below have produced the bridge -- until then Windows refuses as
+`ue.platform` with the exact missing piece, and the web app still
+delivers the headless half (spec, provenance, validation, telemetry).
+The render calibrations were measured on Metal only, so on Windows run
+`experiments/gate6_visual.py` once after building: it re-measures the
+visual clauses from the rendered pixels on YOUR machine, which is the
+project's standard of evidence -- a green Gate 6 there is the Windows
+render claim. Linux remains headless-only.
 
 Per-OS setup notes:
 
@@ -101,11 +106,22 @@ Per-OS setup notes:
   ZERO setup on any OS: a fresh clone compiles a prompt before
   installing anything optional.
 
-**Rendering video clips** needs a Mac with Unreal Engine 5.5
-(free from the Epic Games Launcher) and Xcode: then
-`./scripts/vendor_ue_plugin.sh && ./scripts/build_ue.sh`, create materials
-with `scripts/ue_create_materials.py`, and import aircraft with
-`scripts/ue_import_aircraft.py`. Read `NEXT.md` for operational state and
+**Rendering video clips** needs Unreal Engine 5.5 (free from the Epic
+Games Launcher) plus the platform toolchain:
+
+* **macOS** (Xcode 15.2-16.9):
+  `./scripts/vendor_ue_plugin.sh && ./scripts/build_ue.sh`
+* **Windows** (Visual Studio 2022 with the C++ workload):
+  `.\scripts\vendor_ue_plugin.ps1` builds the Win64 JSBSim library with
+  upstream's own `JSBSimForUnreal.sln` (the patched plugin sources are
+  already committed), then `.\scripts\build_ue.ps1` builds the host.
+  `.\scripts\ue_preflight.ps1` diagnoses exactly what is missing at any
+  point, and `experiments\gate6_visual.py` validates the render output
+  on your machine afterwards.
+
+Then create materials with `scripts/ue_create_materials.py` and import
+aircraft with `scripts/ue_import_aircraft.py` (both run inside
+UnrealEditor-Cmd on either OS). Read `NEXT.md` for operational state and
 the 26 recorded gotchas before deep work.
 
 `rasterio` ships GDAL in its wheel, so no separate GDAL build is needed.

@@ -41,10 +41,17 @@ after its first two runs caught five real gaps (httpx missing,
 anthropic missing, the platform refusal preempting two lock-logic
 tests -- now covered on every OS instead of skipped -- one incidental
 closure assertion, and a per-platform-libm turbulence ratio; fixes in
-2e725e2 + fe36f81, no mac coverage loosened). DELIBERATE DEFERRAL:
-porting the UE host off macOS is out of scope -- every render gotcha
-was measured on Metal only; do not claim render support nobody
-measured.
+2e725e2 + fe36f81, no mac coverage loosened). DEFERRAL LIFTED
+(2026-08-31, owner's decision): the UE host is now wired for Windows
+too -- ue_available() there requires an installed engine AND a built
+bridge (scripts/vendor_ue_plugin.ps1 + build_ue.ps1; ue_preflight.ps1
+diagnoses), editor paths route through
+core/util/platform.py:ue_editor_path(), and the render-claim rule is
+unchanged in spirit: every render gotcha was measured on Metal only,
+so a Windows machine's render claim is a green
+experiments/gate6_visual.py run ON that machine (it re-measures the
+visual clauses from the pixels), not this wiring. Do not report
+Windows render results as validated until Gate 6 has passed there.
 
 **Planned defaults (2026-08-13 -- "simple prompts must just fly").**
 Measured: "rough wind over mountains" + everest refused over numbers the

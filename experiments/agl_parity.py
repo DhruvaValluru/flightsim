@@ -34,6 +34,8 @@ import math
 import subprocess
 import sys
 from pathlib import Path
+
+from core.util.platform import ue_editor_path
 from typing import Dict, List, Optional, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -57,7 +59,7 @@ TOLERANCE = {
 
 
 def run_ue(card: Path, out: Path) -> None:
-    editor = Path("/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor-Cmd")
+    editor = ue_editor_path()
     project = Path(__file__).resolve().parents[1] / "ue" / "FlightSim.uproject"
     out.unlink(missing_ok=True)
     command = [

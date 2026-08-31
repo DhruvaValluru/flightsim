@@ -27,6 +27,46 @@ def test_os_name_dispatch(monkeypatch):
     assert plat.os_name() == "windows"
 
 
+def test_ue_dispatch_windows_needs_engine_and_bridge(monkeypatch, tmp_path):
+    """Windows gets the UE half only once BOTH pieces exist -- the
+    engine's UnrealEditor-Cmd.exe and a built FlightSimBridge DLL -- so a
+    bare clone refuses ue.platform by name instead of failing mid-run.
+    UE_ROOT overrides the engine location like FLIGHTSIM_FFMPEG does for
+    ffmpeg."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    root = tmp_path / "UE_5.5"
+    monkeypatch.setenv("UE_ROOT", str(root))
+    assert plat.find_ue_root() == root
+    editor = plat.ue_editor_path()
+    assert editor == (root / "Engine" / "Binaries" / "Win64"
+                      / "UnrealEditor-Cmd.exe")
+    assert plat.ue_available() is False          # nothing installed
+
+    editor.parent.mkdir(parents=True)
+    editor.write_bytes(b"")
+    bridge = tmp_path / "UnrealEditor-FlightSimBridge.dll"
+    monkeypatch.setattr(plat, "ue_bridge_binary", lambda repo: bridge)
+    assert plat.ue_available() is False          # engine alone: not enough
+
+    bridge.write_bytes(b"")
+    assert plat.ue_available() is True           # engine + built bridge
+
+
+def test_ue_dispatch_mac_and_linux_unchanged(monkeypatch):
+    """mac keeps its measured behavior (available, editor at the default
+    install); Linux still has no UE half at all."""
+    monkeypatch.delenv("UE_ROOT", raising=False)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert plat.ue_available() is True
+    assert plat.ue_editor_path() == Path(
+        "/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor-Cmd")
+    assert plat.ue_bridge_binary(REPO).suffix == ".dylib"
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert plat.ue_available() is False
+    assert plat.ue_editor_path() is None
+
+
 def test_ffmpeg_env_override_wins(monkeypatch, tmp_path):
     fake = tmp_path / "my-ffmpeg"
     monkeypatch.setenv("FLIGHTSIM_FFMPEG", str(fake))

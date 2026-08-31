@@ -29,6 +29,8 @@ import math
 import subprocess
 import sys
 from pathlib import Path
+
+from core.util.platform import ue_editor_path
 from typing import Dict, List, Optional, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -62,7 +64,7 @@ def rms(values: Sequence[float]) -> float:
 
 
 def render(card: Path, frames: Path, terrain: Path, extra: Sequence[str]) -> None:
-    editor = Path("/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor-Cmd")
+    editor = ue_editor_path()
     project = Path(__file__).resolve().parents[1] / "ue" / "FlightSim.uproject"
     frames.mkdir(parents=True, exist_ok=True)
     (frames / "render.json").unlink(missing_ok=True)

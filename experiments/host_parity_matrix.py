@@ -201,7 +201,7 @@ def spec_for(case: Case) -> ScenarioSpec:
     return spec
 
 
-def run_case(case: Case, out_dir: Path, runner: Path) -> CaseResult:
+def run_case(case: Case, out_dir: Path, runner: List[str]) -> CaseResult:
     directory = out_dir / case.slug
     directory.mkdir(parents=True, exist_ok=True)
 
@@ -234,7 +234,7 @@ def run_case(case: Case, out_dir: Path, runner: Path) -> CaseResult:
 
     card = write_run_card(spec, directory / "ue_scenario.json")
     unreal = directory / "unreal.json"
-    process = subprocess.run([str(runner), str(card), str(unreal)],
+    process = subprocess.run(runner + [str(card), str(unreal)],
                              capture_output=True, text=True)
     if process.returncode != 0 or not unreal.is_file():
         tail = (process.stderr or process.stdout).strip().splitlines()
@@ -319,9 +319,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = ap.parse_args(argv)
 
     root = Path(__file__).resolve().parents[1]
-    runner = root / "scripts" / "run_ue_scenario.sh"
-    if not runner.is_file():
-        print(f"  {runner} is missing")
+    from core.util.platform import ue_runner_command
+
+    runner = ue_runner_command(root, "run_ue_scenario")
+    if not Path(runner[-1]).is_file():
+        print(f"  {runner[-1]} is missing")
         return 1
 
     print(f"\n{RULE}\nmodel data, per airframe\n{RULE}")

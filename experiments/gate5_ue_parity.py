@@ -500,7 +500,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--unreal-telemetry", default=None,
                     help="trajectory written by the UE host")
     ap.add_argument("--unreal-render", default=None,
-                    help="render.json written by scripts/render_ue_scenario.sh")
+                    help="render.json written by scripts/render_ue_scenario.sh|.ps1")
     args = ap.parse_args(argv)
     out = Path(args.out)
 
@@ -542,9 +542,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("  The headless half of this gate ran and is correct. There is no")
         print("  second trajectory, so there is nothing to compare.")
         print()
+        from core.util.platform import os_name
+        ext = "ps1" if os_name() == "windows" else "sh"
         print("  Produce one with:")
-        print(f"    scripts/run_ue_scenario.sh {card} {out}/unreal.json")
-        print(f"    scripts/render_ue_scenario.sh {render_card} {out}/frames")
+        print(f"    scripts/run_ue_scenario.{ext} {card} {out}/unreal.json")
+        print(f"    scripts/render_ue_scenario.{ext} {render_card} {out}/frames")
         print()
         print("  GATE 5: BLOCKED -- not passed, and not failed on the merits.")
         print("  §5: do not mark a gate passed on partial evidence.")
@@ -587,8 +589,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not on_screen:
         print("  [ -- ] control surfaces visibly articulate")
         print("  [ -- ] commanded roll is visible on screen")
+        from core.util.platform import os_name
+        ext = "ps1" if os_name() == "windows" else "sh"
         print("         No rendered run was given. Produce one with")
-        print(f"         scripts/render_ue_scenario.sh {render_card} "
+        print(f"         scripts/render_ue_scenario.{ext} {render_card} "
               f"{out}/frames")
         print("         and pass --unreal-render.")
     else:

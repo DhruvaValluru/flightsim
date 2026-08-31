@@ -99,16 +99,28 @@ class RunState:
 def editor_running() -> bool:
     """Gotcha 9. Matches the engine's editor binaries only -- not the
     UnrealEditorServices helper or the Epic launcher, which live at other
-    paths and hold no editor lock. Off-mac there is no editor to lock
-    (the UE half refuses by name before this matters) and no pgrep to
-    call on Windows."""
-    from core.util.platform import is_mac
+    paths and hold no editor lock. On Windows the image names
+    UnrealEditor.exe / UnrealEditor-Cmd.exe are exactly the editor
+    binaries, so tasklist gives the same discrimination pgrep's path
+    match gives on mac. On Linux the UE half refuses by name before this
+    matters."""
+    from core.util.platform import is_mac, os_name
 
-    if not is_mac():
+    if is_mac():
+        probe = subprocess.run(["pgrep", "-f", "Binaries/Mac/UnrealEditor"],
+                               capture_output=True, text=True)
+        return probe.returncode == 0 and probe.stdout.strip() != ""
+    if os_name() == "windows":
+        # Both editor images: the interactive editor AND a commandlet
+        # render (the mac pgrep's path match covers both the same way).
+        for image in ("UnrealEditor.exe", "UnrealEditor-Cmd.exe"):
+            probe = subprocess.run(
+                ["tasklist", "/FI", f"IMAGENAME eq {image}", "/NH"],
+                capture_output=True, text=True)
+            if image in probe.stdout:
+                return True
         return False
-    probe = subprocess.run(["pgrep", "-f", "Binaries/Mac/UnrealEditor"],
-                           capture_output=True, text=True)
-    return probe.returncode == 0 and probe.stdout.strip() != ""
+    return False
 
 
 def _dynamic_scenes(dynamic_dir: Path) -> List[Dict]:
