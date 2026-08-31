@@ -2,12 +2,16 @@
 
 The truthful platform story (README "Platform support"): the compiler,
 headless physics, telemetry, terrain baking and the webapp run on
-macOS / Linux / Windows; the UE render half is macOS-only for now and
-REFUSES BY NAME everywhere else (every render gotcha was measured on
-Metal/macOS only -- claiming more would be claiming what was never
-measured). Everything that differs by OS routes through this module so
-tests can pin the dispatch and future code has one obvious place to
-look.
+macOS / Linux / Windows; the UE render half runs where an Unreal editor
+is actually FOUND (macOS and Windows installs are searched; anywhere
+via the UNREAL_EDITOR_EXE override) and REFUSES BY NAME everywhere
+else. The gate is capability, not OS name: "is the editor here",
+answered by looking, the same doctrine as find_ffmpeg below. One
+honesty note carried in README "Platform support": every render
+calibration was measured on Metal/macOS first, so Windows/D3D12 clips
+may need visual re-tuning -- that is stated, not hidden. Everything
+that differs by OS routes through this module so tests can pin the
+dispatch and future code has one obvious place to look.
 
 Tools are found, never assumed: ffmpeg by env override
 (``FLIGHTSIM_FFMPEG``), then PATH, then the known per-OS locations --
@@ -132,12 +136,64 @@ def mono_fonts(sizes: Tuple[int, ...]) -> List:
     return [default for _ in sizes]
 
 
+#: Where the editor binary sits under an engine install root, per OS.
+#: Linux is deliberately absent from the search: no render behaviour was
+#: ever measured there, and the UNREAL_EDITOR_EXE override remains for
+#: anyone who wants to try anyway (an explicit choice, not a silent one).
+_UE_EDITOR_SUFFIX = {
+    "mac": Path("Engine") / "Binaries" / "Mac" / "UnrealEditor-Cmd",
+    "windows": Path("Engine") / "Binaries" / "Win64" / "UnrealEditor-Cmd.exe",
+}
+
+#: Default engine install roots checked AFTER the env overrides -- the
+#: Epic launcher's own default locations for UE 5.5.
+_UE_ROOT_FALLBACKS = {
+    "mac": ("/Users/Shared/Epic Games/UE_5.5",),
+    "windows": (r"C:\Program Files\Epic Games\UE_5.5",),
+    "linux": (),
+}
+
+
+def find_unreal_editor_cmd() -> Optional[Path]:
+    """The UnrealEditor-Cmd binary to run, or None -- found, never assumed.
+
+    Resolution order: UNREAL_EDITOR_EXE (the -Cmd binary itself) ->
+    UE_ROOT (an engine install root) -> the per-OS default install
+    locations. Note it is the ``-Cmd`` variant everywhere: that is what
+    runs commandlets; plain UnrealEditor(.exe) is the GUI. None simply
+    means the render half is absent here; the caller states that by name
+    (UE_PLATFORM_REFUSAL) instead of failing on a missing path later.
+    """
+    override = os.environ.get("UNREAL_EDITOR_EXE", "").strip()
+    if override:
+        path = Path(override)
+        return path if path.is_file() else None
+    suffix = _UE_EDITOR_SUFFIX.get(os_name())
+    if suffix is None:
+        return None
+    roots: List[str] = []
+    ue_root = os.environ.get("UE_ROOT", "").strip()
+    if ue_root:
+        roots.append(ue_root)
+    roots.extend(_UE_ROOT_FALLBACKS[os_name()])
+    for root in roots:
+        candidate = Path(root) / suffix
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 UE_PLATFORM_REFUSAL = (
-    "REFUSED ue.platform: rendered clips currently require macOS.\n"
-    "The compiler, headless physics, telemetry and the webapp run on\n"
-    "this OS -- see README \"Platform support\".")
+    "REFUSED ue.platform: no Unreal editor found on this machine\n"
+    "(checked UNREAL_EDITOR_EXE, UE_ROOT and the default UE 5.5 install\n"
+    "locations). Rendered clips need UE 5.5 with the FlightSim host\n"
+    "built -- docs/WINDOWS.md on Windows, scripts/ue_preflight.sh on\n"
+    "macOS. The compiler, headless physics, telemetry and the webapp\n"
+    "run on this OS without it -- see README \"Platform support\".")
 
 
 def ue_available() -> bool:
-    """True only where the UE render half is measured to work: macOS."""
-    return is_mac()
+    """True where the UE render half is actually PRESENT: an editor
+    binary was found. Capability, not OS name -- a Mac with no engine
+    refuses the same way a Windows box with no engine does."""
+    return find_unreal_editor_cmd() is not None

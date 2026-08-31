@@ -49,7 +49,15 @@ from experiments.gate5_ue_parity import reference_spec, write_run_card  # noqa: 
 from experiments.orographic_ue import verify_port  # noqa: E402
 
 RULE = "=" * 96
-EDITOR = Path("/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor-Cmd")
+from core.util.platform import find_unreal_editor_cmd  # noqa: E402
+
+#: The editor to invoke, FOUND per-OS (UNREAL_EDITOR_EXE -> UE_ROOT -> the
+#: default install roots; see core.util.platform). The historical Mac path
+#: is only a fallback so the module stays importable on machines with no
+#: editor, where nothing but its constants is used -- webapp/runs.py and
+#: the matrix both refuse by name (ue.platform) before ever invoking it.
+EDITOR = find_unreal_editor_cmd() or Path(
+    "/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor-Cmd")
 try:
     from core.util.platform import find_ffmpeg as _find_ffmpeg
 
