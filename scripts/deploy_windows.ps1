@@ -146,9 +146,11 @@ if ($NoLaunch) {
 
 # --- launch ------------------------------------------------------------
 Step "starting the web app on http://127.0.0.1:8008 (its own window; close it to stop)"
-Start-Process -FilePath $venvPython `
-    -ArgumentList "-m", "uvicorn", "webapp.server:app", "--port", "8008" `
-    -WorkingDirectory $InstallDir
+# Wrapped in powershell -NoExit so a crashing server leaves its error ON
+# SCREEN instead of a window that closes before anyone can read it.
+Start-Process -FilePath "powershell" -WorkingDirectory $InstallDir `
+    -ArgumentList "-NoExit", "-Command",
+    "& '$venvPython' -m uvicorn webapp.server:app --port 8008"
 
 $up = $false
 foreach ($i in 1..30) {
@@ -168,6 +170,9 @@ if ($up) {
     Write-Host "'Quick start'). Rendered video clips still require macOS; everything"
     Write-Host "else runs here."
 } else {
-    throw ("the server did not answer on port 8008 within 30 s -- check the " +
-           "uvicorn window it opened for the actual error.")
+    throw ("the server did not answer on port 8008 within 30 s -- the " +
+           "uvicorn window it opened stays up with the actual error; or run " +
+           "it in THIS window to see it here:`n" +
+           "  cd $InstallDir`n" +
+           "  .\.venv\Scripts\python.exe -m uvicorn webapp.server:app --port 8008")
 }
