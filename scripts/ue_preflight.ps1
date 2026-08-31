@@ -108,6 +108,24 @@ if (Test-Path $bridgeDll) {
     Fail "bridge binary" "not built yet -- run scripts\build_ue.ps1"
 }
 
+# -- build-time material assets ------------------------------------------
+# The render commandlet REFUSES without these rather than falling back to
+# the default material (which would render the terrain classification
+# invisibly wrong). Measured: the first Windows render failed here only
+# AFTER 10 minutes of first-run shader compilation, so name it up front.
+$materials = Join-Path $repo "ue\Content\FlightSim"
+$haveMaterials = @("M_VertexColor", "M_TerrainImagery") |
+    Where-Object { Test-Path (Join-Path $materials "$_.uasset") }
+if ($haveMaterials.Count -eq 2) {
+    Say "material assets" "M_VertexColor + M_TerrainImagery present"
+} else {
+    Fail "material assets" "missing -- run the build-time step below"
+    Write-Host ("        & '$editor' '" + (Join-Path $repo "ue\FlightSim.uproject") +
+                "' -run=pythonscript -script='" +
+                (Join-Path $repo "scripts\ue_create_materials.py") +
+                "' -unattended -nopause -nosplash -stdout")
+}
+
 # -- ffmpeg (clips only; a named refusal elsewhere, stated here early) ----
 $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue
 if ($ffmpeg) { Say "ffmpeg (clip encoding)" $ffmpeg.Source }
