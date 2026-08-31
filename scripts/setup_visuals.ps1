@@ -52,7 +52,7 @@ $Failed = @()
 New-Item -ItemType Directory -Force -Path "runs" | Out-Null
 
 Write-Host ""
-Write-Host "== 1/3 download + convert aircraft models =="
+Write-Host "== 1/4 download + convert aircraft models =="
 foreach ($Name in $Aircraft) {
     $Config = "assets\aircraft_config\$Name.json"
     $Manifest = "assets\generated\$Name\mesh_manifest.json"
@@ -93,7 +93,7 @@ foreach ($Name in $Aircraft) {
 }
 
 Write-Host ""
-Write-Host "== 2/3 import into the Unreal project =="
+Write-Host "== 2/4 import into the Unreal project =="
 Write-Host "  creating materials (full log: runs\setup_visuals_materials.log)..."
 # ABSOLUTE paths with FORWARD slashes -- both measured failures rule out
 # the alternatives: a backslashed absolute path loses its \u sequence in
@@ -123,7 +123,7 @@ foreach ($Name in $Aircraft) {
 }
 
 Write-Host ""
-Write-Host "== 3/3 bake real terrain (Copernicus GLO-30 download, a few minutes each) =="
+Write-Host "== 3/4 bake real terrain (Copernicus GLO-30 download, a few minutes each) =="
 foreach ($Key in $Terrains) {
     if (Test-Path "runs\terrain\$Key.r16") { Write-Host "  $Key : already baked"; continue }
     Write-Host "  $Key : fetching + baking..."
@@ -134,14 +134,35 @@ foreach ($Key in $Terrains) {
     }
 }
 
+# The elevation raster alone renders with the fallback height-coloured
+# material (the flat-shaded pastel look); the REALISTIC look is Sentinel-2
+# cloudless satellite imagery draped over the bake -- the render picks up
+# <key>_imagery.json automatically once it exists (webapp/runs.py
+# pick_scene). drape() verifies the texture against its source and refuses
+# to write an unverified one.
+Write-Host ""
+Write-Host "== 4/4 drape satellite imagery over the bakes (Sentinel-2 download, a few minutes each) =="
+foreach ($Key in $Terrains) {
+    if (-not (Test-Path "runs\terrain\$Key.r16")) { Write-Host "  $Key : not baked, skipped"; continue }
+    if (Test-Path "runs\terrain\$Key`_imagery.json") { Write-Host "  $Key : imagery already draped"; continue }
+    Write-Host "  $Key : fetching + draping satellite imagery..."
+    & $Python -c "from pathlib import Path; from core.terrain.glo30 import LOCATIONS; from core.terrain.imagery import drape; drape(LOCATIONS['$Key'], Path('runs/terrain/$Key'), Path('data/imagery'), Path('runs/terrain'))"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  $Key : IMAGERY FAILED (exit $LASTEXITCODE)"
+        $Failed += "imagery $Key"
+    }
+}
+
 Write-Host ""
 if ($Failed.Count -eq 0) {
     Write-Host "Visual setup complete. Meshes on disk:"
     Get-ChildItem "assets\generated\*\mesh_manifest.json" -ErrorAction SilentlyContinue |
         ForEach-Object { Write-Host "  $($_.Directory.Name)" }
-    Write-Host "Terrains baked:"
-    Get-ChildItem "runs\terrain\*.r16" -ErrorAction SilentlyContinue |
-        ForEach-Object { Write-Host "  $($_.BaseName)" }
+    Write-Host "Terrains baked (i = satellite imagery draped):"
+    Get-ChildItem "runs\terrain\*.r16" -ErrorAction SilentlyContinue | ForEach-Object {
+        $Mark = if (Test-Path "runs\terrain\$($_.BaseName)_imagery.json") { " (i)" } else { "" }
+        Write-Host "  $($_.BaseName)$Mark"
+    }
     Write-Host ""
     Write-Host "Start the webapp and prompt e.g.: fly the 747 over yosemite at 250 kt"
 } else {
