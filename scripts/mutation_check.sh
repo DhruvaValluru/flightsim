@@ -784,6 +784,30 @@ mutate core/nl/compiler.py \
     "a stated image count reaches the camera spec" \
     tests/test_nl_compiler.py || failures=$((failures+1))
 
+mutate core/capture/verify.py \
+    '            if not (0.0 <= u_q <= record["width_px"]' \
+    '            if False and not (0.0 <= u_q <= record["width_px"]' \
+    "an aimed camera that cannot see the aircraft fails verification" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        "cross_view_consistency", worst <= tol_m,' \
+    '        "cross_view_consistency", True,  # MUTATED' \
+    "two-view triangulation errors fail verification" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if indices != list(range(declared)):' \
+    '        if False:  # MUTATED: dropped frames pass' \
+    "a dropped frame fails the count-exactness check" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if worst > tol_s:' \
+    '        if False:  # MUTATED: diverging capture times pass' \
+    "diverging capture times fail the alignment check" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
