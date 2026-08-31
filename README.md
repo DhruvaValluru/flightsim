@@ -77,6 +77,16 @@ Per-OS setup notes:
 * **macOS / Linux**: `./scripts/setup.sh`. **Windows**:
   `.\scripts\setup.ps1` (PowerShell), then
   `.\.venv\Scripts\python.exe -m uvicorn webapp.server:app --port 8008`.
+  Or deploy with one pasted command -- no clone, no prerequisites
+  (installs git/Python via winget only if missing, clones, sets up,
+  starts the server and opens the browser):
+
+  ```powershell
+  irm https://raw.githubusercontent.com/DhruvaValluru/flightsim/master/scripts/deploy_windows.ps1 | iex
+  ```
+
+  Windows note: install Python 3.10-3.12, not 3.13+ -- `numpy==2.0.2`
+  ships no Windows wheel past 3.12, and both setup scripts check this.
 * **ffmpeg** (only for encoding clips/panels): `brew install ffmpeg` /
   `sudo apt install ffmpeg` / `winget install ffmpeg`. Missing ffmpeg is
   a named refusal (`ffmpeg.missing`); nothing else needs it. Override
