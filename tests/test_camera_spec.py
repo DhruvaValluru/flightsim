@@ -227,3 +227,48 @@ def test_unsupported_preset_refuses_by_name():
     spec.cameras = [CameraSpec.defaulted(camera_id="free", preset="explicit")]
     with pytest.raises(ValueError, match="camera.preset"):
         camera_render_flags(spec)
+
+
+# -- planned camera defaults (the planners' discipline, on cameras) -----
+
+def test_defaulted_tower_camera_follows_the_staged_terrain():
+    """A placeless prompt's tower camera is built against flat ground;
+    when the scene planners stage terrain, the SYSTEM's own camera is
+    re-planned onto the final datum (recorded, source derived) instead
+    of being refused kilometres underground -- measured on the first
+    3-second tower demo (camera.terrain_clearance at -2803 m AGL)."""
+    from webapp.runs import plan_camera_defaults
+
+    spec = compile_prompt(
+        "fly the 747 at 3000 m and 250 kt, 15 images from the tower")
+    camera = spec.cameras[0]
+    assert float(camera.position_alt_m.value) == 80.0     # flat + 80
+    spec.plan("terrain_elevation", 2900.0, frm="staged by the test")
+    plan_camera_defaults(spec)
+    assert float(camera.position_alt_m.value) == 2980.0
+    assert str(camera.position_alt_m.source) == "derived"
+    # Value-idempotent: planning again from the same scene moves nothing.
+    plan_camera_defaults(spec)
+    assert float(camera.position_alt_m.value) == 2980.0
+
+
+def test_stated_camera_placement_is_never_replanned():
+    from webapp.runs import plan_camera_defaults
+
+    spec = compile_prompt(
+        "fly the 747 at 3000 m and 250 kt, 15 images from the tower")
+    spec.set("cameras[0].position_alt_m", 80.0, frm="stated placement")
+    spec.plan("terrain_elevation", 2900.0, frm="staged by the test")
+    plan_camera_defaults(spec)
+    assert float(spec.cameras[0].position_alt_m.value) == 80.0
+    assert str(spec.cameras[0].position_alt_m.source) == "user"
+
+
+def test_offset_cameras_are_not_touched_by_the_camera_planner():
+    from webapp.runs import plan_camera_defaults
+
+    spec = compile_prompt("chase view of the 747 at 3000 m and 250 kt")
+    before = spec.cameras[0].to_dict()
+    spec.plan("terrain_elevation", 2900.0, frm="staged by the test")
+    plan_camera_defaults(spec)
+    assert spec.cameras[0].to_dict() == before

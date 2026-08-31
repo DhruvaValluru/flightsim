@@ -1166,6 +1166,67 @@ def tornado_axis(spec: ScenarioSpec, scene: Dict, seconds: float):
             centre_e + offset * _math.sin(hdg + _math.pi / 2))
 
 
+#: Documented height above local ground for the world-anchored preset
+#: cameras (the UE director's own figures: observer 30 m, tower 80 m).
+CAMERA_PRESET_HEIGHT_M = {"ground": 30.0, "tower": 80.0}
+
+
+def plan_camera_defaults(spec: ScenarioSpec) -> None:
+    """World-anchored preset cameras follow the FINAL scene, recorded.
+
+    A defaulted ground/tower placement is built at COMPILE time against
+    the spec's terrain datum -- flat 0 for a placeless prompt -- and the
+    scene planners may then stage mountains under it, leaving the
+    system's own camera kilometres inside the rock and the run refused
+    over a choice nobody made (measured: the first 3-second tower demo
+    refused camera.terrain_clearance at -2803 m AGL after scene-setting
+    landed on the control ridge). Same discipline as every planner:
+    only PLANNABLE camera placement fields move (via CameraSpec.plan,
+    recorded, re-plannable); a stated placement never moves and its
+    refusal stands. The altitude is planned to the local ground at the
+    camera's own north/east -- the scene raster where one is baked, the
+    terrain datum otherwise -- plus the preset's documented height.
+    Value-idempotent: re-planning from the same scene lands the same
+    number.
+    """
+    presets_wanted = [
+        (index, camera) for index, camera in enumerate(spec.cameras)
+        if str(camera.preset.value) in CAMERA_PRESET_HEIGHT_M
+        and str(camera.position_mode.value) == "scene"
+        and str(camera.position_alt_m.source) in PLANNABLE_SOURCES]
+    if not presets_wanted:
+        return
+    scene = pick_scene(spec)
+    heightfield = None
+    frame = None
+    if scene.get("terrain"):
+        from core.capture.poses import SceneFrame
+        from core.terrain.heightfield import Heightfield
+
+        heightfield = Heightfield.read(Path(scene["terrain"]))
+        frame = SceneFrame.for_spec(spec, heightfield)
+    datum = float(spec.terrain_elevation.value)
+    for index, camera in presets_wanted:
+        up = CAMERA_PRESET_HEIGHT_M[str(camera.preset.value)]
+        ground = datum
+        basis = "the spec terrain datum"
+        if heightfield is not None:
+            x, y = frame.to_projected(
+                float(camera.position_north_m.value),
+                float(camera.position_east_m.value))
+            if heightfield.contains(x, y):
+                ground = heightfield.elevation_at(x, y)
+                basis = "the scene raster under the camera"
+        planned = float(round(ground + up))
+        if abs(planned - float(camera.position_alt_m.value)) < 0.5:
+            continue
+        spec.plan(
+            f"cameras[{index}].position_alt_m", planned,
+            frm=f"{camera.preset.value} camera re-planned onto the final "
+                f"scene: {basis} ({ground:.0f} m) + the preset's "
+                f"{up:.0f} m; a stated placement is never moved")
+
+
 def camera_scene_violations(spec: ScenarioSpec, scene: Dict) -> List[Dict]:
     """Scene-coupled camera refusals for /run, the plan_terrain_flight
     pattern: computed where the scene raster is known, returned as

@@ -808,6 +808,12 @@ mutate core/capture/verify.py \
     "diverging capture times fail the alignment check" \
     tests/test_camera_verify.py || failures=$((failures+1))
 
+mutate webapp/runs.py \
+    '        and str(camera.position_alt_m.source) in PLANNABLE_SOURCES]' \
+    '        and True]  # MUTATED: stated camera placements re-planned' \
+    "the camera planner never moves a stated placement" \
+    tests/test_camera_spec.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

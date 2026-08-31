@@ -51,6 +51,7 @@ from webapp.runs import (  # noqa: E402
     needs_dynamic_bake,
     pick_scene,
     place_on_scene,
+    plan_camera_defaults,
     plan_flyable_defaults,
     plan_scene_setting,
     plan_terrain_environment,
@@ -224,6 +225,10 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         pass    # no local raster yet (dynamic bake): /run plans it after /bake
     plan_flyable_defaults(spec)
     plan_trim_recovery(spec)
+    # Defaulted world-anchored cameras follow the staged scene (the
+    # tower does not stay at flat-ground height under planned
+    # mountains); stated placements never move.
+    plan_camera_defaults(spec)
 
     payload = {
         "compiler": compiler_used, "model": model, "llm_note": llm_note,
@@ -279,8 +284,8 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # PLANNER ORDER (load-bearing, pinned by tests): place_on_scene ->
     # apply_weather_event -> apply_historical_weather ->
     # plan_terrain_environment -> derive_seed -> plan_terrain_flight ->
-    # plan_flyable_defaults -> plan_trim_recovery -> project_for_ue_host
-    # -> validate.
+    # plan_flyable_defaults -> plan_trim_recovery ->
+    # plan_camera_defaults -> project_for_ue_host -> validate.
     # Rationale: placement fixes coordinates; the event composes its
     # environment; DATED real weather wins over composition (ERA5 wind is
     # source user, so the terrain planner then refuses to touch it);
@@ -306,6 +311,11 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # then give physics the last word over any surviving guess.
     plan_flyable_defaults(spec)
     plan_trim_recovery(spec)
+    # Camera placements last among the planners: they depend on the
+    # FINAL scene and terrain datum (a defaulted tower camera moves onto
+    # the raster under it; stated placements never move and refuse by
+    # name in the verdict below).
+    plan_camera_defaults(spec)
     project_for_ue_host(spec)
 
     # Validation governs the edited spec too: the run endpoint re-validates
