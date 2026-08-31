@@ -64,9 +64,12 @@ if ($vendored.commit -ne $commit) {
 # toolset and the override is the documented MSBuild knob for exactly
 # this. WindowsTargetPlatformVersion=10.0 resolves to the newest
 # installed SDK instead of the 2019-era one the project predates.
-Write-Host "==> building JSBSimForUnreal.sln (Release x64, v143 toolset)"
+# The SOLUTION's configuration is named 1_Release (upstream numbered
+# them; it maps to the project's Release|x64) -- plain "Release" fails
+# with MSB4126.
+Write-Host "==> building JSBSimForUnreal.sln (1_Release x64, v143 toolset)"
 & $msbuild (Join-Path $src "JSBSimForUnreal.sln") `
-    /p:Configuration=Release /p:Platform=x64 `
+    /p:Configuration=1_Release /p:Platform=x64 `
     /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 `
     /m /v:minimal
 if ($LASTEXITCODE -ne 0) { throw "MSBuild failed ($LASTEXITCODE)" }
