@@ -13,7 +13,8 @@
     "file": "COPYING",
     "repo": "https://github.com/FGMEMBERS/p51d",
     "commit": "cb3bcd6ef41182f6b1bae91395f38d0dadd974e5",
-    "authors_file": "README.md"
+    "authors_file": "README.md",
+    "unavailable": "upstream ships no license file at this commit (whole tree checked: no COPYING/LICENSE anywhere; README.p51d is flying notes and p51d-contributors.txt is authorship, neither is a license). Section 3.3 forbids rendering unattributed geometry, so this airframe stays physics-only until upstream publishes one."
   },
   "parts": [
     {

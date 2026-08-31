@@ -85,34 +85,62 @@ def main(argv=None) -> int:
 
     python = sys.executable
     manifests = []
+    failed = []
+    skipped = []
     for name in names:
         print(f"  {name}")
         config_path = configs[name]
         config = json.loads(config_path.read_text(encoding="utf-8"))
+        # Section 3.3: an airframe whose upstream ships no license file
+        # cannot render at all, and says so ONCE here rather than dying
+        # at the guard on every run.
+        unavailable = config["license"].get("unavailable")
+        if unavailable:
+            print(f"    SKIPPED -- {unavailable}")
+            skipped.append(name)
+            continue
         manifest = (REPO / "assets" / "generated" / config["name"]
                     / "mesh_manifest.json")
         if manifest.is_file():
             print(f"    already converted ({manifest.relative_to(REPO)})")
             manifests.append(manifest)
             continue
-        fetch_source(config, config_path)
+        try:
+            fetch_source(config, config_path)
+        except subprocess.CalledProcessError as exc:
+            print(f"    FETCH FAILED ({exc}) -- continuing with the rest")
+            failed.append(name)
+            continue
         print(f"    converting (license-verified, FDM-matched)")
         converted = subprocess.run(
             [python, str(REPO / "assets_pipeline" / "convert.py"),
              str(config_path)], cwd=REPO)
-        if converted.returncode != 0:
-            print(f"    convert FAILED for {name} -- stopping so the "
-                  f"failure is not buried")
-            return converted.returncode
-        if not manifest.is_file():
-            print(f"    convert reported success but wrote no {manifest}")
-            return 1
+        # One aircraft's failure must not cost the others their fetch and
+        # convert: report it at the end, by name, and keep going.
+        if converted.returncode != 0 or not manifest.is_file():
+            print(f"    CONVERT FAILED for {name} -- continuing with the rest")
+            failed.append(name)
+            continue
         manifests.append(manifest)
+
+    def summary() -> None:
+        if skipped:
+            print(f"\nskipped (no upstream license, section 3.3): "
+                  f"{', '.join(skipped)}")
+        if failed:
+            print(f"FAILED: {', '.join(failed)} -- scroll up for each "
+                  f"reason; the rest are unaffected")
+
+    if not manifests:
+        print("\nnothing converted.")
+        summary()
+        return 1
 
     if args.no_import:
         print("\nConverted. Import later with the same command, minus "
               "--no-import.")
-        return 0
+        summary()
+        return 1 if failed else 0
 
     editor = ue_editor_path()
     if editor is None or not editor.is_file():
@@ -133,9 +161,11 @@ def main(argv=None) -> int:
         print(f"import FAILED ({imported.returncode}) -- scroll up for the "
               f"editor's error")
         return imported.returncode
-    print("\nImported. Renders now use the real models; aircraft without "
-          "one refuse by name instead of showing placeholders.")
-    return 0
+    print(f"\nImported {len(manifests)} aircraft. Renders now use the real "
+          f"models; aircraft without one refuse by name instead of showing "
+          f"placeholders.")
+    summary()
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
