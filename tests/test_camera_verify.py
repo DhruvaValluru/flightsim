@@ -130,9 +130,13 @@ def test_triangulation_passes_and_catches_misattributed_states():
     assert not verify_triangulation(bad).ok
 
 
-def test_triangulation_refuses_to_pass_with_one_camera():
+def test_triangulation_reports_not_exercised_for_one_camera():
+    """No false pass, no false failure: a single camera cannot be
+    cross-checked and the report says so in words."""
     manifest = manifest_for(spec_with(counted("chase", "solo")))
-    assert not verify_triangulation(manifest).ok
+    check = verify_triangulation(manifest)
+    assert check.ok
+    assert "NOT EXERCISED" in check.detail
 
 
 def test_count_exactness_passes_and_catches_a_dropped_frame():

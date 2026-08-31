@@ -200,6 +200,22 @@ gate, the breadth behind Gate 5's single case:
 .venv/bin/python experiments/host_parity_matrix.py
 ```
 
+## Capture camera geometry (Camera Phase 1, any platform)
+
+Cameras are spec elements (provenanced, validated, digest-relevant --
+see `docs/CAMERA_PHASE1_REPORT.md`). A run captures a DEFINED number of
+frames, each with full recoverable geometry, engine or no engine:
+
+```bash
+.venv/bin/python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo
+.venv/bin/python -m flightsim.verify runs/demo
+```
+
+Off macOS the pixel render refuses by name (`ue.platform`) while the
+capture manifest, geometry previews and verification complete; the
+refusal example (`examples/cameras_refusal.yaml`) shows a camera placed
+inside terrain refused as `camera.terrain_clearance`.
+
 ## Run the tests
 
 ```bash
@@ -222,6 +238,7 @@ core/            zero Unreal dependency (§2.9)
   control/       TECS as a JSBSim XML system, run at FDM rate
   scenario/      spec schema, validation, provenance, run harness
   nl/            prompt -> spec compiler. Emits a spec, never runs anything.
+  capture/       camera pose solver, capture scheduler, manifest, verifier
   telemetry/     read-only observers
   terrain/       DEM ingestion, spectral synthesis, heightfield query, Landscape export
 experiments/     gates, sweeps, analysis, validation

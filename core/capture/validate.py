@@ -307,6 +307,12 @@ def static_camera_violations(spec, heightfield=None, scene_frame=None,
                     clearance = alt - heightfield.elevation_at(x, y)
                     if worst is None or clearance < worst:
                         worst = clearance
+            elif heightfield is None:
+                # Flat scenes: the spec's own terrain datum IS the
+                # ground; a camera stated under the slab refuses too.
+                clearance = alt - terrain_datum
+                if worst is None or clearance < worst:
+                    worst = clearance
             if tornado is not None:
                 dn = north - float(tornado["centre_north_m"])
                 de = east - float(tornado["centre_east_m"])

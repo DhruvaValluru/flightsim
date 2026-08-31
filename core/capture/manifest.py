@@ -130,20 +130,25 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                            schedules: Sequence[CaptureSchedule],
                            output_digest: str,
                            scene: Optional[Dict] = None,
-                           terrain_sha256: Optional[str] = None) -> Dict:
+                           terrain_sha256: Optional[str] = None,
+                           cameras=None) -> Dict:
     """Assemble the manifest mapping (see the module docstring schema).
 
     ``tracks`` and ``schedules`` are parallel per-camera sequences from
     the solver and scheduler. Everything is taken verbatim -- this
     function derives no geometry of its own beyond pixel-unit focal
     lengths, which are pure arithmetic on the recorded intrinsics.
+    ``cameras`` names the CameraSpecs that actually flew when they are
+    not the spec's own (a camera-less spec captured with the documented
+    default cameras); the digests stay the spec's.
     """
     if len(tracks) != len(schedules):
         raise ValueError(
             f"{len(tracks)} pose tracks against {len(schedules)} "
             f"schedules; every camera needs exactly one of each")
     aircraft = aircraft_local_track(columns, frame)
-    cameras_by_id = {str(c.camera_id.value): c for c in spec.cameras}
+    flown = spec.cameras if cameras is None else list(cameras)
+    cameras_by_id = {str(c.camera_id.value): c for c in flown}
 
     camera_blocks: List[Dict] = []
     frames: List[Dict] = []
