@@ -192,6 +192,38 @@ def bake_on_demand(lat: float, lon: float) -> Dict:
     return entry
 
 
+#: Guards the one-time control-ridge synthesis; concurrent runs must not
+#: race two syntheses of the same file.
+_CONTROL_RIDGE_LOCK = threading.Lock()
+
+
+def ensure_control_ridge() -> None:
+    """The terrain fail-safe (owner's rule 2026-08-31): the synthesised
+    control ridge is always available, so a scene the SYSTEM chose can
+    never fall through to the featureless slab just because no terrain
+    was baked yet (measured: a fresh Windows machine's mountains prompt
+    rendered flat -- "the mountains didnt load"). Synthesised once, on
+    first need, with the showcase matrix's exact parameters (seed 6,
+    28 deg RMS slope, 1024 px at 30 m) -- deterministic and fully local,
+    no network. Real bakes still win wherever they exist, and a USER-
+    stated flat place stays honestly flat: this floor only catches
+    system-chosen scenes."""
+    terrain_dir = REPO / "runs" / "terrain"
+    if (terrain_dir / "control_ridge.r16").is_file():
+        return
+    with _CONTROL_RIDGE_LOCK:
+        if (terrain_dir / "control_ridge.r16").is_file():
+            return
+        from core.terrain.synthesis import TerrainStatistics, generate
+
+        terrain_dir.mkdir(parents=True, exist_ok=True)
+        field = generate(size=1024, pixel_size_m=30.0,
+                         statistics=TerrainStatistics(rms_slope_deg=28.0),
+                         seed=6, base_elevation_m=600.0,
+                         name="control_ridge")
+        field.write(terrain_dir / "control_ridge")
+
+
 def pick_scene(spec: ScenarioSpec) -> Dict:
     """Choose the scene the spec's geography earns -- never silently."""
     lat = float(spec.latitude.value)
@@ -617,24 +649,32 @@ def renderable_aircraft() -> List[str]:
 
 
 def refuse_placeholder_mesh(spec: ScenarioSpec) -> Optional[Dict]:
-    """OWNER'S RULE (2026-08-14): a placeholder airframe never renders.
+    """OWNER'S RULE (2026-08-14, extended 2026-08-31): a placeholder
+    airframe never renders -- on ANY machine.
 
-    On a machine with imported meshes, a render request for an aircraft
-    without one refuses BY NAME instead of showing blocks (measured: an
-    F-15 run rendered the placeholder and the owner rejected it). A
-    machine with NO meshes imported (fresh clone, CI) is untouched --
-    the render pipeline reports its own missing-assets state there.
+    A render request for an aircraft without a real licensed 3-D model
+    refuses BY NAME instead of showing blocks (measured twice: an F-15
+    run rendered the placeholder and the owner rejected it, then the
+    first Windows deploy rendered the box airframe on a mesh-less
+    machine and the owner rejected that too -- "always use a real
+    model"). The refusal names the one command that imports the models,
+    so a fresh machine is a step away, never a surprise mid-clip.
     """
     have = renderable_aircraft()
     aircraft = str(spec.aircraft.value)
-    if not have or aircraft in have:
+    if aircraft in have:
         return None
+    configured = sorted(
+        p.stem for p in (REPO / "assets" / "aircraft_config").glob("*.json"))
+    here = (f"Renderable on this machine: {', '.join(have)}. " if have
+            else "No models are imported on this machine yet. ")
     return {
         "constraint": "aircraft.mesh",
         "message": f"the {aircraft} has real flight physics but no "
-                   f"licensed 3-D model, and placeholder airframes never "
-                   f"render. Renderable aircraft on this machine: "
-                   f"{', '.join(have)}.",
+                   f"licensed 3-D model imported here, and placeholder "
+                   f"airframes never render. {here}Import the licensed "
+                   f"models with: python scripts/import_aircraft.py "
+                   f"(configured: {', '.join(configured)}).",
     }
 
 
@@ -1192,6 +1232,15 @@ class RunManager:
                      provenance: Dict) -> None:
         out = self.out_root / run.run_id
         out.mkdir(parents=True, exist_ok=True)
+        # Terrain fail-safe: a no-op once the ridge exists. The FIRST
+        # render on a fresh machine pays the one-time synthesis here --
+        # with a status line, never silently -- rather than landing on
+        # the slab. Render path ONLY: tests and CI never synthesise, so
+        # a checkout's scene selection stays deterministic.
+        if not (REPO / "runs" / "terrain" / "control_ridge.r16").is_file():
+            run.push("terrain", "synthesising the control-ridge terrain "
+                                "fail-safe (one-time, local)")
+            ensure_control_ridge()
         scene = pick_scene(spec)
         run.scene = scene
 

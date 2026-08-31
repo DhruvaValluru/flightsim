@@ -5,6 +5,8 @@ against monkeypatched process checks, and the render pipeline itself is the
 showcase machinery already covered by its own gates.
 """
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -139,6 +141,16 @@ def test_run_refuses_while_editor_is_owned(client, monkeypatch):
     # into runs/webapp.
     monkeypatch.setattr(RunManager, "_execute",
                         lambda self, run, spec, provenance: None)
+    # About the editor lock, not the mesh rule or the scene: hold the
+    # mesh gate open and pin the flat scene so this measures the same
+    # thing on a machine with or without local bakes.
+    import webapp.server as server_module
+    monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
+                        lambda spec: None)
+    monkeypatch.setattr(runs_module, "pick_scene",
+                        lambda spec: {"key": "flat", "kind": "flat",
+                                      "terrain": None, "imagery": None,
+                                      "label": "flat (test)"})
     compiled = client.post("/compile", json={
         "prompt": "fly the 747 at 3000 m and 250 kt", "compiler": "regex"}
     ).json()
@@ -331,12 +343,23 @@ def test_llm_death_on_answer_round_falls_back_to_the_original_prompt(
 
 def test_run_forwards_the_transcript_into_provenance(client, monkeypatch):
     from webapp.server import manager
+    import webapp.server as server_module
 
     captured = {}
 
     def fake_start(spec, provenance):
         captured.update(provenance)
         return {"run_id": "test"}
+
+    # About provenance forwarding, not the mesh rule or the scene: hold
+    # the mesh gate open and pin the flat scene so this measures the same
+    # thing on a machine with or without local bakes.
+    monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
+                        lambda spec: None)
+    monkeypatch.setattr(runs_module, "pick_scene",
+                        lambda spec: {"key": "flat", "kind": "flat",
+                                      "terrain": None, "imagery": None,
+                                      "label": "flat (test)"})
 
     monkeypatch.setattr(manager, "start", fake_start)
     compiled = client.post("/compile", json={
@@ -546,19 +569,23 @@ def test_flyable_defaults_are_planned_not_refused():
 
 
 def test_placeholder_airframes_never_render(client, monkeypatch):
-    """Owner's rule: on a machine with imported meshes, an aircraft
-    without a real licensed 3-D model refuses to render BY NAME instead
-    of showing blocks (measured: an F-15 run rendered the placeholder).
-    A machine with no meshes at all is untouched."""
+    """Owner's rule (2026-08-14, extended 2026-08-31): an aircraft
+    without a real licensed 3-D model refuses to render BY NAME on ANY
+    machine -- a mesh-less fresh clone included ("always use a real
+    model", measured on the first Windows deploy). The refusal names the
+    import command, so a fresh machine is one step from real models."""
     from webapp.runs import refuse_placeholder_mesh, renderable_aircraft
 
-    if renderable_aircraft():
-        spec = compile_prompt("fly the f15 at 5000 m and 350 kt")
-        refusal = refuse_placeholder_mesh(spec)
-        assert refusal is not None
-        assert refusal["constraint"] == "aircraft.mesh"
-        assert "f15" in refusal["message"]
+    spec = compile_prompt("fly the f15 at 5000 m and 350 kt")
+    refusal = refuse_placeholder_mesh(spec)
+    assert refusal is not None
+    assert refusal["constraint"] == "aircraft.mesh"
+    assert "f15" in refusal["message"]
+    assert "import_aircraft" in refusal["message"]
+    have = renderable_aircraft()
+    if have:                    # with real models imported, those pass
         real = compile_prompt("fly the 747 at 3000 m and 250 kt")
+        real.set("aircraft", have[0], frm="test: a model that IS imported")
         assert refuse_placeholder_mesh(real) is None
 
     # The endpoint wires the refusal as a named 409, whatever machine.
@@ -570,6 +597,35 @@ def test_placeholder_airframes_never_render(client, monkeypatch):
     reply = client.post("/run", json={"spec": spec.to_dict()})
     assert reply.status_code == 409
     assert reply.json()["refused"] == "aircraft.mesh"
+
+
+def test_control_ridge_failsafe_synthesises_once(tmp_path, monkeypatch):
+    """Owner's rule (2026-08-31): the synthesised control ridge is always
+    available, so a scene the SYSTEM chose never falls through to the
+    featureless slab just because nothing is baked yet (measured: a
+    fresh Windows machine's mountains prompt rendered flat). Synthesises
+    into runs/terrain exactly once, and only when missing."""
+    import webapp.runs as runs
+
+    calls = []
+
+    class FakeField:
+        def write(self, path):
+            Path(str(path) + ".r16").write_bytes(b"synthesised")
+            calls.append(str(path))
+
+    def fake_generate(**kwargs):
+        assert kwargs["seed"] == 6          # the showcase's exact ridge
+        return FakeField()
+
+    monkeypatch.setattr(runs, "REPO", tmp_path)
+    monkeypatch.setattr("core.terrain.synthesis.generate", fake_generate)
+
+    runs.ensure_control_ridge()
+    ridge = tmp_path / "runs" / "terrain" / "control_ridge.r16"
+    assert ridge.is_file()
+    runs.ensure_control_ridge()             # idempotent: no re-synthesis
+    assert len(calls) == 1
 
 
 def test_scene_setting_stages_unlocated_scenes():
@@ -983,6 +1039,11 @@ def test_windy_terrain_run_digest_is_content_addressed(client, monkeypatch):
         return {"run_id": "digesttest"}
 
     monkeypatch.setattr(manager, "start", fake_start)
+    # This test is about the digest, not the mesh rule: hold that gate
+    # open so it measures the same thing on every machine.
+    import webapp.server as server_module
+    monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
+                        lambda spec: None)
     compiled = client.post("/compile", json={
         "prompt": "fly the 747 at 5000 m and 250 kt over 2000 m mountains "
                   "in a strong crosswind",

@@ -247,12 +247,6 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     if unbaked is not None:
         return JSONResponse({"refused": "terrain.unbaked", **unbaked},
                             status_code=409)
-    # Placeholder airframes never render (owner's rule): refuse by name
-    # before anything starts, naming the aircraft that CAN render here.
-    mesh_refusal = refuse_placeholder_mesh(spec)
-    if mesh_refusal is not None:
-        return JSONResponse({"refused": "aircraft.mesh", **mesh_refusal},
-                            status_code=409)
     place_on_scene(spec)
     # Severe-weather composition edits (thunderstorm -> severe turbulence
     # when the word was defaulted): recorded, pre-digest, like every other
@@ -305,6 +299,16 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
         verdict["violations"].append(clearance_refusal)
     if not verdict["ok"]:
         return JSONResponse({"refused": "validation", **verdict},
+                            status_code=409)
+
+    # Placeholder airframes never render (owner's rule, extended
+    # 2026-08-31: on ANY machine). Checked AFTER validation on purpose:
+    # a scenario that cannot fly refuses on the physics first; the asset
+    # refusal names the import command only once the flight itself is
+    # sound.
+    mesh_refusal = refuse_placeholder_mesh(spec)
+    if mesh_refusal is not None:
+        return JSONResponse({"refused": "aircraft.mesh", **mesh_refusal},
                             status_code=409)
 
     outcome = manager.start(spec, provenance={

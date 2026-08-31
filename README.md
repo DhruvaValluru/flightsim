@@ -119,10 +119,25 @@ Games Launcher) plus the platform toolchain:
   point, and `experiments\gate6_visual.py` validates the render output
   on your machine afterwards.
 
-Then create materials with `scripts/ue_create_materials.py` and import
-aircraft with `scripts/ue_import_aircraft.py` (both run inside
-UnrealEditor-Cmd on either OS). Read `NEXT.md` for operational state and
-the 26 recorded gotchas before deep work.
+Then two one-command asset steps, either OS:
+
+* **Real terrain**: `python scripts/bake_terrain.py` bakes the showcase
+  terrains (Matterhorn, Yosemite, the synthesised control ridge) into
+  `runs/terrain/`; `--all` bakes every curated location. Renders also
+  carry a fail-safe: a scene the SYSTEM chose never falls back to the
+  featureless slab -- the control ridge is synthesised on first need --
+  while a user-stated flat place stays honestly flat.
+* **Real aircraft**: `python scripts/import_aircraft.py` fetches each
+  configured model at its pinned commit (license verified on disk),
+  converts it, and imports it into the Unreal project. Placeholder
+  airframes never render on ANY machine (owner's rule, extended
+  2026-08-31): an aircraft without a real model refuses by name with
+  this command in the message.
+
+Materials come from `scripts/ue_create_materials.py` (run inside
+UnrealEditor-Cmd; `ue_preflight` names the exact invocation when they
+are missing). Read `NEXT.md` for operational state and the 26 recorded
+gotchas before deep work.
 
 `rasterio` ships GDAL in its wheel, so no separate GDAL build is needed.
 
