@@ -40,6 +40,9 @@ $MsBuild = & $VsWhere -latest -products * `
 if (-not $MsBuild) {
     throw "no MSBuild with the MSVC C++ toolset -- add the 'Game development with C++' workload in the VS installer"
 }
+$Vs = & $VsWhere -latest -products * `
+    -requires Microsoft.Component.MSBuild Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+    -property installationPath 2>$null | Select-Object -First 1
 
 if (-not (Test-Path (Join-Path $Src ".git"))) {
     Write-Host "==> fetching JSBSim $Tag (library sources and upstream build)"
@@ -52,11 +55,25 @@ if ($Actual -ne $Commit) {
     throw "checkout at $Actual but VENDORED.json pins $Commit -- refusing to build a different JSBSim than the headless core runs"
 }
 
-Write-Host "==> building JSBSimForUnreal.sln 1_Release x64 (upstream's own build; a few minutes)"
+# Upstream's vcxproj pins Windows SDK 10.0.18362.0 and the v142 (VS 2019)
+# toolset, neither of which a current VS install ships (measured: MSB8036 on
+# VS 18). Override both: WindowsTargetPlatformVersion=10.0 resolves to the
+# newest installed SDK, and the toolset is picked from what THIS VS actually
+# has -- oldest first (closest to upstream's v142), so a VS with the v142 or
+# v143 build-tools component installed uses it over the bleeding edge.
+$VCTargets = Get-ChildItem (Join-Path $Vs "MSBuild\Microsoft\VC") -Directory |
+    Sort-Object Name | Select-Object -Last 1
+$Toolsets = Get-ChildItem (Join-Path $VCTargets.FullName "Platforms\x64\PlatformToolsets") -Directory |
+    Where-Object { $_.Name -match "^v\d+$" } | Sort-Object Name
+if (-not $Toolsets) { throw "no MSVC platform toolsets under $($VCTargets.FullName)" }
+$Toolset = $Toolsets[0].Name
+
+Write-Host "==> building JSBSimForUnreal.sln 1_Release x64 (upstream's own build, toolset $Toolset; a few minutes)"
 # Upstream names its solution configurations 1_Release / 2_Debug (the digit
 # prefixes order them in the VS dropdown); "Release" is only the project-level
 # name and msbuild rejects it at the solution level (measured: MSB4126).
-& $MsBuild (Join-Path $Src "JSBSimForUnreal.sln") /m /p:Configuration=1_Release /p:Platform=x64
+& $MsBuild (Join-Path $Src "JSBSimForUnreal.sln") /m /p:Configuration=1_Release /p:Platform=x64 `
+    /p:PlatformToolset=$Toolset /p:WindowsTargetPlatformVersion=10.0
 if ($LASTEXITCODE -ne 0) { throw "msbuild failed (exit $LASTEXITCODE)" }
 
 # Release x64's OutDir is upstream's own plugin Lib folder; take the two
