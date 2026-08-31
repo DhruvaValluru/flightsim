@@ -49,6 +49,8 @@ if ($Probe -match "UnrealEditor") {
 $Project = Join-Path (Get-Location) "ue\FlightSim.uproject"
 $Failed = @()
 
+New-Item -ItemType Directory -Force -Path "runs" | Out-Null
+
 Write-Host ""
 Write-Host "== 1/3 download + convert aircraft models =="
 foreach ($Name in $Aircraft) {
@@ -56,7 +58,33 @@ foreach ($Name in $Aircraft) {
     $Manifest = "assets\generated\$Name\mesh_manifest.json"
     if (-not (Test-Path $Config)) { Write-Host "  $Name : no $Config, skipped"; continue }
     if (Test-Path $Manifest) { Write-Host "  $Name : already converted"; continue }
-    Write-Host "  $Name : downloading + converting (a few minutes)..."
+
+    # convert.py does NOT fetch: it expects the licensed model repo already
+    # checked out at the config's pinned commit (the Mac had these clones
+    # from long ago). Clone-or-update here, license-file presence as the
+    # done-marker -- the same file convert.py refuses without.
+    $Cfg = Get-Content $Config -Raw | ConvertFrom-Json
+    $Src = Join-Path "assets" ($Cfg.source_dir -replace '^\.\./', '')
+    $LicensePath = Join-Path $Src $Cfg.license.file
+    if (-not (Test-Path $LicensePath)) {
+        Write-Host "  $Name : fetching model source ($($Cfg.license.repo) @ $($Cfg.license.commit.Substring(0,10)))..."
+        if (-not (Test-Path (Join-Path $Src ".git"))) {
+            git clone --filter=blob:none $Cfg.license.repo $Src
+            if ($LASTEXITCODE -ne 0) { git clone $Cfg.license.repo $Src }
+        }
+        git -C $Src checkout --quiet $Cfg.license.commit
+        if ($LASTEXITCODE -ne 0) {
+            git -C $Src fetch origin
+            git -C $Src checkout --quiet $Cfg.license.commit
+        }
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $LicensePath)) {
+            Write-Host "  $Name : SOURCE FETCH FAILED"
+            $Failed += "fetch $Name"
+            continue
+        }
+    }
+
+    Write-Host "  $Name : converting..."
     & $Python assets_pipeline\convert.py $Config
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $Manifest)) {
         Write-Host "  $Name : CONVERT FAILED (exit $LASTEXITCODE)"
@@ -66,18 +94,24 @@ foreach ($Name in $Aircraft) {
 
 Write-Host ""
 Write-Host "== 2/3 import into the Unreal project =="
-Write-Host "  creating materials..."
+Write-Host "  creating materials (full log: runs\setup_visuals_materials.log)..."
 & $Editor $Project -run=pythonscript -script="$PWD\scripts\ue_create_materials.py" `
-    -unattended -nopause -nosplash -stdout | Select-String -Pattern "error|Error|created|Material" | Select-Object -First 10
-if ($LASTEXITCODE -ne 0) { $Failed += "ue_create_materials (exit $LASTEXITCODE)" }
+    -unattended -nopause -nosplash -stdout *> "runs\setup_visuals_materials.log"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  ue_create_materials exited $LASTEXITCODE; log tail:"
+    Get-Content "runs\setup_visuals_materials.log" -Tail 20 | ForEach-Object { Write-Host "    $_" }
+    $Failed += "ue_create_materials (exit $LASTEXITCODE)"
+}
 foreach ($Name in $Aircraft) {
     $Manifest = Join-Path (Get-Location) "assets\generated\$Name\mesh_manifest.json"
     if (-not (Test-Path $Manifest)) { Write-Host "  $Name : no manifest, skipped"; continue }
-    Write-Host "  $Name : importing meshes..."
+    $ImportLog = "runs\setup_visuals_import_$Name.log"
+    Write-Host "  $Name : importing meshes (full log: $ImportLog)..."
     & $Editor $Project -run=pythonscript -script="$PWD\scripts\ue_import_aircraft.py $Manifest" `
-        -unattended -nopause -nosplash -stdout | Select-String -Pattern "error|Error|FAIL|imported|bounds" | Select-Object -First 15
+        -unattended -nopause -nosplash -stdout *> $ImportLog
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "  $Name : IMPORT FAILED (exit $LASTEXITCODE)"
+        Write-Host "  $Name : IMPORT FAILED (exit $LASTEXITCODE); log tail:"
+        Get-Content $ImportLog -Tail 20 | ForEach-Object { Write-Host "    $_" }
         $Failed += "import $Name"
     }
 }
