@@ -67,13 +67,26 @@ if ($vendored.commit -ne $commit) {
 # The SOLUTION's configuration is named 1_Release (upstream numbered
 # them; it maps to the project's Release|x64) -- plain "Release" fails
 # with MSB4126.
-Write-Host "==> building JSBSimForUnreal.sln (1_Release x64, v143 toolset)"
+#
+# The project also predates JSBSim's own C++17 requirement: it sets no
+# LanguageStandard, MSVC defaults to C++14, and JSBSim 1.2.4's headers
+# use std::optional and if-initializers (measured: 47 errors, every one
+# rooted in C2039 'optional' / C2429 '/std:c++17'). The CL environment
+# variable prepends flags to every cl.exe invocation -- the supported
+# way to inject a compiler flag without editing upstream's project.
+Write-Host "==> building JSBSimForUnreal.sln (1_Release x64, v143 toolset, /std:c++17)"
 $errLog = Join-Path $work "msbuild-errors.log"
 Remove-Item $errLog -ErrorAction SilentlyContinue
-& $msbuild (Join-Path $src "JSBSimForUnreal.sln") `
-    /p:Configuration=1_Release /p:Platform=x64 `
-    /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 `
-    /m /v:minimal "/flp:logfile=$errLog;errorsonly"
+$oldCL = $env:CL
+$env:CL = "/std:c++17"
+try {
+    & $msbuild (Join-Path $src "JSBSimForUnreal.sln") `
+        /p:Configuration=1_Release /p:Platform=x64 `
+        /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0 `
+        /m /v:minimal "/flp:logfile=$errLog;errorsonly"
+} finally {
+    $env:CL = $oldCL
+}
 if ($LASTEXITCODE -ne 0) {
     # The compile errors scroll off screen in a long build; restate them
     # so the failure is readable where the throw lands.
