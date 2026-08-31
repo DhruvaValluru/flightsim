@@ -150,6 +150,24 @@ CORPUS: List[Dict] = [
      "prompt": "a c172p at 2600 m and 100 kt over Yosemite, calm",
      "expect_questions": False,
      "expect_location": "yosemite"},
+    # -- cameras (Camera Phase 1): extraction measured, not assumed -------
+    {"kind": "vocabulary",
+     "prompt": "fly the 747 at 3000 m and 250 kt, 40 images from the "
+               "tower"},
+    {"kind": "vocabulary",
+     "prompt": "cockpit view of the a320 at 5000 m and 250 kt"},
+    {"kind": "extended",
+     "prompt": "capture 25 stills of a cessna from the control tower "
+               "over yosemite valley",
+     "expect_location": "yosemite"},
+    {"kind": "extended",
+     "prompt": "a wide angle chase of the jumbo jet powering through "
+               "moderate turbulence"},
+    {"kind": "clarify",
+     "prompt": "photograph a 747 in flight",
+     "expect_questions": True,
+     "answers": {"view": "chase", "camera": "chase", "vantage": "chase",
+                 "where": "chase"}},
 ]
 
 

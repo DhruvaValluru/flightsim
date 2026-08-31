@@ -764,6 +764,26 @@ mutate core/scenario/validate.py \
     "camera refusals ride the core validation surface" \
     tests/test_camera_validate.py || failures=$((failures+1))
 
+mutate core/nl/llm_compiler.py \
+    '            if name not in CAMERA_FIELD_VALUE_SCHEMAS:' \
+    '            if False:  # MUTATED: unknown camera fields patched in' \
+    "unknown LLM camera fields refuse loudly" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
+mutate core/nl/llm_compiler.py \
+    '    if len(cameras) > MAX_CAMERAS:' \
+    '    if False:  # MUTATED: unbounded camera lists' \
+    "the LLM camera list is bounded" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '    if count is not None:
+        camera.capture_count = Quantity(' \
+    '    if False:  # MUTATED: image counts silently dropped
+        camera.capture_count = Quantity(' \
+    "a stated image count reaches the camera spec" \
+    tests/test_nl_compiler.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

@@ -307,15 +307,91 @@ def _heading(text: str) -> Quantity:
     return Quantity.default(0.0, "deg", frm="due north")
 
 
+# -- cameras (Camera Phase 1) --------------------------------------------
+
+#: Named views -> camera presets. Deterministic and documented: the same
+#: vocabulary the render presets implement, so a view word can only
+#: request a view that exists.
+CAMERA_VIEW_WORDS: Tuple[Tuple[str, str], ...] = (
+    ("cockpit", "cockpit"),
+    ("wingman", "wingman"),
+    ("from the tower", "tower"),
+    ("tower view", "tower"),
+    ("control tower", "tower"),
+    ("ground observer", "ground"),
+    ("from the ground", "ground"),
+    ("chase", "chase"),
+)
+
+#: Simple lens words -> focal length, mm. Documented middle choices:
+#: "wide angle" is the classic 24 mm wide prime, "telephoto" the 85 mm
+#: short tele. A stated "<n> mm lens" always wins as user.
+LENS_WORDS: Dict[str, float] = {
+    "wide angle": 24.0, "wide-angle": 24.0, "telephoto": 85.0,
+}
+
+
+def _camera(text: str, aircraft: str, terrain_elevation_m: float):
+    """One CameraSpec when the prompt speaks camera language, else None.
+
+    A named view, an image count ("50 images/frames/stills") or a lens
+    word each earns the camera; everything unstated keeps the documented
+    defaults (source ``default``, plannable). Shot language the
+    vocabulary cannot express still goes to notes via CINEMATIC_WORDS.
+    """
+    from ..scenario.camera import CameraSpec
+
+    preset = None
+    preset_phrase = None
+    for phrase, name in CAMERA_VIEW_WORDS:
+        if _search(rf"\b{phrase}\b", text):
+            preset, preset_phrase = name, phrase
+            break
+    count = _search(rf"(\d+)\s*(?:images|frames|stills|photos|pictures|"
+                    rf"snapshots)\b", text)
+    focal = None
+    focal_quantity = None
+    m = _search(rf"{NUMBER}\s*mm\s+lens", text)
+    if m:
+        focal_quantity = Quantity.user(float(m.group(1)), "mm",
+                                       frm=m.group(0).strip())
+    else:
+        for word, mm in LENS_WORDS.items():
+            if word in text:
+                focal_quantity = Quantity.inferred(
+                    mm, "mm", frm=f"{word!r} lens word (documented "
+                                  f"mapping: wide angle 24 mm, telephoto "
+                                  f"85 mm)")
+                break
+    if preset is None and count is None and focal_quantity is None:
+        return None
+    camera = CameraSpec.defaulted(
+        camera_id="camera0", preset=preset or "chase", aircraft=aircraft,
+        terrain_elevation_m=terrain_elevation_m,
+        frm="camera language in the prompt; documented camera default")
+    if preset is not None:
+        camera.preset = Quantity(value=preset, source="inferred",
+                                 frm=preset_phrase)
+    if count is not None:
+        camera.capture_count = Quantity(
+            value=int(count.group(1)), unit="dimensionless",
+            source="user", frm=count.group(0).strip())
+    if focal_quantity is not None:
+        camera.focal_length_mm = focal_quantity
+    return camera
+
+
 # -- the compiler --------------------------------------------------------
 
 #: Words that describe a shot rather than a condition. Recognised only so they
 #: can be reported as ignored -- §8 is explicit that the cinematic vocabulary
 #: must not be the primary plugin surface, because a parser can only request
-#: what its vocabulary can express.
+#: what its vocabulary can express. "camera" and "chase" left this list
+#: when the camera vocabulary above learned to express them (Camera
+#: Phase 1); genuinely unexpressible shot language stays reported.
 CINEMATIC_WORDS = (
     "flyby", "fly-by", "cinematic", "dogfight", "airshow", "aerobatic",
-    "camera", "shot", "dramatic", "epic", "chase",
+    "shot", "dramatic", "epic",
 )
 
 
@@ -360,6 +436,11 @@ def compile_prompt(prompt: str, name: Optional[str] = None) -> ScenarioSpec:
         weather_date=_weather_date(text),
         weather_event=_weather_event(text),
     )
+
+    camera = _camera(text, str(spec.aircraft.value),
+                     float(spec.terrain_elevation.value))
+    if camera is not None:
+        spec.cameras = [camera]
 
     ignored = [w for w in CINEMATIC_WORDS if w in text]
     if ignored:
