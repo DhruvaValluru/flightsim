@@ -142,8 +142,16 @@ function provenanceNote(f) {
       : "compiler: offline regex (no ANTHROPIC_API_KEY in the server " +
         "process; set it where uvicorn runs)")
       + (status.render_available === false
-         ? " · rendered clips need macOS: runs here deliver the " +
-           "headless half (spec, validation, telemetry)"
+         ? (status.platform === "windows"
+            ? " · rendered clips need the Unreal host built here " +
+              "(scripts\\ue_preflight.ps1 names what is missing): runs " +
+              "here deliver the headless half (spec, validation, telemetry)"
+            : status.platform === "linux"
+            ? " · rendered clips need macOS or Windows: runs here deliver " +
+              "the headless half (spec, validation, telemetry)"
+            : " · rendered clips need the Unreal host built here: runs " +
+              "here deliver the headless half (spec, validation, " +
+              "telemetry)")
          : "");
   } catch (error) { $("llmState").textContent = "compiler: server unreachable"; }
 })();

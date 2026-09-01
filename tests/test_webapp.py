@@ -351,9 +351,11 @@ def test_run_forwards_the_transcript_into_provenance(client, monkeypatch):
         captured.update(provenance)
         return {"run_id": "test"}
 
-    # About provenance forwarding, not the mesh rule or the scene: hold
-    # the mesh gate open and pin the flat scene so this measures the same
-    # thing on a machine with or without local bakes.
+    # About provenance forwarding, not the platform/mesh gates or the
+    # scene: hold both gates open and pin the flat scene so this measures
+    # the same thing on a machine with or without local bakes.
+    import core.util.platform as plat
+    monkeypatch.setattr(plat, "ue_available", lambda: True)
     monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
                         lambda spec: None)
     monkeypatch.setattr(runs_module, "pick_scene",
@@ -588,8 +590,12 @@ def test_placeholder_airframes_never_render(client, monkeypatch):
         real.set("aircraft", have[0], frm="test: a model that IS imported")
         assert refuse_placeholder_mesh(real) is None
 
-    # The endpoint wires the refusal as a named 409, whatever machine.
+    # The endpoint wires the refusal as a named 409, whatever machine --
+    # with the platform gate held open, since ue.platform is checked
+    # first and would otherwise preempt the mesh refusal under test.
+    import core.util.platform as plat
     import webapp.server as server_module
+    monkeypatch.setattr(plat, "ue_available", lambda: True)
     monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
                         lambda spec: {"constraint": "aircraft.mesh",
                                       "message": "no real 3-D model"})
@@ -626,6 +632,33 @@ def test_control_ridge_failsafe_synthesises_once(tmp_path, monkeypatch):
     assert ridge.is_file()
     runs.ensure_control_ridge()             # idempotent: no re-synthesis
     assert len(calls) == 1
+
+
+def test_platform_refusal_precedes_the_mesh_refusal(client, monkeypatch):
+    """A machine with no engine build hears ue.platform, not
+    aircraft.mesh. Measured 2026-08-31 on a fresh Windows clone: it was
+    told to import aircraft models when the real blocker was that no
+    Unreal host existed there at all. The engine is the more
+    fundamental missing piece, so it refuses first."""
+    import core.util.platform as plat
+
+    monkeypatch.setattr(plat, "ue_available", lambda: False)
+    monkeypatch.setattr(runs_module, "pick_scene",
+                        lambda spec: {"key": "flat", "kind": "flat",
+                                      "terrain": None, "imagery": None,
+                                      "label": "flat (test)"})
+    # An aircraft with no model on ANY machine: both refusals are live,
+    # and the platform one must win.
+    spec = compile_prompt("fly the f15 at 5000 m and 350 kt")
+    reply = client.post("/run", json={"spec": spec.to_dict()})
+    assert reply.status_code == 409
+    assert reply.json()["constraint"] == "ue.platform"
+
+    # With an engine, the SAME spec falls through to the asset refusal.
+    monkeypatch.setattr(plat, "ue_available", lambda: True)
+    reply = client.post("/run", json={"spec": spec.to_dict()})
+    assert reply.status_code == 409
+    assert reply.json()["refused"] == "aircraft.mesh"
 
 
 def test_scene_setting_stages_unlocated_scenes():
@@ -906,7 +939,11 @@ def test_windy_terrain_run_card_carries_the_rotor(tmp_path, monkeypatch):
     place_on_scene(spec)
     assert str(spec.turbulence.value) == "none"
 
-    def fake_render(card, frames, scene, mesh, aircraft, telemetry=None, look=None, camera="chase"):
+    # **kwargs so a new render argument (camera_flags, Phase 1) does
+    # not silently break this stub on a machine WITH terrain baked,
+    # which is the only place these tests reach _render at all.
+    def fake_render(card, frames, scene, mesh, aircraft, telemetry=None,
+                    look=None, camera="chase", **kwargs):
         frames.mkdir(parents=True, exist_ok=True)
         (frames / "render.json").write_text("{}", encoding="utf-8")
         if telemetry is not None:
@@ -964,7 +1001,11 @@ def test_calm_terrain_run_states_why_the_air_is_still(tmp_path, monkeypatch):
     spec = compile_prompt("fly the 747 at 5000 m over 2000 m mountains")
     place_on_scene(spec)
 
-    def fake_render(card, frames, scene, mesh, aircraft, telemetry=None, look=None, camera="chase"):
+    # **kwargs so a new render argument (camera_flags, Phase 1) does
+    # not silently break this stub on a machine WITH terrain baked,
+    # which is the only place these tests reach _render at all.
+    def fake_render(card, frames, scene, mesh, aircraft, telemetry=None,
+                    look=None, camera="chase", **kwargs):
         frames.mkdir(parents=True, exist_ok=True)
         (frames / "render.json").write_text("{}", encoding="utf-8")
         return True
@@ -1039,9 +1080,11 @@ def test_windy_terrain_run_digest_is_content_addressed(client, monkeypatch):
         return {"run_id": "digesttest"}
 
     monkeypatch.setattr(manager, "start", fake_start)
-    # This test is about the digest, not the mesh rule: hold that gate
-    # open so it measures the same thing on every machine.
+    # This test is about the digest, not the platform or mesh gates:
+    # hold both open so it measures the same thing on every machine.
+    import core.util.platform as plat
     import webapp.server as server_module
+    monkeypatch.setattr(plat, "ue_available", lambda: True)
     monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
                         lambda spec: None)
     compiled = client.post("/compile", json={

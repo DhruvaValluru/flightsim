@@ -336,6 +336,16 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
         return JSONResponse({"refused": "validation", **verdict},
                             status_code=409)
 
+    # REFUSAL ORDER after validation (load-bearing, pinned by test):
+    # ue.platform BEFORE aircraft.mesh. A machine with no engine build
+    # must hear that first -- measured 2026-08-31 on a fresh Windows
+    # clone, which was told to import aircraft models when the real
+    # blocker was that no Unreal host existed there at all.
+    from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
+
+    if not ue_available():
+        return JSONResponse({"refused": UE_PLATFORM_REFUSAL,
+                             "constraint": "ue.platform"}, status_code=409)
     # Placeholder airframes never render (owner's rule, extended
     # 2026-08-31: on ANY machine). Checked AFTER validation on purpose:
     # a scenario that cannot fly refuses on the physics first; the asset
