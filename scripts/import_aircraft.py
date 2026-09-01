@@ -165,10 +165,33 @@ def main(argv=None) -> int:
         [str(editor), str(REPO / "ue" / "FlightSim.uproject"),
          "-run=pythonscript", f"-script={script_arg}",
          "-unattended", "-nopause", "-nosplash", "-stdout"], cwd=REPO)
+
+    # VERIFY THE ASSETS, don't trust the exit code. The editor returns
+    # non-zero if ANY error was logged during the session, including ones
+    # that have nothing to do with the import: measured 2026-09-01, a
+    # cosmetic "PostImport Texture failed to lock mip data" on one A320
+    # texture made a completely successful import of four aircraft
+    # (Python script executed successfully, every part built) report
+    # failure. What matters is whether the .uasset files exist.
+    content = REPO / "ue" / "Content"
+    missing = []
+    for manifest_path in manifests:
+        manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+        # /Game/Aircraft/<name> is ue/Content/Aircraft/<name> on disk.
+        root = manifest["asset_path_root"].replace("/Game/", "", 1)
+        for part in manifest["parts"]:
+            if not (content / root / f"{part}.uasset").is_file():
+                missing.append(f"{manifest['name']}/{part}")
+    if missing:
+        print(f"\nimport FAILED -- these assets are not on disk: "
+              f"{', '.join(missing[:12])}"
+              + (" ..." if len(missing) > 12 else ""))
+        print("scroll up for the editor's error")
+        return 1
     if imported.returncode != 0:
-        print(f"import FAILED ({imported.returncode}) -- scroll up for the "
-              f"editor's error")
-        return imported.returncode
+        print(f"\n(the editor exited {imported.returncode}, but every "
+              f"expected asset is on disk -- engine-level warnings, not an "
+              f"import failure; scroll up if you want to read them)")
     print(f"\nImported {len(manifests)} aircraft. Renders now use the real "
           f"models; aircraft without one refuse by name instead of showing "
           f"placeholders.")
