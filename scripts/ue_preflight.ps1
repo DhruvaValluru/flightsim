@@ -47,7 +47,30 @@ $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer
 if (Test-Path $vswhere) {
     $vs = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
         -property catalog_productDisplayVersion | Select-Object -First 1
-    if ($vs) { Say "visual studio (C++ tools)" "$vs" }
+    if ($vs) {
+        Say "visual studio (C++ tools)" "$vs"
+        # UE 5.5 is built against VS2022's v143 toolset, and so is the
+        # JSBSim vendor build. A NEWER Visual Studio alone is not enough
+        # -- measured on a machine with only VS2026 (v180): MSB8020.
+        $v143 = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.14.3x.17.14.x86.x64 `
+            -property installationPath 2>$null
+        if (-not $v143) {
+            $v143 = Get-ChildItem "C:\Program Files*\Microsoft Visual Studio\2022" `
+                -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
+        if (-not $v143) {
+            $v143 = Get-ChildItem "C:\Program Files*\Microsoft Visual Studio\*\*\VC\Tools\MSVC\14.4*" `
+                -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
+        if ($v143) { Say "v143 toolset (UE 5.5 needs it)" "present" }
+        else {
+            Fail "v143 toolset (UE 5.5 needs it)" "MISSING -- a newer VS alone will not build UE 5.5"
+            Write-Host "        winget install --id Microsoft.VisualStudio.2022.BuildTools ``"
+            Write-Host "          --override `"--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools ``"
+            Write-Host "          --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --includeRecommended`""
+        }
+    }
     else { Fail "visual studio (C++ tools)" "VS found but the 'Desktop development with C++' workload is missing" }
 } else {
     Fail "visual studio (C++ tools)" "vswhere.exe not found -- install Visual Studio 2022 with the C++ workload"

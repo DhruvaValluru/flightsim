@@ -90,11 +90,29 @@ try {
 if ($LASTEXITCODE -ne 0) {
     # The compile errors scroll off screen in a long build; restate them
     # so the failure is readable where the throw lands.
+    $errText = ""
     if ((Test-Path $errLog) -and (Get-Item $errLog).Length -gt 0) {
+        $errText = (Get-Content $errLog -Raw)
         Write-Host ""
         Write-Host "--- MSBuild errors ($errLog) ---"
-        Get-Content $errLog | Write-Host
+        Write-Host $errText
         Write-Host "---"
+    }
+    # MSB8020 means the v143 toolset is absent -- measured on a machine
+    # with only Visual Studio 2026 (toolset v180) installed. v143 is not
+    # a preference here: UE 5.5 itself is built against VS2022, so the
+    # engine build needs it too. Name the fix rather than the error code.
+    if ($errText -match "MSB8020") {
+        Write-Host ""
+        Write-Host "The VS2022 (v143) build tools are missing -- you appear"
+        Write-Host "to have a newer Visual Studio only. UE 5.5 needs v143 as"
+        Write-Host "well, so install it alongside (no IDE, ~5-7 GB):"
+        Write-Host ""
+        Write-Host "  winget install --id Microsoft.VisualStudio.2022.BuildTools ``"
+        Write-Host "    --override `"--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools ``"
+        Write-Host "    --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --includeRecommended`""
+        Write-Host ""
+        throw "MSBuild failed: the v143 toolset is not installed (see above)"
     }
     throw "MSBuild failed ($LASTEXITCODE) -- the errors are restated above"
 }
