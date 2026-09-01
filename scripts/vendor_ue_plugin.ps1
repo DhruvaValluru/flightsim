@@ -37,8 +37,33 @@ $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer
 if (-not (Test-Path $vswhere)) {
     throw "vswhere.exe not found -- is Visual Studio 2022 installed?"
 }
-$msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild `
-    -find "MSBuild\**\Bin\MSBuild.exe" | Select-Object -First 1
+# Pick the MSBuild from an installation that actually HAS the v143
+# toolset, not simply the newest one. Measured on a machine with both
+# VS2026 and the VS2022 build tools: -latest returns VS2026, whose
+# MSBuild resolves PlatformToolset against its OWN VC directory and
+# cannot see v143 in a sibling installation -- MSB8020 with the toolset
+# sitting right there, installed.
+$msbuild = $null
+$installs = & $vswhere -products * -requires Microsoft.Component.MSBuild `
+    -property installationPath
+foreach ($install in @($installs)) {
+    if (-not $install) { continue }
+    $has143 = Get-ChildItem (Join-Path $install "VC\Tools\MSVC\14.3*") `
+        -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($has143) {
+        $candidate = Get-ChildItem (Join-Path $install "MSBuild") -Recurse `
+            -Filter "MSBuild.exe" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\Bin\\MSBuild.exe$" } |
+            Select-Object -First 1
+        if ($candidate) { $msbuild = $candidate.FullName; break }
+    }
+}
+if (-not $msbuild) {
+    # No v143-bearing installation: fall back to the newest MSBuild and
+    # let the MSB8020 handler below name the real fix.
+    $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild `
+        -find "MSBuild\**\Bin\MSBuild.exe" | Select-Object -First 1
+}
 if (-not $msbuild) {
     throw ("no MSBuild found -- install the 'Desktop development with C++' " +
            "workload in Visual Studio 2022")
