@@ -4,9 +4,15 @@
     .venv/bin/python scripts/import_aircraft.py c172p B747 # just these
     .venv/bin/python scripts/import_aircraft.py --no-import  # skip the UE step
 
+You do NOT have to run this to get a render: since 2026-09-01 the webapp
+provisions a missing model itself on the first run that needs it (the
+terrain fail-safe's pattern, with a status line), so this command is for
+priming a machine ahead of time or for building several airframes at
+once. Every step, and every verification, is shared with that path --
+assets_pipeline/importer.py is the one implementation.
+
 Placeholder airframes never render (owner's rule, extended 2026-08-31:
-on ANY machine -- "always use a real model"), so a fresh machine must be
-one command from real models. Per aircraft config under
+on ANY machine -- "always use a real model"). Per aircraft config under
 assets/aircraft_config/ this:
 
 1. fetches the FlightGear model source at the config's PINNED commit
@@ -23,47 +29,16 @@ after (2) for machines without the engine.
 """
 
 import argparse
-import json
-import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from core.util.platform import ue_editor_path  # noqa: E402
-
-
-def fetch_source(config: dict, config_path: Path) -> Path:
-    """The model repo at the PINNED commit -- shallow, verified, idempotent."""
-    source_dir = (config_path.parent / config["source_dir"]).resolve()
-    repo_url = config["license"]["repo"]
-    commit = config["license"]["commit"]
-    head = source_dir / ".git"
-    if head.is_dir():
-        actual = subprocess.run(["git", "-C", str(source_dir), "rev-parse",
-                                 "HEAD"], capture_output=True, text=True)
-        if actual.returncode == 0 and actual.stdout.strip() == commit:
-            print(f"    source already at {commit[:12]}")
-            return source_dir
-        print(f"    source present but not at the pinned commit; re-fetching")
-    source_dir.mkdir(parents=True, exist_ok=True)
-    if not head.is_dir():
-        subprocess.run(["git", "init", "-q", str(source_dir)], check=True)
-        subprocess.run(["git", "-C", str(source_dir), "remote", "add",
-                        "origin", repo_url], check=True)
-    print(f"    fetching {repo_url} @ {commit[:12]} (shallow)")
-    fetched = subprocess.run(["git", "-C", str(source_dir), "fetch",
-                              "--depth", "1", "origin", commit])
-    if fetched.returncode != 0:
-        # A host that refuses arbitrary-SHA shallow fetches gets the full
-        # history instead; the checkout below still pins the commit.
-        print("    shallow fetch refused; fetching full history")
-        subprocess.run(["git", "-C", str(source_dir), "fetch", "origin"],
-                       check=True)
-    subprocess.run(["git", "-C", str(source_dir), "checkout", "-q", commit],
-                   check=True)
-    return source_dir
+from assets_pipeline.importer import (  # noqa: E402
+    AircraftAssetError, configured_aircraft, convert, fetch_source,
+    import_manifests, load_config, mesh_manifest_path, unavailable_reason,
+)
 
 
 def main(argv=None) -> int:
@@ -74,8 +49,7 @@ def main(argv=None) -> int:
                     help="fetch + convert only; skip the Unreal import step")
     args = ap.parse_args(argv)
 
-    config_dir = REPO / "assets" / "aircraft_config"
-    configs = {p.stem: p for p in sorted(config_dir.glob("*.json"))}
+    configs = configured_aircraft()
     names = args.names or sorted(configs)
     unknown = [n for n in names if n not in configs]
     if unknown:
@@ -83,45 +57,33 @@ def main(argv=None) -> int:
               f"configured: {', '.join(sorted(configs))}")
         return 2
 
-    python = sys.executable
     manifests = []
     failed = []
     skipped = []
     for name in names:
         print(f"  {name}")
-        config_path = configs[name]
-        config = json.loads(config_path.read_text(encoding="utf-8"))
+        report = lambda line: print(f"    {line}")   # noqa: E731
         # Section 3.3: an airframe whose upstream ships no license file
         # cannot render at all, and says so ONCE here rather than dying
         # at the guard on every run.
-        unavailable = config["license"].get("unavailable")
-        if unavailable:
-            print(f"    SKIPPED -- {unavailable}")
+        reason = unavailable_reason(name)
+        if reason:
+            print(f"    SKIPPED -- {reason}")
             skipped.append(name)
             continue
-        manifest = (REPO / "assets" / "generated" / config["name"]
-                    / "mesh_manifest.json")
+        manifest = mesh_manifest_path(name)
         if manifest.is_file():
             print(f"    already converted ({manifest.relative_to(REPO)})")
             manifests.append(manifest)
             continue
-        try:
-            fetch_source(config, config_path)
-        except subprocess.CalledProcessError as exc:
-            print(f"    FETCH FAILED ({exc}) -- continuing with the rest")
-            failed.append(name)
-            continue
-        print(f"    converting (license-verified, FDM-matched)")
-        converted = subprocess.run(
-            [python, str(REPO / "assets_pipeline" / "convert.py"),
-             str(config_path)], cwd=REPO)
         # One aircraft's failure must not cost the others their fetch and
         # convert: report it at the end, by name, and keep going.
-        if converted.returncode != 0 or not manifest.is_file():
-            print(f"    CONVERT FAILED for {name} -- continuing with the rest")
+        try:
+            fetch_source(load_config(name), configs[name], report)
+            manifests.append(convert(configs[name], report))
+        except Exception as exc:
+            print(f"    FAILED for {name} ({exc}) -- continuing with the rest")
             failed.append(name)
-            continue
-        manifests.append(manifest)
 
     def summary() -> None:
         if skipped:
@@ -142,56 +104,12 @@ def main(argv=None) -> int:
         summary()
         return 1 if failed else 0
 
-    editor = ue_editor_path()
-    if editor is None or not editor.is_file():
-        print(f"\nno UnrealEditor-Cmd at {editor} (set UE_ROOT, or use "
-              f"--no-import on a machine without the engine)")
+    print()
+    try:
+        import_manifests(manifests, lambda line: print(f"  {line}"))
+    except AircraftAssetError as exc:
+        print(f"\nimport FAILED -- {exc.message}")
         return 1
-    # One editor invocation for every manifest: ue_import_aircraft.py
-    # re-verifies each imported mesh by loading it back (empty-import
-    # protection), and fails THERE, not at render time.
-    #
-    # FORWARD SLASHES, always. UE parses the -script= value through its
-    # own string unescaping, so a Windows path eats "\u" as an escape:
-    # measured 2026-09-01, "scripts\ue_import_aircraft.py" reached the
-    # engine as "scripts_import_aircraft.py" and could not be loaded.
-    # Every path in this argument is posix-form for that reason; UE
-    # accepts forward slashes on Windows everywhere.
-    script_arg = " ".join(
-        [(REPO / "scripts" / "ue_import_aircraft.py").as_posix()]
-        + [Path(m).as_posix() for m in manifests])
-    print(f"\n  importing {len(manifests)} aircraft into the Unreal project")
-    imported = subprocess.run(
-        [str(editor), str(REPO / "ue" / "FlightSim.uproject"),
-         "-run=pythonscript", f"-script={script_arg}",
-         "-unattended", "-nopause", "-nosplash", "-stdout"], cwd=REPO)
-
-    # VERIFY THE ASSETS, don't trust the exit code. The editor returns
-    # non-zero if ANY error was logged during the session, including ones
-    # that have nothing to do with the import: measured 2026-09-01, a
-    # cosmetic "PostImport Texture failed to lock mip data" on one A320
-    # texture made a completely successful import of four aircraft
-    # (Python script executed successfully, every part built) report
-    # failure. What matters is whether the .uasset files exist.
-    content = REPO / "ue" / "Content"
-    missing = []
-    for manifest_path in manifests:
-        manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
-        # /Game/Aircraft/<name> is ue/Content/Aircraft/<name> on disk.
-        root = manifest["asset_path_root"].replace("/Game/", "", 1)
-        for part in manifest["parts"]:
-            if not (content / root / f"{part}.uasset").is_file():
-                missing.append(f"{manifest['name']}/{part}")
-    if missing:
-        print(f"\nimport FAILED -- these assets are not on disk: "
-              f"{', '.join(missing[:12])}"
-              + (" ..." if len(missing) > 12 else ""))
-        print("scroll up for the editor's error")
-        return 1
-    if imported.returncode != 0:
-        print(f"\n(the editor exited {imported.returncode}, but every "
-              f"expected asset is on disk -- engine-level warnings, not an "
-              f"import failure; scroll up if you want to read them)")
     print(f"\nImported {len(manifests)} aircraft. Renders now use the real "
           f"models; aircraft without one refuse by name instead of showing "
           f"placeholders.")

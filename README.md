@@ -119,7 +119,9 @@ Games Launcher) plus the platform toolchain:
   point, and `experiments\gate6_visual.py` validates the render output
   on your machine afterwards.
 
-Then two one-command asset steps, either OS:
+Then two asset steps, either OS -- **optional since 2026-09-01**: a
+render provisions whatever it needs itself, in the open, so these are
+for priming a machine ahead of time rather than prerequisites.
 
 * **Real terrain**: `python scripts/bake_terrain.py` bakes the showcase
   terrains (Matterhorn, Yosemite, the synthesised control ridge) into
@@ -129,10 +131,18 @@ Then two one-command asset steps, either OS:
   while a user-stated flat place stays honestly flat.
 * **Real aircraft**: `python scripts/import_aircraft.py` fetches each
   configured model at its pinned commit (license verified on disk),
-  converts it, and imports it into the Unreal project. Placeholder
-  airframes never render on ANY machine (owner's rule, extended
-  2026-08-31): an aircraft without a real model refuses by name with
-  this command in the message.
+  converts it, and imports it into the Unreal project. Renders carry
+  the same fail-safe the terrain does: the first run that needs a model
+  this machine can build **builds it then and there**, with a status
+  line per step (user request 2026-09-01 -- a missing mesh is not the
+  user's chore). Placeholder airframes still never render on ANY
+  machine (owner's rule, extended 2026-08-31), so two things still
+  refuse by name before any editor time and no automation reaches
+  around them: an airframe with **no model config** (nothing to fetch),
+  and one whose **upstream ships no license file** (section 3.3 -- the
+  p51d today, physics-only until upstream publishes one). A build that
+  starts and fails fails the run by name (`aircraft.mesh_import`); it
+  never falls through to blocks.
 
 Materials come from `scripts/ue_create_materials.py` (run inside
 UnrealEditor-Cmd; `ue_preflight` names the exact invocation when they

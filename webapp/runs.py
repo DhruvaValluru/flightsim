@@ -708,25 +708,81 @@ def refuse_placeholder_mesh(spec: ScenarioSpec) -> Optional[Dict]:
     run rendered the placeholder and the owner rejected it, then the
     first Windows deploy rendered the box airframe on a mesh-less
     machine and the owner rejected that too -- "always use a real
-    model"). The refusal names the one command that imports the models,
-    so a fresh machine is a step away, never a surprise mid-clip.
+    model").
+
+    NARROWED 2026-09-01 (user request: "i cant run commands for every
+    single mesh they should upload by themselves"). A missing model is
+    no longer a refusal when this machine can BUILD it: the render flow
+    provisions it once, in the open, exactly as the terrain fail-safe
+    provisions the control ridge. What survives here is what no command
+    can fix, and both still refuse before any editor time:
+
+    * no config for the airframe -- there is nothing to fetch;
+    * upstream ships no license file (VALIDITY 3.3) -- it may never
+      render at all, so automation must not reach for it either.
+
+    A model that CAN be built but FAILS to build does not fall through
+    to placeholders; it fails the run by name (aircraft.mesh_import) in
+    _render_flow.
     """
-    have = renderable_aircraft()
+    from assets_pipeline.importer import (configured_aircraft,
+                                          unavailable_reason)
+
     aircraft = str(spec.aircraft.value)
-    if aircraft in have:
+    if aircraft in renderable_aircraft():
         return None
-    configured = sorted(
-        p.stem for p in (REPO / "assets" / "aircraft_config").glob("*.json"))
-    here = (f"Renderable on this machine: {', '.join(have)}. " if have
-            else "No models are imported on this machine yet. ")
-    return {
-        "constraint": "aircraft.mesh",
-        "message": f"the {aircraft} has real flight physics but no "
-                   f"licensed 3-D model imported here, and placeholder "
-                   f"airframes never render. {here}Import the licensed "
-                   f"models with: python scripts/import_aircraft.py "
-                   f"(configured: {', '.join(configured)}).",
-    }
+    # Only airframes that can ACTUALLY be built belong in this list: one
+    # whose upstream ships no license (p51d today) would send the reader
+    # after a model that will refuse for a reason no command can fix.
+    buildable = sorted(n for n in configured_aircraft()
+                       if not unavailable_reason(n))
+    reason = unavailable_reason(aircraft)
+    if reason:
+        return {
+            "constraint": "aircraft.mesh",
+            "message": f"the {aircraft} has real flight physics but can "
+                       f"never render: {reason}",
+        }
+    if aircraft not in buildable:
+        return {
+            "constraint": "aircraft.mesh",
+            "message": f"the {aircraft} has real flight physics but no "
+                       f"licensed 3-D model is configured for it, and "
+                       f"placeholder airframes never render. Airframes "
+                       f"with a model this machine can build: "
+                       f"{', '.join(buildable)}.",
+        }
+    return None         # buildable: the run provisions it, in the open
+
+
+def ensure_aircraft_model(spec: ScenarioSpec, report) -> None:
+    """AIRCRAFT FAIL-SAFE: build the licensed model this render needs.
+
+    The control-ridge fail-safe's pattern (owner's rule 2026-08-31),
+    applied to the other prerequisite a fresh machine lacks. The FIRST
+    render that needs an airframe pays its one-time fetch/convert/import
+    here -- with a status line per step, never silently -- rather than
+    refusing and handing the user a command to run (user request
+    2026-09-01: "i cant run commands for every single mesh they should
+    upload by themselves").
+
+    Render path ONLY, like the ridge: tests and CI never provision, so a
+    checkout's asset state stays deterministic and no test run reaches
+    the network or the editor.
+
+    Raises AircraftAssetError -- named -- if the model cannot be built.
+    NOTHING here falls through to the placeholder airframe: that is the
+    rule this fail-safe serves, not one it relaxes.
+    """
+    from assets_pipeline.importer import ensure_model, is_imported
+
+    aircraft = str(spec.aircraft.value)
+    if is_imported(aircraft):
+        return
+    report(f"the {aircraft} model is not on this machine yet; building it "
+           f"once (fetch at the pinned commit, convert, import)")
+    ensure_model(aircraft, report)
+    report(f"the {aircraft} model is ready")
 
 
 def plan_scene_setting(spec: ScenarioSpec) -> None:
@@ -1440,6 +1496,17 @@ class RunManager:
             run.push("terrain", "synthesising the control-ridge terrain "
                                 "fail-safe (one-time, local)")
             ensure_control_ridge()
+        # Aircraft fail-safe, the same shape: the licensed model this
+        # render needs, built and imported now. A failure here fails the
+        # run BY NAME -- it never falls through to placeholder blocks.
+        from assets_pipeline.importer import AircraftAssetError
+
+        try:
+            ensure_aircraft_model(spec,
+                                  lambda line: run.push("aircraft", line))
+        except AircraftAssetError as exc:
+            run.push("failed", f"[{exc.constraint}] {exc.message}")
+            return
         scene = pick_scene(spec)
         run.scene = scene
 

@@ -21,7 +21,7 @@ CLI: python -m flightsim.capture / flightsim.verify (examples/
 -camera-index= pass reading the card's cameras block, written by
 capture --card) compiles logically but was never built or rendered --
 the report's engine-boundary section carries the exact verification
-steps. Suite 558 tests collected, 108 mutation guards. Measured on a
+steps. Suite 573 tests collected, 114 mutation guards. Measured on a
 raster-less clone (no runs/terrain bakes): 104 guards fire; the FOUR
 terrain-coupled planner guards (ridge-axis wind, rotor card word,
 span-station clearance minimum, orographic pre-flight) report WEAK
@@ -31,6 +31,23 @@ it is an environment artifact of guard MEASUREMENT, not a regression;
 they fire on a machine with the bakes. Worth fixing by giving those
 tests a synthetic raster fixture (the camera tests' make_mountain
 pattern) so every guard is machine-independent.
+
+**Aircraft fail-safe (2026-09-01, one commit).** A model a machine can
+BUILD is no longer a refusal: the render flow provisions it on first
+need, exactly as ensure_control_ridge synthesises the ridge, reporting
+each step as a run status line (user: "i cant run commands for every
+single mesh they should upload by themselves"). assets_pipeline/
+importer.py is now the ONE implementation of fetch-at-pinned-commit ->
+convert -> import-and-verify; scripts/import_aircraft.py is a thin CLI
+over it, so the command and the app cannot drift. The owner's
+placeholder rule is UNCHANGED and narrowed only where automation cannot
+help: an airframe with no config, and one whose upstream ships no
+license file (VALIDITY 3.3 -- refused BEFORE any fetch, so automation
+is not a back door to unattributed geometry), still refuse
+aircraft.mesh by name; a build that fails fails the run by name
+(aircraft.mesh_import) and never reaches a render. Six guards, all
+verified firing. Render path only -- tests and CI never provision, so a
+checkout's asset state stays deterministic.
 
 **Scene director + cross-platform (2026-08-13, two commits -- the full
 narrative is docs/CONTEXT_SCENE_DIRECTOR_SESSION.md).** The LLM now

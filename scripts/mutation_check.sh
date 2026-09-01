@@ -814,6 +814,45 @@ mutate webapp/runs.py \
     "the camera planner never moves a stated placement" \
     tests/test_camera_spec.py || failures=$((failures+1))
 
+# -- Aircraft fail-safe guards --------------------------------------------
+
+mutate assets_pipeline/importer.py \
+    '    if reason:' \
+    '    if False:  # MUTATED: an unlicensable airframe is fetched anyway' \
+    "an airframe with no upstream license is never fetched (3.3)" \
+    tests/test_aircraft_assets.py || failures=$((failures+1))
+
+mutate assets_pipeline/importer.py \
+    '    if missing:' \
+    '    if False:  # MUTATED: trust the editor exit code' \
+    "an import is verified by the assets, not the editor exit code" \
+    tests/test_aircraft_assets.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '    if aircraft not in buildable:' \
+    '    if False:  # MUTATED: an airframe with no config renders anyway' \
+    "an airframe with no model config still refuses by name" \
+    tests/test_aircraft_assets.py tests/test_webapp.py \
+    || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '                       if not unavailable_reason(n))' \
+    '                       if True)  # MUTATED: offer unbuildable airframes' \
+    "the refusal never points at an airframe that cannot be built" \
+    tests/test_aircraft_assets.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '    if is_imported(aircraft):' \
+    '    if False:  # MUTATED: rebuild the model on every render' \
+    "the aircraft fail-safe builds once, not once per render" \
+    tests/test_aircraft_assets.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '            run.push("failed", f"[{exc.constraint}] {exc.message}")' \
+    '            pass  # MUTATED: a failed model build is not named' \
+    "a failed model build fails the run BY NAME" \
+    tests/test_aircraft_assets.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

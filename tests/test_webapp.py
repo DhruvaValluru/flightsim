@@ -574,8 +574,14 @@ def test_placeholder_airframes_never_render(client, monkeypatch):
     """Owner's rule (2026-08-14, extended 2026-08-31): an aircraft
     without a real licensed 3-D model refuses to render BY NAME on ANY
     machine -- a mesh-less fresh clone included ("always use a real
-    model", measured on the first Windows deploy). The refusal names the
-    import command, so a fresh machine is one step from real models."""
+    model", measured on the first Windows deploy).
+
+    NARROWED 2026-09-01: a model this machine can BUILD is no longer a
+    refusal -- the render flow provisions it (tests/test_aircraft_assets.py
+    pins that half). What still refuses here is what no command can fix:
+    the f15 has no config, so there is nothing to fetch. The refusal
+    names the airframes that can be built instead of an import command
+    that would not help this one."""
     from webapp.runs import refuse_placeholder_mesh, renderable_aircraft
 
     spec = compile_prompt("fly the f15 at 5000 m and 350 kt")
@@ -583,7 +589,7 @@ def test_placeholder_airframes_never_render(client, monkeypatch):
     assert refusal is not None
     assert refusal["constraint"] == "aircraft.mesh"
     assert "f15" in refusal["message"]
-    assert "import_aircraft" in refusal["message"]
+    assert "B747" in refusal["message"]
     have = renderable_aircraft()
     if have:                    # with real models imported, those pass
         real = compile_prompt("fly the 747 at 3000 m and 250 kt")
