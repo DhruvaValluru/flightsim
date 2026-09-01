@@ -150,8 +150,16 @@ def main(argv=None) -> int:
     # One editor invocation for every manifest: ue_import_aircraft.py
     # re-verifies each imported mesh by loading it back (empty-import
     # protection), and fails THERE, not at render time.
-    script_arg = " ".join([str(REPO / "scripts" / "ue_import_aircraft.py")]
-                          + [str(m) for m in manifests])
+    #
+    # FORWARD SLASHES, always. UE parses the -script= value through its
+    # own string unescaping, so a Windows path eats "\u" as an escape:
+    # measured 2026-09-01, "scripts\ue_import_aircraft.py" reached the
+    # engine as "scripts_import_aircraft.py" and could not be loaded.
+    # Every path in this argument is posix-form for that reason; UE
+    # accepts forward slashes on Windows everywhere.
+    script_arg = " ".join(
+        [(REPO / "scripts" / "ue_import_aircraft.py").as_posix()]
+        + [Path(m).as_posix() for m in manifests])
     print(f"\n  importing {len(manifests)} aircraft into the Unreal project")
     imported = subprocess.run(
         [str(editor), str(REPO / "ue" / "FlightSim.uproject"),
