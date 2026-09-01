@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import zipfile
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -39,6 +40,7 @@ from core.nl.llm_compiler import (  # noqa: E402
 )
 from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import validate  # noqa: E402
+from webapp.capture import run_artifacts  # noqa: E402
 from webapp.runs import (  # noqa: E402
     CLIP_SECONDS,
     RunManager,
@@ -245,13 +247,21 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
     return JSONResponse(payload)
 
 
-@app.post("/run")
-def run_endpoint(request: RunRequest) -> JSONResponse:
+def _prepare_run_spec(request: RunRequest):
+    """Everything both run endpoints do before anything host-specific:
+    parse, plan, project, validate, refuse by name.
+
+    Returns (spec, None) when the spec is ready to run, or (None,
+    response) carrying the named refusal. Factored out so the capture
+    endpoint cannot drift from the render endpoint's planner ORDER --
+    that order is load-bearing and pinned by tests, and two copies of it
+    would be two chances to get it wrong.
+    """
     try:
         spec = ScenarioSpec.from_dict(request.spec)
     except (ValueError, KeyError) as exc:
-        return JSONResponse({"error": f"spec did not parse: {exc}"},
-                            status_code=400)
+        return None, JSONResponse(
+            {"error": f"spec did not parse: {exc}"}, status_code=400)
 
     # The recorded transformations happen BEFORE the digest is answered, so
     # the response content-addresses exactly what will run: the derived
@@ -267,8 +277,8 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     plan_scene_setting(spec)
     unbaked = needs_dynamic_bake(spec)
     if unbaked is not None:
-        return JSONResponse({"refused": "terrain.unbaked", **unbaked},
-                            status_code=409)
+        return None, JSONResponse(
+            {"refused": "terrain.unbaked", **unbaked}, status_code=409)
     place_on_scene(spec)
     # Severe-weather composition edits (thunderstorm -> severe turbulence
     # when the word was defaulted): recorded, pre-digest, like every other
@@ -279,8 +289,9 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # spec edit like every other transformation, or a named refusal.
     weather_refusal = apply_historical_weather(spec)
     if weather_refusal is not None:
-        return JSONResponse({"refused": "weather", **weather_refusal},
-                            status_code=409)
+        return None, JSONResponse(
+            {"refused": "weather", **weather_refusal},
+            status_code=409)
     # PLANNER ORDER (load-bearing, pinned by tests): place_on_scene ->
     # apply_weather_event -> apply_historical_weather ->
     # plan_terrain_environment -> derive_seed -> plan_terrain_flight ->
@@ -333,8 +344,17 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
         verdict["ok"] = False
         verdict["violations"].extend(camera_refusals)
     if not verdict["ok"]:
-        return JSONResponse({"refused": "validation", **verdict},
-                            status_code=409)
+        return None, JSONResponse({"refused": "validation", **verdict},
+                                  status_code=409)
+    return spec, None
+
+
+@app.post("/run")
+def run_endpoint(request: RunRequest) -> JSONResponse:
+    """Render a clip -- and capture its geometry beside it."""
+    spec, refusal = _prepare_run_spec(request)
+    if refusal is not None:
+        return refusal
 
     # REFUSAL ORDER after validation (load-bearing, pinned by test):
     # ue.platform BEFORE aircraft.mesh. A machine with no engine build
@@ -357,6 +377,30 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
                             status_code=409)
 
     outcome = manager.start(spec, provenance={
+        "prompt": spec.prompt,
+        **{k: v for k, v in request.provenance.items()
+           if k in ("compiler", "model", "transcript")},
+    })
+    if "refused" in outcome:
+        return JSONResponse(outcome, status_code=409)
+    return JSONResponse({**outcome, "digest": spec.digest()})
+
+
+@app.post("/capture")
+def capture_endpoint(request: RunRequest) -> JSONResponse:
+    """The capture half alone: labeled geometry, no pixels.
+
+    The same spec preparation and the same named refusals as /run, minus
+    the host gates -- nothing here opens the editor, so this works on
+    every platform, exactly as `python -m flightsim.capture` does. It is
+    what the page offers when rendering would refuse ue.platform, and
+    what a user wanting the data rather than the picture can ask for
+    directly.
+    """
+    spec, refusal = _prepare_run_spec(request)
+    if refusal is not None:
+        return refusal
+    outcome = manager.start_capture(spec, provenance={
         "prompt": spec.prompt,
         **{k: v for k, v in request.provenance.items()
            if k in ("compiler", "model", "transcript")},
@@ -459,6 +503,73 @@ def run_provenance(run_id: str):
     if not path.is_file():
         return JSONResponse({"error": "no provenance"}, status_code=404)
     return JSONResponse(json.loads(path.read_text(encoding="utf-8")))
+
+
+@app.get("/runs/{run_id}/files")
+def run_files(run_id: str) -> JSONResponse:
+    """Every artefact this run left on disk, with a note saying what each
+    one IS. The page renders it as the download list, so a user never has
+    to know a path to get the manifest, the previews or the verification
+    (user request 2026-09-01)."""
+    if not run_id.isalnum():
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    return JSONResponse({"run_id": run_id,
+                         "files": run_artifacts(manager.out_root / run_id)})
+
+
+def _artifact_paths(run_id: str) -> set:
+    """The set of relative paths this run is willing to serve.
+
+    A WHITELIST, built from what the run actually wrote, rather than a
+    path check: the served name has to be one this run listed, so no
+    amount of traversal in the request can name a file outside it.
+    """
+    names = set()
+    for entry in run_artifacts(manager.out_root / run_id):
+        if "images" in entry:
+            names.update(entry["images"])
+        else:
+            names.add(entry["name"])
+    return names
+
+
+MEDIA_TYPES = {".json": "application/json", ".yaml": "text/plain",
+               ".log": "text/plain", ".png": "image/png",
+               ".mp4": "video/mp4"}
+
+
+@app.get("/runs/{run_id}/file/{name:path}")
+def run_file(run_id: str, name: str):
+    """Download one artefact by the name /runs/{id}/files listed."""
+    if not run_id.isalnum() or name not in _artifact_paths(run_id):
+        return JSONResponse({"error": "no such file in this run"},
+                            status_code=404)
+    path = manager.out_root / run_id / name
+    return FileResponse(
+        path, media_type=MEDIA_TYPES.get(path.suffix, "application/json"),
+        filename=path.name)
+
+
+@app.get("/runs/{run_id}/bundle.zip")
+def run_bundle(run_id: str):
+    """Every artefact of one run, in one download.
+
+    Built from the same whitelist the individual links use, so the zip
+    and the list can never disagree about what the run produced.
+    """
+    if not run_id.isalnum():
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    names = sorted(_artifact_paths(run_id))
+    if not names:
+        return JSONResponse({"error": "this run produced no files"},
+                            status_code=404)
+    out = manager.out_root / run_id
+    bundle = out / "bundle.zip"
+    with zipfile.ZipFile(bundle, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name in names:
+            archive.write(out / name, arcname=name)
+    return FileResponse(bundle, media_type="application/zip",
+                        filename=f"flightsim-run-{run_id}.zip")
 
 
 @app.websocket("/telemetry")

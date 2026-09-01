@@ -101,8 +101,12 @@ visual-only per host (measured).</p>
   <div id="verdict"></div>
   <p>
     <button id="run" class="run">Run</button>
+    <button id="capture">Capture geometry</button>
     <span class="dim">re-validated server-side before anything renders;
-    clip capped at 22 s</span>
+    clip capped at 22 s. <b>Run</b> renders the clip <i>and</i> captures
+    the geometry beside it; <b>Capture geometry</b> does the labeled-data
+    half alone &mdash; manifest, previews and verification &mdash; and
+    needs no engine, so it works on any machine.</span>
   </p>
 </div>
 
@@ -374,10 +378,11 @@ $("answer").addEventListener("click", () => {
              prior_spec: compiled ? compiled.spec.dict : null});
 });
 
-$("run").addEventListener("click", () => startRun(true));
+$("run").addEventListener("click", () => startRun(true, "/run"));
+$("capture").addEventListener("click", () => startRun(true, "/capture"));
 
-async function startRun(mayBake) {
-  const response = await fetch("/run", {
+async function startRun(mayBake, endpoint) {
+  const response = await fetch(endpoint, {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       spec: editedSpecDict(),
@@ -414,7 +419,7 @@ async function startRun(mayBake) {
       return;
     }
     $("status").textContent = `baked and verified: ${scene.title}`;
-    return startRun(false);
+    return startRun(false, endpoint);
   }
   if (payload.refused) {
     $("status").innerHTML =
@@ -458,24 +463,98 @@ async function poll() {
     (e.detail ? ` — ${e.detail}` : "")).join("\n");
   $("status").textContent = line;
   if (run.status === "done") {
+    // A capture-only run has no clip, and the page says so rather than
+    // showing a broken video element.
+    const clip = run.clip
+      ? `<video id="clipVideo" controls src="/runs/${activeRun}/clip.mp4">` +
+        `</video>`
+      : `<div class="dim">no clip: this was a capture run (the geometry ` +
+        `below is the deliverable)</div>`;
     $("clipArea").innerHTML =
       `<div class="clipRow"><div class="clipMain">` +
       `<div class="dim">scene: ${run.scene.label || run.scene.kind}</div>` +
-      `<video id="clipVideo" controls src="/runs/${activeRun}/clip.mp4">` +
-      `</video>` +
-      `<div class="dim"><a style="color:#6fb3e0" ` +
-      `href="/runs/${activeRun}/provenance.json">provenance</a> · ` +
-      `<a style="color:#6fb3e0" ` +
-      `href="/runs/${activeRun}/telemetry.json">telemetry</a></div>` +
+      clip +
       `<div id="pathArea"></div>` +
       `</div><div class="aeroSide" id="aeroSide"></div></div>` +
+      `<div id="captureArea"></div>` +
+      `<div id="filesArea"></div>` +
       `<div id="effectArea"></div>`;
-    initAeroPanel(activeRun, run);
+    renderCapture(run);
+    initFilesPanel(activeRun);
+    if (run.clip) initAeroPanel(activeRun, run);
     initFlightPath(activeRun, run);
     initEffectReport(activeRun);
   } else if (run.status !== "failed") {
     setTimeout(poll, 2000);
   }
+}
+
+// ===================== capture geometry + downloads =======================
+// Camera Phase 1's deliverable, on the page: how many frames each camera
+// captured (an exact count is a CONTRACT, so it is shown as one), and the
+// verifier's own five checks -- rendered from verify.json as run, never
+// re-derived here.
+
+function renderCapture(run) {
+  const holder = $("captureArea");
+  if (!holder || !run.capture) return;
+  if (run.capture.refused) {
+    holder.innerHTML =
+      `<div class="card"><b>capture refused</b> — ` +
+      `<span class="verdict-refused">[${run.capture.refused}] ` +
+      `${run.capture.message}</span></div>`;
+    return;
+  }
+  const cameras = (run.capture.cameras || []).map(c =>
+    `<li><b>${c.camera_id}</b>: ${c.frames} frame(s)</li>`).join("");
+  const v = run.capture.verification || {checks: []};
+  const checks = v.checks.map(c =>
+    `<li><b style="color:${c.ok ? "#6fd08c" : "#e06f6f"}">` +
+    `${c.ok ? "PASS" : "FAIL"}</b> ${c.name} — ` +
+    `<span class="dim">${c.detail}</span></li>`).join("");
+  const capped = run.capture.previews_capped
+    ? ` <span class="dim">(previews capped at ${run.capture.preview_cap}; ` +
+      `the manifest carries every frame)</span>` : "";
+  holder.innerHTML =
+    `<div class="card"><b>captured geometry</b> — ` +
+    `${run.capture.frames} frame(s), ${run.capture.previews} preview(s)` +
+    capped +
+    `<ul>${cameras}</ul>` +
+    `<b>verification ${v.ok ? "PASSED" : "FAILED"}</b>` +
+    `<ul>${checks}</ul></div>`;
+}
+
+async function initFilesPanel(runId) {
+  // Every artefact the run wrote, as a link. The server lists them; the
+  // page never guesses a path, so a file that is not there simply does
+  // not appear rather than becoming a dead link.
+  const holder = $("filesArea");
+  if (!holder) return;
+  let files = [];
+  try {
+    const response = await fetch(`/runs/${runId}/files`);
+    if (!response.ok) return;
+    files = (await response.json()).files || [];
+  } catch (error) { return; }
+  if (!files.length) return;
+  const rows = files.map(f => {
+    if (f.images) {
+      const thumbs = f.images.slice(0, 8).map(name =>
+        `<a href="/runs/${runId}/file/${name}" target="_blank">` +
+        `<img src="/runs/${runId}/file/${name}" ` +
+        `style="height:54px;margin:2px;border:1px solid #333"></a>`).join("");
+      return `<li><b>${f.name}</b> <span class="dim">— ${f.note}</span>` +
+             `<div>${thumbs}</div></li>`;
+    }
+    const kb = (f.bytes / 1024).toFixed(1);
+    return `<li><a style="color:#6fb3e0" ` +
+           `href="/runs/${runId}/file/${f.name}">${f.name}</a> ` +
+           `<span class="dim">${kb} kB — ${f.note}</span></li>`;
+  }).join("");
+  holder.innerHTML =
+    `<div class="card"><b>files from this run</b> ` +
+    `<a style="color:#6fb3e0" href="/runs/${runId}/bundle.zip">` +
+    `download all (.zip)</a><ul>${rows}</ul></div>`;
 }
 
 // ===================== the aerodynamics side panel ========================

@@ -241,6 +241,18 @@ capture manifest, geometry previews and verification complete; the
 refusal example (`examples/cameras_refusal.yaml`) shows a camera placed
 inside terrain refused as `camera.terrain_clearance`.
 
+**The same thing from the web app**, with nothing to download by hand:
+**Run** renders the clip *and* captures the geometry beside it, while
+**Capture geometry** does the labeled-data half alone -- no engine
+needed, so it works on any machine. Either way the page then lists every
+artefact the run wrote (manifest, verification, previews, telemetry,
+card, provenance, the spec as run) as links, with a one-click
+`bundle.zip` for all of them, and shows the per-camera frame counts and
+the verifier's own five checks. The capture is solved from its own
+headless flight and written under `capture/` beside that flight's
+telemetry, so a reader can always tell which host produced which number
+-- the run's top-level `telemetry.json` stays the rendered flight's.
+
 ## Run the tests
 
 ```bash

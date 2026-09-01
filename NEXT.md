@@ -21,7 +21,7 @@ CLI: python -m flightsim.capture / flightsim.verify (examples/
 -camera-index= pass reading the card's cameras block, written by
 capture --card) compiles logically but was never built or rendered --
 the report's engine-boundary section carries the exact verification
-steps. Suite 573 tests collected, 114 mutation guards. Measured on a
+steps. Suite 583 tests collected, 118 mutation guards. Measured on a
 raster-less clone (no runs/terrain bakes): 104 guards fire; the FOUR
 terrain-coupled planner guards (ridge-axis wind, rotor card word,
 span-station clearance minimum, orographic pre-flight) report WEAK
@@ -31,6 +31,25 @@ it is an environment artifact of guard MEASUREMENT, not a regression;
 they fire on a machine with the bakes. Worth fixing by giving those
 tests a synthetic raster fixture (the camera tests' make_mountain
 pattern) so every guard is machine-independent.
+
+**Capture on the page (2026-09-01, one commit).** Camera Phase 1's
+deliverable reached the webapp. webapp/capture.py drives the SAME
+solver, scheduler, manifest, verifier and previews the CLI does: every
+/run now captures beside the clip, and a new POST /capture runs the
+labeled-data half alone with no platform gate (nothing there opens the
+editor, so it works wherever flightsim.capture does). /runs/{id}/files
+lists every artefact with a note saying what it is, /runs/{id}/file/{name}
+serves one from a WHITELIST built out of what the run actually wrote
+(not a path check -- an encoded traversal is a 404 by construction), and
+/runs/{id}/bundle.zip is the same set in one download. The page renders
+per-camera frame counts and the verifier's own five checks from
+verify.json as run, never a second opinion. Both endpoints share
+_prepare_run_spec, so the load-bearing planner ORDER cannot drift
+between them. WHICH FLIGHT: the capture is solved from its own headless
+run_spec and written under capture/ beside that run's telemetry; the
+run's top-level telemetry.json stays the rendered flight's -- two hosts,
+two files, neither presented as the other. Ten tests, four guards, all
+verified firing.
 
 **Aircraft fail-safe (2026-09-01, one commit).** A model a machine can
 BUILD is no longer a refusal: the render flow provisions it on first

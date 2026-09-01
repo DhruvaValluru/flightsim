@@ -84,6 +84,10 @@ class RunState:
     # seed + visual-only label, wind, physics ground).
     reference: Optional[Dict] = None
     conditions: Dict = field(default_factory=dict)
+    #: Camera Phase 1's capture half: per-camera frame counts, preview
+    #: count and the verification report. None until the capture phase
+    #: runs (and on a run whose capture refused by name).
+    capture: Optional[Dict] = None
 
     def push(self, status: str, detail: str = "") -> None:
         self.status = status
@@ -96,7 +100,8 @@ class RunState:
                 "detail": self.detail, "spec_digest": self.spec_digest,
                 "scene": self.scene, "clip": self.clip,
                 "started": self.started, "events": self.events[-20:],
-                "reference": self.reference, "conditions": self.conditions}
+                "reference": self.reference, "conditions": self.conditions,
+                "capture": self.capture}
 
 
 def editor_running() -> bool:
@@ -1421,6 +1426,31 @@ class RunManager:
         thread.start()
         return {"run_id": run.run_id}
 
+    def start_capture(self, spec: ScenarioSpec, provenance: Dict) -> Dict:
+        """Start a CAPTURE-ONLY run: the manifest, previews and
+        verification, with no pixels and no engine.
+
+        No platform gate -- this is the half that runs everywhere, so a
+        machine that hears ue.platform for a clip can still get the
+        labeled data from the same page. No editor-lock check either:
+        nothing here opens the editor. The one-run-at-a-time rule
+        stands, because the page shows one run.
+        """
+        with self._lock:
+            active = self.runs.get(self._active) if self._active else None
+            if active is not None and active.status not in ("done", "failed"):
+                return {"refused": f"a run is already {active.status} "
+                                   f"({active.run_id}); one at a time"}
+            run = RunState(run_id=uuid.uuid4().hex[:12],
+                           spec_digest=spec.digest())
+            self.runs[run.run_id] = run
+            self._active = run.run_id
+        thread = threading.Thread(
+            target=self._execute, args=(run, spec, provenance),
+            kwargs={"flow": self._capture_flow}, daemon=True)
+        thread.start()
+        return {"run_id": run.run_id}
+
     # -- the pipeline ------------------------------------------------------
 
     @staticmethod
@@ -1476,10 +1506,64 @@ class RunManager:
                            stdin=subprocess.DEVNULL)
         return (frames / "render.json").is_file()
 
-    def _execute(self, run: RunState, spec: ScenarioSpec,
-                 provenance: Dict) -> None:
+    @staticmethod
+    def _capture_phase(run: RunState, spec: ScenarioSpec, scene: Dict,
+                       out: Path) -> bool:
+        """Camera Phase 1's capture half, run for every run.
+
+        The clip is the picture; this is the labeled data beside it --
+        capture_manifest.json, the geometry previews and the verifier's
+        own report, all under out/capture and all downloadable from the
+        page (user request 2026-09-01). Returns True when it produced a
+        manifest.
+
+        A named capture refusal is REPORTED, not raised: on a render run
+        the clip is already made and stands on its own, and a refusal
+        that silently discarded it would be the worse outcome. The run
+        says which constraint refused, and no manifest is written.
+        """
+        from webapp.capture import CaptureError, capture_run
+
+        run.push("capture", "solving camera geometry and capture schedule")
         try:
-            self._render_flow(run, spec, provenance)
+            run.capture = capture_run(
+                spec, out, scene, lambda line: run.push("capture", line))
+        except CaptureError as exc:
+            run.capture = {"refused": exc.constraint,
+                           "message": exc.message}
+            run.push("capture", f"[{exc.constraint}] {exc.message}")
+            return False
+        return True
+
+    def _capture_flow(self, run: RunState, spec: ScenarioSpec,
+                      provenance: Dict) -> None:
+        """A run with no pixels: the capture half alone.
+
+        Every platform can do this -- it is the CLI's pipeline, which is
+        why flightsim.capture works off a render host. A machine with no
+        engine still gets the manifest, the previews and the
+        verification through the page rather than being told to open a
+        terminal.
+        """
+        out = self.out_root / run.run_id
+        out.mkdir(parents=True, exist_ok=True)
+        scene = pick_scene(spec)
+        run.scene = scene
+        derive_seed(spec, terrain_coupled=coupling_needs_seed(spec))
+        spec.write(out / "scenario.yaml")
+        (out / "provenance.json").write_text(json.dumps({
+            **provenance, "spec_digest": spec.digest(), "scene": scene,
+            "capture_only": True,
+        }, indent=1), encoding="utf-8")
+        if not self._capture_phase(run, spec, scene, out):
+            run.push("failed", str(run.capture.get("message", "refused")))
+            return
+        run.push("done", "capture ready (no pixels on this platform)")
+
+    def _execute(self, run: RunState, spec: ScenarioSpec,
+                 provenance: Dict, flow=None) -> None:
+        try:
+            (flow or self._render_flow)(run, spec, provenance)
         except Exception as exc:   # surfaced to the UI, never swallowed
             run.push("failed", f"{type(exc).__name__}: {exc}")
 
@@ -1763,4 +1847,5 @@ class RunManager:
                                    f"({type(exc).__name__}: {exc}); the "
                                    f"clip stands on its own")
         run.clip = str(clip)
+        self._capture_phase(run, spec, scene, out)
         run.push("done", "clip ready")

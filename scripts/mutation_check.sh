@@ -853,6 +853,40 @@ mutate webapp/runs.py \
     "a failed model build fails the run BY NAME" \
     tests/test_aircraft_assets.py || failures=$((failures+1))
 
+# -- Capture-on-the-page guards -------------------------------------------
+
+mutate webapp/server.py \
+    '    if not run_id.isalnum() or name not in _artifact_paths(run_id):' \
+    '    if False:  # MUTATED: serve any path the request names' \
+    "a run serves only the files it actually wrote" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '    spec, refusal = _prepare_run_spec(request)
+    if refusal is not None:
+        return refusal
+    outcome = manager.start_capture(spec, provenance={' \
+    '    spec, refusal = _prepare_run_spec(request)
+    if False:  # MUTATED: capture skips the shared validation
+        return refusal
+    outcome = manager.start_capture(spec, provenance={' \
+    "the capture endpoint never bypasses the shared validation" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '            run.push("capture", f"[{exc.constraint}] {exc.message}")
+            return False' \
+    '            run.push("capture", f"[{exc.constraint}] {exc.message}")
+            return True  # MUTATED: a refused capture reports success' \
+    "a refused capture never reports a successful run" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    '    if refusals:' \
+    '    if False:  # MUTATED: build a manifest for refused geometry' \
+    "a scene-refused pose track writes no manifest" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
