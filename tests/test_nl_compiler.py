@@ -93,3 +93,59 @@ def test_cinematic_terms_are_reported_as_ignored_not_silently_dropped():
     assert any("cinematic" in n for n in s.notes)
     # and nothing in the spec was set from them
     assert s.airspeed.source is Source.DEFAULT
+
+
+# -- cameras (Camera Phase 1) --------------------------------------------
+
+def test_camera_view_words_map_to_presets():
+    s = compile_prompt("cockpit view of the 747 at 3000 m and 250 kt")
+    assert len(s.cameras) == 1
+    camera = s.cameras[0]
+    assert str(camera.preset.value) == "cockpit"
+    assert camera.preset.source is Source.INFERRED
+    assert camera.preset.frm == "cockpit"
+
+
+def test_image_counts_are_attributed_to_the_user():
+    s = compile_prompt("50 images of the 747 from the tower")
+    camera = s.cameras[0]
+    assert str(camera.preset.value) == "tower"
+    assert camera.capture_count.value == 50
+    assert camera.capture_count.source is Source.USER
+    assert "50 images" in camera.capture_count.frm
+
+
+def test_lens_words_carry_the_documented_mapping():
+    s = compile_prompt("wide angle chase view of the 747")
+    camera = s.cameras[0]
+    assert str(camera.preset.value) == "chase"
+    assert camera.focal_length_mm.value == 24.0
+    assert camera.focal_length_mm.source is Source.INFERRED
+    assert "documented mapping" in camera.focal_length_mm.frm
+
+    stated = compile_prompt("film the 747 with a 85 mm lens")
+    assert stated.cameras[0].focal_length_mm.value == 85.0
+    assert stated.cameras[0].focal_length_mm.source is Source.USER
+
+
+def test_no_camera_language_means_no_cameras():
+    """The empty list IS the documented default (byte-identical render
+    behaviour, pinned in test_camera_spec)."""
+    assert compile_prompt("fly the 747 at 3000 m").cameras == []
+
+
+def test_mapped_camera_words_are_no_longer_reported_ignored():
+    s = compile_prompt("chase view of the 747")
+    assert s.cameras
+    assert not any("chase" in n for n in s.notes)
+    # Genuinely unexpressible shot language still goes to notes.
+    t = compile_prompt("epic cinematic flyby of the 747")
+    assert any("cinematic" in n for n in t.notes)
+
+
+def test_camera_defaults_follow_the_airframe():
+    s = compile_prompt("chase view of the cessna")
+    from core.scenario.camera import CHASE_OFFSETS
+
+    assert float(s.cameras[0].offset_forward_m.value) == \
+        CHASE_OFFSETS["c172p"][0]

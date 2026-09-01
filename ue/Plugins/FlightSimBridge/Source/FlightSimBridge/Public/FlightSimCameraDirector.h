@@ -114,6 +114,30 @@ public:
 	UFUNCTION(BlueprintPure, Category = "FlightSim|Camera")
 	float GetCameraRollDegrees() const;
 
+	// -- consume-poses mode (Camera Phase 1) -------------------------------
+	// The run card can carry a Python-solved pose track (the wind-schedule
+	// discipline applied to cameras: computed once in core/capture/poses.py,
+	// consumed verbatim here). When a track is set, Tick() computes NOTHING
+	// -- the commandlet drives the camera by simulation time through
+	// ApplyPoseAtTime, which interpolates the track (linear position, slerp
+	// rotation) and REFUSES, with the reason, any time the track does not
+	// cover: a camera that extrapolated would be applying a pose nobody
+	// solved or validated. The preset machinery above is untouched and
+	// remains the interactive host's.
+
+	// Times are simulation seconds; locations engine units (cm); rotations
+	// engine rotators (the caller owns the scene-frame conversion, next to
+	// its GeoReferencing context). Refuses tracks shorter than two samples.
+	bool SetPoseTrack(TArray<double>&& Times, TArray<FVector>&& Locations,
+	                  TArray<FRotator>&& Rotations, FString& Error);
+
+	bool ConsumingPoses() const { return PoseTimes.Num() > 0; }
+
+	// Place the camera exactly where the solved track says it is at
+	// SimTimeSeconds. False (with the reason) when no track is set or the
+	// time lies outside the track's span.
+	bool ApplyPoseAtTime(double SimTimeSeconds, FString& Error);
+
 private:
 	void UpdateLaggedChase(float DeltaSeconds, const FTransform& TargetTransform);
 	void UpdateCockpitShoulder(const FTransform& TargetTransform);
@@ -126,4 +150,9 @@ private:
 	FVector SmoothedLocation = FVector::ZeroVector;
 	FVector SmoothedAimPoint = FVector::ZeroVector;
 	bool bInitialised = false;
+
+	// The consumed pose track (empty = preset mode).
+	TArray<double> PoseTimes;
+	TArray<FVector> PoseLocations;
+	TArray<FRotator> PoseRotations;
 };

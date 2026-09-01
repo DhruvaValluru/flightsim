@@ -176,7 +176,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"\n{RULE}\n2. the render (150 s, sun rising 8 -> 30 deg)\n{RULE}")
         import subprocess
 
-        editor = Path("/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor-Cmd")
+        editor = ue_editor_path()
         project = Path(__file__).resolve().parents[1] / "ue" / "FlightSim.uproject"
         frames.mkdir(parents=True, exist_ok=True)
         (frames / "render.json").unlink(missing_ok=True)
@@ -256,7 +256,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     import subprocess
 
     raw = out / "evolving_raw.mp4"
-    from core.util.platform import find_ffmpeg
+    from core.util.platform import find_ffmpeg, ue_editor_path
 
     subprocess.run([
         str(find_ffmpeg()), "-y", "-framerate", str(FPS),

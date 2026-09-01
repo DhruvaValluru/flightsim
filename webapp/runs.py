@@ -37,6 +37,9 @@ import sys
 
 sys.path.insert(0, str(REPO))
 
+from core.scenario.camera import (  # noqa: E402
+    CHASE_OFFSETS, CameraSpec, default_cameras,
+)
 from core.scenario.card import write_run_card  # noqa: E402
 from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import MIN_CLEARANCE_M  # noqa: E402
@@ -99,16 +102,28 @@ class RunState:
 def editor_running() -> bool:
     """Gotcha 9. Matches the engine's editor binaries only -- not the
     UnrealEditorServices helper or the Epic launcher, which live at other
-    paths and hold no editor lock. Off-mac there is no editor to lock
-    (the UE half refuses by name before this matters) and no pgrep to
-    call on Windows."""
-    from core.util.platform import is_mac
+    paths and hold no editor lock. On Windows the image names
+    UnrealEditor.exe / UnrealEditor-Cmd.exe are exactly the editor
+    binaries, so tasklist gives the same discrimination pgrep's path
+    match gives on mac. On Linux the UE half refuses by name before this
+    matters."""
+    from core.util.platform import is_mac, os_name
 
-    if not is_mac():
+    if is_mac():
+        probe = subprocess.run(["pgrep", "-f", "Binaries/Mac/UnrealEditor"],
+                               capture_output=True, text=True)
+        return probe.returncode == 0 and probe.stdout.strip() != ""
+    if os_name() == "windows":
+        # Both editor images: the interactive editor AND a commandlet
+        # render (the mac pgrep's path match covers both the same way).
+        for image in ("UnrealEditor.exe", "UnrealEditor-Cmd.exe"):
+            probe = subprocess.run(
+                ["tasklist", "/FI", f"IMAGENAME eq {image}", "/NH"],
+                capture_output=True, text=True)
+            if image in probe.stdout:
+                return True
         return False
-    probe = subprocess.run(["pgrep", "-f", "Binaries/Mac/UnrealEditor"],
-                           capture_output=True, text=True)
-    return probe.returncode == 0 and probe.stdout.strip() != ""
+    return False
 
 
 def _dynamic_scenes(dynamic_dir: Path) -> List[Dict]:
@@ -178,6 +193,38 @@ def bake_on_demand(lat: float, lon: float) -> Dict:
     sidecar.write_text(json.dumps(entry, indent=1), encoding="utf-8")
     entry["terrain"] = str(raster.with_suffix(""))
     return entry
+
+
+#: Guards the one-time control-ridge synthesis; concurrent runs must not
+#: race two syntheses of the same file.
+_CONTROL_RIDGE_LOCK = threading.Lock()
+
+
+def ensure_control_ridge() -> None:
+    """The terrain fail-safe (owner's rule 2026-08-31): the synthesised
+    control ridge is always available, so a scene the SYSTEM chose can
+    never fall through to the featureless slab just because no terrain
+    was baked yet (measured: a fresh Windows machine's mountains prompt
+    rendered flat -- "the mountains didnt load"). Synthesised once, on
+    first need, with the showcase matrix's exact parameters (seed 6,
+    28 deg RMS slope, 1024 px at 30 m) -- deterministic and fully local,
+    no network. Real bakes still win wherever they exist, and a USER-
+    stated flat place stays honestly flat: this floor only catches
+    system-chosen scenes."""
+    terrain_dir = REPO / "runs" / "terrain"
+    if (terrain_dir / "control_ridge.r16").is_file():
+        return
+    with _CONTROL_RIDGE_LOCK:
+        if (terrain_dir / "control_ridge.r16").is_file():
+            return
+        from core.terrain.synthesis import TerrainStatistics, generate
+
+        terrain_dir.mkdir(parents=True, exist_ok=True)
+        field = generate(size=1024, pixel_size_m=30.0,
+                         statistics=TerrainStatistics(rms_slope_deg=28.0),
+                         seed=6, base_elevation_m=600.0,
+                         name="control_ridge")
+        field.write(terrain_dir / "control_ridge")
 
 
 def pick_scene(spec: ScenarioSpec) -> Dict:
@@ -266,9 +313,57 @@ PLANNED_CLEARANCE_M = 300.0
 #: line (1.05 x) and Vref, and the definitive trim probe still runs after.
 PLANNED_SPEED_MARGIN = 1.25
 #: Webapp chase offsets, TIGHTER than the showcase's (user preference
-#: 2026-08-14: the view stays close to the aircraft). behind:right:up
-#: metres; the showcase matrix keeps its own measured framing.
-WEBAPP_CHASE = {"B747": "-110:0:12", "A320": "-95:0:10", "c172p": "-28:0:4"}
+#: 2026-08-14: the view stays close to the aircraft). forward:right:up
+#: metres; the showcase matrix keeps its own measured framing. The
+#: table itself now lives on the camera spec (core.scenario.camera.
+#: CHASE_OFFSETS) so the spec's default cameras and this flag cannot
+#: drift apart; this is the same numbers in the flag's own spelling.
+WEBAPP_CHASE = {aircraft: f"{f:g}:{r:g}:{u:g}"
+                for aircraft, (f, r, u) in CHASE_OFFSETS.items()}
+#: Spec camera preset -> the commandlet's -camera= word. "ground" and
+#: "explicit" have no render-preset pass in the current commandlet
+#: (package G consumes solved pose tracks); they refuse by name rather
+#: than approximating with the nearest-looking preset.
+COMMANDLET_CAMERA_WORDS = {"chase": "chase", "wingman": "wingman",
+                           "tower": "tower", "cockpit": "shoulder"}
+
+
+def camera_render_flags(spec: ScenarioSpec):
+    """(inline_flags, trailing_flags) for the render command, from the
+    spec's OWN cameras -- default_cameras(spec) when none are stated.
+
+    A camera-less spec must drive the commandlet with BYTE-IDENTICAL
+    arguments to the pre-camera build (pinned by test): the -chase=
+    triple always carries the airframe's chase offset (the commandlet
+    uses ChaseOffsetMetres for the initial placement of EVERY preset,
+    so changing it for a wingman camera would change the settle-in
+    frames), the -camera= word maps through COMMANDLET_CAMERA_WORDS,
+    and a wingman camera carries its abeam distance.
+    """
+    cameras = spec.cameras or default_cameras(spec)
+    camera = cameras[0]
+    preset = str(camera.preset.value)
+    word = COMMANDLET_CAMERA_WORDS.get(preset)
+    if word is None:
+        raise ValueError(
+            f"camera.preset: the render commandlet has no {preset!r} "
+            f"pass; this preset renders through the solved pose track "
+            f"(engine consumption not wired in this build)")
+    aircraft = str(spec.aircraft.value)
+    if preset == "chase":
+        chase = (f"{float(camera.offset_forward_m.value):g}:"
+                 f"{float(camera.offset_right_m.value):g}:"
+                 f"{float(camera.offset_up_m.value):g}")
+    else:
+        chase = WEBAPP_CHASE.get(aircraft, "-110:0:12")
+    inline = [f"-chase={chase}", f"-camera={word}"]
+    trailing = []
+    if word == "wingman":
+        trailing.append(
+            f"-wingman-abeam={float(camera.offset_right_m.value):g}")
+    return inline, trailing
+
+
 #: Sources the planners may move: the system's own choices. "default"
 #: (nobody said it), "model" (the scene director's declared guess) and
 #: "derived" (an earlier planner). NEVER "user" or "inferred" -- those are
@@ -605,25 +700,89 @@ def renderable_aircraft() -> List[str]:
 
 
 def refuse_placeholder_mesh(spec: ScenarioSpec) -> Optional[Dict]:
-    """OWNER'S RULE (2026-08-14): a placeholder airframe never renders.
+    """OWNER'S RULE (2026-08-14, extended 2026-08-31): a placeholder
+    airframe never renders -- on ANY machine.
 
-    On a machine with imported meshes, a render request for an aircraft
-    without one refuses BY NAME instead of showing blocks (measured: an
-    F-15 run rendered the placeholder and the owner rejected it). A
-    machine with NO meshes imported (fresh clone, CI) is untouched --
-    the render pipeline reports its own missing-assets state there.
+    A render request for an aircraft without a real licensed 3-D model
+    refuses BY NAME instead of showing blocks (measured twice: an F-15
+    run rendered the placeholder and the owner rejected it, then the
+    first Windows deploy rendered the box airframe on a mesh-less
+    machine and the owner rejected that too -- "always use a real
+    model").
+
+    NARROWED 2026-09-01 (user request: "i cant run commands for every
+    single mesh they should upload by themselves"). A missing model is
+    no longer a refusal when this machine can BUILD it: the render flow
+    provisions it once, in the open, exactly as the terrain fail-safe
+    provisions the control ridge. What survives here is what no command
+    can fix, and both still refuse before any editor time:
+
+    * no config for the airframe -- there is nothing to fetch;
+    * upstream ships no license file (VALIDITY 3.3) -- it may never
+      render at all, so automation must not reach for it either.
+
+    A model that CAN be built but FAILS to build does not fall through
+    to placeholders; it fails the run by name (aircraft.mesh_import) in
+    _render_flow.
     """
-    have = renderable_aircraft()
+    from assets_pipeline.importer import (configured_aircraft,
+                                          unavailable_reason)
+
     aircraft = str(spec.aircraft.value)
-    if not have or aircraft in have:
+    if aircraft in renderable_aircraft():
         return None
-    return {
-        "constraint": "aircraft.mesh",
-        "message": f"the {aircraft} has real flight physics but no "
-                   f"licensed 3-D model, and placeholder airframes never "
-                   f"render. Renderable aircraft on this machine: "
-                   f"{', '.join(have)}.",
-    }
+    # Only airframes that can ACTUALLY be built belong in this list: one
+    # whose upstream ships no license (p51d today) would send the reader
+    # after a model that will refuse for a reason no command can fix.
+    buildable = sorted(n for n in configured_aircraft()
+                       if not unavailable_reason(n))
+    reason = unavailable_reason(aircraft)
+    if reason:
+        return {
+            "constraint": "aircraft.mesh",
+            "message": f"the {aircraft} has real flight physics but can "
+                       f"never render: {reason}",
+        }
+    if aircraft not in buildable:
+        return {
+            "constraint": "aircraft.mesh",
+            "message": f"the {aircraft} has real flight physics but no "
+                       f"licensed 3-D model is configured for it, and "
+                       f"placeholder airframes never render. Airframes "
+                       f"with a model this machine can build: "
+                       f"{', '.join(buildable)}.",
+        }
+    return None         # buildable: the run provisions it, in the open
+
+
+def ensure_aircraft_model(spec: ScenarioSpec, report) -> None:
+    """AIRCRAFT FAIL-SAFE: build the licensed model this render needs.
+
+    The control-ridge fail-safe's pattern (owner's rule 2026-08-31),
+    applied to the other prerequisite a fresh machine lacks. The FIRST
+    render that needs an airframe pays its one-time fetch/convert/import
+    here -- with a status line per step, never silently -- rather than
+    refusing and handing the user a command to run (user request
+    2026-09-01: "i cant run commands for every single mesh they should
+    upload by themselves").
+
+    Render path ONLY, like the ridge: tests and CI never provision, so a
+    checkout's asset state stays deterministic and no test run reaches
+    the network or the editor.
+
+    Raises AircraftAssetError -- named -- if the model cannot be built.
+    NOTHING here falls through to the placeholder airframe: that is the
+    rule this fail-safe serves, not one it relaxes.
+    """
+    from assets_pipeline.importer import ensure_model, is_imported
+
+    aircraft = str(spec.aircraft.value)
+    if is_imported(aircraft):
+        return
+    report(f"the {aircraft} model is not on this machine yet; building it "
+           f"once (fetch at the pinned commit, convert, import)")
+    ensure_model(aircraft, report)
+    report(f"the {aircraft} model is ready")
 
 
 def plan_scene_setting(spec: ScenarioSpec) -> None:
@@ -1009,6 +1168,154 @@ def plan_weather_event(spec: ScenarioSpec) -> None:
                       "never moved)")
 
 
+def severe_event_centre(spec: ScenarioSpec, scene: Dict,
+                        seconds: float):
+    """(north_m, east_m) of the severe-weather feature on the track.
+
+    ONE placement for the card blocks, the render flow and the camera
+    hazard check, so they cannot model two different storms: the
+    straight-line 45%-ahead point, replaced on terrain scenes by the
+    same point of the PRE-FLOWN track (the banked S-turn misses the
+    straight line; measured on the Fuji core run -- closest approach
+    ~410 m to a 150 m core). An untrimmable spec keeps the straight
+    line and validate() rules next.
+    """
+    import math as _math
+
+    from core.fdm import units as u2
+
+    ahead = 0.45 * u2.kt_to_mps(float(spec.airspeed.value)) * seconds
+    hdg = _math.radians(float(spec.heading.value))
+    centre_n = ahead * _math.cos(hdg)
+    centre_e = ahead * _math.sin(hdg)
+    if scene.get("terrain"):
+        try:
+            from core.terrain.ground import TerrainGround
+            from core.terrain.heightfield import Heightfield
+
+            ground_ = TerrainGround(
+                Heightfield.read(Path(scene["terrain"])))
+            track_ = _fly_clearance_track(
+                spec, ground_, SHOWCASE_DOUBLET, seconds,
+                orographic=_orographic_provider(spec, scene))
+            point = track_[int(0.45 * (len(track_) - 1))]
+            centre_n = float(point["north_m"])
+            centre_e = float(point["east_m"])
+        except Exception:
+            pass
+    return centre_n, centre_e
+
+
+def tornado_axis(spec: ScenarioSpec, scene: Dict, seconds: float):
+    """(north_m, east_m) of the vortex AXIS: the event centre plus the
+    recorded aim's abeam offset (core = on the track; abeam = the
+    2.5-core-radii flyby)."""
+    import math as _math
+
+    from core.environment.tornado import R_CORE_M
+
+    centre_n, centre_e = severe_event_centre(spec, scene, seconds)
+    hdg = _math.radians(float(spec.heading.value))
+    aim = str(spec.weather_event.detail.get("aim", "abeam"))
+    offset = 0.0 if aim == "core" else 2.5 * R_CORE_M
+    return (centre_n + offset * _math.cos(hdg + _math.pi / 2),
+            centre_e + offset * _math.sin(hdg + _math.pi / 2))
+
+
+#: Documented height above local ground for the world-anchored preset
+#: cameras (the UE director's own figures: observer 30 m, tower 80 m).
+CAMERA_PRESET_HEIGHT_M = {"ground": 30.0, "tower": 80.0}
+
+
+def plan_camera_defaults(spec: ScenarioSpec) -> None:
+    """World-anchored preset cameras follow the FINAL scene, recorded.
+
+    A defaulted ground/tower placement is built at COMPILE time against
+    the spec's terrain datum -- flat 0 for a placeless prompt -- and the
+    scene planners may then stage mountains under it, leaving the
+    system's own camera kilometres inside the rock and the run refused
+    over a choice nobody made (measured: the first 3-second tower demo
+    refused camera.terrain_clearance at -2803 m AGL after scene-setting
+    landed on the control ridge). Same discipline as every planner:
+    only PLANNABLE camera placement fields move (via CameraSpec.plan,
+    recorded, re-plannable); a stated placement never moves and its
+    refusal stands. The altitude is planned to the local ground at the
+    camera's own north/east -- the scene raster where one is baked, the
+    terrain datum otherwise -- plus the preset's documented height.
+    Value-idempotent: re-planning from the same scene lands the same
+    number.
+    """
+    presets_wanted = [
+        (index, camera) for index, camera in enumerate(spec.cameras)
+        if str(camera.preset.value) in CAMERA_PRESET_HEIGHT_M
+        and str(camera.position_mode.value) == "scene"
+        and str(camera.position_alt_m.source) in PLANNABLE_SOURCES]
+    if not presets_wanted:
+        return
+    scene = pick_scene(spec)
+    heightfield = None
+    frame = None
+    if scene.get("terrain"):
+        from core.capture.poses import SceneFrame
+        from core.terrain.heightfield import Heightfield
+
+        heightfield = Heightfield.read(Path(scene["terrain"]))
+        frame = SceneFrame.for_spec(spec, heightfield)
+    datum = float(spec.terrain_elevation.value)
+    for index, camera in presets_wanted:
+        up = CAMERA_PRESET_HEIGHT_M[str(camera.preset.value)]
+        ground = datum
+        basis = "the spec terrain datum"
+        if heightfield is not None:
+            x, y = frame.to_projected(
+                float(camera.position_north_m.value),
+                float(camera.position_east_m.value))
+            if heightfield.contains(x, y):
+                ground = heightfield.elevation_at(x, y)
+                basis = "the scene raster under the camera"
+        planned = float(round(ground + up))
+        if abs(planned - float(camera.position_alt_m.value)) < 0.5:
+            continue
+        spec.plan(
+            f"cameras[{index}].position_alt_m", planned,
+            frm=f"{camera.preset.value} camera re-planned onto the final "
+                f"scene: {basis} ({ground:.0f} m) + the preset's "
+                f"{up:.0f} m; a stated placement is never moved")
+
+
+def camera_scene_violations(spec: ScenarioSpec, scene: Dict) -> List[Dict]:
+    """Scene-coupled camera refusals for /run, the plan_terrain_flight
+    pattern: computed where the scene raster is known, returned as
+    violation dicts for the verdict. World-anchored cameras (scene or
+    geographic placement, keyframes included) are fixed geometry and
+    are checked against the raster, its bounds and the modelled tornado
+    core BEFORE any editor time; offset cameras ride the aircraft,
+    whose track the flight planners already clear, and their solved
+    tracks are re-checked wherever telemetry exists."""
+    if not spec.cameras:
+        return []
+    from core.capture.poses import SceneFrame
+    from core.capture.validate import static_camera_violations
+    from core.terrain.heightfield import Heightfield
+
+    heightfield = (Heightfield.read(Path(scene["terrain"]))
+                   if scene.get("terrain") else None)
+    frame = SceneFrame.for_spec(spec, heightfield)
+    tornado_block = None
+    if str(spec.weather_event.value) == "tornado":
+        from core.environment.tornado import FADE_TOP_M, R_CORE_M
+
+        seconds = min(float(spec.duration.value), CLIP_SECONDS)
+        axis_n, axis_e = tornado_axis(spec, scene, seconds)
+        tornado_block = {"centre_north_m": axis_n, "centre_east_m": axis_e,
+                         "r_core_m": R_CORE_M, "fade_top_m": FADE_TOP_M}
+    violations = static_camera_violations(spec, heightfield, frame,
+                                          tornado_block)
+    return [{"constraint": v.constraint, "message": v.message,
+             "actual": v.actual, "limit": v.limit, "unit": v.unit}
+            for v in violations]
+
+
 def coupling_needs_seed(spec: ScenarioSpec) -> bool:
     """True when the run is stochastic even with turbulence word "none":
     a terrain scene with wind (lee-rotor) or a surface class with thermals
@@ -1120,24 +1427,29 @@ class RunManager:
     def _render(card: Path, frames: Path, scene: Dict, mesh: Path,
                 aircraft: str, telemetry: Optional[Path] = None,
                 look: Optional[Dict] = None,
-                camera: str = "chase") -> bool:
+                camera_flags=None) -> bool:
         """The showcase render command, with terrain/imagery conditional.
 
         Same flags render_cell passes (gotcha 1: absolute paths, -stdout,
         -RenderOffScreen, -AllowCommandletRendering); the terrain, imagery
         and mesh arguments appear only when the scene earned them, so a flat
         spec renders the labeled slab rather than failing on an empty path.
+        The camera flags come from the SPEC's cameras via
+        camera_render_flags (default cameras when none stated -- pinned
+        byte-identical to the old hardcoded selection).
         """
         project = REPO / "ue" / "FlightSim.uproject"
         frames.mkdir(parents=True, exist_ok=True)
         (frames / "render.json").unlink(missing_ok=True)
         tod = look or TIME_OF_DAY["noon"]
+        inline, trailing = camera_flags or (
+            [f"-chase={WEBAPP_CHASE.get(aircraft, '-110:0:12')}",
+             "-camera=chase"], [])
         command = [
             str(EDITOR), str(project), "-run=FlightSimBridge.FlightSimRender",
             f"-scenario={card}", f"-frames={frames}",
             "-Visual", "-shot=showcase",
-            f"-chase={WEBAPP_CHASE.get(aircraft, '-110:0:12')}",
-            f"-camera={camera}",
+            *inline,
             f"-fps={FPS}", f"-width={WIDTH}", f"-height={HEIGHT}",
             f"-sun-elev={tod['sun_elev']}", f"-sun-azim={tod['sun_azim']}",
             f"-exposure-bias={tod['exposure_bias']}",
@@ -1146,12 +1458,7 @@ class RunManager:
             "-stdout", "-FullStdOutLogOutput",
             "-RenderOffScreen", "-AllowCommandletRendering",
         ]
-        if camera == "wingman":
-            # Formation slot outside the vortex: the default 25 m sat
-            # INSIDE the funnel (measured: 2 blank frames, floor
-            # refused); 180 m clears the 150 m core while keeping the
-            # aircraft large in frame (user: closer, always).
-            command += ["-wingman-abeam=180"]
+        command += list(trailing)
         if scene.get("terrain"):
             command += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
         if scene.get("imagery"):
@@ -1180,6 +1487,26 @@ class RunManager:
                      provenance: Dict) -> None:
         out = self.out_root / run.run_id
         out.mkdir(parents=True, exist_ok=True)
+        # Terrain fail-safe: a no-op once the ridge exists. The FIRST
+        # render on a fresh machine pays the one-time synthesis here --
+        # with a status line, never silently -- rather than landing on
+        # the slab. Render path ONLY: tests and CI never synthesise, so
+        # a checkout's scene selection stays deterministic.
+        if not (REPO / "runs" / "terrain" / "control_ridge.r16").is_file():
+            run.push("terrain", "synthesising the control-ridge terrain "
+                                "fail-safe (one-time, local)")
+            ensure_control_ridge()
+        # Aircraft fail-safe, the same shape: the licensed model this
+        # render needs, built and imported now. A failure here fails the
+        # run BY NAME -- it never falls through to placeholder blocks.
+        from assets_pipeline.importer import AircraftAssetError
+
+        try:
+            ensure_aircraft_model(spec,
+                                  lambda line: run.push("aircraft", line))
+        except AircraftAssetError as exc:
+            run.push("failed", f"[{exc.constraint}] {exc.message}")
+            return
         scene = pick_scene(spec)
         run.scene = scene
 
@@ -1258,58 +1585,27 @@ class RunManager:
         downburst_block = None
         event_note = None
         if event in ("thunderstorm", "tornado"):
-            import math as _math
-
-            from core.fdm import units as u2
-
             seconds_ = min(float(spec.duration.value), CLIP_SECONDS)
-            ahead = (0.45 * u2.kt_to_mps(float(spec.airspeed.value))
-                     * seconds_)
-            hdg = _math.radians(float(spec.heading.value))
-            centre_n = ahead * _math.cos(hdg)
-            centre_e = ahead * _math.sin(hdg)
-            if scene.get("terrain"):
-                # Scripted terrain runs BANK (the S-turn doublet), so the
-                # straight-line 45%-ahead point misses the curved track.
-                # Measured on a 'through the tornado' Fuji run: closest
-                # approach ~410 m to a 150 m core -- peak sampled wind
-                # 18.3 m/s, exactly the 1/r field at that radius. Place
-                # the event on the PRE-FLOWN track instead: same script,
-                # same wind, same orographic field the clearance planner
-                # flies. An untrimmable spec keeps the straight-line
-                # placement and validate() rules next.
-                try:
-                    from core.terrain.ground import TerrainGround
-                    from core.terrain.heightfield import Heightfield
-
-                    ground_ = TerrainGround(
-                        Heightfield.read(Path(scene["terrain"])))
-                    track_ = _fly_clearance_track(
-                        spec, ground_, SHOWCASE_DOUBLET, seconds_,
-                        orographic=_orographic_provider(spec, scene))
-                    point = track_[int(0.45 * (len(track_) - 1))]
-                    centre_n = float(point["north_m"])
-                    centre_e = float(point["east_m"])
-                except Exception:
-                    pass
+            # ONE placement, shared with the /run camera hazard check
+            # (severe_event_centre): straight-line 45% ahead, replaced
+            # on terrain scenes by the same point of the pre-flown
+            # banked track. The tornado branch resolves its axis through
+            # tornado_axis (centre + recorded abeam offset) so the
+            # pre-flight runs once either way.
             ox, oy, declared = _projected_origin(spec, scene)
             scene_crs = scene_crs or declared
             if event == "tornado":
-                from core.environment.tornado import R_CORE_M, TornadoVortex
+                from core.environment.tornado import TornadoVortex
 
-                # Abeam offset: the track clips the core's edge rather
-                # than spearing the axis.
                 # Placement follows the spec's recorded aim: "core" (the
                 # prompt said through/into) puts the axis ON the track --
                 # the camera will cross the funnel mesh and the frames
                 # honestly show the inside of the marker; "abeam" is the
                 # 2.5-core-radii flyby (at 1.2 radii the chase camera
-                # lived inside the mesh, probe-measured).
-                aim = str(spec.weather_event.detail.get("aim", "abeam"))
-                offset = 0.0 if aim == "core" else 2.5 * R_CORE_M
-                vortex = TornadoVortex(
-                    centre_n + offset * _math.cos(hdg + _math.pi / 2),
-                    centre_e + offset * _math.sin(hdg + _math.pi / 2))
+                # lived inside the mesh, probe-measured). tornado_axis
+                # applies the offset; the hazard check uses the same one.
+                vortex = TornadoVortex(*tornado_axis(spec, scene,
+                                                     seconds_))
                 tornado_block = vortex.card_block(ox, oy)
                 event_note = ("tornado: Rankine vortex (EF2-band, v_max "
                               "50 m/s, core 150 m) abeam the track; funnel "
@@ -1319,7 +1615,8 @@ class RunManager:
             else:
                 from core.environment.downburst import Downburst
 
-                burst = Downburst(centre_n, centre_e)
+                burst = Downburst(*severe_event_centre(spec, scene,
+                                                       seconds_))
                 downburst_block = burst.card_block(ox, oy)
                 event_note = ("thunderstorm (documented composition): "
                               "microburst 1000 m core / 12 m/s outflow "
@@ -1405,29 +1702,22 @@ class RunManager:
 
         run.push("rendering", "editor is rendering frames (a few minutes)")
         frames = out / "frames"
-                # A through-the-core tornado flight is watched from the tower:
-        # the chase camera would spend seconds INSIDE the funnel mesh
-        # and the blank-frame floor (correctly, never weakened) refused
-        # those frames -- measured on run c33db2c326e0.
-        camera = "chase"
-        if (str(spec.weather_event.value) == "tornado"
-                and str(spec.weather_event.detail.get("aim")) == "core"):
-            # User's standing preference (2026-08-14): the view follows
-            # the aircraft, never a fixed ground tower where the plane is
-            # a dot. Wingman flies abeam-and-behind, so it tracks the
-            # plane INTO the vortex without trailing straight through the
-            # funnel mesh the way the chase camera did (measured: chase
-            # sat inside the funnel and the blank-frame floor refused,
-            # run c33db2c326e0 -- the floor stands; if wingman frames
-            # ever trip it, the render fails loudly, never silently).
-            camera = "wingman"
+        # The camera comes from the SPEC now (Camera Phase 1): stated
+        # cameras verbatim, default_cameras otherwise -- which carries
+        # the measured through-the-core tornado rule (wingman follows
+        # the aircraft into the vortex; the chase camera sat INSIDE the
+        # funnel mesh and the blank-frame floor refused, run
+        # c33db2c326e0 -- the floor stands, never weakened).
+        camera_flags = camera_render_flags(spec)
+        flown = spec.cameras or default_cameras(spec)
+        if str(flown[0].preset.value) == "wingman":
             run.conditions["camera"] = ("wingman (follows the aircraft "
                                         "through the core; chase would "
                                         "sit inside the funnel)")
         if not self._render(card, frames, scene, mesh, aircraft,
                             telemetry=out / "telemetry.json",
                             look=STORM_LOOK if event_note else None,
-                            camera=camera):
+                            camera_flags=camera_flags):
             run.push("failed", "the render commandlet wrote no manifest; "
                                f"see {out / 'render.log'}")
             return

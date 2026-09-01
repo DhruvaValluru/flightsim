@@ -48,8 +48,10 @@ from core.terrain.synthesis import TerrainStatistics, generate  # noqa: E402
 from experiments.gate5_ue_parity import reference_spec, write_run_card  # noqa: E402
 from experiments.orographic_ue import verify_port  # noqa: E402
 
+from core.util.platform import ue_editor_path  # noqa: E402
+
 RULE = "=" * 96
-EDITOR = Path("/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor-Cmd")
+EDITOR = ue_editor_path()
 try:
     from core.util.platform import find_ffmpeg as _find_ffmpeg
 

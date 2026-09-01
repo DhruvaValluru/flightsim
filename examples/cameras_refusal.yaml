@@ -1,0 +1,255 @@
+# The refusal case: an explicit camera stated at 400 m MSL under a
+# 1000 m terrain datum. Expected outcome, BY NAME:
+#   REFUSED [camera.terrain_clearance] -- the stated placement sits
+#   inside or on the scene's terrain.
+# A user-stated camera field is never silently moved to pass; edit the
+# spec (position_alt_m) and run again.
+spec_version: 6
+name: cameras_refusal
+aircraft:
+  aircraft:
+    value: B747
+    source: user
+    from: '747'
+initial:
+  altitude:
+    value: 2500.0
+    unit: m
+    source: user
+    from: 2500 m
+  airspeed:
+    value: 280.0
+    unit: kt
+    source: user
+    from: 280 kt
+  airspeed_kind:
+    value: cas
+    source: user
+    from: assumed calibrated
+  heading:
+    value: 0.0
+    unit: deg
+    source: default
+    from: due north
+  latitude:
+    value: 0.0
+    unit: deg
+    source: default
+    from: equator; no geography requested
+  longitude:
+    value: 0.0
+    unit: deg
+    source: default
+    from: prime meridian
+  terrain_elevation:
+    value: 1000.0
+    unit: m
+    source: user
+    from: over 1000 m terrain
+environment:
+  wind_speed:
+    value: 0.0
+    unit: kt
+    source: default
+    from: still air
+  wind_direction:
+    value: 0.0
+    unit: deg
+    source: default
+    from: still air
+  turbulence:
+    value: none
+    source: default
+    from: smooth air
+    std: MIL-F-8785C Fig.7 (W20, wind speed at 20 ft AGL)
+    W20_kt: 0.0
+  surface:
+    value: unspecified
+    source: default
+    from: no ground cover stated; no surface coupling
+  weather_date:
+    value: none
+    source: default
+    from: no date stated; spec wind as given
+  weather_event:
+    value: none
+    source: default
+    from: no severe weather requested
+run:
+  duration:
+    value: 12.0
+    unit: s
+    source: user
+    from: for 12 seconds
+  rate:
+    value: 120.0
+    unit: Hz
+    source: default
+    from: matches the UE plugin substep rate
+  seed:
+    value: 0
+    unit: dimensionless
+    source: default
+    from: deterministic; no stochastic subsystem active yet
+  mass_held:
+    value: false
+    source: default
+    from: realistic fuel burn
+  hold_state:
+    value: true
+    source: default
+    from: hold the commanded state
+cameras:
+- camera_id:
+    value: buried
+    source: default
+    from: documented camera default
+  preset:
+    value: explicit
+    source: default
+    from: documented camera default
+  position_mode:
+    value: scene
+    source: user
+    from: stated placement
+  offset_forward_m:
+    value: 0.0
+    unit: m
+    source: default
+    from: documented camera default
+  offset_right_m:
+    value: 0.0
+    unit: m
+    source: default
+    from: documented camera default
+  offset_up_m:
+    value: 0.0
+    unit: m
+    source: default
+    from: documented camera default
+  position_north_m:
+    value: 500.0
+    unit: m
+    source: user
+    from: stated placement
+  position_east_m:
+    value: 0.0
+    unit: m
+    source: user
+    from: stated placement
+  position_lat_deg:
+    value: 0.0
+    unit: deg
+    source: default
+    from: documented camera default
+  position_lon_deg:
+    value: 0.0
+    unit: deg
+    source: default
+    from: documented camera default
+  position_alt_m:
+    value: 400.0
+    unit: m
+    source: user
+    from: 'stated placement: 600 m UNDER the terrain datum'
+  aim_mode:
+    value: aircraft
+    source: user
+    from: stated
+  aim_north_m:
+    value: 0.0
+    unit: m
+    source: default
+    from: documented camera default
+  aim_east_m:
+    value: 0.0
+    unit: m
+    source: default
+    from: documented camera default
+  aim_alt_m:
+    value: 0.0
+    unit: m
+    source: default
+    from: documented camera default
+  aim_bearing_deg:
+    value: 0.0
+    unit: deg
+    source: default
+    from: documented camera default
+  aim_elevation_deg:
+    value: 0.0
+    unit: deg
+    source: default
+    from: documented camera default
+  focal_length_mm:
+    value: 35.0
+    unit: mm
+    source: default
+    from: documented camera default
+  sensor_width_mm:
+    value: 36.0
+    unit: mm
+    source: default
+    from: documented camera default
+  sensor_height_mm:
+    value: 20.25
+    unit: mm
+    source: default
+    from: documented camera default
+  width_px:
+    value: 1280
+    unit: px
+    source: default
+    from: documented camera default
+  height_px:
+    value: 720
+    unit: px
+    source: default
+    from: documented camera default
+  near_m:
+    value: 0.1
+    unit: m
+    source: default
+    from: documented camera default
+  far_m:
+    value: 100000.0
+    unit: m
+    source: default
+    from: documented camera default
+  trigger:
+    value: interval
+    source: default
+    from: documented camera default
+  capture_count:
+    value: 0
+    unit: dimensionless
+    source: default
+    from: 0 = no counted capture; the clip convention (frames at the render fps)
+  period_s:
+    value: 1.0
+    unit: s
+    source: default
+    from: documented camera default
+  distance_m:
+    value: 500.0
+    unit: m
+    source: default
+    from: documented camera default
+  event_channel:
+    value: roll_deg
+    source: default
+    from: documented camera default
+  event_threshold:
+    value: 30.0
+    source: default
+    from: documented camera default
+  event_direction:
+    value: above
+    source: default
+    from: documented camera default
+  refractory_s:
+    value: 2.0
+    unit: s
+    source: default
+    from: one event is one capture
+  moves: []

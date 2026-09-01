@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -39,15 +40,18 @@ from core.nl.llm_compiler import (  # noqa: E402
 from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import validate  # noqa: E402
 from webapp.runs import (  # noqa: E402
+    CLIP_SECONDS,
     RunManager,
     apply_historical_weather,
     apply_weather_event,
     bake_on_demand,
+    camera_scene_violations,
     coupling_needs_seed,
     derive_seed,
     needs_dynamic_bake,
     pick_scene,
     place_on_scene,
+    plan_camera_defaults,
     plan_flyable_defaults,
     plan_scene_setting,
     plan_terrain_environment,
@@ -71,6 +75,12 @@ class CompileRequest(BaseModel):
     # ``answers`` being present -- the server keeps no conversation state.
     questions: Optional[List[Dict[str, Any]]] = None
     answers: Optional[List[Dict[str, str]]] = None
+    #: The answer round echoes round 1's compiled spec (payload spec.dict)
+    #: so nothing that round decided can silently revert to a default.
+    prior_spec: Optional[Dict[str, Any]] = None
+    #: Clip length selector: an explicit UI choice, applied as a USER edit
+    #: of the run duration. None = whatever the prompt/default says.
+    clip_seconds: Optional[float] = None
 
 
 class RunRequest(BaseModel):
@@ -87,9 +97,25 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
             "source": str(quantity.source), "from": quantity.frm,
             "std": quantity.std, "detail": quantity.detail,
         })
+    # Cameras render as their own labeled blocks with per-field sources,
+    # editable exactly like the scalar rows (the page writes edits into
+    # dict.cameras[i] and /run re-parses the whole spec).
+    cameras = []
+    for index, camera in enumerate(spec.cameras):
+        cameras.append({
+            "index": index,
+            "camera_id": str(camera.camera_id.value),
+            "fields": [{
+                "name": name, "value": quantity.value,
+                "unit": quantity.unit, "source": str(quantity.source),
+                "from": quantity.frm, "std": quantity.std,
+                "detail": quantity.detail,
+            } for name, quantity in camera.quantities()],
+            "moves": [dict(m) for m in camera.moves],
+        })
     return {"digest": spec.digest(), "name": spec.name,
             "prompt": spec.prompt, "notes": spec.notes,
-            "fields": fields, "dict": spec.to_dict(),
+            "fields": fields, "cameras": cameras, "dict": spec.to_dict(),
             "table": spec.render_table()}
 
 
@@ -142,6 +168,43 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         spec = compile_prompt(prompt)
         compiler_used = "regex"
 
+    # The answer round must never LOSE the question round. The protocol is
+    # stateless: round 2 re-extracts everything from the whole conversation,
+    # so a field the model drops -- or the WHOLE round, when the LLM dies
+    # and the regex fallback compiles the original prompt -- silently
+    # reverts to its default (measured: an answered location question came
+    # back with the first round's settings gone). The page echoes round 1's
+    # spec; any field that round DECIDED (user/inferred/model) and this
+    # round left at default is restored with its provenance intact. A field
+    # this round decided wins -- an answer legitimately changes things --
+    # and derived fields are left to the planners below to re-derive.
+    if request.answers and request.prior_spec is not None:
+        try:
+            prior = ScenarioSpec.from_dict(request.prior_spec)
+        except (ValueError, KeyError):
+            prior = None        # a malformed echo restores nothing
+        if prior is not None:
+            for _section, name, current in list(spec.quantities()):
+                previous = getattr(prior, name)
+                if (str(current.source) == "default"
+                        and str(previous.source) in ("user", "inferred",
+                                                     "model")):
+                    setattr(spec, name, replace(
+                        previous,
+                        frm=f"{previous.frm} (kept from the question round)"))
+
+    # Clip length selector: the clip is min(duration, CLIP_SECONDS), so a
+    # shorter scenario renders proportionally fewer frames. An explicit UI
+    # choice is a USER edit of the duration, provenance and all -- it wins
+    # over a duration stated in the prompt, and the table shows that.
+    if request.clip_seconds is not None:
+        seconds = float(request.clip_seconds)
+        if not (0.0 < seconds <= CLIP_SECONDS):
+            return JSONResponse(
+                {"error": f"clip length must be in (0, {CLIP_SECONDS:g}] s"},
+                status_code=400)
+        spec.set("duration", seconds, frm="clip length selector (web UI)")
+
     # Planning happens BEFORE the table and verdict are built, so what the
     # user reviews is what will run: the weather event's documented
     # composition edits (a tornado descends a defaulted altitude into the
@@ -162,6 +225,10 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         pass    # no local raster yet (dynamic bake): /run plans it after /bake
     plan_flyable_defaults(spec)
     plan_trim_recovery(spec)
+    # Defaulted world-anchored cameras follow the staged scene (the
+    # tower does not stay at flat-ground height under planned
+    # mountains); stated placements never move.
+    plan_camera_defaults(spec)
 
     payload = {
         "compiler": compiler_used, "model": model, "llm_note": llm_note,
@@ -202,12 +269,6 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     if unbaked is not None:
         return JSONResponse({"refused": "terrain.unbaked", **unbaked},
                             status_code=409)
-    # Placeholder airframes never render (owner's rule): refuse by name
-    # before anything starts, naming the aircraft that CAN render here.
-    mesh_refusal = refuse_placeholder_mesh(spec)
-    if mesh_refusal is not None:
-        return JSONResponse({"refused": "aircraft.mesh", **mesh_refusal},
-                            status_code=409)
     place_on_scene(spec)
     # Severe-weather composition edits (thunderstorm -> severe turbulence
     # when the word was defaulted): recorded, pre-digest, like every other
@@ -223,8 +284,8 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # PLANNER ORDER (load-bearing, pinned by tests): place_on_scene ->
     # apply_weather_event -> apply_historical_weather ->
     # plan_terrain_environment -> derive_seed -> plan_terrain_flight ->
-    # plan_flyable_defaults -> plan_trim_recovery -> project_for_ue_host
-    # -> validate.
+    # plan_flyable_defaults -> plan_trim_recovery ->
+    # plan_camera_defaults -> project_for_ue_host -> validate.
     # Rationale: placement fixes coordinates; the event composes its
     # environment; DATED real weather wins over composition (ERA5 wind is
     # source user, so the terrain planner then refuses to touch it);
@@ -250,6 +311,11 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # then give physics the last word over any surviving guess.
     plan_flyable_defaults(spec)
     plan_trim_recovery(spec)
+    # Camera placements last among the planners: they depend on the
+    # FINAL scene and terrain datum (a defaulted tower camera moves onto
+    # the raster under it; stated placements never move and refuse by
+    # name in the verdict below).
+    plan_camera_defaults(spec)
     project_for_ue_host(spec)
 
     # Validation governs the edited spec too: the run endpoint re-validates
@@ -258,8 +324,36 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     if clearance_refusal is not None:
         verdict["ok"] = False
         verdict["violations"].append(clearance_refusal)
+    # Scene-coupled camera checks (Camera Phase 1): world-anchored
+    # cameras against the scene raster, its bounds and the modelled
+    # tornado core -- the plan_terrain_flight pattern, refused by name
+    # in the same verdict before any editor time is spent.
+    camera_refusals = camera_scene_violations(spec, pick_scene(spec))
+    if camera_refusals:
+        verdict["ok"] = False
+        verdict["violations"].extend(camera_refusals)
     if not verdict["ok"]:
         return JSONResponse({"refused": "validation", **verdict},
+                            status_code=409)
+
+    # REFUSAL ORDER after validation (load-bearing, pinned by test):
+    # ue.platform BEFORE aircraft.mesh. A machine with no engine build
+    # must hear that first -- measured 2026-08-31 on a fresh Windows
+    # clone, which was told to import aircraft models when the real
+    # blocker was that no Unreal host existed there at all.
+    from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
+
+    if not ue_available():
+        return JSONResponse({"refused": UE_PLATFORM_REFUSAL,
+                             "constraint": "ue.platform"}, status_code=409)
+    # Placeholder airframes never render (owner's rule, extended
+    # 2026-08-31: on ANY machine). Checked AFTER validation on purpose:
+    # a scenario that cannot fly refuses on the physics first; the asset
+    # refusal names the import command only once the flight itself is
+    # sound.
+    mesh_refusal = refuse_placeholder_mesh(spec)
+    if mesh_refusal is not None:
+        return JSONResponse({"refused": "aircraft.mesh", **mesh_refusal},
                             status_code=409)
 
     outcome = manager.start(spec, provenance={

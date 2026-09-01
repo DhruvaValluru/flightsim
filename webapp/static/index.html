@@ -66,6 +66,17 @@ visual-only per host (measured).</p>
   placeholder="simulate a plane in rough wind conditions over mountains"></textarea>
 <p>
   <button id="compile">Interpret</button>
+  <label class="dim" title="The clip is min(duration, 22 s); a shorter clip renders proportionally fewer frames. Overrides a duration stated in the prompt, shown as a user edit in the table.">
+    clip <select id="clipSeconds">
+      <option value="">prompt</option>
+      <option value="3">3 s</option>
+      <option value="6">6 s</option>
+      <option value="10">10 s</option>
+      <option value="15">15 s</option>
+      <option value="20">20 s</option>
+      <option value="22">22 s</option>
+    </select>
+  </label>
   <span id="llmState" class="badge">compiler: checking&hellip;</span>
   <span id="compileState" class="dim"></span>
 </p>
@@ -131,8 +142,16 @@ function provenanceNote(f) {
       : "compiler: offline regex (no ANTHROPIC_API_KEY in the server " +
         "process; set it where uvicorn runs)")
       + (status.render_available === false
-         ? " · rendered clips need macOS: runs here deliver the " +
-           "headless half (spec, validation, telemetry)"
+         ? (status.platform === "windows"
+            ? " · rendered clips need the Unreal host built here " +
+              "(scripts\\ue_preflight.ps1 names what is missing): runs " +
+              "here deliver the headless half (spec, validation, telemetry)"
+            : status.platform === "linux"
+            ? " · rendered clips need macOS or Windows: runs here deliver " +
+              "the headless half (spec, validation, telemetry)"
+            : " · rendered clips need the Unreal host built here: runs " +
+              "here deliver the headless half (spec, validation, " +
+              "telemetry)")
          : "");
   } catch (error) { $("llmState").textContent = "compiler: server unreachable"; }
 })();
@@ -220,6 +239,28 @@ function renderSpec(payload) {
       `${f.std ? " &mdash; " + f.std : ""}</td>`;
     body.appendChild(row);
   }
+  // Camera blocks (Camera Phase 1): each camera is a labeled block of
+  // provenanced, editable rows, exactly like the scalar fields above.
+  for (const cam of (spec.cameras || [])) {
+    const head = document.createElement("tr");
+    head.innerHTML = `<td colspan="4"><b>camera[${cam.index}] ` +
+      `${cam.camera_id}</b></td>`;
+    body.appendChild(head);
+    for (const f of cam.fields) {
+      const row = document.createElement("tr");
+      const key = `cameras[${cam.index}].${f.name}`;
+      row.innerHTML =
+        `<td>&nbsp;&nbsp;${f.name}</td>` +
+        `<td><input data-name="${key}" data-camera="${cam.index}" ` +
+        `data-field="${f.name}" value="${f.value}">` +
+        `${f.unit ? " " + f.unit : ""}</td>` +
+        `<td class="${sourceClass(f.source)}" data-src="${key}">` +
+        `${f.source}</td>` +
+        `<td class="dim">${provenanceNote(f)}` +
+        `${f.std ? " &mdash; " + f.std : ""}</td>`;
+      body.appendChild(row);
+    }
+  }
   // Director's-notes legend: what each source means, in one line.
   $("srcLegend").innerHTML =
     `<span class="src-user">user</span> you said it &middot; ` +
@@ -265,8 +306,11 @@ function editedSpecDict() {
   const sections = {};
   for (const f of compiled.spec.fields) sections[f.name] = f.section;
   document.querySelectorAll("#specTable input").forEach(input => {
-    const name = input.dataset.name, section = sections[name];
-    const entry = dict[section][name];
+    const name = input.dataset.name;
+    // Camera rows edit dict.cameras[i][field]; same source rule.
+    const entry = input.dataset.camera !== undefined
+      ? dict.cameras[+input.dataset.camera][input.dataset.field]
+      : dict[sections[name]][name];
     const parsed = parseFloat(input.value);
     const value = Number.isNaN(parsed) ? input.value : parsed;
     if (String(entry.value) !== String(value)) {
@@ -308,15 +352,26 @@ async function doCompile(body) {
   } finally { $("compile").disabled = false; $("answer").disabled = false; }
 }
 
+// "" = no override: the prompt (or the documented default) decides.
+function clipSeconds() {
+  const v = $("clipSeconds").value;
+  return v === "" ? null : parseFloat(v);
+}
+
 $("compile").addEventListener("click", () =>
-  doCompile({prompt: $("prompt").value}));
+  doCompile({prompt: $("prompt").value, clip_seconds: clipSeconds()}));
 
 $("answer").addEventListener("click", () => {
   // One round: the original prompt plus the model's questions (echoed back)
   // and the user's answers. The server keeps no conversation state.
+  // prior_spec: the question round's full spec, echoed so nothing it
+  // decided can silently revert to a default in the answer round (the
+  // server restores dropped fields, provenance intact).
   doCompile({prompt: $("prompt").value,
              questions: pendingQuestions,
-             answers: collectAnswers()});
+             answers: collectAnswers(),
+             clip_seconds: clipSeconds(),
+             prior_spec: compiled ? compiled.spec.dict : null});
 });
 
 $("run").addEventListener("click", () => startRun(true));

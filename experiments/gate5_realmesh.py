@@ -25,6 +25,8 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+
+from core.util.platform import ue_editor_path
 from typing import Dict, List, Optional, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -86,7 +88,7 @@ AIRFRAMES = (
 
 
 def render(card: Path, frames: Path, manifest: Path, chase: str) -> bool:
-    editor = Path("/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor-Cmd")
+    editor = ue_editor_path()
     project = Path(__file__).resolve().parents[1] / "ue" / "FlightSim.uproject"
     frames.mkdir(parents=True, exist_ok=True)
     for stale in frames.glob("frame_*.png"):

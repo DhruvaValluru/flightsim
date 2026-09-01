@@ -754,3 +754,93 @@ def test_relay_preset_is_keyless(monkeypatch):
     monkeypatch.setenv("FLIGHTSIM_RELAY_URL", "https://example.dev/")
     client, model = resolve_client()
     assert client.base_url == "https://example.dev/v1"
+
+
+# -- cameras (Camera Phase 1) ---------------------------------------------
+
+def test_camera_block_overlays_with_provenance():
+    client = fake_client({
+        "fields": {},
+        "notes": [], "questions": [],
+        "cameras": [{
+            "preset": entry("tower", "inferred", "from the tower"),
+            "capture_count": entry(50, "user", "50 images"),
+        }],
+    })
+    spec = compile_prompt_llm("50 images from the tower",
+                              client=client).spec
+    assert len(spec.cameras) == 1
+    camera = spec.cameras[0]
+    assert str(camera.preset.value) == "tower"
+    assert str(camera.preset.source) == "inferred"
+    assert camera.capture_count.value == 50
+    assert str(camera.capture_count.source) == "user"
+    # Untouched camera fields keep the documented defaults.
+    assert str(camera.focal_length_mm.source) == "default"
+    # And the spec still validates like any other.
+    report = validate(spec, check_feasibility=False)
+    assert not any(v.constraint.startswith("camera.intrinsics")
+                   for v in report.violations)
+
+
+def test_absent_cameras_key_is_no_cameras():
+    client = fake_client({"fields": {}, "notes": [], "questions": []})
+    assert compile_prompt_llm("anything", client=client).spec.cameras == []
+
+
+def test_unknown_camera_field_is_an_error():
+    client = fake_client({
+        "fields": {}, "notes": [], "questions": [],
+        "cameras": [{"zoom": entry(2.0, "user", "zoomed")}],
+    })
+    with pytest.raises(LLMCompileError, match="unknown camera field"):
+        compile_prompt_llm("anything", client=client)
+
+
+def test_camera_preset_outside_the_vocabulary_is_an_error():
+    client = fake_client({
+        "fields": {}, "notes": [], "questions": [],
+        "cameras": [{"preset": entry("drone", "user", "drone shot")}],
+    })
+    with pytest.raises(LLMCompileError, match="outside the vocabulary"):
+        compile_prompt_llm("anything", client=client)
+
+
+def test_camera_model_guess_needs_a_quoted_phrase():
+    client = fake_client({
+        "fields": {}, "notes": [], "questions": [],
+        "cameras": [{"preset": {"value": "chase", "source": "model",
+                                "from": " "}}],
+    })
+    with pytest.raises(LLMCompileError, match="model guess"):
+        compile_prompt_llm("anything", client=client)
+
+
+def test_camera_list_is_bounded():
+    from core.nl.llm_compiler import MAX_CAMERAS
+
+    client = fake_client({
+        "fields": {}, "notes": [], "questions": [],
+        "cameras": [{"preset": entry("chase", "user", "chase")}
+                    for _ in range(MAX_CAMERAS + 1)],
+    })
+    with pytest.raises(LLMCompileError, match="exceed the cap"):
+        compile_prompt_llm("anything", client=client)
+
+
+def test_fractional_capture_count_is_an_error():
+    client = fake_client({
+        "fields": {}, "notes": [], "questions": [],
+        "cameras": [{"capture_count": entry(12.5, "user", "12.5 images")}],
+    })
+    with pytest.raises(LLMCompileError, match="whole number"):
+        compile_prompt_llm("anything", client=client)
+
+
+def test_camera_schema_is_generated_from_cameraspec():
+    from core.nl.llm_compiler import CAMERA_FIELD_VALUE_SCHEMAS
+    from core.scenario.camera import CameraSpec
+
+    assert set(CAMERA_FIELD_VALUE_SCHEMAS) <= set(CameraSpec.FIELD_ORDER)
+    assert RESPONSE_SCHEMA["properties"]["cameras"]["items"][
+        "additionalProperties"] is False

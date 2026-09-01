@@ -63,20 +63,35 @@ One codebase, platform dispatch inside it (`core/util/platform.py`):
 | Prompt → LLM compile → spec → validate | ✓ | ✓ | ✓ |
 | Headless JSBSim physics + telemetry | ✓ | ✓ | ✓ |
 | Web app on localhost:8008, terrain baking, effect reports | ✓ | ✓ | ✓ |
-| Rendered video clips (Unreal Engine host) | ✓ | refused by name | refused by name |
+| Rendered video clips (Unreal Engine host) | ✓ | refused by name | ✓ after the build below |
 
 Everything in the first three rows is pure Python and is exercised by CI
-on all three OSes. The UE render half currently requires macOS -- every
-render calibration was measured on Metal/macOS only, and claiming more
-would be claiming what was never measured -- so off-mac it refuses as
-`ue.platform` with a pointer here, and the web app still delivers the
-headless half (spec, provenance, validation, telemetry).
+on all three OSes. The UE render half runs on macOS (where every render
+calibration was measured, on Metal) and on Windows once the build steps
+below have produced the bridge -- until then Windows refuses as
+`ue.platform` with the exact missing piece, and the web app still
+delivers the headless half (spec, provenance, validation, telemetry).
+The render calibrations were measured on Metal only, so on Windows run
+`experiments/gate6_visual.py` once after building: it re-measures the
+visual clauses from the rendered pixels on YOUR machine, which is the
+project's standard of evidence -- a green Gate 6 there is the Windows
+render claim. Linux remains headless-only.
 
 Per-OS setup notes:
 
 * **macOS / Linux**: `./scripts/setup.sh`. **Windows**:
   `.\scripts\setup.ps1` (PowerShell), then
   `.\.venv\Scripts\python.exe -m uvicorn webapp.server:app --port 8008`.
+  Or deploy with one pasted command -- no clone, no prerequisites
+  (installs git/Python via winget only if missing, clones, sets up,
+  starts the server and opens the browser):
+
+  ```powershell
+  irm https://raw.githubusercontent.com/DhruvaValluru/flightsim/master/scripts/deploy_windows.ps1 | iex
+  ```
+
+  Windows note: install Python 3.10-3.12, not 3.13+ -- `numpy==2.0.2`
+  ships no Windows wheel past 3.12, and both setup scripts check this.
 * **ffmpeg** (only for encoding clips/panels): `brew install ffmpeg` /
   `sudo apt install ffmpeg` / `winget install ffmpeg`. Missing ffmpeg is
   a named refusal (`ffmpeg.missing`); nothing else needs it. Override
@@ -91,12 +106,48 @@ Per-OS setup notes:
   ZERO setup on any OS: a fresh clone compiles a prompt before
   installing anything optional.
 
-**Rendering video clips** needs a Mac with Unreal Engine 5.5
-(free from the Epic Games Launcher) and Xcode: then
-`./scripts/vendor_ue_plugin.sh && ./scripts/build_ue.sh`, create materials
-with `scripts/ue_create_materials.py`, and import aircraft with
-`scripts/ue_import_aircraft.py`. Read `NEXT.md` for operational state and
-the 26 recorded gotchas before deep work.
+**Rendering video clips** needs Unreal Engine 5.5 (free from the Epic
+Games Launcher) plus the platform toolchain:
+
+* **macOS** (Xcode 15.2-16.9):
+  `./scripts/vendor_ue_plugin.sh && ./scripts/build_ue.sh`
+* **Windows** (Visual Studio 2022 with the C++ workload):
+  `.\scripts\vendor_ue_plugin.ps1` builds the Win64 JSBSim library with
+  upstream's own `JSBSimForUnreal.sln` (the patched plugin sources are
+  already committed), then `.\scripts\build_ue.ps1` builds the host.
+  `.\scripts\ue_preflight.ps1` diagnoses exactly what is missing at any
+  point, and `experiments\gate6_visual.py` validates the render output
+  on your machine afterwards.
+
+Then two asset steps, either OS -- **optional since 2026-09-01**: a
+render provisions whatever it needs itself, in the open, so these are
+for priming a machine ahead of time rather than prerequisites.
+
+* **Real terrain**: `python scripts/bake_terrain.py` bakes the showcase
+  terrains (Matterhorn, Yosemite, the synthesised control ridge) into
+  `runs/terrain/`; `--all` bakes every curated location. Renders also
+  carry a fail-safe: a scene the SYSTEM chose never falls back to the
+  featureless slab -- the control ridge is synthesised on first need --
+  while a user-stated flat place stays honestly flat.
+* **Real aircraft**: `python scripts/import_aircraft.py` fetches each
+  configured model at its pinned commit (license verified on disk),
+  converts it, and imports it into the Unreal project. Renders carry
+  the same fail-safe the terrain does: the first run that needs a model
+  this machine can build **builds it then and there**, with a status
+  line per step (user request 2026-09-01 -- a missing mesh is not the
+  user's chore). Placeholder airframes still never render on ANY
+  machine (owner's rule, extended 2026-08-31), so two things still
+  refuse by name before any editor time and no automation reaches
+  around them: an airframe with **no model config** (nothing to fetch),
+  and one whose **upstream ships no license file** (section 3.3 -- the
+  p51d today, physics-only until upstream publishes one). A build that
+  starts and fails fails the run by name (`aircraft.mesh_import`); it
+  never falls through to blocks.
+
+Materials come from `scripts/ue_create_materials.py` (run inside
+UnrealEditor-Cmd; `ue_preflight` names the exact invocation when they
+are missing). Read `NEXT.md` for operational state and the 26 recorded
+gotchas before deep work.
 
 `rasterio` ships GDAL in its wheel, so no separate GDAL build is needed.
 
@@ -174,6 +225,22 @@ gate, the breadth behind Gate 5's single case:
 .venv/bin/python experiments/host_parity_matrix.py
 ```
 
+## Capture camera geometry (Camera Phase 1, any platform)
+
+Cameras are spec elements (provenanced, validated, digest-relevant --
+see `docs/CAMERA_PHASE1_REPORT.md`). A run captures a DEFINED number of
+frames, each with full recoverable geometry, engine or no engine:
+
+```bash
+.venv/bin/python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo
+.venv/bin/python -m flightsim.verify runs/demo
+```
+
+Off macOS the pixel render refuses by name (`ue.platform`) while the
+capture manifest, geometry previews and verification complete; the
+refusal example (`examples/cameras_refusal.yaml`) shows a camera placed
+inside terrain refused as `camera.terrain_clearance`.
+
 ## Run the tests
 
 ```bash
@@ -196,6 +263,7 @@ core/            zero Unreal dependency (§2.9)
   control/       TECS as a JSBSim XML system, run at FDM rate
   scenario/      spec schema, validation, provenance, run harness
   nl/            prompt -> spec compiler. Emits a spec, never runs anything.
+  capture/       camera pose solver, capture scheduler, manifest, verifier
   telemetry/     read-only observers
   terrain/       DEM ingestion, spectral synthesis, heightfield query, Landscape export
 experiments/     gates, sweeps, analysis, validation

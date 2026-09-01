@@ -60,9 +60,112 @@ float AFlightSimCameraDirector::GetCameraRollDegrees() const
 	return GetActorRotation().Roll;
 }
 
+bool AFlightSimCameraDirector::SetPoseTrack(TArray<double>&& Times,
+                                            TArray<FVector>&& Locations,
+                                            TArray<FRotator>&& Rotations,
+                                            FString& Error)
+{
+	if (Times.Num() < 2)
+	{
+		Error = FString::Printf(
+			TEXT("consume-poses: a track of %d sample(s) is not a track; "
+			     "refusing to fly a camera nobody solved"), Times.Num());
+		return false;
+	}
+	if (Times.Num() != Locations.Num() || Times.Num() != Rotations.Num())
+	{
+		Error = FString::Printf(
+			TEXT("consume-poses: %d times against %d locations and %d "
+			     "rotations; refusing a misaligned track"),
+			Times.Num(), Locations.Num(), Rotations.Num());
+		return false;
+	}
+	for (int32 i = 1; i < Times.Num(); ++i)
+	{
+		if (Times[i] <= Times[i - 1])
+		{
+			Error = TEXT("consume-poses: track times must be strictly "
+			             "increasing");
+			return false;
+		}
+	}
+	PoseTimes = MoveTemp(Times);
+	PoseLocations = MoveTemp(Locations);
+	PoseRotations = MoveTemp(Rotations);
+	return true;
+}
+
+bool AFlightSimCameraDirector::ApplyPoseAtTime(double SimTimeSeconds,
+                                               FString& Error)
+{
+	if (PoseTimes.Num() == 0)
+	{
+		Error = TEXT("consume-poses: no pose track is set");
+		return false;
+	}
+	// Refuse, never extrapolate: a time outside the solved span would put
+	// the camera at a pose that was never validated against the scene.
+	const double Slack = 1.0e-6;
+	if (SimTimeSeconds < PoseTimes[0] - Slack ||
+	    SimTimeSeconds > PoseTimes.Last() + Slack)
+	{
+		Error = FString::Printf(
+			TEXT("consume-poses: t=%.6f s lies outside the solved track "
+			     "[%.6f, %.6f]; the track does not cover the run"),
+			SimTimeSeconds, PoseTimes[0], PoseTimes.Last());
+		return false;
+	}
+	int32 Upper = 1;
+	while (Upper < PoseTimes.Num() - 1 && PoseTimes[Upper] < SimTimeSeconds)
+	{
+		++Upper;
+	}
+	const int32 Lower = Upper - 1;
+	const double Span = PoseTimes[Upper] - PoseTimes[Lower];
+	const double Fraction = Span > 0.0
+		? FMath::Clamp((SimTimeSeconds - PoseTimes[Lower]) / Span, 0.0, 1.0)
+		: 0.0;
+	const FVector Location = FMath::Lerp(PoseLocations[Lower],
+	                                     PoseLocations[Upper],
+	                                     Fraction);
+	const FQuat Rotation = FQuat::Slerp(
+		PoseRotations[Lower].Quaternion(),
+		PoseRotations[Upper].Quaternion(),
+		static_cast<float>(Fraction));
+	// Sweep-free teleport: the camera is an observer, never a collider.
+	SetActorLocationAndRotation(Location, Rotation, false, nullptr,
+	                            ETeleportType::TeleportPhysics);
+	// Solved-vs-applied parity, the gate5 discipline: anything that moved
+	// the camera away from the solved pose (a clamp, a collision handler,
+	// an attachment) FAILS LOUDLY here rather than rendering frames whose
+	// recorded geometry is quietly wrong. 10 cm on a cinema camera is
+	// already generous.
+	const FVector Applied = GetActorLocation();
+	if (!Applied.Equals(Location, 10.0f))
+	{
+		Error = FString::Printf(
+			TEXT("consume-poses: applied camera position (%.1f, %.1f, %.1f) "
+			     "differs from the solved pose (%.1f, %.1f, %.1f) by more "
+			     "than 10 cm at t=%.3f s; refusing to record geometry the "
+			     "frames do not have"),
+			Applied.X, Applied.Y, Applied.Z,
+			Location.X, Location.Y, Location.Z, SimTimeSeconds);
+		return false;
+	}
+	return true;
+}
+
 void AFlightSimCameraDirector::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+
+	if (ConsumingPoses())
+	{
+		// Consume-poses mode: the commandlet drives this actor by
+		// simulation time (ApplyPoseAtTime); computing a preset here
+		// would fight the solved track frame by frame.
+		return;
+	}
 
 	if (Target == nullptr || DeltaSeconds <= 0.0f)
 	{

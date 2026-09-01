@@ -55,6 +55,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..environment.surface import SURFACE_CLASSES
+from ..scenario.camera import CAMERA_PRESETS, CameraSpec
 from ..scenario.fields import Quantity, Source
 from ..scenario.spec import ScenarioSpec
 from ..terrain.glo30 import LOCATIONS
@@ -250,6 +251,32 @@ _SPEC_FIELDS = {name for _, name in ScenarioSpec.FIELD_ORDER}
 _unknown = set(FIELD_VALUE_SCHEMAS) - _SPEC_FIELDS
 assert not _unknown, f"llm_compiler schema names non-spec fields: {_unknown}"
 
+#: Hard cap on cameras per response, enforced in parsing like MAX_QUESTIONS.
+MAX_CAMERAS = 4
+
+#: Value schema per LLM-settable CAMERA field (Camera Phase 1). Kept
+#: deliberately narrow: the view, the lens, and the capture schedule --
+#: placement geometry stays with the deterministic vocabulary, the
+#: documented defaults and the review-table edit path.
+CAMERA_FIELD_VALUE_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "preset": {"type": "string", "enum": list(CAMERA_PRESETS)},
+    "focal_length_mm": {"type": "number", "description": "millimetres"},
+    "capture_count": {
+        "type": "number",
+        "description": "exact number of images to capture (whole number)",
+    },
+    "period_s": {"type": "number",
+                 "description": "seconds between captures"},
+}
+
+# Same generated-not-hand-copied discipline: the camera schema is tied
+# to CameraSpec's own field list at import time.
+_CAMERA_FIELDS = set(CameraSpec.FIELD_ORDER)
+_unknown_camera = set(CAMERA_FIELD_VALUE_SCHEMAS) - _CAMERA_FIELDS
+assert not _unknown_camera, (
+    f"llm_compiler camera schema names non-camera fields: "
+    f"{_unknown_camera}")
+
 #: Canonical unit per numeric field -- a redundant "unit" key in a model
 #: response is tolerated ONLY when it states exactly this.
 CANONICAL_UNITS: Dict[str, str] = {
@@ -297,6 +324,21 @@ RESPONSE_SCHEMA: Dict[str, Any] = {
             "maxItems": MAX_QUESTIONS,
             "description": "Clarifying questions; [] when nothing needs "
                            "asking. One round only.",
+        },
+        "cameras": {
+            "type": "array",
+            "maxItems": MAX_CAMERAS,
+            "description": "Cameras the prompt asks for; [] when no "
+                           "camera or capture language appears.",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    name: _field_schema(value_schema)
+                    for name, value_schema
+                    in CAMERA_FIELD_VALUE_SCHEMAS.items()
+                },
+            },
         },
     },
 }
@@ -415,9 +457,25 @@ Extraction rules:
   Each class is a documented roughness + thermal model; ground cover the
   vocabulary lacks (swamp, tundra, ice shelf) goes to "notes", never to
   the nearest-looking class.
-- Anything the schema cannot express -- unknown aircraft, cinematic or
-  camera language, weather the vocabulary lacks -- goes into "notes"
-  verbatim, never guessed into a field.
+- Anything the schema cannot express -- unknown aircraft, cinematic
+  language, weather the vocabulary lacks -- goes into "notes" verbatim,
+  never guessed into a field.
+
+Cameras ("cameras" is a top-level list beside "fields"; [] when the
+prompt has no camera or capture language):
+- Named views map to presets: chase (following), wingman (formation),
+  tower / "from the tower", ground / "ground observer", cockpit /
+  "over the shoulder". Each camera entry carries provenanced fields
+  exactly like "fields": preset, focal_length_mm, capture_count,
+  period_s -- nothing else; placement geometry is not yours to invent.
+- An exact image count ("50 images/frames/stills") is capture_count,
+  source "user". Lens words: wide angle -> 24 mm, telephoto -> 85 mm
+  (inferred); "<n> mm lens" is user.
+- When the prompt implies imagery ("photograph", "capture", "images
+  of") but names NO viewpoint, you MAY ask one camera-intent question
+  (which view?) under the same one-round/three-question caps. A prompt
+  with no camera language at all gets no camera and no question: the
+  documented default view applies.
 
 """ + _locations_block() + """
 
@@ -512,9 +570,13 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
     # strict as before; any OTHER unknown or missing key still refuses.
     payload.setdefault("notes", [])
     payload.setdefault("questions", [])
-    if set(payload) != {"fields", "notes", "questions"}:
+    # An absent cameras key claims exactly what [] does (no camera
+    # language) -- the same OpenAI-compat tolerance the two list keys
+    # above get; every per-entry rail below stays fully strict.
+    payload.setdefault("cameras", [])
+    if set(payload) != {"fields", "notes", "questions", "cameras"}:
         raise _fail(f"top-level keys {sorted(payload)} != "
-                    f"['fields', 'notes', 'questions']")
+                    f"['cameras', 'fields', 'notes', 'questions']")
     fields, notes = payload["fields"], payload["notes"]
     if not isinstance(fields, dict):
         raise _fail("'fields' is not an object")
@@ -634,6 +696,61 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
         elif "enum" in value_schema and value not in value_schema["enum"]:
             raise _fail(f"field {name!r} value {value!r} is outside the "
                         f"vocabulary {value_schema['enum']}")
+
+    # Cameras (Camera Phase 1): a bounded repeated block, every entry
+    # facing the same rails the scalar fields face -- unknown camera
+    # fields refuse, sources are claimed from the same three, a model
+    # guess must quote its phrase, values face the camera vocabulary.
+    cameras = payload["cameras"]
+    if not isinstance(cameras, list):
+        raise _fail("'cameras' is not a list")
+    if len(cameras) > MAX_CAMERAS:
+        raise _fail(f"{len(cameras)} cameras exceed the cap of "
+                    f"{MAX_CAMERAS}")
+    for index, block in enumerate(cameras):
+        if not isinstance(block, dict) or not block:
+            raise _fail(f"camera {index} must be an object of camera "
+                        f"fields")
+        for name in [n for n, e in block.items()
+                     if isinstance(e, dict) and e.get("value") is None]:
+            del block[name]
+        for name, entry in block.items():
+            if name not in CAMERA_FIELD_VALUE_SCHEMAS:
+                raise _fail(f"camera {index}: unknown camera field "
+                            f"{name!r}")
+            if not isinstance(entry, dict) \
+                    or set(entry) != {"value", "source", "from"}:
+                raise _fail(f"camera {index} field {name!r} must carry "
+                            f"exactly value/source/from")
+            if entry["source"] not in ("user", "inferred", "model"):
+                raise _fail(f"camera {index} field {name!r} claims source "
+                            f"{entry['source']!r}; only 'user', "
+                            f"'inferred' or 'model' may be claimed")
+            if not (isinstance(entry["from"], str)
+                    and entry["from"].strip()):
+                if entry["source"] == "model":
+                    raise _fail(f"camera {index} field {name!r} is a "
+                                f"model guess with no declared reason; a "
+                                f"guess must quote the prompt phrase it "
+                                f"interprets")
+                raise _fail(f"camera {index} field {name!r} has no "
+                            f"provenance phrase")
+            value_schema = CAMERA_FIELD_VALUE_SCHEMAS[name]
+            value = entry["value"]
+            if value_schema["type"] == "number":
+                if isinstance(value, bool) \
+                        or not isinstance(value, (int, float)):
+                    raise _fail(f"camera {index} field {name!r} value "
+                                f"{value!r} is not a number")
+                if name == "capture_count" and float(value) != int(value):
+                    raise _fail(f"camera {index}: a capture count of "
+                                f"{value!r} is not a whole number of "
+                                f"images")
+            elif "enum" in value_schema \
+                    and value not in value_schema["enum"]:
+                raise _fail(f"camera {index} field {name!r} value "
+                            f"{value!r} is outside the vocabulary "
+                            f"{value_schema['enum']}")
     return payload
 
 
@@ -768,6 +885,31 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
 
     for field_name, entry in payload["fields"].items():
         _overlay(spec, field_name, entry)
+
+    # Cameras overlay AFTER the fields: the default offsets and the
+    # world-anchored placements depend on the (possibly model-chosen)
+    # aircraft and terrain datum.
+    for index, block in enumerate(payload["cameras"]):
+        preset_entry = block.get("preset")
+        preset = str(preset_entry["value"]) if preset_entry else "chase"
+        camera = CameraSpec.defaulted(
+            camera_id=f"camera{index}", preset=preset,
+            aircraft=str(spec.aircraft.value),
+            terrain_elevation_m=float(spec.terrain_elevation.value),
+            frm="camera language in the prompt; documented camera default")
+        for name, entry in block.items():
+            current = getattr(camera, name)
+            value = entry["value"]
+            schema = CAMERA_FIELD_VALUE_SCHEMAS[name]
+            if schema["type"] == "number":
+                value = int(value) if name == "capture_count" \
+                    else float(value)
+            setattr(camera, name, Quantity(
+                value=value, unit=current.unit,
+                source={"user": Source.USER, "inferred": Source.INFERRED,
+                        "model": Source.MODEL}[entry["source"]],
+                frm=entry["from"].strip()))
+        spec.cameras.append(camera)
 
     # The event AIM rides in the quantity's detail (digest-relevant: it
     # decides whether the vortex axis sits ON the track or 2.5 core radii

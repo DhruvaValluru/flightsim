@@ -27,6 +27,46 @@ def test_os_name_dispatch(monkeypatch):
     assert plat.os_name() == "windows"
 
 
+def test_ue_dispatch_windows_needs_engine_and_bridge(monkeypatch, tmp_path):
+    """Windows gets the UE half only once BOTH pieces exist -- the
+    engine's UnrealEditor-Cmd.exe and a built FlightSimBridge DLL -- so a
+    bare clone refuses ue.platform by name instead of failing mid-run.
+    UE_ROOT overrides the engine location like FLIGHTSIM_FFMPEG does for
+    ffmpeg."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    root = tmp_path / "UE_5.5"
+    monkeypatch.setenv("UE_ROOT", str(root))
+    assert plat.find_ue_root() == root
+    editor = plat.ue_editor_path()
+    assert editor == (root / "Engine" / "Binaries" / "Win64"
+                      / "UnrealEditor-Cmd.exe")
+    assert plat.ue_available() is False          # nothing installed
+
+    editor.parent.mkdir(parents=True)
+    editor.write_bytes(b"")
+    bridge = tmp_path / "UnrealEditor-FlightSimBridge.dll"
+    monkeypatch.setattr(plat, "ue_bridge_binary", lambda repo: bridge)
+    assert plat.ue_available() is False          # engine alone: not enough
+
+    bridge.write_bytes(b"")
+    assert plat.ue_available() is True           # engine + built bridge
+
+
+def test_ue_dispatch_mac_and_linux_unchanged(monkeypatch):
+    """mac keeps its measured behavior (available, editor at the default
+    install); Linux still has no UE half at all."""
+    monkeypatch.delenv("UE_ROOT", raising=False)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert plat.ue_available() is True
+    assert plat.ue_editor_path() == Path(
+        "/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor-Cmd")
+    assert plat.ue_bridge_binary(REPO).suffix == ".dylib"
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert plat.ue_available() is False
+    assert plat.ue_editor_path() is None
+
+
 def test_ffmpeg_env_override_wins(monkeypatch, tmp_path):
     fake = tmp_path / "my-ffmpeg"
     monkeypatch.setenv("FLIGHTSIM_FFMPEG", str(fake))
@@ -75,6 +115,18 @@ def test_webapp_refuses_ue_platform_off_mac(monkeypatch):
     from webapp.server import app
 
     monkeypatch.setattr(plat, "ue_available", lambda: False)
+    # About the platform refusal, not the scene or the mesh rule: pin the
+    # flat scene and hold the mesh gate open so the test measures the
+    # same thing on a machine with or without local bakes and models.
+    import webapp.runs as runs_module
+    import webapp.server as server_module
+
+    monkeypatch.setattr(runs_module, "pick_scene",
+                        lambda spec: {"key": "flat", "kind": "flat",
+                                      "terrain": None, "imagery": None,
+                                      "label": "flat (test)"})
+    monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
+                        lambda spec: None)
     spec = compile_prompt("fly the 747 at 3000 m and 250 kt")
     client = TestClient(app)
     reply = client.post("/run", json={"spec": spec.to_dict()})
@@ -86,6 +138,51 @@ def test_webapp_refuses_ue_platform_off_mac(monkeypatch):
     status = client.get("/status").json()
     assert status["platform"] in ("mac", "linux", "windows")
     assert isinstance(status["render_available"], bool)
+
+
+def test_no_shadowed_locals_in_the_bridge():
+    """MSVC's C4456 is an ERROR under UE's warnings-as-errors, and clang
+    on mac does not raise it: two shadowed `Current` index variables in
+    FlightSimScenarioWorld.cpp compiled clean for the whole life of the
+    mac-only build and stopped the first Windows build dead. Enforced
+    statically here because the bridge cannot be compiled on CI (no
+    engine), so nothing else would catch a reintroduction until someone
+    with a Windows machine hit it again.
+    """
+    decl = re.compile(
+        r"^\s*(?:const\s+)?(?:static\s+)?"
+        r"(?:int32|int|uint32|double|float|bool|FString|FVector|FRotator"
+        r"|FText|FName|auto|TArray<[^;]*?>|TMap<[^;]*?>)\s+(\w+)\s*(?:=|;|\()")
+
+    def without_comments(text):
+        text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+        return "\n".join(re.sub(r"//.*$", "", ln) for ln in text.split("\n"))
+
+    offenders = []
+    source = REPO / "ue" / "Plugins" / "FlightSimBridge" / "Source"
+    for path in sorted(source.rglob("*.cpp")):
+        scopes = [{}]
+        for number, line in enumerate(
+                without_comments(path.read_text(encoding="utf-8")).split("\n"),
+                start=1):
+            match = decl.match(line)
+            if match:
+                name = match.group(1)
+                for outer in scopes[:-1]:
+                    if name in outer and len(scopes) > 1:
+                        offenders.append(
+                            f"{path.relative_to(REPO)}:{number}: '{name}' "
+                            f"hides the declaration at line {outer[name]}")
+                        break
+                scopes[-1][name] = number
+            for _ in range(line.count("{")):
+                scopes.append({})
+            for _ in range(line.count("}")):
+                if len(scopes) > 1:
+                    scopes.pop()
+    assert not offenders, (
+        "shadowed locals (MSVC C4456 is an error under UE's "
+        "warnings-as-errors): " + ", ".join(offenders))
 
 
 def test_no_text_io_without_utf8_encoding():

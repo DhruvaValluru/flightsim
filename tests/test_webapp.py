@@ -5,6 +5,8 @@ against monkeypatched process checks, and the render pipeline itself is the
 showcase machinery already covered by its own gates.
 """
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -20,6 +22,58 @@ def client():
 
 
 # -- /compile --------------------------------------------------------------
+
+def test_clip_selector_is_a_user_edit_of_duration(client):
+    """The UI's clip-length choice is an explicit USER edit of the run
+    duration (the clip is min(duration, CLIP_SECONDS)), it wins over a
+    duration stated in the prompt, and an out-of-range value refuses by
+    name instead of clamping silently."""
+    payload = client.post("/compile", json={
+        "prompt": "fly the 747 at 3000 m and 250 kt for 90 seconds",
+        "compiler": "regex", "clip_seconds": 6}).json()
+    duration = next(f for f in payload["spec"]["fields"]
+                    if f["name"] == "duration")
+    assert duration["value"] == 6.0
+    assert duration["source"] == "user"
+    assert "selector" in duration["from"]
+
+    refused = client.post("/compile", json={
+        "prompt": "fly the 747", "compiler": "regex", "clip_seconds": 99})
+    assert refused.status_code == 400
+    assert "clip length" in refused.json()["error"]
+
+
+def test_answer_round_keeps_the_question_rounds_decisions(client):
+    """The protocol is stateless: round 2 re-extracts everything, so a
+    field the model drops -- or the WHOLE round, when the LLM dies and the
+    regex fallback compiles the original prompt -- silently reverted to
+    its default (measured: an answered location question came back with
+    round 1's settings gone). The page echoes round 1's spec; anything
+    that round decided and round 2 left at default is restored with its
+    provenance intact, and a fresh compile (no answers) ignores the echo.
+    """
+    round1 = client.post("/compile", json={
+        "prompt": "fly the 747 at 5100 m and 260 kt",
+        "compiler": "regex"}).json()
+
+    round2 = client.post("/compile", json={
+        "prompt": "fly the 747",
+        "compiler": "regex",
+        "answers": [{"id": "place", "answer": "the mountains"}],
+        "prior_spec": round1["spec"]["dict"]}).json()
+    altitude = next(f for f in round2["spec"]["fields"]
+                    if f["name"] == "altitude")
+    assert altitude["value"] == 5100.0
+    assert altitude["source"] == "user"
+    assert "kept from the question round" in altitude["from"]
+
+    fresh = client.post("/compile", json={
+        "prompt": "fly the 747", "compiler": "regex",
+        "prior_spec": round1["spec"]["dict"]}).json()
+    altitude = next(f for f in fresh["spec"]["fields"]
+                    if f["name"] == "altitude")
+    assert altitude["source"] != "user"
+
 
 def test_compile_returns_provenanced_fields_and_verdict(client):
     response = client.post("/compile", json={
@@ -87,6 +141,16 @@ def test_run_refuses_while_editor_is_owned(client, monkeypatch):
     # into runs/webapp.
     monkeypatch.setattr(RunManager, "_execute",
                         lambda self, run, spec, provenance: None)
+    # About the editor lock, not the mesh rule or the scene: hold the
+    # mesh gate open and pin the flat scene so this measures the same
+    # thing on a machine with or without local bakes.
+    import webapp.server as server_module
+    monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
+                        lambda spec: None)
+    monkeypatch.setattr(runs_module, "pick_scene",
+                        lambda spec: {"key": "flat", "kind": "flat",
+                                      "terrain": None, "imagery": None,
+                                      "label": "flat (test)"})
     compiled = client.post("/compile", json={
         "prompt": "fly the 747 at 3000 m and 250 kt", "compiler": "regex"}
     ).json()
@@ -279,12 +343,25 @@ def test_llm_death_on_answer_round_falls_back_to_the_original_prompt(
 
 def test_run_forwards_the_transcript_into_provenance(client, monkeypatch):
     from webapp.server import manager
+    import webapp.server as server_module
 
     captured = {}
 
     def fake_start(spec, provenance):
         captured.update(provenance)
         return {"run_id": "test"}
+
+    # About provenance forwarding, not the platform/mesh gates or the
+    # scene: hold both gates open and pin the flat scene so this measures
+    # the same thing on a machine with or without local bakes.
+    import core.util.platform as plat
+    monkeypatch.setattr(plat, "ue_available", lambda: True)
+    monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
+                        lambda spec: None)
+    monkeypatch.setattr(runs_module, "pick_scene",
+                        lambda spec: {"key": "flat", "kind": "flat",
+                                      "terrain": None, "imagery": None,
+                                      "label": "flat (test)"})
 
     monkeypatch.setattr(manager, "start", fake_start)
     compiled = client.post("/compile", json={
@@ -494,27 +571,97 @@ def test_flyable_defaults_are_planned_not_refused():
 
 
 def test_placeholder_airframes_never_render(client, monkeypatch):
-    """Owner's rule: on a machine with imported meshes, an aircraft
-    without a real licensed 3-D model refuses to render BY NAME instead
-    of showing blocks (measured: an F-15 run rendered the placeholder).
-    A machine with no meshes at all is untouched."""
+    """Owner's rule (2026-08-14, extended 2026-08-31): an aircraft
+    without a real licensed 3-D model refuses to render BY NAME on ANY
+    machine -- a mesh-less fresh clone included ("always use a real
+    model", measured on the first Windows deploy).
+
+    NARROWED 2026-09-01: a model this machine can BUILD is no longer a
+    refusal -- the render flow provisions it (tests/test_aircraft_assets.py
+    pins that half). What still refuses here is what no command can fix:
+    the f15 has no config, so there is nothing to fetch. The refusal
+    names the airframes that can be built instead of an import command
+    that would not help this one."""
     from webapp.runs import refuse_placeholder_mesh, renderable_aircraft
 
-    if renderable_aircraft():
-        spec = compile_prompt("fly the f15 at 5000 m and 350 kt")
-        refusal = refuse_placeholder_mesh(spec)
-        assert refusal is not None
-        assert refusal["constraint"] == "aircraft.mesh"
-        assert "f15" in refusal["message"]
+    spec = compile_prompt("fly the f15 at 5000 m and 350 kt")
+    refusal = refuse_placeholder_mesh(spec)
+    assert refusal is not None
+    assert refusal["constraint"] == "aircraft.mesh"
+    assert "f15" in refusal["message"]
+    assert "B747" in refusal["message"]
+    have = renderable_aircraft()
+    if have:                    # with real models imported, those pass
         real = compile_prompt("fly the 747 at 3000 m and 250 kt")
+        real.set("aircraft", have[0], frm="test: a model that IS imported")
         assert refuse_placeholder_mesh(real) is None
 
-    # The endpoint wires the refusal as a named 409, whatever machine.
+    # The endpoint wires the refusal as a named 409, whatever machine --
+    # with the platform gate held open, since ue.platform is checked
+    # first and would otherwise preempt the mesh refusal under test.
+    import core.util.platform as plat
     import webapp.server as server_module
+    monkeypatch.setattr(plat, "ue_available", lambda: True)
     monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
                         lambda spec: {"constraint": "aircraft.mesh",
                                       "message": "no real 3-D model"})
     spec = compile_prompt("fly the f15 at 5000 m and 350 kt")
+    reply = client.post("/run", json={"spec": spec.to_dict()})
+    assert reply.status_code == 409
+    assert reply.json()["refused"] == "aircraft.mesh"
+
+
+def test_control_ridge_failsafe_synthesises_once(tmp_path, monkeypatch):
+    """Owner's rule (2026-08-31): the synthesised control ridge is always
+    available, so a scene the SYSTEM chose never falls through to the
+    featureless slab just because nothing is baked yet (measured: a
+    fresh Windows machine's mountains prompt rendered flat). Synthesises
+    into runs/terrain exactly once, and only when missing."""
+    import webapp.runs as runs
+
+    calls = []
+
+    class FakeField:
+        def write(self, path):
+            Path(str(path) + ".r16").write_bytes(b"synthesised")
+            calls.append(str(path))
+
+    def fake_generate(**kwargs):
+        assert kwargs["seed"] == 6          # the showcase's exact ridge
+        return FakeField()
+
+    monkeypatch.setattr(runs, "REPO", tmp_path)
+    monkeypatch.setattr("core.terrain.synthesis.generate", fake_generate)
+
+    runs.ensure_control_ridge()
+    ridge = tmp_path / "runs" / "terrain" / "control_ridge.r16"
+    assert ridge.is_file()
+    runs.ensure_control_ridge()             # idempotent: no re-synthesis
+    assert len(calls) == 1
+
+
+def test_platform_refusal_precedes_the_mesh_refusal(client, monkeypatch):
+    """A machine with no engine build hears ue.platform, not
+    aircraft.mesh. Measured 2026-08-31 on a fresh Windows clone: it was
+    told to import aircraft models when the real blocker was that no
+    Unreal host existed there at all. The engine is the more
+    fundamental missing piece, so it refuses first."""
+    import core.util.platform as plat
+
+    monkeypatch.setattr(plat, "ue_available", lambda: False)
+    monkeypatch.setattr(runs_module, "pick_scene",
+                        lambda spec: {"key": "flat", "kind": "flat",
+                                      "terrain": None, "imagery": None,
+                                      "label": "flat (test)"})
+    # An aircraft with no model on ANY machine: both refusals are live,
+    # and the platform one must win.
+    spec = compile_prompt("fly the f15 at 5000 m and 350 kt")
+    reply = client.post("/run", json={"spec": spec.to_dict()})
+    assert reply.status_code == 409
+    assert reply.json()["constraint"] == "ue.platform"
+
+    # With an engine, the SAME spec falls through to the asset refusal.
+    monkeypatch.setattr(plat, "ue_available", lambda: True)
     reply = client.post("/run", json={"spec": spec.to_dict()})
     assert reply.status_code == 409
     assert reply.json()["refused"] == "aircraft.mesh"
@@ -798,7 +945,11 @@ def test_windy_terrain_run_card_carries_the_rotor(tmp_path, monkeypatch):
     place_on_scene(spec)
     assert str(spec.turbulence.value) == "none"
 
-    def fake_render(card, frames, scene, mesh, aircraft, telemetry=None, look=None, camera="chase"):
+    # **kwargs so a new render argument (camera_flags, Phase 1) does
+    # not silently break this stub on a machine WITH terrain baked,
+    # which is the only place these tests reach _render at all.
+    def fake_render(card, frames, scene, mesh, aircraft, telemetry=None,
+                    look=None, camera="chase", **kwargs):
         frames.mkdir(parents=True, exist_ok=True)
         (frames / "render.json").write_text("{}", encoding="utf-8")
         if telemetry is not None:
@@ -856,7 +1007,11 @@ def test_calm_terrain_run_states_why_the_air_is_still(tmp_path, monkeypatch):
     spec = compile_prompt("fly the 747 at 5000 m over 2000 m mountains")
     place_on_scene(spec)
 
-    def fake_render(card, frames, scene, mesh, aircraft, telemetry=None, look=None, camera="chase"):
+    # **kwargs so a new render argument (camera_flags, Phase 1) does
+    # not silently break this stub on a machine WITH terrain baked,
+    # which is the only place these tests reach _render at all.
+    def fake_render(card, frames, scene, mesh, aircraft, telemetry=None,
+                    look=None, camera="chase", **kwargs):
         frames.mkdir(parents=True, exist_ok=True)
         (frames / "render.json").write_text("{}", encoding="utf-8")
         return True
@@ -931,6 +1086,13 @@ def test_windy_terrain_run_digest_is_content_addressed(client, monkeypatch):
         return {"run_id": "digesttest"}
 
     monkeypatch.setattr(manager, "start", fake_start)
+    # This test is about the digest, not the platform or mesh gates:
+    # hold both open so it measures the same thing on every machine.
+    import core.util.platform as plat
+    import webapp.server as server_module
+    monkeypatch.setattr(plat, "ue_available", lambda: True)
+    monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
+                        lambda spec: None)
     compiled = client.post("/compile", json={
         "prompt": "fly the 747 at 5000 m and 250 kt over 2000 m mountains "
                   "in a strong crosswind",

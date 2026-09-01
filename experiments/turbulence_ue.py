@@ -65,8 +65,10 @@ def load_nz(telemetry_path: Path) -> List[float]:
 
 
 def run_ue(card: Path, out: Path, allow_environment: bool) -> Path:
-    script = Path(__file__).resolve().parents[1] / "scripts" / "run_ue_scenario.sh"
-    command = [str(script), str(card), str(out)]
+    from core.util.platform import ue_runner_command
+
+    repo = Path(__file__).resolve().parents[1]
+    command = ue_runner_command(repo, "run_ue_scenario") + [str(card), str(out)]
     if allow_environment:
         command.append("-AllowNonParityEnvironment")
     proc = subprocess.run(command, capture_output=True, text=True)

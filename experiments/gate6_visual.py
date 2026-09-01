@@ -53,6 +53,8 @@ import sys
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
+
+from core.util.platform import ue_editor_path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -378,7 +380,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
 
     root = Path(__file__).resolve().parents[1]
-    editor = Path("/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor-Cmd")
+    editor = ue_editor_path()
     project = root / "ue" / "FlightSim.uproject"
 
     print(f"\n{RULE}\n1. inputs, all deterministic\n{RULE}")

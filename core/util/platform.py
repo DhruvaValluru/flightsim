@@ -133,11 +133,88 @@ def mono_fonts(sizes: Tuple[int, ...]) -> List:
 
 
 UE_PLATFORM_REFUSAL = (
-    "REFUSED ue.platform: rendered clips currently require macOS.\n"
-    "The compiler, headless physics, telemetry and the webapp run on\n"
-    "this OS -- see README \"Platform support\".")
+    "REFUSED ue.platform: rendered clips require macOS, or Windows with\n"
+    "Unreal Engine 5.5 and the FlightSimBridge built -- run\n"
+    "scripts\\ue_preflight.ps1 for the exact missing piece. The compiler,\n"
+    "headless physics, telemetry and the webapp run on this OS either\n"
+    "way -- see README \"Platform support\".")
+
+#: Default engine install roots, checked AFTER the UE_ROOT env override.
+#: Windows scans for any UE_5.* so a 5.4/5.6 install is still found and
+#: preflight can name the version mismatch instead of "not found".
+_UE_ROOT_DEFAULTS = {
+    "mac": ("/Users/Shared/Epic Games/UE_5.5",),
+    "windows": (r"C:\Program Files\Epic Games\UE_5.5",),
+    "linux": (),
+}
+
+
+def find_ue_root() -> Optional[Path]:
+    """The engine install to use: UE_ROOT env override, the per-OS
+    default, else (Windows) the newest Epic Games/UE_5.* present. When
+    nothing exists the default path is still returned on mac/Windows so
+    refusals can NAME the expected location; None only on Linux, which
+    has no UE half at all."""
+    override = os.environ.get("UE_ROOT", "").strip()
+    if override:
+        return Path(override)
+    defaults = _UE_ROOT_DEFAULTS[os_name()]
+    for candidate in defaults:
+        if Path(candidate).is_dir():
+            return Path(candidate)
+    if os_name() == "windows":
+        epic = Path(r"C:\Program Files\Epic Games")
+        versions = sorted(epic.glob("UE_5.*"), reverse=True)
+        if versions:
+            return versions[0]
+    return Path(defaults[0]) if defaults else None
+
+
+def ue_editor_path() -> Optional[Path]:
+    """The headless editor binary (UnrealEditor-Cmd) for this OS -- the
+    path to run or to name in a refusal; check is_file() for presence.
+    None only on Linux, where there is no UE half."""
+    root = find_ue_root()
+    if root is None:
+        return None
+    if os_name() == "windows":
+        return root / "Engine" / "Binaries" / "Win64" / "UnrealEditor-Cmd.exe"
+    return root / "Engine" / "Binaries" / "Mac" / "UnrealEditor-Cmd"
+
+
+def ue_bridge_binary(repo: Path) -> Path:
+    """Where a built FlightSimBridge lands on this OS (existence = built)."""
+    plugin = repo / "ue" / "Plugins" / "FlightSimBridge" / "Binaries"
+    if os_name() == "windows":
+        return plugin / "Win64" / "UnrealEditor-FlightSimBridge.dll"
+    return plugin / "Mac" / "UnrealEditor-FlightSimBridge.dylib"
+
+
+def ue_runner_command(repo: Path, script_stem: str) -> List[str]:
+    """Command prefix for scripts/<stem>.sh (mac) or <stem>.ps1 (Windows)
+    -- the experiments that drive the UE host through those wrappers call
+    this instead of hardcoding the .sh path. Append the wrapper's own
+    arguments to the returned list."""
+    if os_name() == "windows":
+        return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                "-File", str(repo / "scripts" / f"{script_stem}.ps1")]
+    return [str(repo / "scripts" / f"{script_stem}.sh")]
 
 
 def ue_available() -> bool:
-    """True only where the UE render half is measured to work: macOS."""
-    return is_mac()
+    """True where the UE render half can run: macOS (where every render
+    gotcha was measured), or Windows with an engine install AND a built
+    bridge -- the gate flips on only once scripts/build_ue.ps1 has
+    produced the binary, so a bare clone still refuses by name with the
+    build steps instead of failing mid-run. Windows render output is
+    validated per machine by experiments/gate6_visual.py (the render
+    calibrations were measured on Metal; Gate 6 measures them again from
+    the pixels wherever it runs)."""
+    if is_mac():
+        return True
+    if os_name() == "windows":
+        editor = ue_editor_path()
+        repo = Path(__file__).resolve().parents[2]
+        return (editor is not None and editor.is_file()
+                and ue_bridge_binary(repo).is_file())
+    return False

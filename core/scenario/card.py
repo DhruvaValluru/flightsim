@@ -124,7 +124,9 @@ def write_run_card(spec: ScenarioSpec, path: Path,
                    turbulence_provider=None,
                    reference_speeds: Optional[Dict[str, object]] = None,
                    tornado: Optional[Dict[str, object]] = None,
-                   scene_crs: Optional[str] = None) -> Path:
+                   scene_crs: Optional[str] = None,
+                   cameras: Optional[Sequence[Dict[str, object]]] = None,
+                   ) -> Path:
     """Write the spec in the form the UE commandlet reads.
 
     A projection of the spec, not a second copy of it. Every field is taken
@@ -211,6 +213,14 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # frame the position-coupled blocks (thermals, downburst, tornado)
         # work in; the card declares it (the spec origin's UTM zone).
         card["scene_crs"] = str(scene_crs)
+    if cameras:
+        # Camera Phase 1: each entry carries the camera's spec fields
+        # AND its Python-solved pose track (PoseTrack.card_block) at
+        # the card's own sample clock -- computed once here, consumed
+        # verbatim by the render host's consume-poses camera mode,
+        # which refuses (never extrapolates) a track that does not
+        # cover the run.
+        card["cameras"] = [dict(entry) for entry in cameras]
     if log_profile:
         card["log_profile"] = dict(log_profile)
     if thermals:

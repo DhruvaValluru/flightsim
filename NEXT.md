@@ -3,6 +3,52 @@
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
 
+**Camera Phase 1 (2026-08-31 -- docs/CAMERA_PHASE1_REPORT.md is the
+full report).** The camera is a spec element now: SPEC_VERSION 6,
+cameras as provenanced CameraSpec blocks (core/scenario/camera.py),
+digest-relevant, editable in the review table, addressable via
+set()/plan() as cameras[0].<field>; an EMPTY list drives the render
+flow byte-identically to the preset build (pinned by test). New
+core/capture/ package: deterministic pose solver (five UE presets
+ported; only cockpit inherits roll), telemetry-only capture scheduling
+(exact counts are contracts), camera.* refusals on the Violation
+surface (scene-free in validate(), scene-coupled in /run and the CLI),
+capture_manifest.json with full per-frame recoverable geometry, and an
+independent verifier whose every check is shown to fail on corruption.
+CLI: python -m flightsim.capture / flightsim.verify (examples/
+*.yaml). MUST-VERIFY ON A MAC: the additive consume-poses C++
+(CameraDirector SetPoseTrack/ApplyPoseAtTime + commandlet
+-camera-index= pass reading the card's cameras block, written by
+capture --card) compiles logically but was never built or rendered --
+the report's engine-boundary section carries the exact verification
+steps. Suite 573 tests collected, 114 mutation guards. Measured on a
+raster-less clone (no runs/terrain bakes): 104 guards fire; the FOUR
+terrain-coupled planner guards (ridge-axis wind, rotor card word,
+span-station clearance minimum, orographic pre-flight) report WEAK
+there because their test_webapp tests silently take the flat path
+without a baked raster -- bisected to the pre-camera base commit, so
+it is an environment artifact of guard MEASUREMENT, not a regression;
+they fire on a machine with the bakes. Worth fixing by giving those
+tests a synthetic raster fixture (the camera tests' make_mountain
+pattern) so every guard is machine-independent.
+
+**Aircraft fail-safe (2026-09-01, one commit).** A model a machine can
+BUILD is no longer a refusal: the render flow provisions it on first
+need, exactly as ensure_control_ridge synthesises the ridge, reporting
+each step as a run status line (user: "i cant run commands for every
+single mesh they should upload by themselves"). assets_pipeline/
+importer.py is now the ONE implementation of fetch-at-pinned-commit ->
+convert -> import-and-verify; scripts/import_aircraft.py is a thin CLI
+over it, so the command and the app cannot drift. The owner's
+placeholder rule is UNCHANGED and narrowed only where automation cannot
+help: an airframe with no config, and one whose upstream ships no
+license file (VALIDITY 3.3 -- refused BEFORE any fetch, so automation
+is not a back door to unattributed geometry), still refuse
+aircraft.mesh by name; a build that fails fails the run by name
+(aircraft.mesh_import) and never reaches a render. Six guards, all
+verified firing. Render path only -- tests and CI never provision, so a
+checkout's asset state stays deterministic.
+
 **Scene director + cross-platform (2026-08-13, two commits -- the full
 narrative is docs/CONTEXT_SCENE_DIRECTOR_SESSION.md).** The LLM now
 fills EVERY field it can justify under the new provenance source
@@ -41,10 +87,17 @@ after its first two runs caught five real gaps (httpx missing,
 anthropic missing, the platform refusal preempting two lock-logic
 tests -- now covered on every OS instead of skipped -- one incidental
 closure assertion, and a per-platform-libm turbulence ratio; fixes in
-2e725e2 + fe36f81, no mac coverage loosened). DELIBERATE DEFERRAL:
-porting the UE host off macOS is out of scope -- every render gotcha
-was measured on Metal only; do not claim render support nobody
-measured.
+2e725e2 + fe36f81, no mac coverage loosened). DEFERRAL LIFTED
+(2026-08-31, owner's decision): the UE host is now wired for Windows
+too -- ue_available() there requires an installed engine AND a built
+bridge (scripts/vendor_ue_plugin.ps1 + build_ue.ps1; ue_preflight.ps1
+diagnoses), editor paths route through
+core/util/platform.py:ue_editor_path(), and the render-claim rule is
+unchanged in spirit: every render gotcha was measured on Metal only,
+so a Windows machine's render claim is a green
+experiments/gate6_visual.py run ON that machine (it re-measures the
+visual clauses from the pixels), not this wiring. Do not report
+Windows render results as validated until Gate 6 has passed there.
 
 **Planned defaults (2026-08-13 -- "simple prompts must just fly").**
 Measured: "rough wind over mountains" + everest refused over numbers the

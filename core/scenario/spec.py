@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from .camera import CameraSpec
 from .fields import Quantity, Source
 
 # 2 (2026-08-11): environment.surface added (Phase 9.1 ground-cover
@@ -37,7 +38,14 @@ from .fields import Quantity, Source
 # raises), so the refuse-old-dicts convention applies in BOTH directions:
 # bumping keeps the failure a named version error instead of a KeyError
 # deep in Quantity. Completed runs recover from provenance.json as always.
-SPEC_VERSION = 5
+# 6 (2026-08-31): cameras added (Camera Phase 1) -- a list of CameraSpec
+# blocks, each field a provenanced Quantity, serialized as an
+# always-present list (an empty list IS the documented default camera
+# behaviour and drives the render pipeline unchanged, pinned by test).
+# The list is digest-relevant, so the version bump changes every digest
+# by design: version-5 dicts refuse by name; completed runs recover
+# from provenance.json, never by re-parsing.
+SPEC_VERSION = 6
 
 
 @dataclass
@@ -81,6 +89,10 @@ class ScenarioSpec:
     #: Retained for provenance only. Never re-parsed to reproduce a run.
     prompt: Optional[str] = None
     notes: List[str] = dc_field(default_factory=list)
+    #: Cameras (Phase 1 camera control): a list of CameraSpec blocks,
+    #: digest-relevant. EMPTY means the documented default camera
+    #: behaviour -- exactly the pre-camera build, via default_cameras().
+    cameras: List["CameraSpec"] = dc_field(default_factory=list)
 
     #: Field order for both serialisation and the rendered table.
     FIELD_ORDER = (
@@ -112,13 +124,40 @@ class ScenarioSpec:
         for section, name in self.FIELD_ORDER:
             yield section, name, getattr(self, name)
 
+    def _camera_address(self, name: str):
+        """Parse ``cameras[<i>].<field>`` -> (CameraSpec, field) or None.
+
+        Camera fields are addressable through the same set()/plan() front
+        door as every scalar field, so the review-table edit path and the
+        planners need no second dispatch mechanism.
+        """
+        import re
+
+        match = re.fullmatch(r"cameras\[(\d+)\]\.(\w+)", name)
+        if match is None:
+            return None
+        index = int(match.group(1))
+        if index >= len(self.cameras):
+            raise ValueError(
+                f"spec has {len(self.cameras)} camera(s); {name} does not "
+                f"exist")
+        field = match.group(2)
+        if field not in CameraSpec.FIELD_ORDER:
+            raise ValueError(f"{field!r} is not a camera field")
+        return self.cameras[index], field
+
     def set(self, name: str, value: Any, frm: str = "edited by hand") -> None:
         """Override a field, recording that a human did it.
 
         This is the edit step of §2.6. The source becomes ``user`` because a
         human overriding an inference is exactly the distinction the provenance
-        record exists to preserve.
+        record exists to preserve. Camera fields are addressed as
+        ``cameras[0].focal_length_mm``.
         """
+        camera = self._camera_address(name)
+        if camera is not None:
+            camera[0].set(camera[1], value, frm=frm)
+            return
         current = getattr(self, name)
         setattr(
             self,
@@ -137,8 +176,13 @@ class ScenarioSpec:
         model-sourced fields may be planned (a model guess is the
         system's choice too -- declared, and overridable by physics); a
         user-stated or inferred value is never silently moved (§2.6) --
-        planners refuse by name instead.
+        planners refuse by name instead. Camera fields are addressed as
+        ``cameras[0].focal_length_mm`` and follow the same rule.
         """
+        camera = self._camera_address(name)
+        if camera is not None:
+            camera[0].plan(camera[1], value, frm=frm)
+            return
         current = getattr(self, name)
         if current.source not in (Source.DEFAULT, Source.DERIVED,
                                   Source.MODEL):
@@ -165,6 +209,10 @@ class ScenarioSpec:
             out["prompt"] = self.prompt
         for section, name, q in self.quantities():
             out.setdefault(section, {})[name] = q.to_dict()
+        # Always present: the canonical form has exactly one spelling of
+        # "no cameras" (the empty list), so the digest cannot fork on an
+        # absent-vs-empty distinction.
+        out["cameras"] = [camera.to_dict() for camera in self.cameras]
         if self.notes:
             out["notes"] = list(self.notes)
         return out
@@ -185,10 +233,15 @@ class ScenarioSpec:
                 raise ValueError(
                     f"spec is missing required field {section}.{name}"
                 ) from exc
+        cameras_data = data.get("cameras", [])
+        if not isinstance(cameras_data, list):
+            raise ValueError("spec 'cameras' must be a list of camera "
+                             "mappings")
         return cls(
             name=data.get("name", "scenario"),
             prompt=data.get("prompt"),
             notes=list(data.get("notes", [])),
+            cameras=[CameraSpec.from_dict(entry) for entry in cameras_data],
             **kwargs,
         )
 
@@ -232,6 +285,20 @@ class ScenarioSpec:
         for section, name, q in self.quantities():
             rows.append((section, name.replace("_", " "), q.render(),
                          str(q.source), q.note()))
+        # Each camera renders as its own labeled block, per-field sources
+        # exactly like every scalar row. No cameras = no block: the table
+        # states defaults through default_cameras at the render flow, not
+        # by inventing rows the digest does not carry.
+        for index, camera in enumerate(self.cameras):
+            section = f"camera[{index}] {camera.camera_id.value}"
+            for name, q in camera.quantities():
+                rows.append((section, name.replace("_", " "), q.render(),
+                             str(q.source), q.note()))
+            if camera.moves:
+                rows.append((section, "moves",
+                             f"{len(camera.moves)} keyframes", "-",
+                             "; ".join(f"t={m.get('t_s')}s"
+                                       for m in camera.moves)))
 
         w_name = max(len(r[1]) for r in rows) + 1
         w_val = max(len(r[2]) for r in rows) + 1
