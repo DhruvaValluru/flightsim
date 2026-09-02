@@ -955,6 +955,20 @@ mutate core/terrain/lookahead.py \
     "the altitude setpoint is raised ahead of terrain the aircraft can clear, and the run refuses by name ahead of terrain it cannot" \
     tests/test_terrain_lookahead.py || failures=$((failures+1))
 
+# -- Package F guard: the rotor acts or says it doesn't -----------------------
+
+mutate core/environment/rotor.py \
+    '        acts = self.delivered_sigma_w_mps() >= ROTOR_ACTS_SIGMA_W_MPS' \
+    '        acts = True  # MUTATED: the rotor claims to act whatever the FDM delivered' \
+    "a run carries the word lee-rotor only if the FDM delivered the turbulence" \
+    tests/test_rotor.py || failures=$((failures+1))
+
+mutate core/environment/rotor.py \
+    '            return measure_poe_sigma_w_mps(msl_m, agl_m, PINNED_SEVERITY)' \
+    '            return 0.544  # MUTATED: the old constant POE index-1 floor claim' \
+    "the sigma_w claimed above the ceiling is measured at the planned MSL, not a constant" \
+    tests/test_rotor.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

@@ -75,6 +75,66 @@ LOW_ALTITUDE_CEILING_M = 300.0
 MAX_JSBSIM_SEED = 2 ** 31 - 1
 
 
+#: The property the FDM reports its Dryden vertical gust through.
+TURB_DOWN_PROP = "atmosphere/turb-down-fps"
+
+_POE_SIGMA_CACHE: Dict[tuple, float] = {}
+
+
+def measure_poe_sigma_w_mps(msl_m: float, agl_m: float, severity: float,
+                            aircraft: str = "B747", seconds: float = 10.0,
+                            seed: int = 1, use_cache: bool = True) -> float:
+    """The sigma_w the POE route DELIVERS at an MSL altitude, measured.
+
+    Above LOW_ALTITUDE_CEILING_M the W20 route is inert and JSBSim's
+    MIL-F-8785C high-altitude branch governs, indexed by *MSL* altitude
+    through the standard's Fig. 7 exceedance curves. That branch is not a
+    constant: measured on the pinned build at severity 1 with terrain 0,
+    sigma_w is 0.0 fps at 150-300 m, 0.91 at 450 m, 1.51 at 600 m, 1.21 at
+    1000 m, 0.76 at 1500 m -- and with the aircraft at ~3000 m MSL over
+    2500 m terrain, 0.0 fps (analysis/flight-dynamics-research-ledger.md,
+    cycle 3). So the value a provider claims above the ceiling is measured
+    here from a throwaway FDM at the planned MSL and AGL, never read from
+    the POE ladder table (which was measured at one altitude, 1000 m).
+
+    Deterministic: a fixed seed, a fixed run length; cached per
+    (aircraft, MSL/50 m, AGL/50 m, severity).
+    """
+    key = (aircraft, int(round(msl_m / 50.0)), int(round(agl_m / 50.0)),
+           float(severity), float(seconds), int(seed))
+    if use_cache and key in _POE_SIGMA_CACHE:
+        return _POE_SIGMA_CACHE[key]
+    import math
+
+    from ..fdm import FlightDynamics, TrimMode
+
+    fdm = FlightDynamics(aircraft)
+    fdm.set_initial_conditions({
+        "h-sl-ft": u.m_to_ft(msl_m), "vc-kts": 250.0, "gamma-deg": 0.0,
+        "phi-deg": 0.0, "psi-true-deg": 0.0, "beta-deg": 0.0,
+        "lat-geod-deg": 0.0, "long-gc-deg": 0.0,
+        "terrain-elevation-ft": u.m_to_ft(max(0.0, msl_m - agl_m)),
+    })
+    fdm.start_engines()
+    fdm.trim(TrimMode.LONGITUDINAL)
+    fdm.hold_mass(True)
+    fdm.props.set_many({
+        "atmosphere/turb-type": float(TURB_TUSTIN),
+        "atmosphere/randomseed": float(seed),
+        "atmosphere/turbulence/milspec/severity": float(severity),
+        "atmosphere/turbulence/milspec/windspeed_at_20ft_AGL-fps": 0.0,
+    })
+    total, samples = 0.0, 0
+    for _ in range(int(round(seconds * fdm.rate_hz))):
+        fdm.step()
+        w = fdm.props.get(TURB_DOWN_PROP)
+        total += w * w
+        samples += 1
+    sigma = u.fps_to_mps(math.sqrt(total / samples))
+    _POE_SIGMA_CACHE[key] = sigma
+    return sigma
+
+
 def poe_index_for(intensity: str) -> int:
     """The POE index whose measured sigma_w is closest to the intensity band."""
     target = TARGET_SIGMA_W_FPS[intensity]

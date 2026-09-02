@@ -149,3 +149,16 @@ def test_camera_defaults_follow_the_airframe():
 
     assert float(s.cameras[0].offset_forward_m.value) == \
         CHASE_OFFSETS["c172p"][0]
+
+
+def test_metres_after_over_are_not_minutes():
+    """"over 2000 m mountains" is terrain, not a 2000-minute flight: the
+    bare "m" reads as minutes only after "for"/"during". Measured before
+    the fix: 120 000 s, which the capture phase flew in full."""
+    s = compile_prompt("fly the 747 at 5000 m and 250 kt over 2000 m mountains")
+    assert float(s.duration.value) == 120.0 and s.duration.source == "default"
+    s = compile_prompt("fly the 747 at 500 m over 3000 m terrain")
+    assert float(s.duration.value) == 120.0
+    assert float(compile_prompt("fly the 747 for 2 m").duration.value) == 120.0
+    assert float(compile_prompt("fly the 747 over 3 minutes").duration.value) == 180.0
+    assert float(compile_prompt("fly the 747 during 90 s").duration.value) == 90.0

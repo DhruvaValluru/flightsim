@@ -925,12 +925,18 @@ def test_clearance_track_is_wingspan_aware():
             < min(p["cg_clearance_m"] for p in track))
 
 
-def test_windy_terrain_run_card_carries_the_rotor(tmp_path, monkeypatch):
-    """Lee-rotor turbulence rides the same orographic field the card
-    carries (gotcha 14: the card word gates the turbulence writes, so the
-    provider's own word 'lee-rotor' travels with its pinned properties);
-    the seed is derived and recorded even when the spec's word is 'none',
-    and the conditions strip states the coupling."""
+def test_windy_terrain_run_says_the_rotor_does_not_act(tmp_path, monkeypatch):
+    """Package F. The lee-rotor coupling delivers through W20, which the
+    pinned build honours below 300 m AGL only; the planner keeps every
+    track PLANNED_CLEARANCE_M (300 m) above the terrain, so on this
+    planned track the FDM delivers 0.000 m/s of rotor turbulence
+    (measured: experiments/airborne/rotor_delivery.py). Before this
+    package the card word 'lee-rotor', the rotor block and the strip all
+    claimed a rotor here. Now the run may carry that word only if the
+    pre-flown track DELIVERED sigma_w >= ROTOR_ACTS_SIGMA_W_MPS, and
+    otherwise says why the rotor is absent. The orographic field itself
+    (lift/sink, a mean wind) still travels, and the seed is still derived
+    and recorded."""
     import json as jsonlib
 
     from webapp.runs import RunState, place_on_scene
@@ -963,6 +969,11 @@ def test_windy_terrain_run_card_carries_the_rotor(tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(RunManager, "_render", staticmethod(fake_render))
+    # The mesh gate belongs to tests/test_aircraft_assets.py; on a machine
+    # without the engine the auto-import refuses by name before the flow
+    # under test is reached, so it is held open here.
+    monkeypatch.setattr(runs_module, "ensure_aircraft_model",
+                        lambda spec, report: None)
     monkeypatch.setattr(runs_module, "encode_clip",
                         lambda frames, clip: bool(clip.write_bytes(b"x")) or True)
     monkeypatch.setattr(runs_module, "build_panel_clip",
@@ -974,13 +985,13 @@ def test_windy_terrain_run_card_carries_the_rotor(tmp_path, monkeypatch):
     assert run.status == "done", run.detail
 
     card = jsonlib.loads((tmp_path / "rotortest" / "card.json").read_text(encoding="utf-8"))
-    assert card["turbulence"] == "lee-rotor"
-    assert card["rotor"]["sigma_gain"] > 0.0
-    assert card["turbulence_properties"]     # the provider's pinned writes
+    assert card["turbulence"] != "lee-rotor"
+    assert card.get("rotor") is None
     assert "orographic" in card and "collision_terrain" in card
     assert str(spec.seed.source) != "default"      # derived, recorded
-    assert "lee-rotor over terrain" in run.conditions["turbulence"]
-    assert run.conditions["turbulence_seed"] == int(spec.seed.value)
+    strip = run.conditions["turbulence"]
+    assert "lee-rotor turbulence absent" in strip
+    assert "300 m AGL" in strip and "delivered sigma_w 0.000 m/s" in strip
 
     # The conditions-effect report: a headless still-air baseline of the
     # same spec beside the run's own telemetry, with the cross-host claim
@@ -1017,6 +1028,11 @@ def test_calm_terrain_run_states_why_the_air_is_still(tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(RunManager, "_render", staticmethod(fake_render))
+    # The mesh gate belongs to tests/test_aircraft_assets.py; on a machine
+    # without the engine the auto-import refuses by name before the flow
+    # under test is reached, so it is held open here.
+    monkeypatch.setattr(runs_module, "ensure_aircraft_model",
+                        lambda spec, report: None)
     monkeypatch.setattr(runs_module, "encode_clip",
                         lambda frames, clip: bool(clip.write_bytes(b"x")) or True)
     monkeypatch.setattr(runs_module, "build_panel_clip",

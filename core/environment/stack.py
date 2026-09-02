@@ -126,6 +126,11 @@ class EnvironmentStack:
         for provider in self.turbulence:
             writes.update(provider.step_writes(position, time_s))
         fdm.props.set_many(writes)
+        # What the process delivered (Package F): read-only, after the
+        # writes, so a provider can report the sigma_w the FDM actually
+        # produced along the track rather than the one it claimed.
+        for provider in self.turbulence:
+            provider.observe(fdm)
         return wind
 
     def run_for(self, fdm, seconds: float, recorder=None) -> int:

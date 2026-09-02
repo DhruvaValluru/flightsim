@@ -378,7 +378,7 @@ PLANNABLE_SOURCES = ("default", "model", "derived")
 
 
 def _fly_clearance_track(spec: ScenarioSpec, ground, script,
-                         seconds: float, orographic=None):
+                         seconds: float, orographic=None, turbulence=None):
     """The scripted flight on the same JSBSim, for the clearance gate.
 
     The Zermatt valley run's fly_headless, generalised: the SAME control
@@ -399,6 +399,12 @@ def _fly_clearance_track(spec: ScenarioSpec, ground, script,
       check that ends the real run), not just the CG: a bank that lowers a
       wingtip toward a slope tightens the planned clearance. Sampled every
       12th step; the run checks every step.
+
+    ``turbulence`` (Package F): a turbulence provider to attach to this
+    pre-flight -- configured once after trim, its per-step writes applied
+    and its ``observe()`` called every step -- so the provider can report
+    the sigma_w the FDM actually DELIVERED along this track before the
+    run is labelled with the provider's word.
     """
     from core.fdm import FlightDynamics, mode_for
     from core.fdm import units as u
@@ -428,6 +434,10 @@ def _fly_clearance_track(spec: ScenarioSpec, ground, script,
     if wind_kt > 0.0:
         fdm.verify_wind_state(north_fps, east_fps, float(spec.airspeed.value))
     fdm.hold_mass(True)
+    if turbulence is not None:
+        from core.environment.stack import EnvironmentStack
+
+        fdm.props.set_many(turbulence.configure())
     trimmed_aileron = fdm.props.get("fcs/aileron-cmd-norm")
     span_m = u.ft_to_m(fdm.props.get("metrics/bw-ft"))
     origin_x = origin_y = 0.0
@@ -459,6 +469,13 @@ def _fly_clearance_track(spec: ScenarioSpec, ground, script,
                      - orographic.lee_sink(north, east))
                     * orographic.decay(agl))
             fdm.props.set("atmosphere/wind-down-fps", -w_up / 0.3048)
+        if turbulence is not None:
+            here = fdm.state()
+            if ground.contains(here.lat_deg, here.lon_deg):
+                ground.apply(fdm)     # the provider's AGL is the raster's
+            fdm.props.set_many(turbulence.step_writes(
+                EnvironmentStack.position_of(fdm), fdm.sim_time))
+            turbulence.observe(fdm)
         fdm.step()
         if i % 12 == 0:
             s = fdm.state()
@@ -485,6 +502,30 @@ def _fly_clearance_track(spec: ScenarioSpec, ground, script,
                           "north_m": y - origin_xy[1],
                           "east_m": x - origin_xy[0]})
     return track
+
+
+def _rotor_acts_on_track(spec: ScenarioSpec, scene: Dict,
+                         rotor_provider) -> Optional[str]:
+    """None if the rotor DELIVERED turbulence on the pre-flown track,
+    else the stated reason it is absent (Package F).
+
+    The clearance pre-flight (same JSBSim, same trim, same wind, same
+    script, same raster, same seed as the run) is flown with the rotor
+    provider attached and observing atmosphere/turb-down-fps. The
+    provider's own acts() decides against ROTOR_ACTS_SIGMA_W_MPS.
+    """
+    from core.terrain.ground import TerrainGround
+    from core.terrain.heightfield import Heightfield
+    from experiments.showcase_matrix import SHOWCASE_DOUBLET
+
+    ground = TerrainGround(Heightfield.read(Path(scene["terrain"])))
+    seconds = min(float(spec.duration.value), CLIP_SECONDS)
+    _fly_clearance_track(spec, ground, SHOWCASE_DOUBLET, seconds,
+                         orographic=rotor_provider.orographic,
+                         turbulence=rotor_provider)
+    if rotor_provider.acts():
+        return None
+    return rotor_provider.absence_note()
 
 
 def _orographic_provider(spec: ScenarioSpec, scene: Dict):
@@ -1643,6 +1684,7 @@ class RunManager:
                 round(float(spec.wind_direction.value)))
         scene_crs = None
         rotor_provider = None
+        rotor_note = None
         if orographic is not None:
             # The mountains shape the turbulence too, not just the mean
             # wind: lee-rotor W20 riding the SAME orographic field the card
@@ -1655,6 +1697,19 @@ class RunManager:
                 _orographic_provider(spec, scene),
                 seed=int(spec.seed.value),
                 background_intensity=str(spec.turbulence.value))
+            # Package F: the rotor either acts or says it doesn't. The
+            # coupling delivers through W20, which the pinned build
+            # honours below 300 m AGL only, and the planner keeps every
+            # track >= PLANNED_CLEARANCE_M above the terrain -- so the
+            # word "lee-rotor" travelled on runs where the FDM delivered
+            # 0.000 m/s of turbulence (measured, research ledger cycle
+            # 3). The same track the card will carry is pre-flown here
+            # with the provider attached and the delivered sigma_w
+            # measured; a rotor that did not act is dropped, and the
+            # conditions strip states why in its place.
+            rotor_note = _rotor_acts_on_track(spec, scene, rotor_provider)
+            if rotor_note is not None:
+                rotor_provider = None
         # Phase 9.1 surface class: roughness shear (the log profile CARRIES
         # the base wind -- reference at the layer top, so cruise flies the
         # spec's wind) and thermal forcing, both from the class table with
@@ -1780,9 +1835,13 @@ class RunManager:
                            "forcing is wind over terrain)"
                            if scene["terrain"] else "calm")),
             "turbulence": (f"lee-rotor over terrain (background "
-                           f"{spec.turbulence.value})"
+                           f"{spec.turbulence.value}; delivered sigma_w "
+                           f"{rotor_provider.delivered_sigma_w_mps():.2f} "
+                           f"m/s on the pre-flown track)"
                            if rotor_provider is not None
-                           else str(spec.turbulence.value)),
+                           else (f"{spec.turbulence.value}; {rotor_note}"
+                                 if rotor_note is not None
+                                 else str(spec.turbulence.value))),
             "turbulence_seed": (int(spec.seed.value)
                                 if rotor_provider is not None
                                 or thermals_block is not None
@@ -1863,10 +1922,13 @@ class RunManager:
             run.push("failed", "panel composition failed")
             return
         raw_clip.unlink(missing_ok=True)
-        if (rotor_provider is not None or log_profile is not None
-                or thermals_block is not None or tornado_block is not None
-                or downburst_block is not None):
+        if (orographic is not None or rotor_provider is not None
+                or log_profile is not None or thermals_block is not None
+                or tornado_block is not None or downburst_block is not None):
             # The conditions-effect report: what the coupling DID, measured
+            # (the orographic lift/sink is a coupling whether or not the
+            # rotor acted on this track -- Package F drops the rotor, not
+            # the report)
             # against a headless still-air-over-terrain baseline of the same
             # spec. Optional -- the clip stands on its own if this fails.
             run.push("report", "measuring the conditions' effect against a "

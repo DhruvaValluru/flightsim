@@ -38,6 +38,17 @@ DEMO = ("fly the 747 at 5000 ft over the prairie for 3 seconds with a "
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(manager, "out_root", tmp_path / "runs")
     monkeypatch.setattr(manager, "_active", None)
+    # Pin the flat scene: on a machine with the control ridge baked,
+    # pick_scene puts any prompt with a terrain elevation onto the ridge
+    # and this 5000 ft prairie run refuses terrain.clearance under
+    # 3299 m peaks before the closure pair is ever reached. These tests
+    # are about the closure pair, not scene selection.
+    import webapp.server as server_module
+    import webapp.runs as runs_module
+    flat = {"key": "flat", "kind": "flat", "terrain": None,
+            "imagery": None, "label": "flat (test)"}
+    monkeypatch.setattr(server_module, "pick_scene", lambda spec: flat)
+    monkeypatch.setattr(runs_module, "pick_scene", lambda spec: flat)
     return TestClient(app)
 
 

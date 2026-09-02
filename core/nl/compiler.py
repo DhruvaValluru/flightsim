@@ -294,9 +294,16 @@ def _duration(text: str) -> Quantity:
     m = _search(rf"(?:for|during|over)\s+{NUMBER}\s*(?:s|sec|secs|second|seconds)\b", text)
     if m:
         return Quantity.user(float(m.group(1)), "s", frm=m.group(0).strip())
-    m = _search(rf"(?:for|during|over)\s+{NUMBER}\s*(?:m|min|mins|minute|minutes)\b", text)
+    # A bare "m" is minutes only after "for"/"during": after "over" it is
+    # metres ("over 2000 m mountains", "over 3000 m terrain"), and reading
+    # it as minutes gave those prompts a 120 000 s duration that the
+    # capture then flew in full (measured: the webapp render-flow test hung
+    # for the whole 2000-minute flight).
+    m = _search(rf"(?:for|during)\s+{NUMBER}\s*(?:m|min|mins|minute|minutes)\b"
+                rf"|over\s+{NUMBER}\s*(?:min|mins|minute|minutes)\b", text)
     if m:
-        return Quantity.user(float(m.group(1)) * 60.0, "s", frm=m.group(0).strip())
+        minutes = m.group(1) if m.group(1) is not None else m.group(2)
+        return Quantity.user(float(minutes) * 60.0, "s", frm=m.group(0).strip())
     return Quantity.default(120.0, "s", frm="long enough to settle and observe")
 
 

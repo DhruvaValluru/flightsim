@@ -12,6 +12,7 @@ import pytest
 
 from core.environment.base import Position
 from core.environment.rotor import (
+    ROTOR_ACTS_SIGMA_W_MPS,
     ROTOR_SIGMA_GAIN,
     SIGMA_W_PER_W20,
     W20_CAP_KT,
@@ -107,16 +108,25 @@ def test_step_writes_touch_w20_and_nothing_else():
     assert set(writes) == {W20_PROP}
 
 
-def test_claimed_sigma_above_the_ceiling_is_the_pinned_floor():
-    """Above 300 m AGL the W20 route is inert: the claim is the constant POE
-    index-1 floor (1.785 fps), stated, never the rotor coupling."""
-    from core.environment.turbulence import POE_SIGMA_W_FPS
+def test_claimed_sigma_above_the_ceiling_is_measured_at_the_msl():
+    """Package F. The provider used to claim the POE ladder's constant
+    index-1 value (1.785 fps = 0.544 m/s) above the ceiling. Measured,
+    that route is indexed by MSL through MIL-F-8785C Fig. 7: 0.30 m/s at
+    1000 m MSL and 0.000 m/s at 3000 m MSL, where every planner-produced
+    mountain track flies (experiments/airborne/rotor_delivery.py). The
+    claim is now the measurement, and it is not the constant."""
     provider = rotor()
-    assert provider.expected_sigma_w_mps(LOW_ALTITUDE_CEILING_M + 1.0) == (
-        pytest.approx(u.fps_to_mps(POE_SIGMA_W_FPS[1])))
+    at_1000 = provider.expected_sigma_w_mps(LOW_ALTITUDE_CEILING_M + 1.0,
+                                            msl_m=1000.0)
+    at_3000 = provider.expected_sigma_w_mps(700.0, msl_m=3000.0)
+    assert 0.2 < at_1000 < 0.4
+    assert at_3000 < 0.02
+    assert abs(at_1000 - 0.544) > 0.1 and abs(at_3000 - 0.544) > 0.1
+    # Below the ceiling the coupling is live and position-dependent.
     below = provider.expected_sigma_w_mps(150.0, position=LEE)
     assert below == pytest.approx(
         u.fps_to_mps(SIGMA_W_PER_W20 * u.kt_to_fps(provider.w20_kt_at(LEE))))
+    assert below > provider.expected_sigma_w_mps(150.0, position=WINDWARD)
 
 
 def test_vocabulary_states_the_ceiling_and_the_anchor():
@@ -163,3 +173,84 @@ def test_null_lee_rotor_turbulence_reaches_the_fdm():
         f"lee rotor turbulence never reached the FDM: lee RMS {lee_rms:.3f} "
         f"fps vs windward {windward_rms:.3f} fps"
     )
+
+
+
+# -- Package F: the rotor acts or says it doesn't ------------------------
+
+
+def fly_in_the_lee(msl_m: float, terrain_m: float, wind_mps: float,
+                   seconds: float = 15.0) -> LeeRotorTurbulence:
+    """A trimmed 747 flown east along the lee with the rotor attached
+    through the stack, which calls observe() every step."""
+    from core.fdm import FlightDynamics, TrimMode
+
+    fdm = FlightDynamics("B747")
+    fdm.set_initial_conditions(
+        {"h-sl-ft": u.m_to_ft(msl_m), "vc-kts": 250.0, "gamma-deg": 0.0,
+         "phi-deg": 0.0, "psi-true-deg": 90.0, "beta-deg": 0.0,
+         "lat-geod-deg": 900.0 / 111_320.0, "long-gc-deg": 0.0,
+         "terrain-elevation-ft": u.m_to_ft(terrain_m)})
+    fdm.start_engines()
+    fdm.trim(TrimMode.LONGITUDINAL)
+    fdm.hold_mass(True)
+    provider = rotor(wind_mps=wind_mps)
+    stack = EnvironmentStack([provider])
+    stack.configure(fdm)
+    for _ in range(int(seconds * fdm.rate_hz)):
+        stack.apply(fdm)
+        fdm.step()
+    return provider
+
+
+def test_the_rotor_acts_where_the_w20_route_governs():
+    """150 m AGL in the lee, 35 m/s across the ridge: the FDM delivers
+    0.36 m/s of Dryden vertical gust (measured; the claim is 0.43), the
+    rotor acts and the run may carry its word."""
+    provider = fly_in_the_lee(150.0, 0.0, wind_mps=35.0)
+    assert provider.observed_steps > 0
+    assert provider.delivered_sigma_w_mps() >= ROTOR_ACTS_SIGMA_W_MPS
+    assert provider.acts()
+    assert provider.word() == "lee-rotor"
+    prov = provider.provenance()
+    assert prov["acts"] is True
+    assert prov["delivered_sigma_w_mps"] == pytest.approx(
+        provider.delivered_sigma_w_mps())
+
+
+def test_the_rotor_says_it_does_not_act_on_a_planned_track():
+    """3384 m MSL over 3000 m terrain -- the control ridge at the
+    planner's altitude (peak + PLANNED_CLEARANCE_M) -- in the same lee,
+    same wind: the W20 route is inert above 300 m AGL and the POE
+    severity-1 curve is zero at this MSL, so the FDM delivers 0.000 m/s.
+    The provider says so, by name, instead of carrying the word."""
+    provider = fly_in_the_lee(3384.0, 3000.0, wind_mps=35.0)
+    assert provider.observed_steps > 0
+    assert provider.delivered_sigma_w_mps() < 0.01
+    assert not provider.acts()
+    assert provider.word() == "none"
+    note = provider.absence_note()
+    assert "acts below 300 m AGL only" in note
+    assert "never descends below 300 m AGL" in note
+    assert "delivered sigma_w 0.000 m/s" in note
+    prov = provider.provenance()
+    assert prov["acts"] is False
+    assert prov["min_agl_observed_m"] > LOW_ALTITUDE_CEILING_M
+
+
+def test_an_unobserved_rotor_claims_nothing():
+    provider = rotor()
+    assert provider.observed_steps == 0
+    assert provider.delivered_sigma_w_mps() == 0.0
+    assert not provider.acts() and provider.word() == "none"
+    assert provider.provenance()["acts"] is None
+
+
+def test_the_stack_lets_the_provider_observe_the_fdm():
+    """observe() is the read-only hook the stack calls after its writes;
+    a provider must never write physical state from it."""
+    from core.environment.base import TurbulenceProvider
+
+    assert TurbulenceProvider.observe(rotor(), None) is None   # default no-op
+    provider = fly_in_the_lee(150.0, 0.0, wind_mps=35.0, seconds=1.0)
+    assert provider.observed_steps == int(1.0 * 120)
