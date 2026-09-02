@@ -129,21 +129,14 @@ def test_each_airframe_either_tracks_its_demand_or_uses_its_thrust():
 
 def test_a_probe_with_no_excess_power_refuses_by_name(monkeypatch):
     """An airframe that cannot out-thrust its trim has no performance to
-    normalise by; that is a named refusal, not a division by ~zero."""
+    normalise by; that is a named refusal, not a division by zero. The
+    probe is made to read a thrust that never changes with throttle (the
+    aircraft's weight stands in for it), so full throttle equals trim."""
     import core.performance as pm
-    real_measure = pm.measure_performance
 
-    def starved_thrust(fdm):
-        return ["propulsion/engine/thrust-lbs"]
-
-    class Const:
-        pass
-
-    # Force the full-throttle read to equal the trim read by making the
-    # probe's `held` see no change: freeze the thrust property list to one
-    # engine and monkeypatch the throttle list to nothing, so held() never
-    # writes a throttle and thrust never rises.
-    monkeypatch.setattr(pm, "_throttle_props", lambda fdm: [])
+    monkeypatch.setattr(pm, "_engine_thrust_props",
+                        lambda fdm: ["inertia/weight-lbs"])
     with pytest.raises(PerformanceError) as caught:
         pm.measure_performance("B747", 3000.0, 250.0, use_cache=False)
     assert caught.value.constraint == "performance.measure"
+    assert "no excess power" in str(caught.value)
