@@ -942,7 +942,7 @@ mutate core/control/autopilot.py \
     tests/test_performance.py || failures=$((failures+1))
 
 mutate core/performance.py \
-    '    if thrust_max_n <= thrust_trim_n:' \
+    '    if thrust_max_n <= thrust_trim_n or thrust_up_n <= thrust_down_n:' \
     '    if False:  # MUTATED: an airframe with no excess power is measured anyway' \
     "a performance probe with no excess power refuses by name" \
     tests/test_performance.py || failures=$((failures+1))
