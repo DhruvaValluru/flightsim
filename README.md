@@ -253,6 +253,18 @@ headless flight and written under `capture/` beside that flight's
 telemetry, so a reader can always tell which host produced which number
 -- the run's top-level `telemetry.json` stays the rendered flight's.
 
+## Airborne physics, phase 2
+
+`docs/AIRBORNE_PHASE2_REPORT.md` is the report: the aircraft is trimmed
+in the spec's wind on both hosts, the control-sign probe and the
+performance model are measured at the engaging state, the TECS throttle
+loop is normalised by the measured thrust-to-weight authority, the
+altitude setpoint is raised ahead of terrain (or the run refuses
+`terrain.lookahead`), the lee rotor carries its word only when the FDM
+delivered turbulence, turns are coordinated from a measured sideslip
+gain, and every run's closure report reaches the page. Each number in
+the report reproduces from a script under `experiments/airborne/`.
+
 ## Run the tests
 
 ```bash
@@ -279,6 +291,8 @@ core/            zero Unreal dependency (§2.9)
   telemetry/     read-only observers
   terrain/       DEM ingestion, spectral synthesis, heightfield query, Landscape export
 experiments/     gates, sweeps, analysis, validation
+  airborne/      the phase-2 reconstruction measurements (every report number)
+analysis/        flight-dynamics audit, research ledger, the executed brief
 docs/vva/        V&V plan, report, accreditation statement
 ue/              Unreal project                    (Phase 5)
 docs/            VALIDITY.md, JSBSIM_CORRECTIONS.md, vva/

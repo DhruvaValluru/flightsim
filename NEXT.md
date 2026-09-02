@@ -3,6 +3,41 @@
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
 
+**Airborne physics reconstruction, phase 2 (2026-09-02 --
+docs/AIRBORNE_PHASE2_REPORT.md is the full report, with the pre/post
+table; analysis/ holds the audit, the research ledger the findings came
+from, and the brief that was executed).** Eight packages, one commit
+each, suite green after each: (A) the aircraft is trimmed IN the spec's
+wind on both hosts -- FGTrim::DoTrim re-applies the zero wind IC over
+atmosphere/wind-* writes, so the wind now goes into the ICs through a
+fixed point on the OBSERVED vc and beta (FlightDynamics.
+set_wind_initial_conditions / verify_wind_state, refusal wind.trim_state;
+open-loop excursion 333 m -> 0.8 m; parity harness grades the first
+sample; the C++ TrimInWind mirror is UNCOMPILED here -- verify per the
+report). (B) the control-sign probe flies the engaging aircraft's own
+state (the c172p engages; the p51d refuses control.signs by name).
+(C) every run flies its spec closed loop headlessly and writes
+capture/closure.json; a missed closure FAILS the run by name. (D)
+core/performance.py measures T_trim/T_max/T_idle and a throttle-thrust
+secant at the engaging state; TECS throttle gains are multiplied by the
+measured thr_per_ste, a feed-forward on demanded energy rate is added,
+hdot-max is capped at 0.8 Edot_max (B747 300 m step 72.7 s -> 28.7 s).
+(E) core/terrain/lookahead.py raises the altitude setpoint ahead of
+terrain along the projected track (90 s, half raster pitch, span
+stations) or refuses terrain.lookahead when the escape climb cannot
+clear it. (F) the lee rotor measured its own delivery: 0.000 m/s on
+every planner-produced track (W20 route inert >= 300 m AGL; POE-1 curve
+zero at ~3000 m MSL); the claimed floor is now measured at the MSL, the
+provider observes atmosphere/turb-down-fps through a read-only stack
+hook and acts() only at >= 0.3 m/s, and the web app drops a rotor that
+did not act, stating why. (G) sideslip-to-rudder coordination from a
+measured beta-per-rudder slope (turn-rate error 10% -> 1%, beta 1.16 ->
+0.005 deg, Dutch roll settles faster). Fixed on the way: "over 2000 m
+mountains" compiled to a 2000-MINUTE duration (gotcha: the bare "m" is
+minutes only after for/during). Suite 635 tests (1 skipped), 131 mutation
+guards, all new ones verified firing. Every number in the report comes
+from experiments/airborne/*.py.
+
 **Camera Phase 1 (2026-08-31 -- docs/CAMERA_PHASE1_REPORT.md is the
 full report).** The camera is a spec element now: SPEC_VERSION 6,
 cameras as provenanced CameraSpec blocks (core/scenario/camera.py),
