@@ -192,23 +192,26 @@ def configure_from_spec(spec: ScenarioSpec) -> FlightDynamics:
         }
     )
 
-    # Steady wind is written before trim so the aircraft is trimmed *in* the
-    # conditions it will fly rather than dropped into them afterwards.
+    # Steady wind goes INTO the initial conditions (Package A), because a
+    # direct atmosphere/wind-* write does not survive trim: FGTrim::DoTrim
+    # re-applies the (zero) wind IC over it, and the aircraft was measured
+    # trimming in calm air and receiving the wind as a step on step one --
+    # +333 m / -327 m in 30 s open loop for a 30 kt head/tail wind. The
+    # fixed point in set_wind_initial_conditions leaves vc at the spec's
+    # value and beta at zero WITH the wind present; trim then solves in it.
     # Turbulence is deliberately NOT active during trim: a stochastic
     # disturbance makes the trim solver chase noise.
     north_fps, east_fps = wind_components_fps(wind_speed, float(spec.wind_direction.value))
-    fdm.props.set_many(
-        {
-            "atmosphere/wind-north-fps": north_fps,
-            "atmosphere/wind-east-fps": east_fps,
-            "atmosphere/wind-down-fps": 0.0,
-            "atmosphere/turb-type": 0.0,
-        }
-    )
+    fdm.props.set("atmosphere/turb-type", 0.0)
+    if wind_speed > 0.0:
+        fdm.set_wind_initial_conditions(north_fps, east_fps, 0.0)
 
     fdm.start_engines()
     # A crosswind start needs the lateral axes solved as well (§5 Phase 0).
     fdm.trim(mode_for(crosswind=wind_speed > 0.0))
+    # The guard: the trimmed state must carry the spec's wind at the spec's
+    # airspeed with no sideslip, or the run refuses by name.
+    fdm.verify_wind_state(north_fps, east_fps, float(spec.airspeed.value))
     if bool(spec.mass_held.value):
         fdm.hold_mass(True)
     return fdm

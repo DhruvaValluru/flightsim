@@ -299,12 +299,10 @@ mutate experiments/gate5_ue_parity.py \
     || failures=$((failures+1))
 
 mutate experiments/gate5_ue_parity.py \
-    '    first_a = at[1] if len(at) > 1 else at[0]
-    first_b = bt[1] if len(bt) > 1 else bt[0]' \
-    '    first_a = at[0]  # MUTATED: the trim snapshot is graded as flight
-    first_b = bt[0]' \
-    "trim snapshot exempt, flight graded" tests/test_host_parity.py \
-    || failures=$((failures+1))
+    '    start, end = max(at[0], bt[0]), min(at[-1], bt[-1])' \
+    '    start, end = max(at[4], bt[4]), min(at[-1], bt[-1])  # MUTATED: skip a leading window' \
+    "no leading window of the flight is skipped (Package A replaced the one-sample exemption)" \
+    tests/test_host_parity.py || failures=$((failures+1))
 
 mutate experiments/gate5_ue_parity.py \
     '    first_a = at[1] if len(at) > 1 else at[0]
@@ -886,6 +884,37 @@ mutate webapp/capture.py \
     '    if False:  # MUTATED: build a manifest for refused geometry' \
     "a scene-refused pose track writes no manifest" \
     tests/test_webapp_capture.py || failures=$((failures+1))
+
+# -- Package A guards: the aircraft is trimmed IN the wind ------------------
+
+mutate core/scenario/runner.py \
+    '        fdm.set_wind_initial_conditions(north_fps, east_fps, 0.0)' \
+    '        pass  # MUTATED: wind written nowhere; trim in calm air' \
+    "the runner places the spec wind in the initial conditions" \
+    tests/test_trim_in_wind.py || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '    fdm.verify_wind_state(north_fps, east_fps, float(spec.airspeed.value))' \
+    '    pass  # MUTATED: a calm trim in a wind spec is not refused' \
+    "a trim that lost the wind refuses by name (wind.trim_state)" \
+    tests/test_trim_in_wind.py || failures=$((failures+1))
+
+mutate core/fdm/fdm.py \
+    '        else:
+            raise TrimStateError(
+                f"{self.model.name!r}: could not place a {mag / 1.6878:.1f} kt "' \
+    '        else:
+            pass  # MUTATED: an unconverged fixed point is handed to trim
+            _unused = (
+                f"{self.model.name!r}: could not place a {mag / 1.6878:.1f} kt "' \
+    "an unconverged wind fixed point refuses rather than approximates" \
+    tests/test_trim_in_wind.py || failures=$((failures+1))
+
+mutate experiments/gate5_ue_parity.py \
+    '    start, end = max(at[0], bt[0]), min(at[-1], bt[-1])' \
+    '    start, end = max(at[1], bt[1]), min(at[-1], bt[-1])  # MUTATED: exemption back' \
+    "host parity grades the trim snapshot (no first-sample exemption)" \
+    tests/test_host_parity.py || failures=$((failures+1))
 
 echo
 purge_cache

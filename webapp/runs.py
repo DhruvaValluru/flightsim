@@ -419,11 +419,14 @@ def _fly_clearance_track(spec: ScenarioSpec, ground, script,
     if wind_kt > 0.0:
         north_fps, east_fps = wind_components_fps(
             wind_kt, float(spec.wind_direction.value))
-        fdm.props.set_many({"atmosphere/wind-north-fps": north_fps,
-                            "atmosphere/wind-east-fps": east_fps,
-                            "atmosphere/wind-down-fps": 0.0})
+        # Package A: the wind goes into the ICs so this pre-flight trims in
+        # it exactly as configure_from_spec does. A flight trimmed in calm
+        # air would pre-fly a different aircraft than the run flies.
+        fdm.set_wind_initial_conditions(north_fps, east_fps, 0.0)
     fdm.start_engines()
     fdm.trim(mode_for(crosswind=wind_kt > 0.0))
+    if wind_kt > 0.0:
+        fdm.verify_wind_state(north_fps, east_fps, float(spec.airspeed.value))
     fdm.hold_mass(True)
     trimmed_aileron = fdm.props.get("fcs/aileron-cmd-norm")
     span_m = u.ft_to_m(fdm.props.get("metrics/bw-ft"))
@@ -552,11 +555,14 @@ def _effect_report(spec: ScenarioSpec, scene: Dict, script, seconds: float,
     if wind_kt > 0.0:
         north_fps, east_fps = wind_components_fps(
             wind_kt, float(spec.wind_direction.value))
-        fdm.props.set_many({"atmosphere/wind-north-fps": north_fps,
-                            "atmosphere/wind-east-fps": east_fps,
-                            "atmosphere/wind-down-fps": 0.0})
+        # Package A: the wind goes into the ICs so this pre-flight trims in
+        # it exactly as configure_from_spec does. A flight trimmed in calm
+        # air would pre-fly a different aircraft than the run flies.
+        fdm.set_wind_initial_conditions(north_fps, east_fps, 0.0)
     fdm.start_engines()
     fdm.trim(mode_for(crosswind=wind_kt > 0.0))
+    if wind_kt > 0.0:
+        fdm.verify_wind_state(north_fps, east_fps, float(spec.airspeed.value))
     fdm.hold_mass(True)
     trimmed_aileron = fdm.props.get("fcs/aileron-cmd-norm")
 
