@@ -363,6 +363,10 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
             # Package D: the airframe performance the throttle loop was
             # normalised by, measured at the trimmed state.
             "performance": autopilot.performance.provenance(),
+            # Package G: the sideslip-to-rudder gains the turn coordinator
+            # was tuned with, measured at the trimmed state.
+            "coordination": (None if autopilot.yaw_authority is None
+                             else autopilot.yaw_authority.provenance()),
         }
     return RunResult(spec.digest(), output_digest, recorder, report, manifest,
                      closure)

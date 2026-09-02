@@ -969,6 +969,14 @@ mutate core/environment/rotor.py \
     "the sigma_w claimed above the ceiling is measured at the planned MSL, not a constant" \
     tests/test_rotor.py || failures=$((failures+1))
 
+# -- Package G guard: the turn is coordinated from a measured gain --------------
+
+mutate core/control/autopilot.py \
+    '            props.set_many(self.yaw_authority.as_properties())' \
+    '            pass  # MUTATED: the sideslip loop stays at the template gain 0' \
+    "the sideslip-to-rudder gains are written from a measurement, not left at zero" \
+    tests/test_turn_coordination.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

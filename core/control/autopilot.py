@@ -136,7 +136,7 @@ class Autopilot:
     def engaged(self) -> bool:
         return self._engaged
 
-    def engage(self) -> None:
+    def engage(self, coordinate: bool = True) -> None:
         """Capture the trimmed state as the controller's reference point.
 
         TECS commands *changes* from trim: the throttle and pitch PIDs add to
@@ -182,6 +182,17 @@ class Autopilot:
             props.get("ap/tecs/hdot-max-fps"),
             HDOT_CAPABILITY_FRACTION * u.mps_to_fps(self.performance.edot_max_mps))
         props.set("ap/tecs/hdot-max-fps", max(hdot_max_fps, 1.0))
+        # Package G: turn coordination, from the beta-per-rudder slope
+        # measured on this airframe at this state. The probe itself
+        # engages with coordinate=False (the damper-only channel it
+        # measures against).
+        self.yaw_authority = None
+        if coordinate:
+            from .coordination import measure_yaw_authority
+
+            self.yaw_authority = measure_yaw_authority(
+                base, altitude_m=here.altitude_m, cas_kt=here.cas_kt)
+            props.set_many(self.yaw_authority.as_properties())
 
         props.set_many(
             {
@@ -305,6 +316,8 @@ class Autopilot:
         "ap/tecs/tau",
         "ap/tecs/speed-weight",
         "ap/tecs/hdot-max-fps",
+        "ap/yaw/k-beta",
+        "ap/yaw/ki-beta",
         "ap/tecs/vdot-max-fps2",
         "ap/tecs/kt-p",
         "ap/tecs/kt-i",

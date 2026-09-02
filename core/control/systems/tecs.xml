@@ -164,8 +164,23 @@
 <property value="3.5">ap/lat/k-phi</property>       <!-- bank error -> roll rate demand -->
 <property value="2.0">ap/lat/kp-p</property>
 <property value="0.05">ap/lat/ki-p</property>
-<property value="1.5">ap/yaw/k-r</property>
+<!-- Yaw damper gain. Raised from 1.5 to 3.0 with the coordinator (Package
+     G): swept with it on the B747 at 3000 m / 230 kt, the Dutch-roll
+     damping ratio after a rudder pulse is 0.21 at 1.5 and 0.25 at 3.0 at
+     the chosen sideslip loop gain, with the turn itself unchanged. -->
+<property value="3.0">ap/yaw/k-r</property>
 <property value="1.0">ap/yaw/washout-c1</property>  <!-- 1/tau_w, tau_w ~ 1 s -->
+<!-- Turn coordination (Package G): rudder per degree of sideslip, SIGNED
+     (negative feedback included), and its integral gain. Both are written
+     at engage from the beta-per-rudder slope core.control.coordination
+     measures on the engaging airframe at its own state; the template
+     value 0 is the pre-Package-G yaw channel (damper only), which flew a
+     25 deg turn 9% below g tan(phi)/V with 1.08 deg of sideslip. -->
+<property value="0.0">ap/yaw/k-beta</property>
+<property value="0.0">ap/yaw/ki-beta</property>
+<!-- A rudder offset added to the command: the probe input the
+     coordination measurement uses (and nothing else writes). -->
+<property value="0.0">ap/yaw/rudder-bias</property>
 
 <!-- ========== limits =================================================== -->
 <property value="0.436332">ap/limits/bank-rad</property>       <!-- 25 deg -->
@@ -775,10 +790,34 @@
     <c1> ap/yaw/washout-c1 </c1>
   </washout_filter>
 
+  <!-- Turn coordination (Package G): sideslip to rudder. The gains carry
+       their own sign (measured: the slope of steady beta against a rudder
+       offset on this airframe at this state), so the term needs no
+       ap/sign/rudder factor. The integrator is frozen when the rudder
+       command sits on a stop, and reset while the autopilot is off. -->
+  <fcs_function name="ap/yaw/beta-trigger">
+    <function>
+      <ifthen>
+        <lt><property>ap/enable</property><value>0.5</value></lt>
+        <value>-1.0</value>
+        <property>ap/yaw/rudder-saturated</property>
+      </ifthen>
+    </function>
+  </fcs_function>
+
+  <pid name="ap/yaw/beta-pid">
+    <input> aero/beta-deg </input>
+    <kp> ap/yaw/k-beta </kp>
+    <ki> ap/yaw/ki-beta </ki>
+    <kd> 0.0 </kd>
+    <trigger> ap/yaw/beta-trigger </trigger>
+    <clipto> <min> -0.3 </min> <max> 0.3 </max> </clipto>
+  </pid>
+
   <!-- Oppose the washed=out yaw rate. The command is built in the natural
        direction (negative rate demand against positive r) and the airframe's
        measured sign is applied last. -->
-  <fcs_function name="ap/yaw/rudder-command">
+  <fcs_function name="ap/yaw/rudder-raw">
     <function>
       <sum>
         <property>ap/trim/rudder</property>
@@ -788,7 +827,25 @@
           <property>ap/yaw/k-r</property>
           <property>ap/yaw/r-washout</property>
         </product>
+        <property>ap/yaw/beta-pid</property>
+        <property>ap/yaw/rudder-bias</property>
       </sum>
+    </function>
+  </fcs_function>
+
+  <fcs_function name="ap/yaw/rudder-saturated">
+    <function>
+      <ifthen>
+        <gt><abs><property>ap/yaw/rudder-raw</property></abs><value>0.5</value></gt>
+        <value>1.0</value>
+        <value>0.0</value>
+      </ifthen>
+    </function>
+  </fcs_function>
+
+  <fcs_function name="ap/yaw/rudder-command">
+    <function>
+      <property>ap/yaw/rudder-raw</property>
     </function>
     <clipto> <min> -0.5 </min> <max> 0.5 </max> </clipto>
   </fcs_function>
