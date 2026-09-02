@@ -258,9 +258,31 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         autopilot = Autopilot(fdm)
         autopilot.engage()
 
+    # Package E: terrain look-ahead on the altitude setpoint. A closed-loop
+    # run over a raster samples the terrain ahead along its projected track
+    # every guidance tick and RAISES the setpoint in time to clear it, from
+    # the climb capability Package D measured; terrain the escape profile
+    # cannot clear refuses the run by name (terrain.lookahead) before the
+    # impact the contact check would otherwise report.
+    lookahead = None
+    if autopilot is not None and terrain_ground is not None:
+        from ..terrain.lookahead import TerrainLookahead
+
+        lookahead = TerrainLookahead.for_run(
+            terrain_ground, fdm, autopilot,
+            hold_tolerance_m=ClosureTolerance().altitude_m)
+        first = lookahead.guide(fdm.state(), autopilot)
+        if first.setpoint_m is not None:
+            recorder_note = (f"terrain look-ahead: setpoint raised to "
+                             f"{first.setpoint_m:.0f} m before the first step")
+        else:
+            recorder_note = None
+
     recorder = Recorder(fdm, interval_s=0.1, extra=SURFACES)
     recorder.sample(force=True)
     recorder.mark("trimmed" if autopilot is None else "trimmed, autopilot engaged")
+    if lookahead is not None and recorder_note is not None:
+        recorder.mark(recorder_note)
     if autopilot is None and terrain_ground is None:
         environment.run_for(fdm, float(spec.duration.value), recorder)
     else:
@@ -280,6 +302,14 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
                     raise TerrainImpactError(impact)
             if autopilot is not None and i % every == 0:
                 autopilot.update()
+                if lookahead is not None:
+                    guided = lookahead.guide(fdm.state(), autopilot)
+                    if guided.setpoint_m is not None:
+                        recorder.mark(
+                            f"terrain look-ahead: setpoint raised to "
+                            f"{guided.setpoint_m:.0f} m "
+                            f"({guided.threat.terrain_m:.0f} m terrain "
+                            f"{guided.threat.distance_m:.0f} m ahead)")
             recorder.sample()
 
     # The closure assertion (§2.8). A run that did not reach what it was
@@ -306,6 +336,8 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
                            else terrain_ground.provenance()),
         "airframe_contact": (None if contact is None
                              else contact.provenance()),
+        "terrain_lookahead": (None if lookahead is None
+                              else lookahead.provenance()),
         "output_digest": output_digest,
         "samples": len(recorder),
         "validation": {

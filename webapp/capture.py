@@ -58,6 +58,25 @@ class CaptureError(RuntimeError):
         self.message = message
 
 
+def _run_named(run_spec, spec, **kwargs):
+    """run_spec, with the terrain refusals carried to the page by name.
+
+    Package E: a closed-loop run over a raster refuses ``terrain.lookahead``
+    when the projected track meets terrain the aircraft cannot out-climb,
+    and the contact check refuses on an impact. Both reach the run status
+    as a named constraint, never as a bare traceback.
+    """
+    from core.terrain.contact import TerrainImpactError
+    from core.terrain.lookahead import TerrainLookaheadError
+
+    try:
+        return run_spec(spec, **kwargs)
+    except TerrainLookaheadError as exc:
+        raise CaptureError(exc.constraint, str(exc)) from exc
+    except TerrainImpactError as exc:
+        raise CaptureError("terrain.impact", str(exc)) from exc
+
+
 def scene_geometry(spec, scene: Dict):
     """(heightfield, scene frame, tornado block) for a webapp scene.
 
@@ -121,7 +140,7 @@ def capture_run(spec, out: Path, scene: Dict,
     capture_dir.mkdir(parents=True, exist_ok=True)
 
     report("flying the spec headlessly for the capture geometry")
-    result = run_spec(spec, terrain_ground=terrain_ground)
+    result = _run_named(run_spec, spec, terrain_ground=terrain_ground)
     columns = result.telemetry.columns
 
     cameras = spec.cameras or default_cameras(spec)
@@ -230,7 +249,7 @@ def closure_run(spec, out: Path, scene: Dict,
                  frm="closure pair: the same spec flown closed loop, so the "
                      "closure assertion reaches the rendered artefact")
     report("flying the same spec closed loop for the closure report")
-    result = run_spec(pair, terrain_ground=terrain_ground,
+    result = _run_named(run_spec, pair, terrain_ground=terrain_ground,
                       assert_closure=False)
     if result.closure is None:
         raise CaptureError(

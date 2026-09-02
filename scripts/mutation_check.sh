@@ -947,6 +947,14 @@ mutate core/performance.py \
     "a performance probe with no excess power refuses by name" \
     tests/test_performance.py || failures=$((failures+1))
 
+# -- Package E guard: the terrain ahead is looked at ------------------------
+
+mutate core/terrain/lookahead.py \
+    'HORIZON_S = 90.0' \
+    'HORIZON_S = 0.0  # MUTATED: the look-ahead sees nothing ahead' \
+    "the altitude setpoint is raised ahead of terrain the aircraft can clear, and the run refuses by name ahead of terrain it cannot" \
+    tests/test_terrain_lookahead.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
