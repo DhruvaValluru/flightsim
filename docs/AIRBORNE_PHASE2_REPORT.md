@@ -36,7 +36,7 @@ fail when the safeguard is disabled.
 | D | c172p 100 m step at 600 m / 85 kt: time to 90 % / fraction of excess thrust used | 26.9 s / — | 26.0 s / 0.95 | `tecs_step.py --aircraft c172p --step 100` |
 | E look-ahead | B747 3000 m / 250 kt at a 3300 m ridge 8 km ahead | left-wingtip impact at 52.6 s | setpoint raised at t = 0 with 54 s lead; 44.8 m minimum AGL at the raster crest; closure passes at 3323 m | `terrain_lookahead.py [--pre]` |
 | E | 5000 m crest, same track | impact | `terrain.lookahead` refusal at t = 0: 12.8 m/s required vs 12.2 m/s available | `terrain_lookahead.py --crest 5000` |
-| F rotor | σ_w claimed above 300 m AGL | constant 0.544 m/s | measured at the MSL: 0.23 m/s at 450 m, 0.30 at 1000 m, 0.07 at 2000 m, 0.000 at ≥ 3000 m | `rotor_delivery.py` |
+| F rotor | σ_w claimed above 300 m AGL | constant 0.544 m/s | measured at the MSL over a 30 s seeded sample (Linux): 0.31 m/s at 450 m, 0.44 at 1000 m, 0.10 at 2000 m, 0.000 at ≥ 3000 m (the zero is exact on every platform; the nonzero values follow the platform C library’s generator) | `rotor_delivery.py` |
 | F | delivered σ_w on a planned mountain track (3384 m MSL / 384 m AGL, 35 m/s across the ridge) | 0.000 m/s, labelled `lee-rotor` | 0.000 m/s, labelled "lee-rotor turbulence absent: …" with the reason | same |
 | F | delivered σ_w in the lee at 150 m AGL, 35 m/s (25 m/s) | not measured | 0.357 (0.256) m/s; `lee-rotor` at 35 m/s, "absent" at 25 | same |
 | G coordination | B747 25° bank at 230 / 300 kt: turn-rate error vs g tan φ / V | −10.3 % / −11.5 % | −1.1 % / −0.8 % | `turn_coordination.py [--pre]` |

@@ -28,7 +28,7 @@ settle. So this provider
   :func:`~core.environment.turbulence.measure_poe_sigma_w_mps`), because
   it is not the constant 1.785 fps the ladder table lists at 1000 m: the
   high-altitude branch is indexed by MSL and the severity-1 curve is ZERO
-  at ~3000 m MSL (0.23 m/s at 450 m, 0.30 at 1000 m, 0.07 at 2000 m,
+  at ~3000 m MSL (0.31 m/s at 450 m, 0.44 at 1000 m, 0.10 at 2000 m,
   0.000 at 3000 m and above; experiments/airborne/rotor_delivery.py).
 
 Acts, or says it doesn't (Package F)

@@ -82,7 +82,7 @@ _POE_SIGMA_CACHE: Dict[tuple, float] = {}
 
 
 def measure_poe_sigma_w_mps(msl_m: float, agl_m: float, severity: float,
-                            aircraft: str = "B747", seconds: float = 10.0,
+                            aircraft: str = "B747", seconds: float = 30.0,
                             seed: int = 1, use_cache: bool = True) -> float:
     """The sigma_w the POE route DELIVERS at an MSL altitude, measured.
 
@@ -97,8 +97,13 @@ def measure_poe_sigma_w_mps(msl_m: float, agl_m: float, severity: float,
     here from a throwaway FDM at the planned MSL and AGL, never read from
     the POE ladder table (which was measured at one altitude, 1000 m).
 
-    Deterministic: a fixed seed, a fixed run length; cached per
-    (aircraft, MSL/50 m, AGL/50 m, severity).
+    A fixed seed and a fixed run length; cached per (aircraft, MSL/50 m,
+    AGL/50 m, severity). The seeded generator inside JSBSim is the C
+    library's, so the realisation -- and this RMS -- differs between
+    operating systems (measured: 0.30 m/s on Linux and 0.45 m/s on macOS
+    at 1000 m MSL over a 10 s sample). Thirty seconds narrows the spread;
+    the zero at >= 3000 m MSL is exact on every platform, because the
+    curve itself is zero there.
     """
     key = (aircraft, int(round(msl_m / 50.0)), int(round(agl_m / 50.0)),
            float(severity), float(seconds), int(seed))
