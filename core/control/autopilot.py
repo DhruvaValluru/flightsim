@@ -99,6 +99,12 @@ class ClosureReport:
         return self
 
 
+#: Fraction of the measured full-throttle specific excess power the
+#: controller may demand as a climb rate. Below 1 so the throttle loop keeps
+#: authority to hold speed through the climb (Package D).
+HDOT_CAPABILITY_FRACTION = 0.8
+
+
 class Autopilot:
     """Engage/disengage TECS and write its setpoints."""
 
@@ -160,6 +166,22 @@ class Autopilot:
         self.signs = measure(base, altitude_m=here.altitude_m,
                              cas_kt=here.cas_kt)
         props.set_many(self.signs.as_properties())
+
+        # Package D: how much aircraft is this? The throttle loop's error is
+        # a required thrust-to-weight increment; the throttle that produces
+        # it depends on the airframe's thrust range, which is MEASURED here
+        # (core.performance) rather than assumed. The demanded climb-rate
+        # limit is derived from the same measurement, so the controller
+        # never asks for a climb the airframe cannot fly at this speed.
+        from ..performance import measure_performance
+
+        self.performance = measure_performance(
+            base, altitude_m=here.altitude_m, cas_kt=here.cas_kt)
+        props.set_many(self.performance.as_properties())
+        hdot_max_fps = min(
+            props.get("ap/tecs/hdot-max-fps"),
+            HDOT_CAPABILITY_FRACTION * u.mps_to_fps(self.performance.edot_max_mps))
+        props.set("ap/tecs/hdot-max-fps", max(hdot_max_fps, 1.0))
 
         props.set_many(
             {
@@ -275,6 +297,11 @@ class Autopilot:
     #: signals and JSBSim's write-only PID internals such as
     #: ``.../initial-integrator-value``, which are state, not configuration.
     GAIN_PROPERTIES = (
+        # Package D: the measured normalisation and the excess-power limits
+        # it came from, so the manifest says how much aircraft the loop knew.
+        "ap/tecs/thr-per-ste",
+        "ap/tecs/stedot-max-fps",
+        "ap/tecs/stedot-min-fps",
         "ap/tecs/tau",
         "ap/tecs/speed-weight",
         "ap/tecs/hdot-max-fps",

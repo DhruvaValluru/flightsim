@@ -328,6 +328,9 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         manifest["control"] = {
             "signs": autopilot.signs.as_properties(),
             "gains": autopilot.gains(),
+            # Package D: the airframe performance the throttle loop was
+            # normalised by, measured at the trimmed state.
+            "performance": autopilot.performance.provenance(),
         }
     return RunResult(spec.digest(), output_digest, recorder, report, manifest,
                      closure)

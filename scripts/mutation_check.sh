@@ -933,6 +933,20 @@ mutate webapp/runs.py \
     "a failed closure fails the run by name (closure.<check>)" \
     tests/test_closure_pair.py || failures=$((failures+1))
 
+# -- Package D guards: the throttle loop knows how much aircraft it flies ----
+
+mutate core/control/autopilot.py \
+    '        props.set_many(self.performance.as_properties())' \
+    '        pass  # MUTATED: thr-per-ste stays at the template constant 1.0' \
+    "the TECS throttle normalisation is written from a measurement, not a constant" \
+    tests/test_performance.py || failures=$((failures+1))
+
+mutate core/performance.py \
+    '    if thrust_max_n <= thrust_trim_n:' \
+    '    if False:  # MUTATED: an airframe with no excess power is measured anyway' \
+    "a performance probe with no excess power refuses by name" \
+    tests/test_performance.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

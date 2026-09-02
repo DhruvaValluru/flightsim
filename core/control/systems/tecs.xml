@@ -123,10 +123,36 @@
         <!-- speed error -> vdot demand, 1/s -->
 <property value="40.0">ap/tecs/hdot-max-fps</property>
 <property value="6.0">ap/tecs/vdot-max-fps2</property>
-<property value="1.2">ap/tecs/kt-p</property>
-<property value="0.30">ap/tecs/kt-i</property>
-<property value="0.5">ap/tecs/ke-p</property>
-<property value="0.08">ap/tecs/ke-i</property>
+<!-- Package D: the throttle gains are NORMALISED by the airframe's measured
+     thrust range. ap/tecs/ste-error is already a required thrust-to-weight
+     increment (an energy-rate error over g*V); multiplying it by
+     thr-per-ste = 1 / ((T_max - T_idle)/W), measured at engage by
+     core.performance, gives the throttle increment that produces exactly
+     that thrust. With it, kt-p is a dimensionless loop gain: 1.0 means
+     "command the throttle the energy error requires"; the same
+     gains give the same bandwidth on every airframe. Before this, a fixed
+     1.2 drove the B747 to 17-54% of its excess power and the c172p to 98%
+     throttle (measured). The 1.0 default here is overwritten at engage from
+     a measurement; a guard makes sure it is. -->
+<property value="1.0">ap/tecs/thr-per-ste</property>
+<property value="1.0">ap/tecs/kt-p</property>
+<property value="0.10">ap/tecs/kt-i</property>
+<!-- Measured specific excess power at full throttle / deficit at idle, fps,
+     written at engage; hdot-max is derived from the first so the demanded
+     climb rate is one the airframe can deliver at constant speed. -->
+<property value="0">ap/tecs/stedot-max-fps</property>
+<property value="0">ap/tecs/stedot-min-fps</property>
+<!-- Package D: with the throttle loop normalised, the energy-DISTRIBUTION
+     loop became the measured bottleneck: at ke-p 0.5 a 300 m step left a
+     2.9 kt speed surplus untraded, the throttle loop read the total energy
+     as satisfied, and the climb stalled at 6.4 m/s of a 12.2 demanded.
+     Swept (experiments/airborne/tecs_step.py): ke-p 0.5 gives 43.9 s to
+     90%, 1.0 gives 33.7 s, 1.5 gives 30.4 s, 2.0 gives 28.7 s with 0.1 m
+     overshoot and a 1.0 kt CAS excursion, climb rate tracking its demand.
+     The SEB error is already an angle (radians), so this gain is
+     dimensionless and airframe-neutral. -->
+<property value="2.0">ap/tecs/ke-p</property>
+<property value="0.32">ap/tecs/ke-i</property>
 <!-- Turn compensation: drag rises with 1/cos(phi), so a banked turn needs
      more thrust for the same energy state (§6.4, ArduPilot TECS_RLL2THR). -->
 <property value="0.20">ap/tecs/roll-to-throttle</property>
@@ -326,10 +352,29 @@
     </function>
   </fcs_function>
 
+  <!-- Normalised gains: kt-p and kt-i times the measured throttle-per-
+       (dT/W). Computed as properties so the PID reads them each step. -->
+  <fcs_function name="ap/tecs/kt-p-normalised">
+    <function>
+      <product>
+        <property>ap/tecs/kt-p</property>
+        <property>ap/tecs/thr-per-ste</property>
+      </product>
+    </function>
+  </fcs_function>
+  <fcs_function name="ap/tecs/kt-i-normalised">
+    <function>
+      <product>
+        <property>ap/tecs/kt-i</property>
+        <property>ap/tecs/thr-per-ste</property>
+      </product>
+    </function>
+  </fcs_function>
+
   <pid name="ap/tecs/throttle-pid">
     <input> ap/tecs/ste-error </input>
-    <kp> ap/tecs/kt-p </kp>
-    <ki> ap/tecs/kt-i </ki>
+    <kp> ap/tecs/kt-p-normalised </kp>
+    <ki> ap/tecs/kt-i-normalised </ki>
     <kd> 0.0 </kd>
     <!-- Freeze the integrator whenever the throttle command has hit a stop. -->
     <trigger> ap/tecs/throttle-trigger </trigger>
@@ -356,9 +401,45 @@
     </function>
   </fcs_function>
 
+  <!-- Package D feed-forward: the throttle increment the DEMANDED energy
+       rate requires, (g*hdot_dem + V*Vdot_dem)/(g*V) times the measured
+       throttle-per-(dT/W). Without it the loop is proportional-only while
+       the climb-rate demand sits at its limit (the anti-windup trigger
+       freezes the integrator there), and a unity-gain proportional loop on
+       a rate settles at HALF the demand: measured, 5.3 m/s achieved for
+       12.2 demanded. The feed-forward supplies the demand; P and I correct
+       the residual (ArduPilot AP_TECS ff_throttle does the same). -->
+  <fcs_function name="ap/tecs/throttle-ff">
+    <function>
+      <product>
+        <property>ap/tecs/thr-per-ste</property>
+        <quotient>
+          <sum>
+            <product>
+              <value>32.174049</value>
+              <property>ap/tecs/hdot-demand-fps</property>
+            </product>
+            <product>
+              <property>velocities/vtrue-fps</property>
+              <property>ap/tecs/vdot-demand-fps2</property>
+            </product>
+          </sum>
+          <product>
+            <value>32.174049</value>
+            <max>
+              <property>velocities/vtrue-fps</property>
+              <value>1.0</value>
+            </max>
+          </product>
+        </quotient>
+      </product>
+    </function>
+  </fcs_function>
+
   <!-- Pre-clip command, kept so saturation can be detected honestly. -->
   <summer name="ap/tecs/throttle-raw">
     <input> ap/trim/throttle </input>
+    <input> ap/tecs/throttle-ff </input>
     <input> ap/tecs/throttle-pid </input>
     <input> ap/tecs/turn-compensation </input>
   </summer>
