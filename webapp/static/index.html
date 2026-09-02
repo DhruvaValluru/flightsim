@@ -515,13 +515,30 @@ function renderCapture(run) {
   const capped = run.capture.previews_capped
     ? ` <span class="dim">(previews capped at ${run.capture.preview_cap}; ` +
       `the manifest carries every frame)</span>` : "";
+  // Package C: the paired closed-loop run's closure report -- commanded vs
+  // achieved by name. Rendered from closure.json as graded, never re-judged.
+  const cl = run.capture.closure;
+  let closure = "";
+  if (cl && cl.refused) {
+    closure = `<b>closure unavailable</b> — <span class="verdict-refused">` +
+      `[${cl.refused}] ${cl.message}</span>`;
+  } else if (cl) {
+    const rows = cl.checks.map(c =>
+      `<li><b style="color:${c.ok ? "#6fd08c" : "#e06f6f"}">` +
+      `${c.ok ? "ok" : "FAIL"}</b> ${c.name}: commanded ` +
+      `${c.commanded.toFixed(2)} ${c.unit}, achieved ${c.achieved.toFixed(2)} ` +
+      `<span class="dim">(tol ${c.tolerance})</span></li>`).join("");
+    closure = `<b>closure ${cl.ok ? "PASSED" : "FAILED"}</b> ` +
+      `<span class="dim">(the same spec flown closed loop, graded over the ` +
+      `settled half)</span><ul>${rows}</ul>`;
+  }
   holder.innerHTML =
     `<div class="card"><b>captured geometry</b> — ` +
     `${run.capture.frames} frame(s), ${run.capture.previews} preview(s)` +
     capped +
     `<ul>${cameras}</ul>` +
     `<b>verification ${v.ok ? "PASSED" : "FAILED"}</b>` +
-    `<ul>${checks}</ul></div>`;
+    `<ul>${checks}</ul>` + closure + `</div>`;
 }
 
 async function initFilesPanel(runId) {

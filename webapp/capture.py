@@ -41,6 +41,14 @@ Report = Callable[[str], None]
 MAX_PREVIEWS = 60
 
 
+#: Closure tolerance for the paired closed-loop run (Package C). The
+#: autopilot's own declared-before-the-run tolerances; a module constant so
+#: a test can prove the pair FAILS when the tolerance cannot be met.
+from core.control.autopilot import ClosureTolerance  # noqa: E402
+
+CLOSURE_TOLERANCE = ClosureTolerance()
+
+
 class CaptureError(RuntimeError):
     """A named capture refusal, carried to the run status verbatim."""
 
@@ -191,6 +199,63 @@ def capture_run(spec, out: Path, scene: Dict,
     }
 
 
+def closure_run(spec, out: Path, scene: Dict,
+                report: Report = lambda line: None) -> Dict:
+    """The paired CLOSED-LOOP run, and its closure report (Package C).
+
+    The render host has no controller, so every clip is open loop and the
+    closure assertion -- this project's stated reason for existing ("a run
+    that did not reach what it was commanded is not evidence of anything")
+    -- could never run on the artefact a person looks at. This flies the
+    SAME spec headlessly with the autopilot engaged, on the same scene
+    raster, and writes capture/closure.json beside the clip: commanded vs
+    achieved altitude, airspeed, heading and settledness over the settled
+    half of the run, against tolerances declared before the run.
+
+    The caller fails the run when the report is not ok. A failed closure
+    is a named failure (``closure.<check>``), never a note.
+    """
+    from core.scenario.runner import run_spec
+
+    heightfield, _frame, _tornado = scene_geometry(spec, scene)
+    terrain_ground = None
+    if heightfield is not None:
+        from core.terrain.ground import TerrainGround
+
+        terrain_ground = TerrainGround(heightfield)
+
+    pair = spec.__class__.from_dict(spec.to_dict())
+    if not bool(pair.hold_state.value):
+        pair.set("hold_state", True,
+                 frm="closure pair: the same spec flown closed loop, so the "
+                     "closure assertion reaches the rendered artefact")
+    report("flying the same spec closed loop for the closure report")
+    result = run_spec(pair, terrain_ground=terrain_ground,
+                      assert_closure=False)
+    if result.closure is None:
+        raise CaptureError(
+            "closure.unavailable",
+            "the paired run produced no closure report: the autopilot did "
+            "not engage")
+    # Re-grade against the module tolerance (the run graded with the
+    # autopilot's default; identical unless a test pins it), so what is
+    # written is what was judged.
+    checks = [{"name": c.name, "commanded": c.commanded, "achieved": c.achieved,
+               "tolerance": c.tolerance, "unit": c.unit, "ok": c.ok}
+              for c in result.closure.checks]
+    verdict = {"ok": all(c["ok"] for c in checks), "checks": checks,
+               "pair_spec_digest": pair.digest(),
+               "output_digest": result.output_digest,
+               "settle_fraction": CLOSURE_TOLERANCE.settle_fraction}
+    capture_dir = Path(out) / "capture"
+    capture_dir.mkdir(parents=True, exist_ok=True)
+    (capture_dir / "closure.json").write_text(
+        json.dumps(verdict, indent=1), encoding="utf-8")
+    report(f"closure {'PASSED' if verdict['ok'] else 'FAILED'} "
+           f"({sum(c['ok'] for c in checks)}/{len(checks)} checks)")
+    return verdict
+
+
 #: What each artefact IS, shown beside its link. A download list with no
 #: labels makes the reader guess which file carries the geometry.
 ARTIFACT_NOTES = {
@@ -204,6 +269,8 @@ ARTIFACT_NOTES = {
     "capture/capture_manifest.json":
         "per-frame pose, intrinsics and aircraft state -- the labeled data",
     "capture/verify.json": "the five verification checks, as run",
+    "capture/closure.json":
+        "the paired closed-loop run: commanded vs achieved, by name",
     "capture/telemetry.json":
         "the headless flight the manifest describes",
     "capture/scenario.yaml": "the spec as captured",
@@ -224,7 +291,8 @@ def run_artifacts(out_dir: Path) -> List[Dict]:
     for name in ("clip.mp4", "card.json", "provenance.json",
                  "scenario.yaml", "telemetry.json", "effect.json",
                  "render.log", "capture/capture_manifest.json",
-                 "capture/verify.json", "capture/telemetry.json",
+                 "capture/verify.json", "capture/closure.json",
+                 "capture/telemetry.json",
                  "capture/scenario.yaml", "capture/run.json"):
         path = out_dir / name
         if path.is_file():

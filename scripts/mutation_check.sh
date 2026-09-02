@@ -925,6 +925,14 @@ mutate core/control/autopilot.py \
     "the sign probe flies the engaging aircraft's own trimmed state" \
     tests/test_control_signs.py || failures=$((failures+1))
 
+# -- Package C guard: a failed closure fails the run ---------------------------
+
+mutate webapp/runs.py \
+    '        if not run.capture["closure"]["ok"]:' \
+    '        if False:  # MUTATED: a failed closure is a note, not a failure' \
+    "a failed closure fails the run by name (closure.<check>)" \
+    tests/test_closure_pair.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

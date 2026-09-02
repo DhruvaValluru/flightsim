@@ -1528,7 +1528,7 @@ class RunManager:
         that silently discarded it would be the worse outcome. The run
         says which constraint refused, and no manifest is written.
         """
-        from webapp.capture import CaptureError, capture_run
+        from webapp.capture import CaptureError, capture_run, closure_run
 
         run.push("capture", "solving camera geometry and capture schedule")
         try:
@@ -1538,6 +1538,31 @@ class RunManager:
             run.capture = {"refused": exc.constraint,
                            "message": exc.message}
             run.push("capture", f"[{exc.constraint}] {exc.message}")
+            return False
+        # Package C: the paired closed-loop run. The closure assertion is
+        # the project's central guarantee and the render host cannot run
+        # it, so the same spec is flown closed loop here and graded. A
+        # closure that fails FAILS THE RUN by name -- the clip may already
+        # exist, and that is exactly the case this exists for: a clean
+        # video of an aircraft that did not reach what it was commanded.
+        try:
+            run.capture["closure"] = closure_run(
+                spec, out, scene, lambda line: run.push("closure", line))
+        except CaptureError as exc:
+            run.capture["closure"] = {"refused": exc.constraint,
+                                      "message": exc.message}
+            run.push("failed", f"[{exc.constraint}] {exc.message}")
+            return False
+        if not run.capture["closure"]["ok"]:
+            failed = [c for c in run.capture["closure"]["checks"]
+                      if not c["ok"]]
+            first = failed[0]
+            run.push("failed",
+                     f"[closure.{first['name']}] commanded "
+                     f"{first['commanded']:.2f} {first['unit']}, achieved "
+                     f"{first['achieved']:.2f} (tolerance {first['tolerance']:g})"
+                     + (f"; {len(failed) - 1} more check(s) failed"
+                        if len(failed) > 1 else ""))
             return False
         return True
 
@@ -1562,7 +1587,10 @@ class RunManager:
             "capture_only": True,
         }, indent=1), encoding="utf-8")
         if not self._capture_phase(run, spec, scene, out):
-            run.push("failed", str(run.capture.get("message", "refused")))
+            # A failed closure has already pushed its named failure; a
+            # refused capture is named here from the refusal it recorded.
+            if run.status != "failed":
+                run.push("failed", str(run.capture.get("message", "refused")))
             return
         run.push("done", "capture ready (no pixels on this platform)")
 
@@ -1853,5 +1881,11 @@ class RunManager:
                                    f"({type(exc).__name__}: {exc}); the "
                                    f"clip stands on its own")
         run.clip = str(clip)
-        self._capture_phase(run, spec, scene, out)
+        if not self._capture_phase(run, spec, scene, out):
+            # A refused capture stands (the clip is the deliverable and the
+            # status names the refusal); a FAILED CLOSURE does not -- the
+            # phase has already pushed the named failure, and a run whose
+            # aircraft did not reach what it was commanded is not "done".
+            if run.status == "failed":
+                return
         run.push("done", "clip ready")
