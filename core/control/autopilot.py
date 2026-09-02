@@ -152,7 +152,13 @@ class Autopilot:
         from .signs import measure
 
         base = getattr(self.fdm.derived, "base_name", self.fdm.aircraft_name)
-        self.signs = measure(base)
+        # Package B: probe at THIS aircraft's trimmed state, not a hardcoded
+        # transport cruise the airframe may not be able to fly. The sign
+        # convention does not depend on the condition; the probe's ability
+        # to trim does.
+        here = self.fdm.state()
+        self.signs = measure(base, altitude_m=here.altitude_m,
+                             cas_kt=here.cas_kt)
         props.set_many(self.signs.as_properties())
 
         props.set_many(

@@ -916,6 +916,15 @@ mutate experiments/gate5_ue_parity.py \
     "host parity grades the trim snapshot (no first-sample exemption)" \
     tests/test_host_parity.py || failures=$((failures+1))
 
+# -- Package B guard: the sign probe flies the aircraft's own state -----------
+
+mutate core/control/autopilot.py \
+    '        self.signs = measure(base, altitude_m=here.altitude_m,
+                             cas_kt=here.cas_kt)' \
+    '        self.signs = measure(base)  # MUTATED: hardcoded transport probe' \
+    "the sign probe flies the engaging aircraft's own trimmed state" \
+    tests/test_control_signs.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

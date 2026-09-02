@@ -36,7 +36,17 @@ MIN_RESPONSE_DPS = 0.05
 
 
 class ControlSignError(FDMError):
-    """A control's sign convention could not be determined."""
+    """A control's sign convention could not be determined.
+
+    Refuses by name (``control.signs``). Package B: the probe used to fly a
+    hardcoded 6000 m / 280 kt CAS, which a Cessna 172 cannot -- so the
+    c172p could never engage the autopilot, for any spec, and the failure
+    surfaced as a bare trim error inside engage(). The probe now flies the
+    engaging aircraft's own state, and a probe that still cannot trim says
+    which condition it tried.
+    """
+
+    constraint = "control.signs"
 
 
 @dataclass(frozen=True)
@@ -82,7 +92,14 @@ def measure(
     """Probe an airframe's control signs on a throwaway instance.
 
     The convention is a property of the model's flight control section, not of
-    the flight condition, so the result is cached per aircraft.
+    the flight condition, so the result is cached per aircraft -- and for the
+    same reason ANY trimmable condition is a valid probe. ``altitude_m`` and
+    ``cas_kt`` default to a transport-category cruise, which a light aircraft
+    cannot reach (measured: the c172p failed to trim at 6000 m / 280 kt on
+    every engage, Package B); :meth:`Autopilot.engage` passes the engaging
+    aircraft's own trimmed state instead. A probe that cannot trim raises
+    :class:`ControlSignError` naming the condition rather than a bare trim
+    failure from inside the autopilot.
     """
     if use_cache and aircraft in _CACHE:
         return _CACHE[aircraft]
@@ -106,7 +123,16 @@ def measure(
              "atmosphere/turb-type": 0.0}
         )
         fdm.start_engines()
-        fdm.trim(TrimMode.LONGITUDINAL)
+        try:
+            fdm.trim(TrimMode.LONGITUDINAL)
+        except FDMError as exc:
+            raise ControlSignError(
+                f"{aircraft!r}: the control-sign probe could not trim at "
+                f"{altitude_m:.0f} m / {cas_kt:.0f} kt CAS ({exc}). The sign "
+                f"convention is condition-independent, so probe at a state "
+                f"this airframe can hold -- engage() passes the aircraft's "
+                f"own trimmed state."
+            ) from exc
 
         name = f"fcs/{control}-cmd-norm"
         fdm.props.set(name, fdm.props.get(name) + PROBE_DELTA)
