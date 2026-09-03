@@ -204,6 +204,15 @@ rather than hides.
 
 ## Fixed on the way
 
+* First run on the user's machine: a 22 s mountain clip passed render
+  and capture, then its closure pair refused `terrain.lookahead` on a
+  ridge 59 s ahead. Two things were wrong. The pair flew the spec's full
+  120 s while the clip is capped at 22 s, so it graded a flight the
+  artefact never shows; it now flies the clip's own window and records
+  it in `closure.json`. And the look-ahead's 90 s horizon reached past
+  the end of the run; it is now capped by the time left, so terrain the
+  flight never reaches is not its threat. Both carry mutation guards.
+
 * "over 2000 m mountains" compiled to a 2000-minute duration (a bare "m"
   after "over" read as minutes), which the capture phase then flew in
   full. The bare "m" is minutes only after "for"/"during".

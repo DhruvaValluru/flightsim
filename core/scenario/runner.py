@@ -271,7 +271,8 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         lookahead = TerrainLookahead.for_run(
             terrain_ground, fdm, autopilot,
             hold_tolerance_m=ClosureTolerance().altitude_m)
-        first = lookahead.guide(fdm.state(), autopilot)
+        first = lookahead.guide(fdm.state(), autopilot,
+                                remaining_s=float(spec.duration.value))
         if first.setpoint_m is not None:
             recorder_note = (f"terrain look-ahead: setpoint raised to "
                              f"{first.setpoint_m:.0f} m before the first step")
@@ -303,7 +304,10 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
             if autopilot is not None and i % every == 0:
                 autopilot.update()
                 if lookahead is not None:
-                    guided = lookahead.guide(fdm.state(), autopilot)
+                    guided = lookahead.guide(
+                        fdm.state(), autopilot,
+                        remaining_s=float(spec.duration.value)
+                        - (i + 1) / fdm.rate_hz)
                     if guided.setpoint_m is not None:
                         recorder.mark(
                             f"terrain look-ahead: setpoint raised to "

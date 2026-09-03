@@ -243,11 +243,23 @@ def closure_run(spec, out: Path, scene: Dict,
 
         terrain_ground = TerrainGround(heightfield)
 
+    from webapp.runs import CLIP_SECONDS
+
     pair = spec.__class__.from_dict(spec.to_dict())
     if not bool(pair.hold_state.value):
         pair.set("hold_state", True,
                  frm="closure pair: the same spec flown closed loop, so the "
                      "closure assertion reaches the rendered artefact")
+    # The clip is capped at CLIP_SECONDS; the pair grades THAT flight, not
+    # a longer one the artefact never shows. Measured on the user's
+    # machine: a 22 s clip over the mountains passed capture, then its
+    # 120 s closure pair refused terrain.lookahead on a ridge 59 s ahead
+    # that the clip never reaches.
+    seconds = min(float(pair.duration.value), CLIP_SECONDS)
+    if seconds < float(pair.duration.value):
+        pair.set("duration", seconds,
+                 frm=f"closure pair: the clip's own window "
+                     f"({CLIP_SECONDS:g} s cap)")
     report("flying the same spec closed loop for the closure report")
     result = _run_named(run_spec, pair, terrain_ground=terrain_ground,
                       assert_closure=False)
@@ -263,6 +275,7 @@ def closure_run(spec, out: Path, scene: Dict,
                "tolerance": c.tolerance, "unit": c.unit, "ok": c.ok}
               for c in result.closure.checks]
     verdict = {"ok": all(c["ok"] for c in checks), "checks": checks,
+               "duration_s": seconds, "clip_seconds_cap": CLIP_SECONDS,
                "pair_spec_digest": pair.digest(),
                "output_digest": result.output_digest,
                "settle_fraction": CLOSURE_TOLERANCE.settle_fraction}

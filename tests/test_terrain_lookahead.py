@@ -80,6 +80,28 @@ def test_a_ridge_the_aircraft_cannot_clear_refuses_by_name_before_impact():
     assert f"{RTC_M:.0f} m" in str(exc.value)
 
 
+def test_terrain_beyond_the_end_of_the_run_is_not_this_flight_s_threat():
+    """The 5000 m crest 8 km (54 s) ahead refuses a 100 s run at its first
+    tick; a 20 s run never reaches it, so it is not raised, not refused,
+    and the setpoint stays at the spec's. Measured on the user's machine
+    before this cap: a 22 s clip's closure pair refused on a ridge 59 s
+    ahead that the clip never showed."""
+    result = fly(5000.0, duration_s=20.0)
+    lookahead = result.manifest["terrain_lookahead"]
+    assert lookahead["raises"] == 0
+    commanded = [c for c in result.closure.checks if c.name == "altitude"][0]
+    assert commanded.commanded == pytest.approx(ALTITUDE_M, abs=0.01)
+
+
+def test_the_horizon_is_capped_by_the_time_left():
+    ground = ridge_ground(3300.0, RIDGE_NORTH_M)
+    la = TerrainLookahead(ground, wingspan_m=60.0, hdot_capability_mps=12.0)
+    state = centre_state(ground, 3000.0)
+    assert la.evaluate(state, 3000.0).threat is not None
+    assert la.evaluate(state, 3000.0, remaining_s=20.0).threat is None
+    assert la.evaluate(state, 3000.0, remaining_s=120.0).threat is not None
+
+
 def test_a_plain_never_moves_the_setpoint():
     result = fly(PLAIN_M, duration_s=20.0)
     lookahead = result.manifest["terrain_lookahead"]

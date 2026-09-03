@@ -34,7 +34,11 @@ did not act, stating why. (G) sideslip-to-rudder coordination from a
 measured beta-per-rudder slope (turn-rate error 10% -> 1%, beta 1.16 ->
 0.005 deg, Dutch roll settles faster). Fixed on the way: "over 2000 m
 mountains" compiled to a 2000-MINUTE duration (gotcha: the bare "m" is
-minutes only after for/during). Suite 635 tests (1 skipped), 131 mutation
+minutes only after for/during). Gotcha from the first run on the user's
+machine: the closure pair must fly the CLIP's window (CLIP_SECONDS), not
+the spec's full duration, and the look-ahead horizon is capped by the
+time left in the run -- otherwise a 22 s clip is refused for a ridge
+59 s ahead that it never reaches. Suite 635 tests (1 skipped), 131 mutation
 guards, all new ones verified firing. Every number in the report comes
 from experiments/airborne/*.py.
 

@@ -120,3 +120,17 @@ def test_closure_run_refuses_when_the_autopilot_cannot_engage(
         capture_module.closure_run(spec, tmp_path, {"key": "flat", "terrain": None})
     assert caught.value.constraint == "closure.unavailable"
     assert not (tmp_path / "capture" / "closure.json").exists()
+
+
+def test_the_closure_pair_grades_the_clip_s_own_window(tmp_path):
+    """The clip is capped at CLIP_SECONDS; the pair flies that window, not
+    the spec's full duration, and says so in closure.json."""
+    from webapp.runs import CLIP_SECONDS
+
+    spec = compile_prompt("fly the 747 at 5000 ft over the prairie for 300 seconds")
+    assert float(spec.duration.value) > CLIP_SECONDS
+    verdict = capture_module.closure_run(
+        spec, tmp_path, {"key": "flat", "terrain": None})
+    assert verdict["duration_s"] == CLIP_SECONDS
+    assert verdict["clip_seconds_cap"] == CLIP_SECONDS
+    assert verdict["ok"]

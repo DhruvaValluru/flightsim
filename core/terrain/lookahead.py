@@ -157,10 +157,17 @@ class TerrainLookahead:
         return altitude_m + hdot_now_mps * response \
             + self.hdot_capability_mps * climbing
 
-    def evaluate(self, state, current_setpoint_m: float) -> LookaheadResult:
+    def evaluate(self, state, current_setpoint_m: float,
+                 remaining_s: Optional[float] = None) -> LookaheadResult:
         """Sample the raster ahead; return the threat (if any) and the
         setpoint that clears it. Raises TerrainLookaheadError when the
-        escape profile does not clear a sample."""
+        escape profile does not clear a sample.
+
+        ``remaining_s`` caps the horizon at the end of the run: terrain the
+        aircraft will not reach before the flight ends is not this
+        flight's threat. Measured on the user's machine before this cap: a
+        22 s clip's closure pair refused on a ridge 59 s ahead.
+        """
         self.evaluations += 1
         vn, ve = float(state.v_north_mps), float(state.v_east_mps)
         groundspeed = math.hypot(vn, ve)
@@ -182,7 +189,10 @@ class TerrainLookahead:
         worst_required = held          # highest terrain + RTC in the horizon
         worst: Optional[Threat] = None
         samples = 0
-        n = int(self.horizon_s / step_s) if step_s > 0.0 else 0
+        horizon = self.horizon_s
+        if remaining_s is not None:
+            horizon = min(horizon, max(0.0, float(remaining_s)))
+        n = int(horizon / step_s) if step_s > 0.0 else 0
         for k in range(1, n + 1):
             ahead_s = k * step_s
             distance = ahead_s * groundspeed
@@ -223,7 +233,8 @@ class TerrainLookahead:
             setpoint = worst_required + self.hold_tolerance_m
         return LookaheadResult(float(state.t), samples, worst, setpoint)
 
-    def guide(self, state, autopilot) -> LookaheadResult:
+    def guide(self, state, autopilot,
+              remaining_s: Optional[float] = None) -> LookaheadResult:
         """One guidance tick: evaluate, and raise the setpoint if needed.
 
         The only write is the altitude setpoint, through the autopilot's
@@ -231,7 +242,7 @@ class TerrainLookahead:
         """
         props = autopilot.fdm.props
         current = u.ft_to_m(props.get("ap/altitude-setpoint-ft"))
-        result = self.evaluate(state, current)
+        result = self.evaluate(state, current, remaining_s=remaining_s)
         if result.setpoint_m is not None and result.setpoint_m > current:
             autopilot.command(altitude_m=result.setpoint_m)
             threat = result.threat

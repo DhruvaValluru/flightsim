@@ -977,6 +977,18 @@ mutate core/control/autopilot.py \
     "the sideslip-to-rudder gains are written from a measurement, not left at zero" \
     tests/test_turn_coordination.py || failures=$((failures+1))
 
+mutate core/terrain/lookahead.py \
+    '            horizon = min(horizon, max(0.0, float(remaining_s)))' \
+    '            pass  # MUTATED: terrain past the end of the run is graded anyway' \
+    "the look-ahead horizon never reaches past the end of the run" \
+    tests/test_terrain_lookahead.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    '    seconds = min(float(pair.duration.value), CLIP_SECONDS)' \
+    '    seconds = float(pair.duration.value)  # MUTATED: the pair flies past the clip' \
+    "the closure pair grades the clip's own window" \
+    tests/test_closure_pair.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
