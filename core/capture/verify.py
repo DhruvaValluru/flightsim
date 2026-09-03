@@ -35,7 +35,7 @@ Checks (numbered as in the phase document):
    ``frames/<camera_id>/render.json`` beside the PNGs: per frame the
    pose it ACTUALLY APPLIED and the simulation time it captured at. The
    applied pose must equal the manifest's solved pose within 10 cm and
-   0.1 deg, the applied time the scheduled instant within half a fixed
+   0.1 deg, the applied time the scheduled instant within one fixed
    step, the PNG named by the frame's index must exist at the
    manifest's size, and the aircraft must reproject through the applied
    pose to the pixel the manifest's own projection gives. With no
@@ -68,10 +68,13 @@ TIME_TOL_S = 1e-9
 #: fails on, and 0.1 deg of orientation.
 ENGINE_POSITION_TOL_M = 0.10
 ENGINE_ANGLE_TOL_DEG = 0.1
-#: Applied capture time against the scheduled instant: half a fixed
-#: step at the 120 Hz default rate. When render.json states the
-#: engine's own ``step_s`` the tolerance is half of THAT step.
-ENGINE_TIME_TOL_S = 0.5 / 120.0
+#: Applied capture time against the scheduled instant: ONE fixed step
+#: at the 120 Hz default rate -- the bar's own tolerance ("to within one
+#: fixed step"). The commandlet captures on the first step whose clock
+#: reaches the instant, so a sample-aligned instant is met exactly and
+#: t=0 is met by the first step, one step late. When render.json states
+#: the engine's own ``step_s`` the tolerance is THAT step.
+ENGINE_TIME_TOL_S = 1.0 / 120.0
 #: The aircraft reprojected through the applied pose against the
 #: manifest's own projection. 0.1 deg at the default 1244 px focal is
 #: 2.2 px and 10 cm at 100 m is 1.2 px: 3 px is what the pose tolerances
@@ -422,8 +425,8 @@ def verify_engine_parity(run_dir, manifest: Dict,
     records by ``frame_index``. For every record: the applied camera
     position within ``pos_tol_m`` of the solved one, applied
     yaw/pitch/roll within ``ang_tol_deg``, the applied capture time
-    within ``time_tol_s`` (default: half the engine's stated step) of
-    the scheduled instant, the PNG named by the index present at the
+    within ``time_tol_s`` (default: the engine's stated step, one fixed
+    step) of the scheduled instant, the PNG named by the index present at the
     manifest's width and height, and the aircraft reprojected through
     the APPLIED pose (this module's own projection, Euler path) within
     ``px_tol`` of the manifest's own projection and, for aircraft-aimed
@@ -471,7 +474,7 @@ def verify_engine_parity(run_dir, manifest: Dict,
         tol_t = time_tol_s
         if tol_t is None:
             step = render.get("step_s")
-            tol_t = (float(step) / 2.0 if isinstance(step, (int, float))
+            tol_t = (float(step) if isinstance(step, (int, float))
                      and step > 0 else ENGINE_TIME_TOL_S)
         time_tol_used = tol_t if time_tol_used is None else max(
             time_tol_used, tol_t)

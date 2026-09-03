@@ -138,6 +138,33 @@ public:
 	// time lies outside the track's span.
 	bool ApplyPoseAtTime(double SimTimeSeconds, FString& Error);
 
+	// Optional per-sample focal length (mm) beside the track, for cards
+	// whose keyframed moves vary the lens. Must match the track's length;
+	// set AFTER SetPoseTrack.
+	bool SetPoseFocalLengths(TArray<double>&& FocalLengthsMm, FString& Error);
+
+	// What the last ApplyPoseAtTime interpolated from the track (the
+	// SOLVED pose the applied one was compared to) and the focal length
+	// it interpolated (0 when the track carries none) -- for the
+	// per-frame record, so the Python verifier grades applied against
+	// solved from one file.
+	FVector GetSolvedLocation() const { return LastSolvedLocation; }
+	FRotator GetSolvedRotation() const { return LastSolvedRotation; }
+	double GetAppliedFocalLengthMm() const { return LastAppliedFocalLengthMm; }
+	double GetTrackStartSeconds() const
+	{
+		return PoseTimes.Num() > 0 ? PoseTimes[0] : 0.0;
+	}
+	double GetTrackEndSeconds() const
+	{
+		return PoseTimes.Num() > 0 ? PoseTimes.Last() : 0.0;
+	}
+
+	// Applied-vs-solved parity, both FAILING ApplyPoseAtTime (never a
+	// warning): 10 cm of position and 0.1 deg of orientation.
+	static constexpr double PoseParityPositionCm = 10.0;
+	static constexpr double PoseParityAngleDegrees = 0.1;
+
 private:
 	void UpdateLaggedChase(float DeltaSeconds, const FTransform& TargetTransform);
 	void UpdateCockpitShoulder(const FTransform& TargetTransform);
@@ -155,4 +182,8 @@ private:
 	TArray<double> PoseTimes;
 	TArray<FVector> PoseLocations;
 	TArray<FRotator> PoseRotations;
+	TArray<double> PoseFocalLengthsMm;
+	FVector LastSolvedLocation = FVector::ZeroVector;
+	FRotator LastSolvedRotation = FRotator::ZeroRotator;
+	double LastAppliedFocalLengthMm = 0.0;
 };

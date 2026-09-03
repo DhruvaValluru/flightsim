@@ -676,6 +676,19 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	int32 ConsumedCameraIndex = 0;
 	double CameraOriginXMetres = 0.0;
 	double CameraOriginYMetres = 0.0;
+	// The camera's scheduled capture instants (the card's capture_times_s):
+	// in consume-poses mode the pass captures ONLY at these, one PNG each,
+	// named by the manifest index -- never on the render fps.
+	TArray<double> ScheduledTimes;
+	double ConsumeSensorWidthMm = 0.0;
+	double ConsumeSensorHeightMm = 0.0;
+	// Horizontal field of view from the card's intrinsics, so the pixels
+	// and the manifest's fx/fy describe the same lens.
+	auto HorizontalFovDegrees = [&ConsumeSensorWidthMm](double FocalMm) -> float
+	{
+		return static_cast<float>(2.0 * FMath::RadiansToDegrees(
+			FMath::Atan(ConsumeSensorWidthMm / (2.0 * FocalMm))));
+	};
 	{
 		FParse::Value(*Params, TEXT("camera-index="), ConsumedCameraIndex);
 		FString CardText;
@@ -715,6 +728,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			const TArray<TSharedPtr<FJsonValue>>* Yaws = nullptr;
 			const TArray<TSharedPtr<FJsonValue>>* Pitches = nullptr;
 			const TArray<TSharedPtr<FJsonValue>>* Rolls = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Focals = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* CaptureTimesJson = nullptr;
 			if (!(*PosesJson)->TryGetArrayField(TEXT("t_s"), Times) ||
 			    !(*PosesJson)->TryGetArrayField(TEXT("north_m"), Norths) ||
 			    !(*PosesJson)->TryGetArrayField(TEXT("east_m"), Easts) ||
@@ -762,13 +777,116 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			{
 				return Fail(Error);
 			}
+			// The lens track (per-sample focal length, mm) when the card
+			// carries one; the block's constant intrinsics otherwise.
+			double BlockFocalMm = 0.0;
+			if ((*PosesJson)->TryGetArrayField(TEXT("focal_length_mm"), Focals) &&
+			    Focals != nullptr && Focals->Num() == Count)
+			{
+				TArray<double> TrackFocals;
+				TrackFocals.Reserve(Count);
+				for (int32 i = 0; i < Count; ++i)
+				{
+					TrackFocals.Add((*Focals)[i]->AsNumber());
+				}
+				BlockFocalMm = TrackFocals[0];
+				if (!Director->SetPoseFocalLengths(MoveTemp(TrackFocals), Error))
+				{
+					return Fail(Error);
+				}
+			}
+			else
+			{
+				return Fail(TEXT("consume-poses: the camera block carries no "
+				                 "per-sample focal_length_mm; refusing to guess "
+				                 "the lens"));
+			}
+			// The schedule: capture ONLY at these instants. A block without one
+			// is refused -- a frame count derived from the render fps is
+			// exactly the failure this pass exists to end.
+			if (!CameraJson->TryGetArrayField(TEXT("capture_times_s"), CaptureTimesJson) ||
+			    CaptureTimesJson == nullptr || CaptureTimesJson->Num() == 0)
+			{
+				return Fail(TEXT("consume-poses: the camera block carries no "
+				                 "capture_times_s; refusing to capture on the render "
+				                 "fps instead of the schedule"));
+			}
+			ScheduledTimes.Reserve(CaptureTimesJson->Num());
+			for (int32 i = 0; i < CaptureTimesJson->Num(); ++i)
+			{
+				const double Scheduled = (*CaptureTimesJson)[i]->AsNumber();
+				if (i > 0 && Scheduled <= ScheduledTimes.Last())
+				{
+					return Fail(TEXT("consume-poses: capture_times_s must be "
+					                 "strictly increasing"));
+				}
+				ScheduledTimes.Add(Scheduled);
+			}
+			// Refuse BEFORE the loop when the solved track does not cover the
+			// schedule: the last scheduled instant must lie inside the track's
+			// span, or the camera would be asked for a pose nobody solved.
+			if (ScheduledTimes[0] < Director->GetTrackStartSeconds() - 1.0e-6 ||
+			    ScheduledTimes.Last() > Director->GetTrackEndSeconds() + 1.0e-6)
+			{
+				return Fail(FString::Printf(
+					TEXT("consume-poses: the schedule spans t=%.3f..%.3f s but the "
+					     "solved track covers only %.3f..%.3f s; the track does not "
+					     "cover the run"),
+					ScheduledTimes[0], ScheduledTimes.Last(),
+					Director->GetTrackStartSeconds(), Director->GetTrackEndSeconds()));
+			}
+			// Intrinsics from the block: the render target takes the camera's
+			// own pixel size (the -width/-height flags are overridden and the
+			// log says so), and the capture's horizontal field of view comes
+			// from focal and sensor width, so fx in the manifest IS this lens.
+			// Square pixels only: a sensor whose aspect differs from the pixel
+			// aspect would need anisotropic pixels this capture cannot make.
+			int32 BlockWidthPx = 0;
+			int32 BlockHeightPx = 0;
+			if (!CameraJson->TryGetNumberField(TEXT("width_px"), BlockWidthPx) ||
+			    !CameraJson->TryGetNumberField(TEXT("height_px"), BlockHeightPx) ||
+			    !CameraJson->TryGetNumberField(TEXT("sensor_width_mm"), ConsumeSensorWidthMm) ||
+			    !CameraJson->TryGetNumberField(TEXT("sensor_height_mm"), ConsumeSensorHeightMm) ||
+			    BlockWidthPx <= 0 || BlockHeightPx <= 0 ||
+			    ConsumeSensorWidthMm <= 0.0 || ConsumeSensorHeightMm <= 0.0)
+			{
+				return Fail(TEXT("consume-poses: the camera block is missing "
+				                 "width_px/height_px/sensor_width_mm/sensor_height_mm; "
+				                 "refusing to guess the intrinsics"));
+			}
+			const double SensorAspect = ConsumeSensorWidthMm / ConsumeSensorHeightMm;
+			const double PixelAspect = static_cast<double>(BlockWidthPx) / BlockHeightPx;
+			if (FMath::Abs(SensorAspect - PixelAspect) > 1.0e-3 * PixelAspect)
+			{
+				return Fail(FString::Printf(
+					TEXT("consume-poses: sensor aspect %.4f differs from the pixel "
+					     "aspect %.4f; this capture cannot honour anisotropic pixels"),
+					SensorAspect, PixelAspect));
+			}
+			if (Width != BlockWidthPx || Height != BlockHeightPx)
+			{
+				UE_LOG(LogFlightSimRender, Display,
+				       TEXT("consume-poses: render target %dx%d from the camera block ")
+				       TEXT("(the -width/-height flags %dx%d are overridden)"),
+				       BlockWidthPx, BlockHeightPx, Width, Height);
+			}
+			Width = BlockWidthPx;
+			Height = BlockHeightPx;
 			bConsumePoses = true;
 			UE_LOG(LogFlightSimRender, Display,
 			       TEXT("consume-poses: camera %d of %d, %d solved samples"),
 			       ConsumedCameraIndex, CamerasJson->Num(), Count);
-			// Place the camera at its first solved pose before the warm-up
-			// captures, replacing the chase settle-in placement above.
-			if (!Director->ApplyPoseAtTime(0.0, Error))
+			UE_LOG(LogFlightSimRender, Display,
+			       TEXT("consume-poses: %d scheduled captures from t=%.3f s to ")
+			       TEXT("t=%.3f s; %dx%d px, sensor %.2f x %.2f mm, focal %.1f mm ")
+			       TEXT("(fov %.2f deg)"),
+			       ScheduledTimes.Num(), ScheduledTimes[0], ScheduledTimes.Last(),
+			       Width, Height, ConsumeSensorWidthMm, ConsumeSensorHeightMm,
+			       BlockFocalMm, HorizontalFovDegrees(BlockFocalMm));
+			// Place the camera at its first SCHEDULED pose before the warm-up
+			// captures, replacing the chase settle-in placement above (the
+			// first instant is inside the track by the check above).
+			if (!Director->ApplyPoseAtTime(ScheduledTimes[0], Error))
 			{
 				return Fail(Error);
 			}
@@ -795,6 +913,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// terrain and sky in shot, and §6.6's manual exposure so the image does
 	// not re-meter as the bright-ground fraction changes with bank.
 	Capture->FOVAngle = bVisual ? 55.0f : 24.0f;
+	if (bConsumePoses && Director->GetAppliedFocalLengthMm() > 0.0)
+	{
+		// The card's lens, not the showcase's 55 deg: the manifest's fx/fy
+		// and these pixels describe the same projection.
+		Capture->FOVAngle = HorizontalFovDegrees(Director->GetAppliedFocalLengthMm());
+	}
 	if (bVisual && !bAutoExposure)
 	{
 		FFlightSimVisualScene::ApplyManualExposure(Capture,
@@ -1144,9 +1268,33 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		: Card.DurationSeconds;
 	const int32 Steps = FMath::RoundToInt(Duration * Card.RateHz);
 	const int32 StepsPerFrame = FMath::Max(1, FMath::RoundToInt(Card.RateHz / FramesPerSecond));
-	UE_LOG(LogFlightSimRender, Display,
-	       TEXT("stepping %d frames of %.6f s, capturing every %d (%.1f Hz) at %dx%d"),
-	       Steps, DeltaSeconds, StepsPerFrame, Card.RateHz / StepsPerFrame, Width, Height);
+	// Consume-poses: capture at the card's scheduled instants only. An
+	// instant is met by the first fixed step whose clock reaches it, and it
+	// must be reached within ONE fixed step (the bar's own tolerance; the
+	// schedule is sample-aligned so in practice the step lands on it
+	// exactly, except t=0, which the first step meets at one step). A
+	// schedule the run cannot reach is refused HERE, before any editor time.
+	int32 NextScheduled = 0;
+	const double ScheduleSlack = 1.0e-6;
+	if (bConsumePoses)
+	{
+		if (ScheduledTimes.Last() > Duration + ScheduleSlack)
+		{
+			return Fail(FString::Printf(
+				TEXT("consume-poses: camera %d schedules a capture at t=%.3f s but "
+				     "the run is %.3f s long; the run does not cover the schedule"),
+				ConsumedCameraIndex, ScheduledTimes.Last(), Duration));
+		}
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("stepping %d steps of %.6f s, capturing at %d scheduled instants at %dx%d"),
+		       Steps, DeltaSeconds, ScheduledTimes.Num(), Width, Height);
+	}
+	else
+	{
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("stepping %d frames of %.6f s, capturing every %d (%.1f Hz) at %dx%d"),
+		       Steps, DeltaSeconds, StepsPerFrame, Card.RateHz / StepsPerFrame, Width, Height);
+	}
 
 	TArray<TSharedPtr<FJsonValue>> FrameRecords;
 	TArray<FColor> Pixels;
@@ -1160,7 +1308,33 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			return Fail(Error + TEXT("; frames written so far are not a complete run"));
 		}
-		if (Step % StepsPerFrame != 0)
+		int32 ConsumeFrameIndex = -1;
+		double ConsumeScheduledSeconds = 0.0;
+		if (bConsumePoses)
+		{
+			if (NextScheduled >= ScheduledTimes.Num())
+			{
+				continue;   // every scheduled frame taken; the run steps on
+			}
+			const double ClockNow = Scenario.ReadProperty(TEXT("simulation/sim-time-sec"));
+			const double Scheduled = ScheduledTimes[NextScheduled];
+			if (ClockNow < Scheduled - ScheduleSlack)
+			{
+				continue;   // not yet
+			}
+			if (ClockNow - Scheduled > DeltaSeconds + ScheduleSlack)
+			{
+				return Fail(FString::Printf(
+					TEXT("consume-poses: scheduled instant t=%.6f s (frame %d) was "
+					     "not met within one fixed step (clock %.6f s, step %.6f s); "
+					     "refusing to capture a frame off its instant"),
+					Scheduled, NextScheduled, ClockNow, DeltaSeconds));
+			}
+			ConsumeFrameIndex = NextScheduled;
+			ConsumeScheduledSeconds = Scheduled;
+			++NextScheduled;
+		}
+		else if (Step % StepsPerFrame != 0)
 		{
 			continue;
 		}
@@ -1187,6 +1361,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				Error))
 			{
 				return Fail(Error);
+			}
+			if (Director->GetAppliedFocalLengthMm() > 0.0)
+			{
+				Capture->FOVAngle = HorizontalFovDegrees(Director->GetAppliedFocalLengthMm());
 			}
 		}
 
@@ -1219,7 +1397,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			++BlankFrames;
 		}
 
-		const FString FrameName = FString::Printf(TEXT("frame_%04d.png"), Captured);
+		// Consume-poses: named by the MANIFEST INDEX, the file
+		// capture_manifest.json's record carries; the preset pass keeps its
+		// running counter.
+		const FString FrameName = bConsumePoses
+			? FString::Printf(TEXT("%04d.png"), ConsumeFrameIndex)
+			: FString::Printf(TEXT("frame_%04d.png"), Captured);
 		TArray64<uint8> Png;
 		FImageUtils::PNGCompressImageArray(Width, Height, Pixels, Png);
 		if (!FFileHelper::SaveArrayToFile(Png, *FPaths::Combine(OutputDirectory, FrameName)))
@@ -1262,6 +1445,42 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			                       AppliedRotation.Pitch);
 			Record->SetNumberField(TEXT("camera_applied_roll_deg"),
 			                       AppliedRotation.Roll);
+			// The scheduled instant, the instant actually captured, and the
+			// SOLVED pose the applied one was compared to -- so the Python
+			// verifier (core/capture/verify.py engine_parity) grades this
+			// frame from this record alone.
+			Record->SetNumberField(TEXT("frame_index"),
+			                       static_cast<double>(ConsumeFrameIndex));
+			Record->SetNumberField(TEXT("t_scheduled_s"), ConsumeScheduledSeconds);
+			Record->SetNumberField(TEXT("t_applied_s"),
+			                       Scenario.ReadProperty(TEXT("simulation/sim-time-sec")));
+			FVector SolvedProjected;
+			Scenario.GeoReferencing->EngineToProjected(
+				Director->GetSolvedLocation(), SolvedProjected);
+			const FRotator SolvedRotation = Director->GetSolvedRotation();
+			Record->SetNumberField(TEXT("camera_solved_north_m"),
+			                       SolvedProjected.Y - CameraOriginYMetres);
+			Record->SetNumberField(TEXT("camera_solved_east_m"),
+			                       SolvedProjected.X - CameraOriginXMetres);
+			Record->SetNumberField(TEXT("camera_solved_alt_m"), SolvedProjected.Z);
+			Record->SetNumberField(TEXT("camera_solved_yaw_deg"),
+			                       FMath::Fmod(SolvedRotation.Yaw + 90.0 + 360.0, 360.0));
+			Record->SetNumberField(TEXT("camera_solved_pitch_deg"), SolvedRotation.Pitch);
+			Record->SetNumberField(TEXT("camera_solved_roll_deg"), SolvedRotation.Roll);
+			Record->SetNumberField(TEXT("camera_applied_focal_length_mm"),
+			                       Director->GetAppliedFocalLengthMm());
+			Record->SetNumberField(TEXT("camera_applied_fov_deg"), Capture->FOVAngle);
+			// The aircraft THIS host drew, in the card frame: the verifier
+			// reports its distance from the manifest's aircraft (host parity,
+			// informational) and reprojects it into the frame.
+			FVector AircraftProjected;
+			Scenario.GeoReferencing->EngineToProjected(
+				Scenario.Aircraft->GetActorLocation(), AircraftProjected);
+			Record->SetNumberField(TEXT("aircraft_applied_north_m"),
+			                       AircraftProjected.Y - CameraOriginYMetres);
+			Record->SetNumberField(TEXT("aircraft_applied_east_m"),
+			                       AircraftProjected.X - CameraOriginXMetres);
+			Record->SetNumberField(TEXT("aircraft_applied_alt_m"), AircraftProjected.Z);
 		}
 		Record->SetNumberField(TEXT("lit_pixels"), Lit);
 		// Load factor and the wind actually inside the FDM this frame -- the
@@ -1356,6 +1575,19 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		++Captured;
 	}
 
+	if (bConsumePoses)
+	{
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("consume-poses: captured %d of %d scheduled frames"),
+		       Captured, ScheduledTimes.Num());
+		if (Captured != ScheduledTimes.Num())
+		{
+			return Fail(FString::Printf(
+				TEXT("consume-poses: captured %d of %d scheduled frames; a frame "
+				     "set short of its schedule is not a frame set"),
+				Captured, ScheduledTimes.Num()));
+		}
+	}
 	if (Captured == 0)
 	{
 		return Fail(TEXT("no frames were captured"));
@@ -1417,6 +1649,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		Root->SetNumberField(TEXT("camera_index"),
 		                     static_cast<double>(ConsumedCameraIndex));
+		// The count contract and the clock the verifier grades against.
+		Root->SetNumberField(TEXT("frames_scheduled"),
+		                     static_cast<double>(ScheduledTimes.Num()));
+		Root->SetNumberField(TEXT("frames_captured"), static_cast<double>(Captured));
+		Root->SetNumberField(TEXT("step_s"), DeltaSeconds);
+		Root->SetNumberField(TEXT("sensor_width_mm"), ConsumeSensorWidthMm);
+		Root->SetNumberField(TEXT("sensor_height_mm"), ConsumeSensorHeightMm);
+		Root->SetNumberField(TEXT("capture_fov_deg"), Capture->FOVAngle);
 	}
 	TSharedPtr<FJsonObject> Scene = MakeShared<FJsonObject>();
 	Scene->SetBoolField(TEXT("visual"), bVisual);

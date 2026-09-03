@@ -324,13 +324,17 @@ def test_engine_parity_fails_on_a_corrupted_yaw(tmp_path):
 
 
 def test_engine_parity_fails_on_a_shifted_capture_time(tmp_path):
-    """Captured 50 ms late: more than half a step at any rate the specs
-    use, so the frame is not the scheduled instant."""
+    """Captured 50 ms late: six steps at 120 Hz, well past the one fixed
+    step the contract allows, so the frame is not the scheduled
+    instant. (One step late -- t=0 met by the first step -- passes.)"""
     from core.capture.verify import verify_engine_parity
 
     manifest = two_camera_manifest()
     write_capture_manifest(manifest, tmp_path)
     outputs = write_engine_output(manifest, tmp_path)
+    outputs["chase0"]["frame_records"][0]["t_applied_s"] += 1.0 / 120.0
+    rewrite(tmp_path, "chase0", outputs["chase0"])
+    assert verify_engine_parity(tmp_path, manifest).ok is True
     outputs["chase0"]["frame_records"][0]["t_applied_s"] += 0.05
     rewrite(tmp_path, "chase0", outputs["chase0"])
     check = verify_engine_parity(tmp_path, manifest)

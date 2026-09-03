@@ -241,17 +241,33 @@ capture manifest, geometry previews and verification complete; the
 refusal example (`examples/cameras_refusal.yaml`) shows a camera placed
 inside terrain refused as `camera.terrain_clearance`.
 
+With the engine (`--render frames`, the default where it exists) the
+same command renders exactly the scheduled PNGs per camera under
+`frames/<camera_id>/NNNN.png` -- one consume-poses pass per camera --
+and the verifier's `engine_parity` check grades every frame's applied
+pose against the solved one; the clip is a by-product of camera 0.
+Without the engine that check reads `[AWAITING] engine_parity`, never
+a pass. The Windows verification steps, exact commands and expected
+log lines are in `docs/CAMERA_PHASE1_REPORT.md` ("Engine verification
+(Windows)"), marked NOT YET RUN until measured there.
+
 **The same thing from the web app**, with nothing to download by hand:
-**Run** renders the clip *and* captures the geometry beside it, while
-**Capture geometry** does the labeled-data half alone -- no engine
-needed, so it works on any machine. Either way the page then lists every
-artefact the run wrote (manifest, verification, previews, telemetry,
-card, provenance, the spec as run) as links, with a one-click
-`bundle.zip` for all of them, and shows the per-camera frame counts and
-the verifier's own five checks. The capture is solved from its own
-headless flight and written under `capture/` beside that flight's
-telemetry, so a reader can always tell which host produced which number
--- the run's top-level `telemetry.json` stays the rendered flight's.
+the run form carries the render choice -- **Render frames and clip**
+(engine, one pass per camera, the frame set is the deliverable),
+**Clip only** (today's clip, capture geometry beside it, nothing
+rendered as frames) or **Headless** (manifest, previews, verification;
+no engine, any machine) -- defaulting to the richest the machine
+supports, with unavailable options disabled and the reason shown; the
+choice is recorded in the run's provenance and the status line names
+what was produced. The page then lists every artefact the run wrote
+(rendered frames per camera, manifest, verification, previews,
+telemetry, card, provenance, the spec as run) as links, with a
+one-click `bundle.zip` for all of them, and shows per camera "N
+scheduled, M rendered, K verified" and the verifier's own checks. The
+capture is solved from its own headless flight and written under
+`capture/` beside that flight's telemetry, so a reader can always tell
+which host produced which number -- the run's top-level
+`telemetry.json` stays the rendered flight's.
 
 ## Airborne physics, phase 2
 

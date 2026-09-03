@@ -95,6 +95,34 @@ bool AFlightSimCameraDirector::SetPoseTrack(TArray<double>&& Times,
 	return true;
 }
 
+bool AFlightSimCameraDirector::SetPoseFocalLengths(TArray<double>&& FocalLengthsMm,
+                                                   FString& Error)
+{
+	if (PoseTimes.Num() == 0)
+	{
+		Error = TEXT("consume-poses: focal lengths given before the pose track");
+		return false;
+	}
+	if (FocalLengthsMm.Num() != PoseTimes.Num())
+	{
+		Error = FString::Printf(
+			TEXT("consume-poses: %d focal lengths against %d track samples; "
+			     "refusing a misaligned lens track"),
+			FocalLengthsMm.Num(), PoseTimes.Num());
+		return false;
+	}
+	for (const double Focal : FocalLengthsMm)
+	{
+		if (!(Focal > 0.0))
+		{
+			Error = TEXT("consume-poses: a focal length must be positive");
+			return false;
+		}
+	}
+	PoseFocalLengthsMm = MoveTemp(FocalLengthsMm);
+	return true;
+}
+
 bool AFlightSimCameraDirector::ApplyPoseAtTime(double SimTimeSeconds,
                                                FString& Error)
 {
@@ -132,6 +160,18 @@ bool AFlightSimCameraDirector::ApplyPoseAtTime(double SimTimeSeconds,
 		PoseRotations[Lower].Quaternion(),
 		PoseRotations[Upper].Quaternion(),
 		static_cast<float>(Fraction));
+	// The SOLVED pose, kept for the per-frame record: what the applied
+	// pose below is compared to, written back beside it so the Python
+	// verifier grades applied-vs-solved from one file.
+	LastSolvedLocation = Location;
+	LastSolvedRotation = Rotation.Rotator();
+	LastAppliedFocalLengthMm = 0.0;
+	if (PoseFocalLengthsMm.Num() == PoseTimes.Num())
+	{
+		LastAppliedFocalLengthMm = FMath::Lerp(PoseFocalLengthsMm[Lower],
+		                                       PoseFocalLengthsMm[Upper],
+		                                       Fraction);
+	}
 	// Sweep-free teleport: the camera is an observer, never a collider.
 	SetActorLocationAndRotation(Location, Rotation, false, nullptr,
 	                            ETeleportType::TeleportPhysics);
@@ -141,7 +181,7 @@ bool AFlightSimCameraDirector::ApplyPoseAtTime(double SimTimeSeconds,
 	// recorded geometry is quietly wrong. 10 cm on a cinema camera is
 	// already generous.
 	const FVector Applied = GetActorLocation();
-	if (!Applied.Equals(Location, 10.0f))
+	if (!Applied.Equals(Location, static_cast<float>(PoseParityPositionCm)))
 	{
 		Error = FString::Printf(
 			TEXT("consume-poses: applied camera position (%.1f, %.1f, %.1f) "
@@ -150,6 +190,19 @@ bool AFlightSimCameraDirector::ApplyPoseAtTime(double SimTimeSeconds,
 			     "frames do not have"),
 			Applied.X, Applied.Y, Applied.Z,
 			Location.X, Location.Y, Location.Z, SimTimeSeconds);
+		return false;
+	}
+	// Orientation parity, the same rule: 0.1 deg between the applied and
+	// the solved rotation, or the pass FAILS by name.
+	const double AppliedAngleDegrees = FMath::RadiansToDegrees(
+		GetActorQuat().AngularDistance(Rotation));
+	if (AppliedAngleDegrees > PoseParityAngleDegrees)
+	{
+		Error = FString::Printf(
+			TEXT("consume-poses: applied camera orientation differs from the "
+			     "solved pose by %.4f deg (tolerance %.2f deg) at t=%.3f s; "
+			     "refusing to record geometry the frames do not have"),
+			AppliedAngleDegrees, PoseParityAngleDegrees, SimTimeSeconds);
 		return false;
 	}
 	return true;

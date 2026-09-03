@@ -42,6 +42,36 @@ time left in the run -- otherwise a 22 s clip is refused for a ridge
 guards, all new ones verified firing. Every number in the report comes
 from experiments/airborne/*.py.
 
+**Camera Phase 1 finished: frames, not a clip (2026-09-03, five
+commits -- docs/CAMERA_PHASE1_REPORT.md "The run emits frames, not a
+clip" + "Engine verification (Windows)").** The run form and the CLI
+carry the SAME render choice (Render frames and clip / Clip only /
+Headless; --render frames|clip|none; default = the richest the machine
+supports, engine options refused ue.platform by name WITH the reason,
+recorded in provenance.render). "frames" solves the capture first, puts
+cameras=camera_card_blocks(...) on the card (whole flight, not the 22 s
+clip cap) and runs the commandlet's consume-poses pass once per camera
+(-camera-index=N, -frames=<run>/capture/frames/<id>) through the ONE
+command builder core/capture/render_pass.render_command; a short pass
+fails the run as render.frames; the clip is a by-product of camera 0
+(frames at their instants via ffmpeg concat; UNMEASURED here, no
+ffmpeg). Frames are frames/<id>/NNNN.png by manifest index. The verifier
+gained engine_parity (10 cm / 0.1 deg / one fixed step / PNG size /
+reprojection 3 px) with a third state, AWAITING, that never counts as
+a pass; every summary says scheduled / rendered / verified. The C++
+(schedule-driven capture, index naming, applied+solved per frame,
+orientation parity, count contract, FOV from the card's lens) is
+UNCOMPILED HERE: the report's Windows section has the literal commands,
+the log lines that must appear and the expected counts; it is marked
+NOT YET RUN until the user pastes the log back. Gotcha: the headless
+recorder's first sample is at t = one step (0.00833 s), not 0, so the
+engine's first post-step clock meets it exactly; the parity time
+tolerance is ONE fixed step (the bar's words), not half. Gotcha: three
+pre-existing guards (measured control signs, gate5 one-sample
+exemption, rotor seed) no longer match their source text and SKIP in a
+full mutation run -- found while checking guard targets, untouched
+here. Suite +49 tests, +23 guards, all new ones verified firing.
+
 **Camera Phase 1 (2026-08-31 -- docs/CAMERA_PHASE1_REPORT.md is the
 full report).** The camera is a spec element now: SPEC_VERSION 6,
 cameras as provenanced CameraSpec blocks (core/scenario/camera.py),
