@@ -1646,7 +1646,7 @@ class RunManager:
 
     @staticmethod
     def _capture_phase(run: RunState, spec: ScenarioSpec, scene: Dict,
-                       out: Path, window_s: Optional[float] = CLIP_SECONDS):
+                       out: Path, full_duration: bool = False):
         """Camera Phase 1's capture half, run for every run.
 
         The clip is the picture; this is the labeled data beside it --
@@ -1656,9 +1656,8 @@ class RunManager:
         summary is run.capture; its solved tracks feed the frames flow's
         card) when it produced a manifest, False otherwise.
 
-        ``window_s`` is the window the closure pair grades: the clip's
-        22 s cap, or None for a frames run whose schedule spans the whole
-        flight.
+        ``full_duration``: the closure pair grades the whole flight (a
+        frames run steps all of it) instead of the clip's 22 s cap.
 
         A named capture refusal is REPORTED, not raised: on a render run
         the clip is already made and stands on its own, and a refusal
@@ -1686,7 +1685,7 @@ class RunManager:
         try:
             run.capture["closure"] = closure_run(
                 spec, out, scene, lambda line: run.push("closure", line),
-                window_s=window_s)
+                full_duration=full_duration)
         except CaptureError as exc:
             run.capture["closure"] = {"refused": exc.constraint,
                                       "message": exc.message}
@@ -1726,7 +1725,7 @@ class RunManager:
             **provenance, "spec_digest": spec.digest(), "scene": scene,
             "capture_only": True, "render": "none",
         }, indent=1), encoding="utf-8")
-        if not self._capture_phase(run, spec, scene, out, window_s=None):
+        if not self._capture_phase(run, spec, scene, out):
             # A failed closure has already pushed its named failure; a
             # refused capture is named here from the refusal it recorded.
             if run.status != "failed":
@@ -1965,7 +1964,7 @@ class RunManager:
         outcome = None
         if render == "frames":
             outcome = self._capture_phase(run, spec, scene, out,
-                                          window_s=None)
+                                          full_duration=True)
             if not outcome:
                 if run.status != "failed":
                     run.push("failed",

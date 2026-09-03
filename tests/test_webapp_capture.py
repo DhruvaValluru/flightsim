@@ -624,3 +624,164 @@ def test_the_by_product_clip_shows_each_frame_at_its_instant():
         concat_playlist([0.0, 1.0, 1.0], ["a", "b", "c"])
     with pytest.raises(ValueError):
         concat_playlist([0.0, 1.0], ["a"])
+
+
+# -- the render choice: one form, three words, one endpoint ---------------
+
+STATIC_INDEX = Path(runs_module.REPO) / "webapp" / "static" / "index.html"
+
+
+def test_the_run_form_offers_the_three_render_words():
+    """The choice is visible before the run starts, in exactly these
+    words, and the page reads which are available (and why not) from
+    /status rather than deciding for itself."""
+    page = STATIC_INDEX.read_text(encoding="utf-8")
+    assert 'id="render"' in page
+    for word, value in (("Render frames and clip", "frames"),
+                        ("Clip only", "clip"), ("Headless", "none")):
+        assert f'<option value="{value}">{word}</option>' in page, word
+    assert "render_unavailable_reason" in page
+    assert "render_default" in page
+    assert 'render: $("render").value' in page
+
+
+def test_status_states_the_render_choices_and_the_reason(client):
+    status = client.get("/status").json()
+    assert isinstance(status["render_available"], bool)
+    choices = {c["value"]: c for c in status["render_choices"]}
+    assert [c["label"] for c in status["render_choices"]] == [
+        "Render frames and clip", "Clip only", "Headless"]
+    assert choices["none"]["available"] is True
+    if status["render_available"]:
+        assert status["render_unavailable_reason"] is None
+        assert status["render_default"] == "frames"
+        assert all(c["available"] for c in choices.values())
+    else:
+        assert status["render_unavailable_reason"]
+        assert status["render_default"] == "none"
+        for word in ("frames", "clip"):
+            assert choices[word]["available"] is False
+            assert choices[word]["reason"] == status["render_unavailable_reason"]
+
+
+def test_an_engine_choice_is_refused_by_name_with_the_reason(client,
+                                                            monkeypatch):
+    """render=frames or clip on a machine without the engine: 409
+    ue.platform carrying the machine's reason, and no run is started.
+    The choice never degrades to headless behind the user's back."""
+    import core.util.platform as plat
+    import webapp.server as server_module
+
+    monkeypatch.setattr(plat, "ue_available", lambda: False)
+    monkeypatch.setattr(plat, "ue_unavailable_reason",
+                        lambda: "no engine on this machine: set UE_ROOT")
+    monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
+                        lambda spec: None)
+    spec = compile_prompt(DEMO)
+    for word in ("frames", "clip"):
+        reply = client.post("/run", json={"spec": spec.to_dict(),
+                                          "render": word})
+        assert reply.status_code == 409, word
+        body = reply.json()
+        assert body["constraint"] == "ue.platform"
+        assert body["reason"] == "no engine on this machine: set UE_ROOT"
+        assert body["render"] == word
+    assert client.get("/status").json()["busy"] is False
+    # A word outside the three is a schema error, not a guess.
+    assert client.post("/run", json={"spec": spec.to_dict(),
+                                     "render": "video"}).status_code == 422
+
+
+def test_render_none_on_run_is_the_headless_flow(client):
+    """POST /run with render=none is the same headless run /capture
+    starts: no platform gate, provenance render 'none', the status line
+    says no pixels."""
+    spec = compile_prompt(DEMO)
+    reply = client.post("/run", json={"spec": spec.to_dict(),
+                                      "render": "none"})
+    assert reply.status_code == 200, reply.json()
+    assert reply.json()["render"] == "none"
+    state = finished(client, reply.json()["run_id"])
+    assert state["status"] == "done", state["detail"]
+    assert state["render"] == "none"
+    assert "no pixels" in state["detail"]
+    provenance = json.loads(
+        (manager.out_root / reply.json()["run_id"] / "provenance.json")
+        .read_text(encoding="utf-8"))
+    assert provenance["render"] == "none"
+
+
+@pytest.fixture()
+def engine_client(client, engine_stubs, monkeypatch):
+    """The HTTP client with the platform gate held open and the engine
+    stubbed, so the three choices can be exercised end to end through
+    POST /run on a machine with no engine."""
+    import core.util.platform as plat
+    import webapp.server as server_module
+
+    monkeypatch.setattr(plat, "ue_available", lambda: True)
+    monkeypatch.setattr(plat, "ue_unavailable_reason", lambda: None)
+    monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
+                        lambda spec: None)
+    monkeypatch.setattr(runs_module, "editor_running", lambda: False)
+    return client
+
+
+def test_render_frames_on_run_records_the_choice_and_names_the_product(
+        engine_client, engine_stubs):
+    from webapp.runs import RunManager
+
+    calls = []
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(honest_engine(calls)))
+    spec = two_camera_spec()
+    reply = engine_client.post("/run", json={"spec": spec.to_dict(),
+                                             "render": "frames"})
+    assert reply.status_code == 200, reply.json()
+    assert reply.json()["render"] == "frames"
+    run_id = reply.json()["run_id"]
+    state = finished(engine_client, run_id)
+    assert state["status"] == "done", state["detail"]
+    assert state["render"] == "frames"
+    assert [c["camera_index"] for c in calls] == [0, 1]
+    assert "8 frames across 2 camera(s) rendered" in state["detail"]
+    assert state["capture"]["rendered"] == 8
+    assert state["clip"] is not None
+    provenance = json.loads(
+        (manager.out_root / run_id / "provenance.json").read_text(encoding="utf-8"))
+    assert provenance["render"] == "frames"
+    # The frame set is served: every PNG the run listed downloads.
+    files = engine_client.get(f"/runs/{run_id}/files").json()["files"]
+    frames = [f for f in files if f["name"].startswith("capture/frames/")
+              and "images" in f]
+    assert [f["count"] for f in frames] == [4, 4]
+    got = engine_client.get(f"/runs/{run_id}/file/{frames[0]['images'][0]}")
+    assert got.status_code == 200 and got.headers["content-type"] == "image/png"
+
+
+def test_render_clip_on_run_is_todays_flow(engine_client, engine_stubs):
+    from webapp.runs import RunManager
+
+    def clip_render(card, frames, scene, mesh, aircraft, telemetry=None,
+                    look=None, camera_flags=None, camera_index=None,
+                    log=None):
+        assert camera_index is None
+        frames.mkdir(parents=True, exist_ok=True)
+        (frames / "render.json").write_text("{}", encoding="utf-8")
+        return True
+
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(clip_render))
+    spec = compile_prompt(DEMO)
+    # Omitting the field is the endpoint's historic meaning: clip.
+    reply = engine_client.post("/run", json={"spec": spec.to_dict()})
+    assert reply.status_code == 200, reply.json()
+    assert reply.json()["render"] == "clip"
+    state = finished(engine_client, reply.json()["run_id"])
+    assert state["status"] == "done", state["detail"]
+    assert state["render"] == "clip"
+    assert state["detail"].startswith("clip only: 4 frames scheduled, 0 rendered")
+    provenance = json.loads(
+        (manager.out_root / reply.json()["run_id"] / "provenance.json")
+        .read_text(encoding="utf-8"))
+    assert provenance["render"] == "clip"

@@ -241,3 +241,43 @@ def test_no_text_io_without_utf8_encoding():
     assert not offenders, (
         "text I/O without encoding='utf-8' (Windows cp1252 hazard): "
         + ", ".join(offenders))
+
+
+def test_ue_unavailable_reason_names_the_missing_piece(monkeypatch, tmp_path):
+    """The page disables the engine render options WITH the reason, and a
+    refused engine choice carries it: no engine on this OS, no engine
+    at UE_ROOT, or the bridge not built. The reason and ue_available()
+    are the same facts, pinned: available exactly when the reason is
+    None."""
+    def agree():
+        assert plat.ue_available() == (plat.ue_unavailable_reason() is None)
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    reason = plat.ue_unavailable_reason()
+    assert reason and "no engine on this OS" in reason
+    agree()
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert plat.ue_unavailable_reason() is None
+    agree()
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    root = tmp_path / "UE_5.5"
+    monkeypatch.setenv("UE_ROOT", str(root))
+    reason = plat.ue_unavailable_reason()
+    assert "set UE_ROOT" in reason and "UnrealEditor-Cmd.exe" in reason
+    agree()
+
+    editor = plat.ue_editor_path()
+    editor.parent.mkdir(parents=True)
+    editor.write_bytes(b"")
+    bridge = tmp_path / "UnrealEditor-FlightSimBridge.dll"
+    monkeypatch.setattr(plat, "ue_bridge_binary", lambda repo: bridge)
+    reason = plat.ue_unavailable_reason()
+    assert "FlightSimBridge not built" in reason
+    assert "ue_preflight.ps1" in reason and "build_ue.ps1" in reason
+    agree()
+
+    bridge.write_bytes(b"")
+    assert plat.ue_unavailable_reason() is None
+    agree()

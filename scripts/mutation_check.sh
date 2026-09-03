@@ -1077,6 +1077,50 @@ mutate webapp/capture.py \
     "a scheduled frame is never counted as rendered" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Camera Phase 1 finished: the render choice ----------------------------
+
+mutate webapp/server.py \
+    '    if not ue_available():
+        return JSONResponse({"refused": UE_PLATFORM_REFUSAL,
+                             "constraint": "ue.platform",
+                             "reason": ue_unavailable_reason(),
+                             "render": render}, status_code=409)' \
+    '    if False:  # MUTATED: an engine choice with no engine is not refused
+        return JSONResponse({"refused": UE_PLATFORM_REFUSAL,
+                             "constraint": "ue.platform",
+                             "reason": ue_unavailable_reason(),
+                             "render": render}, status_code=409)' \
+    "an engine render choice is refused ue.platform before the mesh rule" \
+    tests/test_webapp.py || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '    if render == "none":
+        outcome = manager.start_capture(spec, provenance=provenance)' \
+    '    if False:  # MUTATED: render=none goes through the engine gate
+        outcome = manager.start_capture(spec, provenance=provenance)' \
+    "render=none is the headless flow with no platform gate" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '                         "render_default": "frames" if available else "none"})' \
+    '                         "render_default": "frames"})  # MUTATED: engine option defaulted without an engine' \
+    "the default render choice is the richest the machine supports" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '<option value="frames">Render frames and clip</option>' \
+    '<option value="frames">Render</option>' \
+    "the run form carries the render choice in the stated words" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate core/util/platform.py \
+    '        if not ue_bridge_binary(repo).is_file():
+            return ("FlightSimBridge not built' \
+    '        if False:  # MUTATED: an unbuilt bridge reports no reason
+            return ("FlightSimBridge not built' \
+    "an unbuilt bridge is named as the reason the engine is unavailable" \
+    tests/test_platform.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

@@ -21,7 +21,7 @@ import json
 import zipfile
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Literal, Any, Dict, List, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -88,6 +88,15 @@ class CompileRequest(BaseModel):
 class RunRequest(BaseModel):
     spec: Dict[str, Any]       # ScenarioSpec.to_dict(), possibly edited
     provenance: Dict[str, Any] = {}
+    #: The render choice, in the page's own three words (webapp.runs.
+    #: RENDER_CHOICES): "frames" -- the engine's consume-poses pass once
+    #: per camera, the clip a by-product; "clip" -- the single preset
+    #: pass, this endpoint's historic meaning and its value when the
+    #: field is omitted; "none" -- headless (manifest, previews,
+    #: verification; no engine). The page always sends its selection;
+    #: an engine choice a machine cannot honour is refused ue.platform
+    #: by name with the reason, never degraded.
+    render: Optional[Literal["frames", "clip", "none"]] = None
 
 
 def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
@@ -351,21 +360,39 @@ def _prepare_run_spec(request: RunRequest):
 
 @app.post("/run")
 def run_endpoint(request: RunRequest) -> JSONResponse:
-    """Render a clip -- and capture its geometry beside it."""
+    """Start a run with the requested render choice: frames (engine, one
+    pass per camera, clip as a by-product), clip (the single preset pass
+    -- the default when the field is omitted), or none (headless: the
+    capture half alone, no engine, no platform gate)."""
+    render = request.render or "clip"
     spec, refusal = _prepare_run_spec(request)
     if refusal is not None:
         return refusal
+    provenance = {
+        "prompt": spec.prompt,
+        **{k: v for k, v in request.provenance.items()
+           if k in ("compiler", "model", "transcript")},
+    }
+    if render == "none":
+        outcome = manager.start_capture(spec, provenance=provenance)
+        if "refused" in outcome:
+            return JSONResponse(outcome, status_code=409)
+        return JSONResponse({**outcome, "digest": spec.digest()})
 
     # REFUSAL ORDER after validation (load-bearing, pinned by test):
     # ue.platform BEFORE aircraft.mesh. A machine with no engine build
     # must hear that first -- measured 2026-08-31 on a fresh Windows
     # clone, which was told to import aircraft models when the real
     # blocker was that no Unreal host existed there at all.
-    from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
+    from core.util.platform import (
+        UE_PLATFORM_REFUSAL, ue_available, ue_unavailable_reason,
+    )
 
     if not ue_available():
         return JSONResponse({"refused": UE_PLATFORM_REFUSAL,
-                             "constraint": "ue.platform"}, status_code=409)
+                             "constraint": "ue.platform",
+                             "reason": ue_unavailable_reason(),
+                             "render": render}, status_code=409)
     # Placeholder airframes never render (owner's rule, extended
     # 2026-08-31: on ANY machine). Checked AFTER validation on purpose:
     # a scenario that cannot fly refuses on the physics first; the asset
@@ -376,11 +403,7 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
         return JSONResponse({"refused": "aircraft.mesh", **mesh_refusal},
                             status_code=409)
 
-    outcome = manager.start(spec, provenance={
-        "prompt": spec.prompt,
-        **{k: v for k, v in request.provenance.items()
-           if k in ("compiler", "model", "transcript")},
-    })
+    outcome = manager.start(spec, provenance=provenance, render=render)
     if "refused" in outcome:
         return JSONResponse(outcome, status_code=409)
     return JSONResponse({**outcome, "digest": spec.digest()})
@@ -417,11 +440,26 @@ def status_endpoint() -> JSONResponse:
     # discovering a fallback after a spin. platform/render_available are
     # the same pattern for the UE half: off-mac the page says so up front
     # and a run refuses ue.platform by name instead of 500ing.
-    from core.util.platform import os_name, ue_available
+    from core.util.platform import (
+        os_name, ue_available, ue_unavailable_reason,
+    )
+    from webapp.runs import RENDER_CHOICES, RENDER_WORDS
 
+    available = ue_available()
+    reason = ue_unavailable_reason()
+    # The render choices in the page's own words, each with whether THIS
+    # machine can honour it and why not; the default is the richest one
+    # it can. The page disables what it cannot run and shows the reason.
+    choices = [{"value": word, "label": RENDER_WORDS[word],
+                "available": available or word == "none",
+                "reason": None if available or word == "none" else reason}
+               for word in RENDER_CHOICES]
     return JSONResponse({**manager.status(), "llm_available": llm_available(),
                          "platform": os_name(),
-                         "render_available": ue_available()})
+                         "render_available": available,
+                         "render_unavailable_reason": reason,
+                         "render_choices": choices,
+                         "render_default": "frames" if available else "none"})
 
 
 @app.get("/runs/{run_id}")

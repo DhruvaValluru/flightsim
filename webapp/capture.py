@@ -327,7 +327,7 @@ def verification_line(verification) -> str:
 
 def closure_run(spec, out: Path, scene: Dict,
                 report: Report = lambda line: None,
-                window_s: Optional[float] = None) -> Dict:
+                full_duration: bool = False) -> Dict:
     """The paired CLOSED-LOOP run, and its closure report (Package C).
 
     The render host has no controller, so every clip is open loop and the
@@ -342,9 +342,9 @@ def closure_run(spec, out: Path, scene: Dict,
     The caller fails the run when the report is not ok. A failed closure
     is a named failure (``closure.<check>``), never a note.
 
-    ``window_s`` is the window the artefact shows: CLIP_SECONDS for a
-    clip (the default), the full duration for a frames run whose
-    schedule spans the whole flight.
+    The pair grades the window the artefact shows: the clip's
+    CLIP_SECONDS cap by default; ``full_duration`` for a frames run,
+    whose schedule spans the whole flight the engine steps.
     """
     from core.scenario.runner import run_spec
 
@@ -367,12 +367,14 @@ def closure_run(spec, out: Path, scene: Dict,
     # machine: a 22 s clip over the mountains passed capture, then its
     # 120 s closure pair refused terrain.lookahead on a ridge 59 s ahead
     # that the clip never reaches.
-    window = CLIP_SECONDS if window_s is None else float(window_s)
-    seconds = min(float(pair.duration.value), window)
+    seconds = min(float(pair.duration.value), CLIP_SECONDS)
+    if full_duration:
+        # A frames run steps the whole flight: the pair grades all of it.
+        seconds = float(pair.duration.value)
     if seconds < float(pair.duration.value):
         pair.set("duration", seconds,
-                 frm=f"closure pair: the artefact's own window "
-                     f"({window:g} s cap)")
+                 frm=f"closure pair: the clip's own window "
+                     f"({CLIP_SECONDS:g} s cap)")
     report("flying the same spec closed loop for the closure report")
     result = _run_named(run_spec, pair, terrain_ground=terrain_ground,
                       assert_closure=False)
@@ -388,7 +390,8 @@ def closure_run(spec, out: Path, scene: Dict,
                "tolerance": c.tolerance, "unit": c.unit, "ok": c.ok}
               for c in result.closure.checks]
     verdict = {"ok": all(c["ok"] for c in checks), "checks": checks,
-               "duration_s": seconds, "clip_seconds_cap": window,
+               "duration_s": seconds, "clip_seconds_cap": CLIP_SECONDS,
+               "window": "full duration" if full_duration else "clip",
                "pair_spec_digest": pair.digest(),
                "output_digest": result.output_digest,
                "settle_fraction": CLOSURE_TOLERANCE.settle_fraction}

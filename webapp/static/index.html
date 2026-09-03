@@ -101,13 +101,24 @@ visual-only per host (measured).</p>
   <div id="verdict"></div>
   <p>
     <button id="run" class="run">Run</button>
-    <button id="capture">Capture geometry</button>
-    <span class="dim">re-validated server-side before anything renders;
-    clip capped at 22 s. <b>Run</b> renders the clip <i>and</i> captures
-    the geometry beside it; <b>Capture geometry</b> does the labeled-data
-    half alone &mdash; manifest, previews and verification &mdash; and
-    needs no engine, so it works on any machine.</span>
+    <label class="dim" title="What the run produces. The richest option this machine supports is selected; an option it cannot honour is disabled with the reason.">
+      render <select id="render">
+        <option value="frames">Render frames and clip</option>
+        <option value="clip">Clip only</option>
+        <option value="none">Headless</option>
+      </select>
+    </label>
+    <span id="renderNote" class="dim"></span>
   </p>
+  <p class="dim">re-validated server-side before anything renders.
+    <b>Render frames and clip</b> runs the engine once per camera on the
+    solved pose track and delivers exactly the scheduled PNGs per camera
+    (named by manifest index, verified by engine parity); the clip is a
+    by-product of camera 0. <b>Clip only</b> is the single preset pass
+    and the panel clip, capped at 22 s, with the capture geometry beside
+    it (nothing rendered as frames). <b>Headless</b> is the labeled-data
+    half alone &mdash; manifest, previews and verification &mdash; and
+    needs no engine, so it works on any machine.</p>
 </div>
 
 <div id="runArea" style="display:none" class="card">
@@ -141,6 +152,7 @@ function provenanceNote(f) {
 (async () => {
   try {
     const status = await (await fetch("/status")).json();
+    applyRenderChoices(status);
     $("llmState").textContent = (status.llm_available
       ? "compiler: llm available"
       : "compiler: offline regex (no ANTHROPIC_API_KEY in the server " +
@@ -159,6 +171,28 @@ function provenanceNote(f) {
          : "");
   } catch (error) { $("llmState").textContent = "compiler: server unreachable"; }
 })();
+
+// The render choice, before the run starts: the richest option this
+// machine supports is selected, and an option it cannot honour is
+// DISABLED with the server's reason in its label and title -- the
+// backend refuses the same choice by name (ue.platform), never degrades.
+function applyRenderChoices(status) {
+  const select = $("render");
+  const choices = status.render_choices || [];
+  for (const option of select.options) {
+    const choice = choices.find(c => c.value === option.value);
+    if (!choice) continue;
+    option.disabled = !choice.available;
+    option.textContent = choice.available
+      ? choice.label
+      : `${choice.label} \u2014 unavailable: ${choice.reason}`;
+    option.title = choice.available ? "" : choice.reason;
+  }
+  if (status.render_default) select.value = status.render_default;
+  $("renderNote").textContent = status.render_available
+    ? ""
+    : `engine options disabled: ${status.render_unavailable_reason}`;
+}
 
 function renderQuestions(payload) {
   pendingQuestions = payload.questions;
@@ -379,13 +413,15 @@ $("answer").addEventListener("click", () => {
 });
 
 $("run").addEventListener("click", () => startRun(true, "/run"));
-$("capture").addEventListener("click", () => startRun(true, "/capture"));
 
 async function startRun(mayBake, endpoint) {
+  // The choice travels with the request and is recorded in the run's
+  // provenance; the status lines name what it produced.
   const response = await fetch(endpoint, {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       spec: editedSpecDict(),
+      render: $("render").value,
       provenance: {compiler: compiled.compiler, model: compiled.model,
                    transcript: compiled.transcript || null},
     }),
@@ -423,14 +459,17 @@ async function startRun(mayBake, endpoint) {
   }
   if (payload.refused) {
     $("status").innerHTML =
-      `<span class="verdict-refused">refused: ${payload.refused}` +
+      `<span class="verdict-refused">refused` +
+      (payload.constraint ? ` [${payload.constraint}]` : "") +
+      `: ${payload.refused}` +
+      (payload.reason ? ` — ${payload.reason}` : "") +
       (payload.message ? ` — ${payload.message}` : "") + `</span>`;
     return;
   }
   activeRun = payload.run_id;
   try { localStorage.setItem("flightsim.lastRun", activeRun); } catch (e) {}
   $("status").textContent = `run ${activeRun} started (spec ` +
-    `${payload.digest.slice(0, 16)})`;
+    `${payload.digest.slice(0, 16)}; render: ${payload.render || "clip"})`;
   $("clipArea").innerHTML = "";
   poll();
 }
@@ -467,9 +506,14 @@ async function poll() {
     // showing a broken video element.
     const clip = run.clip
       ? `<video id="clipVideo" controls src="/runs/${activeRun}/clip.mp4">` +
-        `</video>`
-      : `<div class="dim">no clip: this was a capture run (the geometry ` +
-        `below is the deliverable)</div>`;
+        `</video>` +
+        (run.render === "frames"
+          ? `<div class="dim">clip: a by-product of camera 0's rendered ` +
+            `frames shown at their scheduled instants (clip time = ` +
+            `simulation time); the frame set below is the deliverable</div>`
+          : "")
+      : `<div class="dim">no clip: this was a headless run (the geometry ` +
+        `below is the deliverable; no engine pass ran)</div>`;
     $("clipArea").innerHTML =
       `<div class="clipRow"><div class="clipMain">` +
       `<div class="dim">scene: ${run.scene.label || run.scene.kind}</div>` +

@@ -347,7 +347,10 @@ def test_run_forwards_the_transcript_into_provenance(client, monkeypatch):
 
     captured = {}
 
-    def fake_start(spec, provenance):
+    # render= is the run's choice (Camera Phase 1 finished): a POST /run
+    # with the field omitted is the endpoint's historic meaning, clip.
+    def fake_start(spec, provenance, render="clip"):
+        assert render == "clip"
         captured.update(provenance)
         return {"run_id": "test"}
 
@@ -1097,7 +1100,8 @@ def test_windy_terrain_run_digest_is_content_addressed(client, monkeypatch):
 
     captured = {}
 
-    def fake_start(spec, provenance):
+    def fake_start(spec, provenance, render="clip"):
+        assert render == "clip"
         captured["spec"] = spec
         return {"run_id": "digesttest"}
 
