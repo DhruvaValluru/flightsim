@@ -80,6 +80,14 @@ ENGINE_ANGLE_TOL_DEG = 0.1
 #: t=0 is met by the first step, one step late. When render.json states
 #: the engine's own ``step_s`` the tolerance is THAT step.
 ENGINE_TIME_TOL_S = 1.0 / 120.0
+#: The instant the engine interpolated the applied pose AT (``t_pose_s``)
+#: against the scheduled instant: the commandlet applies the pose at the
+#: scheduled instant itself, never at the engine clock, so this is exact
+#: by construction and the tolerance is float representation only. A
+#: pose taken at the clock instead would move a chase camera ~1.4 m per
+#: step at 320 kt and fail the 10 cm clause; naming the cause here is
+#: what tells that failure from a real drift.
+ENGINE_POSE_TIME_TOL_S = 1.0e-6
 #: The aircraft reprojected through the applied pose against the
 #: manifest's own projection. 0.1 deg at the default 1244 px focal is
 #: 2.2 px and 10 cm at 100 m is 1.2 px: 3 px is what the pose tolerances
@@ -447,9 +455,11 @@ def verify_engine_parity(run_dir, manifest: Dict,
     commandlet's consume-poses pass) is matched to the manifest's frame
     records by ``frame_index``. For every record: the applied camera
     position within ``pos_tol_m`` of the solved one, applied
-    yaw/pitch/roll within ``ang_tol_deg``, the applied capture time
-    within ``time_tol_s`` (default: the engine's stated step, one fixed
-    step) of the scheduled instant, the PNG named by the index present at the
+    yaw/pitch/roll within ``ang_tol_deg``, the pose interpolated AT the
+    scheduled instant (``t_pose_s``, exact to ENGINE_POSE_TIME_TOL_S),
+    the applied capture time within ``time_tol_s`` (default: the
+    engine's stated step, one fixed step) of the scheduled instant, the
+    PNG named by the index present at the
     manifest's width and height, and the aircraft reprojected through
     the APPLIED pose (this module's own projection, Euler path) within
     ``px_tol`` of the manifest's own projection and, for aircraft-aimed
@@ -476,6 +486,7 @@ def verify_engine_parity(run_dir, manifest: Dict,
     problems: List[str] = []
     per_camera: Dict[str, Dict] = {}
     worst = {"position_m": 0.0, "angle_deg": 0.0, "time_s": 0.0,
+             "pose_time_s": 0.0,
              "reprojection_px": 0.0, "aircraft_m": 0.0, "aircraft_px": 0.0,
              "aircraft_px_tol": 0.0, "aircraft_depth_m": 0.0}
     frames_checked = 0
@@ -541,6 +552,7 @@ def verify_engine_parity(run_dir, manifest: Dict,
                 a_pitch = float(applied["camera_applied_pitch_deg"])
                 a_roll = float(applied["camera_applied_roll_deg"])
                 a_t = float(applied["t_applied_s"])
+                pose_t = float(applied["t_pose_s"])
             except (KeyError, TypeError, ValueError) as exc:
                 problems.append(f"{camera_id} frame {index}: engine record "
                                 f"lacks an applied field ({exc})")
@@ -553,9 +565,19 @@ def verify_engine_parity(run_dir, manifest: Dict,
                           abs(a_pitch - float(record["pitch_deg"])),
                           abs(a_roll - float(record["roll_deg"])))
             gap_t = abs(a_t - float(record["t_s"]))
+            gap_pose_t = abs(pose_t - float(record["t_s"]))
             worst["position_m"] = max(worst["position_m"], gap_pos)
             worst["angle_deg"] = max(worst["angle_deg"], gap_ang)
             worst["time_s"] = max(worst["time_s"], gap_t)
+            worst["pose_time_s"] = max(worst["pose_time_s"], gap_pose_t)
+            if gap_pose_t > ENGINE_POSE_TIME_TOL_S:
+                frame_ok = False
+                problems.append(f"{camera_id} frame {index}: pose applied "
+                                f"at t={pose_t:.6f} s against the scheduled "
+                                f"{float(record['t_s']):.6f} s (tol "
+                                f"{ENGINE_POSE_TIME_TOL_S:g}): the pose must "
+                                f"be applied at the scheduled instant, not "
+                                f"the engine clock")
             if gap_pos > pos_tol_m:
                 frame_ok = False
                 problems.append(f"{camera_id} frame {index}: applied "
@@ -696,7 +718,9 @@ def verify_engine_parity(run_dir, manifest: Dict,
 
     data = {"cameras": per_camera, "worst": worst,
             "tolerances": {"position_m": pos_tol_m, "angle_deg": ang_tol_deg,
-                           "time_s": time_tol_used, "reprojection_px": px_tol,
+                           "time_s": time_tol_used,
+                           "pose_time_s": ENGINE_POSE_TIME_TOL_S,
+                           "reprojection_px": px_tol,
                            "aircraft_m": aircraft_tol_m}}
     if awaiting and not problems and frames_checked == 0:
         return Check(
@@ -716,7 +740,9 @@ def verify_engine_parity(run_dir, manifest: Dict,
                   f"camera(s); worst position {worst['position_m']:.3f} m "
                   f"(tol {pos_tol_m}); worst angle {worst['angle_deg']:.3f} "
                   f"deg (tol {ang_tol_deg}); worst time "
-                  f"{worst['time_s']:.4f} s (tol {time_tol_used:.4g}); "
+                  f"{worst['time_s']:.4f} s (tol {time_tol_used:.4g}); pose "
+                  f"applied at the scheduled instant to "
+                  f"{worst['pose_time_s']:.1e} s; "
                   f"worst reprojection {worst['reprojection_px']:.2f} px "
                   f"(tol {px_tol}); aircraft drawn within "
                   f"{worst['aircraft_m']:.2f} m of the manifest's aircraft "

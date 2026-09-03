@@ -216,6 +216,7 @@ def write_engine_output(manifest, run_dir, cameras=None, step_s=1.0 / 120.0):
                 "frame": f"{record['index']:04d}.png",
                 "t_scheduled_s": record["t_s"],
                 "t_applied_s": record["t_s"],
+                "t_pose_s": record["t_s"],
                 "camera_applied_north_m": record["position_north_m"],
                 "camera_applied_east_m": record["position_east_m"],
                 "camera_applied_alt_m": record["position_alt_m"],
@@ -340,6 +341,36 @@ def test_engine_parity_fails_on_a_shifted_capture_time(tmp_path):
     check = verify_engine_parity(tmp_path, manifest)
     assert check.ok is False
     assert "chase0 frame 0: captured at" in check.detail
+
+
+def test_engine_parity_fails_when_the_pose_was_applied_at_the_clock(
+        tmp_path):
+    """The pose contract is exact by construction: the commandlet
+    interpolates the pose AT the scheduled instant and records it as
+    t_pose_s. A pose taken one step later (at an engine clock one step
+    off) is a different pose -- ~1.4 m along a chase track at 320 kt --
+    and fails by name even when the capture time itself is within its
+    one-step tolerance."""
+    from core.capture.verify import verify_engine_parity
+
+    manifest = two_camera_manifest()
+    write_capture_manifest(manifest, tmp_path)
+    outputs = write_engine_output(manifest, tmp_path)
+    record = outputs["chase0"]["frame_records"][5]
+    record["t_pose_s"] += 1.0 / 120.0
+    rewrite(tmp_path, "chase0", outputs["chase0"])
+    check = verify_engine_parity(tmp_path, manifest)
+    assert check.ok is False
+    assert "chase0 frame 5: pose applied at t=" in check.detail
+    assert "not the engine clock" in check.detail
+    assert check.data["cameras"]["chase0"]["verified"] == 14
+    assert check.data["worst"]["pose_time_s"] == pytest.approx(1.0 / 120.0)
+    # A record that never says when its pose was taken cannot be graded.
+    del record["t_pose_s"]
+    rewrite(tmp_path, "chase0", outputs["chase0"])
+    check = verify_engine_parity(tmp_path, manifest)
+    assert check.ok is False
+    assert "chase0 frame 5: engine record lacks an applied field" in check.detail
 
 
 def test_engine_parity_fails_on_a_missing_or_misshapen_png(tmp_path):

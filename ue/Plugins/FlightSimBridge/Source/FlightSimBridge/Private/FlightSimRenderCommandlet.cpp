@@ -1350,15 +1350,19 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			VisualScene.Sun->SetActorRotation(FRotator(-Elev, Azim + 180.0, 0.0));
 		}
 
-		// Consume-poses: drive the camera by SIMULATION time before the
-		// render-state flush, so the capture sees the solved pose for this
-		// exact frame. A track that does not cover the run fails loudly
-		// here (never extrapolated), as does any applied-vs-solved drift.
+		// Consume-poses: drive the camera to the SCHEDULED instant's pose
+		// before the render-state flush -- the instant the manifest's
+		// solved pose was computed at, never the engine clock's reading.
+		// The pose contract is then exact by construction (the Python
+		// verifier checks t_pose_s == the manifest's t_s), and the capture
+		// time (t_applied_s, the clock, within one fixed step) is the
+		// only tolerance left; a clock one step off shows up in the drawn
+		// aircraft's distance from the manifest's, where it belongs. A
+		// track that does not cover the run fails loudly here (never
+		// extrapolated), as does any applied-vs-solved drift.
 		if (bConsumePoses)
 		{
-			if (!Director->ApplyPoseAtTime(
-				Scenario.ReadProperty(TEXT("simulation/sim-time-sec")),
-				Error))
+			if (!Director->ApplyPoseAtTime(ConsumeScheduledSeconds, Error))
 			{
 				return Fail(Error);
 			}
@@ -1454,6 +1458,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Record->SetNumberField(TEXT("t_scheduled_s"), ConsumeScheduledSeconds);
 			Record->SetNumberField(TEXT("t_applied_s"),
 			                       Scenario.ReadProperty(TEXT("simulation/sim-time-sec")));
+			// The instant the applied pose was interpolated AT (the
+			// scheduled one, by construction above): the verifier fails a
+			// frame whose pose was taken at any other time.
+			Record->SetNumberField(TEXT("t_pose_s"), ConsumeScheduledSeconds);
 			FVector SolvedProjected;
 			Scenario.GeoReferencing->EngineToProjected(
 				Director->GetSolvedLocation(), SolvedProjected);

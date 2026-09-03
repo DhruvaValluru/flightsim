@@ -337,6 +337,7 @@ def honest_engine(calls, short_for=None, fail_for=None):
             records.append({
                 "frame_index": index, "frame": f"{index:04d}.png",
                 "t_scheduled_s": t, "t_applied_s": poses["t_s"][k],
+                "t_pose_s": t,
                 "camera_applied_north_m": poses["north_m"][k],
                 "camera_applied_east_m": poses["east_m"][k],
                 "camera_applied_alt_m": poses["alt_m"][k],

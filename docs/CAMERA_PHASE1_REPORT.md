@@ -215,19 +215,25 @@ In the `-camera-index=N` pass it:
 4. captures ONLY at the scheduled instants: the first fixed step whose
    clock reaches an instant takes it; an instant not met within one
    fixed step fails the pass by name; `-fps` plays no part;
-5. names each PNG `%04d.png` by its manifest index and writes per
-   frame `frame_index`, `t_scheduled_s`, `t_applied_s`, the applied
-   pose (`camera_applied_*`), the SOLVED pose it was compared to
+5. applies the pose AT THE SCHEDULED INSTANT (`ApplyPoseAtTime(t_sched)`,
+   the instant the manifest's solved pose was computed at), never at
+   the engine clock's reading, so the pose contract is exact by
+   construction; the clock is recorded beside it as `t_applied_s` and
+   the instant the pose was taken at as `t_pose_s` (the verifier fails
+   a frame whose `t_pose_s` is not the manifest's `t_s`, to 1e-6 s);
+6. names each PNG `%04d.png` by its manifest index and writes per
+   frame `frame_index`, `t_scheduled_s`, `t_applied_s`, `t_pose_s`, the
+   applied pose (`camera_applied_*`), the SOLVED pose it was compared to
    (`camera_solved_*`), `camera_applied_focal_length_mm`,
    `camera_applied_fov_deg`, and the aircraft this host drew
    (`aircraft_applied_*`), all in the card's local frame; the root
    carries `frames_scheduled`, `frames_captured`, `step_s`,
    `capture_fov_deg`, the sensor size;
-6. `ApplyPoseAtTime` FAILS the pass (never warns) when the applied
+7. `ApplyPoseAtTime` FAILS the pass (never warns) when the applied
    position differs from the solved one by more than 10 cm
    (`PoseParityPositionCm`) OR the applied orientation by more than
    0.1 deg (`PoseParityAngleDegrees`);
-7. fails after the loop when `captured != scheduled`.
+8. fails after the loop when `captured != scheduled`.
 
 ## Engine verification (Windows)
 
@@ -276,14 +282,35 @@ engine pass 2 of 2: camera 'tower0', 24 frames scheduled over the 12 s run (-cam
   [PASS] geometry_recovery: 48 frames; quaternion-vs-euler reprojection gap 0.0000 px (tol 0.5); 0 aircraft behind camera; 0 aimed frames without the aircraft in frame
   [PASS] cross_view_consistency: 24 two-view instants; worst triangulation error 0.0000 m (tol 0.5)
   [PASS] count_exactness: 2 camera(s), every declared count met exactly
-  [PASS] engine_parity: 48 frames across 2 camera(s); worst position 0.0xx m (tol 0.1); worst angle 0.0xx deg (tol 0.1); worst time 0.0000 s (tol 0.008333); worst reprojection x.xx px (tol 3.0); aircraft drawn within x.xx m of the manifest's aircraft (tol 2.5) and xx.x px of its labelled pixel (tol 31.1 px at that frame's 111 m)
+  [PASS] engine_parity: 48 frames across 2 camera(s); worst position 0.0xx m (tol 0.1); worst angle 0.0xx deg (tol 0.1); worst time 0.00xx s (tol 0.008333); pose applied at the scheduled instant to 0.0e+00 s; worst reprojection x.xx px (tol 3.0); aircraft drawn within x.xx m of the manifest's aircraft (tol 2.5) and xx.x px of its labelled pixel (tol 31.1 px at that frame's 111 m)
 verification PASSED (6/6 checks)
 rendered 48 frames across 2 camera(s) (48 verified by engine parity) under runs\demo\frames
 ```
 
 The `x` digits are the numbers this section exists to obtain; write
-them in here from the log. `worst time` must be 0.0000 (every capture
-instant is a sample instant, and samples fall on fixed steps).
+them in here from the log. What each one tells:
+
+* `worst position` / `worst angle` -- the camera actor against the
+  solved pose, both applied AT the scheduled instant, so these measure
+  the engine's placement fidelity only (a transform clamp, a collision
+  handler), never the clock; expected well under 0.01 m / 0.01 deg.
+* `pose applied at the scheduled instant to 0.0e+00 s` -- exact by
+  construction (`t_pose_s` is the card's instant); anything else means
+  the commandlet regressed to applying the pose at the clock.
+* `worst time` -- the engine clock (`simulation/sim-time-sec`) at the
+  capture against the scheduled instant: 0.0000 if the clock after N
+  steps reads N x 1/120 s (JSBSim increments sim-time-sec at the end of
+  each Run; every capture instant is a sample instant, and samples fall
+  on fixed steps), 0.0083 if the trim sequence or engine start offsets
+  it by one step. Either passes the one-step contract; the number is
+  UNMEASURED until this run and is the coupling this section pins down.
+* `aircraft drawn within x.xx m` -- the engine's own FDM against the
+  headless flight at the capture: expected about one step of travel,
+  1.4 m for this example (the measured constant one-step host phase,
+  docs/VALIDITY.md), PLUS another 1.4 m per step of `worst time` if the
+  clock is offset. A value over 2.5 m fails by name, and then the clock
+  offset (`worst time`) says whether it is the coupling or a diverged
+  FDM.
 
 ### 3. The two commandlet passes, literally
 
@@ -363,6 +390,10 @@ of which must FAIL by name:
   same-seed host parity is measured and refused ...` before any flight
   (exit 2); `--render clip` on the same spec renders the visual-only
   clip;
+* edit `runs\demo\frames\chase0\render.json`, add 0.008333 to one
+  record's `t_pose_s`: `[FAIL] engine_parity: chase0 frame N: pose
+  applied at t=... s against the scheduled ... s (tol 1e-06): the pose
+  must be applied at the scheduled instant, not the engine clock`;
 * re-run pass 1 with `-seconds=6` appended: the commandlet must refuse
   before stepping with `consume-poses: camera 1 schedules a capture at
   t=11.992 s but the run is 6.000 s long; the run does not cover the
