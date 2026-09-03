@@ -989,6 +989,56 @@ mutate webapp/capture.py \
     "the closure pair grades the clip's own window" \
     tests/test_closure_pair.py || failures=$((failures+1))
 
+# -- Camera Phase 1 finished: engine parity on rendered frames -------------
+
+mutate core/capture/verify.py \
+    '            if gap_pos > pos_tol_m:' \
+    '            if False:  # MUTATED: an applied position off the solved pose passes' \
+    "an applied camera position off the solved pose fails engine parity" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if gap_ang > ang_tol_deg:' \
+    '            if False:  # MUTATED: an applied orientation off the solved pose passes' \
+    "an applied camera orientation off the solved pose fails engine parity" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if gap_t > tol_t:' \
+    '            if False:  # MUTATED: a capture off its scheduled instant passes' \
+    "a capture off its scheduled instant fails engine parity" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                if size is not None and size != expected:' \
+    '                if False:  # MUTATED: a PNG of the wrong size passes' \
+    "a rendered PNG of the wrong size fails engine parity" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                if gap_px > px_tol:' \
+    '                if False:  # MUTATED: reprojection through the applied pose unchecked' \
+    "the aircraft must reproject through the applied pose to the manifest pixel" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if captured != scheduled or declared != scheduled:' \
+    '        if False:  # MUTATED: engine frame counts unchecked' \
+    "the engine's frame count must equal the schedule's for engine parity" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            ENGINE_PARITY_CHECK, None,' \
+    '            ENGINE_PARITY_CHECK, True,  # MUTATED: awaiting reported as passed' \
+    "awaiting engine frames is never reported as a pass" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        return all(c.ok is not False for c in self.checks)' \
+    '        return True  # MUTATED: a failed check never fails the report' \
+    "a failed check fails the verification report" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

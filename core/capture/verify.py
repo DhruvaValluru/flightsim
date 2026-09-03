@@ -30,6 +30,19 @@ Checks (numbered as in the phase document):
    metre tolerance.
 4. **Count exactness** (:func:`verify_counts`) -- every camera's frame
    records number exactly its declared capture count, densely indexed.
+5. **Engine parity** (:func:`verify_engine_parity`) -- on a machine with
+   the engine, the render commandlet's consume-poses pass writes
+   ``frames/<camera_id>/render.json`` beside the PNGs: per frame the
+   pose it ACTUALLY APPLIED and the simulation time it captured at. The
+   applied pose must equal the manifest's solved pose within 10 cm and
+   0.1 deg, the applied time the scheduled instant within half a fixed
+   step, the PNG named by the frame's index must exist at the
+   manifest's size, and the aircraft must reproject through the applied
+   pose to the pixel the manifest's own projection gives. With no
+   render.json at all the check is AWAITING ENGINE FRAMES -- a third
+   state that neither passes nor fails, so a headless run can never
+   claim parity it did not exercise and never fails for lacking an
+   engine.
 """
 
 from __future__ import annotations
@@ -49,12 +62,45 @@ TRIANGULATION_TOL_M = 0.5
 #: telemetry clock, so this is a float-representation tolerance).
 TIME_TOL_S = 1e-9
 
+#: Engine parity (check 5): the pose the engine APPLIED, written back per
+#: frame by the render commandlet's consume-poses pass, against the pose
+#: the manifest says was solved. The same 10 cm the commandlet itself
+#: fails on, and 0.1 deg of orientation.
+ENGINE_POSITION_TOL_M = 0.10
+ENGINE_ANGLE_TOL_DEG = 0.1
+#: Applied capture time against the scheduled instant: half a fixed
+#: step at the 120 Hz default rate. When render.json states the
+#: engine's own ``step_s`` the tolerance is half of THAT step.
+ENGINE_TIME_TOL_S = 0.5 / 120.0
+#: The aircraft reprojected through the applied pose against the
+#: manifest's own projection. 0.1 deg at the default 1244 px focal is
+#: 2.2 px and 10 cm at 100 m is 1.2 px: 3 px is what the pose tolerances
+#: above already permit, not slack on top of them.
+ENGINE_REPROJECTION_TOL_PX = 3.0
+
+#: The check name and the detail prefix the page and the CLI key on.
+ENGINE_PARITY_CHECK = "engine_parity"
+AWAITING_ENGINE_FRAMES = "awaiting engine frames"
+
 
 @dataclass(frozen=True)
 class Check:
+    """One named check. ``ok`` is True (PASS), False (FAIL) or None --
+    AWAITING: the check could not be exercised on this machine, which
+    is neither a pass nor a failure and is reported in those words.
+    ``data`` carries structured numbers the page renders (per-camera
+    counts for the engine check); it is informational."""
+
     name: str
-    ok: bool
+    ok: Optional[bool]
     detail: str
+    data: Optional[Dict] = None
+
+    @property
+    def status(self) -> str:
+        if self.ok is None:
+            return "AWAITING"
+        return "PASS" if self.ok else "FAIL"
 
 
 @dataclass
@@ -63,19 +109,33 @@ class VerificationReport:
 
     @property
     def ok(self) -> bool:
-        return all(c.ok for c in self.checks)
+        """Every check that RAN passed. An awaiting check (ok None) is
+        excluded on purpose: it neither passes nor fails, and the
+        report says so in render()."""
+        return all(c.ok is not False for c in self.checks)
 
-    def add(self, name: str, ok: bool, detail: str) -> None:
+    @property
+    def passed(self) -> int:
+        return sum(1 for c in self.checks if c.ok is True)
+
+    @property
+    def awaiting(self) -> List[Check]:
+        return [c for c in self.checks if c.ok is None]
+
+    def add(self, name: str, ok: Optional[bool], detail: str) -> None:
         self.checks.append(Check(name, ok, detail))
 
     def render(self) -> str:
         lines = []
         for c in self.checks:
-            lines.append(f"  [{'PASS' if c.ok else 'FAIL'}] {c.name}: "
-                         f"{c.detail}")
-        lines.append(f"verification {'PASSED' if self.ok else 'FAILED'} "
-                     f"({sum(c.ok for c in self.checks)}/"
-                     f"{len(self.checks)} checks)")
+            lines.append(f"  [{c.status}] {c.name}: {c.detail}")
+        ran = len(self.checks) - len(self.awaiting)
+        summary = (f"verification {'PASSED' if self.ok else 'FAILED'} "
+                   f"({self.passed}/{ran} checks")
+        if self.awaiting:
+            summary += (f"; {len(self.awaiting)} {AWAITING_ENGINE_FRAMES}: "
+                        + ", ".join(c.name for c in self.awaiting))
+        lines.append(summary + ")")
         return "\n".join(lines)
 
 
@@ -327,8 +387,270 @@ def verify_alignment(manifest_a: Dict, manifest_b: Dict,
                       f"across the two camera sets")
 
 
+def _angle_gap_deg(a: float, b: float) -> float:
+    """Smallest unsigned difference between two angles in degrees."""
+    return abs((float(a) - float(b) + 180.0) % 360.0 - 180.0)
+
+
+def _png_size(path: Path) -> Tuple[int, int]:
+    from PIL import Image
+
+    with Image.open(path) as image:
+        return int(image.size[0]), int(image.size[1])
+
+
+def _rendered_count(run_dir: Path, camera_id: str) -> int:
+    """PNGs actually present under frames/<camera_id> -- what "rendered"
+    means everywhere the word is used: files on disk, never a schedule
+    length."""
+    directory = Path(run_dir) / "frames" / camera_id
+    if not directory.is_dir():
+        return 0
+    return sum(1 for p in directory.glob("*.png") if p.is_file())
+
+
+def verify_engine_parity(run_dir, manifest: Dict,
+                         pos_tol_m: float = ENGINE_POSITION_TOL_M,
+                         ang_tol_deg: float = ENGINE_ANGLE_TOL_DEG,
+                         time_tol_s: Optional[float] = None,
+                         px_tol: float = ENGINE_REPROJECTION_TOL_PX) -> Check:
+    """Check 5: the frames the engine rendered carry the geometry the
+    manifest claims.
+
+    Per camera, ``frames/<camera_id>/render.json`` (written by the render
+    commandlet's consume-poses pass) is matched to the manifest's frame
+    records by ``frame_index``. For every record: the applied camera
+    position within ``pos_tol_m`` of the solved one, applied
+    yaw/pitch/roll within ``ang_tol_deg``, the applied capture time
+    within ``time_tol_s`` (default: half the engine's stated step) of
+    the scheduled instant, the PNG named by the index present at the
+    manifest's width and height, and the aircraft reprojected through
+    the APPLIED pose (this module's own projection, Euler path) within
+    ``px_tol`` of the manifest's own projection and, for aircraft-aimed
+    cameras, inside the frame. The engine's frame counts must equal the
+    schedule's.
+
+    Returns an AWAITING check (``ok`` None) when no camera has a
+    render.json -- the honest state of a headless run -- and a FAIL when
+    some cameras rendered and others did not.
+    """
+    run_dir = Path(run_dir)
+    aim_modes = _aim_modes(manifest)
+    by_camera: Dict[str, List[Dict]] = {}
+    for record in manifest.get("frames", []):
+        by_camera.setdefault(record["camera_id"], []).append(record)
+    camera_ids = [b["camera_id"] for b in manifest.get("cameras", [])]
+
+    awaiting: List[str] = []
+    problems: List[str] = []
+    per_camera: Dict[str, Dict] = {}
+    worst = {"position_m": 0.0, "angle_deg": 0.0, "time_s": 0.0,
+             "reprojection_px": 0.0, "aircraft_m": 0.0}
+    frames_checked = 0
+    time_tol_used = time_tol_s
+
+    for camera_id in camera_ids:
+        records = by_camera.get(camera_id, [])
+        scheduled = len(records)
+        entry = {"scheduled": scheduled,
+                 "rendered": _rendered_count(run_dir, camera_id),
+                 "verified": 0}
+        per_camera[camera_id] = entry
+        report_path = run_dir / "frames" / camera_id / "render.json"
+        if not report_path.is_file():
+            awaiting.append(camera_id)
+            continue
+        try:
+            render = json.loads(report_path.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            problems.append(f"{camera_id}: render.json is not JSON ({exc})")
+            continue
+        if not isinstance(render, dict):
+            problems.append(f"{camera_id}: render.json is not a mapping")
+            continue
+        tol_t = time_tol_s
+        if tol_t is None:
+            step = render.get("step_s")
+            tol_t = (float(step) / 2.0 if isinstance(step, (int, float))
+                     and step > 0 else ENGINE_TIME_TOL_S)
+        time_tol_used = tol_t if time_tol_used is None else max(
+            time_tol_used, tol_t)
+        applied_by_index: Dict[int, Dict] = {}
+        for applied in render.get("frame_records", []):
+            if isinstance(applied, dict) and "frame_index" in applied:
+                applied_by_index[int(applied["frame_index"])] = applied
+        captured = render.get("frames_captured")
+        declared = render.get("frames_scheduled")
+        if captured != scheduled or declared != scheduled:
+            problems.append(
+                f"{camera_id}: the engine reports {captured} captured of "
+                f"{declared} scheduled against {scheduled} manifest frames")
+        if records:
+            size = (int(records[0]["width_px"]), int(records[0]["height_px"]))
+            engine_size = (render.get("width"), render.get("height"))
+            if engine_size != size:
+                problems.append(
+                    f"{camera_id}: the engine rendered {engine_size[0]}x"
+                    f"{engine_size[1]} against the manifest's "
+                    f"{size[0]}x{size[1]}")
+        verified = 0
+        for record in records:
+            index = int(record["index"])
+            applied = applied_by_index.get(index)
+            if applied is None:
+                problems.append(f"{camera_id} frame {index}: no engine "
+                                f"record carries this frame_index")
+                continue
+            try:
+                a_pos = (float(applied["camera_applied_north_m"]),
+                         float(applied["camera_applied_east_m"]),
+                         float(applied["camera_applied_alt_m"]))
+                a_yaw = float(applied["camera_applied_yaw_deg"])
+                a_pitch = float(applied["camera_applied_pitch_deg"])
+                a_roll = float(applied["camera_applied_roll_deg"])
+                a_t = float(applied["t_applied_s"])
+            except (KeyError, TypeError, ValueError) as exc:
+                problems.append(f"{camera_id} frame {index}: engine record "
+                                f"lacks an applied field ({exc})")
+                continue
+            frame_ok = True
+            gap_pos = math.dist(a_pos, (record["position_north_m"],
+                                        record["position_east_m"],
+                                        record["position_alt_m"]))
+            gap_ang = max(_angle_gap_deg(a_yaw, record["yaw_deg"]),
+                          abs(a_pitch - float(record["pitch_deg"])),
+                          abs(a_roll - float(record["roll_deg"])))
+            gap_t = abs(a_t - float(record["t_s"]))
+            worst["position_m"] = max(worst["position_m"], gap_pos)
+            worst["angle_deg"] = max(worst["angle_deg"], gap_ang)
+            worst["time_s"] = max(worst["time_s"], gap_t)
+            if gap_pos > pos_tol_m:
+                frame_ok = False
+                problems.append(f"{camera_id} frame {index}: applied "
+                                f"position {gap_pos:.3f} m from the solved "
+                                f"pose (tol {pos_tol_m})")
+            if gap_ang > ang_tol_deg:
+                frame_ok = False
+                problems.append(f"{camera_id} frame {index}: applied "
+                                f"orientation {gap_ang:.3f} deg from the "
+                                f"solved pose (tol {ang_tol_deg})")
+            if gap_t > tol_t:
+                frame_ok = False
+                problems.append(f"{camera_id} frame {index}: captured at "
+                                f"t={a_t:.4f} s against the scheduled "
+                                f"{float(record['t_s']):.4f} s (tol "
+                                f"{tol_t:.4g})")
+            png = run_dir / str(record["file"])
+            if not png.is_file():
+                frame_ok = False
+                problems.append(f"{camera_id} frame {index}: "
+                                f"{record['file']} does not exist")
+            else:
+                try:
+                    size = _png_size(png)
+                except (OSError, ValueError) as exc:
+                    size = None
+                    problems.append(f"{camera_id} frame {index}: "
+                                    f"{record['file']} is not a readable "
+                                    f"PNG ({exc})")
+                expected = (int(record["width_px"]), int(record["height_px"]))
+                if size is not None and size != expected:
+                    frame_ok = False
+                    problems.append(f"{camera_id} frame {index}: PNG is "
+                                    f"{size[0]}x{size[1]} against the "
+                                    f"manifest's {expected[0]}x{expected[1]}")
+                elif size is None:
+                    frame_ok = False
+            # Reprojection through the pose the engine APPLIED, this
+            # module's own projection on the Euler path, against the
+            # manifest's own projection of the same aircraft point.
+            point = _aircraft_point(record)
+            u_s, v_s, z_s = project_point(record, point)
+            applied_record = dict(record)
+            applied_record["position_north_m"] = a_pos[0]
+            applied_record["position_east_m"] = a_pos[1]
+            applied_record["position_alt_m"] = a_pos[2]
+            u_a, v_a, z_a = project_point(
+                applied_record, point, axes_from_euler(a_roll, a_pitch, a_yaw))
+            if z_s > 0 and z_a > 0 and math.isfinite(u_s) \
+                    and math.isfinite(u_a):
+                gap_px = math.hypot(u_a - u_s, v_a - v_s)
+                worst["reprojection_px"] = max(worst["reprojection_px"],
+                                               gap_px)
+                if gap_px > px_tol:
+                    frame_ok = False
+                    problems.append(f"{camera_id} frame {index}: the "
+                                    f"aircraft reprojects {gap_px:.2f} px "
+                                    f"from the manifest's pixel through the "
+                                    f"applied pose (tol {px_tol})")
+                if aim_modes.get(camera_id) == "aircraft" and not (
+                        0.0 <= u_a <= record["width_px"]
+                        and 0.0 <= v_a <= record["height_px"]):
+                    frame_ok = False
+                    problems.append(f"{camera_id} frame {index}: the "
+                                    f"aircraft falls outside the rendered "
+                                    f"frame through the applied pose")
+            elif z_s > 0:
+                frame_ok = False
+                problems.append(f"{camera_id} frame {index}: the aircraft "
+                                f"lies behind the applied camera")
+            # Where the engine also wrote the aircraft it drew (its own
+            # FDM's state in the card frame), report the host-to-host
+            # distance; the pose contract above is what passes or fails.
+            if "aircraft_applied_north_m" in applied:
+                try:
+                    drawn = (float(applied["aircraft_applied_north_m"]),
+                             float(applied["aircraft_applied_east_m"]),
+                             float(applied["aircraft_applied_alt_m"]))
+                    worst["aircraft_m"] = max(worst["aircraft_m"],
+                                              math.dist(drawn, point))
+                except (KeyError, TypeError, ValueError):
+                    pass
+            if frame_ok:
+                verified += 1
+        entry["verified"] = verified
+        frames_checked += scheduled
+
+    data = {"cameras": per_camera, "worst": worst,
+            "tolerances": {"position_m": pos_tol_m, "angle_deg": ang_tol_deg,
+                           "time_s": time_tol_used, "reprojection_px": px_tol}}
+    if awaiting and not problems and frames_checked == 0:
+        return Check(
+            ENGINE_PARITY_CHECK, None,
+            f"{AWAITING_ENGINE_FRAMES}: no render.json for camera "
+            + ", ".join(awaiting)
+            + " (the engine pass has not run on this machine; choose "
+              "'Render frames and clip' or --render frames where the "
+              "engine exists)",
+            data=data)
+    if awaiting:
+        problems.append("no render.json for camera " + ", ".join(awaiting)
+                        + " while other cameras rendered")
+    ok = not problems and frames_checked > 0
+    if ok:
+        detail = (f"{frames_checked} frames across {len(camera_ids)} "
+                  f"camera(s); worst position {worst['position_m']:.3f} m "
+                  f"(tol {pos_tol_m}); worst angle {worst['angle_deg']:.3f} "
+                  f"deg (tol {ang_tol_deg}); worst time "
+                  f"{worst['time_s']:.4f} s (tol {time_tol_used:.4g}); "
+                  f"worst reprojection {worst['reprojection_px']:.2f} px "
+                  f"(tol {px_tol}); aircraft drawn within "
+                  f"{worst['aircraft_m']:.2f} m of the manifest")
+    else:
+        shown = problems[:4]
+        detail = "; ".join(shown) + (
+            f"; {len(problems) - len(shown)} more" if len(problems) > 4
+            else "")
+        if not problems:
+            detail = "no frames to verify"
+    return Check(ENGINE_PARITY_CHECK, ok, detail, data=data)
+
+
 def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
-    """The pass/fail summary over a run directory (CLI: flightsim.verify)."""
+    """The pass/fail summary over a run directory (CLI: flightsim.verify).
+
+    ``run_dir`` holds capture_manifest.json and, when the engine pass
+    ran, ``frames/<camera_id>/`` with the PNGs and render.json."""
     from .manifest import read_capture_manifest
 
     report = VerificationReport()
@@ -358,6 +680,7 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     report.checks.append(verify_geometry(manifest))
     report.checks.append(verify_triangulation(manifest))
     report.checks.append(verify_counts(manifest))
+    report.checks.append(verify_engine_parity(run_dir, manifest))
 
     if other_run_dir is not None:
         other = read_capture_manifest(

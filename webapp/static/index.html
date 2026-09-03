@@ -508,10 +508,19 @@ function renderCapture(run) {
   const cameras = (run.capture.cameras || []).map(c =>
     `<li><b>${c.camera_id}</b>: ${c.frames} frame(s)</li>`).join("");
   const v = run.capture.verification || {checks: []};
+  // Three states, the verifier's own: PASS, FAIL, and AWAITING (the
+  // engine-parity check with no engine frames to grade -- neither passed
+  // nor failed, and never coloured as either).
+  const checkWord = c => c.status || (c.ok === null ? "AWAITING"
+                                      : (c.ok ? "PASS" : "FAIL"));
+  const checkColour = c => c.ok === null ? "#d9b85c"
+                           : (c.ok ? "#6fd08c" : "#e06f6f");
   const checks = v.checks.map(c =>
-    `<li><b style="color:${c.ok ? "#6fd08c" : "#e06f6f"}">` +
-    `${c.ok ? "PASS" : "FAIL"}</b> ${c.name} — ` +
-    `<span class="dim">${c.detail}</span></li>`).join("");
+    `<li><b style="color:${checkColour(c)}">${checkWord(c)}</b> ` +
+    `${c.name} — <span class="dim">${c.detail}</span></li>`).join("");
+  const awaiting = (v.awaiting || []).length
+    ? ` <span class="dim">(${v.passed}/${v.ran} checks ran; ` +
+      `${v.awaiting.join(", ")} awaiting engine frames)</span>` : "";
   const capped = run.capture.previews_capped
     ? ` <span class="dim">(previews capped at ${run.capture.preview_cap}; ` +
       `the manifest carries every frame)</span>` : "";
@@ -537,7 +546,7 @@ function renderCapture(run) {
     `${run.capture.frames} frame(s), ${run.capture.previews} preview(s)` +
     capped +
     `<ul>${cameras}</ul>` +
-    `<b>verification ${v.ok ? "PASSED" : "FAILED"}</b>` +
+    `<b>verification ${v.ok ? "PASSED" : "FAILED"}</b>` + awaiting +
     `<ul>${checks}</ul>` + closure + `</div>`;
 }
 

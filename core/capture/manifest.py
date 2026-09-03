@@ -38,9 +38,13 @@ Per frame::
 
     index              frame number within ITS camera, 0-based
     camera_id
-    file               relative image path, per-camera subdirectory
-                       ("frames/<camera_id>/frame_00042.png") -- where
-                       pixels were produced they land exactly there
+    file               relative image path, per-camera subdirectory,
+                       NAMED BY THE FRAME'S INDEX
+                       ("frames/<camera_id>/0042.png") -- the render
+                       commandlet's consume-poses pass writes exactly
+                       this file for exactly this record, so a PNG and
+                       its geometry are tied by name, never by a
+                       running counter
     t_s                simulation time (the telemetry sample's own t)
     sample_index       index into the telemetry record
     position_north_m / position_east_m / position_alt_m
@@ -118,10 +122,12 @@ def simulation_digest(spec) -> str:
 
 
 def frame_filename(camera_id: str, index: int) -> str:
-    """Relative image path, per-camera subdirectory. The renderer that
-    produces pixels writes THIS path; headless manifests carry it as
-    the name the frame would have."""
-    return f"frames/{camera_id}/frame_{index:05d}.png"
+    """Relative image path, per-camera subdirectory, named by the
+    frame's manifest index (``0000.png`` ...). The renderer that
+    produces pixels writes THIS path (the commandlet's consume-poses
+    pass names its PNG by the same index); headless manifests carry it
+    as the name the frame would have."""
+    return f"frames/{camera_id}/{index:04d}.png"
 
 
 def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],

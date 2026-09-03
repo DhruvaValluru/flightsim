@@ -92,7 +92,9 @@ def test_frames_carry_per_camera_indices_and_paths():
     chase_frames = [f for f in manifest["frames"]
                     if f["camera_id"] == "chase0"]
     assert [f["index"] for f in chase_frames] == list(range(20))
-    assert chase_frames[3]["file"] == "frames/chase0/frame_00003.png"
+    # Named by the manifest index, exactly the file the engine's
+    # consume-poses pass writes for this record.
+    assert chase_frames[3]["file"] == "frames/chase0/0003.png"
 
 
 def test_digests_tie_the_manifest_to_its_run():

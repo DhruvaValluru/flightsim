@@ -196,16 +196,10 @@ def capture_run(spec, out: Path, scene: Dict,
     # Built ONCE and used for both the file and the page: two
     # constructions of the same report are two chances for the download
     # and the screen to disagree about whether a run verified.
-    verdict = {
-        "ok": verification.ok,
-        "checks": [{"name": c.name, "ok": c.ok, "detail": c.detail}
-                   for c in verification.checks],
-    }
+    verdict = verification_verdict(verification)
     (capture_dir / "verify.json").write_text(
         json.dumps(verdict, indent=1), encoding="utf-8")
-    report(f"verification {'PASSED' if verification.ok else 'FAILED'} "
-           f"({sum(c.ok for c in verification.checks)}/"
-           f"{len(verification.checks)} checks)")
+    report(verification_line(verification))
 
     return {
         "frames": total,
@@ -216,6 +210,35 @@ def capture_run(spec, out: Path, scene: Dict,
         "preview_cap": MAX_PREVIEWS if capped else None,
         "verification": verdict,
     }
+
+
+def verification_verdict(verification) -> Dict:
+    """verify.json's content: the verifier's own checks as run. A check's
+    ``ok`` is True, False or None (AWAITING -- the engine-parity check
+    with no engine frames to grade), and the report's ``ok`` is decided
+    by the checks that ran, exactly as VerificationReport.ok is."""
+    return {
+        "ok": verification.ok,
+        "checks": [{"name": c.name, "ok": c.ok, "status": c.status,
+                    "detail": c.detail,
+                    **({"data": c.data} if c.data is not None else {})}
+                   for c in verification.checks],
+        "passed": verification.passed,
+        "ran": len(verification.checks) - len(verification.awaiting),
+        "awaiting": [c.name for c in verification.awaiting],
+    }
+
+
+def verification_line(verification) -> str:
+    """The status line: PASSED/FAILED over the checks that ran, and the
+    awaiting ones named as such -- never counted as passed."""
+    ran = len(verification.checks) - len(verification.awaiting)
+    line = (f"verification {'PASSED' if verification.ok else 'FAILED'} "
+            f"({verification.passed}/{ran} checks")
+    if verification.awaiting:
+        line += (f"; {', '.join(c.name for c in verification.awaiting)} "
+                 f"awaiting engine frames")
+    return line + ")"
 
 
 def closure_run(spec, out: Path, scene: Dict,
@@ -300,7 +323,7 @@ ARTIFACT_NOTES = {
     "render.log": "the editor's own output",
     "capture/capture_manifest.json":
         "per-frame pose, intrinsics and aircraft state -- the labeled data",
-    "capture/verify.json": "the five verification checks, as run",
+    "capture/verify.json": "the verification checks as run (engine parity awaits engine frames on a headless run)",
     "capture/closure.json":
         "the paired closed-loop run: commanded vs achieved, by name",
     "capture/telemetry.json":

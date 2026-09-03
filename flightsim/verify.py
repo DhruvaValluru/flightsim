@@ -5,11 +5,17 @@
 Runs :mod:`core.capture.verify` over a run directory written by
 ``python -m flightsim.capture``: manifest schema, field finiteness,
 geometry recovery (independent reprojection), cross-view consistency
-(two-view triangulation) and count exactness -- plus, with
-``--against``, temporal alignment between two runs of the same
-simulation captured with different cameras.
+(two-view triangulation), count exactness and -- where the engine's
+consume-poses pass rendered frames under ``frames/<camera_id>/`` --
+engine parity (applied vs solved pose and time per frame, the PNG
+named by index at the manifest's size, the aircraft reprojected
+through the applied pose) -- plus, with ``--against``, temporal
+alignment between two runs of the same simulation captured with
+different cameras. With no engine frames the engine check prints
+``[AWAITING] engine_parity: awaiting engine frames ...``: neither
+passed nor failed, and never counted as passed.
 
-Exit code 0 when every check passes, 1 otherwise.
+Exit code 0 when every check that ran passes, 1 otherwise.
 """
 
 from __future__ import annotations

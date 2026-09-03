@@ -100,7 +100,16 @@ def test_the_page_shows_the_verifier_s_own_report(captured, client):
     assert verification["ok"] is True
     names = [c["name"] for c in verification["checks"]]
     assert names == ["manifest_version", "fields_finite", "geometry_recovery",
-                     "cross_view_consistency", "count_exactness"]
+                     "cross_view_consistency", "count_exactness",
+                     "engine_parity"]
+    # No engine on this machine: the engine-parity check is AWAITING in
+    # those words -- not passed (nothing was rendered), not failed (the
+    # run never claimed pixels), and not counted among the passed.
+    engine = verification["checks"][-1]
+    assert engine["ok"] is None and engine["status"] == "AWAITING"
+    assert "awaiting engine frames" in engine["detail"]
+    assert verification["awaiting"] == ["engine_parity"]
+    assert verification["passed"] == 5 and verification["ran"] == 5
 
     on_disk = json.loads(
         (manager.out_root / run_id / "capture" / "verify.json")
