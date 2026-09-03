@@ -101,14 +101,14 @@ visual-only per host (measured).</p>
   <div id="verdict"></div>
   <p>
     <button id="run" class="run">Run</button>
-    <label class="dim" title="What the run produces. The richest option this machine supports is selected; an option it cannot honour is disabled with the reason.">
-      render <select id="render">
+    <label class="dim" title="What the run produces. The richest option this machine supports is selected once /status has said what it is; until then the control is disabled on Headless, and an option the machine cannot honour is disabled with the reason.">
+      render <select id="render" disabled>
         <option value="frames">Render frames and clip</option>
         <option value="clip">Clip only</option>
-        <option value="none">Headless</option>
+        <option value="none" selected>Headless</option>
       </select>
     </label>
-    <span id="renderNote" class="dim"></span>
+    <span id="renderNote" class="dim">waiting for /status (Headless until the server says what this machine supports)</span>
   </p>
   <p class="dim">re-validated server-side before anything renders.
     <b>Render frames and clip</b> runs the engine once per camera on the
@@ -159,23 +159,37 @@ function provenanceNote(f) {
         "process; set it where uvicorn runs)")
       + (status.render_available === false
          ? (status.platform === "windows"
-            ? " · rendered clips need the Unreal host built here " +
-              "(scripts\\ue_preflight.ps1 names what is missing): runs " +
-              "here deliver the headless half (spec, validation, telemetry)"
+            ? " · rendered frames and clips need the Unreal host built " +
+              "here (scripts\\ue_preflight.ps1 names what is missing): " +
+              "runs here deliver the headless half (spec, validation, " +
+              "telemetry, manifest, previews, verification)"
             : status.platform === "linux"
-            ? " · rendered clips need macOS or Windows: runs here deliver " +
-              "the headless half (spec, validation, telemetry)"
-            : " · rendered clips need the Unreal host built here: runs " +
+            ? " · rendered frames and clips need macOS or Windows: runs " +
               "here deliver the headless half (spec, validation, " +
-              "telemetry)")
+              "telemetry, manifest, previews, verification)"
+            : " · rendered frames and clips need the Unreal host built " +
+              "here: runs here deliver the headless half (spec, " +
+              "validation, telemetry, manifest, previews, verification)")
          : "");
-  } catch (error) { $("llmState").textContent = "compiler: server unreachable"; }
+  } catch (error) {
+    $("llmState").textContent = "compiler: server unreachable";
+    // No /status, no default: the render control stays disabled on
+    // Headless -- an engine option was never offered as a default here.
+    $("renderNote").textContent =
+      "render choice unavailable: server unreachable (Headless is the " +
+      "only safe choice until /status answers)";
+  }
 })();
 
 // The render choice, before the run starts: the richest option this
 // machine supports is selected, and an option it cannot honour is
 // DISABLED with the server's reason in its label and title -- the
 // backend refuses the same choice by name (ue.platform), never degrades.
+// The default is the server's word ONLY (render_default, from
+// core.capture.render_pass.render_choice_default): the control ships
+// disabled on Headless and is enabled here, once that word has arrived;
+// without it (no /status, or a /status without the field) it stays
+// disabled on Headless and says so -- no hidden engine default, ever.
 function applyRenderChoices(status) {
   const select = $("render");
   const choices = status.render_choices || [];
@@ -189,7 +203,11 @@ function applyRenderChoices(status) {
     option.title = choice.available ? "" : choice.reason;
   }
   if (status.render_default) select.value = status.render_default;
-  $("renderNote").textContent = status.render_available
+  select.disabled = !status.render_default;
+  $("renderNote").textContent = !status.render_default
+    ? "render choice unavailable: /status gave no render_default " +
+      "(Headless is the only safe choice)"
+    : status.render_available
     ? ""
     : `engine options disabled: ${status.render_unavailable_reason}`;
 }

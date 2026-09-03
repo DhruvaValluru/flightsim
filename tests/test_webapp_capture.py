@@ -659,15 +659,148 @@ STATIC_INDEX = Path(runs_module.REPO) / "webapp" / "static" / "index.html"
 def test_the_run_form_offers_the_three_render_words():
     """The choice is visible before the run starts, in exactly these
     words, and the page reads which are available (and why not) from
-    /status rather than deciding for itself."""
+    /status rather than deciding for itself. Headless is the option
+    marked selected in the served markup: the safe initial state."""
     page = STATIC_INDEX.read_text(encoding="utf-8")
     assert 'id="render"' in page
-    for word, value in (("Render frames and clip", "frames"),
-                        ("Clip only", "clip"), ("Headless", "none")):
-        assert f'<option value="{value}">{word}</option>' in page, word
+    for word, value, markup in (
+            ("Render frames and clip", "frames",
+             '<option value="frames">Render frames and clip</option>'),
+            ("Clip only", "clip", '<option value="clip">Clip only</option>'),
+            ("Headless", "none",
+             '<option value="none" selected>Headless</option>')):
+        assert markup in page, word
     assert "render_unavailable_reason" in page
     assert "render_default" in page
     assert 'render: $("render").value' in page
+
+
+def test_the_run_form_starts_disabled_on_headless_until_status_answers():
+    """The 'hidden default' the bar names: before /status answers (and
+    for good, if it never does) the served page must not offer an
+    engine option as the default. Pinned at the source: the select
+    ships disabled with Headless selected; applyRenderChoices reads the
+    default from render_default ONLY, enables the control only once it
+    has that word, disables an unavailable option with the reason, and
+    the unreachable-server branch leaves the control disabled and says
+    so. No second spelling of the default rule exists in the page."""
+    page = STATIC_INDEX.read_text(encoding="utf-8")
+    assert '<select id="render" disabled>' in page
+    assert '<option value="none" selected>Headless</option>' in page
+    assert ('<span id="renderNote" class="dim">waiting for /status (Headless '
+            'until the server says what this machine supports)</span>') in page
+    assert 'if (status.render_default) select.value = status.render_default;' in page
+    assert 'select.disabled = !status.render_default;' in page
+    assert 'option.disabled = !choice.available;' in page
+    assert 'unavailable: ${choice.reason}' in page
+    assert 'option.title = choice.available ? "" : choice.reason;' in page
+    assert ('"render choice unavailable: server unreachable (Headless is the "'
+            in page)
+    # One assignment of the select's value in the whole page: the server's
+    # render_default, never a page-side guess.
+    assert page.count("select.value = ") == 1
+    assert page.count('.value = "frames"') == 0
+
+
+APPLY_RENDER_CHOICES_HARNESS = """
+const options = [
+  {value: "frames", textContent: "Render frames and clip", disabled: false, title: ""},
+  {value: "clip", textContent: "Clip only", disabled: false, title: ""},
+  {value: "none", textContent: "Headless", disabled: false, title: ""},
+];
+const select = {options, disabled: true, _value: "none",
+                get value() { return this._value; },
+                set value(v) { this._value = v; }};
+const note = {textContent: "waiting for /status"};
+const $ = id => ({render: select, renderNote: note})[id];
+%s
+applyRenderChoices(JSON.parse(process.argv[2]));
+console.log(JSON.stringify({
+  disabled: select.disabled, value: select.value, note: note.textContent,
+  options: options.map(o => ({value: o.value, disabled: o.disabled,
+                              text: o.textContent, title: o.title})),
+}));
+"""
+
+
+def apply_render_choices(tmp_path, payload):
+    """Run the page's applyRenderChoices, verbatim from the served HTML,
+    under node against a minimal DOM shim, and return what it did."""
+    import re
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not on PATH; the string-level test pins the "
+                    "source instead")
+    page = STATIC_INDEX.read_text(encoding="utf-8")
+    source = re.search(r"function applyRenderChoices\(status\) \{.*?\n\}\n",
+                       page, re.S).group(0)
+    harness = tmp_path / "apply_render_choices.js"
+    harness.write_text(APPLY_RENDER_CHOICES_HARNESS % source, encoding="utf-8")
+    proc = subprocess.run([node, str(harness), json.dumps(payload)],
+                          capture_output=True, text=True, check=True)
+    return json.loads(proc.stdout)
+
+
+def test_apply_render_choices_honours_the_status_payload(client, tmp_path):
+    """The page's own JS, driven by the real /status payload of this
+    machine and by a mac-like one: an unavailable option is disabled
+    with the reason in its label and title, the default is the server's
+    render_default, the control is enabled only then, and a payload
+    without render_default leaves it disabled on Headless."""
+    status = client.get("/status").json()
+    result = apply_render_choices(tmp_path, status)
+    assert result["disabled"] is False
+    assert result["value"] == status["render_default"]
+    by_value = {o["value"]: o for o in result["options"]}
+    assert by_value["none"]["disabled"] is False
+    if status["render_available"]:
+        assert result["value"] == "frames" and result["note"] == ""
+        assert not any(o["disabled"] for o in result["options"])
+    else:
+        reason = status["render_unavailable_reason"]
+        assert result["value"] == "none"
+        for word, label in (("frames", "Render frames and clip"),
+                            ("clip", "Clip only")):
+            assert by_value[word]["disabled"] is True
+            assert by_value[word]["text"] == f"{label} \u2014 unavailable: {reason}"
+            assert by_value[word]["title"] == reason
+        assert result["note"] == f"engine options disabled: {reason}"
+
+    engine = {"render_available": True, "render_unavailable_reason": None,
+              "render_default": "frames",
+              "render_choices": [{"value": w, "label": l, "available": True,
+                                  "reason": None}
+                                 for w, l in (("frames", "Render frames and clip"),
+                                              ("clip", "Clip only"),
+                                              ("none", "Headless"))]}
+    result = apply_render_choices(tmp_path, engine)
+    assert result["disabled"] is False and result["value"] == "frames"
+    assert result["note"] == ""
+    assert not any(o["disabled"] for o in result["options"])
+
+    # No render_default (a server that never said): disabled, Headless.
+    result = apply_render_choices(tmp_path, {})
+    assert result["disabled"] is True and result["value"] == "none"
+    assert result["note"].startswith("render choice unavailable")
+
+
+def test_status_default_is_the_cli_s_own_rule(client, monkeypatch):
+    """/status's render_default is render_choice_default() -- the one rule
+    the CLI uses -- under both gate states, not a second spelling."""
+    import core.util.platform as plat
+    from core.capture.render_pass import render_choice_default
+
+    for available in (False, True):
+        monkeypatch.setattr(plat, "ue_available", lambda a=available: a)
+        monkeypatch.setattr(plat, "ue_unavailable_reason",
+                            lambda a=available: None if a else "no engine (test)")
+        status = client.get("/status").json()
+        assert status["render_default"] == render_choice_default()
+        assert status["render_default"] == ("frames" if available else "none")
+        assert status["render_available"] is available
 
 
 def test_status_states_the_render_choices_and_the_reason(client):

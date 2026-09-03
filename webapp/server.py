@@ -457,13 +457,18 @@ def status_endpoint() -> JSONResponse:
     from core.util.platform import (
         os_name, ue_available, ue_unavailable_reason,
     )
-    from webapp.runs import RENDER_CHOICES, RENDER_WORDS
+    from core.capture.render_pass import (
+        RENDER_CHOICES, RENDER_WORDS, render_choice_default,
+    )
 
     available = ue_available()
     reason = ue_unavailable_reason()
     # The render choices in the page's own words, each with whether THIS
-    # machine can honour it and why not; the default is the richest one
-    # it can. The page disables what it cannot run and shows the reason.
+    # machine can honour it and why not; the default is the ONE rule the
+    # CLI uses too (render_choice_default: the richest option the machine
+    # supports), not a second spelling of it. The page disables what it
+    # cannot run, shows the reason, and enables the control only once
+    # this default has arrived.
     choices = [{"value": word, "label": RENDER_WORDS[word],
                 "available": available or word == "none",
                 "reason": None if available or word == "none" else reason}
@@ -473,7 +478,7 @@ def status_endpoint() -> JSONResponse:
                          "render_available": available,
                          "render_unavailable_reason": reason,
                          "render_choices": choices,
-                         "render_default": "frames" if available else "none"})
+                         "render_default": render_choice_default()})
 
 
 @app.get("/runs/{run_id}")

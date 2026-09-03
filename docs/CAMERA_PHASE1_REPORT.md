@@ -145,7 +145,16 @@ Now it does, and the choice is explicit:
   `render_default` and `render_unavailable_reason`; the page disables
   the engine options WITH the reason, e.g. "no engine on this machine:
   set UE_ROOT ..." or "FlightSimBridge not built: run
-  scripts\ue_preflight.ps1 then scripts\build_ue.ps1"). An engine choice
+  scripts\ue_preflight.ps1 then scripts\build_ue.ps1"). There is no
+  hidden default: the control ships DISABLED with *Headless* selected
+  and is enabled only once `/status` has answered with
+  `render_default` -- the one rule the CLI uses too,
+  `core.capture.render_pass.render_choice_default()` -- so a slow or
+  unreachable server never shows an engine option as the default (the
+  page says "render choice unavailable: server unreachable"); the JS
+  that does this (`applyRenderChoices`) is driven verbatim under node by
+  `tests/test_webapp_capture.py` against the real `/status` payload, and
+  its markup and lines are pinned at the source. An engine choice
   on a machine without the engine is refused `ue.platform` by name with
   that reason -- never degraded to headless. The choice is recorded as
   `render` in `provenance.json` and the final status line names what

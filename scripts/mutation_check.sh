@@ -1102,7 +1102,7 @@ mutate webapp/server.py \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
 mutate webapp/server.py \
-    '                         "render_default": "frames" if available else "none"})' \
+    '                         "render_default": render_choice_default()})' \
     '                         "render_default": "frames"})  # MUTATED: engine option defaulted without an engine' \
     "the default render choice is the richest the machine supports" \
     tests/test_webapp_capture.py || failures=$((failures+1))
@@ -1223,6 +1223,32 @@ mutate flightsim/capture.py \
     '            print(UE_PLATFORM_REFUSAL)  # MUTATED: a successful headless run prints a refusal' \
     "a successful headless CLI run states the engine's absence without REFUSING" \
     tests/test_camera_cli.py || failures=$((failures+1))
+
+# -- Round 2: no hidden render default on the run form ----------------------
+
+mutate webapp/static/index.html \
+    '<select id="render" disabled>' \
+    '<select id="render">' \
+    "the run form's render control ships disabled until /status answers" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '<option value="none" selected>Headless</option>' \
+    '<option value="none">Headless</option>' \
+    "the run form's initial selection is Headless, never an engine option" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '    option.disabled = !choice.available;' \
+    '    option.disabled = false;  // MUTATED: an unavailable option stays selectable' \
+    "an unavailable render option is disabled on the page" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '  select.disabled = !status.render_default;' \
+    '  select.disabled = false;  // MUTATED: enabled without a server default' \
+    "the render control is enabled only once the server has said the default" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
 
 echo
 purge_cache
