@@ -393,6 +393,20 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
                              "constraint": "ue.platform",
                              "reason": ue_unavailable_reason(),
                              "render": render}, status_code=409)
+    # A frames pass whose labels could not match its pixels is refused
+    # by name BEFORE the mesh rule: the choice itself is the problem, not
+    # the machine. Host parity is measured and refused for turbulence
+    # (docs/VALIDITY.md); the flow refuses the lee-rotor case the same
+    # way once the scene has decided it (webapp.runs).
+    from core.capture.render_pass import (
+        HOST_PARITY_CONSTRAINT, frames_host_parity_refusal,
+    )
+
+    parity = frames_host_parity_refusal(spec) if render == "frames" else None
+    if parity is not None:
+        return JSONResponse({"refused": parity,
+                             "constraint": HOST_PARITY_CONSTRAINT,
+                             "render": render}, status_code=409)
     # Placeholder airframes never render (owner's rule, extended
     # 2026-08-31: on ANY machine). Checked AFTER validation on purpose:
     # a scenario that cannot fly refuses on the physics first; the asset

@@ -288,6 +288,28 @@ def two_camera_spec():
     return spec
 
 
+def manifest_beside(card):
+    """The capture manifest a run wrote beside its card: out/capture/
+    capture_manifest.json (the webapp) or out/capture_manifest.json (the
+    CLI). An honest engine draws the aircraft where its own FDM is; for
+    a stub that is where the manifest says it is."""
+    card = Path(card)
+    for candidate in (card.parent / "capture" / "capture_manifest.json",
+                      card.parent / "capture_manifest.json"):
+        if candidate.is_file():
+            return json.loads(candidate.read_text(encoding="utf-8"))
+    raise FileNotFoundError(f"no capture manifest beside {card}")
+
+
+def drawn_aircraft(manifest, camera_id, index):
+    """The ``aircraft_applied_*`` fields of an honest engine record."""
+    record = next(r for r in manifest["frames"]
+                  if r["camera_id"] == camera_id and r["index"] == index)
+    return {"aircraft_applied_north_m": record["aircraft"]["north_m"],
+            "aircraft_applied_east_m": record["aircraft"]["east_m"],
+            "aircraft_applied_alt_m": record["aircraft"]["alt_m"]}
+
+
 def honest_engine(calls, short_for=None, fail_for=None):
     """A _render stub that behaves like the consume-poses pass."""
     from PIL import Image
@@ -302,6 +324,7 @@ def honest_engine(calls, short_for=None, fail_for=None):
             return False
         block = json.loads(Path(card).read_text(encoding="utf-8"))[
             "cameras"][camera_index]
+        manifest = manifest_beside(card)
         poses = block["poses"]
         times = block["capture_times_s"]
         if short_for is not None and camera_index == short_for:
@@ -320,6 +343,7 @@ def honest_engine(calls, short_for=None, fail_for=None):
                 "camera_applied_yaw_deg": poses["yaw_deg"][k],
                 "camera_applied_pitch_deg": poses["pitch_deg"][k],
                 "camera_applied_roll_deg": poses["roll_deg"][k],
+                **drawn_aircraft(manifest, block["camera_id"], index),
             })
             Image.new("RGB", (block["width_px"], block["height_px"]),
                       (30, 30, 30)).save(frames / f"{index:04d}.png")
@@ -757,6 +781,86 @@ def test_render_frames_on_run_records_the_choice_and_names_the_product(
     assert [f["count"] for f in frames] == [4, 4]
     got = engine_client.get(f"/runs/{run_id}/file/{frames[0]['images'][0]}")
     assert got.status_code == 200 and got.headers["content-type"] == "image/png"
+
+
+def test_a_turbulent_spec_is_refused_frames_by_name(engine_client,
+                                                     engine_stubs):
+    """Host parity is measured and REFUSED for turbulence realisations
+    (docs/VALIDITY.md): the engine's aircraft could not be labelled from
+    the manifest, so render=frames on a turbulent spec is 409
+    render.host_parity BEFORE any run -- never rendered and then failed.
+    Clip only keeps its visual-only label and stays available."""
+    from webapp.runs import RunManager
+
+    calls = []
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(honest_engine(calls)))
+    spec = two_camera_spec()
+    spec.set("turbulence", "moderate", frm="test: a turbulence realisation")
+    reply = engine_client.post("/run", json={"spec": spec.to_dict(),
+                                             "render": "frames"})
+    assert reply.status_code == 409, reply.json()
+    body = reply.json()
+    assert body["constraint"] == "render.host_parity"
+    assert "turbulence 'moderate'" in body["refused"]
+    assert "host parity" in body["refused"] and "Clip only" in body["refused"]
+    assert body["render"] == "frames"
+    assert calls == []
+    assert engine_client.get("/status").json()["busy"] is False
+    # The pure rule, both cases the flow can meet.
+    from core.capture.render_pass import frames_host_parity_refusal
+
+    calm = two_camera_spec()
+    assert frames_host_parity_refusal(calm) is None
+    assert "lee-rotor" in frames_host_parity_refusal(calm, rotor_attached=True)
+    assert "turbulence 'moderate'" in frames_host_parity_refusal(spec)
+
+
+def test_a_rotor_attached_frames_run_fails_by_name(engine_stubs):
+    """The lee rotor is decided inside the flow (terrain scene, wind, and
+    the pre-flight says it acts): a frames run that would carry it fails
+    [render.host_parity] before any capture or editor time. The rule is
+    stubbed to say the rotor is attached; the flow must honour it."""
+    from webapp.runs import RunManager, RunState
+
+    calls = []
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(honest_engine(calls)))
+    seen = []
+
+    def rotor_rule(spec, rotor_attached=False):
+        seen.append(rotor_attached)
+        return "stub: lee-rotor turbulence is attached on this terrain scene"
+
+    engine_stubs["monkeypatch"].setattr(runs_module,
+                                        "frames_host_parity_refusal",
+                                        rotor_rule)
+    manager = engine_stubs["manager"]
+    run = RunState(run_id="rotorframes")
+    manager._render_flow(run, two_camera_spec(), provenance={},
+                         render="frames")
+    assert run.status == "failed"
+    assert run.detail.startswith("[render.host_parity] stub: lee-rotor")
+    assert seen == [False]           # the flat test scene attaches no rotor
+    assert calls == []               # no editor time was spent
+    assert run.capture is None       # no capture was solved either
+    # The clip flow never consults the rule: its label is visual-only.
+    seen.clear()
+    run = RunState(run_id="rotorclip")
+
+    def clip_render(card, frames, scene, mesh, aircraft, telemetry=None,
+                    look=None, camera_flags=None, camera_index=None,
+                    log=None):
+        frames.mkdir(parents=True, exist_ok=True)
+        (frames / "render.json").write_text("{}", encoding="utf-8")
+        return True
+
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(clip_render))
+    manager._render_flow(run, two_camera_spec(), provenance={},
+                         render="clip")
+    assert run.status == "done", run.detail
+    assert seen == []
 
 
 def test_render_clip_on_run_is_todays_flow(engine_client, engine_stubs):

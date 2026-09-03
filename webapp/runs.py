@@ -52,7 +52,8 @@ import sys
 sys.path.insert(0, str(REPO))
 
 from core.capture.render_pass import (  # noqa: E402
-    RENDER_CHOICES, RENDER_FRAMES_CONSTRAINT, RENDER_WORDS,
+    HOST_PARITY_CONSTRAINT, RENDER_CHOICES, RENDER_FRAMES_CONSTRAINT,
+    RENDER_WORDS, frames_host_parity_refusal,
     check_render_pass, encode_scheduled_clip, frame_name, render_command,
     rendered_count, run_render_pass,
 )
@@ -1792,6 +1793,18 @@ class RunManager:
             rotor_note = _rotor_acts_on_track(spec, scene, rotor_provider)
             if rotor_note is not None:
                 rotor_provider = None
+        # A frames run whose labels could not match its pixels fails by
+        # name here, before any capture or editor time: the engine flies
+        # its own FDM, and same-seed host parity is measured and refused
+        # for turbulence (docs/VALIDITY.md) -- the spec's own word (the
+        # endpoint refuses that one too) or the lee rotor this scene just
+        # attached. Clip only keeps its visual-only label.
+        if render == "frames":
+            parity = frames_host_parity_refusal(
+                spec, rotor_attached=rotor_provider is not None)
+            if parity is not None:
+                run.push("failed", f"[{HOST_PARITY_CONSTRAINT}] {parity}")
+                return
         # Phase 9.1 surface class: roughness shear (the log profile CARRIES
         # the base wind -- reference at the layer top, so cruise flies the
         # spec's wind) and thermal forcing, both from the class table with

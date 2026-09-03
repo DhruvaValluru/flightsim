@@ -54,9 +54,10 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
 from core.capture.render_pass import (  # noqa: E402
-    RENDER_CHOICES, RENDER_FRAMES_CONSTRAINT, RENDER_WORDS,
-    check_render_pass, encode_scheduled_clip, render_choice_default,
-    render_command, rendered_count, run_render_pass,
+    HOST_PARITY_CONSTRAINT, RENDER_CHOICES, RENDER_FRAMES_CONSTRAINT,
+    RENDER_WORDS, check_render_pass, encode_scheduled_clip,
+    frames_host_parity_refusal, render_choice_default, render_command,
+    rendered_count, run_render_pass,
 )
 
 
@@ -176,6 +177,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
     if static:
         return _refuse(static)
+    # A frames pass whose labels could not match its pixels: host parity
+    # is measured and refused for turbulence (docs/VALIDITY.md), so the
+    # choice is refused by name here, before the flight -- never rendered
+    # and then failed by the verifier.
+    if render == "frames":
+        parity = frames_host_parity_refusal(spec)
+        if parity is not None:
+            print(f"REFUSED {HOST_PARITY_CONSTRAINT}: {parity}")
+            return 2
 
     print(f"spec {spec.digest()[:16]} valid; running headlessly...")
     result = run_spec(spec, terrain_ground=terrain_ground)

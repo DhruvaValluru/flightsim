@@ -138,8 +138,12 @@ def honest_cli_engine(calls, short_for=None, fail_for=None):
                       "log": Path(log), "camera_index": index})
         if fail_for is not None and index == fail_for:
             return False
-        card = json.loads(Path(parse_flag(command, "scenario"))
-                          .read_text(encoding="utf-8"))
+        card_path = Path(parse_flag(command, "scenario"))
+        card = json.loads(card_path.read_text(encoding="utf-8"))
+        # An honest engine draws the aircraft where its own FDM is; for
+        # a stub that is where the manifest beside the card says.
+        manifest = json.loads((card_path.parent / "capture_manifest.json")
+                              .read_text(encoding="utf-8"))
         block = card["cameras"][index]
         poses, times = block["poses"], block["capture_times_s"]
         if short_for is not None and index == short_for:
@@ -149,6 +153,9 @@ def honest_cli_engine(calls, short_for=None, fail_for=None):
         records = []
         for i, t in enumerate(times):
             k = poses["t_s"].index(t)
+            drawn = next(r["aircraft"] for r in manifest["frames"]
+                         if r["camera_id"] == block["camera_id"]
+                         and r["index"] == i)
             records.append({
                 "frame_index": i, "t_scheduled_s": t,
                 "t_applied_s": poses["t_s"][k],
@@ -157,7 +164,10 @@ def honest_cli_engine(calls, short_for=None, fail_for=None):
                 "camera_applied_alt_m": poses["alt_m"][k],
                 "camera_applied_yaw_deg": poses["yaw_deg"][k],
                 "camera_applied_pitch_deg": poses["pitch_deg"][k],
-                "camera_applied_roll_deg": poses["roll_deg"][k]})
+                "camera_applied_roll_deg": poses["roll_deg"][k],
+                "aircraft_applied_north_m": drawn["north_m"],
+                "aircraft_applied_east_m": drawn["east_m"],
+                "aircraft_applied_alt_m": drawn["alt_m"]})
             Image.new("RGB", (block["width_px"], block["height_px"]),
                       (20, 20, 20)).save(frames / f"{i:04d}.png")
         (frames / "render.json").write_text(json.dumps({
@@ -237,6 +247,35 @@ def test_an_engine_choice_without_an_engine_refuses_by_name(tmp_path, capsys,
         assert "no engine on this machine: set UE_ROOT" in text
         assert f"--render {word}" in text
         assert not (out / "capture_manifest.json").exists()
+
+
+def test_a_turbulent_spec_refuses_frames_by_name(tmp_path, capsys,
+                                                  cli_engine):
+    """--render frames on a turbulent spec: REFUSED render.host_parity
+    before any flight (host parity is measured and refused for
+    turbulence realisations), no engine pass, no manifest. The same
+    spec runs headlessly (--render none) and as a clip."""
+    import flightsim.capture as cli
+
+    calls = []
+    cli_engine["monkeypatch"].setattr(cli, "run_render_pass",
+                                      honest_cli_engine(calls))
+    spec = ScenarioSpec.read(EXAMPLES / "cameras_multi.yaml")
+    spec.set("turbulence", "moderate", frm="test: a turbulence realisation")
+    turbulent = tmp_path / "turbulent.yaml"
+    spec.write(turbulent)
+    out = tmp_path / "frames"
+    code = capture_main([str(turbulent), "--out", str(out),
+                         "--max-previews", "0", "--render", "frames"])
+    text = capsys.readouterr().out
+    assert code == 2, text
+    assert "REFUSED render.host_parity: turbulence 'moderate'" in text
+    assert "host parity" in text and "Clip only" in text
+    assert calls == []
+    assert not (out / "capture_manifest.json").exists()
+    assert capture_main([str(turbulent), "--out", str(tmp_path / "none"),
+                         "--max-previews", "0", "--render", "none"]) == 0
+    assert "REFUSED render.host_parity" not in capsys.readouterr().out
 
 
 def test_render_frames_runs_the_engine_once_per_camera(tmp_path, capsys,

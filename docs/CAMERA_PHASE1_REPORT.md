@@ -161,9 +161,28 @@ Now it does, and the choice is explicit:
   the manifest's width x height, the engine's counts equal to the
   schedule, and the aircraft reprojected through the APPLIED pose
   within 3 px of the manifest's own projection (and inside aimed
-  frames). Where the engine wrote the aircraft it drew
-  (`aircraft_applied_*`) the host-to-host distance is reported, not
-  judged. With no render.json anywhere the check is **AWAITING** --
+  frames). Then the aircraft the engine actually DREW
+  (`aircraft_applied_*`: its own FDM's state at the capture) is JUDGED,
+  not reported: within `ENGINE_AIRCRAFT_TOL_M` = 2.5 m of the manifest's
+  aircraft and, reprojected through the applied pose, within a pixel
+  tolerance graded by the frame's depth, `3 px + fx * 2.5 m / depth`,
+  of the manifest's labelled pixel -- measured on `cameras_multi`: the
+  chase frames sit 110.7-177.2 m from the aircraft (31.1-20.6 px), the
+  tower frames 3074-3262 m (4.0 px) -- and inside an aimed frame; a
+  record without the drawn aircraft FAILS the frame. The 2.5 m is one
+  fixed step of travel at 300 m/s plus the measured host residual:
+  docs/VALIDITY.md's Gate 5 puts the two hosts 3.6e-4 m apart in
+  altitude and the parity matrix a CONSTANT one-step phase apart in
+  position (1.24 m at 250 kt); this example flies 322.7 kt TAS, 1.384 m
+  per step, so the expected drawn-aircraft distance on the Windows run
+  is about 1.4 m (an engine whose FDM diverged, or a clock one step off
+  on top of the phase, fails this clause by name with the number). A
+  spec whose air CANNOT agree across hosts -- a turbulence word, or the
+  lee rotor a terrain scene attaches -- is refused `render.host_parity`
+  by name before any editor time (POST /run 409, the flow, and the CLI),
+  because same-seed turbulence host parity was measured and REFUSED
+  (docs/VALIDITY.md); *Clip only* keeps its visual-only label there.
+  With no render.json anywhere the check is **AWAITING** --
   `[AWAITING] engine_parity: awaiting engine frames ...` -- neither
   passed nor failed and never counted among the passed; some cameras
   rendered and others not is a FAIL. `verify.json` carries `status`,
@@ -257,7 +276,7 @@ engine pass 2 of 2: camera 'tower0', 24 frames scheduled over the 12 s run (-cam
   [PASS] geometry_recovery: 48 frames; quaternion-vs-euler reprojection gap 0.0000 px (tol 0.5); 0 aircraft behind camera; 0 aimed frames without the aircraft in frame
   [PASS] cross_view_consistency: 24 two-view instants; worst triangulation error 0.0000 m (tol 0.5)
   [PASS] count_exactness: 2 camera(s), every declared count met exactly
-  [PASS] engine_parity: 48 frames across 2 camera(s); worst position 0.0xx m (tol 0.1); worst angle 0.0xx deg (tol 0.1); worst time 0.0000 s (tol 0.008333); worst reprojection x.xx px (tol 3.0); aircraft drawn within x.xx m of the manifest
+  [PASS] engine_parity: 48 frames across 2 camera(s); worst position 0.0xx m (tol 0.1); worst angle 0.0xx deg (tol 0.1); worst time 0.0000 s (tol 0.008333); worst reprojection x.xx px (tol 3.0); aircraft drawn within x.xx m of the manifest's aircraft (tol 2.5) and xx.x px of its labelled pixel (tol 31.1 px at that frame's 111 m)
 verification PASSED (6/6 checks)
 rendered 48 frames across 2 camera(s) (48 verified by engine parity) under runs\demo\frames
 ```
@@ -333,6 +352,17 @@ of which must FAIL by name:
   applied position 0.200 m from the solved pose (tol 0.1)`;
 * delete `runs\demo\frames\tower0\0005.png`: `[FAIL] engine_parity:
   tower0 frame 5: frames/tower0/0005.png does not exist`;
+* edit `runs\demo\frames\chase0\render.json`, add 5.0 to one record's
+  `aircraft_applied_east_m`: `[FAIL] engine_parity: chase0 frame N: the
+  engine drew the aircraft 5.00 m from the manifest's aircraft (tol
+  2.5), 5x.x px from its labelled pixel (tol 3x.x px at 1xx m)` -- the
+  clause that judges the pixels against the label; the same edit on a
+  tower record fails on the metres (5.00 m, tol 2.5) at 4.0 px;
+* run `examples\cameras_multi.yaml` with `turbulence: moderate` and
+  `--render frames`: `REFUSED render.host_parity: turbulence 'moderate':
+  same-seed host parity is measured and refused ...` before any flight
+  (exit 2); `--render clip` on the same spec renders the visual-only
+  clip;
 * re-run pass 1 with `-seconds=6` appended: the commandlet must refuse
   before stepping with `consume-poses: camera 1 schedules a capture at
   t=11.992 s but the run is 6.000 s long; the run does not cover the

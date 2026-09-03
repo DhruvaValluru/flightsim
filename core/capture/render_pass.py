@@ -16,6 +16,12 @@ frames flow and ``python -m flightsim.capture --render frames``:
   (``render.frames``) the caller fails the run with; a pass that
   returned but rendered fewer frames than scheduled is never presented
   as frames.
+* :func:`frames_host_parity_refusal` refuses BY NAME (``render.host_parity``)
+  a frames pass whose labels could not match its pixels: the engine
+  flies its own FDM, and same-seed Dryden turbulence was measured and
+  REFUSED for host parity (docs/VALIDITY.md), so a turbulent spec is
+  never rendered as frames and graded to a failure -- Clip only keeps
+  its visual-only label with the seed recorded.
 * :func:`concat_playlist` / :func:`encode_scheduled_clip` make the clip
   a BY-PRODUCT of camera 0: the rendered frames shown at their scheduled
   instants (ffmpeg's concat demuxer with per-frame durations, a black
@@ -39,6 +45,44 @@ RENDER_FRAMES_CONSTRAINT = "render.frames"
 RENDER_CHOICES = ("frames", "clip", "none")
 RENDER_WORDS = {"frames": "Render frames and clip", "clip": "Clip only",
                 "none": "Headless"}
+
+
+#: The named refusal for a frames pass whose labels could not match its
+#: pixels (host parity measured and refused for the spec's air).
+HOST_PARITY_CONSTRAINT = "render.host_parity"
+
+
+def frames_host_parity_refusal(spec, rotor_attached: bool = False
+                               ) -> Optional[str]:
+    """None when the engine's flight can be labelled from the manifest;
+    otherwise WHY a frames pass is refused by name (render.host_parity).
+
+    Engine parity judges the aircraft the engine DREW against the
+    manifest's aircraft, the headless flight. Same-seed Dryden
+    turbulence was measured and REFUSED for host parity (docs/VALIDITY.md:
+    with seed 424242 the two hosts diverge from the first flown sample),
+    so a turbulent spec -- the spec's own turbulence word, or a lee rotor
+    the webapp attaches on a terrain scene -- would render frames whose
+    labels cannot match their pixels. Those are refused HERE, before any
+    editor time, never rendered and then failed by the verifier; Clip
+    only stays available with its visual-only label and the seed
+    recorded.
+    """
+    word = str(spec.turbulence.value)
+    if word != "none":
+        return (f"turbulence '{word}': same-seed host parity is measured and "
+                f"refused for turbulence realisations (docs/VALIDITY.md), so "
+                f"the aircraft the engine draws cannot be labelled from the "
+                f"manifest; choose '{RENDER_WORDS['clip']}' (visual-only, "
+                f"seed recorded) or turbulence none")
+    if rotor_attached:
+        return ("lee-rotor turbulence is attached on this terrain scene: "
+                "same-seed host parity is measured and refused for "
+                "turbulence realisations (docs/VALIDITY.md), so the "
+                "aircraft the engine draws cannot be labelled from the "
+                f"manifest; choose '{RENDER_WORDS['clip']}' (visual-only, "
+                f"seed recorded) or calm air")
+    return None
 
 
 def render_choice_default() -> str:

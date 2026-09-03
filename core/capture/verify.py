@@ -37,8 +37,13 @@ Checks (numbered as in the phase document):
    applied pose must equal the manifest's solved pose within 10 cm and
    0.1 deg, the applied time the scheduled instant within one fixed
    step, the PNG named by the frame's index must exist at the
-   manifest's size, and the aircraft must reproject through the applied
-   pose to the pixel the manifest's own projection gives. With no
+   manifest's size, the aircraft must reproject through the applied
+   pose to the pixel the manifest's own projection gives, and the
+   aircraft the engine actually DREW (``aircraft_applied_*``, its own
+   FDM's state at the capture) must land within a stated metre budget
+   of the manifest's aircraft and, reprojected through the applied
+   pose, within the pixels that budget subtends at the frame's depth --
+   the clause that judges the pixels, not only the camera. With no
    render.json at all the check is AWAITING ENGINE FRAMES -- a third
    state that neither passes nor fails, so a headless run can never
    claim parity it did not exercise and never fails for lacking an
@@ -80,6 +85,22 @@ ENGINE_TIME_TOL_S = 1.0 / 120.0
 #: 2.2 px and 10 cm at 100 m is 1.2 px: 3 px is what the pose tolerances
 #: above already permit, not slack on top of them.
 ENGINE_REPROJECTION_TOL_PX = 3.0
+#: The aircraft the engine DREW (``aircraft_applied_*``: its own FDM's
+#: state at the capture, in the card frame) against the manifest's
+#: aircraft (the headless flight) -- the host-parity budget, in metres.
+#: Measured basis (docs/VALIDITY.md, Gate 5 and the parity matrix): the
+#: two hosts' calm flights agree to 3.6e-4 m in altitude and 1e-5 deg in
+#: attitude, and differ in position by a CONSTANT one-fixed-step phase
+#: (1.24 m at 250 kt; the headless host integrates one extra step during
+#: engine start). 2.5 m is one 1/120 s step of travel at 300 m/s, above
+#: any envelope point the vocabulary validates, plus that residual; a
+#: drawn aircraft further off than that is a flight the manifest does not
+#: describe (a turbulence realisation, a diverged FDM), never a label.
+#: In pixels the budget is GRADED per frame: the pose tolerance above
+#: plus what 2.5 m subtends at the frame's own depth (fx * 2.5 / depth):
+#: about 31 px for a chase frame at 110 m, about 6 px for a tower frame
+#: at 1.2 km, at the default 1244 px focal.
+ENGINE_AIRCRAFT_TOL_M = 2.5
 
 #: The check name and the detail prefix the page and the CLI key on.
 ENGINE_PARITY_CHECK = "engine_parity"
@@ -416,7 +437,9 @@ def verify_engine_parity(run_dir, manifest: Dict,
                          pos_tol_m: float = ENGINE_POSITION_TOL_M,
                          ang_tol_deg: float = ENGINE_ANGLE_TOL_DEG,
                          time_tol_s: Optional[float] = None,
-                         px_tol: float = ENGINE_REPROJECTION_TOL_PX) -> Check:
+                         px_tol: float = ENGINE_REPROJECTION_TOL_PX,
+                         aircraft_tol_m: float = ENGINE_AIRCRAFT_TOL_M
+                         ) -> Check:
     """Check 5: the frames the engine rendered carry the geometry the
     manifest claims.
 
@@ -430,8 +453,13 @@ def verify_engine_parity(run_dir, manifest: Dict,
     manifest's width and height, and the aircraft reprojected through
     the APPLIED pose (this module's own projection, Euler path) within
     ``px_tol`` of the manifest's own projection and, for aircraft-aimed
-    cameras, inside the frame. The engine's frame counts must equal the
-    schedule's.
+    cameras, inside the frame. Then the aircraft the engine DREW
+    (``aircraft_applied_*``; its absence FAILS the frame -- a record
+    without it cannot be graded) within ``aircraft_tol_m`` of the
+    manifest's aircraft and, reprojected through the applied pose,
+    within ``px_tol + fx * aircraft_tol_m / depth`` of the manifest's
+    labelled pixel and inside an aimed frame. The engine's frame counts
+    must equal the schedule's.
 
     Returns an AWAITING check (``ok`` None) when no camera has a
     render.json -- the honest state of a headless run -- and a FAIL when
@@ -448,7 +476,8 @@ def verify_engine_parity(run_dir, manifest: Dict,
     problems: List[str] = []
     per_camera: Dict[str, Dict] = {}
     worst = {"position_m": 0.0, "angle_deg": 0.0, "time_s": 0.0,
-             "reprojection_px": 0.0, "aircraft_m": 0.0}
+             "reprojection_px": 0.0, "aircraft_m": 0.0, "aircraft_px": 0.0,
+             "aircraft_px_tol": 0.0, "aircraft_depth_m": 0.0}
     frames_checked = 0
     time_tol_used = time_tol_s
 
@@ -597,18 +626,69 @@ def verify_engine_parity(run_dir, manifest: Dict,
                 frame_ok = False
                 problems.append(f"{camera_id} frame {index}: the aircraft "
                                 f"lies behind the applied camera")
-            # Where the engine also wrote the aircraft it drew (its own
-            # FDM's state in the card frame), report the host-to-host
-            # distance; the pose contract above is what passes or fails.
-            if "aircraft_applied_north_m" in applied:
-                try:
-                    drawn = (float(applied["aircraft_applied_north_m"]),
-                             float(applied["aircraft_applied_east_m"]),
-                             float(applied["aircraft_applied_alt_m"]))
-                    worst["aircraft_m"] = max(worst["aircraft_m"],
-                                              math.dist(drawn, point))
-                except (KeyError, TypeError, ValueError):
-                    pass
+            # The aircraft the engine DREW (its own FDM's state in the
+            # card frame), judged: within the metre budget of the
+            # manifest's aircraft, and -- reprojected through the APPLIED
+            # pose -- within the pixels that budget subtends at this
+            # frame's depth of the manifest's labelled pixel, inside an
+            # aimed frame. A record without it FAILS: the pose contract
+            # alone cannot tell a labelled frame from a picture of some
+            # other flight.
+            try:
+                drawn = (float(applied["aircraft_applied_north_m"]),
+                         float(applied["aircraft_applied_east_m"]),
+                         float(applied["aircraft_applied_alt_m"]))
+            except (KeyError, TypeError, ValueError) as exc:
+                drawn = None
+                frame_ok = False
+                problems.append(f"{camera_id} frame {index}: engine record "
+                                f"lacks the drawn aircraft ({exc}); the "
+                                f"pixels cannot be judged against the "
+                                f"label")
+            if drawn is not None:
+                gap_m = math.dist(drawn, point)
+                worst["aircraft_m"] = max(worst["aircraft_m"], gap_m)
+                u_d, v_d, z_d = project_point(
+                    applied_record, drawn,
+                    axes_from_euler(a_roll, a_pitch, a_yaw))
+                if z_s > 0 and (z_d <= 0 or not math.isfinite(u_d)):
+                    frame_ok = False
+                    problems.append(f"{camera_id} frame {index}: the "
+                                    f"engine drew the aircraft behind the "
+                                    f"applied camera ({gap_m:.2f} m from "
+                                    f"the manifest's aircraft)")
+                elif z_s > 0 and math.isfinite(u_s):
+                    gap_px_d = math.hypot(u_d - u_s, v_d - v_s)
+                    tol_px_d = px_tol + float(record["fx_px"]) * \
+                        aircraft_tol_m / z_d
+                    if gap_px_d > worst["aircraft_px"]:
+                        worst["aircraft_px"] = gap_px_d
+                        worst["aircraft_px_tol"] = tol_px_d
+                        worst["aircraft_depth_m"] = z_d
+                    if gap_m > aircraft_tol_m or gap_px_d > tol_px_d:
+                        frame_ok = False
+                        problems.append(
+                            f"{camera_id} frame {index}: the engine drew "
+                            f"the aircraft {gap_m:.2f} m from the "
+                            f"manifest's aircraft (tol {aircraft_tol_m}), "
+                            f"{gap_px_d:.1f} px from its labelled pixel "
+                            f"(tol {tol_px_d:.1f} px at {z_d:.0f} m)")
+                    if aim_modes.get(camera_id) == "aircraft" and not (
+                            0.0 <= u_d <= record["width_px"]
+                            and 0.0 <= v_d <= record["height_px"]):
+                        frame_ok = False
+                        problems.append(f"{camera_id} frame {index}: the "
+                                        f"drawn aircraft falls outside the "
+                                        f"rendered frame through the "
+                                        f"applied pose")
+                elif gap_m > aircraft_tol_m:
+                    # The manifest's own camera does not see the aircraft
+                    # ahead (a cockpit view): the metre budget still holds.
+                    frame_ok = False
+                    problems.append(
+                        f"{camera_id} frame {index}: the engine drew the "
+                        f"aircraft {gap_m:.2f} m from the manifest's "
+                        f"aircraft (tol {aircraft_tol_m})")
             if frame_ok:
                 verified += 1
         entry["verified"] = verified
@@ -616,7 +696,8 @@ def verify_engine_parity(run_dir, manifest: Dict,
 
     data = {"cameras": per_camera, "worst": worst,
             "tolerances": {"position_m": pos_tol_m, "angle_deg": ang_tol_deg,
-                           "time_s": time_tol_used, "reprojection_px": px_tol}}
+                           "time_s": time_tol_used, "reprojection_px": px_tol,
+                           "aircraft_m": aircraft_tol_m}}
     if awaiting and not problems and frames_checked == 0:
         return Check(
             ENGINE_PARITY_CHECK, None,
@@ -638,7 +719,10 @@ def verify_engine_parity(run_dir, manifest: Dict,
                   f"{worst['time_s']:.4f} s (tol {time_tol_used:.4g}); "
                   f"worst reprojection {worst['reprojection_px']:.2f} px "
                   f"(tol {px_tol}); aircraft drawn within "
-                  f"{worst['aircraft_m']:.2f} m of the manifest")
+                  f"{worst['aircraft_m']:.2f} m of the manifest's aircraft "
+                  f"(tol {aircraft_tol_m}) and {worst['aircraft_px']:.1f} px "
+                  f"of its labelled pixel (tol {worst['aircraft_px_tol']:.1f} "
+                  f"px at that frame's {worst['aircraft_depth_m']:.0f} m)")
     else:
         shown = problems[:4]
         detail = "; ".join(shown) + (

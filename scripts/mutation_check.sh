@@ -1151,6 +1151,58 @@ mutate core/capture/render_pass.py \
     "the per-camera pass carries -camera-index=N" \
     tests/test_camera_cli.py || failures=$((failures+1))
 
+# -- Round 2: engine parity judges the aircraft the engine DREW ------------
+
+mutate core/capture/verify.py \
+    '                    if gap_m > aircraft_tol_m or gap_px_d > tol_px_d:' \
+    '                    if False:  # MUTATED: the drawn aircraft is never judged' \
+    "the aircraft the engine drew must land on the manifest's labelled pixel" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                drawn = None
+                frame_ok = False
+                problems.append(f"{camera_id} frame {index}: engine record "
+                                f"lacks the drawn aircraft ({exc}); the "' \
+    '                drawn = None
+                frame_ok = frame_ok  # MUTATED: a missing drawn aircraft is skipped
+                _skipped = (f"{camera_id} frame {index}: engine record "
+                                f"lacks the drawn aircraft ({exc}); the "' \
+    "an engine record without the drawn aircraft fails engine parity" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/render_pass.py \
+    '    word = str(spec.turbulence.value)
+    if word != "none":' \
+    '    word = str(spec.turbulence.value)
+    if False:  # MUTATED: turbulence words pass the host-parity rule' \
+    "a turbulence word refuses a frames pass (host parity measured and refused)" \
+    tests/test_camera_cli.py tests/test_webapp_capture.py \
+    || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '    parity = frames_host_parity_refusal(spec) if render == "frames" else None' \
+    '    parity = None  # MUTATED: /run never consults the host-parity rule' \
+    "POST /run refuses frames for a turbulent spec by name" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '            parity = frames_host_parity_refusal(
+                spec, rotor_attached=rotor_provider is not None)' \
+    '            parity = None  # MUTATED: the flow ignores an attached rotor' \
+    "a frames run with a lee rotor attached fails by name" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '        parity = frames_host_parity_refusal(spec)
+        if parity is not None:
+            print(f"REFUSED {HOST_PARITY_CONSTRAINT}: {parity}")' \
+    '        parity = None  # MUTATED: the CLI renders frames for turbulent air
+        if parity is not None:
+            print(f"REFUSED {HOST_PARITY_CONSTRAINT}: {parity}")' \
+    "the CLI refuses frames for a turbulent spec by name" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

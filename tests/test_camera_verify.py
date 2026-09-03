@@ -380,6 +380,76 @@ def test_engine_parity_fails_on_a_short_pass(tmp_path):
     assert "frame 14: no engine record" in check.detail
 
 
+def test_engine_parity_fails_when_the_engine_drew_the_aircraft_elsewhere(
+        tmp_path):
+    """The camera pose and the capture time are exact, but the engine's
+    own FDM put the aircraft 5 m from where the manifest says (the case
+    host parity is refused for): the frame's label does not match its
+    pixels, and the check FAILS by frame with the metre and pixel
+    numbers. One step of travel (the measured host phase) passes."""
+    from core.capture.verify import (
+        ENGINE_AIRCRAFT_TOL_M, verify_engine_parity,
+    )
+
+    manifest = two_camera_manifest()
+    write_capture_manifest(manifest, tmp_path)
+    outputs = write_engine_output(manifest, tmp_path)
+    record = outputs["chase0"]["frame_records"][2]
+    record["aircraft_applied_east_m"] += 1.3      # one 1/120 s step at 156 m/s
+    rewrite(tmp_path, "chase0", outputs["chase0"])
+    check = verify_engine_parity(tmp_path, manifest)
+    assert check.ok is True, check.detail
+    assert "aircraft drawn within 1.30 m" in check.detail
+    assert f"(tol {ENGINE_AIRCRAFT_TOL_M})" in check.detail
+    assert "px of its labelled pixel" in check.detail
+
+    record["aircraft_applied_east_m"] += 3.7      # 5.0 m in all
+    rewrite(tmp_path, "chase0", outputs["chase0"])
+    check = verify_engine_parity(tmp_path, manifest)
+    assert check.ok is False
+    assert "chase0 frame 2: the engine drew the aircraft 5.00 m" in check.detail
+    assert f"(tol {ENGINE_AIRCRAFT_TOL_M})" in check.detail
+    assert "px from its labelled pixel (tol" in check.detail
+    assert check.data["cameras"]["chase0"]["verified"] == 14
+    assert check.data["worst"]["aircraft_m"] == pytest.approx(5.0)
+    # 5 m abeam at the chase distance is tens of pixels: the graded pixel
+    # tolerance at that depth is stated in the failure, and exceeded.
+    import re
+
+    gap_px, tol_px = map(float, re.search(
+        r"(\d+\.\d) px from its labelled pixel \(tol (\d+\.\d) px",
+        check.detail).groups())
+    assert gap_px > tol_px > 3.0
+
+    # The tower is 1.2 km away: the same 5 m is a few pixels there, and
+    # the METRE clause still fails it -- the budget is not slack.
+    outputs = write_engine_output(manifest, tmp_path)
+    outputs["tower0"]["frame_records"][9]["aircraft_applied_north_m"] += 5.0
+    rewrite(tmp_path, "tower0", outputs["tower0"])
+    check = verify_engine_parity(tmp_path, manifest)
+    assert check.ok is False
+    assert "tower0 frame 9: the engine drew the aircraft 5.00 m" in check.detail
+
+
+def test_engine_parity_fails_when_the_engine_did_not_record_the_aircraft(
+        tmp_path):
+    """A consume-poses record without the aircraft the engine drew cannot
+    be graded against its label: FAIL by frame, never a silent skip."""
+    from core.capture.verify import verify_engine_parity
+
+    manifest = two_camera_manifest()
+    write_capture_manifest(manifest, tmp_path)
+    outputs = write_engine_output(manifest, tmp_path)
+    for key in ("aircraft_applied_north_m", "aircraft_applied_east_m",
+                "aircraft_applied_alt_m"):
+        del outputs["tower0"]["frame_records"][3][key]
+    rewrite(tmp_path, "tower0", outputs["tower0"])
+    check = verify_engine_parity(tmp_path, manifest)
+    assert check.ok is False
+    assert "tower0 frame 3: engine record lacks the drawn aircraft" in check.detail
+    assert check.data["cameras"]["tower0"]["verified"] == 14
+
+
 def test_engine_parity_fails_when_only_some_cameras_rendered(tmp_path):
     """One camera's pass ran and the other's did not: that is a failed
     run, not an awaiting one."""
