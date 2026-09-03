@@ -133,11 +133,12 @@ def mono_fonts(sizes: Tuple[int, ...]) -> List:
 
 
 UE_PLATFORM_REFUSAL = (
-    "REFUSED ue.platform: rendered clips require macOS, or Windows with\n"
-    "Unreal Engine 5.5 and the FlightSimBridge built -- run\n"
+    "REFUSED ue.platform: rendered frames and clips require macOS, or\n"
+    "Windows with Unreal Engine 5.5 and the FlightSimBridge built -- run\n"
     "scripts\\ue_preflight.ps1 for the exact missing piece. The compiler,\n"
-    "headless physics, telemetry and the webapp run on this OS either\n"
-    "way -- see README \"Platform support\".")
+    "headless physics, telemetry, the capture manifest, previews and\n"
+    "verification, and the webapp run on this OS either way -- see README\n"
+    "\"Platform support\".")
 
 #: Default engine install roots, checked AFTER the UE_ROOT env override.
 #: Windows scans for any UE_5.* so a 5.4/5.6 install is still found and

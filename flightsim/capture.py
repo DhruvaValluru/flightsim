@@ -19,7 +19,11 @@ approximating):
 6. the solved tracks are re-checked against the scene along the whole
    run;
 7. capture_manifest.json, telemetry.json, scenario.yaml and one
-   geometry preview per scheduled frame are written;
+   geometry preview per scheduled frame are written, and the SAME
+   verifier the instructor runs (flightsim.verify) grades what was just
+   written -- its table is printed in every mode, engine parity AWAITING
+   until frames exist, and a manifest that fails its own verification
+   FAILS the run by name (capture.verification, exit 2);
 8. the render choice, the SAME three words the web page offers
    (--render, default: the richest this machine supports):
 
@@ -34,8 +38,10 @@ approximating):
    * ``clip`` -- one preset pass and an fps clip, the manifest and
      previews beside it, nothing rendered as frames;
    * ``none`` -- steps 1-7 only. On a machine without the engine this
-     is the only choice; asking for frames or clip there REFUSES BY
-     NAME (ue.platform) with the machine's reason.
+     is the only choice: the run states the engine's absence by reason
+     ("engine absent: ...; frames not rendered") and is DONE, exit 0 --
+     asking for frames or clip there REFUSES BY NAME (ue.platform) with
+     the machine's reason, and REFUSED is exit 2's word only.
 
 Exit codes: 0 = done as chosen (a headless run is done at step 7);
 2 = a named refusal or a named engine-pass failure; 1 = unexpected.
@@ -261,14 +267,36 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"  previews: {len(previews)} geometry preview(s) under "
           f"{out / 'previews'} (previews are not frames)")
 
+    # Every mode verifies what it just wrote, with the verifier the
+    # instructor runs (flightsim.verify), BEFORE the final line -- so
+    # "verification" is never claimed for a check that did not run. The
+    # table is printed here for none and clip (engine parity AWAITING,
+    # in those words); frames prints the complete table once its passes
+    # have given engine parity frames to grade, and refuses here, before
+    # any editor time, when the manifest itself does not verify.
+    from core.capture.verify import verify_run
+
+    report = verify_run(out)
+    if render != "frames" or not report.ok:
+        print(report.render())
+    if not report.ok:
+        print(f"FAILED capture.verification: the manifest just written did "
+              f"not verify ({report.passed} of "
+              f"{len(report.checks) - len(report.awaiting)} checks passed); "
+              f"nothing is rendered from geometry that fails its own check")
+        return 2
+
     if render == "none":
+        # Done as chosen: the engine's absence is a stated fact with its
+        # reason, in a non-refusal register -- REFUSED is exit 2's word.
         if ue_available():
             print("render: none (headless by choice; --render frames "
                   "would render the scheduled frames on this machine)")
         else:
-            print(UE_PLATFORM_REFUSAL)
-            print("(pixels only; the manifest, previews and verification "
-                  "above are complete on this platform)")
+            print(f"engine absent: {ue_unavailable_reason()}; frames not "
+                  f"rendered (--render frames where the engine exists)")
+        print(f"done: manifest, {len(previews)} previews and verification "
+              f"for {total} scheduled frames under {out} (no pixels)")
         return 0
 
     scene = {"key": "terrain" if heightfield else "flat",

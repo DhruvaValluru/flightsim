@@ -228,6 +228,80 @@ def test_render_none_says_scheduled_not_captured(tmp_path, capsys):
     assert not (out / "card.json").exists()          # only with --card
 
 
+def test_a_headless_run_verifies_and_never_says_refused(tmp_path, capsys,
+                                                         monkeypatch):
+    """--render none on a machine without the engine did exactly what
+    was asked: exit 0, the verifier's own table printed before the final
+    line (five PASS lines and engine parity AWAITING, in those words),
+    the engine's absence stated by reason in a non-refusal register, and
+    the word REFUSED nowhere -- REFUSED is exit 2's word. On a machine
+    WITH the engine the same run says headless was a choice."""
+    import core.util.platform as plat
+
+    monkeypatch.setattr(plat, "ue_available", lambda: False)
+    monkeypatch.setattr(plat, "ue_unavailable_reason",
+                        lambda: "no engine on this OS: the render half needs "
+                                "macOS, or Windows with Unreal Engine 5.5")
+    out = tmp_path / "headless"
+    assert capture_main([str(EXAMPLES / "cameras_multi.yaml"), "--out",
+                         str(out), "--max-previews", "2",
+                         "--render", "none"]) == 0
+    text = capsys.readouterr().out
+    for check in ("manifest_version", "fields_finite", "geometry_recovery",
+                  "cross_view_consistency", "count_exactness"):
+        assert f"[PASS] {check}" in text, check
+    assert "[AWAITING] engine_parity: awaiting engine frames" in text
+    assert "verification PASSED (5/5 checks; 1 awaiting engine frames" in text
+    assert "REFUSED" not in text
+    assert ("engine absent: no engine on this OS: the render half needs "
+            "macOS, or Windows with Unreal Engine 5.5; frames not rendered "
+            "(--render frames where the engine exists)") in text
+    lines = text.strip().splitlines()
+    assert lines[-1].startswith("done: manifest, 2 previews and verification "
+                                "for 48 scheduled frames under ")
+    assert lines[-1].endswith("(no pixels)")
+    # The table precedes the final line: verification is not a claim.
+    assert text.index("[AWAITING] engine_parity") < text.index("engine absent:")
+    # Verifiable from the directory, exactly as printed.
+    assert verify_main([str(out)]) == 0
+    assert "[AWAITING] engine_parity" in capsys.readouterr().out
+
+    monkeypatch.setattr(plat, "ue_available", lambda: True)
+    monkeypatch.setattr(plat, "ue_unavailable_reason", lambda: None)
+    assert capture_main([str(EXAMPLES / "cameras_multi.yaml"), "--out",
+                         str(tmp_path / "chosen"), "--max-previews", "0",
+                         "--render", "none"]) == 0
+    text = capsys.readouterr().out
+    assert "render: none (headless by choice" in text
+    assert "REFUSED" not in text and "engine absent" not in text
+    assert "verification PASSED (5/5 checks" in text
+
+
+def test_a_manifest_that_fails_its_own_verification_fails_the_run(
+        tmp_path, capsys, monkeypatch):
+    """The headless run does not stop at 'written': a manifest the
+    verifier fails is a failed run, by name (capture.verification, exit
+    2), with the failing table printed."""
+    from core.capture.verify import VerificationReport
+
+    def failing(run_dir, other_run_dir=None):
+        report = VerificationReport()
+        report.add("manifest_version", True, "manifest_version 1")
+        report.add("geometry_recovery", False,
+                   "stub: 3 aimed frames without the aircraft in frame")
+        return report
+
+    monkeypatch.setattr("core.capture.verify.verify_run", failing)
+    out = tmp_path / "unverified"
+    code = capture_main([str(EXAMPLES / "cameras_multi.yaml"), "--out",
+                         str(out), "--max-previews", "0", "--render", "none"])
+    text = capsys.readouterr().out
+    assert code == 2, text
+    assert "[FAIL] geometry_recovery: stub: 3 aimed frames" in text
+    assert "FAILED capture.verification: the manifest just written did not verify (1 of 2 checks passed)" in text
+    assert "done:" not in text
+
+
 def test_an_engine_choice_without_an_engine_refuses_by_name(tmp_path, capsys,
                                                              monkeypatch):
     """--render frames|clip on a machine without the engine: exit 2 with
@@ -247,6 +321,10 @@ def test_an_engine_choice_without_an_engine_refuses_by_name(tmp_path, capsys,
         assert "no engine on this machine: set UE_ROOT" in text
         assert f"--render {word}" in text
         assert not (out / "capture_manifest.json").exists()
+        # The refusal speaks of frames, the phase's deliverable, and of
+        # what DOES run here -- not of "rendered clips" alone.
+        assert "REFUSED ue.platform: rendered frames and clips require" in text
+        assert "the capture manifest, previews and" in text
 
 
 def test_a_turbulent_spec_refuses_frames_by_name(tmp_path, capsys,
@@ -379,5 +457,9 @@ def test_render_clip_is_the_single_preset_pass(tmp_path, capsys, cli_engine):
     assert "rendered clip:" in text
     assert "0 frames rendered as a frame set" in text
     assert not (out / "frames").exists()
+    # The clip mode verified the manifest it wrote, before the pass.
+    assert "[AWAITING] engine_parity" in text
+    assert "verification PASSED (5/5 checks" in text
+    assert text.index("verification PASSED") < text.index("engine pass:")
     clip_card = json.loads((out / "clip_card.json").read_text(encoding="utf-8"))
     assert "cameras" not in clip_card

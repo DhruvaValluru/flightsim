@@ -86,16 +86,38 @@ table. Now:
 .venv/bin/python -m flightsim.verify runs/demo
 ```
 
-Expected without the engine: validation passes, the headless run
-flies, 48 frames (24 per camera) are scheduled, `capture_manifest.json`
-+ geometry previews are written ("scheduled 48 frames across 2
-camera(s)" -- previews are not frames), verification reports 5/5 PASS
-with `[AWAITING] engine_parity: awaiting engine frames`, and the default
-render choice resolves to `none` (`--render frames` there refuses BY
-NAME, `ue.platform`, with the machine's reason -- the designed outcome,
-not a failure). With the engine built the default is `--render frames`
-and the same command renders 24 PNGs per camera and grades them (see
-"Engine verification (Windows)" below).
+Expected without the engine (measured 2026-09-03 on Linux, exit 0;
+the JSBSim banner omitted; the default render choice resolves to
+`none` there, so `--render none` is implied):
+
+```
+spec cef57d752362381d valid; running headlessly...
+scheduled 48 frames across 2 camera(s)
+  manifest: runs/demo/capture_manifest.json
+  previews: 48 geometry preview(s) under runs/demo/previews (previews are not frames)
+  [PASS] manifest_version: manifest_version 1, spec cef57d752362381d
+  [PASS] fields_finite: 48 frame records checked
+  [PASS] geometry_recovery: 48 frames; quaternion-vs-euler reprojection gap 0.0000 px (tol 0.5); 0 aircraft behind camera; 0 aimed frames without the aircraft in frame
+  [PASS] cross_view_consistency: 24 two-view instants; worst triangulation error 0.0000 m (tol 0.5)
+  [PASS] count_exactness: 2 camera(s), every declared count met exactly
+  [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
+verification PASSED (5/5 checks; 1 awaiting engine frames: engine_parity)
+engine absent: no engine on this OS: the render half needs macOS, or Windows with Unreal Engine 5.5 and the FlightSimBridge built; frames not rendered (--render frames where the engine exists)
+done: manifest, 48 previews and verification for 48 scheduled frames under runs/demo (no pixels)
+```
+
+Every mode runs that verifier on the manifest it just wrote and prints
+the table BEFORE its final line (clip mode too, before its engine pass;
+frames mode prints the complete table after its passes, when engine
+parity has frames to grade), and a manifest that fails its own
+verification fails the run by name (`capture.verification`, exit 2).
+The word REFUSED is reserved for exit 2: a headless run on a machine
+without the engine is DONE, and states the engine's absence by reason.
+`--render frames` there refuses BY NAME (`ue.platform`, "rendered
+frames and clips require ...") with the machine's reason -- the
+designed outcome, not a failure. With the engine built the default is
+`--render frames` and the same command renders 24 PNGs per camera and
+grades them (see "Engine verification (Windows)" below).
 
 Also committed:
 

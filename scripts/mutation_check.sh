@@ -1209,6 +1209,21 @@ mutate core/capture/verify.py \
     "the applied pose must be taken at the scheduled instant, not the engine clock" \
     tests/test_camera_verify.py || failures=$((failures+1))
 
+mutate flightsim/capture.py \
+    '    if not report.ok:
+        print(f"FAILED capture.verification: the manifest just written did "' \
+    '    if False:  # MUTATED: a manifest that fails its own verification is done
+        print(f"FAILED capture.verification: the manifest just written did "' \
+    "a manifest that fails its own verification fails the CLI run by name" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '            print(f"engine absent: {ue_unavailable_reason()}; frames not "
+                  f"rendered (--render frames where the engine exists)")' \
+    '            print(UE_PLATFORM_REFUSAL)  # MUTATED: a successful headless run prints a refusal' \
+    "a successful headless CLI run states the engine's absence without REFUSING" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
