@@ -1,7 +1,8 @@
-"""Capture a scenario: spec -> validate -> run -> solved geometry.
+"""Capture a scenario: spec -> validate -> run -> solved geometry -> frames.
 
     .venv/bin/python -m flightsim.capture examples/cameras_multi.yaml \
-        --out runs/demo [--terrain runs/terrain/matterhorn] [--max-previews N]
+        --out runs/demo [--render frames|clip|none] \
+        [--terrain runs/terrain/matterhorn] [--max-previews N]
 
 What happens, in order (each step refuses by name rather than
 approximating):
@@ -19,13 +20,25 @@ approximating):
    run;
 7. capture_manifest.json, telemetry.json, scenario.yaml and one
    geometry preview per scheduled frame are written;
-8. on a machine with the UE render half, pixels would render beside
-   them; anywhere else rendering REFUSES BY NAME (ue.platform) while
-   steps 1-7 stand -- the manifest and previews are the off-mac
-   deliverable.
+8. the render choice, the SAME three words the web page offers
+   (--render, default: the richest this machine supports):
 
-Exit codes: 0 = captured (even when rendering was refused by name);
-2 = a named validation/schedule refusal; 1 = unexpected failure.
+   * ``frames`` -- card.json carries every camera's solved pose track
+     and capture instants; the render commandlet's consume-poses pass
+     runs ONCE PER CAMERA (-camera-index=N, -frames=<out>/frames/<id>)
+     through the same command builder the webapp uses, captures only
+     at the scheduled instants and names each PNG by its manifest
+     index; a short pass FAILS by name (render.frames); the verifier's
+     engine-parity check then grades applied vs solved per frame; the
+     clip is a by-product of camera 0's frames at their instants;
+   * ``clip`` -- one preset pass and an fps clip, the manifest and
+     previews beside it, nothing rendered as frames;
+   * ``none`` -- steps 1-7 only. On a machine without the engine this
+     is the only choice; asking for frames or clip there REFUSES BY
+     NAME (ue.platform) with the machine's reason.
+
+Exit codes: 0 = done as chosen (a headless run is done at step 7);
+2 = a named refusal or a named engine-pass failure; 1 = unexpected.
 """
 
 from __future__ import annotations
@@ -39,6 +52,12 @@ from typing import Optional, Sequence
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
+
+from core.capture.render_pass import (  # noqa: E402
+    RENDER_CHOICES, RENDER_FRAMES_CONSTRAINT, RENDER_WORDS,
+    check_render_pass, encode_scheduled_clip, render_choice_default,
+    render_command, rendered_count, run_render_pass,
+)
 
 
 def _tornado_hazard_block(spec):
@@ -88,11 +107,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                              "per scheduled frame)")
     parser.add_argument("--card", action="store_true",
                         help="also write card.json carrying each camera's "
-                             "solved pose track, for the UE commandlet's "
-                             "consume-poses mode on a render-capable "
-                             "machine (-camera-index=N, one pass per "
-                             "camera)")
+                             "solved pose track (always written by "
+                             "--render frames), for the UE commandlet's "
+                             "consume-poses mode (-camera-index=N, one "
+                             "pass per camera)")
+    parser.add_argument("--render", choices=RENDER_CHOICES, default=None,
+                        help="what to produce: frames (engine, one "
+                             "consume-poses pass per camera, clip as a "
+                             "by-product), clip (one preset pass), none "
+                             "(headless: manifest, previews, "
+                             "verification). Default: the richest this "
+                             "machine supports")
     args = parser.parse_args(argv)
+    render = args.render or render_choice_default()
 
     from core.capture.manifest import (
         build_capture_manifest, write_capture_manifest,
@@ -100,6 +127,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from core.capture.poses import (
         SceneFrame, camera_card_blocks, solve_pose_track,
     )
+    from core.util.platform import (
+        UE_PLATFORM_REFUSAL, ue_available, ue_unavailable_reason,
+    )
+
+    # The choice is checked BEFORE any editor time or headless flight: an
+    # engine choice this machine cannot honour is refused by name here,
+    # never degraded to the headless run.
+    if render != "none" and not ue_available():
+        print(UE_PLATFORM_REFUSAL)
+        print(f"  --render {render} ({RENDER_WORDS[render]}) needs the "
+              f"engine: {ue_unavailable_reason()}")
+        print("  --render none runs the headless half on this machine")
+        return 2
     from core.capture.preview import render_previews
     from core.capture.schedule import ScheduleError, solve_schedule
     from core.capture.validate import (
@@ -184,7 +224,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "samples": len(result.telemetry),
     }, indent=1), encoding="utf-8")
 
-    if args.card:
+    card_path = None
+    if args.card or render == "frames":
         # The run-card projection with the cameras block: spec fields +
         # solved pose tracks, computed HERE, consumed verbatim by the
         # commandlet's consume-poses mode. The commandlet's own named
@@ -192,11 +233,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # airspeed_kind, a track that does not cover the run).
         from core.scenario.card import write_run_card
 
-        write_run_card(
+        card_path = write_run_card(
             spec, out / "card.json",
             cameras=camera_card_blocks(cameras, tracks, schedules, frame),
             scene_crs=frame.crs if frame.declared else None)
-        print(f"  card:     {out / 'card.json'} (consume-poses; one "
+        print(f"  card:     {card_path} (consume-poses; one "
               f"commandlet pass per camera via -camera-index=N)")
 
     previews = render_previews(manifest, out, heightfield=heightfield,
@@ -204,22 +245,161 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                terrain_elevation_m=terrain_datum,
                                max_frames=args.max_previews)
     total = sum(len(s) for s in schedules)
-    print(f"captured: {total} frames across {len(cameras)} camera(s)")
+    # Scheduled, in that word: nothing has been rendered yet.
+    print(f"scheduled {total} frames across {len(cameras)} camera(s)")
     print(f"  manifest: {manifest_path}")
     print(f"  previews: {len(previews)} geometry preview(s) under "
-          f"{out / 'previews'}")
+          f"{out / 'previews'} (previews are not frames)")
 
-    from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
+    if render == "none":
+        if ue_available():
+            print("render: none (headless by choice; --render frames "
+                  "would render the scheduled frames on this machine)")
+        else:
+            print(UE_PLATFORM_REFUSAL)
+            print("(pixels only; the manifest, previews and verification "
+                  "above are complete on this platform)")
+        return 0
 
-    if ue_available():
-        print("UE render half present: render this card through the "
-              "webapp flow (webapp.runs) or the render commandlet; the "
-              "per-camera consume-poses pass is the engine side of this "
-              "phase.")
-    else:
-        print(UE_PLATFORM_REFUSAL)
-        print("(pixels only; the manifest, previews and verification "
-              "above are complete on this platform)")
+    scene = {"key": "terrain" if heightfield else "flat",
+             "terrain": args.terrain, "imagery": None}
+    if render == "frames":
+        return _render_frames(spec, out, card_path, scene, cameras,
+                              schedules)
+    return _render_clip(spec, out, scene)
+
+
+def _engine_prerequisites(spec, out: Path):
+    """(editor, project, mesh) for an engine pass, or a named refusal
+    (exit code) -- the owner's placeholder rule through the webapp's ONE
+    implementation: an airframe without a real licensed model never
+    renders, on any machine."""
+    from core.util.platform import ue_editor_path
+
+    from webapp.runs import refuse_placeholder_mesh
+
+    refusal = refuse_placeholder_mesh(spec)
+    if refusal is not None:
+        print(f"REFUSED {refusal['constraint']}: {refusal['message']}")
+        return None
+    aircraft = str(spec.aircraft.value)
+    mesh = REPO / "assets" / "generated" / aircraft / "mesh_manifest.json"
+    project = REPO / "ue" / "FlightSim.uproject"
+    return ue_editor_path(), project, mesh
+
+
+def _render_frames(spec, out: Path, card_path: Path, scene, cameras,
+                   schedules) -> int:
+    """--render frames: one consume-poses pass per camera, graded pass
+    by pass, then the verifier's engine-parity check over the lot."""
+    from core.capture.verify import verify_run
+    from experiments.showcase_matrix import FPS, HEIGHT, TIME_OF_DAY, \
+        VISIBILITY, WIDTH
+
+    prerequisites = _engine_prerequisites(spec, out)
+    if prerequisites is None:
+        return 2
+    editor, project, mesh = prerequisites
+    duration = float(spec.duration.value)
+    for index, schedule in enumerate(schedules):
+        camera_id = schedule.camera_id
+        frames_dir = out / "frames" / camera_id
+        print(f"engine pass {index + 1} of {len(schedules)}: camera "
+              f"'{camera_id}', {len(schedule)} frames scheduled over the "
+              f"{duration:g} s run (-camera-index={index})")
+        command = render_command(
+            editor, project, card_path, frames_dir, fps=FPS, width=WIDTH,
+            height=HEIGHT, look=TIME_OF_DAY["noon"],
+            fog_density=VISIBILITY["clear"], scene=scene, mesh=mesh,
+            telemetry=(out / "engine_telemetry.json" if index == 0
+                       else None),
+            camera_index=index)
+        ok = run_render_pass(command, frames_dir, frames_dir / "render.log")
+        problem = (check_render_pass(frames_dir, len(schedule)) if ok
+                   else f"the engine pass wrote no render.json; see "
+                        f"{frames_dir / 'render.log'}")
+        if problem is not None:
+            print(f"FAILED {RENDER_FRAMES_CONSTRAINT}: camera '{camera_id}': "
+                  f"{problem}")
+            print(f"  rendered {rendered_count(frames_dir)} of "
+                  f"{len(schedule)} scheduled frames; the frames written "
+                  f"so far are not a frame set")
+            return 2
+        print(f"  camera '{camera_id}': {rendered_count(frames_dir)} of "
+              f"{len(schedule)} scheduled frames rendered under "
+              f"{frames_dir}")
+
+    first = schedules[0]
+    clip = out / "clip.mp4"
+    try:
+        from core.util.platform import find_ffmpeg
+
+        encoded = encode_scheduled_clip(find_ffmpeg(),
+                                        out / "frames" / first.camera_id,
+                                        list(first.times), clip)
+    except Exception as exc:
+        encoded = False
+        print(f"  clip: not encoded ({type(exc).__name__}: {exc}); the "
+              f"frames stand on their own")
+    if encoded:
+        print(f"  clip:     {clip} (by-product of camera "
+              f"'{first.camera_id}', frames at their scheduled instants)")
+
+    report = verify_run(out)
+    print(report.render())
+    total = sum(len(s) for s in schedules)
+    verified = 0
+    for check in report.checks:
+        if check.name == "engine_parity" and check.data:
+            verified = sum(int(c.get("verified", 0))
+                           for c in check.data["cameras"].values())
+    if not report.ok:
+        print(f"FAILED {RENDER_FRAMES_CONSTRAINT}: rendered {total} frames "
+              f"across {len(cameras)} camera(s) but verification failed "
+              f"({verified} verified by engine parity)")
+        return 2
+    print(f"rendered {total} frames across {len(cameras)} camera(s) "
+          f"({verified} verified by engine parity) under {out / 'frames'}")
+    return 0
+
+
+def _render_clip(spec, out: Path, scene) -> int:
+    """--render clip: the single preset pass (the SAME flags the webapp's
+    clip flow builds) and an fps clip; nothing rendered as frames."""
+    from core.scenario.card import write_run_card
+    from experiments.showcase_matrix import FPS, HEIGHT, TIME_OF_DAY, \
+        VISIBILITY, WIDTH, encode_clip
+
+    from webapp.runs import camera_render_flags
+
+    prerequisites = _engine_prerequisites(spec, out)
+    if prerequisites is None:
+        return 2
+    editor, project, mesh = prerequisites
+    try:
+        camera_flags = camera_render_flags(spec)
+    except ValueError as exc:
+        print(f"REFUSED {exc}")
+        return 2
+    card_path = write_run_card(spec, out / "clip_card.json")
+    frames_dir = out / "clip_frames"
+    command = render_command(
+        editor, project, card_path, frames_dir, fps=FPS, width=WIDTH,
+        height=HEIGHT, look=TIME_OF_DAY["noon"],
+        fog_density=VISIBILITY["clear"], scene=scene, mesh=mesh,
+        telemetry=out / "engine_telemetry.json", camera_flags=camera_flags)
+    print(f"engine pass: preset camera {camera_flags[0]}, {FPS} fps over "
+          f"the {float(spec.duration.value):g} s run")
+    if not run_render_pass(command, frames_dir, out / "clip_render.log"):
+        print(f"FAILED render.clip: the engine pass wrote no render.json; "
+              f"see {out / 'clip_render.log'}")
+        return 2
+    clip = out / "clip.mp4"
+    if not encode_clip(frames_dir, clip):
+        print("FAILED render.clip: ffmpeg could not encode the clip")
+        return 2
+    print(f"rendered clip: {clip} ({FPS} fps); 0 frames rendered as a "
+          f"frame set (--render frames for that)")
     return 0
 
 

@@ -52,8 +52,9 @@ import sys
 sys.path.insert(0, str(REPO))
 
 from core.capture.render_pass import (  # noqa: E402
-    RENDER_FRAMES_CONSTRAINT, check_render_pass, encode_scheduled_clip,
-    frame_name, rendered_count,
+    RENDER_CHOICES, RENDER_FRAMES_CONSTRAINT, RENDER_WORDS,
+    check_render_pass, encode_scheduled_clip, frame_name, render_command,
+    rendered_count, run_render_pass,
 )
 from core.scenario.camera import (  # noqa: E402
     CHASE_OFFSETS, CameraSpec, default_cameras,
@@ -82,12 +83,10 @@ from experiments.showcase_panel import build_panel_clip  # noqa: E402
 #: capped, and the run says so.
 CLIP_SECONDS = 22.0
 
-#: The three render choices, in the page's own words. The richest option
-#: the machine supports is the default; an engine option a machine cannot
-#: honour is refused by name (ue.platform), never degraded.
-RENDER_CHOICES = ("frames", "clip", "none")
-RENDER_WORDS = {"frames": "Render frames and clip", "clip": "Clip only",
-                "none": "Headless"}
+#: The three render choices (core.capture.render_pass.RENDER_CHOICES,
+#: re-exported), in the page's own words. The richest option the machine
+#: supports is the default; an engine option a machine cannot honour is
+#: refused by name (ue.platform), never degraded.
 
 
 def capture_done_line(summary: Optional[Dict], render: str,
@@ -1604,45 +1603,22 @@ class RunManager:
         their own).
         """
         project = REPO / "ue" / "FlightSim.uproject"
-        frames.mkdir(parents=True, exist_ok=True)
-        (frames / "render.json").unlink(missing_ok=True)
         tod = look or TIME_OF_DAY["noon"]
-        if camera_index is not None:
-            inline, trailing = [f"-camera-index={int(camera_index)}"], []
-        else:
-            inline, trailing = camera_flags or (
+        if camera_index is None and not camera_flags:
+            camera_flags = (
                 [f"-chase={WEBAPP_CHASE.get(aircraft, '-110:0:12')}",
                  "-camera=chase"], [])
-        command = [
-            str(EDITOR), str(project), "-run=FlightSimBridge.FlightSimRender",
-            f"-scenario={card}", f"-frames={frames}",
-            "-Visual", "-shot=showcase",
-            *inline,
-            f"-fps={FPS}", f"-width={WIDTH}", f"-height={HEIGHT}",
-            f"-sun-elev={tod['sun_elev']}", f"-sun-azim={tod['sun_azim']}",
-            f"-exposure-bias={tod['exposure_bias']}",
-            f"-fog-density={(look or {}).get('fog_density', VISIBILITY['clear'])}",
-            "-unattended", "-nopause", "-nosplash",
-            "-stdout", "-FullStdOutLogOutput",
-            "-RenderOffScreen", "-AllowCommandletRendering",
-        ]
-        command += list(trailing)
-        if scene.get("terrain"):
-            command += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
-        if scene.get("imagery"):
-            command += [f"-imagery={scene['imagery']}"]
-        if mesh.is_file():
-            command += [f"-mesh={mesh}"]
-        if telemetry is not None:
-            # The SHARED recorder's own file (same component all three hosts
-            # use), stamping the FDM's clock -- the aero panel reads it
-            # verbatim, no resampling.
-            command += [f"-telemetry={telemetry}"]
+        # The SHARED builder (core.capture.render_pass.render_command, the
+        # CLI's too); -telemetry= names the shared recorder's own file,
+        # stamping the FDM's clock -- the aero panel reads it verbatim.
+        command = render_command(
+            EDITOR, project, card, frames, fps=FPS, width=WIDTH,
+            height=HEIGHT, look=tod,
+            fog_density=(look or {}).get("fog_density", VISIBILITY["clear"]),
+            scene=scene, mesh=mesh, telemetry=telemetry,
+            camera_flags=camera_flags, camera_index=camera_index)
         log = Path(log) if log is not None else frames.parent / "render.log"
-        with log.open("w") as sink:
-            subprocess.run(command, stdout=sink, stderr=subprocess.STDOUT,
-                           stdin=subprocess.DEVNULL)
-        return (frames / "render.json").is_file()
+        return run_render_pass(command, frames, log)
 
     @staticmethod
     def _capture_phase(run: RunState, spec: ScenarioSpec, scene: Dict,

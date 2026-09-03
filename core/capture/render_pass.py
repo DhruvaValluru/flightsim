@@ -33,6 +33,79 @@ from typing import Dict, List, Optional, Sequence
 
 #: The named constraint a short or absent engine pass fails with.
 RENDER_FRAMES_CONSTRAINT = "render.frames"
+#: The three render choices, in the page's own words (webapp.runs
+#: re-exports them). The richest option the machine supports is the
+#: default everywhere the choice is offered.
+RENDER_CHOICES = ("frames", "clip", "none")
+RENDER_WORDS = {"frames": "Render frames and clip", "clip": "Clip only",
+                "none": "Headless"}
+
+
+def render_choice_default() -> str:
+    """The richest render choice this machine supports: frames where the
+    engine exists (core.util.platform.ue_available), else none."""
+    from core.util.platform import ue_available
+
+    return "frames" if ue_available() else "none"
+
+
+def render_command(editor, project, card, frames, *, fps: int, width: int,
+                   height: int, look: Dict, fog_density: float,
+                   scene: Dict, mesh, telemetry=None,
+                   camera_flags=None, camera_index: Optional[int] = None
+                   ) -> List[str]:
+    """The render commandlet's argument list -- ONE builder for the
+    webapp's flows and the CLI, so the two cannot drift.
+
+    Gotcha 1: absolute paths, -stdout -FullStdOutLogOutput,
+    -RenderOffScreen -AllowCommandletRendering. The terrain, imagery,
+    mesh and telemetry arguments appear only when given. ``camera_flags``
+    is the preset pass's (inline, trailing) pair from
+    camera_render_flags; ``camera_index`` selects the consume-poses pass
+    instead: ``-camera-index=N`` and no preset words at all.
+    """
+    if camera_index is not None:
+        inline, trailing = [f"-camera-index={int(camera_index)}"], []
+    else:
+        inline, trailing = camera_flags if camera_flags else ([], [])
+    command = [
+        str(editor), str(project), "-run=FlightSimBridge.FlightSimRender",
+        f"-scenario={card}", f"-frames={frames}",
+        "-Visual", "-shot=showcase",
+        *inline,
+        f"-fps={fps}", f"-width={width}", f"-height={height}",
+        f"-sun-elev={look['sun_elev']}", f"-sun-azim={look['sun_azim']}",
+        f"-exposure-bias={look['exposure_bias']}",
+        f"-fog-density={fog_density}",
+        "-unattended", "-nopause", "-nosplash",
+        "-stdout", "-FullStdOutLogOutput",
+        "-RenderOffScreen", "-AllowCommandletRendering",
+    ]
+    command += list(trailing)
+    if scene.get("terrain"):
+        command += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
+    if scene.get("imagery"):
+        command += [f"-imagery={scene['imagery']}"]
+    if mesh is not None and Path(mesh).is_file():
+        command += [f"-mesh={mesh}"]
+    if telemetry is not None:
+        command += [f"-telemetry={telemetry}"]
+    return command
+
+
+def run_render_pass(command: Sequence[str], frames: Path, log: Path) -> bool:
+    """Run one commandlet pass with its output in ``log``; True when it
+    left render.json under ``frames``. A stale render.json is removed
+    first so a pass that died cannot inherit the previous one's."""
+    frames = Path(frames)
+    frames.mkdir(parents=True, exist_ok=True)
+    (frames / "render.json").unlink(missing_ok=True)
+    log = Path(log)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("w", encoding="utf-8") as sink:
+        subprocess.run(list(command), stdout=sink, stderr=subprocess.STDOUT,
+                       stdin=subprocess.DEVNULL)
+    return (frames / "render.json").is_file()
 #: How long the last frame of the by-product clip is held, seconds --
 #: the concat demuxer needs a duration for it and the schedule has none.
 LAST_FRAME_HOLD_S = 1.0

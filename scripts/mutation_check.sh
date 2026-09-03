@@ -1121,6 +1121,36 @@ mutate core/util/platform.py \
     "an unbuilt bridge is named as the reason the engine is unavailable" \
     tests/test_platform.py || failures=$((failures+1))
 
+# -- Camera Phase 1 finished: the CLI's --render switch ----------------------
+
+mutate flightsim/capture.py \
+    '    if render != "none" and not ue_available():' \
+    '    if False:  # MUTATED: an engine choice without an engine runs headless' \
+    "the CLI refuses an engine render choice by name without an engine" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '        if problem is not None:
+            print(f"FAILED {RENDER_FRAMES_CONSTRAINT}: camera' \
+    '        if False:  # MUTATED: a short engine pass is reported as frames
+            print(f"FAILED {RENDER_FRAMES_CONSTRAINT}: camera' \
+    "the CLI fails a short engine pass by name" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/render_pass.py \
+    '    return "frames" if ue_available() else "none"' \
+    '    return "frames"  # MUTATED: an engine default on a machine without one' \
+    "the default render choice is the richest the machine supports (CLI)" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/render_pass.py \
+    '    if camera_index is not None:
+        inline, trailing = [f"-camera-index={int(camera_index)}"], []' \
+    '    if False:  # MUTATED: the consume-poses pass never gets its index
+        inline, trailing = [f"-camera-index={int(camera_index)}"], []' \
+    "the per-camera pass carries -camera-index=N" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
