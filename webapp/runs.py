@@ -19,10 +19,24 @@ strip every showcase clip carries. What this module adds is orchestration:
 
 The render duration is capped at the showcase's 22 s per clip so a casual
 prompt cannot queue an hour of editor time; the cap is recorded in the run.
+
+THE RENDER CHOICE (Camera Phase 1 finished). A run is started with one of
+three words, recorded in its provenance and named in its status lines:
+
+* ``frames`` -- the engine's consume-poses pass once per camera
+  (``-camera-index=N``, ``-frames=<run>/capture/frames/<camera_id>``) on
+  the card that carries the solved pose tracks and capture instants; the
+  clip is a BY-PRODUCT of camera 0's frames. The deliverable is the
+  scheduled number of rendered PNGs per camera, verified by the
+  engine-parity check.
+* ``clip`` -- today's single preset pass and the panel clip, with the
+  capture half beside it (scheduled frames, previews, no rendered frames).
+* ``none`` -- headless: manifest, previews, verification; no engine.
 """
 
 from __future__ import annotations
 
+import functools
 import json
 import subprocess
 import threading
@@ -37,6 +51,10 @@ import sys
 
 sys.path.insert(0, str(REPO))
 
+from core.capture.render_pass import (  # noqa: E402
+    RENDER_FRAMES_CONSTRAINT, check_render_pass, encode_scheduled_clip,
+    frame_name, rendered_count,
+)
 from core.scenario.camera import (  # noqa: E402
     CHASE_OFFSETS, CameraSpec, default_cameras,
 )
@@ -64,6 +82,43 @@ from experiments.showcase_panel import build_panel_clip  # noqa: E402
 #: capped, and the run says so.
 CLIP_SECONDS = 22.0
 
+#: The three render choices, in the page's own words. The richest option
+#: the machine supports is the default; an engine option a machine cannot
+#: honour is refused by name (ue.platform), never degraded.
+RENDER_CHOICES = ("frames", "clip", "none")
+RENDER_WORDS = {"frames": "Render frames and clip", "clip": "Clip only",
+                "none": "Headless"}
+
+
+def capture_done_line(summary: Optional[Dict], render: str,
+                      clip_of: Optional[str] = None,
+                      clip: bool = True) -> str:
+    """The final status line, naming what was PRODUCED in the three words
+    the counts use: scheduled, rendered, verified. A preview is never
+    counted as a frame; "no pixels" is said in those words on a
+    headless run."""
+    if not summary or summary.get("refused"):
+        return {"frames": "done", "clip": "clip ready (capture refused by "
+                                          "name above)",
+                "none": "no pixels: capture refused by name above"}[render]
+    cameras = summary.get("cameras") or []
+    scheduled = int(summary.get("scheduled", summary.get("frames", 0)))
+    rendered = int(summary.get("rendered", 0))
+    verified = int(summary.get("verified", 0))
+    previews = int(summary.get("previews", 0))
+    if render == "frames":
+        return (f"{rendered} frames across {len(cameras)} camera(s) "
+                f"rendered ({scheduled} scheduled, {verified} verified by "
+                f"engine parity)"
+                + (f" + clip (by-product of '{clip_of}')" if clip and clip_of
+                   else "; no clip"))
+    if render == "clip":
+        return (f"clip only: {scheduled} frames scheduled, 0 rendered "
+                f"({previews} geometry previews; choose "
+                f"'{RENDER_WORDS['frames']}' for the frame set)")
+    return (f"headless: manifest + {previews} previews for {scheduled} "
+            f"scheduled frames, no pixels (no engine pass)")
+
 #: How close (degrees) the spec's origin must sit to a bake's origin for the
 #: bake to be reused. ~0.1 deg is ~11 km: on the bake or not at all.
 LOCATION_TOLERANCE_DEG = 0.1
@@ -88,6 +143,9 @@ class RunState:
     #: count and the verification report. None until the capture phase
     #: runs (and on a run whose capture refused by name).
     capture: Optional[Dict] = None
+    #: The render choice this run was started with ("frames" | "clip" |
+    #: "none"); recorded in provenance.json too.
+    render: Optional[str] = None
 
     def push(self, status: str, detail: str = "") -> None:
         self.status = status
@@ -101,7 +159,7 @@ class RunState:
                 "scene": self.scene, "clip": self.clip,
                 "started": self.started, "events": self.events[-20:],
                 "reference": self.reference, "conditions": self.conditions,
-                "capture": self.capture}
+                "capture": self.capture, "render": self.render}
 
 
 def editor_running() -> bool:
@@ -1438,22 +1496,40 @@ class RunManager:
             run.scene = provenance.get("scene") or {}
             run.reference = provenance.get("reference_speeds")
             run.conditions = provenance.get("conditions") or {}
+            run.render = provenance.get("render")
         run.events.append({"t": run.started, "status": "done",
                            "detail": "recovered after a server restart"})
         self.runs[run_id] = run
         return run
 
-    def start(self, spec: ScenarioSpec, provenance: Dict) -> Dict:
-        """Refuses (with the reason) or starts a run and returns its id."""
-        from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
+    def start(self, spec: ScenarioSpec, provenance: Dict,
+              render: str = "clip") -> Dict:
+        """Refuses (with the reason) or starts a run and returns its id.
 
+        ``render`` selects the flow (RENDER_CHOICES): "none" is the
+        headless capture (start_capture, no platform gate); "clip" and
+        "frames" need the engine and refuse ue.platform by name -- with
+        the machine's reason -- when it is absent. The choice is recorded
+        in the run and its provenance."""
+        from core.util.platform import (
+            UE_PLATFORM_REFUSAL, ue_available, ue_unavailable_reason,
+        )
+
+        if render not in RENDER_CHOICES:
+            return {"refused": f"render must be one of "
+                               f"{', '.join(RENDER_CHOICES)}, not {render!r}",
+                    "constraint": "render.choice"}
+        if render == "none":
+            return self.start_capture(spec, provenance)
         if not ue_available():
             # The named platform refusal, not a 500: every render gotcha
             # was measured on Metal/macOS only. The headless half (spec,
             # provenance, validation, telemetry via run_spec) already
             # happened or remains available on this OS.
             return {"refused": UE_PLATFORM_REFUSAL,
-                    "constraint": "ue.platform"}
+                    "constraint": "ue.platform",
+                    "reason": ue_unavailable_reason(),
+                    "render": render}
         with self._lock:
             active = self.runs.get(self._active) if self._active else None
             if active is not None and active.status not in ("done", "failed"):
@@ -1465,13 +1541,16 @@ class RunManager:
                                    "matrix render?); refusing a concurrent "
                                    "run"}
             run = RunState(run_id=uuid.uuid4().hex[:12],
-                           spec_digest=spec.digest())
+                           spec_digest=spec.digest(), render=render)
             self.runs[run.run_id] = run
             self._active = run.run_id
-        thread = threading.Thread(target=self._execute,
-                                  args=(run, spec, provenance), daemon=True)
+        thread = threading.Thread(
+            target=self._execute, args=(run, spec, provenance),
+            kwargs={"flow": functools.partial(self._render_flow,
+                                              render=render)},
+            daemon=True)
         thread.start()
-        return {"run_id": run.run_id}
+        return {"run_id": run.run_id, "render": render}
 
     def start_capture(self, spec: ScenarioSpec, provenance: Dict) -> Dict:
         """Start a CAPTURE-ONLY run: the manifest, previews and
@@ -1489,14 +1568,14 @@ class RunManager:
                 return {"refused": f"a run is already {active.status} "
                                    f"({active.run_id}); one at a time"}
             run = RunState(run_id=uuid.uuid4().hex[:12],
-                           spec_digest=spec.digest())
+                           spec_digest=spec.digest(), render="none")
             self.runs[run.run_id] = run
             self._active = run.run_id
         thread = threading.Thread(
             target=self._execute, args=(run, spec, provenance),
             kwargs={"flow": self._capture_flow}, daemon=True)
         thread.start()
-        return {"run_id": run.run_id}
+        return {"run_id": run.run_id, "render": "none"}
 
     # -- the pipeline ------------------------------------------------------
 
@@ -1504,7 +1583,8 @@ class RunManager:
     def _render(card: Path, frames: Path, scene: Dict, mesh: Path,
                 aircraft: str, telemetry: Optional[Path] = None,
                 look: Optional[Dict] = None,
-                camera_flags=None) -> bool:
+                camera_flags=None, camera_index: Optional[int] = None,
+                log: Optional[Path] = None) -> bool:
         """The showcase render command, with terrain/imagery conditional.
 
         Same flags render_cell passes (gotcha 1: absolute paths, -stdout,
@@ -1514,14 +1594,25 @@ class RunManager:
         The camera flags come from the SPEC's cameras via
         camera_render_flags (default cameras when none stated -- pinned
         byte-identical to the old hardcoded selection).
+
+        ``camera_index`` selects the consume-poses pass (Camera Phase 1):
+        ``-camera-index=N`` on a card carrying the ``cameras`` block, no
+        ``-camera=``/``-chase=`` words at all -- the solved track places
+        the camera, the commandlet captures only at that camera's
+        scheduled instants and names each PNG by its manifest index.
+        ``log`` overrides the editor log path (per-camera passes keep
+        their own).
         """
         project = REPO / "ue" / "FlightSim.uproject"
         frames.mkdir(parents=True, exist_ok=True)
         (frames / "render.json").unlink(missing_ok=True)
         tod = look or TIME_OF_DAY["noon"]
-        inline, trailing = camera_flags or (
-            [f"-chase={WEBAPP_CHASE.get(aircraft, '-110:0:12')}",
-             "-camera=chase"], [])
+        if camera_index is not None:
+            inline, trailing = [f"-camera-index={int(camera_index)}"], []
+        else:
+            inline, trailing = camera_flags or (
+                [f"-chase={WEBAPP_CHASE.get(aircraft, '-110:0:12')}",
+                 "-camera=chase"], [])
         command = [
             str(EDITOR), str(project), "-run=FlightSimBridge.FlightSimRender",
             f"-scenario={card}", f"-frames={frames}",
@@ -1547,7 +1638,7 @@ class RunManager:
             # use), stamping the FDM's clock -- the aero panel reads it
             # verbatim, no resampling.
             command += [f"-telemetry={telemetry}"]
-        log = frames.parent / "render.log"
+        log = Path(log) if log is not None else frames.parent / "render.log"
         with log.open("w") as sink:
             subprocess.run(command, stdout=sink, stderr=subprocess.STDOUT,
                            stdin=subprocess.DEVNULL)
@@ -1555,14 +1646,19 @@ class RunManager:
 
     @staticmethod
     def _capture_phase(run: RunState, spec: ScenarioSpec, scene: Dict,
-                       out: Path) -> bool:
+                       out: Path, window_s: Optional[float] = CLIP_SECONDS):
         """Camera Phase 1's capture half, run for every run.
 
         The clip is the picture; this is the labeled data beside it --
         capture_manifest.json, the geometry previews and the verifier's
         own report, all under out/capture and all downloadable from the
-        page (user request 2026-09-01). Returns True when it produced a
-        manifest.
+        page (user request 2026-09-01). Returns the CaptureOutcome (its
+        summary is run.capture; its solved tracks feed the frames flow's
+        card) when it produced a manifest, False otherwise.
+
+        ``window_s`` is the window the closure pair grades: the clip's
+        22 s cap, or None for a frames run whose schedule spans the whole
+        flight.
 
         A named capture refusal is REPORTED, not raised: on a render run
         the clip is already made and stands on its own, and a refusal
@@ -1573,8 +1669,9 @@ class RunManager:
 
         run.push("capture", "solving camera geometry and capture schedule")
         try:
-            run.capture = capture_run(
+            outcome = capture_run(
                 spec, out, scene, lambda line: run.push("capture", line))
+            run.capture = outcome.summary
         except CaptureError as exc:
             run.capture = {"refused": exc.constraint,
                            "message": exc.message}
@@ -1588,7 +1685,8 @@ class RunManager:
         # video of an aircraft that did not reach what it was commanded.
         try:
             run.capture["closure"] = closure_run(
-                spec, out, scene, lambda line: run.push("closure", line))
+                spec, out, scene, lambda line: run.push("closure", line),
+                window_s=window_s)
         except CaptureError as exc:
             run.capture["closure"] = {"refused": exc.constraint,
                                       "message": exc.message}
@@ -1605,7 +1703,7 @@ class RunManager:
                      + (f"; {len(failed) - 1} more check(s) failed"
                         if len(failed) > 1 else ""))
             return False
-        return True
+        return outcome
 
     def _capture_flow(self, run: RunState, spec: ScenarioSpec,
                       provenance: Dict) -> None:
@@ -1623,17 +1721,18 @@ class RunManager:
         run.scene = scene
         derive_seed(spec, terrain_coupled=coupling_needs_seed(spec))
         spec.write(out / "scenario.yaml")
+        run.render = "none"
         (out / "provenance.json").write_text(json.dumps({
             **provenance, "spec_digest": spec.digest(), "scene": scene,
-            "capture_only": True,
+            "capture_only": True, "render": "none",
         }, indent=1), encoding="utf-8")
-        if not self._capture_phase(run, spec, scene, out):
+        if not self._capture_phase(run, spec, scene, out, window_s=None):
             # A failed closure has already pushed its named failure; a
             # refused capture is named here from the refusal it recorded.
             if run.status != "failed":
                 run.push("failed", str(run.capture.get("message", "refused")))
             return
-        run.push("done", "capture ready (no pixels on this platform)")
+        run.push("done", capture_done_line(run.capture, "none"))
 
     def _execute(self, run: RunState, spec: ScenarioSpec,
                  provenance: Dict, flow=None) -> None:
@@ -1643,7 +1742,15 @@ class RunManager:
             run.push("failed", f"{type(exc).__name__}: {exc}")
 
     def _render_flow(self, run: RunState, spec: ScenarioSpec,
-                     provenance: Dict) -> None:
+                     provenance: Dict, render: str = "clip") -> None:
+        """The engine flows: ``render`` is "clip" (one preset pass, the
+        panel clip, the capture half beside it) or "frames" (the
+        consume-poses pass once per camera on the card carrying the
+        solved tracks; the clip a by-product of camera 0)."""
+        if render not in ("clip", "frames"):
+            raise ValueError(f"_render_flow renders 'clip' or 'frames', "
+                             f"not {render!r}")
+        run.render = render
         out = self.out_root / run.run_id
         out.mkdir(parents=True, exist_ok=True)
         # Terrain fail-safe: a no-op once the ridge exists. The FIRST
@@ -1851,10 +1958,27 @@ class RunManager:
             **({"surface": surface_note} if surface_note else {}),
             **({"weather": event_note} if event_note else {}),
         }
+        # The frames flow solves the capture FIRST: the card must carry
+        # the solved pose tracks and capture instants the engine consumes,
+        # and the window it steps is the whole flight the schedule spans,
+        # not the clip's 22 s. The closure pair grades that same window.
+        outcome = None
+        if render == "frames":
+            outcome = self._capture_phase(run, spec, scene, out,
+                                          window_s=None)
+            if not outcome:
+                if run.status != "failed":
+                    run.push("failed",
+                             f"[{run.capture.get('refused', 'capture')}] "
+                             f"{run.capture.get('message', 'refused')}")
+                return
+        window_s = (float(spec.duration.value) if render == "frames"
+                    else min(float(spec.duration.value), CLIP_SECONDS))
         card = write_run_card(
             spec, out / "card.json",
             control_inputs=SHOWCASE_DOUBLET if scripted else (),
-            duration_s=min(float(spec.duration.value), CLIP_SECONDS),
+            duration_s=window_s,
+            cameras=outcome.card_blocks() if outcome else None,
             orographic=orographic,
             rotor=(rotor_provider.card_block()
                    if rotor_provider is not None else None),
@@ -1872,12 +1996,20 @@ class RunManager:
         (out / "provenance.json").write_text(json.dumps({
             **provenance, "spec_digest": spec.digest(),
             "scene": scene, "clip_seconds_cap": CLIP_SECONDS,
+            "render": render, "window_s": window_s,
             "reference_speeds": reference,
             # Also read back by _recover_from_disk after a server restart.
             "conditions": run.conditions,
         }, indent=1), encoding="utf-8")
 
-        run.push("rendering", "editor is rendering frames (a few minutes)")
+        if render == "frames":
+            self._frames_passes(run, spec, scene, out, card, mesh, aircraft,
+                                outcome, look=STORM_LOOK if event_note
+                                else None)
+            return
+
+        run.push("rendering", "editor is rendering the clip's frames "
+                              "(a few minutes; clip only, no frame set)")
         frames = out / "frames"
         # The camera comes from the SPEC now (Camera Phase 1): stated
         # cameras verbatim, default_cameras otherwise -- which carries
@@ -1950,4 +2082,92 @@ class RunManager:
             # aircraft did not reach what it was commanded is not "done".
             if run.status == "failed":
                 return
-        run.push("done", "clip ready")
+        run.push("done", capture_done_line(run.capture, "clip"))
+
+    def _frames_passes(self, run: RunState, spec: ScenarioSpec, scene: Dict,
+                       out: Path, card: Path, mesh: Path, aircraft: str,
+                       outcome, look: Optional[Dict] = None) -> None:
+        """The engine's consume-poses pass, once per camera.
+
+        Each pass gets ``-camera-index=N`` and its own
+        ``capture/frames/<camera_id>/`` directory; the commandlet reads
+        that camera's solved track and capture instants from the card,
+        captures ONLY at those instants and names each PNG by its manifest
+        index. A pass that returns without render.json, or whose
+        render.json reports fewer frames than scheduled, FAILS the run by
+        name (render.frames) -- the previews are never presented as
+        frames. The clip is encoded from camera 0's frames afterwards, a
+        by-product; the capture summary is re-verified so engine parity
+        has frames to grade and the counts say what was rendered.
+        """
+        from webapp.capture import refresh_after_render
+
+        cameras = outcome.schedules
+        total = sum(len(s) for s in cameras)
+        window = float(spec.duration.value)
+        for index, schedule in enumerate(cameras):
+            camera_id = schedule.camera_id
+            frames = out / "capture" / "frames" / camera_id
+            run.push("rendering",
+                     f"editor pass {index + 1} of {len(cameras)}: camera "
+                     f"'{camera_id}', {len(schedule)} frames scheduled over "
+                     f"the {window:g} s run (consume-poses, "
+                     f"-camera-index={index})")
+            ok = self._render(card, frames, scene, mesh, aircraft,
+                              telemetry=(out / "telemetry.json"
+                                         if index == 0 else None),
+                              look=look, camera_index=index,
+                              log=frames / "render.log")
+            problem = (check_render_pass(frames, len(schedule)) if ok
+                       else f"the engine pass for camera '{camera_id}' "
+                            f"wrote no render.json; see "
+                            f"{frames / 'render.log'}")
+            if problem is not None:
+                # Whatever landed on disk is counted honestly (rendered N
+                # of M) and the run fails by name: a short pass is not a
+                # frame set.
+                refresh_after_render(outcome,
+                                     lambda line: run.push("capture", line))
+                run.push("failed", f"[{RENDER_FRAMES_CONSTRAINT}] camera "
+                                   f"'{camera_id}': {problem}")
+                return
+            run.push("rendering", f"camera '{camera_id}': "
+                                  f"{rendered_count(frames)} of "
+                                  f"{len(schedule)} scheduled frames rendered")
+
+        first = cameras[0]
+        first_dir = out / "capture" / "frames" / first.camera_id
+        run.push("encoding",
+                 f"encoding the by-product clip from camera "
+                 f"'{first.camera_id}' ({len(first)} frames at their "
+                 f"scheduled instants; no telemetry panel -- the panel is "
+                 f"fps-locked)")
+        clip = out / "clip.mp4"
+        try:
+            from core.util.platform import find_ffmpeg
+
+            encoded = encode_scheduled_clip(find_ffmpeg(), first_dir,
+                                            list(first.times), clip)
+        except Exception as exc:     # ffmpeg.missing or an encode failure
+            encoded = False
+            run.push("encoding", f"by-product clip not encoded "
+                                 f"({type(exc).__name__}: {exc}); the "
+                                 f"frames stand on their own")
+        if encoded:
+            run.clip = str(clip)
+        else:
+            run.push("encoding", "ffmpeg could not encode the by-product "
+                                 "clip; the frames stand on their own")
+
+        summary = refresh_after_render(
+            outcome, lambda line: run.push("capture", line))
+        engine = next((c for c in summary["verification"]["checks"]
+                       if c["name"] == "engine_parity"), None)
+        if engine is None or engine["ok"] is not True:
+            run.push("failed",
+                     f"[{RENDER_FRAMES_CONSTRAINT}] engine parity: "
+                     f"{engine['detail'] if engine else 'not checked'}")
+            return
+        run.push("done", capture_done_line(summary, "frames",
+                                           clip_of=first.camera_id,
+                                           clip=encoded))

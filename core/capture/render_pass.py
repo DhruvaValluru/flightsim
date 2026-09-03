@@ -1,0 +1,142 @@
+"""The engine's frames pass, from the Python side: what a per-camera
+consume-poses invocation must leave behind, and the by-product clip.
+
+Camera Phase 1's brief: "a run should emit a defined number of images
+rather than a clip". The render commandlet's ``-camera-index=N`` pass
+consumes ONE camera's solved track from the card and captures ONLY at
+that camera's scheduled instants, writing ``NNNN.png`` named by the
+manifest index and ``render.json`` with the applied pose per frame.
+This module is the contract's Python half, shared by the webapp's
+frames flow and ``python -m flightsim.capture --render frames``:
+
+* :func:`check_render_pass` grades what one pass wrote against the
+  schedule it was handed -- render.json present, the engine's own
+  ``frames_captured``/``frames_scheduled`` equal to the schedule, and
+  every PNG named by index on disk. Anything short is a NAMED problem
+  (``render.frames``) the caller fails the run with; a pass that
+  returned but rendered fewer frames than scheduled is never presented
+  as frames.
+* :func:`concat_playlist` / :func:`encode_scheduled_clip` make the clip
+  a BY-PRODUCT of camera 0: the rendered frames shown at their scheduled
+  instants (ffmpeg's concat demuxer with per-frame durations, a black
+  lead-in to the first instant), so the clip's clock IS the simulation
+  clock and the page's telemetry panel keeps its 1:1 mapping. No frame
+  is deleted, resampled or duplicated to a render fps.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence
+
+#: The named constraint a short or absent engine pass fails with.
+RENDER_FRAMES_CONSTRAINT = "render.frames"
+#: How long the last frame of the by-product clip is held, seconds --
+#: the concat demuxer needs a duration for it and the schedule has none.
+LAST_FRAME_HOLD_S = 1.0
+
+
+def frame_name(index: int) -> str:
+    """The PNG the engine writes for manifest frame ``index`` -- the
+    basename of core.capture.manifest.frame_filename, spelled once
+    here for the checks that look at a directory rather than a
+    manifest."""
+    return f"{index:04d}.png"
+
+
+def check_render_pass(frames_dir: Path, scheduled: int) -> Optional[str]:
+    """None when the pass under ``frames_dir`` delivered exactly the
+    ``scheduled`` frames; otherwise the problem, in words. Reads only
+    what the engine wrote: render.json's counts and the files."""
+    frames_dir = Path(frames_dir)
+    report = frames_dir / "render.json"
+    if not report.is_file():
+        return (f"the engine pass wrote no render.json under {frames_dir}; "
+                f"see {frames_dir / 'render.log'}")
+    try:
+        render = json.loads(report.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        return f"render.json under {frames_dir} is not JSON ({exc})"
+    if not isinstance(render, dict):
+        return f"render.json under {frames_dir} is not a mapping"
+    captured = render.get("frames_captured")
+    declared = render.get("frames_scheduled")
+    if captured != scheduled or declared != scheduled:
+        return (f"the engine captured {captured} of {declared} scheduled "
+                f"frames against the {scheduled} the card scheduled")
+    missing = [frame_name(i) for i in range(scheduled)
+               if not (frames_dir / frame_name(i)).is_file()]
+    if missing:
+        shown = ", ".join(missing[:5])
+        return (f"{len(missing)} of {scheduled} scheduled PNGs are missing "
+                f"under {frames_dir} ({shown}"
+                + (", ..." if len(missing) > 5 else "") + ")")
+    return None
+
+
+def rendered_count(frames_dir: Path) -> int:
+    """PNGs actually on disk under one camera's frames directory."""
+    frames_dir = Path(frames_dir)
+    if not frames_dir.is_dir():
+        return 0
+    return sum(1 for p in frames_dir.glob("*.png") if p.is_file())
+
+
+def concat_playlist(times: Sequence[float], names: Sequence[str],
+                    last_hold_s: float = LAST_FRAME_HOLD_S) -> str:
+    """The ffconcat playlist showing frame i from times[i] until
+    times[i+1]. The concat demuxer applies a file's duration only when
+    another entry follows it, so the last frame is listed twice: once
+    with its hold, once to terminate."""
+    if len(times) != len(names) or not times:
+        raise ValueError(f"{len(times)} instants against {len(names)} "
+                         f"frames; refusing an unpaired playlist")
+    lines = ["ffconcat version 1.0"]
+    for index, (t, name) in enumerate(zip(times, names)):
+        if index + 1 < len(times):
+            duration = float(times[index + 1]) - float(t)
+            if duration <= 0.0:
+                raise ValueError(f"capture instants must increase: "
+                                 f"{t} then {times[index + 1]}")
+        else:
+            duration = float(last_hold_s)
+        lines.append(f"file '{name}'")
+        lines.append(f"duration {duration:.6f}")
+    lines.append(f"file '{names[-1]}'")
+    return "\n".join(lines) + "\n"
+
+
+def encode_scheduled_clip(ffmpeg: Path, frames_dir: Path,
+                          times: Sequence[float], clip: Path,
+                          lead_in_s: Optional[float] = None) -> bool:
+    """Encode the by-product clip from frames named by index, each
+    shown at its scheduled instant. ``lead_in_s`` (default: the first
+    instant) is black, so clip time equals simulation time from t=0.
+    The PNGs are left in place: they are the deliverable."""
+    frames_dir = Path(frames_dir)
+    names = [frame_name(i) for i in range(len(times))]
+    playlist = frames_dir / "clip_playlist.ffconcat"
+    playlist.write_text(concat_playlist(times, names), encoding="utf-8")
+    lead = float(times[0]) if lead_in_s is None else float(lead_in_s)
+    command = [str(ffmpeg), "-y", "-f", "concat", "-safe", "0",
+               "-i", str(playlist)]
+    if lead > 0.0:
+        command += ["-vf", f"tpad=start_duration={lead:.6f}:color=black"]
+    command += ["-vsync", "vfr", "-c:v", "libx264", "-preset", "medium",
+                "-crf", "19", "-pix_fmt", "yuv420p", str(clip)]
+    clip.parent.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(command, capture_output=True)
+    return proc.returncode == 0 and Path(clip).is_file()
+
+
+def pass_summary(frames_dir: Path, scheduled: int) -> Dict[str, object]:
+    """The counts one pass leaves: scheduled (the card's), rendered
+    (PNGs on disk), and whether the pass is complete by
+    :func:`check_render_pass`."""
+    problem = check_render_pass(frames_dir, scheduled)
+    return {"scheduled": int(scheduled),
+            "rendered": rendered_count(frames_dir),
+            "complete": problem is None,
+            **({"problem": problem} if problem else {})}

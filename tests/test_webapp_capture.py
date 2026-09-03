@@ -264,3 +264,363 @@ def test_a_refused_track_writes_no_manifest(tmp_path, monkeypatch):
             spec, out, {"key": "flat", "terrain": None})
     assert caught.value.constraint == "camera.terrain_clearance"
     assert not (out / "capture" / "capture_manifest.json").exists()
+
+
+# -- the frames flow: the engine pass once per camera ---------------------
+# The engine cannot run here, so _render is stubbed with an HONEST engine:
+# it reads the card's cameras block exactly as the commandlet does, writes
+# one PNG per scheduled instant named by its index, and a render.json whose
+# applied pose is the solved pose at that instant. Anything the flow claims
+# about frames must then be backed by files this stub wrote.
+
+TWO_CAMERA = ("fly the 747 at 5000 ft over the prairie for 3 seconds with "
+              "a chase camera capturing 4 images")
+
+
+def two_camera_spec():
+    from core.scenario.camera import CameraSpec
+
+    spec = compile_prompt(TWO_CAMERA)
+    tower = CameraSpec.defaulted(camera_id="tower0", preset="tower",
+                                 aircraft="B747")
+    tower.set("capture_count", 4, frm="test: the same count, a second view")
+    spec.cameras.append(tower)
+    return spec
+
+
+def honest_engine(calls, short_for=None, fail_for=None):
+    """A _render stub that behaves like the consume-poses pass."""
+    from PIL import Image
+
+    def fake_render(card, frames, scene, mesh, aircraft, telemetry=None,
+                    look=None, camera_flags=None, camera_index=None,
+                    log=None, **kwargs):
+        calls.append({"card": Path(card), "frames": Path(frames),
+                      "camera_index": camera_index, "camera_flags": camera_flags,
+                      "telemetry": telemetry, "log": log})
+        if fail_for is not None and camera_index == fail_for:
+            return False
+        block = json.loads(Path(card).read_text(encoding="utf-8"))[
+            "cameras"][camera_index]
+        poses = block["poses"]
+        times = block["capture_times_s"]
+        if short_for is not None and camera_index == short_for:
+            times = times[:-1]
+        frames = Path(frames)
+        frames.mkdir(parents=True, exist_ok=True)
+        records = []
+        for index, t in enumerate(times):
+            k = poses["t_s"].index(t)
+            records.append({
+                "frame_index": index, "frame": f"{index:04d}.png",
+                "t_scheduled_s": t, "t_applied_s": poses["t_s"][k],
+                "camera_applied_north_m": poses["north_m"][k],
+                "camera_applied_east_m": poses["east_m"][k],
+                "camera_applied_alt_m": poses["alt_m"][k],
+                "camera_applied_yaw_deg": poses["yaw_deg"][k],
+                "camera_applied_pitch_deg": poses["pitch_deg"][k],
+                "camera_applied_roll_deg": poses["roll_deg"][k],
+            })
+            Image.new("RGB", (block["width_px"], block["height_px"]),
+                      (30, 30, 30)).save(frames / f"{index:04d}.png")
+        (frames / "render.json").write_text(json.dumps({
+            "host": "unreal", "camera_consume_poses": True,
+            "camera_index": camera_index,
+            "width": block["width_px"], "height": block["height_px"],
+            "step_s": 1.0 / 120.0,
+            "frames_scheduled": len(block["capture_times_s"]),
+            "frames_captured": len(times),
+            "frame_records": records,
+        }), encoding="utf-8")
+        if log is not None:
+            Path(log).write_text("stub editor log\n", encoding="utf-8")
+        return True
+    return fake_render
+
+
+@pytest.fixture()
+def engine_stubs(tmp_path, monkeypatch):
+    """Everything around the engine held open so the flow under test is
+    reached on a machine with no engine, no ffmpeg and no meshes."""
+    from webapp.runs import RunManager
+
+    flat = {"key": "flat", "kind": "flat", "terrain": None,
+            "imagery": None, "label": "flat (test)"}
+    monkeypatch.setattr(runs_module, "pick_scene", lambda spec: flat)
+    monkeypatch.setattr(runs_module, "ensure_control_ridge", lambda: None)
+    monkeypatch.setattr(runs_module, "ensure_aircraft_model",
+                        lambda spec, report: None)
+    encoded = []
+
+    def fake_encode(ffmpeg, frames_dir, times, clip, lead_in_s=None):
+        encoded.append({"frames_dir": Path(frames_dir), "times": list(times),
+                        "clip": Path(clip)})
+        Path(clip).write_bytes(b"mp4")
+        return True
+
+    monkeypatch.setattr(runs_module, "encode_scheduled_clip", fake_encode)
+    import core.util.platform as plat
+    monkeypatch.setattr(plat, "find_ffmpeg", lambda: Path("ffmpeg"))
+    # The clip flow's own encoder/panel, for the clip-only comparison.
+    monkeypatch.setattr(runs_module, "encode_clip",
+                        lambda frames, clip: bool(clip.write_bytes(b"x")) or True)
+    monkeypatch.setattr(runs_module, "build_panel_clip",
+                        lambda *a, **k: True)
+    return {"manager": RunManager(out_root=tmp_path / "runs"),
+            "encoded": encoded, "monkeypatch": monkeypatch}
+
+
+def test_frames_flow_invokes_the_engine_once_per_camera(engine_stubs):
+    """The gap this closes: the page's render flow never entered the
+    commandlet's consume-poses branch. Now a frames run writes the card
+    WITH the cameras block and runs one pass per camera, each with its
+    own -camera-index and its own capture/frames/<camera_id> directory,
+    and the status line names what came out of it."""
+    from webapp.runs import RunManager, RunState
+
+    calls = []
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(honest_engine(calls)))
+    manager = engine_stubs["manager"]
+    spec = two_camera_spec()
+    run = RunState(run_id="framesrun")
+    manager._render_flow(run, spec, provenance={}, render="frames")
+    assert run.status == "done", run.detail
+    out = manager.out_root / "framesrun"
+
+    # One pass per camera, in card order, by index, into its own directory,
+    # with NO preset words (the card's track places the camera).
+    assert [c["camera_index"] for c in calls] == [0, 1]
+    assert [c["frames"] for c in calls] == [
+        out / "capture" / "frames" / "camera0",
+        out / "capture" / "frames" / "tower0"]
+    assert all(c["camera_flags"] is None for c in calls)
+    assert calls[0]["telemetry"] == out / "telemetry.json"
+    assert calls[1]["telemetry"] is None
+    assert [c["log"] for c in calls] == [
+        out / "capture" / "frames" / "camera0" / "render.log",
+        out / "capture" / "frames" / "tower0" / "render.log"]
+
+    # The card carries the solved tracks and capture instants -- the SAME
+    # block the CLI's --card writes -- over the whole 3 s run.
+    card = json.loads((out / "card.json").read_text(encoding="utf-8"))
+    assert [b["camera_id"] for b in card["cameras"]] == ["camera0", "tower0"]
+    assert len(card["cameras"][0]["capture_times_s"]) == 4
+    assert card["duration_s"] == 3.0
+    manifest = json.loads(
+        (out / "capture" / "capture_manifest.json").read_text(encoding="utf-8"))
+    assert [r["t_s"] for r in manifest["frames"] if r["camera_id"] == "camera0"] \
+        == card["cameras"][0]["capture_times_s"]
+
+    # Exactly the scheduled PNGs, named by manifest index, per camera.
+    for camera_id in ("camera0", "tower0"):
+        names = sorted(p.name for p in
+                       (out / "capture" / "frames" / camera_id).glob("*.png"))
+        assert names == ["0000.png", "0001.png", "0002.png", "0003.png"]
+
+    # The counts say what was rendered, and engine parity graded it.
+    assert run.capture["scheduled"] == 8
+    assert run.capture["rendered"] == 8 and run.capture["verified"] == 8
+    assert [(c["camera_id"], c["scheduled"], c["rendered"], c["verified"])
+            for c in run.capture["cameras"]] == [
+        ("camera0", 4, 4, 4), ("tower0", 4, 4, 4)]
+    engine = [c for c in run.capture["verification"]["checks"]
+              if c["name"] == "engine_parity"][0]
+    assert engine["ok"] is True, engine["detail"]
+    assert run.capture["verification"]["ok"] is True
+
+    # The clip is a by-product of camera 0's frames at their instants.
+    assert engine_stubs["encoded"][0]["frames_dir"] == \
+        out / "capture" / "frames" / "camera0"
+    assert engine_stubs["encoded"][0]["times"] == \
+        card["cameras"][0]["capture_times_s"]
+    assert run.clip == str(out / "clip.mp4")
+
+    # Provenance records the choice; the status line names the product.
+    provenance = json.loads((out / "provenance.json").read_text(encoding="utf-8"))
+    assert provenance["render"] == "frames"
+    assert provenance["window_s"] == 3.0
+    assert run.render == "frames"
+    assert "8 frames across 2 camera(s) rendered" in run.detail
+    assert "8 verified" in run.detail and "by-product of 'camera0'" in run.detail
+
+    # The frames are listed and downloadable as their own artefact class.
+    files = capture_module.run_artifacts(out)
+    frames_entry = next(f for f in files if f["name"] == "capture/frames/camera0")
+    assert frames_entry["count"] == 4 and "rendered" in frames_entry["note"]
+    assert "capture/frames/tower0/render.json" in [f["name"] for f in files]
+
+
+def test_a_failed_engine_pass_fails_the_run_by_name(engine_stubs):
+    """A pass that returns without render.json fails the run as
+    render.frames, and nothing presents the previews as frames."""
+    from webapp.runs import RunManager, RunState
+
+    calls = []
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(honest_engine(calls, fail_for=1)))
+    manager = engine_stubs["manager"]
+    run = RunState(run_id="failedpass")
+    manager._render_flow(run, two_camera_spec(), provenance={},
+                         render="frames")
+    assert run.status == "failed"
+    assert "[render.frames]" in run.detail and "tower0" in run.detail
+    assert "no render.json" in run.detail
+    # Camera 0 rendered, camera 1 did not: counted honestly, never dressed
+    # up as a frame set, and the verifier says why.
+    counts = {c["camera_id"]: (c["rendered"], c["verified"])
+              for c in run.capture["cameras"]}
+    assert counts == {"camera0": (4, 4), "tower0": (0, 0)}
+    engine = [c for c in run.capture["verification"]["checks"]
+              if c["name"] == "engine_parity"][0]
+    assert engine["ok"] is False
+    assert run.clip is None
+    assert not engine_stubs["encoded"]
+
+
+def test_a_short_engine_pass_fails_the_run_by_name(engine_stubs):
+    """render.json reporting 3 of 4 scheduled frames is a failed pass,
+    named, not a frame set with a frame missing."""
+    from webapp.runs import RunManager, RunState
+
+    calls = []
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(honest_engine(calls, short_for=0)))
+    manager = engine_stubs["manager"]
+    run = RunState(run_id="shortpass")
+    manager._render_flow(run, two_camera_spec(), provenance={},
+                         render="frames")
+    assert run.status == "failed"
+    assert "[render.frames]" in run.detail
+    assert "captured 3 of 4 scheduled" in run.detail
+    assert len(calls) == 1                     # stopped at the first bad pass
+    assert run.capture["cameras"][0]["rendered"] == 3
+    assert run.capture["cameras"][0]["verified"] == 3
+
+
+def test_the_clip_flow_reports_zero_rendered(engine_stubs):
+    """Clip only: the SAME capture summary, with rendered 0 and the words
+    saying so -- today's behaviour, now named."""
+    from webapp.runs import RunManager, RunState
+
+    def clip_render(card, frames, scene, mesh, aircraft, telemetry=None,
+                    look=None, camera_flags=None, camera_index=None,
+                    log=None):
+        assert camera_index is None and camera_flags is not None
+        frames.mkdir(parents=True, exist_ok=True)
+        (frames / "render.json").write_text("{}", encoding="utf-8")
+        return True
+
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(clip_render))
+    manager = engine_stubs["manager"]
+    run = RunState(run_id="cliprun")
+    manager._render_flow(run, two_camera_spec(), provenance={}, render="clip")
+    assert run.status == "done", run.detail
+    out = manager.out_root / "cliprun"
+    card = json.loads((out / "card.json").read_text(encoding="utf-8"))
+    assert "cameras" not in card                # the preset pass, unchanged
+    assert card["duration_s"] == 3.0
+    assert run.capture["rendered"] == 0 and run.capture["verified"] == 0
+    assert run.capture["scheduled"] == 8
+    assert run.detail.startswith("clip only: 8 frames scheduled, 0 rendered")
+    provenance = json.loads((out / "provenance.json").read_text(encoding="utf-8"))
+    assert provenance["render"] == "clip"
+
+
+def test_a_headless_run_reports_zero_rendered(captured):
+    """The count contract on the headless path: scheduled 4, rendered 0,
+    verified 0, and 'no pixels' in the status -- a preview is not a
+    frame."""
+    run_id, state = captured
+    capture = state["capture"]
+    assert capture["scheduled"] == 4
+    assert capture["rendered"] == 0 and capture["verified"] == 0
+    assert capture["cameras"][0]["rendered"] == 0
+    assert state["render"] == "none"
+    assert "no pixels" in state["detail"] and "4 previews" in state["detail"]
+    provenance = json.loads(
+        (manager.out_root / run_id / "provenance.json").read_text(encoding="utf-8"))
+    assert provenance["render"] == "none"
+
+
+def test_a_pass_missing_a_png_fails_the_run_by_name(engine_stubs):
+    """render.json says 4 of 4, but a PNG named by index is not on disk:
+    the file is the frame, so the pass is short and the run fails."""
+    from webapp.runs import RunManager, RunState
+
+    calls = []
+    honest = honest_engine(calls)
+
+    def lossy(card, frames, *args, **kwargs):
+        ok = honest(card, frames, *args, **kwargs)
+        (Path(frames) / "0002.png").unlink()
+        return ok
+
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(lossy))
+    manager = engine_stubs["manager"]
+    run = RunState(run_id="lossypass")
+    manager._render_flow(run, two_camera_spec(), provenance={},
+                         render="frames")
+    assert run.status == "failed"
+    assert "[render.frames]" in run.detail
+    assert "1 of 4 scheduled PNGs are missing" in run.detail
+    assert "0002.png" in run.detail
+    assert run.capture["cameras"][0]["rendered"] == 3
+
+
+def test_a_dishonest_engine_pass_fails_engine_parity(engine_stubs):
+    """The counts are right and every PNG exists, but the engine placed
+    the camera 20 cm off the solved pose: engine parity FAILS the run by
+    name. Frames whose recorded geometry is quietly wrong are not a
+    frame set."""
+    from webapp.runs import RunManager, RunState
+
+    calls = []
+    honest = honest_engine(calls)
+
+    def drifting(card, frames, *args, **kwargs):
+        ok = honest(card, frames, *args, **kwargs)
+        report = Path(frames) / "render.json"
+        render = json.loads(report.read_text(encoding="utf-8"))
+        render["frame_records"][1]["camera_applied_east_m"] += 0.20
+        report.write_text(json.dumps(render), encoding="utf-8")
+        return ok
+
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(drifting))
+    manager = engine_stubs["manager"]
+    run = RunState(run_id="driftpass")
+    manager._render_flow(run, two_camera_spec(), provenance={},
+                         render="frames")
+    assert run.status == "failed"
+    assert "[render.frames] engine parity" in run.detail
+    assert "0.200 m" in run.detail
+    # Rendered, yes; verified, not those frames -- and the page shows it.
+    assert run.capture["rendered"] == 8
+    assert run.capture["verified"] == 6
+
+
+def test_the_by_product_clip_shows_each_frame_at_its_instant():
+    """The concat playlist the by-product clip is encoded from: frame i
+    is held from its instant until the next, the last for the stated
+    hold, listed twice so the demuxer applies its duration. Clip time
+    is simulation time -- no render fps anywhere."""
+    from core.capture.render_pass import concat_playlist
+
+    text = concat_playlist([0.0, 0.5, 1.5, 3.0],
+                           ["0000.png", "0001.png", "0002.png", "0003.png"],
+                           last_hold_s=1.0)
+    lines = text.strip().splitlines()
+    assert lines[0] == "ffconcat version 1.0"
+    assert lines[1:] == [
+        "file '0000.png'", "duration 0.500000",
+        "file '0001.png'", "duration 1.000000",
+        "file '0002.png'", "duration 1.500000",
+        "file '0003.png'", "duration 1.000000",
+        "file '0003.png'"]
+    with pytest.raises(ValueError):
+        concat_playlist([0.0, 1.0, 1.0], ["a", "b", "c"])
+    with pytest.raises(ValueError):
+        concat_playlist([0.0, 1.0], ["a"])

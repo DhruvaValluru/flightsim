@@ -535,7 +535,7 @@ def _artifact_paths(run_id: str) -> set:
 
 MEDIA_TYPES = {".json": "application/json", ".yaml": "text/plain",
                ".log": "text/plain", ".png": "image/png",
-               ".mp4": "video/mp4"}
+               ".mp4": "video/mp4", ".ffconcat": "text/plain"}
 
 
 @app.get("/runs/{run_id}/file/{name:path}")

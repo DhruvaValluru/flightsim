@@ -375,6 +375,30 @@ class PoseTrack:
         }
 
 
+def camera_card_blocks(cameras: Sequence[CameraSpec],
+                       tracks: Sequence[PoseTrack],
+                       schedules: Sequence,
+                       frame: "SceneFrame") -> List[Dict[str, object]]:
+    """The run card's ``cameras`` block: one entry per camera from its
+    solved track and schedule. THE one builder -- the CLI's --card and
+    the webapp's frames flow both call it, so the card the engine
+    consumes cannot drift between the two producers."""
+    if not (len(cameras) == len(tracks) == len(schedules)):
+        raise PoseSolveError(
+            f"{len(cameras)} cameras against {len(tracks)} tracks and "
+            f"{len(schedules)} schedules; refusing a misattributed card")
+    blocks = []
+    for camera, track, schedule in zip(cameras, tracks, schedules):
+        if track.camera_id != schedule.camera_id or \
+                track.camera_id != str(camera.camera_id.value):
+            raise PoseSolveError(
+                f"camera {camera.camera_id.value!r} paired with track "
+                f"{track.camera_id!r} and schedule "
+                f"{schedule.camera_id!r}; refusing a misattributed card")
+        blocks.append(track.card_block(camera, schedule, frame))
+    return blocks
+
+
 def _columns(columns: Dict[str, Sequence[float]]):
     missing = [name for name in REQUIRED_CHANNELS if name not in columns]
     if missing:

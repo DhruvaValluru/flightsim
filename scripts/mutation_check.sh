@@ -1039,6 +1039,44 @@ mutate core/capture/verify.py \
     "a failed check fails the verification report" \
     tests/test_camera_verify.py || failures=$((failures+1))
 
+# -- Camera Phase 1 finished: the web run renders frames, not a clip ------
+
+mutate core/capture/render_pass.py \
+    '    if captured != scheduled or declared != scheduled:' \
+    '    if False:  # MUTATED: a short engine pass counts as a frame set' \
+    "an engine pass short of the schedule fails the run by name" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate core/capture/render_pass.py \
+    '    if missing:' \
+    '    if False:  # MUTATED: a scheduled PNG missing from disk passes' \
+    "a scheduled PNG missing from disk fails the pass by name" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '            if problem is not None:' \
+    '            if False:  # MUTATED: a failed engine pass never stops the run' \
+    "a failed engine pass stops the frames run before any clip" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '            cameras=outcome.card_blocks() if outcome else None,' \
+    '            cameras=None,  # MUTATED: the card carries no solved tracks' \
+    "the frames run's card carries the solved pose tracks" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '        if engine is None or engine["ok"] is not True:' \
+    '        if False:  # MUTATED: engine parity never fails a frames run' \
+    "a frames run is done only when engine parity passed" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    '            "rendered": int(per.get("rendered", 0)),' \
+    '            "rendered": len(schedule),  # MUTATED: scheduled counted as rendered' \
+    "a scheduled frame is never counted as rendered" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

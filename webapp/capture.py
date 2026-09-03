@@ -27,6 +27,7 @@ everywhere, exactly as the CLI does.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
@@ -103,14 +104,92 @@ def scene_geometry(spec, scene: Dict):
     return heightfield, frame, tornado
 
 
+@dataclass
+class CaptureOutcome:
+    """What one capture solved and wrote. ``summary`` is the mapping the
+    page renders (run.capture); the solved objects ride beside it so the
+    frames flow can hand the SAME tracks and schedules to the engine
+    through the card -- never a second solve."""
+
+    summary: Dict
+    capture_dir: Path
+    cameras: List = field(default_factory=list)
+    tracks: List = field(default_factory=list)
+    schedules: List = field(default_factory=list)
+    frame: object = None
+    manifest: Optional[Dict] = None
+
+    def card_blocks(self) -> List[Dict]:
+        """The card's ``cameras`` block through the ONE shared builder
+        (core.capture.poses.camera_card_blocks): spec fields, the solved
+        per-sample track and the capture instants, verbatim."""
+        from core.capture.poses import camera_card_blocks
+
+        return camera_card_blocks(self.cameras, self.tracks,
+                                  self.schedules, self.frame)
+
+
+def camera_counts(schedules, verdict: Dict) -> List[Dict]:
+    """Per-camera ``scheduled`` / ``rendered`` / ``verified``, the three
+    words every status line and the page use. Scheduled is the
+    schedule's length; rendered and verified come from the verifier's
+    engine-parity data -- PNGs it counted on disk and frames it graded
+    -- so the page never shows a count it cannot back with a file. A
+    headless run reports rendered 0, verified 0. ``frames`` repeats
+    scheduled for the page's existing readers."""
+    engine = {}
+    for check in verdict.get("checks", []):
+        if check.get("name") == "engine_parity":
+            engine = (check.get("data") or {}).get("cameras") or {}
+    counts = []
+    for schedule in schedules:
+        per = engine.get(schedule.camera_id, {})
+        counts.append({
+            "camera_id": schedule.camera_id,
+            "frames": len(schedule),
+            "scheduled": len(schedule),
+            "rendered": int(per.get("rendered", 0)),
+            "verified": int(per.get("verified", 0)),
+        })
+    return counts
+
+
+def verify_capture(capture_dir: Path, report: Report = lambda line: None):
+    """Run the verifier over ``capture_dir`` and (re)write verify.json --
+    ONCE for the file and the page, so the download and the screen
+    cannot disagree. Returns the verdict mapping."""
+    from core.capture.verify import verify_run
+
+    verification = verify_run(capture_dir)
+    verdict = verification_verdict(verification)
+    (Path(capture_dir) / "verify.json").write_text(
+        json.dumps(verdict, indent=1), encoding="utf-8")
+    report(verification_line(verification))
+    return verdict
+
+
+def refresh_after_render(outcome: "CaptureOutcome",
+                         report: Report = lambda line: None) -> Dict:
+    """After the engine passes: re-verify (engine parity now has frames
+    to grade) and update the summary's counts and verification in
+    place. Returns the summary."""
+    verdict = verify_capture(outcome.capture_dir, report)
+    counts = camera_counts(outcome.schedules, verdict)
+    outcome.summary["verification"] = verdict
+    outcome.summary["cameras"] = counts
+    outcome.summary["rendered"] = sum(c["rendered"] for c in counts)
+    outcome.summary["verified"] = sum(c["verified"] for c in counts)
+    return outcome.summary
+
+
 def capture_run(spec, out: Path, scene: Dict,
-                report: Report = lambda line: None) -> Dict:
+                report: Report = lambda line: None) -> CaptureOutcome:
     """Run the spec headlessly and write its capture artefacts.
 
     Writes into ``out/capture``: telemetry.json (this run's own),
     scenario.yaml, run.json, capture_manifest.json, verify.json and one
     geometry preview per scheduled frame (capped, and the cap is
-    reported). Returns the summary the page renders.
+    reported). Returns the outcome whose ``summary`` the page renders.
 
     Raises CaptureError -- named -- on a schedule or solved-track
     refusal, so a capture never half-succeeds into a manifest that
@@ -123,7 +202,6 @@ def capture_run(spec, out: Path, scene: Dict,
     from core.capture.preview import render_previews
     from core.capture.schedule import ScheduleError, solve_schedule
     from core.capture.validate import track_violations
-    from core.capture.verify import verify_run
     from core.scenario.camera import default_cameras
     from core.scenario.runner import run_spec
 
@@ -186,30 +264,36 @@ def capture_run(spec, out: Path, scene: Dict,
                                terrain_elevation_m=terrain_datum,
                                max_frames=MAX_PREVIEWS)
     capped = len(previews) < total
-    report(f"captured {total} frame(s) across {len(cameras)} camera(s)")
+    # Scheduled, in that word: nothing has been rendered yet, and a
+    # preview is not a capture.
+    report(f"scheduled {total} frame(s) across {len(cameras)} camera(s); "
+           f"{len(previews)} geometry preview(s) written")
 
     # Verify what was just written, with the SAME verifier the CLI runs
     # -- an independent reimplementation of the projection maths, so a
     # pass means the manifest reproduces itself, not that one code path
-    # agrees with itself.
-    verification = verify_run(capture_dir)
-    # Built ONCE and used for both the file and the page: two
-    # constructions of the same report are two chances for the download
-    # and the screen to disagree about whether a run verified.
-    verdict = verification_verdict(verification)
-    (capture_dir / "verify.json").write_text(
-        json.dumps(verdict, indent=1), encoding="utf-8")
-    report(verification_line(verification))
+    # agrees with itself. Built ONCE and used for both the file and the
+    # page: two constructions of the same report are two chances for
+    # the download and the screen to disagree about whether a run
+    # verified.
+    verdict = verify_capture(capture_dir, report)
+    counts = camera_counts(schedules, verdict)
 
-    return {
+    summary = {
         "frames": total,
-        "cameras": [{"camera_id": s.camera_id, "frames": len(s)}
-                    for s in schedules],
+        "scheduled": total,
+        "rendered": sum(c["rendered"] for c in counts),
+        "verified": sum(c["verified"] for c in counts),
+        "cameras": counts,
         "previews": len(previews),
         "previews_capped": capped,
         "preview_cap": MAX_PREVIEWS if capped else None,
         "verification": verdict,
     }
+    return CaptureOutcome(summary=summary, capture_dir=capture_dir,
+                          cameras=list(cameras), tracks=tracks,
+                          schedules=schedules, frame=frame,
+                          manifest=manifest)
 
 
 def verification_verdict(verification) -> Dict:
@@ -242,7 +326,8 @@ def verification_line(verification) -> str:
 
 
 def closure_run(spec, out: Path, scene: Dict,
-                report: Report = lambda line: None) -> Dict:
+                report: Report = lambda line: None,
+                window_s: Optional[float] = None) -> Dict:
     """The paired CLOSED-LOOP run, and its closure report (Package C).
 
     The render host has no controller, so every clip is open loop and the
@@ -256,6 +341,10 @@ def closure_run(spec, out: Path, scene: Dict,
 
     The caller fails the run when the report is not ok. A failed closure
     is a named failure (``closure.<check>``), never a note.
+
+    ``window_s`` is the window the artefact shows: CLIP_SECONDS for a
+    clip (the default), the full duration for a frames run whose
+    schedule spans the whole flight.
     """
     from core.scenario.runner import run_spec
 
@@ -278,11 +367,12 @@ def closure_run(spec, out: Path, scene: Dict,
     # machine: a 22 s clip over the mountains passed capture, then its
     # 120 s closure pair refused terrain.lookahead on a ridge 59 s ahead
     # that the clip never reaches.
-    seconds = min(float(pair.duration.value), CLIP_SECONDS)
+    window = CLIP_SECONDS if window_s is None else float(window_s)
+    seconds = min(float(pair.duration.value), window)
     if seconds < float(pair.duration.value):
         pair.set("duration", seconds,
-                 frm=f"closure pair: the clip's own window "
-                     f"({CLIP_SECONDS:g} s cap)")
+                 frm=f"closure pair: the artefact's own window "
+                     f"({window:g} s cap)")
     report("flying the same spec closed loop for the closure report")
     result = _run_named(run_spec, pair, terrain_ground=terrain_ground,
                       assert_closure=False)
@@ -298,7 +388,7 @@ def closure_run(spec, out: Path, scene: Dict,
                "tolerance": c.tolerance, "unit": c.unit, "ok": c.ok}
               for c in result.closure.checks]
     verdict = {"ok": all(c["ok"] for c in checks), "checks": checks,
-               "duration_s": seconds, "clip_seconds_cap": CLIP_SECONDS,
+               "duration_s": seconds, "clip_seconds_cap": window,
                "pair_spec_digest": pair.digest(),
                "output_digest": result.output_digest,
                "settle_fraction": CLOSURE_TOLERANCE.settle_fraction}
@@ -331,6 +421,12 @@ ARTIFACT_NOTES = {
     "capture/scenario.yaml": "the spec as captured",
     "capture/run.json": "spec and output digests of the capture run",
 }
+#: Per-camera engine artefacts under capture/frames/<camera_id>/.
+FRAME_DIR_NOTES = {
+    "render.json": "the engine pass: applied pose and time per frame",
+    "render.log": "the editor's own output for this camera's pass",
+    "clip_playlist.ffconcat": "the by-product clip's frame timing",
+}
 
 
 def run_artifacts(out_dir: Path) -> List[Dict]:
@@ -353,6 +449,29 @@ def run_artifacts(out_dir: Path) -> List[Dict]:
         if path.is_file():
             entries.append({"name": name, "bytes": path.stat().st_size,
                             "note": ARTIFACT_NOTES.get(name, "")})
+    frames_root = out_dir / "capture" / "frames"
+    if frames_root.is_dir():
+        # Rendered frames FIRST: they are the deliverable; previews are
+        # the fallback and are labelled as such below.
+        for camera_dir in sorted(p for p in frames_root.iterdir()
+                                 if p.is_dir()):
+            images = sorted(camera_dir.glob("*.png"))
+            if images:
+                entries.append({
+                    "name": f"capture/frames/{camera_dir.name}",
+                    "count": len(images),
+                    "note": f"{len(images)} rendered frame(s) for camera "
+                            f"'{camera_dir.name}', named by manifest "
+                            f"index",
+                    "images": [f"capture/frames/{camera_dir.name}/"
+                               f"{p.name}" for p in images],
+                })
+            for name, note in FRAME_DIR_NOTES.items():
+                path = camera_dir / name
+                if path.is_file():
+                    entries.append({
+                        "name": f"capture/frames/{camera_dir.name}/{name}",
+                        "bytes": path.stat().st_size, "note": note})
     previews = out_dir / "capture" / "previews"
     if previews.is_dir():
         for camera_dir in sorted(p for p in previews.iterdir() if p.is_dir()):

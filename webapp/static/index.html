@@ -505,8 +505,20 @@ function renderCapture(run) {
       `${run.capture.message}</span></div>`;
     return;
   }
-  const cameras = (run.capture.cameras || []).map(c =>
-    `<li><b>${c.camera_id}</b>: ${c.frames} frame(s)</li>`).join("");
+  // The count contract, per camera, in the three words the verifier
+  // backs with files: scheduled (the manifest), rendered (PNGs on disk),
+  // verified (engine parity). A headless or clip-only run says
+  // "0 rendered" and why, never a preview count dressed as frames.
+  const rendered = run.render === "frames";
+  const cameras = (run.capture.cameras || []).map(c => {
+    const scheduled = c.scheduled ?? c.frames;
+    const words = (c.rendered ?? 0) > 0 || rendered
+      ? `${scheduled} scheduled, ${c.rendered ?? 0} rendered, ` +
+        `${c.verified ?? 0} verified`
+      : `${scheduled} scheduled, 0 rendered (` +
+        `${run.render === "clip" ? "clip only" : "headless"}), previews only`;
+    return `<li><b>${c.camera_id}</b>: ${words}</li>`;
+  }).join("");
   const v = run.capture.verification || {checks: []};
   // Three states, the verifier's own: PASS, FAIL, and AWAITING (the
   // engine-parity check with no engine frames to grade -- neither passed
@@ -541,9 +553,15 @@ function renderCapture(run) {
       `<span class="dim">(the same spec flown closed loop, graded over the ` +
       `settled half)</span><ul>${rows}</ul>`;
   }
+  const totals = (run.capture.rendered ?? 0) > 0 || rendered
+    ? `${run.capture.scheduled ?? run.capture.frames} scheduled, ` +
+      `${run.capture.rendered ?? 0} rendered, ${run.capture.verified ?? 0} ` +
+      `verified; ${run.capture.previews} geometry preview(s)`
+    : `${run.capture.scheduled ?? run.capture.frames} scheduled, 0 rendered ` +
+      `(${run.render === "clip" ? "clip only" : "headless: no engine pass"}); ` +
+      `${run.capture.previews} geometry preview(s), which are NOT frames`;
   holder.innerHTML =
-    `<div class="card"><b>captured geometry</b> — ` +
-    `${run.capture.frames} frame(s), ${run.capture.previews} preview(s)` +
+    `<div class="card"><b>capture geometry</b> — ` + totals +
     capped +
     `<ul>${cameras}</ul>` +
     `<b>verification ${v.ok ? "PASSED" : "FAILED"}</b>` + awaiting +

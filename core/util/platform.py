@@ -201,6 +201,27 @@ def ue_runner_command(repo: Path, script_stem: str) -> List[str]:
     return [str(repo / "scripts" / f"{script_stem}.sh")]
 
 
+def ue_unavailable_reason() -> Optional[str]:
+    """None where the UE render half can run; otherwise WHY it cannot, in
+    one sentence the page shows beside the disabled render options and
+    the CLI prints with its refusal. The same facts ue_available()
+    decides on (pinned by test: available == reason is None)."""
+    if is_mac():
+        return None
+    if os_name() == "windows":
+        editor = ue_editor_path()
+        if editor is None or not editor.is_file():
+            return (f"no engine on this machine: set UE_ROOT to the Unreal "
+                    f"Engine 5.5 install (looked for {editor})")
+        repo = Path(__file__).resolve().parents[2]
+        if not ue_bridge_binary(repo).is_file():
+            return ("FlightSimBridge not built: run scripts\\ue_preflight.ps1 "
+                    "then scripts\\build_ue.ps1")
+        return None
+    return ("no engine on this OS: the render half needs macOS, or Windows "
+            "with Unreal Engine 5.5 and the FlightSimBridge built")
+
+
 def ue_available() -> bool:
     """True where the UE render half can run: macOS (where every render
     gotcha was measured), or Windows with an engine install AND a built

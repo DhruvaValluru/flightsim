@@ -97,7 +97,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from core.capture.manifest import (
         build_capture_manifest, write_capture_manifest,
     )
-    from core.capture.poses import SceneFrame, solve_pose_track
+    from core.capture.poses import (
+        SceneFrame, camera_card_blocks, solve_pose_track,
+    )
     from core.capture.preview import render_previews
     from core.capture.schedule import ScheduleError, solve_schedule
     from core.capture.validate import (
@@ -192,9 +194,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         write_run_card(
             spec, out / "card.json",
-            cameras=[track.card_block(camera, schedule, frame)
-                     for camera, track, schedule
-                     in zip(cameras, tracks, schedules)],
+            cameras=camera_card_blocks(cameras, tracks, schedules, frame),
             scene_crs=frame.crs if frame.declared else None)
         print(f"  card:     {out / 'card.json'} (consume-poses; one "
               f"commandlet pass per camera via -camera-index=N)")
