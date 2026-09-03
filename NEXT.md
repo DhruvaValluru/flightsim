@@ -3,6 +3,58 @@
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
 
+**Camera Phase 1, frames round 2 (2026-09-03, six commits -- the
+judge's ranked gaps against analysis/QUALITY_BAR_camera_phase1.md,
+closed in priority order; docs/CAMERA_PHASE1_REPORT.md is current).**
+(1) Engine parity JUDGES the aircraft the engine drew: aircraft_applied_*
+within ENGINE_AIRCRAFT_TOL_M = 2.5 m of the manifest's aircraft (one
+1/120 s step at 300 m/s plus the measured host residual: VALIDITY's
+Gate 5 3.6e-4 m, the parity matrix's constant one-step phase of 1.24 m)
+and, reprojected through the applied pose, within 3 px + fx * 2.5 m /
+depth of the labelled pixel (measured on cameras_multi: 31.1-20.6 px at
+the chase's 110.7-177.2 m, 4.0 px at the tower's 3074-3262 m); a record
+without it FAILS the frame. A spec whose air cannot agree across hosts
+(a turbulence word; the lee rotor a terrain scene attaches) is refused
+render.host_parity BY NAME before editor time (POST /run 409, the flow,
+the CLI exit 2) through the ONE rule core.capture.render_pass.
+frames_host_parity_refusal -- Clip only keeps its visual-only label.
+(2) The commandlet applies the pose AT THE SCHEDULED INSTANT and records
+t_pose_s beside t_applied_s (the clock); the verifier requires t_pose_s
+== t_s to 1e-6 s, so the pose contract is exact by construction and the
+capture time is the only tolerance; the expected drawn-aircraft
+distance on the Windows run is ~1.4 m (this example flies 322.7 kt TAS,
+1.384 m per step) plus 1.4 m per step of clock offset -- the coupling
+the report's Windows section now pins by number. (3) flightsim.capture
+verifies in EVERY mode and prints the table before its final line; a
+manifest that fails its own verification exits 2 (capture.verification);
+a successful headless run says "engine absent: <reason>; frames not
+rendered" and "done: ..." -- REFUSED is exit 2's word only;
+UE_PLATFORM_REFUSAL speaks of frames. (4) No hidden render default: the
+form's select ships DISABLED on Headless and is enabled only once
+/status has said render_default (= render_choice_default(), the CLI's
+rule); the page's applyRenderChoices is run verbatim under node against
+the real /status payload (skipped without node; the string test pins the
+source). (5) A frames pass stops after its last scheduled instant
+(1439 of 1440 steps for the example) and records steps_taken/stepped_s,
+said per pass and recorded as provenance render_passes (CLI: run.json).
+(6) The by-product clip: black lead-in PNG listed first in the concat
+playlist (no tpad), argv spelled once (clip_command) and pinned exactly
+with subprocess stubbed, expected length scheduled_clip_seconds (12.992
+s for the example) stated before encoding and recorded with
+clip_encoded; the report's step 5b is the ffprobe measurement. (7) The
+three stale guards (measured control signs, the one-sample exemption,
+the rotor seed) are repointed to the code as it stands and fire;
+scripts/mutation_check.sh ran END TO END: 172 guards, 170 fired in one end-to-end run (31 min; the suite green before and after), and the 2 WEAK there were BOTH pre-existing -- a fourth stale guard, 'a failed model build fails the run BY NAME', whose target string's FIRST occurrence had drifted into _capture_phase so the mutation never touched the guarded line (repointed to the unique except-branch), and 'the rotor card word travels with its pinned turbulence writes', which since Package F had no test where a rotor ACTS (tests/test_webapp.py gained test_a_rotor_that_acts_carries_its_word_and_block_on_the_card, the pre-flight stubbed to 'acts', the flow real) -- both verified firing by subset afterwards: 172 of 172 load-bearing. Suite: 681 passed, 1 skipped in 154 s (+35 tests this round, 14 new guards, 5 repointed).
+Gotcha: scripts/check_bridge_api.sh reports "API surface has drifted" on
+any machine without the engine install (it looks for headers under the
+UE_ROOT default) -- identical on the base commit; not a C++ regression
+signal here. Gotcha: node on PATH is what makes the page-JS test run;
+without it the test skips and the four form guards fire through the
+string-level test alone. STILL NOT YET RUN: every engine change (pose at
+the scheduled instant, t_pose_s, the stop after the last instant,
+steps_taken/stepped_s) is compile-safe by inspection only; the report's
+Windows section has the commands, the log lines and the numbers to fill.
+
 **Airborne physics reconstruction, phase 2 (2026-09-02 --
 docs/AIRBORNE_PHASE2_REPORT.md is the full report, with the pre/post
 table; analysis/ holds the audit, the research ledger the findings came

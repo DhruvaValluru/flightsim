@@ -111,7 +111,8 @@ mutate core/scenario/runner.py \
     "unimplemented-condition guard" tests/test_validation_and_run.py || failures=$((failures+1))
 
 mutate core/control/autopilot.py \
-    '        self.signs = measure(base)' \
+    '        self.signs = measure(base, altitude_m=here.altitude_m,
+                             cas_kt=here.cas_kt)' \
     '        from .signs import ControlSigns
         self.signs = ControlSigns(base, 1.0, 1.0, 1.0)  # MUTATED: assume signs' \
     "measured control signs" tests/test_control.py || failures=$((failures+1))
@@ -305,12 +306,10 @@ mutate experiments/gate5_ue_parity.py \
     tests/test_host_parity.py || failures=$((failures+1))
 
 mutate experiments/gate5_ue_parity.py \
-    '    first_a = at[1] if len(at) > 1 else at[0]
-    first_b = bt[1] if len(bt) > 1 else bt[0]' \
-    '    first_a = at[5] if len(at) > 5 else at[0]  # MUTATED: shave five samples
-    first_b = bt[5] if len(bt) > 5 else bt[0]' \
-    "exactly one sample is exempt" tests/test_host_parity.py \
-    || failures=$((failures+1))
+    '    grid = [t for t in at if start <= t <= end]' \
+    '    grid = [t for t in at if start <= t <= end][1:]  # MUTATED: the trim snapshot is exempt again' \
+    "no sample is exempt: the trim snapshot is graded (Package A retired the one-sample exemption)" \
+    tests/test_host_parity.py || failures=$((failures+1))
 
 mutate experiments/gate6_visual.py \
     '        ratio <= THRESHOLDS["max_extinction_ratio"],' \
@@ -464,8 +463,8 @@ mutate core/environment/rotor.py \
     tests/test_rotor.py || failures=$((failures+1))
 
 mutate core/environment/rotor.py \
-    '        return {W20_PROP: u.kt_to_fps(self.w20_kt_at(position))}' \
-    '        return {W20_PROP: u.kt_to_fps(self.w20_kt_at(position)), "atmosphere/randomseed": float(self.seed)}  # MUTATED' \
+    '        return {W20_PROP: u.kt_to_fps(w20_kt)}' \
+    '        return {W20_PROP: u.kt_to_fps(w20_kt), "atmosphere/randomseed": float(self.seed)}  # MUTATED' \
     "rotor per-step writes must never touch the seed" \
     tests/test_rotor.py || failures=$((failures+1))
 
@@ -846,8 +845,10 @@ mutate webapp/runs.py \
     tests/test_aircraft_assets.py || failures=$((failures+1))
 
 mutate webapp/runs.py \
-    '            run.push("failed", f"[{exc.constraint}] {exc.message}")' \
-    '            pass  # MUTATED: a failed model build is not named' \
+    '        except AircraftAssetError as exc:
+            run.push("failed", f"[{exc.constraint}] {exc.message}")' \
+    '        except AircraftAssetError as exc:
+            pass  # MUTATED: a failed model build is not named' \
     "a failed model build fails the run BY NAME" \
     tests/test_aircraft_assets.py || failures=$((failures+1))
 

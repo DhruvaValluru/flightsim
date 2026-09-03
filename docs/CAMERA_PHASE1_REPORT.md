@@ -270,12 +270,16 @@ In the `-camera-index=N` pass it:
    `camera_applied_fov_deg`, and the aircraft this host drew
    (`aircraft_applied_*`), all in the card's local frame; the root
    carries `frames_scheduled`, `frames_captured`, `step_s`,
-   `capture_fov_deg`, the sensor size;
+   `steps_taken`, `stepped_s`, `capture_fov_deg`, the sensor size;
 7. `ApplyPoseAtTime` FAILS the pass (never warns) when the applied
    position differs from the solved one by more than 10 cm
    (`PoseParityPositionCm`) OR the applied orientation by more than
    0.1 deg (`PoseParityAngleDegrees`);
-8. fails after the loop when `captured != scheduled`.
+8. stops stepping after the last scheduled capture ("consume-poses:
+   stopped after the last scheduled instant at t=... s (N of M
+   steps)") -- the schedule is the run the frames need; the steps
+   actually integrated are what `steps_taken` / `stepped_s` report;
+9. fails after the loop when `captured != scheduled`.
 
 ## Engine verification (Windows)
 

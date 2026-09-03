@@ -928,6 +928,69 @@ def test_clearance_track_is_wingspan_aware():
             < min(p["cg_clearance_m"] for p in track))
 
 
+def test_a_rotor_that_acts_carries_its_word_and_block_on_the_card(
+        tmp_path, monkeypatch):
+    """The other half of Package F: when the pre-flown track says the
+    rotor DID act, the card carries the word 'lee-rotor' (the gate for
+    turbulence_properties, gotcha 14), the rotor block, and the
+    conditions strip states the delivered sigma. The pre-flight verdict
+    is stubbed to 'acts'; everything downstream of it is the real flow.
+    (The sibling test below covers the rotor that does NOT act, where
+    the word must be absent -- which is why THIS case is needed for the
+    card-word guard to be load-bearing.)"""
+    import json as jsonlib
+
+    from webapp.runs import RunState, place_on_scene
+
+    if not (runs_module.REPO / "runs" / "terrain"
+            / "control_ridge.r16").is_file():
+        pytest.skip("no control ridge baked on this machine")
+
+    spec = compile_prompt(
+        "fly the 747 at 5000 m and 250 kt over 2000 m mountains "
+        "in a strong crosswind")
+    place_on_scene(spec)
+    assert str(spec.turbulence.value) == "none"
+
+    def fake_render(card, frames, scene, mesh, aircraft, telemetry=None,
+                    look=None, camera="chase", **kwargs):
+        frames.mkdir(parents=True, exist_ok=True)
+        (frames / "render.json").write_text("{}", encoding="utf-8")
+        if telemetry is not None:
+            from webapp.runs import EFFECT_CHANNELS
+            columns = {"t": [round(0.1 * i, 1) for i in range(220)]}
+            for name in EFFECT_CHANNELS:
+                columns[name] = [1.0 + 0.01 * (i % 7) for i in range(220)]
+            telemetry.write_text(jsonlib.dumps({"columns": columns}),
+                                 encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(RunManager, "_render", staticmethod(fake_render))
+    monkeypatch.setattr(runs_module, "ensure_aircraft_model",
+                        lambda spec, report: None)
+    monkeypatch.setattr(runs_module, "encode_clip",
+                        lambda frames, clip: bool(clip.write_bytes(b"x")) or True)
+    monkeypatch.setattr(runs_module, "build_panel_clip",
+                        lambda *a, **k: True)
+    # The pre-flight says the rotor acted on this track.
+    monkeypatch.setattr(runs_module, "_rotor_acts_on_track",
+                        lambda spec, scene, provider: None)
+
+    local = RunManager(out_root=tmp_path)
+    run = RunState(run_id="rotoracts")
+    local._render_flow(run, spec, provenance={})
+    assert run.status == "done", run.detail
+
+    card = jsonlib.loads((tmp_path / "rotoracts" / "card.json")
+                         .read_text(encoding="utf-8"))
+    assert card["turbulence"] == "lee-rotor"
+    assert card.get("rotor") is not None
+    assert "orographic" in card
+    assert run.conditions["turbulence"].startswith("lee-rotor over terrain")
+    assert "delivered sigma_w" in run.conditions["turbulence"]
+    assert run.conditions["turbulence_seed"] == int(spec.seed.value)
+
+
 def test_windy_terrain_run_says_the_rotor_does_not_act(tmp_path, monkeypatch):
     """Package F. The lee-rotor coupling delivers through W20, which the
     pinned build honours below 300 m AGL only; the planner keeps every
