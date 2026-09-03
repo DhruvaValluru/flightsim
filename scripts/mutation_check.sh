@@ -1250,6 +1250,35 @@ mutate webapp/static/index.html \
     "the render control is enabled only once the server has said the default" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Round 2: what a frames pass costs, and the by-product clip, recorded ---
+
+mutate core/capture/render_pass.py \
+    '            "-i", str(playlist), "-vsync", "vfr",' \
+    '            "-i", str(playlist),  # MUTATED: constant frame rate, instants lost' \
+    "the by-product clip keeps every frame at its scheduled instant (-vsync vfr)" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate core/capture/render_pass.py \
+    '    if lead > 0.0:
+        from PIL import Image' \
+    '    if False:  # MUTATED: no black lead-in; clip time is not simulation time
+        from PIL import Image' \
+    "the by-product clip leads in black to the first instant" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '        _note_frames_provenance(out, passes, encoded, clip_seconds)' \
+    '        pass  # MUTATED: the passes and the clip are not recorded' \
+    "a frames run records its passes and its clip in provenance" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '    record.update({"render_passes": passes, "clip_encoded": bool(encoded),
+                   "clip_seconds": float(clip_seconds)})' \
+    '    pass  # MUTATED: the CLI does not record its passes or its clip' \
+    "the CLI records its passes and its clip beside the run's digests" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

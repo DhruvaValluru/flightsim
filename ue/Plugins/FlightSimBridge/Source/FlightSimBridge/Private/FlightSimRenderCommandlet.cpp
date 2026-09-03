@@ -1300,6 +1300,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	TArray<FColor> Pixels;
 	int32 Captured = 0;
 	int32 BlankFrames = 0;
+	// Fixed steps actually integrated: a consume-poses pass stops after
+	// its last scheduled instant, and says how far it went.
+	int32 StepsTaken = 0;
 
 	for (int32 Step = 0; Step < Steps; ++Step)
 	{
@@ -1308,13 +1311,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			return Fail(Error + TEXT("; frames written so far are not a complete run"));
 		}
+		StepsTaken = Step + 1;
 		int32 ConsumeFrameIndex = -1;
 		double ConsumeScheduledSeconds = 0.0;
 		if (bConsumePoses)
 		{
 			if (NextScheduled >= ScheduledTimes.Num())
 			{
-				continue;   // every scheduled frame taken; the run steps on
+				continue;   // unreachable: the loop breaks after the last capture
 			}
 			const double ClockNow = Scenario.ReadProperty(TEXT("simulation/sim-time-sec"));
 			const double Scheduled = ScheduledTimes[NextScheduled];
@@ -1581,6 +1585,22 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 		FrameRecords.Add(MakeShared<FJsonValueObject>(Record));
 		++Captured;
+		if (bConsumePoses && NextScheduled >= ScheduledTimes.Num())
+		{
+			// Every scheduled frame is taken: the schedule defines the run
+			// the frames need (the telemetry commandlet and the closure pair
+			// cover the flight), so the pass stops HERE instead of stepping
+			// the spec's remaining seconds for nothing -- a 120 s default-
+			// duration spec with its captures in the first 12 s was 14400
+			// steps per camera pass. The steps actually integrated go into
+			// render.json (steps_taken, stepped_s) and the Python side
+			// reports them per pass.
+			UE_LOG(LogFlightSimRender, Display,
+			       TEXT("consume-poses: stopped after the last scheduled instant at t=%.3f s (%d of %d steps)"),
+			       Scenario.ReadProperty(TEXT("simulation/sim-time-sec")),
+			       StepsTaken, Steps);
+			break;
+		}
 	}
 
 	if (bConsumePoses)
@@ -1662,6 +1682,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		                     static_cast<double>(ScheduledTimes.Num()));
 		Root->SetNumberField(TEXT("frames_captured"), static_cast<double>(Captured));
 		Root->SetNumberField(TEXT("step_s"), DeltaSeconds);
+		// How far the pass stepped: the last scheduled instant, never the
+		// spec's whole duration.
+		Root->SetNumberField(TEXT("steps_taken"), static_cast<double>(StepsTaken));
+		Root->SetNumberField(TEXT("stepped_s"), StepsTaken * DeltaSeconds);
 		Root->SetNumberField(TEXT("sensor_width_mm"), ConsumeSensorWidthMm);
 		Root->SetNumberField(TEXT("sensor_height_mm"), ConsumeSensorHeightMm);
 		Root->SetNumberField(TEXT("capture_fov_deg"), Capture->FOVAngle);

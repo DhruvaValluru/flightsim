@@ -25,9 +25,15 @@ frames flow and ``python -m flightsim.capture --render frames``:
 * :func:`concat_playlist` / :func:`encode_scheduled_clip` make the clip
   a BY-PRODUCT of camera 0: the rendered frames shown at their scheduled
   instants (ffmpeg's concat demuxer with per-frame durations, a black
-  lead-in to the first instant), so the clip's clock IS the simulation
-  clock and the page's telemetry panel keeps its 1:1 mapping. No frame
-  is deleted, resampled or duplicated to a render fps.
+  lead-in PNG listed first for the time to the first instant), so the
+  clip's clock IS the simulation clock and the page's telemetry panel
+  keeps its 1:1 mapping. No frame is deleted, resampled or duplicated to
+  a render fps; the argv is pinned by test and the clip's expected
+  length is :func:`scheduled_clip_seconds`, recorded in provenance.
+* :func:`pass_stepping` reads how far a pass stepped (``steps_taken``,
+  ``stepped_s``): the commandlet stops after its last scheduled instant
+  and the status lines and provenance say how much editor time a pass
+  cost, per camera.
 """
 
 from __future__ import annotations
@@ -193,6 +199,33 @@ def check_render_pass(frames_dir: Path, scheduled: int) -> Optional[str]:
     return None
 
 
+def pass_stepping(frames_dir: Path) -> Optional[Dict[str, float]]:
+    """``{"steps_taken": N, "stepped_s": S}`` from a pass's render.json --
+    how far the commandlet stepped the FDM (it stops after the last
+    scheduled instant) -- or None when the pass did not say."""
+    report = Path(frames_dir) / "render.json"
+    try:
+        render = json.loads(report.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(render, dict):
+        return None
+    steps, seconds = render.get("steps_taken"), render.get("stepped_s")
+    if not isinstance(steps, (int, float)) or \
+            not isinstance(seconds, (int, float)):
+        return None
+    return {"steps_taken": int(steps), "stepped_s": float(seconds)}
+
+
+def stepping_words(stepping: Optional[Dict[str, float]]) -> str:
+    """The status-line clause for a pass's stepping, or '' when the pass
+    did not record it."""
+    if not stepping:
+        return ""
+    return (f" (engine stepped {stepping['stepped_s']:.3f} s in "
+            f"{stepping['steps_taken']} steps)")
+
+
 def rendered_count(frames_dir: Path) -> int:
     """PNGs actually on disk under one camera's frames directory."""
     frames_dir = Path(frames_dir)
@@ -201,16 +234,45 @@ def rendered_count(frames_dir: Path) -> int:
     return sum(1 for p in frames_dir.glob("*.png") if p.is_file())
 
 
+#: The black lead-in of the by-product clip: a PNG at the frames' own
+#: size, listed FIRST in the playlist for the time to the first instant,
+#: so clip time equals simulation time from t=0. Written beside the
+#: per-camera frame directories (never inside one: a directory's PNGs are
+#: its rendered frames, counted as such).
+CLIP_LEAD_NAME = "clip_lead.png"
+
+
+def scheduled_clip_seconds(times: Sequence[float],
+                           lead_in_s: Optional[float] = None,
+                           last_hold_s: float = LAST_FRAME_HOLD_S) -> float:
+    """The by-product clip's expected length: the lead-in (default: the
+    first instant, so clip time is simulation time), the span to the
+    last instant, and the last frame's hold."""
+    if not times:
+        raise ValueError("no capture instants; no clip to size")
+    lead = float(times[0]) if lead_in_s is None else float(lead_in_s)
+    return lead + (float(times[-1]) - float(times[0])) + float(last_hold_s)
+
+
 def concat_playlist(times: Sequence[float], names: Sequence[str],
-                    last_hold_s: float = LAST_FRAME_HOLD_S) -> str:
+                    last_hold_s: float = LAST_FRAME_HOLD_S,
+                    lead_in=None) -> str:
     """The ffconcat playlist showing frame i from times[i] until
     times[i+1]. The concat demuxer applies a file's duration only when
     another entry follows it, so the last frame is listed twice: once
-    with its hold, once to terminate."""
+    with its hold, once to terminate. ``lead_in`` is an optional
+    ``(name, seconds)`` entry listed first (the black lead-in)."""
     if len(times) != len(names) or not times:
         raise ValueError(f"{len(times)} instants against {len(names)} "
                          f"frames; refusing an unpaired playlist")
     lines = ["ffconcat version 1.0"]
+    if lead_in is not None:
+        lead_name, lead_seconds = lead_in
+        if float(lead_seconds) <= 0.0:
+            raise ValueError(f"a lead-in must last longer than 0 s, not "
+                             f"{lead_seconds}")
+        lines.append(f"file '{lead_name}'")
+        lines.append(f"duration {float(lead_seconds):.6f}")
     for index, (t, name) in enumerate(zip(times, names)):
         if index + 1 < len(times):
             duration = float(times[index + 1]) - float(t)
@@ -225,24 +287,43 @@ def concat_playlist(times: Sequence[float], names: Sequence[str],
     return "\n".join(lines) + "\n"
 
 
+def clip_command(ffmpeg: Path, playlist: Path, clip: Path) -> List[str]:
+    """The by-product clip's ffmpeg argv, spelled once and pinned by
+    test: the concat demuxer over the playlist (``-safe 0`` because the
+    lead-in lives one directory up), variable frame rate so every frame
+    keeps its scheduled instant, H.264 at the showcase's own quality."""
+    return [str(ffmpeg), "-y", "-f", "concat", "-safe", "0",
+            "-i", str(playlist), "-vsync", "vfr",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "19",
+            "-pix_fmt", "yuv420p", str(clip)]
+
+
 def encode_scheduled_clip(ffmpeg: Path, frames_dir: Path,
                           times: Sequence[float], clip: Path,
                           lead_in_s: Optional[float] = None) -> bool:
     """Encode the by-product clip from frames named by index, each
     shown at its scheduled instant. ``lead_in_s`` (default: the first
-    instant) is black, so clip time equals simulation time from t=0.
-    The PNGs are left in place: they are the deliverable."""
+    instant) is black -- a PNG at the frames' size, written beside the
+    camera directories and listed first in the playlist -- so clip time
+    equals simulation time from t=0 (:func:`scheduled_clip_seconds` is
+    the expected length). The PNGs are left in place: they are the
+    deliverable."""
     frames_dir = Path(frames_dir)
     names = [frame_name(i) for i in range(len(times))]
     playlist = frames_dir / "clip_playlist.ffconcat"
-    playlist.write_text(concat_playlist(times, names), encoding="utf-8")
     lead = float(times[0]) if lead_in_s is None else float(lead_in_s)
-    command = [str(ffmpeg), "-y", "-f", "concat", "-safe", "0",
-               "-i", str(playlist)]
+    lead_in = None
     if lead > 0.0:
-        command += ["-vf", f"tpad=start_duration={lead:.6f}:color=black"]
-    command += ["-vsync", "vfr", "-c:v", "libx264", "-preset", "medium",
-                "-crf", "19", "-pix_fmt", "yuv420p", str(clip)]
+        from PIL import Image
+
+        with Image.open(frames_dir / names[0]) as first:
+            size = first.size
+        Image.new("RGB", size, (0, 0, 0)).save(frames_dir.parent
+                                               / CLIP_LEAD_NAME)
+        lead_in = (f"../{CLIP_LEAD_NAME}", lead)
+    playlist.write_text(concat_playlist(times, names, lead_in=lead_in),
+                        encoding="utf-8")
+    command = clip_command(ffmpeg, playlist, clip)
     clip.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(command, capture_output=True)
     return proc.returncode == 0 and Path(clip).is_file()
@@ -256,4 +337,5 @@ def pass_summary(frames_dir: Path, scheduled: int) -> Dict[str, object]:
     return {"scheduled": int(scheduled),
             "rendered": rendered_count(frames_dir),
             "complete": problem is None,
-            **({"problem": problem} if problem else {})}
+            **({"problem": problem} if problem else {}),
+            **(pass_stepping(frames_dir) or {})}

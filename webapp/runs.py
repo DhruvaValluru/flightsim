@@ -52,10 +52,11 @@ import sys
 sys.path.insert(0, str(REPO))
 
 from core.capture.render_pass import (  # noqa: E402
-    HOST_PARITY_CONSTRAINT, RENDER_CHOICES, RENDER_FRAMES_CONSTRAINT,
-    RENDER_WORDS, frames_host_parity_refusal,
-    check_render_pass, encode_scheduled_clip, frame_name, render_command,
-    rendered_count, run_render_pass,
+    HOST_PARITY_CONSTRAINT, LAST_FRAME_HOLD_S, RENDER_CHOICES,
+    RENDER_FRAMES_CONSTRAINT, RENDER_WORDS, frames_host_parity_refusal,
+    check_render_pass, encode_scheduled_clip, frame_name, pass_stepping,
+    render_command, rendered_count, run_render_pass,
+    scheduled_clip_seconds, stepping_words,
 )
 from core.scenario.camera import (  # noqa: E402
     CHASE_OFFSETS, CameraSpec, default_cameras,
@@ -88,6 +89,19 @@ CLIP_SECONDS = 22.0
 #: re-exported), in the page's own words. The richest option the machine
 #: supports is the default; an engine option a machine cannot honour is
 #: refused by name (ue.platform), never degraded.
+
+
+def _note_frames_provenance(out: Path, passes: List[Dict], encoded: bool,
+                            clip_seconds: float) -> None:
+    """Add what the frames passes did to the run's provenance.json:
+    ``render_passes`` (per camera: scheduled, rendered, and how far the
+    engine stepped), ``clip_encoded`` and ``clip_seconds`` (the
+    by-product's expected length, stated whether or not it encoded)."""
+    path = Path(out) / "provenance.json"
+    provenance = json.loads(path.read_text(encoding="utf-8"))
+    provenance.update({"render_passes": passes, "clip_encoded": bool(encoded),
+                       "clip_seconds": float(clip_seconds)})
+    path.write_text(json.dumps(provenance, indent=1), encoding="utf-8")
 
 
 def capture_done_line(summary: Optional[Dict], render: str,
@@ -2093,6 +2107,7 @@ class RunManager:
         cameras = outcome.schedules
         total = sum(len(s) for s in cameras)
         window = float(spec.duration.value)
+        passes: List[Dict] = []
         for index, schedule in enumerate(cameras):
             camera_id = schedule.camera_id
             frames = out / "capture" / "frames" / camera_id
@@ -2119,23 +2134,40 @@ class RunManager:
                 run.push("failed", f"[{RENDER_FRAMES_CONSTRAINT}] camera "
                                    f"'{camera_id}': {problem}")
                 return
+            # How far the engine stepped for this camera (it stops after
+            # the last scheduled instant): said per pass and recorded.
+            stepping = pass_stepping(frames)
+            passes.append({"camera_id": camera_id, "camera_index": index,
+                           "scheduled": len(schedule),
+                           "rendered": rendered_count(frames),
+                           **(stepping or {})})
             run.push("rendering", f"camera '{camera_id}': "
                                   f"{rendered_count(frames)} of "
-                                  f"{len(schedule)} scheduled frames rendered")
+                                  f"{len(schedule)} scheduled frames rendered"
+                                  + stepping_words(stepping))
 
         first = cameras[0]
         first_dir = out / "capture" / "frames" / first.camera_id
+        # The clip's expected length is stated BEFORE encoding: the black
+        # lead-in to the first instant, the flight to the last, the hold.
+        clip_seconds = scheduled_clip_seconds(list(first.times))
         run.push("encoding",
                  f"encoding the by-product clip from camera "
                  f"'{first.camera_id}' ({len(first)} frames at their "
-                 f"scheduled instants; no telemetry panel -- the panel is "
-                 f"fps-locked)")
+                 f"scheduled instants: {clip_seconds:.3f} s of clip = black "
+                 f"to t={float(first.times[0]):.3f} s, the flight to "
+                 f"t={float(first.times[-1]):.3f} s, a {LAST_FRAME_HOLD_S:g} "
+                 f"s hold; no telemetry panel -- the panel is fps-locked)")
         clip = out / "clip.mp4"
         try:
             from core.util.platform import find_ffmpeg
 
             encoded = encode_scheduled_clip(find_ffmpeg(), first_dir,
                                             list(first.times), clip)
+            if not encoded:
+                run.push("encoding", "ffmpeg could not encode the "
+                                     "by-product clip; the frames stand on "
+                                     "their own")
         except Exception as exc:     # ffmpeg.missing or an encode failure
             encoded = False
             run.push("encoding", f"by-product clip not encoded "
@@ -2143,12 +2175,15 @@ class RunManager:
                                  f"frames stand on their own")
         if encoded:
             run.clip = str(clip)
-        else:
-            run.push("encoding", "ffmpeg could not encode the by-product "
-                                 "clip; the frames stand on their own")
+        # Recorded, whether or not the clip came out: what each pass
+        # cost and what the clip was expected to be.
+        _note_frames_provenance(out, passes, encoded, clip_seconds)
 
         summary = refresh_after_render(
             outcome, lambda line: run.push("capture", line))
+        summary["render_passes"] = passes
+        summary["clip"] = {"encoded": encoded, "seconds": clip_seconds,
+                           "by_product_of": first.camera_id}
         engine = next((c for c in summary["verification"]["checks"]
                        if c["name"] == "engine_parity"), None)
         if engine is None or engine["ok"] is not True:

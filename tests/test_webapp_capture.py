@@ -18,6 +18,7 @@ everything"):
 """
 
 import json
+import subprocess
 import zipfile
 from pathlib import Path
 
@@ -355,6 +356,9 @@ def honest_engine(calls, short_for=None, fail_for=None):
             "step_s": 1.0 / 120.0,
             "frames_scheduled": len(block["capture_times_s"]),
             "frames_captured": len(times),
+            # The pass stops after the last scheduled instant.
+            "steps_taken": int(round(times[-1] * 120.0)),
+            "stepped_s": times[-1],
             "frame_records": records,
         }), encoding="utf-8")
         if log is not None:
@@ -625,6 +629,137 @@ def test_a_dishonest_engine_pass_fails_engine_parity(engine_stubs):
     # Rendered, yes; verified, not those frames -- and the page shows it.
     assert run.capture["rendered"] == 8
     assert run.capture["verified"] == 6
+
+
+def test_the_frames_run_records_its_passes_and_the_clip(engine_stubs):
+    """What each engine pass cost (it stops after the last scheduled
+    instant: steps_taken / stepped_s from render.json) is said per pass
+    in the status and recorded in provenance as render_passes, and the
+    by-product clip's expected length is stated before encoding and
+    recorded with whether it encoded -- also when it did not."""
+    from webapp.runs import RunManager, RunState
+
+    calls = []
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(honest_engine(calls)))
+    manager = engine_stubs["manager"]
+    run = RunState(run_id="passes")
+    lines = []
+    original_push = run.push
+
+    def push(status, detail):
+        lines.append((status, detail))
+        original_push(status, detail)
+
+    run.push = push
+    manager._render_flow(run, two_camera_spec(), provenance={},
+                         render="frames")
+    assert run.status == "done", run.detail
+    out = manager.out_root / "passes"
+    card = json.loads((out / "card.json").read_text(encoding="utf-8"))
+    last = card["cameras"][0]["capture_times_s"][-1]
+    provenance = json.loads((out / "provenance.json").read_text(encoding="utf-8"))
+    assert provenance["render_passes"] == [
+        {"camera_id": "camera0", "camera_index": 0, "scheduled": 4,
+         "rendered": 4, "steps_taken": int(round(last * 120.0)),
+         "stepped_s": last},
+        {"camera_id": "tower0", "camera_index": 1, "scheduled": 4,
+         "rendered": 4, "steps_taken": int(round(last * 120.0)),
+         "stepped_s": last}]
+    assert provenance["clip_encoded"] is True
+    assert provenance["clip_seconds"] == pytest.approx(last + 1.0)
+    assert run.capture["render_passes"] == provenance["render_passes"]
+    assert run.capture["clip"] == {"encoded": True,
+                                   "seconds": pytest.approx(last + 1.0),
+                                   "by_product_of": "camera0"}
+    rendering = [d for s, d in lines if s == "rendering"]
+    assert any(d.startswith("camera 'camera0': 4 of 4 scheduled frames "
+                            "rendered (engine stepped ") for d in rendering)
+    assert any(f"in {int(round(last * 120.0))} steps)" in d for d in rendering)
+    encoding = [d for s, d in lines if s == "encoding"]
+    assert f"{last + 1.0:.3f} s of clip = black to t=" in encoding[0]
+    assert "a 1 s hold" in encoding[0]
+    assert provenance["render"] == "frames"          # the earlier fields stay
+
+    # The clip did not come out: recorded as such, the expected length
+    # still stated, the run still done on its frames.
+    def no_ffmpeg(ffmpeg, frames_dir, times, clip, lead_in_s=None):
+        raise RuntimeError("ffmpeg.missing: no ffmpeg found (test)")
+
+    engine_stubs["monkeypatch"].setattr(runs_module, "encode_scheduled_clip",
+                                        no_ffmpeg)
+    run = RunState(run_id="noclip")
+    manager._render_flow(run, two_camera_spec(), provenance={},
+                         render="frames")
+    assert run.status == "done", run.detail
+    assert run.clip is None and run.detail.endswith("; no clip")
+    provenance = json.loads((manager.out_root / "noclip" / "provenance.json")
+                            .read_text(encoding="utf-8"))
+    assert provenance["clip_encoded"] is False
+    assert provenance["clip_seconds"] == pytest.approx(last + 1.0)
+    assert len(provenance["render_passes"]) == 2
+
+
+def test_the_by_product_clip_s_ffmpeg_command_is_pinned(tmp_path, monkeypatch):
+    """The exact argv the by-product clip is encoded with, the playlist
+    it reads (a black lead-in PNG at the frames' size listed first for
+    the time to the first instant, each frame held to the next, the
+    last held and repeated to terminate) and the clip's expected
+    length. Nothing here needs ffmpeg: subprocess.run is stubbed and the
+    argv is the claim."""
+    from PIL import Image
+
+    from core.capture import render_pass
+    from core.capture.render_pass import (
+        CLIP_LEAD_NAME, encode_scheduled_clip, scheduled_clip_seconds,
+    )
+
+    frames_dir = tmp_path / "frames" / "cam"
+    frames_dir.mkdir(parents=True)
+    for index in range(3):
+        Image.new("RGB", (64, 36), (30, 30, 30)).save(
+            frames_dir / f"{index:04d}.png")
+    ran = []
+
+    def fake_run(command, capture_output=False, **kwargs):
+        ran.append(list(command))
+        Path(command[-1]).write_bytes(b"mp4")
+        return subprocess.CompletedProcess(command, 0, b"", b"")
+
+    monkeypatch.setattr(render_pass.subprocess, "run", fake_run)
+    clip = tmp_path / "clip.mp4"
+    assert encode_scheduled_clip(Path("ffmpeg"), frames_dir, [0.5, 1.0, 2.0],
+                                 clip) is True
+    playlist = frames_dir / "clip_playlist.ffconcat"
+    assert ran == [[
+        "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(playlist),
+        "-vsync", "vfr", "-c:v", "libx264", "-preset", "medium",
+        "-crf", "19", "-pix_fmt", "yuv420p", str(clip)]]
+    assert playlist.read_text(encoding="utf-8").splitlines() == [
+        "ffconcat version 1.0",
+        f"file '../{CLIP_LEAD_NAME}'", "duration 0.500000",
+        "file '0000.png'", "duration 0.500000",
+        "file '0001.png'", "duration 1.000000",
+        "file '0002.png'", "duration 1.000000",
+        "file '0002.png'"]
+    lead = tmp_path / "frames" / CLIP_LEAD_NAME
+    with Image.open(lead) as image:
+        assert image.size == (64, 36)
+        assert image.getpixel((0, 0)) == (0, 0, 0)
+    # The lead-in never lands among a camera's rendered frames.
+    assert sorted(p.name for p in frames_dir.glob("*.png")) == [
+        "0000.png", "0001.png", "0002.png"]
+    # Expected length: lead (first instant) + span + the 1 s hold.
+    assert scheduled_clip_seconds([0.5, 1.0, 2.0]) == pytest.approx(3.0)
+    assert scheduled_clip_seconds([0.5, 1.0, 2.0], lead_in_s=0.0) == \
+        pytest.approx(2.5)
+    # No lead-in when the first instant is t=0: no lead entry, no PNG.
+    lead.unlink()
+    assert encode_scheduled_clip(Path("ffmpeg"), frames_dir, [0.0, 1.0, 2.0],
+                                 clip) is True
+    assert playlist.read_text(encoding="utf-8").splitlines()[1] == \
+        "file '0000.png'"
+    assert not lead.exists()
 
 
 def test_the_by_product_clip_shows_each_frame_at_its_instant():

@@ -175,6 +175,9 @@ def honest_cli_engine(calls, short_for=None, fail_for=None):
             "step_s": 1.0 / 120.0,
             "frames_scheduled": len(block["capture_times_s"]),
             "frames_captured": len(times), "frame_records": records,
+            # The pass stops after the last scheduled instant.
+            "steps_taken": int(round(times[-1] * 120.0)),
+            "stepped_s": times[-1],
         }), encoding="utf-8")
         return True
     return fake_pass
@@ -393,6 +396,17 @@ def test_render_frames_runs_the_engine_once_per_camera(tmp_path, capsys,
     assert "[PASS] engine_parity" in text
     assert cli_engine["encoded"][0]["frames_dir"] == out / "frames" / "chase0"
     assert len(cli_engine["encoded"][0]["times"]) == 24
+    # What each pass cost and what the clip was expected to be, said and
+    # recorded beside the run's digests.
+    last = card["cameras"][0]["capture_times_s"][-1]
+    assert f"(engine stepped {last:.3f} s in {int(round(last * 120))} steps)" in text
+    assert f"{last + 1.0:.3f} s = black to t=" in text
+    run = json.loads((out / "run.json").read_text(encoding="utf-8"))
+    assert [p["camera_id"] for p in run["render_passes"]] == ["chase0", "tower0"]
+    assert run["render_passes"][0]["stepped_s"] == last
+    assert run["render_passes"][0]["steps_taken"] == int(round(last * 120))
+    assert run["clip_encoded"] is True
+    assert run["clip_seconds"] == pytest.approx(last + 1.0)
     # The frames verify from the directory, as the instructor would run it.
     assert verify_main([str(out)]) == 0
     assert "[PASS] engine_parity: 48 frames" in capsys.readouterr().out

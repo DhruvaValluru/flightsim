@@ -60,10 +60,11 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
 from core.capture.render_pass import (  # noqa: E402
-    HOST_PARITY_CONSTRAINT, RENDER_CHOICES, RENDER_FRAMES_CONSTRAINT,
-    RENDER_WORDS, check_render_pass, encode_scheduled_clip,
-    frames_host_parity_refusal, render_choice_default, render_command,
-    rendered_count, run_render_pass,
+    HOST_PARITY_CONSTRAINT, LAST_FRAME_HOLD_S, RENDER_CHOICES,
+    RENDER_FRAMES_CONSTRAINT, RENDER_WORDS, check_render_pass,
+    encode_scheduled_clip, frames_host_parity_refusal, pass_stepping,
+    render_choice_default, render_command, rendered_count, run_render_pass,
+    scheduled_clip_seconds, stepping_words,
 )
 
 
@@ -339,6 +340,7 @@ def _render_frames(spec, out: Path, card_path: Path, scene, cameras,
         return 2
     editor, project, mesh = prerequisites
     duration = float(spec.duration.value)
+    passes = []
     for index, schedule in enumerate(schedules):
         camera_id = schedule.camera_id
         frames_dir = out / "frames" / camera_id
@@ -363,25 +365,45 @@ def _render_frames(spec, out: Path, card_path: Path, scene, cameras,
                   f"{len(schedule)} scheduled frames; the frames written "
                   f"so far are not a frame set")
             return 2
+        stepping = pass_stepping(frames_dir)
+        passes.append({"camera_id": camera_id, "camera_index": index,
+                       "scheduled": len(schedule),
+                       "rendered": rendered_count(frames_dir),
+                       **(stepping or {})})
         print(f"  camera '{camera_id}': {rendered_count(frames_dir)} of "
               f"{len(schedule)} scheduled frames rendered under "
-              f"{frames_dir}")
+              f"{frames_dir}" + stepping_words(stepping))
 
     first = schedules[0]
     clip = out / "clip.mp4"
+    clip_seconds = scheduled_clip_seconds(list(first.times))
     try:
         from core.util.platform import find_ffmpeg
 
         encoded = encode_scheduled_clip(find_ffmpeg(),
                                         out / "frames" / first.camera_id,
                                         list(first.times), clip)
+        if not encoded:
+            print("  clip: ffmpeg could not encode the by-product clip; the "
+                  "frames stand on their own")
     except Exception as exc:
         encoded = False
         print(f"  clip: not encoded ({type(exc).__name__}: {exc}); the "
               f"frames stand on their own")
     if encoded:
         print(f"  clip:     {clip} (by-product of camera "
-              f"'{first.camera_id}', frames at their scheduled instants)")
+              f"'{first.camera_id}', {len(first)} frames at their scheduled "
+              f"instants; {clip_seconds:.3f} s = black to "
+              f"t={float(first.times[0]):.3f} s, the flight to "
+              f"t={float(first.times[-1]):.3f} s, a {LAST_FRAME_HOLD_S:g} s "
+              f"hold)")
+    # Recorded beside the run's digests: what each pass cost and what the
+    # clip was expected to be, whether or not it encoded.
+    run_json = out / "run.json"
+    record = json.loads(run_json.read_text(encoding="utf-8"))
+    record.update({"render_passes": passes, "clip_encoded": bool(encoded),
+                   "clip_seconds": float(clip_seconds)})
+    run_json.write_text(json.dumps(record, indent=1), encoding="utf-8")
 
     report = verify_run(out)
     print(report.render())

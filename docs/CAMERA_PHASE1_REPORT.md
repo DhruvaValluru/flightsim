@@ -176,10 +176,21 @@ Now it does, and the choice is explicit:
   present, the engine's own `frames_captured == frames_scheduled ==`
   the schedule, every `NNNN.png` on disk); anything short fails the run
   as `[render.frames] camera '<id>': ...` and the previews are never
-  presented as frames. The clip is a by-product of camera 0 -- its
-  frames at their scheduled instants through ffmpeg's concat demuxer
-  with a black lead-in, so clip time equals simulation time; no
-  telemetry panel (the panel is fps-locked).
+  presented as frames. A pass stops after its last scheduled instant
+  (the schedule defines the run the frames need; telemetry and the
+  closure pair cover the flight) and says how far it stepped
+  (`steps_taken`, `stepped_s` in render.json; "camera 'chase0': 24 of
+  24 scheduled frames rendered (engine stepped 11.992 s in 1439
+  steps)"), recorded per camera as `render_passes` in provenance.json
+  (the CLI: run.json). The clip is a by-product of camera 0 -- its
+  frames at their scheduled instants through ffmpeg's concat demuxer,
+  a black lead-in PNG (`frames/clip_lead.png`, the frames' own size)
+  listed first for the time to the first instant, so clip time equals
+  simulation time; the argv is spelled once (`clip_command`) and pinned
+  by test, the expected length is stated before encoding
+  (`scheduled_clip_seconds`: first instant + span + 1 s hold, 12.992 s
+  for the example) and recorded with `clip_encoded`, whether or not the
+  clip came out; no telemetry panel (the panel is fps-locked).
 * **The counts** -- every summary carries `scheduled` / `rendered` /
   `verified` per camera: rendered is PNGs the verifier counted on disk,
   verified is frames engine parity graded. A headless or clip-only run
@@ -304,10 +315,10 @@ scheduled 48 frames across 2 camera(s)
   manifest: runs\demo\capture_manifest.json
   previews: 48 geometry preview(s) under runs\demo\previews (previews are not frames)
 engine pass 1 of 2: camera 'chase0', 24 frames scheduled over the 12 s run (-camera-index=0)
-  camera 'chase0': 24 of 24 scheduled frames rendered under runs\demo\frames\chase0
+  camera 'chase0': 24 of 24 scheduled frames rendered under runs\demo\frames\chase0 (engine stepped 11.992 s in 1439 steps)
 engine pass 2 of 2: camera 'tower0', 24 frames scheduled over the 12 s run (-camera-index=1)
-  camera 'tower0': 24 of 24 scheduled frames rendered under runs\demo\frames\tower0
-  clip:     runs\demo\clip.mp4 (by-product of camera 'chase0', frames at their scheduled instants)
+  camera 'tower0': 24 of 24 scheduled frames rendered under runs\demo\frames\tower0 (engine stepped 11.992 s in 1439 steps)
+  clip:     runs\demo\clip.mp4 (by-product of camera 'chase0', 24 frames at their scheduled instants; 12.992 s = black to t=0.008 s, the flight to t=11.992 s, a 1 s hold)
   [PASS] manifest_version: manifest_version 1, spec cef57d752362381d
   [PASS] fields_finite: 48 frame records checked
   [PASS] geometry_recovery: 48 frames; quaternion-vs-euler reprojection gap 0.0000 px (tol 0.5); 0 aircraft behind camera; 0 aimed frames without the aircraft in frame
@@ -364,9 +375,16 @@ example's):
 consume-poses: camera 0 of 2, 115 solved samples
 consume-poses: 24 scheduled captures from t=0.008 s to t=11.992 s; 1280x720 px, sensor 36.00 x 20.25 mm, focal 35.0 mm (fov 54.43 deg)
 stepping 1440 steps of 0.008333 s, capturing at 24 scheduled instants at 1280x720
+consume-poses: stopped after the last scheduled instant at t=11.992 s (1439 of 1440 steps)
 consume-poses: captured 24 of 24 scheduled frames
 wrote 24 frames and C:\flightsim\runs\demo\frames\chase0\render.json
 ```
+
+The "stopped after" line is the frames-mode editor-time guard: the
+pass steps to the last scheduled instant and no further (1439 steps
+here; a 120 s spec whose 24 captures lie in its first 12 s costs the
+same 1439, not 14400). The Python side reports the recorded
+`steps_taken`/`stepped_s` per pass, as above.
 
 (camera 1 of 2 for the tower pass). `-fps=30` is passed and ignored in
 this mode: the log must NOT say "capturing every 4 (30.0 Hz)". Absent
@@ -380,13 +398,15 @@ runs\demo\
   capture_manifest.json        48 frame records, file = frames/<id>/NNNN.png
   card.json                    cameras: 2 blocks, 115 poses each, 24 capture_times_s each
   frames\chase0\0000.png .. 0023.png   24 files, 1280x720
-  frames\chase0\render.json    frames_scheduled 24, frames_captured 24, step_s 0.008333, 24 frame_records with frame_index 0..23
+  frames\chase0\render.json    frames_scheduled 24, frames_captured 24, step_s 0.008333, steps_taken 1439, stepped_s 11.992, 24 frame_records with frame_index 0..23 (each with t_scheduled_s, t_applied_s, t_pose_s, camera_applied_*, camera_solved_*, aircraft_applied_*)
   frames\chase0\render.log
   frames\tower0\0000.png .. 0023.png   24 files
   frames\tower0\render.json    the same, camera_index 1
   frames\tower0\render.log
-  frames\chase0\clip_playlist.ffconcat
-  clip.mp4                     the by-product: 24 frames shown at their instants (12 s)
+  frames\chase0\clip_playlist.ffconcat   the lead-in first ('../clip_lead.png', 0.008333 s), then 0000.png .. 0023.png with their durations, 0023.png repeated
+  frames\clip_lead.png         the by-product clip's black lead-in, 1280x720 (beside the camera directories, never inside one)
+  clip.mp4                     the by-product: black to t=0.008 s, 24 frames at their instants to t=11.992 s, the last held 1 s: 12.992 s
+  provenance.json              render "frames", render_passes (per camera: scheduled 24, rendered 24, steps_taken 1439, stepped_s 11.992), clip_encoded true, clip_seconds 12.992
   previews\...                 48 geometry previews (not frames)
   engine_telemetry.json        the engine's own recorder, pass 0
   telemetry.json               the headless flight the manifest describes
@@ -433,6 +453,22 @@ of which must FAIL by name:
   `poses.t_s`/`north_m`/... arrays, re-run pass 0: `consume-poses: the
   schedule spans t=0.008..11.992 s but the solved track covers only
   0.008..x s; the track does not cover the run`.
+
+### 5b. The by-product clip, measured
+
+The clip's ffmpeg argv is pinned by test and UNMEASURED here (no
+ffmpeg on the authoring machine). On the Windows machine:
+
+```
+ffprobe -v error -show_entries format=duration -of csv=p=0 runs\demo\clip.mp4
+ffprobe -v error -select_streams v -count_frames -show_entries stream=nb_read_frames,width,height -of csv=p=0 runs\demo\clip.mp4
+```
+
+The first must print 12.992 to within one frame of the last-held
+instant (12.99); the second 25 read frames (the lead-in plus 24) at
+1280x720 -- write both numbers here. A duration off by the 0.008 s
+lead-in or by the 1 s hold means the concat demuxer dropped an entry
+and the playlist, not the frames, is at fault.
 
 ### 6. The same from the page
 
@@ -485,10 +521,15 @@ Paste every log back; this section is rewritten from them.
   its log read, engine parity has never been exercised on real pixels,
   and this document says so rather than counting it.
 * The by-product clip's ffmpeg concat encoding is unmeasured here (no
-  ffmpeg on the authoring machine); the playlist it is built from is
-  pinned by test. The panel clip stays with *Clip only*.
-* A frames run steps the WHOLE spec duration in the editor (the
-  schedule spans the flight); the 22 s cap applies to clips only. A
-  120 s default-duration spec is 14400 fixed steps per camera pass.
+  ffmpeg on the authoring machine); its argv, playlist, lead-in PNG and
+  expected length are pinned by test, and step 5b above is the ffprobe
+  measurement. The panel clip stays with *Clip only*.
+* A frames pass steps the editor to its LAST SCHEDULED INSTANT and
+  stops (recorded as `steps_taken` / `stepped_s` per pass); a schedule
+  whose last instant lies late in a long spec still steps to it -- 24
+  captures spread over a 120 s spec is 14400 steps per camera pass --
+  and the status line says how many. The 22 s cap applies to clips
+  only; there is no frames-mode cap, by design: the schedule is the
+  contract.
 * Segmentation masks, bounding boxes, domain randomization, batch
   execution: out of scope, untouched.
