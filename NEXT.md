@@ -3,6 +3,54 @@
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
 
+**Camera Phase 1, frames round 3 (2026-09-04, six commits -- the
+judge's ranked gaps against analysis/QUALITY_BAR_camera_phase1.md,
+closed in priority order; docs/CAMERA_PHASE1_REPORT.md is current and
+SUPERSEDES the round-2 tolerances below).** (1) Engine parity judges
+the PIXELS: the commandlet writes its own projection of the aircraft
+it drew (aircraft_px/py/visible, aircraft_bbox_px from the bounds'
+corners via ProjectToPixel) and the verifier grades it against the
+labelled pixel within the graded budget and against its own projection
+of the drawn point within 3 px ("do not describe one lens"); a
+label-window contrast clause reads the PNG (window half max(16 px,
+graded budget) widened to the screen box, against a same-size window
+at the farthest corner, >= 8/255 in mean or spread) so a flat frame or
+a blob 40 px off fails by frame with both windows' numbers; all three
+engine stubs DRAW the blob at the label (tests.test_camera_verify.
+honest_frame). (2) ONE parity contract: the manifest carries rate_hz,
+step_s and per-frame aircraft.speed_mps (tas_kt, else ground speed);
+solve_schedule(rate_hz=) and the manifest refuse an instant off the
+fixed-step grid by name; t_applied_s must EQUAL t_s to 1e-6 s (the
+commandlet subtracts its clock origin, read before the first step,
+recorded as clock_origin_s, and fails a step that passes an instant --
+nothing is rounded to a nearest step, so "nearest" and "at or after"
+never differ); render.json's step_s is CHECKED against 1/rate_hz, never
+the tolerance; the drawn-aircraft budget is (1 + 0.5) steps x
+speed_mps / rate_hz per frame with the arithmetic printed ("budget
+2.08 m = 1.5 steps x 1.384 m/step at 166.0 m/s" on cameras_multi;
+1.24 m on the synthetic 99.43 m/s track), so a one-step-late clock
+fails cleanly by name and is never "within contract" on one line and
+over budget on the next; ENGINE_AIRCRAFT_TOL_M is gone. (3) The CLI's
+run.json carries render {choice, label, engine_available,
+engine_unavailable_reason} and verify.json is written beside the
+manifest in every mode (webapp.capture.verification_verdict). (4) POST
+/run without the field resolves through render_choice_default(); the
+page prints the server's word. (5) macOS is gated on the editor at
+UE_ROOT and the built .dylib exactly like Windows (ue_available() IS
+ue_unavailable_reason() is None). Suite 690 passed, 1 skipped in 107 s
+(+9 tests); 187 guards (+15, one repointed), each verified firing by
+subset. Gotcha: tests/test_webapp.py's clip-flow posts must state
+render "clip" -- an omitted field is now the machine's default (frames
+under a mocked-open gate). Gotcha: the synthetic make_columns track is
+99.43 m/s through the scene frame's projection, not the 100 m/s its
+degrees imply; pin measured numbers. STILL NOT YET RUN: the engine
+fields (aircraft_px/py/visible/bbox, clock_origin_s, t_clock_s, the
+exact-grid capture rule) are compile-safe by inspection only; the
+report's Windows section carries the commands, the log lines and the
+x digits to fill; the 8/255 contrast threshold is stated, not measured
+on rendered pixels, and the Windows run's "lowest label window
+contrast" is the first measurement of it.
+
 **Camera Phase 1, frames round 2 (2026-09-03, six commits -- the
 judge's ranked gaps against analysis/QUALITY_BAR_camera_phase1.md,
 closed in priority order; docs/CAMERA_PHASE1_REPORT.md is current).**
