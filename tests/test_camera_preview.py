@@ -1249,3 +1249,81 @@ def test_a_scale_that_does_not_divide_the_resolution_is_refused_by_name(tmp_path
     # A tile at an explicit size is not a scale: 320x180 from 1280x720.
     tile, tinfo = pv.draw_preview(rec, m, ("flat", None), size=(320, 180), style="thumbnail")
     assert tile.size == (320, 180)
+
+
+# -- round 3: the header tells what is in the picture; hidden counts per kind
+
+def test_the_header_says_when_the_ground_and_arrow_are_out_of_frame():
+    """A tower camera pitched 60 deg up at an aircraft at 3 km: no
+    lattice, ring or arrow segment survives, so the ground line reads
+    "(out of frame)", the rings "(none in frame)" and the arrow "ground
+    out of frame" -- never as if drawn. A camera over the plane says
+    "drawn (60 px, ...)" and no such suffix."""
+    rec = record(camera=(900.0, -800.0, 80.0), look=(90.0, 60.0, 0.0),
+                 aircraft=(1000.0, 0.0, 3048.0))
+    _, info = draw(rec)
+    assert info["segments"]["grid"] == 0 and info["segments"]["rings"] == 0
+    assert info["segments"]["north_arrow"] == 0
+    ground = [line for line in info["header"] if line.startswith("ground:")][0]
+    assert "lattice 20 m / 200 m to 49.7778 km (out of frame)" in ground
+    assert "rings centred on the camera's ground point (none in frame)" in ground
+    assert ground.endswith("; north arrow: ground out of frame")
+    assert info["north_arrow_state"] == "ground out of frame"
+    # Drawn: the words say so, with the arrow's measured size.
+    _, info = draw(record(camera=(0.0, 0.0, 800.0), look=(0.0, -60.0, 0.0),
+                          aircraft=(300.0, 200.0, 600.0)))
+    ground = [line for line in info["header"] if line.startswith("ground:")][0]
+    assert "(out of frame)" not in ground and "(none in frame)" not in ground
+    assert "; north arrow: drawn (60 px, " in ground
+    assert info["north_arrow_state"].startswith("drawn (60 px, ")
+    # header_lines without the picture's counts carries no suffix.
+    plain = pv.header_lines(rec, manifest([rec]), ground=pv.Ground("flat", None),
+                            plan=pv.flat_ground_plan(rec, 0.0))
+    assert "(out of frame)" not in "\n".join(plain) and "north arrow" not in "\n".join(plain)
+
+
+def test_hidden_counts_are_per_kind_and_reconcile_with_the_segments_in_frame():
+    """The judge's scene (two_ridge_heightfield, camera at 100 m): for
+    each kind (coarse, fine, rings) hidden + visible == in frame, where
+    visible counts SOURCE segments with at least one visible run (the
+    skyline cull's source array) and the visible runs are counted
+    apart. Recomputed here from the same clip and cull: coarse 1314 in
+    frame, 124 with a visible run, 1190 hidden, 134 runs; rings 66 in
+    frame, 44 visible, 22 hidden. The old total, 1202, was len(all
+    clipped) - len(all runs) across kinds. The header carries the
+    coarse counts."""
+    from tests.test_camera_poses import FRAME
+
+    ground = pv._ground(two_ridge_heightfield(), FRAME)
+    rec = record(camera=(-1500.0, 0.0, 100.0), look=(0.0, 0.0, 0.0),
+                 aircraft=(-1300.0, 100.0, 150.0))
+    _, info = pv.draw_preview(rec, manifest([rec]), ground)
+    seg = info["segments"]
+    for kind in ("terrain", "terrain_fine"):
+        assert seg[f"{kind}_hidden"] + seg[f"{kind}_visible"] == seg[kind]
+        assert seg[f"{kind}_visible_runs"] >= seg[f"{kind}_visible"]
+    assert seg["rings_hidden"] + seg["rings_visible"] == seg["rings_in_frame"]
+    # Independently: the same parts, clipped and culled together.
+    a, b = ground.segments
+    na, nb = pv.terrain_near_wireframe(ground.heightfield, ground.frame, rec, ground.plan)
+    ra, rb, _ = pv.terrain_rings(rec, ground, float(rec["far_m"]))
+    kind = np.concatenate([np.zeros(len(a), int), np.ones(len(na), int), np.full(len(ra), 2)])
+    clipped, za, zb, survivors = pv._project_clip(
+        rec, np.concatenate([a, na, ra]), np.concatenate([b, nb, rb]), 1.0)
+    visible, source, _ = pv.skyline_cull(clipped, za, zb, WIDTH)
+    in_frame_kind = kind[survivors]
+    for k, name in ((0, "terrain"), (1, "terrain_fine")):
+        in_frame = int((in_frame_kind == k).sum())
+        seen = len(np.unique(source[in_frame_kind[source] == k]))
+        assert seg[name] == in_frame and seg[f"{name}_visible"] == seen
+        assert seg[f"{name}_hidden"] == in_frame - seen
+        assert seg[f"{name}_visible_runs"] == int((in_frame_kind[source] == k).sum())
+    assert seg["rings_in_frame"] == int((in_frame_kind == 2).sum())
+    assert seg["rings_visible"] == len(np.unique(source[in_frame_kind[source] == 2]))
+    assert (seg["terrain"], seg["terrain_visible"], seg["terrain_hidden"],
+            seg["terrain_visible_runs"]) == (1314, 124, 1190, 134)
+    assert (seg["rings_in_frame"], seg["rings_visible"], seg["rings_hidden"]) == (66, 44, 22)
+    assert seg["terrain_hidden"] != len(clipped) - len(visible) == 1202
+    terrain_line = [line for line in info["header"] if line.startswith("terrain ")][0]
+    assert "(124 of 1314 coarse + 0 of 0 fine in view, 1190 hidden behind ridges)" in terrain_line
+    assert "; rings on the terrain; north arrow: drawn (" in terrain_line

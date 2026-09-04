@@ -1752,6 +1752,32 @@ mutate webapp/server.py \
     "preview round 3: the page refuses a non-divisor preview scale before the run" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+mutate core/capture/preview.py \
+    '        if drawn is not None and drawn.get("grid", 0) == 0:
+            words += " (out of frame)"' \
+    '        if False:  # MUTATED: the header describes a lattice the picture does not carry
+            words += " (out of frame)"' \
+    "preview round 3: the ground line says (out of frame) when no ground segment survived" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '                         arrow=info["north_arrow_state"])' \
+    '                         arrow=None)  # MUTATED: the header is silent about the arrow' \
+    "preview round 3: the header states the north arrow's state" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '            info["segments"][f"{name}_hidden"] = n_in_frame - seen' \
+    '            info["segments"][f"{name}_hidden"] = int(len(clipped) - len(visible))  # MUTATED: the old cross-kind total' \
+    "preview round 3: hidden counts are per kind and reconcile with the segments in frame" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '            if zone[0] <= ax <= zone[2] and zone[1] <= ay <= zone[3]:' \
+    '            if False:  # MUTATED: no candidate below a zone the anchor lies in' \
+    "preview round 3: a label anchored inside a reserved zone is offered the rows beside it" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

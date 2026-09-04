@@ -101,8 +101,15 @@ What is drawn, and where each number comes from
   human count), simulation time, position, look direction (yaw, pitch,
   roll), focal length and fx, the resolution; the aircraft's state;
   the body's dimensions with their sources; the ground (raster name,
-  size, resolution and wireframe spacing, or the flat lattice); the
-  track's source. Font and line height derive from the image height
+  size, resolution and wireframe spacing, or the flat lattice) with
+  what of it is IN the picture -- "(out of frame)" when no ground
+  segment survived, "(none in frame)" for the rings, the per-kind
+  visible / hidden counts on terrain -- and the north arrow's state
+  ("drawn (60 px, 1234 m)" or "ground out of frame"); the track's
+  source. ``info["segments"]`` counts, per kind (terrain coarse,
+  terrain_fine, rings), the segments in frame, those with a visible
+  run, those hidden (in frame = visible + hidden) and the visible
+  runs drawn. Font and line height derive from the image height
   and lines longer than the image are wrapped, so the text fits at any
   size.
 
@@ -1138,29 +1145,58 @@ def body_words(metrics: Optional[Dict]) -> str:
 
 
 def ground_words(ground: Ground, plan: Optional[Dict],
-                 terrain_elevation_m: float) -> str:
+                 terrain_elevation_m: float, drawn: Optional[Dict] = None,
+                 arrow: Optional[str] = None) -> str:
+    """The ground line. With ``drawn`` (the picture's segment counts)
+    a lattice that put no segment in the frame says "(out of frame)",
+    rings that put none say "(none in frame)", and ``arrow`` (the
+    north arrow's state) is appended: the header never describes an
+    element the picture does not carry as if it were drawn."""
     if ground.kind == "terrain":
         tp = ground.plan
         if not tp:
-            return "terrain: raster wireframe (metadata not passed)"
-        return (f"terrain {tp['name']} {tp['width_px']}x{tp['height_px']} @ "
-                f"{tp['pixel_size_m']:g} m, wireframe {tp['samples'][0]}x"
-                f"{tp['samples'][1]} ({tp['spacing_m']:g} m) + {tp['fine_spacing_m']:g} m "
-                f"within {tp['near_radius_m'] / 1000.0:g} km of the camera; rings on "
-                f"the terrain")
-    if plan is None:
-        return (f"ground: flat plane at {terrain_elevation_m:g} m (camera at or "
-                f"below it: no lattice)")
-    return (f"ground: flat plane at {plan['alt_m']:g} m, lattice {plan['step_m']:g} m / "
-            f"{plan['coarse_step_m']:g} m to {plan['extent_m'] / 1000.0:g} km; rings "
-            f"centred on the camera's ground point")
+            words = "terrain: raster wireframe (metadata not passed)"
+        else:
+            words = (f"terrain {tp['name']} {tp['width_px']}x{tp['height_px']} @ "
+                     f"{tp['pixel_size_m']:g} m, wireframe {tp['samples'][0]}x"
+                     f"{tp['samples'][1]} ({tp['spacing_m']:g} m) + {tp['fine_spacing_m']:g} m "
+                     f"within {tp['near_radius_m'] / 1000.0:g} km of the camera")
+            if drawn is not None:
+                seen = drawn.get("terrain_visible", 0) + drawn.get("terrain_fine_visible", 0)
+                if seen == 0:
+                    words += " (out of frame)"
+                else:
+                    words += (f" ({drawn.get('terrain_visible', 0)} of {drawn.get('terrain', 0)} "
+                              f"coarse + {drawn.get('terrain_fine_visible', 0)} of "
+                              f"{drawn.get('terrain_fine', 0)} fine in view, "
+                              f"{drawn.get('terrain_hidden', 0) + drawn.get('terrain_fine_hidden', 0)} "
+                              f"hidden behind ridges)")
+            words += "; rings on the terrain"
+            if drawn is not None and drawn.get("rings", 0) == 0:
+                words += " (none in frame)"
+    elif plan is None:
+        words = (f"ground: flat plane at {terrain_elevation_m:g} m (camera at or "
+                 f"below it: no lattice)")
+    else:
+        words = (f"ground: flat plane at {plan['alt_m']:g} m, lattice {plan['step_m']:g} m / "
+                 f"{plan['coarse_step_m']:g} m to {plan['extent_m'] / 1000.0:g} km")
+        if drawn is not None and drawn.get("grid", 0) == 0:
+            words += " (out of frame)"
+        words += "; rings centred on the camera's ground point"
+        if drawn is not None and drawn.get("rings", 0) == 0:
+            words += " (none in frame)"
+    if arrow:
+        words += f"; north arrow: {arrow}"
+    return words
 
 
 def header_lines(record: Dict, manifest: Dict, scale: int = 1,
                  tag: str = "geometry preview, not a render",
                  ground: Optional[Ground] = None, plan: Optional[Dict] = None,
                  terrain_elevation_m: float = 0.0,
-                 track_words: Optional[str] = None) -> List[str]:
+                 track_words: Optional[str] = None,
+                 drawn: Optional[Dict] = None,
+                 arrow: Optional[str] = None) -> List[str]:
     """The header text, line by line, every number from the record."""
     block = _camera_block(manifest, record["camera_id"])
     count = block.get("capture_count")
@@ -1192,7 +1228,7 @@ def header_lines(record: Dict, manifest: Dict, scale: int = 1,
         body_words(metrics),
     ]
     if ground is not None:
-        lines.append(ground_words(ground, plan, terrain_elevation_m))
+        lines.append(ground_words(ground, plan, terrain_elevation_m, drawn, arrow))
     if track_words:
         lines.append(track_words)
     return lines
@@ -1295,8 +1331,7 @@ class _Labels:
                               "prefer": tuple(prefer), "priority": int(priority),
                               "gap": float(gap), "order": len(self.requests)})
 
-    @staticmethod
-    def candidates(anchor, tw, th, prefer, gap):
+    def candidates(self, anchor, tw, th, prefer, gap):
         ax, ay = anchor
         side = {"right": (ax + gap, ay - th / 2.0), "left": (ax - gap - tw, ay - th / 2.0),
                 "above": (ax - tw / 2.0, ay - gap - th), "below": (ax - tw / 2.0, ay + gap)}
@@ -1312,6 +1347,17 @@ class _Labels:
                     out.append(((x, y - k * step), name, k))
                 else:
                     out.append(((x, y + k * step), name, k))
+        # An anchor INSIDE a reserved zone (a ring under the header
+        # band, say): the first rows just below and just above that
+        # zone, then shifted outward, whatever the zone's height.
+        for zone in self.reserved:
+            if zone[0] <= ax <= zone[2] and zone[1] <= ay <= zone[3]:
+                below = zone[3] + 3.0
+                above = zone[1] - 3.0 - th
+                for k in range(0, LABEL_MAX_SHIFT_LINES + 1):
+                    out.append(((ax - tw / 2.0, below + k * step), "below", k))
+                    out.append(((ax + gap, below + k * step), "right", k))
+                    out.append(((ax - tw / 2.0, above - k * step), "above", k))
         return out
 
     def place_all(self, draw, w_img, h_img):
@@ -1527,12 +1573,17 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
         src_kind = kind_of[survivors][source] if len(source) else np.zeros(0, dtype=int)
         src_radius = radius_of[survivors][source] if len(source) else np.zeros(0)
         clipped_kind = kind_of[survivors]
-        # "terrain": the coarse segments in the frame (what the frame
-        # contains); "terrain_visible": those left after the cull.
-        info["segments"]["terrain"] = int((clipped_kind == 0).sum())
-        info["segments"]["terrain_visible"] = int((src_kind == 0).sum())
-        info["segments"]["terrain_fine"] = int((src_kind == 1).sum())
-        info["segments"]["terrain_hidden"] = int(len(clipped) - len(visible))
+        # Per kind (coarse, fine, rings): the segments IN FRAME, those
+        # with at least one visible run (drawn), those with none
+        # (hidden behind nearer ground), hidden + visible == in frame,
+        # and the count of visible runs (sub-segments) drawn.
+        for k, name in ((0, "terrain"), (1, "terrain_fine"), (2, "rings")):
+            n_in_frame = int((clipped_kind == k).sum())
+            seen = int(len(np.unique(source[src_kind == k]))) if len(source) else 0
+            info["segments"][name if k != 2 else "rings_in_frame"] = n_in_frame
+            info["segments"][f"{name}_visible"] = seen
+            info["segments"][f"{name}_hidden"] = n_in_frame - seen
+            info["segments"][f"{name}_visible_runs"] = int((src_kind == k).sum())
         _draw_segments(draw, visible[src_kind == 0], colour_shaded(TERRAIN_TINT))
         _draw_segments(draw, visible[src_kind == 1], colour_shaded(TERRAIN_TINT))
         ring_rows = visible[src_kind == 2]
@@ -1588,10 +1639,15 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
             info["segments"]["rings"] = rings
             arrow_base = north_arrow_base(record, plan)
 
-    # 1b. the north arrow (every scene), NORTH_ARROW_PX on screen
+    # 1b. the north arrow (every scene), NORTH_ARROW_PX on screen; its
+    #     state is told in the header when it is not drawn.
     info["segments"]["north_arrow"] = 0
+    info["north_arrow_state"] = ("ground out of frame" if ground.kind == "flat" and plan is not None
+                                 else "no ground under the camera" if ground.kind == "flat"
+                                 else "no ground on the raster under the ray or the aircraft")
     if arrow_base is not None:
         arrow = north_arrow_points(record, arrow_base, axes)
+        info["north_arrow_state"] = "ground out of frame"
         if arrow is not None:
             segs = _clip_segments(record,
                                   np.array([arrow["base"], arrow["tip"], arrow["tip"]]),
@@ -1599,6 +1655,10 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
                                   axis_scale, axes)
             _draw_segments(draw, segs, _solid(rgba(NORTH_RGB)), width=2)
             info["segments"]["north_arrow"] = int(len(segs))
+            if len(segs):
+                info["north_arrow_state"] = (f"drawn ({arrow['screen_px']:.0f} px, "
+                                             f"{arrow['length_m']:.0f} m)"
+                                             if arrow["screen_px"] is not None else "drawn")
             u, v, z = px(arrow["tip"])
             info["north_arrow"] = {"base": arrow["base"], "tip": arrow["tip"],
                                    "length_m": arrow["length_m"],
@@ -1754,7 +1814,8 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
     # 6. header, wrapped to the image width, font from the image height
     lines = header_lines(record, manifest, scale, tag, ground=ground, plan=plan,
                          terrain_elevation_m=terrain_elevation_m,
-                         track_words=track_words)
+                         track_words=track_words, drawn=info["segments"],
+                         arrow=info["north_arrow_state"])
     info["header"] = lines
     font = _font(font_px)
     line_h = font_px + 2
