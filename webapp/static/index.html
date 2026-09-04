@@ -486,8 +486,9 @@ async function startRun(mayBake, endpoint) {
   }
   activeRun = payload.run_id;
   try { localStorage.setItem("flightsim.lastRun", activeRun); } catch (e) {}
+  // The server's resolved word, never a page-side fallback.
   $("status").textContent = `run ${activeRun} started (spec ` +
-    `${payload.digest.slice(0, 16)}; render: ${payload.render || "clip"})`;
+    `${payload.digest.slice(0, 16)}; render: ${payload.render})`;
   $("clipArea").innerHTML = "";
   poll();
 }

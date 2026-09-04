@@ -91,11 +91,13 @@ class RunRequest(BaseModel):
     #: The render choice, in the page's own three words (webapp.runs.
     #: RENDER_CHOICES): "frames" -- the engine's consume-poses pass once
     #: per camera, the clip a by-product; "clip" -- the single preset
-    #: pass, this endpoint's historic meaning and its value when the
-    #: field is omitted; "none" -- headless (manifest, previews,
-    #: verification; no engine). The page always sends its selection;
-    #: an engine choice a machine cannot honour is refused ue.platform
-    #: by name with the reason, never degraded.
+    #: pass; "none" -- headless (manifest, previews, verification; no
+    #: engine). An OMITTED field resolves through the ONE rule the page
+    #: and the CLI use, core.capture.render_pass.render_choice_default
+    #: (the richest option this machine supports) -- there is no second
+    #: spelling of the default here; the reply echoes the resolved
+    #: word. An engine choice a machine cannot honour is refused
+    #: ue.platform by name with the reason, never degraded.
     render: Optional[Literal["frames", "clip", "none"]] = None
 
 
@@ -361,10 +363,13 @@ def _prepare_run_spec(request: RunRequest):
 @app.post("/run")
 def run_endpoint(request: RunRequest) -> JSONResponse:
     """Start a run with the requested render choice: frames (engine, one
-    pass per camera, clip as a by-product), clip (the single preset pass
-    -- the default when the field is omitted), or none (headless: the
-    capture half alone, no engine, no platform gate)."""
-    render = request.render or "clip"
+    pass per camera, clip as a by-product), clip (the single preset
+    pass), or none (headless: the capture half alone, no engine, no
+    platform gate). An omitted field is the machine's default by the one
+    rule (render_choice_default), echoed back as ``render``."""
+    from core.capture.render_pass import render_choice_default
+
+    render = request.render or render_choice_default()
     spec, refusal = _prepare_run_spec(request)
     if refusal is not None:
         return refusal

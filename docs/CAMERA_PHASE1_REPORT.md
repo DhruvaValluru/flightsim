@@ -164,9 +164,15 @@ Now it does, and the choice is explicit:
   page says "render choice unavailable: server unreachable"); the JS
   that does this (`applyRenderChoices`) is driven verbatim under node by
   `tests/test_webapp_capture.py` against the real `/status` payload, and
-  its markup and lines are pinned at the source. An engine choice
-  on a machine without the engine is refused `ue.platform` by name with
-  that reason -- never degraded to headless. The choice is recorded as
+  its markup and lines are pinned at the source. A `POST /run` that
+  OMITS the field (an API client) resolves through the same one rule,
+  `render_choice_default()`, and the reply echoes the resolved word --
+  headless on a machine without the engine, frames where it exists;
+  there is no second spelling of the default on the server and the
+  page prints the server's word with no fallback of its own (pinned
+  under both gate states by `tests/test_webapp_capture.py`). An engine
+  choice on a machine without the engine is refused `ue.platform` by
+  name with that reason -- never degraded to headless. The choice is recorded as
   `render` in `provenance.json` and the final status line names what
   came out: "48 frames across 2 camera(s) rendered (48 scheduled, 48
   verified by engine parity) + clip (by-product of 'chase0')", "clip

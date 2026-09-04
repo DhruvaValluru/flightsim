@@ -1132,6 +1132,12 @@ mutate flightsim/capture.py \
     "the CLI writes the verifier's report as verify.json in every mode" \
     tests/test_camera_cli.py || failures=$((failures+1))
 
+mutate webapp/server.py \
+    '    render = request.render or render_choice_default()' \
+    '    render = request.render or "clip"  # MUTATED: a second, hidden default' \
+    "an omitted render field resolves through the one default rule" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 # -- Camera Phase 1 finished: the web run renders frames, not a clip ------
 
 mutate core/capture/render_pass.py \

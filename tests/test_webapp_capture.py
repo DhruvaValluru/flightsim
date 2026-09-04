@@ -1160,8 +1160,8 @@ def test_render_clip_on_run_is_todays_flow(engine_client, engine_stubs):
     engine_stubs["monkeypatch"].setattr(
         RunManager, "_render", staticmethod(clip_render))
     spec = compile_prompt(DEMO)
-    # Omitting the field is the endpoint's historic meaning: clip.
-    reply = engine_client.post("/run", json={"spec": spec.to_dict()})
+    reply = engine_client.post("/run", json={"spec": spec.to_dict(),
+                                             "render": "clip"})
     assert reply.status_code == 200, reply.json()
     assert reply.json()["render"] == "clip"
     state = finished(engine_client, reply.json()["run_id"])
@@ -1172,3 +1172,49 @@ def test_render_clip_on_run_is_todays_flow(engine_client, engine_stubs):
         (manager.out_root / reply.json()["run_id"] / "provenance.json")
         .read_text(encoding="utf-8"))
     assert provenance["render"] == "clip"
+
+
+def test_an_omitted_render_field_resolves_through_the_one_default_rule(
+        client, engine_stubs, monkeypatch):
+    """POST /run without the field is not a second spelling of the
+    default: it resolves through render_choice_default() -- headless on
+    a machine without the engine (never a ue.platform refusal for a
+    choice the client did not make), frames where the engine exists --
+    and the reply echoes the resolved word."""
+    import core.util.platform as plat
+    import webapp.server as server_module
+    from core.capture.render_pass import render_choice_default
+    from webapp.runs import RunManager
+
+    monkeypatch.setattr(plat, "ue_available", lambda: False)
+    monkeypatch.setattr(plat, "ue_unavailable_reason",
+                        lambda: "no engine on this machine (test)")
+    assert render_choice_default() == "none"
+    spec = two_camera_spec()
+    reply = client.post("/run", json={"spec": spec.to_dict()})
+    assert reply.status_code == 200, reply.json()
+    assert reply.json()["render"] == "none" == render_choice_default()
+    state = finished(client, reply.json()["run_id"])
+    assert state["status"] == "done", state["detail"]
+    assert state["render"] == "none" and "no pixels" in state["detail"]
+
+    monkeypatch.setattr(plat, "ue_available", lambda: True)
+    monkeypatch.setattr(plat, "ue_unavailable_reason", lambda: None)
+    monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
+                        lambda spec: None)
+    monkeypatch.setattr(runs_module, "editor_running", lambda: False)
+    calls = []
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(honest_engine(calls)))
+    assert render_choice_default() == "frames"
+    reply = client.post("/run", json={"spec": spec.to_dict()})
+    assert reply.status_code == 200, reply.json()
+    assert reply.json()["render"] == "frames" == render_choice_default()
+    state = finished(client, reply.json()["run_id"])
+    assert state["status"] == "done", state["detail"]
+    assert state["render"] == "frames"
+    assert [c["camera_index"] for c in calls] == [0, 1]
+    # The page prints the server's word, with no fallback of its own.
+    page = STATIC_INDEX.read_text(encoding="utf-8")
+    assert 'render: ${payload.render})' in page
+    assert '|| "clip"' not in page
