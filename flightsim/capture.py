@@ -293,11 +293,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"  card:     {card_path} (consume-poses; one "
               f"commandlet pass per camera via -camera-index=N)")
 
+    # The flown track comes from the run's own telemetry (decimated in
+    # the preview module, never interpolated); the header says so.
     previews = render_previews(manifest, out, heightfield=heightfield,
                                scene_frame=frame,
                                terrain_elevation_m=terrain_datum,
                                max_frames=args.max_previews,
-                               scale=preview_scale)
+                               scale=preview_scale, telemetry=columns)
     _note_previews(out, previews)
     total = sum(len(s) for s in schedules)
     # Scheduled, in that word: nothing has been rendered yet.
@@ -305,7 +307,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"  manifest: {manifest_path}")
     print(f"  previews: {len(previews)} geometry preview(s)"
           f"{preview_words(previews)} under {out / 'previews'} (previews "
-          f"are not frames)")
+          f"are not frames; {previews.track_source})")
     if previews.contact_sheets:
         print(f"  contact sheets: {len(previews.contact_sheets)} "
               f"(contact_sheets/<camera_id>.png, one per camera)")
@@ -347,7 +349,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                               schedules, overlay=lambda: render_overlays(
                                   manifest, out, heightfield=heightfield,
                                   scene_frame=frame,
-                                  terrain_elevation_m=terrain_datum))
+                                  terrain_elevation_m=terrain_datum,
+                                  telemetry=columns))
     return _render_clip(spec, out, scene)
 
 
@@ -373,6 +376,7 @@ def _note_previews(out: Path, previews) -> None:
         "scale": int(previews.scale),
         "resolution": list(previews.resolution) if previews.resolution else None,
         "s_per_frame": float(previews.seconds_per_frame),
+        "track_source": str(previews.track_source),
         "contact_sheets": {camera_id: str(path.relative_to(out))
                            for camera_id, path in previews.contact_sheets.items()},
     }

@@ -1273,6 +1273,16 @@ def test_the_page_s_previews_are_full_resolution_with_a_contact_sheet(
     assert capture["preview_resolution"] == [record["width_px"],
                                              record["height_px"]]
     assert 0.0 < capture["preview_s_per_frame"] < 0.5
+    # The flown track comes from the run's own telemetry at the rate
+    # measured from its samples (the recorder's 13-step spacing: 9.23 Hz).
+    import numpy as np
+
+    telemetry = client.get(f"/runs/{run_id}/file/capture/telemetry.json").json()
+    t = telemetry["columns"]["t"]
+    rate = 1.0 / float(np.median(np.diff(t)))
+    assert 9.0 < rate < 10.0
+    assert capture["preview_track_source"] == (
+        f"track: telemetry {rate:g} Hz ({len(t)} points, no decimation)")
     camera_id = record["camera_id"]
     assert capture["contact_sheets"] == {
         camera_id: f"capture/contact_sheets/{camera_id}.png"}
@@ -1295,6 +1305,7 @@ def test_the_page_s_previews_are_full_resolution_with_a_contact_sheet(
     run_json = client.get(f"/runs/{run_id}/file/capture/run.json").json()
     assert run_json["previews"]["scale"] == 1
     assert run_json["previews"]["count"] == 4
+    assert run_json["previews"]["track_source"] == capture["preview_track_source"]
 
 
 def test_the_page_s_preview_scale_field_is_honoured_or_refused_by_name(client):

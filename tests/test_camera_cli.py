@@ -607,6 +607,18 @@ def test_previews_are_full_resolution_scaled_from_the_fdm_and_timed(demo_run):
     assert block["count"] == 3 and block["scale"] == 1
     assert block["resolution"] == [record["width_px"], record["height_px"]]
     assert 0.0 < block["s_per_frame"] < RENDER_BUDGET_S_PER_FRAME
+    # The flown track is the run's own telemetry, not the schedule's
+    # chords, at the rate MEASURED from its samples (the recorder steps
+    # 13 fixed steps, 0.1083 s, between samples: 9.23 Hz, not a nominal
+    # 10) and undecimated below TRACK_TARGET_HZ.
+    import numpy as np
+
+    telemetry = json.loads((demo_run / "telemetry.json").read_text(encoding="utf-8"))
+    t = telemetry["columns"]["t"]
+    rate = 1.0 / float(np.median(np.diff(t)))
+    assert 9.0 < rate < 10.0
+    assert block["track_source"] == (f"track: telemetry {rate:g} Hz ({len(t)} points, "
+                                     f"no decimation)")
     assert block["contact_sheets"] == {"chase0": "contact_sheets/chase0.png"}
     assert (demo_run / "contact_sheets" / "chase0.png").is_file()
 

@@ -22,6 +22,21 @@ cd "$(dirname "$0")/.."
 PY=.venv/bin/python
 PYTEST=.venv/bin/pytest
 
+# --only <regex>: run only the guards whose LABEL matches the extended
+# regex (bash =~), e.g. --only 'geometry preview|preview round 2'; the
+# others are not run and not counted. The baseline and the final
+# restore check still run the whole suite (a mutation must be judged
+# against a green tree), so a subset costs two suite runs plus its
+# guards. The selected guards are listed and counted in the summary.
+ONLY=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --only) ONLY="$2"; shift 2 ;;
+        *) echo "usage: $0 [--only <label regex>]"; exit 2 ;;
+    esac
+done
+selected=0
+
 purge_cache() {
     find . -name __pycache__ -type d -not -path "./.venv/*" -exec rm -rf {} + 2>/dev/null
     local prefix
@@ -34,6 +49,8 @@ purge_cache() {
 # mutate <file> <python-repr-of-old> <python-repr-of-new> <label> <tests...>
 mutate() {
     local file="$1" old="$2" new="$3" label="$4"; shift 4
+    if [ -n "$ONLY" ] && ! [[ "$label" =~ $ONLY ]]; then return 0; fi
+    selected=$((selected+1))
     local backup; backup=$(mktemp)
     cp "$file" "$backup"
 
@@ -1383,15 +1400,16 @@ mutate webapp/runs.py \
 
 mutate flightsim/capture.py \
     '    record.update({"render_passes": passes, "clip_encoded": bool(encoded),
-                   "clip_seconds": float(clip_seconds)})' \
-    '    pass  # MUTATED: the CLI does not record its passes or its clip' \
+                   "clip_seconds": float(clip_seconds),' \
+    '    ({"render_passes": passes, "clip_encoded": bool(encoded),  # MUTATED: not recorded
+                   "clip_seconds": float(clip_seconds),' \
     "the CLI records its passes and its clip beside the run's digests" \
     tests/test_camera_cli.py || failures=$((failures+1))
 
 # -- Camera Phase 1, package I done properly: the geometry preview ----------
 
 mutate core/capture/preview.py \
-    '    horizon = horizon_segment(record, scale)' \
+    '    horizon = horizon_segment(record, axis_scale)' \
     '    horizon = None  # MUTATED: no horizon is computed or drawn' \
     "the preview draws the horizon at the camera's pitch and roll" \
     tests/test_camera_preview.py || failures=$((failures+1))
@@ -1427,7 +1445,9 @@ mutate core/capture/preview.py \
     tests/test_camera_preview.py || failures=$((failures+1))
 
 mutate core/capture/preview.py \
-    '    lines = header_lines(record, manifest, scale, tag)' \
+    '    lines = header_lines(record, manifest, scale, tag, ground=ground, plan=plan,
+                         terrain_elevation_m=terrain_elevation_m,
+                         track_words=track_words)' \
     '    lines = [record["camera_id"]]  # MUTATED: the header names only the camera' \
     "the header states position, look direction and focal length" \
     tests/test_camera_preview.py || failures=$((failures+1))
@@ -1487,12 +1507,161 @@ mutate webapp/server.py \
     "the page's preview scale is honoured or refused by name" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Camera Phase 1, package I, preview round 2: depth order, telemetry
+# -- track, rings from the camera, compass + arrow, overlays at the
+# -- frame's size, the terrain header, the length caveat, numbering -----
+
+mutate core/capture/preview.py \
+    '    order = np.argsort(-segments[:, 4], kind="stable")' \
+    '    order = np.arange(len(segments))  # MUTATED: raster order, far over near' \
+    "preview round 2: segments are drawn far to near (painter's order)" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '    visible_s = v_s <= prev_v + tolerance_px' \
+    '    visible_s = np.ones(len(v_s), dtype=bool)  # MUTATED: nothing is hidden behind a ridge' \
+    "preview round 2: ground behind a nearer ridge is hidden by the skyline" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '    if telemetry is not None:
+        frame = scene_frame' \
+    '    if False:  # MUTATED: the track is always the schedule'"'"'s chords
+        frame = scene_frame' \
+    "preview round 2: the flown track is the telemetry, not the schedule's chords" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '    interval = float(np.median(np.diff(t)))' \
+    '    interval = (t[-1] - t[0]) / (n - 1)  # MUTATED: the mean step, skewed by the first sample' \
+    "preview round 2: the telemetry rate is the recorder's median step" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '            past = when[1:] <= now + 1e-9' \
+    '            past = np.ones(len(when) - 1, dtype=bool)  # MUTATED: everything is past' \
+    "preview round 2: the past/future split is at the frame's instant" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '            "camera_north_m": cam_n, "camera_east_m": cam_e,' \
+    '            "camera_north_m": centre_n, "camera_east_m": centre_e,  # MUTATED: rings on the snapped origin' \
+    "preview round 2: distance rings are centred on the camera's exact ground point" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '        angle = (offset - yaw) % 360.0' \
+    '        angle = (offset + yaw) % 360.0  # MUTATED: the compass turns the wrong way' \
+    "preview round 2: the compass puts north at minus the camera's yaw" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '    if arrow_base is not None:
+        arrow = north_arrow_points(record, arrow_base, axes)' \
+    '    if False:  # MUTATED: no north arrow in any scene
+        arrow = north_arrow_points(record, arrow_base, axes)' \
+    "preview round 2: the north arrow is drawn in every scene" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '        length = min(NORTH_ARROW_PX / per_metre, cap)
+        for _ in range(3):' \
+    '        length = cap  # MUTATED: a world length, whatever it projects to
+        for _ in range(0):' \
+    "preview round 2: the arrow's world length is set by its projected size" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '        axis_scale = (float(record["width_px"]) / w, float(record["height_px"]) / h)' \
+    '        axis_scale = (1.0, 1.0)  # MUTATED: the record'"'"'s intrinsics on a frame of another size' \
+    "preview round 2: overlays scale the intrinsics per axis to the frame's own size" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '    band_alpha = 255 if layer is image else min(alpha, OVERLAY_BAND_ALPHA)' \
+    '    band_alpha = 255 if layer is image else min(alpha, 150)  # MUTATED: the old dark band' \
+    "preview round 2: the overlay's header band darkens the frame by at most 96/255" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '        if _text_width(draw, line, font) <= max_width:
+            out.append(line)
+            continue' \
+    '        if True:  # MUTATED: no wrapping, the line runs off the frame
+            out.append(line)
+            continue' \
+    "preview round 2: header lines wider than the image are wrapped" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '        return (f"terrain {tp['"'"'name'"'"']} {tp['"'"'width_px'"'"']}x{tp['"'"'height_px'"'"']} @ "' \
+    '        return ("terrain: raster wireframe"  # MUTATED: the raster is not named
+                f"{tp['"'"'name'"'"'][:0]}{tp['"'"'width_px'"'"'] * 0}{tp['"'"'height_px'"'"'] * 0}"' \
+    "preview round 2: the header names the raster, its resolution and the wireframe spacing" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '    if fine >= stride:
+        return np.zeros((0, 3)), np.zeros((0, 3))' \
+    '    if True:  # MUTATED: no fine lattice near the camera
+        return np.zeros((0, 3)), np.zeros((0, 3))' \
+    "preview round 2: the fine lattice densifies the ground near the camera" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '        if radius > far_m:
+            continue' \
+    '        if True:  # MUTATED: no rings on the terrain
+            continue' \
+    "preview round 2: distance rings are draped on the raster in terrain scenes" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '    if stations_m >= arm_chord_m:' \
+    '    if False:  # MUTATED: always arm + chord, the shorter bound' \
+    "preview round 2: the body length is the larger stated station extent, named" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '    caveat = metrics.get("length_caveat")' \
+    '    caveat = None  # MUTATED: the picture drops the length caveat' \
+    "preview round 2: the body line carries the length caveat" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '    return f"frame index {index} ({int(index) + 1} of {count})"' \
+    '    return f"frame index {index} ({int(index)} of {count})"  # MUTATED: index over count again' \
+    "preview round 2: the header numbers frames by index AND count" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '    words = f"#{index} ({int(index) + 1}/{total})"' \
+    '    words = f"#{index}"  # MUTATED: the contact sheet drops the count' \
+    "preview round 2: the contact sheet label carries index and count" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '                               scale=preview_scale, telemetry=columns)' \
+    '                               scale=preview_scale)  # MUTATED: the CLI keeps its telemetry to itself' \
+    "preview round 2: the CLI passes the run's telemetry to the previews" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    '                               max_frames=MAX_PREVIEWS, scale=preview_scale,
+                               telemetry=columns)' \
+    '                               max_frames=MAX_PREVIEWS, scale=preview_scale)  # MUTATED: no telemetry to the page'"'"'s previews' \
+    "preview round 2: the page passes the run's telemetry to the previews" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
     echo "Restored: SUITE IS NOT GREEN -- a restore failed"; exit 1; fi
 
 echo
+if [ -n "$ONLY" ]; then
+    echo "Subset --only '$ONLY': $selected guard(s) run."
+fi
 if [ "$failures" -eq 0 ]; then
     echo "All guards are load-bearing."
 else

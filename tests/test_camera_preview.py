@@ -57,15 +57,20 @@ def record(camera=(0.0, 0.0, 1000.0), look=(0.0, 0.0, 0.0),
     }
 
 
-def manifest(records, metrics=METRICS, preset="tower"):
+def manifest(records, metrics=METRICS, preset="tower", count=None):
     cameras = {}
     for r in records:
         block = cameras.setdefault(r["camera_id"], {
             "camera_id": r["camera_id"], "preset": preset,
             "schedule_basis": "count 4 over the run", "capture_count": 0})
         block["capture_count"] += 1
+    if count is not None:
+        for block in cameras.values():
+            block["capture_count"] = count
     return {"manifest_version": 1, "aircraft_metrics": metrics,
-            "cameras": list(cameras.values()), "frames": list(records)}
+            "cameras": list(cameras.values()), "frames": list(records),
+            "frame": {"crs": "EPSG:32631", "origin_lat_deg": 0.0,
+                      "origin_lon_deg": 0.0, "declared_on_card": True}}
 
 
 def draw(rec, metrics=METRICS, ground=("flat", None), **kw):
@@ -187,8 +192,13 @@ def test_the_track_is_drawn_past_solid_future_dim():
     m = manifest(recs)
     track = pv._track(m)
     assert [p[3] for p in track] == [0, 10, 20, 30]
+    assert [p[4] for p in track] == [0.0, 1.0, 2.0, 3.0]          # t_s per instant
     _, info = pv.draw_preview(recs[1], m, ("flat", None), track_points=track)
     assert info["segments"]["track"] == 3
+    assert info["segments"]["track_dots"] == 4       # this camera's scheduled instants
+    # Without telemetry the header says the track is the schedule's instants.
+    _, words = pv._track_points(m, None, None)
+    assert words == "track: scheduled instants only (no telemetry passed)"
 
 
 # -- clipping ---------------------------------------------------------------
@@ -269,9 +279,12 @@ def test_previews_default_to_the_record_s_full_resolution(tmp_path):
 def test_the_header_states_position_look_and_focal_length():
     rec = record(camera=(268.4, 0.0, 3060.0), look=(0.0, -6.2, 0.0),
                  aircraft=(444.4, 0.0, 3048.0), index=5, t_s=2.683)
-    lines = pv.header_lines(rec, manifest([rec]))
+    lines = pv.header_lines(rec, manifest([rec], count=24))
     text = "\n".join(lines)
-    assert "cam0  frame 5/1  t=2.683 s" in text
+    # The manifest's 0-based index a verifier greps for AND the human count.
+    assert "cam0  frame index 5 (6 of 24)  t=2.683 s" in text
+    assert pv.contact_label(5, 24, 2.683) == "#5 (6/24)  t=2.683 s"
+    assert pv.contact_label(23, 24, 11.992) == "#23 (24/24)  t=11.992 s"
     assert "pos N +268.4 E +0.0 alt 3060.0 m" in text
     assert "look yaw 0.0 pitch -6.2 roll 0.0 deg" in text
     assert "f=35 mm (fx 1244 px)" in text and "1280x720" in text
@@ -280,8 +293,8 @@ def test_the_header_states_position_look_and_focal_length():
     assert "span 64.0 m (metrics/bw-ft)" in text
     assert "1/2 scale" not in text
     assert "1/2 scale" in "\n".join(pv.header_lines(rec, manifest([rec]), scale=2))
-    image, info = draw(rec)
-    assert info["header"] == lines
+    image, info = pv.draw_preview(rec, manifest([rec], count=24), ("flat", None))
+    assert info["header"][:len(lines)] == lines
     # The header band is painted: text pixels on the black band.
     band = np.asarray(image.crop((0, 0, 400, 20)))
     assert (band == pv.TEXT_RGB).all(axis=2).any()
@@ -398,3 +411,397 @@ def test_the_runner_reads_the_airframe_metrics_from_the_fdm_once():
                                      aircraft_metrics=metrics)
     assert carried["aircraft_metrics"] == metrics
     assert json.loads(json.dumps(carried))["aircraft_metrics"]["span_source"] == "metrics/bw-ft"
+
+
+# -- round 2: depth order and the skyline ------------------------------------
+
+def test_segments_are_drawn_in_painter_s_order_far_first():
+    """Two crossing segments given FAR-LAST: the near one's colour is
+    what the crossing pixel carries, whatever the input order."""
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", (40, 40), (0, 0, 0))
+    near, far = (10, 200, 10), (200, 10, 10)
+    segs = np.array([[0.0, 20.0, 40.0, 20.0, 100.0],      # near, horizontal
+                     [20.0, 0.0, 20.0, 40.0, 5000.0]])    # far, vertical, listed last
+    pv._draw_segments(ImageDraw.Draw(image), segs,
+                      lambda depth: near if depth < 1000 else far)
+    assert image.getpixel((20, 20)) == near
+    assert image.getpixel((20, 5)) == far and image.getpixel((5, 20)) == near
+
+
+def two_ridge_heightfield():
+    """41 x 41 at 100 m: a NEAR ridge 300 m high along east at north
+    -500 and a FAR ridge 150 m high at north +500, flat ground
+    elsewhere."""
+    from core.terrain.heightfield import Georeference, Heightfield
+
+    samples = np.zeros((41, 41), dtype=np.uint16)
+    samples[25, :] = 300                                  # north = 2000 - 25 x 100
+    samples[15, :] = 150                                  # north = +500
+    return Heightfield(
+        samples=samples,
+        georeference=Georeference(crs="EPSG:32631", origin_x_m=166021.0 - 2000.0,
+                                  origin_y_m=2000.0, pixel_size_m=100.0),
+        scale_m=1.0, offset_m=0.0, name="two_ridges")
+
+
+def test_a_near_ridge_hides_the_far_ridge_behind_it():
+    """Camera at north -1500, alt 400, looking north, pitch -5: the
+    near crest (300 m at 1000 m) sits ABOVE the far crest (150 m at
+    2000 m) on screen, so the far crest's row lies on the near ridge's
+    face. The pixel where it crosses the near ridge's column line at
+    east 0 carries the near (bright) colour, the far row is NOT drawn
+    beside it, and the info counts the hidden segments."""
+    from tests.test_camera_poses import FRAME
+
+    hf = two_ridge_heightfield()
+    ground = pv._ground(hf, FRAME)
+    a, _ = ground.segments
+    east0 = float(a[np.argmin(np.abs(a[:, 1])), 1])              # the column nearest east 0
+    rec = record(camera=(-1500.0, east0, 400.0), look=(0.0, -5.0, 0.0),
+                 aircraft=(-1300.0, east0 + 100.0, 450.0))
+    cx, cy = rec["principal_point_px"]
+    u_f, v_f, z_f = project_point(rec, (500.0, east0, 150.0))     # far crest
+    u_n, v_n, z_n = project_point(rec, (-500.0, east0, 300.0))    # near crest
+    assert abs(u_f - cx) < 1e-6 and abs(u_n - cx) < 1e-6
+    assert v_n < v_f < HEIGHT                                     # far crest below near crest
+    image, info = pv.draw_preview(rec, manifest([rec]), ground)
+    assert info["segments"]["terrain_hidden"] > 0
+    assert info["segments"]["terrain_visible"] < info["segments"]["terrain"]
+    # Where the far crest's ROW crosses the near ridge's COLUMN line one
+    # lattice column east of the camera (the centre column carries the
+    # north arrow): intersect the two projected lines.
+    e_n = east0 + 100.0
+    P0 = np.array(project_point(rec, (-600.0, e_n, 0.0))[:2])
+    P1 = np.array(project_point(rec, (-500.0, e_n, 300.0))[:2])
+    Q0 = np.array(project_point(rec, (500.0, e_n, 150.0))[:2])
+    Q1 = np.array(project_point(rec, (500.0, e_n + 400.0, 150.0))[:2])
+    d1, d2 = P1 - P0, Q1 - Q0
+    s_ = np.cross(Q0 - P0, d2) / np.cross(d1, d2)
+    ui, vi = P0 + s_ * d1
+    assert 0.0 < s_ < 1.0 and v_n < vi < HEIGHT                  # on the near face
+    far_rgb = pv._shaded(rec)(z_f)
+    near_floor = pv._shaded(rec)(z_n)
+    window = [image.getpixel((int(round(ui)) + du, int(round(vi)) + dv))
+              for du in (-1, 0, 1) for dv in (-1, 0, 1)]
+    # The near column line's bright green is there; the far row's dim
+    # green is nowhere in the window.
+    assert any(p[1] >= near_floor[1] - 2 for p in window), (window, near_floor)
+    assert all(p == pv.BACKGROUND_RGB or p[1] > far_rgb[1] + 8 for p in window), window
+    # Beside the column line, on the near face, the far row is not
+    # drawn: background, or a distance ring draped on the near face.
+    for du in (-30, 30):
+        vq = Q0[1] + (ui + du - Q0[0]) * d2[1] / d2[0]
+        p = image.getpixel((int(round(ui)) + du, int(round(vq))))
+        assert p in (pv.BACKGROUND_RGB, pv.RING_RGB), p
+    # The crest is hidden ALONG the frame, not only at that column.
+    u2, v2, _ = project_point(rec, (500.0, east0 + 400.0, 150.0))
+    p = image.getpixel((int(round(u2)), int(round(v2))))
+    assert p in (pv.BACKGROUND_RGB, pv.RING_RGB), p
+    # The skyline cull alone: the same clipped segments with the cull
+    # report the far crest as hidden.
+    clipped, za, zb, _ = pv._project_clip(rec, *ground.segments, 1.0)
+    visible, source, skyline = pv.skyline_cull(clipped, za, zb, WIDTH)
+    assert len(visible) < len(clipped)
+    assert skyline[int(round(cx))] <= v_n + 1.0
+
+
+# -- round 2: the flown track from the telemetry -----------------------------
+
+def arc_columns(points=200, dt=0.05, radius=1000.0, alt=1000.0):
+    """A 200-point telemetry record flying a half circle of ``radius``
+    about the origin at 20 Hz."""
+    from tests.test_camera_poses import FRAME
+
+    columns = {k: [] for k in ("t", "lat_deg", "lon_deg", "altitude_m")}
+    for i in range(points):
+        angle = math.pi * i / (points - 1)
+        north, east = radius * math.cos(angle), radius * math.sin(angle)
+        lat, lon = FRAME.to_geographic(north, east)
+        columns["t"].append(round(i * dt, 6))
+        columns["lat_deg"].append(lat)
+        columns["lon_deg"].append(lon)
+        columns["altitude_m"].append(alt)
+    return columns
+
+
+def test_the_drawn_track_follows_the_telemetry_not_the_chord(tmp_path):
+    from tests.test_camera_poses import FRAME
+
+    columns = arc_columns()
+    track, words = pv.telemetry_track(columns, FRAME)
+    assert words == "track: telemetry 20 Hz decimated to 10 Hz (101 points)"
+    # The recorder's first sample sits one fixed step in: the rate is
+    # the MEDIAN step, not the mean over the span.
+    shifted = dict(columns, t=[0.008333] + columns["t"][1:])
+    assert pv.telemetry_track(shifted, FRAME)[1] == words
+    assert [p[3] for p in track][:3] == [0, 2, 4] and track[-1][3] == 199
+    assert abs(track[50][4] - 5.0) < 1e-9                       # t_s carried
+    # Five scheduled instants along the arc, the camera off to the south.
+    recs = []
+    for k, i in enumerate((0, 50, 100, 150, 199)):
+        n, e = FRAME.to_local(columns["lat_deg"][i], columns["lon_deg"][i])
+        recs.append(record(camera=(-3000.0, 0.0, 2500.0), look=(0.0, -25.0, 0.0),
+                           aircraft=(n, e, 1000.0), index=k,
+                           t_s=columns["t"][i], sample_index=i))
+    m = manifest(recs)
+    rec = recs[2]
+    image, info = pv.draw_preview(rec, m, ("flat", None), track_points=track,
+                                  track_words=words)
+    assert info["segments"]["track_dots"] == 5
+    assert words in info["header"]
+
+    def has_colour(u, v, rgb, radius=2):
+        return any(image.getpixel((int(round(u)) + du, int(round(v)) + dv)) == rgb
+                   for du in range(-radius, radius + 1)
+                   for dv in range(-radius, radius + 1))
+
+    # Intermediate telemetry points (never scheduled) lie ON the drawn
+    # track: past ones before t=5 s, future ones after.
+    for i, rgb in ((25, pv.TRACK_PAST_RGB), (75, pv.TRACK_PAST_RGB),
+                   (125, pv.TRACK_FUTURE_RGB), (175, pv.TRACK_FUTURE_RGB)):
+        n, e = FRAME.to_local(columns["lat_deg"][i], columns["lon_deg"][i])
+        u, v, z = project_point(rec, (n, e, 1000.0))
+        assert z > 0 and has_colour(u, v, rgb), i
+    # The chord between two scheduled instants is NOT the track: its
+    # midpoint, 90 m inside the arc, is background.
+    a = recs[0]["aircraft"]; b = recs[1]["aircraft"]
+    mid = ((a["north_m"] + b["north_m"]) / 2, (a["east_m"] + b["east_m"]) / 2, 1000.0)
+    u, v, _ = project_point(rec, mid)
+    assert not has_colour(u, v, pv.TRACK_PAST_RGB) and not has_colour(u, v, pv.TRACK_FUTURE_RGB)
+    # Through render_previews: the words reach the set and the header.
+    written = pv.render_previews(m, tmp_path, telemetry=columns)
+    assert written.track_source == words
+    plain = pv.render_previews(m, tmp_path / "plain")
+    assert plain.track_source == "track: scheduled instants only (no telemetry passed)"
+
+
+# -- round 2: rings from the camera, the compass, the arrow ---------------
+
+def test_distance_rings_are_centred_on_the_camera_s_exact_ground_point():
+    """Camera N +268.4, alt 3060, pitch -4.8: the 10 km ring's
+    forward-azimuth point is 10 km north of the CAMERA, so it projects
+    at v = cy + fy tan(atan(3060 / 10000) - 4.8 deg), within 1 px --
+    not at the lattice's snapped 10.27 km."""
+    rec = record(camera=(268.4, 0.0, 3060.0), look=(0.0, -4.8, 0.0),
+                 aircraft=(444.4, 0.0, 3048.0))
+    cx, cy = rec["principal_point_px"]
+    plan = pv.flat_ground_plan(rec, 0.0)
+    assert plan["camera_north_m"] == 268.4 and plan["centre_north_m"] == 0.0
+    pts = pv.ring_points(plan, 10000.0)
+    assert abs(pts[0][0] - 10268.4) < 1e-9 and abs(pts[0][1]) < 1e-9
+    u, v, z = project_point(rec, tuple(pts[0]))
+    expected = cy + FY * math.tan(math.atan(3060.0 / 10000.0) - math.radians(4.8))
+    assert abs(v - expected) < 1.0 and abs(u - cx) < 1e-6
+    snapped = cy + FY * math.tan(math.atan(3060.0 / 10268.4) - math.radians(4.8))
+    assert abs(expected - snapped) > 5.0
+    image, info = draw(rec)
+    assert info["segments"]["rings"] >= 2
+    assert image.getpixel((int(round(cx)), int(round(expected)))) == pv.RING_RGB
+    assert "rings centred on the camera's ground point" in "\n".join(info["header"])
+
+
+def test_the_compass_rose_puts_north_at_minus_yaw():
+    for yaw in (0.0, 90.0, 231.3):
+        rec = record(look=(yaw, -10.0, 0.0), attitude=(0.0, 0.0, 45.0))
+        rose = pv.compass_rose(rec, WIDTH, HEIGHT)
+        assert abs(rose["north_deg"] - (-yaw) % 360.0) < 1e-9
+        assert abs(rose["heading_needle_deg"] - (45.0 - yaw) % 360.0) < 1e-9
+        cx, cy = rose["centre"]
+        tx, ty = rose["spokes"]["N"]["tip"]
+        drawn = math.degrees(math.atan2(tx - cx, -(ty - cy))) % 360.0
+        assert abs(drawn - (-yaw) % 360.0) < 1e-9
+        assert abs(rose["spokes"]["E"]["angle_deg"] - (90.0 - yaw) % 360.0) < 1e-9
+        image, info = draw(rec)
+        assert info["compass"]["north_deg"] == rose["north_deg"]
+        # The N spoke is painted along its angle, in the north colour.
+        a = math.radians(rose["north_deg"])
+        u, v = cx + 20 * math.sin(a), cy - 20 * math.cos(a)
+        assert image.getpixel((int(round(u)), int(round(v)))) == pv.NORTH_RGB
+        assert (cx, cy) == (WIDTH - pv.COMPASS_INSET_PX[0], HEIGHT - pv.COMPASS_INSET_PX[1])
+
+
+def test_the_north_arrow_is_sixty_pixels_on_screen_in_flat_and_terrain_scenes():
+    from tests.test_camera_poses import FRAME
+
+    # Flat: the camera looks steeply down at the plane. The base sits
+    # on the ray NORTH_ARROW_DROP_PX below the boresight, clear of the
+    # aircraft an aimed camera centres.
+    rec = record(camera=(0.0, 0.0, 800.0), look=(0.0, -60.0, 0.0),
+                 aircraft=(300.0, 200.0, 600.0))
+    cx, cy = rec["principal_point_px"]
+    image, info = draw(rec)
+    assert info["segments"]["north_arrow"] == 3
+    assert abs(info["north_arrow"]["screen_px"] - pv.NORTH_ARROW_PX) < 1.0
+    u, v, z = project_point(rec, info["north_arrow"]["tip"])
+    assert abs(info["north_arrow"]["tip_px"][0] - u) < 1e-6
+    bu, bv, _ = project_point(rec, info["north_arrow"]["base"])
+    assert abs(bu - cx) < 1e-6 and abs(bv - (cy + pv.NORTH_ARROW_DROP_PX)) < 1e-6
+    assert info["north_arrow"]["base"][2] == 0.0                     # on the plane
+    # Terrain: the arrow is drawn where the boresight meets the raster.
+    ground = pv._ground(synthetic_heightfield(), FRAME)
+    rec = record(camera=(-400.0, 0.0, 700.0), look=(0.0, -35.0, 0.0),
+                 aircraft=(0.0, 0.0, 600.0))
+    image, info = draw(rec, ground=ground)
+    assert info["segments"]["north_arrow"] == 3
+    assert abs(info["north_arrow"]["screen_px"] - pv.NORTH_ARROW_PX) < 1.0
+    base = info["north_arrow"]["base"]
+    assert abs(base[2] - ground.elevation(base[0], base[1])) < 1e-6   # on the raster
+    bu, bv, _ = project_point(rec, base)
+    assert abs(bu - cx) < 1e-6 and abs(bv - (cy + pv.NORTH_ARROW_DROP_PX)) < 1.0
+
+
+# -- round 2: overlays at the frame's own size -------------------------------
+
+@pytest.mark.parametrize("size", [(640, 360), (1920, 1080)])
+def test_overlays_are_drawn_at_the_frame_s_own_size_for_any_ratio(tmp_path, size):
+    from PIL import Image, ImageDraw
+
+    from tests.test_camera_verify import honest_frame
+
+    rec = record(aircraft=(800.0, 60.0, 1030.0), camera_id="cam0")
+    m = manifest([rec])
+    frame_path = tmp_path / rec["file"]
+    frame_path.parent.mkdir(parents=True)
+    honest_frame(frame_path, *size)
+    frame = Image.open(frame_path).convert("RGB")
+    background = frame.getpixel((size[0] - 2, size[1] - 2))
+    written = pv.render_overlays(m, tmp_path)
+    overlay = Image.open(written[0])
+    assert overlay.size == size == written.sizes[written[0]]
+    # The body centre is project_point scaled by the ratio, within 1 px;
+    # the intrinsics were scaled, the pixels never resampled.
+    ratio = (size[0] / WIDTH, size[1] / HEIGHT)
+    image, info = pv.draw_preview(rec, m, ("flat", None), image=frame, alpha=200,
+                                  tag="overlay")
+    u, v, _ = project_point(rec, (800.0, 60.0, 1030.0))
+    assert abs(info["aircraft_px"][0] - u * ratio[0]) < 1.0
+    assert abs(info["aircraft_px"][1] - v * ratio[1]) < 1.0
+    assert info["axis_scale"] == (WIDTH / size[0], HEIGHT / size[1])
+    assert overlay.getpixel((int(round(u * ratio[0])), int(round(v * ratio[1])))) != background
+    # A corner pixel outside any geometry is the frame's own.
+    assert overlay.getpixel((size[0] - 2, size[1] - 2)) == background
+    # The header band darkens the frame by at most OVERLAY_BAND_ALPHA.
+    band_px = overlay.getpixel((size[0] - 3, 3))
+    floor = background[0] * (1.0 - pv.OVERLAY_BAND_ALPHA / 255.0) - 1.0
+    assert band_px[0] >= floor
+    assert pv.OVERLAY_BAND_ALPHA <= 96
+    # No header line is wider than the frame; the size note is in it.
+    draw_ = ImageDraw.Draw(overlay)
+    font = pv._font(pv.header_font_px(size[1]))
+    assert all(draw_.textlength(line, font=font) <= size[0] for line in info["header_drawn"])
+    tag = pv.overlay_tag(rec, size)
+    assert f"frame {size[0]}x{size[1]} differs from the record's 1280x720" in tag
+    assert "pixels not resampled" in tag
+    assert pv.overlay_tag(rec, (WIDTH, HEIGHT)) == \
+        "overlay: reprojected geometry over the rendered frame"
+
+
+# -- round 2: the terrain header, the vertex, the rings on the raster ----------
+
+def test_the_terrain_header_names_the_raster_and_a_vertex_projects_at_its_pixel():
+    from tests.test_camera_poses import FRAME
+
+    hf = synthetic_heightfield()
+    ground = pv._ground(hf, FRAME)
+    assert ground.plan["spacing_m"] == 100.0 and ground.plan["samples"] == (9, 9)
+    rec = record(camera=(-1500.0, 0.0, 800.0), look=(0.0, -10.0, 0.0),
+                 aircraft=(0.0, 0.0, 600.0))
+    image, info = draw(rec, ground=ground)
+    text = "\n".join(info["header"])
+    assert "terrain synthetic 9x9 @ 100 m, wireframe 9x9 (100 m)" in text
+    # A known raster vertex (row 4, col 4: north 0, east ~0, alt 200+
+    # 50x4... read from the raster itself) projects at project_point
+    # and the pixel there is terrain-coloured.
+    a, b = ground.segments
+    vertex = (0.0, a[:, 1][np.argmin(np.abs(a[:, 1]))], None)
+    z = ground.elevation(vertex[0], vertex[1])
+    assert z is not None
+    u, v, depth = project_point(rec, (vertex[0], vertex[1], z))
+    assert depth > 0
+    window = [image.getpixel((int(round(u)) + du, int(round(v)) + dv))
+              for du in (-1, 0, 1) for dv in (-1, 0, 1)]
+    assert any(p[1] > p[0] and p[1] > 60 for p in window)          # terrain green
+    # Rings draped on the raster: the 500 m ring around a camera over
+    # the raster's centre lies on it and is drawn.
+    rec = record(camera=(0.0, 0.0, 900.0), look=(0.0, -45.0, 0.0),
+                 aircraft=(300.0, 0.0, 600.0))
+    ra, rb, radii = pv.terrain_rings(rec, ground, 1e5)
+    assert set(radii.tolist()) == {500.0}                           # 1 km leaves the raster
+    for point in ra[:5]:
+        assert abs(point[2] - ground.elevation(point[0], point[1])) < 1e-9
+    _, info = draw(rec, ground=ground)
+    assert info["segments"]["rings"] == 1
+    assert "rings on the terrain" in "\n".join(info["header"])
+
+
+def test_the_fine_lattice_densifies_the_ground_near_the_camera():
+    from core.terrain.heightfield import Georeference, Heightfield
+    from tests.test_camera_poses import FRAME
+
+    samples = (np.arange(97 * 97).reshape(97, 97) % 7).astype(np.uint16)
+    hf = Heightfield(samples=samples,
+                     georeference=Georeference(crs="EPSG:32631", origin_x_m=166021.0 - 4800.0,
+                                               origin_y_m=4800.0, pixel_size_m=100.0),
+                     scale_m=1.0, offset_m=0.0, name="fine")
+    ground = pv._ground(hf, FRAME)
+    # 96 px over 47 gaps is 2.04 px: a stride under the density is left
+    # whole (3 px, 300 m) and the fine lattice is the raster itself.
+    assert pv.terrain_stride_px(97) == 3 and pv.terrain_stride_px(1024) == 24
+    assert ground.plan["stride_px"] == 3 and ground.plan["fine_stride_px"] == 1
+    assert ground.plan["near_radius_m"] == 10 * 300.0
+    rec = record(camera=(0.0, 0.0, 1500.0), look=(0.0, -40.0, 0.0),
+                 aircraft=(500.0, 0.0, 600.0))
+    na, nb = pv.terrain_near_wireframe(hf, FRAME, rec, ground.plan)
+    mid = 0.5 * (na + nb)
+    assert len(na) > 0 and np.hypot(mid[:, 0], mid[:, 1]).max() <= 3000.0
+    assert np.allclose(np.linalg.norm((nb - na)[:, :2], axis=1), 100.0)
+    # No fine segment lies on a coarse line (those are drawn once): a
+    # row-wise segment's raster row and a column-wise one's raster
+    # column are never multiples of the coarse stride.
+    g = hf.georeference
+    rows = np.rint((g.origin_y_m - (na[:, 0] + FRAME.origin_y_m)) / 100.0).astype(int)
+    cols = np.rint(((na[:, 1] + FRAME.origin_x_m) - g.origin_x_m) / 100.0).astype(int)
+    row_wise = np.abs(na[:, 0] - nb[:, 0]) < 1e-9
+    assert np.all(rows[row_wise] % 3 != 0) and np.all(cols[~row_wise] % 3 != 0)
+    _, info = draw(rec, ground=ground)
+    assert info["segments"]["terrain_fine"] > 0
+    assert "+ 100 m within 3 km of the camera" in "\n".join(info["header"])
+
+
+# -- round 2: the body's length caveat -----------------------------------
+
+def test_the_body_line_carries_the_length_caveat():
+    metrics = dict(METRICS, length_m=59.644, length_label="eyepoint to tail arm",
+                   length_caveat="no fuselage length in JSBSim",
+                   height_label="sqrt Sv")
+    line = pv.body_words(metrics)
+    assert ("length >= 59.6 m (eyepoint to tail arm; no fuselage length in "
+            "JSBSim)") in line
+    assert "fin 8.0 m (sqrt Sv)" in line and "span 64.0 m (metrics/bw-ft)" in line
+    rec = record()
+    assert line in pv.header_lines(rec, manifest([rec], metrics=metrics))
+
+
+def test_the_runner_s_length_is_the_larger_stated_station_extent():
+    """B747: eyepoint (308 in) to the tail arm (aero RP 1377 in +
+    lh 106.6 ft) is 59.6 m, above arm + chord's 40.8 m, so it is the
+    length, named, with the caveat and both candidates carried."""
+    from core.scenario.runner import (
+        aircraft_metrics, configure_from_spec, longitudinal_stations_in,
+    )
+    from tests.test_camera_manifest import spec_with_cameras
+
+    fdm = configure_from_spec(spec_with_cameras())
+    stations = longitudinal_stations_in(fdm)
+    assert set(stations) == {"eyepoint", "VRP", "aero RP", "CG", "tail arm"}
+    assert stations["eyepoint"] == 308.0 and abs(stations["tail arm"] - 2656.2) < 1e-6
+    metrics = aircraft_metrics(fdm)
+    assert abs(metrics["length_m"] - (2656.2 - 308.0) * 0.0254) < 1e-6
+    assert abs(metrics["length_m"] - 59.644) < 1e-3
+    assert metrics["length_label"] == "eyepoint to tail arm"
+    assert metrics["length_caveat"] == "no fuselage length in JSBSim"
+    assert abs(metrics["length_candidates_m"]["arm_chord"] - 40.816) < 1e-3
+    assert "eyepoint 308 in" in metrics["length_source"]
+    assert "metrics/lh-ft" in metrics["length_source"]

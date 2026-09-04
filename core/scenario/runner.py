@@ -230,18 +230,76 @@ def aircraft_metrics(fdm) -> Dict[str, Any]:
     arm_ft = float(fdm.props.get("metrics/lh-ft"))
     chord_ft = float(fdm.props.get("metrics/cbarw-ft"))
     fin_sqft = float(fdm.props.get("metrics/Sv-sqft"))
+    arm_chord_m = u.ft_to_m(arm_ft + chord_ft)
+    stations = longitudinal_stations_in(fdm)
+    stations_m = (max(stations.values()) - min(stations.values())) * 0.0254
+    # Both are distances between stations the FDM states, so both are
+    # lower bounds on the fuselage; the larger is the better bound and
+    # its name is carried (B747: eyepoint to tail arm 59.6 m against
+    # arm + chord 40.8 m; c172p: arm + chord 6.3 m against 4.9 m).
+    if stations_m >= arm_chord_m:
+        length_m = stations_m
+        fore = min(stations, key=stations.get)
+        aft = max(stations, key=stations.get)
+        label = f"{fore} to {aft}"
+        source = (f"{label}: {stations_m:.1f} m between the FDM's stated "
+                  f"structural stations {', '.join(f'{k} {v:.0f} in' for k, v in stations.items())}"
+                  f" (metrics/lh-ft + metrics/cbarw-ft gives {arm_chord_m:.1f} m); "
+                  f"JSBSim states no nose-to-tail length")
+    else:
+        length_m = arm_chord_m
+        label = "arm + chord"
+        source = (f"metrics/lh-ft + metrics/cbarw-ft (wing-to-tail arm plus one "
+                  f"mean chord): {arm_chord_m:.1f} m, above the {stations_m:.1f} m "
+                  f"between the FDM's stated stations "
+                  f"{', '.join(f'{k} {v:.0f} in' for k, v in stations.items())}; "
+                  f"JSBSim states no nose-to-tail length")
     return {
         "aircraft": fdm.model.name,
         "span_m": u.ft_to_m(span_ft),
         "span_source": "metrics/bw-ft",
-        "length_m": u.ft_to_m(arm_ft + chord_ft),
-        "length_source": "metrics/lh-ft + metrics/cbarw-ft (wing-to-tail "
-                         "arm plus one mean chord: the FDM's longitudinal "
-                         "extent; JSBSim states no nose-to-tail length)",
+        "length_m": length_m,
+        "length_label": label,
+        "length_caveat": "no fuselage length in JSBSim",
+        "length_source": source,
+        "length_candidates_m": {"stations": stations_m, "arm_chord": arm_chord_m},
         "height_m": u.ft_to_m(math.sqrt(max(fin_sqft, 0.0))),
+        "height_label": "sqrt Sv",
         "height_source": "sqrt(metrics/Sv-sqft) (the vertical tail area's "
                          "square side: the FDM's only vertical extent)",
     }
+
+
+#: The longitudinal stations JSBSim states, in the structural frame
+#: (inches, x positive aft), each named for the source string.
+LONGITUDINAL_STATION_PROPERTIES = (
+    ("eyepoint", "metrics/eyepoint-x-in"),
+    ("VRP", "metrics/visualrefpoint-x-in"),
+    ("aero RP", "metrics/aero-rp-x-in"),
+    ("CG", "inertia/cg-x-in"),
+)
+
+
+def longitudinal_stations_in(fdm) -> Dict[str, float]:
+    """Every longitudinal station the FDM states, in structural inches:
+    the eyepoint, the visual reference point, the aerodynamic reference
+    point, the CG, and the tail arm's end (aero RP + metrics/lh-ft, the
+    horizontal tail's aerodynamic centre). A property the model does
+    not carry is left out, never guessed."""
+    out: Dict[str, float] = {}
+    for name, prop in LONGITUDINAL_STATION_PROPERTIES:
+        try:
+            out[name] = float(fdm.props.get(prop))
+        except Exception:
+            continue
+    try:
+        out["tail arm"] = (float(fdm.props.get("metrics/aero-rp-x-in"))
+                           + 12.0 * float(fdm.props.get("metrics/lh-ft")))
+    except Exception:
+        pass
+    if not out:
+        raise ValueError("aircraft_metrics: the FDM states no longitudinal station")
+    return out
 
 
 def run_spec(spec: ScenarioSpec, validate_first: bool = True,

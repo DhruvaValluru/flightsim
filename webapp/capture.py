@@ -122,6 +122,9 @@ class CaptureOutcome:
     #: drawn after the engine passes use the SAME ground.
     heightfield: object = None
     terrain_elevation_m: float = 0.0
+    #: The run's recorded telemetry columns: the flown track the
+    #: previews drew, kept so the overlays draw the SAME track.
+    telemetry: Optional[Dict] = None
 
     def card_blocks(self) -> List[Dict]:
         """The card's ``cameras`` block through the ONE shared builder
@@ -186,7 +189,8 @@ def refresh_after_render(outcome: "CaptureOutcome",
         overlays = render_overlays(
             outcome.manifest, outcome.capture_dir,
             heightfield=outcome.heightfield, scene_frame=outcome.frame,
-            terrain_elevation_m=outcome.terrain_elevation_m)
+            terrain_elevation_m=outcome.terrain_elevation_m,
+            telemetry=outcome.telemetry)
     outcome.summary["overlays"] = len(overlays)
     outcome.summary["overlay_s_per_frame"] = float(
         getattr(overlays, "seconds_per_frame", 0.0))
@@ -287,7 +291,8 @@ def capture_run(spec, out: Path, scene: Dict,
     previews = render_previews(manifest, capture_dir,
                                heightfield=heightfield, scene_frame=frame,
                                terrain_elevation_m=terrain_datum,
-                               max_frames=MAX_PREVIEWS, scale=preview_scale)
+                               max_frames=MAX_PREVIEWS, scale=preview_scale,
+                               telemetry=columns)
     capped = len(previews) < total
     contact_sheets = {camera_id: f"capture/contact_sheets/{camera_id}.png"
                       for camera_id in previews.contact_sheets}
@@ -298,6 +303,7 @@ def capture_run(spec, out: Path, scene: Dict,
         "count": len(previews), "scale": int(previews.scale),
         "resolution": list(previews.resolution) if previews.resolution else None,
         "s_per_frame": float(previews.seconds_per_frame),
+        "track_source": str(previews.track_source),
         "contact_sheets": contact_sheets,
     }
     run_json.write_text(json.dumps(run_record, indent=1), encoding="utf-8")
@@ -334,6 +340,7 @@ def capture_run(spec, out: Path, scene: Dict,
         "preview_resolution": (list(previews.resolution)
                                if previews.resolution else None),
         "preview_s_per_frame": float(previews.seconds_per_frame),
+        "preview_track_source": str(previews.track_source),
         "contact_sheets": contact_sheets,
         "verification": verdict,
     }
@@ -341,7 +348,8 @@ def capture_run(spec, out: Path, scene: Dict,
                           cameras=list(cameras), tracks=tracks,
                           schedules=schedules, frame=frame,
                           manifest=manifest, heightfield=heightfield,
-                          terrain_elevation_m=terrain_datum)
+                          terrain_elevation_m=terrain_datum,
+                          telemetry=columns)
 
 
 def verification_verdict(verification) -> Dict:
