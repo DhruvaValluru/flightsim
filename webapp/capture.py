@@ -118,6 +118,10 @@ class CaptureOutcome:
     schedules: List = field(default_factory=list)
     frame: object = None
     manifest: Optional[Dict] = None
+    #: The scene the previews were drawn over, kept so the overlays
+    #: drawn after the engine passes use the SAME ground.
+    heightfield: object = None
+    terrain_elevation_m: float = 0.0
 
     def card_blocks(self) -> List[Dict]:
         """The card's ``cameras`` block through the ONE shared builder
@@ -170,9 +174,25 @@ def verify_capture(capture_dir: Path, report: Report = lambda line: None):
 
 def refresh_after_render(outcome: "CaptureOutcome",
                          report: Report = lambda line: None) -> Dict:
-    """After the engine passes: re-verify (engine parity now has frames
-    to grade) and update the summary's counts and verification in
-    place. Returns the summary."""
+    """After the engine passes: draw the reprojected-geometry overlay
+    over every rendered frame (capture/overlays/<camera_id>/NNNN.png:
+    the verification made visible), re-verify (engine parity now has
+    frames to grade) and update the summary's counts and verification
+    in place. Returns the summary."""
+    from core.capture.preview import render_overlays
+
+    overlays = []
+    if outcome.manifest is not None:
+        overlays = render_overlays(
+            outcome.manifest, outcome.capture_dir,
+            heightfield=outcome.heightfield, scene_frame=outcome.frame,
+            terrain_elevation_m=outcome.terrain_elevation_m)
+    outcome.summary["overlays"] = len(overlays)
+    outcome.summary["overlay_s_per_frame"] = float(
+        getattr(overlays, "seconds_per_frame", 0.0))
+    report(f"{len(overlays)} overlay(s): the manifest's aircraft box, "
+           f"ground and horizon reprojected over the rendered frames "
+           f"under capture/overlays")
     verdict = verify_capture(outcome.capture_dir, report)
     counts = camera_counts(outcome.schedules, verdict)
     outcome.summary["verification"] = verdict
@@ -183,13 +203,16 @@ def refresh_after_render(outcome: "CaptureOutcome",
 
 
 def capture_run(spec, out: Path, scene: Dict,
-                report: Report = lambda line: None) -> CaptureOutcome:
+                report: Report = lambda line: None,
+                preview_scale: int = 1) -> CaptureOutcome:
     """Run the spec headlessly and write its capture artefacts.
 
     Writes into ``out/capture``: telemetry.json (this run's own),
-    scenario.yaml, run.json, capture_manifest.json, verify.json and one
+    scenario.yaml, run.json, capture_manifest.json, verify.json, one
     geometry preview per scheduled frame (capped, and the cap is
-    reported). Returns the outcome whose ``summary`` the page renders.
+    reported; full resolution unless ``preview_scale`` asks for 1/N)
+    and a contact sheet per camera. Returns the outcome whose
+    ``summary`` the page renders.
 
     Raises CaptureError -- named -- on a schedule or solved-track
     refusal, so a capture never half-succeeds into a manifest that
@@ -248,7 +271,8 @@ def capture_run(spec, out: Path, scene: Dict,
         scene={"key": scene.get("key", "flat"),
                "terrain": scene.get("terrain")},
         terrain_sha256=heightfield.digest() if heightfield else None,
-        cameras=cameras)
+        cameras=cameras,
+        aircraft_metrics=result.manifest.get("aircraft_metrics"))
     write_capture_manifest(manifest, capture_dir)
     result.telemetry.write_json(capture_dir / "telemetry.json")
     spec.write(capture_dir / "scenario.yaml")
@@ -263,12 +287,29 @@ def capture_run(spec, out: Path, scene: Dict,
     previews = render_previews(manifest, capture_dir,
                                heightfield=heightfield, scene_frame=frame,
                                terrain_elevation_m=terrain_datum,
-                               max_frames=MAX_PREVIEWS)
+                               max_frames=MAX_PREVIEWS, scale=preview_scale)
     capped = len(previews) < total
+    contact_sheets = {camera_id: f"capture/contact_sheets/{camera_id}.png"
+                      for camera_id in previews.contact_sheets}
+    # The run's own record of what was drawn and what it measured.
+    run_json = capture_dir / "run.json"
+    run_record = json.loads(run_json.read_text(encoding="utf-8"))
+    run_record["previews"] = {
+        "count": len(previews), "scale": int(previews.scale),
+        "resolution": list(previews.resolution) if previews.resolution else None,
+        "s_per_frame": float(previews.seconds_per_frame),
+        "contact_sheets": contact_sheets,
+    }
+    run_json.write_text(json.dumps(run_record, indent=1), encoding="utf-8")
     # Scheduled, in that word: nothing has been rendered yet, and a
     # preview is not a capture.
+    resolution = (f" at {previews.resolution[0]}x{previews.resolution[1]}"
+                  + (f" (1/{previews.scale} scale)" if previews.scale != 1 else "")
+                  + f", {previews.seconds_per_frame:.3f} s/frame"
+                  if previews.resolution else "")
     report(f"scheduled {total} frame(s) across {len(cameras)} camera(s); "
-           f"{len(previews)} geometry preview(s) written")
+           f"{len(previews)} geometry preview(s) written{resolution}; "
+           f"{len(contact_sheets)} contact sheet(s)")
 
     # Verify what was just written, with the SAME verifier the CLI runs
     # -- an independent reimplementation of the projection maths, so a
@@ -289,12 +330,18 @@ def capture_run(spec, out: Path, scene: Dict,
         "previews": len(previews),
         "previews_capped": capped,
         "preview_cap": MAX_PREVIEWS if capped else None,
+        "preview_scale": int(previews.scale),
+        "preview_resolution": (list(previews.resolution)
+                               if previews.resolution else None),
+        "preview_s_per_frame": float(previews.seconds_per_frame),
+        "contact_sheets": contact_sheets,
         "verification": verdict,
     }
     return CaptureOutcome(summary=summary, capture_dir=capture_dir,
                           cameras=list(cameras), tracks=tracks,
                           schedules=schedules, frame=frame,
-                          manifest=manifest)
+                          manifest=manifest, heightfield=heightfield,
+                          terrain_elevation_m=terrain_datum)
 
 
 def verification_verdict(verification) -> Dict:
@@ -425,6 +472,12 @@ ARTIFACT_NOTES = {
     "capture/scenario.yaml": "the spec as captured",
     "capture/run.json": "spec and output digests of the capture run",
 }
+#: The overlay class: reprojected geometry drawn over a rendered frame.
+OVERLAY_NOTE = ("reprojected geometry over the rendered frame: the manifest's "
+                "aircraft body and box, ground and horizon drawn on the "
+                "engine's pixels, so the verification is visible")
+CONTACT_SHEET_NOTE = ("contact sheet: every preview of this camera as a "
+                      "thumbnail with its index and time")
 #: Per-camera engine artefacts under capture/frames/<camera_id>/.
 FRAME_DIR_NOTES = {
     "render.json": "the engine pass: applied pose and time per frame",
@@ -476,16 +529,40 @@ def run_artifacts(out_dir: Path) -> List[Dict]:
                     entries.append({
                         "name": f"capture/frames/{camera_dir.name}/{name}",
                         "bytes": path.stat().st_size, "note": note})
+    overlays_root = out_dir / "capture" / "overlays"
+    if overlays_root.is_dir():
+        for camera_dir in sorted(p for p in overlays_root.iterdir()
+                                 if p.is_dir()):
+            images = sorted(camera_dir.glob("*.png"))
+            if images:
+                entries.append({
+                    "name": f"capture/overlays/{camera_dir.name}",
+                    "count": len(images),
+                    "note": f"{len(images)} overlay(s) for camera "
+                            f"'{camera_dir.name}': {OVERLAY_NOTE}",
+                    "images": [f"capture/overlays/{camera_dir.name}/"
+                               f"{p.name}" for p in images],
+                })
+    sheets = out_dir / "capture" / "contact_sheets"
+    if sheets.is_dir():
+        for sheet in sorted(sheets.glob("*.png")):
+            entries.append({
+                "name": f"capture/contact_sheets/{sheet.name}",
+                "bytes": sheet.stat().st_size,
+                "note": f"{CONTACT_SHEET_NOTE} ('{sheet.stem}')",
+                "sheet": True,
+            })
     previews = out_dir / "capture" / "previews"
     if previews.is_dir():
         for camera_dir in sorted(p for p in previews.iterdir() if p.is_dir()):
-            images = sorted(camera_dir.glob("*.png"))
+            images = sorted(camera_dir.glob("preview_*.png"))
             if images:
                 entries.append({
                     "name": f"capture/previews/{camera_dir.name}",
                     "count": len(images),
                     "note": f"{len(images)} geometry preview(s) for "
-                            f"camera '{camera_dir.name}'",
+                            f"camera '{camera_dir.name}' (full resolution "
+                            f"unless the run asked for a scale; not frames)",
                     "images": [f"capture/previews/{camera_dir.name}/"
                                f"{p.name}" for p in images],
                 })

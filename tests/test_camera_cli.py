@@ -577,3 +577,109 @@ def test_run_json_records_the_render_choice_and_verify_json_in_every_mode(
         lambda frames, clip: bool(clip.write_bytes(b"x")) or True)
     _, verify = run("clip", tmp_path / "clip", engine_available=True)
     assert verify["checks"][-1]["status"] == "AWAITING"
+
+
+# -- the geometry preview through the CLI (package I, done properly) ------
+
+def test_previews_are_full_resolution_scaled_from_the_fdm_and_timed(demo_run):
+    """The default preview is the record's own 1280x720; run.json
+    records the scale, the resolution, the MEASURED seconds per frame
+    (under the 0.5 s budget) and the contact sheet; the manifest carries
+    the airframe metrics the body is scaled by, read from the FDM
+    (metrics/bw-ft: the B747's 211.5 ft span)."""
+    from PIL import Image
+
+    from core.capture.preview import RENDER_BUDGET_S_PER_FRAME
+
+    manifest = json.loads(
+        (demo_run / "capture_manifest.json").read_text(encoding="utf-8"))
+    metrics = manifest["aircraft_metrics"]
+    assert metrics["span_source"] == "metrics/bw-ft"
+    assert metrics["span_m"] == pytest.approx(64.4652, abs=1e-3)
+    assert metrics["length_m"] > 0 and metrics["height_m"] > 0
+    previews = sorted((demo_run / "previews").rglob("preview_*.png"))
+    assert len(previews) == 3
+    record = manifest["frames"][0]
+    assert Image.open(previews[0]).size == (record["width_px"],
+                                            record["height_px"])
+    run = json.loads((demo_run / "run.json").read_text(encoding="utf-8"))
+    block = run["previews"]
+    assert block["count"] == 3 and block["scale"] == 1
+    assert block["resolution"] == [record["width_px"], record["height_px"]]
+    assert 0.0 < block["s_per_frame"] < RENDER_BUDGET_S_PER_FRAME
+    assert block["contact_sheets"] == {"chase0": "contact_sheets/chase0.png"}
+    assert (demo_run / "contact_sheets" / "chase0.png").is_file()
+
+
+def test_the_preview_scale_flag_is_optional_and_refuses_a_bad_value(
+        tmp_path, capsys):
+    from PIL import Image
+
+    out = tmp_path / "half"
+    code = capture_main([str(EXAMPLES / "cameras_multi.yaml"), "--out",
+                         str(out), "--max-previews", "1", "--render", "none",
+                         "--preview-scale", "2"])
+    text = capsys.readouterr().out
+    assert code == 0, text
+    assert "1 geometry preview(s) at 640x360, 1/2 scale, " in text
+    assert " s/frame under " in text and "not frames" in text
+    assert "contact sheets: 1 (contact_sheets/<camera_id>.png" in text
+    assert Image.open(out / "previews" / "chase0" / "preview_00000.png").size \
+        == (640, 360)
+    run = json.loads((out / "run.json").read_text(encoding="utf-8"))
+    assert run["previews"]["scale"] == 2
+    assert run["previews"]["resolution"] == [640, 360]
+    # A scale the preview cannot draw at exactly refuses BY NAME before
+    # any flight: no run directory, no manifest.
+    for bad in ("0", "-2"):
+        code = capture_main([str(EXAMPLES / "cameras_multi.yaml"), "--out",
+                             str(tmp_path / "bad"), "--render", "none",
+                             "--preview-scale", bad])
+        text = capsys.readouterr().out
+        assert code == 2
+        assert "REFUSED -- preview.scale:" in text
+        assert not (tmp_path / "bad").exists()
+
+
+def test_render_frames_overlays_the_reprojected_geometry_on_every_frame(
+        tmp_path, capsys, cli_engine):
+    """After the engine passes every rendered PNG gets an overlay named
+    by the same index, the frame's own size, with the manifest's
+    aircraft drawn at the labelled pixel; the count and its measured
+    time are said and recorded in run.json."""
+    from PIL import Image
+
+    import flightsim.capture as cli
+    from core.capture.verify import labelled_pixel
+
+    calls = []
+    cli_engine["monkeypatch"].setattr(cli, "run_render_pass",
+                                      honest_cli_engine(calls))
+    out = tmp_path / "frames"
+    code = capture_main([str(EXAMPLES / "cameras_multi.yaml"), "--out",
+                         str(out), "--max-previews", "0",
+                         "--render", "frames"])
+    text = capsys.readouterr().out
+    assert code == 0, text
+    assert "overlays: 48 reprojected-geometry overlay(s) over the rendered " \
+           "frames under" in text
+    manifest = json.loads(
+        (out / "capture_manifest.json").read_text(encoding="utf-8"))
+    for camera_id in ("chase0", "tower0"):
+        names = sorted(p.name for p in (out / "overlays" / camera_id).glob("*.png"))
+        assert names == [f"{i:04d}.png" for i in range(24)]
+    record = next(r for r in manifest["frames"]
+                  if r["camera_id"] == "chase0" and r["index"] == 5)
+    frame = Image.open(out / record["file"])
+    overlay = Image.open(out / "overlays" / "chase0" / "0005.png")
+    assert overlay.size == frame.size
+    u, v, depth = labelled_pixel(record)
+    assert depth > 0
+    # The body's wing line crosses the labelled pixel: the overlay differs
+    # from the stub's frame there, and matches it far from any geometry.
+    assert overlay.getpixel((int(round(u)), int(round(v)))) != \
+        frame.getpixel((int(round(u)), int(round(v))))
+    assert overlay.getpixel((20, 200)) == frame.getpixel((20, 200))
+    run = json.loads((out / "run.json").read_text(encoding="utf-8"))
+    assert run["overlays"]["count"] == 48
+    assert 0.0 < run["overlays"]["s_per_frame"] < 0.5

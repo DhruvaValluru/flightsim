@@ -1388,6 +1388,105 @@ mutate flightsim/capture.py \
     "the CLI records its passes and its clip beside the run's digests" \
     tests/test_camera_cli.py || failures=$((failures+1))
 
+# -- Camera Phase 1, package I done properly: the geometry preview ----------
+
+mutate core/capture/preview.py \
+    '    horizon = horizon_segment(record, scale)' \
+    '    horizon = None  # MUTATED: no horizon is computed or drawn' \
+    "the preview draws the horizon at the camera's pitch and roll" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '        "left_tip": P - r * S / 2, "right_tip": P + r * S / 2,' \
+    '        "left_tip": P - r * S / 4, "right_tip": P + r * S / 4,  # MUTATED' \
+    "the aircraft body is scaled by the FDM's span at the frame's range" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '    keep = (za > near) | (zb > near)' \
+    '    keep = np.ones(len(za), dtype=bool)  # MUTATED: geometry behind the camera is drawn mirrored' \
+    "a segment behind the camera is never drawn" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    'PREVIEW_SCALE_DEFAULT = 1' \
+    'PREVIEW_SCALE_DEFAULT = 2  # MUTATED: half scale by default' \
+    "previews default to the record's full resolution" \
+    tests/test_camera_preview.py tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '    if value is None or value < 1 or float(scale) != float(value):' \
+    '    if False:  # MUTATED: any scale is accepted and rounded' \
+    "a preview scale that is not a positive integer refuses by name" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '    return np.clip(32.0 + 208.0 * (1.0 - frac), 32.0, 240.0)' \
+    '    return np.full_like(frac, 120.0)  # MUTATED: no depth shading' \
+    "the ground is depth-shaded, near bright and far dim" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '    lines = header_lines(record, manifest, scale, tag)' \
+    '    lines = [record["camera_id"]]  # MUTATED: the header names only the camera' \
+    "the header states position, look direction and focal length" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '    if contact_sheets:' \
+    '    if False:  # MUTATED: no contact sheet' \
+    "every camera gets a contact sheet of its previews" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '    written.seconds_per_frame = elapsed / len(written) if written else 0.0
+    if contact_sheets:' \
+    '    written.seconds_per_frame = 0.0  # MUTATED: the render time is not measured
+    if contact_sheets:' \
+    "the preview render time is measured per frame and recorded" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '        "aircraft_metrics": aircraft_metrics(fdm),' \
+    '        "aircraft_metrics": None,  # MUTATED: the FDM span is not read' \
+    "the run manifest carries the airframe metrics read from the FDM" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '        aircraft_metrics=result.manifest.get("aircraft_metrics"))' \
+    '        aircraft_metrics=None)  # MUTATED: the capture manifest drops the metrics' \
+    "the capture manifest carries the airframe metrics the body is scaled by" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '    overlays = overlay() if overlay is not None else []' \
+    '    overlays = []  # MUTATED: no overlay over the rendered frames' \
+    "a frames run overlays the reprojected geometry on every rendered frame (CLI)" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    '    if outcome.manifest is not None:
+        overlays = render_overlays(' \
+    '    if False:  # MUTATED: no overlay over the rendered frames
+        overlays = render_overlays(' \
+    "a frames run overlays the reprojected geometry on every rendered frame (page)" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    '    overlays_root = out_dir / "capture" / "overlays"
+    if overlays_root.is_dir():' \
+    '    overlays_root = out_dir / "capture" / "overlays"
+    if False:  # MUTATED: overlays are not listed' \
+    "the page lists the overlays as their own artefact class" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '        return validated_scale(1 if request.preview_scale is None
+                               else request.preview_scale), None' \
+    '        return 1, None  # MUTATED: the page field is ignored' \
+    "the page's preview scale is honoured or refused by name" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

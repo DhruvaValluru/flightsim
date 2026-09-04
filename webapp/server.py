@@ -99,6 +99,31 @@ class RunRequest(BaseModel):
     #: word. An engine choice a machine cannot honour is refused
     #: ue.platform by name with the reason, never degraded.
     render: Optional[Literal["frames", "clip", "none"]] = None
+    #: Preview scale: 1 (default) draws every geometry preview at the
+    #: record's full resolution; N draws at 1/N. Anything that is not a
+    #: positive integer is refused by name (preview.scale), never
+    #: rounded (core.capture.preview.validated_scale).
+    preview_scale: Optional[int] = None
+
+
+def _preview_scale_or_refusal(request: "RunRequest"):
+    """(scale, None) or (None, the 409 refusal). The scale is handed to
+    the manager only when it is not the manager's own default, so the
+    default has one spelling (capture_run's) and the manager's stubs in
+    the tests keep their three-argument shape."""
+    from core.capture.preview import validated_scale
+
+    try:
+        return validated_scale(1 if request.preview_scale is None
+                               else request.preview_scale), None
+    except ValueError as exc:
+        return None, JSONResponse({"refused": str(exc),
+                                   "constraint": "preview.scale"},
+                                  status_code=409)
+
+
+def _scale_kwargs(preview_scale: int) -> Dict[str, int]:
+    return {"preview_scale": preview_scale} if preview_scale != 1 else {}
 
 
 def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
@@ -370,6 +395,9 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     from core.capture.render_pass import render_choice_default
 
     render = request.render or render_choice_default()
+    preview_scale, refusal = _preview_scale_or_refusal(request)
+    if refusal is not None:
+        return refusal
     spec, refusal = _prepare_run_spec(request)
     if refusal is not None:
         return refusal
@@ -379,7 +407,8 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
            if k in ("compiler", "model", "transcript")},
     }
     if render == "none":
-        outcome = manager.start_capture(spec, provenance=provenance)
+        outcome = manager.start_capture(spec, provenance=provenance,
+                                        **_scale_kwargs(preview_scale))
         if "refused" in outcome:
             return JSONResponse(outcome, status_code=409)
         return JSONResponse({**outcome, "digest": spec.digest()})
@@ -422,7 +451,8 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
         return JSONResponse({"refused": "aircraft.mesh", **mesh_refusal},
                             status_code=409)
 
-    outcome = manager.start(spec, provenance=provenance, render=render)
+    outcome = manager.start(spec, provenance=provenance, render=render,
+                            **_scale_kwargs(preview_scale))
     if "refused" in outcome:
         return JSONResponse(outcome, status_code=409)
     return JSONResponse({**outcome, "digest": spec.digest()})
@@ -439,6 +469,9 @@ def capture_endpoint(request: RunRequest) -> JSONResponse:
     what a user wanting the data rather than the picture can ask for
     directly.
     """
+    preview_scale, refusal = _preview_scale_or_refusal(request)
+    if refusal is not None:
+        return refusal
     spec, refusal = _prepare_run_spec(request)
     if refusal is not None:
         return refusal
@@ -446,7 +479,7 @@ def capture_endpoint(request: RunRequest) -> JSONResponse:
         "prompt": spec.prompt,
         **{k: v for k, v in request.provenance.items()
            if k in ("compiler", "model", "transcript")},
-    })
+    }, **_scale_kwargs(preview_scale))
     if "refused" in outcome:
         return JSONResponse(outcome, status_code=409)
     return JSONResponse({**outcome, "digest": spec.digest()})

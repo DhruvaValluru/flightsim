@@ -37,6 +37,15 @@ Top level::
                        origin of the local north/east metres
     software_revision  git revision of the producing tree ("unknown"
                        outside a checkout; informational, in no digest)
+    aircraft_metrics   the airframe's extents read ONCE from the
+                       configured FDM by the runner (core.scenario.
+                       runner.aircraft_metrics): span_m from
+                       metrics/bw-ft, length_m and height_m with their
+                       stated derivations, each beside its *_source --
+                       what the geometry preview scales the aircraft
+                       body by; null when the producer had no FDM (a
+                       synthetic manifest), and the preview then SAYS
+                       the body is unscaled
     cameras            [per-camera blocks]
     frames             [per-frame records, all cameras, capture order]
 
@@ -150,7 +159,8 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                            output_digest: str,
                            scene: Optional[Dict] = None,
                            terrain_sha256: Optional[str] = None,
-                           cameras=None) -> Dict:
+                           cameras=None,
+                           aircraft_metrics: Optional[Dict] = None) -> Dict:
     """Assemble the manifest mapping (see the module docstring schema).
 
     ``tracks`` and ``schedules`` are parallel per-camera sequences from
@@ -159,7 +169,8 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
     lengths, which are pure arithmetic on the recorded intrinsics.
     ``cameras`` names the CameraSpecs that actually flew when they are
     not the spec's own (a camera-less spec captured with the documented
-    default cameras); the digests stay the spec's.
+    default cameras); the digests stay the spec's. ``aircraft_metrics``
+    is the runner's FDM-read extents block, carried verbatim.
     """
     if len(tracks) != len(schedules):
         raise ValueError(
@@ -259,6 +270,8 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
         },
         "frame": frame.provenance(),
         "software_revision": software_revision(),
+        "aircraft_metrics": (dict(aircraft_metrics)
+                             if aircraft_metrics is not None else None),
         "cameras": camera_blocks,
         "frames": frames,
     }

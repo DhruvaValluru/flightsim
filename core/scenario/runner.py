@@ -217,6 +217,33 @@ def configure_from_spec(spec: ScenarioSpec) -> FlightDynamics:
     return fdm
 
 
+def aircraft_metrics(fdm) -> Dict[str, Any]:
+    """The airframe's extents, read ONCE from the configured FDM's own
+    metrics (the same ``metrics/bw-ft`` the span-station contact check
+    uses) and carried into the run manifest and the capture manifest so
+    the geometry preview draws the aircraft at its size -- never from a
+    constant. JSBSim states no nose-to-tail length and no height, so the
+    longitudinal extent is the wing-to-tail arm plus one mean chord and
+    the vertical extent is the vertical tail area's square side; each
+    number carries its source so a reader knows exactly what it is."""
+    span_ft = float(fdm.props.get("metrics/bw-ft"))
+    arm_ft = float(fdm.props.get("metrics/lh-ft"))
+    chord_ft = float(fdm.props.get("metrics/cbarw-ft"))
+    fin_sqft = float(fdm.props.get("metrics/Sv-sqft"))
+    return {
+        "aircraft": fdm.model.name,
+        "span_m": u.ft_to_m(span_ft),
+        "span_source": "metrics/bw-ft",
+        "length_m": u.ft_to_m(arm_ft + chord_ft),
+        "length_source": "metrics/lh-ft + metrics/cbarw-ft (wing-to-tail "
+                         "arm plus one mean chord: the FDM's longitudinal "
+                         "extent; JSBSim states no nose-to-tail length)",
+        "height_m": u.ft_to_m(math.sqrt(max(fin_sqft, 0.0))),
+        "height_source": "sqrt(metrics/Sv-sqft) (the vertical tail area's "
+                         "square side: the FDM's only vertical extent)",
+    }
+
+
 def run_spec(spec: ScenarioSpec, validate_first: bool = True,
              assert_closure: bool = True, terrain_ground=None) -> RunResult:
     """Run a scenario. Raises rather than running something it cannot deliver.
@@ -334,6 +361,7 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         "spec_digest": spec.digest(),
         "spec": spec.to_dict(),
         "fdm": fdm.provenance(),
+        "aircraft_metrics": aircraft_metrics(fdm),
         "environment": environment.provenance(),
         "physics_ground": ("flat slab (spec terrain elevation)"
                            if terrain_ground is None

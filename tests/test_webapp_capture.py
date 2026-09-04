@@ -1252,3 +1252,122 @@ def test_status_disables_the_engine_options_on_a_mac_without_the_engine(
     assert reply.status_code == 409
     assert reply.json()["constraint"] == "ue.platform"
     assert reply.json()["reason"] == status["render_unavailable_reason"]
+
+
+# -- the geometry preview on the page (package I, done properly) ----------
+
+def test_the_page_s_previews_are_full_resolution_with_a_contact_sheet(
+        captured, client):
+    """The capture summary says what the previews are (the record's own
+    resolution, the measured seconds per frame, a contact sheet per
+    camera) and the file list carries the sheet as its own entry above
+    the per-frame gallery, with the previews still counted as 4."""
+    from PIL import Image
+
+    run_id, state = captured
+    capture = state["capture"]
+    manifest = client.get(
+        f"/runs/{run_id}/file/capture/capture_manifest.json").json()
+    record = manifest["frames"][0]
+    assert capture["preview_scale"] == 1
+    assert capture["preview_resolution"] == [record["width_px"],
+                                             record["height_px"]]
+    assert 0.0 < capture["preview_s_per_frame"] < 0.5
+    camera_id = record["camera_id"]
+    assert capture["contact_sheets"] == {
+        camera_id: f"capture/contact_sheets/{camera_id}.png"}
+    assert manifest["aircraft_metrics"]["span_source"] == "metrics/bw-ft"
+
+    files = client.get(f"/runs/{run_id}/files").json()["files"]
+    sheet = next(f for f in files if f.get("sheet"))
+    assert sheet["name"] == f"capture/contact_sheets/{camera_id}.png"
+    assert "contact sheet" in sheet["note"]
+    previews = next(f for f in files if f["name"] == f"capture/previews/{camera_id}")
+    assert previews["count"] == 4                 # the sheet is not a preview
+    assert all(name.endswith(".png") and "preview_" in name
+               for name in previews["images"])
+    got = client.get(f"/runs/{run_id}/file/{previews['images'][0]}")
+    assert got.status_code == 200
+    from io import BytesIO
+    assert Image.open(BytesIO(got.content)).size == (record["width_px"],
+                                                     record["height_px"])
+    assert client.get(f"/runs/{run_id}/file/{sheet['name']}").status_code == 200
+    run_json = client.get(f"/runs/{run_id}/file/capture/run.json").json()
+    assert run_json["previews"]["scale"] == 1
+    assert run_json["previews"]["count"] == 4
+
+
+def test_the_page_s_preview_scale_field_is_honoured_or_refused_by_name(client):
+    from PIL import Image
+    from io import BytesIO
+
+    spec = compile_prompt(DEMO)
+    bad = client.post("/capture", json={"spec": spec.to_dict(),
+                                        "preview_scale": 0})
+    assert bad.status_code == 409
+    assert bad.json()["constraint"] == "preview.scale"
+    assert "preview.scale" in bad.json()["refused"]
+    reply = client.post("/capture", json={"spec": spec.to_dict(),
+                                          "preview_scale": 2})
+    assert reply.status_code == 200, reply.json()
+    run_id = reply.json()["run_id"]
+    state = finished(client, run_id)
+    assert state["status"] == "done", state["detail"]
+    capture = state["capture"]
+    assert capture["preview_scale"] == 2
+    assert capture["previews"] == 4
+    manifest = client.get(
+        f"/runs/{run_id}/file/capture/capture_manifest.json").json()
+    record = manifest["frames"][0]
+    assert capture["preview_resolution"] == [record["width_px"] // 2,
+                                             record["height_px"] // 2]
+    got = client.get(f"/runs/{run_id}/file/capture/previews/"
+                     f"{record['camera_id']}/preview_00000.png")
+    assert Image.open(BytesIO(got.content)).size == (record["width_px"] // 2,
+                                                     record["height_px"] // 2)
+
+
+def test_the_frames_run_overlays_the_reprojected_geometry_on_every_frame(
+        engine_stubs):
+    """A frames run draws the manifest's geometry over every rendered
+    PNG under capture/overlays/<camera_id>/, the frame's own size,
+    counts them in the summary and lists them as their own artefact
+    class with the note that says what they are."""
+    from PIL import Image
+
+    from core.capture.verify import labelled_pixel
+    from webapp.runs import RunManager, RunState
+
+    calls = []
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(honest_engine(calls)))
+    manager = engine_stubs["manager"]
+    run = RunState(run_id="overlayrun")
+    manager._render_flow(run, two_camera_spec(), provenance={},
+                         render="frames")
+    assert run.status == "done", run.detail
+    out = manager.out_root / "overlayrun"
+    assert run.capture["overlays"] == 8
+    assert 0.0 < run.capture["overlay_s_per_frame"] < 0.5
+    manifest = json.loads(
+        (out / "capture" / "capture_manifest.json").read_text(encoding="utf-8"))
+    for camera_id in ("camera0", "tower0"):
+        names = sorted(p.name for p in
+                       (out / "capture" / "overlays" / camera_id).glob("*.png"))
+        assert names == ["0000.png", "0001.png", "0002.png", "0003.png"]
+    record = next(r for r in manifest["frames"]
+                  if r["camera_id"] == "camera0" and r["index"] == 2)
+    frame = Image.open(out / "capture" / record["file"])
+    overlay = Image.open(out / "capture" / "overlays" / "camera0" / "0002.png")
+    assert overlay.size == frame.size
+    u, v, depth = labelled_pixel(record)
+    assert depth > 0
+    assert overlay.getpixel((int(round(u)), int(round(v)))) != \
+        frame.getpixel((int(round(u)), int(round(v))))
+    files = capture_module.run_artifacts(out)
+    entry = next(f for f in files if f["name"] == "capture/overlays/camera0")
+    assert entry["count"] == 4
+    assert "reprojected geometry over the rendered frame" in entry["note"]
+    assert entry["images"][0] == "capture/overlays/camera0/0000.png"
+    assert any(l["detail"].startswith("8 overlay(s): the manifest's aircraft")
+               for l in run.events if l["status"] == "capture")

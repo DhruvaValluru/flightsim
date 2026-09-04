@@ -2,7 +2,8 @@
 
     .venv/bin/python -m flightsim.capture examples/cameras_multi.yaml \
         --out runs/demo [--render frames|clip|none] \
-        [--terrain runs/terrain/matterhorn] [--max-previews N]
+        [--terrain runs/terrain/matterhorn] [--max-previews N] \
+        [--preview-scale N]
 
 What happens, in order (each step refuses by name rather than
 approximating):
@@ -26,7 +27,11 @@ approximating):
    its table is printed in every mode and written as verify.json beside
    the manifest (the JSON the webapp serves), engine parity AWAITING
    until frames exist, and a manifest that fails its own verification
-   FAILS the run by name (capture.verification, exit 2);
+   FAILS the run by name (capture.verification, exit 2). Previews draw
+   at the record's full resolution unless --preview-scale N asks for
+   1/N; their measured render time per frame, the scale, the resolution
+   and the per-camera contact sheets are recorded in run.json
+   ("previews") and printed;
 8. the render choice, the SAME three words the web page offers
    (--render, default: the richest this machine supports):
 
@@ -35,9 +40,13 @@ approximating):
      runs ONCE PER CAMERA (-camera-index=N, -frames=<out>/frames/<id>)
      through the same command builder the webapp uses, captures only
      at the scheduled instants and names each PNG by its manifest
-     index; a short pass FAILS by name (render.frames); the verifier's
-     engine-parity check then grades applied vs solved per frame; the
-     clip is a by-product of camera 0's frames at their instants;
+     index; a short pass FAILS by name (render.frames); every rendered
+     frame gets an OVERLAY (overlays/<camera_id>/NNNN.png: the
+     reprojected aircraft body and box, terrain wireframe or ground
+     grid, horizon and header drawn over the PNG, so the verification
+     is visible to the eye); the verifier's engine-parity check then
+     grades applied vs solved per frame; the clip is a by-product of
+     camera 0's frames at their instants;
    * ``clip`` -- one preset pass and an fps clip, the manifest and
      previews beside it, nothing rendered as frames;
    * ``none`` -- steps 1-7 only. On a machine without the engine this
@@ -116,6 +125,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--max-previews", type=int, default=None,
                         help="cap preview images per run (default: one "
                              "per scheduled frame)")
+    parser.add_argument("--preview-scale", type=int, default=1,
+                        metavar="N",
+                        help="draw previews at 1/N of the record's "
+                             "resolution (default 1: full resolution; "
+                             "a non-positive N refuses by name)")
     parser.add_argument("--card", action="store_true",
                         help="also write card.json carrying each camera's "
                              "solved pose track (always written by "
@@ -131,6 +145,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                              "machine supports")
     args = parser.parse_args(argv)
     render = args.render or render_choice_default()
+    from core.capture.preview import validated_scale
+
+    try:
+        preview_scale = validated_scale(args.preview_scale)
+    except ValueError as exc:
+        # Refused before any flight: a scale the preview cannot draw at
+        # exactly is never rounded to one it can.
+        print(f"REFUSED -- {exc}")
+        return 2
 
     from core.capture.manifest import (
         build_capture_manifest, write_capture_manifest,
@@ -151,7 +174,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               f"engine: {ue_unavailable_reason()}")
         print("  --render none runs the headless half on this machine")
         return 2
-    from core.capture.preview import render_previews
+    from core.capture.preview import render_overlays, render_previews
     from core.capture.schedule import ScheduleError, solve_schedule
     from core.capture.validate import (
         static_camera_violations, track_violations,
@@ -235,7 +258,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         terrain_sha256=heightfield.digest() if heightfield else None,
         # The cameras that actually flew (default_cameras for a
         # camera-less spec); the digests stay the spec's own.
-        cameras=cameras)
+        cameras=cameras,
+        # The airframe's extents, read once from the FDM by the runner.
+        aircraft_metrics=result.manifest.get("aircraft_metrics"))
     manifest_path = write_capture_manifest(manifest, out)
     result.telemetry.write_json(out / "telemetry.json")
     spec.write(out / "scenario.yaml")
@@ -271,13 +296,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     previews = render_previews(manifest, out, heightfield=heightfield,
                                scene_frame=frame,
                                terrain_elevation_m=terrain_datum,
-                               max_frames=args.max_previews)
+                               max_frames=args.max_previews,
+                               scale=preview_scale)
+    _note_previews(out, previews)
     total = sum(len(s) for s in schedules)
     # Scheduled, in that word: nothing has been rendered yet.
     print(f"scheduled {total} frames across {len(cameras)} camera(s)")
     print(f"  manifest: {manifest_path}")
-    print(f"  previews: {len(previews)} geometry preview(s) under "
-          f"{out / 'previews'} (previews are not frames)")
+    print(f"  previews: {len(previews)} geometry preview(s)"
+          f"{preview_words(previews)} under {out / 'previews'} (previews "
+          f"are not frames)")
+    if previews.contact_sheets:
+        print(f"  contact sheets: {len(previews.contact_sheets)} "
+              f"(contact_sheets/<camera_id>.png, one per camera)")
 
     # Every mode verifies what it just wrote, with the verifier the
     # instructor runs (flightsim.verify), BEFORE the final line -- so
@@ -313,8 +344,39 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
              "terrain": args.terrain, "imagery": None}
     if render == "frames":
         return _render_frames(spec, out, card_path, scene, cameras,
-                              schedules)
+                              schedules, overlay=lambda: render_overlays(
+                                  manifest, out, heightfield=heightfield,
+                                  scene_frame=frame,
+                                  terrain_elevation_m=terrain_datum))
     return _render_clip(spec, out, scene)
+
+
+def preview_words(previews) -> str:
+    """" at 1280x720, 0.048 s/frame" (", 1/2 scale" when not 1); empty
+    when nothing was drawn -- the measured numbers, never a promise."""
+    if not previews or previews.resolution is None:
+        return ""
+    w, h = previews.resolution
+    words = f" at {w}x{h}"
+    if previews.scale != 1:
+        words += f", 1/{previews.scale} scale"
+    return words + f", {previews.seconds_per_frame:.3f} s/frame"
+
+
+def _note_previews(out: Path, previews) -> None:
+    """run.json "previews": what was drawn and what it measured --
+    count, scale, resolution, seconds per frame, the contact sheets."""
+    run_json = out / "run.json"
+    record = json.loads(run_json.read_text(encoding="utf-8"))
+    record["previews"] = {
+        "count": len(previews),
+        "scale": int(previews.scale),
+        "resolution": list(previews.resolution) if previews.resolution else None,
+        "s_per_frame": float(previews.seconds_per_frame),
+        "contact_sheets": {camera_id: str(path.relative_to(out))
+                           for camera_id, path in previews.contact_sheets.items()},
+    }
+    run_json.write_text(json.dumps(record, indent=1), encoding="utf-8")
 
 
 def _verify_and_record(out: Path):
@@ -353,9 +415,12 @@ def _engine_prerequisites(spec, out: Path):
 
 
 def _render_frames(spec, out: Path, card_path: Path, scene, cameras,
-                   schedules) -> int:
+                   schedules, overlay=None) -> int:
     """--render frames: one consume-poses pass per camera, graded pass
-    by pass, then the verifier's engine-parity check over the lot."""
+    by pass, the reprojected-geometry overlays drawn over every
+    rendered frame (``overlay``: the preview module's render_overlays
+    bound to this run's manifest and scene), then the verifier's
+    engine-parity check over the lot."""
     from experiments.showcase_matrix import FPS, HEIGHT, TIME_OF_DAY, \
         VISIBILITY, WIDTH
 
@@ -398,6 +463,14 @@ def _render_frames(spec, out: Path, card_path: Path, scene, cameras,
               f"{len(schedule)} scheduled frames rendered under "
               f"{frames_dir}" + stepping_words(stepping))
 
+    overlays = overlay() if overlay is not None else []
+    if overlay is not None:
+        print(f"  overlays: {len(overlays)} reprojected-geometry overlay(s) "
+              f"over the rendered frames under {out / 'overlays'} "
+              f"({overlays.seconds_per_frame:.3f} s/frame; the aircraft "
+              f"box, wireframe and horizon the manifest predicts, drawn on "
+              f"the engine's pixels)")
+
     first = schedules[0]
     clip = out / "clip.mp4"
     clip_seconds = scheduled_clip_seconds(list(first.times))
@@ -426,7 +499,10 @@ def _render_frames(spec, out: Path, card_path: Path, scene, cameras,
     run_json = out / "run.json"
     record = json.loads(run_json.read_text(encoding="utf-8"))
     record.update({"render_passes": passes, "clip_encoded": bool(encoded),
-                   "clip_seconds": float(clip_seconds)})
+                   "clip_seconds": float(clip_seconds),
+                   "overlays": {"count": len(overlays),
+                                "s_per_frame": float(getattr(
+                                    overlays, "seconds_per_frame", 0.0))}})
     run_json.write_text(json.dumps(record, indent=1), encoding="utf-8")
 
     report = _verify_and_record(out)

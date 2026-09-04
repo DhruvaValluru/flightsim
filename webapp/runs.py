@@ -160,6 +160,9 @@ class RunState:
     #: The render choice this run was started with ("frames" | "clip" |
     #: "none"); recorded in provenance.json too.
     render: Optional[str] = None
+    #: The preview scale the run was started with (1 = the record's
+    #: full resolution); recorded in capture/run.json "previews".
+    preview_scale: int = 1
 
     def push(self, status: str, detail: str = "") -> None:
         self.status = status
@@ -1522,7 +1525,7 @@ class RunManager:
         return run
 
     def start(self, spec: ScenarioSpec, provenance: Dict,
-              render: str = "clip") -> Dict:
+              render: str = "clip", preview_scale: int = 1) -> Dict:
         """Refuses (with the reason) or starts a run and returns its id.
 
         ``render`` selects the flow (RENDER_CHOICES): "none" is the
@@ -1539,7 +1542,8 @@ class RunManager:
                                f"{', '.join(RENDER_CHOICES)}, not {render!r}",
                     "constraint": "render.choice"}
         if render == "none":
-            return self.start_capture(spec, provenance)
+            return self.start_capture(spec, provenance,
+                                      preview_scale=preview_scale)
         if not ue_available():
             # The named platform refusal, not a 500: every render gotcha
             # was measured on Metal/macOS only. The headless half (spec,
@@ -1560,7 +1564,8 @@ class RunManager:
                                    "matrix render?); refusing a concurrent "
                                    "run"}
             run = RunState(run_id=uuid.uuid4().hex[:12],
-                           spec_digest=spec.digest(), render=render)
+                           spec_digest=spec.digest(), render=render,
+                           preview_scale=int(preview_scale))
             self.runs[run.run_id] = run
             self._active = run.run_id
         thread = threading.Thread(
@@ -1571,7 +1576,8 @@ class RunManager:
         thread.start()
         return {"run_id": run.run_id, "render": render}
 
-    def start_capture(self, spec: ScenarioSpec, provenance: Dict) -> Dict:
+    def start_capture(self, spec: ScenarioSpec, provenance: Dict,
+                      preview_scale: int = 1) -> Dict:
         """Start a CAPTURE-ONLY run: the manifest, previews and
         verification, with no pixels and no engine.
 
@@ -1587,7 +1593,8 @@ class RunManager:
                 return {"refused": f"a run is already {active.status} "
                                    f"({active.run_id}); one at a time"}
             run = RunState(run_id=uuid.uuid4().hex[:12],
-                           spec_digest=spec.digest(), render="none")
+                           spec_digest=spec.digest(), render="none",
+                           preview_scale=int(preview_scale))
             self.runs[run.run_id] = run
             self._active = run.run_id
         thread = threading.Thread(
@@ -1664,8 +1671,12 @@ class RunManager:
 
         run.push("capture", "solving camera geometry and capture schedule")
         try:
+            # The scale travels only when it is not capture_run's own
+            # default, so the call's default IS the default (one spelling).
             outcome = capture_run(
-                spec, out, scene, lambda line: run.push("capture", line))
+                spec, out, scene, lambda line: run.push("capture", line),
+                **({"preview_scale": run.preview_scale}
+                   if run.preview_scale != 1 else {}))
             run.capture = outcome.summary
         except CaptureError as exc:
             run.capture = {"refused": exc.constraint,

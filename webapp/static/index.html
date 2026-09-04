@@ -109,6 +109,9 @@ visual-only per host (measured).</p>
       </select>
     </label>
     <span id="renderNote" class="dim">waiting for /status (Headless until the server says what this machine supports)</span>
+    <label class="dim" title="Geometry previews draw at the camera's full output resolution by default (scale 1); N draws them at 1/N. Anything that is not a positive whole number is refused by name (preview.scale).">
+      preview scale 1/<input id="previewScale" type="number" min="1" step="1" value="1" style="width:3.5em">
+    </label>
   </p>
   <p class="dim">re-validated server-side before anything renders.
     <b>Render frames and clip</b> runs the engine once per camera on the
@@ -440,6 +443,9 @@ async function startRun(mayBake, endpoint) {
     body: JSON.stringify({
       spec: editedSpecDict(),
       render: $("render").value,
+      // The preview scale travels with the request (1 = full resolution)
+      // and is recorded in capture/run.json "previews".
+      preview_scale: parseInt($("previewScale").value, 10),
       provenance: {compiler: compiled.compiler, model: compiled.model,
                    transcript: compiled.transcript || null},
     }),
@@ -599,6 +605,17 @@ function renderCapture(run) {
   const capped = run.capture.previews_capped
     ? ` <span class="dim">(previews capped at ${run.capture.preview_cap}; ` +
       `the manifest carries every frame)</span>` : "";
+  // What the previews are: the drawn resolution, the scale when not 1,
+  // the MEASURED seconds per frame, and the overlays once frames exist.
+  const res = run.capture.preview_resolution;
+  const previewWords = res
+    ? ` <span class="dim">(previews at ${res[0]}x${res[1]}` +
+      (run.capture.preview_scale > 1 ? `, 1/${run.capture.preview_scale} scale` : "") +
+      `, ${(run.capture.preview_s_per_frame ?? 0).toFixed(3)} s/frame` +
+      `; a contact sheet per camera` +
+      ((run.capture.overlays ?? 0) > 0
+        ? `; ${run.capture.overlays} overlay(s) of the reprojected geometry over the rendered frames`
+        : "") + `)</span>` : "";
   // Package C: the paired closed-loop run's closure report -- commanded vs
   // achieved by name. Rendered from closure.json as graded, never re-judged.
   const cl = run.capture.closure;
@@ -625,7 +642,7 @@ function renderCapture(run) {
       `${run.capture.previews} geometry preview(s), which are NOT frames`;
   holder.innerHTML =
     `<div class="card"><b>capture geometry</b> — ` + totals +
-    capped +
+    capped + previewWords +
     `<ul>${cameras}</ul>` +
     `<b>verification ${v.ok ? "PASSED" : "FAILED"}</b>` + awaiting +
     `<ul>${checks}</ul>` + closure + `</div>`;
@@ -645,6 +662,13 @@ async function initFilesPanel(runId) {
   } catch (error) { return; }
   if (!files.length) return;
   const rows = files.map(f => {
+    if (f.sheet) {
+      // The contact sheet: shown whole, above the per-frame gallery.
+      return `<li><b>${f.name}</b> <span class="dim">— ${f.note}</span>` +
+             `<div><a href="/runs/${runId}/file/${f.name}" target="_blank">` +
+             `<img src="/runs/${runId}/file/${f.name}" ` +
+             `style="max-width:100%;margin:2px;border:1px solid #333"></a></div></li>`;
+    }
     if (f.images) {
       const thumbs = f.images.slice(0, 8).map(name =>
         `<a href="/runs/${runId}/file/${name}" target="_blank">` +
