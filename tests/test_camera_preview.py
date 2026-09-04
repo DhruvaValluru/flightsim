@@ -805,3 +805,71 @@ def test_the_runner_s_length_is_the_larger_stated_station_extent():
     assert abs(metrics["length_candidates_m"]["arm_chord"] - 40.816) < 1e-3
     assert "eyepoint 308 in" in metrics["length_source"]
     assert "metrics/lh-ft" in metrics["length_source"]
+
+
+# -- round 3: the contact sheet is drawn for the tile ---------------------
+
+def test_contact_sheet_tiles_are_drawn_for_the_tile_with_no_text(tmp_path):
+    """Each tile is draw_preview at the tile's size in the thumbnail
+    style, not the preview shrunk: the level camera's horizon is on
+    the tile's row cy/4 (two rows: THUMBNAIL_LINE_PX), the body centre
+    is at the reprojected pixel over 4, and NO text is drawn inside a
+    tile (no header band, no legend, no compass, no labels); the index
+    and time label sits under the tile."""
+    recs = [record(camera=(0.0, 0.0, 1000.0), look=(0.0, 0.0, 0.0),
+                   aircraft=(800.0 + 50.0 * k, 60.0, 1030.0), index=k,
+                   t_s=0.5 * k, sample_index=k, camera_id="cam0") for k in range(3)]
+    m = manifest(recs)
+    written = pv.render_previews(m, tmp_path)
+    paths = [p for p in written if p.parent.name == "cam0"]
+    sheet_path, info = pv.contact_sheet(m, "cam0", paths, tmp_path / "sheet.png",
+                                        track_points=pv._track(m))
+    sheet = Image.open(sheet_path)
+    assert info["thumb_size"] == (320, 180) == pv.thumbnail_size(WIDTH, HEIGHT)
+    assert len(info["tiles"]) == 3
+    full, full_info = pv.draw_preview(recs[0], m, ("flat", None))
+    assert full_info["text_drawn"] > 10                       # the full preview has text
+    tile = info["tiles"][0]
+    x, y = tile["origin"]
+    tw, th = tile["size"]
+    ti = tile["info"]
+    assert ti["style"] == "thumbnail" and ti["size"] == (tw, th)
+    assert ti["text_drawn"] == 0 and ti["header_band_px"] == 0
+    assert ti["header_drawn"] == []
+    # The horizon: the same row as the full preview over 4, two rows thick.
+    assert abs(ti["horizon"][0][1] - full_info["horizon"][0][1] / 4.0) < 1e-6
+    v_h = int(round(ti["horizon"][0][1]))
+    assert sheet.getpixel((x + 100, y + v_h)) == pv.HORIZON_RGB
+    assert sheet.getpixel((x + 100, y + v_h + 1)) == pv.HORIZON_RGB   # width 2
+    assert sheet.getpixel((x + 100, y + v_h - 1)) == pv.BACKGROUND_RGB
+    assert sheet.getpixel((x + 100, y + v_h + 2)) == pv.BACKGROUND_RGB
+    # The body centre: project_point over 4, a body pixel in its window.
+    u, v, _ = project_point(recs[0], (800.0, 60.0, 1030.0))
+    assert abs(ti["aircraft_px"][0] - u / 4.0) < 1e-6
+    assert abs(ti["aircraft_px"][1] - v / 4.0) < 1e-6
+    window = [sheet.getpixel((x + int(round(u / 4.0)) + du, y + int(round(v / 4.0)) + dv))
+              for du in (-1, 0, 1) for dv in (-1, 0, 1)]
+    assert pv.BODY_RGB in window
+    # The ground, rings, arrow and the track are in the tile.
+    assert ti["segments"]["grid"] > 0 and ti["segments"]["rings"] > 0
+    assert ti["segments"]["north_arrow"] == 3 and ti["segments"]["track"] > 0
+    # No text pixel inside any tile; no black band at its top.
+    for t in info["tiles"]:
+        tx, ty = t["origin"]
+        pixels = np.asarray(sheet.crop((tx, ty, tx + tw, ty + th)))
+        assert not (pixels == np.array(pv.TEXT_RGB)).all(axis=2).any()
+        assert sheet.getpixel((tx + 2, ty + 2)) == pv.BACKGROUND_RGB
+        assert t["info"]["text_drawn"] == 0
+        # The label under the tile is drawn in the text colour.
+        below = np.asarray(sheet.crop((tx, ty + th, tx + tw, ty + th + 18)))
+        assert (below == np.array(pv.TEXT_RGB)).all(axis=2).any()
+        assert t["label"] == pv.contact_label(t["index"], 3, recs[t["index"]]["t_s"])
+    # The title names the tile size and the record's resolution.
+    title = np.asarray(sheet.crop((0, 0, sheet.size[0], 28)))
+    assert (title == np.array(pv.TEXT_RGB)).all(axis=2).any()
+    # render_previews draws the same tiles (a fresh sheet is byte-identical).
+    again, _ = pv.contact_sheet(m, "cam0", paths, tmp_path / "again.png",
+                                track_points=pv._track(m))
+    assert (tmp_path / "contact_sheets" / "cam0.png").read_bytes() == again.read_bytes()
+    with pytest.raises(ValueError, match="preview.style"):
+        pv.draw_preview(recs[0], m, ("flat", None), style="tiny")

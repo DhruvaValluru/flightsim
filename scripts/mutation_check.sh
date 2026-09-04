@@ -1653,6 +1653,25 @@ mutate webapp/capture.py \
     "preview round 2: the page passes the run's telemetry to the previews" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Camera Phase 1, package I, preview round 3: readable contact sheets,
+# -- header wrapping exercised, label placement, the horizon behind the
+# -- skyline, overlay text backing, divisor scales, header truth, the
+# -- terrain and overlay render budget ---------------------------------
+
+mutate core/capture/preview.py \
+    '            tile, tile_info = draw_preview(record, manifest, ground, size=(tw, th),
+                                           style="thumbnail", track_points=track_points,' \
+    '            tile, tile_info = draw_preview(record, manifest, ground, size=(tw, th),
+                                           style="full", track_points=track_points,  # MUTATED: the tile carries the header, legend and labels' \
+    "preview round 3: contact-sheet tiles are drawn for the tile, without text" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '    line_px = THUMBNAIL_LINE_PX if thumbnail else 1' \
+    '    line_px = 1  # MUTATED: one-pixel lines in the tile' \
+    "preview round 3: tile lines are drawn at THUMBNAIL_LINE_PX" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

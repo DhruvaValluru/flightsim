@@ -103,10 +103,14 @@ frame whose size differs from its record is drawn through the
 record's intrinsics scaled per axis by the actual ratio (fx, cx by
 width; fy, cy by height); the rendered pixels are never resampled.
 The header band is no darker than OVERLAY_BAND_ALPHA. Contact sheets
-(:func:`contact_sheet`): every preview of a camera as thumbnails with
-index and time, under ``contact_sheets/<camera_id>.png`` -- beside
-``previews/``, never inside it, so ``previews/`` holds exactly one PNG
-per drawn frame and a count of it is a count of previews.
+(:func:`contact_sheet`): every preview of a camera as a tile DRAWN FOR
+THE TILE from its record (``style="thumbnail"``: the same projection
+at the tile's size, no text, the horizon, track and body at
+THUMBNAIL_LINE_PX -- never the preview shrunk, which smears its one-
+pixel lines and header to nothing), index and time under each, under
+``contact_sheets/<camera_id>.png`` -- beside ``previews/``, never
+inside it, so ``previews/`` holds exactly one PNG per drawn frame and
+a count of it is a count of previews.
 
 These are geometry previews, not renders: no lighting, no meshes, no
 claim beyond "this is where the camera pointed".
@@ -169,6 +173,9 @@ TERRAIN_TINT = (0.55, 0.9, 0.6)
 FLAT_TINT = (0.6, 0.7, 0.9)
 CONTACT_THUMB_WIDTH_PX = 320
 CONTACT_COLUMNS = 6
+#: Line width of the horizon, track and body in a contact-sheet tile
+#: (drawn for the tile, never a shrunk preview).
+THUMBNAIL_LINE_PX = 2
 
 
 class PreviewSet(list):
@@ -1136,12 +1143,18 @@ def wrap_lines(draw, lines: Sequence[str], font, max_width: float) -> List[str]:
 
 class _Labels:
     """Placed labels, so a new one landing within LABEL_CLEARANCE_PX
-    of an existing one is shifted down until clear (bounded)."""
+    of an existing one is shifted down until clear (bounded). With
+    ``enabled`` False (a thumbnail) nothing is drawn or placed."""
 
-    def __init__(self):
+    def __init__(self, enabled: bool = True):
         self.boxes: List[Tuple[float, float, float, float]] = []
+        self.enabled = enabled
+        self.drawn = 0
 
     def place(self, draw, xy, text, fill, font, w_img, h_img):
+        if not self.enabled:
+            return None
+        self.drawn += 1
         tw = _text_width(draw, text, font)
         th = getattr(font, "size", 12)
         x, y = float(xy[0]), float(xy[1])
@@ -1169,25 +1182,41 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
                  image=None, alpha: int = 255, tag: str = "geometry preview, not a render",
                  track_points: Optional[Sequence] = None,
                  terrain_elevation_m: float = 0.0,
-                 track_words: Optional[str] = None):
+                 track_words: Optional[str] = None,
+                 size: Optional[Tuple[int, int]] = None,
+                 style: str = "full"):
     """Draw one frame's geometry. ``ground`` is a :class:`Ground` or
     the tuple ``("terrain", (a, b))`` of world segments from
     :func:`terrain_wireframe` / ``("flat", None)``. With ``image`` the
     geometry is drawn as a translucent layer over it AT ITS OWN SIZE
-    (the record's intrinsics scaled per axis). Returns ``(image,
-    info)``: info carries the header lines, the horizon segment, the
-    aircraft centre pixel, the compass, the arrow and the counts of
-    segments drawn -- what the tests grade."""
+    (the record's intrinsics scaled per axis); with ``size`` a fresh
+    image of exactly that size is drawn the same way (a contact-sheet
+    tile: the intrinsics scaled per axis, nothing resampled). ``style``
+    "thumbnail" draws for a tile: no text of any kind (no header,
+    legend, compass, FOV or labels) and the horizon, track and body at
+    THUMBNAIL_LINE_PX. Returns ``(image, info)``: info carries the
+    header lines, the horizon segment, the aircraft centre pixel, the
+    compass, the arrow, the count of text items drawn and the counts
+    of segments drawn -- what the tests grade."""
     from PIL import Image, ImageDraw
 
     ground = Ground.coerce(ground)
     scale = validated_scale(scale)
-    if image is None:
+    if style not in ("full", "thumbnail"):
+        raise ValueError(f"preview.style: {style!r} is neither 'full' nor 'thumbnail'")
+    thumbnail = style == "thumbnail"
+    if image is None and size is not None:
+        w, h = int(size[0]), int(size[1])
+        image = Image.new("RGB", (w, h), BACKGROUND_RGB)
+        layer = image
+        axis_scale: Tuple[float, float] = (float(record["width_px"]) / w,
+                                           float(record["height_px"]) / h)
+    elif image is None:
         w = int(record["width_px"]) // scale
         h = int(record["height_px"]) // scale
         image = Image.new("RGB", (w, h), BACKGROUND_RGB)
         layer = image
-        axis_scale: Tuple[float, float] = (float(scale), float(scale))
+        axis_scale = (float(scale), float(scale))
     else:
         layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
         w, h = image.size
@@ -1196,14 +1225,22 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
     draw = ImageDraw.Draw(layer)
     axes = _camera_axes(record)
     info: Dict = {"scale": scale, "axis_scale": axis_scale, "size": (w, h),
-                  "segments": {}}
+                  "style": style, "segments": {}, "text_drawn": 0}
     font_px = header_font_px(h)
     label_font = _font(round(font_px * 0.93))
     small = _font(round(font_px * 0.87))
-    labels = _Labels()
+    line_px = THUMBNAIL_LINE_PX if thumbnail else 1
+    labels = _Labels(enabled=not thumbnail)
 
     def rgba(rgb):
         return rgb if layer is image else (rgb + (alpha,))
+
+    def text(xy, string, fill, font):
+        """Every piece of text goes through here: none in a thumbnail."""
+        if thumbnail:
+            return
+        info["text_drawn"] += 1
+        draw.text(xy, string, fill=fill, font=font)
 
     def colour_shaded(tint):
         base = _shaded(record, tint)
@@ -1313,7 +1350,7 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
     horizon = horizon_segment(record, axis_scale)
     info["horizon"] = horizon
     if horizon is not None:
-        draw.line([horizon[0], horizon[1]], fill=rgba(HORIZON_RGB), width=1)
+        draw.line([horizon[0], horizon[1]], fill=rgba(HORIZON_RGB), width=line_px)
 
     # 3. track: past solid, future dim, split at the frame's instant;
     #    this camera's scheduled instants as dots on the line
@@ -1327,7 +1364,7 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
             for mask, rgb in ((past, TRACK_PAST_RGB), (~past, TRACK_FUTURE_RGB)):
                 if mask.any():
                     clipped = _clip_segments(record, a[mask], b[mask], axis_scale, axes)
-                    _draw_segments(draw, clipped, _solid(rgba(rgb)))
+                    _draw_segments(draw, clipped, _solid(rgba(rgb)), width=line_px)
                     info["segments"].setdefault("track", 0)
                     info["segments"]["track"] += int(len(clipped))
         dots = 0
@@ -1357,7 +1394,7 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
         box_a = np.array([body[e[0]] for e in BOX_EDGES])
         box_b = np.array([body[e[1]] for e in BOX_EDGES])
         clipped = _clip_segments(record, box_a, box_b, axis_scale, axes)
-        _draw_segments(draw, clipped, _solid(rgba(BOX_RGB)))
+        _draw_segments(draw, clipped, _solid(rgba(BOX_RGB)), width=line_px)
         info["segments"]["box"] = int(len(clipped))
         axes_a = np.array([body["tail"], body["left_tip"], body["centre"]])
         axes_b = np.array([body["nose"], body["right_tip"], body["fin_top"]])
@@ -1384,29 +1421,30 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
         draw.line([(x0, y0), (x1, y1)], fill=rgba(CAMERA_RGB), width=1)
     hfov, vfov = field_of_view_deg(record)
     labels.place(draw, (cx + arm + 2, cy + 2), "boresight", rgba(CAMERA_RGB), small, w, h)
-    draw.text((cx - 40, h - 18), f"HFOV {hfov:.1f} deg", fill=rgba(CAMERA_RGB), font=small)
-    draw.text((4, cy - 14), f"VFOV\n{vfov:.1f}", fill=rgba(CAMERA_RGB), font=small)
+    text((cx - 40, h - 18), f"HFOV {hfov:.1f} deg", rgba(CAMERA_RGB), small)
+    text((4, cy - 14), f"VFOV\n{vfov:.1f}", rgba(CAMERA_RGB), small)
     for (x0, y0, x1, y1) in ((cx, 0, cx, 6), (cx, h - 7, cx, h - 1), (0, cy, 6, cy),
                              (w - 7, cy, w - 1, cy)):
         draw.line([(x0, y0), (x1, y1)], fill=rgba(CAMERA_RGB), width=2)
 
-    # 5b. the compass rose: image space, every scene
+    # 5b. the compass rose: image space, every scene but a thumbnail
     rose = compass_rose(record, w, h)
     info["compass"] = rose
-    rcx, rcy, rr = rose["centre"][0], rose["centre"][1], rose["radius"]
-    draw.ellipse([rcx - rr, rcy - rr, rcx + rr, rcy + rr], outline=rgba(COMPASS_RGB))
-    for name, spoke in rose["spokes"].items():
-        tip = spoke["tip"]
-        colour = NORTH_RGB if name == "N" else COMPASS_RGB
-        draw.line([(rcx, rcy), tip], fill=rgba(colour), width=3 if name == "N" else 1)
-        ang = math.radians(spoke["angle_deg"])
-        lx, ly = rcx + (rr + 9) * math.sin(ang), rcy - (rr + 9) * math.cos(ang)
-        draw.text((lx - 4, ly - 6), name, fill=rgba(colour), font=small)
-    draw.line([(rcx, rcy), rose["heading_tip"]], fill=rgba(BODY_RGB), width=2)
-    draw.text((rcx - rr - 12, rcy + rr + 20),
-              f"cam yaw {rose['yaw_deg']:.1f}", fill=rgba(COMPASS_RGB), font=small)
-    draw.text((rcx - rr - 12, rcy + rr + 20 + font_px),
-              f"hdg {rose['heading_deg']:.1f}", fill=rgba(BODY_RGB), font=small)
+    if not thumbnail:
+        rcx, rcy, rr = rose["centre"][0], rose["centre"][1], rose["radius"]
+        draw.ellipse([rcx - rr, rcy - rr, rcx + rr, rcy + rr], outline=rgba(COMPASS_RGB))
+        for name, spoke in rose["spokes"].items():
+            tip = spoke["tip"]
+            colour = NORTH_RGB if name == "N" else COMPASS_RGB
+            draw.line([(rcx, rcy), tip], fill=rgba(colour), width=3 if name == "N" else 1)
+            ang = math.radians(spoke["angle_deg"])
+            lx, ly = rcx + (rr + 9) * math.sin(ang), rcy - (rr + 9) * math.cos(ang)
+            text((lx - 4, ly - 6), name, rgba(colour), small)
+        draw.line([(rcx, rcy), rose["heading_tip"]], fill=rgba(BODY_RGB), width=2)
+        text((rcx - rr - 12, rcy + rr + 20),
+             f"cam yaw {rose['yaw_deg']:.1f}", rgba(COMPASS_RGB), small)
+        text((rcx - rr - 12, rcy + rr + 20 + font_px),
+             f"hdg {rose['heading_deg']:.1f}", rgba(BODY_RGB), small)
 
     # 6. header, wrapped to the image width, font from the image height
     lines = header_lines(record, manifest, scale, tag, ground=ground, plan=plan,
@@ -1415,22 +1453,26 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
     info["header"] = lines
     font = _font(font_px)
     line_h = font_px + 2
-    wrapped = wrap_lines(draw, lines, font, w - 8)
+    wrapped = wrap_lines(draw, lines, font, w - 8) if not thumbnail else []
     info["header_drawn"] = wrapped
     band_alpha = 255 if layer is image else min(alpha, OVERLAY_BAND_ALPHA)
-    draw.rectangle([0, 0, w, 4 + line_h * len(wrapped) + 2],
-                   fill=rgba((0, 0, 0)) if layer is image else (0, 0, 0, band_alpha))
-    info["header_band_px"] = 4 + line_h * len(wrapped) + 2
+    if not thumbnail:
+        draw.rectangle([0, 0, w, 4 + line_h * len(wrapped) + 2],
+                       fill=rgba((0, 0, 0)) if layer is image else (0, 0, 0, band_alpha))
+    info["header_band_px"] = 4 + line_h * len(wrapped) + 2 if not thumbnail else 0
     for i, line in enumerate(wrapped):
-        draw.text((4, 3 + line_h * i), line, fill=rgba(TEXT_RGB), font=font)
+        text((4, 3 + line_h * i), line, rgba(TEXT_RGB), font)
     legend = ("legend: ground wireframe depth-shaded (near bright, hidden behind "
               "ridges) | horizon | rings from the camera | N arrow | track past/future "
               "+ scheduled dots | aircraft body + box | heading tick | boresight + FOV | "
               "compass: N and heading")
-    legend_lines = wrap_lines(draw, [legend], small, max(80, w - 2 * COMPASS_INSET_PX[0] - 20))
+    legend_lines = (wrap_lines(draw, [legend], small,
+                               max(80, w - 2 * COMPASS_INSET_PX[0] - 20))
+                    if not thumbnail else [])
     for i, line in enumerate(legend_lines):
-        draw.text((4, h - 22 - (len(legend_lines) - i) * (round(font_px * 0.87) + 2)),
-                  line, fill=rgba((160, 160, 160)), font=small)
+        text((4, h - 22 - (len(legend_lines) - i) * (round(font_px * 0.87) + 2)),
+             line, rgba((160, 160, 160)), small)
+    info["text_drawn"] += labels.drawn
 
     if layer is not image:
         image = Image.alpha_composite(image.convert("RGBA"), layer).convert("RGB")
@@ -1493,7 +1535,9 @@ def render_previews(manifest: Dict, out_dir, heightfield=None,
         for camera_id, paths in per_camera.items():
             sheet, _ = contact_sheet(manifest, camera_id, paths,
                                      Path(out_dir) / "contact_sheets"
-                                     / f"{camera_id}.png", scale=scale)
+                                     / f"{camera_id}.png", scale=scale,
+                                     ground=ground, track_points=track_points,
+                                     terrain_elevation_m=terrain_elevation_m)
             written.contact_sheets[camera_id] = sheet
     return written
 
@@ -1504,15 +1548,34 @@ def contact_label(index: int, total, t_s: Optional[float]) -> str:
     return f"{words}  t={t_s:.3f} s" if t_s is not None else words
 
 
+def thumbnail_size(width_px: int, height_px: int,
+                   thumb_width: int = CONTACT_THUMB_WIDTH_PX) -> Tuple[int, int]:
+    """The tile size for a record: ``thumb_width`` wide, the height at
+    the record's own ratio rounded to a pixel (1280x720 -> 320x180)."""
+    return (int(thumb_width),
+            max(1, int(round(thumb_width * float(height_px) / float(width_px)))))
+
+
 def contact_sheet(manifest: Dict, camera_id: str, paths: Sequence[Path],
                   out_path, scale: int = 1,
                   thumb_width: int = CONTACT_THUMB_WIDTH_PX,
-                  columns: int = CONTACT_COLUMNS):
-    """A grid of every preview of one camera, index and time under each,
-    a title row with camera id, preset, schedule basis and count.
-    Returns ``(path, info)``; info["thumbnails"] is the count laid out."""
+                  columns: int = CONTACT_COLUMNS, ground=("flat", None),
+                  track_points: Optional[Sequence] = None,
+                  terrain_elevation_m: float = 0.0):
+    """A grid of every preview of one camera, each tile DRAWN FOR THE
+    TILE from its frame record (:func:`draw_preview` at the tile's
+    size in the thumbnail style: horizon, ground, rings, arrow, track
+    and body at THUMBNAIL_LINE_PX, no text of any kind) -- never the
+    preview shrunk, whose one-pixel lines and header smear to nothing
+    at a quarter size -- with index and time under each tile and a
+    title row with camera id, preset, schedule basis and count.
+    ``paths`` names the previews on the sheet (each tile's record is
+    the manifest frame of the path's index). Returns ``(path, info)``;
+    info["thumbnails"] is the count laid out, info["tiles"] each tile's
+    origin, size and draw info."""
     from PIL import Image, ImageDraw
 
+    ground = Ground.coerce(ground)
     block = _camera_block(manifest, camera_id)
     records = {r["index"]: r for r in manifest.get("frames", [])
                if r["camera_id"] == camera_id}
@@ -1520,10 +1583,11 @@ def contact_sheet(manifest: Dict, camera_id: str, paths: Sequence[Path],
     count = len(paths)
     cols = max(1, min(columns, count))
     rows = max(1, math.ceil(count / cols))
-    first = Image.open(paths[0]) if paths else None
-    aspect = (first.height / first.width) if first else 9 / 16
-    tw = thumb_width
-    th = int(round(tw * aspect))
+    first = records[min(records)] if records else None
+    if first is not None:
+        tw, th = thumbnail_size(first["width_px"], first["height_px"], thumb_width)
+    else:
+        tw, th = thumbnail_size(16, 9, thumb_width)
     margin, label_h, title_h = 6, 18, 28
     width = margin + cols * (tw + margin)
     height = title_h + margin + rows * (th + label_h + margin)
@@ -1531,30 +1595,37 @@ def contact_sheet(manifest: Dict, camera_id: str, paths: Sequence[Path],
     draw = ImageDraw.Draw(sheet)
     font = _font(15)
     small = _font(12)
-    thumb_scale = (first.width / tw) if first else 1.0
     total = block.get("capture_count", len(records))
+    scale_note = "" if scale == 1 else f" at 1/{scale}"
     title = (f"{camera_id}  preset {block.get('preset', '?')}  schedule: "
              f"{block.get('schedule_basis', '?')}  {count} of {total} frames"
-             f"  (thumbnails at 1/{thumb_scale * scale:g} of "
-             f"{int(records[0]['width_px']) if records else '?'}x"
-             f"{int(records[0]['height_px']) if records else '?'})")
+             f"  (tiles {tw}x{th} drawn from the records; previews "
+             f"{int(first['width_px']) if first else '?'}x"
+             f"{int(first['height_px']) if first else '?'}{scale_note})")
     draw.text((margin, 6), title, fill=TEXT_RGB, font=font)
+    tiles = []
     for k, path in enumerate(paths):
         r, c = divmod(k, cols)
         x = margin + c * (tw + margin)
         y = title_h + margin + r * (th + label_h + margin)
-        thumb = Image.open(path).convert("RGB")
-        thumb.thumbnail((tw, th))
-        sheet.paste(thumb, (x, y))
-        index = int(path.stem.split("_")[-1])
+        index = int(Path(path).stem.split("_")[-1])
         record = records.get(index)
+        tile_info = None
+        if record is not None:
+            tile, tile_info = draw_preview(record, manifest, ground, size=(tw, th),
+                                           style="thumbnail", track_points=track_points,
+                                           terrain_elevation_m=terrain_elevation_m)
+            sheet.paste(tile, (x, y))
         label = contact_label(index, total, record["t_s"] if record else None)
         draw.text((x, y + th + 2), label, fill=TEXT_RGB, font=small)
+        tiles.append({"index": index, "origin": (x, y), "size": (tw, th),
+                      "info": tile_info, "label": label})
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(out_path)
     return out_path, {"thumbnails": count, "columns": cols, "rows": rows,
-                      "thumb_size": (tw, th), "size": (width, height)}
+                      "thumb_size": (tw, th), "size": (width, height),
+                      "tiles": tiles}
 
 
 def overlay_tag(record: Dict, size: Tuple[int, int]) -> str:
