@@ -3,6 +3,64 @@
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
 
+**Camera Phase 1, preview round 2 (2026-09-04, the judge's nine ranked
+gaps against bar section 3, closed in order; docs/CAMERA_PHASE1_REPORT.md
+"Geometry preview" is current and SUPERSEDES round 1's description).**
+core/capture/preview.py: (1) terrain segments drawn far to near and
+HIDDEN behind nearer ground by a vectorised per-column skyline
+(skyline_cull: samples sorted by column then depth, the running
+minimum v before each sample, hidden when below it by more than 1 px;
+sub-segments rebuilt from the visible runs); (2) the flown track is
+the run's telemetry (telemetry_track: integer-stride decimation to
+<= 10 Hz, the rate as the recorder's MEDIAN step, 9.23 Hz for its
+13-step spacing, never the mean), past/future split at the frame's
+t_s, this camera's scheduled instants as dots, the header and run.json
+"track_source" say which; the CLI and webapp/capture.py pass columns
+(CaptureOutcome.telemetry carries them to the overlays); (3) rings
+around the camera's EXACT ground point (plan camera_north_m/east_m),
+the lattice keeps its snapped origin; (4) an image-space compass
+(north at -yaw, heading needle at heading - yaw, bottom-right) in
+every scene, the world arrow sized by its PROJECTION (secant steps,
+capped 0.3 x depth) and based on the ray 90 px below the boresight
+(NORTH_ARROW_DROP_PX; terrain: marched + bisected on the raster),
+labels shifted when within 20 px of another; (5) overlays at the
+frame's own size for any ratio (axis_scale per axis, never resampled),
+header font from the image height, lines wrapped at field separators,
+band alpha <= 96; (6) header line "terrain <name> WxH @ px m, wireframe
+NxN (spacing) + fine within R km; rings on the terrain" from
+terrain_plan, the coarse stride now a multiple of 4 raster px
+(control_ridge: 24 px = 720 m, 43x43), a fine lattice at stride/4
+within 10 coarse steps, rings draped on the raster and culled with
+it; (7) runner.aircraft_metrics: length = the LARGER of the stated-
+station extent (eyepoint/VRP/aero RP/CG/tail arm = aero RP + 12 lh)
+and arm + chord, with length_label, length_caveat and both candidates
+(B747 59.6 m eyepoint to tail arm; c172p 6.3 m arm + chord) and the
+picture reads "length >= 59.6 m (...; no fuselage length in JSBSim)";
+(8) "frame index 5 (6 of 24)" / "#5 (6/24)"; (9) scripts/
+mutation_check.sh --only <label regex> runs a named subset (baseline
+and restore still run the whole suite), 21 new guards + 3 repointed
+(two of round 1's whose target lines changed, one PRE-EXISTING stale
+CLI guard whose record.update call had gained a key); the subset
+run was stopped after 11 of 38 (all 11 fired, the 3 repointed ones
+among them) -- the 21 NEW guards are NOT yet verified firing: run
+./scripts/mutation_check.sh --only 'preview round 2' (or the
+scratchpad subset builder) FIRST in the next session and fix any WEAK. Measured: 0.068 s/frame on cameras_multi (48
+frames), 0.076 on cameras_waypoint, 0.053 on the control_ridge frame
+(draw_preview alone; the first cut was 0.135 until the raster
+sampling and header measurement were vectorised -- text measurement
+was the profile's top entry). Gotchas: (a) the info key "terrain" is
+the count of coarse segments IN FRAME and "terrain_visible" the count
+after the cull, so round 1's "> 100" assertion stands at full
+strength; (b) the recorder's samples are 13 steps apart, not 12: a
+test that assumes "10 Hz" fails -- compute the words from the run's
+telemetry; (c) the raster lattice column nearest east 0 sits at
+-0.44 m in the synthetic fields: grade pixels on the lattice's own
+columns, not at east 0; (d) the arrow at the boresight hit lands ON
+the aircraft an aimed camera centres, hence the 90 px drop; (e) a
+mutation run rewrites preview.py, runner.py, flightsim/capture.py and
+webapp/capture.py in place -- never edit or test while one runs.
+NOT YET RUN: overlays on real engine pixels (report step 5c).
+
 **Camera Phase 1, preview round 1 (2026-09-04, the geometry preview
 done properly against bar section 3; docs/CAMERA_PHASE1_REPORT.md
 "Geometry preview" is the description).** core/capture/preview.py

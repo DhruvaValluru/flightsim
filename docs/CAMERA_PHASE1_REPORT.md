@@ -89,7 +89,7 @@ table. Now:
 .venv/bin/python -m flightsim.verify runs/demo
 ```
 
-Expected without the engine (measured 2026-09-03 on Linux, exit 0;
+Expected without the engine (measured 2026-09-04 on Linux, exit 0;
 the JSBSim banner omitted; the default render choice resolves to
 `none` there, so `--render none` is implied):
 
@@ -97,7 +97,7 @@ the JSBSim banner omitted; the default render choice resolves to
 spec cef57d752362381d valid; running headlessly...
 scheduled 48 frames across 2 camera(s)
   manifest: runs/demo/capture_manifest.json
-  previews: 48 geometry preview(s) at 1280x720, 0.049 s/frame under runs/demo/previews (previews are not frames)
+  previews: 48 geometry preview(s) at 1280x720, 0.068 s/frame under runs/demo/previews (previews are not frames; track: telemetry 9.23077 Hz (115 points, no decimation))
   contact sheets: 2 (contact_sheets/<camera_id>.png, one per camera)
   [PASS] manifest_version: manifest_version 1, spec cef57d752362381d
   [PASS] fields_finite: 48 frame records checked
@@ -146,7 +146,7 @@ Temporal alignment across camera sets is exercised on real telemetry by
 same spec captured with a chase+tower set and again with a cockpit set
 aligns frame-for-frame (`flightsim.verify --against`).
 
-## Geometry preview (package I, done properly 2026-09-04)
+## Geometry preview (package I, done properly 2026-09-04; round 2 the same day)
 
 `core/capture/preview.py` draws one PNG per scheduled frame with numpy
 and Pillow only (matplotlib is not a dependency), every element
@@ -157,25 +157,41 @@ What a reader sees, and the field each element comes from:
 
 | element | drawn as | source |
 |---|---|---|
-| terrain (terrain scenes) | a 48 x 48 wireframe of the raster, each sample joined to its row and column neighbour, clipped at the near plane and to the image, shaded by camera-space depth: 240 at the frame's subject range (camera to aircraft) falling on a log scale to 32 at `far_m` | the heightfield, `near_m`, `far_m`, the aircraft state |
-| ground grid (flat scenes) | a fine lattice (step = the nice number at or above height/4) and a coarse one (10x that step) on the plane at the spec's terrain elevation, centred beneath the camera, extent = min(`far_m`, fy x height / 2) so it reaches the horizon or the far plane; distance rings at 500 m, 1, 2, 5, 10, 20 km labelled; a north arrow one step long where the boresight meets the plane | `position_*_m`, `fy_px`, `far_m`, the spec's terrain elevation |
+| terrain (terrain scenes) | a wireframe of the raster sampled every `terrain_stride_px` raster pixels (the smallest multiple of 4 giving at most 48 samples per axis: `control_ridge` 1024 px at 30 m is stride 24, 720 m, 43 x 43), each sample joined to its row and column neighbour, PLUS a fine lattice at a quarter of that stride (180 m) within 10 coarse steps (7.2 km) of the camera's ground point, so the near ground reads at the scale the aircraft is drawn; clipped at the near plane and to the image; shaded by camera-space depth: 240 at the frame's subject range (camera to aircraft) falling on a log scale to 32 at `far_m`; drawn far to near (painter's order) and HIDDEN behind nearer ground by a per-column skyline (`skyline_cull`: walking the segments near to far, each image column keeps the highest point drawn so far and a farther sample below it is behind a ridge) | the heightfield (name, size, pixel size: `Heightfield.metadata`), `near_m`, `far_m`, the aircraft state |
+| ground grid (flat scenes) | a fine lattice (step = the nice number at or above height/4) and a coarse one (10x that step) on the plane at the spec's terrain elevation, origin snapped to the step, extent = min(`far_m`, fy x height / 2) so it reaches the horizon or the far plane | `position_*_m`, `fy_px`, `far_m`, the spec's terrain elevation |
+| distance rings (every scene) | rings at 500 m, 1, 2, 5, 10, 20 km around the camera's EXACT ground point (never the snapped lattice origin: a ring labelled "10 km" is 10 km from the camera), labelled; in terrain scenes DRAPED on the raster (every ring point at the raster's elevation) and hidden behind ridges with the wireframe | `position_*_m`; the raster |
+| north arrow (every scene) | a world-space arrow on the ground pointing north, its world length set so its PROJECTION spans 60 px (capped at 0.3 x the base's depth when north is foreshortened to nothing), based where the ray 90 px below the boresight meets the ground (plane, or raster marched and bisected) so it sits clear of the aircraft an aimed camera centres; its "N" label placed clear of other labels (a label within 20 px of one already placed is shifted down) | the pose, the ground |
+| compass rose (every scene) | image-space, bottom-right, 40 px: the N/E/S/W spokes with north at screen angle -yaw (clockwise from up; a camera yawed 90 east has north to its left) and the aircraft's heading as a second needle at heading - yaw, both numbered ("cam yaw 231.3", "hdg 0.0") | `yaw_deg`, `aircraft.heading_deg` |
 | horizon | the level directions at infinity projected: `v = cy + fy tan(pitch)` for a level-rolled camera (a camera pitched down sees it ABOVE centre), tilted by roll | `quaternion_wxyz`, intrinsics |
-| aircraft | a three-axis body: nose-tail along the recorded heading and pitch, wing tips at +/- span/2 with the recorded roll, a fin up from the centre; the length x span x height box; a heading tick beyond the nose; the flown track (past solid, future dim) | `aircraft.*` per frame; `aircraft_metrics` (below) |
+| aircraft | a three-axis body: nose-tail along the recorded heading and pitch, wing tips at +/- span/2 with the recorded roll, a fin up from the centre; the length x span x height box; a heading tick beyond the nose | `aircraft.*` per frame; `aircraft_metrics` (below) |
+| flown track | the run's TELEMETRY (`telemetry_track`: the recorder's samples in the scene frame, decimated by the integer stride that brings the rate to at or below 10 Hz, never interpolated; the rate MEASURED as the recorder's median step, 9.23 Hz for this recorder's 13-step spacing), past solid and future dim split at the frame's `t_s`, with this camera's scheduled instants as dots on the line; without telemetry (a synthetic manifest) the manifest's scheduled instants, and the header says which | `telemetry.json` columns `t`, `lat_deg`, `lon_deg`, `altitude_m`; the frame records |
 | camera | a boresight cross at `principal_point_px` with the FOV `2 atan(sensor / 2 focal)` printed at the edges | `principal_point_px`, focal, sensor |
-| header | camera id, frame index / capture count, t, position, look yaw/pitch/roll, focal and fx, resolution, FOV; the aircraft's position, attitude, the aircraft-to-camera bearing and range; the body's span, length and height with their sources | the record; the camera block |
+| header | camera id, "frame index 5 (6 of 24)" (the manifest's 0-based index a verifier greps for AND the human count), t, position, look yaw/pitch/roll, focal and fx, resolution, FOV; the aircraft's position, attitude, the aircraft-to-camera bearing and range; the body's span, length (with its caveat, below) and fin with their sources; the ground ("terrain control_ridge 1024x1024 @ 30 m, wireframe 43x43 (720 m) + 180 m within 7.2 km of the camera; rings on the terrain", or the flat lattice's steps and extent); the track's source. Font and line height derive from the image height (15 px at 720, 8 at 360, 22 at 1080) and a line wider than the image is wrapped at its field separators | the record; the camera block; the heightfield; the telemetry |
 
 **The airframe metrics are read once from the FDM, never a constant**:
 `core.scenario.runner.aircraft_metrics(fdm)` reads `metrics/bw-ft`
-(span; the same property the span-station contact check uses),
-`metrics/lh-ft` + `metrics/cbarw-ft` (the wing-to-tail arm plus one
-mean chord: the FDM's longitudinal extent -- JSBSim states no
-nose-to-tail length, and the source string says so) and
+(span; the same property the span-station contact check uses) and
 `sqrt(metrics/Sv-sqft)` (the vertical tail area's square side: the
-FDM's only vertical extent). The run manifest and the capture manifest
-carry the block as `aircraft_metrics` (B747: span 64.47 m, length
-40.82 m, height 8.78 m). A manifest without it (a synthetic one) gets
-a fixed cross and a header line "aircraft_metrics absent: body
-unscaled" -- never a silent guess.
+FDM's only vertical extent). JSBSim states no nose-to-tail length, so
+the longitudinal extent is the LARGER of two distances between stations
+the FDM does state, each a lower bound on the fuselage: the extent of
+the stated structural stations (`metrics/eyepoint-x-in`,
+`metrics/visualrefpoint-x-in`, `metrics/aero-rp-x-in`, `inertia/cg-x-in`
+and the tail arm `metrics/aero-rp-x-in` + 12 x `metrics/lh-ft`), and
+the wing-to-tail arm plus one mean chord (`metrics/lh-ft` +
+`metrics/cbarw-ft`). Measured: B747 eyepoint 308 in to tail arm 2656 in
+= 59.6 m (arm + chord 40.8 m; the real fuselage is 70.7 m), c172p arm +
+chord 6.3 m (stations 4.9 m; real 8.3 m). The block carries
+`length_label` ("eyepoint to tail arm" / "arm + chord"),
+`length_caveat` ("no fuselage length in JSBSim"), both candidates
+(`length_candidates_m`) and a source string naming every station in
+inches; the picture's body line reads "length >= 59.6 m (eyepoint to
+tail arm; no fuselage length in JSBSim)" so a reader of the PNG alone
+sees the caveat. The run manifest and the capture manifest carry the
+block as `aircraft_metrics` (B747: span 64.47 m, length 59.64 m,
+height 8.78 m). A manifest without it (a synthetic one) gets a fixed
+cross and a header line "aircraft_metrics absent: body unscaled" --
+never a silent guess.
 
 **Resolution.** Full output resolution by default (the record's
 `width_px` x `height_px`); `--preview-scale N` on the CLI and the
@@ -183,42 +199,62 @@ page's "preview scale 1/N" field draw at 1/N, the header and the CLI
 line say so only when N is not 1, and a value that is not a positive
 integer is refused by name (`preview.scale`) before any flight.
 
-**Measured render time** (this machine, Linux, 2026-09-04, the 48
-frames of `examples/cameras_multi.yaml`, flat scene): 0.049 s/frame at
-1280x720 including the lattice, rings, track, body and header; 0.029
-s/frame at 1/2 scale; 0.064 s/frame including the contact sheets. The
-budget is 0.5 s/frame (`RENDER_BUDGET_S_PER_FRAME`), graded by
+**Measured render time** (this machine, Linux, 4 cores, 2026-09-04,
+round 2): 0.068 s/frame for the 48 frames of `examples/cameras_multi.yaml`
+at 1280x720 (flat scene: lattice, rings, arrow, compass, telemetry
+track, body, header); 0.076 s/frame for the 5 frames of
+`examples/cameras_waypoint.yaml` (280-point telemetry track); 0.053
+s/frame on the `control_ridge` terrain frame (chase0 index 5: 418
+coarse segments in frame, 98 hidden by the skyline, 38 fine, one ring)
+measured over 10 draws with `draw_preview` alone, 0.135 s/frame for
+the 30-preview CLI run of that scene before the raster sampling and
+the header measurement were vectorised (the profile: text measurement
+and `Heightfield.elevations()` per frame). The budget is 0.5 s/frame
+(`RENDER_BUDGET_S_PER_FRAME`), graded by
 `tests/test_camera_preview.py::test_full_resolution_render_time_is_under_budget`
-and printed by every run ("0.049 s/frame"); `run.json` `previews`
-records it.
+and printed by every run ("0.068 s/frame"); `run.json` `previews`
+records it, with `track_source`.
 
 **Overlays** (`overlays/<camera_id>/NNNN.png`): after an engine pass,
 `render_overlays` draws the same geometry as a translucent layer over
-every rendered PNG that exists (named by the same index, the frame's
-own size): the reprojected aircraft box, the ground and the horizon on
-the engine's pixels, so the verification is visible to the eye. The
-CLI prints "overlays: 48 reprojected-geometry overlay(s) ... (0.0xx
-s/frame)" and records `overlays {count, s_per_frame}` in `run.json`;
-the page lists `capture/overlays/<camera_id>` with the note
-"reprojected geometry over the rendered frame". Exercised here only
-against the honest engine STUB (a blob at the labelled pixel);
-"awaiting Windows verification" on real pixels, step 5c below.
+every rendered PNG that exists (named by the same index) at the
+frame's OWN size, whatever it is: a frame whose size differs from its
+record is drawn through the record's intrinsics scaled per axis by
+the actual ratio (fx and cx by width, fy and cy by height) and its
+header says so ("frame 640x360 differs from the record's 1280x720:
+intrinsics scaled to the frame, pixels not resampled"); the rendered
+pixels are never resampled, and the verifier, not the overlay, grades
+the mismatch. The header band is no darker than 96/255
+(`OVERLAY_BAND_ALPHA`). The CLI prints "overlays: 48
+reprojected-geometry overlay(s) ... (0.0xx s/frame)" and records
+`overlays {count, s_per_frame}` in `run.json`; the page lists
+`capture/overlays/<camera_id>` with the note "reprojected geometry
+over the rendered frame". Exercised here only against the honest
+engine STUB (a blob at the labelled pixel); "awaiting Windows
+verification" on real pixels, step 5c below.
 
 **Contact sheets** (`contact_sheets/<camera_id>.png`, beside
 `previews/`, never inside it -- `previews/` holds exactly one PNG per
 drawn frame): every preview of the camera as a 320-px-wide thumbnail
-with its index and time, a title row with camera id, preset, schedule
-basis and "N of M frames". Listed by the CLI and shown whole on the
-page above the per-frame gallery.
+labelled "#5 (6/24)  t=2.683 s" (index and count), a title row with
+camera id, preset, schedule basis and "N of M frames". Listed by the
+CLI and shown whole on the page above the per-frame gallery.
 
-**Reference image**: `docs/images/preview_chase0_frame5.png` is frame 5
-of `chase0` from the command above (t=2.683 s, camera at N +268.4, alt
-3060 m, pitch -4.8 deg): the horizon at row 256 (= 360 + 1244 tan(-4.8
-deg)), the 747's 64.5 m span drawn 455 px wide at 176 m range
-(1244 x 64.5 / 176 = 456), the box around it, the boresight cross, the
-10 km and 20 km rings and the coarse lattice dim in the distance.
+**Reference image**: `docs/images/preview_chase0_frame5.png` is frame
+index 5 of `chase0` from the command above (t=2.683 s, camera at N
++268.4, alt 3060 m, pitch -4.8 deg): the horizon at row 256 (= 360 +
+1244 tan(-4.8 deg)), the 747's 64.5 m span drawn 455 px wide at 176 m
+range (1244 x 64.5 / 176 = 456), the 59.6 m box around it, the
+boresight cross, the 10 km ring at row 629 (= 360 + 1244 tan(atan(3060
+/ 10000) - 4.8 deg): 10 km from the camera, not 10.27 km from the
+snapped lattice origin), the 20 km ring, the telemetry track through
+the aircraft with the scheduled dots, the north arrow 90 px below the
+boresight (45 px long: its base is 19.6 km out where north is
+foreshortened, and the 0.3 x depth cap, 5.9 km, holds it under 60 px), the compass with N up (yaw 0) and the
+heading needle on it, the coarse lattice dim in the distance. Byte-
+identical to a fresh run of the command (`cmp`).
 
-**Tests** (`tests/test_camera_preview.py`, 20 tests on synthetic
+**Tests** (`tests/test_camera_preview.py`, 32 tests on synthetic
 records with known poses): the level camera's horizon row equals cy
 within 1 px and a ground point ahead lands below it; pitch -10 deg
 moves it by fy tan(pitch); the body centre equals `project_point` of
@@ -227,11 +263,70 @@ range within 1 px and halves at twice the range; roll and heading move
 the tips and nose as recorded; a segment behind the camera is not
 drawn, even when its mirrored projection would land in frame; the
 default size is the record's; the header carries the position, look
-and focal strings; the overlay is the frame's size with the body at
-the reprojected pixel; one contact sheet per camera with one thumbnail
-per frame; the render time is under budget. 15 mutation guards
-(`scripts/mutation_check.sh`, "the geometry preview") disable each
-safeguard in turn and were verified to fail their tests.
+and focal strings and the exact "frame index 5 (6 of 24)"; the overlay
+is the frame's size with the body at the reprojected pixel; one
+contact sheet per camera with one thumbnail per frame; the render time
+is under budget. Round 2 adds: two crossing segments given far-last
+leave the near colour on the crossing pixel; a two-ridge heightfield
+(near 300 m at 1 km, far 150 m at 2 km) hides the far crest where it
+crosses the near face (the near column line's bright green is on that
+pixel, the far row's dim green is nowhere in its 3x3 window, and the
+far crest is background along the frame); a 200-point half-circle
+telemetry at 20 Hz is decimated to 101 points at 10 Hz with the words
+"track: telemetry 20 Hz decimated to 10 Hz (101 points)", intermediate
+(never scheduled) points lie on the drawn track in the past colour
+before the frame's instant and the future colour after, the chord
+midpoint between two instants (90 m inside the arc) is background, and
+the recorder's median step, not the mean, sets the rate; the 10 km
+ring's forward point projects at cy + fy tan(atan(3060/10000) - 4.8
+deg) within 1 px (9.6 px from the snapped value) and the pixel there is
+ring-coloured; the compass's N spoke sits at -yaw for yaw 0, 90 and
+231.3 and its pixel is north-coloured, the heading needle at heading -
+yaw; the north arrow is 60 px on screen within 1 px in a flat and a
+terrain scene with its base on the ground at the pixel 90 px below
+the boresight; a 640x360 and a 1920x1080 frame against a 1280x720
+record get overlays of their own size with the body centre at
+`project_point` times the ratio within 1 px, a corner pixel unchanged,
+the band no darker than 96/255 and no header line wider than the
+frame; the terrain header names the raster ("terrain synthetic 9x9 @
+100 m, wireframe 9x9 (100 m)"), a raster vertex projects at its pixel
+in terrain green, and the 500 m ring is draped on the raster and drawn;
+the fine lattice lies within its radius at the raster's spacing and
+never on a coarse line; the body line carries the caveat; the runner's
+B747 length is 59.644 m from the named stations with both candidates.
+The CLI and page tests assert the run's `track_source` equals the
+words computed from the run's own telemetry. 36 mutation guards
+(`scripts/mutation_check.sh`, "the geometry preview" and "preview round
+2") disable each safeguard in turn; the runner's `--only <label regex>`
+runs a named subset. **Verification state, honestly**: the round-2
+subset run (38 guards: the 15 round-1 preview guards, two of them
+repointed to lines the rewrite moved, one pre-existing stale CLI guard
+repointed, the two frames-provenance guards and the 21 new round-2
+guards) was stopped after 11 guards, all 11 firing, when the session
+was closed; its output as far as it got:
+
+```
+  ok    a frames run records its passes and its clip in provenance -- tests fail with the guard removed
+  ok    the CLI records its passes and its clip beside the run's digests -- tests fail with the guard removed
+  ok    the preview draws the horizon at the camera's pitch and roll -- tests fail with the guard removed
+  ok    the aircraft body is scaled by the FDM's span at the frame's range -- tests fail with the guard removed
+  ok    a segment behind the camera is never drawn -- tests fail with the guard removed
+  ok    previews default to the record's full resolution -- tests fail with the guard removed
+  ok    a preview scale that is not a positive integer refuses by name -- tests fail with the guard removed
+  ok    the ground is depth-shaded, near bright and far dim -- tests fail with the guard removed
+  ok    the header states position, look direction and focal length -- tests fail with the guard removed
+  ok    every camera gets a contact sheet of its previews -- tests fail with the guard removed
+  ok    the preview render time is measured per frame and recorded -- tests fail with the guard removed
+  ok    the run manifest carries the airframe metrics read from the FDM -- tests fail with the guard removed
+  ok    the capture manifest carries the airframe metrics the body is scaled by -- tests fail with the guard removed
+```
+
+The 21 round-2 guards are written against target strings verified to
+be present in the source and each names the test that grades its
+safeguard, but they have NOT been run through the runner: until
+`./scripts/mutation_check.sh --only 'preview round 2'` prints "ok" for
+each, they are not verified firing, and this document says so rather
+than counting them.
 
 ## The run emits frames, not a clip (finished 2026-09-03)
 
@@ -493,7 +588,7 @@ spec cef57d752362381d valid; running headlessly...
   card:     runs\demo\card.json (consume-poses; one commandlet pass per camera via -camera-index=N)
 scheduled 48 frames across 2 camera(s)
   manifest: runs\demo\capture_manifest.json
-  previews: 48 geometry preview(s) at 1280x720, 0.0xx s/frame under runs\demo\previews (previews are not frames)
+  previews: 48 geometry preview(s) at 1280x720, 0.0xx s/frame under runs\demo\previews (previews are not frames; track: telemetry 9.23077 Hz (115 points, no decimation))
   contact sheets: 2 (contact_sheets/<camera_id>.png, one per camera)
 engine pass 1 of 2: camera 'chase0', 24 frames scheduled over the 12 s run (-camera-index=0)
   camera 'chase0': 24 of 24 scheduled frames rendered under runs\demo\frames\chase0 (engine stepped 11.992 s in 1439 steps)
@@ -715,15 +810,26 @@ start runs\demo\overlays\chase0\0005.png
 start runs\demo\overlays\tower0\0010.png
 ```
 
-The count must print 24 (and 24 for tower0). In `chase0\0005.png` the
-yellow wing line (64.5 m at 176 m range: 455 px wide) must lie across
-the rendered 747's wings and the box enclose the fuselage, to within
+The count must print 24 (and 24 for tower0). In `chase0\0005.png` (the
+header reads "frame index 5 (6 of 24)") the yellow wing line (64.5 m
+at 176 m range: 455 px wide) must lie across the rendered 747's wings
+and the 59.6 m box enclose most of the fuselage (the box is the FDM's
+eyepoint-to-tail-arm extent, 11 m short of the real 70.7 m, and the
+header says "no fuselage length in JSBSim"), to within
 the frame's graded pixel budget the verifier prints ("aircraft drawn
 within x.xx m", about 10 px at this range); the horizon line must run
 along the rendered horizon (the flat scene's ground plane edge) and the
-lattice recede toward it. In `tower0\0010.png` the aircraft is 3 km
-away: a 26 px span line on the rendered aircraft, the track line along
-its path, no horizon in frame (the tower looks up 75 deg). A wing line
+lattice recede toward it; the blue track through the aircraft must be
+the flown path (the telemetry, 115 points) with the 24 scheduled dots
+on it, and the header band at the top must leave the rendered pixels
+readable through it (alpha 96/255, not black). In `tower0\0010.png` the
+aircraft is 3 km away: a 26 px span line on the rendered aircraft, the
+track line along its path, no horizon in frame (the tower looks up 75
+deg), the compass in the corner with N at -94.1 deg (the tower's yaw).
+A frame the engine wrote at a size other than the record's gets its
+overlay at the frame's own size with the intrinsics scaled and a
+header note saying so -- if that note appears, the engine's resolution
+setting, not the overlay, is what to check. A wing line
 beside, not on, the rendered aircraft is the SAME disagreement engine
 parity grades numerically, and the frame's `render.json` record says
 which side (`aircraft_px` against the manifest's labelled pixel); a
@@ -793,14 +899,33 @@ Paste every log back; this section is rewritten from them.
   only; there is no frames-mode cap, by design: the schedule is the
   contract.
 * The geometry preview's aircraft is a three-axis body and a box, not
-  a silhouette, and its LENGTH is the FDM's wing-to-tail arm plus one
-  mean chord (40.8 m for the B747, whose fuselage is 70.7 m) because
-  JSBSim states no nose-to-tail length; the header and the manifest
-  say exactly which metric each dimension is. The span (metrics/bw-ft)
-  is the airframe's own.
+  a silhouette, and its LENGTH is a lower bound: the larger of the
+  FDM's stated-station extent (eyepoint to tail arm, 59.6 m for the
+  B747 whose fuselage is 70.7 m) and the wing-to-tail arm plus one
+  mean chord (6.3 m for the c172p, whose fuselage is 8.3 m), because
+  JSBSim states no nose-to-tail length; the picture's header says
+  ">= ... (no fuselage length in JSBSim)" and the manifest names every
+  station. The span (metrics/bw-ft) is the airframe's own.
 * The overlays have been drawn over the honest engine stub only; over
   real rendered pixels they are NOT YET RUN (step 5c above).
-* Terrain scenes have no distance rings or north arrow (the wireframe
-  and the horizon carry the scale there); flat scenes have both.
+* The terrain skyline cull hides ground behind nearer ground per image
+  column from the wireframe's own samples: a ridge narrower than the
+  coarse spacing (720 m on control_ridge) between two sample rows does
+  not occlude, and a farther sample within 1 px of the skyline is kept
+  (`SKYLINE_TOLERANCE_PX`). The fine lattice near the camera (180 m)
+  narrows that gap only within 7.2 km. The cull orders samples by
+  their camera depth interpolated linearly along each segment, not
+  perspective-correctly; over a 720 m segment that is a metre-scale
+  depth error, far below the 1 px tolerance at the ranges drawn.
+* The north arrow's world length is set by its projected size and
+  capped at 0.3 x its base's depth: where north is foreshortened to
+  nothing (the flat chase view's arrow base 36 km out) it is shorter
+  than 60 px (45 px there) and the compass rose carries the
+  orientation; the header's compass numbers are the record's yaw and
+  heading, never estimated from the arrow.
+* The telemetry track is decimated by an integer stride to at most
+  10 Hz and never interpolated; the recorder's own spacing (13 fixed
+  steps, 9.23 Hz) is below that, so today's tracks are undecimated and
+  the header says so.
 * Segmentation masks, bounding boxes, domain randomization, batch
   execution: out of scope, untouched.
