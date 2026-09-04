@@ -112,8 +112,15 @@ done: manifest, 48 previews and verification for 48 scheduled frames under runs/
 Every mode runs that verifier on the manifest it just wrote and prints
 the table BEFORE its final line (clip mode too, before its engine pass;
 frames mode prints the complete table after its passes, when engine
-parity has frames to grade), and a manifest that fails its own
-verification fails the run by name (`capture.verification`, exit 2).
+parity has frames to grade), writes it as `verify.json` beside the
+manifest (the same JSON the webapp serves, so `flightsim.verify`'s
+output and the run's own record agree without re-running), records the
+render choice in `run.json` (`render`: the word, the page's label, and
+the engine's availability and reason on this machine -- the CLI's copy
+of the webapp's `provenance.json` `render`), and a manifest that fails
+its own verification fails the run by name (`capture.verification`,
+exit 2). The headless tree is `capture_manifest.json`, `telemetry.json`,
+`scenario.yaml`, `run.json`, `verify.json`, `previews/`.
 The word REFUSED is reserved for exit 2: a headless run on a machine
 without the engine is DONE, and states the engine's absence by reason.
 `--render frames` there refuses BY NAME (`ue.platform`, "rendered
@@ -495,7 +502,8 @@ runs\demo\
   frames\chase0\clip_playlist.ffconcat   the lead-in first ('../clip_lead.png', 0.008333 s), then 0000.png .. 0023.png with their durations, 0023.png repeated
   frames\clip_lead.png         the by-product clip's black lead-in, 1280x720 (beside the camera directories, never inside one)
   clip.mp4                     the by-product: black to t=0.008 s, 24 frames at their instants to t=11.992 s, the last held 1 s: 12.992 s
-  provenance.json              render "frames", render_passes (per camera: scheduled 24, rendered 24, steps_taken 1439, stepped_s 11.992), clip_encoded true, clip_seconds 12.992
+  run.json                     spec_digest, output_digest, samples 115, render {choice "frames", label "Render frames and clip", engine_available true, engine_unavailable_reason null}, render_passes (per camera: scheduled 24, rendered 24, steps_taken 1439, stepped_s 11.992), clip_encoded true, clip_seconds 12.992
+  verify.json                  the verifier's report as run (the JSON the webapp serves): ok, checks [6, each name/ok/status/detail/data], passed 6, ran 6, awaiting [] -- rewritten after the passes, so the printed table and the file agree without re-running
   previews\...                 48 geometry previews (not frames)
   engine_telemetry.json        the engine's own recorder, pass 0
   telemetry.json               the headless flight the manifest describes

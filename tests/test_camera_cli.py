@@ -498,3 +498,82 @@ def test_render_clip_is_the_single_preset_pass(tmp_path, capsys, cli_engine):
     assert text.index("verification PASSED") < text.index("engine pass:")
     clip_card = json.loads((out / "clip_card.json").read_text(encoding="utf-8"))
     assert "cameras" not in clip_card
+
+
+def test_run_json_records_the_render_choice_and_verify_json_in_every_mode(
+        tmp_path, capsys, cli_engine, monkeypatch):
+    """The CLI's own record agrees with the webapp's: run.json carries
+    the render choice (word, label, the engine's availability and
+    reason) and verify.json -- the verifier's report, the JSON the page
+    serves -- sits beside the manifest in all three modes, matching what
+    flightsim.verify prints without re-running."""
+    import core.util.platform as plat
+    import flightsim.capture as cli
+    from core.capture.render_pass import RENDER_WORDS
+
+    def run(word, out, **extra):
+        code = capture_main([str(EXAMPLES / "cameras_multi.yaml"), "--out",
+                             str(out), "--max-previews", "0",
+                             "--render", word])
+        text = capsys.readouterr().out
+        assert code == 0, text
+        run_json = json.loads((out / "run.json").read_text(encoding="utf-8"))
+        assert run_json["render"]["choice"] == word
+        assert run_json["render"]["label"] == RENDER_WORDS[word]
+        for key, value in extra.items():
+            assert run_json["render"][key] == value, key
+        verify = json.loads((out / "verify.json").read_text(encoding="utf-8"))
+        assert verify["ok"] is True
+        assert [c["name"] for c in verify["checks"]] == [
+            "manifest_version", "fields_finite", "geometry_recovery",
+            "cross_view_consistency", "count_exactness", "engine_parity"]
+        # The file says what the table said.
+        for check in verify["checks"]:
+            assert f"[{check['status']}] {check['name']}: " in text, check
+        return run_json, verify
+
+    # Headless on a machine without the engine: the reason is recorded.
+    monkeypatch.setattr(plat, "ue_available", lambda: False)
+    monkeypatch.setattr(plat, "ue_unavailable_reason",
+                        lambda: "no engine on this OS (test)")
+    _, verify = run("none", tmp_path / "none", engine_available=False,
+                    engine_unavailable_reason="no engine on this OS (test)")
+    engine = verify["checks"][-1]
+    assert engine["status"] == "AWAITING" and engine["ok"] is None
+    assert verify["awaiting"] == ["engine_parity"] and verify["ran"] == 5
+    assert engine["data"]["cameras"]["chase0"] == {
+        "scheduled": 24, "rendered": 0, "verified": 0}
+    # flightsim.verify over the directory prints exactly the file's checks.
+    assert verify_main([str(tmp_path / "none")]) == 0
+    printed = capsys.readouterr().out
+    for check in verify["checks"]:
+        assert f"[{check['status']}] {check['name']}: {check['detail']}" in printed
+
+    # Frames: verify.json is rewritten AFTER the passes, engine parity graded.
+    monkeypatch.setattr(plat, "ue_available", lambda: True)
+    monkeypatch.setattr(plat, "ue_unavailable_reason", lambda: None)
+    calls = []
+    cli_engine["monkeypatch"].setattr(cli, "run_render_pass",
+                                      honest_cli_engine(calls))
+    run_json, verify = run("frames", tmp_path / "frames",
+                           engine_available=True,
+                           engine_unavailable_reason=None)
+    engine = verify["checks"][-1]
+    assert engine["status"] == "PASS"
+    assert engine["data"]["cameras"]["tower0"] == {
+        "scheduled": 24, "rendered": 24, "verified": 24}
+    assert verify["awaiting"] == [] and verify["ran"] == 6
+    assert [p["camera_id"] for p in run_json["render_passes"]] == ["chase0", "tower0"]
+
+    # Clip: the choice is recorded and the manifest verified (parity awaiting).
+    def preset_pass(command, frames, log):
+        Path(frames).mkdir(parents=True, exist_ok=True)
+        (Path(frames) / "render.json").write_text("{}", encoding="utf-8")
+        return True
+
+    cli_engine["monkeypatch"].setattr(cli, "run_render_pass", preset_pass)
+    cli_engine["monkeypatch"].setattr(
+        "experiments.showcase_matrix.encode_clip",
+        lambda frames, clip: bool(clip.write_bytes(b"x")) or True)
+    _, verify = run("clip", tmp_path / "clip", engine_available=True)
+    assert verify["checks"][-1]["status"] == "AWAITING"

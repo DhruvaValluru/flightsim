@@ -18,10 +18,13 @@ approximating):
    the documented default camera);
 6. the solved tracks are re-checked against the scene along the whole
    run;
-7. capture_manifest.json, telemetry.json, scenario.yaml and one
-   geometry preview per scheduled frame are written, and the SAME
-   verifier the instructor runs (flightsim.verify) grades what was just
-   written -- its table is printed in every mode, engine parity AWAITING
+7. capture_manifest.json, telemetry.json, scenario.yaml, run.json (the
+   digests and the render choice: word, label, the engine's
+   availability and reason on this machine) and one geometry preview
+   per scheduled frame are written, and the SAME verifier the
+   instructor runs (flightsim.verify) grades what was just written --
+   its table is printed in every mode and written as verify.json beside
+   the manifest (the JSON the webapp serves), engine parity AWAITING
    until frames exist, and a manifest that fails its own verification
    FAILS the run by name (capture.verification, exit 2);
 8. the render choice, the SAME three words the web page offers
@@ -236,10 +239,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     manifest_path = write_capture_manifest(manifest, out)
     result.telemetry.write_json(out / "telemetry.json")
     spec.write(out / "scenario.yaml")
+    # The run's own record: its digests AND the render choice, in the
+    # word and the label the page uses, with the engine's availability
+    # and reason as this machine stated them -- the same provenance the
+    # webapp writes (provenance.json "render"), on the CLI's surface.
     (out / "run.json").write_text(json.dumps({
         "spec_digest": result.spec_digest,
         "output_digest": result.output_digest,
         "samples": len(result.telemetry),
+        "render": {"choice": render, "label": RENDER_WORDS[render],
+                   "engine_available": bool(ue_available()),
+                   "engine_unavailable_reason": ue_unavailable_reason()},
     }, indent=1), encoding="utf-8")
 
     card_path = None
@@ -276,9 +286,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # in those words); frames prints the complete table once its passes
     # have given engine parity frames to grade, and refuses here, before
     # any editor time, when the manifest itself does not verify.
-    from core.capture.verify import verify_run
-
-    report = verify_run(out)
+    report = _verify_and_record(out)
     if render != "frames" or not report.ok:
         print(report.render())
     if not report.ok:
@@ -309,6 +317,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     return _render_clip(spec, out, scene)
 
 
+def _verify_and_record(out: Path):
+    """Run the verifier the instructor runs (flightsim.verify) over
+    ``out`` and write its report as ``verify.json`` beside the manifest
+    -- the SAME JSON the webapp serves (webapp.capture.verification_verdict),
+    written in every mode and rewritten after the engine passes, so the
+    printed table and the run's own record cannot disagree."""
+    from core.capture.verify import verify_run
+
+    from webapp.capture import verification_verdict
+
+    report = verify_run(out)
+    (Path(out) / "verify.json").write_text(
+        json.dumps(verification_verdict(report), indent=1), encoding="utf-8")
+    return report
+
+
 def _engine_prerequisites(spec, out: Path):
     """(editor, project, mesh) for an engine pass, or a named refusal
     (exit code) -- the owner's placeholder rule through the webapp's ONE
@@ -332,7 +356,6 @@ def _render_frames(spec, out: Path, card_path: Path, scene, cameras,
                    schedules) -> int:
     """--render frames: one consume-poses pass per camera, graded pass
     by pass, then the verifier's engine-parity check over the lot."""
-    from core.capture.verify import verify_run
     from experiments.showcase_matrix import FPS, HEIGHT, TIME_OF_DAY, \
         VISIBILITY, WIDTH
 
@@ -406,7 +429,7 @@ def _render_frames(spec, out: Path, card_path: Path, scene, cameras,
                    "clip_seconds": float(clip_seconds)})
     run_json.write_text(json.dumps(record, indent=1), encoding="utf-8")
 
-    report = verify_run(out)
+    report = _verify_and_record(out)
     print(report.render())
     total = sum(len(s) for s in schedules)
     verified = 0

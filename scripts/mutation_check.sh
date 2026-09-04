@@ -1118,6 +1118,20 @@ mutate core/capture/poses.py \
     "the manifest's aircraft speed is the recorded true airspeed when present" \
     tests/test_camera_manifest.py || failures=$((failures+1))
 
+# -- Camera Phase 1, frames round 3: the CLI's record agrees with the page --
+
+mutate flightsim/capture.py \
+    '        "render": {"choice": render, "label": RENDER_WORDS[render],' \
+    '        "render_": {"choice": render, "label": RENDER_WORDS[render],  # MUTATED: the choice is not recorded' \
+    "the CLI records its render choice in run.json" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '    (Path(out) / "verify.json").write_text(' \
+    '    (Path(out) / "verify_.json").write_text(  # MUTATED: no verify.json beside the manifest' \
+    "the CLI writes the verifier's report as verify.json in every mode" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
 # -- Camera Phase 1 finished: the web run renders frames, not a clip ------
 
 mutate core/capture/render_pass.py \
