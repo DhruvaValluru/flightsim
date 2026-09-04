@@ -642,8 +642,10 @@ def test_the_preview_scale_flag_is_optional_and_refuses_a_bad_value(
     assert run["previews"]["scale"] == 2
     assert run["previews"]["resolution"] == [640, 360]
     # A scale the preview cannot draw at exactly refuses BY NAME before
-    # any flight: no run directory, no manifest.
-    for bad in ("0", "-2"):
+    # any flight: no run directory, no manifest. 3 does not divide the
+    # example's 1280x720 (426.67x240): refused from the spec's cameras,
+    # never floored to 426x240.
+    for bad in ("0", "-2", "3"):
         code = capture_main([str(EXAMPLES / "cameras_multi.yaml"), "--out",
                              str(tmp_path / "bad"), "--render", "none",
                              "--preview-scale", bad])
@@ -651,6 +653,10 @@ def test_the_preview_scale_flag_is_optional_and_refuses_a_bad_value(
         assert code == 2
         assert "REFUSED -- preview.scale:" in text
         assert not (tmp_path / "bad").exists()
+        if bad == "3":
+            assert "3 does not divide 1280x720 exactly (426.67x240)" in text
+            assert "(camera chase0)" in text
+            assert "running headlessly" not in text            # before the flight
 
 
 def test_render_frames_overlays_the_reprojected_geometry_on_every_frame(

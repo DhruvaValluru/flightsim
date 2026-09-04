@@ -1208,3 +1208,44 @@ def test_overlay_text_has_a_dark_backing_over_a_bright_frame():
     assert len(plain_items) == len(overlay_items) == 15
     assert [t for t in plain_items if not t.startswith("cam0")] == \
         [t for t in overlay_items if not t.startswith("cam0")]
+
+
+# -- round 3: a scale that does not divide the resolution is refused ---------
+
+def test_a_scale_that_does_not_divide_the_resolution_is_refused_by_name(tmp_path):
+    """3 on 1280x720 would be 426.67x240: refused by name (preview.scale)
+    with the fractional size in the words, by validated_scale with a
+    resolution, by draw_preview, by render_previews and by the camera
+    check the CLI and page run before the flight; 4 and 5 (320x180,
+    256x144) draw. Overlays and tiles, drawn at a given size, do not
+    take a scale and are unaffected."""
+    assert pv.validated_scale(4, (WIDTH, HEIGHT)) == 4
+    assert pv.validated_scale(5, (WIDTH, HEIGHT)) == 5
+    assert pv.validated_scale(3) == 3                        # no resolution: integer only
+    with pytest.raises(ValueError, match=r"preview\.scale: 3 does not divide 1280x720 exactly \(426\.67x240\)"):
+        pv.validated_scale(3, (WIDTH, HEIGHT))
+    with pytest.raises(ValueError, match="never floors"):
+        pv.validated_scale(7, (WIDTH, HEIGHT))
+    rec = record(index=0)
+    m = manifest([rec])
+    with pytest.raises(ValueError, match="preview.scale: 3 does not divide"):
+        pv.draw_preview(rec, m, ("flat", None), scale=3)
+    with pytest.raises(ValueError, match="preview.scale: 3 does not divide"):
+        pv.render_previews(m, tmp_path / "three", scale=3)
+    assert not (tmp_path / "three").exists()
+    image, info = pv.draw_preview(rec, m, ("flat", None), scale=5)
+    assert image.size == (256, 144) and info["size"] == (256, 144)
+    assert "1/5 scale" in info["header"][0]
+    # The camera check names the camera, from records or CameraSpec blocks.
+    assert pv.scale_refusal_for_cameras(4, [rec]) is None
+    words = pv.scale_refusal_for_cameras(3, [rec])
+    assert "preview.scale: 3 does not divide 1280x720 exactly (426.67x240)" in words
+    assert words.endswith("(camera cam0)")
+    from core.scenario.camera import CameraSpec
+
+    block = CameraSpec.defaulted(camera_id="wide", preset="chase", aircraft="B747")
+    assert pv.scale_refusal_for_cameras(2, [block]) is None
+    assert "(camera wide)" in pv.scale_refusal_for_cameras(3, [block])
+    # A tile at an explicit size is not a scale: 320x180 from 1280x720.
+    tile, tinfo = pv.draw_preview(rec, m, ("flat", None), size=(320, 180), style="thumbnail")
+    assert tile.size == (320, 180)

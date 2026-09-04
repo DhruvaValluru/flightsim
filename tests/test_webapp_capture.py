@@ -1318,6 +1318,17 @@ def test_the_page_s_preview_scale_field_is_honoured_or_refused_by_name(client):
     assert bad.status_code == 409
     assert bad.json()["constraint"] == "preview.scale"
     assert "preview.scale" in bad.json()["refused"]
+    # 3 does not divide the default camera's 1280x720: refused by name
+    # before the run starts (no run id), never floored to 426x240.
+    three = client.post("/capture", json={"spec": spec.to_dict(),
+                                          "preview_scale": 3})
+    assert three.status_code == 409, three.json()
+    assert three.json()["constraint"] == "preview.scale"
+    assert "3 does not divide 1280x720 exactly (426.67x240)" in three.json()["refused"]
+    assert "run_id" not in three.json()
+    three_run = client.post("/run", json={"spec": spec.to_dict(),
+                                          "preview_scale": 3, "render": "none"})
+    assert three_run.status_code == 409 and three_run.json()["constraint"] == "preview.scale"
     reply = client.post("/capture", json={"spec": spec.to_dict(),
                                           "preview_scale": 2})
     assert reply.status_code == 200, reply.json()

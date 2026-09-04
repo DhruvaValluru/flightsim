@@ -1724,6 +1724,34 @@ mutate core/capture/preview.py \
     "preview round 3: the overlay's compass sits on its own band" \
     tests/test_camera_preview.py || failures=$((failures+1))
 
+mutate core/capture/preview.py \
+    '        if w % value or h % value:' \
+    '        if False:  # MUTATED: a non-divisor scale is floored (426x240 for 3)' \
+    "preview round 3: a scale that does not divide the resolution is refused by name" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '    if scale_refusal is not None:
+        print(f"REFUSED -- {scale_refusal}")
+        return 2' \
+    '    if False:  # MUTATED: the CLI flies first and floors the previews
+        print(f"REFUSED -- {scale_refusal}")
+        return 2' \
+    "preview round 3: the CLI refuses a non-divisor preview scale before the flight" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '    refusal = scale_refusal_for_cameras(preview_scale,
+                                        spec.cameras or default_cameras(spec))
+    if refusal is None:
+        return None' \
+    '    refusal = scale_refusal_for_cameras(preview_scale,
+                                        spec.cameras or default_cameras(spec))
+    if True:  # MUTATED: the page starts the run at a scale it cannot draw
+        return None' \
+    "preview round 3: the page refuses a non-divisor preview scale before the run" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

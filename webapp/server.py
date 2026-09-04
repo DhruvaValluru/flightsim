@@ -101,8 +101,9 @@ class RunRequest(BaseModel):
     render: Optional[Literal["frames", "clip", "none"]] = None
     #: Preview scale: 1 (default) draws every geometry preview at the
     #: record's full resolution; N draws at 1/N. Anything that is not a
-    #: positive integer is refused by name (preview.scale), never
-    #: rounded (core.capture.preview.validated_scale).
+    #: positive integer, or one that does not divide every camera's
+    #: resolution exactly, is refused by name (preview.scale), never
+    #: rounded or floored (core.capture.preview.validated_scale).
     preview_scale: Optional[int] = None
 
 
@@ -124,6 +125,21 @@ def _preview_scale_or_refusal(request: "RunRequest"):
 
 def _scale_kwargs(preview_scale: int) -> Dict[str, int]:
     return {"preview_scale": preview_scale} if preview_scale != 1 else {}
+
+
+def _scale_divides_or_refusal(preview_scale: int, spec: ScenarioSpec):
+    """The 409 refusal (or None) when the scale does not divide every
+    camera's resolution exactly (3 on 1280x720): refused by name
+    BEFORE the run starts, never floored to 426x240."""
+    from core.capture.preview import scale_refusal_for_cameras
+    from core.scenario.camera import default_cameras
+
+    refusal = scale_refusal_for_cameras(preview_scale,
+                                        spec.cameras or default_cameras(spec))
+    if refusal is None:
+        return None
+    return JSONResponse({"refused": refusal, "constraint": "preview.scale"},
+                        status_code=409)
 
 
 def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
@@ -401,6 +417,9 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     spec, refusal = _prepare_run_spec(request)
     if refusal is not None:
         return refusal
+    refusal = _scale_divides_or_refusal(preview_scale, spec)
+    if refusal is not None:
+        return refusal
     provenance = {
         "prompt": spec.prompt,
         **{k: v for k, v in request.provenance.items()
@@ -473,6 +492,9 @@ def capture_endpoint(request: RunRequest) -> JSONResponse:
     if refusal is not None:
         return refusal
     spec, refusal = _prepare_run_spec(request)
+    if refusal is not None:
+        return refusal
+    refusal = _scale_divides_or_refusal(preview_scale, spec)
     if refusal is not None:
         return refusal
     outcome = manager.start_capture(spec, provenance={

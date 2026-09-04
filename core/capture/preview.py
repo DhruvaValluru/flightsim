@@ -108,7 +108,10 @@ What is drawn, and where each number comes from
 
 Full output resolution by default (``scale=1``: the record's own
 ``width_px`` x ``height_px``); ``scale=N`` draws at 1/N and the header
-says so. Render time is MEASURED per call (``PreviewSet.seconds_per_
+says so -- N must divide the record's width and height exactly, else
+it is refused by name (``preview.scale``: 3 on 1280x720 would be
+426.67x240), never floored; the CLI and the page refuse before the
+flight from the spec's cameras (:func:`scale_refusal_for_cameras`). Render time is MEASURED per call (``PreviewSet.seconds_per_
 frame``) against RENDER_BUDGET_S_PER_FRAME.
 
 Overlays (:func:`render_overlays`): for every frame record whose PNG
@@ -248,9 +251,12 @@ class OverlaySet(list):
         self.sizes = {}
 
 
-def validated_scale(scale) -> int:
-    """A preview scale is a positive integer divisor of the resolution;
-    anything else is refused by name (preview.scale), never rounded."""
+def validated_scale(scale, resolution=None) -> int:
+    """A preview scale is a positive integer; with ``resolution``
+    (width, height) it must also divide BOTH exactly. Anything else is
+    refused by name (preview.scale), never rounded or floored: 3 on
+    1280x720 would be 426.67x240, a size the preview cannot draw at
+    with the record's principal point on a pixel."""
     try:
         value = int(scale)
     except (TypeError, ValueError):
@@ -260,7 +266,37 @@ def validated_scale(scale) -> int:
             f"preview.scale: {scale!r} is not a positive integer; the "
             f"preview draws at 1/N of the record's resolution and never "
             f"rounds a scale")
+    if resolution is not None:
+        w, h = int(resolution[0]), int(resolution[1])
+        if w % value or h % value:
+            raise ValueError(
+                f"preview.scale: {value} does not divide {w}x{h} exactly "
+                f"({round(w / value, 2):g}x{round(h / value, 2):g}); the preview draws at 1/N of "
+                f"the record's resolution and never floors a size")
     return value
+
+
+def scale_refusal_for_cameras(scale, cameras) -> Optional[str]:
+    """The refusal (or None) for drawing every camera's previews at
+    1/``scale``: the first camera whose width_px x height_px the scale
+    does not divide, named. ``cameras`` are CameraSpec blocks (their
+    ``width_px`` / ``height_px`` quantities) or frame records; checked
+    BEFORE any flight so a run never starts that its previews would
+    refuse."""
+    for camera in cameras:
+        if isinstance(camera, dict):
+            camera_id = camera.get("camera_id", "?")
+            w, h = camera["width_px"], camera["height_px"]
+        else:
+            camera_id = getattr(camera, "camera_id", "?")
+            camera_id = getattr(camera_id, "value", camera_id)
+            w = getattr(camera.width_px, "value", camera.width_px)
+            h = getattr(camera.height_px, "value", camera.height_px)
+        try:
+            validated_scale(scale, (w, h))
+        except ValueError as exc:
+            return f"{exc} (camera {camera_id})"
+    return None
 
 
 def _axis_scale(scale) -> Tuple[float, float]:
@@ -1393,7 +1429,9 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
     from PIL import Image, ImageDraw
 
     ground = Ground.coerce(ground)
-    scale = validated_scale(scale)
+    # Drawing at 1/N of the record: N must divide it, refused by name.
+    scale = validated_scale(scale, (record["width_px"], record["height_px"])
+                            if image is None and size is None else None)
     if style not in ("full", "thumbnail"):
         raise ValueError(f"preview.style: {style!r} is neither 'full' nor 'thumbnail'")
     thumbnail = style == "thumbnail"

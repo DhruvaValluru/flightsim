@@ -129,7 +129,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         metavar="N",
                         help="draw previews at 1/N of the record's "
                              "resolution (default 1: full resolution; "
-                             "a non-positive N refuses by name)")
+                             "a non-positive N, or one that does not "
+                             "divide a camera's resolution exactly, "
+                             "refuses by name before the flight)")
     parser.add_argument("--card", action="store_true",
                         help="also write card.json carrying each camera's "
                              "solved pose track (always written by "
@@ -219,6 +221,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if parity is not None:
             print(f"REFUSED {HOST_PARITY_CONSTRAINT}: {parity}")
             return 2
+
+    # A preview scale the cameras' resolution cannot be drawn at exactly
+    # (3 on 1280x720) is refused by name BEFORE the flight, never floored.
+    from core.capture.preview import scale_refusal_for_cameras
+
+    scale_refusal = scale_refusal_for_cameras(
+        preview_scale, spec.cameras or default_cameras(spec))
+    if scale_refusal is not None:
+        print(f"REFUSED -- {scale_refusal}")
+        return 2
 
     print(f"spec {spec.digest()[:16]} valid; running headlessly...")
     result = run_spec(spec, terrain_ground=terrain_ground)
