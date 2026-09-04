@@ -146,7 +146,7 @@ Temporal alignment across camera sets is exercised on real telemetry by
 same spec captured with a chase+tower set and again with a cockpit set
 aligns frame-for-frame (`flightsim.verify --against`).
 
-## Geometry preview (package I, done properly 2026-09-04; round 2 the same day)
+## Geometry preview (package I, done properly 2026-09-04; rounds 2 and 3 the same day)
 
 `core/capture/preview.py` draws one PNG per scheduled frame with numpy
 and Pillow only (matplotlib is not a dependency), every element
@@ -160,13 +160,14 @@ What a reader sees, and the field each element comes from:
 | terrain (terrain scenes) | a wireframe of the raster sampled every `terrain_stride_px` raster pixels (the smallest multiple of 4 giving at most 48 samples per axis: `control_ridge` 1024 px at 30 m is stride 24, 720 m, 43 x 43), each sample joined to its row and column neighbour, PLUS a fine lattice at a quarter of that stride (180 m) within 10 coarse steps (7.2 km) of the camera's ground point, so the near ground reads at the scale the aircraft is drawn; clipped at the near plane and to the image; shaded by camera-space depth: 240 at the frame's subject range (camera to aircraft) falling on a log scale to 32 at `far_m`; drawn far to near (painter's order) and HIDDEN behind nearer ground by a per-column skyline (`skyline_cull`: walking the segments near to far, each image column keeps the highest point drawn so far and a farther sample below it is behind a ridge) | the heightfield (name, size, pixel size: `Heightfield.metadata`), `near_m`, `far_m`, the aircraft state |
 | ground grid (flat scenes) | a fine lattice (step = the nice number at or above height/4) and a coarse one (10x that step) on the plane at the spec's terrain elevation, origin snapped to the step, extent = min(`far_m`, fy x height / 2) so it reaches the horizon or the far plane | `position_*_m`, `fy_px`, `far_m`, the spec's terrain elevation |
 | distance rings (every scene) | rings at 500 m, 1, 2, 5, 10, 20 km around the camera's EXACT ground point (never the snapped lattice origin: a ring labelled "10 km" is 10 km from the camera), labelled; in terrain scenes DRAPED on the raster (every ring point at the raster's elevation) and hidden behind ridges with the wireframe | `position_*_m`; the raster |
-| north arrow (every scene) | a world-space arrow on the ground pointing north, its world length set so its PROJECTION spans 60 px (capped at 0.3 x the base's depth when north is foreshortened to nothing), based where the ray 90 px below the boresight meets the ground (plane, or raster marched and bisected) so it sits clear of the aircraft an aimed camera centres; its "N" label placed clear of other labels (a label within 20 px of one already placed is shifted down) | the pose, the ground |
+| north arrow (every scene) | a world-space arrow on the ground pointing north, its world length set so its PROJECTION spans 60 px (capped at 0.3 x the base's depth when north is foreshortened to nothing), based where the ray 90 px below the boresight meets the ground (plane, or raster marched and bisected) so it sits clear of the aircraft an aimed camera centres; its "N" label beside the arrow HEAD (right or left of the tip) | the pose, the ground |
+| labels (round 3) | "boresight", "N" and the ring distances are REQUESTED with their anchor pixel while the geometry is drawn and PLACED once the header band, legend, compass and FOV text are known: each tries right, left, above and below its anchor (4 px off), then each side shifted outward by whole line heights (up to 6), first clear of every placed label by 20 px, then by 3 px (touching allowed, intersecting not), always clear of the reserved zones; an anchor INSIDE a zone (a ring under the header band) is offered the rows just below and above that zone; a label whose box ends farther than its gap plus one line height from its anchor gets a leader line from the anchor. Ring labels sit 25 deg round the ring from the camera's forward azimuth, or a quarter of the horizontal FOV if that is less (13.6 deg for the 35 mm lens), at least 80 px from the frame's sides -- off the column the arrow and the boresight share; on terrain, on the ring's VISIBLE piece nearest that point. `info["labels"]` reports every placement (anchor, box, side, shift, distance, leader, collided) | the placed geometry |
 | compass rose (every scene) | image-space, bottom-right, 40 px: the N/E/S/W spokes with north at screen angle -yaw (clockwise from up; a camera yawed 90 east has north to its left) and the aircraft's heading as a second needle at heading - yaw, both numbered ("cam yaw 231.3", "hdg 0.0") | `yaw_deg`, `aircraft.heading_deg` |
-| horizon | the level directions at infinity projected: `v = cy + fy tan(pitch)` for a level-rolled camera (a camera pitched down sees it ABOVE centre), tilted by roll | `quaternion_wxyz`, intrinsics |
+| horizon | the level directions at infinity projected: `v = cy + fy tan(pitch)` for a level-rolled camera (a camera pitched down sees it ABOVE centre), tilted by roll. In terrain scenes it takes part in the SKYLINE (round 3): solid only in the columns where the drawn ground's top (the skyline from `skyline_cull`) lies below it, dashed (4 on, 8 off) in a dimmer colour where a ridge rises above the level horizon, so the level reference stays readable without being painted through a mountain; `info["horizon_visible_px"]` / `horizon_hidden_px` count the columns | `quaternion_wxyz`, intrinsics; the skyline |
 | aircraft | a three-axis body: nose-tail along the recorded heading and pitch, wing tips at +/- span/2 with the recorded roll, a fin up from the centre; the length x span x height box; a heading tick beyond the nose | `aircraft.*` per frame; `aircraft_metrics` (below) |
 | flown track | the run's TELEMETRY (`telemetry_track`: the recorder's samples in the scene frame, decimated by the integer stride that brings the rate to at or below 10 Hz, never interpolated; the rate MEASURED as the recorder's median step, 9.23 Hz for this recorder's 13-step spacing), past solid and future dim split at the frame's `t_s`, with this camera's scheduled instants as dots on the line; without telemetry (a synthetic manifest) the manifest's scheduled instants, and the header says which | `telemetry.json` columns `t`, `lat_deg`, `lon_deg`, `altitude_m`; the frame records |
 | camera | a boresight cross at `principal_point_px` with the FOV `2 atan(sensor / 2 focal)` printed at the edges | `principal_point_px`, focal, sensor |
-| header | camera id, "frame index 5 (6 of 24)" (the manifest's 0-based index a verifier greps for AND the human count), t, position, look yaw/pitch/roll, focal and fx, resolution, FOV; the aircraft's position, attitude, the aircraft-to-camera bearing and range; the body's span, length (with its caveat, below) and fin with their sources; the ground ("terrain control_ridge 1024x1024 @ 30 m, wireframe 43x43 (720 m) + 180 m within 7.2 km of the camera; rings on the terrain", or the flat lattice's steps and extent); the track's source. Font and line height derive from the image height (15 px at 720, 8 at 360, 22 at 1080) and a line wider than the image is wrapped at its field separators | the record; the camera block; the heightfield; the telemetry |
+| header | camera id, "frame index 5 (6 of 24)" (the manifest's 0-based index a verifier greps for AND the human count), t, position, look yaw/pitch/roll, focal and fx, resolution, FOV; the aircraft's position, attitude, the aircraft-to-camera bearing and range; the body's span, length (with its caveat, below) and fin with their sources; the ground ("terrain control_ridge 1024x1024 @ 30 m, wireframe 43x43 (720 m) + 180 m within 7.2 km of the camera", or the flat lattice's steps and extent) with WHAT OF IT IS IN THE PICTURE (round 3): "(out of frame)" when no ground segment survived, "(none in frame)" for the rings, "(124 of 1314 coarse + 0 of 0 fine in view, 1190 hidden behind ridges)" on terrain, and the north arrow's state ("north arrow: drawn (45 px, 5892 m)" or "north arrow: ground out of frame"); the track's source. Font and line height derive from the image height (15 px at 720, 8 at 360, 22 at 1080) and a line wider than the image is wrapped at its field separators, continuation lines indented | the record; the camera block; the heightfield; the picture's own counts; the telemetry |
 
 **The airframe metrics are read once from the FDM, never a constant**:
 `core.scenario.runner.aircraft_metrics(fdm)` reads `metrics/bw-ft`
@@ -196,24 +197,40 @@ never a silent guess.
 **Resolution.** Full output resolution by default (the record's
 `width_px` x `height_px`); `--preview-scale N` on the CLI and the
 page's "preview scale 1/N" field draw at 1/N, the header and the CLI
-line say so only when N is not 1, and a value that is not a positive
-integer is refused by name (`preview.scale`) before any flight.
+line say so only when N is not 1. N must be a positive integer that
+divides BOTH the width and the height exactly: anything else is
+refused by name (`preview.scale`) BEFORE any flight -- the CLI checks
+the spec's cameras (or the documented defaults) before `run_spec`
+("REFUSED -- preview.scale: 3 does not divide 1280x720 exactly
+(426.67x240); the preview draws at 1/N of the record's resolution and
+never floors a size (camera chase0)", exit 2, no run directory) and
+the page's `/run` and `/capture` answer 409 with constraint
+`preview.scale` and no run id; `draw_preview` itself refuses the same
+way. Round 2 floored 1280 // 3 to 426 with the intrinsics divided by
+exactly 3 (the CLI printed "426x240, 1/3 scale": a silent
+approximation with the principal point at 213.33 in a 426-px image);
+that is gone. 4 and 5 draw (320x180, 256x144).
 
 **Measured render time** (this machine, Linux, 4 cores, 2026-09-04,
-round 2): 0.068 s/frame for the 48 frames of `examples/cameras_multi.yaml`
+round 3): 0.077 s/frame for the 48 frames of `examples/cameras_multi.yaml`
 at 1280x720 (flat scene: lattice, rings, arrow, compass, telemetry
-track, body, header); 0.076 s/frame for the 5 frames of
-`examples/cameras_waypoint.yaml` (280-point telemetry track); 0.053
-s/frame on the `control_ridge` terrain frame (chase0 index 5: 418
-coarse segments in frame, 98 hidden by the skyline, 38 fine, one ring)
-measured over 10 draws with `draw_preview` alone, 0.135 s/frame for
-the 30-preview CLI run of that scene before the raster sampling and
-the header measurement were vectorised (the profile: text measurement
-and `Heightfield.elevations()` per frame). The budget is 0.5 s/frame
+track, body, labels, header; `run.json` `previews.s_per_frame`
+0.0770); 0.084 s/frame for the 5 frames of `examples/cameras_waypoint.yaml`
+(280-point telemetry track); 0.090 s/frame for the 48 frames of the
+`control_ridge` variant of cameras_multi with `--terrain` (coarse +
+fine lattice, draped rings, skyline cull, the horizon against it).
+The tests measure the same paths on synthetic scenes: the flat 48-
+frame scene 0.0633 s/frame (0.0713 with the contact sheets: a tile
+costs 0.0098 s), 24 terrain frames over a 97x97 raster with 400 m
+ridges 0.0915 s/frame (0.1072 with the sheet; 433 coarse, 586 fine,
+358 hidden per frame), 12 overlays over honest 1280x720 frames
+0.1615 s/frame. The budget is 0.5 s/frame
 (`RENDER_BUDGET_S_PER_FRAME`), graded by
 `tests/test_camera_preview.py::test_full_resolution_render_time_is_under_budget`
-and printed by every run ("0.068 s/frame"); `run.json` `previews`
-records it, with `track_source`.
+(flat) and `::test_terrain_and_overlay_render_time_is_under_budget`
+(terrain and overlays, round 3), both printing their numbers; every
+run prints its own ("0.077 s/frame") and `run.json` `previews`
+records it with `track_source`.
 
 **Overlays** (`overlays/<camera_id>/NNNN.png`): after an engine pass,
 `render_overlays` draws the same geometry as a translucent layer over
@@ -225,36 +242,102 @@ header says so ("frame 640x360 differs from the record's 1280x720:
 intrinsics scaled to the frame, pixels not resampled"); the rendered
 pixels are never resampled, and the verifier, not the overlay, grades
 the mismatch. The header band is no darker than 96/255
-(`OVERLAY_BAND_ALPHA`). The CLI prints "overlays: 48
+(`OVERLAY_BAND_ALPHA`). Round 3: every piece of overlay text -- the
+legend, the compass letters, "cam yaw" / "hdg", HFOV, VFOV, the header
+lines and every label -- carries a 2 px black stroke at the layer's
+alpha (`TEXT_STROKE_PX`) and the compass sits on a disc of the band's
+alpha (`COMPASS_BAND_PAD_PX` 16 beyond its ring), so the numbers read
+over sky and ground; measured over a pure white frame at alpha 200,
+all 15 text items and 5 labels have a dark pixel (55) and a light
+pixel (188-255) in their box, the compass disc reads 159 (the band's
+floor, no darker), and a pixel far from any geometry stays 255; the
+plain preview draws no stroke. The CLI prints "overlays: 48
 reprojected-geometry overlay(s) ... (0.0xx s/frame)" and records
 `overlays {count, s_per_frame}` in `run.json`; the page lists
 `capture/overlays/<camera_id>` with the note "reprojected geometry
 over the rendered frame". Exercised here only against the honest
-engine STUB (a blob at the labelled pixel); "awaiting Windows
-verification" on real pixels, step 5c below.
+engine STUB (a blob at the labelled pixel) and synthetic frames;
+"awaiting Windows verification" on real pixels, step 5c below.
 
 **Contact sheets** (`contact_sheets/<camera_id>.png`, beside
 `previews/`, never inside it -- `previews/` holds exactly one PNG per
-drawn frame): every preview of the camera as a 320-px-wide thumbnail
-labelled "#5 (6/24)  t=2.683 s" (index and count), a title row with
-camera id, preset, schedule basis and "N of M frames". Listed by the
-CLI and shown whole on the page above the per-frame gallery.
+drawn frame): every preview of the camera as a 320x180 tile DRAWN FOR
+THE TILE from its frame record (round 3: `draw_preview` at the tile's
+size in the thumbnail style -- the record's intrinsics scaled per
+axis, nothing resampled, no text of any kind, the horizon, track,
+body and box at 2 px), never the preview shrunk: round 2's
+`Image.thumbnail()` of the 1280x720 preview smeared the one-pixel
+lattice and track to nothing and the six-line header into a band
+over the top 15% of every tile. Measured on cameras_multi chase0's
+tile #5: geometry pixels brighter than the background by 70 are 6.47%
+of the tile against 1.30% for the shrunk preview (the judge measured
+0.51% on the round-2 sheet), the peak pixel 255 against 159; the tile
+draws 0 text items where the full preview draws 20. Under each tile
+"#5 (6/24)  t=2.683 s" (index and count); a title row with camera id,
+preset, schedule basis, "N of M frames" and "tiles 320x180 drawn from
+the records; previews 1280x720". `docs/images/contact_sheet_chase0.png`
+is the chase0 sheet of the command above. Listed by the CLI and shown
+whole on the page above the per-frame gallery.
 
 **Reference image**: `docs/images/preview_chase0_frame5.png` is frame
 index 5 of `chase0` from the command above (t=2.683 s, camera at N
-+268.4, alt 3060 m, pitch -4.8 deg): the horizon at row 256 (= 360 +
-1244 tan(-4.8 deg)), the 747's 64.5 m span drawn 455 px wide at 176 m
-range (1244 x 64.5 / 176 = 456), the 59.6 m box around it, the
-boresight cross, the 10 km ring at row 629 (= 360 + 1244 tan(atan(3060
-/ 10000) - 4.8 deg): 10 km from the camera, not 10.27 km from the
-snapped lattice origin), the 20 km ring, the telemetry track through
-the aircraft with the scheduled dots, the north arrow 90 px below the
-boresight (45 px long: its base is 19.6 km out where north is
-foreshortened, and the 0.3 x depth cap, 5.9 km, holds it under 60 px), the compass with N up (yaw 0) and the
-heading needle on it, the coarse lattice dim in the distance. Byte-
-identical to a fresh run of the command (`cmp`).
++268.4, alt 3060 m, pitch -4.8 deg), round 3: the horizon at row 255.4
+(= 360 + 1244 tan(-4.8 deg)), the 747's 64.5 m span drawn 455 px wide
+at 176 m range (1244 x 64.5 / 176 = 456), the 59.6 m box around it,
+the boresight cross with "boresight" beside it (box 658-716 x 354-366,
+18 px from the cross, no leader), the 10 km ring at row 629 (= 360 +
+1244 tan(atan(3060 / 10000) - 4.8 deg): 10 km from the camera, not
+10.27 km from the snapped lattice origin) labelled at (939, 633) --
+13.6 deg round the ring from the forward azimuth, 295 px right of the
+arrow's column, 4 px from its anchor -- the 20 km ring labelled at
+(942, 443), the telemetry track through the aircraft with the
+scheduled dots, the north arrow 90 px below the boresight (45 px
+long: its base is 5.9 km out on the 0.3 x depth cap, north being
+foreshortened there) with "N" beside its head at (644, 397) 4 px
+right of the tip (640, 405), the compass with N up (yaw 0) and the
+heading needle on it, the coarse lattice dim in the distance, and a
+six-line header (band 108 px) whose ground line ends "north arrow:
+drawn (45 px, 5892 m)". Byte-identical to a fresh draw of the record
+(the test probe compares the arrays).
 
-**Tests** (`tests/test_camera_preview.py`, 32 tests on synthetic
+**Label placement, measured** over every preview of the judge's three
+runs (cameras_multi, cameras_waypoint, control_ridge with --terrain;
+120 + 25 + 118 labels): round 2 had 1 overlapping pair with
+"boresight" 136 px below its cross (cameras_waypoint survey #2, on top
+of "5 km"), 119 px off in control_ridge chase0 #1, and "N" 60-80 px
+below the arrow tip -- beneath its base -- in every chase frame, with
+the ring labels on the arrow's shaft whenever the camera looked
+north; round 3 has 0 overlapping pairs and 0 collided placements,
+worst distances boresight 18 px, N 4 px, ring 22 px (with a leader).
+Over the three example scenes rebuilt in-test on synthetic telemetry
+(100 frames; the third over the committed `control_ridge` raster):
+0 intersections, 0 collided, no label on the band or the compass;
+the tower frames' ring and N labels, anchored inside the 108-125 px
+band, sit just below it with leaders.
+
+**The horizon behind ridges, measured**: with `two_ridge_heightfield`
+and the camera at 100 m a kilometre south of the 300 m ridge (crest
+at v=111, horizon row v=360), round 2 painted 157 of 160 sampled
+horizon-row pixels in the horizon colour across the ridge face; round
+3 paints 0 of 160. A half-ridge scene (the ridge on the east half
+only) splits at u=557, where the west slope crosses the row (foot at
+u=516/v=484, crest at u=640/v=111, interpolated 557): 557 columns
+visible + 723 hidden = 1280; east of the boresight label 0 of 552
+pixels are horizon-coloured and 230 (5/12: Pillow paints a line from
+u to u+4 as 5 pixels) are dashes.
+
+**Hidden counts, per kind**: `info["segments"]` counts, for the
+coarse lattice, the fine lattice and the rings separately, the
+segments in frame, those with at least one visible run (from
+`skyline_cull`'s source array), those with none (hidden), with hidden
++ visible == in frame, and the visible runs drawn apart. On the judge's
+scene: coarse 1314 in frame, 124 with a visible run, 1190 hidden, 134
+runs; rings 66 in frame, 44 visible, 22 hidden. Round 2's single
+"terrain_hidden" (1202 there; 238 on control_ridge chase0 #5 against
+459 - 295 = 164) was len(all clipped) - len(all runs) across the
+kinds, which nothing reconciles with.
+
+**Tests** (`tests/test_camera_preview.py`, 42 tests on synthetic
 records with known poses): the level camera's horizon row equals cy
 within 1 px and a ground point ahead lands below it; pitch -10 deg
 moves it by fy tan(pitch); the body centre equals `project_point` of
@@ -269,41 +352,65 @@ contact sheet per camera with one thumbnail per frame; the render time
 is under budget. Round 2 adds: two crossing segments given far-last
 leave the near colour on the crossing pixel; a two-ridge heightfield
 (near 300 m at 1 km, far 150 m at 2 km) hides the far crest where it
-crosses the near face (the near column line's bright green is on that
-pixel, the far row's dim green is nowhere in its 3x3 window, and the
-far crest is background along the frame); a 200-point half-circle
-telemetry at 20 Hz is decimated to 101 points at 10 Hz with the words
-"track: telemetry 20 Hz decimated to 10 Hz (101 points)", intermediate
-(never scheduled) points lie on the drawn track in the past colour
-before the frame's instant and the future colour after, the chord
-midpoint between two instants (90 m inside the arc) is background, and
-the recorder's median step, not the mean, sets the rate; the 10 km
-ring's forward point projects at cy + fy tan(atan(3060/10000) - 4.8
-deg) within 1 px (9.6 px from the snapped value) and the pixel there is
-ring-coloured; the compass's N spoke sits at -yaw for yaw 0, 90 and
-231.3 and its pixel is north-coloured, the heading needle at heading -
-yaw; the north arrow is 60 px on screen within 1 px in a flat and a
-terrain scene with its base on the ground at the pixel 90 px below
-the boresight; a 640x360 and a 1920x1080 frame against a 1280x720
-record get overlays of their own size with the body centre at
-`project_point` times the ratio within 1 px, a corner pixel unchanged,
-the band no darker than 96/255 and no header line wider than the
-frame; the terrain header names the raster ("terrain synthetic 9x9 @
-100 m, wireframe 9x9 (100 m)"), a raster vertex projects at its pixel
-in terrain green, and the 500 m ring is draped on the raster and drawn;
-the fine lattice lies within its radius at the raster's spacing and
-never on a coarse line; the body line carries the caveat; the runner's
-B747 length is 59.644 m from the named stations with both candidates.
-The CLI and page tests assert the run's `track_source` equals the
-words computed from the run's own telemetry. 36 mutation guards
-(`scripts/mutation_check.sh`, "the geometry preview" and "preview round
-2") disable each safeguard in turn; the runner's `--only <label regex>`
-runs a named subset. **Verification state, honestly**: the round-2
-subset run (38 guards: the 15 round-1 preview guards, two of them
-repointed to lines the rewrite moved, one pre-existing stale CLI guard
-repointed, the two frames-provenance guards and the 21 new round-2
-guards) was stopped after 11 guards, all 11 firing, when the session
-was closed; its output as far as it got:
+crosses the near face; a 200-point half-circle telemetry at 20 Hz is
+decimated to 101 points at 10 Hz with the words "track: telemetry 20
+Hz decimated to 10 Hz (101 points)", intermediate points lie on the
+drawn track in the past colour before the frame's instant and the
+future colour after, the chord midpoint is background, and the
+recorder's median step sets the rate; the 10 km ring's forward point
+projects at cy + fy tan(atan(3060/10000) - 4.8 deg) within 1 px; the
+compass's N spoke sits at -yaw for yaw 0, 90 and 231.3; the north
+arrow is 60 px on screen within 1 px in a flat and a terrain scene;
+640x360 and 1920x1080 frames get overlays of their own size; the
+terrain header names the raster; the fine lattice lies within its
+radius and never on a coarse line; the body line carries the caveat;
+the runner's B747 length is 59.644 m. Round 3 adds (10 tests): the
+contact-sheet tile has the horizon on rows cy/4 and cy/4 + 1, the body
+centre at the reprojected pixel over 4, grid, rings, arrow and track
+present, no text pixel and no band inside any tile, the label under
+it, and a fresh sheet byte-identical; a 400x225 record whose position
+line measures 440 px wraps to 8 drawn lines from 6, every line within
+w - 8, continuation lines indented, no bright pixel in the band's
+rightmost 8 columns (a 480x270 record does NOT wrap: widest line 440
+px against 472 of room); over the three example scenes no two label
+boxes intersect, none collides, every label is within 24 px of its
+anchor or has a leader, none lies on the band or the compass,
+"boresight" is within 20 px of its cross, "N" is centred on the tip's
+row right or left of it, ring anchors are more than 100 px off the
+arrow's column; eight labels on one anchor all place with 0
+intersections and leaders on the far ones, a label anchored inside
+the band lands below it; the half-ridge horizon split at the
+projected crossing, the flat scene whole, the full ridge entirely
+hidden, the tile at a quarter; every overlay text item and label has
+a dark and a light pixel over a white frame, the compass disc within
+the band's alpha, a far pixel unchanged, the plain preview stroke-
+free; 3 on 1280x720 refused by name everywhere with "(426.67x240)" in
+the words, 5 draws 256x144, the camera check names the camera from
+records and CameraSpec blocks (the CLI test's loop gains "3", the page
+test 3 on /capture and /run); the tower camera's header reads "(out of
+frame)", "(none in frame)" and "north arrow: ground out of frame", the
+aimed camera's "north arrow: drawn (60 px, ...)"; the per-kind counts
+reconcile with an independent recomputation and equal the numbers
+above; the terrain and overlay render times are under budget. The
+CLI and page tests assert the run's `track_source` equals the words
+computed from the run's own telemetry.
+
+**Mutation guards** (`scripts/mutation_check.sh`): the 15 round-1
+guards ("the geometry preview"), the 21 round-2 guards ("preview
+round 2") and the 18 round-3 guards ("preview round 3") each disable
+one safeguard and require its test to fail; `--only <label regex>`
+runs a named subset. Round 2's guard "header lines wider than the
+image are wrapped" was WEAK (its only assertion held without wrapping
+because no header line exceeded the 640x360 or 1920x1080 frames);
+round 3's 400x225 test makes it fire. The whole preview set (56
+guards: rounds 1-3, the airframe-metrics, overlay, page-scale and
+frames-provenance guards) was run to completion in round 3 through
+the subset runner (23:05-23:27 UTC, 2026-09-04): 53 ok, 0 WEAK, 3 SKIP
+whose target strings round 3 had moved (the round-1 header guard, the
+round-2 band-alpha and raster-name guards), repointed and re-run: ok.
+The round-2 subset the previous session left unfinished therefore
+stands at 21 ok, of which the wrap guard was WEAK until round 3's test.
+Its output:
 
 ```
   ok    a frames run records its passes and its clip in provenance -- tests fail with the guard removed
@@ -314,19 +421,63 @@ was closed; its output as far as it got:
   ok    previews default to the record's full resolution -- tests fail with the guard removed
   ok    a preview scale that is not a positive integer refuses by name -- tests fail with the guard removed
   ok    the ground is depth-shaded, near bright and far dim -- tests fail with the guard removed
-  ok    the header states position, look direction and focal length -- tests fail with the guard removed
+  SKIP  the header states position, look direction and focal length -- could not apply mutation
   ok    every camera gets a contact sheet of its previews -- tests fail with the guard removed
   ok    the preview render time is measured per frame and recorded -- tests fail with the guard removed
   ok    the run manifest carries the airframe metrics read from the FDM -- tests fail with the guard removed
   ok    the capture manifest carries the airframe metrics the body is scaled by -- tests fail with the guard removed
-```
+  ok    a frames run overlays the reprojected geometry on every rendered frame (CLI) -- tests fail with the guard removed
+  ok    a frames run overlays the reprojected geometry on every rendered frame (page) -- tests fail with the guard removed
+  ok    the page lists the overlays as their own artefact class -- tests fail with the guard removed
+  ok    the page's preview scale is honoured or refused by name -- tests fail with the guard removed
+  ok    preview round 2: segments are drawn far to near (painter's order) -- tests fail with the guard removed
+  ok    preview round 2: ground behind a nearer ridge is hidden by the skyline -- tests fail with the guard removed
+  ok    preview round 2: the flown track is the telemetry, not the schedule's chords -- tests fail with the guard removed
+  ok    preview round 2: the telemetry rate is the recorder's median step -- tests fail with the guard removed
+  ok    preview round 2: the past/future split is at the frame's instant -- tests fail with the guard removed
+  ok    preview round 2: distance rings are centred on the camera's exact ground point -- tests fail with the guard removed
+  ok    preview round 2: the compass puts north at minus the camera's yaw -- tests fail with the guard removed
+  ok    preview round 2: the north arrow is drawn in every scene -- tests fail with the guard removed
+  ok    preview round 2: the arrow's world length is set by its projected size -- tests fail with the guard removed
+  ok    preview round 2: overlays scale the intrinsics per axis to the frame's own size -- tests fail with the guard removed
+  SKIP  preview round 2: the overlay's header band darkens the frame by at most 96/255 -- could not apply mutation
+  ok    preview round 2: header lines wider than the image are wrapped -- tests fail with the guard removed
+  SKIP  preview round 2: the header names the raster, its resolution and the wireframe spacing -- could not apply mutation
+  ok    preview round 2: the fine lattice densifies the ground near the camera -- tests fail with the guard removed
+  ok    preview round 2: distance rings are draped on the raster in terrain scenes -- tests fail with the guard removed
+  ok    preview round 2: the body length is the larger stated station extent, named -- tests fail with the guard removed
+  ok    preview round 2: the body line carries the length caveat -- tests fail with the guard removed
+  ok    preview round 2: the header numbers frames by index AND count -- tests fail with the guard removed
+  ok    preview round 2: the contact sheet label carries index and count -- tests fail with the guard removed
+  ok    preview round 2: the CLI passes the run's telemetry to the previews -- tests fail with the guard removed
+  ok    preview round 2: the page passes the run's telemetry to the previews -- tests fail with the guard removed
+  ok    preview round 3: contact-sheet tiles are drawn for the tile, without text -- tests fail with the guard removed
+  ok    preview round 3: tile lines are drawn at THUMBNAIL_LINE_PX -- tests fail with the guard removed
+  ok    preview round 3: a label placed far from its anchor gets a leader line -- tests fail with the guard removed
+  ok    preview round 3: labels try right, left, above and below their anchor -- tests fail with the guard removed
+  ok    preview round 3: labels keep clear of the header band, legend and compass -- tests fail with the guard removed
+  ok    preview round 3: ring labels are anchored off the arrow's column -- tests fail with the guard removed
+  ok    preview round 3: the horizon is hidden where the skyline rises above it -- tests fail with the guard removed
+  ok    preview round 3: the hidden horizon is dashed in its own colour -- tests fail with the guard removed
+  ok    preview round 3: overlay text carries a dark stroke -- tests fail with the guard removed
+  ok    preview round 3: the overlay's compass sits on its own band -- tests fail with the guard removed
+  ok    preview round 3: a scale that does not divide the resolution is refused by name -- tests fail with the guard removed
+  ok    preview round 3: the CLI refuses a non-divisor preview scale before the flight -- tests fail with the guard removed
+  ok    preview round 3: the page refuses a non-divisor preview scale before the run -- tests fail with the guard removed
+  ok    preview round 3: the ground line says (out of frame) when no ground segment survived -- tests fail with the guard removed
+  ok    preview round 3: the header states the north arrow's state -- tests fail with the guard removed
+  ok    preview round 3: hidden counts are per kind and reconcile with the segments in frame -- tests fail with the guard removed
+  ok    preview round 3: a label anchored inside a reserved zone is offered the rows beside it -- tests fail with the guard removed
+  ok    preview round 3: the overlay render time is measured per frame and graded -- tests fail with the guard removed
 
-The 21 round-2 guards are written against target strings verified to
-be present in the source and each names the test that grades its
-safeguard, but they have NOT been run through the runner: until
-`./scripts/mutation_check.sh --only 'preview round 2'` prints "ok" for
-each, they are not verified firing, and this document says so rather
-than counting them.
+SUBSET: 3 guard(s) NOT covered  (the three SKIPs: their target strings had moved in round 3; repointed and re-run alone:)
+
+  ok    the header states position, look direction and focal length -- tests fail with the guard removed
+  ok    preview round 2: the overlay's header band darkens the frame by at most 96/255 -- tests fail with the guard removed
+  ok    preview round 2: the header names the raster, its resolution and the wireframe spacing -- tests fail with the guard removed
+
+SUBSET: all guards load-bearing
+```
 
 ## The run emits frames, not a clip (finished 2026-09-03)
 
@@ -834,8 +985,18 @@ beside, not on, the rendered aircraft is the SAME disagreement engine
 parity grades numerically, and the frame's `render.json` record says
 which side (`aircraft_px` against the manifest's labelled pixel); a
 horizon line off the rendered horizon is an orientation disagreement
-the applied-vs-solved clause would already have failed. Write here
-what was seen.
+the applied-vs-solved clause would already have failed. Round 3
+changed what the text on the overlay looks like, and that is part of
+what to look at: the legend (bottom left), the compass letters,
+"cam yaw" / "hdg", HFOV, VFOV and every label are drawn with a 2 px
+black stroke and the compass sits on a translucent disc, so they must
+be readable over the rendered sky and ground (in round 2 they were
+bare grey and white text and vanished over bright pixels); "boresight"
+sits beside the cross, "N" beside the arrow's head, and the ring
+distances sit to the right of the frame's centre, off the arrow's
+column -- a label sitting on top of another, or far from the mark it
+names with no leader line to it, is a placement defect to report. Write
+here what was seen.
 
 ### 6. The same from the page
 

@@ -1447,7 +1447,8 @@ mutate core/capture/preview.py \
 mutate core/capture/preview.py \
     '    lines = header_lines(record, manifest, scale, tag, ground=ground, plan=plan,
                          terrain_elevation_m=terrain_elevation_m,
-                         track_words=track_words)' \
+                         track_words=track_words, drawn=info["segments"],
+                         arrow=info["north_arrow_state"])' \
     '    lines = [record["camera_id"]]  # MUTATED: the header names only the camera' \
     "the header states position, look direction and focal length" \
     tests/test_camera_preview.py || failures=$((failures+1))
@@ -1578,8 +1579,8 @@ mutate core/capture/preview.py \
     tests/test_camera_preview.py || failures=$((failures+1))
 
 mutate core/capture/preview.py \
-    '    band_alpha = 255 if layer is image else min(alpha, OVERLAY_BAND_ALPHA)' \
-    '    band_alpha = 255 if layer is image else min(alpha, 150)  # MUTATED: the old dark band' \
+    '    band_alpha = 255 if not overlay else min(alpha, OVERLAY_BAND_ALPHA)' \
+    '    band_alpha = 255 if not overlay else min(alpha, 150)  # MUTATED: the old dark band' \
     "preview round 2: the overlay's header band darkens the frame by at most 96/255" \
     tests/test_camera_preview.py || failures=$((failures+1))
 
@@ -1594,9 +1595,9 @@ mutate core/capture/preview.py \
     tests/test_camera_preview.py || failures=$((failures+1))
 
 mutate core/capture/preview.py \
-    '        return (f"terrain {tp['"'"'name'"'"']} {tp['"'"'width_px'"'"']}x{tp['"'"'height_px'"'"']} @ "' \
-    '        return ("terrain: raster wireframe"  # MUTATED: the raster is not named
-                f"{tp['"'"'name'"'"'][:0]}{tp['"'"'width_px'"'"'] * 0}{tp['"'"'height_px'"'"'] * 0}"' \
+    '            words = (f"terrain {tp['"'"'name'"'"']} {tp['"'"'width_px'"'"']}x{tp['"'"'height_px'"'"']} @ "' \
+    '            words = ("terrain: raster wireframe"  # MUTATED: the raster is not named
+                     f"{tp['"'"'name'"'"'][:0]}{tp['"'"'width_px'"'"'] * 0}{tp['"'"'height_px'"'"'] * 0}"' \
     "preview round 2: the header names the raster, its resolution and the wireframe spacing" \
     tests/test_camera_preview.py || failures=$((failures+1))
 

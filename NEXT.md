@@ -3,6 +3,61 @@
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
 
+**Camera Phase 1, preview round 3 (2026-09-04, the judge's eight ranked
+gaps against bar section 3, closed in order, eight commits;
+docs/CAMERA_PHASE1_REPORT.md "Geometry preview" is current and
+SUPERSEDES rounds 1 and 2).** core/capture/preview.py: (1) contact-
+sheet tiles are DRAWN FOR THE TILE (draw_preview size=(320, 180),
+style="thumbnail": intrinsics scaled per axis, no text of any kind,
+horizon/track/body at 2 px; info["text_drawn"] is 0 for a tile),
+never Image.thumbnail() of the preview -- 6.47% geometry pixels
+against 1.30%, peak 255 against 159; (2) the WEAK round-2 wrap guard
+fires: a 400x225 record's 440-px position line wraps to 8 lines from
+6 (480x270 does NOT wrap: 440 < 472); (3) labels are REQUESTED while
+drawing and PLACED once the band, legend, compass and FOV zones are
+known -- right/left/above/below, shifted outward up to 6 lines, 20 px
+clearance then 3 px, the rows beside a zone the anchor lies in, a
+leader when the box ends farther than gap + one line height --
+"boresight" on the cross (18 px), "N" on the arrow TIP right/left
+first, ring labels at min(25 deg, hfov/4) round the ring and 80 px
+from the sides: 0 overlapping pairs and 0 collided over the judge's
+three runs (was 136 px boresight drift, N under the arrow base, rings
+on the shaft); (4) the horizon is split per column against
+skyline_cull's skyline (horizon_runs): solid where the ground's top is
+below it, dashed HORIZON_HIDDEN_RGB (4 on / 8 off; Pillow paints a
+4-px dash as 5 pixels) where a ridge rises above it, info
+horizon_visible_px / horizon_hidden_px -- 157/160 horizon pixels
+through the ridge face went to 0/160; (5) overlay text carries a 2 px
+black stroke and the compass a disc of the band's alpha; (6)
+validated_scale(scale, resolution) refuses a non-divisor by name
+("3 does not divide 1280x720 exactly (426.67x240)"), the CLI before
+run_spec from spec.cameras or default_cameras (exit 2, no directory)
+and the page's /run and /capture (409) via scale_refusal_for_cameras;
+(7) ground_words takes the picture's counts: "(out of frame)", "(none
+in frame)", per-kind "(124 of 1314 coarse + ... in view, 1190 hidden
+behind ridges)" and "; north arrow: drawn (45 px, 5892 m)" / "ground
+out of frame"; info["segments"] counts per kind (terrain,
+terrain_fine, rings_in_frame) in frame / _visible / _hidden /
+_visible_runs with hidden + visible == in frame (the old single
+terrain_hidden 1202 was a cross-kind difference); (8) a second budget
+test over a 97x97 relief raster (0.0915 s/frame, 0.1072 with the
+sheet) and 12 overlays (0.1615 s/frame). CLI: cameras_multi 0.077
+s/frame, cameras_waypoint 0.084, control_ridge with --terrain 0.090.
+42 tests in tests/test_camera_preview.py; 18 new guards, each
+verified firing by the scratchpad subset builder as it was added; the
+whole 56-guard preview set run to completion: 53 ok, 0 WEAK, 3 SKIP whose targets round 3 had moved (repointed, re-run: ok; log in the report).
+Gotchas: (a) a mutation guard's "ok" is meaningless while its test
+fails on its own -- run the test alone first (an early overlay-text
+assertion compared the header's tag line between preview and
+overlay); (b) a loop variable named in_frame shadowed the in_frame()
+helper further down draw_preview; (c) Pillow's textlength at an 8-px
+font is anti-aliased: grade text pixels by brightness, not exact
+colour; (d) the ridge scene's tower frames wrap the band to 125 px,
+which six shifted lines cannot clear -- hence the zone candidates;
+(e) the gap-6 commit body says "100 passed" for the three test files
+where the run printed 93 (corrected in the gap-7 commit). NOT YET RUN:
+overlays on real engine pixels (report step 5c).
+
 **Camera Phase 1, preview round 2 (2026-09-04, the judge's nine ranked
 gaps against bar section 3, closed in order; docs/CAMERA_PHASE1_REPORT.md
 "Geometry preview" is current and SUPERSEDES round 1's description).**
@@ -42,9 +97,10 @@ and restore still run the whole suite), 21 new guards + 3 repointed
 (two of round 1's whose target lines changed, one PRE-EXISTING stale
 CLI guard whose record.update call had gained a key); the subset
 run was stopped after 11 of 38 (all 11 fired, the 3 repointed ones
-among them) -- the 21 NEW guards are NOT yet verified firing: run
-./scripts/mutation_check.sh --only 'preview round 2' (or the
-scratchpad subset builder) FIRST in the next session and fix any WEAK. Measured: 0.068 s/frame on cameras_multi (48
+among them); round 3 ran the whole set to completion: 20 ok, 1 WEAK
+("header lines wider than the image are wrapped"), the WEAK one fixed
+by a test that wraps (see the round-3 entry above; the log is in the
+report). Measured: 0.068 s/frame on cameras_multi (48
 frames), 0.076 on cameras_waypoint, 0.053 on the control_ridge frame
 (draw_preview alone; the first cut was 0.135 until the raster
 sampling and header measurement were vectorised -- text measurement
