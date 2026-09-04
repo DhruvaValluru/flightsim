@@ -191,15 +191,55 @@ def test_verify_run_refuses_a_missing_or_wrong_version_manifest(tmp_path):
 
 # -- check 5: engine parity on rendered frames --------------------------
 
+#: The honest stub's frame: a dark background with a light blob DRAWN AT
+#: the labelled pixel -- the one thing the pixel-content clause requires
+#: and a flat PNG lacks. Shared by every engine stub in the suite so all
+#: three (this file, the webapp's, the CLI's) draw what the manifest says.
+BLOB_RADIUS_PX = 8
+BACKGROUND = (30, 30, 30)
+BLOB = (200, 200, 200)
+
+
+def honest_frame(path, width, height, pixel=None, background=BACKGROUND,
+                 blob=BLOB, radius=BLOB_RADIUS_PX):
+    """Write a PNG of ``width`` x ``height`` with a blob at ``pixel``
+    (none: a flat frame -- what an engine whose mesh never loaded
+    leaves)."""
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", (int(width), int(height)), background)
+    if pixel is not None:
+        u, v = pixel
+        ImageDraw.Draw(image).ellipse(
+            [u - radius, v - radius, u + radius, v + radius], fill=blob)
+    image.save(path)
+
+
+def engine_pixel_fields(record):
+    """What an honest engine measures about the aircraft it drew: the
+    manifest's own labelled pixel (the stub draws exactly there), its
+    visibility, and a screen box around it."""
+    from core.capture.verify import labelled_pixel
+
+    u, v, depth = labelled_pixel(record)
+    visible = (depth > 0 and 0.0 <= u <= record["width_px"]
+               and 0.0 <= v <= record["height_px"])
+    return {"aircraft_px": u, "aircraft_py": v, "aircraft_visible": visible,
+            "aircraft_bbox_px": [u - BLOB_RADIUS_PX, v - BLOB_RADIUS_PX,
+                                 u + BLOB_RADIUS_PX, v + BLOB_RADIUS_PX]}
+
+
 def write_engine_output(manifest, run_dir, cameras=None, step_s=1.0 / 120.0):
     """A synthetic consume-poses pass: what an HONEST engine writes --
     frames/<camera_id>/render.json with the applied pose equal to the
     solved one, the applied time equal to the scheduled instant, one
-    PNG per record named by its index at the manifest's size. Built
-    here by hand from the manifest so the test owns every number."""
+    PNG per record named by its index at the manifest's size WITH the
+    aircraft drawn at the labelled pixel, and the engine's own
+    measurement of that pixel. Built here by hand from the manifest so
+    the test owns every number."""
     import json
 
-    from PIL import Image
+    from core.capture.verify import labelled_pixel
 
     outputs = {}
     for block in manifest["cameras"]:
@@ -226,9 +266,12 @@ def write_engine_output(manifest, run_dir, cameras=None, step_s=1.0 / 120.0):
                 "aircraft_applied_north_m": record["aircraft"]["north_m"],
                 "aircraft_applied_east_m": record["aircraft"]["east_m"],
                 "aircraft_applied_alt_m": record["aircraft"]["alt_m"],
+                **engine_pixel_fields(record),
             })
-            Image.new("RGB", (record["width_px"], record["height_px"]),
-                      (40, 40, 40)).save(run_dir / record["file"])
+            u, v, depth = labelled_pixel(record)
+            honest_frame(run_dir / record["file"], record["width_px"],
+                         record["height_px"],
+                         pixel=(u, v) if depth > 0 else None)
         render = {
             "host": "unreal", "camera_consume_poses": True,
             "width": records[0]["width_px"], "height": records[0]["height_px"],
@@ -427,6 +470,9 @@ def test_engine_parity_fails_when_the_engine_drew_the_aircraft_elsewhere(
     outputs = write_engine_output(manifest, tmp_path)
     record = outputs["chase0"]["frame_records"][2]
     record["aircraft_applied_east_m"] += 1.3      # one 1/120 s step at 156 m/s
+    # An honest engine measures and draws the aircraft where its FDM put
+    # it: its own pixel and the blob move with the drawn point.
+    move_drawn_aircraft(manifest, tmp_path, "chase0", record)
     rewrite(tmp_path, "chase0", outputs["chase0"])
     check = verify_engine_parity(tmp_path, manifest)
     assert check.ok is True, check.detail
@@ -435,6 +481,7 @@ def test_engine_parity_fails_when_the_engine_drew_the_aircraft_elsewhere(
     assert "px of its labelled pixel" in check.detail
 
     record["aircraft_applied_east_m"] += 3.7      # 5.0 m in all
+    move_drawn_aircraft(manifest, tmp_path, "chase0", record)
     rewrite(tmp_path, "chase0", outputs["chase0"])
     check = verify_engine_parity(tmp_path, manifest)
     assert check.ok is False
@@ -456,10 +503,146 @@ def test_engine_parity_fails_when_the_engine_drew_the_aircraft_elsewhere(
     # the METRE clause still fails it -- the budget is not slack.
     outputs = write_engine_output(manifest, tmp_path)
     outputs["tower0"]["frame_records"][9]["aircraft_applied_north_m"] += 5.0
+    move_drawn_aircraft(manifest, tmp_path, "tower0",
+                        outputs["tower0"]["frame_records"][9])
     rewrite(tmp_path, "tower0", outputs["tower0"])
     check = verify_engine_parity(tmp_path, manifest)
     assert check.ok is False
     assert "tower0 frame 9: the engine drew the aircraft 5.00 m" in check.detail
+
+
+def move_drawn_aircraft(manifest, run_dir, camera_id, engine_record):
+    """Keep an engine record honest after its drawn aircraft was moved:
+    re-measure its own pixel through the applied pose (the solved one
+    here) and redraw the blob there."""
+    from core.capture.verify import axes_from_euler, project_point
+
+    record = next(r for r in manifest["frames"] if r["camera_id"] == camera_id
+                  and r["index"] == engine_record["frame_index"])
+    drawn = (engine_record["aircraft_applied_north_m"],
+             engine_record["aircraft_applied_east_m"],
+             engine_record["aircraft_applied_alt_m"])
+    u, v, depth = project_point(
+        record, drawn, axes_from_euler(engine_record["camera_applied_roll_deg"],
+                                       engine_record["camera_applied_pitch_deg"],
+                                       engine_record["camera_applied_yaw_deg"]))
+    engine_record.update({"aircraft_px": u, "aircraft_py": v,
+                          "aircraft_visible": depth > 0,
+                          "aircraft_bbox_px": [u - BLOB_RADIUS_PX,
+                                               v - BLOB_RADIUS_PX,
+                                               u + BLOB_RADIUS_PX,
+                                               v + BLOB_RADIUS_PX]})
+    honest_frame(run_dir / record["file"], record["width_px"],
+                 record["height_px"], pixel=(u, v))
+
+
+def test_engine_parity_fails_when_nothing_is_drawn_at_the_label(tmp_path):
+    """The engine's numbers about itself are perfect; the PIXELS are
+    judged: a flat frame (the mesh never loaded) fails by frame with
+    both windows' luminance figures, and a frame whose blob sits 40 px
+    from the label -- outside the label window, the engine still
+    claiming the label -- fails the same clause. The honest frame, blob
+    at the label, passes with the contrast stated."""
+    from core.capture.verify import (
+        ENGINE_LABEL_CONTRAST_MIN, verify_engine_parity,
+    )
+
+    manifest = two_camera_manifest()
+    write_capture_manifest(manifest, tmp_path)
+    write_engine_output(manifest, tmp_path)
+    check = verify_engine_parity(tmp_path, manifest)
+    assert check.ok is True, check.detail
+    assert "lowest label window contrast" in check.detail
+    assert f"(min {ENGINE_LABEL_CONTRAST_MIN:g})" in check.detail
+    assert check.data["worst"]["label_contrast"] >= ENGINE_LABEL_CONTRAST_MIN
+    assert check.data["worst"]["label_background"] == pytest.approx(30.0)
+
+    # Flat: nothing drawn anywhere.
+    record = next(r for r in manifest["frames"]
+                  if r["camera_id"] == "tower0" and r["index"] == 7)
+    honest_frame(tmp_path / record["file"], record["width_px"],
+                 record["height_px"], pixel=None)
+    check = verify_engine_parity(tmp_path, manifest)
+    assert check.ok is False
+    assert ("tower0 frame 7: nothing is drawn at the labelled pixel of "
+            "frames/tower0/0007.png: label window [") in check.detail
+    assert "mean 30.0 std 0.0 against background mean 30.0 std 0.0, contrast 0.0 (min 8)" in check.detail
+    assert check.data["cameras"]["tower0"]["verified"] == 14
+    assert check.data["worst"]["label_contrast"] == 0.0
+
+    # Drawn, but 40 px from the label (the tower's window is +-16 px).
+    from core.capture.verify import labelled_pixel
+
+    u, v, _ = labelled_pixel(record)
+    honest_frame(tmp_path / record["file"], record["width_px"],
+                 record["height_px"], pixel=(u + 40.0, v))
+    check = verify_engine_parity(tmp_path, manifest)
+    assert check.ok is False
+    assert "tower0 frame 7: nothing is drawn at the labelled pixel" in check.detail
+    assert check.data["cameras"]["tower0"]["verified"] == 14
+
+    # Back at the label: the frame verifies again.
+    honest_frame(tmp_path / record["file"], record["width_px"],
+                 record["height_px"], pixel=(u, v))
+    assert verify_engine_parity(tmp_path, manifest).ok is True
+
+
+def test_engine_parity_fails_when_the_engine_measured_the_aircraft_elsewhere(
+        tmp_path):
+    """The engine's OWN projection of the aircraft it drew (aircraft_px /
+    aircraft_py through the capture's transform) is graded against the
+    labelled pixel: 40 px off on a tower frame (budget ~5.5 px at 1.2 km)
+    fails by frame with both pixels; a record without it cannot be
+    graded; 'not visible' where the label is in frame fails; and an
+    engine pixel that disagrees with the manifest's projection model of
+    the same drawn point by more than the pose tolerance fails even
+    inside the graded budget (the chase's 24 px)."""
+    from core.capture.verify import verify_engine_parity
+
+    manifest = two_camera_manifest()
+    write_capture_manifest(manifest, tmp_path)
+    outputs = write_engine_output(manifest, tmp_path)
+    record = outputs["tower0"]["frame_records"][7]
+    label_px = record["aircraft_px"]
+    record["aircraft_px"] = label_px + 40.0
+    rewrite(tmp_path, "tower0", outputs["tower0"])
+    check = verify_engine_parity(tmp_path, manifest)
+    assert check.ok is False
+    assert ("tower0 frame 7: the engine measured the aircraft at "
+            f"({label_px + 40.0:.1f}, {record['aircraft_py']:.1f}) px, 40.0 px "
+            "from the labelled pixel") in check.detail
+    assert "(tol 5.5 px)" in check.detail
+    assert check.data["cameras"]["tower0"]["verified"] == 14
+    assert check.data["worst"]["engine_px"] == pytest.approx(40.0)
+
+    record["aircraft_px"] = label_px
+    record["aircraft_visible"] = False
+    rewrite(tmp_path, "tower0", outputs["tower0"])
+    check = verify_engine_parity(tmp_path, manifest)
+    assert check.ok is False
+    assert "tower0 frame 7: the engine reports the aircraft not visible" in check.detail
+
+    for key in ("aircraft_px", "aircraft_py", "aircraft_visible"):
+        del record[key]
+    rewrite(tmp_path, "tower0", outputs["tower0"])
+    check = verify_engine_parity(tmp_path, manifest)
+    assert check.ok is False
+    assert ("tower0 frame 7: engine record lacks its own projection of the "
+            "drawn aircraft") in check.detail
+
+    # The chase's budget is 23.7 px at 150 m: 10 px off the label is inside
+    # it, but 10 px off the manifest's projection of the SAME drawn point
+    # means the engine's lens is not the manifest's lens.
+    outputs = write_engine_output(manifest, tmp_path)
+    chase = outputs["chase0"]["frame_records"][7]
+    chase["aircraft_py"] += 10.0
+    rewrite(tmp_path, "chase0", outputs["chase0"])
+    check = verify_engine_parity(tmp_path, manifest)
+    assert check.ok is False
+    assert ("chase0 frame 7: the engine's own projection of the aircraft it "
+            "drew disagrees with the manifest's projection model by 10.00 px "
+            "(tol 3.0)") in check.detail
+    assert "the engine measured the aircraft at" not in check.detail
 
 
 def test_engine_parity_fails_when_the_engine_did_not_record_the_aircraft(

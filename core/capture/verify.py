@@ -110,6 +110,33 @@ ENGINE_REPROJECTION_TOL_PX = 3.0
 #: at 1.2 km, at the default 1244 px focal.
 ENGINE_AIRCRAFT_TOL_M = 2.5
 
+#: The engine's OWN measurement of where it drew the aircraft:
+#: ``aircraft_px`` / ``aircraft_py`` / ``aircraft_visible`` per frame, the
+#: aircraft actor projected through the capture component's transform and
+#: field of view by the commandlet itself (the same call its landmarks
+#: block makes). It is graded twice: against the manifest's labelled pixel
+#: within the graded budget above (the engine's projection of what it
+#: drew, independent of any projection computed here), and against THIS
+#: module's projection of the drawn aircraft through the applied pose
+#: within ENGINE_REPROJECTION_TOL_PX -- the capture FOV is
+#: 2 atan(sensor / 2 focal), so the engine's tan-based projection and the
+#: manifest's fx-based one describe one lens and must agree to the pose
+#: tolerance, not merely to the budget.
+#:
+#: Pixel content: the numbers above are what the engine wrote about
+#: itself; a mesh that failed to load leaves them perfect and the frame
+#: empty (measured: the 747 body absent from every frame while captures
+#: "succeeded"). So a window of the PNG around the labelled pixel -- half
+#: size the larger of ENGINE_LABEL_WINDOW_HALF_PX and the frame's graded
+#: pixel budget, widened to the engine's reported screen box -- must
+#: differ from a same-size background window at the frame corner
+#: farthest from the label: the larger of the mean-luminance and the
+#: luminance-spread differences, ``contrast``, at least
+#: ENGINE_LABEL_CONTRAST_MIN of 255. A flat frame, or a frame drawn
+#: anywhere but at the label, fails by frame with both windows' numbers.
+ENGINE_LABEL_WINDOW_HALF_PX = 16
+ENGINE_LABEL_CONTRAST_MIN = 8.0
+
 #: The check name and the detail prefix the page and the CLI key on.
 ENGINE_PARITY_CHECK = "engine_parity"
 AWAITING_ENGINE_FRAMES = "awaiting engine frames"
@@ -431,6 +458,77 @@ def _png_size(path: Path) -> Tuple[int, int]:
         return int(image.size[0]), int(image.size[1])
 
 
+def labelled_pixel(record: Dict) -> Tuple[float, float, float]:
+    """(u, v, depth) of the manifest's aircraft through the manifest's
+    OWN pose and intrinsics -- the labelled pixel every engine-side clause
+    is graded against. The manifest's projection model, nothing else."""
+    return project_point(record, _aircraft_point(record))
+
+
+def _luminance(path: Path):
+    """The PNG as a float luminance array (rows, columns), 0..255."""
+    import numpy as np
+    from PIL import Image
+
+    with Image.open(path) as image:
+        return np.asarray(image.convert("L"), dtype=np.float32)
+
+
+def _window(lum, x0: int, y0: int, x1: int, y1: int):
+    height, width = lum.shape
+    x0, x1 = max(0, min(width, x0)), max(0, min(width, x1))
+    y0, y1 = max(0, min(height, y0)), max(0, min(height, y1))
+    return lum[y0:y1, x0:x1], (x0, y0, x1, y1)
+
+
+def label_window_contrast(lum, u: float, v: float, half_px: int,
+                          bbox=None) -> Dict[str, float]:
+    """How the label window differs from the background, in luminance.
+
+    The label window is the square of half size ``half_px`` centred on
+    the labelled pixel, widened to cover ``bbox`` (the engine's screen
+    box ``[x0, y0, x1, y1]``) when given; the background window is one
+    of the same size in the frame corner farthest from the label. Both
+    are clamped to the frame. ``contrast`` is the larger of the two
+    windows' mean difference and spread (standard deviation)
+    difference: an aircraft against sky moves the mean, an aircraft
+    against textured ground moves at least one of them; nothing drawn
+    moves neither. The numbers go into the detail line."""
+    import numpy as np
+
+    height, width = lum.shape
+    x0, y0 = int(math.floor(u - half_px)), int(math.floor(v - half_px))
+    x1, y1 = int(math.ceil(u + half_px)) + 1, int(math.ceil(v + half_px)) + 1
+    if bbox is not None:
+        try:
+            bx0, by0, bx1, by1 = (float(b) for b in bbox)
+        except (TypeError, ValueError):
+            bx0 = by0 = bx1 = by1 = float("nan")
+        if all(math.isfinite(b) for b in (bx0, by0, bx1, by1)):
+            x0, y0 = min(x0, int(math.floor(bx0))), min(y0, int(math.floor(by0)))
+            x1, y1 = max(x1, int(math.ceil(bx1)) + 1), \
+                max(y1, int(math.ceil(by1)) + 1)
+    label, label_box = _window(lum, x0, y0, x1, y1)
+    size_x, size_y = x1 - x0, y1 - y0
+    corners = [(0, 0), (width - size_x, 0), (0, height - size_y),
+               (width - size_x, height - size_y)]
+    far = max(corners, key=lambda c: math.hypot(c[0] + size_x / 2.0 - u,
+                                                 c[1] + size_y / 2.0 - v))
+    background, background_box = _window(lum, far[0], far[1],
+                                         far[0] + size_x, far[1] + size_y)
+    if label.size == 0 or background.size == 0:
+        return {"mean": float("nan"), "std": float("nan"),
+                "background_mean": float("nan"),
+                "background_std": float("nan"), "contrast": 0.0,
+                "window": label_box, "background": background_box}
+    mean, std = float(np.mean(label)), float(np.std(label))
+    bg_mean, bg_std = float(np.mean(background)), float(np.std(background))
+    return {"mean": mean, "std": std, "background_mean": bg_mean,
+            "background_std": bg_std,
+            "contrast": max(abs(mean - bg_mean), abs(std - bg_std)),
+            "window": label_box, "background": background_box}
+
+
 def _rendered_count(run_dir: Path, camera_id: str) -> int:
     """PNGs actually present under frames/<camera_id> -- what "rendered"
     means everywhere the word is used: files on disk, never a schedule
@@ -439,6 +537,87 @@ def _rendered_count(run_dir: Path, camera_id: str) -> int:
     if not directory.is_dir():
         return 0
     return sum(1 for p in directory.glob("*.png") if p.is_file())
+
+
+def _engine_pixel_clauses(camera_id: str, index: int, record: Dict,
+                          applied: Dict, label, drawn_px, tol_px_d: float,
+                          px_tol: float, worst: Dict,
+                          problems: List[str]) -> bool:
+    """The engine-measured aircraft pixel (``aircraft_px``,
+    ``aircraft_py``, ``aircraft_visible``): required, visible, within the
+    graded budget of the labelled pixel, and within ``px_tol`` of this
+    module's projection of the drawn aircraft through the applied pose.
+    Returns False when the frame fails a clause (appended by name)."""
+    try:
+        e_px = float(applied["aircraft_px"])
+        e_py = float(applied["aircraft_py"])
+        e_visible = bool(applied["aircraft_visible"])
+    except (KeyError, TypeError, ValueError) as exc:
+        problems.append(f"{camera_id} frame {index}: engine record lacks "
+                        f"its own projection of the drawn aircraft "
+                        f"({exc}); aircraft_px/aircraft_py/aircraft_visible "
+                        f"are required")
+        return False
+    ok = True
+    u_s, v_s = label
+    if not e_visible:
+        ok = False
+        problems.append(f"{camera_id} frame {index}: the engine reports the "
+                        f"aircraft not visible in a frame whose label places "
+                        f"it at ({u_s:.1f}, {v_s:.1f}) px")
+    gap_e = math.hypot(e_px - u_s, e_py - v_s)
+    worst["engine_px"] = max(worst["engine_px"], gap_e)
+    if gap_e > tol_px_d:
+        ok = False
+        problems.append(f"{camera_id} frame {index}: the engine measured "
+                        f"the aircraft at ({e_px:.1f}, {e_py:.1f}) px, "
+                        f"{gap_e:.1f} px from the labelled pixel "
+                        f"({u_s:.1f}, {v_s:.1f}) (tol {tol_px_d:.1f} px)")
+    gap_model = math.hypot(e_px - drawn_px[0], e_py - drawn_px[1])
+    worst["engine_model_px"] = max(worst["engine_model_px"], gap_model)
+    if gap_model > px_tol:
+        ok = False
+        problems.append(f"{camera_id} frame {index}: the engine's own "
+                        f"projection of the aircraft it drew disagrees with "
+                        f"the manifest's projection model by "
+                        f"{gap_model:.2f} px (tol {px_tol}); the two do not "
+                        f"describe one lens")
+    return ok
+
+
+def _pixel_content_clause(camera_id: str, index: int, record: Dict,
+                          applied: Dict, png: Path, label, tol_px_d: float,
+                          worst: Dict, problems: List[str],
+                          contrast_min: float = ENGINE_LABEL_CONTRAST_MIN
+                          ) -> bool:
+    """Something must be DRAWN at the label: the PNG's window around the
+    labelled pixel must differ from the frame's background window by at
+    least ``contrast_min`` (label_window_contrast). Returns False when
+    the frame fails, appended with both windows' numbers."""
+    u_s, v_s = label
+    half = max(ENGINE_LABEL_WINDOW_HALF_PX, int(math.ceil(tol_px_d)))
+    try:
+        stats = label_window_contrast(_luminance(png), u_s, v_s, half,
+                                      bbox=applied.get("aircraft_bbox_px"))
+    except (OSError, ValueError) as exc:
+        problems.append(f"{camera_id} frame {index}: {record['file']} "
+                        f"could not be read for its pixels ({exc})")
+        return False
+    if stats["contrast"] < worst["label_contrast"]:
+        worst["label_contrast"] = stats["contrast"]
+        worst["label_background"] = stats["background_mean"]
+    if stats["contrast"] < contrast_min:
+        x0, y0, x1, y1 = stats["window"]
+        problems.append(
+            f"{camera_id} frame {index}: nothing is drawn at the labelled "
+            f"pixel of {record['file']}: label window "
+            f"[{x0}:{x1}, {y0}:{y1}] mean {stats['mean']:.1f} std "
+            f"{stats['std']:.1f} against background mean "
+            f"{stats['background_mean']:.1f} std "
+            f"{stats['background_std']:.1f}, contrast "
+            f"{stats['contrast']:.1f} (min {contrast_min:g})")
+        return False
+    return True
 
 
 def verify_engine_parity(run_dir, manifest: Dict,
@@ -488,7 +667,9 @@ def verify_engine_parity(run_dir, manifest: Dict,
     worst = {"position_m": 0.0, "angle_deg": 0.0, "time_s": 0.0,
              "pose_time_s": 0.0,
              "reprojection_px": 0.0, "aircraft_m": 0.0, "aircraft_px": 0.0,
-             "aircraft_px_tol": 0.0, "aircraft_depth_m": 0.0}
+             "aircraft_px_tol": 0.0, "aircraft_depth_m": 0.0,
+             "engine_px": 0.0, "engine_model_px": 0.0,
+             "label_contrast": float("inf"), "label_background": 0.0}
     frames_checked = 0
     time_tol_used = time_tol_s
 
@@ -595,6 +776,7 @@ def verify_engine_parity(run_dir, manifest: Dict,
                                 f"{float(record['t_s']):.4f} s (tol "
                                 f"{tol_t:.4g})")
             png = run_dir / str(record["file"])
+            png_readable = False
             if not png.is_file():
                 frame_ok = False
                 problems.append(f"{camera_id} frame {index}: "
@@ -615,6 +797,8 @@ def verify_engine_parity(run_dir, manifest: Dict,
                                     f"manifest's {expected[0]}x{expected[1]}")
                 elif size is None:
                     frame_ok = False
+                else:
+                    png_readable = True
             # Reprojection through the pose the engine APPLIED, this
             # module's own projection on the Euler path, against the
             # manifest's own projection of the same aircraft point.
@@ -703,6 +887,23 @@ def verify_engine_parity(run_dir, manifest: Dict,
                                         f"drawn aircraft falls outside the "
                                         f"rendered frame through the "
                                         f"applied pose")
+                    # The engine's OWN projection of the aircraft it drew
+                    # (aircraft_px/py through the capture's transform and
+                    # FOV) against the labelled pixel and against this
+                    # module's projection of the same drawn point; then
+                    # the pixels themselves: something must be drawn at
+                    # the label. Graded only where the label lies inside
+                    # the frame (a cockpit view sees no aircraft).
+                    in_frame = (0.0 <= u_s <= record["width_px"]
+                                and 0.0 <= v_s <= record["height_px"])
+                    if in_frame:
+                        frame_ok &= _engine_pixel_clauses(
+                            camera_id, index, record, applied, (u_s, v_s),
+                            (u_d, v_d), tol_px_d, px_tol, worst, problems)
+                        if png_readable:
+                            frame_ok &= _pixel_content_clause(
+                                camera_id, index, record, applied, png,
+                                (u_s, v_s), tol_px_d, worst, problems)
                 elif gap_m > aircraft_tol_m:
                     # The manifest's own camera does not see the aircraft
                     # ahead (a cockpit view): the metre budget still holds.
@@ -721,7 +922,10 @@ def verify_engine_parity(run_dir, manifest: Dict,
                            "time_s": time_tol_used,
                            "pose_time_s": ENGINE_POSE_TIME_TOL_S,
                            "reprojection_px": px_tol,
-                           "aircraft_m": aircraft_tol_m}}
+                           "aircraft_m": aircraft_tol_m,
+                           "label_contrast_min": ENGINE_LABEL_CONTRAST_MIN}}
+    if worst["label_contrast"] == float("inf"):
+        worst["label_contrast"] = None
     if awaiting and not problems and frames_checked == 0:
         return Check(
             ENGINE_PARITY_CHECK, None,
@@ -748,7 +952,16 @@ def verify_engine_parity(run_dir, manifest: Dict,
                   f"{worst['aircraft_m']:.2f} m of the manifest's aircraft "
                   f"(tol {aircraft_tol_m}) and {worst['aircraft_px']:.1f} px "
                   f"of its labelled pixel (tol {worst['aircraft_px_tol']:.1f} "
-                  f"px at that frame's {worst['aircraft_depth_m']:.0f} m)")
+                  f"px at that frame's {worst['aircraft_depth_m']:.0f} m); "
+                  f"the engine measured its aircraft within "
+                  f"{worst['engine_px']:.1f} px of the label and "
+                  f"{worst['engine_model_px']:.2f} px of the manifest's "
+                  f"projection model (tol {px_tol}); lowest label window "
+                  f"contrast "
+                  + (f"{worst['label_contrast']:.1f}"
+                     if worst['label_contrast'] is not None else "n/a")
+                  + f" against background {worst['label_background']:.1f} "
+                  f"(min {ENGINE_LABEL_CONTRAST_MIN:g})")
     else:
         shown = problems[:4]
         detail = "; ".join(shown) + (

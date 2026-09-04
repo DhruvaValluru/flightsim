@@ -127,8 +127,11 @@ def honest_cli_engine(calls, short_for=None, fail_for=None):
     """A run_render_pass stub behaving like the consume-poses pass: it
     reads -scenario= and -camera-index= off the argv exactly as the
     commandlet does, and writes the PNGs and render.json the contract
-    specifies."""
-    from PIL import Image
+    specifies -- the aircraft DRAWN at the manifest's labelled pixel and
+    the engine's own measurement of that pixel recorded."""
+    from core.capture.verify import labelled_pixel
+
+    from tests.test_camera_verify import engine_pixel_fields, honest_frame
 
     def fake_pass(command, frames, log):
         command = list(command)
@@ -153,9 +156,10 @@ def honest_cli_engine(calls, short_for=None, fail_for=None):
         records = []
         for i, t in enumerate(times):
             k = poses["t_s"].index(t)
-            drawn = next(r["aircraft"] for r in manifest["frames"]
-                         if r["camera_id"] == block["camera_id"]
-                         and r["index"] == i)
+            labelled = next(r for r in manifest["frames"]
+                            if r["camera_id"] == block["camera_id"]
+                            and r["index"] == i)
+            drawn = labelled["aircraft"]
             records.append({
                 "frame_index": i, "t_scheduled_s": t,
                 "t_applied_s": poses["t_s"][k], "t_pose_s": t,
@@ -167,9 +171,12 @@ def honest_cli_engine(calls, short_for=None, fail_for=None):
                 "camera_applied_roll_deg": poses["roll_deg"][k],
                 "aircraft_applied_north_m": drawn["north_m"],
                 "aircraft_applied_east_m": drawn["east_m"],
-                "aircraft_applied_alt_m": drawn["alt_m"]})
-            Image.new("RGB", (block["width_px"], block["height_px"]),
-                      (20, 20, 20)).save(frames / f"{i:04d}.png")
+                "aircraft_applied_alt_m": drawn["alt_m"],
+                **engine_pixel_fields(labelled)})
+            u, v, depth = labelled_pixel(labelled)
+            honest_frame(frames / f"{i:04d}.png", block["width_px"],
+                         block["height_px"],
+                         pixel=(u, v) if depth > 0 else None)
         (frames / "render.json").write_text(json.dumps({
             "width": block["width_px"], "height": block["height_px"],
             "step_s": 1.0 / 120.0,

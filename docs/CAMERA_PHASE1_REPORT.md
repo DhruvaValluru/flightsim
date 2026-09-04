@@ -224,6 +224,41 @@ Now it does, and the choice is explicit:
   by name before any editor time (POST /run 409, the flow, and the CLI),
   because same-seed turbulence host parity was measured and REFUSED
   (docs/VALIDITY.md); *Clip only* keeps its visual-only label there.
+  **The pixels are judged, not only the engine's numbers about itself**
+  (round 3): (1) the commandlet projects the aircraft actor and its
+  bounds' corners through the capture's own transform and field of view
+  -- `ProjectToPixel`, the landmarks' call -- and writes `aircraft_px`,
+  `aircraft_py`, `aircraft_visible`, `aircraft_bbox_px` per frame; the
+  verifier requires them, requires `aircraft_visible` wherever the label
+  lies in frame, grades the engine-measured pixel against the manifest's
+  labelled pixel within the graded budget above ("the engine measured
+  the aircraft at (680.4, 355.9) px, 40.0 px from the labelled pixel
+  (620.4, 355.9) (tol 5.5 px)") and against the verifier's own
+  projection of the drawn aircraft through the applied pose within 3 px
+  -- the capture FOV is `2 atan(sensor / 2 focal)`, so a tan-based and an
+  fx-based projection describe one lens or the frame fails ("disagrees
+  with the manifest's projection model by 10.00 px (tol 3.0); the two do
+  not describe one lens"); (2) a pixel-content clause reads the PNG: the
+  luminance window around the labelled pixel (half size the larger of 16
+  px and the frame's graded budget, widened to the engine's screen box)
+  must differ from a same-size window at the frame corner farthest from
+  the label by at least 8 of 255 in mean or in spread
+  (`ENGINE_LABEL_CONTRAST_MIN`; `label_window_contrast` in
+  `core/capture/verify.py`), so a mesh that never loaded -- the measured
+  failure the commandlet documents, the 747 body absent from every frame
+  while captures "succeeded" -- fails by frame with both windows'
+  numbers: "nothing is drawn at the labelled pixel of
+  frames/tower0/0007.png: label window [604:638, 339:373] mean 30.0 std
+  0.0 against background mean 30.0 std 0.0, contrast 0.0 (min 8)". Pinned
+  by `tests/test_camera_verify.py`: a flat frame fails, a blob 40 px from
+  the label fails, the blob at the label passes with the contrast stated
+  ("lowest label window contrast 37.8 against background 30.0 (min 8)"
+  on the synthetic frames); the engine stubs in all three test files
+  DRAW the blob where the manifest says and record their own pixel, so
+  no stub can pass on a flat PNG. The 8-of-255 threshold and the window
+  rule are stated, not measured on rendered pixels: the Windows run
+  below measures the real contrast (aircraft against sky and against
+  ground) and this number is revisited from it.
   With no render.json anywhere the check is **AWAITING** --
   `[AWAITING] engine_parity: awaiting engine frames ...` -- neither
   passed nor failed and never counted among the passed; some cameras
@@ -267,8 +302,12 @@ In the `-camera-index=N` pass it:
    frame `frame_index`, `t_scheduled_s`, `t_applied_s`, `t_pose_s`, the
    applied pose (`camera_applied_*`), the SOLVED pose it was compared to
    (`camera_solved_*`), `camera_applied_focal_length_mm`,
-   `camera_applied_fov_deg`, and the aircraft this host drew
-   (`aircraft_applied_*`), all in the card's local frame; the root
+   `camera_applied_fov_deg`, the aircraft this host drew
+   (`aircraft_applied_*`), all in the card's local frame, and its OWN
+   projection of that aircraft through the capture (`aircraft_px`,
+   `aircraft_py`, `aircraft_visible`, `aircraft_bbox_px` = the bounds'
+   eight corners' screen box when all lie in front of the camera,
+   `aircraft_bbox_corners_in_front`); the root
    carries `frames_scheduled`, `frames_captured`, `step_s`,
    `steps_taken`, `stepped_s`, `capture_fov_deg`, the sensor size;
 7. `ApplyPoseAtTime` FAILS the pass (never warns) when the applied
@@ -328,7 +367,7 @@ engine pass 2 of 2: camera 'tower0', 24 frames scheduled over the 12 s run (-cam
   [PASS] geometry_recovery: 48 frames; quaternion-vs-euler reprojection gap 0.0000 px (tol 0.5); 0 aircraft behind camera; 0 aimed frames without the aircraft in frame
   [PASS] cross_view_consistency: 24 two-view instants; worst triangulation error 0.0000 m (tol 0.5)
   [PASS] count_exactness: 2 camera(s), every declared count met exactly
-  [PASS] engine_parity: 48 frames across 2 camera(s); worst position 0.0xx m (tol 0.1); worst angle 0.0xx deg (tol 0.1); worst time 0.00xx s (tol 0.008333); pose applied at the scheduled instant to 0.0e+00 s; worst reprojection x.xx px (tol 3.0); aircraft drawn within x.xx m of the manifest's aircraft (tol 2.5) and xx.x px of its labelled pixel (tol 31.1 px at that frame's 111 m)
+  [PASS] engine_parity: 48 frames across 2 camera(s); worst position 0.0xx m (tol 0.1); worst angle 0.0xx deg (tol 0.1); worst time 0.00xx s (tol 0.008333); pose applied at the scheduled instant to 0.0e+00 s; worst reprojection x.xx px (tol 3.0); aircraft drawn within x.xx m of the manifest's aircraft (tol 2.5) and xx.x px of its labelled pixel (tol 31.1 px at that frame's 111 m); the engine measured its aircraft within xx.x px of the label and x.xx px of the manifest's projection model (tol 3.0); lowest label window contrast xx.x against background xxx.x (min 8)
 verification PASSED (6/6 checks)
 rendered 48 frames across 2 camera(s) (48 verified by engine parity) under runs\demo\frames
 ```
@@ -350,6 +389,18 @@ them in here from the log. What each one tells:
   on fixed steps), 0.0083 if the trim sequence or engine start offsets
   it by one step. Either passes the one-step contract; the number is
   UNMEASURED until this run and is the coupling this section pins down.
+* `the engine measured its aircraft within xx.x px of the label` -- the
+  commandlet's own projection of the actor it drew against the
+  manifest's labelled pixel; expected within the same graded budget as
+  the drawn-aircraft clause (the same point, two projections), and
+  `x.xx px of the manifest's projection model` expected under 0.1 px
+  (one lens, two formulae).
+* `lowest label window contrast` -- the first number ever measured on
+  rendered pixels for this clause: the darkest-against-its-background
+  aircraft window across the 48 frames. Expected well above 8 for a
+  747 against sky or ground; a value near 0 with the aircraft visible
+  on screen means the label window is not where the aircraft is, and
+  the frame's `aircraft_bbox_px` says where the engine drew it.
 * `aircraft drawn within x.xx m` -- the engine's own FDM against the
   headless flight at the capture: expected about one step of travel,
   1.4 m for this example (the measured constant one-step host phase,
@@ -445,6 +496,19 @@ of which must FAIL by name:
   same-seed host parity is measured and refused ...` before any flight
   (exit 2); `--render clip` on the same spec renders the visual-only
   clip;
+* replace `runs\demo\frames\tower0\0007.png` with a flat PNG of the
+  same size (`.venv\Scripts\python -c "from PIL import Image;
+  Image.new('RGB', (1280, 720), (30, 30, 30)).save(r'runs\demo\frames\tower0\0007.png')"`):
+  `[FAIL] engine_parity: tower0 frame 7: nothing is drawn at the
+  labelled pixel of frames/tower0/0007.png: label window [...] mean 30.0
+  std 0.0 against background mean 30.0 std 0.0, contrast 0.0 (min 8)` --
+  the pixel-content clause; restore the frame afterwards;
+* edit `runs\demo\frames\tower0\render.json`, add 40 to one record's
+  `aircraft_px`: `[FAIL] engine_parity: tower0 frame N: the engine
+  measured the aircraft at (x, y) px, 40.0 px from the labelled pixel
+  (x, y) (tol ~4 px)` -- the engine's own projection against the label;
+  set the same record's `aircraft_visible` to false: `the engine reports
+  the aircraft not visible in a frame whose label places it at ...`;
 * edit `runs\demo\frames\chase0\render.json`, add 0.008333 to one
   record's `t_pose_s`: `[FAIL] engine_parity: chase0 frame N: pose
   applied at t=... s against the scheduled ... s (tol 1e-06): the pose

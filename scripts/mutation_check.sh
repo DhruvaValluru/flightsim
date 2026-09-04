@@ -1040,6 +1040,40 @@ mutate core/capture/verify.py \
     "a failed check fails the verification report" \
     tests/test_camera_verify.py || failures=$((failures+1))
 
+# -- Camera Phase 1, frames round 3: engine parity judges the pixels ------
+
+mutate core/capture/verify.py \
+    '    if gap_e > tol_px_d:' \
+    '    if False:  # MUTATED: the engine-measured aircraft pixel is never graded' \
+    "the engine-measured aircraft pixel must sit at the labelled pixel" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if gap_model > px_tol:' \
+    '    if False:  # MUTATED: an engine lens that is not the card lens passes' \
+    "the engine's own projection must agree with the manifest's lens model" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if not e_visible:' \
+    '    if False:  # MUTATED: an aircraft the engine calls invisible passes' \
+    "an aircraft the engine reports not visible fails a labelled frame" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if stats["contrast"] < contrast_min:' \
+    '    if False:  # MUTATED: a flat frame passes the pixel-content clause' \
+    "a frame with nothing drawn at the label window fails engine parity" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                        if png_readable:
+                            frame_ok &= _pixel_content_clause(' \
+    '                        if False:  # MUTATED: the pixels are never read
+                            frame_ok &= _pixel_content_clause(' \
+    "engine parity reads the PNG's pixels at the label window" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
 # -- Camera Phase 1 finished: the web run renders frames, not a clip ------
 
 mutate core/capture/render_pass.py \

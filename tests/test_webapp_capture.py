@@ -302,18 +302,27 @@ def manifest_beside(card):
     raise FileNotFoundError(f"no capture manifest beside {card}")
 
 
+def manifest_record(manifest, camera_id, index):
+    return next(r for r in manifest["frames"]
+                if r["camera_id"] == camera_id and r["index"] == index)
+
+
 def drawn_aircraft(manifest, camera_id, index):
     """The ``aircraft_applied_*`` fields of an honest engine record."""
-    record = next(r for r in manifest["frames"]
-                  if r["camera_id"] == camera_id and r["index"] == index)
+    record = manifest_record(manifest, camera_id, index)
     return {"aircraft_applied_north_m": record["aircraft"]["north_m"],
             "aircraft_applied_east_m": record["aircraft"]["east_m"],
             "aircraft_applied_alt_m": record["aircraft"]["alt_m"]}
 
 
 def honest_engine(calls, short_for=None, fail_for=None):
-    """A _render stub that behaves like the consume-poses pass."""
-    from PIL import Image
+    """A _render stub that behaves like the consume-poses pass: the
+    applied pose is the solved one, the aircraft is DRAWN at the
+    manifest's labelled pixel (tests.test_camera_verify.honest_frame)
+    and the engine's own measurement of that pixel is recorded."""
+    from core.capture.verify import labelled_pixel
+
+    from tests.test_camera_verify import engine_pixel_fields, honest_frame
 
     def fake_render(card, frames, scene, mesh, aircraft, telemetry=None,
                     look=None, camera_flags=None, camera_index=None,
@@ -346,9 +355,14 @@ def honest_engine(calls, short_for=None, fail_for=None):
                 "camera_applied_pitch_deg": poses["pitch_deg"][k],
                 "camera_applied_roll_deg": poses["roll_deg"][k],
                 **drawn_aircraft(manifest, block["camera_id"], index),
+                **engine_pixel_fields(
+                    manifest_record(manifest, block["camera_id"], index)),
             })
-            Image.new("RGB", (block["width_px"], block["height_px"]),
-                      (30, 30, 30)).save(frames / f"{index:04d}.png")
+            u, v, depth = labelled_pixel(
+                manifest_record(manifest, block["camera_id"], index))
+            honest_frame(frames / f"{index:04d}.png", block["width_px"],
+                         block["height_px"],
+                         pixel=(u, v) if depth > 0 else None)
         (frames / "render.json").write_text(json.dumps({
             "host": "unreal", "camera_consume_poses": True,
             "camera_index": camera_index,

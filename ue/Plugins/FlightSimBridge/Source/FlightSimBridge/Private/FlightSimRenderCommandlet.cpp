@@ -111,6 +111,14 @@ namespace
 		       OutPixel.Y >= 0 && OutPixel.Y < Height;
 	}
 
+	// Whether a world point lies in front of the capture (the same test
+	// ProjectToPixel applies before projecting), so a screen box can skip
+	// corners that have no pixel rather than read (-1, -1) as one.
+	bool InFrontOfCapture(const USceneCaptureComponent2D* Capture, const FVector& WorldCm)
+	{
+		return Capture->GetComponentTransform().InverseTransformPosition(WorldCm).X > 1.0;
+	}
+
 	// A real aircraft mesh, assembled from the converter's manifest: one
 	// static mesh for the body and one per control surface, each surface
 	// under a hinge scene component at the hinge line the FlightGear model
@@ -1493,6 +1501,61 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Record->SetNumberField(TEXT("aircraft_applied_east_m"),
 			                       AircraftProjected.X - CameraOriginXMetres);
 			Record->SetNumberField(TEXT("aircraft_applied_alt_m"), AircraftProjected.Z);
+			// The engine's OWN measurement of where it drew the aircraft: the
+			// actor location, and the corners of its component bounds,
+			// projected through the capture's transform and field of view
+			// (ProjectToPixel, the landmarks' call below). The Python verifier
+			// grades aircraft_px/py against the manifest's labelled pixel and
+			// against its own projection of aircraft_applied_* through the
+			// applied pose, and widens its pixel-content window to the screen
+			// box -- a projection the ENGINE made about what it drew, so a
+			// mesh that never loaded, a hidden actor or a lens that is not the
+			// card's cannot pass on numbers Python computed for itself.
+			{
+				FVector2D AircraftPixel;
+				const bool bAircraftInFrame = ProjectToPixel(
+					Capture, Width, Height, Scenario.Aircraft->GetActorLocation(),
+					AircraftPixel);
+				Record->SetNumberField(TEXT("aircraft_px"), AircraftPixel.X);
+				Record->SetNumberField(TEXT("aircraft_py"), AircraftPixel.Y);
+				Record->SetBoolField(TEXT("aircraft_visible"),
+				                     bAircraftInFrame && !bHideAircraft);
+				const FBox Bounds = Scenario.Aircraft->GetComponentsBoundingBox(true);
+				double MinX = TNumericLimits<double>::Max();
+				double MinY = TNumericLimits<double>::Max();
+				double MaxX = -TNumericLimits<double>::Max();
+				double MaxY = -TNumericLimits<double>::Max();
+				int32 CornersInFront = 0;
+				for (int32 Corner = 0; Corner < 8; ++Corner)
+				{
+					const FVector CornerCm(
+						(Corner & 1) ? Bounds.Max.X : Bounds.Min.X,
+						(Corner & 2) ? Bounds.Max.Y : Bounds.Min.Y,
+						(Corner & 4) ? Bounds.Max.Z : Bounds.Min.Z);
+					if (!InFrontOfCapture(Capture, CornerCm))
+					{
+						continue;
+					}
+					FVector2D CornerPixel;
+					ProjectToPixel(Capture, Width, Height, CornerCm, CornerPixel);
+					MinX = FMath::Min(MinX, CornerPixel.X);
+					MinY = FMath::Min(MinY, CornerPixel.Y);
+					MaxX = FMath::Max(MaxX, CornerPixel.X);
+					MaxY = FMath::Max(MaxY, CornerPixel.Y);
+					++CornersInFront;
+				}
+				Record->SetNumberField(TEXT("aircraft_bbox_corners_in_front"),
+				                       static_cast<double>(CornersInFront));
+				if (CornersInFront == 8)
+				{
+					TArray<TSharedPtr<FJsonValue>> Box;
+					Box.Add(MakeShared<FJsonValueNumber>(MinX));
+					Box.Add(MakeShared<FJsonValueNumber>(MinY));
+					Box.Add(MakeShared<FJsonValueNumber>(MaxX));
+					Box.Add(MakeShared<FJsonValueNumber>(MaxY));
+					Record->SetArrayField(TEXT("aircraft_bbox_px"), Box);
+				}
+			}
 		}
 		Record->SetNumberField(TEXT("lit_pixels"), Lit);
 		// Load factor and the wind actually inside the FDM this frame -- the
