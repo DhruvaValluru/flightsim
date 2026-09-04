@@ -1149,3 +1149,62 @@ def test_the_horizon_is_hidden_where_terrain_rises_above_it():
     _, tile = pv.draw_preview(rec, manifest([rec]), ground, size=(320, 180),
                               style="thumbnail")
     assert abs(tile["horizon_visible_px"] - split / 4.0) <= 1.0
+
+
+# -- round 3: overlay text reads over bright pixels --------------------------
+
+def test_overlay_text_has_a_dark_backing_over_a_bright_frame():
+    """Over a pure white frame every text item (header lines, legend,
+    compass letters, cam yaw / hdg, HFOV, VFOV) and every label
+    (boresight, N, ring distances) has BOTH a dark pixel (the stroke or
+    band: max channel < 80) and a light pixel (min channel > 170) in
+    its box; the compass sits on a disc no darker than the band; a
+    pixel far from any geometry is the frame's own white; the plain
+    preview draws no stroke."""
+    rec = record(camera=(0.0, 0.0, 1000.0), look=(0.0, 0.0, 0.0),
+                 aircraft=(800.0, 60.0, 1030.0), attitude=(0.0, 0.0, 45.0))
+    m = manifest([rec])
+    white = Image.new("RGB", (WIDTH, HEIGHT), (255, 255, 255))
+    image, info = pv.draw_preview(rec, m, ("flat", None), image=white, alpha=200,
+                                  tag="overlay", track_points=pv._track(m))
+    assert info["text_stroke_px"] == pv.TEXT_STROKE_PX == 2
+    pixels = np.asarray(image).astype(int)
+
+    def stats(x0, y0, x1, y1):
+        x0, y0 = max(0, int(x0) - 2), max(0, int(y0) - 2)
+        x1, y1 = min(WIDTH, int(x1) + 3), min(HEIGHT, int(y1) + 3)
+        window = pixels[y0:y1, x0:x1]
+        return int(window.max(axis=2).min()), int(window.min(axis=2).max())
+
+    boxes = [(it["text"], (it["xy"][0], it["xy"][1], it["xy"][0] + it["width"],
+                           it["xy"][1] + it["height"])) for it in info["text_items"]]
+    boxes += [(lab["text"], lab["box"]) for lab in info["labels"]]
+    names = {name.split("\n")[0].split("  ")[0] for name, _ in boxes}
+    for expected in ("HFOV 54.4 deg", "VFOV", "N", "E", "S", "W", "cam yaw 0.0", "hdg 45.0",
+                     "cam0", "legend: ground wireframe depth-shaded", "boresight",
+                     "5 km", "10 km", "20 km"):
+        assert any(n.startswith(expected) for n in names), expected
+    assert len(boxes) >= 20
+    for name, box in boxes:
+        dark, light = stats(*box)
+        assert dark < 80, (name, dark)
+        assert light > 170, (name, light)
+    # The compass disc: a pixel inside the ring between spokes is dimmed
+    # by the band's alpha, no more.
+    rose = info["compass"]
+    rcx, rcy, rr = rose["centre"][0], rose["centre"][1], rose["radius"]
+    px = (int(round(rcx + 0.5 * rr * math.sin(math.radians(135)))),
+          int(round(rcy - 0.5 * rr * math.cos(math.radians(135)))))
+    disc = image.getpixel(px)
+    floor = 255 * (1.0 - pv.OVERLAY_BAND_ALPHA / 255.0) - 1.0
+    assert floor <= disc[0] < 200 and disc == image.getpixel((WIDTH - 3, 3))
+    # Far from any geometry the frame shows through untouched.
+    assert image.getpixel((WIDTH - 2, 200)) == (255, 255, 255)
+    # The plain preview: no stroke, the same text items.
+    _, plain = pv.draw_preview(rec, m, ("flat", None), track_points=pv._track(m))
+    assert plain["text_stroke_px"] == 0
+    plain_items = [it["text"] for it in plain["text_items"]]
+    overlay_items = [it["text"] for it in info["text_items"]]
+    assert len(plain_items) == len(overlay_items) == 15
+    assert [t for t in plain_items if not t.startswith("cam0")] == \
+        [t for t in overlay_items if not t.startswith("cam0")]

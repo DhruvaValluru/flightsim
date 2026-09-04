@@ -118,7 +118,10 @@ rendered frame -- the verification made visible -- under
 frame whose size differs from its record is drawn through the
 record's intrinsics scaled per axis by the actual ratio (fx, cx by
 width; fy, cy by height); the rendered pixels are never resampled.
-The header band is no darker than OVERLAY_BAND_ALPHA. Contact sheets
+The header band is no darker than OVERLAY_BAND_ALPHA; every piece of
+overlay text (legend, compass, yaw/hdg, FOV, labels, header) carries a
+TEXT_STROKE_PX dark stroke and the compass sits on a disc of the
+band's alpha, so the numbers read over bright sky or ground. Contact sheets
 (:func:`contact_sheet`): every preview of a camera as a tile DRAWN FOR
 THE TILE from its record (``style="thumbnail"``: the same projection
 at the tile's size, no text, the horizon, track and body at
@@ -186,6 +189,11 @@ COMPASS_INSET_PX = (60, 98)
 TRACK_TARGET_HZ = 10.0
 #: The overlay's header band never darkens the frame by more than this.
 OVERLAY_BAND_ALPHA = 96
+#: Every piece of overlay text is drawn with a dark stroke this wide,
+#: so it reads over bright rendered pixels; the compass sits on a disc
+#: of the band's alpha.
+TEXT_STROKE_PX = 2
+COMPASS_BAND_PAD_PX = 16
 #: A farther sample this close (px) to the skyline still counts as seen.
 SKYLINE_TOLERANCE_PX = 1.0
 
@@ -1229,12 +1237,14 @@ class _Labels:
     point, in its own colour. With ``enabled`` False (a thumbnail)
     nothing is requested, placed or drawn."""
 
-    def __init__(self, enabled: bool = True):
+    def __init__(self, enabled: bool = True, stroke: int = 0, stroke_fill=None):
         self.requests: List[Dict] = []
         self.reserved: List[Tuple[float, float, float, float]] = []
         self.boxes: List[Tuple[float, float, float, float]] = []
         self.placed: List[Dict] = []
         self.enabled = enabled
+        self.stroke = int(stroke)
+        self.stroke_fill = stroke_fill
         self.drawn = 0
 
     def reserve(self, box):
@@ -1313,7 +1323,11 @@ class _Labels:
             leader = ((ax, ay), (nx, ny))
         self.boxes.append(chosen)
         self.drawn += 1
-        draw.text((chosen[0], chosen[1]), text, fill=fill, font=font)
+        if self.stroke:
+            draw.text((chosen[0], chosen[1]), text, fill=fill, font=font,
+                      stroke_width=self.stroke, stroke_fill=self.stroke_fill)
+        else:
+            draw.text((chosen[0], chosen[1]), text, fill=fill, font=font)
         self.placed.append({"text": text, "anchor": (ax, ay), "box": chosen,
                             "side": side, "shift": shift, "distance_px": distance,
                             "leader": leader, "collided": collided})
@@ -1403,22 +1417,38 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
     draw = ImageDraw.Draw(layer)
     axes = _camera_axes(record)
     info: Dict = {"scale": scale, "axis_scale": axis_scale, "size": (w, h),
-                  "style": style, "segments": {}, "text_drawn": 0}
+                  "style": style, "segments": {}, "text_drawn": 0,
+                  "text_items": []}
     font_px = header_font_px(h)
     label_font = _font(round(font_px * 0.93))
     small = _font(round(font_px * 0.87))
     line_px = THUMBNAIL_LINE_PX if thumbnail else 1
-    labels = _Labels(enabled=not thumbnail)
+    overlay = layer is not image
+    band_alpha = 255 if not overlay else min(alpha, OVERLAY_BAND_ALPHA)
+    # Overlay text carries a dark stroke so it reads over bright pixels.
+    stroke = TEXT_STROKE_PX if overlay else 0
+    stroke_fill = (0, 0, 0, alpha)
+    info["text_stroke_px"] = stroke
+    labels = _Labels(enabled=not thumbnail, stroke=stroke, stroke_fill=stroke_fill)
 
     def rgba(rgb):
         return rgb if layer is image else (rgb + (alpha,))
 
     def text(xy, string, fill, font):
-        """Every piece of text goes through here: none in a thumbnail."""
+        """Every piece of text goes through here: none in a thumbnail;
+        stroked on an overlay; each item recorded for the tests."""
         if thumbnail:
             return
         info["text_drawn"] += 1
-        draw.text(xy, string, fill=fill, font=font)
+        info["text_items"].append({"xy": (float(xy[0]), float(xy[1])), "text": string,
+                                   "width": _text_width(draw, string.split("\n")[0], font),
+                                   "height": float(getattr(font, "size", 12))
+                                   * (1 + string.count("\n"))})
+        if stroke:
+            draw.text(xy, string, fill=fill, font=font, stroke_width=stroke,
+                      stroke_fill=stroke_fill)
+        else:
+            draw.text(xy, string, fill=fill, font=font)
 
     def colour_shaded(tint):
         base = _shaded(record, tint)
@@ -1662,6 +1692,11 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
     info["compass"] = rose
     if not thumbnail:
         rcx, rcy, rr = rose["centre"][0], rose["centre"][1], rose["radius"]
+        if overlay:
+            # The compass on its own small band, like the header.
+            pad = COMPASS_BAND_PAD_PX
+            draw.ellipse([rcx - rr - pad, rcy - rr - pad, rcx + rr + pad, rcy + rr + pad],
+                         fill=(0, 0, 0, band_alpha))
         draw.ellipse([rcx - rr, rcy - rr, rcx + rr, rcy + rr], outline=rgba(COMPASS_RGB))
         for name, spoke in rose["spokes"].items():
             tip = spoke["tip"]
@@ -1687,7 +1722,6 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
     line_h = font_px + 2
     wrapped = wrap_lines(draw, lines, font, w - 8) if not thumbnail else []
     info["header_drawn"] = wrapped
-    band_alpha = 255 if layer is image else min(alpha, OVERLAY_BAND_ALPHA)
     info["header_band_px"] = 4 + line_h * len(wrapped) + 2 if not thumbnail else 0
     legend = ("legend: ground wireframe depth-shaded (near bright, hidden behind "
               "ridges) | horizon | rings from the camera | N arrow | track past/future "

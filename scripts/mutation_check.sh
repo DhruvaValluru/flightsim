@@ -1710,6 +1710,20 @@ mutate core/capture/preview.py \
     "preview round 3: the hidden horizon is dashed in its own colour" \
     tests/test_camera_preview.py || failures=$((failures+1))
 
+mutate core/capture/preview.py \
+    '    stroke = TEXT_STROKE_PX if overlay else 0' \
+    '    stroke = 0  # MUTATED: bare overlay text over bright pixels' \
+    "preview round 3: overlay text carries a dark stroke" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '        if overlay:
+            # The compass on its own small band, like the header.' \
+    '        if False:  # MUTATED: no band under the compass
+            # The compass on its own small band, like the header.' \
+    "preview round 3: the overlay's compass sits on its own band" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
