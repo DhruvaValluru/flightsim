@@ -155,7 +155,12 @@ Now it does, and the choice is explicit:
   `render_default` and `render_unavailable_reason`; the page disables
   the engine options WITH the reason, e.g. "no engine on this machine:
   set UE_ROOT ..." or "FlightSimBridge not built: run
-  scripts\ue_preflight.ps1 then scripts\build_ue.ps1"). There is no
+  scripts\ue_preflight.ps1 then scripts\build_ue.ps1" -- and macOS is
+  gated on the SAME two facts, the editor at UE_ROOT and a built
+  `.dylib`, with `scripts/ue_preflight.sh then scripts/build_ue.sh`
+  named, so a mac without the engine is told so before a run, never
+  offered *Render frames and clip* as a default it cannot honour;
+  `ue_available()` IS `ue_unavailable_reason() is None`). There is no
   hidden default: the control ships DISABLED with *Headless* selected
   and is enabled only once `/status` has answered with
   `render_default` -- the one rule the CLI uses too,

@@ -1218,3 +1218,32 @@ def test_an_omitted_render_field_resolves_through_the_one_default_rule(
     page = STATIC_INDEX.read_text(encoding="utf-8")
     assert 'render: ${payload.render})' in page
     assert '|| "clip"' not in page
+
+
+def test_status_disables_the_engine_options_on_a_mac_without_the_engine(
+        client, monkeypatch, tmp_path):
+    """On macOS the gate looks for the editor and the built bridge
+    exactly as on Windows: with neither, /status reports the engine
+    choices unavailable WITH the reason and render_default 'none', so
+    the page never selects an option the machine cannot honour."""
+    import sys
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setenv("UE_ROOT", str(tmp_path / "UE_5.5"))
+    status = client.get("/status").json()
+    assert status["platform"] == "mac"
+    assert status["render_available"] is False
+    assert status["render_default"] == "none"
+    assert status["render_unavailable_reason"].startswith(
+        "no engine on this machine: set UE_ROOT")
+    choices = {c["value"]: c for c in status["render_choices"]}
+    for word in ("frames", "clip"):
+        assert choices[word]["available"] is False
+        assert choices[word]["reason"] == status["render_unavailable_reason"]
+    assert choices["none"]["available"] is True
+    # And the run itself is refused by name before any editor time.
+    reply = client.post("/run", json={"spec": two_camera_spec().to_dict(),
+                                      "render": "frames"})
+    assert reply.status_code == 409
+    assert reply.json()["constraint"] == "ue.platform"
+    assert reply.json()["reason"] == status["render_unavailable_reason"]

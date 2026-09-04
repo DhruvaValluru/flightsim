@@ -63,14 +63,20 @@ One codebase, platform dispatch inside it (`core/util/platform.py`):
 | Prompt → LLM compile → spec → validate | ✓ | ✓ | ✓ |
 | Headless JSBSim physics + telemetry | ✓ | ✓ | ✓ |
 | Web app on localhost:8008, terrain baking, effect reports | ✓ | ✓ | ✓ |
-| Rendered video clips (Unreal Engine host) | ✓ | refused by name | ✓ after the build below |
+| Rendered frames and clips (Unreal Engine host) | ✓ after the build below | refused by name | ✓ after the build below |
 
 Everything in the first three rows is pure Python and is exercised by CI
 on all three OSes. The UE render half runs on macOS (where every render
-calibration was measured, on Metal) and on Windows once the build steps
-below have produced the bridge -- until then Windows refuses as
-`ue.platform` with the exact missing piece, and the web app still
-delivers the headless half (spec, provenance, validation, telemetry).
+calibration was measured, on Metal) and on Windows, on each once the
+engine is installed at `UE_ROOT` (default `/Users/Shared/Epic Games/UE_5.5`
+or `C:\Program Files\Epic Games\UE_5.5`) AND the build steps below have
+produced the bridge -- until then BOTH refuse as `ue.platform` with the
+exact missing piece ("no engine on this machine: set UE_ROOT ..." or
+"FlightSimBridge not built: run scripts/ue_preflight.sh then
+scripts/build_ue.sh"), the run form's engine options are disabled with
+that reason and its default is Headless, and the web app still delivers
+the headless half (spec, provenance, validation, telemetry, the capture
+manifest, previews and verification).
 The render calibrations were measured on Metal only, so on Windows run
 `experiments/gate6_visual.py` once after building: it re-measures the
 visual clauses from the rendered pixels on YOUR machine, which is the

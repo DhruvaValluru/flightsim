@@ -202,41 +202,48 @@ def ue_runner_command(repo: Path, script_stem: str) -> List[str]:
     return [str(repo / "scripts" / f"{script_stem}.sh")]
 
 
+#: The build steps that produce the bridge binary, per OS, named in the
+#: "not built" reason.
+_UE_BUILD_STEPS = {
+    "mac": "scripts/ue_preflight.sh then scripts/build_ue.sh",
+    "windows": "scripts\\ue_preflight.ps1 then scripts\\build_ue.ps1",
+}
+
+
 def ue_unavailable_reason() -> Optional[str]:
     """None where the UE render half can run; otherwise WHY it cannot, in
     one sentence the page shows beside the disabled render options and
     the CLI prints with its refusal. The same facts ue_available()
-    decides on (pinned by test: available == reason is None)."""
-    if is_mac():
-        return None
-    if os_name() == "windows":
-        editor = ue_editor_path()
-        if editor is None or not editor.is_file():
-            return (f"no engine on this machine: set UE_ROOT to the Unreal "
-                    f"Engine 5.5 install (looked for {editor})")
-        repo = Path(__file__).resolve().parents[2]
-        if not ue_bridge_binary(repo).is_file():
-            return ("FlightSimBridge not built: run scripts\\ue_preflight.ps1 "
-                    "then scripts\\build_ue.ps1")
-        return None
-    return ("no engine on this OS: the render half needs macOS, or Windows "
-            "with Unreal Engine 5.5 and the FlightSimBridge built")
+    decides on (pinned by test: available == reason is None). macOS and
+    Windows are checked the SAME way -- the engine's UnrealEditor-Cmd at
+    UE_ROOT (or the per-OS default install) and a built FlightSimBridge
+    binary must both exist -- so a mac without the install, or with the
+    bridge unbuilt, is told so BEFORE a run, never mid-run by a pass
+    that "wrote no render.json"; Linux has no UE half at all."""
+    if os_name() == "linux":
+        return ("no engine on this OS: the render half needs macOS, or "
+                "Windows with Unreal Engine 5.5 and the FlightSimBridge "
+                "built")
+    editor = ue_editor_path()
+    if editor is None or not editor.is_file():
+        return (f"no engine on this machine: set UE_ROOT to the Unreal "
+                f"Engine 5.5 install (looked for {editor})")
+    repo = Path(__file__).resolve().parents[2]
+    if not ue_bridge_binary(repo).is_file():
+        return ("FlightSimBridge not built: run "
+                + _UE_BUILD_STEPS[os_name()])
+    return None
 
 
 def ue_available() -> bool:
     """True where the UE render half can run: macOS (where every render
-    gotcha was measured), or Windows with an engine install AND a built
-    bridge -- the gate flips on only once scripts/build_ue.ps1 has
-    produced the binary, so a bare clone still refuses by name with the
-    build steps instead of failing mid-run. Windows render output is
-    validated per machine by experiments/gate6_visual.py (the render
-    calibrations were measured on Metal; Gate 6 measures them again from
-    the pixels wherever it runs)."""
-    if is_mac():
-        return True
-    if os_name() == "windows":
-        editor = ue_editor_path()
-        repo = Path(__file__).resolve().parents[2]
-        return (editor is not None and editor.is_file()
-                and ue_bridge_binary(repo).is_file())
-    return False
+    gotcha was measured) or Windows, each with an engine install AND a
+    built bridge -- the gate flips on only once the build script has
+    produced the binary, so a bare clone (or a mac with no engine) still
+    refuses by name with the missing piece instead of failing mid-run.
+    Exactly ue_unavailable_reason() is None: one set of facts, one
+    answer. Windows render output is validated per machine by
+    experiments/gate6_visual.py (the render calibrations were measured
+    on Metal; Gate 6 measures them again from the pixels wherever it
+    runs)."""
+    return ue_unavailable_reason() is None

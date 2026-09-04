@@ -371,7 +371,7 @@ def test_run_forwards_the_transcript_into_provenance(client, monkeypatch):
         "prompt": "fly the 747 at 3000 m and 250 kt",
         "compiler": "regex"}).json()
     response = client.post("/run", json={
-        "spec": compiled["spec"]["dict"],
+        "spec": compiled["spec"]["dict"], "render": "clip",
         "provenance": {"compiler": "llm", "model": "m",
                        "transcript": [{"role": "user", "content": "hi"}],
                        "evil_extra": 1}})
@@ -659,7 +659,8 @@ def test_platform_refusal_precedes_the_mesh_refusal(client, monkeypatch):
     # An aircraft with no model on ANY machine: both refusals are live,
     # and the platform one must win.
     spec = compile_prompt("fly the f15 at 5000 m and 350 kt")
-    reply = client.post("/run", json={"spec": spec.to_dict()})
+    reply = client.post("/run", json={"spec": spec.to_dict(),
+                                      "render": "clip"})
     assert reply.status_code == 409
     assert reply.json()["constraint"] == "ue.platform"
 
@@ -1180,7 +1181,8 @@ def test_windy_terrain_run_digest_is_content_addressed(client, monkeypatch):
         "prompt": "fly the 747 at 5000 m and 250 kt over 2000 m mountains "
                   "in a strong crosswind",
         "compiler": "regex"}).json()
-    response = client.post("/run", json={"spec": compiled["spec"]["dict"]})
+    response = client.post("/run", json={"spec": compiled["spec"]["dict"],
+                                         "render": "clip"})
     assert response.status_code == 200, response.json()
     spec = captured["spec"]
     assert str(spec.turbulence.value) == "none"

@@ -1138,6 +1138,16 @@ mutate webapp/server.py \
     "an omitted render field resolves through the one default rule" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+mutate core/util/platform.py \
+    '    editor = ue_editor_path()
+    if editor is None or not editor.is_file():
+        return (f"no engine on this machine: set UE_ROOT to the Unreal "' \
+    '    editor = ue_editor_path()
+    if False:  # MUTATED: a missing engine install is not a reason
+        return (f"no engine on this machine: set UE_ROOT to the Unreal "' \
+    "a mac or Windows machine without the engine install is refused by name" \
+    tests/test_platform.py || failures=$((failures+1))
+
 # -- Camera Phase 1 finished: the web run renders frames, not a clip ------
 
 mutate core/capture/render_pass.py \
@@ -1213,10 +1223,10 @@ mutate webapp/static/index.html \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
 mutate core/util/platform.py \
-    '        if not ue_bridge_binary(repo).is_file():
-            return ("FlightSimBridge not built' \
-    '        if False:  # MUTATED: an unbuilt bridge reports no reason
-            return ("FlightSimBridge not built' \
+    '    if not ue_bridge_binary(repo).is_file():
+        return ("FlightSimBridge not built: run "' \
+    '    if False:  # MUTATED: an unbuilt bridge reports no reason
+        return ("FlightSimBridge not built: run "' \
     "an unbuilt bridge is named as the reason the engine is unavailable" \
     tests/test_platform.py || failures=$((failures+1))
 
