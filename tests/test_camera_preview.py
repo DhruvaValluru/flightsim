@@ -873,3 +873,48 @@ def test_contact_sheet_tiles_are_drawn_for_the_tile_with_no_text(tmp_path):
     assert (tmp_path / "contact_sheets" / "cam0.png").read_bytes() == again.read_bytes()
     with pytest.raises(ValueError, match="preview.style"):
         pv.draw_preview(recs[0], m, ("flat", None), style="tiny")
+
+
+# -- round 3: header wrapping exercised on a frame the header exceeds ----
+
+def test_header_lines_wider_than_the_frame_are_wrapped_with_an_indent():
+    """A 400x225 record (font 8 px, 392 px of room) whose position
+    line measures 440 px: the drawn header has MORE lines than the
+    header, every drawn line fits in w - 8, continuation lines carry
+    the two-space indent, and no text pixel lies in the rightmost 8
+    columns of the band (without wrapping the line runs to the last
+    column)."""
+    from PIL import ImageDraw
+
+    rec = record(camera=(268.4, 0.0, 3060.0), look=(0.0, -4.8, 0.0),
+                 aircraft=(444.4, 0.0, 3048.0), index=5, t_s=2.683,
+                 camera_id="ridge_survey_camera")
+    rec = dict(rec, width_px=400, height_px=225, principal_point_px=[200.0, 112.5],
+               fx_px=388.9, fy_px=388.9)
+    m = manifest([rec], count=24)
+    words = "track: telemetry 9.23 Hz decimated to 9.23 Hz (128 points)"
+    image, info = pv.draw_preview(rec, m, ("flat", None), track_points=pv._track(m),
+                                  track_words=words)
+    w, h = info["size"]
+    assert (w, h) == (400, 225) and pv.header_font_px(h) == 8
+    draw_ = ImageDraw.Draw(image)
+    font = pv._font(pv.header_font_px(h))
+    # The header genuinely exceeds the frame before wrapping.
+    assert max(draw_.textlength(line, font=font) for line in info["header"]) > w - 8
+    assert len(info["header_drawn"]) > len(info["header"])
+    assert all(draw_.textlength(line, font=font) <= w - 8 for line in info["header_drawn"])
+    continuations = [line for line in info["header_drawn"] if line.startswith("  ")]
+    assert len(continuations) == len(info["header_drawn"]) - len(info["header"])
+    assert continuations                                   # at least one wrapped
+    # Every field of every header line survives the wrap, in order.
+    joined = " ".join(line.strip() for line in info["header_drawn"])
+    for line in info["header"]:
+        for field in line.split("  "):
+            assert field.strip() in joined, field
+    # The band is as tall as the drawn lines, and no text pixel (bright
+    # on every channel) sits in its rightmost 8 columns.
+    assert info["header_band_px"] == 4 + (8 + 2) * len(info["header_drawn"]) + 2
+    band = np.asarray(image.crop((0, 0, w, info["header_band_px"]))).astype(int)
+    bright = band.min(axis=2) > 100
+    assert bright.any()                                    # text is on the band
+    assert not bright[:, w - 8:].any()
