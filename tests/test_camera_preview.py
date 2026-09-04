@@ -1071,3 +1071,81 @@ def test_label_placement_tries_every_side_and_leads_to_a_far_label():
     # The boresight label: at its gap past the cross arm, no leader.
     bore = [p for p in info["labels"] if p["text"] == "boresight"][0]
     assert bore["distance_px"] == 18.0 and bore["leader"] is None
+
+
+# -- round 3: the horizon behind the skyline ---------------------------------
+
+def half_ridge_heightfield():
+    """41 x 41 at 100 m: a 300 m ridge along east at north -500 on the
+    EAST half only (east >= 0), flat ground elsewhere."""
+    from core.terrain.heightfield import Georeference, Heightfield
+
+    samples = np.zeros((41, 41), dtype=np.uint16)
+    samples[25, 20:] = 300
+    return Heightfield(
+        samples=samples,
+        georeference=Georeference(crs="EPSG:32631", origin_x_m=166021.0 - 2000.0,
+                                  origin_y_m=2000.0, pixel_size_m=100.0),
+        scale_m=1.0, offset_m=0.0, name="half_ridge")
+
+
+def test_the_horizon_is_hidden_where_terrain_rises_above_it():
+    """A level camera at 100 m, 1 km south of a 300 m ridge that fills
+    the east half of the frame: the crest projects at row 111, above
+    the horizon row 360. The horizon is solid HORIZON_RGB west of the
+    point where the ridge's west slope crosses the horizon row
+    (interpolated from the projected foot and crest: u = 557) and
+    NEVER HORIZON_RGB east of it -- dashed HORIZON_HIDDEN_RGB over
+    terrain or background -- and info counts the columns each way. A
+    flat scene keeps the whole horizon; the judge's full-ridge scene
+    hides all of it."""
+    from tests.test_camera_poses import FRAME
+
+    ground = pv._ground(half_ridge_heightfield(), FRAME)
+    rec = record(camera=(-1500.0, 0.0, 100.0), look=(0.0, 0.0, 0.0),
+                 aircraft=(-1300.0, 100.0, 150.0))
+    cx, cy = rec["principal_point_px"]
+    u_c, v_c, _ = project_point(rec, (-500.0, 0.0, 300.0))        # the crest's west end
+    u_f, v_f, _ = project_point(rec, (-500.0, -100.0, 0.0))       # the slope's foot
+    assert v_c < cy < v_f and u_f < u_c
+    split = u_f + (v_f - cy) / (v_f - v_c) * (u_c - u_f)
+    assert abs(split - 557.0) < 2.0
+    image, info = pv.draw_preview(rec, manifest([rec]), ground)
+    runs = info["horizon_runs"]
+    assert [seen for _, _, seen in runs] == [True, False]
+    assert abs(runs[0][1] - split) <= 2.0 and runs[1][1] == WIDTH
+    assert abs(info["horizon_visible_px"] - split) <= 2.0
+    assert abs(info["horizon_visible_px"] + info["horizon_hidden_px"] - WIDTH) < 1e-9
+    row = int(round(cy))
+    # West (past the VFOV text columns): every sampled pixel is horizon.
+    west = [image.getpixel((x, row)) for x in range(48, int(split) - 40, 8)]
+    assert len(west) > 50 and all(p == pv.HORIZON_RGB for p in west)
+    # East: never HORIZON_RGB; dashes in the hidden colour over terrain
+    # green, rings or background.
+    east = [image.getpixel((x, row)) for x in range(int(cx) + 80, WIDTH - 8)]
+    assert len(east) > 400 and not any(p == pv.HORIZON_RGB for p in east)
+    # Dashes HORIZON_DASH_PX (4 on, 8 off): Pillow paints a line from u
+    # to u + 4 as 5 pixels, so the dashes cover 5/12 of the hidden run.
+    dashes = sum(p == pv.HORIZON_HIDDEN_RGB for p in east)
+    on, off = pv.HORIZON_DASH_PX
+    assert abs(dashes / len(east) - (on + 1) / (on + off)) < 0.03, dashes
+    for p in east:
+        assert (p in (pv.BACKGROUND_RGB, pv.HORIZON_HIDDEN_RGB, pv.RING_RGB)
+                or (p[1] > p[0] and p[1] > p[2])), p
+    # horizon_runs alone: a skyline below the row everywhere keeps it.
+    clear = pv.horizon_runs(info["horizon"], np.full(WIDTH + 1, np.inf), WIDTH)
+    assert clear == [(0.0, float(WIDTH), True)]
+    # Flat scene: the whole horizon, one run, nothing hidden.
+    _, flat = draw(record(camera=(0.0, 0.0, 1000.0), look=(0.0, 0.0, 0.0),
+                          aircraft=(2000.0, 0.0, 1400.0)))
+    assert flat["horizon_visible_px"] == WIDTH and flat["horizon_hidden_px"] == 0.0
+    assert len(flat["horizon_runs"]) == 1
+    # The judge's scene: the ridge across the whole frame hides all of it.
+    full = pv._ground(two_ridge_heightfield(), FRAME)
+    image, info = pv.draw_preview(rec, manifest([rec]), full)
+    assert info["horizon_visible_px"] == 0.0 and info["horizon_hidden_px"] == WIDTH
+    assert not any(image.getpixel((x, row)) == pv.HORIZON_RGB for x in range(48, WIDTH - 8, 8))
+    # A tile draws the same split at a quarter of the columns.
+    _, tile = pv.draw_preview(rec, manifest([rec]), ground, size=(320, 180),
+                              style="thumbnail")
+    assert abs(tile["horizon_visible_px"] - split / 4.0) <= 1.0

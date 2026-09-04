@@ -68,7 +68,13 @@ What is drawn, and where each number comes from
   camera's pitch and roll -- directions with zero vertical component,
   projected; for a level camera it is the row ``v = cy``, for pitch p
   it is ``cy + fy tan(p)`` (a camera pitched DOWN sees the horizon
-  above its centre), and roll tilts it. Drawn in HORIZON_RGB.
+  above its centre), and roll tilts it. Drawn in HORIZON_RGB -- in
+  terrain scenes only in the columns where the drawn ground's top
+  (the skyline from :func:`skyline_cull`) lies below it; where a ridge
+  rises above the level horizon it is dashed in HORIZON_HIDDEN_RGB so
+  the level reference stays readable without being painted through
+  the mountain (:func:`horizon_runs`; ``info["horizon_visible_px"]``
+  and ``horizon_hidden_px`` count the columns).
 * **Aircraft**: a three-axis body scaled from the manifest's
   ``aircraft_metrics`` (read ONCE from the configured FDM by the
   runner: span from ``metrics/bw-ft``, the longitudinal extent from
@@ -185,6 +191,10 @@ SKYLINE_TOLERANCE_PX = 1.0
 
 BACKGROUND_RGB = (12, 16, 24)
 HORIZON_RGB = (240, 230, 200)
+#: The horizon where terrain rises above it: dashed, in this colour,
+#: so the level reference stays readable without claiming to be seen.
+HORIZON_HIDDEN_RGB = (150, 140, 110)
+HORIZON_DASH_PX = (4, 8)
 TRACK_PAST_RGB = (80, 160, 255)
 TRACK_FUTURE_RGB = (50, 80, 120)
 BODY_RGB = (255, 200, 60)
@@ -472,6 +482,39 @@ def horizon_points(record, scale=1.0, samples: int = 179):
         y = -sum(a * b for a, b in zip(up, d))
         points.append(((cx + fx * x / z) / sx, (cy + fy * y / z) / sy))
     return points
+
+
+def horizon_runs(horizon, skyline: np.ndarray, width: int,
+                 tolerance_px: float = SKYLINE_TOLERANCE_PX):
+    """Split the horizon segment into per-column runs against the
+    per-column skyline from :func:`skyline_cull` (the smallest v drawn
+    in each column; inf where no ground was drawn): the horizon is
+    HIDDEN in a column whose skyline lies ABOVE the horizon row there
+    (smaller v, by more than ``tolerance_px``: the terrain's top is
+    above the level horizon) and visible elsewhere. Returns a list of
+    ``(u_start, u_end, visible)`` runs in pixels covering the segment
+    from its left end to its right end."""
+    (u0, v0), (u1, v1) = horizon
+    if u1 < u0:
+        u0, v0, u1, v1 = u1, v1, u0, v0
+    c0 = int(math.ceil(u0))
+    c1 = int(math.floor(u1))
+    if c1 < c0:
+        return [(float(u0), float(u1), True)]
+    cols = np.arange(c0, c1 + 1)
+    v_h = v0 + (cols - u0) * ((v1 - v0) / (u1 - u0) if u1 > u0 else 0.0)
+    sky = np.asarray(skyline, dtype=float)
+    idx = np.clip(cols, 0, len(sky) - 1)
+    hidden = sky[idx] < v_h - tolerance_px
+    runs = []
+    start = 0
+    for k in range(1, len(cols) + 1):
+        if k == len(cols) or hidden[k] != hidden[start]:
+            a = float(u0) if start == 0 else float(cols[start])
+            b = float(u1) if k == len(cols) else float(cols[k])
+            runs.append((a, b, not bool(hidden[start])))
+            start = k
+    return runs
 
 
 def horizon_segment(record, scale=1.0):
@@ -1393,6 +1436,7 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
     # 1. ground
     plan = None
     arrow_base = None
+    skyline = None
     far = float(record.get("far_m", 1e5))
     if ground.kind == "terrain":
         a, b = ground.segments
@@ -1497,11 +1541,39 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
                 labels.request((u, v), "N", rgba(NORTH_RGB), _font(font_px + 1),
                                prefer=("right", "left", "above", "below"), priority=2)
 
-    # 2. horizon
+    # 2. horizon: part of the skyline in terrain scenes -- solid only
+    #    in the columns where the drawn ground's top lies below it,
+    #    dashed (HORIZON_HIDDEN_RGB) where a ridge rises above it.
     horizon = horizon_segment(record, axis_scale)
     info["horizon"] = horizon
+    info["horizon_visible_px"] = 0.0
+    info["horizon_hidden_px"] = 0.0
     if horizon is not None:
-        draw.line([horizon[0], horizon[1]], fill=rgba(HORIZON_RGB), width=line_px)
+        if skyline is not None:
+            runs = horizon_runs(horizon, skyline, w)
+        else:
+            runs = [(horizon[0][0], horizon[1][0], True)]
+        (u0, v0), (u1, v1) = horizon
+        if u1 < u0:
+            u0, v0, u1, v1 = u1, v1, u0, v0
+        slope = (v1 - v0) / (u1 - u0) if u1 > u0 else 0.0
+
+        def at(u):
+            return (u, v0 + (u - u0) * slope)
+
+        for a, b, seen in runs:
+            if seen:
+                draw.line([at(a), at(b)], fill=rgba(HORIZON_RGB), width=line_px)
+                info["horizon_visible_px"] += b - a
+            else:
+                on, off = HORIZON_DASH_PX
+                u = a
+                while u < b:
+                    draw.line([at(u), at(min(u + on, b))], fill=rgba(HORIZON_HIDDEN_RGB),
+                              width=line_px)
+                    u += on + off
+                info["horizon_hidden_px"] += b - a
+        info["horizon_runs"] = runs
 
     # 3. track: past solid, future dim, split at the frame's instant;
     #    this camera's scheduled instants as dots on the line

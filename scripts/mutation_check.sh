@@ -1698,6 +1698,18 @@ mutate core/capture/preview.py \
     "preview round 3: ring labels are anchored off the arrow's column" \
     tests/test_camera_preview.py || failures=$((failures+1))
 
+mutate core/capture/preview.py \
+    '    hidden = sky[idx] < v_h - tolerance_px' \
+    '    hidden = np.zeros(len(cols), dtype=bool)  # MUTATED: the horizon is painted through the ridge' \
+    "preview round 3: the horizon is hidden where the skyline rises above it" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '                    draw.line([at(u), at(min(u + on, b))], fill=rgba(HORIZON_HIDDEN_RGB),' \
+    '                    draw.line([at(u), at(min(u + on, b))], fill=rgba(HORIZON_RGB),  # MUTATED: hidden dashes in the seen colour' \
+    "preview round 3: the hidden horizon is dashed in its own colour" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
