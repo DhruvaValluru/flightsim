@@ -875,7 +875,7 @@ def apply_render_choices(tmp_path, payload):
     harness = tmp_path / "apply_render_choices.js"
     harness.write_text(APPLY_RENDER_CHOICES_HARNESS % source, encoding="utf-8")
     proc = subprocess.run([node, str(harness), json.dumps(payload)],
-                          capture_output=True, text=True, check=True)
+                          capture_output=True, text=True, check=True, encoding="utf-8")
     return json.loads(proc.stdout)
 
 

@@ -354,9 +354,24 @@ def test_a_turbulent_spec_refuses_frames_by_name(tmp_path, capsys,
     assert "host parity" in text and "Clip only" in text
     assert calls == []
     assert not (out / "capture_manifest.json").exists()
-    assert capture_main([str(turbulent), "--out", str(tmp_path / "none"),
-                         "--max-previews", "0", "--render", "none"]) == 0
-    assert "REFUSED render.host_parity" not in capsys.readouterr().out
+    # The same spec is NOT refused headlessly or as a clip: the refusal is
+    # the engine's, decided before any flight. Asserted on the refusal
+    # function itself rather than by flying the turbulent spec, whose
+    # seeded Dryden realisation is the platform C library's (CI measured
+    # its closure 0.02 kt outside tolerance on Windows and inside on
+    # Linux), so a flight would test the platform, not the refusal.
+    from core.capture.render_pass import frames_host_parity_refusal
+
+    assert frames_host_parity_refusal(spec) is not None
+    calm = ScenarioSpec.read(EXAMPLES / "cameras_multi.yaml")
+    assert frames_host_parity_refusal(calm) is None
+    code_none = capture_main([str(turbulent), "--out", str(tmp_path / "none"),
+                              "--max-previews", "0", "--render", "none"])
+    text_none = capsys.readouterr().out
+    assert "REFUSED render.host_parity" not in text_none
+    # Exit 0, or the closure assertion's own named failure for this
+    # platform's turbulence realisation: never the frames refusal.
+    assert code_none == 0 or "closure" in text_none.lower(), text_none
 
 
 def test_render_frames_runs_the_engine_once_per_camera(tmp_path, capsys,
