@@ -365,13 +365,12 @@ def test_a_turbulent_spec_refuses_frames_by_name(tmp_path, capsys,
     assert frames_host_parity_refusal(spec) is not None
     calm = ScenarioSpec.read(EXAMPLES / "cameras_multi.yaml")
     assert frames_host_parity_refusal(calm) is None
-    code_none = capture_main([str(turbulent), "--out", str(tmp_path / "none"),
-                              "--max-previews", "0", "--render", "none"])
-    text_none = capsys.readouterr().out
-    assert "REFUSED render.host_parity" not in text_none
-    # Exit 0, or the closure assertion's own named failure for this
-    # platform's turbulence realisation: never the frames refusal.
-    assert code_none == 0 or "closure" in text_none.lower(), text_none
+    # The calm spec flies headlessly with no host-parity refusal (the
+    # turbulent one is not flown: its closure is the platform's).
+    assert capture_main([str(EXAMPLES / "cameras_multi.yaml"), "--out",
+                         str(tmp_path / "none"), "--max-previews", "0",
+                         "--render", "none"]) == 0
+    assert "REFUSED render.host_parity" not in capsys.readouterr().out
 
 
 def test_render_frames_runs_the_engine_once_per_camera(tmp_path, capsys,
