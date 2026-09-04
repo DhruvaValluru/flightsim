@@ -97,7 +97,8 @@ the JSBSim banner omitted; the default render choice resolves to
 spec cef57d752362381d valid; running headlessly...
 scheduled 48 frames across 2 camera(s)
   manifest: runs/demo/capture_manifest.json
-  previews: 48 geometry preview(s) under runs/demo/previews (previews are not frames)
+  previews: 48 geometry preview(s) at 1280x720, 0.049 s/frame under runs/demo/previews (previews are not frames)
+  contact sheets: 2 (contact_sheets/<camera_id>.png, one per camera)
   [PASS] manifest_version: manifest_version 1, spec cef57d752362381d
   [PASS] fields_finite: 48 frame records checked
   [PASS] geometry_recovery: 48 frames; quaternion-vs-euler reprojection gap 0.0000 px (tol 0.5); 0 aircraft behind camera; 0 aimed frames without the aircraft in frame
@@ -120,7 +121,10 @@ the engine's availability and reason on this machine -- the CLI's copy
 of the webapp's `provenance.json` `render`), and a manifest that fails
 its own verification fails the run by name (`capture.verification`,
 exit 2). The headless tree is `capture_manifest.json`, `telemetry.json`,
-`scenario.yaml`, `run.json`, `verify.json`, `previews/`.
+`scenario.yaml`, `run.json`, `verify.json`, `previews/<camera_id>/
+preview_NNNNN.png` (full resolution) and `contact_sheets/<camera_id>.png`
+(see "Geometry preview" below; `run.json` `previews` records the scale,
+the resolution and the measured seconds per frame).
 The word REFUSED is reserved for exit 2: a headless run on a machine
 without the engine is DONE, and states the engine's absence by reason.
 `--render frames` there refuses BY NAME (`ue.platform`, "rendered
@@ -141,6 +145,93 @@ Temporal alignment across camera sets is exercised on real telemetry by
 `tests/test_camera_cli.py::test_two_camera_sets_align_in_time`: the
 same spec captured with a chase+tower set and again with a cockpit set
 aligns frame-for-frame (`flightsim.verify --against`).
+
+## Geometry preview (package I, done properly 2026-09-04)
+
+`core/capture/preview.py` draws one PNG per scheduled frame with numpy
+and Pillow only (matplotlib is not a dependency), every element
+projected through the frame's OWN recorded pose and intrinsics by the
+verifier's independent `project_point`, so the picture is an eyeball
+check on the manifest: a wrong record would draw in the wrong place.
+What a reader sees, and the field each element comes from:
+
+| element | drawn as | source |
+|---|---|---|
+| terrain (terrain scenes) | a 48 x 48 wireframe of the raster, each sample joined to its row and column neighbour, clipped at the near plane and to the image, shaded by camera-space depth: 240 at the frame's subject range (camera to aircraft) falling on a log scale to 32 at `far_m` | the heightfield, `near_m`, `far_m`, the aircraft state |
+| ground grid (flat scenes) | a fine lattice (step = the nice number at or above height/4) and a coarse one (10x that step) on the plane at the spec's terrain elevation, centred beneath the camera, extent = min(`far_m`, fy x height / 2) so it reaches the horizon or the far plane; distance rings at 500 m, 1, 2, 5, 10, 20 km labelled; a north arrow one step long where the boresight meets the plane | `position_*_m`, `fy_px`, `far_m`, the spec's terrain elevation |
+| horizon | the level directions at infinity projected: `v = cy + fy tan(pitch)` for a level-rolled camera (a camera pitched down sees it ABOVE centre), tilted by roll | `quaternion_wxyz`, intrinsics |
+| aircraft | a three-axis body: nose-tail along the recorded heading and pitch, wing tips at +/- span/2 with the recorded roll, a fin up from the centre; the length x span x height box; a heading tick beyond the nose; the flown track (past solid, future dim) | `aircraft.*` per frame; `aircraft_metrics` (below) |
+| camera | a boresight cross at `principal_point_px` with the FOV `2 atan(sensor / 2 focal)` printed at the edges | `principal_point_px`, focal, sensor |
+| header | camera id, frame index / capture count, t, position, look yaw/pitch/roll, focal and fx, resolution, FOV; the aircraft's position, attitude, the aircraft-to-camera bearing and range; the body's span, length and height with their sources | the record; the camera block |
+
+**The airframe metrics are read once from the FDM, never a constant**:
+`core.scenario.runner.aircraft_metrics(fdm)` reads `metrics/bw-ft`
+(span; the same property the span-station contact check uses),
+`metrics/lh-ft` + `metrics/cbarw-ft` (the wing-to-tail arm plus one
+mean chord: the FDM's longitudinal extent -- JSBSim states no
+nose-to-tail length, and the source string says so) and
+`sqrt(metrics/Sv-sqft)` (the vertical tail area's square side: the
+FDM's only vertical extent). The run manifest and the capture manifest
+carry the block as `aircraft_metrics` (B747: span 64.47 m, length
+40.82 m, height 8.78 m). A manifest without it (a synthetic one) gets
+a fixed cross and a header line "aircraft_metrics absent: body
+unscaled" -- never a silent guess.
+
+**Resolution.** Full output resolution by default (the record's
+`width_px` x `height_px`); `--preview-scale N` on the CLI and the
+page's "preview scale 1/N" field draw at 1/N, the header and the CLI
+line say so only when N is not 1, and a value that is not a positive
+integer is refused by name (`preview.scale`) before any flight.
+
+**Measured render time** (this machine, Linux, 2026-09-04, the 48
+frames of `examples/cameras_multi.yaml`, flat scene): 0.049 s/frame at
+1280x720 including the lattice, rings, track, body and header; 0.029
+s/frame at 1/2 scale; 0.064 s/frame including the contact sheets. The
+budget is 0.5 s/frame (`RENDER_BUDGET_S_PER_FRAME`), graded by
+`tests/test_camera_preview.py::test_full_resolution_render_time_is_under_budget`
+and printed by every run ("0.049 s/frame"); `run.json` `previews`
+records it.
+
+**Overlays** (`overlays/<camera_id>/NNNN.png`): after an engine pass,
+`render_overlays` draws the same geometry as a translucent layer over
+every rendered PNG that exists (named by the same index, the frame's
+own size): the reprojected aircraft box, the ground and the horizon on
+the engine's pixels, so the verification is visible to the eye. The
+CLI prints "overlays: 48 reprojected-geometry overlay(s) ... (0.0xx
+s/frame)" and records `overlays {count, s_per_frame}` in `run.json`;
+the page lists `capture/overlays/<camera_id>` with the note
+"reprojected geometry over the rendered frame". Exercised here only
+against the honest engine STUB (a blob at the labelled pixel);
+"awaiting Windows verification" on real pixels, step 5c below.
+
+**Contact sheets** (`contact_sheets/<camera_id>.png`, beside
+`previews/`, never inside it -- `previews/` holds exactly one PNG per
+drawn frame): every preview of the camera as a 320-px-wide thumbnail
+with its index and time, a title row with camera id, preset, schedule
+basis and "N of M frames". Listed by the CLI and shown whole on the
+page above the per-frame gallery.
+
+**Reference image**: `docs/images/preview_chase0_frame5.png` is frame 5
+of `chase0` from the command above (t=2.683 s, camera at N +268.4, alt
+3060 m, pitch -4.8 deg): the horizon at row 256 (= 360 + 1244 tan(-4.8
+deg)), the 747's 64.5 m span drawn 455 px wide at 176 m range
+(1244 x 64.5 / 176 = 456), the box around it, the boresight cross, the
+10 km and 20 km rings and the coarse lattice dim in the distance.
+
+**Tests** (`tests/test_camera_preview.py`, 20 tests on synthetic
+records with known poses): the level camera's horizon row equals cy
+within 1 px and a ground point ahead lands below it; pitch -10 deg
+moves it by fy tan(pitch); the body centre equals `project_point` of
+the aircraft within 1 px; the wing-tip separation equals fx x span /
+range within 1 px and halves at twice the range; roll and heading move
+the tips and nose as recorded; a segment behind the camera is not
+drawn, even when its mirrored projection would land in frame; the
+default size is the record's; the header carries the position, look
+and focal strings; the overlay is the frame's size with the body at
+the reprojected pixel; one contact sheet per camera with one thumbnail
+per frame; the render time is under budget. 15 mutation guards
+(`scripts/mutation_check.sh`, "the geometry preview") disable each
+safeguard in turn and were verified to fail their tests.
 
 ## The run emits frames, not a clip (finished 2026-09-03)
 
@@ -402,11 +493,13 @@ spec cef57d752362381d valid; running headlessly...
   card:     runs\demo\card.json (consume-poses; one commandlet pass per camera via -camera-index=N)
 scheduled 48 frames across 2 camera(s)
   manifest: runs\demo\capture_manifest.json
-  previews: 48 geometry preview(s) under runs\demo\previews (previews are not frames)
+  previews: 48 geometry preview(s) at 1280x720, 0.0xx s/frame under runs\demo\previews (previews are not frames)
+  contact sheets: 2 (contact_sheets/<camera_id>.png, one per camera)
 engine pass 1 of 2: camera 'chase0', 24 frames scheduled over the 12 s run (-camera-index=0)
   camera 'chase0': 24 of 24 scheduled frames rendered under runs\demo\frames\chase0 (engine stepped 11.992 s in 1439 steps)
 engine pass 2 of 2: camera 'tower0', 24 frames scheduled over the 12 s run (-camera-index=1)
   camera 'tower0': 24 of 24 scheduled frames rendered under runs\demo\frames\tower0 (engine stepped 11.992 s in 1439 steps)
+  overlays: 48 reprojected-geometry overlay(s) over the rendered frames under runs\demo\overlays (0.0xx s/frame; the aircraft box, wireframe and horizon the manifest predicts, drawn on the engine's pixels)
   clip:     runs\demo\clip.mp4 (by-product of camera 'chase0', 24 frames at their scheduled instants; 12.992 s = black to t=0.008 s, the flight to t=11.992 s, a 1 s hold)
   [PASS] manifest_version: manifest_version 1, spec cef57d752362381d
   [PASS] fields_finite: 48 frame records checked
@@ -515,7 +608,9 @@ runs\demo\
   clip.mp4                     the by-product: black to t=0.008 s, 24 frames at their instants to t=11.992 s, the last held 1 s: 12.992 s
   run.json                     spec_digest, output_digest, samples 115, render {choice "frames", label "Render frames and clip", engine_available true, engine_unavailable_reason null}, render_passes (per camera: scheduled 24, rendered 24, steps_taken 1439, stepped_s 11.992), clip_encoded true, clip_seconds 12.992
   verify.json                  the verifier's report as run (the JSON the webapp serves): ok, checks [6, each name/ok/status/detail/data], passed 6, ran 6, awaiting [] -- rewritten after the passes, so the printed table and the file agree without re-running
-  previews\...                 48 geometry previews (not frames)
+  previews\chase0\preview_00000.png .. preview_00023.png   24 geometry previews at 1280x720 (not frames); the same for tower0
+  contact_sheets\chase0.png, tower0.png   one contact sheet per camera
+  overlays\chase0\0000.png .. 0023.png   24 overlays, 1280x720: the manifest's geometry drawn over the rendered frame; the same for tower0
   engine_telemetry.json        the engine's own recorder, pass 0
   telemetry.json               the headless flight the manifest describes
 ```
@@ -608,6 +703,34 @@ instant (12.99); the second 25 read frames (the lead-in plus 24) at
 lead-in or by the 1 s hold means the concat demuxer dropped an entry
 and the playlist, not the frames, is at fault.
 
+### 5c. The overlays, looked at (NOT YET RUN)
+
+The overlays are the verification made visible, and they have only
+ever been drawn over the honest engine STUB here. On the Windows
+machine, after step 2:
+
+```
+dir /b runs\demo\overlays\chase0\*.png | find /c ".png"
+start runs\demo\overlays\chase0\0005.png
+start runs\demo\overlays\tower0\0010.png
+```
+
+The count must print 24 (and 24 for tower0). In `chase0\0005.png` the
+yellow wing line (64.5 m at 176 m range: 455 px wide) must lie across
+the rendered 747's wings and the box enclose the fuselage, to within
+the frame's graded pixel budget the verifier prints ("aircraft drawn
+within x.xx m", about 10 px at this range); the horizon line must run
+along the rendered horizon (the flat scene's ground plane edge) and the
+lattice recede toward it. In `tower0\0010.png` the aircraft is 3 km
+away: a 26 px span line on the rendered aircraft, the track line along
+its path, no horizon in frame (the tower looks up 75 deg). A wing line
+beside, not on, the rendered aircraft is the SAME disagreement engine
+parity grades numerically, and the frame's `render.json` record says
+which side (`aircraft_px` against the manifest's labelled pixel); a
+horizon line off the rendered horizon is an orientation disagreement
+the applied-vs-solved clause would already have failed. Write here
+what was seen.
+
 ### 6. The same from the page
 
 Start the server, interpret "fly the 747 at 10000 ft and 280 kt for 12
@@ -669,5 +792,15 @@ Paste every log back; this section is rewritten from them.
   and the status line says how many. The 22 s cap applies to clips
   only; there is no frames-mode cap, by design: the schedule is the
   contract.
+* The geometry preview's aircraft is a three-axis body and a box, not
+  a silhouette, and its LENGTH is the FDM's wing-to-tail arm plus one
+  mean chord (40.8 m for the B747, whose fuselage is 70.7 m) because
+  JSBSim states no nose-to-tail length; the header and the manifest
+  say exactly which metric each dimension is. The span (metrics/bw-ft)
+  is the airframe's own.
+* The overlays have been drawn over the honest engine stub only; over
+  real rendered pixels they are NOT YET RUN (step 5c above).
+* Terrain scenes have no distance rings or north arrow (the wireframe
+  and the horizon carry the scale there); flat scenes have both.
 * Segmentation masks, bounding boxes, domain randomization, batch
   execution: out of scope, untouched.

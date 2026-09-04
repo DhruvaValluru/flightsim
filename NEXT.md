@@ -3,6 +3,34 @@
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
 
+**Camera Phase 1, preview round 1 (2026-09-04, the geometry preview
+done properly against bar section 3; docs/CAMERA_PHASE1_REPORT.md
+"Geometry preview" is the description).** core/capture/preview.py
+rewritten: terrain as a depth-shaded wireframe (flat scenes: a
+camera-derived lattice reaching the horizon or far_m, distance rings,
+a north arrow), the horizon from the camera's pitch and roll (v = cy +
+fy tan(pitch): pitched DOWN puts it ABOVE centre; roll +20 gives slope
+-tan 20), the aircraft as a three-axis body + box + heading tick +
+past/future track scaled from `aircraft_metrics` -- read ONCE from the
+FDM by core.scenario.runner.aircraft_metrics (metrics/bw-ft span;
+lh-ft + cbarw-ft as the longitudinal extent because JSBSim has no
+length; sqrt(Sv-sqft) vertical) and carried through the run manifest
+into the capture manifest -- boresight cross + FOV at the edges, a
+four-line header. Full resolution by default (--preview-scale N / the
+page's field, refused by name preview.scale otherwise); the measured
+time per frame printed and in run.json "previews" (0.049 s/frame at
+1280x720 on the 48-frame example; budget 0.5 s); overlays over every
+rendered PNG after a frames pass (overlays/<cam>/NNNN.png, CLI and
+page, stub-verified only); contact_sheets/<cam>.png. 20 tests in
+tests/test_camera_preview.py + 6 CLI/page tests; 15 guards verified
+firing by subset (202 guards on the branch). Suite 716 passed, 1
+skipped in 166 s. Gotchas: (a) the contact sheet must NOT live under
+previews/ -- tests/test_camera_cli.py counts every *.png there as a
+preview, so it lives beside it; (b) preview_scale travels to
+capture_run / manager.start only when it is not 1, because existing
+tests stub those with their old signatures (one spelling of the
+default). NOT YET RUN: overlays on real engine pixels (report step 5c).
+
 **Camera Phase 1, frames round 3 (2026-09-04, six commits -- the
 judge's ranked gaps against analysis/QUALITY_BAR_camera_phase1.md,
 closed in priority order; docs/CAMERA_PHASE1_REPORT.md is current and
@@ -694,3 +722,15 @@ the parity discipline, and the do-not-regress list)
     wall-cloud disc was removed (a 700 m disc at chase distance reads
     as a screen-filling artifact); funnel spin runs at the model's own
     core rate omega = v_max/r_core from SIM time (replay-identical).
+
+27. **A camera pitched DOWN sees the horizon ABOVE its centre**: the
+    horizon row is v = cy + fy tan(pitch) (pitch -4.8 deg at fy 1244
+    puts it at row 256 of 720), and a camera rolled right sees it rise
+    to the right (slope -tan roll). The brief's "cy - fy tan(pitch)"
+    has the sign wrong; the preview tests pin the measured one.
+28. **Pillow's ImageDraw.line has no clipping of its own**: a segment
+    whose endpoint sits near the near plane projects to coordinates in
+    the millions and Bresenham walks them all. core.capture.preview
+    clips every segment at near_m in camera space and then to the image
+    (Liang-Barsky) BEFORE drawing; that is why 4600 wireframe segments
+    cost 49 ms and not seconds.

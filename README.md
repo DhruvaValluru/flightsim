@@ -76,7 +76,8 @@ exact missing piece ("no engine on this machine: set UE_ROOT ..." or
 scripts/build_ue.sh"), the run form's engine options are disabled with
 that reason and its default is Headless, and the web app still delivers
 the headless half (spec, provenance, validation, telemetry, the capture
-manifest, previews and verification).
+manifest, full-resolution geometry previews with a contact sheet per
+camera, and verification).
 The render calibrations were measured on Metal only, so on Windows run
 `experiments/gate6_visual.py` once after building: it re-measures the
 visual clauses from the rendered pixels on YOUR machine, which is the
@@ -243,7 +244,11 @@ frames, each with full recoverable geometry, engine or no engine:
 ```
 
 Off macOS the pixel render refuses by name (`ue.platform`) while the
-capture manifest, geometry previews and verification complete; the
+capture manifest, geometry previews (full resolution: terrain wireframe
+or ground grid with distance rings, horizon, the aircraft as a body
+scaled from the FDM's own span, the camera's boresight and field of
+view, a header with pose and lens; `contact_sheets/<camera>.png` per
+camera; measured 0.049 s/frame) and verification complete; the
 refusal example (`examples/cameras_refusal.yaml`) shows a camera placed
 inside terrain refused as `camera.terrain_clearance`.
 
@@ -251,7 +256,9 @@ With the engine (`--render frames`, the default where it exists) the
 same command renders exactly the scheduled PNGs per camera under
 `frames/<camera_id>/NNNN.png` -- one consume-poses pass per camera --
 and the verifier's `engine_parity` check grades every frame's applied
-pose against the solved one; the clip is a by-product of camera 0.
+pose against the solved one, and `overlays/<camera_id>/NNNN.png` draws
+the manifest's aircraft box, ground and horizon over every rendered
+frame so the check is visible; the clip is a by-product of camera 0.
 Without the engine that check reads `[AWAITING] engine_parity`, never
 a pass. The Windows verification steps, exact commands and expected
 log lines are in `docs/CAMERA_PHASE1_REPORT.md` ("Engine verification
