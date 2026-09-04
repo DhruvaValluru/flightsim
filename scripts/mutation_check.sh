@@ -1074,6 +1074,50 @@ mutate core/capture/verify.py \
     "engine parity reads the PNG's pixels at the label window" \
     tests/test_camera_verify.py || failures=$((failures+1))
 
+# -- Camera Phase 1, frames round 3: one coherent parity contract ---------
+
+mutate core/capture/verify.py \
+    '            elif abs(float(step) - 1.0 / rate_hz) > ENGINE_STEP_TOL_S:' \
+    '            elif False:  # MUTATED: the engine step is never checked against the spec rate' \
+    "render.json's step_s is checked against the manifest's rate_hz" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        tol_t = time_tol_s
+        # The engine'"'"'s step is a FACT to check against the spec'"'"'s rate,' \
+    '        tol_t = float(render.get("step_s", time_tol_s))  # MUTATED: the judged file declares its own tolerance
+        # The engine'"'"'s step is a FACT to check against the spec'"'"'s rate,' \
+    "the capture-time tolerance never comes from the file being judged" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                    budget = drawn_aircraft_budget_m(speed, rate_hz)' \
+    '                    budget = {"budget_m": 2.5, "steps": 1.5, "step_m": 1.667, "speed_mps": 200.0, "rate_hz": 120.0}  # MUTATED: a constant budget' \
+    "the drawn-aircraft budget is computed from the run's own speed and rate" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/schedule.py \
+    '        off = off_grid_instants(times, rate_hz)
+        if off:' \
+    '        off = off_grid_instants(times, rate_hz)
+        if False:  # MUTATED: an off-grid instant is scheduled anyway' \
+    "a capture instant off the fixed-step grid is refused by name" \
+    tests/test_camera_schedule.py || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '        if off:
+            raise ValueError(' \
+    '        if False:  # MUTATED: an off-grid schedule reaches the manifest
+            raise ValueError(' \
+    "the manifest refuses a schedule off the fixed-step grid" \
+    tests/test_camera_manifest.py || failures=$((failures+1))
+
+mutate core/capture/poses.py \
+    '    if TAS_CHANNEL in columns and len(columns[TAS_CHANNEL]) == n:' \
+    '    if False:  # MUTATED: the recorded airspeed is ignored' \
+    "the manifest's aircraft speed is the recorded true airspeed when present" \
+    tests/test_camera_manifest.py || failures=$((failures+1))
+
 # -- Camera Phase 1 finished: the web run renders frames, not a clip ------
 
 mutate core/capture/render_pass.py \

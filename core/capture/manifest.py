@@ -19,6 +19,16 @@ Top level::
     output_digest      SHA-256 over the recorded telemetry columns
                        (core.scenario.runner._digest_telemetry)
     seed               the spec's random seed
+    rate_hz            the spec's fixed-step rate (spec.rate): the grid
+                       every capture instant lies on, and the engine's
+                       step the verifier grades render.json's step_s
+                       against -- the engine never declares its own
+                       tolerance
+    step_s             1 / rate_hz
+    speed_basis        where each frame's aircraft.speed_mps came from
+                       (the recorded tas_kt channel, or the ground speed
+                       of the recorded track when no airspeed channel
+                       exists)
     scene              {key, terrain, terrain_sha256} -- terrain_sha256
                        is the SHA-256 of the raw .r16 samples
                        (Heightfield.digest()), null for flat scenes
@@ -57,7 +67,10 @@ Per frame::
     principal_point_px [cx, cy] = the image centre
     fx_px / fy_px      focal length in pixels (focal/sensor * pixels)
     aircraft           {north_m, east_m, alt_m, roll_deg, pitch_deg,
-                       heading_deg} at the same instant
+                       heading_deg, speed_mps} at the same instant --
+                       speed_mps x step_s is one fixed step of this
+                       run's travel, the unit of the engine-parity
+                       drawn-aircraft budget
 
 Projection (reconstructible, and reconstructed independently by the
 verifier): world point P (north, east, alt) in this file's frame;
@@ -84,7 +97,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
 from .poses import PoseTrack, SceneFrame, aircraft_local_track
-from .schedule import CaptureSchedule
+from .schedule import CaptureSchedule, off_grid_instants
 
 MANIFEST_VERSION = 1
 
@@ -153,6 +166,18 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
             f"{len(tracks)} pose tracks against {len(schedules)} "
             f"schedules; every camera needs exactly one of each")
     aircraft = aircraft_local_track(columns, frame)
+    rate_hz = float(spec.rate.value)
+    if not (rate_hz > 0.0):
+        raise ValueError(f"spec rate {rate_hz!r} Hz is not a fixed-step "
+                         f"grid; refusing a manifest with no clock")
+    for schedule in schedules:
+        off = off_grid_instants(schedule.times, rate_hz)
+        if off:
+            raise ValueError(
+                f"camera.schedule: camera {schedule.camera_id!r} schedules "
+                f"{len(off)} instant(s) off the {rate_hz:g} Hz fixed-step "
+                f"grid (first: t={off[0]:.6f} s); the engine captures on "
+                f"fixed steps only and never approximates an instant")
     flown = spec.cameras if cameras is None else list(cameras)
     cameras_by_id = {str(c.camera_id.value): c for c in flown}
 
@@ -214,6 +239,7 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                     "roll_deg": state["roll_deg"],
                     "pitch_deg": state["pitch_deg"],
                     "heading_deg": state["heading_deg"],
+                    "speed_mps": state["speed_mps"],
                 },
             })
 
@@ -223,6 +249,9 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
         "simulation_digest": simulation_digest(spec),
         "output_digest": output_digest,
         "seed": int(spec.seed.value),
+        "rate_hz": rate_hz,
+        "step_s": 1.0 / rate_hz,
+        "speed_basis": aircraft[0]["speed_basis"] if aircraft else None,
         "scene": {
             "key": (scene or {}).get("key", "flat"),
             "terrain": (scene or {}).get("terrain"),

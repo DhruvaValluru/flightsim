@@ -49,7 +49,7 @@ padding or truncating.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from ..scenario.camera import CameraSpec
 from .poses import SceneFrame
@@ -79,6 +79,25 @@ class CaptureSchedule:
         return len(self.indices)
 
 
+#: Representation slack for "on the fixed-step grid": a sample instant
+#: is k / rate_hz computed in floating point (measured on the example:
+#: the worst instant is 2.1e-11 s off its step at 120 Hz).
+GRID_SLACK_S = 1.0e-6
+
+
+def off_grid_instants(times: Sequence[float], rate_hz: float
+                      ) -> List[float]:
+    """The instants in ``times`` that do not lie on the ``rate_hz``
+    fixed-step grid (within GRID_SLACK_S). The engine captures on fixed
+    steps only: the commandlet takes the step whose clock equals the
+    instant and fails by name on any other, so an off-grid schedule is
+    refused here, before any editor time, never rounded to a step."""
+    step = 1.0 / float(rate_hz)
+    return [float(t) for t in times
+            if abs(float(t) / step - round(float(t) / step)) * step
+            > GRID_SLACK_S]
+
+
 def _series(columns, name: str, camera_id: str):
     if name not in columns:
         raise ScheduleError(
@@ -90,11 +109,15 @@ def _series(columns, name: str, camera_id: str):
 
 def solve_schedule(columns: Dict[str, Sequence[float]],
                    camera: CameraSpec,
-                   frame: Optional[SceneFrame] = None) -> CaptureSchedule:
+                   frame: Optional[SceneFrame] = None,
+                   rate_hz: Optional[float] = None) -> CaptureSchedule:
     """The capture schedule for one camera over one telemetry record.
 
     Raises :class:`ScheduleError` (named ``camera.schedule``) rather
-    than emitting a schedule that differs from what was asked.
+    than emitting a schedule that differs from what was asked. With
+    ``rate_hz`` (the spec's fixed-step rate) an instant off that grid is
+    refused by name: the engine captures on fixed steps only and never
+    rounds an instant to the nearest one.
     """
     camera_id = str(camera.camera_id.value)
     t = [float(v) for v in columns.get("t", ())]
@@ -134,9 +157,19 @@ def solve_schedule(columns: Dict[str, Sequence[float]],
             f"over this telemetry; the count contract is refused, never "
             f"padded or truncated")
 
+    times = tuple(t[i] for i in indices)
+    if rate_hz is not None:
+        off = off_grid_instants(times, rate_hz)
+        if off:
+            raise ScheduleError(
+                f"camera {camera_id!r} schedules {len(off)} instant(s) off "
+                f"the {float(rate_hz):g} Hz fixed-step grid (first: "
+                f"t={off[0]:.6f} s); the engine captures on fixed steps "
+                f"only and never approximates an instant to the nearest "
+                f"step")
     return CaptureSchedule(
         camera_id=camera_id, trigger=trigger,
-        indices=tuple(indices), times=tuple(t[i] for i in indices),
+        indices=tuple(indices), times=times,
         basis=basis)
 
 

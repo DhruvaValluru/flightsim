@@ -1276,12 +1276,15 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		: Card.DurationSeconds;
 	const int32 Steps = FMath::RoundToInt(Duration * Card.RateHz);
 	const int32 StepsPerFrame = FMath::Max(1, FMath::RoundToInt(Card.RateHz / FramesPerSecond));
-	// Consume-poses: capture at the card's scheduled instants only. An
-	// instant is met by the first fixed step whose clock reaches it, and it
-	// must be reached within ONE fixed step (the bar's own tolerance; the
-	// schedule is sample-aligned so in practice the step lands on it
-	// exactly, except t=0, which the first step meets at one step). A
-	// schedule the run cannot reach is refused HERE, before any editor time.
+	// Consume-poses: capture at the card's scheduled instants only. Every
+	// instant lies on the fixed-step grid (the Python side refuses one that
+	// does not, by name, before any editor time), and the capture is taken
+	// on the step whose RUN clock -- the FDM clock minus its reading before
+	// the first step, so a trim sequence or engine start that advanced the
+	// clock never shifts the schedule -- EQUALS the instant to ScheduleSlack.
+	// A step that passes an instant without meeting it fails the pass by
+	// name: nothing is rounded to a nearest step. A schedule the run cannot
+	// reach is refused HERE, before any editor time.
 	int32 NextScheduled = 0;
 	const double ScheduleSlack = 1.0e-6;
 	if (bConsumePoses)
@@ -1311,6 +1314,17 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// Fixed steps actually integrated: a consume-poses pass stops after
 	// its last scheduled instant, and says how far it went.
 	int32 StepsTaken = 0;
+	// The FDM clock before the first step of the run: subtracted from every
+	// capture-time reading so t_applied_s is run-relative (the manifest's
+	// clock starts at the first step), and recorded at the root as
+	// clock_origin_s so the raw reading is recoverable (t_clock_s per frame).
+	const double ClockOrigin = Scenario.ReadProperty(TEXT("simulation/sim-time-sec"));
+	if (bConsumePoses)
+	{
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("consume-poses: clock origin t=%.6f s before the first step; capture times are run-relative"),
+		       ClockOrigin);
+	}
 
 	for (int32 Step = 0; Step < Steps; ++Step)
 	{
@@ -1328,19 +1342,21 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			{
 				continue;   // unreachable: the loop breaks after the last capture
 			}
-			const double ClockNow = Scenario.ReadProperty(TEXT("simulation/sim-time-sec"));
+			const double ClockNow =
+				Scenario.ReadProperty(TEXT("simulation/sim-time-sec")) - ClockOrigin;
 			const double Scheduled = ScheduledTimes[NextScheduled];
 			if (ClockNow < Scheduled - ScheduleSlack)
 			{
 				continue;   // not yet
 			}
-			if (ClockNow - Scheduled > DeltaSeconds + ScheduleSlack)
+			if (ClockNow - Scheduled > ScheduleSlack)
 			{
 				return Fail(FString::Printf(
-					TEXT("consume-poses: scheduled instant t=%.6f s (frame %d) was "
-					     "not met within one fixed step (clock %.6f s, step %.6f s); "
-					     "refusing to capture a frame off its instant"),
-					Scheduled, NextScheduled, ClockNow, DeltaSeconds));
+					TEXT("consume-poses: scheduled instant t=%.6f s (frame %d) is not "
+					     "on the fixed-step grid: the run clock stepped past it to %.6f s "
+					     "(step %.6f s, clock origin %.6f s); refusing to capture a frame "
+					     "off its instant"),
+					Scheduled, NextScheduled, ClockNow, DeltaSeconds, ClockOrigin));
 			}
 			ConsumeFrameIndex = NextScheduled;
 			ConsumeScheduledSeconds = Scheduled;
@@ -1468,7 +1484,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Record->SetNumberField(TEXT("frame_index"),
 			                       static_cast<double>(ConsumeFrameIndex));
 			Record->SetNumberField(TEXT("t_scheduled_s"), ConsumeScheduledSeconds);
+			// The run clock at the capture (equal to the instant by the rule
+			// above) and the raw FDM clock it was read from.
 			Record->SetNumberField(TEXT("t_applied_s"),
+			                       Scenario.ReadProperty(TEXT("simulation/sim-time-sec")) - ClockOrigin);
+			Record->SetNumberField(TEXT("t_clock_s"),
 			                       Scenario.ReadProperty(TEXT("simulation/sim-time-sec")));
 			// The instant the applied pose was interpolated AT (the
 			// scheduled one, by construction above): the verifier fails a
@@ -1660,7 +1680,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			// reports them per pass.
 			UE_LOG(LogFlightSimRender, Display,
 			       TEXT("consume-poses: stopped after the last scheduled instant at t=%.3f s (%d of %d steps)"),
-			       Scenario.ReadProperty(TEXT("simulation/sim-time-sec")),
+			       Scenario.ReadProperty(TEXT("simulation/sim-time-sec")) - ClockOrigin,
 			       StepsTaken, Steps);
 			break;
 		}
@@ -1745,6 +1765,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		                     static_cast<double>(ScheduledTimes.Num()));
 		Root->SetNumberField(TEXT("frames_captured"), static_cast<double>(Captured));
 		Root->SetNumberField(TEXT("step_s"), DeltaSeconds);
+		Root->SetNumberField(TEXT("clock_origin_s"), ClockOrigin);
 		// How far the pass stepped: the last scheduled instant, never the
 		// spec's whole duration.
 		Root->SetNumberField(TEXT("steps_taken"), static_cast<double>(StepsTaken));

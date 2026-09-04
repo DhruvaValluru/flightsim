@@ -368,22 +368,66 @@ def test_engine_parity_fails_on_a_corrupted_yaw(tmp_path):
 
 
 def test_engine_parity_fails_on_a_shifted_capture_time(tmp_path):
-    """Captured 50 ms late: six steps at 120 Hz, well past the one fixed
-    step the contract allows, so the frame is not the scheduled
-    instant. (One step late -- t=0 met by the first step -- passes.)"""
-    from core.capture.verify import verify_engine_parity
+    """The capture clock must EQUAL the scheduled instant: every instant
+    lies on the spec's fixed-step grid and the commandlet captures on
+    that step, so the tolerance is representation slack (1e-6 s), not a
+    step. One step late (a different FDM state, ~1.4 m of travel on the
+    example) fails by name -- never absorbed by a one-step tolerance
+    AND charged to the drawn-aircraft budget both. 1e-7 s passes."""
+    from core.capture.verify import ENGINE_TIME_TOL_S, verify_engine_parity
 
     manifest = two_camera_manifest()
     write_capture_manifest(manifest, tmp_path)
     outputs = write_engine_output(manifest, tmp_path)
-    outputs["chase0"]["frame_records"][0]["t_applied_s"] += 1.0 / 120.0
+    outputs["chase0"]["frame_records"][0]["t_applied_s"] += 1.0e-7
     rewrite(tmp_path, "chase0", outputs["chase0"])
-    assert verify_engine_parity(tmp_path, manifest).ok is True
-    outputs["chase0"]["frame_records"][0]["t_applied_s"] += 0.05
+    check = verify_engine_parity(tmp_path, manifest)
+    assert check.ok is True, check.detail
+    assert "worst time 1.0e-07 s (tol 1e-06; every instant on the 120 Hz grid, the engine stepped 0.008333 s)" in check.detail
+    outputs["chase0"]["frame_records"][0]["t_applied_s"] += 1.0 / 120.0
     rewrite(tmp_path, "chase0", outputs["chase0"])
     check = verify_engine_parity(tmp_path, manifest)
     assert check.ok is False
     assert "chase0 frame 0: captured at" in check.detail
+    assert f"(tol {ENGINE_TIME_TOL_S:.4g})" in check.detail
+    assert check.data["tolerances"]["time_s"] == ENGINE_TIME_TOL_S
+    assert check.data["tolerances"]["rate_hz"] == 120.0
+
+
+def test_engine_time_tolerance_comes_from_the_manifest_not_the_file_judged(
+        tmp_path):
+    """render.json's step_s is a FACT checked against the manifest's
+    rate_hz, never the tolerance: a file declaring step_s = 10.0 fails
+    by camera ("the engine stepped 10 s against the spec's 120 Hz") and
+    a shifted capture time STILL fails with it in place."""
+    from core.capture.verify import verify_engine_parity
+
+    manifest = two_camera_manifest()
+    assert manifest["rate_hz"] == 120.0
+    write_capture_manifest(manifest, tmp_path)
+    outputs = write_engine_output(manifest, tmp_path, step_s=10.0)
+    outputs["chase0"]["frame_records"][3]["t_applied_s"] += 0.05
+    rewrite(tmp_path, "chase0", outputs["chase0"])
+    check = verify_engine_parity(tmp_path, manifest)
+    assert check.ok is False
+    assert ("chase0: the engine stepped 10 s against the spec's 120 Hz "
+            "(1/120 = 0.008333 s); the frames are not on the manifest's "
+            "grid") in check.detail
+    assert "tower0: the engine stepped 10 s" in check.detail
+    assert "chase0 frame 3: captured at" in check.detail
+    assert check.data["cameras"]["chase0"]["verified"] == 14
+    # A render.json that states no step at all cannot be checked either.
+    del outputs["chase0"]["step_s"]
+    rewrite(tmp_path, "chase0", outputs["chase0"])
+    check = verify_engine_parity(tmp_path, manifest)
+    assert "chase0: render.json states no step_s" in check.detail
+    # And a manifest without the rate has no grid to grade on.
+    outputs = write_engine_output(manifest, tmp_path)
+    stripped = dict(manifest)
+    del stripped["rate_hz"]
+    check = verify_engine_parity(tmp_path, stripped)
+    assert check.ok is False
+    assert "the manifest carries no rate_hz" in check.detail
 
 
 def test_engine_parity_fails_when_the_pose_was_applied_at_the_clock(
@@ -460,33 +504,55 @@ def test_engine_parity_fails_when_the_engine_drew_the_aircraft_elsewhere(
     own FDM put the aircraft 5 m from where the manifest says (the case
     host parity is refused for): the frame's label does not match its
     pixels, and the check FAILS by frame with the metre and pixel
-    numbers. One step of travel (the measured host phase) passes."""
+    numbers. The budget is THIS run's: 1.5 steps (the measured one-step
+    host phase plus half a step) x the frame's speed / the manifest's
+    rate -- 99.43 m/s (the synthetic track's ground speed through the
+    scene projection) at 120 Hz here, 0.829 m/step, budget 1.24 m --
+    with the arithmetic in the detail line. One step of travel passes."""
     from core.capture.verify import (
-        ENGINE_AIRCRAFT_TOL_M, verify_engine_parity,
+        HOST_PHASE_MARGIN_STEPS, HOST_PHASE_STEPS, drawn_aircraft_budget_m,
+        verify_engine_parity,
     )
 
     manifest = two_camera_manifest()
     write_capture_manifest(manifest, tmp_path)
     outputs = write_engine_output(manifest, tmp_path)
     record = outputs["chase0"]["frame_records"][2]
-    record["aircraft_applied_east_m"] += 1.3      # one 1/120 s step at 156 m/s
+    speed = next(r for r in manifest["frames"] if r["camera_id"] == "chase0"
+                 and r["index"] == 2)["aircraft"]["speed_mps"]
+    assert speed == pytest.approx(99.43, abs=0.01)
+    budget = drawn_aircraft_budget_m(speed, manifest["rate_hz"])
+    assert budget["budget_m"] == pytest.approx(1.243, abs=1e-3)
+    assert HOST_PHASE_STEPS == 1.0 and HOST_PHASE_MARGIN_STEPS == 0.5
+    record["aircraft_applied_east_m"] += 0.83     # one 1/120 s step at 99.4 m/s
     # An honest engine measures and draws the aircraft where its FDM put
     # it: its own pixel and the blob move with the drawn point.
     move_drawn_aircraft(manifest, tmp_path, "chase0", record)
     rewrite(tmp_path, "chase0", outputs["chase0"])
     check = verify_engine_parity(tmp_path, manifest)
     assert check.ok is True, check.detail
-    assert "aircraft drawn within 1.30 m" in check.detail
-    assert f"(tol {ENGINE_AIRCRAFT_TOL_M})" in check.detail
+    assert "aircraft drawn within 0.83 m" in check.detail
+    assert "(budget 1.24 m = 1.5 steps x 0.829 m/step at 99.4 m/s)" in check.detail
     assert "px of its labelled pixel" in check.detail
+    assert check.data["tolerances"]["aircraft_m"] == pytest.approx(1.243, abs=1e-3)
 
-    record["aircraft_applied_east_m"] += 3.7      # 5.0 m in all
+    # A second step (what a one-step clock offset would add) is over
+    # budget by construction: the time clause refuses the clock, the
+    # budget does not absorb it.
+    record["aircraft_applied_east_m"] += 0.83     # 1.66 m
+    move_drawn_aircraft(manifest, tmp_path, "chase0", record)
+    rewrite(tmp_path, "chase0", outputs["chase0"])
+    check = verify_engine_parity(tmp_path, manifest)
+    assert check.ok is False
+    assert "chase0 frame 2: the engine drew the aircraft 1.66 m" in check.detail
+
+    record["aircraft_applied_east_m"] += 3.34     # 5.0 m in all
     move_drawn_aircraft(manifest, tmp_path, "chase0", record)
     rewrite(tmp_path, "chase0", outputs["chase0"])
     check = verify_engine_parity(tmp_path, manifest)
     assert check.ok is False
     assert "chase0 frame 2: the engine drew the aircraft 5.00 m" in check.detail
-    assert f"(tol {ENGINE_AIRCRAFT_TOL_M})" in check.detail
+    assert "(budget 1.24 m = 1.5 steps x 0.829 m/step at 99.4 m/s, 120 Hz)" in check.detail
     assert "px from its labelled pixel (tol" in check.detail
     assert check.data["cameras"]["chase0"]["verified"] == 14
     assert check.data["worst"]["aircraft_m"] == pytest.approx(5.0)
@@ -591,7 +657,7 @@ def test_engine_parity_fails_when_the_engine_measured_the_aircraft_elsewhere(
         tmp_path):
     """The engine's OWN projection of the aircraft it drew (aircraft_px /
     aircraft_py through the capture's transform) is graded against the
-    labelled pixel: 40 px off on a tower frame (budget ~5.5 px at 1.2 km)
+    labelled pixel: 40 px off on a tower frame (budget ~4.3 px at 1.2 km)
     fails by frame with both pixels; a record without it cannot be
     graded; 'not visible' where the label is in frame fails; and an
     engine pixel that disagrees with the manifest's projection model of
@@ -611,7 +677,7 @@ def test_engine_parity_fails_when_the_engine_measured_the_aircraft_elsewhere(
     assert ("tower0 frame 7: the engine measured the aircraft at "
             f"({label_px + 40.0:.1f}, {record['aircraft_py']:.1f}) px, 40.0 px "
             "from the labelled pixel") in check.detail
-    assert "(tol 5.5 px)" in check.detail
+    assert "(tol 4.3 px)" in check.detail
     assert check.data["cameras"]["tower0"]["verified"] == 14
     assert check.data["worst"]["engine_px"] == pytest.approx(40.0)
 
@@ -630,7 +696,7 @@ def test_engine_parity_fails_when_the_engine_measured_the_aircraft_elsewhere(
     assert ("tower0 frame 7: engine record lacks its own projection of the "
             "drawn aircraft") in check.detail
 
-    # The chase's budget is 23.7 px at 150 m: 10 px off the label is inside
+    # The chase's budget is 13.4 px at 150 m: 10 px off the label is inside
     # it, but 10 px off the manifest's projection of the SAME drawn point
     # means the engine's lens is not the manifest's lens.
     outputs = write_engine_output(manifest, tmp_path)

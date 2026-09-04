@@ -193,3 +193,30 @@ def test_event_on_a_missing_channel_refuses():
 def test_unknown_trigger_refuses():
     with pytest.raises(ScheduleError, match="unknown trigger"):
         solve_schedule(make_columns(), camera(trigger="sometimes"))
+
+
+# -- the fixed-step grid ------------------------------------------------
+
+def test_an_instant_off_the_fixed_step_grid_refuses_by_name():
+    """With the spec's rate stated, an instant that is not k / rate_hz
+    is a camera.schedule refusal naming the instant -- never rounded to
+    the nearest step (the engine captures on the step whose clock EQUALS
+    the instant). Sample-aligned records pass, at 120 Hz and at 60 Hz."""
+    from core.capture.schedule import off_grid_instants
+
+    columns = make_columns(duration_s=20.0, dt=0.1)
+    assert len(solve_schedule(columns, camera(capture_count=50),
+                              rate_hz=120.0)) == 50
+    assert len(solve_schedule(columns, camera(capture_count=50),
+                              rate_hz=60.0)) == 50
+    columns["t"][40] = 4.0 + 0.003           # 4.003 s is not a 1/120 s step
+    with pytest.raises(ScheduleError,
+                       match=r"camera.schedule: camera 'cam' schedules 1 "
+                             r"instant\(s\) off the 120 Hz fixed-step grid "
+                             r"\(first: t=4.003000 s\)"):
+        solve_schedule(columns, camera(capture_count=201), rate_hz=120.0)
+    # Without a rate stated the schedule is the telemetry's; the refusal
+    # lives where the rate is known.
+    assert len(solve_schedule(columns, camera(capture_count=201))) == 201
+    assert off_grid_instants([0.0, 1.0 / 120.0, 0.1, 4.003], 120.0) == [4.003]
+    assert off_grid_instants([0.0, 0.5, 1.0 / 120.0 * 7], 120.0) == []

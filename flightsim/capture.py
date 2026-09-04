@@ -207,7 +207,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         for camera in cameras:
             tracks.append(solve_pose_track(columns, camera, frame))
-            schedules.append(solve_schedule(columns, camera, frame))
+            schedules.append(solve_schedule(
+                columns, camera, frame, rate_hz=float(spec.rate.value)))
     except ScheduleError as exc:
         print(f"REFUSED -- {exc}")
         return 2

@@ -81,10 +81,53 @@ def test_every_frame_field_is_present_and_finite():
                                                 record["height_px"] / 2.0]
         aircraft = record["aircraft"]
         for key in ("north_m", "east_m", "alt_m", "roll_deg",
-                    "pitch_deg", "heading_deg"):
+                    "pitch_deg", "heading_deg", "speed_mps"):
             assert math.isfinite(aircraft[key]), key
         assert record["file"].startswith(
             f"frames/{record['camera_id']}/")
+
+
+def test_manifest_carries_the_fixed_step_grid_and_the_aircraft_speed():
+    """The verifier's engine-parity clock tolerance and drawn-aircraft
+    budget come from the MANIFEST: rate_hz (the spec's), step_s, and per
+    frame the aircraft's speed with its basis stated -- the recorded
+    tas_kt channel when the record has one, else the ground speed of the
+    recorded track (the synthetic record: 100 m/s northbound in
+    degrees, 99.43 m/s through the scene frame's own projection)."""
+    from core.capture.schedule import off_grid_instants
+
+    manifest = build()
+    assert manifest["rate_hz"] == 120.0
+    assert manifest["step_s"] == pytest.approx(1.0 / 120.0)
+    assert manifest["speed_basis"] == ("ground speed of the recorded track "
+                                       "(no tas_kt channel)")
+    for record in manifest["frames"]:
+        assert record["aircraft"]["speed_mps"] == pytest.approx(99.43, abs=0.01)
+    assert off_grid_instants([r["t_s"] for r in manifest["frames"]],
+                             manifest["rate_hz"]) == []
+
+    columns = make_columns(duration_s=10.0)
+    columns["tas_kt"] = [250.0] * len(columns["t"])
+    manifest = build(columns=columns)
+    assert manifest["speed_basis"] == ("true airspeed from the recorded "
+                                       "tas_kt channel")
+    assert manifest["frames"][0]["aircraft"]["speed_mps"] == pytest.approx(
+        250.0 * 0.514444, abs=1e-3)
+
+
+def test_manifest_refuses_a_schedule_off_the_fixed_step_grid():
+    """A schedule whose instant is not on the spec's grid is refused by
+    name before any manifest exists: the engine captures on fixed steps
+    and never approximates an instant."""
+    columns = make_columns(duration_s=10.0, dt=0.1)
+    columns["t"][5] = 0.5 + 0.003          # 0.503 s: not a 1/120 s step
+    spec = spec_with_cameras()
+    tracks = [solve_pose_track(columns, c, FRAME) for c in spec.cameras]
+    schedules = [solve_schedule(columns, c, FRAME) for c in spec.cameras]
+    with pytest.raises(ValueError, match="camera.schedule.*off the 120 Hz "
+                                          "fixed-step grid"):
+        build_capture_manifest(spec, columns, FRAME, tracks, schedules,
+                               output_digest="0" * 64)
 
 
 def test_frames_carry_per_camera_indices_and_paths():

@@ -227,7 +227,8 @@ def capture_run(spec, out: Path, scene: Dict,
     try:
         for camera in cameras:
             tracks.append(solve_pose_track(columns, camera, frame))
-            schedules.append(solve_schedule(columns, camera, frame))
+            schedules.append(solve_schedule(
+                columns, camera, frame, rate_hz=float(spec.rate.value)))
     except ScheduleError as exc:
         raise CaptureError("camera.schedule", str(exc)) from exc
 

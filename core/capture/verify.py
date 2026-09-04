@@ -35,15 +35,22 @@ Checks (numbered as in the phase document):
    ``frames/<camera_id>/render.json`` beside the PNGs: per frame the
    pose it ACTUALLY APPLIED and the simulation time it captured at. The
    applied pose must equal the manifest's solved pose within 10 cm and
-   0.1 deg, the applied time the scheduled instant within one fixed
-   step, the PNG named by the frame's index must exist at the
+   0.1 deg, the applied time must EQUAL the scheduled instant (every
+   instant lies on the manifest's fixed-step grid and the engine
+   captures on that step; the engine's step is checked against the
+   manifest's rate), the PNG named by the frame's index must exist at the
    manifest's size, the aircraft must reproject through the applied
    pose to the pixel the manifest's own projection gives, and the
    aircraft the engine actually DREW (``aircraft_applied_*``, its own
-   FDM's state at the capture) must land within a stated metre budget
-   of the manifest's aircraft and, reprojected through the applied
-   pose, within the pixels that budget subtends at the frame's depth --
-   the clause that judges the pixels, not only the camera. With no
+   FDM's state at the capture) must land within a metre budget computed
+   from THIS run (the measured one-step host phase plus half a step,
+   times the frame's recorded speed over the manifest's rate) of the
+   manifest's aircraft and, reprojected through the applied pose,
+   within the pixels that budget subtends at the frame's depth; the
+   engine's own projection of that aircraft must sit at the labelled
+   pixel, and the PNG's window around the label must differ from the
+   frame's background -- the clauses that judge the pixels, not only
+   the numbers the engine wrote about itself. With no
    render.json at all the check is AWAITING ENGINE FRAMES -- a third
    state that neither passes nor fails, so a headless run can never
    claim parity it did not exercise and never fails for lacking an
@@ -73,13 +80,19 @@ TIME_TOL_S = 1e-9
 #: fails on, and 0.1 deg of orientation.
 ENGINE_POSITION_TOL_M = 0.10
 ENGINE_ANGLE_TOL_DEG = 0.1
-#: Applied capture time against the scheduled instant: ONE fixed step
-#: at the 120 Hz default rate -- the bar's own tolerance ("to within one
-#: fixed step"). The commandlet captures on the first step whose clock
-#: reaches the instant, so a sample-aligned instant is met exactly and
-#: t=0 is met by the first step, one step late. When render.json states
-#: the engine's own ``step_s`` the tolerance is THAT step.
-ENGINE_TIME_TOL_S = 1.0 / 120.0
+#: Applied capture time against the scheduled instant. Every instant lies
+#: on the spec's fixed-step grid (core.capture.schedule refuses one that
+#: does not, by name, before any editor time) and the commandlet captures
+#: on the step whose run clock EQUALS the instant (its clock origin, read
+#: before the first step, is subtracted and recorded), so the tolerance
+#: is representation slack, not a step: a capture one step late is a
+#: different FDM state and fails by name here. The grid itself is the
+#: MANIFEST's ``rate_hz``; render.json's ``step_s`` is a fact to check
+#: against it, never the tolerance.
+ENGINE_TIME_TOL_S = 1.0e-6
+#: The engine's step against the manifest's 1/rate_hz: exact to float
+#: representation.
+ENGINE_STEP_TOL_S = 1.0e-9
 #: The instant the engine interpolated the applied pose AT (``t_pose_s``)
 #: against the scheduled instant: the commandlet applies the pose at the
 #: scheduled instant itself, never at the engine clock, so this is exact
@@ -95,20 +108,38 @@ ENGINE_POSE_TIME_TOL_S = 1.0e-6
 ENGINE_REPROJECTION_TOL_PX = 3.0
 #: The aircraft the engine DREW (``aircraft_applied_*``: its own FDM's
 #: state at the capture, in the card frame) against the manifest's
-#: aircraft (the headless flight) -- the host-parity budget, in metres.
-#: Measured basis (docs/VALIDITY.md, Gate 5 and the parity matrix): the
-#: two hosts' calm flights agree to 3.6e-4 m in altitude and 1e-5 deg in
-#: attitude, and differ in position by a CONSTANT one-fixed-step phase
-#: (1.24 m at 250 kt; the headless host integrates one extra step during
-#: engine start). 2.5 m is one 1/120 s step of travel at 300 m/s, above
-#: any envelope point the vocabulary validates, plus that residual; a
-#: drawn aircraft further off than that is a flight the manifest does not
-#: describe (a turbulence realisation, a diverged FDM), never a label.
-#: In pixels the budget is GRADED per frame: the pose tolerance above
-#: plus what 2.5 m subtends at the frame's own depth (fx * 2.5 / depth):
-#: about 31 px for a chase frame at 110 m, about 6 px for a tower frame
-#: at 1.2 km, at the default 1244 px focal.
-ENGINE_AIRCRAFT_TOL_M = 2.5
+#: aircraft (the headless flight) -- the host-parity budget, computed PER
+#: RUN from the manifest, never a constant for some other aircraft:
+#:
+#:     budget_m = (HOST_PHASE_STEPS + HOST_PHASE_MARGIN_STEPS)
+#:                x speed_mps / rate_hz
+#:
+#: with the frame's own ``aircraft.speed_mps`` (the recorded true
+#: airspeed) and the manifest's ``rate_hz``. Measured basis
+#: (docs/VALIDITY.md, Gate 5 and the parity matrix): the two hosts' calm
+#: flights agree to 3.6e-4 m in altitude and 1e-5 deg in attitude, and
+#: differ in position by a CONSTANT phase of EXACTLY ONE fixed step (1.24
+#: m at 250 kt: the headless host integrates one extra step during
+#: engine start) -- HOST_PHASE_STEPS. The margin is half a step: the
+#: phase was measured at one envelope point, and half a step covers a
+#: trim start that differs by less than a step WITHOUT admitting a whole
+#: second step -- which is the clock offset the time clause above
+#: refuses by name, so the two clauses cannot contradict each other. The
+#: arithmetic is printed in the detail line ("budget 2.08 m = 1.5 steps x
+#: 1.384 m/step"). In pixels the budget is GRADED per frame: the pose
+#: tolerance above plus what the budget subtends at the frame's depth
+#: (fx x budget / depth).
+HOST_PHASE_STEPS = 1.0
+HOST_PHASE_MARGIN_STEPS = 0.5
+
+
+def drawn_aircraft_budget_m(speed_mps: float, rate_hz: float) -> Dict[str, float]:
+    """The drawn-aircraft budget for one frame: the numbers the detail
+    line prints (``budget_m``, ``steps``, ``step_m``)."""
+    step_m = float(speed_mps) / float(rate_hz)
+    steps = HOST_PHASE_STEPS + HOST_PHASE_MARGIN_STEPS
+    return {"budget_m": steps * step_m, "steps": steps, "step_m": step_m,
+            "speed_mps": float(speed_mps), "rate_hz": float(rate_hz)}
 
 #: The engine's OWN measurement of where it drew the aircraft:
 #: ``aircraft_px`` / ``aircraft_py`` / ``aircraft_visible`` per frame, the
@@ -623,9 +654,9 @@ def _pixel_content_clause(camera_id: str, index: int, record: Dict,
 def verify_engine_parity(run_dir, manifest: Dict,
                          pos_tol_m: float = ENGINE_POSITION_TOL_M,
                          ang_tol_deg: float = ENGINE_ANGLE_TOL_DEG,
-                         time_tol_s: Optional[float] = None,
+                         time_tol_s: float = ENGINE_TIME_TOL_S,
                          px_tol: float = ENGINE_REPROJECTION_TOL_PX,
-                         aircraft_tol_m: float = ENGINE_AIRCRAFT_TOL_M
+                         aircraft_tol_m: Optional[float] = None
                          ) -> Check:
     """Check 5: the frames the engine rendered carry the geometry the
     manifest claims.
@@ -636,17 +667,22 @@ def verify_engine_parity(run_dir, manifest: Dict,
     position within ``pos_tol_m`` of the solved one, applied
     yaw/pitch/roll within ``ang_tol_deg``, the pose interpolated AT the
     scheduled instant (``t_pose_s``, exact to ENGINE_POSE_TIME_TOL_S),
-    the applied capture time within ``time_tol_s`` (default: the
-    engine's stated step, one fixed step) of the scheduled instant, the
+    the applied capture time EQUAL to the scheduled instant within
+    ``time_tol_s`` (representation slack: the instant lies on the
+    manifest's ``rate_hz`` grid and the engine captures on that step;
+    render.json's ``step_s`` must equal 1/rate_hz), the
     PNG named by the index present at the
     manifest's width and height, and the aircraft reprojected through
     the APPLIED pose (this module's own projection, Euler path) within
     ``px_tol`` of the manifest's own projection and, for aircraft-aimed
     cameras, inside the frame. Then the aircraft the engine DREW
     (``aircraft_applied_*``; its absence FAILS the frame -- a record
-    without it cannot be graded) within ``aircraft_tol_m`` of the
+    without it cannot be graded) within the frame's budget -- computed
+    from the frame's recorded speed and the manifest's rate
+    (:func:`drawn_aircraft_budget_m`; ``aircraft_tol_m`` overrides it
+    for a caller that states its own) -- of the
     manifest's aircraft and, reprojected through the applied pose,
-    within ``px_tol + fx * aircraft_tol_m / depth`` of the manifest's
+    within ``px_tol + fx * budget / depth`` of the manifest's
     labelled pixel and inside an aimed frame. The engine's frame counts
     must equal the schedule's.
 
@@ -672,6 +708,17 @@ def verify_engine_parity(run_dir, manifest: Dict,
              "label_contrast": float("inf"), "label_background": 0.0}
     frames_checked = 0
     time_tol_used = time_tol_s
+    rate_hz = manifest.get("rate_hz")
+    if not isinstance(rate_hz, (int, float)) or not rate_hz > 0:
+        problems.append("the manifest carries no rate_hz; the fixed-step "
+                        "grid the capture clock is graded on cannot be "
+                        "stated (a manifest written before this contract)")
+        rate_hz = None
+    worst["budget_m"] = 0.0
+    worst["budget_steps"] = HOST_PHASE_STEPS + HOST_PHASE_MARGIN_STEPS
+    worst["budget_step_m"] = 0.0
+    worst["budget_speed_mps"] = 0.0
+    clock_origins: Dict[str, float] = {}
 
     for camera_id in camera_ids:
         records = by_camera.get(camera_id, [])
@@ -693,12 +740,24 @@ def verify_engine_parity(run_dir, manifest: Dict,
             problems.append(f"{camera_id}: render.json is not a mapping")
             continue
         tol_t = time_tol_s
-        if tol_t is None:
-            step = render.get("step_s")
-            tol_t = (float(step) if isinstance(step, (int, float))
-                     and step > 0 else ENGINE_TIME_TOL_S)
-        time_tol_used = tol_t if time_tol_used is None else max(
-            time_tol_used, tol_t)
+        # The engine's step is a FACT to check against the spec's rate,
+        # never the tolerance: a render.json declaring step_s = 10 would
+        # otherwise pass any capture time.
+        step = render.get("step_s")
+        if rate_hz is not None:
+            if not isinstance(step, (int, float)) or not step > 0:
+                problems.append(f"{camera_id}: render.json states no step_s; "
+                                f"the engine's step cannot be checked "
+                                f"against the spec's {rate_hz:g} Hz")
+            elif abs(float(step) - 1.0 / rate_hz) > ENGINE_STEP_TOL_S:
+                problems.append(f"{camera_id}: the engine stepped "
+                                f"{float(step):.6g} s against the spec's "
+                                f"{rate_hz:g} Hz (1/{rate_hz:g} = "
+                                f"{1.0 / rate_hz:.6f} s); the frames are "
+                                f"not on the manifest's grid")
+        origin = render.get("clock_origin_s")
+        if isinstance(origin, (int, float)):
+            clock_origins[camera_id] = float(origin)
         applied_by_index: Dict[int, Dict] = {}
         for applied in render.get("frame_records", []):
             if isinstance(applied, dict) and "frame_index" in applied:
@@ -851,9 +910,38 @@ def verify_engine_parity(run_dir, manifest: Dict,
                                 f"lacks the drawn aircraft ({exc}); the "
                                 f"pixels cannot be judged against the "
                                 f"label")
+            budget = None
             if drawn is not None:
+                speed = (record.get("aircraft") or {}).get("speed_mps")
+                if aircraft_tol_m is not None:
+                    budget = {"budget_m": float(aircraft_tol_m),
+                              "steps": float("nan"), "step_m": float("nan"),
+                              "speed_mps": float("nan"),
+                              "rate_hz": float("nan")}
+                elif rate_hz is None or not isinstance(speed, (int, float)):
+                    drawn = None
+                    frame_ok = False
+                    problems.append(f"{camera_id} frame {index}: the "
+                                    f"manifest frame carries no aircraft "
+                                    f"speed_mps or rate_hz; the drawn-"
+                                    f"aircraft budget cannot be computed "
+                                    f"for this run")
+                else:
+                    budget = drawn_aircraft_budget_m(speed, rate_hz)
+            if drawn is not None:
+                tol_m = budget["budget_m"]
+                budget_words = (
+                    f"budget {tol_m:.2f} m = {budget['steps']:g} steps x "
+                    f"{budget['step_m']:.3f} m/step at {budget['speed_mps']:.1f} "
+                    f"m/s, {budget['rate_hz']:g} Hz"
+                    if math.isfinite(budget["steps"])
+                    else f"budget {tol_m:.2f} m stated by the caller")
                 gap_m = math.dist(drawn, point)
-                worst["aircraft_m"] = max(worst["aircraft_m"], gap_m)
+                if gap_m >= worst["aircraft_m"]:
+                    worst["aircraft_m"] = gap_m
+                    worst["budget_m"] = tol_m
+                    worst["budget_step_m"] = budget["step_m"]
+                    worst["budget_speed_mps"] = budget["speed_mps"]
                 u_d, v_d, z_d = project_point(
                     applied_record, drawn,
                     axes_from_euler(a_roll, a_pitch, a_yaw))
@@ -865,18 +953,17 @@ def verify_engine_parity(run_dir, manifest: Dict,
                                     f"the manifest's aircraft)")
                 elif z_s > 0 and math.isfinite(u_s):
                     gap_px_d = math.hypot(u_d - u_s, v_d - v_s)
-                    tol_px_d = px_tol + float(record["fx_px"]) * \
-                        aircraft_tol_m / z_d
+                    tol_px_d = px_tol + float(record["fx_px"]) * tol_m / z_d
                     if gap_px_d > worst["aircraft_px"]:
                         worst["aircraft_px"] = gap_px_d
                         worst["aircraft_px_tol"] = tol_px_d
                         worst["aircraft_depth_m"] = z_d
-                    if gap_m > aircraft_tol_m or gap_px_d > tol_px_d:
+                    if gap_m > tol_m or gap_px_d > tol_px_d:
                         frame_ok = False
                         problems.append(
                             f"{camera_id} frame {index}: the engine drew "
                             f"the aircraft {gap_m:.2f} m from the "
-                            f"manifest's aircraft (tol {aircraft_tol_m}), "
+                            f"manifest's aircraft ({budget_words}), "
                             f"{gap_px_d:.1f} px from its labelled pixel "
                             f"(tol {tol_px_d:.1f} px at {z_d:.0f} m)")
                     if aim_modes.get(camera_id) == "aircraft" and not (
@@ -904,25 +991,31 @@ def verify_engine_parity(run_dir, manifest: Dict,
                             frame_ok &= _pixel_content_clause(
                                 camera_id, index, record, applied, png,
                                 (u_s, v_s), tol_px_d, worst, problems)
-                elif gap_m > aircraft_tol_m:
+                elif gap_m > tol_m:
                     # The manifest's own camera does not see the aircraft
                     # ahead (a cockpit view): the metre budget still holds.
                     frame_ok = False
                     problems.append(
                         f"{camera_id} frame {index}: the engine drew the "
                         f"aircraft {gap_m:.2f} m from the manifest's "
-                        f"aircraft (tol {aircraft_tol_m})")
+                        f"aircraft ({budget_words})")
             if frame_ok:
                 verified += 1
         entry["verified"] = verified
         frames_checked += scheduled
 
     data = {"cameras": per_camera, "worst": worst,
+            "clock_origins_s": clock_origins,
             "tolerances": {"position_m": pos_tol_m, "angle_deg": ang_tol_deg,
                            "time_s": time_tol_used,
+                           "step_s": ENGINE_STEP_TOL_S,
+                           "rate_hz": rate_hz,
                            "pose_time_s": ENGINE_POSE_TIME_TOL_S,
                            "reprojection_px": px_tol,
-                           "aircraft_m": aircraft_tol_m,
+                           "aircraft_m": (worst["budget_m"]
+                                          if aircraft_tol_m is None
+                                          else aircraft_tol_m),
+                           "aircraft_budget_steps": worst["budget_steps"],
                            "label_contrast_min": ENGINE_LABEL_CONTRAST_MIN}}
     if worst["label_contrast"] == float("inf"):
         worst["label_contrast"] = None
@@ -944,13 +1037,21 @@ def verify_engine_parity(run_dir, manifest: Dict,
                   f"camera(s); worst position {worst['position_m']:.3f} m "
                   f"(tol {pos_tol_m}); worst angle {worst['angle_deg']:.3f} "
                   f"deg (tol {ang_tol_deg}); worst time "
-                  f"{worst['time_s']:.4f} s (tol {time_tol_used:.4g}); pose "
-                  f"applied at the scheduled instant to "
+                  f"{worst['time_s']:.1e} s (tol {time_tol_used:.0e}; every "
+                  f"instant on the {rate_hz:g} Hz grid, the engine stepped "
+                  f"{1.0 / rate_hz:.6f} s"
+                  + (f", clock origin {max(clock_origins.values()):.6f} s"
+                     if clock_origins else "")
+                  + f"); pose applied at the scheduled instant to "
                   f"{worst['pose_time_s']:.1e} s; "
                   f"worst reprojection {worst['reprojection_px']:.2f} px "
                   f"(tol {px_tol}); aircraft drawn within "
                   f"{worst['aircraft_m']:.2f} m of the manifest's aircraft "
-                  f"(tol {aircraft_tol_m}) and {worst['aircraft_px']:.1f} px "
+                  f"(budget {worst['budget_m']:.2f} m = "
+                  f"{worst['budget_steps']:g} steps x "
+                  f"{worst['budget_step_m']:.3f} m/step at "
+                  f"{worst['budget_speed_mps']:.1f} m/s) and "
+                  f"{worst['aircraft_px']:.1f} px "
                   f"of its labelled pixel (tol {worst['aircraft_px_tol']:.1f} "
                   f"px at that frame's {worst['aircraft_depth_m']:.0f} m); "
                   f"the engine measured its aircraft within "

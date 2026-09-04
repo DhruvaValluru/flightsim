@@ -55,10 +55,13 @@ table. Now:
   module docstring): per frame the pose (position, quaternion AND
   Euler), full intrinsics (focal, sensor, principal point, pixel focal
   lengths, near/far), the relative per-camera image path, and the
-  aircraft state at that instant; per run the spec digest, the
+  aircraft state at that instant (with its speed, `speed_mps`, from the
+  recorded true airspeed); per run the spec digest, the
   camera-free `simulation_digest`, the telemetry `output_digest`, the
-  seed, the terrain raster SHA-256, the scene-frame CRS and the git
-  revision.
+  seed, the spec's fixed-step `rate_hz` and `step_s` (the grid every
+  capture instant lies on -- a schedule off it is refused
+  `camera.schedule` by name), the terrain raster SHA-256, the scene-frame
+  CRS and the git revision.
 * **Verification can fail** (`core/capture/verify.py`): temporal
   alignment across camera variants, geometry recovery through an
   independent reprojection (quaternion cross-checked against Euler;
@@ -198,27 +201,41 @@ Now it does, and the choice is explicit:
 * **Engine parity** (`core/capture/verify.py` `verify_engine_parity`,
   check 5): per camera, `frames/<camera_id>/render.json` matched to the
   manifest by `frame_index`; applied position within 0.10 m, applied
-  yaw/pitch/roll within 0.1 deg, `t_applied_s` within one fixed step
-  (the engine's own `step_s`) of `t_s`, the PNG named by the index at
-  the manifest's width x height, the engine's counts equal to the
-  schedule, and the aircraft reprojected through the APPLIED pose
-  within 3 px of the manifest's own projection (and inside aimed
-  frames). Then the aircraft the engine actually DREW
+  yaw/pitch/roll within 0.1 deg, `t_applied_s` EQUAL to `t_s` (tolerance
+  1e-6 s, representation slack: every instant lies on the MANIFEST's
+  `rate_hz` grid and the commandlet captures on the step whose run clock
+  equals it -- a capture one step late is a different FDM state and
+  fails by name; render.json's `step_s` is a fact checked against
+  1/rate_hz, "the engine stepped 10 s against the spec's 120 Hz", never
+  the tolerance, so the file being judged cannot declare its own), the
+  PNG named by the index at the manifest's width x height, the engine's
+  counts equal to the schedule, and the aircraft reprojected through the
+  APPLIED pose within 3 px of the manifest's own projection (and inside
+  aimed frames). Then the aircraft the engine actually DREW
   (`aircraft_applied_*`: its own FDM's state at the capture) is JUDGED,
-  not reported: within `ENGINE_AIRCRAFT_TOL_M` = 2.5 m of the manifest's
-  aircraft and, reprojected through the applied pose, within a pixel
-  tolerance graded by the frame's depth, `3 px + fx * 2.5 m / depth`,
-  of the manifest's labelled pixel -- measured on `cameras_multi`: the
-  chase frames sit 110.7-177.2 m from the aircraft (31.1-20.6 px), the
-  tower frames 3074-3262 m (4.0 px) -- and inside an aimed frame; a
-  record without the drawn aircraft FAILS the frame. The 2.5 m is one
-  fixed step of travel at 300 m/s plus the measured host residual:
-  docs/VALIDITY.md's Gate 5 puts the two hosts 3.6e-4 m apart in
-  altitude and the parity matrix a CONSTANT one-step phase apart in
-  position (1.24 m at 250 kt); this example flies 322.7 kt TAS, 1.384 m
-  per step, so the expected drawn-aircraft distance on the Windows run
-  is about 1.4 m (an engine whose FDM diverged, or a clock one step off
-  on top of the phase, fails this clause by name with the number). A
+  not reported, against ONE budget computed per run from the manifest,
+  never a constant for some other aircraft:
+  `budget = (1 + 0.5) steps x speed_mps / rate_hz` -- the measured host
+  phase (docs/VALIDITY.md: the two hosts' calm flights agree to 3.6e-4 m
+  in altitude and differ in position by a CONSTANT phase of EXACTLY ONE
+  fixed step, 1.24 m at 250 kt, the headless host's extra step during
+  engine start) plus half a step of margin (the phase was measured at
+  one envelope point; half a step covers a trim start that differs by
+  less than a step WITHOUT admitting a second whole step, which is the
+  clock offset the time clause refuses -- so the two clauses cannot
+  contradict each other, and a one-step-late clock fails cleanly by
+  name, never "within contract" on one line and over budget on the
+  next). The arithmetic is printed: on `cameras_multi` (322.74 kt TAS =
+  166.03 m/s from the recorded `tas_kt`, 120 Hz) "budget 2.08 m = 1.5
+  steps x 1.384 m/step at 166.0 m/s"; a slow c172 run earns a smaller
+  budget, a fast one a larger, each its own. In pixels the budget is
+  graded by depth, `3 px + fx * budget / depth`: measured on
+  `cameras_multi` the chase frames sit 110.7-177.1 m from the aircraft
+  (26.3-17.6 px), the tower frames 3074-3262 m (3.8 px) -- and inside
+  an aimed frame; a record without the drawn aircraft FAILS the frame.
+  The expected drawn-aircraft distance on the Windows run is ONE number:
+  about 1.38 m (the measured one-step phase at this TAS), against the
+  2.08 m budget; a diverged FDM fails by name with the number. A
   spec whose air CANNOT agree across hosts -- a turbulence word, or the
   lee rotor a terrain scene attaches -- is refused `render.host_parity`
   by name before any editor time (POST /run 409, the flow, and the CLI),
@@ -289,15 +306,25 @@ In the `-camera-index=N` pass it:
    view to `2 atan(sensor_width / 2 focal)` -- per frame, from the
    interpolated focal -- so the manifest's `fx`/`fy` and the pixels
    describe one lens;
-4. captures ONLY at the scheduled instants: the first fixed step whose
-   clock reaches an instant takes it; an instant not met within one
-   fixed step fails the pass by name; `-fps` plays no part;
+4. captures ONLY at the scheduled instants, on the fixed step whose RUN
+   clock equals the instant. The rule in one sentence: every instant is
+   `k / rate_hz` (the Python side refuses any other by name before
+   editor time, `camera.schedule ... off the 120 Hz fixed-step grid`),
+   the commandlet reads the FDM clock once before its first step
+   (`clock_origin_s`, logged and recorded) and subtracts it from every
+   reading, so the k-th step meets the instant exactly and a trim
+   sequence or engine start that advanced the clock cannot shift the
+   schedule; a step that passes an instant without meeting it fails
+   the pass by name ("is not on the fixed-step grid") -- nothing is
+   rounded to a nearest step, which is why "nearest" and "at or after"
+   never differ here. `-fps` plays no part;
 5. applies the pose AT THE SCHEDULED INSTANT (`ApplyPoseAtTime(t_sched)`,
    the instant the manifest's solved pose was computed at), never at
    the engine clock's reading, so the pose contract is exact by
-   construction; the clock is recorded beside it as `t_applied_s` and
-   the instant the pose was taken at as `t_pose_s` (the verifier fails
-   a frame whose `t_pose_s` is not the manifest's `t_s`, to 1e-6 s);
+   construction; the run clock is recorded beside it as `t_applied_s`
+   (the raw FDM clock as `t_clock_s`) and the instant the pose was
+   taken at as `t_pose_s` (the verifier fails a frame whose `t_pose_s`
+   or `t_applied_s` is not the manifest's `t_s`, to 1e-6 s);
 6. names each PNG `%04d.png` by its manifest index and writes per
    frame `frame_index`, `t_scheduled_s`, `t_applied_s`, `t_pose_s`, the
    applied pose (`camera_applied_*`), the SOLVED pose it was compared to
@@ -309,7 +336,8 @@ In the `-camera-index=N` pass it:
    eight corners' screen box when all lie in front of the camera,
    `aircraft_bbox_corners_in_front`); the root
    carries `frames_scheduled`, `frames_captured`, `step_s`,
-   `steps_taken`, `stepped_s`, `capture_fov_deg`, the sensor size;
+   `clock_origin_s`, `steps_taken`, `stepped_s`, `capture_fov_deg`, the
+   sensor size;
 7. `ApplyPoseAtTime` FAILS the pass (never warns) when the applied
    position differs from the solved one by more than 10 cm
    (`PoseParityPositionCm`) OR the applied orientation by more than
@@ -367,7 +395,7 @@ engine pass 2 of 2: camera 'tower0', 24 frames scheduled over the 12 s run (-cam
   [PASS] geometry_recovery: 48 frames; quaternion-vs-euler reprojection gap 0.0000 px (tol 0.5); 0 aircraft behind camera; 0 aimed frames without the aircraft in frame
   [PASS] cross_view_consistency: 24 two-view instants; worst triangulation error 0.0000 m (tol 0.5)
   [PASS] count_exactness: 2 camera(s), every declared count met exactly
-  [PASS] engine_parity: 48 frames across 2 camera(s); worst position 0.0xx m (tol 0.1); worst angle 0.0xx deg (tol 0.1); worst time 0.00xx s (tol 0.008333); pose applied at the scheduled instant to 0.0e+00 s; worst reprojection x.xx px (tol 3.0); aircraft drawn within x.xx m of the manifest's aircraft (tol 2.5) and xx.x px of its labelled pixel (tol 31.1 px at that frame's 111 m); the engine measured its aircraft within xx.x px of the label and x.xx px of the manifest's projection model (tol 3.0); lowest label window contrast xx.x against background xxx.x (min 8)
+  [PASS] engine_parity: 48 frames across 2 camera(s); worst position 0.0xx m (tol 0.1); worst angle 0.0xx deg (tol 0.1); worst time x.xe-xx s (tol 1e-06; every instant on the 120 Hz grid, the engine stepped 0.008333 s, clock origin x.xxxxxx s); pose applied at the scheduled instant to 0.0e+00 s; worst reprojection x.xx px (tol 3.0); aircraft drawn within x.xx m of the manifest's aircraft (budget 2.08 m = 1.5 steps x 1.384 m/step at 166.0 m/s) and xx.x px of its labelled pixel (tol 26.3 px at that frame's 111 m); the engine measured its aircraft within xx.x px of the label and x.xx px of the manifest's projection model (tol 3.0); lowest label window contrast xx.x against background xxx.x (min 8)
 verification PASSED (6/6 checks)
 rendered 48 frames across 2 camera(s) (48 verified by engine parity) under runs\demo\frames
 ```
@@ -382,13 +410,17 @@ them in here from the log. What each one tells:
 * `pose applied at the scheduled instant to 0.0e+00 s` -- exact by
   construction (`t_pose_s` is the card's instant); anything else means
   the commandlet regressed to applying the pose at the clock.
-* `worst time` -- the engine clock (`simulation/sim-time-sec`) at the
-  capture against the scheduled instant: 0.0000 if the clock after N
-  steps reads N x 1/120 s (JSBSim increments sim-time-sec at the end of
-  each Run; every capture instant is a sample instant, and samples fall
-  on fixed steps), 0.0083 if the trim sequence or engine start offsets
-  it by one step. Either passes the one-step contract; the number is
-  UNMEASURED until this run and is the coupling this section pins down.
+* `worst time` -- the RUN clock at the capture (`simulation/sim-time-sec`
+  minus `clock_origin_s`, the reading before the first step) against
+  the scheduled instant: expected at float accumulation, under 1e-9 s
+  (1439 steps of 0.0083333 s). The one-step ambiguity of the previous
+  contract is gone by construction: whatever the trim sequence or
+  engine start left on the clock is `clock_origin_s` (printed in the
+  line; expected 0.000000 or a small multiple of 0.008333), subtracted,
+  and recorded -- it can never make a capture "one step late but
+  within contract". A value over 1e-6 s fails by name and means the
+  schedule is not on the engine's grid, which the log's "clock origin"
+  and the pass's `step_s` then explain.
 * `the engine measured its aircraft within xx.x px of the label` -- the
   commandlet's own projection of the actor it drew against the
   manifest's labelled pixel; expected within the same graded budget as
@@ -402,12 +434,13 @@ them in here from the log. What each one tells:
   on screen means the label window is not where the aircraft is, and
   the frame's `aircraft_bbox_px` says where the engine drew it.
 * `aircraft drawn within x.xx m` -- the engine's own FDM against the
-  headless flight at the capture: expected about one step of travel,
-  1.4 m for this example (the measured constant one-step host phase,
-  docs/VALIDITY.md), PLUS another 1.4 m per step of `worst time` if the
-  clock is offset. A value over 2.5 m fails by name, and then the clock
-  offset (`worst time`) says whether it is the coupling or a diverged
-  FDM.
+  headless flight at the capture: ONE expected number, about 1.38 m
+  for this example (the measured constant one-step host phase,
+  docs/VALIDITY.md, at 1.384 m/step), against the printed budget of
+  2.08 m = 1.5 steps x 1.384 m/step. There is no clock-offset term any
+  more: the time clause above refuses an offset clock by name, so a
+  value over the budget is a diverged FDM (or a wrong trim state), not
+  a coupling.
 
 ### 3. The two commandlet passes, literally
 
@@ -430,6 +463,7 @@ example's):
 consume-poses: camera 0 of 2, 115 solved samples
 consume-poses: 24 scheduled captures from t=0.008 s to t=11.992 s; 1280x720 px, sensor 36.00 x 20.25 mm, focal 35.0 mm (fov 54.43 deg)
 stepping 1440 steps of 0.008333 s, capturing at 24 scheduled instants at 1280x720
+consume-poses: clock origin t=0.000000 s before the first step; capture times are run-relative
 consume-poses: stopped after the last scheduled instant at t=11.992 s (1439 of 1440 steps)
 consume-poses: captured 24 of 24 scheduled frames
 wrote 24 frames and C:\flightsim\runs\demo\frames\chase0\render.json
@@ -453,7 +487,7 @@ runs\demo\
   capture_manifest.json        48 frame records, file = frames/<id>/NNNN.png
   card.json                    cameras: 2 blocks, 115 poses each, 24 capture_times_s each
   frames\chase0\0000.png .. 0023.png   24 files, 1280x720
-  frames\chase0\render.json    frames_scheduled 24, frames_captured 24, step_s 0.008333, steps_taken 1439, stepped_s 11.992, 24 frame_records with frame_index 0..23 (each with t_scheduled_s, t_applied_s, t_pose_s, camera_applied_*, camera_solved_*, aircraft_applied_*)
+  frames\chase0\render.json    frames_scheduled 24, frames_captured 24, step_s 0.008333, clock_origin_s, steps_taken 1439, stepped_s 11.992, 24 frame_records with frame_index 0..23 (each with t_scheduled_s, t_applied_s, t_clock_s, t_pose_s, camera_applied_*, camera_solved_*, aircraft_applied_*, aircraft_px, aircraft_py, aircraft_visible, aircraft_bbox_px)
   frames\chase0\render.log
   frames\tower0\0000.png .. 0023.png   24 files
   frames\tower0\render.json    the same, camera_index 1
@@ -487,10 +521,27 @@ of which must FAIL by name:
   tower0 frame 5: frames/tower0/0005.png does not exist`;
 * edit `runs\demo\frames\chase0\render.json`, add 5.0 to one record's
   `aircraft_applied_east_m`: `[FAIL] engine_parity: chase0 frame N: the
-  engine drew the aircraft 5.00 m from the manifest's aircraft (tol
-  2.5), 5x.x px from its labelled pixel (tol 3x.x px at 1xx m)` -- the
-  clause that judges the pixels against the label; the same edit on a
-  tower record fails on the metres (5.00 m, tol 2.5) at 4.0 px;
+  engine drew the aircraft 5.00 m from the manifest's aircraft (budget
+  2.08 m = 1.5 steps x 1.384 m/step at 166.0 m/s, 120 Hz), 5x.x px from
+  its labelled pixel (tol 2x.x px at 1xx m)` -- the metre budget of THIS
+  run, with its arithmetic; the same edit on a tower record fails on the
+  metres at 3.8 px;
+* edit `runs\demo\frames\chase0\render.json`, add 0.008333 to one
+  record's `t_applied_s`: `[FAIL] engine_parity: chase0 frame N:
+  captured at t=... s against the scheduled ... s (tol 1e-06)` -- one
+  step late is a different FDM state and fails by name, never absorbed;
+  set the root's `step_s` to 10.0: `chase0: the engine stepped 10 s
+  against the spec's 120 Hz (1/120 = 0.008333 s); the frames are not on
+  the manifest's grid` -- the tolerance comes from the manifest, never
+  from the file being judged;
+* edit `card.json`, add 0.003 to one entry of camera 0's
+  `capture_times_s`, re-run pass 0: the commandlet must refuse at that
+  step with `consume-poses: scheduled instant t=... s (frame N) is not
+  on the fixed-step grid: the run clock stepped past it to ... s (step
+  0.008333 s, clock origin ... s)`; the Python side refuses the same
+  schedule earlier, at solve time (`camera.schedule: camera 'chase0'
+  schedules 1 instant(s) off the 120 Hz fixed-step grid`), so the
+  engine's refusal is reachable only by editing the card;
 * run `examples\cameras_multi.yaml` with `turbulence: moderate` and
   `--render frames`: `REFUSED render.host_parity: turbulence 'moderate':
   same-seed host parity is measured and refused ...` before any flight
