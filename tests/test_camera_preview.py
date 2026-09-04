@@ -918,3 +918,156 @@ def test_header_lines_wider_than_the_frame_are_wrapped_with_an_indent():
     bright = band.min(axis=2) > 100
     assert bright.any()                                    # text is on the band
     assert not bright[:, w - 8:].any()
+
+
+# -- round 3: label placement ----------------------------------------------
+
+RIDGE_RASTER = Path(__file__).resolve().parents[1] / "runs" / "terrain" / "control_ridge"
+EXAMPLES_DIR = Path(__file__).resolve().parents[1] / "examples"
+
+
+def example_scene(name, relocate=None):
+    """One committed example as a capture manifest over SYNTHETIC
+    telemetry (a straight northbound track at the spec's speed and
+    altitude; no FDM flight, so the test runs in seconds): the spec's
+    cameras (or the documented defaults), their solved pose tracks and
+    schedules, the manifest, the ground (the control_ridge raster when
+    ``relocate`` moves the spec over it) and the track points."""
+    from core.capture.manifest import build_capture_manifest
+    from core.capture.poses import SceneFrame, solve_pose_track
+    from core.capture.schedule import solve_schedule
+    from core.fdm import units
+    from core.scenario.camera import default_cameras
+    from core.scenario.spec import ScenarioSpec
+    from tests.test_camera_poses import FRAME, make_columns
+
+    spec = ScenarioSpec.read(EXAMPLES_DIR / name)
+    heightfield, frame = None, FRAME
+    if relocate:
+        from core.terrain.heightfield import Heightfield
+
+        heightfield = Heightfield.read(RIDGE_RASTER)
+        for key, value in relocate.items():
+            spec.set(key, value, frm="test: the example over the ridge raster")
+        frame = SceneFrame.for_spec(spec, heightfield)
+    cameras = spec.cameras or default_cameras(spec)
+    columns = make_columns(duration_s=float(spec.duration.value),
+                           speed_mps=units.kt_to_mps(float(spec.airspeed.value)),
+                           altitude=lambda t: float(spec.altitude.value))
+    if relocate:
+        columns["lat_deg"] = [v + float(spec.latitude.value) for v in columns["lat_deg"]]
+        columns["lon_deg"] = [v + float(spec.longitude.value) for v in columns["lon_deg"]]
+    tracks = [solve_pose_track(columns, c, frame) for c in cameras]
+    schedules = [solve_schedule(columns, c, frame) for c in cameras]
+    m = build_capture_manifest(spec, columns, frame, tracks, schedules,
+                               output_digest="0" * 64, aircraft_metrics=METRICS)
+    ground = pv._ground(heightfield, frame)
+    track, words = pv._track_points(m, columns, frame)
+    return m, ground, float(spec.terrain_elevation.value), track, words
+
+
+def boxes_intersect(a, b):
+    return not (a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1])
+
+
+def test_labels_never_collide_and_stay_with_what_they_name():
+    """Over every frame of the three example scenes (cameras_multi,
+    cameras_waypoint, cameras_multi over the control_ridge raster: 100
+    frames, 3 cameras' presets): no two label boxes intersect, none is
+    reported colliding, every label is within 24 px of its anchor or
+    has a leader line, no box lies on the header band or the compass,
+    'boresight' is within 20 px of its cross, 'N' sits BESIDE the arrow
+    head (its box centred on the tip's row, right or left of it) when
+    the tip is clear of the band, and ring labels are anchored off the
+    arrow's column (RING_LABEL_AZIMUTH_DEG round the ring, capped at a
+    quarter of the FOV: 13.6 deg here, 290 px off)."""
+    scenes = [example_scene("cameras_multi.yaml"), example_scene("cameras_waypoint.yaml"),
+              example_scene("cameras_multi.yaml",
+                            {"latitude": 0.138428, "longitude": 10.648732,
+                             "altitude": 4200.0, "terrain_elevation": 2094.0})]
+    assert scenes[2][1].kind == "terrain" and scenes[0][1].kind == "flat"
+    frames = sum(len(m["frames"]) for m, *_ in scenes)
+    assert frames == 100
+    counted = {"labels": 0, "leaders": 0, "beside": 0, "rings_off_column": 0}
+    for m, ground, datum, track, words in scenes:
+        for rec in m["frames"]:
+            _, info = pv.draw_preview(rec, m, ground, track_points=track,
+                                      terrain_elevation_m=datum, track_words=words)
+            labels = info["labels"]
+            band = info["header_band_px"]
+            rose = info["compass"]
+            rcx, rcy, rr = rose["centre"][0], rose["centre"][1], rose["radius"]
+            compass_zone = (rcx - rr - 14, rcy - rr - 16, rcx + rr + 16,
+                            rcy + rr + 20 + 2 * pv.header_font_px(info["size"][1]) + 4)
+            tip = (info.get("north_arrow") or {}).get("tip_px")
+            for i, a in enumerate(labels):
+                counted["labels"] += 1
+                for b in labels[i + 1:]:
+                    assert not boxes_intersect(a["box"], b["box"]), (rec["camera_id"], rec["index"], a, b)
+                assert not a["collided"], (rec["camera_id"], rec["index"], a)
+                assert a["distance_px"] <= 24.0 or a["leader"] is not None, a
+                counted["leaders"] += a["leader"] is not None
+                assert a["box"][1] >= band, (rec["camera_id"], rec["index"], a, band)
+                assert not pv._near(a["box"], compass_zone, 0.0), a
+                if a["text"] == "boresight":
+                    cx, cy = rec["principal_point_px"]
+                    assert a["anchor"] == (cx, cy) and a["distance_px"] <= 20.0
+                if a["text"] == "N":
+                    assert tip is not None and a["anchor"] == (tip[0], tip[1])
+                    if tip[1] > band + 40:
+                        centre_v = 0.5 * (a["box"][1] + a["box"][3])
+                        assert abs(centre_v - tip[1]) <= 1.0, (a, tip)
+                        assert a["side"] in ("right", "left") and a["shift"] == 0
+                        counted["beside"] += 1
+                if a["text"].endswith("km") or a["text"].endswith(" m"):
+                    if tip is not None and ground.kind == "flat":
+                        assert abs(a["anchor"][0] - tip[0]) > 100.0, (a, tip)
+                        counted["rings_off_column"] += 1
+    assert counted["labels"] > 150 and counted["beside"] >= 24
+    assert counted["rings_off_column"] >= 8 and counted["leaders"] >= 20
+
+
+def test_label_placement_tries_every_side_and_leads_to_a_far_label():
+    """Eight labels on ONE anchor: right, left, above, below and then
+    shifted outward, none intersecting, none colliding, every one
+    within 24 px or with a leader (the far ones have leaders). A ring
+    label whose anchor lies INSIDE the header band (camera pitched -18
+    deg: the 20 km ring at row 39, band 91 px) is placed below the
+    band with a leader; a label at its requested gap gets no leader."""
+    from PIL import ImageDraw
+
+    image = Image.new("RGB", (400, 300), pv.BACKGROUND_RGB)
+    draw_ = ImageDraw.Draw(image)
+    labels = pv._Labels()
+    font = pv._font(14)
+    for k in range(8):
+        labels.request((200.0, 150.0), f"label {k}", (255, 255, 255), font, priority=k)
+    placed = labels.place_all(draw_, 400, 300)
+    assert len(placed) == 8 and not any(p["collided"] for p in placed)
+    for i, a in enumerate(placed):
+        for b in placed[i + 1:]:
+            assert not boxes_intersect(a["box"], b["box"]), (a, b)
+        assert a["distance_px"] <= 24.0 or a["leader"] is not None, a
+    sides = {p["side"] for p in placed}
+    assert {"right", "left"} <= sides
+    assert placed[0]["distance_px"] == pv.LABEL_GAP_PX and placed[0]["leader"] is None
+    far = [p for p in placed if p["distance_px"] > 24.0]
+    assert len(far) >= 4 and all(p["leader"] is not None for p in far)
+    # The leader is drawn from the anchor to the box's nearest point.
+    lead = far[0]["leader"]
+    assert lead[0] == (200.0, 150.0)
+    assert abs(math.hypot(lead[1][0] - 200.0, lead[1][1] - 150.0) - far[0]["distance_px"]) < 1e-9
+    mid = ((lead[0][0] + lead[1][0]) / 2.0, (lead[0][1] + lead[1][1]) / 2.0)
+    assert image.getpixel((int(round(mid[0])), int(round(mid[1])))) == (255, 255, 255)
+    # A label anchored inside the band is moved below it, with a leader.
+    rec = record(camera=(0.0, 0.0, 1200.0), look=(0.0, -18.0, 0.0),
+                 aircraft=(28.0, 0.0, 1200.0))
+    _, info = draw(rec)
+    band = info["header_band_px"]
+    ring = [p for p in info["labels"] if p["text"] == "20 km"][0]
+    assert ring["anchor"][1] < band
+    assert ring["box"][1] >= band and ring["leader"] is not None
+    assert all(p["box"][1] >= band for p in info["labels"])
+    # The boresight label: at its gap past the cross arm, no leader.
+    bore = [p for p in info["labels"] if p["text"] == "boresight"][0]
+    assert bore["distance_px"] == 18.0 and bore["leader"] is None

@@ -1672,6 +1672,32 @@ mutate core/capture/preview.py \
     "preview round 3: tile lines are drawn at THUMBNAIL_LINE_PX" \
     tests/test_camera_preview.py || failures=$((failures+1))
 
+mutate core/capture/preview.py \
+    '        if distance > req["gap"] + LABEL_LEADER_LINE_HEIGHTS * th:' \
+    '        if False:  # MUTATED: a label far from its anchor gets no leader' \
+    "preview round 3: a label placed far from its anchor gets a leader line" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '        out = [(side[k], k, 0) for k in prefer]' \
+    '        out = [(side[prefer[-1]], prefer[-1], 0)]  # MUTATED: one side only, the old shift-down' \
+    "preview round 3: labels try right, left, above and below their anchor" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '                if any(_near(box, zone, 2.0) for zone in self.reserved):
+                    continue' \
+    '                if False:  # MUTATED: labels may land on the band, legend or compass
+                    continue' \
+    "preview round 3: labels keep clear of the header band, legend and compass" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
+mutate core/capture/preview.py \
+    '    for offset in (step, -step, 0.0):' \
+    '    for offset in (0.0,):  # MUTATED: ring labels back on the arrow'"'"'s column' \
+    "preview round 3: ring labels are anchored off the arrow's column" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

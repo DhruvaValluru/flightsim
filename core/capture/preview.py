@@ -46,9 +46,19 @@ What is drawn, and where each number comes from
   boresight meets the ground (flat: the plane; terrain: the raster,
   marched) -- clear of the aircraft an aimed camera centres -- or,
   when it does not, ahead of the camera / under the aircraft; its "N"
-  label placed clear of other labels (a label landing within
-  LABEL_CLEARANCE_PX of one already placed is shifted down). Drawn in
-  EVERY scene.
+  label beside the arrow head. Drawn in EVERY scene.
+* **Labels** ("boresight", "N", the ring distances): placed once the
+  header band, legend, compass and FOV text are known, each trying
+  the sides of its anchor (right, left, above, below, LABEL_GAP_PX
+  off) and then each side shifted outward by whole line heights,
+  taking the first box clear of every placed label by
+  LABEL_CLEARANCE_PX and of every reserved zone; a label whose box
+  ends more than one line height from its anchor gets a leader line.
+  Ring labels are anchored RING_LABEL_AZIMUTH_DEG round the ring from
+  the camera's forward azimuth (in terrain scenes, on the ring's
+  visible piece nearest that point), off the column the arrow and the
+  boresight share. ``info["labels"]`` reports every placement
+  (anchor, box, side, distance, leader, collided).
 * **Compass rose**: image-space, in the bottom-right corner, drawn in
   every scene from the camera's own yaw: the N/E/S/W spokes rotated so
   north sits at screen angle -yaw (clockwise from up), and the
@@ -144,8 +154,25 @@ GRID_STEPS_M = (10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0,
                 5000.0, 10000.0)
 #: The world-space north arrow's on-screen length at its base's depth.
 NORTH_ARROW_PX = 60.0
-#: A label landing within this many pixels of another is shifted.
+#: A label landing within this many pixels of another is moved.
 LABEL_CLEARANCE_PX = 20.0
+#: A label's gap from its anchor on the side it is placed.
+LABEL_GAP_PX = 4.0
+#: A label whose box ends farther than its requested gap plus this many
+#: line heights from its anchor gets a leader line from the anchor.
+LABEL_LEADER_LINE_HEIGHTS = 1.0
+#: How far a label may be moved outward from its anchor before it is
+#: drawn anyway (and reported as colliding): this many line heights.
+LABEL_MAX_SHIFT_LINES = 6
+#: The second placement pass accepts a box this close to another label
+#: (never intersecting) when no box clears LABEL_CLEARANCE_PX.
+LABEL_MIN_CLEARANCE_PX = 3.0
+#: Ring labels sit this far round the ring from the camera's forward
+#: azimuth (or a quarter of the horizontal FOV, whichever is less), off
+#: the column the north arrow and the boresight share, and at least
+#: RING_LABEL_EDGE_MARGIN_PX from the frame's sides.
+RING_LABEL_AZIMUTH_DEG = 25.0
+RING_LABEL_EDGE_MARGIN_PX = 80.0
 #: The compass rose: radius and its inset from the bottom-right corner.
 COMPASS_RADIUS_PX = 40
 COMPASS_INSET_PX = (60, 98)
@@ -1142,38 +1169,146 @@ def wrap_lines(draw, lines: Sequence[str], font, max_width: float) -> List[str]:
 
 
 class _Labels:
-    """Placed labels, so a new one landing within LABEL_CLEARANCE_PX
-    of an existing one is shifted down until clear (bounded). With
-    ``enabled`` False (a thumbnail) nothing is drawn or placed."""
+    """Label placement, deferred: every label is REQUESTED with its
+    anchor pixel while the geometry is drawn and PLACED once the
+    reserved zones (header band, compass, legend, FOV text) are known.
+    A label tries the sides of its anchor in its preferred order
+    (right, left, above, below by default, LABEL_GAP_PX away), then
+    each side shifted outward by whole line heights up to
+    LABEL_MAX_SHIFT_LINES, and takes the first box that lies inside
+    the image, clear of every placed label by LABEL_CLEARANCE_PX and
+    clear of every reserved zone; when none is, the same candidates
+    at LABEL_MIN_CLEARANCE_PX (touching allowed, intersecting not);
+    when none is still, the first candidate is drawn anyway and the
+    placement says ``collided``. A label whose
+    box ends farther than LABEL_LEADER_LINE_HEIGHTS line heights from
+    its anchor gets a leader line from the anchor to the box's nearest
+    point, in its own colour. With ``enabled`` False (a thumbnail)
+    nothing is requested, placed or drawn."""
 
     def __init__(self, enabled: bool = True):
+        self.requests: List[Dict] = []
+        self.reserved: List[Tuple[float, float, float, float]] = []
         self.boxes: List[Tuple[float, float, float, float]] = []
+        self.placed: List[Dict] = []
         self.enabled = enabled
         self.drawn = 0
 
-    def place(self, draw, xy, text, fill, font, w_img, h_img):
+    def reserve(self, box):
+        self.reserved.append(tuple(float(v) for v in box))
+
+    def request(self, anchor, text, fill, font, prefer=("right", "left", "above", "below"),
+                priority: int = 5, gap: float = LABEL_GAP_PX):
         if not self.enabled:
-            return None
-        self.drawn += 1
+            return
+        self.requests.append({"anchor": (float(anchor[0]), float(anchor[1])),
+                              "text": text, "fill": fill, "font": font,
+                              "prefer": tuple(prefer), "priority": int(priority),
+                              "gap": float(gap), "order": len(self.requests)})
+
+    @staticmethod
+    def candidates(anchor, tw, th, prefer, gap):
+        ax, ay = anchor
+        side = {"right": (ax + gap, ay - th / 2.0), "left": (ax - gap - tw, ay - th / 2.0),
+                "above": (ax - tw / 2.0, ay - gap - th), "below": (ax - tw / 2.0, ay + gap)}
+        out = [(side[k], k, 0) for k in prefer]
+        step = th + 4.0
+        for k in range(1, LABEL_MAX_SHIFT_LINES + 1):
+            for name in prefer:
+                x, y = side[name]
+                if name in ("right", "left"):
+                    out.append(((x, y + k * step), name, k))
+                    out.append(((x, y - k * step), name, k))
+                elif name == "above":
+                    out.append(((x, y - k * step), name, k))
+                else:
+                    out.append(((x, y + k * step), name, k))
+        return out
+
+    def place_all(self, draw, w_img, h_img):
+        for req in sorted(self.requests, key=lambda r: (r["priority"], r["order"])):
+            self._place(draw, req, w_img, h_img)
+        self.requests = []
+        return self.placed
+
+    def _place(self, draw, req, w_img, h_img):
+        text, font, fill = req["text"], req["font"], req["fill"]
         tw = _text_width(draw, text, font)
-        th = getattr(font, "size", 12)
-        x, y = float(xy[0]), float(xy[1])
-        x = min(max(0.0, x), max(0.0, w_img - tw))
-        for _ in range(8):
-            box = (x, y, x + tw, y + th)
-            if not any(_near(box, other, LABEL_CLEARANCE_PX) for other in self.boxes):
+        th = float(getattr(font, "size", 12))
+        ax, ay = req["anchor"]
+        chosen = None
+        side = None
+        shift = 0
+        first = None
+        candidates = []
+        for (x, y), name, k in self.candidates(req["anchor"], tw, th, req["prefer"],
+                                               req["gap"]):
+            x = min(max(0.0, x), max(0.0, w_img - tw))
+            y = min(max(0.0, y), max(0.0, h_img - th))
+            candidates.append(((x, y, x + tw, y + th), name, k))
+        first = candidates[0][0]
+        for clearance in (LABEL_CLEARANCE_PX, LABEL_MIN_CLEARANCE_PX):
+            for box, name, k in candidates:
+                if any(_near(box, other, clearance) for other in self.boxes):
+                    continue
+                if any(_near(box, zone, 2.0) for zone in self.reserved):
+                    continue
+                chosen, side, shift = box, name, k
                 break
-            y += th + 4
-        y = min(max(0.0, y), max(0.0, h_img - th))
-        box = (x, y, x + tw, y + th)
-        self.boxes.append(box)
-        draw.text((x, y), text, fill=fill, font=font)
-        return box
+            if chosen is not None:
+                break
+        collided = chosen is None
+        if chosen is None:
+            chosen, side = first, req["prefer"][0]
+        # The box's nearest point to the anchor, and a leader when far.
+        nx = min(max(ax, chosen[0]), chosen[2])
+        ny = min(max(ay, chosen[1]), chosen[3])
+        distance = math.hypot(nx - ax, ny - ay)
+        leader = None
+        if distance > req["gap"] + LABEL_LEADER_LINE_HEIGHTS * th:
+            draw.line([(ax, ay), (nx, ny)], fill=fill, width=1)
+            leader = ((ax, ay), (nx, ny))
+        self.boxes.append(chosen)
+        self.drawn += 1
+        draw.text((chosen[0], chosen[1]), text, fill=fill, font=font)
+        self.placed.append({"text": text, "anchor": (ax, ay), "box": chosen,
+                            "side": side, "shift": shift, "distance_px": distance,
+                            "leader": leader, "collided": collided})
+        return chosen
 
 
 def _near(a, b, clearance):
     return not (a[2] + clearance < b[0] or b[2] + clearance < a[0]
                 or a[3] + clearance < b[1] or b[3] + clearance < a[1])
+
+
+def ring_label_point(plan_or_ground, record, radius_m: float, axes,
+                     elevation=None) -> List[Tuple[float, float, float]]:
+    """Where a ring's label is anchored, in preference order: the ring's
+    point RING_LABEL_AZIMUTH_DEG (or hfov/4, whichever is less) round
+    from the camera's forward azimuth (off the column the arrow and
+    boresight share), then the point the other way round, then the
+    forward point; each at the ground's elevation there (``elevation``
+    for a terrain ring, the plane otherwise). Points off the raster
+    are left out. The caller takes the first that projects in frame
+    clear of the sides by RING_LABEL_EDGE_MARGIN_PX."""
+    fwd = axes[0]
+    azimuth = math.atan2(fwd[1], fwd[0])
+    cam_n, cam_e = float(record["position_north_m"]), float(record["position_east_m"])
+    hfov, _ = field_of_view_deg(record)
+    step = min(RING_LABEL_AZIMUTH_DEG, hfov / 4.0)
+    out = []
+    for offset in (step, -step, 0.0):
+        a = azimuth + math.radians(offset)
+        n, e = cam_n + radius_m * math.cos(a), cam_e + radius_m * math.sin(a)
+        if elevation is not None:
+            z = elevation(n, e)
+            if z is None:
+                continue
+        else:
+            z = plan_or_ground["alt_m"]
+        out.append((n, e, float(z)))
+    return out
 
 
 # -- one picture -------------------------------------------------------------
@@ -1253,6 +1388,8 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
     def in_frame(u, v, z):
         return z > 0 and 0 <= u < w and 0 <= v < h
 
+    label_margin = RING_LABEL_EDGE_MARGIN_PX / sx
+
     # 1. ground
     plan = None
     arrow_base = None
@@ -1290,13 +1427,25 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
         ring_radii = src_radius[src_kind == 2]
         _draw_segments(draw, ring_rows, _solid(rgba(RING_RGB)))
         info["segments"]["rings"] = int(len(set(ring_radii.tolist())))
-        # Label each ring on its visible piece nearest the centre column.
-        for radius in sorted(set(ring_radii.tolist())):
+        # Label each ring on its VISIBLE piece nearest the ring's
+        # label point (RING_LABEL_AZIMUTH_DEG round from the forward
+        # azimuth; the forward point when that is out of frame), so a
+        # label never names a hidden piece.
+        for radius in sorted(set(ring_radii.tolist()), reverse=True):
             rows = ring_rows[ring_radii == radius]
             mid_u = 0.5 * (rows[:, 0] + rows[:, 2])
-            k = int(np.argmin(np.abs(mid_u - w / 2.0)))
-            labels.place(draw, (rows[k, 0] + 3, rows[k, 1] - 12), _ring_label(radius),
-                         rgba(RING_RGB), label_font, w, h)
+            mid_v = 0.5 * (rows[:, 1] + rows[:, 3])
+            target = (w / 2.0, h / 2.0)
+            for point in ring_label_point(ground, record, radius, axes,
+                                          elevation=ground.elevation):
+                u, v, z = px(point)
+                if in_frame(u, v, z) and label_margin <= u <= w - label_margin:
+                    target = (u, v)
+                    break
+            k = int(np.argmin(np.hypot(mid_u - target[0], mid_v - target[1])))
+            labels.request((mid_u[k], mid_v[k]), _ring_label(radius), rgba(RING_RGB),
+                           label_font, prefer=("right", "above", "left", "below"),
+                           priority=3)
         if ground.heightfield is not None:
             arrow_base = terrain_arrow_base(record, ground)
     else:
@@ -1313,16 +1462,17 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
                 clipped = _clip_segments(record, ra, rb, axis_scale, axes)
                 _draw_segments(draw, clipped, _solid(rgba(RING_RGB)))
                 rings += int(len(clipped) > 0)
-                # Label at the ring's point along the camera's forward
-                # azimuth, measured from the camera's ground point.
-                fwd = axes[0]
-                norm = math.hypot(fwd[0], fwd[1]) or 1.0
-                lp = (plan["camera_north_m"] + radius * fwd[0] / norm,
-                      plan["camera_east_m"] + radius * fwd[1] / norm, plan["alt_m"])
-                u, v, z = px(lp)
-                if in_frame(u, v, z):
-                    labels.place(draw, (u + 3, v - 12), _ring_label(radius),
-                                 rgba(RING_RGB), label_font, w, h)
+                # Label at the ring's point RING_LABEL_AZIMUTH_DEG round
+                # from the camera's forward azimuth (the forward point
+                # when that is out of frame), measured from the camera's
+                # exact ground point.
+                for point in ring_label_point(plan, record, radius, axes):
+                    u, v, z = px(point)
+                    if in_frame(u, v, z) and label_margin <= u <= w - label_margin:
+                        labels.request((u, v), _ring_label(radius), rgba(RING_RGB),
+                                       label_font, prefer=("right", "above", "left", "below"),
+                                       priority=3)
+                        break
             info["segments"]["rings"] = rings
             arrow_base = north_arrow_base(record, plan)
 
@@ -1343,8 +1493,9 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
                                    "screen_px": arrow["screen_px"],
                                    "tip_px": (u, v) if z > 0 else None}
             if in_frame(u, v, z):
-                labels.place(draw, (u + 4, v - 6), "N", rgba(NORTH_RGB),
-                             _font(font_px + 1), w, h)
+                # Beside the arrow HEAD: right or left of the tip first.
+                labels.request((u, v), "N", rgba(NORTH_RGB), _font(font_px + 1),
+                               prefer=("right", "left", "above", "below"), priority=2)
 
     # 2. horizon
     horizon = horizon_segment(record, axis_scale)
@@ -1420,9 +1571,16 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
                              (cx, cy - arm, cx, cy - gap), (cx, cy + gap, cx, cy + arm)):
         draw.line([(x0, y0), (x1, y1)], fill=rgba(CAMERA_RGB), width=1)
     hfov, vfov = field_of_view_deg(record)
-    labels.place(draw, (cx + arm + 2, cy + 2), "boresight", rgba(CAMERA_RGB), small, w, h)
+    # "boresight" beside the cross (LABEL_GAP_PX past the arm), first
+    # in the placement order so it stays with what it names.
+    labels.request((cx, cy), "boresight", rgba(CAMERA_RGB), small, priority=1,
+                   gap=arm + LABEL_GAP_PX)
     text((cx - 40, h - 18), f"HFOV {hfov:.1f} deg", rgba(CAMERA_RGB), small)
+    labels.reserve((cx - 40, h - 18, cx - 40 + _text_width(draw, f"HFOV {hfov:.1f} deg", small),
+                    h - 4))
     text((4, cy - 14), f"VFOV\n{vfov:.1f}", rgba(CAMERA_RGB), small)
+    labels.reserve((4, cy - 14, 4 + _text_width(draw, f"{vfov:.1f}", small),
+                    cy - 14 + 2 * (round(font_px * 0.87) + 2)))
     for (x0, y0, x1, y1) in ((cx, 0, cx, 6), (cx, h - 7, cx, h - 1), (0, cy, 6, cy),
                              (w - 7, cy, w - 1, cy)):
         draw.line([(x0, y0), (x1, y1)], fill=rgba(CAMERA_RGB), width=2)
@@ -1445,6 +1603,8 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
              f"cam yaw {rose['yaw_deg']:.1f}", rgba(COMPASS_RGB), small)
         text((rcx - rr - 12, rcy + rr + 20 + font_px),
              f"hdg {rose['heading_deg']:.1f}", rgba(BODY_RGB), small)
+        labels.reserve((rcx - rr - 14, rcy - rr - 16, rcx + rr + 16,
+                        rcy + rr + 20 + 2 * font_px + 4))
 
     # 6. header, wrapped to the image width, font from the image height
     lines = header_lines(record, manifest, scale, tag, ground=ground, plan=plan,
@@ -1456,12 +1616,7 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
     wrapped = wrap_lines(draw, lines, font, w - 8) if not thumbnail else []
     info["header_drawn"] = wrapped
     band_alpha = 255 if layer is image else min(alpha, OVERLAY_BAND_ALPHA)
-    if not thumbnail:
-        draw.rectangle([0, 0, w, 4 + line_h * len(wrapped) + 2],
-                       fill=rgba((0, 0, 0)) if layer is image else (0, 0, 0, band_alpha))
     info["header_band_px"] = 4 + line_h * len(wrapped) + 2 if not thumbnail else 0
-    for i, line in enumerate(wrapped):
-        text((4, 3 + line_h * i), line, rgba(TEXT_RGB), font)
     legend = ("legend: ground wireframe depth-shaded (near bright, hidden behind "
               "ridges) | horizon | rings from the camera | N arrow | track past/future "
               "+ scheduled dots | aircraft body + box | heading tick | boresight + FOV | "
@@ -1469,6 +1624,20 @@ def draw_preview(record: Dict, manifest: Dict, ground, scale: int = 1,
     legend_lines = (wrap_lines(draw, [legend], small,
                                max(80, w - 2 * COMPASS_INSET_PX[0] - 20))
                     if not thumbnail else [])
+    legend_top = h - 22 - len(legend_lines) * (round(font_px * 0.87) + 2)
+    # 6b. the labels, placed clear of the band, the legend, the compass
+    #     and the FOV text now that those zones are known.
+    if not thumbnail:
+        labels.reserve((0, 0, w, info["header_band_px"]))
+        if legend_lines:
+            labels.reserve((0, legend_top, max(80, w - 2 * COMPASS_INSET_PX[0] - 20) + 4,
+                            h - 22))
+    info["labels"] = labels.place_all(draw, w, h)
+    if not thumbnail:
+        draw.rectangle([0, 0, w, 4 + line_h * len(wrapped) + 2],
+                       fill=rgba((0, 0, 0)) if layer is image else (0, 0, 0, band_alpha))
+    for i, line in enumerate(wrapped):
+        text((4, 3 + line_h * i), line, rgba(TEXT_RGB), font)
     for i, line in enumerate(legend_lines):
         text((4, h - 22 - (len(legend_lines) - i) * (round(font_px * 0.87) + 2)),
              line, rgba((160, 160, 160)), small)
