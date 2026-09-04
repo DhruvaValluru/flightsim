@@ -1327,3 +1327,66 @@ def test_hidden_counts_are_per_kind_and_reconcile_with_the_segments_in_frame():
     terrain_line = [line for line in info["header"] if line.startswith("terrain ")][0]
     assert "(124 of 1314 coarse + 0 of 0 fine in view, 1190 hidden behind ridges)" in terrain_line
     assert "; rings on the terrain; north arrow: drawn (" in terrain_line
+
+
+# -- round 3: the render budget on the terrain and overlay paths --------------
+
+def relief_heightfield():
+    """97 x 97 at 100 m with real relief (ridges 400 m high), so the
+    fine lattice, the draped rings and the skyline cull all work."""
+    from core.terrain.heightfield import Georeference, Heightfield
+
+    rows, cols = np.mgrid[0:97, 0:97]
+    samples = (200.0 + 200.0 * np.sin(rows / 6.0) * np.cos(cols / 9.0)).astype(np.uint16)
+    return Heightfield(samples=samples,
+                       georeference=Georeference(crs="EPSG:32631", origin_x_m=166021.0 - 4800.0,
+                                                 origin_y_m=4800.0, pixel_size_m=100.0),
+                       scale_m=1.0, offset_m=0.0, name="relief")
+
+
+def test_terrain_and_overlay_render_time_is_under_budget(tmp_path, capsys):
+    """The heavier paths, measured and graded like the flat one: 24
+    terrain frames at 1280x720 (coarse + fine lattice, draped rings,
+    skyline cull, the horizon against it, labels) through
+    render_previews with the sheet, and 12 overlays over honest
+    1280x720 frames through render_overlays (alpha compositing, the
+    strokes, the compass disc); each under RENDER_BUDGET_S_PER_FRAME,
+    the numbers printed."""
+    from tests.test_camera_poses import FRAME
+    from tests.test_camera_verify import honest_frame
+
+    hf = relief_heightfield()
+    # A low camera (350 m among 400 m ridges, pitch -5): the horizon is in
+    # frame (row 251) and ridges rise above it, so the skyline hides both
+    # ground and horizon.
+    recs = [record(camera=(-2500.0 + 120.0 * k, 200.0, 350.0), look=(0.0, -5.0, 0.0),
+                   aircraft=(-2000.0 + 120.0 * k, 200.0, 420.0), index=k, t_s=0.5 * k,
+                   sample_index=60 * k, camera_id="chase0") for k in range(24)]
+    m = manifest(recs)
+    started = time.perf_counter()
+    written = pv.render_previews(m, tmp_path / "terrain", heightfield=hf, scene_frame=FRAME)
+    wall = (time.perf_counter() - started) / len(written)
+    assert len(written) == 24
+    _, info = pv.draw_preview(recs[12], m, pv._ground(hf, FRAME))
+    assert info["segments"]["terrain_hidden"] > 0 and info["segments"]["terrain_fine"] > 0
+    assert info["segments"]["rings"] > 0 and info["horizon_hidden_px"] > 0
+    print(f"\nterrain previews: {written.seconds_per_frame:.4f} s/frame "
+          f"({wall:.4f} with the sheet; {info['segments']['terrain']} coarse, "
+          f"{info['segments']['terrain_fine']} fine, {info['segments']['terrain_hidden']} hidden)")
+    assert 0.0 < written.seconds_per_frame < pv.RENDER_BUDGET_S_PER_FRAME
+    assert wall < pv.RENDER_BUDGET_S_PER_FRAME
+    # Overlays over honest frames at the record's size.
+    over = [record(aircraft=(800.0 + 20.0 * k, 60.0, 1030.0), index=k, t_s=0.5 * k,
+                   sample_index=60 * k, camera_id="cam0") for k in range(12)]
+    om = manifest(over)
+    for rec in over:
+        frame_path = tmp_path / "over" / rec["file"]
+        frame_path.parent.mkdir(parents=True, exist_ok=True)
+        honest_frame(frame_path, WIDTH, HEIGHT)
+    started = time.perf_counter()
+    overlays = pv.render_overlays(om, tmp_path / "over")
+    wall = (time.perf_counter() - started) / len(overlays)
+    assert len(overlays) == 12
+    print(f"overlays: {overlays.seconds_per_frame:.4f} s/frame ({wall:.4f} wall)")
+    assert 0.0 < overlays.seconds_per_frame < pv.RENDER_BUDGET_S_PER_FRAME
+    assert overlays.seconds_per_frame <= wall < pv.RENDER_BUDGET_S_PER_FRAME

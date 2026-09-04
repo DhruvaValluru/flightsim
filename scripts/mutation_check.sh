@@ -1778,6 +1778,16 @@ mutate core/capture/preview.py \
     "preview round 3: a label anchored inside a reserved zone is offered the rows beside it" \
     tests/test_camera_preview.py || failures=$((failures+1))
 
+mutate core/capture/preview.py \
+    '        written.sizes[path] = image.size
+    elapsed = time.perf_counter() - started
+    written.seconds_per_frame = elapsed / len(written) if written else 0.0' \
+    '        written.sizes[path] = image.size
+    elapsed = time.perf_counter() - started
+    written.seconds_per_frame = RENDER_BUDGET_S_PER_FRAME  # MUTATED: the overlay time is not measured' \
+    "preview round 3: the overlay render time is measured per frame and graded" \
+    tests/test_camera_preview.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
