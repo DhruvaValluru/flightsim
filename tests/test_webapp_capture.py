@@ -1230,6 +1230,11 @@ def test_status_disables_the_engine_options_on_a_mac_without_the_engine(
 
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setenv("UE_ROOT", str(tmp_path / "UE_5.5"))
+    # The editor probe is the mac pgrep; on a non-mac CI runner faking
+    # the platform there is no pgrep and no editor. Pin it: this test is
+    # about the render gate, not the editor lock.
+    import webapp.runs as runs_module
+    monkeypatch.setattr(runs_module, "editor_running", lambda: False)
     status = client.get("/status").json()
     assert status["platform"] == "mac"
     assert status["render_available"] is False

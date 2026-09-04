@@ -290,7 +290,10 @@ def test_ue_unavailable_reason_names_the_missing_piece(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setenv("UE_ROOT", str(tmp_path / "absent"))
     reason = plat.ue_unavailable_reason()
-    assert "set UE_ROOT" in reason and "Binaries/Mac/UnrealEditor-Cmd" in reason
+    # The looked-for path is joined by the host's os.path (backslashes on a
+    # Windows CI runner faking the mac platform), so compare separator-free.
+    assert "set UE_ROOT" in reason
+    assert "Binaries/Mac/UnrealEditor-Cmd" in reason.replace("\\", "/")
     agree()
 
     monkeypatch.setattr(sys, "platform", "win32")

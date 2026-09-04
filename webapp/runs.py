@@ -187,8 +187,13 @@ def editor_running() -> bool:
     from core.util.platform import is_mac, os_name
 
     if is_mac():
-        probe = subprocess.run(["pgrep", "-f", "Binaries/Mac/UnrealEditor"],
-                               capture_output=True, text=True)
+        try:
+            probe = subprocess.run(["pgrep", "-f", "Binaries/Mac/UnrealEditor"],
+                                   capture_output=True, text=True)
+        except OSError:
+            # No pgrep on this host (a mac-gated test running elsewhere):
+            # no editor lock can be seen, so none is reported.
+            return False
         return probe.returncode == 0 and probe.stdout.strip() != ""
     if os_name() == "windows":
         # Both editor images: the interactive editor AND a commandlet
