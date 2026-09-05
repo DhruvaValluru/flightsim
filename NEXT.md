@@ -21,6 +21,52 @@ machine supports (render_choice_default), engine options refused
 `ue.platform` by name with the machine's reason, the choice recorded
 in run.json / provenance.json "render".
 
+**Camera Phase 1, docs round 1 (2026-09-05, the judge's seven ranked
+gaps against bar section 7, all seven closed in priority order, four
+code/doc commits plus this tally).** (1) The Windows expected-output
+block (report section 2) is GENERATED: scripts/examples_expected.py
+generate_frames() runs `--render frames --brief` on the honest engine
+stub in a child process (`--frames-stub-run`), normalises paths, masks
+only the engine_parity row's MEASURED digits as x (mask_engine), and
+`--write` splices it between the frames_expected markers; measured
+15.39 s wall, exit 0, 82 stdout lines, 15 model loads, 48 previews at
+0.074 s/frame, 48 overlays at 0.172 s/frame, 1439 steps per pass, ten
+PASS rows, "done: rendered 48 frames ...". tests/test_camera_cli.py::
+test_the_documents_windows_frames_block_matches_the_stub_run
+regenerates and compares it (15.3 s) and reads verify.json's counts
+and every run.json key back from the run. (2) The run card's mixture
+probe is routed through the console sink WHOLE (construction, run_ic,
+trim, the sustain steps; stamp "FGFDMExec(B747, mixture probe)"): the
+Mass Properties Report JSBSim prints at run_ic (debug level 1) no
+longer lands on stdout under "nothing of JSBSim's on stdout" --
+measured on `--card --render none`: 96 lines before, 82 after, 0 ANSI
+escapes, the report at line 546 of jsbsim.log; pinned under capfd.
+(3) Section 6c's path was `capture<FF>rames\chase0<LF>ender.json` (an
+interpreted \f); fixed, and the report is pinned to carry no control
+character but newline. (4) The expected tree's verify.json line said
+8 checks against the ten-row table: 10/10/10 now, read back from the
+stub run's file; run.json's line names every key (jsbsim_log,
+previews, overlays added). (5) A dated "Status today" table at the
+top of the report, per deliverable x platform, every engine cell
+"NOT YET RUN -- section N" (the one Windows observation, the pre-
+rewrite clip flow before 2026-09-03, is dated as such). (6) README's
+capture section no longer says "Off macOS" (Windows renders after the
+build, as its own table says) and quotes 0.074-0.075 s/frame from the
+dated blocks (0.049 was stale); core/util/platform.py's docstring
+carries ue_unavailable_reason()'s words, not "macOS-only". (7) The
+standing block above, and gotchas 1-28. tests/test_camera_docs.py is
+new (6 tests, 0.05 s). 11 guards under "docs round 1", each verified
+firing by subset (1 + 4 + 6: 1m26, 6m43, 2.5 s). Touched test files
+in full: 98 passed in 118 s. Gotchas: (a) a `\f` or `\r` typed inside
+a Python string that writes Markdown is interpreted -- grep the
+document for bytes below 0x20 after writing it (the test does now);
+(b) the honest stub's engine_parity row is all zeros BY CONSTRUCTION
+(it draws where the label says), so a generated block must mask that
+cell or it prints zeros as the engine's; (c) the mutation runner
+mutates docs in place too -- never edit the report while a docs guard
+subset runs; (d) capsys does not see JSBSim's C++ output, capfd does.
+STILL NOT YET RUN: everything in the status table's engine column.
+
 **Camera Phase 1, page round 3 (2026-09-05, the judge's eight ranked
 gaps against bar section 4, all eight closed in priority order, eight
 code commits; docs/CAMERA_PHASE1_REPORT.md section 6 (fallback words,
