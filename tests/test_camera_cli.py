@@ -1475,7 +1475,13 @@ def test_exit_codes_share_one_table_and_the_verdict_line_names_them(
                                   "--render", "none"])
     assert code == 2
     lines = refused.splitlines()
-    assert lines[0] == "REFUSED -- by name:"
+    # The header from the spec alone comes first (round 3), then the
+    # violations by name.
+    assert lines[0] == f"run:         {tmp_path / 'refused'}"
+    assert lines[1].startswith("spec         ") and lines[1].endswith(
+        "   output -")
+    assert lines[4] == "cameras      1"
+    assert lines[6] == "REFUSED -- by name:"
     assert lines[-1] == ("REFUSED [camera.terrain_clearance]: nothing "
                          "produced (the run directory holds jsbsim.log only)")
     assert sorted(p.name for p in (tmp_path / "refused").iterdir()) == \
@@ -1594,3 +1600,77 @@ def test_the_documents_expected_output_matches_a_fresh_run(tmp_path):
         assert "<s/frame>" in first and not re.search(r"\d s/frame", first)
     # The blocks say what they are: exit codes 0/0/0/0/0/2 then nine 1s.
     assert [b["code"] for b in doc] == [0, 0, 0, 0, 0, 2] + [1] * 9
+
+
+def test_a_refusal_prints_the_header_from_the_spec(tmp_path):
+    """A refused capture still says WHAT it refused: the header -- run,
+    spec and simulation digests (output '-': nothing was flown), scene
+    and CRS, flight, one line per camera with fx computed from the
+    spec's focal length, sensor width and resolution -- printed from
+    the spec alone before the violation, the JSBSim line and the
+    REFUSED verdict; --json carries the same 'header' block."""
+    from core.capture.manifest import simulation_digest
+
+    spec = ScenarioSpec.read(EXAMPLES / "cameras_refusal.yaml")
+    out = tmp_path / "refused"
+    code, text = capture_text([str(EXAMPLES / "cameras_refusal.yaml"),
+                               "--out", str(out), "--render", "none"])
+    assert code == 2, text
+    lines = text.splitlines()
+    camera = spec.cameras[0]
+    fx = (float(camera.focal_length_mm.value) * int(camera.width_px.value)
+          / float(camera.sensor_width_mm.value))
+    count = int(camera.capture_count.value)
+    captures = (f"{count} captures, interval" if count else
+                f"every {float(camera.period_s.value):g} s, interval")
+    assert lines[:7] == [
+        f"run:         {out}",
+        f"spec         {spec.digest()[:16]}   simulation "
+        f"{simulation_digest(spec)[:16]}   output -",
+        "scene        flat (no raster)   crs EPSG:32631",
+        f"flight       {spec.aircraft.value}, {float(spec.duration.value):g} "
+        f"s at 120 Hz (step 0.008333 s)",
+        "cameras      1",
+        f"  buried  explicit/scene  aim aircraft (exact)  "
+        f"{int(camera.width_px.value)}x{int(camera.height_px.value)}  "
+        f"{float(camera.focal_length_mm.value):.1f} mm (fx {fx:.1f} px)  "
+        f"{captures}",
+        "REFUSED -- by name:",
+    ]
+    assert "camera.terrain_clearance" in lines[7]
+    assert lines[-1] == ("REFUSED [camera.terrain_clearance]: nothing "
+                         "produced (the run directory holds jsbsim.log only)")
+    assert "JSBSim startup" not in text
+    # --json: the same header as data, on the refusal path.
+    code, printed = capture_text([str(EXAMPLES / "cameras_refusal.yaml"),
+                                  "--out", str(tmp_path / "refused_json"),
+                                  "--render", "none", "--json"])
+    assert code == 2
+    doc = json.loads(printed)
+    assert doc["verdict"] == "REFUSED" and doc["exit_code"] == 2
+    assert doc["header"]["spec_digest"] == spec.digest()
+    assert doc["header"]["simulation_digest"] == simulation_digest(spec)
+    assert doc["header"]["output_digest"] is None
+    assert doc["header"]["scene"] == {"key": "flat", "terrain": None,
+                                      "terrain_sha256": None,
+                                      "crs": "EPSG:32631"}
+    assert [c["camera_id"] for c in doc["header"]["cameras"]] == ["buried"]
+    assert doc["header"]["cameras"][0]["fx_px"] == pytest.approx(fx)
+    assert doc["header"]["cameras"][0]["flown"] is False
+    assert doc["refusals"][0]["constraint"] == "camera.terrain_clearance"
+    assert doc["text"][0] == f"run:         {tmp_path / 'refused_json'}"
+    assert doc["text"][1:7] == lines[1:7]
+    # A camera whose count the flight decides says so instead of a
+    # number that was not computed.
+    from flightsim.report import captures_words
+
+    assert captures_words({"capture_count": 24, "trigger": "interval",
+                           "flown": False}) == "24 captures, interval"
+    assert captures_words({"capture_count": 0, "trigger": "interval",
+                           "period_s": 1.0, "flown": False}) == \
+        "every 1 s, interval"
+    assert captures_words({"capture_count": 0, "trigger": "distance",
+                           "flown": False}) == \
+        "captures set by the flight, distance"
+    assert captures_words({"capture_count": 5, "trigger": "distance",
+                           "flown": True}) == "5 captures, distance"

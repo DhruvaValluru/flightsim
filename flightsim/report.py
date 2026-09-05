@@ -260,6 +260,48 @@ def aim_reference(block: Dict, record: Optional[Dict]) -> Dict:
     return reference
 
 
+def spec_manifest(spec, frame=None, terrain=None, cameras=None) -> Dict:
+    """A manifest-SHAPED mapping built from the spec alone, before any
+    flight: the spec and simulation digests (``output_digest`` None --
+    nothing has been flown), the scene from the terrain choice, the
+    frame's provenance, and one camera block per camera of the spec
+    (or the documented default cameras) carrying the CameraSpec fields,
+    the trigger and the stated capture count (0 when the flight
+    decides it). No frame records. What :func:`header` prints for a
+    refusal, so a refused capture still says which spec, which scene
+    and which cameras it refused."""
+    from core.capture.manifest import simulation_digest
+    from core.scenario.camera import default_cameras
+
+    flown = list(cameras) if cameras is not None else (
+        spec.cameras or default_cameras(spec))
+    blocks = []
+    for camera in flown:
+        blocks.append({
+            "camera_id": str(camera.camera_id.value),
+            "preset": str(camera.preset.value),
+            "spec": camera.to_dict(),
+            "trigger": str(camera.trigger.value),
+            "capture_count": int(camera.capture_count.value),
+            "period_s": float(camera.period_s.value),
+        })
+    rate = float(spec.rate.value)
+    return {
+        "manifest_version": None,
+        "spec_digest": spec.digest(),
+        "simulation_digest": simulation_digest(spec),
+        "output_digest": None,
+        "rate_hz": rate, "step_s": (1.0 / rate) if rate else None,
+        "scene": {"key": "terrain" if terrain else "flat",
+                  "terrain": str(terrain) if terrain else None,
+                  "terrain_sha256": None},
+        "frame": frame.provenance() if frame is not None else {},
+        "aircraft_metrics": None,
+        "cameras": blocks,
+        "frames": [],
+    }
+
+
 def header(manifest: Dict, out=None, aircraft: Optional[str] = None,
            duration_s: Optional[float] = None,
            samples: Optional[int] = None,
@@ -273,7 +315,11 @@ def header(manifest: Dict, out=None, aircraft: Optional[str] = None,
     states the window the schedule lives in beside the spec's
     duration: a 30 s spec whose record runs 4.900..34.858 s says so);
     the manifest's own aircraft_metrics name the airframe when nothing
-    else does."""
+    else does. A manifest-shaped mapping from the spec alone
+    (:func:`spec_manifest`, no frame records, no output digest) prints
+    the same lines with ``output -``, fx computed from the camera's
+    focal length, sensor width and resolution, and the captures column
+    from the spec's stated count or its trigger."""
     metrics = manifest.get("aircraft_metrics") or {}
     aircraft = aircraft or metrics.get("aircraft") or "-"
     scene = manifest.get("scene") or {}
@@ -290,21 +336,32 @@ def header(manifest: Dict, out=None, aircraft: Optional[str] = None,
 
         first = next((r for r in manifest.get("frames", [])
                       if r["camera_id"] == block["camera_id"]), None)
+        width = int(value("width_px", first["width_px"] if first else 0))
+        focal = float(value("focal_length_mm",
+                            first["focal_length_mm"] if first else 0.0))
+        if first is not None:
+            fx = float(first["fx_px"])
+        elif value("sensor_width_mm"):
+            # No record yet (a refusal's header): the manifest's own
+            # arithmetic, focal x width / sensor width.
+            fx = focal * width / float(value("sensor_width_mm"))
+        else:
+            fx = None
         cameras.append({
             "camera_id": block["camera_id"],
             "preset": block.get("preset") or value("preset", "-"),
             "position_mode": value("position_mode", "-"),
             "aim_mode": value("aim_mode", "-"),
-            "width_px": int(value("width_px", first["width_px"] if first
-                                  else 0)),
+            "width_px": width,
             "height_px": int(value("height_px", first["height_px"] if first
                                    else 0)),
-            "focal_length_mm": float(value("focal_length_mm",
-                                           first["focal_length_mm"] if first
-                                           else 0.0)),
-            "fx_px": float(first["fx_px"]) if first else None,
+            "focal_length_mm": focal,
+            "fx_px": fx,
             "capture_count": int(block.get("capture_count", 0)),
             "trigger": block.get("trigger") or value("trigger", "-"),
+            "period_s": block.get("period_s"),
+            "flown": first is not None or "frames" not in manifest
+            or manifest.get("output_digest") is not None,
             "schedule_basis": block.get("schedule_basis"),
             "horizon_stable": block.get("horizon_stable"),
             "aim_reference": aim_reference(block, first),
@@ -373,12 +430,28 @@ def header(manifest: Dict, out=None, aircraft: Optional[str] = None,
             f"  {c['camera_id']:<{width}}  {c['preset']}/{c['position_mode']}"
             f"  {reference['words']}  {c['width_px']}x{c['height_px']}  "
             f"{c['focal_length_mm']:.1f} mm ({fx})  "
-            f"{c['capture_count']} captures, {c['trigger']}")
+            + captures_words(c))
         if reference["note"]:
             # The aim reference's explanation on its own line under the
             # camera: where the aircraft's pixel is promised to be.
             lines.append(f"  {'':<{width}}  {reference['note']}")
     return lines, data
+
+
+def captures_words(camera: Dict) -> str:
+    """"24 captures, interval": the count and the trigger. From a
+    manifest the count is the schedule's; from a spec alone (a refusal
+    printed before any flight) it is the stated count, or, when the
+    flight decides it, the trigger's own words -- "every 1 s, interval"
+    or "captures set by the flight, distance" -- never a number that
+    was not computed."""
+    count = int(camera.get("capture_count") or 0)
+    trigger = camera.get("trigger") or "-"
+    if camera.get("flown", True) or count > 0:
+        return f"{count} captures, {trigger}"
+    if trigger == "interval" and camera.get("period_s"):
+        return f"every {float(camera['period_s']):g} s, {trigger}"
+    return f"captures set by the flight, {trigger}"
 
 
 def flight_words_from_run(run_dir) -> Dict:

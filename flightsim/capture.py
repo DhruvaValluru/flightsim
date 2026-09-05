@@ -127,10 +127,14 @@ def _tornado_hazard_block(spec):
     }
 
 
-def _refuse(violations, doc: dict, console=None) -> int:
-    """The named refusal: every violation on its own line, the JSBSim
-    log named, and a verdict line that starts with REFUSED and lists
-    the constraints (exit 2)."""
+def _refuse(violations, doc: dict, console=None, header=None) -> int:
+    """The named refusal: the header from the spec alone (``header``:
+    a callable printing it -- which spec, scene and cameras were
+    refused), every violation on its own line, the JSBSim log named,
+    and a verdict line that starts with REFUSED and lists the
+    constraints (exit 2)."""
+    if header is not None:
+        header()
     names = []
     print("REFUSED -- by name:")
     for v in violations:
@@ -276,17 +280,6 @@ def _capture_in(args, doc: dict, out: Path, render: str, preview_scale: int,
         doc["refusals"] = [{"constraint": "spec", "message": str(exc)}]
         return EXIT_REFUSED
 
-    # A preview scale the cameras' resolution cannot be drawn at exactly
-    # (3 on 1280x720) is refused by name BEFORE the flight -- before any
-    # model is even loaded -- never floored.
-    from core.capture.preview import scale_refusal_for_cameras
-
-    scale_refusal = scale_refusal_for_cameras(
-        preview_scale, spec.cameras or default_cameras(spec))
-    if scale_refusal is not None:
-        print(f"REFUSED -- {scale_refusal}")
-        return 2
-
     heightfield = None
     terrain_ground = None
     if args.terrain:
@@ -297,16 +290,45 @@ def _capture_in(args, doc: dict, out: Path, render: str, preview_scale: int,
         terrain_ground = TerrainGround(heightfield)
 
     frame = SceneFrame.for_spec(spec, heightfield)
+    cameras = spec.cameras or default_cameras(spec)
+
+    # The header from the spec alone -- spec and simulation digests,
+    # the scene, the flight, one line per camera -- printed by every
+    # refusal from here on, BEFORE the violation, so a refused capture
+    # still says what it refused. (A completed run prints the header
+    # from the manifest instead, with the output digest and the
+    # telemetry window the flight gave it.)
+    from flightsim.report import spec_manifest
+
+    def spec_header() -> None:
+        lines, data = header(spec_manifest(spec, frame, args.terrain, cameras),
+                             out, aircraft=str(spec.aircraft.value),
+                             duration_s=float(spec.duration.value))
+        for line in lines:
+            print(line)
+        doc["header"] = data
+
+    # A preview scale the cameras' resolution cannot be drawn at exactly
+    # (3 on 1280x720) is refused by name BEFORE the flight -- before any
+    # model is even loaded -- never floored.
+    from core.capture.preview import scale_refusal_for_cameras
+
+    scale_refusal = scale_refusal_for_cameras(preview_scale, cameras)
+    if scale_refusal is not None:
+        spec_header()
+        print(f"REFUSED -- {scale_refusal}")
+        return 2
+
     tornado = _tornado_hazard_block(spec)
 
     report = validate(spec)
     if not report.ok:
-        return _refuse(report.violations, doc, console)
+        return _refuse(report.violations, doc, console, header=spec_header)
     static = static_camera_violations(
         spec, heightfield, frame, tornado,
         )
     if static:
-        return _refuse(static, doc, console)
+        return _refuse(static, doc, console, header=spec_header)
     # A frames pass whose labels could not match its pixels: host parity
     # is measured and refused for turbulence (docs/VALIDITY.md), so the
     # choice is refused by name here, before the flight -- never rendered
@@ -314,6 +336,7 @@ def _capture_in(args, doc: dict, out: Path, render: str, preview_scale: int,
     if render == "frames":
         parity = frames_host_parity_refusal(spec)
         if parity is not None:
+            spec_header()
             print(f"REFUSED {HOST_PARITY_CONSTRAINT}: {parity}")
             doc["refusals"] = [{"constraint": HOST_PARITY_CONSTRAINT,
                                 "message": str(parity)}]
@@ -323,7 +346,6 @@ def _capture_in(args, doc: dict, out: Path, render: str, preview_scale: int,
     result = run_spec(spec, terrain_ground=terrain_ground)
     columns = result.telemetry.columns
 
-    cameras = spec.cameras or default_cameras(spec)
     if not spec.cameras:
         print("no camera stated: capturing with the documented default "
               "camera (the chase view)")
@@ -335,6 +357,7 @@ def _capture_in(args, doc: dict, out: Path, render: str, preview_scale: int,
             schedules.append(solve_schedule(
                 columns, camera, frame, rate_hz=float(spec.rate.value)))
     except ScheduleError as exc:
+        spec_header()
         print(f"REFUSED -- {exc}")
         doc["refusals"] = [{"constraint": "camera.schedule",
                             "message": str(exc)}]
@@ -347,7 +370,7 @@ def _capture_in(args, doc: dict, out: Path, render: str, preview_scale: int,
             track, heightfield=heightfield, scene_frame=frame,
             tornado=tornado, terrain_elevation_m=terrain_datum))
     if solved_violations:
-        return _refuse(solved_violations, doc, console)
+        return _refuse(solved_violations, doc, console, header=spec_header)
 
     manifest = build_capture_manifest(
         spec, columns, frame, tracks, schedules,

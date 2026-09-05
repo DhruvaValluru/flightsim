@@ -186,7 +186,7 @@ Measured 2026-09-05 on Linux x86_64, Python 3.11.15 by `scripts/examples_expecte
 
 #### capture: two cameras, one flight (cameras_multi)
 
-`python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo` -- exit 0, 5.21 s wall
+`python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo` -- exit 0, 5.06 s wall
 
 ```
 spec cef57d752362381d valid; running headlessly...
@@ -273,7 +273,7 @@ done: manifest, 48 previews and verification for 48 scheduled frames under runs/
 
 #### verify: the same run, graded from its directory
 
-`python -m flightsim.verify runs/demo` -- exit 0, 0.49 s wall
+`python -m flightsim.verify runs/demo` -- exit 0, 0.48 s wall
 
 ```
 run:         runs/demo
@@ -354,7 +354,7 @@ verified: runs/demo/capture_manifest.json (48 frame records, 2 camera(s)); repor
 
 #### capture: the same flight, a cockpit camera (cameras_multi_cockpit)
 
-`python -m flightsim.capture examples/cameras_multi_cockpit.yaml --out runs/demo_b` -- exit 0, 2.87 s wall
+`python -m flightsim.capture examples/cameras_multi_cockpit.yaml --out runs/demo_b` -- exit 0, 2.79 s wall
 
 ```
 spec b8e463be7defdc73 valid; running headlessly...
@@ -394,7 +394,7 @@ scheduled 24 frames across 1 camera(s)
       22    11.450     109      1894.567       -0.485    3049.352  (743.7, 691.9)             0.0
       23    11.992     114      1984.546       -0.483    3049.352  (743.7, 691.9)             0.0
   manifest: runs/demo_b/capture_manifest.json
-  previews: 24 geometry preview(s) at 1280x720, 0.074 s/frame under runs/demo_b/previews (previews are not frames; track: telemetry 9.23077 Hz (115 points, no decimation))
+  previews: 24 geometry preview(s) at 1280x720, 0.072 s/frame under runs/demo_b/previews (previews are not frames; track: telemetry 9.23077 Hz (115 points, no decimation))
   contact sheets: 1 (contact_sheets/<camera_id>.png, one per camera)
   CHECK                   STATUS    MEASURED                       TOLERANCE                     WHERE
   manifest_version        PASS      version 1                      = 1                           spec b8e463be7defdc73
@@ -474,7 +474,7 @@ verified: runs/demo_b/capture_manifest.json (24 frame records, 1 camera(s)); rep
 
 #### capture: waypoint trigger, one camera (cameras_waypoint)
 
-`python -m flightsim.capture examples/cameras_waypoint.yaml --out runs/waypoint` -- exit 0, 1.31 s wall
+`python -m flightsim.capture examples/cameras_waypoint.yaml --out runs/waypoint` -- exit 0, 1.29 s wall
 
 ```
 spec b031d3e385b823b3 valid; running headlessly...
@@ -519,6 +519,12 @@ done: manifest, 5 previews and verification for 5 scheduled frames under runs/wa
 `python -m flightsim.capture examples/cameras_refusal.yaml --out runs/refused` -- exit 2, 0.28 s wall
 
 ```
+run:         runs/refused
+spec         0b69edf3b46b0386   simulation 7051fbaad128630f   output -
+scene        flat (no raster)   crs EPSG:32631
+flight       B747, 12 s at 120 Hz (step 0.008333 s)
+cameras      1
+  buried  explicit/scene  aim aircraft (exact)  1280x720  35.0 mm (fx 1244.4 px)  every 1 s, interval
 REFUSED -- by name:
   [camera.terrain_clearance] camera[0] 'buried': the stated placement sits inside or on the scene's terrain (checked over the whole run window) (requested -600 m AGL, limit 2 m AGL)
 JSBSim output: runs/refused/jsbsim.log (4 model loads; nothing of JSBSim's on stdout)
@@ -527,7 +533,7 @@ REFUSED [camera.terrain_clearance]: nothing produced (the run directory holds js
 
 #### verify --corrupt quaternion: geometry recovery must FAIL
 
-`python -m flightsim.verify runs/demo --corrupt quaternion` -- exit 1, 0.50 s wall
+`python -m flightsim.verify runs/demo --corrupt quaternion` -- exit 1, 0.49 s wall
 
 ```
 corrupt quaternion: manifest copied to runs/demo_corrupt_quaternion; corrupted chase0 frame 3 (t=1.608 s) quaternion y += 0.05 (-0.042399 -> 0.007601); the Euler angles are untouched
@@ -613,7 +619,7 @@ FAILED verification: as expected for --corrupt quaternion, geometry_recovery FAI
 
 #### verify --corrupt aircraft: cross-view consistency must FAIL
 
-`python -m flightsim.verify runs/demo --corrupt aircraft` -- exit 1, 0.48 s wall
+`python -m flightsim.verify runs/demo --corrupt aircraft` -- exit 1, 0.50 s wall
 
 ```
 corrupt aircraft: manifest copied to runs/demo_corrupt_aircraft; corrupted tower0: every frame's recorded aircraft north_m += 5 m (24 frames); chase0's records are untouched, so the two views disagree
@@ -698,7 +704,7 @@ FAILED verification: as expected for --corrupt aircraft, cross_view_consistency 
 
 #### verify --corrupt time: temporal alignment must FAIL
 
-`python -m flightsim.verify runs/demo --corrupt time` -- exit 1, 0.52 s wall
+`python -m flightsim.verify runs/demo --corrupt time` -- exit 1, 0.48 s wall
 
 ```
 corrupt time: manifest copied to runs/demo_corrupt_time; corrupted chase0 frame 3 t_s += one fixed step (0.008333 s: 1.608333 -> 1.616667 s)
@@ -786,7 +792,7 @@ FAILED verification: as expected for --corrupt time, temporal_alignment FAILED (
 
 #### verify --corrupt count: count exactness must FAIL
 
-`python -m flightsim.verify runs/demo --corrupt count` -- exit 1, 0.49 s wall
+`python -m flightsim.verify runs/demo --corrupt count` -- exit 1, 0.50 s wall
 
 ```
 corrupt count: manifest copied to runs/demo_corrupt_count; corrupted chase0: frame record 23 (t=11.992 s) dropped; capture_count stays 24
@@ -870,7 +876,7 @@ FAILED verification: as expected for --corrupt count, count_exactness FAILED (al
 
 #### verify --corrupt clock: flight fidelity must FAIL (every instant shifted, no sibling run)
 
-`python -m flightsim.verify runs/demo --corrupt clock` -- exit 1, 0.50 s wall
+`python -m flightsim.verify runs/demo --corrupt clock` -- exit 1, 0.49 s wall
 
 ```
 corrupt clock: manifest copied to runs/demo_corrupt_clock; corrupted every record (48 frames, both the sample_index and the aircraft state untouched): t_s += 0.5 s; the records still agree with each other, only the telemetry's clock says otherwise
@@ -955,7 +961,7 @@ FAILED verification: as expected for --corrupt clock, flight_fidelity FAILED (al
 
 #### verify --corrupt flight: flight fidelity must FAIL (the aircraft moved in every view; cross-view fails beside it since round 3)
 
-`python -m flightsim.verify runs/demo --corrupt flight` -- exit 1, 0.50 s wall
+`python -m flightsim.verify runs/demo --corrupt flight` -- exit 1, 0.49 s wall
 
 ```
 corrupt flight: manifest copied to runs/demo_corrupt_flight; corrupted every camera's every record (48 frames): aircraft north_m += 50 m; the views still agree with EACH OTHER (cross_view_consistency passes), only the telemetry says the aircraft was elsewhere
@@ -1040,7 +1046,7 @@ FAILED verification: as expected for --corrupt flight, flight_fidelity FAILED (a
 
 #### verify --corrupt schedule: schedule fidelity must FAIL (an instant the spec does not schedule; every per-record check PASSES)
 
-`python -m flightsim.verify runs/demo --corrupt schedule` -- exit 1, 0.54 s wall
+`python -m flightsim.verify runs/demo --corrupt schedule` -- exit 1, 0.53 s wall
 
 ```
 corrupt schedule: manifest copied to runs/demo_corrupt_schedule; corrupted the instant at sample 59 (t=6.183 s -> sample 60, t=6.283 s) on chase0 #12, tower0 #12: sample_index, t_s, the aircraft state and the camera pose moved one telemetry sample later, the flight's own state and the spec's own solved pose at that sample copied in, so every per-record check still passes; only the schedule recomputed from the spec says the instant is wrong
@@ -1209,7 +1215,7 @@ FAILED verification: as expected for --corrupt pose, pose_fidelity FAILED (also:
 
 #### verify --corrupt lens: pose fidelity must FAIL (fx, fy and focal scaled 1.5x; geometry recovery still PASSES)
 
-`python -m flightsim.verify runs/demo --corrupt lens` -- exit 1, 0.50 s wall
+`python -m flightsim.verify runs/demo --corrupt lens` -- exit 1, 0.51 s wall
 
 ```
 corrupt lens: manifest copied to runs/demo_corrupt_lens; corrupted chase0: every record's fx_px, fy_px and focal_length_mm x 1.5 (24 frames); the pose and the aircraft untouched, the aircraft still in frame, so geometry_recovery passes; only the lens recomputed from the spec's camera says otherwise
@@ -1334,7 +1340,19 @@ The committed examples, each under a minute (times above):
   one camera, so cross-view consistency is SKIPPED by name;
 * `examples/cameras_refusal.yaml` -- a camera stated 600 m under the
   terrain datum; `REFUSED [camera.terrain_clearance]`, exit 2, the
-  run directory holding `jsbsim.log` only.
+  run directory holding `jsbsim.log` only. The refusal opens with the
+  header printed from the SPEC ALONE (round 3: `run`, the spec and
+  simulation digests with `output -` because nothing was flown, the
+  scene and CRS, the flight, one line per camera with fx computed from
+  the camera's focal length, sensor width and resolution and the
+  captures column from the stated count or, when the flight decides
+  it, the trigger -- "every 1 s, interval"), then the violation by
+  name, the JSBSim line and the verdict; `--json` carries the same
+  `header` block on the refusal path. Every refusal after the spec is
+  read prints it (validation, the scene checks, the preview scale, the
+  frames host-parity refusal, a schedule the telemetry cannot honour,
+  a solved track that violates the scene); a spec that does not parse
+  has no header to print.
 
 ### Watching each check fail on purpose
 

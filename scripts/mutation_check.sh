@@ -2191,6 +2191,26 @@ mutate flightsim/verify.py \
     "commands round 3: --corrupt schedule copies the spec's pose at the moved sample so only the schedule tells" \
     tests/test_camera_cli.py || failures=$((failures+1))
 
+mutate flightsim/capture.py \
+    '    if header is not None:
+        header()' \
+    '    if False:  # MUTATED: a refusal prints no header
+        header()' \
+    "commands round 3: a refused capture prints the header from the spec alone before the violation" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/report.py \
+    '            fx = focal * width / float(value("sensor_width_mm"))' \
+    '            fx = None  # MUTATED: no record, no fx' \
+    "commands round 3: the refusal header's fx is computed from the spec's focal length, sensor width and resolution" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/report.py \
+    '    if trigger == "interval" and camera.get("period_s"):' \
+    '    if False:  # MUTATED: a period schedule is worded as a count of 0' \
+    "commands round 3: a spec-only camera whose count the flight decides is worded from its trigger, never as 0 captures" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
