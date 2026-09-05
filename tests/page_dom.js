@@ -361,8 +361,10 @@ async function main() {
       if (!input) throw new Error(`no input ${action.name}`);
       input.value = action.value;
       input.dispatchEvent({type: "change"});
+      const srcKey = input.dataset.srcKey || action.name;
       out.push(Object.assign(snapshot(), {
-        sourceCell: document.querySelector(`[data-src="${action.name}"]`).serialize()}));
+        sourceCell: document.querySelector(`[data-src="${srcKey}"]`).serialize(),
+        sourceCells: document.querySelectorAll(`[data-src="${srcKey}"]`).map(c => c.serialize())}));
     } else if (action.do === "startRun") {
       await page.startRun(action.mayBake ?? false, action.endpoint || "/run");
       await settle();

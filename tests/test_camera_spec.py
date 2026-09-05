@@ -272,3 +272,38 @@ def test_offset_cameras_are_not_touched_by_the_camera_planner():
     spec.plan("terrain_elevation", 2900.0, frm="staged by the test")
     plan_camera_defaults(spec)
     assert spec.cameras[0].to_dict() == before
+
+
+def test_moves_carry_their_provenance_through_the_round_trip(spec_with_camera,
+                                                             tmp_path):
+    """The moves list is one recorded decision, so it carries one source
+    word and one note (``moves_source`` / ``moves_from``) beside it,
+    serialised only when there are moves, digest-relevant like every
+    field's source, preserved by the YAML round trip; an absent source
+    is None (the table says "no recorded source"), and a word outside
+    Source is refused by name -- never guessed."""
+    camera = spec_with_camera.cameras[0]
+    assert "moves_source" not in camera.to_dict()       # no moves, no source
+    camera.moves = [{"t_s": 0.0, "focal_length_mm": 35.0},
+                    {"t_s": 10.0, "focal_length_mm": 85.0}]
+    unrecorded = camera.to_dict()
+    assert unrecorded["moves_source"] is None and unrecorded["moves_from"] is None
+    digest_unrecorded = spec_with_camera.digest()
+    camera.set_moves(camera.moves, frm="stated: zoom 35 to 85 mm over 10 s")
+    assert camera.moves_source == "user"
+    assert camera.moves_from == "stated: zoom 35 to 85 mm over 10 s"
+    assert spec_with_camera.digest() != digest_unrecorded
+    path = spec_with_camera.write(tmp_path / "moves.yaml")
+    reread = ScenarioSpec.read(path)
+    assert reread.digest() == spec_with_camera.digest()
+    assert reread.cameras[0].moves == camera.moves
+    assert reread.cameras[0].moves_source == "user"
+    assert reread.cameras[0].moves_from == "stated: zoom 35 to 85 mm over 10 s"
+    camera.set_moves(camera.moves, frm="a planner's dolly", source=Source.DERIVED)
+    assert camera.to_dict()["moves_source"] == "derived"
+    bad = spec_with_camera.to_dict()
+    bad["cameras"][0]["moves_source"] = "planner"
+    with pytest.raises(ValueError, match="moves_source.*'planner'"):
+        ScenarioSpec.from_dict(bad)
+    with pytest.raises(ValueError, match="moves source must be one of"):
+        camera.set_moves(camera.moves, frm="x", source="planner")

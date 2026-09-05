@@ -2670,6 +2670,40 @@ mutate webapp/runs.py \
     "page round 3: the mesh refusal carries the airframe against the buildable list" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 3: keyframe rows carry their recorded provenance and are editable --
+
+mutate webapp/static/index.html \
+    '    : `<td class="src-default" data-src="${esc(key)}">spec data (no ` +' \
+    '    : `<td class="src-user" data-src="${esc(key)}">keyframe (no ` +  // MUTATED: unrecorded painted green' \
+    "page round 3: a keyframe row without a recorded source is never painted as the user's word" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '        camera.moves_source = "user";
+        camera.moves_from = "edited in the web UI";' \
+    '        // MUTATED: the edit leaves the list'"'"'s provenance unrecorded' \
+    "page round 3 (DOM): an edited keyframe records the list's provenance as the user's edit" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '        move[input.dataset.field] = value;' \
+    '        // MUTATED: the keyframe edit is never written back' \
+    "page round 3 (DOM): a keyframe edit is written into dict.cameras[i].moves[k]" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate core/scenario/camera.py \
+    '        return cls(moves=[dict(m) for m in moves], moves_source=source,
+                   moves_from=frm, **kwargs)' \
+    '        return cls(moves=[dict(m) for m in moves], **kwargs)  # MUTATED: provenance dropped on parse' \
+    "page round 3: a camera's moves provenance survives the dict round trip" \
+    tests/test_camera_spec.py || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '            "moves_source": camera.moves_source,' \
+    '            "moves_source": None,  # MUTATED: /compile hides the recorded source' \
+    "page round 3: /compile sends the moves' recorded source" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

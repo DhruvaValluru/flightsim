@@ -2356,11 +2356,16 @@ def test_the_run_payload_carries_the_whole_event_log(client, tmp_path):
 def test_the_review_table_shows_each_camera_s_keyframed_moves(tmp_path):
     """/compile sends each camera's ``moves`` (the keyframes the pose
     track interpolates: data inside the camera record, digest-relevant)
-    and the page's camera block dropped them, so a camera that moved
-    showed only its starting fields. cameraMovesHtml renders one row per
-    keyframe after the fields -- the instant, every keyed field with its
-    unit, the word "keyframe" and its place in the sequence -- and
-    renderSpec appends them; a camera without moves gets no row."""
+    and their recorded provenance (``moves_source`` / ``moves_from``,
+    one for the whole list). cameraMovesHtml renders one row per
+    keyframe after the fields -- its place, the instant and every keyed
+    field as an INPUT with its unit -- and the source column prints the
+    list's recorded source word in that source's own colour, or, when
+    the spec recorded none, "spec data (no recorded source)" in the
+    default colour: the rows used to say "keyframe" in the user's green
+    although CameraSpec.moves recorded no source at all. renderSpec
+    appends them; a camera without moves gets no row; the CLI table
+    prints the same source word."""
     import re
 
     from tests.test_camera_poses import explicit_camera_with_moves
@@ -2373,25 +2378,116 @@ def test_the_review_table_shows_each_camera_s_keyframed_moves(tmp_path):
     assert payload["cameras"][1]["moves"] == [
         {"t_s": 0.0, "position_north_m": 0.0, "focal_length_mm": 35.0},
         {"t_s": 10.0, "position_north_m": 2000.0, "focal_length_mm": 85.0}]
+    assert payload["cameras"][1]["moves_source"] is None
+    assert payload["cameras"][1]["moves_from"] is None
     rows = page_capture(tmp_path, {}, {}, "r", cameras=payload["cameras"])["moves"]
     assert rows[0] == ""
-    words = text_of(rows[1])
     assert rows[1].count('<tr class="move">') == 2
-    assert ("move at t=0 s position_north_m = 0 m, focal_length_mm = 35 mm "
-            "keyframe keyframe 1 of 2 (spec data, digest-relevant): the pose "
-            "track interpolates linearly to the next keyframe and holds past "
-            "the last") in words
-    assert ("move at t=10 s position_north_m = 2000 m, focal_length_mm = 85 mm "
-            "keyframe keyframe 2 of 2") in words
+    # No recorded source: said so, in the default colour, never green.
+    assert rows[1].count('<td class="src-default" data-src="cameras[1].moves">'
+                         'spec data (no recorded source)</td>') == 2
+    assert "src-user" not in rows[1] and ">keyframe<" not in rows[1]
+    words = text_of(rows[1])
+    assert ("move 1 of 2 t_s = s, position_north_m = m, focal_length_mm = mm "
+            "spec data (no recorded source) keyframe 1 of 2 (spec data, "
+            "digest-relevant): the pose track interpolates linearly to the "
+            "next keyframe and holds past the last") in words
+    assert "move 2 of 2 t_s = s, position_north_m = m, focal_length_mm = mm" in words
+    # Every value is an input that writes back into dict.cameras[1].moves[k].
+    inputs = re.findall(r'<input data-name="([^"]+)" data-src-key="([^"]+)" '
+                        r'data-camera="(\d+)" data-move="(\d+)" '
+                        r'data-field="([^"]+)" value="([^"]*)">', rows[1])
+    assert inputs == [
+        ("cameras[1].moves[0].t_s", "cameras[1].moves", "1", "0", "t_s", "0"),
+        ("cameras[1].moves[0].position_north_m", "cameras[1].moves", "1", "0",
+         "position_north_m", "0"),
+        ("cameras[1].moves[0].focal_length_mm", "cameras[1].moves", "1", "0",
+         "focal_length_mm", "35"),
+        ("cameras[1].moves[1].t_s", "cameras[1].moves", "1", "1", "t_s", "10"),
+        ("cameras[1].moves[1].position_north_m", "cameras[1].moves", "1", "1",
+         "position_north_m", "2000"),
+        ("cameras[1].moves[1].focal_length_mm", "cameras[1].moves", "1", "1",
+         "focal_length_mm", "85")]
     # The units are the camera's own field units, never guessed.
     units = {f["name"]: f["unit"] for f in payload["cameras"][1]["fields"]}
     assert units["position_north_m"] == "m" and units["focal_length_mm"] == "mm"
+    assert "position_north_m = <input" in rows[1] and "> m, focal_length_mm" in rows[1]
+    assert "no recorded source" in spec.render_table()
+    # A recorded provenance: the source word in its own colour, the note
+    # before the keyframe words -- on the page and in the CLI table.
+    spec.cameras[1].set_moves(spec.cameras[1].moves,
+                              frm="stated: dolly north 0 to 2000 m, 35 to 85 mm")
+    payload = _spec_payload(spec)
+    assert payload["cameras"][1]["moves_source"] == "user"
+    assert payload["cameras"][1]["moves_from"] == "stated: dolly north 0 to 2000 m, 35 to 85 mm"
+    rows = page_capture(tmp_path, {}, {}, "r", cameras=payload["cameras"])["moves"]
+    assert rows[1].count('<td class="src-user" data-src="cameras[1].moves">user</td>') == 2
+    assert "no recorded source" not in rows[1]
+    assert ("user stated: dolly north 0 to 2000 m, 35 to 85 mm — keyframe 1 of 2"
+            in text_of(rows[1]).replace("&mdash;", "—"))
+    table = spec.render_table()
+    assert "no recorded source" not in table
+    assert re.search(r"moves\s+2 keyframes\s+user\s+stated: dolly north 0 to "
+                     r"2000 m, 35 to 85 mm: t=0.0s; t=10.0s", table), table
     # renderSpec appends the rows after each camera's field rows.
     page = STATIC_INDEX.read_text(encoding="utf-8")
     render_spec = re.search(r"function renderSpec\(payload\) \{.*?\n\}\n", page, re.S).group(0)
     assert 'body.insertAdjacentHTML("beforeend", cameraMovesHtml(cam));' in render_spec
     assert render_spec.index("for (const f of cam.fields)") \
         < render_spec.index("cameraMovesHtml(cam)")
+
+
+def test_keyframes_are_edited_in_the_table_and_written_back(tmp_path):
+    """The DOM: renderSpec draws the dolly's two keyframe rows; editing
+    one keyframe's focal length repaints EVERY source cell of that
+    list "user (edited)" (one decision, one provenance) and
+    editedSpecDict writes the value into dict.cameras[1].moves[1] with
+    the list's provenance recorded as the user's edit -- and /run's own
+    parser (ScenarioSpec.from_dict) accepts that dict, keyframe and
+    provenance intact, while a source word outside Source is refused
+    by name. The untouched camera and keyframe are unchanged."""
+    from core.scenario.spec import ScenarioSpec
+    from tests.test_camera_poses import explicit_camera_with_moves
+    from webapp.server import _spec_payload
+
+    spec = compile_prompt(DEMO)
+    spec.cameras.append(explicit_camera_with_moves())
+    payload = {"compiler": "regex", "model": None, "spec": _spec_payload(spec),
+               "validation": {"ok": True, "warnings": [], "violations": []}}
+    snaps = page_dom(tmp_path, {}, [
+        {"do": "renderSpec", "payload": payload},
+        {"do": "editedSpecDict"},
+        {"do": "setInput", "name": "cameras[1].moves[1].focal_length_mm",
+         "value": "70"},
+        {"do": "editedSpecDict"},
+    ])
+    table = snaps[0]["specTable"]
+    assert table.count('<tr class="move">') == 2
+    assert table.count('data-src="cameras[1].moves">spec data (no recorded source)') == 2
+    # Untouched: the dict is the compiled one, provenance unrecorded.
+    untouched = snaps[1]["dict"]["cameras"][1]
+    assert untouched["moves"] == spec.cameras[1].moves
+    assert untouched["moves_source"] is None and untouched["moves_from"] is None
+    assert snaps[2]["sourceCells"] == [
+        '<td class="src-edited" data-src="cameras[1].moves">user (edited)</td>'] * 2
+    edited = snaps[3]["dict"]
+    dolly = edited["cameras"][1]
+    assert dolly["moves"] == [
+        {"t_s": 0.0, "position_north_m": 0.0, "focal_length_mm": 35.0},
+        {"t_s": 10.0, "position_north_m": 2000.0, "focal_length_mm": 70}]
+    assert dolly["moves_source"] == "user"
+    assert dolly["moves_from"] == "edited in the web UI"
+    assert edited["cameras"][0]["moves"] == [] and "moves_source" not in edited["cameras"][0]
+    reparsed = ScenarioSpec.from_dict(edited)
+    assert reparsed.cameras[1].moves[1]["focal_length_mm"] == 70
+    assert reparsed.cameras[1].moves_source == "user"
+    assert reparsed.cameras[1].moves_from == "edited in the web UI"
+    assert reparsed.digest() != spec.digest()
+    assert reparsed.to_dict()["cameras"][1]["moves_source"] == "user"
+    bad = json.loads(json.dumps(edited))
+    bad["cameras"][1]["moves_source"] = "planner"
+    with pytest.raises(ValueError, match="moves_source.*'planner'"):
+        ScenarioSpec.from_dict(bad)
 
 
 # -- a finished run outlives the server process ---------------------------

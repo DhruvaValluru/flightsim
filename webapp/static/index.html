@@ -23,6 +23,7 @@
   td input { background: #171d24; color: inherit; border: 1px solid #2c3947;
              border-radius: 4px; font: inherit; padding: .15rem .4rem;
              width: 9rem; }
+  tr.move td input { width: 5rem; }
   .src-user     { color: #7fd08f; }
   .src-inferred { color: #e0b452; }
   .src-model    { color: #6fb3e0; }
@@ -349,9 +350,14 @@ function renderSpec(payload) {
     `<span class="src-default">default</span> documented default`;
   body.querySelectorAll("input").forEach(input => {
     input.addEventListener("change", () => {
-      const cell = body.querySelector(`[data-src="${input.dataset.name}"]`);
-      cell.textContent = "user (edited)";
-      cell.className = "src-edited";
+      // A keyframe input names the source cells of its whole moves
+      // list (data-src-key): one decision, one provenance, every row
+      // of it repainted.
+      const key = input.dataset.srcKey || input.dataset.name;
+      body.querySelectorAll(`[data-src="${key}"]`).forEach(cell => {
+        cell.textContent = "user (edited)";
+        cell.className = "src-edited";
+      });
     });
   });
   renderVerdict(payload.validation);
@@ -382,12 +388,26 @@ function editedSpecDict() {
   for (const f of compiled.spec.fields) sections[f.name] = f.section;
   document.querySelectorAll("#specTable input").forEach(input => {
     const name = input.dataset.name;
+    const parsed = parseFloat(input.value);
+    const value = Number.isNaN(parsed) ? input.value : parsed;
+    // Keyframe rows edit dict.cameras[i].moves[k][field]; the moves
+    // list is ONE recorded decision, so an edit to any keyframe records
+    // the list's provenance as the user's edit, the same words a field
+    // edit records.
+    if (input.dataset.move !== undefined) {
+      const camera = dict.cameras[+input.dataset.camera];
+      const move = camera.moves[+input.dataset.move];
+      if (String(move[input.dataset.field]) !== String(value)) {
+        move[input.dataset.field] = value;
+        camera.moves_source = "user";
+        camera.moves_from = "edited in the web UI";
+      }
+      return;
+    }
     // Camera rows edit dict.cameras[i][field]; same source rule.
     const entry = input.dataset.camera !== undefined
       ? dict.cameras[+input.dataset.camera][input.dataset.field]
       : dict[sections[name]][name];
-    const parsed = parseFloat(input.value);
-    const value = Number.isNaN(parsed) ? input.value : parsed;
     if (String(entry.value) !== String(value)) {
       entry.value = value;
       entry.source = "user";
@@ -793,20 +813,35 @@ function verificationTableHtml(v) {
 // carried verbatim, digest-relevant) that the pose track interpolates
 // linearly between keyframes and holds outside them. The page used to
 // drop them, so a camera that moved showed only its starting fields.
-// Each row: the instant, every keyed field at it with the field's own
-// unit (from the camera's field rows), the source word "keyframe" and
-// where the keyframe sits in the sequence. No moves, no rows.
+// Each row: the keyframe's place in the sequence, its instant and
+// every keyed field at it as an INPUT with the field's own unit (from
+// the camera's field rows; edits write back into
+// dict.cameras[i].moves[k] through editedSpecDict), the source column
+// the list's RECORDED source word (cam.moves_source, in that source's
+// own colour, with its note) -- or, when the spec recorded none,
+// "spec data (no recorded source)" in the default colour, never the
+// user's green. No moves, no rows.
 function cameraMovesHtml(cam) {
   const moves = cam.moves || [];
   if (!moves.length) return "";
-  const units = {};
+  const units = {t_s: "s"};
   (cam.fields || []).forEach(f => { units[f.name] = f.unit || ""; });
+  const key = `cameras[${cam.index}].moves`;
+  const source = cam.moves_source
+    ? `<td class="src-${esc(cam.moves_source)}" data-src="${esc(key)}">` +
+      `${esc(cam.moves_source)}</td>`
+    : `<td class="src-default" data-src="${esc(key)}">spec data (no ` +
+      `recorded source)</td>`;
+  const note = cam.moves_from ? `${esc(cam.moves_from)} &mdash; ` : "";
   return moves.map((m, i) => {
-    const keyed = Object.keys(m).filter(k => k !== "t_s").map(k =>
-      `${esc(k)} = ${esc(m[k])}${units[k] ? " " + esc(units[k]) : ""}`).join(", ");
-    return `<tr class="move"><td>&nbsp;&nbsp;move at t=${esc(m.t_s)} s</td>` +
-      `<td>${keyed}</td><td class="src-user">keyframe</td>` +
-      `<td class="dim">keyframe ${i + 1} of ${moves.length} (spec data, ` +
+    const keyed = ["t_s"].concat(Object.keys(m).filter(k => k !== "t_s")).map(k =>
+      `${esc(k)} = <input data-name="${esc(key)}[${i}].${esc(k)}" ` +
+      `data-src-key="${esc(key)}" data-camera="${cam.index}" data-move="${i}" ` +
+      `data-field="${esc(k)}" value="${esc(m[k])}">` +
+      `${units[k] ? " " + esc(units[k]) : ""}`).join(", ");
+    return `<tr class="move"><td>&nbsp;&nbsp;move ${i + 1} of ${moves.length}</td>` +
+      `<td>${keyed}</td>${source}` +
+      `<td class="dim">${note}keyframe ${i + 1} of ${moves.length} (spec data, ` +
       `digest-relevant): the pose track interpolates linearly to the next ` +
       `keyframe and holds past the last</td></tr>`;
   }).join("");

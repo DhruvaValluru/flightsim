@@ -200,6 +200,11 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
                 "detail": quantity.detail,
             } for name, quantity in camera.quantities()],
             "moves": [dict(m) for m in camera.moves],
+            # The list's provenance, like every field's: the page's
+            # keyframe rows print it in its own colour, or say that
+            # none was recorded.
+            "moves_source": camera.moves_source,
+            "moves_from": camera.moves_from,
         })
     return {"digest": spec.digest(), "name": spec.name,
             "prompt": spec.prompt, "notes": spec.notes,
