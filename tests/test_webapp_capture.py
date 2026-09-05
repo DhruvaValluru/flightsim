@@ -2293,6 +2293,38 @@ def test_a_short_engine_pass_shows_its_partial_frame_set_on_the_page(
         page_capture(tmp_path, unencoded, {}, run_id)["card"])
 
 
+# -- the page's status log is the whole event log --------------------------
+
+def test_the_run_payload_carries_the_whole_event_log(client, tmp_path):
+    """/runs/{id} used to carry events[-20:]: a three- or four-camera
+    frames run (two "rendering" lines per camera plus the capture,
+    closure, encoding and overlay lines) lost its first status lines
+    from the page silently while status.json kept them all. The payload
+    now carries every event, equal to what status.json holds."""
+    from webapp.runs import RunState
+
+    run = RunState(run_id="abcdef123456")
+    run.out_dir = str(tmp_path / "abcdef123456")
+    Path(run.out_dir).mkdir()
+    for index in range(24):
+        run.push("rendering", f"line {index}")
+    run.push("done", "line 24")
+    assert len(run.events) == 25
+    assert run.as_dict()["events"] == run.events
+    assert [e["detail"] for e in run.as_dict()["events"]][:3] == [
+        "line 0", "line 1", "line 2"]
+    log = json.loads((Path(run.out_dir) / "status.json").read_text(encoding="utf-8"))
+    assert log["events"] == run.as_dict()["events"]
+    # Through HTTP, the same 25 lines in order.
+    manager.runs[run.run_id] = run
+    try:
+        state = client.get(f"/runs/{run.run_id}").json()
+    finally:
+        manager.runs.pop(run.run_id, None)
+    assert len(state["events"]) == 25
+    assert [e["detail"] for e in state["events"]] == [f"line {i}" for i in range(25)]
+
+
 # -- a finished run outlives the server process ---------------------------
 
 def recovered(run_id):

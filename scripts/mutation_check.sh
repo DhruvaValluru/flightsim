@@ -2524,6 +2524,14 @@ mutate webapp/static/index.html \
     "page round 2: on a frames run the preview contact sheet sits inside the previews disclosure" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 2: the page's status log is the whole event log ------------
+
+mutate webapp/runs.py \
+    '                "started": self.started, "events": list(self.events),' \
+    '                "started": self.started, "events": self.events[-20:],  # MUTATED: the first status lines dropped' \
+    "page round 2: the run payload carries the whole event log, as status.json does" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

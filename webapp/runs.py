@@ -203,10 +203,15 @@ class RunState:
         }, indent=1), encoding="utf-8")
 
     def as_dict(self) -> Dict:
+        # The WHOLE event log: the page prints it as the run's status
+        # lines and status.json keeps all of it, so the two must agree.
+        # A four-camera frames run (two "rendering" lines per camera
+        # plus the capture, closure, encoding and overlay lines) passes
+        # 20 events; a truncated log dropped its first lines silently.
         return {"run_id": self.run_id, "status": self.status,
                 "detail": self.detail, "spec_digest": self.spec_digest,
                 "scene": self.scene, "clip": self.clip,
-                "started": self.started, "events": self.events[-20:],
+                "started": self.started, "events": list(self.events),
                 "reference": self.reference, "conditions": self.conditions,
                 "capture": self.capture, "render": self.render,
                 "engine_reason": self.engine_reason}
