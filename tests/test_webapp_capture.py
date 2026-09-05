@@ -3067,3 +3067,116 @@ def test_the_live_page_prints_a_run_refusal_in_the_one_shape(
         "refused — [run.busy] a run is already rendering (abc123def456); one "
         "editor instance at a time (requested abc123def456 rendering, limit "
         "one editor instance at a time)")
+
+
+# -- page round 3: the gallery shows WHICH frames failed engine parity -----
+
+@pytest.fixture()
+def drifting_run(engine_client, engine_stubs):
+    """A two-camera frames run through POST /run whose engine placed
+    frame 1 of EACH camera 20 cm east of the solved pose: every PNG
+    exists, the counts are right, and engine parity fails the run by
+    name -- 8 rendered, 6 verified."""
+    from webapp.runs import RunManager
+
+    calls = []
+    honest = honest_engine(calls)
+
+    def drifting(card, frames, *args, **kwargs):
+        ok = honest(card, frames, *args, **kwargs)
+        report = Path(frames) / "render.json"
+        render = json.loads(report.read_text(encoding="utf-8"))
+        render["frame_records"][1]["camera_applied_east_m"] += 0.20
+        report.write_text(json.dumps(render), encoding="utf-8")
+        return ok
+
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(drifting))
+    reply = engine_client.post("/run", json={"spec": two_camera_spec().to_dict(),
+                                             "render": "frames"})
+    assert reply.status_code == 200, reply.json()
+    run_id = reply.json()["run_id"]
+    state = finished(engine_client, run_id)
+    assert state["status"] == "failed", state["detail"]
+    return run_id, state
+
+
+def test_the_gallery_captions_each_frame_that_failed_engine_parity(
+        drifting_run, frames_run, captured, client, engine_client, tmp_path):
+    """engine_parity's data recorded per-camera counts and one worst
+    frame, so a reader could not see from the thumbnails which frames
+    the verifier rejected. verify.json now carries one entry per graded
+    frame (index, t_s, ok, the measured gaps, that frame's own problem
+    sentences); /files' galleries attach it to each rendered frame; and
+    the gallery captions a failed frame "parity FAIL: <the verifier's
+    sentence>" in the FAIL colour with a red outline, the heading
+    counting them -- the number of FAIL captions equals rendered minus
+    verified. An honest pass and a headless run carry no such words."""
+    import re
+
+    run_id, state = drifting_run
+    assert state["capture"]["rendered"] == 8 and state["capture"]["verified"] == 6
+    verdict = engine_client.get(f"/runs/{run_id}/file/capture/verify.json").json()
+    parity = next(c for c in verdict["checks"] if c["name"] == "engine_parity")
+    frames = parity["data"]["frames"]
+    assert sorted(frames) == ["camera0", "tower0"]
+    for cam, entries in frames.items():
+        assert [e["index"] for e in entries] == [0, 1, 2, 3]
+        assert [e["ok"] for e in entries] == [True, False, True, True]
+        assert entries[1]["problems"] == [
+            "applied position 0.200 m from the solved pose (tol 0.1)"]
+        assert entries[1]["gaps"]["position_m"] == pytest.approx(0.2)
+        assert all(e["problems"] == [] for e in entries if e["ok"])
+        assert all(e["gaps"]["position_m"] == pytest.approx(0.0)
+                   for e in entries if e["ok"])
+    payload = engine_client.get(f"/runs/{run_id}/files").json()
+    failed = [(g["camera_id"], f["index"]) for g in payload["galleries"]
+              for f in g["frames"] if f["parity"]["ok"] is False]
+    assert failed == [("camera0", 1), ("tower0", 1)]
+    assert len(failed) == state["capture"]["rendered"] - state["capture"]["verified"]
+    assert payload["galleries"][0]["frames"][1]["parity"]["problems"] == [
+        "applied position 0.200 m from the solved pose (tol 0.1)"]
+    html = page_capture(tmp_path, state, payload, run_id)
+    assert len(html["galleries"]) == 2
+    captions = []
+    for gallery in html["galleries"]:
+        cam = re.match(r'<div class="gallery"><b>([^<]+)</b>', gallery).group(1)
+        words = text_of(gallery)
+        assert (f"{cam} : 4 scheduled, 4 rendered, 3 verified — showing 4 of 4 "
+                f"rendered frame(s) — 1 of them failed engine parity (captioned "
+                f"and outlined below)") in words
+        assert gallery.count('<figure class="thumb parity-fail">') == 1
+        assert gallery.count('<figure class="thumb">') == 7      # 3 frames + 4 previews
+        caption = re.search(r'<figcaption class="dim">#1 t=([\d.]+) s <span '
+                            r'class="verdict-refused">— parity FAIL: ([^<]+)'
+                            r'</span></figcaption>', gallery)
+        assert caption, gallery
+        captions.append(caption.group(2))
+        t1 = payload["galleries"][0]["frames"][1]["t_s"]
+        assert caption.group(1) == f"{t1:.3f}"
+        # The failed thumbnail is the frame it says it is.
+        figure = re.search(r'<figure class="thumb parity-fail">.*?</figure>', gallery).group(0)
+        assert f"/runs/{run_id}/file/capture/frames/{cam}/0001.png" in figure
+    assert captions == ["applied position 0.200 m from the solved pose (tol 0.1)"] * 2
+    assert "".join(html["galleries"]).count("parity FAIL") == 2
+    assert "8 scheduled, 8 rendered, 6 verified" in text_of(html["card"])
+    # The honest pass: every frame verified, no FAIL caption, no outline.
+    honest_id, honest_state = frames_run
+    honest_payload = engine_client.get(f"/runs/{honest_id}/files").json()
+    assert all(f["parity"]["ok"] is True and f["parity"]["problems"] == []
+               for g in honest_payload["galleries"] for f in g["frames"])
+    honest_html = "".join(page_capture(tmp_path, honest_state, honest_payload,
+                                       honest_id)["galleries"])
+    assert "parity FAIL" not in honest_html and "parity-fail" not in honest_html
+    assert "failed engine parity" not in honest_html
+    # Headless: nothing was graded, so verify.json records no frame and
+    # the previews carry no verdict.
+    headless_id, headless_state = captured
+    headless = client.get(f"/runs/{headless_id}/file/capture/verify.json").json()
+    awaiting = next(c for c in headless["checks"] if c["name"] == "engine_parity")
+    assert awaiting["ok"] is None and awaiting["data"]["frames"] == {}
+    headless_payload = client.get(f"/runs/{headless_id}/files").json()
+    assert all("parity" not in p for g in headless_payload["galleries"]
+               for p in g["previews"])
+    assert "parity" not in "".join(page_capture(tmp_path, headless_state,
+                                                headless_payload, headless_id)["galleries"])

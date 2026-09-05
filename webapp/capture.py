@@ -843,6 +843,32 @@ def frames_zip_refusal(out_dir: Path, files: List[Dict]) -> Optional[str]:
                                "no rendered frames in this run")
 
 
+def frame_parity(out_dir: Path) -> Dict[str, Dict[int, Dict]]:
+    """Each graded frame's engine-parity verdict, by camera and index,
+    read from capture/verify.json's own engine_parity data ("frames":
+    index, t_s, ok, the measured gaps and that frame's own problem
+    sentences) -- so a gallery can say WHICH rendered frames the
+    verifier rejected, from the file the page links. Empty without a
+    verify.json, or before any engine frame was graded."""
+    path = Path(out_dir) / "capture" / "verify.json"
+    if not path.is_file():
+        return {}
+    try:
+        verdict = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    for check in verdict.get("checks", []):
+        if check.get("name") != "engine_parity":
+            continue
+        frames = (check.get("data") or {}).get("frames") or {}
+        return {camera_id: {int(f["index"]): {"ok": f.get("ok"),
+                                              "gaps": f.get("gaps") or {},
+                                              "problems": f.get("problems") or []}
+                            for f in entries if "index" in f}
+                for camera_id, entries in frames.items()}
+    return {}
+
+
 def run_galleries(out_dir: Path, files: Optional[List[Dict]] = None) -> List[Dict]:
     """One gallery per camera for the page: the manifest's records
     (index and t_s) matched against the files the listing carries.
@@ -861,6 +887,7 @@ def run_galleries(out_dir: Path, files: Optional[List[Dict]] = None) -> List[Dic
         return []
     if files is None:
         files = run_artifacts(out_dir)
+    parity = frame_parity(out_dir)
     on_disk = set()
     sheets = {}
     for entry in files:
@@ -885,7 +912,8 @@ def run_galleries(out_dir: Path, files: Optional[List[Dict]] = None) -> List[Dic
             if frame in on_disk:
                 frames.append({"index": index, "t_s": float(record["t_s"]),
                                "file": frame,
-                               "overlay": overlay if overlay in on_disk else None})
+                               "overlay": overlay if overlay in on_disk else None,
+                               "parity": parity.get(camera_id, {}).get(index)})
             if preview in on_disk:
                 previews.append({"index": index, "t_s": float(record["t_s"]),
                                  "file": preview})

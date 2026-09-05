@@ -1896,6 +1896,13 @@ def verify_engine_parity(run_dir, manifest: Dict,
     awaiting: List[str] = []
     problems: List[str] = []
     per_camera: Dict[str, Dict] = {}
+    # One entry per graded frame, per camera: WHICH frames the verifier
+    # rejected and why, so a gallery can caption a failed thumbnail
+    # instead of showing the verdict only as counts. ``problems`` are
+    # that frame's own sentences (the "camera frame N:" prefix
+    # stripped), ``gaps`` its measured quantities against
+    # data["tolerances"].
+    per_frame: Dict[str, List[Dict]] = {}
     worst = {"position_m": 0.0, "angle_deg": 0.0, "time_s": 0.0,
              "pose_time_s": 0.0,
              "reprojection_px": 0.0, "aircraft_m": 0.0, "aircraft_px": 0.0,
@@ -1973,12 +1980,26 @@ def verify_engine_parity(run_dir, manifest: Dict,
                     f"{engine_size[1]} against the manifest's "
                     f"{size[0]}x{size[1]}")
         verified = 0
+        frame_entries: List[Dict] = []
+        per_frame[camera_id] = frame_entries
+
+        def frame_entry(index: int, record: Dict, ok: bool, first: int,
+                        gaps: Optional[Dict] = None) -> None:
+            prefix = f"{camera_id} frame {index}: "
+            frame_entries.append({
+                "index": index, "t_s": float(record["t_s"]), "ok": bool(ok),
+                "gaps": gaps or {},
+                "problems": [p[len(prefix):] if p.startswith(prefix) else p
+                             for p in problems[first:]]})
+
         for record in records:
             index = int(record["index"])
+            first_problem = len(problems)
             applied = applied_by_index.get(index)
             if applied is None:
                 problems.append(f"{camera_id} frame {index}: no engine "
                                 f"record carries this frame_index")
+                frame_entry(index, record, False, first_problem)
                 continue
             try:
                 a_pos = (float(applied["camera_applied_north_m"]),
@@ -1992,6 +2013,7 @@ def verify_engine_parity(run_dir, manifest: Dict,
             except (KeyError, TypeError, ValueError) as exc:
                 problems.append(f"{camera_id} frame {index}: engine record "
                                 f"lacks an applied field ({exc})")
+                frame_entry(index, record, False, first_problem)
                 continue
             frame_ok = True
             gap_pos = math.dist(a_pos, (record["position_north_m"],
@@ -2197,10 +2219,13 @@ def verify_engine_parity(run_dir, manifest: Dict,
                         f"aircraft ({budget_words})")
             if frame_ok:
                 verified += 1
+            frame_entry(index, record, frame_ok, first_problem,
+                        {"position_m": gap_pos, "angle_deg": gap_ang,
+                         "time_s": gap_t, "pose_time_s": gap_pose_t})
         entry["verified"] = verified
         frames_checked += scheduled
 
-    data = {"cameras": per_camera, "worst": worst,
+    data = {"cameras": per_camera, "frames": per_frame, "worst": worst,
             "clock_origins_s": clock_origins,
             "tolerances": {"position_m": pos_tol_m, "angle_deg": ang_tol_deg,
                            "time_s": time_tol_used,

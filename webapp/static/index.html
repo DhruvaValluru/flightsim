@@ -66,6 +66,7 @@
   .thumbs { display: flex; flex-wrap: wrap; gap: 4px; margin: .3rem 0; }
   .thumb { margin: 0; width: 160px; }
   .thumb img { width: 160px; border: 1px solid #333; display: block; }
+  .thumb.parity-fail img { border: 2px solid #e06f6f; }
   .thumb figcaption { font-size: 11px; }
   details summary { cursor: pointer; }
   table.verify { margin: .3rem 0 .6rem 0; font-size: 12px; }
@@ -714,15 +715,32 @@ function fallbackWords(run) {
     : "headless run by choice; choose Render frames and clip for the frame set";
 }
 
+// A rendered frame the verifier REJECTED (its /files entry carries
+// verify.json's per-frame engine-parity verdict) is captioned "parity
+// FAIL: <the verifier's own sentence for that frame>" in the FAIL
+// colour with a red border, so a short or dishonest pass shows WHICH
+// thumbnails failed, not only how many. A frame that passed, and a
+// preview (never graded), carry no clause.
+function parityFailed(it) {
+  return !!(it.parity && it.parity.ok === false);
+}
+
+function parityCaption(it) {
+  if (!parityFailed(it)) return "";
+  const why = (it.parity.problems || [])[0] || "rejected by engine parity";
+  return ` <span class="verdict-refused">— parity FAIL: ${esc(why)}</span>`;
+}
+
 function thumbsHtml(runId, cameraId, items, kind) {
   return `<div class="thumbs" data-camera="${esc(cameraId)}" data-kind="${kind}">` +
     items.map(it =>
-      `<figure class="thumb"><a href="/runs/${runId}/file/${esc(it.file)}" ` +
+      `<figure class="thumb${parityFailed(it) ? " parity-fail" : ""}">` +
+      `<a href="/runs/${runId}/file/${esc(it.file)}" ` +
       `target="_blank"><img loading="lazy" src="/runs/${runId}/file/${esc(it.file)}" ` +
       `data-frame="/runs/${runId}/file/${esc(it.file)}"` +
       (it.overlay ? ` data-overlay="/runs/${runId}/file/${esc(it.overlay)}"` : "") +
       `></a><figcaption class="dim">#${it.index} t=${Number(it.t_s).toFixed(3)} s` +
-      `</figcaption></figure>`).join("") + `</div>`;
+      `${parityCaption(it)}</figcaption></figure>`).join("") + `</div>`;
 }
 
 // One camera's gallery: the heading is the count contract in the
@@ -760,9 +778,13 @@ function galleryHtml(runId, run, gallery) {
         `</summary>` + sheet +
         thumbsHtml(runId, gallery.camera_id, previews, "previews") + `</details>`
       : "";
+    const failed = frames.filter(parityFailed).length;
+    const failedWords = failed
+      ? ` <span class="verdict-refused">— ${failed} of them failed engine ` +
+        `parity (captioned and outlined below)</span>` : "";
     return `<div class="gallery">${heading} <span class="dim">— showing ` +
       `${frames.length} of ${counts.rendered ?? frames.length} rendered ` +
-      `frame(s)</span>${toggle}` +
+      `frame(s)</span>${failedWords}${toggle}` +
       thumbsHtml(runId, gallery.camera_id, frames, "frames") + previewBlock +
       `</div>`;
   }

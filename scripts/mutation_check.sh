@@ -2704,6 +2704,26 @@ mutate webapp/server.py \
     "page round 3: /compile sends the moves' recorded source" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 3: the gallery shows WHICH frames failed engine parity -----
+
+mutate core/capture/verify.py \
+    '                "index": index, "t_s": float(record["t_s"]), "ok": bool(ok),' \
+    '                "index": index, "t_s": float(record["t_s"]), "ok": True,  # MUTATED: every frame recorded as verified' \
+    "page round 3: verify.json records which frame failed engine parity" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    '                               "parity": parity.get(camera_id, {}).get(index)})' \
+    '                               "parity": None})  # MUTATED: the gallery never learns the verdict' \
+    "page round 3: the galleries carry each rendered frame's parity verdict" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '  return !!(it.parity && it.parity.ok === false);' \
+    '  return false;  // MUTATED: a rejected frame is captioned like a verified one' \
+    "page round 3: a frame that failed engine parity is captioned FAIL in the gallery" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
