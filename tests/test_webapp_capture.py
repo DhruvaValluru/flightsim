@@ -1618,6 +1618,7 @@ const out = {
   galleries: (files.galleries || []).map(g => galleryHtml(input.runId, input.run, g)),
   files: filesHtml(input.runId, files.files || []),
   moves: (input.cameras || []).map(cameraMovesHtml),
+  telemetry: telemetrySource(input.run, files),
 };
 console.log(JSON.stringify(out));
 """
@@ -2546,3 +2547,87 @@ def test_a_terminal_push_writes_the_status_log_before_the_status_shows(tmp_path)
     assert log["capture_refused"] is None and log["closure_refused"] is None
     # No out_dir (a run driven directly): nothing written, nothing raised.
     RunState(run_id="def").push("done", "x")
+
+
+# -- page round 3: the flight path is drawn from the file the run listed --
+
+def refused_mid_run(client, monkeypatch):
+    """A capture refused mid-run (camera.terrain_clearance, with its
+    measured value): the run ends failed having written no telemetry."""
+    from core.scenario.validate import Violation
+    import core.capture.validate as validate_module
+
+    monkeypatch.setattr(
+        validate_module, "track_violations",
+        lambda *a, **k: [Violation(
+            constraint="camera.terrain_clearance",
+            message="tower0: the stated placement sits inside or on the "
+                    "scene's terrain (checked over the whole run window)",
+            actual=-12.3, limit=30.0, unit="m AGL")])
+    reply = client.post("/capture", json={"spec": compile_prompt(DEMO).to_dict()})
+    run_id = reply.json()["run_id"]
+    state = finished(client, run_id)
+    assert state["status"] == "failed"
+    return run_id, state
+
+
+def engine_stubs_root(run_id):
+    """The run directory of a run started through the engine client
+    (the manager the app serves, whose out_root the fixture pinned)."""
+    return manager.out_root / run_id
+
+
+def test_the_flight_path_is_drawn_from_the_telemetry_file_the_run_listed(
+        captured, client, frames_run, engine_client, monkeypatch, tmp_path):
+    """A headless run has no out/telemetry.json (that file is the render
+    flow's), so /runs/<id>/telemetry.json answers 404 -- and the page
+    used to omit the flight path although capture/telemetry.json was
+    listed and downloadable. telemetrySource picks the file from the
+    run's OWN listing: the headless payload resolves to
+    capture/telemetry.json through the whitelist route (and that route
+    serves the lat/lon/altitude channels the chart draws); a frames run
+    keeps the rendered flight's telemetry.json; the mid-run refusal,
+    which wrote no telemetry, resolves to nothing and draws nothing."""
+    run_id, state = captured
+    assert client.get(f"/runs/{run_id}/telemetry.json").status_code == 404
+    payload = client.get(f"/runs/{run_id}/files").json()
+    names = [f["name"] for f in payload["files"]]
+    assert "capture/telemetry.json" in names and "telemetry.json" not in names
+    source = page_capture(tmp_path, state, payload, run_id)["telemetry"]
+    assert source == {"name": "capture/telemetry.json",
+                      "href": "file/capture/telemetry.json",
+                      "flight": "the headless capture flight the manifest "
+                                "describes"}
+    served = client.get(f"/runs/{run_id}/{source['href']}")
+    assert served.status_code == 200
+    columns = served.json()["columns"]
+    assert len(columns["lat_deg"]) == len(columns["lon_deg"]) == \
+        len(columns["altitude_m"]) == len(columns["t"]) >= 2
+    # A frames run keeps the rendered flight's telemetry.json (the
+    # commandlet's -telemetry= recorder writes it) when it exists. The
+    # engine stub records none, so the stubbed run honestly resolves to
+    # the capture flight's file; once the rendered flight's file is on
+    # disk (written here as the real engine would), the rendered
+    # flight wins, by name, through the same whitelist route.
+    frames_id, frames_state = frames_run
+    frames_payload = engine_client.get(f"/runs/{frames_id}/files").json()
+    assert "telemetry.json" not in [f["name"] for f in frames_payload["files"]]
+    assert page_capture(tmp_path, frames_state, frames_payload,
+                        frames_id)["telemetry"]["name"] == "capture/telemetry.json"
+    out = engine_stubs_root(frames_id)
+    (out / "telemetry.json").write_bytes(
+        (out / "capture" / "telemetry.json").read_bytes())
+    frames_payload = engine_client.get(f"/runs/{frames_id}/files").json()
+    assert "telemetry.json" in [f["name"] for f in frames_payload["files"]]
+    source = page_capture(tmp_path, frames_state, frames_payload, frames_id)["telemetry"]
+    assert source == {"name": "telemetry.json", "href": "file/telemetry.json",
+                      "flight": "the rendered flight"}
+    assert engine_client.get(f"/runs/{frames_id}/{source['href']}").status_code == 200
+    # The refusal wrote no telemetry: nothing to draw from, and the
+    # page says so instead of guessing a route.
+    refused_id, refused_state = refused_mid_run(client, monkeypatch)
+    refused_payload = client.get(f"/runs/{refused_id}/files").json()
+    assert not any(f["name"].endswith("telemetry.json") for f in refused_payload["files"])
+    assert page_capture(tmp_path, refused_state, refused_payload, refused_id)["telemetry"] is None
+    # No listing at all (the /files fetch failed): nothing is drawn.
+    assert page_capture(tmp_path, state, {}, run_id)["telemetry"] is None

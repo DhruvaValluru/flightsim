@@ -562,9 +562,12 @@ async function poll() {
       `<div id="filesArea"></div>` +
       `<div id="effectArea"></div>`;
     renderCapture(run);
-    initFilesPanel(activeRun, run);
+    // The files listing is fetched ONCE and shared: the strip, the
+    // galleries and the flight path are all drawn from files the
+    // server listed for this run, never from a route guessed here.
+    const listing = await initFilesPanel(activeRun, run);
     if (run.clip) initAeroPanel(activeRun, run);
-    initFlightPath(activeRun, run);
+    initFlightPath(activeRun, run, listing);
     initEffectReport(activeRun);
   } else {
     setTimeout(poll, 2000);
@@ -950,6 +953,27 @@ function filesHtml(runId, files) {
     `<a style="color:#6fb3e0" href="/runs/${runId}/bundle.zip">` +
     `download all (.zip)</a><ul>${rows}</ul></div>`;
 }
+// The telemetry file the flight-path panel is drawn from, chosen from
+// the run's OWN file listing: a rendered run's top-level telemetry.json
+// (the rendered flight's recorder) when the run wrote one, else the
+// capture flight's capture/telemetry.json (the headless flight the
+// manifest describes -- the only flight a headless run flew), else
+// null and the panel draws nothing. The route is the whitelist's
+// (/runs/<id>/file/<name>), so the chart can never be drawn from a
+// file the files panel does not list, and the formula line names it.
+function telemetrySource(run, files) {
+  const names = new Set((files && files.files || []).map(f => f.name));
+  if (names.has("telemetry.json")) {
+    return {name: "telemetry.json", href: "file/telemetry.json",
+            flight: "the rendered flight"};
+  }
+  if (names.has("capture/telemetry.json")) {
+    return {name: "capture/telemetry.json",
+            href: "file/capture/telemetry.json",
+            flight: "the headless capture flight the manifest describes"};
+  }
+  return null;
+}
 // PAGE_CAPTURE_END
 
 function renderCapture(run) {
@@ -968,7 +992,7 @@ async function initFilesPanel(runId, run) {
     payload = await response.json();
   } catch (error) { return; }
   const files = payload.files || [];
-  if (!files.length) return;
+  if (!files.length) return payload;
   const strip = downloadStripHtml(runId, payload.downloads || []);
   const stripHolder = $("captureDownloads");
   if (stripHolder) stripHolder.innerHTML = strip;
@@ -978,6 +1002,7 @@ async function initFilesPanel(runId, run) {
       g => galleryHtml(runId, run, g)).join("");
   }
   holder.innerHTML = (stripHolder ? "" : strip) + filesHtml(runId, files);
+  return payload;
 }
 
 // Swap one camera's frame thumbnails for their overlays (the manifest's
@@ -1001,17 +1026,27 @@ function toggleOverlays(cameraId, on) {
 // video currentTime maps 1:1 to recorded FDM t (the clip starts at t = 0);
 // the nearest recorded sample is shown.
 
-async function initFlightPath(runId, run) {
+async function initFlightPath(runId, run, files) {
   // Top-down ground track from the RECORDED lat/lon channels (the
   // recorder's own position samples -- nothing integrated or recomputed),
   // projected to metres about the first sample, with the run card's own
-  // tornado placement overlaid. Optional like the aero panel: absent
-  // telemetry omits the chart rather than approximating one.
+  // tornado placement overlaid. The file is the one telemetrySource
+  // picks from the run's listing (a rendered run's telemetry.json, else
+  // the headless capture/telemetry.json), fetched through the whitelist
+  // route the files panel links; a run that listed no telemetry file
+  // says so and draws nothing rather than approximating a track.
   const holder = $("pathArea");
   if (!holder) return;
+  const source = telemetrySource(run, files);
+  if (!source) {
+    holder.innerHTML = `<div class="dim" style="margin-top:.6rem">flight ` +
+      `path omitted: this run listed no telemetry file (nothing was ` +
+      `flown to record)</div>`;
+    return;
+  }
   let tele = null, card = null;
   try {
-    const r = await fetch(`/runs/${runId}/telemetry.json`);
+    const r = await fetch(`/runs/${runId}/${source.href}`);
     if (r.ok) tele = await r.json();
     const c = await fetch(`/runs/${runId}/card.json`);
     if (c.ok) card = await c.json();
@@ -1048,8 +1083,9 @@ async function initFlightPath(runId, run) {
     `style="max-width:100%"></canvas>` +
     `<canvas id="profileCanvas" width="${W}" height="130" ` +
     `style="max-width:100%"></canvas>` +
-    `<div class="formula">ground track = the recorder's own lat/lon ` +
-    `channels (${cols.t.length} samples at ${tele.interval_s}s), ` +
+    `<div class="formula">ground track = ${esc(source.name)}'s own ` +
+    `lat/lon channels (${cols.t.length} samples at ${tele.interval_s} s; ` +
+    `${esc(source.flight)}), ` +
     `projected to metres about the first sample; colour runs start ` +
     `(blue) to end (amber); altitude profile from recorded altitude_m` +
     (tornado ? `; tornado core position and radius from the run card ` +

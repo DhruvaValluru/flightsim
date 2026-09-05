@@ -2570,6 +2570,20 @@ mutate webapp/static/index.html \
     "page round 2: renderSpec appends the move rows after each camera's fields" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 3: the flight path is drawn from the file the run listed --
+
+mutate webapp/static/index.html \
+    '  if (names.has("capture/telemetry.json")) {' \
+    '  if (false) {  // MUTATED: a headless run'"'"'s flight path is not drawn from capture/telemetry.json' \
+    "page round 3: a headless run's flight path is drawn from the listed capture/telemetry.json" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '  if (names.has("telemetry.json")) {' \
+    '  if (false) {  // MUTATED: a rendered run'"'"'s flight path never takes the rendered flight'"'"'s file' \
+    "page round 3: a rendered run's flight path keeps the rendered flight's telemetry.json" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
