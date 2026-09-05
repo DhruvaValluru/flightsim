@@ -108,18 +108,25 @@ def _flush_c_streams() -> None:
     """Flush the C library's stdio buffers so anything JSBSim wrote
     through them lands in the log BEFORE the descriptors are restored
     (``std::cout`` is synchronised with stdio by default)."""
-    try:
-        if os.name == "nt":
-            # CDLL(None) is a POSIX idiom (dlopen of the running
-            # process); on Windows it raises TypeError. The C runtime
-            # JSBSim's stdio lives in is msvcrt (or the UCRT that the
-            # same name resolves to).
-            libc = ctypes.cdll.msvcrt
-        else:
-            libc = ctypes.CDLL(None)
-        libc.fflush(None)
-    except (OSError, AttributeError, TypeError, ImportError):
-        pass
+    if os.name == "nt":
+        # CDLL(None) is a POSIX idiom (dlopen of the running process);
+        # on Windows it raises TypeError. Python and the JSBSim wheel
+        # both link the Universal CRT, so its stdout buffer (fully
+        # buffered when fd 1 is a pipe, as under CI's capture) is where
+        # a banner waits: flush ucrtbase, and the legacy msvcrt as well
+        # for a build that links that one. Measured on the Windows CI
+        # leg before this: msvcrt alone left the banner's tail in the
+        # UCRT buffer, and it reached stdout after the descriptors were
+        # restored.
+        names = ("ucrtbase", "msvcrt")
+    else:
+        names = (None,)
+    for name in names:
+        try:
+            libc = ctypes.CDLL(name)
+            libc.fflush(None)
+        except (OSError, AttributeError, TypeError, ImportError):
+            pass
 
 
 def _caller_words() -> str:
@@ -152,7 +159,10 @@ def captured_console(label: Optional[str] = None
     sink.labels.append(words)
     stamp = f"# load {sink.loads}: {words}\n"
     sink.path.parent.mkdir(parents=True, exist_ok=True)
+    # Everything already written to the real streams goes out first, so
+    # nothing of the caller's ends up in the log.
     _flush_python_streams()
+    _flush_c_streams()
     log_fd = os.open(str(sink.path), os.O_WRONLY | os.O_CREAT | os.O_APPEND,
                      0o644)
     os.write(log_fd, stamp.encode("utf-8"))
