@@ -263,11 +263,12 @@ def test_a_headless_run_verifies_and_never_says_refused(tmp_path, capsys,
     rows = verification_rows(text)
     for check in ("manifest_version", "fields_finite", "geometry_recovery",
                   "cross_view_consistency", "count_exactness",
-                  "flight_fidelity", "schedule_fidelity", "pose_fidelity"):
+                  "flight_fidelity", "schedule_fidelity", "pose_fidelity",
+                  "aim_fidelity"):
         assert rows[check][0] == "PASS", check
         assert f"[PASS] {check}" not in text, check   # rendered once
     assert "[AWAITING] engine_parity: awaiting engine frames" in text
-    assert "verification PASSED (8/8 checks; 1 awaiting engine frames" in text
+    assert "verification PASSED (9/9 checks; 1 awaiting engine frames" in text
     assert "REFUSED" not in text
     assert ("engine absent: no engine on this OS: the render half needs "
             "macOS, or Windows with Unreal Engine 5.5; frames not rendered "
@@ -290,7 +291,7 @@ def test_a_headless_run_verifies_and_never_says_refused(tmp_path, capsys,
     text = capsys.readouterr().out
     assert "render: none (headless by choice" in text
     assert "REFUSED" not in text and "engine absent" not in text
-    assert "verification PASSED (8/8 checks" in text
+    assert "verification PASSED (9/9 checks" in text
 
 
 def test_a_manifest_that_fails_its_own_verification_fails_the_run(
@@ -506,7 +507,7 @@ def test_render_clip_is_the_single_preset_pass(tmp_path, capsys, cli_engine):
     assert not (out / "frames").exists()
     # The clip mode verified the manifest it wrote, before the pass.
     assert "[AWAITING] engine_parity" in text
-    assert "verification PASSED (8/8 checks" in text
+    assert "verification PASSED (9/9 checks" in text
     assert text.index("verification PASSED") < text.index("engine pass:")
     clip_card = json.loads((out / "clip_card.json").read_text(encoding="utf-8"))
     assert "cameras" not in clip_card
@@ -539,7 +540,8 @@ def test_run_json_records_the_render_choice_and_verify_json_in_every_mode(
         assert [c["name"] for c in verify["checks"]] == [
             "manifest_version", "fields_finite", "geometry_recovery",
             "cross_view_consistency", "count_exactness", "flight_fidelity",
-            "schedule_fidelity", "pose_fidelity", "engine_parity"]
+            "schedule_fidelity", "pose_fidelity", "aim_fidelity",
+            "engine_parity"]
         # The file says what the table said: a PASS is its row, once;
         # anything else has its detail line too.
         rows = verification_rows(text)
@@ -559,7 +561,7 @@ def test_run_json_records_the_render_choice_and_verify_json_in_every_mode(
                     engine_unavailable_reason="no engine on this OS (test)")
     engine = verify["checks"][-1]
     assert engine["status"] == "AWAITING" and engine["ok"] is None
-    assert verify["awaiting"] == ["engine_parity"] and verify["ran"] == 8
+    assert verify["awaiting"] == ["engine_parity"] and verify["ran"] == 9
     assert engine["data"]["cameras"]["chase0"] == {
         "scheduled": 24, "rendered": 0, "verified": 0}
     # flightsim.verify over the directory prints exactly the file's checks.
@@ -588,7 +590,7 @@ def test_run_json_records_the_render_choice_and_verify_json_in_every_mode(
     assert engine["status"] == "PASS"
     assert engine["data"]["cameras"]["tower0"] == {
         "scheduled": 24, "rendered": 24, "verified": 24}
-    assert verify["awaiting"] == [] and verify["ran"] == 9
+    assert verify["awaiting"] == [] and verify["ran"] == 10
     assert [p["camera_id"] for p in run_json["render_passes"]] == ["chase0", "tower0"]
 
     # Clip: the choice is recorded and the manifest verified (parity awaiting).
@@ -1046,7 +1048,7 @@ def test_the_verification_table_has_measured_tolerance_status_and_where(
     assert [line for line in lines if line.startswith("  [")] == [
         "  [AWAITING] engine_parity: " + verify["checks"][-1]["detail"]]
     assert "[PASS]" not in text
-    assert "verification PASSED (8/8 checks; 1 awaiting engine frames: " \
+    assert "verification PASSED (9/9 checks; 1 awaiting engine frames: " \
            "engine_parity)" in lines
     assert lines[-1].startswith("done: ")
 
@@ -1107,7 +1109,7 @@ CORRUPT_FAILS_EXACTLY = {
     # cast from the true pose through the twisted label (18 m), and by
     # the pose recomputed from the spec.
     "quaternion": ["geometry_recovery", "cross_view_consistency",
-                   "pose_fidelity"],
+                   "pose_fidelity", "aim_fidelity"],
     "aircraft": ["cross_view_consistency", "flight_fidelity"],
     "time": ["flight_fidelity", "schedule_fidelity", "temporal_alignment"],
     "count": ["count_exactness", "schedule_fidelity"],
@@ -1117,8 +1119,11 @@ CORRUPT_FAILS_EXACTLY = {
     # triangulating 50 m from the flight fail that row too.
     "flight": ["cross_view_consistency", "flight_fidelity"],
     "schedule": ["schedule_fidelity"],
-    "pose": ["cross_view_consistency", "pose_fidelity"],
+    # A moved camera's promise is computed from where the record says
+    # it stands, so its orientation no longer matches the promise either.
+    "pose": ["cross_view_consistency", "pose_fidelity", "aim_fidelity"],
     "lens": ["cross_view_consistency", "pose_fidelity"],
+    "aim": ["cross_view_consistency", "pose_fidelity", "aim_fidelity"],
 }
 
 
@@ -1155,6 +1160,12 @@ CORRUPT_FAILS_EXACTLY = {
                 r"\(17\.500 mm\) at chase0 #\d+ t=\d+\.\d{3} s \(recorded fx "
                 r"1866\.667, fy 1866\.667 px, focal 52\.500 mm; the spec's "
                 r"camera fx 1244\.444, fy 1244\.444 px, focal 35\.000 mm\)")),
+    ("aim", "aim_fidelity",
+     re.compile(r"the aircraft's pixel is 21\.675 px from where the camera's "
+                r"promise puts it at chase0 #\d+ t=\d+\.\d{3} s \(aircraft at "
+                r"\(\d+\.\d, \d+\.\d\) px, promised \(\d+\.\d, \d+\.\d\) px: "
+                r"aircraft-lagged, off-aim \d+\.\d px against a predicted "
+                r"\d+\.\d\)")),
 ])
 def test_corrupt_fails_the_named_check_with_exit_1(report_run, kind, check,
                                                     offender):
@@ -1196,13 +1207,17 @@ def test_corrupt_fails_the_named_check_with_exit_1(report_run, kind, check,
         assert rows["flight_fidelity"][0] == "PASS"
         assert rows["cross_view_consistency"][0] == "PASS"
         assert rows["pose_fidelity"][0] == "PASS"
-    if kind in ("pose", "lens"):
+    if kind in ("pose", "lens", "aim"):
         # The records agree with themselves and with the flight; only
         # the pose recomputed from the spec tells (and the ray cast
-        # from it).
+        # from it, and the promise recomputed over the telemetry).
         assert rows["geometry_recovery"][0] == "PASS"
         assert rows["flight_fidelity"][0] == "PASS"
         assert rows["schedule_fidelity"][0] == "PASS"
+    if kind == "lens":
+        # Both the measured and the promised pixel go through the
+        # record's own lens: the promise scales with it.
+        assert rows["aim_fidelity"][0] == "PASS"
     assert f"[FAIL] {check}:" in text
     also = CORRUPT_FAILS_EXACTLY[kind][:]
     also.remove(check)
@@ -1283,6 +1298,24 @@ def test_corrupt_measures_the_damage(report_run):
     rows = verification_rows(buffer.getvalue())
     assert rows["pose_fidelity"][1] == "pos 0 m, ang 0 deg, lens 622.222 px"
     assert rows["geometry_recovery"][0] == "PASS"
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        verify_main([str(out), "--corrupt", "aim"])
+    rows = verification_rows(buffer.getvalue())
+    assert rows["aim_fidelity"][1:3] == ("gap 21.7 px", "1e-06 px, 1e-06 deg")
+    assert rows["geometry_recovery"][0] == "PASS"
+    assert rows["pose_fidelity"][1] == "pos 0 m, ang 1 deg, lens 0 px"
+    # The honest run's own aim row: the off-aim column, graded.
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(out)]) == 0
+    rows = verification_rows(buffer.getvalue())
+    assert rows["aim_fidelity"][0] == "PASS"
+    assert rows["aim_fidelity"][3] == (
+        "48 records; chase0 aircraft-lagged: off-aim up to 22.2 px, "
+        "predicted 22.2; tower0 aircraft-lagged: off-aim up to 13.7 px, "
+        "predicted 13.7")
+    assert float(rows["aim_fidelity"][1].split()[1]) < 1e-9
 
 
 def test_the_verifier_reads_the_flight_not_only_the_manifest(report_run,
@@ -1442,7 +1475,11 @@ def test_the_committed_cockpit_example_aligns_with_cameras_multi(report_run,
         "PASS", "0 s", "1e-09 s", "24 instants in both runs; worst gap 0 s")
     assert rows["cross_view_consistency"][0] == "SKIPPED"
     assert rows["pose_fidelity"][0] == "PASS"
-    assert ("verification PASSED (8/8 checks; 1 skipped: "
+    assert rows["aim_fidelity"][0] == "PASS"
+    assert rows["aim_fidelity"][3] == ("24 records; shoulder body-axis: "
+                                       "off-aim up to 347.7 px, predicted "
+                                       "347.7")
+    assert ("verification PASSED (9/9 checks; 1 skipped: "
             "cross_view_consistency (single camera); 1 awaiting engine "
             "frames: engine_parity)") in text
     assert text.splitlines()[-1].startswith(
@@ -1579,7 +1616,7 @@ def test_the_documents_expected_output_matches_a_fresh_run(tmp_path):
     assert module.measured_platform(doc_text) is not None
     fresh = module.generate(tmp_path / "runs_root")
     assert [b["command"] for b in doc] == [r["command"] for r in fresh]
-    assert len(doc) == len(module.COMMANDS) == 15
+    assert len(doc) == len(module.COMMANDS) == 16
     for expected, actual in zip(doc, fresh):
         assert expected["code"] == actual["code"], expected["command"]
         want = module.shape(expected["text"], exact=exact)
@@ -1598,8 +1635,8 @@ def test_the_documents_expected_output_matches_a_fresh_run(tmp_path):
         first = "\n".join(module.shape(doc[0]["text"], exact=True))
         assert re.search(r"\d+\.\d+ s/frame", doc[0]["text"])
         assert "<s/frame>" in first and not re.search(r"\d s/frame", first)
-    # The blocks say what they are: exit codes 0/0/0/0/0/2 then nine 1s.
-    assert [b["code"] for b in doc] == [0, 0, 0, 0, 0, 2] + [1] * 9
+    # The blocks say what they are: exit codes 0/0/0/0/0/2 then ten 1s.
+    assert [b["code"] for b in doc] == [0, 0, 0, 0, 0, 2] + [1] * 10
 
 
 def test_a_refusal_prints_the_header_from_the_spec(tmp_path):

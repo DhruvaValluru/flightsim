@@ -103,7 +103,7 @@ def test_the_page_shows_the_verifier_s_own_report(captured, client):
     assert names == ["manifest_version", "fields_finite", "geometry_recovery",
                      "cross_view_consistency", "count_exactness",
                      "flight_fidelity", "schedule_fidelity", "pose_fidelity",
-                     "engine_parity"]
+                     "aim_fidelity", "engine_parity"]
     # No engine on this machine: the engine-parity check is AWAITING in
     # those words -- not passed (nothing was rendered), not failed (the
     # run never claimed pixels), and not counted among the passed.
@@ -113,21 +113,24 @@ def test_the_page_shows_the_verifier_s_own_report(captured, client):
     assert verification["awaiting"] == ["engine_parity"]
     # One camera: cross-view consistency had nothing to grade and is
     # SKIPPED with its reason -- counted in neither passed nor ran, so
-    # the tally is 7/7, never an 8/8 the check did not earn. The flight,
-    # schedule and pose checks RAN: capture/ carries telemetry.json and
-    # scenario.yaml beside the manifest.
-    assert verification["passed"] == 7 and verification["ran"] == 7
+    # the tally is 8/8, never a 9/9 the check did not earn. The flight,
+    # schedule, pose and aim checks RAN: capture/ carries telemetry.json
+    # and scenario.yaml beside the manifest.
+    assert verification["passed"] == 8 and verification["ran"] == 8
     assert verification["skipped"] == [
         {"name": "cross_view_consistency", "reason": "single camera"}]
     cross = verification["checks"][3]
     assert cross["ok"] is None and cross["status"] == "SKIPPED"
-    assert "7/7 checks" in verification["summary"]
+    assert "8/8 checks" in verification["summary"]
     by_name = {c["name"]: c for c in verification["checks"]}
     assert by_name["flight_fidelity"]["ok"] is True
     assert by_name["flight_fidelity"]["data"]["digests_equal"] is True
     assert by_name["schedule_fidelity"]["ok"] is True
     assert by_name["pose_fidelity"]["ok"] is True
     assert by_name["pose_fidelity"]["data"]["digests_equal"] == {"camera0": True}
+    assert by_name["aim_fidelity"]["ok"] is True
+    assert by_name["aim_fidelity"]["data"]["cameras"]["camera0"]["kind"] == \
+        "aircraft-lagged"
 
     on_disk = json.loads(
         (manager.out_root / run_id / "capture" / "verify.json")

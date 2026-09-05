@@ -9,7 +9,7 @@ instructor runs from the committed tree -- ``flightsim.capture`` over
 ``examples/cameras_multi.yaml``, ``cameras_multi_cockpit.yaml``,
 ``cameras_waypoint.yaml`` and ``cameras_refusal.yaml``,
 ``flightsim.verify`` over the first run, ``--against`` over the pair,
-and the nine ``--corrupt`` kinds -- and prints each command with its
+and the ten ``--corrupt`` kinds -- and prints each command with its
 exit code, its measured wall time and its stdout VERBATIM, paths
 normalised to ``runs/...`` so the text reads the same from any
 checkout. The section carries the date and the platform it was
@@ -111,6 +111,11 @@ COMMANDS = [
      "scaled 1.5x; geometry recovery still PASSES)",
      "python -m flightsim.verify runs/demo --corrupt lens",
      "verify", ["runs/demo", "--corrupt", "lens"]),
+    ("verify --corrupt aim: aim fidelity must FAIL (one camera yawed 1 deg, "
+     "quaternion and Euler together; the aircraft's pixel is no longer where "
+     "the promise puts it)",
+     "python -m flightsim.verify runs/demo --corrupt aim",
+     "verify", ["runs/demo", "--corrupt", "aim"]),
 ]
 
 

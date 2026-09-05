@@ -82,7 +82,12 @@ table. Now:
   pose track recomputed from `scenario.yaml`'s cameras over the
   telemetry at the record's sample, and every camera block's
   `pose_track_digest` against the recomputed track's, verbatim; round
-  3), and
+  3), aim fidelity (the telemetry's aircraft put through each record's
+  own pose must land where the preset's promise predicts: the image
+  centre for an explicit camera, the pixel the 0.25 s lagged aim
+  recomputed over the telemetry predicts for chase/wingman/tower/
+  ground, the body-axis cg pixel for a cockpit -- the schedule table's
+  `off-aim px` column, graded; round 3), and
   count exactness. Each check is demonstrated to fail on a corrupted
   manifest, and `scripts/mutation_check.sh` gained 19 guards, each
   verified to fail its test when its safeguard is disabled.
@@ -129,7 +134,12 @@ schedule table's last column, `off-aim px`, is each frame's aircraft
 pixel measured against that promise -- 0.0 for every shoulder frame,
 up to 22.2 px for the chase (the aim lag), `-` for a point or bearing
 aim -- so a pixel 332 px below centre is explained on the page it
-appears on, or would stand out as a number; one line
+appears on, or would stand out as a number -- and since round 3 the
+`aim_fidelity` row GRADES that column: the aircraft's pixel through
+each record against the pixel the promise predicts, to 1e-6 px ("48
+records; chase0 aircraft-lagged: off-aim up to 22.2 px, predicted
+22.2; tower0 aircraft-lagged: off-aim up to 13.7 px, predicted 13.7");
+one line
 per camera: id, preset/position mode, aim, resolution, focal length in
 mm and pixels, capture count and trigger); for capture, **one line
 naming where JSBSim's console went** (`<out>/jsbsim.log`, with the
@@ -186,7 +196,7 @@ Measured 2026-09-05 on Linux x86_64, Python 3.11.15 by `scripts/examples_expecte
 
 #### capture: two cameras, one flight (cameras_multi)
 
-`python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo` -- exit 0, 5.06 s wall
+`python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo` -- exit 0, 5.18 s wall
 
 ```
 spec cef57d752362381d valid; running headlessly...
@@ -252,7 +262,7 @@ scheduled 48 frames across 2 camera(s)
       22    11.450     109       900.000     -800.000      80.000  (631.9, 369.1)            12.2
       23    11.992     114       900.000     -800.000      80.000  (632.4, 369.2)            12.0
   manifest: runs/demo/capture_manifest.json
-  previews: 48 geometry preview(s) at 1280x720, 0.074 s/frame under runs/demo/previews (previews are not frames; track: telemetry 9.23077 Hz (115 points, no decimation))
+  previews: 48 geometry preview(s) at 1280x720, 0.075 s/frame under runs/demo/previews (previews are not frames; track: telemetry 9.23077 Hz (115 points, no decimation))
   contact sheets: 2 (contact_sheets/<camera_id>.png, one per camera)
   CHECK                   STATUS    MEASURED                       TOLERANCE                     WHERE
   manifest_version        PASS      version 1                      = 1                           spec cef57d752362381d
@@ -263,17 +273,18 @@ scheduled 48 frames across 2 camera(s)
   flight_fidelity         PASS      t 0 s, pos 0 m, att 0 deg      1e-09 s, 1e-06 m, 1e-06 deg   48 records against 115 samples; digest 2c3eac9056d8257c = output_digest; worst chase0 #0 t=0.008 s
   schedule_fidelity       PASS      0 of 48 instants differ        0 differ                      chase0 24/24, tower0 24/24 (recorded/spec)
   pose_fidelity           PASS      pos 0 m, ang 0 deg, lens 0 px  1e-06 m, 1e-06 deg, 1e-06 px  48 records against the tracks recomputed from 2 camera(s) over 115 samples; digests = pose_track_digest; worst chase0 #0 t=0.008 s
+  aim_fidelity            PASS      gap 4.1e-13 px                 1e-06 px, 1e-06 deg           48 records; chase0 aircraft-lagged: off-aim up to 22.2 px, predicted 22.2; tower0 aircraft-lagged: off-aim up to 13.7 px, predicted 13.7
   engine_parity           AWAITING  -                              -                             awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
   detail:
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
-verification PASSED (8/8 checks; 1 awaiting engine frames: engine_parity)
+verification PASSED (9/9 checks; 1 awaiting engine frames: engine_parity)
 engine absent: no engine on this OS: the render half needs macOS, or Windows with Unreal Engine 5.5 and the FlightSimBridge built; frames not rendered (--render frames where the engine exists)
 done: manifest, 48 previews and verification for 48 scheduled frames under runs/demo (no pixels)
 ```
 
 #### verify: the same run, graded from its directory
 
-`python -m flightsim.verify runs/demo` -- exit 0, 0.48 s wall
+`python -m flightsim.verify runs/demo` -- exit 0, 0.50 s wall
 
 ```
 run:         runs/demo
@@ -345,16 +356,17 @@ scheduled 48 frames across 2 camera(s)
   flight_fidelity         PASS      t 0 s, pos 0 m, att 0 deg      1e-09 s, 1e-06 m, 1e-06 deg   48 records against 115 samples; digest 2c3eac9056d8257c = output_digest; worst chase0 #0 t=0.008 s
   schedule_fidelity       PASS      0 of 48 instants differ        0 differ                      chase0 24/24, tower0 24/24 (recorded/spec)
   pose_fidelity           PASS      pos 0 m, ang 0 deg, lens 0 px  1e-06 m, 1e-06 deg, 1e-06 px  48 records against the tracks recomputed from 2 camera(s) over 115 samples; digests = pose_track_digest; worst chase0 #0 t=0.008 s
+  aim_fidelity            PASS      gap 4.1e-13 px                 1e-06 px, 1e-06 deg           48 records; chase0 aircraft-lagged: off-aim up to 22.2 px, predicted 22.2; tower0 aircraft-lagged: off-aim up to 13.7 px, predicted 13.7
   engine_parity           AWAITING  -                              -                             awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
   detail:
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
-verification PASSED (8/8 checks; 1 awaiting engine frames: engine_parity)
+verification PASSED (9/9 checks; 1 awaiting engine frames: engine_parity)
 verified: runs/demo/capture_manifest.json (48 frame records, 2 camera(s)); report runs/demo/verify.json
 ```
 
 #### capture: the same flight, a cockpit camera (cameras_multi_cockpit)
 
-`python -m flightsim.capture examples/cameras_multi_cockpit.yaml --out runs/demo_b` -- exit 0, 2.79 s wall
+`python -m flightsim.capture examples/cameras_multi_cockpit.yaml --out runs/demo_b` -- exit 0, 2.84 s wall
 
 ```
 spec b8e463be7defdc73 valid; running headlessly...
@@ -394,7 +406,7 @@ scheduled 24 frames across 1 camera(s)
       22    11.450     109      1894.567       -0.485    3049.352  (743.7, 691.9)             0.0
       23    11.992     114      1984.546       -0.483    3049.352  (743.7, 691.9)             0.0
   manifest: runs/demo_b/capture_manifest.json
-  previews: 24 geometry preview(s) at 1280x720, 0.072 s/frame under runs/demo_b/previews (previews are not frames; track: telemetry 9.23077 Hz (115 points, no decimation))
+  previews: 24 geometry preview(s) at 1280x720, 0.073 s/frame under runs/demo_b/previews (previews are not frames; track: telemetry 9.23077 Hz (115 points, no decimation))
   contact sheets: 1 (contact_sheets/<camera_id>.png, one per camera)
   CHECK                   STATUS    MEASURED                       TOLERANCE                     WHERE
   manifest_version        PASS      version 1                      = 1                           spec b8e463be7defdc73
@@ -405,18 +417,19 @@ scheduled 24 frames across 1 camera(s)
   flight_fidelity         PASS      t 0 s, pos 0 m, att 0 deg      1e-09 s, 1e-06 m, 1e-06 deg   24 records against 115 samples; digest 2c3eac9056d8257c = output_digest; worst shoulder #0 t=0.008 s
   schedule_fidelity       PASS      0 of 24 instants differ        0 differ                      shoulder 24/24 (recorded/spec)
   pose_fidelity           PASS      pos 0 m, ang 0 deg, lens 0 px  1e-06 m, 1e-06 deg, 1e-06 px  24 records against the tracks recomputed from 1 camera(s) over 115 samples; digests = pose_track_digest; worst shoulder #0 t=0.008 s
+  aim_fidelity            PASS      gap 4.53e-11 px, axes 0 deg    1e-06 px, 1e-06 deg           24 records; shoulder body-axis: off-aim up to 347.7 px, predicted 347.7
   engine_parity           AWAITING  -                              -                             awaiting engine frames: no render.json for camera shoulder (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
   detail:
   [SKIPPED] cross_view_consistency: NOT EXERCISED (single camera): no instant is seen by two cameras; capture two cameras on a shared schedule to verify cross-view consistency
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera shoulder (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
-verification PASSED (7/7 checks; 1 skipped: cross_view_consistency (single camera); 1 awaiting engine frames: engine_parity)
+verification PASSED (8/8 checks; 1 skipped: cross_view_consistency (single camera); 1 awaiting engine frames: engine_parity)
 engine absent: no engine on this OS: the render half needs macOS, or Windows with Unreal Engine 5.5 and the FlightSimBridge built; frames not rendered (--render frames where the engine exists)
 done: manifest, 24 previews and verification for 24 scheduled frames under runs/demo_b (no pixels)
 ```
 
 #### verify --against: temporal alignment across the two camera sets
 
-`python -m flightsim.verify runs/demo_b --against runs/demo` -- exit 0, 0.28 s wall
+`python -m flightsim.verify runs/demo_b --against runs/demo` -- exit 0, 0.30 s wall
 
 ```
 run:         runs/demo_b
@@ -463,18 +476,19 @@ scheduled 24 frames across 1 camera(s)
   flight_fidelity         PASS      t 0 s, pos 0 m, att 0 deg      1e-09 s, 1e-06 m, 1e-06 deg   24 records against 115 samples; digest 2c3eac9056d8257c = output_digest; worst shoulder #0 t=0.008 s
   schedule_fidelity       PASS      0 of 24 instants differ        0 differ                      shoulder 24/24 (recorded/spec)
   pose_fidelity           PASS      pos 0 m, ang 0 deg, lens 0 px  1e-06 m, 1e-06 deg, 1e-06 px  24 records against the tracks recomputed from 1 camera(s) over 115 samples; digests = pose_track_digest; worst shoulder #0 t=0.008 s
+  aim_fidelity            PASS      gap 4.53e-11 px, axes 0 deg    1e-06 px, 1e-06 deg           24 records; shoulder body-axis: off-aim up to 347.7 px, predicted 347.7
   engine_parity           AWAITING  -                              -                             awaiting engine frames: no render.json for camera shoulder (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
   temporal_alignment      PASS      0 s                            1e-09 s                       24 instants in both runs; worst gap 0 s
   detail:
   [SKIPPED] cross_view_consistency: NOT EXERCISED (single camera): no instant is seen by two cameras; capture two cameras on a shared schedule to verify cross-view consistency
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera shoulder (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
-verification PASSED (8/8 checks; 1 skipped: cross_view_consistency (single camera); 1 awaiting engine frames: engine_parity)
+verification PASSED (9/9 checks; 1 skipped: cross_view_consistency (single camera); 1 awaiting engine frames: engine_parity)
 verified: runs/demo_b/capture_manifest.json (24 frame records, 1 camera(s)); report runs/demo_b/verify.json
 ```
 
 #### capture: waypoint trigger, one camera (cameras_waypoint)
 
-`python -m flightsim.capture examples/cameras_waypoint.yaml --out runs/waypoint` -- exit 0, 1.29 s wall
+`python -m flightsim.capture examples/cameras_waypoint.yaml --out runs/waypoint` -- exit 0, 1.32 s wall
 
 ```
 spec b031d3e385b823b3 valid; running headlessly...
@@ -494,7 +508,7 @@ scheduled 5 frames across 1 camera(s)
        3    26.417     201      1021.586     -389.426    1161.131  (632.5, 347.9)            14.3
        4    33.017     262      1098.203     -773.430    1128.009  (631.0, 348.0)            15.0
   manifest: runs/waypoint/capture_manifest.json
-  previews: 5 geometry preview(s) at 1280x720, 0.081 s/frame under runs/waypoint/previews (previews are not frames; track: telemetry 9.23077 Hz (280 points, no decimation))
+  previews: 5 geometry preview(s) at 1280x720, 0.083 s/frame under runs/waypoint/previews (previews are not frames; track: telemetry 9.23077 Hz (280 points, no decimation))
   contact sheets: 1 (contact_sheets/<camera_id>.png, one per camera)
   CHECK                   STATUS    MEASURED                       TOLERANCE                     WHERE
   manifest_version        PASS      version 1                      = 1                           spec b031d3e385b823b3
@@ -505,18 +519,19 @@ scheduled 5 frames across 1 camera(s)
   flight_fidelity         PASS      t 0 s, pos 0 m, att 0 deg      1e-09 s, 1e-06 m, 1e-06 deg   5 records against 280 samples; digest 9225ac5e7dcb7ada = output_digest; worst survey #0 t=4.900 s
   schedule_fidelity       PASS      0 of 5 instants differ         0 differ                      survey 5/5 (recorded/spec)
   pose_fidelity           PASS      pos 0 m, ang 0 deg, lens 0 px  1e-06 m, 1e-06 deg, 1e-06 px  5 records against the tracks recomputed from 1 camera(s) over 280 samples; digests = pose_track_digest; worst survey #0 t=4.900 s
+  aim_fidelity            PASS      gap 7.96e-13 px                1e-06 px, 1e-06 deg           5 records; survey aircraft-lagged: off-aim up to 25.5 px, predicted 25.5
   engine_parity           AWAITING  -                              -                             awaiting engine frames: no render.json for camera survey (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
   detail:
   [SKIPPED] cross_view_consistency: NOT EXERCISED (single camera): no instant is seen by two cameras; capture two cameras on a shared schedule to verify cross-view consistency
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera survey (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
-verification PASSED (7/7 checks; 1 skipped: cross_view_consistency (single camera); 1 awaiting engine frames: engine_parity)
+verification PASSED (8/8 checks; 1 skipped: cross_view_consistency (single camera); 1 awaiting engine frames: engine_parity)
 engine absent: no engine on this OS: the render half needs macOS, or Windows with Unreal Engine 5.5 and the FlightSimBridge built; frames not rendered (--render frames where the engine exists)
 done: manifest, 5 previews and verification for 5 scheduled frames under runs/waypoint (no pixels)
 ```
 
 #### capture: the refusal (cameras_refusal)
 
-`python -m flightsim.capture examples/cameras_refusal.yaml --out runs/refused` -- exit 2, 0.28 s wall
+`python -m flightsim.capture examples/cameras_refusal.yaml --out runs/refused` -- exit 2, 0.29 s wall
 
 ```
 run:         runs/refused
@@ -533,7 +548,7 @@ REFUSED [camera.terrain_clearance]: nothing produced (the run directory holds js
 
 #### verify --corrupt quaternion: geometry recovery must FAIL
 
-`python -m flightsim.verify runs/demo --corrupt quaternion` -- exit 1, 0.49 s wall
+`python -m flightsim.verify runs/demo --corrupt quaternion` -- exit 1, 0.51 s wall
 
 ```
 corrupt quaternion: manifest copied to runs/demo_corrupt_quaternion; corrupted chase0 frame 3 (t=1.608 s) quaternion y += 0.05 (-0.042399 -> 0.007601); the Euler angles are untouched
@@ -607,14 +622,16 @@ scheduled 48 frames across 2 camera(s)
   flight_fidelity         PASS      t 0 s, pos 0 m, att 0 deg      1e-09 s, 1e-06 m, 1e-06 deg   48 records against 115 samples; digest 2c3eac9056d8257c = output_digest; worst chase0 #0 t=0.008 s
   schedule_fidelity       PASS      0 of 48 instants differ        0 differ                      chase0 24/24, tower0 24/24 (recorded/spec)
   pose_fidelity           FAIL      pos 0 m, ang 0 deg, lens 0 px  1e-06 m, 1e-06 deg, 1e-06 px  quaternion differs from the spec's track by 0.050000 at chase0 #3 t=1.608 s
+  aim_fidelity            FAIL      gap 125 px                     1e-06 px, 1e-06 deg           the aircraft's pixel is 124.708 px from where the camera's promise puts it at chase0 #3 t=1.608 s (aircraft at (640.0, 464.7) px, promised (640.0, 340.0) px: aircraft-lagged, off-aim 104.7 px against a predicted 20.0)
   engine_parity           AWAITING  -                              -                             awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
   detail:
   [FAIL] geometry_recovery: 48 frames; quaternion-vs-euler reprojection gap 124.7076 px (tol 0.5) at chase0 #3 t=1.608 s; 0 aircraft behind camera; 0 aimed frames without the aircraft in frame
   [FAIL] cross_view_consistency: 24 two-view instants (rays from the poses recomputed from the spec through each record's own label, against the telemetry's aircraft); worst triangulation error 18.1254 m (tol 0.5) at sample 15 t=1.608 s (chase0 #3 with tower0 #3)
   [FAIL] pose_fidelity: quaternion differs from the spec's track by 0.050000 at chase0 #3 t=1.608 s
+  [FAIL] aim_fidelity: the aircraft's pixel is 124.708 px from where the camera's promise puts it at chase0 #3 t=1.608 s (aircraft at (640.0, 464.7) px, promised (640.0, 340.0) px: aircraft-lagged, off-aim 104.7 px against a predicted 20.0)
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
-verification FAILED (5/8 checks; FAILED: geometry_recovery, cross_view_consistency, pose_fidelity; 1 awaiting engine frames: engine_parity)
-FAILED verification: as expected for --corrupt quaternion, geometry_recovery FAILED (also: cross_view_consistency, pose_fidelity); runs/demo_corrupt_quaternion/capture_manifest.json graded, report runs/demo_corrupt_quaternion/verify.json
+verification FAILED (5/9 checks; FAILED: geometry_recovery, cross_view_consistency, pose_fidelity, aim_fidelity; 1 awaiting engine frames: engine_parity)
+FAILED verification: as expected for --corrupt quaternion, geometry_recovery FAILED (also: cross_view_consistency, pose_fidelity, aim_fidelity); runs/demo_corrupt_quaternion/capture_manifest.json graded, report runs/demo_corrupt_quaternion/verify.json
 ```
 
 #### verify --corrupt aircraft: cross-view consistency must FAIL
@@ -693,18 +710,19 @@ scheduled 48 frames across 2 camera(s)
   flight_fidelity         FAIL      t 0 s, pos 5 m, att 0 deg      1e-09 s, 1e-06 m, 1e-06 deg   aircraft position differs from the telemetry by 5.000 m at tower0 #0 t=0.008 s (recorded aircraft 5.000 N, 0.000 E, 3048.000 m; telemetry 0.000 N, 0.000 E, 3048.000 m at sample 0)
   schedule_fidelity       PASS      0 of 48 instants differ        0 differ                      chase0 24/24, tower0 24/24 (recorded/spec)
   pose_fidelity           PASS      pos 0 m, ang 0 deg, lens 0 px  1e-06 m, 1e-06 deg, 1e-06 px  48 records against the tracks recomputed from 2 camera(s) over 115 samples; digests = pose_track_digest; worst chase0 #0 t=0.008 s
+  aim_fidelity            PASS      gap 4.1e-13 px                 1e-06 px, 1e-06 deg           48 records; chase0 aircraft-lagged: off-aim up to 22.2 px, predicted 22.2; tower0 aircraft-lagged: off-aim up to 13.7 px, predicted 13.7
   engine_parity           AWAITING  -                              -                             awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
   detail:
   [FAIL] cross_view_consistency: 24 two-view instants (rays from the poses recomputed from the spec through each record's own label, against the telemetry's aircraft); worst triangulation error 5.1845 m (tol 0.5) at sample 0 t=0.008 s (chase0 #0 with tower0 #0)
   [FAIL] flight_fidelity: aircraft position differs from the telemetry by 5.000 m at tower0 #0 t=0.008 s (recorded aircraft 5.000 N, 0.000 E, 3048.000 m; telemetry 0.000 N, 0.000 E, 3048.000 m at sample 0)
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
-verification FAILED (6/8 checks; FAILED: cross_view_consistency, flight_fidelity; 1 awaiting engine frames: engine_parity)
+verification FAILED (7/9 checks; FAILED: cross_view_consistency, flight_fidelity; 1 awaiting engine frames: engine_parity)
 FAILED verification: as expected for --corrupt aircraft, cross_view_consistency FAILED (also: flight_fidelity); runs/demo_corrupt_aircraft/capture_manifest.json graded, report runs/demo_corrupt_aircraft/verify.json
 ```
 
 #### verify --corrupt time: temporal alignment must FAIL
 
-`python -m flightsim.verify runs/demo --corrupt time` -- exit 1, 0.48 s wall
+`python -m flightsim.verify runs/demo --corrupt time` -- exit 1, 0.50 s wall
 
 ```
 corrupt time: manifest copied to runs/demo_corrupt_time; corrupted chase0 frame 3 t_s += one fixed step (0.008333 s: 1.608333 -> 1.616667 s)
@@ -779,6 +797,7 @@ scheduled 48 frames across 2 camera(s)
   flight_fidelity         FAIL      t 0.00833333 s, pos 0 m, att 0 deg  1e-09 s, 1e-06 m, 1e-06 deg   instant differs from the telemetry by 0.008333 s at chase0 #3 t=1.617 s (telemetry t=1.608333 s at sample 15)
   schedule_fidelity       FAIL      1 of 48 instants differ             0 differ                      1 of 48 instants differ from the spec's schedule; worst chase0 #3 at sample 15 t=1.617 s where the spec schedules sample 15 t=1.608 s
   pose_fidelity           PASS      pos 0 m, ang 0 deg, lens 0 px       1e-06 m, 1e-06 deg, 1e-06 px  48 records against the tracks recomputed from 2 camera(s) over 115 samples; digests = pose_track_digest; worst chase0 #0 t=0.008 s
+  aim_fidelity            PASS      gap 4.1e-13 px                      1e-06 px, 1e-06 deg           48 records; chase0 aircraft-lagged: off-aim up to 22.2 px, predicted 22.2; tower0 aircraft-lagged: off-aim up to 13.7 px, predicted 13.7
   engine_parity           AWAITING  -                                   -                             awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
   temporal_alignment      FAIL      25 vs 24 instants                   1e-09 s                       25 instants in demo_corrupt_time vs 24 in demo; only in demo_corrupt_time: t=1.616667 s
   detail:
@@ -786,13 +805,13 @@ scheduled 48 frames across 2 camera(s)
   [FAIL] schedule_fidelity: 1 of 48 instants differ from the spec's schedule; worst chase0 #3 at sample 15 t=1.617 s where the spec schedules sample 15 t=1.608 s
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
   [FAIL] temporal_alignment: 25 capture instants in demo_corrupt_time against 24 in demo; only in demo_corrupt_time: t=1.616667 s
-verification FAILED (6/9 checks; FAILED: flight_fidelity, schedule_fidelity, temporal_alignment; 1 awaiting engine frames: engine_parity)
+verification FAILED (7/10 checks; FAILED: flight_fidelity, schedule_fidelity, temporal_alignment; 1 awaiting engine frames: engine_parity)
 FAILED verification: as expected for --corrupt time, temporal_alignment FAILED (also: flight_fidelity, schedule_fidelity); runs/demo_corrupt_time/capture_manifest.json graded, report runs/demo_corrupt_time/verify.json
 ```
 
 #### verify --corrupt count: count exactness must FAIL
 
-`python -m flightsim.verify runs/demo --corrupt count` -- exit 1, 0.50 s wall
+`python -m flightsim.verify runs/demo --corrupt count` -- exit 1, 0.49 s wall
 
 ```
 corrupt count: manifest copied to runs/demo_corrupt_count; corrupted chase0: frame record 23 (t=11.992 s) dropped; capture_count stays 24
@@ -865,18 +884,19 @@ scheduled 47 frames across 2 camera(s)
   flight_fidelity         PASS      t 0 s, pos 0 m, att 0 deg      1e-09 s, 1e-06 m, 1e-06 deg   47 records against 115 samples; digest 2c3eac9056d8257c = output_digest; worst chase0 #0 t=0.008 s
   schedule_fidelity       FAIL      1 of 48 instants differ        0 differ                      chase0: 23 recorded instants against 24 the spec schedules
   pose_fidelity           PASS      pos 0 m, ang 0 deg, lens 0 px  1e-06 m, 1e-06 deg, 1e-06 px  47 records against the tracks recomputed from 2 camera(s) over 115 samples; digests = pose_track_digest; worst chase0 #0 t=0.008 s
+  aim_fidelity            PASS      gap 4.1e-13 px                 1e-06 px, 1e-06 deg           47 records; chase0 aircraft-lagged: off-aim up to 22.2 px, predicted 22.2; tower0 aircraft-lagged: off-aim up to 13.7 px, predicted 13.7
   engine_parity           AWAITING  -                              -                             awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
   detail:
   [FAIL] count_exactness: chase0: 23 frames against a declared 24 (missing index 23)
   [FAIL] schedule_fidelity: chase0: 23 recorded instants against 24 the spec schedules
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
-verification FAILED (6/8 checks; FAILED: count_exactness, schedule_fidelity; 1 awaiting engine frames: engine_parity)
+verification FAILED (7/9 checks; FAILED: count_exactness, schedule_fidelity; 1 awaiting engine frames: engine_parity)
 FAILED verification: as expected for --corrupt count, count_exactness FAILED (also: schedule_fidelity); runs/demo_corrupt_count/capture_manifest.json graded, report runs/demo_corrupt_count/verify.json
 ```
 
 #### verify --corrupt clock: flight fidelity must FAIL (every instant shifted, no sibling run)
 
-`python -m flightsim.verify runs/demo --corrupt clock` -- exit 1, 0.49 s wall
+`python -m flightsim.verify runs/demo --corrupt clock` -- exit 1, 0.50 s wall
 
 ```
 corrupt clock: manifest copied to runs/demo_corrupt_clock; corrupted every record (48 frames, both the sample_index and the aircraft state untouched): t_s += 0.5 s; the records still agree with each other, only the telemetry's clock says otherwise
@@ -950,18 +970,19 @@ scheduled 48 frames across 2 camera(s)
   flight_fidelity         FAIL      t 0.5 s, pos 0 m, att 0 deg    1e-09 s, 1e-06 m, 1e-06 deg   instant differs from the telemetry by 0.500000 s at chase0 #1 t=1.025 s (telemetry t=0.525000 s at sample 5)
   schedule_fidelity       FAIL      48 of 48 instants differ       0 differ                      48 of 48 instants differ from the spec's schedule; worst chase0 #1 at sample 5 t=1.025 s where the spec schedules sample 5 t=0.525 s
   pose_fidelity           PASS      pos 0 m, ang 0 deg, lens 0 px  1e-06 m, 1e-06 deg, 1e-06 px  48 records against the tracks recomputed from 2 camera(s) over 115 samples; digests = pose_track_digest; worst chase0 #0 t=0.508 s
+  aim_fidelity            PASS      gap 4.1e-13 px                 1e-06 px, 1e-06 deg           48 records; chase0 aircraft-lagged: off-aim up to 22.2 px, predicted 22.2; tower0 aircraft-lagged: off-aim up to 13.7 px, predicted 13.7
   engine_parity           AWAITING  -                              -                             awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
   detail:
   [FAIL] flight_fidelity: instant differs from the telemetry by 0.500000 s at chase0 #1 t=1.025 s (telemetry t=0.525000 s at sample 5)
   [FAIL] schedule_fidelity: 48 of 48 instants differ from the spec's schedule; worst chase0 #1 at sample 5 t=1.025 s where the spec schedules sample 5 t=0.525 s
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
-verification FAILED (6/8 checks; FAILED: flight_fidelity, schedule_fidelity; 1 awaiting engine frames: engine_parity)
+verification FAILED (7/9 checks; FAILED: flight_fidelity, schedule_fidelity; 1 awaiting engine frames: engine_parity)
 FAILED verification: as expected for --corrupt clock, flight_fidelity FAILED (also: schedule_fidelity); runs/demo_corrupt_clock/capture_manifest.json graded, report runs/demo_corrupt_clock/verify.json
 ```
 
 #### verify --corrupt flight: flight fidelity must FAIL (the aircraft moved in every view; cross-view fails beside it since round 3)
 
-`python -m flightsim.verify runs/demo --corrupt flight` -- exit 1, 0.49 s wall
+`python -m flightsim.verify runs/demo --corrupt flight` -- exit 1, 0.50 s wall
 
 ```
 corrupt flight: manifest copied to runs/demo_corrupt_flight; corrupted every camera's every record (48 frames): aircraft north_m += 50 m; the views still agree with EACH OTHER (cross_view_consistency passes), only the telemetry says the aircraft was elsewhere
@@ -1035,18 +1056,19 @@ scheduled 48 frames across 2 camera(s)
   flight_fidelity         FAIL      t 0 s, pos 50 m, att 0 deg     1e-09 s, 1e-06 m, 1e-06 deg   aircraft position differs from the telemetry by 50.000 m at chase0 #1 t=0.525 s (recorded aircraft 135.826 N, 0.000 E, 3048.001 m; telemetry 85.826 N, 0.000 E, 3048.001 m at sample 5)
   schedule_fidelity       PASS      0 of 48 instants differ        0 differ                      chase0 24/24, tower0 24/24 (recorded/spec)
   pose_fidelity           PASS      pos 0 m, ang 0 deg, lens 0 px  1e-06 m, 1e-06 deg, 1e-06 px  48 records against the tracks recomputed from 2 camera(s) over 115 samples; digests = pose_track_digest; worst chase0 #0 t=0.008 s
+  aim_fidelity            PASS      gap 4.1e-13 px                 1e-06 px, 1e-06 deg           48 records; chase0 aircraft-lagged: off-aim up to 22.2 px, predicted 22.2; tower0 aircraft-lagged: off-aim up to 13.7 px, predicted 13.7
   engine_parity           AWAITING  -                              -                             awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
   detail:
   [FAIL] cross_view_consistency: 24 two-view instants (rays from the poses recomputed from the spec through each record's own label, against the telemetry's aircraft); worst triangulation error 50.0000 m (tol 0.5) at sample 10 t=1.067 s (chase0 #2 with tower0 #2)
   [FAIL] flight_fidelity: aircraft position differs from the telemetry by 50.000 m at chase0 #1 t=0.525 s (recorded aircraft 135.826 N, 0.000 E, 3048.001 m; telemetry 85.826 N, 0.000 E, 3048.001 m at sample 5)
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
-verification FAILED (6/8 checks; FAILED: cross_view_consistency, flight_fidelity; 1 awaiting engine frames: engine_parity)
+verification FAILED (7/9 checks; FAILED: cross_view_consistency, flight_fidelity; 1 awaiting engine frames: engine_parity)
 FAILED verification: as expected for --corrupt flight, flight_fidelity FAILED (also: cross_view_consistency); runs/demo_corrupt_flight/capture_manifest.json graded, report runs/demo_corrupt_flight/verify.json
 ```
 
 #### verify --corrupt schedule: schedule fidelity must FAIL (an instant the spec does not schedule; every per-record check PASSES)
 
-`python -m flightsim.verify runs/demo --corrupt schedule` -- exit 1, 0.53 s wall
+`python -m flightsim.verify runs/demo --corrupt schedule` -- exit 1, 0.56 s wall
 
 ```
 corrupt schedule: manifest copied to runs/demo_corrupt_schedule; corrupted the instant at sample 59 (t=6.183 s -> sample 60, t=6.283 s) on chase0 #12, tower0 #12: sample_index, t_s, the aircraft state and the camera pose moved one telemetry sample later, the flight's own state and the spec's own solved pose at that sample copied in, so every per-record check still passes; only the schedule recomputed from the spec says the instant is wrong
@@ -1120,17 +1142,18 @@ scheduled 48 frames across 2 camera(s)
   flight_fidelity         PASS      t 0 s, pos 0 m, att 0 deg      1e-09 s, 1e-06 m, 1e-06 deg   48 records against 115 samples; digest 2c3eac9056d8257c = output_digest; worst chase0 #0 t=0.008 s
   schedule_fidelity       FAIL      2 of 48 instants differ        0 differ                      2 of 48 instants differ from the spec's schedule; worst chase0 #12 at sample 60 t=6.283 s where the spec schedules sample 59 t=6.183 s
   pose_fidelity           PASS      pos 0 m, ang 0 deg, lens 0 px  1e-06 m, 1e-06 deg, 1e-06 px  48 records against the tracks recomputed from 2 camera(s) over 115 samples; digests = pose_track_digest; worst chase0 #0 t=0.008 s
+  aim_fidelity            PASS      gap 4.1e-13 px                 1e-06 px, 1e-06 deg           48 records; chase0 aircraft-lagged: off-aim up to 22.2 px, predicted 22.2; tower0 aircraft-lagged: off-aim up to 13.7 px, predicted 13.7
   engine_parity           AWAITING  -                              -                             awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
   detail:
   [FAIL] schedule_fidelity: 2 of 48 instants differ from the spec's schedule; worst chase0 #12 at sample 60 t=6.283 s where the spec schedules sample 59 t=6.183 s
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
-verification FAILED (7/8 checks; FAILED: schedule_fidelity; 1 awaiting engine frames: engine_parity)
+verification FAILED (8/9 checks; FAILED: schedule_fidelity; 1 awaiting engine frames: engine_parity)
 FAILED verification: as expected for --corrupt schedule, schedule_fidelity FAILED; runs/demo_corrupt_schedule/capture_manifest.json graded, report runs/demo_corrupt_schedule/verify.json
 ```
 
 #### verify --corrupt pose: pose fidelity must FAIL (one camera moved 5 m, its quaternion, Euler angles and aircraft untouched; cross-view fails beside it)
 
-`python -m flightsim.verify runs/demo --corrupt pose` -- exit 1, 0.49 s wall
+`python -m flightsim.verify runs/demo --corrupt pose` -- exit 1, 0.53 s wall
 
 ```
 corrupt pose: manifest copied to runs/demo_corrupt_pose; corrupted tower0: every record's camera position_east_m += 5 m (24 frames); quaternion, Euler angles, lens and aircraft untouched, so the records agree with themselves and with the flight; only the pose recomputed from the spec says the camera was elsewhere
@@ -1204,13 +1227,15 @@ scheduled 48 frames across 2 camera(s)
   flight_fidelity         PASS      t 0 s, pos 0 m, att 0 deg      1e-09 s, 1e-06 m, 1e-06 deg   48 records against 115 samples; digest 2c3eac9056d8257c = output_digest; worst chase0 #0 t=0.008 s
   schedule_fidelity       PASS      0 of 48 instants differ        0 differ                      chase0 24/24, tower0 24/24 (recorded/spec)
   pose_fidelity           FAIL      pos 5 m, ang 0 deg, lens 0 px  1e-06 m, 1e-06 deg, 1e-06 px  camera position differs from the spec's track by 5.000 m at tower0 #0 t=0.008 s (recorded 900.000 N, -795.000 E, 80.000 m; the spec's track 900.000 N, -800.000 E, 80.000 m at sample 0)
+  aim_fidelity            FAIL      gap 1.97 px                    1e-06 px, 1e-06 deg           the aircraft's pixel is 1.974 px from where the camera's promise puts it at tower0 #15 t=7.683 s (aircraft at (626.7, 363.3) px, promised (627.5, 365.1) px: aircraft-lagged, off-aim 13.7 px against a predicted 13.5)
   engine_parity           AWAITING  -                              -                             awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
   detail:
   [FAIL] cross_view_consistency: 24 two-view instants (rays from the poses recomputed from the spec through each record's own label, against the telemetry's aircraft); worst triangulation error 2.4705 m (tol 0.5) at sample 0 t=0.008 s (chase0 #0 with tower0 #0)
   [FAIL] pose_fidelity: camera position differs from the spec's track by 5.000 m at tower0 #0 t=0.008 s (recorded 900.000 N, -795.000 E, 80.000 m; the spec's track 900.000 N, -800.000 E, 80.000 m at sample 0)
+  [FAIL] aim_fidelity: the aircraft's pixel is 1.974 px from where the camera's promise puts it at tower0 #15 t=7.683 s (aircraft at (626.7, 363.3) px, promised (627.5, 365.1) px: aircraft-lagged, off-aim 13.7 px against a predicted 13.5)
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
-verification FAILED (6/8 checks; FAILED: cross_view_consistency, pose_fidelity; 1 awaiting engine frames: engine_parity)
-FAILED verification: as expected for --corrupt pose, pose_fidelity FAILED (also: cross_view_consistency); runs/demo_corrupt_pose/capture_manifest.json graded, report runs/demo_corrupt_pose/verify.json
+verification FAILED (6/9 checks; FAILED: cross_view_consistency, pose_fidelity, aim_fidelity; 1 awaiting engine frames: engine_parity)
+FAILED verification: as expected for --corrupt pose, pose_fidelity FAILED (also: cross_view_consistency, aim_fidelity); runs/demo_corrupt_pose/capture_manifest.json graded, report runs/demo_corrupt_pose/verify.json
 ```
 
 #### verify --corrupt lens: pose fidelity must FAIL (fx, fy and focal scaled 1.5x; geometry recovery still PASSES)
@@ -1289,13 +1314,101 @@ scheduled 48 frames across 2 camera(s)
   flight_fidelity         PASS      t 0 s, pos 0 m, att 0 deg            1e-09 s, 1e-06 m, 1e-06 deg   48 records against 115 samples; digest 2c3eac9056d8257c = output_digest; worst chase0 #0 t=0.008 s
   schedule_fidelity       PASS      0 of 48 instants differ              0 differ                      chase0 24/24, tower0 24/24 (recorded/spec)
   pose_fidelity           FAIL      pos 0 m, ang 0 deg, lens 622.222 px  1e-06 m, 1e-06 deg, 1e-06 px  lens differs from the spec's camera by 622.222 px (17.500 mm) at chase0 #0 t=0.008 s (recorded fx 1866.667, fy 1866.667 px, focal 52.500 mm; the spec's camera fx 1244.444, fy 1244.444 px, focal 35.000 mm)
+  aim_fidelity            PASS      gap 4.1e-13 px                       1e-06 px, 1e-06 deg           48 records; chase0 aircraft-lagged: off-aim up to 33.4 px, predicted 33.4; tower0 aircraft-lagged: off-aim up to 13.7 px, predicted 13.7
   engine_parity           AWAITING  -                                    -                             awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
   detail:
   [FAIL] cross_view_consistency: 24 two-view instants (rays from the poses recomputed from the spec through each record's own label, against the telemetry's aircraft); worst triangulation error 1.4487 m (tol 0.5) at sample 10 t=1.067 s (chase0 #2 with tower0 #2)
   [FAIL] pose_fidelity: lens differs from the spec's camera by 622.222 px (17.500 mm) at chase0 #0 t=0.008 s (recorded fx 1866.667, fy 1866.667 px, focal 52.500 mm; the spec's camera fx 1244.444, fy 1244.444 px, focal 35.000 mm)
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
-verification FAILED (6/8 checks; FAILED: cross_view_consistency, pose_fidelity; 1 awaiting engine frames: engine_parity)
+verification FAILED (7/9 checks; FAILED: cross_view_consistency, pose_fidelity; 1 awaiting engine frames: engine_parity)
 FAILED verification: as expected for --corrupt lens, pose_fidelity FAILED (also: cross_view_consistency); runs/demo_corrupt_lens/capture_manifest.json graded, report runs/demo_corrupt_lens/verify.json
+```
+
+#### verify --corrupt aim: aim fidelity must FAIL (one camera yawed 1 deg, quaternion and Euler together; the aircraft's pixel is no longer where the promise puts it)
+
+`python -m flightsim.verify runs/demo --corrupt aim` -- exit 1, 0.51 s wall
+
+```
+corrupt aim: manifest copied to runs/demo_corrupt_aim; corrupted chase0: every record yawed 1 deg with the quaternion and the Euler angles rotated together (24 frames); position, lens and aircraft untouched, the aircraft still in frame, so geometry_recovery passes; only the promise recomputed over the telemetry says the camera looks the wrong way
+  expected: [FAIL] aim_fidelity, exit 1
+run:         runs/demo_corrupt_aim
+spec         cef57d752362381d   simulation 7c9e52e245405487   output 2c3eac9056d8257c
+scene        flat (no raster)   crs EPSG:32631
+flight       B747, 12 s at 120 Hz (step 0.008333 s); telemetry t 0.008..11.992 s (115 samples, 0.108 s apart); span 64.5 m
+cameras      2
+  chase0  chase/offset  aim aircraft (lag 0.25 s: the pixel trails the aircraft)  1280x720  35.0 mm (fx 1244.4 px)  24 captures, interval
+  tower0  tower/scene  aim aircraft (lag 0.25 s: the pixel trails the aircraft)  1280x720  35.0 mm (fx 1244.4 px)  24 captures, interval
+scheduled 48 frames across 2 camera(s)
+  chase0: 24 scheduled instant(s) (count 24 spread over [0.00833333, 11.9917] s, endpoints included)
+     idx       t_s  sample   cam north m   cam east m   cam alt m  aircraft px (u, v)  off-aim px
+       0     0.008       0      -110.000        0.000    3060.000  (618.4, 360.0)            21.6
+       1     0.525       5       -69.626        0.000    3060.000  (618.3, 337.8)            31.0
+       2     1.067      10         5.891        0.000    3060.001  (618.3, 339.2)            30.1
+       3     1.608      15        91.530        0.000    3060.002  (618.3, 340.0)            29.5
+       4     2.142      20       178.732        0.000    3060.003  (618.3, 340.2)            29.3
+       5     2.683      25       268.383        0.001    3060.004  (618.3, 340.4)            29.2
+       6     3.225      30       358.263        0.001    3060.004  (618.3, 340.4)            29.2
+       7     3.767      35       448.213        0.001    3060.005  (618.3, 340.4)            29.2
+       8     4.283      40       533.719        0.002    3060.006  (618.3, 340.2)            29.3
+       9     4.783      45       616.554        0.002    3060.007  (618.3, 340.2)            29.4
+      10     5.283      50       699.538        0.003    3060.007  (618.3, 340.2)            29.4
+      11     5.783      55       782.571        0.003    3060.007  (618.3, 340.2)            29.4
+      12     6.183      59       849.010        0.004    3060.008  (618.3, 340.2)            29.4
+      13     6.683      64       932.064        0.005    3060.008  (618.3, 340.2)            29.4
+      14     7.183      69      1015.121        0.005    3060.009  (618.3, 340.2)            29.4
+      15     7.683      74      1098.178        0.006    3060.009  (618.3, 340.2)            29.4
+      16     8.200      79      1184.248        0.007    3060.009  (618.3, 340.4)            29.2
+      17     8.742      84      1274.503        0.008    3060.009  (618.3, 340.5)            29.2
+      18     9.283      89      1364.564        0.009    3060.009  (618.3, 340.4)            29.2
+      19     9.825      94      1454.568        0.010    3060.010  (618.3, 340.4)            29.2
+      20    10.367      99      1544.554        0.011    3060.010  (618.3, 340.4)            29.2
+      21    10.908     104      1634.535        0.013    3060.010  (618.3, 340.4)            29.2
+      22    11.450     109      1724.515        0.014    3060.010  (618.3, 340.4)            29.2
+      23    11.992     114      1814.494        0.015    3060.010  (618.3, 340.4)            29.2
+  tower0: 24 scheduled instant(s) (count 24 spread over [0.00833333, 11.9917] s, endpoints included)
+     idx       t_s  sample   cam north m   cam east m   cam alt m  aircraft px (u, v)  off-aim px
+       0     0.008       0       900.000     -800.000      80.000  (640.0, 360.0)             0.0
+       1     0.525       5       900.000     -800.000      80.000  (632.1, 352.2)            11.1
+       2     1.067      10       900.000     -800.000      80.000  (630.6, 351.7)            12.5
+       3     1.608      15       900.000     -800.000      80.000  (629.9, 352.1)            12.8
+       4     2.142      20       900.000     -800.000      80.000  (629.2, 352.6)            13.0
+       5     2.683      25       900.000     -800.000      80.000  (628.7, 353.4)            13.1
+       6     3.225      30       900.000     -800.000      80.000  (628.1, 354.3)            13.2
+       7     3.767      35       900.000     -800.000      80.000  (627.5, 355.4)            13.3
+       8     4.283      40       900.000     -800.000      80.000  (626.9, 356.5)            13.5
+       9     4.783      45       900.000     -800.000      80.000  (626.5, 357.7)            13.6
+      10     5.283      50       900.000     -800.000      80.000  (626.4, 359.1)            13.7
+      11     5.783      55       900.000     -800.000      80.000  (626.3, 360.4)            13.7
+      12     6.183      59       900.000     -800.000      80.000  (626.4, 361.5)            13.7
+      13     6.683      64       900.000     -800.000      80.000  (626.7, 362.8)            13.6
+      14     7.183      69       900.000     -800.000      80.000  (627.0, 364.0)            13.6
+      15     7.683      74       900.000     -800.000      80.000  (627.5, 365.1)            13.5
+      16     8.200      79       900.000     -800.000      80.000  (628.2, 366.0)            13.3
+      17     8.742      84       900.000     -800.000      80.000  (628.9, 366.8)            13.0
+      18     9.283      89       900.000     -800.000      80.000  (629.5, 367.5)            12.9
+      19     9.825      94       900.000     -800.000      80.000  (630.1, 368.1)            12.7
+      20    10.367      99       900.000     -800.000      80.000  (630.8, 368.5)            12.6
+      21    10.908     104       900.000     -800.000      80.000  (631.3, 368.8)            12.4
+      22    11.450     109       900.000     -800.000      80.000  (631.9, 369.1)            12.2
+      23    11.992     114       900.000     -800.000      80.000  (632.4, 369.2)            12.0
+  CHECK                   STATUS    MEASURED                       TOLERANCE                     WHERE
+  manifest_version        PASS      version 1                      = 1                           spec cef57d752362381d
+  fields_finite           PASS      0 non-finite of 48 records     0 non-finite                  48 records, 6 fields each
+  geometry_recovery       PASS      4.1e-13 px                     0.5 px                        worst tower0 #9 t=4.783 s
+  cross_view_consistency  FAIL      1.7 m                          0.5 m                         24 two-view instants; worst sample 114 t=11.992 s (chase0 #23 with tower0 #23); rays from the poses recomputed from the spec through each record's own label, against the telemetry's aircraft
+  count_exactness         PASS      48 frames = 24 + 24            exactly 48                    chase0 24/24, tower0 24/24
+  flight_fidelity         PASS      t 0 s, pos 0 m, att 0 deg      1e-09 s, 1e-06 m, 1e-06 deg   48 records against 115 samples; digest 2c3eac9056d8257c = output_digest; worst chase0 #0 t=0.008 s
+  schedule_fidelity       PASS      0 of 48 instants differ        0 differ                      chase0 24/24, tower0 24/24 (recorded/spec)
+  pose_fidelity           FAIL      pos 0 m, ang 1 deg, lens 0 px  1e-06 m, 1e-06 deg, 1e-06 px  camera orientation differs from the spec's track by 1.0000 deg at chase0 #0 t=0.008 s (recorded yaw 1.0000, pitch -6.2258, roll 0.0000 deg; the spec's track 0.0000, -6.2258, 0.0000)
+  aim_fidelity            FAIL      gap 21.7 px                    1e-06 px, 1e-06 deg           the aircraft's pixel is 21.675 px from where the camera's promise puts it at chase0 #14 t=7.183 s (aircraft at (618.3, 340.2) px, promised (640.0, 340.2) px: aircraft-lagged, off-aim 29.4 px against a predicted 19.8)
+  engine_parity           AWAITING  -                              -                             awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
+  detail:
+  [FAIL] cross_view_consistency: 24 two-view instants (rays from the poses recomputed from the spec through each record's own label, against the telemetry's aircraft); worst triangulation error 1.7000 m (tol 0.5) at sample 114 t=11.992 s (chase0 #23 with tower0 #23)
+  [FAIL] pose_fidelity: camera orientation differs from the spec's track by 1.0000 deg at chase0 #0 t=0.008 s (recorded yaw 1.0000, pitch -6.2258, roll 0.0000 deg; the spec's track 0.0000, -6.2258, 0.0000); quaternion differs from the spec's track by 0.008719 at chase0 #16 t=8.200 s
+  [FAIL] aim_fidelity: the aircraft's pixel is 21.675 px from where the camera's promise puts it at chase0 #14 t=7.183 s (aircraft at (618.3, 340.2) px, promised (640.0, 340.2) px: aircraft-lagged, off-aim 29.4 px against a predicted 19.8)
+  [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
+verification FAILED (6/9 checks; FAILED: cross_view_consistency, pose_fidelity, aim_fidelity; 1 awaiting engine frames: engine_parity)
+FAILED verification: as expected for --corrupt aim, aim_fidelity FAILED (also: cross_view_consistency, pose_fidelity); runs/demo_corrupt_aim/capture_manifest.json graded, report runs/demo_corrupt_aim/verify.json
 ```
 
 <!-- examples_expected: end -->
@@ -1357,12 +1470,13 @@ The committed examples, each under a minute (times above):
 ### Watching each check fail on purpose
 
 `flightsim.verify <run> --corrupt
-{quaternion|aircraft|time|count|clock|flight|schedule|pose|lens}` copies
-the manifest (with `telemetry.json` and `scenario.yaml`) to a SIBLING
-directory, `<run>_corrupt_<kind>/` (or `--corrupt-dir DIR`; a copy
-inside the run is refused as USAGE), applies ONE named edit (stated on
-the first line of the output), grades the copy with the same verifier
-and must exit 1 with the named check FAILED -- the nine blocks above
+{quaternion|aircraft|time|count|clock|flight|schedule|pose|lens|aim}`
+copies the manifest (with `telemetry.json` and `scenario.yaml`) to a
+SIBLING directory, `<run>_corrupt_<kind>/` (or `--corrupt-dir DIR`; a
+copy inside the run is refused as USAGE), applies ONE named edit
+(stated on the first line of the output), grades the copy with the
+same verifier and must exit 1 with the named check FAILED -- the ten
+blocks above
 are the actual runs, and the verdict line names the copy's manifest
 and report. The run directory itself stays exactly what capture wrote
 (the CLI test lists it before and after every corruption), so nothing
@@ -1493,6 +1607,44 @@ caught by the solver's own tests (bit-identical digests, the preset
 rules) and, on rendered frames, by engine parity -- not by this check;
 what this check proves is that the manifest's poses ARE what the
 committed spec commands over the recorded flight.
+
+**The aim promise is graded (round 3).** The header prints "aim
+aircraft (lag 0.25 s: the pixel trails the aircraft)" and the schedule
+table an `off-aim px` column, but no check bounded that number: a
+chase record 300 px off its aim verified. `aim_fidelity` now puts the
+telemetry's aircraft (pyproj, the verifier's own projection) through
+each record's own pose and lens and compares that pixel with the pixel
+the preset's promise predicts, computed in the verifier without the
+solver: for chase, wingman, tower and ground the first-order lag of
+the aircraft track (time constant `AIM_LAG_S` = 0.25 s over the
+recorded clock, starting on the aircraft) aimed from the record's
+position with roll 0; for an explicit camera the aircraft itself (the
+image centre); for a cockpit the cg pixel the spec's lens offsets put
+along the body axis, with the record's axes compared to the
+telemetry's roll/pitch/heading directly. Tolerance 1e-6 px (and 1e-6
+deg on the cockpit axes): representation slack -- measured on the
+committed runs the worst gap is 4.1e-13 px (cameras_multi), 4.53e-11
+px (the cockpit pair; axes 0 deg) and 7.96e-13 px (the waypoint run),
+and a camera turned 0.001 deg is already 0.022 px and FAILS. The row's
+WHERE states the graded column per camera ("chase0 aircraft-lagged:
+off-aim up to 22.2 px, predicted 22.2; tower0 ... 13.7, predicted
+13.7"; the shoulder cockpit "off-aim up to 347.7 px, predicted
+347.7"); a point- or bearing-aimed camera promises nothing and is
+named "not graded"; the check is SKIPPED by name without
+`telemetry.json`. `--corrupt aim` (block above) yaws the chase
+camera's every record 1 deg with the quaternion and Euler angles
+rotated TOGETHER, so `geometry_recovery` passes and the aircraft stays
+in frame: `aim_fidelity FAIL, gap 21.7 px` -- "the aircraft's pixel is
+21.675 px from where the camera's promise puts it at chase0 #14
+t=7.183 s (aircraft at (618.3, 340.2) px, promised (640.0, 340.2) px:
+aircraft-lagged, off-aim 21.7 px against a predicted 0.0)" -- with
+`pose_fidelity` (ang 1 deg) and `cross_view_consistency` beside it.
+`--corrupt pose` fails it too (1.97 px: the promise is computed from
+where the record says the camera stands, and the record's orientation
+was solved from where it really stood); `--corrupt lens` does not (the
+measured and the promised pixel both go through the record's lens),
+which is `pose_fidelity`'s catch. The check takes 0.065 s on
+cameras_multi, the pyproj transformer included.
 
 The corruption that cannot fail (`--corrupt aircraft` on a
 single-camera run, where the check is SKIPPED) is refused as USAGE,
@@ -2111,8 +2263,9 @@ engine pass 2 of 2: camera 'tower0', 24 frames scheduled over the 12 s run (-cam
   flight_fidelity         PASS    t 0 s, pos 0 m, att 0 deg                             1e-09 s, 1e-06 m, 1e-06 deg      48 records against 115 samples; digest 2c3eac9056d8257c = output_digest; worst chase0 #0 t=0.008 s
   schedule_fidelity       PASS    0 of 48 instants differ                               0 differ                         chase0 24/24, tower0 24/24 (recorded/spec)
   pose_fidelity           PASS    pos 0 m, ang 0 deg, lens 0 px                         1e-06 m, 1e-06 deg, 1e-06 px     48 records against the tracks recomputed from 2 camera(s) over 115 samples; digests = pose_track_digest; worst chase0 #0 t=0.008 s
+  aim_fidelity            PASS    gap 4.1e-13 px                                        1e-06 px, 1e-06 deg              48 records; chase0 aircraft-lagged: off-aim up to 22.2 px, predicted 22.2; tower0 aircraft-lagged: off-aim up to 13.7 px, predicted 13.7
   engine_parity           PASS    pos 0.0xx m, ang 0.0xx deg, t x.xe-xx s, px x.xx      0.1 m, 0.1 deg, 1e-06 s, 3.0 px  48 of 48 frames verified across 2 camera(s)
-verification PASSED (9/9 checks)
+verification PASSED (10/10 checks)
 rendered 48 frames across 2 camera(s) (48 verified by engine parity) under runs\demo\frames
 ```
 
@@ -2228,7 +2381,7 @@ runs\demo\
 .venv\Scripts\python -m flightsim.verify runs\demo
 ```
 
-must print the nine-row table of step 2 with every STATUS `PASS`,
+must print the ten-row table of step 2 with every STATUS `PASS`,
 no `detail:` block (a PASS is rendered once, in the table; the prose
 of every check is in `verify.json`) and exit 0; the `engine_parity`
 row -- and its `detail` in `verify.json`, which carries the worst

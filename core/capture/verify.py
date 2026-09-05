@@ -98,8 +98,24 @@ Checks (numbered as in the phase document):
    or yawed 3 deg with the quaternion and Euler angles moved together,
    or whose lens was scaled 1.5x, verified 7/7.
 
-Checks 6, 7 and 8 are SKIPPED by name when the file they need is not
-beside the manifest; a skipped check is never a pass.
+9. **Aim fidelity** (:func:`verify_aim_fidelity`) -- the promise the
+   header prints beside each camera, graded: for every record the
+   telemetry's aircraft (projected here with pyproj) is put through
+   the record's own pose and lens, and that pixel must be where the
+   preset promises it -- the image centre for an explicit camera
+   aimed at the aircraft; for the lagged presets (chase, wingman,
+   tower, ground) the pixel the AIM_LAG_S first-order lag of the
+   aircraft track, recomputed HERE over the telemetry, predicts at
+   that sample; for a cockpit the pixel the spec's lens offsets put
+   the cg at along the body axis, with the record's axes compared to
+   the telemetry's attitude directly. The ``off-aim px`` column of the
+   schedule table was a number nobody graded; this check grades it
+   against a computed expectation, to representation tolerance. A
+   camera whose aim mode promises nothing about the aircraft (point,
+   bearing) is named as not graded.
+
+Checks 6, 7, 8 and 9 are SKIPPED by name when the file they need is
+not beside the manifest; a skipped check is never a pass.
 """
 
 from __future__ import annotations
@@ -148,6 +164,16 @@ POSE_ANGLE_TOL_DEG = 1e-6
 POSE_QUATERNION_TOL = 1e-9
 POSE_LENS_TOL_PX = 1e-6
 POSE_LENS_TOL_MM = 1e-9
+
+#: Aim fidelity (check 9): the aircraft's pixel through the record
+#: against the pixel the preset's promise predicts, both computed here.
+#: Representation slack: the promise is a look direction, a rotation
+#: and a projection, and the record encodes the same direction; the
+#: measured worst on the committed examples is below 1e-9 px.
+AIM_TOL_PX = 1e-6
+#: The record's forward axis against the telemetry's body axis for a
+#: cockpit camera (the preset inherits the full attitude).
+AIM_AXIS_TOL_DEG = 1e-6
 
 #: Engine parity (check 5): the pose the engine APPLIED, written back per
 #: frame by the render commandlet's consume-poses pass, against the pose
@@ -1319,6 +1345,254 @@ def verify_pose_fidelity(manifest: Dict, spec,
                                       "focal_mm": lens_tol_mm}})
 
 
+def _aim_kind(block: Dict) -> Tuple[str, Dict]:
+    """(kind, spec values) of a camera block's promise about the
+    aircraft's pixel: ``aircraft-exact`` (explicit, aim aircraft),
+    ``aircraft-lagged`` (chase, wingman, tower, ground: the C++
+    director's aim lag), ``body-axis`` (cockpit: the view is along the
+    body axis whatever aim_mode says) or ``none`` (point / bearing)."""
+    spec = block.get("spec") or {}
+
+    def value(key, default=None):
+        field = spec.get(key)
+        return field.get("value", default) if isinstance(field, dict) \
+            else default
+
+    preset = str(block.get("preset") or value("preset", "-"))
+    aim_mode = str(value("aim_mode", "aircraft"))
+    values = {"preset": preset, "aim_mode": aim_mode,
+              "offset_forward_m": float(value("offset_forward_m", 0.0)),
+              "offset_right_m": float(value("offset_right_m", 0.0)),
+              "offset_up_m": float(value("offset_up_m", 0.0))}
+    if preset == "cockpit":
+        return "body-axis", values
+    if aim_mode == "aircraft":
+        return ("aircraft-exact" if preset == "explicit"
+                else "aircraft-lagged"), values
+    return "none", values
+
+
+def _telemetry_track(columns: Dict[str, Sequence[float]],
+                     frame_block: Dict) -> Optional[List[Tuple[float, float, float]]]:
+    """The aircraft's (north, east, alt) at every telemetry sample,
+    projected here with pyproj through the manifest's frame block;
+    None when the telemetry or the frame cannot give it."""
+    n = len(columns.get("t", []))
+    if n == 0 or "altitude_m" not in columns:
+        return None
+    probe = telemetry_state_at(columns, frame_block, 0)
+    if probe["north_m"] is None:
+        return None
+    from pyproj import Transformer
+
+    forward = Transformer.from_crs("EPSG:4326", str(frame_block["crs"]),
+                                   always_xy=True)
+    ox, oy = float(frame_block["origin_x_m"]), float(frame_block["origin_y_m"])
+    track = []
+    for i in range(n):
+        x, y = forward.transform(float(columns["lon_deg"][i]),
+                                 float(columns["lat_deg"][i]))
+        track.append((float(y) - oy, float(x) - ox,
+                      float(columns["altitude_m"][i])))
+    return track
+
+
+def lagged_aim_track(t: Sequence[float],
+                     track: Sequence[Tuple[float, float, float]],
+                     lag_s: float) -> List[Tuple[float, float, float]]:
+    """The first-order lag of the aircraft track the ported presets aim
+    at: the aim starts ON the aircraft and follows it with time constant
+    ``lag_s`` over the recorded clock (dt from the telemetry's own t).
+    Written here from the promise's statement, not imported."""
+    aim: List[Tuple[float, float, float]] = []
+    current = None
+    for i, point in enumerate(track):
+        if current is None:
+            current = tuple(point)
+        else:
+            dt = float(t[i]) - float(t[i - 1])
+            gain = 1.0 - math.exp(-dt / lag_s)
+            current = tuple(c + (p - c) * gain for c, p in zip(current, point))
+        aim.append(current)
+    return aim
+
+
+def _look_axes(from_point, to_point):
+    """(forward, right, up) of a roll-free camera at ``from_point``
+    looking at ``to_point``: yaw from the horizontal bearing, pitch
+    from the climb angle, roll 0 -- the horizon-stable rule every
+    ported preset follows."""
+    dn = to_point[0] - from_point[0]
+    de = to_point[1] - from_point[1]
+    dup = to_point[2] - from_point[2]
+    yaw = math.degrees(math.atan2(de, dn))
+    pitch = math.degrees(math.atan2(dup, math.hypot(dn, de)))
+    return axes_from_euler(0.0, pitch, yaw)
+
+
+def _angle_between_deg(a, b) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
+    if norm == 0.0:
+        return 180.0
+    return math.degrees(math.acos(max(-1.0, min(1.0, dot / norm))))
+
+
+def verify_aim_fidelity(manifest: Dict,
+                        columns: Optional[Dict[str, Sequence[float]]],
+                        tol_px: float = AIM_TOL_PX,
+                        axis_tol_deg: float = AIM_AXIS_TOL_DEG) -> Check:
+    """Check 9: the aircraft's pixel through each record against the
+    pixel its camera's promise predicts (module docstring). ``columns``
+    None: SKIPPED by name; a telemetry without lat/lon or altitude, or
+    a manifest whose every camera aims at a point or a bearing:
+    SKIPPED with that reason."""
+    from .poses import AIM_LAG_S
+
+    tolerance_text = f"{tol_px:g} px, {axis_tol_deg:g} deg"
+    if columns is None:
+        return Check("aim_fidelity", None,
+                     f"NOT EXERCISED (no {TELEMETRY_FILE} beside the "
+                     f"manifest): the aim promise was not graded",
+                     skipped=f"no {TELEMETRY_FILE} beside the manifest",
+                     tolerance_text=tolerance_text, data={"telemetry": None})
+    frame_block = manifest.get("frame") or {}
+    track = _telemetry_track(columns, frame_block)
+    if track is None:
+        return Check("aim_fidelity", None,
+                     f"NOT EXERCISED: {TELEMETRY_FILE} carries no lat/lon "
+                     f"and altitude to put through the manifest's frame",
+                     skipped=f"{TELEMETRY_FILE} carries no lat/lon/altitude",
+                     tolerance_text=tolerance_text, data={"telemetry": None})
+    t = [float(v) for v in columns["t"]]
+    kinds = {b["camera_id"]: _aim_kind(b) for b in manifest.get("cameras", [])}
+    lagged: Dict[str, List] = {}
+    per_camera: Dict[str, Dict] = {}
+    problems: List[str] = []
+    worst_gap = 0.0
+    worst_at = None
+    worst_axis = 0.0
+    graded = 0
+    for record in manifest.get("frames", []):
+        camera_id = record["camera_id"]
+        kind, values = kinds.get(camera_id, ("none", {}))
+        entry = per_camera.setdefault(camera_id, {
+            "kind": kind, "graded": 0, "worst_gap_px": 0.0,
+            "off_aim_px": 0.0, "predicted_off_aim_px": 0.0,
+            "worst_at": None})
+        if kind == "none":
+            continue
+        here = _frame_words(record)
+        i = int(record["sample_index"])
+        if not 0 <= i < len(track):
+            problems.append(f"{here}: sample_index {i} outside the "
+                            f"telemetry's {len(track)} samples")
+            continue
+        aircraft = track[i]
+        camera = (float(record["position_north_m"]),
+                  float(record["position_east_m"]),
+                  float(record["position_alt_m"]))
+        cx, cy = record["principal_point_px"]
+        # Where the record puts the flight's aircraft.
+        u, v, depth = project_point(record, aircraft)
+        if kind == "body-axis":
+            ahead = -values["offset_forward_m"]
+            if not ahead > 0.0:
+                # The cg is not ahead of the lens: no pixel is promised.
+                entry["kind"] = "body-axis (cg not ahead of the lens)"
+                continue
+            u_p = cx + float(record["fx_px"]) * (-values["offset_right_m"]) / ahead
+            v_p = cy + float(record["fy_px"]) * values["offset_up_m"] / ahead
+            body = axes_from_euler(float(columns["roll_deg"][i]),
+                                   float(columns["pitch_deg"][i]),
+                                   float(columns["heading_deg"][i])) \
+                if all(k in columns for k in ("roll_deg", "pitch_deg",
+                                              "heading_deg")) else None
+            if body is not None:
+                own = axes_from_quat(record["quaternion_wxyz"])
+                axis_gap = max(_angle_between_deg(a, b)
+                               for a, b in zip(own, body))
+                if axis_gap > worst_axis:
+                    worst_axis = axis_gap
+                if axis_gap > axis_tol_deg:
+                    problems.append(f"{here}: the camera's axes are "
+                                    f"{axis_gap:.6f} deg from the "
+                                    f"telemetry's body axes (tol "
+                                    f"{axis_tol_deg:g}); the cockpit view "
+                                    f"is promised ALONG the body axis")
+        else:
+            if kind == "aircraft-lagged":
+                if camera_id not in lagged:
+                    lagged[camera_id] = lagged_aim_track(t, track, AIM_LAG_S)
+                aim = lagged[camera_id][i]
+            else:
+                aim = aircraft
+            axes = _look_axes(camera, aim)
+            u_p, v_p, depth_p = project_point(record, aircraft, axes)
+            if depth_p <= 0:
+                problems.append(f"{here}: the promised aim puts the "
+                                f"aircraft behind the camera")
+                continue
+        if depth <= 0 or not math.isfinite(u):
+            problems.append(f"{here}: the aircraft lies behind the camera "
+                            f"where the promise puts it at ({u_p:.1f}, "
+                            f"{v_p:.1f}) px")
+            continue
+        graded += 1
+        entry["graded"] += 1
+        gap = math.hypot(u - u_p, v - v_p)
+        off_aim = math.hypot(u - cx, v - cy)
+        predicted = math.hypot(u_p - cx, v_p - cy)
+        entry["off_aim_px"] = max(entry["off_aim_px"], off_aim)
+        entry["predicted_off_aim_px"] = max(entry["predicted_off_aim_px"],
+                                            predicted)
+        if entry["worst_at"] is None or gap > entry["worst_gap_px"]:
+            entry["worst_gap_px"], entry["worst_at"] = gap, here
+        if worst_at is None or gap > worst_gap:
+            worst_gap, worst_at = gap, (
+                f"{here} (aircraft at ({u:.1f}, {v:.1f}) px, promised "
+                f"({u_p:.1f}, {v_p:.1f}) px: {kind}, off-aim {off_aim:.1f} px "
+                f"against a predicted {predicted:.1f})")
+    if worst_gap > tol_px:
+        problems.insert(0, f"the aircraft's pixel is {worst_gap:.3f} px from "
+                           f"where the camera's promise puts it at "
+                           f"{worst_at}")
+    not_graded = [c for c, e in per_camera.items() if e["graded"] == 0
+                  and not problems]
+    if graded == 0 and not problems:
+        reason = ("no camera promises the aircraft's pixel (aim point / "
+                  "bearing)" if per_camera else "no frames")
+        return Check("aim_fidelity", None,
+                     f"NOT EXERCISED: {reason}", skipped=reason,
+                     tolerance_text=tolerance_text,
+                     data={"cameras": per_camera})
+    ok = not problems and graded > 0
+    words = []
+    for camera_id, entry in per_camera.items():
+        if entry["graded"]:
+            words.append(f"{camera_id} {entry['kind']}: off-aim up to "
+                         f"{entry['off_aim_px']:.1f} px, predicted "
+                         f"{entry['predicted_off_aim_px']:.1f}")
+        else:
+            words.append(f"{camera_id} not graded ({entry['kind']})")
+    measured_text = f"gap {worst_gap:.3g} px" + (
+        f", axes {worst_axis:.3g} deg" if any(
+            e["kind"].startswith("body-axis") for e in per_camera.values())
+        else "")
+    where = (problems[0] if problems else
+             f"{graded} records; " + "; ".join(words))
+    detail = ("; ".join(problems) if problems else
+              f"{graded} records put the flight's aircraft where their "
+              f"camera's promise predicts (worst gap {worst_gap:.3g} px, "
+              f"tol {tol_px:g}); " + "; ".join(words))
+    return Check("aim_fidelity", ok, detail, measured=worst_gap,
+                 tolerance=tol_px, unit="px", measured_text=measured_text,
+                 tolerance_text=tolerance_text, where=where,
+                 data={"records": graded, "worst_gap_px": worst_gap,
+                       "worst_axis_deg": worst_axis, "worst_at": worst_at,
+                       "cameras": per_camera, "lag_s": AIM_LAG_S})
+
+
 def read_scenario_spec(run_dir):
     """The spec beside a manifest (``scenario.yaml``) or None when the
     file is not there. An unreadable spec raises: a verify that reads
@@ -2079,6 +2353,7 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     report.checks.append(verify_schedule_fidelity(manifest, spec, columns))
     report.checks.append(verify_pose_fidelity(manifest, spec, columns,
                                               recomputed))
+    report.checks.append(verify_aim_fidelity(manifest, columns))
     report.checks.append(verify_engine_parity(run_dir, manifest))
 
     if other_run_dir is not None:

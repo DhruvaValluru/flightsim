@@ -1938,9 +1938,9 @@ mutate flightsim/capture.py \
 # The document itself is the guarded artefact here: a stale block (one
 # summary line edited) must fail the shape comparison.
 mutate docs/CAMERA_PHASE1_REPORT.md \
-    'verification PASSED (8/8 checks; 1 awaiting engine frames: engine_parity)
+    'verification PASSED (9/9 checks; 1 awaiting engine frames: engine_parity)
 engine absent:' \
-    'verification PASSED (8/8 checks)
+    'verification PASSED (9/9 checks)
 engine absent:' \
     "commands round 1: the document's expected output cannot go stale without a test saying so" \
     tests/test_camera_cli.py || failures=$((failures+1))
@@ -2209,6 +2209,40 @@ mutate flightsim/report.py \
     '    if trigger == "interval" and camera.get("period_s"):' \
     '    if False:  # MUTATED: a period schedule is worded as a count of 0' \
     "commands round 3: a spec-only camera whose count the flight decides is worded from its trigger, never as 0 captures" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if worst_gap > tol_px:
+        problems.insert(0, f"the aircraft'"'"'s pixel is {worst_gap:.3f} px from "' \
+    '    if False:  # MUTATED: the off-aim promise is never graded
+        problems.insert(0, f"the aircraft'"'"'s pixel is {worst_gap:.3f} px from "' \
+    "commands round 3: aim fidelity grades the aircraft's pixel against the pixel the preset's promise predicts" \
+    tests/test_camera_verify.py tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            gain = 1.0 - math.exp(-dt / lag_s)' \
+    '            gain = 1.0  # MUTATED: the promise is the aircraft itself, not the lagged aim' \
+    "commands round 3: the lagged presets' promise is the AIM_LAG_S first-order lag recomputed over the telemetry" \
+    tests/test_camera_verify.py tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                if axis_gap > axis_tol_deg:' \
+    '                if False:  # MUTATED: a cockpit camera'"'"'s axes are never compared with the body axes' \
+    "commands round 3: a cockpit record's axes are compared with the telemetry's body axes" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    report.checks.append(verify_aim_fidelity(manifest, columns))' \
+    '    report.checks.append(verify_aim_fidelity(manifest, None))  # MUTATED: the aim is never graded from the flight' \
+    "commands round 3: verify_run grades the aim promise from telemetry.json; aim fidelity is never skipped when it exists" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/verify.py \
+    '                record["yaw_deg"] = (float(record["yaw_deg"])
+                                     + AIM_TWIST_DEG) % 360.0' \
+    '                record["yaw_deg"] = (float(record["yaw_deg"])
+                                     + 0.0) % 360.0  # MUTATED: the corruption is a no-op' \
+    "commands round 3: --corrupt aim really turns the camera, and the verifier catches it" \
     tests/test_camera_cli.py || failures=$((failures+1))
 
 echo

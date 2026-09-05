@@ -1,7 +1,7 @@
 """Verify a captured run's geometry: the phase's pass/fail report.
 
     .venv/bin/python -m flightsim.verify runs/demo [--against runs/demo_b]
-        [--corrupt quaternion|aircraft|time|count|clock|flight|schedule|pose|lens]
+        [--corrupt quaternion|aircraft|time|count|clock|flight|schedule|pose|lens|aim]
         [--json] [--brief]
 
 Runs :mod:`core.capture.verify` over a run directory written by
@@ -9,9 +9,10 @@ Runs :mod:`core.capture.verify` over a run directory written by
 geometry recovery (independent reprojection), cross-view consistency
 (two-view triangulation, the rays cast from the poses recomputed from
 the spec; SKIPPED by name for a single camera), count exactness,
-flight, schedule and pose fidelity (the records against telemetry.json,
-the instants and the poses against what scenario.yaml commands over
-it) and -- where the engine's consume-poses pass rendered frames
+flight, schedule, pose and aim fidelity (the records against
+telemetry.json, the instants and the poses against what scenario.yaml
+commands over it, the aircraft's pixel against the preset's promise)
+and -- where the engine's consume-poses pass rendered frames
 under ``frames/<camera_id>/`` -- engine parity (applied vs solved pose
 and time per frame, the PNG named by index at the manifest's size, the
 aircraft reprojected through the applied pose) -- plus, with
@@ -74,7 +75,14 @@ copy -- and must FAIL the named check with exit 1:
   focal_length_mm scaled by LENS_SCALE (pose_fidelity: the lens is not
   the spec camera's; every record still projects the aircraft into the
   frame and its quaternion still agrees with its Euler angles, so
-  geometry_recovery passes).
+  geometry_recovery passes);
+* ``aim``        -- the first camera's every record yawed AIM_TWIST_DEG
+  with the quaternion and the Euler angles rotated TOGETHER, so
+  geometry_recovery passes and the aircraft stays in frame
+  (aim_fidelity: the aircraft's pixel is no longer where the preset's
+  promise -- the lagged aim recomputed over the telemetry -- puts it;
+  pose_fidelity and, on two cameras, cross_view_consistency fail
+  beside it).
 
 Exit codes (one table with flightsim.capture): 0 verified ("verified:"
 line); 1 FAILED (a check FAILED; "FAILED verification:" line); 2
@@ -100,7 +108,7 @@ from flightsim.report import (  # noqa: E402
 )
 
 CORRUPT_KINDS = ("quaternion", "aircraft", "time", "count", "clock",
-                 "flight", "schedule", "pose", "lens")
+                 "flight", "schedule", "pose", "lens", "aim")
 #: The check each corruption must fail, by name.
 CORRUPT_FAILS = {"quaternion": "geometry_recovery",
                  "aircraft": "cross_view_consistency",
@@ -110,7 +118,8 @@ CORRUPT_FAILS = {"quaternion": "geometry_recovery",
                  "flight": "flight_fidelity",
                  "schedule": "schedule_fidelity",
                  "pose": "pose_fidelity",
-                 "lens": "pose_fidelity"}
+                 "lens": "pose_fidelity",
+                 "aim": "aim_fidelity"}
 #: Corruptions the judge's own demonstrations showed the verifier
 #: passing (round 1: 5/5 on the clock and the flight; round 2: 7/7 on a
 #: moved camera and a scaled lens): the edit each applies, stated so
@@ -119,6 +128,7 @@ CLOCK_SHIFT_S = 0.5
 FLIGHT_SHIFT_M = 50.0
 POSE_SHIFT_M = 5.0
 LENS_SCALE = 1.5
+AIM_TWIST_DEG = 1.0
 
 
 def build_parser() -> ReportParser:
@@ -351,6 +361,28 @@ def corrupt_manifest(run_dir: Path, kind: str,
         edit = {"camera_id": cameras[0], "frames": count,
                 "fields": ["fx_px", "fy_px", "focal_length_mm"],
                 "scale": LENS_SCALE}
+    elif kind == "aim":
+        from core.capture.poses import euler_to_quat
+
+        count = 0
+        for record in frames:
+            if record["camera_id"] == cameras[0]:
+                record["yaw_deg"] = (float(record["yaw_deg"])
+                                     + AIM_TWIST_DEG) % 360.0
+                record["quaternion_wxyz"] = list(euler_to_quat(
+                    float(record["roll_deg"]), float(record["pitch_deg"]),
+                    float(record["yaw_deg"])))
+                count += 1
+        words = (f"corrupted {cameras[0]}: every record yawed "
+                 f"{AIM_TWIST_DEG:g} deg with the quaternion and the Euler "
+                 f"angles rotated together ({count} frames); position, "
+                 f"lens and aircraft untouched, the aircraft still in "
+                 f"frame, so geometry_recovery passes; only the promise "
+                 f"recomputed over the telemetry says the camera looks "
+                 f"the wrong way")
+        edit = {"camera_id": cameras[0], "frames": count,
+                "field": "yaw_deg + quaternion_wxyz",
+                "delta_deg": AIM_TWIST_DEG}
     else:
         raise UsageError(f"unknown --corrupt kind {kind!r}")
 

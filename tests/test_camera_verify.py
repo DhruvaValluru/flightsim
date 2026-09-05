@@ -18,8 +18,9 @@ from core.capture.schedule import solve_schedule
 from core.capture.verify import (
     VerificationReport, project_point, recompute_pose_tracks, telemetry_digest,
     telemetry_state_at, track_record, verify_alignment, verify_counts,
-    verify_flight_fidelity, verify_geometry, verify_pose_fidelity, verify_run,
-    verify_schedule_fidelity, verify_triangulation,
+    verify_aim_fidelity, verify_flight_fidelity, verify_geometry,
+    verify_pose_fidelity, verify_run, verify_schedule_fidelity,
+    verify_triangulation,
 )
 from core.nl.compiler import compile_prompt
 from core.scenario.camera import CameraSpec
@@ -789,7 +790,9 @@ def test_every_check_carries_measured_tolerance_and_where(tmp_path):
         {"name": "schedule_fidelity",
          "reason": "no scenario.yaml or telemetry.json beside the manifest"},
         {"name": "pose_fidelity",
-         "reason": "no scenario.yaml or telemetry.json beside the manifest"}]
+         "reason": "no scenario.yaml or telemetry.json beside the manifest"},
+        {"name": "aim_fidelity",
+         "reason": "no telemetry.json beside the manifest"}]
     assert data["awaiting"] == ["engine_parity"]
     for check in data["checks"]:
         for key in ("measured_text", "tolerance_text", "where", "status",
@@ -926,14 +929,15 @@ def test_a_skipped_check_is_neither_passed_nor_ran(tmp_path):
     assert report.ok
     assert [c.name for c in report.skipped] == [
         "cross_view_consistency", "flight_fidelity", "schedule_fidelity",
-        "pose_fidelity"]
+        "pose_fidelity", "aim_fidelity"]
     assert report.skipped[0].status == "SKIPPED"
     assert report.passed == 4 and report.ran == 4
     assert report.summary() == (
-        "verification PASSED (4/4 checks; 4 skipped: cross_view_consistency "
+        "verification PASSED (4/4 checks; 5 skipped: cross_view_consistency "
         "(single camera), flight_fidelity (no telemetry.json beside the "
         "manifest), schedule_fidelity (no scenario.yaml or telemetry.json "
         "beside the manifest), pose_fidelity (no scenario.yaml or "
+        "telemetry.json beside the manifest), aim_fidelity (no "
         "telemetry.json beside the manifest); 1 awaiting engine frames: "
         "engine_parity)")
     data = report.to_dict()
@@ -990,7 +994,7 @@ def test_flight_and_schedule_fidelity_pass_on_the_run_that_wrote_them(tmp_path):
     assert [c.name for c in report.checks] == [
         "manifest_version", "fields_finite", "geometry_recovery",
         "cross_view_consistency", "count_exactness", "flight_fidelity",
-        "schedule_fidelity", "pose_fidelity", "engine_parity"]
+        "schedule_fidelity", "pose_fidelity", "aim_fidelity", "engine_parity"]
     flight = by_name["flight_fidelity"]
     assert flight.ok is True and flight.measured == 0.0
     assert flight.measured_cell == "t 0 s, pos 0 m, att 0 deg"
@@ -1021,7 +1025,15 @@ def test_flight_and_schedule_fidelity_pass_on_the_run_that_wrote_them(tmp_path):
     assert cross.where.endswith(
         "; rays from the poses recomputed from the spec through each "
         "record's own label, against the telemetry's aircraft")
-    assert report.summary() == ("verification PASSED (8/8 checks; 1 "
+    aim = by_name["aim_fidelity"]
+    assert aim.ok is True and aim.unit == "px" and aim.tolerance == 1e-6
+    assert aim.measured < 1e-9
+    assert aim.tolerance_cell == "1e-06 px, 1e-06 deg"
+    assert aim.data["cameras"]["chase0"]["kind"] == "aircraft-lagged"
+    assert aim.data["cameras"]["tower0"]["graded"] == 15
+    assert aim.where.startswith("30 records; chase0 aircraft-lagged: off-aim "
+                                "up to ")
+    assert report.summary() == ("verification PASSED (9/9 checks; 1 "
                                 "awaiting engine frames: engine_parity)")
 
 
@@ -1427,3 +1439,89 @@ def test_cross_view_consistency_is_not_circular_in_the_pose(tmp_path):
     assert check.data["independent_pairs"] == 0
     assert "the poses are not tested here" in check.where
     assert "(no scenario.yaml" not in check.where
+
+
+def test_aim_fidelity_grades_the_promise_the_header_makes(tmp_path):
+    """The schedule table's off-aim column was a number nobody graded.
+    The check puts the telemetry's aircraft through each record and
+    compares that pixel with the one the preset's promise predicts --
+    the lagged aim recomputed here over the telemetry for chase and
+    tower, the image centre for an explicit camera, the body-axis cg
+    pixel for a cockpit -- so a camera turned 0.001 deg (0.02 px) fails
+    by name while an honest record is at float precision."""
+    columns = make_columns(duration_s=14.0,
+                           heading=lambda t: (3.0 * t) % 360.0,
+                           roll=lambda t: 10.0 * math.sin(0.5 * t))
+    explicit = counted("explicit", "fixed")
+    for name, value in (("position_mode", "scene"),
+                        ("position_north_m", 300.0),
+                        ("position_east_m", -200.0),
+                        ("position_alt_m", 900.0)):
+        explicit.set(name, value, frm="test")
+    manifest = write_run(tmp_path, spec_with(
+        counted("chase", "chase0"), counted("tower", "tower0"),
+        counted("cockpit", "pilot"), explicit), columns)
+    honest = verify_aim_fidelity(manifest, columns)
+    assert honest.ok is True, honest.detail
+    assert honest.measured < 1e-9
+    kinds = {c: e["kind"] for c, e in honest.data["cameras"].items()}
+    assert kinds == {"chase0": "aircraft-lagged", "tower0": "aircraft-lagged",
+                     "pilot": "body-axis", "fixed": "aircraft-exact"}
+    assert honest.data["cameras"]["fixed"]["off_aim_px"] < 1e-9
+    assert honest.data["cameras"]["chase0"]["off_aim_px"] > 1.0
+    assert honest.data["cameras"]["chase0"]["predicted_off_aim_px"] == \
+        pytest.approx(honest.data["cameras"]["chase0"]["off_aim_px"], abs=1e-9)
+    assert honest.data["lag_s"] == 0.25
+    # The lagged aim recomputed here starts on the aircraft and trails
+    # it; a 1 deg twist of the chase, quaternion and Euler together,
+    # is ~22 px at the default lens and fails; 0.001 deg (0.02 px) too.
+    for camera_id, degrees, at_least in (("chase0", 1.0, 15.0),
+                                         ("chase0", 0.001, 0.01),
+                                         ("tower0", 1.0, 5.0),
+                                         ("pilot", 1.0, 15.0),
+                                         ("fixed", 0.5, 5.0)):
+        twisted = {**manifest, "frames": [
+            dict(r, yaw_deg=(r["yaw_deg"] + degrees) % 360.0,
+                 quaternion_wxyz=list(euler_to_quat(
+                     r["roll_deg"], r["pitch_deg"],
+                     (r["yaw_deg"] + degrees) % 360.0)))
+            if r["camera_id"] == camera_id else r for r in manifest["frames"]]}
+        check = verify_aim_fidelity(twisted, columns)
+        assert check.ok is False, (camera_id, degrees)
+        assert check.measured >= at_least, (camera_id, degrees, check.measured)
+        assert check.where.startswith("the aircraft's pixel is ")
+        assert f" at {camera_id} #" in check.where
+        if camera_id == "pilot":
+            assert check.data["worst_axis_deg"] == pytest.approx(degrees,
+                                                                  abs=1e-6)
+            assert "from the telemetry's body axes" in check.detail
+        # The quaternion and the Euler angles still agree: geometry
+        # recovery is not what catches this.
+        assert verify_geometry(twisted).ok is True
+    # A point- or bearing-aimed camera promises nothing: named, never
+    # graded; a manifest of such cameras alone is SKIPPED by name.
+    pointed = counted("tower", "watch")
+    for name, value in (("aim_mode", "point"), ("aim_north_m", 500.0),
+                        ("aim_east_m", 0.0), ("aim_alt_m", 1000.0)):
+        pointed.set(name, value, frm="test")
+    solo = write_run(tmp_path / "point", spec_with(pointed), columns)
+    check = verify_aim_fidelity(solo, columns)
+    assert check.ok is None and check.status == "SKIPPED"
+    assert check.skipped == ("no camera promises the aircraft's pixel (aim "
+                             "point / bearing)")
+    mixed = {**manifest, "cameras": manifest["cameras"] + solo["cameras"],
+             "frames": manifest["frames"] + solo["frames"]}
+    check = verify_aim_fidelity(mixed, columns)
+    assert check.ok is True
+    assert "watch not graded (none)" in check.where
+    # No telemetry, or a telemetry without lat/lon: SKIPPED by name.
+    check = verify_aim_fidelity(manifest, None)
+    assert check.skipped == "no telemetry.json beside the manifest"
+    check = verify_aim_fidelity(manifest, {"t": columns["t"],
+                                           "altitude_m": columns["altitude_m"]})
+    assert check.skipped == "telemetry.json carries no lat/lon/altitude"
+    # verify_run carries the row after pose fidelity, before the engine.
+    report = verify_run(tmp_path)
+    assert [c.name for c in report.checks][-3:] == [
+        "pose_fidelity", "aim_fidelity", "engine_parity"]
+    assert report.ok, report.render()
