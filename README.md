@@ -245,6 +245,7 @@ frames, each with full recoverable geometry, engine or no engine:
 .venv/bin/python -m flightsim.verify runs/demo_b --against runs/demo   # temporal alignment, committed pair
 .venv/bin/python -m flightsim.verify runs/demo --corrupt quaternion    # watch geometry_recovery FAIL (exit 1)
 .venv/bin/python -m flightsim.verify runs/demo --corrupt flight        # the aircraft moved in EVERY view: only telemetry.json tells (flight_fidelity FAIL)
+.venv/bin/python -m flightsim.verify runs/demo --corrupt pose          # a camera moved 5 m, all else consistent: only the pose recomputed from scenario.yaml tells (pose_fidelity FAIL)
 ```
 
 Both commands print a header (digests, scene, flight, one line per

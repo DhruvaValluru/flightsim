@@ -1650,8 +1650,33 @@ The corruption that cannot fail (`--corrupt aircraft` on a
 single-camera run, where the check is SKIPPED) is refused as USAGE,
 exit 3, rather than reported as caught. The same failures are unit
 tests over corrupted manifests (`tests/test_camera_verify.py`) and
-mutation guards (`scripts/mutation_check.sh`, the "commands round 1"
-section among them).
+mutation guards (`scripts/mutation_check.sh`, the "commands round 1",
+"commands round 2" and "commands round 3" sections among them: 24
+round-3 guards -- the pose comparisons, the digest, the record
+fields, the non-circular cross-view rays and their target, the aim
+comparison, the lag filter, the cockpit axes, the three new
+corruptions, the refusal header, the planning sink, the per-thread
+slot -- each verified firing by the subset runner as it was added).
+
+**The whole guard set, run to completion (2026-09-05).**
+`./scripts/mutation_check.sh` at the head of this round's commits,
+03:31 to 06:24 UTC on this Linux x86_64 machine: 311 guards, baseline
+suite green, 305 ok, 0 WEAK, 6 SKIP ("could not apply mutation": a
+target string the tree had moved away from -- four moved by this
+round's own edits, the refusal header before the host-parity and
+preview-scale refusals, the planning sink around `/capture`'s
+preparation and the spec read once in `verify_run`; two older, the
+drawn-aircraft budget variable renamed in the per-run-budget round and
+the page's render=none branch reshaped by the preview-scale round),
+restored suite green, 10378 s wall (2 h 53 min; the commands rounds'
+guards each run `tests/test_camera_cli.py`, 85 s, which is most of
+it). The six were repointed to the tree as it is and re-run through
+the subset runner: 6 ok -- the render=none guard now degrades the
+page's choice to the engine flow (`render = "clip"`) rather than
+disabling one of the two branches that honour it, because `/run`'s
+handler and `RunManager.start()` both route none to the headless
+capture and removing either alone leaves the other. So the set
+stands at 311 guards, every one load-bearing on this tree.
 
 ## Geometry preview (package I, done properly 2026-09-04; rounds 2 and 3 the same day)
 

@@ -3,6 +3,57 @@
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
 
+**Camera Phase 1, commands round 3 (2026-09-05, the judge's seven ranked
+gaps against bar sections 5 and 6, closed in priority order; four
+code commits plus the tally commit; docs/CAMERA_PHASE1_REPORT.md
+"How to demonstrate", "Watching each check fail" and "Known
+limitations" are current).** The verifier GRADES THE POSE:
+core/capture/verify.py pose_fidelity (recompute_pose_tracks solves
+every camera's track again from scenario.yaml over telemetry.json in
+the manifest's frame block -- the producer's solver, stated as such --
+and every record's position/quaternion/Euler/focal/fx/fy/principal
+point/resolution/sensor/near/far is compared at its sample, 1e-6 m,
+1e-6 deg, 1e-9 quaternion, 1e-6 px, plus every block's
+pose_track_digest verbatim; 0.0096 s for both cameras of cameras_multi,
+digests bit-identical) and aim_fidelity (the telemetry's aircraft
+through each record against the pixel the preset's promise predicts,
+computed WITHOUT the solver: the AIM_LAG_S first-order lag recomputed
+over the telemetry for chase/wingman/tower/ground, the centre for an
+explicit camera, the body-axis cg pixel for a cockpit with the axes
+compared to the telemetry attitude; 1e-6 px; honest worst 4.1e-13 px,
+0.001 deg of yaw is 0.022 px and FAILS). cross_view_consistency is no
+longer circular: the ray goes through the record's own label but
+STARTS at the recomputed pose, and the recovered point is graded
+against the telemetry's aircraft and both records' (data["mode"]
+independent / records-only; records-only WHERE says "the poses are not
+tested here"). The judge's seven pose corruptions (both +30 m, tower
++5 m, both yawed 3 deg consistently, tower yawed 10 deg, lens x1.5,
+ids swapped) all FAIL now. Ten --corrupt kinds (pose, lens, aim added;
+schedule now copies the spec's pose at the moved sample too so only
+schedule_fidelity fails); --corrupt flight and quaternion fail
+cross-view too (50.0 m; 18.1 m). The CLI runs 9/9 (single camera 8/8
++ cross-view skipped; manifest-only 5/5 + 4 skipped). A REFUSED
+capture prints the header from the spec alone (flightsim.report.
+spec_manifest + captures_words: "output -", fx from focal x width /
+sensor width, "every 1 s, interval" when the flight decides the
+count) before the violation; --json carries it. The request
+handlers' planning (/compile, /run, /capture) is routed to
+<runs root>/jsbsim.log (RunManager.planning_console; /status names it
+with planning_model_loads) and the console sink is one slot PER
+THREAD (core/fdm/console.py threading.local). The doc's block list is
+16. Gotchas: (a) a check that is SKIPPED for a manifest-only directory
+must be added to the skipped lists in tests/test_camera_verify.py
+(three places) and tests/test_webapp_capture.py's tally; (b) the
+doc-staleness guard target moves with the tally ("(9/9 checks; ...");
+(c) the corrupt "schedule" kind must copy the POSE at the new sample
+or pose_fidelity and cross-view fail it; (d) CameraSpec.defaulted()
+takes no field kwargs -- set() them; (e) /status's
+planning_model_loads is since process start, so a test compares
+deltas; (f) 24 new guards under "commands round 3", every one
+verified firing by subset (never run pytest while a subset runs);
+the whole 311-guard suite was run to completion at the end of the
+round (tally in the report).
+
 **Camera Phase 1, commands round 2 (2026-09-05, the judge's eight ranked
 gaps against bar sections 5 and 6, all eight closed; five commits;
 docs/CAMERA_PHASE1_REPORT.md "How to demonstrate" and "Known

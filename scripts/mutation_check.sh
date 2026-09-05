@@ -878,12 +878,20 @@ mutate webapp/server.py \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
 mutate webapp/server.py \
-    '    spec, refusal = _prepare_run_spec(request)
+    '    with manager.planning_console():
+        spec, refusal = _prepare_run_spec(request)
+    if refusal is not None:
+        return refusal
+    refusal = _scale_divides_or_refusal(preview_scale, spec)
     if refusal is not None:
         return refusal
     outcome = manager.start_capture(spec, provenance={' \
-    '    spec, refusal = _prepare_run_spec(request)
+    '    with manager.planning_console():
+        spec, refusal = _prepare_run_spec(request)
     if False:  # MUTATED: capture skips the shared validation
+        return refusal
+    refusal = _scale_divides_or_refusal(preview_scale, spec)
+    if refusal is not None:
         return refusal
     outcome = manager.start_capture(spec, provenance={' \
     "the capture endpoint never bypasses the shared validation" \
@@ -1221,9 +1229,13 @@ mutate webapp/server.py \
 
 mutate webapp/server.py \
     '    if render == "none":
-        outcome = manager.start_capture(spec, provenance=provenance)' \
-    '    if False:  # MUTATED: render=none goes through the engine gate
-        outcome = manager.start_capture(spec, provenance=provenance)' \
+        outcome = manager.start_capture(spec, provenance=provenance,
+                                        **_scale_kwargs(preview_scale))' \
+    '    if render == "none":
+        render = "clip"  # MUTATED: render=none is degraded to the engine flow and its gate
+    if False:
+        outcome = manager.start_capture(spec, provenance=provenance,
+                                        **_scale_kwargs(preview_scale))' \
     "render=none is the headless flow with no platform gate" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
@@ -1280,7 +1292,7 @@ mutate core/capture/render_pass.py \
 # -- Round 2: engine parity judges the aircraft the engine DREW ------------
 
 mutate core/capture/verify.py \
-    '                    if gap_m > aircraft_tol_m or gap_px_d > tol_px_d:' \
+    '                    if gap_m > tol_m or gap_px_d > tol_px_d:' \
     '                    if False:  # MUTATED: the drawn aircraft is never judged' \
     "the aircraft the engine drew must land on the manifest's labelled pixel" \
     tests/test_camera_verify.py || failures=$((failures+1))
@@ -1322,9 +1334,11 @@ mutate webapp/runs.py \
 mutate flightsim/capture.py \
     '        parity = frames_host_parity_refusal(spec)
         if parity is not None:
+            spec_header()
             print(f"REFUSED {HOST_PARITY_CONSTRAINT}: {parity}")' \
     '        parity = None  # MUTATED: the CLI renders frames for turbulent air
         if parity is not None:
+            spec_header()
             print(f"REFUSED {HOST_PARITY_CONSTRAINT}: {parity}")' \
     "the CLI refuses frames for a turbulent spec by name" \
     tests/test_camera_cli.py || failures=$((failures+1))
@@ -1733,9 +1747,11 @@ mutate core/capture/preview.py \
 
 mutate flightsim/capture.py \
     '    if scale_refusal is not None:
+        spec_header()
         print(f"REFUSED -- {scale_refusal}")
         return 2' \
     '    if False:  # MUTATED: the CLI flies first and floors the previews
+        spec_header()
         print(f"REFUSED -- {scale_refusal}")
         return 2' \
     "preview round 3: the CLI refuses a non-divisor preview scale before the flight" \
@@ -1987,8 +2003,8 @@ mutate core/capture/verify.py \
     tests/test_camera_verify.py tests/test_camera_cli.py || failures=$((failures+1))
 
 mutate core/capture/verify.py \
-    '        manifest, read_scenario_spec(run_dir), columns))' \
-    '        manifest, None, columns))  # MUTATED: the spec is never read' \
+    '    report.checks.append(verify_schedule_fidelity(manifest, spec, columns))' \
+    '    report.checks.append(verify_schedule_fidelity(manifest, None, columns))  # MUTATED: the spec is never read for the schedule' \
     "commands round 2: verify_run reads scenario.yaml beside the manifest; schedule fidelity is never skipped when it exists" \
     tests/test_camera_verify.py tests/test_camera_cli.py || failures=$((failures+1))
 
