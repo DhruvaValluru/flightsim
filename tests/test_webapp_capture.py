@@ -1920,12 +1920,19 @@ def test_the_page_s_galleries_show_every_frame_and_label_previews_as_the_fallbac
     gallery = html["galleries"][0]
     words = text_of(gallery)
     assert words.startswith("camera0 : 4 scheduled, 0 rendered (headless), previews only")
+    # The fallback names the platform gate's reason ONCE -- the sentence
+    # /status and the CLI print, which already begins "no engine on
+    # this OS" -- never prefixed with a second "no engine" clause.
     reason = state["engine_reason"]
-    expected = (f"no engine on this machine — {reason}" if reason
+    expected = (reason if reason
                 else "headless run by choice; choose Render frames and clip "
                      "for the frame set")
     assert f"previews (fallback: {expected}; showing 4 of 4 preview(s), " \
            f"which are NOT frames)" in words
+    assert "no engine on this machine" not in words
+    if reason:
+        assert reason.startswith("no engine on this OS")
+        assert words.count("no engine") == 1
     srcs = img_srcs(gallery)
     previews = [s for s in srcs if "/previews/" in s]
     assert len(previews) == 4 == payload["galleries"][0]["scheduled"]

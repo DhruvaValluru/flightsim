@@ -2776,6 +2776,18 @@ mutate webapp/static/index.html \
     "page round 3 (DOM): an empty file listing is said by name" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 3: the headless fallback states the reason once -----------
+
+mutate webapp/static/index.html \
+    '  return run.engine_reason
+    ? run.engine_reason
+    : "headless run by choice; choose Render frames and clip for the frame set";' \
+    '  return run.engine_reason
+    ? `no engine on this machine — ${run.engine_reason}`  // MUTATED: the reason twice
+    : "headless run by choice; choose Render frames and clip for the frame set";' \
+    "page round 3: the headless fallback states the platform gate's reason once" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

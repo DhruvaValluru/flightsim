@@ -717,8 +717,11 @@ function fallbackWords(run) {
     return "the engine pass rendered no frame for this camera (the run's " +
            "status names the failure)";
   }
+  // The platform gate's own sentence, once: it already begins "no
+  // engine on this OS: ...", so no prefix -- the same words /status
+  // and the CLI print.
   return run.engine_reason
-    ? `no engine on this machine — ${run.engine_reason}`
+    ? run.engine_reason
     : "headless run by choice; choose Render frames and clip for the frame set";
 }
 
