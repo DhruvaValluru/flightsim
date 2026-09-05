@@ -26,7 +26,16 @@ while a caller has asked for it:
 
 The output is routed, never dropped: the log is opened for append, and
 the sink refuses ``os.devnull`` by name -- a banner nobody can read
-back is a banner lost.
+back is a banner lost. Every routed construction is preceded in the
+log by a one-line stamp, ``# load 3: FlightDynamics(B747) called from
+core.scenario.runner.build_fdm``, so fourteen identical banners read
+as fourteen named loads (the label is the constructor's, the caller is
+the first frame outside this module and the wrapper that asked).
+
+The sink is one process-wide slot (a module global): the CLI enters it
+around its whole run, the webapp's capture and closure flights around
+theirs; the page's manager runs one flight at a time, so two runs
+never share a slot.
 """
 
 from __future__ import annotations
@@ -46,6 +55,9 @@ class JSBSimConsole:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self.loads = 0
+        #: One stamp per routed load, in order: what was constructed and
+        #: who asked (the same text the log carries).
+        self.labels: list = []
 
     def __repr__(self) -> str:
         return f"JSBSimConsole({str(self.path)!r}, loads={self.loads})"
@@ -104,19 +116,40 @@ def _flush_c_streams() -> None:
         pass
 
 
+def _caller_words() -> str:
+    """``module.function`` of the first frame outside this module and
+    the FDM wrappers that construct through it -- the code that asked
+    for the model."""
+    own = {__name__, "core.fdm.fdm", "contextlib"}
+    frame = sys._getframe(1)
+    while frame is not None:
+        module = frame.f_globals.get("__name__", "?")
+        if module not in own:
+            return f"{module}.{frame.f_code.co_name}"
+        frame = frame.f_back
+    return "?"
+
+
 @contextlib.contextmanager
-def captured_console() -> Iterator[Optional[JSBSimConsole]]:
+def captured_console(label: Optional[str] = None
+                     ) -> Iterator[Optional[JSBSimConsole]]:
     """Redirect fds 1 and 2 to the active sink for the block; a no-op
-    when no sink is active."""
+    when no sink is active. ``label`` names what is being constructed
+    ("FlightDynamics(B747)"); the stamp written to the log before the
+    routed output adds who asked."""
     sink = _ACTIVE
     if sink is None:
         yield None
         return
     sink.loads += 1
+    words = f"{label or 'FGFDMExec'} called from {_caller_words()}"
+    sink.labels.append(words)
+    stamp = f"# load {sink.loads}: {words}\n"
     sink.path.parent.mkdir(parents=True, exist_ok=True)
     _flush_python_streams()
     log_fd = os.open(str(sink.path), os.O_WRONLY | os.O_CREAT | os.O_APPEND,
                      0o644)
+    os.write(log_fd, stamp.encode("utf-8"))
     saved_out, saved_err = os.dup(1), os.dup(2)
     try:
         os.dup2(log_fd, 1)

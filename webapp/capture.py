@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
+from core.fdm.console import JSBSimConsole, active_console, jsbsim_console
+
 REPO = Path(__file__).resolve().parents[1]
 
 #: Progress sink: one human-readable line per step.
@@ -76,6 +78,31 @@ def _run_named(run_spec, spec, **kwargs):
         raise CaptureError(exc.constraint, str(exc)) from exc
     except TerrainImpactError as exc:
         raise CaptureError("terrain.impact", str(exc)) from exc
+
+
+def run_console(capture_dir: Path):
+    """The sink the capture and closure flights construct their models
+    under. Inside a page run the manager has already entered the run's
+    own sink (``<run>/jsbsim.log``, around the whole flow: planning,
+    the flights, the card), so the flights simply write there, the
+    load numbering continuous; a direct ``capture_run`` (a test, a
+    script) with no sink active opens ``capture/jsbsim.log`` for
+    itself. Either way JSBSim's banner never reaches the console."""
+    import contextlib
+
+    active = active_console()
+    if active is not None:
+        return contextlib.nullcontext(active)
+    return jsbsim_console(Path(capture_dir) / "jsbsim.log")
+
+
+def _log_words(console: JSBSimConsole, out: Path) -> str:
+    """The sink's log named relative to the run (``jsbsim.log`` or
+    ``capture/jsbsim.log``)."""
+    try:
+        return console.path.resolve().relative_to(Path(out).resolve()).as_posix()
+    except ValueError:
+        return str(console.path)
 
 
 def scene_geometry(spec, scene: Dict):
@@ -245,7 +272,16 @@ def capture_run(spec, out: Path, scene: Dict,
     capture_dir.mkdir(parents=True, exist_ok=True)
 
     report("flying the spec headlessly for the capture geometry")
-    result = _run_named(run_spec, spec, terrain_ground=terrain_ground)
+    # JSBSim's startup banner (C++, file descriptor 1) goes to the
+    # run's log, stamped per model load, exactly as the CLI routes it
+    # -- never to the server's console, never dropped.
+    with run_console(capture_dir) as console:
+        before = console.loads
+        result = _run_named(run_spec, spec, terrain_ground=terrain_ground)
+    routed = console.loads - before
+    log_words = _log_words(console, out)
+    report(f"JSBSim output: {log_words} ({routed} model loads routed there "
+           f"for the capture flight; nothing of JSBSim's on the console)")
     columns = result.telemetry.columns
 
     cameras = spec.cameras or default_cameras(spec)
@@ -343,6 +379,8 @@ def capture_run(spec, out: Path, scene: Dict,
         "preview_track_source": str(previews.track_source),
         "contact_sheets": contact_sheets,
         "verification": verdict,
+        "jsbsim_log": log_words,
+        "jsbsim_model_loads": int(routed),
     }
     return CaptureOutcome(summary=summary, capture_dir=capture_dir,
                           cameras=list(cameras), tracks=tracks,
@@ -429,8 +467,16 @@ def closure_run(spec, out: Path, scene: Dict,
                  frm=f"closure pair: the clip's own window "
                      f"({CLIP_SECONDS:g} s cap)")
     report("flying the same spec closed loop for the closure report")
-    result = _run_named(run_spec, pair, terrain_ground=terrain_ground,
-                      assert_closure=False)
+    # The same sink the capture flight wrote to (the run's, or
+    # capture/jsbsim.log appended), the same stamps: the closure pair's
+    # loads are named there too.
+    with run_console(Path(out) / "capture") as console:
+        before = console.loads
+        result = _run_named(run_spec, pair, terrain_ground=terrain_ground,
+                            assert_closure=False)
+    report(f"JSBSim output: {_log_words(console, out)} "
+           f"({console.loads - before} model loads routed there for the "
+           f"closure flight)")
     if result.closure is None:
         raise CaptureError(
             "closure.unavailable",
@@ -476,6 +522,13 @@ ARTIFACT_NOTES = {
         "the headless flight the manifest describes",
     "capture/scenario.yaml": "the spec as captured",
     "capture/run.json": "spec and output digests of the capture run",
+    "jsbsim.log":
+        "JSBSim's own console for the whole run (planning, the capture and "
+        "closure flights, the card), one '# load N:' stamp per model "
+        "construction",
+    "capture/jsbsim.log":
+        "JSBSim's own console for a direct capture (no page run), one "
+        "'# load N:' stamp per model construction",
 }
 #: The overlay class: reprojected geometry drawn over a rendered frame.
 OVERLAY_NOTE = ("reprojected geometry over the rendered frame: the manifest's "
@@ -503,10 +556,11 @@ def run_artifacts(out_dir: Path) -> List[Dict]:
     entries: List[Dict] = []
     for name in ("clip.mp4", "card.json", "provenance.json",
                  "scenario.yaml", "telemetry.json", "effect.json",
-                 "render.log", "capture/capture_manifest.json",
+                 "render.log", "jsbsim.log", "capture/capture_manifest.json",
                  "capture/verify.json", "capture/closure.json",
                  "capture/telemetry.json",
-                 "capture/scenario.yaml", "capture/run.json"):
+                 "capture/scenario.yaml", "capture/run.json",
+                 "capture/jsbsim.log"):
         path = out_dir / name
         if path.is_file():
             entries.append({"name": name, "bytes": path.stat().st_size,

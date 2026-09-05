@@ -156,7 +156,7 @@ class FlightDynamics:
         # The banner is emitted by the constructor itself, before
         # set_debug_level can run: the whole construct-and-load is routed
         # through the console sink when one is active (see the note above).
-        with captured_console():
+        with captured_console(f"FlightDynamics({self.model.name})"):
             self._exec = jsbsim.FGFDMExec(root_dir=str(self.model.root_dir))
             self._exec.set_debug_level(debug_level)
             # A derived aircraft lives outside the JSBSim data root, so

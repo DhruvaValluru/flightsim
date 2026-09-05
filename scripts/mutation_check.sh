@@ -1824,7 +1824,7 @@ mutate core/capture/verify.py \
     tests/test_camera_verify.py || failures=$((failures+1))
 
 mutate core/fdm/fdm.py \
-    '        with captured_console():
+    '        with captured_console(f"FlightDynamics({self.model.name})"):
             self._exec = jsbsim.FGFDMExec(root_dir=str(self.model.root_dir))' \
     '        if True:  # MUTATED: the banner goes to stdout
             self._exec = jsbsim.FGFDMExec(root_dir=str(self.model.root_dir))' \
@@ -2054,6 +2054,40 @@ mutate core/capture/verify.py \
                 problems.append(f"{camera_id}: {len(indices)} frames "' \
     "commands round 2: a count FAIL says what was found, a wrong count or the wrong indices, never 'or'" \
     tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/fdm/console.py \
+    '    os.write(log_fd, stamp.encode("utf-8"))' \
+    '    os.write(log_fd, b"")  # MUTATED: the loads are not stamped' \
+    "commands round 2: every routed model load is stamped in the log with what was built and who asked" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    '    return jsbsim_console(Path(capture_dir) / "jsbsim.log")' \
+    '    return contextlib.nullcontext(JSBSimConsole(Path(capture_dir) / "jsbsim.log"))  # MUTATED: a direct capture_run is not routed' \
+    "commands round 2: a direct capture_run routes JSBSim's console to capture/jsbsim.log" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '            with jsbsim_console(out / "jsbsim.log"):
+                (flow or self._render_flow)(run, spec, provenance)' \
+    '            if True:  # MUTATED: the page run is not routed
+                (flow or self._render_flow)(run, spec, provenance)' \
+    "commands round 2: a page run enters the run's own JSBSim sink, <run>/jsbsim.log, around the whole flow" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate flightsim/report.py \
+    '            du = float(record["fx_px"]) * (-right) / ahead' \
+    '            du = 0.0  # MUTATED: the cockpit promise ignores the lateral offset' \
+    "commands round 2: the cockpit off-aim column measures against the body-axis cg pixel the header promises" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/report.py \
+    '    if kind in ("aircraft-lagged", "aircraft-exact"):
+        return math.hypot(u - cx, v - cy)' \
+    '    if kind in ("aircraft-lagged", "aircraft-exact"):
+        return 0.0  # MUTATED: an aimed camera never reports its miss' \
+    "commands round 2: an aircraft-aimed camera's off-aim column is its measured distance from the centre" \
+    tests/test_camera_cli.py || failures=$((failures+1))
 
 echo
 purge_cache

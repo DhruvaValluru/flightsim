@@ -810,6 +810,16 @@ def test_stdout_carries_no_jsbsim_text_and_the_log_holds_it(report_run):
     assert match, text
     assert Path(match.group(1)) == log
     assert int(match.group(2)) == banners
+    # One stamp before every routed load: what was built and who asked,
+    # so fourteen identical banners read as fourteen named loads.
+    stamps = re.findall(r"^# load (\d+): (\S+) called from ([\w.]+)$",
+                        log.read_text(encoding="utf-8"), re.M)
+    assert len(stamps) == banners
+    assert [int(n) for n, _, _ in stamps] == list(range(1, banners + 1))
+    assert stamps[0][1] == "FlightDynamics(B747)"
+    assert all(label.startswith("FlightDynamics(") for _, label, _ in stamps)
+    assert all(caller.startswith("core.") for _, _, caller in stamps)
+    assert all(not caller.startswith("core.fdm.") for _, _, caller in stamps)
     run = json.loads((out / "run.json").read_text(encoding="utf-8"))
     assert run["jsbsim_log"] == str(log)
     # verify constructs no FDM: nothing of JSBSim's, not even the line.
@@ -843,9 +853,11 @@ def test_the_report_opens_with_a_header(report_run):
                                "0.008333 s); telemetry t 0.008..11.992 s "
                                "(115 samples, 0.108 s apart); span 64.5 m")
     assert lines[5] == "cameras      2"
-    assert lines[6] == ("  chase0  chase/offset  aim aircraft  1280x720  "
+    assert lines[6] == ("  chase0  chase/offset  aim aircraft (lag 0.25 s: "
+                        "the pixel trails the aircraft)  1280x720  "
                         "35.0 mm (fx 1244.4 px)  24 captures, interval")
-    assert lines[7] == ("  tower0  tower/scene  aim aircraft  1280x720  "
+    assert lines[7] == ("  tower0  tower/scene  aim aircraft (lag 0.25 s: "
+                        "the pixel trails the aircraft)  1280x720  "
                         "35.0 mm (fx 1244.4 px)  24 captures, interval")
     # flightsim.verify prints the same header from the manifest alone.
     buffer = io.StringIO()
@@ -921,6 +933,85 @@ def test_the_flight_line_and_brief_name_the_window_and_the_trigger(tmp_path):
     printed = buffer.getvalue()
     assert flight in printed.splitlines()
     assert "every 400 m of track; instants" in printed
+
+
+def off_aim_printed(text, camera_id):
+    """The printed off-aim column of one camera: [float or None]."""
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines)
+                 if line.startswith(f"  {camera_id}: ") and "scheduled instant"
+                 in line)
+    assert lines[start + 1].rstrip().endswith("aircraft px (u, v)  off-aim px")
+    values = []
+    for line in lines[start + 2:]:
+        match = re.match(r"\s+\d+\s+[\d.]+\s+\d+\s+.*\)\s+(-|[\d.]+)$", line)
+        if not match:
+            break
+        values.append(None if match.group(1) == "-" else float(match.group(1)))
+    return values
+
+
+def test_the_header_states_the_aim_reference_and_the_table_its_miss(
+        report_run, tmp_path):
+    """cameras_multi_cockpit's shoulder camera says 'aim aircraft' and
+    shows the aircraft 332 px below centre in every frame: the cockpit
+    preset looks along the body axis, so the header says where the cg
+    is and which pixel that is, and the off-aim column measures the
+    table's pixel against THAT promise (0.0 px), while the chase and
+    tower cameras' off-aim is their distance from the centre -- the aim
+    lag the header names."""
+    out, text = report_run
+    manifest = json.loads(
+        (out / "capture_manifest.json").read_text(encoding="utf-8"))
+    for camera_id in ("chase0", "tower0"):
+        values = off_aim_printed(text, camera_id)
+        assert len(values) == 24
+        records = [r for r in manifest["frames"] if r["camera_id"] == camera_id]
+        for value, record in zip(values, records):
+            u, v = record["principal_point_px"]
+            from core.capture.verify import project_point
+
+            pu, pv, _ = project_point(record, (
+                record["aircraft"]["north_m"], record["aircraft"]["east_m"],
+                record["aircraft"]["alt_m"]))
+            assert value == pytest.approx(
+                ((pu - u) ** 2 + (pv - v) ** 2) ** 0.5, abs=0.06)
+        assert values[0] == 0.0 and 0.0 < max(values) < 30.0
+    cockpit = tmp_path / "cockpit"
+    code, printed = capture_text([str(COCKPIT), "--out", str(cockpit),
+                                  "--max-previews", "0", "--render", "none"])
+    assert code == 0, printed
+    lines = printed.splitlines()
+    camera = next(i for i, line in enumerate(lines)
+                  if line.startswith("  shoulder  cockpit/offset  "))
+    assert lines[camera] == ("  shoulder  cockpit/offset  aim body axis  "
+                             "1280x720  35.0 mm (fx 1244.4 px)  24 captures, "
+                             "interval")
+    assert lines[camera + 1] == (
+        "            (aim_mode aircraft is not applied by the cockpit preset: "
+        "the view is along the body axis; the cg sits 6 m ahead, 1.6 m below "
+        "and 0.5 m right of the lens, so its pixel is (743.7, 691.9), "
+        "(+103.7, +331.9) px from the image centre)")
+    values = off_aim_printed(printed, "shoulder")
+    assert len(values) == 24 and max(values) < 0.05
+    rows = schedule_rows_printed(printed, "shoulder")
+    assert len(rows) == 24
+    assert re.search(r"^\s+0\s+0\.008\s+0\s+.*\(743\.7, 691\.9\)\s+0\.0$",
+                     printed, re.M), printed
+    # verify prints the same header words from the manifest alone, and
+    # --json carries the reference as data.
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(cockpit), "--json"]) == 0
+    doc = json.loads(buffer.getvalue())
+    reference = doc["header"]["cameras"][0]["aim_reference"]
+    assert reference["kind"] == "body-axis"
+    assert reference["predicted_offset_px"] == pytest.approx(
+        [103.7, 331.9], abs=0.05)
+    assert lines[camera + 1] in doc["text"]
+    assert doc["schedule"]["columns"][-1] == "off-aim px"
+    assert all(r["off_aim_px"] < 0.05 and r["aim_kind"] == "body-axis"
+               for r in doc["schedule"]["cameras"]["shoulder"])
 
 
 def test_the_verification_table_has_measured_tolerance_status_and_where(

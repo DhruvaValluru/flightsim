@@ -1742,8 +1742,17 @@ class RunManager:
 
     def _execute(self, run: RunState, spec: ScenarioSpec,
                  provenance: Dict, flow=None) -> None:
+        # The whole flow runs under the run's own JSBSim console sink
+        # (core.fdm.console): every model construction -- planning, the
+        # capture and closure flights, the run card -- appends its
+        # banner to <run>/jsbsim.log behind a "# load N:" stamp, and
+        # nothing of it reaches the server's console.
+        from core.fdm.console import jsbsim_console
+
+        out = self.out_root / run.run_id
         try:
-            (flow or self._render_flow)(run, spec, provenance)
+            with jsbsim_console(out / "jsbsim.log"):
+                (flow or self._render_flow)(run, spec, provenance)
         except Exception as exc:   # surfaced to the UI, never swallowed
             run.push("failed", f"{type(exc).__name__}: {exc}")
 

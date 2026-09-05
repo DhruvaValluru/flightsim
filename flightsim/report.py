@@ -40,6 +40,7 @@ import argparse
 import contextlib
 import io
 import json
+import math
 import sys
 import traceback
 from pathlib import Path
@@ -179,6 +180,86 @@ def telemetry_window(t: Sequence[float]) -> Optional[Dict[str, float]]:
             "spacing_s": spacing}
 
 
+def aim_reference(block: Dict, record: Optional[Dict]) -> Dict:
+    """What a camera's aim mode actually promises for the aircraft's
+    pixel, per preset -- the words the header prints beside ``aim`` and
+    the offset the schedule table's ``off-aim px`` column measures
+    against:
+
+    * chase / wingman / tower / ground, ``aim aircraft``: the C++
+      director's aim lags the aircraft (AIM_LAG_S), so the pixel trails
+      the image centre -- ``off-aim`` is the distance from the centre;
+    * explicit, ``aim aircraft``: exact -- the same distance, expected 0;
+    * cockpit: the view is ALONG THE BODY AXIS whatever ``aim_mode``
+      says (the preset inherits the full attitude), so the aircraft's
+      cg sits at a fixed offset from the lens -- ``off-aim`` is the
+      distance from THAT predicted pixel, expected 0, and the header
+      says where the cg is and which pixel that is;
+    * ``aim point`` / ``aim bearing``: no aircraft promise; ``off-aim``
+      is ``-``.
+    """
+    from core.capture.poses import AIM_LAG_S
+
+    spec = block.get("spec") or {}
+
+    def value(key, default=None):
+        field = spec.get(key)
+        return field.get("value", default) if isinstance(field, dict) \
+            else default
+
+    preset = str(block.get("preset") or value("preset", "-"))
+    aim_mode = str(value("aim_mode", "aircraft"))
+    reference = {"preset": preset, "aim_mode": aim_mode, "kind": None,
+                 "words": f"aim {aim_mode}", "note": None,
+                 "predicted_offset_px": None}
+    if preset == "cockpit":
+        forward = float(value("offset_forward_m", 0.0))
+        right = float(value("offset_right_m", 0.0))
+        up = float(value("offset_up_m", 0.0))
+        ahead = -forward                     # the cg relative to the lens
+        reference["kind"] = "body-axis"
+        reference["words"] = "aim body axis"
+        if record is not None and ahead > 0.0:
+            # The manifest's own projection model, applied to the cg in
+            # the camera's frame: x right, y down, z forward.
+            du = float(record["fx_px"]) * (-right) / ahead
+            dv = float(record["fy_px"]) * up / ahead
+            reference["predicted_offset_px"] = (du, dv)
+            cx, cy = record["principal_point_px"]
+            reference["note"] = (
+                f"(aim_mode {aim_mode} is not applied by the cockpit "
+                f"preset: the view is along the body axis; the cg sits "
+                f"{ahead:g} m ahead, {abs(up):g} m "
+                f"{'below' if up > 0 else 'above'} and {abs(right):g} m "
+                f"{'right' if right < 0 else 'left'} of the lens, so its "
+                f"pixel is ({cx + du:.1f}, {cy + dv:.1f}), "
+                f"({du:+.1f}, {dv:+.1f}) px from the image centre)")
+        else:
+            reference["note"] = (f"(aim_mode {aim_mode} is not applied by "
+                                 f"the cockpit preset: the view is along "
+                                 f"the body axis)")
+    elif aim_mode == "aircraft":
+        if preset == "explicit":
+            reference["kind"] = "aircraft-exact"
+            reference["words"] = "aim aircraft (exact)"
+        else:
+            reference["kind"] = "aircraft-lagged"
+            reference["words"] = (f"aim aircraft (lag {AIM_LAG_S:g} s: the "
+                                  f"pixel trails the aircraft)")
+    elif aim_mode == "point":
+        reference["kind"] = "point"
+        reference["words"] = (f"aim point ({float(value('aim_north_m', 0)):g} "
+                              f"N, {float(value('aim_east_m', 0)):g} E, "
+                              f"{float(value('aim_alt_m', 0)):g} m)")
+    elif aim_mode == "bearing":
+        reference["kind"] = "bearing"
+        reference["words"] = (f"aim bearing "
+                              f"{float(value('aim_bearing_deg', 0)):g} deg, "
+                              f"elevation "
+                              f"{float(value('aim_elevation_deg', 0)):g} deg")
+    return reference
+
+
 def header(manifest: Dict, out=None, aircraft: Optional[str] = None,
            duration_s: Optional[float] = None,
            samples: Optional[int] = None,
@@ -226,6 +307,7 @@ def header(manifest: Dict, out=None, aircraft: Optional[str] = None,
             "trigger": block.get("trigger") or value("trigger", "-"),
             "schedule_basis": block.get("schedule_basis"),
             "horizon_stable": block.get("horizon_stable"),
+            "aim_reference": aim_reference(block, first),
         })
     data = {
         "run": str(out) if out is not None else None,
@@ -286,11 +368,16 @@ def header(manifest: Dict, out=None, aircraft: Optional[str] = None,
     width = max((len(c["camera_id"]) for c in cameras), default=6)
     for c in cameras:
         fx = f"fx {c['fx_px']:.1f} px" if c["fx_px"] is not None else "fx -"
+        reference = c["aim_reference"]
         lines.append(
             f"  {c['camera_id']:<{width}}  {c['preset']}/{c['position_mode']}"
-            f"  aim {c['aim_mode']}  {c['width_px']}x{c['height_px']}  "
+            f"  {reference['words']}  {c['width_px']}x{c['height_px']}  "
             f"{c['focal_length_mm']:.1f} mm ({fx})  "
             f"{c['capture_count']} captures, {c['trigger']}")
+        if reference["note"]:
+            # The aim reference's explanation on its own line under the
+            # camera: where the aircraft's pixel is promised to be.
+            lines.append(f"  {'':<{width}}  {reference['note']}")
     return lines, data
 
 
@@ -327,20 +414,45 @@ def flight_words_from_run(run_dir) -> Dict:
 # -- the schedule tables -------------------------------------------------
 
 SCHEDULE_HEAD = ("idx", "t_s", "sample", "cam north m", "cam east m",
-                 "cam alt m", "aircraft px (u, v)")
+                 "cam alt m", "aircraft px (u, v)", "off-aim px")
+
+
+def off_aim_px(reference: Dict, record: Dict, u: float, v: float
+               ) -> Optional[float]:
+    """The aircraft pixel's distance from where the camera's aim
+    reference (:func:`aim_reference`) promises it: the image centre for
+    an aircraft-aimed camera, the body-axis cg pixel for a cockpit;
+    None when the aim mode promises nothing about the aircraft."""
+    kind = reference.get("kind")
+    cx, cy = record["principal_point_px"]
+    if kind in ("aircraft-lagged", "aircraft-exact"):
+        return math.hypot(u - cx, v - cy)
+    if kind == "body-axis" and reference.get("predicted_offset_px"):
+        du, dv = reference["predicted_offset_px"]
+        return math.hypot(u - (cx + du), v - (cy + dv))
+    return None
 
 
 def schedule_rows(manifest: Dict) -> Dict[str, List[Dict]]:
-    """Per camera, one row per scheduled frame: the manifest's record
-    and the aircraft's pixel through the verifier's own projection."""
+    """Per camera, one row per scheduled frame: the manifest's record,
+    the aircraft's pixel through the verifier's own projection, and
+    that pixel's distance from the aim reference's promise."""
     from core.capture.verify import project_point
 
+    blocks = {b["camera_id"]: b for b in manifest.get("cameras", [])}
+    references: Dict[str, Dict] = {}
     rows: Dict[str, List[Dict]] = {}
     for record in manifest.get("frames", []):
         u, v, depth = project_point(record, (
             record["aircraft"]["north_m"], record["aircraft"]["east_m"],
             record["aircraft"]["alt_m"]))
-        rows.setdefault(record["camera_id"], []).append({
+        camera_id = record["camera_id"]
+        if camera_id not in references:
+            references[camera_id] = aim_reference(
+                blocks.get(camera_id, {"camera_id": camera_id}), record)
+        off_aim = (off_aim_px(references[camera_id], record, u, v)
+                   if depth > 0 else None)
+        rows.setdefault(camera_id, []).append({
             "index": int(record["index"]), "t_s": float(record["t_s"]),
             "sample_index": int(record["sample_index"]),
             "north_m": float(record["position_north_m"]),
@@ -349,6 +461,8 @@ def schedule_rows(manifest: Dict) -> Dict[str, List[Dict]]:
             "aircraft_u_px": (u if depth > 0 else None),
             "aircraft_v_px": (v if depth > 0 else None),
             "aircraft_depth_m": float(depth),
+            "off_aim_px": off_aim,
+            "aim_kind": references[camera_id]["kind"],
             "file": record.get("file"),
         })
     return rows
@@ -431,15 +545,19 @@ def schedule_tables(manifest: Dict, brief: bool = False,
             continue
         lines.append(f"{indent}  {'idx':>4}  {'t_s':>8}  {'sample':>6}  "
                      f"{'cam north m':>12}  {'cam east m':>11}  "
-                     f"{'cam alt m':>10}  aircraft px (u, v)")
+                     f"{'cam alt m':>10}  {'aircraft px (u, v)':<18}  "
+                     f"off-aim px")
         for r in records:
             if r["aircraft_u_px"] is None:
                 pixel = f"behind ({r['aircraft_depth_m']:.1f} m)"
             else:
                 pixel = f"({r['aircraft_u_px']:.1f}, {r['aircraft_v_px']:.1f})"
+            off_aim = ("-" if r["off_aim_px"] is None
+                       else f"{r['off_aim_px']:.1f}")
             lines.append(f"{indent}  {r['index']:>4}  {r['t_s']:>8.3f}  "
                          f"{r['sample_index']:>6}  {r['north_m']:>12.3f}  "
-                         f"{r['east_m']:>11.3f}  {r['alt_m']:>10.3f}  {pixel}")
+                         f"{r['east_m']:>11.3f}  {r['alt_m']:>10.3f}  "
+                         f"{pixel:<18}  {off_aim:>10}")
     return lines, {"columns": list(SCHEDULE_HEAD), "cameras": rows}
 
 

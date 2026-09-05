@@ -151,11 +151,89 @@ def test_the_manifest_describes_its_own_flight(captured, client):
 
 # -- everything downloadable ---------------------------------------------
 
+def test_the_page_run_routes_jsbsim_to_a_stamped_log(client, capfd):
+    """A page run constructs every model under the run's own sink: the
+    banner JSBSim prints from C++ on every construction lands in
+    <run>/jsbsim.log -- one '# load N:' stamp naming the model and the
+    caller before each -- and nothing of it reaches the server's
+    console (fd 1, read here with capfd). The run is started through
+    the manager directly, so the request handler's own pre-flight
+    planning (which prints to the console: Known Limitations) is not
+    in the reading."""
+    import re
+
+    spec = compile_prompt(DEMO)
+    capfd.readouterr()                          # the compile's own loads
+    started = manager.start_capture(spec, provenance={"prompt": DEMO})
+    run_id = started["run_id"]
+    state = finished(client, run_id)
+    assert state["status"] == "done", state
+    console = capfd.readouterr().out
+    assert "JSBSim startup beginning" not in console
+    assert "JSBSim Flight Dynamics Model" not in console
+    log = manager.out_root / run_id / "jsbsim.log"
+    assert log.is_file()
+    assert not (manager.out_root / run_id / "capture" / "jsbsim.log").exists()
+    text = log.read_text(encoding="utf-8")
+    banners = text.count("JSBSim startup beginning")
+    stamps = re.findall(r"^# load (\d+): (\S+) called from ([\w.]+)$", text,
+                        re.M)
+    assert banners >= 2 and len(stamps) == banners
+    assert [int(n) for n, _, _ in stamps] == list(range(1, banners + 1))
+    assert all(label.startswith("FlightDynamics(") for _, label, _ in stamps)
+    assert all(caller.startswith("core.") or caller.startswith("webapp.")
+               for _, _, caller in stamps)
+    # The capture flight's loads are counted from the run's continuous
+    # numbering and the status lines say where they went.
+    capture_loads = state["capture"]["jsbsim_model_loads"]
+    assert state["capture"]["jsbsim_log"] == "jsbsim.log"
+    assert 1 <= capture_loads < banners
+    lines = [e["detail"] for e in state["events"]]
+    assert any(line.startswith(f"JSBSim output: jsbsim.log ({capture_loads} "
+                               f"model loads routed there for the capture "
+                               f"flight") for line in lines), lines
+    assert any(line.startswith("JSBSim output: jsbsim.log (") and
+               "for the closure flight" in line for line in lines), lines
+    # The page lists the log with a note and serves it.
+    files = client.get(f"/runs/{run_id}/files").json()["files"]
+    entry = next(f for f in files if f["name"] == "jsbsim.log")
+    assert "stamp per model construction" in entry["note"]
+    assert client.get(f"/runs/{run_id}/file/jsbsim.log").status_code == 200
+
+
+def test_a_direct_capture_run_routes_jsbsim_to_its_own_log(tmp_path, capfd):
+    """capture_run called with no sink active (a script, a test) opens
+    capture/jsbsim.log for itself: the same stamps, nothing on fd 1."""
+    import re
+
+    spec = compile_prompt(DEMO)
+    flat = {"key": "flat", "kind": "flat", "terrain": None, "imagery": None}
+    capfd.readouterr()
+    lines = []
+    outcome = capture_module.capture_run(spec, tmp_path, flat, lines.append)
+    console = capfd.readouterr().out
+    assert "JSBSim startup beginning" not in console
+    log = tmp_path / "capture" / "jsbsim.log"
+    assert log.is_file()
+    text = log.read_text(encoding="utf-8")
+    banners = text.count("JSBSim startup beginning")
+    stamps = re.findall(r"^# load (\d+): ", text, re.M)
+    assert banners >= 1 and len(stamps) == banners
+    assert outcome.summary["jsbsim_log"] == "capture/jsbsim.log"
+    assert outcome.summary["jsbsim_model_loads"] == banners
+    assert any(line.startswith(f"JSBSim output: capture/jsbsim.log "
+                               f"({banners} model loads routed there")
+               for line in lines), lines
+    files = capture_module.run_artifacts(tmp_path)
+    entry = next(f for f in files if f["name"] == "capture/jsbsim.log")
+    assert "direct capture" in entry["note"]
+
+
 def test_every_artefact_is_listed_and_downloadable(captured, client):
     run_id, _ = captured
     files = client.get(f"/runs/{run_id}/files").json()["files"]
     names = [f["name"] for f in files]
-    for expected in ("provenance.json", "scenario.yaml",
+    for expected in ("provenance.json", "scenario.yaml", "jsbsim.log",
                      "capture/capture_manifest.json", "capture/verify.json",
                      "capture/telemetry.json", "capture/run.json"):
         assert expected in names, expected
