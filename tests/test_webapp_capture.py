@@ -1713,9 +1713,13 @@ def test_the_frames_zip_carries_exactly_the_frame_set(frames_run,
 
     downloads = payload["downloads"]
     assert [d["class"] for d in downloads] == [
-        "frames", "manifest", "telemetry", "clip", "everything"]
+        "frames", "manifest", "verification", "telemetry", "clip", "everything"]
     by_class = {d["class"]: d for d in downloads}
     assert by_class["frames"]["href"] == "frames.zip"
+    assert by_class["verification"]["href"] == "file/capture/verify.json"
+    assert by_class["verification"]["label"] == "verify.json"
+    assert by_class["verification"]["note"].startswith(
+        "capture/verify.json: the verification checks as run")
     assert by_class["frames"]["note"] == (
         "8 PNG(s) across 2 camera(s) (camera0, tower0), named by manifest "
         "index, with each camera's render.json")
@@ -1746,8 +1750,8 @@ def test_the_frames_zip_is_refused_by_name_without_rendered_frames(
         "no rendered frames: this was a headless run (no engine pass)")
     assert not (manager.out_root / run_id / "frames.zip").exists()
     downloads = client.get(f"/runs/{run_id}/files").json()["downloads"]
-    assert [d["class"] for d in downloads] == ["manifest", "telemetry",
-                                               "everything"]
+    assert [d["class"] for d in downloads] == ["manifest", "verification",
+                                               "telemetry", "everything"]
 
     def clip_render(card, frames, scene, mesh, aircraft, telemetry=None,
                     look=None, camera_flags=None, camera_index=None,
@@ -1775,9 +1779,9 @@ def test_the_frames_zip_is_refused_by_name_without_rendered_frames(
         "no rendered frames: this was a clip-only run; choose 'Render "
         "frames and clip' for the frame set")
     downloads = engine_client.get(f"/runs/{clip_id}/files").json()["downloads"]
-    assert [d["class"] for d in downloads] == ["manifest", "telemetry",
-                                               "clip", "everything"]
-    assert downloads[2]["note"] == "clip.mp4: the rendered clip (clip only: no frame set)"
+    assert [d["class"] for d in downloads] == ["manifest", "verification",
+                                               "telemetry", "clip", "everything"]
+    assert downloads[3]["note"] == "clip.mp4: the rendered clip (clip only: no frame set)"
 
 
 def test_the_page_s_download_strip_offers_one_button_per_class(
@@ -1791,7 +1795,7 @@ def test_the_page_s_download_strip_offers_one_button_per_class(
     html = page_capture(tmp_path, state, payload, run_id)
     strip = html["strip"]
     classes = [d["class"] for d in payload["downloads"]]
-    assert classes == ["manifest", "telemetry", "everything"]
+    assert classes == ["manifest", "verification", "telemetry", "everything"]
     for d in payload["downloads"]:
         assert links_of(strip, d["class"]) == [f"/runs/{run_id}/{d['href']}"]
         assert d["label"] in text_of(strip) and d["note"] in text_of(strip)
@@ -2038,8 +2042,16 @@ def test_the_page_s_verification_table_is_verify_json_s_own_table(
                          r'\[(\w+)\] (\w+): ', table)
     assert details == [("SKIPPED", "cross_view_consistency"),
                        ("AWAITING", "engine_parity")]
-    # The tally is the verifier's own line, verbatim.
+    # The tally is the verifier's own line, verbatim, followed by a link
+    # to the file it was rendered from.
     assert f"<b>{verification['summary']}</b>" in card
+    assert (f"<b>{verification['summary']}</b> <a class=\"dim filelink\" "
+            f"href=\"/runs/{run_id}/file/capture/verify.json\" target=\"_blank\">"
+            f"capture/verify.json</a>") in card
+    assert client.get(f"/runs/{run_id}/file/capture/verify.json").status_code == 200
+    # No run id in the payload, no link invented.
+    anonymous = json.loads(json.dumps(state)); anonymous.pop("run_id")
+    assert "filelink" not in page_capture(tmp_path, anonymous, {}, run_id)["card"]
     assert verification["summary"].startswith("verification PASSED (8/8 checks; 1 skipped: "
                                               "cross_view_consistency (single camera); "
                                               "1 awaiting engine frames: engine_parity)")
@@ -2130,6 +2142,12 @@ def test_the_closure_report_names_its_units_and_the_graded_window(
                 f"{check['unit']} (tol {check['tolerance']:g} {check['unit']})") in words
     assert "altitude: commanded 1524.00 m, achieved 1524.00 m (tol 15 m)" in words
     assert "settled half)" not in words
+    # The heading links the file it is rendered from.
+    card = page_capture(tmp_path, state, {}, run_id)["card"]
+    assert (f"capped at 22 s)</span> <a class=\"dim filelink\" "
+            f"href=\"/runs/{run_id}/file/capture/closure.json\" target=\"_blank\">"
+            f"capture/closure.json</a><ul>") in card
+    assert client.get(f"/runs/{run_id}/file/capture/closure.json").status_code == 200
 
     frames_id, frames_state = frames_run
     closure = frames_state["capture"]["closure"]
@@ -2253,7 +2271,7 @@ def test_a_short_engine_pass_shows_its_partial_frame_set_on_the_page(
     frames_entry = next(f for f in payload["files"] if f["name"] == "capture/frames/camera0")
     assert len(frames_entry["images"]) == 3
     assert [d["class"] for d in payload["downloads"]] == [
-        "frames", "manifest", "telemetry", "everything"]
+        "frames", "manifest", "verification", "telemetry", "everything"]
 
     html = page_capture(tmp_path, state, payload, run_id)
     assert html["terminal"] is True
@@ -2371,7 +2389,8 @@ def test_a_finished_headless_run_survives_a_server_restart(captured, client,
     assert "status log" in entry["note"]
     log = client.get(f"/runs/{run_id}/file/status.json").json()
     assert log["status"] == "done" and log["events"] == state["events"]
-    assert [d["class"] for d in files["downloads"]] == ["manifest", "telemetry",
+    assert [d["class"] for d in files["downloads"]] == ["manifest", "verification",
+                                                        "telemetry",
                                                         "everything"]
 
 

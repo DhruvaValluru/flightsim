@@ -2532,6 +2532,28 @@ mutate webapp/runs.py \
     "page round 2: the run payload carries the whole event log, as status.json does" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 2: the verifier's table and the closure link their file ----
+
+mutate webapp/capture.py \
+    '    verification = "capture/verify.json"
+    if verification in by_name:' \
+    '    verification = "capture/verify.json"
+    if False:  # MUTATED: no download class for the verification report' \
+    "page round 2: the strip offers verify.json as its own artefact class" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '    + fileLink(run, "capture/verify.json");' \
+    '    + "";  // MUTATED: the tally does not link verify.json' \
+    "page round 2: the verifier's tally links the verify.json it is rendered from" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '      fileLink(run, "capture/closure.json") + `<ul>${rows}</ul>`;' \
+    '      `<ul>${rows}</ul>`;  // MUTATED: the closure heading does not link closure.json' \
+    "page round 2: the closure heading links the closure.json it is rendered from" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

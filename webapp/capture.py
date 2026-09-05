@@ -899,14 +899,16 @@ def run_galleries(out_dir: Path, files: Optional[List[Dict]] = None) -> List[Dic
 #: The artefact classes, in the order the page's download strip shows
 #: them. One button per class the run actually wrote; a class whose
 #: file is absent is absent from the strip, never a dead link.
-DOWNLOAD_CLASSES = ("frames", "manifest", "telemetry", "clip", "everything")
+DOWNLOAD_CLASSES = ("frames", "manifest", "verification", "telemetry", "clip",
+                    "everything")
 
 
 def run_downloads(out_dir: Path, files: Optional[List[Dict]] = None) -> List[Dict]:
     """One download per artefact class the run wrote, built from the
     listing the whitelist uses: frames.zip (only when a rendered PNG
-    exists), the manifest, the telemetry the manifest describes, the
-    clip, and everything. Each carries the route relative to
+    exists), the manifest, the verification report (verify.json: the
+    checks the card's table and tally are rendered from), the telemetry
+    the manifest describes, the clip, and everything. Each carries the route relative to
     /runs/<id>/, the label, and a note saying what it is and how much
     of it there is -- counted from the listing, never assumed."""
     out_dir = Path(out_dir)
@@ -928,6 +930,12 @@ def run_downloads(out_dir: Path, files: Optional[List[Dict]] = None) -> List[Dic
             "class": "manifest", "label": "manifest",
             "href": f"file/{manifest}",
             "note": f"{manifest}: {ARTIFACT_NOTES[manifest]}"})
+    verification = "capture/verify.json"
+    if verification in by_name:
+        downloads.append({
+            "class": "verification", "label": "verify.json",
+            "href": f"file/{verification}",
+            "note": f"{verification}: {ARTIFACT_NOTES[verification]}"})
     telemetry = "capture/telemetry.json"
     if telemetry in by_name:
         downloads.append({

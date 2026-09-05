@@ -2587,10 +2587,12 @@ The capture card must then show, top to bottom:
 * the download strip: `frames.zip` ("48 PNG(s) across 2 camera(s)
   (chase0, tower0), named by manifest index, with each camera's
   render.json"), `manifest` (capture/capture_manifest.json),
-  `telemetry` (capture/telemetry.json: the headless flight the
-  manifest describes), `clip.mp4` ("by-product of 'chase0' (the frame
-  set is the deliverable)") and `everything (.zip)` with the file
-  count -- one button per artefact class the run wrote, nothing else;
+  `verify.json` (capture/verify.json: the checks the table and the
+  tally below are rendered from), `telemetry` (capture/telemetry.json:
+  the headless flight the manifest describes), `clip.mp4`
+  ("by-product of 'chase0' (the frame set is the deliverable)") and
+  `everything (.zip)` with the file count -- one button per artefact
+  class the run wrote, nothing else;
 * "capture geometry — 48 scheduled, 48 rendered, 48 verified; 48
   geometry preview(s) (previews at 1280x720, 0.076 s/frame; a contact
   sheet per camera; 48 overlay(s) of the reprojected geometry over the
@@ -2604,8 +2606,9 @@ The capture card must then show, top to bottom:
   previews -- only behind "geometry previews (not frames): 24 shown,
   and their contact sheet"; the same for tower0. The count in a
   heading is always the number of pictures under it;
-* "verification PASSED (10/10 checks)" over the CHECK / STATUS /
-  MEASURED / TOLERANCE / WHERE table -- the same rows
+* "verification PASSED (10/10 checks)", the link `capture/verify.json`
+  beside it (the file the table is rendered from), over the CHECK /
+  STATUS / MEASURED / TOLERANCE / WHERE table -- the same rows
   `flightsim.verify` prints -- with every row PASS; the engine_parity
   row's MEASURED reads "pos x.xxx m, ang x.xxx deg, t x.xe-xx s, px
   x.xx" against "0.1 m, 0.1 deg, 1e-06 s, 3.0 px" and its WHERE "48
@@ -2614,8 +2617,8 @@ The capture card must then show, top to bottom:
   numbers must sit under the tolerances);
 * "closure PASSED — the same spec flown closed loop, graded over the
   settled half of 12 s (full duration: a frames run steps the whole
-  flight)" with each row's unit ("altitude: commanded 3048.00 m,
-  achieved ... m (tol 15 m)").
+  flight)", the link `capture/closure.json` beside it, with each row's
+  unit ("altitude: commanded 3048.00 m, achieved ... m (tol 15 m)").
 
 Then, from a shell, the frame set as its own download and what a
 restart does to the run:
@@ -2628,7 +2631,7 @@ curl -s http://localhost:8008/runs/<id>/files | python -c "import json,sys; d=js
 ```
 
 The counts must print 48 and 2, the classes `['frames', 'manifest',
-'telemetry', 'clip', 'everything']` and the galleries `[('chase0',
+'verification', 'telemetry', 'clip', 'everything']` and the galleries `[('chase0',
 24, 24), ('tower0', 24, 24)]`. Stop the server, start it again, reload
 the page: the same run id comes back "done" with the same card (the
 events end with "recovered after a server restart"), because a

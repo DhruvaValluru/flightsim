@@ -59,6 +59,7 @@
                   padding: .25rem .8rem; text-decoration: none; }
   .dlstrip a.dl-frames { background: #2f7d4f; }
   .dlstrip .dlnote { font-size: 11px; margin-right: .6rem; }
+  a.filelink { color: #6fb3e0; font-size: 11px; }
   .gallery { margin: .6rem 0; }
   .gallery img.sheet { max-width: 100%; margin: 2px; border: 1px solid #333; }
   .thumbs { display: flex; flex-wrap: wrap; gap: 4px; margin: .3rem 0; }
@@ -764,6 +765,17 @@ function verificationTableHtml(v) {
     `<tbody>${body}</tbody></table>`;
 }
 
+// The file a block of the card is rendered from, as a link beside it
+// (the verifier's tally to capture/verify.json, the closure heading to
+// capture/closure.json): the reader opens the number's source without
+// hunting for it in the files panel. Empty when the payload carries no
+// run id to build the route from.
+function fileLink(run, name) {
+  if (!run.run_id) return "";
+  return ` <a class="dim filelink" href="/runs/${esc(run.run_id)}/file/${esc(name)}" ` +
+    `target="_blank">${esc(name)}</a>`;
+}
+
 // The graded window, from closure.json's own fields, naming what was
 // actually graded: "settled half of 12 s (full duration: a frames run
 // steps the whole flight)"; on a clip run "settled half of 12 s (the
@@ -828,11 +840,12 @@ function captureCardHtml(run) {
     ? [`${v.awaiting.join(", ")} awaiting engine frames`] : []);
   // The tally is the verifier's own summary line (the one the CLI
   // prints); the page composes one only for a verify.json without it.
-  const tally = v.summary
+  const tally = (v.summary
     ? `<b>${esc(v.summary)}</b>`
     : `<b>verification ${v.ok ? "PASSED" : "FAILED"}</b>` + (notRun.length
       ? ` <span class="dim">(${v.passed}/${v.ran} checks ran; ` +
-        `${esc(notRun.join("; "))})</span>` : "");
+        `${esc(notRun.join("; "))})</span>` : ""))
+    + fileLink(run, "capture/verify.json");
   const capped = run.capture.previews_capped
     ? ` <span class="dim">(previews capped at ${run.capture.preview_cap}; ` +
       `the manifest carries every frame)</span>` : "";
@@ -865,7 +878,8 @@ function captureCardHtml(run) {
       `${esc(c.unit)} <span class="dim">(tol ${c.tolerance} ${esc(c.unit)})</span></li>`).join("");
     closure = `<b>closure ${cl.ok ? "PASSED" : "FAILED"}</b> ` +
       `<span class="dim">— the same spec flown closed loop, graded over the ` +
-      `${closureWindowWords(cl, run.render)}</span><ul>${rows}</ul>`;
+      `${closureWindowWords(cl, run.render)}</span>` +
+      fileLink(run, "capture/closure.json") + `<ul>${rows}</ul>`;
   }
   // The failure clause (failureWords) sits right after the counts it
   // qualifies: "8 scheduled, 3 rendered, 3 verified (engine pass
