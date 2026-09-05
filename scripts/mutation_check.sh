@@ -2411,6 +2411,20 @@ mutate webapp/static/index.html \
     "page round 1: the card prints a refusal's measured value and limit" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 1: closure rows with their unit and the graded window -----
+
+mutate webapp/static/index.html \
+    '      `${esc(c.unit)} <span class="dim">(tol ${c.tolerance} ${esc(c.unit)})</span></li>`).join("");' \
+    '      `${esc(c.unit)} <span class="dim">(tol ${c.tolerance})</span></li>`).join("");  // MUTATED: no unit on the tolerance' \
+    "page round 1: a closure row's tolerance carries its unit" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '  if (cl.duration_s == null) return settled;' \
+    '  return settled;  // MUTATED: the graded window is never named' \
+    "page round 1: the closure heading names the graded window and its length" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

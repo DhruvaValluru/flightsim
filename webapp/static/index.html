@@ -720,6 +720,20 @@ function verificationTableHtml(v) {
     `<tbody>${body}</tbody></table>`;
 }
 
+// "settled half of 12 s (full duration: a frames run steps the whole
+// flight)" / "settled half of 3 s (the clip's window, capped at 22 s)":
+// the graded window, from closure.json's own fields.
+function closureWindowWords(cl) {
+  const fraction = cl.settle_fraction ?? 0.5;
+  const settled = fraction === 0.5 ? "settled half"
+    : `settled last ${Math.round((1 - fraction) * 100)}%`;
+  if (cl.duration_s == null) return settled;
+  const window = cl.window === "full duration"
+    ? "full duration: a frames run steps the whole flight"
+    : `the clip's window, capped at ${cl.clip_seconds_cap ?? "?"} s`;
+  return `${settled} of ${Number(cl.duration_s).toFixed(0)} s (${window})`;
+}
+
 function captureCardHtml(run) {
   if (!run.capture) return "";
   if (run.capture.refused) {
@@ -780,14 +794,17 @@ function captureCardHtml(run) {
     closure = `<b>closure unavailable</b> — <span class="verdict-refused">` +
       `[${esc(cl.refused)}] ${esc(cl.message)}</span>`;
   } else if (cl) {
+    // Every number with its unit, and WHICH flight was graded: the
+    // window closure.json records (the clip's capped window, or the
+    // full duration a frames run steps) and its length.
     const rows = cl.checks.map(c =>
       `<li><b style="color:${c.ok ? "#6fd08c" : "#e06f6f"}">` +
       `${c.ok ? "ok" : "FAIL"}</b> ${esc(c.name)}: commanded ` +
       `${c.commanded.toFixed(2)} ${esc(c.unit)}, achieved ${c.achieved.toFixed(2)} ` +
-      `<span class="dim">(tol ${c.tolerance})</span></li>`).join("");
+      `${esc(c.unit)} <span class="dim">(tol ${c.tolerance} ${esc(c.unit)})</span></li>`).join("");
     closure = `<b>closure ${cl.ok ? "PASSED" : "FAILED"}</b> ` +
-      `<span class="dim">(the same spec flown closed loop, graded over the ` +
-      `settled half)</span><ul>${rows}</ul>`;
+      `<span class="dim">— the same spec flown closed loop, graded over the ` +
+      `${closureWindowWords(cl)}</span><ul>${rows}</ul>`;
   }
   const totals = (run.capture.rendered ?? 0) > 0 || rendered
     ? `${run.capture.scheduled ?? run.capture.frames} scheduled, ` +

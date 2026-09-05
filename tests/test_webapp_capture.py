@@ -2075,3 +2075,31 @@ def test_a_mid_run_refusal_keeps_its_offending_value(client, monkeypatch,
     assert capture_module.CaptureError("camera.schedule", "4 over 3 s").as_dict() \
         == {"refused": "camera.schedule", "message": "4 over 3 s",
             "actual": None, "limit": None, "unit": None}
+
+
+def test_the_closure_report_names_its_units_and_the_graded_window(
+        captured, client, frames_run, tmp_path):
+    """Each closure row carries the tolerance's unit, and the heading
+    says which flight was graded: closure.json's window (the clip's
+    capped window on a headless or clip run; the full duration a frames
+    run steps) with its length in seconds."""
+    run_id, state = captured
+    closure = state["capture"]["closure"]
+    assert closure["window"] == "clip" and closure["duration_s"] == 3.0
+    assert closure["clip_seconds_cap"] == 22.0
+    words = text_of(page_capture(tmp_path, state, {}, run_id)["card"])
+    assert ("closure PASSED — the same spec flown closed loop, graded over "
+            "the settled half of 3 s (the clip's window, capped at 22 s)") in words
+    for check in closure["checks"]:
+        assert (f"ok {check['name']}: commanded {check['commanded']:.2f} "
+                f"{check['unit']}, achieved {check['achieved']:.2f} "
+                f"{check['unit']} (tol {check['tolerance']:g} {check['unit']})") in words
+    assert "altitude: commanded 1524.00 m, achieved 1524.00 m (tol 15 m)" in words
+    assert "settled half)" not in words
+
+    frames_id, frames_state = frames_run
+    closure = frames_state["capture"]["closure"]
+    assert closure["window"] == "full duration"
+    words = text_of(page_capture(tmp_path, frames_state, {}, frames_id)["card"])
+    assert ("graded over the settled half of 3 s (full duration: a frames run "
+            "steps the whole flight)") in words
