@@ -589,9 +589,11 @@ function renderCapture(run) {
     return `<li><b>${c.camera_id}</b>: ${words}</li>`;
   }).join("");
   const v = run.capture.verification || {checks: []};
-  // Three states, the verifier's own: PASS, FAIL, and AWAITING (the
-  // engine-parity check with no engine frames to grade -- neither passed
-  // nor failed, and never coloured as either).
+  // Four states, the verifier's own: PASS, FAIL, AWAITING (the
+  // engine-parity check with no engine frames to grade) and SKIPPED (a
+  // check with nothing to grade: cross-view consistency on one camera)
+  // -- the last two neither passed nor failed, never coloured as either,
+  // and named in the tally with the skip's reason.
   const checkWord = c => c.status || (c.ok === null ? "AWAITING"
                                       : (c.ok ? "PASS" : "FAIL"));
   const checkColour = c => c.ok === null ? "#d9b85c"
@@ -599,9 +601,12 @@ function renderCapture(run) {
   const checks = v.checks.map(c =>
     `<li><b style="color:${checkColour(c)}">${checkWord(c)}</b> ` +
     `${c.name} — <span class="dim">${c.detail}</span></li>`).join("");
-  const awaiting = (v.awaiting || []).length
+  const skipped = (v.skipped || []).map(s => `${s.name} skipped (${s.reason})`);
+  const notRun = skipped.concat((v.awaiting || []).length
+    ? [`${v.awaiting.join(", ")} awaiting engine frames`] : []);
+  const awaiting = notRun.length
     ? ` <span class="dim">(${v.passed}/${v.ran} checks ran; ` +
-      `${v.awaiting.join(", ")} awaiting engine frames)</span>` : "";
+      `${notRun.join("; ")})</span>` : "";
   const capped = run.capture.previews_capped
     ? ` <span class="dim">(previews capped at ${run.capture.preview_cap}; ` +
       `the manifest carries every frame)</span>` : "";

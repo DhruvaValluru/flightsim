@@ -5,7 +5,10 @@ examples, on the real headless flight dynamics -- the off-mac
 demonstration path, exercised as a test so it cannot rot.
 """
 
+import contextlib
+import io
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -291,7 +294,9 @@ def test_a_manifest_that_fails_its_own_verification_fails_the_run(
         tmp_path, capsys, monkeypatch):
     """The headless run does not stop at 'written': a manifest the
     verifier fails is a failed run, by name (capture.verification, exit
-    2), with the failing table printed."""
+    1 -- the shared table's word for a verification FAILED, the same
+    code flightsim.verify gives the same manifest), with the failing
+    table printed."""
     from core.capture.verify import VerificationReport
 
     def failing(run_dir, other_run_dir=None):
@@ -306,7 +311,7 @@ def test_a_manifest_that_fails_its_own_verification_fails_the_run(
     code = capture_main([str(EXAMPLES / "cameras_multi.yaml"), "--out",
                          str(out), "--max-previews", "0", "--render", "none"])
     text = capsys.readouterr().out
-    assert code == 2, text
+    assert code == 1, text
     assert "[FAIL] geometry_recovery: stub: 3 aimed frames" in text
     assert "FAILED capture.verification: the manifest just written did not verify (1 of 2 checks passed)" in text
     assert "done:" not in text
@@ -701,3 +706,461 @@ def test_render_frames_overlays_the_reprojected_geometry_on_every_frame(
     run = json.loads((out / "run.json").read_text(encoding="utf-8"))
     assert run["overlays"]["count"] == 48
     assert 0.0 < run["overlays"]["s_per_frame"] < 0.5
+
+
+# -- Commands round 1: the report a person wants to read ------------------
+# -- (header, schedule table, verification table, verdict, --json,
+# -- --corrupt, exit codes, no JSBSim banner on stdout)
+
+COCKPIT = EXAMPLES / "cameras_multi_cockpit.yaml"
+
+
+def capture_text(argv):
+    """(exit code, stdout) of flightsim.capture, stdout collected at the
+    Python level -- JSBSim's C++ banner goes through file descriptor 1
+    and would bypass this collector if it were not routed to the log."""
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        code = capture_main(argv)
+    return code, buffer.getvalue()
+
+
+@pytest.fixture(scope="module")
+def report_run(tmp_path_factory):
+    out = tmp_path_factory.mktemp("report")
+    code, text = capture_text([str(EXAMPLES / "cameras_multi.yaml"), "--out",
+                               str(out), "--max-previews", "0",
+                               "--render", "none"])
+    assert code == 0, text
+    return out, text
+
+
+def verification_rows(text):
+    """The verification table's rows, parsed from the printed report:
+    {check: (status, measured, tolerance, where)}."""
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines)
+                 if line.split() == ["CHECK", "STATUS", "MEASURED",
+                                     "TOLERANCE", "WHERE"])
+    head = lines[start]
+    columns = [head.index(word) for word in ("CHECK", "STATUS", "MEASURED",
+                                              "TOLERANCE", "WHERE")]
+    rows = {}
+    for line in lines[start + 1:]:
+        if line.strip() == "detail:":
+            break
+        cells = [line[a:b].strip() for a, b in zip(columns, columns[1:])]
+        cells.append(line[columns[-1]:].strip())
+        rows[cells[0]] = tuple(cells[1:])
+    return rows
+
+
+def schedule_rows_printed(text, camera_id):
+    """The printed schedule rows of one camera: [(idx, t_s, sample)]."""
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines)
+                 if line.startswith(f"  {camera_id}: ") and "scheduled instant"
+                 in line)
+    rows = []
+    for line in lines[start + 2:]:
+        match = re.match(r"\s+(\d+)\s+([\d.]+)\s+(\d+)\s+", line)
+        if not match:
+            break
+        rows.append((int(match.group(1)), float(match.group(2)),
+                     int(match.group(3))))
+    return rows
+
+
+def test_stdout_carries_no_jsbsim_text_and_the_log_holds_it(report_run):
+    """The startup banner JSBSim prints from C++ on every model
+    construction is routed to <out>/jsbsim.log at the descriptor level,
+    counted, and named in one line; stdout carries none of it."""
+    out, text = report_run
+    assert "JSBSim startup" not in text
+    assert "JSBSim Flight Dynamics Model" not in text
+    log = out / "jsbsim.log"
+    assert log.is_file()
+    banners = log.read_text(encoding="utf-8").count("JSBSim startup beginning")
+    assert banners >= 1
+    match = re.search(r"^JSBSim output: (.+) \((\d+) model loads; nothing of "
+                      r"JSBSim's on stdout\)$", text, re.M)
+    assert match, text
+    assert Path(match.group(1)) == log
+    assert int(match.group(2)) == banners
+    run = json.loads((out / "run.json").read_text(encoding="utf-8"))
+    assert run["jsbsim_log"] == str(log)
+    # verify constructs no FDM: nothing of JSBSim's, not even the line.
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(out)]) == 0
+    assert "JSBSim" not in buffer.getvalue()
+
+
+def test_the_report_opens_with_a_header(report_run):
+    out, text = report_run
+    manifest = json.loads(
+        (out / "capture_manifest.json").read_text(encoding="utf-8"))
+    lines = text.splitlines()
+    assert lines[0] == f"spec {manifest['spec_digest'][:16]} valid; running headlessly..."
+    assert lines[1] == f"run:         {out}"
+    assert lines[2] == (f"spec         {manifest['spec_digest'][:16]}   "
+                        f"simulation {manifest['simulation_digest'][:16]}   "
+                        f"output {manifest['output_digest'][:16]}")
+    assert lines[3] == "scene        flat (no raster)   crs EPSG:32631"
+    assert lines[4].startswith("flight       B747, 12 s at 120 Hz (step "
+                               "0.008333 s), ")
+    assert "telemetry samples; span 64.5 m" in lines[4]
+    assert lines[5] == "cameras      2"
+    assert lines[6] == ("  chase0  chase/offset  aim aircraft  1280x720  "
+                        "35.0 mm (fx 1244.4 px)  24 captures, interval")
+    assert lines[7] == ("  tower0  tower/scene  aim aircraft  1280x720  "
+                        "35.0 mm (fx 1244.4 px)  24 captures, interval")
+    # flightsim.verify prints the same header from the manifest alone.
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(out)]) == 0
+    printed = buffer.getvalue().splitlines()
+    assert printed[:7] == lines[1:8]
+
+
+def test_the_schedule_table_lists_every_instant(report_run):
+    out, text = report_run
+    manifest = json.loads(
+        (out / "capture_manifest.json").read_text(encoding="utf-8"))
+    assert "scheduled 48 frames across 2 camera(s)" in text
+    for block in manifest["cameras"]:
+        rows = schedule_rows_printed(text, block["camera_id"])
+        records = [r for r in manifest["frames"]
+                   if r["camera_id"] == block["camera_id"]]
+        assert len(rows) == block["capture_count"] == len(records)
+        assert [r[0] for r in rows] == list(range(block["capture_count"]))
+        for (idx, t_s, sample), record in zip(rows, records):
+            assert t_s == pytest.approx(record["t_s"], abs=5e-4)
+            assert sample == record["sample_index"]
+    # The camera's own line names the schedule basis.
+    assert ("  chase0: 24 scheduled instant(s) (count 24 spread over "
+            "[0.00833333, 11.9917] s, endpoints included)") in text
+    # --brief collapses each camera to one honest line: this count
+    # schedule is sample-snapped, so no period is claimed.
+    code, brief = capture_text([str(EXAMPLES / "cameras_multi.yaml"), "--out",
+                                str(out.parent / "brief"), "--max-previews",
+                                "0", "--render", "none", "--brief"])
+    assert code == 0
+    assert schedule_rows_printed(brief, "chase0") == []
+    assert re.search(r"^    0\.\.23 spaced 0\.\d{3}\.\.0\.\d{3} s "
+                     r"\(sample-snapped, not uniform\) from 0\.008 s to "
+                     r"11\.992 s \(samples 0\.\.114\)$", brief, re.M)
+
+
+def test_the_verification_table_has_measured_tolerance_status_and_where(
+        report_run):
+    out, text = report_run
+    rows = verification_rows(text)
+    verify = json.loads((out / "verify.json").read_text(encoding="utf-8"))
+    assert list(rows) == [c["name"] for c in verify["checks"]]
+    for check in verify["checks"]:
+        status, measured, tolerance, where = rows[check["name"]]
+        assert status == check["status"]
+        if check["ok"] is None:
+            assert measured == "-" and tolerance == "-"
+        else:
+            assert measured == check["measured_text"]
+            assert tolerance == check["tolerance_text"]
+            assert where == check["where"]
+    assert rows["geometry_recovery"][1:3] == (
+        verify["checks"][2]["measured_text"], "0.5 px")
+    assert rows["geometry_recovery"][3].startswith("worst ")
+    assert rows["cross_view_consistency"][2] == "0.5 m"
+    assert rows["cross_view_consistency"][3].startswith(
+        "24 two-view instants; worst sample ")
+    assert rows["count_exactness"][1:] == (
+        "48 frames = 24 + 24", "exactly 48", "chase0 24/24, tower0 24/24")
+    assert rows["engine_parity"][0] == "AWAITING"
+    # The detail lines follow, then the summary, then the verdict.
+    lines = text.splitlines()
+    assert "  detail:" in lines
+    assert "verification PASSED (5/5 checks; 1 awaiting engine frames: " \
+           "engine_parity)" in lines
+    assert lines[-1].startswith("done: ")
+
+
+def test_json_gives_the_same_document_as_the_text(tmp_path):
+    out = tmp_path / "json"
+    code, printed = capture_text([str(EXAMPLES / "cameras_waypoint.yaml"),
+                                  "--out", str(out), "--max-previews", "0",
+                                  "--render", "none", "--json"])
+    assert code == 0
+    doc = json.loads(printed)             # nothing but the document
+    assert doc["verdict"] == "done" and doc["exit_code"] == 0
+    assert doc["command"] == "python -m flightsim.capture"
+    for key in ("header", "schedule", "previews", "verification",
+                "artefacts", "render", "jsbsim", "text"):
+        assert key in doc, key
+    manifest = json.loads(
+        (out / "capture_manifest.json").read_text(encoding="utf-8"))
+    assert doc["header"]["spec_digest"] == manifest["spec_digest"]
+    assert doc["header"]["cameras"][0]["camera_id"] == "survey"
+    assert doc["header"]["cameras"][0]["capture_count"] == 5
+    rows = doc["schedule"]["cameras"]["survey"]
+    assert [r["t_s"] for r in rows] == [r["t_s"] for r in manifest["frames"]]
+    assert doc["verification"] == json.loads(
+        (out / "verify.json").read_text(encoding="utf-8"))
+    assert doc["verification"]["skipped"] == [
+        {"name": "cross_view_consistency", "reason": "single camera"}]
+    assert doc["render"]["choice"] == "none"
+    assert doc["jsbsim"]["log"] == str(out / "jsbsim.log")
+    assert doc["artefacts"]["manifest"] == str(out / "capture_manifest.json")
+    # The text lines are the report the numbers were rendered into.
+    assert any(line.startswith("done: manifest, 0 previews")
+               for line in doc["text"])
+    assert not any("JSBSim startup" in line for line in doc["text"])
+    # verify --json: the same verification document, as data.
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(out), "--json"]) == 0
+    verified = json.loads(buffer.getvalue())
+    assert verified["verdict"] == "verified" and verified["exit_code"] == 0
+    assert verified["verification"]["checks"] == doc["verification"]["checks"]
+    assert verified["header"]["cameras"] == doc["header"]["cameras"]
+    assert verified["artefacts"]["verify_json"] == str(out / "verify.json")
+    # Every check carries the table's numbers as fields.
+    for check in verified["verification"]["checks"]:
+        for key in ("measured", "tolerance", "unit", "measured_text",
+                    "tolerance_text", "where", "skipped_reason"):
+            assert key in check, (check["name"], key)
+
+
+@pytest.mark.parametrize("kind, check, offender", [
+    ("quaternion", "geometry_recovery", "worst chase0 #3 t=1.608 s"),
+    ("aircraft", "cross_view_consistency",
+     "24 two-view instants; worst sample 0 t=0.008 s (chase0 #0 with tower0 #0)"),
+    ("time", "temporal_alignment",
+     "25 instants in corrupt_time vs 24 in report0; only in corrupt_time: "
+     "t=1.616667 s"),
+    ("count", "count_exactness", "chase0 23/24, tower0 24/24"),
+])
+def test_corrupt_fails_the_named_check_with_exit_1(report_run, kind, check,
+                                                    offender):
+    """--corrupt KIND: one named edit on a copy, the same verifier, and
+    the named check FAILS with its offender in the WHERE column."""
+    out, _ = report_run
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        code = verify_main([str(out), "--corrupt", kind])
+    text = buffer.getvalue()
+    assert code == 1, text
+    lines = text.splitlines()
+    assert lines[0].startswith(f"corrupt {kind}: manifest copied to "
+                               f"{out / ('corrupt_' + kind)}; corrupted ")
+    assert lines[1] == f"  expected: [FAIL] {check}, exit 1"
+    rows = verification_rows(text)
+    assert rows[check][0] == "FAIL"
+    assert rows[check][3] == offender.replace("report0", out.name), rows[check]
+    failed = [name for name, row in rows.items() if row[0] == "FAIL"]
+    assert failed == [check]
+    assert f"[FAIL] {check}:" in text
+    assert lines[-1].startswith(f"FAILED verification: as expected for "
+                                f"--corrupt {kind}, {check} FAILED; ")
+    assert (out / f"corrupt_{kind}" / "capture_manifest.json").is_file()
+    assert (out / f"corrupt_{kind}" / "verify.json").is_file()
+    # The original is untouched: it still verifies.
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert verify_main([str(out)]) == 0
+
+
+def test_corrupt_measures_the_damage(report_run):
+    out, _ = report_run
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        verify_main([str(out), "--corrupt", "quaternion"])
+    rows = verification_rows(buffer.getvalue())
+    measured = float(rows["geometry_recovery"][1].split()[0])
+    assert measured > 100.0 and rows["geometry_recovery"][1].endswith(" px")
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        verify_main([str(out), "--corrupt", "aircraft"])
+    rows = verification_rows(buffer.getvalue())
+    measured = float(rows["cross_view_consistency"][1].split()[0])
+    assert 5.0 <= measured < 6.0
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        verify_main([str(out), "--corrupt", "time"])
+    rows = verification_rows(buffer.getvalue())
+    assert rows["temporal_alignment"][1:3] == ("25 vs 24 instants", "1e-09 s")
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        verify_main([str(out), "--corrupt", "count"])
+    text = buffer.getvalue()
+    rows = verification_rows(text)
+    assert rows["count_exactness"][1:3] == ("47 frames = 23 + 24",
+                                            "exactly 48")
+    assert "(missing index 23)" in text
+
+
+def test_a_corruption_the_verifier_misses_is_unexpected_not_caught(
+        report_run, monkeypatch):
+    """--corrupt reports FAILED only when the NAMED check failed; a
+    verifier that lets the corruption through is UNEXPECTED (exit 4),
+    never a FAILED the instructor would read as 'caught'."""
+    from core.capture.verify import VerificationReport
+
+    out, _ = report_run
+
+    def blind(run_dir, other_run_dir=None):
+        report = VerificationReport()
+        report.add("manifest_version", True, "stub")
+        report.add("count_exactness", True, "stub: the drop went unnoticed")
+        return report
+
+    monkeypatch.setattr("core.capture.verify.verify_run", blind)
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        code = verify_main([str(out), "--corrupt", "count"])
+    text = buffer.getvalue()
+    assert code == 4, text
+    assert text.splitlines()[-1] == (
+        "UNEXPECTED: --corrupt count did not fail count_exactness (FAILED: "
+        "none); the verifier cannot be trusted to catch this corruption")
+    assert "FAILED verification: as expected" not in text
+
+
+def test_corrupt_aircraft_needs_two_cameras(tmp_path):
+    out = tmp_path / "solo"
+    code, _ = capture_text([str(EXAMPLES / "cameras_waypoint.yaml"), "--out",
+                            str(out), "--max-previews", "0", "--render",
+                            "none"])
+    assert code == 0
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(out), "--corrupt", "aircraft"]) == 3
+    assert buffer.getvalue().startswith(
+        f"USAGE: {out}: --corrupt aircraft needs a two-camera run")
+
+
+def test_the_committed_cockpit_example_aligns_with_cameras_multi(report_run,
+                                                                  tmp_path):
+    """examples/cameras_multi_cockpit.yaml: the same flight, a different
+    camera set, committed -- the temporal-alignment check's exercise an
+    instructor runs from the tree."""
+    out, _ = report_run
+    other = tmp_path / "demo_b"
+    code, text = capture_text([str(COCKPIT), "--out", str(other),
+                               "--max-previews", "0", "--render", "none"])
+    assert code == 0, text
+    a = json.loads((out / "capture_manifest.json").read_text(encoding="utf-8"))
+    b = json.loads((other / "capture_manifest.json").read_text(encoding="utf-8"))
+    assert a["simulation_digest"] == b["simulation_digest"]
+    assert a["output_digest"] == b["output_digest"]
+    assert [c["camera_id"] for c in b["cameras"]] == ["shoulder"]
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(other), "--against", str(out)]) == 0
+    text = buffer.getvalue()
+    assert f"against:     {out} (temporal alignment)" in text
+    rows = verification_rows(text)
+    assert rows["temporal_alignment"] == (
+        "PASS", "0 s", "1e-09 s", "24 instants in both runs; worst gap 0 s")
+    assert rows["cross_view_consistency"][0] == "SKIPPED"
+    assert ("verification PASSED (5/5 checks; 1 skipped: "
+            "cross_view_consistency (single camera); 1 awaiting engine "
+            "frames: engine_parity)") in text
+    assert text.splitlines()[-1].startswith(
+        f"verified: {other / 'capture_manifest.json'} (24 frame records, "
+        f"1 camera(s)); report {other / 'verify.json'}")
+
+
+def test_exit_codes_share_one_table_and_the_verdict_line_names_them(
+        report_run, tmp_path, monkeypatch):
+    """0 done/verified, 1 FAILED, 2 REFUSED, 3 USAGE, 4 UNEXPECTED -- on
+    both commands, and the last stdout line starts with the word."""
+    out, text = report_run
+    assert text.splitlines()[-1].startswith("done: ")
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(out)]) == 0
+    assert buffer.getvalue().splitlines()[-1].startswith(
+        f"verified: {out / 'capture_manifest.json'} (48 frame records, "
+        f"2 camera(s)); report {out / 'verify.json'}")
+    # 1: the verifier failed the artefact.
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(out), "--corrupt", "count"]) == 1
+    assert buffer.getvalue().splitlines()[-1].startswith("FAILED verification:")
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert verify_main([str(out / "corrupt_count")]) == 1
+    # 2: refused by name, before anything is produced.
+    code, refused = capture_text([str(EXAMPLES / "cameras_refusal.yaml"),
+                                  "--out", str(tmp_path / "refused"),
+                                  "--render", "none"])
+    assert code == 2
+    lines = refused.splitlines()
+    assert lines[0] == "REFUSED -- by name:"
+    assert lines[-1] == ("REFUSED [camera.terrain_clearance]: nothing "
+                         "produced (the run directory holds jsbsim.log only)")
+    assert sorted(p.name for p in (tmp_path / "refused").iterdir()) == \
+        ["jsbsim.log"]
+    assert "JSBSim startup" not in refused
+    # 3: usage -- the command line, or nothing to verify.
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(tmp_path / "nowhere")]) == 3
+    assert buffer.getvalue().splitlines()[-1].startswith(
+        f"USAGE: {tmp_path / 'nowhere'} holds no capture_manifest.json")
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(out), "--bogus"]) == 3
+    assert buffer.getvalue().splitlines()[-1] == (
+        "USAGE: python -m flightsim.verify: unrecognized arguments: --bogus")
+    code, usage = capture_text([str(EXAMPLES / "cameras_multi.yaml")])
+    assert code == 3 and usage.splitlines()[-1].startswith(
+        "USAGE: python -m flightsim.capture: the following arguments are "
+        "required: --out")
+    # 4: unexpected -- an exception, named, traceback on stderr.
+    def boom(run_dir, other_run_dir=None):
+        raise RuntimeError("stub: the verifier blew up")
+
+    monkeypatch.setattr("core.capture.verify.verify_run", boom)
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(out)]) == 4
+    assert buffer.getvalue().splitlines()[-1] == (
+        "UNEXPECTED RuntimeError: stub: the verifier blew up (traceback on "
+        "stderr)")
+    # --help lists the table, once, for both commands.
+    from flightsim.capture import build_parser as capture_parser
+    from flightsim.verify import build_parser as verify_parser
+
+    for parser in (capture_parser(), verify_parser()):
+        help_text = parser.format_help()
+        for code, word in ((0, "done"), (1, "FAILED"), (2, "REFUSED"),
+                           (3, "USAGE"), (4, "UNEXPECTED")):
+            assert re.search(rf"^  {code}  .*{word}", help_text, re.M), word
+
+
+def test_the_documents_expected_output_matches_a_fresh_run(tmp_path):
+    """docs/CAMERA_PHASE1_REPORT.md carries every example's output
+    verbatim from a dated run (scripts/examples_expected.py). A fresh
+    run here must reproduce each block's SHAPE line for line -- the
+    words, the columns, the check names and statuses, the exit codes --
+    with numbers, digests and camera ids masked, so a stale document
+    fails this test while timings and float noise do not."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "examples_expected",
+        Path(__file__).resolve().parents[1] / "scripts" / "examples_expected.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    doc = module.doc_blocks(module.DOC.read_text(encoding="utf-8"))
+    fresh = module.generate(tmp_path / "runs_root")
+    assert [b["command"] for b in doc] == [r["command"] for r in fresh]
+    assert len(doc) == len(module.COMMANDS) == 10
+    for expected, actual in zip(doc, fresh):
+        assert expected["code"] == actual["code"], expected["command"]
+        want = module.shape(expected["text"])
+        got = module.shape(actual["text"])
+        assert want == got, (expected["command"],
+                             [pair for pair in zip(want, got)
+                              if pair[0] != pair[1]][:3])
+    # The blocks say what they are: exit codes 0/0/0/0/0/2/1/1/1/1.
+    assert [b["code"] for b in doc] == [0, 0, 0, 0, 0, 2, 1, 1, 1, 1]

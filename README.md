@@ -241,7 +241,19 @@ frames, each with full recoverable geometry, engine or no engine:
 ```bash
 .venv/bin/python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo
 .venv/bin/python -m flightsim.verify runs/demo
+.venv/bin/python -m flightsim.capture examples/cameras_multi_cockpit.yaml --out runs/demo_b
+.venv/bin/python -m flightsim.verify runs/demo_b --against runs/demo   # temporal alignment, committed pair
+.venv/bin/python -m flightsim.verify runs/demo --corrupt quaternion    # watch geometry_recovery FAIL (exit 1)
 ```
+
+Both commands print a header (digests, scene, flight, one line per
+camera), the per-camera table of scheduled instants, a verification
+table (`CHECK STATUS MEASURED TOLERANCE WHERE`) and a verdict line whose
+first word is the exit code's word (0 done/verified, 1 FAILED, 2
+REFUSED, 3 USAGE, 4 UNEXPECTED -- one table for both, `--help` prints
+it); `--json` gives the same as data; JSBSim's own console goes to
+`<out>/jsbsim.log`, never stdout. The expected output of every example
+is in `docs/CAMERA_PHASE1_REPORT.md`, verbatim from a dated run.
 
 Off macOS the pixel render refuses by name (`ue.platform`) while the
 capture manifest, geometry previews (full resolution: terrain wireframe

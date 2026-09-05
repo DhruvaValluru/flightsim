@@ -1823,6 +1823,130 @@ mutate core/capture/verify.py \
     "commands round 1: temporal alignment names the run holding the extra instant" \
     tests/test_camera_verify.py || failures=$((failures+1))
 
+mutate core/fdm/fdm.py \
+    '        with captured_console():
+            self._exec = jsbsim.FGFDMExec(root_dir=str(self.model.root_dir))' \
+    '        if True:  # MUTATED: the banner goes to stdout
+            self._exec = jsbsim.FGFDMExec(root_dir=str(self.model.root_dir))' \
+    "commands round 1: JSBSim's startup banner is routed to the run's log, not stdout" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/fdm/console.py \
+    '    sink.loads += 1' \
+    '    sink.loads += 0  # MUTATED: model loads are not counted' \
+    "commands round 1: the JSBSim line's model-load count is the sink's own count" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/fdm/console.py \
+    '    log_fd = os.open(str(sink.path), os.O_WRONLY | os.O_CREAT | os.O_APPEND,' \
+    '    log_fd = os.open(os.devnull, os.O_WRONLY | os.O_CREAT | os.O_APPEND,  # MUTATED: the banner is dropped' \
+    "commands round 1: the routed JSBSim console is written to the log, never dropped" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '        "jsbsim_log": str(out / "jsbsim.log"),' \
+    '        "jsbsim_log_": str(out / "jsbsim.log"),  # MUTATED: run.json does not record the log' \
+    "commands round 1: run.json records the JSBSim log path" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/report.py \
+    '    for c in cameras:
+        fx = f"fx {c['"'"'fx_px'"'"']:.1f} px" if c["fx_px"] is not None else "fx -"' \
+    '    for c in cameras[:1]:  # MUTATED: the header lists one camera
+        fx = f"fx {c['"'"'fx_px'"'"']:.1f} px" if c["fx_px"] is not None else "fx -"' \
+    "commands round 1: the header carries one line per camera" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/report.py \
+    '        for r in records:
+            if r["aircraft_u_px"] is None:' \
+    '        for r in records[:1]:  # MUTATED: the schedule table stops after one row
+            if r["aircraft_u_px"] is None:' \
+    "commands round 1: the schedule table lists every scheduled instant" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/report.py \
+    '            elif len(times) > 1:
+                gaps = [b - a for a, b in zip(times, times[1:])]' \
+    '            elif False:  # MUTATED: a sample-snapped schedule is reported as uniform
+                gaps = [b - a for a, b in zip(times, times[1:])]' \
+    "commands round 1: --brief never claims a period the schedule does not have" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/verify.py \
+    '        target["quaternion_wxyz"][2] = before[2] + 0.05' \
+    '        target["quaternion_wxyz"][2] = before[2] + 0.0  # MUTATED: the corruption is a no-op' \
+    "commands round 1: --corrupt quaternion really corrupts, and the verifier catches it" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/verify.py \
+    '                record["aircraft"]["north_m"] += 5.0' \
+    '                record["aircraft"]["north_m"] += 0.0  # MUTATED: the corruption is a no-op' \
+    "commands round 1: --corrupt aircraft really corrupts, and the verifier catches it" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/verify.py \
+    '        target["t_s"] = before + step' \
+    '        target["t_s"] = before  # MUTATED: the corruption is a no-op' \
+    "commands round 1: --corrupt time really corrupts, and the verifier catches it" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/verify.py \
+    '        manifest["frames"] = [r for r in frames if r is not last]' \
+    '        manifest["frames"] = list(frames)  # MUTATED: the corruption is a no-op' \
+    "commands round 1: --corrupt count really corrupts, and the verifier catches it" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/verify.py \
+    '        if expected in failed:' \
+    '        if True:  # MUTATED: a corruption the verifier missed is reported as caught' \
+    "commands round 1: a --corrupt run the verifier does not catch is UNEXPECTED, not FAILED" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/report.py \
+    '        print(f"USAGE: {exc}", file=sys.stderr)
+        print(f"USAGE: {exc}")
+        return EXIT_USAGE' \
+    '        print(f"USAGE: {exc}", file=sys.stderr)
+        print(f"USAGE: {exc}")
+        return EXIT_REFUSED  # MUTATED: usage errors share REFUSED'"'"'s code' \
+    "commands round 1: a usage error exits 3, never REFUSED's 2" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/report.py \
+    '                code = EXIT_UNEXPECTED' \
+    '                code = EXIT_FAILED  # MUTATED: an exception reads as a verification failure' \
+    "commands round 1: an exception exits 4 by word, never as a FAILED verification" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '    doc["verification"] = report.to_dict()
+    if render != "frames" or not report.ok:' \
+    '    doc["verification"] = {}  # MUTATED: --json carries no verification
+    if render != "frames" or not report.ok:' \
+    "commands round 1: capture --json carries the verification document" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '        return EXIT_FAILED
+
+    if render == "none":' \
+    '        return EXIT_REFUSED  # MUTATED: a verification failure exits as a refusal
+
+    if render == "none":' \
+    "commands round 1: a manifest failing its own verification exits 1, the shared FAILED code" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+# The document itself is the guarded artefact here: a stale block (one
+# summary line edited) must fail the shape comparison.
+mutate docs/CAMERA_PHASE1_REPORT.md \
+    'verification PASSED (5/5 checks; 1 awaiting engine frames: engine_parity)
+engine absent:' \
+    'verification PASSED (5/5 checks)
+engine absent:' \
+    "commands round 1: the document's expected output cannot go stale without a test saying so" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

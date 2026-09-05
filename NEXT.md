@@ -3,6 +3,35 @@
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
 
+**Camera Phase 1, commands round 1 (2026-09-05, the judge's ten ranked
+gaps against bar sections 5 and 6, closed in order;
+docs/CAMERA_PHASE1_REPORT.md "How to demonstrate" is current).**
+flightsim/report.py is the surface both commands share: header, per-
+camera schedule table (--brief), the verifier's CHECK/STATUS/MEASURED/
+TOLERANCE/WHERE table (core/capture/verify.py: every Check carries
+measured/tolerance/unit/where, VerificationReport.to_dict() is the ONE
+source for verify.json, the page and --json), a verdict line whose
+first word is the exit code's word (0 done/verified, 1 FAILED, 2
+REFUSED, 3 USAGE, 4 UNEXPECTED; capture.verification moved 2 -> 1 to
+match verify). SKIPPED (ok None + reason) is the fourth status: a
+single camera's cross-view check, counted in neither passed nor ran.
+JSBSim's C++ banner is routed at the fd level (core/fdm/console.py:
+jsbsim_console(path) around the run, captured_console() around each
+FGFDMExec construction in fdm.py and card.py) to <out>/jsbsim.log and
+counted ("14 model loads"); the sink refuses os.devnull. verify
+--corrupt {quaternion|aircraft|time|count} copies the manifest to
+<run>/corrupt_<kind>/ and must exit 1 with the named check FAILED.
+examples/cameras_multi_cockpit.yaml is the committed alignment pair
+(keep `name: cameras_multi`: the name is in the simulation digest).
+scripts/examples_expected.py --write regenerates the doc's verbatim
+blocks; a test compares their SHAPE (numbers, digests, camera ids
+masked) with the doc's. Gotchas: (a) the `[STATUS] name: detail`
+lines are pinned by tests and stay under the table as "detail:"; (b)
+the sink must wrap ONLY the C++ construction -- a whole-run dup2 would
+swallow our own prints; (c) the scale refusal runs BEFORE validation so
+a refused run leaves no directory (the sink mkdirs lazily on the first
+load); (d) never run pytest while a mutation subset runs.
+
 **Camera Phase 1, preview round 3 (2026-09-04, the judge's eight ranked
 gaps against bar section 3, closed in order, eight commits;
 docs/CAMERA_PHASE1_REPORT.md "Geometry preview" is current and
