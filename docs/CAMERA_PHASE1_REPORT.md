@@ -2264,43 +2264,90 @@ paste the build log back if it fails.
 ### 2. The whole thing in one command
 
 ```
-.venv\Scripts\python -m flightsim.capture examples\cameras_multi.yaml --out runs\demo --render frames
+.venv\Scripts\python -m flightsim.capture examples\cameras_multi.yaml --out runs\demo --render frames --brief
 ```
 
-Expected output (the numbers come from the headless run of this
-example on 2026-09-03: 115 telemetry samples, 24 captures per camera
-from t=0.008 s to t=11.992 s, 1440 steps of 0.008333 s):
+Expected output: the block below is what that command prints, line
+for line, measured here on the honest engine STUB (the commandlet's
+consume-poses pass replaced by `tests.test_camera_cli.
+honest_cli_engine`, which reads the card and writes the scheduled PNGs
+and `render.json` the contract specifies; everything else -- the
+flight, the card, the 15 model loads, the schedule, the previews, the
+overlays, the clip playlist call, the verifier -- is the real code).
+The Windows log must match it with two differences: paths print with
+backslashes (`runs\demo\...`), and the `engine_parity` row's MEASURED
+cell, masked `x` here, carries the engine's own numbers. `--brief`
+collapses each camera's schedule table to one line; without it the
+full tables of the first Linux block print in the same place. The
+step counts (1439 of 1440 steps per pass) are the schedule's own --
+the last instant, 11.992 s, on the 120 Hz grid -- and section 3
+requires the same of the engine's log, so a different count on
+Windows is a finding to report, not a digit to fill in.
+
+<!-- frames_expected: begin -->
+Measured 2026-09-05 on Linux x86_64, Python 3.11.15 on the honest engine STUB by `scripts/examples_expected.py` (`tests.test_camera_cli.honest_cli_engine` standing in for the commandlet's consume-poses pass; the flight, card, manifest, previews, overlays and verifier are the real ones; stdout verbatim, paths normalised to `runs/...` where Windows prints `runs\...`; wall times are this machine's). The `engine_parity` row's MEASURED cell is masked `x`: those digits come from the Windows run and are written in here from its log. Everything else -- every other line, digest, count and check number -- the Windows log must print the same, or the difference is the finding. `tests/test_camera_cli.py::test_the_documents_windows_frames_block_matches_the_stub_run` regenerates this block and compares it as the Linux blocks are compared.
+
+#### capture --render frames: two cameras, one flight (cameras_multi), on the honest engine STUB
+
+`.venv\Scripts\python -m flightsim.capture examples\cameras_multi.yaml --out runs\demo --render frames --brief` -- exit 0, 15.39 s wall on the stub
 
 ```
 spec cef57d752362381d valid; running headlessly...
-  card:     runs\demo\card.json (consume-poses; one commandlet pass per camera via -camera-index=N)
+run:         runs/demo
+spec         cef57d752362381d   simulation 7c9e52e245405487   output 2c3eac9056d8257c
+scene        flat (no raster)   crs EPSG:32631
+flight       B747, 12 s at 120 Hz (step 0.008333 s); telemetry t 0.008..11.992 s (115 samples, 0.108 s apart); span 64.5 m
+cameras      2
+  chase0  chase/offset  aim aircraft (lag 0.25 s: the pixel trails the aircraft)  1280x720  35.0 mm (fx 1244.4 px)  24 captures, interval
+  tower0  tower/scene  aim aircraft (lag 0.25 s: the pixel trails the aircraft)  1280x720  35.0 mm (fx 1244.4 px)  24 captures, interval
+  card:     runs/demo/card.json (consume-poses; one commandlet pass per camera via -camera-index=N)
+JSBSim output: runs/demo/jsbsim.log (15 model loads; nothing of JSBSim's on stdout)
 scheduled 48 frames across 2 camera(s)
-  manifest: runs\demo\capture_manifest.json
-  previews: 48 geometry preview(s) at 1280x720, 0.0xx s/frame under runs\demo\previews (previews are not frames; track: telemetry 9.23077 Hz (115 points, no decimation))
+  chase0: 24 scheduled instant(s) (count 24 spread over [0.00833333, 11.9917] s, endpoints included)
+    0..23 spaced 0.400..0.542 s (sample-snapped, not uniform) from 0.008 s to 11.992 s (samples 0..114)
+  tower0: 24 scheduled instant(s) (count 24 spread over [0.00833333, 11.9917] s, endpoints included)
+    0..23 spaced 0.400..0.542 s (sample-snapped, not uniform) from 0.008 s to 11.992 s (samples 0..114)
+  manifest: runs/demo/capture_manifest.json
+  previews: 48 geometry preview(s) at 1280x720, 0.074 s/frame under runs/demo/previews (previews are not frames; track: telemetry 9.23077 Hz (115 points, no decimation))
   contact sheets: 2 (contact_sheets/<camera_id>.png, one per camera)
 engine pass 1 of 2: camera 'chase0', 24 frames scheduled over the 12 s run (-camera-index=0)
-  camera 'chase0': 24 of 24 scheduled frames rendered under runs\demo\frames\chase0 (engine stepped 11.992 s in 1439 steps)
+  camera 'chase0': 24 of 24 scheduled frames rendered under runs/demo/frames/chase0 (engine stepped 11.992 s in 1439 steps)
 engine pass 2 of 2: camera 'tower0', 24 frames scheduled over the 12 s run (-camera-index=1)
-  camera 'tower0': 24 of 24 scheduled frames rendered under runs\demo\frames\tower0 (engine stepped 11.992 s in 1439 steps)
-  overlays: 48 reprojected-geometry overlay(s) over the rendered frames under runs\demo\overlays (0.0xx s/frame; the aircraft box, wireframe and horizon the manifest predicts, drawn on the engine's pixels)
-  clip:     runs\demo\clip.mp4 (by-product of camera 'chase0', 24 frames at their scheduled instants; 12.992 s = black to t=0.008 s, the flight to t=11.992 s, a 1 s hold)
-  CHECK                   STATUS  MEASURED                                              TOLERANCE                        WHERE
-  manifest_version        PASS    version 1                                             = 1                              spec cef57d752362381d
-  fields_finite           PASS    0 non-finite of 48 records                            0 non-finite                     48 records, 6 fields each
-  geometry_recovery       PASS    x.xe-xx px                                            0.5 px                           worst tower0 #9 t=4.783 s
-  cross_view_consistency  PASS    x.xxe-xx m                                            0.5 m                            24 two-view instants; worst sample 10 t=1.067 s (chase0 #2 with tower0 #2); rays from the poses recomputed from the spec through each record's own label, against the telemetry's aircraft
-  count_exactness         PASS    48 frames = 24 + 24                                   exactly 48                       chase0 24/24, tower0 24/24
-  flight_fidelity         PASS    t 0 s, pos 0 m, att 0 deg                             1e-09 s, 1e-06 m, 1e-06 deg      48 records against 115 samples; digest 2c3eac9056d8257c = output_digest; worst chase0 #0 t=0.008 s
-  schedule_fidelity       PASS    0 of 48 instants differ                               0 differ                         chase0 24/24, tower0 24/24 (recorded/spec)
-  pose_fidelity           PASS    pos 0 m, ang 0 deg, lens 0 px                         1e-06 m, 1e-06 deg, 1e-06 px     48 records against the tracks recomputed from 2 camera(s) over 115 samples; digests = pose_track_digest; worst chase0 #0 t=0.008 s
-  aim_fidelity            PASS    gap 4.1e-13 px                                        1e-06 px, 1e-06 deg              48 records; chase0 aircraft-lagged: off-aim up to 22.2 px, predicted 22.2; tower0 aircraft-lagged: off-aim up to 13.7 px, predicted 13.7
-  engine_parity           PASS    pos 0.0xx m, ang 0.0xx deg, t x.xe-xx s, px x.xx      0.1 m, 0.1 deg, 1e-06 s, 3.0 px  48 of 48 frames verified across 2 camera(s)
+  camera 'tower0': 24 of 24 scheduled frames rendered under runs/demo/frames/tower0 (engine stepped 11.992 s in 1439 steps)
+  overlays: 48 reprojected-geometry overlay(s) over the rendered frames under runs/demo/overlays (0.172 s/frame; the aircraft box, wireframe and horizon the manifest predicts, drawn on the engine's pixels)
+  clip:     runs/demo/clip.mp4 (by-product of camera 'chase0', 24 frames at their scheduled instants; 12.992 s = black to t=0.008 s, the flight to t=11.992 s, a 1 s hold)
+  CHECK                   STATUS  MEASURED                                          TOLERANCE                        WHERE
+  manifest_version        PASS    version 1                                         = 1                              spec cef57d752362381d
+  fields_finite           PASS    0 non-finite of 48 records                        0 non-finite                     48 records, 6 fields each
+  geometry_recovery       PASS    4.1e-13 px                                        0.5 px                           worst tower0 #9 t=4.783 s
+  cross_view_consistency  PASS    1.04e-12 m                                        0.5 m                            24 two-view instants; worst sample 10 t=1.067 s (chase0 #2 with tower0 #2); rays from the poses recomputed from the spec through each record's own label, against the telemetry's aircraft
+  count_exactness         PASS    48 frames = 24 + 24                               exactly 48                       chase0 24/24, tower0 24/24
+  flight_fidelity         PASS    t 0 s, pos 0 m, att 0 deg                         1e-09 s, 1e-06 m, 1e-06 deg      48 records against 115 samples; digest 2c3eac9056d8257c = output_digest; worst chase0 #0 t=0.008 s
+  schedule_fidelity       PASS    0 of 48 instants differ                           0 differ                         chase0 24/24, tower0 24/24 (recorded/spec)
+  pose_fidelity           PASS    pos 0 m, ang 0 deg, lens 0 px                     1e-06 m, 1e-06 deg, 1e-06 px     48 records against the tracks recomputed from 2 camera(s) over 115 samples; digests = pose_track_digest; worst chase0 #0 t=0.008 s
+  aim_fidelity            PASS    gap 4.1e-13 px                                    1e-06 px, 1e-06 deg              48 records; chase0 aircraft-lagged: off-aim up to 22.2 px, predicted 22.2; tower0 aircraft-lagged: off-aim up to 13.7 px, predicted 13.7
+  engine_parity           PASS    pos x.xxx m, ang x.xxx deg, t x.xe+xx s, px x.xx  0.1 m, 0.1 deg, 1e-06 s, 3.0 px  48 of 48 frames verified across 2 camera(s)
 verification PASSED (10/10 checks)
-rendered 48 frames across 2 camera(s) (48 verified by engine parity) under runs\demo\frames
+done: rendered 48 frames across 2 camera(s) (48 verified by engine parity) under runs/demo/frames
 ```
 
+<!-- frames_expected: end -->
+
 The `x` digits are the numbers this section exists to obtain; write
-them in here from the log. What each one tells:
+them in here from the log. The row's `detail` sentence in
+`runs\demo\verify.json` (a PASS prints once, in the table; the prose
+is in the file) carries them by name -- on the stub it reads "48
+frames across 2 camera(s); worst position 0.000 m (tol 0.1); worst
+angle 0.000 deg (tol 0.1); worst time 0.0e+00 s (tol 1e-06; every
+instant on the 120 Hz grid, the engine stepped 0.008333 s); pose
+applied at the scheduled instant to 0.0e+00 s; worst reprojection
+0.00 px (tol 3.0); aircraft drawn within 0.00 m of the manifest's
+aircraft (budget 2.08 m = 1.5 steps x 1.384 m/step at 166.0 m/s) and
+0.0 px of its labelled pixel (tol 3.8 px at that frame's 3076 m); the
+engine measured its aircraft within 0.0 px of the label and 0.00 px
+of the manifest's projection model (tol 3.0); lowest label window
+contrast 44.2 against background 30.0 (min 8)", every zero the stub's.
+What each one tells:
 
 * `worst position` / `worst angle` -- the camera actor against the
   solved pose, both applied AT the scheduled instant, so these measure
@@ -2394,8 +2441,8 @@ runs\demo\
   frames\chase0\clip_playlist.ffconcat   the lead-in first ('../clip_lead.png', 0.008333 s), then 0000.png .. 0023.png with their durations, 0023.png repeated
   frames\clip_lead.png         the by-product clip's black lead-in, 1280x720 (beside the camera directories, never inside one)
   clip.mp4                     the by-product: black to t=0.008 s, 24 frames at their instants to t=11.992 s, the last held 1 s: 12.992 s
-  run.json                     spec_digest, output_digest, samples 115, render {choice "frames", label "Render frames and clip", engine_available true, engine_unavailable_reason null}, render_passes (per camera: scheduled 24, rendered 24, steps_taken 1439, stepped_s 11.992), clip_encoded true, clip_seconds 12.992
-  verify.json                  the verifier's report as run (the JSON the webapp serves): ok, checks [8, each name/ok/status/detail/data], passed 8, ran 8, awaiting [] -- rewritten after the passes, so the printed table and the file agree without re-running
+  run.json                     spec_digest, output_digest, samples 115, render {choice "frames", label "Render frames and clip", engine_available true, engine_unavailable_reason null}, jsbsim_log, previews {count 48, scale 1, resolution [1280, 720], s_per_frame, track_source, contact_sheets {chase0, tower0}}, render_passes (per camera: camera_id, camera_index, scheduled 24, rendered 24, steps_taken 1439, stepped_s 11.992), clip_encoded true, clip_seconds 12.992, overlays {count 48, s_per_frame} -- the keys as the stub run wrote them (the freshness test reads every one back)
+  verify.json                  the verifier's report as run (the JSON the webapp serves): ok true, checks [10, each name/ok/status/detail/measured/tolerance/unit/measured_text/tolerance_text/where/skipped_reason/data], passed 10, ran 10, awaiting [], skipped [], failed [], summary, table -- the ten rows of step 2, rewritten after the passes, so the printed table and the file agree without re-running (counts read from the stub run's file by the freshness test)
   previews\chase0\preview_00000.png .. preview_00023.png   24 geometry previews at 1280x720 (not frames); the same for tower0
   contact_sheets\chase0.png, tower0.png   one contact sheet per camera
   overlays\chase0\0000.png .. 0023.png   24 overlays, 1280x720: the manifest's geometry drawn over the rendered frame; the same for tower0
@@ -2787,8 +2834,7 @@ file".
    for f in v] for k, v in c['data']['frames'].items()})"` must print
    every camera's list as all `True`, 24 entries each.
 2. To see a FAIL caption on purpose: edit
-   `runs\<id>\capturerames\chase0
-ender.json`, add 0.2 to
+   `runs\<id>\capture\frames\chase0\render.json`, add 0.2 to
    `frame_records[1].camera_applied_east_m`, run
    `.venv\Scripts\python -m flightsim.verify runs\<id>\capture` (exit
    code 1, engine_parity FAIL naming "chase0 frame 1: applied position

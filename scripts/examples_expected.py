@@ -28,6 +28,20 @@ JSBSim build differs by bits there (measured on the CI streams:
 4.1e-13 px here against 1.61e-13 px elsewhere for the same check). So
 the document cannot go stale without a test saying so, and a stale
 number is stale on the platform it was measured on.
+
+The Windows "Engine verification" section carries ONE more block, the
+``--render frames`` run of ``cameras_multi`` on the honest engine STUB
+(``tests.test_camera_cli.honest_cli_engine``: the consume-poses pass
+as a Python function that writes the PNGs and render.json the
+contract specifies), between ``<!-- frames_expected: begin -->`` and
+``<!-- frames_expected: end -->``. It is the stdout shape the Windows
+command prints -- the same header, JSBSim line, schedule lines, engine
+pass lines, overlays, clip, verification table and ``done:`` verdict
+-- with the engine-measured digits of the ``engine_parity`` row
+masked as ``x``, because only the engine can supply them (``--write``
+regenerates it too; ``--frames-stub-run <out>`` is the child process
+the generator runs it in). ``test_the_documents_windows_frames_block_
+matches_the_stub_run`` compares it the same way.
 """
 
 from __future__ import annotations
@@ -49,6 +63,21 @@ sys.path.insert(0, str(REPO))
 DOC = REPO / "docs" / "CAMERA_PHASE1_REPORT.md"
 BEGIN = "<!-- examples_expected: begin -->"
 END = "<!-- examples_expected: end -->"
+FRAMES_BEGIN = "<!-- frames_expected: begin -->"
+FRAMES_END = "<!-- frames_expected: end -->"
+
+#: The Windows command (section "Engine verification (Windows)", step
+#: 2), as the instructor types it there with the venv's Windows path
+#: and backslashes; here the same argv on the honest engine stub. --brief
+#: keeps the two schedule tables to one line each (the full tables are
+#: the first Linux block's).
+FRAMES_COMMAND = (
+    "capture --render frames: two cameras, one flight (cameras_multi), on "
+    "the honest engine STUB",
+    ".venv\\Scripts\\python -m flightsim.capture examples\\cameras_multi.yaml "
+    "--out runs\\demo --render frames --brief",
+    ["examples/cameras_multi.yaml", "--out", "runs/demo", "--render",
+     "frames", "--brief"])
 
 #: (label, command words as the instructor types them, main, argv
 #: relative to the root) -- the order matters: verify needs the runs.
@@ -201,6 +230,130 @@ def render(records: List[Dict], when: Optional[str] = None) -> str:
     return "\n".join(lines)
 
 
+# -- the Windows command on the honest engine stub ----------------------
+
+def frames_stub_child(argv: List[str]) -> int:
+    """The child process of :func:`generate_frames`: the capture CLI
+    with the engine gate held open and every engine-side piece stubbed
+    EXACTLY as ``tests/test_camera_cli.py``'s ``cli_engine`` fixture
+    holds it -- ``run_render_pass`` is the honest stub (reads
+    -scenario= and -camera-index= off the argv as the commandlet does,
+    writes the scheduled PNGs with the aircraft drawn at the labelled
+    pixel and the render.json the contract specifies), the by-product
+    clip's ffmpeg call writes a placeholder file. Nothing else is
+    touched: the flight, the card, the manifest, the previews, the
+    overlays and the verifier are the real ones."""
+    import core.util.platform as plat
+    import flightsim.capture as cli
+    import webapp.runs as runs_module
+    from tests.test_camera_cli import honest_cli_engine
+
+    plat.ue_available = lambda: True
+    plat.ue_unavailable_reason = lambda: None
+    plat.find_ffmpeg = lambda: Path("ffmpeg")
+    runs_module.refuse_placeholder_mesh = lambda spec: None
+
+    def fake_encode(ffmpeg, frames_dir, times, clip, lead_in_s=None):
+        Path(clip).write_bytes(b"mp4")
+        return True
+
+    cli.encode_scheduled_clip = fake_encode
+    cli.run_render_pass = honest_cli_engine([])
+    return int(cli.main(argv))
+
+
+def generate_frames(root: Optional[Path] = None) -> Dict:
+    """Run the Windows command on the honest engine stub under ``root``
+    (``runs/demo`` there) as its own process and return its record:
+    label, command, exit code, seconds, text (paths normalised, the
+    engine-measured digits masked by :func:`mask_engine`), and the run
+    directory so a test can read verify.json and run.json beside the
+    block."""
+    if root is None:
+        root = Path(tempfile.mkdtemp(prefix="frames_expected_"))
+    label, command, argv = FRAMES_COMMAND
+    resolved = [str(root / a) if a.startswith("runs/") else
+                (str(REPO / a) if a.startswith("examples/") else a)
+                for a in argv]
+    started = time.perf_counter()
+    completed = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve()), "--frames-stub-run",
+         *resolved], cwd=str(REPO), capture_output=True, text=True,
+        encoding="utf-8")
+    elapsed = time.perf_counter() - started
+    text = mask_engine(_normalise_paths(completed.stdout, root))
+    return {"label": label, "command": command,
+            "code": int(completed.returncode), "seconds": elapsed,
+            "text": text, "stderr": completed.stderr,
+            "run_dir": root / "runs" / "demo"}
+
+
+#: The one table row whose MEASURED cell only the engine can fill: the
+#: applied-vs-solved pose, the capture clock, the reprojection.
+_ENGINE_PARITY_ROW = re.compile(
+    r"^(?P<head>  engine_parity\s+\S+\s+)(?P<measured>.+?)(?P<tail>\s{2,}\S.*)$",
+    re.M)
+
+
+def mask_engine(text: str) -> str:
+    """The ``engine_parity`` row's MEASURED cell with every digit
+    replaced by ``x`` (``pos 0.000 m`` reads ``pos x.xxx m``), the
+    column widths kept: the stub's zeros are the stub's, and the
+    document must not print a number the engine has not produced."""
+    def _mask(match):
+        cell = re.sub(r"\d", "x", match.group("measured"))
+        return match.group("head") + cell + match.group("tail")
+    return _ENGINE_PARITY_ROW.sub(_mask, text)
+
+
+def render_frames(record: Dict, when: Optional[str] = None) -> str:
+    when = when or dt.date.today().isoformat()
+    machine = (f"{platform.system()} {platform.machine()}, Python "
+               f"{platform.python_version()}")
+    lines = [FRAMES_BEGIN,
+             f"Measured {when} on {machine} on the honest engine STUB by "
+             f"`scripts/examples_expected.py` (`tests.test_camera_cli."
+             f"honest_cli_engine` standing in for the commandlet's "
+             f"consume-poses pass; the flight, card, manifest, previews, "
+             f"overlays and verifier are the real ones; stdout verbatim, "
+             f"paths normalised to `runs/...` where Windows prints "
+             f"`runs\\...`; wall times are this machine's). The "
+             f"`engine_parity` row's MEASURED cell is masked `x`: those "
+             f"digits come from the Windows run and are written in here "
+             f"from its log. Everything else -- every other line, digest, "
+             f"count and check number -- the Windows log must print the "
+             f"same, or the difference is the finding. `tests/"
+             f"test_camera_cli.py::test_the_documents_windows_frames_block_"
+             f"matches_the_stub_run` regenerates this block and compares "
+             f"it as the Linux blocks are compared.", ""]
+    lines.append(f"#### {record['label']}")
+    lines.append("")
+    lines.append(f"`{record['command']}` -- exit {record['code']}, "
+                 f"{record['seconds']:.2f} s wall on the stub")
+    lines.append("")
+    lines.append("```")
+    lines.extend(record["text"].rstrip("\n").splitlines())
+    lines.append("```")
+    lines.append("")
+    lines.append(FRAMES_END)
+    return "\n".join(lines)
+
+
+def frames_doc_block(doc_text: str) -> Optional[Dict]:
+    """The document's stub-frames block: label, command, exit code,
+    text; None when the markers are absent."""
+    if FRAMES_BEGIN not in doc_text or FRAMES_END not in doc_text:
+        return None
+    section = doc_text.split(FRAMES_BEGIN, 1)[1].split(FRAMES_END, 1)[0]
+    match = re.search(
+        r"#### (?P<label>.+?)\n\n`(?P<command>[^`]+)` -- exit (?P<code>\d+), "
+        r"[\d.]+ s wall on the stub\n\n```\n(?P<text>.*?)```", section, re.S)
+    if not match:
+        return None
+    return {"label": match.group("label"), "command": match.group("command"),
+            "code": int(match.group("code")), "text": match.group("text")}
+
+
 # -- the shape a test compares ------------------------------------------
 
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?(?:e[+-]?\d+)?")
@@ -278,12 +431,13 @@ def doc_blocks(doc_text: str) -> List[Dict]:
     return blocks
 
 
-def write_doc(section: str, doc: Path = DOC) -> None:
+def write_doc(section: str, doc: Path = DOC, begin: str = BEGIN,
+              end: str = END) -> None:
     text = doc.read_text(encoding="utf-8")
-    if BEGIN not in text or END not in text:
-        raise SystemExit(f"{doc} carries no {BEGIN} / {END} markers")
-    head, rest = text.split(BEGIN, 1)
-    _, tail = rest.split(END, 1)
+    if begin not in text or end not in text:
+        raise SystemExit(f"{doc} carries no {begin} / {end} markers")
+    head, rest = text.split(begin, 1)
+    _, tail = rest.split(end, 1)
     doc.write_text(head + section + tail, encoding="utf-8")
 
 
@@ -295,15 +449,28 @@ def main(argv=None) -> int:
     parser.add_argument("--root", default=None,
                         help="where to write the runs (default: a "
                              "temporary directory)")
+    parser.add_argument("--frames-stub-run", nargs=argparse.REMAINDER,
+                        default=None, metavar="CAPTURE-ARGS",
+                        help="(the generator's own child process) run the "
+                             "capture CLI with these arguments on the "
+                             "honest engine stub and exit with its code")
     args = parser.parse_args(argv)
-    records = generate(Path(args.root) if args.root else None)
+    if args.frames_stub_run is not None:
+        return frames_stub_child(args.frames_stub_run)
+    root = Path(args.root) if args.root else None
+    records = generate(root)
     section = render(records)
+    frames = render_frames(generate_frames(
+        root / "frames" if root else None))
     if args.write:
         write_doc(section)
-        print(f"wrote {len(records)} blocks into {DOC.relative_to(REPO)}",
-              file=sys.stderr)
+        write_doc(frames, begin=FRAMES_BEGIN, end=FRAMES_END)
+        print(f"wrote {len(records)} blocks and the stub-frames block into "
+              f"{DOC.relative_to(REPO)}", file=sys.stderr)
     else:
         print(section)
+        print()
+        print(frames)
     return 0
 
 

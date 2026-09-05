@@ -2800,6 +2800,33 @@ mutate core/scenario/card.py \
     "docs round 1: the card's mixture probe is routed through the console sink, run_ic and trim included" \
     tests/test_camera_cli.py || failures=$((failures+1))
 
+# -- Camera Phase 1, docs round 1: the Windows expected-output block is the
+# stub run's stdout, regenerated and compared; its typed tree is read back
+# from the run's files.
+mutate docs/CAMERA_PHASE1_REPORT.md \
+    'done: rendered 48 frames across 2 camera(s) (48 verified by engine parity) under runs/demo/frames' \
+    'rendered 48 frames across 2 camera(s) (48 verified by engine parity) under runs/demo/frames' \
+    "docs round 1: the Windows block's verdict line cannot drop its 'done:' word without the freshness test saying so" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate scripts/examples_expected.py \
+    '        cell = re.sub(r"\d", "x", match.group("measured"))' \
+    '        cell = match.group("measured")  # MUTATED: the stub zeros printed as the engine numbers' \
+    "docs round 1: the engine_parity row's MEASURED digits are masked x in the Windows block, never the stub's zeros" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate docs/CAMERA_PHASE1_REPORT.md \
+    'checks [10, each' \
+    'checks [8, each' \
+    "docs round 1: the expected tree's verify.json counts are read back from the stub run's file" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate docs/CAMERA_PHASE1_REPORT.md \
+    ', overlays {count 48, s_per_frame}' \
+    '' \
+    "docs round 1: the expected tree's run.json line names every key the run writes" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
