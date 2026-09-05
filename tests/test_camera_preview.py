@@ -946,6 +946,13 @@ def example_scene(name, relocate=None):
     if relocate:
         from core.terrain.heightfield import Heightfield
 
+        if not RIDGE_RASTER.with_suffix(".r16").is_file():
+            # A fresh clone (CI) has no bake yet: the same deterministic
+            # synthesis the web app runs on first need, so this test is
+            # machine-independent instead of skipped.
+            from webapp.runs import ensure_control_ridge
+
+            ensure_control_ridge()
         heightfield = Heightfield.read(RIDGE_RASTER)
         for key, value in relocate.items():
             spec.set(key, value, frm="test: the example over the ridge raster")
