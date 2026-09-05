@@ -98,9 +98,22 @@ def run_one(main, argv: List[str], root: Path) -> Dict:
     with contextlib.redirect_stdout(buffer):
         code = main(resolved)
     elapsed = time.perf_counter() - started
-    text = buffer.getvalue().replace(str(root) + "/", "").replace(
-        str(REPO) + "/", "")
+    text = _normalise_paths(buffer.getvalue(), root)
     return {"code": int(code), "seconds": elapsed, "text": text}
+
+
+_RELATIVE = re.compile(r"(?:runs|examples)\\[^\s'\"(),;]*")
+
+
+def _normalise_paths(text: str, root: Path) -> str:
+    """Every path under ``root`` or the checkout reads ``runs/...`` or
+    ``examples/...`` with forward slashes, whatever the host's
+    separator: the document is measured on one platform and compared
+    on all three."""
+    for base in (root, REPO):
+        for sep in ("/", "\\"):
+            text = text.replace(str(base) + sep, "")
+    return _RELATIVE.sub(lambda m: m.group(0).replace("\\", "/"), text)
 
 
 def generate(root: Optional[Path] = None, when: Optional[str] = None) -> List[Dict]:
