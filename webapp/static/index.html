@@ -336,6 +336,8 @@ function renderSpec(payload) {
         `${f.std ? " &mdash; " + f.std : ""}</td>`;
       body.appendChild(row);
     }
+    // The camera's keyframed moves, one row each, after its fields.
+    body.insertAdjacentHTML("beforeend", cameraMovesHtml(cam));
   }
   // Director's-notes legend: what each source means, in one line.
   $("srcLegend").innerHTML =
@@ -763,6 +765,31 @@ function verificationTableHtml(v) {
   return `<table class="verify"><thead><tr><th>CHECK</th><th>STATUS</th>` +
     `<th>MEASURED</th><th>TOLERANCE</th><th>WHERE</th></tr></thead>` +
     `<tbody>${body}</tbody></table>`;
+}
+
+// A camera's keyframed moves, as review-table rows after its fields.
+// A move is data inside the camera record ({t_s, and any of the mode's
+// position keys, aim keys or focal_length_mm}: one recorded decision,
+// carried verbatim, digest-relevant) that the pose track interpolates
+// linearly between keyframes and holds outside them. The page used to
+// drop them, so a camera that moved showed only its starting fields.
+// Each row: the instant, every keyed field at it with the field's own
+// unit (from the camera's field rows), the source word "keyframe" and
+// where the keyframe sits in the sequence. No moves, no rows.
+function cameraMovesHtml(cam) {
+  const moves = cam.moves || [];
+  if (!moves.length) return "";
+  const units = {};
+  (cam.fields || []).forEach(f => { units[f.name] = f.unit || ""; });
+  return moves.map((m, i) => {
+    const keyed = Object.keys(m).filter(k => k !== "t_s").map(k =>
+      `${esc(k)} = ${esc(m[k])}${units[k] ? " " + esc(units[k]) : ""}`).join(", ");
+    return `<tr class="move"><td>&nbsp;&nbsp;move at t=${esc(m.t_s)} s</td>` +
+      `<td>${keyed}</td><td class="src-user">keyframe</td>` +
+      `<td class="dim">keyframe ${i + 1} of ${moves.length} (spec data, ` +
+      `digest-relevant): the pose track interpolates linearly to the next ` +
+      `keyframe and holds past the last</td></tr>`;
+  }).join("");
 }
 
 // The file a block of the card is rendered from, as a link beside it

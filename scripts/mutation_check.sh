@@ -2554,6 +2554,22 @@ mutate webapp/static/index.html \
     "page round 2: the closure heading links the closure.json it is rendered from" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 2: the review table shows the cameras' keyframed moves -----
+
+mutate webapp/static/index.html \
+    '  const moves = cam.moves || [];
+  if (!moves.length) return "";' \
+    '  const moves = cam.moves || [];
+  return "";  // MUTATED: the moves are dropped from the review table again' \
+    "page round 2: the review table shows each camera's keyframed moves" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '    body.insertAdjacentHTML("beforeend", cameraMovesHtml(cam));' \
+    '    // MUTATED: renderSpec never appends the move rows' \
+    "page round 2: renderSpec appends the move rows after each camera's fields" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

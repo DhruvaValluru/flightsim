@@ -1617,13 +1617,15 @@ const out = {
   strip: downloadStripHtml(input.runId, files.downloads || []),
   galleries: (files.galleries || []).map(g => galleryHtml(input.runId, input.run, g)),
   files: filesHtml(input.runId, files.files || []),
+  moves: (input.cameras || []).map(cameraMovesHtml),
 };
 console.log(JSON.stringify(out));
 """
 
 
-def page_capture(tmp_path, run, files, run_id="run1"):
+def page_capture(tmp_path, run, files, run_id="run1", cameras=None):
     """Render the page's capture card, download strip and files panel
+    (and, given the compile payload's camera blocks, their move rows)
     under node from the page's own source, and return the HTML of each."""
     import re
     import shutil
@@ -1638,7 +1640,8 @@ def page_capture(tmp_path, run, files, run_id="run1"):
     harness.write_text(PAGE_CAPTURE_HARNESS % block, encoding="utf-8")
     payload = tmp_path / "page_capture_input.json"
     payload.write_text(json.dumps({"run": run, "files": files,
-                                   "runId": run_id}), encoding="utf-8")
+                                   "runId": run_id, "cameras": cameras}),
+                       encoding="utf-8")
     proc = subprocess.run([node, str(harness), str(payload)],
                           capture_output=True, text=True, encoding="utf-8")
     assert proc.returncode == 0, proc.stderr
@@ -2341,6 +2344,49 @@ def test_the_run_payload_carries_the_whole_event_log(client, tmp_path):
         manager.runs.pop(run.run_id, None)
     assert len(state["events"]) == 25
     assert [e["detail"] for e in state["events"]] == [f"line {i}" for i in range(25)]
+
+
+# -- the review table shows the cameras' keyframed moves -------------------
+
+def test_the_review_table_shows_each_camera_s_keyframed_moves(tmp_path):
+    """/compile sends each camera's ``moves`` (the keyframes the pose
+    track interpolates: data inside the camera record, digest-relevant)
+    and the page's camera block dropped them, so a camera that moved
+    showed only its starting fields. cameraMovesHtml renders one row per
+    keyframe after the fields -- the instant, every keyed field with its
+    unit, the word "keyframe" and its place in the sequence -- and
+    renderSpec appends them; a camera without moves gets no row."""
+    import re
+
+    from tests.test_camera_poses import explicit_camera_with_moves
+    from webapp.server import _spec_payload
+
+    spec = compile_prompt(DEMO)
+    spec.cameras.append(explicit_camera_with_moves())
+    payload = _spec_payload(spec)
+    assert payload["cameras"][0]["moves"] == []
+    assert payload["cameras"][1]["moves"] == [
+        {"t_s": 0.0, "position_north_m": 0.0, "focal_length_mm": 35.0},
+        {"t_s": 10.0, "position_north_m": 2000.0, "focal_length_mm": 85.0}]
+    rows = page_capture(tmp_path, {}, {}, "r", cameras=payload["cameras"])["moves"]
+    assert rows[0] == ""
+    words = text_of(rows[1])
+    assert rows[1].count('<tr class="move">') == 2
+    assert ("move at t=0 s position_north_m = 0 m, focal_length_mm = 35 mm "
+            "keyframe keyframe 1 of 2 (spec data, digest-relevant): the pose "
+            "track interpolates linearly to the next keyframe and holds past "
+            "the last") in words
+    assert ("move at t=10 s position_north_m = 2000 m, focal_length_mm = 85 mm "
+            "keyframe keyframe 2 of 2") in words
+    # The units are the camera's own field units, never guessed.
+    units = {f["name"]: f["unit"] for f in payload["cameras"][1]["fields"]}
+    assert units["position_north_m"] == "m" and units["focal_length_mm"] == "mm"
+    # renderSpec appends the rows after each camera's field rows.
+    page = STATIC_INDEX.read_text(encoding="utf-8")
+    render_spec = re.search(r"function renderSpec\(payload\) \{.*?\n\}\n", page, re.S).group(0)
+    assert 'body.insertAdjacentHTML("beforeend", cameraMovesHtml(cam));' in render_spec
+    assert render_spec.index("for (const f of cam.fields)") \
+        < render_spec.index("cameraMovesHtml(cam)")
 
 
 # -- a finished run outlives the server process ---------------------------
