@@ -133,4 +133,8 @@ def test_the_closure_pair_grades_the_clip_s_own_window(tmp_path):
         spec, tmp_path, {"key": "flat", "terrain": None})
     assert verdict["duration_s"] == CLIP_SECONDS
     assert verdict["clip_seconds_cap"] == CLIP_SECONDS
+    # The window word says what was graded (the first 22 s of a 300 s
+    # flight), never "clip": a headless pair has no clip to name.
+    assert verdict["window"] == "capped"
+    assert verdict["spec_duration_s"] == 300.0
     assert verdict["ok"]

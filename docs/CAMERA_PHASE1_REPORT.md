@@ -2643,7 +2643,14 @@ rendered (headless), previews only" and "previews (fallback: headless
 run by choice; choose Render frames and clip for the frame set;
 showing 24 of 24 preview(s), which are NOT frames)" (on a machine
 without the engine the fallback reads "no engine on this machine —
-<the platform gate's reason>"), no frames.zip button, and
+<the platform gate's reason>"), the closure heading "graded over the
+settled half of 12 s (the first 12 s, the same window a clip would
+cover, capped at 22 s)" -- a headless run has no clip to name, so
+`closure.json` records window "capped" with `spec_duration_s` beside
+`duration_s` (a *Clip only* run reads "the first 12 s, the clip's
+window, capped at 22 s"; a 120 s flight "the first 22 s of the 120 s
+flight, ..."; the frames run above "full duration: a frames run steps
+the whole flight"), no frames.zip button, and
 `/runs/<id>/frames.zip` must answer 404 "no rendered frames: this was
 a headless run (no engine pass); the manifest and the previews are
 its deliverable".

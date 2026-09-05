@@ -2088,11 +2088,29 @@ def test_the_closure_report_names_its_units_and_the_graded_window(
     run steps) with its length in seconds."""
     run_id, state = captured
     closure = state["capture"]["closure"]
-    assert closure["window"] == "clip" and closure["duration_s"] == 3.0
+    # The window word names what was GRADED: a headless run has no clip
+    # to name, so closure.json says "capped" (the first min(duration,
+    # cap) seconds) and records the spec's own duration beside it.
+    assert closure["window"] == "capped" and closure["duration_s"] == 3.0
     assert closure["clip_seconds_cap"] == 22.0
+    assert closure["spec_duration_s"] == 3.0
     words = text_of(page_capture(tmp_path, state, {}, run_id)["card"])
     assert ("closure PASSED — the same spec flown closed loop, graded over "
-            "the settled half of 3 s (the clip's window, capped at 22 s)") in words
+            "the settled half of 3 s (the first 3 s, the same window a clip "
+            "would cover, capped at 22 s)") in words
+    assert "clip's window" not in words
+    # A clip run names its clip; a capped flight names the whole flight.
+    clip_state = json.loads(json.dumps(state))
+    clip_state["render"] = "clip"
+    assert ("graded over the settled half of 3 s (the first 3 s, the clip's "
+            "window, capped at 22 s)") in text_of(
+                page_capture(tmp_path, clip_state, {}, run_id)["card"])
+    capped_state = json.loads(json.dumps(state))
+    capped_state["capture"]["closure"].update({"duration_s": 22.0,
+                                               "spec_duration_s": 120.0})
+    assert ("graded over the settled half of 22 s (the first 22 s of the 120 s "
+            "flight, the same window a clip would cover, capped at 22 s)") in text_of(
+                page_capture(tmp_path, capped_state, {}, run_id)["card"])
     for check in closure["checks"]:
         assert (f"ok {check['name']}: commanded {check['commanded']:.2f} "
                 f"{check['unit']}, achieved {check['achieved']:.2f} "

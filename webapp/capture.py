@@ -642,9 +642,16 @@ def closure_run(spec, out: Path, scene: Dict,
     checks = [{"name": c.name, "commanded": c.commanded, "achieved": c.achieved,
                "tolerance": c.tolerance, "unit": c.unit, "ok": c.ok}
               for c in result.closure.checks]
+    # The window word names what was GRADED, not what the run shows:
+    # "full duration" when the pair flew the whole flight (a frames
+    # run), "capped" when it flew the first min(duration, cap) seconds
+    # -- the window a clip covers, whether or not this run made one (a
+    # headless run has no clip to name). spec_duration_s beside
+    # duration_s says whether the cap actually shortened the flight.
     verdict = {"ok": all(c["ok"] for c in checks), "checks": checks,
                "duration_s": seconds, "clip_seconds_cap": CLIP_SECONDS,
-               "window": "full duration" if full_duration else "clip",
+               "spec_duration_s": float(spec.duration.value),
+               "window": "full duration" if full_duration else "capped",
                "pair_spec_digest": pair.digest(),
                "output_digest": result.output_digest,
                "settle_fraction": CLOSURE_TOLERANCE.settle_fraction}

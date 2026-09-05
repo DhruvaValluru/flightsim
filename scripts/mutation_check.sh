@@ -2493,6 +2493,27 @@ mutate webapp/static/index.html \
     "page round 2: a failed engine run's clip words name the failure" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 2: the closure window names what was graded ------------------
+
+mutate webapp/capture.py \
+    '               "window": "full duration" if full_duration else "capped",' \
+    '               "window": "full duration" if full_duration else "clip",  # MUTATED: a headless pair names a clip it never made' \
+    "page round 2: closure.json's window word is capped, never a clip the run did not make" \
+    tests/test_webapp_capture.py tests/test_closure_pair.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '    const what = render === "clip" ? "the clip'"'"'s window"
+      : "the same window a clip would cover";' \
+    '    const what = "the clip'"'"'s window";  // MUTATED: the headless heading names a clip' \
+    "page round 2: the headless closure heading names the window a clip would cover, not a clip" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '    const whole = cl.spec_duration_s != null && Number(cl.spec_duration_s) > graded' \
+    '    const whole = false  // MUTATED: a capped flight is not said to be capped' \
+    "page round 2: a capped closure window names the whole flight it was cut from" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

@@ -760,18 +760,31 @@ function verificationTableHtml(v) {
     `<tbody>${body}</tbody></table>`;
 }
 
-// "settled half of 12 s (full duration: a frames run steps the whole
-// flight)" / "settled half of 3 s (the clip's window, capped at 22 s)":
-// the graded window, from closure.json's own fields.
-function closureWindowWords(cl) {
+// The graded window, from closure.json's own fields, naming what was
+// actually graded: "settled half of 12 s (full duration: a frames run
+// steps the whole flight)"; on a clip run "settled half of 12 s (the
+// first 12 s, the clip's window, capped at 22 s)"; on a headless run
+// -- which has no clip to name -- "settled half of 12 s (the first 12
+// s, the same window a clip would cover, capped at 22 s)"; and when the
+// cap shortened the flight, "the first 22 s of the 120 s flight, ...".
+function closureWindowWords(cl, render) {
   const fraction = cl.settle_fraction ?? 0.5;
   const settled = fraction === 0.5 ? "settled half"
     : `settled last ${Math.round((1 - fraction) * 100)}%`;
   if (cl.duration_s == null) return settled;
-  const window = cl.window === "full duration"
-    ? "full duration: a frames run steps the whole flight"
-    : `the clip's window, capped at ${cl.clip_seconds_cap ?? "?"} s`;
-  return `${settled} of ${Number(cl.duration_s).toFixed(0)} s (${window})`;
+  const graded = Number(cl.duration_s);
+  let window;
+  if (cl.window === "full duration") {
+    window = "full duration: a frames run steps the whole flight";
+  } else {
+    const whole = cl.spec_duration_s != null && Number(cl.spec_duration_s) > graded
+      ? ` of the ${Number(cl.spec_duration_s).toFixed(0)} s flight` : "";
+    const what = render === "clip" ? "the clip's window"
+      : "the same window a clip would cover";
+    window = `the first ${graded.toFixed(0)} s${whole}, ${what}, capped at ` +
+      `${cl.clip_seconds_cap ?? "?"} s`;
+  }
+  return `${settled} of ${graded.toFixed(0)} s (${window})`;
 }
 
 function captureCardHtml(run) {
@@ -848,7 +861,7 @@ function captureCardHtml(run) {
       `${esc(c.unit)} <span class="dim">(tol ${c.tolerance} ${esc(c.unit)})</span></li>`).join("");
     closure = `<b>closure ${cl.ok ? "PASSED" : "FAILED"}</b> ` +
       `<span class="dim">— the same spec flown closed loop, graded over the ` +
-      `${closureWindowWords(cl)}</span><ul>${rows}</ul>`;
+      `${closureWindowWords(cl, run.render)}</span><ul>${rows}</ul>`;
   }
   // The failure clause (failureWords) sits right after the counts it
   // qualifies: "8 scheduled, 3 rendered, 3 verified (engine pass
