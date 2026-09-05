@@ -2967,6 +2967,26 @@ mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRender
     "docs round 2: a log word edited in the commandlet is caught against section 3's lines" \
     tests/test_camera_cli.py::test_section_3s_render_log_lines_are_the_commandlets_own_format_strings || failures=$((failures+1))
 
+# -- Camera Phase 1, docs round 2: README's platform table and the report's
+# headings cannot claim the frame set on an engine before it was observed.
+mutate README.md \
+    '| refused by name | code complete, NOT YET RUN on any engine (the same table; the steps await the user'"'"'s Windows run) |' \
+    '| refused by name | ✓ after the build below |' \
+    "docs round 2: README's frames row cannot tick Windows while the report's status table says NOT YET RUN" \
+    tests/test_camera_docs.py || failures=$((failures+1))
+
+mutate README.md \
+    'after the build below: observed once, on the pre-rewrite page flow, before 2026-09-03; the flow as it stands today not re-run there' \
+    '✓ after the build below' \
+    "docs round 2: README's clip row dates the one Windows observation instead of ticking it" \
+    tests/test_camera_docs.py || failures=$((failures+1))
+
+mutate docs/CAMERA_PHASE1_REPORT.md \
+    '## The run emits frames, not a clip (Python side done 2026-09-03; engine pass NOT YET RUN -- see Engine verification)' \
+    '## The run emits frames, not a clip (finished 2026-09-03)' \
+    "docs round 2: no heading calls the frames deliverable finished while its engine cell reads NOT YET RUN" \
+    tests/test_camera_docs.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

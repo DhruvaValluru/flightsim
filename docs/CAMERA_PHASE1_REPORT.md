@@ -2043,7 +2043,7 @@ SUBSET: 3 guard(s) NOT covered  (the three SKIPs: their target strings had moved
 SUBSET: all guards load-bearing
 ```
 
-## The run emits frames, not a clip (finished 2026-09-03)
+## The run emits frames, not a clip (Python side done 2026-09-03; engine pass NOT YET RUN -- see Engine verification)
 
 The first Windows run of this phase produced a clip plus schematic
 previews: the web flow never invoked the engine's consume-poses pass.

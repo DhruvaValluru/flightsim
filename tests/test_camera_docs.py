@@ -102,6 +102,21 @@ def test_the_engine_section_and_limitations_say_not_yet_run():
     limits = text.split("## Known limitations", 1)[1]
     assert "**The engine pass is NOT YET RUN.**" in limits
     assert "The overlays have been drawn over the honest engine stub only" in limits
+    # No heading calls the frames deliverable finished or done while the
+    # status table's engine column for it still reads NOT YET RUN: a
+    # reader skimming headings must not take the engine half as done.
+    _, rows = _status_table()
+    frames_row = next(e for d, (_, e) in rows.items()
+                      if d.startswith("`--render frames`"))
+    assert frames_row.startswith("NOT YET RUN")
+    headings = [line for line in text.splitlines() if line.startswith("## ")]
+    frames_headings = [h for h in headings if "frames" in h.lower()]
+    assert frames_headings, "the frames section heading is gone"
+    for heading in frames_headings:
+        if re.search(r"\b(finished|done|complete[d]?)\b", heading, re.I):
+            assert "NOT YET RUN" in heading, heading
+    assert ("## The run emits frames, not a clip (Python side done 2026-09-03; "
+            "engine pass NOT YET RUN -- see Engine verification)") in headings
 
 
 def test_the_readme_matches_its_own_platform_table():
@@ -123,10 +138,34 @@ def test_the_readme_matches_its_own_platform_table():
         '"Engine verification (Windows)"' in capture
     assert '"Status today"' in capture
     assert "NOT YET RUN" in capture
-    # The Windows column of the table is what the capture section says.
-    table_row = next(line for line in text.splitlines()
-                     if line.startswith("| Rendered frames and clips"))
-    assert table_row.rstrip("| ").endswith("after the build below")
+    # The table keeps the clip and the frame set apart: the clip row is
+    # dated per platform, the frames row says NOT YET RUN on every engine
+    # column until the commit that rewrites the report's status table
+    # changes it (the report's `--render frames` row is the authority).
+    rows = {line.split("|")[1].strip(): [c.strip() for c in line.split("|")[2:-1]]
+            for line in text.splitlines() if line.startswith("| Rendered")}
+    assert len(rows) == 2, list(rows)
+    clip_row = next(v for k, v in rows.items() if k.startswith("Rendered clip"))
+    frames_row = next(v for k, v in rows.items()
+                      if k.startswith("Rendered frames per camera"))
+    mac, linux, windows = clip_row
+    assert mac.startswith("✓ after the build below") and "not re-run since" in mac
+    assert linux == "refused by name"
+    assert "observed once" in windows and "before 2026-09-03" in windows
+    assert "not re-run" in windows and '"Status today"' in windows
+    assert not windows.startswith("✓")
+    mac, linux, windows = frames_row
+    assert linux == "refused by name"
+    for cell in (mac, windows):
+        assert cell.startswith("code complete, NOT YET RUN on any engine"), cell
+        assert "✓" not in cell
+    assert '"Status today"' in mac and '"Engine verification (Windows)"' in mac
+    _, report_rows = _status_table()
+    report_frames = next(e for d, (_, e) in report_rows.items()
+                         if d.startswith("`--render frames`"))
+    assert report_frames.startswith("NOT YET RUN")
+    assert "NOT YET RUN on any engine" in text.split("| Rendered frames per camera", 1)[1].split("\n", 1)[0]
+    assert "kept apart on purpose" in text
 
 
 def test_the_platform_module_docstring_matches_its_own_refusal():

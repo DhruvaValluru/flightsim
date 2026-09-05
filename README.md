@@ -63,10 +63,16 @@ One codebase, platform dispatch inside it (`core/util/platform.py`):
 | Prompt → LLM compile → spec → validate | ✓ | ✓ | ✓ |
 | Headless JSBSim physics + telemetry | ✓ | ✓ | ✓ |
 | Web app on localhost:8008, terrain baking, effect reports | ✓ | ✓ | ✓ |
-| Rendered frames and clips (Unreal Engine host) | ✓ after the build below | refused by name | ✓ after the build below |
+| Rendered clip (Unreal Engine host; *Clip only*, the preset pass) | ✓ after the build below: the flow every render calibration was measured on (Metal), before Camera Phase 1; not re-run since | refused by name | after the build below: observed once, on the pre-rewrite page flow, before 2026-09-03; the flow as it stands today not re-run there (`docs/CAMERA_PHASE1_REPORT.md` "Status today") |
+| Rendered frames per camera (the consume-poses pass; *Render frames and clip*) | code complete, NOT YET RUN on any engine (`docs/CAMERA_PHASE1_REPORT.md` "Status today" and "Engine verification (Windows)") | refused by name | code complete, NOT YET RUN on any engine (the same table; the steps await the user's Windows run) |
 
 Everything in the first three rows is pure Python and is exercised by CI
-on all three OSes. The UE render half runs on macOS (where every render
+on all three OSes. The last two rows are the two things the engine
+produces, kept apart on purpose: a clip has been rendered on both
+engine platforms (dated above), the per-camera frame set has not been
+rendered on any -- its Python side is measured on an honest engine
+stub and its engine side awaits the Windows verification the report
+spells out. The UE render half runs on macOS (where every render
 calibration was measured, on Metal) and on Windows, on each once the
 engine is installed at `UE_ROOT` (default `/Users/Shared/Epic Games/UE_5.5`
 or `C:\Program Files\Epic Games\UE_5.5`) AND the build steps below have
