@@ -1,7 +1,7 @@
 # Resume here
 
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
-docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-28.
+docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-31.
 
 **Standing until the Windows logs are pasted back: the engine
 per-camera pass, engine_parity on rendered pixels, the overlays on
@@ -20,6 +20,61 @@ core.capture.render_pass.RENDER_WORDS), default the richest the
 machine supports (render_choice_default), engine options refused
 `ue.platform` by name with the machine's reason, the choice recorded
 in run.json / provenance.json "render".
+
+**Camera Phase 1, docs round 2 (2026-09-05, the judge's six ranked
+gaps against bar section 7, all six closed in priority order, five
+code/doc commits plus this tally).** (1) The Windows expected-output
+block names every stub its child applies: scripts/examples_expected.py
+exports STUBBED (six dotted names: run_render_pass, the clip encoder's
+3-byte placeholder writer, find_ffmpeg, the two engine-gate functions,
+refuse_placeholder_mesh), the generated preamble and the hand-written
+paragraph name each, the `clip:` line and run.json's clip_encoded /
+clip_seconds are said to be the playlist arithmetic until 5b's ffprobe,
+the "two differences" are three (the ffmpeg-missing clip line measured
+with os_name patched to windows), and section 4's clip.mp4 tree line
+says "placeholder here (3 bytes)"; tests/test_camera_cli.py::
+test_the_windows_block_discloses_every_stub_the_child_applies reads
+frames_stub_child's source (ast) against STUBBED. (2) Section 6's page
+block is GENERATED (page_stub_child / generate_page: the committed
+cameras_multi.yaml posted to the TestClient's /run with render
+"frames" on the honest stub, the event list as /runs/<id> serves it,
+the strip, card and galleries under node, run id masked <id>, the
+parity row masked x, captions folded; PAGE_STUBBED discloses ten
+names) between the page_expected markers; measured 15.9-16.3 s wall,
+47 block lines, 1439 steps per pass, closure altitude 3048.01 of
+3048.00 m; tests/test_webapp_capture.py::
+test_the_documents_page_block_matches_the_stub_run compares it and
+checks the status lines against the run's status.json. FINDING: the
+example posted to /run without "over flat ground" in its prompt
+answers 409 terrain.clearance here (plan_scene_setting stages an
+unplaced spec on the prairie bake, and without that bake on the
+control ridge); section 6's prompt now carries the planner's opt-out
+words, and the page's digest 0916ea45841b3667 differs from the CLI's
+cef57d752362381d because /run projects the spec for the engine host
+(hold_state false, mass_held true). (3) Section 3's two command lines
+are built from render_command with a Windows-shaped UE_ROOT and
+checkout and compared token for token; its seven render.log lines are
+turned back into %d/%.3f/%.6f/%s skeletons and each must be a
+TEXT(...) literal of FlightSimRenderCommandlet.cpp in the source's
+order (word-less "%s" literals skipped), the numbers read from the
+section 2 block. (4) README's platform row is two: the rendered clip
+(macOS dated before Camera Phase 1, Windows observed once pre-rewrite)
+and the rendered frames per camera (code complete, NOT YET RUN on any
+engine). (5) The frames section heading reads "(Python side done
+2026-09-03; engine pass NOT YET RUN -- see Engine verification)" and
+no "## " heading may pair frames with finished/done while the status
+table's engine cell reads NOT YET RUN. (6) Known limitations is 18
+bullets of at most four lines each with a pointer; the console and
+verifier histories are sections ("Where JSBSim's console goes", "What
+the verifier cannot see"); the status table cites CI read from GitHub
+Actions: run #74 on a928572 RED on windows-latest (the CR of a CRLF
+checkout, byte 13, in the control-character test; 508263d fixes it),
+the latest fully green run #72 on 3c57d5d with windows-latest job
+101289429647 green in 10 min 19 s. 22 guards under "docs round 2",
+each verified firing by subset (4 + 4 + 4 + 3 + 3 + 4). Gotchas 29-31
+below; also: `pytest -q` on CI on top of pytest.ini's -q hides the
+short summary, so a failed test's NAME is not in the log tail -- the
+assertion diff is what identifies it.
 
 **Camera Phase 1, docs round 1 (2026-09-05, the judge's seven ranked
 gaps against bar section 7, all seven closed in priority order, four
@@ -1113,3 +1168,21 @@ the parity discipline, and the do-not-regress list)
     clips every segment at near_m in camera space and then to the image
     (Liang-Barsky) BEFORE drawing; that is why 4600 wireframe segments
     cost 49 ms and not seconds.
+29. **The page's scene-setting planner stages an UNPLACED spec on the
+    prairie bake** (default lat/lon and terrain_elevation, no opt-out
+    word in the prompt: webapp.runs.plan_scene_setting), and on a
+    machine without that bake on the control ridge, where a stated
+    10000 ft refuses terrain.clearance under 3299 m peaks. A YAML spec
+    posted to /run with no prompt is unplaced: give it a prompt with
+    "flat ground" (the planner's own opt-out) to fly the flat scene the
+    CLI flies; the prompt is not digest-relevant. The webapp tests pin
+    a flat scene by stubbing pick_scene, which is why this never showed.
+30. **Bare `TEXT("%s")` literals in the commandlet match any line**: a
+    static check that turns log lines back into format skeletons must
+    skip word-less literals or every line matches three of them.
+31. **Another session may be committing to the same branch while you
+    work** (508263d and a928572 appeared between this round's commits):
+    `git add` named files only, never `-A`, and read `git log` before
+    each commit; a guard whose target text another commit reworded
+    SKIPs ("could not apply mutation") rather than failing, so re-run
+    the subset after pulling in their change.

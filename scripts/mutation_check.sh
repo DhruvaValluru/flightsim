@@ -2858,8 +2858,8 @@ REFUSES BY NAME everywhere' \
     tests/test_camera_docs.py || failures=$((failures+1))
 
 mutate NEXT.md \
-    'then this file'"'"'s gotchas 1-28.' \
-    'then this file'"'"'s gotchas 1-26.' \
+    'then this file'"'"'s gotchas 1-31.' \
+    'then this file'"'"'s gotchas 1-29.' \
     "docs round 1: NEXT.md's gotcha range counts the gotchas the file holds" \
     tests/test_camera_docs.py || failures=$((failures+1))
 
