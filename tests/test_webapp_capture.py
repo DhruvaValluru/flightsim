@@ -2028,3 +2028,50 @@ def test_the_page_s_verification_table_is_verify_json_s_own_table(
                                               "cross_view_consistency (single camera); "
                                               "1 awaiting engine frames: engine_parity)")
     assert "checks ran;" not in text_of(card)
+
+
+def test_a_mid_run_refusal_keeps_its_offending_value(client, monkeypatch,
+                                                     tmp_path):
+    """camera.terrain_clearance's message never states the AGL it
+    measured -- that number lives in the Violation's actual/limit/unit.
+    A refusal raised mid-capture now carries the three through
+    CaptureError into run.capture, the status line and the card, in the
+    same "(measured X, limit Y)" shape the pre-run verdict uses."""
+    from core.scenario.validate import Violation
+    import core.capture.validate as validate_module
+
+    monkeypatch.setattr(
+        validate_module, "track_violations",
+        lambda *a, **k: [Violation(
+            constraint="camera.terrain_clearance",
+            message="tower0: the stated placement sits inside or on the "
+                    "scene's terrain (checked over the whole run window)",
+            actual=-12.3, limit=30.0, unit="m AGL")])
+    spec = compile_prompt(DEMO)
+    reply = client.post("/capture", json={"spec": spec.to_dict()})
+    assert reply.status_code == 200, reply.json()
+    state = finished(client, reply.json()["run_id"])
+    assert state["status"] == "failed"
+    assert state["capture"] == {
+        "refused": "camera.terrain_clearance",
+        "message": "tower0: the stated placement sits inside or on the "
+                   "scene's terrain (checked over the whole run window)",
+        "actual": -12.3, "limit": 30.0, "unit": "m AGL"}
+    expected = ("[camera.terrain_clearance] tower0: the stated placement sits "
+                "inside or on the scene's terrain (checked over the whole run "
+                "window) (measured -12.3 m AGL, limit 30 m AGL)")
+    assert state["detail"] == expected
+    assert [e["detail"] for e in state["events"] if e["status"] == "capture"][-1] \
+        == expected
+    # The card prints the same words.
+    card = page_capture(tmp_path, state, {}, "refusedrun")["card"]
+    assert ("[camera.terrain_clearance] tower0: the stated placement sits "
+            "inside or on the scene's terrain (checked over the whole run "
+            "window) (measured -12.3 m AGL, limit 30 m AGL)") in text_of(card)
+    assert "capture refused" in text_of(card)
+    # A refusal with no value (a schedule refusal) renders without the clause.
+    assert capture_module.CaptureError("camera.schedule", "4 over 3 s").render() \
+        == "[camera.schedule] 4 over 3 s"
+    assert capture_module.CaptureError("camera.schedule", "4 over 3 s").as_dict() \
+        == {"refused": "camera.schedule", "message": "4 over 3 s",
+            "actual": None, "limit": None, "unit": None}

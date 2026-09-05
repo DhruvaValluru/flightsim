@@ -723,9 +723,16 @@ function verificationTableHtml(v) {
 function captureCardHtml(run) {
   if (!run.capture) return "";
   if (run.capture.refused) {
+    // The constraint, the message and -- when the refusal measured one
+    // -- the offending value against its limit, in the validation
+    // verdict's own shape.
+    const r = run.capture;
+    const unit = r.unit ? ` ${esc(r.unit)}` : "";
+    const value = r.actual != null && r.limit != null
+      ? ` (measured ${r.actual}${unit}, limit ${r.limit}${unit})` : "";
     return `<div class="card"><b>capture refused</b> — ` +
-      `<span class="verdict-refused">[${esc(run.capture.refused)}] ` +
-      `${esc(run.capture.message)}</span>` +
+      `<span class="verdict-refused">[${esc(r.refused)}] ` +
+      `${esc(r.message)}${value}</span>` +
       `<div id="captureDownloads"></div></div>`;
   }
   // The count contract, per camera, in the three words the verifier

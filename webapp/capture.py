@@ -53,12 +53,49 @@ CLOSURE_TOLERANCE = ClosureTolerance()
 
 
 class CaptureError(RuntimeError):
-    """A named capture refusal, carried to the run status verbatim."""
+    """A named capture refusal, carried to the run status verbatim.
 
-    def __init__(self, constraint: str, message: str) -> None:
+    ``actual`` / ``limit`` / ``unit`` are the offending value and the
+    bound it broke, when the refusal has them (a solved track's worst
+    AGL against the clearance floor; the climb a terrain threat needs
+    against the climb available): the SAME three fields
+    core.scenario.validate.Violation carries, rendered in the same
+    shape, so the pre-run verdict and a mid-run refusal read alike."""
+
+    def __init__(self, constraint: str, message: str,
+                 actual: Optional[float] = None,
+                 limit: Optional[float] = None,
+                 unit: Optional[str] = None) -> None:
         super().__init__(message)
         self.constraint = constraint
         self.message = message
+        self.actual = actual
+        self.limit = limit
+        self.unit = unit
+
+    def as_dict(self) -> Dict:
+        """run.capture on a refused capture: the constraint under
+        ``refused`` (the page's existing key), the message and the
+        three value fields (None when the refusal has none)."""
+        return {"refused": self.constraint, "message": self.message,
+                "actual": self.actual, "limit": self.limit,
+                "unit": self.unit}
+
+    def render(self) -> str:
+        return refused_words(self.as_dict())
+
+
+def refused_words(refusal: Dict) -> str:
+    """``[constraint] message (measured X unit, limit Y unit)`` -- the
+    value clause only when both numbers exist, formatted as the
+    validation verdict formats them."""
+    words = f"[{refusal.get('refused')}] {refusal.get('message')}"
+    actual, limit = refusal.get("actual"), refusal.get("limit")
+    if actual is not None and limit is not None:
+        unit = f" {refusal['unit']}" if refusal.get("unit") else ""
+        words += (f" (measured {float(actual):g}{unit}, "
+                  f"limit {float(limit):g}{unit})")
+    return words
 
 
 def _run_named(run_spec, spec, **kwargs):
@@ -75,9 +112,15 @@ def _run_named(run_spec, spec, **kwargs):
     try:
         return run_spec(spec, **kwargs)
     except TerrainLookaheadError as exc:
-        raise CaptureError(exc.constraint, str(exc)) from exc
+        threat = exc.threat
+        raise CaptureError(exc.constraint, str(exc),
+                           actual=float(threat.required_hdot_mps),
+                           limit=float(threat.available_hdot_mps),
+                           unit="m/s of climb") from exc
     except TerrainImpactError as exc:
-        raise CaptureError("terrain.impact", str(exc)) from exc
+        raise CaptureError("terrain.impact", str(exc),
+                           actual=float(exc.impact.penetration_m), limit=0.0,
+                           unit="m into the terrain") from exc
 
 
 def run_console(capture_dir: Path):
@@ -303,7 +346,11 @@ def capture_run(spec, out: Path, scene: Dict,
             tornado=tornado, terrain_elevation_m=terrain_datum))
     if refusals:
         first = refusals[0]
-        raise CaptureError(first.constraint, first.message)
+        # The offending value travels: the message alone never states
+        # the AGL a terrain_clearance refusal measured.
+        raise CaptureError(first.constraint, first.message,
+                           actual=first.actual, limit=first.limit,
+                           unit=first.unit)
 
     manifest = build_capture_manifest(
         spec, columns, frame, tracks, schedules,

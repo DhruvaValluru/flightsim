@@ -2387,6 +2387,30 @@ mutate webapp/static/index.html \
     "page round 1: a row that did not PASS carries its detail line, as the CLI prints it" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 1: a mid-run refusal keeps its offending value -------------
+
+mutate webapp/capture.py \
+    '        raise CaptureError(first.constraint, first.message,
+                           actual=first.actual, limit=first.limit,
+                           unit=first.unit)' \
+    '        raise CaptureError(first.constraint, first.message)  # MUTATED: the value dropped' \
+    "page round 1: a track refusal carries the violation's actual, limit and unit" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '            run.capture = exc.as_dict()
+            run.push("capture", exc.render())' \
+    '            run.capture = {"refused": exc.constraint, "message": exc.message}  # MUTATED: value lost
+            run.push("capture", f"[{exc.constraint}] {exc.message}")' \
+    "page round 1: the run state and status line carry the refusal's value against its limit" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '      ? ` (measured ${r.actual}${unit}, limit ${r.limit}${unit})` : "";' \
+    '      ? `` : "";  // MUTATED: the card prints the message alone' \
+    "page round 1: the card prints a refusal's measured value and limit" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

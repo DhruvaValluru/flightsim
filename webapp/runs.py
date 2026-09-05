@@ -1715,7 +1715,9 @@ class RunManager:
         that silently discarded it would be the worse outcome. The run
         says which constraint refused, and no manifest is written.
         """
-        from webapp.capture import CaptureError, capture_run, closure_run
+        from webapp.capture import (
+            CaptureError, capture_run, closure_run, refused_words,
+        )
 
         run.push("capture", "solving camera geometry and capture schedule")
         try:
@@ -1727,9 +1729,10 @@ class RunManager:
                    if run.preview_scale != 1 else {}))
             run.capture = outcome.summary
         except CaptureError as exc:
-            run.capture = {"refused": exc.constraint,
-                           "message": exc.message}
-            run.push("capture", f"[{exc.constraint}] {exc.message}")
+            # The constraint, the message AND the offending value against
+            # its limit -- the same three fields the pre-run verdict shows.
+            run.capture = exc.as_dict()
+            run.push("capture", exc.render())
             return False
         # Package C: the paired closed-loop run. The closure assertion is
         # the project's central guarantee and the render host cannot run
@@ -1742,9 +1745,8 @@ class RunManager:
                 spec, out, scene, lambda line: run.push("closure", line),
                 full_duration=full_duration)
         except CaptureError as exc:
-            run.capture["closure"] = {"refused": exc.constraint,
-                                      "message": exc.message}
-            run.push("failed", f"[{exc.constraint}] {exc.message}")
+            run.capture["closure"] = exc.as_dict()
+            run.push("failed", exc.render())
             return False
         if not run.capture["closure"]["ok"]:
             failed = [c for c in run.capture["closure"]["checks"]
@@ -1785,7 +1787,9 @@ class RunManager:
             # A failed closure has already pushed its named failure; a
             # refused capture is named here from the refusal it recorded.
             if run.status != "failed":
-                run.push("failed", str(run.capture.get("message", "refused")))
+                from webapp.capture import refused_words
+
+                run.push("failed", refused_words(run.capture))
             return
         run.push("done", capture_done_line(run.capture, "none"))
 
@@ -2044,9 +2048,9 @@ class RunManager:
                                           full_duration=True)
             if not outcome:
                 if run.status != "failed":
-                    run.push("failed",
-                             f"[{run.capture.get('refused', 'capture')}] "
-                             f"{run.capture.get('message', 'refused')}")
+                    from webapp.capture import refused_words
+
+                    run.push("failed", refused_words(run.capture))
                 return
         window_s = (float(spec.duration.value) if render == "frames"
                     else min(float(spec.duration.value), CLIP_SECONDS))
