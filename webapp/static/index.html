@@ -66,6 +66,9 @@
   .thumb img { width: 160px; border: 1px solid #333; display: block; }
   .thumb figcaption { font-size: 11px; }
   details summary { cursor: pointer; }
+  table.verify { margin: .3rem 0 .6rem 0; font-size: 12px; }
+  table.verify td, table.verify th { padding: .15rem .5rem; vertical-align: top; }
+  table.verify tr.detail td { border-bottom: 0; padding-top: 0; }
 </style>
 </head>
 <body>
@@ -683,6 +686,40 @@ function galleryHtml(runId, run, gallery) {
     thumbsHtml(runId, gallery.camera_id, previews, "previews") + `</div>`;
 }
 
+// The verifier's table, the same rows flightsim.verify prints: CHECK,
+// STATUS, MEASURED, TOLERANCE, WHERE from verify.json's own "table"
+// (its cells are measured_text / tolerance_text / where; an AWAITING or
+// SKIPPED row carries its reason in WHERE), one row per check in the
+// four states' own colours, the prose detail on hover and -- only for a
+// row that did not PASS -- as a second line, exactly as the CLI does.
+function verificationTableHtml(v) {
+  const checks = v.checks || [];
+  const byName = {};
+  checks.forEach(c => { byName[c.name] = c; });
+  const rows = v.table || checks.map(c => c.ok === null
+    ? [c.name, c.status || "AWAITING", "-", "-", c.skipped_reason || c.detail]
+    : [c.name, c.status || (c.ok ? "PASS" : "FAIL"),
+       c.measured_text ?? c.detail, c.tolerance_text ?? "-", c.where || "-"]);
+  const colour = {PASS: "#6fd08c", FAIL: "#e06f6f", AWAITING: "#d9b85c",
+                  SKIPPED: "#9fb4c7"};
+  const body = rows.map(row => {
+    const check = byName[row[0]] || {};
+    const status = row[1];
+    const detail = check.detail || "";
+    const line = status === "PASS" ? "" :
+      `<tr class="detail"><td></td><td colspan="4" class="dim">` +
+      `[${esc(status)}] ${esc(row[0])}: ${esc(detail)}</td></tr>`;
+    return `<tr class="check check-${esc(status)}" title="${esc(detail)}">` +
+      `<td>${esc(row[0])}</td>` +
+      `<td><b style="color:${colour[status] || "#d8dde2"}">${esc(status)}</b></td>` +
+      `<td>${esc(row[2])}</td><td>${esc(row[3])}</td>` +
+      `<td class="dim">${esc(row[4])}</td></tr>` + line;
+  }).join("");
+  return `<table class="verify"><thead><tr><th>CHECK</th><th>STATUS</th>` +
+    `<th>MEASURED</th><th>TOLERANCE</th><th>WHERE</th></tr></thead>` +
+    `<tbody>${body}</tbody></table>`;
+}
+
 function captureCardHtml(run) {
   if (!run.capture) return "";
   if (run.capture.refused) {
@@ -703,19 +740,17 @@ function captureCardHtml(run) {
   // check with nothing to grade: cross-view consistency on one camera)
   // -- the last two neither passed nor failed, never coloured as either,
   // and named in the tally with the skip's reason.
-  const checkWord = c => c.status || (c.ok === null ? "AWAITING"
-                                      : (c.ok ? "PASS" : "FAIL"));
-  const checkColour = c => c.ok === null ? "#d9b85c"
-                           : (c.ok ? "#6fd08c" : "#e06f6f");
-  const checks = v.checks.map(c =>
-    `<li><b style="color:${checkColour(c)}">${checkWord(c)}</b> ` +
-    `${esc(c.name)} — <span class="dim">${esc(c.detail)}</span></li>`).join("");
+  const checks = verificationTableHtml(v);
   const skipped = (v.skipped || []).map(s => `${s.name} skipped (${s.reason})`);
   const notRun = skipped.concat((v.awaiting || []).length
     ? [`${v.awaiting.join(", ")} awaiting engine frames`] : []);
-  const awaiting = notRun.length
-    ? ` <span class="dim">(${v.passed}/${v.ran} checks ran; ` +
-      `${esc(notRun.join("; "))})</span>` : "";
+  // The tally is the verifier's own summary line (the one the CLI
+  // prints); the page composes one only for a verify.json without it.
+  const tally = v.summary
+    ? `<b>${esc(v.summary)}</b>`
+    : `<b>verification ${v.ok ? "PASSED" : "FAILED"}</b>` + (notRun.length
+      ? ` <span class="dim">(${v.passed}/${v.ran} checks ran; ` +
+        `${esc(notRun.join("; "))})</span>` : "");
   const capped = run.capture.previews_capped
     ? ` <span class="dim">(previews capped at ${run.capture.preview_cap}; ` +
       `the manifest carries every frame)</span>` : "";
@@ -761,8 +796,7 @@ function captureCardHtml(run) {
   return `<div class="card"><div id="captureDownloads"></div>` +
     `<b>capture geometry</b> — ` + totals + capped + previewWords +
     `<div id="captureGalleries"><ul>${cameras}</ul></div>` +
-    `<b>verification ${v.ok ? "PASSED" : "FAILED"}</b>` + awaiting +
-    `<ul>${checks}</ul>` + closure + `</div>`;
+    tally + checks + closure + `</div>`;
 }
 
 // Every artefact the run wrote, as a link with its note. The server

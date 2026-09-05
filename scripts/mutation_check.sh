@@ -2365,6 +2365,28 @@ mutate webapp/runs.py \
     "page round 1: a headless run records the machine's own no-engine reason" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 1: the verifier's table on the page, verbatim from verify.json
+
+mutate webapp/static/index.html \
+    '      `<td>${esc(row[2])}</td><td>${esc(row[3])}</td>` +' \
+    '      `<td>-</td><td>-</td>` +  // MUTATED: the measured and tolerance cells dropped' \
+    "page round 1: the page's verification table carries the measured and tolerance cells" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '  const tally = v.summary
+    ? `<b>${esc(v.summary)}</b>`' \
+    '  const tally = false
+    ? `<b>${esc(v.summary)}</b>`  // MUTATED: the tally composed on the page instead of the verifier'"'"'s line' \
+    "page round 1: the tally line is the verifier's own summary, verbatim" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '    const line = status === "PASS" ? "" :' \
+    '    const line = true ? "" :  // MUTATED: no detail line for a row that did not PASS' \
+    "page round 1: a row that did not PASS carries its detail line, as the CLI prints it" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

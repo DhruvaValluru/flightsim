@@ -1975,3 +1975,56 @@ def test_the_page_s_galleries_show_every_frame_and_label_previews_as_the_fallbac
     assert "<img" not in html["files"]
     assert "capture/frames/camera0 — 4 rendered frame(s) for camera 'camera0'" in files_words
     assert "(4 file(s), in the capture card's gallery)" in files_words
+
+
+def test_the_page_s_verification_table_is_verify_json_s_own_table(
+        captured, client, tmp_path):
+    """The card shows the verifier's checks as the CHECK / STATUS /
+    MEASURED / TOLERANCE / WHERE table flightsim.verify prints -- the
+    rows are verify.json's "table" verbatim (the same measured_text,
+    tolerance_text and where), the tally is verify.json's "summary"
+    line verbatim, and only the rows that did not PASS get a detail
+    line, as in the CLI. Nothing is re-derived on the page."""
+    import html as html_module
+    import re
+
+    run_id, state = captured
+    verification = state["capture"]["verification"]
+    on_disk = json.loads(
+        (manager.out_root / run_id / "capture" / "verify.json")
+        .read_text(encoding="utf-8"))
+    assert on_disk["table"] == verification["table"]
+    card = page_capture(tmp_path, state, {}, run_id)["card"]
+    table = re.search(r'<table class="verify">.*?</table>', card, re.S).group(0)
+    header = re.findall(r"<th>([^<]+)</th>", table)
+    assert header == ["CHECK", "STATUS", "MEASURED", "TOLERANCE", "WHERE"]
+    rows = []
+    for match in re.finditer(
+            r'<tr class="check check-(\w+)" title="([^"]*)">'
+            r'<td>([^<]*)</td><td><b style="color:#[0-9a-f]{6}">(\w+)</b></td>'
+            r'<td>([^<]*)</td><td>([^<]*)</td><td class="dim">([^<]*)</td></tr>',
+            table):
+        cls, title, name, status, measured, tolerance, where = (
+            html_module.unescape(g) for g in match.groups())
+        assert cls == status
+        rows.append([name, status, measured, tolerance, where])
+        check = next(c for c in verification["checks"] if c["name"] == name)
+        assert title == check["detail"]
+    assert rows == [list(r) for r in verification["table"]]
+    assert len(rows) == 10
+    # The numbers a reader checks: geometry recovery's measured px against
+    # its tolerance and the worst frame, straight from the verifier.
+    geometry = next(r for r in rows if r[0] == "geometry_recovery")
+    assert re.fullmatch(r"[0-9.e-]+ px", geometry[2]) and geometry[3] == "0.5 px"
+    assert geometry[4].startswith("worst camera0 #")
+    # Detail lines only for the rows that did not PASS, in the CLI's form.
+    details = re.findall(r'<tr class="detail"><td></td><td colspan="4" class="dim">'
+                         r'\[(\w+)\] (\w+): ', table)
+    assert details == [("SKIPPED", "cross_view_consistency"),
+                       ("AWAITING", "engine_parity")]
+    # The tally is the verifier's own line, verbatim.
+    assert f"<b>{verification['summary']}</b>" in card
+    assert verification["summary"].startswith("verification PASSED (8/8 checks; 1 skipped: "
+                                              "cross_view_consistency (single camera); "
+                                              "1 awaiting engine frames: engine_parity)")
+    assert "checks ran;" not in text_of(card)
