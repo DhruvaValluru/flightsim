@@ -91,9 +91,16 @@ def _flush_c_streams() -> None:
     through them lands in the log BEFORE the descriptors are restored
     (``std::cout`` is synchronised with stdio by default)."""
     try:
-        libc = ctypes.CDLL(None)
+        if os.name == "nt":
+            # CDLL(None) is a POSIX idiom (dlopen of the running
+            # process); on Windows it raises TypeError. The C runtime
+            # JSBSim's stdio lives in is msvcrt (or the UCRT that the
+            # same name resolves to).
+            libc = ctypes.cdll.msvcrt
+        else:
+            libc = ctypes.CDLL(None)
         libc.fflush(None)
-    except (OSError, AttributeError):
+    except (OSError, AttributeError, TypeError, ImportError):
         pass
 
 
