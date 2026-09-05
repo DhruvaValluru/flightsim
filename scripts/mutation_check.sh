@@ -2724,6 +2724,26 @@ mutate webapp/static/index.html \
     "page round 3: a frame that failed engine parity is captioned FAIL in the gallery" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 3: the review table escapes what it interpolates ----------
+
+mutate webapp/static/index.html \
+    '         ? `<input data-name="${esc(f.name)}" value="${esc(value)}">`' \
+    '         ? `<input data-name="${esc(f.name)}" value="${value}">`  // MUTATED: raw value in the attribute' \
+    "page round 3: a field value is escaped into its input attribute" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '        `data-field="${esc(f.name)}" value="${esc(f.value)}">` +' \
+    '        `data-field="${esc(f.name)}" value="${f.value}">` +  // MUTATED: raw camera value' \
+    "page round 3: a camera field value is escaped into its input attribute" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '  if (f.source === "model") return `interpreting &ldquo;${esc(frm)}&rdquo;`;' \
+    '  if (f.source === "model") return `interpreting &ldquo;${frm}&rdquo;`;  // MUTATED: the phrase is markup' \
+    "page round 3: the provenance note's quoted phrase is escaped" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

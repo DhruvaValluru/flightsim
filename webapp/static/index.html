@@ -161,12 +161,15 @@ function sourceClass(s) { return "src-" + s; }
 // The provenance column reads like director's notes: a model row shows
 // the QUOTED phrase the guess interprets, an inferred row the quoted
 // vocabulary phrase, others their plain origin.
+// The phrase is the user's own prompt words (or the model's quotation
+// of them): escaped, so a quote or an angle bracket in a prompt reaches
+// the table as text, never as markup.
 function provenanceNote(f) {
   const frm = f.from || "";
   if (!frm) return "";
-  if (f.source === "model") return `interpreting &ldquo;${frm}&rdquo;`;
-  if (f.source === "inferred") return `&ldquo;${frm}&rdquo;`;
-  return frm;
+  if (f.source === "model") return `interpreting &ldquo;${esc(frm)}&rdquo;`;
+  if (f.source === "inferred") return `&ldquo;${esc(frm)}&rdquo;`;
+  return esc(frm);
 }
 
 // Compiler state up front (Task 0): the page states which compiler WILL run
@@ -287,15 +290,19 @@ function renderSpec(payload) {
   compiled = payload;
   const spec = payload.spec;
   $("specArea").style.display = "";
+  // Every value, unit, source, note and word the server sent is
+  // interpolated through esc(): the table the user checks before
+  // running must show a prompt's quote or "<" as text, and an input's
+  // value attribute must survive it (editedSpecDict reads it back).
   $("compilerLine").innerHTML =
-    `<span class="badge">compiler: ${payload.compiler}</span>` +
-    (payload.model ? `<span class="badge">model: ${payload.model}</span>` : "") +
-    `<span class="badge">digest: ${spec.digest.slice(0, 16)}</span>` +
+    `<span class="badge">compiler: ${esc(payload.compiler)}</span>` +
+    (payload.model ? `<span class="badge">model: ${esc(payload.model)}</span>` : "") +
+    `<span class="badge">digest: ${esc(spec.digest.slice(0, 16))}</span>` +
     (payload.llm_note
-      ? `<div class="dim">llm fallback reason: ${payload.llm_note}</div>` : "");
+      ? `<div class="dim">llm fallback reason: ${esc(payload.llm_note)}</div>` : "");
   $("notes").innerHTML = spec.notes.length
     ? `<div class="dim">notes:<ul>` +
-      spec.notes.map(n => `<li>${n}</li>`).join("") + `</ul></div>`
+      spec.notes.map(n => `<li>${esc(n)}</li>`).join("") + `</ul></div>`
     : "";
 
   const body = $("specTable").querySelector("tbody");
@@ -307,35 +314,35 @@ function renderSpec(payload) {
     const value = typeof f.value === "number" && !Number.isInteger(f.value)
       ? f.value : f.value;
     row.innerHTML =
-      `<td>${f.section}.${f.name}</td>` +
+      `<td>${esc(f.section)}.${esc(f.name)}</td>` +
       `<td>${editable
-         ? `<input data-name="${f.name}" value="${value}">`
-         : `${value}`}${f.unit ? " " + f.unit : ""}</td>` +
-      `<td class="${sourceClass(f.source)}" data-src="${f.name}">` +
-      `${f.source}</td>` +
+         ? `<input data-name="${esc(f.name)}" value="${esc(value)}">`
+         : `${esc(value)}`}${f.unit ? " " + esc(f.unit) : ""}</td>` +
+      `<td class="${esc(sourceClass(f.source))}" data-src="${esc(f.name)}">` +
+      `${esc(f.source)}</td>` +
       `<td class="dim">${provenanceNote(f)}` +
-      `${f.std ? " &mdash; " + f.std : ""}</td>`;
+      `${f.std ? " &mdash; " + esc(f.std) : ""}</td>`;
     body.appendChild(row);
   }
   // Camera blocks (Camera Phase 1): each camera is a labeled block of
   // provenanced, editable rows, exactly like the scalar fields above.
   for (const cam of (spec.cameras || [])) {
     const head = document.createElement("tr");
-    head.innerHTML = `<td colspan="4"><b>camera[${cam.index}] ` +
-      `${cam.camera_id}</b></td>`;
+    head.innerHTML = `<td colspan="4"><b>camera[${esc(cam.index)}] ` +
+      `${esc(cam.camera_id)}</b></td>`;
     body.appendChild(head);
     for (const f of cam.fields) {
       const row = document.createElement("tr");
       const key = `cameras[${cam.index}].${f.name}`;
       row.innerHTML =
-        `<td>&nbsp;&nbsp;${f.name}</td>` +
-        `<td><input data-name="${key}" data-camera="${cam.index}" ` +
-        `data-field="${f.name}" value="${f.value}">` +
-        `${f.unit ? " " + f.unit : ""}</td>` +
-        `<td class="${sourceClass(f.source)}" data-src="${key}">` +
-        `${f.source}</td>` +
+        `<td>&nbsp;&nbsp;${esc(f.name)}</td>` +
+        `<td><input data-name="${esc(key)}" data-camera="${esc(cam.index)}" ` +
+        `data-field="${esc(f.name)}" value="${esc(f.value)}">` +
+        `${f.unit ? " " + esc(f.unit) : ""}</td>` +
+        `<td class="${esc(sourceClass(f.source))}" data-src="${esc(key)}">` +
+        `${esc(f.source)}</td>` +
         `<td class="dim">${provenanceNote(f)}` +
-        `${f.std ? " &mdash; " + f.std : ""}</td>`;
+        `${f.std ? " &mdash; " + esc(f.std) : ""}</td>`;
       body.appendChild(row);
     }
     // The camera's keyframed moves, one row each, after its fields.
@@ -368,9 +375,9 @@ function renderVerdict(v) {
   if (v.ok) {
     $("verdict").innerHTML =
       `<div class="verdict-ok">VALID` +
-      (v.derived_speeds ? ` &mdash; ${v.derived_speeds}` : "") + `</div>` +
+      (v.derived_speeds ? ` &mdash; ${esc(v.derived_speeds)}` : "") + `</div>` +
       (v.warnings.length
-        ? `<div class="dim">warnings: ${v.warnings.join("; ")}</div>` : "");
+        ? `<div class="dim">warnings: ${esc(v.warnings.join("; "))}</div>` : "");
     $("run").disabled = false;
   } else {
     $("verdict").innerHTML =

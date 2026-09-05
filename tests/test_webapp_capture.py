@@ -3180,3 +3180,67 @@ def test_the_gallery_captions_each_frame_that_failed_engine_parity(
                for p in g["previews"])
     assert "parity" not in "".join(page_capture(tmp_path, headless_state,
                                                 headless_payload, headless_id)["galleries"])
+
+
+# -- page round 3: the review table escapes what it interpolates ----------
+
+def test_the_review_table_escapes_values_and_provenance_notes(client, tmp_path):
+    """renderSpec wrote `value="${value}"` and provenanceNote's quoted
+    phrase -- the user's own prompt words, as the model quotes them --
+    straight into innerHTML, so a prompt with a double quote or "<"
+    broke the input attribute or injected markup into the table the
+    user is asked to check before running. Every interpolation now goes
+    through esc(): the DOM shows the phrase as text, the input's value
+    attribute carries the quote escaped, and editedSpecDict reads the
+    value back intact (round trip), an edit with a quote included."""
+    compiled = client.post("/compile", json={"prompt": DEMO,
+                                             "compiler": "regex"}).json()
+    spec = compiled["spec"]
+    altitude = next(f for f in spec["fields"] if f["name"] == "altitude")
+    altitude["source"] = "model"
+    altitude["from"] = 'say "hi" <b>x</b>'
+    altitude["std"] = 'std <i>note</i>'
+    camera_id = next(f for f in spec["cameras"][0]["fields"]
+                     if f["name"] == "camera_id")
+    camera_id["value"] = 'tow"er<0>'
+    spec["cameras"][0]["camera_id"] = 'tow"er<0>'
+    spec["dict"]["cameras"][0]["camera_id"]["value"] = 'tow"er<0>'
+    aircraft = next(f for f in spec["fields"] if f["name"] == "aircraft")
+    aircraft["value"] = 'B7"47<x>'
+    spec["dict"]["aircraft"]["aircraft"]["value"] = 'B7"47<x>'
+    spec["notes"] = ['a <note> "quoted"']
+    compiled["validation"]["warnings"] = ['<w>arning "one"']
+    compiled["llm_note"] = 'fell <back> "here"'
+    snaps = page_dom(tmp_path, {}, [
+        {"do": "renderSpec", "payload": compiled},
+        {"do": "editedSpecDict"},
+        {"do": "setInput", "name": "cameras[0].camera_id", "value": 'new"<id>'},
+        {"do": "editedSpecDict"},
+    ])
+    table = snaps[0]["specTable"]
+    assert "<b>x</b>" not in table and "<i>note</i>" not in table
+    assert ('interpreting &ldquo;say &quot;hi&quot; &lt;b&gt;x&lt;/b&gt;&rdquo;'
+            in table)
+    assert "&mdash; std &lt;i&gt;note&lt;/i&gt;" in table
+    assert ('<input data-name="cameras[0].camera_id" data-camera="0" '
+            'data-field="camera_id" value="tow&quot;er&lt;0&gt;">') in table
+    assert '<b>camera[0] tow&quot;er&lt;0&gt;</b>' in table
+    assert '<input data-name="aircraft" value="B7&quot;47&lt;x&gt;">' in table
+    assert '<x>' not in table
+    assert "<note>" not in table
+    notes = snaps[0]["statusHtml"]      # the status is untouched by renderSpec
+    assert notes == ""
+    page = snaps[0]
+    assert "&lt;w&gt;arning &quot;one&quot;" in page["verdict"] and "<w>" not in page["verdict"]
+    # The value survives the round trip through the input attribute.
+    assert snaps[1]["dict"]["cameras"][0]["camera_id"]["value"] == 'tow"er<0>'
+    assert snaps[1]["dict"]["aircraft"]["aircraft"]["value"] == 'B7"47<x>'
+    assert snaps[1]["dict"]["aircraft"]["aircraft"]["source"] == \
+        spec["dict"]["aircraft"]["aircraft"]["source"]
+    assert snaps[1]["dict"]["cameras"][0]["camera_id"]["source"] != "user (edited)"
+    edited = snaps[3]["dict"]["cameras"][0]["camera_id"]
+    assert edited == {**snaps[1]["dict"]["cameras"][0]["camera_id"],
+                      "value": 'new"<id>', "source": "user",
+                      "from": "edited in the web UI"}
+    assert snaps[2]["sourceCell"] == (
+        '<td class="src-edited" data-src="cameras[0].camera_id">user (edited)</td>')
