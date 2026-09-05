@@ -1940,11 +1940,76 @@ mutate flightsim/capture.py \
 # The document itself is the guarded artefact here: a stale block (one
 # summary line edited) must fail the shape comparison.
 mutate docs/CAMERA_PHASE1_REPORT.md \
-    'verification PASSED (5/5 checks; 1 awaiting engine frames: engine_parity)
+    'verification PASSED (7/7 checks; 1 awaiting engine frames: engine_parity)
 engine absent:' \
-    'verification PASSED (5/5 checks)
+    'verification PASSED (7/7 checks)
 engine absent:' \
     "commands round 1: the document's expected output cannot go stale without a test saying so" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+# -- Camera Phase 1, package I, commands round 2: the verifier reads the
+# -- flight (telemetry.json) and the spec's schedule (scenario.yaml), so a
+# -- manifest that disagrees with the flight it claims to record fails its
+# -- own verification with no sibling run; --corrupt clock/flight/schedule --
+
+mutate core/capture/verify.py \
+    '    if worst["position_m"] > position_tol_m:' \
+    '    if False:  # MUTATED: the recorded aircraft is never graded against the telemetry' \
+    "commands round 2: flight fidelity grades the recorded aircraft position against the telemetry at its sample" \
+    tests/test_camera_verify.py tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if worst["time_s"] > time_tol_s:' \
+    '    if False:  # MUTATED: a record'"'"'s t_s is never graded against the telemetry clock' \
+    "commands round 2: flight fidelity grades every record's t_s against the telemetry's own t at its sample" \
+    tests/test_camera_verify.py tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if worst["angle_deg"] > angle_tol_deg:' \
+    '    if False:  # MUTATED: the recorded attitude is never graded against the telemetry' \
+    "commands round 2: flight fidelity grades the recorded attitude against the telemetry" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if not digests_equal:' \
+    '    if False:  # MUTATED: a telemetry.json that is not this flight passes' \
+    "commands round 2: telemetry.json beside the manifest must digest to the manifest's output_digest" \
+    tests/test_camera_verify.py tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if si != ai or gap > TIME_TOL_S:' \
+    '            if False:  # MUTATED: the recomputed schedule is never compared instant for instant' \
+    "commands round 2: schedule fidelity compares the spec's recomputed schedule with the manifest instant for instant" \
+    tests/test_camera_verify.py tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    report.checks.append(verify_flight_fidelity(manifest, columns))' \
+    '    report.checks.append(verify_flight_fidelity(manifest, None))  # MUTATED: the flight is never read' \
+    "commands round 2: verify_run reads telemetry.json beside the manifest; flight fidelity is never skipped when it exists" \
+    tests/test_camera_verify.py tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        manifest, read_scenario_spec(run_dir), columns))' \
+    '        manifest, None, columns))  # MUTATED: the spec is never read' \
+    "commands round 2: verify_run reads scenario.yaml beside the manifest; schedule fidelity is never skipped when it exists" \
+    tests/test_camera_verify.py tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/verify.py \
+    '            record["t_s"] = float(record["t_s"]) + CLOCK_SHIFT_S' \
+    '            record["t_s"] = float(record["t_s"]) + 0.0  # MUTATED: the corruption is a no-op' \
+    "commands round 2: --corrupt clock really shifts every instant, and the verifier catches it" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/verify.py \
+    '            record["aircraft"]["north_m"] += FLIGHT_SHIFT_M' \
+    '            record["aircraft"]["north_m"] += 0.0  # MUTATED: the corruption is a no-op' \
+    "commands round 2: --corrupt flight really moves the aircraft in every view, and the verifier catches it" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/verify.py \
+    '            record["sample_index"] = moved' \
+    '            record["sample_index"] = sample  # MUTATED: the instant stays where the spec schedules it' \
+    "commands round 2: --corrupt schedule really moves an instant off the spec's schedule, and the verifier catches it" \
     tests/test_camera_cli.py || failures=$((failures+1))
 
 echo

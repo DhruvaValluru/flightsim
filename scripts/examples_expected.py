@@ -9,7 +9,7 @@ runs from the committed tree -- ``flightsim.capture`` over
 ``examples/cameras_multi.yaml``, ``cameras_multi_cockpit.yaml``,
 ``cameras_waypoint.yaml`` and ``cameras_refusal.yaml``,
 ``flightsim.verify`` over the first run, ``--against`` over the pair,
-and the four ``--corrupt`` kinds -- and prints each command with its
+and the seven ``--corrupt`` kinds -- and prints each command with its
 exit code, its measured wall time and its stdout VERBATIM, paths
 normalised to ``runs/...`` so the text reads the same from any
 checkout. The section carries the date and the platform it was
@@ -84,6 +84,18 @@ COMMANDS = [
     ("verify --corrupt count: count exactness must FAIL",
      "python -m flightsim.verify runs/demo --corrupt count",
      "verify", ["runs/demo", "--corrupt", "count"]),
+    ("verify --corrupt clock: flight fidelity must FAIL (every instant "
+     "shifted, no sibling run)",
+     "python -m flightsim.verify runs/demo --corrupt clock",
+     "verify", ["runs/demo", "--corrupt", "clock"]),
+    ("verify --corrupt flight: flight fidelity must FAIL (the aircraft "
+     "moved in every view; cross-view still PASSES)",
+     "python -m flightsim.verify runs/demo --corrupt flight",
+     "verify", ["runs/demo", "--corrupt", "flight"]),
+    ("verify --corrupt schedule: schedule fidelity must FAIL (an instant "
+     "the spec does not schedule; every per-record check PASSES)",
+     "python -m flightsim.verify runs/demo --corrupt schedule",
+     "verify", ["runs/demo", "--corrupt", "schedule"]),
 ]
 
 

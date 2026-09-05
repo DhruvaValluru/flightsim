@@ -8,6 +8,7 @@ solver's projection), per the phase rules.
 """
 
 import math
+from pathlib import Path
 
 import pytest
 
@@ -15,8 +16,9 @@ from core.capture.manifest import build_capture_manifest, write_capture_manifest
 from core.capture.poses import euler_to_quat, solve_pose_track
 from core.capture.schedule import solve_schedule
 from core.capture.verify import (
-    project_point, verify_alignment, verify_counts, verify_geometry,
-    verify_run, verify_triangulation,
+    project_point, telemetry_digest, telemetry_state_at, verify_alignment,
+    verify_counts, verify_flight_fidelity, verify_geometry, verify_run,
+    verify_schedule_fidelity, verify_triangulation,
 )
 from core.nl.compiler import compile_prompt
 from core.scenario.camera import CameraSpec
@@ -48,6 +50,25 @@ def manifest_for(spec, columns=None):
 def two_camera_manifest():
     return manifest_for(spec_with(counted("chase", "chase0"),
                                   counted("tower", "tower0")))
+
+
+def write_run(run_dir, spec, columns=None):
+    """A run directory as capture writes it: the manifest, telemetry.json
+    (the columns the manifest was built over, so output_digest is the
+    telemetry's own digest) and scenario.yaml. Returns the manifest."""
+    import json
+
+    columns = columns or make_columns(duration_s=14.0)
+    tracks = [solve_pose_track(columns, c, FRAME) for c in spec.cameras]
+    schedules = [solve_schedule(columns, c, FRAME) for c in spec.cameras]
+    manifest = build_capture_manifest(
+        spec, columns, FRAME, tracks, schedules,
+        output_digest=telemetry_digest(columns))
+    write_capture_manifest(manifest, run_dir)
+    (Path(run_dir) / "telemetry.json").write_text(
+        json.dumps({"columns": columns}), encoding="utf-8")
+    spec.write(Path(run_dir) / "scenario.yaml")
+    return manifest
 
 
 # -- the independent projection, checked against hand arithmetic --------
@@ -756,7 +777,14 @@ def test_every_check_carries_measured_tolerance_and_where(tmp_path):
     report = verify_run(tmp_path)
     data = report.to_dict()
     assert data["ok"] is True and data["ran"] == 5 and data["passed"] == 5
-    assert data["skipped"] == [] and data["awaiting"] == ["engine_parity"]
+    # A manifest alone: the two checks that read the flight and the spec
+    # beside it are SKIPPED by name, never passed.
+    assert data["skipped"] == [
+        {"name": "flight_fidelity",
+         "reason": "no telemetry.json beside the manifest"},
+        {"name": "schedule_fidelity",
+         "reason": "no scenario.yaml or telemetry.json beside the manifest"}]
+    assert data["awaiting"] == ["engine_parity"]
     for check in data["checks"]:
         for key in ("measured_text", "tolerance_text", "where", "status",
                     "skipped_reason"):
@@ -845,15 +873,18 @@ def test_a_skipped_check_is_neither_passed_nor_ran(tmp_path):
         manifest_for(spec_with(counted("chase", "solo"))), tmp_path)
     report = verify_run(tmp_path)
     assert report.ok
-    assert [c.name for c in report.skipped] == ["cross_view_consistency"]
+    assert [c.name for c in report.skipped] == [
+        "cross_view_consistency", "flight_fidelity", "schedule_fidelity"]
     assert report.skipped[0].status == "SKIPPED"
     assert report.passed == 4 and report.ran == 4
     assert report.summary() == (
-        "verification PASSED (4/4 checks; 1 skipped: cross_view_consistency "
-        "(single camera); 1 awaiting engine frames: engine_parity)")
+        "verification PASSED (4/4 checks; 3 skipped: cross_view_consistency "
+        "(single camera), flight_fidelity (no telemetry.json beside the "
+        "manifest), schedule_fidelity (no scenario.yaml or telemetry.json "
+        "beside the manifest); 1 awaiting engine frames: engine_parity)")
     data = report.to_dict()
-    assert data["skipped"] == [{"name": "cross_view_consistency",
-                                "reason": "single camera"}]
+    assert data["skipped"][0] == {"name": "cross_view_consistency",
+                                  "reason": "single camera"}
     assert data["passed"] == 4 and data["ran"] == 4
     assert "[SKIPPED] cross_view_consistency: NOT EXERCISED (single camera)" \
         in report.render()
@@ -888,3 +919,185 @@ def test_alignment_names_the_run_with_the_extra_instant_and_the_gap():
         label_a="demo", label_b="demo_b")
     assert good.ok and good.measured == 0.0
     assert good.where == "15 instants in both runs; worst gap 0 s"
+
+
+# -- the flight the manifest claims to record (checks 6 and 7) ----------
+
+def test_flight_and_schedule_fidelity_pass_on_the_run_that_wrote_them(tmp_path):
+    """telemetry.json and scenario.yaml beside the manifest: every
+    record's instant and aircraft state match the telemetry at its
+    sample, the file digests to output_digest, and the schedule
+    recomputed from the spec's cameras matches instant for instant."""
+    write_run(tmp_path, spec_with(counted("chase", "chase0"),
+                                  counted("tower", "tower0")))
+    report = verify_run(tmp_path)
+    assert report.ok, report.render()
+    by_name = {c.name: c for c in report.checks}
+    assert [c.name for c in report.checks] == [
+        "manifest_version", "fields_finite", "geometry_recovery",
+        "cross_view_consistency", "count_exactness", "flight_fidelity",
+        "schedule_fidelity", "engine_parity"]
+    flight = by_name["flight_fidelity"]
+    assert flight.ok is True and flight.measured == 0.0
+    assert flight.measured_cell == "t 0 s, pos 0 m, att 0 deg"
+    assert flight.tolerance_cell == "1e-09 s, 1e-06 m, 1e-06 deg"
+    assert flight.where.startswith("30 records against 141 samples; digest ")
+    assert flight.data["digests_equal"] is True
+    assert flight.data["positions_compared"] == 30
+    schedule = by_name["schedule_fidelity"]
+    assert schedule.ok is True and schedule.measured == 0.0
+    assert schedule.measured_cell == "0 of 30 instants differ"
+    assert schedule.where == "chase0 15/15, tower0 15/15 (recorded/spec)"
+    assert report.summary() == ("verification PASSED (7/7 checks; 1 "
+                                "awaiting engine frames: engine_parity)")
+
+
+def test_telemetry_state_is_projected_from_lat_lon_without_the_solver():
+    """The verifier's own projection of the telemetry's lat/lon through
+    the manifest's frame block reproduces the manifest's aircraft
+    north/east: the check is against the flight, not the solver."""
+    columns = make_columns(duration_s=14.0)
+    manifest = manifest_for(spec_with(counted("chase", "chase0")), columns)
+    for record in manifest["frames"]:
+        state = telemetry_state_at(columns, manifest["frame"],
+                                   record["sample_index"])
+        assert state["north_m"] == pytest.approx(
+            record["aircraft"]["north_m"], abs=1e-9)
+        assert state["east_m"] == pytest.approx(
+            record["aircraft"]["east_m"], abs=1e-9)
+        assert state["alt_m"] == record["aircraft"]["alt_m"]
+        assert state["t_s"] == record["t_s"]
+    # No frame block, no lat/lon: north/east are None, never guessed.
+    assert telemetry_state_at(columns, None, 0)["north_m"] is None
+    assert telemetry_state_at({"t": [0.0]}, manifest["frame"], 0) == {
+        "t_s": 0.0, "alt_m": None, "roll_deg": None, "pitch_deg": None,
+        "heading_deg": None, "north_m": None, "east_m": None}
+
+
+def test_flight_fidelity_catches_the_aircraft_moved_in_every_view(tmp_path):
+    """The judge's case: every record's aircraft north += 50 m in BOTH
+    cameras. The views still agree with each other (cross-view PASSES)
+    and only the telemetry says the aircraft was elsewhere."""
+    manifest = write_run(tmp_path, spec_with(counted("chase", "chase0"),
+                                             counted("tower", "tower0")))
+    for record in manifest["frames"]:
+        record["aircraft"]["north_m"] += 50.0
+    write_capture_manifest(manifest, tmp_path)
+    report = verify_run(tmp_path)
+    assert report.ok is False
+    assert [c.name for c in report.failed] == ["flight_fidelity"]
+    by_name = {c.name: c for c in report.checks}
+    assert by_name["cross_view_consistency"].ok is True
+    flight = by_name["flight_fidelity"]
+    assert flight.measured == pytest.approx(50.0, abs=1e-6)
+    assert flight.unit == "m" and flight.tolerance == 1e-6
+    assert flight.where.startswith(
+        "aircraft position differs from the telemetry by 50.000 m at chase0 #")
+    assert "(recorded aircraft " in flight.where and "; telemetry " in flight.where
+    assert flight.measured_cell.startswith("t 0 s, pos 50 m, att 0 deg")
+
+
+def test_flight_fidelity_catches_a_shifted_clock_and_a_swapped_flight(tmp_path):
+    columns = make_columns(duration_s=14.0)
+    manifest = write_run(tmp_path, spec_with(counted("chase", "chase0")),
+                         columns)
+    # Every t_s += 0.5 s, sample_index untouched: the instants are not
+    # the telemetry's own at those samples.
+    shifted = {**manifest, "frames": [dict(r, t_s=r["t_s"] + 0.5)
+                                      for r in manifest["frames"]]}
+    check = verify_flight_fidelity(shifted, columns)
+    assert check.ok is False
+    assert check.measured_cell == "t 0.5 s, pos 0 m, att 0 deg"
+    assert check.where.startswith(
+        "instant differs from the telemetry by 0.500000 s at chase0 #")
+    assert "(telemetry t=" in check.where and " at sample " in check.where
+    # Attitude: one record's heading moved by 1e-3 deg is caught too.
+    turned = {**manifest, "frames": [dict(r, aircraft=dict(
+        r["aircraft"], heading_deg=r["aircraft"]["heading_deg"] + 1e-3))
+        for r in manifest["frames"]]}
+    check = verify_flight_fidelity(turned, columns)
+    assert check.ok is False
+    assert "aircraft attitude differs from the telemetry by 0.001000 deg" \
+        in check.detail
+    # A different flight beside the manifest: the digests disagree, by
+    # name, even where the samples happen to line up.
+    other = make_columns(duration_s=14.0, altitude=lambda t: 1000.0 + t)
+    check = verify_flight_fidelity(manifest, other)
+    assert check.ok is False
+    assert (f"telemetry.json digests to {telemetry_digest(other)[:16]}, not "
+            f"the manifest's output_digest {manifest['output_digest'][:16]}"
+            in check.detail)
+    assert check.data["digests_equal"] is False
+    # A record pointing past the end of the telemetry is named.
+    short = {name: values[:10] for name, values in columns.items()}
+    check = verify_flight_fidelity(manifest, short)
+    assert check.ok is False
+    assert "sample_index" in check.detail and "outside the telemetry's 10 " \
+        "samples" in check.detail
+    assert check.data["out_of_range"] == sum(
+        1 for r in manifest["frames"] if r["sample_index"] >= 10)
+    # Nothing beside the manifest: SKIPPED by name.
+    check = verify_flight_fidelity(manifest, None)
+    assert check.ok is None and check.status == "SKIPPED"
+    assert check.skipped == "no telemetry.json beside the manifest"
+
+
+def test_schedule_fidelity_catches_an_instant_the_spec_did_not_schedule(
+        tmp_path):
+    """One shared instant moved one telemetry sample later with the
+    flight's own state at that sample copied in: every per-record check
+    passes (the records ARE the flight at that sample); only the
+    schedule recomputed from the spec's cameras over the telemetry says
+    the instant is not one the cameras capture."""
+    columns = make_columns(duration_s=14.0)
+    manifest = write_run(tmp_path, spec_with(counted("chase", "chase0"),
+                                             counted("tower", "tower0")),
+                         columns)
+    middle = manifest["frames"][7]
+    sample = middle["sample_index"]
+    moved = telemetry_state_at(columns, manifest["frame"], sample + 1)
+    touched = 0
+    for record in manifest["frames"]:
+        if record["sample_index"] == sample:
+            record["sample_index"] = sample + 1
+            record["t_s"] = moved["t_s"]
+            for key in ("north_m", "east_m", "alt_m", "roll_deg",
+                        "pitch_deg", "heading_deg"):
+                record["aircraft"][key] = moved[key]
+            touched += 1
+    assert touched == 2
+    write_capture_manifest(manifest, tmp_path)
+    report = verify_run(tmp_path)
+    assert [c.name for c in report.failed] == ["schedule_fidelity"]
+    by_name = {c.name: c for c in report.checks}
+    assert by_name["flight_fidelity"].ok is True
+    assert by_name["cross_view_consistency"].ok is True
+    schedule = by_name["schedule_fidelity"]
+    assert schedule.measured == 2.0 and schedule.unit == "instants"
+    assert schedule.measured_cell == "2 of 30 instants differ"
+    assert schedule.where == (
+        f"2 of 30 instants differ from the spec's schedule; worst chase0 #7 "
+        f"at sample {sample + 1} t={moved['t_s']:.3f} s where the spec "
+        f"schedules sample {sample} t={columns['t'][sample]:.3f} s")
+    # A camera the spec does not carry, and a count the spec does not
+    # schedule, are named too.
+    from core.scenario.spec import ScenarioSpec
+
+    spec = ScenarioSpec.read(tmp_path / "scenario.yaml")
+    stray = dict(manifest, frames=manifest["frames"]
+                 + [dict(manifest["frames"][0], camera_id="ghost")])
+    check = verify_schedule_fidelity(stray, spec, columns)
+    assert check.ok is False
+    assert "ghost: recorded in the manifest but not a camera of the spec" \
+        in check.detail
+    fewer = dict(manifest, frames=manifest["frames"][:-1])
+    check = verify_schedule_fidelity(fewer, spec, columns)
+    assert check.ok is False
+    assert "tower0: 14 recorded instants against 15 the spec schedules" \
+        in check.detail
+    # Without the spec, or the telemetry: SKIPPED by name.
+    check = verify_schedule_fidelity(manifest, None, columns)
+    assert check.status == "SKIPPED"
+    assert check.skipped == "no scenario.yaml beside the manifest"
+    check = verify_schedule_fidelity(manifest, spec, None)
+    assert check.skipped == "no telemetry.json beside the manifest"

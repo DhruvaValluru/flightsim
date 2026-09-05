@@ -41,7 +41,18 @@ named check with exit 1:
   (temporal_alignment against ``--against``, which defaults to the
   original run: the instant sets differ);
 * ``count``      -- the first camera's last frame record dropped
-  (count_exactness: 23 against a declared 24).
+  (count_exactness: 23 against a declared 24);
+* ``clock``      -- EVERY record's t_s += 0.5 s, sample_index untouched
+  (flight_fidelity: the instants are not the telemetry's own at those
+  samples; schedule_fidelity fails beside it);
+* ``flight``     -- EVERY camera's every record: aircraft north += 50 m
+  (flight_fidelity: the two views still agree with each other, so
+  cross_view_consistency PASSES -- only the telemetry tells);
+* ``schedule``   -- one shared instant (the middle record of the first
+  camera, and every other camera's record at that sample) moved ONE
+  telemetry sample later with the flight's state at that sample copied
+  in, so every per-record check passes (schedule_fidelity: the instant
+  is not the one the spec's cameras schedule over this telemetry).
 
 Exit codes (one table with flightsim.capture): 0 verified ("verified:"
 line); 1 FAILED (a check FAILED; "FAILED verification:" line); 2
@@ -66,12 +77,20 @@ from flightsim.report import (  # noqa: E402
     flight_words_from_run, header, run_command, schedule_tables,
 )
 
-CORRUPT_KINDS = ("quaternion", "aircraft", "time", "count")
+CORRUPT_KINDS = ("quaternion", "aircraft", "time", "count", "clock",
+                 "flight", "schedule")
 #: The check each corruption must fail, by name.
 CORRUPT_FAILS = {"quaternion": "geometry_recovery",
                  "aircraft": "cross_view_consistency",
                  "time": "temporal_alignment",
-                 "count": "count_exactness"}
+                 "count": "count_exactness",
+                 "clock": "flight_fidelity",
+                 "flight": "flight_fidelity",
+                 "schedule": "schedule_fidelity"}
+#: Corruptions the judge's own demonstration showed the round-1 verifier
+#: passing 5/5: the shift each applies, stated so the output can say it.
+CLOCK_SHIFT_S = 0.5
+FLIGHT_SHIFT_M = 50.0
 
 
 def build_parser() -> ReportParser:
@@ -167,6 +186,69 @@ def corrupt_manifest(run_dir: Path, kind: str) -> Tuple[Path, str, Dict]:
                  f"{len(own)}")
         edit = {"camera_id": cameras[0], "dropped_index": last["index"],
                 "declared": len(own)}
+    elif kind == "clock":
+        count = 0
+        for record in frames:
+            record["t_s"] = float(record["t_s"]) + CLOCK_SHIFT_S
+            count += 1
+        words = (f"corrupted every record ({count} frames, both the "
+                 f"sample_index and the aircraft state untouched): t_s += "
+                 f"{CLOCK_SHIFT_S:g} s; the records still agree with each "
+                 f"other, only the telemetry's clock says otherwise")
+        edit = {"frames": count, "field": "t_s", "delta_s": CLOCK_SHIFT_S}
+    elif kind == "flight":
+        count = 0
+        for record in frames:
+            record["aircraft"]["north_m"] += FLIGHT_SHIFT_M
+            count += 1
+        words = (f"corrupted every camera's every record ({count} frames): "
+                 f"aircraft north_m += {FLIGHT_SHIFT_M:g} m; the views still "
+                 f"agree with EACH OTHER (cross_view_consistency passes), "
+                 f"only the telemetry says the aircraft was elsewhere")
+        edit = {"frames": count, "field": "aircraft.north_m",
+                "delta_m": FLIGHT_SHIFT_M}
+    elif kind == "schedule":
+        from core.capture.verify import (
+            read_telemetry_columns, telemetry_state_at,
+        )
+
+        columns = read_telemetry_columns(run_dir)
+        if columns is None:
+            raise UsageError(f"{run_dir}: --corrupt schedule needs "
+                             f"telemetry.json beside the manifest to copy "
+                             f"the flight's state from")
+        own = [r for r in frames if r["camera_id"] == cameras[0]]
+        target = own[len(own) // 2]
+        sample = int(target["sample_index"])
+        moved = sample + 1
+        taken = {int(r["sample_index"]) for r in own}
+        if moved >= len(columns["t"]) or moved in taken:
+            raise UsageError(f"{run_dir}: camera {cameras[0]!r} has no free "
+                             f"telemetry sample after sample {sample} to "
+                             f"move its middle instant to")
+        flight = telemetry_state_at(columns, manifest.get("frame"), moved)
+        before_t = float(target["t_s"])
+        touched = []
+        for record in frames:
+            if int(record["sample_index"]) != sample:
+                continue
+            record["sample_index"] = moved
+            record["t_s"] = flight["t_s"]
+            for key in ("north_m", "east_m", "alt_m", "roll_deg",
+                        "pitch_deg", "heading_deg"):
+                if flight[key] is not None:
+                    record["aircraft"][key] = flight[key]
+            touched.append(f"{record['camera_id']} #{record['index']}")
+        words = (f"corrupted the instant at sample {sample} "
+                 f"(t={before_t:.3f} s -> sample {moved}, "
+                 f"t={flight['t_s']:.3f} s) on {', '.join(touched)}: "
+                 f"sample_index, t_s and the aircraft state moved one "
+                 f"telemetry sample later, the flight's own state at that "
+                 f"sample copied in, so every per-record check still "
+                 f"passes; only the schedule recomputed from the spec says "
+                 f"the instant is wrong")
+        edit = {"frames": touched, "from_sample": sample, "to_sample": moved,
+                "to_t_s": flight["t_s"]}
     else:
         raise UsageError(f"unknown --corrupt kind {kind!r}")
 

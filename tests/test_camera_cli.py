@@ -261,10 +261,11 @@ def test_a_headless_run_verifies_and_never_says_refused(tmp_path, capsys,
                          "--render", "none"]) == 0
     text = capsys.readouterr().out
     for check in ("manifest_version", "fields_finite", "geometry_recovery",
-                  "cross_view_consistency", "count_exactness"):
+                  "cross_view_consistency", "count_exactness",
+                  "flight_fidelity", "schedule_fidelity"):
         assert f"[PASS] {check}" in text, check
     assert "[AWAITING] engine_parity: awaiting engine frames" in text
-    assert "verification PASSED (5/5 checks; 1 awaiting engine frames" in text
+    assert "verification PASSED (7/7 checks; 1 awaiting engine frames" in text
     assert "REFUSED" not in text
     assert ("engine absent: no engine on this OS: the render half needs "
             "macOS, or Windows with Unreal Engine 5.5; frames not rendered "
@@ -287,7 +288,7 @@ def test_a_headless_run_verifies_and_never_says_refused(tmp_path, capsys,
     text = capsys.readouterr().out
     assert "render: none (headless by choice" in text
     assert "REFUSED" not in text and "engine absent" not in text
-    assert "verification PASSED (5/5 checks" in text
+    assert "verification PASSED (7/7 checks" in text
 
 
 def test_a_manifest_that_fails_its_own_verification_fails_the_run(
@@ -499,7 +500,7 @@ def test_render_clip_is_the_single_preset_pass(tmp_path, capsys, cli_engine):
     assert not (out / "frames").exists()
     # The clip mode verified the manifest it wrote, before the pass.
     assert "[AWAITING] engine_parity" in text
-    assert "verification PASSED (5/5 checks" in text
+    assert "verification PASSED (7/7 checks" in text
     assert text.index("verification PASSED") < text.index("engine pass:")
     clip_card = json.loads((out / "clip_card.json").read_text(encoding="utf-8"))
     assert "cameras" not in clip_card
@@ -531,7 +532,8 @@ def test_run_json_records_the_render_choice_and_verify_json_in_every_mode(
         assert verify["ok"] is True
         assert [c["name"] for c in verify["checks"]] == [
             "manifest_version", "fields_finite", "geometry_recovery",
-            "cross_view_consistency", "count_exactness", "engine_parity"]
+            "cross_view_consistency", "count_exactness", "flight_fidelity",
+            "schedule_fidelity", "engine_parity"]
         # The file says what the table said.
         for check in verify["checks"]:
             assert f"[{check['status']}] {check['name']}: " in text, check
@@ -545,7 +547,7 @@ def test_run_json_records_the_render_choice_and_verify_json_in_every_mode(
                     engine_unavailable_reason="no engine on this OS (test)")
     engine = verify["checks"][-1]
     assert engine["status"] == "AWAITING" and engine["ok"] is None
-    assert verify["awaiting"] == ["engine_parity"] and verify["ran"] == 5
+    assert verify["awaiting"] == ["engine_parity"] and verify["ran"] == 7
     assert engine["data"]["cameras"]["chase0"] == {
         "scheduled": 24, "rendered": 0, "verified": 0}
     # flightsim.verify over the directory prints exactly the file's checks.
@@ -567,7 +569,7 @@ def test_run_json_records_the_render_choice_and_verify_json_in_every_mode(
     assert engine["status"] == "PASS"
     assert engine["data"]["cameras"]["tower0"] == {
         "scheduled": 24, "rendered": 24, "verified": 24}
-    assert verify["awaiting"] == [] and verify["ran"] == 6
+    assert verify["awaiting"] == [] and verify["ran"] == 8
     assert [p["camera_id"] for p in run_json["render_passes"]] == ["chase0", "tower0"]
 
     # Clip: the choice is recorded and the manifest verified (parity awaiting).
@@ -879,7 +881,7 @@ def test_the_verification_table_has_measured_tolerance_status_and_where(
     # The detail lines follow, then the summary, then the verdict.
     lines = text.splitlines()
     assert "  detail:" in lines
-    assert "verification PASSED (5/5 checks; 1 awaiting engine frames: " \
+    assert "verification PASSED (7/7 checks; 1 awaiting engine frames: " \
            "engine_parity)" in lines
     assert lines[-1].startswith("done: ")
 
@@ -930,6 +932,22 @@ def test_json_gives_the_same_document_as_the_text(tmp_path):
             assert key in check, (check["name"], key)
 
 
+#: Every check each corruption fails, exactly: the named one first, and
+#: the checks that see the same damage from their own side (a clock
+#: shifted on every record is not the telemetry's clock AND not the
+#: spec's schedule; one instant moved a step is seen by the flight, the
+#: schedule and the sibling run).
+CORRUPT_FAILS_EXACTLY = {
+    "quaternion": ["geometry_recovery"],
+    "aircraft": ["cross_view_consistency", "flight_fidelity"],
+    "time": ["flight_fidelity", "schedule_fidelity", "temporal_alignment"],
+    "count": ["count_exactness", "schedule_fidelity"],
+    "clock": ["flight_fidelity", "schedule_fidelity"],
+    "flight": ["flight_fidelity"],
+    "schedule": ["schedule_fidelity"],
+}
+
+
 @pytest.mark.parametrize("kind, check, offender", [
     ("quaternion", "geometry_recovery", "worst chase0 #3 t=1.608 s"),
     ("aircraft", "cross_view_consistency",
@@ -938,6 +956,19 @@ def test_json_gives_the_same_document_as_the_text(tmp_path):
      "25 instants in corrupt_time vs 24 in report0; only in corrupt_time: "
      "t=1.616667 s"),
     ("count", "count_exactness", "chase0 23/24, tower0 24/24"),
+    ("clock", "flight_fidelity",
+     re.compile(r"instant differs from the telemetry by 0\.500000 s at "
+                r"chase0 #\d+ t=\d+\.\d{3} s \(telemetry t=\d+\.\d{6} s "
+                r"at sample \d+\)")),
+    ("flight", "flight_fidelity",
+     re.compile(r"aircraft position differs from the telemetry by 50\.000 m "
+                r"at chase0 #\d+ t=\d+\.\d{3} s \(recorded aircraft "
+                r"-?\d+\.\d{3} N, -?\d+\.\d{3} E, \d+\.\d{3} m; telemetry "
+                r"-?\d+\.\d{3} N, -?\d+\.\d{3} E, \d+\.\d{3} m at sample "
+                r"\d+\)")),
+    ("schedule", "schedule_fidelity",
+     "2 of 48 instants differ from the spec's schedule; worst chase0 #12 at "
+     "sample 60 t=6.283 s where the spec schedules sample 59 t=6.183 s"),
 ])
 def test_corrupt_fails_the_named_check_with_exit_1(report_run, kind, check,
                                                     offender):
@@ -955,12 +986,26 @@ def test_corrupt_fails_the_named_check_with_exit_1(report_run, kind, check,
     assert lines[1] == f"  expected: [FAIL] {check}, exit 1"
     rows = verification_rows(text)
     assert rows[check][0] == "FAIL"
-    assert rows[check][3] == offender.replace("report0", out.name), rows[check]
+    if isinstance(offender, str):
+        assert rows[check][3] == offender.replace("report0", out.name), \
+            rows[check]
+    else:
+        assert offender.fullmatch(rows[check][3]), rows[check]
     failed = [name for name, row in rows.items() if row[0] == "FAIL"]
-    assert failed == [check]
+    assert failed == CORRUPT_FAILS_EXACTLY[kind]
+    if kind == "flight":
+        # The two views still agree with EACH OTHER: only the flight tells.
+        assert rows["cross_view_consistency"][0] == "PASS"
+    if kind == "schedule":
+        # The moved records ARE the flight at their new sample.
+        assert rows["flight_fidelity"][0] == "PASS"
+        assert rows["cross_view_consistency"][0] == "PASS"
     assert f"[FAIL] {check}:" in text
-    assert lines[-1].startswith(f"FAILED verification: as expected for "
-                                f"--corrupt {kind}, {check} FAILED; ")
+    also = CORRUPT_FAILS_EXACTLY[kind][:]
+    also.remove(check)
+    assert lines[-1].startswith(
+        f"FAILED verification: as expected for --corrupt {kind}, {check} "
+        f"FAILED" + (f" (also: {', '.join(also)})" if also else "") + "; ")
     assert (out / f"corrupt_{kind}" / "capture_manifest.json").is_file()
     assert (out / f"corrupt_{kind}" / "verify.json").is_file()
     # The original is untouched: it still verifies.
@@ -995,6 +1040,90 @@ def test_corrupt_measures_the_damage(report_run):
     assert rows["count_exactness"][1:3] == ("47 frames = 23 + 24",
                                             "exactly 48")
     assert "(missing index 23)" in text
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        verify_main([str(out), "--corrupt", "clock"])
+    rows = verification_rows(buffer.getvalue())
+    assert rows["flight_fidelity"][1:3] == ("t 0.5 s, pos 0 m, att 0 deg",
+                                            "1e-09 s, 1e-06 m, 1e-06 deg")
+    assert rows["schedule_fidelity"][1:3] == ("48 of 48 instants differ",
+                                              "0 differ")
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        verify_main([str(out), "--corrupt", "flight"])
+    rows = verification_rows(buffer.getvalue())
+    assert rows["flight_fidelity"][1] == "t 0 s, pos 50 m, att 0 deg"
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        verify_main([str(out), "--corrupt", "schedule"])
+    rows = verification_rows(buffer.getvalue())
+    assert rows["schedule_fidelity"][1:3] == ("2 of 48 instants differ",
+                                              "0 differ")
+    assert rows["flight_fidelity"][1] == "t 0 s, pos 0 m, att 0 deg"
+
+
+def test_the_verifier_reads_the_flight_not_only_the_manifest(report_run,
+                                                              tmp_path):
+    """The judge's demonstration against round 1, now a test: a manifest
+    that disagrees with telemetry.json or with the spec's schedule
+    FAILS its own verification, with no sibling run to align against.
+    Round 1 passed all three 5/5."""
+    import shutil
+
+    out, _ = report_run
+    # (1) every record's aircraft north += 50 m, both cameras.
+    moved = tmp_path / "moved"
+    shutil.copytree(out, moved, ignore=shutil.ignore_patterns("corrupt_*"))
+    manifest = json.loads(
+        (moved / "capture_manifest.json").read_text(encoding="utf-8"))
+    for record in manifest["frames"]:
+        record["aircraft"]["north_m"] += 50.0
+    (moved / "capture_manifest.json").write_text(json.dumps(manifest),
+                                                 encoding="utf-8")
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(moved)]) == 1
+    rows = verification_rows(buffer.getvalue())
+    assert rows["flight_fidelity"][0] == "FAIL"
+    assert rows["cross_view_consistency"][0] == "PASS"
+    # (2) every t_s += 0.5 s, sample_index untouched.
+    late = tmp_path / "late"
+    shutil.copytree(out, late, ignore=shutil.ignore_patterns("corrupt_*"))
+    manifest = json.loads(
+        (late / "capture_manifest.json").read_text(encoding="utf-8"))
+    for record in manifest["frames"]:
+        record["t_s"] += 0.5
+    (late / "capture_manifest.json").write_text(json.dumps(manifest),
+                                                encoding="utf-8")
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(late)]) == 1
+    rows = verification_rows(buffer.getvalue())
+    assert rows["flight_fidelity"][0] == "FAIL"
+    assert rows["schedule_fidelity"][0] == "FAIL"
+    # (3) the --corrupt time copy, verified ALONE (no --against).
+    with contextlib.redirect_stdout(io.StringIO()):
+        verify_main([str(out), "--corrupt", "time"])
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(out / "corrupt_time")]) == 1
+    rows = verification_rows(buffer.getvalue())
+    assert rows["flight_fidelity"][0] == "FAIL"
+    assert "temporal_alignment" not in rows
+    # A telemetry.json that is not this flight's is named by digest.
+    swapped = tmp_path / "swapped"
+    shutil.copytree(out, swapped, ignore=shutil.ignore_patterns("corrupt_*"))
+    telemetry = json.loads(
+        (swapped / "telemetry.json").read_text(encoding="utf-8"))
+    telemetry["columns"]["altitude_m"][-1] += 1.0
+    (swapped / "telemetry.json").write_text(json.dumps(telemetry),
+                                            encoding="utf-8")
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(swapped)]) == 1
+    text = buffer.getvalue()
+    assert "telemetry.json digests to " in text
+    assert "not the manifest's output_digest" in text
 
 
 def test_a_corruption_the_verifier_misses_is_unexpected_not_caught(
@@ -1061,7 +1190,7 @@ def test_the_committed_cockpit_example_aligns_with_cameras_multi(report_run,
     assert rows["temporal_alignment"] == (
         "PASS", "0 s", "1e-09 s", "24 instants in both runs; worst gap 0 s")
     assert rows["cross_view_consistency"][0] == "SKIPPED"
-    assert ("verification PASSED (5/5 checks; 1 skipped: "
+    assert ("verification PASSED (7/7 checks; 1 skipped: "
             "cross_view_consistency (single camera); 1 awaiting engine "
             "frames: engine_parity)") in text
     assert text.splitlines()[-1].startswith(
@@ -1154,7 +1283,7 @@ def test_the_documents_expected_output_matches_a_fresh_run(tmp_path):
     doc = module.doc_blocks(module.DOC.read_text(encoding="utf-8"))
     fresh = module.generate(tmp_path / "runs_root")
     assert [b["command"] for b in doc] == [r["command"] for r in fresh]
-    assert len(doc) == len(module.COMMANDS) == 10
+    assert len(doc) == len(module.COMMANDS) == 13
     for expected, actual in zip(doc, fresh):
         assert expected["code"] == actual["code"], expected["command"]
         want = module.shape(expected["text"])
@@ -1162,5 +1291,5 @@ def test_the_documents_expected_output_matches_a_fresh_run(tmp_path):
         assert want == got, (expected["command"],
                              [pair for pair in zip(want, got)
                               if pair[0] != pair[1]][:3])
-    # The blocks say what they are: exit codes 0/0/0/0/0/2/1/1/1/1.
-    assert [b["code"] for b in doc] == [0, 0, 0, 0, 0, 2, 1, 1, 1, 1]
+    # The blocks say what they are: exit codes 0/0/0/0/0/2 then seven 1s.
+    assert [b["code"] for b in doc] == [0, 0, 0, 0, 0, 2, 1, 1, 1, 1, 1, 1, 1]

@@ -55,6 +55,27 @@ Checks (numbered as in the phase document):
    state that neither passes nor fails, so a headless run can never
    claim parity it did not exercise and never fails for lacking an
    engine.
+6. **Flight fidelity** (:func:`verify_flight_fidelity`) -- the manifest
+   against the flight it claims to record: ``telemetry.json`` beside
+   the manifest must digest to the manifest's ``output_digest`` (the
+   same hash the runner computes, reimplemented here), and EVERY frame
+   record's ``t_s`` must be the telemetry's own ``t`` at its
+   ``sample_index`` and its recorded aircraft altitude, attitude and --
+   when the record carries ``lat_deg``/``lon_deg`` -- local north/east
+   (projected here through the manifest's own frame block with pyproj,
+   never the pose solver) must equal the telemetry at that sample to
+   representation tolerance. Checks 2 and 3 grade records against each
+   other; this one grades them against the flight, so two views that
+   agree with each other but not with the telemetry FAIL here.
+7. **Schedule fidelity** (:func:`verify_schedule_fidelity`) -- the
+   capture schedule recomputed from ``scenario.yaml``'s cameras over
+   ``telemetry.json`` (:mod:`core.capture.schedule`) must match the
+   manifest's instants sample-for-sample, per camera, so a shifted
+   clock or a moved instant is caught by the run's own verification,
+   without a sibling run to align against.
+
+Checks 6 and 7 are SKIPPED by name when the file they need is not
+beside the manifest; a skipped check is never a pass.
 """
 
 from __future__ import annotations
@@ -73,6 +94,20 @@ TRIANGULATION_TOL_M = 0.5
 #: Frame-time agreement across runs (times come off the same recorded
 #: telemetry clock, so this is a float-representation tolerance).
 TIME_TOL_S = 1e-9
+
+#: Flight fidelity (check 6): the manifest's per-frame aircraft state
+#: and instant against telemetry.json at the record's sample. The
+#: manifest copies the telemetry's own numbers (altitude, attitude, t)
+#: and projects lat/lon through the same CRS, so every tolerance is
+#: representation slack, never a physical allowance: a record that
+#: differs from the flight by more than this describes a different
+#: flight.
+FLIGHT_TIME_TOL_S = 1e-9
+FLIGHT_POSITION_TOL_M = 1e-6
+FLIGHT_ANGLE_TOL_DEG = 1e-6
+#: The files checks 6 and 7 read beside the manifest.
+TELEMETRY_FILE = "telemetry.json"
+SCENARIO_FILE = "scenario.yaml"
 
 #: Engine parity (check 5): the pose the engine APPLIED, written back per
 #: frame by the render commandlet's consume-poses pass, against the pose
@@ -651,6 +686,290 @@ def verify_counts(manifest: Dict) -> Check:
                  tolerance_text=f"exactly {declared_total}",
                  where=", ".join(per_camera) or "no cameras",
                  data={"cameras": counts})
+
+
+# -- the flight the manifest claims to record ---------------------------
+
+def read_telemetry_columns(run_dir) -> Optional[Dict[str, List[float]]]:
+    """The recorded telemetry columns beside a manifest
+    (``telemetry.json``, the recorder's own JSON: ``columns`` keyed by
+    channel), or None when the file is not there."""
+    path = Path(run_dir) / TELEMETRY_FILE
+    if not path.is_file():
+        return None
+    record = json.loads(path.read_text(encoding="utf-8"))
+    columns = record.get("columns", record)
+    if not isinstance(columns, dict) or "t" not in columns:
+        return None
+    return columns
+
+
+def telemetry_digest(columns: Dict[str, Sequence[float]]) -> str:
+    """SHA-256 over the recorded columns, exactly as the runner
+    computes ``output_digest`` (names sorted, every value's ``repr``):
+    reimplemented here so the verifier does not import the producer."""
+    import hashlib
+
+    h = hashlib.sha256()
+    for name in sorted(columns):
+        h.update(name.encode())
+        for value in columns[name]:
+            h.update(repr(value).encode())
+    return h.hexdigest()
+
+
+def telemetry_state_at(columns: Dict[str, Sequence[float]],
+                       frame_block: Optional[Dict], sample_index: int
+                       ) -> Dict[str, Optional[float]]:
+    """The flight at one telemetry sample, in the manifest's own frame:
+    ``t_s``, ``alt_m``, ``roll_deg``, ``pitch_deg``, ``heading_deg``
+    and, when the record carries ``lat_deg``/``lon_deg`` and the
+    manifest names its CRS and projected origin, ``north_m``/``east_m``
+    projected HERE with pyproj (the manifest's documented frame: the
+    CRS, minus the origin's projected coordinates) -- never through the
+    pose solver's SceneFrame."""
+    i = int(sample_index)
+    state: Dict[str, Optional[float]] = {
+        "t_s": float(columns["t"][i]),
+        "alt_m": float(columns["altitude_m"][i])
+        if "altitude_m" in columns else None,
+        "roll_deg": float(columns["roll_deg"][i])
+        if "roll_deg" in columns else None,
+        "pitch_deg": float(columns["pitch_deg"][i])
+        if "pitch_deg" in columns else None,
+        "heading_deg": float(columns["heading_deg"][i])
+        if "heading_deg" in columns else None,
+        "north_m": None, "east_m": None,
+    }
+    block = frame_block or {}
+    if ("lat_deg" in columns and "lon_deg" in columns and block.get("crs")
+            and block.get("origin_x_m") is not None
+            and block.get("origin_y_m") is not None):
+        from pyproj import Transformer
+
+        forward = Transformer.from_crs("EPSG:4326", str(block["crs"]),
+                                       always_xy=True)
+        x, y = forward.transform(float(columns["lon_deg"][i]),
+                                 float(columns["lat_deg"][i]))
+        state["north_m"] = float(y) - float(block["origin_y_m"])
+        state["east_m"] = float(x) - float(block["origin_x_m"])
+    return state
+
+
+def verify_flight_fidelity(manifest: Dict,
+                           columns: Optional[Dict[str, Sequence[float]]],
+                           time_tol_s: float = FLIGHT_TIME_TOL_S,
+                           position_tol_m: float = FLIGHT_POSITION_TOL_M,
+                           angle_tol_deg: float = FLIGHT_ANGLE_TOL_DEG
+                           ) -> Check:
+    """Check 6: every record's instant and aircraft state against the
+    telemetry at its sample, and the telemetry's digest against the
+    manifest's ``output_digest``. ``columns`` None: SKIPPED by name."""
+    tolerance_text = (f"{time_tol_s:g} s, {position_tol_m:g} m, "
+                      f"{angle_tol_deg:g} deg")
+    if columns is None:
+        return Check("flight_fidelity", None,
+                     f"NOT EXERCISED (no {TELEMETRY_FILE} beside the "
+                     f"manifest): the records were not compared with the "
+                     f"flight; verify the run directory capture wrote",
+                     skipped=f"no {TELEMETRY_FILE} beside the manifest",
+                     tolerance_text=tolerance_text,
+                     data={"telemetry": None})
+    frames = manifest.get("frames", [])
+    n = len(columns.get("t", []))
+    frame_block = manifest.get("frame") or {}
+    problems: List[str] = []
+    worst = {"time_s": 0.0, "position_m": 0.0, "angle_deg": 0.0}
+    worst_at = {"time_s": None, "position_m": None, "angle_deg": None}
+    positions_compared = 0
+    out_of_range = 0
+    for record in frames:
+        here = _frame_words(record)
+        i = int(record["sample_index"])
+        if not 0 <= i < n:
+            out_of_range += 1
+            problems.append(f"{here}: sample_index {i} outside the "
+                            f"telemetry's {n} samples")
+            continue
+        flight = telemetry_state_at(columns, frame_block, i)
+        gap_t = abs(float(record["t_s"]) - flight["t_s"])
+        if worst_at["time_s"] is None or gap_t > worst["time_s"]:
+            worst["time_s"], worst_at["time_s"] = gap_t, (
+                f"{here} (telemetry t={flight['t_s']:.6f} s at sample {i})")
+        aircraft = record["aircraft"]
+        gaps = []
+        if flight["alt_m"] is not None:
+            gaps.append(abs(float(aircraft["alt_m"]) - flight["alt_m"]))
+        if flight["north_m"] is not None:
+            gaps.append(abs(float(aircraft["north_m"]) - flight["north_m"]))
+            gaps.append(abs(float(aircraft["east_m"]) - flight["east_m"]))
+            positions_compared += 1
+        gap_p = math.sqrt(sum(g * g for g in gaps)) if gaps else 0.0
+        if worst_at["position_m"] is None or gap_p > worst["position_m"]:
+            worst["position_m"], worst_at["position_m"] = gap_p, (
+                f"{here} (recorded aircraft "
+                f"{float(aircraft['north_m']):.3f} N, "
+                f"{float(aircraft['east_m']):.3f} E, "
+                f"{float(aircraft['alt_m']):.3f} m; telemetry "
+                + (f"{flight['north_m']:.3f} N, {flight['east_m']:.3f} E, "
+                   if flight["north_m"] is not None else "")
+                + (f"{flight['alt_m']:.3f} m" if flight["alt_m"] is not None
+                   else "no altitude channel")
+                + f" at sample {i})")
+        gap_a = 0.0
+        for key in ("roll_deg", "pitch_deg", "heading_deg"):
+            if flight[key] is not None:
+                gap_a = max(gap_a, _angle_gap_deg(aircraft[key], flight[key]))
+        if worst_at["angle_deg"] is None or gap_a > worst["angle_deg"]:
+            worst["angle_deg"], worst_at["angle_deg"] = gap_a, here
+    if worst["time_s"] > time_tol_s:
+        problems.append(f"instant differs from the telemetry by "
+                        f"{worst['time_s']:.6f} s at {worst_at['time_s']}")
+    if worst["position_m"] > position_tol_m:
+        problems.append(f"aircraft position differs from the telemetry "
+                        f"by {worst['position_m']:.3f} m at "
+                        f"{worst_at['position_m']}")
+    if worst["angle_deg"] > angle_tol_deg:
+        problems.append(f"aircraft attitude differs from the telemetry "
+                        f"by {worst['angle_deg']:.6f} deg at "
+                        f"{worst_at['angle_deg']}")
+    digest = telemetry_digest(columns)
+    digests_equal = digest == manifest.get("output_digest")
+    if not digests_equal:
+        problems.append(f"{TELEMETRY_FILE} digests to {digest[:16]}, not "
+                        f"the manifest's output_digest "
+                        f"{str(manifest.get('output_digest'))[:16]}: this "
+                        f"is not the flight the manifest records")
+    ok = not problems and bool(frames)
+    if not frames:
+        problems.append("no frame records to compare with the flight")
+    measured_text = (f"t {worst['time_s']:g} s, pos {worst['position_m']:g} "
+                     f"m, att {worst['angle_deg']:g} deg")
+    where = (problems[0] if problems else
+             f"{len(frames)} records against {n} samples"
+             + (f" ({positions_compared} with north/east)"
+                if positions_compared < len(frames) else "")
+             + f"; digest {digest[:16]} = output_digest; worst "
+             + (str(worst_at["position_m"]).split(" (")[0]
+                if worst_at["position_m"] else "no frame"))
+    detail = ("; ".join(problems) if problems else
+              f"{len(frames)} records match the flight at their samples "
+              f"(worst t {worst['time_s']:g} s, position "
+              f"{worst['position_m']:g} m, attitude {worst['angle_deg']:g} "
+              f"deg; {TELEMETRY_FILE} digest = output_digest)")
+    return Check("flight_fidelity", ok, detail,
+                 measured=worst["position_m"], tolerance=position_tol_m,
+                 unit="m", measured_text=measured_text,
+                 tolerance_text=tolerance_text, where=where,
+                 data={"frames": len(frames), "samples": n,
+                       "positions_compared": positions_compared,
+                       "out_of_range": out_of_range, "worst": worst,
+                       "worst_at": worst_at,
+                       "telemetry_digest": digest,
+                       "digests_equal": digests_equal})
+
+
+def verify_schedule_fidelity(manifest: Dict, spec,
+                             columns: Optional[Dict[str, Sequence[float]]]
+                             ) -> Check:
+    """Check 7: the schedule recomputed from the spec's cameras over the
+    telemetry against the manifest's instants, sample for sample.
+    ``spec`` None or ``columns`` None: SKIPPED by name."""
+    missing = ([SCENARIO_FILE] if spec is None else []) + (
+        [TELEMETRY_FILE] if columns is None else [])
+    if missing:
+        return Check("schedule_fidelity", None,
+                     f"NOT EXERCISED (no {' or '.join(missing)} beside the "
+                     f"manifest): the schedule was not recomputed from "
+                     f"the spec",
+                     skipped=f"no {' or '.join(missing)} beside the manifest",
+                     tolerance_text="0 differ",
+                     data={"missing": missing})
+    from ..scenario.camera import default_cameras
+    from .poses import SceneFrame
+    from .schedule import ScheduleError, solve_schedule
+
+    block = manifest.get("frame") or {}
+    frame = SceneFrame(str(block.get("crs")),
+                       float(block.get("origin_lat_deg", 0.0)),
+                       float(block.get("origin_lon_deg", 0.0)),
+                       bool(block.get("declared_on_card", False)))
+    cameras = spec.cameras or default_cameras(spec)
+    rate_hz = float(manifest.get("rate_hz") or spec.rate.value)
+    recorded: Dict[str, List[Tuple[int, float]]] = {}
+    for record in manifest.get("frames", []):
+        recorded.setdefault(record["camera_id"], []).append(
+            (int(record["sample_index"]), float(record["t_s"])))
+    problems: List[str] = []
+    differing = 0
+    total = 0
+    worst_gap = 0.0
+    worst_at = None
+    per_camera = []
+    spec_ids = []
+    for camera in cameras:
+        camera_id = str(camera.camera_id.value)
+        spec_ids.append(camera_id)
+        try:
+            schedule = solve_schedule(columns, camera, frame, rate_hz=rate_hz)
+        except ScheduleError as exc:
+            problems.append(f"{camera_id}: the spec's schedule cannot be "
+                            f"recomputed over this telemetry ({exc})")
+            continue
+        expected = list(zip(schedule.indices, schedule.times))
+        actual = recorded.get(camera_id, [])
+        total += max(len(expected), len(actual))
+        per_camera.append(f"{camera_id} {len(actual)}/{len(expected)}")
+        if len(expected) != len(actual):
+            differing += abs(len(expected) - len(actual))
+            problems.append(f"{camera_id}: {len(actual)} recorded instants "
+                            f"against {len(expected)} the spec schedules")
+        for number, ((si, st), (ai, at)) in enumerate(zip(expected, actual)):
+            gap = abs(st - at)
+            if si != ai or gap > TIME_TOL_S:
+                differing += 1
+                if worst_at is None or gap > worst_gap:
+                    worst_gap = gap
+                    worst_at = (f"{camera_id} #{number} at sample {ai} "
+                                f"t={at:.3f} s where the spec schedules "
+                                f"sample {si} t={st:.3f} s")
+    for camera_id in recorded:
+        if camera_id not in spec_ids:
+            problems.append(f"{camera_id}: recorded in the manifest but "
+                            f"not a camera of the spec")
+            differing += len(recorded[camera_id])
+            total += len(recorded[camera_id])
+    if worst_at is not None:
+        problems.insert(0, f"{differing} of {total} instants differ from "
+                           f"the spec's schedule; worst {worst_at}")
+    ok = not problems and total > 0
+    if total == 0 and not problems:
+        problems.append("no instants to compare")
+    return Check("schedule_fidelity", ok,
+                 "; ".join(problems) if problems
+                 else f"{total} instants across {len(cameras)} camera(s) "
+                      f"match the schedule recomputed from the spec's "
+                      f"cameras over the telemetry, sample for sample",
+                 measured=float(differing), tolerance=0.0, unit="instants",
+                 measured_text=f"{differing} of {total} instants differ",
+                 tolerance_text="0 differ",
+                 where=(problems[0] if problems
+                        else ", ".join(per_camera) + " (recorded/spec)"),
+                 data={"differing": differing, "instants": total,
+                       "worst_gap_s": worst_gap, "worst_at": worst_at,
+                       "cameras": per_camera})
+
+
+def read_scenario_spec(run_dir):
+    """The spec beside a manifest (``scenario.yaml``) or None when the
+    file is not there. An unreadable spec raises: a verify that reads
+    the wrong thing must say so, never grade around it."""
+    path = Path(run_dir) / SCENARIO_FILE
+    if not path.is_file():
+        return None
+    from ..scenario.spec import ScenarioSpec
+
+    return ScenarioSpec.read(path)
 
 
 def verify_alignment(manifest_a: Dict, manifest_b: Dict,
@@ -1384,6 +1703,13 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     report.checks.append(verify_geometry(manifest))
     report.checks.append(verify_triangulation(manifest))
     report.checks.append(verify_counts(manifest))
+    # Checks 6 and 7 read the flight and the spec beside the manifest:
+    # the records against the telemetry, the instants against the
+    # schedule the spec commands over it. SKIPPED by name without them.
+    columns = read_telemetry_columns(run_dir)
+    report.checks.append(verify_flight_fidelity(manifest, columns))
+    report.checks.append(verify_schedule_fidelity(
+        manifest, read_scenario_spec(run_dir), columns))
     report.checks.append(verify_engine_parity(run_dir, manifest))
 
     if other_run_dir is not None:
