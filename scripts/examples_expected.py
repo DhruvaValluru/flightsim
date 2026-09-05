@@ -42,6 +42,18 @@ masked as ``x``, because only the engine can supply them (``--write``
 regenerates it too; ``--frames-stub-run <out>`` is the child process
 the generator runs it in). ``test_the_documents_windows_frames_block_
 matches_the_stub_run`` compares it the same way.
+
+Section 6 of the same Windows section carries the PAGE block, between
+``<!-- page_expected: begin -->`` and ``<!-- page_expected: end -->``:
+the committed example posted to the TestClient's ``/run`` with the
+render choice "frames" on the same honest stub (``--page-stub-run
+<root>`` is its child process), the run's event list as ``/runs/<id>``
+serves it and the card, strip and galleries rendered under node from
+the page's own functions. ``tests/test_webapp_capture.py::
+test_the_documents_page_block_matches_the_stub_run`` regenerates and
+compares it. Every attribute either child stubs is disclosed in
+:data:`STUBBED` / :data:`PAGE_STUBBED` and named in the block's
+preamble; the tests read the children's own source against the tuples.
 """
 
 from __future__ import annotations
@@ -65,6 +77,8 @@ BEGIN = "<!-- examples_expected: begin -->"
 END = "<!-- examples_expected: end -->"
 FRAMES_BEGIN = "<!-- frames_expected: begin -->"
 FRAMES_END = "<!-- frames_expected: end -->"
+PAGE_BEGIN = "<!-- page_expected: begin -->"
+PAGE_END = "<!-- page_expected: end -->"
 
 #: The Windows command (section "Engine verification (Windows)", step
 #: 2), as the instructor types it there with the venv's Windows path
@@ -398,6 +412,265 @@ def frames_doc_block(doc_text: str) -> Optional[Dict]:
             "code": int(match.group("code")), "text": match.group("text")}
 
 
+# -- the same run from the page, on the honest engine stub --------------
+
+#: Every attribute :func:`page_stub_child` replaces, and what stands in
+#: for it -- the webapp's own stubs (``tests/test_webapp_capture.py``'s
+#: ``engine_stubs`` and ``engine_client`` fixtures), disclosed the way
+#: :data:`STUBBED` discloses the CLI child's; the freshness test reads
+#: the function's own source against this tuple.
+PAGE_STUBBED = (
+    ("webapp.runs.RunManager._render",
+     "the commandlet pass replaced by `tests.test_webapp_capture."
+     "honest_engine`, the consume-poses pass as a Python function (the "
+     "scheduled PNGs and render.json the contract specifies)"),
+    ("webapp.runs.encode_scheduled_clip",
+     "the by-product clip's ffmpeg concat call replaced by a placeholder "
+     "writer: `clip.mp4` is the 3 bytes `mp4`, never an encode"),
+    ("core.util.platform.find_ffmpeg",
+     "a fake path (no ffmpeg on this machine, none run)"),
+    ("core.util.platform.ue_available",
+     "held open (True) so the engine choices are offered and taken"),
+    ("core.util.platform.ue_unavailable_reason",
+     "None, the same gate"),
+    ("webapp.server.refuse_placeholder_mesh",
+     "disabled (the B747 mesh is not imported here)"),
+    ("webapp.runs.ensure_control_ridge",
+     "a no-op (the flat scene needs no raster; the bake is not run)"),
+    ("webapp.runs.ensure_aircraft_model",
+     "a no-op (the model import needs the engine)"),
+    ("webapp.runs.editor_running",
+     "False (gotcha 9's editor-lock check; no editor here)"),
+    ("webapp.server.manager.out_root",
+     "the generator's temporary directory, so the run lands there"),
+)
+
+#: The page's status log, as the generated block prints it: the event's
+#: status word padded to this width, then its detail (the page itself
+#: prefixes each line with the local time, which no document can carry).
+PAGE_STATUS_WIDTH = 10
+
+#: The example the page block runs -- the same spec as the Windows
+#: command's -- posted to /run as the page posts a reviewed spec, with
+#: the prompt below recorded on it. The prompt matters: the page's
+#: scene-setting planner (webapp.runs.plan_scene_setting) stages a spec
+#: whose location nobody chose on the prairie bake, and on a machine
+#: without that bake on the synthesised control ridge, where 10000 ft
+#: refuses terrain.clearance under 3299 m peaks (measured here); "flat
+#: ground" is the planner's own opt-out, so the run stays on the flat
+#: scene the CLI's cameras_multi run flies, with the same digest (the
+#: prompt is not digest-relevant).
+PAGE_EXAMPLE = "examples/cameras_multi.yaml"
+PAGE_PROMPT = ("fly the 747 at 10000 ft and 280 kt for 12 seconds over flat "
+               "ground with a chase camera and a tower camera capturing 24 "
+               "images")
+
+
+def page_stubbed_words() -> str:
+    return "; ".join(f"`{name}` -- {what}" for name, what in PAGE_STUBBED)
+
+
+_BLOCK_CLOSE = re.compile(r"</(?:p|div|li|tr|h[1-6]|summary|details|ul|table|"
+                          r"thead|tbody|figure|figcaption|label)>|<br\s*/?>",
+                          re.I)
+
+
+def lines_of(html: str) -> List[str]:
+    """The words a reader sees, one line per block element: the HTML
+    split at its block-closing tags, tags stripped, whitespace
+    collapsed, empty lines dropped (``tests.test_webapp_capture.
+    text_of`` per block)."""
+    import html as html_module
+
+    lines = []
+    for piece in _BLOCK_CLOSE.split(html):
+        words = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", piece)).strip()
+        if words:
+            lines.append(html_module.unescape(words))
+    return lines
+
+
+_CAPTION = re.compile(r"^#\d+ t=\S+ s$")
+
+
+def fold_captions(lines: List[str]) -> List[str]:
+    """Consecutive frame captions (``#k t=... s``, one block element
+    each in a gallery) joined on one line, comma-separated, so a
+    24-frame gallery reads as one line of captions and not 24."""
+    folded: List[str] = []
+    run: List[str] = []
+    for line in [*lines, None]:
+        if line is not None and _CAPTION.match(line):
+            run.append(line)
+            continue
+        if run:
+            folded.append("captions: " + ", ".join(run))
+            run = []
+        if line is not None:
+            folded.append(line)
+    return folded
+
+
+def page_stub_child(root: Path) -> int:
+    """The child process of :func:`generate_page`: the TestClient over
+    the webapp with the engine gate held open and every engine-side
+    piece stubbed EXACTLY as ``tests/test_webapp_capture.py``'s
+    ``engine_stubs`` and ``engine_client`` fixtures hold it -- every
+    attribute replaced is listed in :data:`PAGE_STUBBED`. Posts the
+    committed example to ``/run`` with the render choice "frames",
+    polls the run to completion, and prints the page's status log (the
+    run's event list, the same list ``status.json`` keeps) followed by
+    the capture card, the download strip and the galleries as node
+    renders them from the page's own functions, one line per block
+    element."""
+    from starlette.testclient import TestClient
+
+    import core.util.platform as plat
+    import webapp.runs as runs_module
+    import webapp.server as server_module
+    from core.scenario.spec import ScenarioSpec
+    from tests.test_webapp_capture import (
+        finished, honest_engine, page_capture, text_of,
+    )
+
+    plat.ue_available = lambda: True
+    plat.ue_unavailable_reason = lambda: None
+    plat.find_ffmpeg = lambda: Path("ffmpeg")
+    server_module.refuse_placeholder_mesh = lambda spec: None
+    runs_module.ensure_control_ridge = lambda: None
+    runs_module.ensure_aircraft_model = lambda spec, report: None
+    runs_module.editor_running = lambda: False
+    server_module.manager.out_root = root / "runs"
+
+    def fake_encode(ffmpeg, frames_dir, times, clip, lead_in_s=None):
+        Path(clip).write_bytes(b"mp4")
+        return True
+
+    runs_module.encode_scheduled_clip = fake_encode
+    runs_module.RunManager._render = staticmethod(honest_engine([]))
+
+    client = TestClient(server_module.app)
+    spec = ScenarioSpec.read(REPO / PAGE_EXAMPLE)
+    spec.prompt = PAGE_PROMPT
+    reply = client.post("/run", json={"spec": spec.to_dict(), "render": "frames"})
+    if reply.status_code != 200:
+        print(f"POST /run answered {reply.status_code}: {reply.text}")
+        return 1
+    run_id = reply.json()["run_id"]
+    state = finished(client, run_id)
+    files = client.get(f"/runs/{run_id}/files").json()
+    for event in state["events"]:
+        print(f"{event['status']:<{PAGE_STATUS_WIDTH}} {event['detail']}")
+    print()
+    print("card (the words the page shows, one line per block; tags stripped):")
+    page = page_capture(root, state, files, run_id)
+    print(f"  {text_of(page['clip'])}")
+    for line in lines_of(page["strip"]):
+        print(f"  {line}")
+    for line in lines_of(page["card"]):
+        print(f"  {line}")
+    for gallery in page["galleries"]:
+        for line in fold_captions(lines_of(gallery)):
+            print(f"  {line}")
+    (root / "run_id").write_text(run_id, encoding="utf-8")
+    return 0 if state["status"] == "done" else 1
+
+
+#: The page's engine_parity row, as the card's table renders it: the
+#: MEASURED cell only the engine can fill, digits masked as the CLI
+#: block's are.
+_PAGE_PARITY_ROW = re.compile(
+    r"^(?P<head>  engine_parity PASS )(?P<measured>pos \S+ m, ang \S+ deg, "
+    r"t \S+ s, px \S+)(?P<tail> .*)$", re.M)
+
+
+def mask_page(text: str, run_id: str) -> str:
+    """The run id (a uuid, different every run) reads ``<id>`` and the
+    page's engine_parity MEASURED cell has every digit replaced by
+    ``x``: the stub's zeros are the stub's."""
+    text = text.replace(run_id, "<id>")
+
+    def _mask(match):
+        cell = re.sub(r"\d", "x", match.group("measured"))
+        return match.group("head") + cell + match.group("tail")
+    return _PAGE_PARITY_ROW.sub(_mask, text)
+
+
+def generate_page(root: Optional[Path] = None) -> Dict:
+    """Run the page's frames flow on the honest engine stub under
+    ``root`` as its own process and return its record: exit code,
+    seconds, text (paths normalised, the run id and the engine-measured
+    digits masked), the run directory."""
+    if root is None:
+        root = Path(tempfile.mkdtemp(prefix="page_expected_"))
+    root.mkdir(parents=True, exist_ok=True)
+    started = time.perf_counter()
+    completed = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve()), "--page-stub-run",
+         str(root)], cwd=str(REPO), capture_output=True, text=True,
+        encoding="utf-8")
+    elapsed = time.perf_counter() - started
+    run_id_file = root / "run_id"
+    run_id = run_id_file.read_text(encoding="utf-8") if run_id_file.is_file() else ""
+    text = _normalise_paths(completed.stdout, root)
+    if run_id:
+        text = mask_page(text, run_id)
+    return {"code": int(completed.returncode), "seconds": elapsed,
+            "text": text, "stderr": completed.stderr,
+            "run_dir": (root / "runs" / run_id) if run_id else None,
+            "run_id": run_id}
+
+
+def render_page(record: Dict, when: Optional[str] = None) -> str:
+    when = when or dt.date.today().isoformat()
+    machine = (f"{platform.system()} {platform.machine()}, Python "
+               f"{platform.python_version()}")
+    lines = [PAGE_BEGIN,
+             f"Measured {when} on {machine} on the honest engine STUB by "
+             f"`scripts/examples_expected.py` (`--page-stub-run`: "
+             f"`{PAGE_EXAMPLE}` posted to the TestClient's `/run` with the "
+             f"render choice \"frames\", the run polled to completion, "
+             f"exit {record['code']}, {record['seconds']:.2f} s wall on the "
+             f"stub; the status lines are the run's event list as `/runs/"
+             f"<id>` serves it -- the page prefixes each with the local "
+             f"time -- the status word padded to {PAGE_STATUS_WIDTH} "
+             f"columns; the card lines are the download strip, the capture "
+             f"card and the galleries rendered under node from the page's "
+             f"own functions, one line per block element, tags stripped, "
+             f"a gallery's consecutive frame captions joined on one line; "
+             f"the run id reads `<id>`). Stubbed in the child process, and "
+             f"nothing else: {page_stubbed_words()}. The capture flight, "
+             f"the closure flight, the card, the manifest, the schedule, "
+             f"the previews, the contact sheets, the overlays, the "
+             f"verifier and the page's own JavaScript are the real code. "
+             f"{CLIP_LINE_CAVEAT} The page's `engine_parity` row's MEASURED "
+             f"cell is masked `x`: those digits come from the Windows run. "
+             f"`tests/test_webapp_capture.py::"
+             f"test_the_documents_page_block_matches_the_stub_run` "
+             f"regenerates this block and compares it as the CLI blocks "
+             f"are compared (exact on {platform.system()} "
+             f"{platform.machine()}, numbers masked elsewhere).", ""]
+    lines.append("```")
+    lines.extend(record["text"].rstrip("\n").splitlines())
+    lines.append("```")
+    lines.append("")
+    lines.append(PAGE_END)
+    return "\n".join(lines)
+
+
+def page_doc_block(doc_text: str) -> Optional[Dict]:
+    """The document's page block: exit code, text; None when the
+    markers or the block are absent."""
+    if PAGE_BEGIN not in doc_text or PAGE_END not in doc_text:
+        return None
+    section = doc_text.split(PAGE_BEGIN, 1)[1].split(PAGE_END, 1)[0]
+    match = re.search(r"exit (?P<code>\d+), [\d.]+ s wall on the stub.*?"
+                      r"\n\n```\n(?P<text>.*?)```", section, re.S)
+    if not match:
+        return None
+    return {"code": int(match.group("code")), "text": match.group("text")}
+
+
 # -- the shape a test compares ------------------------------------------
 
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?(?:e[+-]?\d+)?")
@@ -498,23 +771,33 @@ def main(argv=None) -> int:
                         help="(the generator's own child process) run the "
                              "capture CLI with these arguments on the "
                              "honest engine stub and exit with its code")
+    parser.add_argument("--page-stub-run", default=None, metavar="ROOT",
+                        help="(the generator's own child process) run the "
+                             "page's frames flow on the honest engine stub "
+                             "under ROOT and print its status log and card")
     args = parser.parse_args(argv)
     if args.frames_stub_run is not None:
         return frames_stub_child(args.frames_stub_run)
+    if args.page_stub_run is not None:
+        return page_stub_child(Path(args.page_stub_run))
     root = Path(args.root) if args.root else None
     records = generate(root)
     section = render(records)
     frames = render_frames(generate_frames(
         root / "frames" if root else None))
+    page = render_page(generate_page(root / "page" if root else None))
     if args.write:
         write_doc(section)
         write_doc(frames, begin=FRAMES_BEGIN, end=FRAMES_END)
-        print(f"wrote {len(records)} blocks and the stub-frames block into "
-              f"{DOC.relative_to(REPO)}", file=sys.stderr)
+        write_doc(page, begin=PAGE_BEGIN, end=PAGE_END)
+        print(f"wrote {len(records)} blocks, the stub-frames block and the "
+              f"page block into {DOC.relative_to(REPO)}", file=sys.stderr)
     else:
         print(section)
         print()
         print(frames)
+        print()
+        print(page)
     return 0
 
 

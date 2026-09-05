@@ -2901,6 +2901,43 @@ mutate docs/CAMERA_PHASE1_REPORT.md \
     "docs round 2: the expected tree says the stub run's clip.mp4 is a placeholder" \
     tests/test_camera_cli.py::test_the_documents_windows_frames_block_matches_the_stub_run || failures=$((failures+1))
 
+# -- Camera Phase 1, docs round 2: section 6's page block is a run's output
+# (the status log as /runs/<id> serves it, the card under node), generated
+# and compared like the CLI blocks; its child's stubs are disclosed.
+mutate docs/CAMERA_PHASE1_REPORT.md \
+    "done       48 frames across 2 camera(s) rendered (48 scheduled, 48 verified by engine parity) + clip (by-product of 'chase0')" \
+    "done       48 frames across 2 camera(s) rendered (48 verified by engine parity) + clip (by-product of 'chase0')" \
+    "docs round 2: the page block's verdict line cannot drop its scheduled count without the freshness test saying so" \
+    tests/test_webapp_capture.py::test_the_documents_page_block_matches_the_stub_run || failures=$((failures+1))
+
+mutate scripts/examples_expected.py \
+    '    def _mask(match):
+        cell = re.sub(r"\d", "x", match.group("measured"))
+        return match.group("head") + cell + match.group("tail")
+    return _PAGE_PARITY_ROW.sub(_mask, text)' \
+    '    def _mask(match):
+        cell = match.group("measured")  # MUTATED: the stub zeros printed as the engine numbers
+        return match.group("head") + cell + match.group("tail")
+    return _PAGE_PARITY_ROW.sub(_mask, text)' \
+    "docs round 2: the page block's engine_parity MEASURED digits are masked x, never the stub's zeros" \
+    tests/test_webapp_capture.py::test_the_documents_page_block_matches_the_stub_run || failures=$((failures+1))
+
+mutate scripts/examples_expected.py \
+    '    ("webapp.runs.ensure_aircraft_model",
+     "a no-op (the model import needs the engine)"),
+' \
+    '' \
+    "docs round 2: a stub dropped from PAGE_STUBBED is caught against the page child's own source" \
+    tests/test_webapp_capture.py::test_the_page_block_discloses_every_stub_the_child_applies || failures=$((failures+1))
+
+mutate docs/CAMERA_PHASE1_REPORT.md \
+    'seconds over flat ground with a chase camera and a tower camera
+capturing 24 images", leave the render select' \
+    'seconds with a chase camera and a tower camera capturing 24
+images", leave the render select' \
+    "docs round 2: section 6's prompt keeps the scene-setting opt-out words the block was measured with" \
+    tests/test_webapp_capture.py::test_the_documents_page_block_matches_the_stub_run || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

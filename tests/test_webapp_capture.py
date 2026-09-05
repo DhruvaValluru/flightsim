@@ -3305,3 +3305,179 @@ def test_a_failed_file_listing_is_said_by_name_in_the_card(
     snap = page_dom(tmp_path, routes, [{"do": "poll", "runId": run_id}])[0]
     assert "verdict-refused" not in snap["captureDownloads"]
     assert links_of(snap["captureDownloads"], "everything") == [f"/runs/{run_id}/bundle.zip"]
+
+
+# -- docs round 2: section 6's page block is a run's output, not typed ------
+
+def _examples_expected_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "examples_expected",
+        Path(__file__).resolve().parents[1] / "scripts" / "examples_expected.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _stubbed_by(function):
+    """The dotted names ``function`` assigns to through its imports
+    (``alias.attr = ...``, ``alias.attr.attr = ...``), read from its own
+    source; assignments to names the function binds itself (its
+    locals) are not stubs."""
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+    aliases, locals_, stubbed = {}, set(), set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                aliases[alias.asname or alias.name] = alias.name
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                locals_.add(alias.asname or alias.name)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            locals_.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    locals_.add(target.id)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            chain, base = [], target
+            while isinstance(base, ast.Attribute):
+                chain.insert(0, base.attr)
+                base = base.value
+            if not chain or not isinstance(base, ast.Name):
+                continue
+            if base.id in aliases:
+                stubbed.add(".".join([aliases[base.id], *chain]))
+            else:
+                assert base.id in locals_, (base.id, chain)
+    return stubbed
+
+
+def test_the_page_block_discloses_every_stub_the_child_applies():
+    """The page block's child process stubs the engine pass, the clip
+    encoder, find_ffmpeg, the engine gate, the placeholder-mesh
+    refusal, the ridge bake, the model import, the editor-lock check
+    and the runs root; PAGE_STUBBED discloses each, the child's own
+    source is the authority (a new stub without an entry fails here),
+    and the block's preamble in the document names every entry."""
+    module = _examples_expected_module()
+    stubbed = _stubbed_by(module.page_stub_child)
+    disclosed = [name for name, _ in module.PAGE_STUBBED]
+    assert len(disclosed) == len(set(disclosed))
+    assert stubbed == set(disclosed), (stubbed ^ set(disclosed))
+    for name in ("webapp.runs.RunManager._render",
+                 "webapp.runs.encode_scheduled_clip",
+                 "core.util.platform.find_ffmpeg",
+                 "webapp.runs.ensure_aircraft_model",
+                 "webapp.server.manager.out_root"):
+        assert name in stubbed, name
+    doc_text = module.DOC.read_text(encoding="utf-8")
+    generated = doc_text.split(module.PAGE_BEGIN, 1)[1].split("\n```", 1)[0]
+    assert module.page_stubbed_words() in generated
+    assert module.CLIP_LINE_CAVEAT in generated
+    for name, what in module.PAGE_STUBBED:
+        assert f"`{name}` -- {what}" in generated, name
+    assert "the page's own JavaScript are the real code" in generated
+    assert "test_the_documents_page_block_matches_the_stub_run" in generated
+
+
+def test_the_documents_page_block_matches_the_stub_run(tmp_path):
+    """Section 6's status lines and card are the output of a run: the
+    committed example posted to /run on the honest engine stub, the
+    event log as /runs/<id> serves it (the same list status.json keeps)
+    and the card, strip and galleries rendered under node from the
+    page's own functions. A fresh stub run here must reproduce the
+    block the way the CLI blocks are reproduced (exact on the measured
+    platform, numbers masked elsewhere); the block carries the stub's
+    1439 steps where the document once said "N steps", and no hand-
+    substituted number; the page's engine_parity MEASURED cell is
+    masked x; the prose names the prompt whose "over flat ground" keeps
+    the run on the flat scene, and the page's own digest."""
+    import re
+    import shutil
+
+    if shutil.which("node") is None:
+        pytest.skip("node is not on PATH; the page's HTML builders need it")
+    module = _examples_expected_module()
+    doc_text = module.DOC.read_text(encoding="utf-8")
+    doc = module.page_doc_block(doc_text)
+    assert doc is not None, "the page_expected markers or block are missing"
+    exact = module.measured_platform(doc_text) == module.this_platform()
+    fresh = module.generate_page(tmp_path / "page_root")
+    assert fresh["code"] == 0, fresh["stderr"] + fresh["text"]
+    assert doc["code"] == 0
+    want = module.shape(doc["text"], exact=exact)
+    got = module.shape(fresh["text"], exact=exact)
+    assert want == got, ("exact" if exact else "masked (another platform)",
+                         [pair for pair in zip(want, got) if pair[0] != pair[1]][:3])
+    text = doc["text"]
+    for line in ("capture    solving camera geometry and capture schedule",
+                 "capture    verification PASSED (9/9 checks; engine_parity "
+                 "awaiting engine frames)",
+                 "closure    closure PASSED (4/4 checks)",
+                 "rendering  editor pass 1 of 2: camera 'chase0', 24 frames "
+                 "scheduled over the 12 s run (consume-poses, -camera-index=0)",
+                 "rendering  camera 'chase0': 24 of 24 scheduled frames rendered "
+                 "(engine stepped 11.992 s in 1439 steps)",
+                 "rendering  camera 'tower0': 24 of 24 scheduled frames rendered "
+                 "(engine stepped 11.992 s in 1439 steps)",
+                 "encoding   encoding the by-product clip from camera 'chase0' "
+                 "(24 frames at their scheduled instants: 12.992 s of clip",
+                 "capture    verification PASSED (10/10 checks)",
+                 "done       48 frames across 2 camera(s) rendered (48 scheduled, "
+                 "48 verified by engine parity) + clip (by-product of 'chase0')",
+                 "  downloads frames.zip 48 PNG(s) across 2 camera(s) (chase0, "
+                 "tower0), named by manifest index, with each camera's render.json",
+                 "  capture geometry — 48 scheduled, 48 rendered, 48 verified; 48 "
+                 "geometry preview(s)",
+                 "  verification PASSED (10/10 checks) capture/verify.json CHECK "
+                 "STATUS MEASURED TOLERANCE WHERE",
+                 "  closure PASSED — the same spec flown closed loop, graded over "
+                 "the settled half of 12 s (full duration: a frames run steps the "
+                 "whole flight)",
+                 "  chase0 : 24 scheduled, 24 rendered, 24 verified — showing 24 "
+                 "of 24 rendered frame(s) show the reprojected-geometry overlays "
+                 "(24 of 24)",
+                 "  tower0 : 24 scheduled, 24 rendered, 24 verified — showing 24 "
+                 "of 24 rendered frame(s)",
+                 "  captions: #0 t=0.008 s, #1 t=0.525 s,",
+                 "#23 t=11.992 s\n",
+                 "  geometry previews (not frames): 24 shown, and their contact sheet"):
+        assert line in text, line
+    assert "N steps" not in text and "parity FAIL" not in text
+    # The status lines are the run's own event list, in order.
+    status = json.loads((fresh["run_dir"] / "status.json").read_text(encoding="utf-8"))
+    printed = fresh["text"].split("\n\n", 1)[0].splitlines()
+    assert printed == [f"{e['status']:<10} {e['detail']}" for e in status["events"]]
+    assert len(printed) == 16
+    # Only the engine's row is masked, and it is masked.
+    parity = next(l for l in text.splitlines() if l.startswith("  engine_parity "))
+    assert re.search(r"^  engine_parity PASS pos x\.xxx m, ang x\.xxx deg, "
+                     r"t x\.xe\+xx s, px x\.xx 0\.1 m, 0\.1 deg, 1e-06 s, 3\.0 px "
+                     r"48 of 48 frames verified across 2 camera\(s\)$", parity), parity
+    fresh_parity = next(l for l in fresh["text"].splitlines()
+                        if l.startswith("  engine_parity "))
+    assert fresh_parity == parity
+    # The stub's clip is the placeholder its disclosure says it is.
+    assert (fresh["run_dir"] / "clip.mp4").stat().st_size == 3
+    # The prose around the block: no hand-substituted numbers, the
+    # prompt with its opt-out words, the page's own digest.
+    section = doc_text.split("### 6. The same from the page", 1)[1]
+    section = section.split("#### 6b.", 1)[0]
+    assert "N steps" not in section
+    assert "numbers of the 24-image run substituted" not in section
+    assert "0.076 s/frame" not in section
+    assert f'interpret "{module.PAGE_PROMPT}"' in " ".join(section.split())
+    assert "over flat ground" in module.PAGE_PROMPT
+    digest = re.search(r"manifest_version PASS version 1 = 1 spec ([0-9a-f]{16})",
+                       text).group(1)
+    assert f"(`{digest}`)" in section
+    assert "`terrain.clearance`" in section and "plan_scene_setting" in section
