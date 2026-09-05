@@ -506,7 +506,11 @@ def _note_previews(out: Path, previews) -> None:
         "resolution": list(previews.resolution) if previews.resolution else None,
         "s_per_frame": float(previews.seconds_per_frame),
         "track_source": str(previews.track_source),
-        "contact_sheets": {camera_id: str(path.relative_to(out))
+        # Relative paths in the record are POSIX on every host: a
+        # run.json written on Windows must read the same on a mac (CI
+        # measured 'contact_sheets\\chase0.png' against the documented
+        # 'contact_sheets/chase0.png').
+        "contact_sheets": {camera_id: path.relative_to(out).as_posix()
                            for camera_id, path in previews.contact_sheets.items()},
     }
     run_json.write_text(json.dumps(record, indent=1), encoding="utf-8")
