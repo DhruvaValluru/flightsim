@@ -2788,6 +2788,18 @@ mutate webapp/static/index.html \
     "page round 3: the headless fallback states the platform gate's reason once" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Camera Phase 1, docs round 1: the card's engine-start probe is routed ---
+# The probe builds a model at debug level 1 and runs it to trim; run_ic
+# prints the Mass Properties Report AFTER the banner. Routing only the
+# construction (the shape before this round) leaves the report on
+# stdout under a line saying "nothing of JSBSim's on stdout".
+mutate core/scenario/card.py \
+    '        with captured_console(f"FGFDMExec({aircraft}, mixture probe)"):
+            return _attempt_routed(mixture)' \
+    '        return _attempt_routed(mixture)  # MUTATED: the probe prints where it falls' \
+    "docs round 1: the card's mixture probe is routed through the console sink, run_ic and trim included" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

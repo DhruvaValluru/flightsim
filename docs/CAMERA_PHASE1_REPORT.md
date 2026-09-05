@@ -189,7 +189,12 @@ camera); 1 awaiting engine frames: engine_parity").
 Without the engine the default render choice resolves to `none`, so
 `--render none` is what the commands below ran with. Every block is the
 command's stdout as run here, unedited; the JSBSim banner needs no
-"omitted" caveat because it is in `runs/<run>/jsbsim.log`.
+"omitted" caveat because it is in `runs/<run>/jsbsim.log` -- and so,
+since docs round 1 (2026-09-05), is the Mass Properties Report the run
+card's engine-start probe makes JSBSim print on the `--card` and
+`--render frames` paths (the blocks below take neither; the Windows
+block in "Engine verification" does, and was measured clean at the
+file-descriptor level).
 
 <!-- examples_expected: begin -->
 Measured 2026-09-05 on Linux x86_64, Python 3.11.15 by `scripts/examples_expected.py` (every block below is the command's stdout verbatim, paths normalised to `runs/...`; wall times are this machine's, previews at full resolution). `tests/test_camera_cli.py::test_the_documents_expected_output_matches_a_fresh_run` regenerates the blocks and compares them with these: on Linux x86_64 exactly -- every digest, check number, pixel coordinate and camera position at its printed precision, only the wall-clock seconds per frame and the engine-availability line masked; on another platform with digests and numbers masked too, because the JSBSim build differs by bits there.
@@ -2858,8 +2863,22 @@ Paste every log back; this section is rewritten from them.
   load is preceded by a stamp, `# load 3: FlightDynamics(B747) called
   from core.scenario.validate.validate`, so fourteen identical banners
   read as fourteen named loads (measured: the CLI's cameras_multi run
-  is 14 stamped loads; a page capture run of the 3 s prairie spec is
-  15 in `<run>/jsbsim.log`). Since round 3 the request handlers' own
+  is 14 stamped loads, 15 with `--card` or `--render frames`, the
+  fifteenth being the run card's engine-start mixture probe, stamped
+  `FGFDMExec(B747, mixture probe) called from core.scenario.card.
+  attempt`; a page capture run of the 3 s prairie spec is 15 in
+  `<run>/jsbsim.log`). The probe builds its model at JSBSim's debug
+  level 1, so `run_ic` prints the Mass Properties Report from C++
+  AFTER the banner; until docs round 1 (2026-09-05) only the probe's
+  construction was inside the sink and that report -- twelve coloured
+  lines -- landed on stdout between the header and `card:`, one line
+  above "nothing of JSBSim's on stdout" (measured on `--card --render
+  none`: 96 stdout lines). The whole probe (construction, `run_ic`,
+  trim, the sustain steps) is routed now: 82 lines, none of JSBSim's,
+  and the report sits in the log under the probe's stamp;
+  `tests/test_camera_cli.py::
+  test_the_cards_engine_start_probe_prints_nothing_on_stdout` pins it
+  under file-descriptor capture. Since round 3 the request handlers' own
   pre-flight planning and validation BEFORE a run exists
   (`plan_flyable_defaults`, the envelope measurement, `validate` in
   `/compile`, `/run` and `/capture`) is routed too, to the

@@ -831,6 +831,38 @@ def test_stdout_carries_no_jsbsim_text_and_the_log_holds_it(report_run):
     assert "JSBSim" not in buffer.getvalue()
 
 
+def test_the_cards_engine_start_probe_prints_nothing_on_stdout(tmp_path, capfd):
+    """--card and --render frames write the run card, whose engine-start
+    mixture probe (core.scenario.card.discovered_engine_mixture) builds
+    a JSBSim model at debug level 1 and runs it to trim: run_ic prints
+    the Mass Properties Report from C++ AFTER the startup banner. The
+    whole probe is routed through the console sink, so under FILE
+    DESCRIPTOR capture (capfd, the level the bytes leave at) stdout
+    carries none of it and the log holds the report, stamped as the
+    probe's own load. Measured before the fix: twelve coloured lines
+    on stdout between the header and "card:"."""
+    from core.fdm.console import jsbsim_console
+    from core.scenario.card import _MIXTURE_CACHE, write_run_card
+
+    spec = ScenarioSpec.read(EXAMPLES / "cameras_multi.yaml")
+    _MIXTURE_CACHE.clear()       # force the probe: the cache is per process
+    log = tmp_path / "jsbsim.log"
+    capfd.readouterr()
+    with jsbsim_console(log) as sink:
+        write_run_card(spec, tmp_path / "card.json")
+    out, err = capfd.readouterr()
+    assert out == "" and err == "", (out, err)
+    text = log.read_text(encoding="utf-8")
+    assert "Mass Properties Report" in text
+    assert "End of vehicle configuration loading" in text
+    assert "JSBSim startup beginning" in text
+    assert sink.loads == 1
+    assert sink.labels == ["FGFDMExec(B747, mixture probe) called from "
+                           "core.scenario.card.attempt"]
+    assert text.startswith("# load 1: FGFDMExec(B747, mixture probe) called "
+                           "from core.scenario.card.attempt\n")
+
+
 def test_the_report_opens_with_a_header(report_run):
     out, text = report_run
     manifest = json.loads(

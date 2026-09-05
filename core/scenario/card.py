@@ -58,11 +58,23 @@ def discovered_engine_mixture(spec: ScenarioSpec) -> float:
     def attempt(mixture: float):
         from core.fdm.console import captured_console
 
-        # The startup banner goes wherever the caller routed JSBSim's
-        # console (core.fdm.console), the same as the FDM wrapper's own.
-        with captured_console():
-            fdm = jsbsim.FGFDMExec(jsbsim.get_default_root_dir())
-            fdm.load_model(aircraft)
+        # Everything this probe makes JSBSim print goes wherever the
+        # caller routed its console (core.fdm.console), the same as the
+        # FDM wrapper's own -- the WHOLE probe, not the construction
+        # alone: the model is built at debug level 1 (the wrapper's own
+        # is 0), so run_ic prints the Mass Properties Report from C++
+        # AFTER the banner, and a block that ended at load_model left
+        # that report on stdout (measured on the capture CLI's --card
+        # path, 2026-09-05: twelve coloured lines between the header
+        # and "card:", one line above "nothing of JSBSim's on stdout").
+        # Routed, never dropped: the report is in the log, stamped as
+        # the probe's load, where a reader can check the mass it flew.
+        with captured_console(f"FGFDMExec({aircraft}, mixture probe)"):
+            return _attempt_routed(mixture)
+
+    def _attempt_routed(mixture: float):
+        fdm = jsbsim.FGFDMExec(jsbsim.get_default_root_dir())
+        fdm.load_model(aircraft)
         fdm.set_dt(1.0 / float(spec.rate.value))
         # _IC_PRIORITY's safe order: position, attitude (beta before psi),
         # then speed last (docs/JSBSIM_CORRECTIONS.md §2).
