@@ -2449,7 +2449,12 @@ What step 2 runs (the command builder is
 `core.capture.render_pass.render_command`; substitute the checkout
 path). The mesh argument is present only once the B747 model is
 imported (`assets\generated\B747\mesh_manifest.json`; the owner's
-placeholder rule refuses `aircraft.mesh` otherwise):
+placeholder rule refuses `aircraft.mesh` otherwise). The two lines
+are pinned: `tests/test_camera_cli.py::
+test_section_3s_commandlet_lines_are_render_commands_own` builds them
+from `render_command` with this UE_ROOT and checkout and compares
+token for token, so a flag added, renamed or reordered on either side
+fails the suite:
 
 ```
 "C:\Program Files\Epic Games\UE_5.5\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" C:\flightsim\ue\FlightSim.uproject -run=FlightSimBridge.FlightSimRender -scenario=C:\flightsim\runs\demo\card.json -frames=C:\flightsim\runs\demo\frames\chase0 -Visual -shot=showcase -camera-index=0 -fps=30 -width=1280 -height=720 -sun-elev=50.0 -sun-azim=180.0 -exposure-bias=9.5 -fog-density=0.0012 -unattended -nopause -nosplash -stdout -FullStdOutLogOutput -RenderOffScreen -AllowCommandletRendering -mesh=C:\flightsim\assets\generated\B747\mesh_manifest.json -telemetry=C:\flightsim\runs\demo\engine_telemetry.json
@@ -2458,7 +2463,13 @@ placeholder rule refuses `aircraft.mesh` otherwise):
 
 Each pass's editor log lands in `runs\demo\frames\<camera_id>\render.log`
 and MUST contain, in this order (the `%d`/`%.3f` values are the
-example's):
+example's; `tests/test_camera_cli.py::
+test_section_3s_render_log_lines_are_the_commandlets_own_format_strings`
+turns each line back into its `%d`/`%.3f`/`%.6f`/`%s` skeleton and
+requires it to be a `TEXT(...)` literal of
+`FlightSimRenderCommandlet.cpp`, in the source's order, with the
+example's numbers read from the section 2 block -- so a log word
+changed in the C++ or here fails the suite, engine or no engine):
 
 ```
 consume-poses: camera 0 of 2, 115 solved samples

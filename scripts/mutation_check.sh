@@ -2938,6 +2938,35 @@ images", leave the render select' \
     "docs round 2: section 6's prompt keeps the scene-setting opt-out words the block was measured with" \
     tests/test_webapp_capture.py::test_the_documents_page_block_matches_the_stub_run || failures=$((failures+1))
 
+# -- Camera Phase 1, docs round 2: section 3's command lines are
+# render_command's own and its log lines are the commandlet's format
+# strings, pinned statically on both sides.
+mutate docs/CAMERA_PHASE1_REPORT.md \
+    '-camera-index=0 -fps=30 -width=1280 -height=720 -sun-elev=50.0 -sun-azim=180.0 -exposure-bias=9.5 -fog-density=0.0012 -unattended -nopause -nosplash -stdout -FullStdOutLogOutput -RenderOffScreen -AllowCommandletRendering' \
+    '-camera-index=0 -fps=30 -width=1280 -height=720 -sun-elev=50.0 -sun-azim=180.0 -exposure-bias=9.5 -fog-density=0.0012 -unattended -nopause -nosplash -stdout -FullStdOutLogOutput -RenderOffScreen -AllowCommandletRender' \
+    "docs round 2: a flag edited in section 3's command line is caught against render_command" \
+    tests/test_camera_cli.py::test_section_3s_commandlet_lines_are_render_commands_own || failures=$((failures+1))
+
+mutate core/capture/render_pass.py \
+    '        "-RenderOffScreen", "-AllowCommandletRendering",
+    ]' \
+    '        "-AllowCommandletRendering", "-RenderOffScreen",
+    ]' \
+    "docs round 2: a flag reordered in render_command is caught against section 3's command line" \
+    tests/test_camera_cli.py::test_section_3s_commandlet_lines_are_render_commands_own || failures=$((failures+1))
+
+mutate docs/CAMERA_PHASE1_REPORT.md \
+    'consume-poses: captured 24 of 24 scheduled frames' \
+    'consume-poses: captured 24 of 24 scheduled images' \
+    "docs round 2: a log word edited in section 3 is caught against the commandlet's format strings" \
+    tests/test_camera_cli.py::test_section_3s_render_log_lines_are_the_commandlets_own_format_strings || failures=$((failures+1))
+
+mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp \
+    '		       TEXT("consume-poses: captured %d of %d scheduled frames"),' \
+    '		       TEXT("consume-poses: captured %d of %d scheduled images"),' \
+    "docs round 2: a log word edited in the commandlet is caught against section 3's lines" \
+    tests/test_camera_cli.py::test_section_3s_render_log_lines_are_the_commandlets_own_format_strings || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

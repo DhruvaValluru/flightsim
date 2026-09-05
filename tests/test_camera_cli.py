@@ -1932,3 +1932,165 @@ def test_a_refusal_prints_the_header_from_the_spec(tmp_path):
         "captures set by the flight, distance"
     assert captures_words({"capture_count": 5, "trigger": "distance",
                            "flown": True}) == "5 captures, distance"
+
+
+# -- docs round 2: section 3's command lines and log lines are pinned -------
+
+_CPP = (Path(__file__).resolve().parents[1] / "ue" / "Plugins" / "FlightSimBridge"
+        / "Source" / "FlightSimBridge" / "Private" / "FlightSimRenderCommandlet.cpp")
+
+
+def _section_3_blocks(doc_text):
+    """The two fenced blocks of the report's section 3: the command
+    lines (two) and the render.log lines (seven)."""
+    section = doc_text.split("### 3. The two commandlet passes, literally", 1)[1]
+    section = section.split("### 4. Expected tree and counts", 1)[0]
+    blocks = re.findall(r"\n```\n(.*?)```", section, re.S)
+    assert len(blocks) == 2, len(blocks)
+    return [b.rstrip("\n").splitlines() for b in blocks]
+
+
+def test_section_3s_commandlet_lines_are_render_commands_own(tmp_path):
+    """The two UnrealEditor-Cmd.exe argument lists quoted in section 3
+    are core.capture.render_pass.render_command's output for the
+    example's card with a Windows-shaped UE_ROOT and checkout, joined
+    as the document joins them (the editor path quoted, the rest
+    bare): token for token, camera 0 with the engine telemetry, camera
+    1 without, the mesh argument where the CLI puts it. A flag added,
+    renamed or reordered on either side fails here."""
+    from pathlib import PureWindowsPath
+
+    from core.capture.render_pass import render_command
+    from experiments.showcase_matrix import (
+        FPS, HEIGHT, TIME_OF_DAY, VISIBILITY, WIDTH,
+    )
+
+    module = _examples_expected_module()
+    doc_text = module.DOC.read_text(encoding="utf-8")
+    commands, _ = _section_3_blocks(doc_text)
+    assert len(commands) == 2
+    editor = PureWindowsPath(r"C:\Program Files\Epic Games\UE_5.5\Engine"
+                             r"\Binaries\Win64\UnrealEditor-Cmd.exe")
+    checkout = PureWindowsPath(r"C:\flightsim")
+    run = checkout / "runs" / "demo"
+    windows_mesh = str(checkout / "assets" / "generated" / "B747"
+                       / "mesh_manifest.json")
+    # render_command adds -mesh only for a file that exists: build with
+    # a real file and read its path back as the Windows one, so the
+    # argument's PLACE is render_command's, not this test's.
+    mesh = tmp_path / "mesh_manifest.json"
+    mesh.write_text("{}", encoding="utf-8")
+    scene = {"key": "flat", "terrain": None, "imagery": None}
+    for index, camera_id in enumerate(("chase0", "tower0")):
+        command = render_command(
+            editor, checkout / "ue" / "FlightSim.uproject", run / "card.json",
+            run / "frames" / camera_id, fps=FPS, width=WIDTH, height=HEIGHT,
+            look=TIME_OF_DAY["noon"], fog_density=VISIBILITY["clear"],
+            scene=scene, mesh=mesh,
+            telemetry=(run / "engine_telemetry.json" if index == 0 else None),
+            camera_index=index)
+        tokens = [t.replace(str(mesh), windows_mesh) for t in command]
+        assert tokens[0] == str(editor)
+        joined = f'"{tokens[0]}" ' + " ".join(tokens[1:])
+        assert commands[index] == joined, (
+            camera_id, [pair for pair in zip(commands[index].split(" "),
+                                             joined.split(" "))
+                        if pair[0] != pair[1]][:3])
+    assert "-telemetry=" in commands[0] and "-telemetry=" not in commands[1]
+    assert "-camera-index=0" in commands[0] and "-camera-index=1" in commands[1]
+    assert "-mesh=" in commands[0] and "-mesh=" in commands[1]
+    assert "-GeorefTerrain" not in commands[0]        # cameras_multi is flat
+    # The CLI passes exactly these: the telemetry for pass 0 only, the
+    # noon look and clear fog (pinned against its own source).
+    source = (Path(__file__).resolve().parents[1] / "flightsim" / "capture.py"
+              ).read_text(encoding="utf-8")
+    assert ('telemetry=(out / "engine_telemetry.json" if index == 0\n'
+            '                       else None),') in source
+    assert 'look=TIME_OF_DAY["noon"],' in source
+    assert 'fog_density=VISIBILITY["clear"], scene=scene, mesh=mesh,' in source
+
+
+_TEXT_LITERAL = re.compile(r'TEXT\("((?:[^"\\]|\\.)*)"\)')
+_FORMAT = {"%d": r"-?\d+", "%s": r".+?", "%.1f": r"-?\d+\.\d", "%.2f": r"-?\d+\.\d{2}",
+           "%.3f": r"-?\d+\.\d{3}", "%.4f": r"-?\d+\.\d{4}", "%.6f": r"-?\d+\.\d{6}"}
+
+
+def _cpp_format_literals():
+    """Every TEXT("...") literal of the render commandlet, adjacent
+    literals joined (the compiler concatenates them), as (position,
+    literal, compiled regex with each printf conversion replaced by
+    the shape of what it prints)."""
+    source = _CPP.read_text(encoding="utf-8")
+    joined = []
+    for match in _TEXT_LITERAL.finditer(source):
+        text = match.group(1).replace('\\"', '"')
+        if joined and source[joined[-1][2]:match.start()].strip() == "":
+            position, literal, _ = joined[-1]
+            joined[-1] = (position, literal + text, match.end())
+        else:
+            joined.append((match.start(), text, match.end()))
+    literals = []
+    for position, literal, _ in joined:
+        bare = literal
+        for conversion in _FORMAT:
+            bare = bare.replace(conversion, "")
+        if not re.search(r"[A-Za-z]", bare):
+            continue            # a bare "%s" would match any line at all
+        pattern = re.escape(literal)
+        for conversion, shape in _FORMAT.items():
+            pattern = pattern.replace(re.escape(conversion), shape)
+        literals.append((position, literal, re.compile("^" + pattern + "$")))
+    return literals
+
+
+def test_section_3s_render_log_lines_are_the_commandlets_own_format_strings():
+    """Each of the seven render.log lines section 3 requires, with the
+    example's numbers put back into %d / %.3f / %.6f / %s, is a
+    TEXT(...) literal of FlightSimRenderCommandlet.cpp -- matched
+    against the C++ source statically, the discipline
+    test_no_shadowed_locals_in_the_bridge uses, since the commandlet
+    cannot be compiled here -- in the order the source emits them; and
+    the numbers are the example's own, read from the generated section
+    2 block (samples, captures, first and last instant, resolution,
+    steps). A log word changed on either side fails here."""
+    module = _examples_expected_module()
+    doc_text = module.DOC.read_text(encoding="utf-8")
+    _, log_lines = _section_3_blocks(doc_text)
+    assert len(log_lines) == 7
+    literals = _cpp_format_literals()
+    assert len(literals) > 50
+    positions = []
+    for line in log_lines:
+        hits = [(position, literal) for position, literal, regex in literals
+                if regex.match(line)]
+        assert len(hits) == 1, (line, hits)
+        positions.append(hits[0][0])
+    assert positions == sorted(positions), "section 3's lines are not in the source's order"
+    assert [l.split(":")[0] if l.startswith("consume-poses") else l.split(" ")[0]
+            for l in log_lines] == ["consume-poses", "consume-poses", "stepping",
+                                    "consume-poses", "consume-poses",
+                                    "consume-poses", "wrote"]
+    # The lines the mode must NOT print are the preset pass's own.
+    assert any("capturing every %d (%.1f Hz)" in literal for _, literal, _ in literals)
+    assert not any("capturing every" in line for line in log_lines)
+    # The numbers are the example's: from the generated section 2 block.
+    block = module.frames_doc_block(doc_text)["text"]
+    samples = int(re.search(r"\((\d+) samples,", block).group(1))
+    captures = int(re.search(r"chase0: (\d+) scheduled instant", block).group(1))
+    first, last = re.search(r"from (\d+\.\d{3}) s to (\d+\.\d{3}) s", block).groups()
+    steps = int(re.search(r"in (\d+) steps", block).group(1))
+    hz = float(re.search(r"12 s at (\d+) Hz", block).group(1))
+    assert log_lines[0] == f"consume-poses: camera 0 of 2, {samples} solved samples"
+    assert log_lines[1].startswith(
+        f"consume-poses: {captures} scheduled captures from t={first} s to "
+        f"t={last} s; 1280x720 px, sensor 36.00 x 20.25 mm, focal 35.0 mm ")
+    assert log_lines[2] == (f"stepping {int(12 * hz)} steps of {1 / hz:.6f} s, "
+                            f"capturing at {captures} scheduled instants at 1280x720")
+    assert log_lines[4] == (f"consume-poses: stopped after the last scheduled "
+                            f"instant at t={last} s ({steps} of {int(12 * hz)} steps)")
+    assert log_lines[5] == f"consume-poses: captured {captures} of {captures} scheduled frames"
+    assert log_lines[6].startswith(f"wrote {captures} frames and C:\\flightsim\\runs\\demo\\")
+    # The horizontal field of view the line quotes is the lens's own.
+    import math
+    fov = math.degrees(2 * math.atan(36.0 / (2 * 35.0)))
+    assert f"(fov {fov:.2f} deg)" in log_lines[1]
