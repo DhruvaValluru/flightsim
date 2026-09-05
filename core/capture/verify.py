@@ -379,13 +379,20 @@ class VerificationReport:
         return "\n".join(lines)
 
     def render(self) -> str:
-        """The table, then one ``[STATUS] name: detail`` line per check
-        (the prose the table's numbers came from -- the failing frames
-        by name on a FAIL), then the summary line."""
+        """The table, then -- only for the rows that did not PASS -- one
+        ``[STATUS] name: detail`` line each (what a FAIL found, why a
+        check was SKIPPED or is AWAITING), then the summary line. A
+        PASS is rendered ONCE, in the table: its number, its tolerance
+        and its worst case are the row, and a second rendering of the
+        same number in prose is a second number for the reader to
+        choose between. The prose detail of every check, PASS
+        included, stays in :meth:`to_dict` (verify.json)."""
         lines = [self.table()]
-        lines.append("  detail:")
-        for c in self.checks:
-            lines.append(f"  [{c.status}] {c.name}: {c.detail}")
+        noted = [c for c in self.checks if c.ok is not True]
+        if noted:
+            lines.append("  detail:")
+            for c in noted:
+                lines.append(f"  [{c.status}] {c.name}: {c.detail}")
         lines.append(self.summary())
         return "\n".join(lines)
 
@@ -665,12 +672,21 @@ def verify_counts(manifest: Dict) -> Check:
         # load-bearing rather than shadowed by a sibling check.
         if indices != list(range(declared)):
             missing = sorted(set(range(declared)) - set(indices))
-            problems.append(f"{camera_id}: {len(indices)} frames against "
-                            f"a declared {declared}, or gaps in the "
-                            f"index sequence"
-                            + (f" (missing index "
-                               f"{', '.join(str(i) for i in missing[:4])})"
-                               if missing else ""))
+            extra = sorted(set(indices) - set(range(declared)))
+            found = (" (missing index "
+                     f"{', '.join(str(i) for i in missing[:4])}"
+                     + (f"; unexpected index "
+                        f"{', '.join(str(i) for i in extra[:4])}"
+                        if extra else "") + ")") if missing or extra else ""
+            # Say what was found -- a wrong count, or the right count
+            # with the wrong indices -- never "or".
+            if len(indices) != declared:
+                problems.append(f"{camera_id}: {len(indices)} frames "
+                                f"against a declared {declared}{found}")
+            else:
+                problems.append(f"{camera_id}: {declared} frames as "
+                                f"declared but not indexed 0.."
+                                f"{declared - 1}{found}")
     found = sum(c["found"] for c in counts.values())
     declared_total = sum(c["declared"] for c in counts.values())
     return Check("count_exactness", not problems,

@@ -1904,11 +1904,9 @@ mutate flightsim/verify.py \
     tests/test_camera_cli.py || failures=$((failures+1))
 
 mutate flightsim/report.py \
-    '        print(f"USAGE: {exc}", file=sys.stderr)
-        print(f"USAGE: {exc}")
+    '        print(f"USAGE: {exc}")
         return EXIT_USAGE' \
-    '        print(f"USAGE: {exc}", file=sys.stderr)
-        print(f"USAGE: {exc}")
+    '        print(f"USAGE: {exc}")
         return EXIT_REFUSED  # MUTATED: usage errors share REFUSED'"'"'s code' \
     "commands round 1: a usage error exits 3, never REFUSED's 2" \
     tests/test_camera_cli.py || failures=$((failures+1))
@@ -2024,6 +2022,38 @@ mutate flightsim/verify.py \
     '    if False:  # MUTATED: a --corrupt-dir inside the run is accepted' \
     "commands round 2: a --corrupt-dir inside the run is refused as USAGE" \
     tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/report.py \
+    '        flight += (f"; telemetry t {telemetry['"'"'first_s'"'"']:.3f}.."' \
+    '        flight += (f"; telemetry ({telemetry['"'"'first_s'"'"']:.3f}.."  # MUTATED: the window is not stated' \
+    "commands round 2: the flight line states the telemetry window the schedule lives in" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/report.py \
+    '                if trigger == "distance":' \
+    '                if False:  # MUTATED: a distance trigger is worded as sample-snapped' \
+    "commands round 2: --brief words a distance trigger's spacing from the trigger, never as sample snapping" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '    if not Path(args.spec).is_file():' \
+    '    if False:  # MUTATED: a missing spec falls through to a traceback' \
+    "commands round 2: a spec path that does not exist is USAGE (exit 3), never UNEXPECTED" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        noted = [c for c in self.checks if c.ok is not True]' \
+    '        noted = list(self.checks)  # MUTATED: every PASS is rendered twice' \
+    "commands round 2: a PASS is rendered once, in the table, never again as a detail line" \
+    tests/test_camera_verify.py tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if len(indices) != declared:
+                problems.append(f"{camera_id}: {len(indices)} frames "' \
+    '            if True:  # MUTATED: a wrong-index FAIL is worded as a wrong count
+                problems.append(f"{camera_id}: {len(indices)} frames "' \
+    "commands round 2: a count FAIL says what was found, a wrong count or the wrong indices, never 'or'" \
+    tests/test_camera_verify.py || failures=$((failures+1))
 
 echo
 purge_cache

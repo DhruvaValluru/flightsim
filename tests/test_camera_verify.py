@@ -16,7 +16,7 @@ from core.capture.manifest import build_capture_manifest, write_capture_manifest
 from core.capture.poses import euler_to_quat, solve_pose_track
 from core.capture.schedule import solve_schedule
 from core.capture.verify import (
-    project_point, telemetry_digest, telemetry_state_at, verify_alignment,
+    VerificationReport, project_point, telemetry_digest, telemetry_state_at, verify_alignment,
     verify_counts, verify_flight_fidelity, verify_geometry, verify_run,
     verify_schedule_fidelity, verify_triangulation,
 )
@@ -332,7 +332,10 @@ def test_engine_parity_passes_on_honest_engine_output(tmp_path):
     report = verify_run(tmp_path)
     assert report.ok, report.render()
     assert [c.name for c in report.checks][-1] == "engine_parity"
-    assert "[PASS] engine_parity" in report.render()
+    assert ("engine_parity", "PASS") in [(r[0], r[1])
+                                         for r in report.table_rows()]
+    # A PASS is rendered once, in the table: no detail line repeats it.
+    assert "[PASS] engine_parity" not in report.render()
 
 
 def test_engine_parity_is_awaiting_without_engine_frames(tmp_path):
@@ -814,11 +817,49 @@ def test_every_check_carries_measured_tolerance_and_where(tmp_path):
         assert line.startswith(f"  {name}")
         assert f"  {status}  " in line
         assert measured in line and tolerance in line and where in line
-    # The detail lines and the summary follow the table.
+    # The detail lines (rows that did not PASS only) and the summary
+    # follow the table; a PASS row is never rendered twice.
     rendered = report.render()
     assert rendered.index("CHECK") < rendered.index("  detail:") \
-        < rendered.index("[PASS] manifest_version:") \
+        < rendered.index("[SKIPPED] flight_fidelity:") \
+        < rendered.index("[AWAITING] engine_parity:") \
         < rendered.index("verification PASSED (5/5 checks")
+    assert "[PASS]" not in rendered
+
+
+def test_a_pass_is_rendered_once_and_a_count_fail_says_what_it_found(tmp_path):
+    """render(): the table carries every number once; the detail block
+    exists only for rows that did not PASS, and is absent when every
+    row passed. A count FAIL states what was found -- a wrong count, or
+    the right count with the wrong indices -- never "or"."""
+    manifest = two_camera_manifest()
+    write_capture_manifest(manifest, tmp_path)
+    write_engine_output(manifest, tmp_path)
+    report = verify_run(tmp_path)
+    rendered = report.render()
+    assert "[PASS]" not in rendered
+    assert "  detail:" in rendered            # two SKIPPED rows (no files)
+    every = VerificationReport([c for c in report.checks if c.ok is True])
+    assert "detail:" not in every.render()
+    assert every.render().splitlines()[-1].startswith("verification PASSED")
+    # verify.json keeps every check's prose, PASS included.
+    assert all(c["detail"] for c in report.to_dict()["checks"])
+    # The count check: a dropped record is "23 against 24"; a record
+    # renumbered is "the right count, wrong indices" -- and neither says "or".
+    dropped = dict(manifest, frames=manifest["frames"][:-1])
+    check = verify_counts(dropped)
+    assert check.ok is False
+    assert check.detail == ("tower0: 14 frames against a declared 15 "
+                            "(missing index 14)")
+    renumbered = dict(manifest, frames=[
+        dict(r, index=99) if r["camera_id"] == "chase0" and r["index"] == 3
+        else r for r in manifest["frames"]])
+    check = verify_counts(renumbered)
+    assert check.ok is False
+    assert check.detail == ("chase0: 15 frames as declared but not indexed "
+                            "0..14 (missing index 3; unexpected index 99)")
+    for text in (verify_counts(dropped).detail, check.detail):
+        assert " or " not in text
 
 
 def test_a_bad_quaternion_is_localised_by_camera_frame_and_instant():

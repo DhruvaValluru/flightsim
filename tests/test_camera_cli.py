@@ -260,10 +260,12 @@ def test_a_headless_run_verifies_and_never_says_refused(tmp_path, capsys,
                          str(out), "--max-previews", "2",
                          "--render", "none"]) == 0
     text = capsys.readouterr().out
+    rows = verification_rows(text)
     for check in ("manifest_version", "fields_finite", "geometry_recovery",
                   "cross_view_consistency", "count_exactness",
                   "flight_fidelity", "schedule_fidelity"):
-        assert f"[PASS] {check}" in text, check
+        assert rows[check][0] == "PASS", check
+        assert f"[PASS] {check}" not in text, check   # rendered once
     assert "[AWAITING] engine_parity: awaiting engine frames" in text
     assert "verification PASSED (7/7 checks; 1 awaiting engine frames" in text
     assert "REFUSED" not in text
@@ -420,7 +422,8 @@ def test_render_frames_runs_the_engine_once_per_camera(tmp_path, capsys,
         assert names == [f"{i:04d}.png" for i in range(24)]
     assert "scheduled 48 frames across 2 camera(s)" in text
     assert "rendered 48 frames across 2 camera(s) (48 verified by engine parity)" in text
-    assert "[PASS] engine_parity" in text
+    assert verification_rows(text)["engine_parity"][0] == "PASS"
+    assert "[PASS]" not in text and "detail:" not in text   # every row passed
     assert cli_engine["encoded"][0]["frames_dir"] == out / "frames" / "chase0"
     assert len(cli_engine["encoded"][0]["times"]) == 24
     # What each pass cost and what the clip was expected to be, said and
@@ -436,7 +439,10 @@ def test_render_frames_runs_the_engine_once_per_camera(tmp_path, capsys,
     assert run["clip_seconds"] == pytest.approx(last + 1.0)
     # The frames verify from the directory, as the instructor would run it.
     assert verify_main([str(out)]) == 0
-    assert "[PASS] engine_parity: 48 frames" in capsys.readouterr().out
+    rows = verification_rows(capsys.readouterr().out)
+    assert rows["engine_parity"][0] == "PASS"
+    assert rows["engine_parity"][1].startswith("pos 0.")
+    assert rows["engine_parity"][3].startswith("48 of 48 frames verified")
 
 
 def test_render_frames_fails_by_name_on_a_short_pass(tmp_path, capsys,
@@ -534,9 +540,15 @@ def test_run_json_records_the_render_choice_and_verify_json_in_every_mode(
             "manifest_version", "fields_finite", "geometry_recovery",
             "cross_view_consistency", "count_exactness", "flight_fidelity",
             "schedule_fidelity", "engine_parity"]
-        # The file says what the table said.
+        # The file says what the table said: a PASS is its row, once;
+        # anything else has its detail line too.
+        rows = verification_rows(text)
         for check in verify["checks"]:
-            assert f"[{check['status']}] {check['name']}: " in text, check
+            assert rows[check["name"]][0] == check["status"], check
+            if check["status"] == "PASS":
+                assert f"[PASS] {check['name']}" not in text, check
+            else:
+                assert f"[{check['status']}] {check['name']}: " in text, check
         return run_json, verify
 
     # Headless on a machine without the engine: the reason is recorded.
@@ -553,8 +565,15 @@ def test_run_json_records_the_render_choice_and_verify_json_in_every_mode(
     # flightsim.verify over the directory prints exactly the file's checks.
     assert verify_main([str(tmp_path / "none")]) == 0
     printed = capsys.readouterr().out
+    rows = verification_rows(printed)
     for check in verify["checks"]:
-        assert f"[{check['status']}] {check['name']}: {check['detail']}" in printed
+        assert rows[check["name"]][0] == check["status"]
+        if check["status"] != "PASS":
+            assert (f"[{check['status']}] {check['name']}: "
+                    f"{check['detail']}") in printed
+        else:
+            assert rows[check["name"]][1:3] == (check["measured_text"],
+                                                check["tolerance_text"])
 
     # Frames: verify.json is rewritten AFTER the passes, engine parity graded.
     monkeypatch.setattr(plat, "ue_available", lambda: True)
@@ -749,7 +768,9 @@ def verification_rows(text):
                                               "TOLERANCE", "WHERE")]
     rows = {}
     for line in lines[start + 1:]:
-        if line.strip() == "detail:":
+        # The table ends at the detail block (rows that did not PASS)
+        # or, when every row passed, at the summary line.
+        if line.strip() == "detail:" or not line.startswith("  "):
             break
         cells = [line[a:b].strip() for a, b in zip(columns, columns[1:])]
         cells.append(line[columns[-1]:].strip())
@@ -809,9 +830,18 @@ def test_the_report_opens_with_a_header(report_run):
                         f"simulation {manifest['simulation_digest'][:16]}   "
                         f"output {manifest['output_digest'][:16]}")
     assert lines[3] == "scene        flat (no raster)   crs EPSG:32631"
+    # The flight line states the window the schedule lives in, from the
+    # record itself, beside the spec's duration.
+    telemetry = json.loads(
+        (out / "telemetry.json").read_text(encoding="utf-8"))["columns"]["t"]
+    gaps = sorted(b - a for a, b in zip(telemetry, telemetry[1:]))
+    assert lines[4] == (
+        f"flight       B747, 12 s at 120 Hz (step 0.008333 s); telemetry t "
+        f"{telemetry[0]:.3f}..{telemetry[-1]:.3f} s ({len(telemetry)} "
+        f"samples, {gaps[len(gaps) // 2]:.3f} s apart); span 64.5 m")
     assert lines[4].startswith("flight       B747, 12 s at 120 Hz (step "
-                               "0.008333 s), ")
-    assert "telemetry samples; span 64.5 m" in lines[4]
+                               "0.008333 s); telemetry t 0.008..11.992 s "
+                               "(115 samples, 0.108 s apart); span 64.5 m")
     assert lines[5] == "cameras      2"
     assert lines[6] == ("  chase0  chase/offset  aim aircraft  1280x720  "
                         "35.0 mm (fx 1244.4 px)  24 captures, interval")
@@ -854,6 +884,45 @@ def test_the_schedule_table_lists_every_instant(report_run):
                      r"11\.992 s \(samples 0\.\.114\)$", brief, re.M)
 
 
+def test_the_flight_line_and_brief_name_the_window_and_the_trigger(tmp_path):
+    """cameras_waypoint: a 30 s spec whose record runs 4.900..34.858 s
+    (the c172p's trim and engine start ran the clock first) and whose
+    last instant is t=33.017 s -- the flight line says so; --brief words
+    the spacing from the distance trigger, never as sample snapping."""
+    out = tmp_path / "waypoint"
+    code, text = capture_text([str(EXAMPLES / "cameras_waypoint.yaml"),
+                               "--out", str(out), "--max-previews", "0",
+                               "--render", "none", "--brief"])
+    assert code == 0, text
+    telemetry = json.loads(
+        (out / "telemetry.json").read_text(encoding="utf-8"))["columns"]["t"]
+    assert telemetry[0] > 1.0                  # the clock ran before the record
+    flight = next(line for line in text.splitlines()
+                  if line.startswith("flight "))
+    assert flight == (
+        f"flight       c172p, 30 s at 120 Hz (step 0.008333 s); telemetry t "
+        f"{telemetry[0]:.3f}..{telemetry[-1]:.3f} s ({len(telemetry)} samples, "
+        f"0.108 s apart), the clock at {telemetry[0]:.3f} s when the record "
+        f"began (trim and engine start); span 10.9 m")
+    manifest = json.loads(
+        (out / "capture_manifest.json").read_text(encoding="utf-8"))
+    times = [r["t_s"] for r in manifest["frames"]]
+    gaps = [b - a for a, b in zip(times, times[1:])]
+    assert re.search(
+        rf"^    0\.\.4 every 400 m of track; instants {min(gaps):.3f}\.\."
+        rf"{max(gaps):.3f} s apart from {times[0]:.3f} s to {times[-1]:.3f} s "
+        rf"\(samples 0\.\.{manifest['frames'][-1]['sample_index']}\)$",
+        text, re.M), text
+    assert "sample-snapped" not in text
+    # flightsim.verify prints the same flight line from telemetry.json.
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(out), "--brief"]) == 0
+    printed = buffer.getvalue()
+    assert flight in printed.splitlines()
+    assert "every 400 m of track; instants" in printed
+
+
 def test_the_verification_table_has_measured_tolerance_status_and_where(
         report_run):
     out, text = report_run
@@ -878,9 +947,14 @@ def test_the_verification_table_has_measured_tolerance_status_and_where(
     assert rows["count_exactness"][1:] == (
         "48 frames = 24 + 24", "exactly 48", "chase0 24/24, tower0 24/24")
     assert rows["engine_parity"][0] == "AWAITING"
-    # The detail lines follow, then the summary, then the verdict.
+    # The detail block (rows that did not PASS: engine parity AWAITING
+    # here) follows, then the summary, then the verdict; every PASS is
+    # rendered once, in the table.
     lines = text.splitlines()
     assert "  detail:" in lines
+    assert [line for line in lines if line.startswith("  [")] == [
+        "  [AWAITING] engine_parity: " + verify["checks"][-1]["detail"]]
+    assert "[PASS]" not in text
     assert "verification PASSED (7/7 checks; 1 awaiting engine frames: " \
            "engine_parity)" in lines
     assert lines[-1].startswith("done: ")
@@ -1298,6 +1372,38 @@ def test_exit_codes_share_one_table_and_the_verdict_line_names_them(
         for code, word in ((0, "done"), (1, "FAILED"), (2, "REFUSED"),
                            (3, "USAGE"), (4, "UNEXPECTED")):
             assert re.search(rf"^  {code}  .*{word}", help_text, re.M), word
+
+
+def test_a_missing_spec_is_usage_and_the_usage_line_prints_once(tmp_path,
+                                                                  capsys):
+    """A spec path that does not exist exits 3 with "USAGE: <path>: no
+    such file" -- the table's own words, no traceback -- and every
+    usage error names itself ONCE, on stdout where the verdict lives;
+    stderr carries argparse's usage text alone."""
+    nope = EXAMPLES / "nope.yaml"
+    assert capture_main([str(nope), "--out", str(tmp_path / "x")]) == 3
+    captured = capsys.readouterr()
+    assert captured.out.splitlines()[-1] == f"USAGE: {nope}: no such file"
+    assert captured.out.count("USAGE:") == 1
+    assert "Traceback" not in captured.err and "USAGE:" not in captured.err
+    assert not (tmp_path / "x").exists()
+    # --json: the same verdict as data.
+    assert capture_main([str(nope), "--out", str(tmp_path / "x"),
+                         "--json"]) == 3
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["exit_code"] == 3 and doc["verdict"] == "USAGE"
+    assert doc["text"] == [f"USAGE: {nope}: no such file"]
+    # An argparse error: once on stdout, argparse's usage on stderr.
+    assert verify_main([str(tmp_path), "--bogus"]) == 3
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == [
+        "USAGE: python -m flightsim.verify: unrecognized arguments: --bogus"]
+    assert captured.err.startswith("usage: python -m flightsim.verify")
+    assert "USAGE:" not in captured.err
+    assert capture_main([str(EXAMPLES / "cameras_multi.yaml")]) == 3
+    captured = capsys.readouterr()
+    assert captured.out.count("USAGE:") == 1 and "USAGE:" not in captured.err
+    assert captured.err.startswith("usage: python -m flightsim.capture")
 
 
 def test_the_documents_expected_output_matches_a_fresh_run(tmp_path):

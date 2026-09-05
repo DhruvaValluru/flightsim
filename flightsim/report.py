@@ -25,8 +25,9 @@ Exit codes (:data:`EXIT_WORDS`), one table for both commands::
     0  done / verified   capture produced what was asked; verify passed
     1  FAILED            the verifier failed the artefact (a check FAILED)
     2  REFUSED           a named constraint refused before/while producing
-    3  USAGE             the command line, or a run directory that holds
-                         nothing to verify
+    3  USAGE             the command line, a spec or run path that does
+                         not exist, or a run directory that holds nothing
+                         to verify
     4  UNEXPECTED        an exception; the traceback goes to stderr
 
 The verdict line's first word is the code's word, so the last line of
@@ -64,8 +65,9 @@ EXIT_MEANINGS: Dict[int, str] = {
     EXIT_REFUSED: "REFUSED by name: a named constraint (camera.*, "
                   "ue.platform, render.*) refused before or while "
                   "producing; nothing is approximated",
-    EXIT_USAGE: "USAGE: the command line is wrong, or the run directory "
-                "holds nothing to verify",
+    EXIT_USAGE: "USAGE: the command line is wrong, a spec or run path "
+                "does not exist, or the run directory holds nothing to "
+                "verify",
     EXIT_UNEXPECTED: "UNEXPECTED: an exception; the traceback is on "
                      "stderr",
 }
@@ -122,9 +124,9 @@ def run_command(main: Callable[[argparse.Namespace, Dict], int],
     try:
         args = parser.parse_args(argv)
     except UsageError as exc:
-        # Named on stdout (the verdict line, exit 3's word) and on
-        # stderr beside argparse's usage text.
-        print(f"USAGE: {exc}", file=sys.stderr)
+        # Named ONCE, on stdout (the verdict line, exit 3's word, where
+        # every other verdict lives); stderr carries argparse's own
+        # usage text alone, so a terminal never shows the line twice.
         print(f"USAGE: {exc}")
         return EXIT_USAGE
     except SystemExit as exc:          # --help, -h
@@ -163,14 +165,34 @@ def _digest16(value) -> str:
     return str(value)[:16] if value else "-"
 
 
+def telemetry_window(t: Sequence[float]) -> Optional[Dict[str, float]]:
+    """The recorded clock's window: first and last instant, the sample
+    count and the spacing (the median gap, measured from the record
+    itself -- the recorder's 0.1 s interval snaps to 13 fixed steps at
+    120 Hz, 0.108 s, so the nominal interval is never quoted)."""
+    t = [float(v) for v in t]
+    if not t:
+        return None
+    gaps = sorted(b - a for a, b in zip(t, t[1:]))
+    spacing = gaps[len(gaps) // 2] if gaps else None
+    return {"first_s": t[0], "last_s": t[-1], "samples": len(t),
+            "spacing_s": spacing}
+
+
 def header(manifest: Dict, out=None, aircraft: Optional[str] = None,
            duration_s: Optional[float] = None,
-           samples: Optional[int] = None) -> Tuple[List[str], Dict]:
+           samples: Optional[int] = None,
+           telemetry: Optional[Dict[str, float]] = None
+           ) -> Tuple[List[str], Dict]:
     """The header block as (lines, data) from a capture manifest.
     ``aircraft`` / ``duration_s`` come from the spec when the caller has
     it (capture) or from scenario.yaml beside the manifest (verify:
-    :func:`flight_words_from_run`); the manifest's own aircraft_metrics
-    name the airframe when nothing else does."""
+    :func:`flight_words_from_run`); ``telemetry`` is
+    :func:`telemetry_window` of the recorded clock (the flight line
+    states the window the schedule lives in beside the spec's
+    duration: a 30 s spec whose record runs 4.900..34.858 s says so);
+    the manifest's own aircraft_metrics name the airframe when nothing
+    else does."""
     metrics = manifest.get("aircraft_metrics") or {}
     aircraft = aircraft or metrics.get("aircraft") or "-"
     scene = manifest.get("scene") or {}
@@ -217,6 +239,7 @@ def header(manifest: Dict, out=None, aircraft: Optional[str] = None,
         "aircraft": aircraft, "duration_s": duration_s,
         "rate_hz": rate, "step_s": manifest.get("step_s"),
         "samples": samples,
+        "telemetry": telemetry,
         "span_m": metrics.get("span_m"),
         "software_revision": manifest.get("software_revision"),
         "cameras": cameras,
@@ -237,8 +260,24 @@ def header(manifest: Dict, out=None, aircraft: Optional[str] = None,
     flight = f"flight       {aircraft}"
     if duration_s is not None:
         flight += f", {float(duration_s):g} s"
-    flight += f" at {rate:g} Hz (step {1.0 / rate if rate else 0:.6f} s)"
-    if samples is not None:
+    step = 1.0 / rate if rate else 0.0
+    flight += f" at {rate:g} Hz (step {step:.6f} s)"
+    if telemetry:
+        # The window the schedule lives in, from the record itself.
+        flight += (f"; telemetry t {telemetry['first_s']:.3f}.."
+                   f"{telemetry['last_s']:.3f} s ({int(telemetry['samples'])} "
+                   f"samples")
+        if telemetry.get("spacing_s") is not None:
+            flight += f", {telemetry['spacing_s']:.3f} s apart"
+        flight += ")"
+        if telemetry["first_s"] > step + 1e-9:
+            # The record starts where the run starts: the clock ran
+            # through trim and engine start first (the c172p's starter
+            # crank steps the FDM; the record's own first t says how
+            # far).
+            flight += (f", the clock at {telemetry['first_s']:.3f} s when "
+                       f"the record began (trim and engine start)")
+    elif samples is not None:
         flight += f", {int(samples)} telemetry samples"
     if metrics.get("span_m"):
         flight += f"; span {float(metrics['span_m']):.1f} m"
@@ -259,7 +298,8 @@ def flight_words_from_run(run_dir) -> Dict:
     """(aircraft, duration_s, samples) read from scenario.yaml and
     telemetry.json beside a manifest when they exist -- plain YAML/JSON
     reads, so a verify never refuses over a spec detail."""
-    words: Dict = {"aircraft": None, "duration_s": None, "samples": None}
+    words: Dict = {"aircraft": None, "duration_s": None, "samples": None,
+                   "telemetry": None}
     scenario = Path(run_dir) / "scenario.yaml"
     if scenario.is_file():
         try:
@@ -278,6 +318,7 @@ def flight_words_from_run(run_dir) -> Dict:
             columns = json.loads(telemetry.read_text(encoding="utf-8"))
             columns = columns.get("columns", columns)
             words["samples"] = len(columns.get("t", []))
+            words["telemetry"] = telemetry_window(columns.get("t", []))
         except Exception:         # noqa: BLE001
             pass
     return words
@@ -326,13 +367,17 @@ def schedule_tables(manifest: Dict, brief: bool = False,
                     indent: str = "  ") -> Tuple[List[str], Dict]:
     """The per-camera schedule as (lines, data). Every instant is a row;
     with ``brief`` each camera collapses to one line -- "0..23 every
-    0.521 s from 0.008 s" when the spacing is uniform, the spacing's
-    range and the words "sample-snapped, not uniform" when it is not
-    (a count schedule snaps to telemetry samples), never a period that
+    0.521 s from 0.008 s" when the spacing is uniform; otherwise the
+    cause from the camera's own trigger ("every 400 m of track;
+    instants 6.600..7.433 s apart" for a distance trigger, the aim
+    point and radius for proximity, the channel and threshold for an
+    event) and, for a count or period schedule, the spacing's range
+    with the words "sample-snapped, not uniform" -- never a period that
     was not measured."""
     rows = schedule_rows(manifest)
-    basis = {b["camera_id"]: b.get("schedule_basis")
-             for b in manifest.get("cameras", [])}
+    blocks = {b["camera_id"]: b for b in manifest.get("cameras", [])}
+    basis = {camera_id: b.get("schedule_basis")
+             for camera_id, b in blocks.items()}
     lines: List[str] = []
     for camera_id, records in rows.items():
         times = [r["t_s"] for r in records]
@@ -349,8 +394,36 @@ def schedule_tables(manifest: Dict, brief: bool = False,
                 spacing = f"every {period:.3f} s"
             elif len(times) > 1:
                 gaps = [b - a for a, b in zip(times, times[1:])]
-                spacing = (f"spaced {min(gaps):.3f}..{max(gaps):.3f} s "
-                           f"(sample-snapped, not uniform)")
+                apart = f"instants {min(gaps):.3f}..{max(gaps):.3f} s apart"
+                block = blocks.get(camera_id) or {}
+                trigger = block.get("trigger")
+                spec = block.get("spec") or {}
+
+                def value(key, default=None):
+                    field = spec.get(key)
+                    return field.get("value", default) \
+                        if isinstance(field, dict) else default
+
+                if trigger == "distance":
+                    spacing = (f"every {float(value('distance_m', 0)):g} m "
+                               f"of track; {apart}")
+                elif trigger == "proximity":
+                    spacing = (f"within {float(value('distance_m', 0)):g} m "
+                               f"of ({float(value('aim_north_m', 0)):g} N, "
+                               f"{float(value('aim_east_m', 0)):g} E), "
+                               f"refractory "
+                               f"{float(value('refractory_s', 0)):g} s; "
+                               f"{apart}")
+                elif trigger == "event":
+                    spacing = (f"on {value('event_channel', '?')} "
+                               f"{value('event_direction', '?')} "
+                               f"{float(value('event_threshold', 0)):g}, "
+                               f"refractory "
+                               f"{float(value('refractory_s', 0)):g} s; "
+                               f"{apart}")
+                else:
+                    spacing = (f"spaced {min(gaps):.3f}..{max(gaps):.3f} s "
+                               f"(sample-snapped, not uniform)")
             else:
                 spacing = "a single instant"
             lines.append(f"{indent}  {records[0]['index']}.."

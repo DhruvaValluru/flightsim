@@ -71,7 +71,8 @@ capture.verification:", or a frames run whose rendered frames fail
 engine parity); 2 REFUSED -- a named constraint refused ("REFUSED
 <constraint>"), or the engine pass did not honour its contract ("FAILED
 render.frames:" / "FAILED render.clip:", the frames written are not a
-frame set); 3 USAGE; 4 UNEXPECTED (traceback on stderr).
+frame set); 3 USAGE (the command line, or a spec path that does not exist); 4
+UNEXPECTED (traceback on stderr).
 """
 
 from __future__ import annotations
@@ -95,8 +96,8 @@ from core.capture.render_pass import (  # noqa: E402
 )
 from core.fdm.console import jsbsim_console  # noqa: E402
 from flightsim.report import (  # noqa: E402
-    EXIT_DONE, EXIT_FAILED, EXIT_REFUSED, ReportParser, add_common_arguments,
-    header, run_command, schedule_tables,
+    EXIT_DONE, EXIT_FAILED, EXIT_REFUSED, ReportParser, UsageError,
+    add_common_arguments, header, run_command, schedule_tables,
 )
 
 
@@ -202,6 +203,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 
 def _capture(args, doc: dict) -> int:
+    # A spec path that does not exist is a usage error (exit 3, by
+    # word), never an UNEXPECTED traceback: the table's own words.
+    if not Path(args.spec).is_file():
+        raise UsageError(f"{args.spec}: no such file")
     render = args.render or render_choice_default()
     from core.capture.preview import validated_scale
 
@@ -374,9 +379,12 @@ def _capture_in(args, doc: dict, out: Path, render: str, preview_scale: int,
 
     # The header: digests, scene, flight, one line per camera -- the
     # same block flightsim.verify prints from the manifest alone.
+    from flightsim.report import telemetry_window
+
     head_lines, head_data = header(
         manifest, out, aircraft=str(spec.aircraft.value),
-        duration_s=float(spec.duration.value), samples=len(result.telemetry))
+        duration_s=float(spec.duration.value), samples=len(result.telemetry),
+        telemetry=telemetry_window(columns["t"]))
     for line in head_lines:
         print(line)
     doc["header"] = head_data
