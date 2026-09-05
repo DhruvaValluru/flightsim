@@ -2987,6 +2987,33 @@ mutate docs/CAMERA_PHASE1_REPORT.md \
     "docs round 2: no heading calls the frames deliverable finished while its engine cell reads NOT YET RUN" \
     tests/test_camera_docs.py || failures=$((failures+1))
 
+# -- Camera Phase 1, docs round 2: Known limitations is a list of limitations
+# (one each, four lines at most, a pointer to the history) and the status
+# table cites the CI result it read.
+mutate docs/CAMERA_PHASE1_REPORT.md \
+    '* Segmentation masks, bounding boxes, domain randomization, batch
+  execution: out of scope, untouched.' \
+    '* Segmentation masks, bounding boxes, domain randomization, batch
+  execution: out of scope, untouched. In round 1 the masks were
+  discussed and deferred; in round 2 the boxes were deferred again;
+  in round 3 batch execution was deferred a third time; in round 4
+  domain randomization was deferred once more.' \
+    "docs round 2: a Known-limitations bullet cannot grow back into a changelog" \
+    tests/test_camera_docs.py || failures=$((failures+1))
+
+mutate docs/CAMERA_PHASE1_REPORT.md \
+    '  instant can cross logs. See "Where JSBSim'"'"'s console goes" above.' \
+    '  instant can cross logs.' \
+    "docs round 2: the console bullet points at the section holding its history" \
+    tests/test_camera_docs.py || failures=$((failures+1))
+
+mutate docs/CAMERA_PHASE1_REPORT.md \
+    'run is #72 on 3c57d5d (10:06 UTC,
+https://github.com/DhruvaValluru/flightsim/actions/runs/33959746547),' \
+    'run is #72 on 3c57d5d (10:06 UTC; no CI result was read in this session),' \
+    "docs round 2: the status table cites the green windows-latest CI run by id" \
+    tests/test_camera_docs.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

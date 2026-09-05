@@ -15,8 +15,19 @@ means no real engine has ever produced it, and the section named holds
 the exact steps and expected numbers. Nothing in the right-hand column
 is counted as verified until the Windows logs have been pasted back.
 `ci.yml` runs the suite on ubuntu, windows and macos runners (the
-expected-output comparison masks numbers off the measured platform);
-no CI result was read in this session.
+expected-output comparison masks numbers off the measured platform).
+CI read on 2026-09-05 from GitHub Actions (workflow `ci`, PR #5 of
+this branch): the latest run, #74 on a928572 (13:02 UTC), was RED on
+windows-latest -- the test that forbids control characters in this
+report listed a byte 13 at every line, the CR of the runner's CRLF
+checkout; 508263d fixes the test and had not been through CI when this
+was written -- and green on ubuntu and macos; the latest fully green
+run is #72 on 3c57d5d (10:06 UTC,
+https://github.com/DhruvaValluru/flightsim/actions/runs/33959746547),
+whose windows-latest job (101289429647) ran `pytest -q` green in
+10 min 19 s: the Python half of every headless row below, the masked
+expected-output comparison included, measured on a Windows runner.
+Nothing engine-side runs on CI.
 
 | deliverable | without the engine (Linux; macOS or Windows before the build) | Windows with the engine (UE 5.5 + the built bridge) |
 |---|---|---|
@@ -27,7 +38,7 @@ no CI result was read in this session.
 | overlays over rendered frames (`overlays/<id>/NNNN.png`) | stub: 48, measured here 2026-09-05 (the s/frame is the block's own, about 0.17) | NOT YET RUN -- section 5c (looked at, not only counted) |
 | the by-product clip of camera 0 (ffmpeg concat at the scheduled instants, 12.992 s) | argv, playlist and lead-in pinned by test; no ffmpeg on this machine, so never encoded here (the stub block's `clip:` line is the playlist arithmetic over a 3-byte placeholder) | NOT YET RUN -- section 5b (ffprobe: duration and 25 read frames) |
 | `--render clip` / *Clip only* (the preset pass, an fps clip) | stub, measured here (`test_render_clip_is_the_single_preset_pass`) | observed on the user's Windows machine before 2026-09-03 on the PRE-REWRITE page flow (a clip plus schematic previews: analysis/PLAN_camera_frames_not_clip.md); the flow as it stands today NOT re-run there -- section 6 |
-| the page's frames flow: galleries per camera, "N scheduled, M rendered, K verified", download classes, parity captions | measured here 2026-09-05 under node and the TestClient on the stub (`tests/test_webapp_capture.py`) | NOT YET RUN -- section 6 (6b, 6c for the failure and refusal words) |
+| the page's frames flow: galleries per camera, "N scheduled, M rendered, K verified", download classes, parity captions | measured here 2026-09-05 under node and the TestClient on the stub (`tests/test_webapp_capture.py`; the generated block in section 6 is that run's status log and card) | NOT YET RUN -- section 6 (6b, 6c for the failure and refusal words) |
 | temporal alignment across two camera sets on rendered frames | measured here on headless runs (block 4 below: 24 instants, worst gap 0 s) | NOT YET RUN -- section 7 |
 | the C++ consume-poses pass itself (`FlightSimRenderCommandlet.cpp`) | compile-safe by inspection only: never compiled, never run (no engine here) | NOT YET RUN -- section 1 (the build; paste the log back if it fails) |
 
@@ -192,6 +203,50 @@ document the text was rendered from, as data (header, schedule,
 previews, verification -- `VerificationReport.to_dict()`, the same JSON
 written as `verify.json` and served by the page -- artefact paths, the
 render choice, the JSBSim log, the exit code, and the text lines).
+
+### Where JSBSim's console goes
+
+The history behind the Known-limitations bullet on the console,
+measured round by round. The startup banner
+JSBSim prints from C++ on every `FGFDMExec` construction is routed
+at the file-descriptor level (`core/fdm/console.py`) ONLY inside a
+sink: the CLI's whole run (`<out>/jsbsim.log`) and, since round 2,
+the page's whole run flow (`<run>/jsbsim.log`, entered by the run
+manager around planning, the capture and closure flights and the
+card; listed on the page as an artefact) or, for a `capture_run`
+called directly with no sink, `capture/jsbsim.log`. Every routed
+load is preceded by a stamp, `# load 3: FlightDynamics(B747) called
+from core.scenario.validate.validate`, so fourteen identical banners
+read as fourteen named loads (measured: the CLI's cameras_multi run
+is 14 stamped loads, 15 with `--card` or `--render frames`, the
+fifteenth being the run card's engine-start mixture probe, stamped
+`FGFDMExec(B747, mixture probe) called from core.scenario.card.
+attempt`; a page capture run of the 3 s prairie spec is 15 in
+`<run>/jsbsim.log`). The probe builds its model at JSBSim's debug
+level 1, so `run_ic` prints the Mass Properties Report from C++
+AFTER the banner; until docs round 1 (2026-09-05) only the probe's
+construction was inside the sink and that report -- twelve coloured
+lines -- landed on stdout between the header and `card:`, one line
+above "nothing of JSBSim's on stdout" (measured on `--card --render
+none`: 96 stdout lines). The whole probe (construction, `run_ic`,
+trim, the sustain steps) is routed now: 82 lines, none of JSBSim's,
+and the report sits in the log under the probe's stamp;
+`tests/test_camera_cli.py::
+test_the_cards_engine_start_probe_prints_nothing_on_stdout` pins it
+under file-descriptor capture. Since round 3 the request handlers' own
+pre-flight planning and validation BEFORE a run exists
+(`plan_flyable_defaults`, the envelope measurement, `validate` in
+`/compile`, `/run` and `/capture`) is routed too, to the
+server-level planning log `<runs root>/jsbsim.log` (appended,
+stamped, counted; `/status` names it as `planning_log` with
+`planning_model_loads`), and the sink is one slot PER THREAD
+(`threading.local`), so a request planning while a run is flying
+keeps its own slot and the run keeps its own log with its own
+numbering from 1. NOT routed: a bare `run_spec` in a test with no
+sink entered. The descriptor redirection itself is process-wide for
+the milliseconds one construction takes, so two threads constructing
+at the same instant could land a banner in the other's log -- in a
+log, never on the console.
 
 ### Exit codes (one table for both commands)
 
@@ -1710,6 +1765,28 @@ handler and `RunManager.start()` both route none to the headless
 capture and removing either alone leaves the other. So the set
 stands at 311 guards, every one load-bearing on this tree.
 
+### What the verifier cannot see
+
+The history behind the Known-limitations bullet of the same name.
+`flight_fidelity` and `schedule_fidelity` read `telemetry.json` and `scenario.yaml` beside
+the manifest; a manifest verified without them is graded for its
+internal consistency only (the two checks SKIPPED by name, never
+passed). `flight_fidelity` proves the manifest IS the telemetry
+beside it (digest and per-sample equality); it cannot prove that
+telemetry was flown honestly -- a `telemetry.json` and manifest
+forged together verify, and only engine parity on rendered frames
+(Windows, awaiting) grades the pixels. `schedule_fidelity` recomputes
+the schedule with the scheduler the producer used (`core/capture/
+schedule.py`) and `pose_fidelity` (round 3) recomputes the pose
+tracks with the pose solver the producer used (`core/capture/
+poses.py`), so a bug in the scheduler or the solver itself is caught
+only by their own tests (and, for the pose, by engine parity on
+rendered frames), not by these checks; what they prove is that the
+manifest carries what the committed spec commands over the recorded
+flight. The projections the verifier grades WITH (the aircraft's
+north/east from lat/lon, the pinhole model, the rays) are its own
+(pyproj and plain arithmetic), never the solver's.
+
 ## Geometry preview (package I, done properly 2026-09-04; rounds 2 and 3 the same day)
 
 `core/capture/preview.py` draws one PNG per scheduled frame with numpy
@@ -2996,148 +3073,70 @@ Paste every log back; this section is rewritten from them.
 
 ## Known limitations
 
-* Keyframed moves only — no physically simulated camera platforms (out
+One limitation per bullet; the history behind each is in the section
+it points to.
+
+* Keyframed moves only -- no physically simulated camera platforms (out
   of scope by the phase definition).
 * The headless CLI's tornado hazard check uses the straight-line
-  45%-ahead placement (its own track IS straight); the webapp's
-  terrain runs refine the placement onto the pre-flown banked track
-  through the same shared helper.
-* **A run the server died under is not recovered.** A finished run
-  writes `<run>/status.json` (its verdict and event log) before its
-  status shows as done or failed, and a restarted server rebuilds the
-  run -- headless, clip or frames -- from that file, `provenance.json`
-  and the capture files; a run interrupted by the restart has none and
-  the page says "not recoverable" (gotcha 23 stands: do not restart
-  the server while a run is active). Runs written before status.json
-  existed recover from their clip.mp4 alone, with no capture card.
-* **Keyframed moves reach the page only from a spec that carried
-  them.** No prompt vocabulary produces `moves` (the compiler's camera
-  schema has none), so the review table's keyframe rows -- editable,
-  with the list's recorded provenance -- appear only for a spec loaded
-  with moves (the CLI's YAML path, or a run's `scenario.yaml` re-posted
-  to `/run`); a prompt cannot state a dolly yet.
-* **The page's galleries draw every rendered frame the server lists**
-  (lazily loaded; 48 thumbnails at 160 px is the measured largest
-  case here) but previews stay capped at MAX_PREVIEWS (60) per run,
-  and the card says so ("previews capped at 60; the manifest carries
-  every frame"). The overlay toggle swaps each thumbnail for the
-  overlay file the server listed; nothing is drawn in the browser.
+  45%-ahead placement (its own track IS straight); the webapp's terrain
+  runs refine it onto the pre-flown banked track through the same
+  shared helper.
+* **A run the server died under is not recovered.** A finished run's
+  `status.json` lets a restarted server rebuild it; an interrupted run
+  has none and the page says "not recoverable" (gotcha 23: no restart
+  while a run is active). Detail: section 6, "what a restart does".
+* **Keyframed moves reach the page only from a spec that carried them.**
+  No prompt vocabulary produces `moves`, so the review table's keyframe
+  rows appear only for a YAML spec or a run's re-posted `scenario.yaml`;
+  a prompt cannot state a dolly yet.
+* **Previews on the page are capped at MAX_PREVIEWS (60) per run** (the
+  card says so; the manifest carries every frame); the galleries draw
+  every rendered frame the server lists (48 thumbnails at 160 px is the
+  largest case measured here), the overlay toggle swapping server files.
 * Cross-view consistency is SKIPPED by name for single-camera runs
-  (`ok` None, reason "single camera": counted in neither passed nor
-  ran -- no false pass, no false failure); the two-camera example is
-  where it is exercised.
-* **Where JSBSim's console is and is not routed.** The startup banner
-  JSBSim prints from C++ on every `FGFDMExec` construction is routed
-  at the file-descriptor level (`core/fdm/console.py`) ONLY inside a
-  sink: the CLI's whole run (`<out>/jsbsim.log`) and, since round 2,
-  the page's whole run flow (`<run>/jsbsim.log`, entered by the run
-  manager around planning, the capture and closure flights and the
-  card; listed on the page as an artefact) or, for a `capture_run`
-  called directly with no sink, `capture/jsbsim.log`. Every routed
-  load is preceded by a stamp, `# load 3: FlightDynamics(B747) called
-  from core.scenario.validate.validate`, so fourteen identical banners
-  read as fourteen named loads (measured: the CLI's cameras_multi run
-  is 14 stamped loads, 15 with `--card` or `--render frames`, the
-  fifteenth being the run card's engine-start mixture probe, stamped
-  `FGFDMExec(B747, mixture probe) called from core.scenario.card.
-  attempt`; a page capture run of the 3 s prairie spec is 15 in
-  `<run>/jsbsim.log`). The probe builds its model at JSBSim's debug
-  level 1, so `run_ic` prints the Mass Properties Report from C++
-  AFTER the banner; until docs round 1 (2026-09-05) only the probe's
-  construction was inside the sink and that report -- twelve coloured
-  lines -- landed on stdout between the header and `card:`, one line
-  above "nothing of JSBSim's on stdout" (measured on `--card --render
-  none`: 96 stdout lines). The whole probe (construction, `run_ic`,
-  trim, the sustain steps) is routed now: 82 lines, none of JSBSim's,
-  and the report sits in the log under the probe's stamp;
-  `tests/test_camera_cli.py::
-  test_the_cards_engine_start_probe_prints_nothing_on_stdout` pins it
-  under file-descriptor capture. Since round 3 the request handlers' own
-  pre-flight planning and validation BEFORE a run exists
-  (`plan_flyable_defaults`, the envelope measurement, `validate` in
-  `/compile`, `/run` and `/capture`) is routed too, to the
-  server-level planning log `<runs root>/jsbsim.log` (appended,
-  stamped, counted; `/status` names it as `planning_log` with
-  `planning_model_loads`), and the sink is one slot PER THREAD
-  (`threading.local`), so a request planning while a run is flying
-  keeps its own slot and the run keeps its own log with its own
-  numbering from 1. NOT routed: a bare `run_spec` in a test with no
-  sink entered. The descriptor redirection itself is process-wide for
-  the milliseconds one construction takes, so two threads constructing
-  at the same instant could land a banner in the other's log -- in a
-  log, never on the console.
-* **What the verifier cannot see.** `flight_fidelity` and
-  `schedule_fidelity` read `telemetry.json` and `scenario.yaml` beside
-  the manifest; a manifest verified without them is graded for its
-  internal consistency only (the two checks SKIPPED by name, never
-  passed). `flight_fidelity` proves the manifest IS the telemetry
-  beside it (digest and per-sample equality); it cannot prove that
-  telemetry was flown honestly -- a `telemetry.json` and manifest
-  forged together verify, and only engine parity on rendered frames
-  (Windows, awaiting) grades the pixels. `schedule_fidelity` recomputes
-  the schedule with the scheduler the producer used (`core/capture/
-  schedule.py`) and `pose_fidelity` (round 3) recomputes the pose
-  tracks with the pose solver the producer used (`core/capture/
-  poses.py`), so a bug in the scheduler or the solver itself is caught
-  only by their own tests (and, for the pose, by engine parity on
-  rendered frames), not by these checks; what they prove is that the
-  manifest carries what the committed spec commands over the recorded
-  flight. The projections the verifier grades WITH (the aircraft's
-  north/east from lat/lon, the pinhole model, the rays) are its own
-  (pyproj and plain arithmetic), never the solver's.
-* The `--brief` schedule line for a count schedule states the spacing's
-  range and "sample-snapped, not uniform": the instants are snapped to
-  telemetry samples (13 fixed steps apart), so no period is claimed. A
-  distance, proximity or event schedule is worded from its trigger
-  ("every 400 m of track; instants 6.600..7.433 s apart"): the spacing
-  is the flown track's, not the sampling's.
-* **The engine pass is NOT YET RUN.** The consume-poses C++ (schedule-
-  driven capture, index naming, applied + solved pose per frame,
-  orientation parity, the count contract, the lens from the card) was
-  written in an environment with no engine and no compiler; the Python
-  side is exercised against an honest engine STUB that writes what the
-  contract specifies. Until the Windows section above has been run and
-  its log read, engine parity has never been exercised on real pixels,
-  and this document says so rather than counting it.
+  (`ok` None, reason "single camera": counted in neither passed nor ran);
+  the two-camera example is where it is exercised.
+* **JSBSim's console is routed only inside a sink** (the CLI's run, the
+  page's run flow, the handlers' planning): a bare `run_spec` with no
+  sink prints to the console, and two threads constructing at one
+  instant can cross logs. See "Where JSBSim's console goes" above.
+* **What the verifier cannot see:** a `telemetry.json` and manifest
+  forged together verify (only engine parity on rendered pixels, NOT
+  YET RUN, grades the pixels), and a scheduler or pose-solver bug
+  escapes the checks that recompute with them. See the section so named.
+* The `--brief` count-schedule line states a spacing range and
+  "sample-snapped, not uniform" (instants snap to telemetry samples, 13
+  fixed steps apart); distance, proximity and event schedules are worded
+  from their trigger, the spacing the flown track's.
+* **The engine pass is NOT YET RUN.** The consume-poses C++ was written
+  with no engine and no compiler; the Python side is exercised on an
+  honest engine STUB, and engine parity has never been exercised on real
+  pixels. Steps and expected numbers: "Engine verification (Windows)".
 * The by-product clip's ffmpeg concat encoding is unmeasured here (no
-  ffmpeg on the authoring machine); its argv, playlist, lead-in PNG and
-  expected length are pinned by test, and step 5b above is the ffprobe
-  measurement. The panel clip stays with *Clip only*.
-* A frames pass steps the editor to its LAST SCHEDULED INSTANT and
-  stops (recorded as `steps_taken` / `stepped_s` per pass); a schedule
-  whose last instant lies late in a long spec still steps to it -- 24
-  captures spread over a 120 s spec is 14400 steps per camera pass --
-  and the status line says how many. The 22 s cap applies to clips
-  only; there is no frames-mode cap, by design: the schedule is the
-  contract.
-* The geometry preview's aircraft is a three-axis body and a box, not
-  a silhouette, and its LENGTH is a lower bound: the larger of the
-  FDM's stated-station extent (eyepoint to tail arm, 59.6 m for the
-  B747 whose fuselage is 70.7 m) and the wing-to-tail arm plus one
-  mean chord (6.3 m for the c172p, whose fuselage is 8.3 m), because
-  JSBSim states no nose-to-tail length; the picture's header says
-  ">= ... (no fuselage length in JSBSim)" and the manifest names every
-  station. The span (metrics/bw-ft) is the airframe's own.
+  ffmpeg): its argv, playlist, lead-in PNG and expected length are
+  pinned by test, and step 5b is the ffprobe measurement. The panel
+  clip stays with *Clip only*.
+* A frames pass steps the editor to its LAST SCHEDULED INSTANT
+  (`steps_taken` / `stepped_s` per pass): 24 captures spread over a
+  120 s spec is 14400 steps per camera pass, and the status line says
+  so. The 22 s cap applies to clips only; no frames-mode cap, by design.
+* The geometry preview's aircraft is a three-axis body and box whose
+  LENGTH is a lower bound (eyepoint-to-tail-arm, 59.6 m for the 70.7 m
+  B747; wing-to-tail arm plus a chord, 6.3 m for the 8.3 m c172p):
+  JSBSim states no nose-to-tail length, and the header says so.
 * The overlays have been drawn over the honest engine stub only; over
   real rendered pixels they are NOT YET RUN (step 5c above).
-* The terrain skyline cull hides ground behind nearer ground per image
-  column from the wireframe's own samples: a ridge narrower than the
-  coarse spacing (720 m on control_ridge) between two sample rows does
-  not occlude, and a farther sample within 1 px of the skyline is kept
-  (`SKYLINE_TOLERANCE_PX`). The fine lattice near the camera (180 m)
-  narrows that gap only within 7.2 km. The cull orders samples by
-  their camera depth interpolated linearly along each segment, not
-  perspective-correctly; over a 720 m segment that is a metre-scale
-  depth error, far below the 1 px tolerance at the ranges drawn.
-* The north arrow's world length is set by its projected size and
-  capped at 0.3 x its base's depth: where north is foreshortened to
-  nothing (the flat chase view's arrow base 36 km out) it is shorter
-  than 60 px (45 px there) and the compass rose carries the
-  orientation; the header's compass numbers are the record's yaw and
-  heading, never estimated from the arrow.
-* The telemetry track is decimated by an integer stride to at most
-  10 Hz and never interpolated; the recorder's own spacing (13 fixed
-  steps, 9.23 Hz) is below that, so today's tracks are undecimated and
-  the header says so.
+* The terrain skyline cull works from the wireframe's own samples: a
+  ridge narrower than the coarse spacing (720 m on control_ridge) does
+  not occlude, a sample within 1 px of the skyline (`SKYLINE_TOLERANCE_PX`)
+  is kept, and depth is interpolated linearly along a segment (metres).
+* The north arrow's world length is set by its projected size, capped at
+  0.3 x its base's depth: where north is foreshortened (the flat chase
+  view: 45 px) the compass rose carries the orientation; the header's
+  compass numbers are the record's, never estimated from the arrow.
+* The telemetry track is decimated by an integer stride to at most 10 Hz
+  and never interpolated; the recorder's own spacing (9.23 Hz) is below
+  that, so today's tracks are undecimated and the header says so.
 * Segmentation masks, bounding boxes, domain randomization, batch
   execution: out of scope, untouched.

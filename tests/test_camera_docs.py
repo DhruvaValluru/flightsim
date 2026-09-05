@@ -200,3 +200,75 @@ def test_next_md_has_a_standing_windows_pointer_and_counts_its_gotchas():
     match = re.search(r"gotchas 1-(\d+)\.", top)
     assert match, "the resume block names no gotcha range"
     assert int(match.group(1)) == highest, (match.group(1), highest)
+
+
+def _known_limitations():
+    """The bullets of the report's Known limitations list, each as its
+    list of lines (the bullet line and its continuation lines)."""
+    text = REPORT.read_text(encoding="utf-8")
+    section = text.split("## Known limitations\n", 1)[1]
+    bullets, current = [], None
+    for line in section.splitlines():
+        if line.startswith("* "):
+            current = [line]
+            bullets.append(current)
+        elif line.startswith("  ") and current is not None:
+            current.append(line)
+        elif not line.strip():
+            current = None
+    return bullets
+
+
+def test_known_limitations_are_one_limitation_each_with_a_pointer():
+    """A Known-limitations list is read for what is still true, not
+    for how it got there: every bullet is one limitation in at most
+    four lines, and the two histories that lived in the list (the
+    JSBSim console's routing, round by round; what the verifier cannot
+    see) are sections of their own that the bullets point to."""
+    text = REPORT.read_text(encoding="utf-8")
+    bullets = _known_limitations()
+    assert len(bullets) >= 15
+    for bullet in bullets:
+        assert len(bullet) <= 4, ("\n".join(bullet), len(bullet))
+        assert all(len(line) <= 80 for line in bullet), bullet
+    joined = ["\n".join(b) for b in bullets]
+    console = next(b for b in joined if b.startswith("* **JSBSim's console is routed"))
+    assert '"Where JSBSim\'s console goes"' in console
+    verifier = next(b for b in joined if b.startswith("* **What the verifier cannot see"))
+    assert "See the section so named" in verifier
+    engine = next(b for b in joined if b.startswith("* **The engine pass is NOT YET RUN.**"))
+    assert '"Engine verification (Windows)"' in engine
+    # The histories are where the bullets say, and are the history.
+    demonstrate = text.split("## How to demonstrate (any platform)", 1)[1]
+    demonstrate = demonstrate.split("### Exit codes", 1)[0]
+    assert "### Where JSBSim's console goes" in demonstrate
+    console_section = demonstrate.split("### Where JSBSim's console goes", 1)[1]
+    assert "96 stdout lines" in console_section and "82 lines" in console_section
+    assert "threading.local" in console_section
+    checks = text.split("### Watching each check fail on purpose", 1)[1]
+    checks = checks.split("## Geometry preview", 1)[0]
+    assert "### What the verifier cannot see" in checks
+    verifier_section = checks.split("### What the verifier cannot see", 1)[1]
+    assert "forged together verify" in verifier_section
+    assert "never the solver's" in verifier_section
+    # The list itself carries no round-by-round history.
+    limits = text.split("## Known limitations\n", 1)[1]
+    assert "until docs round 1" not in limits and "Since round 3" not in limits
+
+
+def test_the_status_table_cites_the_ci_result_it_read():
+    """The status table's headless column is the Python half, and CI
+    runs that half on a Windows runner: the table names the latest
+    fully green run by id and date, the green windows-latest job, and
+    the latest run's colour per leg -- or says plainly that CI was red
+    or absent -- instead of "no CI result was read"."""
+    text = REPORT.read_text(encoding="utf-8")
+    head = text.split("## What the camera is now", 1)[0]
+    assert "no CI result was read" not in head
+    assert "CI read on 2026-09-05" in head
+    assert "https://github.com/DhruvaValluru/flightsim/actions/runs/33959746547" in head
+    assert "#72 on 3c57d5d" in head and "windows-latest job (101289429647)" in head
+    assert "10 min 19 s" in head
+    assert "#74 on a928572" in head and "RED on\nwindows-latest" in head
+    assert "byte 13" in head and "508263d" in head
+    assert "Nothing engine-side runs on CI." in head
