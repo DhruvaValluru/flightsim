@@ -53,6 +53,12 @@
   .formula { font-size: 11px; color: #7d8a93; margin-top: .4rem; }
   #status { white-space: pre-wrap; }
   ul { margin: .3rem 0 .3rem 1.2rem; padding: 0; }
+  .dlstrip { margin: 0 0 .8rem 0; display: flex; flex-wrap: wrap;
+             align-items: baseline; gap: .3rem .6rem; }
+  .dlstrip a.dl { background: #2b5d8c; color: #eaf2f9; border-radius: 6px;
+                  padding: .25rem .8rem; text-decoration: none; }
+  .dlstrip a.dl-frames { background: #2f7d4f; }
+  .dlstrip .dlnote { font-size: 11px; margin-right: .6rem; }
 </style>
 </head>
 <body>
@@ -549,7 +555,7 @@ async function poll() {
       `<div id="filesArea"></div>` +
       `<div id="effectArea"></div>`;
     renderCapture(run);
-    initFilesPanel(activeRun);
+    initFilesPanel(activeRun, run);
     if (run.clip) initAeroPanel(activeRun, run);
     initFlightPath(activeRun, run);
     initEffectReport(activeRun);
@@ -560,34 +566,59 @@ async function poll() {
 
 // ===================== capture geometry + downloads =======================
 // Camera Phase 1's deliverable, on the page: how many frames each camera
-// captured (an exact count is a CONTRACT, so it is shown as one), and the
-// verifier's own checks (six with engine parity) -- rendered from verify.json as run, never
-// re-derived here.
+// captured (an exact count is a CONTRACT, so it is shown as one), the
+// verifier's own checks rendered from verify.json as run (never re-derived
+// here), and one download per artefact class the run wrote.
+//
+// Everything between PAGE_CAPTURE_BEGIN and PAGE_CAPTURE_END is PURE: HTML
+// from the server's own JSON, no DOM, no fetch. tests/test_webapp_capture.py
+// runs that block verbatim under node against the real /runs/{id} and
+// /files payloads, so the words the card prints are pinned by a test.
+// PAGE_CAPTURE_BEGIN
+function esc(text) {
+  return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
 
-function renderCapture(run) {
-  const holder = $("captureArea");
-  if (!holder || !run.capture) return;
+// The count contract for one camera, in the verifier's three words. A
+// headless or clip-only run says "0 rendered" and why -- never a preview
+// count dressed as frames.
+function countWords(c, render) {
+  const scheduled = c.scheduled ?? c.frames;
+  if ((c.rendered ?? 0) > 0 || render === "frames") {
+    return `${scheduled} scheduled, ${c.rendered ?? 0} rendered, ` +
+           `${c.verified ?? 0} verified`;
+  }
+  return `${scheduled} scheduled, 0 rendered (` +
+         `${render === "clip" ? "clip only" : "headless"}), previews only`;
+}
+
+// One button per artefact class the run actually wrote (the server's
+// /files "downloads": frames.zip, manifest, telemetry, clip, everything),
+// each with its note. A class the run did not write is not offered.
+function downloadStripHtml(runId, downloads) {
+  if (!downloads || !downloads.length) return "";
+  const buttons = downloads.map(d =>
+    `<a class="dl dl-${esc(d.class)}" href="/runs/${runId}/${esc(d.href)}" ` +
+    `title="${esc(d.note)}">${esc(d.label)}</a>` +
+    `<span class="dim dlnote">${esc(d.note)}</span>`).join("");
+  return `<div class="dlstrip"><b>downloads</b> ${buttons}</div>`;
+}
+
+function captureCardHtml(run) {
+  if (!run.capture) return "";
   if (run.capture.refused) {
-    holder.innerHTML =
-      `<div class="card"><b>capture refused</b> — ` +
-      `<span class="verdict-refused">[${run.capture.refused}] ` +
-      `${run.capture.message}</span></div>`;
-    return;
+    return `<div class="card"><b>capture refused</b> — ` +
+      `<span class="verdict-refused">[${esc(run.capture.refused)}] ` +
+      `${esc(run.capture.message)}</span>` +
+      `<div id="captureDownloads"></div></div>`;
   }
   // The count contract, per camera, in the three words the verifier
   // backs with files: scheduled (the manifest), rendered (PNGs on disk),
-  // verified (engine parity). A headless or clip-only run says
-  // "0 rendered" and why, never a preview count dressed as frames.
+  // verified (engine parity).
   const rendered = run.render === "frames";
-  const cameras = (run.capture.cameras || []).map(c => {
-    const scheduled = c.scheduled ?? c.frames;
-    const words = (c.rendered ?? 0) > 0 || rendered
-      ? `${scheduled} scheduled, ${c.rendered ?? 0} rendered, ` +
-        `${c.verified ?? 0} verified`
-      : `${scheduled} scheduled, 0 rendered (` +
-        `${run.render === "clip" ? "clip only" : "headless"}), previews only`;
-    return `<li><b>${c.camera_id}</b>: ${words}</li>`;
-  }).join("");
+  const cameras = (run.capture.cameras || []).map(c =>
+    `<li><b>${esc(c.camera_id)}</b>: ${countWords(c, run.render)}</li>`).join("");
   const v = run.capture.verification || {checks: []};
   // Four states, the verifier's own: PASS, FAIL, AWAITING (the
   // engine-parity check with no engine frames to grade) and SKIPPED (a
@@ -600,13 +631,13 @@ function renderCapture(run) {
                            : (c.ok ? "#6fd08c" : "#e06f6f");
   const checks = v.checks.map(c =>
     `<li><b style="color:${checkColour(c)}">${checkWord(c)}</b> ` +
-    `${c.name} — <span class="dim">${c.detail}</span></li>`).join("");
+    `${esc(c.name)} — <span class="dim">${esc(c.detail)}</span></li>`).join("");
   const skipped = (v.skipped || []).map(s => `${s.name} skipped (${s.reason})`);
   const notRun = skipped.concat((v.awaiting || []).length
     ? [`${v.awaiting.join(", ")} awaiting engine frames`] : []);
   const awaiting = notRun.length
     ? ` <span class="dim">(${v.passed}/${v.ran} checks ran; ` +
-      `${notRun.join("; ")})</span>` : "";
+      `${esc(notRun.join("; "))})</span>` : "";
   const capped = run.capture.previews_capped
     ? ` <span class="dim">(previews capped at ${run.capture.preview_cap}; ` +
       `the manifest carries every frame)</span>` : "";
@@ -627,12 +658,12 @@ function renderCapture(run) {
   let closure = "";
   if (cl && cl.refused) {
     closure = `<b>closure unavailable</b> — <span class="verdict-refused">` +
-      `[${cl.refused}] ${cl.message}</span>`;
+      `[${esc(cl.refused)}] ${esc(cl.message)}</span>`;
   } else if (cl) {
     const rows = cl.checks.map(c =>
       `<li><b style="color:${c.ok ? "#6fd08c" : "#e06f6f"}">` +
-      `${c.ok ? "ok" : "FAIL"}</b> ${c.name}: commanded ` +
-      `${c.commanded.toFixed(2)} ${c.unit}, achieved ${c.achieved.toFixed(2)} ` +
+      `${c.ok ? "ok" : "FAIL"}</b> ${esc(c.name)}: commanded ` +
+      `${c.commanded.toFixed(2)} ${esc(c.unit)}, achieved ${c.achieved.toFixed(2)} ` +
       `<span class="dim">(tol ${c.tolerance})</span></li>`).join("");
     closure = `<b>closure ${cl.ok ? "PASSED" : "FAILED"}</b> ` +
       `<span class="dim">(the same spec flown closed loop, graded over the ` +
@@ -645,52 +676,75 @@ function renderCapture(run) {
     : `${run.capture.scheduled ?? run.capture.frames} scheduled, 0 rendered ` +
       `(${run.render === "clip" ? "clip only" : "headless: no engine pass"}); ` +
       `${run.capture.previews} geometry preview(s), which are NOT frames`;
-  holder.innerHTML =
-    `<div class="card"><b>capture geometry</b> — ` + totals +
-    capped + previewWords +
+  // The download strip and the per-camera galleries are filled from
+  // /files once it answers (initFilesPanel): the page never names a
+  // file the server did not list.
+  return `<div class="card"><div id="captureDownloads"></div>` +
+    `<b>capture geometry</b> — ` + totals + capped + previewWords +
     `<ul>${cameras}</ul>` +
+    `<div id="captureGalleries"></div>` +
     `<b>verification ${v.ok ? "PASSED" : "FAILED"}</b>` + awaiting +
     `<ul>${checks}</ul>` + closure + `</div>`;
 }
 
-async function initFilesPanel(runId) {
-  // Every artefact the run wrote, as a link. The server lists them; the
-  // page never guesses a path, so a file that is not there simply does
-  // not appear rather than becoming a dead link.
-  const holder = $("filesArea");
-  if (!holder) return;
-  let files = [];
-  try {
-    const response = await fetch(`/runs/${runId}/files`);
-    if (!response.ok) return;
-    files = (await response.json()).files || [];
-  } catch (error) { return; }
-  if (!files.length) return;
+// Every artefact the run wrote, as a link with its note. The server
+// lists them; the page never guesses a path, so a file that is not there
+// simply does not appear rather than becoming a dead link. Image classes
+// (frames, overlays, previews) are one row each with their count; the
+// pictures are thumbnails with the count of what is shown stated.
+function filesHtml(runId, files) {
+  if (!files || !files.length) return "";
   const rows = files.map(f => {
     if (f.sheet) {
-      // The contact sheet: shown whole, above the per-frame gallery.
-      return `<li><b>${f.name}</b> <span class="dim">— ${f.note}</span>` +
-             `<div><a href="/runs/${runId}/file/${f.name}" target="_blank">` +
-             `<img src="/runs/${runId}/file/${f.name}" ` +
+      return `<li><b>${esc(f.name)}</b> <span class="dim">— ${esc(f.note)}</span>` +
+             `<div><a href="/runs/${runId}/file/${esc(f.name)}" target="_blank">` +
+             `<img src="/runs/${runId}/file/${esc(f.name)}" ` +
              `style="max-width:100%;margin:2px;border:1px solid #333"></a></div></li>`;
     }
     if (f.images) {
-      const thumbs = f.images.slice(0, 8).map(name =>
-        `<a href="/runs/${runId}/file/${name}" target="_blank">` +
-        `<img src="/runs/${runId}/file/${name}" ` +
+      // Never silently truncated: the row says how many of the files
+      // its thumbnails show.
+      const shown = f.images.slice(0, 8);
+      const thumbs = shown.map(name =>
+        `<a href="/runs/${runId}/file/${esc(name)}" target="_blank">` +
+        `<img src="/runs/${runId}/file/${esc(name)}" ` +
         `style="height:54px;margin:2px;border:1px solid #333"></a>`).join("");
-      return `<li><b>${f.name}</b> <span class="dim">— ${f.note}</span>` +
+      return `<li><b>${esc(f.name)}</b> <span class="dim">— ${esc(f.note)} ` +
+             `(showing ${shown.length} of ${f.images.length})</span>` +
              `<div>${thumbs}</div></li>`;
     }
     const kb = (f.bytes / 1024).toFixed(1);
     return `<li><a style="color:#6fb3e0" ` +
-           `href="/runs/${runId}/file/${f.name}">${f.name}</a> ` +
-           `<span class="dim">${kb} kB — ${f.note}</span></li>`;
+           `href="/runs/${runId}/file/${esc(f.name)}">${esc(f.name)}</a> ` +
+           `<span class="dim">${kb} kB — ${esc(f.note)}</span></li>`;
   }).join("");
-  holder.innerHTML =
-    `<div class="card"><b>files from this run</b> ` +
+  return `<div class="card"><b>files from this run</b> ` +
     `<a style="color:#6fb3e0" href="/runs/${runId}/bundle.zip">` +
     `download all (.zip)</a><ul>${rows}</ul></div>`;
+}
+// PAGE_CAPTURE_END
+
+function renderCapture(run) {
+  const holder = $("captureArea");
+  if (!holder || !run.capture) return;
+  holder.innerHTML = captureCardHtml(run);
+}
+
+async function initFilesPanel(runId, run) {
+  const holder = $("filesArea");
+  if (!holder) return;
+  let payload = null;
+  try {
+    const response = await fetch(`/runs/${runId}/files`);
+    if (!response.ok) return;
+    payload = await response.json();
+  } catch (error) { return; }
+  const files = payload.files || [];
+  if (!files.length) return;
+  const strip = downloadStripHtml(runId, payload.downloads || []);
+  const stripHolder = $("captureDownloads");
+  if (stripHolder) stripHolder.innerHTML = strip;
+  holder.innerHTML = (stripHolder ? "" : strip) + filesHtml(runId, files);
 }
 
 // ===================== the aerodynamics side panel ========================

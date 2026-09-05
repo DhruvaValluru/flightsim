@@ -2301,6 +2301,36 @@ mutate webapp/runs.py \
     "commands round 3: /status counts the model loads the planning log holds" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 1: the frames zip and one download per artefact class ------
+
+mutate webapp/server.py \
+    '    refusal = frames_zip_refusal(out, files)' \
+    '    refusal = None  # MUTATED: an empty frames zip is served for a headless run' \
+    "page round 1: frames.zip is refused by name when no frame was rendered" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    '        if not entry["name"].startswith("capture/frames/"):
+            continue' \
+    '        if False:  # MUTATED: every image class counts as the frame set
+            continue' \
+    "page round 1: the frames zip carries only capture/frames PNGs and render.json" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    '    if frames:
+        cameras = sorted(' \
+    '    if True:  # MUTATED: frames.zip offered with no rendered frame
+        cameras = sorted(' \
+    "page round 1: the download strip offers frames.zip only when a rendered PNG exists" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '  const buttons = downloads.map(d =>' \
+    '  const buttons = downloads.slice(0, 1).map(d =>  // MUTATED: one button, whatever the classes' \
+    "page round 1: the strip offers one button per artefact class the run wrote" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

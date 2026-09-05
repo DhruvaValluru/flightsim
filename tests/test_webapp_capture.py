@@ -1595,3 +1595,217 @@ def test_the_frames_run_overlays_the_reprojected_geometry_on_every_frame(
     assert entry["images"][0] == "capture/overlays/camera0/0000.png"
     assert any(l["detail"].startswith("8 overlay(s): the manifest's aircraft")
                for l in run.events if l["status"] == "capture")
+
+
+# -- the page itself: downloads, galleries and the verifier's table --------
+# The capture card and the files panel are built by PURE functions on the
+# page (between PAGE_CAPTURE_BEGIN and PAGE_CAPTURE_END: HTML from the
+# server's JSON, no DOM, no fetch). They are run VERBATIM under node here
+# against the real /runs/{id} and /files payloads, so the words the card
+# prints -- the count contract, the fallback label, the verifier's table --
+# are pinned by a test, not by reading the source.
+
+PAGE_CAPTURE_HARNESS = """
+%s
+const input = JSON.parse(require("fs").readFileSync(process.argv[2], "utf8"));
+const files = input.files || {};
+const out = {
+  card: captureCardHtml(input.run),
+  strip: downloadStripHtml(input.runId, files.downloads || []),
+  files: filesHtml(input.runId, files.files || []),
+};
+console.log(JSON.stringify(out));
+"""
+
+
+def page_capture(tmp_path, run, files, run_id="run1"):
+    """Render the page's capture card, download strip and files panel
+    under node from the page's own source, and return the HTML of each."""
+    import re
+    import shutil
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not on PATH; the page's HTML builders need it")
+    page = STATIC_INDEX.read_text(encoding="utf-8")
+    block = re.search(r"// PAGE_CAPTURE_BEGIN\n(.*?)// PAGE_CAPTURE_END",
+                      page, re.S).group(1)
+    harness = tmp_path / "page_capture.js"
+    harness.write_text(PAGE_CAPTURE_HARNESS % block, encoding="utf-8")
+    payload = tmp_path / "page_capture_input.json"
+    payload.write_text(json.dumps({"run": run, "files": files,
+                                   "runId": run_id}), encoding="utf-8")
+    proc = subprocess.run([node, str(harness), str(payload)],
+                          capture_output=True, text=True, encoding="utf-8")
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout)
+
+
+def text_of(html):
+    """The words a reader sees: tags stripped, whitespace collapsed."""
+    import re
+
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html)).strip()
+
+
+def links_of(html, cls):
+    """The hrefs of the anchors carrying CSS class ``cls``."""
+    import re
+
+    return re.findall(r'<a class="dl dl-' + cls + r'" href="([^"]+)"', html)
+
+
+@pytest.fixture()
+def frames_run(engine_client, engine_stubs):
+    """A two-camera frames run through POST /run with the honest engine
+    stub: 8 PNGs on disk, the clip a by-product, the counts verified."""
+    from webapp.runs import RunManager
+
+    calls = []
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(honest_engine(calls)))
+    reply = engine_client.post("/run", json={"spec": two_camera_spec().to_dict(),
+                                             "render": "frames"})
+    assert reply.status_code == 200, reply.json()
+    run_id = reply.json()["run_id"]
+    state = finished(engine_client, run_id)
+    assert state["status"] == "done", state["detail"]
+    return run_id, state
+
+
+def test_the_frames_zip_carries_exactly_the_frame_set(frames_run,
+                                                      engine_client):
+    """/runs/{id}/frames.zip is the frame set alone: every rendered PNG
+    the file list names under capture/frames/<camera_id>/ plus each
+    camera's render.json -- no previews, no overlays, no contact sheets,
+    no logs. The download strip offers one button per artefact class
+    the run wrote, in the stated order."""
+    run_id, _ = frames_run
+    payload = engine_client.get(f"/runs/{run_id}/files").json()
+    files = payload["files"]
+    listed_pngs = set()
+    for entry in files:
+        if entry["name"].startswith("capture/frames/") and "images" in entry:
+            listed_pngs.update(entry["images"])
+    assert len(listed_pngs) == 8
+    render_jsons = {f["name"] for f in files
+                    if f["name"].startswith("capture/frames/")
+                    and f["name"].endswith("/render.json")}
+    assert render_jsons == {"capture/frames/camera0/render.json",
+                            "capture/frames/tower0/render.json"}
+
+    got = engine_client.get(f"/runs/{run_id}/frames.zip")
+    assert got.status_code == 200
+    assert got.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(manager.out_root / run_id / "frames.zip") as archive:
+        names = set(archive.namelist())
+    assert names == listed_pngs | render_jsons
+    assert not any("previews" in n or "overlays" in n or "contact_sheets" in n
+                   or n.endswith(".log") for n in names)
+    # The bundle still carries everything (previews, overlays, logs...);
+    # the frames zip is the subset a user wanting "the frame set" takes.
+    assert len(listed_pngs) < sum(
+        len(f["images"]) if "images" in f else 1 for f in files)
+
+    downloads = payload["downloads"]
+    assert [d["class"] for d in downloads] == [
+        "frames", "manifest", "telemetry", "clip", "everything"]
+    by_class = {d["class"]: d for d in downloads}
+    assert by_class["frames"]["href"] == "frames.zip"
+    assert by_class["frames"]["note"] == (
+        "8 PNG(s) across 2 camera(s) (camera0, tower0), named by manifest "
+        "index, with each camera's render.json")
+    assert by_class["manifest"]["href"] == "file/capture/capture_manifest.json"
+    assert by_class["telemetry"]["href"] == "file/capture/telemetry.json"
+    assert by_class["clip"]["href"] == "file/clip.mp4"
+    assert by_class["clip"]["note"].startswith("clip.mp4: by-product of 'camera0'")
+    assert by_class["everything"]["href"] == "bundle.zip"
+    total = sum(len(f["images"]) if "images" in f else 1 for f in files)
+    assert by_class["everything"]["note"] == f"{total} file(s): every artefact listed below"
+    # Every class's route answers.
+    for d in downloads:
+        assert engine_client.get(f"/runs/{run_id}/{d['href']}").status_code == 200, d
+
+
+def test_the_frames_zip_is_refused_by_name_without_rendered_frames(
+        captured, client, engine_client, engine_stubs):
+    """A headless run has no frame set and says so -- a 404 with the
+    run's own reason, never an empty zip; and its strip offers no
+    frames.zip. The clip-only run is refused in its own words."""
+    from webapp.runs import RunManager
+
+    run_id, _ = captured
+    got = client.get(f"/runs/{run_id}/frames.zip")
+    assert got.status_code == 404
+    assert got.json()["constraint"] == "frames.none"
+    assert got.json()["error"].startswith(
+        "no rendered frames: this was a headless run (no engine pass)")
+    assert not (manager.out_root / run_id / "frames.zip").exists()
+    downloads = client.get(f"/runs/{run_id}/files").json()["downloads"]
+    assert [d["class"] for d in downloads] == ["manifest", "telemetry",
+                                               "everything"]
+
+    def clip_render(card, frames, scene, mesh, aircraft, telemetry=None,
+                    look=None, camera_flags=None, camera_index=None,
+                    log=None):
+        frames.mkdir(parents=True, exist_ok=True)
+        (frames / "render.json").write_text("{}", encoding="utf-8")
+        return True
+
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(clip_render))
+    # The panel step writes clip.mp4 on a real run; the stub does too, so
+    # the strip's clip button is judged against a file on disk.
+    engine_stubs["monkeypatch"].setattr(
+        runs_module, "build_panel_clip",
+        lambda card, manifest, conditions, raw, clip, fps=None:
+            bool(Path(clip).write_bytes(b"mp4")) or True)
+    reply = engine_client.post("/run", json={"spec": compile_prompt(DEMO).to_dict(),
+                                             "render": "clip"})
+    assert reply.status_code == 200, reply.json()
+    clip_id = reply.json()["run_id"]
+    assert finished(engine_client, clip_id)["status"] == "done"
+    got = engine_client.get(f"/runs/{clip_id}/frames.zip")
+    assert got.status_code == 404
+    assert got.json()["error"] == (
+        "no rendered frames: this was a clip-only run; choose 'Render "
+        "frames and clip' for the frame set")
+    downloads = engine_client.get(f"/runs/{clip_id}/files").json()["downloads"]
+    assert [d["class"] for d in downloads] == ["manifest", "telemetry",
+                                               "clip", "everything"]
+    assert downloads[2]["note"] == "clip.mp4: the rendered clip (clip only: no frame set)"
+
+
+def test_the_page_s_download_strip_offers_one_button_per_class(
+        captured, client, tmp_path):
+    """The page's strip, from the real /files payload of the headless
+    run: exactly one button per download class the server listed, each
+    linking the server's route, and no frames.zip when no frame was
+    rendered; the strip sits at the top of the capture card."""
+    run_id, state = captured
+    payload = client.get(f"/runs/{run_id}/files").json()
+    html = page_capture(tmp_path, state, payload, run_id)
+    strip = html["strip"]
+    classes = [d["class"] for d in payload["downloads"]]
+    assert classes == ["manifest", "telemetry", "everything"]
+    for d in payload["downloads"]:
+        assert links_of(strip, d["class"]) == [f"/runs/{run_id}/{d['href']}"]
+        assert d["label"] in text_of(strip) and d["note"] in text_of(strip)
+    assert links_of(strip, "frames") == []
+    assert "frames.zip" not in strip
+    assert strip.count('<a class="dl ') == len(classes)
+    # The card carries the strip's holder FIRST, then the geometry words.
+    card = html["card"]
+    assert card.index('id="captureDownloads"') < card.index("capture geometry")
+    # A synthetic frames-run listing: the frames button appears, first.
+    frames_payload = {"downloads": [
+        {"class": "frames", "label": "frames.zip", "href": "frames.zip",
+         "note": "48 PNG(s) across 2 camera(s) (chase0, tower0), named by "
+                 "manifest index, with each camera's render.json"},
+        {"class": "clip", "label": "clip.mp4", "href": "file/clip.mp4",
+         "note": "clip.mp4: by-product of 'chase0' (the frame set is the "
+                 "deliverable)"}]}
+    strip = page_capture(tmp_path, state, frames_payload, "abc")["strip"]
+    assert links_of(strip, "frames") == ["/runs/abc/frames.zip"]
+    assert strip.count('<a class="dl ') == 2
+    assert text_of(strip).startswith("downloads frames.zip 48 PNG(s) across 2 camera(s)")

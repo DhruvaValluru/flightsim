@@ -40,7 +40,9 @@ from core.nl.llm_compiler import (  # noqa: E402
 )
 from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import validate  # noqa: E402
-from webapp.capture import run_artifacts  # noqa: E402
+from webapp.capture import (  # noqa: E402
+    frame_set, frames_zip_refusal, run_artifacts, run_downloads,
+)
 from webapp.runs import (  # noqa: E402
     CLIP_SECONDS,
     RunManager,
@@ -638,8 +640,12 @@ def run_files(run_id: str) -> JSONResponse:
     (user request 2026-09-01)."""
     if not run_id.isalnum():
         return JSONResponse({"error": "no such run"}, status_code=404)
-    return JSONResponse({"run_id": run_id,
-                         "files": run_artifacts(manager.out_root / run_id)})
+    out = manager.out_root / run_id
+    files = run_artifacts(out)
+    # One download per artefact class the run wrote (the page's strip),
+    # built from the SAME listing as the whitelist and the bundle.
+    return JSONResponse({"run_id": run_id, "files": files,
+                         "downloads": run_downloads(out, files)})
 
 
 def _artifact_paths(run_id: str) -> set:
@@ -695,6 +701,32 @@ def run_bundle(run_id: str):
             archive.write(out / name, arcname=name)
     return FileResponse(bundle, media_type="application/zip",
                         filename=f"flightsim-run-{run_id}.zip")
+
+
+@app.get("/runs/{run_id}/frames.zip")
+def run_frames_zip(run_id: str):
+    """The frame set alone: capture/frames/<camera_id>/NNNN.png for
+    every rendered frame plus each camera's render.json (the applied
+    pose and time per frame), nothing else -- no previews, no overlays,
+    no logs. Built from the same listing the whitelist uses. A run with
+    no rendered frame is REFUSED by name (404 with the run's own
+    reason: headless, clip only, or a failed engine pass), never served
+    an empty zip that looks like a frame set."""
+    if not run_id.isalnum():
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    out = manager.out_root / run_id
+    files = run_artifacts(out)
+    refusal = frames_zip_refusal(out, files)
+    if refusal is not None:
+        return JSONResponse({"error": refusal, "constraint": "frames.none"},
+                            status_code=404)
+    names = sorted(frame_set(files))
+    archive_path = out / "frames.zip"
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name in names:
+            archive.write(out / name, arcname=name)
+    return FileResponse(archive_path, media_type="application/zip",
+                        filename=f"flightsim-frames-{run_id}.zip")
 
 
 @app.websocket("/telemetry")

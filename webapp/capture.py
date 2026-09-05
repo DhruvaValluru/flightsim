@@ -626,3 +626,111 @@ def run_artifacts(out_dir: Path) -> List[Dict]:
                                f"{p.name}" for p in images],
                 })
     return entries
+
+
+def frame_set(files: List[Dict]) -> List[str]:
+    """The frame set, by name: every rendered PNG the listing carries
+    under capture/frames/<camera_id>/ and each camera's render.json (the
+    applied pose and time per frame). Built from the SAME listing the
+    download whitelist is built from, so frames.zip cannot carry a file
+    the page does not list, nor list one it cannot serve."""
+    names: List[str] = []
+    for entry in files:
+        if not entry["name"].startswith("capture/frames/"):
+            continue
+        if "images" in entry:
+            names.extend(entry["images"])
+        elif entry["name"].endswith("/render.json"):
+            names.append(entry["name"])
+    return names
+
+
+def render_word(out_dir: Path) -> Optional[str]:
+    """The run's recorded render choice ("frames" | "clip" | "none")
+    from provenance.json, or None when the run left no provenance."""
+    path = Path(out_dir) / "provenance.json"
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("render")
+    except (OSError, ValueError):
+        return None
+
+
+#: Why there is no frame set, by the run's own render word.
+NO_FRAMES_WORDS = {
+    "none": "no rendered frames: this was a headless run (no engine pass); "
+            "the manifest and the previews are its deliverable",
+    "clip": "no rendered frames: this was a clip-only run; choose "
+            "'Render frames and clip' for the frame set",
+    "frames": "no rendered frames: the engine pass wrote none (the run's "
+              "status names the failure)",
+}
+
+
+def frames_zip_refusal(out_dir: Path, files: List[Dict]) -> Optional[str]:
+    """The named reason there is no frames.zip to serve, or None when at
+    least one rendered PNG is listed. A frames zip with nothing in it
+    would be a frame set that is not there."""
+    if any(name.endswith(".png") for name in frame_set(files)):
+        return None
+    return NO_FRAMES_WORDS.get(render_word(out_dir),
+                               "no rendered frames in this run")
+
+
+#: The artefact classes, in the order the page's download strip shows
+#: them. One button per class the run actually wrote; a class whose
+#: file is absent is absent from the strip, never a dead link.
+DOWNLOAD_CLASSES = ("frames", "manifest", "telemetry", "clip", "everything")
+
+
+def run_downloads(out_dir: Path, files: Optional[List[Dict]] = None) -> List[Dict]:
+    """One download per artefact class the run wrote, built from the
+    listing the whitelist uses: frames.zip (only when a rendered PNG
+    exists), the manifest, the telemetry the manifest describes, the
+    clip, and everything. Each carries the route relative to
+    /runs/<id>/, the label, and a note saying what it is and how much
+    of it there is -- counted from the listing, never assumed."""
+    out_dir = Path(out_dir)
+    if files is None:
+        files = run_artifacts(out_dir)
+    by_name = {f["name"]: f for f in files}
+    downloads: List[Dict] = []
+    frames = [name for name in frame_set(files) if name.endswith(".png")]
+    if frames:
+        cameras = sorted({name.split("/")[2] for name in frames})
+        downloads.append({
+            "class": "frames", "label": "frames.zip", "href": "frames.zip",
+            "note": f"{len(frames)} PNG(s) across {len(cameras)} camera(s) "
+                    f"({', '.join(cameras)}), named by manifest index, "
+                    f"with each camera's render.json"})
+    manifest = "capture/capture_manifest.json"
+    if manifest in by_name:
+        downloads.append({
+            "class": "manifest", "label": "manifest",
+            "href": f"file/{manifest}",
+            "note": f"{manifest}: {ARTIFACT_NOTES[manifest]}"})
+    telemetry = "capture/telemetry.json"
+    if telemetry in by_name:
+        downloads.append({
+            "class": "telemetry", "label": "telemetry",
+            "href": f"file/{telemetry}",
+            "note": f"{telemetry}: {ARTIFACT_NOTES[telemetry]}"})
+    if "clip.mp4" in by_name:
+        word = render_word(out_dir)
+        if word == "frames":
+            by_product = frames[0].split("/")[2] if frames else "camera 0"
+            note = f"clip.mp4: by-product of '{by_product}' (the frame set is the deliverable)"
+        elif word == "clip":
+            note = "clip.mp4: the rendered clip (clip only: no frame set)"
+        else:
+            note = f"clip.mp4: {ARTIFACT_NOTES['clip.mp4']}"
+        downloads.append({"class": "clip", "label": "clip.mp4",
+                          "href": "file/clip.mp4", "note": note})
+    total = sum(len(f["images"]) if "images" in f else 1 for f in files)
+    if total:
+        downloads.append({
+            "class": "everything", "label": "everything (.zip)",
+            "href": "bundle.zip",
+            "note": f"{total} file(s): every artefact listed below"})
+    return downloads
