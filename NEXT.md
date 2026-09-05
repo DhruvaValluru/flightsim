@@ -3,6 +3,44 @@
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
 
+**Camera Phase 1, page round 2 (2026-09-05, the judge's seven ranked
+gaps against bar section 4, six closed in priority order, six code
+commits; docs/CAMERA_PHASE1_REPORT.md section 6 and the new 6b are
+current).** (1) A FAILED run is terminal for the page: poll() asks
+runIsTerminal (done OR failed) and draws the clip words (clipHtml:
+headless / "the run FAILED before a clip was encoded -- <status line>"
+/ "the by-product clip was not encoded"), the capture card (its refused
+branch, now a path the live page takes; or the counts with
+"(engine pass FAILED: <status line>)" right after "verified") and the
+files panel with the strip -- measured on the mid-run
+camera.terrain_clearance refusal (4 files, downloads ['everything'])
+and on a 3-of-4 short engine pass (frames.zip = 3 PNG + render.json,
+downloads frames/manifest/verification/telemetry/everything, no clip).
+(2, NOT closed: needs the engine) the frames path stays "awaiting
+Windows verification". (3) closure.json's window word is "capped" (the
+first min(duration, 22) s) or "full duration", with spec_duration_s
+beside duration_s; the page reads "the first 12 s, the same window a
+clip would cover, capped at 22 s" on a headless run, "the clip's
+window" only on a clip run, "of the 120 s flight" when the cap bit.
+(4) On a frames run the preview contact sheet lives INSIDE the
+previews' <details> ("...: 4 shown, and their contact sheet"); the
+first <img> under a rendered count is a rendered frame. (5) as_dict
+carries the whole event log (25 of 25 through /runs/<id>). (6) A
+"verification" download class (verify.json) between manifest and
+telemetry -- six classes on a frames run; the tally links
+capture/verify.json and the closure heading capture/closure.json
+(fileLink, built from the payload's run_id only). (7) The review table
+shows each camera's keyframed MOVES (the judge called them planner
+moves; a planner's change is the field's provenance note) as rows
+after its fields, units from the field rows. 14 new guards under
+"page round 2", each verified firing by subset. Gotchas: (a) text_of
+turns "</span>;" into ") ;" -- assert the clause and the order, not
+the joined string; (b) the poll() string test forbids the word
+"failed" inside poll(), comments included; (c) the harness (page_
+capture) now also returns terminal, clip and moves; (d) any test that
+lists download classes must include "verification"; (e) gap 2 is the
+only one left and it is the engine's.
+
 **Camera Phase 1, commands round 3 (2026-09-05, the judge's seven ranked
 gaps against bar sections 5 and 6, closed in priority order; four
 code commits plus the tally commit; docs/CAMERA_PHASE1_REPORT.md

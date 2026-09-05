@@ -2554,7 +2554,10 @@ Start the server, interpret "fly the 747 at 10000 ft and 280 kt for 12
 seconds with a chase camera and a tower camera capturing 24 images",
 leave the render select on *Render frames and clip* (the default once
 the bridge is built) and Run. The status lines must read, in order
-(the model-load counts and the seconds per frame are this machine's):
+(the model-load counts and the seconds per frame are this machine's;
+the page prints EVERY status line -- `/runs/<id>` carries the whole
+event log, the same list `status.json` keeps -- so a four-camera run's
+first lines are not cut off):
 
 ```
 capture    solving camera geometry and capture schedule
@@ -2658,6 +2661,36 @@ the whole flight"), no frames.zip button, and
 `/runs/<id>/frames.zip` must answer 404 "no rendered frames: this was
 a headless run (no engine pass); the manifest and the previews are
 its deliverable".
+
+#### 6b. If an engine pass fails on the Windows machine
+
+A failed run is terminal for the page exactly like a finished one: the
+page must NOT fall back to the status text. Measured here on the honest
+stub with camera 0's pass cut to 3 of 4 frames (the same payloads a
+short or crashed commandlet pass produces): the status ends
+`failed  [render.frames] camera 'camera0': the engine captured 3 of 4
+scheduled frames against the 4 the card scheduled`; the clip area
+reads "no clip: the run FAILED before a clip was encoded — <that
+line>"; the card reads "capture geometry — 8 scheduled, 3 rendered, 3
+verified (engine pass FAILED: <that line>); 8 geometry preview(s)
+..." with "verification FAILED (9/10 checks; FAILED: engine_parity)"
+and the engine_parity row's WHERE naming the shortfall; the strip
+offers `frames.zip` ("3 PNG(s) across 1 camera(s) (camera0)"),
+`manifest`, `verify.json`, `telemetry` and `everything` -- no clip
+button, since none was encoded; camera0's gallery is headed "4
+scheduled, 3 rendered, 3 verified — showing 3 of 3 rendered
+frame(s)" and tower0's "4 scheduled, 0 rendered, 0 verified" over
+"previews (fallback: the engine pass rendered no frame for this
+camera (the run's status names the failure); ...)"; the files panel
+lists every file the run wrote, `status.json` and the per-camera
+`render.log` included. On Windows, with the real commandlet, the
+words are the same with the run's own numbers; a mid-run capture
+refusal (a camera placed in the terrain) shows instead "capture
+refused — [camera.terrain_clearance] ... (measured X m AGL, limit Y m
+AGL)" with "the run ended failed on this refusal; every file it wrote
+before refusing is listed below" and the four files it wrote
+(provenance.json, scenario.yaml, status.json, jsbsim.log) one click
+away.
 
 ### 7. Temporal alignment on rendered frames
 
