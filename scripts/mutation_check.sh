@@ -2517,9 +2517,9 @@ mutate webapp/static/index.html \
 # -- Page round 2: the preview contact sheet never sits above rendered frames
 
 mutate webapp/static/index.html \
-    '      `frame(s)</span>${toggle}` +
+    '      `frame(s)</span>${failedWords}${toggle}` +
       thumbsHtml(runId, gallery.camera_id, frames, "frames") + previewBlock +' \
-    '      `frame(s)</span>${toggle}${sheet}` +  // MUTATED: the preview mosaic drawn above the rendered frames
+    '      `frame(s)</span>${failedWords}${toggle}${sheet}` +  // MUTATED: the preview mosaic drawn above the rendered frames
       thumbsHtml(runId, gallery.camera_id, frames, "frames") + previewBlock +' \
     "page round 2: on a frames run the preview contact sheet sits inside the previews disclosure" \
     tests/test_webapp_capture.py || failures=$((failures+1))

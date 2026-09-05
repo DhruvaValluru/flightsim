@@ -31,7 +31,11 @@ red with a red outline. (6) renderSpec/provenanceNote/renderVerdict
 escape everything. (7) A /files failure is said by name in the card.
 (8) The headless fallback is the platform gate's sentence once. 29
 guards under "page round 3" (8 for gaps 1-2, 21 for gaps 3-8), each
-verified firing by subset.
+verified firing by subset. Full suite after the round: 818 passed, 1
+skipped in 331 s. The 14 "page round 2" and the 8 earlier "page round
+3" guards were re-fired to completion: 21 ok, 1 SKIP (the contact-sheet
+guard's target moved when gap 5 added failedWords to galleryHtml;
+repointed and re-fired: ok).
 Gotchas: (a) Python 3.11's Enum raises TypeError on `"str" in Enum`
 -- validate against `[s.value for s in Source]`; (b) page_dom.js
 serialises innerHTML with entities kept (&ldquo; stays &ldquo;), so
