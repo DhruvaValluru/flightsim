@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import os
 import platform
 import re
 import subprocess
@@ -70,6 +71,14 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 REPO = Path(__file__).resolve().parents[1]
+
+#: The environment every documented command runs under as a child
+#: process: stdout decoded here as UTF-8, so the child must WRITE UTF-8.
+#: On Windows a child Python writes a pipe in the console code page
+#: (cp1252) unless told otherwise -- measured on the Windows CI leg at
+#: 150c220: the page block's em dash arrived as byte 0x97 and the
+#: UTF-8 decode of the reader thread failed, stdout came back None.
+CHILD_ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
 sys.path.insert(0, str(REPO))
 
 DOC = REPO / "docs" / "CAMERA_PHASE1_REPORT.md"
@@ -176,7 +185,7 @@ def run_one(module: str, argv: List[str], root: Path) -> Dict:
     started = time.perf_counter()
     completed = subprocess.run(
         [sys.executable, "-m", module, *resolved], cwd=str(REPO),
-        capture_output=True, text=True, encoding="utf-8")
+        capture_output=True, text=True, encoding="utf-8", env=CHILD_ENV)
     elapsed = time.perf_counter() - started
     text = _normalise_paths(completed.stdout, root)
     return {"code": int(completed.returncode), "seconds": elapsed,
@@ -337,7 +346,7 @@ def generate_frames(root: Optional[Path] = None) -> Dict:
     completed = subprocess.run(
         [sys.executable, str(Path(__file__).resolve()), "--frames-stub-run",
          *resolved], cwd=str(REPO), capture_output=True, text=True,
-        encoding="utf-8")
+        encoding="utf-8", env=CHILD_ENV)
     elapsed = time.perf_counter() - started
     text = mask_engine(_normalise_paths(completed.stdout, root))
     return {"label": label, "command": command,
@@ -608,7 +617,7 @@ def generate_page(root: Optional[Path] = None) -> Dict:
     completed = subprocess.run(
         [sys.executable, str(Path(__file__).resolve()), "--page-stub-run",
          str(root)], cwd=str(REPO), capture_output=True, text=True,
-        encoding="utf-8")
+        encoding="utf-8", env=CHILD_ENV)
     elapsed = time.perf_counter() - started
     run_id_file = root / "run_id"
     run_id = run_id_file.read_text(encoding="utf-8") if run_id_file.is_file() else ""
