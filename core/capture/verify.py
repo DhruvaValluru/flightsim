@@ -24,10 +24,20 @@ Checks (numbered as in the phase document):
    and the quaternion and Euler encodings of the same orientation must
    project it to the same pixel within a stated tolerance.
 3. **Cross-view consistency** (:func:`verify_triangulation`) -- at
-   instants two cameras captured the same telemetry sample, rays cast
-   through each camera's own projection of the aircraft must
-   triangulate back to the recorded aircraft position within a stated
-   metre tolerance.
+   instants two cameras captured the same telemetry sample, a ray
+   through each record's LABEL (its own projection of its own
+   aircraft) must triangulate to one point, and that point must be the
+   aircraft: the telemetry's aircraft at that sample AND each record's
+   own. The rays are cast from the poses RECOMPUTED from the spec over
+   the telemetry (check 8's tracks), never from the record under test
+   -- a ray cast from a record's own pose through that record's own
+   label passes through its aircraft by construction, whatever the
+   pose, so the old check could only ever see two records' aircraft
+   disagree (the judge's demonstration: a tower moved 5 m or yawed
+   10 deg triangulated "perfectly"). Without ``scenario.yaml`` and
+   ``telemetry.json`` beside the manifest the rays come from the
+   records themselves and the row SAYS SO: the two records agree on
+   the aircraft; the poses are not tested.
 4. **Count exactness** (:func:`verify_counts`) -- every camera's frame
    records number exactly its declared capture count, densely indexed.
 5. **Engine parity** (:func:`verify_engine_parity`) -- on a machine with
@@ -74,7 +84,21 @@ Checks (numbered as in the phase document):
    clock or a moved instant is caught by the run's own verification,
    without a sibling run to align against.
 
-Checks 6 and 7 are SKIPPED by name when the file they need is not
+8. **Pose fidelity** (:func:`verify_pose_fidelity`) -- every record's
+   camera position, quaternion, Euler angles, focal length, pixel
+   focal lengths, principal point, resolution, sensor and clip planes
+   against the pose track recomputed from ``scenario.yaml``'s cameras
+   over ``telemetry.json`` (:func:`recompute_pose_tracks`, the
+   producer's own solver -- stated as such in the phase document, as
+   check 7 states it for the scheduler) at the record's sample, to
+   representation tolerance, and every camera block's
+   ``pose_track_digest`` against the recomputed track's digest,
+   verbatim. Before this check the pose was graded against nothing
+   outside the manifest: a manifest whose cameras were all moved 30 m,
+   or yawed 3 deg with the quaternion and Euler angles moved together,
+   or whose lens was scaled 1.5x, verified 7/7.
+
+Checks 6, 7 and 8 are SKIPPED by name when the file they need is not
 beside the manifest; a skipped check is never a pass.
 """
 
@@ -84,7 +108,10 @@ import json
 import math
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
+
+if TYPE_CHECKING:                                   # pragma: no cover
+    from .poses import PoseTrack
 
 #: Pixel agreement demanded between the quaternion and Euler encodings
 #: of one recorded orientation.
@@ -105,9 +132,22 @@ TIME_TOL_S = 1e-9
 FLIGHT_TIME_TOL_S = 1e-9
 FLIGHT_POSITION_TOL_M = 1e-6
 FLIGHT_ANGLE_TOL_DEG = 1e-6
-#: The files checks 6 and 7 read beside the manifest.
+#: The files checks 6, 7 and 8 read beside the manifest.
 TELEMETRY_FILE = "telemetry.json"
 SCENARIO_FILE = "scenario.yaml"
+
+#: Pose fidelity (check 8): every record's pose and lens against the
+#: track recomputed from the spec's cameras over the telemetry, at the
+#: record's sample. The manifest copies the solver's numbers verbatim
+#: (core.capture.manifest takes PoseTrack.sample as is and derives only
+#: fx/fy by one multiplication), so every tolerance is representation
+#: slack: a record that differs by more describes a camera the spec did
+#: not command. Integer fields (resolution) and the digest are exact.
+POSE_POSITION_TOL_M = 1e-6
+POSE_ANGLE_TOL_DEG = 1e-6
+POSE_QUATERNION_TOL = 1e-9
+POSE_LENS_TOL_PX = 1e-6
+POSE_LENS_TOL_MM = 1e-9
 
 #: Engine parity (check 5): the pose the engine APPLIED, written back per
 #: frame by the render commandlet's consume-poses pass, against the pose
@@ -590,40 +630,81 @@ def _ray_through_pixel(record: Dict, u: float, v: float):
 
 
 def verify_triangulation(manifest: Dict,
-                         tol_m: float = TRIANGULATION_TOL_M) -> Check:
+                         tol_m: float = TRIANGULATION_TOL_M,
+                         tracks: Optional[Dict[str, "PoseTrack"]] = None,
+                         columns: Optional[Dict[str, Sequence[float]]] = None
+                         ) -> Check:
     """Check 3: a world point seen from two cameras at the same instant
-    triangulates back."""
+    triangulates back -- to the aircraft the telemetry recorded, and to
+    the aircraft each record labels.
+
+    Each ray goes through the record's LABEL: the record's own
+    projection of its own aircraft, the pixel a consumer of the
+    manifest would draw the box around. Where the ray STARTS is what
+    makes the check independent of the record: with ``tracks`` (the
+    poses recomputed from the spec over the telemetry,
+    :func:`recompute_pose_tracks`) and ``columns`` (the telemetry), the
+    ray is cast from the RECOMPUTED pose and lens at the record's
+    sample, and the recovered point is graded against the telemetry's
+    aircraft at that sample (projected here with pyproj) as well as
+    against both records' own aircraft. A record whose camera was
+    moved or rotated labels the wrong pixel, and a ray from the true
+    pose through the wrong pixel misses. Without the two, the rays come
+    from the records themselves (``mode`` ``records-only``): two honest
+    records of one instant still triangulate, disagreeing aircraft
+    states still fail, but a pose corruption cannot be seen -- and the
+    WHERE column says so."""
     by_sample: Dict[int, List[Dict]] = {}
     for record in manifest.get("frames", []):
         by_sample.setdefault(record["sample_index"], []).append(record)
+    frame_block = manifest.get("frame") or {}
+    independent_possible = tracks is not None and columns is not None
     pairs = 0
+    independent_pairs = 0
     worst = 0.0
     worst_at = None
     for sample_index, records in sorted(by_sample.items()):
         if len(records) < 2:
             continue
         a, b = records[0], records[1]
-        # Each camera's ray is cast through ITS OWN record's view of the
-        # world (its own pose, its own recorded aircraft state). Two
-        # honest records of the same instant produce rays through the
-        # same point; a misattributed pairing -- wrong instant, wrong
-        # camera, disagreeing aircraft states -- produces skew rays and
-        # a triangulation error. (Casting both rays from ONE record's
-        # point would be circular: any invertible corruption of a pose
-        # projects and back-projects consistently and could never fail.)
         point_a = _aircraft_point(a)
         point_b = _aircraft_point(b)
+        # The labels: each record's own pixel for its own aircraft.
         ua, va, za = project_point(a, point_a)
         ub, vb, zb = project_point(b, point_b)
         if za <= 0 or zb <= 0:
             continue          # a camera that cannot see it: check 2's job
+        # Where the rays start. Independent: the pose the spec commands
+        # at this sample, and the flight's aircraft as the target.
+        cast_a, cast_b, target = a, b, point_a
+        if independent_possible:
+            expected_a = track_record(tracks.get(a["camera_id"]),
+                                      int(sample_index))
+            expected_b = track_record(tracks.get(b["camera_id"]),
+                                      int(sample_index))
+            flight = telemetry_state_at(columns, frame_block,
+                                        int(sample_index)) \
+                if 0 <= int(sample_index) < len(columns.get("t", [])) \
+                else None
+            if (expected_a is not None and expected_b is not None
+                    and flight is not None
+                    and flight["north_m"] is not None
+                    and flight["alt_m"] is not None):
+                cast_a, cast_b = expected_a, expected_b
+                target = (flight["north_m"], flight["east_m"],
+                          flight["alt_m"])
+                independent_pairs += 1
         recovered = _closest_point_between_rays(
-            *_ray_through_pixel(a, ua, va), *_ray_through_pixel(b, ub, vb))
+            *_ray_through_pixel(cast_a, ua, va),
+            *_ray_through_pixel(cast_b, ub, vb))
         if recovered is None:
             continue          # parallel rays carry no depth information
         pairs += 1
-        error = max(math.dist(recovered, point_a),
-                    math.dist(point_a, point_b))
+        # One point: where the flight was (independent mode) and where
+        # each record says the aircraft was.
+        error = max(math.dist(recovered, target),
+                    math.dist(recovered, point_a),
+                    math.dist(recovered, point_b))
         if worst_at is None or error > worst:
             worst = error
             worst_at = (f"sample {int(sample_index)} t={float(a['t_s']):.3f} s "
@@ -645,13 +726,32 @@ def verify_triangulation(manifest: Dict,
                      f"schedule to verify cross-view consistency",
                      skipped=reason, unit="m", tolerance=tol_m,
                      data={"pairs": 0, "cameras": cameras})
+    if independent_pairs == pairs:
+        mode = "independent"
+        basis = ("rays from the poses recomputed from the spec through "
+                 "each record's own label, against the telemetry's "
+                 "aircraft")
+    elif independent_pairs == 0:
+        mode = "records-only"
+        basis = ("rays from the records' own poses: the two records agree "
+                 "on the aircraft; the poses are not tested here"
+                 + ("" if independent_possible else
+                    f" (no {SCENARIO_FILE} or {TELEMETRY_FILE} beside the "
+                    f"manifest)"))
+    else:
+        mode = "mixed"
+        basis = (f"{independent_pairs} of {pairs} instants cast from the "
+                 f"recomputed poses; the rest from the records' own "
+                 f"(a camera the spec does not carry, or a sample past "
+                 f"the telemetry)")
     return Check(
         "cross_view_consistency", worst <= tol_m,
-        f"{pairs} two-view instants; worst triangulation error "
+        f"{pairs} two-view instants ({basis}); worst triangulation error "
         f"{worst:.4f} m (tol {tol_m}) at {worst_at}",
         measured=worst, tolerance=tol_m, unit="m",
-        where=f"{pairs} two-view instants; worst {worst_at}",
-        data={"pairs": pairs, "cameras": cameras, "worst_at": worst_at})
+        where=f"{pairs} two-view instants; worst {worst_at}; {basis}",
+        data={"pairs": pairs, "cameras": cameras, "worst_at": worst_at,
+              "mode": mode, "independent_pairs": independent_pairs})
 
 
 def verify_counts(manifest: Dict) -> Check:
@@ -974,6 +1074,249 @@ def verify_schedule_fidelity(manifest: Dict, spec,
                  data={"differing": differing, "instants": total,
                        "worst_gap_s": worst_gap, "worst_at": worst_at,
                        "cameras": per_camera})
+
+
+def recompute_pose_tracks(manifest: Dict, spec,
+                          columns: Dict[str, Sequence[float]]
+                          ) -> Tuple[Dict[str, "PoseTrack"], List[str]]:
+    """The per-camera pose tracks solved AGAIN from the spec's cameras
+    (or the documented default camera of a camera-less spec) over the
+    telemetry, in the manifest's own frame block (CRS and origin):
+    ``{camera_id: PoseTrack}`` plus the problems named for any camera
+    whose track cannot be solved over this telemetry. This is the
+    producer's solver (core.capture.poses.solve_pose_track), run here
+    on the run's own inputs: what checks 3 and 8 grade the records
+    against. Measured on examples/cameras_multi: both tracks in a few
+    milliseconds, digests bit-identical to the manifest's."""
+    from ..scenario.camera import default_cameras
+    from .poses import PoseSolveError, SceneFrame, solve_pose_track
+
+    block = manifest.get("frame") or {}
+    frame = SceneFrame(str(block.get("crs")),
+                       float(block.get("origin_lat_deg", 0.0)),
+                       float(block.get("origin_lon_deg", 0.0)),
+                       bool(block.get("declared_on_card", False)))
+    tracks: Dict[str, "PoseTrack"] = {}
+    problems: List[str] = []
+    for camera in (spec.cameras or default_cameras(spec)):
+        camera_id = str(camera.camera_id.value)
+        try:
+            tracks[camera_id] = solve_pose_track(columns, camera, frame)
+        except PoseSolveError as exc:
+            problems.append(f"{camera_id}: the spec's pose track cannot be "
+                            f"recomputed over this telemetry ({exc})")
+    return tracks, problems
+
+
+def track_record(track: Optional["PoseTrack"], sample_index: int
+                 ) -> Optional[Dict]:
+    """One recomputed pose as a frame-record mapping (the fields
+    :func:`project_point` and :func:`_ray_through_pixel` read, plus the
+    lens the manifest derives: fx/fy from focal, sensor and resolution
+    by the manifest's own one multiplication, the principal point at
+    the image centre); None when there is no track or the sample lies
+    outside it."""
+    if track is None or not 0 <= int(sample_index) < len(track):
+        return None
+    pose = track.sample(int(sample_index))
+    fx = track.width_px / track.sensor_width_mm
+    fy = track.height_px / track.sensor_height_mm
+    return {
+        **pose,
+        "sensor_width_mm": track.sensor_width_mm,
+        "sensor_height_mm": track.sensor_height_mm,
+        "width_px": track.width_px, "height_px": track.height_px,
+        "near_m": track.near_m, "far_m": track.far_m,
+        "principal_point_px": [track.width_px / 2.0, track.height_px / 2.0],
+        "fx_px": pose["focal_length_mm"] * fx,
+        "fy_px": pose["focal_length_mm"] * fy,
+    }
+
+
+def verify_pose_fidelity(manifest: Dict, spec,
+                         columns: Optional[Dict[str, Sequence[float]]],
+                         recomputed: Optional[Tuple[Dict[str, "PoseTrack"],
+                                                    List[str]]] = None,
+                         position_tol_m: float = POSE_POSITION_TOL_M,
+                         angle_tol_deg: float = POSE_ANGLE_TOL_DEG,
+                         quaternion_tol: float = POSE_QUATERNION_TOL,
+                         lens_tol_px: float = POSE_LENS_TOL_PX,
+                         lens_tol_mm: float = POSE_LENS_TOL_MM) -> Check:
+    """Check 8: every record's pose and lens against the track
+    recomputed from the spec's cameras over the telemetry at the
+    record's sample, and every camera block's ``pose_track_digest``
+    against the recomputed track's digest, verbatim. ``recomputed`` is
+    :func:`recompute_pose_tracks`' result when the caller already has
+    it. ``spec`` None or ``columns`` None: SKIPPED by name."""
+    tolerance_text = (f"{position_tol_m:g} m, {angle_tol_deg:g} deg, "
+                      f"{lens_tol_px:g} px")
+    missing = ([SCENARIO_FILE] if spec is None else []) + (
+        [TELEMETRY_FILE] if columns is None else [])
+    if missing:
+        return Check("pose_fidelity", None,
+                     f"NOT EXERCISED (no {' or '.join(missing)} beside the "
+                     f"manifest): the camera poses were not recomputed "
+                     f"from the spec; a moved or rotated camera is not "
+                     f"seen without them",
+                     skipped=f"no {' or '.join(missing)} beside the manifest",
+                     tolerance_text=tolerance_text,
+                     data={"missing": missing})
+    if recomputed is None:
+        recomputed = recompute_pose_tracks(manifest, spec, columns)
+    tracks, problems = recomputed
+    problems = list(problems)
+    frames = manifest.get("frames", [])
+    blocks = manifest.get("cameras", [])
+    digests_equal: Dict[str, bool] = {}
+    for block in blocks:
+        camera_id = block["camera_id"]
+        track = tracks.get(camera_id)
+        if track is None:
+            problems.append(f"{camera_id}: a camera block in the manifest "
+                            f"but not a camera of the spec")
+            continue
+        equal = str(block.get("pose_track_digest")) == track.digest()
+        digests_equal[camera_id] = equal
+        if not equal:
+            problems.append(f"{camera_id}: pose_track_digest "
+                            f"{str(block.get('pose_track_digest'))[:16]} is "
+                            f"not the recomputed track's "
+                            f"{track.digest()[:16]}")
+        if str(block.get("preset")) != track.preset:
+            problems.append(f"{camera_id}: block preset "
+                            f"{block.get('preset')!r} against the spec "
+                            f"camera's {track.preset!r}")
+    for camera_id in tracks:
+        if camera_id not in {b["camera_id"] for b in blocks}:
+            problems.append(f"{camera_id}: a camera of the spec with no "
+                            f"camera block in the manifest")
+    worst_pose = {"position_m": 0.0, "angle_deg": 0.0, "quaternion": 0.0,
+                  "lens_px": 0.0, "focal_mm": 0.0}
+    worst_at = {key: None for key in worst_pose}
+    field_problems = 0
+    out_of_range = 0
+    compared = 0
+    for record in frames:
+        here = _frame_words(record)
+        expected = track_record(tracks.get(record["camera_id"]),
+                                int(record["sample_index"]))
+        if expected is None:
+            if record["camera_id"] in tracks:
+                out_of_range += 1
+                problems.append(
+                    f"{here}: sample_index {int(record['sample_index'])} "
+                    f"outside the recomputed track's "
+                    f"{len(tracks[record['camera_id']])} samples")
+            continue
+        compared += 1
+        gap_pos = math.dist(
+            (record["position_north_m"], record["position_east_m"],
+             record["position_alt_m"]),
+            (expected["position_north_m"], expected["position_east_m"],
+             expected["position_alt_m"]))
+        if worst_at["position_m"] is None or gap_pos > worst_pose["position_m"]:
+            worst_pose["position_m"], worst_at["position_m"] = gap_pos, (
+                f"{here} (recorded {float(record['position_north_m']):.3f} N, "
+                f"{float(record['position_east_m']):.3f} E, "
+                f"{float(record['position_alt_m']):.3f} m; the spec's track "
+                f"{expected['position_north_m']:.3f} N, "
+                f"{expected['position_east_m']:.3f} E, "
+                f"{expected['position_alt_m']:.3f} m at sample "
+                f"{int(record['sample_index'])})")
+        gap_ang = max(_angle_gap_deg(record["yaw_deg"], expected["yaw_deg"]),
+                      abs(float(record["pitch_deg"]) - expected["pitch_deg"]),
+                      abs(float(record["roll_deg"]) - expected["roll_deg"]))
+        if worst_at["angle_deg"] is None or gap_ang > worst_pose["angle_deg"]:
+            worst_pose["angle_deg"], worst_at["angle_deg"] = gap_ang, (
+                f"{here} (recorded yaw {float(record['yaw_deg']):.4f}, pitch "
+                f"{float(record['pitch_deg']):.4f}, roll "
+                f"{float(record['roll_deg']):.4f} deg; the spec's track "
+                f"{expected['yaw_deg']:.4f}, {expected['pitch_deg']:.4f}, "
+                f"{expected['roll_deg']:.4f})")
+        gap_q = max(abs(float(x) - float(y)) for x, y in zip(
+            record["quaternion_wxyz"], expected["quaternion_wxyz"]))
+        if worst_at["quaternion"] is None or gap_q > worst_pose["quaternion"]:
+            worst_pose["quaternion"], worst_at["quaternion"] = gap_q, here
+        gap_lens = max(
+            abs(float(record["fx_px"]) - expected["fx_px"]),
+            abs(float(record["fy_px"]) - expected["fy_px"]),
+            math.dist(record["principal_point_px"],
+                      expected["principal_point_px"]))
+        if worst_at["lens_px"] is None or gap_lens > worst_pose["lens_px"]:
+            worst_pose["lens_px"], worst_at["lens_px"] = gap_lens, (
+                f"{here} (recorded fx {float(record['fx_px']):.3f}, fy "
+                f"{float(record['fy_px']):.3f} px, focal "
+                f"{float(record['focal_length_mm']):.3f} mm; the spec's "
+                f"camera fx {expected['fx_px']:.3f}, fy "
+                f"{expected['fy_px']:.3f} px, focal "
+                f"{expected['focal_length_mm']:.3f} mm)")
+        gap_mm = abs(float(record["focal_length_mm"])
+                     - expected["focal_length_mm"])
+        if worst_at["focal_mm"] is None or gap_mm > worst_pose["focal_mm"]:
+            worst_pose["focal_mm"], worst_at["focal_mm"] = gap_mm, here
+        for key in ("width_px", "height_px", "sensor_width_mm",
+                    "sensor_height_mm", "near_m", "far_m"):
+            if record.get(key) != expected[key]:
+                field_problems += 1
+                if field_problems <= 4:
+                    problems.append(f"{here}: {key} {record.get(key)!r} "
+                                    f"against the spec camera's "
+                                    f"{expected[key]!r}")
+    if worst_pose["position_m"] > position_tol_m:
+        problems.append(f"camera position differs from the spec's track by "
+                        f"{worst_pose['position_m']:.3f} m at "
+                        f"{worst_at['position_m']}")
+    if worst_pose["angle_deg"] > angle_tol_deg:
+        problems.append(f"camera orientation differs from the spec's track "
+                        f"by {worst_pose['angle_deg']:.4f} deg at "
+                        f"{worst_at['angle_deg']}")
+    if worst_pose["quaternion"] > quaternion_tol:
+        problems.append(f"quaternion differs from the spec's track by "
+                        f"{worst_pose['quaternion']:.6f} at "
+                        f"{worst_at['quaternion']}")
+    if worst_pose["lens_px"] > lens_tol_px or worst_pose["focal_mm"] > lens_tol_mm:
+        problems.append(f"lens differs from the spec's camera by "
+                        f"{worst_pose['lens_px']:.3f} px "
+                        f"({worst_pose['focal_mm']:.3f} mm) at "
+                        f"{worst_at['lens_px']}")
+    if field_problems > 4:
+        problems.append(f"{field_problems - 4} more record fields differ "
+                        f"from the spec camera's")
+    ok = not problems and compared > 0 and bool(blocks)
+    if compared == 0 and not problems:
+        problems.append("no frame records to compare with the spec's track")
+    measured_text = (f"pos {worst_pose['position_m']:g} m, ang "
+                     f"{worst_pose['angle_deg']:g} deg, lens "
+                     f"{worst_pose['lens_px']:g} px")
+    samples = len(columns.get("t", []))
+    where = (problems[0] if problems else
+             f"{compared} records against the tracks recomputed from "
+             f"{len(tracks)} camera(s) over {samples} samples; digests = "
+             f"pose_track_digest; worst "
+             + (str(worst_at["position_m"]).split(" (")[0]
+                if worst_at["position_m"] else "no frame"))
+    detail = ("; ".join(problems) if problems else
+              f"{compared} records match the pose track recomputed from "
+              f"the spec's {len(tracks)} camera(s) over the telemetry at "
+              f"their samples (worst position {worst_pose['position_m']:g} "
+              f"m, orientation {worst_pose['angle_deg']:g} deg, quaternion "
+              f"{worst_pose['quaternion']:g}, lens {worst_pose['lens_px']:g} "
+              f"px, focal {worst_pose['focal_mm']:g} mm); every camera "
+              f"block's pose_track_digest = the recomputed track's")
+    return Check("pose_fidelity", ok, detail,
+                 measured=worst_pose["position_m"], tolerance=position_tol_m,
+                 unit="m", measured_text=measured_text,
+                 tolerance_text=tolerance_text, where=where,
+                 data={"records": compared, "out_of_range": out_of_range,
+                       "cameras": sorted(tracks), "samples": samples,
+                       "digests_equal": digests_equal,
+                       "worst": worst_pose, "worst_at": worst_at,
+                       "field_problems": field_problems,
+                       "tolerances": {"position_m": position_tol_m,
+                                      "angle_deg": angle_tol_deg,
+                                      "quaternion": quaternion_tol,
+                                      "lens_px": lens_tol_px,
+                                      "focal_mm": lens_tol_mm}})
 
 
 def read_scenario_spec(run_dir):
@@ -1716,16 +2059,26 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
                where=(f"first {first_bad}" if first_bad
                       else f"{len(frames)} records, 6 fields each"))
 
-    report.checks.append(verify_geometry(manifest))
-    report.checks.append(verify_triangulation(manifest))
-    report.checks.append(verify_counts(manifest))
-    # Checks 6 and 7 read the flight and the spec beside the manifest:
-    # the records against the telemetry, the instants against the
-    # schedule the spec commands over it. SKIPPED by name without them.
+    # Checks 3, 6, 7 and 8 read the flight and the spec beside the
+    # manifest: the records against the telemetry, the instants against
+    # the schedule the spec commands over it, the poses against the
+    # tracks the spec commands over it -- recomputed ONCE here and
+    # shared by the cross-view rays and the pose check. SKIPPED by name
+    # without them (cross-view falls back to the records' own poses and
+    # says so).
     columns = read_telemetry_columns(run_dir)
+    spec = read_scenario_spec(run_dir)
+    recomputed = (recompute_pose_tracks(manifest, spec, columns)
+                  if spec is not None and columns is not None else None)
+    report.checks.append(verify_geometry(manifest))
+    report.checks.append(verify_triangulation(
+        manifest, tracks=recomputed[0] if recomputed else None,
+        columns=columns if recomputed else None))
+    report.checks.append(verify_counts(manifest))
     report.checks.append(verify_flight_fidelity(manifest, columns))
-    report.checks.append(verify_schedule_fidelity(
-        manifest, read_scenario_spec(run_dir), columns))
+    report.checks.append(verify_schedule_fidelity(manifest, spec, columns))
+    report.checks.append(verify_pose_fidelity(manifest, spec, columns,
+                                              recomputed))
     report.checks.append(verify_engine_parity(run_dir, manifest))
 
     if other_run_dir is not None:

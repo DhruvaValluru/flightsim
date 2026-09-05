@@ -263,11 +263,11 @@ def test_a_headless_run_verifies_and_never_says_refused(tmp_path, capsys,
     rows = verification_rows(text)
     for check in ("manifest_version", "fields_finite", "geometry_recovery",
                   "cross_view_consistency", "count_exactness",
-                  "flight_fidelity", "schedule_fidelity"):
+                  "flight_fidelity", "schedule_fidelity", "pose_fidelity"):
         assert rows[check][0] == "PASS", check
         assert f"[PASS] {check}" not in text, check   # rendered once
     assert "[AWAITING] engine_parity: awaiting engine frames" in text
-    assert "verification PASSED (7/7 checks; 1 awaiting engine frames" in text
+    assert "verification PASSED (8/8 checks; 1 awaiting engine frames" in text
     assert "REFUSED" not in text
     assert ("engine absent: no engine on this OS: the render half needs "
             "macOS, or Windows with Unreal Engine 5.5; frames not rendered "
@@ -290,7 +290,7 @@ def test_a_headless_run_verifies_and_never_says_refused(tmp_path, capsys,
     text = capsys.readouterr().out
     assert "render: none (headless by choice" in text
     assert "REFUSED" not in text and "engine absent" not in text
-    assert "verification PASSED (7/7 checks" in text
+    assert "verification PASSED (8/8 checks" in text
 
 
 def test_a_manifest_that_fails_its_own_verification_fails_the_run(
@@ -506,7 +506,7 @@ def test_render_clip_is_the_single_preset_pass(tmp_path, capsys, cli_engine):
     assert not (out / "frames").exists()
     # The clip mode verified the manifest it wrote, before the pass.
     assert "[AWAITING] engine_parity" in text
-    assert "verification PASSED (7/7 checks" in text
+    assert "verification PASSED (8/8 checks" in text
     assert text.index("verification PASSED") < text.index("engine pass:")
     clip_card = json.loads((out / "clip_card.json").read_text(encoding="utf-8"))
     assert "cameras" not in clip_card
@@ -539,7 +539,7 @@ def test_run_json_records_the_render_choice_and_verify_json_in_every_mode(
         assert [c["name"] for c in verify["checks"]] == [
             "manifest_version", "fields_finite", "geometry_recovery",
             "cross_view_consistency", "count_exactness", "flight_fidelity",
-            "schedule_fidelity", "engine_parity"]
+            "schedule_fidelity", "pose_fidelity", "engine_parity"]
         # The file says what the table said: a PASS is its row, once;
         # anything else has its detail line too.
         rows = verification_rows(text)
@@ -559,7 +559,7 @@ def test_run_json_records_the_render_choice_and_verify_json_in_every_mode(
                     engine_unavailable_reason="no engine on this OS (test)")
     engine = verify["checks"][-1]
     assert engine["status"] == "AWAITING" and engine["ok"] is None
-    assert verify["awaiting"] == ["engine_parity"] and verify["ran"] == 7
+    assert verify["awaiting"] == ["engine_parity"] and verify["ran"] == 8
     assert engine["data"]["cameras"]["chase0"] == {
         "scheduled": 24, "rendered": 0, "verified": 0}
     # flightsim.verify over the directory prints exactly the file's checks.
@@ -588,7 +588,7 @@ def test_run_json_records_the_render_choice_and_verify_json_in_every_mode(
     assert engine["status"] == "PASS"
     assert engine["data"]["cameras"]["tower0"] == {
         "scheduled": 24, "rendered": 24, "verified": 24}
-    assert verify["awaiting"] == [] and verify["ran"] == 8
+    assert verify["awaiting"] == [] and verify["ran"] == 9
     assert [p["camera_id"] for p in run_json["render_passes"]] == ["chase0", "tower0"]
 
     # Clip: the choice is recorded and the manifest verified (parity awaiting).
@@ -1046,7 +1046,7 @@ def test_the_verification_table_has_measured_tolerance_status_and_where(
     assert [line for line in lines if line.startswith("  [")] == [
         "  [AWAITING] engine_parity: " + verify["checks"][-1]["detail"]]
     assert "[PASS]" not in text
-    assert "verification PASSED (7/7 checks; 1 awaiting engine frames: " \
+    assert "verification PASSED (8/8 checks; 1 awaiting engine frames: " \
            "engine_parity)" in lines
     assert lines[-1].startswith("done: ")
 
@@ -1103,20 +1103,31 @@ def test_json_gives_the_same_document_as_the_text(tmp_path):
 #: spec's schedule; one instant moved a step is seen by the flight, the
 #: schedule and the sibling run).
 CORRUPT_FAILS_EXACTLY = {
-    "quaternion": ["geometry_recovery"],
+    # A twisted quaternion is seen by the Euler cross-check, by the ray
+    # cast from the true pose through the twisted label (18 m), and by
+    # the pose recomputed from the spec.
+    "quaternion": ["geometry_recovery", "cross_view_consistency",
+                   "pose_fidelity"],
     "aircraft": ["cross_view_consistency", "flight_fidelity"],
     "time": ["flight_fidelity", "schedule_fidelity", "temporal_alignment"],
     "count": ["count_exactness", "schedule_fidelity"],
     "clock": ["flight_fidelity", "schedule_fidelity"],
-    "flight": ["flight_fidelity"],
+    # Round 3: the cross-view rays are cast from the recomputed poses
+    # against the telemetry's aircraft, so the labels of both views
+    # triangulating 50 m from the flight fail that row too.
+    "flight": ["cross_view_consistency", "flight_fidelity"],
     "schedule": ["schedule_fidelity"],
+    "pose": ["cross_view_consistency", "pose_fidelity"],
+    "lens": ["cross_view_consistency", "pose_fidelity"],
 }
 
 
 @pytest.mark.parametrize("kind, check, offender", [
     ("quaternion", "geometry_recovery", "worst chase0 #3 t=1.608 s"),
     ("aircraft", "cross_view_consistency",
-     "24 two-view instants; worst sample 0 t=0.008 s (chase0 #0 with tower0 #0)"),
+     "24 two-view instants; worst sample 0 t=0.008 s (chase0 #0 with tower0 #0)"
+     "; rays from the poses recomputed from the spec through each record's "
+     "own label, against the telemetry's aircraft"),
     ("time", "temporal_alignment",
      "25 instants in report0_corrupt_time vs 24 in report0; only in "
      "report0_corrupt_time: t=1.616667 s"),
@@ -1134,6 +1145,16 @@ CORRUPT_FAILS_EXACTLY = {
     ("schedule", "schedule_fidelity",
      "2 of 48 instants differ from the spec's schedule; worst chase0 #12 at "
      "sample 60 t=6.283 s where the spec schedules sample 59 t=6.183 s"),
+    ("pose", "pose_fidelity",
+     re.compile(r"camera position differs from the spec's track by 5\.000 m "
+                r"at tower0 #\d+ t=\d+\.\d{3} s \(recorded 900\.000 N, "
+                r"-795\.000 E, 80\.000 m; the spec's track 900\.000 N, "
+                r"-800\.000 E, 80\.000 m at sample \d+\)")),
+    ("lens", "pose_fidelity",
+     re.compile(r"lens differs from the spec's camera by 622\.222 px "
+                r"\(17\.500 mm\) at chase0 #\d+ t=\d+\.\d{3} s \(recorded fx "
+                r"1866\.667, fy 1866\.667 px, focal 52\.500 mm; the spec's "
+                r"camera fx 1244\.444, fy 1244\.444 px, focal 35\.000 mm\)")),
 ])
 def test_corrupt_fails_the_named_check_with_exit_1(report_run, kind, check,
                                                     offender):
@@ -1161,12 +1182,27 @@ def test_corrupt_fails_the_named_check_with_exit_1(report_run, kind, check,
     failed = [name for name, row in rows.items() if row[0] == "FAIL"]
     assert failed == CORRUPT_FAILS_EXACTLY[kind]
     if kind == "flight":
-        # The two views still agree with EACH OTHER: only the flight tells.
-        assert rows["cross_view_consistency"][0] == "PASS"
+        # The two views still agree with EACH OTHER (a records-only grade
+        # would pass); the rays cast from the recomputed poses meet 50 m
+        # from the flight, and the row says which it graded.
+        assert rows["cross_view_consistency"][0] == "FAIL"
+        assert rows["cross_view_consistency"][1] == "50.0 m"
+        assert rows["cross_view_consistency"][3].endswith(
+            "; rays from the poses recomputed from the spec through each "
+            "record's own label, against the telemetry's aircraft")
     if kind == "schedule":
-        # The moved records ARE the flight at their new sample.
+        # The moved records ARE the flight, and the spec's pose, at
+        # their new sample.
         assert rows["flight_fidelity"][0] == "PASS"
         assert rows["cross_view_consistency"][0] == "PASS"
+        assert rows["pose_fidelity"][0] == "PASS"
+    if kind in ("pose", "lens"):
+        # The records agree with themselves and with the flight; only
+        # the pose recomputed from the spec tells (and the ray cast
+        # from it).
+        assert rows["geometry_recovery"][0] == "PASS"
+        assert rows["flight_fidelity"][0] == "PASS"
+        assert rows["schedule_fidelity"][0] == "PASS"
     assert f"[FAIL] {check}:" in text
     also = CORRUPT_FAILS_EXACTLY[kind][:]
     also.remove(check)
@@ -1232,6 +1268,21 @@ def test_corrupt_measures_the_damage(report_run):
     assert rows["schedule_fidelity"][1:3] == ("2 of 48 instants differ",
                                               "0 differ")
     assert rows["flight_fidelity"][1] == "t 0 s, pos 0 m, att 0 deg"
+    assert rows["pose_fidelity"][1] == "pos 0 m, ang 0 deg, lens 0 px"
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        verify_main([str(out), "--corrupt", "pose"])
+    rows = verification_rows(buffer.getvalue())
+    assert rows["pose_fidelity"][1:3] == ("pos 5 m, ang 0 deg, lens 0 px",
+                                          "1e-06 m, 1e-06 deg, 1e-06 px")
+    measured = float(rows["cross_view_consistency"][1].split()[0])
+    assert 2.0 <= measured < 3.0                # 2.4705 m measured here
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        verify_main([str(out), "--corrupt", "lens"])
+    rows = verification_rows(buffer.getvalue())
+    assert rows["pose_fidelity"][1] == "pos 0 m, ang 0 deg, lens 622.222 px"
+    assert rows["geometry_recovery"][0] == "PASS"
 
 
 def test_the_verifier_reads_the_flight_not_only_the_manifest(report_run,
@@ -1257,7 +1308,8 @@ def test_the_verifier_reads_the_flight_not_only_the_manifest(report_run,
         assert verify_main([str(moved)]) == 1
     rows = verification_rows(buffer.getvalue())
     assert rows["flight_fidelity"][0] == "FAIL"
-    assert rows["cross_view_consistency"][0] == "PASS"
+    assert rows["cross_view_consistency"][0] == "FAIL"      # round 3
+    assert rows["pose_fidelity"][0] == "PASS"
     # (2) every t_s += 0.5 s, sample_index untouched.
     late = tmp_path / "late"
     shutil.copytree(out, late, ignore=shutil.ignore_patterns("corrupt_*"))
@@ -1389,7 +1441,8 @@ def test_the_committed_cockpit_example_aligns_with_cameras_multi(report_run,
     assert rows["temporal_alignment"] == (
         "PASS", "0 s", "1e-09 s", "24 instants in both runs; worst gap 0 s")
     assert rows["cross_view_consistency"][0] == "SKIPPED"
-    assert ("verification PASSED (7/7 checks; 1 skipped: "
+    assert rows["pose_fidelity"][0] == "PASS"
+    assert ("verification PASSED (8/8 checks; 1 skipped: "
             "cross_view_consistency (single camera); 1 awaiting engine "
             "frames: engine_parity)") in text
     assert text.splitlines()[-1].startswith(
@@ -1520,7 +1573,7 @@ def test_the_documents_expected_output_matches_a_fresh_run(tmp_path):
     assert module.measured_platform(doc_text) is not None
     fresh = module.generate(tmp_path / "runs_root")
     assert [b["command"] for b in doc] == [r["command"] for r in fresh]
-    assert len(doc) == len(module.COMMANDS) == 13
+    assert len(doc) == len(module.COMMANDS) == 15
     for expected, actual in zip(doc, fresh):
         assert expected["code"] == actual["code"], expected["command"]
         want = module.shape(expected["text"], exact=exact)
@@ -1539,5 +1592,5 @@ def test_the_documents_expected_output_matches_a_fresh_run(tmp_path):
         first = "\n".join(module.shape(doc[0]["text"], exact=True))
         assert re.search(r"\d+\.\d+ s/frame", doc[0]["text"])
         assert "<s/frame>" in first and not re.search(r"\d s/frame", first)
-    # The blocks say what they are: exit codes 0/0/0/0/0/2 then seven 1s.
-    assert [b["code"] for b in doc] == [0, 0, 0, 0, 0, 2, 1, 1, 1, 1, 1, 1, 1]
+    # The blocks say what they are: exit codes 0/0/0/0/0/2 then nine 1s.
+    assert [b["code"] for b in doc] == [0, 0, 0, 0, 0, 2] + [1] * 9

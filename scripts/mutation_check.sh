@@ -1938,9 +1938,9 @@ mutate flightsim/capture.py \
 # The document itself is the guarded artefact here: a stale block (one
 # summary line edited) must fail the shape comparison.
 mutate docs/CAMERA_PHASE1_REPORT.md \
-    'verification PASSED (7/7 checks; 1 awaiting engine frames: engine_parity)
+    'verification PASSED (8/8 checks; 1 awaiting engine frames: engine_parity)
 engine absent:' \
-    'verification PASSED (7/7 checks)
+    'verification PASSED (8/8 checks)
 engine absent:' \
     "commands round 1: the document's expected output cannot go stale without a test saying so" \
     tests/test_camera_cli.py || failures=$((failures+1))
@@ -2104,6 +2104,91 @@ mutate scripts/examples_expected.py \
     '    if True:  # MUTATED: digests and numbers are masked on every platform
         masked = _HEX.sub("<hex>", masked)' \
     "commands round 2: the freshness comparison is exact on the measured platform, numbers and digests included" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+# -- Camera Phase 1, package I, commands round 3: the pose is graded
+# -- against the spec (pose_fidelity: the track recomputed from
+# -- scenario.yaml over telemetry.json) and the cross-view rays start at
+# -- the recomputed pose, never at the record under test; --corrupt
+# -- pose/lens --
+
+mutate core/capture/verify.py \
+    '    if worst_pose["position_m"] > position_tol_m:' \
+    '    if False:  # MUTATED: a moved camera is never graded against the spec'"'"'s track' \
+    "commands round 3: pose fidelity grades every record's camera position against the track recomputed from the spec" \
+    tests/test_camera_verify.py tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if worst_pose["angle_deg"] > angle_tol_deg:' \
+    '    if False:  # MUTATED: a rotated camera'"'"'s Euler angles are never graded' \
+    "commands round 3: pose fidelity grades every record's Euler orientation against the recomputed track" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if worst_pose["quaternion"] > quaternion_tol:' \
+    '    if False:  # MUTATED: the quaternion is never graded against the recomputed track' \
+    "commands round 3: pose fidelity grades every record's quaternion against the recomputed track" \
+    tests/test_camera_verify.py tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if worst_pose["lens_px"] > lens_tol_px or worst_pose["focal_mm"] > lens_tol_mm:' \
+    '    if False:  # MUTATED: a scaled lens is never graded against the spec camera' \
+    "commands round 3: pose fidelity grades every record's fx/fy, principal point and focal length against the spec camera" \
+    tests/test_camera_verify.py tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        equal = str(block.get("pose_track_digest")) == track.digest()' \
+    '        equal = True  # MUTATED: the manifest'"'"'s pose_track_digest is written and never read' \
+    "commands round 3: every camera block's pose_track_digest is compared verbatim with the recomputed track's" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if record.get(key) != expected[key]:' \
+    '            if False:  # MUTATED: resolution, sensor and clip planes are never compared' \
+    "commands round 3: a record's resolution, sensor and clip planes are compared with the spec camera's" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    report.checks.append(verify_pose_fidelity(manifest, spec, columns,
+                                              recomputed))' \
+    '    report.checks.append(verify_pose_fidelity(manifest, None, columns,
+                                              recomputed))  # MUTATED: the spec is never read for the pose' \
+    "commands round 3: verify_run reads scenario.yaml for the pose; pose fidelity is never skipped when it exists" \
+    tests/test_camera_verify.py tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                cast_a, cast_b = expected_a, expected_b' \
+    '                cast_a, cast_b = a, b  # MUTATED: the rays start at the record under test (circular in the pose)' \
+    "commands round 3: the cross-view rays are cast from the poses recomputed from the spec, never from the record under test" \
+    tests/test_camera_verify.py tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                target = (flight["north_m"], flight["east_m"],
+                          flight["alt_m"])' \
+    '                target = point_a  # MUTATED: the recovered point is graded against the record, not the flight' \
+    "commands round 3: the cross-view recovered point is graded against the telemetry's aircraft at that sample" \
+    tests/test_camera_verify.py tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/verify.py \
+    '                record["position_east_m"] += POSE_SHIFT_M' \
+    '                record["position_east_m"] += 0.0  # MUTATED: the corruption is a no-op' \
+    "commands round 3: --corrupt pose really moves the camera, and the verifier catches it" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/verify.py \
+    '                record["fx_px"] *= LENS_SCALE
+                record["fy_px"] *= LENS_SCALE
+                record["focal_length_mm"] *= LENS_SCALE' \
+    '                record["fx_px"] *= 1.0  # MUTATED: the corruption is a no-op
+                record["fy_px"] *= 1.0
+                record["focal_length_mm"] *= 1.0' \
+    "commands round 3: --corrupt lens really scales the lens, and the verifier catches it" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/verify.py \
+    '                record[key] = pose[key]' \
+    '                record[key] = record[key]  # MUTATED: the moved instant keeps the old sample'"'"'s pose' \
+    "commands round 3: --corrupt schedule copies the spec's pose at the moved sample so only the schedule tells" \
     tests/test_camera_cli.py || failures=$((failures+1))
 
 echo

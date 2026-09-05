@@ -1,13 +1,17 @@
 """Verify a captured run's geometry: the phase's pass/fail report.
 
     .venv/bin/python -m flightsim.verify runs/demo [--against runs/demo_b]
-        [--corrupt quaternion|aircraft|time|count] [--json] [--brief]
+        [--corrupt quaternion|aircraft|time|count|clock|flight|schedule|pose|lens]
+        [--json] [--brief]
 
 Runs :mod:`core.capture.verify` over a run directory written by
 ``python -m flightsim.capture``: manifest schema, field finiteness,
 geometry recovery (independent reprojection), cross-view consistency
-(two-view triangulation; SKIPPED by name for a single camera), count
-exactness and -- where the engine's consume-poses pass rendered frames
+(two-view triangulation, the rays cast from the poses recomputed from
+the spec; SKIPPED by name for a single camera), count exactness,
+flight, schedule and pose fidelity (the records against telemetry.json,
+the instants and the poses against what scenario.yaml commands over
+it) and -- where the engine's consume-poses pass rendered frames
 under ``frames/<camera_id>/`` -- engine parity (applied vs solved pose
 and time per frame, the PNG named by index at the manifest's size, the
 aircraft reprojected through the applied pose) -- plus, with
@@ -49,13 +53,28 @@ copy -- and must FAIL the named check with exit 1:
   (flight_fidelity: the instants are not the telemetry's own at those
   samples; schedule_fidelity fails beside it);
 * ``flight``     -- EVERY camera's every record: aircraft north += 50 m
-  (flight_fidelity: the two views still agree with each other, so
-  cross_view_consistency PASSES -- only the telemetry tells);
+  (flight_fidelity: the two views still agree with each other; since
+  round 3 cross_view_consistency fails beside it, its rays cast from the
+  recomputed poses meeting 50 m from the telemetry's aircraft, and from
+  the records alone the manifest would pass -- only the telemetry
+  tells);
 * ``schedule``   -- one shared instant (the middle record of the first
   camera, and every other camera's record at that sample) moved ONE
-  telemetry sample later with the flight's state at that sample copied
-  in, so every per-record check passes (schedule_fidelity: the instant
-  is not the one the spec's cameras schedule over this telemetry).
+  telemetry sample later with the flight's state AND the spec's solved
+  pose at that sample copied in, so every per-record check passes
+  (schedule_fidelity: the instant is not the one the spec's cameras
+  schedule over this telemetry);
+* ``pose``       -- the last camera's every record: the camera moved
+  POSE_SHIFT_M east, quaternion and Euler angles untouched
+  (pose_fidelity: the pose is not the one the spec's camera solves to
+  over this telemetry; cross_view_consistency fails beside it on a
+  two-camera run, the ray from the true pose through the moved
+  record's label missing the aircraft);
+* ``lens``       -- the first camera's every record: fx_px, fy_px and
+  focal_length_mm scaled by LENS_SCALE (pose_fidelity: the lens is not
+  the spec camera's; every record still projects the aircraft into the
+  frame and its quaternion still agrees with its Euler angles, so
+  geometry_recovery passes).
 
 Exit codes (one table with flightsim.capture): 0 verified ("verified:"
 line); 1 FAILED (a check FAILED; "FAILED verification:" line); 2
@@ -81,7 +100,7 @@ from flightsim.report import (  # noqa: E402
 )
 
 CORRUPT_KINDS = ("quaternion", "aircraft", "time", "count", "clock",
-                 "flight", "schedule")
+                 "flight", "schedule", "pose", "lens")
 #: The check each corruption must fail, by name.
 CORRUPT_FAILS = {"quaternion": "geometry_recovery",
                  "aircraft": "cross_view_consistency",
@@ -89,11 +108,17 @@ CORRUPT_FAILS = {"quaternion": "geometry_recovery",
                  "count": "count_exactness",
                  "clock": "flight_fidelity",
                  "flight": "flight_fidelity",
-                 "schedule": "schedule_fidelity"}
-#: Corruptions the judge's own demonstration showed the round-1 verifier
-#: passing 5/5: the shift each applies, stated so the output can say it.
+                 "schedule": "schedule_fidelity",
+                 "pose": "pose_fidelity",
+                 "lens": "pose_fidelity"}
+#: Corruptions the judge's own demonstrations showed the verifier
+#: passing (round 1: 5/5 on the clock and the flight; round 2: 7/7 on a
+#: moved camera and a scaled lens): the edit each applies, stated so
+#: the output can say it.
 CLOCK_SHIFT_S = 0.5
 FLIGHT_SHIFT_M = 50.0
+POSE_SHIFT_M = 5.0
+LENS_SCALE = 1.5
 
 
 def build_parser() -> ReportParser:
@@ -245,29 +270,87 @@ def corrupt_manifest(run_dir: Path, kind: str,
             raise UsageError(f"{run_dir}: camera {cameras[0]!r} has no free "
                              f"telemetry sample after sample {sample} to "
                              f"move its middle instant to")
+        from core.capture.verify import (
+            read_scenario_spec, recompute_pose_tracks, track_record,
+        )
+
+        spec = read_scenario_spec(run_dir)
+        if spec is None:
+            raise UsageError(f"{run_dir}: --corrupt schedule needs "
+                             f"scenario.yaml beside the manifest to copy "
+                             f"the spec's pose at the moved sample from")
+        tracks, track_problems = recompute_pose_tracks(manifest, spec,
+                                                       columns)
+        if track_problems:
+            raise UsageError(f"{run_dir}: the spec's pose tracks cannot be "
+                             f"recomputed over this telemetry "
+                             f"({track_problems[0]})")
         flight = telemetry_state_at(columns, manifest.get("frame"), moved)
         before_t = float(target["t_s"])
         touched = []
         for record in frames:
             if int(record["sample_index"]) != sample:
                 continue
+            pose = track_record(tracks.get(record["camera_id"]), moved)
+            if pose is None:
+                raise UsageError(f"{run_dir}: camera "
+                                 f"{record['camera_id']!r} has no solved "
+                                 f"pose at sample {moved} to copy")
             record["sample_index"] = moved
             record["t_s"] = flight["t_s"]
             for key in ("north_m", "east_m", "alt_m", "roll_deg",
                         "pitch_deg", "heading_deg"):
                 if flight[key] is not None:
                     record["aircraft"][key] = flight[key]
+            # The spec's own pose and lens at the new sample, so the
+            # pose check and the cross-view rays see an honest record.
+            for key in ("position_north_m", "position_east_m",
+                        "position_alt_m", "quaternion_wxyz", "yaw_deg",
+                        "pitch_deg", "roll_deg", "focal_length_mm",
+                        "fx_px", "fy_px"):
+                record[key] = pose[key]
             touched.append(f"{record['camera_id']} #{record['index']}")
         words = (f"corrupted the instant at sample {sample} "
                  f"(t={before_t:.3f} s -> sample {moved}, "
                  f"t={flight['t_s']:.3f} s) on {', '.join(touched)}: "
-                 f"sample_index, t_s and the aircraft state moved one "
-                 f"telemetry sample later, the flight's own state at that "
-                 f"sample copied in, so every per-record check still "
-                 f"passes; only the schedule recomputed from the spec says "
-                 f"the instant is wrong")
+                 f"sample_index, t_s, the aircraft state and the camera "
+                 f"pose moved one telemetry sample later, the flight's own "
+                 f"state and the spec's own solved pose at that sample "
+                 f"copied in, so every per-record check still passes; only "
+                 f"the schedule recomputed from the spec says the instant "
+                 f"is wrong")
         edit = {"frames": touched, "from_sample": sample, "to_sample": moved,
                 "to_t_s": flight["t_s"]}
+    elif kind == "pose":
+        count = 0
+        for record in frames:
+            if record["camera_id"] == cameras[-1]:
+                record["position_east_m"] += POSE_SHIFT_M
+                count += 1
+        words = (f"corrupted {cameras[-1]}: every record's camera "
+                 f"position_east_m += {POSE_SHIFT_M:g} m ({count} frames); "
+                 f"quaternion, Euler angles, lens and aircraft untouched, "
+                 f"so the records agree with themselves and with the "
+                 f"flight; only the pose recomputed from the spec says "
+                 f"the camera was elsewhere")
+        edit = {"camera_id": cameras[-1], "frames": count,
+                "field": "position_east_m", "delta_m": POSE_SHIFT_M}
+    elif kind == "lens":
+        count = 0
+        for record in frames:
+            if record["camera_id"] == cameras[0]:
+                record["fx_px"] *= LENS_SCALE
+                record["fy_px"] *= LENS_SCALE
+                record["focal_length_mm"] *= LENS_SCALE
+                count += 1
+        words = (f"corrupted {cameras[0]}: every record's fx_px, fy_px and "
+                 f"focal_length_mm x {LENS_SCALE:g} ({count} frames); the "
+                 f"pose and the aircraft untouched, the aircraft still in "
+                 f"frame, so geometry_recovery passes; only the lens "
+                 f"recomputed from the spec's camera says otherwise")
+        edit = {"camera_id": cameras[0], "frames": count,
+                "fields": ["fx_px", "fy_px", "focal_length_mm"],
+                "scale": LENS_SCALE}
     else:
         raise UsageError(f"unknown --corrupt kind {kind!r}")
 

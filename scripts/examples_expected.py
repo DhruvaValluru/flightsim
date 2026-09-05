@@ -9,7 +9,7 @@ instructor runs from the committed tree -- ``flightsim.capture`` over
 ``examples/cameras_multi.yaml``, ``cameras_multi_cockpit.yaml``,
 ``cameras_waypoint.yaml`` and ``cameras_refusal.yaml``,
 ``flightsim.verify`` over the first run, ``--against`` over the pair,
-and the seven ``--corrupt`` kinds -- and prints each command with its
+and the nine ``--corrupt`` kinds -- and prints each command with its
 exit code, its measured wall time and its stdout VERBATIM, paths
 normalised to ``runs/...`` so the text reads the same from any
 checkout. The section carries the date and the platform it was
@@ -95,13 +95,22 @@ COMMANDS = [
      "python -m flightsim.verify runs/demo --corrupt clock",
      "verify", ["runs/demo", "--corrupt", "clock"]),
     ("verify --corrupt flight: flight fidelity must FAIL (the aircraft "
-     "moved in every view; cross-view still PASSES)",
+     "moved in every view; cross-view fails beside it since round 3)",
      "python -m flightsim.verify runs/demo --corrupt flight",
      "verify", ["runs/demo", "--corrupt", "flight"]),
     ("verify --corrupt schedule: schedule fidelity must FAIL (an instant "
      "the spec does not schedule; every per-record check PASSES)",
      "python -m flightsim.verify runs/demo --corrupt schedule",
      "verify", ["runs/demo", "--corrupt", "schedule"]),
+    ("verify --corrupt pose: pose fidelity must FAIL (one camera moved 5 m, "
+     "its quaternion, Euler angles and aircraft untouched; cross-view fails "
+     "beside it)",
+     "python -m flightsim.verify runs/demo --corrupt pose",
+     "verify", ["runs/demo", "--corrupt", "pose"]),
+    ("verify --corrupt lens: pose fidelity must FAIL (fx, fy and focal "
+     "scaled 1.5x; geometry recovery still PASSES)",
+     "python -m flightsim.verify runs/demo --corrupt lens",
+     "verify", ["runs/demo", "--corrupt", "lens"]),
 ]
 
 

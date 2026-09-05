@@ -16,8 +16,9 @@ from core.capture.manifest import build_capture_manifest, write_capture_manifest
 from core.capture.poses import euler_to_quat, solve_pose_track
 from core.capture.schedule import solve_schedule
 from core.capture.verify import (
-    VerificationReport, project_point, telemetry_digest, telemetry_state_at, verify_alignment,
-    verify_counts, verify_flight_fidelity, verify_geometry, verify_run,
+    VerificationReport, project_point, recompute_pose_tracks, telemetry_digest,
+    telemetry_state_at, track_record, verify_alignment, verify_counts,
+    verify_flight_fidelity, verify_geometry, verify_pose_fidelity, verify_run,
     verify_schedule_fidelity, verify_triangulation,
 )
 from core.nl.compiler import compile_prompt
@@ -786,6 +787,8 @@ def test_every_check_carries_measured_tolerance_and_where(tmp_path):
         {"name": "flight_fidelity",
          "reason": "no telemetry.json beside the manifest"},
         {"name": "schedule_fidelity",
+         "reason": "no scenario.yaml or telemetry.json beside the manifest"},
+        {"name": "pose_fidelity",
          "reason": "no scenario.yaml or telemetry.json beside the manifest"}]
     assert data["awaiting"] == ["engine_parity"]
     for check in data["checks"]:
@@ -800,6 +803,13 @@ def test_every_check_carries_measured_tolerance_and_where(tmp_path):
     cross = by_name["cross_view_consistency"]
     assert cross["unit"] == "m" and cross["tolerance"] == 0.5
     assert "15 two-view instants; worst sample" in cross["where"]
+    # A manifest alone: the rays come from the records' own poses and
+    # the row says what that proves and what it does not.
+    assert cross["data"]["mode"] == "records-only"
+    assert cross["where"].endswith(
+        "; rays from the records' own poses: the two records agree on the "
+        "aircraft; the poses are not tested here (no scenario.yaml or "
+        "telemetry.json beside the manifest)")
     counts = by_name["count_exactness"]
     assert counts["measured_text"] == "30 frames = 15 + 15"
     assert counts["tolerance_text"] == "exactly 30"
@@ -915,14 +925,17 @@ def test_a_skipped_check_is_neither_passed_nor_ran(tmp_path):
     report = verify_run(tmp_path)
     assert report.ok
     assert [c.name for c in report.skipped] == [
-        "cross_view_consistency", "flight_fidelity", "schedule_fidelity"]
+        "cross_view_consistency", "flight_fidelity", "schedule_fidelity",
+        "pose_fidelity"]
     assert report.skipped[0].status == "SKIPPED"
     assert report.passed == 4 and report.ran == 4
     assert report.summary() == (
-        "verification PASSED (4/4 checks; 3 skipped: cross_view_consistency "
+        "verification PASSED (4/4 checks; 4 skipped: cross_view_consistency "
         "(single camera), flight_fidelity (no telemetry.json beside the "
         "manifest), schedule_fidelity (no scenario.yaml or telemetry.json "
-        "beside the manifest); 1 awaiting engine frames: engine_parity)")
+        "beside the manifest), pose_fidelity (no scenario.yaml or "
+        "telemetry.json beside the manifest); 1 awaiting engine frames: "
+        "engine_parity)")
     data = report.to_dict()
     assert data["skipped"][0] == {"name": "cross_view_consistency",
                                   "reason": "single camera"}
@@ -977,7 +990,7 @@ def test_flight_and_schedule_fidelity_pass_on_the_run_that_wrote_them(tmp_path):
     assert [c.name for c in report.checks] == [
         "manifest_version", "fields_finite", "geometry_recovery",
         "cross_view_consistency", "count_exactness", "flight_fidelity",
-        "schedule_fidelity", "engine_parity"]
+        "schedule_fidelity", "pose_fidelity", "engine_parity"]
     flight = by_name["flight_fidelity"]
     assert flight.ok is True and flight.measured == 0.0
     assert flight.measured_cell == "t 0 s, pos 0 m, att 0 deg"
@@ -989,7 +1002,26 @@ def test_flight_and_schedule_fidelity_pass_on_the_run_that_wrote_them(tmp_path):
     assert schedule.ok is True and schedule.measured == 0.0
     assert schedule.measured_cell == "0 of 30 instants differ"
     assert schedule.where == "chase0 15/15, tower0 15/15 (recorded/spec)"
-    assert report.summary() == ("verification PASSED (7/7 checks; 1 "
+    pose = by_name["pose_fidelity"]
+    assert pose.ok is True and pose.measured == 0.0 and pose.unit == "m"
+    assert pose.measured_cell == "pos 0 m, ang 0 deg, lens 0 px"
+    assert pose.tolerance_cell == "1e-06 m, 1e-06 deg, 1e-06 px"
+    assert pose.where.startswith(
+        "30 records against the tracks recomputed from 2 camera(s) over 141 "
+        "samples; digests = pose_track_digest; worst ")
+    assert pose.data["digests_equal"] == {"chase0": True, "tower0": True}
+    assert pose.data["worst"] == {"position_m": 0.0, "angle_deg": 0.0,
+                                  "quaternion": 0.0, "lens_px": 0.0,
+                                  "focal_mm": 0.0}
+    # The cross-view rays were cast from the recomputed poses, not the
+    # records', and the row says so.
+    cross = by_name["cross_view_consistency"]
+    assert cross.data["mode"] == "independent"
+    assert cross.data["independent_pairs"] == cross.data["pairs"] == 15
+    assert cross.where.endswith(
+        "; rays from the poses recomputed from the spec through each "
+        "record's own label, against the telemetry's aircraft")
+    assert report.summary() == ("verification PASSED (8/8 checks; 1 "
                                 "awaiting engine frames: engine_parity)")
 
 
@@ -1026,9 +1058,20 @@ def test_flight_fidelity_catches_the_aircraft_moved_in_every_view(tmp_path):
     write_capture_manifest(manifest, tmp_path)
     report = verify_run(tmp_path)
     assert report.ok is False
-    assert [c.name for c in report.failed] == ["flight_fidelity"]
+    # Round 3: the cross-view rays are cast from the recomputed poses
+    # against the telemetry's aircraft, so the two labels triangulate
+    # to one point 50 m from the flight and that row FAILS too; graded
+    # from the records alone (no files beside the manifest) it still
+    # passes, in words that say the poses were not tested.
+    assert [c.name for c in report.failed] == ["cross_view_consistency",
+                                               "flight_fidelity"]
     by_name = {c.name: c for c in report.checks}
-    assert by_name["cross_view_consistency"].ok is True
+    cross = by_name["cross_view_consistency"]
+    assert cross.measured == pytest.approx(50.0, abs=1e-6)
+    assert cross.data["mode"] == "independent"
+    alone = verify_triangulation(manifest)
+    assert alone.ok is True and alone.data["mode"] == "records-only"
+    assert "the poses are not tested here" in alone.where
     flight = by_name["flight_fidelity"]
     assert flight.measured == pytest.approx(50.0, abs=1e-6)
     assert flight.unit == "m" and flight.tolerance == 1e-6
@@ -1097,6 +1140,11 @@ def test_schedule_fidelity_catches_an_instant_the_spec_did_not_schedule(
     middle = manifest["frames"][7]
     sample = middle["sample_index"]
     moved = telemetry_state_at(columns, manifest["frame"], sample + 1)
+    from core.scenario.spec import ScenarioSpec
+
+    tracks, problems = recompute_pose_tracks(
+        manifest, ScenarioSpec.read(tmp_path / "scenario.yaml"), columns)
+    assert problems == []
     touched = 0
     for record in manifest["frames"]:
         if record["sample_index"] == sample:
@@ -1105,6 +1153,15 @@ def test_schedule_fidelity_catches_an_instant_the_spec_did_not_schedule(
             for key in ("north_m", "east_m", "alt_m", "roll_deg",
                         "pitch_deg", "heading_deg"):
                 record["aircraft"][key] = moved[key]
+            # The spec's own pose at the new sample (as --corrupt
+            # schedule copies it): the pose check and the cross-view
+            # rays see an honest record; only the schedule tells.
+            pose = track_record(tracks[record["camera_id"]], sample + 1)
+            for key in ("position_north_m", "position_east_m",
+                        "position_alt_m", "quaternion_wxyz", "yaw_deg",
+                        "pitch_deg", "roll_deg", "focal_length_mm", "fx_px",
+                        "fy_px"):
+                record[key] = pose[key]
             touched += 1
     assert touched == 2
     write_capture_manifest(manifest, tmp_path)
@@ -1113,6 +1170,7 @@ def test_schedule_fidelity_catches_an_instant_the_spec_did_not_schedule(
     by_name = {c.name: c for c in report.checks}
     assert by_name["flight_fidelity"].ok is True
     assert by_name["cross_view_consistency"].ok is True
+    assert by_name["pose_fidelity"].ok is True
     schedule = by_name["schedule_fidelity"]
     assert schedule.measured == 2.0 and schedule.unit == "instants"
     assert schedule.measured_cell == "2 of 30 instants differ"
@@ -1142,3 +1200,230 @@ def test_schedule_fidelity_catches_an_instant_the_spec_did_not_schedule(
     assert check.skipped == "no scenario.yaml beside the manifest"
     check = verify_schedule_fidelity(manifest, spec, None)
     assert check.skipped == "no telemetry.json beside the manifest"
+
+
+# -- round 3: the pose graded against the spec, the cross-view rays cast
+# -- from it -------------------------------------------------------------
+
+def _quat_for(record):
+    return list(euler_to_quat(record["roll_deg"], record["pitch_deg"],
+                              record["yaw_deg"]))
+
+
+@pytest.mark.parametrize("case, expect_cross_fail", [
+    ("both +30 m east", True),
+    ("tower0 +5 m north", True),
+    ("both yawed 3 deg, quaternion and Euler together", True),
+    ("tower0 yawed 10 deg", True),
+    ("fx/fy/focal x1.5", True),
+    ("camera ids swapped", True),
+])
+def test_pose_fidelity_catches_the_judges_seven_pose_corruptions(
+        tmp_path, case, expect_cross_fail):
+    """The judge's demonstration against round 2: every consistent
+    corruption of the recorded pose verified 7/7 because no check
+    recomputed a pose. Each now FAILS pose_fidelity by name with the
+    edit measured, and the cross-view row -- its rays cast from the
+    recomputed poses -- fails beside it on every geometric one."""
+    manifest = write_run(tmp_path, spec_with(counted("chase", "chase0"),
+                                             counted("tower", "tower0")))
+    frames = manifest["frames"]
+    if case == "both +30 m east":
+        for r in frames:
+            r["position_east_m"] += 30.0
+        expect = ("position_m", 30.0)
+    elif case == "tower0 +5 m north":
+        for r in frames:
+            if r["camera_id"] == "tower0":
+                r["position_north_m"] += 5.0
+        expect = ("position_m", 5.0)
+    elif case.startswith("both yawed 3 deg"):
+        for r in frames:
+            r["yaw_deg"] = (r["yaw_deg"] + 3.0) % 360.0
+            r["quaternion_wxyz"] = _quat_for(r)
+        expect = ("angle_deg", 3.0)
+    elif case == "tower0 yawed 10 deg":
+        for r in frames:
+            if r["camera_id"] == "tower0":
+                r["yaw_deg"] = (r["yaw_deg"] + 10.0) % 360.0
+                r["quaternion_wxyz"] = _quat_for(r)
+        expect = ("angle_deg", 10.0)
+    elif case == "fx/fy/focal x1.5":
+        for r in frames:
+            for key in ("fx_px", "fy_px", "focal_length_mm"):
+                r[key] *= 1.5
+        expect = ("lens_px", 0.5 * frames[0]["fx_px"] / 1.5)
+    else:
+        for r in frames:
+            r["camera_id"] = "tower0" if r["camera_id"] == "chase0" \
+                else "chase0"
+        expect = ("position_m", None)
+    write_capture_manifest(manifest, tmp_path)
+    report = verify_run(tmp_path)
+    assert report.ok is False, report.render()
+    failed = [c.name for c in report.failed]
+    assert "pose_fidelity" in failed
+    assert ("cross_view_consistency" in failed) is expect_cross_fail, failed
+    # Nothing else is fooled into failing: the records still agree with
+    # themselves and (but for the swap) with the flight.
+    for name in ("manifest_version", "fields_finite", "count_exactness",
+                 "schedule_fidelity"):
+        assert name not in failed, name
+    pose = next(c for c in report.checks if c.name == "pose_fidelity")
+    key, value = expect
+    if value is not None:
+        assert pose.data["worst"][key] == pytest.approx(value, abs=1e-6), \
+            pose.detail
+    if key == "position_m":
+        assert pose.where.startswith(
+            "camera position differs from the spec's track by ")
+    elif key == "angle_deg":
+        assert pose.where.startswith(
+            "camera orientation differs from the spec's track by ")
+        assert pose.data["worst"]["quaternion"] > 1e-9
+    else:
+        assert pose.where.startswith("lens differs from the spec's camera by ")
+        assert "(17.500 mm)" in pose.where
+    assert "; detail" not in pose.where
+
+
+def test_pose_fidelity_reads_the_digest_the_fields_and_the_spec(tmp_path):
+    columns = make_columns(duration_s=14.0)
+    manifest = write_run(tmp_path, spec_with(counted("chase", "chase0"),
+                                             counted("tower", "tower0")),
+                         columns)
+    from core.scenario.spec import ScenarioSpec
+
+    spec = ScenarioSpec.read(tmp_path / "scenario.yaml")
+    honest = verify_pose_fidelity(manifest, spec, columns)
+    assert honest.ok is True
+    assert honest.data["records"] == 30 and honest.data["samples"] == 141
+    # The block's digest is compared verbatim with the recomputed track's.
+    forged = {**manifest, "cameras": [dict(manifest["cameras"][0],
+                                           pose_track_digest="0" * 64),
+                                      manifest["cameras"][1]]}
+    check = verify_pose_fidelity(forged, spec, columns)
+    assert check.ok is False
+    assert check.where == ("chase0: pose_track_digest 0000000000000000 is "
+                           "not the recomputed track's "
+                           + manifest["cameras"][0]["pose_track_digest"][:16])
+    assert check.data["digests_equal"] == {"chase0": False, "tower0": True}
+    # A record's resolution, sensor and clip planes against the spec's.
+    widened = {**manifest, "frames": [
+        dict(manifest["frames"][5], width_px=1920)] + manifest["frames"][:5]
+        + manifest["frames"][6:]}
+    check = verify_pose_fidelity(widened, spec, columns)
+    assert check.ok is False
+    assert check.where == (f"{manifest['frames'][5]['camera_id']} #5 "
+                           f"t={manifest['frames'][5]['t_s']:.3f} s: "
+                           f"width_px 1920 against the spec camera's 1280")
+    assert check.data["field_problems"] == 1
+    # A camera the spec does not carry, and a spec camera the manifest
+    # lacks, are named.
+    ghost = {**manifest, "cameras": manifest["cameras"]
+             + [dict(manifest["cameras"][0], camera_id="ghost")]}
+    check = verify_pose_fidelity(ghost, spec, columns)
+    assert "ghost: a camera block in the manifest but not a camera of " \
+           "the spec" in check.detail
+    fewer = {**manifest, "cameras": manifest["cameras"][:1],
+             "frames": [r for r in manifest["frames"]
+                        if r["camera_id"] == "chase0"]}
+    check = verify_pose_fidelity(fewer, spec, columns)
+    assert check.ok is False
+    assert "tower0: a camera of the spec with no camera block in the " \
+           "manifest" in check.detail
+    # A record past the telemetry: named, never compared.
+    short = {name: values[:10] for name, values in columns.items()}
+    check = verify_pose_fidelity(manifest, spec, short)
+    assert check.ok is False
+    assert "outside the recomputed track's 10 samples" in check.detail
+    assert check.data["out_of_range"] == sum(
+        1 for r in manifest["frames"] if r["sample_index"] >= 10)
+    # A quaternion edited alone (the Euler angles untouched) is a
+    # quaternion gap, measured.
+    twisted = {**manifest, "frames": [dict(manifest["frames"][3],
+               quaternion_wxyz=[q + (0.05 if i == 2 else 0.0) for i, q in
+                                enumerate(manifest["frames"][3]
+                                          ["quaternion_wxyz"])])]
+               + manifest["frames"][:3] + manifest["frames"][4:]}
+    check = verify_pose_fidelity(twisted, spec, columns)
+    assert check.ok is False
+    assert check.data["worst"]["quaternion"] == pytest.approx(0.05)
+    assert "quaternion differs from the spec's track by 0.050000 at " \
+        in check.detail
+    # Without the spec, or the telemetry: SKIPPED by name, never passed.
+    check = verify_pose_fidelity(manifest, None, columns)
+    assert check.ok is None and check.status == "SKIPPED"
+    assert check.skipped == "no scenario.yaml beside the manifest"
+    check = verify_pose_fidelity(manifest, spec, None)
+    assert check.skipped == "no telemetry.json beside the manifest"
+    assert check.tolerance_cell == "1e-06 m, 1e-06 deg, 1e-06 px"
+    # The recomputed record carries the manifest's lens arithmetic.
+    tracks, _ = recompute_pose_tracks(manifest, spec, columns)
+    record = manifest["frames"][0]
+    expected = track_record(tracks[record["camera_id"]],
+                            record["sample_index"])
+    for key in ("position_north_m", "quaternion_wxyz", "fx_px", "fy_px",
+                "principal_point_px", "width_px", "sensor_width_mm",
+                "near_m", "far_m", "focal_length_mm"):
+        assert expected[key] == record[key], key
+    assert track_record(tracks["chase0"], 10 ** 6) is None
+    assert track_record(None, 0) is None
+
+
+def test_cross_view_consistency_is_not_circular_in_the_pose(tmp_path):
+    """The judge's demonstration: a tower moved 5 m or yawed 10 deg
+    triangulated 'perfectly' because each ray was cast from the record
+    under test through that record's own label. The rays now start at
+    the pose recomputed from the spec, so a pose-only corruption (the
+    aircraft, quaternion and Euler angles untouched) FAILS, in
+    independent mode -- and from the records alone the same manifest
+    still passes, in words that say the poses were not tested."""
+    columns = make_columns(duration_s=14.0)
+    manifest = write_run(tmp_path, spec_with(counted("chase", "chase0"),
+                                             counted("tower", "tower0")),
+                         columns)
+    from core.scenario.spec import ScenarioSpec
+
+    spec = ScenarioSpec.read(tmp_path / "scenario.yaml")
+    tracks, _ = recompute_pose_tracks(manifest, spec, columns)
+    honest = verify_triangulation(manifest, tracks=tracks, columns=columns)
+    alone = verify_triangulation(manifest)
+    assert honest.ok and alone.ok
+    assert honest.data["mode"] == "independent"
+    assert alone.data["mode"] == "records-only"
+    assert honest.measured < 1e-6 and alone.measured < 1e-6
+    moved = {**manifest, "frames": [
+        dict(r, position_north_m=r["position_north_m"] + 5.0)
+        if r["camera_id"] == "tower0" else r for r in manifest["frames"]]}
+    check = verify_triangulation(moved, tracks=tracks, columns=columns)
+    assert check.ok is False, check.detail
+    assert check.measured > 0.5 and check.unit == "m"
+    assert check.where.startswith("15 two-view instants; worst sample ")
+    assert check.where.endswith(
+        "; rays from the poses recomputed from the spec through each "
+        "record's own label, against the telemetry's aircraft")
+    circular = verify_triangulation(moved)
+    assert circular.ok is True and circular.measured < 1e-6
+    assert circular.where.endswith(
+        "; rays from the records' own poses: the two records agree on the "
+        "aircraft; the poses are not tested here (no scenario.yaml or "
+        "telemetry.json beside the manifest)")
+    yawed = {**manifest, "frames": [
+        dict(r, yaw_deg=(r["yaw_deg"] + 10.0) % 360.0,
+             quaternion_wxyz=list(euler_to_quat(r["roll_deg"], r["pitch_deg"],
+                                                (r["yaw_deg"] + 10.0) % 360.0)))
+        if r["camera_id"] == "tower0" else r for r in manifest["frames"]]}
+    check = verify_triangulation(yawed, tracks=tracks, columns=columns)
+    assert check.ok is False and check.measured > 10.0
+    assert verify_triangulation(yawed).ok is True
+    # A camera the spec does not carry falls back to its record's pose
+    # for its pairs, and the row counts them.
+    stray = {**manifest, "frames": [dict(r, camera_id="ghost")
+                                    if r["camera_id"] == "tower0" else r
+                                    for r in manifest["frames"]]}
+    check = verify_triangulation(stray, tracks=tracks, columns=columns)
+    assert check.data["mode"] == "records-only"
+    assert check.data["independent_pairs"] == 0
+    assert "the poses are not tested here" in check.where
+    assert "(no scenario.yaml" not in check.where
