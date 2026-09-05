@@ -2597,12 +2597,13 @@ The capture card must then show, top to bottom:
   rendered frames)";
 * one gallery per camera headed "chase0: 24 scheduled, 24 rendered,
   24 verified — showing 24 of 24 rendered frame(s)" with the checkbox
-  "show the reprojected-geometry overlays (24 of 24)", the contact
-  sheet, then all 24 rendered frames captioned "#0 t=0.008 s" ...
-  "#23 t=11.992 s" (the manifest's instants), and the previews only
-  behind "geometry previews (not frames): 24 shown"; the same for
-  tower0. The count in a heading is always the number of pictures
-  under it;
+  "show the reprojected-geometry overlays (24 of 24)", then all 24
+  rendered frames captioned "#0 t=0.008 s" ... "#23 t=11.992 s" (the
+  manifest's instants) as the FIRST pictures under that heading, and
+  the previews -- with their contact sheet, which is a mosaic of
+  previews -- only behind "geometry previews (not frames): 24 shown,
+  and their contact sheet"; the same for tower0. The count in a
+  heading is always the number of pictures under it;
 * "verification PASSED (10/10 checks)" over the CHECK / STATUS /
   MEASURED / TOLERANCE / WHERE table -- the same rows
   `flightsim.verify` prints -- with every row PASS; the engine_parity

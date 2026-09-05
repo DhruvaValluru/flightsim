@@ -685,10 +685,13 @@ function thumbsHtml(runId, cameraId, items, kind) {
 // One camera's gallery: the heading is the count contract in the
 // verifier's words; the pictures are EVERY rendered frame the server
 // listed (captioned with index and instant from the manifest, the
-// overlay a toggle away), the contact sheet above them. With no
-// rendered frame the section is the previews, labelled as the fallback
-// with the reason, and a count shown is always the number of pictures
-// shown ("showing k of N").
+// overlay a toggle away). The contact sheet is a mosaic of the
+// PREVIEWS, so on a frames run it lives inside the previews'
+// disclosure with them -- the first picture under a rendered count is
+// always a rendered frame. With no rendered frame the section is the
+// previews, labelled as the fallback with the reason, the sheet above
+// them, and a count shown is always the number of pictures shown
+// ("showing k of N").
 function galleryHtml(runId, run, gallery) {
   const counts = (run.capture && run.capture.cameras || []).find(
     c => c.camera_id === gallery.camera_id) || {scheduled: gallery.scheduled};
@@ -708,14 +711,15 @@ function galleryHtml(runId, run, gallery) {
         `onchange="toggleOverlays('${esc(gallery.camera_id)}', this.checked)"> ` +
         `show the reprojected-geometry overlays (${overlays} of ${frames.length})</label>`
       : "";
-    const previewBlock = previews.length
+    const previewBlock = previews.length || sheet
       ? `<details><summary class="dim">geometry previews (not frames): ` +
-        `${previews.length} shown</summary>` +
+        `${previews.length} shown` + (sheet ? ", and their contact sheet" : "") +
+        `</summary>` + sheet +
         thumbsHtml(runId, gallery.camera_id, previews, "previews") + `</details>`
       : "";
     return `<div class="gallery">${heading} <span class="dim">— showing ` +
       `${frames.length} of ${counts.rendered ?? frames.length} rendered ` +
-      `frame(s)</span>${toggle}${sheet}` +
+      `frame(s)</span>${toggle}` +
       thumbsHtml(runId, gallery.camera_id, frames, "frames") + previewBlock +
       `</div>`;
   }

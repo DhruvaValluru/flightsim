@@ -1920,6 +1920,11 @@ def test_the_page_s_galleries_show_every_frame_and_label_previews_as_the_fallbac
     assert [s for s in srcs if "/contact_sheets/" in s] == [
         f"/runs/{run_id}/file/capture/contact_sheets/camera0.png"]
     assert not [s for s in srcs if "/frames/" in s]
+    # With no rendered frame the sheet stays where it is: under the
+    # fallback label, above the preview thumbnails, no disclosure.
+    assert "<details>" not in gallery
+    assert gallery.index("fallback") < gallery.index('class="sheet"') \
+        < gallery.index('data-kind="previews"')
     # "4 frames", "4 rendered", "captured 4": none of it, anywhere.
     assert re.search(r"\b4 (rendered )?frames?\b", words) is None
     assert "captured" not in words and "4 rendered" not in words
@@ -1968,10 +1973,18 @@ def test_the_page_s_galleries_show_every_frame_and_label_previews_as_the_fallbac
         # Previews: behind a disclosure that says they are not frames,
         # never beside the frames as peers.
         assert "<details><summary" in gallery
-        assert "geometry previews (not frames): 4 shown" in words
+        assert "geometry previews (not frames): 4 shown, and their contact sheet" in words
         assert gallery.index('data-kind="frames"') < gallery.index("<details>")
         assert gallery.index("<details>") < gallery.index('data-kind="previews"')
         assert "fallback" not in words
+        # The contact sheet is a mosaic of PREVIEWS: on a frames run it
+        # sits inside the previews' disclosure, never above the rendered
+        # frames -- the first picture under a rendered count is a frame.
+        sheet = gallery.index('class="sheet"')
+        assert gallery.index("<details>") < sheet < gallery.index('data-kind="previews"')
+        first_img = gallery.index("<img ")
+        assert 'class="sheet"' not in gallery[first_img:first_img + 40]
+        assert "/frames/" in gallery[first_img:gallery.index(">", first_img)]
     # The files panel no longer draws thumbnails of its own: one row per
     # image class with its count, the pictures in the galleries above.
     files_words = text_of(html["files"])

@@ -2514,6 +2514,16 @@ mutate webapp/static/index.html \
     "page round 2: a capped closure window names the whole flight it was cut from" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 2: the preview contact sheet never sits above rendered frames
+
+mutate webapp/static/index.html \
+    '      `frame(s)</span>${toggle}` +
+      thumbsHtml(runId, gallery.camera_id, frames, "frames") + previewBlock +' \
+    '      `frame(s)</span>${toggle}${sheet}` +  // MUTATED: the preview mosaic drawn above the rendered frames
+      thumbsHtml(runId, gallery.camera_id, frames, "frames") + previewBlock +' \
+    "page round 2: on a frames run the preview contact sheet sits inside the previews disclosure" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
