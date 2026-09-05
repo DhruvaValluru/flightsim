@@ -44,6 +44,10 @@ def test_the_report_carries_no_control_character_but_newline():
     the document is plain text with newlines and nothing else below
     space."""
     raw = REPORT.read_bytes()
+    # A checkout on Windows may carry CRLF line endings (Git's autocrlf
+    # on the CI runner): a CR that ends a line is the line ending, not
+    # a destroyed path; a CR anywhere else still is.
+    raw = raw.replace(b"\r\n", b"\n")
     bad = [(i, b) for i, b in enumerate(raw)
            if b < 0x20 and b not in (0x0A,)]
     assert bad == [], bad[:5]
