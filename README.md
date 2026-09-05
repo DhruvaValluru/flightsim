@@ -263,7 +263,7 @@ reason) while the capture manifest, geometry previews (full resolution:
 terrain wireframe or ground grid with distance rings, horizon, the
 aircraft as a body scaled from the FDM's own span, the camera's
 boresight and field of view, a header with pose and lens;
-`contact_sheets/<camera>.png` per camera; 0.074-0.075 s/frame at
+`contact_sheets/<camera>.png` per camera; 0.073-0.077 s/frame at
 1280x720 in the report's dated blocks, measured 2026-09-05 on the Linux
 machine that wrote them) and verification complete; the refusal
 example (`examples/cameras_refusal.yaml`) shows a camera placed inside

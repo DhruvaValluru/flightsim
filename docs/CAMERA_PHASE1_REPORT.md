@@ -22,10 +22,10 @@ no CI result was read in this session.
 |---|---|---|
 | prompt -> spec -> validate; cameras in the spec, digest, review table, refusals by name | measured here 2026-09-05 (`tests/test_camera_spec.py`, `test_camera_validate.py`, `test_llm_compiler.py`) | the same Python; nothing engine-side |
 | headless capture: pose tracks, schedule, manifest, previews, contact sheets, `flightsim.verify` (`--render none`) | measured here 2026-09-05: 16 blocks below, exact to the digit on Linux x86_64 (`test_the_documents_expected_output_matches_a_fresh_run`) | the same command prints the same words; digits differ by bits (the comparison is masked there) |
-| `--render frames`: one consume-poses pass per camera, `frames/<id>/NNNN.png` | stub, measured here 2026-09-05: the generated block in section 2 (48 frames, 1439 steps per pass, 15.39 s wall) | NOT YET RUN -- sections 1-4 |
+| `--render frames`: one consume-poses pass per camera, `frames/<id>/NNNN.png` | stub, measured here 2026-09-05: the generated block in section 2 (48 frames, 1439 steps per pass; the wall time is the block's own, about 15 s), with every stub the child applies named in its preamble | NOT YET RUN -- sections 1-4 |
 | `engine_parity` on rendered pixels (applied vs solved pose, capture clock, reprojection, drawn aircraft, label contrast) | stub: 48 of 48 verified, every measured value 0 (the stub draws where the label says); the row's digits are masked `x` in section 2 | NOT YET RUN -- section 5 (the x digits) |
-| overlays over rendered frames (`overlays/<id>/NNNN.png`) | stub: 48 at 0.172 s/frame, measured here 2026-09-05 | NOT YET RUN -- section 5c (looked at, not only counted) |
-| the by-product clip of camera 0 (ffmpeg concat at the scheduled instants, 12.992 s) | argv, playlist and lead-in pinned by test; no ffmpeg on this machine, so never encoded here | NOT YET RUN -- section 5b (ffprobe: duration and 25 read frames) |
+| overlays over rendered frames (`overlays/<id>/NNNN.png`) | stub: 48, measured here 2026-09-05 (the s/frame is the block's own, about 0.17) | NOT YET RUN -- section 5c (looked at, not only counted) |
+| the by-product clip of camera 0 (ffmpeg concat at the scheduled instants, 12.992 s) | argv, playlist and lead-in pinned by test; no ffmpeg on this machine, so never encoded here (the stub block's `clip:` line is the playlist arithmetic over a 3-byte placeholder) | NOT YET RUN -- section 5b (ffprobe: duration and 25 read frames) |
 | `--render clip` / *Clip only* (the preset pass, an fps clip) | stub, measured here (`test_render_clip_is_the_single_preset_pass`) | observed on the user's Windows machine before 2026-09-03 on the PRE-REWRITE page flow (a clip plus schematic previews: analysis/PLAN_camera_frames_not_clip.md); the flow as it stands today NOT re-run there -- section 6 |
 | the page's frames flow: galleries per camera, "N scheduled, M rendered, K verified", download classes, parity captions | measured here 2026-09-05 under node and the TestClient on the stub (`tests/test_webapp_capture.py`) | NOT YET RUN -- section 6 (6b, 6c for the failure and refusal words) |
 | temporal alignment across two camera sets on rendered frames | measured here on headless runs (block 4 below: 24 instants, worst gap 0 s) | NOT YET RUN -- section 7 |
@@ -2295,15 +2295,43 @@ paste the build log back if it fails.
 ```
 
 Expected output: the block below is what that command prints, line
-for line, measured here on the honest engine STUB (the commandlet's
-consume-poses pass replaced by `tests.test_camera_cli.
+for line, measured here in a child process that stubs EXACTLY these
+six pieces (`scripts/examples_expected.py`'s `STUBBED` tuple, which
+the freshness test checks against the child's own source, so a new
+stub cannot go undisclosed): `flightsim.capture.run_render_pass` (the
+commandlet's consume-poses pass, replaced by `tests.test_camera_cli.
 honest_cli_engine`, which reads the card and writes the scheduled PNGs
-and `render.json` the contract specifies; everything else -- the
-flight, the card, the 15 model loads, the schedule, the previews, the
-overlays, the clip playlist call, the verifier -- is the real code).
-The Windows log must match it with two differences: paths print with
-backslashes (`runs\demo\...`), and the `engine_parity` row's MEASURED
-cell, masked `x` here, carries the engine's own numbers. `--brief`
+and `render.json` the contract specifies), `flightsim.capture.
+encode_scheduled_clip` (the by-product clip's ffmpeg concat call,
+replaced by a placeholder writer: `clip.mp4` is the 3 bytes `mp4`),
+`core.util.platform.find_ffmpeg` (a fake path; no ffmpeg on this
+machine, none run), `core.util.platform.ue_available` and
+`core.util.platform.ue_unavailable_reason` (the engine gate held
+open), and `webapp.runs.refuse_placeholder_mesh` (disabled: the B747
+mesh is not imported here). Everything else -- the flight, the card, the 15 model loads,
+the schedule, the previews, the overlays, the verifier -- is the real
+code. So the block's `clip:` line, and run.json's `clip_encoded true`
+/ `clip_seconds 12.992`, are the playlist arithmetic (black lead-in,
+24 instants, a 1 s hold) over a placeholder file, not an encode, until
+section 5b's ffprobe measures the Windows file.
+The Windows log must match it with three differences: paths print
+with backslashes (`runs\demo\...`); the `engine_parity` row's MEASURED
+cell, masked `x` here, carries the engine's own numbers; and the
+`clip:` line reads as below only with ffmpeg on PATH (or at
+`FLIGHTSIM_FFMPEG`, `C:\ffmpeg\bin\ffmpeg.exe` or `C:\Program
+Files\ffmpeg\bin\ffmpeg.exe`) -- without it `flightsim/capture.py`
+prints, in that line's place (measured here with the platform word
+patched to windows):
+
+```
+  clip: not encoded (FfmpegMissingError: ffmpeg.missing: no ffmpeg found (checked FLIGHTSIM_FFMPEG, PATH, and the usual windows locations). Install it with: winget install ffmpeg   (or choco install ffmpeg) -- compiling and headless runs work without it; only video encoding needs it.); the frames stand on their own
+```
+
+and, with ffmpeg present but failing, `  clip: ffmpeg could not encode
+the by-product clip; the frames stand on their own`; either way
+run.json records `clip_encoded false` and the rest of the block, the
+verdict included, is unchanged (the frames are the deliverable).
+`--brief`
 collapses each camera's schedule table to one line; without it the
 full tables of the first Linux block print in the same place. The
 step counts (1439 of 1440 steps per pass) are the schedule's own --
@@ -2312,11 +2340,11 @@ requires the same of the engine's log, so a different count on
 Windows is a finding to report, not a digit to fill in.
 
 <!-- frames_expected: begin -->
-Measured 2026-09-05 on Linux x86_64, Python 3.11.15 on the honest engine STUB by `scripts/examples_expected.py` (`tests.test_camera_cli.honest_cli_engine` standing in for the commandlet's consume-poses pass; the flight, card, manifest, previews, overlays and verifier are the real ones; stdout verbatim, paths normalised to `runs/...` where Windows prints `runs\...`; wall times are this machine's). The `engine_parity` row's MEASURED cell is masked `x`: those digits come from the Windows run and are written in here from its log. Everything else -- every other line, digest, count and check number -- the Windows log must print the same, or the difference is the finding. `tests/test_camera_cli.py::test_the_documents_windows_frames_block_matches_the_stub_run` regenerates this block and compares it as the Linux blocks are compared.
+Measured 2026-09-05 on Linux x86_64, Python 3.11.15 on the honest engine STUB by `scripts/examples_expected.py` (stdout verbatim, paths normalised to `runs/...` where Windows prints `runs\...`; wall times are this machine's). Stubbed in the child process, and nothing else: `flightsim.capture.run_render_pass` -- the commandlet's consume-poses pass replaced by `tests.test_camera_cli.honest_cli_engine`, a Python function that reads -scenario= and -camera-index= off the argv and writes the scheduled PNGs and render.json the contract specifies; `flightsim.capture.encode_scheduled_clip` -- the by-product clip's ffmpeg concat call replaced by a placeholder writer: `clip.mp4` is the 3 bytes `mp4`, never an encode; `core.util.platform.find_ffmpeg` -- a fake path (no ffmpeg on this machine, none run); `core.util.platform.ue_available` -- held open (True) so the engine branch is entered; `core.util.platform.ue_unavailable_reason` -- None, the same gate; `webapp.runs.refuse_placeholder_mesh` -- disabled (the B747 mesh is not imported here, so `aircraft.mesh` would refuse by name). The flight, card, manifest, schedule, previews, contact sheets, overlays and verifier are the real code. The `clip:` line, and run.json's `clip_encoded true` / `clip_seconds 12.992`, are the playlist arithmetic (black lead-in, 24 instants, a 1 s hold) over a placeholder file, not an encode: section 5b's ffprobe on the Windows machine is the measurement. The `engine_parity` row's MEASURED cell is masked `x`: those digits come from the Windows run and are written in here from its log. Everything else -- every other line, digest, count and check number -- the Windows log must print the same, or the difference is the finding. `tests/test_camera_cli.py::test_the_documents_windows_frames_block_matches_the_stub_run` regenerates this block and compares it as the Linux blocks are compared.
 
 #### capture --render frames: two cameras, one flight (cameras_multi), on the honest engine STUB
 
-`.venv\Scripts\python -m flightsim.capture examples\cameras_multi.yaml --out runs\demo --render frames --brief` -- exit 0, 15.39 s wall on the stub
+`.venv\Scripts\python -m flightsim.capture examples\cameras_multi.yaml --out runs\demo --render frames --brief` -- exit 0, 15.24 s wall on the stub
 
 ```
 spec cef57d752362381d valid; running headlessly...
@@ -2335,13 +2363,13 @@ scheduled 48 frames across 2 camera(s)
   tower0: 24 scheduled instant(s) (count 24 spread over [0.00833333, 11.9917] s, endpoints included)
     0..23 spaced 0.400..0.542 s (sample-snapped, not uniform) from 0.008 s to 11.992 s (samples 0..114)
   manifest: runs/demo/capture_manifest.json
-  previews: 48 geometry preview(s) at 1280x720, 0.074 s/frame under runs/demo/previews (previews are not frames; track: telemetry 9.23077 Hz (115 points, no decimation))
+  previews: 48 geometry preview(s) at 1280x720, 0.075 s/frame under runs/demo/previews (previews are not frames; track: telemetry 9.23077 Hz (115 points, no decimation))
   contact sheets: 2 (contact_sheets/<camera_id>.png, one per camera)
 engine pass 1 of 2: camera 'chase0', 24 frames scheduled over the 12 s run (-camera-index=0)
   camera 'chase0': 24 of 24 scheduled frames rendered under runs/demo/frames/chase0 (engine stepped 11.992 s in 1439 steps)
 engine pass 2 of 2: camera 'tower0', 24 frames scheduled over the 12 s run (-camera-index=1)
   camera 'tower0': 24 of 24 scheduled frames rendered under runs/demo/frames/tower0 (engine stepped 11.992 s in 1439 steps)
-  overlays: 48 reprojected-geometry overlay(s) over the rendered frames under runs/demo/overlays (0.172 s/frame; the aircraft box, wireframe and horizon the manifest predicts, drawn on the engine's pixels)
+  overlays: 48 reprojected-geometry overlay(s) over the rendered frames under runs/demo/overlays (0.170 s/frame; the aircraft box, wireframe and horizon the manifest predicts, drawn on the engine's pixels)
   clip:     runs/demo/clip.mp4 (by-product of camera 'chase0', 24 frames at their scheduled instants; 12.992 s = black to t=0.008 s, the flight to t=11.992 s, a 1 s hold)
   CHECK                   STATUS  MEASURED                                          TOLERANCE                        WHERE
   manifest_version        PASS    version 1                                         = 1                              spec cef57d752362381d
@@ -2467,8 +2495,8 @@ runs\demo\
   frames\tower0\render.log
   frames\chase0\clip_playlist.ffconcat   the lead-in first ('../clip_lead.png', 0.008333 s), then 0000.png .. 0023.png with their durations, 0023.png repeated
   frames\clip_lead.png         the by-product clip's black lead-in, 1280x720 (beside the camera directories, never inside one)
-  clip.mp4                     the by-product: black to t=0.008 s, 24 frames at their instants to t=11.992 s, the last held 1 s: 12.992 s
-  run.json                     spec_digest, output_digest, samples 115, render {choice "frames", label "Render frames and clip", engine_available true, engine_unavailable_reason null}, jsbsim_log, previews {count 48, scale 1, resolution [1280, 720], s_per_frame, track_source, contact_sheets {chase0, tower0}}, render_passes (per camera: camera_id, camera_index, scheduled 24, rendered 24, steps_taken 1439, stepped_s 11.992), clip_encoded true, clip_seconds 12.992, overlays {count 48, s_per_frame} -- the keys as the stub run wrote them (the freshness test reads every one back)
+  clip.mp4                     the by-product: black to t=0.008 s, 24 frames at their instants to t=11.992 s, the last held 1 s: 12.992 s by the playlist arithmetic -- a placeholder here (3 bytes: the stub replaces the encoder); on Windows the encoded file, which section 5b measures, or absent without ffmpeg (step 2's alternative clip line; clip_encoded false)
+  run.json                     spec_digest, output_digest, samples 115, render {choice "frames", label "Render frames and clip", engine_available true, engine_unavailable_reason null}, jsbsim_log, previews {count 48, scale 1, resolution [1280, 720], s_per_frame, track_source, contact_sheets {chase0, tower0}}, render_passes (per camera: camera_id, camera_index, scheduled 24, rendered 24, steps_taken 1439, stepped_s 11.992), clip_encoded true, clip_seconds 12.992 (the playlist arithmetic; true only because the stub's placeholder writer returned true -- on Windows, true only if ffmpeg encoded the file), overlays {count 48, s_per_frame} -- the keys as the stub run wrote them (the freshness test reads every one back)
   verify.json                  the verifier's report as run (the JSON the webapp serves): ok true, checks [10, each name/ok/status/detail/measured/tolerance/unit/measured_text/tolerance_text/where/skipped_reason/data], passed 10, ran 10, awaiting [], skipped [], failed [], summary, table -- the ten rows of step 2, rewritten after the passes, so the printed table and the file agree without re-running (counts read from the stub run's file by the freshness test)
   previews\chase0\preview_00000.png .. preview_00023.png   24 geometry previews at 1280x720 (not frames); the same for tower0
   contact_sheets\chase0.png, tower0.png   one contact sheet per camera

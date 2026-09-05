@@ -232,17 +232,61 @@ def render(records: List[Dict], when: Optional[str] = None) -> str:
 
 # -- the Windows command on the honest engine stub ----------------------
 
+#: Every attribute :func:`frames_stub_child` replaces, and what stands
+#: in for it: (dotted name, what the stand-in does). The preamble of the
+#: generated block names each one, and the freshness test reads the
+#: function's own source to check that nothing is stubbed that this
+#: tuple does not disclose -- so a new stub cannot go undisclosed.
+STUBBED = (
+    ("flightsim.capture.run_render_pass",
+     "the commandlet's consume-poses pass replaced by "
+     "`tests.test_camera_cli.honest_cli_engine`, a Python function that "
+     "reads -scenario= and -camera-index= off the argv and writes the "
+     "scheduled PNGs and render.json the contract specifies"),
+    ("flightsim.capture.encode_scheduled_clip",
+     "the by-product clip's ffmpeg concat call replaced by a placeholder "
+     "writer: `clip.mp4` is the 3 bytes `mp4`, never an encode"),
+    ("core.util.platform.find_ffmpeg",
+     "a fake path (no ffmpeg on this machine, none run)"),
+    ("core.util.platform.ue_available",
+     "held open (True) so the engine branch is entered"),
+    ("core.util.platform.ue_unavailable_reason",
+     "None, the same gate"),
+    ("webapp.runs.refuse_placeholder_mesh",
+     "disabled (the B747 mesh is not imported here, so `aircraft.mesh` "
+     "would refuse by name)"),
+)
+
+#: The one line of the block that is the playlist ARITHMETIC, not an
+#: encode, until section 5b measures the file: what the `clip:` line
+#: and run.json's clip_encoded / clip_seconds mean on the stub.
+CLIP_LINE_CAVEAT = (
+    "The `clip:` line, and run.json's `clip_encoded true` / "
+    "`clip_seconds 12.992`, are the playlist arithmetic (black lead-in, "
+    "24 instants, a 1 s hold) over a placeholder file, not an encode: "
+    "section 5b's ffprobe on the Windows machine is the measurement."
+)
+
+
+def stubbed_words() -> str:
+    """The stubs, named one by one for a preamble."""
+    return "; ".join(f"`{name}` -- {what}" for name, what in STUBBED)
+
+
 def frames_stub_child(argv: List[str]) -> int:
     """The child process of :func:`generate_frames`: the capture CLI
     with the engine gate held open and every engine-side piece stubbed
     EXACTLY as ``tests/test_camera_cli.py``'s ``cli_engine`` fixture
-    holds it -- ``run_render_pass`` is the honest stub (reads
+    holds it. Every attribute this function replaces is listed in
+    :data:`STUBBED` -- ``run_render_pass`` is the honest stub (reads
     -scenario= and -camera-index= off the argv as the commandlet does,
     writes the scheduled PNGs with the aircraft drawn at the labelled
     pixel and the render.json the contract specifies), the by-product
-    clip's ffmpeg call writes a placeholder file. Nothing else is
-    touched: the flight, the card, the manifest, the previews, the
-    overlays and the verifier are the real ones."""
+    clip's ffmpeg call writes a 3-byte placeholder, ``find_ffmpeg`` is
+    a fake path, the engine gate is held open and the placeholder-mesh
+    refusal is disabled. Nothing else is touched: the flight, the
+    card, the manifest, the previews, the overlays and the verifier
+    are the real ones."""
     import core.util.platform as plat
     import flightsim.capture as cli
     import webapp.runs as runs_module
@@ -312,13 +356,13 @@ def render_frames(record: Dict, when: Optional[str] = None) -> str:
                f"{platform.python_version()}")
     lines = [FRAMES_BEGIN,
              f"Measured {when} on {machine} on the honest engine STUB by "
-             f"`scripts/examples_expected.py` (`tests.test_camera_cli."
-             f"honest_cli_engine` standing in for the commandlet's "
-             f"consume-poses pass; the flight, card, manifest, previews, "
-             f"overlays and verifier are the real ones; stdout verbatim, "
-             f"paths normalised to `runs/...` where Windows prints "
-             f"`runs\\...`; wall times are this machine's). The "
-             f"`engine_parity` row's MEASURED cell is masked `x`: those "
+             f"`scripts/examples_expected.py` (stdout verbatim, paths "
+             f"normalised to `runs/...` where Windows prints `runs\\...`; "
+             f"wall times are this machine's). Stubbed in the child "
+             f"process, and nothing else: {stubbed_words()}. The flight, "
+             f"card, manifest, schedule, previews, contact sheets, "
+             f"overlays and verifier are the real code. {CLIP_LINE_CAVEAT} "
+             f"The `engine_parity` row's MEASURED cell is masked `x`: those "
              f"digits come from the Windows run and are written in here "
              f"from its log. Everything else -- every other line, digest, "
              f"count and check number -- the Windows log must print the "

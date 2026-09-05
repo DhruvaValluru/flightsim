@@ -1755,6 +1755,109 @@ def test_the_documents_windows_frames_block_matches_the_stub_run(tmp_path):
         assert key in run_line.group(1), f"run.json's {key!r} is not in the tree"
     assert run["overlays"]["count"] == 48
     assert [p["steps_taken"] for p in run["render_passes"]] == [1439, 1439]
+    # The clip the stub run "encoded" is the placeholder the disclosed
+    # stub wrote -- 3 bytes -- and section 4's tree line says so.
+    assert (fresh["run_dir"] / "clip.mp4").stat().st_size == 3
+    assert run["clip_encoded"] is True
+    assert f"{run['clip_seconds']:.3f}" == "12.992"
+    clip_line = re.search(r"^  clip\.mp4 +(.*)$", doc_text, re.M)
+    assert clip_line, "section 4's clip.mp4 line is missing"
+    assert "a placeholder here (3 bytes" in clip_line.group(1)
+    assert "section 5b measures" in clip_line.group(1)
+
+
+def _stubbed_by_the_frames_child(module):
+    """The dotted names frames_stub_child assigns to, read from its own
+    source: every ``<alias>.<attr> = ...`` with the alias resolved
+    through the function's imports."""
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(module.frames_stub_child)))
+    aliases = {}
+    stubbed = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                aliases[alias.asname or alias.name] = alias.name
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Attribute) and \
+                        isinstance(target.value, ast.Name):
+                    stubbed.add(f"{aliases[target.value.id]}.{target.attr}")
+    return stubbed
+
+
+def test_the_windows_block_discloses_every_stub_the_child_applies():
+    """The Windows expected-output block is a stub run's stdout, and
+    its preamble (the generated one inside the markers AND the hand-
+    written paragraph above them) must name every piece the child
+    process stubs: the consume-poses pass, the clip encoder (a 3-byte
+    placeholder), find_ffmpeg, the engine gate, the placeholder-mesh
+    refusal. STUBBED is the disclosure; the child's own source is the
+    authority, so a stub added to frames_stub_child without a STUBBED
+    entry fails here, and so does a preamble that drops one. The
+    `clip:` line is said to be the playlist arithmetic, not an encode;
+    the "differences" sentence counts three and quotes capture.py's
+    own alternative clip lines, the ffmpeg-missing one measured with
+    the platform word patched to windows."""
+    module = _examples_expected_module()
+    stubbed = _stubbed_by_the_frames_child(module)
+    disclosed = [name for name, _ in module.STUBBED]
+    assert len(disclosed) == len(set(disclosed))
+    assert stubbed == set(disclosed), (stubbed ^ set(disclosed))
+    assert "flightsim.capture.encode_scheduled_clip" in stubbed
+    assert "core.util.platform.find_ffmpeg" in stubbed
+    assert "webapp.runs.refuse_placeholder_mesh" in stubbed
+    for name, what in module.STUBBED:
+        assert what.strip(), name
+    doc_text = module.DOC.read_text(encoding="utf-8")
+    generated = doc_text.split(module.FRAMES_BEGIN, 1)[1].split("####", 1)[0]
+    assert module.stubbed_words() in generated
+    assert module.CLIP_LINE_CAVEAT in generated
+    for name, what in module.STUBBED:
+        assert f"`{name}` -- {what}" in generated, name
+    assert "3 bytes" in generated and "not an encode" in generated
+    # The hand-written paragraph between the step-2 heading and the
+    # markers names each stub too (dotted names may wrap at a dot).
+    section = doc_text.split("### 2. The whole thing in one command", 1)[1]
+    section = section.split(module.FRAMES_BEGIN, 1)[0]
+    joined = section.replace("\n", "")
+    for name, _ in module.STUBBED:
+        assert name in joined, name
+    assert "playlist arithmetic" in section and "not an encode" in section
+    assert "three differences" in section
+    assert "two differences" not in section
+    # The alternative clip lines are capture.py's own words.
+    import shutil
+
+    import core.util.platform as plat
+    capture_source = (Path(__file__).resolve().parents[1] / "flightsim"
+                      / "capture.py").read_text(encoding="utf-8")
+    assert ('f"  clip: not encoded ({type(exc).__name__}: {exc}); the "\n'
+            '              f"frames stand on their own")') in capture_source
+    assert ('"  clip: ffmpeg could not encode the by-product clip; the "\n'
+            '                  "frames stand on their own"') in capture_source
+    original = (plat.os_name, shutil.which)
+    try:
+        plat.os_name = lambda: "windows"
+        shutil.which = lambda name: None
+        with pytest.raises(plat.FfmpegMissingError) as caught:
+            plat.find_ffmpeg()
+    finally:
+        plat.os_name, shutil.which = original
+    exc = caught.value
+    missing = (f"  clip: not encoded ({type(exc).__name__}: {exc}); the "
+               f"frames stand on their own")
+    assert "the usual windows locations" in missing
+    assert "winget install ffmpeg" in missing
+    assert f"\n```\n{missing}\n```\n" in section
+    assert ("`  clip: ffmpeg could not encode\nthe by-product clip; the frames "
+            "stand on their own`") in section
+    assert "clip_encoded false" in section
+    for candidate in plat._FFMPEG_FALLBACKS["windows"]:
+        assert candidate in section.replace("\n", " "), candidate
 
 
 def test_a_refusal_prints_the_header_from_the_spec(tmp_path):

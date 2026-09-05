@@ -2869,6 +2869,38 @@ mutate NEXT.md \
     "docs round 1: NEXT.md's standing block says the engine pass is not yet run" \
     tests/test_camera_docs.py || failures=$((failures+1))
 
+# -- Camera Phase 1, docs round 2: the Windows block discloses every stub --
+# The stub child's own source is the authority: a stub the STUBBED tuple
+# does not disclose, or a disclosure the preamble drops, fails the test.
+mutate scripts/examples_expected.py \
+    '    ("core.util.platform.find_ffmpeg",
+     "a fake path (no ffmpeg on this machine, none run)"),
+' \
+    '' \
+    "docs round 2: a stub dropped from STUBBED is caught against the child's own source" \
+    tests/test_camera_cli.py::test_the_windows_block_discloses_every_stub_the_child_applies || failures=$((failures+1))
+
+mutate scripts/examples_expected.py \
+    '    plat.ue_available = lambda: True
+    plat.ue_unavailable_reason = lambda: None' \
+    '    plat.ue_available = lambda: True
+    plat.os_name = lambda: "windows"  # MUTATED: an undisclosed stub
+    plat.ue_unavailable_reason = lambda: None' \
+    "docs round 2: a new stub in frames_stub_child cannot go undisclosed" \
+    tests/test_camera_cli.py::test_the_windows_block_discloses_every_stub_the_child_applies || failures=$((failures+1))
+
+mutate docs/CAMERA_PHASE1_REPORT.md \
+    'The Windows log must match it with three differences: paths print' \
+    'The Windows log must match it with two differences: paths print' \
+    "docs round 2: the differences sentence counts the clip line among them" \
+    tests/test_camera_cli.py::test_the_windows_block_discloses_every_stub_the_child_applies || failures=$((failures+1))
+
+mutate docs/CAMERA_PHASE1_REPORT.md \
+    '12.992 s by the playlist arithmetic -- a placeholder here (3 bytes: the stub replaces the encoder); on Windows the encoded file, which section 5b measures, or absent' \
+    '12.992 s; on Windows the encoded file, or absent' \
+    "docs round 2: the expected tree says the stub run's clip.mp4 is a placeholder" \
+    tests/test_camera_cli.py::test_the_documents_windows_frames_block_matches_the_stub_run || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
