@@ -2631,3 +2631,165 @@ def test_the_flight_path_is_drawn_from_the_telemetry_file_the_run_listed(
     assert page_capture(tmp_path, refused_state, refused_payload, refused_id)["telemetry"] is None
     # No listing at all (the /files fetch failed): nothing is drawn.
     assert page_capture(tmp_path, state, {}, run_id)["telemetry"] is None
+
+
+# -- page round 3: the page's DOM glue, executed -----------------------------
+# poll(), renderCapture(), initFilesPanel(), initFlightPath(),
+# toggleOverlays(), renderSpec() and startRun() touch the document and
+# fetch, so the pure-block harness above cannot reach them and they were
+# pinned only by regex on the source. tests/page_dom.js loads the page's
+# OWN script over a small document (the body's markup parsed into
+# elements) with fetch answered from the real TestClient payloads, runs
+# the actions and returns a snapshot of the document after each.
+
+PAGE_DOM = Path(__file__).resolve().parent / "page_dom.js"
+
+
+def page_dom(tmp_path, routes, actions):
+    """Run the page's glue under node over the minimal DOM: ``routes``
+    maps "METHOD /path" to {"status", "body"} (or {"throw": true} for
+    a dead fetch); ``actions`` is the list page_dom.js executes. Returns
+    one snapshot per action."""
+    import shutil
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not on PATH; the page's DOM glue needs it")
+    payload = tmp_path / "page_dom_input.json"
+    payload.write_text(json.dumps({"index": str(STATIC_INDEX), "routes": routes,
+                                   "actions": actions}), encoding="utf-8")
+    proc = subprocess.run([node, str(PAGE_DOM), str(payload)],
+                          capture_output=True, text=True, encoding="utf-8")
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout)
+
+
+def run_routes(client, run_id, state=None):
+    """The routes a finished run answers: /status, /runs/<id>, its
+    /files listing and every file the listing carries (served from the
+    TestClient, so the DOM is drawn from what the server serves)."""
+    routes = {"GET /status": {"body": client.get("/status").json()}}
+    routes[f"GET /runs/{run_id}"] = {
+        "body": state if state is not None else client.get(f"/runs/{run_id}").json()}
+    files = client.get(f"/runs/{run_id}/files").json()
+    routes[f"GET /runs/{run_id}/files"] = {"body": files}
+    for entry in files["files"]:
+        if entry["name"].endswith(".json"):
+            reply = client.get(f"/runs/{run_id}/file/{entry['name']}")
+            routes[f"GET /runs/{run_id}/file/{entry['name']}"] = {
+                "status": reply.status_code, "body": reply.json()}
+    return routes
+
+
+def test_poll_draws_the_headless_page_s_dom_from_the_run_s_payloads(
+        captured, client, monkeypatch, tmp_path):
+    """poll() on the live page, executed over the DOM: the status log is
+    every event line; the download strip lands INSIDE the capture card
+    (#captureDownloads, above the heading) and not in the files panel;
+    the galleries REPLACE the card's per-camera count list; the flight
+    path is drawn from capture/telemetry.json through the whitelist
+    route (never /runs/<id>/telemetry.json) and its formula line names
+    the file; a terminal run schedules no further poll. A run still in
+    flight draws no card, no strip, no files and re-polls in 2 s; an
+    unrecoverable run (404) says so. A mid-run refusal reaches the card
+    on the live page with its constraint and value, the strip with
+    'everything', and draws no flight path."""
+    run_id, state = captured
+    routes = run_routes(client, run_id, state)
+    payload = routes[f"GET /runs/{run_id}/files"]["body"]
+    pure = page_capture(tmp_path, state, payload, run_id)
+    snap = page_dom(tmp_path, routes, [{"do": "poll", "runId": run_id}])[0]
+    for event in state["events"]:
+        assert event["status"] in snap["status"] and event["detail"] in snap["status"]
+    assert snap["timeouts"] == []
+    # The strip: in the card, above its heading, exactly the pure builder's.
+    card = snap["captureArea"]
+    assert snap["captureDownloads"] == pure["strip"]
+    assert card.index('<div class="dlstrip">') < card.index("capture geometry")
+    assert "dlstrip" not in snap["filesArea"]
+    assert text_of(snap["filesArea"]).startswith("files from this run download all (.zip)")
+    # The galleries replaced the count list.
+    assert snap["captureGalleries"] == "".join(pure["galleries"])
+    assert "<ul>" not in snap["captureGalleries"]
+    assert 'data-kind="previews"' in card and "<li>" not in snap["captureGalleries"]
+    # The flight path, from the listed file, named.
+    assert f"GET /runs/{run_id}/file/capture/telemetry.json" in snap["fetches"]
+    assert f"GET /runs/{run_id}/telemetry.json" not in snap["fetches"]
+    path = text_of(snap["pathArea"])
+    assert path.startswith("flight path — top-down ground track, north up")
+    telemetry = routes[f"GET /runs/{run_id}/file/capture/telemetry.json"]["body"]
+    samples = len(telemetry["columns"]["t"])
+    assert (f"ground track = capture/telemetry.json's own lat/lon channels "
+            f"({samples} samples at {telemetry['interval_s']} s; the headless "
+            f"capture flight the manifest describes), projected to metres") in path
+    assert 'id="pathCanvas"' in snap["pathArea"] and 'id="profileCanvas"' in snap["pathArea"]
+    assert text_of(snap["clipArea"]).startswith(
+        "scene: flat (test) no clip: this was a headless run (the geometry below "
+        "is the deliverable; no engine pass ran) flight path")
+
+    # Still in flight: nothing drawn, another poll in 2 s.
+    live = dict(state, status="capture", detail="flying the spec headlessly")
+    live_routes = dict(routes, **{f"GET /runs/{run_id}": {"body": live}})
+    snap = page_dom(tmp_path, live_routes, [{"do": "poll", "runId": run_id}])[0]
+    assert snap["captureArea"] is None and snap["clipArea"] == ""
+    assert snap["timeouts"] == [2000]
+    assert f"GET /runs/{run_id}/files" not in snap["fetches"]
+    assert "flying the spec headlessly" in snap["status"]
+    # Not recoverable: said, and no further poll.
+    gone = {f"GET /runs/{run_id}": {"status": 404, "body": {"error": "no such run"}}}
+    snap = page_dom(tmp_path, gone, [{"do": "poll", "runId": run_id}])[0]
+    assert snap["status"] == (f"run {run_id} is not recoverable (interrupted, or "
+                              f"its files were removed)")
+    assert snap["timeouts"] == []
+
+    # The refusal path, on the live page.
+    refused_id, refused_state = refused_mid_run(client, monkeypatch)
+    routes = run_routes(client, refused_id, refused_state)
+    snap = page_dom(tmp_path, routes, [{"do": "poll", "runId": refused_id}])[0]
+    card = text_of(snap["captureArea"])
+    assert "capture refused — [camera.terrain_clearance] tower0:" in card
+    assert "(measured -12.3 m AGL, limit 30 m AGL)" in card
+    assert links_of(snap["captureDownloads"], "everything") == [f"/runs/{refused_id}/bundle.zip"]
+    assert snap["captureGalleries"] is None       # the refused card has no galleries holder
+    assert text_of(snap["pathArea"]) == ("flight path omitted: this run listed no "
+                                         "telemetry file (nothing was flown to record)")
+    assert "pathCanvas" not in snap["pathArea"]
+    assert f'href="/runs/{refused_id}/file/status.json"' in snap["filesArea"]
+
+
+def test_toggle_overlays_swaps_every_frame_s_src_and_href_both_ways(
+        frames_run, engine_client, tmp_path):
+    """The frames run on the live page: poll() draws both cameras'
+    galleries with every rendered frame; toggleOverlays(camera, on)
+    swaps each of THAT camera's frame thumbnails to its overlay file
+    and the anchor's href with it, leaves the other camera alone, and
+    swaps back."""
+    run_id, state = frames_run
+    routes = run_routes(engine_client, run_id, state)
+    snaps = page_dom(tmp_path, routes, [
+        {"do": "poll", "runId": run_id},
+        {"do": "toggleOverlays", "camera": "camera0", "on": True},
+        {"do": "toggleOverlays", "camera": "camera0", "on": False},
+        {"do": "toggleOverlays", "camera": "tower0", "on": True},
+    ])
+    frame = lambda cam, i: f"/runs/{run_id}/file/capture/frames/{cam}/{i:04d}.png"
+    overlay = lambda cam, i: f"/runs/{run_id}/file/capture/overlays/{cam}/{i:04d}.png"
+    before = snaps[0]["frames"]
+    assert [(f["camera"], f["src"], f["href"]) for f in before] == [
+        (cam, frame(cam, i), frame(cam, i))
+        for cam in ("camera0", "tower0") for i in range(4)]
+    assert "8 scheduled, 8 rendered, 8 verified" in text_of(snaps[0]["captureArea"])
+    assert links_of(snaps[0]["captureDownloads"], "frames") == [f"/runs/{run_id}/frames.zip"]
+    on = snaps[1]["frames"]
+    assert [(f["src"], f["href"]) for f in on if f["camera"] == "camera0"] == [
+        (overlay("camera0", i), overlay("camera0", i)) for i in range(4)]
+    assert [(f["src"], f["href"]) for f in on if f["camera"] == "tower0"] == [
+        (frame("tower0", i), frame("tower0", i)) for i in range(4)]
+    assert snaps[2]["frames"] == before
+    tower = snaps[3]["frames"]
+    assert [(f["src"], f["href"]) for f in tower if f["camera"] == "tower0"] == [
+        (overlay("tower0", i), overlay("tower0", i)) for i in range(4)]
+    assert [(f["src"], f["href"]) for f in tower if f["camera"] == "camera0"] == [
+        (frame("camera0", i), frame("camera0", i)) for i in range(4)]
+    # The clip is a by-product of camera 0: the video sits in the clip area.
+    assert f'<video id="clipVideo" controls src="/runs/{run_id}/clip.mp4">' in snaps[0]["clipArea"]

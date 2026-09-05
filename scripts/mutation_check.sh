@@ -2584,6 +2584,52 @@ mutate webapp/static/index.html \
     "page round 3: a rendered run's flight path keeps the rendered flight's telemetry.json" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 3: the page's DOM glue is executed, not regex-pinned -------
+
+mutate webapp/static/index.html \
+    '    renderCapture(run);
+    // The files listing is fetched ONCE and shared: the strip, the' \
+    '    // MUTATED: poll never draws the capture card
+    // The files listing is fetched ONCE and shared: the strip, the' \
+    "page round 3 (DOM): poll draws the capture card on the live page" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '  if (stripHolder) stripHolder.innerHTML = strip;' \
+    '  // MUTATED: the strip never lands in the card' \
+    "page round 3 (DOM): the download strip lands inside the capture card" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '  if (galleries && run) {
+    galleries.innerHTML = (payload.galleries || []).map(' \
+    '  if (false) {  // MUTATED: the galleries never replace the count list
+    galleries.innerHTML = (payload.galleries || []).map(' \
+    "page round 3 (DOM): the galleries replace the card's per-camera count list" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '      img.src = on ? img.dataset.overlay : img.dataset.frame;' \
+    '      img.src = img.dataset.overlay;  // MUTATED: the toggle never swaps back' \
+    "page round 3 (DOM): the overlay toggle swaps every frame's src both ways" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '      if (link && link.tagName === "A") link.href = img.src;' \
+    '      // MUTATED: the anchor keeps the frame while the thumbnail shows the overlay' \
+    "page round 3 (DOM): the overlay toggle swaps the anchor's href with the src" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '  } else {
+    setTimeout(poll, 2000);
+  }' \
+    '  } else {
+    // MUTATED: a live run is never polled again
+  }' \
+    "page round 3 (DOM): a run still in flight is polled again" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
