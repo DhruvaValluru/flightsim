@@ -2744,6 +2744,38 @@ mutate webapp/static/index.html \
     "page round 3: the provenance note's quoted phrase is escaped" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 3: a missing file listing is said by name ------------------
+
+mutate webapp/static/index.html \
+    '    if (!response.ok) {
+      say(`files: /runs/${esc(runId)}/files answered HTTP ${response.status} ` +
+          `— downloads and galleries unavailable`);
+      return null;
+    }' \
+    '    if (!response.ok) return null;  // MUTATED: an HTTP error leaves the card bare' \
+    "page round 3 (DOM): a failed /files fetch is said by name in the card" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '  } catch (error) {
+    say(`files: /runs/${esc(runId)}/files could not be fetched ` +
+        `(${esc(error)}) — downloads and galleries unavailable`);
+    return null;
+  }' \
+    '  } catch (error) { return null; }  // MUTATED: a dead fetch is silent' \
+    "page round 3 (DOM): a dead /files fetch is said by name in the card" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '  if (!files.length) {
+    say(`files: this run listed no files (/runs/${esc(runId)}/files answered ` +
+        `an empty list) — nothing to download, no gallery to show`);
+    return payload;
+  }' \
+    '  if (!files.length) return payload;  // MUTATED: an empty listing is silent' \
+    "page round 3 (DOM): an empty file listing is said by name" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

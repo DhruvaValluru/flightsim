@@ -1062,14 +1062,37 @@ function renderCapture(run) {
 async function initFilesPanel(runId, run) {
   const holder = $("filesArea");
   if (!holder) return;
+  // A listing that did not arrive -- an HTTP error, a dead fetch, or an
+  // empty list -- is said by name where the strip would be (inside the
+  // card, else the files panel), so a card without downloads is never
+  // mistaken for a run that wrote nothing. Returns null when no
+  // listing arrived: the flight path then says so too.
+  const say = words => {
+    const line = `<div class="verdict-refused">${words}</div>`;
+    const stripHolder = $("captureDownloads");
+    if (stripHolder) stripHolder.innerHTML = line;
+    holder.innerHTML = stripHolder ? "" : line;
+  };
   let payload = null;
   try {
     const response = await fetch(`/runs/${runId}/files`);
-    if (!response.ok) return;
+    if (!response.ok) {
+      say(`files: /runs/${esc(runId)}/files answered HTTP ${response.status} ` +
+          `— downloads and galleries unavailable`);
+      return null;
+    }
     payload = await response.json();
-  } catch (error) { return; }
+  } catch (error) {
+    say(`files: /runs/${esc(runId)}/files could not be fetched ` +
+        `(${esc(error)}) — downloads and galleries unavailable`);
+    return null;
+  }
   const files = payload.files || [];
-  if (!files.length) return payload;
+  if (!files.length) {
+    say(`files: this run listed no files (/runs/${esc(runId)}/files answered ` +
+        `an empty list) — nothing to download, no gallery to show`);
+    return payload;
+  }
   const strip = downloadStripHtml(runId, payload.downloads || []);
   const stripHolder = $("captureDownloads");
   if (stripHolder) stripHolder.innerHTML = strip;
@@ -1114,6 +1137,12 @@ async function initFlightPath(runId, run, files) {
   // says so and draws nothing rather than approximating a track.
   const holder = $("pathArea");
   if (!holder) return;
+  if (!files) {
+    holder.innerHTML = `<div class="dim" style="margin-top:.6rem">flight ` +
+      `path omitted: the file listing did not arrive (the files panel ` +
+      `says why), so no telemetry file can be named</div>`;
+    return;
+  }
   const source = telemetrySource(run, files);
   if (!source) {
     holder.innerHTML = `<div class="dim" style="margin-top:.6rem">flight ` +

@@ -3244,3 +3244,55 @@ def test_the_review_table_escapes_values_and_provenance_notes(client, tmp_path):
                       "from": "edited in the web UI"}
     assert snaps[2]["sourceCell"] == (
         '<td class="src-edited" data-src="cameras[0].camera_id">user (edited)</td>')
+
+
+# -- page round 3: a missing file listing is said by name ------------------
+
+def test_a_failed_file_listing_is_said_by_name_in_the_card(
+        captured, client, tmp_path):
+    """initFilesPanel returned silently when /files was not ok, threw,
+    or listed nothing: the card kept its bare per-camera count list
+    with no strip and no word saying why. On the DOM: an HTTP 500, a
+    dead fetch and an empty list each print the failure by name where
+    the strip would be (inside the card), the files panel stays empty,
+    the count list stays (the honest state), and the flight path says
+    the listing did not arrive instead of claiming no telemetry was
+    written."""
+    run_id, state = captured
+    routes = run_routes(client, run_id, state)
+    files_route = f"GET /runs/{run_id}/files"
+    cases = {
+        "http": ({"status": 500, "body": {"error": "boom"}},
+                 f"files: /runs/{run_id}/files answered HTTP 500 — downloads "
+                 f"and galleries unavailable"),
+        "dead": ({"throw": True},
+                 f"files: /runs/{run_id}/files could not be fetched (TypeError: "
+                 f"fetch failed: GET /runs/{run_id}/files) — downloads and "
+                 f"galleries unavailable"),
+        "empty": ({"body": {"files": [], "downloads": [], "galleries": []}},
+                  f"files: this run listed no files (/runs/{run_id}/files "
+                  f"answered an empty list) — nothing to download, no gallery "
+                  f"to show"),
+    }
+    for name, (route, words) in cases.items():
+        snap = page_dom(tmp_path, dict(routes, **{files_route: route}),
+                        [{"do": "poll", "runId": run_id}])[0]
+        assert snap["captureDownloads"] == f'<div class="verdict-refused">{words}</div>', name
+        assert snap["filesArea"] == "", name
+        assert "dlstrip" not in snap["captureArea"], name
+        # The count list is the card's honest state until a listing arrives.
+        assert "<ul><li><b>camera0</b>: 4 scheduled, 0 rendered (headless), " \
+               "previews only</li></ul>" in snap["captureGalleries"], name
+        path = text_of(snap["pathArea"])
+        if name == "empty":
+            assert path == ("flight path omitted: this run listed no telemetry "
+                            "file (nothing was flown to record)"), name
+        else:
+            assert path == ("flight path omitted: the file listing did not arrive "
+                            "(the files panel says why), so no telemetry file "
+                            "can be named"), name
+        assert "pathCanvas" not in snap["pathArea"], name
+    # With the real listing the strip is there and nothing is refused.
+    snap = page_dom(tmp_path, routes, [{"do": "poll", "runId": run_id}])[0]
+    assert "verdict-refused" not in snap["captureDownloads"]
+    assert links_of(snap["captureDownloads"], "everything") == [f"/runs/{run_id}/bundle.zip"]
