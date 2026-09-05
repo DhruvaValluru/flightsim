@@ -36,6 +36,7 @@ three words, recorded in its provenance and named in its status lines:
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import json
 import subprocess
@@ -1472,18 +1473,52 @@ class RunManager:
 
     def __init__(self, out_root: Optional[Path] = None) -> None:
         self.out_root = out_root or (REPO / "runs" / "webapp")
+        #: Model loads the request handlers' planning routed to the
+        #: planning log since this process started (status()).
+        self.planning_loads = 0
         self.runs: Dict[str, RunState] = {}
         self._lock = threading.Lock()
         self._active: Optional[str] = None
 
+    #: The server-level JSBSim log for the request handlers' own
+    #: planning (compile, /run and /capture prepare the spec BEFORE a
+    #: run directory exists: plan_flyable_defaults, the envelope
+    #: measurement, validate), relative to the runs root; named in
+    #: /status with the number of model loads routed there.
+    PLANNING_LOG = "jsbsim.log"
+
+    @property
+    def planning_log(self) -> Path:
+        return self.out_root / self.PLANNING_LOG
+
+    @contextlib.contextmanager
+    def planning_console(self):
+        """Route every JSBSim console line a request handler's planning
+        produces to the server-level log (``<runs root>/jsbsim.log``,
+        appended, one "# load N:" stamp per construction) and count it;
+        nothing reaches the server console. The sink is per thread
+        (core.fdm.console), so a request planning while a run is
+        flying keeps its own slot and the run keeps its own log."""
+        from core.fdm.console import jsbsim_console
+
+        with jsbsim_console(self.planning_log) as sink:
+            try:
+                yield sink
+            finally:
+                with self._lock:
+                    self.planning_loads += int(sink.loads)
+
     def status(self) -> Dict:
         with self._lock:
             active = self.runs.get(self._active) if self._active else None
+            planning_loads = int(self.planning_loads)
         return {
             "busy": active is not None and active.status not in
                     ("done", "failed"),
             "editor_running": editor_running(),
             "active": active.as_dict() if active else None,
+            "planning_log": str(self.planning_log),
+            "planning_model_loads": planning_loads,
         }
 
     def get(self, run_id: str) -> Optional[RunState]:

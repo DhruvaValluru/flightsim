@@ -267,22 +267,28 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
     # must not be refused over the system's own choices. Every move is a
     # recorded edit (source becomes ``derived``); stated values never
     # move. /run applies the same planners again: value-idempotent.
-    plan_scene_setting(spec)
-    apply_weather_event(spec)
-    # Terrain-aware environment (cross-ridge wind, along-ridge heading):
-    # shown in the review table when the scene's raster is already baked
-    # locally; /run applies the same planner, so run-time is never a
-    # surprise relative to the table.
-    try:
-        plan_terrain_environment(spec)
-    except (OSError, ValueError):
-        pass    # no local raster yet (dynamic bake): /run plans it after /bake
-    plan_flyable_defaults(spec)
-    plan_trim_recovery(spec)
-    # Defaulted world-anchored cameras follow the staged scene (the
-    # tower does not stay at flat-ground height under planned
-    # mountains); stated placements never move.
-    plan_camera_defaults(spec)
+    # The planners and the validation construct models (the envelope
+    # measurement, validate): JSBSim's banner goes to the server-level
+    # planning log, stamped and counted (/status names it), never to
+    # the server console.
+    with manager.planning_console():
+        plan_scene_setting(spec)
+        apply_weather_event(spec)
+        # Terrain-aware environment (cross-ridge wind, along-ridge
+        # heading): shown in the review table when the scene's raster is
+        # already baked locally; /run applies the same planner, so
+        # run-time is never a surprise relative to the table.
+        try:
+            plan_terrain_environment(spec)
+        except (OSError, ValueError):
+            pass    # no local raster yet (dynamic bake): /run plans it after /bake
+        plan_flyable_defaults(spec)
+        plan_trim_recovery(spec)
+        # Defaulted world-anchored cameras follow the staged scene (the
+        # tower does not stay at flat-ground height under planned
+        # mountains); stated placements never move.
+        plan_camera_defaults(spec)
+        validation = _validation_payload(spec)
 
     payload = {
         "compiler": compiler_used, "model": model, "llm_note": llm_note,
@@ -294,7 +300,7 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         "questions": questions,
         "transcript": transcript,
         "spec": _spec_payload(spec),
-        "validation": _validation_payload(spec),
+        "validation": validation,
     }
     return JSONResponse(payload)
 
@@ -414,7 +420,8 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     preview_scale, refusal = _preview_scale_or_refusal(request)
     if refusal is not None:
         return refusal
-    spec, refusal = _prepare_run_spec(request)
+    with manager.planning_console():
+        spec, refusal = _prepare_run_spec(request)
     if refusal is not None:
         return refusal
     refusal = _scale_divides_or_refusal(preview_scale, spec)
@@ -491,7 +498,8 @@ def capture_endpoint(request: RunRequest) -> JSONResponse:
     preview_scale, refusal = _preview_scale_or_refusal(request)
     if refusal is not None:
         return refusal
-    spec, refusal = _prepare_run_spec(request)
+    with manager.planning_console():
+        spec, refusal = _prepare_run_spec(request)
     if refusal is not None:
         return refusal
     refusal = _scale_divides_or_refusal(preview_scale, spec)

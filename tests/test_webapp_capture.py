@@ -163,9 +163,9 @@ def test_the_page_run_routes_jsbsim_to_a_stamped_log(client, capfd):
     <run>/jsbsim.log -- one '# load N:' stamp naming the model and the
     caller before each -- and nothing of it reaches the server's
     console (fd 1, read here with capfd). The run is started through
-    the manager directly, so the request handler's own pre-flight
-    planning (which prints to the console: Known Limitations) is not
-    in the reading."""
+    the manager directly, so only the run's own loads are in the
+    reading (the request handlers' planning has its own sink since
+    round 3: test_the_request_handlers_route_their_planning below)."""
     import re
 
     spec = compile_prompt(DEMO)
@@ -205,6 +205,110 @@ def test_the_page_run_routes_jsbsim_to_a_stamped_log(client, capfd):
     entry = next(f for f in files if f["name"] == "jsbsim.log")
     assert "stamp per model construction" in entry["note"]
     assert client.get(f"/runs/{run_id}/file/jsbsim.log").status_code == 200
+
+
+def test_the_request_handlers_route_their_planning_to_the_server_log(
+        client, capfd):
+    """/compile, /run and /capture construct models BEFORE a run
+    directory exists (plan_flyable_defaults, the envelope measurement,
+    validate). Their banners go to the server-level planning log,
+    <runs root>/jsbsim.log, stamped and counted -- /status names the
+    log and the count -- and nothing reaches the server console (fd 1,
+    read with capfd), while the run that follows keeps its own log."""
+    import re
+
+    log = manager.out_root / "jsbsim.log"
+    assert not log.exists()
+    # The count in /status is since this PROCESS started (the manager is
+    # one per server; the test client shares it across tests), so the
+    # comparison is a delta against the fresh log.
+    before = client.get("/status").json()["planning_model_loads"]
+    capfd.readouterr()
+    reply = client.post("/compile", json={"prompt": DEMO, "compiler": "regex"})
+    assert reply.status_code == 200, reply.json()
+    console = capfd.readouterr()
+    assert "JSBSim startup beginning" not in console.out + console.err
+    assert log.is_file()
+    text = log.read_text(encoding="utf-8")
+    compile_banners = text.count("JSBSim startup beginning")
+    assert compile_banners >= 1
+    # Every construction is stamped and counted; JSBSim prints its
+    # banner on some of them (measured: 7 stamped loads, 3 banners on
+    # this compile), so the count is the stamps', never the banners'.
+    stamps = re.findall(r"^# load (\d+): (\S+) called from ([\w.]+)$", text,
+                        re.M)
+    assert len(stamps) >= compile_banners
+    status = client.get("/status").json()
+    assert status["planning_log"] == str(log)
+    assert status["planning_model_loads"] - before == len(stamps)
+    assert all(caller.startswith(("core.", "webapp.")) for _, _, caller in stamps)
+    # /capture: the same planning, then the run in its own log.
+    spec = compile_prompt(DEMO).to_dict()
+    capfd.readouterr()
+    reply = client.post("/capture", json={"spec": spec})
+    assert reply.status_code == 200, reply.json()
+    run_id = reply.json()["run_id"]
+    state = finished(client, run_id)
+    assert state["status"] == "done", state
+    console = capfd.readouterr()
+    assert "JSBSim startup beginning" not in console.out + console.err
+    assert "JSBSim Flight Dynamics Model" not in console.out + console.err
+    text = log.read_text(encoding="utf-8")
+    planning_banners = text.count("JSBSim startup beginning")
+    assert planning_banners > compile_banners
+    planning_stamps = len(re.findall(r"^# load \d+: ", text, re.M))
+    assert client.get("/status").json()["planning_model_loads"] - before == \
+        planning_stamps > len(stamps)
+    run_log = manager.out_root / run_id / "jsbsim.log"
+    assert run_log.is_file()
+    assert run_log.read_text(encoding="utf-8").count(
+        "JSBSim startup beginning") >= 2
+    # The run's stamps number from 1 in ITS log: the planning sink and
+    # the run sink are different slots (per thread), not one shared one.
+    assert re.search(r"^# load 1: ", run_log.read_text(encoding="utf-8"),
+                     re.M)
+    # /run with render none plans the same way.
+    capfd.readouterr()
+    reply = client.post("/run", json={"spec": spec, "render": "none"})
+    assert reply.status_code == 200, reply.json()
+    finished(client, reply.json()["run_id"])
+    console = capfd.readouterr()
+    assert "JSBSim startup beginning" not in console.out + console.err
+    assert log.read_text(encoding="utf-8").count(
+        "JSBSim startup beginning") > planning_banners
+
+
+def test_the_console_sink_is_one_slot_per_thread(tmp_path):
+    """A request handler entering the planning sink while the run
+    thread is inside the run's own must neither steal that slot nor
+    lose its own when the run's block exits: the sink is per thread."""
+    import threading
+
+    from core.fdm.console import active_console, jsbsim_console
+
+    seen = {}
+    gate_in = threading.Event()
+    gate_out = threading.Event()
+
+    def runner():
+        with jsbsim_console(tmp_path / "run.log") as sink:
+            seen["run_inside"] = active_console() is sink
+            gate_in.set()
+            gate_out.wait(5.0)
+            seen["run_still"] = active_console() is sink
+        seen["run_after"] = active_console()
+
+    thread = threading.Thread(target=runner, daemon=True)
+    thread.start()
+    assert gate_in.wait(5.0)
+    assert active_console() is None          # this thread has no sink
+    with jsbsim_console(tmp_path / "planning.log") as planning:
+        assert active_console() is planning
+        gate_out.set()
+        thread.join(5.0)
+        assert active_console() is planning  # the run's exit did not clear it
+    assert active_console() is None
+    assert seen == {"run_inside": True, "run_still": True, "run_after": None}
 
 
 def test_a_direct_capture_run_routes_jsbsim_to_its_own_log(tmp_path, capfd):

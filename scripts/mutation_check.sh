@@ -2245,6 +2245,46 @@ mutate flightsim/verify.py \
     "commands round 3: --corrupt aim really turns the camera, and the verifier catches it" \
     tests/test_camera_cli.py || failures=$((failures+1))
 
+mutate webapp/server.py \
+    '    with manager.planning_console():
+        spec, refusal = _prepare_run_spec(request)
+    if refusal is not None:
+        return refusal
+    refusal = _scale_divides_or_refusal(preview_scale, spec)
+    if refusal is not None:
+        return refusal
+    outcome = manager.start_capture(spec, provenance={' \
+    '    if True:  # MUTATED: /capture plans on the server console
+        spec, refusal = _prepare_run_spec(request)
+    if refusal is not None:
+        return refusal
+    refusal = _scale_divides_or_refusal(preview_scale, spec)
+    if refusal is not None:
+        return refusal
+    outcome = manager.start_capture(spec, provenance={' \
+    "commands round 3: /capture's own pre-run planning routes JSBSim's console to the server-level planning log" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '    with manager.planning_console():
+        plan_scene_setting(spec)' \
+    '    if True:  # MUTATED: /compile plans on the server console
+        plan_scene_setting(spec)' \
+    "commands round 3: /compile's planning routes JSBSim's console to the server-level planning log" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate core/fdm/console.py \
+    '_SLOT = threading.local()' \
+    '_SLOT = type("Slot", (), {})()  # MUTATED: one process-wide slot shared by every thread' \
+    "commands round 3: the JSBSim console sink is one slot per thread, so a request's planning and a run never share one" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '                    self.planning_loads += int(sink.loads)' \
+    '                    self.planning_loads += 0  # MUTATED: the status line never counts the planning loads' \
+    "commands round 3: /status counts the model loads the planning log holds" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

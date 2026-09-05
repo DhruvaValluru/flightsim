@@ -32,10 +32,15 @@ core.scenario.runner.build_fdm``, so fourteen identical banners read
 as fourteen named loads (the label is the constructor's, the caller is
 the first frame outside this module and the wrapper that asked).
 
-The sink is one process-wide slot (a module global): the CLI enters it
-around its whole run, the webapp's capture and closure flights around
-theirs; the page's manager runs one flight at a time, so two runs
-never share a slot.
+The sink is one slot PER THREAD (a ``threading.local``): the CLI
+enters it around its whole run; the page's run thread enters the run's
+own sink around its flow and each request handler thread enters the
+server's planning sink around its pre-run planning (webapp.runs.
+RunManager.planning_console), so a request that plans while a run is
+flying neither steals the run's slot nor loses its own. The descriptor
+redirection itself is process-wide for the milliseconds a construction
+takes: two threads constructing at the same instant could land one
+banner in the other's log -- in a log, never on the console.
 """
 
 from __future__ import annotations
@@ -44,6 +49,7 @@ import contextlib
 import ctypes
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Iterator, Optional
 
@@ -63,12 +69,13 @@ class JSBSimConsole:
         return f"JSBSimConsole({str(self.path)!r}, loads={self.loads})"
 
 
-_ACTIVE: Optional[JSBSimConsole] = None
+_SLOT = threading.local()
 
 
 def active_console() -> Optional[JSBSimConsole]:
-    """The sink in force, or None when the banner goes to the terminal."""
-    return _ACTIVE
+    """The sink in force on THIS thread, or None when the banner goes to
+    the terminal."""
+    return getattr(_SLOT, "active", None)
 
 
 @contextlib.contextmanager
@@ -76,18 +83,17 @@ def jsbsim_console(path) -> Iterator[JSBSimConsole]:
     """Route every JSBSim console line produced inside the block to
     ``path`` (appended). Yields the sink; ``sink.loads`` afterwards is
     the number of model constructions that were routed."""
-    global _ACTIVE
     path = Path(path)
     if str(path) == os.devnull:
         raise ValueError("the JSBSim console log cannot be os.devnull: "
                          "the output is routed, never dropped")
-    previous = _ACTIVE
+    previous = active_console()
     sink = JSBSimConsole(path)
-    _ACTIVE = sink
+    _SLOT.active = sink
     try:
         yield sink
     finally:
-        _ACTIVE = previous
+        _SLOT.active = previous
 
 
 def _flush_python_streams() -> None:
@@ -137,7 +143,7 @@ def captured_console(label: Optional[str] = None
     when no sink is active. ``label`` names what is being constructed
     ("FlightDynamics(B747)"); the stamp written to the log before the
     routed output adds who asked."""
-    sink = _ACTIVE
+    sink = active_console()
     if sink is None:
         yield None
         return

@@ -2571,13 +2571,20 @@ Paste every log back; this section is rewritten from them.
   from core.scenario.validate.validate`, so fourteen identical banners
   read as fourteen named loads (measured: the CLI's cameras_multi run
   is 14 stamped loads; a page capture run of the 3 s prairie spec is
-  15 in `<run>/jsbsim.log`). NOT routed (the banner goes to the server
-  console): the request handler's own pre-flight planning and
-  validation BEFORE a run exists (`plan_flyable_defaults`, the
-  envelope measurement, `validate`; measured 7 loads per `/capture`
-  request, 3 of them printing a banner), and any bare `run_spec` in a
-  test. The sink is one process-wide slot; the page's manager runs one
-  flight at a time, so two runs never share a log.
+  15 in `<run>/jsbsim.log`). Since round 3 the request handlers' own
+  pre-flight planning and validation BEFORE a run exists
+  (`plan_flyable_defaults`, the envelope measurement, `validate` in
+  `/compile`, `/run` and `/capture`) is routed too, to the
+  server-level planning log `<runs root>/jsbsim.log` (appended,
+  stamped, counted; `/status` names it as `planning_log` with
+  `planning_model_loads`), and the sink is one slot PER THREAD
+  (`threading.local`), so a request planning while a run is flying
+  keeps its own slot and the run keeps its own log with its own
+  numbering from 1. NOT routed: a bare `run_spec` in a test with no
+  sink entered. The descriptor redirection itself is process-wide for
+  the milliseconds one construction takes, so two threads constructing
+  at the same instant could land a banner in the other's log -- in a
+  log, never on the console.
 * **What the verifier cannot see.** `flight_fidelity` and
   `schedule_fidelity` read `telemetry.json` and `scenario.yaml` beside
   the manifest; a manifest verified without them is graded for its
