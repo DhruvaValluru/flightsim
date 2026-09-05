@@ -2,12 +2,16 @@
 
 The truthful platform story (README "Platform support"): the compiler,
 headless physics, telemetry, terrain baking and the webapp run on
-macOS / Linux / Windows; the UE render half is macOS-only for now and
-REFUSES BY NAME everywhere else (every render gotcha was measured on
-Metal/macOS only -- claiming more would be claiming what was never
-measured). Everything that differs by OS routes through this module so
-tests can pin the dispatch and future code has one obvious place to
-look.
+macOS / Linux / Windows; the UE render half needs macOS, or Windows
+with Unreal Engine 5.5 and the FlightSimBridge built -- the words
+``ue_unavailable_reason()`` prints -- and REFUSES BY NAME everywhere
+else: on Linux, which has no UE half at all, and on a mac or Windows
+machine without the engine at UE_ROOT or with the bridge unbuilt
+(every render calibration was measured on Metal/macOS; Windows output
+is validated per machine by experiments/gate6_visual.py -- claiming
+more would be claiming what was never measured). Everything that
+differs by OS routes through this module so tests can pin the
+dispatch and future code has one obvious place to look.
 
 Tools are found, never assumed: ffmpeg by env override
 (``FLIGHTSIM_FFMPEG``), then PATH, then the known per-OS locations --

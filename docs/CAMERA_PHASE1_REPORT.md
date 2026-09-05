@@ -4,6 +4,33 @@ What was implemented, how to demonstrate it, and what remains. Written
 against the phase plan ("Phase 1 — Camera Control and Capture
 Geometry") as it landed on this tree.
 
+## Status today (2026-09-05)
+
+What runs on which platform, per deliverable. "Measured here" is this
+session's Linux x86_64 machine (no engine, no ffmpeg), with the test
+that keeps the claim fresh; "stub" is the honest engine stub
+(`tests.test_camera_cli.honest_cli_engine`: the consume-poses pass as
+a Python function writing what the contract specifies); "NOT YET RUN"
+means no real engine has ever produced it, and the section named holds
+the exact steps and expected numbers. Nothing in the right-hand column
+is counted as verified until the Windows logs have been pasted back.
+`ci.yml` runs the suite on ubuntu, windows and macos runners (the
+expected-output comparison masks numbers off the measured platform);
+no CI result was read in this session.
+
+| deliverable | without the engine (Linux; macOS or Windows before the build) | Windows with the engine (UE 5.5 + the built bridge) |
+|---|---|---|
+| prompt -> spec -> validate; cameras in the spec, digest, review table, refusals by name | measured here 2026-09-05 (`tests/test_camera_spec.py`, `test_camera_validate.py`, `test_llm_compiler.py`) | the same Python; nothing engine-side |
+| headless capture: pose tracks, schedule, manifest, previews, contact sheets, `flightsim.verify` (`--render none`) | measured here 2026-09-05: 16 blocks below, exact to the digit on Linux x86_64 (`test_the_documents_expected_output_matches_a_fresh_run`) | the same command prints the same words; digits differ by bits (the comparison is masked there) |
+| `--render frames`: one consume-poses pass per camera, `frames/<id>/NNNN.png` | stub, measured here 2026-09-05: the generated block in section 2 (48 frames, 1439 steps per pass, 15.39 s wall) | NOT YET RUN -- sections 1-4 |
+| `engine_parity` on rendered pixels (applied vs solved pose, capture clock, reprojection, drawn aircraft, label contrast) | stub: 48 of 48 verified, every measured value 0 (the stub draws where the label says); the row's digits are masked `x` in section 2 | NOT YET RUN -- section 5 (the x digits) |
+| overlays over rendered frames (`overlays/<id>/NNNN.png`) | stub: 48 at 0.172 s/frame, measured here 2026-09-05 | NOT YET RUN -- section 5c (looked at, not only counted) |
+| the by-product clip of camera 0 (ffmpeg concat at the scheduled instants, 12.992 s) | argv, playlist and lead-in pinned by test; no ffmpeg on this machine, so never encoded here | NOT YET RUN -- section 5b (ffprobe: duration and 25 read frames) |
+| `--render clip` / *Clip only* (the preset pass, an fps clip) | stub, measured here (`test_render_clip_is_the_single_preset_pass`) | observed on the user's Windows machine before 2026-09-03 on the PRE-REWRITE page flow (a clip plus schematic previews: analysis/PLAN_camera_frames_not_clip.md); the flow as it stands today NOT re-run there -- section 6 |
+| the page's frames flow: galleries per camera, "N scheduled, M rendered, K verified", download classes, parity captions | measured here 2026-09-05 under node and the TestClient on the stub (`tests/test_webapp_capture.py`) | NOT YET RUN -- section 6 (6b, 6c for the failure and refusal words) |
+| temporal alignment across two camera sets on rendered frames | measured here on headless runs (block 4 below: 24 instants, worst gap 0 s) | NOT YET RUN -- section 7 |
+| the C++ consume-poses pass itself (`FlightSimRenderCommandlet.cpp`) | compile-safe by inspection only: never compiled, never run (no engine here) | NOT YET RUN -- section 1 (the build; paste the log back if it fails) |
+
 ## What the camera is now
 
 Before this phase the camera was a render-time preset: chosen by the

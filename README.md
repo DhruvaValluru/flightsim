@@ -257,14 +257,19 @@ it); `--json` gives the same as data; JSBSim's own console goes to
 `<out>/jsbsim.log`, never stdout. The expected output of every example
 is in `docs/CAMERA_PHASE1_REPORT.md`, verbatim from a dated run.
 
-Off macOS the pixel render refuses by name (`ue.platform`) while the
-capture manifest, geometry previews (full resolution: terrain wireframe
-or ground grid with distance rings, horizon, the aircraft as a body
-scaled from the FDM's own span, the camera's boresight and field of
-view, a header with pose and lens; `contact_sheets/<camera>.png` per
-camera; measured 0.049 s/frame) and verification complete; the
-refusal example (`examples/cameras_refusal.yaml`) shows a camera placed
-inside terrain refused as `camera.terrain_clearance`.
+Without the engine (Linux; macOS or Windows before the build above)
+the pixel render refuses by name (`ue.platform`, with the machine's
+reason) while the capture manifest, geometry previews (full resolution:
+terrain wireframe or ground grid with distance rings, horizon, the
+aircraft as a body scaled from the FDM's own span, the camera's
+boresight and field of view, a header with pose and lens;
+`contact_sheets/<camera>.png` per camera; 0.074-0.075 s/frame at
+1280x720 in the report's dated blocks, measured 2026-09-05 on the Linux
+machine that wrote them) and verification complete; the refusal
+example (`examples/cameras_refusal.yaml`) shows a camera placed inside
+terrain refused as `camera.terrain_clearance`. What runs on which
+platform TODAY, per deliverable and dated, is the "Status today" table
+at the top of `docs/CAMERA_PHASE1_REPORT.md`.
 
 With the engine (`--render frames`, the default where it exists) the
 same command renders exactly the scheduled PNGs per camera under
@@ -274,9 +279,12 @@ pose against the solved one, and `overlays/<camera_id>/NNNN.png` draws
 the manifest's aircraft box, ground and horizon over every rendered
 frame so the check is visible; the clip is a by-product of camera 0.
 Without the engine that check reads `[AWAITING] engine_parity`, never
-a pass. The Windows verification steps, exact commands and expected
-log lines are in `docs/CAMERA_PHASE1_REPORT.md` ("Engine verification
-(Windows)"), marked NOT YET RUN until measured there.
+a pass. The engine pass has NOT YET RUN on a real engine: the Windows
+verification steps, exact commands and expected output (the one
+command's stdout generated from the honest engine stub, the engine's
+own digits masked `x` until the log supplies them) are in
+`docs/CAMERA_PHASE1_REPORT.md` ("Engine verification (Windows)"),
+marked NOT YET RUN until measured there.
 
 **The same thing from the web app**, with nothing to download by hand:
 the run form carries the render choice -- **Render frames and clip**

@@ -1,7 +1,25 @@
 # Resume here
 
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
-docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
+docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-28.
+
+**Standing until the Windows logs are pasted back: the engine
+per-camera pass, engine_parity on rendered pixels, the overlays on
+rendered frames, the by-product clip's ffprobe length and the page's
+frames flow are NOT YET RUN on Windows.** Do docs/CAMERA_PHASE1_REPORT.md
+"Engine verification (Windows)" steps 1-7 (build; the one command,
+whose expected stdout is generated from the honest engine stub with
+only the engine_parity digits masked x; the two commandlet passes and
+their log lines; the tree; the verifier and its failure demonstrations;
+ffprobe on the clip; the overlays looked at; the page; --against) and
+paste every log back; the report's "Status today" table says, per
+deliverable and dated, what was measured here and what awaits. The
+render choice: the CLI's `--render frames|clip|none` IS the page's
+Render frames and clip / Clip only / Headless (the same three words,
+core.capture.render_pass.RENDER_WORDS), default the richest the
+machine supports (render_choice_default), engine options refused
+`ue.platform` by name with the machine's reason, the choice recorded
+in run.json / provenance.json "render".
 
 **Camera Phase 1, page round 3 (2026-09-05, the judge's eight ranked
 gaps against bar section 4, all eight closed in priority order, eight

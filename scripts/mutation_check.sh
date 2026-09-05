@@ -2827,6 +2827,48 @@ mutate docs/CAMERA_PHASE1_REPORT.md \
     "docs round 1: the expected tree's run.json line names every key the run writes" \
     tests/test_camera_cli.py || failures=$((failures+1))
 
+# -- Camera Phase 1, docs round 1: the documents tell the truth today ------
+# The corrupted path of section 6c, put back (an interpreted \f and \r).
+mutate docs/CAMERA_PHASE1_REPORT.md \
+    'capture\frames\chase0\render.json' \
+    $'capture\frames\\chase0\render.json' \
+    "docs round 1: the report carries no control character but newline" \
+    tests/test_camera_docs.py || failures=$((failures+1))
+
+# An engine result claimed in the status table before a Windows log was read.
+mutate docs/CAMERA_PHASE1_REPORT.md \
+    '| NOT YET RUN -- section 5 (the x digits) |' \
+    '| measured on Windows 2026-09-05: 48 of 48 verified |' \
+    "docs round 1: the status table cannot claim an engine result that was not observed" \
+    tests/test_camera_docs.py || failures=$((failures+1))
+
+mutate README.md \
+    'Without the engine (Linux; macOS or Windows before the build above)' \
+    'Off macOS' \
+    "docs round 1: README's capture section agrees with its own platform table" \
+    tests/test_camera_docs.py || failures=$((failures+1))
+
+mutate core/util/platform.py \
+    'macOS / Linux / Windows; the UE render half needs macOS, or Windows
+with Unreal Engine 5.5 and the FlightSimBridge built -- the words
+``ue_unavailable_reason()`` prints -- and REFUSES BY NAME everywhere' \
+    'macOS / Linux / Windows; the UE render half is macOS-only for now and
+REFUSES BY NAME everywhere' \
+    "docs round 1: the platform module's docstring matches its own refusal words" \
+    tests/test_camera_docs.py || failures=$((failures+1))
+
+mutate NEXT.md \
+    'then this file'"'"'s gotchas 1-28.' \
+    'then this file'"'"'s gotchas 1-26.' \
+    "docs round 1: NEXT.md's gotcha range counts the gotchas the file holds" \
+    tests/test_camera_docs.py || failures=$((failures+1))
+
+mutate NEXT.md \
+    'frames flow are NOT YET RUN on Windows.**' \
+    'frames flow were verified on Windows.**' \
+    "docs round 1: NEXT.md's standing block says the engine pass is not yet run" \
+    tests/test_camera_docs.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
