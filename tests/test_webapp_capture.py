@@ -2103,3 +2103,161 @@ def test_the_closure_report_names_its_units_and_the_graded_window(
     words = text_of(page_capture(tmp_path, frames_state, {}, frames_id)["card"])
     assert ("graded over the settled half of 3 s (full duration: a frames run "
             "steps the whole flight)") in words
+
+
+# -- a finished run outlives the server process ---------------------------
+
+def recovered(run_id):
+    """A fresh manager over the same runs root: what a restarted server
+    would reconstruct for this run."""
+    from webapp.runs import RunManager
+
+    fresh = RunManager(out_root=manager.out_root)
+    run = fresh.get(run_id)
+    return run.as_dict() if run is not None else None
+
+
+def test_a_finished_headless_run_survives_a_server_restart(captured, client,
+                                                            monkeypatch):
+    """Recovery is keyed on provenance.json and status.json, not on a
+    clip: a headless run comes back "done" with the SAME capture summary
+    (rebuilt from the manifest, verify.json, capture/run.json and
+    closure.json), its render word, its engine reason and its whole
+    event log, plus one "recovered" event. Through HTTP, after the
+    manager forgets everything, /runs/{id} and /files still answer."""
+    run_id, state = captured
+    assert (manager.out_root / run_id / "status.json").is_file()
+    assert not (manager.out_root / run_id / "clip.mp4").exists()
+    back = recovered(run_id)
+    assert back is not None
+    assert back["status"] == "done" and back["detail"] == state["detail"]
+    assert back["capture"] == state["capture"]
+    assert back["render"] == "none" and back["clip"] is None
+    assert back["engine_reason"] == state["engine_reason"]
+    assert back["scene"] == state["scene"]
+    assert back["spec_digest"] == state["spec_digest"]
+    assert back["events"][:-1] == state["events"]
+    assert back["events"][-1]["status"] == "done"
+    assert back["events"][-1]["detail"] == "recovered after a server restart"
+
+    monkeypatch.setattr(manager, "runs", {})          # the restart
+    reply = client.get(f"/runs/{run_id}")
+    assert reply.status_code == 200
+    assert reply.json()["capture"] == state["capture"]
+    files = client.get(f"/runs/{run_id}/files").json()
+    names = [f["name"] for f in files["files"]]
+    assert "status.json" in names
+    entry = next(f for f in files["files"] if f["name"] == "status.json")
+    assert "status log" in entry["note"]
+    log = client.get(f"/runs/{run_id}/file/status.json").json()
+    assert log["status"] == "done" and log["events"] == state["events"]
+    assert [d["class"] for d in files["downloads"]] == ["manifest", "telemetry",
+                                                        "everything"]
+
+
+def test_a_finished_frames_run_survives_a_server_restart(frames_run,
+                                                          engine_client,
+                                                          monkeypatch):
+    """The frames run's card comes back whole: counts, verification,
+    closure, overlays, the engine passes and the by-product clip -- all
+    from files the page links."""
+    run_id, state = frames_run
+    back = recovered(run_id)
+    assert back is not None
+    assert back["status"] == "done" and back["detail"] == state["detail"]
+    assert back["capture"] == state["capture"]
+    for key in ("render_passes", "clip", "overlays", "overlay_s_per_frame",
+                "closure", "verification", "jsbsim_log", "jsbsim_model_loads"):
+        assert key in back["capture"], key
+    assert back["capture"]["rendered"] == 8 and back["capture"]["verified"] == 8
+    assert back["capture"]["clip"]["by_product_of"] == "camera0"
+    assert back["render"] == "frames"
+    assert back["clip"] == str(manager.out_root / run_id / "clip.mp4")
+    assert back["events"][:-1] == state["events"][-len(back["events"]) + 1:]
+    monkeypatch.setattr(manager, "runs", {})
+    assert engine_client.get(f"/runs/{run_id}").json()["capture"] == state["capture"]
+    assert engine_client.get(f"/runs/{run_id}/frames.zip").status_code == 200
+
+
+def test_a_refused_capture_survives_a_server_restart(client, monkeypatch):
+    """A refused capture wrote no manifest; its refusal (constraint,
+    message, value) is read back from status.json and the run is
+    "failed", as it was."""
+    from core.scenario.validate import Violation
+    import core.capture.validate as validate_module
+
+    monkeypatch.setattr(
+        validate_module, "track_violations",
+        lambda *a, **k: [Violation(
+            constraint="camera.terrain_clearance", message="inside the terrain",
+            actual=-3.0, limit=30.0, unit="m AGL")])
+    reply = client.post("/capture", json={"spec": compile_prompt(DEMO).to_dict()})
+    run_id = reply.json()["run_id"]
+    state = finished(client, run_id)
+    assert state["status"] == "failed"
+    back = recovered(run_id)
+    assert back["status"] == "failed" and back["detail"] == state["detail"]
+    assert back["capture"] == state["capture"]
+    assert back["capture"]["actual"] == -3.0
+
+
+def test_an_interrupted_run_stays_absent_and_a_legacy_clip_run_recovers(tmp_path):
+    """No status.json and no clip: the process died under the run and
+    there is no worker to resume -- absent, which the page reports. A
+    run from before status.json existed (clip.mp4 beside provenance)
+    recovers as it always did. No provenance at all: absent."""
+    from webapp.runs import RunManager
+
+    root = tmp_path / "runs"
+    fresh = RunManager(out_root=root)
+    interrupted = root / "abc123"
+    interrupted.mkdir(parents=True)
+    (interrupted / "provenance.json").write_text(json.dumps(
+        {"render": "none", "spec_digest": "x", "scene": {"kind": "flat"}}),
+        encoding="utf-8")
+    assert fresh.get("abc123") is None
+    legacy = root / "def456"
+    legacy.mkdir()
+    (legacy / "provenance.json").write_text(json.dumps(
+        {"render": "clip", "spec_digest": "y", "scene": {"kind": "flat"}}),
+        encoding="utf-8")
+    (legacy / "clip.mp4").write_bytes(b"mp4")
+    run = fresh.get("def456")
+    assert run is not None and run.status == "done"
+    assert run.detail == "clip ready (recovered after a server restart)"
+    assert run.clip == str(legacy / "clip.mp4") and run.render == "clip"
+    assert run.capture is None
+    bare = root / "0123abc"
+    bare.mkdir()
+    (bare / "clip.mp4").write_bytes(b"mp4")
+    assert fresh.get("0123abc") is None
+    assert fresh.get("../abc123") is None
+
+
+def test_a_terminal_push_writes_the_status_log_before_the_status_shows(tmp_path):
+    """status.json is on disk BEFORE run.status reads "done": a page
+    that sees "done" and lists the files sees status.json in the list,
+    and the bundle it then builds carries it."""
+    from webapp.runs import RunState
+
+    out = tmp_path / "run"
+    out.mkdir()
+    run = RunState(run_id="abc", out_dir=str(out))
+    run.push("capture", "solving")
+    assert not (out / "status.json").exists()
+    seen = []
+    original = run.write_status
+
+    def spy(*args, **kwargs):
+        seen.append(run.status)          # the status as it was when written
+        original(*args, **kwargs)
+
+    run.write_status = spy
+    run.push("done", "no pixels")
+    assert seen == ["capture"]
+    log = json.loads((out / "status.json").read_text(encoding="utf-8"))
+    assert log["status"] == "done" and log["detail"] == "no pixels"
+    assert [e["status"] for e in log["events"]] == ["capture", "done"]
+    assert log["capture_refused"] is None and log["closure_refused"] is None
+    # No out_dir (a run driven directly): nothing written, nothing raised.
+    RunState(run_id="def").push("done", "x")

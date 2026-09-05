@@ -169,12 +169,38 @@ class RunState:
     #: engine was available: the page labels a headless run's previews
     #: as the fallback with THIS reason. Recorded in provenance.json.
     engine_reason: Optional[str] = None
+    #: The run directory, when the manager owns the run: a terminal push
+    #: writes status.json there BEFORE the status becomes visible, so a
+    #: page that sees "done" and lists the files sees status.json too.
+    out_dir: Optional[str] = None
 
     def push(self, status: str, detail: str = "") -> None:
-        self.status = status
-        self.detail = detail
         self.events.append({"t": time.time(), "status": status,
                             "detail": detail})
+        if status in ("done", "failed") and self.out_dir:
+            self.write_status(Path(self.out_dir), status, detail)
+        self.status = status
+        self.detail = detail
+
+    def write_status(self, out: Path, status: Optional[str] = None,
+                     detail: Optional[str] = None) -> None:
+        """<run>/status.json: the run's terminal verdict and its whole
+        event log (plus a capture or closure refusal, which no capture
+        file records). This is what RunManager._recover_from_disk reads
+        back after a server restart; a run the process died under never
+        gets one and stays honestly absent."""
+        if not Path(out).is_dir():
+            return
+        capture = self.capture or {}
+        closure = capture.get("closure") or {}
+        (Path(out) / "status.json").write_text(json.dumps({
+            "status": status if status is not None else self.status,
+            "detail": detail if detail is not None else self.detail,
+            "events": self.events, "started": self.started,
+            "finished": time.time(),
+            "capture_refused": capture if capture.get("refused") else None,
+            "closure_refused": closure if closure.get("refused") else None,
+        }, indent=1), encoding="utf-8")
 
     def as_dict(self) -> Dict:
         return {"run_id": self.run_id, "status": self.status,
@@ -1534,33 +1560,65 @@ class RunManager:
         return self._recover_from_disk(run_id)
 
     def _recover_from_disk(self, run_id: str) -> Optional[RunState]:
-        """A COMPLETED run outlives the process that ran it.
+        """A FINISHED run outlives the process that ran it.
 
         A server restart kills the manager's in-memory state; without this,
-        a finished clip on disk becomes unreachable and the page polls a
+        a finished run on disk becomes unreachable and the page polls a
         run the new process never heard of (measured: a restart landed
-        mid-run and orphaned it). Only runs with a finished clip are
-        reconstructed -- an interrupted run has no worker thread to resume
-        and stays absent, which the page reports honestly.
+        mid-run and orphaned it). Recovery is keyed on provenance.json
+        (the render word, the scene, the digests) and status.json (the
+        terminal verdict and the event log): a headless run recovers as
+        readily as a clip run, and the capture card is rebuilt from the
+        capture files the page links (webapp.capture.
+        recover_capture_summary), so it shows only numbers a file backs.
+        A run written before status.json existed recovers from its
+        clip.mp4 alone, as before. An interrupted run (no status.json, no
+        clip) has no worker thread to resume and stays absent, which the
+        page reports honestly.
         """
+        from webapp.capture import recover_capture_summary
+
         if not run_id.isalnum():          # run ids are hex; no path tricks
             return None
         out = self.out_root / run_id
-        clip = out / "clip.mp4"
-        if not clip.is_file():
-            return None
-        run = RunState(run_id=run_id, status="done",
-                       detail="clip ready (recovered after a server restart)")
-        run.clip = str(clip)
         provenance_path = out / "provenance.json"
-        if provenance_path.is_file():
-            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
-            run.spec_digest = provenance.get("spec_digest", "")
-            run.scene = provenance.get("scene") or {}
-            run.reference = provenance.get("reference_speeds")
-            run.conditions = provenance.get("conditions") or {}
-            run.render = provenance.get("render")
-        run.events.append({"t": run.started, "status": "done",
+        status_path = out / "status.json"
+        clip = out / "clip.mp4"
+        if not provenance_path.is_file():
+            return None
+        status = None
+        if status_path.is_file():
+            try:
+                status = json.loads(status_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                status = None
+        if status is None and not clip.is_file():
+            return None
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        if status is not None:
+            run = RunState(run_id=run_id, status=str(status.get("status", "done")),
+                           detail=str(status.get("detail", "")),
+                           started=float(status.get("started", time.time())))
+            run.events = list(status.get("events") or [])
+        else:
+            run = RunState(run_id=run_id, status="done",
+                           detail="clip ready (recovered after a server "
+                                  "restart)")
+        if clip.is_file():
+            run.clip = str(clip)
+        run.spec_digest = provenance.get("spec_digest", "")
+        run.scene = provenance.get("scene") or {}
+        run.reference = provenance.get("reference_speeds")
+        run.conditions = provenance.get("conditions") or {}
+        run.render = provenance.get("render")
+        run.engine_reason = provenance.get("engine_unavailable_reason")
+        run.capture = recover_capture_summary(out)
+        if status is not None:
+            if status.get("capture_refused"):
+                run.capture = dict(status["capture_refused"])
+            elif status.get("closure_refused") and run.capture is not None:
+                run.capture["closure"] = dict(status["closure_refused"])
+        run.events.append({"t": time.time(), "status": run.status,
                            "detail": "recovered after a server restart"})
         self.runs[run_id] = run
         return run
@@ -1607,6 +1665,7 @@ class RunManager:
             run = RunState(run_id=uuid.uuid4().hex[:12],
                            spec_digest=spec.digest(), render=render,
                            preview_scale=int(preview_scale))
+            run.out_dir = str(self.out_root / run.run_id)
             self.runs[run.run_id] = run
             self._active = run.run_id
         thread = threading.Thread(
@@ -1643,6 +1702,7 @@ class RunManager:
                            spec_digest=spec.digest(), render="none",
                            preview_scale=int(preview_scale),
                            engine_reason=ue_unavailable_reason())
+            run.out_dir = str(self.out_root / run.run_id)
             self.runs[run.run_id] = run
             self._active = run.run_id
         thread = threading.Thread(
@@ -1808,6 +1868,10 @@ class RunManager:
                 (flow or self._render_flow)(run, spec, provenance)
         except Exception as exc:   # surfaced to the UI, never swallowed
             run.push("failed", f"{type(exc).__name__}: {exc}")
+        # A run whose terminal push wrote status.json is already on disk;
+        # one constructed without out_dir gets it here.
+        if run.status in ("done", "failed") and not (out / "status.json").is_file():
+            run.write_status(out)
 
     def _render_flow(self, run: RunState, spec: ScenarioSpec,
                      provenance: Dict, render: str = "clip") -> None:

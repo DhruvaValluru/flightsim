@@ -898,9 +898,9 @@ mutate webapp/server.py \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
 mutate webapp/runs.py \
-    '            run.push("capture", f"[{exc.constraint}] {exc.message}")
+    '            run.push("capture", exc.render())
             return False' \
-    '            run.push("capture", f"[{exc.constraint}] {exc.message}")
+    '            run.push("capture", exc.render())
             return True  # MUTATED: a refused capture reports success' \
     "a refused capture never reports a successful run" \
     tests/test_webapp_capture.py || failures=$((failures+1))
@@ -2423,6 +2423,46 @@ mutate webapp/static/index.html \
     '  if (cl.duration_s == null) return settled;' \
     '  return settled;  // MUTATED: the graded window is never named' \
     "page round 1: the closure heading names the graded window and its length" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+# -- Page round 1: a finished run outlives the server process ---------------
+
+mutate webapp/runs.py \
+    '        if status is None and not clip.is_file():
+            return None' \
+    '        if not clip.is_file():  # MUTATED: recovery keyed on the clip again
+            return None' \
+    "page round 1: recovery is keyed on provenance and status, not on a clip" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '        run.capture = recover_capture_summary(out)' \
+    '        run.capture = None  # MUTATED: a recovered run loses its capture card' \
+    "page round 1: a recovered run's capture card is rebuilt from the capture files" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    '    closure = _read_json(capture_dir / "closure.json")
+    if closure is not None:' \
+    '    closure = _read_json(capture_dir / "closure.json")
+    if False:  # MUTATED: the closure report is not read back' \
+    "page round 1: the recovered card carries closure.json" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    '    counts = _counts([(camera_id, lengths[camera_id]) for camera_id in order],
+                     verdict)' \
+    '    counts = _counts([(camera_id, lengths[camera_id]) for camera_id in order],
+                     {})  # MUTATED: rendered and verified not read from verify.json' \
+    "page round 1: the recovered counts come from verify.json's engine-parity data" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '        if status in ("done", "failed") and self.out_dir:
+            self.write_status(Path(self.out_dir), status, detail)' \
+    '        if False:  # MUTATED: status.json written only after the status shows
+            self.write_status(Path(self.out_dir), status, detail)' \
+    "page round 1: a terminal push writes status.json before the status is visible" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
 echo

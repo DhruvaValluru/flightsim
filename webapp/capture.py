@@ -214,17 +214,24 @@ def camera_counts(schedules, verdict: Dict) -> List[Dict]:
     -- so the page never shows a count it cannot back with a file. A
     headless run reports rendered 0, verified 0. ``frames`` repeats
     scheduled for the page's existing readers."""
+    return _counts([(s.camera_id, len(s)) for s in schedules], verdict)
+
+
+def _counts(scheduled, verdict: Dict) -> List[Dict]:
+    """camera_counts' arithmetic over (camera_id, scheduled) pairs --
+    the same for a live schedule and for a manifest read back from
+    disk, so a recovered card cannot count differently."""
     engine = {}
     for check in verdict.get("checks", []):
         if check.get("name") == "engine_parity":
             engine = (check.get("data") or {}).get("cameras") or {}
     counts = []
-    for schedule in schedules:
-        per = engine.get(schedule.camera_id, {})
+    for camera_id, length in scheduled:
+        per = engine.get(camera_id, {})
         counts.append({
-            "camera_id": schedule.camera_id,
-            "frames": len(schedule),
-            "scheduled": len(schedule),
+            "camera_id": camera_id,
+            "frames": int(length),
+            "scheduled": int(length),
             "rendered": int(per.get("rendered", 0)),
             "verified": int(per.get("verified", 0)),
         })
@@ -264,6 +271,11 @@ def refresh_after_render(outcome: "CaptureOutcome",
     outcome.summary["overlays"] = len(overlays)
     outcome.summary["overlay_s_per_frame"] = float(
         getattr(overlays, "seconds_per_frame", 0.0))
+    # Recorded beside the previews' record, so a card rebuilt after a
+    # server restart shows the same overlay count and timing.
+    _update_run_record(outcome.capture_dir, overlays={
+        "count": len(overlays),
+        "s_per_frame": outcome.summary["overlay_s_per_frame"]})
     report(f"{len(overlays)} overlay(s): the manifest's aircraft box, "
            f"ground and horizon reprojected over the rendered frames "
            f"under capture/overlays")
@@ -389,6 +401,10 @@ def capture_run(spec, out: Path, scene: Dict,
         "track_source": str(previews.track_source),
         "contact_sheets": contact_sheets,
     }
+    # Where JSBSim's console went and how many loads: the summary's own
+    # two facts that live nowhere else, kept so the card survives a
+    # server restart with the same numbers.
+    run_record["jsbsim"] = {"log": log_words, "model_loads": int(routed)}
     run_json.write_text(json.dumps(run_record, indent=1), encoding="utf-8")
     # Scheduled, in that word: nothing has been rendered yet, and a
     # preview is not a capture.
@@ -435,6 +451,97 @@ def capture_run(spec, out: Path, scene: Dict,
                           manifest=manifest, heightfield=heightfield,
                           terrain_elevation_m=terrain_datum,
                           telemetry=columns)
+
+
+def _update_run_record(capture_dir: Path, **fields) -> None:
+    """Merge ``fields`` into capture/run.json (created if absent)."""
+    path = Path(capture_dir) / "run.json"
+    record = {}
+    if path.is_file():
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            record = {}
+    record.update(fields)
+    path.write_text(json.dumps(record, indent=1), encoding="utf-8")
+
+
+def _read_json(path: Path) -> Optional[Dict]:
+    path = Path(path)
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def recover_capture_summary(out_dir: Path) -> Optional[Dict]:
+    """run.capture rebuilt from the files a finished run left: the
+    manifest (scheduled per camera), verify.json (the verification and
+    the rendered/verified counts, through the same arithmetic the live
+    run used), capture/run.json (previews, overlays, the JSBSim log),
+    closure.json and provenance.json (the engine passes and the
+    by-product clip). Every number on a recovered card is therefore one
+    of the files the page links. None when the manifest or verify.json
+    is missing -- a refused capture wrote neither."""
+    out_dir = Path(out_dir)
+    capture_dir = out_dir / "capture"
+    manifest = _read_json(capture_dir / "capture_manifest.json")
+    verdict = _read_json(capture_dir / "verify.json")
+    if manifest is None or verdict is None:
+        return None
+    order = [c.get("camera_id") for c in manifest.get("cameras", [])]
+    lengths: Dict[str, int] = {camera_id: 0 for camera_id in order}
+    for record in manifest.get("frames", []):
+        camera_id = record.get("camera_id")
+        if camera_id not in lengths:
+            order.append(camera_id)
+            lengths[camera_id] = 0
+        lengths[camera_id] += 1
+    counts = _counts([(camera_id, lengths[camera_id]) for camera_id in order],
+                     verdict)
+    total = sum(lengths.values())
+    record = _read_json(capture_dir / "run.json") or {}
+    previews = record.get("previews") or {}
+    preview_count = int(previews.get("count", 0))
+    capped = preview_count < total
+    jsbsim = record.get("jsbsim") or {}
+    summary = {
+        "frames": total,
+        "scheduled": total,
+        "rendered": sum(c["rendered"] for c in counts),
+        "verified": sum(c["verified"] for c in counts),
+        "cameras": counts,
+        "previews": preview_count,
+        "previews_capped": capped,
+        "preview_cap": MAX_PREVIEWS if capped else None,
+        "preview_scale": int(previews.get("scale", 1)),
+        "preview_resolution": previews.get("resolution"),
+        "preview_s_per_frame": float(previews.get("s_per_frame", 0.0)),
+        "preview_track_source": str(previews.get("track_source", "")),
+        "contact_sheets": previews.get("contact_sheets") or {},
+        "verification": verdict,
+        "jsbsim_log": jsbsim.get("log"),
+        "jsbsim_model_loads": jsbsim.get("model_loads"),
+    }
+    closure = _read_json(capture_dir / "closure.json")
+    if closure is not None:
+        summary["closure"] = closure
+    overlays = record.get("overlays")
+    if overlays is not None:
+        summary["overlays"] = int(overlays.get("count", 0))
+        summary["overlay_s_per_frame"] = float(overlays.get("s_per_frame", 0.0))
+    provenance = _read_json(out_dir / "provenance.json") or {}
+    passes = provenance.get("render_passes")
+    if passes is not None:
+        summary["render_passes"] = passes
+        summary["clip"] = {
+            "encoded": bool(provenance.get("clip_encoded")),
+            "seconds": provenance.get("clip_seconds"),
+            "by_product_of": passes[0]["camera_id"] if passes else None,
+        }
+    return summary
 
 
 def verification_verdict(verification) -> Dict:
@@ -569,6 +676,9 @@ ARTIFACT_NOTES = {
         "the headless flight the manifest describes",
     "capture/scenario.yaml": "the spec as captured",
     "capture/run.json": "spec and output digests of the capture run",
+    "status.json":
+        "the run's own status log: every status line in order, and the "
+        "verdict it ended on (read back after a server restart)",
     "jsbsim.log":
         "JSBSim's own console for the whole run (planning, the capture and "
         "closure flights, the card), one '# load N:' stamp per model "
@@ -603,7 +713,8 @@ def run_artifacts(out_dir: Path) -> List[Dict]:
     entries: List[Dict] = []
     for name in ("clip.mp4", "card.json", "provenance.json",
                  "scenario.yaml", "telemetry.json", "effect.json",
-                 "render.log", "jsbsim.log", "capture/capture_manifest.json",
+                 "render.log", "status.json", "jsbsim.log",
+                 "capture/capture_manifest.json",
                  "capture/verify.json", "capture/closure.json",
                  "capture/telemetry.json",
                  "capture/scenario.yaml", "capture/run.json",
