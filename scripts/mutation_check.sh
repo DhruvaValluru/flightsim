@@ -2089,6 +2089,23 @@ mutate flightsim/report.py \
     "commands round 2: an aircraft-aimed camera's off-aim column is its measured distance from the centre" \
     tests/test_camera_cli.py || failures=$((failures+1))
 
+# A stale NUMBER in the document (one measured value off by one in its
+# last digit) must fail the freshness test on the platform it was
+# measured on: the comparison is exact there, not a masked shape.
+mutate docs/CAMERA_PHASE1_REPORT.md \
+    '  geometry_recovery       FAIL      124.7076 px' \
+    '  geometry_recovery       FAIL      124.7075 px' \
+    "commands round 2: a stale measured number in the document fails the freshness test on the measured platform" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate scripts/examples_expected.py \
+    '    if not exact:
+        masked = _HEX.sub("<hex>", masked)' \
+    '    if True:  # MUTATED: digests and numbers are masked on every platform
+        masked = _HEX.sub("<hex>", masked)' \
+    "commands round 2: the freshness comparison is exact on the measured platform, numbers and digests included" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

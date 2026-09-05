@@ -1500,10 +1500,13 @@ def test_a_missing_spec_is_usage_and_the_usage_line_prints_once(tmp_path,
 def test_the_documents_expected_output_matches_a_fresh_run(tmp_path):
     """docs/CAMERA_PHASE1_REPORT.md carries every example's output
     verbatim from a dated run (scripts/examples_expected.py). A fresh
-    run here must reproduce each block's SHAPE line for line -- the
-    words, the columns, the check names and statuses, the exit codes --
-    with numbers, digests and camera ids masked, so a stale document
-    fails this test while timings and float noise do not."""
+    run here must reproduce each block: on the platform the document
+    was measured on EXACTLY -- every digest, check number, pixel
+    coordinate and camera position at its printed precision, only the
+    wall-clock seconds per frame and the machine-worded engine line
+    masked -- and on another platform (the CI legs, whose JSBSim build
+    differs by bits) with numbers and digests masked as well, so the
+    words, columns, check names, statuses and exit codes still count."""
     import importlib.util
 
     spec = importlib.util.spec_from_file_location(
@@ -1511,16 +1514,30 @@ def test_the_documents_expected_output_matches_a_fresh_run(tmp_path):
         Path(__file__).resolve().parents[1] / "scripts" / "examples_expected.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    doc = module.doc_blocks(module.DOC.read_text(encoding="utf-8"))
+    doc_text = module.DOC.read_text(encoding="utf-8")
+    doc = module.doc_blocks(doc_text)
+    exact = module.measured_platform(doc_text) == module.this_platform()
+    assert module.measured_platform(doc_text) is not None
     fresh = module.generate(tmp_path / "runs_root")
     assert [b["command"] for b in doc] == [r["command"] for r in fresh]
     assert len(doc) == len(module.COMMANDS) == 13
     for expected, actual in zip(doc, fresh):
         assert expected["code"] == actual["code"], expected["command"]
-        want = module.shape(expected["text"])
-        got = module.shape(actual["text"])
-        assert want == got, (expected["command"],
+        want = module.shape(expected["text"], exact=exact)
+        got = module.shape(actual["text"], exact=exact)
+        assert want == got, (expected["command"], "exact" if exact else
+                             "masked (another platform)",
                              [pair for pair in zip(want, got)
                               if pair[0] != pair[1]][:3])
+    if exact:
+        # The exact comparison really compares numbers: a digest and a
+        # measured value are in the compared text verbatim.
+        text = "\n".join(module.shape(doc[6]["text"], exact=True))
+        assert "124.7076 px" in text
+        assert re.search(r"^spec +[0-9a-f]{16} +simulation [0-9a-f]{16}", text,
+                         re.M)
+        first = "\n".join(module.shape(doc[0]["text"], exact=True))
+        assert re.search(r"\d+\.\d+ s/frame", doc[0]["text"])
+        assert "<s/frame>" in first and not re.search(r"\d s/frame", first)
     # The blocks say what they are: exit codes 0/0/0/0/0/2 then seven 1s.
     assert [b["code"] for b in doc] == [0, 0, 0, 0, 0, 2, 1, 1, 1, 1, 1, 1, 1]

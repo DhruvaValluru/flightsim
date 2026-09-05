@@ -18,9 +18,16 @@ measured on.
 ``docs/CAMERA_PHASE1_REPORT.md`` holds the section between the
 markers ``<!-- examples_expected: begin -->`` and ``<!-- examples_expected:
 end -->``; ``--write`` replaces it. ``tests/test_camera_cli.py`` regenerates
-the blocks and compares their SHAPE (:func:`shape`: numbers, camera ids
-and paths masked, so timings and float noise do not count) with the
-document's, so the document cannot go stale without a test saying so.
+the blocks and compares them with the document's (:func:`shape`): on
+the platform the section was measured on, EXACTLY -- every digest,
+check number, pixel coordinate and camera position at its printed
+precision, with only the wall-clock seconds per frame and the
+machine-worded engine-availability line masked; on another platform
+(the CI legs) with digests and numbers masked as well, because the
+JSBSim build differs by bits there (measured on the CI streams:
+4.1e-13 px here against 1.61e-13 px elsewhere for the same check). So
+the document cannot go stale without a test saying so, and a stale
+number is stale on the platform it was measured on.
 """
 
 from __future__ import annotations
@@ -157,8 +164,13 @@ def render(records: List[Dict], when: Optional[str] = None) -> str:
              f"wall times are this machine's, previews at full "
              f"resolution). `tests/test_camera_cli.py::"
              f"test_the_documents_expected_output_matches_a_fresh_run` "
-             f"regenerates the blocks and compares their shape with "
-             f"these.", ""]
+             f"regenerates the blocks and compares them with these: on "
+             f"{platform.system()} {platform.machine()} exactly -- every "
+             f"digest, check number, pixel coordinate and camera position "
+             f"at its printed precision, only the wall-clock seconds per "
+             f"frame and the engine-availability line masked; on another "
+             f"platform with digests and numbers masked too, because the "
+             f"JSBSim build differs by bits there.", ""]
     for r in records:
         lines.append(f"#### {r['label']}")
         lines.append("")
@@ -186,29 +198,51 @@ _ENGINE_LINE = re.compile(
     r"^(?:engine absent: .*; frames not rendered .*"
     r"|render: none \(headless by choice.*)$")
 _GAP = re.compile(r" {2,}")
+#: The one wall-clock number inside a block: the previews' measured
+#: seconds per frame.
+_WALL = re.compile(r"\d+\.\d+ s/frame")
+_MEASURED_ON = re.compile(r"Measured \d{4}-\d{2}-\d{2} on (\S+) (\S+), Python")
 
 
-def shape(text: str) -> List[str]:
-    """The text with every number, digest and camera id masked: what a
-    fresh run must reproduce line for line (timings, float noise and
-    the worst frame's identity do not count; the words, the columns,
-    the check names, the statuses and the line count do).
+def measured_platform(doc_text: str) -> Optional[str]:
+    """"Linux x86_64": the platform the document's section was measured
+    on, from its first line; None when the section carries none."""
+    match = _MEASURED_ON.search(doc_text)
+    return f"{match.group(1)} {match.group(2)}" if match else None
 
-    Two things are machine-dependent and masked as well: the engine-
-    availability line (its reason is worded per platform) becomes
-    ``<engine availability: machine-dependent>``, and runs of two or
-    more spaces collapse to two, so a column keeps its place in the
-    row while a float's width (``4.1e-13`` here, ``1.61e-13`` on
-    another platform) does not move the column after it."""
-    masked = _HEX.sub("<hex>", text)
-    masked = _CAMERA.sub("<cam>", masked)
-    masked = _NUMBER.sub("#", masked)
+
+def this_platform() -> str:
+    return f"{platform.system()} {platform.machine()}"
+
+
+def shape(text: str, exact: bool = True) -> List[str]:
+    """What a fresh run must reproduce line for line.
+
+    ``exact`` (the document's own platform): the text with ONLY the
+    wall-clock seconds per frame and the machine-worded engine-
+    availability line masked -- every digest, check number, pixel
+    coordinate and camera position must match at its printed
+    precision, and a stale one fails.
+
+    Not exact (another platform): every number, digest and camera id
+    masked as well, and runs of two or more spaces collapsed to two so
+    a float's width (``4.1e-13`` here, ``1.61e-13`` on another
+    platform) does not move the column after it -- the words, the
+    columns, the check names, the statuses and the line count still
+    count. The JSBSim build differs by bits across platforms and so do
+    the digests and the last digits; the document says which platform
+    its numbers are from."""
+    masked = _WALL.sub("<s/frame>", text)
+    if not exact:
+        masked = _HEX.sub("<hex>", masked)
+        masked = _CAMERA.sub("<cam>", masked)
+        masked = _NUMBER.sub("#", masked)
     lines = []
     for line in masked.rstrip("\n").splitlines():
         line = line.rstrip()
         if _ENGINE_LINE.match(line):
             line = "<engine availability: machine-dependent>"
-        lines.append(_GAP.sub("  ", line))
+        lines.append(line if exact else _GAP.sub("  ", line))
     return lines
 
 

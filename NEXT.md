@@ -3,6 +3,43 @@
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
 
+**Camera Phase 1, commands round 2 (2026-09-05, the judge's eight ranked
+gaps against bar sections 5 and 6, all eight closed; five commits;
+docs/CAMERA_PHASE1_REPORT.md "How to demonstrate" and "Known
+limitations" are current).** The verifier READS THE FLIGHT:
+core/capture/verify.py flight_fidelity (every record's t_s, altitude,
+attitude and pyproj-projected north/east against telemetry.json at its
+sample_index, tolerances 1e-9 s / 1e-6 m / 1e-6 deg; telemetry.json's
+digest = output_digest) and schedule_fidelity (the schedule recomputed
+from scenario.yaml's cameras over the telemetry, instant for instant);
+both SKIPPED by name when the file is not beside the manifest (a
+manifest-only directory is 5/5 + 2 skipped, the CLI runs 7/7). Seven
+--corrupt kinds (clock, flight, schedule added); the copy is the
+SIBLING <run>_corrupt_<kind>/ or --corrupt-dir, never inside the run.
+render() prints a PASS once (the table); "detail:" only for rows that
+did not PASS. The flight line states the telemetry window ("telemetry
+t 4.900..34.858 s (280 samples, 0.108 s apart), the clock at 4.900 s
+when the record began (trim and engine start)"); --brief words
+distance/proximity/event schedules from the trigger. A missing spec is
+USAGE 3; the USAGE line prints once (stdout). The page run enters
+<run>/jsbsim.log around the whole flow (webapp/runs.py _execute), a
+direct capture_run opens capture/jsbsim.log; every routed load is
+stamped "# load N: FlightDynamics(X) called from module.function".
+The header states the aim reference per preset ("aim body axis" +
+the cg pixel for a cockpit) and the schedule table has an "off-aim
+px" column. scripts/examples_expected.py compares the doc blocks
+EXACTLY on the measured platform (only "s/frame" and the engine line
+masked), masked on other platforms. Gotchas: (a) tests that pinned
+"[PASS] name" lines now assert the table row and "[PASS]" ABSENT;
+(b) verification_rows() in the CLI tests ends the table at "detail:"
+OR the first line not indented two spaces (a report with every row
+PASS has no detail block); (c) the request handler's pre-flight
+planning (/capture, /run) still constructs FDMs before a run exists
+and prints to the server console -- stated in Known Limitations, not
+routed; (d) the doc-staleness guard target is now "(7/7 checks; ...";
+(e) 24 new guards under "commands round 2" (plus three round-1 guards repointed), every one verified firing
+by subset (never run pytest while a subset runs).
+
 **Camera Phase 1, commands round 1 (2026-09-05, the judge's ten ranked
 gaps against bar sections 5 and 6, closed in order;
 docs/CAMERA_PHASE1_REPORT.md "How to demonstrate" is current).**
