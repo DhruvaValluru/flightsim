@@ -20,7 +20,8 @@ jsbsim_console(path) around the run, captured_console() around each
 FGFDMExec construction in fdm.py and card.py) to <out>/jsbsim.log and
 counted ("14 model loads"); the sink refuses os.devnull. verify
 --corrupt {quaternion|aircraft|time|count} copies the manifest to
-<run>/corrupt_<kind>/ and must exit 1 with the named check FAILED.
+<run>/corrupt_<kind>/ (round 2: the SIBLING <run>_corrupt_<kind>/) and
+must exit 1 with the named check FAILED.
 examples/cameras_multi_cockpit.yaml is the committed alignment pair
 (keep `name: cameras_multi`: the name is in the simulation digest).
 scripts/examples_expected.py --write regenerates the doc's verbatim

@@ -953,8 +953,8 @@ CORRUPT_FAILS_EXACTLY = {
     ("aircraft", "cross_view_consistency",
      "24 two-view instants; worst sample 0 t=0.008 s (chase0 #0 with tower0 #0)"),
     ("time", "temporal_alignment",
-     "25 instants in corrupt_time vs 24 in report0; only in corrupt_time: "
-     "t=1.616667 s"),
+     "25 instants in report0_corrupt_time vs 24 in report0; only in "
+     "report0_corrupt_time: t=1.616667 s"),
     ("count", "count_exactness", "chase0 23/24, tower0 24/24"),
     ("clock", "flight_fidelity",
      re.compile(r"instant differs from the telemetry by 0\.500000 s at "
@@ -975,6 +975,8 @@ def test_corrupt_fails_the_named_check_with_exit_1(report_run, kind, check,
     """--corrupt KIND: one named edit on a copy, the same verifier, and
     the named check FAILS with its offender in the WHERE column."""
     out, _ = report_run
+    before = sorted(p.name for p in out.iterdir())
+    copy = out.parent / f"{out.name}_corrupt_{kind}"
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         code = verify_main([str(out), "--corrupt", kind])
@@ -982,7 +984,7 @@ def test_corrupt_fails_the_named_check_with_exit_1(report_run, kind, check,
     assert code == 1, text
     lines = text.splitlines()
     assert lines[0].startswith(f"corrupt {kind}: manifest copied to "
-                               f"{out / ('corrupt_' + kind)}; corrupted ")
+                               f"{copy}; corrupted ")
     assert lines[1] == f"  expected: [FAIL] {check}, exit 1"
     rows = verification_rows(text)
     assert rows[check][0] == "FAIL"
@@ -1006,9 +1008,14 @@ def test_corrupt_fails_the_named_check_with_exit_1(report_run, kind, check,
     assert lines[-1].startswith(
         f"FAILED verification: as expected for --corrupt {kind}, {check} "
         f"FAILED" + (f" (also: {', '.join(also)})" if also else "") + "; ")
-    assert (out / f"corrupt_{kind}" / "capture_manifest.json").is_file()
-    assert (out / f"corrupt_{kind}" / "verify.json").is_file()
-    # The original is untouched: it still verifies.
+    assert (copy / "capture_manifest.json").is_file()
+    assert (copy / "verify.json").is_file()
+    assert lines[-1].endswith(f"; {copy / 'capture_manifest.json'} graded, "
+                              f"report {copy / 'verify.json'}")
+    # The original is untouched -- the copy is a SIBLING, the run's own
+    # tree holds exactly what capture wrote -- and it still verifies.
+    assert sorted(p.name for p in out.iterdir()) == before
+    assert not any(p.name.startswith("corrupt_") for p in out.iterdir())
     with contextlib.redirect_stdout(io.StringIO()):
         assert verify_main([str(out)]) == 0
 
@@ -1106,7 +1113,7 @@ def test_the_verifier_reads_the_flight_not_only_the_manifest(report_run,
         verify_main([str(out), "--corrupt", "time"])
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
-        assert verify_main([str(out / "corrupt_time")]) == 1
+        assert verify_main([str(out.parent / f"{out.name}_corrupt_time")]) == 1
     rows = verification_rows(buffer.getvalue())
     assert rows["flight_fidelity"][0] == "FAIL"
     assert "temporal_alignment" not in rows
@@ -1151,6 +1158,33 @@ def test_a_corruption_the_verifier_misses_is_unexpected_not_caught(
         "UNEXPECTED: --corrupt count did not fail count_exactness (FAILED: "
         "none); the verifier cannot be trusted to catch this corruption")
     assert "FAILED verification: as expected" not in text
+
+
+def test_corrupt_dir_is_honoured_and_never_inside_the_run(report_run,
+                                                           tmp_path):
+    out, _ = report_run
+    elsewhere = tmp_path / "elsewhere" / "copy"
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(out), "--corrupt", "count",
+                            "--corrupt-dir", str(elsewhere)]) == 1
+    text = buffer.getvalue()
+    assert text.splitlines()[0].startswith(
+        f"corrupt count: manifest copied to {elsewhere}; ")
+    assert (elsewhere / "capture_manifest.json").is_file()
+    assert (elsewhere / "telemetry.json").is_file()
+    assert (elsewhere / "scenario.yaml").is_file()
+    assert (elsewhere / "verify.json").is_file()
+    assert not (out / "corrupt_count").exists()
+    # A copy inside the run is refused by usage: the run stays what
+    # capture wrote.
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        assert verify_main([str(out), "--corrupt", "count",
+                            "--corrupt-dir", str(out / "corrupt_count")]) == 3
+    assert buffer.getvalue().splitlines()[-1].startswith(
+        f"USAGE: --corrupt-dir {out / 'corrupt_count'} lies inside the run ")
+    assert not (out / "corrupt_count").exists()
 
 
 def test_corrupt_aircraft_needs_two_cameras(tmp_path):
@@ -1216,7 +1250,7 @@ def test_exit_codes_share_one_table_and_the_verdict_line_names_them(
         assert verify_main([str(out), "--corrupt", "count"]) == 1
     assert buffer.getvalue().splitlines()[-1].startswith("FAILED verification:")
     with contextlib.redirect_stdout(io.StringIO()):
-        assert verify_main([str(out / "corrupt_count")]) == 1
+        assert verify_main([str(out.parent / f"{out.name}_corrupt_count")]) == 1
     # 2: refused by name, before anything is produced.
     code, refused = capture_text([str(EXAMPLES / "cameras_refusal.yaml"),
                                   "--out", str(tmp_path / "refused"),

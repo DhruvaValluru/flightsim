@@ -2012,6 +2012,19 @@ mutate flightsim/verify.py \
     "commands round 2: --corrupt schedule really moves an instant off the spec's schedule, and the verifier catches it" \
     tests/test_camera_cli.py || failures=$((failures+1))
 
+mutate flightsim/verify.py \
+    '    return run_dir.parent / f"{run_dir.name}_corrupt_{kind}"' \
+    '    return run_dir / f"corrupt_{kind}"  # MUTATED: the corrupt copy lands inside the run' \
+    "commands round 2: the corrupt copy is a sibling of the run, never inside it" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/verify.py \
+    '    if copy_dir.resolve() == Path(run_dir).resolve() or \
+            Path(run_dir).resolve() in copy_dir.resolve().parents:' \
+    '    if False:  # MUTATED: a --corrupt-dir inside the run is accepted' \
+    "commands round 2: a --corrupt-dir inside the run is refused as USAGE" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

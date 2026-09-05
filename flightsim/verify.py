@@ -26,10 +26,13 @@ names the artefacts (the manifest graded, verify.json written beside
 it). ``--json`` prints the same document as data. No FDM is ever
 constructed here, so nothing of JSBSim's reaches stdout.
 
-``--corrupt KIND`` is the instructor's switch: the manifest is copied
-to ``<run>/corrupt_<kind>/`` and ONE named edit applied (stated in the
-output), then the same verifier grades the copy -- and must FAIL the
-named check with exit 1:
+``--corrupt KIND`` is the instructor's switch: the manifest (with
+telemetry.json and scenario.yaml) is copied to a SIBLING directory,
+``<run>_corrupt_<kind>/`` (or ``--corrupt-dir DIR``) -- never inside the
+run, which stays exactly what capture wrote, so nothing that zips,
+lists or serves the run can pick a corrupted copy up -- and ONE named
+edit applied (stated in the output), then the same verifier grades the
+copy -- and must FAIL the named check with exit 1:
 
 * ``quaternion`` -- the first camera's frame 3: quaternion y += 0.05
   (geometry_recovery: the quaternion and Euler encodings no longer
@@ -104,9 +107,14 @@ def build_parser() -> ReportParser:
                              "different cameras, for the temporal-"
                              "alignment check")
     parser.add_argument("--corrupt", choices=CORRUPT_KINDS, default=None,
-                        help="copy the manifest to <run>/corrupt_<kind>/, "
-                             "apply ONE named edit and verify the copy: "
-                             "the named check must FAIL (exit 1)")
+                        help="copy the manifest (with telemetry.json and "
+                             "scenario.yaml) to a sibling directory "
+                             "<run>_corrupt_<kind>/, apply ONE named edit "
+                             "and verify the copy: the named check must "
+                             "FAIL (exit 1); the run itself is untouched")
+    parser.add_argument("--corrupt-dir", default=None, metavar="DIR",
+                        help="where --corrupt writes its copy (default: "
+                             "the sibling <run>_corrupt_<kind>/)")
     add_common_arguments(parser)
     return parser
 
@@ -115,11 +123,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     return run_command(_verify, build_parser(), argv, success_word="verified")
 
 
-def corrupt_manifest(run_dir: Path, kind: str) -> Tuple[Path, str, Dict]:
-    """Copy ``run_dir``'s manifest to ``run_dir/corrupt_<kind>/`` with
-    ONE named edit applied. Returns (copy_dir, the edit in words, the
-    edit as data). Refuses by usage when the run cannot carry the edit
-    (a second camera for ``aircraft``)."""
+def corrupt_copy_dir(run_dir: Path, kind: str) -> Path:
+    """Where the corrupted copy goes by default: a sibling of the run,
+    ``<run>_corrupt_<kind>``, never a subdirectory of it."""
+    run_dir = Path(run_dir)
+    return run_dir.parent / f"{run_dir.name}_corrupt_{kind}"
+
+
+def corrupt_manifest(run_dir: Path, kind: str,
+                     copy_dir: Optional[Path] = None
+                     ) -> Tuple[Path, str, Dict]:
+    """Copy ``run_dir``'s manifest (with telemetry.json and scenario.yaml)
+    to ``copy_dir`` (default :func:`corrupt_copy_dir`: the sibling
+    ``<run>_corrupt_<kind>/``) with ONE named edit applied. Returns
+    (copy_dir, the edit in words, the edit as data). Refuses by usage
+    when the run cannot carry the edit (a second camera for
+    ``aircraft``), or when the copy would land inside the run."""
     from core.capture.manifest import read_capture_manifest
 
     manifest = read_capture_manifest(run_dir / "capture_manifest.json")
@@ -252,7 +271,14 @@ def corrupt_manifest(run_dir: Path, kind: str) -> Tuple[Path, str, Dict]:
     else:
         raise UsageError(f"unknown --corrupt kind {kind!r}")
 
-    copy_dir = run_dir / f"corrupt_{kind}"
+    copy_dir = Path(copy_dir) if copy_dir is not None \
+        else corrupt_copy_dir(run_dir, kind)
+    if copy_dir.resolve() == Path(run_dir).resolve() or \
+            Path(run_dir).resolve() in copy_dir.resolve().parents:
+        raise UsageError(f"--corrupt-dir {copy_dir} lies inside the run "
+                         f"{run_dir}; the run directory stays exactly what "
+                         f"capture wrote (the default is the sibling "
+                         f"{corrupt_copy_dir(run_dir, kind)})")
     if copy_dir.exists():
         shutil.rmtree(copy_dir)
     copy_dir.mkdir(parents=True)
@@ -285,7 +311,9 @@ def _verify(args, doc: dict) -> int:
             # The alignment check needs a second run; the original,
             # uncorrupted one is the honest counterpart.
             against = run_dir
-        graded, words, edit = corrupt_manifest(run_dir, args.corrupt)
+        graded, words, edit = corrupt_manifest(
+            run_dir, args.corrupt,
+            Path(args.corrupt_dir) if args.corrupt_dir else None)
         print(f"corrupt {args.corrupt}: manifest copied to {graded}; {words}")
         print(f"  expected: [FAIL] {CORRUPT_FAILS[args.corrupt]}, exit 1")
         doc["corrupt"] = {"kind": args.corrupt, "copy_dir": str(graded),

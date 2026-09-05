@@ -152,7 +152,7 @@ Measured 2026-09-05 on Linux x86_64, Python 3.11.15 by `scripts/examples_expecte
 
 #### capture: two cameras, one flight (cameras_multi)
 
-`python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo` -- exit 0, 4.86 s wall
+`python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo` -- exit 0, 4.95 s wall
 
 ```
 spec cef57d752362381d valid; running headlessly...
@@ -218,7 +218,7 @@ scheduled 48 frames across 2 camera(s)
       22    11.450     109       900.000     -800.000      80.000  (631.9, 369.1)
       23    11.992     114       900.000     -800.000      80.000  (632.4, 369.2)
   manifest: runs/demo/capture_manifest.json
-  previews: 48 geometry preview(s) at 1280x720, 0.074 s/frame under runs/demo/previews (previews are not frames; track: telemetry 9.23077 Hz (115 points, no decimation))
+  previews: 48 geometry preview(s) at 1280x720, 0.075 s/frame under runs/demo/previews (previews are not frames; track: telemetry 9.23077 Hz (115 points, no decimation))
   contact sheets: 2 (contact_sheets/<camera_id>.png, one per camera)
   CHECK                   STATUS    MEASURED                    TOLERANCE                    WHERE
   manifest_version        PASS      version 1                   = 1                          spec cef57d752362381d
@@ -245,7 +245,7 @@ done: manifest, 48 previews and verification for 48 scheduled frames under runs/
 
 #### verify: the same run, graded from its directory
 
-`python -m flightsim.verify runs/demo` -- exit 0, 0.31 s wall
+`python -m flightsim.verify runs/demo` -- exit 0, 0.26 s wall
 
 ```
 run:         runs/demo
@@ -332,7 +332,7 @@ verified: runs/demo/capture_manifest.json (48 frame records, 2 camera(s)); repor
 
 #### capture: the same flight, a cockpit camera (cameras_multi_cockpit)
 
-`python -m flightsim.capture examples/cameras_multi_cockpit.yaml --out runs/demo_b` -- exit 0, 2.40 s wall
+`python -m flightsim.capture examples/cameras_multi_cockpit.yaml --out runs/demo_b` -- exit 0, 2.39 s wall
 
 ```
 spec b8e463be7defdc73 valid; running headlessly...
@@ -371,7 +371,7 @@ scheduled 24 frames across 1 camera(s)
       22    11.450     109      1894.567       -0.485    3049.352  (743.7, 691.9)
       23    11.992     114      1984.546       -0.483    3049.352  (743.7, 691.9)
   manifest: runs/demo_b/capture_manifest.json
-  previews: 24 geometry preview(s) at 1280x720, 0.073 s/frame under runs/demo_b/previews (previews are not frames; track: telemetry 9.23077 Hz (115 points, no decimation))
+  previews: 24 geometry preview(s) at 1280x720, 0.072 s/frame under runs/demo_b/previews (previews are not frames; track: telemetry 9.23077 Hz (115 points, no decimation))
   contact sheets: 1 (contact_sheets/<camera_id>.png, one per camera)
   CHECK                   STATUS    MEASURED                    TOLERANCE                    WHERE
   manifest_version        PASS      version 1                   = 1                          spec b8e463be7defdc73
@@ -398,7 +398,7 @@ done: manifest, 24 previews and verification for 24 scheduled frames under runs/
 
 #### verify --against: temporal alignment across the two camera sets
 
-`python -m flightsim.verify runs/demo_b --against runs/demo` -- exit 0, 0.15 s wall
+`python -m flightsim.verify runs/demo_b --against runs/demo` -- exit 0, 0.14 s wall
 
 ```
 run:         runs/demo_b
@@ -461,7 +461,7 @@ verified: runs/demo_b/capture_manifest.json (24 frame records, 1 camera(s)); rep
 
 #### capture: waypoint trigger, one camera (cameras_waypoint)
 
-`python -m flightsim.capture examples/cameras_waypoint.yaml --out runs/waypoint` -- exit 0, 1.05 s wall
+`python -m flightsim.capture examples/cameras_waypoint.yaml --out runs/waypoint` -- exit 0, 1.06 s wall
 
 ```
 spec b031d3e385b823b3 valid; running headlessly...
@@ -508,7 +508,7 @@ done: manifest, 5 previews and verification for 5 scheduled frames under runs/wa
 
 #### capture: the refusal (cameras_refusal)
 
-`python -m flightsim.capture examples/cameras_refusal.yaml --out runs/refused` -- exit 2, 0.07 s wall
+`python -m flightsim.capture examples/cameras_refusal.yaml --out runs/refused` -- exit 2, 0.08 s wall
 
 ```
 REFUSED -- by name:
@@ -519,12 +519,12 @@ REFUSED [camera.terrain_clearance]: nothing produced (the run directory holds js
 
 #### verify --corrupt quaternion: geometry recovery must FAIL
 
-`python -m flightsim.verify runs/demo --corrupt quaternion` -- exit 1, 0.26 s wall
+`python -m flightsim.verify runs/demo --corrupt quaternion` -- exit 1, 0.27 s wall
 
 ```
-corrupt quaternion: manifest copied to runs/demo/corrupt_quaternion; corrupted chase0 frame 3 (t=1.608 s) quaternion y += 0.05 (-0.042399 -> 0.007601); the Euler angles are untouched
+corrupt quaternion: manifest copied to runs/demo_corrupt_quaternion; corrupted chase0 frame 3 (t=1.608 s) quaternion y += 0.05 (-0.042399 -> 0.007601); the Euler angles are untouched
   expected: [FAIL] geometry_recovery, exit 1
-run:         runs/demo/corrupt_quaternion
+run:         runs/demo_corrupt_quaternion
 spec         cef57d752362381d   simulation 7c9e52e245405487   output 2c3eac9056d8257c
 scene        flat (no raster)   crs EPSG:32631
 flight       B747, 12 s at 120 Hz (step 0.008333 s), 115 telemetry samples; span 64.5 m
@@ -603,7 +603,7 @@ scheduled 48 frames across 2 camera(s)
   [PASS] schedule_fidelity: 48 instants across 2 camera(s) match the schedule recomputed from the spec's cameras over the telemetry, sample for sample
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
 verification FAILED (6/7 checks; FAILED: geometry_recovery; 1 awaiting engine frames: engine_parity)
-FAILED verification: as expected for --corrupt quaternion, geometry_recovery FAILED; runs/demo/corrupt_quaternion/capture_manifest.json graded, report runs/demo/corrupt_quaternion/verify.json
+FAILED verification: as expected for --corrupt quaternion, geometry_recovery FAILED; runs/demo_corrupt_quaternion/capture_manifest.json graded, report runs/demo_corrupt_quaternion/verify.json
 ```
 
 #### verify --corrupt aircraft: cross-view consistency must FAIL
@@ -611,9 +611,9 @@ FAILED verification: as expected for --corrupt quaternion, geometry_recovery FAI
 `python -m flightsim.verify runs/demo --corrupt aircraft` -- exit 1, 0.27 s wall
 
 ```
-corrupt aircraft: manifest copied to runs/demo/corrupt_aircraft; corrupted tower0: every frame's recorded aircraft north_m += 5 m (24 frames); chase0's records are untouched, so the two views disagree
+corrupt aircraft: manifest copied to runs/demo_corrupt_aircraft; corrupted tower0: every frame's recorded aircraft north_m += 5 m (24 frames); chase0's records are untouched, so the two views disagree
   expected: [FAIL] cross_view_consistency, exit 1
-run:         runs/demo/corrupt_aircraft
+run:         runs/demo_corrupt_aircraft
 spec         cef57d752362381d   simulation 7c9e52e245405487   output 2c3eac9056d8257c
 scene        flat (no raster)   crs EPSG:32631
 flight       B747, 12 s at 120 Hz (step 0.008333 s), 115 telemetry samples; span 64.5 m
@@ -692,17 +692,17 @@ scheduled 48 frames across 2 camera(s)
   [PASS] schedule_fidelity: 48 instants across 2 camera(s) match the schedule recomputed from the spec's cameras over the telemetry, sample for sample
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
 verification FAILED (5/7 checks; FAILED: cross_view_consistency, flight_fidelity; 1 awaiting engine frames: engine_parity)
-FAILED verification: as expected for --corrupt aircraft, cross_view_consistency FAILED (also: flight_fidelity); runs/demo/corrupt_aircraft/capture_manifest.json graded, report runs/demo/corrupt_aircraft/verify.json
+FAILED verification: as expected for --corrupt aircraft, cross_view_consistency FAILED (also: flight_fidelity); runs/demo_corrupt_aircraft/capture_manifest.json graded, report runs/demo_corrupt_aircraft/verify.json
 ```
 
 #### verify --corrupt time: temporal alignment must FAIL
 
-`python -m flightsim.verify runs/demo --corrupt time` -- exit 1, 0.28 s wall
+`python -m flightsim.verify runs/demo --corrupt time` -- exit 1, 0.27 s wall
 
 ```
-corrupt time: manifest copied to runs/demo/corrupt_time; corrupted chase0 frame 3 t_s += one fixed step (0.008333 s: 1.608333 -> 1.616667 s)
+corrupt time: manifest copied to runs/demo_corrupt_time; corrupted chase0 frame 3 t_s += one fixed step (0.008333 s: 1.608333 -> 1.616667 s)
   expected: [FAIL] temporal_alignment, exit 1
-run:         runs/demo/corrupt_time
+run:         runs/demo_corrupt_time
 spec         cef57d752362381d   simulation 7c9e52e245405487   output 2c3eac9056d8257c
 scene        flat (no raster)   crs EPSG:32631
 flight       B747, 12 s at 120 Hz (step 0.008333 s), 115 telemetry samples; span 64.5 m
@@ -772,7 +772,7 @@ scheduled 48 frames across 2 camera(s)
   flight_fidelity         FAIL      t 0.00833333 s, pos 0 m, att 0 deg  1e-09 s, 1e-06 m, 1e-06 deg  instant differs from the telemetry by 0.008333 s at chase0 #3 t=1.617 s (telemetry t=1.608333 s at sample 15)
   schedule_fidelity       FAIL      1 of 48 instants differ             0 differ                     1 of 48 instants differ from the spec's schedule; worst chase0 #3 at sample 15 t=1.617 s where the spec schedules sample 15 t=1.608 s
   engine_parity           AWAITING  -                                   -                            awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
-  temporal_alignment      FAIL      25 vs 24 instants                   1e-09 s                      25 instants in corrupt_time vs 24 in demo; only in corrupt_time: t=1.616667 s
+  temporal_alignment      FAIL      25 vs 24 instants                   1e-09 s                      25 instants in demo_corrupt_time vs 24 in demo; only in demo_corrupt_time: t=1.616667 s
   detail:
   [PASS] manifest_version: manifest_version 1, spec cef57d752362381d
   [PASS] fields_finite: 48 frame records checked, 0 non-finite field(s)
@@ -782,19 +782,19 @@ scheduled 48 frames across 2 camera(s)
   [FAIL] flight_fidelity: instant differs from the telemetry by 0.008333 s at chase0 #3 t=1.617 s (telemetry t=1.608333 s at sample 15)
   [FAIL] schedule_fidelity: 1 of 48 instants differ from the spec's schedule; worst chase0 #3 at sample 15 t=1.617 s where the spec schedules sample 15 t=1.608 s
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
-  [FAIL] temporal_alignment: 25 capture instants in corrupt_time against 24 in demo; only in corrupt_time: t=1.616667 s
+  [FAIL] temporal_alignment: 25 capture instants in demo_corrupt_time against 24 in demo; only in demo_corrupt_time: t=1.616667 s
 verification FAILED (5/8 checks; FAILED: flight_fidelity, schedule_fidelity, temporal_alignment; 1 awaiting engine frames: engine_parity)
-FAILED verification: as expected for --corrupt time, temporal_alignment FAILED (also: flight_fidelity, schedule_fidelity); runs/demo/corrupt_time/capture_manifest.json graded, report runs/demo/corrupt_time/verify.json
+FAILED verification: as expected for --corrupt time, temporal_alignment FAILED (also: flight_fidelity, schedule_fidelity); runs/demo_corrupt_time/capture_manifest.json graded, report runs/demo_corrupt_time/verify.json
 ```
 
 #### verify --corrupt count: count exactness must FAIL
 
-`python -m flightsim.verify runs/demo --corrupt count` -- exit 1, 0.27 s wall
+`python -m flightsim.verify runs/demo --corrupt count` -- exit 1, 0.26 s wall
 
 ```
-corrupt count: manifest copied to runs/demo/corrupt_count; corrupted chase0: frame record 23 (t=11.992 s) dropped; capture_count stays 24
+corrupt count: manifest copied to runs/demo_corrupt_count; corrupted chase0: frame record 23 (t=11.992 s) dropped; capture_count stays 24
   expected: [FAIL] count_exactness, exit 1
-run:         runs/demo/corrupt_count
+run:         runs/demo_corrupt_count
 spec         cef57d752362381d   simulation 7c9e52e245405487   output 2c3eac9056d8257c
 scene        flat (no raster)   crs EPSG:32631
 flight       B747, 12 s at 120 Hz (step 0.008333 s), 115 telemetry samples; span 64.5 m
@@ -872,17 +872,17 @@ scheduled 47 frames across 2 camera(s)
   [FAIL] schedule_fidelity: chase0: 23 recorded instants against 24 the spec schedules
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
 verification FAILED (5/7 checks; FAILED: count_exactness, schedule_fidelity; 1 awaiting engine frames: engine_parity)
-FAILED verification: as expected for --corrupt count, count_exactness FAILED (also: schedule_fidelity); runs/demo/corrupt_count/capture_manifest.json graded, report runs/demo/corrupt_count/verify.json
+FAILED verification: as expected for --corrupt count, count_exactness FAILED (also: schedule_fidelity); runs/demo_corrupt_count/capture_manifest.json graded, report runs/demo_corrupt_count/verify.json
 ```
 
 #### verify --corrupt clock: flight fidelity must FAIL (every instant shifted, no sibling run)
 
-`python -m flightsim.verify runs/demo --corrupt clock` -- exit 1, 0.28 s wall
+`python -m flightsim.verify runs/demo --corrupt clock` -- exit 1, 0.26 s wall
 
 ```
-corrupt clock: manifest copied to runs/demo/corrupt_clock; corrupted every record (48 frames, both the sample_index and the aircraft state untouched): t_s += 0.5 s; the records still agree with each other, only the telemetry's clock says otherwise
+corrupt clock: manifest copied to runs/demo_corrupt_clock; corrupted every record (48 frames, both the sample_index and the aircraft state untouched): t_s += 0.5 s; the records still agree with each other, only the telemetry's clock says otherwise
   expected: [FAIL] flight_fidelity, exit 1
-run:         runs/demo/corrupt_clock
+run:         runs/demo_corrupt_clock
 spec         cef57d752362381d   simulation 7c9e52e245405487   output 2c3eac9056d8257c
 scene        flat (no raster)   crs EPSG:32631
 flight       B747, 12 s at 120 Hz (step 0.008333 s), 115 telemetry samples; span 64.5 m
@@ -961,17 +961,17 @@ scheduled 48 frames across 2 camera(s)
   [FAIL] schedule_fidelity: 48 of 48 instants differ from the spec's schedule; worst chase0 #1 at sample 5 t=1.025 s where the spec schedules sample 5 t=0.525 s
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
 verification FAILED (5/7 checks; FAILED: flight_fidelity, schedule_fidelity; 1 awaiting engine frames: engine_parity)
-FAILED verification: as expected for --corrupt clock, flight_fidelity FAILED (also: schedule_fidelity); runs/demo/corrupt_clock/capture_manifest.json graded, report runs/demo/corrupt_clock/verify.json
+FAILED verification: as expected for --corrupt clock, flight_fidelity FAILED (also: schedule_fidelity); runs/demo_corrupt_clock/capture_manifest.json graded, report runs/demo_corrupt_clock/verify.json
 ```
 
 #### verify --corrupt flight: flight fidelity must FAIL (the aircraft moved in every view; cross-view still PASSES)
 
-`python -m flightsim.verify runs/demo --corrupt flight` -- exit 1, 0.29 s wall
+`python -m flightsim.verify runs/demo --corrupt flight` -- exit 1, 0.27 s wall
 
 ```
-corrupt flight: manifest copied to runs/demo/corrupt_flight; corrupted every camera's every record (48 frames): aircraft north_m += 50 m; the views still agree with EACH OTHER (cross_view_consistency passes), only the telemetry says the aircraft was elsewhere
+corrupt flight: manifest copied to runs/demo_corrupt_flight; corrupted every camera's every record (48 frames): aircraft north_m += 50 m; the views still agree with EACH OTHER (cross_view_consistency passes), only the telemetry says the aircraft was elsewhere
   expected: [FAIL] flight_fidelity, exit 1
-run:         runs/demo/corrupt_flight
+run:         runs/demo_corrupt_flight
 spec         cef57d752362381d   simulation 7c9e52e245405487   output 2c3eac9056d8257c
 scene        flat (no raster)   crs EPSG:32631
 flight       B747, 12 s at 120 Hz (step 0.008333 s), 115 telemetry samples; span 64.5 m
@@ -1050,7 +1050,7 @@ scheduled 48 frames across 2 camera(s)
   [PASS] schedule_fidelity: 48 instants across 2 camera(s) match the schedule recomputed from the spec's cameras over the telemetry, sample for sample
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
 verification FAILED (6/7 checks; FAILED: flight_fidelity; 1 awaiting engine frames: engine_parity)
-FAILED verification: as expected for --corrupt flight, flight_fidelity FAILED; runs/demo/corrupt_flight/capture_manifest.json graded, report runs/demo/corrupt_flight/verify.json
+FAILED verification: as expected for --corrupt flight, flight_fidelity FAILED; runs/demo_corrupt_flight/capture_manifest.json graded, report runs/demo_corrupt_flight/verify.json
 ```
 
 #### verify --corrupt schedule: schedule fidelity must FAIL (an instant the spec does not schedule; every per-record check PASSES)
@@ -1058,9 +1058,9 @@ FAILED verification: as expected for --corrupt flight, flight_fidelity FAILED; r
 `python -m flightsim.verify runs/demo --corrupt schedule` -- exit 1, 0.27 s wall
 
 ```
-corrupt schedule: manifest copied to runs/demo/corrupt_schedule; corrupted the instant at sample 59 (t=6.183 s -> sample 60, t=6.283 s) on chase0 #12, tower0 #12: sample_index, t_s and the aircraft state moved one telemetry sample later, the flight's own state at that sample copied in, so every per-record check still passes; only the schedule recomputed from the spec says the instant is wrong
+corrupt schedule: manifest copied to runs/demo_corrupt_schedule; corrupted the instant at sample 59 (t=6.183 s -> sample 60, t=6.283 s) on chase0 #12, tower0 #12: sample_index, t_s and the aircraft state moved one telemetry sample later, the flight's own state at that sample copied in, so every per-record check still passes; only the schedule recomputed from the spec says the instant is wrong
   expected: [FAIL] schedule_fidelity, exit 1
-run:         runs/demo/corrupt_schedule
+run:         runs/demo_corrupt_schedule
 spec         cef57d752362381d   simulation 7c9e52e245405487   output 2c3eac9056d8257c
 scene        flat (no raster)   crs EPSG:32631
 flight       B747, 12 s at 120 Hz (step 0.008333 s), 115 telemetry samples; span 64.5 m
@@ -1139,7 +1139,7 @@ scheduled 48 frames across 2 camera(s)
   [FAIL] schedule_fidelity: 2 of 48 instants differ from the spec's schedule; worst chase0 #12 at sample 60 t=6.283 s where the spec schedules sample 59 t=6.183 s
   [AWAITING] engine_parity: awaiting engine frames: no render.json for camera chase0, tower0 (the engine pass has not run on this machine; choose 'Render frames and clip' or --render frames where the engine exists)
 verification FAILED (6/7 checks; FAILED: schedule_fidelity; 1 awaiting engine frames: engine_parity)
-FAILED verification: as expected for --corrupt schedule, schedule_fidelity FAILED; runs/demo/corrupt_schedule/capture_manifest.json graded, report runs/demo/corrupt_schedule/verify.json
+FAILED verification: as expected for --corrupt schedule, schedule_fidelity FAILED; runs/demo_corrupt_schedule/capture_manifest.json graded, report runs/demo_corrupt_schedule/verify.json
 ```
 
 <!-- examples_expected: end -->
@@ -1190,17 +1190,22 @@ The committed examples, each under a minute (times above):
 
 `flightsim.verify <run> --corrupt
 {quaternion|aircraft|time|count|clock|flight|schedule}` copies the
-manifest (with `telemetry.json` and `scenario.yaml`) to
-`<run>/corrupt_<kind>/`, applies ONE named edit (stated on the first
-line of the output), grades the copy with the same verifier and must
-exit 1 with the named check FAILED -- the seven blocks above are the
-actual runs. Measured here: a 0.05 shift of one
+manifest (with `telemetry.json` and `scenario.yaml`) to a SIBLING
+directory, `<run>_corrupt_<kind>/` (or `--corrupt-dir DIR`; a copy
+inside the run is refused as USAGE), applies ONE named edit (stated on
+the first line of the output), grades the copy with the same verifier
+and must exit 1 with the named check FAILED -- the seven blocks above
+are the actual runs, and the verdict line names the copy's manifest
+and report. The run directory itself stays exactly what capture wrote
+(the CLI test lists it before and after every corruption), so nothing
+that zips, lists or serves a run can pick a corrupted manifest up. Measured here: a 0.05 shift of one
 quaternion component (the Euler angles untouched) is a 124.7076 px
 quaternion-vs-Euler gap at `chase0 #3 t=1.608 s` (tol 0.5 px); a 5 m
 shift of the tower's recorded aircraft is a 5.1845 m worst
 triangulation error (tol 0.5 m) at sample 0; one instant moved by one
-fixed step (0.008333 s) is "25 instants in corrupt_time vs 24 in demo;
-only in corrupt_time: t=1.616667 s" (tol 1e-09 s); one dropped record
+fixed step (0.008333 s) is "25 instants in demo_corrupt_time vs 24 in
+demo; only in demo_corrupt_time: t=1.616667 s" (tol 1e-09 s); one
+dropped record
 is "47 frames = 23 + 24" against "exactly 48", `chase0 23/24` (missing
 index 23).
 
