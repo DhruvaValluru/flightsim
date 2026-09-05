@@ -347,7 +347,10 @@ def test_run_forwards_the_transcript_into_provenance(client, monkeypatch):
 
     captured = {}
 
-    def fake_start(spec, provenance):
+    # render= is the run's choice (Camera Phase 1 finished): a POST /run
+    # with the field omitted is the endpoint's historic meaning, clip.
+    def fake_start(spec, provenance, render="clip"):
+        assert render == "clip"
         captured.update(provenance)
         return {"run_id": "test"}
 
@@ -368,7 +371,7 @@ def test_run_forwards_the_transcript_into_provenance(client, monkeypatch):
         "prompt": "fly the 747 at 3000 m and 250 kt",
         "compiler": "regex"}).json()
     response = client.post("/run", json={
-        "spec": compiled["spec"]["dict"],
+        "spec": compiled["spec"]["dict"], "render": "clip",
         "provenance": {"compiler": "llm", "model": "m",
                        "transcript": [{"role": "user", "content": "hi"}],
                        "evil_extra": 1}})
@@ -656,7 +659,8 @@ def test_platform_refusal_precedes_the_mesh_refusal(client, monkeypatch):
     # An aircraft with no model on ANY machine: both refusals are live,
     # and the platform one must win.
     spec = compile_prompt("fly the f15 at 5000 m and 350 kt")
-    reply = client.post("/run", json={"spec": spec.to_dict()})
+    reply = client.post("/run", json={"spec": spec.to_dict(),
+                                      "render": "clip"})
     assert reply.status_code == 409
     assert reply.json()["constraint"] == "ue.platform"
 
@@ -925,12 +929,81 @@ def test_clearance_track_is_wingspan_aware():
             < min(p["cg_clearance_m"] for p in track))
 
 
-def test_windy_terrain_run_card_carries_the_rotor(tmp_path, monkeypatch):
-    """Lee-rotor turbulence rides the same orographic field the card
-    carries (gotcha 14: the card word gates the turbulence writes, so the
-    provider's own word 'lee-rotor' travels with its pinned properties);
-    the seed is derived and recorded even when the spec's word is 'none',
-    and the conditions strip states the coupling."""
+def test_a_rotor_that_acts_carries_its_word_and_block_on_the_card(
+        tmp_path, monkeypatch):
+    """The other half of Package F: when the pre-flown track says the
+    rotor DID act, the card carries the word 'lee-rotor' (the gate for
+    turbulence_properties, gotcha 14), the rotor block, and the
+    conditions strip states the delivered sigma. The pre-flight verdict
+    is stubbed to 'acts'; everything downstream of it is the real flow.
+    (The sibling test below covers the rotor that does NOT act, where
+    the word must be absent -- which is why THIS case is needed for the
+    card-word guard to be load-bearing.)"""
+    import json as jsonlib
+
+    from webapp.runs import RunState, place_on_scene
+
+    if not (runs_module.REPO / "runs" / "terrain"
+            / "control_ridge.r16").is_file():
+        pytest.skip("no control ridge baked on this machine")
+
+    spec = compile_prompt(
+        "fly the 747 at 5000 m and 250 kt over 2000 m mountains "
+        "in a strong crosswind")
+    place_on_scene(spec)
+    assert str(spec.turbulence.value) == "none"
+
+    def fake_render(card, frames, scene, mesh, aircraft, telemetry=None,
+                    look=None, camera="chase", **kwargs):
+        frames.mkdir(parents=True, exist_ok=True)
+        (frames / "render.json").write_text("{}", encoding="utf-8")
+        if telemetry is not None:
+            from webapp.runs import EFFECT_CHANNELS
+            columns = {"t": [round(0.1 * i, 1) for i in range(220)]}
+            for name in EFFECT_CHANNELS:
+                columns[name] = [1.0 + 0.01 * (i % 7) for i in range(220)]
+            telemetry.write_text(jsonlib.dumps({"columns": columns}),
+                                 encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(RunManager, "_render", staticmethod(fake_render))
+    monkeypatch.setattr(runs_module, "ensure_aircraft_model",
+                        lambda spec, report: None)
+    monkeypatch.setattr(runs_module, "encode_clip",
+                        lambda frames, clip: bool(clip.write_bytes(b"x")) or True)
+    monkeypatch.setattr(runs_module, "build_panel_clip",
+                        lambda *a, **k: True)
+    # The pre-flight says the rotor acted on this track.
+    monkeypatch.setattr(runs_module, "_rotor_acts_on_track",
+                        lambda spec, scene, provider: None)
+
+    local = RunManager(out_root=tmp_path)
+    run = RunState(run_id="rotoracts")
+    local._render_flow(run, spec, provenance={})
+    assert run.status == "done", run.detail
+
+    card = jsonlib.loads((tmp_path / "rotoracts" / "card.json")
+                         .read_text(encoding="utf-8"))
+    assert card["turbulence"] == "lee-rotor"
+    assert card.get("rotor") is not None
+    assert "orographic" in card
+    assert run.conditions["turbulence"].startswith("lee-rotor over terrain")
+    assert "delivered sigma_w" in run.conditions["turbulence"]
+    assert run.conditions["turbulence_seed"] == int(spec.seed.value)
+
+
+def test_windy_terrain_run_says_the_rotor_does_not_act(tmp_path, monkeypatch):
+    """Package F. The lee-rotor coupling delivers through W20, which the
+    pinned build honours below 300 m AGL only; the planner keeps every
+    track PLANNED_CLEARANCE_M (300 m) above the terrain, so on this
+    planned track the FDM delivers 0.000 m/s of rotor turbulence
+    (measured: experiments/airborne/rotor_delivery.py). Before this
+    package the card word 'lee-rotor', the rotor block and the strip all
+    claimed a rotor here. Now the run may carry that word only if the
+    pre-flown track DELIVERED sigma_w >= ROTOR_ACTS_SIGMA_W_MPS, and
+    otherwise says why the rotor is absent. The orographic field itself
+    (lift/sink, a mean wind) still travels, and the seed is still derived
+    and recorded."""
     import json as jsonlib
 
     from webapp.runs import RunState, place_on_scene
@@ -963,6 +1036,11 @@ def test_windy_terrain_run_card_carries_the_rotor(tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(RunManager, "_render", staticmethod(fake_render))
+    # The mesh gate belongs to tests/test_aircraft_assets.py; on a machine
+    # without the engine the auto-import refuses by name before the flow
+    # under test is reached, so it is held open here.
+    monkeypatch.setattr(runs_module, "ensure_aircraft_model",
+                        lambda spec, report: None)
     monkeypatch.setattr(runs_module, "encode_clip",
                         lambda frames, clip: bool(clip.write_bytes(b"x")) or True)
     monkeypatch.setattr(runs_module, "build_panel_clip",
@@ -974,13 +1052,13 @@ def test_windy_terrain_run_card_carries_the_rotor(tmp_path, monkeypatch):
     assert run.status == "done", run.detail
 
     card = jsonlib.loads((tmp_path / "rotortest" / "card.json").read_text(encoding="utf-8"))
-    assert card["turbulence"] == "lee-rotor"
-    assert card["rotor"]["sigma_gain"] > 0.0
-    assert card["turbulence_properties"]     # the provider's pinned writes
+    assert card["turbulence"] != "lee-rotor"
+    assert card.get("rotor") is None
     assert "orographic" in card and "collision_terrain" in card
     assert str(spec.seed.source) != "default"      # derived, recorded
-    assert "lee-rotor over terrain" in run.conditions["turbulence"]
-    assert run.conditions["turbulence_seed"] == int(spec.seed.value)
+    strip = run.conditions["turbulence"]
+    assert "lee-rotor turbulence absent" in strip
+    assert "300 m AGL" in strip and "delivered sigma_w 0.000 m/s" in strip
 
     # The conditions-effect report: a headless still-air baseline of the
     # same spec beside the run's own telemetry, with the cross-host claim
@@ -1017,6 +1095,11 @@ def test_calm_terrain_run_states_why_the_air_is_still(tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(RunManager, "_render", staticmethod(fake_render))
+    # The mesh gate belongs to tests/test_aircraft_assets.py; on a machine
+    # without the engine the auto-import refuses by name before the flow
+    # under test is reached, so it is held open here.
+    monkeypatch.setattr(runs_module, "ensure_aircraft_model",
+                        lambda spec, report: None)
     monkeypatch.setattr(runs_module, "encode_clip",
                         lambda frames, clip: bool(clip.write_bytes(b"x")) or True)
     monkeypatch.setattr(runs_module, "build_panel_clip",
@@ -1081,7 +1164,8 @@ def test_windy_terrain_run_digest_is_content_addressed(client, monkeypatch):
 
     captured = {}
 
-    def fake_start(spec, provenance):
+    def fake_start(spec, provenance, render="clip"):
+        assert render == "clip"
         captured["spec"] = spec
         return {"run_id": "digesttest"}
 
@@ -1097,7 +1181,8 @@ def test_windy_terrain_run_digest_is_content_addressed(client, monkeypatch):
         "prompt": "fly the 747 at 5000 m and 250 kt over 2000 m mountains "
                   "in a strong crosswind",
         "compiler": "regex"}).json()
-    response = client.post("/run", json={"spec": compiled["spec"]["dict"]})
+    response = client.post("/run", json={"spec": compiled["spec"]["dict"],
+                                         "render": "clip"})
     assert response.status_code == 200, response.json()
     spec = captured["spec"]
     assert str(spec.turbulence.value) == "none"

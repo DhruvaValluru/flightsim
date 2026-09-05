@@ -23,6 +23,7 @@
   td input { background: #171d24; color: inherit; border: 1px solid #2c3947;
              border-radius: 4px; font: inherit; padding: .15rem .4rem;
              width: 9rem; }
+  tr.move td input { width: 5rem; }
   .src-user     { color: #7fd08f; }
   .src-inferred { color: #e0b452; }
   .src-model    { color: #6fb3e0; }
@@ -53,6 +54,24 @@
   .formula { font-size: 11px; color: #7d8a93; margin-top: .4rem; }
   #status { white-space: pre-wrap; }
   ul { margin: .3rem 0 .3rem 1.2rem; padding: 0; }
+  .dlstrip { margin: 0 0 .8rem 0; display: flex; flex-wrap: wrap;
+             align-items: baseline; gap: .3rem .6rem; }
+  .dlstrip a.dl { background: #2b5d8c; color: #eaf2f9; border-radius: 6px;
+                  padding: .25rem .8rem; text-decoration: none; }
+  .dlstrip a.dl-frames { background: #2f7d4f; }
+  .dlstrip .dlnote { font-size: 11px; margin-right: .6rem; }
+  a.filelink { color: #6fb3e0; font-size: 11px; }
+  .gallery { margin: .6rem 0; }
+  .gallery img.sheet { max-width: 100%; margin: 2px; border: 1px solid #333; }
+  .thumbs { display: flex; flex-wrap: wrap; gap: 4px; margin: .3rem 0; }
+  .thumb { margin: 0; width: 160px; }
+  .thumb img { width: 160px; border: 1px solid #333; display: block; }
+  .thumb.parity-fail img { border: 2px solid #e06f6f; }
+  .thumb figcaption { font-size: 11px; }
+  details summary { cursor: pointer; }
+  table.verify { margin: .3rem 0 .6rem 0; font-size: 12px; }
+  table.verify td, table.verify th { padding: .15rem .5rem; vertical-align: top; }
+  table.verify tr.detail td { border-bottom: 0; padding-top: 0; }
 </style>
 </head>
 <body>
@@ -101,9 +120,27 @@ visual-only per host (measured).</p>
   <div id="verdict"></div>
   <p>
     <button id="run" class="run">Run</button>
-    <span class="dim">re-validated server-side before anything renders;
-    clip capped at 22 s</span>
+    <label class="dim" title="What the run produces. The richest option this machine supports is selected once /status has said what it is; until then the control is disabled on Headless, and an option the machine cannot honour is disabled with the reason.">
+      render <select id="render" disabled>
+        <option value="frames">Render frames and clip</option>
+        <option value="clip">Clip only</option>
+        <option value="none" selected>Headless</option>
+      </select>
+    </label>
+    <span id="renderNote" class="dim">waiting for /status (Headless until the server says what this machine supports)</span>
+    <label class="dim" title="Geometry previews draw at the camera's full output resolution by default (scale 1); N draws them at 1/N. Anything that is not a positive whole number is refused by name (preview.scale).">
+      preview scale 1/<input id="previewScale" type="number" min="1" step="1" value="1" style="width:3.5em">
+    </label>
   </p>
+  <p class="dim">re-validated server-side before anything renders.
+    <b>Render frames and clip</b> runs the engine once per camera on the
+    solved pose track and delivers exactly the scheduled PNGs per camera
+    (named by manifest index, verified by engine parity); the clip is a
+    by-product of camera 0. <b>Clip only</b> is the single preset pass
+    and the panel clip, capped at 22 s, with the capture geometry beside
+    it (nothing rendered as frames). <b>Headless</b> is the labeled-data
+    half alone &mdash; manifest, previews and verification &mdash; and
+    needs no engine, so it works on any machine.</p>
 </div>
 
 <div id="runArea" style="display:none" class="card">
@@ -124,12 +161,15 @@ function sourceClass(s) { return "src-" + s; }
 // The provenance column reads like director's notes: a model row shows
 // the QUOTED phrase the guess interprets, an inferred row the quoted
 // vocabulary phrase, others their plain origin.
+// The phrase is the user's own prompt words (or the model's quotation
+// of them): escaped, so a quote or an angle bracket in a prompt reaches
+// the table as text, never as markup.
 function provenanceNote(f) {
   const frm = f.from || "";
   if (!frm) return "";
-  if (f.source === "model") return `interpreting &ldquo;${frm}&rdquo;`;
-  if (f.source === "inferred") return `&ldquo;${frm}&rdquo;`;
-  return frm;
+  if (f.source === "model") return `interpreting &ldquo;${esc(frm)}&rdquo;`;
+  if (f.source === "inferred") return `&ldquo;${esc(frm)}&rdquo;`;
+  return esc(frm);
 }
 
 // Compiler state up front (Task 0): the page states which compiler WILL run
@@ -137,24 +177,65 @@ function provenanceNote(f) {
 (async () => {
   try {
     const status = await (await fetch("/status")).json();
+    applyRenderChoices(status);
     $("llmState").textContent = (status.llm_available
       ? "compiler: llm available"
       : "compiler: offline regex (no ANTHROPIC_API_KEY in the server " +
         "process; set it where uvicorn runs)")
       + (status.render_available === false
          ? (status.platform === "windows"
-            ? " · rendered clips need the Unreal host built here " +
-              "(scripts\\ue_preflight.ps1 names what is missing): runs " +
-              "here deliver the headless half (spec, validation, telemetry)"
+            ? " · rendered frames and clips need the Unreal host built " +
+              "here (scripts\\ue_preflight.ps1 names what is missing): " +
+              "runs here deliver the headless half (spec, validation, " +
+              "telemetry, manifest, previews, verification)"
             : status.platform === "linux"
-            ? " · rendered clips need macOS or Windows: runs here deliver " +
-              "the headless half (spec, validation, telemetry)"
-            : " · rendered clips need the Unreal host built here: runs " +
+            ? " · rendered frames and clips need macOS or Windows: runs " +
               "here deliver the headless half (spec, validation, " +
-              "telemetry)")
+              "telemetry, manifest, previews, verification)"
+            : " · rendered frames and clips need the Unreal host built " +
+              "here: runs here deliver the headless half (spec, " +
+              "validation, telemetry, manifest, previews, verification)")
          : "");
-  } catch (error) { $("llmState").textContent = "compiler: server unreachable"; }
+  } catch (error) {
+    $("llmState").textContent = "compiler: server unreachable";
+    // No /status, no default: the render control stays disabled on
+    // Headless -- an engine option was never offered as a default here.
+    $("renderNote").textContent =
+      "render choice unavailable: server unreachable (Headless is the " +
+      "only safe choice until /status answers)";
+  }
 })();
+
+// The render choice, before the run starts: the richest option this
+// machine supports is selected, and an option it cannot honour is
+// DISABLED with the server's reason in its label and title -- the
+// backend refuses the same choice by name (ue.platform), never degrades.
+// The default is the server's word ONLY (render_default, from
+// core.capture.render_pass.render_choice_default): the control ships
+// disabled on Headless and is enabled here, once that word has arrived;
+// without it (no /status, or a /status without the field) it stays
+// disabled on Headless and says so -- no hidden engine default, ever.
+function applyRenderChoices(status) {
+  const select = $("render");
+  const choices = status.render_choices || [];
+  for (const option of select.options) {
+    const choice = choices.find(c => c.value === option.value);
+    if (!choice) continue;
+    option.disabled = !choice.available;
+    option.textContent = choice.available
+      ? choice.label
+      : `${choice.label} \u2014 unavailable: ${choice.reason}`;
+    option.title = choice.available ? "" : choice.reason;
+  }
+  if (status.render_default) select.value = status.render_default;
+  select.disabled = !status.render_default;
+  $("renderNote").textContent = !status.render_default
+    ? "render choice unavailable: /status gave no render_default " +
+      "(Headless is the only safe choice)"
+    : status.render_available
+    ? ""
+    : `engine options disabled: ${status.render_unavailable_reason}`;
+}
 
 function renderQuestions(payload) {
   pendingQuestions = payload.questions;
@@ -209,15 +290,19 @@ function renderSpec(payload) {
   compiled = payload;
   const spec = payload.spec;
   $("specArea").style.display = "";
+  // Every value, unit, source, note and word the server sent is
+  // interpolated through esc(): the table the user checks before
+  // running must show a prompt's quote or "<" as text, and an input's
+  // value attribute must survive it (editedSpecDict reads it back).
   $("compilerLine").innerHTML =
-    `<span class="badge">compiler: ${payload.compiler}</span>` +
-    (payload.model ? `<span class="badge">model: ${payload.model}</span>` : "") +
-    `<span class="badge">digest: ${spec.digest.slice(0, 16)}</span>` +
+    `<span class="badge">compiler: ${esc(payload.compiler)}</span>` +
+    (payload.model ? `<span class="badge">model: ${esc(payload.model)}</span>` : "") +
+    `<span class="badge">digest: ${esc(spec.digest.slice(0, 16))}</span>` +
     (payload.llm_note
-      ? `<div class="dim">llm fallback reason: ${payload.llm_note}</div>` : "");
+      ? `<div class="dim">llm fallback reason: ${esc(payload.llm_note)}</div>` : "");
   $("notes").innerHTML = spec.notes.length
     ? `<div class="dim">notes:<ul>` +
-      spec.notes.map(n => `<li>${n}</li>`).join("") + `</ul></div>`
+      spec.notes.map(n => `<li>${esc(n)}</li>`).join("") + `</ul></div>`
     : "";
 
   const body = $("specTable").querySelector("tbody");
@@ -229,37 +314,39 @@ function renderSpec(payload) {
     const value = typeof f.value === "number" && !Number.isInteger(f.value)
       ? f.value : f.value;
     row.innerHTML =
-      `<td>${f.section}.${f.name}</td>` +
+      `<td>${esc(f.section)}.${esc(f.name)}</td>` +
       `<td>${editable
-         ? `<input data-name="${f.name}" value="${value}">`
-         : `${value}`}${f.unit ? " " + f.unit : ""}</td>` +
-      `<td class="${sourceClass(f.source)}" data-src="${f.name}">` +
-      `${f.source}</td>` +
+         ? `<input data-name="${esc(f.name)}" value="${esc(value)}">`
+         : `${esc(value)}`}${f.unit ? " " + esc(f.unit) : ""}</td>` +
+      `<td class="${esc(sourceClass(f.source))}" data-src="${esc(f.name)}">` +
+      `${esc(f.source)}</td>` +
       `<td class="dim">${provenanceNote(f)}` +
-      `${f.std ? " &mdash; " + f.std : ""}</td>`;
+      `${f.std ? " &mdash; " + esc(f.std) : ""}</td>`;
     body.appendChild(row);
   }
   // Camera blocks (Camera Phase 1): each camera is a labeled block of
   // provenanced, editable rows, exactly like the scalar fields above.
   for (const cam of (spec.cameras || [])) {
     const head = document.createElement("tr");
-    head.innerHTML = `<td colspan="4"><b>camera[${cam.index}] ` +
-      `${cam.camera_id}</b></td>`;
+    head.innerHTML = `<td colspan="4"><b>camera[${esc(cam.index)}] ` +
+      `${esc(cam.camera_id)}</b></td>`;
     body.appendChild(head);
     for (const f of cam.fields) {
       const row = document.createElement("tr");
       const key = `cameras[${cam.index}].${f.name}`;
       row.innerHTML =
-        `<td>&nbsp;&nbsp;${f.name}</td>` +
-        `<td><input data-name="${key}" data-camera="${cam.index}" ` +
-        `data-field="${f.name}" value="${f.value}">` +
-        `${f.unit ? " " + f.unit : ""}</td>` +
-        `<td class="${sourceClass(f.source)}" data-src="${key}">` +
-        `${f.source}</td>` +
+        `<td>&nbsp;&nbsp;${esc(f.name)}</td>` +
+        `<td><input data-name="${esc(key)}" data-camera="${esc(cam.index)}" ` +
+        `data-field="${esc(f.name)}" value="${esc(f.value)}">` +
+        `${f.unit ? " " + esc(f.unit) : ""}</td>` +
+        `<td class="${esc(sourceClass(f.source))}" data-src="${esc(key)}">` +
+        `${esc(f.source)}</td>` +
         `<td class="dim">${provenanceNote(f)}` +
-        `${f.std ? " &mdash; " + f.std : ""}</td>`;
+        `${f.std ? " &mdash; " + esc(f.std) : ""}</td>`;
       body.appendChild(row);
     }
+    // The camera's keyframed moves, one row each, after its fields.
+    body.insertAdjacentHTML("beforeend", cameraMovesHtml(cam));
   }
   // Director's-notes legend: what each source means, in one line.
   $("srcLegend").innerHTML =
@@ -271,9 +358,14 @@ function renderSpec(payload) {
     `<span class="src-default">default</span> documented default`;
   body.querySelectorAll("input").forEach(input => {
     input.addEventListener("change", () => {
-      const cell = body.querySelector(`[data-src="${input.dataset.name}"]`);
-      cell.textContent = "user (edited)";
-      cell.className = "src-edited";
+      // A keyframe input names the source cells of its whole moves
+      // list (data-src-key): one decision, one provenance, every row
+      // of it repainted.
+      const key = input.dataset.srcKey || input.dataset.name;
+      body.querySelectorAll(`[data-src="${key}"]`).forEach(cell => {
+        cell.textContent = "user (edited)";
+        cell.className = "src-edited";
+      });
     });
   });
   renderVerdict(payload.validation);
@@ -283,18 +375,15 @@ function renderVerdict(v) {
   if (v.ok) {
     $("verdict").innerHTML =
       `<div class="verdict-ok">VALID` +
-      (v.derived_speeds ? ` &mdash; ${v.derived_speeds}` : "") + `</div>` +
+      (v.derived_speeds ? ` &mdash; ${esc(v.derived_speeds)}` : "") + `</div>` +
       (v.warnings.length
-        ? `<div class="dim">warnings: ${v.warnings.join("; ")}</div>` : "");
+        ? `<div class="dim">warnings: ${esc(v.warnings.join("; "))}</div>` : "");
     $("run").disabled = false;
   } else {
     $("verdict").innerHTML =
       `<div class="verdict-refused">REFUSED &mdash; by name:</div><ul>` +
-      v.violations.map(x =>
-        `<li><b>[${x.constraint}]</b> ${x.message}` +
-        (x.actual != null && x.limit != null
-          ? ` (requested ${x.actual}${x.unit ? " " + x.unit : ""}, ` +
-            `limit ${x.limit})` : "") + `</li>`).join("") + `</ul>`;
+      v.violations.map(x => `<li>${refusalWords(x, "requested")}</li>`)
+        .join("") + `</ul>`;
     $("run").disabled = true;
   }
 }
@@ -307,12 +396,26 @@ function editedSpecDict() {
   for (const f of compiled.spec.fields) sections[f.name] = f.section;
   document.querySelectorAll("#specTable input").forEach(input => {
     const name = input.dataset.name;
+    const parsed = parseFloat(input.value);
+    const value = Number.isNaN(parsed) ? input.value : parsed;
+    // Keyframe rows edit dict.cameras[i].moves[k][field]; the moves
+    // list is ONE recorded decision, so an edit to any keyframe records
+    // the list's provenance as the user's edit, the same words a field
+    // edit records.
+    if (input.dataset.move !== undefined) {
+      const camera = dict.cameras[+input.dataset.camera];
+      const move = camera.moves[+input.dataset.move];
+      if (String(move[input.dataset.field]) !== String(value)) {
+        move[input.dataset.field] = value;
+        camera.moves_source = "user";
+        camera.moves_from = "edited in the web UI";
+      }
+      return;
+    }
     // Camera rows edit dict.cameras[i][field]; same source rule.
     const entry = input.dataset.camera !== undefined
       ? dict.cameras[+input.dataset.camera][input.dataset.field]
       : dict[sections[name]][name];
-    const parsed = parseFloat(input.value);
-    const value = Number.isNaN(parsed) ? input.value : parsed;
     if (String(entry.value) !== String(value)) {
       entry.value = value;
       entry.source = "user";
@@ -374,13 +477,19 @@ $("answer").addEventListener("click", () => {
              prior_spec: compiled ? compiled.spec.dict : null});
 });
 
-$("run").addEventListener("click", () => startRun(true));
+$("run").addEventListener("click", () => startRun(true, "/run"));
 
-async function startRun(mayBake) {
-  const response = await fetch("/run", {
+async function startRun(mayBake, endpoint) {
+  // The choice travels with the request and is recorded in the run's
+  // provenance; the status lines name what it produced.
+  const response = await fetch(endpoint, {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       spec: editedSpecDict(),
+      render: $("render").value,
+      // The preview scale travels with the request (1 = full resolution)
+      // and is recorded in capture/run.json "previews".
+      preview_scale: parseInt($("previewScale").value, 10),
       provenance: {compiler: compiled.compiler, model: compiled.model,
                    transcript: compiled.transcript || null},
     }),
@@ -414,18 +523,23 @@ async function startRun(mayBake) {
       return;
     }
     $("status").textContent = `baked and verified: ${scene.title}`;
-    return startRun(false);
+    return startRun(false, endpoint);
   }
   if (payload.refused) {
+    // Every named refusal /run can answer (ue.platform, aircraft.mesh,
+    // preview.scale, render.host_parity, run.busy, ...) in the ONE
+    // shape the validation verdict uses: the constraint once, the
+    // message, and the refused value against its limit.
     $("status").innerHTML =
-      `<span class="verdict-refused">refused: ${payload.refused}` +
-      (payload.message ? ` — ${payload.message}` : "") + `</span>`;
+      `<span class="verdict-refused">refused — ` +
+      `${refusalWords(payload, "requested")}</span>`;
     return;
   }
   activeRun = payload.run_id;
   try { localStorage.setItem("flightsim.lastRun", activeRun); } catch (e) {}
+  // The server's resolved word, never a page-side fallback.
   $("status").textContent = `run ${activeRun} started (spec ` +
-    `${payload.digest.slice(0, 16)})`;
+    `${payload.digest.slice(0, 16)}; render: ${payload.render})`;
   $("clipArea").innerHTML = "";
   poll();
 }
@@ -457,25 +571,554 @@ async function poll() {
     `${new Date(e.t * 1000).toLocaleTimeString()}  ${e.status}` +
     (e.detail ? ` — ${e.detail}` : "")).join("\n");
   $("status").textContent = line;
-  if (run.status === "done") {
+  // A run that ended -- either way -- gets the whole page: a run that
+  // ended badly left files too (its provenance, status log, JSBSim
+  // log; on a short engine pass the manifest, verify.json, the
+  // previews and the partial frame set), and its refusal belongs in
+  // the card, not only in the status text. Nothing is drawn while the
+  // run is live.
+  if (runIsTerminal(run)) {
     $("clipArea").innerHTML =
       `<div class="clipRow"><div class="clipMain">` +
       `<div class="dim">scene: ${run.scene.label || run.scene.kind}</div>` +
-      `<video id="clipVideo" controls src="/runs/${activeRun}/clip.mp4">` +
-      `</video>` +
-      `<div class="dim"><a style="color:#6fb3e0" ` +
-      `href="/runs/${activeRun}/provenance.json">provenance</a> · ` +
-      `<a style="color:#6fb3e0" ` +
-      `href="/runs/${activeRun}/telemetry.json">telemetry</a></div>` +
+      clipHtml(activeRun, run) +
       `<div id="pathArea"></div>` +
       `</div><div class="aeroSide" id="aeroSide"></div></div>` +
+      `<div id="captureArea"></div>` +
+      `<div id="filesArea"></div>` +
       `<div id="effectArea"></div>`;
-    initAeroPanel(activeRun, run);
-    initFlightPath(activeRun, run);
+    renderCapture(run);
+    // The files listing is fetched ONCE and shared: the strip, the
+    // galleries and the flight path are all drawn from files the
+    // server listed for this run, never from a route guessed here.
+    const listing = await initFilesPanel(activeRun, run);
+    if (run.clip) initAeroPanel(activeRun, run);
+    initFlightPath(activeRun, run, listing);
     initEffectReport(activeRun);
-  } else if (run.status !== "failed") {
+  } else {
     setTimeout(poll, 2000);
   }
+}
+
+// ===================== capture geometry + downloads =======================
+// Camera Phase 1's deliverable, on the page: how many frames each camera
+// captured (an exact count is a CONTRACT, so it is shown as one), the
+// verifier's own checks rendered from verify.json as run (never re-derived
+// here), and one download per artefact class the run wrote.
+//
+// Everything between PAGE_CAPTURE_BEGIN and PAGE_CAPTURE_END is PURE: HTML
+// from the server's own JSON, no DOM, no fetch. tests/test_webapp_capture.py
+// runs that block verbatim under node against the real /runs/{id} and
+// /files payloads, so the words the card prints are pinned by a test.
+// PAGE_CAPTURE_BEGIN
+function esc(text) {
+  return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// The page's ONE refusal shape -- the validation verdict's, which is
+// core.scenario.validate.Violation's: "[constraint] message (requested
+// X unit, limit Y unit)". Every refusal the server answers carries the
+// same keys (constraint, message, actual, limit, unit; a capture
+// refusal keeps its constraint under "refused"), so a pre-run verdict
+// line, a /run refusal in the status and a mid-run refusal in the
+// capture card read alike. ``verb`` says what the value was: what the
+// user asked for ("requested") or what the run found ("measured"). The
+// value clause appears only when both numbers exist; a message that
+// is missing falls back to the refusal's own text, never to nothing.
+function refusalWords(r, verb) {
+  const constraint = r.constraint || r.refused;
+  const message = r.message || r.reason || r.refused;
+  const unit = r.unit ? ` ${esc(r.unit)}` : "";
+  const value = r.actual != null && r.limit != null
+    ? ` (${verb} ${esc(r.actual)}${unit}, limit ${esc(r.limit)}${unit})` : "";
+  return `<b>[${esc(constraint)}]</b> ${esc(message)}${value}`;
+}
+
+// The page's ONE terminal rule: a run that ended -- done or failed --
+// gets its clip words, its capture card and its files panel. poll()
+// asks this and nothing else, so a failed run can never fall back to
+// the status text alone.
+function runIsTerminal(run) {
+  return run.status === "done" || run.status === "failed";
+}
+
+// The clip, or why there is none, in the run's own words: a headless
+// run never had an engine pass; a failed engine run stopped before the
+// clip (the status line names where); a frames run whose by-product did
+// not encode says so and points at the frame set.
+function clipHtml(runId, run) {
+  if (run.clip) {
+    return `<video id="clipVideo" controls src="/runs/${runId}/clip.mp4">` +
+      `</video>` +
+      (run.render === "frames"
+        ? `<div class="dim">clip: a by-product of camera 0's rendered ` +
+          `frames shown at their scheduled instants (clip time = ` +
+          `simulation time); the frame set below is the deliverable</div>`
+        : "");
+  }
+  if (run.render === "none") {
+    return `<div class="dim">no clip: this was a headless run (the geometry ` +
+      `below is the deliverable; no engine pass ran)</div>`;
+  }
+  if (run.status === "failed") {
+    return `<div class="dim">no clip: the run <span class="verdict-refused">` +
+      `FAILED</span> before a clip was encoded — ${esc(run.detail)}</div>`;
+  }
+  return `<div class="dim">no clip: the by-product clip was not encoded ` +
+    `(the status lines say why); the frame set below is the deliverable</div>`;
+}
+
+// What a failed run's card says beside its counts: the run's own last
+// status line (the constraint and the offending value on a refusal;
+// the camera and the shortfall on a short engine pass; the check on a
+// failed closure), in the verdict's colour. Empty on a run that ended
+// "done".
+function failureWords(run) {
+  if (run.status !== "failed") return "";
+  const what = run.render === "frames" && String(run.detail).startsWith("[render.frames]")
+    ? "engine pass FAILED" : "run FAILED";
+  return ` <span class="verdict-refused">(${what}: ${esc(run.detail)})</span>`;
+}
+
+// The count contract for one camera, in the verifier's three words. A
+// headless or clip-only run says "0 rendered" and why -- never a preview
+// count dressed as frames.
+function countWords(c, render) {
+  const scheduled = c.scheduled ?? c.frames;
+  if ((c.rendered ?? 0) > 0 || render === "frames") {
+    return `${scheduled} scheduled, ${c.rendered ?? 0} rendered, ` +
+           `${c.verified ?? 0} verified`;
+  }
+  return `${scheduled} scheduled, 0 rendered (` +
+         `${render === "clip" ? "clip only" : "headless"}), previews only`;
+}
+
+// One button per artefact class the run actually wrote (the server's
+// /files "downloads": frames.zip, manifest, telemetry, clip, everything),
+// each with its note. A class the run did not write is not offered.
+function downloadStripHtml(runId, downloads) {
+  if (!downloads || !downloads.length) return "";
+  const buttons = downloads.map(d =>
+    `<a class="dl dl-${esc(d.class)}" href="/runs/${runId}/${esc(d.href)}" ` +
+    `title="${esc(d.note)}">${esc(d.label)}</a>` +
+    `<span class="dim dlnote">${esc(d.note)}</span>`).join("");
+  return `<div class="dlstrip"><b>downloads</b> ${buttons}</div>`;
+}
+
+// Why the previews are what the gallery shows, in the server's own
+// words: the machine's recorded reason for having no engine, the
+// clip-only choice, or an engine pass that rendered nothing.
+function fallbackWords(run) {
+  if (run.render === "clip") {
+    return "clip-only run; choose Render frames and clip for the frame set";
+  }
+  if (run.render === "frames") {
+    return "the engine pass rendered no frame for this camera (the run's " +
+           "status names the failure)";
+  }
+  // The platform gate's own sentence, once: it already begins "no
+  // engine on this OS: ...", so no prefix -- the same words /status
+  // and the CLI print.
+  return run.engine_reason
+    ? run.engine_reason
+    : "headless run by choice; choose Render frames and clip for the frame set";
+}
+
+// A rendered frame the verifier REJECTED (its /files entry carries
+// verify.json's per-frame engine-parity verdict) is captioned "parity
+// FAIL: <the verifier's own sentence for that frame>" in the FAIL
+// colour with a red border, so a short or dishonest pass shows WHICH
+// thumbnails failed, not only how many. A frame that passed, and a
+// preview (never graded), carry no clause.
+function parityFailed(it) {
+  return !!(it.parity && it.parity.ok === false);
+}
+
+function parityCaption(it) {
+  if (!parityFailed(it)) return "";
+  const why = (it.parity.problems || [])[0] || "rejected by engine parity";
+  return ` <span class="verdict-refused">— parity FAIL: ${esc(why)}</span>`;
+}
+
+function thumbsHtml(runId, cameraId, items, kind) {
+  return `<div class="thumbs" data-camera="${esc(cameraId)}" data-kind="${kind}">` +
+    items.map(it =>
+      `<figure class="thumb${parityFailed(it) ? " parity-fail" : ""}">` +
+      `<a href="/runs/${runId}/file/${esc(it.file)}" ` +
+      `target="_blank"><img loading="lazy" src="/runs/${runId}/file/${esc(it.file)}" ` +
+      `data-frame="/runs/${runId}/file/${esc(it.file)}"` +
+      (it.overlay ? ` data-overlay="/runs/${runId}/file/${esc(it.overlay)}"` : "") +
+      `></a><figcaption class="dim">#${it.index} t=${Number(it.t_s).toFixed(3)} s` +
+      `${parityCaption(it)}</figcaption></figure>`).join("") + `</div>`;
+}
+
+// One camera's gallery: the heading is the count contract in the
+// verifier's words; the pictures are EVERY rendered frame the server
+// listed (captioned with index and instant from the manifest, the
+// overlay a toggle away). The contact sheet is a mosaic of the
+// PREVIEWS, so on a frames run it lives inside the previews'
+// disclosure with them -- the first picture under a rendered count is
+// always a rendered frame. With no rendered frame the section is the
+// previews, labelled as the fallback with the reason, the sheet above
+// them, and a count shown is always the number of pictures shown
+// ("showing k of N").
+function galleryHtml(runId, run, gallery) {
+  const counts = (run.capture && run.capture.cameras || []).find(
+    c => c.camera_id === gallery.camera_id) || {scheduled: gallery.scheduled};
+  const heading = `<b>${esc(gallery.camera_id)}</b>: ${countWords(counts, run.render)}`;
+  const sheet = gallery.contact_sheet
+    ? `<div><a href="/runs/${runId}/file/${esc(gallery.contact_sheet)}" ` +
+      `target="_blank"><img class="sheet" src="/runs/${runId}/file/` +
+      `${esc(gallery.contact_sheet)}"></a>` +
+      `<div class="dim">contact sheet: every preview of this camera with ` +
+      `its index and time</div></div>` : "";
+  const frames = gallery.frames || [];
+  const previews = gallery.previews || [];
+  if (frames.length) {
+    const overlays = frames.filter(f => f.overlay).length;
+    const toggle = overlays
+      ? ` <label class="dim"><input type="checkbox" ` +
+        `onchange="toggleOverlays('${esc(gallery.camera_id)}', this.checked)"> ` +
+        `show the reprojected-geometry overlays (${overlays} of ${frames.length})</label>`
+      : "";
+    const previewBlock = previews.length || sheet
+      ? `<details><summary class="dim">geometry previews (not frames): ` +
+        `${previews.length} shown` + (sheet ? ", and their contact sheet" : "") +
+        `</summary>` + sheet +
+        thumbsHtml(runId, gallery.camera_id, previews, "previews") + `</details>`
+      : "";
+    const failed = frames.filter(parityFailed).length;
+    const failedWords = failed
+      ? ` <span class="verdict-refused">— ${failed} of them failed engine ` +
+        `parity (captioned and outlined below)</span>` : "";
+    return `<div class="gallery">${heading} <span class="dim">— showing ` +
+      `${frames.length} of ${counts.rendered ?? frames.length} rendered ` +
+      `frame(s)</span>${failedWords}${toggle}` +
+      thumbsHtml(runId, gallery.camera_id, frames, "frames") + previewBlock +
+      `</div>`;
+  }
+  return `<div class="gallery">${heading}<div><b>previews</b> ` +
+    `<span class="dim">(fallback: ${esc(fallbackWords(run))}; showing ` +
+    `${previews.length} of ${previews.length} preview(s), which are NOT ` +
+    `frames)</span></div>${sheet}` +
+    thumbsHtml(runId, gallery.camera_id, previews, "previews") + `</div>`;
+}
+
+// The verifier's table, the same rows flightsim.verify prints: CHECK,
+// STATUS, MEASURED, TOLERANCE, WHERE from verify.json's own "table"
+// (its cells are measured_text / tolerance_text / where; an AWAITING or
+// SKIPPED row carries its reason in WHERE), one row per check in the
+// four states' own colours, the prose detail on hover and -- only for a
+// row that did not PASS -- as a second line, exactly as the CLI does.
+function verificationTableHtml(v) {
+  const checks = v.checks || [];
+  const byName = {};
+  checks.forEach(c => { byName[c.name] = c; });
+  const rows = v.table || checks.map(c => c.ok === null
+    ? [c.name, c.status || "AWAITING", "-", "-", c.skipped_reason || c.detail]
+    : [c.name, c.status || (c.ok ? "PASS" : "FAIL"),
+       c.measured_text ?? c.detail, c.tolerance_text ?? "-", c.where || "-"]);
+  const colour = {PASS: "#6fd08c", FAIL: "#e06f6f", AWAITING: "#d9b85c",
+                  SKIPPED: "#9fb4c7"};
+  const body = rows.map(row => {
+    const check = byName[row[0]] || {};
+    const status = row[1];
+    const detail = check.detail || "";
+    const line = status === "PASS" ? "" :
+      `<tr class="detail"><td></td><td colspan="4" class="dim">` +
+      `[${esc(status)}] ${esc(row[0])}: ${esc(detail)}</td></tr>`;
+    return `<tr class="check check-${esc(status)}" title="${esc(detail)}">` +
+      `<td>${esc(row[0])}</td>` +
+      `<td><b style="color:${colour[status] || "#d8dde2"}">${esc(status)}</b></td>` +
+      `<td>${esc(row[2])}</td><td>${esc(row[3])}</td>` +
+      `<td class="dim">${esc(row[4])}</td></tr>` + line;
+  }).join("");
+  return `<table class="verify"><thead><tr><th>CHECK</th><th>STATUS</th>` +
+    `<th>MEASURED</th><th>TOLERANCE</th><th>WHERE</th></tr></thead>` +
+    `<tbody>${body}</tbody></table>`;
+}
+
+// A camera's keyframed moves, as review-table rows after its fields.
+// A move is data inside the camera record ({t_s, and any of the mode's
+// position keys, aim keys or focal_length_mm}: one recorded decision,
+// carried verbatim, digest-relevant) that the pose track interpolates
+// linearly between keyframes and holds outside them. The page used to
+// drop them, so a camera that moved showed only its starting fields.
+// Each row: the keyframe's place in the sequence, its instant and
+// every keyed field at it as an INPUT with the field's own unit (from
+// the camera's field rows; edits write back into
+// dict.cameras[i].moves[k] through editedSpecDict), the source column
+// the list's RECORDED source word (cam.moves_source, in that source's
+// own colour, with its note) -- or, when the spec recorded none,
+// "spec data (no recorded source)" in the default colour, never the
+// user's green. No moves, no rows.
+function cameraMovesHtml(cam) {
+  const moves = cam.moves || [];
+  if (!moves.length) return "";
+  const units = {t_s: "s"};
+  (cam.fields || []).forEach(f => { units[f.name] = f.unit || ""; });
+  const key = `cameras[${cam.index}].moves`;
+  const source = cam.moves_source
+    ? `<td class="src-${esc(cam.moves_source)}" data-src="${esc(key)}">` +
+      `${esc(cam.moves_source)}</td>`
+    : `<td class="src-default" data-src="${esc(key)}">spec data (no ` +
+      `recorded source)</td>`;
+  const note = cam.moves_from ? `${esc(cam.moves_from)} &mdash; ` : "";
+  return moves.map((m, i) => {
+    const keyed = ["t_s"].concat(Object.keys(m).filter(k => k !== "t_s")).map(k =>
+      `${esc(k)} = <input data-name="${esc(key)}[${i}].${esc(k)}" ` +
+      `data-src-key="${esc(key)}" data-camera="${cam.index}" data-move="${i}" ` +
+      `data-field="${esc(k)}" value="${esc(m[k])}">` +
+      `${units[k] ? " " + esc(units[k]) : ""}`).join(", ");
+    return `<tr class="move"><td>&nbsp;&nbsp;move ${i + 1} of ${moves.length}</td>` +
+      `<td>${keyed}</td>${source}` +
+      `<td class="dim">${note}keyframe ${i + 1} of ${moves.length} (spec data, ` +
+      `digest-relevant): the pose track interpolates linearly to the next ` +
+      `keyframe and holds past the last</td></tr>`;
+  }).join("");
+}
+
+// The file a block of the card is rendered from, as a link beside it
+// (the verifier's tally to capture/verify.json, the closure heading to
+// capture/closure.json): the reader opens the number's source without
+// hunting for it in the files panel. Empty when the payload carries no
+// run id to build the route from.
+function fileLink(run, name) {
+  if (!run.run_id) return "";
+  return ` <a class="dim filelink" href="/runs/${esc(run.run_id)}/file/${esc(name)}" ` +
+    `target="_blank">${esc(name)}</a>`;
+}
+
+// The graded window, from closure.json's own fields, naming what was
+// actually graded: "settled half of 12 s (full duration: a frames run
+// steps the whole flight)"; on a clip run "settled half of 12 s (the
+// first 12 s, the clip's window, capped at 22 s)"; on a headless run
+// -- which has no clip to name -- "settled half of 12 s (the first 12
+// s, the same window a clip would cover, capped at 22 s)"; and when the
+// cap shortened the flight, "the first 22 s of the 120 s flight, ...".
+function closureWindowWords(cl, render) {
+  const fraction = cl.settle_fraction ?? 0.5;
+  const settled = fraction === 0.5 ? "settled half"
+    : `settled last ${Math.round((1 - fraction) * 100)}%`;
+  if (cl.duration_s == null) return settled;
+  const graded = Number(cl.duration_s);
+  let window;
+  if (cl.window === "full duration") {
+    window = "full duration: a frames run steps the whole flight";
+  } else {
+    const whole = cl.spec_duration_s != null && Number(cl.spec_duration_s) > graded
+      ? ` of the ${Number(cl.spec_duration_s).toFixed(0)} s flight` : "";
+    const what = render === "clip" ? "the clip's window"
+      : "the same window a clip would cover";
+    window = `the first ${graded.toFixed(0)} s${whole}, ${what}, capped at ` +
+      `${cl.clip_seconds_cap ?? "?"} s`;
+  }
+  return `${settled} of ${graded.toFixed(0)} s (${window})`;
+}
+
+function captureCardHtml(run) {
+  if (!run.capture) return "";
+  if (run.capture.refused) {
+    // The constraint, the message and -- when the refusal measured one
+    // -- the offending value against its limit, in the validation
+    // verdict's own shape.
+    return `<div class="card"><div id="captureDownloads"></div>` +
+      `<b>capture refused</b> — ` +
+      `<span class="verdict-refused">` +
+      `${refusalWords(run.capture, "measured")}</span>` +
+      (run.status === "failed"
+        ? `<div class="dim">the run ended failed on this refusal; every ` +
+          `file it wrote before refusing is listed below</div>`
+        : "") + `</div>`;
+  }
+  // The count contract, per camera, in the three words the verifier
+  // backs with files: scheduled (the manifest), rendered (PNGs on disk),
+  // verified (engine parity).
+  const rendered = run.render === "frames";
+  const cameras = (run.capture.cameras || []).map(c =>
+    `<li><b>${esc(c.camera_id)}</b>: ${countWords(c, run.render)}</li>`).join("");
+  const v = run.capture.verification || {checks: []};
+  // Four states, the verifier's own: PASS, FAIL, AWAITING (the
+  // engine-parity check with no engine frames to grade) and SKIPPED (a
+  // check with nothing to grade: cross-view consistency on one camera)
+  // -- the last two neither passed nor failed, never coloured as either,
+  // and named in the tally with the skip's reason.
+  const checks = verificationTableHtml(v);
+  const skipped = (v.skipped || []).map(s => `${s.name} skipped (${s.reason})`);
+  const notRun = skipped.concat((v.awaiting || []).length
+    ? [`${v.awaiting.join(", ")} awaiting engine frames`] : []);
+  // The tally is the verifier's own summary line (the one the CLI
+  // prints); the page composes one only for a verify.json without it.
+  const tally = (v.summary
+    ? `<b>${esc(v.summary)}</b>`
+    : `<b>verification ${v.ok ? "PASSED" : "FAILED"}</b>` + (notRun.length
+      ? ` <span class="dim">(${v.passed}/${v.ran} checks ran; ` +
+        `${esc(notRun.join("; "))})</span>` : ""))
+    + fileLink(run, "capture/verify.json");
+  const capped = run.capture.previews_capped
+    ? ` <span class="dim">(previews capped at ${run.capture.preview_cap}; ` +
+      `the manifest carries every frame)</span>` : "";
+  // What the previews are: the drawn resolution, the scale when not 1,
+  // the MEASURED seconds per frame, and the overlays once frames exist.
+  const res = run.capture.preview_resolution;
+  const previewWords = res
+    ? ` <span class="dim">(previews at ${res[0]}x${res[1]}` +
+      (run.capture.preview_scale > 1 ? `, 1/${run.capture.preview_scale} scale` : "") +
+      `, ${(run.capture.preview_s_per_frame ?? 0).toFixed(3)} s/frame` +
+      `; a contact sheet per camera` +
+      ((run.capture.overlays ?? 0) > 0
+        ? `; ${run.capture.overlays} overlay(s) of the reprojected geometry over the rendered frames`
+        : "") + `)</span>` : "";
+  // Package C: the paired closed-loop run's closure report -- commanded vs
+  // achieved by name. Rendered from closure.json as graded, never re-judged.
+  const cl = run.capture.closure;
+  let closure = "";
+  if (cl && cl.refused) {
+    closure = `<b>closure unavailable</b> — <span class="verdict-refused">` +
+      `[${esc(cl.refused)}] ${esc(cl.message)}</span>`;
+  } else if (cl) {
+    // Every number with its unit, and WHICH flight was graded: the
+    // window closure.json records (the clip's capped window, or the
+    // full duration a frames run steps) and its length.
+    const rows = cl.checks.map(c =>
+      `<li><b style="color:${c.ok ? "#6fd08c" : "#e06f6f"}">` +
+      `${c.ok ? "ok" : "FAIL"}</b> ${esc(c.name)}: commanded ` +
+      `${c.commanded.toFixed(2)} ${esc(c.unit)}, achieved ${c.achieved.toFixed(2)} ` +
+      `${esc(c.unit)} <span class="dim">(tol ${c.tolerance} ${esc(c.unit)})</span></li>`).join("");
+    closure = `<b>closure ${cl.ok ? "PASSED" : "FAILED"}</b> ` +
+      `<span class="dim">— the same spec flown closed loop, graded over the ` +
+      `${closureWindowWords(cl, run.render)}</span>` +
+      fileLink(run, "capture/closure.json") + `<ul>${rows}</ul>`;
+  }
+  // The failure clause (failureWords) sits right after the counts it
+  // qualifies: "8 scheduled, 3 rendered, 3 verified (engine pass
+  // FAILED: ...)", before the preview count.
+  const totals = (run.capture.rendered ?? 0) > 0 || rendered
+    ? `${run.capture.scheduled ?? run.capture.frames} scheduled, ` +
+      `${run.capture.rendered ?? 0} rendered, ${run.capture.verified ?? 0} ` +
+      `verified${failureWords(run)}; ${run.capture.previews} geometry preview(s)`
+    : `${run.capture.scheduled ?? run.capture.frames} scheduled, 0 rendered ` +
+      `(${run.render === "clip" ? "clip only" : "headless: no engine pass"})` +
+      `${failureWords(run)}; ` +
+      `${run.capture.previews} geometry preview(s), which are NOT frames`;
+  // The download strip and the per-camera galleries are filled from
+  // /files once it answers (initFilesPanel): the page never names a
+  // file the server did not list. Until then the galleries' holder
+  // carries the per-camera count list alone.
+  return `<div class="card"><div id="captureDownloads"></div>` +
+    `<b>capture geometry</b> — ` + totals + capped + previewWords +
+    `<div id="captureGalleries"><ul>${cameras}</ul></div>` +
+    tally + checks + closure + `</div>`;
+}
+
+// Every artefact the run wrote, as a link with its note. The server
+// lists them; the page never guesses a path, so a file that is not there
+// simply does not appear rather than becoming a dead link. Image classes
+// (frames, overlays, previews) are one row each with their count; the
+// pictures themselves are in the capture card's galleries.
+function filesHtml(runId, files) {
+  if (!files || !files.length) return "";
+  const rows = files.map(f => {
+    if (f.images) {
+      return `<li><b>${esc(f.name)}</b> <span class="dim">— ${esc(f.note)} ` +
+             `(${f.images.length} file(s), in the capture card's gallery)</span></li>`;
+    }
+    const kb = (f.bytes / 1024).toFixed(1);
+    return `<li><a style="color:#6fb3e0" ` +
+           `href="/runs/${runId}/file/${esc(f.name)}">${esc(f.name)}</a> ` +
+           `<span class="dim">${kb} kB — ${esc(f.note)}</span></li>`;
+  }).join("");
+  return `<div class="card"><b>files from this run</b> ` +
+    `<a style="color:#6fb3e0" href="/runs/${runId}/bundle.zip">` +
+    `download all (.zip)</a><ul>${rows}</ul></div>`;
+}
+// The telemetry file the flight-path panel is drawn from, chosen from
+// the run's OWN file listing: a rendered run's top-level telemetry.json
+// (the rendered flight's recorder) when the run wrote one, else the
+// capture flight's capture/telemetry.json (the headless flight the
+// manifest describes -- the only flight a headless run flew), else
+// null and the panel draws nothing. The route is the whitelist's
+// (/runs/<id>/file/<name>), so the chart can never be drawn from a
+// file the files panel does not list, and the formula line names it.
+function telemetrySource(run, files) {
+  const names = new Set((files && files.files || []).map(f => f.name));
+  if (names.has("telemetry.json")) {
+    return {name: "telemetry.json", href: "file/telemetry.json",
+            flight: "the rendered flight"};
+  }
+  if (names.has("capture/telemetry.json")) {
+    return {name: "capture/telemetry.json",
+            href: "file/capture/telemetry.json",
+            flight: "the headless capture flight the manifest describes"};
+  }
+  return null;
+}
+// PAGE_CAPTURE_END
+
+function renderCapture(run) {
+  const holder = $("captureArea");
+  if (!holder || !run.capture) return;
+  holder.innerHTML = captureCardHtml(run);
+}
+
+async function initFilesPanel(runId, run) {
+  const holder = $("filesArea");
+  if (!holder) return;
+  // A listing that did not arrive -- an HTTP error, a dead fetch, or an
+  // empty list -- is said by name where the strip would be (inside the
+  // card, else the files panel), so a card without downloads is never
+  // mistaken for a run that wrote nothing. Returns null when no
+  // listing arrived: the flight path then says so too.
+  const say = words => {
+    const line = `<div class="verdict-refused">${words}</div>`;
+    const stripHolder = $("captureDownloads");
+    if (stripHolder) stripHolder.innerHTML = line;
+    holder.innerHTML = stripHolder ? "" : line;
+  };
+  let payload = null;
+  try {
+    const response = await fetch(`/runs/${runId}/files`);
+    if (!response.ok) {
+      say(`files: /runs/${esc(runId)}/files answered HTTP ${response.status} ` +
+          `— downloads and galleries unavailable`);
+      return null;
+    }
+    payload = await response.json();
+  } catch (error) {
+    say(`files: /runs/${esc(runId)}/files could not be fetched ` +
+        `(${esc(error)}) — downloads and galleries unavailable`);
+    return null;
+  }
+  const files = payload.files || [];
+  if (!files.length) {
+    say(`files: this run listed no files (/runs/${esc(runId)}/files answered ` +
+        `an empty list) — nothing to download, no gallery to show`);
+    return payload;
+  }
+  const strip = downloadStripHtml(runId, payload.downloads || []);
+  const stripHolder = $("captureDownloads");
+  if (stripHolder) stripHolder.innerHTML = strip;
+  const galleries = $("captureGalleries");
+  if (galleries && run) {
+    galleries.innerHTML = (payload.galleries || []).map(
+      g => galleryHtml(runId, run, g)).join("");
+  }
+  holder.innerHTML = (stripHolder ? "" : strip) + filesHtml(runId, files);
+  return payload;
+}
+
+// Swap one camera's frame thumbnails for their overlays (the manifest's
+// geometry drawn over the engine's pixels) and back. Both images are
+// files the server listed; nothing is drawn here.
+function toggleOverlays(cameraId, on) {
+  document.querySelectorAll(
+    `.thumbs[data-kind="frames"][data-camera="${cameraId}"] img[data-overlay]`)
+    .forEach(img => {
+      img.src = on ? img.dataset.overlay : img.dataset.frame;
+      const link = img.parentElement;
+      if (link && link.tagName === "A") link.href = img.src;
+    });
 }
 
 // ===================== the aerodynamics side panel ========================
@@ -486,17 +1129,33 @@ async function poll() {
 // video currentTime maps 1:1 to recorded FDM t (the clip starts at t = 0);
 // the nearest recorded sample is shown.
 
-async function initFlightPath(runId, run) {
+async function initFlightPath(runId, run, files) {
   // Top-down ground track from the RECORDED lat/lon channels (the
   // recorder's own position samples -- nothing integrated or recomputed),
   // projected to metres about the first sample, with the run card's own
-  // tornado placement overlaid. Optional like the aero panel: absent
-  // telemetry omits the chart rather than approximating one.
+  // tornado placement overlaid. The file is the one telemetrySource
+  // picks from the run's listing (a rendered run's telemetry.json, else
+  // the headless capture/telemetry.json), fetched through the whitelist
+  // route the files panel links; a run that listed no telemetry file
+  // says so and draws nothing rather than approximating a track.
   const holder = $("pathArea");
   if (!holder) return;
+  if (!files) {
+    holder.innerHTML = `<div class="dim" style="margin-top:.6rem">flight ` +
+      `path omitted: the file listing did not arrive (the files panel ` +
+      `says why), so no telemetry file can be named</div>`;
+    return;
+  }
+  const source = telemetrySource(run, files);
+  if (!source) {
+    holder.innerHTML = `<div class="dim" style="margin-top:.6rem">flight ` +
+      `path omitted: this run listed no telemetry file (nothing was ` +
+      `flown to record)</div>`;
+    return;
+  }
   let tele = null, card = null;
   try {
-    const r = await fetch(`/runs/${runId}/telemetry.json`);
+    const r = await fetch(`/runs/${runId}/${source.href}`);
     if (r.ok) tele = await r.json();
     const c = await fetch(`/runs/${runId}/card.json`);
     if (c.ok) card = await c.json();
@@ -533,8 +1192,9 @@ async function initFlightPath(runId, run) {
     `style="max-width:100%"></canvas>` +
     `<canvas id="profileCanvas" width="${W}" height="130" ` +
     `style="max-width:100%"></canvas>` +
-    `<div class="formula">ground track = the recorder's own lat/lon ` +
-    `channels (${cols.t.length} samples at ${tele.interval_s}s), ` +
+    `<div class="formula">ground track = ${esc(source.name)}'s own ` +
+    `lat/lon channels (${cols.t.length} samples at ${tele.interval_s} s; ` +
+    `${esc(source.flight)}), ` +
     `projected to metres about the first sample; colour runs start ` +
     `(blue) to end (amber); altitude profile from recorded altitude_m` +
     (tornado ? `; tornado core position and radius from the run card ` +

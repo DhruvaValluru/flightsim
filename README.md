@@ -63,14 +63,27 @@ One codebase, platform dispatch inside it (`core/util/platform.py`):
 | Prompt → LLM compile → spec → validate | ✓ | ✓ | ✓ |
 | Headless JSBSim physics + telemetry | ✓ | ✓ | ✓ |
 | Web app on localhost:8008, terrain baking, effect reports | ✓ | ✓ | ✓ |
-| Rendered video clips (Unreal Engine host) | ✓ | refused by name | ✓ after the build below |
+| Rendered clip (Unreal Engine host; *Clip only*, the preset pass) | ✓ after the build below: the flow every render calibration was measured on (Metal), before Camera Phase 1; not re-run since | refused by name | after the build below: observed once, on the pre-rewrite page flow, before 2026-09-03; the flow as it stands today not re-run there (`docs/CAMERA_PHASE1_REPORT.md` "Status today") |
+| Rendered frames per camera (the consume-poses pass; *Render frames and clip*) | code complete, NOT YET RUN on any engine (`docs/CAMERA_PHASE1_REPORT.md` "Status today" and "Engine verification (Windows)") | refused by name | code complete, NOT YET RUN on any engine (the same table; the steps await the user's Windows run) |
 
 Everything in the first three rows is pure Python and is exercised by CI
-on all three OSes. The UE render half runs on macOS (where every render
-calibration was measured, on Metal) and on Windows once the build steps
-below have produced the bridge -- until then Windows refuses as
-`ue.platform` with the exact missing piece, and the web app still
-delivers the headless half (spec, provenance, validation, telemetry).
+on all three OSes. The last two rows are the two things the engine
+produces, kept apart on purpose: a clip has been rendered on both
+engine platforms (dated above), the per-camera frame set has not been
+rendered on any -- its Python side is measured on an honest engine
+stub and its engine side awaits the Windows verification the report
+spells out. The UE render half runs on macOS (where every render
+calibration was measured, on Metal) and on Windows, on each once the
+engine is installed at `UE_ROOT` (default `/Users/Shared/Epic Games/UE_5.5`
+or `C:\Program Files\Epic Games\UE_5.5`) AND the build steps below have
+produced the bridge -- until then BOTH refuse as `ue.platform` with the
+exact missing piece ("no engine on this machine: set UE_ROOT ..." or
+"FlightSimBridge not built: run scripts/ue_preflight.sh then
+scripts/build_ue.sh"), the run form's engine options are disabled with
+that reason and its default is Headless, and the web app still delivers
+the headless half (spec, provenance, validation, telemetry, the capture
+manifest, full-resolution geometry previews with a contact sheet per
+camera, and verification).
 The render calibrations were measured on Metal only, so on Windows run
 `experiments/gate6_visual.py` once after building: it re-measures the
 visual clauses from the rendered pixels on YOUR machine, which is the
@@ -234,12 +247,80 @@ frames, each with full recoverable geometry, engine or no engine:
 ```bash
 .venv/bin/python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo
 .venv/bin/python -m flightsim.verify runs/demo
+.venv/bin/python -m flightsim.capture examples/cameras_multi_cockpit.yaml --out runs/demo_b
+.venv/bin/python -m flightsim.verify runs/demo_b --against runs/demo   # temporal alignment, committed pair
+.venv/bin/python -m flightsim.verify runs/demo --corrupt quaternion    # watch geometry_recovery FAIL (exit 1)
+.venv/bin/python -m flightsim.verify runs/demo --corrupt flight        # the aircraft moved in EVERY view: only telemetry.json tells (flight_fidelity FAIL)
+.venv/bin/python -m flightsim.verify runs/demo --corrupt pose          # a camera moved 5 m, all else consistent: only the pose recomputed from scenario.yaml tells (pose_fidelity FAIL)
 ```
 
-Off macOS the pixel render refuses by name (`ue.platform`) while the
-capture manifest, geometry previews and verification complete; the
-refusal example (`examples/cameras_refusal.yaml`) shows a camera placed
-inside terrain refused as `camera.terrain_clearance`.
+Both commands print a header (digests, scene, flight, one line per
+camera), the per-camera table of scheduled instants, a verification
+table (`CHECK STATUS MEASURED TOLERANCE WHERE`) and a verdict line whose
+first word is the exit code's word (0 done/verified, 1 FAILED, 2
+REFUSED, 3 USAGE, 4 UNEXPECTED -- one table for both, `--help` prints
+it); `--json` gives the same as data; JSBSim's own console goes to
+`<out>/jsbsim.log`, never stdout. The expected output of every example
+is in `docs/CAMERA_PHASE1_REPORT.md`, verbatim from a dated run.
+
+Without the engine (Linux; macOS or Windows before the build above)
+the pixel render refuses by name (`ue.platform`, with the machine's
+reason) while the capture manifest, geometry previews (full resolution:
+terrain wireframe or ground grid with distance rings, horizon, the
+aircraft as a body scaled from the FDM's own span, the camera's
+boresight and field of view, a header with pose and lens;
+`contact_sheets/<camera>.png` per camera; 0.073-0.077 s/frame at
+1280x720 in the report's dated blocks, measured 2026-09-05 on the Linux
+machine that wrote them) and verification complete; the refusal
+example (`examples/cameras_refusal.yaml`) shows a camera placed inside
+terrain refused as `camera.terrain_clearance`. What runs on which
+platform TODAY, per deliverable and dated, is the "Status today" table
+at the top of `docs/CAMERA_PHASE1_REPORT.md`.
+
+With the engine (`--render frames`, the default where it exists) the
+same command renders exactly the scheduled PNGs per camera under
+`frames/<camera_id>/NNNN.png` -- one consume-poses pass per camera --
+and the verifier's `engine_parity` check grades every frame's applied
+pose against the solved one, and `overlays/<camera_id>/NNNN.png` draws
+the manifest's aircraft box, ground and horizon over every rendered
+frame so the check is visible; the clip is a by-product of camera 0.
+Without the engine that check reads `[AWAITING] engine_parity`, never
+a pass. The engine pass has NOT YET RUN on a real engine: the Windows
+verification steps, exact commands and expected output (the one
+command's stdout generated from the honest engine stub, the engine's
+own digits masked `x` until the log supplies them) are in
+`docs/CAMERA_PHASE1_REPORT.md` ("Engine verification (Windows)"),
+marked NOT YET RUN until measured there.
+
+**The same thing from the web app**, with nothing to download by hand:
+the run form carries the render choice -- **Render frames and clip**
+(engine, one pass per camera, the frame set is the deliverable),
+**Clip only** (today's clip, capture geometry beside it, nothing
+rendered as frames) or **Headless** (manifest, previews, verification;
+no engine, any machine) -- defaulting to the richest the machine
+supports, with unavailable options disabled and the reason shown; the
+choice is recorded in the run's provenance and the status line names
+what was produced. The page then lists every artefact the run wrote
+(rendered frames per camera, manifest, verification, previews,
+telemetry, card, provenance, the spec as run) as links, with a
+one-click `bundle.zip` for all of them, and shows per camera "N
+scheduled, M rendered, K verified" and the verifier's own checks. The
+capture is solved from its own headless flight and written under
+`capture/` beside that flight's telemetry, so a reader can always tell
+which host produced which number -- the run's top-level
+`telemetry.json` stays the rendered flight's.
+
+## Airborne physics, phase 2
+
+`docs/AIRBORNE_PHASE2_REPORT.md` is the report: the aircraft is trimmed
+in the spec's wind on both hosts, the control-sign probe and the
+performance model are measured at the engaging state, the TECS throttle
+loop is normalised by the measured thrust-to-weight authority, the
+altitude setpoint is raised ahead of terrain (or the run refuses
+`terrain.lookahead`), the lee rotor carries its word only when the FDM
+delivered turbulence, turns are coordinated from a measured sideslip
+gain, and every run's closure report reaches the page. Each number in
+the report reproduces from a script under `experiments/airborne/`.
 
 ## Run the tests
 
@@ -267,6 +348,8 @@ core/            zero Unreal dependency (§2.9)
   telemetry/     read-only observers
   terrain/       DEM ingestion, spectral synthesis, heightfield query, Landscape export
 experiments/     gates, sweeps, analysis, validation
+  airborne/      the phase-2 reconstruction measurements (every report number)
+analysis/        flight-dynamics audit, research ledger, the executed brief
 docs/vva/        V&V plan, report, accreditation statement
 ue/              Unreal project                    (Phase 5)
 docs/            VALIDITY.md, JSBSIM_CORRECTIONS.md, vva/

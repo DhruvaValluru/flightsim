@@ -105,15 +105,14 @@ def test_index_alignment_would_have_reported_a_divergence_that_is_not_there(tmp_
     assert all(r.max_difference < 1e-9 for r in results)
 
 
-def test_the_trim_snapshot_is_not_graded_but_the_flight_is(tmp_path):
-    """The first sample is the trim snapshot; in a wind case it predates the wind.
-
-    Measured on this build: the headless recorder force-samples the trimmed
-    state before the environment loop runs, so its first row of a 13 kt
-    headwind case reads 288 kt TAS against 301 kt one sample later. That
-    switch-on artifact must not be graded -- and nothing after it may be
-    forgiven. Host A here has the pre-wind first sample; both hosts agree
-    perfectly afterwards.
+def test_the_trim_snapshot_is_graded_and_must_carry_the_wind(tmp_path):
+    """Package A reverses the old exemption. The first sample IS the trim
+    snapshot, and it is graded: a headless host whose trim state predates
+    the wind (288 kt against the engine host's 301 kt, the case this test
+    used to forgive) now fails, because that mismatch is the defect --
+    the aircraft was trimmed in calm air and hit the wind as a step. With
+    the wind in the initial conditions both hosts' first rows agree, and
+    nothing after the first row was ever forgiven either.
     """
     def write(path, first_tas):
         times = [round(0.1 * (i + 1), 3) for i in range(100)]
@@ -124,15 +123,21 @@ def test_the_trim_snapshot_is_not_graded_but_the_flight_is(tmp_path):
         path.write_text(json.dumps({"columns": columns}), encoding="utf-8")
         return path
 
-    a = write(tmp_path / "h.json", 288.0)    # pre-wind trim snapshot
-    b = write(tmp_path / "u.json", 301.0)    # wind already acting
+    a = write(tmp_path / "h.json", 288.0)    # a calm-trim snapshot: the defect
+    b = write(tmp_path / "u.json", 301.0)    # wind already in the trim
+    results = {r.channel: r for r in compare(a, b)[0]}
+    assert not results["tas_kt"].ok
+    assert results["tas_kt"].max_difference == pytest.approx(13.0)
+
+    a = write(tmp_path / "h2.json", 301.0)   # both trimmed in the wind
     results = {r.channel: r for r in compare(a, b)[0]}
     assert results["tas_kt"].ok
     assert results["tas_kt"].max_difference < 1e-9
 
 
 def test_a_divergence_from_the_second_sample_onward_is_not_forgiven(tmp_path):
-    """Exactly one sample is exempt. The next one is the flight."""
+    """No sample is exempt any more (Package A); this test predates that
+    and still holds: a divergence anywhere, early or late, is a divergence."""
     def write(path, tas):
         times = [round(0.1 * (i + 1), 3) for i in range(100)]
         columns = {"t": times}

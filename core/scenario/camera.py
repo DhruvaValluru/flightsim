@@ -153,6 +153,16 @@ class CameraSpec:
     #: not Quantitys: the WHOLE list is one recorded decision, carried
     #: verbatim and digest-relevant.
     moves: List[Dict[str, Any]] = dc_field(default_factory=list)
+    #: The moves list's provenance -- the WHOLE list is one recorded
+    #: decision, so it carries one source word (a Source value: "user"
+    #: when a person wrote the keyframes, "derived" when a planner
+    #: did, ...) and one note, exactly like every field's, and both are
+    #: serialised beside the list (digest-relevant, as every source
+    #: is). None means the spec that carried the moves recorded no
+    #: source, and the table says so -- it never paints the list as
+    #: anybody's word.
+    moves_source: Optional[str] = None
+    moves_from: Optional[str] = None
 
     #: Canonical field order for serialisation and the rendered table.
     FIELD_ORDER = (
@@ -184,6 +194,19 @@ class CameraSpec:
                          frm=frm, std=current.std,
                          detail=dict(current.detail)))
 
+    def set_moves(self, moves: List[Dict[str, Any]], frm: str,
+                  source: Source = Source.USER) -> None:
+        """Replace the keyframed moves, recording who wrote them and
+        why: the list is one decision with one provenance."""
+        words = [s.value for s in Source]
+        word = getattr(source, "value", source)
+        if word not in words:
+            raise ValueError(f"moves source must be one of {words}, "
+                             f"not {source!r}")
+        self.moves = [dict(m) for m in moves]
+        self.moves_source = word
+        self.moves_from = frm
+
     def plan(self, name: str, value: Any, frm: str) -> None:
         """Move a camera field the SYSTEM chose. Same doctrine as the
         spec's: only defaulted/derived/model fields move; a user-stated
@@ -213,6 +236,12 @@ class CameraSpec:
         # "no moves" (the empty-list discipline the cameras list itself
         # follows on the spec).
         out["moves"] = [dict(m) for m in self.moves]
+        # A list of keyframes carries its provenance beside it (None
+        # when the spec recorded none); an empty list has nothing to
+        # have a source, so its canonical form stays the one spelling.
+        if self.moves:
+            out["moves_source"] = self.moves_source
+            out["moves_from"] = self.moves_from
         return out
 
     @classmethod
@@ -224,7 +253,8 @@ class CameraSpec:
             except KeyError as exc:
                 raise ValueError(
                     f"camera is missing required field {name}") from exc
-        unknown = set(data) - set(cls.FIELD_ORDER) - {"moves"}
+        unknown = (set(data) - set(cls.FIELD_ORDER)
+                   - {"moves", "moves_source", "moves_from"})
         if unknown:
             raise ValueError(
                 f"camera carries unknown fields {sorted(unknown)}; "
@@ -234,7 +264,17 @@ class CameraSpec:
                 isinstance(m, dict) for m in moves):
             raise ValueError("camera 'moves' must be a list of keyframe "
                              "mappings")
-        return cls(moves=[dict(m) for m in moves], **kwargs)
+        source = data.get("moves_source")
+        if source is not None and source not in [s.value for s in Source]:
+            raise ValueError(
+                f"camera 'moves_source' must be one of "
+                f"{[s.value for s in Source]} or absent, not {source!r}; "
+                f"refusing to guess who wrote the keyframes")
+        frm = data.get("moves_from")
+        if frm is not None and not isinstance(frm, str):
+            raise ValueError("camera 'moves_from' must be a string")
+        return cls(moves=[dict(m) for m in moves], moves_source=source,
+                   moves_from=frm, **kwargs)
 
     # -- construction ---------------------------------------------------
 

@@ -111,6 +111,14 @@ namespace
 		       OutPixel.Y >= 0 && OutPixel.Y < Height;
 	}
 
+	// Whether a world point lies in front of the capture (the same test
+	// ProjectToPixel applies before projecting), so a screen box can skip
+	// corners that have no pixel rather than read (-1, -1) as one.
+	bool InFrontOfCapture(const USceneCaptureComponent2D* Capture, const FVector& WorldCm)
+	{
+		return Capture->GetComponentTransform().InverseTransformPosition(WorldCm).X > 1.0;
+	}
+
 	// A real aircraft mesh, assembled from the converter's manifest: one
 	// static mesh for the body and one per control surface, each surface
 	// under a hinge scene component at the hinge line the FlightGear model
@@ -676,6 +684,19 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	int32 ConsumedCameraIndex = 0;
 	double CameraOriginXMetres = 0.0;
 	double CameraOriginYMetres = 0.0;
+	// The camera's scheduled capture instants (the card's capture_times_s):
+	// in consume-poses mode the pass captures ONLY at these, one PNG each,
+	// named by the manifest index -- never on the render fps.
+	TArray<double> ScheduledTimes;
+	double ConsumeSensorWidthMm = 0.0;
+	double ConsumeSensorHeightMm = 0.0;
+	// Horizontal field of view from the card's intrinsics, so the pixels
+	// and the manifest's fx/fy describe the same lens.
+	auto HorizontalFovDegrees = [&ConsumeSensorWidthMm](double FocalMm) -> float
+	{
+		return static_cast<float>(2.0 * FMath::RadiansToDegrees(
+			FMath::Atan(ConsumeSensorWidthMm / (2.0 * FocalMm))));
+	};
 	{
 		FParse::Value(*Params, TEXT("camera-index="), ConsumedCameraIndex);
 		FString CardText;
@@ -715,6 +736,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			const TArray<TSharedPtr<FJsonValue>>* Yaws = nullptr;
 			const TArray<TSharedPtr<FJsonValue>>* Pitches = nullptr;
 			const TArray<TSharedPtr<FJsonValue>>* Rolls = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Focals = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* CaptureTimesJson = nullptr;
 			if (!(*PosesJson)->TryGetArrayField(TEXT("t_s"), Times) ||
 			    !(*PosesJson)->TryGetArrayField(TEXT("north_m"), Norths) ||
 			    !(*PosesJson)->TryGetArrayField(TEXT("east_m"), Easts) ||
@@ -762,13 +785,116 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			{
 				return Fail(Error);
 			}
+			// The lens track (per-sample focal length, mm) when the card
+			// carries one; the block's constant intrinsics otherwise.
+			double BlockFocalMm = 0.0;
+			if ((*PosesJson)->TryGetArrayField(TEXT("focal_length_mm"), Focals) &&
+			    Focals != nullptr && Focals->Num() == Count)
+			{
+				TArray<double> TrackFocals;
+				TrackFocals.Reserve(Count);
+				for (int32 i = 0; i < Count; ++i)
+				{
+					TrackFocals.Add((*Focals)[i]->AsNumber());
+				}
+				BlockFocalMm = TrackFocals[0];
+				if (!Director->SetPoseFocalLengths(MoveTemp(TrackFocals), Error))
+				{
+					return Fail(Error);
+				}
+			}
+			else
+			{
+				return Fail(TEXT("consume-poses: the camera block carries no "
+				                 "per-sample focal_length_mm; refusing to guess "
+				                 "the lens"));
+			}
+			// The schedule: capture ONLY at these instants. A block without one
+			// is refused -- a frame count derived from the render fps is
+			// exactly the failure this pass exists to end.
+			if (!CameraJson->TryGetArrayField(TEXT("capture_times_s"), CaptureTimesJson) ||
+			    CaptureTimesJson == nullptr || CaptureTimesJson->Num() == 0)
+			{
+				return Fail(TEXT("consume-poses: the camera block carries no "
+				                 "capture_times_s; refusing to capture on the render "
+				                 "fps instead of the schedule"));
+			}
+			ScheduledTimes.Reserve(CaptureTimesJson->Num());
+			for (int32 i = 0; i < CaptureTimesJson->Num(); ++i)
+			{
+				const double Scheduled = (*CaptureTimesJson)[i]->AsNumber();
+				if (i > 0 && Scheduled <= ScheduledTimes.Last())
+				{
+					return Fail(TEXT("consume-poses: capture_times_s must be "
+					                 "strictly increasing"));
+				}
+				ScheduledTimes.Add(Scheduled);
+			}
+			// Refuse BEFORE the loop when the solved track does not cover the
+			// schedule: the last scheduled instant must lie inside the track's
+			// span, or the camera would be asked for a pose nobody solved.
+			if (ScheduledTimes[0] < Director->GetTrackStartSeconds() - 1.0e-6 ||
+			    ScheduledTimes.Last() > Director->GetTrackEndSeconds() + 1.0e-6)
+			{
+				return Fail(FString::Printf(
+					TEXT("consume-poses: the schedule spans t=%.3f..%.3f s but the "
+					     "solved track covers only %.3f..%.3f s; the track does not "
+					     "cover the run"),
+					ScheduledTimes[0], ScheduledTimes.Last(),
+					Director->GetTrackStartSeconds(), Director->GetTrackEndSeconds()));
+			}
+			// Intrinsics from the block: the render target takes the camera's
+			// own pixel size (the -width/-height flags are overridden and the
+			// log says so), and the capture's horizontal field of view comes
+			// from focal and sensor width, so fx in the manifest IS this lens.
+			// Square pixels only: a sensor whose aspect differs from the pixel
+			// aspect would need anisotropic pixels this capture cannot make.
+			int32 BlockWidthPx = 0;
+			int32 BlockHeightPx = 0;
+			if (!CameraJson->TryGetNumberField(TEXT("width_px"), BlockWidthPx) ||
+			    !CameraJson->TryGetNumberField(TEXT("height_px"), BlockHeightPx) ||
+			    !CameraJson->TryGetNumberField(TEXT("sensor_width_mm"), ConsumeSensorWidthMm) ||
+			    !CameraJson->TryGetNumberField(TEXT("sensor_height_mm"), ConsumeSensorHeightMm) ||
+			    BlockWidthPx <= 0 || BlockHeightPx <= 0 ||
+			    ConsumeSensorWidthMm <= 0.0 || ConsumeSensorHeightMm <= 0.0)
+			{
+				return Fail(TEXT("consume-poses: the camera block is missing "
+				                 "width_px/height_px/sensor_width_mm/sensor_height_mm; "
+				                 "refusing to guess the intrinsics"));
+			}
+			const double SensorAspect = ConsumeSensorWidthMm / ConsumeSensorHeightMm;
+			const double PixelAspect = static_cast<double>(BlockWidthPx) / BlockHeightPx;
+			if (FMath::Abs(SensorAspect - PixelAspect) > 1.0e-3 * PixelAspect)
+			{
+				return Fail(FString::Printf(
+					TEXT("consume-poses: sensor aspect %.4f differs from the pixel "
+					     "aspect %.4f; this capture cannot honour anisotropic pixels"),
+					SensorAspect, PixelAspect));
+			}
+			if (Width != BlockWidthPx || Height != BlockHeightPx)
+			{
+				UE_LOG(LogFlightSimRender, Display,
+				       TEXT("consume-poses: render target %dx%d from the camera block ")
+				       TEXT("(the -width/-height flags %dx%d are overridden)"),
+				       BlockWidthPx, BlockHeightPx, Width, Height);
+			}
+			Width = BlockWidthPx;
+			Height = BlockHeightPx;
 			bConsumePoses = true;
 			UE_LOG(LogFlightSimRender, Display,
 			       TEXT("consume-poses: camera %d of %d, %d solved samples"),
 			       ConsumedCameraIndex, CamerasJson->Num(), Count);
-			// Place the camera at its first solved pose before the warm-up
-			// captures, replacing the chase settle-in placement above.
-			if (!Director->ApplyPoseAtTime(0.0, Error))
+			UE_LOG(LogFlightSimRender, Display,
+			       TEXT("consume-poses: %d scheduled captures from t=%.3f s to ")
+			       TEXT("t=%.3f s; %dx%d px, sensor %.2f x %.2f mm, focal %.1f mm ")
+			       TEXT("(fov %.2f deg)"),
+			       ScheduledTimes.Num(), ScheduledTimes[0], ScheduledTimes.Last(),
+			       Width, Height, ConsumeSensorWidthMm, ConsumeSensorHeightMm,
+			       BlockFocalMm, HorizontalFovDegrees(BlockFocalMm));
+			// Place the camera at its first SCHEDULED pose before the warm-up
+			// captures, replacing the chase settle-in placement above (the
+			// first instant is inside the track by the check above).
+			if (!Director->ApplyPoseAtTime(ScheduledTimes[0], Error))
 			{
 				return Fail(Error);
 			}
@@ -795,6 +921,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// terrain and sky in shot, and §6.6's manual exposure so the image does
 	// not re-meter as the bright-ground fraction changes with bank.
 	Capture->FOVAngle = bVisual ? 55.0f : 24.0f;
+	if (bConsumePoses && Director->GetAppliedFocalLengthMm() > 0.0)
+	{
+		// The card's lens, not the showcase's 55 deg: the manifest's fx/fy
+		// and these pixels describe the same projection.
+		Capture->FOVAngle = HorizontalFovDegrees(Director->GetAppliedFocalLengthMm());
+	}
 	if (bVisual && !bAutoExposure)
 	{
 		FFlightSimVisualScene::ApplyManualExposure(Capture,
@@ -1144,14 +1276,55 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		: Card.DurationSeconds;
 	const int32 Steps = FMath::RoundToInt(Duration * Card.RateHz);
 	const int32 StepsPerFrame = FMath::Max(1, FMath::RoundToInt(Card.RateHz / FramesPerSecond));
-	UE_LOG(LogFlightSimRender, Display,
-	       TEXT("stepping %d frames of %.6f s, capturing every %d (%.1f Hz) at %dx%d"),
-	       Steps, DeltaSeconds, StepsPerFrame, Card.RateHz / StepsPerFrame, Width, Height);
+	// Consume-poses: capture at the card's scheduled instants only. Every
+	// instant lies on the fixed-step grid (the Python side refuses one that
+	// does not, by name, before any editor time), and the capture is taken
+	// on the step whose RUN clock -- the FDM clock minus its reading before
+	// the first step, so a trim sequence or engine start that advanced the
+	// clock never shifts the schedule -- EQUALS the instant to ScheduleSlack.
+	// A step that passes an instant without meeting it fails the pass by
+	// name: nothing is rounded to a nearest step. A schedule the run cannot
+	// reach is refused HERE, before any editor time.
+	int32 NextScheduled = 0;
+	const double ScheduleSlack = 1.0e-6;
+	if (bConsumePoses)
+	{
+		if (ScheduledTimes.Last() > Duration + ScheduleSlack)
+		{
+			return Fail(FString::Printf(
+				TEXT("consume-poses: camera %d schedules a capture at t=%.3f s but "
+				     "the run is %.3f s long; the run does not cover the schedule"),
+				ConsumedCameraIndex, ScheduledTimes.Last(), Duration));
+		}
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("stepping %d steps of %.6f s, capturing at %d scheduled instants at %dx%d"),
+		       Steps, DeltaSeconds, ScheduledTimes.Num(), Width, Height);
+	}
+	else
+	{
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("stepping %d frames of %.6f s, capturing every %d (%.1f Hz) at %dx%d"),
+		       Steps, DeltaSeconds, StepsPerFrame, Card.RateHz / StepsPerFrame, Width, Height);
+	}
 
 	TArray<TSharedPtr<FJsonValue>> FrameRecords;
 	TArray<FColor> Pixels;
 	int32 Captured = 0;
 	int32 BlankFrames = 0;
+	// Fixed steps actually integrated: a consume-poses pass stops after
+	// its last scheduled instant, and says how far it went.
+	int32 StepsTaken = 0;
+	// The FDM clock before the first step of the run: subtracted from every
+	// capture-time reading so t_applied_s is run-relative (the manifest's
+	// clock starts at the first step), and recorded at the root as
+	// clock_origin_s so the raw reading is recoverable (t_clock_s per frame).
+	const double ClockOrigin = Scenario.ReadProperty(TEXT("simulation/sim-time-sec"));
+	if (bConsumePoses)
+	{
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("consume-poses: clock origin t=%.6f s before the first step; capture times are run-relative"),
+		       ClockOrigin);
+	}
 
 	for (int32 Step = 0; Step < Steps; ++Step)
 	{
@@ -1160,7 +1333,36 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			return Fail(Error + TEXT("; frames written so far are not a complete run"));
 		}
-		if (Step % StepsPerFrame != 0)
+		StepsTaken = Step + 1;
+		int32 ConsumeFrameIndex = -1;
+		double ConsumeScheduledSeconds = 0.0;
+		if (bConsumePoses)
+		{
+			if (NextScheduled >= ScheduledTimes.Num())
+			{
+				continue;   // unreachable: the loop breaks after the last capture
+			}
+			const double ClockNow =
+				Scenario.ReadProperty(TEXT("simulation/sim-time-sec")) - ClockOrigin;
+			const double Scheduled = ScheduledTimes[NextScheduled];
+			if (ClockNow < Scheduled - ScheduleSlack)
+			{
+				continue;   // not yet
+			}
+			if (ClockNow - Scheduled > ScheduleSlack)
+			{
+				return Fail(FString::Printf(
+					TEXT("consume-poses: scheduled instant t=%.6f s (frame %d) is not "
+					     "on the fixed-step grid: the run clock stepped past it to %.6f s "
+					     "(step %.6f s, clock origin %.6f s); refusing to capture a frame "
+					     "off its instant"),
+					Scheduled, NextScheduled, ClockNow, DeltaSeconds, ClockOrigin));
+			}
+			ConsumeFrameIndex = NextScheduled;
+			ConsumeScheduledSeconds = Scheduled;
+			++NextScheduled;
+		}
+		else if (Step % StepsPerFrame != 0)
 		{
 			continue;
 		}
@@ -1176,17 +1378,25 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			VisualScene.Sun->SetActorRotation(FRotator(-Elev, Azim + 180.0, 0.0));
 		}
 
-		// Consume-poses: drive the camera by SIMULATION time before the
-		// render-state flush, so the capture sees the solved pose for this
-		// exact frame. A track that does not cover the run fails loudly
-		// here (never extrapolated), as does any applied-vs-solved drift.
+		// Consume-poses: drive the camera to the SCHEDULED instant's pose
+		// before the render-state flush -- the instant the manifest's
+		// solved pose was computed at, never the engine clock's reading.
+		// The pose contract is then exact by construction (the Python
+		// verifier checks t_pose_s == the manifest's t_s), and the capture
+		// time (t_applied_s, the clock, within one fixed step) is the
+		// only tolerance left; a clock one step off shows up in the drawn
+		// aircraft's distance from the manifest's, where it belongs. A
+		// track that does not cover the run fails loudly here (never
+		// extrapolated), as does any applied-vs-solved drift.
 		if (bConsumePoses)
 		{
-			if (!Director->ApplyPoseAtTime(
-				Scenario.ReadProperty(TEXT("simulation/sim-time-sec")),
-				Error))
+			if (!Director->ApplyPoseAtTime(ConsumeScheduledSeconds, Error))
 			{
 				return Fail(Error);
+			}
+			if (Director->GetAppliedFocalLengthMm() > 0.0)
+			{
+				Capture->FOVAngle = HorizontalFovDegrees(Director->GetAppliedFocalLengthMm());
 			}
 		}
 
@@ -1219,7 +1429,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			++BlankFrames;
 		}
 
-		const FString FrameName = FString::Printf(TEXT("frame_%04d.png"), Captured);
+		// Consume-poses: named by the MANIFEST INDEX, the file
+		// capture_manifest.json's record carries; the preset pass keeps its
+		// running counter.
+		const FString FrameName = bConsumePoses
+			? FString::Printf(TEXT("%04d.png"), ConsumeFrameIndex)
+			: FString::Printf(TEXT("frame_%04d.png"), Captured);
 		TArray64<uint8> Png;
 		FImageUtils::PNGCompressImageArray(Width, Height, Pixels, Png);
 		if (!FFileHelper::SaveArrayToFile(Png, *FPaths::Combine(OutputDirectory, FrameName)))
@@ -1262,6 +1477,105 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			                       AppliedRotation.Pitch);
 			Record->SetNumberField(TEXT("camera_applied_roll_deg"),
 			                       AppliedRotation.Roll);
+			// The scheduled instant, the instant actually captured, and the
+			// SOLVED pose the applied one was compared to -- so the Python
+			// verifier (core/capture/verify.py engine_parity) grades this
+			// frame from this record alone.
+			Record->SetNumberField(TEXT("frame_index"),
+			                       static_cast<double>(ConsumeFrameIndex));
+			Record->SetNumberField(TEXT("t_scheduled_s"), ConsumeScheduledSeconds);
+			// The run clock at the capture (equal to the instant by the rule
+			// above) and the raw FDM clock it was read from.
+			Record->SetNumberField(TEXT("t_applied_s"),
+			                       Scenario.ReadProperty(TEXT("simulation/sim-time-sec")) - ClockOrigin);
+			Record->SetNumberField(TEXT("t_clock_s"),
+			                       Scenario.ReadProperty(TEXT("simulation/sim-time-sec")));
+			// The instant the applied pose was interpolated AT (the
+			// scheduled one, by construction above): the verifier fails a
+			// frame whose pose was taken at any other time.
+			Record->SetNumberField(TEXT("t_pose_s"), ConsumeScheduledSeconds);
+			FVector SolvedProjected;
+			Scenario.GeoReferencing->EngineToProjected(
+				Director->GetSolvedLocation(), SolvedProjected);
+			const FRotator SolvedRotation = Director->GetSolvedRotation();
+			Record->SetNumberField(TEXT("camera_solved_north_m"),
+			                       SolvedProjected.Y - CameraOriginYMetres);
+			Record->SetNumberField(TEXT("camera_solved_east_m"),
+			                       SolvedProjected.X - CameraOriginXMetres);
+			Record->SetNumberField(TEXT("camera_solved_alt_m"), SolvedProjected.Z);
+			Record->SetNumberField(TEXT("camera_solved_yaw_deg"),
+			                       FMath::Fmod(SolvedRotation.Yaw + 90.0 + 360.0, 360.0));
+			Record->SetNumberField(TEXT("camera_solved_pitch_deg"), SolvedRotation.Pitch);
+			Record->SetNumberField(TEXT("camera_solved_roll_deg"), SolvedRotation.Roll);
+			Record->SetNumberField(TEXT("camera_applied_focal_length_mm"),
+			                       Director->GetAppliedFocalLengthMm());
+			Record->SetNumberField(TEXT("camera_applied_fov_deg"), Capture->FOVAngle);
+			// The aircraft THIS host drew, in the card frame: the verifier
+			// reports its distance from the manifest's aircraft (host parity,
+			// informational) and reprojects it into the frame.
+			FVector AircraftProjected;
+			Scenario.GeoReferencing->EngineToProjected(
+				Scenario.Aircraft->GetActorLocation(), AircraftProjected);
+			Record->SetNumberField(TEXT("aircraft_applied_north_m"),
+			                       AircraftProjected.Y - CameraOriginYMetres);
+			Record->SetNumberField(TEXT("aircraft_applied_east_m"),
+			                       AircraftProjected.X - CameraOriginXMetres);
+			Record->SetNumberField(TEXT("aircraft_applied_alt_m"), AircraftProjected.Z);
+			// The engine's OWN measurement of where it drew the aircraft: the
+			// actor location, and the corners of its component bounds,
+			// projected through the capture's transform and field of view
+			// (ProjectToPixel, the landmarks' call below). The Python verifier
+			// grades aircraft_px/py against the manifest's labelled pixel and
+			// against its own projection of aircraft_applied_* through the
+			// applied pose, and widens its pixel-content window to the screen
+			// box -- a projection the ENGINE made about what it drew, so a
+			// mesh that never loaded, a hidden actor or a lens that is not the
+			// card's cannot pass on numbers Python computed for itself.
+			{
+				FVector2D AircraftPixel;
+				const bool bAircraftInFrame = ProjectToPixel(
+					Capture, Width, Height, Scenario.Aircraft->GetActorLocation(),
+					AircraftPixel);
+				Record->SetNumberField(TEXT("aircraft_px"), AircraftPixel.X);
+				Record->SetNumberField(TEXT("aircraft_py"), AircraftPixel.Y);
+				Record->SetBoolField(TEXT("aircraft_visible"),
+				                     bAircraftInFrame && !bHideAircraft);
+				const FBox Bounds = Scenario.Aircraft->GetComponentsBoundingBox(true);
+				double MinX = TNumericLimits<double>::Max();
+				double MinY = TNumericLimits<double>::Max();
+				double MaxX = -TNumericLimits<double>::Max();
+				double MaxY = -TNumericLimits<double>::Max();
+				int32 CornersInFront = 0;
+				for (int32 Corner = 0; Corner < 8; ++Corner)
+				{
+					const FVector CornerCm(
+						(Corner & 1) ? Bounds.Max.X : Bounds.Min.X,
+						(Corner & 2) ? Bounds.Max.Y : Bounds.Min.Y,
+						(Corner & 4) ? Bounds.Max.Z : Bounds.Min.Z);
+					if (!InFrontOfCapture(Capture, CornerCm))
+					{
+						continue;
+					}
+					FVector2D CornerPixel;
+					ProjectToPixel(Capture, Width, Height, CornerCm, CornerPixel);
+					MinX = FMath::Min(MinX, CornerPixel.X);
+					MinY = FMath::Min(MinY, CornerPixel.Y);
+					MaxX = FMath::Max(MaxX, CornerPixel.X);
+					MaxY = FMath::Max(MaxY, CornerPixel.Y);
+					++CornersInFront;
+				}
+				Record->SetNumberField(TEXT("aircraft_bbox_corners_in_front"),
+				                       static_cast<double>(CornersInFront));
+				if (CornersInFront == 8)
+				{
+					TArray<TSharedPtr<FJsonValue>> Box;
+					Box.Add(MakeShared<FJsonValueNumber>(MinX));
+					Box.Add(MakeShared<FJsonValueNumber>(MinY));
+					Box.Add(MakeShared<FJsonValueNumber>(MaxX));
+					Box.Add(MakeShared<FJsonValueNumber>(MaxY));
+					Record->SetArrayField(TEXT("aircraft_bbox_px"), Box);
+				}
+			}
 		}
 		Record->SetNumberField(TEXT("lit_pixels"), Lit);
 		// Load factor and the wind actually inside the FDM this frame -- the
@@ -1354,8 +1668,37 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 		FrameRecords.Add(MakeShared<FJsonValueObject>(Record));
 		++Captured;
+		if (bConsumePoses && NextScheduled >= ScheduledTimes.Num())
+		{
+			// Every scheduled frame is taken: the schedule defines the run
+			// the frames need (the telemetry commandlet and the closure pair
+			// cover the flight), so the pass stops HERE instead of stepping
+			// the spec's remaining seconds for nothing -- a 120 s default-
+			// duration spec with its captures in the first 12 s was 14400
+			// steps per camera pass. The steps actually integrated go into
+			// render.json (steps_taken, stepped_s) and the Python side
+			// reports them per pass.
+			UE_LOG(LogFlightSimRender, Display,
+			       TEXT("consume-poses: stopped after the last scheduled instant at t=%.3f s (%d of %d steps)"),
+			       Scenario.ReadProperty(TEXT("simulation/sim-time-sec")) - ClockOrigin,
+			       StepsTaken, Steps);
+			break;
+		}
 	}
 
+	if (bConsumePoses)
+	{
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("consume-poses: captured %d of %d scheduled frames"),
+		       Captured, ScheduledTimes.Num());
+		if (Captured != ScheduledTimes.Num())
+		{
+			return Fail(FString::Printf(
+				TEXT("consume-poses: captured %d of %d scheduled frames; a frame "
+				     "set short of its schedule is not a frame set"),
+				Captured, ScheduledTimes.Num()));
+		}
+	}
 	if (Captured == 0)
 	{
 		return Fail(TEXT("no frames were captured"));
@@ -1417,6 +1760,19 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		Root->SetNumberField(TEXT("camera_index"),
 		                     static_cast<double>(ConsumedCameraIndex));
+		// The count contract and the clock the verifier grades against.
+		Root->SetNumberField(TEXT("frames_scheduled"),
+		                     static_cast<double>(ScheduledTimes.Num()));
+		Root->SetNumberField(TEXT("frames_captured"), static_cast<double>(Captured));
+		Root->SetNumberField(TEXT("step_s"), DeltaSeconds);
+		Root->SetNumberField(TEXT("clock_origin_s"), ClockOrigin);
+		// How far the pass stepped: the last scheduled instant, never the
+		// spec's whole duration.
+		Root->SetNumberField(TEXT("steps_taken"), static_cast<double>(StepsTaken));
+		Root->SetNumberField(TEXT("stepped_s"), StepsTaken * DeltaSeconds);
+		Root->SetNumberField(TEXT("sensor_width_mm"), ConsumeSensorWidthMm);
+		Root->SetNumberField(TEXT("sensor_height_mm"), ConsumeSensorHeightMm);
+		Root->SetNumberField(TEXT("capture_fov_deg"), Capture->FOVAngle);
 	}
 	TSharedPtr<FJsonObject> Scene = MakeShared<FJsonObject>();
 	Scene->SetBoolField(TEXT("visual"), bVisual);

@@ -19,6 +19,16 @@ Top level::
     output_digest      SHA-256 over the recorded telemetry columns
                        (core.scenario.runner._digest_telemetry)
     seed               the spec's random seed
+    rate_hz            the spec's fixed-step rate (spec.rate): the grid
+                       every capture instant lies on, and the engine's
+                       step the verifier grades render.json's step_s
+                       against -- the engine never declares its own
+                       tolerance
+    step_s             1 / rate_hz
+    speed_basis        where each frame's aircraft.speed_mps came from
+                       (the recorded tas_kt channel, or the ground speed
+                       of the recorded track when no airspeed channel
+                       exists)
     scene              {key, terrain, terrain_sha256} -- terrain_sha256
                        is the SHA-256 of the raw .r16 samples
                        (Heightfield.digest()), null for flat scenes
@@ -27,6 +37,15 @@ Top level::
                        origin of the local north/east metres
     software_revision  git revision of the producing tree ("unknown"
                        outside a checkout; informational, in no digest)
+    aircraft_metrics   the airframe's extents read ONCE from the
+                       configured FDM by the runner (core.scenario.
+                       runner.aircraft_metrics): span_m from
+                       metrics/bw-ft, length_m and height_m with their
+                       stated derivations, each beside its *_source --
+                       what the geometry preview scales the aircraft
+                       body by; null when the producer had no FDM (a
+                       synthetic manifest), and the preview then SAYS
+                       the body is unscaled
     cameras            [per-camera blocks]
     frames             [per-frame records, all cameras, capture order]
 
@@ -38,9 +57,13 @@ Per frame::
 
     index              frame number within ITS camera, 0-based
     camera_id
-    file               relative image path, per-camera subdirectory
-                       ("frames/<camera_id>/frame_00042.png") -- where
-                       pixels were produced they land exactly there
+    file               relative image path, per-camera subdirectory,
+                       NAMED BY THE FRAME'S INDEX
+                       ("frames/<camera_id>/0042.png") -- the render
+                       commandlet's consume-poses pass writes exactly
+                       this file for exactly this record, so a PNG and
+                       its geometry are tied by name, never by a
+                       running counter
     t_s                simulation time (the telemetry sample's own t)
     sample_index       index into the telemetry record
     position_north_m / position_east_m / position_alt_m
@@ -53,7 +76,10 @@ Per frame::
     principal_point_px [cx, cy] = the image centre
     fx_px / fy_px      focal length in pixels (focal/sensor * pixels)
     aircraft           {north_m, east_m, alt_m, roll_deg, pitch_deg,
-                       heading_deg} at the same instant
+                       heading_deg, speed_mps} at the same instant --
+                       speed_mps x step_s is one fixed step of this
+                       run's travel, the unit of the engine-parity
+                       drawn-aircraft budget
 
 Projection (reconstructible, and reconstructed independently by the
 verifier): world point P (north, east, alt) in this file's frame;
@@ -80,7 +106,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
 from .poses import PoseTrack, SceneFrame, aircraft_local_track
-from .schedule import CaptureSchedule
+from .schedule import CaptureSchedule, off_grid_instants
 
 MANIFEST_VERSION = 1
 
@@ -118,10 +144,12 @@ def simulation_digest(spec) -> str:
 
 
 def frame_filename(camera_id: str, index: int) -> str:
-    """Relative image path, per-camera subdirectory. The renderer that
-    produces pixels writes THIS path; headless manifests carry it as
-    the name the frame would have."""
-    return f"frames/{camera_id}/frame_{index:05d}.png"
+    """Relative image path, per-camera subdirectory, named by the
+    frame's manifest index (``0000.png`` ...). The renderer that
+    produces pixels writes THIS path (the commandlet's consume-poses
+    pass names its PNG by the same index); headless manifests carry it
+    as the name the frame would have."""
+    return f"frames/{camera_id}/{index:04d}.png"
 
 
 def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
@@ -131,7 +159,8 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                            output_digest: str,
                            scene: Optional[Dict] = None,
                            terrain_sha256: Optional[str] = None,
-                           cameras=None) -> Dict:
+                           cameras=None,
+                           aircraft_metrics: Optional[Dict] = None) -> Dict:
     """Assemble the manifest mapping (see the module docstring schema).
 
     ``tracks`` and ``schedules`` are parallel per-camera sequences from
@@ -140,13 +169,26 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
     lengths, which are pure arithmetic on the recorded intrinsics.
     ``cameras`` names the CameraSpecs that actually flew when they are
     not the spec's own (a camera-less spec captured with the documented
-    default cameras); the digests stay the spec's.
+    default cameras); the digests stay the spec's. ``aircraft_metrics``
+    is the runner's FDM-read extents block, carried verbatim.
     """
     if len(tracks) != len(schedules):
         raise ValueError(
             f"{len(tracks)} pose tracks against {len(schedules)} "
             f"schedules; every camera needs exactly one of each")
     aircraft = aircraft_local_track(columns, frame)
+    rate_hz = float(spec.rate.value)
+    if not (rate_hz > 0.0):
+        raise ValueError(f"spec rate {rate_hz!r} Hz is not a fixed-step "
+                         f"grid; refusing a manifest with no clock")
+    for schedule in schedules:
+        off = off_grid_instants(schedule.times, rate_hz)
+        if off:
+            raise ValueError(
+                f"camera.schedule: camera {schedule.camera_id!r} schedules "
+                f"{len(off)} instant(s) off the {rate_hz:g} Hz fixed-step "
+                f"grid (first: t={off[0]:.6f} s); the engine captures on "
+                f"fixed steps only and never approximates an instant")
     flown = spec.cameras if cameras is None else list(cameras)
     cameras_by_id = {str(c.camera_id.value): c for c in flown}
 
@@ -208,6 +250,7 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                     "roll_deg": state["roll_deg"],
                     "pitch_deg": state["pitch_deg"],
                     "heading_deg": state["heading_deg"],
+                    "speed_mps": state["speed_mps"],
                 },
             })
 
@@ -217,6 +260,9 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
         "simulation_digest": simulation_digest(spec),
         "output_digest": output_digest,
         "seed": int(spec.seed.value),
+        "rate_hz": rate_hz,
+        "step_s": 1.0 / rate_hz,
+        "speed_basis": aircraft[0]["speed_basis"] if aircraft else None,
         "scene": {
             "key": (scene or {}).get("key", "flat"),
             "terrain": (scene or {}).get("terrain"),
@@ -224,6 +270,8 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
         },
         "frame": frame.provenance(),
         "software_revision": software_revision(),
+        "aircraft_metrics": (dict(aircraft_metrics)
+                             if aircraft_metrics is not None else None),
         "cameras": camera_blocks,
         "frames": frames,
     }

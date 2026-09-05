@@ -167,6 +167,12 @@ class TurbulenceProvider(Provider):
         """
         return {}
 
+    def observe(self, fdm) -> None:
+        """Read what the process DELIVERED this step. Called after the
+        step writes, every step, by the stack. Read-only: a provider that
+        wants to know whether its intensity reached the FDM accumulates
+        ``atmosphere/turb-*`` here and never writes anything."""
+
     @abstractmethod
     def expected_sigma_w_mps(self, agl_m: float) -> float:
         """Predicted vertical RMS gust velocity, for the null test to check."""

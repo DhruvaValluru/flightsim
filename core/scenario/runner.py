@@ -192,26 +192,114 @@ def configure_from_spec(spec: ScenarioSpec) -> FlightDynamics:
         }
     )
 
-    # Steady wind is written before trim so the aircraft is trimmed *in* the
-    # conditions it will fly rather than dropped into them afterwards.
+    # Steady wind goes INTO the initial conditions (Package A), because a
+    # direct atmosphere/wind-* write does not survive trim: FGTrim::DoTrim
+    # re-applies the (zero) wind IC over it, and the aircraft was measured
+    # trimming in calm air and receiving the wind as a step on step one --
+    # +333 m / -327 m in 30 s open loop for a 30 kt head/tail wind. The
+    # fixed point in set_wind_initial_conditions leaves vc at the spec's
+    # value and beta at zero WITH the wind present; trim then solves in it.
     # Turbulence is deliberately NOT active during trim: a stochastic
     # disturbance makes the trim solver chase noise.
     north_fps, east_fps = wind_components_fps(wind_speed, float(spec.wind_direction.value))
-    fdm.props.set_many(
-        {
-            "atmosphere/wind-north-fps": north_fps,
-            "atmosphere/wind-east-fps": east_fps,
-            "atmosphere/wind-down-fps": 0.0,
-            "atmosphere/turb-type": 0.0,
-        }
-    )
+    fdm.props.set("atmosphere/turb-type", 0.0)
+    if wind_speed > 0.0:
+        fdm.set_wind_initial_conditions(north_fps, east_fps, 0.0)
 
     fdm.start_engines()
     # A crosswind start needs the lateral axes solved as well (§5 Phase 0).
     fdm.trim(mode_for(crosswind=wind_speed > 0.0))
+    # The guard: the trimmed state must carry the spec's wind at the spec's
+    # airspeed with no sideslip, or the run refuses by name.
+    fdm.verify_wind_state(north_fps, east_fps, float(spec.airspeed.value))
     if bool(spec.mass_held.value):
         fdm.hold_mass(True)
     return fdm
+
+
+def aircraft_metrics(fdm) -> Dict[str, Any]:
+    """The airframe's extents, read ONCE from the configured FDM's own
+    metrics (the same ``metrics/bw-ft`` the span-station contact check
+    uses) and carried into the run manifest and the capture manifest so
+    the geometry preview draws the aircraft at its size -- never from a
+    constant. JSBSim states no nose-to-tail length and no height, so the
+    longitudinal extent is the wing-to-tail arm plus one mean chord and
+    the vertical extent is the vertical tail area's square side; each
+    number carries its source so a reader knows exactly what it is."""
+    span_ft = float(fdm.props.get("metrics/bw-ft"))
+    arm_ft = float(fdm.props.get("metrics/lh-ft"))
+    chord_ft = float(fdm.props.get("metrics/cbarw-ft"))
+    fin_sqft = float(fdm.props.get("metrics/Sv-sqft"))
+    arm_chord_m = u.ft_to_m(arm_ft + chord_ft)
+    stations = longitudinal_stations_in(fdm)
+    stations_m = (max(stations.values()) - min(stations.values())) * 0.0254
+    # Both are distances between stations the FDM states, so both are
+    # lower bounds on the fuselage; the larger is the better bound and
+    # its name is carried (B747: eyepoint to tail arm 59.6 m against
+    # arm + chord 40.8 m; c172p: arm + chord 6.3 m against 4.9 m).
+    if stations_m >= arm_chord_m:
+        length_m = stations_m
+        fore = min(stations, key=stations.get)
+        aft = max(stations, key=stations.get)
+        label = f"{fore} to {aft}"
+        source = (f"{label}: {stations_m:.1f} m between the FDM's stated "
+                  f"structural stations {', '.join(f'{k} {v:.0f} in' for k, v in stations.items())}"
+                  f" (metrics/lh-ft + metrics/cbarw-ft gives {arm_chord_m:.1f} m); "
+                  f"JSBSim states no nose-to-tail length")
+    else:
+        length_m = arm_chord_m
+        label = "arm + chord"
+        source = (f"metrics/lh-ft + metrics/cbarw-ft (wing-to-tail arm plus one "
+                  f"mean chord): {arm_chord_m:.1f} m, above the {stations_m:.1f} m "
+                  f"between the FDM's stated stations "
+                  f"{', '.join(f'{k} {v:.0f} in' for k, v in stations.items())}; "
+                  f"JSBSim states no nose-to-tail length")
+    return {
+        "aircraft": fdm.model.name,
+        "span_m": u.ft_to_m(span_ft),
+        "span_source": "metrics/bw-ft",
+        "length_m": length_m,
+        "length_label": label,
+        "length_caveat": "no fuselage length in JSBSim",
+        "length_source": source,
+        "length_candidates_m": {"stations": stations_m, "arm_chord": arm_chord_m},
+        "height_m": u.ft_to_m(math.sqrt(max(fin_sqft, 0.0))),
+        "height_label": "sqrt Sv",
+        "height_source": "sqrt(metrics/Sv-sqft) (the vertical tail area's "
+                         "square side: the FDM's only vertical extent)",
+    }
+
+
+#: The longitudinal stations JSBSim states, in the structural frame
+#: (inches, x positive aft), each named for the source string.
+LONGITUDINAL_STATION_PROPERTIES = (
+    ("eyepoint", "metrics/eyepoint-x-in"),
+    ("VRP", "metrics/visualrefpoint-x-in"),
+    ("aero RP", "metrics/aero-rp-x-in"),
+    ("CG", "inertia/cg-x-in"),
+)
+
+
+def longitudinal_stations_in(fdm) -> Dict[str, float]:
+    """Every longitudinal station the FDM states, in structural inches:
+    the eyepoint, the visual reference point, the aerodynamic reference
+    point, the CG, and the tail arm's end (aero RP + metrics/lh-ft, the
+    horizontal tail's aerodynamic centre). A property the model does
+    not carry is left out, never guessed."""
+    out: Dict[str, float] = {}
+    for name, prop in LONGITUDINAL_STATION_PROPERTIES:
+        try:
+            out[name] = float(fdm.props.get(prop))
+        except Exception:
+            continue
+    try:
+        out["tail arm"] = (float(fdm.props.get("metrics/aero-rp-x-in"))
+                           + 12.0 * float(fdm.props.get("metrics/lh-ft")))
+    except Exception:
+        pass
+    if not out:
+        raise ValueError("aircraft_metrics: the FDM states no longitudinal station")
+    return out
 
 
 def run_spec(spec: ScenarioSpec, validate_first: bool = True,
@@ -255,9 +343,32 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         autopilot = Autopilot(fdm)
         autopilot.engage()
 
+    # Package E: terrain look-ahead on the altitude setpoint. A closed-loop
+    # run over a raster samples the terrain ahead along its projected track
+    # every guidance tick and RAISES the setpoint in time to clear it, from
+    # the climb capability Package D measured; terrain the escape profile
+    # cannot clear refuses the run by name (terrain.lookahead) before the
+    # impact the contact check would otherwise report.
+    lookahead = None
+    if autopilot is not None and terrain_ground is not None:
+        from ..terrain.lookahead import TerrainLookahead
+
+        lookahead = TerrainLookahead.for_run(
+            terrain_ground, fdm, autopilot,
+            hold_tolerance_m=ClosureTolerance().altitude_m)
+        first = lookahead.guide(fdm.state(), autopilot,
+                                remaining_s=float(spec.duration.value))
+        if first.setpoint_m is not None:
+            recorder_note = (f"terrain look-ahead: setpoint raised to "
+                             f"{first.setpoint_m:.0f} m before the first step")
+        else:
+            recorder_note = None
+
     recorder = Recorder(fdm, interval_s=0.1, extra=SURFACES)
     recorder.sample(force=True)
     recorder.mark("trimmed" if autopilot is None else "trimmed, autopilot engaged")
+    if lookahead is not None and recorder_note is not None:
+        recorder.mark(recorder_note)
     if autopilot is None and terrain_ground is None:
         environment.run_for(fdm, float(spec.duration.value), recorder)
     else:
@@ -277,6 +388,17 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
                     raise TerrainImpactError(impact)
             if autopilot is not None and i % every == 0:
                 autopilot.update()
+                if lookahead is not None:
+                    guided = lookahead.guide(
+                        fdm.state(), autopilot,
+                        remaining_s=float(spec.duration.value)
+                        - (i + 1) / fdm.rate_hz)
+                    if guided.setpoint_m is not None:
+                        recorder.mark(
+                            f"terrain look-ahead: setpoint raised to "
+                            f"{guided.setpoint_m:.0f} m "
+                            f"({guided.threat.terrain_m:.0f} m terrain "
+                            f"{guided.threat.distance_m:.0f} m ahead)")
             recorder.sample()
 
     # The closure assertion (§2.8). A run that did not reach what it was
@@ -297,12 +419,15 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         "spec_digest": spec.digest(),
         "spec": spec.to_dict(),
         "fdm": fdm.provenance(),
+        "aircraft_metrics": aircraft_metrics(fdm),
         "environment": environment.provenance(),
         "physics_ground": ("flat slab (spec terrain elevation)"
                            if terrain_ground is None
                            else terrain_ground.provenance()),
         "airframe_contact": (None if contact is None
                              else contact.provenance()),
+        "terrain_lookahead": (None if lookahead is None
+                              else lookahead.provenance()),
         "output_digest": output_digest,
         "samples": len(recorder),
         "validation": {
@@ -325,6 +450,13 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         manifest["control"] = {
             "signs": autopilot.signs.as_properties(),
             "gains": autopilot.gains(),
+            # Package D: the airframe performance the throttle loop was
+            # normalised by, measured at the trimmed state.
+            "performance": autopilot.performance.provenance(),
+            # Package G: the sideslip-to-rudder gains the turn coordinator
+            # was tuned with, measured at the trimmed state.
+            "coordination": (None if autopilot.yaw_authority is None
+                             else autopilot.yaw_authority.provenance()),
         }
     return RunResult(spec.digest(), output_digest, recorder, report, manifest,
                      closure)

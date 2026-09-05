@@ -58,3 +58,19 @@ class TrimError(FDMError):
 
 class SimulationError(FDMError):
     """The integrator failed to advance, or produced a non-finite state."""
+
+
+class TrimStateError(FDMError):
+    """The trimmed state does not carry the conditions the spec asked for.
+
+    Package A (2026-09-02): measured on the pinned build, ``FGTrim::DoTrim``
+    calls ``Initialize(&fgic)``, which re-applies the initial conditions --
+    including a zero wind -- over any ``atmosphere/wind-*`` written before
+    the trim. The aircraft was therefore trimmed in calm air and received
+    the spec's wind as a step on the first step of the run: +333 m / -327 m
+    of altitude in 30 s open loop for a 30 kt head/tail wind. This error is
+    the guard: after trim, the FDM's total wind must equal the spec wind and
+    the airspeed the spec's, or the run refuses by name (``wind.trim_state``).
+    """
+
+    constraint = "wind.trim_state"

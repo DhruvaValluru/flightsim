@@ -1,7 +1,638 @@
 # Resume here
 
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
-docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
+docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-31.
+
+**Standing until the Windows logs are pasted back: the engine
+per-camera pass, engine_parity on rendered pixels, the overlays on
+rendered frames, the by-product clip's ffprobe length and the page's
+frames flow are NOT YET RUN on Windows.** Do docs/CAMERA_PHASE1_REPORT.md
+"Engine verification (Windows)" steps 1-7 (build; the one command,
+whose expected stdout is generated from the honest engine stub with
+only the engine_parity digits masked x; the two commandlet passes and
+their log lines; the tree; the verifier and its failure demonstrations;
+ffprobe on the clip; the overlays looked at; the page; --against) and
+paste every log back; the report's "Status today" table says, per
+deliverable and dated, what was measured here and what awaits. The
+render choice: the CLI's `--render frames|clip|none` IS the page's
+Render frames and clip / Clip only / Headless (the same three words,
+core.capture.render_pass.RENDER_WORDS), default the richest the
+machine supports (render_choice_default), engine options refused
+`ue.platform` by name with the machine's reason, the choice recorded
+in run.json / provenance.json "render".
+
+**Camera Phase 1, docs round 2 (2026-09-05, the judge's six ranked
+gaps against bar section 7, all six closed in priority order, five
+code/doc commits plus this tally).** (1) The Windows expected-output
+block names every stub its child applies: scripts/examples_expected.py
+exports STUBBED (six dotted names: run_render_pass, the clip encoder's
+3-byte placeholder writer, find_ffmpeg, the two engine-gate functions,
+refuse_placeholder_mesh), the generated preamble and the hand-written
+paragraph name each, the `clip:` line and run.json's clip_encoded /
+clip_seconds are said to be the playlist arithmetic until 5b's ffprobe,
+the "two differences" are three (the ffmpeg-missing clip line measured
+with os_name patched to windows), and section 4's clip.mp4 tree line
+says "placeholder here (3 bytes)"; tests/test_camera_cli.py::
+test_the_windows_block_discloses_every_stub_the_child_applies reads
+frames_stub_child's source (ast) against STUBBED. (2) Section 6's page
+block is GENERATED (page_stub_child / generate_page: the committed
+cameras_multi.yaml posted to the TestClient's /run with render
+"frames" on the honest stub, the event list as /runs/<id> serves it,
+the strip, card and galleries under node, run id masked <id>, the
+parity row masked x, captions folded; PAGE_STUBBED discloses ten
+names) between the page_expected markers; measured 15.9-16.3 s wall,
+47 block lines, 1439 steps per pass, closure altitude 3048.01 of
+3048.00 m; tests/test_webapp_capture.py::
+test_the_documents_page_block_matches_the_stub_run compares it and
+checks the status lines against the run's status.json. FINDING: the
+example posted to /run without "over flat ground" in its prompt
+answers 409 terrain.clearance here (plan_scene_setting stages an
+unplaced spec on the prairie bake, and without that bake on the
+control ridge); section 6's prompt now carries the planner's opt-out
+words, and the page's digest 0916ea45841b3667 differs from the CLI's
+cef57d752362381d because /run projects the spec for the engine host
+(hold_state false, mass_held true). (3) Section 3's two command lines
+are built from render_command with a Windows-shaped UE_ROOT and
+checkout and compared token for token; its seven render.log lines are
+turned back into %d/%.3f/%.6f/%s skeletons and each must be a
+TEXT(...) literal of FlightSimRenderCommandlet.cpp in the source's
+order (word-less "%s" literals skipped), the numbers read from the
+section 2 block. (4) README's platform row is two: the rendered clip
+(macOS dated before Camera Phase 1, Windows observed once pre-rewrite)
+and the rendered frames per camera (code complete, NOT YET RUN on any
+engine). (5) The frames section heading reads "(Python side done
+2026-09-03; engine pass NOT YET RUN -- see Engine verification)" and
+no "## " heading may pair frames with finished/done while the status
+table's engine cell reads NOT YET RUN. (6) Known limitations is 18
+bullets of at most four lines each with a pointer; the console and
+verifier histories are sections ("Where JSBSim's console goes", "What
+the verifier cannot see"); the status table cites CI read from GitHub
+Actions: run #74 on a928572 RED on windows-latest (the CR of a CRLF
+checkout, byte 13, in the control-character test; 508263d fixes it),
+the latest fully green run #72 on 3c57d5d with windows-latest job
+101289429647 green in 10 min 19 s. 22 guards under "docs round 2",
+each verified firing by subset (4 + 4 + 4 + 3 + 3 + 4). Gotchas 29-31
+below; also: `pytest -q` on CI on top of pytest.ini's -q hides the
+short summary, so a failed test's NAME is not in the log tail -- the
+assertion diff is what identifies it.
+
+**Camera Phase 1, docs round 1 (2026-09-05, the judge's seven ranked
+gaps against bar section 7, all seven closed in priority order, four
+code/doc commits plus this tally).** (1) The Windows expected-output
+block (report section 2) is GENERATED: scripts/examples_expected.py
+generate_frames() runs `--render frames --brief` on the honest engine
+stub in a child process (`--frames-stub-run`), normalises paths, masks
+only the engine_parity row's MEASURED digits as x (mask_engine), and
+`--write` splices it between the frames_expected markers; measured
+15.39 s wall, exit 0, 82 stdout lines, 15 model loads, 48 previews at
+0.074 s/frame, 48 overlays at 0.172 s/frame, 1439 steps per pass, ten
+PASS rows, "done: rendered 48 frames ...". tests/test_camera_cli.py::
+test_the_documents_windows_frames_block_matches_the_stub_run
+regenerates and compares it (15.3 s) and reads verify.json's counts
+and every run.json key back from the run. (2) The run card's mixture
+probe is routed through the console sink WHOLE (construction, run_ic,
+trim, the sustain steps; stamp "FGFDMExec(B747, mixture probe)"): the
+Mass Properties Report JSBSim prints at run_ic (debug level 1) no
+longer lands on stdout under "nothing of JSBSim's on stdout" --
+measured on `--card --render none`: 96 lines before, 82 after, 0 ANSI
+escapes, the report at line 546 of jsbsim.log; pinned under capfd.
+(3) Section 6c's path was `capture<FF>rames\chase0<LF>ender.json` (an
+interpreted \f); fixed, and the report is pinned to carry no control
+character but newline. (4) The expected tree's verify.json line said
+8 checks against the ten-row table: 10/10/10 now, read back from the
+stub run's file; run.json's line names every key (jsbsim_log,
+previews, overlays added). (5) A dated "Status today" table at the
+top of the report, per deliverable x platform, every engine cell
+"NOT YET RUN -- section N" (the one Windows observation, the pre-
+rewrite clip flow before 2026-09-03, is dated as such). (6) README's
+capture section no longer says "Off macOS" (Windows renders after the
+build, as its own table says) and quotes 0.074-0.075 s/frame from the
+dated blocks (0.049 was stale); core/util/platform.py's docstring
+carries ue_unavailable_reason()'s words, not "macOS-only". (7) The
+standing block above, and gotchas 1-28. tests/test_camera_docs.py is
+new (6 tests, 0.05 s). 11 guards under "docs round 1", each verified
+firing by subset (1 + 4 + 6: 1m26, 6m43, 2.5 s). Touched test files
+in full: 98 passed in 118 s. Gotchas: (a) a `\f` or `\r` typed inside
+a Python string that writes Markdown is interpreted -- grep the
+document for bytes below 0x20 after writing it (the test does now);
+(b) the honest stub's engine_parity row is all zeros BY CONSTRUCTION
+(it draws where the label says), so a generated block must mask that
+cell or it prints zeros as the engine's; (c) the mutation runner
+mutates docs in place too -- never edit the report while a docs guard
+subset runs; (d) capsys does not see JSBSim's C++ output, capfd does.
+STILL NOT YET RUN: everything in the status table's engine column.
+
+**Camera Phase 1, page round 3 (2026-09-05, the judge's eight ranked
+gaps against bar section 4, all eight closed in priority order, eight
+code commits; docs/CAMERA_PHASE1_REPORT.md section 6 (fallback words,
+parity captions), 6b (the dishonest pass) and the new 6c are
+current).** (1) The flight path is drawn from the telemetry file the
+run LISTED (telemetrySource: telemetry.json, else
+capture/telemetry.json, else nothing), through the whitelist route.
+(2) The page's DOM glue runs under node (tests/page_dom.js: a
+60-line-DOM over index.html's own script, fetch from the TestClient's
+payloads) -- poll, renderCapture, initFilesPanel, toggleOverlays,
+renderSpec, editedSpecDict, startRun are executed, not regex-pinned.
+(3) ONE refusal shape for the whole page (refusalWords in the
+PAGE_CAPTURE block: "[constraint] message (requested X unit, limit Y
+unit)"); every 409 carries constraint/message/actual/limit/unit
+(server.refusal_payload, runs.platform_refusal, runs.busy_refusal;
+new constraint names run.busy and editor.locked; the old keys stay).
+(4) Keyframed moves carry provenance (CameraSpec.moves_source /
+moves_from, set_moves(); serialised only when moves exist, so a
+move-less camera's digest is unchanged); the page's keyframe rows are
+inputs writing into dict.cameras[i].moves[k], the source column the
+recorded word or "spec data (no recorded source)" in grey. (5)
+verify.json's engine_parity data carries "frames" (per camera: index,
+t_s, ok, gaps, that frame's problem sentences); /files galleries
+attach it; a rejected frame is captioned "parity FAIL: <sentence>" in
+red with a red outline. (6) renderSpec/provenanceNote/renderVerdict
+escape everything. (7) A /files failure is said by name in the card.
+(8) The headless fallback is the platform gate's sentence once. 29
+guards under "page round 3" (8 for gaps 1-2, 21 for gaps 3-8), each
+verified firing by subset. Full suite after the round: 818 passed, 1
+skipped in 331 s. The 14 "page round 2" and the 8 earlier "page round
+3" guards were re-fired to completion: 21 ok, 1 SKIP (the contact-sheet
+guard's target moved when gap 5 added failedWords to galleryHtml;
+repointed and re-fired: ok).
+Gotchas: (a) Python 3.11's Enum raises TypeError on `"str" in Enum`
+-- validate against `[s.value for s in Source]`; (b) page_dom.js
+serialises innerHTML with entities kept (&ldquo; stays &ldquo;), so
+assert the entity form, and page_capture returns a dict -- index
+["refusals"] / ["moves"]; (c) an escaping guard is WEAK unless the
+test carries the escaped character in the EXACT interpolation the
+guard mutates (the scalar-value guard needed a quoted aircraft value);
+(d) no prompt vocabulary produces moves, so the page's keyframe rows
+show only for a spec that carried them (Known limitations); (e) the
+DOM harness's setInput now reports sourceCells (every cell sharing
+the input's data-src-key) beside sourceCell.
+
+**Camera Phase 1, page round 2 (2026-09-05, the judge's seven ranked
+gaps against bar section 4, six closed in priority order, six code
+commits; docs/CAMERA_PHASE1_REPORT.md section 6 and the new 6b are
+current).** (1) A FAILED run is terminal for the page: poll() asks
+runIsTerminal (done OR failed) and draws the clip words (clipHtml:
+headless / "the run FAILED before a clip was encoded -- <status line>"
+/ "the by-product clip was not encoded"), the capture card (its refused
+branch, now a path the live page takes; or the counts with
+"(engine pass FAILED: <status line>)" right after "verified") and the
+files panel with the strip -- measured on the mid-run
+camera.terrain_clearance refusal (4 files, downloads ['everything'])
+and on a 3-of-4 short engine pass (frames.zip = 3 PNG + render.json,
+downloads frames/manifest/verification/telemetry/everything, no clip).
+(2, NOT closed: needs the engine) the frames path stays "awaiting
+Windows verification". (3) closure.json's window word is "capped" (the
+first min(duration, 22) s) or "full duration", with spec_duration_s
+beside duration_s; the page reads "the first 12 s, the same window a
+clip would cover, capped at 22 s" on a headless run, "the clip's
+window" only on a clip run, "of the 120 s flight" when the cap bit.
+(4) On a frames run the preview contact sheet lives INSIDE the
+previews' <details> ("...: 4 shown, and their contact sheet"); the
+first <img> under a rendered count is a rendered frame. (5) as_dict
+carries the whole event log (25 of 25 through /runs/<id>). (6) A
+"verification" download class (verify.json) between manifest and
+telemetry -- six classes on a frames run; the tally links
+capture/verify.json and the closure heading capture/closure.json
+(fileLink, built from the payload's run_id only). (7) The review table
+shows each camera's keyframed MOVES (the judge called them planner
+moves; a planner's change is the field's provenance note) as rows
+after its fields, units from the field rows. 14 new guards under
+"page round 2", each verified firing by subset. Gotchas: (a) text_of
+turns "</span>;" into ") ;" -- assert the clause and the order, not
+the joined string; (b) the poll() string test forbids the word
+"failed" inside poll(), comments included; (c) the harness (page_
+capture) now also returns terminal, clip and moves; (d) any test that
+lists download classes must include "verification"; (e) gap 2 is the
+only one left and it is the engine's.
+
+**Camera Phase 1, commands round 3 (2026-09-05, the judge's seven ranked
+gaps against bar sections 5 and 6, closed in priority order; four
+code commits plus the tally commit; docs/CAMERA_PHASE1_REPORT.md
+"How to demonstrate", "Watching each check fail" and "Known
+limitations" are current).** The verifier GRADES THE POSE:
+core/capture/verify.py pose_fidelity (recompute_pose_tracks solves
+every camera's track again from scenario.yaml over telemetry.json in
+the manifest's frame block -- the producer's solver, stated as such --
+and every record's position/quaternion/Euler/focal/fx/fy/principal
+point/resolution/sensor/near/far is compared at its sample, 1e-6 m,
+1e-6 deg, 1e-9 quaternion, 1e-6 px, plus every block's
+pose_track_digest verbatim; 0.0096 s for both cameras of cameras_multi,
+digests bit-identical) and aim_fidelity (the telemetry's aircraft
+through each record against the pixel the preset's promise predicts,
+computed WITHOUT the solver: the AIM_LAG_S first-order lag recomputed
+over the telemetry for chase/wingman/tower/ground, the centre for an
+explicit camera, the body-axis cg pixel for a cockpit with the axes
+compared to the telemetry attitude; 1e-6 px; honest worst 4.1e-13 px,
+0.001 deg of yaw is 0.022 px and FAILS). cross_view_consistency is no
+longer circular: the ray goes through the record's own label but
+STARTS at the recomputed pose, and the recovered point is graded
+against the telemetry's aircraft and both records' (data["mode"]
+independent / records-only; records-only WHERE says "the poses are not
+tested here"). The judge's seven pose corruptions (both +30 m, tower
++5 m, both yawed 3 deg consistently, tower yawed 10 deg, lens x1.5,
+ids swapped) all FAIL now. Ten --corrupt kinds (pose, lens, aim added;
+schedule now copies the spec's pose at the moved sample too so only
+schedule_fidelity fails); --corrupt flight and quaternion fail
+cross-view too (50.0 m; 18.1 m). The CLI runs 9/9 (single camera 8/8
++ cross-view skipped; manifest-only 5/5 + 4 skipped). A REFUSED
+capture prints the header from the spec alone (flightsim.report.
+spec_manifest + captures_words: "output -", fx from focal x width /
+sensor width, "every 1 s, interval" when the flight decides the
+count) before the violation; --json carries it. The request
+handlers' planning (/compile, /run, /capture) is routed to
+<runs root>/jsbsim.log (RunManager.planning_console; /status names it
+with planning_model_loads) and the console sink is one slot PER
+THREAD (core/fdm/console.py threading.local). The doc's block list is
+16. Gotchas: (a) a check that is SKIPPED for a manifest-only directory
+must be added to the skipped lists in tests/test_camera_verify.py
+(three places) and tests/test_webapp_capture.py's tally; (b) the
+doc-staleness guard target moves with the tally ("(9/9 checks; ...");
+(c) the corrupt "schedule" kind must copy the POSE at the new sample
+or pose_fidelity and cross-view fail it; (d) CameraSpec.defaulted()
+takes no field kwargs -- set() them; (e) /status's
+planning_model_loads is since process start, so a test compares
+deltas; (f) 24 new guards under "commands round 3", every one
+verified firing by subset (never run pytest while a subset runs);
+the whole 311-guard suite was run to completion at the end of the
+round (tally in the report).
+
+**Camera Phase 1, commands round 2 (2026-09-05, the judge's eight ranked
+gaps against bar sections 5 and 6, all eight closed; five commits;
+docs/CAMERA_PHASE1_REPORT.md "How to demonstrate" and "Known
+limitations" are current).** The verifier READS THE FLIGHT:
+core/capture/verify.py flight_fidelity (every record's t_s, altitude,
+attitude and pyproj-projected north/east against telemetry.json at its
+sample_index, tolerances 1e-9 s / 1e-6 m / 1e-6 deg; telemetry.json's
+digest = output_digest) and schedule_fidelity (the schedule recomputed
+from scenario.yaml's cameras over the telemetry, instant for instant);
+both SKIPPED by name when the file is not beside the manifest (a
+manifest-only directory is 5/5 + 2 skipped, the CLI runs 7/7). Seven
+--corrupt kinds (clock, flight, schedule added); the copy is the
+SIBLING <run>_corrupt_<kind>/ or --corrupt-dir, never inside the run.
+render() prints a PASS once (the table); "detail:" only for rows that
+did not PASS. The flight line states the telemetry window ("telemetry
+t 4.900..34.858 s (280 samples, 0.108 s apart), the clock at 4.900 s
+when the record began (trim and engine start)"); --brief words
+distance/proximity/event schedules from the trigger. A missing spec is
+USAGE 3; the USAGE line prints once (stdout). The page run enters
+<run>/jsbsim.log around the whole flow (webapp/runs.py _execute), a
+direct capture_run opens capture/jsbsim.log; every routed load is
+stamped "# load N: FlightDynamics(X) called from module.function".
+The header states the aim reference per preset ("aim body axis" +
+the cg pixel for a cockpit) and the schedule table has an "off-aim
+px" column. scripts/examples_expected.py compares the doc blocks
+EXACTLY on the measured platform (only "s/frame" and the engine line
+masked), masked on other platforms. Gotchas: (a) tests that pinned
+"[PASS] name" lines now assert the table row and "[PASS]" ABSENT;
+(b) verification_rows() in the CLI tests ends the table at "detail:"
+OR the first line not indented two spaces (a report with every row
+PASS has no detail block); (c) the request handler's pre-flight
+planning (/capture, /run) still constructs FDMs before a run exists
+and prints to the server console -- stated in Known Limitations, not
+routed; (d) the doc-staleness guard target is now "(7/7 checks; ...";
+(e) 24 new guards under "commands round 2" (plus three round-1 guards repointed), every one verified firing
+by subset (never run pytest while a subset runs).
+
+**Camera Phase 1, commands round 1 (2026-09-05, the judge's ten ranked
+gaps against bar sections 5 and 6, closed in order;
+docs/CAMERA_PHASE1_REPORT.md "How to demonstrate" is current).**
+flightsim/report.py is the surface both commands share: header, per-
+camera schedule table (--brief), the verifier's CHECK/STATUS/MEASURED/
+TOLERANCE/WHERE table (core/capture/verify.py: every Check carries
+measured/tolerance/unit/where, VerificationReport.to_dict() is the ONE
+source for verify.json, the page and --json), a verdict line whose
+first word is the exit code's word (0 done/verified, 1 FAILED, 2
+REFUSED, 3 USAGE, 4 UNEXPECTED; capture.verification moved 2 -> 1 to
+match verify). SKIPPED (ok None + reason) is the fourth status: a
+single camera's cross-view check, counted in neither passed nor ran.
+JSBSim's C++ banner is routed at the fd level (core/fdm/console.py:
+jsbsim_console(path) around the run, captured_console() around each
+FGFDMExec construction in fdm.py and card.py) to <out>/jsbsim.log and
+counted ("14 model loads"); the sink refuses os.devnull. verify
+--corrupt {quaternion|aircraft|time|count} copies the manifest to
+<run>/corrupt_<kind>/ (round 2: the SIBLING <run>_corrupt_<kind>/) and
+must exit 1 with the named check FAILED.
+examples/cameras_multi_cockpit.yaml is the committed alignment pair
+(keep `name: cameras_multi`: the name is in the simulation digest).
+scripts/examples_expected.py --write regenerates the doc's verbatim
+blocks; a test compares their SHAPE (numbers, digests, camera ids
+masked) with the doc's. Gotchas: (a) the `[STATUS] name: detail`
+lines are pinned by tests and stay under the table as "detail:"; (b)
+the sink must wrap ONLY the C++ construction -- a whole-run dup2 would
+swallow our own prints; (c) the scale refusal runs BEFORE validation so
+a refused run leaves no directory (the sink mkdirs lazily on the first
+load); (d) never run pytest while a mutation subset runs.
+
+**Camera Phase 1, preview round 3 (2026-09-04, the judge's eight ranked
+gaps against bar section 3, closed in order, eight commits;
+docs/CAMERA_PHASE1_REPORT.md "Geometry preview" is current and
+SUPERSEDES rounds 1 and 2).** core/capture/preview.py: (1) contact-
+sheet tiles are DRAWN FOR THE TILE (draw_preview size=(320, 180),
+style="thumbnail": intrinsics scaled per axis, no text of any kind,
+horizon/track/body at 2 px; info["text_drawn"] is 0 for a tile),
+never Image.thumbnail() of the preview -- 6.47% geometry pixels
+against 1.30%, peak 255 against 159; (2) the WEAK round-2 wrap guard
+fires: a 400x225 record's 440-px position line wraps to 8 lines from
+6 (480x270 does NOT wrap: 440 < 472); (3) labels are REQUESTED while
+drawing and PLACED once the band, legend, compass and FOV zones are
+known -- right/left/above/below, shifted outward up to 6 lines, 20 px
+clearance then 3 px, the rows beside a zone the anchor lies in, a
+leader when the box ends farther than gap + one line height --
+"boresight" on the cross (18 px), "N" on the arrow TIP right/left
+first, ring labels at min(25 deg, hfov/4) round the ring and 80 px
+from the sides: 0 overlapping pairs and 0 collided over the judge's
+three runs (was 136 px boresight drift, N under the arrow base, rings
+on the shaft); (4) the horizon is split per column against
+skyline_cull's skyline (horizon_runs): solid where the ground's top is
+below it, dashed HORIZON_HIDDEN_RGB (4 on / 8 off; Pillow paints a
+4-px dash as 5 pixels) where a ridge rises above it, info
+horizon_visible_px / horizon_hidden_px -- 157/160 horizon pixels
+through the ridge face went to 0/160; (5) overlay text carries a 2 px
+black stroke and the compass a disc of the band's alpha; (6)
+validated_scale(scale, resolution) refuses a non-divisor by name
+("3 does not divide 1280x720 exactly (426.67x240)"), the CLI before
+run_spec from spec.cameras or default_cameras (exit 2, no directory)
+and the page's /run and /capture (409) via scale_refusal_for_cameras;
+(7) ground_words takes the picture's counts: "(out of frame)", "(none
+in frame)", per-kind "(124 of 1314 coarse + ... in view, 1190 hidden
+behind ridges)" and "; north arrow: drawn (45 px, 5892 m)" / "ground
+out of frame"; info["segments"] counts per kind (terrain,
+terrain_fine, rings_in_frame) in frame / _visible / _hidden /
+_visible_runs with hidden + visible == in frame (the old single
+terrain_hidden 1202 was a cross-kind difference); (8) a second budget
+test over a 97x97 relief raster (0.0915 s/frame, 0.1072 with the
+sheet) and 12 overlays (0.1615 s/frame). CLI: cameras_multi 0.077
+s/frame, cameras_waypoint 0.084, control_ridge with --terrain 0.090.
+42 tests in tests/test_camera_preview.py; 18 new guards, each
+verified firing by the scratchpad subset builder as it was added; the
+whole 56-guard preview set run to completion: 53 ok, 0 WEAK, 3 SKIP whose targets round 3 had moved (repointed, re-run: ok; log in the report).
+Gotchas: (a) a mutation guard's "ok" is meaningless while its test
+fails on its own -- run the test alone first (an early overlay-text
+assertion compared the header's tag line between preview and
+overlay); (b) a loop variable named in_frame shadowed the in_frame()
+helper further down draw_preview; (c) Pillow's textlength at an 8-px
+font is anti-aliased: grade text pixels by brightness, not exact
+colour; (d) the ridge scene's tower frames wrap the band to 125 px,
+which six shifted lines cannot clear -- hence the zone candidates;
+(e) the gap-6 commit body says "100 passed" for the three test files
+where the run printed 93 (corrected in the gap-7 commit). NOT YET RUN:
+overlays on real engine pixels (report step 5c).
+
+**Camera Phase 1, preview round 2 (2026-09-04, the judge's nine ranked
+gaps against bar section 3, closed in order; docs/CAMERA_PHASE1_REPORT.md
+"Geometry preview" is current and SUPERSEDES round 1's description).**
+core/capture/preview.py: (1) terrain segments drawn far to near and
+HIDDEN behind nearer ground by a vectorised per-column skyline
+(skyline_cull: samples sorted by column then depth, the running
+minimum v before each sample, hidden when below it by more than 1 px;
+sub-segments rebuilt from the visible runs); (2) the flown track is
+the run's telemetry (telemetry_track: integer-stride decimation to
+<= 10 Hz, the rate as the recorder's MEDIAN step, 9.23 Hz for its
+13-step spacing, never the mean), past/future split at the frame's
+t_s, this camera's scheduled instants as dots, the header and run.json
+"track_source" say which; the CLI and webapp/capture.py pass columns
+(CaptureOutcome.telemetry carries them to the overlays); (3) rings
+around the camera's EXACT ground point (plan camera_north_m/east_m),
+the lattice keeps its snapped origin; (4) an image-space compass
+(north at -yaw, heading needle at heading - yaw, bottom-right) in
+every scene, the world arrow sized by its PROJECTION (secant steps,
+capped 0.3 x depth) and based on the ray 90 px below the boresight
+(NORTH_ARROW_DROP_PX; terrain: marched + bisected on the raster),
+labels shifted when within 20 px of another; (5) overlays at the
+frame's own size for any ratio (axis_scale per axis, never resampled),
+header font from the image height, lines wrapped at field separators,
+band alpha <= 96; (6) header line "terrain <name> WxH @ px m, wireframe
+NxN (spacing) + fine within R km; rings on the terrain" from
+terrain_plan, the coarse stride now a multiple of 4 raster px
+(control_ridge: 24 px = 720 m, 43x43), a fine lattice at stride/4
+within 10 coarse steps, rings draped on the raster and culled with
+it; (7) runner.aircraft_metrics: length = the LARGER of the stated-
+station extent (eyepoint/VRP/aero RP/CG/tail arm = aero RP + 12 lh)
+and arm + chord, with length_label, length_caveat and both candidates
+(B747 59.6 m eyepoint to tail arm; c172p 6.3 m arm + chord) and the
+picture reads "length >= 59.6 m (...; no fuselage length in JSBSim)";
+(8) "frame index 5 (6 of 24)" / "#5 (6/24)"; (9) scripts/
+mutation_check.sh --only <label regex> runs a named subset (baseline
+and restore still run the whole suite), 21 new guards + 3 repointed
+(two of round 1's whose target lines changed, one PRE-EXISTING stale
+CLI guard whose record.update call had gained a key); the subset
+run was stopped after 11 of 38 (all 11 fired, the 3 repointed ones
+among them); round 3 ran the whole set to completion: 20 ok, 1 WEAK
+("header lines wider than the image are wrapped"), the WEAK one fixed
+by a test that wraps (see the round-3 entry above; the log is in the
+report). Measured: 0.068 s/frame on cameras_multi (48
+frames), 0.076 on cameras_waypoint, 0.053 on the control_ridge frame
+(draw_preview alone; the first cut was 0.135 until the raster
+sampling and header measurement were vectorised -- text measurement
+was the profile's top entry). Gotchas: (a) the info key "terrain" is
+the count of coarse segments IN FRAME and "terrain_visible" the count
+after the cull, so round 1's "> 100" assertion stands at full
+strength; (b) the recorder's samples are 13 steps apart, not 12: a
+test that assumes "10 Hz" fails -- compute the words from the run's
+telemetry; (c) the raster lattice column nearest east 0 sits at
+-0.44 m in the synthetic fields: grade pixels on the lattice's own
+columns, not at east 0; (d) the arrow at the boresight hit lands ON
+the aircraft an aimed camera centres, hence the 90 px drop; (e) a
+mutation run rewrites preview.py, runner.py, flightsim/capture.py and
+webapp/capture.py in place -- never edit or test while one runs.
+NOT YET RUN: overlays on real engine pixels (report step 5c).
+
+**Camera Phase 1, preview round 1 (2026-09-04, the geometry preview
+done properly against bar section 3; docs/CAMERA_PHASE1_REPORT.md
+"Geometry preview" is the description).** core/capture/preview.py
+rewritten: terrain as a depth-shaded wireframe (flat scenes: a
+camera-derived lattice reaching the horizon or far_m, distance rings,
+a north arrow), the horizon from the camera's pitch and roll (v = cy +
+fy tan(pitch): pitched DOWN puts it ABOVE centre; roll +20 gives slope
+-tan 20), the aircraft as a three-axis body + box + heading tick +
+past/future track scaled from `aircraft_metrics` -- read ONCE from the
+FDM by core.scenario.runner.aircraft_metrics (metrics/bw-ft span;
+lh-ft + cbarw-ft as the longitudinal extent because JSBSim has no
+length; sqrt(Sv-sqft) vertical) and carried through the run manifest
+into the capture manifest -- boresight cross + FOV at the edges, a
+four-line header. Full resolution by default (--preview-scale N / the
+page's field, refused by name preview.scale otherwise); the measured
+time per frame printed and in run.json "previews" (0.049 s/frame at
+1280x720 on the 48-frame example; budget 0.5 s); overlays over every
+rendered PNG after a frames pass (overlays/<cam>/NNNN.png, CLI and
+page, stub-verified only); contact_sheets/<cam>.png. 20 tests in
+tests/test_camera_preview.py + 6 CLI/page tests; 15 guards verified
+firing by subset (202 guards on the branch). Suite 716 passed, 1
+skipped in 166 s. Gotchas: (a) the contact sheet must NOT live under
+previews/ -- tests/test_camera_cli.py counts every *.png there as a
+preview, so it lives beside it; (b) preview_scale travels to
+capture_run / manager.start only when it is not 1, because existing
+tests stub those with their old signatures (one spelling of the
+default). NOT YET RUN: overlays on real engine pixels (report step 5c).
+
+**Camera Phase 1, frames round 3 (2026-09-04, six commits -- the
+judge's ranked gaps against analysis/QUALITY_BAR_camera_phase1.md,
+closed in priority order; docs/CAMERA_PHASE1_REPORT.md is current and
+SUPERSEDES the round-2 tolerances below).** (1) Engine parity judges
+the PIXELS: the commandlet writes its own projection of the aircraft
+it drew (aircraft_px/py/visible, aircraft_bbox_px from the bounds'
+corners via ProjectToPixel) and the verifier grades it against the
+labelled pixel within the graded budget and against its own projection
+of the drawn point within 3 px ("do not describe one lens"); a
+label-window contrast clause reads the PNG (window half max(16 px,
+graded budget) widened to the screen box, against a same-size window
+at the farthest corner, >= 8/255 in mean or spread) so a flat frame or
+a blob 40 px off fails by frame with both windows' numbers; all three
+engine stubs DRAW the blob at the label (tests.test_camera_verify.
+honest_frame). (2) ONE parity contract: the manifest carries rate_hz,
+step_s and per-frame aircraft.speed_mps (tas_kt, else ground speed);
+solve_schedule(rate_hz=) and the manifest refuse an instant off the
+fixed-step grid by name; t_applied_s must EQUAL t_s to 1e-6 s (the
+commandlet subtracts its clock origin, read before the first step,
+recorded as clock_origin_s, and fails a step that passes an instant --
+nothing is rounded to a nearest step, so "nearest" and "at or after"
+never differ); render.json's step_s is CHECKED against 1/rate_hz, never
+the tolerance; the drawn-aircraft budget is (1 + 0.5) steps x
+speed_mps / rate_hz per frame with the arithmetic printed ("budget
+2.08 m = 1.5 steps x 1.384 m/step at 166.0 m/s" on cameras_multi;
+1.24 m on the synthetic 99.43 m/s track), so a one-step-late clock
+fails cleanly by name and is never "within contract" on one line and
+over budget on the next; ENGINE_AIRCRAFT_TOL_M is gone. (3) The CLI's
+run.json carries render {choice, label, engine_available,
+engine_unavailable_reason} and verify.json is written beside the
+manifest in every mode (webapp.capture.verification_verdict). (4) POST
+/run without the field resolves through render_choice_default(); the
+page prints the server's word. (5) macOS is gated on the editor at
+UE_ROOT and the built .dylib exactly like Windows (ue_available() IS
+ue_unavailable_reason() is None). Suite 690 passed, 1 skipped in 107 s
+(+9 tests); 187 guards (+15, one repointed), each verified firing by
+subset. Gotcha: tests/test_webapp.py's clip-flow posts must state
+render "clip" -- an omitted field is now the machine's default (frames
+under a mocked-open gate). Gotcha: the synthetic make_columns track is
+99.43 m/s through the scene frame's projection, not the 100 m/s its
+degrees imply; pin measured numbers. STILL NOT YET RUN: the engine
+fields (aircraft_px/py/visible/bbox, clock_origin_s, t_clock_s, the
+exact-grid capture rule) are compile-safe by inspection only; the
+report's Windows section carries the commands, the log lines and the
+x digits to fill; the 8/255 contrast threshold is stated, not measured
+on rendered pixels, and the Windows run's "lowest label window
+contrast" is the first measurement of it.
+
+**Camera Phase 1, frames round 2 (2026-09-03, six commits -- the
+judge's ranked gaps against analysis/QUALITY_BAR_camera_phase1.md,
+closed in priority order; docs/CAMERA_PHASE1_REPORT.md is current).**
+(1) Engine parity JUDGES the aircraft the engine drew: aircraft_applied_*
+within ENGINE_AIRCRAFT_TOL_M = 2.5 m of the manifest's aircraft (one
+1/120 s step at 300 m/s plus the measured host residual: VALIDITY's
+Gate 5 3.6e-4 m, the parity matrix's constant one-step phase of 1.24 m)
+and, reprojected through the applied pose, within 3 px + fx * 2.5 m /
+depth of the labelled pixel (measured on cameras_multi: 31.1-20.6 px at
+the chase's 110.7-177.2 m, 4.0 px at the tower's 3074-3262 m); a record
+without it FAILS the frame. A spec whose air cannot agree across hosts
+(a turbulence word; the lee rotor a terrain scene attaches) is refused
+render.host_parity BY NAME before editor time (POST /run 409, the flow,
+the CLI exit 2) through the ONE rule core.capture.render_pass.
+frames_host_parity_refusal -- Clip only keeps its visual-only label.
+(2) The commandlet applies the pose AT THE SCHEDULED INSTANT and records
+t_pose_s beside t_applied_s (the clock); the verifier requires t_pose_s
+== t_s to 1e-6 s, so the pose contract is exact by construction and the
+capture time is the only tolerance; the expected drawn-aircraft
+distance on the Windows run is ~1.4 m (this example flies 322.7 kt TAS,
+1.384 m per step) plus 1.4 m per step of clock offset -- the coupling
+the report's Windows section now pins by number. (3) flightsim.capture
+verifies in EVERY mode and prints the table before its final line; a
+manifest that fails its own verification exits 2 (capture.verification);
+a successful headless run says "engine absent: <reason>; frames not
+rendered" and "done: ..." -- REFUSED is exit 2's word only;
+UE_PLATFORM_REFUSAL speaks of frames. (4) No hidden render default: the
+form's select ships DISABLED on Headless and is enabled only once
+/status has said render_default (= render_choice_default(), the CLI's
+rule); the page's applyRenderChoices is run verbatim under node against
+the real /status payload (skipped without node; the string test pins the
+source). (5) A frames pass stops after its last scheduled instant
+(1439 of 1440 steps for the example) and records steps_taken/stepped_s,
+said per pass and recorded as provenance render_passes (CLI: run.json).
+(6) The by-product clip: black lead-in PNG listed first in the concat
+playlist (no tpad), argv spelled once (clip_command) and pinned exactly
+with subprocess stubbed, expected length scheduled_clip_seconds (12.992
+s for the example) stated before encoding and recorded with
+clip_encoded; the report's step 5b is the ffprobe measurement. (7) The
+three stale guards (measured control signs, the one-sample exemption,
+the rotor seed) are repointed to the code as it stands and fire;
+scripts/mutation_check.sh ran END TO END: 172 guards, 170 fired in one end-to-end run (31 min; the suite green before and after), and the 2 WEAK there were BOTH pre-existing -- a fourth stale guard, 'a failed model build fails the run BY NAME', whose target string's FIRST occurrence had drifted into _capture_phase so the mutation never touched the guarded line (repointed to the unique except-branch), and 'the rotor card word travels with its pinned turbulence writes', which since Package F had no test where a rotor ACTS (tests/test_webapp.py gained test_a_rotor_that_acts_carries_its_word_and_block_on_the_card, the pre-flight stubbed to 'acts', the flow real) -- both verified firing by subset afterwards: 172 of 172 load-bearing. Suite: 681 passed, 1 skipped in 154 s (+35 tests this round, 14 new guards, 5 repointed).
+Gotcha: scripts/check_bridge_api.sh reports "API surface has drifted" on
+any machine without the engine install (it looks for headers under the
+UE_ROOT default) -- identical on the base commit; not a C++ regression
+signal here. Gotcha: node on PATH is what makes the page-JS test run;
+without it the test skips and the four form guards fire through the
+string-level test alone. STILL NOT YET RUN: every engine change (pose at
+the scheduled instant, t_pose_s, the stop after the last instant,
+steps_taken/stepped_s) is compile-safe by inspection only; the report's
+Windows section has the commands, the log lines and the numbers to fill.
+
+**Airborne physics reconstruction, phase 2 (2026-09-02 --
+docs/AIRBORNE_PHASE2_REPORT.md is the full report, with the pre/post
+table; analysis/ holds the audit, the research ledger the findings came
+from, and the brief that was executed).** Eight packages, one commit
+each, suite green after each: (A) the aircraft is trimmed IN the spec's
+wind on both hosts -- FGTrim::DoTrim re-applies the zero wind IC over
+atmosphere/wind-* writes, so the wind now goes into the ICs through a
+fixed point on the OBSERVED vc and beta (FlightDynamics.
+set_wind_initial_conditions / verify_wind_state, refusal wind.trim_state;
+open-loop excursion 333 m -> 0.8 m; parity harness grades the first
+sample; the C++ TrimInWind mirror is UNCOMPILED here -- verify per the
+report). (B) the control-sign probe flies the engaging aircraft's own
+state (the c172p engages; the p51d refuses control.signs by name).
+(C) every run flies its spec closed loop headlessly and writes
+capture/closure.json; a missed closure FAILS the run by name. (D)
+core/performance.py measures T_trim/T_max/T_idle and a throttle-thrust
+secant at the engaging state; TECS throttle gains are multiplied by the
+measured thr_per_ste, a feed-forward on demanded energy rate is added,
+hdot-max is capped at 0.8 Edot_max (B747 300 m step 72.7 s -> 28.7 s).
+(E) core/terrain/lookahead.py raises the altitude setpoint ahead of
+terrain along the projected track (90 s, half raster pitch, span
+stations) or refuses terrain.lookahead when the escape climb cannot
+clear it. (F) the lee rotor measured its own delivery: 0.000 m/s on
+every planner-produced track (W20 route inert >= 300 m AGL; POE-1 curve
+zero at ~3000 m MSL); the claimed floor is now measured at the MSL, the
+provider observes atmosphere/turb-down-fps through a read-only stack
+hook and acts() only at >= 0.3 m/s, and the web app drops a rotor that
+did not act, stating why. (G) sideslip-to-rudder coordination from a
+measured beta-per-rudder slope (turn-rate error 10% -> 1%, beta 1.16 ->
+0.005 deg, Dutch roll settles faster). Fixed on the way: "over 2000 m
+mountains" compiled to a 2000-MINUTE duration (gotcha: the bare "m" is
+minutes only after for/during). Gotcha from the first run on the user's
+machine: the closure pair must fly the CLIP's window (CLIP_SECONDS), not
+the spec's full duration, and the look-ahead horizon is capped by the
+time left in the run -- otherwise a 22 s clip is refused for a ridge
+59 s ahead that it never reaches. Suite 635 tests (1 skipped), 131 mutation
+guards, all new ones verified firing. Every number in the report comes
+from experiments/airborne/*.py.
+
+**Camera Phase 1 finished: frames, not a clip (2026-09-03, five
+commits -- docs/CAMERA_PHASE1_REPORT.md "The run emits frames, not a
+clip" + "Engine verification (Windows)").** The run form and the CLI
+carry the SAME render choice (Render frames and clip / Clip only /
+Headless; --render frames|clip|none; default = the richest the machine
+supports, engine options refused ue.platform by name WITH the reason,
+recorded in provenance.render). "frames" solves the capture first, puts
+cameras=camera_card_blocks(...) on the card (whole flight, not the 22 s
+clip cap) and runs the commandlet's consume-poses pass once per camera
+(-camera-index=N, -frames=<run>/capture/frames/<id>) through the ONE
+command builder core/capture/render_pass.render_command; a short pass
+fails the run as render.frames; the clip is a by-product of camera 0
+(frames at their instants via ffmpeg concat; UNMEASURED here, no
+ffmpeg). Frames are frames/<id>/NNNN.png by manifest index. The verifier
+gained engine_parity (10 cm / 0.1 deg / one fixed step / PNG size /
+reprojection 3 px) with a third state, AWAITING, that never counts as
+a pass; every summary says scheduled / rendered / verified. The C++
+(schedule-driven capture, index naming, applied+solved per frame,
+orientation parity, count contract, FOV from the card's lens) is
+UNCOMPILED HERE: the report's Windows section has the literal commands,
+the log lines that must appear and the expected counts; it is marked
+NOT YET RUN until the user pastes the log back. Gotcha: the headless
+recorder's first sample is at t = one step (0.00833 s), not 0, so the
+engine's first post-step clock meets it exactly; the parity time
+tolerance is ONE fixed step (the bar's words), not half. Gotcha: three
+pre-existing guards (measured control signs, gate5 one-sample
+exemption, rotor seed) no longer match their source text and SKIP in a
+full mutation run -- found while checking guard targets, untouched
+here. Suite +49 tests, +23 guards, all new ones verified firing.
 
 **Camera Phase 1 (2026-08-31 -- docs/CAMERA_PHASE1_REPORT.md is the
 full report).** The camera is a spec element now: SPEC_VERSION 6,
@@ -21,7 +652,7 @@ CLI: python -m flightsim.capture / flightsim.verify (examples/
 -camera-index= pass reading the card's cameras block, written by
 capture --card) compiles logically but was never built or rendered --
 the report's engine-boundary section carries the exact verification
-steps. Suite 573 tests collected, 114 mutation guards. Measured on a
+steps. Suite 583 tests collected, 118 mutation guards. Measured on a
 raster-less clone (no runs/terrain bakes): 104 guards fire; the FOUR
 terrain-coupled planner guards (ridge-axis wind, rotor card word,
 span-station clearance minimum, orographic pre-flight) report WEAK
@@ -31,6 +662,25 @@ it is an environment artifact of guard MEASUREMENT, not a regression;
 they fire on a machine with the bakes. Worth fixing by giving those
 tests a synthetic raster fixture (the camera tests' make_mountain
 pattern) so every guard is machine-independent.
+
+**Capture on the page (2026-09-01, one commit).** Camera Phase 1's
+deliverable reached the webapp. webapp/capture.py drives the SAME
+solver, scheduler, manifest, verifier and previews the CLI does: every
+/run now captures beside the clip, and a new POST /capture runs the
+labeled-data half alone with no platform gate (nothing there opens the
+editor, so it works wherever flightsim.capture does). /runs/{id}/files
+lists every artefact with a note saying what it is, /runs/{id}/file/{name}
+serves one from a WHITELIST built out of what the run actually wrote
+(not a path check -- an encoded traversal is a 404 by construction), and
+/runs/{id}/bundle.zip is the same set in one download. The page renders
+per-camera frame counts and the verifier's own five checks from
+verify.json as run, never a second opinion. Both endpoints share
+_prepare_run_spec, so the load-bearing planner ORDER cannot drift
+between them. WHICH FLIGHT: the capture is solved from its own headless
+run_spec and written under capture/ beside that run's telemetry; the
+run's top-level telemetry.json stays the rendered flight's -- two hosts,
+two files, neither presented as the other. Ten tests, four guards, all
+verified firing.
 
 **Aircraft fail-safe (2026-09-01, one commit).** A model a machine can
 BUILD is no longer a refusal: the render flow provisions it on first
@@ -506,3 +1156,33 @@ the parity discipline, and the do-not-regress list)
     wall-cloud disc was removed (a 700 m disc at chase distance reads
     as a screen-filling artifact); funnel spin runs at the model's own
     core rate omega = v_max/r_core from SIM time (replay-identical).
+
+27. **A camera pitched DOWN sees the horizon ABOVE its centre**: the
+    horizon row is v = cy + fy tan(pitch) (pitch -4.8 deg at fy 1244
+    puts it at row 256 of 720), and a camera rolled right sees it rise
+    to the right (slope -tan roll). The brief's "cy - fy tan(pitch)"
+    has the sign wrong; the preview tests pin the measured one.
+28. **Pillow's ImageDraw.line has no clipping of its own**: a segment
+    whose endpoint sits near the near plane projects to coordinates in
+    the millions and Bresenham walks them all. core.capture.preview
+    clips every segment at near_m in camera space and then to the image
+    (Liang-Barsky) BEFORE drawing; that is why 4600 wireframe segments
+    cost 49 ms and not seconds.
+29. **The page's scene-setting planner stages an UNPLACED spec on the
+    prairie bake** (default lat/lon and terrain_elevation, no opt-out
+    word in the prompt: webapp.runs.plan_scene_setting), and on a
+    machine without that bake on the control ridge, where a stated
+    10000 ft refuses terrain.clearance under 3299 m peaks. A YAML spec
+    posted to /run with no prompt is unplaced: give it a prompt with
+    "flat ground" (the planner's own opt-out) to fly the flat scene the
+    CLI flies; the prompt is not digest-relevant. The webapp tests pin
+    a flat scene by stubbing pick_scene, which is why this never showed.
+30. **Bare `TEXT("%s")` literals in the commandlet match any line**: a
+    static check that turns log lines back into format skeletons must
+    skip word-less literals or every line matches three of them.
+31. **Another session may be committing to the same branch while you
+    work** (508263d and a928572 appeared between this round's commits):
+    `git add` named files only, never `-A`, and read `git log` before
+    each commit; a guard whose target text another commit reworded
+    SKIPs ("could not apply mutation") rather than failing, so re-run
+    the subset after pulling in their change.

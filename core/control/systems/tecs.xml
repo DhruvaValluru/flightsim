@@ -123,10 +123,36 @@
         <!-- speed error -> vdot demand, 1/s -->
 <property value="40.0">ap/tecs/hdot-max-fps</property>
 <property value="6.0">ap/tecs/vdot-max-fps2</property>
-<property value="1.2">ap/tecs/kt-p</property>
-<property value="0.30">ap/tecs/kt-i</property>
-<property value="0.5">ap/tecs/ke-p</property>
-<property value="0.08">ap/tecs/ke-i</property>
+<!-- Package D: the throttle gains are NORMALISED by the airframe's measured
+     thrust range. ap/tecs/ste-error is already a required thrust-to-weight
+     increment (an energy-rate error over g*V); multiplying it by
+     thr-per-ste = 1 / ((T_max - T_idle)/W), measured at engage by
+     core.performance, gives the throttle increment that produces exactly
+     that thrust. With it, kt-p is a dimensionless loop gain: 1.0 means
+     "command the throttle the energy error requires"; the same
+     gains give the same bandwidth on every airframe. Before this, a fixed
+     1.2 drove the B747 to 17-54% of its excess power and the c172p to 98%
+     throttle (measured). The 1.0 default here is overwritten at engage from
+     a measurement; a guard makes sure it is. -->
+<property value="1.0">ap/tecs/thr-per-ste</property>
+<property value="1.0">ap/tecs/kt-p</property>
+<property value="0.10">ap/tecs/kt-i</property>
+<!-- Measured specific excess power at full throttle / deficit at idle, fps,
+     written at engage; hdot-max is derived from the first so the demanded
+     climb rate is one the airframe can deliver at constant speed. -->
+<property value="0">ap/tecs/stedot-max-fps</property>
+<property value="0">ap/tecs/stedot-min-fps</property>
+<!-- Package D: with the throttle loop normalised, the energy-DISTRIBUTION
+     loop became the measured bottleneck: at ke-p 0.5 a 300 m step left a
+     2.9 kt speed surplus untraded, the throttle loop read the total energy
+     as satisfied, and the climb stalled at 6.4 m/s of a 12.2 demanded.
+     Swept (experiments/airborne/tecs_step.py): ke-p 0.5 gives 43.9 s to
+     90%, 1.0 gives 33.7 s, 1.5 gives 30.4 s, 2.0 gives 28.7 s with 0.1 m
+     overshoot and a 1.0 kt CAS excursion, climb rate tracking its demand.
+     The SEB error is already an angle (radians), so this gain is
+     dimensionless and airframe-neutral. -->
+<property value="2.0">ap/tecs/ke-p</property>
+<property value="0.32">ap/tecs/ke-i</property>
 <!-- Turn compensation: drag rises with 1/cos(phi), so a banked turn needs
      more thrust for the same energy state (§6.4, ArduPilot TECS_RLL2THR). -->
 <property value="0.20">ap/tecs/roll-to-throttle</property>
@@ -138,8 +164,23 @@
 <property value="3.5">ap/lat/k-phi</property>       <!-- bank error -> roll rate demand -->
 <property value="2.0">ap/lat/kp-p</property>
 <property value="0.05">ap/lat/ki-p</property>
-<property value="1.5">ap/yaw/k-r</property>
+<!-- Yaw damper gain. Raised from 1.5 to 3.0 with the coordinator (Package
+     G): swept with it on the B747 at 3000 m / 230 kt, the Dutch-roll
+     damping ratio after a rudder pulse is 0.21 at 1.5 and 0.25 at 3.0 at
+     the chosen sideslip loop gain, with the turn itself unchanged. -->
+<property value="3.0">ap/yaw/k-r</property>
 <property value="1.0">ap/yaw/washout-c1</property>  <!-- 1/tau_w, tau_w ~ 1 s -->
+<!-- Turn coordination (Package G): rudder per degree of sideslip, SIGNED
+     (negative feedback included), and its integral gain. Both are written
+     at engage from the beta-per-rudder slope core.control.coordination
+     measures on the engaging airframe at its own state; the template
+     value 0 is the pre-Package-G yaw channel (damper only), which flew a
+     25 deg turn 9% below g tan(phi)/V with 1.08 deg of sideslip. -->
+<property value="0.0">ap/yaw/k-beta</property>
+<property value="0.0">ap/yaw/ki-beta</property>
+<!-- A rudder offset added to the command: the probe input the
+     coordination measurement uses (and nothing else writes). -->
+<property value="0.0">ap/yaw/rudder-bias</property>
 
 <!-- ========== limits =================================================== -->
 <property value="0.436332">ap/limits/bank-rad</property>       <!-- 25 deg -->
@@ -326,10 +367,29 @@
     </function>
   </fcs_function>
 
+  <!-- Normalised gains: kt-p and kt-i times the measured throttle-per-
+       (dT/W). Computed as properties so the PID reads them each step. -->
+  <fcs_function name="ap/tecs/kt-p-normalised">
+    <function>
+      <product>
+        <property>ap/tecs/kt-p</property>
+        <property>ap/tecs/thr-per-ste</property>
+      </product>
+    </function>
+  </fcs_function>
+  <fcs_function name="ap/tecs/kt-i-normalised">
+    <function>
+      <product>
+        <property>ap/tecs/kt-i</property>
+        <property>ap/tecs/thr-per-ste</property>
+      </product>
+    </function>
+  </fcs_function>
+
   <pid name="ap/tecs/throttle-pid">
     <input> ap/tecs/ste-error </input>
-    <kp> ap/tecs/kt-p </kp>
-    <ki> ap/tecs/kt-i </ki>
+    <kp> ap/tecs/kt-p-normalised </kp>
+    <ki> ap/tecs/kt-i-normalised </ki>
     <kd> 0.0 </kd>
     <!-- Freeze the integrator whenever the throttle command has hit a stop. -->
     <trigger> ap/tecs/throttle-trigger </trigger>
@@ -356,9 +416,45 @@
     </function>
   </fcs_function>
 
+  <!-- Package D feed-forward: the throttle increment the DEMANDED energy
+       rate requires, (g*hdot_dem + V*Vdot_dem)/(g*V) times the measured
+       throttle-per-(dT/W). Without it the loop is proportional-only while
+       the climb-rate demand sits at its limit (the anti-windup trigger
+       freezes the integrator there), and a unity-gain proportional loop on
+       a rate settles at HALF the demand: measured, 5.3 m/s achieved for
+       12.2 demanded. The feed-forward supplies the demand; P and I correct
+       the residual (ArduPilot AP_TECS ff_throttle does the same). -->
+  <fcs_function name="ap/tecs/throttle-ff">
+    <function>
+      <product>
+        <property>ap/tecs/thr-per-ste</property>
+        <quotient>
+          <sum>
+            <product>
+              <value>32.174049</value>
+              <property>ap/tecs/hdot-demand-fps</property>
+            </product>
+            <product>
+              <property>velocities/vtrue-fps</property>
+              <property>ap/tecs/vdot-demand-fps2</property>
+            </product>
+          </sum>
+          <product>
+            <value>32.174049</value>
+            <max>
+              <property>velocities/vtrue-fps</property>
+              <value>1.0</value>
+            </max>
+          </product>
+        </quotient>
+      </product>
+    </function>
+  </fcs_function>
+
   <!-- Pre-clip command, kept so saturation can be detected honestly. -->
   <summer name="ap/tecs/throttle-raw">
     <input> ap/trim/throttle </input>
+    <input> ap/tecs/throttle-ff </input>
     <input> ap/tecs/throttle-pid </input>
     <input> ap/tecs/turn-compensation </input>
   </summer>
@@ -694,10 +790,34 @@
     <c1> ap/yaw/washout-c1 </c1>
   </washout_filter>
 
+  <!-- Turn coordination (Package G): sideslip to rudder. The gains carry
+       their own sign (measured: the slope of steady beta against a rudder
+       offset on this airframe at this state), so the term needs no
+       ap/sign/rudder factor. The integrator is frozen when the rudder
+       command sits on a stop, and reset while the autopilot is off. -->
+  <fcs_function name="ap/yaw/beta-trigger">
+    <function>
+      <ifthen>
+        <lt><property>ap/enable</property><value>0.5</value></lt>
+        <value>-1.0</value>
+        <property>ap/yaw/rudder-saturated</property>
+      </ifthen>
+    </function>
+  </fcs_function>
+
+  <pid name="ap/yaw/beta-pid">
+    <input> aero/beta-deg </input>
+    <kp> ap/yaw/k-beta </kp>
+    <ki> ap/yaw/ki-beta </ki>
+    <kd> 0.0 </kd>
+    <trigger> ap/yaw/beta-trigger </trigger>
+    <clipto> <min> -0.3 </min> <max> 0.3 </max> </clipto>
+  </pid>
+
   <!-- Oppose the washed=out yaw rate. The command is built in the natural
        direction (negative rate demand against positive r) and the airframe's
        measured sign is applied last. -->
-  <fcs_function name="ap/yaw/rudder-command">
+  <fcs_function name="ap/yaw/rudder-raw">
     <function>
       <sum>
         <property>ap/trim/rudder</property>
@@ -707,7 +827,25 @@
           <property>ap/yaw/k-r</property>
           <property>ap/yaw/r-washout</property>
         </product>
+        <property>ap/yaw/beta-pid</property>
+        <property>ap/yaw/rudder-bias</property>
       </sum>
+    </function>
+  </fcs_function>
+
+  <fcs_function name="ap/yaw/rudder-saturated">
+    <function>
+      <ifthen>
+        <gt><abs><property>ap/yaw/rudder-raw</property></abs><value>0.5</value></gt>
+        <value>1.0</value>
+        <value>0.0</value>
+      </ifthen>
+    </function>
+  </fcs_function>
+
+  <fcs_function name="ap/yaw/rudder-command">
+    <function>
+      <property>ap/yaw/rudder-raw</property>
     </function>
     <clipto> <min> -0.5 </min> <max> 0.5 </max> </clipto>
   </fcs_function>

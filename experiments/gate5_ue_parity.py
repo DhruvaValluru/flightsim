@@ -310,18 +310,17 @@ def compare(headless: Path, unreal: Path) -> Tuple[List[Parity], Overlap]:
             )
 
     at, bt = a["t"], b["t"]
-    # The comparison starts at each host's SECOND sample. The first sample is
-    # the trim snapshot: the headless recorder takes it by force before the
-    # environment loop has run, so in a wind scenario it records the aircraft
-    # an instant before the wind switches on -- measured, 288.0 kt TAS against
-    # 301.1 kt one sample later in a 13 kt headwind. Grading that instant
-    # grades the switch-on artifact, which is the §1.1 mistake (scoring the
-    # initialisation transient) in miniature. Exactly one sample is skipped
-    # per host, never more: a real divergence from the second sample onward is
-    # still a divergence, and there is a test holding that line.
-    first_a = at[1] if len(at) > 1 else at[0]
-    first_b = bt[1] if len(bt) > 1 else bt[0]
-    start, end = max(first_a, first_b), min(at[-1], bt[-1])
+    # The comparison starts at each host's FIRST sample -- the trim snapshot
+    # included. This harness used to skip it: in a wind case the headless
+    # first row read 288.0 kt TAS against 301.1 kt one sample later (13 kt
+    # headwind) and that was diagnosed as the recorder sampling before the
+    # environment loop. It was not. The trim state itself was calm -- FGTrim
+    # re-applied the zero wind IC over the property write -- and the
+    # "switch-on artifact" was the physics receiving the wind as a step
+    # (Package A, 2026-09-02, measured on both hosts). With the wind now in
+    # the initial conditions the trim snapshot carries it, and grading that
+    # row is exactly what proves it on both hosts. Nothing is exempt.
+    start, end = max(at[0], bt[0]), min(at[-1], bt[-1])
     grid = [t for t in at if start <= t <= end]
     overlap = Overlap(start=start, end=end,
                       headless_span=at[-1] - at[0], unreal_span=bt[-1] - bt[0],

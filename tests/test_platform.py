@@ -52,16 +52,43 @@ def test_ue_dispatch_windows_needs_engine_and_bridge(monkeypatch, tmp_path):
     assert plat.ue_available() is True           # engine + built bridge
 
 
-def test_ue_dispatch_mac_and_linux_unchanged(monkeypatch):
-    """mac keeps its measured behavior (available, editor at the default
-    install); Linux still has no UE half at all."""
+def test_ue_dispatch_mac_needs_engine_and_bridge_like_windows(monkeypatch,
+                                                              tmp_path):
+    """A mac is gated on the SAME two facts as Windows -- the editor at
+    UE_ROOT (default /Users/Shared/Epic Games/UE_5.5) and a built
+    .dylib -- so a mac with no engine install, or an unbuilt bridge, is
+    told so by name BEFORE a run (the page disables the engine options
+    with the reason; /status's default is Headless) instead of failing
+    mid-run with "wrote no render.json". Linux still has no UE half."""
     monkeypatch.delenv("UE_ROOT", raising=False)
     monkeypatch.setattr(sys, "platform", "darwin")
-    assert plat.ue_available() is True
     assert plat.ue_editor_path() == Path(
         "/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor-Cmd")
     assert plat.ue_bridge_binary(REPO).suffix == ".dylib"
 
+    root = tmp_path / "UE_5.5"
+    monkeypatch.setenv("UE_ROOT", str(root))
+    assert plat.ue_available() is False          # nothing installed
+    reason = plat.ue_unavailable_reason()
+    assert reason.startswith("no engine on this machine: set UE_ROOT")
+    assert str(root / "Engine" / "Binaries" / "Mac" / "UnrealEditor-Cmd") \
+        in reason
+
+    editor = plat.ue_editor_path()
+    editor.parent.mkdir(parents=True)
+    editor.write_bytes(b"")
+    bridge = tmp_path / "UnrealEditor-FlightSimBridge.dylib"
+    monkeypatch.setattr(plat, "ue_bridge_binary", lambda repo: bridge)
+    assert plat.ue_available() is False          # engine alone: not enough
+    reason = plat.ue_unavailable_reason()
+    assert reason == ("FlightSimBridge not built: run scripts/ue_preflight.sh "
+                      "then scripts/build_ue.sh")
+
+    bridge.write_bytes(b"")
+    assert plat.ue_available() is True           # engine + built bridge
+    assert plat.ue_unavailable_reason() is None
+
+    monkeypatch.delenv("UE_ROOT")
     monkeypatch.setattr(sys, "platform", "linux")
     assert plat.ue_available() is False
     assert plat.ue_editor_path() is None
@@ -107,8 +134,10 @@ def test_font_chain_and_honest_degradation(monkeypatch, tmp_path, capsys):
 
 
 def test_webapp_refuses_ue_platform_off_mac(monkeypatch):
-    """Off-mac a render request is the NAMED ue.platform refusal on the
-    page, never a 500; the headless half stays available."""
+    """Off-mac a render request (an engine choice stated -- an omitted
+    field is the machine's own default, headless here) is the NAMED
+    ue.platform refusal on the page, never a 500; the headless half
+    stays available."""
     from fastapi.testclient import TestClient
 
     from core.nl.compiler import compile_prompt
@@ -129,7 +158,8 @@ def test_webapp_refuses_ue_platform_off_mac(monkeypatch):
                         lambda spec: None)
     spec = compile_prompt("fly the 747 at 3000 m and 250 kt")
     client = TestClient(app)
-    reply = client.post("/run", json={"spec": spec.to_dict()})
+    reply = client.post("/run", json={"spec": spec.to_dict(),
+                                      "render": "clip"})
     assert reply.status_code == 409
     body = reply.json()
     assert body.get("constraint") == "ue.platform"
@@ -241,3 +271,48 @@ def test_no_text_io_without_utf8_encoding():
     assert not offenders, (
         "text I/O without encoding='utf-8' (Windows cp1252 hazard): "
         + ", ".join(offenders))
+
+
+def test_ue_unavailable_reason_names_the_missing_piece(monkeypatch, tmp_path):
+    """The page disables the engine render options WITH the reason, and a
+    refused engine choice carries it: no engine on this OS, no engine
+    at UE_ROOT, or the bridge not built. The reason and ue_available()
+    are the same facts, pinned: available exactly when the reason is
+    None."""
+    def agree():
+        assert plat.ue_available() == (plat.ue_unavailable_reason() is None)
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    reason = plat.ue_unavailable_reason()
+    assert reason and "no engine on this OS" in reason
+    agree()
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setenv("UE_ROOT", str(tmp_path / "absent"))
+    reason = plat.ue_unavailable_reason()
+    # The looked-for path is joined by the host's os.path (backslashes on a
+    # Windows CI runner faking the mac platform), so compare separator-free.
+    assert "set UE_ROOT" in reason
+    assert "Binaries/Mac/UnrealEditor-Cmd" in reason.replace("\\", "/")
+    agree()
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    root = tmp_path / "UE_5.5"
+    monkeypatch.setenv("UE_ROOT", str(root))
+    reason = plat.ue_unavailable_reason()
+    assert "set UE_ROOT" in reason and "UnrealEditor-Cmd.exe" in reason
+    agree()
+
+    editor = plat.ue_editor_path()
+    editor.parent.mkdir(parents=True)
+    editor.write_bytes(b"")
+    bridge = tmp_path / "UnrealEditor-FlightSimBridge.dll"
+    monkeypatch.setattr(plat, "ue_bridge_binary", lambda repo: bridge)
+    reason = plat.ue_unavailable_reason()
+    assert "FlightSimBridge not built" in reason
+    assert "ue_preflight.ps1" in reason and "build_ue.ps1" in reason
+    agree()
+
+    bridge.write_bytes(b"")
+    assert plat.ue_unavailable_reason() is None
+    agree()

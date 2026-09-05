@@ -28,7 +28,8 @@ from typing import Dict, Optional
 import jsbsim
 
 from . import aircraft as ac
-from .errors import SimulationError
+from .console import captured_console
+from .errors import SimulationError, TrimStateError
 from .properties import PropertyAccess
 from .state import REQUIRED_PROPERTIES, SURFACE_PROPERTIES, AircraftState
 from .trim import TrimMode, trim as _trim
@@ -41,10 +42,12 @@ DEFAULT_RATE_HZ = 120.0
 
 # Note: JSBSim prints a three-line startup banner to stdout from C++ on every
 # FGFDMExec construction. Measured on the pinned build, FGJSBBase.debug_lvl = 0
-# does NOT suppress it (it only gates later diagnostics), so silencing it would
-# require redirecting the OS-level file descriptor around construction. Left
-# alone for now rather than shipping a suppression that does not suppress; it
-# matters only for sweep log volume, which Phase 7 will address.
+# does NOT suppress it (it only gates later diagnostics), so the construction
+# below runs inside core.fdm.console.captured_console(): while a caller has
+# named a log file (jsbsim_console(path), as the capture CLI does), file
+# descriptors 1 and 2 are redirected to it for exactly that call and the
+# banner is routed there, counted, never lost; with no sink active nothing
+# changes and the banner reaches the terminal as before.
 
 #: Initial conditions are order-dependent. Lower rank is applied first.
 #:
@@ -150,16 +153,22 @@ class FlightDynamics:
         #: the manifest can name both the stock model and the derivation.
         self.derived = derived
 
-        self._exec = jsbsim.FGFDMExec(root_dir=str(self.model.root_dir))
-        self._exec.set_debug_level(debug_level)
-        # A derived aircraft lives outside the JSBSim data root, so engines and
-        # shared systems still have to be resolved against the stock tree.
-        if engine_path is not None:
-            self._exec.set_engine_path(str(engine_path))
-        if systems_path is not None:
-            self._exec.set_systems_path(str(systems_path))
+        # The banner is emitted by the constructor itself, before
+        # set_debug_level can run: the whole construct-and-load is routed
+        # through the console sink when one is active (see the note above).
+        with captured_console(f"FlightDynamics({self.model.name})"):
+            self._exec = jsbsim.FGFDMExec(root_dir=str(self.model.root_dir))
+            self._exec.set_debug_level(debug_level)
+            # A derived aircraft lives outside the JSBSim data root, so
+            # engines and shared systems still have to be resolved against
+            # the stock tree.
+            if engine_path is not None:
+                self._exec.set_engine_path(str(engine_path))
+            if systems_path is not None:
+                self._exec.set_systems_path(str(systems_path))
 
-        if not self._exec.load_model(self.model.name):
+            loaded = self._exec.load_model(self.model.name)
+        if not loaded:
             raise SimulationError(
                 f"JSBSim refused to load {self.model.name!r} from {self.model.xml_path}"
             )
@@ -277,6 +286,124 @@ class FlightDynamics:
         self._verify_initial_conditions(ordered, tolerance)
         self._ic_applied = True
         self._trimmed = False
+
+    def set_wind_initial_conditions(
+        self, north_fps: float, east_fps: float, down_fps: float = 0.0,
+        max_iterations: int = 6, vc_tolerance_kt: float = 0.05,
+        beta_tolerance_deg: float = 0.02,
+    ) -> int:
+        """Put the spec's wind INTO the initial conditions, so trim sees it.
+
+        Package A (2026-09-02). Writing ``atmosphere/wind-*`` before
+        ``trim()`` does not work: ``FGTrim::DoTrim`` calls
+        ``Initialize(&fgic)``, which re-applies the initial conditions --
+        wind included, zero -- over the direct writes (measured: -50.63 fps
+        before ``trim()``, 0.00 after). The aircraft was trimmed in calm air
+        and received the wind as a step on the first step of every windy
+        run: +333 m / -327 m of altitude in 30 s open loop for 30 kt.
+
+        JSBSim's own wind initial conditions are treacherous the other way:
+        they hold the *ground* velocity and re-derive airspeed (a commanded
+        250 kt CAS came out at 303/197 kt in a 30 kt head/tail wind), and
+        ``ic/vw-dir-deg`` is the direction the wind blows TOWARD. So rather
+        than reason about the setters, this method writes the wind IC and
+        the NED ground-velocity ICs from the guess
+
+            v_ground = v_air (along the commanded heading) + v_wind,
+
+        runs the IC, and iterates on what the FDM *reports* --
+        ``velocities/vc-kts`` and ``aero/beta-deg`` -- until the calibrated
+        airspeed is the commanded one and the sideslip is zero with the wind
+        present. Measured: one iteration on B747 and c172p, head, tail,
+        cross and quartering winds. The commanded CAS and heading are those
+        the last :meth:`set_initial_conditions` applied, read back from the
+        ``ic/`` tree; the CAS-to-TAS conversion is the FDM's own.
+
+        Returns the iteration count (recorded in :meth:`provenance`).
+        Raises :class:`TrimStateError` if the fixed point does not converge:
+        a state that would trim in the wrong wind is refused, never
+        approximated.
+        """
+        if not self._ic_applied:
+            raise SimulationError(
+                "set_wind_initial_conditions() needs the airspeed and heading "
+                "initial conditions first: call set_initial_conditions()"
+            )
+        props = self.props
+        cas_kt = props.get("ic/vc-kts")
+        heading_deg = props.get("ic/psi-true-deg")
+        vt_target = props.get("ic/vt-fps")
+        psi = math.radians(heading_deg)
+        vn = vt_target * math.cos(psi) + north_fps
+        ve = vt_target * math.sin(psi) + east_fps
+        vd = float(down_fps)
+        mag = math.sqrt(north_fps ** 2 + east_fps ** 2 + down_fps ** 2)
+        to_deg = math.degrees(math.atan2(east_fps, north_fps)) % 360.0
+        vc = beta = float("nan")
+        for iterations in range(1, max_iterations + 1):
+            props.set_many({
+                "ic/vw-mag-fps": mag, "ic/vw-dir-deg": to_deg,
+                "ic/vn-fps": vn, "ic/ve-fps": ve, "ic/vd-fps": vd,
+                "ic/psi-true-deg": heading_deg,
+            })
+            if not self._exec.run_ic():
+                raise SimulationError(
+                    f"run_ic() failed for {self.model.name!r} while placing "
+                    f"the wind in the initial conditions")
+            props.refresh()
+            vc = props.get("velocities/vc-kts")
+            beta = props.get("aero/beta-deg")
+            if abs(vc - cas_kt) < vc_tolerance_kt and abs(beta) < beta_tolerance_deg:
+                break
+            # Correct the AIR vector the guess implied, using the wind the
+            # FDM itself reports (its sign convention, not this code's):
+            # scale by the airspeed ratio, rotate out the sideslip, re-add.
+            wn = props.get("atmosphere/wind-north-fps")
+            we = props.get("atmosphere/wind-east-fps")
+            an, ae = vn - wn, ve - we
+            a_mag = math.hypot(an, ae) * cas_kt / max(vc, 1.0)
+            a_dir = math.atan2(ae, an) - math.radians(beta)
+            vn, ve = a_mag * math.cos(a_dir) + wn, a_mag * math.sin(a_dir) + we
+        else:
+            raise TrimStateError(
+                f"{self.model.name!r}: could not place a {mag / 1.6878:.1f} kt "
+                f"wind in the initial conditions with {cas_kt:.1f} kt CAS and "
+                f"zero sideslip after {max_iterations} iterations (last: vc "
+                f"{vc:.2f} kt, beta {beta:.3f} deg). Refusing to trim in a "
+                f"wind other than the spec's.")
+        self._wind_ic = (float(north_fps), float(east_fps), float(down_fps))
+        self._wind_ic_iterations = iterations
+        self._trimmed = False
+        return iterations
+
+    def verify_wind_state(self, north_fps: float, east_fps: float,
+                          cas_kt: float, wind_tolerance_fps: float = 0.05,
+                          cas_tolerance_kt: float = 0.1,
+                          beta_tolerance_deg: float = 0.05) -> None:
+        """The post-trim guard (Package A): the FDM must be flying in the
+        spec's wind at the spec's airspeed with no sideslip, or refuse by
+        name (``wind.trim_state``). Called after ``trim()``, on every host
+        path that trims for a spec."""
+        props = self.props
+        wn = props.get("atmosphere/total-wind-north-fps")
+        we = props.get("atmosphere/total-wind-east-fps")
+        vc = props.get("velocities/vc-kts")
+        beta = props.get("aero/beta-deg")
+        problems = []
+        if (abs(wn - north_fps) > wind_tolerance_fps
+                or abs(we - east_fps) > wind_tolerance_fps):
+            problems.append(f"total wind ({wn:.2f}, {we:.2f}) fps, spec "
+                            f"({north_fps:.2f}, {east_fps:.2f})")
+        if abs(vc - cas_kt) > cas_tolerance_kt:
+            problems.append(f"vc {vc:.2f} kt, spec {cas_kt:.2f}")
+        if abs(beta) > beta_tolerance_deg:
+            problems.append(f"beta {beta:.3f} deg, expected 0")
+        if problems:
+            raise TrimStateError(
+                f"{self.model.name!r} is not trimmed in the spec's conditions: "
+                + "; ".join(problems)
+                + ". The run would begin with a wind step from a calm trim "
+                  "(measured: +333 m / -327 m in 30 s open loop for 30 kt).")
 
     def _verify_initial_conditions(
         self, requested: Dict[str, float], tolerance: float
@@ -574,6 +701,10 @@ class FlightDynamics:
             # An experimental control, not a detail: a mass-held run is not a
             # realistic one and must never be reported as such.
             "mass_held_constant": self.mass_held,
+            # Package A: the wind the trim actually saw (NED fps) and how
+            # many fixed-point iterations placed it. None means a calm trim.
+            "wind_in_initial_conditions_fps": getattr(self, "_wind_ic", None),
+            "wind_ic_iterations": getattr(self, "_wind_ic_iterations", 0),
         }
 
     def __repr__(self) -> str:

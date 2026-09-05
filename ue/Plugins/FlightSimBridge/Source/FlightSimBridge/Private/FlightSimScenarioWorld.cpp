@@ -1078,14 +1078,56 @@ bool FFlightSimScenarioWorld::TrimInWind(const FFlightSimScenarioCard& Card,
 		return true;   // still air: the trim BeginPlay produced stands
 	}
 
-	// The headless sequence, reproduced: calm RunIC (done, in BeginPlay), wind
-	// written to FGWinds directly, then a FULL trim in the wind. FULL rather
-	// than longitudinal for the same reason mode_for(crosswind=True) chooses
-	// it -- a crosswind start needs the lateral axes solved too.
-	TArray<FString> Unused;
-	Movement->CommandConsoleBatch(WindProperties, WindValues, Unused);
+	// Package A (2026-09-02, mirrors core.fdm.FlightDynamics.
+	// set_wind_initial_conditions -- NOT compiled or run in the authoring
+	// environment; verify on a machine with the engine, see
+	// docs/AIRBORNE_PHASE2_REPORT.md). The previous sequence -- calm RunIC,
+	// wind written to FGWinds, then do_simple_trim -- did not trim in the
+	// wind: JSBSim's FGTrim::DoTrim calls Initialize(&fgic), which re-applies
+	// the (zero) wind initial condition over the direct write. Measured
+	// headless: wind -50.63 fps before the trim, 0.00 after; the aircraft
+	// then received the wind as a step on step one (+333 m / -327 m in 30 s
+	// open loop for 30 kt). Both hosts shared it, which is why parity agreed.
+	//
+	// The wind therefore goes INTO the initial conditions, with the NED
+	// ground-velocity ICs set to v_ground = v_air(along heading) + v_wind so
+	// that the air-relative state the IC produces is the spec's (JSBSim's
+	// wind ICs otherwise hold ground speed and re-derive airspeed: 250 kt
+	// commanded came out at 303/197 kt). The headless fixed point converges
+	// in one iteration on every airframe measured; here the same one
+	// iteration is applied and the result VERIFIED, not iterated, because
+	// the console path cannot loop cheaply -- a mismatch fails the run by
+	// name rather than trimming in the wrong wind.
 	FString Out;
 	Movement->CommandConsole(TEXT("atmosphere/turb-type"), TEXT("0"), Out);
+	// TAS the calm IC implies for the card's CAS at this altitude: the FDM's
+	// own conversion, read back rather than recomputed here.
+	FString VtStr;
+	Movement->CommandConsole(TEXT("ic/vt-fps"), TEXT(""), VtStr);
+	const double VtFps = FCString::Atod(*VtStr);
+	const double PsiRad = FMath::DegreesToRadians(Card.HeadingDegrees);
+	const double VnFps = VtFps * FMath::Cos(PsiRad) + SteadyWindNorthFps;
+	const double VeFps = VtFps * FMath::Sin(PsiRad) + SteadyWindEastFps;
+	const double MagFps = FMath::Sqrt(SteadyWindNorthFps * SteadyWindNorthFps
+	                                  + SteadyWindEastFps * SteadyWindEastFps);
+	// ic/vw-dir-deg is the direction the wind blows TOWARD (measured).
+	const double ToDeg = FMath::Fmod(FMath::RadiansToDegrees(
+		FMath::Atan2(SteadyWindEastFps, SteadyWindNorthFps)) + 360.0, 360.0);
+	const TArray<FString> IcProperties = {
+		TEXT("ic/vw-mag-fps"), TEXT("ic/vw-dir-deg"),
+		TEXT("ic/vn-fps"), TEXT("ic/ve-fps"), TEXT("ic/vd-fps"),
+		TEXT("ic/psi-true-deg")};
+	const TArray<FString> IcValues = {
+		FString::Printf(TEXT("%.17g"), MagFps), FString::Printf(TEXT("%.17g"), ToDeg),
+		FString::Printf(TEXT("%.17g"), VnFps), FString::Printf(TEXT("%.17g"), VeFps),
+		TEXT("0"), FString::Printf(TEXT("%.17g"), Card.HeadingDegrees)};
+	TArray<FString> Unused;
+	Movement->CommandConsoleBatch(IcProperties, IcValues, Unused);
+	// FGTrim re-initialises from these ICs before solving, so the wind is
+	// now part of what it solves in. The direct FGWinds write below is kept
+	// so the first step's environment matches the trim (the run loop
+	// re-writes it every step anyway).
+	Movement->CommandConsoleBatch(WindProperties, WindValues, Unused);
 
 	// JSBSim's own trim entry point, through the property tree. 1 = tFull,
 	// the same enum value core.fdm.trim.TrimMode.FULL pins against the 1.2.4
@@ -1093,9 +1135,30 @@ bool FFlightSimScenarioWorld::TrimInWind(const FFlightSimScenarioCard& Card,
 	// which is exactly what VerifyTrimmedCondition exists to catch, so a
 	// failed trim here cannot produce a quiet wrong run.
 	Movement->CommandConsole(TEXT("simulation/do_simple_trim"), TEXT("1"), Out);
+	// The guard (core.fdm.FlightDynamics.verify_wind_state): the trimmed
+	// state must carry the card's wind at the card's airspeed with no
+	// sideslip, or this run refuses by name. Tolerances match the headless
+	// guard: 0.05 fps wind, 0.1 kt CAS, 0.05 deg sideslip.
+	FString WnStr, WeStr, VcStr, BetaStr;
+	Movement->CommandConsole(TEXT("atmosphere/total-wind-north-fps"), TEXT(""), WnStr);
+	Movement->CommandConsole(TEXT("atmosphere/total-wind-east-fps"), TEXT(""), WeStr);
+	Movement->CommandConsole(TEXT("velocities/vc-kts"), TEXT(""), VcStr);
+	Movement->CommandConsole(TEXT("aero/beta-deg"), TEXT(""), BetaStr);
+	const double Wn = FCString::Atod(*WnStr), We = FCString::Atod(*WeStr);
+	const double Vc = FCString::Atod(*VcStr), Beta = FCString::Atod(*BetaStr);
+	if (FMath::Abs(Wn - SteadyWindNorthFps) > 0.05 || FMath::Abs(We - SteadyWindEastFps) > 0.05
+	    || FMath::Abs(Vc - Card.AirspeedKnots) > 0.1 || FMath::Abs(Beta) > 0.05)
+	{
+		Error = FString::Printf(
+			TEXT("wind.trim_state: not trimmed in the card's conditions -- total wind ")
+			TEXT("(%.2f, %.2f) fps for (%.2f, %.2f), vc %.2f kt for %.2f, beta %.3f deg. ")
+			TEXT("The run would begin with a wind step from a calm trim."),
+			Wn, We, SteadyWindNorthFps, SteadyWindEastFps, Vc, Card.AirspeedKnots, Beta);
+		return false;
+	}
 	UE_LOG(LogFlightSimScenario, Display,
-	       TEXT("re-trimmed in %.1f kt wind from %.0f deg (tFull)"),
-	       Card.WindSpeedKnots, Card.WindFromDegrees);
+	       TEXT("trimmed IN %.1f kt wind from %.0f deg (tFull): vc %.2f kt, beta %.3f deg"),
+	       Card.WindSpeedKnots, Card.WindFromDegrees, Vc, Beta);
 	return true;
 }
 

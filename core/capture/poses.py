@@ -375,6 +375,30 @@ class PoseTrack:
         }
 
 
+def camera_card_blocks(cameras: Sequence[CameraSpec],
+                       tracks: Sequence[PoseTrack],
+                       schedules: Sequence,
+                       frame: "SceneFrame") -> List[Dict[str, object]]:
+    """The run card's ``cameras`` block: one entry per camera from its
+    solved track and schedule. THE one builder -- the CLI's --card and
+    the webapp's frames flow both call it, so the card the engine
+    consumes cannot drift between the two producers."""
+    if not (len(cameras) == len(tracks) == len(schedules)):
+        raise PoseSolveError(
+            f"{len(cameras)} cameras against {len(tracks)} tracks and "
+            f"{len(schedules)} schedules; refusing a misattributed card")
+    blocks = []
+    for camera, track, schedule in zip(cameras, tracks, schedules):
+        if track.camera_id != schedule.camera_id or \
+                track.camera_id != str(camera.camera_id.value):
+            raise PoseSolveError(
+                f"camera {camera.camera_id.value!r} paired with track "
+                f"{track.camera_id!r} and schedule "
+                f"{schedule.camera_id!r}; refusing a misattributed card")
+        blocks.append(track.card_block(camera, schedule, frame))
+    return blocks
+
+
 def _columns(columns: Dict[str, Sequence[float]]):
     missing = [name for name in REQUIRED_CHANNELS if name not in columns]
     if missing:
@@ -595,9 +619,13 @@ def aircraft_local_track(columns: Dict[str, Sequence[float]],
     computed once here so every consumer shares one projection."""
     _columns(columns)
     out = []
-    for i in range(len(columns["t"])):
-        north, east = frame.to_local(float(columns["lat_deg"][i]),
-                                     float(columns["lon_deg"][i]))
+    n = len(columns["t"])
+    positions = [frame.to_local(float(columns["lat_deg"][i]),
+                                float(columns["lon_deg"][i]))
+                 for i in range(n)]
+    speeds, basis = aircraft_speeds(columns, positions)
+    for i in range(n):
+        north, east = positions[i]
         out.append({
             "t_s": float(columns["t"][i]),
             "north_m": north, "east_m": east,
@@ -605,5 +633,46 @@ def aircraft_local_track(columns: Dict[str, Sequence[float]],
             "roll_deg": float(columns["roll_deg"][i]),
             "pitch_deg": float(columns["pitch_deg"][i]),
             "heading_deg": float(columns["heading_deg"][i]),
+            "speed_mps": speeds[i],
+            "speed_basis": basis,
         })
     return out
+
+
+#: The recorder's true-airspeed channel; the manifest's per-frame
+#: aircraft speed comes from it when the record carries it.
+TAS_CHANNEL = "tas_kt"
+
+
+def aircraft_speeds(columns: Dict[str, Sequence[float]], positions
+                    ) -> Tuple[List[float], str]:
+    """The aircraft's speed per sample, metres per second, and the
+    basis in words: the recorder's ``tas_kt`` channel when present
+    (the FDM's own true airspeed, the speed a fixed step of the engine's
+    FDM moves the aircraft through the air), else the ground speed of
+    the recorded track (central differences over the local positions
+    and altitude; a synthetic record with no airspeed channel). The
+    engine-parity verifier sizes its drawn-aircraft budget from this
+    number and the spec's rate: one step of THIS run's travel, never a
+    constant for some other aircraft."""
+    from ..fdm import units as u
+
+    n = len(columns["t"])
+    if TAS_CHANNEL in columns and len(columns[TAS_CHANNEL]) == n:
+        return ([u.kt_to_mps(float(v)) for v in columns[TAS_CHANNEL]],
+                f"true airspeed from the recorded {TAS_CHANNEL} channel")
+    t = [float(v) for v in columns["t"]]
+    alt = [float(v) for v in columns["altitude_m"]]
+    speeds = []
+    for i in range(n):
+        a, b = max(0, i - 1), min(n - 1, i + 1)
+        dt = t[b] - t[a]
+        if dt <= 0.0:
+            speeds.append(0.0)
+            continue
+        dn = positions[b][0] - positions[a][0]
+        de = positions[b][1] - positions[a][1]
+        dh = alt[b] - alt[a]
+        speeds.append(math.sqrt(dn * dn + de * de + dh * dh) / dt)
+    return speeds, ("ground speed of the recorded track (no "
+                    f"{TAS_CHANNEL} channel)")

@@ -295,10 +295,15 @@ class ScenarioSpec:
                 rows.append((section, name.replace("_", " "), q.render(),
                              str(q.source), q.note()))
             if camera.moves:
+                # The list's own recorded source, or the honest word
+                # for none; the note first, then the instants.
+                instants = "; ".join(f"t={m.get('t_s')}s"
+                                     for m in camera.moves)
                 rows.append((section, "moves",
-                             f"{len(camera.moves)} keyframes", "-",
-                             "; ".join(f"t={m.get('t_s')}s"
-                                       for m in camera.moves)))
+                             f"{len(camera.moves)} keyframes",
+                             camera.moves_source or "no recorded source",
+                             (f"{camera.moves_from}: " if camera.moves_from
+                              else "") + instants))
 
         w_name = max(len(r[1]) for r in rows) + 1
         w_val = max(len(r[2]) for r in rows) + 1

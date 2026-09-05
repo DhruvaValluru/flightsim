@@ -99,6 +99,12 @@ class ClosureReport:
         return self
 
 
+#: Fraction of the measured full-throttle specific excess power the
+#: controller may demand as a climb rate. Below 1 so the throttle loop keeps
+#: authority to hold speed through the climb (Package D).
+HDOT_CAPABILITY_FRACTION = 0.8
+
+
 class Autopilot:
     """Engage/disengage TECS and write its setpoints."""
 
@@ -130,7 +136,7 @@ class Autopilot:
     def engaged(self) -> bool:
         return self._engaged
 
-    def engage(self) -> None:
+    def engage(self, coordinate: bool = True) -> None:
         """Capture the trimmed state as the controller's reference point.
 
         TECS commands *changes* from trim: the throttle and pitch PIDs add to
@@ -152,8 +158,41 @@ class Autopilot:
         from .signs import measure
 
         base = getattr(self.fdm.derived, "base_name", self.fdm.aircraft_name)
-        self.signs = measure(base)
+        # Package B: probe at THIS aircraft's trimmed state, not a hardcoded
+        # transport cruise the airframe may not be able to fly. The sign
+        # convention does not depend on the condition; the probe's ability
+        # to trim does.
+        here = self.fdm.state()
+        self.signs = measure(base, altitude_m=here.altitude_m,
+                             cas_kt=here.cas_kt)
         props.set_many(self.signs.as_properties())
+
+        # Package D: how much aircraft is this? The throttle loop's error is
+        # a required thrust-to-weight increment; the throttle that produces
+        # it depends on the airframe's thrust range, which is MEASURED here
+        # (core.performance) rather than assumed. The demanded climb-rate
+        # limit is derived from the same measurement, so the controller
+        # never asks for a climb the airframe cannot fly at this speed.
+        from ..performance import measure_performance
+
+        self.performance = measure_performance(
+            base, altitude_m=here.altitude_m, cas_kt=here.cas_kt)
+        props.set_many(self.performance.as_properties())
+        hdot_max_fps = min(
+            props.get("ap/tecs/hdot-max-fps"),
+            HDOT_CAPABILITY_FRACTION * u.mps_to_fps(self.performance.edot_max_mps))
+        props.set("ap/tecs/hdot-max-fps", max(hdot_max_fps, 1.0))
+        # Package G: turn coordination, from the beta-per-rudder slope
+        # measured on this airframe at this state. The probe itself
+        # engages with coordinate=False (the damper-only channel it
+        # measures against).
+        self.yaw_authority = None
+        if coordinate:
+            from .coordination import measure_yaw_authority
+
+            self.yaw_authority = measure_yaw_authority(
+                base, altitude_m=here.altitude_m, cas_kt=here.cas_kt)
+            props.set_many(self.yaw_authority.as_properties())
 
         props.set_many(
             {
@@ -269,9 +308,16 @@ class Autopilot:
     #: signals and JSBSim's write-only PID internals such as
     #: ``.../initial-integrator-value``, which are state, not configuration.
     GAIN_PROPERTIES = (
+        # Package D: the measured normalisation and the excess-power limits
+        # it came from, so the manifest says how much aircraft the loop knew.
+        "ap/tecs/thr-per-ste",
+        "ap/tecs/stedot-max-fps",
+        "ap/tecs/stedot-min-fps",
         "ap/tecs/tau",
         "ap/tecs/speed-weight",
         "ap/tecs/hdot-max-fps",
+        "ap/yaw/k-beta",
+        "ap/yaw/ki-beta",
         "ap/tecs/vdot-max-fps2",
         "ap/tecs/kt-p",
         "ap/tecs/kt-i",

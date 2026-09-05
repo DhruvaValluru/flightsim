@@ -18,9 +18,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import zipfile
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Literal, Any, Dict, List, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -39,6 +40,10 @@ from core.nl.llm_compiler import (  # noqa: E402
 )
 from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import validate  # noqa: E402
+from webapp.capture import (  # noqa: E402
+    frame_set, frames_zip_refusal, run_artifacts, run_downloads,
+    run_galleries,
+)
 from webapp.runs import (  # noqa: E402
     CLIP_SECONDS,
     RunManager,
@@ -49,6 +54,7 @@ from webapp.runs import (  # noqa: E402
     coupling_needs_seed,
     derive_seed,
     needs_dynamic_bake,
+    platform_refusal,
     pick_scene,
     place_on_scene,
     plan_camera_defaults,
@@ -86,6 +92,88 @@ class CompileRequest(BaseModel):
 class RunRequest(BaseModel):
     spec: Dict[str, Any]       # ScenarioSpec.to_dict(), possibly edited
     provenance: Dict[str, Any] = {}
+    #: The render choice, in the page's own three words (webapp.runs.
+    #: RENDER_CHOICES): "frames" -- the engine's consume-poses pass once
+    #: per camera, the clip a by-product; "clip" -- the single preset
+    #: pass; "none" -- headless (manifest, previews, verification; no
+    #: engine). An OMITTED field resolves through the ONE rule the page
+    #: and the CLI use, core.capture.render_pass.render_choice_default
+    #: (the richest option this machine supports) -- there is no second
+    #: spelling of the default here; the reply echoes the resolved
+    #: word. An engine choice a machine cannot honour is refused
+    #: ue.platform by name with the reason, never degraded.
+    render: Optional[Literal["frames", "clip", "none"]] = None
+    #: Preview scale: 1 (default) draws every geometry preview at the
+    #: record's full resolution; N draws at 1/N. Anything that is not a
+    #: positive integer, or one that does not divide every camera's
+    #: resolution exactly, is refused by name (preview.scale), never
+    #: rounded or floored (core.capture.preview.validated_scale).
+    preview_scale: Optional[int] = None
+
+
+def _preview_scale_or_refusal(request: "RunRequest"):
+    """(scale, None) or (None, the 409 refusal). The scale is handed to
+    the manager only when it is not the manager's own default, so the
+    default has one spelling (capture_run's) and the manager's stubs in
+    the tests keep their three-argument shape."""
+    from core.capture.preview import validated_scale
+
+    try:
+        return validated_scale(1 if request.preview_scale is None
+                               else request.preview_scale), None
+    except ValueError as exc:
+        return None, JSONResponse(
+            refusal_payload("preview.scale", str(exc),
+                            actual=request.preview_scale,
+                            limit="a positive whole number",
+                            refused=str(exc)),
+            status_code=409)
+
+
+def _scale_kwargs(preview_scale: int) -> Dict[str, int]:
+    return {"preview_scale": preview_scale} if preview_scale != 1 else {}
+
+
+def _scale_divides_or_refusal(preview_scale: int, spec: ScenarioSpec):
+    """The 409 refusal (or None) when the scale does not divide every
+    camera's resolution exactly (3 on 1280x720): refused by name
+    BEFORE the run starts, never floored to 426x240."""
+    from core.capture.preview import scale_refusal_for_cameras
+    from core.scenario.camera import default_cameras
+
+    cameras = spec.cameras or default_cameras(spec)
+    refusal = scale_refusal_for_cameras(preview_scale, cameras)
+    if refusal is None:
+        return None
+    # The limit, for the refusal's value clause: the first resolution
+    # the scale does not divide (the same camera the message names).
+    limit = "divides every camera's resolution"
+    for camera in cameras:
+        w, h = int(camera.width_px.value), int(camera.height_px.value)
+        if w % preview_scale or h % preview_scale:
+            limit = f"divides {w}x{h}"
+            break
+    return JSONResponse(
+        refusal_payload("preview.scale", refusal, actual=preview_scale,
+                        limit=limit, refused=refusal),
+        status_code=409)
+
+
+def refusal_payload(constraint: str, message: str, actual=None, limit=None,
+                    unit: Optional[str] = None, refused: Optional[str] = None,
+                    **extra) -> Dict[str, Any]:
+    """ONE shape for every named refusal the page can receive, the
+    validation verdict's: ``constraint``, ``message`` and -- when the
+    refusal has them -- the offending value (``actual``), the bound it
+    broke (``limit``) and their ``unit``, under the keys
+    core.scenario.validate.Violation uses. ``refused`` keeps the
+    page's existing key (the constraint by default; a longer text for
+    callers that read it, the CLI's platform paragraph among them) and
+    ``extra`` carries a refusal's own fields (render, latitude). The
+    page renders every one of them with the same refusalWords()."""
+    return {"refused": constraint if refused is None else refused,
+            "constraint": constraint, "message": message,
+            "actual": actual, "limit": limit, "unit": unit, **extra}
 
 
 def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
@@ -112,6 +200,11 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
                 "detail": quantity.detail,
             } for name, quantity in camera.quantities()],
             "moves": [dict(m) for m in camera.moves],
+            # The list's provenance, like every field's: the page's
+            # keyframe rows print it in its own colour, or say that
+            # none was recorded.
+            "moves_source": camera.moves_source,
+            "moves_from": camera.moves_from,
         })
     return {"digest": spec.digest(), "name": spec.name,
             "prompt": spec.prompt, "notes": spec.notes,
@@ -213,22 +306,28 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
     # must not be refused over the system's own choices. Every move is a
     # recorded edit (source becomes ``derived``); stated values never
     # move. /run applies the same planners again: value-idempotent.
-    plan_scene_setting(spec)
-    apply_weather_event(spec)
-    # Terrain-aware environment (cross-ridge wind, along-ridge heading):
-    # shown in the review table when the scene's raster is already baked
-    # locally; /run applies the same planner, so run-time is never a
-    # surprise relative to the table.
-    try:
-        plan_terrain_environment(spec)
-    except (OSError, ValueError):
-        pass    # no local raster yet (dynamic bake): /run plans it after /bake
-    plan_flyable_defaults(spec)
-    plan_trim_recovery(spec)
-    # Defaulted world-anchored cameras follow the staged scene (the
-    # tower does not stay at flat-ground height under planned
-    # mountains); stated placements never move.
-    plan_camera_defaults(spec)
+    # The planners and the validation construct models (the envelope
+    # measurement, validate): JSBSim's banner goes to the server-level
+    # planning log, stamped and counted (/status names it), never to
+    # the server console.
+    with manager.planning_console():
+        plan_scene_setting(spec)
+        apply_weather_event(spec)
+        # Terrain-aware environment (cross-ridge wind, along-ridge
+        # heading): shown in the review table when the scene's raster is
+        # already baked locally; /run applies the same planner, so
+        # run-time is never a surprise relative to the table.
+        try:
+            plan_terrain_environment(spec)
+        except (OSError, ValueError):
+            pass    # no local raster yet (dynamic bake): /run plans it after /bake
+        plan_flyable_defaults(spec)
+        plan_trim_recovery(spec)
+        # Defaulted world-anchored cameras follow the staged scene (the
+        # tower does not stay at flat-ground height under planned
+        # mountains); stated placements never move.
+        plan_camera_defaults(spec)
+        validation = _validation_payload(spec)
 
     payload = {
         "compiler": compiler_used, "model": model, "llm_note": llm_note,
@@ -240,18 +339,26 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         "questions": questions,
         "transcript": transcript,
         "spec": _spec_payload(spec),
-        "validation": _validation_payload(spec),
+        "validation": validation,
     }
     return JSONResponse(payload)
 
 
-@app.post("/run")
-def run_endpoint(request: RunRequest) -> JSONResponse:
+def _prepare_run_spec(request: RunRequest):
+    """Everything both run endpoints do before anything host-specific:
+    parse, plan, project, validate, refuse by name.
+
+    Returns (spec, None) when the spec is ready to run, or (None,
+    response) carrying the named refusal. Factored out so the capture
+    endpoint cannot drift from the render endpoint's planner ORDER --
+    that order is load-bearing and pinned by tests, and two copies of it
+    would be two chances to get it wrong.
+    """
     try:
         spec = ScenarioSpec.from_dict(request.spec)
     except (ValueError, KeyError) as exc:
-        return JSONResponse({"error": f"spec did not parse: {exc}"},
-                            status_code=400)
+        return None, JSONResponse(
+            {"error": f"spec did not parse: {exc}"}, status_code=400)
 
     # The recorded transformations happen BEFORE the digest is answered, so
     # the response content-addresses exactly what will run: the derived
@@ -267,8 +374,8 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     plan_scene_setting(spec)
     unbaked = needs_dynamic_bake(spec)
     if unbaked is not None:
-        return JSONResponse({"refused": "terrain.unbaked", **unbaked},
-                            status_code=409)
+        return None, JSONResponse(
+            {"refused": "terrain.unbaked", **unbaked}, status_code=409)
     place_on_scene(spec)
     # Severe-weather composition edits (thunderstorm -> severe turbulence
     # when the word was defaulted): recorded, pre-digest, like every other
@@ -279,8 +386,9 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # spec edit like every other transformation, or a named refusal.
     weather_refusal = apply_historical_weather(spec)
     if weather_refusal is not None:
-        return JSONResponse({"refused": "weather", **weather_refusal},
-                            status_code=409)
+        return None, JSONResponse(
+            {"refused": "weather", **weather_refusal},
+            status_code=409)
     # PLANNER ORDER (load-bearing, pinned by tests): place_on_scene ->
     # apply_weather_event -> apply_historical_weather ->
     # plan_terrain_environment -> derive_seed -> plan_terrain_flight ->
@@ -333,19 +441,74 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
         verdict["ok"] = False
         verdict["violations"].extend(camera_refusals)
     if not verdict["ok"]:
-        return JSONResponse({"refused": "validation", **verdict},
-                            status_code=409)
+        return None, JSONResponse({"refused": "validation", **verdict},
+                                  status_code=409)
+    return spec, None
+
+
+@app.post("/run")
+def run_endpoint(request: RunRequest) -> JSONResponse:
+    """Start a run with the requested render choice: frames (engine, one
+    pass per camera, clip as a by-product), clip (the single preset
+    pass), or none (headless: the capture half alone, no engine, no
+    platform gate). An omitted field is the machine's default by the one
+    rule (render_choice_default), echoed back as ``render``."""
+    from core.capture.render_pass import render_choice_default
+
+    render = request.render or render_choice_default()
+    preview_scale, refusal = _preview_scale_or_refusal(request)
+    if refusal is not None:
+        return refusal
+    with manager.planning_console():
+        spec, refusal = _prepare_run_spec(request)
+    if refusal is not None:
+        return refusal
+    refusal = _scale_divides_or_refusal(preview_scale, spec)
+    if refusal is not None:
+        return refusal
+    provenance = {
+        "prompt": spec.prompt,
+        **{k: v for k, v in request.provenance.items()
+           if k in ("compiler", "model", "transcript")},
+    }
+    if render == "none":
+        outcome = manager.start_capture(spec, provenance=provenance,
+                                        **_scale_kwargs(preview_scale))
+        if "refused" in outcome:
+            return JSONResponse(outcome, status_code=409)
+        return JSONResponse({**outcome, "digest": spec.digest()})
 
     # REFUSAL ORDER after validation (load-bearing, pinned by test):
     # ue.platform BEFORE aircraft.mesh. A machine with no engine build
     # must hear that first -- measured 2026-08-31 on a fresh Windows
     # clone, which was told to import aircraft models when the real
     # blocker was that no Unreal host existed there at all.
-    from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
+    from core.util.platform import (
+        UE_PLATFORM_REFUSAL, ue_available, ue_unavailable_reason,
+    )
 
     if not ue_available():
-        return JSONResponse({"refused": UE_PLATFORM_REFUSAL,
-                             "constraint": "ue.platform"}, status_code=409)
+        return JSONResponse(
+            platform_refusal(render, UE_PLATFORM_REFUSAL,
+                             ue_unavailable_reason()),
+            status_code=409)
+    # A frames pass whose labels could not match its pixels is refused
+    # by name BEFORE the mesh rule: the choice itself is the problem, not
+    # the machine. Host parity is measured and refused for turbulence
+    # (docs/VALIDITY.md); the flow refuses the lee-rotor case the same
+    # way once the scene has decided it (webapp.runs).
+    from core.capture.render_pass import (
+        HOST_PARITY_CONSTRAINT, frames_host_parity_refusal,
+    )
+
+    parity = frames_host_parity_refusal(spec) if render == "frames" else None
+    if parity is not None:
+        return JSONResponse(
+            refusal_payload(HOST_PARITY_CONSTRAINT, parity, actual=render,
+                            limit="clip or none (the choices whose labels "
+                                  "need no host parity)",
+                            refused=parity, render=render),
+            status_code=409)
     # Placeholder airframes never render (owner's rule, extended
     # 2026-08-31: on ANY machine). Checked AFTER validation on purpose:
     # a scenario that cannot fly refuses on the physics first; the asset
@@ -353,14 +516,45 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # sound.
     mesh_refusal = refuse_placeholder_mesh(spec)
     if mesh_refusal is not None:
-        return JSONResponse({"refused": "aircraft.mesh", **mesh_refusal},
-                            status_code=409)
+        return JSONResponse(
+            refusal_payload("aircraft.mesh", mesh_refusal["message"],
+                            actual=mesh_refusal.get("actual"),
+                            limit=mesh_refusal.get("limit")),
+            status_code=409)
 
-    outcome = manager.start(spec, provenance={
+    outcome = manager.start(spec, provenance=provenance, render=render,
+                            **_scale_kwargs(preview_scale))
+    if "refused" in outcome:
+        return JSONResponse(outcome, status_code=409)
+    return JSONResponse({**outcome, "digest": spec.digest()})
+
+
+@app.post("/capture")
+def capture_endpoint(request: RunRequest) -> JSONResponse:
+    """The capture half alone: labeled geometry, no pixels.
+
+    The same spec preparation and the same named refusals as /run, minus
+    the host gates -- nothing here opens the editor, so this works on
+    every platform, exactly as `python -m flightsim.capture` does. It is
+    what the page offers when rendering would refuse ue.platform, and
+    what a user wanting the data rather than the picture can ask for
+    directly.
+    """
+    preview_scale, refusal = _preview_scale_or_refusal(request)
+    if refusal is not None:
+        return refusal
+    with manager.planning_console():
+        spec, refusal = _prepare_run_spec(request)
+    if refusal is not None:
+        return refusal
+    refusal = _scale_divides_or_refusal(preview_scale, spec)
+    if refusal is not None:
+        return refusal
+    outcome = manager.start_capture(spec, provenance={
         "prompt": spec.prompt,
         **{k: v for k, v in request.provenance.items()
            if k in ("compiler", "model", "transcript")},
-    })
+    }, **_scale_kwargs(preview_scale))
     if "refused" in outcome:
         return JSONResponse(outcome, status_code=409)
     return JSONResponse({**outcome, "digest": spec.digest()})
@@ -373,11 +567,31 @@ def status_endpoint() -> JSONResponse:
     # discovering a fallback after a spin. platform/render_available are
     # the same pattern for the UE half: off-mac the page says so up front
     # and a run refuses ue.platform by name instead of 500ing.
-    from core.util.platform import os_name, ue_available
+    from core.util.platform import (
+        os_name, ue_available, ue_unavailable_reason,
+    )
+    from core.capture.render_pass import (
+        RENDER_CHOICES, RENDER_WORDS, render_choice_default,
+    )
 
+    available = ue_available()
+    reason = ue_unavailable_reason()
+    # The render choices in the page's own words, each with whether THIS
+    # machine can honour it and why not; the default is the ONE rule the
+    # CLI uses too (render_choice_default: the richest option the machine
+    # supports), not a second spelling of it. The page disables what it
+    # cannot run, shows the reason, and enables the control only once
+    # this default has arrived.
+    choices = [{"value": word, "label": RENDER_WORDS[word],
+                "available": available or word == "none",
+                "reason": None if available or word == "none" else reason}
+               for word in RENDER_CHOICES]
     return JSONResponse({**manager.status(), "llm_available": llm_available(),
                          "platform": os_name(),
-                         "render_available": ue_available()})
+                         "render_available": available,
+                         "render_unavailable_reason": reason,
+                         "render_choices": choices,
+                         "render_default": render_choice_default()})
 
 
 @app.get("/runs/{run_id}")
@@ -459,6 +673,104 @@ def run_provenance(run_id: str):
     if not path.is_file():
         return JSONResponse({"error": "no provenance"}, status_code=404)
     return JSONResponse(json.loads(path.read_text(encoding="utf-8")))
+
+
+@app.get("/runs/{run_id}/files")
+def run_files(run_id: str) -> JSONResponse:
+    """Every artefact this run left on disk, with a note saying what each
+    one IS. The page renders it as the download list, so a user never has
+    to know a path to get the manifest, the previews or the verification
+    (user request 2026-09-01)."""
+    if not run_id.isalnum():
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    out = manager.out_root / run_id
+    files = run_artifacts(out)
+    # One download per artefact class the run wrote (the page's strip),
+    # built from the SAME listing as the whitelist and the bundle.
+    return JSONResponse({"run_id": run_id, "files": files,
+                         "downloads": run_downloads(out, files),
+                         "galleries": run_galleries(out, files)})
+
+
+def _artifact_paths(run_id: str) -> set:
+    """The set of relative paths this run is willing to serve.
+
+    A WHITELIST, built from what the run actually wrote, rather than a
+    path check: the served name has to be one this run listed, so no
+    amount of traversal in the request can name a file outside it.
+    """
+    names = set()
+    for entry in run_artifacts(manager.out_root / run_id):
+        if "images" in entry:
+            names.update(entry["images"])
+        else:
+            names.add(entry["name"])
+    return names
+
+
+MEDIA_TYPES = {".json": "application/json", ".yaml": "text/plain",
+               ".log": "text/plain", ".png": "image/png",
+               ".mp4": "video/mp4", ".ffconcat": "text/plain"}
+
+
+@app.get("/runs/{run_id}/file/{name:path}")
+def run_file(run_id: str, name: str):
+    """Download one artefact by the name /runs/{id}/files listed."""
+    if not run_id.isalnum() or name not in _artifact_paths(run_id):
+        return JSONResponse({"error": "no such file in this run"},
+                            status_code=404)
+    path = manager.out_root / run_id / name
+    return FileResponse(
+        path, media_type=MEDIA_TYPES.get(path.suffix, "application/json"),
+        filename=path.name)
+
+
+@app.get("/runs/{run_id}/bundle.zip")
+def run_bundle(run_id: str):
+    """Every artefact of one run, in one download.
+
+    Built from the same whitelist the individual links use, so the zip
+    and the list can never disagree about what the run produced.
+    """
+    if not run_id.isalnum():
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    names = sorted(_artifact_paths(run_id))
+    if not names:
+        return JSONResponse({"error": "this run produced no files"},
+                            status_code=404)
+    out = manager.out_root / run_id
+    bundle = out / "bundle.zip"
+    with zipfile.ZipFile(bundle, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name in names:
+            archive.write(out / name, arcname=name)
+    return FileResponse(bundle, media_type="application/zip",
+                        filename=f"flightsim-run-{run_id}.zip")
+
+
+@app.get("/runs/{run_id}/frames.zip")
+def run_frames_zip(run_id: str):
+    """The frame set alone: capture/frames/<camera_id>/NNNN.png for
+    every rendered frame plus each camera's render.json (the applied
+    pose and time per frame), nothing else -- no previews, no overlays,
+    no logs. Built from the same listing the whitelist uses. A run with
+    no rendered frame is REFUSED by name (404 with the run's own
+    reason: headless, clip only, or a failed engine pass), never served
+    an empty zip that looks like a frame set."""
+    if not run_id.isalnum():
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    out = manager.out_root / run_id
+    files = run_artifacts(out)
+    refusal = frames_zip_refusal(out, files)
+    if refusal is not None:
+        return JSONResponse({"error": refusal, "constraint": "frames.none"},
+                            status_code=404)
+    names = sorted(frame_set(files))
+    archive_path = out / "frames.zip"
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name in names:
+            archive.write(out / name, arcname=name)
+    return FileResponse(archive_path, media_type="application/zip",
+                        filename=f"flightsim-frames-{run_id}.zip")
 
 
 @app.websocket("/telemetry")
