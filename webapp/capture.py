@@ -678,6 +678,59 @@ def frames_zip_refusal(out_dir: Path, files: List[Dict]) -> Optional[str]:
                                "no rendered frames in this run")
 
 
+def run_galleries(out_dir: Path, files: Optional[List[Dict]] = None) -> List[Dict]:
+    """One gallery per camera for the page: the manifest's records
+    (index and t_s) matched against the files the listing carries.
+    ``frames`` names only rendered PNGs on disk (each with its overlay
+    when one exists), ``previews`` only preview PNGs on disk, so a
+    count the page shows for either is the number of files it can
+    open; ``scheduled`` is the manifest's record count for the camera.
+    No manifest, no galleries."""
+    out_dir = Path(out_dir)
+    manifest_path = out_dir / "capture" / "capture_manifest.json"
+    if not manifest_path.is_file():
+        return []
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if files is None:
+        files = run_artifacts(out_dir)
+    on_disk = set()
+    sheets = {}
+    for entry in files:
+        on_disk.update(entry.get("images") or ())
+        if entry.get("sheet"):
+            sheets[Path(entry["name"]).stem] = entry["name"]
+    order = [c.get("camera_id") for c in manifest.get("cameras", [])]
+    records: Dict[str, List[Dict]] = {}
+    for record in manifest.get("frames", []):
+        camera_id = record.get("camera_id")
+        if camera_id not in order:
+            order.append(camera_id)
+        records.setdefault(camera_id, []).append(record)
+    galleries = []
+    for camera_id in order:
+        frames, previews = [], []
+        for record in records.get(camera_id, []):
+            index = int(record["index"])
+            frame = f"capture/frames/{camera_id}/{index:04d}.png"
+            overlay = f"capture/overlays/{camera_id}/{index:04d}.png"
+            preview = f"capture/previews/{camera_id}/preview_{index:05d}.png"
+            if frame in on_disk:
+                frames.append({"index": index, "t_s": float(record["t_s"]),
+                               "file": frame,
+                               "overlay": overlay if overlay in on_disk else None})
+            if preview in on_disk:
+                previews.append({"index": index, "t_s": float(record["t_s"]),
+                                 "file": preview})
+        galleries.append({"camera_id": camera_id,
+                          "scheduled": len(records.get(camera_id, [])),
+                          "frames": frames, "previews": previews,
+                          "contact_sheet": sheets.get(camera_id)})
+    return galleries
+
+
 #: The artefact classes, in the order the page's download strip shows
 #: them. One button per class the run actually wrote; a class whose
 #: file is absent is absent from the strip, never a dead link.

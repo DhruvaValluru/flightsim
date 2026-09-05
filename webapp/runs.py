@@ -164,6 +164,11 @@ class RunState:
     #: The preview scale the run was started with (1 = the record's
     #: full resolution); recorded in capture/run.json "previews".
     preview_scale: int = 1
+    #: Why this machine could not render when the run started (the
+    #: platform gate's own reason, core.util.platform), None when the
+    #: engine was available: the page labels a headless run's previews
+    #: as the fallback with THIS reason. Recorded in provenance.json.
+    engine_reason: Optional[str] = None
 
     def push(self, status: str, detail: str = "") -> None:
         self.status = status
@@ -177,7 +182,8 @@ class RunState:
                 "scene": self.scene, "clip": self.clip,
                 "started": self.started, "events": self.events[-20:],
                 "reference": self.reference, "conditions": self.conditions,
-                "capture": self.capture, "render": self.render}
+                "capture": self.capture, "render": self.render,
+                "engine_reason": self.engine_reason}
 
 
 def editor_running() -> bool:
@@ -1621,7 +1627,13 @@ class RunManager:
         labeled data from the same page. No editor-lock check either:
         nothing here opens the editor. The one-run-at-a-time rule
         stands, because the page shows one run.
+
+        The machine's own reason for having no engine (or None when it
+        has one and Headless was chosen) travels with the run, so the
+        page can say WHY the previews are the fallback.
         """
+        from core.util.platform import ue_unavailable_reason
+
         with self._lock:
             active = self.runs.get(self._active) if self._active else None
             if active is not None and active.status not in ("done", "failed"):
@@ -1629,7 +1641,8 @@ class RunManager:
                                    f"({active.run_id}); one at a time"}
             run = RunState(run_id=uuid.uuid4().hex[:12],
                            spec_digest=spec.digest(), render="none",
-                           preview_scale=int(preview_scale))
+                           preview_scale=int(preview_scale),
+                           engine_reason=ue_unavailable_reason())
             self.runs[run.run_id] = run
             self._active = run.run_id
         thread = threading.Thread(
@@ -1766,6 +1779,7 @@ class RunManager:
         (out / "provenance.json").write_text(json.dumps({
             **provenance, "spec_digest": spec.digest(), "scene": scene,
             "capture_only": True, "render": "none",
+            "engine_unavailable_reason": run.engine_reason,
         }, indent=1), encoding="utf-8")
         if not self._capture_phase(run, spec, scene, out):
             # A failed closure has already pushed its named failure; a

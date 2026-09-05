@@ -42,6 +42,7 @@ from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import validate  # noqa: E402
 from webapp.capture import (  # noqa: E402
     frame_set, frames_zip_refusal, run_artifacts, run_downloads,
+    run_galleries,
 )
 from webapp.runs import (  # noqa: E402
     CLIP_SECONDS,
@@ -645,7 +646,8 @@ def run_files(run_id: str) -> JSONResponse:
     # One download per artefact class the run wrote (the page's strip),
     # built from the SAME listing as the whitelist and the bundle.
     return JSONResponse({"run_id": run_id, "files": files,
-                         "downloads": run_downloads(out, files)})
+                         "downloads": run_downloads(out, files),
+                         "galleries": run_galleries(out, files)})
 
 
 def _artifact_paths(run_id: str) -> set:

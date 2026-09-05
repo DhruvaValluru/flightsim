@@ -2331,6 +2331,40 @@ mutate webapp/static/index.html \
     "page round 1: the strip offers one button per artefact class the run wrote" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 1: the gallery shows every frame; previews are the labelled fallback
+
+mutate webapp/capture.py \
+    '            if frame in on_disk:
+                frames.append(' \
+    '            if True:  # MUTATED: a frame is listed whether or not its PNG exists
+                frames.append(' \
+    "page round 1: a gallery lists a frame only when its PNG is on disk" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '      thumbsHtml(runId, gallery.camera_id, frames, "frames") + previewBlock +' \
+    '      thumbsHtml(runId, gallery.camera_id, frames.slice(0, 2), "frames") + previewBlock +  // MUTATED: silently truncated' \
+    "page round 1: the gallery shows every rendered frame the server listed" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '    `<span class="dim">(fallback: ${esc(fallbackWords(run))}; showing ` +' \
+    '    `<span class="dim">(${esc(fallbackWords(run))}; showing ` +  // MUTATED: previews not labelled as the fallback' \
+    "page round 1: previews with no rendered frame are labelled as the fallback with the reason" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '      ? `<details><summary class="dim">geometry previews (not frames): ` +' \
+    '      ? `<div><summary class="dim">geometry previews (not frames): ` +  // MUTATED: previews drawn as peers of the frames' \
+    "page round 1: on a frames run the previews sit behind a not-frames disclosure" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '                           engine_reason=ue_unavailable_reason())' \
+    '                           engine_reason=None)  # MUTATED: the machine'"'"'s reason is not recorded' \
+    "page round 1: a headless run records the machine's own no-engine reason" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

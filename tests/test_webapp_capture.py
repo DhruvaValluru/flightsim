@@ -1612,6 +1612,7 @@ const files = input.files || {};
 const out = {
   card: captureCardHtml(input.run),
   strip: downloadStripHtml(input.runId, files.downloads || []),
+  galleries: (files.galleries || []).map(g => galleryHtml(input.runId, input.run, g)),
   files: filesHtml(input.runId, files.files || []),
 };
 console.log(JSON.stringify(out));
@@ -1809,3 +1810,168 @@ def test_the_page_s_download_strip_offers_one_button_per_class(
     assert links_of(strip, "frames") == ["/runs/abc/frames.zip"]
     assert strip.count('<a class="dl ') == 2
     assert text_of(strip).startswith("downloads frames.zip 48 PNG(s) across 2 camera(s)")
+
+
+def img_srcs(html):
+    import re
+
+    return re.findall(r'<img [^>]*src="([^"]+)"', html)
+
+
+def test_the_file_list_describes_a_gallery_per_camera_from_the_manifest(
+        captured, client, frames_run, engine_client):
+    """/files "galleries": per camera, the manifest's records matched
+    against the files on disk. A headless run lists NO frames (there
+    are none) and its 4 previews with the manifest's instants; the
+    frames run lists 4 frames per camera, each with its overlay, and
+    the previews beside them. A count in a gallery is a count of files
+    the run can serve."""
+    run_id, _ = captured
+    payload = client.get(f"/runs/{run_id}/files").json()
+    manifest = client.get(
+        f"/runs/{run_id}/file/capture/capture_manifest.json").json()
+    times = [r["t_s"] for r in manifest["frames"]]
+    galleries = payload["galleries"]
+    assert [g["camera_id"] for g in galleries] == ["camera0"]
+    camera = galleries[0]
+    assert camera["scheduled"] == 4 and camera["frames"] == []
+    assert [p["t_s"] for p in camera["previews"]] == times
+    assert [p["index"] for p in camera["previews"]] == [0, 1, 2, 3]
+    assert camera["previews"][0]["file"] == "capture/previews/camera0/preview_00000.png"
+    assert camera["contact_sheet"] == "capture/contact_sheets/camera0.png"
+    for item in camera["previews"]:
+        assert client.get(f"/runs/{run_id}/file/{item['file']}").status_code == 200
+
+    frames_id, _ = frames_run
+    galleries = engine_client.get(f"/runs/{frames_id}/files").json()["galleries"]
+    assert [g["camera_id"] for g in galleries] == ["camera0", "tower0"]
+    for gallery in galleries:
+        cam = gallery["camera_id"]
+        assert gallery["scheduled"] == 4
+        assert [f["file"] for f in gallery["frames"]] == [
+            f"capture/frames/{cam}/{i:04d}.png" for i in range(4)]
+        assert [f["overlay"] for f in gallery["frames"]] == [
+            f"capture/overlays/{cam}/{i:04d}.png" for i in range(4)]
+        assert len(gallery["previews"]) == 4
+        for item in gallery["frames"]:
+            assert engine_client.get(
+                f"/runs/{frames_id}/file/{item['file']}").status_code == 200
+            assert engine_client.get(
+                f"/runs/{frames_id}/file/{item['overlay']}").status_code == 200
+    # No manifest, no galleries (a refused capture wrote none).
+    assert capture_module.run_galleries(manager.out_root / "nowhere") == []
+
+
+def test_a_headless_run_records_why_the_machine_has_no_engine(
+        client, monkeypatch):
+    """The platform gate's own reason travels with the run (state and
+    provenance), so the page labels the previews as the fallback with
+    the server's words, never a page-side guess."""
+    import core.util.platform as plat
+
+    monkeypatch.setattr(plat, "ue_unavailable_reason",
+                        lambda: "no engine (test): set UE_ROOT")
+    spec = compile_prompt(DEMO)
+    reply = client.post("/capture", json={"spec": spec.to_dict()})
+    assert reply.status_code == 200, reply.json()
+    run_id = reply.json()["run_id"]
+    state = finished(client, run_id)
+    assert state["status"] == "done", state["detail"]
+    assert state["engine_reason"] == "no engine (test): set UE_ROOT"
+    provenance = json.loads(
+        (manager.out_root / run_id / "provenance.json").read_text(encoding="utf-8"))
+    assert provenance["engine_unavailable_reason"] == "no engine (test): set UE_ROOT"
+
+
+def test_the_page_s_galleries_show_every_frame_and_label_previews_as_the_fallback(
+        captured, client, frames_run, engine_client, tmp_path):
+    """The page's own gallery builder against the real payloads.
+
+    Headless: the heading is the count contract ("4 scheduled, 0
+    rendered (headless), previews only"), the pictures are the previews
+    labelled "fallback" with the server's recorded reason, every count
+    shown equals the number of <img> tags, and no preview count stands
+    beside the word "frames". Frames run: every rendered frame is shown
+    (count == img tags == the verifier's rendered count), captioned with
+    its index and instant from the manifest, the overlay behind a
+    toggle, the previews behind a "not frames" disclosure. Clip only:
+    the fallback names the clip-only choice."""
+    import re
+
+    run_id, state = captured
+    payload = client.get(f"/runs/{run_id}/files").json()
+    html = page_capture(tmp_path, state, payload, run_id)
+    assert len(html["galleries"]) == 1
+    gallery = html["galleries"][0]
+    words = text_of(gallery)
+    assert words.startswith("camera0 : 4 scheduled, 0 rendered (headless), previews only")
+    reason = state["engine_reason"]
+    expected = (f"no engine on this machine — {reason}" if reason
+                else "headless run by choice; choose Render frames and clip "
+                     "for the frame set")
+    assert f"previews (fallback: {expected}; showing 4 of 4 preview(s), " \
+           f"which are NOT frames)" in words
+    srcs = img_srcs(gallery)
+    previews = [s for s in srcs if "/previews/" in s]
+    assert len(previews) == 4 == payload["galleries"][0]["scheduled"]
+    assert [s for s in srcs if "/contact_sheets/" in s] == [
+        f"/runs/{run_id}/file/capture/contact_sheets/camera0.png"]
+    assert not [s for s in srcs if "/frames/" in s]
+    # "4 frames", "4 rendered", "captured 4": none of it, anywhere.
+    assert re.search(r"\b4 (rendered )?frames?\b", words) is None
+    assert "captured" not in words and "4 rendered" not in words
+    # The captions carry the manifest's instants.
+    manifest = client.get(
+        f"/runs/{run_id}/file/capture/capture_manifest.json").json()
+    for record in manifest["frames"]:
+        assert f"#{record['index']} t={record['t_s']:.3f} s" in words
+    # The card's own galleries holder starts as the per-camera list.
+    card_words = text_of(html["card"])
+    assert "camera0 : 4 scheduled, 0 rendered (headless), previews only" in card_words
+    assert 'id="captureGalleries"' in html["card"]
+
+    # Clip only: the same summary, the fallback in its own words.
+    clip_state = json.loads(json.dumps(state))
+    clip_state["render"] = "clip"
+    clip_words = text_of(page_capture(tmp_path, clip_state, payload, run_id)["galleries"][0])
+    assert "camera0 : 4 scheduled, 0 rendered (clip only), previews only" in clip_words
+    assert ("previews (fallback: clip-only run; choose Render frames and clip "
+            "for the frame set; showing 4 of 4 preview(s), which are NOT frames)"
+            in clip_words)
+
+    # Frames run: every frame shown, captioned, overlays a toggle away.
+    frames_id, frames_state = frames_run
+    frames_payload = engine_client.get(f"/runs/{frames_id}/files").json()
+    html = page_capture(tmp_path, frames_state, frames_payload, frames_id)
+    assert len(html["galleries"]) == 2
+    manifest = engine_client.get(
+        f"/runs/{frames_id}/file/capture/capture_manifest.json").json()
+    for gallery, counts in zip(html["galleries"], frames_state["capture"]["cameras"]):
+        cam = counts["camera_id"]
+        words = text_of(gallery)
+        assert words.startswith(f"{cam} : 4 scheduled, 4 rendered, 4 verified "
+                                f"— showing 4 of 4 rendered frame(s)")
+        assert counts["rendered"] == 4
+        frame_imgs = re.findall(r'<img loading="lazy" src="([^"]+)" data-frame="[^"]+"'
+                                r' data-overlay="([^"]+)">', gallery)
+        assert [src for src, _ in frame_imgs] == [
+            f"/runs/{frames_id}/file/capture/frames/{cam}/{i:04d}.png" for i in range(4)]
+        assert [ov for _, ov in frame_imgs] == [
+            f"/runs/{frames_id}/file/capture/overlays/{cam}/{i:04d}.png" for i in range(4)]
+        assert f"toggleOverlays('{cam}', this.checked)" in gallery
+        assert "show the reprojected-geometry overlays (4 of 4)" in words
+        for record in (r for r in manifest["frames"] if r["camera_id"] == cam):
+            assert f"#{record['index']} t={record['t_s']:.3f} s" in words
+        # Previews: behind a disclosure that says they are not frames,
+        # never beside the frames as peers.
+        assert "<details><summary" in gallery
+        assert "geometry previews (not frames): 4 shown" in words
+        assert gallery.index('data-kind="frames"') < gallery.index("<details>")
+        assert gallery.index("<details>") < gallery.index('data-kind="previews"')
+        assert "fallback" not in words
+    # The files panel no longer draws thumbnails of its own: one row per
+    # image class with its count, the pictures in the galleries above.
+    files_words = text_of(html["files"])
+    assert "<img" not in html["files"]
+    assert "capture/frames/camera0 — 4 rendered frame(s) for camera 'camera0'" in files_words
+    assert "(4 file(s), in the capture card's gallery)" in files_words

@@ -59,6 +59,13 @@
                   padding: .25rem .8rem; text-decoration: none; }
   .dlstrip a.dl-frames { background: #2f7d4f; }
   .dlstrip .dlnote { font-size: 11px; margin-right: .6rem; }
+  .gallery { margin: .6rem 0; }
+  .gallery img.sheet { max-width: 100%; margin: 2px; border: 1px solid #333; }
+  .thumbs { display: flex; flex-wrap: wrap; gap: 4px; margin: .3rem 0; }
+  .thumb { margin: 0; width: 160px; }
+  .thumb img { width: 160px; border: 1px solid #333; display: block; }
+  .thumb figcaption { font-size: 11px; }
+  details summary { cursor: pointer; }
 </style>
 </head>
 <body>
@@ -605,6 +612,77 @@ function downloadStripHtml(runId, downloads) {
   return `<div class="dlstrip"><b>downloads</b> ${buttons}</div>`;
 }
 
+// Why the previews are what the gallery shows, in the server's own
+// words: the machine's recorded reason for having no engine, the
+// clip-only choice, or an engine pass that rendered nothing.
+function fallbackWords(run) {
+  if (run.render === "clip") {
+    return "clip-only run; choose Render frames and clip for the frame set";
+  }
+  if (run.render === "frames") {
+    return "the engine pass rendered no frame for this camera (the run's " +
+           "status names the failure)";
+  }
+  return run.engine_reason
+    ? `no engine on this machine — ${run.engine_reason}`
+    : "headless run by choice; choose Render frames and clip for the frame set";
+}
+
+function thumbsHtml(runId, cameraId, items, kind) {
+  return `<div class="thumbs" data-camera="${esc(cameraId)}" data-kind="${kind}">` +
+    items.map(it =>
+      `<figure class="thumb"><a href="/runs/${runId}/file/${esc(it.file)}" ` +
+      `target="_blank"><img loading="lazy" src="/runs/${runId}/file/${esc(it.file)}" ` +
+      `data-frame="/runs/${runId}/file/${esc(it.file)}"` +
+      (it.overlay ? ` data-overlay="/runs/${runId}/file/${esc(it.overlay)}"` : "") +
+      `></a><figcaption class="dim">#${it.index} t=${Number(it.t_s).toFixed(3)} s` +
+      `</figcaption></figure>`).join("") + `</div>`;
+}
+
+// One camera's gallery: the heading is the count contract in the
+// verifier's words; the pictures are EVERY rendered frame the server
+// listed (captioned with index and instant from the manifest, the
+// overlay a toggle away), the contact sheet above them. With no
+// rendered frame the section is the previews, labelled as the fallback
+// with the reason, and a count shown is always the number of pictures
+// shown ("showing k of N").
+function galleryHtml(runId, run, gallery) {
+  const counts = (run.capture && run.capture.cameras || []).find(
+    c => c.camera_id === gallery.camera_id) || {scheduled: gallery.scheduled};
+  const heading = `<b>${esc(gallery.camera_id)}</b>: ${countWords(counts, run.render)}`;
+  const sheet = gallery.contact_sheet
+    ? `<div><a href="/runs/${runId}/file/${esc(gallery.contact_sheet)}" ` +
+      `target="_blank"><img class="sheet" src="/runs/${runId}/file/` +
+      `${esc(gallery.contact_sheet)}"></a>` +
+      `<div class="dim">contact sheet: every preview of this camera with ` +
+      `its index and time</div></div>` : "";
+  const frames = gallery.frames || [];
+  const previews = gallery.previews || [];
+  if (frames.length) {
+    const overlays = frames.filter(f => f.overlay).length;
+    const toggle = overlays
+      ? ` <label class="dim"><input type="checkbox" ` +
+        `onchange="toggleOverlays('${esc(gallery.camera_id)}', this.checked)"> ` +
+        `show the reprojected-geometry overlays (${overlays} of ${frames.length})</label>`
+      : "";
+    const previewBlock = previews.length
+      ? `<details><summary class="dim">geometry previews (not frames): ` +
+        `${previews.length} shown</summary>` +
+        thumbsHtml(runId, gallery.camera_id, previews, "previews") + `</details>`
+      : "";
+    return `<div class="gallery">${heading} <span class="dim">— showing ` +
+      `${frames.length} of ${counts.rendered ?? frames.length} rendered ` +
+      `frame(s)</span>${toggle}${sheet}` +
+      thumbsHtml(runId, gallery.camera_id, frames, "frames") + previewBlock +
+      `</div>`;
+  }
+  return `<div class="gallery">${heading}<div><b>previews</b> ` +
+    `<span class="dim">(fallback: ${esc(fallbackWords(run))}; showing ` +
+    `${previews.length} of ${previews.length} preview(s), which are NOT ` +
+    `frames)</span></div>${sheet}` +
+    thumbsHtml(runId, gallery.camera_id, previews, "previews") + `</div>`;
+}
+
 function captureCardHtml(run) {
   if (!run.capture) return "";
   if (run.capture.refused) {
@@ -678,11 +756,11 @@ function captureCardHtml(run) {
       `${run.capture.previews} geometry preview(s), which are NOT frames`;
   // The download strip and the per-camera galleries are filled from
   // /files once it answers (initFilesPanel): the page never names a
-  // file the server did not list.
+  // file the server did not list. Until then the galleries' holder
+  // carries the per-camera count list alone.
   return `<div class="card"><div id="captureDownloads"></div>` +
     `<b>capture geometry</b> — ` + totals + capped + previewWords +
-    `<ul>${cameras}</ul>` +
-    `<div id="captureGalleries"></div>` +
+    `<div id="captureGalleries"><ul>${cameras}</ul></div>` +
     `<b>verification ${v.ok ? "PASSED" : "FAILED"}</b>` + awaiting +
     `<ul>${checks}</ul>` + closure + `</div>`;
 }
@@ -691,27 +769,13 @@ function captureCardHtml(run) {
 // lists them; the page never guesses a path, so a file that is not there
 // simply does not appear rather than becoming a dead link. Image classes
 // (frames, overlays, previews) are one row each with their count; the
-// pictures are thumbnails with the count of what is shown stated.
+// pictures themselves are in the capture card's galleries.
 function filesHtml(runId, files) {
   if (!files || !files.length) return "";
   const rows = files.map(f => {
-    if (f.sheet) {
-      return `<li><b>${esc(f.name)}</b> <span class="dim">— ${esc(f.note)}</span>` +
-             `<div><a href="/runs/${runId}/file/${esc(f.name)}" target="_blank">` +
-             `<img src="/runs/${runId}/file/${esc(f.name)}" ` +
-             `style="max-width:100%;margin:2px;border:1px solid #333"></a></div></li>`;
-    }
     if (f.images) {
-      // Never silently truncated: the row says how many of the files
-      // its thumbnails show.
-      const shown = f.images.slice(0, 8);
-      const thumbs = shown.map(name =>
-        `<a href="/runs/${runId}/file/${esc(name)}" target="_blank">` +
-        `<img src="/runs/${runId}/file/${esc(name)}" ` +
-        `style="height:54px;margin:2px;border:1px solid #333"></a>`).join("");
       return `<li><b>${esc(f.name)}</b> <span class="dim">— ${esc(f.note)} ` +
-             `(showing ${shown.length} of ${f.images.length})</span>` +
-             `<div>${thumbs}</div></li>`;
+             `(${f.images.length} file(s), in the capture card's gallery)</span></li>`;
     }
     const kb = (f.bytes / 1024).toFixed(1);
     return `<li><a style="color:#6fb3e0" ` +
@@ -744,7 +808,25 @@ async function initFilesPanel(runId, run) {
   const strip = downloadStripHtml(runId, payload.downloads || []);
   const stripHolder = $("captureDownloads");
   if (stripHolder) stripHolder.innerHTML = strip;
+  const galleries = $("captureGalleries");
+  if (galleries && run) {
+    galleries.innerHTML = (payload.galleries || []).map(
+      g => galleryHtml(runId, run, g)).join("");
+  }
   holder.innerHTML = (stripHolder ? "" : strip) + filesHtml(runId, files);
+}
+
+// Swap one camera's frame thumbnails for their overlays (the manifest's
+// geometry drawn over the engine's pixels) and back. Both images are
+// files the server listed; nothing is drawn here.
+function toggleOverlays(cameraId, on) {
+  document.querySelectorAll(
+    `.thumbs[data-kind="frames"][data-camera="${cameraId}"] img[data-overlay]`)
+    .forEach(img => {
+      img.src = on ? img.dataset.overlay : img.dataset.frame;
+      const link = img.parentElement;
+      if (link && link.tagName === "A") link.href = img.src;
+    });
 }
 
 // ===================== the aerodynamics side panel ========================
