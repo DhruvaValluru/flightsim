@@ -3,6 +3,47 @@
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
 
+**Camera Phase 1, page round 3 (2026-09-05, the judge's eight ranked
+gaps against bar section 4, all eight closed in priority order, eight
+code commits; docs/CAMERA_PHASE1_REPORT.md section 6 (fallback words,
+parity captions), 6b (the dishonest pass) and the new 6c are
+current).** (1) The flight path is drawn from the telemetry file the
+run LISTED (telemetrySource: telemetry.json, else
+capture/telemetry.json, else nothing), through the whitelist route.
+(2) The page's DOM glue runs under node (tests/page_dom.js: a
+60-line-DOM over index.html's own script, fetch from the TestClient's
+payloads) -- poll, renderCapture, initFilesPanel, toggleOverlays,
+renderSpec, editedSpecDict, startRun are executed, not regex-pinned.
+(3) ONE refusal shape for the whole page (refusalWords in the
+PAGE_CAPTURE block: "[constraint] message (requested X unit, limit Y
+unit)"); every 409 carries constraint/message/actual/limit/unit
+(server.refusal_payload, runs.platform_refusal, runs.busy_refusal;
+new constraint names run.busy and editor.locked; the old keys stay).
+(4) Keyframed moves carry provenance (CameraSpec.moves_source /
+moves_from, set_moves(); serialised only when moves exist, so a
+move-less camera's digest is unchanged); the page's keyframe rows are
+inputs writing into dict.cameras[i].moves[k], the source column the
+recorded word or "spec data (no recorded source)" in grey. (5)
+verify.json's engine_parity data carries "frames" (per camera: index,
+t_s, ok, gaps, that frame's problem sentences); /files galleries
+attach it; a rejected frame is captioned "parity FAIL: <sentence>" in
+red with a red outline. (6) renderSpec/provenanceNote/renderVerdict
+escape everything. (7) A /files failure is said by name in the card.
+(8) The headless fallback is the platform gate's sentence once. 29
+guards under "page round 3" (8 for gaps 1-2, 21 for gaps 3-8), each
+verified firing by subset.
+Gotchas: (a) Python 3.11's Enum raises TypeError on `"str" in Enum`
+-- validate against `[s.value for s in Source]`; (b) page_dom.js
+serialises innerHTML with entities kept (&ldquo; stays &ldquo;), so
+assert the entity form, and page_capture returns a dict -- index
+["refusals"] / ["moves"]; (c) an escaping guard is WEAK unless the
+test carries the escaped character in the EXACT interpolation the
+guard mutates (the scalar-value guard needed a quoted aircraft value);
+(d) no prompt vocabulary produces moves, so the page's keyframe rows
+show only for a spec that carried them (Known limitations); (e) the
+DOM harness's setInput now reports sourceCells (every cell sharing
+the input's data-src-key) beside sourceCell.
+
 **Camera Phase 1, page round 2 (2026-09-05, the judge's seven ranked
 gaps against bar section 4, six closed in priority order, six code
 commits; docs/CAMERA_PHASE1_REPORT.md section 6 and the new 6b are

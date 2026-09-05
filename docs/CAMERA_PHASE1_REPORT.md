@@ -2608,7 +2608,16 @@ The capture card must then show, top to bottom:
   the previews -- with their contact sheet, which is a mosaic of
   previews -- only behind "geometry previews (not frames): 24 shown,
   and their contact sheet"; the same for tower0. The count in a
-  heading is always the number of pictures under it;
+  heading is always the number of pictures under it. No caption
+  carries the words "parity FAIL" and no thumbnail has a red outline:
+  a frame the verifier rejects is captioned "#k t=... s — parity FAIL:
+  <the verifier's own sentence for that frame>" in red with a red
+  outline, and the heading adds "N of them failed engine parity
+  (captioned and outlined below)", N equal to rendered minus verified
+  (`verify.json`'s engine_parity data now records one entry per graded
+  frame under "frames": index, t_s, ok, the measured gaps and that
+  frame's problem sentences -- measured on the drifting stub, section
+  6b);
 * "verification PASSED (10/10 checks)", the link `capture/verify.json`
   beside it (the file the table is rendered from), over the CHECK /
   STATUS / MEASURED / TOLERANCE / WHERE table -- the same rows
@@ -2649,8 +2658,12 @@ are NOT frames", each gallery headed "chase0: 24 scheduled, 0
 rendered (headless), previews only" and "previews (fallback: headless
 run by choice; choose Render frames and clip for the frame set;
 showing 24 of 24 preview(s), which are NOT frames)" (on a machine
-without the engine the fallback reads "no engine on this machine —
-<the platform gate's reason>"), the closure heading "graded over the
+without the engine the fallback is the platform gate's own sentence,
+once -- measured here: "previews (fallback: no engine on this OS: the
+render half needs macOS, or Windows with Unreal Engine 5.5 and the
+FlightSimBridge built; showing 4 of 4 preview(s), which are NOT
+frames)" -- never prefixed with a second "no engine" clause), the
+closure heading "graded over the
 settled half of 12 s (the first 12 s, the same window a clip would
 cover, capped at 22 s)" -- a headless run has no clip to name, so
 `closure.json` records window "capped" with `spec_duration_s` beside
@@ -2692,6 +2705,100 @@ before refusing is listed below" and the four files it wrote
 (provenance.json, scenario.yaml, status.json, jsbsim.log) one click
 away.
 
+A DISHONEST pass -- every PNG present, the counts right, but the
+engine's render.json placing frame 1 of each camera 20 cm east of the
+solved pose (the stub in `tests/test_webapp_capture.py`,
+`drifting_run`) -- ends `failed  [render.frames] engine parity ...
+0.200 m ...` with "8 scheduled, 8 rendered, 6 verified"; each gallery
+is headed "4 scheduled, 4 rendered, 3 verified — showing 4 of 4
+rendered frame(s) — 1 of them failed engine parity (captioned and
+outlined below)", the one red-outlined thumbnail is
+`capture/frames/<camera>/0001.png` and its caption reads "#1 t=<its
+instant> s — parity FAIL: applied position 0.200 m from the solved
+pose (tol 0.1)" -- the sentence `verify.json` records for that frame
+(`checks[engine_parity].data.frames.<camera>[1].problems[0]`); two
+"parity FAIL" captions across the run, equal to rendered minus
+verified. An honest pass has none, and a headless run's `verify.json`
+records no frame at all (`data.frames` is `{}`).
+
+#### 6c. Refusals, the review table and a lost file listing (page round 3, 2026-09-05)
+
+Every refusal the page prints has ONE shape, the validation verdict's:
+`[constraint] message (requested X unit, limit Y unit)` -- rendered by
+one function (`refusalWords`) for the pre-run verdict, a `/run`
+refusal in the status line, and a mid-run capture refusal in the card
+(verb "measured"). Every 409 the server answers carries the verdict's
+keys (`constraint`, `message`, `actual`, `limit`, `unit`) beside the
+keys it always had. Measured live through the test client on this
+machine:
+
+```
+refused — [ue.platform] no engine on this OS: the render half needs macOS, or Windows with Unreal Engine 5.5 and the FlightSimBridge built (requested frames, limit none (Headless))
+refused — [preview.scale] preview.scale: 3 does not divide 1280x720 exactly (426.67x240); the preview draws at 1/N of the record's resolution and never floors a size (camera camera0) (requested 3, limit divides 1280x720)
+refused — [aircraft.mesh] the f15 has real flight physics but no licensed 3-D model is configured for it, and placeholder airframes never render. Airframes with a model this machine can build: A320, B747, DHC6, c172p. (requested f15, limit A320, B747, DHC6, c172p)
+refused — [render.host_parity] turbulence 'moderate': same-seed host parity is measured and refused for turbulence realisations (docs/VALIDITY.md), so the aircraft the engine draws cannot be labelled from the manifest; choose 'Clip only' (visual-only, seed recorded) or turbulence none (requested frames, limit clip or none (the choices whose labels need no host parity))
+refused — [render.choice] render must be one of frames, clip, none (requested video, limit frames, clip, none)
+refused — [run.busy] a run is already rendering (abc123def456); one editor instance at a time (requested abc123def456 rendering, limit one editor instance at a time)
+```
+
+Each constraint appears exactly once in its line; the CLI's six-line
+`REFUSED ue.platform` paragraph (still the payload's `refused` text,
+for the CLI) reaches the page nowhere. The pre-run verdict prints a
+violation's unit on both numbers ("(requested 50000 ft, limit 45000
+ft)"), as `flightsim.capture` does.
+
+The review table escapes everything it interpolates (values, units,
+sources, the provenance note's quoted phrase, notes, warnings): a
+prompt phrase with a double quote or "<" reaches the table as text and
+an input's value attribute survives it (measured: 'B7"47<x>' and
+'tow"er<0>' round-trip through `editedSpecDict` unchanged). Each
+camera's keyframed moves are rows "move k of N" whose every keyed
+field is an input (t_s first, the field's own unit) writing back into
+`cameras[i].moves[k]`; their source column is the list's RECORDED
+provenance (`moves_source` / `moves_from` on the camera record, one for
+the whole list, serialised beside it and digest-relevant like every
+source; `CameraSpec.set_moves` records it) in that source's colour, or
+"spec data (no recorded source)" in the default colour -- never the
+user's green for a source nobody recorded. An edit records the list as
+"user" / "edited in the web UI" and `/run` re-parses it (a source word
+outside `user/inferred/model/derived/default` is refused by name).
+
+A file listing that does not arrive is said by name where the strip
+would be: "files: /runs/<id>/files answered HTTP 500 — downloads and
+galleries unavailable", "... could not be fetched (<the error>) — ...",
+or "files: this run listed no files (... answered an empty list) —
+nothing to download, no gallery to show"; the card keeps its count
+list, and the flight path says "the file listing did not arrive (the
+files panel says why)" rather than "this run listed no telemetry
+file".
+
+**On the Windows machine** (nothing above was seen on a real engine):
+
+1. Run the section-6 spec with *Render frames and clip*. The
+   galleries must show NO "parity FAIL" caption and no red outline;
+   `curl -s http://localhost:8008/runs/<id>/file/capture/verify.json |
+   python -c "import json,sys; d=json.load(sys.stdin); c=[x for x in
+   d['checks'] if x['name']=='engine_parity'][0]; print({k: [f['ok']
+   for f in v] for k, v in c['data']['frames'].items()})"` must print
+   every camera's list as all `True`, 24 entries each.
+2. To see a FAIL caption on purpose: edit
+   `runs\<id>\capturerames\chase0
+ender.json`, add 0.2 to
+   `frame_records[1].camera_applied_east_m`, run
+   `.venv\Scripts\python -m flightsim.verify runs\<id>\capture` (exit
+   code 1, engine_parity FAIL naming "chase0 frame 1: applied position
+   0.200 m from the solved pose (tol 0.1)"), reload the page: chase0's
+   gallery must read "24 scheduled, 24 rendered, 23 verified — showing
+   24 of 24 rendered frame(s) — 1 of them failed engine parity
+   (captioned and outlined below)" with `0001.png` outlined and
+   captioned "#1 t=<the manifest's instant for frame 1> s — parity FAIL:
+   applied position 0.200 m from the solved pose (tol 0.1)". Restore
+   the file and re-run the verifier afterwards.
+3. Interpret the same prompt with "in moderate turbulence", leave
+   *Render frames and clip*, press Run: the status must read exactly
+   the `[render.host_parity]` line above (one constraint, the value
+   clause at the end).
+
 ### 7. Temporal alignment on rendered frames
 
 ```
@@ -2724,6 +2831,12 @@ Paste every log back; this section is rewritten from them.
   the page says "not recoverable" (gotcha 23 stands: do not restart
   the server while a run is active). Runs written before status.json
   existed recover from their clip.mp4 alone, with no capture card.
+* **Keyframed moves reach the page only from a spec that carried
+  them.** No prompt vocabulary produces `moves` (the compiler's camera
+  schema has none), so the review table's keyframe rows -- editable,
+  with the list's recorded provenance -- appear only for a spec loaded
+  with moves (the CLI's YAML path, or a run's `scenario.yaml` re-posted
+  to `/run`); a prompt cannot state a dolly yet.
 * **The page's galleries draw every rendered frame the server lists**
   (lazily loaded; 48 thumbnails at 160 px is the measured largest
   case here) but previews stay capped at MAX_PREVIEWS (60) per run,
