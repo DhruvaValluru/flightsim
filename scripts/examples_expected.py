@@ -153,17 +153,38 @@ def render(records: List[Dict], when: Optional[str] = None) -> str:
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?(?:e[+-]?\d+)?")
 _CAMERA = re.compile(r"\b(chase0|tower0|shoulder|survey|buried)\b")
 _HEX = re.compile(r"\b[0-9a-f]{16,64}\b")
+#: The one line whose words depend on the machine, not the run: the
+#: engine's absence is stated with the platform's own reason (Linux,
+#: macOS and Windows each word it differently), and a machine that HAS
+#: the engine says "render: none (headless by choice ...)" instead.
+_ENGINE_LINE = re.compile(
+    r"^(?:engine absent: .*; frames not rendered .*"
+    r"|render: none \(headless by choice.*)$")
+_GAP = re.compile(r" {2,}")
 
 
 def shape(text: str) -> List[str]:
     """The text with every number, digest and camera id masked: what a
     fresh run must reproduce line for line (timings, float noise and
     the worst frame's identity do not count; the words, the columns,
-    the check names, the statuses and the line count do)."""
+    the check names, the statuses and the line count do).
+
+    Two things are machine-dependent and masked as well: the engine-
+    availability line (its reason is worded per platform) becomes
+    ``<engine availability: machine-dependent>``, and runs of two or
+    more spaces collapse to two, so a column keeps its place in the
+    row while a float's width (``4.1e-13`` here, ``1.61e-13`` on
+    another platform) does not move the column after it."""
     masked = _HEX.sub("<hex>", text)
     masked = _CAMERA.sub("<cam>", masked)
     masked = _NUMBER.sub("#", masked)
-    return [line.rstrip() for line in masked.rstrip("\n").splitlines()]
+    lines = []
+    for line in masked.rstrip("\n").splitlines():
+        line = line.rstrip()
+        if _ENGINE_LINE.match(line):
+            line = "<engine availability: machine-dependent>"
+        lines.append(_GAP.sub("  ", line))
+    return lines
 
 
 def doc_blocks(doc_text: str) -> List[Dict]:
