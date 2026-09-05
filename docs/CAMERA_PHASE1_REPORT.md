@@ -2539,22 +2539,114 @@ column -- a label sitting on top of another, or far from the mark it
 names with no leader line to it, is a placement defect to report. Write
 here what was seen.
 
-### 6. The same from the page
+### 6. The same from the page (awaiting Windows verification)
+
+Everything in this section is the words the page prints TODAY,
+measured in this session on the honest engine stub (a two-camera 3 s
+run capturing 4 images per camera through `RunManager._render_flow`,
+the card and galleries rendered under node from the page's own
+functions; `tests/test_webapp_capture.py` pins each line) with the
+numbers of the 24-image run substituted. Nothing here has been seen on
+a Windows machine yet; paste the status lines and the card back and
+this section is rewritten from them.
 
 Start the server, interpret "fly the 747 at 10000 ft and 280 kt for 12
 seconds with a chase camera and a tower camera capturing 24 images",
 leave the render select on *Render frames and clip* (the default once
-the bridge is built) and Run. The status lines must read, in order,
-"scheduled 48 frame(s) across 2 camera(s)", "editor pass 1 of 2: camera
-'chase0', 24 frames scheduled over the 12 s run", "camera 'chase0': 24
-of 24 scheduled frames rendered", the same for 'tower0', "encoding the
-by-product clip from camera 'chase0'", "verification PASSED (6/6
-checks)", and finally "48 frames across 2 camera(s) rendered (48
-scheduled, 48 verified by engine parity) + clip (by-product of
-'chase0')". The page's capture card must show "48 scheduled, 48
-rendered, 48 verified", list `capture/frames/chase0` and
-`capture/frames/tower0` as 24 rendered frames each, and
-`/runs/<id>/bundle.zip` must contain the 48 PNGs.
+the bridge is built) and Run. The status lines must read, in order
+(the model-load counts and the seconds per frame are this machine's):
+
+```
+capture    solving camera geometry and capture schedule
+capture    flying the spec headlessly for the capture geometry
+capture    JSBSim output: jsbsim.log (5 model loads routed there for the capture flight; nothing of JSBSim's on the console)
+capture    scheduled 48 frame(s) across 2 camera(s); 48 geometry preview(s) written at 1280x720, 0.076 s/frame; 2 contact sheet(s)
+capture    verification PASSED (9/9 checks; engine_parity awaiting engine frames)
+closure    flying the same spec closed loop for the closure report
+closure    JSBSim output: jsbsim.log (10 model loads routed there for the closure flight)
+closure    closure PASSED (4/4 checks)
+rendering  editor pass 1 of 2: camera 'chase0', 24 frames scheduled over the 12 s run (consume-poses, -camera-index=0)
+rendering  camera 'chase0': 24 of 24 scheduled frames rendered (engine stepped 11.992 s in N steps)
+rendering  editor pass 2 of 2: camera 'tower0', 24 frames scheduled over the 12 s run (consume-poses, -camera-index=1)
+rendering  camera 'tower0': 24 of 24 scheduled frames rendered (engine stepped 11.992 s in N steps)
+encoding   encoding the by-product clip from camera 'chase0' (24 frames at their scheduled instants: 12.992 s of clip = black to t=0.008 s, the flight to t=11.992 s, a 1 s hold; no telemetry panel -- the panel is fps-locked)
+capture    48 overlay(s): the manifest's aircraft box, ground and horizon reprojected over the rendered frames under capture/overlays
+capture    verification PASSED (10/10 checks)
+done       48 frames across 2 camera(s) rendered (48 scheduled, 48 verified by engine parity) + clip (by-product of 'chase0')
+```
+
+(11.992 s is the schedule's last instant, from section 2; N is the
+step count the commandlet's render.json records -- not measured here.
+The first "verification PASSED"
+is the headless verifier before the engine passes, 9/9 with engine
+parity AWAITING; the second is after them, 10/10 -- two cameras, so
+cross-view consistency ran.)
+
+The capture card must then show, top to bottom:
+
+* the download strip: `frames.zip` ("48 PNG(s) across 2 camera(s)
+  (chase0, tower0), named by manifest index, with each camera's
+  render.json"), `manifest` (capture/capture_manifest.json),
+  `telemetry` (capture/telemetry.json: the headless flight the
+  manifest describes), `clip.mp4` ("by-product of 'chase0' (the frame
+  set is the deliverable)") and `everything (.zip)` with the file
+  count -- one button per artefact class the run wrote, nothing else;
+* "capture geometry — 48 scheduled, 48 rendered, 48 verified; 48
+  geometry preview(s) (previews at 1280x720, 0.076 s/frame; a contact
+  sheet per camera; 48 overlay(s) of the reprojected geometry over the
+  rendered frames)";
+* one gallery per camera headed "chase0: 24 scheduled, 24 rendered,
+  24 verified — showing 24 of 24 rendered frame(s)" with the checkbox
+  "show the reprojected-geometry overlays (24 of 24)", the contact
+  sheet, then all 24 rendered frames captioned "#0 t=0.008 s" ...
+  "#23 t=11.992 s" (the manifest's instants), and the previews only
+  behind "geometry previews (not frames): 24 shown"; the same for
+  tower0. The count in a heading is always the number of pictures
+  under it;
+* "verification PASSED (10/10 checks)" over the CHECK / STATUS /
+  MEASURED / TOLERANCE / WHERE table -- the same rows
+  `flightsim.verify` prints -- with every row PASS; the engine_parity
+  row's MEASURED reads "pos x.xxx m, ang x.xxx deg, t x.xe-xx s, px
+  x.xx" against "0.1 m, 0.1 deg, 1e-06 s, 3.0 px" and its WHERE "48
+  of 48 frames verified across 2 camera(s)" (the stub measured pos
+  0.000 m, ang 0.000 deg, t 0.0e+00 s, px 0.00; the real engine's
+  numbers must sit under the tolerances);
+* "closure PASSED — the same spec flown closed loop, graded over the
+  settled half of 12 s (full duration: a frames run steps the whole
+  flight)" with each row's unit ("altitude: commanded 3048.00 m,
+  achieved ... m (tol 15 m)").
+
+Then, from a shell, the frame set as its own download and what a
+restart does to the run:
+
+```
+curl -s -o frames.zip http://localhost:8008/runs/<id>/frames.zip
+tar -tf frames.zip | find /c ".png"
+tar -tf frames.zip | find /c "render.json"
+curl -s http://localhost:8008/runs/<id>/files | python -c "import json,sys; d=json.load(sys.stdin); print([x['class'] for x in d['downloads']]); print([(g['camera_id'], len(g['frames']), len(g['previews'])) for g in d['galleries']])"
+```
+
+The counts must print 48 and 2, the classes `['frames', 'manifest',
+'telemetry', 'clip', 'everything']` and the galleries `[('chase0',
+24, 24), ('tower0', 24, 24)]`. Stop the server, start it again, reload
+the page: the same run id comes back "done" with the same card (the
+events end with "recovered after a server restart"), because a
+finished run's verdict and event log are in `<run>/status.json` and
+its card is rebuilt from the manifest, `capture/verify.json`,
+`capture/run.json`, `capture/closure.json` and `provenance.json` --
+measured here: the recovered summary equals the live one key for key
+for both a headless and a stubbed frames run. A headless run (render
+select on *Headless*) must show the SAME card with "48 scheduled, 0
+rendered (headless: no engine pass); 48 geometry preview(s), which
+are NOT frames", each gallery headed "chase0: 24 scheduled, 0
+rendered (headless), previews only" and "previews (fallback: headless
+run by choice; choose Render frames and clip for the frame set;
+showing 24 of 24 preview(s), which are NOT frames)" (on a machine
+without the engine the fallback reads "no engine on this machine —
+<the platform gate's reason>"), no frames.zip button, and
+`/runs/<id>/frames.zip` must answer 404 "no rendered frames: this was
+a headless run (no engine pass); the manifest and the previews are
+its deliverable".
 
 ### 7. Temporal alignment on rendered frames
 
@@ -2580,6 +2672,20 @@ Paste every log back; this section is rewritten from them.
   45%-ahead placement (its own track IS straight); the webapp's
   terrain runs refine the placement onto the pre-flown banked track
   through the same shared helper.
+* **A run the server died under is not recovered.** A finished run
+  writes `<run>/status.json` (its verdict and event log) before its
+  status shows as done or failed, and a restarted server rebuilds the
+  run -- headless, clip or frames -- from that file, `provenance.json`
+  and the capture files; a run interrupted by the restart has none and
+  the page says "not recoverable" (gotcha 23 stands: do not restart
+  the server while a run is active). Runs written before status.json
+  existed recover from their clip.mp4 alone, with no capture card.
+* **The page's galleries draw every rendered frame the server lists**
+  (lazily loaded; 48 thumbnails at 160 px is the measured largest
+  case here) but previews stay capped at MAX_PREVIEWS (60) per run,
+  and the card says so ("previews capped at 60; the manifest carries
+  every frame"). The overlay toggle swaps each thumbnail for the
+  overlay file the server listed; nothing is drawn in the browser.
 * Cross-view consistency is SKIPPED by name for single-camera runs
   (`ok` None, reason "single camera": counted in neither passed nor
   ran -- no false pass, no false failure); the two-camera example is
