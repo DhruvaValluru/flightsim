@@ -54,6 +54,7 @@ from webapp.runs import (  # noqa: E402
     coupling_needs_seed,
     derive_seed,
     needs_dynamic_bake,
+    platform_refusal,
     pick_scene,
     place_on_scene,
     plan_camera_defaults,
@@ -121,9 +122,12 @@ def _preview_scale_or_refusal(request: "RunRequest"):
         return validated_scale(1 if request.preview_scale is None
                                else request.preview_scale), None
     except ValueError as exc:
-        return None, JSONResponse({"refused": str(exc),
-                                   "constraint": "preview.scale"},
-                                  status_code=409)
+        return None, JSONResponse(
+            refusal_payload("preview.scale", str(exc),
+                            actual=request.preview_scale,
+                            limit="a positive whole number",
+                            refused=str(exc)),
+            status_code=409)
 
 
 def _scale_kwargs(preview_scale: int) -> Dict[str, int]:
@@ -137,12 +141,39 @@ def _scale_divides_or_refusal(preview_scale: int, spec: ScenarioSpec):
     from core.capture.preview import scale_refusal_for_cameras
     from core.scenario.camera import default_cameras
 
-    refusal = scale_refusal_for_cameras(preview_scale,
-                                        spec.cameras or default_cameras(spec))
+    cameras = spec.cameras or default_cameras(spec)
+    refusal = scale_refusal_for_cameras(preview_scale, cameras)
     if refusal is None:
         return None
-    return JSONResponse({"refused": refusal, "constraint": "preview.scale"},
-                        status_code=409)
+    # The limit, for the refusal's value clause: the first resolution
+    # the scale does not divide (the same camera the message names).
+    limit = "divides every camera's resolution"
+    for camera in cameras:
+        w, h = int(camera.width_px.value), int(camera.height_px.value)
+        if w % preview_scale or h % preview_scale:
+            limit = f"divides {w}x{h}"
+            break
+    return JSONResponse(
+        refusal_payload("preview.scale", refusal, actual=preview_scale,
+                        limit=limit, refused=refusal),
+        status_code=409)
+
+
+def refusal_payload(constraint: str, message: str, actual=None, limit=None,
+                    unit: Optional[str] = None, refused: Optional[str] = None,
+                    **extra) -> Dict[str, Any]:
+    """ONE shape for every named refusal the page can receive, the
+    validation verdict's: ``constraint``, ``message`` and -- when the
+    refusal has them -- the offending value (``actual``), the bound it
+    broke (``limit``) and their ``unit``, under the keys
+    core.scenario.validate.Violation uses. ``refused`` keeps the
+    page's existing key (the constraint by default; a longer text for
+    callers that read it, the CLI's platform paragraph among them) and
+    ``extra`` carries a refusal's own fields (render, latitude). The
+    page renders every one of them with the same refusalWords()."""
+    return {"refused": constraint if refused is None else refused,
+            "constraint": constraint, "message": message,
+            "actual": actual, "limit": limit, "unit": unit, **extra}
 
 
 def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
@@ -452,10 +483,10 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     )
 
     if not ue_available():
-        return JSONResponse({"refused": UE_PLATFORM_REFUSAL,
-                             "constraint": "ue.platform",
-                             "reason": ue_unavailable_reason(),
-                             "render": render}, status_code=409)
+        return JSONResponse(
+            platform_refusal(render, UE_PLATFORM_REFUSAL,
+                             ue_unavailable_reason()),
+            status_code=409)
     # A frames pass whose labels could not match its pixels is refused
     # by name BEFORE the mesh rule: the choice itself is the problem, not
     # the machine. Host parity is measured and refused for turbulence
@@ -467,9 +498,12 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
 
     parity = frames_host_parity_refusal(spec) if render == "frames" else None
     if parity is not None:
-        return JSONResponse({"refused": parity,
-                             "constraint": HOST_PARITY_CONSTRAINT,
-                             "render": render}, status_code=409)
+        return JSONResponse(
+            refusal_payload(HOST_PARITY_CONSTRAINT, parity, actual=render,
+                            limit="clip or none (the choices whose labels "
+                                  "need no host parity)",
+                            refused=parity, render=render),
+            status_code=409)
     # Placeholder airframes never render (owner's rule, extended
     # 2026-08-31: on ANY machine). Checked AFTER validation on purpose:
     # a scenario that cannot fly refuses on the physics first; the asset
@@ -477,8 +511,11 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # sound.
     mesh_refusal = refuse_placeholder_mesh(spec)
     if mesh_refusal is not None:
-        return JSONResponse({"refused": "aircraft.mesh", **mesh_refusal},
-                            status_code=409)
+        return JSONResponse(
+            refusal_payload("aircraft.mesh", mesh_refusal["message"],
+                            actual=mesh_refusal.get("actual"),
+                            limit=mesh_refusal.get("limit")),
+            status_code=409)
 
     outcome = manager.start(spec, provenance=provenance, render=render,
                             **_scale_kwargs(preview_scale))

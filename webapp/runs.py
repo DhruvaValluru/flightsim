@@ -296,6 +296,8 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
                    f"and verify that terrain (first fetch downloads tiles, "
                    f"a few minutes), then run again",
         "latitude": lat, "longitude": lon,
+        "actual": f"{lat:.4f}, {lon:.4f}", "limit": "a baked GLO-30 scene",
+        "unit": None,
     }
 
 
@@ -869,6 +871,29 @@ def renderable_aircraft() -> List[str]:
                   (REPO / "assets" / "generated").glob("*/mesh_manifest.json"))
 
 
+def platform_refusal(render: str, paragraph: str, reason: Optional[str]
+                     ) -> Dict:
+    """The ue.platform refusal in the validation verdict's shape: the
+    constraint, the machine's one-sentence reason as the message, the
+    choice that was refused as the offending value ("frames") against
+    the only choice this machine honours ("none (Headless)"). ``refused``
+    keeps the CLI's platform paragraph and ``reason`` / ``render`` their
+    existing keys, so nothing that read them changes."""
+    return {"refused": paragraph, "constraint": "ue.platform",
+            "message": reason or "no engine on this machine",
+            "reason": reason, "render": render,
+            "actual": render, "limit": "none (Headless)", "unit": None}
+
+
+def busy_refusal(active: "RunState", rule: str) -> Dict:
+    """One run at a time, in the verdict's shape: the active run (its
+    status and id) as the offending value against the rule."""
+    words = f"a run is already {active.status} ({active.run_id}); {rule}"
+    return {"refused": words, "constraint": "run.busy", "message": words,
+            "actual": f"{active.run_id} {active.status}", "limit": rule,
+            "unit": None}
+
+
 def refuse_placeholder_mesh(spec: ScenarioSpec) -> Optional[Dict]:
     """OWNER'S RULE (2026-08-14, extended 2026-08-31): a placeholder
     airframe never renders -- on ANY machine.
@@ -907,11 +932,16 @@ def refuse_placeholder_mesh(spec: ScenarioSpec) -> Optional[Dict]:
     buildable = sorted(n for n in configured_aircraft()
                        if not unavailable_reason(n))
     reason = unavailable_reason(aircraft)
+    # The offending value and the bound, in the validation verdict's
+    # own keys: the airframe asked for, against the airframes this
+    # machine can build (the page prints "requested F15, limit ...").
     if reason:
         return {
             "constraint": "aircraft.mesh",
             "message": f"the {aircraft} has real flight physics but can "
                        f"never render: {reason}",
+            "actual": aircraft,
+            "limit": f"an airframe with a licensed model ({', '.join(buildable)})",
         }
     if aircraft not in buildable:
         return {
@@ -921,6 +951,8 @@ def refuse_placeholder_mesh(spec: ScenarioSpec) -> Optional[Dict]:
                        f"placeholder airframes never render. Airframes "
                        f"with a model this machine can build: "
                        f"{', '.join(buildable)}.",
+            "actual": aircraft,
+            "limit": ", ".join(buildable),
         }
     return None         # buildable: the run provisions it, in the open
 
@@ -1644,7 +1676,11 @@ class RunManager:
         if render not in RENDER_CHOICES:
             return {"refused": f"render must be one of "
                                f"{', '.join(RENDER_CHOICES)}, not {render!r}",
-                    "constraint": "render.choice"}
+                    "constraint": "render.choice",
+                    "message": f"render must be one of "
+                               f"{', '.join(RENDER_CHOICES)}",
+                    "actual": render, "limit": ", ".join(RENDER_CHOICES),
+                    "unit": None}
         if render == "none":
             return self.start_capture(spec, provenance,
                                       preview_scale=preview_scale)
@@ -1653,20 +1689,23 @@ class RunManager:
             # was measured on Metal/macOS only. The headless half (spec,
             # provenance, validation, telemetry via run_spec) already
             # happened or remains available on this OS.
-            return {"refused": UE_PLATFORM_REFUSAL,
-                    "constraint": "ue.platform",
-                    "reason": ue_unavailable_reason(),
-                    "render": render}
+            return platform_refusal(render, UE_PLATFORM_REFUSAL,
+                                    ue_unavailable_reason())
         with self._lock:
             active = self.runs.get(self._active) if self._active else None
             if active is not None and active.status not in ("done", "failed"):
-                return {"refused": f"a run is already {active.status} "
-                                   f"({active.run_id}); one editor instance "
-                                   f"at a time"}
+                return busy_refusal(active, "one editor instance at a time")
             if editor_running():
                 return {"refused": "another process owns the editor (a "
                                    "matrix render?); refusing a concurrent "
-                                   "run"}
+                                   "run",
+                        "constraint": "editor.locked",
+                        "message": "another process owns the editor (a "
+                                   "matrix render?); refusing a concurrent "
+                                   "run",
+                        "actual": "an editor process outside this server",
+                        "limit": "one editor instance at a time",
+                        "unit": None}
             run = RunState(run_id=uuid.uuid4().hex[:12],
                            spec_digest=spec.digest(), render=render,
                            preview_scale=int(preview_scale))
@@ -1701,8 +1740,7 @@ class RunManager:
         with self._lock:
             active = self.runs.get(self._active) if self._active else None
             if active is not None and active.status not in ("done", "failed"):
-                return {"refused": f"a run is already {active.status} "
-                                   f"({active.run_id}); one at a time"}
+                return busy_refusal(active, "one at a time")
             run = RunState(run_id=uuid.uuid4().hex[:12],
                            spec_digest=spec.digest(), render="none",
                            preview_scale=int(preview_scale),

@@ -1619,14 +1619,17 @@ const out = {
   files: filesHtml(input.runId, files.files || []),
   moves: (input.cameras || []).map(cameraMovesHtml),
   telemetry: telemetrySource(input.run, files),
+  refusals: (input.refusals || []).map(r => refusalWords(r.payload, r.verb)),
 };
 console.log(JSON.stringify(out));
 """
 
 
-def page_capture(tmp_path, run, files, run_id="run1", cameras=None):
+def page_capture(tmp_path, run, files, run_id="run1", cameras=None,
+                 refusals=None):
     """Render the page's capture card, download strip and files panel
-    (and, given the compile payload's camera blocks, their move rows)
+    (and, given the compile payload's camera blocks, their move rows;
+    given ``refusals`` as [{"payload", "verb"}], their refusal lines)
     under node from the page's own source, and return the HTML of each."""
     import re
     import shutil
@@ -1641,7 +1644,8 @@ def page_capture(tmp_path, run, files, run_id="run1", cameras=None):
     harness.write_text(PAGE_CAPTURE_HARNESS % block, encoding="utf-8")
     payload = tmp_path / "page_capture_input.json"
     payload.write_text(json.dumps({"run": run, "files": files,
-                                   "runId": run_id, "cameras": cameras}),
+                                   "runId": run_id, "cameras": cameras,
+                                   "refusals": refusals}),
                        encoding="utf-8")
     proc = subprocess.run([node, str(harness), str(payload)],
                           capture_output=True, text=True, encoding="utf-8")
@@ -2793,3 +2797,177 @@ def test_toggle_overlays_swaps_every_frame_s_src_and_href_both_ways(
         (frame("camera0", i), frame("camera0", i)) for i in range(4)]
     # The clip is a by-product of camera 0: the video sits in the clip area.
     assert f'<video id="clipVideo" controls src="/runs/{run_id}/clip.mp4">' in snaps[0]["clipArea"]
+
+
+# -- page round 3: one refusal shape for the whole page --------------------
+
+def run_refusal_payloads(client, monkeypatch):
+    """Every named 409 /run can answer, collected LIVE: ue.platform (this
+    OS has no engine), preview.scale (0, and 3 on 1280x720),
+    aircraft.mesh (the f15, with the platform gate held open),
+    render.host_parity (a turbulent spec asked for frames), and the
+    manager's own render.choice and run.busy refusals."""
+    import core.util.platform as plat
+    from webapp.runs import RunState
+
+    spec = compile_prompt(DEMO)
+    out = {}
+    monkeypatch.setattr(plat, "ue_available", lambda: False)
+    monkeypatch.setattr(plat, "ue_unavailable_reason",
+                        lambda: "no engine on this OS: the render half needs "
+                                "macOS, or Windows with Unreal Engine 5.5 and "
+                                "the FlightSimBridge built")
+    reply = client.post("/run", json={"spec": spec.to_dict(), "render": "frames"})
+    assert reply.status_code == 409
+    out["ue.platform"] = reply.json()
+    for scale in (0, 3):
+        reply = client.post("/run", json={"spec": spec.to_dict(), "render": "none",
+                                          "preview_scale": scale})
+        assert reply.status_code == 409
+        out[f"preview.scale {scale}"] = reply.json()
+    monkeypatch.setattr(plat, "ue_available", lambda: True)
+    f15 = compile_prompt("fly the f15 at 5000 m and 350 kt for 3 seconds with "
+                         "a chase camera capturing 4 images")
+    reply = client.post("/run", json={"spec": f15.to_dict(), "render": "frames"})
+    assert reply.status_code == 409
+    out["aircraft.mesh"] = reply.json()
+    turbulent = compile_prompt("fly the 747 at 5000 ft over the prairie in "
+                               "moderate turbulence for 3 seconds with a "
+                               "chase camera capturing 4 images")
+    reply = client.post("/run", json={"spec": turbulent.to_dict(),
+                                      "render": "frames"})
+    assert reply.status_code == 409
+    out["render.host_parity"] = reply.json()
+    out["render.choice"] = manager.start(spec, {}, render="video")
+    active = RunState(run_id="abc123def456")
+    active.status = "rendering"
+    monkeypatch.setitem(manager.runs, "abc123def456", active)
+    monkeypatch.setattr(manager, "_active", "abc123def456")
+    out["run.busy"] = manager.start(spec, {}, render="frames")
+    out["run.busy capture"] = manager.start_capture(spec, {})
+    return out
+
+
+def test_every_run_refusal_reads_in_the_verdict_s_one_shape(
+        client, monkeypatch, tmp_path):
+    """startRun's generic branch printed 'refused [ue.platform]: REFUSED
+    ue.platform: <six lines> -- <reason>' -- the constraint twice, the
+    CLI's paragraph, and never the choice that was refused. Every 409
+    now carries the validation verdict's keys (constraint, message,
+    actual, limit, unit) and the page renders each with the ONE
+    refusalWords(): '[constraint] message (requested X, limit Y)'. The
+    words are pinned per payload, from the server's live answers."""
+    payloads = run_refusal_payloads(client, monkeypatch)
+    for name, payload in payloads.items():
+        for key in ("refused", "constraint", "message", "actual", "limit", "unit"):
+            assert key in payload, (name, key)
+    assert payloads["ue.platform"]["actual"] == "frames"
+    assert payloads["ue.platform"]["limit"] == "none (Headless)"
+    assert payloads["ue.platform"]["render"] == "frames"        # its own key stays
+    assert payloads["ue.platform"]["refused"].startswith("REFUSED ue.platform")
+    assert payloads["preview.scale 3"]["actual"] == 3
+    assert payloads["preview.scale 3"]["limit"] == "divides 1280x720"
+    assert payloads["preview.scale 0"]["limit"] == "a positive whole number"
+    assert payloads["aircraft.mesh"]["actual"] == "f15"
+    assert payloads["aircraft.mesh"]["limit"] == "A320, B747, DHC6, c172p"
+    assert payloads["render.host_parity"]["actual"] == "frames"
+    assert payloads["render.choice"]["actual"] == "video"
+    assert payloads["run.busy"]["actual"] == "abc123def456 rendering"
+    lines = page_capture(tmp_path, {}, {}, "r", refusals=[
+        {"payload": p, "verb": "requested"} for p in payloads.values()])["refusals"]
+    words = dict(zip(payloads, (text_of(line) for line in lines)))
+    assert words["ue.platform"] == (
+        "[ue.platform] no engine on this OS: the render half needs macOS, or "
+        "Windows with Unreal Engine 5.5 and the FlightSimBridge built "
+        "(requested frames, limit none (Headless))")
+    assert words["preview.scale 3"] == (
+        "[preview.scale] preview.scale: 3 does not divide 1280x720 exactly "
+        "(426.67x240); the preview draws at 1/N of the record's resolution "
+        "and never floors a size (camera camera0) (requested 3, limit divides "
+        "1280x720)")
+    assert words["preview.scale 0"].endswith(
+        "(requested 0, limit a positive whole number)")
+    assert words["aircraft.mesh"] == (
+        "[aircraft.mesh] the f15 has real flight physics but no licensed 3-D "
+        "model is configured for it, and placeholder airframes never render. "
+        "Airframes with a model this machine can build: A320, B747, DHC6, "
+        "c172p. (requested f15, limit A320, B747, DHC6, c172p)")
+    assert words["render.host_parity"].startswith(
+        "[render.host_parity] turbulence 'moderate': same-seed host parity")
+    assert words["render.host_parity"].endswith(
+        "(requested frames, limit clip or none (the choices whose labels need "
+        "no host parity))")
+    assert words["render.choice"] == (
+        "[render.choice] render must be one of frames, clip, none (requested "
+        "video, limit frames, clip, none)")
+    assert words["run.busy"] == (
+        "[run.busy] a run is already rendering (abc123def456); one editor "
+        "instance at a time (requested abc123def456 rendering, limit one "
+        "editor instance at a time)")
+    # Each constraint is named exactly once, and the CLI's paragraph
+    # never reaches the page.
+    for name, line in words.items():
+        constraint = payloads[name]["constraint"]
+        assert line.count(f"[{constraint}]") == 1, line
+        assert "REFUSED ue.platform" not in line
+    # The verdict's own lines go through the same function: a Violation
+    # with a unit prints it on both numbers, one without a value prints
+    # no clause.
+    verdict = page_capture(tmp_path, {}, {}, "r", refusals=[
+        {"payload": {"constraint": "envelope.ceiling", "message": "too high",
+                     "actual": 50000, "limit": 45000, "unit": "ft"},
+         "verb": "requested"},
+        {"payload": {"constraint": "camera.schedule", "message": "4 over 3 s",
+                     "actual": None, "limit": None, "unit": None},
+         "verb": "measured"}])["refusals"]
+    assert text_of(verdict[0]) == ("[envelope.ceiling] too high (requested "
+                                   "50000 ft, limit 45000 ft)")
+    assert text_of(verdict[1]) == "[camera.schedule] 4 over 3 s"
+
+
+def test_the_live_page_prints_a_run_refusal_in_the_one_shape(
+        client, monkeypatch, tmp_path):
+    """The DOM: the review table drawn from a real /compile payload, Run
+    pressed, the server answering 409 ue.platform (this OS) -- the
+    status reads 'refused — [ue.platform] <reason> (requested frames,
+    limit none (Headless))', the constraint once, no paragraph; the
+    run area is shown and no run is polled. The pre-run verdict, drawn
+    through the same function, prints a violation's unit on both
+    numbers."""
+    compiled = client.post("/compile", json={"prompt": DEMO,
+                                             "compiler": "regex"}).json()
+    payloads = run_refusal_payloads(client, monkeypatch)
+    routes = {"GET /status": {"body": client.get("/status").json()},
+              "POST /run": {"status": 409, "body": payloads["ue.platform"]}}
+    snaps = page_dom(tmp_path, routes, [
+        {"do": "renderSpec", "payload": compiled},
+        {"do": "startRun", "endpoint": "/run"},
+        {"do": "renderVerdict", "payload": {
+            "ok": False, "warnings": [], "violations": [
+                {"constraint": "envelope.ceiling", "message": "too high",
+                 "actual": 50000, "limit": 45000, "unit": "ft"}]}},
+    ])
+    status = text_of(snaps[1]["statusHtml"])
+    assert status == (
+        "refused — [ue.platform] no engine on this OS: the render half needs "
+        "macOS, or Windows with Unreal Engine 5.5 and the FlightSimBridge "
+        "built (requested frames, limit none (Headless))")
+    assert status.count("ue.platform") == 1
+    assert "REFUSED" not in status
+    assert snaps[1]["runAreaDisplay"] == ""
+    assert snaps[1]["timeouts"] == [] and "GET /runs/" not in "".join(snaps[1]["fetches"])
+    import html
+
+    assert html.unescape(text_of(snaps[2]["verdict"])) == (
+        "REFUSED — by name: [envelope.ceiling] too high (requested 50000 ft, "
+        "limit 45000 ft)")
+    assert snaps[2]["runDisabled"] is True
+    # The busy refusal, the same way.
+    routes["POST /run"] = {"status": 409, "body": payloads["run.busy"]}
+    snap = page_dom(tmp_path, routes, [
+        {"do": "renderSpec", "payload": compiled},
+        {"do": "startRun", "endpoint": "/run"}])[1]
+    assert text_of(snap["statusHtml"]) == (
+        "refused — [run.busy] a run is already rendering (abc123def456); one "
+        "editor instance at a time (requested abc123def456 rendering, limit "
+        "one editor instance at a time)")

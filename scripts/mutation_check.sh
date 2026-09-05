@@ -2630,6 +2630,46 @@ mutate webapp/static/index.html \
     "page round 3 (DOM): a run still in flight is polled again" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 3: one refusal shape for the whole page --------------------
+
+mutate webapp/static/index.html \
+    '  const constraint = r.constraint || r.refused;' \
+    '  const constraint = r.refused;  // MUTATED: the CLI paragraph stands in for the constraint' \
+    "page round 3: a run refusal names its constraint once, never the CLI's paragraph" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '      `${refusalWords(payload, "requested")}</span>`;' \
+    '      `${esc(payload.refused)}</span>`;  // MUTATED: the status prints the raw refused text' \
+    "page round 3 (DOM): the run refusal in the status is the verdict's one shape" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '      v.violations.map(x => `<li>${refusalWords(x, "requested")}</li>`)' \
+    '      v.violations.map(x => `<li>[${x.constraint}] ${x.message}</li>`)  // MUTATED: no value clause' \
+    "page round 3 (DOM): the verdict's violations go through the one refusal shape" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '            "actual": render, "limit": "none (Headless)", "unit": None}' \
+    '            "actual": None, "limit": None, "unit": None}  # MUTATED: the refused choice is dropped' \
+    "page round 3: the platform refusal carries the refused choice against the machine's only choice" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '            "actual": f"{active.run_id} {active.status}", "limit": rule,' \
+    '            "actual": None, "limit": None,  # MUTATED: the active run is not named as the value' \
+    "page round 3: the busy refusal names the active run against the one-at-a-time rule" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '            "actual": aircraft,
+            "limit": ", ".join(buildable),' \
+    '            "actual": None,  # MUTATED: the airframe is only inside the prose
+            "limit": None,' \
+    "page round 3: the mesh refusal carries the airframe against the buildable list" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

@@ -368,11 +368,8 @@ function renderVerdict(v) {
   } else {
     $("verdict").innerHTML =
       `<div class="verdict-refused">REFUSED &mdash; by name:</div><ul>` +
-      v.violations.map(x =>
-        `<li><b>[${x.constraint}]</b> ${x.message}` +
-        (x.actual != null && x.limit != null
-          ? ` (requested ${x.actual}${x.unit ? " " + x.unit : ""}, ` +
-            `limit ${x.limit})` : "") + `</li>`).join("") + `</ul>`;
+      v.violations.map(x => `<li>${refusalWords(x, "requested")}</li>`)
+        .join("") + `</ul>`;
     $("run").disabled = true;
   }
 }
@@ -501,12 +498,13 @@ async function startRun(mayBake, endpoint) {
     return startRun(false, endpoint);
   }
   if (payload.refused) {
+    // Every named refusal /run can answer (ue.platform, aircraft.mesh,
+    // preview.scale, render.host_parity, run.busy, ...) in the ONE
+    // shape the validation verdict uses: the constraint once, the
+    // message, and the refused value against its limit.
     $("status").innerHTML =
-      `<span class="verdict-refused">refused` +
-      (payload.constraint ? ` [${payload.constraint}]` : "") +
-      `: ${payload.refused}` +
-      (payload.reason ? ` — ${payload.reason}` : "") +
-      (payload.message ? ` — ${payload.message}` : "") + `</span>`;
+      `<span class="verdict-refused">refused — ` +
+      `${refusalWords(payload, "requested")}</span>`;
     return;
   }
   activeRun = payload.run_id;
@@ -588,6 +586,25 @@ async function poll() {
 function esc(text) {
   return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// The page's ONE refusal shape -- the validation verdict's, which is
+// core.scenario.validate.Violation's: "[constraint] message (requested
+// X unit, limit Y unit)". Every refusal the server answers carries the
+// same keys (constraint, message, actual, limit, unit; a capture
+// refusal keeps its constraint under "refused"), so a pre-run verdict
+// line, a /run refusal in the status and a mid-run refusal in the
+// capture card read alike. ``verb`` says what the value was: what the
+// user asked for ("requested") or what the run found ("measured"). The
+// value clause appears only when both numbers exist; a message that
+// is missing falls back to the refusal's own text, never to nothing.
+function refusalWords(r, verb) {
+  const constraint = r.constraint || r.refused;
+  const message = r.message || r.reason || r.refused;
+  const unit = r.unit ? ` ${esc(r.unit)}` : "";
+  const value = r.actual != null && r.limit != null
+    ? ` (${verb} ${esc(r.actual)}${unit}, limit ${esc(r.limit)}${unit})` : "";
+  return `<b>[${esc(constraint)}]</b> ${esc(message)}${value}`;
 }
 
 // The page's ONE terminal rule: a run that ended -- done or failed --
@@ -839,14 +856,10 @@ function captureCardHtml(run) {
     // The constraint, the message and -- when the refusal measured one
     // -- the offending value against its limit, in the validation
     // verdict's own shape.
-    const r = run.capture;
-    const unit = r.unit ? ` ${esc(r.unit)}` : "";
-    const value = r.actual != null && r.limit != null
-      ? ` (measured ${r.actual}${unit}, limit ${r.limit}${unit})` : "";
     return `<div class="card"><div id="captureDownloads"></div>` +
       `<b>capture refused</b> — ` +
-      `<span class="verdict-refused">[${esc(r.refused)}] ` +
-      `${esc(r.message)}${value}</span>` +
+      `<span class="verdict-refused">` +
+      `${refusalWords(run.capture, "measured")}</span>` +
       (run.status === "failed"
         ? `<div class="dim">the run ended failed on this refusal; every ` +
           `file it wrote before refusing is listed below</div>`
