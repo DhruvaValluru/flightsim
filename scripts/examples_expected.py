@@ -4,8 +4,8 @@
     .venv/bin/python scripts/examples_expected.py            # print the section
     .venv/bin/python scripts/examples_expected.py --write    # splice it into the doc
 
-Runs, in this process and in this order, the commands an instructor
-runs from the committed tree -- ``flightsim.capture`` over
+Runs, each as its own process and in this order, the commands an
+instructor runs from the committed tree -- ``flightsim.capture`` over
 ``examples/cameras_multi.yaml``, ``cameras_multi_cockpit.yaml``,
 ``cameras_waypoint.yaml`` and ``cameras_refusal.yaml``,
 ``flightsim.verify`` over the first run, ``--against`` over the pair,
@@ -33,11 +33,10 @@ number is stale on the platform it was measured on.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import datetime as dt
-import io
 import platform
 import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -106,19 +105,25 @@ COMMANDS = [
 ]
 
 
-def run_one(main, argv: List[str], root: Path) -> Dict:
-    """Run ``main`` in-process with ``argv`` (paths under ``root``),
-    collecting stdout, the exit code and the wall time."""
+def run_one(module: str, argv: List[str], root: Path) -> Dict:
+    """Run ``python -m <module> <argv>`` (paths under ``root``) as its
+    own process -- the command exactly as the instructor types it, in
+    a fresh interpreter, so the stdout (the JSBSim model-load count
+    included: 14 for cameras_multi from a cold process, fewer inside a
+    process whose envelope and mixture caches are already warm) is the
+    command's own -- collecting stdout, the exit code and the wall
+    time."""
     resolved = [str(root / a) if a.startswith("runs/") else
                 (str(REPO / a) if a.startswith("examples/") else a)
                 for a in argv]
-    buffer = io.StringIO()
     started = time.perf_counter()
-    with contextlib.redirect_stdout(buffer):
-        code = main(resolved)
+    completed = subprocess.run(
+        [sys.executable, "-m", module, *resolved], cwd=str(REPO),
+        capture_output=True, text=True, encoding="utf-8")
     elapsed = time.perf_counter() - started
-    text = _normalise_paths(buffer.getvalue(), root)
-    return {"code": int(code), "seconds": elapsed, "text": text}
+    text = _normalise_paths(completed.stdout, root)
+    return {"code": int(completed.returncode), "seconds": elapsed,
+            "text": text, "stderr": completed.stderr}
 
 
 _RELATIVE = re.compile(r"(?:runs|examples)\\[^\s'\"(),;]*")
@@ -139,10 +144,7 @@ def generate(root: Optional[Path] = None, when: Optional[str] = None) -> List[Di
     """Run every command under ``root`` (a temporary directory by
     default) and return one record per command: label, command, exit
     code, seconds, text."""
-    from flightsim.capture import main as capture_main
-    from flightsim.verify import main as verify_main
-
-    mains = {"capture": capture_main, "verify": verify_main}
+    mains = {"capture": "flightsim.capture", "verify": "flightsim.verify"}
     if root is None:
         root = Path(tempfile.mkdtemp(prefix="examples_expected_"))
     records = []
