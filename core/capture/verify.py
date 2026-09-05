@@ -176,21 +176,92 @@ AWAITING_ENGINE_FRAMES = "awaiting engine frames"
 @dataclass(frozen=True)
 class Check:
     """One named check. ``ok`` is True (PASS), False (FAIL) or None --
-    AWAITING: the check could not be exercised on this machine, which
-    is neither a pass nor a failure and is reported in those words.
-    ``data`` carries structured numbers the page renders (per-camera
-    counts for the engine check); it is informational."""
+    AWAITING (the check could not be exercised on this machine: engine
+    parity without engine frames) or, when ``skipped`` names a reason,
+    SKIPPED (the check had nothing to grade: cross-view consistency with
+    one camera). Neither None state is a pass nor a failure, neither is
+    counted among the checks that ran, and each is reported in its own
+    word.
+
+    ``measured`` / ``tolerance`` / ``unit`` are the number the verdict
+    rests on and the bound it was graded against (the table's MEASURED
+    and TOLERANCE columns; ``measured_text`` / ``tolerance_text``
+    override the cell for a check whose verdict rests on several
+    numbers). ``where`` names the worst offender -- camera, frame index,
+    instant, sample or run -- so a FAIL says where, and a PASS says what
+    its worst case was. ``data`` carries structured numbers the page
+    renders (per-camera counts for the engine check)."""
 
     name: str
     ok: Optional[bool]
     detail: str
     data: Optional[Dict] = None
+    measured: Optional[float] = None
+    tolerance: Optional[float] = None
+    unit: str = ""
+    where: str = ""
+    skipped: Optional[str] = None
+    measured_text: Optional[str] = None
+    tolerance_text: Optional[str] = None
 
     @property
     def status(self) -> str:
         if self.ok is None:
-            return "AWAITING"
+            return "SKIPPED" if self.skipped else "AWAITING"
         return "PASS" if self.ok else "FAIL"
+
+    @property
+    def measured_cell(self) -> str:
+        """The MEASURED column: the override, the number with its unit,
+        or the detail when the check carries no number."""
+        if self.measured_text is not None:
+            return self.measured_text
+        if self.measured is not None:
+            return _number(self.measured, self.unit)
+        return self.detail
+
+    @property
+    def tolerance_cell(self) -> str:
+        if self.tolerance_text is not None:
+            return self.tolerance_text
+        if self.tolerance is not None:
+            return _number(self.tolerance, self.unit)
+        return "-"
+
+    def to_dict(self) -> Dict:
+        """The check as data: every table column, the prose detail, and
+        the structured block -- verify.json's per-check record."""
+        record = {
+            "name": self.name, "ok": self.ok, "status": self.status,
+            "detail": self.detail,
+            "measured": self.measured, "tolerance": self.tolerance,
+            "unit": self.unit, "measured_text": self.measured_cell,
+            "tolerance_text": self.tolerance_cell, "where": self.where,
+            "skipped_reason": self.skipped,
+        }
+        if self.data is not None:
+            record["data"] = self.data
+        return record
+
+
+def _number(value: float, unit: str) -> str:
+    """A measured or tolerance number for the table: full precision
+    where it is small (a 1e-09 s tolerance stays 1e-09), four decimals
+    otherwise, the unit appended."""
+    value = float(value)
+    if value == 0.0:
+        text = "0"
+    elif abs(value) < 1e-3 or abs(value) >= 1e6:
+        text = f"{value:.3g}"
+    else:
+        text = f"{value:.4f}".rstrip("0").rstrip(".")
+        if "." not in text and abs(value) < 1e3:
+            text = f"{value:.1f}" if value != int(value) else text
+    return f"{text} {unit}".strip()
+
+
+#: The verification table's column heads, in order.
+TABLE_COLUMNS = ("CHECK", "STATUS", "MEASURED", "TOLERANCE", "WHERE")
 
 
 @dataclass
@@ -199,9 +270,9 @@ class VerificationReport:
 
     @property
     def ok(self) -> bool:
-        """Every check that RAN passed. An awaiting check (ok None) is
-        excluded on purpose: it neither passes nor fails, and the
-        report says so in render()."""
+        """Every check that RAN passed. An awaiting or skipped check (ok
+        None) is excluded on purpose: it neither passes nor fails, and
+        the report says so in render()."""
         return all(c.ok is not False for c in self.checks)
 
     @property
@@ -209,24 +280,97 @@ class VerificationReport:
         return sum(1 for c in self.checks if c.ok is True)
 
     @property
-    def awaiting(self) -> List[Check]:
-        return [c for c in self.checks if c.ok is None]
+    def failed(self) -> List[Check]:
+        return [c for c in self.checks if c.ok is False]
 
-    def add(self, name: str, ok: Optional[bool], detail: str) -> None:
-        self.checks.append(Check(name, ok, detail))
+    @property
+    def awaiting(self) -> List[Check]:
+        return [c for c in self.checks if c.ok is None and not c.skipped]
+
+    @property
+    def skipped(self) -> List[Check]:
+        """Checks that had nothing to grade (ok None with a reason):
+        never counted as passed, never counted as ran."""
+        return [c for c in self.checks if c.ok is None and c.skipped]
+
+    @property
+    def ran(self) -> int:
+        return len(self.checks) - len(self.awaiting) - len(self.skipped)
+
+    def add(self, name: str, ok: Optional[bool], detail: str, **fields) -> None:
+        self.checks.append(Check(name, ok, detail, **fields))
+
+    def summary(self) -> str:
+        """"verification PASSED (5/5 checks; 1 awaiting engine frames:
+        engine_parity)" -- skipped checks named with their reason and
+        counted in neither number."""
+        text = (f"verification {'PASSED' if self.ok else 'FAILED'} "
+                f"({self.passed}/{self.ran} checks")
+        if self.failed:
+            text += "; FAILED: " + ", ".join(c.name for c in self.failed)
+        if self.skipped:
+            text += (f"; {len(self.skipped)} skipped: "
+                     + ", ".join(f"{c.name} ({c.skipped})"
+                                 for c in self.skipped))
+        if self.awaiting:
+            text += (f"; {len(self.awaiting)} {AWAITING_ENGINE_FRAMES}: "
+                     + ", ".join(c.name for c in self.awaiting))
+        return text + ")"
+
+    def table_rows(self) -> List[Tuple[str, str, str, str, str]]:
+        """One (check, status, measured, tolerance, where) row per
+        check, the same cells the JSON carries."""
+        rows = []
+        for c in self.checks:
+            if c.ok is None:
+                rows.append((c.name, c.status, "-", "-",
+                             c.skipped or c.detail))
+            else:
+                rows.append((c.name, c.status, c.measured_cell,
+                             c.tolerance_cell, c.where or "-"))
+        return rows
+
+    def table(self, indent: str = "  ") -> str:
+        """The fixed-width verification table: CHECK, STATUS, MEASURED,
+        TOLERANCE, WHERE; one row per check, columns padded to the
+        widest cell."""
+        rows = [TABLE_COLUMNS] + self.table_rows()
+        widths = [max(len(str(r[i])) for r in rows) for i in range(4)]
+        lines = []
+        for row in rows:
+            cells = [f"{str(row[i]):<{widths[i]}}" for i in range(4)]
+            lines.append((indent + "  ".join(cells) + "  " + str(row[4]))
+                         .rstrip())
+        return "\n".join(lines)
 
     def render(self) -> str:
-        lines = []
+        """The table, then one ``[STATUS] name: detail`` line per check
+        (the prose the table's numbers came from -- the failing frames
+        by name on a FAIL), then the summary line."""
+        lines = [self.table()]
+        lines.append("  detail:")
         for c in self.checks:
             lines.append(f"  [{c.status}] {c.name}: {c.detail}")
-        ran = len(self.checks) - len(self.awaiting)
-        summary = (f"verification {'PASSED' if self.ok else 'FAILED'} "
-                   f"({self.passed}/{ran} checks")
-        if self.awaiting:
-            summary += (f"; {len(self.awaiting)} {AWAITING_ENGINE_FRAMES}: "
-                        + ", ".join(c.name for c in self.awaiting))
-        lines.append(summary + ")")
+        lines.append(self.summary())
         return "\n".join(lines)
+
+    def to_dict(self) -> Dict:
+        """verify.json, the page and --json all read THIS: the report as
+        data. ``ok`` is decided by the checks that ran, exactly as the
+        property is; awaiting and skipped checks are listed by name and
+        counted in neither ``passed`` nor ``ran``."""
+        return {
+            "ok": self.ok,
+            "checks": [c.to_dict() for c in self.checks],
+            "passed": self.passed,
+            "ran": self.ran,
+            "failed": [c.name for c in self.failed],
+            "awaiting": [c.name for c in self.awaiting],
+            "skipped": [{"name": c.name, "reason": c.skipped}
+                        for c in self.skipped],
+            "summary": self.summary(),
+            "table": self.table_rows(),
+        }
 
 
 # -- independent geometry ------------------------------------------------
@@ -305,11 +449,15 @@ def verify_geometry(manifest: Dict,
     """Check 2: recovery of the aircraft through pose + intrinsics."""
     aim_modes = _aim_modes(manifest)
     worst_gap = 0.0
+    worst_at = None
     behind = 0
+    behind_at = None
     out_of_frame = 0
+    out_at = None
     frames = manifest.get("frames", [])
     for record in frames:
         point = _aircraft_point(record)
+        here = _frame_words(record)
         u_q, v_q, z_q = project_point(
             record, point, axes_from_quat(record["quaternion_wxyz"]))
         u_e, v_e, z_e = project_point(
@@ -322,23 +470,47 @@ def verify_geometry(manifest: Dict,
             and abs(z_q) < 10.0)
         if z_q <= 0 and not cockpit_origin:
             behind += 1
+            behind_at = behind_at or here
             continue
         if math.isfinite(u_q) and math.isfinite(u_e):
-            worst_gap = max(worst_gap, math.hypot(u_q - u_e, v_q - v_e))
+            gap = math.hypot(u_q - u_e, v_q - v_e)
+            if worst_at is None or gap > worst_gap:
+                worst_gap, worst_at = gap, here
         if aim_modes.get(record["camera_id"]) == "aircraft":
             # An aircraft-aimed camera that cannot see the aircraft has
             # wrong geometry somewhere.
             if not (0.0 <= u_q <= record["width_px"]
                     and 0.0 <= v_q <= record["height_px"]):
                 out_of_frame += 1
+                out_at = out_at or (f"{here} at ({u_q:.1f}, {v_q:.1f}) px "
+                                    f"of {record['width_px']}x"
+                                    f"{record['height_px']}")
     ok = (behind == 0 and out_of_frame == 0 and worst_gap <= tol_px
           and bool(frames))
+    where = (f"worst {worst_at}" if worst_at else "no frames")
+    if behind:
+        where += f"; first behind the camera: {behind_at}"
+    if out_of_frame:
+        where += f"; first out of frame: {out_at}"
     return Check(
         "geometry_recovery", ok,
         f"{len(frames)} frames; quaternion-vs-euler reprojection gap "
-        f"{worst_gap:.4f} px (tol {tol_px}); {behind} aircraft behind "
-        f"camera; {out_of_frame} aimed frames without the aircraft in "
-        f"frame")
+        f"{worst_gap:.4f} px (tol {tol_px}) at {worst_at or 'no frame'}; "
+        f"{behind} aircraft behind camera"
+        + (f" (first {behind_at})" if behind else "")
+        + f"; {out_of_frame} aimed frames without the aircraft in frame"
+        + (f" (first {out_at})" if out_of_frame else ""),
+        measured=worst_gap, tolerance=tol_px, unit="px", where=where,
+        data={"frames": len(frames), "behind": behind,
+              "out_of_frame": out_of_frame, "worst_frame": worst_at,
+              "first_behind": behind_at, "first_out_of_frame": out_at})
+
+
+def _frame_words(record: Dict) -> str:
+    """"chase0 #3 t=1.508 s": one frame, named the way the manifest and
+    the PNG name it."""
+    return (f"{record['camera_id']} #{int(record['index'])} "
+            f"t={float(record['t_s']):.3f} s")
 
 
 def _closest_point_between_rays(o1, d1, o2, d2):
@@ -384,7 +556,8 @@ def verify_triangulation(manifest: Dict,
         by_sample.setdefault(record["sample_index"], []).append(record)
     pairs = 0
     worst = 0.0
-    for records in by_sample.values():
+    worst_at = None
+    for sample_index, records in sorted(by_sample.items()):
         if len(records) < 2:
             continue
         a, b = records[0], records[1]
@@ -407,50 +580,84 @@ def verify_triangulation(manifest: Dict,
         if recovered is None:
             continue          # parallel rays carry no depth information
         pairs += 1
-        worst = max(worst, math.dist(recovered, point_a),
+        error = max(math.dist(recovered, point_a),
                     math.dist(point_a, point_b))
+        if worst_at is None or error > worst:
+            worst = error
+            worst_at = (f"sample {int(sample_index)} t={float(a['t_s']):.3f} s "
+                        f"({a['camera_id']} #{int(a['index'])} with "
+                        f"{b['camera_id']} #{int(b['index'])})")
+    cameras = len(manifest.get("cameras", []))
     if pairs == 0:
         # A single camera (or disjoint schedules) has nothing to cross-
-        # check: report NOT EXERCISED rather than a false pass or a
-        # false failure -- the detail says exactly what was not
-        # verified, and the phase demo runs two shared-schedule cameras
-        # so the check is exercised where the claim is made.
-        return Check("cross_view_consistency", True,
-                     "NOT EXERCISED: no instant is seen by two cameras "
-                     "(single camera or disjoint schedules); capture "
-                     "two cameras on a shared schedule to verify "
-                     "cross-view consistency")
+        # check: SKIPPED, with the reason, rather than a false pass or a
+        # false failure -- ok None, counted in neither passed nor ran;
+        # the phase demo runs two shared-schedule cameras so the check
+        # is exercised where the claim is made.
+        reason = ("single camera" if cameras < 2
+                  else "disjoint schedules: no instant is seen by two "
+                       "cameras")
+        return Check("cross_view_consistency", None,
+                     f"NOT EXERCISED ({reason}): no instant is seen by "
+                     f"two cameras; capture two cameras on a shared "
+                     f"schedule to verify cross-view consistency",
+                     skipped=reason, unit="m", tolerance=tol_m,
+                     data={"pairs": 0, "cameras": cameras})
     return Check(
         "cross_view_consistency", worst <= tol_m,
         f"{pairs} two-view instants; worst triangulation error "
-        f"{worst:.4f} m (tol {tol_m})")
+        f"{worst:.4f} m (tol {tol_m}) at {worst_at}",
+        measured=worst, tolerance=tol_m, unit="m",
+        where=f"{pairs} two-view instants; worst {worst_at}",
+        data={"pairs": pairs, "cameras": cameras, "worst_at": worst_at})
 
 
 def verify_counts(manifest: Dict) -> Check:
     """Check 4: per-camera frame records number exactly the declared
     capture count, densely indexed from zero."""
     problems = []
+    per_camera = []
+    counts = {}
     for block in manifest.get("cameras", []):
         camera_id = block["camera_id"]
         declared = int(block["capture_count"])
         indices = sorted(r["index"] for r in manifest.get("frames", [])
                          if r["camera_id"] == camera_id)
+        counts[camera_id] = {"declared": declared, "found": len(indices)}
+        per_camera.append(f"{camera_id} {len(indices)}/{declared}")
         # One condition carries the whole guarantee (dense 0..declared-1
         # covers both a wrong count and a gap), so its mutation guard is
         # load-bearing rather than shadowed by a sibling check.
         if indices != list(range(declared)):
+            missing = sorted(set(range(declared)) - set(indices))
             problems.append(f"{camera_id}: {len(indices)} frames against "
                             f"a declared {declared}, or gaps in the "
-                            f"index sequence")
+                            f"index sequence"
+                            + (f" (missing index "
+                               f"{', '.join(str(i) for i in missing[:4])})"
+                               if missing else ""))
+    found = sum(c["found"] for c in counts.values())
+    declared_total = sum(c["declared"] for c in counts.values())
     return Check("count_exactness", not problems,
                  "; ".join(problems) if problems
                  else f"{len(manifest.get('cameras', []))} camera(s), "
-                      f"every declared count met exactly")
+                      f"every declared count met exactly",
+                 measured=float(found), tolerance=float(declared_total),
+                 unit="frames",
+                 measured_text=(f"{found} frames = "
+                                + " + ".join(str(c["found"])
+                                             for c in counts.values())
+                                if counts else "0 frames"),
+                 tolerance_text=f"exactly {declared_total}",
+                 where=", ".join(per_camera) or "no cameras",
+                 data={"cameras": counts})
 
 
 def verify_alignment(manifest_a: Dict, manifest_b: Dict,
-                     tol_s: float = TIME_TOL_S) -> Check:
-    """Check 1: two runs of the same simulation align frame-for-frame."""
+                     tol_s: float = TIME_TOL_S, label_a: str = "this run",
+                     label_b: str = "the other run") -> Check:
+    """Check 1: two runs of the same simulation align frame-for-frame.
+    ``label_a`` / ``label_b`` name the runs in the offender text."""
     problems = []
     if manifest_a.get("simulation_digest") != \
             manifest_b.get("simulation_digest"):
@@ -463,18 +670,55 @@ def verify_alignment(manifest_a: Dict, manifest_b: Dict,
                       for r in manifest_a.get("frames", [])})
     times_b = sorted({round(r["t_s"], 9)
                       for r in manifest_b.get("frames", [])})
+    worst = 0.0
+    worst_at = None
+    where = None
     if len(times_a) != len(times_b):
-        problems.append(f"{len(times_a)} capture instants against "
-                        f"{len(times_b)}")
+        only_a = sorted(set(times_a) - set(times_b))
+        only_b = sorted(set(times_b) - set(times_a))
+        extra = (f"; only in {label_a}: t="
+                 + ", ".join(f"{t:.6f}" for t in only_a[:3]) + " s"
+                 if only_a else "") + (
+                 f"; only in {label_b}: t="
+                 + ", ".join(f"{t:.6f}" for t in only_b[:3]) + " s"
+                 if only_b else "")
+        problems.append(f"{len(times_a)} capture instants in {label_a} "
+                        f"against {len(times_b)} in {label_b}{extra}")
+        where = (f"{len(times_a)} instants in {label_a} vs {len(times_b)} "
+                 f"in {label_b}{extra}")
+        worst = math.inf
     else:
-        worst = max((abs(x - y) for x, y in zip(times_a, times_b)),
-                    default=0.0)
+        for x, y in zip(times_a, times_b):
+            gap = abs(x - y)
+            if worst_at is None or gap > worst:
+                worst, worst_at = gap, (x, y)
         if worst > tol_s:
-            problems.append(f"capture times diverge by {worst:g} s")
+            problems.append(f"capture times diverge by {worst:g} s "
+                            f"(t={worst_at[0]:.6f} s in {label_a} against "
+                            f"{worst_at[1]:.6f} s in {label_b})")
+        where = (f"{len(times_a)} instants in both runs; worst gap "
+                 f"{worst:g} s"
+                 + (f" at t={worst_at[0]:.6f} s ({label_a}) vs "
+                    f"{worst_at[1]:.6f} s ({label_b})"
+                    if worst_at and worst > 0 else ""))
     return Check("temporal_alignment", not problems,
                  "; ".join(problems) if problems
                  else f"{len(times_a)} capture instants align exactly "
-                      f"across the two camera sets")
+                      f"across the two camera sets (worst gap {worst:g} s, "
+                      f"tol {tol_s:g})",
+                 measured=worst, tolerance=tol_s, unit="s",
+                 measured_text=(f"{worst:g} s" if math.isfinite(worst)
+                                else f"{len(times_a)} vs {len(times_b)} "
+                                     f"instants"),
+                 where=where,
+                 data={"instants": [len(times_a), len(times_b)],
+                       "runs": [label_a, label_b],
+                       "simulation_digests_equal":
+                           manifest_a.get("simulation_digest")
+                           == manifest_b.get("simulation_digest"),
+                       "output_digests_equal":
+                           manifest_a.get("output_digest")
+                           == manifest_b.get("output_digest")})
 
 
 def _angle_gap_deg(a: float, b: float) -> float:
@@ -1019,6 +1263,11 @@ def verify_engine_parity(run_dir, manifest: Dict,
                            "label_contrast_min": ENGINE_LABEL_CONTRAST_MIN}}
     if worst["label_contrast"] == float("inf"):
         worst["label_contrast"] = None
+    engine_measured = (f"pos {worst['position_m']:.3f} m, ang "
+                       f"{worst['angle_deg']:.3f} deg, t {worst['time_s']:.1e} "
+                       f"s, px {worst['reprojection_px']:.2f}")
+    engine_tolerance = (f"{pos_tol_m} m, {ang_tol_deg} deg, "
+                        f"{time_tol_used:.0e} s, {px_tol} px")
     if awaiting and not problems and frames_checked == 0:
         return Check(
             ENGINE_PARITY_CHECK, None,
@@ -1027,7 +1276,8 @@ def verify_engine_parity(run_dir, manifest: Dict,
             + " (the engine pass has not run on this machine; choose "
               "'Render frames and clip' or --render frames where the "
               "engine exists)",
-            data=data)
+            data=data, measured_text="-", tolerance_text=engine_tolerance,
+            where="no render.json for camera " + ", ".join(awaiting))
     if awaiting:
         problems.append("no render.json for camera " + ", ".join(awaiting)
                         + " while other cameras rendered")
@@ -1070,7 +1320,14 @@ def verify_engine_parity(run_dir, manifest: Dict,
             else "")
         if not problems:
             detail = "no frames to verify"
-    return Check(ENGINE_PARITY_CHECK, ok, detail, data=data)
+    verified_total = sum(int(c["verified"]) for c in per_camera.values())
+    where = (f"{verified_total} of {frames_checked} frames verified across "
+             f"{len(camera_ids)} camera(s)")
+    if problems:
+        where += f"; first: {problems[0]}"
+    return Check(ENGINE_PARITY_CHECK, ok, detail, data=data,
+                 measured_text=engine_measured,
+                 tolerance_text=engine_tolerance, where=where)
 
 
 def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
@@ -1078,31 +1335,51 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
 
     ``run_dir`` holds capture_manifest.json and, when the engine pass
     ran, ``frames/<camera_id>/`` with the PNGs and render.json."""
-    from .manifest import read_capture_manifest
+    from .manifest import MANIFEST_VERSION, read_capture_manifest
 
     report = VerificationReport()
     path = Path(run_dir) / "capture_manifest.json"
     if not path.is_file():
         report.add("manifest_present", False,
-                   f"{path} does not exist; nothing to verify")
+                   f"{path} does not exist; nothing to verify",
+                   measured_text="absent", tolerance_text="present",
+                   where=str(path))
         return report
     try:
         manifest = read_capture_manifest(path)
     except ValueError as exc:
-        report.add("manifest_version", False, str(exc))
+        report.add("manifest_version", False, str(exc),
+                   measured_text="unsupported",
+                   tolerance_text=f"= {MANIFEST_VERSION}", where=str(path))
         return report
     report.add("manifest_version", True,
                f"manifest_version {manifest['manifest_version']}, "
-               f"spec {manifest['spec_digest'][:16]}")
+               f"spec {manifest['spec_digest'][:16]}",
+               measured=float(manifest["manifest_version"]),
+               tolerance=float(MANIFEST_VERSION),
+               measured_text=f"version {manifest['manifest_version']}",
+               tolerance_text=f"= {MANIFEST_VERSION}",
+               where=f"spec {manifest['spec_digest'][:16]}")
 
-    finite = True
-    for record in manifest.get("frames", []):
+    non_finite = 0
+    first_bad = None
+    frames = manifest.get("frames", [])
+    for record in frames:
         for key in ("t_s", "position_north_m", "position_east_m",
                     "position_alt_m", "fx_px", "fy_px"):
             if not math.isfinite(record[key]):
-                finite = False
-    report.add("fields_finite", finite,
-               f"{len(manifest.get('frames', []))} frame records checked")
+                non_finite += 1
+                first_bad = first_bad or f"{_frame_words(record)} {key}"
+    report.add("fields_finite", non_finite == 0,
+               f"{len(frames)} frame records checked, {non_finite} "
+               f"non-finite field(s)"
+               + (f" (first {first_bad})" if first_bad else ""),
+               measured=float(non_finite), tolerance=0.0, unit="fields",
+               measured_text=f"{non_finite} non-finite of {len(frames)} "
+                             f"records",
+               tolerance_text="0 non-finite",
+               where=(f"first {first_bad}" if first_bad
+                      else f"{len(frames)} records, 6 fields each"))
 
     report.checks.append(verify_geometry(manifest))
     report.checks.append(verify_triangulation(manifest))
@@ -1112,5 +1389,7 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     if other_run_dir is not None:
         other = read_capture_manifest(
             Path(other_run_dir) / "capture_manifest.json")
-        report.checks.append(verify_alignment(manifest, other))
+        report.checks.append(verify_alignment(
+            manifest, other, label_a=Path(run_dir).name or str(run_dir),
+            label_b=Path(other_run_dir).name or str(other_run_dir)))
     return report

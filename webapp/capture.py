@@ -353,28 +353,25 @@ def capture_run(spec, out: Path, scene: Dict,
 
 
 def verification_verdict(verification) -> Dict:
-    """verify.json's content: the verifier's own checks as run. A check's
-    ``ok`` is True, False or None (AWAITING -- the engine-parity check
-    with no engine frames to grade), and the report's ``ok`` is decided
-    by the checks that ran, exactly as VerificationReport.ok is."""
-    return {
-        "ok": verification.ok,
-        "checks": [{"name": c.name, "ok": c.ok, "status": c.status,
-                    "detail": c.detail,
-                    **({"data": c.data} if c.data is not None else {})}
-                   for c in verification.checks],
-        "passed": verification.passed,
-        "ran": len(verification.checks) - len(verification.awaiting),
-        "awaiting": [c.name for c in verification.awaiting],
-    }
+    """verify.json's content: the verifier's own report as data
+    (VerificationReport.to_dict -- the ONE source the file, the page,
+    flightsim.verify and --json all read). A check's ``ok`` is True,
+    False or None (AWAITING -- the engine-parity check with no engine
+    frames to grade -- or SKIPPED, with its reason: nothing to grade),
+    and the report's ``ok`` is decided by the checks that ran, exactly
+    as VerificationReport.ok is."""
+    return verification.to_dict()
 
 
 def verification_line(verification) -> str:
-    """The status line: PASSED/FAILED over the checks that ran, and the
-    awaiting ones named as such -- never counted as passed."""
-    ran = len(verification.checks) - len(verification.awaiting)
+    """The status line: PASSED/FAILED over the checks that ran, the
+    skipped ones named with their reason and the awaiting ones named as
+    such -- neither counted as passed nor as ran."""
     line = (f"verification {'PASSED' if verification.ok else 'FAILED'} "
-            f"({verification.passed}/{ran} checks")
+            f"({verification.passed}/{verification.ran} checks")
+    if verification.skipped:
+        line += ("; " + ", ".join(f"{c.name} skipped ({c.skipped})"
+                                  for c in verification.skipped))
     if verification.awaiting:
         line += (f"; {', '.join(c.name for c in verification.awaiting)} "
                  f"awaiting engine frames")

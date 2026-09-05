@@ -1789,6 +1789,40 @@ mutate core/capture/preview.py \
     "preview round 3: the overlay render time is measured per frame and graded" \
     tests/test_camera_preview.py || failures=$((failures+1))
 
+# -- Camera Phase 1, package I, commands round 1: the verifier as a table
+# -- with a number, a tolerance and a WHERE per check; SKIPPED is neither
+# -- passed nor ran; the JSBSim console is routed, counted, never lost --
+
+mutate core/capture/verify.py \
+    '        return Check("cross_view_consistency", None,' \
+    '        return Check("cross_view_consistency", True,  # MUTATED: nothing to grade counted as a pass' \
+    "commands round 1: a single-camera cross-view check is SKIPPED, never a pass" \
+    tests/test_camera_verify.py tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        return len(self.checks) - len(self.awaiting) - len(self.skipped)' \
+    '        return len(self.checks) - len(self.awaiting)  # MUTATED: a skipped check counted as ran' \
+    "commands round 1: a skipped check is counted in neither passed nor ran" \
+    tests/test_camera_verify.py tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if worst_at is None or gap > worst_gap:' \
+    '            if worst_at is None:  # MUTATED: the worst frame is never tracked' \
+    "commands round 1: geometry recovery names the worst frame by camera, index and instant" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if worst_at is None or error > worst:' \
+    '        if worst_at is None:  # MUTATED: the worst two-view instant is never tracked' \
+    "commands round 1: cross-view consistency names the worst sample and its two frames" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        only_b = sorted(set(times_b) - set(times_a))' \
+    '        only_b = []  # MUTATED: the run with the extra instant is not named' \
+    "commands round 1: temporal alignment names the run holding the extra instant" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

@@ -135,7 +135,10 @@ def test_triangulation_reports_not_exercised_for_one_camera():
     cross-checked and the report says so in words."""
     manifest = manifest_for(spec_with(counted("chase", "solo")))
     check = verify_triangulation(manifest)
-    assert check.ok
+    # SKIPPED, not a pass: ok is None, the reason is named, and the
+    # report counts it in neither passed nor ran.
+    assert check.ok is None
+    assert check.status == "SKIPPED" and check.skipped == "single camera"
     assert "NOT EXERCISED" in check.detail
 
 
@@ -741,3 +744,147 @@ def test_engine_parity_fails_when_only_some_cameras_rendered(tmp_path):
     check = verify_engine_parity(tmp_path, manifest)
     assert check.ok is False
     assert "no render.json for camera tower0" in check.detail
+
+
+# -- the report as a table and as data: every check carries its number,
+# -- its tolerance and WHERE it was worst; SKIPPED is neither pass nor ran
+
+def test_every_check_carries_measured_tolerance_and_where(tmp_path):
+    """The table's cells and the JSON's fields are the same numbers: a
+    FAIL says where, a PASS says what its worst case was."""
+    write_capture_manifest(two_camera_manifest(), tmp_path)
+    report = verify_run(tmp_path)
+    data = report.to_dict()
+    assert data["ok"] is True and data["ran"] == 5 and data["passed"] == 5
+    assert data["skipped"] == [] and data["awaiting"] == ["engine_parity"]
+    for check in data["checks"]:
+        for key in ("measured_text", "tolerance_text", "where", "status",
+                    "skipped_reason"):
+            assert key in check, (check["name"], key)
+    by_name = {c["name"]: c for c in data["checks"]}
+    geometry = by_name["geometry_recovery"]
+    assert geometry["unit"] == "px" and geometry["tolerance"] == 0.5
+    assert geometry["measured"] <= 0.5
+    assert geometry["where"].startswith("worst ") and " #" in geometry["where"]
+    cross = by_name["cross_view_consistency"]
+    assert cross["unit"] == "m" and cross["tolerance"] == 0.5
+    assert "15 two-view instants; worst sample" in cross["where"]
+    counts = by_name["count_exactness"]
+    assert counts["measured_text"] == "30 frames = 15 + 15"
+    assert counts["tolerance_text"] == "exactly 30"
+    assert counts["where"] == "chase0 15/15, tower0 15/15"
+    # The rendered table has one row per check with the same cells.
+    rows = report.table_rows()
+    assert [r[0] for r in rows] == [c["name"] for c in data["checks"]]
+    assert data["table"] == rows
+    table = report.table().splitlines()
+    assert table[0].split() == ["CHECK", "STATUS", "MEASURED", "TOLERANCE",
+                                "WHERE"]
+    assert len(table) == 1 + len(data["checks"])
+    for line, (name, status, measured, tolerance, where) in zip(table[1:],
+                                                                rows):
+        assert line.startswith(f"  {name}")
+        assert f"  {status}  " in line
+        assert measured in line and tolerance in line and where in line
+    # The detail lines and the summary follow the table.
+    rendered = report.render()
+    assert rendered.index("CHECK") < rendered.index("  detail:") \
+        < rendered.index("[PASS] manifest_version:") \
+        < rendered.index("verification PASSED (5/5 checks")
+
+
+def test_a_bad_quaternion_is_localised_by_camera_frame_and_instant():
+    bad = two_camera_manifest()
+    record = bad["frames"][5]
+    record["quaternion_wxyz"] = list(
+        euler_to_quat(0.0, record["pitch_deg"] + 5.0, record["yaw_deg"]))
+    check = verify_geometry(bad)
+    assert check.ok is False
+    expected = (f"{record['camera_id']} #{record['index']} "
+                f"t={record['t_s']:.3f} s")
+    assert check.where == f"worst {expected}", check.where
+    assert expected in check.detail
+    assert check.measured > 0.5 and check.tolerance == 0.5
+    assert check.data["worst_frame"] == expected
+    # The table row says where, not only how much.
+    from core.capture.verify import VerificationReport
+
+    report = VerificationReport([check])
+    row = report.table().splitlines()[1]
+    assert "FAIL" in row and expected in row
+
+
+def test_a_misattributed_state_is_localised_by_sample_and_cameras():
+    bad = two_camera_manifest()
+    for record in bad["frames"]:
+        if record["camera_id"] == "tower0":
+            record["aircraft"]["north_m"] += 5.0
+    check = verify_triangulation(bad)
+    assert check.ok is False
+    # A 5 m misattribution triangulates to at least 5 m of error (the
+    # rays no longer meet at the recorded point); the number is measured.
+    assert 5.0 <= check.measured < 6.0, check.measured
+    assert check.where.startswith("15 two-view instants; worst sample ")
+    assert "chase0 #" in check.where and "with tower0 #" in check.where
+    assert check.data["worst_at"] in check.where
+    # ONE misattributed record: the offender is that sample, by name.
+    one = two_camera_manifest()
+    target = [r for r in one["frames"] if r["camera_id"] == "tower0"][7]
+    target["aircraft"]["north_m"] += 5.0
+    check = verify_triangulation(one)
+    assert check.ok is False
+    assert (f"worst sample {target['sample_index']} t={target['t_s']:.3f} s"
+            in check.where)
+    assert "with tower0 #7)" in check.where
+
+
+def test_a_skipped_check_is_neither_passed_nor_ran(tmp_path):
+    """One camera: cross-view consistency is SKIPPED with its reason --
+    ok None, out of both tallies, named in the summary and the JSON."""
+    write_capture_manifest(
+        manifest_for(spec_with(counted("chase", "solo"))), tmp_path)
+    report = verify_run(tmp_path)
+    assert report.ok
+    assert [c.name for c in report.skipped] == ["cross_view_consistency"]
+    assert report.skipped[0].status == "SKIPPED"
+    assert report.passed == 4 and report.ran == 4
+    assert report.summary() == (
+        "verification PASSED (4/4 checks; 1 skipped: cross_view_consistency "
+        "(single camera); 1 awaiting engine frames: engine_parity)")
+    data = report.to_dict()
+    assert data["skipped"] == [{"name": "cross_view_consistency",
+                                "reason": "single camera"}]
+    assert data["passed"] == 4 and data["ran"] == 4
+    assert "[SKIPPED] cross_view_consistency: NOT EXERCISED (single camera)" \
+        in report.render()
+    row = [r for r in report.table_rows()
+           if r[0] == "cross_view_consistency"][0]
+    assert row[1] == "SKIPPED" and row[4] == "single camera"
+
+
+def test_alignment_names_the_run_with_the_extra_instant_and_the_gap():
+    columns = make_columns(duration_s=14.0)
+    a = manifest_for(spec_with(counted("chase", "chase0")), columns)
+    c = manifest_for(spec_with(counted("chase", "chase0")), columns)
+    c["frames"][3]["t_s"] += 0.05
+    check = verify_alignment(a, c, label_a="demo", label_b="demo_b")
+    assert check.ok is False
+    assert check.unit == "s" and check.tolerance == 1e-9
+    assert check.measured == pytest.approx(0.05, abs=1e-6)
+    t3 = a["frames"][3]["t_s"]
+    assert (f"t={t3:.6f} s in demo against {t3 + 0.05:.6f} s in demo_b"
+            in check.detail)
+    assert "worst gap 0.05 s at t=" in check.where
+    # A run with an EXTRA instant is named, with the instant.
+    d = manifest_for(spec_with(counted("chase", "chase0")), columns)
+    d["frames"].append(dict(d["frames"][-1], index=15, t_s=13.37))
+    check = verify_alignment(a, d, label_a="demo", label_b="demo_b")
+    assert check.ok is False
+    assert check.measured_cell == "15 vs 16 instants"
+    assert "16 in demo_b; only in demo_b: t=13.370000 s" in check.where
+    assert check.data["instants"] == [15, 16]
+    good = verify_alignment(a, c := manifest_for(
+        spec_with(counted("tower", "tower0")), columns),
+        label_a="demo", label_b="demo_b")
+    assert good.ok and good.measured == 0.0
+    assert good.where == "15 instants in both runs; worst gap 0 s"

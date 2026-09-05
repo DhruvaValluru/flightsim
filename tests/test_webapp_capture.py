@@ -110,7 +110,15 @@ def test_the_page_shows_the_verifier_s_own_report(captured, client):
     assert engine["ok"] is None and engine["status"] == "AWAITING"
     assert "awaiting engine frames" in engine["detail"]
     assert verification["awaiting"] == ["engine_parity"]
-    assert verification["passed"] == 5 and verification["ran"] == 5
+    # One camera: cross-view consistency had nothing to grade and is
+    # SKIPPED with its reason -- counted in neither passed nor ran, so
+    # the tally is 4/4, never a 5/5 the check did not earn.
+    assert verification["passed"] == 4 and verification["ran"] == 4
+    assert verification["skipped"] == [
+        {"name": "cross_view_consistency", "reason": "single camera"}]
+    cross = verification["checks"][3]
+    assert cross["ok"] is None and cross["status"] == "SKIPPED"
+    assert "4/4 checks" in verification["summary"]
 
     on_disk = json.loads(
         (manager.out_root / run_id / "capture" / "verify.json")
