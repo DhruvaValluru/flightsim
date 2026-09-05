@@ -28,6 +28,7 @@ from typing import Dict, Optional
 import jsbsim
 
 from . import aircraft as ac
+from .console import captured_console
 from .errors import SimulationError, TrimStateError
 from .properties import PropertyAccess
 from .state import REQUIRED_PROPERTIES, SURFACE_PROPERTIES, AircraftState
@@ -41,10 +42,12 @@ DEFAULT_RATE_HZ = 120.0
 
 # Note: JSBSim prints a three-line startup banner to stdout from C++ on every
 # FGFDMExec construction. Measured on the pinned build, FGJSBBase.debug_lvl = 0
-# does NOT suppress it (it only gates later diagnostics), so silencing it would
-# require redirecting the OS-level file descriptor around construction. Left
-# alone for now rather than shipping a suppression that does not suppress; it
-# matters only for sweep log volume, which Phase 7 will address.
+# does NOT suppress it (it only gates later diagnostics), so the construction
+# below runs inside core.fdm.console.captured_console(): while a caller has
+# named a log file (jsbsim_console(path), as the capture CLI does), file
+# descriptors 1 and 2 are redirected to it for exactly that call and the
+# banner is routed there, counted, never lost; with no sink active nothing
+# changes and the banner reaches the terminal as before.
 
 #: Initial conditions are order-dependent. Lower rank is applied first.
 #:
@@ -150,16 +153,22 @@ class FlightDynamics:
         #: the manifest can name both the stock model and the derivation.
         self.derived = derived
 
-        self._exec = jsbsim.FGFDMExec(root_dir=str(self.model.root_dir))
-        self._exec.set_debug_level(debug_level)
-        # A derived aircraft lives outside the JSBSim data root, so engines and
-        # shared systems still have to be resolved against the stock tree.
-        if engine_path is not None:
-            self._exec.set_engine_path(str(engine_path))
-        if systems_path is not None:
-            self._exec.set_systems_path(str(systems_path))
+        # The banner is emitted by the constructor itself, before
+        # set_debug_level can run: the whole construct-and-load is routed
+        # through the console sink when one is active (see the note above).
+        with captured_console():
+            self._exec = jsbsim.FGFDMExec(root_dir=str(self.model.root_dir))
+            self._exec.set_debug_level(debug_level)
+            # A derived aircraft lives outside the JSBSim data root, so
+            # engines and shared systems still have to be resolved against
+            # the stock tree.
+            if engine_path is not None:
+                self._exec.set_engine_path(str(engine_path))
+            if systems_path is not None:
+                self._exec.set_systems_path(str(systems_path))
 
-        if not self._exec.load_model(self.model.name):
+            loaded = self._exec.load_model(self.model.name)
+        if not loaded:
             raise SimulationError(
                 f"JSBSim refused to load {self.model.name!r} from {self.model.xml_path}"
             )

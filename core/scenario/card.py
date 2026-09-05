@@ -56,8 +56,13 @@ def discovered_engine_mixture(spec: ScenarioSpec) -> float:
         return _MIXTURE_CACHE[key]
 
     def attempt(mixture: float):
-        fdm = jsbsim.FGFDMExec(jsbsim.get_default_root_dir())
-        fdm.load_model(aircraft)
+        from core.fdm.console import captured_console
+
+        # The startup banner goes wherever the caller routed JSBSim's
+        # console (core.fdm.console), the same as the FDM wrapper's own.
+        with captured_console():
+            fdm = jsbsim.FGFDMExec(jsbsim.get_default_root_dir())
+            fdm.load_model(aircraft)
         fdm.set_dt(1.0 / float(spec.rate.value))
         # _IC_PRIORITY's safe order: position, attitude (beta before psi),
         # then speed last (docs/JSBSIM_CORRECTIONS.md §2).
