@@ -2465,6 +2465,34 @@ mutate webapp/runs.py \
     "page round 1: a terminal push writes status.json before the status is visible" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Page round 2: a failed run is terminal for the page ---------------------
+
+mutate webapp/static/index.html \
+    '  return run.status === "done" || run.status === "failed";' \
+    '  return run.status === "done";  // MUTATED: a failed run gets the status text alone' \
+    "page round 2: a failed run is terminal for the page (card, strip and files drawn)" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '  if (runIsTerminal(run)) {' \
+    '  if (run.status === "done") {  // MUTATED: poll bypasses the one terminal rule' \
+    "page round 2: poll draws the page through the one terminal rule" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '  if (run.status !== "failed") return "";' \
+    '  return "";  // MUTATED: a failed run'"'"'s card shows its counts as if it had finished' \
+    "page round 2: a failed run's card names the failure beside its counts" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    '  if (run.status === "failed") {
+    return `<div class="dim">no clip: the run <span class="verdict-refused">` +' \
+    '  if (false) {  // MUTATED: a failed engine run gets the unencoded-by-product words
+    return `<div class="dim">no clip: the run <span class="verdict-refused">` +' \
+    "page round 2: a failed engine run's clip words name the failure" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

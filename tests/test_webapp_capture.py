@@ -17,6 +17,7 @@ everything"):
   never allowed to masquerade as a successful capture.
 """
 
+import io
 import json
 import subprocess
 import zipfile
@@ -1610,6 +1611,8 @@ PAGE_CAPTURE_HARNESS = """
 const input = JSON.parse(require("fs").readFileSync(process.argv[2], "utf8"));
 const files = input.files || {};
 const out = {
+  terminal: runIsTerminal(input.run),
+  clip: clipHtml(input.runId, input.run),
   card: captureCardHtml(input.run),
   strip: downloadStripHtml(input.runId, files.downloads || []),
   galleries: (files.galleries || []).map(g => galleryHtml(input.runId, input.run, g)),
@@ -2103,6 +2106,160 @@ def test_the_closure_report_names_its_units_and_the_graded_window(
     words = text_of(page_capture(tmp_path, frames_state, {}, frames_id)["card"])
     assert ("graded over the settled half of 3 s (full duration: a frames run "
             "steps the whole flight)") in words
+
+
+# -- a FAILED run is terminal for the page: card, strip and files ----------
+
+def test_poll_draws_the_page_through_the_one_terminal_rule():
+    """poll() used to draw the card and the files panel only on
+    status "done" and stop silently on "failed" -- the refused-capture
+    branch of the card was dead on the live page and a failed run's
+    files were unreachable from it. Pinned at the source: poll asks
+    runIsTerminal (done OR failed), and no other comparison against
+    "done" exists in the page's run handling."""
+    import re
+
+    page = STATIC_INDEX.read_text(encoding="utf-8")
+    poll = re.search(r"async function poll\(\) \{.*?\n\}\n", page, re.S).group(0)
+    assert "if (runIsTerminal(run)) {" in poll
+    assert "clipHtml(activeRun, run)" in poll
+    assert "renderCapture(run);" in poll and "initFilesPanel(activeRun, run);" in poll
+    assert 'run.status === "done"' not in poll
+    assert '"failed"' not in poll
+    rule = re.search(r"function runIsTerminal\(run\) \{\n(.*?)\n\}", page, re.S).group(1)
+    assert rule.strip() == 'return run.status === "done" || run.status === "failed";'
+
+
+def test_a_mid_run_refusal_is_terminal_and_its_files_are_one_click_away(
+        client, monkeypatch, tmp_path):
+    """The refused-capture path the page actually takes: a
+    camera.terrain_clearance refusal through POST /capture ends
+    "failed" with provenance.json, scenario.yaml, status.json and
+    jsbsim.log on disk. The page's own functions on that payload: the
+    run is terminal, the card is the refusal with its constraint and
+    measured value (and says the run ended on it), the strip offers
+    "everything", the files panel lists each file the run wrote, and
+    the clip words say there was no engine pass. A live run is not
+    terminal."""
+    from core.scenario.validate import Violation
+    import core.capture.validate as validate_module
+
+    monkeypatch.setattr(
+        validate_module, "track_violations",
+        lambda *a, **k: [Violation(
+            constraint="camera.terrain_clearance",
+            message="tower0: the stated placement sits inside or on the "
+                    "scene's terrain (checked over the whole run window)",
+            actual=-12.3, limit=30.0, unit="m AGL")])
+    spec = compile_prompt(DEMO)
+    reply = client.post("/capture", json={"spec": spec.to_dict()})
+    run_id = reply.json()["run_id"]
+    state = finished(client, run_id)
+    assert state["status"] == "failed"
+    payload = client.get(f"/runs/{run_id}/files").json()
+    names = [f["name"] for f in payload["files"]]
+    assert names == ["provenance.json", "scenario.yaml", "status.json", "jsbsim.log"]
+    assert [d["class"] for d in payload["downloads"]] == ["everything"]
+    assert payload["galleries"] == []
+    html = page_capture(tmp_path, state, payload, run_id)
+    assert html["terminal"] is True
+    card = text_of(html["card"])
+    assert card.startswith("capture refused — [camera.terrain_clearance] tower0: ")
+    assert "(measured -12.3 m AGL, limit 30 m AGL)" in card
+    assert ("the run ended failed on this refusal; every file it wrote before "
+            "refusing is listed below") in card
+    assert html["card"].index('id="captureDownloads"') < html["card"].index("capture refused")
+    assert links_of(html["strip"], "everything") == [f"/runs/{run_id}/bundle.zip"]
+    assert "4 file(s): every artefact listed below" in text_of(html["strip"])
+    files = html["files"]
+    for name in names:
+        assert f'href="/runs/{run_id}/file/{name}"' in files
+        assert client.get(f"/runs/{run_id}/file/{name}").status_code == 200
+    assert "status.json" in text_of(files) and "the verdict it ended on" in text_of(files)
+    assert text_of(html["clip"]) == ("no clip: this was a headless run (the geometry "
+                                     "below is the deliverable; no engine pass ran)")
+    # A run still in flight is not terminal: nothing is drawn yet.
+    live = dict(state, status="capture", detail="flying the spec headlessly")
+    assert page_capture(tmp_path, live, payload, run_id)["terminal"] is False
+
+
+def test_a_short_engine_pass_shows_its_partial_frame_set_on_the_page(
+        engine_client, engine_stubs, tmp_path):
+    """The other failed payload: an engine pass that captured 3 of 4
+    scheduled frames fails the run by name (render.frames) and leaves
+    the manifest, verify.json, the previews and the partial frame
+    directory on disk. On the page: the run is terminal; the card's
+    count contract says "8 scheduled, 3 rendered, 3 verified (engine
+    pass FAILED: <the status line>)"; the strip offers frames.zip with
+    the 3 PNGs, the manifest, the telemetry and everything (no clip:
+    none was encoded); camera0's gallery shows its 3 rendered frames
+    and tower0's says the pass rendered nothing for it; the clip words
+    name the failure."""
+    import re
+
+    from webapp.runs import RunManager
+
+    calls = []
+    engine_stubs["monkeypatch"].setattr(
+        RunManager, "_render", staticmethod(honest_engine(calls, short_for=0)))
+    reply = engine_client.post("/run", json={"spec": two_camera_spec().to_dict(),
+                                             "render": "frames"})
+    assert reply.status_code == 200, reply.json()
+    run_id = reply.json()["run_id"]
+    state = finished(engine_client, run_id)
+    assert state["status"] == "failed"
+    assert state["detail"].startswith("[render.frames] camera 'camera0': ")
+    assert "captured 3 of 4 scheduled" in state["detail"]
+    assert state["clip"] is None
+    payload = engine_client.get(f"/runs/{run_id}/files").json()
+    names = [f["name"] for f in payload["files"]]
+    for name in ("capture/capture_manifest.json", "capture/verify.json",
+                 "capture/frames/camera0", "capture/frames/camera0/render.json",
+                 "capture/previews/camera0", "capture/previews/tower0",
+                 "status.json"):
+        assert name in names, name
+    assert "clip.mp4" not in names
+    frames_entry = next(f for f in payload["files"] if f["name"] == "capture/frames/camera0")
+    assert len(frames_entry["images"]) == 3
+    assert [d["class"] for d in payload["downloads"]] == [
+        "frames", "manifest", "telemetry", "everything"]
+
+    html = page_capture(tmp_path, state, payload, run_id)
+    assert html["terminal"] is True
+    card = text_of(html["card"])
+    assert ("capture geometry — 8 scheduled, 3 rendered, 3 verified (engine pass "
+            f"FAILED: {state['detail']})") in card
+    assert card.index("engine pass FAILED") < card.index("8 geometry preview(s)")
+    assert "camera0 : 4 scheduled, 3 rendered, 3 verified" in card
+    assert "tower0 : 4 scheduled, 0 rendered, 0 verified" in card
+    assert "verification FAILED" in card
+    assert links_of(html["strip"], "frames") == [f"/runs/{run_id}/frames.zip"]
+    assert "3 PNG(s) across 1 camera(s) (camera0)" in text_of(html["strip"])
+    assert links_of(html["strip"], "clip") == []
+    zipped = engine_client.get(f"/runs/{run_id}/frames.zip")
+    assert zipped.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(zipped.content)) as archive:
+        assert sorted(archive.namelist()) == [
+            "capture/frames/camera0/0000.png", "capture/frames/camera0/0001.png",
+            "capture/frames/camera0/0002.png", "capture/frames/camera0/render.json"]
+    galleries = [text_of(g) for g in html["galleries"]]
+    assert galleries[0].startswith("camera0 : 4 scheduled, 3 rendered, 3 verified "
+                                   "— showing 3 of 3 rendered frame(s)")
+    assert len(re.findall(r'data-frame="[^"]+/frames/camera0/', html["galleries"][0])) == 3
+    assert galleries[1].startswith("tower0 : 4 scheduled, 0 rendered, 0 verified")
+    assert ("previews (fallback: the engine pass rendered no frame for this camera "
+            "(the run's status names the failure); showing 4 of 4 preview(s), "
+            "which are NOT frames)") in galleries[1]
+    assert f'href="/runs/{run_id}/file/capture/verify.json"' in html["files"]
+    assert text_of(html["clip"]) == ("no clip: the run FAILED before a clip was "
+                                     f"encoded — {state['detail']}")
+    # A done frames run whose by-product did not encode says so too.
+    unencoded = dict(state, status="done", clip=None)
+    assert text_of(page_capture(tmp_path, unencoded, payload, run_id)["clip"]) == (
+        "no clip: the by-product clip was not encoded (the status lines say why); "
+        "the frame set below is the deliverable")
+    assert "engine pass FAILED" not in text_of(
+        page_capture(tmp_path, unencoded, {}, run_id)["card"])
 
 
 # -- a finished run outlives the server process ---------------------------

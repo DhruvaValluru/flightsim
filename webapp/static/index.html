@@ -542,23 +542,17 @@ async function poll() {
     `${new Date(e.t * 1000).toLocaleTimeString()}  ${e.status}` +
     (e.detail ? ` — ${e.detail}` : "")).join("\n");
   $("status").textContent = line;
-  if (run.status === "done") {
-    // A capture-only run has no clip, and the page says so rather than
-    // showing a broken video element.
-    const clip = run.clip
-      ? `<video id="clipVideo" controls src="/runs/${activeRun}/clip.mp4">` +
-        `</video>` +
-        (run.render === "frames"
-          ? `<div class="dim">clip: a by-product of camera 0's rendered ` +
-            `frames shown at their scheduled instants (clip time = ` +
-            `simulation time); the frame set below is the deliverable</div>`
-          : "")
-      : `<div class="dim">no clip: this was a headless run (the geometry ` +
-        `below is the deliverable; no engine pass ran)</div>`;
+  // A run that ended -- either way -- gets the whole page: a run that
+  // ended badly left files too (its provenance, status log, JSBSim
+  // log; on a short engine pass the manifest, verify.json, the
+  // previews and the partial frame set), and its refusal belongs in
+  // the card, not only in the status text. Nothing is drawn while the
+  // run is live.
+  if (runIsTerminal(run)) {
     $("clipArea").innerHTML =
       `<div class="clipRow"><div class="clipMain">` +
       `<div class="dim">scene: ${run.scene.label || run.scene.kind}</div>` +
-      clip +
+      clipHtml(activeRun, run) +
       `<div id="pathArea"></div>` +
       `</div><div class="aeroSide" id="aeroSide"></div></div>` +
       `<div id="captureArea"></div>` +
@@ -569,7 +563,7 @@ async function poll() {
     if (run.clip) initAeroPanel(activeRun, run);
     initFlightPath(activeRun, run);
     initEffectReport(activeRun);
-  } else if (run.status !== "failed") {
+  } else {
     setTimeout(poll, 2000);
   }
 }
@@ -588,6 +582,52 @@ async function poll() {
 function esc(text) {
   return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// The page's ONE terminal rule: a run that ended -- done or failed --
+// gets its clip words, its capture card and its files panel. poll()
+// asks this and nothing else, so a failed run can never fall back to
+// the status text alone.
+function runIsTerminal(run) {
+  return run.status === "done" || run.status === "failed";
+}
+
+// The clip, or why there is none, in the run's own words: a headless
+// run never had an engine pass; a failed engine run stopped before the
+// clip (the status line names where); a frames run whose by-product did
+// not encode says so and points at the frame set.
+function clipHtml(runId, run) {
+  if (run.clip) {
+    return `<video id="clipVideo" controls src="/runs/${runId}/clip.mp4">` +
+      `</video>` +
+      (run.render === "frames"
+        ? `<div class="dim">clip: a by-product of camera 0's rendered ` +
+          `frames shown at their scheduled instants (clip time = ` +
+          `simulation time); the frame set below is the deliverable</div>`
+        : "");
+  }
+  if (run.render === "none") {
+    return `<div class="dim">no clip: this was a headless run (the geometry ` +
+      `below is the deliverable; no engine pass ran)</div>`;
+  }
+  if (run.status === "failed") {
+    return `<div class="dim">no clip: the run <span class="verdict-refused">` +
+      `FAILED</span> before a clip was encoded — ${esc(run.detail)}</div>`;
+  }
+  return `<div class="dim">no clip: the by-product clip was not encoded ` +
+    `(the status lines say why); the frame set below is the deliverable</div>`;
+}
+
+// What a failed run's card says beside its counts: the run's own last
+// status line (the constraint and the offending value on a refusal;
+// the camera and the shortfall on a short engine pass; the check on a
+// failed closure), in the verdict's colour. Empty on a run that ended
+// "done".
+function failureWords(run) {
+  if (run.status !== "failed") return "";
+  const what = run.render === "frames" && String(run.detail).startsWith("[render.frames]")
+    ? "engine pass FAILED" : "run FAILED";
+  return ` <span class="verdict-refused">(${what}: ${esc(run.detail)})</span>`;
 }
 
 // The count contract for one camera, in the verifier's three words. A
@@ -744,10 +784,14 @@ function captureCardHtml(run) {
     const unit = r.unit ? ` ${esc(r.unit)}` : "";
     const value = r.actual != null && r.limit != null
       ? ` (measured ${r.actual}${unit}, limit ${r.limit}${unit})` : "";
-    return `<div class="card"><b>capture refused</b> — ` +
+    return `<div class="card"><div id="captureDownloads"></div>` +
+      `<b>capture refused</b> — ` +
       `<span class="verdict-refused">[${esc(r.refused)}] ` +
       `${esc(r.message)}${value}</span>` +
-      `<div id="captureDownloads"></div></div>`;
+      (run.status === "failed"
+        ? `<div class="dim">the run ended failed on this refusal; every ` +
+          `file it wrote before refusing is listed below</div>`
+        : "") + `</div>`;
   }
   // The count contract, per camera, in the three words the verifier
   // backs with files: scheduled (the manifest), rendered (PNGs on disk),
@@ -806,12 +850,16 @@ function captureCardHtml(run) {
       `<span class="dim">— the same spec flown closed loop, graded over the ` +
       `${closureWindowWords(cl)}</span><ul>${rows}</ul>`;
   }
+  // The failure clause (failureWords) sits right after the counts it
+  // qualifies: "8 scheduled, 3 rendered, 3 verified (engine pass
+  // FAILED: ...)", before the preview count.
   const totals = (run.capture.rendered ?? 0) > 0 || rendered
     ? `${run.capture.scheduled ?? run.capture.frames} scheduled, ` +
       `${run.capture.rendered ?? 0} rendered, ${run.capture.verified ?? 0} ` +
-      `verified; ${run.capture.previews} geometry preview(s)`
+      `verified${failureWords(run)}; ${run.capture.previews} geometry preview(s)`
     : `${run.capture.scheduled ?? run.capture.frames} scheduled, 0 rendered ` +
-      `(${run.render === "clip" ? "clip only" : "headless: no engine pass"}); ` +
+      `(${run.render === "clip" ? "clip only" : "headless: no engine pass"})` +
+      `${failureWords(run)}; ` +
       `${run.capture.previews} geometry preview(s), which are NOT frames`;
   // The download strip and the per-camera galleries are filled from
   // /files once it answers (initFilesPanel): the page never names a
