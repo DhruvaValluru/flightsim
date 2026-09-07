@@ -83,9 +83,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--terrain", default=None,
                         help="baked heightfield stem (<stem>.r16 + .json) "
                              "for real-raster physics and camera checks")
-    parser.add_argument("--max-previews", type=int, default=None,
-                        help="cap preview images per run (default: one "
-                             "per scheduled frame)")
+    parser.add_argument("--max-previews", type=int, default=8,
+                        help="cap geometry preview images per run "
+                             "(default 8; they are near-identical frame "
+                             "to frame and each draws a full shaded "
+                             "scene). 0 writes none.")
     parser.add_argument("--render", action="store_true",
                         help="also render the frames through the solved "
                              "poses (Windows with UE 5.5 and the bridge "
@@ -252,6 +254,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 1
     rendered = sorted(frames_dir.rglob("frame_*.png"))
     print(f"  frames:   {len(rendered)} rendered under {frames_dir}")
+
+    from core.capture.overlay import draw_overlays
+
+    overlays = draw_overlays(manifest, out, max_frames=args.max_previews)
+    print(f"  overlays: {len(overlays)} under {out / 'overlays'} -- the "
+          f"recorded geometry drawn ON the rendered pixels; the circle "
+          f"(manifest) and the cross (engine) should coincide")
     print(f"  verify:   python -m flightsim.verify {out}")
     print("  (with pixels present, verification exercises the landmark "
           "reprojection and two-view checks that report NOT RUN without "

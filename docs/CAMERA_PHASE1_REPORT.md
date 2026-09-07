@@ -1,5 +1,31 @@
 # Camera Phase 1 — Camera Control and Capture Geometry: report
 
+> **Superseded in part by Camera Phase 2** (`docs/CAMERA_PHASE2_WINDOWS_PLAN.md`).
+> Three claims below were wrong and are withdrawn here rather than
+> quietly edited, because the corrections are the useful part:
+>
+> 1. **"the circular formulation is documented and avoided"** — it was
+>    documented and then committed. `verify_triangulation` cast both
+>    rays through each record's copy of one aircraft array, so they met
+>    at that point whatever the poses were. It reported `0.0000 m` and
+>    passed with a camera displaced 300 m and with every focal length
+>    scaled 1.7x. Two-view consistency now needs independently measured
+>    pixels and reports NOT RUN without them
+>    (`tests/test_camera_verify_corruption.py`).
+> 2. **"Every run writes `capture_manifest.json` ... on every platform"**
+>    — it was written by `flightsim/capture.py` and by nothing else. No
+>    rendered run produced one, because the web render path never called
+>    it.
+> 3. **"the UE render half is macOS-only"** — Windows has rendered since
+>    `e73aee8`. Windows is now the supported render platform; macOS
+>    builds from the same sources and is not the tested path.
+>
+> Also corrected: the commandlet's field of view was hardcoded (55°)
+> rather than derived from the recorded lens, so the manifest's
+> intrinsics described an image nobody rendered; `-camera-index` was
+> invoked by nothing in the tree; and the geometry preview drew 128
+> non-background pixels on a 640×360 canvas.
+
 What was implemented, how to demonstrate it, and what remains. Written
 against the phase plan ("Phase 1 — Camera Control and Capture
 Geometry") as it landed on this tree.
@@ -59,15 +85,16 @@ table. Now:
   camera-free `simulation_digest`, the telemetry `output_digest`, the
   seed, the terrain raster SHA-256, the scene-frame CRS and the git
   revision.
-* **Verification can fail** (`core/capture/verify.py`): temporal
-  alignment across camera variants, geometry recovery through an
-  independent reprojection (quaternion cross-checked against Euler;
-  aimed cameras must contain the aircraft), two-view triangulation
-  (each ray cast through its own record's view, so misattribution
-  breaks it — the circular formulation is documented and avoided), and
-  count exactness. Each check is demonstrated to fail on a corrupted
-  manifest, and `scripts/mutation_check.sh` gained 19 guards, each
-  verified to fail its test when its safeguard is disabled.
+* **Verification** (`core/capture/verify.py`). ~~Each check is
+  demonstrated to fail on a corrupted manifest.~~ **Withdrawn.** Four
+  of the checks could not fail: triangulation was circular (above),
+  geometry recovery compared two encodings of one rotation and only
+  ever projected the aircraft, count exactness compared the schedule
+  length against the frame list, and the documented verify command
+  never ran the alignment check at all. Rebuilt in Phase 2 around what
+  each check's independent reference actually is — the specification,
+  the engine, or a second run — with a NOT RUN status for the ones
+  whose reference is absent.
 * **The prompt surface expresses cameras** (`core/nl/compiler.py`,
   `core/nl/llm_compiler.py`): named views, image counts, lens words
   with documented mm mappings; a bounded provenanced `cameras` block in
@@ -109,7 +136,8 @@ aligns frame-for-frame (`flightsim.verify --against`).
 ## The engine boundary (what was NOT verified here)
 
 Rendering stays behind `core/util/platform.ue_available()` and the
-named `ue.platform` refusal. The engine-consumption half (package G) is
+named `ue.platform` refusal — on **Windows** since `e73aee8`, not
+macOS as written below. The engine-consumption half (package G) is
 **additive and deliberately thin on this branch**:
 
 * `write_run_card` accepts an optional `cameras` block (spec fields +

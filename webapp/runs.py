@@ -341,6 +341,22 @@ def camera_render_flags(spec: ScenarioSpec):
     and a wingman camera carries its abeam distance.
     """
     cameras = spec.cameras or default_cameras(spec)
+    if len(cameras) > 1:
+        # This path renders ONE pass through the commandlet's own preset
+        # machinery. It used to take cameras[0] and silently drop the
+        # rest, so a two-camera spec produced one clip and a manifest
+        # naming frames that were never written. Multi-camera capture is
+        # the CLI's job, where the poses are solved in Python and each
+        # camera gets its own commandlet pass.
+        raise ValueError(
+            f"camera.multi_render: this spec states {len(cameras)} "
+            f"cameras and the web render path produces one pass through "
+            f"the preset machinery -- it would render "
+            f"{str(cameras[0].camera_id.value)!r} and silently drop the "
+            f"rest. Capture all of them, with solved poses and a manifest "
+            f"per frame, with:\n"
+            f"    python -m flightsim.capture <spec.yaml> --out runs/demo "
+            f"--render")
     camera = cameras[0]
     preset = str(camera.preset.value)
     word = COMMANDLET_CAMERA_WORDS.get(preset)
