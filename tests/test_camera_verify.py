@@ -18,6 +18,9 @@ from core.capture.verify import (
     project_point, verify_alignment, verify_counts, verify_geometry,
     verify_run, verify_triangulation,
 )
+from core.capture.verify import (
+    FAIL, NOT_RUN, PASS, verify_aircraft_consistency,
+)
 from core.nl.compiler import compile_prompt
 from core.scenario.camera import CameraSpec
 
@@ -118,25 +121,42 @@ def test_geometry_recovery_catches_an_out_of_frame_aim():
     assert not verify_geometry(manifest).ok
 
 
-def test_triangulation_passes_and_catches_misattributed_states():
+def test_triangulation_needs_independently_measured_pixels():
+    """Phase 1 triangulated the aircraft across two cameras and reported
+    0.0000 m. Both rays were cast through each record's copy of ONE
+    aircraft array, so they met at that point whatever the poses were:
+    the check passed with a camera displaced 300 m and with every focal
+    length scaled 1.7x (tests/test_camera_verify_corruption.py).
+
+    Two-view consistency needs pixels this module did not itself
+    compute -- the engine's own ProjectToPixel output in render.json.
+    Without them the honest report is NOT RUN, not a pass.
+    """
     manifest = two_camera_manifest()
-    check = verify_triangulation(manifest)
-    assert check.ok, check.detail
+    check = verify_triangulation(manifest, run_dir=None)
+    assert check.status == NOT_RUN
+    assert not any(word in check.detail for word in ("0.0000", "PASS"))
+
+
+def test_the_manifest_agrees_with_itself_about_the_aircraft():
+    """What Phase 1's triangulation test was really testing, under a
+    name that says so: two cameras capturing one telemetry sample must
+    record the same aircraft state for it."""
+    assert verify_aircraft_consistency(two_camera_manifest()).status == PASS
 
     bad = two_camera_manifest()
     for record in bad["frames"]:
         if record["camera_id"] == "tower0":
-            record["aircraft"]["north_m"] += 50.0   # a different instant
-    assert not verify_triangulation(bad).ok
+            record["aircraft"]["north_m"] += 50.0
+    assert verify_aircraft_consistency(bad).status == FAIL
 
 
-def test_triangulation_reports_not_exercised_for_one_camera():
+def test_consistency_reports_not_run_for_one_camera():
     """No false pass, no false failure: a single camera cannot be
     cross-checked and the report says so in words."""
     manifest = manifest_for(spec_with(counted("chase", "solo")))
-    check = verify_triangulation(manifest)
-    assert check.ok
-    assert "NOT EXERCISED" in check.detail
+    check = verify_aircraft_consistency(manifest)
+    assert check.status == NOT_RUN
 
 
 def test_count_exactness_passes_and_catches_a_dropped_frame():

@@ -106,9 +106,11 @@ def test_font_chain_and_honest_degradation(monkeypatch, tmp_path, capsys):
     assert "WARNING" in capsys.readouterr().out
 
 
-def test_webapp_refuses_ue_platform_off_mac(monkeypatch):
-    """Off-mac a render request is the NAMED ue.platform refusal on the
-    page, never a 500; the headless half stays available."""
+def test_webapp_refuses_ue_platform_without_the_engine(monkeypatch):
+    """Without a usable engine a render request is the NAMED ue.platform
+    refusal on the page, never a 500; the headless half stays
+    available, and the refusal names a remedy that exists on the OS
+    reading it."""
     from fastapi.testclient import TestClient
 
     from core.nl.compiler import compile_prompt
@@ -133,7 +135,16 @@ def test_webapp_refuses_ue_platform_off_mac(monkeypatch):
     assert reply.status_code == 409
     body = reply.json()
     assert body.get("constraint") == "ue.platform"
-    assert "macOS" in body["refused"]
+    # The refusal must name the platform that CAN render -- Windows, since
+    # the Win64 host landed -- and must name a remedy that exists on the
+    # machine reading it. The single all-platforms text this replaced told
+    # Linux users to run a PowerShell preflight for an engine half Linux
+    # does not have.
+    assert "Windows" in body["refused"]
+    remedy = {"linux": "no Unreal Engine half on Linux",
+              "mac": "scripts/ue_preflight.sh",
+              "windows": "scripts\\ue_preflight.ps1"}[plat.os_name()]
+    assert remedy in body["refused"], body["refused"]
 
     status = client.get("/status").json()
     assert status["platform"] in ("mac", "linux", "windows")

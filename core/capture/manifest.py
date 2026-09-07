@@ -6,7 +6,7 @@ the macOS render adds pixels beside it without touching it. A frame
 without recorded geometry is unusable as labeled data; this file is the
 label.
 
-Schema (``manifest_version`` 1)
+Schema (``manifest_version`` 2)
 -------------------------------
 Top level::
 
@@ -27,6 +27,14 @@ Top level::
                        origin of the local north/east metres
     software_revision  git revision of the producing tree ("unknown"
                        outside a checkout; informational, in no digest)
+    landmarks          known STATIC world points (the terrain raster's
+                       corners and peak, or the documented flat ring --
+                       core.capture.landmarks), each {name, north_m,
+                       east_m, alt_m}. They exist so verification has
+                       off-axis points that are not the aircraft, and
+                       so the render commandlet can project the SAME
+                       points through its own world-to-pixel helper for
+                       the engine-parity comparison.
     cameras            [per-camera blocks]
     frames             [per-frame records, all cameras, capture order]
 
@@ -39,7 +47,7 @@ Per frame::
     index              frame number within ITS camera, 0-based
     camera_id
     file               relative image path, per-camera subdirectory
-                       ("frames/<camera_id>/frame_00042.png") -- where
+                       ("frames/<camera_id>/frame_0042.png") -- where
                        pixels were produced they land exactly there
     t_s                simulation time (the telemetry sample's own t)
     sample_index       index into the telemetry record
@@ -79,10 +87,11 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
+from .landmarks import scene_landmarks
 from .poses import PoseTrack, SceneFrame, aircraft_local_track
 from .schedule import CaptureSchedule
 
-MANIFEST_VERSION = 1
+MANIFEST_VERSION = 2
 
 
 def software_revision(repo: Optional[Path] = None) -> str:
@@ -121,7 +130,11 @@ def frame_filename(camera_id: str, index: int) -> str:
     """Relative image path, per-camera subdirectory. The renderer that
     produces pixels writes THIS path; headless manifests carry it as
     the name the frame would have."""
-    return f"frames/{camera_id}/frame_{index:05d}.png"
+    # frame_%04d matches what the render commandlet actually writes
+    # (FlightSimRenderCommandlet.cpp) and what the existing gate scripts
+    # glob for. The manifest promised a five-digit name no renderer ever
+    # produced, so no manifest entry could name a real file.
+    return f"frames/{camera_id}/frame_{index:04d}.png"
 
 
 def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
@@ -131,7 +144,9 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                            output_digest: str,
                            scene: Optional[Dict] = None,
                            terrain_sha256: Optional[str] = None,
-                           cameras=None) -> Dict:
+                           cameras=None,
+                           heightfield=None,
+                           terrain_elevation_m: float = 0.0) -> Dict:
     """Assemble the manifest mapping (see the module docstring schema).
 
     ``tracks`` and ``schedules`` are parallel per-camera sequences from
@@ -224,6 +239,9 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
         },
         "frame": frame.provenance(),
         "software_revision": software_revision(),
+        "landmarks": scene_landmarks(
+            frame, aircraft_track=aircraft, heightfield=heightfield,
+            terrain_elevation_m=terrain_elevation_m),
         "cameras": camera_blocks,
         "frames": frames,
     }

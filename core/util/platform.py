@@ -132,12 +132,55 @@ def mono_fonts(sizes: Tuple[int, ...]) -> List:
     return [default for _ in sizes]
 
 
-UE_PLATFORM_REFUSAL = (
-    "REFUSED ue.platform: rendered clips require macOS, or Windows with\n"
-    "Unreal Engine 5.5 and the FlightSimBridge built -- run\n"
-    "scripts\\ue_preflight.ps1 for the exact missing piece. The compiler,\n"
-    "headless physics, telemetry and the webapp run on this OS either\n"
-    "way -- see README \"Platform support\".")
+#: What is missing, and the remedy, IN THIS OS's OWN TERMS. One text for
+#: all three lied on two of them: it named a PowerShell preflight to
+#: Linux users, who have no UE half to preflight at all.
+_UE_REFUSAL = {
+    "windows": (
+        "REFUSED ue.platform: Windows is the supported render platform, "
+        "but this\n"
+        "machine is missing Unreal Engine 5.5 or a built FlightSimBridge. "
+        "Run\n"
+        "    powershell -ExecutionPolicy Bypass -File scripts\\ue_preflight.ps1\n"
+        "for the exact missing piece, then scripts\\build_ue.ps1 to build "
+        "the bridge.\n"
+        "Capture, validation, the solved pose tracks, the manifest and "
+        "verification\n"
+        "all completed without it -- only the pixels are missing."),
+    "mac": (
+        "REFUSED ue.platform: no Unreal Engine 5.5 or built FlightSimBridge "
+        "on this\n"
+        "Mac. Run scripts/ue_preflight.sh for the missing piece, then "
+        "scripts/build_ue.sh.\n"
+        "The render half is maintained against Windows this phase; macOS "
+        "still builds\n"
+        "from the same sources but is not the tested path. Capture, the "
+        "manifest and\n"
+        "verification all completed without it."),
+    "linux": (
+        "REFUSED ue.platform: there is no Unreal Engine half on Linux at "
+        "all -- not\n"
+        "missing, not unbuilt, not supported. Rendered frames need Windows "
+        "with\n"
+        "Unreal Engine 5.5 and the FlightSimBridge built (scripts\\"
+        "ue_preflight.ps1\n"
+        "there names anything absent). Everything else in this run -- the "
+        "flight, the\n"
+        "solved pose tracks, the capture manifest and every verification "
+        "check that\n"
+        "does not need pixels -- completed here and is the Linux "
+        "deliverable."),
+}
+
+
+def ue_platform_refusal() -> str:
+    """The ue.platform refusal for THIS machine, naming a remedy that
+    exists on it."""
+    return _UE_REFUSAL[os_name()]
+
+
+#: Back-compat alias, resolved for the running OS at import.
+UE_PLATFORM_REFUSAL = _UE_REFUSAL[os_name()]
 
 #: Default engine install roots, checked AFTER the UE_ROOT env override.
 #: Windows scans for any UE_5.* so a 5.4/5.6 install is still found and

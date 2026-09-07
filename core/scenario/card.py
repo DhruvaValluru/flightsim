@@ -126,6 +126,7 @@ def write_run_card(spec: ScenarioSpec, path: Path,
                    tornado: Optional[Dict[str, object]] = None,
                    scene_crs: Optional[str] = None,
                    cameras: Optional[Sequence[Dict[str, object]]] = None,
+                   landmarks: Optional[Sequence[Dict[str, object]]] = None,
                    ) -> Path:
     """Write the spec in the form the UE commandlet reads.
 
@@ -221,6 +222,14 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # which refuses (never extrapolates) a track that does not
         # cover the run.
         card["cameras"] = [dict(entry) for entry in cameras]
+    if landmarks:
+        # Camera Phase 2: the SAME known static world points the capture
+        # manifest records. The commandlet projects them through its own
+        # world-to-pixel helper and writes the pixels into render.json;
+        # the verifier projects them through the manifest and compares.
+        # Two implementations of one projection -- the only reprojection
+        # check in this system that is not the manifest talking to itself.
+        card["landmarks"] = [dict(entry) for entry in landmarks]
     if log_profile:
         card["log_profile"] = dict(log_profile)
     if thermals:

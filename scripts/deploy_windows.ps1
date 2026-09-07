@@ -183,8 +183,18 @@ if ($up) {
     Write-Host ""
     Write-Host "Type a scenario ('fly the c172p through a tornado over the prairie'),"
     Write-Host "review the compiled spec, and run. No API keys needed (README"
-    Write-Host "'Quick start'). Rendered video clips still require macOS; everything"
-    Write-Host "else runs here."
+    Write-Host "'Quick start')."
+    Write-Host ""
+    Write-Host "Camera capture, from this same install:"
+    Write-Host "  cd $InstallDir"
+    Write-Host "  .\.venv\Scripts\python.exe -m flightsim.capture examples\cameras_multi.yaml --out runs\demo --card"
+    Write-Host "  .\.venv\Scripts\python.exe -m flightsim.verify runs\demo"
+    Write-Host ""
+    Write-Host "Windows is the supported platform for rendered frames. With"
+    Write-Host "Unreal Engine 5.5 installed and scripts\build_ue.ps1 run, add"
+    Write-Host "--render to the capture command and the frames come out per"
+    Write-Host "camera under runs\demo\frames\. Without the engine everything"
+    Write-Host "except the pixels still runs."
 } else {
     throw ("the server did not answer on port 8008 within 30 s -- the " +
            "uvicorn window it opened stays up with the actual error; or run " +

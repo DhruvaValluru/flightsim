@@ -3,13 +3,22 @@
     .venv/bin/python -m flightsim.verify runs/demo [--against runs/demo2]
 
 Runs :mod:`core.capture.verify` over a run directory written by
-``python -m flightsim.capture``: manifest schema, field finiteness,
-geometry recovery (independent reprojection), cross-view consistency
-(two-view triangulation) and count exactness -- plus, with
-``--against``, temporal alignment between two runs of the same
-simulation captured with different cameras.
+``python -m flightsim.capture``:
 
-Exit code 0 when every check passes, 1 otherwise.
+* manifest schema and field finiteness;
+* **intrinsics against the stated lens** and **the solved pose against
+  the stated camera** -- the two checks whose independent reference is
+  the specification, so they can fail with no engine present;
+* geometry recovery (the aircraft in front of and inside the frames
+  that claim to see it, and the two orientation encodings agreeing);
+* **landmark reprojection** and **two-view triangulation** against the
+  render host's own projection, which need rendered frames and report
+  NOT RUN without them rather than passing on a tautology;
+* count exactness against the number each camera's spec REQUESTED;
+* temporal alignment, with ``--against``.
+
+A check that could not run is named as NOT RUN and is not counted as a
+pass. Exit code 0 when no check failed, 1 otherwise.
 """
 
 from __future__ import annotations
@@ -31,7 +40,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--against", default=None,
                         help="a second run of the SAME simulation with "
                              "different cameras, for the temporal-"
-                             "alignment check")
+                             "alignment check (without it that check "
+                             "reports NOT RUN rather than being silently "
+                             "omitted)")
     args = parser.parse_args(argv)
 
     from core.capture.verify import verify_run

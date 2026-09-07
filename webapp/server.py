@@ -341,10 +341,10 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # must hear that first -- measured 2026-08-31 on a fresh Windows
     # clone, which was told to import aircraft models when the real
     # blocker was that no Unreal host existed there at all.
-    from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
+    from core.util.platform import ue_available, ue_platform_refusal
 
     if not ue_available():
-        return JSONResponse({"refused": UE_PLATFORM_REFUSAL,
+        return JSONResponse({"refused": ue_platform_refusal(),
                              "constraint": "ue.platform"}, status_code=409)
     # Placeholder airframes never render (owner's rule, extended
     # 2026-08-31: on ANY machine). Checked AFTER validation on purpose:

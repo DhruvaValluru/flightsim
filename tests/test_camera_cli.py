@@ -30,7 +30,7 @@ def demo_run(tmp_path_factory):
 def test_capture_writes_manifest_previews_and_telemetry(demo_run):
     manifest = json.loads(
         (demo_run / "capture_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["manifest_version"] == 1
+    assert manifest["manifest_version"] == 2
     assert len(manifest["frames"]) == 48          # 24 per camera, exact
     assert (demo_run / "telemetry.json").is_file()
     assert (demo_run / "scenario.yaml").is_file()

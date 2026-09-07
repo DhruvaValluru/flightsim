@@ -676,6 +676,19 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	int32 ConsumedCameraIndex = 0;
 	double CameraOriginXMetres = 0.0;
 	double CameraOriginYMetres = 0.0;
+	// The solved camera's own sensor, so the field of view can follow the
+	// solved focal length instead of a hardcoded constant. Camera Phase 2:
+	// a manifest that names a lens the frames were not taken through is a
+	// plausible fiction, and every label derived from it is wrong at the
+	// edges of the frame.
+	double CameraSensorWidthMm = 0.0;
+	// Known static world points, solved in Python and carried on the card.
+	// This commandlet projects them through its OWN ProjectToPixel; the
+	// Python verifier projects the same points through the manifest. Two
+	// implementations of one projection is the only independent
+	// reprojection check in this system.
+	TArray<FString> LandmarkNames;
+	TArray<FVector> LandmarkProjectedMetres;
 	{
 		FParse::Value(*Params, TEXT("camera-index="), ConsumedCameraIndex);
 		FString CardText;
@@ -708,6 +721,34 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				return Fail(TEXT("cameras block is missing origin_x_m/"
 				                 "origin_y_m/poses; refusing to guess the frame"));
 			}
+			// The output frame and the lens are part of the recorded
+			// label. Taking them from the card (where core/capture/poses.py
+			// put them) rather than from -width=/-height= and a constant
+			// FOVAngle is what makes the manifest describe the pixels that
+			// were actually produced.
+			double CameraWidthPx = 0.0;
+			double CameraHeightPx = 0.0;
+			if (!CameraJson->TryGetNumberField(TEXT("width_px"), CameraWidthPx) ||
+			    !CameraJson->TryGetNumberField(TEXT("height_px"), CameraHeightPx) ||
+			    !CameraJson->TryGetNumberField(TEXT("sensor_width_mm"),
+			                                   CameraSensorWidthMm))
+			{
+				return Fail(TEXT("cameras block is missing width_px/"
+				                 "height_px/sensor_width_mm; refusing to "
+				                 "render through a lens the manifest does "
+				                 "not name"));
+			}
+			if (CameraWidthPx < 1.0 || CameraHeightPx < 1.0 ||
+			    CameraSensorWidthMm <= 0.0)
+			{
+				return Fail(FString::Printf(
+					TEXT("cameras block states a %.0fx%.0f output on a "
+					     "%.4f mm sensor; not a camera"),
+					CameraWidthPx, CameraHeightPx, CameraSensorWidthMm));
+			}
+			Width = FMath::RoundToInt(CameraWidthPx);
+			Height = FMath::RoundToInt(CameraHeightPx);
+
 			const TArray<TSharedPtr<FJsonValue>>* Times = nullptr;
 			const TArray<TSharedPtr<FJsonValue>>* Norths = nullptr;
 			const TArray<TSharedPtr<FJsonValue>>* Easts = nullptr;
@@ -715,6 +756,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			const TArray<TSharedPtr<FJsonValue>>* Yaws = nullptr;
 			const TArray<TSharedPtr<FJsonValue>>* Pitches = nullptr;
 			const TArray<TSharedPtr<FJsonValue>>* Rolls = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Focals = nullptr;
+			if (!(*PosesJson)->TryGetArrayField(TEXT("focal_length_mm"),
+			                                    Focals))
+			{
+				return Fail(TEXT("camera pose track is missing "
+				                 "focal_length_mm; the field of view is "
+				                 "solved, never assumed"));
+			}
 			if (!(*PosesJson)->TryGetArrayField(TEXT("t_s"), Times) ||
 			    !(*PosesJson)->TryGetArrayField(TEXT("north_m"), Norths) ||
 			    !(*PosesJson)->TryGetArrayField(TEXT("east_m"), Easts) ||
@@ -730,7 +779,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			const int32 Count = Times->Num();
 			if (Norths->Num() != Count || Easts->Num() != Count ||
 			    Alts->Num() != Count || Yaws->Num() != Count ||
-			    Pitches->Num() != Count || Rolls->Num() != Count)
+			    Pitches->Num() != Count || Rolls->Num() != Count ||
+			    Focals->Num() != Count)
 			{
 				return Fail(TEXT("camera pose track arrays disagree about "
 				                 "their length; refusing a misaligned track"));
@@ -738,9 +788,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			TArray<double> TrackTimes;
 			TArray<FVector> TrackLocations;
 			TArray<FRotator> TrackRotations;
+			TArray<double> TrackFocalLengthsMm;
 			TrackTimes.Reserve(Count);
 			TrackLocations.Reserve(Count);
 			TrackRotations.Reserve(Count);
+			TrackFocalLengthsMm.Reserve(Count);
 			for (int32 i = 0; i < Count; ++i)
 			{
 				TrackTimes.Add((*Times)[i]->AsNumber());
@@ -755,12 +807,46 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 					(*Pitches)[i]->AsNumber(),
 					(*Yaws)[i]->AsNumber() - 90.0,
 					(*Rolls)[i]->AsNumber()));
+				TrackFocalLengthsMm.Add((*Focals)[i]->AsNumber());
 			}
 			if (!Director->SetPoseTrack(MoveTemp(TrackTimes),
 			                            MoveTemp(TrackLocations),
-			                            MoveTemp(TrackRotations), Error))
+			                            MoveTemp(TrackRotations),
+			                            MoveTemp(TrackFocalLengthsMm),
+			                            Error))
 			{
 				return Fail(Error);
+			}
+
+			// The card's landmarks, expressed like every other card
+			// position: local north/east about this camera block's own
+			// projected origin, altitude MSL.
+			const TArray<TSharedPtr<FJsonValue>>* LandmarksJson = nullptr;
+			if (CardRoot->TryGetArrayField(TEXT("landmarks"), LandmarksJson) &&
+			    LandmarksJson != nullptr)
+			{
+				for (const TSharedPtr<FJsonValue>& Value : *LandmarksJson)
+				{
+					const TSharedPtr<FJsonObject> Landmark = Value->AsObject();
+					if (!Landmark.IsValid())
+					{
+						continue;
+					}
+					FString LandmarkName;
+					double North = 0.0, East = 0.0, Alt = 0.0;
+					if (!Landmark->TryGetStringField(TEXT("name"), LandmarkName) ||
+					    !Landmark->TryGetNumberField(TEXT("north_m"), North) ||
+					    !Landmark->TryGetNumberField(TEXT("east_m"), East) ||
+					    !Landmark->TryGetNumberField(TEXT("alt_m"), Alt))
+					{
+						return Fail(TEXT("a landmark is missing name/"
+						                 "north_m/east_m/alt_m"));
+					}
+					LandmarkNames.Add(LandmarkName);
+					LandmarkProjectedMetres.Add(FVector(
+						CameraOriginXMetres + East,
+						CameraOriginYMetres + North, Alt));
+				}
 			}
 			bConsumePoses = true;
 			UE_LOG(LogFlightSimRender, Display,
@@ -794,7 +880,20 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// The void scene frames a silhouette tightly; the visual scene needs the
 	// terrain and sky in shot, and §6.6's manual exposure so the image does
 	// not re-meter as the bright-ground fraction changes with bank.
+	// Preset mode keeps the measured constants. Consume-poses mode takes
+	// the field of view from the SOLVED LENS -- horizontal FOV =
+	// 2*atan(sensor_width / (2*focal_length)) -- so the intrinsics in the
+	// capture manifest describe the frames that were actually rendered.
+	// The hardcoded 55 deg differed from the documented default lens
+	// (35 mm on a 36 mm sensor, 54.43 deg) by about 7 px 600 px off centre,
+	// permanently and in every frame, with nothing checking it.
 	Capture->FOVAngle = bVisual ? 55.0f : 24.0f;
+	if (bConsumePoses)
+	{
+		Capture->FOVAngle = static_cast<float>(FMath::RadiansToDegrees(
+			2.0 * FMath::Atan(CameraSensorWidthMm /
+			                  (2.0 * Director->GetAppliedFocalLengthMm()))));
+	}
 	if (bVisual && !bAutoExposure)
 	{
 		FFlightSimVisualScene::ApplyManualExposure(Capture,
@@ -1188,6 +1287,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			{
 				return Fail(Error);
 			}
+			// A keyframed focal-length move has to reach the PIXELS, not
+			// only the manifest, or the recorded intrinsics stop
+			// describing the frames partway through the run.
+			Capture->FOVAngle = static_cast<float>(FMath::RadiansToDegrees(
+				2.0 * FMath::Atan(CameraSensorWidthMm /
+				                  (2.0 * Director->GetAppliedFocalLengthMm()))));
 		}
 
 		// Component render-state updates are queued and flushed at end of
@@ -1327,6 +1432,41 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// Landmarks, projected through the camera of record, so the harness
 		// samples known world points instead of guessing regions by eye. The
 		// aircraft ground point is its position dropped to the visual ground.
+		// Camera Phase 2: the card's own landmarks, projected through THIS
+		// capture's transform and field of view, so the Python verifier can
+		// grade its projection against the engine's. Written whenever the
+		// card carried landmarks, independently of the Gate 6 visual set
+		// below.
+		if (LandmarkNames.Num() > 0)
+		{
+			TSharedPtr<FJsonObject> Landmarks = MakeShared<FJsonObject>();
+			for (int32 i = 0; i < LandmarkNames.Num(); ++i)
+			{
+				FVector EngineLocation;
+				Scenario.GeoReferencing->ProjectedToEngine(
+					LandmarkProjectedMetres[i], EngineLocation);
+				FVector2D Pixel;
+				const bool bVisible = ProjectToPixel(Capture, Width, Height,
+				                                     EngineLocation, Pixel);
+				TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+				Entry->SetBoolField(TEXT("visible"), bVisible);
+				Entry->SetNumberField(TEXT("px"), Pixel.X);
+				Entry->SetNumberField(TEXT("py"), Pixel.Y);
+				Landmarks->SetObjectField(LandmarkNames[i], Entry);
+			}
+			Record->SetObjectField(TEXT("landmarks"), Landmarks);
+			// The intrinsics ACTUALLY applied, so a disagreement with the
+			// manifest is visible rather than assumed away.
+			Record->SetNumberField(TEXT("applied_focal_length_mm"),
+			                       Director->GetAppliedFocalLengthMm());
+			Record->SetNumberField(TEXT("applied_sensor_width_mm"),
+			                       CameraSensorWidthMm);
+			Record->SetNumberField(TEXT("applied_fov_deg"),
+			                       Capture->FOVAngle);
+			Record->SetNumberField(TEXT("applied_width_px"), Width);
+			Record->SetNumberField(TEXT("applied_height_px"), Height);
+		}
+
 		if (bVisual)
 		{
 			TSharedPtr<FJsonObject> Landmarks = MakeShared<FJsonObject>();

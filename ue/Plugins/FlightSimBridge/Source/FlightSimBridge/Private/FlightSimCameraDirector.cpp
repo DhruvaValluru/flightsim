@@ -63,6 +63,7 @@ float AFlightSimCameraDirector::GetCameraRollDegrees() const
 bool AFlightSimCameraDirector::SetPoseTrack(TArray<double>&& Times,
                                             TArray<FVector>&& Locations,
                                             TArray<FRotator>&& Rotations,
+                                            TArray<double>&& FocalLengthsMm,
                                             FString& Error)
 {
 	if (Times.Num() < 2)
@@ -72,13 +73,27 @@ bool AFlightSimCameraDirector::SetPoseTrack(TArray<double>&& Times,
 			     "refusing to fly a camera nobody solved"), Times.Num());
 		return false;
 	}
-	if (Times.Num() != Locations.Num() || Times.Num() != Rotations.Num())
+	if (Times.Num() != Locations.Num() || Times.Num() != Rotations.Num() ||
+	    Times.Num() != FocalLengthsMm.Num())
 	{
 		Error = FString::Printf(
-			TEXT("consume-poses: %d times against %d locations and %d "
-			     "rotations; refusing a misaligned track"),
-			Times.Num(), Locations.Num(), Rotations.Num());
+			TEXT("consume-poses: %d times against %d locations, %d "
+			     "rotations and %d focal lengths; refusing a misaligned "
+			     "track"),
+			Times.Num(), Locations.Num(), Rotations.Num(),
+			FocalLengthsMm.Num());
 		return false;
+	}
+	for (int32 i = 0; i < FocalLengthsMm.Num(); ++i)
+	{
+		if (!(FocalLengthsMm[i] > 0.0))
+		{
+			Error = FString::Printf(
+				TEXT("consume-poses: solved focal length %.4f mm at sample "
+				     "%d is not a lens; refusing to guess a field of view"),
+				FocalLengthsMm[i], i);
+			return false;
+		}
 	}
 	for (int32 i = 1; i < Times.Num(); ++i)
 	{
@@ -92,6 +107,8 @@ bool AFlightSimCameraDirector::SetPoseTrack(TArray<double>&& Times,
 	PoseTimes = MoveTemp(Times);
 	PoseLocations = MoveTemp(Locations);
 	PoseRotations = MoveTemp(Rotations);
+	PoseFocalLengthsMm = MoveTemp(FocalLengthsMm);
+	AppliedFocalLengthMm = PoseFocalLengthsMm[0];
 	return true;
 }
 
@@ -132,6 +149,9 @@ bool AFlightSimCameraDirector::ApplyPoseAtTime(double SimTimeSeconds,
 		PoseRotations[Lower].Quaternion(),
 		PoseRotations[Upper].Quaternion(),
 		static_cast<float>(Fraction));
+	AppliedFocalLengthMm = FMath::Lerp(PoseFocalLengthsMm[Lower],
+	                                   PoseFocalLengthsMm[Upper],
+	                                   Fraction);
 	// Sweep-free teleport: the camera is an observer, never a collider.
 	SetActorLocationAndRotation(Location, Rotation, false, nullptr,
 	                            ETeleportType::TeleportPhysics);
@@ -150,6 +170,21 @@ bool AFlightSimCameraDirector::ApplyPoseAtTime(double SimTimeSeconds,
 			     "frames do not have"),
 			Applied.X, Applied.Y, Applied.Z,
 			Location.X, Location.Y, Location.Z, SimTimeSeconds);
+		return false;
+	}
+	// Position parity alone let a rotation divergence through, and where
+	// the camera LOOKS is most of the label: a tenth of a degree at a
+	// kilometre is nearly two metres of misplaced world. Same doctrine,
+	// same loudness.
+	const double RotationErrorDeg = FMath::RadiansToDegrees(
+		GetActorQuat().AngularDistance(Rotation));
+	if (RotationErrorDeg > 0.05)
+	{
+		Error = FString::Printf(
+			TEXT("consume-poses: applied camera rotation differs from the "
+			     "solved pose by %.4f deg at t=%.3f s (tolerance 0.05 deg); "
+			     "refusing to record an orientation the frames do not have"),
+			RotationErrorDeg, SimTimeSeconds);
 		return false;
 	}
 	return true;

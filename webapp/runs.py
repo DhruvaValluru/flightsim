@@ -1393,14 +1393,14 @@ class RunManager:
 
     def start(self, spec: ScenarioSpec, provenance: Dict) -> Dict:
         """Refuses (with the reason) or starts a run and returns its id."""
-        from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
+        from core.util.platform import ue_available, ue_platform_refusal
 
         if not ue_available():
             # The named platform refusal, not a 500: every render gotcha
             # was measured on Metal/macOS only. The headless half (spec,
             # provenance, validation, telemetry via run_spec) already
             # happened or remains available on this OS.
-            return {"refused": UE_PLATFORM_REFUSAL,
+            return {"refused": ue_platform_refusal(),
                     "constraint": "ue.platform"}
         with self._lock:
             active = self.runs.get(self._active) if self._active else None

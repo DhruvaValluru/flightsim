@@ -86,6 +86,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--max-previews", type=int, default=None,
                         help="cap preview images per run (default: one "
                              "per scheduled frame)")
+    parser.add_argument("--render", action="store_true",
+                        help="also render the frames through the solved "
+                             "poses (Windows with UE 5.5 and the bridge "
+                             "built; refuses by name anywhere else). "
+                             "Implies --card.")
     parser.add_argument("--card", action="store_true",
                         help="also write card.json carrying each camera's "
                              "solved pose track, for the UE commandlet's "
@@ -172,7 +177,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         terrain_sha256=heightfield.digest() if heightfield else None,
         # The cameras that actually flew (default_cameras for a
         # camera-less spec); the digests stay the spec's own.
-        cameras=cameras)
+        cameras=cameras,
+        # The scene's own known landmarks ride into the manifest so the
+        # verifier has off-axis points that are not the aircraft.
+        heightfield=heightfield, terrain_elevation_m=terrain_datum)
     manifest_path = write_capture_manifest(manifest, out)
     result.telemetry.write_json(out / "telemetry.json")
     spec.write(out / "scenario.yaml")
@@ -182,7 +190,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "samples": len(result.telemetry),
     }, indent=1), encoding="utf-8")
 
-    if args.card:
+    if args.card or args.render:
         # The run-card projection with the cameras block: spec fields +
         # solved pose tracks, computed HERE, consumed verbatim by the
         # commandlet's consume-poses mode. The commandlet's own named
@@ -195,6 +203,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             cameras=[track.card_block(camera, schedule, frame)
                      for camera, track, schedule
                      in zip(cameras, tracks, schedules)],
+            landmarks=manifest.get("landmarks"),
             scene_crs=frame.crs if frame.declared else None)
         print(f"  card:     {out / 'card.json'} (consume-poses; one "
               f"commandlet pass per camera via -camera-index=N)")
@@ -209,17 +218,44 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"  previews: {len(previews)} geometry preview(s) under "
           f"{out / 'previews'}")
 
-    from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
+    from core.util.platform import (
+        os_name, ue_available, ue_platform_refusal, ue_runner_command,
+    )
 
-    if ue_available():
-        print("UE render half present: render this card through the "
-              "webapp flow (webapp.runs) or the render commandlet; the "
-              "per-camera consume-poses pass is the engine side of this "
-              "phase.")
-    else:
-        print(UE_PLATFORM_REFUSAL)
-        print("(pixels only; the manifest, previews and verification "
-              "above are complete on this platform)")
+    if not args.render:
+        if ue_available():
+            print(f"UE render half present on this {os_name()} machine: add "
+                  f"--render to produce the frames through these solved "
+                  f"poses, one commandlet pass per camera.")
+        else:
+            print(ue_platform_refusal())
+            print("(pixels only; the manifest and every verification check "
+                  "that does not need them are complete here)")
+        return 0
+
+    if not ue_available():
+        print(ue_platform_refusal())
+        print("(--render asked for pixels; everything else in this run "
+              "completed and is on disk)")
+        return 0
+
+    import subprocess
+
+    frames_dir = out / "frames"
+    command = ue_runner_command(REPO, "render_ue_scenario")
+    command += [str(out / "card.json"), str(frames_dir)]
+    print(f"rendering {len(cameras)} camera pass(es) into {frames_dir} ...")
+    completed = subprocess.run(command)
+    if completed.returncode != 0:
+        print(f"REFUSED -- the render wrapper exited {completed.returncode}; "
+              f"the manifest and verification above still stand")
+        return 1
+    rendered = sorted(frames_dir.rglob("frame_*.png"))
+    print(f"  frames:   {len(rendered)} rendered under {frames_dir}")
+    print(f"  verify:   python -m flightsim.verify {out}")
+    print("  (with pixels present, verification exercises the landmark "
+          "reprojection and two-view checks that report NOT RUN without "
+          "them)")
     return 0
 
 

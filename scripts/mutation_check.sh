@@ -797,10 +797,60 @@ mutate core/capture/verify.py \
     tests/test_camera_verify.py || failures=$((failures+1))
 
 mutate core/capture/verify.py \
-    '        if indices != list(range(declared)):' \
-    '        if False:  # MUTATED: dropped frames pass' \
-    "a dropped frame fails the count-exactness check" \
-    tests/test_camera_verify.py || failures=$((failures+1))
+    '        if indices != list(range(emitted)):' \
+    '        if False:  # MUTATED: gaps in the frame index pass' \
+    "a gap in the frame index sequence fails the count check" \
+    tests/test_camera_verify_corruption.py || failures=$((failures+1))
+
+# -- Camera Phase 2: the checks that replaced the tautologies. Each of
+# these corruptions PASSED the Phase 1 verifier.
+mutate core/capture/verify.py \
+    '            if emitted != int(requested):' \
+    '            if False:  # MUTATED: the requested count is not read' \
+    "an emitted count that is not the count the SPEC requested fails" \
+    tests/test_camera_verify_corruption.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                if gap > tol:' \
+    '                if False:  # MUTATED: a stated placement may move' \
+    "a world-anchored camera moved off its stated position fails" \
+    tests/test_camera_verify_corruption.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if gap > tol:' \
+    '            if False:  # MUTATED: a chase camera may leave station' \
+    "a chase camera displaced from its stated station fails" \
+    tests/test_camera_verify_corruption.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                if angle > AIM_TOL_DEG:' \
+    '                if False:  # MUTATED: an aimed camera may look away' \
+    "an aircraft-aimed camera that stops tracking the aircraft fails" \
+    tests/test_camera_verify_corruption.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if not (lo - 1e-9 <= focal <= hi + 1e-9):' \
+    '            if False:  # MUTATED: any focal length is accepted' \
+    "a focal length the spec never stated fails the intrinsics check" \
+    tests/test_camera_verify_corruption.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if worst_fx > 1e-6:' \
+    '    if False:  # MUTATED: fx need not follow from the lens' \
+    "pixel focal lengths that do not follow from focal/sensor*pixels fail" \
+    tests/test_camera_verify_corruption.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if gap > 1e-6:' \
+    '            if False:  # MUTATED: cameras may disagree about the aircraft' \
+    "two cameras disagreeing about one instant fail the consistency check" \
+    tests/test_camera_verify_corruption.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if not measured:' \
+    '    if False:  # MUTATED: triangulate without an independent reference' \
+    "two-view triangulation reports NOT RUN without engine-measured pixels" \
+    tests/test_camera_verify_corruption.py || failures=$((failures+1))
 
 mutate core/capture/verify.py \
     '        if worst > tol_s:' \

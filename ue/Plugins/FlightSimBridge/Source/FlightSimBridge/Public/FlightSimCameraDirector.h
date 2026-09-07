@@ -127,16 +127,29 @@ public:
 
 	// Times are simulation seconds; locations engine units (cm); rotations
 	// engine rotators (the caller owns the scene-frame conversion, next to
-	// its GeoReferencing context). Refuses tracks shorter than two samples.
+	// its GeoReferencing context). FocalLengthsMm is the solved per-sample
+	// lens: the camera phase's intrinsics are part of the recorded label,
+	// so the frames must be taken through the lens the manifest names, not
+	// through a hardcoded field of view. Refuses tracks shorter than two
+	// samples, and any array whose length disagrees with the rest.
 	bool SetPoseTrack(TArray<double>&& Times, TArray<FVector>&& Locations,
-	                  TArray<FRotator>&& Rotations, FString& Error);
+	                  TArray<FRotator>&& Rotations,
+	                  TArray<double>&& FocalLengthsMm, FString& Error);
 
 	bool ConsumingPoses() const { return PoseTimes.Num() > 0; }
 
 	// Place the camera exactly where the solved track says it is at
-	// SimTimeSeconds. False (with the reason) when no track is set or the
-	// time lies outside the track's span.
+	// SimTimeSeconds. False (with the reason) when no track is set, the
+	// time lies outside the track's span, or the pose the engine actually
+	// applied differs from the solved one in POSITION or ROTATION beyond
+	// the stated tolerances.
 	bool ApplyPoseAtTime(double SimTimeSeconds, FString& Error);
+
+	// The solved lens at the last applied time, millimetres. The commandlet
+	// sets the capture's field of view from this every frame, so a
+	// keyframed focal-length move reaches the pixels instead of only the
+	// manifest.
+	double GetAppliedFocalLengthMm() const { return AppliedFocalLengthMm; }
 
 private:
 	void UpdateLaggedChase(float DeltaSeconds, const FTransform& TargetTransform);
@@ -155,4 +168,6 @@ private:
 	TArray<double> PoseTimes;
 	TArray<FVector> PoseLocations;
 	TArray<FRotator> PoseRotations;
+	TArray<double> PoseFocalLengthsMm;
+	double AppliedFocalLengthMm = 0.0;
 };
