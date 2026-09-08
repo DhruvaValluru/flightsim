@@ -179,36 +179,64 @@ def _horizon(draw, record, width, height):
     draw.line([(0, left), (width, rightv)], fill=(190, 200, 210), width=1)
 
 
-def _body_glyph(record) -> List[Tuple[str, Sequence]]:
-    """The aircraft as fuselage, wings and fin in ITS OWN body frame,
-    rotated by its recorded attitude. Roll is visible here or it is
-    visible nowhere: a circle draws the same at every bank angle."""
-    a = record["aircraft"]
-    roll, pitch, yaw = (math.radians(a["roll_deg"]),
-                        math.radians(a["pitch_deg"]),
-                        math.radians(a["heading_deg"]))
-    cr, sr, cp, sp, cy, sy = (math.cos(roll), math.sin(roll),
-                              math.cos(pitch), math.sin(pitch),
-                              math.cos(yaw), math.sin(yaw))
+def airframe_geometry(aircraft: str):
+    """(faces, source) for an airframe: the REAL mesh the engine imports
+    when its sources are on disk, else the parametric stand-in.
 
-    def to_world(bx, by, bz):
-        """Body (forward, right, down) -> world (north, east, up)."""
-        n = ((cp * cy) * bx + (sr * sp * cy - cr * sy) * by
-             + (cr * sp * cy + sr * sy) * bz)
-        e = ((cp * sy) * bx + (sr * sp * sy + cr * cy) * by
-             + (cr * sp * sy - sr * cy) * bz)
-        d = (-sp) * bx + (sr * cp) * by + (cr * cp) * bz
-        return (a["north_m"] + n, a["east_m"] + e, a["alt_m"] - d)
+    Returned faces are (body-frame vertices, rgb). The caller says which
+    source it drew, because "that is the real 747" and "that is a
+    stand-in" are different claims.
+    """
+    from .aircraft_mesh import load_triangles
 
-    # Metres, roughly a transport aircraft: long enough to read at chase
-    # range, small enough not to fill a tower frame.
-    return [
-        ("fuselage", [to_world(24.0, 0.0, 0.0), to_world(-22.0, 0.0, 0.0)]),
-        ("wing", [to_world(0.0, -28.0, 0.0), to_world(0.0, 28.0, 0.0)]),
-        ("tailplane", [to_world(-20.0, -10.0, 0.0),
-                       to_world(-20.0, 10.0, 0.0)]),
-        ("fin", [to_world(-20.0, 0.0, 0.0), to_world(-20.0, 0.0, -8.0)]),
-    ]
+    real = load_triangles(aircraft)
+    if real:
+        return real, "source mesh"
+    from .aircraft_model import body_faces
+
+    return body_faces(aircraft), "parametric stand-in"
+
+
+def _aircraft_faces(record, faces, camera):
+    """The solid airframe for this frame, back-to-front, each face with
+    its lambert term.
+
+    No back-face culling: the wings, tailplane and fin are single-sided
+    surfaces, and the mirrored (left) copies come out with reversed
+    winding, so culling by normal sign deleted exactly half the
+    aircraft. Shading uses |lambert| instead, which is right for a thin
+    surface lit from either side and harmless for the fuselage.
+    """
+    from .aircraft_model import body_to_world, face_normal
+
+    state = record["aircraft"]
+    origin = (state["north_m"], state["east_m"], state["alt_m"])
+    drawn = []
+    for vertices, colour in faces:
+        world = [body_to_world(v, state["roll_deg"], state["pitch_deg"],
+                               state["heading_deg"], origin)
+                 for v in vertices]
+        normal = face_normal(world)
+        centroid = tuple(sum(v[i] for v in world) / len(world)
+                         for i in range(3))
+        lambert = abs(sum(n * s for n, s in zip(normal, SUN)))
+        drawn.append((math.dist(centroid, camera), world, colour, lambert))
+    drawn.sort(key=lambda item: -item[0])
+    return drawn
+
+
+def _shadow_faces(record, faces, ground_alt: float):
+    """The airframe flattened onto the ground. Untextured solids float
+    without one -- the shadow is what says how high the aircraft is."""
+    from .aircraft_model import body_to_world
+
+    state = record["aircraft"]
+    origin = (state["north_m"], state["east_m"], state["alt_m"])
+    return [[(v[0], v[1], ground_alt)
+             for v in (body_to_world(c, state["roll_deg"], state["pitch_deg"],
+                                     state["heading_deg"], origin)
+                       for c in vertices)]
+            for vertices, _ in faces]
 
 
 def render_previews(manifest: Dict, out_dir, heightfield=None,
@@ -245,6 +273,10 @@ def render_previews(manifest: Dict, out_dir, heightfield=None,
               for corners, base in mesh]
 
     landmarks = manifest.get("landmarks") or []
+    aircraft = str(manifest.get("aircraft") or "B747")
+    ground_alt = float(terrain_elevation_m)
+    # Once per run: parsing the 747's .ac parts is not per-frame work.
+    airframe, airframe_source = airframe_geometry(aircraft)
     written: List[Path] = []
     for record in frames:
         width = max(int(record["width_px"]) // PREVIEW_SCALE, 16)
@@ -256,11 +288,20 @@ def render_previews(manifest: Dict, out_dir, heightfield=None,
         camera = (record["position_north_m"], record["position_east_m"],
                   record["position_alt_m"])
 
+        near = max(float(record.get("near_m", 0.1)), 0.1)
+        limit = 40.0 * max(width, height)
+
         def to_px(point):
             u, v, z = project_point(record, point)
-            if z <= 0 or not math.isfinite(u):
+            # Near-plane reject, not just "behind the camera": a vertex a
+            # few centimetres in front projects to an enormous pixel and
+            # Pillow happily fills the frame with the resulting polygon.
+            if z <= near or not math.isfinite(u):
                 return None
-            return u / PREVIEW_SCALE, v / PREVIEW_SCALE
+            x, y = u / PREVIEW_SCALE, v / PREVIEW_SCALE
+            if abs(x) > limit or abs(y) > limit:
+                return None
+            return x, y
 
         # Painter's algorithm: furthest cell first, so nearer ground
         # covers what is behind it instead of stippling through it.
@@ -300,22 +341,36 @@ def render_previews(manifest: Dict, out_dir, heightfield=None,
             draw.line([(x - 4, y), (x + 4, y)], fill=(255, 120, 120))
             draw.line([(x, y - 4), (x, y + 4)], fill=(255, 120, 120))
 
-        for name, segment in _body_glyph(record):
-            pixels = [to_px(p) for p in segment]
+        # The aircraft's shadow first: it lands on the ground, so the
+        # solid is drawn over it, and the ground is already down.
+        for shadow in _shadow_faces(record, airframe, ground_alt):
+            pixels = [to_px(v) for v in shadow]
             if any(p is None for p in pixels):
                 continue
-            draw.line(pixels, fill=(255, 226, 120),
-                      width=3 if name == "fuselage" else 2)
+            draw.polygon(pixels, fill=(58, 66, 52))
+
+        for _, vertices, colour, lambert in _aircraft_faces(
+                record, airframe, camera):
+            pixels = [to_px(v) for v in vertices]
+            if any(p is None for p in pixels):
+                continue
+            lit = 0.30 + 0.70 * max(0.0, lambert)
+            draw.polygon(pixels,
+                         fill=tuple(int(min(255, c * lit)) for c in colour))
 
         caption = (f"{record['camera_id']}  #{record['index']:03d}  "
-                   f"t={record['t_s']:.1f}s  "
+                   f"t={record['t_s']:.1f}s  {aircraft}  "
                    f"{record['focal_length_mm']:.0f}mm  "
-                   f"{int(record['width_px'])}x{int(record['height_px'])}")
+                   f"{int(record['width_px'])}x{int(record['height_px'])}  "
+                   f"roll {record['aircraft']['roll_deg']:+.1f} "
+                   f"pitch {record['aircraft']['pitch_deg']:+.1f}")
         draw.rectangle([0, 0, width, 30], fill=(12, 16, 24))
         draw.text((6, 4), caption, fill=(230, 230, 230))
         draw.text((6, 16),
-                  "GEOMETRY PREVIEW (no engine): terrain, track and "
-                  "aircraft through the recorded camera matrix",
+                  f"SOLID-SHADED PREVIEW -- no engine, no textures, no "
+                  f"materials. Airframe: {airframe_source}. Photographic "
+                  f"frames come from the Unreal host on Windows "
+                  f"(--render).",
                   fill=(150, 160, 175))
 
         path = (Path(out_dir) / "previews" / record["camera_id"]

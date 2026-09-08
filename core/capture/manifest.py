@@ -19,6 +19,7 @@ Top level::
     output_digest      SHA-256 over the recorded telemetry columns
                        (core.scenario.runner._digest_telemetry)
     seed               the spec's random seed
+    aircraft           the airframe that flew
     scene              {key, terrain, terrain_sha256} -- terrain_sha256
                        is the SHA-256 of the raw .r16 samples
                        (Heightfield.digest()), null for flat scenes
@@ -232,6 +233,10 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
         "simulation_digest": simulation_digest(spec),
         "output_digest": output_digest,
         "seed": int(spec.seed.value),
+        # Which airframe flew. The preview draws the real dimensions of
+        # THIS aircraft rather than one silhouette scaled by eye, and a
+        # downstream consumer needs it to know what the labels label.
+        "aircraft": str(spec.aircraft.value),
         "scene": {
             "key": (scene or {}).get("key", "flat"),
             "terrain": (scene or {}).get("terrain"),
