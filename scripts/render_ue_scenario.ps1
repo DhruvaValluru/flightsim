@@ -72,12 +72,28 @@ function Invoke-RenderPass {
         "-FullStdOutLogOutput", "-RenderOffScreen",
         "-AllowCommandletRendering"
     )
-    & $editor @arguments
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "commandlet exited $LASTEXITCODE -- no frames in $OutDir"
-        exit $LASTEXITCODE
-    }
-    if (-not (Test-Path (Join-Path $OutDir "render.json"))) {
+    # Keep the engine's own output. Without this the commandlet's named
+    # refusal -- the one thing that says WHY a pass produced no frames --
+    # scrolled past with the rest of UE's log and was gone.
+    $log = Join-Path $OutDir "render.log"
+    & $editor @arguments 2>&1 | Tee-Object -FilePath $log | Out-Null
+
+    if ($LASTEXITCODE -ne 0 -or
+        -not (Test-Path (Join-Path $OutDir "render.json"))) {
+        Write-Host ""
+        Write-Host "---- the commandlet's last words ($log) ----"
+        # The named refusals and any error/warning, then the tail, so the
+        # reason is on screen rather than buried in a 20 MB engine log.
+        $named = Select-String -Path $log -Pattern `
+            "LogFlightSimRender|consume-poses|cameras block|camera pose track|Error:|Fatal" |
+            Select-Object -Last 25
+        if ($named) { $named | ForEach-Object { Write-Host $_.Line } }
+        else { Get-Content $log -Tail 25 | ForEach-Object { Write-Host $_ } }
+        Write-Host "-------------------------------------------"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "commandlet exited $LASTEXITCODE -- no frames in $OutDir"
+            exit $LASTEXITCODE
+        }
         Write-Error "commandlet reported success but wrote no render.json in $OutDir"
         exit 1
     }
