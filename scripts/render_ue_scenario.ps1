@@ -62,6 +62,9 @@ function Invoke-RenderPass {
     # if the commandlet failed part way through.
     Remove-Item (Join-Path $OutDir "frame_*.png") -ErrorAction SilentlyContinue
     Remove-Item (Join-Path $OutDir "render.json") -ErrorAction SilentlyContinue
+    # Same reasoning, and it matters more: a stale host telemetry would be
+    # graded as if this pass had produced it.
+    Remove-Item (Join-Path $OutDir "host_telemetry.json") -ErrorAction SilentlyContinue
 
     $arguments = @(
         (Join-Path $repo "ue\FlightSim.uproject"),
@@ -109,7 +112,17 @@ if ($cameraIds.Count -eq 0) {
         $id = $cameraIds[$i]
         $outDir = Join-Path $frames $id
         Write-Host "camera $($i + 1)/$($cameraIds.Count): $id -> $outDir"
-        $count = Invoke-RenderPass -OutDir $outDir -ExtraArgs @("-camera-index=$i")
+        # -telemetry= makes the host record the flight it ACTUALLY flew.
+        # Without it the host records nothing, and flight_agreement --
+        # the one check standing between the manifest and "one flight,
+        # not two" -- had no host flight to read. It read the headless
+        # pre-run's telemetry.json instead, which is the very file the
+        # manifest's aircraft track was solved from, and reported 0.00 m
+        # every time. Only the camera path passes this: the camera-less
+        # path's arguments are pinned byte-identical by test.
+        $count = Invoke-RenderPass -OutDir $outDir -ExtraArgs @(
+            "-camera-index=$i",
+            "-telemetry=$(Join-Path $outDir 'host_telemetry.json')")
         Write-Host "  wrote $count frames"
         $total += $count
     }

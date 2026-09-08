@@ -1096,22 +1096,35 @@ def verify_flight_agreement(manifest: Dict, run_dir=None,
         return Check("flight_agreement", NOT_RUN,
                      "no run directory given, so the host's telemetry "
                      "cannot be compared against the manifest's")
-    path = Path(run_dir) / "telemetry.json"
-    if not path.is_file():
+    # The HOST's own recording, written by the render pass into the
+    # camera's directory -- never <run>/telemetry.json, which is the
+    # headless pre-run the manifest's aircraft track was SOLVED FROM.
+    # Reading that one made this check compare the pre-run against
+    # itself: structurally 0.00 m, on every run, whatever the host
+    # actually flew. It is the P10 guard, and it had the P1 defect.
+    # The two files carry the same four column names, which is exactly
+    # why pointing at the wrong one looked like it worked.
+    hosts = sorted(Path(run_dir).rglob("host_telemetry.json"))
+    if not hosts:
         return Check(
             "flight_agreement", NOT_RUN,
-            "no host telemetry.json beside the manifest: nothing rendered "
-            "here, so there is only one flight and nothing to disagree")
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        return Check("flight_agreement", NOT_RUN,
-                     f"host telemetry could not be read ({exc})")
-    columns = payload.get("columns", payload)
+            "no host_telemetry.json under the run directory: the render "
+            "host recorded no flight of its own, so there is nothing to "
+            "compare the manifest's aircraft track against. Render on "
+            "Windows to exercise this")
+    columns_by_camera: Dict[str, Dict] = {}
     needed = ("t", "lat_deg", "lon_deg", "altitude_m")
-    if not all(key in columns for key in needed):
-        return Check("flight_agreement", NOT_RUN,
-                     f"host telemetry carries no {needed} columns")
+    for path in hosts:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            return Check("flight_agreement", NOT_RUN,
+                         f"host telemetry could not be read ({exc})")
+        columns = payload.get("columns", payload)
+        if not all(key in columns for key in needed):
+            return Check("flight_agreement", NOT_RUN,
+                         f"host telemetry carries no {needed} columns")
+        columns_by_camera[path.parent.name] = columns
 
     frame_meta = manifest.get("frame") or {}
     try:
@@ -1123,43 +1136,109 @@ def verify_flight_agreement(manifest: Dict, run_dir=None,
         return Check("flight_agreement", NOT_RUN,
                      f"the manifest's CRS could not be opened ({exc})")
 
-    times = [float(v) for v in columns["t"]]
-    if len(times) < 2:
+    times_by_camera = {camera: [float(v) for v in cols["t"]]
+                       for camera, cols in columns_by_camera.items()}
+    if not any(len(t) >= 2 for t in times_by_camera.values()):
         return Check("flight_agreement", NOT_RUN,
                      "host telemetry has fewer than two samples")
 
     worst = 0.0
     worst_t = 0.0
+    worst_camera = ""
     compared = 0
+    unmatched = 0
+    edge = 0
+    outside: List[str] = []
     for record in manifest.get("frames", []):
-        t = float(record["t_s"])
-        # Nearest host sample to this frame's simulation time.
-        index = min(range(len(times)), key=lambda i: abs(times[i] - t))
-        if abs(times[index] - t) > 0.5:
+        # Each camera pass is its own flight of the host, so a frame is
+        # graded against the flight that produced IT -- not against
+        # whichever host recording happened to be found first.
+        camera = str(record.get("camera_id"))
+        columns = columns_by_camera.get(camera)
+        if columns is None:
+            unmatched += 1
             continue
-        x, y = transformer.transform(float(columns["lon_deg"][index]),
-                                     float(columns["lat_deg"][index]))
+        times = times_by_camera[camera]
+        t = float(record["t_s"])
+        # INTERPOLATE to the frame's own instant; do not snap to the
+        # nearest host sample. The host records every 0.1 s and a
+        # 280 kt aircraft covers 8.3 m in half of that, so snapping
+        # reported up to ~8 m of pure time quantisation as though it
+        # were flight divergence -- which both inflates the number
+        # (12.46 m measured, against a true divergence nearer 2.8 m)
+        # and eats most of the tolerance, leaving the check able to
+        # catch only what is bigger than its own noise.
+        upper = None
+        for i in range(1, len(times)):
+            if times[i - 1] <= t <= times[i]:
+                upper = i
+                break
+        if upper is None:
+            # Outside the host's own track, and never extrapolated. A
+            # frame just past either end is the recorder's granularity
+            # -- it samples every SampleIntervalSeconds and the last
+            # capture instant can fall inside that final interval, so
+            # the last frame of every run lands here. A frame outside
+            # by MORE than one interval means the host stopped flying
+            # before the run ended, which is not granularity and is not
+            # allowed to pass quietly.
+            interval = ((times[-1] - times[0]) / (len(times) - 1)
+                        if len(times) > 1 else 0.0)
+            if t < times[0] - interval or t > times[-1] + interval:
+                outside.append(f"{camera} t={t:.3f}s")
+            else:
+                edge += 1
+            continue
+        lower = upper - 1
+        span = times[upper] - times[lower]
+        fraction = (t - times[lower]) / span if span > 0 else 0.0
+
+        def at(key, i):
+            return float(columns[key][i])
+
+        def lerp(key):
+            return at(key, lower) + fraction * (at(key, upper) - at(key, lower))
+
+        x, y = transformer.transform(lerp("lon_deg"), lerp("lat_deg"))
         host = (y - float(frame_meta["origin_y_m"]),
                 x - float(frame_meta["origin_x_m"]),
-                float(columns["altitude_m"][index]))
+                lerp("altitude_m"))
         gap = math.dist(_aircraft_point(record), host)
         if gap > worst:
-            worst, worst_t = gap, t
+            worst, worst_t, worst_camera = gap, t, camera
         compared += 1
     if compared == 0:
         return Check("flight_agreement", NOT_RUN,
                      "no frame time matched a host telemetry sample")
+    if unmatched:
+        return Check(
+            "flight_agreement", FAIL,
+            f"{unmatched} frames name a camera that recorded no host "
+            f"flight, so nothing grades them; host flights present for "
+            f"{sorted(columns_by_camera)}")
+    if outside:
+        return Check(
+            "flight_agreement", FAIL,
+            f"{len(outside)} frames fall outside the host's recorded "
+            f"flight by more than one sample interval, so the host was "
+            f"not flying when they were taken and nothing grades them: "
+            + ", ".join(outside[:5])
+            + (f" (+{len(outside) - 5} more)" if len(outside) > 5 else ""))
     if worst > tol_m:
         return Check(
             "flight_agreement", FAIL,
             f"the manifest's aircraft track and the host's recorded "
-            f"flight differ by up to {worst:.1f} m (at t={worst_t:.2f}s, "
-            f"tol {tol_m:g} m) over {compared} frames: the labels "
-            f"describe a different flight than the frames show")
+            f"flight differ by up to {worst:.1f} m (at t={worst_t:.2f}s "
+            f"on {worst_camera}, tol {tol_m:g} m) over {compared} "
+            f"frames: the labels describe a different flight than the "
+            f"frames show")
     return Check("flight_agreement", PASS,
-                 f"{compared} frames; the manifest's aircraft track "
-                 f"matches the host's recorded flight to within "
-                 f"{worst:.2f} m (tol {tol_m:g} m)")
+                 f"{compared} frames against {len(columns_by_camera)} "
+                 f"host flight(s); the manifest's aircraft track matches "
+                 f"the host's recorded flight to within {worst:.2f} m "
+                 f"(tol {tol_m:g} m)"
+                 + (f"; {edge} frame(s) sat inside the recorder's final "
+                    f"sample interval and were not graded" if edge else ""))
 
 
 # -- check: temporal alignment ------------------------------------------
