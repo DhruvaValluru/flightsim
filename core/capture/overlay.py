@@ -35,7 +35,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .landmarks import landmark_point
-from .verify import _engine_landmark_pixels, axes_from_quat, project_point
+from .verify import (_engine_landmark_pixels, _record_in_enu, axes_from_quat,
+                     project_point, scene_to_enu)
 
 #: Colours, chosen to stay legible over both sky and terrain.
 AIRCRAFT = (255, 214, 64)
@@ -100,11 +101,20 @@ def draw_overlays(manifest: Dict, run_dir, out_subdir: str = "overlays",
     if max_frames is not None:
         frames = frames[:max_frames]
 
+    # These marks are drawn ON the host's pixels, so every world point
+    # here has to be projected in the host's own frame -- otherwise the
+    # circle and the cross are 0.6 px apart for no reason but the frame
+    # each was computed in, which is exactly the disagreement the
+    # overlay exists to make visible. See verify.scene_to_enu.
+    to_enu = scene_to_enu(manifest)
+    world = (lambda p: to_enu(*p)) if to_enu is not None else (lambda p: p)
+
     written: List[Path] = []
     for record in frames:
         source = run_dir / str(record.get("file", ""))
         if not source.is_file():
             continue
+        placed = _record_in_enu(record, to_enu)
         image = Image.open(source).convert("RGB")
         draw = ImageDraw.Draw(image)
         width, height = image.size
@@ -116,7 +126,7 @@ def draw_overlays(manifest: Dict, run_dir, out_subdir: str = "overlays",
         measured = engine.get(str(record.get("file")), {})
         for landmark in landmarks:
             name = str(landmark["name"])
-            u, v, z = project_point(record, landmark_point(landmark))
+            u, v, z = project_point(placed, world(landmark_point(landmark)))
             if z > 0 and math.isfinite(u) and 0 <= u < width and 0 <= v < height:
                 draw.ellipse([u - 5, v - 5, u + 5, v + 5],
                              outline=MANIFEST_MARK, width=2)
@@ -130,14 +140,14 @@ def draw_overlays(manifest: Dict, run_dir, out_subdir: str = "overlays",
         for segment in _body_glyph(record):
             pixels = []
             for point in segment:
-                u, v, z = project_point(record, point)
+                u, v, z = project_point(placed, world(point))
                 pixels.append((u, v) if z > 0 and math.isfinite(u) else None)
             if all(p is not None for p in pixels):
                 draw.line(pixels, fill=AIRCRAFT, width=2)
 
-        u, v, z = project_point(record, (record["aircraft"]["north_m"],
-                                         record["aircraft"]["east_m"],
-                                         record["aircraft"]["alt_m"]))
+        u, v, z = project_point(placed, world(
+            (record["aircraft"]["north_m"], record["aircraft"]["east_m"],
+             record["aircraft"]["alt_m"])))
         if z > 0 and math.isfinite(u):
             draw.line([(u - 18, v), (u - 6, v)], fill=AIRCRAFT, width=2)
             draw.line([(u + 6, v), (u + 18, v)], fill=AIRCRAFT, width=2)

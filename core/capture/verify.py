@@ -156,6 +156,101 @@ def axes_from_euler(roll_deg: float, pitch_deg: float, yaw_deg: float):
     return forward, right, up
 
 
+def scene_to_enu(manifest: Dict):
+    """``f(north_m, east_m, alt_m) -> (north, east, up)`` metres in the
+    frame the RENDER HOST actually places things in, or ``None``.
+
+    A manifest's positions are offsets in the scene's projected CRS
+    about a recorded origin (``manifest["frame"]``: ``crs``,
+    ``origin_x_m``, ``origin_y_m``, ``origin_lat_deg``,
+    ``origin_lon_deg``) -- grid metres, not local Cartesian ones. The
+    render host reads them as exactly that and walks
+    projected -> geographic -> ECEF -> a round-planet ENU tangent frame
+    (``AGeoReferencingSystem``, ``PlanetShape=RoundPlanet``). Every
+    check here that compares a projection against the engine's own has
+    to stand in the same frame or it is grading two different scenes.
+
+    It matters more than "projections are approximate" suggests, and
+    the size is measured, not assumed. The example run's origin sits
+    334 km off the UTM 31N central meridian, where the point scale
+    factor is 1.00097: grid metres are 0.097% longer than ground
+    metres, HORIZONTALLY ONLY -- altitude passes through untouched --
+    so the mismatch is an anisotropic squeeze that no common scaling
+    cancels, and earth curvature drops a further 0.8 m over the tower
+    camera's 3.2 km sightline. Reading the frame flat put this
+    module's landmark projections 0.60 px from the engine's (mean 0.23
+    px on the chase camera, 0.36 px on the tower camera, systematic in
+    sign, growing with range). Walking the same chain the host walks
+    takes that to 0.0013 px worst of 916 projections -- float noise.
+    That 0.60 px is what made two-view triangulation miss by up to
+    1.17 m: at 3.2 km, one pixel is 2.6 m.
+
+    Returns ``None`` when the manifest declares no usable frame -- a
+    synthetic manifest built for a unit test has none, and for a scene
+    with no projection the flat reading IS the right one.
+    """
+    frame = manifest.get("frame")
+    if not isinstance(frame, dict):
+        return None
+    try:
+        crs = str(frame["crs"])
+        origin_x = float(frame["origin_x_m"])
+        origin_y = float(frame["origin_y_m"])
+        lat0 = float(frame["origin_lat_deg"])
+        lon0 = float(frame["origin_lon_deg"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    try:
+        from pyproj import Transformer
+    except ImportError:                     # pragma: no cover
+        return None
+    try:
+        to_geographic = Transformer.from_crs(crs, "EPSG:4979", always_xy=True)
+        to_ecef = Transformer.from_crs("EPSG:4979", "EPSG:4978", always_xy=True)
+        x0, y0, z0 = to_ecef.transform(lon0, lat0, 0.0)
+    except Exception:                       # pragma: no cover
+        return None
+    sin_lat, cos_lat = math.sin(math.radians(lat0)), math.cos(math.radians(lat0))
+    sin_lon, cos_lon = math.sin(math.radians(lon0)), math.cos(math.radians(lon0))
+
+    def convert(north_m, east_m, alt_m):
+        lon, lat, height = to_geographic.transform(
+            origin_x + float(east_m), origin_y + float(north_m), float(alt_m))
+        x, y, z = to_ecef.transform(lon, lat, height)
+        dx, dy, dz = x - x0, y - y0, z - z0
+        # The origin's own altitude never enters: every consumer takes
+        # a DIFFERENCE of two converted points, and a common
+        # translation cancels out of it.
+        east = -sin_lon * dx + cos_lon * dy
+        north = -sin_lat * cos_lon * dx - sin_lat * sin_lon * dy + cos_lat * dz
+        up = cos_lat * cos_lon * dx + cos_lat * sin_lon * dy + sin_lat * dz
+        return north, east, up
+
+    return convert
+
+
+def _record_in_enu(record: Dict, to_enu) -> Dict:
+    """``record`` with its camera position moved into the host's frame.
+
+    The recorded ROTATION is left exactly as it is: the host applies
+    the card's yaw/pitch/roll directly in its ENU frame, so the
+    verifier must read them there too. (Grid convergence would separate
+    grid north from true north elsewhere; at this scene's equatorial
+    origin it is identically zero, and the 0.0013 px residual says the
+    host is doing no other rotation either.)
+    """
+    if to_enu is None:
+        return record
+    north, east, up = to_enu(record["position_north_m"],
+                             record["position_east_m"],
+                             record["position_alt_m"])
+    moved = dict(record)
+    moved["position_north_m"] = north
+    moved["position_east_m"] = east
+    moved["position_alt_m"] = up
+    return moved
+
+
 def project_point(record: Dict, point, axes=None) -> Tuple[float, float, float]:
     """(u_px, v_px, depth_m) of a world point through one frame record,
     the manifest's documented model, implemented here from scratch."""
@@ -752,6 +847,7 @@ def verify_landmark_reprojection(manifest: Dict, run_dir=None,
         return Check("landmark_reprojection", NOT_RUN,
                      "the manifest records no landmarks to reproject")
     known = by_name(manifest["landmarks"])
+    to_enu = scene_to_enu(manifest)
     compared = 0
     worst = 0.0
     disagreements: List[str] = []
@@ -759,11 +855,15 @@ def verify_landmark_reprojection(manifest: Dict, run_dir=None,
         pixels = engine.get(str(record.get("file")))
         if not pixels:
             continue
+        placed = _record_in_enu(record, to_enu)
         for name, (px, py, visible) in pixels.items():
             landmark = known.get(name)
             if landmark is None or not visible:
                 continue
-            u, v, z = project_point(record, landmark_point(landmark))
+            point = landmark_point(landmark)
+            if to_enu is not None:
+                point = to_enu(*point)
+            u, v, z = project_point(placed, point)
             if z <= 0 or not math.isfinite(u):
                 disagreements.append(
                     f"{record['camera_id']} #{record['index']}: the "
@@ -820,17 +920,24 @@ def verify_triangulation(manifest: Dict, run_dir=None,
         return Check("cross_view_consistency", NOT_RUN,
                      "the manifest records no landmarks to triangulate")
 
+    # Both rays and the truth they are graded against stand in the
+    # host's frame -- see scene_to_enu. Triangulating grid-metre rays
+    # against a grid-metre truth would miss by up to 1.17 m here for
+    # no reason but the frame.
+    to_enu = scene_to_enu(manifest)
+
     # (sample_index, landmark) -> [(record, u, v)]
     sightings: Dict[Tuple[int, str], List] = {}
     for record in manifest.get("frames", []):
         pixels = measured.get(str(record.get("file")))
         if not pixels:
             continue
+        placed = _record_in_enu(record, to_enu)
         for name, (px, py, visible) in pixels.items():
             if not visible or name not in known:
                 continue
             sightings.setdefault((int(record["sample_index"]), name),
-                                 []).append((record, px, py))
+                                 []).append((placed, px, py))
 
     pairs = 0
     worst = 0.0
@@ -847,6 +954,8 @@ def verify_triangulation(manifest: Dict, run_dir=None,
         if recovered is None:
             continue                    # parallel rays carry no depth
         truth = landmark_point(known[name])
+        if to_enu is not None:
+            truth = to_enu(*truth)
         error = math.dist(recovered, truth)
         worst = max(worst, error)
         pairs += 1

@@ -80,6 +80,51 @@ def engine_style_pixel(record, point):
     return px, py, (0.0 <= px < width and 0.0 <= py < height)
 
 
+def engine_frame_converter(manifest):
+    """``f(north, east, alt) -> (north, east, up)`` in the metric ENU
+    frame the render host places things in.
+
+    A card position is NOT local Cartesian metres and the commandlet
+    does not read it as such: it adds the offset to the scene origin's
+    easting/northing and hands the result to ``AGeoReferencingSystem``
+    (``PlanetShape=RoundPlanet``), which walks projected -> geographic
+    -> ECEF -> a round-planet ENU tangent frame. A stand-in that skips
+    that step is not standing in for the commandlet, it is a flat-earth
+    engine -- and at this scene's origin, 334 km off the UTM 31N
+    central meridian where the point scale factor is 1.00097, the
+    difference is 0.6 px of reprojection and up to 1.1 m of two-view
+    triangulation error. Small enough to hide under the 2 px
+    reprojection tolerance; not small enough to hide under the 0.5 m
+    triangulation one, which is how the real render found it.
+
+    Built here from pyproj on the manifest's own recorded frame, so it
+    stays independent of ``core.capture.verify``'s converter in the
+    way the rest of this file is independent of its projection.
+    """
+    from pyproj import Transformer
+
+    frame = manifest["frame"]
+    origin_x, origin_y = frame["origin_x_m"], frame["origin_y_m"]
+    lat0, lon0 = frame["origin_lat_deg"], frame["origin_lon_deg"]
+    to_geographic = Transformer.from_crs(frame["crs"], "EPSG:4979",
+                                         always_xy=True)
+    to_ecef = Transformer.from_crs("EPSG:4979", "EPSG:4978", always_xy=True)
+    x0, y0, z0 = to_ecef.transform(lon0, lat0, 0.0)
+    sin_lat, cos_lat = math.sin(math.radians(lat0)), math.cos(math.radians(lat0))
+    sin_lon, cos_lon = math.sin(math.radians(lon0)), math.cos(math.radians(lon0))
+
+    def convert(north_m, east_m, alt_m):
+        lon, lat, height = to_geographic.transform(
+            origin_x + east_m, origin_y + north_m, alt_m)
+        x, y, z = to_ecef.transform(lon, lat, height)
+        dx, dy, dz = x - x0, y - y0, z - z0
+        return (-sin_lat * cos_lon * dx - sin_lat * sin_lon * dy + cos_lat * dz,
+                -sin_lon * dx + cos_lon * dy,
+                cos_lat * cos_lon * dx + cos_lat * sin_lon * dy + sin_lat * dz)
+
+    return convert
+
+
 def counted(preset, camera_id, count=10, **kwargs):
     camera = CameraSpec.defaulted(camera_id=camera_id, preset=preset,
                                   aircraft="B747", **kwargs)
@@ -104,16 +149,25 @@ def write_render_json(manifest, run_dir, jitter_px=0.0, only_camera=None):
     directory, with every landmark projected the engine's way."""
     from core.capture.landmarks import landmark_point
 
+    to_enu = engine_frame_converter(manifest)
     by_camera = {}
     for record in manifest["frames"]:
         by_camera.setdefault(record["camera_id"], []).append(record)
     for camera_id, records in by_camera.items():
         frames = []
         for record in records:
+            # Camera and landmark both into the host's frame; the
+            # recorded rotation is applied there unchanged, as the
+            # commandlet applies it.
+            placed = dict(record)
+            (placed["position_north_m"], placed["position_east_m"],
+             placed["position_alt_m"]) = to_enu(record["position_north_m"],
+                                                record["position_east_m"],
+                                                record["position_alt_m"])
             landmarks = {}
             for landmark in manifest["landmarks"]:
                 px, py, visible = engine_style_pixel(
-                    record, landmark_point(landmark))
+                    placed, to_enu(*landmark_point(landmark)))
                 if only_camera in (None, camera_id):
                     px += jitter_px
                 landmarks[landmark["name"]] = {
