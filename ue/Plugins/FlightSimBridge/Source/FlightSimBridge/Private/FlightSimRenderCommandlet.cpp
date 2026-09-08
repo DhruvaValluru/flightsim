@@ -529,6 +529,33 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		ASkyLight* Sky = World->SpawnActor<ASkyLight>();
 		Sky->GetLightComponent()->SetMobility(EComponentMobility::Movable);
 		Sky->GetLightComponent()->SetIntensity(1.1f);
+
+		// ...and a fill from the opposite hemisphere, because in this scene
+		// that SkyLight delivers NOTHING. Its source is the captured scene,
+		// and the scene is a deliberately black void: it captures black and
+		// adds black. So the airframe was lit from exactly one direction,
+		// and every surface facing away from the sun rendered at 13/255 --
+		// the background's own noise floor, below the 24 that separates
+		// aircraft from void. Measured on the tower camera, which looks UP
+		// at the belly from 68 deg below: 18 of 24 frames came back with
+		// literally nothing above the background, while the solved pose had
+		// the aircraft dead centre (648, 360) and 25 px across the whole
+		// time. The frames were empty because the belly is unlit, not
+		// because the camera was aimed wrong.
+		//
+		// A mirrored key at half intensity is the studio answer: it lights
+		// the shadow side to ~65/255 against the sunlit side's ~130, so an
+		// observer anywhere on the sphere sees an airframe, and the sun is
+		// still visibly the sun. It casts no shadows -- a second shadowing
+		// directional light would put a contradictory shadow under the
+		// aircraft in the -Visual scene's terms and this tier has no ground
+		// to catch one anyway. It cannot brighten the background: a
+		// directional light illuminates surfaces, and the void has none.
+		ADirectionalLight* Fill = World->SpawnActor<ADirectionalLight>();
+		Fill->GetLightComponent()->SetMobility(EComponentMobility::Movable);
+		Fill->SetActorRotation(FRotator(35.0, -40.0, 0.0));
+		Fill->GetLightComponent()->SetIntensity(4.0f);
+		Fill->GetLightComponent()->SetCastShadows(false);
 	}
 
 	UFlightSimSurfaceAnimator* Animator =
