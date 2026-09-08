@@ -879,7 +879,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			       ConsumedCameraIndex, CamerasJson->Num(), Count);
 			// Place the camera at its first solved pose before the warm-up
 			// captures, replacing the chase settle-in placement above.
-			if (!Director->ApplyPoseAtTime(0.0, Error))
+			// "First solved pose" is the track's own start, not t=0: the
+			// telemetry recorder's first sample is one step in.
+			if (!Director->ApplyPoseAtTime(Director->TrackStartSeconds(),
+			                               Error))
 			{
 				return Fail(Error);
 			}

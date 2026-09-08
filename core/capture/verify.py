@@ -606,6 +606,80 @@ def _engine_landmark_pixels(run_dir) -> Dict:
     return out
 
 
+def _engine_frame_times(run_dir) -> Dict[str, float]:
+    """``{frame_file: sim time the engine actually rendered it at}``.
+
+    The commandlet records its own clock per frame. The manifest states
+    the SCHEDULED instant. They are not automatically the same: capture
+    times come off the telemetry clock while the renderer advances on
+    its own frame grid, so the frame delivered for a scheduled instant
+    is the first one at or after it.
+    """
+    if run_dir is None:
+        return {}
+    run_dir = Path(run_dir)
+    out: Dict[str, float] = {}
+    for path in sorted(run_dir.rglob("render.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        try:
+            prefix = path.parent.relative_to(run_dir).as_posix()
+        except ValueError:
+            prefix = ""
+        for record in payload.get("frames", []) or []:
+            name = record.get("frame") or record.get("file")
+            if not name or "t" not in record:
+                continue
+            leaf = str(name).replace("\\", "/").rsplit("/", 1)[-1]
+            out[f"{prefix}/{leaf}" if prefix else leaf] = float(record["t"])
+    return out
+
+
+def verify_capture_times(manifest: Dict, run_dir=None,
+                         tol_s: float = 0.05) -> Check:
+    """The frame delivered for a scheduled instant must be FROM that
+    instant.
+
+    Every label in a frame record -- the camera pose, the aircraft
+    state -- is stated for ``t_s``. If the pixels come from a different
+    moment, the labels describe a world the picture does not show, and
+    nothing inside the manifest can reveal it. The engine's own
+    per-frame clock is the reference.
+    """
+    engine = _engine_frame_times(run_dir)
+    if not engine:
+        return Check("capture_time_agreement", NOT_RUN,
+                     "no render.json with per-frame times: nothing was "
+                     "rendered here, so the scheduled instant is the only "
+                     "instant")
+    worst = 0.0
+    worst_frame = ""
+    compared = 0
+    for record in manifest.get("frames", []):
+        actual = engine.get(str(record.get("file")))
+        if actual is None:
+            continue
+        gap = abs(actual - float(record["t_s"]))
+        compared += 1
+        if gap > worst:
+            worst, worst_frame = gap, str(record.get("file"))
+    if compared == 0:
+        return Check("capture_time_agreement", NOT_RUN,
+                     "no rendered frame matched a manifest frame record")
+    if worst > tol_s:
+        return Check(
+            "capture_time_agreement", FAIL,
+            f"a frame was rendered {worst:.4f} s from the instant its "
+            f"record states ({worst_frame}, tol {tol_s:g} s) over "
+            f"{compared} frames: the labels describe a moment the "
+            f"pixels do not show")
+    return Check("capture_time_agreement", PASS,
+                 f"{compared} frames rendered within {worst:.4f} s of the "
+                 f"instant each record states (tol {tol_s:g} s)")
+
+
 def _landmark_coverage(manifest: Dict) -> Tuple[int, float]:
     """(landmark projections that land in frame, worst radial offset
     from the principal point as a fraction of the half-diagonal).
@@ -1033,6 +1107,7 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     report.checks.append(verify_counts(manifest))
     report.checks.append(verify_aircraft_consistency(manifest))
     report.checks.append(verify_flight_agreement(manifest, run_dir))
+    report.checks.append(verify_capture_times(manifest, run_dir))
 
     if other_run_dir is not None:
         other = read_capture_manifest(

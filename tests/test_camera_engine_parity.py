@@ -210,3 +210,52 @@ def test_triangulation_catches_one_camera_in_the_wrong_place(
     check = verify_triangulation(manifest, tmp_path)
     assert check.status == FAIL
     assert "triangulates" in check.detail
+
+
+def write_frame_times(manifest, run_dir, offset_s=0.0):
+    """render.json carrying the engine's own per-frame clock."""
+    by_camera = {}
+    for record in manifest["frames"]:
+        by_camera.setdefault(record["camera_id"], []).append(record)
+    for camera_id, records in by_camera.items():
+        frames = [{"frame": Path(r["file"]).name,
+                   "t": float(r["t_s"]) + offset_s} for r in records]
+        path = run_dir / "frames" / camera_id
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "render.json").write_text(json.dumps({"frames": frames}),
+                                          encoding="utf-8")
+
+
+def test_capture_times_not_run_without_a_render(manifest, tmp_path):
+    from core.capture.verify import verify_capture_times
+
+    assert verify_capture_times(manifest, tmp_path).status == NOT_RUN
+
+
+def test_frames_rendered_at_their_stated_instant_pass(manifest, tmp_path):
+    from core.capture.verify import verify_capture_times
+
+    write_frame_times(manifest, tmp_path)
+    assert verify_capture_times(manifest, tmp_path).status == PASS
+
+
+def test_a_frame_from_the_wrong_instant_is_caught(manifest, tmp_path):
+    """Capture times come off the telemetry clock; the renderer advances
+    on its own frame grid. A frame delivered for a scheduled instant but
+    taken from a different one carries labels for a world it does not
+    show, and nothing inside the manifest can reveal it."""
+    from core.capture.verify import verify_capture_times
+
+    write_frame_times(manifest, tmp_path, offset_s=0.4)
+    check = verify_capture_times(manifest, tmp_path)
+    assert check.status == FAIL
+    assert "the pixels do not show" in check.detail
+
+
+def test_frame_grid_quantisation_is_within_tolerance(manifest, tmp_path):
+    """One 30 fps frame interval of lateness is the renderer's grid, not
+    a desync: the check bounds it rather than demanding the impossible."""
+    from core.capture.verify import verify_capture_times
+
+    write_frame_times(manifest, tmp_path, offset_s=1.0 / 30.0)
+    assert verify_capture_times(manifest, tmp_path).status == PASS

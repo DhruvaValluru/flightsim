@@ -138,6 +138,17 @@ public:
 
 	bool ConsumingPoses() const { return PoseTimes.Num() > 0; }
 
+	// The first solved instant. The warm-up placement wants THIS, not
+	// zero: the recorder's first sample is one step in (t = 1/rate), so
+	// asking for t=0 lands outside the track and is refused -- correctly,
+	// by a guard that exists to catch a track that does not cover the
+	// run. Nothing is being relaxed here; the caller was asking the
+	// wrong question.
+	double TrackStartSeconds() const
+	{
+		return PoseTimes.Num() > 0 ? PoseTimes[0] : 0.0;
+	}
+
 	// Place the camera exactly where the solved track says it is at
 	// SimTimeSeconds. False (with the reason) when no track is set, the
 	// time lies outside the track's span, or the pose the engine actually
