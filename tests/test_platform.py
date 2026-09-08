@@ -106,12 +106,15 @@ def test_font_chain_and_honest_degradation(monkeypatch, tmp_path, capsys):
     assert "WARNING" in capsys.readouterr().out
 
 
-def test_webapp_refuses_ue_platform_off_mac(monkeypatch):
-    """Off-mac a render request is the NAMED ue.platform refusal on the
-    page, never a 500; the headless half stays available."""
+def test_webapp_refuses_the_pixels_by_name_off_mac(monkeypatch):
+    """Off-mac the PIXELS are the NAMED ue.platform refusal, never a
+    500 -- and (Camera Phase 1) never the whole run either: the capture
+    manifest is written for every run on every platform, so the refusal
+    rides the started run instead of replacing it."""
     from fastapi.testclient import TestClient
 
     from core.nl.compiler import compile_prompt
+    from webapp.runs import RunManager
     from webapp.server import app
 
     monkeypatch.setattr(plat, "ue_available", lambda: False)
@@ -119,22 +122,19 @@ def test_webapp_refuses_ue_platform_off_mac(monkeypatch):
     # flat scene and hold the mesh gate open so the test measures the
     # same thing on a machine with or without local bakes and models.
     import webapp.runs as runs_module
-    import webapp.server as server_module
 
     monkeypatch.setattr(runs_module, "pick_scene",
                         lambda spec: {"key": "flat", "kind": "flat",
                                       "terrain": None, "imagery": None,
                                       "label": "flat (test)"})
-    monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
+    monkeypatch.setattr(runs_module, "refuse_placeholder_mesh",
                         lambda spec: None)
     spec = compile_prompt("fly the 747 at 3000 m and 250 kt")
-    client = TestClient(app)
-    reply = client.post("/run", json={"spec": spec.to_dict()})
-    assert reply.status_code == 409
-    body = reply.json()
-    assert body.get("constraint") == "ue.platform"
-    assert "macOS" in body["refused"]
+    refusal = RunManager.render_refusal(spec)
+    assert refusal["constraint"] == "ue.platform"
+    assert "macOS" in refusal["message"]
 
+    client = TestClient(app)
     status = client.get("/status").json()
     assert status["platform"] in ("mac", "linux", "windows")
     assert isinstance(status["render_available"], bool)

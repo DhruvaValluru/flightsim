@@ -70,7 +70,9 @@ on all three OSes. The UE render half runs on macOS (where every render
 calibration was measured, on Metal) and on Windows once the build steps
 below have produced the bridge -- until then Windows refuses as
 `ue.platform` with the exact missing piece, and the web app still
-delivers the headless half (spec, provenance, validation, telemetry).
+delivers everything else -- spec, provenance, validation, telemetry AND
+the Camera Phase 1 capture manifest, geometry previews and geometry
+verification, which is the whole deliverable except the pixels.
 The render calibrations were measured on Metal only, so on Windows run
 `experiments/gate6_visual.py` once after building: it re-measures the
 visual clauses from the rendered pixels on YOUR machine, which is the
@@ -228,18 +230,50 @@ gate, the breadth behind Gate 5's single case:
 ## Capture camera geometry (Camera Phase 1, any platform)
 
 Cameras are spec elements (provenanced, validated, digest-relevant --
-see `docs/CAMERA_PHASE1_REPORT.md`). A run captures a DEFINED number of
-frames, each with full recoverable geometry, engine or no engine:
+see `docs/CAMERA_PHASE1_REPORT.md`, and `docs/CAMERA_PHASE1_GRADE.md`
+for what was measured wrong and fixed). A run captures a DEFINED number
+of frames, each with full recoverable geometry, engine or no engine.
+
+**One command, every platform** -- captures a specification twice with
+different camera sets and reports alignment, geometry recovery and
+cross-view consistency in one pass/fail summary:
 
 ```bash
-.venv/bin/python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo
-.venv/bin/python -m flightsim.verify runs/demo
+./scripts/verify_phase1.sh          # Windows: .\scripts\verify_phase1.ps1
 ```
 
-Off macOS the pixel render refuses by name (`ue.platform`) while the
-capture manifest, geometry previews and verification complete; the
-refusal example (`examples/cameras_refusal.yaml`) shows a camera placed
-inside terrain refused as `camera.terrain_clearance`.
+Or the pieces:
+
+```bash
+# macOS / Linux                            # Windows
+.venv/bin/python -m flightsim.demo         .\.venv\Scripts\python.exe -m flightsim.demo
+.venv/bin/python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo
+.venv/bin/python -m flightsim.verify runs/demo
+.venv/bin/pytest tests/test_camera_spec.py tests/test_camera_poses.py -q
+```
+
+Off a render-capable machine the pixel render refuses by name
+(`ue.platform`) while the capture manifest, geometry previews and
+verification complete. **This is also true in the web app**: a run on
+Windows or Linux writes its capture manifest, draws its geometry
+previews and reports its verification on the page, and only the
+photographic frames are refused (`GET /runs/<id>/capture_manifest.json`,
+`GET /runs/<id>/verify`, `GET /runs/<id>/previews/<camera>/<file>`).
+
+Committed examples, all runnable with no network and no account:
+
+| example | what it shows | expected |
+|---|---|---|
+| `cameras_multi.yaml` | two cameras, one flight, 24 images each | 48 frames, 8/8 checks |
+| `cameras_waypoint.yaml` | waypoint capture along the flown track | frames each 400 m |
+| `cameras_terrain.yaml` | waypoint + counted capture over a REAL raster (`--synth-terrain`) | 30 frames, 8/8 checks |
+| `cameras_refusal.yaml` | a camera under the terrain datum | `REFUSED [camera.terrain_clearance]` |
+| `cameras_mountain_refusal.yaml` | a camera INSIDE a mountain, checked against the raster (`--synth-terrain`) | `REFUSED [camera.terrain_clearance]` |
+
+`--synth-terrain` synthesises a deterministic raster centred on the
+spec's own origin (spectral construction plus thermal and hydraulic
+erosion), so the terrain examples run over real ground on a fresh clone.
+`--terrain <bake stem>` remains the path for real geography.
 
 ## Run the tests
 

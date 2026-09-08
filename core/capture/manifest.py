@@ -247,3 +247,31 @@ def read_capture_manifest(path) -> Dict:
             f"this build (expects {MANIFEST_VERSION}); refusing to "
             f"guess at the schema")
     return manifest
+
+
+# -- the lens, stated once ------------------------------------------------
+#
+# The manifest records fx_px / fy_px; the render host sets a field of
+# view. They describe the SAME camera, and the arithmetic that ties them
+# together lives here so the two halves cannot each carry their own. A
+# hardcoded 55 deg against a 35 mm lens on a 36 mm sensor (54.43 deg) is
+# ~8 px of disagreement at the frame edge -- sixteen times the phase's
+# own 0.5 px reprojection tolerance -- and a stated 85 mm telephoto
+# would be wrong by a factor of 2.4 while the labels claimed otherwise.
+
+def horizontal_fov_deg(focal_length_mm: float,
+                       sensor_width_mm: float) -> float:
+    """The horizontal field of view of a lens on a sensor, degrees."""
+    import math
+
+    return math.degrees(
+        2.0 * math.atan(sensor_width_mm / (2.0 * focal_length_mm)))
+
+
+def pixel_focal_from_fov(fov_deg: float, width_px: int) -> float:
+    """The pixel focal length a horizontal field of view implies -- the
+    inverse of :func:`horizontal_fov_deg` composed with the sensor, and
+    the number a render host's own framing amounts to."""
+    import math
+
+    return width_px / (2.0 * math.tan(math.radians(fov_deg) / 2.0))

@@ -58,7 +58,6 @@ from webapp.runs import (  # noqa: E402
     plan_terrain_flight,
     plan_trim_recovery,
     project_for_ue_host,
-    refuse_placeholder_mesh,
 )
 
 app = FastAPI(title="flightsim", docs_url=None, redoc_url=None)
@@ -336,26 +335,14 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
         return JSONResponse({"refused": "validation", **verdict},
                             status_code=409)
 
-    # REFUSAL ORDER after validation (load-bearing, pinned by test):
-    # ue.platform BEFORE aircraft.mesh. A machine with no engine build
-    # must hear that first -- measured 2026-08-31 on a fresh Windows
-    # clone, which was told to import aircraft models when the real
-    # blocker was that no Unreal host existed there at all.
-    from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
-
-    if not ue_available():
-        return JSONResponse({"refused": UE_PLATFORM_REFUSAL,
-                             "constraint": "ue.platform"}, status_code=409)
-    # Placeholder airframes never render (owner's rule, extended
-    # 2026-08-31: on ANY machine). Checked AFTER validation on purpose:
-    # a scenario that cannot fly refuses on the physics first; the asset
-    # refusal names the import command only once the flight itself is
-    # sound.
-    mesh_refusal = refuse_placeholder_mesh(spec)
-    if mesh_refusal is not None:
-        return JSONResponse({"refused": "aircraft.mesh", **mesh_refusal},
-                            status_code=409)
-
+    # The RENDER refusals (ue.platform, then aircraft.mesh -- that order
+    # is load-bearing and pinned by test) no longer refuse the RUN.
+    # Camera Phase 1's deliverable is the capture manifest and the
+    # geometry it carries, written for every run on every platform
+    # whether or not pixels were produced; refusing outright off-mac
+    # produced nothing at all. The named refusal is computed here, rides
+    # the response as ``render_refused``, and is recorded on the run --
+    # the pixels are still refused by name, and everything else runs.
     outcome = manager.start(spec, provenance={
         "prompt": spec.prompt,
         **{k: v for k, v in request.provenance.items()
@@ -406,6 +393,92 @@ def run_telemetry(run_id: str):
     if run is None or run.status != "done" or not path.is_file():
         return JSONResponse({"error": "no telemetry"}, status_code=404)
     return FileResponse(path, media_type="application/json")
+
+
+#: The Camera Phase 1 artefacts a completed run serves. Everything here
+#: exists on EVERY platform, including the machines where the pixel
+#: render refuses by name -- that is the point of the phase.
+
+
+def _run_dir(run_id: str) -> Optional[Path]:
+    """The run's directory, or None when the id is not one of ours.
+
+    Run ids are hex; anything else is refused before it can be joined
+    onto a path (the _recover_from_disk rule, applied at every file
+    endpoint rather than once).
+    """
+    if not run_id.isalnum():
+        return None
+    return manager.out_root / run_id
+
+
+@app.get("/runs/{run_id}/capture_manifest.json")
+def run_capture_manifest(run_id: str):
+    """The capture manifest: every frame's pose, intrinsics and aircraft
+    state. This is the phase's deliverable and it exists whether or not
+    pixels were produced, so it is served as soon as the capture half
+    has finished -- not gated on a clip that a non-macOS machine will
+    never have."""
+    directory = _run_dir(run_id)
+    if directory is None or manager.get(run_id) is None:
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    path = directory / "capture_manifest.json"
+    if not path.is_file():
+        return JSONResponse({"error": "no capture manifest yet"},
+                            status_code=404)
+    return FileResponse(path, media_type="application/json")
+
+
+@app.get("/runs/{run_id}/verify")
+def run_verify(run_id: str) -> JSONResponse:
+    """Re-run the geometry verification over the run directory and
+    return the report. Re-run rather than remembered: the answer is
+    about the files as they are now, which is what a consumer of the
+    imagery actually cares about."""
+    directory = _run_dir(run_id)
+    if directory is None or manager.get(run_id) is None:
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    if not (directory / "capture_manifest.json").is_file():
+        return JSONResponse({"error": "no capture manifest yet"},
+                            status_code=404)
+    from core.capture.verify import verify_run
+
+    report = verify_run(directory)
+    return JSONResponse({
+        "ok": report.ok,
+        "checks": [{"name": c.name, "ok": c.ok, "detail": c.detail}
+                   for c in report.checks],
+        "summary": report.render(),
+    })
+
+
+@app.get("/runs/{run_id}/previews/{camera_id}/{name}")
+def run_preview(run_id: str, camera_id: str, name: str):
+    """One geometry preview PNG: terrain and the flown track drawn
+    through that frame's own recorded camera matrix, with no engine.
+    This is what makes the capability VISIBLE on a machine that cannot
+    render.
+
+    ``camera_id`` and ``name`` are checked against the same rail the
+    camera.identifier constraint applies at validation time, so a
+    request cannot walk out of the previews directory even if a run
+    directory were somehow written with a hostile name.
+    """
+    directory = _run_dir(run_id)
+    if directory is None or manager.get(run_id) is None:
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    safe = set("abcdefghijklmnopqrstuvwxyz"
+               "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.")
+    for part in (camera_id, name):
+        if not part or part.startswith(".") or set(part) - safe:
+            return JSONResponse({"error": "bad preview path"},
+                                status_code=400)
+    if not name.endswith(".png"):
+        return JSONResponse({"error": "previews are PNG"}, status_code=400)
+    path = directory / "previews" / camera_id / name
+    if not path.is_file():
+        return JSONResponse({"error": "no such preview"}, status_code=404)
+    return FileResponse(path, media_type="image/png")
 
 
 class BakeRequest(BaseModel):

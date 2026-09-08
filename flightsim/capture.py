@@ -83,6 +83,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--terrain", default=None,
                         help="baked heightfield stem (<stem>.r16 + .json) "
                              "for real-raster physics and camera checks")
+    parser.add_argument("--synth-terrain", action="store_true",
+                        help="synthesise a raster CENTRED on the spec's "
+                             "own origin and fly over that -- real "
+                             "terrain physics and real raster camera "
+                             "checks with no network and no account, "
+                             "deterministic from its seed. Ignored when "
+                             "--terrain names a bake.")
     parser.add_argument("--max-previews", type=int, default=None,
                         help="cap preview images per run (default: one "
                              "per scheduled frame)")
@@ -116,11 +123,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     heightfield = None
     terrain_ground = None
-    if args.terrain:
+    terrain_stem = args.terrain
+    if terrain_stem is None and args.synth_terrain:
+        # Synthesised, not fetched: the same Heightfield a DEM bakes to,
+        # centred on this spec's origin so the flight is actually over
+        # it, deterministic from its seed, and available on a fresh
+        # clone with no network. Real geography still comes from a real
+        # bake through --terrain.
+        from core.terrain.synthesis import ensure_ridge_for_origin
+
+        terrain_stem = str(ensure_ridge_for_origin(
+            REPO / "runs" / "terrain",
+            float(spec.latitude.value), float(spec.longitude.value),
+            name=f"synth_{spec.name or 'scene'}"))
+        print(f"synthesised terrain: {terrain_stem} (deterministic; no "
+              f"network)")
+    if terrain_stem:
         from core.terrain.ground import TerrainGround
         from core.terrain.heightfield import Heightfield
 
-        heightfield = Heightfield.read(Path(args.terrain))
+        heightfield = Heightfield.read(Path(terrain_stem))
         terrain_ground = TerrainGround(heightfield)
 
     frame = SceneFrame.for_spec(spec, heightfield)
@@ -136,7 +158,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return _refuse(static)
 
     print(f"spec {spec.digest()[:16]} valid; running headlessly...")
-    result = run_spec(spec, terrain_ground=terrain_ground)
+    # A terrain impact or an untrimmable state is a NAMED outcome of the
+    # scenario, not a bug in the tool: report it the way every other
+    # refusal is reported instead of unwinding a stack trace at the
+    # instructor. (Measured: flying a 1200 m example over a raster whose
+    # ridge reaches 3043 m printed a traceback.)
+    from core.fdm.errors import TrimError
+    from core.terrain.contact import TerrainImpactError
+
+    try:
+        result = run_spec(spec, terrain_ground=terrain_ground)
+    except TerrainImpactError as exc:
+        print(f"REFUSED -- terrain.impact: {exc}")
+        return 2
+    except TrimError as exc:
+        print(f"REFUSED -- trim: {exc}")
+        return 2
     columns = result.telemetry.columns
 
     cameras = spec.cameras or default_cameras(spec)
@@ -168,7 +205,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         spec, columns, frame, tracks, schedules,
         output_digest=result.output_digest,
         scene={"key": "terrain" if heightfield else "flat",
-               "terrain": args.terrain},
+               "terrain": terrain_stem},
         terrain_sha256=heightfield.digest() if heightfield else None,
         # The cameras that actually flew (default_cameras for a
         # camera-less spec); the digests stay the spec's own.

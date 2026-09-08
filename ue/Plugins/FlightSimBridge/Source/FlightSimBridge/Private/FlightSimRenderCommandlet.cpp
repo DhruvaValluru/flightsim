@@ -676,6 +676,16 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	int32 ConsumedCameraIndex = 0;
 	double CameraOriginXMetres = 0.0;
 	double CameraOriginYMetres = 0.0;
+	// The INTRINSICS are consumed too, not just the pose. The capture
+	// manifest records fx_px = focal_mm / sensor_mm * width_px for every
+	// frame; if the render used its own field of view instead, every
+	// recorded intrinsic would describe a camera the pixels were never
+	// taken with -- a 35 mm default is 54.4 deg against the shot's 55.0,
+	// and a stated 85 mm telephoto would be off by a factor of 2.4 while
+	// the labels claimed otherwise. Solved in Python, applied here.
+	TArray<double> TrackFocalMM;
+	double ConsumedSensorWidthMM = 0.0;
+	double ConsumedFOVDegrees = 0.0;
 	{
 		FParse::Value(*Params, TEXT("camera-index="), ConsumedCameraIndex);
 		FString CardText;
@@ -715,6 +725,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			const TArray<TSharedPtr<FJsonValue>>* Yaws = nullptr;
 			const TArray<TSharedPtr<FJsonValue>>* Pitches = nullptr;
 			const TArray<TSharedPtr<FJsonValue>>* Rolls = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Focals = nullptr;
 			if (!(*PosesJson)->TryGetArrayField(TEXT("t_s"), Times) ||
 			    !(*PosesJson)->TryGetArrayField(TEXT("north_m"), Norths) ||
 			    !(*PosesJson)->TryGetArrayField(TEXT("east_m"), Easts) ||
@@ -730,11 +741,38 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			const int32 Count = Times->Num();
 			if (Norths->Num() != Count || Easts->Num() != Count ||
 			    Alts->Num() != Count || Yaws->Num() != Count ||
-			    Pitches->Num() != Count || Rolls->Num() != Count)
+			    Pitches->Num() != Count || Rolls->Num() != Count ||
+			    Focals->Num() != Count)
 			{
 				return Fail(TEXT("camera pose track arrays disagree about "
 				                 "their length; refusing a misaligned track"));
 			}
+			// Output resolution and lens come from the SPECIFICATION,
+			// through the card, exactly like the pose: -width/-height and
+			// a hardcoded FOV would silently disagree with the manifest.
+			int32 SpecWidth = 0;
+			int32 SpecHeight = 0;
+			if (!CameraJson->TryGetNumberField(TEXT("width_px"), SpecWidth) ||
+			    !CameraJson->TryGetNumberField(TEXT("height_px"), SpecHeight) ||
+			    !CameraJson->TryGetNumberField(TEXT("sensor_width_mm"),
+			                                   ConsumedSensorWidthMM) ||
+			    SpecWidth <= 0 || SpecHeight <= 0 ||
+			    ConsumedSensorWidthMM <= 0.0)
+			{
+				return Fail(TEXT("cameras block is missing usable "
+				                 "width_px/height_px/sensor_width_mm; "
+				                 "refusing to render at an output the "
+				                 "manifest does not describe"));
+			}
+			if (!(*PosesJson)->TryGetArrayField(TEXT("focal_length_mm"),
+			                                    Focals))
+			{
+				return Fail(TEXT("camera pose track is missing "
+				                 "focal_length_mm; refusing to choose a "
+				                 "field of view the manifest does not carry"));
+			}
+			Width = SpecWidth;
+			Height = SpecHeight;
 			TArray<double> TrackTimes;
 			TArray<FVector> TrackLocations;
 			TArray<FRotator> TrackRotations;
@@ -755,6 +793,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 					(*Pitches)[i]->AsNumber(),
 					(*Yaws)[i]->AsNumber() - 90.0,
 					(*Rolls)[i]->AsNumber()));
+				TrackFocalMM.Add((*Focals)[i]->AsNumber());
 			}
 			if (!Director->SetPoseTrack(MoveTemp(TrackTimes),
 			                            MoveTemp(TrackLocations),
@@ -794,7 +833,17 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// The void scene frames a silhouette tightly; the visual scene needs the
 	// terrain and sky in shot, and §6.6's manual exposure so the image does
 	// not re-meter as the bright-ground fraction changes with bank.
+	// The consumed camera's own horizontal field of view, from the lens
+	// and sensor the specification states: 2 * atan(sensor_w / (2 * f)).
+	// Without a consumed camera, the shot's documented framing stands.
 	Capture->FOVAngle = bVisual ? 55.0f : 24.0f;
+	if (bConsumePoses && TrackFocalMM.Num() > 0)
+	{
+		ConsumedFOVDegrees = FMath::RadiansToDegrees(
+			2.0 * FMath::Atan(ConsumedSensorWidthMM /
+			                  (2.0 * TrackFocalMM[0])));
+		Capture->FOVAngle = static_cast<float>(ConsumedFOVDegrees);
+	}
 	if (bVisual && !bAutoExposure)
 	{
 		FFlightSimVisualScene::ApplyManualExposure(Capture,
@@ -1182,12 +1231,34 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// here (never extrapolated), as does any applied-vs-solved drift.
 		if (bConsumePoses)
 		{
-			if (!Director->ApplyPoseAtTime(
-				Scenario.ReadProperty(TEXT("simulation/sim-time-sec")),
-				Error))
+			const double SimTime =
+				Scenario.ReadProperty(TEXT("simulation/sim-time-sec"));
+			if (!Director->ApplyPoseAtTime(SimTime, Error))
 			{
 				return Fail(Error);
 			}
+			// A keyframed focal length is part of the solved track, so
+			// the field of view follows it per frame rather than being
+			// fixed at the first sample.
+			double FocalMM = TrackFocalMM[0];
+			for (int32 i = 1; i < TrackFocalMM.Num(); ++i)
+			{
+				if (Director->PoseTimeAt(i) >= SimTime)
+				{
+					const double T0 = Director->PoseTimeAt(i - 1);
+					const double Span = Director->PoseTimeAt(i) - T0;
+					const double Fraction = Span > 0.0
+						? FMath::Clamp((SimTime - T0) / Span, 0.0, 1.0)
+						: 0.0;
+					FocalMM = FMath::Lerp(TrackFocalMM[i - 1],
+					                      TrackFocalMM[i], Fraction);
+					break;
+				}
+				FocalMM = TrackFocalMM[i];
+			}
+			ConsumedFOVDegrees = FMath::RadiansToDegrees(
+				2.0 * FMath::Atan(ConsumedSensorWidthMM / (2.0 * FocalMM)));
+			Capture->FOVAngle = static_cast<float>(ConsumedFOVDegrees);
 		}
 
 		// Component render-state updates are queued and flushed at end of
@@ -1256,6 +1327,16 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			                       AppliedProjected.X - CameraOriginXMetres);
 			Record->SetNumberField(TEXT("camera_applied_alt_m"),
 			                       AppliedProjected.Z);
+			// The INTRINSICS actually applied, for the same reason: the
+			// manifest's fx_px must describe the camera these pixels came
+			// from. A Python-side grader recomputes
+			// fx = width / (2 tan(hfov/2)) and compares.
+			Record->SetNumberField(TEXT("camera_applied_hfov_deg"),
+			                       ConsumedFOVDegrees);
+			Record->SetNumberField(TEXT("camera_applied_width_px"),
+			                       static_cast<double>(Width));
+			Record->SetNumberField(TEXT("camera_applied_height_px"),
+			                       static_cast<double>(Height));
 			Record->SetNumberField(TEXT("camera_applied_yaw_deg"),
 			                       FMath::Fmod(AppliedRotation.Yaw + 90.0 + 360.0, 360.0));
 			Record->SetNumberField(TEXT("camera_applied_pitch_deg"),

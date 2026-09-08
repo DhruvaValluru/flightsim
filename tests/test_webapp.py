@@ -144,8 +144,7 @@ def test_run_refuses_while_editor_is_owned(client, monkeypatch):
     # About the editor lock, not the mesh rule or the scene: hold the
     # mesh gate open and pin the flat scene so this measures the same
     # thing on a machine with or without local bakes.
-    import webapp.server as server_module
-    monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
+    monkeypatch.setattr(runs_module, "refuse_placeholder_mesh",
                         lambda spec: None)
     monkeypatch.setattr(runs_module, "pick_scene",
                         lambda spec: {"key": "flat", "kind": "flat",
@@ -343,7 +342,6 @@ def test_llm_death_on_answer_round_falls_back_to_the_original_prompt(
 
 def test_run_forwards_the_transcript_into_provenance(client, monkeypatch):
     from webapp.server import manager
-    import webapp.server as server_module
 
     captured = {}
 
@@ -356,7 +354,7 @@ def test_run_forwards_the_transcript_into_provenance(client, monkeypatch):
     # the same thing on a machine with or without local bakes.
     import core.util.platform as plat
     monkeypatch.setattr(plat, "ue_available", lambda: True)
-    monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
+    monkeypatch.setattr(runs_module, "refuse_placeholder_mesh",
                         lambda spec: None)
     monkeypatch.setattr(runs_module, "pick_scene",
                         lambda spec: {"key": "flat", "kind": "flat",
@@ -596,19 +594,23 @@ def test_placeholder_airframes_never_render(client, monkeypatch):
         real.set("aircraft", have[0], frm="test: a model that IS imported")
         assert refuse_placeholder_mesh(real) is None
 
-    # The endpoint wires the refusal as a named 409, whatever machine --
-    # with the platform gate held open, since ue.platform is checked
-    # first and would otherwise preempt the mesh refusal under test.
+    # The run wires it as a NAMED RENDER refusal, with the platform gate
+    # held open (ue.platform is checked first and would otherwise
+    # preempt the mesh refusal under test).
+    #
+    # CHANGED (Camera Phase 1): this is no longer a 409 that produces
+    # nothing. The manifest is written for every run on every platform,
+    # so a render refusal refuses the PIXELS by name and lets the
+    # capture half run. What the refusal says, and that it is said, are
+    # unchanged.
     import core.util.platform as plat
-    import webapp.server as server_module
     monkeypatch.setattr(plat, "ue_available", lambda: True)
-    monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
+    monkeypatch.setattr(runs_module, "refuse_placeholder_mesh",
                         lambda spec: {"constraint": "aircraft.mesh",
                                       "message": "no real 3-D model"})
     spec = compile_prompt("fly the f15 at 5000 m and 350 kt")
-    reply = client.post("/run", json={"spec": spec.to_dict()})
-    assert reply.status_code == 409
-    assert reply.json()["refused"] == "aircraft.mesh"
+    refusal = RunManager.render_refusal(spec)
+    assert refusal["constraint"] == "aircraft.mesh"
 
 
 def test_control_ridge_failsafe_synthesises_once(tmp_path, monkeypatch):
@@ -655,16 +657,18 @@ def test_platform_refusal_precedes_the_mesh_refusal(client, monkeypatch):
                                       "label": "flat (test)"})
     # An aircraft with no model on ANY machine: both refusals are live,
     # and the platform one must win.
+    #
+    # CHANGED (Camera Phase 1): the order now lives in
+    # RunManager.render_refusal, because a render refusal no longer
+    # refuses the RUN -- the capture half runs on every platform and
+    # only the pixels are refused. The ORDER is what this test pins, and
+    # it is unchanged.
     spec = compile_prompt("fly the f15 at 5000 m and 350 kt")
-    reply = client.post("/run", json={"spec": spec.to_dict()})
-    assert reply.status_code == 409
-    assert reply.json()["constraint"] == "ue.platform"
+    assert RunManager.render_refusal(spec)["constraint"] == "ue.platform"
 
     # With an engine, the SAME spec falls through to the asset refusal.
     monkeypatch.setattr(plat, "ue_available", lambda: True)
-    reply = client.post("/run", json={"spec": spec.to_dict()})
-    assert reply.status_code == 409
-    assert reply.json()["refused"] == "aircraft.mesh"
+    assert RunManager.render_refusal(spec)["constraint"] == "aircraft.mesh"
 
 
 def test_scene_setting_stages_unlocated_scenes():
@@ -1089,9 +1093,8 @@ def test_windy_terrain_run_digest_is_content_addressed(client, monkeypatch):
     # This test is about the digest, not the platform or mesh gates:
     # hold both open so it measures the same thing on every machine.
     import core.util.platform as plat
-    import webapp.server as server_module
     monkeypatch.setattr(plat, "ue_available", lambda: True)
-    monkeypatch.setattr(server_module, "refuse_placeholder_mesh",
+    monkeypatch.setattr(runs_module, "refuse_placeholder_mesh",
                         lambda spec: None)
     compiled = client.post("/compile", json={
         "prompt": "fly the 747 at 5000 m and 250 kt over 2000 m mountains "
@@ -1237,3 +1240,123 @@ def test_era5_level_selection_is_nearest_standard_level():
     assert nearest_pressure_level(9000.0) == 300
     assert nearest_pressure_level(1500.0) == 850
     assert nearest_pressure_level(200.0) == 1000
+
+
+# -- the capture half runs on every platform (Camera Phase 1) -----------
+#
+# Before this, POST /run refused the whole run with ue.platform off a
+# render-capable mac and produced NOTHING -- no manifest, no previews, no
+# verification. The phase says the manifest is written for every run, on
+# every platform, whether or not pixels were produced, and the
+# demonstration is meant to be runnable from the web app on Windows and
+# Linux. These tests pin that.
+
+def _finished(client, run_id, timeout_s=600.0):
+    import time
+
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        state = client.get(f"/runs/{run_id}").json()
+        if state["status"] in RunManager.TERMINAL:
+            return state
+        time.sleep(0.25)
+    raise AssertionError(f"run {run_id} never finished: {state['status']}")
+
+
+@pytest.fixture()
+def isolated_runs(tmp_path, monkeypatch):
+    """A manager writing into tmp_path, with no run in flight: these
+    tests start REAL runs and must not share the module manager's
+    one-at-a-time slot."""
+    monkeypatch.setattr(manager, "out_root", tmp_path)
+    monkeypatch.setattr(manager, "runs", {})
+    monkeypatch.setattr(manager, "_active", None)
+    monkeypatch.setattr(runs_module, "editor_running", lambda: False)
+    return tmp_path
+
+
+def test_a_run_captures_geometry_when_the_pixels_are_refused(
+        client, isolated_runs, monkeypatch):
+    import core.util.platform as plat
+
+    monkeypatch.setattr(plat, "ue_available", lambda: False)
+    spec = compile_prompt("tower view of the 747 at 10000 ft and 280 kt, "
+                          "6 images")
+    spec.set("duration", 12.0, frm="test: a short capture")
+    reply = client.post("/run", json={"spec": spec.to_dict()})
+    assert reply.status_code == 200, reply.json()
+    # The pixels are still refused BY NAME -- that has not changed.
+    assert reply.json()["render_refused"]["constraint"] == "ue.platform"
+
+    run_id = reply.json()["run_id"]
+    state = _finished(client, run_id)
+    assert state["status"] == "done", state["detail"]
+
+    capture = state["capture"]
+    assert capture["frames"] == 6
+    assert capture["cameras"][0]["preset"] == "tower"
+    assert capture["previews"], "no geometry previews were drawn"
+
+    # The manifest is served, is the deliverable, and needs no clip.
+    manifest = client.get(f"/runs/{run_id}/capture_manifest.json")
+    assert manifest.status_code == 200
+    body = manifest.json()
+    assert body["manifest_version"] == 1
+    assert len(body["frames"]) == 6
+    assert state["clip"] is None
+
+    # The verification the instructor runs, over HTTP.
+    report = client.get(f"/runs/{run_id}/verify").json()
+    assert report["ok"], report["summary"]
+    names = {c["name"] for c in report["checks"]}
+    assert {"geometry_recovery", "count_exactness", "intrinsics_match_spec",
+            "placement_matches_spec", "telemetry_agreement"} <= names
+
+    # A preview is a real PNG, served from its per-camera directory.
+    image = client.get(f"/runs/{run_id}/{capture['previews'][0]}")
+    assert image.status_code == 200
+    assert image.headers["content-type"] == "image/png"
+    assert image.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_capture_previews_refuse_a_path_outside_the_run(
+        client, isolated_runs, monkeypatch):
+    """The preview endpoint takes a camera id and a file name from the
+    URL; both face the camera.identifier rail rather than the
+    filesystem's mercy."""
+    import core.util.platform as plat
+
+    monkeypatch.setattr(plat, "ue_available", lambda: False)
+    spec = compile_prompt("fly the 747 at 10000 ft and 280 kt")
+    spec.set("duration", 8.0, frm="test: a short capture")
+    run_id = client.post("/run", json={"spec": spec.to_dict()}).json()["run_id"]
+    _finished(client, run_id)
+
+    for camera_id, name in ((".." , "x.png"), ("camera0", "..%2Fx.png"),
+                            (".hidden", "x.png"), ("camera0", "x.txt")):
+        reply = client.get(f"/runs/{run_id}/previews/{camera_id}/{name}")
+        assert reply.status_code in (400, 404), (camera_id, name)
+
+
+def test_a_capture_refusal_ends_the_run_by_name(client, isolated_runs,
+                                                monkeypatch):
+    """A schedule that cannot be honoured refuses by name from inside
+    the run, and does not wedge the one-at-a-time gate."""
+    import core.util.platform as plat
+
+    monkeypatch.setattr(plat, "ue_available", lambda: False)
+    spec = compile_prompt("fly the 747 at 10000 ft and 280 kt")
+    spec.set("duration", 8.0, frm="test: a short capture")
+    camera = spec.cameras[0] if spec.cameras else None
+    if camera is None:
+        from core.scenario.camera import CameraSpec
+        camera = CameraSpec.defaulted(camera_id="cam0", preset="chase",
+                                      aircraft="B747")
+        spec.cameras = [camera]
+    # More images than the run can possibly record.
+    camera.set("capture_count", 100000, frm="test: unreachable")
+    run_id = client.post("/run", json={"spec": spec.to_dict()}).json()["run_id"]
+    state = _finished(client, run_id)
+    assert state["status"] == "refused"
+    assert state["capture"]["refused"]["constraint"] == "camera.schedule"
+    assert not client.get("/status").json()["busy"]

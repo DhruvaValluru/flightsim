@@ -853,6 +853,95 @@ mutate webapp/runs.py \
     "a failed model build fails the run BY NAME" \
     tests/test_aircraft_assets.py || failures=$((failures+1))
 
+echo "-- Camera Phase 1, the external anchors and the platform reach --"
+# Every guard below protects something that was MEASURED to be missing:
+# verification that passed a displaced camera, a focal length the pixels
+# were never taken with, and a count nobody delivered; a camera id that
+# wrote files outside the run directory; and a web app that produced
+# nothing at all off macOS.
+
+mutate core/capture/validate.py \
+    '        out.extend(identifier_violations(camera, index))' \
+    '        pass  # MUTATED: unsafe camera ids reach the filesystem' \
+    "an unsafe camera id refuses before it names a directory" \
+    tests/test_camera_validate.py || failures=$((failures+1))
+
+mutate core/capture/validate.py \
+    '    bad = sorted({c for c in value if c not in _CAMERA_ID_ALLOWED})' \
+    '    bad = []  # MUTATED: separators and wildcards allowed' \
+    "a camera id may not contain a path separator or a wildcard" \
+    tests/test_camera_validate.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if requested > 0:' \
+    '        if False:  # MUTATED: the delivered count is its own contract' \
+    "the count contract is the SPECIFICATION's number, not the delivery's" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if abs(float(record["fx_px"]) - want_fx) > tol_px:' \
+    '        if False:  # MUTATED: any horizontal focal length passes' \
+    "the recorded fx follows from the specified lens and sensor" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if abs(float(record["fy_px"]) - want_fy) > tol_px:' \
+    '        if False:  # MUTATED: any vertical focal length passes' \
+    "the recorded fy follows from the specified lens and sensor" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if indices != list(range(declared)):' \
+    '        if False:  # MUTATED: gaps and misattribution pass' \
+    "frame indices are dense, so a gap cannot hide behind a right count" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if gap > PLACEMENT_TOL_M:' \
+    '            if False:  # MUTATED: a displaced world camera passes' \
+    "a world-anchored camera sits exactly where the spec puts it" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if gap > bound:' \
+    '            if False:  # MUTATED: a displaced offset camera passes' \
+    "an offset camera stays inside its stated lag envelope" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if gap_t > TIME_TOL_S:' \
+    '        if False:  # MUTATED: fabricated frame times pass' \
+    "a frame's time is the telemetry's time at the sample it names" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if delta > PARITY_FOCAL_TOL_PX:' \
+    '            if False:  # MUTATED: the render may use any lens it likes' \
+    "rendered frames used the lens the manifest records" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if columns is None:
+        return Check("telemetry_agreement", False,' \
+    '    if columns is None:
+        return Check("telemetry_agreement", True,  # MUTATED: unanchored' \
+    "a manifest with no telemetry beside it is not verified" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '            summary = capture_flow(' \
+    '            summary = (lambda *a, **k: {"frames": 0, "cameras": [],
+                "previews": [], "preview_total": 0,
+                "verification": {"ok": True, "checks": []}})(  # MUTATED' \
+    "every run captures its geometry, on every platform" \
+    tests/test_webapp.py || failures=$((failures+1))
+
+mutate core/capture/schedule.py \
+    '    if trigger != "interval" and count > 0 and len(indices) != count:' \
+    '    if False:  # MUTATED: a stated count is a suggestion' \
+    "a stated count on a waypoint or event trigger is a contract" \
+    tests/test_camera_schedule.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

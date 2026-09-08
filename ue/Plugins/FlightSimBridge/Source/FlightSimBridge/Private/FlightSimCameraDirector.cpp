@@ -152,6 +152,28 @@ bool AFlightSimCameraDirector::ApplyPoseAtTime(double SimTimeSeconds,
 			Location.X, Location.Y, Location.Z, SimTimeSeconds);
 		return false;
 	}
+	// ORIENTATION parity too. A position-only check leaves the half of
+	// the pose that decides what is actually IN the frame unguarded:
+	// a camera at exactly the right place looking somewhere else records
+	// geometry the pixels do not have just as thoroughly as a displaced
+	// one does. 0.05 deg is well inside a pixel at any framing here.
+	const FQuat AppliedRotation = GetActorQuat();
+	const double AngleDegrees = FMath::RadiansToDegrees(
+		AppliedRotation.AngularDistance(Rotation));
+	if (AngleDegrees > 0.05)
+	{
+		const FRotator AppliedEuler = AppliedRotation.Rotator();
+		const FRotator SolvedEuler = Rotation.Rotator();
+		Error = FString::Printf(
+			TEXT("consume-poses: applied camera orientation (%.3f, %.3f, "
+			     "%.3f) differs from the solved pose (%.3f, %.3f, %.3f) by "
+			     "%.3f deg at t=%.3f s; refusing to record geometry the "
+			     "frames do not have"),
+			AppliedEuler.Pitch, AppliedEuler.Yaw, AppliedEuler.Roll,
+			SolvedEuler.Pitch, SolvedEuler.Yaw, SolvedEuler.Roll,
+			AngleDegrees, SimTimeSeconds);
+		return false;
+	}
 	return true;
 }
 

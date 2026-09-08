@@ -49,6 +49,25 @@ MAX_RESOLUTION_PX = 8192
 MAX_FOCAL_MM = 2000.0
 MAX_SENSOR_MM = 120.0
 
+#: A camera identifier NAMES A DIRECTORY: the manifest's per-frame
+#: ``file`` is ``frames/<camera_id>/frame_00042.png`` and the preview
+#: renderer writes ``previews/<camera_id>/``. So the identifier faces
+#: the strictest of the three filesystems this project runs on rather
+#: than each one's own surprise. Measured before this rail existed: a
+#: camera id of ``../../pwned`` wrote its preview images OUTSIDE the run
+#: directory on Linux, and a ``:`` or a reserved device name is an
+#: unrecoverable file-creation failure on Windows halfway
+#: through a run.
+CAMERA_ID_MAX_LEN = 64
+_CAMERA_ID_ALLOWED = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.")
+#: Windows reserves these stems whatever the extension, on every drive.
+_WINDOWS_RESERVED = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
 
 def _prefix(index: int, camera: CameraSpec) -> str:
     return f"camera[{index}] {str(camera.camera_id.value)!r}"
@@ -96,6 +115,56 @@ def intrinsics_violations(camera: CameraSpec,
             "camera.intrinsics",
             f"{who}: far plane must sit beyond the near plane",
             actual=far, limit=near, unit="m"))
+    return out
+
+
+def identifier_violations(camera: CameraSpec,
+                          index: int = 0) -> List[Violation]:
+    """camera.identifier: an id that cannot safely name a directory.
+
+    Refused by name rather than sanitised, for the same reason every
+    other stated field is: silently rewriting a user's camera id would
+    put the frames somewhere they did not ask for, and the manifest
+    would then label images by a name the run never used.
+    """
+    out: List[Violation] = []
+    who = _prefix(index, camera)
+    value = camera.camera_id.value
+    if not isinstance(value, str) or not value:
+        out.append(Violation(
+            "camera.identifier",
+            f"{who}: the camera id must be a non-empty string; it names "
+            f"the directory the frames are written to"))
+        return out
+    if len(value) > CAMERA_ID_MAX_LEN:
+        out.append(Violation(
+            "camera.identifier",
+            f"{who}: the camera id is {len(value)} characters; the limit "
+            f"is {CAMERA_ID_MAX_LEN}",
+            actual=float(len(value)), limit=float(CAMERA_ID_MAX_LEN)))
+    bad = sorted({c for c in value if c not in _CAMERA_ID_ALLOWED})
+    if bad:
+        out.append(Violation(
+            "camera.identifier",
+            f"{who}: the camera id contains {bad} -- it names a "
+            f"directory on every platform, so letters, digits, '_', "
+            f"'-' and '.' only"))
+    if value in (".", "..") or value.startswith("."):
+        out.append(Violation(
+            "camera.identifier",
+            f"{who}: a camera id may not be '.', '..' or start with a "
+            f"dot; it would escape or hide the frame directory"))
+    if value.endswith((".", " ")):
+        out.append(Violation(
+            "camera.identifier",
+            f"{who}: a camera id may not end in a dot or a space; "
+            f"Windows silently strips both and the frames would land "
+            f"under a name the manifest does not carry"))
+    if value.split(".")[0].upper() in _WINDOWS_RESERVED:
+        out.append(Violation(
+            "camera.identifier",
+            f"{who}: {value!r} is a reserved device name on Windows; "
+            f"the frame directory could never be created there"))
     return out
 
 
@@ -181,6 +250,7 @@ def validate_cameras(spec) -> List[Violation]:
     out: List[Violation] = []
     seen = set()
     for index, camera in enumerate(spec.cameras):
+        out.extend(identifier_violations(camera, index))
         out.extend(vocabulary_violations(camera, index))
         out.extend(intrinsics_violations(camera, index))
         out.extend(schedule_violations(camera, index))

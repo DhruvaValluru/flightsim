@@ -143,15 +143,19 @@ function provenanceNote(f) {
         "process; set it where uvicorn runs)")
       + (status.render_available === false
          ? (status.platform === "windows"
-            ? " · rendered clips need the Unreal host built here " +
-              "(scripts\\ue_preflight.ps1 names what is missing): runs " +
-              "here deliver the headless half (spec, validation, telemetry)"
+            ? " · photographic frames need the Unreal host built here " +
+              "(scripts\\ue_preflight.ps1 names what is missing) and are " +
+              "refused by name; runs here still deliver the capture " +
+              "manifest, the geometry previews and the verification"
             : status.platform === "linux"
-            ? " · rendered clips need macOS or Windows: runs here deliver " +
-              "the headless half (spec, validation, telemetry)"
-            : " · rendered clips need the Unreal host built here: runs " +
-              "here deliver the headless half (spec, validation, " +
-              "telemetry)")
+            ? " · photographic frames need macOS or Windows with the " +
+              "Unreal host and are refused by name; runs here still " +
+              "deliver the capture manifest, the geometry previews and " +
+              "the verification"
+            : " · photographic frames need the Unreal host built here " +
+              "and are refused by name; runs here still deliver the " +
+              "capture manifest, the geometry previews and the " +
+              "verification")
          : "");
   } catch (error) { $("llmState").textContent = "compiler: server unreachable"; }
 })();
@@ -425,7 +429,11 @@ async function startRun(mayBake) {
   activeRun = payload.run_id;
   try { localStorage.setItem("flightsim.lastRun", activeRun); } catch (e) {}
   $("status").textContent = `run ${activeRun} started (spec ` +
-    `${payload.digest.slice(0, 16)})`;
+    `${payload.digest.slice(0, 16)})` +
+    (payload.render_refused
+      ? ` — photographic frames refused by name ` +
+        `(${payload.render_refused.constraint}); the capture half runs`
+      : "");
   $("clipArea").innerHTML = "";
   poll();
 }
@@ -457,25 +465,101 @@ async function poll() {
     `${new Date(e.t * 1000).toLocaleTimeString()}  ${e.status}` +
     (e.detail ? ` — ${e.detail}` : "")).join("\n");
   $("status").textContent = line;
-  if (run.status === "done") {
+  if (run.status === "done" || run.status === "refused") {
+    // The capture half completes on EVERY platform; the clip exists only
+    // where the engine rendered one. Both are shown for what they are --
+    // a machine that cannot render still has the phase's deliverable,
+    // and says so by name rather than showing an empty player.
+    const clip = run.clip
+      ? `<video id="clipVideo" controls src="/runs/${activeRun}/clip.mp4">` +
+        `</video>`
+      : "";
     $("clipArea").innerHTML =
       `<div class="clipRow"><div class="clipMain">` +
-      `<div class="dim">scene: ${run.scene.label || run.scene.kind}</div>` +
-      `<video id="clipVideo" controls src="/runs/${activeRun}/clip.mp4">` +
-      `</video>` +
+      `<div class="dim">scene: ${run.scene.label || run.scene.kind || "—"}` +
+      `</div>` + clip +
       `<div class="dim"><a style="color:#6fb3e0" ` +
       `href="/runs/${activeRun}/provenance.json">provenance</a> · ` +
       `<a style="color:#6fb3e0" ` +
       `href="/runs/${activeRun}/telemetry.json">telemetry</a></div>` +
+      `<div id="captureArea"></div>` +
       `<div id="pathArea"></div>` +
       `</div><div class="aeroSide" id="aeroSide"></div></div>` +
       `<div id="effectArea"></div>`;
-    initAeroPanel(activeRun, run);
+    renderCapture(run);
+    if (run.clip) {
+      initAeroPanel(activeRun, run);
+      initEffectReport(activeRun);
+    }
     initFlightPath(activeRun, run);
-    initEffectReport(activeRun);
   } else if (run.status !== "failed") {
     setTimeout(poll, 2000);
   }
+}
+
+// ===================== the capture half (Camera Phase 1) ==================
+// Every run writes a capture manifest -- every frame's camera pose,
+// intrinsics and aircraft state -- and one geometry preview per scheduled
+// frame, drawn through that frame's own recorded matrix with no engine.
+// This section is what a Windows or Linux machine gets instead of pixels,
+// and it is the phase's actual deliverable, so it is shown as a result
+// rather than as a consolation.
+
+function renderCapture(run) {
+  const holder = $("captureArea");
+  if (!holder) return;
+  const cap = run.capture;
+  if (!cap) { holder.innerHTML = ""; return; }
+  if (cap.refused) {
+    const list = Array.isArray(cap.refused) ? cap.refused : [cap.refused];
+    holder.innerHTML =
+      `<div class="verdict-refused">the capture was REFUSED &mdash; by ` +
+      `name:</div><ul>` +
+      list.map(v => `<li><b>${v.constraint}</b> — ${v.message}</li>`)
+          .join("") + `</ul>`;
+    return;
+  }
+  const refusal = run.render_refusal;
+  const note = refusal
+    ? `<div class="dim" style="margin:.4rem 0">no photographic frames on ` +
+      `this machine — refused by name: <b>${refusal.constraint}</b>. The ` +
+      `manifest, the geometry previews and the verification below are ` +
+      `complete here.</div>`
+    : "";
+  const cams = cap.cameras.map(c =>
+    `<li><b>${c.camera_id}</b> (${c.preset}) — ${c.frames} frame(s), ` +
+    `${c.trigger}: ${c.basis}` +
+    (c.inherits_roll ? ` · <span class="dim">inherits aircraft roll</span>`
+                     : "") + `</li>`).join("");
+  const v = cap.verification || {};
+  const checks = (v.checks || []).map(c =>
+    `<li><span class="${c.ok ? "" : "verdict-refused"}">` +
+    `[${c.ok ? "PASS" : "FAIL"}]</span> <b>${c.name}</b> — ${c.detail}</li>`
+  ).join("");
+  const shown = (cap.previews || []).slice(0, 12);
+  const gallery = shown.map(path =>
+    `<img src="/runs/${activeRun}/${path}" alt="${path}" loading="lazy" ` +
+    `style="width:200px;border:1px solid #2a3340;border-radius:3px">`
+  ).join("");
+  holder.innerHTML =
+    `<h3 style="margin:.8rem 0 .3rem">capture geometry</h3>` + note +
+    `<div class="dim">${cap.frames} frame(s) across ` +
+    `${cap.cameras.length} camera(s) · ` +
+    `<a style="color:#6fb3e0" ` +
+    `href="/runs/${activeRun}/capture_manifest.json">capture manifest</a>` +
+    `</div><ul>${cams}</ul>` +
+    `<div class="${v.ok ? "" : "verdict-refused"}">verification ` +
+    `${v.ok ? "PASSED" : "FAILED"} (${(v.checks || []).filter(c => c.ok)
+      .length}/${(v.checks || []).length} checks)</div>` +
+    `<ul>${checks}</ul>` +
+    (gallery
+      ? `<div class="dim">geometry previews — terrain and the flown track ` +
+        `projected through each frame's own recorded camera matrix, drawn ` +
+        `without the engine (${shown.length} of ${cap.previews.length} ` +
+        `written; ${cap.preview_total} frame(s) scheduled)</div>` +
+        `<div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.4rem">` +
+        gallery + `</div>`
+      : "");
 }
 
 // ===================== the aerodynamics side panel ========================

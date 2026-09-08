@@ -311,3 +311,82 @@ def generate(
             "statistics": stats.to_dict(),
         },
     )
+
+
+# -- a network-free raster centred on a scenario's own origin -------------
+#
+# Committed examples must run over REAL terrain on a fresh clone with no
+# account and no network. A Copernicus bake needs both; a synthesised
+# raster needs neither, is bit-identical from its seed, and reaches the
+# ground callback as the same Heightfield a DEM bakes to -- so a camera
+# checked against it is checked against a raster, not against the spec's
+# flat datum. It is synthesised terrain and says so; --terrain over a
+# real bake remains the path for real geography.
+
+#: The committed demonstration raster: the showcase matrix's own
+#: parameters (seed 6, 28 deg RMS slope, 1024 px at 30 m), which is also
+#: what the web app's terrain fail-safe synthesises.
+DEMO_RIDGE = {
+    "size": 1024, "pixel_size_m": 30.0, "rms_slope_deg": 28.0,
+    "seed": 6, "base_elevation_m": 600.0,
+}
+
+
+def ridge_for_origin(lat_deg: float, lon_deg: float,
+                     name: str = "demo_ridge", **overrides) -> Heightfield:
+    """A synthesised raster CENTRED on a scenario's own origin.
+
+    The centring is the point: a raster the flight is not over is a flat
+    datum with extra steps, and the camera checks would be measuring
+    nothing. The georeference puts the spec's own (lat, lon) at the
+    middle of the raster in that point's UTM zone, so the flown track and
+    any world-anchored camera sit on real ground.
+    """
+    from pyproj import Transformer
+
+    from .glo30 import utm_zone_crs
+
+    params = {**DEMO_RIDGE, **overrides}
+    crs = utm_zone_crs(lat_deg, lon_deg)
+    forward = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+    centre_x, centre_y = forward.transform(float(lon_deg), float(lat_deg))
+    # generate() takes the raster's SOUTH-WEST corner (it converts to the
+    # north-up upper-left georeference itself, adding (size-1) pixels of
+    # northing), so both offsets are negative here. Half the raster is
+    # (size - 1) / 2 pixels: the centre SAMPLE, not the centre of the
+    # outer pixel edges, is what the flight is placed on.
+    half = (params["size"] - 1) * params["pixel_size_m"] / 2.0
+    return generate(
+        size=params["size"], pixel_size_m=params["pixel_size_m"],
+        statistics=TerrainStatistics(rms_slope_deg=params["rms_slope_deg"]),
+        seed=params["seed"],
+        origin_x_m=centre_x - half, origin_y_m=centre_y - half,
+        crs=crs, base_elevation_m=params["base_elevation_m"], name=name)
+
+
+def ensure_ridge_for_origin(directory, lat_deg: float, lon_deg: float,
+                            name: str = "demo_ridge", **overrides):
+    """:func:`ridge_for_origin`, written once under ``directory`` and
+    reused thereafter. Returns the raster stem (``<dir>/<name>``).
+
+    Synthesis is deterministic, so a cached raster and a fresh one are
+    the same bytes; the cache only saves the seconds.
+    """
+    import hashlib
+    from pathlib import Path as _Path
+
+    # The cache key carries the ORIGIN and the parameters, not just the
+    # name: a cached raster reused after an example moved its origin
+    # would be a raster the flight is not over, silently, and the camera
+    # checks would go back to measuring nothing.
+    params = {**DEMO_RIDGE, **overrides}
+    key = hashlib.sha256(
+        repr((round(float(lat_deg), 9), round(float(lon_deg), 9),
+              sorted(params.items()))).encode()).hexdigest()[:10]
+    directory = _Path(directory)
+    stem = directory / f"{name}_{key}"
+    if stem.with_suffix(".r16").is_file():
+        return stem
+    directory.mkdir(parents=True, exist_ok=True)
+    ridge_for_origin(lat_deg, lon_deg, name=stem.name, **overrides).write(stem)
+    return stem

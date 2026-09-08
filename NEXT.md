@@ -1,3 +1,21 @@
+**Camera Phase 1 graded (2026-09-08, this branch).** An adversarial
+review found the phase's own exit criterion unable to fail: geometry
+recovery, cross-view consistency and count exactness ALL passed on a
+manifest with a camera displaced 500 m and re-aimed, a focal length
+multiplied by 1.7, and 10 of 24 requested images delivered. Four
+external-anchor checks were added (intrinsics/placement against the
+recorded SPEC, every frame against telemetry.json, and a render
+manifest's applied pose AND field of view against the solved one); the
+renderer's hardcoded 55-degree FOV and 1280x720 output now come from the
+camera spec; camera_id no longer walks out of the run directory; the
+proximity trigger is reachable from a spec; the web app delivers the
+capture manifest, previews and verification on EVERY platform instead of
+refusing the whole run off macOS; and the terrain examples run over a
+real (synthesised, network-free) raster. Full grade, measurements and
+the findings NOT fixed (lagged-preset rate sensitivity, the one-third of
+package F the prompt surface reaches, the residual circularity in
+triangulation): docs/CAMERA_PHASE1_GRADE.md.
+
 # Resume here
 
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
@@ -21,7 +39,8 @@ CLI: python -m flightsim.capture / flightsim.verify (examples/
 -camera-index= pass reading the card's cameras block, written by
 capture --card) compiles logically but was never built or rendered --
 the report's engine-boundary section carries the exact verification
-steps. Suite 573 tests collected, 114 mutation guards. Measured on a
+steps. Suite 627 tests collected, 127 mutation guards (was 573/114 before the
+adversarial review of 2026-09-08 -- docs/CAMERA_PHASE1_GRADE.md). Measured on a
 raster-less clone (no runs/terrain bakes): 104 guards fire; the FOUR
 terrain-coupled planner guards (ridge-axis wind, rotor card word,
 span-station clearance minimum, orographic pre-flight) report WEAK

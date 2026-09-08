@@ -84,6 +84,14 @@ class RunState:
     # seed + visual-only label, wind, physics ground).
     reference: Optional[Dict] = None
     conditions: Dict = field(default_factory=dict)
+    # Camera Phase 1: the capture half, which runs on EVERY platform.
+    # ``capture`` summarises the manifest that was written; ``verification``
+    # carries the geometry checks' own pass/fail report; ``render_refusal``
+    # is the NAMED reason no pixels exist (ue.platform, aircraft.mesh),
+    # recorded on the run instead of thrown away with it.
+    capture: Optional[Dict] = None
+    verification: Optional[Dict] = None
+    render_refusal: Optional[Dict] = None
 
     def push(self, status: str, detail: str = "") -> None:
         self.status = status
@@ -96,7 +104,9 @@ class RunState:
                 "detail": self.detail, "spec_digest": self.spec_digest,
                 "scene": self.scene, "clip": self.clip,
                 "started": self.started, "events": self.events[-20:],
-                "reference": self.reference, "conditions": self.conditions}
+                "reference": self.reference, "conditions": self.conditions,
+                "capture": self.capture, "verification": self.verification,
+                "render_refusal": self.render_refusal}
 
 
 def editor_running() -> bool:
@@ -1316,6 +1326,178 @@ def camera_scene_violations(spec: ScenarioSpec, scene: Dict) -> List[Dict]:
             for v in violations]
 
 
+#: Geometry previews written per web run. The CLI writes one per
+#: scheduled frame; the web app caps it so a 500-image capture does not
+#: turn a page load into a thousand PNG writes. The manifest is always
+#: complete -- only the preview pictures are sampled, and the summary
+#: says how many of how many were drawn.
+WEBAPP_MAX_PREVIEWS = 24
+
+
+def capture_flow(spec: ScenarioSpec, out: Path,
+                 progress=None) -> Dict:
+    """The Camera Phase 1 capture half, on EVERY platform.
+
+    Rendering is macOS-only and stays so. Everything that makes captured
+    imagery USABLE -- the solved pose tracks, the capture schedule, the
+    capture manifest, the geometry previews and the verification report
+    -- is Python, needs no engine, and is what the phase actually
+    delivers. Running it here means a Windows or Linux web app produces
+    the phase's artefacts and refuses only the pixels, by name, instead
+    of refusing the whole run and producing nothing.
+
+    Returns a summary mapping for the run state, or raises. Named
+    refusals (a schedule that cannot be honoured, a pose track that
+    descends into the terrain) come back as ``{"refused": ...}`` rather
+    than as exceptions, so the page can show them the way it shows
+    every other refusal.
+    """
+    from core.capture.manifest import (
+        build_capture_manifest, write_capture_manifest,
+    )
+    from core.capture.poses import PoseSolveError, SceneFrame, solve_pose_track
+    from core.capture.preview import render_previews
+    from core.capture.schedule import ScheduleError, solve_schedule
+    from core.capture.validate import track_violations
+    from core.capture.verify import verify_run
+    from core.scenario.camera import default_cameras
+    from core.scenario.runner import run_spec
+    from core.terrain.ground import TerrainGround
+    from core.terrain.heightfield import Heightfield
+
+    def say(detail):
+        if progress is not None:
+            progress(detail)
+
+    scene = pick_scene(spec)
+    heightfield = (Heightfield.read(Path(scene["terrain"]))
+                   if scene.get("terrain") else None)
+    frame = SceneFrame.for_spec(spec, heightfield)
+    tornado_block = None
+    if str(spec.weather_event.value) == "tornado":
+        from core.environment.tornado import FADE_TOP_M, R_CORE_M
+
+        seconds = min(float(spec.duration.value), CLIP_SECONDS)
+        axis_n, axis_e = tornado_axis(spec, scene, seconds)
+        tornado_block = {"centre_north_m": axis_n, "centre_east_m": axis_e,
+                         "r_core_m": R_CORE_M, "fade_top_m": FADE_TOP_M}
+
+    say("flying the scenario headlessly (the real flight dynamics)")
+    result = run_spec(spec, terrain_ground=(TerrainGround(heightfield)
+                                            if heightfield else None))
+    columns = result.telemetry.columns
+
+    cameras = spec.cameras or default_cameras(spec)
+    say(f"solving {len(cameras)} camera pose track(s) and schedule(s)")
+    try:
+        tracks = [solve_pose_track(columns, c, frame) for c in cameras]
+        schedules = [solve_schedule(columns, c, frame) for c in cameras]
+    except (ScheduleError, PoseSolveError) as exc:
+        return {"refused": {"constraint": getattr(exc, "constraint",
+                                                  "camera.schedule"),
+                            "message": str(exc)}}
+
+    # The solved tracks against the scene, along the WHOLE run -- the
+    # static check in the /run verdict cannot see where an offset camera
+    # is actually carried.
+    datum = float(spec.terrain_elevation.value)
+    solved = []
+    for track in tracks:
+        solved.extend(track_violations(
+            track, heightfield=heightfield, scene_frame=frame,
+            tornado=tornado_block, terrain_elevation_m=datum))
+    if solved:
+        return {"refused": [{"constraint": v.constraint, "message": v.message,
+                             "actual": v.actual, "limit": v.limit,
+                             "unit": v.unit} for v in solved]}
+
+    out.mkdir(parents=True, exist_ok=True)
+    manifest = build_capture_manifest(
+        spec, columns, frame, tracks, schedules,
+        output_digest=result.output_digest,
+        scene={"key": scene.get("key", "flat"),
+               "terrain": scene.get("terrain")},
+        terrain_sha256=heightfield.digest() if heightfield else None,
+        cameras=cameras)
+    write_capture_manifest(manifest, out)
+    # The telemetry is written BESIDE the manifest because the geometry
+    # verification anchors every frame to it: a manifest alone can only
+    # be checked against itself.
+    result.telemetry.write_json(out / "telemetry.json")
+    spec.write(out / "scenario.yaml")
+
+    total = sum(len(s) for s in schedules)
+    say(f"drawing geometry previews for {min(total, WEBAPP_MAX_PREVIEWS)} "
+        f"of {total} frame(s)")
+    previews = render_previews(manifest, out, heightfield=heightfield,
+                               scene_frame=frame, terrain_elevation_m=datum,
+                               max_frames=WEBAPP_MAX_PREVIEWS)
+    report = verify_run(out)
+    return {
+        "frames": total,
+        "cameras": [{"camera_id": b["camera_id"], "preset": b["preset"],
+                     "frames": b["capture_count"],
+                     "trigger": b["trigger"],
+                     "basis": b["schedule_basis"],
+                     "inherits_roll": b["inherits_roll"]}
+                    for b in manifest["cameras"]],
+        "manifest": "capture_manifest.json",
+        "previews": [str(path.relative_to(out).as_posix())
+                     for path in previews],
+        "preview_total": total,
+        "scene": {"key": scene.get("key"), "kind": scene.get("kind")},
+        "simulation_digest": manifest["simulation_digest"],
+        "output_digest": manifest["output_digest"],
+        "verification": {
+            "ok": report.ok,
+            "checks": [{"name": c.name, "ok": c.ok, "detail": c.detail}
+                       for c in report.checks],
+            "summary": report.render(),
+        },
+    }
+
+
+def _recover_capture_summary(out: Path) -> Optional[Dict]:
+    """Rebuild a finished run's capture summary from what is on disk.
+
+    The manifest and the previews outlive the process that wrote them,
+    so a server restart must not orphan them; the verification is re-run
+    from the same directory rather than remembered, which also means a
+    recovered run reports the checks against the files as they are NOW.
+    """
+    from core.capture.manifest import read_capture_manifest
+    from core.capture.verify import verify_run
+
+    try:
+        manifest = read_capture_manifest(out / "capture_manifest.json")
+    except (OSError, ValueError):
+        return None
+    previews = sorted(
+        path.relative_to(out).as_posix()
+        for path in (out / "previews").rglob("*.png")) \
+        if (out / "previews").is_dir() else []
+    report = verify_run(out)
+    return {
+        "frames": len(manifest.get("frames", [])),
+        "cameras": [{"camera_id": b["camera_id"], "preset": b["preset"],
+                     "frames": b["capture_count"], "trigger": b["trigger"],
+                     "basis": b["schedule_basis"],
+                     "inherits_roll": b["inherits_roll"]}
+                    for b in manifest.get("cameras", [])],
+        "manifest": "capture_manifest.json",
+        "previews": previews,
+        "preview_total": len(manifest.get("frames", [])),
+        "simulation_digest": manifest.get("simulation_digest"),
+        "output_digest": manifest.get("output_digest"),
+        "verification": {
+            "ok": report.ok,
+            "checks": [{"name": c.name, "ok": c.ok, "detail": c.detail}
+                       for c in report.checks],
+            "summary": report.render(),
+        },
+    }
+
+
 def coupling_needs_seed(spec: ScenarioSpec) -> bool:
     """True when the run is stochastic even with turbulence word "none":
     a terrain scene with wind (lee-rotor) or a surface class with thermals
@@ -1344,12 +1526,18 @@ class RunManager:
         self._lock = threading.Lock()
         self._active: Optional[str] = None
 
+    #: Statuses a run does not come back from -- one tuple, so "busy"
+    #: and the one-at-a-time gate cannot disagree. "refused" joined them
+    #: with the capture half: a named capture refusal ends the run
+    #: exactly as a failure does, and must not wedge the manager.
+    TERMINAL = ("done", "failed", "refused")
+
     def status(self) -> Dict:
         with self._lock:
             active = self.runs.get(self._active) if self._active else None
         return {
             "busy": active is not None and active.status not in
-                    ("done", "failed"),
+                    self.TERMINAL,
             "editor_running": editor_running(),
             "active": active.as_dict() if active else None,
         }
@@ -1374,11 +1562,23 @@ class RunManager:
             return None
         out = self.out_root / run_id
         clip = out / "clip.mp4"
-        if not clip.is_file():
+        manifest = out / "capture_manifest.json"
+        # A run that CAPTURED but rendered nothing (every platform but a
+        # render-capable mac) has no clip and is still complete: its
+        # manifest, previews and verification are the deliverable. Before
+        # the capture half existed, only a clip could be recovered, so
+        # such a run vanished on restart.
+        if not clip.is_file() and not manifest.is_file():
             return None
-        run = RunState(run_id=run_id, status="done",
-                       detail="clip ready (recovered after a server restart)")
-        run.clip = str(clip)
+        run = RunState(
+            run_id=run_id, status="done",
+            detail=("clip ready" if clip.is_file() else "captured")
+                   + " (recovered after a server restart)")
+        if clip.is_file():
+            run.clip = str(clip)
+        if manifest.is_file():
+            run.capture = _recover_capture_summary(out)
+            run.verification = (run.capture or {}).get("verification")
         provenance_path = out / "provenance.json"
         if provenance_path.is_file():
             provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
@@ -1392,19 +1592,23 @@ class RunManager:
         return run
 
     def start(self, spec: ScenarioSpec, provenance: Dict) -> Dict:
-        """Refuses (with the reason) or starts a run and returns its id."""
-        from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
+        """Starts a run and returns its id, or refuses with the reason.
 
-        if not ue_available():
-            # The named platform refusal, not a 500: every render gotcha
-            # was measured on Metal/macOS only. The headless half (spec,
-            # provenance, validation, telemetry via run_spec) already
-            # happened or remains available on this OS.
-            return {"refused": UE_PLATFORM_REFUSAL,
-                    "constraint": "ue.platform"}
+        The PLATFORM is no longer a reason to refuse the whole run
+        (Camera Phase 1). Rendering is macOS-only and still refuses by
+        name -- but the capture half (headless flight, solved pose
+        tracks, capture schedule, capture manifest, geometry previews,
+        verification) is Python and runs everywhere, and it is what the
+        phase delivers. Refusing the run outright off-mac produced
+        nothing at all, which is not what the phase asks for: the
+        manifest is written for every run, on every platform, whether
+        or not pixels were produced. The named refusal rides on the
+        response and on the run state instead of replacing them.
+        """
+        render_refusal = self.render_refusal(spec)
         with self._lock:
             active = self.runs.get(self._active) if self._active else None
-            if active is not None and active.status not in ("done", "failed"):
+            if active is not None and active.status not in self.TERMINAL:
                 return {"refused": f"a run is already {active.status} "
                                    f"({active.run_id}); one editor instance "
                                    f"at a time"}
@@ -1414,12 +1618,38 @@ class RunManager:
                                    "run"}
             run = RunState(run_id=uuid.uuid4().hex[:12],
                            spec_digest=spec.digest())
+            run.render_refusal = render_refusal
             self.runs[run.run_id] = run
             self._active = run.run_id
         thread = threading.Thread(target=self._execute,
                                   args=(run, spec, provenance), daemon=True)
         thread.start()
-        return {"run_id": run.run_id}
+        outcome = {"run_id": run.run_id}
+        if render_refusal is not None:
+            outcome["render_refused"] = render_refusal
+        return outcome
+
+    @staticmethod
+    def render_refusal(spec: ScenarioSpec) -> Optional[Dict]:
+        """The NAMED reason this machine will produce no pixels, or None.
+
+        Order is load-bearing and unchanged: ue.platform before
+        aircraft.mesh. A machine with no engine build must hear that
+        first -- measured 2026-08-31 on a fresh Windows clone, which was
+        told to import aircraft models when the real blocker was that no
+        Unreal host existed there at all. What changed in Camera Phase 1
+        is only WHERE the refusal lands: on the run, beside the
+        artefacts the capture half produced, instead of in place of them.
+        """
+        from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
+
+        if not ue_available():
+            return {"constraint": "ue.platform",
+                    "message": UE_PLATFORM_REFUSAL}
+        mesh = refuse_placeholder_mesh(spec)
+        if mesh is not None:
+            return mesh
+        return None
 
     # -- the pipeline ------------------------------------------------------
 
@@ -1478,6 +1708,35 @@ class RunManager:
 
     def _execute(self, run: RunState, spec: ScenarioSpec,
                  provenance: Dict) -> None:
+        """The capture half first, on every platform; the render half
+        after it, only where the engine exists."""
+        out = self.out_root / run.run_id
+        try:
+            run.push("capturing", "solving camera geometry from the "
+                                  "recorded flight")
+            summary = capture_flow(
+                spec, out, progress=lambda d: run.push("capturing", d))
+        except Exception as exc:   # surfaced to the UI, never swallowed
+            run.push("failed", f"capture: {type(exc).__name__}: {exc}")
+            return
+        if "refused" in summary:
+            run.capture = summary
+            run.push("refused", "the capture was refused by name; see the "
+                                "named constraint")
+            return
+        run.capture = summary
+        run.verification = summary.get("verification")
+        run.push("captured",
+                 f"{summary['frames']} frame(s) of geometry across "
+                 f"{len(summary['cameras'])} camera(s); verification "
+                 f"{'PASSED' if summary['verification']['ok'] else 'FAILED'}")
+        if run.render_refusal is not None:
+            # The designed outcome off a render-capable machine, not a
+            # failure: the manifest, the previews and the verification
+            # above are complete, and only the pixels are refused.
+            run.push("done", f"captured; pixels refused by name "
+                             f"({run.render_refusal['constraint']})")
+            return
         try:
             self._render_flow(run, spec, provenance)
         except Exception as exc:   # surfaced to the UI, never swallowed

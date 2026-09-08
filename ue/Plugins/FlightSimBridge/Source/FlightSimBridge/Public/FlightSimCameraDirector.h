@@ -133,6 +133,13 @@ public:
 
 	bool ConsumingPoses() const { return PoseTimes.Num() > 0; }
 
+	// The solved track's own sample count and times, so a caller that
+	// carries a PARALLEL per-sample array (the focal length, which drives
+	// the field of view) interpolates it on exactly the same clock this
+	// actor interpolates the pose on, rather than keeping a second one.
+	int32 PoseSampleCount() const { return PoseTimes.Num(); }
+	double PoseTimeAt(int32 Index) const { return PoseTimes[Index]; }
+
 	// Place the camera exactly where the solved track says it is at
 	// SimTimeSeconds. False (with the reason) when no track is set or the
 	// time lies outside the track's span.

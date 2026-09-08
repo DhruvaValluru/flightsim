@@ -11,9 +11,9 @@ import pytest
 
 from core.capture.poses import SceneFrame, solve_pose_track
 from core.capture.validate import (
-    CAMERA_MIN_CLEARANCE_M, intrinsics_violations, schedule_violations,
-    static_camera_violations, track_violations, validate_cameras,
-    vocabulary_violations,
+    CAMERA_MIN_CLEARANCE_M, identifier_violations, intrinsics_violations,
+    schedule_violations, static_camera_violations, track_violations,
+    validate_cameras, vocabulary_violations,
 )
 from core.nl.compiler import compile_prompt
 from core.scenario.camera import CameraSpec
@@ -243,3 +243,63 @@ def test_clear_track_passes():
     track = solve_pose_track(columns, cam, FRAME)
     assert track_violations(track, heightfield=make_mountain(),
                             scene_frame=FRAME) == []
+
+
+# -- camera.identifier ---------------------------------------------------
+#
+# The camera id NAMES A DIRECTORY (frames/<id>/, previews/<id>/). Before
+# this constraint existed, a camera id of "../../pwned" wrote preview
+# images outside the run directory -- measured on Linux -- and any of
+# ':', '?', '*' or a reserved device name is an unrecoverable failure
+# halfway through a run on Windows.
+
+@pytest.mark.parametrize("bad,reason", [
+    ("../../pwned", "path traversal"),
+    ("cam/0", "a separator"),
+    ("cam\\0", "the Windows separator"),
+    ("cam:0", "a Windows drive separator"),
+    ("cam?0", "a Windows wildcard"),
+    ("cam*", "a Windows wildcard"),
+    ("cam|0", "a Windows pipe"),
+    ('cam"0', "a Windows quote"),
+    ("CON", "a Windows reserved device"),
+    ("com1.left", "a reserved device with an extension"),
+    ("NUL", "a Windows reserved device"),
+    ("cam.", "a trailing dot Windows strips"),
+    ("cam ", "a trailing space Windows strips"),
+    (".hidden", "a leading dot"),
+    ("..", "the parent directory"),
+    ("", "an empty id"),
+    ("c" * 65, "an id past the length limit"),
+])
+def test_unsafe_camera_ids_refuse_by_name(bad, reason):
+    cam = CameraSpec.defaulted(camera_id="cam", preset="chase")
+    cam.set("camera_id", bad, frm="test")
+    violations = identifier_violations(cam)
+    assert violations, f"{bad!r} ({reason}) was accepted"
+    assert constraints(violations) == ["camera.identifier"] * len(violations)
+
+
+@pytest.mark.parametrize("good", ["camera0", "chase_0", "tower-left",
+                                  "cam.left", "C" * 64])
+def test_ordinary_camera_ids_pass(good):
+    cam = CameraSpec.defaulted(camera_id="cam", preset="chase")
+    cam.set("camera_id", good, frm="test")
+    assert identifier_violations(cam) == []
+
+
+def test_core_validate_carries_the_identifier_refusal():
+    spec = compile_prompt("fly the 747 at 10000 ft and 280 kt")
+    cam = CameraSpec.defaulted(camera_id="cam", preset="chase")
+    cam.set("camera_id", "../escape", frm="test")
+    spec.cameras = [cam]
+    assert "camera.identifier" in constraints(validate_cameras(spec))
+
+
+def test_an_unsafe_id_is_refused_never_sanitised():
+    """A stated field is never silently moved -- including this one. The
+    refusal names the constraint; the id keeps the value the user gave."""
+    cam = CameraSpec.defaulted(camera_id="cam", preset="chase")
+    cam.set("camera_id", "cam:0", frm="test")
+    identifier_violations(cam)
+    assert cam.camera_id.value == "cam:0"
