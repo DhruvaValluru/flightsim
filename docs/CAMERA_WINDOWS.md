@@ -78,6 +78,31 @@ engine. The other checks still run and can still fail: their reference
 is the specification, which is an input to the solver rather than an
 output of it.
 
+## From the web app
+
+The same capture, from the browser:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn webapp.server:app --port 8008
+```
+
+Type a scenario, add a camera in the review table (or several), and run.
+A spec that states cameras is **captured, not clipped**: poses solved in
+Python, one commandlet pass per camera, and a gallery under the clip
+showing the overlays, the rendered frames and the previews per camera,
+with the verification summary and a link to `capture_manifest.json`.
+
+The routes behind it, if you want them directly:
+
+| route | what it returns |
+| --- | --- |
+| `/runs/<id>/images` | what images exist, per camera and per kind |
+| `/runs/<id>/frames/<camera>/<name>.png` | a rendered frame |
+| `/runs/<id>/overlays/<camera>/<name>.png` | that frame with the recorded geometry drawn on it |
+| `/runs/<id>/previews/<camera>/<name>.png` | the engine-free preview |
+| `/runs/<id>/capture_manifest.json` | the labels |
+| `/runs/<id>/verify.json` | the verification summary |
+
 ## Temporal alignment
 
 Two captures of the same simulation with different cameras must produce
@@ -107,16 +132,20 @@ engine applied differs from the solved one.
   Linux machine with no engine. `scripts\build_ue.ps1` is the first
   real test of it; if the bridge fails to build, that is this change,
   not your machine.
-* **The web UI renders one camera.** It drives the commandlet's preset
-  machinery, not the solved pose track, and now refuses by name
-  (`camera.multi_render`) rather than silently rendering the first
-  camera of a multi-camera spec. Multi-camera capture is the CLI's.
-* **The render still re-flies the scenario.** `flightsim.capture` flies
-  headlessly to solve the poses, and the commandlet flies again to
-  render. If the host's flight is not bit-identical to the headless
-  one, the manifest labels a slightly different flight than the frames
-  show. The overlays make any such divergence visible — the crosshair
-  drifts off the aircraft — and closing it properly is the next step
-  (`docs/CAMERA_PHASE2_WINDOWS_PLAN.md`, "One flight, not two").
+* **A camera-less run still produces only a clip.** State no camera and
+  the run takes the legacy single-pass path, whose commandlet arguments
+  are pinned byte-identical by test. Its flat `frames/` are served and
+  shown, but there is no manifest and no verification, because nothing
+  solved a pose. State a camera to capture.
+* **The render still re-flies the scenario.** Poses are solved over a
+  headless pre-run, then the host flies the scenario itself. The camera
+  poses are consumed verbatim so those are exact; the AIRCRAFT states in
+  the manifest come from the pre-run. This is no longer silent: the
+  `flight_agreement` check compares the manifest's aircraft track
+  against the host's own recorded telemetry, matched on simulation time,
+  and FAILS the run's verification when they differ by more than 25 m.
+  Closing it properly (replaying the telemetry rather than re-flying) is
+  still the next step — `docs/CAMERA_PHASE2_WINDOWS_PLAN.md`, "One
+  flight, not two".
 * Segmentation masks, bounding boxes, domain randomization and batch
   execution remain out of scope.
