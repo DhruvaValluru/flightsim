@@ -555,6 +555,28 @@ def verify_geometry(manifest: Dict,
 
 # -- checks needing the engine ------------------------------------------
 
+def _render_frame_records(payload: Dict) -> List[Dict]:
+    """The per-frame records out of a host's ``render.json``.
+
+    The commandlet writes TWO differently-shaped things whose names
+    read alike: ``frames`` is the integer COUNT of images written, and
+    ``frame_records`` is the array of per-frame records. Both readers
+    below asked for ``frames`` and got the count, so the landmark and
+    capture-time checks could never see a record: before a render
+    existed they reported NOT RUN, and the first real render turned
+    the count into ``TypeError: 'int' object is not iterable``. Read
+    the array by its name, and accept ``frames`` only when a producer
+    genuinely made it a list.
+    """
+    records = payload.get("frame_records")
+    if isinstance(records, list):
+        return [r for r in records if isinstance(r, dict)]
+    legacy = payload.get("frames")
+    if isinstance(legacy, list):
+        return [r for r in legacy if isinstance(r, dict)]
+    return []
+
+
 def _engine_landmark_pixels(run_dir) -> Dict:
     """``{frame_file: {landmark: (px, py, visible)}}`` from the render
     host's own ``render.json``, where one exists.
@@ -588,7 +610,7 @@ def _engine_landmark_pixels(run_dir) -> Dict:
             prefix = path.parent.relative_to(run_dir).as_posix()
         except ValueError:
             prefix = ""
-        for record in payload.get("frames", []) or []:
+        for record in _render_frame_records(payload):
             landmarks = record.get("landmarks") or {}
             name = record.get("frame") or record.get("file")
             if not name or not landmarks:
@@ -628,7 +650,7 @@ def _engine_frame_times(run_dir) -> Dict[str, float]:
             prefix = path.parent.relative_to(run_dir).as_posix()
         except ValueError:
             prefix = ""
-        for record in payload.get("frames", []) or []:
+        for record in _render_frame_records(payload):
             name = record.get("frame") or record.get("file")
             if not name or "t" not in record:
                 continue
