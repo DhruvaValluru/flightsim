@@ -1287,7 +1287,32 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			return Fail(Error + TEXT("; frames written so far are not a complete run"));
 		}
-		if (Step % StepsPerFrame != 0)
+		// Consume-poses captures on the SCHEDULE, not on the clip's frame
+		// grid. Three things follow from putting the gate here:
+		//
+		//  * the frame delivered for a scheduled instant is taken within
+		//    one SUBSTEP of it (8 ms at 120 Hz) instead of within one
+		//    clip frame (200 ms at 5 Hz) -- at cruise that was 30 m of
+		//    aircraft motion between what a record says and what its
+		//    picture shows;
+		//  * the pose is applied only at instants the track covers, so
+		//    the host's first frame at t=0 (the recorder's first sample
+		//    is one step in) is skipped rather than refused;
+		//  * nothing renders that is not going to be written, instead of
+		//    rendering the whole clip and discarding all but the
+		//    scheduled frames.
+		if (bConsumePoses)
+		{
+			const double Now =
+				Scenario.ReadProperty(TEXT("simulation/sim-time-sec"));
+			if (NextCapture >= CaptureTimes.Num() ||
+			    Now + 0.5 * DeltaSeconds < CaptureTimes[NextCapture])
+			{
+				continue;
+			}
+			++NextCapture;
+		}
+		else if (Step % StepsPerFrame != 0)
 		{
 			continue;
 		}
@@ -1347,23 +1372,6 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				++Lit;
 			}
 		}
-		// In consume-poses mode a frame is written only at the SCHEDULED
-		// capture times, and numbered by capture index -- so the files on
-		// disk are exactly the files capture_manifest.json names, and
-		// exactly as many as the spec asked for. The simulation is still
-		// stepped at the full rate; only the writing is gated.
-		if (bConsumePoses)
-		{
-			const double Now =
-				Scenario.ReadProperty(TEXT("simulation/sim-time-sec"));
-			if (NextCapture >= CaptureTimes.Num() ||
-			    Now + 0.5 * DeltaSeconds < CaptureTimes[NextCapture])
-			{
-				continue;               // not a scheduled instant
-			}
-			++NextCapture;
-		}
-
 		// The blank-frame floor applies to the frames actually DELIVERED.
 		// It used to see every rendered frame because every rendered
 		// frame was written; now that the schedule gates writing, an
