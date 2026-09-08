@@ -56,7 +56,15 @@ CAMERA_PRESETS = ("chase", "ground", "wingman", "tower", "cockpit",
 
 POSITION_MODES = ("offset", "scene", "geographic")
 AIM_MODES = ("aircraft", "point", "bearing")
-TRIGGER_KINDS = ("interval", "distance", "event")
+#: Capture triggers a specification may name. "distance" and
+#: "proximity" are the two halves of the phase's waypoint trigger --
+#: by distance along the flown track, and by proximity to a stated
+#: coordinate. (``proximity`` was implemented and tested in the
+#: scheduler from the start but left out of this tuple, which made every
+#: specification naming it refuse as an unknown trigger: the scheduler
+#: half was unreachable from a spec, and its tests exercised a code path
+#: no run could take.)
+TRIGGER_KINDS = ("interval", "distance", "proximity", "event")
 EVENT_DIRECTIONS = ("above", "below", "rising", "falling")
 
 #: Per-airframe chase offsets, forward:right:up metres in the heading

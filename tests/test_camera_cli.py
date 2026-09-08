@@ -135,3 +135,143 @@ def test_render_projects_the_spec_for_the_host_before_solving(tmp_path):
     assert str(spec.airspeed_kind.value) != "tas"
     # The move is recorded, never silent.
     assert "autopilot" in str(spec.hold_state.frm).lower()
+
+
+# -- the single verification command (package I) ------------------------
+
+def test_demo_runs_alignment_recovery_and_consistency(tmp_path, capsys):
+    """One command, all three exit-criterion properties. Temporal
+    alignment needs TWO runs of the same simulation, so flightsim.verify
+    over one directory can never report it; this command captures both.
+    """
+    from flightsim.demo import main as demo_main
+
+    code = demo_main(["--out", str(tmp_path / "demo"), "--max-previews", "0"])
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert "temporal_alignment" in out
+    assert "geometry_recovery" in out
+    assert "cross_view_consistency" in out
+    assert "DEMO PASSED" in out
+    # Both directories exist and carry the deliverable.
+    assert (tmp_path / "demo" / "capture_manifest.json").is_file()
+    assert (tmp_path / "demo_variant" / "capture_manifest.json").is_file()
+
+
+def test_demo_variant_is_the_same_simulation(tmp_path, capsys):
+    """The alignment claim is only worth anything if the two runs really
+    are one simulation: the camera-free digests must match while the spec
+    digests differ."""
+    import json
+
+    from flightsim.demo import main as demo_main
+
+    assert demo_main(["--out", str(tmp_path / "demo"),
+                      "--max-previews", "0"]) == 0
+    first = json.loads((tmp_path / "demo" / "capture_manifest.json")
+                       .read_text(encoding="utf-8"))
+    second = json.loads((tmp_path / "demo_variant" / "capture_manifest.json")
+                        .read_text(encoding="utf-8"))
+    assert first["spec_digest"] != second["spec_digest"]
+    assert first["simulation_digest"] == second["simulation_digest"]
+    assert first["output_digest"] == second["output_digest"]
+
+
+# -- terrain examples: real raster, no network (package I) --------------
+#
+# The phase asks for "a waypoint capture over real terrain" and "a
+# refusal case with a camera placed inside a mountain". Both committed
+# examples ran over a FLAT scene before this: the waypoint one because
+# it needed a bake the instructor did not have, and the refusal one
+# because it refused against the spec's flat datum rather than against a
+# raster. A synthesised raster centred on the spec's own origin needs no
+# network and no account, and reaches the ground callback as the same
+# Heightfield a Copernicus bake produces.
+
+def test_terrain_example_captures_over_a_real_raster(tmp_path):
+    from core.capture.verify import verify_run
+
+    out = tmp_path / "terrain"
+    assert capture_main([str(EXAMPLES / "cameras_terrain.yaml"),
+                         "--out", str(out), "--synth-terrain",
+                         "--max-previews", "0"]) == 0
+    manifest = json.loads((out / "capture_manifest.json")
+                          .read_text(encoding="utf-8"))
+    # A raster, not a datum: the manifest records its digest.
+    assert manifest["scene"]["terrain_sha256"]
+    assert manifest["scene"]["key"] == "terrain"
+    report = verify_run(out)
+    assert report.ok, report.render()
+
+
+def test_camera_inside_a_mountain_refuses_against_the_raster(tmp_path,
+                                                             capsys):
+    out = tmp_path / "buried"
+    code = capture_main([str(EXAMPLES / "cameras_mountain_refusal.yaml"),
+                         "--out", str(out), "--synth-terrain"])
+    assert code == 2
+    printed = capsys.readouterr().out
+    assert "camera.terrain_clearance" in printed
+    # Against the raster: the reported AGL is the ridge surface's, not
+    # the spec's flat datum's.
+    assert "m AGL" in printed
+    assert not (out / "capture_manifest.json").exists()
+
+
+def test_synthesised_terrain_is_deterministic(tmp_path):
+    """Two syntheses of the same origin are the same raster -- otherwise
+    the committed refusal example would refuse on some runs and not on
+    others."""
+    from core.terrain.synthesis import ridge_for_origin
+
+    a = ridge_for_origin(0.0, 0.0, size=128)
+    b = ridge_for_origin(0.0, 0.0, size=128)
+    assert a.digest() == b.digest()
+    assert a.georeference.to_dict() == b.georeference.to_dict()
+
+
+def test_the_synthesised_raster_is_centred_on_the_spec_origin(tmp_path):
+    """A raster the flight is not over is a flat datum with extra
+    steps: the spec's own origin must land on it."""
+    from pyproj import Transformer
+
+    from core.terrain.synthesis import ridge_for_origin
+
+    field = ridge_for_origin(46.5, 8.5, size=128)
+    forward = Transformer.from_crs("EPSG:4326", field.georeference.crs,
+                                   always_xy=True)
+    x, y = forward.transform(8.5, 46.5)
+    assert field.contains(x, y)
+    column, row = field._pixel_coords(x, y)
+    assert abs(column - (field.width - 1) / 2.0) < 1.0
+    assert abs(row - (field.height - 1) / 2.0) < 1.0
+
+
+def test_a_terrain_impact_is_a_named_refusal_not_a_traceback(tmp_path,
+                                                             capsys):
+    """Flying a low example over a high ridge printed a stack trace at
+    the instructor. An impact is a named outcome of the scenario."""
+    from core.scenario.spec import ScenarioSpec
+
+    spec = ScenarioSpec.read(EXAMPLES / "cameras_terrain.yaml")
+    spec.set("altitude", 1000.0, frm="test: below the ridge")
+    low = tmp_path / "low.yaml"
+    spec.write(low)
+    code = capture_main([str(low), "--out", str(tmp_path / "impact"),
+                         "--synth-terrain", "--max-previews", "0"])
+    assert code == 2
+    assert "terrain.impact" in capsys.readouterr().out
+
+
+def test_synthesised_terrain_cache_is_keyed_by_the_origin(tmp_path):
+    """A cached raster reused after an example moved its origin would be
+    a raster the flight is not over -- silently, and the camera checks
+    would go back to measuring nothing."""
+    from core.terrain.synthesis import ensure_ridge_for_origin
+
+    first = ensure_ridge_for_origin(tmp_path, 46.0, 8.0, name="r", size=64)
+    again = ensure_ridge_for_origin(tmp_path, 46.0, 8.0, name="r", size=64)
+    moved = ensure_ridge_for_origin(tmp_path, 47.0, 8.0, name="r", size=64)
+    assert first == again                       # same origin: reused
+    assert moved != first                       # moved origin: a new raster
+    assert moved.with_suffix(".r16").is_file()

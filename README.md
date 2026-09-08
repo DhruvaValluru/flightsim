@@ -228,18 +228,44 @@ gate, the breadth behind Gate 5's single case:
 ## Capture camera geometry (Camera Phase 1, any platform)
 
 Cameras are spec elements (provenanced, validated, digest-relevant --
-see `docs/CAMERA_PHASE1_REPORT.md`). A run captures a DEFINED number of
-frames, each with full recoverable geometry, engine or no engine:
+see `docs/CAMERA_PHASE1_REPORT.md` and `docs/CAMERA_WINDOWS.md`, and
+`docs/CAMERA_PHASE1_GRADE.md` for what was measured wrong at the phase
+merge and what is still open). A run captures a DEFINED number of
+frames, each with full recoverable geometry, engine or no engine.
+
+**One command, every platform** -- captures a specification twice with
+different camera sets and reports alignment, geometry recovery and
+cross-view consistency in one pass/fail summary:
 
 ```bash
+./scripts/verify_phase1.sh          # Windows: .\scripts\verify_phase1.ps1
+```
+
+Or the pieces:
+
+```bash
+.venv/bin/python -m flightsim.demo
 .venv/bin/python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo
 .venv/bin/python -m flightsim.verify runs/demo
 ```
 
-Off macOS the pixel render refuses by name (`ue.platform`) while the
-capture manifest, geometry previews and verification complete; the
-refusal example (`examples/cameras_refusal.yaml`) shows a camera placed
-inside terrain refused as `camera.terrain_clearance`.
+Without the engine the pixel render refuses by name (`ue.platform`)
+while the capture manifest, geometry previews and verification complete.
+
+Committed examples, all runnable with no network and no account:
+
+| example | what it shows | expected |
+|---|---|---|
+| `cameras_multi.yaml` | two cameras, one flight, 24 images each | 48 frames |
+| `cameras_waypoint.yaml` | waypoint capture along the flown track | frames each 400 m |
+| `cameras_terrain.yaml` | waypoint + counted capture over a REAL raster (`--synth-terrain`) | 30 frames |
+| `cameras_refusal.yaml` | a camera under the terrain datum | `REFUSED [camera.terrain_clearance]` |
+| `cameras_mountain_refusal.yaml` | a camera INSIDE a mountain, checked against the raster (`--synth-terrain`) | `REFUSED [camera.terrain_clearance]` |
+
+`--synth-terrain` synthesises a deterministic raster centred on the
+spec's own origin (spectral construction plus thermal and hydraulic
+erosion), so the terrain examples run over real ground on a fresh clone.
+`--terrain <bake stem>` remains the path for real geography.
 
 ## Run the tests
 

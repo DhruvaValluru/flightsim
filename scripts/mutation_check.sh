@@ -922,6 +922,27 @@ mutate webapp/runs.py \
     "a failed model build fails the run BY NAME" \
     tests/test_aircraft_assets.py || failures=$((failures+1))
 
+echo "-- the camera identifier and the waypoint vocabulary --"
+# Guards for safeguards this branch did not previously have: a camera id
+# that named a directory unchecked (measured: '../../pwned' wrote preview
+# images OUTSIDE the run directory on Linux; ':' or CON is an
+# unrecoverable file-creation failure mid-run on Windows). The count
+# contract already has its guard above; the proximity trigger the
+# scheduler implemented but no specification could reach is covered by
+# the vocabulary tests it now passes through.
+
+mutate core/capture/validate.py \
+    '        out.extend(identifier_violations(camera, index))' \
+    '        pass  # MUTATED: unsafe camera ids reach the filesystem' \
+    "an unsafe camera id refuses before it names a directory" \
+    tests/test_camera_validate.py || failures=$((failures+1))
+
+mutate core/capture/validate.py \
+    '    bad = sorted({c for c in value if c not in _CAMERA_ID_ALLOWED})' \
+    '    bad = []  # MUTATED: separators and wildcards allowed' \
+    "a camera id may not contain a path separator or a wildcard" \
+    tests/test_camera_validate.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
