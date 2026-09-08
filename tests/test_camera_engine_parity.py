@@ -23,6 +23,7 @@ disagreement of the size that matters.
 
 import json
 import math
+from pathlib import Path
 
 import pytest
 
@@ -117,7 +118,14 @@ def write_render_json(manifest, run_dir, jitter_px=0.0, only_camera=None):
                     px += jitter_px
                 landmarks[landmark["name"]] = {
                     "visible": bool(visible), "px": px, "py": py}
-            frames.append({"frame": record["file"], "landmarks": landmarks})
+            # The engine records the BASENAME, because the commandlet only
+            # knows the directory it was told to write into. This fixture
+            # used to record the manifest's full relative path, which made
+            # the lookup appear to work in tests while never matching a
+            # real render.json -- so both engine checks reported NOT RUN
+            # on a real run and these tests could not see it.
+            frames.append({"frame": Path(record["file"]).name,
+                           "landmarks": landmarks})
         path = run_dir / "frames" / camera_id
         path.mkdir(parents=True, exist_ok=True)
         (path / "render.json").write_text(

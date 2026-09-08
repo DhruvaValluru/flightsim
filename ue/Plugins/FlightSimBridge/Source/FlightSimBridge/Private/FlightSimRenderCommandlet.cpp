@@ -689,6 +689,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// reprojection check in this system.
 	TArray<FString> LandmarkNames;
 	TArray<FVector> LandmarkProjectedMetres;
+	// The capture SCHEDULE: the simulation times this camera is meant to
+	// produce an image at, solved in Python. Without it the commandlet
+	// wrote every rendered frame at the clip's frame rate and numbered
+	// them from zero, so a manifest promising 24 images at scheduled
+	// times pointed at the first 24 frames of the run -- real files, the
+	// wrong pictures. The count contract has to reach the pixels.
+	TArray<double> CaptureTimes;
+	int32 NextCapture = 0;
 	{
 		FParse::Value(*Params, TEXT("camera-index="), ConsumedCameraIndex);
 		FString CardText;
@@ -816,6 +824,23 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			                            Error))
 			{
 				return Fail(Error);
+			}
+
+			const TArray<TSharedPtr<FJsonValue>>* CaptureTimesJson = nullptr;
+			if (CameraJson->TryGetArrayField(TEXT("capture_times_s"),
+			                                 CaptureTimesJson) &&
+			    CaptureTimesJson != nullptr)
+			{
+				for (const TSharedPtr<FJsonValue>& Value : *CaptureTimesJson)
+				{
+					CaptureTimes.Add(Value->AsNumber());
+				}
+			}
+			if (CaptureTimes.Num() == 0)
+			{
+				return Fail(TEXT("cameras block carries no capture_times_s; "
+				                 "refusing to guess which frames the "
+				                 "manifest names"));
 			}
 
 			// The card's landmarks, expressed like every other card
@@ -1319,12 +1344,37 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				++Lit;
 			}
 		}
+		// In consume-poses mode a frame is written only at the SCHEDULED
+		// capture times, and numbered by capture index -- so the files on
+		// disk are exactly the files capture_manifest.json names, and
+		// exactly as many as the spec asked for. The simulation is still
+		// stepped at the full rate; only the writing is gated.
+		if (bConsumePoses)
+		{
+			const double Now =
+				Scenario.ReadProperty(TEXT("simulation/sim-time-sec"));
+			if (NextCapture >= CaptureTimes.Num() ||
+			    Now + 0.5 * DeltaSeconds < CaptureTimes[NextCapture])
+			{
+				continue;               // not a scheduled instant
+			}
+			++NextCapture;
+		}
+
+		// The blank-frame floor applies to the frames actually DELIVERED.
+		// It used to see every rendered frame because every rendered
+		// frame was written; now that the schedule gates writing, an
+		// unwritten frame is nobody's frame. The floor itself is
+		// unchanged and still absolute: one blank delivered frame fails
+		// the run.
 		if (Lit == 0)
 		{
 			++BlankFrames;
 		}
 
-		const FString FrameName = FString::Printf(TEXT("frame_%04d.png"), Captured);
+		const FString FrameName = FString::Printf(
+			TEXT("frame_%04d.png"),
+			bConsumePoses ? NextCapture - 1 : Captured);
 		TArray64<uint8> Png;
 		FImageUtils::PNGCompressImageArray(Width, Height, Pixels, Png);
 		if (!FFileHelper::SaveArrayToFile(Png, *FPaths::Combine(OutputDirectory, FrameName)))
@@ -1496,6 +1546,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		++Captured;
 	}
 
+	if (bConsumePoses && NextCapture != CaptureTimes.Num())
+	{
+		return Fail(FString::Printf(
+			TEXT("consume-poses: emitted %d of the %d scheduled images; "
+			     "the run ended before the schedule did, so the manifest "
+			     "would name frames that do not exist"),
+			NextCapture, CaptureTimes.Num()));
+	}
 	if (Captured == 0)
 	{
 		return Fail(TEXT("no frames were captured"));

@@ -567,17 +567,36 @@ def _engine_landmark_pixels(run_dir) -> Dict:
     """
     if run_dir is None:
         return {}
+    run_dir = Path(run_dir)
     out: Dict[str, Dict] = {}
-    for path in sorted(Path(run_dir).rglob("render.json")):
+    for path in sorted(run_dir.rglob("render.json")):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
+        # The engine names a frame by its BASENAME ("frame_0005.png"),
+        # because it only knows the directory it was told to write into.
+        # The manifest names it by the path relative to the run
+        # ("frames/chase0/frame_0005.png"). Keying on the engine's name
+        # alone never matched the manifest -- so both engine-dependent
+        # checks reported NOT RUN even with a render present, which is
+        # the quietest possible way for them to not exist. It also
+        # collides across cameras, which all number from frame_0000.
+        # render.json sits in the camera's own directory, so that
+        # directory IS the missing prefix.
+        try:
+            prefix = path.parent.relative_to(run_dir).as_posix()
+        except ValueError:
+            prefix = ""
         for record in payload.get("frames", []) or []:
             landmarks = record.get("landmarks") or {}
             name = record.get("frame") or record.get("file")
             if not name or not landmarks:
                 continue
+            # Basename first: the engine records "frame_0005.png", but a
+            # producer that recorded a path must not be prefixed twice.
+            leaf = str(name).replace("\\", "/").rsplit("/", 1)[-1]
+            name = f"{prefix}/{leaf}" if prefix else leaf
             out[str(name)] = {
                 str(key): (float(entry.get("px", math.nan)),
                            float(entry.get("py", math.nan)),
