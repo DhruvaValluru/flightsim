@@ -158,6 +158,27 @@ def test_a_normalised_dot_segment_cannot_reach_outside_the_run(run_dir):
     assert landed.status_code == 200
 
 
+def test_a_symlinked_camera_directory_cannot_serve_outside_the_run(
+        run_dir, tmp_path):
+    """The name patterns block "/" and "..", so they alone stop every
+    textual traversal -- which leaves resolving the path and requiring
+    it to stay inside the run as the guard for the case they cannot see:
+    a symlink in the run directory pointing somewhere else. Without that
+    check this request serves the file.
+    """
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "frame_0000.png").write_bytes(_png())
+    escape = run_dir / "frames" / "escape"
+    try:
+        escape.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):      # no symlinks on this FS
+        pytest.skip("symlinks unavailable")
+    reply = TestClient(app).get("/runs/run_test/frames/escape/frame_0000.png")
+    assert reply.status_code == 404
+    assert not reply.content.startswith(b"\x89PNG")
+
+
 def test_inventory_reads_the_directories_not_the_manifest(run_dir):
     """A frame the manifest names but the renderer never wrote must not
     appear as an image the page then fails to load."""

@@ -791,10 +791,29 @@ mutate core/capture/verify.py \
     tests/test_camera_verify.py || failures=$((failures+1))
 
 mutate core/capture/verify.py \
-    '        "cross_view_consistency", worst <= tol_m,' \
-    '        "cross_view_consistency", True,  # MUTATED' \
-    "two-view triangulation errors fail verification" \
-    tests/test_camera_verify.py || failures=$((failures+1))
+    '        if error > tol_m:' \
+    '        if False:  # MUTATED: a landmark may triangulate anywhere' \
+    "a landmark that does not triangulate back fails cross-view consistency" \
+    tests/test_camera_engine_parity.py || failures=$((failures+1))
+
+# -- Camera Phase 2: the capture stage and the web app it reaches.
+mutate core/capture/verify.py \
+    '    if worst > tol_m:' \
+    '    if False:  # MUTATED: the labelled flight need not be the rendered one' \
+    "a manifest labelling a different flight than the frames show fails" \
+    tests/test_camera_flight_agreement.py || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '        resolved.relative_to(root)' \
+    '        pass  # MUTATED: a path may climb out of the run directory' \
+    "an image path that climbs out of the run directory is refused" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate core/capture/aircraft_mesh.py \
+    '            return None                    # partial source is not a model' \
+    '            continue  # MUTATED: draw whatever parts happen to exist' \
+    "a partial airframe source is refused, never drawn as the real aircraft" \
+    tests/test_camera_airframe.py || failures=$((failures+1))
 
 mutate core/capture/verify.py \
     '        if indices != list(range(emitted)):' \
