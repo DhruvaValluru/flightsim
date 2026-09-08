@@ -121,6 +121,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"REFUSED -- {exc}")
         return 2
 
+    if args.render:
+        # The render hosts have no autopilot, take only calibrated
+        # airspeed, and hold mass for the clip. The webapp has projected
+        # every spec through this before handing it to the commandlet
+        # since Gate 8.3; --render did not, so a spec with the DEFAULT
+        # hold_state (true) flew headlessly, solved every pose, launched
+        # the engine, and only then hit the commandlet's named refusal.
+        # Project first, say what moved, and solve the poses over the
+        # flight the host will actually fly.
+        from webapp.runs import project_for_ue_host
+
+        # spec.quantities() yields (section, name, quantity).
+        before = {name: q.value for _, name, q in spec.quantities()}
+        project_for_ue_host(spec)
+        moved = [f"{name}: {before[name]!r} -> {q.value!r}"
+                 for _, name, q in spec.quantities()
+                 if before.get(name) != q.value]
+        if moved:
+            print("projected for the render host (no autopilot; "
+                  "calibrated airspeed only):")
+            for line in moved:
+                print(f"  {line}")
+
     heightfield = None
     terrain_ground = None
     if args.terrain:

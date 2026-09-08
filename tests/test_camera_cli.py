@@ -108,3 +108,30 @@ def test_card_carries_the_solved_pose_tracks(tmp_path):
     assert block["origin_x_m"] == manifest["frame"]["origin_x_m"]
     # Flat scene: the card declares the projected frame.
     assert card["scene_crs"] == manifest["frame"]["crs"]
+
+
+def test_render_projects_the_spec_for_the_host_before_solving(tmp_path):
+    """--render must apply the same host projection the webapp has
+    applied since Gate 8.3.
+
+    The render hosts have no autopilot, so the commandlet refuses a
+    spec that commands a held state -- and hold_state defaults to TRUE.
+    Without the projection, --render flew the scenario headlessly,
+    solved every pose track, launched Unreal, and only then hit that
+    refusal, having burned the whole run to learn something readable
+    off the spec. Worse, the poses would have been solved over a
+    closed-loop flight the open-loop host was never going to fly.
+    """
+    from webapp.runs import project_for_ue_host
+
+    repo = Path(__file__).resolve().parents[1]
+    spec = ScenarioSpec.read(repo / "examples" / "cameras_multi.yaml")
+    assert bool(spec.hold_state.value) is True, (
+        "the example no longer exercises the refusal this guards")
+
+    project_for_ue_host(spec)
+    assert bool(spec.hold_state.value) is False
+    assert bool(spec.mass_held.value) is True
+    assert str(spec.airspeed_kind.value) != "tas"
+    # The move is recorded, never silent.
+    assert "autopilot" in str(spec.hold_state.frm).lower()
