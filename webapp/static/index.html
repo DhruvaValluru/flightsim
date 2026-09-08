@@ -469,9 +469,11 @@ async function poll() {
       `href="/runs/${activeRun}/telemetry.json">telemetry</a></div>` +
       `<div id="pathArea"></div>` +
       `</div><div class="aeroSide" id="aeroSide"></div></div>` +
+      `<div id="galleryArea"></div>` +
       `<div id="effectArea"></div>`;
     initAeroPanel(activeRun, run);
     initFlightPath(activeRun, run);
+    initGallery(activeRun, run);
     initEffectReport(activeRun);
   } else if (run.status !== "failed") {
     setTimeout(poll, 2000);
@@ -1003,6 +1005,119 @@ async function initEffectReport(runId) {
   drawPair("fxAlt", "altitude", "m", ch.altitude_m.baseline,
            ch.altitude_m.actual, false);
 }
+
+// -- Camera Phase 2: the captured images -------------------------------
+// The frames a run renders have always survived on disk; until now
+// nothing served them and nothing here showed them, so the only visual
+// output of a run was a single mp4. A spec that states cameras is
+// captured rather than clipped: one pass per camera, a capture manifest
+// carrying every frame's pose and intrinsics, overlays drawing that
+// geometry back onto the pixels, and a verification summary.
+const GALLERY_KINDS = [
+  ["overlays", "overlay", "the recorded geometry drawn ON the rendered " +
+   "pixels: circle = manifest projection, cross = engine projection"],
+  ["frames", "rendered", "what the camera saw"],
+  ["previews", "preview", "engine-free geometry preview (no engine on " +
+   "this machine, or no pixels for this frame)"],
+];
+
+async function initGallery(runId, run) {
+  const area = document.getElementById("galleryArea");
+  if (!area) return;
+  let inventory;
+  try {
+    const reply = await fetch(`/runs/${runId}/images`);
+    if (!reply.ok) return;
+    inventory = await reply.json();
+  } catch (err) { return; }
+
+  // Which kinds actually produced files. A run with no cameras stated
+  // takes the legacy clip path and has flat frames only; say so rather
+  // than showing an empty gallery.
+  const kinds = GALLERY_KINDS.filter(
+    ([key]) => Object.keys(inventory[key] || {}).length > 0);
+  if (!kinds.length) return;
+
+  const cameras = inventory.cameras || [];
+  const html = [];
+  html.push(`<h3 style="margin:18px 0 6px">Captured images</h3>`);
+
+  if (inventory.has_manifest) {
+    html.push(`<div class="dim" style="margin-bottom:8px">` +
+      `<a style="color:#6fb3e0" href="/runs/${runId}/capture_manifest.json">` +
+      `capture_manifest.json</a> — every frame's camera pose, full ` +
+      `intrinsics, the aircraft state at that instant and the scene's ` +
+      `landmarks. This is what makes the images labelled data.` +
+      (inventory.has_verify
+        ? ` · <a style="color:#6fb3e0" href="/runs/${runId}/verify.json">` +
+          `verify.json</a>`
+        : "") +
+      `</div>`);
+  } else {
+    html.push(`<div class="dim" style="margin-bottom:8px">` +
+      `No capture manifest: this run stated no cameras, so it took the ` +
+      `legacy single-clip path. State a camera in the review table to ` +
+      `capture images with pose and intrinsics per frame.</div>`);
+  }
+
+  if (run.capture && run.capture.checks) {
+    html.push(renderVerify(run.capture));
+  }
+
+  for (const camera of cameras) {
+    html.push(`<div class="dim" style="margin-top:10px">` +
+      `<b>${camera.camera_id}</b> — ${camera.preset}, ` +
+      `${camera.capture_count} image(s), ${camera.trigger} trigger` +
+      (camera.schedule_basis ? ` (${camera.schedule_basis})` : "") +
+      `</div>`);
+  }
+
+  for (const [key, label, note] of kinds) {
+    const perCamera = inventory[key];
+    for (const cameraId of Object.keys(perCamera)) {
+      const names = perCamera[cameraId];
+      const shown = names.slice(0, 60);
+      html.push(`<div style="margin-top:10px"><b>${label}</b>` +
+        (cameraId ? ` · ${cameraId}` : "") +
+        ` <span class="dim">(${names.length} image${
+          names.length === 1 ? "" : "s"}${
+          shown.length < names.length ? `, showing ${shown.length}` : ""
+        }) — ${note}</span></div>`);
+      html.push(`<div style="display:flex;flex-wrap:wrap;gap:6px;` +
+        `margin-top:6px">`);
+      for (const name of shown) {
+        const href = `/runs/${runId}/${key}/${cameraId || "-"}/${name}`;
+        html.push(`<a href="${href}" target="_blank" title="${name}">` +
+          `<img src="${href}" loading="lazy" style="height:104px;` +
+          `border:1px solid #2a3340;border-radius:3px;display:block"></a>`);
+      }
+      html.push(`</div>`);
+    }
+  }
+  area.innerHTML = html.join("");
+}
+
+function renderVerify(capture) {
+  // NOT RUN is shown as NOT RUN, never folded into the pass count: a
+  // green summary that silently omitted half its checks is worse than a
+  // red one.
+  const rows = capture.checks.map(c => {
+    const colour = c.status === "PASS" ? "#7fd08a"
+      : (c.status === "FAIL" ? "#e08080" : "#c9a961");
+    return `<div style="margin:2px 0"><span style="color:${colour};` +
+      `font-family:monospace">[${c.status}]</span> ` +
+      `<b>${c.name}</b> <span class="dim">${c.detail}</span></div>`;
+  }).join("");
+  const passed = capture.checks.filter(c => c.status === "PASS").length;
+  const failed = capture.checks.filter(c => c.status === "FAIL").length;
+  const notRun = capture.checks.filter(c => c.status === "NOT RUN").length;
+  return `<div style="margin:10px 0;padding:8px;border:1px solid #2a3340;` +
+    `border-radius:4px"><div style="margin-bottom:4px"><b>Verification: ` +
+    `${capture.ok ? "PASSED" : "FAILED"}</b> <span class="dim">` +
+    `(${passed} passed, ${failed} failed, ${notRun} not run)</span></div>` +
+    rows + `</div>`;
+}
+
 </script>
 </body>
 </html>

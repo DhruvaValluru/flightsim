@@ -850,6 +850,94 @@ def verify_aircraft_consistency(manifest: Dict) -> Check:
                  f"{worst:.2e} m)")
 
 
+# -- check: the manifest's flight against the flight that rendered -------
+
+def verify_flight_agreement(manifest: Dict, run_dir=None,
+                            tol_m: float = 25.0) -> Check:
+    """The aircraft this manifest labels must be the aircraft the frames
+    show.
+
+    Poses are solved over a headless pre-run, then the render host flies
+    the scenario itself. The camera poses are consumed verbatim, so
+    those are exact -- but the AIRCRAFT states in the manifest come from
+    the pre-run, and if the host's flight diverges from it the labels
+    describe a slightly different flight than the pixels.
+
+    This measures that divergence instead of assuming it away: the
+    manifest's aircraft track against the host's own recorded telemetry,
+    matched on simulation time. NOT RUN where no host telemetry exists
+    (an unrendered capture has only the one flight).
+    """
+    if run_dir is None:
+        return Check("flight_agreement", NOT_RUN,
+                     "no run directory given, so the host's telemetry "
+                     "cannot be compared against the manifest's")
+    path = Path(run_dir) / "telemetry.json"
+    if not path.is_file():
+        return Check(
+            "flight_agreement", NOT_RUN,
+            "no host telemetry.json beside the manifest: nothing rendered "
+            "here, so there is only one flight and nothing to disagree")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return Check("flight_agreement", NOT_RUN,
+                     f"host telemetry could not be read ({exc})")
+    columns = payload.get("columns", payload)
+    needed = ("t", "lat_deg", "lon_deg", "altitude_m")
+    if not all(key in columns for key in needed):
+        return Check("flight_agreement", NOT_RUN,
+                     f"host telemetry carries no {needed} columns")
+
+    frame_meta = manifest.get("frame") or {}
+    try:
+        from pyproj import Transformer
+
+        transformer = Transformer.from_crs("EPSG:4326", frame_meta["crs"],
+                                           always_xy=True)
+    except Exception as exc:
+        return Check("flight_agreement", NOT_RUN,
+                     f"the manifest's CRS could not be opened ({exc})")
+
+    times = [float(v) for v in columns["t"]]
+    if len(times) < 2:
+        return Check("flight_agreement", NOT_RUN,
+                     "host telemetry has fewer than two samples")
+
+    worst = 0.0
+    worst_t = 0.0
+    compared = 0
+    for record in manifest.get("frames", []):
+        t = float(record["t_s"])
+        # Nearest host sample to this frame's simulation time.
+        index = min(range(len(times)), key=lambda i: abs(times[i] - t))
+        if abs(times[index] - t) > 0.5:
+            continue
+        x, y = transformer.transform(float(columns["lon_deg"][index]),
+                                     float(columns["lat_deg"][index]))
+        host = (y - float(frame_meta["origin_y_m"]),
+                x - float(frame_meta["origin_x_m"]),
+                float(columns["altitude_m"][index]))
+        gap = math.dist(_aircraft_point(record), host)
+        if gap > worst:
+            worst, worst_t = gap, t
+        compared += 1
+    if compared == 0:
+        return Check("flight_agreement", NOT_RUN,
+                     "no frame time matched a host telemetry sample")
+    if worst > tol_m:
+        return Check(
+            "flight_agreement", FAIL,
+            f"the manifest's aircraft track and the host's recorded "
+            f"flight differ by up to {worst:.1f} m (at t={worst_t:.2f}s, "
+            f"tol {tol_m:g} m) over {compared} frames: the labels "
+            f"describe a different flight than the frames show")
+    return Check("flight_agreement", PASS,
+                 f"{compared} frames; the manifest's aircraft track "
+                 f"matches the host's recorded flight to within "
+                 f"{worst:.2f} m (tol {tol_m:g} m)")
+
+
 # -- check: temporal alignment ------------------------------------------
 
 def verify_alignment(manifest_a: Dict, manifest_b: Dict,
@@ -925,6 +1013,7 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     report.checks.append(verify_triangulation(manifest, run_dir))
     report.checks.append(verify_counts(manifest))
     report.checks.append(verify_aircraft_consistency(manifest))
+    report.checks.append(verify_flight_agreement(manifest, run_dir))
 
     if other_run_dir is not None:
         other = read_capture_manifest(

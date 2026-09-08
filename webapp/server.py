@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import replace
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -450,6 +451,88 @@ def run_effect(run_id: str):
     path = manager.out_root / run_id / "effect.json"
     if run is None or run.status != "done" or not path.is_file():
         return JSONResponse({"error": "no effect report"}, status_code=404)
+    return FileResponse(path, media_type="application/json")
+
+
+#: Image kinds the page may fetch, and where each lives under the run.
+#: A fixed map, not a caller-supplied path: these routes take names from
+#: the browser, so the only defence that actually holds is refusing to
+#: build a path out of anything but a known directory plus a matched
+#: filename.
+_IMAGE_KINDS = {"frames": "frames", "overlays": "overlays",
+                "previews": "previews"}
+_IMAGE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,80}\.png$")
+_CAMERA_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+@app.get("/runs/{run_id}/images")
+def run_images(run_id: str):
+    """What images this run produced, per camera and per kind.
+
+    The page renders its gallery from this. Read off the directories
+    rather than the manifest: a frame the manifest names but the
+    renderer never wrote must not appear as an image the page then
+    fails to load.
+    """
+    from webapp.capture import inventory
+
+    run = manager.get(run_id)
+    out = manager.out_root / run_id
+    if run is None or not out.is_dir():
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    return JSONResponse(inventory(out))
+
+
+@app.get("/runs/{run_id}/{kind}/{camera_id}/{name}")
+def run_image(run_id: str, kind: str, camera_id: str, name: str):
+    """One rendered frame, overlay or preview.
+
+    The frames a run renders have always survived on disk; until now
+    nothing served them, so the only visual output the page could show
+    was a single mp4. Every path component is validated against a
+    pattern and the resolved path is required to stay inside the run
+    directory -- a name like ``..%2f..%2fetc%2fpasswd`` gets a 404, not
+    a file.
+    """
+    if kind not in _IMAGE_KINDS or not _IMAGE_NAME.match(name):
+        return JSONResponse({"error": "no such image"}, status_code=404)
+    if camera_id != "-" and not _CAMERA_NAME.match(camera_id):
+        return JSONResponse({"error": "no such image"}, status_code=404)
+    root = (manager.out_root / run_id / _IMAGE_KINDS[kind]).resolve()
+    path = (root if camera_id == "-" else root / camera_id) / name
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(root)
+    except (OSError, ValueError):
+        return JSONResponse({"error": "no such image"}, status_code=404)
+    if not resolved.is_file():
+        return JSONResponse({"error": "no such image"}, status_code=404)
+    return FileResponse(resolved, media_type="image/png")
+
+
+@app.get("/runs/{run_id}/capture_manifest.json")
+def run_capture_manifest(run_id: str):
+    """The capture manifest: every frame's camera pose, full intrinsics,
+    the aircraft state at that instant and the scene's landmarks. This is
+    what makes the images usable as labelled data rather than just
+    pictures, and it is written for camera-carrying runs."""
+    path = manager.out_root / run_id / "capture_manifest.json"
+    if not path.is_file():
+        return JSONResponse(
+            {"error": "no capture manifest: this run stated no cameras, so "
+                      "it took the legacy single-clip path"},
+            status_code=404)
+    return FileResponse(path, media_type="application/json")
+
+
+@app.get("/runs/{run_id}/verify.json")
+def run_verify(run_id: str):
+    """The verification summary for a captured run: which checks passed,
+    which failed, and which could not run and why."""
+    path = manager.out_root / run_id / "verify.json"
+    if not path.is_file():
+        return JSONResponse({"error": "no verification summary"},
+                            status_code=404)
     return FileResponse(path, media_type="application/json")
 
 

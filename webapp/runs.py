@@ -58,6 +58,16 @@ from experiments.showcase_matrix import (  # noqa: E402
     encode_clip,
 )
 from experiments.showcase_panel import build_panel_clip  # noqa: E402
+from webapp.capture import (  # noqa: E402
+    CaptureError,
+    card_blocks as capture_card_blocks,
+    finish as capture_finish,
+    landmarks as capture_landmark_set,
+    render_passes as capture_render_passes,
+    solve as capture_solve,
+    wants_capture,
+    write_manifest as capture_write_manifest,
+)
 
 #: Render length cap, seconds. The showcase's own clip length; a spec asking
 #: for more still records the full duration in its spec -- only the clip is
@@ -84,6 +94,9 @@ class RunState:
     # seed + visual-only label, wind, physics ground).
     reference: Optional[Dict] = None
     conditions: Dict = field(default_factory=dict)
+    #: Camera Phase 2: the verification summary for a captured run
+    #: (None for a camera-less run, which takes the legacy clip path).
+    capture: Optional[Dict] = None
 
     def push(self, status: str, detail: str = "") -> None:
         self.status = status
@@ -96,7 +109,8 @@ class RunState:
                 "detail": self.detail, "spec_digest": self.spec_digest,
                 "scene": self.scene, "clip": self.clip,
                 "started": self.started, "events": self.events[-20:],
-                "reference": self.reference, "conditions": self.conditions}
+                "reference": self.reference, "conditions": self.conditions,
+                "capture": self.capture}
 
 
 def editor_running() -> bool:
@@ -342,21 +356,16 @@ def camera_render_flags(spec: ScenarioSpec):
     """
     cameras = spec.cameras or default_cameras(spec)
     if len(cameras) > 1:
-        # This path renders ONE pass through the commandlet's own preset
-        # machinery. It used to take cameras[0] and silently drop the
-        # rest, so a two-camera spec produced one clip and a manifest
-        # naming frames that were never written. Multi-camera capture is
-        # the CLI's job, where the poses are solved in Python and each
-        # camera gets its own commandlet pass.
+        # Reachable only if something routes a multi-camera spec down the
+        # LEGACY path, which renders one pass through the preset
+        # machinery: it would render cameras[0] and silently drop the
+        # rest. A spec that states cameras goes through the capture stage
+        # instead (webapp.capture), which renders one pass per camera.
         raise ValueError(
-            f"camera.multi_render: this spec states {len(cameras)} "
-            f"cameras and the web render path produces one pass through "
-            f"the preset machinery -- it would render "
-            f"{str(cameras[0].camera_id.value)!r} and silently drop the "
-            f"rest. Capture all of them, with solved poses and a manifest "
-            f"per frame, with:\n"
-            f"    python -m flightsim.capture <spec.yaml> --out runs/demo "
-            f"--render")
+            f"camera.multi_render: {len(cameras)} cameras reached the "
+            f"legacy single-pass render path, which can only produce "
+            f"{str(cameras[0].camera_id.value)!r}; a camera-carrying spec "
+            f"belongs in the capture stage")
     camera = cameras[0]
     preset = str(camera.preset.value)
     word = COMMANDLET_CAMERA_WORDS.get(preset)
@@ -1443,7 +1452,7 @@ class RunManager:
     def _render(card: Path, frames: Path, scene: Dict, mesh: Path,
                 aircraft: str, telemetry: Optional[Path] = None,
                 look: Optional[Dict] = None,
-                camera_flags=None) -> bool:
+                camera_flags=None, extra=None) -> bool:
         """The showcase render command, with terrain/imagery conditional.
 
         Same flags render_cell passes (gotcha 1: absolute paths, -stdout,
@@ -1475,6 +1484,7 @@ class RunManager:
             "-RenderOffScreen", "-AllowCommandletRendering",
         ]
         command += list(trailing)
+        command += list(extra or ())
         if scene.get("terrain"):
             command += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
         if scene.get("imagery"):
@@ -1690,6 +1700,41 @@ class RunManager:
             **({"surface": surface_note} if surface_note else {}),
             **({"weather": event_note} if event_note else {}),
         }
+        # The scene's raster, for the headless pre-run's ground model and
+        # for the terrain-coupled camera checks. Same construction the
+        # effect report uses.
+        capture_heightfield = None
+        capture_ground = None
+        if scene.get("terrain"):
+            from core.terrain.ground import TerrainGround
+            from core.terrain.heightfield import Heightfield
+
+            capture_heightfield = Heightfield.read(Path(scene["terrain"]))
+            capture_ground = TerrainGround(capture_heightfield)
+
+        # -- Camera Phase 2: the capture stage -------------------------
+        # A spec that STATES cameras is captured, not clipped: every
+        # camera's pose track and capture schedule are solved here, in
+        # Python, and consumed verbatim by one commandlet pass per
+        # camera. The legacy preset flags stay for a camera-less spec,
+        # whose commandlet arguments are pinned byte-identical by test.
+        capture_solved = None
+        capture_cameras = None
+        capture_landmarks = None
+        if wants_capture(spec):
+            run.push("cameras", f"solving {len(spec.cameras)} camera "
+                                f"pose track(s) and capture schedule(s)")
+            try:
+                capture_solved = capture_solve(
+                    spec, scene, heightfield=capture_heightfield,
+                    terrain_ground=capture_ground, tornado=tornado_block)
+            except CaptureError as exc:
+                run.push("failed", f"[{exc.constraint}] {exc.message}")
+                return
+            capture_cameras = capture_card_blocks(spec, capture_solved)
+            capture_landmarks = capture_landmark_set(
+                spec, capture_solved, heightfield=capture_heightfield)
+
         card = write_run_card(
             spec, out / "card.json",
             control_inputs=SHOWCASE_DOUBLET if scripted else (),
@@ -1705,6 +1750,8 @@ class RunManager:
             scene_crs=scene_crs,
             collision_terrain=str(collision) if collision else None,
             reference_speeds=reference,
+            cameras=capture_cameras,
+            landmarks=capture_landmarks,
         )
         # Prompt/model provenance in a Python-written UTF-8 sidecar; the
         # UE-written manifest stays ASCII (gotcha 13).
@@ -1724,19 +1771,57 @@ class RunManager:
         # the aircraft into the vortex; the chase camera sat INSIDE the
         # funnel mesh and the blank-frame floor refused, run
         # c33db2c326e0 -- the floor stands, never weakened).
-        camera_flags = camera_render_flags(spec)
+        # The legacy preset flags are for the legacy path only. Under
+        # consume-poses the commandlet takes its pose, its lens and its
+        # output size from the card, so these are inert -- and
+        # camera_render_flags refuses a multi-camera spec, which the
+        # capture path handles by rendering one pass per camera.
+        camera_flags = None if capture_solved is not None \
+            else camera_render_flags(spec)
         flown = spec.cameras or default_cameras(spec)
         if str(flown[0].preset.value) == "wingman":
             run.conditions["camera"] = ("wingman (follows the aircraft "
                                         "through the core; chase would "
                                         "sit inside the funnel)")
-        if not self._render(card, frames, scene, mesh, aircraft,
-                            telemetry=out / "telemetry.json",
-                            look=STORM_LOOK if event_note else None,
-                            camera_flags=camera_flags):
+        if capture_solved is not None:
+            # One pass per camera into frames/<camera_id>/ -- the layout
+            # capture_manifest.json names in every frame record.
+            camera_ids = [str(c.camera_id.value) for c in spec.cameras]
+            run.push("rendering",
+                     f"rendering {len(camera_ids)} camera pass(es): "
+                     f"{', '.join(camera_ids)}")
+            try:
+                capture_render_passes(
+                    card, frames, camera_ids,
+                    lambda card, frames, extra: self._render(
+                        card, frames, scene, mesh, aircraft,
+                        telemetry=out / "telemetry.json",
+                        look=STORM_LOOK if event_note else None,
+                        camera_flags=camera_flags, extra=extra))
+            except CaptureError as exc:
+                run.push("failed", f"[{exc.constraint}] {exc.message}")
+                return
+        elif not self._render(card, frames, scene, mesh, aircraft,
+                              telemetry=out / "telemetry.json",
+                              look=STORM_LOOK if event_note else None,
+                              camera_flags=camera_flags):
             run.push("failed", "the render commandlet wrote no manifest; "
                                f"see {out / 'render.log'}")
             return
+
+        if capture_solved is not None:
+            run.push("manifest", "writing the capture manifest, the "
+                                 "overlays and the verification summary")
+            capture_write_manifest(spec, capture_solved, out, scene,
+                                   heightfield=capture_heightfield)
+            run.capture = capture_finish(out)
+            if not run.capture["ok"]:
+                failed = [c["name"] for c in run.capture["checks"]
+                          if c["status"] == "FAIL"]
+                run.push("verified", "images captured, but verification "
+                                     f"FAILED: {', '.join(failed)}")
+            else:
+                run.push("verified", "images captured and verified")
 
         run.push("encoding", "encoding frames to mp4")
         raw_clip = out / "raw.mp4"
