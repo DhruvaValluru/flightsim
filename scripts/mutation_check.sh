@@ -999,6 +999,12 @@ mutate scripts/run_ue_scenario.ps1 \
     "a PowerShell statement may not sit where a value is expected" \
     tests/test_powershell_scripts.py || failures=$((failures+1))
 
+mutate scripts/run_ue_scenario.ps1 \
+    '    "-run=FlightSimBridge.FlightSimScenario",' \
+    '    -run=FlightSimBridge.FlightSimScenario' \
+    "a dotted native argument must be quoted or PowerShell splits it" \
+    tests/test_powershell_scripts.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

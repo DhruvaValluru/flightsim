@@ -39,11 +39,30 @@ Remove-Item $out -ErrorAction SilentlyContinue
 # WHY a pass recorded nothing, and without this it scrolls past inside 20 MB
 # of UE log and is gone.
 $log = [System.IO.Path]::ChangeExtension($out, ".log")
-& $editor (Join-Path $repo "ue\FlightSim.uproject") `
-    -run=FlightSimBridge.FlightSimScenario `
-    "-scenario=$card" "-telemetry=$out" `
-    -unattended -nopause -nosplash -nullrhi -stdout -FullStdOutLogOutput `
-    @extra 2>&1 | Tee-Object -FilePath $log | Out-Null
+
+# One array of QUOTED strings, splatted -- the form render_ue_scenario.ps1
+# has always used, and the reason that one works.
+#
+# This script passed its arguments bare, across backtick continuations, and
+# PowerShell split the commandlet name in half at the dot. UE received
+#
+#     -run=FlightSimBridge .FlightSimScenario
+#
+# as two separate tokens and answered "FlightSimBridgeCommandlet looked like
+# a commandlet, but we could not find the class" -- which names a class
+# nobody wrote and reads like a build problem rather than a quoting one. An
+# unquoted native-command argument is at the mercy of PowerShell's own
+# tokenizer; a quoted one is not, so every argument here is quoted whether
+# it obviously needs it or not.
+$arguments = @(
+    (Join-Path $repo "ue\FlightSim.uproject"),
+    "-run=FlightSimBridge.FlightSimScenario",
+    "-scenario=$card", "-telemetry=$out"
+) + $extra + @(
+    "-unattended", "-nopause", "-nosplash", "-nullrhi",
+    "-stdout", "-FullStdOutLogOutput"
+)
+& $editor @arguments 2>&1 | Tee-Object -FilePath $log | Out-Null
 $code = $LASTEXITCODE
 
 if ($code -ne 0 -or -not (Test-Path $out)) {

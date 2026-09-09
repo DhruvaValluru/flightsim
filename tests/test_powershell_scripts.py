@@ -136,6 +136,67 @@ def test_the_lint_catches_the_bug_it_was_written_for():
         "a $( ) subexpression is valid PowerShell and must pass")
 
 
+def _inside_quotes(line: str, index: int) -> bool:
+    """True when `line[index]` sits inside a quoted string.
+
+    Counts unescaped quotes before it; odd means open.
+    """
+    single = line.count("'", 0, index) - line.count("\\'", 0, index)
+    double = line.count('"', 0, index) - line.count('\\"', 0, index)
+    return (single % 2 == 1) or (double % 2 == 1)
+
+
+#: `-name=value` where the value contains a dot -- the shape that broke.
+DOTTED_SWITCH = re.compile(r"-[A-Za-z][\w-]*=[^\s\"']*\.[^\s\"']*")
+
+
+@pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
+def test_dotted_native_arguments_are_quoted(script):
+    """The second half of the same failure, and the more dangerous half.
+
+    `run_ue_scenario.ps1` passed its commandlet name bare::
+
+        & $editor ... -run=FlightSimBridge.FlightSimScenario ...
+
+    PowerShell split that token at the dot, so UE received `-run=
+    FlightSimBridge` and `.FlightSimScenario` as two arguments and
+    reported "FlightSimBridgeCommandlet looked like a commandlet, but we
+    could not find the class" -- naming a class nobody wrote, which
+    reads like a broken build rather than a quoting bug. It cost a full
+    headless flight per attempt to find out otherwise.
+
+    `render_ue_scenario.ps1` has always passed a quoted array and has
+    always worked. An unquoted native-command argument is at the mercy
+    of PowerShell's tokenizer; a quoted one is not.
+    """
+    offenders = []
+    for number, line in code_lines(script):
+        for match in DOTTED_SWITCH.finditer(line):
+            if not _inside_quotes(line, match.start()):
+                offenders.append((number, match.group(0)))
+    assert not offenders, (
+        f"{script.name}: an unquoted native argument carries a dot and "
+        f"PowerShell may split it; quote it:\n" +
+        "\n".join(f"  line {n}: {text}" for n, text in offenders))
+
+
+def test_the_dotted_argument_lint_catches_the_bug_it_was_written_for():
+    """Its own reference case, for the same reason as above."""
+    shipped = "    -run=FlightSimBridge.FlightSimScenario `"
+    match = DOTTED_SWITCH.search(shipped)
+    assert match and not _inside_quotes(shipped, match.start())
+
+    fixed = '    "-run=FlightSimBridge.FlightSimScenario",'
+    match = DOTTED_SWITCH.search(fixed)
+    assert match and _inside_quotes(fixed, match.start()), (
+        "a quoted argument must pass")
+
+    # A switch with no dot cannot be split this way, so it is not the
+    # lint's business.
+    plain = "    -unattended -nopause -nosplash"
+    assert not DOTTED_SWITCH.search(plain)
+
+
 def test_the_host_solve_pass_keeps_the_engine_s_output():
     """The other half of what this failure showed.
 
