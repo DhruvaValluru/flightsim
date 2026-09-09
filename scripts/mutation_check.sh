@@ -993,6 +993,12 @@ mutate core/capture/validate.py \
     "a camera may not take a directory name the run writes itself" \
     tests/test_camera_validate.py || failures=$((failures+1))
 
+mutate scripts/run_ue_scenario.ps1 \
+    '$out = Join-Path (Resolve-Path $outDir).Path (Split-Path -Leaf $args[1])' \
+    '$out = Join-Path (Resolve-Path (if ($outDir) { $outDir } else { "." })).Path (Split-Path -Leaf $args[1])' \
+    "a PowerShell statement may not sit where a value is expected" \
+    tests/test_powershell_scripts.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

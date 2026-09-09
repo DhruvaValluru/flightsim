@@ -67,9 +67,26 @@ if ($LASTEXITCODE -ne 0) {
         Write-Host ""
         Write-Host "the capture refused by name (above). Nothing to verify."
     } else {
+        # Which engine pass fell over, decided by what is actually on disk
+        # rather than assumed. This used to say "the render stage" for every
+        # non-refusal exit and point at a render.log -- which, when the HOST
+        # SOLVE pass was the one that failed, named a file that does not
+        # exist and sent the reader looking for it.
         Write-Host ""
-        Write-Host "the capture failed at the render stage; the reason is in"
-        Write-Host "  $Out\frames\<camera_id>\render.log"
+        $hostLog = Join-Path $Out "host_flight\host_telemetry.log"
+        $renderLogs = @(Get-ChildItem (Join-Path $Out "frames") -Recurse `
+            -Filter "render.log" -ErrorAction SilentlyContinue)
+        if ($renderLogs.Count -gt 0) {
+            Write-Host "the capture failed at the render stage; the reason is in"
+            $renderLogs | ForEach-Object { Write-Host "  $($_.FullName)" }
+        } elseif (Test-Path $hostLog) {
+            Write-Host "the capture failed flying the host to solve over --"
+            Write-Host "before any frame was rendered. The reason is in"
+            Write-Host "  $hostLog"
+        } else {
+            Write-Host "the capture failed before either engine pass wrote a"
+            Write-Host "log; the REFUSED line above is the whole reason."
+        }
     }
     exit $LASTEXITCODE
 }

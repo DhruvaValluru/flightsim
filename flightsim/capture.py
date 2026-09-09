@@ -341,9 +341,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if completed.returncode != 0:
             print(f"REFUSED -- capture.host_flight: the scenario "
                   f"commandlet exited {completed.returncode} and recorded "
-                  f"no flight; nothing was rendered. Re-run with "
+                  f"no flight; nothing was rendered. The wrapper printed "
+                  f"its last words above and kept them in "
+                  f"{host_telemetry.with_suffix('.log')}. Re-run with "
                   f"--no-host-flight to solve over the pre-run instead, "
-                  f"knowing the labels will describe a different flight")
+                  f"knowing the labels will then describe a different "
+                  f"flight from the one the pixels show")
             return 1
         try:
             host_columns = read_host_columns(host_telemetry)
