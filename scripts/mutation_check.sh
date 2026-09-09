@@ -961,6 +961,38 @@ mutate core/capture/verify.py \
     "host determinism is what licenses re-flying instead of replaying" \
     tests/test_camera_flight_agreement.py || failures=$((failures+1))
 
+# -- one flight, not two: solving over the host's own flight -----------
+
+mutate core/capture/verify.py \
+    '        tol_m = (HOST_FLIGHT_AGREEMENT_TOL_M' \
+    '        tol_m = (PRE_RUN_AGREEMENT_TOL_M  # MUTATED: fallback invisible' \
+    "a manifest claiming a host solve is held to the host's tolerance" \
+    tests/test_camera_host_flight.py || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '    if solve_source not in SOLVE_SOURCES:' \
+    '    if False:  # MUTATED: the manifest need not say which flight' \
+    "a manifest has to declare which flight its aircraft labels describe" \
+    tests/test_camera_host_flight.py || failures=$((failures+1))
+
+mutate core/capture/hostflight.py \
+    '    missing = [name for name in REQUIRED_CHANNELS if name not in columns]' \
+    '    missing = []  # MUTATED: solve over a flight missing channels' \
+    "the host flight is refused by name when the solver's channels are absent" \
+    tests/test_camera_host_flight.py || failures=$((failures+1))
+
+mutate core/capture/hostflight.py \
+    "    h = hashlib.sha256()" \
+    "    h = hashlib.sha256(b'salt')  # MUTATED: not the runner's digest" \
+    "the host flight digests exactly as run_spec digests its own" \
+    tests/test_camera_host_flight.py || failures=$((failures+1))
+
+mutate core/capture/validate.py \
+    '    if value in RESERVED_CAMERA_IDS:' \
+    '    if False:  # MUTATED: a camera may shadow the host flight dir' \
+    "a camera may not take a directory name the run writes itself" \
+    tests/test_camera_validate.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

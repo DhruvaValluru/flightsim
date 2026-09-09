@@ -1107,22 +1107,54 @@ def _host_telemetry_paths(run_dir) -> List[Path]:
     return sorted(Path(run_dir).rglob("host_telemetry.json"))
 
 
+#: Tolerance for a manifest solved over the HEADLESS PRE-RUN. Two JSBSim
+#: builds stepping one scenario diverge; measured at 1.38 m on the demo,
+#: and this bounds it rather than pretending it is zero.
+PRE_RUN_AGREEMENT_TOL_M = 25.0
+
+#: Tolerance for a manifest solved over THE HOST'S OWN FLIGHT. There is
+#: no divergence left to allow for: the labels and the pixels come from
+#: one flight, and the host is bit-deterministic, so all that separates
+#: them is this check interpolating the host's 0.1 s samples to the
+#: frame's own instant. That error is the curvature of the track over
+#: half a sample -- sub-decimetre even in a hard manoeuvre. 0.5 m is
+#: loose enough never to fire on interpolation and tight enough that
+#: solving over the pre-run again (1.38 m) FAILS here, which is exactly
+#: the regression this bound exists to catch.
+HOST_FLIGHT_AGREEMENT_TOL_M = 0.5
+
+
 def verify_flight_agreement(manifest: Dict, run_dir=None,
-                            tol_m: float = 25.0) -> Check:
+                            tol_m: Optional[float] = None) -> Check:
     """The aircraft this manifest labels must be the aircraft the frames
     show.
 
-    Poses are solved over a headless pre-run, then the render host flies
-    the scenario itself. The camera poses are consumed verbatim, so
-    those are exact -- but the AIRCRAFT states in the manifest come from
-    the pre-run, and if the host's flight diverges from it the labels
-    describe a slightly different flight than the pixels.
+    Two ways a run can get here, and the manifest says which in
+    ``solve_source``:
 
-    This measures that divergence instead of assuming it away: the
-    manifest's aircraft track against the host's own recorded telemetry,
-    matched on simulation time. NOT RUN where no host telemetry exists
-    (an unrendered capture has only the one flight).
+    * **"headless pre-run"** -- poses solved over the Python-side
+      flight, the host then re-flies the scenario itself. Camera poses
+      are consumed verbatim so those are exact, but the AIRCRAFT states
+      come from a DIFFERENT flight than the pixels show. Bounded at
+      ``PRE_RUN_AGREEMENT_TOL_M``, measured at 1.38 m on the demo.
+    * **"host flight"** -- the host flew the card first and everything
+      was solved over its telemetry (``core.capture.hostflight``). The
+      labels and the pixels are one flight, so the bound drops to
+      ``HOST_FLIGHT_AGREEMENT_TOL_M`` and this check becomes the guard
+      that the pipeline did not quietly fall back to the pre-run.
+
+    Either way it MEASURES the divergence instead of assuming it away:
+    the manifest's aircraft track against the host's own recorded
+    telemetry, matched on simulation time. NOT RUN where no host
+    telemetry exists (an unrendered capture has only the one flight).
     """
+    from .manifest import SOLVE_HOST_FLIGHT
+
+    solved_over = str(manifest.get("solve_source") or "")
+    if tol_m is None:
+        tol_m = (HOST_FLIGHT_AGREEMENT_TOL_M
+                 if solved_over == SOLVE_HOST_FLIGHT
+                 else PRE_RUN_AGREEMENT_TOL_M)
     if run_dir is None:
         return Check("flight_agreement", NOT_RUN,
                      "no run directory given, so the host's telemetry "
@@ -1262,12 +1294,15 @@ def verify_flight_agreement(manifest: Dict, run_dir=None,
             f"flight differ by up to {worst:.1f} m (at t={worst_t:.2f}s "
             f"on {worst_camera}, tol {tol_m:g} m) over {compared} "
             f"frames: the labels describe a different flight than the "
-            f"frames show")
+            f"frames show. Solved over {solved_over!r}"
+            + ("; a gap this size is what solving over the headless "
+               "pre-run produces, so check the host flight actually ran"
+               if solved_over == SOLVE_HOST_FLIGHT else ""))
     return Check("flight_agreement", PASS,
                  f"{compared} frames against {len(columns_by_camera)} "
                  f"host flight(s); the manifest's aircraft track matches "
                  f"the host's recorded flight to within {worst:.2f} m "
-                 f"(tol {tol_m:g} m)"
+                 f"(solved over {solved_over!r}, tol {tol_m:g} m)"
                  + (f"; {edge} frame(s) sat inside the recorder's final "
                     f"sample interval and were not graded" if edge else ""))
 
@@ -1293,6 +1328,13 @@ def verify_host_determinism(run_dir=None) -> Check:
     "re-fly" decision is invalid and the aircraft labels drift between
     cameras with nothing else to notice.
 
+    Since the solve pass landed (core.capture.hostflight), a rendered
+    run records the host's SOLVE flight as well as one flight per camera
+    pass, so this compares the flight the labels were solved over
+    against the flights the pixels were taken on -- which is the exact
+    premise of solving over the host at all, and it now has something to
+    compare even on a single-camera render.
+
     NOT RUN with fewer than two host flights -- one pass measures
     nothing about repeatability.
     """
@@ -1304,8 +1346,9 @@ def verify_host_determinism(run_dir=None) -> Check:
         return Check(
             "host_determinism", NOT_RUN,
             f"{len(hosts)} host flight(s) recorded; repeatability needs "
-            f"two passes over the same card to compare. Render a "
-            f"multi-camera spec on Windows to exercise this")
+            f"two flights over the same card to compare. Render on "
+            f"Windows to exercise this -- a run that flies the host to "
+            f"solve, then renders, records two")
     digests: Dict[str, str] = {}
     for path in hosts:
         try:
@@ -1334,19 +1377,23 @@ def verify_host_determinism(run_dir=None) -> Check:
         return Check(
             "host_determinism", FAIL,
             f"{len(unique)} different flights across {len(digests)} "
-            f"render passes of one card ({listed}): the host is not "
+            f"host flights of one card ({listed}): the host is not "
             f"reproducible, so the aircraft labels differ between "
-            f"cameras and re-flying the scenario per pass is not sound "
-            f"-- the poses would have to be replayed instead")
+            f"passes and re-flying the scenario per pass is not sound "
+            f"-- the poses would have to be replayed instead. If the "
+            f"odd one out is 'host_flight', the solve pass and the "
+            f"render passes are not being given the same "
+            f"scenario-affecting flags")
     sample_count = len(next(iter(
         json.loads(hosts[0].read_text(encoding="utf-8"))
         .get("columns", {}).values()), []))
     return Check(
         "host_determinism", PASS,
-        f"{len(digests)} render passes of one card flew byte-identical "
-        f"flights ({unique[0][:12]}, {sample_count} samples): the host "
-        f"is reproducible, which is what makes re-flying per pass sound "
-        f"rather than an assumption")
+        f"{len(digests)} host flights of one card were byte-identical "
+        f"({unique[0][:12]}, {sample_count} samples): the host is "
+        f"reproducible, which is what makes solving over one of its "
+        f"flights and re-flying for the pixels sound rather than an "
+        f"assumption")
 
 
 # -- check: temporal alignment ------------------------------------------

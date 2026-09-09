@@ -155,13 +155,20 @@ def render_passes(card: Path, frames_root: Path, camera_ids: List[str],
 def write_manifest(spec, solved: Dict, out: Path, scene: Dict,
                    heightfield=None) -> Path:
     from core.capture.manifest import (
-        build_capture_manifest, write_capture_manifest,
+        SOLVE_PRE_RUN, build_capture_manifest, write_capture_manifest,
     )
 
     manifest = build_capture_manifest(
         spec, solved["columns"], solved["frame"], solved["tracks"],
         solved["schedules"],
         output_digest=solved["result"].output_digest,
+        # The web path still solves over the HEADLESS pre-run and lets
+        # the host re-fly it, so its aircraft labels describe a flight
+        # ~1.4 m from the one its pixels show. The CLI's --render flies
+        # the host first and re-solves (core.capture.hostflight); this
+        # path has not been moved onto that yet, and the manifest says
+        # so rather than leaving a reader to assume.
+        solve_source=SOLVE_PRE_RUN,
         scene={"key": scene.get("key", "flat"),
                "terrain": scene.get("terrain")},
         terrain_sha256=heightfield.digest() if heightfield else None,

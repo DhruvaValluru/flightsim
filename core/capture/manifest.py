@@ -6,18 +6,29 @@ the macOS render adds pixels beside it without touching it. A frame
 without recorded geometry is unusable as labeled data; this file is the
 label.
 
-Schema (``manifest_version`` 2)
+Schema (``manifest_version`` 3)
 -------------------------------
 Top level::
 
-    manifest_version   1
+    manifest_version   3
     spec_digest        SHA-256 of the canonical spec (spec.digest())
     simulation_digest  SHA-256 of the spec with its CAMERAS REMOVED --
                        the "simulation identity": two runs that differ
                        only in cameras share it, which is what the
                        temporal-alignment check keys on
     output_digest      SHA-256 over the recorded telemetry columns
-                       (core.scenario.runner._digest_telemetry)
+                       (core.scenario.runner._digest_telemetry) -- of
+                       the flight named by ``solve_source``
+    solve_source       WHICH FLIGHT the aircraft labels describe:
+                       "host flight" when the UE host flew the card
+                       first and the poses were solved over ITS
+                       telemetry, "headless pre-run" when they were
+                       solved over the Python-side flight. Version 2
+                       could not say, and always meant the latter --
+                       which on a rendered run put the labels 1.38 m
+                       from the flight the pixels showed. A consumer
+                       training on these images needs to know which it
+                       has, so version 3 makes every manifest answer.
     seed               the spec's random seed
     aircraft           the airframe that flew
     scene              {key, terrain, terrain_sha256} -- terrain_sha256
@@ -92,7 +103,16 @@ from .landmarks import scene_landmarks
 from .poses import PoseTrack, SceneFrame, aircraft_local_track
 from .schedule import CaptureSchedule
 
-MANIFEST_VERSION = 2
+MANIFEST_VERSION = 3
+
+#: Which flight the ``aircraft`` block in every frame record describes.
+#: A v2 manifest could not say, and the answer matters more than any
+#: other single field in the file: it is the difference between labels
+#: that describe the flight the pixels show and labels that describe a
+#: different, very similar flight.
+SOLVE_PRE_RUN = "headless pre-run"
+SOLVE_HOST_FLIGHT = "host flight"
+SOLVE_SOURCES = (SOLVE_PRE_RUN, SOLVE_HOST_FLIGHT)
 
 
 def software_revision(repo: Optional[Path] = None) -> str:
@@ -147,7 +167,8 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                            terrain_sha256: Optional[str] = None,
                            cameras=None,
                            heightfield=None,
-                           terrain_elevation_m: float = 0.0) -> Dict:
+                           terrain_elevation_m: float = 0.0,
+                           solve_source: str = SOLVE_PRE_RUN) -> Dict:
     """Assemble the manifest mapping (see the module docstring schema).
 
     ``tracks`` and ``schedules`` are parallel per-camera sequences from
@@ -158,6 +179,12 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
     not the spec's own (a camera-less spec captured with the documented
     default cameras); the digests stay the spec's.
     """
+    if solve_source not in SOLVE_SOURCES:
+        raise ValueError(
+            f"solve_source {solve_source!r} is not one of "
+            f"{SOLVE_SOURCES}; the manifest has to say which flight its "
+            f"aircraft labels describe, and guessing is what version 2 "
+            f"did")
     if len(tracks) != len(schedules):
         raise ValueError(
             f"{len(tracks)} pose tracks against {len(schedules)} "
@@ -232,6 +259,9 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
         "spec_digest": spec.digest(),
         "simulation_digest": simulation_digest(spec),
         "output_digest": output_digest,
+        # WHICH FLIGHT the aircraft labels describe. See
+        # SOLVE_PRE_RUN / SOLVE_HOST_FLIGHT.
+        "solve_source": solve_source,
         "seed": int(spec.seed.value),
         # Which airframe flew. The preview draws the real dimensions of
         # THIS aircraft rather than one silhouette scaled by eye, and a

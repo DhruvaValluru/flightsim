@@ -16,13 +16,21 @@ approximating):
    computed from the recorded telemetry (a spec with no cameras gets
    the documented default camera);
 6. the solved tracks are re-checked against the scene along the whole
-   run;
-7. capture_manifest.json, telemetry.json, scenario.yaml and one
-   geometry preview per scheduled frame are written;
-8. on a machine with the UE render half, pixels would render beside
-   them; anywhere else rendering REFUSES BY NAME (ue.platform) while
-   steps 1-7 stand -- the manifest and previews are the off-mac
-   deliverable.
+   run -- steps 4-6 are the cheap pre-flight gate, so a camera inside
+   a mountain refuses before any engine time is spent;
+7. with --render, THE HOST FLIES THE CARD FIRST (the telemetry-only
+   commandlet, no renderer) and steps 5-6 run again over the host's
+   own telemetry. The labels then describe the flight the pixels will
+   show rather than a second, very similar one -- see
+   core.capture.hostflight. --no-host-flight keeps the old behaviour
+   deliberately;
+8. capture_manifest.json (carrying solve_source, which says WHICH of
+   those flights the aircraft labels came from), telemetry.json,
+   scenario.yaml and one geometry preview per scheduled frame;
+9. on a machine with the UE render half, pixels render beside them,
+   one commandlet pass per camera; anywhere else rendering REFUSES BY
+   NAME (ue.platform) while steps 1-8 stand -- the manifest and
+   previews are the engine-less deliverable.
 
 Exit codes: 0 = captured (even when rendering was refused by name);
 2 = a named validation/schedule refusal; 1 = unexpected failure.
@@ -106,6 +114,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                              "terrain, just the lit airframe. What the "
                              "silhouette measurements want, and nothing "
                              "else")
+    parser.add_argument("--no-host-flight", action="store_true",
+                        help="with --render, skip the host's own solve "
+                             "flight and solve the poses over the "
+                             "headless pre-run instead. Faster by one "
+                             "commandlet pass, and the aircraft labels "
+                             "then describe a DIFFERENT flight from the "
+                             "one the pixels show (1.38 m measured). "
+                             "Only for when you want the old behaviour "
+                             "deliberately.")
     parser.add_argument("--card", action="store_true",
                         help="also write card.json carrying each camera's "
                              "solved pose track, for the UE commandlet's "
@@ -216,30 +233,143 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not spec.cameras:
         print("no camera stated: capturing with the documented default "
               "camera (the chase view)")
-    tracks = []
-    schedules = []
-    try:
+    terrain_datum = float(spec.terrain_elevation.value)
+
+    def solve_over(flight):
+        """Pose tracks, schedules and their scene violations over one
+        recorded flight. Runs twice when the host flies its own: once
+        over the headless pre-run as the cheap pre-flight gate, once
+        over the host's telemetry for the labels that ship."""
+        tracks, schedules = [], []
         for camera in cameras:
-            tracks.append(solve_pose_track(columns, camera, frame))
-            schedules.append(solve_schedule(columns, camera, frame))
+            tracks.append(solve_pose_track(flight, camera, frame))
+            schedules.append(solve_schedule(flight, camera, frame))
+        violations = []
+        for track in tracks:
+            violations.extend(track_violations(
+                track, heightfield=heightfield, scene_frame=frame,
+                tornado=tornado, terrain_elevation_m=terrain_datum))
+        return tracks, schedules, violations
+
+    try:
+        tracks, schedules, solved_violations = solve_over(columns)
     except ScheduleError as exc:
         print(f"REFUSED -- {exc}")
         return 2
-
-    terrain_datum = float(spec.terrain_elevation.value)
-    solved_violations = []
-    for track in tracks:
-        solved_violations.extend(track_violations(
-            track, heightfield=heightfield, scene_frame=frame,
-            tornado=tornado, terrain_elevation_m=terrain_datum))
     if solved_violations:
         return _refuse(solved_violations)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+
+    from core.capture.manifest import SOLVE_HOST_FLIGHT, SOLVE_PRE_RUN
+    from core.util.platform import (
+        os_name, ue_available, ue_platform_refusal, ue_runner_command,
+    )
+
+    def write_card(path, tracks, schedules, landmarks):
+        """The card the hosts read: spec fields + solved pose tracks."""
+        from core.scenario.card import write_run_card
+
+        return write_run_card(
+            spec, path,
+            cameras=[track.card_block(camera, schedule, frame)
+                     for camera, track, schedule
+                     in zip(cameras, tracks, schedules)],
+            landmarks=landmarks,
+            scene_crs=frame.crs if frame.declared else None)
+
+    solve_source = SOLVE_PRE_RUN
+    solve_digest = result.output_digest
+
+    # ------------------------------------------------------------------
+    # ONE FLIGHT, NOT TWO.
+    #
+    # Everything above solved the poses over the HEADLESS pre-run -- the
+    # jsbsim Python package. The host then flies the same card through
+    # UE's vendored JSBSim, and two builds stepping one scenario do not
+    # agree: 1.38 m worst, measured. The camera poses survive that (the
+    # host consumes them verbatim) but the AIRCRAFT state in every frame
+    # record described the pre-run while the pixels showed the host's
+    # flight, which for labelled data is the defect that matters.
+    #
+    # So when there are pixels to take, the host flies FIRST -- the
+    # telemetry-only commandlet, no renderer -- and everything is solved
+    # again over ITS telemetry. The render passes then re-fly the same
+    # card and, because the host is bit-deterministic, fly the identical
+    # flight. Manifest and pixels describe one flight by construction.
+    #
+    # The pre-run is not wasted and is not skipped: it stays the cheap
+    # pre-flight gate, so a camera inside a mountain still refuses
+    # BEFORE a UE pass is spent rather than after one.
+    # ------------------------------------------------------------------
+    host_flight = args.render and not args.no_host_flight and ue_available()
+    if host_flight:
+        import subprocess
+
+        from core.capture.hostflight import (
+            HostFlightError, digest_columns, host_telemetry_path,
+            read_host_columns,
+        )
+
+        host_dir = out / "host_flight"
+        host_dir.mkdir(parents=True, exist_ok=True)
+        # The card the SOLVE pass flies. It carries the pre-run's tracks;
+        # the scenario commandlet ignores the cameras block entirely (it
+        # renders nothing), and the card that the render passes consume
+        # is rewritten below from the re-solved tracks.
+        # No landmarks: this pass renders nothing and projects
+        # nothing, so it has no use for them.
+        write_card(host_dir / "card.json", tracks, schedules, None)
+        host_telemetry = host_telemetry_path(out)
+        command = ue_runner_command(REPO, "run_ue_scenario")
+        command += [str(host_dir / "card.json"), str(host_telemetry)]
+        # Physics-affecting flags only. -Visual builds the RENDER scene
+        # and this pass has no renderer; the terrain is what the ground
+        # callback reads, so it has to match what the render passes fly
+        # over or the two flights differ for a reason that is not the
+        # host's determinism. verify_host_determinism is precisely the
+        # check that grades this choice: if it ever FAILs on a run whose
+        # passes differ only in -Visual, then -Visual perturbs the
+        # flight and this pass has to carry it too.
+        if terrain_stem:
+            command.append(f"-terrain={terrain_stem}")
+            command.append("-GeorefTerrain")
+        print("flying the card in the host first, so the labels "
+              "describe the flight the pixels show ...")
+        completed = subprocess.run(command)
+        if completed.returncode != 0:
+            print(f"REFUSED -- capture.host_flight: the scenario "
+                  f"commandlet exited {completed.returncode} and recorded "
+                  f"no flight; nothing was rendered. Re-run with "
+                  f"--no-host-flight to solve over the pre-run instead, "
+                  f"knowing the labels will describe a different flight")
+            return 1
+        try:
+            host_columns = read_host_columns(host_telemetry)
+            tracks, schedules, solved_violations = solve_over(host_columns)
+        except HostFlightError as exc:
+            print(f"REFUSED -- {exc.render()}")
+            return 2
+        except ScheduleError as exc:
+            print(f"REFUSED -- {exc}")
+            return 2
+        # The host's flight is a different flight, so the scene checks
+        # run again over it. A camera that cleared the ridge on the
+        # pre-run and does not on the host's own track must refuse --
+        # this is the flight the frames would be taken on.
+        if solved_violations:
+            return _refuse(solved_violations)
+        columns = host_columns
+        solve_source = SOLVE_HOST_FLIGHT
+        solve_digest = digest_columns(host_columns)
+        print(f"  host flight: {len(host_columns['t'])} samples, digest "
+              f"{solve_digest[:16]} -- poses re-solved over it")
+
     manifest = build_capture_manifest(
         spec, columns, frame, tracks, schedules,
-        output_digest=result.output_digest,
+        output_digest=solve_digest,
+        solve_source=solve_source,
         scene={"key": "terrain" if heightfield else "flat",
                "terrain": terrain_stem},
         terrain_sha256=heightfield.digest() if heightfield else None,
@@ -254,8 +384,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     spec.write(out / "scenario.yaml")
     (out / "run.json").write_text(json.dumps({
         "spec_digest": result.spec_digest,
+        # The HEADLESS pre-run's, always -- run.json describes the
+        # flight run_spec flew. When the host flew its own and the
+        # manifest was solved over that, the manifest's output_digest
+        # is the host's and these two differ ON PURPOSE, which is the
+        # visible trace of P10's real size.
         "output_digest": result.output_digest,
         "samples": len(result.telemetry),
+        "solve_source": solve_source,
+        "solve_digest": solve_digest,
     }, indent=1), encoding="utf-8")
 
     if args.card or args.render:
@@ -264,15 +401,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # commandlet's consume-poses mode. The commandlet's own named
         # refusals still govern anything it cannot honour (hold_state,
         # airspeed_kind, a track that does not cover the run).
-        from core.scenario.card import write_run_card
-
-        write_run_card(
-            spec, out / "card.json",
-            cameras=[track.card_block(camera, schedule, frame)
-                     for camera, track, schedule
-                     in zip(cameras, tracks, schedules)],
-            landmarks=manifest.get("landmarks"),
-            scene_crs=frame.crs if frame.declared else None)
+        #
+        # After a host flight these are the RE-SOLVED tracks, so the
+        # card the render passes consume and the manifest that labels
+        # their output came out of one flight.
+        write_card(out / "card.json", tracks, schedules,
+                   manifest.get("landmarks"))
         print(f"  card:     {out / 'card.json'} (consume-poses; one "
               f"commandlet pass per camera via -camera-index=N)")
 
@@ -285,10 +419,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"  manifest: {manifest_path}")
     print(f"  previews: {len(previews)} geometry preview(s) under "
           f"{out / 'previews'}")
-
-    from core.util.platform import (
-        os_name, ue_available, ue_platform_refusal, ue_runner_command,
-    )
 
     if not args.render:
         if ue_available():

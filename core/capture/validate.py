@@ -61,6 +61,14 @@ MAX_SENSOR_MM = 120.0
 CAMERA_ID_MAX_LEN = 64
 _CAMERA_ID_ALLOWED = set(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.")
+#: Directory names this project itself owns inside a run. A camera may
+#: not take one: ``host_flight/`` holds the flight the UE host flew
+#: before the poses were solved, and the verifier keys host telemetry by
+#: its parent directory name -- so a camera called "host_flight" would
+#: put two different flights under one key and silently shadow one.
+#: Refused rather than renamed, like every other stated field.
+RESERVED_CAMERA_IDS = frozenset({"host_flight"})
+
 #: Windows reserves these stems whatever the extension, on every drive.
 _WINDOWS_RESERVED = {
     "CON", "PRN", "AUX", "NUL",
@@ -165,6 +173,13 @@ def identifier_violations(camera: CameraSpec,
             "camera.identifier",
             f"{who}: {value!r} is a reserved device name on Windows; "
             f"the frame directory could never be created there"))
+    if value in RESERVED_CAMERA_IDS:
+        out.append(Violation(
+            "camera.identifier",
+            f"{who}: {value!r} is a directory this run writes itself, "
+            f"and the verifier keys host telemetry by directory name -- "
+            f"two flights under one key, one of them shadowed. Reserved: "
+            f"{sorted(RESERVED_CAMERA_IDS)}"))
     return out
 
 

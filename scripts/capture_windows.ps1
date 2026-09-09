@@ -12,6 +12,13 @@
 #
 # It is not a wrapper that hides the commands. It prints each one before
 # running it, so the two-command form stays the thing you learn.
+#
+# --render flies the card in the host FIRST and solves the poses over
+# that flight, so the aircraft labels describe the flight the pixels
+# show rather than a second, very similar one. That costs one extra
+# commandlet pass, which has no renderer and is the cheap kind.
+# -NoHostFlight buys the pass back and gives up ~1.4 m of label
+# accuracy.
 
 param(
     [string]$Spec = "examples\cameras_multi.yaml",
@@ -23,7 +30,11 @@ param(
     [switch]$SynthTerrain,
     # Render in the black void instead of the visual scene. What the
     # silhouette measurements want; not what a camera view looks like.
-    [switch]$Void
+    [switch]$Void,
+    # Solve the poses over the headless pre-run instead of the host's
+    # own flight: one commandlet pass cheaper, and the aircraft labels
+    # then describe a flight ~1.4 m from the one the pixels show.
+    [switch]$NoHostFlight
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,6 +54,7 @@ if (-not (Test-Path $bridge)) {
 $captureArgs = @("-m", "flightsim.capture", $Spec, "--out", $Out, "--render")
 if ($SynthTerrain) { $captureArgs += "--synth-terrain" }
 if ($Void) { $captureArgs += "--void" }
+if ($NoHostFlight) { $captureArgs += "--no-host-flight" }
 
 Write-Host ""
 Write-Host "[1/2] $python $($captureArgs -join ' ')"

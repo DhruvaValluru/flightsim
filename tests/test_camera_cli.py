@@ -30,7 +30,7 @@ def demo_run(tmp_path_factory):
 def test_capture_writes_manifest_previews_and_telemetry(demo_run):
     manifest = json.loads(
         (demo_run / "capture_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["manifest_version"] == 2
+    assert manifest["manifest_version"] == 3
     assert len(manifest["frames"]) == 48          # 24 per camera, exact
     assert (demo_run / "telemetry.json").is_file()
     assert (demo_run / "scenario.yaml").is_file()
@@ -40,6 +40,39 @@ def test_capture_writes_manifest_previews_and_telemetry(demo_run):
     run = json.loads((demo_run / "run.json").read_text(encoding="utf-8"))
     assert manifest["spec_digest"] == run["spec_digest"]
     assert manifest["output_digest"] == run["output_digest"]
+
+
+def test_an_engine_less_capture_says_it_solved_over_the_pre_run(demo_run):
+    """The manifest has to name the flight its aircraft labels describe.
+
+    With no engine there IS only the headless pre-run, so this is not a
+    failure -- it is the honest answer, and a consumer of these images
+    can read it rather than assuming. On Windows with --render the same
+    field reads "host flight" because the host flew the card first and
+    the poses were re-solved over its telemetry.
+    """
+    from core.capture.manifest import SOLVE_PRE_RUN
+
+    manifest = json.loads(
+        (demo_run / "capture_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["solve_source"] == SOLVE_PRE_RUN
+    # And no host flight was recorded, so nothing claims one.
+    assert not (demo_run / "host_flight").exists()
+
+
+def test_the_host_flight_can_be_declined_deliberately(capsys):
+    """--no-host-flight is the old behaviour, kept because it is one
+    commandlet pass cheaper. It has to be an explicit CHOICE -- the
+    default is to solve over the flight the pixels are taken on -- and
+    the help has to say what declining costs, or nobody choosing it
+    knows they are choosing 1.38 m of label error.
+    """
+    with pytest.raises(SystemExit) as caught:
+        capture_main(["--help"])
+    assert caught.value.code == 0
+    helptext = capsys.readouterr().out
+    assert "--no-host-flight" in helptext
+    assert "1.38 m" in helptext
 
 
 def test_verify_passes_on_the_demo_run(demo_run, capsys):

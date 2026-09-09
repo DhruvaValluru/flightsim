@@ -112,6 +112,51 @@ the pre-run with itself. Closing P10 outright still means either
 replaying the recorded track into the host, or rebuilding the manifest's
 aircraft states from the host's telemetry after the render.
 
+**Closed, by a third route neither of those.** Both options above accept
+that the poses are solved over the wrong flight and then repair the
+labels afterwards. The determinism measurement licenses something
+simpler: let the host fly the card FIRST — the telemetry-only commandlet,
+no renderer, `scripts/run_ue_scenario.ps1`, which has existed since
+Phase 5 — and solve the poses, schedules, scene checks and manifest over
+THAT recording. The render passes then re-fly the same card and, being
+bit-deterministic, fly the identical flight. Manifest and pixels
+describe one flight by construction, with no replay path and no
+post-hoc relabelling.
+
+* **No new C++.** The host already records every channel the pose solver
+  needs (`t`, `lat_deg`, `lon_deg`, `altitude_m`, `roll_deg`,
+  `pitch_deg`, `heading_deg` — `FlightSimTelemetryRecorder.cpp` lines
+  24–33 against `core/capture/poses.py:74`), under the same names and
+  units. `core/capture/hostflight.py` reads it back and refuses by name
+  (`capture.host_flight`) when it cannot be solved over.
+* **The pre-run is kept, and demoted.** It stays the cheap pre-flight
+  gate, so a camera inside a mountain still refuses before any engine
+  time is spent. It is no longer a data source. The scene checks then
+  run AGAIN over the host's own track, because that is the flight the
+  frames are taken on.
+* **The manifest declares which flight it describes.** `solve_source`,
+  new in `manifest_version` 3 — a v2 manifest could not say, and always
+  meant the pre-run. A consumer training on these images needs to know.
+* **The decision keeps checking its condition.** Every rendered run now
+  records the solve flight plus one per camera pass, so
+  `verify_host_determinism` compares them and no longer reports NOT RUN
+  on a single-camera render. And `verify_flight_agreement` reads
+  `solve_source`: a manifest claiming a host solve is held to 0.5 m
+  rather than 25 m, so a silent fallback to the pre-run — the pass not
+  running, `--no-host-flight`, a future refactor — FAILS by name at its
+  own 1.38 m signature instead of passing inside a tolerance sized for
+  it. That bound is pinned by test in both directions.
+* **What is NOT yet measured.** The 0.5 m bound is reasoned from the
+  interpolation residual (the track's curvature over half of a 0.1 s
+  host sample, sub-decimetre even in a hard manoeuvre), not measured on
+  Windows. Nor is the assumption that the solve pass and the render
+  passes fly the same flight despite differing in `-Visual`: the solve
+  pass is given the physics-affecting flags (`-terrain=`,
+  `-GeorefTerrain`) and not the render-scene one. `host_determinism` is
+  exactly the check that grades that choice, and a FAIL there naming
+  `host_flight` as the odd one out means `-Visual` perturbs the flight
+  and the solve pass must carry it too.
+
 ## Problems being closed
 
 Each was reproduced against the committed tree, not inferred.

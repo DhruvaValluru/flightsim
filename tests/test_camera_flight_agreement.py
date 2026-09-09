@@ -187,7 +187,7 @@ def test_determinism_is_not_run_with_one_flight(captured):
     write_host_flight(run_dir, columns, "chase0")
     check = verify_host_determinism(run_dir)
     assert check.status == NOT_RUN
-    assert "two passes" in check.detail
+    assert "two flights" in check.detail
 
 
 def test_identical_passes_prove_the_host_is_reproducible(captured):

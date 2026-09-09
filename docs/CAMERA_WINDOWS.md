@@ -52,6 +52,10 @@ the synthesised ridge it refuses with `camera.terrain_clearance`
 (“requested −2802.8 m AGL”). `examples\cameras_terrain.yaml` is the one
 baselined for terrain.
 
+`--render` flies the card in the host **first** -- the telemetry-only
+commandlet, no renderer — and re-solves every pose over *that* flight
+before rendering, so the aircraft labels describe the flight the pixels
+show ("One flight, not two" below). `--no-host-flight` skips that pass.
 `--render` implies `--card` and drives `scripts\render_ue_scenario.ps1`,
 which runs **one commandlet pass per camera** into
 `runs\demo\frames\<camera_id>\`. Without the engine, drop `--render`:
@@ -62,8 +66,9 @@ names what is missing.
 
 | path | what it is |
 | --- | --- |
-| `capture_manifest.json` | every frame's camera pose, full intrinsics, the aircraft state at that instant, and the scene's known landmarks |
-| `telemetry.json` | the recorded flight the poses were solved over |
+| `capture_manifest.json` | every frame's camera pose, full intrinsics, the aircraft state at that instant, the scene's known landmarks, and `solve_source` -- which flight those aircraft states came from |
+| `host_flight\host_telemetry.json` | the flight the host flew for the poses to be solved over (absent with `--no-host-flight`) |
+| `telemetry.json` | the headless pre-run: the validation flight, and the solve source only under `--no-host-flight` |
 | `card.json` | the run card the commandlet consumes: solved pose tracks, intrinsics, landmarks |
 | `frames\<camera_id>\` | the rendered PNGs, plus `render.json` |
 | `overlays\<camera_id>\` | the recorded geometry drawn **on** the rendered pixels |
@@ -105,10 +110,14 @@ NOT RUN is not a pass:
 Measured on `examples\cameras_multi.yaml`, so you know what "PASS"
 is worth here: landmark reprojection agrees with the engine to
 **0.00 px** over 916 projections (tolerance 2.0), two-view
-triangulation to **0.000 m** over 216 sightings (tolerance 0.5), the
-manifest's aircraft track sits **1.38 m** from the host's own recorded
-flight (tolerance 25), and the two render passes flew **byte-identical**
-flights.
+triangulation to **0.000 m** over 216 sightings (tolerance 0.5), and the
+two render passes flew **byte-identical** flights.
+
+Those figures were taken before the host flew its own solve flight, so
+`flight_agreement` read **1.38 m** there (against the 25 m the pre-run
+is allowed). With the host flight it is graded against 0.5 m instead,
+and the number a host-solved run actually produces has not been measured
+yet — the first Windows run under it is what establishes that.
 
 Off Windows, or before the engine is built, `landmark_reprojection` and
 `cross_view_consistency` report NOT RUN, because their reference is the
@@ -140,6 +149,49 @@ The routes behind it, if you want them directly:
 | `/runs/<id>/previews/<camera>/<name>.png` | the engine-free preview |
 | `/runs/<id>/capture_manifest.json` | the labels |
 | `/runs/<id>/verify.json` | the verification summary |
+
+## One flight, not two
+
+Poses used to be solved over a **headless pre-run** — the `jsbsim`
+Python package — after which the host flew the same card through **UE's
+vendored JSBSim**. Two builds stepping one scenario do not agree:
+**1.38 m worst at t~1.5 s**, measured. The camera poses survived that
+(the host consumes them verbatim) but the `aircraft` block in every
+frame record described a flight the frames did not show. For labelled
+training data that is the defect that matters: the camera is exactly
+where the label says, and the thing in front of it is up to a metre and
+a half from where the label says.
+
+`--render` now flies the host **first**:
+
+```
+1. fly headless   the cheap pre-flight gate — a camera inside a
+                  mountain still refuses BEFORE any engine time
+2. fly the host   telemetry-only commandlet, no renderer
+                  -> host_flight\host_telemetry.json
+3. re-solve       poses, schedules, scene checks, manifest, card,
+                  all over the host's own flight
+4. render         one pass per camera, consuming those poses
+```
+
+What makes step 4 agree with step 2 is that **the host is
+bit-deterministic** — measured: two passes over one card, byte-identical
+across 30 columns and 120 samples, SHA-256 `4e5a7334...`, worst
+per-sample difference exactly 0. The render passes re-fly the identical
+flight, so the manifest describes the pixels by construction rather than
+to a tolerance.
+
+That is a conditional decision, so it keeps checking its condition.
+Every rendered run now records at least two host flights (the solve pass
+plus one per camera) and `host_determinism` compares their digests — it
+no longer reports NOT RUN on a single-camera render. And
+`flight_agreement` reads the manifest's `solve_source`: one claiming a
+host solve is held to **0.5 m** rather than 25 m, so a silent fallback
+to the pre-run (1.38 m) FAILS by name instead of hiding inside a
+tolerance sized for it.
+
+`--no-host-flight` keeps the old behaviour deliberately. It is one
+commandlet pass cheaper, and the manifest records which you chose.
 
 ## Temporal alignment
 
@@ -192,21 +244,22 @@ engine applied differs from the solved one.
   are pinned byte-identical by test. Its flat `frames/` are served and
   shown, but there is no manifest and no verification, because nothing
   solved a pose. State a camera to capture.
-* **The render still re-flies the scenario.** Poses are solved over a
-  headless pre-run, then the host flies the scenario itself. The camera
-  poses are consumed verbatim so those are exact; the AIRCRAFT states in
-  the manifest come from the pre-run. This is no longer silent, and it
-  is no longer unmeasured: `flight_agreement` compares the manifest's
-  aircraft track against the host's own recorded telemetry (written per
-  camera pass to `frames\<camera_id>\host_telemetry.json`), interpolated
-  to each frame's instant, and FAILS beyond 25 m. **Measured: 1.38 m**
-  on the demo — the pre-run is the `jsbsim` Python package and the host
-  is UE's vendored JSBSim, two builds of one simulator.
-
-  The host itself is bit-deterministic: two passes over one card fly
-  byte-identical flights, which `host_determinism` asserts on every
-  multi-camera render. So replay is not needed for *reproducibility* —
-  but it is still what would close the 1.38 m *agreement* gap. See
-  `docs/CAMERA_PHASE2_WINDOWS_PLAN.md`, "The measurement, taken".
+* **The web app still solves over the pre-run.** `flightsim.capture
+  --render` flies the host first and re-solves over its flight ("One
+  flight, not two" above); the web path has not been moved onto that
+  yet. A web run's manifest therefore reads `solve_source: "headless
+  pre-run"` and its aircraft labels sit ~1.4 m from the flight its
+  pixels show. The manifest says which flight it describes rather than
+  leaving a reader to assume — but `flight_agreement` reports NOT RUN
+  there, because the web path passes one shared `-telemetry=` path for
+  every camera pass instead of writing
+  `frames\<camera_id>\host_telemetry.json` per pass.
+* **The 0.5 m host-solve bound has not been measured on Windows.** It is
+  reasoned from the interpolation error (the track's curvature over half
+  of a 0.1 s sample, sub-decimetre even in a hard manoeuvre) and pinned
+  by test at 1.38 m — the pre-run's signature — but the real number a
+  host-solved run produces is unknown until one runs. If it comes back
+  above 0.5 m, that is a finding about the host's own recorder, not a
+  tolerance to widen quietly.
 * Segmentation masks, bounding boxes, domain randomization and batch
   execution remain out of scope.

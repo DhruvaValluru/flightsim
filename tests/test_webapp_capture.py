@@ -35,7 +35,7 @@ def run_dir(tmp_path, monkeypatch):
     (out / "frames" / "tower0").mkdir()
     (out / "frames" / "tower0" / "frame_0000.png").write_bytes(_png())
     (out / "capture_manifest.json").write_text(json.dumps({
-        "manifest_version": 2,
+        "manifest_version": 3,
         "cameras": [{"camera_id": "chase0", "preset": "chase",
                      "capture_count": 1, "trigger": "interval",
                      "schedule_basis": "count 1"},
@@ -97,7 +97,7 @@ def test_the_capture_manifest_and_verification_are_downloadable(run_dir):
     client = TestClient(app)
     manifest = client.get("/runs/run_test/capture_manifest.json")
     assert manifest.status_code == 200
-    assert manifest.json()["manifest_version"] == 2
+    assert manifest.json()["manifest_version"] == 3
     assert client.get("/runs/run_test/verify.json").json()["ok"] is True
 
 

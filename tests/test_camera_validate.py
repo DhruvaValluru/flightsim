@@ -271,6 +271,7 @@ def test_clear_track_passes():
     ("..", "the parent directory"),
     ("", "an empty id"),
     ("c" * 65, "an id past the length limit"),
+    ("host_flight", "a directory the run writes itself"),
 ])
 def test_unsafe_camera_ids_refuse_by_name(bad, reason):
     cam = CameraSpec.defaulted(camera_id="cam", preset="chase")
@@ -286,6 +287,20 @@ def test_ordinary_camera_ids_pass(good):
     cam = CameraSpec.defaulted(camera_id="cam", preset="chase")
     cam.set("camera_id", good, frm="test")
     assert identifier_violations(cam) == []
+
+
+def test_the_reserved_ids_are_the_directories_the_run_writes():
+    """Not an arbitrary blocklist. A run puts the host's solve flight in
+    <run>/host_flight/, and the verifier keys host telemetry by its
+    PARENT DIRECTORY NAME -- so a camera called host_flight would put
+    two different flights under one key and shadow one of them. The
+    reserved set and the directory constant have to stay the same
+    string, and this is what says so.
+    """
+    from core.capture.hostflight import HOST_FLIGHT_DIR
+    from core.capture.validate import RESERVED_CAMERA_IDS
+
+    assert HOST_FLIGHT_DIR in RESERVED_CAMERA_IDS
 
 
 def test_core_validate_carries_the_identifier_refusal():
