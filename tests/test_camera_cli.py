@@ -275,3 +275,81 @@ def test_synthesised_terrain_cache_is_keyed_by_the_origin(tmp_path):
     assert first == again                       # same origin: reused
     assert moved != first                       # moved origin: a new raster
     assert moved.with_suffix(".r16").is_file()
+
+
+# -- --camera-sets: alignment that actually runs -------------------------
+
+def test_camera_sets_captures_twice_and_aligns(tmp_path, capsys):
+    """The check that was real and almost never ran.
+
+    Temporal alignment asserts that the CAMERA SET does not perturb the
+    simulation or the capture clock. Exercising it used to mean
+    capturing twice by hand and remembering --against, so in practice
+    it reported NOT RUN -- which is not a pass, and was not being read
+    as one either. One command now does both captures and grades them.
+    """
+    code = verify_main(["--camera-sets", str(EXAMPLES / "cameras_multi.yaml"),
+                        "--out", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert "[PASS] temporal_alignment" in out
+    assert "align exactly across the two camera sets" in out
+    # Two runs, one per half of the spec's camera list.
+    assert (tmp_path / "set_a" / "capture_manifest.json").is_file()
+    assert (tmp_path / "set_b" / "capture_manifest.json").is_file()
+    a = json.loads((tmp_path / "set_a" / "capture_manifest.json")
+                   .read_text(encoding="utf-8"))
+    b = json.loads((tmp_path / "set_b" / "capture_manifest.json")
+                   .read_text(encoding="utf-8"))
+    # Different cameras, same flight: that is the whole property.
+    assert ({c["camera_id"] for c in a["cameras"]}
+            != {c["camera_id"] for c in b["cameras"]})
+    assert a["output_digest"] == b["output_digest"]
+
+
+def test_camera_sets_refuses_a_spec_with_one_camera(tmp_path, capsys):
+    """Two sets need two cameras. One camera cannot demonstrate that the
+    camera set makes no difference."""
+    spec = ScenarioSpec.read(EXAMPLES / "cameras_multi.yaml")
+    spec.cameras = spec.cameras[:1]
+    written = tmp_path / "one.yaml"
+    spec.write(written)
+    code = verify_main(["--camera-sets", str(written), "--out",
+                        str(tmp_path / "out")])
+    out = capsys.readouterr().out
+    assert code == 2
+    assert "verify.camera_sets" in out
+    assert "at least two" in out
+
+
+def test_camera_sets_refuses_when_the_two_sets_ask_for_different_schedules(
+        tmp_path, capsys):
+    """A spurious red is worse than a NOT RUN.
+
+    Alignment compares capture INSTANTS. Two sets that requested
+    different schedules legitimately do not align -- that is the spec's
+    shape, not a defect -- and grading them against each other would
+    print a failure that is not one, which is how people learn to
+    ignore a check.
+    """
+    spec = ScenarioSpec.read(EXAMPLES / "cameras_multi.yaml")
+    spec.cameras[1].set("capture_count", 11, frm="test")
+    written = tmp_path / "mixed.yaml"
+    spec.write(written)
+    code = verify_main(["--camera-sets", str(written), "--out",
+                        str(tmp_path / "out")])
+    out = capsys.readouterr().out
+    assert code == 2
+    assert "verify.camera_sets" in out
+    assert "different capture schedules" in out
+    # And it said so BEFORE flying anything.
+    assert not (tmp_path / "out" / "set_a" / "capture_manifest.json").exists()
+
+
+def test_camera_sets_will_not_also_take_a_run_directory(tmp_path):
+    """It captures its own two runs; taking a third would leave which
+    one was graded ambiguous."""
+    with pytest.raises(SystemExit):
+        verify_main([str(tmp_path), "--camera-sets",
+                     str(EXAMPLES / "cameras_multi.yaml"),
+                     "--out", str(tmp_path / "out")])

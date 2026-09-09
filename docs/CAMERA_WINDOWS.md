@@ -69,8 +69,19 @@ NOT RUN is not a pass:
   [PASS]    cross_view_consistency       a landmark seen twice triangulates back
   [PASS]    count_exactness              exactly the images the spec requested
   [PASS]    aircraft_state_consistency   the manifest agrees with itself
-  [NOT RUN] temporal_alignment           needs a second run: --against <dir>
+  [PASS]    flight_agreement             the manifest labels the flight the host flew
+  [PASS]    host_determinism             both render passes flew the same flight
+  [PASS]    capture_time_agreement       the pixels are from the instant they claim
+  [NOT RUN] temporal_alignment           needs a second run: --camera-sets, or --against <dir>
 ```
+
+Measured on `examples\cameras_multi.yaml`, so you know what "PASS"
+is worth here: landmark reprojection agrees with the engine to
+**0.00 px** over 916 projections (tolerance 2.0), two-view
+triangulation to **0.000 m** over 216 sightings (tolerance 0.5), the
+manifest's aircraft track sits **1.38 m** from the host's own recorded
+flight (tolerance 25), and the two render passes flew **byte-identical**
+flights.
 
 Off Windows, or before the engine is built, `landmark_reprojection` and
 `cross_view_consistency` report NOT RUN, because their reference is the
@@ -106,7 +117,25 @@ The routes behind it, if you want them directly:
 ## Temporal alignment
 
 Two captures of the same simulation with different cameras must produce
-frame sets that align exactly in time:
+frame sets that align exactly in time — the camera set must not perturb
+the simulation or the capture clock. One command does both captures and
+grades them:
+
+```powershell
+.\.venv\Scripts\python.exe -m flightsim.verify --camera-sets examples\cameras_multi.yaml --out runs\align
+```
+
+It splits the spec's own camera list in half and captures once per half,
+so the two runs differ in exactly one thing — which cameras were asked
+for — rather than in whatever else two hand-written example files
+happen to disagree about. Add `--render` to render both. It refuses by
+name (`verify.camera_sets`) on a spec with fewer than two cameras, and
+on one whose two halves ask for different capture schedules: those
+frame sets are not supposed to align, and reporting that as a failure
+would be a red light with nothing behind it.
+
+The manual form still works when you have two runs you specifically
+want compared:
 
 ```powershell
 .\.venv\Scripts\python.exe -m flightsim.capture examples\cameras_multi.yaml --out runs\a
@@ -128,10 +157,9 @@ engine applied differs from the solved one.
 
 ## Known limits
 
-* **The C++ in this change has not been compiled.** It was written on a
-  Linux machine with no engine. `scripts\build_ue.ps1` is the first
-  real test of it; if the bridge fails to build, that is this change,
-  not your machine.
+* The plugin's own C++ tests run with `.\scripts\test_ue.ps1`. They
+  drive the applied-vs-solved parity tolerances at their boundaries
+  and the pose-track refusals; they need the engine but not a GPU.
 * **A camera-less run still produces only a clip.** State no camera and
   the run takes the legacy single-pass path, whose commandlet arguments
   are pinned byte-identical by test. Its flat `frames/` are served and
@@ -140,12 +168,18 @@ engine applied differs from the solved one.
 * **The render still re-flies the scenario.** Poses are solved over a
   headless pre-run, then the host flies the scenario itself. The camera
   poses are consumed verbatim so those are exact; the AIRCRAFT states in
-  the manifest come from the pre-run. This is no longer silent: the
-  `flight_agreement` check compares the manifest's aircraft track
-  against the host's own recorded telemetry, matched on simulation time,
-  and FAILS the run's verification when they differ by more than 25 m.
-  Closing it properly (replaying the telemetry rather than re-flying) is
-  still the next step — `docs/CAMERA_PHASE2_WINDOWS_PLAN.md`, "One
-  flight, not two".
+  the manifest come from the pre-run. This is no longer silent, and it
+  is no longer unmeasured: `flight_agreement` compares the manifest's
+  aircraft track against the host's own recorded telemetry (written per
+  camera pass to `frames\<camera_id>\host_telemetry.json`), interpolated
+  to each frame's instant, and FAILS beyond 25 m. **Measured: 1.38 m**
+  on the demo — the pre-run is the `jsbsim` Python package and the host
+  is UE's vendored JSBSim, two builds of one simulator.
+
+  The host itself is bit-deterministic: two passes over one card fly
+  byte-identical flights, which `host_determinism` asserts on every
+  multi-camera render. So replay is not needed for *reproducibility* —
+  but it is still what would close the 1.38 m *agreement* gap. See
+  `docs/CAMERA_PHASE2_WINDOWS_PLAN.md`, "The measurement, taken".
 * Segmentation masks, bounding boxes, domain randomization and batch
   execution remain out of scope.
