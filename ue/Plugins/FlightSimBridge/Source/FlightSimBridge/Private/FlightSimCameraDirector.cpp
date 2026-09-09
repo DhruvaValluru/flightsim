@@ -161,30 +161,32 @@ bool AFlightSimCameraDirector::ApplyPoseAtTime(double SimTimeSeconds,
 	// recorded geometry is quietly wrong. 10 cm on a cinema camera is
 	// already generous.
 	const FVector Applied = GetActorLocation();
-	if (!Applied.Equals(Location, 10.0f))
+	if (!Applied.Equals(Location, PositionToleranceCm))
 	{
 		Error = FString::Printf(
 			TEXT("consume-poses: applied camera position (%.1f, %.1f, %.1f) "
 			     "differs from the solved pose (%.1f, %.1f, %.1f) by more "
-			     "than 10 cm at t=%.3f s; refusing to record geometry the "
-			     "frames do not have"),
+			     "than %.3g cm at t=%.3f s; refusing to record geometry "
+			     "the frames do not have"),
 			Applied.X, Applied.Y, Applied.Z,
-			Location.X, Location.Y, Location.Z, SimTimeSeconds);
+			Location.X, Location.Y, Location.Z,
+			PositionToleranceCm, SimTimeSeconds);
 		return false;
 	}
 	// Position parity alone let a rotation divergence through, and where
 	// the camera LOOKS is most of the label: a tenth of a degree at a
 	// kilometre is nearly two metres of misplaced world. Same doctrine,
 	// same loudness.
-	const double RotationErrorDeg = FMath::RadiansToDegrees(
-		GetActorQuat().AngularDistance(Rotation));
-	if (RotationErrorDeg > 0.05)
+	const double RotationErrorDeg =
+		RotationErrorDegrees(GetActorQuat(), Rotation);
+	if (RotationErrorDeg > RotationToleranceDeg)
 	{
 		Error = FString::Printf(
 			TEXT("consume-poses: applied camera rotation differs from the "
-			     "solved pose by %.4f deg at t=%.3f s (tolerance 0.05 deg); "
-			     "refusing to record an orientation the frames do not have"),
-			RotationErrorDeg, SimTimeSeconds);
+			     "solved pose by %.4f deg at t=%.3f s (tolerance %.3g "
+			     "deg); refusing to record an orientation the frames do "
+			     "not have"),
+			RotationErrorDeg, SimTimeSeconds, RotationToleranceDeg);
 		return false;
 	}
 	return true;

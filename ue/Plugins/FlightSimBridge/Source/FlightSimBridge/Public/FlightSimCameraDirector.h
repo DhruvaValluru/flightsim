@@ -156,6 +156,33 @@ public:
 	// the stated tolerances.
 	bool ApplyPoseAtTime(double SimTimeSeconds, FString& Error);
 
+	// The two applied-vs-solved tolerances, named rather than spelled
+	// inline, so a test can drive the decision at the exact boundary
+	// instead of asserting that a magic number appears in the source.
+	//
+	// 10 cm on a cinema camera is already generous. 0.05 deg is the one
+	// that earns its keep: at a kilometre it is 0.9 m of misplaced
+	// world, and where the camera LOOKS is most of the label.
+	//
+	// For scale, this comparison cannot resolve better than ~2e-6 deg
+	// -- AngularDistance goes through acos, which is ill-conditioned
+	// near an angle of zero, and that is what an identical pose
+	// measures against itself. Four orders of magnitude under the
+	// tolerance, so 0.05 deg grades displacement and not the
+	// arithmetic underneath it.
+	static constexpr double PositionToleranceCm = 10.0;
+	static constexpr double RotationToleranceDeg = 0.05;
+
+	// Degrees between two orientations. Pure, static and public because
+	// it is the guard's actual decision: everything else in
+	// ApplyPoseAtTime is placing the camera, and this is the part that
+	// says whether the placement took.
+	static double RotationErrorDegrees(const FQuat& Applied,
+	                                   const FQuat& Solved)
+	{
+		return FMath::RadiansToDegrees(Applied.AngularDistance(Solved));
+	}
+
 	// The solved lens at the last applied time, millimetres. The commandlet
 	// sets the capture's field of view from this every frame, so a
 	// keyframed focal-length move reaches the pixels instead of only the

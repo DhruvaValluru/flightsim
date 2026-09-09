@@ -20,3 +20,5 @@ ue/Saved/
 ue/DerivedDataCache/
 ue/Plugins/*/Intermediate/
 ue/Plugins/*/Binaries/
+
+ue_tests.log
