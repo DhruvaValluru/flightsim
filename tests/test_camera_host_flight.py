@@ -23,7 +23,7 @@ import pytest
 
 from core.capture.hostflight import (
     HOST_FLIGHT_DIR, HostFlightError, REQUIRED_CHANNELS, digest_columns,
-    host_telemetry_path, read_host_columns,
+    host_telemetry_path, read_all_host_columns, read_host_columns,
 )
 from core.capture.manifest import (
     MANIFEST_VERSION, SOLVE_HOST_FLIGHT, SOLVE_PRE_RUN,
@@ -151,6 +151,64 @@ def test_the_digest_is_exact_not_rounded(flight):
     nudged = {k: list(v) for k, v in columns.items()}
     nudged["altitude_m"][3] = nudged["altitude_m"][3] * (1.0 + 1e-15)
     assert digest_columns(columns) != digest_columns(nudged)
+
+
+def test_the_digest_covers_every_recorded_column(tmp_path, flight):
+    """A manifest's ``output_digest`` is documented as covering "the
+    recorded telemetry columns", and the headless pre-run's covers all
+    of them. Digesting only the seven the SOLVER needs would give one
+    field two meanings depending on solve_source.
+
+    It did, and it showed: on the first host-solved run the capture
+    printed fc328800... while verify_host_determinism, reading the same
+    bytes, digested 1c8acba2... Same file, two numbers.
+    """
+    payload = host_payload(flight)
+    # A column the solver never touches, of the kind the host records
+    # thirty of.
+    payload["columns"]["lift_n"] = [1.5 * i for i in range(len(flight["t"]))]
+    path = tmp_path / "host_telemetry.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    solver_only = read_host_columns(path)
+    everything = read_all_host_columns(path)
+    assert set(solver_only) == set(REQUIRED_CHANNELS)
+    assert "lift_n" in everything
+    assert digest_columns(everything) != digest_columns(solver_only), (
+        "digesting the solver's subset is what made one field mean two "
+        "things; the two must be distinguishable")
+
+
+def test_the_full_digest_agrees_with_the_verifier_s(tmp_path, flight):
+    """The independent reference for the fix: verify_host_determinism
+    digests these files its own way, and the capture's digest of the
+    same bytes has to be the same number or the inconsistency has only
+    moved."""
+    import hashlib
+
+    payload = host_payload(flight)
+    payload["columns"]["lift_n"] = [0.25 * i for i in range(len(flight["t"]))]
+    path = tmp_path / "host_telemetry.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    # verify_host_determinism's algorithm, written out here rather than
+    # imported, so this compares two constructions and not one.
+    columns = json.loads(path.read_text(encoding="utf-8"))["columns"]
+    digest = hashlib.sha256()
+    for key in sorted(columns):
+        digest.update(key.encode("utf-8"))
+        for value in columns[key]:
+            digest.update(repr(float(value)).encode("utf-8"))
+
+    assert digest_columns(read_all_host_columns(path)) == digest.hexdigest()
+
+
+def test_a_host_file_with_no_numeric_columns_refuses(tmp_path):
+    path = tmp_path / "host_telemetry.json"
+    path.write_text(json.dumps({"columns": {"note": ["a", "b"]}}),
+                    encoding="utf-8")
+    with pytest.raises(HostFlightError, match="numeric"):
+        read_all_host_columns(path)
 
 
 # -- the manifest says which flight it describes ------------------------

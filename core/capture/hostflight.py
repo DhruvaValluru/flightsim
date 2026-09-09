@@ -134,6 +134,42 @@ def read_host_columns(path) -> Dict[str, List[float]]:
     return out
 
 
+def read_all_host_columns(path) -> Dict[str, List[float]]:
+    """EVERY column the host recorded, not just the solver's seven.
+
+    ``read_host_columns`` narrows to what the pose solver indexes, which
+    is right for solving and wrong for digesting: a manifest's
+    ``output_digest`` is documented as covering "the recorded telemetry
+    columns", and the headless pre-run's digest covers all thirty of
+    them. Digesting seven here would quietly give one field two
+    meanings depending on ``solve_source`` -- and it did, visibly: the
+    capture printed fc328800... for a file that verify_host_determinism,
+    reading the same bytes, digested as 1c8acba2...
+    """
+    path = Path(path)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise HostFlightError(
+            f"the host telemetry at {path} could not be read ({exc})"
+        ) from exc
+    columns = payload.get("columns", payload) if isinstance(payload, dict) \
+        else None
+    if not isinstance(columns, dict) or not columns:
+        raise HostFlightError(
+            f"the host telemetry at {path} carries no columns object")
+    out: Dict[str, List[float]] = {}
+    for name, values in columns.items():
+        try:
+            out[str(name)] = [float(v) for v in values]
+        except (TypeError, ValueError):
+            continue          # a non-numeric column is not part of the flight
+    if not out:
+        raise HostFlightError(
+            f"the host telemetry at {path} has no numeric columns")
+    return out
+
+
 def digest_columns(columns: Dict[str, Sequence[float]]) -> str:
     """SHA-256 over the columns, EXACTLY as ``run_spec`` digests its own.
 

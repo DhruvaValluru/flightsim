@@ -309,7 +309,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         from core.capture.hostflight import (
             HostFlightError, digest_columns, host_telemetry_path,
-            read_host_columns,
+            read_all_host_columns, read_host_columns,
         )
 
         host_dir = out / "host_flight"
@@ -365,7 +365,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return _refuse(solved_violations)
         columns = host_columns
         solve_source = SOLVE_HOST_FLIGHT
-        solve_digest = digest_columns(host_columns)
+        # Over EVERY column the host recorded, so output_digest means
+        # the same thing whichever flight the manifest describes.
+        solve_digest = digest_columns(read_all_host_columns(host_telemetry))
         print(f"  host flight: {len(host_columns['t'])} samples, digest "
               f"{solve_digest[:16]} -- poses re-solved over it")
 

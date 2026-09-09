@@ -1005,6 +1005,16 @@ mutate scripts/run_ue_scenario.ps1 \
     "a dotted native argument must be quoted or PowerShell splits it" \
     tests/test_powershell_scripts.py || failures=$((failures+1))
 
+# The CALL SITE in flightsim/capture.py cannot be guarded here: it runs
+# only when ue_available(), so on any machine without the engine it is
+# unreachable and a guard on it would report WEAK forever. What is
+# guarded is the function it calls, which the unit tests do reach.
+mutate core/capture/hostflight.py \
+    '    for name, values in columns.items():' \
+    '    for name, values in [(n, columns[n]) for n in REQUIRED_CHANNELS if n in columns]:' \
+    "the host flight digest covers every recorded column, not seven" \
+    tests/test_camera_host_flight.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

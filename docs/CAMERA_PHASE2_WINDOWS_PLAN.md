@@ -146,16 +146,20 @@ post-hoc relabelling.
   running, `--no-host-flight`, a future refactor — FAILS by name at its
   own 1.38 m signature instead of passing inside a tolerance sized for
   it. That bound is pinned by test in both directions.
-* **What is NOT yet measured.** The 0.5 m bound is reasoned from the
-  interpolation residual (the track's curvature over half of a 0.1 s
-  host sample, sub-decimetre even in a hard manoeuvre), not measured on
-  Windows. Nor is the assumption that the solve pass and the render
-  passes fly the same flight despite differing in `-Visual`: the solve
-  pass is given the physics-affecting flags (`-terrain=`,
-  `-GeorefTerrain`) and not the render-scene one. `host_determinism` is
-  exactly the check that grades that choice, and a FAIL there naming
-  `host_flight` as the odd one out means `-Visual` perturbs the flight
-  and the solve pass must carry it too.
+* **Measured, and both open questions closed.** On
+  `examples/cameras_terrain.yaml` (UE 5.5, 30 frames, two cameras):
+  `flight_agreement` reports **0.00 m** against its 0.5 m bound, where
+  the pre-run solve reported 1.38 m against 25. P10 is closed, not
+  bounded.
+
+  And `host_determinism` compared **three** flights of one card — the
+  solve pass plus both render passes — byte-identical over 900 samples.
+  The solve pass is given the physics-affecting flags (`-terrain=`,
+  `-GeorefTerrain`) and NOT `-Visual`, and that it lands bit-identical
+  to two passes that did get `-Visual` is the measurement retiring the
+  question of whether the render scene perturbs the flight. It does
+  not. Had it, the check would have named `host_flight` as the odd
+  flight out, which is what it was pointed at.
 
 ## Problems being closed
 

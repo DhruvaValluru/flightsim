@@ -52,7 +52,7 @@ the synthesised ridge it refuses with `camera.terrain_clearance`
 (“requested −2802.8 m AGL”). `examples\cameras_terrain.yaml` is the one
 baselined for terrain.
 
-`--render` flies the card in the host **first** -- the telemetry-only
+`--render` flies the card in the host **first** — the telemetry-only
 commandlet, no renderer — and re-solves every pose over *that* flight
 before rendering, so the aircraft labels describe the flight the pixels
 show ("One flight, not two" below). `--no-host-flight` skips that pass.
@@ -102,7 +102,7 @@ NOT RUN is not a pass:
   [PASS]    count_exactness              exactly the images the spec requested
   [PASS]    aircraft_state_consistency   the manifest agrees with itself
   [PASS]    flight_agreement             the manifest labels the flight the host flew
-  [PASS]    host_determinism             both render passes flew the same flight
+  [PASS]    host_determinism             every host flight of one card was identical
   [PASS]    capture_time_agreement       the pixels are from the instant they claim
   [NOT RUN] temporal_alignment           needs a second run: --camera-sets, or --against <dir>
 ```
@@ -114,10 +114,9 @@ triangulation to **0.000 m** over 216 sightings (tolerance 0.5), and the
 two render passes flew **byte-identical** flights.
 
 Those figures were taken before the host flew its own solve flight, so
-`flight_agreement` read **1.38 m** there (against the 25 m the pre-run
-is allowed). With the host flight it is graded against 0.5 m instead,
-and the number a host-solved run actually produces has not been measured
-yet — the first Windows run under it is what establishes that.
+`flight_agreement` read **1.38 m** there, against the 25 m a pre-run
+solve is allowed. Measured again on `examples\cameras_terrain.yaml`
+with the host flying first: **0.00 m**, against 0.5 m.
 
 Off Windows, or before the engine is built, `landmark_reprojection` and
 `cross_view_consistency` report NOT RUN, because their reference is the
@@ -193,6 +192,16 @@ tolerance sized for it.
 `--no-host-flight` keeps the old behaviour deliberately. It is one
 commandlet pass cheaper, and the manifest records which you chose.
 
+**Measured, `examples\cameras_terrain.yaml`, UE 5.5:** the manifest's
+aircraft track matches the host's own recorded flight to **0.00 m**
+(tolerance 0.5), against **1.38 m** when the poses were solved over the
+headless pre-run. And `host_determinism` compared **three** flights of
+one card — the solve pass plus both render passes — and found them
+byte-identical over 900 samples. The solve pass is given the terrain
+flags but not `-Visual`; that it lands bit-identical to two passes that
+DID get `-Visual` is the measurement which retires the open question of
+whether the render scene perturbs the flight. It does not.
+
 ## Temporal alignment
 
 Two captures of the same simulation with different cameras must produce
@@ -254,12 +263,9 @@ engine applied differs from the solved one.
   there, because the web path passes one shared `-telemetry=` path for
   every camera pass instead of writing
   `frames\<camera_id>\host_telemetry.json` per pass.
-* **The 0.5 m host-solve bound has not been measured on Windows.** It is
-  reasoned from the interpolation error (the track's curvature over half
-  of a 0.1 s sample, sub-decimetre even in a hard manoeuvre) and pinned
-  by test at 1.38 m — the pre-run's signature — but the real number a
-  host-solved run produces is unknown until one runs. If it comes back
-  above 0.5 m, that is a finding about the host's own recorder, not a
-  tolerance to widen quietly.
+* ~~The 0.5 m host-solve bound has not been measured on Windows.~~
+  **Measured: 0.00 m**, on `examples\cameras_terrain.yaml`, UE 5.5,
+  30 frames across two cameras. The bound was reasoned from the
+  interpolation residual and is not being approached.
 * Segmentation masks, bounding boxes, domain randomization and batch
   execution remain out of scope.
