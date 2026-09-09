@@ -64,10 +64,41 @@ def wants_capture(spec) -> bool:
     return bool(getattr(spec, "cameras", None))
 
 
+def clip_columns(columns: Dict, duration_s: Optional[float]) -> Dict:
+    """The recorded flight, cut to the window the host will actually fly.
+
+    The web run caps its clip at CLIP_SECONDS while the SPEC keeps its
+    own duration, and the headless pre-run flies the spec's. Solving
+    capture schedules over the full flight therefore laid capture
+    instants out past the end of the clip, and the render commandlet
+    refused -- correctly, and only once it had flown:
+
+        consume-poses: emitted 3 of the 4 scheduled images; the run
+        ended before the schedule did, so the manifest would name
+        frames that do not exist
+
+    A manifest naming frames that cannot exist is the exact failure this
+    phase is about, so the schedule is cut to fit the flight rather than
+    the flight stretched to fit the schedule. The CLI never hit this
+    because it caps nothing: its host flies the spec's own duration.
+    """
+    if duration_s is None:
+        return columns
+    times = [float(t) for t in columns["t"]]
+    keep = sum(1 for t in times if t <= duration_s)
+    if keep >= len(times) or keep < 2:
+        return columns
+    return {name: list(values)[:keep] for name, values in columns.items()}
+
+
 def solve(spec, scene: Dict, heightfield=None, terrain_ground=None,
-          tornado: Optional[Dict] = None):
+          tornado: Optional[Dict] = None,
+          duration_s: Optional[float] = None):
     """Fly headlessly, solve every camera, and return everything the
     render and the manifest need.
+
+    ``duration_s`` is the window the HOST will fly (the clip cap), which
+    is not always the spec's own duration -- see :func:`clip_columns`.
 
     Raises :class:`CaptureError` with the named camera constraint rather
     than rendering frames whose geometry was never validated.
@@ -79,7 +110,7 @@ def solve(spec, scene: Dict, heightfield=None, terrain_ground=None,
 
     frame = SceneFrame.for_spec(spec, heightfield)
     result = run_spec(spec, terrain_ground=terrain_ground)
-    columns = result.telemetry.columns
+    columns = clip_columns(result.telemetry.columns, duration_s)
     datum = float(spec.terrain_elevation.value)
     tracks, schedules = _solve_cameras(
         spec, columns, frame, heightfield, tornado, datum)
@@ -125,7 +156,8 @@ def _solve_cameras(spec, columns, frame, heightfield, tornado, datum):
 
 
 def resolve_over_host(spec, solved: Dict, host_telemetry, heightfield=None,
-                      tornado: Optional[Dict] = None) -> Dict:
+                      tornado: Optional[Dict] = None,
+                      duration_s: Optional[float] = None) -> Dict:
     """Re-solve everything over the flight the HOST actually flew.
 
     The web run used to solve its poses over the headless pre-run and
@@ -147,7 +179,7 @@ def resolve_over_host(spec, solved: Dict, host_telemetry, heightfield=None,
     )
 
     try:
-        columns = read_host_columns(host_telemetry)
+        columns = clip_columns(read_host_columns(host_telemetry), duration_s)
         digest = digest_columns(read_all_host_columns(host_telemetry))
     except HostFlightError as exc:
         raise CaptureError(exc.constraint, exc.message) from exc

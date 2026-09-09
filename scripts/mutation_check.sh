@@ -1067,6 +1067,12 @@ mutate webapp/runs.py \
     "the solve pass leaves no render.json for the verifier to find" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+mutate webapp/capture.py \
+    '    return {name: list(values)[:keep] for name, values in columns.items()}' \
+    '    return columns  # MUTATED: schedule past the end of the clip' \
+    "the capture schedule is cut to the flight the host will fly" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

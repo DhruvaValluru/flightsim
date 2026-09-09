@@ -201,6 +201,68 @@ def test_a_camera_carrying_spec_goes_to_the_capture_stage():
     assert wants_capture(spec)
 
 
+# -- the schedule has to fit the flight ----------------------------------
+
+def test_the_solve_window_is_cut_to_the_clip():
+    """The web run caps its clip at CLIP_SECONDS while the SPEC keeps
+    its own duration, and the headless pre-run flies the spec's. Capture
+    schedules solved over the full flight laid instants out past the end
+    of the clip, and the render commandlet refused -- correctly, and
+    only after flying for a minute:
+
+        consume-poses: emitted 3 of the 4 scheduled images; the run
+        ended before the schedule did, so the manifest would name frames
+        that do not exist
+
+    A manifest naming frames that cannot exist is the exact failure this
+    phase is about. The schedule is cut to fit the flight.
+    """
+    from webapp.capture import clip_columns
+
+    columns = {"t": [i * 0.5 for i in range(200)],   # 0 .. 99.5 s
+               "lat_deg": [0.0] * 200}
+    cut = clip_columns(columns, 22.0)
+    assert cut["t"][-1] <= 22.0
+    assert len(cut["t"]) == len(cut["lat_deg"]), "columns stay in step"
+    assert len(cut["t"]) < 200
+
+
+def test_a_flight_already_inside_the_clip_is_left_alone():
+    from webapp.capture import clip_columns
+
+    columns = {"t": [0.0, 1.0, 2.0], "lat_deg": [0.0, 0.0, 0.0]}
+    assert clip_columns(columns, 22.0) == columns
+    assert clip_columns(columns, None) == columns
+
+
+def test_cutting_never_leaves_less_than_a_flight():
+    """Two samples is the minimum a pose track can be solved over.
+    Rather than hand the solver something it must refuse, a cap that
+    short leaves the flight whole and lets the schedule check speak."""
+    from webapp.capture import clip_columns
+
+    columns = {"t": [0.0, 5.0, 10.0], "lat_deg": [0.0, 0.0, 0.0]}
+    assert clip_columns(columns, 1.0) == columns
+
+
+def test_the_solve_pass_card_states_no_cameras(tmp_path):
+    """With a cameras block the render commandlet enters consume-poses
+    and holds the pass to a capture schedule it is not producing images
+    for -- and whose frames this pass throws away. The solve pass exists
+    to record a flight."""
+    import inspect
+
+    from webapp import runs
+
+    source = inspect.getsource(runs.RunManager._render_flow)
+    assert '"cameras": None' in source, (
+        "the solve pass card must carry no cameras block"
+    )
+    # And it is a DIFFERENT file from the one the render passes consume,
+    # which carries the re-solved tracks.
+    assert 'out / "host_flight" / "card.json"' in source
+
+
 # -- which commandlet can fly the solve pass -----------------------------
 
 def test_a_scripted_card_is_recognised(tmp_path):

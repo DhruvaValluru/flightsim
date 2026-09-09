@@ -1833,7 +1833,12 @@ class RunManager:
             try:
                 capture_solved = capture_solve(
                     spec, scene, heightfield=capture_heightfield,
-                    terrain_ground=capture_ground, tornado=tornado_block)
+                    terrain_ground=capture_ground, tornado=tornado_block,
+                    # The window the HOST flies, not the spec's own: a
+                    # schedule laid out past the clip's end names frames
+                    # that can never exist.
+                    duration_s=min(float(spec.duration.value),
+                                   CLIP_SECONDS))
             except CaptureError as exc:
                 run.push("failed", f"[{exc.constraint}] {exc.message}")
                 return
@@ -1892,7 +1897,18 @@ class RunManager:
                                     "so the labels describe the flight the "
                                     "pixels show")
             host_telemetry = out / "host_flight" / "host_telemetry.json"
-            if not self._fly_host(card, host_telemetry, scene,
+            # The card the SOLVE pass flies carries NO cameras block.
+            # With one, the render commandlet enters consume-poses mode
+            # and holds the pass to the capture schedule -- which this
+            # pass is not producing images for and whose frames are
+            # discarded. It refused on exactly that, after flying:
+            # "emitted 3 of the 4 scheduled images". The pass exists to
+            # record a flight; the flight is what the card describes,
+            # and the cameras are not part of it.
+            solve_card = write_run_card(
+                spec, out / "host_flight" / "card.json",
+                **{**card_arguments, "cameras": None, "landmarks": None})
+            if not self._fly_host(solve_card, host_telemetry, scene,
                                   mesh=mesh, aircraft=aircraft):
                 # Whichever tool flew it wrote a log: the scenario
                 # commandlet's beside the telemetry, the renderer's as
@@ -1913,7 +1929,9 @@ class RunManager:
             try:
                 capture_solved = capture_resolve_over_host(
                     spec, capture_solved, host_telemetry,
-                    heightfield=capture_heightfield, tornado=tornado_block)
+                    heightfield=capture_heightfield, tornado=tornado_block,
+                    duration_s=min(float(spec.duration.value),
+                                   CLIP_SECONDS))
             except CaptureError as exc:
                 # A camera that cleared the ridge on the pre-run and does
                 # not on the host's own track must refuse: that is the
