@@ -572,6 +572,60 @@ def run_images(run_id: str):
     return JSONResponse(inventory(out))
 
 
+@app.get("/runs/{run_id}/cameras/{camera_id}/manifest.json")
+def run_camera_manifest(run_id: str, camera_id: str):
+    """ONE camera's labels: its block, its frames, and their context.
+
+    The whole-run manifest carries every camera's frames in one list,
+    which is right for verification and wrong for a person -- or a
+    training pipeline -- that wants "the tower view". This is that view
+    on its own, self-contained: the camera's own spec block, only its
+    frame records, and the shared context those records are meaningless
+    without (the CRS the metres are in, the scene and its raster digest,
+    the landmarks, which flight the labels were solved over, and the
+    digests that identify the run).
+
+    DECLARED BEFORE the generic image route on purpose: that route's
+    path pattern also matches this one, and while its .png check would
+    404 rather than serve anything wrong, the 404 would be the answer.
+    """
+    if not _CAMERA_NAME.match(camera_id):
+        return JSONResponse({"error": "no such camera"}, status_code=404)
+    path = manager.out_root / run_id / "capture_manifest.json"
+    if not path.is_file():
+        return JSONResponse(
+            {"error": "this run stated no cameras, so it took the legacy "
+                      "single-clip path and wrote no capture manifest"},
+            status_code=404)
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return JSONResponse({"error": f"manifest unreadable: {exc}"},
+                            status_code=500)
+
+    blocks = [c for c in manifest.get("cameras", [])
+              if str(c.get("camera_id")) == camera_id]
+    if not blocks:
+        return JSONResponse(
+            {"error": f"this run has no camera {camera_id!r}; it states "
+                      f"{[c.get('camera_id') for c in manifest.get('cameras', [])]}"},
+            status_code=404)
+    frames = [f for f in manifest.get("frames", [])
+              if str(f.get("camera_id")) == camera_id]
+    shared = {key: manifest.get(key) for key in (
+        "manifest_version", "spec_digest", "simulation_digest",
+        "output_digest", "solve_source", "seed", "aircraft", "scene",
+        "frame", "landmarks", "software_revision")}
+    return JSONResponse({**shared, "run_id": run_id,
+                         "camera": blocks[0], "frames": frames})
+
+
+@app.get("/frames.html", response_class=HTMLResponse)
+def frames_page() -> str:
+    """The per-camera frame browser: every image beside its own labels."""
+    return (STATIC / "frames.html").read_text(encoding="utf-8")
+
+
 @app.get("/runs/{run_id}/{kind}/{camera_id}/{name}")
 def run_image(run_id: str, kind: str, camera_id: str, name: str):
     """One rendered frame, overlay or preview.

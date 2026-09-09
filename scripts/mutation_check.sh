@@ -1035,6 +1035,20 @@ mutate webapp/server.py \
     "an added view gets an id no other camera has" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+mutate webapp/server.py \
+    '    frames = [f for f in manifest.get("frames", [])
+              if str(f.get("camera_id")) == camera_id]' \
+    '    frames = list(manifest.get("frames", []))  # MUTATED: every camera' \
+    "a camera's manifest carries that camera's frames and no others" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '    if not _CAMERA_NAME.match(camera_id):
+        return JSONResponse({"error": "no such camera"}, status_code=404)' \
+    '    if False:  # MUTATED: any string may name a camera' \
+    "the per-camera manifest route validates the name it is given" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

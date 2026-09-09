@@ -155,11 +155,24 @@ summary and a link to `capture_manifest.json`.
 Every view is another engine pass. Six views is one solve pass plus six
 render passes, and the page says so before you press Run.
 
+Under each camera in the gallery is **open all N frame(s) with their
+metadata →**. That page puts every frame of that one camera beside its
+own record — where the camera was, which way it pointed, what lens, and
+what the aircraft was doing at that instant — with the overlay, the
+rendered frame and the preview for each. Beside it, **this camera's
+manifest**: the same thing as JSON, carrying the CRS its metres are in,
+the scene and its raster digest, the landmarks, and which flight the
+labels were solved over. The whole-run manifest interleaves every
+camera's frames in one list, which is what verification wants and not
+what a person reading one view wants.
+
 The routes behind it, if you want them directly:
 
 | route | what it returns |
 | --- | --- |
 | `POST /cameras` | add a view (`{spec, preset}`) or drop one (`{spec, remove}`); returns the whole spec payload |
+| `/frames.html?run=<id>&camera=<cid>` | one camera's frames, each beside its own pose, intrinsics and aircraft state |
+| `/runs/<id>/cameras/<cid>/manifest.json` | that camera on its own: its block, only its frames, and the CRS/scene/landmarks they need |
 | `/runs/<id>/images` | what images exist, per camera and per kind |
 | `/runs/<id>/frames/<camera>/<name>.png` | a rendered frame |
 | `/runs/<id>/overlays/<camera>/<name>.png` | that frame with the recorded geometry drawn on it |

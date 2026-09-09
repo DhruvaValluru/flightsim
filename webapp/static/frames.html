@@ -1,0 +1,212 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>frames</title>
+<!--
+  One camera's frames, each beside its own labels.
+
+  The gallery on the run page shows thumbnails; this is the page behind
+  them. A capture manifest is the product -- the pictures alone are not
+  -- and until now the only way to read a frame's pose, intrinsics and
+  aircraft state was to open capture_manifest.json and find the record
+  by hand, in a list carrying every camera's frames at once.
+
+  It fetches /runs/<id>/cameras/<camera>/manifest.json, which is that
+  camera on its own: its spec block, only its frames, and the shared
+  context the records are meaningless without (the CRS the metres are
+  in, the scene, the landmarks, which flight the labels were solved
+  over).
+-->
+<style>
+  body { background: #10161d; color: #d8dde2; margin: 0;
+         font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 1rem 1.2rem; border-bottom: 1px solid #24303c;
+           position: sticky; top: 0; background: #10161d; z-index: 2; }
+  h1 { font-size: 1.05rem; margin: 0 0 .3rem; }
+  a { color: #7fb2e5; }
+  .dim { color: #8b98a5; }
+  .badge { background: #1d2733; border-radius: 4px; padding: .1rem .45rem;
+           margin-right: .4rem; font-size: .85em; }
+  main { padding: 1rem 1.2rem; }
+  .frame { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+           gap: 1rem; padding: 1rem 0; border-bottom: 1px solid #1c2630; }
+  @media (max-width: 900px) { .frame { grid-template-columns: 1fr; } }
+  .shots img { width: 100%; border-radius: 6px; background: #000;
+               display: block; margin-bottom: .35rem; }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: .12rem .5rem .12rem 0; vertical-align: top; }
+  td.k { color: #8b98a5; white-space: nowrap; width: 12rem; }
+  td.v { font-family: ui-monospace, Menlo, Consolas, monospace;
+         font-size: .88em; word-break: break-word; }
+  h2 { font-size: .95rem; margin: 0 0 .4rem; }
+  .group { margin-bottom: .6rem; }
+  .group > b { color: #b9c4cf; font-size: .85em; letter-spacing: .03em;
+               text-transform: uppercase; }
+  #state { padding: 1rem 1.2rem; }
+</style>
+
+<header>
+  <h1 id="title">frames</h1>
+  <div id="meta" class="dim"></div>
+  <div id="links" style="margin-top:.4rem"></div>
+</header>
+<div id="state" class="dim">loading...</div>
+<main id="frames"></main>
+
+<script>
+const params = new URLSearchParams(location.search);
+const runId = params.get("run");
+const cameraId = params.get("camera");
+
+function esc(text) {
+  return String(text).replace(/[&<>"]/g, c =>
+    ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+}
+
+function num(value) {
+  if (typeof value !== "number") return esc(value);
+  return Number.isInteger(value) ? String(value) : value.toFixed(6);
+}
+
+function rows(pairs) {
+  return pairs.map(([k, v]) =>
+    `<tr><td class="k">${esc(k)}</td><td class="v">${v}</td></tr>`).join("");
+}
+
+// The record, grouped the way it is actually read: where the camera was,
+// which way it pointed, what lens, and what the aircraft was doing at
+// that instant. Nothing is dropped -- an unlisted key still prints under
+// "other", so a field added to the manifest never silently stops showing.
+const GROUPS = [
+  ["when", ["index", "t_s", "sample_index", "file"]],
+  ["where the camera was", ["position_north_m", "position_east_m",
+                            "position_alt_m"]],
+  ["which way it pointed", ["quaternion_wxyz", "yaw_deg", "pitch_deg",
+                            "roll_deg"]],
+  ["what lens", ["focal_length_mm", "sensor_width_mm", "sensor_height_mm",
+                 "width_px", "height_px", "fx_px", "fy_px",
+                 "principal_point_px", "near_m", "far_m"]],
+  ["the aircraft, at that instant", ["aircraft"]],
+];
+
+function recordTable(record) {
+  const shown = new Set(["camera_id"]);
+  let html = "";
+  for (const [label, keys] of GROUPS) {
+    const pairs = [];
+    for (const key of keys) {
+      if (!(key in record)) continue;
+      shown.add(key);
+      const value = record[key];
+      if (key === "aircraft" && value && typeof value === "object") {
+        for (const [k, v] of Object.entries(value)) pairs.push([k, num(v)]);
+      } else if (Array.isArray(value)) {
+        pairs.push([key, value.map(num).join(", ")]);
+      } else {
+        pairs.push([key, num(value)]);
+      }
+    }
+    if (pairs.length) {
+      html += `<div class="group"><b>${label}</b>` +
+              `<table>${rows(pairs)}</table></div>`;
+    }
+  }
+  const rest = Object.entries(record).filter(([k]) => !shown.has(k));
+  if (rest.length) {
+    html += `<div class="group"><b>other</b><table>` +
+      rows(rest.map(([k, v]) => [k, Array.isArray(v)
+        ? v.map(num).join(", ") : num(v)])) + `</table></div>`;
+  }
+  return html;
+}
+
+async function load() {
+  if (!runId || !cameraId) {
+    $state("open this from a run's gallery: it needs ?run=&lt;id&gt;" +
+           "&amp;camera=&lt;camera_id&gt;");
+    return;
+  }
+  const base = `/runs/${encodeURIComponent(runId)}`;
+  const url = `${base}/cameras/${encodeURIComponent(cameraId)}/manifest.json`;
+  let payload;
+  try {
+    const response = await fetch(url);
+    payload = await response.json();
+    if (payload.error) { $state(esc(payload.error)); return; }
+  } catch (error) {
+    $state(`could not read the manifest: ${esc(error)}`);
+    return;
+  }
+
+  // Which images exist is read off the DIRECTORIES, not the manifest: a
+  // frame the manifest names but the renderer never wrote must not
+  // appear here as a broken image.
+  let inventory = {frames: {}, overlays: {}, previews: {}};
+  try {
+    inventory = await (await fetch(`${base}/images`)).json();
+  } catch (error) { /* the manifest alone still renders */ }
+  const have = kind => new Set(
+    ((inventory[kind] || {})[cameraId]) || []);
+  const present = {frames: have("frames"), overlays: have("overlays"),
+                   previews: have("previews")};
+
+  const camera = payload.camera || {};
+  document.title = `${cameraId} — ${payload.frames.length} frames`;
+  document.getElementById("title").textContent =
+    `${cameraId} — ${camera.preset || ""} — ${payload.frames.length} frame(s)`;
+  document.getElementById("meta").innerHTML =
+    `<span class="badge">run ${esc(runId)}</span>` +
+    `<span class="badge">solved over ${esc(payload.solve_source || "?")}</span>` +
+    `<span class="badge">${esc(payload.aircraft || "")}</span>` +
+    `<span class="badge">${(payload.landmarks || []).length} landmarks</span>` +
+    `<span class="badge">spec ${esc((payload.spec_digest || "").slice(0, 12))}</span>` +
+    (camera.schedule_basis
+      ? `<span class="badge">${esc(camera.schedule_basis)}</span>` : "");
+  document.getElementById("links").innerHTML =
+    `<a href="${url}" download="${esc(cameraId)}_manifest.json">` +
+    `download this camera's manifest</a> &middot; ` +
+    `<a href="${base}/capture_manifest.json">the whole run's</a> &middot; ` +
+    `<a href="${base}/verify.json">verification</a> &middot; ` +
+    `<a href="/">back to the app</a>`;
+
+  const main = document.getElementById("frames");
+  main.innerHTML = "";
+  for (const record of payload.frames) {
+    const name = String(record.file || "").split("/").pop();
+    const shots = [];
+    for (const [kind, label] of [["overlays", "overlay — the manifest's " +
+                                  "projection (circle) and the engine's " +
+                                  "(cross)"],
+                                 ["frames", "rendered frame"],
+                                 ["previews", "engine-free preview"]]) {
+      if (present[kind].has(name)) {
+        const href = `${base}/${kind}/${encodeURIComponent(cameraId)}/` +
+                     encodeURIComponent(name);
+        shots.push(`<a href="${href}" target="_blank">` +
+                   `<img src="${href}" alt="${esc(kind)} ${esc(name)}"></a>` +
+                   `<div class="dim">${esc(label)} &middot; ` +
+                   `<a href="${href}" download>${esc(name)}</a></div>`);
+      }
+    }
+    const block = document.createElement("section");
+    block.className = "frame";
+    block.innerHTML =
+      `<div class="shots">${shots.join("") ||
+        `<div class="dim">no image on disk for this record — the ` +
+        `manifest names <code>${esc(record.file)}</code>, which the ` +
+        `renderer did not write (no engine on the machine that ran ` +
+        `this, or the pass refused)</div>`}</div>` +
+      `<div><h2>frame ${esc(record.index)} — t = ${num(record.t_s)} s</h2>` +
+      recordTable(record) + `</div>`;
+    main.appendChild(block);
+  }
+  document.getElementById("state").style.display = "none";
+}
+
+function $state(html) {
+  const node = document.getElementById("state");
+  node.style.display = "";
+  node.innerHTML = html;
+}
+
+load();
+</script>

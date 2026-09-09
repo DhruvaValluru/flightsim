@@ -201,6 +201,138 @@ def test_a_camera_carrying_spec_goes_to_the_capture_stage():
     assert wants_capture(spec)
 
 
+# -- one camera's frames, with one camera's labels -----------------------
+
+@pytest.fixture
+def labelled_run(tmp_path, monkeypatch):
+    """A finished two-camera run whose manifest carries real records."""
+    monkeypatch.setattr(manager, "out_root", tmp_path)
+    out = tmp_path / "run_lbl"
+    for camera_id in ("chase0", "tower0"):
+        (out / "frames" / camera_id).mkdir(parents=True)
+        (out / "frames" / camera_id / "frame_0000.png").write_bytes(_png())
+
+    def record(camera_id, index):
+        return {
+            "index": index, "camera_id": camera_id,
+            "file": f"frames/{camera_id}/frame_{index:04d}.png",
+            "t_s": 1.0 * index, "sample_index": index * 10,
+            "position_north_m": 1.0, "position_east_m": 2.0,
+            "position_alt_m": 3.0,
+            "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+            "yaw_deg": 0.0, "pitch_deg": 0.0, "roll_deg": 0.0,
+            "focal_length_mm": 35.0, "sensor_width_mm": 36.0,
+            "sensor_height_mm": 20.25, "width_px": 1280, "height_px": 720,
+            "near_m": 0.1, "far_m": 100000.0,
+            "principal_point_px": [640.0, 360.0],
+            "fx_px": 1244.4, "fy_px": 1244.4,
+            "aircraft": {"north_m": 9.0, "east_m": 8.0, "alt_m": 7.0,
+                         "roll_deg": 0.0, "pitch_deg": 1.0,
+                         "heading_deg": 2.0},
+        }
+
+    (out / "capture_manifest.json").write_text(json.dumps({
+        "manifest_version": 3, "spec_digest": "a" * 64,
+        "simulation_digest": "b" * 64, "output_digest": "c" * 64,
+        "solve_source": "host flight", "seed": 0, "aircraft": "B747",
+        "scene": {"key": "terrain", "terrain": "x", "terrain_sha256": "d"},
+        "frame": {"crs": "EPSG:32631", "origin_x_m": 1.0},
+        "landmarks": [{"name": "peak", "north_m": 0.0, "east_m": 0.0,
+                       "alt_m": 0.0}],
+        "software_revision": "deadbeef",
+        "cameras": [{"camera_id": "chase0", "preset": "chase",
+                     "capture_count": 2, "schedule_basis": "count 2"},
+                    {"camera_id": "tower0", "preset": "tower",
+                     "capture_count": 1, "schedule_basis": "count 1"}],
+        "frames": [record("chase0", 0), record("chase0", 1),
+                   record("tower0", 0)],
+    }), encoding="utf-8")
+
+    from webapp.runs import RunState
+
+    state = RunState(run_id="run_lbl")
+    state.status = "done"
+    manager.runs["run_lbl"] = state
+    return out
+
+
+def test_one_camera_s_manifest_carries_only_its_frames(labelled_run):
+    """The whole-run manifest interleaves every camera's frames in one
+    list, which is right for verification and wrong for a person -- or a
+    training pipeline -- that wants "the tower view"."""
+    body = TestClient(app).get(
+        "/runs/run_lbl/cameras/chase0/manifest.json").json()
+    assert body["camera"]["camera_id"] == "chase0"
+    assert [f["index"] for f in body["frames"]] == [0, 1]
+    assert all(f["camera_id"] == "chase0" for f in body["frames"])
+
+
+def test_one_camera_s_manifest_carries_the_context_it_needs(labelled_run):
+    """Positions in grid metres about a recorded origin mean nothing
+    without the CRS, and the labels mean nothing without knowing which
+    flight they were solved over. Both ride along."""
+    body = TestClient(app).get(
+        "/runs/run_lbl/cameras/tower0/manifest.json").json()
+    assert body["frame"]["crs"] == "EPSG:32631"
+    assert body["solve_source"] == "host flight"
+    assert body["landmarks"][0]["name"] == "peak"
+    assert body["aircraft"] == "B747"
+    assert body["spec_digest"] and body["output_digest"]
+    assert body["run_id"] == "run_lbl"
+
+
+def test_the_per_camera_route_is_not_swallowed_by_the_image_route(
+        labelled_run):
+    """`/runs/{id}/{kind}/{camera}/{name}` also matches this path, and
+    FastAPI takes the first route declared. If the image route won, the
+    answer would be a 404 for a manifest that exists."""
+    reply = TestClient(app).get(
+        "/runs/run_lbl/cameras/chase0/manifest.json")
+    assert reply.status_code == 200
+    assert reply.json()["camera"]["preset"] == "chase"
+
+
+def test_a_camera_the_run_does_not_have_says_which_it_has(labelled_run):
+    reply = TestClient(app).get(
+        "/runs/run_lbl/cameras/nosuch/manifest.json")
+    assert reply.status_code == 404
+    assert "chase0" in reply.json()["error"]
+
+
+@pytest.mark.parametrize("camera", ["..", "..%2f..", "a/b", "x" * 65])
+def test_the_per_camera_route_refuses_an_unusable_name(labelled_run, camera):
+    reply = TestClient(app).get(f"/runs/run_lbl/cameras/{camera}/manifest.json")
+    assert reply.status_code == 404
+    assert b"capture_manifest" not in reply.content
+
+
+def test_a_clip_only_run_says_why_it_has_no_camera_manifest(tmp_path,
+                                                            monkeypatch):
+    monkeypatch.setattr(manager, "out_root", tmp_path)
+    (tmp_path / "bare").mkdir()
+    reply = TestClient(app).get("/runs/bare/cameras/chase0/manifest.json")
+    assert reply.status_code == 404
+    assert "stated no cameras" in reply.json()["error"]
+
+
+def test_the_frame_browser_is_served_and_reads_that_route():
+    """The page the gallery links to. It has to exist, and it has to
+    fetch the per-camera manifest rather than the whole-run one."""
+    reply = TestClient(app).get("/frames.html")
+    assert reply.status_code == 200
+    assert "/cameras/" in reply.text and "manifest.json" in reply.text
+    # Images are listed off the DIRECTORIES, not the manifest: a record
+    # whose frame was never written must not render as a broken image.
+    assert "/images" in reply.text
+
+
+def test_the_gallery_links_to_each_camera_s_frames():
+    page = (Path(__file__).resolve().parents[1]
+            / "webapp" / "static" / "index.html").read_text(encoding="utf-8")
+    assert "/frames.html?run=" in page
+    assert "cameras/${id}/manifest.json" in page
+
+
 # -- the points-of-view picker -------------------------------------------
 
 def compiled_spec():

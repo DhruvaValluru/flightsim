@@ -1146,11 +1146,25 @@ async function initGallery(runId, run) {
     html.push(renderVerify(run.capture));
   }
 
+  // Per camera: what it is, and the way in to ITS frames with ITS
+  // labels. The strips below are thumbnails; the manifest is the
+  // product, and reading one frame's pose used to mean opening
+  // capture_manifest.json and finding the record by hand in a list
+  // carrying every camera's frames at once.
   for (const camera of cameras) {
-    html.push(`<div class="dim" style="margin-top:10px">` +
-      `<b>${camera.camera_id}</b> — ${camera.preset}, ` +
+    const id = encodeURIComponent(camera.camera_id);
+    const shot = (inventory.frames[camera.camera_id] || []).length;
+    html.push(`<div style="margin-top:10px">` +
+      `<span class="dim"><b>${camera.camera_id}</b> — ${camera.preset}, ` +
       `${camera.capture_count} image(s), ${camera.trigger} trigger` +
       (camera.schedule_basis ? ` (${camera.schedule_basis})` : "") +
+      `</span><br>` +
+      `<a href="/frames.html?run=${runId}&camera=${id}" target="_blank">` +
+      `open all ${shot || camera.capture_count} frame(s) with their ` +
+      `metadata &rarr;</a> <span class="dim">&middot;</span> ` +
+      `<a href="/runs/${runId}/cameras/${id}/manifest.json" ` +
+      `download="${camera.camera_id}_manifest.json">` +
+      `this camera's manifest</a>` +
       `</div>`);
   }
 
