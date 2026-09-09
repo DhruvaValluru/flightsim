@@ -263,8 +263,20 @@ currently passes. Plus a mutation guard per check.
 
 ### W7 — Examples and the single command (demonstration)
 
-- `examples/cameras_multi.yaml` re-baselined over real baked terrain so
-  the rendered frames show something.
+**Done, and the shape of it changed.** The frames were not showing
+anything for a reason no example could fix: the camera path never
+passed `-Visual`, so it rendered in Gate 5's black void whatever the
+example said. With the visual scene on, `cameras_multi.yaml` over the
+synthesised ridge refuses by name — `camera.terrain_clearance`,
+"requested −2802.8 m AGL", because its tower sits at 80 m MSL and the
+ridge under it reaches ~2883 m. That refusal is correct, so the example
+was not re-baselined; `examples/cameras_terrain.yaml` is the one
+placed for terrain, and it renders the aircraft over a lit ridge with a
+horizon. `scripts/capture_windows.ps1` is the single command.
+
+- ~~`examples/cameras_multi.yaml` re-baselined over real baked terrain so
+  the rendered frames show something.~~ Superseded: it stays the flat
+  example, and it is a refusal demonstration over terrain.
 - Keep `cameras_refusal.yaml`; add an intrinsics-divergence refusal
   example.
 - One command end to end:

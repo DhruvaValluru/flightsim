@@ -25,6 +25,33 @@ powershell -ExecutionPolicy Bypass -File scripts\build_ue.ps1
 .\.venv\Scripts\python.exe -m flightsim.verify runs\demo
 ```
 
+Or both, stopping at whichever went wrong and reading the verification's
+own verdict rather than the exit code of the last thing it ran:
+
+```powershell
+.\scripts\capture_windows.ps1                                          # the demo above
+.\scripts\capture_windows.ps1 examples\cameras_terrain.yaml runs\terrain -SynthTerrain
+```
+
+### The scene the frames are taken in
+
+Frames render in the **visual scene** — sun, sky, atmosphere, fog, and
+terrain when the run has a bake. `-SynthTerrain` (or `--synth-terrain`)
+raises a ridge under the scenario's origin, deterministic from its seed
+and needing no network, so a clone can produce a landscape immediately;
+`--terrain <stem>` uses a real Copernicus bake.
+
+`--void` renders in the black-void tier instead: no sky, no horizon, no
+ground, just the lit airframe. That is what the silhouette measurements
+want and it is what the camera path used to do unconditionally, which
+is why its frames were a grey aeroplane on black.
+
+A camera placed for flat terrain will not survive a ridge, and should
+not: `examples\cameras_multi.yaml` puts its tower at 80 m MSL, so over
+the synthesised ridge it refuses with `camera.terrain_clearance`
+(“requested −2802.8 m AGL”). `examples\cameras_terrain.yaml` is the one
+baselined for terrain.
+
 `--render` implies `--card` and drives `scripts\render_ue_scenario.ps1`,
 which runs **one commandlet pass per camera** into
 `runs\demo\frames\<camera_id>\`. Without the engine, drop `--render`:
