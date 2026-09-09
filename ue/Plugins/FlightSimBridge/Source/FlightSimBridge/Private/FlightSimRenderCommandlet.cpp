@@ -1557,7 +1557,25 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 
 		if (bVisual)
 		{
-			TSharedPtr<FJsonObject> Landmarks = MakeShared<FJsonObject>();
+			// ADD to the card's landmarks; do not replace them. These four
+			// are Gate 6's scene features and the card's are the camera
+			// phase's reference set, and both have always been written to
+			// one field name -- so this block silently overwrote however
+			// many the card carried with exactly four. The block above says
+			// it writes "independently of the Gate 6 visual set below",
+			// which was true of the writing and not of the result.
+			//
+			// It cost nothing while nothing rendered with -Visual, and
+			// everything the moment something did: 36 landmarks became 4,
+			// none of them named in the manifest, and both engine-referenced
+			// checks -- the two this phase exists for -- went from PASS to
+			// NOT RUN inside a summary that still said PASSED. The two name
+			// sets are disjoint (air_*/ground_*/terrain_* against
+			// near_peak/far_peak/valley/aircraft_ground), so they merge.
+			const TSharedPtr<FJsonObject>* Existing = nullptr;
+			TSharedPtr<FJsonObject> Landmarks =
+				Record->TryGetObjectField(TEXT("landmarks"), Existing)
+					? *Existing : MakeShared<FJsonObject>();
 			auto AddLandmark = [&](const TCHAR* LandmarkName, const FVector& WorldCm)
 			{
 				FVector2D Pixel;

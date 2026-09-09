@@ -100,6 +100,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                              "poses (Windows with UE 5.5 and the bridge "
                              "built; refuses by name anywhere else). "
                              "Implies --card.")
+    parser.add_argument("--void", action="store_true",
+                        help="render in the black-void scene instead of "
+                             "the visual one: no sky, no horizon, no "
+                             "terrain, just the lit airframe. What the "
+                             "silhouette measurements want, and nothing "
+                             "else")
     parser.add_argument("--card", action="store_true",
                         help="also write card.json carrying each camera's "
                              "solved pose track, for the UE commandlet's "
@@ -306,7 +312,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     frames_dir = out / "frames"
     command = ue_runner_command(REPO, "render_ue_scenario")
     command += [str(out / "card.json"), str(frames_dir)]
-    print(f"rendering {len(cameras)} camera pass(es) into {frames_dir} ...")
+    # The scene the frames are taken in. Gate 5's tier is a black void
+    # -- deliberately, because its silhouette measurements need one --
+    # and the camera phase inherited it by never asking for anything
+    # else. The result was a grey airframe on black: no sky, no
+    # horizon, no ground. Correct geometry, and not a picture of a
+    # camera view, which is the whole complaint the phase exists to
+    # answer. -Visual builds the real scene (sun, sky, atmosphere, fog,
+    # and terrain when a bake is present), and the aircraft is then IN
+    # something. --void keeps the old tier for anyone measuring
+    # silhouettes.
+    if not args.void:
+        command.append("-Visual")
+        if terrain_stem:
+            command.append(f"-terrain={terrain_stem}")
+            command.append("-GeorefTerrain")
+    print(f"rendering {len(cameras)} camera pass(es) into {frames_dir} "
+          f"{'in the black void (--void)' if args.void else 'in the visual scene'} ...")
     completed = subprocess.run(command)
     if completed.returncode != 0:
         print(f"REFUSED -- the render wrapper exited {completed.returncode}; "

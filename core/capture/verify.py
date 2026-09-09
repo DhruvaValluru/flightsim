@@ -881,9 +881,24 @@ def verify_landmark_reprojection(manifest: Dict, run_dir=None,
                     f"({u:.1f}, {v:.1f}) and the engine's "
                     f"({px:.1f}, {py:.1f})")
     if compared == 0:
-        return Check("landmark_reprojection", NOT_RUN,
-                     f"render.json carried no landmark this manifest also "
-                     f"names. ({coverage})")
+        # A render.json with landmark pixels, none of which this manifest
+        # names, is not a missing reference -- it is a broken contract.
+        # The engine rendered these frames FROM this manifest's card and
+        # projected a different scene's landmarks into them, so nothing
+        # here can be graded and something upstream is wrong. Reporting
+        # it as NOT RUN is how it stayed invisible: turning on the visual
+        # scene made the commandlet overwrite the card's 36 landmarks
+        # with Gate 6's 4, both engine-referenced checks stopped running,
+        # and the summary still said PASSED.
+        seen = sorted({name for pixels in engine.values() for name in pixels})
+        return Check(
+            "landmark_reprojection", FAIL,
+            f"the engine projected {len(seen)} landmark(s) into these "
+            f"frames and this manifest names none of them "
+            f"({', '.join(seen[:6])}{'...' if len(seen) > 6 else ''} "
+            f"against {', '.join(sorted(known)[:6])}...): the frames were "
+            f"rendered from a different landmark set than the labels "
+            f"describe. ({coverage})")
     if disagreements:
         return Check("landmark_reprojection", FAIL,
                      "; ".join(disagreements[:5])

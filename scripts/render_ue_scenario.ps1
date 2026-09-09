@@ -30,13 +30,20 @@
 $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
-if ($args.Count -ne 2) {
-    Write-Error "usage: render_ue_scenario.ps1 <run-card.json> <frames-out-dir>"
+if ($args.Count -lt 2) {
+    Write-Error "usage: render_ue_scenario.ps1 <run-card.json> <frames-out-dir> [commandlet flags...]"
     exit 2
 }
 $card = (Resolve-Path $args[0]).Path
 New-Item -ItemType Directory -Force -Path $args[1] | Out-Null
 $frames = (Resolve-Path $args[1]).Path
+# Anything after the two positional arguments goes to EVERY camera pass
+# -- -Visual, -terrain=, -GeorefTerrain. Per pass rather than once,
+# because each camera is its own commandlet invocation and a scene flag
+# that reached only the first would render two cameras of one flight in
+# two different worlds.
+$sceneArgs = @($args[2..($args.Count - 1)]) | Where-Object { $_ -ne $null }
+if ($args.Count -eq 2) { $sceneArgs = @() }
 
 $python = Join-Path $repo ".venv\Scripts\python.exe"
 $editor = & $python -c "from core.util.platform import ue_editor_path; print(ue_editor_path())"
@@ -53,6 +60,10 @@ card = json.load(open(sys.argv[1], encoding='utf-8'))
 print('\n'.join(str(c['camera_id']) for c in card.get('cameras', [])))
 "@ $card
 $cameraIds = @($cameraJson -split "`r?`n" | Where-Object { $_ -ne "" })
+
+if ($sceneArgs.Count -gt 0) {
+    Write-Host "scene flags for every pass: $($sceneArgs -join ' ')"
+}
 
 function Invoke-RenderPass {
     param([string]$OutDir, [string[]]$ExtraArgs)
@@ -104,7 +115,7 @@ function Invoke-RenderPass {
 }
 
 if ($cameraIds.Count -eq 0) {
-    $count = Invoke-RenderPass -OutDir $frames -ExtraArgs @()
+    $count = Invoke-RenderPass -OutDir $frames -ExtraArgs $sceneArgs
     Write-Host "wrote $count frames and $frames\render.json"
 } else {
     $total = 0
@@ -120,9 +131,10 @@ if ($cameraIds.Count -eq 0) {
         # manifest's aircraft track was solved from, and reported 0.00 m
         # every time. Only the camera path passes this: the camera-less
         # path's arguments are pinned byte-identical by test.
-        $count = Invoke-RenderPass -OutDir $outDir -ExtraArgs @(
+        $passArgs = @(
             "-camera-index=$i",
-            "-telemetry=$(Join-Path $outDir 'host_telemetry.json')")
+            "-telemetry=$(Join-Path $outDir 'host_telemetry.json')") + $sceneArgs
+        $count = Invoke-RenderPass -OutDir $outDir -ExtraArgs $passArgs
         Write-Host "  wrote $count frames"
         $total += $count
     }

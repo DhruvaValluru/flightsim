@@ -99,7 +99,21 @@ def draw_overlays(manifest: Dict, run_dir, out_subdir: str = "overlays",
     landmarks = manifest.get("landmarks") or []
     frames = manifest.get("frames", [])
     if max_frames is not None:
-        frames = frames[:max_frames]
+        # Per CAMERA, not per run. Slicing the flat list took the first
+        # N records, which are all one camera's, so a two-camera run
+        # produced overlays for the chase view and none at all for the
+        # tower -- and the tower is the one whose geometry is least
+        # obvious by eye. The cap is there to keep the count sane on a
+        # long clip, not to pick a camera.
+        seen: Dict[str, int] = {}
+        kept = []
+        for record in frames:
+            camera = str(record.get("camera_id"))
+            if seen.get(camera, 0) >= max_frames:
+                continue
+            seen[camera] = seen.get(camera, 0) + 1
+            kept.append(record)
+        frames = kept
 
     # These marks are drawn ON the host's pixels, so every world point
     # here has to be projected in the host's own frame -- otherwise the
