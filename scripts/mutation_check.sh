@@ -1049,6 +1049,12 @@ mutate webapp/server.py \
     "the per-camera manifest route validates the name it is given" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+mutate webapp/runs.py \
+    '        chosen = (named or [line.strip() for line in lines])[-keep:]' \
+    '        chosen = []  # MUTATED: the page gets a path, not a reason' \
+    "a failed engine pass tells the page why, not where to look" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

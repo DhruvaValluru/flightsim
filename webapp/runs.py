@@ -1532,6 +1532,33 @@ class RunManager:
                            stdin=subprocess.DEVNULL)
         return telemetry.is_file()
 
+    @staticmethod
+    def commandlet_last_words(log: Path, keep: int = 12) -> str:
+        """Why an engine pass produced nothing, out of its own log.
+
+        The refusals this project cares about are NAMED, and the
+        commandlet prints its reason into a log that also carries
+        twenty megabytes of UE start-up. Handing a path to whoever is
+        looking at a web page is the same as not answering: they cannot
+        grep a file they have to go and find. Both PowerShell wrappers
+        have printed the commandlet's last words since 7cef57d for this
+        reason; this is that, for the page.
+
+        Prefers the named lines and falls back to the tail, so an
+        unrecognised failure still says something.
+        """
+        try:
+            lines = log.read_text(encoding="utf-8",
+                                  errors="replace").splitlines()
+        except OSError:
+            return ""
+        wanted = ("LogFlightSim", "Error:", "Fatal", "commandlet",
+                  "refus", "-scenario=", "-telemetry=")
+        named = [line.strip() for line in lines
+                 if any(word in line for word in wanted)]
+        chosen = (named or [line.strip() for line in lines])[-keep:]
+        return "\n".join(line for line in chosen if line)
+
     def _execute(self, run: RunState, spec: ScenarioSpec,
                  provenance: Dict) -> None:
         try:
@@ -1817,10 +1844,15 @@ class RunManager:
                                     "pixels show")
             host_telemetry = out / "host_flight" / "host_telemetry.json"
             if not self._fly_host(card, host_telemetry, scene):
+                words = self.commandlet_last_words(
+                    host_telemetry.with_suffix(".log"))
                 run.push("failed",
                          "[capture.host_flight] the scenario commandlet "
                          "recorded no flight; nothing was rendered. Its "
-                         f"output is in {host_telemetry.with_suffix('.log')}")
+                         "last words:\n"
+                         + (words or "(it wrote no log at all)")
+                         + f"\n-- full log: "
+                           f"{host_telemetry.with_suffix('.log')}")
                 return
             try:
                 capture_solved = capture_resolve_over_host(
@@ -1885,14 +1917,28 @@ class RunManager:
                         look=STORM_LOOK if event_note else None,
                         camera_flags=camera_flags, extra=extra))
             except CaptureError as exc:
-                run.push("failed", f"[{exc.constraint}] {exc.message}")
+                # The render log for the pass that failed sits beside its
+                # frames. Say what it HOLDS, not where it is: whoever is
+                # looking at a web page cannot grep a file they have to
+                # go and find.
+                words = "\n".join(
+                    w for w in (self.commandlet_last_words(log)
+                                for log in sorted(frames.rglob("render.log")))
+                    if w)
+                run.push("failed", f"[{exc.constraint}] {exc.message}"
+                                   + (f"\nlast words:\n{words}"
+                                      if words else ""))
                 return
         elif not self._render(card, frames, scene, mesh, aircraft,
                               telemetry=out / "telemetry.json",
                               look=STORM_LOOK if event_note else None,
                               camera_flags=camera_flags):
             run.push("failed", "the render commandlet wrote no manifest; "
-                               f"see {out / 'render.log'}")
+                               "its last words:\n"
+                               + (self.commandlet_last_words(
+                                   out / "render.log")
+                                  or "(it wrote no log at all)")
+                               + f"\n-- full log: {out / 'render.log'}")
             return
 
         if capture_solved is not None:

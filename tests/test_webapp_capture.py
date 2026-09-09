@@ -201,6 +201,47 @@ def test_a_camera_carrying_spec_goes_to_the_capture_stage():
     assert wants_capture(spec)
 
 
+# -- an engine pass that fails has to SAY why ----------------------------
+
+def test_the_page_gets_the_commandlet_s_reason_not_a_file_path(tmp_path):
+    """A named refusal buried in twenty megabytes of UE start-up is as
+    good as no answer: whoever is looking at a web page cannot grep a
+    file they have to go and find. Both PowerShell wrappers have printed
+    the commandlet's last words since 7cef57d; the web path named a path
+    and made the reader go looking.
+    """
+    from webapp.runs import RunManager
+
+    log = tmp_path / "host_telemetry.log"
+    log.write_text("\n".join(
+        ["LogInit: boot"] + [f"LogSomethingElse: line {i}" for i in range(400)]
+        + ["LogFlightSimScenario: REFUSED camera.intrinsics: no width_px",
+           "Error: commandlet exited 1"]), encoding="utf-8")
+
+    words = RunManager.commandlet_last_words(log)
+    assert "REFUSED camera.intrinsics" in words
+    assert "Error: commandlet exited 1" in words
+    assert "LogSomethingElse" not in words, (
+        "the named lines are the point; the noise is what buries them")
+
+
+def test_an_unrecognised_failure_still_says_something(tmp_path):
+    """A log with no line this code knows about must not come back
+    empty -- that would be the silence the change exists to remove."""
+    from webapp.runs import RunManager
+
+    log = tmp_path / "render.log"
+    log.write_text("something went wrong in a way nobody anticipated\n" * 3,
+                   encoding="utf-8")
+    assert "nobody anticipated" in RunManager.commandlet_last_words(log)
+
+
+def test_a_missing_log_is_not_a_crash(tmp_path):
+    from webapp.runs import RunManager
+
+    assert RunManager.commandlet_last_words(tmp_path / "nope.log") == ""
+
+
 # -- one camera's frames, with one camera's labels -----------------------
 
 @pytest.fixture
