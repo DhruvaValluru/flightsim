@@ -201,6 +201,90 @@ def test_a_camera_carrying_spec_goes_to_the_capture_stage():
     assert wants_capture(spec)
 
 
+# -- which commandlet can fly the solve pass -----------------------------
+
+def test_a_scripted_card_is_recognised(tmp_path):
+    """The scenario commandlet REFUSES a card carrying control inputs,
+    and it is right to: it exists as the Gate 5 parity reference against
+    the headless run, which is hands off from trim, so scripted inputs
+    would attribute a control input to the integration.
+
+    Measured on Windows, from the web app's first host solve flight:
+
+        LogFlightSimScenario: Error: this run card carries 4 scripted
+        control inputs. The headless reference has none, so the two
+        hosts would not be flying the same scenario. Use the render
+        commandlet for a scenario with control inputs.
+
+    Every showcase web run scripts the doublet -- it is what puts
+    visible roll in the clip -- so every one of them hit this. The
+    refusal is untouched; the caller picks the tool that can do the job,
+    which is what the refusal itself says to do.
+    """
+    from webapp.runs import RunManager
+
+    scripted = tmp_path / "scripted.json"
+    scripted.write_text(json.dumps({
+        "control_inputs": [{"t_s": 1.0, "aileron": 0.2}] * 4},
+    ), encoding="utf-8")
+    assert RunManager.card_has_control_inputs(scripted)
+
+    plain = tmp_path / "plain.json"
+    plain.write_text(json.dumps({"control_inputs": []}), encoding="utf-8")
+    assert not RunManager.card_has_control_inputs(plain)
+
+    absent = tmp_path / "absent.json"
+    absent.write_text(json.dumps({}), encoding="utf-8")
+    assert not RunManager.card_has_control_inputs(absent)
+
+
+def test_an_unreadable_card_does_not_decide_by_crashing(tmp_path):
+    """It is a routing question, not a validation one -- the card is
+    validated elsewhere. Answer false and let the pass refuse by name."""
+    from webapp.runs import RunManager
+
+    broken = tmp_path / "broken.json"
+    broken.write_text("{not json", encoding="utf-8")
+    assert RunManager.card_has_control_inputs(broken) is False
+    assert RunManager.card_has_control_inputs(tmp_path / "gone.json") is False
+
+
+def test_the_solve_pass_throws_its_frames_away(tmp_path, monkeypatch):
+    """A render.json left inside the run would be found by the
+    verifier's rglob and graded as though its frames were part of the
+    capture. They are one camera's, from the PRE-RUN poses, and naming
+    a landmark set the manifest does not carry is a FAIL by design.
+    """
+    from webapp.runs import RunManager
+
+    manager_ = RunManager()
+    card = tmp_path / "card.json"
+    card.write_text(json.dumps(
+        {"control_inputs": [{"t_s": 1.0}]}), encoding="utf-8")
+    telemetry = tmp_path / "host_flight" / "host_telemetry.json"
+
+    rendered = {}
+
+    def fake_render(card, frames, scene, mesh, aircraft, telemetry=None,
+                    **kwargs):
+        rendered["frames"] = frames
+        frames.mkdir(parents=True, exist_ok=True)
+        (frames / "render.json").write_text("{}", encoding="utf-8")
+        (frames / "frame_0000.png").write_bytes(_png())
+        Path(telemetry).parent.mkdir(parents=True, exist_ok=True)
+        Path(telemetry).write_text('{"columns": {}}', encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(manager_, "_render", fake_render)
+    assert manager_._fly_host(card, telemetry, {}, mesh=None, aircraft="B747")
+
+    assert telemetry.is_file(), "the telemetry is the whole point"
+    assert not rendered["frames"].exists(), (
+        "the solve pass's frames and its render.json must not survive "
+        "inside the run directory")
+    assert not list(tmp_path.rglob("render.json"))
+
+
 # -- an engine pass that fails has to SAY why ----------------------------
 
 def test_the_page_gets_the_commandlet_s_reason_not_a_file_path(tmp_path):

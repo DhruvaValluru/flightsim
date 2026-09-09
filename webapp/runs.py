@@ -24,6 +24,7 @@ prompt cannot queue an hour of editor time; the cap is recorded in the run.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import threading
 import time
@@ -1504,19 +1505,67 @@ class RunManager:
         return (frames / "render.json").is_file()
 
     @staticmethod
-    def _fly_host(card: Path, telemetry: Path, scene: Dict) -> bool:
-        """Fly the card in the host with NO renderer, and record it.
+    def card_has_control_inputs(card: Path) -> bool:
+        """True when the card scripts control inputs.
+
+        Which decides WHICH commandlet can fly the solve pass. The
+        scenario commandlet refuses a card carrying them, and it is
+        right to: it exists as the Gate 5 parity reference against the
+        headless run, which is hands off from trim, so scripted inputs
+        would attribute a control input to the integration. That
+        reasoning does not cover this pass -- nothing compares it to the
+        headless run; it is compared to the host's OWN render passes --
+        but the commandlet cannot tell the two uses apart, and the
+        protection is load-bearing where it does apply. So the refusal
+        stands untouched and the caller picks the tool that can do the
+        job, which is what its own error message says to do.
+        """
+        try:
+            payload = json.loads(card.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return bool(payload.get("control_inputs"))
+
+    def _fly_host(self, card: Path, telemetry: Path, scene: Dict,
+                  mesh: Optional[Path] = None,
+                  aircraft: str = "") -> bool:
+        """Fly the card in the host and record the flight it flew.
 
         The solve pass of "one flight, not two". Physics-affecting flags
         only -- the terrain the ground callback reads has to match what
         the render passes fly over -- and NOT -Visual, which builds the
-        render scene this pass has no renderer for. That choice is not
-        assumed: verify_host_determinism compares this flight against
-        every render pass, and on the CLI's first host-solved run all
-        three came back byte-identical over 900 samples.
+        render scene. That choice is not assumed: verify_host_determinism
+        compares this flight against every render pass, and on the CLI's
+        first host-solved run all three came back byte-identical over
+        900 samples.
+
+        Two tools, because one card in three cannot use the cheap one.
+        A card with no scripted inputs goes to the SCENARIO commandlet
+        under -nullrhi: no renderer, seconds rather than minutes. A card
+        that scripts inputs -- which every showcase web run does, the
+        doublet is what puts visible roll in the clip -- is refused by
+        that commandlet by design, so it goes to the RENDER commandlet
+        instead, exactly as that refusal instructs. Its frames are
+        thrown away; only the telemetry is wanted.
         """
         telemetry.parent.mkdir(parents=True, exist_ok=True)
         telemetry.unlink(missing_ok=True)
+
+        if self.card_has_control_inputs(card):
+            # Into its own directory, and deleted afterwards. A render.json
+            # left inside the run would be found by the verifier's rglob
+            # and graded as though its frames were part of the capture --
+            # they are one camera's, from the PRE-RUN poses, and naming a
+            # landmark set the manifest does not carry is a FAIL by
+            # design (eaa8bff). The telemetry and the log live outside it.
+            scratch = telemetry.parent / "solve_frames"
+            try:
+                self._render(card, scratch, scene, mesh or Path(""),
+                             aircraft, telemetry=telemetry)
+            finally:
+                shutil.rmtree(scratch, ignore_errors=True)
+            return telemetry.is_file()
+
         command = [
             str(EDITOR), str(REPO / "ue" / "FlightSim.uproject"),
             "-run=FlightSimBridge.FlightSimScenario",
@@ -1843,9 +1892,16 @@ class RunManager:
                                     "so the labels describe the flight the "
                                     "pixels show")
             host_telemetry = out / "host_flight" / "host_telemetry.json"
-            if not self._fly_host(card, host_telemetry, scene):
-                words = self.commandlet_last_words(
-                    host_telemetry.with_suffix(".log"))
+            if not self._fly_host(card, host_telemetry, scene,
+                                  mesh=mesh, aircraft=aircraft):
+                # Whichever tool flew it wrote a log: the scenario
+                # commandlet's beside the telemetry, the renderer's as
+                # render.log in the same directory.
+                logs = [host_telemetry.with_suffix(".log"),
+                        host_telemetry.parent / "render.log"]
+                words = "\n".join(
+                    w for w in (self.commandlet_last_words(log)
+                                for log in logs if log.is_file()) if w)
                 run.push("failed",
                          "[capture.host_flight] the scenario commandlet "
                          "recorded no flight; nothing was rendered. Its "

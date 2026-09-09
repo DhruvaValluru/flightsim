@@ -1055,6 +1055,18 @@ mutate webapp/runs.py \
     "a failed engine pass tells the page why, not where to look" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+mutate webapp/runs.py \
+    '        return bool(payload.get("control_inputs"))' \
+    '        return False  # MUTATED: send every card to the parity tool' \
+    "a scripted card goes to the tool that can fly it" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '                shutil.rmtree(scratch, ignore_errors=True)' \
+    '                pass  # MUTATED: leave the solve pass render.json behind' \
+    "the solve pass leaves no render.json for the verifier to find" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
