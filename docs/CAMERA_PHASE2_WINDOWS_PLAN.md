@@ -77,6 +77,41 @@ bit-deterministic, pass 3 can re-fly instead of replaying and the
 verifier asserts the digests match. If it is not, replay is required.
 Either way the property is checked, not assumed.
 
+### The measurement, taken
+
+Taken on `examples/cameras_multi.yaml`, Windows, UE 5.5. A two-camera
+run renders one commandlet pass per camera, so it is two host flights
+over one card — the measurement the paragraph above asks for, and it
+now runs on every multi-camera render rather than once by hand.
+
+**The host is bit-deterministic.** Both passes produced byte-identical
+telemetry across all 30 recorded columns and 120 samples, SHA-256
+`4e5a7334…` both times, worst per-sample difference exactly `0`. So
+**re-flying is sound and `-replay=` is not needed.** `verify_host_determinism`
+asserts it on every run that renders more than one camera, digesting
+with `repr` so a last-bit divergence fails; NOT RUN on a single-camera
+render, which measures nothing about repeatability.
+
+**But the host's flight is not the pre-run's flight.** The headless
+pre-run (the `jsbsim` Python package) and the host (UE's vendored
+JSBSim) are different builds stepping the same scenario, and they
+diverge: **1.38 m** worst, at t≈1.5 s, over the demo's 46 gradeable
+frames. That is the real size of P10, measured for the first time, and
+it is what the manifest's aircraft labels are wrong by.
+
+Consequence for the planned `capture.telemetry_mismatch` refusal, which
+W1 specifies as "the render's own recorded telemetry digest must equal
+the digest the manifest was solved against": **that refusal is not
+implementable while the host re-flies**, because the two digests are
+never equal — 1.38 m apart is not a last-bit difference. It presupposes
+the replay path. Determinism removed the *reproducibility* argument for
+replay but not the *agreement* one, so what stands in its place today
+is `flight_agreement`, which bounds the divergence at 25 m against the
+host's own recording and now reports a real number instead of comparing
+the pre-run with itself. Closing P10 outright still means either
+replaying the recorded track into the host, or rebuilding the manifest's
+aircraft states from the host's telemetry after the render.
+
 ## Problems being closed
 
 Each was reproduced against the committed tree, not inferred.

@@ -943,6 +943,24 @@ mutate core/capture/validate.py \
     "a camera id may not contain a path separator or a wildcard" \
     tests/test_camera_validate.py || failures=$((failures+1))
 
+mutate core/capture/verify.py \
+    '    return sorted(Path(run_dir).rglob("host_telemetry.json"))' \
+    '    return [Path(run_dir) / "telemetry.json"]  # MUTATED: the pre-run again' \
+    "flight_agreement reads the host's flight, not the pre-run it was solved from" \
+    tests/test_camera_flight_agreement.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if t < times[0] - interval or t > times[-1] + interval:' \
+    '            if False:  # MUTATED: uncovered frames dropped in silence' \
+    "a frame outside the host's recorded flight is not quietly dropped" \
+    tests/test_camera_flight_agreement.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if len(unique) > 1:' \
+    '    if False:  # MUTATED: a host that flies differently each pass passes' \
+    "host determinism is what licenses re-flying instead of replaying" \
+    tests/test_camera_flight_agreement.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

@@ -161,3 +161,60 @@ def test_a_frame_outside_the_host_flight_is_not_quietly_dropped(captured):
     check = verify_flight_agreement(manifest, run_dir)
     assert check.status == FAIL, check.detail
     assert "outside the host's recorded flight" in check.detail
+
+
+# -- host determinism ----------------------------------------------------
+
+def write_host_flight(run_dir, columns, camera_id, last_bit_shift=0.0):
+    """One camera's recorded host flight."""
+    payload = {"columns": {
+        "t": [float(v) for v in columns["t"]],
+        "lat_deg": [float(v) + last_bit_shift for v in columns["lat_deg"]],
+        "lon_deg": [float(v) for v in columns["lon_deg"]],
+        "altitude_m": [float(v) for v in columns["altitude_m"]],
+    }}
+    directory = run_dir / "frames" / camera_id
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "host_telemetry.json").write_text(json.dumps(payload),
+                                                   encoding="utf-8")
+
+
+def test_determinism_is_not_run_with_one_flight(captured):
+    """One pass measures nothing about repeatability."""
+    from core.capture.verify import verify_host_determinism
+
+    _, columns, run_dir = captured
+    write_host_flight(run_dir, columns, "chase0")
+    check = verify_host_determinism(run_dir)
+    assert check.status == NOT_RUN
+    assert "two passes" in check.detail
+
+
+def test_identical_passes_prove_the_host_is_reproducible(captured):
+    from core.capture.verify import verify_host_determinism
+
+    _, columns, run_dir = captured
+    write_host_flight(run_dir, columns, "chase0")
+    write_host_flight(run_dir, columns, "tower0")
+    check = verify_host_determinism(run_dir)
+    assert check.status == PASS, check.detail
+    assert "byte-identical" in check.detail
+
+
+def test_a_host_that_flies_differently_each_pass_is_caught(captured):
+    """The property that licenses re-flying instead of replaying. If it
+    stops holding, the aircraft labels drift between cameras and only
+    this check would notice.
+
+    The divergence here is one part in 1e9 of a degree -- far below any
+    tolerance flight_agreement would ever apply -- because the claim
+    being checked is bit-determinism, not closeness.
+    """
+    from core.capture.verify import verify_host_determinism
+
+    _, columns, run_dir = captured
+    write_host_flight(run_dir, columns, "chase0")
+    write_host_flight(run_dir, columns, "tower0", last_bit_shift=1e-9)
+    check = verify_host_determinism(run_dir)
+    assert check.status == FAIL, check.detail
+    assert "not reproducible" in check.detail

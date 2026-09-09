@@ -39,6 +39,7 @@ silently omitted half its checks is worse than a red one.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from dataclasses import dataclass, field as dc_field
@@ -1076,6 +1077,21 @@ def verify_aircraft_consistency(manifest: Dict) -> Check:
 
 # -- check: the manifest's flight against the flight that rendered -------
 
+def _host_telemetry_paths(run_dir) -> List[Path]:
+    """Every flight the RENDER HOST recorded, one per camera pass.
+
+    The single place that decides which file is the host's. It is
+    emphatically not ``<run>/telemetry.json``: that is the headless
+    pre-run, the telemetry the manifest's aircraft track was solved
+    from, and reading it made flight_agreement compare the pre-run with
+    itself and report 0.00 m forever. Both files carry the same four
+    column names, so nothing downstream can tell them apart -- which is
+    why the choice lives here, once, behind a name that says which one
+    it is.
+    """
+    return sorted(Path(run_dir).rglob("host_telemetry.json"))
+
+
 def verify_flight_agreement(manifest: Dict, run_dir=None,
                             tol_m: float = 25.0) -> Check:
     """The aircraft this manifest labels must be the aircraft the frames
@@ -1104,7 +1120,7 @@ def verify_flight_agreement(manifest: Dict, run_dir=None,
     # actually flew. It is the P10 guard, and it had the P1 defect.
     # The two files carry the same four column names, which is exactly
     # why pointing at the wrong one looked like it worked.
-    hosts = sorted(Path(run_dir).rglob("host_telemetry.json"))
+    hosts = _host_telemetry_paths(run_dir)
     if not hosts:
         return Check(
             "flight_agreement", NOT_RUN,
@@ -1241,6 +1257,83 @@ def verify_flight_agreement(manifest: Dict, run_dir=None,
                     f"sample interval and were not graded" if edge else ""))
 
 
+def verify_host_determinism(run_dir=None) -> Check:
+    """Every render pass over one card must fly the same flight.
+
+    This is the property that licenses the pipeline's shape. The plan
+    left the choice open -- re-fly the scenario in the host, or replay
+    the recorded telemetry into it -- and made it conditional on a
+    measurement nobody had taken: render the same card twice and see
+    whether the host is bit-deterministic. It is. Two commandlet passes
+    over examples/cameras_multi.yaml produced byte-identical telemetry
+    across all 30 recorded columns and 120 samples, digest
+    4e5a7334... both times, worst per-sample difference exactly 0. So
+    re-flying is reproducible and the replay path is not needed.
+
+    A conditional decision has to keep checking its condition, or it
+    quietly becomes an assumption again -- which is how this phase got
+    every other defect it had. A run renders one pass per camera, so
+    every multi-camera run measures the property for free: same card,
+    separate host flights, digests compared. If they ever diverge, the
+    "re-fly" decision is invalid and the aircraft labels drift between
+    cameras with nothing else to notice.
+
+    NOT RUN with fewer than two host flights -- one pass measures
+    nothing about repeatability.
+    """
+    if run_dir is None:
+        return Check("host_determinism", NOT_RUN,
+                     "no run directory given")
+    hosts = _host_telemetry_paths(run_dir)
+    if len(hosts) < 2:
+        return Check(
+            "host_determinism", NOT_RUN,
+            f"{len(hosts)} host flight(s) recorded; repeatability needs "
+            f"two passes over the same card to compare. Render a "
+            f"multi-camera spec on Windows to exercise this")
+    digests: Dict[str, str] = {}
+    for path in hosts:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            return Check("host_determinism", NOT_RUN,
+                         f"a host telemetry could not be read ({exc})")
+        columns = payload.get("columns", payload)
+        if not isinstance(columns, dict) or not columns:
+            return Check("host_determinism", NOT_RUN,
+                         f"{path.parent.name} recorded no columns")
+        # Exact, over every column the host records -- repr, not a
+        # rounded format, so two flights differing in the last bit
+        # produce different digests. A tolerance here would defeat the
+        # point: the claim being checked is bit-determinism.
+        digest = hashlib.sha256()
+        for key in sorted(columns):
+            digest.update(key.encode("utf-8"))
+            for value in columns[key]:
+                digest.update(repr(float(value)).encode("utf-8"))
+        digests[path.parent.name] = digest.hexdigest()
+    unique = sorted(set(digests.values()))
+    if len(unique) > 1:
+        listed = ", ".join(f"{camera}={value[:12]}"
+                           for camera, value in sorted(digests.items()))
+        return Check(
+            "host_determinism", FAIL,
+            f"{len(unique)} different flights across {len(digests)} "
+            f"render passes of one card ({listed}): the host is not "
+            f"reproducible, so the aircraft labels differ between "
+            f"cameras and re-flying the scenario per pass is not sound "
+            f"-- the poses would have to be replayed instead")
+    sample_count = len(next(iter(
+        json.loads(hosts[0].read_text(encoding="utf-8"))
+        .get("columns", {}).values()), []))
+    return Check(
+        "host_determinism", PASS,
+        f"{len(digests)} render passes of one card flew byte-identical "
+        f"flights ({unique[0][:12]}, {sample_count} samples): the host "
+        f"is reproducible, which is what makes re-flying per pass sound "
+        f"rather than an assumption")
+
+
 # -- check: temporal alignment ------------------------------------------
 
 def verify_alignment(manifest_a: Dict, manifest_b: Dict,
@@ -1317,6 +1410,7 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     report.checks.append(verify_counts(manifest))
     report.checks.append(verify_aircraft_consistency(manifest))
     report.checks.append(verify_flight_agreement(manifest, run_dir))
+    report.checks.append(verify_host_determinism(run_dir))
     report.checks.append(verify_capture_times(manifest, run_dir))
 
     if other_run_dir is not None:
