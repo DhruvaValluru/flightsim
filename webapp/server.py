@@ -89,6 +89,22 @@ class RunRequest(BaseModel):
     provenance: Dict[str, Any] = {}
 
 
+class CameraRequest(BaseModel):
+    """Add or remove one camera on the spec the page is holding.
+
+    The page sends the whole spec dict and gets the whole payload back,
+    so the 32 defaults of a new camera come from ``CameraSpec.defaulted``
+    -- the one place that knows them -- rather than being duplicated in
+    JavaScript where they would drift.
+    """
+
+    spec: Dict[str, Any]
+    #: Add: the preset the new camera takes (CAMERA_PRESETS).
+    preset: Optional[str] = None
+    #: Remove: the index to drop. Exactly one of preset/remove.
+    remove: Optional[int] = None
+
+
 def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
     fields = []
     for section, name, quantity in spec.quantities():
@@ -106,6 +122,9 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
         cameras.append({
             "index": index,
             "camera_id": str(camera.camera_id.value),
+            # The header names the view, so the page does not have to dig
+            # it out of the field list to say what this block is.
+            "preset": str(camera.preset.value),
             "fields": [{
                 "name": name, "value": quantity.value,
                 "unit": quantity.unit, "source": str(quantity.source),
@@ -244,6 +263,76 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         "validation": _validation_payload(spec),
     }
     return JSONResponse(payload)
+
+
+@app.post("/cameras")
+def cameras_endpoint(request: CameraRequest) -> JSONResponse:
+    """One more point of view, or one fewer.
+
+    Camera Phase 1 made the camera a spec element and the page learned to
+    EDIT one; it could never add a second, because the compiler builds at
+    most one CameraSpec and nothing else appended to the list. So the
+    phase's own flagship demonstration -- several views of one flight --
+    was reachable from a YAML file and not from the app. Everything
+    downstream already handled N cameras: the planners enumerate them,
+    the capture stage solves a track each, and the render runs one
+    commandlet pass per camera.
+
+    Refusals are the validator's, by name. A duplicate or unusable
+    ``camera_id`` is refused rather than silently renamed, for the reason
+    every stated field is: the id names the directory the frames land in
+    and the manifest labels them by it.
+    """
+    from core.capture.validate import validate_cameras
+    from core.scenario.camera import CameraSpec
+
+    try:
+        spec = ScenarioSpec.from_dict(request.spec)
+    except (ValueError, KeyError) as exc:
+        return JSONResponse({"error": f"spec did not parse: {exc}"},
+                            status_code=400)
+
+    if request.remove is not None:
+        if not 0 <= request.remove < len(spec.cameras):
+            return JSONResponse(
+                {"error": f"camera[{request.remove}] does not exist; the "
+                          f"spec states {len(spec.cameras)}"},
+                status_code=400)
+        spec.cameras.pop(request.remove)
+        return JSONResponse(_spec_payload(spec))
+
+    # The preset is NOT checked here. core.capture.validate owns that
+    # vocabulary and its refusal already names the modelled set --
+    # duplicating it would be a second place to keep in step, and a
+    # check that cannot fire (measured: disabling it changed nothing,
+    # because validate_cameras below caught every case first).
+    preset = str(request.preset or "")
+
+    # A NEW id, not a renamed one. Ids name directories, so a collision
+    # would put two cameras' frames in one place; picking the next free
+    # suffix keeps them distinct without touching any id already stated.
+    taken = {str(camera.camera_id.value) for camera in spec.cameras}
+    camera_id = preset
+    suffix = 0
+    while camera_id in taken:
+        suffix += 1
+        camera_id = f"{preset}{suffix}"
+
+    spec.cameras.append(CameraSpec.defaulted(
+        camera_id=camera_id, preset=preset,
+        aircraft=str(spec.aircraft.value),
+        terrain_elevation_m=float(spec.terrain_elevation.value),
+        frm=f"added from the page as a {preset} view"))
+
+    violations = validate_cameras(spec)
+    if violations:
+        spec.cameras.pop()
+        first = violations[0]
+        return JSONResponse(
+            {"refused": first.constraint,
+             "error": "; ".join(v.render() for v in violations)},
+            status_code=409)
+    return JSONResponse(_spec_payload(spec))
 
 
 @app.post("/run")

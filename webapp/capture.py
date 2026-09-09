@@ -43,6 +43,9 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
+from core.capture.hostflight import HostFlightError
+from core.capture.manifest import SOLVE_HOST_FLIGHT, SOLVE_PRE_RUN
+
 REPO = Path(__file__).resolve().parents[1]
 
 
@@ -77,6 +80,26 @@ def solve(spec, scene: Dict, heightfield=None, terrain_ground=None,
     frame = SceneFrame.for_spec(spec, heightfield)
     result = run_spec(spec, terrain_ground=terrain_ground)
     columns = result.telemetry.columns
+    datum = float(spec.terrain_elevation.value)
+    tracks, schedules = _solve_cameras(
+        spec, columns, frame, heightfield, tornado, datum)
+    return {"frame": frame, "columns": columns, "tracks": tracks,
+            "schedules": schedules, "result": result,
+            "terrain_elevation_m": datum,
+            "solve_source": SOLVE_PRE_RUN,
+            "output_digest": result.output_digest}
+
+
+def _solve_cameras(spec, columns, frame, heightfield, tornado, datum):
+    """Pose tracks and schedules over ONE recorded flight, scene-checked.
+
+    Pulled out of :func:`solve` so it can run twice: once over the
+    headless pre-run as the cheap pre-flight gate, and once over the
+    host's own flight for the labels that ship (:func:`resolve_over_host`).
+    """
+    from core.capture.poses import PoseSolveError, solve_pose_track
+    from core.capture.schedule import ScheduleError, solve_schedule
+    from core.capture.validate import track_violations
 
     tracks, schedules = [], []
     try:
@@ -87,7 +110,6 @@ def solve(spec, scene: Dict, heightfield=None, terrain_ground=None,
         raise CaptureError(getattr(exc, "constraint", "camera.schedule"),
                            str(exc)) from exc
 
-    datum = float(spec.terrain_elevation.value)
     violations = []
     for track in tracks:
         violations.extend(track_violations(
@@ -99,9 +121,46 @@ def solve(spec, scene: Dict, heightfield=None, terrain_ground=None,
             getattr(first, "constraint", "camera.track"),
             "; ".join(v.render() if hasattr(v, "render") else str(v)
                       for v in violations))
-    return {"frame": frame, "columns": columns, "tracks": tracks,
-            "schedules": schedules, "result": result,
-            "terrain_elevation_m": datum}
+    return tracks, schedules
+
+
+def resolve_over_host(spec, solved: Dict, host_telemetry, heightfield=None,
+                      tornado: Optional[Dict] = None) -> Dict:
+    """Re-solve everything over the flight the HOST actually flew.
+
+    The web run used to solve its poses over the headless pre-run and
+    then let the render host fly the scenario again -- two builds of
+    JSBSim stepping one scenario, 1.38 m apart, so the aircraft states
+    in every frame record described a flight the pixels did not show.
+    The CLI closed that in 129f140 by flying the host first; this is the
+    same move on the web path, and for the same reason: the web app is
+    where these images are actually looked at.
+
+    The pre-run is not wasted. It stays the cheap pre-flight gate, so a
+    camera inside a mountain refuses BEFORE an engine pass is spent; it
+    just stops being the source of the labels. The scene checks run
+    again here, because the host's track is the flight the frames are
+    taken on.
+    """
+    from core.capture.hostflight import (
+        digest_columns, read_all_host_columns, read_host_columns,
+    )
+
+    try:
+        columns = read_host_columns(host_telemetry)
+        digest = digest_columns(read_all_host_columns(host_telemetry))
+    except HostFlightError as exc:
+        raise CaptureError(exc.constraint, exc.message) from exc
+
+    tracks, schedules = _solve_cameras(
+        spec, columns, solved["frame"], heightfield, tornado,
+        solved["terrain_elevation_m"])
+    out = dict(solved)
+    out.update({"columns": columns, "tracks": tracks,
+                "schedules": schedules,
+                "solve_source": SOLVE_HOST_FLIGHT,
+                "output_digest": digest})
+    return out
 
 
 def card_blocks(spec, solved: Dict) -> List[Dict]:
@@ -140,8 +199,14 @@ def render_passes(card: Path, frames_root: Path, camera_ids: List[str],
         for stale in out.glob("frame_*.png"):
             stale.unlink()
         (out / "render.json").unlink(missing_ok=True)
+        # -telemetry= per camera, into the camera's OWN directory. The
+        # web path used to hand every pass one shared path -- the
+        # pre-run's telemetry.json -- so no per-camera host recording
+        # existed and flight_agreement, which keys them by directory,
+        # reported NOT RUN on every web run ever made.
         ok = render(card=card, frames=out,
-                    extra=[f"-camera-index={index}"], **render_kwargs)
+                    extra=[f"-camera-index={index}"],
+                    telemetry=out / "host_telemetry.json", **render_kwargs)
         if not ok:
             raise CaptureError(
                 "camera.render",
@@ -155,20 +220,17 @@ def render_passes(card: Path, frames_root: Path, camera_ids: List[str],
 def write_manifest(spec, solved: Dict, out: Path, scene: Dict,
                    heightfield=None) -> Path:
     from core.capture.manifest import (
-        SOLVE_PRE_RUN, build_capture_manifest, write_capture_manifest,
+        build_capture_manifest, write_capture_manifest,
     )
 
     manifest = build_capture_manifest(
         spec, solved["columns"], solved["frame"], solved["tracks"],
         solved["schedules"],
-        output_digest=solved["result"].output_digest,
-        # The web path still solves over the HEADLESS pre-run and lets
-        # the host re-fly it, so its aircraft labels describe a flight
-        # ~1.4 m from the one its pixels show. The CLI's --render flies
-        # the host first and re-solves (core.capture.hostflight); this
-        # path has not been moved onto that yet, and the manifest says
-        # so rather than leaving a reader to assume.
-        solve_source=SOLVE_PRE_RUN,
+        # Of the flight the labels were actually solved over: the
+        # host's own when it flew first, the headless pre-run when the
+        # engine was absent. The manifest says which either way.
+        output_digest=solved["output_digest"],
+        solve_source=solved["solve_source"],
         scene={"key": scene.get("key", "flat"),
                "terrain": scene.get("terrain")},
         terrain_sha256=heightfield.digest() if heightfield else None,

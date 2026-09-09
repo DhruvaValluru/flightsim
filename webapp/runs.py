@@ -64,6 +64,7 @@ from webapp.capture import (  # noqa: E402
     finish as capture_finish,
     landmarks as capture_landmark_set,
     render_passes as capture_render_passes,
+    resolve_over_host as capture_resolve_over_host,
     solve as capture_solve,
     wants_capture,
     write_manifest as capture_write_manifest,
@@ -1502,6 +1503,35 @@ class RunManager:
                            stdin=subprocess.DEVNULL)
         return (frames / "render.json").is_file()
 
+    @staticmethod
+    def _fly_host(card: Path, telemetry: Path, scene: Dict) -> bool:
+        """Fly the card in the host with NO renderer, and record it.
+
+        The solve pass of "one flight, not two". Physics-affecting flags
+        only -- the terrain the ground callback reads has to match what
+        the render passes fly over -- and NOT -Visual, which builds the
+        render scene this pass has no renderer for. That choice is not
+        assumed: verify_host_determinism compares this flight against
+        every render pass, and on the CLI's first host-solved run all
+        three came back byte-identical over 900 samples.
+        """
+        telemetry.parent.mkdir(parents=True, exist_ok=True)
+        telemetry.unlink(missing_ok=True)
+        command = [
+            str(EDITOR), str(REPO / "ue" / "FlightSim.uproject"),
+            "-run=FlightSimBridge.FlightSimScenario",
+            f"-scenario={card}", f"-telemetry={telemetry}",
+            "-unattended", "-nopause", "-nosplash", "-nullrhi",
+            "-stdout", "-FullStdOutLogOutput",
+        ]
+        if scene.get("terrain"):
+            command += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
+        log = telemetry.with_suffix(".log")
+        with log.open("w") as sink:
+            subprocess.run(command, stdout=sink, stderr=subprocess.STDOUT,
+                           stdin=subprocess.DEVNULL)
+        return telemetry.is_file()
+
     def _execute(self, run: RunState, spec: ScenarioSpec,
                  provenance: Dict) -> None:
         try:
@@ -1735,8 +1765,10 @@ class RunManager:
             capture_landmarks = capture_landmark_set(
                 spec, capture_solved, heightfield=capture_heightfield)
 
-        card = write_run_card(
-            spec, out / "card.json",
+        # Named once: after the host flies its own solve flight the card
+        # is rewritten with the RE-SOLVED tracks, and every other field
+        # has to be identical or the two passes are not over one scene.
+        card_arguments = dict(
             control_inputs=SHOWCASE_DOUBLET if scripted else (),
             duration_s=min(float(spec.duration.value), CLIP_SECONDS),
             orographic=orographic,
@@ -1753,6 +1785,7 @@ class RunManager:
             cameras=capture_cameras,
             landmarks=capture_landmarks,
         )
+        card = write_run_card(spec, out / "card.json", **card_arguments)
         # Prompt/model provenance in a Python-written UTF-8 sidecar; the
         # UE-written manifest stays ASCII (gotcha 13).
         (out / "provenance.json").write_text(json.dumps({
@@ -1762,6 +1795,53 @@ class RunManager:
             # Also read back by _recover_from_disk after a server restart.
             "conditions": run.conditions,
         }, indent=1), encoding="utf-8")
+
+        # ONE FLIGHT, NOT TWO -- the web half of 129f140.
+        #
+        # Everything above solved the poses over the HEADLESS pre-run.
+        # The host then flies the same card through UE's own JSBSim, and
+        # two builds stepping one scenario land 1.38 m apart, so the
+        # aircraft states in every frame record described a flight these
+        # pixels do not show. The CLI closed that by flying the host
+        # first; this is the same move here, because the web app is
+        # where the images are actually looked at.
+        #
+        # The pre-run above stays the cheap pre-flight gate: a camera
+        # inside a mountain still refuses before an engine pass is spent.
+        # It just stops being the source of the labels.
+        from core.util.platform import ue_available
+
+        if capture_solved is not None and ue_available():
+            run.push("host flight", "flying the scenario in the host first, "
+                                    "so the labels describe the flight the "
+                                    "pixels show")
+            host_telemetry = out / "host_flight" / "host_telemetry.json"
+            if not self._fly_host(card, host_telemetry, scene):
+                run.push("failed",
+                         "[capture.host_flight] the scenario commandlet "
+                         "recorded no flight; nothing was rendered. Its "
+                         f"output is in {host_telemetry.with_suffix('.log')}")
+                return
+            try:
+                capture_solved = capture_resolve_over_host(
+                    spec, capture_solved, host_telemetry,
+                    heightfield=capture_heightfield, tornado=tornado_block)
+            except CaptureError as exc:
+                # A camera that cleared the ridge on the pre-run and does
+                # not on the host's own track must refuse: that is the
+                # flight the frames would be taken on.
+                run.push("failed", f"[{exc.constraint}] {exc.message}")
+                return
+            # The card the render passes consume carries the RE-SOLVED
+            # tracks, so the pixels and the manifest come out of one
+            # flight.
+            card = write_run_card(
+                spec, out / "card.json",
+                **{**card_arguments,
+                   "cameras": capture_card_blocks(spec, capture_solved)})
+            run.push("host flight",
+                     f"{len(capture_solved['columns']['t'])} samples; every "
+                     f"camera re-solved over the host's own flight")
 
         run.push("rendering", "editor is rendering frames (a few minutes)")
         frames = out / "frames"
@@ -1793,9 +1873,15 @@ class RunManager:
             try:
                 capture_render_passes(
                     card, frames, camera_ids,
-                    lambda card, frames, extra: self._render(
+                    lambda card, frames, extra, telemetry: self._render(
                         card, frames, scene, mesh, aircraft,
-                        telemetry=out / "telemetry.json",
+                        # The HOST's own recording, per camera, into the
+                        # camera's directory -- what flight_agreement
+                        # grades each frame against. This used to be one
+                        # shared path (the pre-run's telemetry.json), so
+                        # no per-camera host flight existed and the check
+                        # reported NOT RUN on every web run.
+                        telemetry=telemetry,
                         look=STORM_LOOK if event_note else None,
                         camera_flags=camera_flags, extra=extra))
             except CaptureError as exc:

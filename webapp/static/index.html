@@ -98,6 +98,8 @@ visual-only per host (measured).</p>
     <tbody></tbody>
   </table>
   <div id="srcLegend" class="dim" style="margin:.4rem 0"></div>
+  <div id="cameraPicker" style="margin:.6rem 0"></div>
+  <div id="cameraState" class="dim"></div>
   <div id="verdict"></div>
   <p>
     <button id="run" class="run">Run</button>
@@ -243,8 +245,10 @@ function renderSpec(payload) {
   // provenanced, editable rows, exactly like the scalar fields above.
   for (const cam of (spec.cameras || [])) {
     const head = document.createElement("tr");
-    head.innerHTML = `<td colspan="4"><b>camera[${cam.index}] ` +
-      `${cam.camera_id}</b></td>`;
+    head.innerHTML = `<td colspan="3"><b>camera[${cam.index}] ` +
+      `${cam.camera_id}</b> <span class="dim">${cam.preset || ""}</span></td>` +
+      `<td><button class="opt cam-remove" data-remove="${cam.index}">` +
+      `remove</button></td>`;
     body.appendChild(head);
     for (const f of cam.fields) {
       const row = document.createElement("tr");
@@ -261,6 +265,7 @@ function renderSpec(payload) {
       body.appendChild(row);
     }
   }
+  renderCameraPicker();
   // Director's-notes legend: what each source means, in one line.
   $("srcLegend").innerHTML =
     `<span class="src-user">user</span> you said it &middot; ` +
@@ -296,6 +301,83 @@ function renderVerdict(v) {
           ? ` (requested ${x.actual}${x.unit ? " " + x.unit : ""}, ` +
             `limit ${x.limit})` : "") + `</li>`).join("") + `</ul>`;
     $("run").disabled = true;
+  }
+}
+
+// -- points of view ------------------------------------------------------
+//
+// Camera Phase 1 made the camera a spec element and this page learned to
+// EDIT one. It could never add a second: the compiler builds at most one
+// CameraSpec and nothing else appended to the list, so the phase's own
+// flagship demonstration -- several views of one flight -- was reachable
+// from a YAML file and not from the app. Everything downstream already
+// handled N cameras.
+//
+// The defaults for a new camera come from the SERVER (CameraSpec.defaulted,
+// 32 fields) rather than being written out here, where they would drift
+// from the ones every other path uses.
+const CAMERA_VIEWS = [
+  ["chase", "behind and above the aircraft, lagged"],
+  ["ground", "a fixed observer on the ground"],
+  ["wingman", "formation slot, 180 m abeam"],
+  ["tower", "a control tower, looking down"],
+  ["cockpit", "over the pilot's shoulder"],
+  ["explicit", "you state the position yourself"],
+];
+
+function renderCameraPicker() {
+  const holder = $("cameraPicker");
+  holder.innerHTML = `<div class="dim">Points of view — each one renders ` +
+    `as its own commandlet pass, with its own frames, overlays and ` +
+    `per-frame metadata. Every view added is another few minutes of ` +
+    `engine time.</div>`;
+  const row = document.createElement("div");
+  for (const [preset, blurb] of CAMERA_VIEWS) {
+    const button = document.createElement("button");
+    button.className = "opt";
+    button.textContent = "+ " + preset;
+    button.title = blurb;
+    button.addEventListener("click", () => changeCameras({preset}));
+    row.appendChild(button);
+  }
+  holder.appendChild(row);
+  document.querySelectorAll(".cam-remove").forEach(button =>
+    button.addEventListener("click", () =>
+      changeCameras({remove: +button.dataset.remove})));
+}
+
+async function changeCameras(change) {
+  // The EDITED dict, so a value typed into the table is not lost by
+  // adding a view. The server re-parses, appends or drops, re-validates
+  // and hands back the whole payload -- the page never invents a camera.
+  $("cameraState").textContent = change.preset
+    ? `adding a ${change.preset} view...` : "removing...";
+  document.querySelectorAll("#cameraPicker button, .cam-remove")
+    .forEach(b => { b.disabled = true; });
+  try {
+    const response = await fetch("/cameras", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({spec: editedSpecDict(), ...change}),
+    });
+    const payload = await response.json();
+    if (payload.error) {
+      // A named refusal is a RESULT: the spec asked for something the
+      // validator will not accept, and it says which clause.
+      $("cameraState").innerHTML = payload.refused
+        ? `<b>REFUSED [${payload.refused}]</b> ${payload.error}`
+        : payload.error;
+      document.querySelectorAll("#cameraPicker button, .cam-remove")
+        .forEach(b => { b.disabled = false; });
+      return;
+    }
+    $("cameraState").textContent =
+      `${payload.cameras.length} view(s): ` +
+      payload.cameras.map(c => c.camera_id).join(", ");
+    renderSpec({...compiled, spec: payload});
+  } catch (error) {
+    $("cameraState").textContent = `could not reach the server: ${error}`;
+    document.querySelectorAll("#cameraPicker button, .cam-remove")
+      .forEach(b => { b.disabled = false; });
   }
 }
 

@@ -132,16 +132,34 @@ The same capture, from the browser:
 .\.venv\Scripts\python.exe -m uvicorn webapp.server:app --port 8008
 ```
 
-Type a scenario, add a camera in the review table (or several), and run.
-A spec that states cameras is **captured, not clipped**: poses solved in
-Python, one commandlet pass per camera, and a gallery under the clip
-showing the overlays, the rendered frames and the previews per camera,
-with the verification summary and a link to `capture_manifest.json`.
+Type a scenario, then add points of view under the review table:
+
+    Points of view — each one renders as its own commandlet pass, with its
+    own frames, overlays and per-frame metadata.
+    [+ chase] [+ ground] [+ wingman] [+ tower] [+ cockpit] [+ explicit]
+
+Five modelled views plus `explicit`, which is not a view — it is "I will
+state the position myself". Each button appends a camera whose 32 fields
+come from `CameraSpec.defaulted` on the server, so the page never invents
+a default; each camera then appears as its own editable block with per-
+field provenance, and `remove` drops it. Ids are generated distinct
+(`chase`, `chase1`, …) because the id names the directory the frames land
+in; a stated id is never renamed.
+
+A spec that states cameras is **captured, not clipped**: the host flies
+the card first and every pose is solved over that flight, one commandlet
+pass per camera, and a gallery under the clip shows the overlays, the
+rendered frames and the previews per camera, with the verification
+summary and a link to `capture_manifest.json`.
+
+Every view is another engine pass. Six views is one solve pass plus six
+render passes, and the page says so before you press Run.
 
 The routes behind it, if you want them directly:
 
 | route | what it returns |
 | --- | --- |
+| `POST /cameras` | add a view (`{spec, preset}`) or drop one (`{spec, remove}`); returns the whole spec payload |
 | `/runs/<id>/images` | what images exist, per camera and per kind |
 | `/runs/<id>/frames/<camera>/<name>.png` | a rendered frame |
 | `/runs/<id>/overlays/<camera>/<name>.png` | that frame with the recorded geometry drawn on it |
@@ -253,16 +271,13 @@ engine applied differs from the solved one.
   are pinned byte-identical by test. Its flat `frames/` are served and
   shown, but there is no manifest and no verification, because nothing
   solved a pose. State a camera to capture.
-* **The web app still solves over the pre-run.** `flightsim.capture
-  --render` flies the host first and re-solves over its flight ("One
-  flight, not two" above); the web path has not been moved onto that
-  yet. A web run's manifest therefore reads `solve_source: "headless
-  pre-run"` and its aircraft labels sit ~1.4 m from the flight its
-  pixels show. The manifest says which flight it describes rather than
-  leaving a reader to assume — but `flight_agreement` reports NOT RUN
-  there, because the web path passes one shared `-telemetry=` path for
-  every camera pass instead of writing
-  `frames\<camera_id>\host_telemetry.json` per pass.
+* ~~The web app still solves over the pre-run.~~ It no longer does: a
+  web run with cameras flies the host to solve over, re-solves every
+  camera against that flight, and gives each render pass its own
+  `-telemetry=` into `frames\<camera_id>\host_telemetry.json`. Its
+  manifest reads `solve_source: "host flight"` and `flight_agreement`
+  grades it at 0.5 m like the CLI's. **Not yet measured on Windows** —
+  the CLI path is (0.00 m); this one has been exercised only by test.
 * ~~The 0.5 m host-solve bound has not been measured on Windows.~~
   **Measured: 0.00 m**, on `examples\cameras_terrain.yaml`, UE 5.5,
   30 frames across two cameras. The bound was reasoned from the

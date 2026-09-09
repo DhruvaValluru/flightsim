@@ -1015,6 +1015,26 @@ mutate core/capture/hostflight.py \
     "the host flight digest covers every recorded column, not seven" \
     tests/test_camera_host_flight.py || failures=$((failures+1))
 
+# -- the web app: every view, and the flight its labels describe -------
+
+mutate webapp/capture.py \
+    '                    telemetry=out / "host_telemetry.json", **render_kwargs)' \
+    '                    **render_kwargs)  # MUTATED: one shared recording' \
+    "each camera pass records the host flight that produced ITS frames" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    'solve_source=solved["solve_source"],' \
+    'solve_source=SOLVE_PRE_RUN,  # MUTATED: the label is a constant' \
+    "a web manifest names the flight it was actually solved over" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '    while camera_id in taken:' \
+    '    while False:  # MUTATED: two views may share a directory' \
+    "an added view gets an id no other camera has" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

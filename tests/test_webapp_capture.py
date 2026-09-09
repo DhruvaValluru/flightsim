@@ -15,6 +15,7 @@ rather than the single-pass preset path.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -198,6 +199,220 @@ def test_a_camera_carrying_spec_goes_to_the_capture_stage():
     spec.cameras = [CameraSpec.defaulted(camera_id="c0", preset="chase",
                                          aircraft="B747")]
     assert wants_capture(spec)
+
+
+# -- the points-of-view picker -------------------------------------------
+
+def compiled_spec():
+    from core.nl.compiler import compile_prompt
+
+    return compile_prompt("fly the 747 at 10000 ft and 280 kt").to_dict()
+
+
+def test_the_page_can_add_a_view_for_every_documented_preset():
+    """Phase 1 asked for multiple cameras and the app could never state
+    a second one: compile_prompt builds at most one CameraSpec and
+    nothing appended to the list. Everything downstream already handled
+    N -- the planners enumerate them, the capture stage solves a track
+    each, the render runs one pass per camera.
+    """
+    from core.scenario.camera import CAMERA_PRESETS
+
+    client = TestClient(app)
+    spec = compiled_spec()
+    assert spec.get("cameras") == []
+
+    for preset in CAMERA_PRESETS:
+        reply = client.post("/cameras", json={"spec": spec,
+                                              "preset": preset})
+        assert reply.status_code == 200, reply.json()
+        spec = reply.json()["dict"]
+
+    assert len(spec["cameras"]) == len(CAMERA_PRESETS)
+    presets = [c["preset"] for c in reply.json()["cameras"]]
+    assert presets == list(CAMERA_PRESETS)
+
+
+def test_added_views_get_distinct_ids_and_keep_stated_ones():
+    """A camera id NAMES A DIRECTORY (frames/<id>/), so two views sharing
+    one id would put their frames in one place. The next free suffix is
+    taken instead -- and no id already on the spec is touched, because
+    renaming a stated field is exactly what this project refuses to do.
+    """
+    client = TestClient(app)
+    spec = compiled_spec()
+    for _ in range(3):
+        spec = client.post("/cameras",
+                           json={"spec": spec, "preset": "chase"}).json()["dict"]
+    ids = [c["camera_id"]["value"] for c in spec["cameras"]]
+    assert ids == ["chase", "chase1", "chase2"]
+    assert len(set(ids)) == 3
+
+
+def test_a_view_the_vocabulary_does_not_have_is_refused_by_name():
+    client = TestClient(app)
+    reply = client.post("/cameras", json={"spec": compiled_spec(),
+                                          "preset": "helicopter"})
+    assert reply.status_code == 409
+    assert reply.json()["refused"] == "camera.preset"
+
+
+def test_a_view_can_be_removed_and_the_rest_keep_their_ids():
+    client = TestClient(app)
+    spec = compiled_spec()
+    for preset in ("chase", "tower", "cockpit"):
+        spec = client.post("/cameras",
+                           json={"spec": spec, "preset": preset}).json()["dict"]
+    reply = client.post("/cameras", json={"spec": spec, "remove": 1})
+    assert reply.status_code == 200
+    assert [c["camera_id"] for c in reply.json()["cameras"]] == \
+        ["chase", "cockpit"]
+
+
+def test_removing_a_camera_that_is_not_there_says_so():
+    client = TestClient(app)
+    reply = client.post("/cameras", json={"spec": compiled_spec(),
+                                          "remove": 4})
+    assert reply.status_code == 400
+    assert "does not exist" in reply.json()["error"]
+
+
+def test_added_views_reach_the_capture_stage():
+    """The routing decision the whole picker depends on: once the spec
+    states cameras, the run is CAPTURED (poses solved in Python, one
+    pass per camera, a manifest) rather than clipped."""
+    from core.scenario.spec import ScenarioSpec
+
+    client = TestClient(app)
+    spec = compiled_spec()
+    for preset in ("chase", "tower"):
+        spec = client.post("/cameras",
+                           json={"spec": spec, "preset": preset}).json()["dict"]
+    assert wants_capture(ScenarioSpec.from_dict(spec))
+
+
+def test_the_picker_offers_exactly_the_documented_presets():
+    """The page's list and the validator's have to be the same set, or a
+    button offers a view the run will refuse."""
+    import re
+
+    from core.scenario.camera import CAMERA_PRESETS
+
+    page = (Path(__file__).resolve().parents[1]
+            / "webapp" / "static" / "index.html").read_text(encoding="utf-8")
+    block = re.search(r"const CAMERA_VIEWS = \[(.*?)\];", page, re.S)
+    assert block, "the page's view list moved or was renamed"
+    offered = re.findall(r'\["(\w+)"', block.group(1))
+    assert offered == list(CAMERA_PRESETS)
+
+
+# -- one flight, not two, on the web path --------------------------------
+
+def test_each_camera_pass_records_its_own_host_flight():
+    """THE REGRESSION.
+
+    ``verify_flight_agreement`` keys host telemetry by the directory it
+    sits in, so every camera pass needs its OWN ``-telemetry=`` path.
+    The web path handed every pass one shared file -- and it was
+    ``<run>/telemetry.json``, the headless PRE-RUN the manifest was
+    solved from. So no per-camera host recording existed anywhere on
+    disk and flight_agreement reported NOT RUN on every web run ever
+    made, while the CLI reported a real number.
+    """
+    from webapp.capture import render_passes
+
+    seen = {}
+
+    def fake_render(card, frames, extra, telemetry):
+        seen[frames.name] = telemetry
+        (frames / "render.json").write_text("{}", encoding="utf-8")
+        return True
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        render_passes(root / "card.json", root / "frames",
+                      ["chase0", "tower0"], fake_render)
+
+    assert sorted(seen) == ["chase0", "tower0"]
+    for camera_id, path in seen.items():
+        assert path.name == "host_telemetry.json"
+        assert path.parent.name == camera_id, (
+            "the host recording has to land in the camera's own "
+            "directory or flight_agreement cannot key it")
+    assert len(set(seen.values())) == 2, (
+        "two passes sharing one telemetry path is the bug: the second "
+        "overwrites the first and neither frame set is graded against "
+        "the flight that produced it")
+
+
+def test_the_web_manifest_names_the_flight_it_was_solved_over():
+    """A web run's manifest has to answer the same question the CLI's
+    does. It used to be hardcoded to the pre-run because that was the
+    only flight the web path had."""
+    import inspect
+
+    from webapp import capture
+
+    source = inspect.getsource(capture.write_manifest)
+    assert 'solve_source=solved["solve_source"]' in source, (
+        "the manifest must carry the flight the poses were actually "
+        "solved over, not a constant")
+    assert 'output_digest=solved["output_digest"]' in source
+
+
+def test_resolve_over_host_reports_the_host_flight(tmp_path):
+    """Re-solving over the host's recording changes what the manifest
+    describes, and says so."""
+    import json as _json
+
+    from core.capture.hostflight import REQUIRED_CHANNELS
+    from core.capture.manifest import SOLVE_HOST_FLIGHT, SOLVE_PRE_RUN
+    from core.capture.poses import SceneFrame, solve_pose_track
+    from core.capture.schedule import solve_schedule
+    from core.nl.compiler import compile_prompt
+    from core.scenario.camera import CameraSpec
+    from webapp.capture import resolve_over_host
+
+    from tests.test_camera_poses import FRAME, make_columns
+
+    spec = compile_prompt("fly the 747 at 10000 ft and 280 kt")
+    camera = CameraSpec.defaulted(camera_id="chase0", preset="chase",
+                                  aircraft="B747")
+    camera.set("capture_count", 4, frm="test")
+    spec.cameras = [camera]
+    columns = make_columns(duration_s=14.0)
+
+    solved = {
+        "frame": FRAME, "columns": columns,
+        "tracks": [solve_pose_track(columns, camera, FRAME)],
+        "schedules": [solve_schedule(columns, camera, FRAME)],
+        "result": None, "terrain_elevation_m": 0.0,
+        "solve_source": SOLVE_PRE_RUN, "output_digest": "pre-run",
+    }
+
+    host = tmp_path / "host_telemetry.json"
+    host.write_text(_json.dumps({"columns": {
+        name: [float(v) for v in columns[name]]
+        for name in REQUIRED_CHANNELS}}), encoding="utf-8")
+
+    out = resolve_over_host(spec, solved, host)
+    assert out["solve_source"] == SOLVE_HOST_FLIGHT
+    assert out["output_digest"] != "pre-run"
+    assert len(out["tracks"]) == 1
+
+
+def test_an_unreadable_host_flight_refuses_by_name(tmp_path):
+    """Named, like every other camera refusal -- not a stack trace in a
+    background thread the page can only report as 'failed'."""
+    from webapp.capture import CaptureError, resolve_over_host
+
+    bad = tmp_path / "host_telemetry.json"
+    bad.write_text("{}", encoding="utf-8")
+    with pytest.raises(CaptureError) as caught:
+        resolve_over_host(None, {}, bad)
+    assert caught.value.constraint == "capture.host_flight"
 
 
 def test_the_legacy_flags_refuse_multi_camera_by_name():
