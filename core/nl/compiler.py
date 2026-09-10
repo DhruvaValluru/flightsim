@@ -339,7 +339,7 @@ def _camera(text: str, aircraft: str, terrain_elevation_m: float):
     defaults (source ``default``, plannable). Shot language the
     vocabulary cannot express still goes to notes via CINEMATIC_WORDS.
     """
-    from ..scenario.camera import CameraSpec
+    from ..scenario.camera import CameraSpec, plan_full_capture
 
     preset = None
     preset_phrase = None
@@ -376,6 +376,16 @@ def _camera(text: str, aircraft: str, terrain_elevation_m: float):
         camera.capture_count = Quantity(
             value=int(count.group(1)), unit="dimensionless",
             source="user", frm=count.group(0).strip())
+    else:
+        # No number in the prompt, so nothing to honour exactly: a view
+        # named in words means the whole flight from that view, at the
+        # rate it was recorded -- the same thing the page's picker
+        # gives. Without this a prompt-named camera kept the one-per-
+        # second interval default and a short clip came back as three
+        # stills, which is the complaint the page's picker had already
+        # been fixed for.
+        plan_full_capture(camera, frm="a view named in the prompt with "
+                                      "no count captures the whole clip")
     if focal_quantity is not None:
         camera.focal_length_mm = focal_quantity
     return camera

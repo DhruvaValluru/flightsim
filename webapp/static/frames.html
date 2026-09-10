@@ -181,8 +181,14 @@ async function load() {
       if (present[kind].has(name)) {
         const href = `${base}/${kind}/${encodeURIComponent(cameraId)}/` +
                      encodeURIComponent(name);
+        // Lazily: a continuous capture is one frame per recorded
+        // sample, so a 22 s clip is 221 records and up to three images
+        // each. Fetching six hundred PNGs the moment the page opens
+        // stalls the browser and the server for a gallery whose first
+        // screen shows two of them.
         shots.push(`<a href="${href}" target="_blank">` +
-                   `<img src="${href}" alt="${esc(kind)} ${esc(name)}"></a>` +
+                   `<img src="${href}" loading="lazy" decoding="async" ` +
+                   `alt="${esc(kind)} ${esc(name)}"></a>` +
                    `<div class="dim">${esc(label)} &middot; ` +
                    `<a href="${href}" download>${esc(name)}</a></div>`);
       }

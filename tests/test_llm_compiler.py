@@ -844,3 +844,60 @@ def test_camera_schema_is_generated_from_cameraspec():
     assert set(CAMERA_FIELD_VALUE_SCHEMAS) <= set(CameraSpec.FIELD_ORDER)
     assert RESPONSE_SCHEMA["properties"]["cameras"]["items"][
         "additionalProperties"] is False
+
+
+def test_a_model_named_view_with_no_count_captures_the_whole_clip():
+    """Same rule as the regex compiler and the page's picker.
+
+    A camera the model named without a number used to keep the
+    `interval` default -- one frame a second, so three stills on a
+    three-second clip. It now plans `continuous`: every recorded
+    sample, ten a second, for as long as the clip lasts.
+    """
+    client = fake_client({
+        "fields": {}, "notes": [], "questions": [],
+        "cameras": [{"preset": entry("tower", "inferred",
+                                     "from the tower")}],
+    })
+    camera = compile_prompt_llm("from the tower",
+                                client=client).spec.cameras[0]
+    assert str(camera.trigger.value) == "continuous"
+    assert str(camera.trigger.source) == "derived"
+
+
+def test_a_model_stated_count_keeps_its_exact_contract():
+    """`continuous` cannot honour a count, so a counted camera keeps
+    the interval trigger rather than becoming a schedule refusal."""
+    from core.capture.schedule import solve_schedule
+
+    client = fake_client({
+        "fields": {}, "notes": [], "questions": [],
+        "cameras": [{"capture_count": entry(50, "user", "50 images")}],
+    })
+    camera = compile_prompt_llm("50 images",
+                                client=client).spec.cameras[0]
+    assert str(camera.trigger.value) == "interval"
+    columns = {"t": [round(i * 0.1, 1) for i in range(221)]}
+    assert len(solve_schedule(columns, camera)) == 50
+
+
+def test_a_model_stated_period_is_never_replanned_away():
+    """The rate is the other way of asking for an interval capture.
+
+    `trigger` is not in the LLM's camera vocabulary, so the model can
+    only ask for an interval capture by its COUNT or its PERIOD.
+    `continuous` ignores period_s entirely, so planning it over a
+    stated one would drop the request without a word.
+    """
+    from core.capture.schedule import solve_schedule
+
+    client = fake_client({
+        "fields": {}, "notes": [], "questions": [],
+        "cameras": [{"period_s": entry(2.0, "user", "one every 2 s")}],
+    })
+    camera = compile_prompt_llm("one every 2 seconds",
+                                client=client).spec.cameras[0]
+    assert str(camera.trigger.value) == "interval"
+    assert float(camera.period_s.value) == 2.0
+    columns = {"t": [round(i * 0.1, 1) for i in range(221)]}
+    assert len(solve_schedule(columns, camera)) == 12

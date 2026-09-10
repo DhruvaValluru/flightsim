@@ -1075,3 +1075,43 @@ def test_the_inventory_lists_the_clips_that_exist(labelled_run):
     (labelled_run / "clips").mkdir()
     (labelled_run / "clips" / "tower0.mp4").write_bytes(b"mp4")
     assert inventory(labelled_run)["clips"] == ["tower0"]
+
+
+def test_the_frame_count_is_ten_a_second_whatever_the_clip():
+    """The number the instructor actually sees, pinned to the rate.
+
+    "why is it only 3 frames" had one cause with three doors: the
+    interval default is one capture a second, so ANY path that built a
+    camera without a number produced a handful of stills. The rate is
+    not a guess -- core.scenario.card.SAMPLE_INTERVAL_S is the interval
+    the run card hands the engine's recorder, and the headless recorder
+    matches it -- so `continuous` is exactly 1/SAMPLE_INTERVAL_S frames
+    per second of clip. This reads that constant rather than repeating
+    it, so a change to the record rate lands here rather than in a
+    surprise.
+    """
+    from core.capture.schedule import solve_schedule
+    from core.scenario.card import SAMPLE_INTERVAL_S
+    from core.scenario.camera import CameraSpec, plan_full_capture
+
+    camera = CameraSpec.defaulted(camera_id="chase", preset="chase",
+                                  aircraft="B747")
+    assert plan_full_capture(camera, frm="test") is True
+
+    for seconds in (3.0, 15.0, 22.0):
+        n = int(round(seconds / SAMPLE_INTERVAL_S)) + 1
+        columns = {"t": [round(i * SAMPLE_INTERVAL_S, 6) for i in range(n)]}
+        assert len(solve_schedule(columns, camera)) == n
+        # The complaint, as an assertion: never a contact sheet again.
+        assert len(solve_schedule(columns, camera)) > 15
+
+
+def test_the_frame_browser_does_not_fetch_every_png_at_once():
+    """A continuous capture is hundreds of records, each with up to
+    three images. The page must not open six hundred requests to show
+    the two frames on the first screen."""
+    page = (Path(__file__).resolve().parents[1]
+            / "webapp" / "static" / "frames.html").read_text(encoding="utf-8")
+    assert 'loading="lazy"' in page
+    assert page.count("<img") == page.count('loading="lazy"'), (
+        "every frame image in the browser must be lazily loaded")

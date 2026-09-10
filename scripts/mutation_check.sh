@@ -1080,9 +1080,48 @@ mutate webapp/runs.py \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
 mutate webapp/server.py \
-    '    camera.plan("trigger", "continuous",' \
-    '    camera.plan("trigger", "interval",  # MUTATED: three stills' \
+    '    plan_full_capture(' \
+    '    (lambda *a, **k: None)(  # MUTATED: three stills from the page' \
     "a view added from the page captures the whole clip" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate core/scenario/camera.py \
+    '    camera.plan("trigger", "continuous", frm=frm)' \
+    '    pass  # MUTATED: keep the one-capture-a-second default' \
+    "a view nobody counted captures every recorded sample" \
+    tests/test_camera_spec.py tests/test_webapp_capture.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/camera.py \
+    '    if int(camera.capture_count.value or 0) > 0:' \
+    '    if False:  # MUTATED: plan continuous over a stated count' \
+    "a stated image count is never turned into a schedule refusal" \
+    tests/test_camera_spec.py tests/test_llm_compiler.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/camera.py \
+    '    if camera.period_s.source is not Source.DEFAULT:' \
+    '    if False:  # MUTATED: drop a stated capture rate in silence' \
+    "a stated capture rate is never planned away" \
+    tests/test_camera_spec.py tests/test_llm_compiler.py \
+    || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '        plan_full_capture(camera, frm="a view named in the prompt with "' \
+    '        (lambda *a, **k: None)(camera, frm="MUTATED: three stills "' \
+    "a view named in the prompt captures the whole clip" \
+    tests/test_camera_spec.py || failures=$((failures+1))
+
+mutate core/nl/llm_compiler.py \
+    '        plan_full_capture(camera, frm="a view named in the prompt with "' \
+    '        (lambda *a, **k: None)(camera, frm="MUTATED: three stills "' \
+    "a view the model named captures the whole clip" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
+mutate webapp/static/frames.html \
+    'loading="lazy" decoding="async" ' \
+    '' \
+    "the frame browser lazily loads hundreds of images" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
 mutate core/capture/schedule.py \

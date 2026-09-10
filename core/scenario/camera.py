@@ -322,6 +322,47 @@ class CameraSpec:
                 f"({self.preset.value})")
 
 
+def plan_full_capture(camera: "CameraSpec", frm: str) -> bool:
+    """Plan CONTINUOUS capture for a camera that asked for no count.
+
+    A camera nobody gave a count or a trigger to used to take the
+    ``interval`` default: one frame per second. On a short clip that is
+    three or four stills -- which is not a view of a flight, it is a
+    contact sheet. Every path that builds a camera from a request that
+    did not name a number should reach the same place the web page's
+    picker does: every recorded sample, for as long as the clip lasts,
+    ten frames per second of flight.
+
+    Three things are left alone, and each of them matters:
+
+    * a STATED count ("50 images") is a contract the ``continuous``
+      trigger cannot honour -- it emits as many frames as there are
+      samples -- so a camera carrying one keeps its interval trigger
+      and this returns False rather than turning a count into a
+      refusal at schedule time;
+    * a MOVED ``period_s`` ("one every two seconds") is somebody asking
+      for an interval capture by its rate instead of its count.
+      ``continuous`` ignores the period entirely, so planning it over a
+      stated one would drop a request silently -- the one outcome this
+      repo does not allow. Only the untouched default period is
+      overridden;
+    * a stated TRIGGER is a stated field, so ``plan()`` refuses to move
+      it. Only a defaulted/derived/model trigger is planned, which is
+      why an edit in the review table still wins.
+
+    Returns True when the trigger was moved.
+    """
+    if int(camera.capture_count.value or 0) > 0:
+        return False
+    if camera.period_s.source is not Source.DEFAULT:
+        return False
+    if camera.trigger.source not in (Source.DEFAULT, Source.DERIVED,
+                                     Source.MODEL):
+        return False
+    camera.plan("trigger", "continuous", frm=frm)
+    return True
+
+
 def default_cameras(spec) -> List["CameraSpec"]:
     """The documented default camera set for a camera-less spec.
 

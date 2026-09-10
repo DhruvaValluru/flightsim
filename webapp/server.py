@@ -284,7 +284,7 @@ def cameras_endpoint(request: CameraRequest) -> JSONResponse:
     and the manifest labels them by it.
     """
     from core.capture.validate import validate_cameras
-    from core.scenario.camera import CameraSpec
+    from core.scenario.camera import CameraSpec, plan_full_capture
 
     try:
         spec = ScenarioSpec.from_dict(request.spec)
@@ -330,8 +330,8 @@ def cameras_endpoint(request: CameraRequest) -> JSONResponse:
     # second default produced on a three-second clip. Planned rather
     # than set: the page chose it, the user did not state it, so an
     # edit in the review table still wins.
-    camera.plan("trigger", "continuous",
-                frm="a view added from the page captures the whole clip")
+    plan_full_capture(
+        camera, frm="a view added from the page captures the whole clip")
     spec.cameras.append(camera)
 
     violations = validate_cameras(spec)

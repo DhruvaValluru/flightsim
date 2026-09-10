@@ -55,7 +55,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..environment.surface import SURFACE_CLASSES
-from ..scenario.camera import CAMERA_PRESETS, CameraSpec
+from ..scenario.camera import (CAMERA_PRESETS, CameraSpec,
+                               plan_full_capture)
 from ..scenario.fields import Quantity, Source
 from ..scenario.spec import ScenarioSpec
 from ..terrain.glo30 import LOCATIONS
@@ -909,6 +910,12 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
                 source={"user": Source.USER, "inferred": Source.INFERRED,
                         "model": Source.MODEL}[entry["source"]],
                 frm=entry["from"].strip()))
+        # Same rule as the regex compiler and the page's picker: a view
+        # the model named without a count is the whole clip from that
+        # view. A count or a trigger the model DID state is a stated
+        # field and is left exactly as it is.
+        plan_full_capture(camera, frm="a view named in the prompt with "
+                                      "no count captures the whole clip")
         spec.cameras.append(camera)
 
     # The event AIM rides in the quantity's detail (digest-relevant: it

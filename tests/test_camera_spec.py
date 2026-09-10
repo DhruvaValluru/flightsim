@@ -272,3 +272,114 @@ def test_offset_cameras_are_not_touched_by_the_camera_planner():
     spec.plan("terrain_elevation", 2900.0, frm="staged by the test")
     plan_camera_defaults(spec)
     assert spec.cameras[0].to_dict() == before
+
+
+# -- how many frames a view nobody counted actually takes ---------------
+#
+# "why is it only 3 frames" -- and it was three, from every path that
+# built a camera without a number in it. CameraSpec.defaulted() takes
+# the `interval` trigger with capture_count 0 and period_s 1.0, which
+# is one frame per second: a three-second clip is three stills. The web
+# page's picker was fixed first (a view added there plans `continuous`);
+# these pin the same rule for the two compilers, so a view NAMED in the
+# prompt cannot come back as a contact sheet.
+#
+# The rate is not arbitrary: core.scenario.card.SAMPLE_INTERVAL_S is
+# 0.1 s and the headless recorder matches it, so `continuous` is ten
+# frames per second of flight -- 221 over a 22 s clip, 31 over a 3 s
+# one. Both are the whole flight; neither is three.
+
+def test_plan_full_capture_moves_a_defaulted_trigger():
+    from core.scenario.camera import plan_full_capture
+
+    camera = CameraSpec.defaulted(camera_id="c", preset="chase",
+                                  aircraft="B747")
+    assert str(camera.trigger.value) == "interval"
+    assert plan_full_capture(camera, frm="the test") is True
+    assert str(camera.trigger.value) == "continuous"
+    # Planned, not stated: the review table can still overrule it.
+    assert camera.trigger.source == Source.DERIVED
+
+
+def test_plan_full_capture_leaves_a_stated_count_alone():
+    """The guard that keeps a helpful default from becoming a refusal.
+
+    `continuous` emits one frame per recorded sample, so it cannot also
+    honour "12 images" -- solve_schedule refuses a count contract it
+    cannot meet rather than truncating. A camera carrying a stated
+    count therefore keeps its interval trigger.
+    """
+    from core.capture.schedule import solve_schedule
+    from core.scenario.camera import plan_full_capture
+
+    camera = CameraSpec.defaulted(camera_id="c", preset="chase",
+                                  aircraft="B747")
+    camera.set("capture_count", 12, frm="12 images")
+    assert plan_full_capture(camera, frm="the test") is False
+    assert str(camera.trigger.value) == "interval"
+
+    columns = {"t": [round(i * 0.1, 1) for i in range(221)]}
+    assert len(solve_schedule(columns, camera)) == 12
+
+
+def test_plan_full_capture_leaves_a_stated_trigger_alone():
+    from core.scenario.camera import plan_full_capture
+
+    camera = CameraSpec.defaulted(camera_id="c", preset="chase",
+                                  aircraft="B747")
+    camera.set("trigger", "distance", frm="every 500 m")
+    assert plan_full_capture(camera, frm="the test") is False
+    assert str(camera.trigger.value) == "distance"
+
+
+def test_a_view_named_in_the_prompt_captures_the_whole_clip():
+    from core.capture.schedule import solve_schedule
+
+    spec = compile_prompt("chase view of the 747 at 3000 m and 250 kt")
+    camera = spec.cameras[0]
+    assert str(camera.trigger.value) == "continuous", (
+        "a view named without a number is the whole flight from that "
+        "view, not one frame a second")
+
+    # Ten samples a second, so neither clip length is a handful.
+    for seconds, expected in ((3.0, 31), (22.0, 221)):
+        columns = {"t": [round(i * 0.1, 1)
+                         for i in range(int(seconds * 10) + 1)]}
+        assert len(solve_schedule(columns, camera)) == expected
+    assert len(solve_schedule(
+        {"t": [round(i * 0.1, 1) for i in range(31)]}, camera)) > 15
+
+
+def test_a_counted_view_in_the_prompt_still_gets_exactly_that_many():
+    from core.capture.schedule import solve_schedule
+
+    spec = compile_prompt(
+        "fly the 747 at 3000 m and 250 kt, 15 images from the tower")
+    camera = spec.cameras[0]
+    assert int(camera.capture_count.value) == 15
+    assert str(camera.trigger.value) == "interval"
+    assert str(camera.capture_count.source) == "user"
+
+    columns = {"t": [round(i * 0.1, 1) for i in range(221)]}
+    assert len(solve_schedule(columns, camera)) == 15
+
+
+def test_plan_full_capture_leaves_a_stated_period_alone():
+    """A rate is a request too, and `continuous` ignores it.
+
+    period_s is how the review table and the language model ask for an
+    interval capture without naming a count. Planning `continuous` over
+    a stated period would drop that request silently rather than refuse
+    it by name.
+    """
+    from core.capture.schedule import solve_schedule
+    from core.scenario.camera import plan_full_capture
+
+    camera = CameraSpec.defaulted(camera_id="c", preset="chase",
+                                  aircraft="B747")
+    camera.set("period_s", 2.0, frm="one every two seconds")
+    assert plan_full_capture(camera, frm="the test") is False
+    assert str(camera.trigger.value) == "interval"
+
+    columns = {"t": [round(i * 0.1, 1) for i in range(221)]}
+    assert len(solve_schedule(columns, camera)) == 12
