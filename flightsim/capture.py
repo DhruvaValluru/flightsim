@@ -133,6 +133,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     from core.capture.manifest import (
         build_capture_manifest, write_capture_manifest,
+        write_frame_sidecars,
     )
     from core.capture.poses import SceneFrame, solve_pose_track
     from core.capture.preview import render_previews
@@ -309,7 +310,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         from core.capture.hostflight import (
             HostFlightError, digest_columns, host_telemetry_path,
-            read_all_host_columns, read_host_columns,
+            read_all_host_columns, read_host_record,
         )
 
         host_dir = out / "host_flight"
@@ -349,7 +350,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                   f"flight from the one the pixels show")
             return 1
         try:
-            host_columns = read_host_columns(host_telemetry)
+            # The whole record: every frame's ``state`` is cut from it.
+            host_columns = read_host_record(host_telemetry)
             tracks, schedules, solved_violations = solve_over(host_columns)
         except HostFlightError as exc:
             print(f"REFUSED -- {exc.render()}")
@@ -385,6 +387,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # verifier has off-axis points that are not the aircraft.
         heightfield=heightfield, terrain_elevation_m=terrain_datum)
     manifest_path = write_capture_manifest(manifest, out)
+    write_frame_sidecars(manifest, out)
     result.telemetry.write_json(out / "telemetry.json")
     spec.write(out / "scenario.yaml")
     (out / "run.json").write_text(json.dumps({

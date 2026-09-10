@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from core.capture.manifest import MANIFEST_VERSION
 from core.scenario.camera import CameraSpec
 from core.scenario.spec import ScenarioSpec
 from flightsim.capture import main as capture_main
@@ -30,7 +31,7 @@ def demo_run(tmp_path_factory):
 def test_capture_writes_manifest_previews_and_telemetry(demo_run):
     manifest = json.loads(
         (demo_run / "capture_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["manifest_version"] == 3
+    assert manifest["manifest_version"] == MANIFEST_VERSION
     assert len(manifest["frames"]) == 48          # 24 per camera, exact
     assert (demo_run / "telemetry.json").is_file()
     assert (demo_run / "scenario.yaml").is_file()
@@ -386,3 +387,26 @@ def test_camera_sets_will_not_also_take_a_run_directory(tmp_path):
         verify_main([str(tmp_path), "--camera-sets",
                      str(EXAMPLES / "cameras_multi.yaml"),
                      "--out", str(tmp_path / "out")])
+
+
+def test_capture_leaves_a_label_file_beside_every_frame(demo_run):
+    """The CLI's own writer, on a real headless flight: every frame the
+    manifest names has its sidecar, carrying the recorder's whole row
+    at that instant -- wind, forces, controls -- not six numbers."""
+    manifest = json.loads(
+        (demo_run / "capture_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["manifest_version"] == MANIFEST_VERSION
+    units = manifest["state_units"]
+    for record in manifest["frames"]:
+        sidecar = demo_run / (record["file"][:-4] + ".json")
+        assert sidecar.is_file(), record["file"]
+        state = json.loads(sidecar.read_text(encoding="utf-8"))["frame"]["state"]
+        # The headless recorder's channels, at the frame's own sample.
+        for channel in ("wind_north_mps", "lift_n", "alpha_deg", "n_z",
+                        "elevator_deg", "agl_m", "tas_kt"):
+            assert channel in state, channel
+            assert channel in units, channel
+        assert state["t"] == record["t_s"]
+    assert "?" not in units.values(), (
+        f"a recorded channel with no stated unit: "
+        f"{[k for k, v in units.items() if v == '?']}")

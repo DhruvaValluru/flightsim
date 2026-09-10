@@ -170,6 +170,29 @@ def read_all_host_columns(path) -> Dict[str, List[float]]:
     return out
 
 
+def read_host_record(path) -> Dict[str, List[float]]:
+    """The host's flight, validated AND whole: the solver's seven
+    channels checked the way read_host_columns checks them, plus every
+    other numeric column the host recorded, at the same sample count.
+
+    read_host_columns is what the pose solver needs and nothing more;
+    passing it on to the manifest meant every frame's ``state`` was the
+    solver's seven numbers, when the host had logged the wind vector,
+    the ground velocity, alpha and beta, the aero forces and the
+    control positions at that same instant -- and dropped them at the
+    frame. A column whose length disagrees with ``t`` is left out
+    rather than misaligned: the seven are refused ragged, the rest are
+    simply not the flight's.
+    """
+    required = read_host_columns(path)
+    n = len(required["t"])
+    record = dict(required)
+    for name, values in read_all_host_columns(path).items():
+        if name not in record and len(values) == n:
+            record[name] = values
+    return record
+
+
 def digest_columns(columns: Dict[str, Sequence[float]]) -> str:
     """SHA-256 over the columns, EXACTLY as ``run_spec`` digests its own.
 

@@ -1172,6 +1172,93 @@ mutate scripts/report_run.ps1 \
     "git is called through a resolved path, never by name" \
     tests/test_powershell_scripts.py || failures=$((failures+1))
 
+# -- version 4: the whole recorded row rides with every frame -----------
+
+mutate core/capture/manifest.py \
+    '                "state": frame_state(columns, sample_index),' \
+    '                "state": {},  # MUTATED: six numbers, the rest dropped' \
+    "every frame carries the whole recorded row" \
+    tests/test_camera_manifest.py tests/test_webapp_capture.py \
+    || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '    return {name: float(values[index]) for name, values in columns.items()}' \
+    '    return {name: float(values[0]) for name, values in columns.items()}  # MUTATED: the first sample for every frame' \
+    "a frame's state is the row at ITS sample, not the first" \
+    tests/test_camera_manifest.py || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '    return {name: channel_unit(name) for name in columns}' \
+    '    return {}  # MUTATED: no units, so a consumer guesses' \
+    "every state channel has a stated unit" \
+    tests/test_camera_manifest.py || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '    return "?"' \
+    '    return "m"  # MUTATED: an unrecognised channel is guessed as metres' \
+    "an unrecognised channel unit is a question, not a guess" \
+    tests/test_camera_manifest.py || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '        if section not in ("initial", "environment"):' \
+    '        if section not in ("run",):  # MUTATED: the wrong sections' \
+    "the conditions asked for ride in the manifest" \
+    tests/test_camera_manifest.py || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    'SUPPORTED_MANIFEST_VERSIONS = (3, 4)' \
+    'SUPPORTED_MANIFEST_VERSIONS = (4,)  # MUTATED: every earlier run refused' \
+    "a version 3 manifest still reads" \
+    tests/test_camera_manifest.py || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '            if stale.resolve() not in named:' \
+    '            if False:  # MUTATED: stale sidecars kept beside the frames' \
+    "stale sidecars are removed like stale frames" \
+    tests/test_camera_manifest.py || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '        "camera": cameras.get(str(record.get("camera_id"))),' \
+    '        "camera": next(iter(cameras.values()), None),  # MUTATED: the first camera for every frame' \
+    "a sidecar names ITS camera" \
+    tests/test_camera_manifest.py || failures=$((failures+1))
+
+mutate core/capture/hostflight.py \
+    '        if name not in record and len(values) == n:' \
+    '        if name not in record:  # MUTATED: a ragged column misaligned' \
+    "a column of the wrong length is not the flight's" \
+    tests/test_camera_host_flight.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    '        columns = clip_columns(read_host_record(host_telemetry), duration_s)' \
+    '        columns = clip_columns(read_host_columns(host_telemetry), duration_s)  # MUTATED: seven columns' \
+    "the host solve hands the manifest the whole record" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    '    write_frame_sidecars(manifest, out)' \
+    '    pass  # MUTATED: no sidecars beside the frames' \
+    "the web run writes a label file beside every frame" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    '            zf.write(path, arcname=f"{camera_id}/{path.name}",' \
+    '            if path.suffix == ".json": continue  # MUTATED: pictures only\n            zf.write(path, arcname=f"{camera_id}/{path.name}",' \
+    "the zip packs every frame's labels beside it" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    '        if archive.stat().st_mtime >= newest:' \
+    '        if True:  # MUTATED: a stale zip is served forever' \
+    "the archive follows a re-render" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '    if resolved.suffix == ".json" and kind != "frames":' \
+    '    if False:  # MUTATED: any .json under any image dir is served' \
+    "a json outside frames is not a label file" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 mutate core/capture/schedule.py \
     '        indices = list(range(n))' \
     '        indices = [0]  # MUTATED: continuous is one frame' \

@@ -560,7 +560,9 @@ def run_effect(run_id: str):
 #: filename.
 _IMAGE_KINDS = {"frames": "frames", "overlays": "overlays",
                 "previews": "previews"}
-_IMAGE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,80}\.png$")
+#: A frame image, or a frame's own label sidecar beside it.
+_IMAGE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,80}\.(png|json)$")
+_SERVED_TYPES = {".png": "image/png", ".json": "application/json"}
 _CAMERA_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
@@ -613,21 +615,46 @@ def run_camera_manifest(run_id: str, camera_id: str):
         return JSONResponse({"error": f"manifest unreadable: {exc}"},
                             status_code=500)
 
-    blocks = [c for c in manifest.get("cameras", [])
-              if str(c.get("camera_id")) == camera_id]
-    if not blocks:
+    from webapp.capture import camera_view
+
+    view = camera_view(manifest, camera_id)
+    if view is None:
         return JSONResponse(
             {"error": f"this run has no camera {camera_id!r}; it states "
                       f"{[c.get('camera_id') for c in manifest.get('cameras', [])]}"},
             status_code=404)
-    frames = [f for f in manifest.get("frames", [])
-              if str(f.get("camera_id")) == camera_id]
-    shared = {key: manifest.get(key) for key in (
-        "manifest_version", "spec_digest", "simulation_digest",
-        "output_digest", "solve_source", "seed", "aircraft", "scene",
-        "frame", "landmarks", "software_revision")}
-    return JSONResponse({**shared, "run_id": run_id,
-                         "camera": blocks[0], "frames": frames})
+    return JSONResponse({**view, "run_id": run_id})
+
+
+@app.get("/runs/{run_id}/cameras/{camera_id}/frames.zip")
+def run_camera_archive(run_id: str, camera_id: str):
+    """ONE view as a download: every frame, each frame's own labels
+    beside it, the camera's manifest and a README.
+
+    The page shows frames; this is how they leave it. A consumer who
+    wants "the wingman view" gets a folder in which every PNG sits next
+    to a JSON carrying where the camera was, which way it pointed, the
+    lens, and everything the flight recorder logged at that instant --
+    not a folder of pictures and a manifest to cross-reference by hand.
+
+    Same name discipline as the image route, and DECLARED BEFORE it for
+    the same reason the manifest route is.
+    """
+    from webapp.capture import frames_archive
+
+    if not _CAMERA_NAME.match(camera_id):
+        return JSONResponse({"error": "no such camera"}, status_code=404)
+    out = manager.out_root / run_id
+    if not out.is_dir():
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    archive = frames_archive(out, camera_id)
+    if archive is None:
+        return JSONResponse(
+            {"error": f"camera {camera_id!r} has no frames on disk in "
+                      f"this run"},
+            status_code=404)
+    return FileResponse(archive, media_type="application/zip",
+                        filename=f"{run_id}_{camera_id}_frames.zip")
 
 
 @app.get("/frames.html", response_class=HTMLResponse)
@@ -682,7 +709,11 @@ def run_image(run_id: str, kind: str, camera_id: str, name: str):
         return JSONResponse({"error": "no such image"}, status_code=404)
     if not resolved.is_file():
         return JSONResponse({"error": "no such image"}, status_code=404)
-    return FileResponse(resolved, media_type="image/png")
+    # A sidecar only lives beside a FRAME; overlays and previews carry
+    # no labels of their own, and a .json under them is not ours.
+    if resolved.suffix == ".json" and kind != "frames":
+        return JSONResponse({"error": "no such image"}, status_code=404)
+    return FileResponse(resolved, media_type=_SERVED_TYPES[resolved.suffix])
 
 
 @app.get("/runs/{run_id}/capture_manifest.json")

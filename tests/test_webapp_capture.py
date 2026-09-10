@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from core.capture.manifest import MANIFEST_VERSION, SUPPORTED_MANIFEST_VERSIONS
 from webapp.capture import inventory, wants_capture
 from webapp.server import app, manager
 
@@ -98,7 +99,7 @@ def test_the_capture_manifest_and_verification_are_downloadable(run_dir):
     client = TestClient(app)
     manifest = client.get("/runs/run_test/capture_manifest.json")
     assert manifest.status_code == 200
-    assert manifest.json()["manifest_version"] == 3
+    assert manifest.json()["manifest_version"] in SUPPORTED_MANIFEST_VERSIONS
     assert client.get("/runs/run_test/verify.json").json()["ok"] is True
 
 
@@ -1115,3 +1116,199 @@ def test_the_frame_browser_does_not_fetch_every_png_at_once():
     assert 'loading="lazy"' in page
     assert page.count("<img") == page.count('loading="lazy"'), (
         "every frame image in the browser must be lazily loaded")
+
+
+# -- frames leave the page with their labels -----------------------------
+
+@pytest.fixture
+def wide_run(tmp_path, monkeypatch):
+    """A finished, host-solved run whose frames carry the whole recorded
+    row, with pixels and sidecars on disk the way the writers lay them
+    out."""
+    from core.capture.manifest import write_frame_sidecars
+
+    from tests.test_camera_manifest import build, wide_columns
+
+    monkeypatch.setattr(manager, "out_root", tmp_path)
+    out = tmp_path / "run_wide"
+    manifest = build(columns=wide_columns())
+    (out / "capture_manifest.json").parent.mkdir(parents=True)
+    (out / "capture_manifest.json").write_text(json.dumps(manifest),
+                                               encoding="utf-8")
+    write_frame_sidecars(manifest, out)
+    for record in manifest["frames"]:
+        (out / record["file"]).write_bytes(_png())
+
+    from webapp.runs import RunState
+
+    state = RunState(run_id="run_wide")
+    state.status = "done"
+    manager.runs["run_wide"] = state
+    return out, manifest
+
+
+def test_a_view_downloads_as_frames_beside_their_labels(wide_run):
+    import io
+    import zipfile
+
+    out, manifest = wide_run
+    camera = manifest["cameras"][0]["camera_id"]
+    reply = TestClient(app).get(f"/runs/run_wide/cameras/{camera}/frames.zip")
+    assert reply.status_code == 200
+    assert reply.headers["content-type"].startswith("application/zip")
+
+    with zipfile.ZipFile(io.BytesIO(reply.content)) as zf:
+        names = set(zf.namelist())
+        mine = [f for f in manifest["frames"] if f["camera_id"] == camera]
+        for record in mine:
+            png = f"{camera}/{Path(record['file']).name}"
+            assert png in names
+            assert png[:-4] + ".json" in names, "every PNG has its labels"
+            sidecar = json.loads(zf.read(png[:-4] + ".json"))
+            assert sidecar["frame"]["state"]["wind_north_mps"] == \
+                record["state"]["wind_north_mps"]
+        assert f"{camera}/manifest.json" in names
+        assert f"{camera}/README.txt" in names
+        # ONLY this view.
+        others = {f["camera_id"] for f in manifest["frames"]} - {camera}
+        assert not any(n.startswith(f"{o}/") for n in names for o in others)
+        # PNGs are stored, not deflated again.
+        info = zf.getinfo(f"{camera}/{Path(mine[0]['file']).name}")
+        assert info.compress_type == zipfile.ZIP_STORED
+        view = json.loads(zf.read(f"{camera}/manifest.json"))
+        assert view["camera"]["camera_id"] == camera
+        assert view["state_units"]["lift_n"] == "N"
+        assert "conditions" in view
+
+
+def test_the_archive_is_rebuilt_when_a_frame_changes(wide_run):
+    import os
+    import time
+
+    from webapp.capture import frames_archive
+
+    out, manifest = wide_run
+    camera = manifest["cameras"][0]["camera_id"]
+    first = frames_archive(out, camera)
+    stamp = first.stat().st_mtime
+    assert frames_archive(out, camera).stat().st_mtime == stamp, "reused"
+
+    # A re-render touches a frame; the download must follow it.
+    frame = out / manifest["frames"][0]["file"]
+    later = time.time() + 5
+    os.utime(frame, (later, later))
+    assert frames_archive(out, camera).stat().st_mtime > stamp
+
+
+def test_a_view_with_no_frames_is_a_404_not_an_empty_zip(wide_run):
+    reply = TestClient(app).get("/runs/run_wide/cameras/nosuch/frames.zip")
+    assert reply.status_code == 404
+
+
+@pytest.mark.parametrize("camera", ["..", "..%2f..", "a/b", "x" * 65])
+def test_the_archive_route_refuses_an_unusable_name(wide_run, camera):
+    reply = TestClient(app).get(f"/runs/run_wide/cameras/{camera}/frames.zip")
+    assert reply.status_code == 404
+    assert not reply.headers["content-type"].startswith("application/zip")
+
+
+def test_a_frame_s_labels_are_served_beside_it(wide_run):
+    out, manifest = wide_run
+    record = manifest["frames"][0]
+    camera, name = record["camera_id"], Path(record["file"]).name
+    client = TestClient(app)
+    png = client.get(f"/runs/run_wide/frames/{camera}/{name}")
+    assert png.status_code == 200
+    assert png.headers["content-type"] == "image/png"
+    labels = client.get(f"/runs/run_wide/frames/{camera}/{name[:-4]}.json")
+    assert labels.status_code == 200
+    assert labels.headers["content-type"].startswith("application/json")
+    assert labels.json()["frame"]["index"] == record["index"]
+    assert labels.json()["frame"]["state"]["qbar_pa"] == \
+        record["state"]["qbar_pa"]
+
+
+def test_a_json_under_overlays_is_not_ours_to_serve(wide_run):
+    """The sidecar lives beside a FRAME. A .json under overlays or
+    previews is not a label file, whatever put it there."""
+    out, manifest = wide_run
+    camera = manifest["frames"][0]["camera_id"]
+    (out / "overlays" / camera).mkdir(parents=True)
+    (out / "overlays" / camera / "frame_0000.json").write_text(
+        '{"not": "ours"}', encoding="utf-8")
+    reply = TestClient(app).get(
+        f"/runs/run_wide/overlays/{camera}/frame_0000.json")
+    assert reply.status_code == 404
+
+
+def test_the_per_camera_manifest_carries_units_and_conditions(wide_run):
+    out, manifest = wide_run
+    camera = manifest["cameras"][0]["camera_id"]
+    view = TestClient(app).get(
+        f"/runs/run_wide/cameras/{camera}/manifest.json").json()
+    assert view["state_units"] == manifest["state_units"]
+    assert view["conditions"] == manifest["conditions"]
+    assert all("state" in f for f in view["frames"])
+
+
+def test_the_pages_link_the_download_and_show_the_row():
+    static = Path(__file__).resolve().parents[1] / "webapp" / "static"
+    frames = (static / "frames.html").read_text(encoding="utf-8")
+    index = (static / "index.html").read_text(encoding="utf-8")
+    assert "/frames.zip" in frames and "/frames.zip" in index
+    # Per frame: the sidecar link, and the recorded row grouped by what
+    # a person is asking about.
+    assert '.replace(/\\.png$/, ".json")' in frames
+    for group in ("the wind, at that instant", "what the air was doing to it",
+                  "what the controls were set to", "how it was moving"):
+        assert group in frames, group
+    assert "other recorded channels" in frames, (
+        "a channel outside the groups must still print")
+    # The no-image fallback must survive the sidecar link: the link is
+    # not a shot.
+    assert "${labelLink}</div>" in frames
+
+
+def test_the_host_solve_hands_the_manifest_the_whole_record(tmp_path):
+    """resolve_over_host used to pass the solver's seven columns on to
+    the manifest, so a host-solved frame's state was seven numbers
+    while the host had logged thirty. The clipped record the manifest
+    is built from must be the whole one."""
+    import inspect
+
+    from webapp import capture
+
+    source = inspect.getsource(capture.resolve_over_host)
+    assert "read_host_record(host_telemetry)" in source
+    assert "read_host_columns(host_telemetry)" not in source
+
+
+def test_the_web_run_s_manifest_writer_leaves_labels_beside_the_frames(tmp_path):
+    """The webapp writes its manifest through write_manifest, and that
+    is where the sidecars have to come from -- a fixture that writes
+    them itself proves nothing about the run."""
+    from core.capture.poses import solve_pose_track
+    from core.capture.schedule import solve_schedule
+    from webapp.capture import write_manifest
+
+    from tests.test_camera_manifest import spec_with_cameras, wide_columns
+    from tests.test_camera_poses import FRAME
+
+    spec = spec_with_cameras()
+    columns = wide_columns(duration_s=6.0)
+    solved = {
+        "columns": columns, "frame": FRAME,
+        "tracks": [solve_pose_track(columns, c, FRAME) for c in spec.cameras],
+        "schedules": [solve_schedule(columns, c, FRAME) for c in spec.cameras],
+        "output_digest": "0" * 64, "solve_source": "headless pre-run",
+        "terrain_elevation_m": 0.0,
+    }
+    write_manifest(spec, solved, tmp_path, scene={"key": "flat"})
+    manifest = json.loads((tmp_path / "capture_manifest.json")
+                          .read_text(encoding="utf-8"))
+    for record in manifest["frames"]:
+        sidecar = tmp_path / (record["file"][:-4] + ".json")
+        assert sidecar.is_file(), record["file"]
+        labels = json.loads(sidecar.read_text(encoding="utf-8"))
+        assert labels["frame"]["state"]["lift_n"] == \
+            record["state"]["lift_n"]

@@ -299,3 +299,40 @@ def test_the_tight_bound_still_allows_interpolation_noise(flight, tmp_path):
     manifest = captured_manifest(flight, SOLVE_HOST_FLIGHT)
     write_host_telemetry(tmp_path, flight, north_shift_m=0.05)
     assert verify_flight_agreement(manifest, tmp_path).status == PASS
+
+
+# -- the whole record, not the solver's seven ----------------------------
+
+def test_the_host_record_is_validated_and_whole(tmp_path, flight):
+    """read_host_columns is what the solver needs; read_host_record is
+    that, validated the same way, plus every other channel the host
+    logged at the same sample count -- the wind vector, the forces,
+    the control positions that every frame's ``state`` is cut from."""
+    from core.capture.hostflight import read_host_record
+
+    columns = dict(flight)
+    n = len(columns["t"])
+    columns["wind_north_mps"] = [0.5 * i for i in range(n)]
+    columns["lift_n"] = [1000.0 + i for i in range(n)]
+    columns["ragged"] = [1.0, 2.0]             # not the flight's
+    path = tmp_path / "host_telemetry.json"
+    path.write_text(json.dumps({"columns": columns}), encoding="utf-8")
+
+    record = read_host_record(path)
+    assert set(REQUIRED_CHANNELS) <= set(record)
+    assert record["wind_north_mps"] == columns["wind_north_mps"]
+    assert record["lift_n"] == columns["lift_n"]
+    assert "ragged" not in record, (
+        "a column of the wrong length is not the flight's, and is left "
+        "out rather than misaligned")
+
+
+def test_the_host_record_refuses_what_the_solver_would(tmp_path, flight):
+    from core.capture.hostflight import read_host_record
+
+    columns = dict(flight)
+    del columns["heading_deg"]
+    path = tmp_path / "host_telemetry.json"
+    path.write_text(json.dumps({"columns": columns}), encoding="utf-8")
+    with pytest.raises(HostFlightError, match="heading_deg"):
+        read_host_record(path)

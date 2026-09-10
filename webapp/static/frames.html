@@ -88,8 +88,62 @@ const GROUPS = [
   ["the aircraft, at that instant", ["aircraft"]],
 ];
 
+// The recorder's whole row at that instant (record.state), grouped the
+// way a person reads a flight: where it was, how it was moving, what
+// the air was doing to it and around it, what the pilot had set. Keys
+// come from whichever recorder flew, so a channel not listed here still
+// prints under "other recorded channels" -- nothing is dropped.
+const STATE_GROUPS = [
+  ["where the aircraft was", ["lat_deg", "lon_deg", "altitude_m", "agl_m"]],
+  ["how it was moving", ["tas_kt", "cas_kt", "mach", "v_north_mps",
+                         "v_east_mps", "v_down_mps", "climb_rate_mps",
+                         "track_deg", "crab_deg", "flight_path_angle_deg",
+                         "pitch_rate_dps", "roll_rate_dps"]],
+  ["the wind, at that instant", ["wind_north_mps", "wind_east_mps",
+                                 "wind_down_mps", "wind_speed_mps"]],
+  ["what the air was doing to it", ["alpha_deg", "beta_deg", "qbar_pa",
+                                    "lift_n", "drag_n", "side_force_n",
+                                    "f_aero_x_n", "f_aero_y_n", "f_aero_z_n",
+                                    "n_z", "weight_kg"]],
+  ["what the controls were set to", ["elevator_deg", "aileron_deg",
+                                     "rudder_deg", "elevator_pos_rad",
+                                     "aileron_pos_rad", "rudder_pos_rad",
+                                     "throttle_cmd"]],
+];
+
+let UNITS = {};   // context.state_units, once the manifest is read
+
+function withUnit(key, value) {
+  const unit = UNITS[key];
+  return unit && unit !== "1" && unit !== "?"
+    ? `${num(value)} <span class="dim">${esc(unit)}</span>` : num(value);
+}
+
+function stateTables(state) {
+  const shown = new Set();
+  let html = "";
+  for (const [label, keys] of STATE_GROUPS) {
+    const pairs = [];
+    for (const key of keys) {
+      if (!(key in state)) continue;
+      shown.add(key);
+      pairs.push([key, withUnit(key, state[key])]);
+    }
+    if (pairs.length) {
+      html += `<div class="group"><b>${label}</b>` +
+              `<table>${rows(pairs)}</table></div>`;
+    }
+  }
+  const rest = Object.entries(state).filter(([k]) => !shown.has(k));
+  if (rest.length) {
+    html += `<div class="group"><b>other recorded channels</b><table>` +
+      rows(rest.map(([k, v]) => [k, withUnit(k, v)])) + `</table></div>`;
+  }
+  return html;
+}
+
 function recordTable(record) {
-  const shown = new Set(["camera_id"]);
+  const shown = new Set(["camera_id", "state"]);
   let html = "";
   for (const [label, keys] of GROUPS) {
     const pairs = [];
@@ -110,6 +164,9 @@ function recordTable(record) {
               `<table>${rows(pairs)}</table></div>`;
     }
   }
+  if (record.state && typeof record.state === "object") {
+    html += stateTables(record.state);
+  }
   const rest = Object.entries(record).filter(([k]) => !shown.has(k));
   if (rest.length) {
     html += `<div class="group"><b>other</b><table>` +
@@ -117,6 +174,20 @@ function recordTable(record) {
         ? v.map(num).join(", ") : num(v)])) + `</table></div>`;
   }
   return html;
+}
+
+function conditionsLine(conditions) {
+  if (!conditions || typeof conditions !== "object") return "";
+  const parts = [];
+  for (const [name, q] of Object.entries(conditions)) {
+    if (!q || q.value === undefined || q.value === null) continue;
+    const unit = q.unit && q.unit !== "dimensionless" ? ` ${q.unit}` : "";
+    parts.push(`${esc(name)} ${esc(q.value)}${esc(unit)}` +
+               ` <span class="dim">(${esc(q.source)})</span>`);
+  }
+  return parts.length
+    ? `<div class="dim" style="margin-top:.3rem">asked for: ` +
+      parts.join(" &middot; ") + `</div>` : "";
 }
 
 async function load() {
@@ -150,6 +221,7 @@ async function load() {
                    previews: have("previews")};
 
   const camera = payload.camera || {};
+  UNITS = payload.state_units || {};
   document.title = `${cameraId} — ${payload.frames.length} frames`;
   document.getElementById("title").textContent =
     `${cameraId} — ${camera.preset || ""} — ${payload.frames.length} frame(s)`;
@@ -162,11 +234,14 @@ async function load() {
     (camera.schedule_basis
       ? `<span class="badge">${esc(camera.schedule_basis)}</span>` : "");
   document.getElementById("links").innerHTML =
+    `<a href="${base}/cameras/${encodeURIComponent(cameraId)}/frames.zip">` +
+    `<b>download every frame with its labels (zip)</b></a> &middot; ` +
     `<a href="${url}" download="${esc(cameraId)}_manifest.json">` +
-    `download this camera's manifest</a> &middot; ` +
+    `this camera's manifest</a> &middot; ` +
     `<a href="${base}/capture_manifest.json">the whole run's</a> &middot; ` +
     `<a href="${base}/verify.json">verification</a> &middot; ` +
-    `<a href="/">back to the app</a>`;
+    `<a href="/">back to the app</a>` +
+    conditionsLine(payload.conditions);
 
   const main = document.getElementById("frames");
   main.innerHTML = "";
@@ -193,6 +268,14 @@ async function load() {
                    `<a href="${href}" download>${esc(name)}</a></div>`);
       }
     }
+    // The frame's own labels, as a file: the same record this page
+    // renders, plus the run context, written beside the PNG.
+    const sidecar = name.replace(/\.png$/, ".json");
+    const labels = `${base}/frames/${encodeURIComponent(cameraId)}/` +
+                   encodeURIComponent(sidecar);
+    const labelLink = `<div class="dim" style="margin:.2rem 0 .6rem">` +
+               `<a href="${labels}" download>${esc(sidecar)}</a>` +
+               ` &mdash; this frame's labels, as a file</div>`;
     const block = document.createElement("section");
     block.className = "frame";
     block.innerHTML =
@@ -200,7 +283,7 @@ async function load() {
         `<div class="dim">no image on disk for this record — the ` +
         `manifest names <code>${esc(record.file)}</code>, which the ` +
         `renderer did not write (no engine on the machine that ran ` +
-        `this, or the pass refused)</div>`}</div>` +
+        `this, or the pass refused)</div>`}${labelLink}</div>` +
       `<div><h2>frame ${esc(record.index)} — t = ${num(record.t_s)} s</h2>` +
       recordTable(record) + `</div>`;
     main.appendChild(block);

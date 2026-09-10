@@ -175,11 +175,15 @@ def resolve_over_host(spec, solved: Dict, host_telemetry, heightfield=None,
     taken on.
     """
     from core.capture.hostflight import (
-        digest_columns, read_all_host_columns, read_host_columns,
+        digest_columns, read_all_host_columns, read_host_record,
     )
 
     try:
-        columns = clip_columns(read_host_columns(host_telemetry), duration_s)
+        # The WHOLE record, not the solver's seven: every frame's
+        # ``state`` is cut from these columns, and the wind, the
+        # velocities and the aero forces the host logged at each
+        # instant are the labels a consumer actually asked for.
+        columns = clip_columns(read_host_record(host_telemetry), duration_s)
         digest = digest_columns(read_all_host_columns(host_telemetry))
     except HostFlightError as exc:
         raise CaptureError(exc.constraint, exc.message) from exc
@@ -253,6 +257,7 @@ def write_manifest(spec, solved: Dict, out: Path, scene: Dict,
                    heightfield=None) -> Path:
     from core.capture.manifest import (
         build_capture_manifest, write_capture_manifest,
+        write_frame_sidecars,
     )
 
     manifest = build_capture_manifest(
@@ -269,7 +274,113 @@ def write_manifest(spec, solved: Dict, out: Path, scene: Dict,
         cameras=spec.cameras,
         heightfield=heightfield,
         terrain_elevation_m=solved["terrain_elevation_m"])
-    return write_capture_manifest(manifest, out)
+    path = write_capture_manifest(manifest, out)
+    # One JSON beside every PNG, so a downloaded frame carries its own
+    # labels and a zip of a view is a labelled set, not a folder of
+    # pictures and a manifest to cross-reference by hand.
+    write_frame_sidecars(manifest, out)
+    return path
+
+
+#: Everything a labelled set is, per view. The zip is rebuilt when any
+#: of these is newer than it, so a re-render or a re-verify refreshes
+#: the download and nothing else does.
+_ARCHIVE_PATTERNS = ("frame_*.png", "frame_*.json")
+
+
+def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
+    """A zip of ONE view: its frames, each frame's sidecar, the
+    per-camera manifest and a README saying what is what.
+
+    Built on disk under ``downloads/<camera_id>.zip`` and reused while
+    it is newer than every file it packs. PNGs are STORED -- they are
+    already compressed, and deflating 221 of them again would cost
+    minutes for nothing -- and the JSON is deflated. Returns None when
+    the view has no frames at all, so the route answers 404 rather
+    than an empty archive.
+    """
+    import zipfile
+
+    source = out / "frames" / camera_id
+    if not source.is_dir():
+        return None
+    files = sorted(p for pattern in _ARCHIVE_PATTERNS
+                   for p in source.glob(pattern))
+    if not any(p.suffix == ".png" or p.suffix == ".json" for p in files):
+        return None
+    manifest_path = out / "capture_manifest.json"
+    inputs = files + ([manifest_path] if manifest_path.is_file() else [])
+
+    archive = out / "downloads" / f"{camera_id}.zip"
+    if archive.is_file():
+        newest = max(p.stat().st_mtime for p in inputs)
+        if archive.stat().st_mtime >= newest:
+            return archive
+    archive.parent.mkdir(parents=True, exist_ok=True)
+
+    camera_manifest = None
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            manifest = {}
+        camera_manifest = camera_view(manifest, camera_id)
+
+    readme = (
+        f"{camera_id}: one view of run {out.name}\n"
+        f"\n"
+        f"frame_NNNN.png   the rendered frame\n"
+        f"frame_NNNN.json  that frame's labels: where the camera was, which\n"
+        f"                 way it pointed, the lens, and under 'state' every\n"
+        f"                 channel the flight recorder logged at that instant\n"
+        f"                 (units in context.state_units; the conditions the\n"
+        f"                 run was asked for in context.conditions)\n"
+        f"manifest.json    this camera's block, all of its frames, the scene's\n"
+        f"                 landmarks and the CRS the metres are expressed in\n"
+        f"\n"
+        f"Positions are local north/east metres about the origin named in\n"
+        f"context.frame, altitude in metres MSL. A consumer checks\n"
+        f"manifest_version before parsing.\n")
+
+    partial = archive.with_suffix(".zip.part")
+    with zipfile.ZipFile(partial, "w") as zf:
+        for path in files:
+            method = (zipfile.ZIP_STORED if path.suffix == ".png"
+                      else zipfile.ZIP_DEFLATED)
+            zf.write(path, arcname=f"{camera_id}/{path.name}",
+                     compress_type=method)
+        if camera_manifest is not None:
+            zf.writestr(f"{camera_id}/manifest.json",
+                        json.dumps(camera_manifest, indent=1),
+                        compress_type=zipfile.ZIP_DEFLATED)
+        zf.writestr(f"{camera_id}/README.txt", readme,
+                    compress_type=zipfile.ZIP_DEFLATED)
+    partial.replace(archive)
+    return archive
+
+
+#: Top-level keys a per-camera view carries alongside its own block and
+#: frames: the context the records are meaningless without.
+CAMERA_VIEW_KEYS = (
+    "manifest_version", "spec_digest", "simulation_digest",
+    "output_digest", "solve_source", "seed", "aircraft", "scene",
+    "frame", "landmarks", "software_revision", "conditions",
+    "state_units",
+)
+
+
+def camera_view(manifest: Dict, camera_id: str) -> Optional[Dict]:
+    """ONE camera's labels out of the whole-run manifest, or None when
+    the run has no such camera. Shared by the manifest route and the
+    zip, so the two cannot disagree about what a view contains."""
+    blocks = [c for c in manifest.get("cameras", [])
+              if str(c.get("camera_id")) == camera_id]
+    if not blocks:
+        return None
+    frames = [f for f in manifest.get("frames", [])
+              if str(f.get("camera_id")) == camera_id]
+    shared = {key: manifest.get(key) for key in CAMERA_VIEW_KEYS}
+    return {**shared, "camera": blocks[0], "frames": frames}
 
 
 def finish(out: Path, max_overlays: Optional[int] = 24) -> Dict:
