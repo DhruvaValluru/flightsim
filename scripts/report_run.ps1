@@ -142,6 +142,32 @@ if (Test-Path $manifestPath) {
     foreach ($c in $m.cameras) {
         Say "  camera        $($c.camera_id) ($($c.preset)), $($c.capture_count) image(s), $($c.schedule_basis)"
     }
+    # Version 4: the recorder's whole row rides with every frame. Which
+    # channels that is depends on which recorder flew -- the host's set
+    # is not the headless one's -- so the report names them, with their
+    # units, off the FIRST frame, rather than leaving it to a sidecar
+    # nobody has opened yet. A "?" unit is a channel whose name follows
+    # no convention, and is worth seeing here.
+    if ($m.frames.Count -gt 0 -and $m.frames[0].state) {
+        $state = $m.frames[0].state
+        $keys = @($state.PSObject.Properties.Name)
+        Say "  state         $($keys.Count) channel(s) per frame"
+        foreach ($k in $keys) {
+            $unit = if ($m.state_units -and $m.state_units.$k) { $m.state_units.$k } else { "?" }
+            Say ("     {0,-24} {1,14:G6} {2}" -f $k, [double]$state.$k, $unit)
+        }
+    } elseif ($m.manifest_version -ge 4) {
+        Say "  state         NONE on the first frame -- a version 4 manifest must carry one"
+    }
+    if ($m.conditions) {
+        $asked = @()
+        foreach ($p in $m.conditions.PSObject.Properties) {
+            $v = $p.Value
+            $u = if ($v.unit -and $v.unit -ne "dimensionless") { " $($v.unit)" } else { "" }
+            $asked += "$($p.Name)=$($v.value)$u ($($v.source))"
+        }
+        Say "  asked for     $($asked -join '; ')"
+    }
     Say ""
 } else {
     Say "MANIFEST      none -- this run stated no cameras, or it never got that far"

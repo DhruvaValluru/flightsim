@@ -225,7 +225,10 @@ def test_the_run_report_collects_what_diagnosis_has_actually_needed():
               / "scripts" / "report_run.ps1").read_text(encoding="utf-8")
 
     for needed in ("capture_manifest.json", "verify.json", "solve_source",
-                   "LogFlightSim", "Error:", "refus"):
+                   "LogFlightSim", "Error:", "refus",
+                   # Version 4: the first frame's recorded row, with
+                   # units, and the conditions the run was asked for.
+                   "state_units", "conditions"):
         assert needed in script, f"the report no longer collects {needed}"
 
     # NOT RUN is not a pass, so its reason is as wanted as a failure's.
