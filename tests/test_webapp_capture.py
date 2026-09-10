@@ -938,3 +938,140 @@ def test_the_run_publishes_the_flight_its_panels_read():
 
     source = inspect.getsource(runs.RunManager._render_flow)
     assert 'shutil.copyfile(host_telemetry, out / "telemetry.json")' in source
+
+
+# -- that many seconds of that view --------------------------------------
+
+def test_a_page_added_view_captures_the_whole_clip():
+    """Picking a viewpoint and a clip length should give that many
+    seconds of that view. It used to give three stills: the default
+    trigger is one capture per second, so a 3 s clip produced 3 frames
+    and the run read as a handful of photographs rather than a
+    simulation from that angle.
+
+    Planned, not set: the page chose it, the user did not state it, so
+    an edit in the review table still wins.
+    """
+    client = TestClient(app)
+    reply = client.post("/cameras", json={"spec": compiled_spec(),
+                                          "preset": "tower"})
+    fields = {f["name"]: f for f in reply.json()["cameras"][0]["fields"]}
+    assert fields["trigger"]["value"] == "continuous"
+    assert fields["trigger"]["source"] == "derived"
+
+
+def test_continuous_captures_every_recorded_sample():
+    """The whole flight as a sequence, at the rate it was recorded --
+    which is the telemetry rate, not the render's 30 fps."""
+    from core.capture.schedule import solve_schedule
+    from core.scenario.camera import CameraSpec
+
+    from tests.test_camera_poses import FRAME, make_columns
+
+    columns = make_columns(duration_s=22.0)
+    camera = CameraSpec.defaulted(camera_id="chase", preset="chase",
+                                  aircraft="B747")
+    camera.set("trigger", "continuous", frm="test")
+    schedule = solve_schedule(columns, camera, FRAME)
+    assert len(schedule) == len(columns["t"])
+    assert schedule.times[0] == columns["t"][0]
+    assert schedule.times[-1] == columns["t"][-1]
+    assert "every recorded sample" in schedule.basis
+
+
+def test_continuous_still_honours_a_stated_count():
+    """A stated capture_count is a CONTRACT everywhere else, and it does
+    not stop being one here: padding or truncating to fit would be the
+    manifest naming frames the flight did not take."""
+    from core.capture.schedule import ScheduleError, solve_schedule
+    from core.scenario.camera import CameraSpec
+
+    from tests.test_camera_poses import FRAME, make_columns
+
+    columns = make_columns(duration_s=4.0)
+    camera = CameraSpec.defaulted(camera_id="chase", preset="chase",
+                                  aircraft="B747")
+    camera.set("trigger", "continuous", frm="test")
+    camera.set("capture_count", 7, frm="test")
+    with pytest.raises(ScheduleError, match="count contract"):
+        solve_schedule(columns, camera, FRAME)
+
+
+def test_a_camera_clip_is_encoded_at_the_rate_its_frames_were_taken(tmp_path):
+    """A continuous capture runs at the recorded telemetry rate, not at
+    the render's 30 fps. Encoding at 30 would play the flight three
+    times too fast."""
+    from webapp.runs import RunManager
+
+    manifest = tmp_path / "capture_manifest.json"
+    manifest.write_text(json.dumps({"frames": [
+        {"camera_id": "chase", "t_s": i * 0.1} for i in range(20)
+    ]}), encoding="utf-8")
+    assert RunManager._capture_fps(manifest, "chase") == pytest.approx(10.0)
+
+
+def test_the_capture_rate_falls_back_rather_than_crashing(tmp_path):
+    from webapp.runs import RunManager
+
+    assert RunManager._capture_fps(tmp_path / "gone.json", "chase") > 0
+    empty = tmp_path / "capture_manifest.json"
+    empty.write_text(json.dumps({"frames": []}), encoding="utf-8")
+    assert RunManager._capture_fps(empty, "chase") > 0
+
+
+def test_every_view_gets_its_own_clip(tmp_path, monkeypatch):
+    """The gallery used to show one clip for the whole run, from
+    whichever camera happened to be first. A view is what the user
+    picked, so each one gets the flight from that angle."""
+    from webapp.runs import RunManager
+
+    out = tmp_path / "run"
+    frames = out / "frames"
+    for camera_id in ("chase", "tower"):
+        (frames / camera_id).mkdir(parents=True)
+        for i in range(3):
+            (frames / camera_id / f"frame_{i:04d}.png").write_bytes(_png())
+    (frames / "still").mkdir()
+    (frames / "still" / "frame_0000.png").write_bytes(_png())
+    (out / "capture_manifest.json").write_text(
+        json.dumps({"frames": []}), encoding="utf-8")
+
+    def fake_run(command, **kwargs):
+        Path(command[-1]).write_bytes(b"mp4")
+
+        class Done:
+            returncode = 0
+        return Done()
+
+    monkeypatch.setattr("webapp.runs.subprocess.run", fake_run)
+    made = RunManager()._encode_camera_clips(
+        out, frames, ["chase", "tower", "still"])
+    assert made == ["chase", "tower"], "a single still is not a clip"
+    assert (out / "clips" / "chase.mp4").is_file()
+    assert (out / "clips" / "tower.mp4").is_file()
+
+
+def test_a_camera_clip_is_served_and_guarded(labelled_run):
+    client = TestClient(app)
+    clips = labelled_run / "clips"
+    clips.mkdir()
+    (clips / "chase0.mp4").write_bytes(b"mp4")
+
+    good = client.get("/runs/run_lbl/clips/chase0.mp4")
+    assert good.status_code == 200
+    assert good.headers["content-type"] == "video/mp4"
+
+    for bad in ("..", "a/b", "x" * 65):
+        assert client.get(
+            f"/runs/run_lbl/clips/{bad}.mp4").status_code == 404
+
+
+def test_the_inventory_lists_the_clips_that_exist(labelled_run):
+    """Read off the directory like every other kind, so a clip the
+    encoder failed to make is absent rather than a broken video."""
+    from webapp.capture import inventory
+
+    assert inventory(labelled_run)["clips"] == []
+    (labelled_run / "clips").mkdir()
+    (labelled_run / "clips" / "tower0.mp4").write_bytes(b"mp4")
+    assert inventory(labelled_run)["clips"] == ["tower0"]

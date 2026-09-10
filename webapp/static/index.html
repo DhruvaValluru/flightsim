@@ -1166,6 +1166,13 @@ async function initGallery(runId, run) {
       `download="${camera.camera_id}_manifest.json">` +
       `this camera's manifest</a>` +
       `</div>`);
+    // The view's OWN clip: the flight from that angle, at the rate its
+    // frames were taken. The page used to show one video for the whole
+    // run, from whichever camera happened to be first.
+    if ((inventory.clips || []).includes(camera.camera_id)) {
+      html.push(`<video src="/runs/${runId}/clips/${id}.mp4" controls ` +
+        `style="max-width:100%;border-radius:6px;margin:.35rem 0"></video>`);
+    }
   }
 
   for (const [key, label, note] of kinds) {

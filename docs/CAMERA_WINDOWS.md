@@ -152,8 +152,23 @@ pass per camera, and a gallery under the clip shows the overlays, the
 rendered frames and the previews per camera, with the verification
 summary and a link to `capture_manifest.json`.
 
+**A view added from the page captures the whole clip.** Its trigger is
+`continuous`: every recorded sample, for as long as the clip lasts, so
+picking a viewpoint and a clip length gives *that many seconds of that
+view* rather than a handful of stills. Each one then gets **its own
+mp4**, encoded at the rate its frames were actually taken (the recorded
+telemetry rate, not the render's 30 fps -- encoding at 30 would play
+the flight three times too fast). The trigger is *planned*, not stated,
+so editing it in the review table still wins.
+
+The clip length selector beside the prompt sets `run.duration`, capped
+at 22 s (`CLIP_SECONDS`).
+
 Every view is another engine pass. Six views is one solve pass plus six
-render passes, and the page says so before you press Run.
+render passes, and the page says so before you press Run. More FRAMES
+per view is nearly free by comparison -- the pass flies the whole clip
+either way, and capturing more instants during it only writes more
+PNGs.
 
 Under each camera in the gallery is **open all N frame(s) with their
 metadata →**. That page puts every frame of that one camera beside its
@@ -177,6 +192,7 @@ The routes behind it, if you want them directly:
 | `/runs/<id>/frames/<camera>/<name>.png` | a rendered frame |
 | `/runs/<id>/overlays/<camera>/<name>.png` | that frame with the recorded geometry drawn on it |
 | `/runs/<id>/previews/<camera>/<name>.png` | the engine-free preview |
+| `/runs/<id>/clips/<camera>.mp4` | that view's own clip, at the rate its frames were taken |
 | `/runs/<id>/capture_manifest.json` | the labels |
 | `/runs/<id>/verify.json` | the verification summary |
 

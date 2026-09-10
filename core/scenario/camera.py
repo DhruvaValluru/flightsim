@@ -64,7 +64,13 @@ AIM_MODES = ("aircraft", "point", "bearing")
 #: specification naming it refuse as an unknown trigger: the scheduler
 #: half was unreachable from a spec, and its tests exercised a code path
 #: no run could take.)
-TRIGGER_KINDS = ("interval", "distance", "proximity", "event")
+#: "continuous" captures EVERY recorded sample: the whole flight as a
+#: sequence rather than a handful of stills, which is what "a
+#: simulation from this angle" means. It is what a camera added from
+#: the web page takes, so selecting a view and a clip length gives
+#: that many seconds of that view.
+TRIGGER_KINDS = ("continuous", "interval", "distance", "proximity",
+                 "event")
 EVENT_DIRECTIONS = ("above", "below", "rising", "falling")
 
 #: Per-airframe chase offsets, forward:right:up metres in the heading

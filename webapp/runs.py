@@ -99,6 +99,10 @@ class RunState:
     #: Camera Phase 2: the verification summary for a captured run
     #: (None for a camera-less run, which takes the legacy clip path).
     capture: Optional[Dict] = None
+    #: The cameras that got their own mp4 -- one clip per view, so a
+    #: selected angle and a selected clip length give that many seconds
+    #: of that angle.
+    camera_clips: List[str] = field(default_factory=list)
 
     def push(self, status: str, detail: str = "") -> None:
         self.status = status
@@ -1505,6 +1509,60 @@ class RunManager:
         return (frames / "render.json").is_file()
 
     @staticmethod
+    def _capture_fps(manifest_path: Path, camera_id: str) -> float:
+        """The rate this camera's frames were actually taken at.
+
+        A continuous capture runs at the recorded telemetry rate, not at
+        the render's 30 fps, so encoding at 30 would play the flight
+        three times too fast. Read the frame times back and use the
+        median spacing -- median, not mean, so one dropped instant does
+        not skew the whole clip.
+        """
+        from statistics import median
+
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return float(FPS)
+        times = sorted(float(f["t_s"]) for f in payload.get("frames", ())
+                       if str(f.get("camera_id")) == camera_id)
+        gaps = [b - a for a, b in zip(times, times[1:]) if b > a]
+        if not gaps:
+            return float(FPS)
+        return max(1.0, min(float(FPS), 1.0 / median(gaps)))
+
+    def _encode_camera_clips(self, out: Path, frames: Path,
+                             camera_ids: List[str]) -> List[str]:
+        """One mp4 per camera: that many seconds of THAT view.
+
+        The gallery used to show one clip for the whole run, from
+        whichever camera happened to be first. But a view is what the
+        user picked, so each one gets its own video of the flight --
+        every frame that camera took, at the rate it took them.
+        """
+        from experiments.showcase_matrix import FFMPEG
+
+        clips = out / "clips"
+        clips.mkdir(parents=True, exist_ok=True)
+        manifest_path = out / "capture_manifest.json"
+        made = []
+        for camera_id in camera_ids:
+            directory = frames / camera_id
+            if len(sorted(directory.glob("frame_*.png"))) < 2:
+                continue          # a still is not a clip
+            target = clips / f"{camera_id}.mp4"
+            done = subprocess.run([
+                str(FFMPEG), "-y",
+                "-framerate", f"{self._capture_fps(manifest_path, camera_id):g}",
+                "-i", str(directory / "frame_%04d.png"),
+                "-c:v", "libx264", "-preset", "medium", "-crf", "19",
+                "-pix_fmt", "yuv420p", str(target),
+            ], capture_output=True)
+            if done.returncode == 0 and target.is_file():
+                made.append(camera_id)
+        return made
+
+    @staticmethod
     def _encode_capture_clip(frames: Path, clip: Path,
                              camera_ids: List[str]) -> Optional[str]:
         """An mp4 of ONE camera's frames, leaving every frame on disk.
@@ -2086,6 +2144,10 @@ class RunManager:
                                      f"FAILED: {', '.join(failed)}")
             else:
                 run.push("verified", "images captured and verified")
+            made = self._encode_camera_clips(out, frames, camera_ids)
+            run.camera_clips = made
+            if made:
+                run.push("clips", f"a clip per view: {', '.join(made)}")
 
         run.push("encoding", "encoding frames to mp4")
         raw_clip = out / "raw.mp4"

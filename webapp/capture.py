@@ -313,6 +313,12 @@ def inventory(out: Path) -> Dict:
                 found.setdefault("", []).append(entry.name)
         return found
 
+    # One mp4 per camera: that many seconds of THAT view. Read off the
+    # directory like everything else here, so a clip the encoder failed
+    # to make is simply absent rather than a broken <video> element.
+    clips = (sorted(c.stem for c in (out / "clips").glob("*.mp4"))
+             if (out / "clips").is_dir() else [])
+
     manifest_path = out / "capture_manifest.json"
     cameras: List[Dict] = []
     if manifest_path.is_file():
@@ -333,6 +339,7 @@ def inventory(out: Path) -> Dict:
         "frames": listing(out / "frames"),
         "overlays": listing(out / "overlays"),
         "previews": listing(out / "previews"),
+        "clips": clips,
         "has_manifest": manifest_path.is_file(),
         "has_verify": (out / "verify.json").is_file(),
     }

@@ -1079,6 +1079,25 @@ mutate webapp/runs.py \
     "the engine projects the landmarks the manifest names" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+mutate webapp/server.py \
+    '    camera.plan("trigger", "continuous",' \
+    '    camera.plan("trigger", "interval",  # MUTATED: three stills' \
+    "a view added from the page captures the whole clip" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate core/capture/schedule.py \
+    '        indices = list(range(n))' \
+    '        indices = [0]  # MUTATED: continuous is one frame' \
+    "continuous captures every recorded sample" \
+    tests/test_camera_schedule.py tests/test_webapp_capture.py \
+    || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '        return max(1.0, min(float(FPS), 1.0 / median(gaps)))' \
+    '        return float(FPS)  # MUTATED: play the flight 3x too fast' \
+    "a camera clip plays at the rate its frames were taken" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

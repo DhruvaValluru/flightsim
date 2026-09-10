@@ -318,11 +318,21 @@ def cameras_endpoint(request: CameraRequest) -> JSONResponse:
         suffix += 1
         camera_id = f"{preset}{suffix}"
 
-    spec.cameras.append(CameraSpec.defaulted(
+    camera = CameraSpec.defaulted(
         camera_id=camera_id, preset=preset,
         aircraft=str(spec.aircraft.value),
         terrain_elevation_m=float(spec.terrain_elevation.value),
-        frm=f"added from the page as a {preset} view"))
+        frm=f"added from the page as a {preset} view")
+    # A view added from the page captures CONTINUOUSLY: every recorded
+    # sample, for as long as the clip lasts. Picking a viewpoint and a
+    # clip length should give that many seconds of that view -- a
+    # simulation from that angle -- not the three stills the one-per-
+    # second default produced on a three-second clip. Planned rather
+    # than set: the page chose it, the user did not state it, so an
+    # edit in the review table still wins.
+    camera.plan("trigger", "continuous",
+                frm="a view added from the page captures the whole clip")
+    spec.cameras.append(camera)
 
     violations = validate_cameras(spec)
     if violations:
@@ -624,6 +634,28 @@ def run_camera_manifest(run_id: str, camera_id: str):
 def frames_page() -> str:
     """The per-camera frame browser: every image beside its own labels."""
     return (STATIC / "frames.html").read_text(encoding="utf-8")
+
+
+@app.get("/runs/{run_id}/clips/{camera_id}.mp4")
+def run_camera_clip(run_id: str, camera_id: str):
+    """One camera's own clip: that many seconds of THAT view.
+
+    Guarded exactly like the image routes -- the id comes off a URL and
+    names a file -- and declared before the generic image route, whose
+    pattern also matches this path.
+    """
+    if not _CAMERA_NAME.match(camera_id):
+        return JSONResponse({"error": "no such clip"}, status_code=404)
+    root = (manager.out_root / run_id / "clips").resolve()
+    path = root / f"{camera_id}.mp4"
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(root)
+    except (OSError, ValueError):
+        return JSONResponse({"error": "no such clip"}, status_code=404)
+    if not resolved.is_file():
+        return JSONResponse({"error": "no such clip"}, status_code=404)
+    return FileResponse(resolved, media_type="video/mp4")
 
 
 @app.get("/runs/{run_id}/{kind}/{camera_id}/{name}")

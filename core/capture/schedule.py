@@ -22,6 +22,12 @@ Trigger kinds (the spec's ``trigger`` field):
   sample). ``capture_count`` == 0: one capture every ``period_s``,
   starting at the first sample, each snapped to the nearest recorded
   sample time.
+* ``continuous`` -- every recorded sample, which is the whole flight
+  as a sequence rather than a handful of stills. This is what "a
+  simulation from this angle" means: the camera captures at the rate
+  the flight was recorded at, for as long as it lasts, and the frames
+  play back as a video. A stated ``capture_count`` is still a contract
+  and still refuses if the record does not hold exactly that many.
 * ``distance`` -- one capture at the start, then one each time the
   flown ground track accumulates another ``distance_m`` metres
   (projected through the scene frame; drift and turns lengthen the
@@ -113,7 +119,11 @@ def solve_schedule(columns: Dict[str, Sequence[float]],
         raise ScheduleError(
             f"camera {camera_id!r} states a negative refractory period")
 
-    if trigger == "interval":
+    if trigger == "continuous":
+        indices = list(range(n))
+        basis = (f"every recorded sample over [{t[0]:g}, {t[-1]:g}] s "
+                 f"({n} frames at the recorded rate)")
+    elif trigger == "interval":
         indices, basis = _interval(camera_id, camera, t, count)
     elif trigger == "distance":
         indices, basis = _distance(camera_id, camera, columns, frame)
@@ -125,7 +135,7 @@ def solve_schedule(columns: Dict[str, Sequence[float]],
     else:
         raise ScheduleError(
             f"camera {camera_id!r} names unknown trigger {trigger!r} "
-            f"(interval | distance | proximity | event)")
+            f"(continuous | interval | distance | proximity | event)")
 
     if trigger != "interval" and count > 0 and len(indices) != count:
         raise ScheduleError(
