@@ -1994,6 +1994,15 @@ class RunManager:
                 **{**card_arguments,
                    "cameras": capture_card_blocks(spec, capture_solved),
                    "landmarks": capture_landmarks})
+            # The run's telemetry.json is the flight the aero panel and
+            # the effect report read. It used to be written by the render
+            # pass (-telemetry=<run>/telemetry.json); giving each camera
+            # pass its own recording left nothing there, so both went
+            # quiet -- "no recorded telemetry for this run" under a run
+            # that had just flown. The host's SOLVE flight is the right
+            # one to publish: it is the flight the pixels show, and
+            # host_determinism asserts every render pass matched it.
+            shutil.copyfile(host_telemetry, out / "telemetry.json")
             run.push("host flight",
                      f"{len(capture_solved['columns']['t'])} samples; every "
                      f"camera re-solved over the host's own flight")

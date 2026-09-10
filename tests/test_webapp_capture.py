@@ -920,3 +920,21 @@ def test_the_legacy_flags_refuse_multi_camera_by_name():
     ]
     with pytest.raises(ValueError, match="camera.multi_render"):
         camera_render_flags(spec)
+
+
+def test_the_run_publishes_the_flight_its_panels_read():
+    """<run>/telemetry.json is what the aero panel and the effect report
+    read. It used to be written by the render pass; giving each camera
+    pass its OWN recording left nothing there, and a run that had just
+    flown reported "no recorded telemetry for this run".
+
+    The host's solve flight is the right one to publish: it is the
+    flight the pixels show, and host_determinism asserts every render
+    pass matched it.
+    """
+    import inspect
+
+    from webapp import runs
+
+    source = inspect.getsource(runs.RunManager._render_flow)
+    assert 'shutil.copyfile(host_telemetry, out / "telemetry.json")' in source
