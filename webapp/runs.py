@@ -1506,7 +1506,7 @@ class RunManager:
 
     @staticmethod
     def _encode_capture_clip(frames: Path, clip: Path,
-                             camera_ids: List[str]) -> bool:
+                             camera_ids: List[str]) -> Optional[str]:
         """An mp4 of ONE camera's frames, leaving every frame on disk.
 
         Deliberately not ``encode_clip``: that one reads a flat
@@ -1515,6 +1515,12 @@ class RunManager:
         but the middle one. Right for the showcase, where the mp4 is the
         deliverable; here the FRAMES are the deliverable and the
         manifest names every one of them by path.
+
+        Returns the camera the clip was made from, because the telemetry
+        panel is composited onto that clip and has to read the SAME
+        camera's render.json. Returning a bare bool left the panel to
+        guess, and it guessed a flat frames/render.json that a capture
+        run does not have.
         """
         from experiments.showcase_matrix import FFMPEG, FPS
 
@@ -1530,8 +1536,8 @@ class RunManager:
                 "-pix_fmt", "yuv420p", str(clip),
             ], capture_output=True)
             if done.returncode == 0 and clip.is_file():
-                return True
-        return False
+                return camera_id
+        return None
 
     @staticmethod
     def card_has_control_inputs(card: Path) -> bool:
@@ -2084,9 +2090,13 @@ class RunManager:
         # middle one on success. That is right for the showcase, whose
         # deliverable is the mp4; it is destructive here, where the frames
         # ARE the deliverable and the manifest names every one of them.
-        clip_ok = (self._encode_capture_clip(frames, raw_clip, camera_ids)
-                   if capture_solved is not None
-                   else encode_clip(frames, raw_clip))
+        clip_camera = None
+        if capture_solved is not None:
+            clip_camera = self._encode_capture_clip(frames, raw_clip,
+                                                    camera_ids)
+            clip_ok = clip_camera is not None
+        else:
+            clip_ok = encode_clip(frames, raw_clip)
         if not clip_ok:
             if capture_solved is None:
                 run.push("failed", "ffmpeg could not encode the frames")
@@ -2100,7 +2110,13 @@ class RunManager:
                              "the verification stand")
 
         run.push("panel", "compositing the telemetry panel")
-        manifest = frames / "render.json"
+        # The render.json of the camera the CLIP was made from. A capture
+        # run writes frames/<camera_id>/render.json, so the flat path
+        # this used to read did not exist and the run died with a
+        # FileNotFoundError -- after the images, the manifest and a
+        # PASSING verification were already on disk.
+        manifest = ((frames / clip_camera / "render.json") if clip_camera
+                    else (frames / "render.json"))
         seed = int(spec.seed.value)
         turbulent = (str(spec.turbulence.value) != "none"
                      or rotor_provider is not None)
@@ -2113,9 +2129,19 @@ class RunManager:
         clip = out / "clip.mp4"
         if not build_panel_clip(card, manifest, conditions, raw_clip, clip,
                                 fps=FPS):
-            run.push("failed", "panel composition failed")
-            return
-        raw_clip.unlink(missing_ok=True)
+            if capture_solved is None:
+                run.push("failed", "panel composition failed")
+                return
+            # Same rule as the clip itself: on a capture run the images
+            # and their labels are the product. Keep the unpanelled clip
+            # rather than losing a verified capture over a composite.
+            if raw_clip.is_file():
+                raw_clip.replace(clip)
+            run.push("panel", "no telemetry panel (composition failed) -- "
+                              "the clip, the frames, the manifest and the "
+                              "verification stand")
+        else:
+            raw_clip.unlink(missing_ok=True)
         if (rotor_provider is not None or log_profile is not None
                 or thermals_block is not None or tornado_block is not None
                 or downburst_block is not None):

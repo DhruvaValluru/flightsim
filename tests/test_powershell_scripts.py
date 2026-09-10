@@ -210,3 +210,30 @@ def test_the_host_solve_pass_keeps_the_engine_s_output():
             / "scripts" / "run_ue_scenario.ps1").read_text(encoding="utf-8")
     assert "Tee-Object" in text
     assert "the commandlet's last words" in text
+
+
+def test_the_run_report_collects_what_diagnosis_has_actually_needed():
+    """Every failure on this branch was diagnosed from one of these.
+
+    The PowerShell parse error, the split commandlet name, the
+    scripted-card refusal, the schedule that outran the clip, the
+    landmark sets that disagreed -- each was found in a verification
+    detail or a named engine-log line. A report that stopped collecting
+    one of them would quietly cost a round trip, so this pins the set.
+    """
+    script = (Path(__file__).resolve().parents[1]
+              / "scripts" / "report_run.ps1").read_text(encoding="utf-8")
+
+    for needed in ("capture_manifest.json", "verify.json", "solve_source",
+                   "LogFlightSim", "Error:", "refus"):
+        assert needed in script, f"the report no longer collects {needed}"
+
+    # NOT RUN is not a pass, so its reason is as wanted as a failure's.
+    assert 'status -ne "PASS"' in script, (
+        "the report must explain every check that did not pass, not only "
+        "the ones that failed")
+
+    # And it must not commit anything but the report.
+    assert "GIT_INDEX_FILE" in script, (
+        "pushing must not touch the working tree; a temporary index is "
+        "how an in-progress edit avoids being committed or stashed")

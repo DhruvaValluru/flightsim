@@ -233,6 +233,24 @@ flags but not `-Visual`; that it lands bit-identical to two passes that
 DID get `-Visual` is the measurement which retires the open question of
 whether the render scene perturbs the flight. It does not.
 
+## Reporting a run
+
+Every failure on this branch was diagnosed from a log or a verification
+detail. Collecting them by hand costs a round trip each time, so:
+
+```powershell
+.\scripts\report_run.ps1            # the newest run under runs\
+.\scripts\report_run.ps1 -Push      # ...and push it for review
+```
+
+One file: what the manifest says it is (including `solve_source`), the
+verification verdict with the **detail of every check that did not
+pass** -- NOT RUN included, because it is not a pass -- what landed on
+disk per camera, and the named last words of every engine pass. `-Push`
+puts it on the `run-reports` branch, which carries reports and nothing
+else; the working tree is untouched, because the commit is built from a
+temporary index rather than by staging or stashing.
+
 ## Temporal alignment
 
 Two captures of the same simulation with different cameras must produce

@@ -314,8 +314,61 @@ def test_no_camera_has_frames_is_a_false_not_a_crash(tmp_path):
 
     frames = tmp_path / "frames"
     frames.mkdir()
-    assert not RunManager._encode_capture_clip(
-        frames, tmp_path / "raw.mp4", ["nothing"])
+    assert RunManager._encode_capture_clip(
+        frames, tmp_path / "raw.mp4", ["nothing"]) is None
+
+
+def test_the_encoder_names_the_camera_the_clip_came_from(tmp_path,
+                                                         monkeypatch):
+    """The telemetry panel is composited ONTO that clip and reads the
+    same camera's render.json. A bare bool left the panel to guess, and
+    it guessed a flat frames/render.json that a capture run does not
+    have -- so the run died with FileNotFoundError after the images, the
+    manifest and a PASSING verification were already on disk.
+    """
+    from webapp.runs import RunManager
+
+    frames = tmp_path / "frames"
+    (frames / "cockpit").mkdir(parents=True)
+    (frames / "cockpit" / "frame_0000.png").write_bytes(_png())
+
+    def fake_run(command, **kwargs):
+        Path(command[-1]).write_bytes(b"mp4")
+
+        class Done:
+            returncode = 0
+        return Done()
+
+    monkeypatch.setattr("webapp.runs.subprocess.run", fake_run)
+    assert RunManager._encode_capture_clip(
+        frames, tmp_path / "raw.mp4", ["cockpit"]) == "cockpit"
+
+
+def test_the_panel_reads_the_clip_s_own_camera():
+    import inspect
+
+    from webapp import runs
+
+    source = inspect.getsource(runs.RunManager._render_flow)
+    assert 'frames / clip_camera / "render.json"' in source, (
+        "the panel must read the render.json of the camera whose frames "
+        "the clip was encoded from")
+
+
+def test_a_failed_panel_does_not_lose_a_verified_capture():
+    """Same rule as the clip: on a capture run the images and their
+    labels are the product. Losing a verified capture over a composite
+    is the failure mode that threw away three good runs."""
+    import inspect
+
+    from webapp import runs
+
+    source = inspect.getsource(runs.RunManager._render_flow)
+    panel = source[source.index("compositing the telemetry panel"):]
+    assert "if capture_solved is None:" in panel, (
+        "only a clip-only run may fail over the panel")
+    assert "raw_clip.replace(clip)" in panel, (
+        "keep the unpanelled clip rather than leaving no video at all")
 
 
 # -- the schedule has to fit the flight ----------------------------------
