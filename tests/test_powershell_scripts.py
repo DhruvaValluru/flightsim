@@ -237,3 +237,113 @@ def test_the_run_report_collects_what_diagnosis_has_actually_needed():
     assert "GIT_INDEX_FILE" in script, (
         "pushing must not touch the working tree; a temporary index is "
         "how an in-progress edit avoids being committed or stashed")
+
+
+# -- the redirect that means "die if it says anything" -------------------
+#
+# Under $ErrorActionPreference = "Stop", Windows PowerShell 5.1 turns a
+# REDIRECTED stderr line from a native command into a terminating
+# NativeCommandError. So `... 2>$null`, which every reader takes to mean
+# "I do not care what it prints on stderr", actually means "throw if it
+# prints anything at all" -- the precise opposite, on the exact calls
+# that were written BECAUSE they were expected to fail.
+#
+# It has now cost three scripts. setup.ps1 and deploy_windows.ps1 found
+# it (the Microsoft Store's python.exe stub printing "Python was not
+# found" killed a deploy) and each grew a wrapper. report_run.ps1 was
+# then written without one and died on its first -Push, at
+# `rev-parse refs/heads/run-reports` -- the line whose whole job was to
+# ask whether that branch existed yet. ue_preflight.ps1 carried two more
+# of them, each guarding a probe whose own Fail line was unreachable.
+#
+# A merge (`2>&1 | Tee-Object`) is NOT this bug and must keep passing:
+# it makes stderr ordinary output, which is why every engine pass in
+# this repo has always logged that way.
+
+#: `2>` to anything that is not `&1`. `2>&1` merges; `2>$null` and
+#: `2>file` redirect, and only redirection throws.
+STDERR_REDIRECT = re.compile(r"2>\s*(?!&1)(\$null|\$[A-Za-z_]\w*|[\"'./\\A-Za-z])")
+
+
+def guarded_regions(path: Path):
+    """Line spans of functions that drop $ErrorActionPreference.
+
+    Brace-counted from each `function` header. Crude, and enough: the
+    safe idiom in this repo is a small wrapper function that saves the
+    preference, sets Continue, redirects, and restores in a finally.
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
+    spans = []
+    for index, line in enumerate(lines):
+        if not re.match(r"\s*function\s+[\w-]+", line):
+            continue
+        depth = 0
+        started = False
+        for end in range(index, len(lines)):
+            depth += lines[end].count("{") - lines[end].count("}")
+            if "{" in lines[end]:
+                started = True
+            if started and depth <= 0:
+                break
+        body = "\n".join(lines[index:end + 1])
+        if re.search(r'\$ErrorActionPreference\s*=\s*"Continue"', body):
+            spans.append((index + 1, end + 1))
+    return spans
+
+
+@pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
+def test_stderr_is_not_redirected_under_a_stop_preference(script):
+    text = script.read_text(encoding="utf-8")
+    if not re.search(r'\$ErrorActionPreference\s*=\s*"Stop"', text):
+        return
+    spans = guarded_regions(script)
+    offenders = []
+    for number, line in code_lines(script):
+        if not STDERR_REDIRECT.search(line):
+            continue
+        if any(lo <= number <= hi for lo, hi in spans):
+            continue
+        offenders.append((number, line.strip()))
+    assert not offenders, (
+        f"{script.name}: a native command's stderr is redirected while "
+        f"$ErrorActionPreference is 'Stop', which makes any stderr line "
+        f"a terminating error; call it through a wrapper that drops the "
+        f"preference to 'Continue', or merge with 2>&1 instead:\n" +
+        "\n".join(f"  line {n}: {text}" for n, text in offenders))
+
+
+def test_the_stderr_lint_catches_the_bugs_it_was_written_for():
+    """Its own reference cases: the two shapes that actually shipped."""
+    assert STDERR_REDIRECT.search(
+        '    $parent = & git -C $repo rev-parse "refs/heads/$Branch" 2>$null')
+    assert STDERR_REDIRECT.search(
+        '        $core = & $py -c "import jsbsim" 2>$null')
+
+    # A MERGE is how every engine pass in this repo logs, and is fine.
+    assert not STDERR_REDIRECT.search(
+        "& $editor @arguments 2>&1 | Tee-Object -FilePath $log | Out-Null")
+    assert not STDERR_REDIRECT.search("Git @('push') | Out-Host")
+
+
+def test_the_report_does_not_pipe_a_line_into_git():
+    """The other half of the same failed run, and the quieter half.
+
+    `"100644 blob $blob`t reports/x.txt" | git update-index --index-info`
+    reaches git with PowerShell's CRLF on the end, so the path carries a
+    trailing carriage return -- a control character, which Windows git
+    rejects. It does not fail loudly: it prints "Ignoring path ..." and
+    writes an EMPTY tree, so the push succeeds and delivers a commit
+    with no report in it. --cacheinfo passes the entry as an argument,
+    where PowerShell's line endings cannot reach it.
+    """
+    script = (Path(__file__).resolve().parents[1]
+              / "scripts" / "report_run.ps1")
+    # Code only: this file's own comments name the bug on purpose.
+    code = "\n".join(line for _, line in code_lines(script))
+    assert "--index-info" not in code, (
+        "an index entry piped on stdin picks up PowerShell's CRLF")
+    assert "--cacheinfo" in code
+    # And the commit message likewise goes in as an argument, not on
+    # stdin, for exactly the same reason.
+    assert "commit-tree" in code
+    assert "| & git" not in code

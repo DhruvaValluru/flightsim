@@ -7,6 +7,25 @@ $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $script:status = 0
 
+# Run a native command with its stderr discarded SAFELY. Under
+# $ErrorActionPreference = "Stop", Windows PowerShell 5.1 turns a
+# REDIRECTED stderr line into a terminating error -- so `... 2>$null`,
+# which reads as "I do not care what it says on stderr", is in fact
+# "die if it says anything at all". Both probes below are asked in the
+# expectation that they may fail: a machine without the VS2022 v143
+# toolset, and a .venv without jsbsim. Preflight exists to REPORT those,
+# and each unguarded redirect turned its own Fail line into an
+# unreachable branch. (setup.ps1 and deploy_windows.ps1 already carry
+# this wrapper; report_run.ps1 carries its git twin.)
+function Probe {
+    param([string]$exe, [string[]]$probeArgs)
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { return & $exe @probeArgs 2>$null }
+    catch { $global:LASTEXITCODE = 1; return $null }
+    finally { $ErrorActionPreference = $old }
+}
+
 function Say($label, $msg)  { "  {0,-34} {1}" -f $label, $msg | Write-Host }
 function Fail($label, $msg) { "  {0,-34} {1}" -f $label, $msg | Write-Host; $script:status = 1 }
 
@@ -52,9 +71,9 @@ if (Test-Path $vswhere) {
         # UE 5.5 is built against VS2022's v143 toolset, and so is the
         # JSBSim vendor build. A NEWER Visual Studio alone is not enough
         # -- measured on a machine with only VS2026 (v180): MSB8020.
-        $v143 = & $vswhere -latest -products * `
-            -requires Microsoft.VisualStudio.Component.VC.14.3x.17.14.x86.x64 `
-            -property installationPath 2>$null
+        $v143 = Probe $vswhere @("-latest", "-products", "*",
+            "-requires", "Microsoft.VisualStudio.Component.VC.14.3x.17.14.x86.x64",
+            "-property", "installationPath")
         if (-not $v143) {
             $v143 = Get-ChildItem "C:\Program Files*\Microsoft Visual Studio\2022" `
                 -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -99,7 +118,8 @@ if (Test-Path $vendoredJson) {
     # Both hosts must run the same JSBSim, or the parity claim is untestable.
     $py = Join-Path $repo ".venv\Scripts\python.exe"
     if (Test-Path $py) {
-        $core = & $py -c "import jsbsim,re;print(re.search(r'commit ([0-9a-f]+)', jsbsim.FGJSBBase().get_version()).group(1))" 2>$null
+        $core = Probe $py @("-c",
+            "import jsbsim,re;print(re.search(r'commit ([0-9a-f]+)', jsbsim.FGJSBBase().get_version()).group(1))")
         if ($LASTEXITCODE -eq 0 -and $core -eq $vendored.commit) {
             Say "jsbsim parity" "both hosts at $($core.Substring(0,12))"
         } elseif ($LASTEXITCODE -eq 0) {

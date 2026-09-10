@@ -30,6 +30,43 @@ param(
 $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
+# Native git with $ErrorActionPreference dropped for the duration of the
+# call. Under "Stop", Windows PowerShell 5.1 turns a REDIRECTED stderr
+# line from a native command into a terminating NativeCommandError --
+# the quirk setup.ps1 and deploy_windows.ps1 already carry a wrapper
+# for, and which this script was written without.
+#
+# git writes to stderr as a matter of routine: `rev-parse` on a branch
+# that does not exist yet, and `push` on every success. Measured on the
+# first -Push run ever made: the report was written, then
+#
+#     git.exe : fatal: ambiguous argument 'refs/heads/run-reports':
+#     unknown revision or path not in the working tree
+#
+# killed the script at the line whose whole job was to ask whether that
+# branch existed. Not redirecting at all is the fix: stderr goes to the
+# console where it can be read, and nothing throws. Existence is asked
+# with `show-ref --verify --quiet`, which says it in an exit code and
+# prints nothing either way.
+#
+# Arguments go in as ONE array rather than as remaining arguments:
+# PowerShell would try to bind a leading `--verify` as a parameter name
+# of this function.
+function Git {
+    param([string[]]$GitArgs)
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try { & git -C $repo @GitArgs }
+    finally { $ErrorActionPreference = $old }
+}
+
+function GitLine {
+    param([string[]]$GitArgs)
+    $out = Git $GitArgs | Select-Object -First 1
+    if ($null -eq $out) { return "" }
+    return ([string]$out).Trim()
+}
+
 if (-not $Run) {
     $candidates = @(Get-ChildItem (Join-Path $repo "runs") -Recurse -Depth 2 `
         -Filter "capture_manifest.json" -ErrorAction SilentlyContinue)
@@ -54,7 +91,7 @@ function Say([string]$text) { $lines.Add($text) }
 Say "run report: $name"
 Say "taken:      $stamp"
 Say "path:       $runPath"
-Say "revision:   $(& git -C $repo rev-parse --short HEAD 2>$null)"
+Say "revision:   $(GitLine @('rev-parse', '--short', 'HEAD'))"
 Say ""
 
 # -- what the manifest says it is --------------------------------------
@@ -165,24 +202,39 @@ if (-not $Push) {
 $tempIndex = Join-Path $env:TEMP "flightsim-report-index-$PID"
 $env:GIT_INDEX_FILE = $tempIndex
 try {
-    $blob = & git -C $repo hash-object -w $reportPath
-    $entry = "100644 blob $blob`t" + "reports/$name.txt"
-    $entry | & git -C $repo update-index --index-info
-    $tree = & git -C $repo write-tree
-    $parent = & git -C $repo rev-parse "refs/heads/$Branch" 2>$null
-    if ($LASTEXITCODE -eq 0 -and $parent) {
-        $commit = "run report $name" | & git -C $repo commit-tree $tree -p $parent
+    $blob = GitLine @("hash-object", "-w", $reportPath)
+    # --cacheinfo, NOT a line piped into `update-index --index-info`.
+    # PowerShell terminates a piped string with CRLF, so the path
+    # reached git carrying a trailing carriage return -- a control
+    # character, which Windows git rejects as an invalid path. It does
+    # not fail loudly: it prints
+    #
+    #     Ignoring path reports/e4f389accddd.txt
+    #
+    # and carries on to write an EMPTY tree, so the push would have
+    # succeeded and delivered a commit with no report in it. Measured
+    # on the first -Push run. Passing the entry as an argument keeps
+    # PowerShell's line endings out of it entirely.
+    Git @("update-index", "--add",
+          "--cacheinfo", "100644,$blob,reports/$name.txt") | Out-Null
+    $tree = GitLine @("write-tree")
+
+    $message = "run report $name"
+    Git @("show-ref", "--verify", "--quiet", "refs/heads/$Branch") | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $parent = GitLine @("rev-parse", "refs/heads/$Branch")
+        $commit = GitLine @("commit-tree", $tree, "-p", $parent, "-m", $message)
     } else {
-        $commit = "run report $name" | & git -C $repo commit-tree $tree
+        $commit = GitLine @("commit-tree", $tree, "-m", $message)
     }
-    & git -C $repo update-ref "refs/heads/$Branch" $commit
+    Git @("update-ref", "refs/heads/$Branch", $commit) | Out-Null
 } finally {
     Remove-Item Env:\GIT_INDEX_FILE -ErrorAction SilentlyContinue
     Remove-Item $tempIndex -ErrorAction SilentlyContinue
 }
 
 for ($i = 1; $i -le 4; $i++) {
-    & git -C $repo push -u origin "${Branch}:${Branch}" 2>&1 | Out-Host
+    Git @("push", "-u", "origin", "${Branch}:${Branch}") | Out-Host
     if ($LASTEXITCODE -eq 0) {
         Write-Host ""
         Write-Host "pushed to '$Branch' as reports/$name.txt -- nothing to paste."

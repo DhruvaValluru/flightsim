@@ -1124,6 +1124,24 @@ mutate webapp/static/frames.html \
     "the frame browser lazily loads hundreds of images" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+mutate scripts/report_run.ps1 \
+    '    Git @("show-ref", "--verify", "--quiet", "refs/heads/$Branch") | Out-Null' \
+    '    $parent = & git -C $repo rev-parse "refs/heads/$Branch" 2>$null  # MUTATED' \
+    "a redirected stderr is not a terminating error" \
+    tests/test_powershell_scripts.py || failures=$((failures+1))
+
+mutate scripts/report_run.ps1 \
+    '          "--cacheinfo", "100644,$blob,reports/$name.txt") | Out-Null' \
+    '          "--index-info") | Out-Null  # MUTATED: an entry on stdin' \
+    "the index entry never travels through a PowerShell pipe" \
+    tests/test_powershell_scripts.py || failures=$((failures+1))
+
+mutate scripts/ue_preflight.ps1 \
+    '        $core = Probe $py @("-c",' \
+    '        $core = & $py 2>$null @("-c",  # MUTATED: unguarded redirect' \
+    "the preflight probes can report a failure instead of dying on it" \
+    tests/test_powershell_scripts.py || failures=$((failures+1))
+
 mutate core/capture/schedule.py \
     '        indices = list(range(n))' \
     '        indices = [0]  # MUTATED: continuous is one frame' \
