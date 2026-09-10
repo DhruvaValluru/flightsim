@@ -1505,6 +1505,35 @@ class RunManager:
         return (frames / "render.json").is_file()
 
     @staticmethod
+    def _encode_capture_clip(frames: Path, clip: Path,
+                             camera_ids: List[str]) -> bool:
+        """An mp4 of ONE camera's frames, leaving every frame on disk.
+
+        Deliberately not ``encode_clip``: that one reads a flat
+        ``frames/frame_%04d.png`` (a capture run has
+        ``frames/<camera_id>/``) and, on success, deletes every frame
+        but the middle one. Right for the showcase, where the mp4 is the
+        deliverable; here the FRAMES are the deliverable and the
+        manifest names every one of them by path.
+        """
+        from experiments.showcase_matrix import FFMPEG, FPS
+
+        for camera_id in camera_ids:
+            directory = frames / camera_id
+            if not sorted(directory.glob("frame_*.png")):
+                continue
+            clip.parent.mkdir(parents=True, exist_ok=True)
+            done = subprocess.run([
+                str(FFMPEG), "-y", "-framerate", str(FPS),
+                "-i", str(directory / "frame_%04d.png"),
+                "-c:v", "libx264", "-preset", "medium", "-crf", "19",
+                "-pix_fmt", "yuv420p", str(clip),
+            ], capture_output=True)
+            if done.returncode == 0 and clip.is_file():
+                return True
+        return False
+
+    @staticmethod
     def card_has_control_inputs(card: Path) -> bool:
         """True when the card scripts control inputs.
 
@@ -1939,12 +1968,26 @@ class RunManager:
                 run.push("failed", f"[{exc.constraint}] {exc.message}")
                 return
             # The card the render passes consume carries the RE-SOLVED
-            # tracks, so the pixels and the manifest come out of one
-            # flight.
+            # tracks AND the re-solved landmarks, so the pixels and the
+            # manifest come out of one flight.
+            #
+            # The landmarks are the half that was missed, and the checks
+            # caught it on the first web run that got this far:
+            # landmark_reprojection and cross_view_consistency both
+            # FAILED. core.capture.landmarks anchors its marks around
+            # the FLOWN TRACK, so the same names sit at different
+            # coordinates on a different flight -- the engine projected
+            # the pre-run's set while the manifest declared the host's,
+            # and the two checks measured exactly that disagreement.
+            # That is the class of defect this whole phase is about, and
+            # the guards found it rather than a person.
+            capture_landmarks = capture_landmark_set(
+                spec, capture_solved, heightfield=capture_heightfield)
             card = write_run_card(
                 spec, out / "card.json",
                 **{**card_arguments,
-                   "cameras": capture_card_blocks(spec, capture_solved)})
+                   "cameras": capture_card_blocks(spec, capture_solved),
+                   "landmarks": capture_landmarks})
             run.push("host flight",
                      f"{len(capture_solved['columns']['t'])} samples; every "
                      f"camera re-solved over the host's own flight")
@@ -2031,9 +2074,30 @@ class RunManager:
 
         run.push("encoding", "encoding frames to mp4")
         raw_clip = out / "raw.mp4"
-        if not encode_clip(frames, raw_clip):
-            run.push("failed", "ffmpeg could not encode the frames")
-            return
+        # A CAPTURE run keeps its frames in frames/<camera_id>/, and the
+        # encoder reads a flat frames/frame_%04d.png -- so it found
+        # nothing and failed the whole run at the very end, after the
+        # images, the manifest, the overlays and the verification had all
+        # been written. Encode one camera's frames instead.
+        #
+        # And never through encode_clip, which DELETES every frame but the
+        # middle one on success. That is right for the showcase, whose
+        # deliverable is the mp4; it is destructive here, where the frames
+        # ARE the deliverable and the manifest names every one of them.
+        clip_ok = (self._encode_capture_clip(frames, raw_clip, camera_ids)
+                   if capture_solved is not None
+                   else encode_clip(frames, raw_clip))
+        if not clip_ok:
+            if capture_solved is None:
+                run.push("failed", "ffmpeg could not encode the frames")
+                return
+            # The images and their labels are the product of a capture
+            # run; the clip is a convenience. Losing it does not lose
+            # the run, and saying "failed" over it threw away everything
+            # that had already succeeded.
+            run.push("clip", "no mp4 (ffmpeg could not encode, or is not "
+                             "installed) -- the frames, the manifest and "
+                             "the verification stand")
 
         run.push("panel", "compositing the telemetry panel")
         manifest = frames / "render.json"

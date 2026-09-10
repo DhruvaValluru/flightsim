@@ -201,6 +201,123 @@ def test_a_camera_carrying_spec_goes_to_the_capture_stage():
     assert wants_capture(spec)
 
 
+# -- the landmarks the engine projects are the ones the manifest names ---
+
+def test_the_card_is_rewritten_with_the_re_solved_landmarks():
+    """The failure the checks caught on the first web run that got far
+    enough to be graded:
+
+        verification FAILED: landmark_reprojection, cross_view_consistency
+
+    core.capture.landmarks anchors its marks around the FLOWN TRACK, so
+    the same names sit at different coordinates on a different flight.
+    The card was rewritten after the host solve with the re-solved
+    camera tracks but the PRE-RUN's landmarks, so the engine projected
+    one set while the manifest declared another, and both engine-
+    referenced checks measured exactly that disagreement. They did their
+    job; a person had not noticed.
+    """
+    import inspect
+
+    from webapp import runs
+
+    source = inspect.getsource(runs.RunManager._render_flow)
+    after = source.split("re-solved over the host's own flight")[0]
+    rewrite = after[after.index("capture_resolve_over_host"):]
+    assert "capture_landmark_set(" in rewrite, (
+        "the landmarks must be recomputed over the host's flight before "
+        "the card the render passes consume is written")
+    assert '"landmarks": capture_landmarks' in rewrite
+
+
+def test_landmarks_move_with_the_flight_they_were_solved_over():
+    """Why the above matters, from the landmark module itself rather
+    than by assertion: two different tracks give the same names
+    different positions."""
+    from core.capture.landmarks import scene_landmarks
+
+    from tests.test_camera_poses import FRAME
+
+    near = [{"north_m": float(i), "east_m": 0.0, "alt_m": 4500.0}
+            for i in range(20)]
+    far = [{"north_m": 5000.0 + i, "east_m": 0.0, "alt_m": 4500.0}
+           for i in range(20)]
+    a = {m["name"]: (m["north_m"], m["east_m"]) for m
+         in scene_landmarks(FRAME, aircraft_track=near)}
+    b = {m["name"]: (m["north_m"], m["east_m"]) for m
+         in scene_landmarks(FRAME, aircraft_track=far)}
+    shared = set(a) & set(b)
+    assert shared, "the two sets share names"
+    assert any(a[name] != b[name] for name in shared), (
+        "same name, different place -- which is why the card and the "
+        "manifest must be built from ONE flight")
+
+
+# -- the clip is a convenience; the frames are the product ---------------
+
+def test_a_capture_clip_never_deletes_the_frames(tmp_path, monkeypatch):
+    """encode_clip deletes every frame but the middle one on success --
+    right for the showcase, whose deliverable is the mp4, destructive
+    here, where the frames ARE the deliverable and the manifest names
+    every one of them by path."""
+    from webapp.runs import RunManager
+
+    frames = tmp_path / "frames"
+    (frames / "chase").mkdir(parents=True)
+    for i in range(4):
+        (frames / "chase" / f"frame_{i:04d}.png").write_bytes(_png())
+
+    def fake_run(command, **kwargs):
+        Path(command[-1]).write_bytes(b"mp4")
+
+        class Done:
+            returncode = 0
+        return Done()
+
+    monkeypatch.setattr("webapp.runs.subprocess.run", fake_run)
+    assert RunManager._encode_capture_clip(
+        frames, tmp_path / "raw.mp4", ["chase"])
+    assert len(list((frames / "chase").glob("frame_*.png"))) == 4, (
+        "every frame the manifest names has to still be there")
+
+
+def test_a_capture_clip_reads_a_camera_directory(tmp_path, monkeypatch):
+    """A capture run keeps frames in frames/<camera_id>/, and the
+    showcase encoder reads a flat frames/frame_%04d.png -- so it found
+    nothing and failed the whole run at the very end, after the images,
+    the manifest and the verification had all been written."""
+    from webapp.runs import RunManager
+
+    frames = tmp_path / "frames"
+    (frames / "tower").mkdir(parents=True)
+    (frames / "tower" / "frame_0000.png").write_bytes(_png())
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen["input"] = command[command.index("-i") + 1]
+        Path(command[-1]).write_bytes(b"mp4")
+
+        class Done:
+            returncode = 0
+        return Done()
+
+    monkeypatch.setattr("webapp.runs.subprocess.run", fake_run)
+    # An empty camera is skipped rather than encoded into nothing.
+    (frames / "empty").mkdir()
+    assert RunManager._encode_capture_clip(
+        frames, tmp_path / "raw.mp4", ["empty", "tower"])
+    assert "tower" in seen["input"]
+
+
+def test_no_camera_has_frames_is_a_false_not_a_crash(tmp_path):
+    from webapp.runs import RunManager
+
+    frames = tmp_path / "frames"
+    frames.mkdir()
+    assert not RunManager._encode_capture_clip(
+        frames, tmp_path / "raw.mp4", ["nothing"])
+
+
 # -- the schedule has to fit the flight ----------------------------------
 
 def test_the_solve_window_is_cut_to_the_clip():
