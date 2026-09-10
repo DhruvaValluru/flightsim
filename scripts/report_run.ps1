@@ -52,17 +52,42 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 # Arguments go in as ONE array rather than as remaining arguments:
 # PowerShell would try to bind a leading `--verify` as a parameter name
 # of this function.
-function Git {
+#
+# The name is NOT `Git`, and the call target is a resolved path, not the
+# word `git`. PowerShell resolves a command as alias, then FUNCTION, then
+# cmdlet, then external program, and it does so case-insensitively -- so
+# `function Git { & git ... }` does not call git at all. It calls itself,
+# forever:
+#
+#     The script failed due to call depth overflow.
+#     At scripts\report_run.ps1:59 char:11
+#     +     try { & git -C $repo @GitArgs }
+#
+# It is slow before it is fatal, which is why the run before it was
+# reported as taking too long rather than as failing -- a recursion
+# thousands of frames deep, doing nothing, looking exactly like a push
+# waiting on a credential. Resolving git.exe once, up front, also turns
+# "git is not on PATH" into a named failure here instead of a confusing
+# one later.
+$gitExe = (Get-Command "git.exe" -CommandType Application `
+    -ErrorAction SilentlyContinue | Select-Object -First 1)
+if (-not $gitExe) {
+    Write-Error "git is not on PATH; run scripts\deploy_windows.ps1 first."
+    exit 1
+}
+$gitExe = $gitExe.Source
+
+function Invoke-Git {
     param([string[]]$GitArgs)
     $old = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    try { & git -C $repo @GitArgs }
+    try { & $gitExe -C $repo @GitArgs }
     finally { $ErrorActionPreference = $old }
 }
 
-function GitLine {
+function Get-GitLine {
     param([string[]]$GitArgs)
-    $out = Git $GitArgs | Select-Object -First 1
+    $out = Invoke-Git $GitArgs | Select-Object -First 1
     if ($null -eq $out) { return "" }
     return ([string]$out).Trim()
 }
@@ -100,7 +125,7 @@ function Say([string]$text) { $lines.Add($text) }
 Say "run report: $name"
 Say "taken:      $stamp"
 Say "path:       $runPath"
-Say "revision:   $(GitLine @('rev-parse', '--short', 'HEAD'))"
+Say "revision:   $(Get-GitLine @('rev-parse', '--short', 'HEAD'))"
 Say ""
 
 # -- what the manifest says it is --------------------------------------
@@ -231,7 +256,7 @@ if (-not $Push) {
 $tempIndex = Join-Path $env:TEMP "flightsim-report-index-$PID"
 $env:GIT_INDEX_FILE = $tempIndex
 try {
-    $blob = GitLine @("hash-object", "-w", $reportPath)
+    $blob = Get-GitLine @("hash-object", "-w", $reportPath)
     # --cacheinfo, NOT a line piped into `update-index --index-info`.
     # PowerShell terminates a piped string with CRLF, so the path
     # reached git carrying a trailing carriage return -- a control
@@ -244,19 +269,19 @@ try {
     # succeeded and delivered a commit with no report in it. Measured
     # on the first -Push run. Passing the entry as an argument keeps
     # PowerShell's line endings out of it entirely.
-    Git @("update-index", "--add",
+    Invoke-Git @("update-index", "--add",
           "--cacheinfo", "100644,$blob,reports/$name.txt") | Out-Null
-    $tree = GitLine @("write-tree")
+    $tree = Get-GitLine @("write-tree")
 
     $message = "run report $name"
-    Git @("show-ref", "--verify", "--quiet", "refs/heads/$Branch") | Out-Null
+    Invoke-Git @("show-ref", "--verify", "--quiet", "refs/heads/$Branch") | Out-Null
     if ($LASTEXITCODE -eq 0) {
-        $parent = GitLine @("rev-parse", "refs/heads/$Branch")
-        $commit = GitLine @("commit-tree", $tree, "-p", $parent, "-m", $message)
+        $parent = Get-GitLine @("rev-parse", "refs/heads/$Branch")
+        $commit = Get-GitLine @("commit-tree", $tree, "-p", $parent, "-m", $message)
     } else {
-        $commit = GitLine @("commit-tree", $tree, "-m", $message)
+        $commit = Get-GitLine @("commit-tree", $tree, "-m", $message)
     }
-    Git @("update-ref", "refs/heads/$Branch", $commit) | Out-Null
+    Invoke-Git @("update-ref", "refs/heads/$Branch", $commit) | Out-Null
 } finally {
     Remove-Item Env:\GIT_INDEX_FILE -ErrorAction SilentlyContinue
     Remove-Item $tempIndex -ErrorAction SilentlyContinue
@@ -276,7 +301,7 @@ $env:GCM_INTERACTIVE = "never"
 try {
     for ($i = 1; $i -le 4; $i++) {
         Step "pushing to '$Branch' (attempt $i of 4)"
-        Git @("push", "-u", "origin", "${Branch}:${Branch}") | Out-Host
+        Invoke-Git @("push", "-u", "origin", "${Branch}:${Branch}") | Out-Host
         if ($LASTEXITCODE -eq 0) {
             Write-Host ""
             Write-Host "pushed to '$Branch' as reports/$name.txt -- nothing to paste."

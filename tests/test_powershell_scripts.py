@@ -401,3 +401,110 @@ def test_the_report_says_what_it_is_doing():
         "same silence with a name on it")
     for phase in ("finding the newest run", "reading {0}", "pushing to"):
         assert phase in code, f"no progress line for: {phase}"
+
+
+# -- the wrapper that wrapped itself ------------------------------------
+#
+# PowerShell resolves a command as alias, then FUNCTION, then cmdlet,
+# then external program -- case-insensitively. So a wrapper written the
+# obvious way:
+#
+#     function Git {
+#         ...
+#         try { & git -C $repo @GitArgs }   # <- calls Git, not git.exe
+#     }
+#
+# never reaches git at all. It recurses until the engine gives up:
+#
+#     The script failed due to call depth overflow.
+#
+# and it is SLOW before it is fatal, so the run before the one that
+# reported it was reported instead as "taking way too long" -- thousands
+# of stack frames doing nothing, indistinguishable from a push waiting
+# on a credential. Two rounds spent on the wrong diagnosis.
+
+#: A bare `& name` call: an external program or another function, but
+#: not `& $variable`, which is a resolved path and cannot collide.
+BARE_AMPERSAND_CALL = re.compile(r"&\s+([A-Za-z][\w.-]*)")
+
+
+def function_blocks(path: Path):
+    """(name, body) for every `function NAME {` in the file."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    blocks = []
+    for index, line in enumerate(lines):
+        match = re.match(r"\s*function\s+([\w-]+)", line)
+        if not match:
+            continue
+        depth = 0
+        started = False
+        for end in range(index, len(lines)):
+            depth += lines[end].count("{") - lines[end].count("}")
+            if "{" in lines[end]:
+                started = True
+            if started and depth <= 0:
+                break
+        blocks.append((match.group(1), "\n".join(lines[index:end + 1])))
+    return blocks
+
+
+@pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
+def test_no_function_shadows_the_command_it_calls(script):
+    offenders = []
+    for name, body in function_blocks(script):
+        for called in BARE_AMPERSAND_CALL.findall(body):
+            stem = called.rsplit(".", 1)[0]
+            if stem.lower() == name.lower():
+                offenders.append((name, called))
+    assert not offenders, (
+        f"{script.name}: a function invokes a command with its own name, "
+        f"which PowerShell resolves back to the function -- infinite "
+        f"recursion, not a call to the program. Rename the function "
+        f"(Invoke-Git) and call a resolved path (& $gitExe):\n" +
+        "\n".join(f"  function {n} calls & {c}" for n, c in offenders))
+
+
+def test_the_shadowing_lint_catches_the_bug_it_was_written_for(tmp_path):
+    """The exact wrapper that shipped, and the fix for it."""
+    shipped = tmp_path / "shipped.ps1"
+    shipped.write_text(
+        'function Git {\n'
+        '    param([string[]]$GitArgs)\n'
+        '    try { & git -C $repo @GitArgs }\n'
+        '}\n', encoding="utf-8")
+    assert [n for n, body in function_blocks(shipped)] == ["Git"]
+    assert any(c.rsplit(".", 1)[0].lower() == n.lower()
+               for n, body in function_blocks(shipped)
+               for c in BARE_AMPERSAND_CALL.findall(body))
+
+    fixed = tmp_path / "fixed.ps1"
+    fixed.write_text(
+        'function Invoke-Git {\n'
+        '    param([string[]]$GitArgs)\n'
+        '    try { & $gitExe -C $repo @GitArgs }\n'
+        '}\n', encoding="utf-8")
+    assert not any(c.rsplit(".", 1)[0].lower() == n.lower()
+                   for n, body in function_blocks(fixed)
+                   for c in BARE_AMPERSAND_CALL.findall(body))
+
+    # `.exe` on the call site is the same collision: PowerShell matches
+    # a function named Git against `& git.exe`? It does not -- but the
+    # stem comparison is what makes the lint catch `function Git` +
+    # `& Git.exe`, which some shells' habits produce.
+    both = tmp_path / "both.ps1"
+    both.write_text('function Git {\n    & Git.exe status\n}\n',
+                    encoding="utf-8")
+    assert any(c.rsplit(".", 1)[0].lower() == n.lower()
+               for n, body in function_blocks(both)
+               for c in BARE_AMPERSAND_CALL.findall(body))
+
+
+def test_the_report_calls_git_through_a_resolved_path():
+    """Belt to the lint's braces: the wrapper must not name git at all."""
+    script = (Path(__file__).resolve().parents[1]
+              / "scripts" / "report_run.ps1")
+    code = "\n".join(line for _, line in code_lines(script))
+    assert "function Invoke-Git" in code
+    assert "& $gitExe" in code
+    assert not re.search(r"&\s+git\b", code), (
+        "every git call must go through the resolved $gitExe path")

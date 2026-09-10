@@ -1125,8 +1125,8 @@ mutate webapp/static/frames.html \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
 mutate scripts/report_run.ps1 \
-    '    Git @("show-ref", "--verify", "--quiet", "refs/heads/$Branch") | Out-Null' \
-    '    $parent = & git -C $repo rev-parse "refs/heads/$Branch" 2>$null  # MUTATED' \
+    '    Invoke-Git @("show-ref", "--verify", "--quiet", "refs/heads/$Branch") | Out-Null' \
+    '    $parent = & $gitExe -C $repo rev-parse "refs/heads/$Branch" 2>$null  # MUTATED' \
     "a redirected stderr is not a terminating error" \
     tests/test_powershell_scripts.py || failures=$((failures+1))
 
@@ -1158,6 +1158,18 @@ mutate scripts/report_run.ps1 \
     '    Write-Host ("  ... {0}" -f $text) -ForegroundColor DarkGray' \
     '    # MUTATED: Step prints nothing, so a slow phase is silence' \
     "the report says which phase it is in" \
+    tests/test_powershell_scripts.py || failures=$((failures+1))
+
+mutate scripts/report_run.ps1 \
+    'function Invoke-Git {' \
+    'function Git {  # MUTATED: shadows git.exe and calls itself' \
+    "no wrapper function shadows the command it calls" \
+    tests/test_powershell_scripts.py || failures=$((failures+1))
+
+mutate scripts/report_run.ps1 \
+    '    try { & $gitExe -C $repo @GitArgs }' \
+    '    try { & git -C $repo @GitArgs }  # MUTATED: the word, not the path' \
+    "git is called through a resolved path, never by name" \
     tests/test_powershell_scripts.py || failures=$((failures+1))
 
 mutate core/capture/schedule.py \
