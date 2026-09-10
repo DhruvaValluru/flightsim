@@ -347,3 +347,57 @@ def test_the_report_does_not_pipe_a_line_into_git():
     # stdin, for exactly the same reason.
     assert "commit-tree" in code
     assert "| & git" not in code
+
+
+def test_the_report_cannot_sit_waiting_for_a_credential():
+    """A push that WAITS is worse than a push that fails.
+
+    `run-reports` has never existed on the remote, and the first push of
+    a new branch is exactly when git reaches for a credential helper. If
+    it has nothing cached it waits -- on a terminal prompt, or on a
+    Credential Manager window that may open behind everything else. The
+    script looks hung, and the report (already written to disk before
+    the push) looks lost with it. Reported as "taking way too long",
+    which is the only symptom it can produce.
+    """
+    script = (Path(__file__).resolve().parents[1]
+              / "scripts" / "report_run.ps1")
+    code = "\n".join(line for _, line in code_lines(script))
+    assert 'GIT_TERMINAL_PROMPT = "0"' in code
+    assert 'GCM_INTERACTIVE = "never"' in code
+    # And it must say where the report already is when the push fails,
+    # rather than only that it failed.
+    assert "$reportPath" in code.split("could not push")[-1], (
+        "a failed push must name the report already on disk")
+
+
+def test_the_report_reads_engine_logs_from_the_tail():
+    """`Select-String -Path` reads the WHOLE file.
+
+    These logs grow with the frame count -- the commandlet logs per
+    frame -- so continuous capture makes them an order of magnitude
+    longer than the three-still runs this script was written against,
+    once per pass. The code only ever kept the last ten matches, so the
+    tail gives the same answer in constant time; the whole-file scan
+    stays as the fallback for a refusal that fired early.
+    """
+    script = (Path(__file__).resolve().parents[1]
+              / "scripts" / "report_run.ps1")
+    code = "\n".join(line for _, line in code_lines(script))
+    assert "-Tail $TAIL_LINES" in code
+    assert "Select-String -Path" in code, (
+        "the whole-file scan must remain as the fallback")
+
+
+def test_the_report_says_what_it_is_doing():
+    """A script that prints nothing for a minute cannot be told from a
+    hung one, and that is exactly how this was reported."""
+    script = (Path(__file__).resolve().parents[1]
+              / "scripts" / "report_run.ps1")
+    code = "\n".join(line for _, line in code_lines(script))
+    body = re.search(r"function Step\([^)]*\)\s*\{(.*?)\n\}", code, re.S)
+    assert body and "Write-Host" in body.group(1), (
+        "Step must actually print; a Step that writes nothing is the "
+        "same silence with a name on it")
+    for phase in ("finding the newest run", "reading {0}", "pushing to"):
+        assert phase in code, f"no progress line for: {phase}"

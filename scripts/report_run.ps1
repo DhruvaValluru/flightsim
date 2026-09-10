@@ -67,7 +67,16 @@ function GitLine {
     return ([string]$out).Trim()
 }
 
+# Progress goes to the CONSOLE, not into the report: a script that
+# prints nothing for a minute is indistinguishable from a hung one, and
+# the first -Push run that took a while was reported as "taking way too
+# long" with no way to say which phase was taking it.
+function Step([string]$text) {
+    Write-Host ("  ... {0}" -f $text) -ForegroundColor DarkGray
+}
+
 if (-not $Run) {
+    Step "finding the newest run under runs\"
     $candidates = @(Get-ChildItem (Join-Path $repo "runs") -Recurse -Depth 2 `
         -Filter "capture_manifest.json" -ErrorAction SilentlyContinue)
     if ($candidates.Count -eq 0) {
@@ -169,15 +178,35 @@ Say ""
 # -- the engine's own last words, from every pass ----------------------
 # The named lines only. A UE log is twenty megabytes of start-up around
 # one sentence that says what went wrong.
+#
+# From the TAIL first. `Select-String -Path` reads the whole file, and a
+# continuous capture makes these logs grow with the frame count -- the
+# commandlet logs per frame, so 221 frames per camera is a log an order
+# of magnitude longer than the three-still runs this was written
+# against, times one per pass. Since the code only ever kept the LAST
+# ten matches, reading the last few thousand lines gives the same answer
+# in constant time. A refusal that fired early would be missed, so when
+# the tail carries nothing named the whole file is scanned once -- rare,
+# and worth the wait when it happens.
+$TAIL_LINES = 4000
 $logs = @(Get-ChildItem $runPath -Recurse -Filter "*.log" -ErrorAction SilentlyContinue)
 if ($logs.Count -gt 0) {
     Say "ENGINE LOGS"
     foreach ($log in $logs) {
-        $named = Select-String -Path $log.FullName -Pattern `
-            "LogFlightSim|Error:|Fatal|refus|Warning/Error Summary" `
-            -ErrorAction SilentlyContinue | Select-Object -Last 10
-        Say ("  -- {0} ({1} bytes)" -f
-             $log.FullName.Substring($runPath.Length + 1), $log.Length)
+        Step ("reading {0} ({1:N0} bytes)" -f $log.Name, $log.Length)
+        $pattern = "LogFlightSim|Error:|Fatal|refus|Warning/Error Summary"
+        $named = Get-Content $log.FullName -Tail $TAIL_LINES `
+            -ErrorAction SilentlyContinue |
+            Select-String -Pattern $pattern | Select-Object -Last 10
+        $whence = "last $TAIL_LINES lines"
+        if (-not $named) {
+            Step "  nothing named near the end; scanning the whole file"
+            $named = Select-String -Path $log.FullName -Pattern $pattern `
+                -ErrorAction SilentlyContinue | Select-Object -Last 10
+            $whence = "whole file"
+        }
+        Say ("  -- {0} ({1} bytes, {2})" -f
+             $log.FullName.Substring($runPath.Length + 1), $log.Length, $whence)
         if ($named) { foreach ($n in $named) { Say "     $($n.Line.Trim())" } }
         else { Say "     (no named line; the pass said nothing it flags)" }
     }
@@ -233,14 +262,39 @@ try {
     Remove-Item $tempIndex -ErrorAction SilentlyContinue
 }
 
-for ($i = 1; $i -le 4; $i++) {
-    Git @("push", "-u", "origin", "${Branch}:${Branch}") | Out-Host
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host ""
-        Write-Host "pushed to '$Branch' as reports/$name.txt -- nothing to paste."
-        exit 0
+# A push that WAITS is worse than a push that fails. `run-reports` has
+# never existed on the remote, and a first push of a new branch is
+# exactly when git reaches for a credential helper -- which, if it has
+# nothing cached, sits there forever waiting on a terminal prompt or on
+# a Credential Manager window that may open behind everything else. The
+# script looks hung and the report, already written to disk, looks lost.
+# These two make a missing credential an immediate, named failure.
+$oldPrompt = $env:GIT_TERMINAL_PROMPT
+$oldInteractive = $env:GCM_INTERACTIVE
+$env:GIT_TERMINAL_PROMPT = "0"
+$env:GCM_INTERACTIVE = "never"
+try {
+    for ($i = 1; $i -le 4; $i++) {
+        Step "pushing to '$Branch' (attempt $i of 4)"
+        Git @("push", "-u", "origin", "${Branch}:${Branch}") | Out-Host
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host ""
+            Write-Host "pushed to '$Branch' as reports/$name.txt -- nothing to paste."
+            exit 0
+        }
+        Start-Sleep -Seconds ([math]::Pow(2, $i))
     }
-    Start-Sleep -Seconds ([math]::Pow(2, $i))
+    Write-Host ""
+    Write-Host "could not push after 4 attempts. The report is already written:"
+    Write-Host "  $reportPath"
+    Write-Host "If git asked for credentials, this run refused to wait for them"
+    Write-Host "(GIT_TERMINAL_PROMPT=0). Push the branch once by hand to store"
+    Write-Host "them, then -Push works unattended from here on:"
+    Write-Host "  git push -u origin ${Branch}:${Branch}"
+    exit 1
+} finally {
+    if ($null -eq $oldPrompt) { Remove-Item Env:\GIT_TERMINAL_PROMPT -ErrorAction SilentlyContinue }
+    else { $env:GIT_TERMINAL_PROMPT = $oldPrompt }
+    if ($null -eq $oldInteractive) { Remove-Item Env:\GCM_INTERACTIVE -ErrorAction SilentlyContinue }
+    else { $env:GCM_INTERACTIVE = $oldInteractive }
 }
-Write-Error "could not push the report after 4 attempts"
-exit 1

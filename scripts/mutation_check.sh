@@ -1142,6 +1142,24 @@ mutate scripts/ue_preflight.ps1 \
     "the preflight probes can report a failure instead of dying on it" \
     tests/test_powershell_scripts.py || failures=$((failures+1))
 
+mutate scripts/report_run.ps1 \
+    '$env:GIT_TERMINAL_PROMPT = "0"' \
+    '$env:GIT_TERMINAL_PROMPT = "1"  # MUTATED: wait for a credential' \
+    "the push refuses to sit waiting for a credential" \
+    tests/test_powershell_scripts.py || failures=$((failures+1))
+
+mutate scripts/report_run.ps1 \
+    '-Tail $TAIL_LINES' \
+    '-Raw  # MUTATED: read every engine log end to end' \
+    "engine logs are read from the tail, not end to end" \
+    tests/test_powershell_scripts.py || failures=$((failures+1))
+
+mutate scripts/report_run.ps1 \
+    '    Write-Host ("  ... {0}" -f $text) -ForegroundColor DarkGray' \
+    '    # MUTATED: Step prints nothing, so a slow phase is silence' \
+    "the report says which phase it is in" \
+    tests/test_powershell_scripts.py || failures=$((failures+1))
+
 mutate core/capture/schedule.py \
     '        indices = list(range(n))' \
     '        indices = [0]  # MUTATED: continuous is one frame' \
