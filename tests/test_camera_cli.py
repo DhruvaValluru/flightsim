@@ -1,7 +1,7 @@
 """Camera Phase 1, package I: the instructor commands, end to end.
 
 python -m flightsim.capture / flightsim.verify over the committed
-examples, on the real headless flight dynamics -- the off-mac
+examples, on the real headless flight dynamics -- the engine-less
 demonstration path, exercised as a test so it cannot rot.
 """
 

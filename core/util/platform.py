@@ -2,11 +2,12 @@
 
 The truthful platform story (README "Platform support"): the compiler,
 headless physics, telemetry, terrain baking and the webapp run on
-macOS / Linux / Windows; the UE render half is macOS-only for now and
-REFUSES BY NAME everywhere else (every render gotcha was measured on
-Metal/macOS only -- claiming more would be claiming what was never
-measured). Everything that differs by OS routes through this module so
-tests can pin the dispatch and future code has one obvious place to
+macOS / Linux / Windows; the UE render half runs on WINDOWS (the
+supported, tested render platform since Camera Phase 2: an engine
+install plus the built bridge) and REFUSES BY NAME everywhere else --
+macOS builds the same sources but is not the maintained path, Linux is
+headless-only. Everything that differs by OS routes through this module
+so tests can pin the dispatch and future code has one obvious place to
 look.
 
 Tools are found, never assumed: ffmpeg by env override
@@ -245,14 +246,15 @@ def ue_runner_command(repo: Path, script_stem: str) -> List[str]:
 
 
 def ue_available() -> bool:
-    """True where the UE render half can run: macOS (where every render
-    gotcha was measured), or Windows with an engine install AND a built
-    bridge -- the gate flips on only once scripts/build_ue.ps1 has
-    produced the binary, so a bare clone still refuses by name with the
-    build steps instead of failing mid-run. Windows render output is
-    validated per machine by experiments/gate6_visual.py (the render
-    calibrations were measured on Metal; Gate 6 measures them again from
-    the pixels wherever it runs)."""
+    """True where the UE render half can run: Windows with an engine
+    install AND a built bridge -- the gate flips on only once
+    scripts/build_ue.ps1 has produced the binary, so a bare clone still
+    refuses by name with the build steps instead of failing mid-run --
+    or a Mac, which builds the same sources (the original calibrations
+    were measured there) but is not the maintained render path.
+    Windows render output is validated per machine by
+    experiments/gate6_visual.py, which measures the visual clauses again
+    from the pixels wherever it runs."""
     if is_mac():
         return True
     if os_name() == "windows":

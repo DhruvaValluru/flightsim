@@ -32,7 +32,9 @@ import sys
 
 sys.path.insert(0, str(REPO))
 
-from core.nl.compiler import compile_prompt  # noqa: E402
+from core.nl.compiler import (  # noqa: E402
+    camera_questions, compile_prompt, rescale_moves,
+)
 from core.nl.llm_compiler import (  # noqa: E402
     LLMCompileError,
     compile_prompt_llm,
@@ -191,15 +193,21 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
                           if result.transcript else None)
         except LLMCompileError as exc:
             # The offline compiler is the documented fallback; the UI states
-            # the switch and why, never silently. The regex compiler never
-            # asks and never sees answers: it compiles the ORIGINAL prompt,
-            # even when the LLM died between the question and answer rounds.
-            spec = compile_prompt(prompt)
+            # the switch and why, never silently. It compiles the ORIGINAL
+            # prompt plus whatever the answer round said to its one
+            # question (camera_view), even when the LLM died between the
+            # question and answer rounds.
+            spec = compile_prompt(prompt, answers=request.answers)
             compiler_used = "regex (llm unavailable)"
             llm_note = str(exc)
+            questions = [] if request.answers else camera_questions(prompt)
     else:
-        spec = compile_prompt(prompt)
+        # The regex path has exactly one clarifying question: which view,
+        # when the prompt speaks of imagery and names none. Asked once;
+        # the answer round compiles with the answer and asks nothing.
+        spec = compile_prompt(prompt, answers=request.answers)
         compiler_used = "regex"
+        questions = [] if request.answers else camera_questions(prompt)
 
     # The answer round must never LOSE the question round. The protocol is
     # stateless: round 2 re-extracts everything from the whole conversation,
@@ -236,7 +244,12 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
             return JSONResponse(
                 {"error": f"clip length must be in (0, {CLIP_SECONDS:g}] s"},
                 status_code=400)
+        previous = float(spec.duration.value)
         spec.set("duration", seconds, frm="clip length selector (web UI)")
+        # A move phrase spans the whole flight: keyframes that ended at
+        # the old duration end at the new one (stated keyframe times
+        # elsewhere are left alone).
+        rescale_moves(spec, previous, seconds)
 
     # Planning happens BEFORE the table and verdict are built, so what the
     # user reviews is what will run: the weather event's documented
@@ -498,7 +511,7 @@ def status_endpoint() -> JSONResponse:
     # llm_available is a presence check (SDK + key in THIS process's
     # environment) so the page can state the compiler up front instead of
     # discovering a fallback after a spin. platform/render_available are
-    # the same pattern for the UE half: off-mac the page says so up front
+    # the same pattern for the UE half: without the Windows host the page says so up front
     # and a run refuses ue.platform by name instead of 500ing.
     from core.util.platform import os_name, ue_available
 

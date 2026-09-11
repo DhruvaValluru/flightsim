@@ -58,24 +58,27 @@ The page states which tier is active next to the Interpret button.
 
 One codebase, platform dispatch inside it (`core/util/platform.py`):
 
-| | macOS | Linux | Windows |
+| | Windows | macOS | Linux |
 |---|---|---|---|
 | Prompt → LLM compile → spec → validate | ✓ | ✓ | ✓ |
-| Headless JSBSim physics + telemetry | ✓ | ✓ | ✓ |
-| Web app on localhost:8008, terrain baking, effect reports | ✓ | ✓ | ✓ |
-| Rendered video clips (Unreal Engine host) | ✓ | refused by name | ✓ after the build below |
+| Headless JSBSim physics + telemetry, capture manifests, labels, verification | ✓ | ✓ | ✓ |
+| Web app on localhost:8008, terrain baking, effect reports, batch + export | ✓ | ✓ | ✓ |
+| Rendered frames and clips (Unreal Engine host) | ✓ after the build below | builds from the same sources; not the tested path | refused by name |
 
-Everything in the first three rows is pure Python and is exercised by CI
-on all three OSes. The UE render half runs on macOS (where every render
-calibration was measured, on Metal) and on Windows once the build steps
-below have produced the bridge -- until then Windows refuses as
-`ue.platform` with the exact missing piece, and the web app still
-delivers the headless half (spec, provenance, validation, telemetry).
-The render calibrations were measured on Metal only, so on Windows run
-`experiments/gate6_visual.py` once after building: it re-measures the
+**Windows is the render platform.** Every rendered result since Camera
+Phase 2 (landmark reprojection 0.00 px, two-view triangulation 0.000 m,
+the `-labels` masks and depth, the sensor frames, Gate 10-R) is measured
+or is to be measured on Windows, and every capture-and-render
+instruction in the docs is a PowerShell command. Until the build steps
+below have produced the bridge, Windows refuses as `ue.platform` with
+the exact missing piece, and everything in the first three rows still
+completes. Everything in those rows is pure Python and is exercised by
+CI on all three OSes. macOS builds the same sources (the original
+calibrations were measured there, on Metal) but is not maintained as a
+render path this phase; Linux is headless-only. After building on
+Windows run `experiments/gate6_visual.py` once: it re-measures the
 visual clauses from the rendered pixels on YOUR machine, which is the
-project's standard of evidence -- a green Gate 6 there is the Windows
-render claim. Linux remains headless-only.
+project's standard of evidence.
 
 Per-OS setup notes:
 

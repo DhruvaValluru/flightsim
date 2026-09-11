@@ -1484,8 +1484,8 @@ class RunManager:
         from core.util.platform import ue_available, ue_platform_refusal
 
         if not ue_available():
-            # The named platform refusal, not a 500: every render gotcha
-            # was measured on Metal/macOS only. The headless half (spec,
+            # The named platform refusal, not a 500: rendering needs the
+            # Windows host (engine + built bridge). The headless half (spec,
             # provenance, validation, telemetry via run_spec) already
             # happened or remains available on this OS.
             return {"refused": ue_platform_refusal(),

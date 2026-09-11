@@ -1967,6 +1967,86 @@ def verify_frame_integrity(manifest: Dict, run_dir=None) -> Check:
                  f"{sorted(recorded)}")
 
 
+PROJECTION_MATRIX_TOL_PX = 1e-3
+
+
+def verify_projection_matrix(manifest: Dict) -> Check:
+    """Every frame's projection_matrix projects the aircraft (and every
+    landmark in front of the camera) to the SAME pixel as the record's
+    parameters through the manifest's stated formula, to a thousandth
+    of a pixel; the intrinsic_matrix carries the record's own fx, fy
+    and principal point. A matrix that disagrees with the parameters it
+    claims to summarise fails by frame. NOT RUN on a manifest with no
+    matrices (older than this check)."""
+    from .labels import camera_axes, project_with_matrix, to_camera, to_pixel
+
+    frames = manifest.get("frames", [])
+    carried = [r for r in frames if "projection_matrix" in r]
+    if not carried:
+        return Check("projection_matrix", NOT_RUN,
+                     "no frame carries a projection_matrix")
+    landmarks = [(lm["north_m"], lm["east_m"], lm["alt_m"])
+                 for lm in manifest.get("landmarks", [])]
+    bad = []
+    worst = 0.0
+    compared = 0
+    for record in frames:
+        P = record.get("projection_matrix")
+        K = record.get("intrinsic_matrix")
+        name = f"{record.get('camera_id')}/{record.get('index')}"
+        if P is None or K is None:
+            bad.append(f"{name}: no matrices")
+            continue
+        cx, cy = record["principal_point_px"]
+        if (abs(K[0][0] - record["fx_px"]) > 1e-9 or abs(K[1][1] - record["fy_px"]) > 1e-9
+                or abs(K[0][2] - cx) > 1e-9 or abs(K[1][2] - cy) > 1e-9
+                or K[2] != [0.0, 0.0, 1.0] or K[0][1] != 0.0 or K[1][0] != 0.0):
+            bad.append(f"{name}: intrinsic_matrix is not [[fx,0,cx],[0,fy,cy],[0,0,1]]")
+        axes = camera_axes(record["quaternion_wxyz"])
+        aircraft = record["aircraft"]
+        points = [(aircraft["north_m"], aircraft["east_m"], aircraft["alt_m"])] + landmarks
+        for point in points:
+            expected = to_pixel(record, to_camera(record, point, axes))
+            via_matrix = project_with_matrix(P, point)
+            if (expected is None) != (via_matrix is None):
+                bad.append(f"{name}: matrix and parameters disagree on "
+                           f"whether a point is in front of the camera")
+                break
+            if expected is None:
+                continue
+            compared += 1
+            err = max(abs(expected[0] - via_matrix[0]), abs(expected[1] - via_matrix[1]))
+            worst = max(worst, err)
+            if err > PROJECTION_MATRIX_TOL_PX:
+                bad.append(f"{name}: matrix projects {err:.4f} px from the parameters")
+                break
+    if bad:
+        return Check("projection_matrix", FAIL,
+                     f"{len(bad)} frame(s): " + "; ".join(bad[:4]))
+    return Check("projection_matrix", PASS,
+                 f"{compared} projections through P agree with the recorded "
+                 f"parameters to {worst:.2e} px (tol {PROJECTION_MATRIX_TOL_PX} px)")
+
+
+def verify_json_schema(manifest: Dict) -> Check:
+    """The manifest against the published JSON Schema for its version
+    (docs/schemas/capture_manifest.v<N>.schema.json): the contract a
+    consumer validates against before parsing. Any violation fails,
+    by path."""
+    from .schema import SchemaError, schema_path, validate_manifest
+
+    try:
+        problems = validate_manifest(manifest)
+    except SchemaError as exc:
+        return Check("json_schema", FAIL, str(exc))
+    if problems:
+        return Check("json_schema", FAIL,
+                     f"{len(problems)} violation(s) of {schema_path(manifest).name}: "
+                     + "; ".join(problems[:4]))
+    return Check("json_schema", PASS,
+                 f"valid against {schema_path(manifest).name}")
+
+
 def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     """The pass/fail summary over a run directory (CLI: flightsim.verify).
 
@@ -2001,7 +2081,9 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     report.add("fields_finite", finite,
                f"{len(manifest.get('frames', []))} frame records checked")
 
+    report.checks.append(verify_json_schema(manifest))
     report.checks.append(verify_intrinsics(manifest))
+    report.checks.append(verify_projection_matrix(manifest))
     report.checks.append(verify_pose_matches_spec(manifest))
     report.checks.append(verify_geometry(manifest))
     report.checks.append(verify_landmark_reprojection(manifest, run_dir))

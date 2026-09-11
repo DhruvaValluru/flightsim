@@ -36,6 +36,18 @@ ALL DELIVERED; the Windows verification steps (labels, -linear,
 refusal, a rendered batch export) are listed per package in the
 report.
 
+**Camera Phase 1 gap closure (2026-09-11, docs/CAMERA_PHASE1_REPORT.md
+"Gap closure").** Every missing/partial item of the phase plan closed:
+multi-camera sentences (ids = preset names), move phrases as keyframes
+(keyframed offsets in the solver; `camera.moves` refuses unknown keys),
+the regex `camera_view` question + answer round, a 26-prompt corpus
+test, the exact first-order-hold lag (chase rate sensitivity 3.29 m ->
+0.3 mm), per-frame K and P with a `projection_matrix` check, the
+published JSON Schema + dependency-free validator + `json_schema`
+check, and Windows named as the render platform in README/platform.py/
+conftest (marker `ue_host`). Regex compiler ids changed from camera0 to
+the preset name.
+
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
 

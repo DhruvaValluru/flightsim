@@ -3,7 +3,7 @@
 The platform story is code, not luck: OS dispatch lives in
 core/util/platform.py alone, missing tools refuse by name with the
 per-OS fix, fonts degrade honestly instead of crashing, the UE half
-refuses ue.platform off-mac, and the UTF-8 discipline is enforced
+refuses ue.platform without the Windows host, and the UTF-8 discipline is enforced
 statically so it cannot rot.
 """
 

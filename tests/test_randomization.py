@@ -346,7 +346,7 @@ def test_the_card_carries_the_block_only_when_on(tmp_path):
     assert block["engine_sun_azimuth_deg"] == engine_sun_azimuth(block["sun_azimuth_deg"])
     assert block["livery"] == "default"
     assert "Meeus" in block["solar_source"]
-    moved = block["camera_jitter"]["camera0"]
+    moved = block["camera_jitter"]["chase"]      # regex camera ids are the preset names
     assert moved["offset_forward_m"]["base"] == -110.0
     assert moved["offset_forward_m"]["delta"] == pytest.approx(
         moved["offset_forward_m"]["value"] + 110.0, abs=1e-6)

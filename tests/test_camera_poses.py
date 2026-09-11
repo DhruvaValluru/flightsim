@@ -259,9 +259,12 @@ def _manoeuvring(dt, duration_s=20.0):
         altitude=lambda t: 3000.0 + 2.0 * t)
 
 
-# Bounds MEASURED on the track below (chase 3.294 m / 0.032 deg, wingman
-# 3.212 / 0.047, tower 0.000 / 0.224, cockpit exactly 0), then rounded up
-# for headroom. The "ground" preset is deliberately absent: this
+# Bounds MEASURED on the track below with the exact first-order-hold
+# integrator (chase 0.0003 m / 0.0001 deg, wingman 0.0006 / 0.0002,
+# tower and cockpit exactly 0), then rounded up for headroom. Under the
+# previous zero-order-hold update the same track measured chase 3.294 m
+# / 0.032 deg and wingman 3.212 / 0.047: that was integrator error, and
+# it is gone; what remains is the aircraft track's own interpolation. The "ground" preset is deliberately absent: this
 # synthetic track flies due north from the origin and the ground
 # observer sits 1500 m due north of it, so the aircraft passes THROUGH
 # the camera and the look direction flips 180 degrees. That is geometry,
@@ -269,9 +272,9 @@ def _manoeuvring(dt, duration_s=20.0):
 # thing.
 @pytest.mark.parametrize("preset,bound_m,bound_deg", [
     ("cockpit", 1e-9, 1e-9),      # body-fixed: no filter, exactly invariant
-    ("tower", 1e-9, 0.5),         # world-anchored: only the AIM is lagged
-    ("chase", 5.0, 0.5),
-    ("wingman", 5.0, 0.5),
+    ("tower", 1e-9, 0.001),       # world-anchored: only the aim is lagged, exactly
+    ("chase", 0.01, 0.001),
+    ("wingman", 0.01, 0.001),
 ])
 def test_lagged_presets_rate_sensitivity_is_bounded(preset, bound_m,
                                                     bound_deg):
@@ -296,11 +299,13 @@ def test_lagged_presets_rate_sensitivity_is_bounded(preset, bound_m,
     assert worst_deg <= bound_deg, f"{preset}: {worst_deg:.3f} deg"
 
 
-def test_the_lagged_presets_are_NOT_rate_invariant():
-    """The complement of the bound: this is a real limitation, and a
-    test that says so keeps the report honest if someone later claims
-    invariance the solver does not have. (Measured 1.68 m on a 110 m
-    chase offset at 140 m/s.)"""
+def test_the_lagged_presets_are_rate_invariant_to_the_input_not_bit_identical():
+    """The complement of the bound, kept honest in both directions: the
+    lagged chase is NOT bit-identical across rates (the two rates sample
+    the aircraft track differently, so the goal the filter follows is
+    not the same signal) -- but the residual is the track's, not the
+    integrator's, and stays under a centimetre. A residual back above
+    that means someone reintroduced integrator error."""
     camera = CameraSpec.defaulted(camera_id="c", preset="chase",
                                   aircraft="B747")
     coarse = solve_pose_track(_manoeuvring(0.1), camera, FRAME)
@@ -310,5 +315,24 @@ def test_the_lagged_presets_are_NOT_rate_invariant():
         math.dist((coarse.north_m[i], coarse.east_m[i], coarse.alt_m[i]),
                   (fine.north_m[j], fine.east_m[j], fine.alt_m[j]))
         for i, t in enumerate(coarse.t) for j in [fine_at[t]])
-    assert worst > 0.5, ("the lag filter became rate-invariant -- if that "
-                         "was deliberate, update the report and this test")
+    assert 0.0 < worst < 0.01, worst
+
+
+def test_lag_step_is_the_exact_first_order_hold_solution():
+    """Against the closed form: a goal ramping at constant slope settles
+    to (goal - slope * tau), whatever the step size; and a step taken in
+    one interval equals the same step taken in two halves."""
+    from core.capture.poses import lag_step
+
+    tau, slope = 0.45, 140.0
+    y = 0.0
+    x_prev = 0.0
+    for _ in range(400):                 # 40 s at 0.1 s
+        x_now = x_prev + slope * 0.1
+        y = lag_step(y, x_prev, x_now, 0.1, tau)
+        x_prev = x_now
+    assert y == pytest.approx(x_prev - slope * tau, abs=1e-6)
+    one = lag_step(3.0, 10.0, 12.0, 0.2, tau)
+    two = lag_step(lag_step(3.0, 10.0, 11.0, 0.1, tau), 11.0, 12.0, 0.1, tau)
+    assert one == pytest.approx(two, abs=1e-12)
+    assert lag_step(3.0, 10.0, 12.0, 0.0, tau) == 3.0

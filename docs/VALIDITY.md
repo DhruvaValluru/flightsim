@@ -1080,6 +1080,24 @@ that any rendered batch has been exported on this machine (no engine).
 
 ---
 
+### 2.19 The manifest's contract (gap closure): schema, matrices, lag
+
+What IS claimed: every capture manifest validates against the published
+JSON Schema of its version (`docs/schemas/`), checked by the verifier;
+every frame's `projection_matrix` reproduces the recorded parameters'
+projection to 0.001 px (measured 2.5e-9); the lagged camera presets
+integrate their time constants exactly over each telemetry interval, so
+a change of sample rate moves a chase camera by the aircraft track's own
+interpolation residual (measured 0.3 mm on the reference track) and not
+by integrator error. What is NOT claimed: bit-identical lagged poses
+across sample rates -- the two rates sample a different goal signal, and
+the residual is pinned under a centimetre, not at zero; and the validator
+here enforces the subset of JSON Schema the file uses (it refuses a file
+that uses more), so a consumer with a full validator sees exactly the
+same contract, no more.
+
+---
+
 ## 3. Reproducibility: two different claims, kept separate
 
 **Physics** is intended to be bit-reproducible from a spec, and that is a

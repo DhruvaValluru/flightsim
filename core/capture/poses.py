@@ -4,7 +4,7 @@ Camera Phase 1's design decision 1, the run-card discipline applied to
 cameras: the pose track is COMPUTED IN PYTHON as a pure function of the
 recorded telemetry and the camera spec, and every consumer -- the
 capture manifest, the geometry verifier, the preview renderer, and (on
-macOS) the render commandlet's consume-poses mode -- reads the same
+Windows) the render commandlet's consume-poses mode -- reads the same
 solved track verbatim. No engine, no wall clock, no RNG, no frame-rate
 dependence: two invocations over the same telemetry are bit-identical,
 and the suite compares them by digest.
@@ -28,10 +28,13 @@ The five presets are ported from
 * **explicit** -- a stated placement with no preset behaviour: position
   and aim exactly as stated (or keyframed), no smoothing.
 
-Smoothing is the C++ ``SmoothTowards`` filter discretised on the
-telemetry clock: ``alpha = 1 - exp(-dt / tau)`` with dt the recorded
-sample spacing, so the lag is a time constant, never a per-frame
-fraction. The initial condition is DECLARED (the C++ actor starts
+Smoothing is the C++ ``SmoothTowards`` filter's continuous-time model
+(``y' = (x - y) / tau``) integrated EXACTLY over each telemetry
+interval with the goal linear across it (first-order hold,
+:func:`lag_step`), so the lag is a time constant, never a per-frame
+fraction, and the integrator adds no rate-dependent error of its own;
+what remains between sample rates is the aircraft track's own
+interpolation error (measured, bounded by test). The initial condition is DECLARED (the C++ actor starts
 wherever it was spawned; the solver has no spawn): the smoothed
 position starts AT its first goal and the smoothed aim at the
 aircraft, which is exactly the commandlet's own "start it where it
@@ -227,6 +230,19 @@ def look_angles(from_n, from_e, from_alt, to_n, to_e, to_alt):
 
 # -- keyframed moves -----------------------------------------------------
 
+#: Every field a keyframe may carry besides ``t_s``. A move naming any
+#: other key refuses by name (camera.moves) in validation rather than
+#: being silently ignored here.
+MOVE_KEYS = (
+    "position_north_m", "position_east_m", "position_alt_m",
+    "position_lat_deg", "position_lon_deg",
+    "aim_north_m", "aim_east_m", "aim_alt_m",
+    "aim_bearing_deg", "aim_elevation_deg",
+    "focal_length_mm",
+    "offset_forward_m", "offset_right_m", "offset_up_m",
+)
+
+
 def _keyframe_value(moves: List[Dict], key: str, t: float,
                     default: float) -> float:
     """Piecewise-linear interpolation of one keyframed scalar over
@@ -396,6 +412,23 @@ def _columns(columns: Dict[str, Sequence[float]]):
     return n
 
 
+def lag_step(y_prev: float, x_prev: float, x_now: float, dt: float,
+             tau: float) -> float:
+    """One step of the first-order lag y' = (x - y) / tau with the
+    input LINEAR between the two samples (first-order hold): the exact
+    solution over the interval, so halving the sample spacing changes
+    the result only through the input's own interpolation error, not
+    through the integrator. (The previous zero-order-hold update,
+    ``y += (x_now - y) * (1 - exp(-dt/tau))``, carried a first-order
+    integrator error that measured 1.68 m on a 110 m chase offset at
+    140 m/s between 10 and 20 Hz; this form measures centimetres.)"""
+    if dt <= 0.0:
+        return y_prev
+    decay = math.exp(-dt / tau)
+    slope = (x_now - x_prev) / dt
+    return x_now - slope * tau + (y_prev - x_prev + slope * tau) * decay
+
+
 def solve_pose_track(columns: Dict[str, Sequence[float]],
                      camera: CameraSpec,
                      frame: SceneFrame) -> PoseTrack:
@@ -424,9 +457,17 @@ def solve_pose_track(columns: Dict[str, Sequence[float]],
                      "explicit"):
         raise PoseSolveError(f"camera.poses: unknown preset {preset!r}")
 
-    offset = (float(camera.offset_forward_m.value),
-              float(camera.offset_right_m.value),
-              float(camera.offset_up_m.value))
+    def offset_at(at_t: float):
+        """The aircraft-relative offset, keyframable (push in, pull
+        back, orbit are keyframes over these three)."""
+        return (_keyframe_value(camera.moves, "offset_forward_m", at_t,
+                                float(camera.offset_forward_m.value)),
+                _keyframe_value(camera.moves, "offset_right_m", at_t,
+                                float(camera.offset_right_m.value)),
+                _keyframe_value(camera.moves, "offset_up_m", at_t,
+                                float(camera.offset_up_m.value)))
+
+    offset = offset_at(t[0]) if n else (0.0, 0.0, 0.0)
 
     pos_n: List[float] = []
     pos_e: List[float] = []
@@ -464,8 +505,9 @@ def solve_pose_track(columns: Dict[str, Sequence[float]],
                                     if preset == "wingman" else 1.0)
         sm_n = sm_e = sm_alt = None
         aim_n = aim_e = aim_alt = None
+        prev_goal = prev_target = None
         for i in range(n):
-            gn, ge, gup = _heading_only(air_yaw[i], *offset)
+            gn, ge, gup = _heading_only(air_yaw[i], *offset_at(t[i]))
             goal = (air_n[i] + gn, air_e[i] + ge, air_alt[i] + gup)
             target = (air_n[i], air_e[i], air_alt[i])
             if i == 0:
@@ -473,14 +515,13 @@ def solve_pose_track(columns: Dict[str, Sequence[float]],
                 aim_n, aim_e, aim_alt = target
             else:
                 dt = t[i] - t[i - 1]
-                ap = 1.0 - math.exp(-dt / tau_pos)
-                aa = 1.0 - math.exp(-dt / AIM_LAG_S)
-                sm_n += (goal[0] - sm_n) * ap
-                sm_e += (goal[1] - sm_e) * ap
-                sm_alt += (goal[2] - sm_alt) * ap
-                aim_n += (target[0] - aim_n) * aa
-                aim_e += (target[1] - aim_e) * aa
-                aim_alt += (target[2] - aim_alt) * aa
+                sm_n = lag_step(sm_n, prev_goal[0], goal[0], dt, tau_pos)
+                sm_e = lag_step(sm_e, prev_goal[1], goal[1], dt, tau_pos)
+                sm_alt = lag_step(sm_alt, prev_goal[2], goal[2], dt, tau_pos)
+                aim_n = lag_step(aim_n, prev_target[0], target[0], dt, AIM_LAG_S)
+                aim_e = lag_step(aim_e, prev_target[1], target[1], dt, AIM_LAG_S)
+                aim_alt = lag_step(aim_alt, prev_target[2], target[2], dt, AIM_LAG_S)
+            prev_goal, prev_target = goal, target
             y, p = look_angles(sm_n, sm_e, sm_alt, aim_n, aim_e, aim_alt)
             pos_n.append(sm_n)
             pos_e.append(sm_e)
@@ -504,10 +545,10 @@ def solve_pose_track(columns: Dict[str, Sequence[float]],
                     aim_n, aim_e, aim_alt = target
                 else:
                     dt = t[i] - t[i - 1]
-                    aa = 1.0 - math.exp(-dt / AIM_LAG_S)
-                    aim_n += (target[0] - aim_n) * aa
-                    aim_e += (target[1] - aim_e) * aa
-                    aim_alt += (target[2] - aim_alt) * aa
+                    aim_n = lag_step(aim_n, prev_target[0], target[0], dt, AIM_LAG_S)
+                    aim_e = lag_step(aim_e, prev_target[1], target[1], dt, AIM_LAG_S)
+                    aim_alt = lag_step(aim_alt, prev_target[2], target[2], dt, AIM_LAG_S)
+                prev_target = target
                 y, p = look_angles(cn, ce, calt, aim_n, aim_e, aim_alt)
                 q = euler_to_quat(0.0, p, y)
             elif aim_mode == "point":

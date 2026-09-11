@@ -124,6 +124,35 @@ def to_pixel(record: Dict, cam: Vec) -> Optional[Tuple[float, float]]:
             cy + record["fy_px"] * cam[1] / cam[2])
 
 
+def projection_matrices(record: Dict) -> Tuple[List[List[float]], List[List[float]]]:
+    """(K, P) for a frame record: K the 3x3 intrinsic matrix and P the
+    3x4 projection over homogeneous scene points (north, east, up, 1)
+    -- ``pixel = (P p) / (P p)_z``. Exactly what to_camera + to_pixel
+    compute, written as one matrix a consumer can multiply."""
+    forward, right, up = camera_axes(record["quaternion_wxyz"])
+    rows = [list(right), [-u for u in up], list(forward)]        # x, y, z
+    centre = (float(record["position_north_m"]),
+              float(record["position_east_m"]),
+              float(record["position_alt_m"]))
+    translation = [-sum(r[k] * centre[k] for k in range(3)) for r in rows]
+    fx, fy = float(record["fx_px"]), float(record["fy_px"])
+    cx, cy = (float(v) for v in record["principal_point_px"])
+    K = [[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]]
+    extrinsic = [rows[i] + [translation[i]] for i in range(3)]
+    P = [[sum(K[i][k] * extrinsic[k][j] for k in range(3)) for j in range(4)]
+         for i in range(3)]
+    return K, P
+
+
+def project_with_matrix(P: Sequence[Sequence[float]], point: Vec
+                        ) -> Optional[Tuple[float, float]]:
+    """(u, v) through a 3x4 projection matrix, or None behind the camera."""
+    h = [sum(P[i][k] * point[k] for k in range(3)) + P[i][3] for i in range(3)]
+    if h[2] <= 0.0:
+        return None
+    return (h[0] / h[2], h[1] / h[2])
+
+
 # -- boxes ---------------------------------------------------------------
 
 def _clip_box(box, width: float, height: float):
@@ -369,6 +398,13 @@ def conventions() -> Dict:
         "horizon": f"spherical Earth R = {EARTH_RADIUS_M:.1f} m, no "
                    f"refraction, the scene datum plane's tangent horizon; "
                    f"terrain occlusion not modelled",
+        "projection_matrix": "P = K [R | t], 3x4, over homogeneous scene "
+                             "points (north, east, up, 1): pixel = (P p) / "
+                             "(P p)_z; K = [[fx, 0, cx], [0, fy, cy], [0, 0, "
+                             "1]]; the rows of R are the camera's right, "
+                             "down and forward axes in scene coordinates; "
+                             "t = -R c for the camera centre c. Per frame "
+                             "as intrinsic_matrix and projection_matrix.",
         "projection": "u = cx + fx*x/z, v = cy + fy*y/z over the camera "
                       "frame above -- the manifest's documented model",
     }

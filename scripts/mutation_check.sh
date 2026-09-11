@@ -1707,6 +1707,128 @@ mutate flightsim/verify.py \
     "flightsim.verify records its verdict" \
     tests/test_dataset.py || failures=$((failures+1))
 
+# -- Camera Phase 1 gap closure: vocabulary, question, moves, lag, matrices, schema --
+
+mutate core/nl/compiler.py \
+    '        if name not in seen:
+            seen.add(name)
+            out.append((phrase, name))' \
+    '        if True:  # MUTATED: a view named twice is two cameras
+            seen.add(name)
+            out.append((phrase, name))' \
+    "one camera per view named, however often" \
+    tests/test_camera_prompts.py || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '    if _view_mentions(text):
+        return []
+    if not any(' \
+    '    if False:  # MUTATED: a named view still asks which view
+        return []
+    if not any(' \
+    "a named view is never asked about" \
+    tests/test_camera_prompts.py || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '    if not mentions and answered is not None:
+        mentions = [answered]' \
+    '    if False:  # MUTATED: the answer round is ignored
+        mentions = [answered]' \
+    "the camera_view answer compiles" \
+    tests/test_camera_prompts.py || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '            if keyframes is None:
+                notes.append(' \
+    '            if False:  # MUTATED: an inexpressible move crashes instead of a note
+                notes.append(' \
+    "an inexpressible move is reported, not guessed" \
+    tests/test_camera_prompts.py || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '        if abs(last - old_duration_s) > 1e-9:
+            continue' \
+    '        if False:  # MUTATED: stated keyframe times are rescaled too
+            continue' \
+    "only prompt-spanning moves follow the clip selector" \
+    tests/test_camera_prompts.py || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '        rescale_moves(spec, previous, seconds)' \
+    '        pass  # MUTATED: a shorter clip keeps the long move' \
+    "the clip selector rescales prompt moves" \
+    tests/test_camera_prompts.py || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '        compiler_used = "regex"
+        questions = [] if request.answers else camera_questions(prompt)' \
+    '        compiler_used = "regex"
+        questions = []  # MUTATED: the regex path never asks' \
+    "the regex path asks its one question" \
+    tests/test_camera_prompts.py || failures=$((failures+1))
+
+mutate core/capture/poses.py \
+    '    return x_now - slope * tau + (y_prev - x_prev + slope * tau) * decay' \
+    '    return x_now + (y_prev - x_now) * decay  # MUTATED: zero-order hold again' \
+    "the lag integrator is the exact first-order-hold solution" \
+    tests/test_camera_poses.py || failures=$((failures+1))
+
+mutate core/capture/poses.py \
+    '            gn, ge, gup = _heading_only(air_yaw[i], *offset_at(t[i]))' \
+    '            gn, ge, gup = _heading_only(air_yaw[i], *offset)  # MUTATED: offsets never keyframed' \
+    "push, pull and orbit reach the solver" \
+    tests/test_camera_prompts.py || failures=$((failures+1))
+
+mutate core/capture/validate.py \
+    '        if unknown:
+            out.append(Violation(
+                "camera.moves",' \
+    '        if False:  # MUTATED: an unknown keyframe key is silently ignored
+            out.append(Violation(
+                "camera.moves",' \
+    "a keyframe key the solver never reads refuses by name" \
+    tests/test_camera_prompts.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if err > PROJECTION_MATRIX_TOL_PX:' \
+    '            if False:  # MUTATED: a wrong matrix passes' \
+    "projection_matrix fails on a matrix that disagrees" \
+    tests/test_capture_schema.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            bad.append(f"{name}: intrinsic_matrix is not [[fx,0,cx],[0,fy,cy],[0,0,1]]")' \
+    '            pass  # MUTATED: a wrong K passes' \
+    "the intrinsic matrix must be the record's own K" \
+    tests/test_capture_schema.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if problems:
+        return Check("json_schema", FAIL,' \
+    '    if False:  # MUTATED: schema violations pass
+        return Check("json_schema", FAIL,' \
+    "json_schema fails on a violation" \
+    tests/test_capture_schema.py || failures=$((failures+1))
+
+mutate core/capture/schema.py \
+    '            if key not in instance:
+                out.append(f"{path}: missing required key {key!r}")' \
+    '            if False:  # MUTATED: required keys are optional
+                out.append(f"{path}: missing required key {key!r}")' \
+    "the validator enforces required keys" \
+    tests/test_capture_schema.py || failures=$((failures+1))
+
+mutate core/capture/schema.py \
+    '        if unknown and where.rsplit("/", 1)[-1] not in ("properties", "$defs"):' \
+    '        if False:  # MUTATED: unenforced keywords pass silently' \
+    "the validator refuses keywords it does not enforce" \
+    tests/test_capture_schema.py || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '            frames[-1]["projection_matrix"] = P' \
+    '            frames[-1]["projection_matrix"] = [[0.0] * 4 for _ in range(3)]  # MUTATED' \
+    "the manifest's P is the record's own projection" \
+    tests/test_capture_schema.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

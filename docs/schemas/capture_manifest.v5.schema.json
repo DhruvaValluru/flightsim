@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/DhruvaValluru/flightsim/docs/schemas/capture_manifest.v5.schema.json",
+  "title": "flightsim capture manifest, version 5",
+  "description": "capture_manifest.json as written by core/capture/manifest.py (manifest_version 5). One record per frame: camera pose, intrinsics, projection matrix, aircraft state, labels and the sensor model; per run: digests, seed, scene, airframe, conventions, asset digests and the randomisation block. Positions are local scene metres (north, east, up) about the run's projected origin; the camera frame is x right, y down, z forward; pixel = (P p) / (P p)_z. Validate before parsing; a consumer must not guess at a key it does not find here.",
+  "type": "object",
+  "required": [
+    "manifest_version", "spec_digest", "simulation_digest", "output_digest",
+    "solve_source", "seed", "aircraft", "scene", "frame", "software_revision",
+    "landmarks", "conditions", "state_units", "airframe", "label_conventions",
+    "assets", "randomization", "cameras", "frames"
+  ],
+  "properties": {
+    "manifest_version": {"const": 5},
+    "spec_digest": {"$ref": "#/$defs/sha256"},
+    "simulation_digest": {"$ref": "#/$defs/sha256"},
+    "output_digest": {"type": "string"},
+    "solve_source": {"type": "string"},
+    "seed": {"type": "integer", "minimum": 0},
+    "aircraft": {"type": "string"},
+    "scene": {
+      "type": "object",
+      "required": ["key", "terrain", "terrain_sha256"],
+      "properties": {
+        "key": {"type": "string"},
+        "terrain": {"type": ["string", "null"]},
+        "terrain_sha256": {"type": ["string", "null"]}
+      }
+    },
+    "frame": {"type": "object"},
+    "software_revision": {"type": "string"},
+    "landmarks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "north_m", "east_m", "alt_m"],
+        "properties": {
+          "name": {"type": "string"},
+          "north_m": {"type": "number"},
+          "east_m": {"type": "number"},
+          "alt_m": {"type": "number"}
+        }
+      }
+    },
+    "conditions": {"type": "object"},
+    "state_units": {"type": "object"},
+    "airframe": {
+      "type": "object",
+      "required": ["aircraft", "length_m", "span_m", "height_m", "keypoints"],
+      "properties": {
+        "aircraft": {"type": "string"},
+        "length_m": {"type": "number", "minimum": 0},
+        "span_m": {"type": "number", "minimum": 0},
+        "height_m": {"type": "number", "minimum": 0},
+        "keypoints": {"type": "array"}
+      }
+    },
+    "label_conventions": {"type": "object"},
+    "assets": {"type": "object"},
+    "randomization": {"type": ["object", "null"]},
+    "cameras": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/camera_block"}
+    },
+    "frames": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/frame_record"}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "vec3": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}},
+    "matrix3x3": {"type": "array", "minItems": 3, "maxItems": 3,
+                  "items": {"$ref": "#/$defs/vec3"}},
+    "matrix3x4": {"type": "array", "minItems": 3, "maxItems": 3,
+                  "items": {"type": "array", "minItems": 4, "maxItems": 4,
+                            "items": {"type": "number"}}},
+    "camera_block": {
+      "type": "object",
+      "required": ["camera_id", "preset", "horizon_stable", "inherits_roll",
+                   "schedule_basis", "trigger", "capture_count",
+                   "pose_track_digest", "profile"],
+      "properties": {
+        "camera_id": {"type": "string"},
+        "preset": {"type": "string"},
+        "horizon_stable": {"type": "boolean"},
+        "inherits_roll": {"type": "boolean"},
+        "spec": {"type": ["object", "null"]},
+        "schedule_basis": {"type": "string"},
+        "trigger": {"type": "string"},
+        "capture_count": {"type": "integer", "minimum": 0},
+        "pose_track_digest": {"type": "string"},
+        "profile": {"type": "object"}
+      }
+    },
+    "frame_record": {
+      "type": "object",
+      "required": [
+        "index", "camera_id", "file", "t_s", "sample_index",
+        "position_north_m", "position_east_m", "position_alt_m",
+        "quaternion_wxyz", "yaw_deg", "pitch_deg", "roll_deg",
+        "focal_length_mm", "sensor_width_mm", "sensor_height_mm",
+        "width_px", "height_px", "near_m", "far_m", "principal_point_px",
+        "fx_px", "fy_px", "intrinsic_matrix", "projection_matrix",
+        "aircraft", "state", "labels", "sensor"
+      ],
+      "properties": {
+        "index": {"type": "integer", "minimum": 0},
+        "camera_id": {"type": "string"},
+        "file": {"type": "string", "pattern": "^frames/.+/frame_[0-9]{4}\\.png$"},
+        "t_s": {"type": "number", "minimum": 0},
+        "sample_index": {"type": "integer", "minimum": 0},
+        "position_north_m": {"type": "number"},
+        "position_east_m": {"type": "number"},
+        "position_alt_m": {"type": "number"},
+        "quaternion_wxyz": {"type": "array", "minItems": 4, "maxItems": 4,
+                            "items": {"type": "number"}},
+        "yaw_deg": {"type": "number"},
+        "pitch_deg": {"type": "number"},
+        "roll_deg": {"type": "number"},
+        "focal_length_mm": {"type": "number", "minimum": 0},
+        "sensor_width_mm": {"type": "number", "minimum": 0},
+        "sensor_height_mm": {"type": "number", "minimum": 0},
+        "width_px": {"type": "integer", "minimum": 1},
+        "height_px": {"type": "integer", "minimum": 1},
+        "near_m": {"type": "number", "minimum": 0},
+        "far_m": {"type": "number", "minimum": 0},
+        "principal_point_px": {"type": "array", "minItems": 2, "maxItems": 2,
+                               "items": {"type": "number"}},
+        "fx_px": {"type": "number", "minimum": 0},
+        "fy_px": {"type": "number", "minimum": 0},
+        "intrinsic_matrix": {"$ref": "#/$defs/matrix3x3"},
+        "projection_matrix": {"$ref": "#/$defs/matrix3x4"},
+        "aircraft": {
+          "type": "object",
+          "required": ["north_m", "east_m", "alt_m", "roll_deg", "pitch_deg", "heading_deg"],
+          "properties": {
+            "north_m": {"type": "number"}, "east_m": {"type": "number"},
+            "alt_m": {"type": "number"}, "roll_deg": {"type": "number"},
+            "pitch_deg": {"type": "number"}, "heading_deg": {"type": "number"}
+          }
+        },
+        "state": {"type": "object"},
+        "labels": {
+          "type": "object",
+          "required": ["bbox_2d", "bbox_2d_unclipped", "truncation", "in_frame",
+                       "bbox_3d_camera", "keypoints", "horizon"],
+          "properties": {
+            "bbox_2d": {"anyOf": [{"type": "null"},
+                                  {"type": "array", "minItems": 4, "maxItems": 4,
+                                   "items": {"type": "number"}}]},
+            "in_frame": {"type": "boolean"},
+            "keypoints": {"type": "object"},
+            "horizon": {"type": "object"}
+          }
+        },
+        "sensor": {
+          "type": "object",
+          "required": ["profile", "angular_rate_rad_s", "labels_sensor"],
+          "properties": {
+            "profile": {"type": "string"},
+            "angular_rate_rad_s": {"$ref": "#/$defs/vec3"},
+            "labels_sensor": {"type": "object"}
+          }
+        }
+      }
+    }
+  }
+}

@@ -169,7 +169,9 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
 from .airframe import load_airframe
-from .labels import conventions as label_conventions, frame_labels
+from .labels import (
+    conventions as label_conventions, frame_labels, projection_matrices,
+)
 from .profile import load_profile, sensor_labels
 from .landmarks import scene_landmarks
 from .poses import PoseTrack, SceneFrame, aircraft_local_track
@@ -487,6 +489,13 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                 # above are the solver's; this is the recorder's.
                 "state": frame_state(columns, sample_index),
             })
+            # The projection as one matrix: K and P = K [R | t], from
+            # this very record, so a consumer multiplies instead of
+            # re-deriving the convention (the verifier checks the two
+            # agree to a thousandth of a pixel on every frame).
+            K, P = projection_matrices(frames[-1])
+            frames[-1]["intrinsic_matrix"] = K
+            frames[-1]["projection_matrix"] = P
             # Version 5: the labels, from this very record and the
             # cited airframe -- the same numbers a consumer reads.
             frames[-1]["labels"] = frame_labels(

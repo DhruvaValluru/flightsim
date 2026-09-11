@@ -25,7 +25,7 @@ vocabulary is conditions-first by construction.
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..fdm import units as u
 from ..scenario.fields import Quantity
@@ -307,17 +307,19 @@ def _heading(text: str) -> Quantity:
     return Quantity.default(0.0, "deg", frm="due north")
 
 
-# -- cameras (Camera Phase 1) --------------------------------------------
+# -- cameras (Camera Phase 1; vocabulary completed in the gap closure) --
 
 #: Named views -> camera presets. Deterministic and documented: the same
 #: vocabulary the render presets implement, so a view word can only
-#: request a view that exists.
+#: request a view that exists. EVERY view named in a sentence becomes a
+#: camera ("chase and wingman views" is two), in the order named.
 CAMERA_VIEW_WORDS: Tuple[Tuple[str, str], ...] = (
     ("cockpit", "cockpit"),
     ("wingman", "wingman"),
     ("from the tower", "tower"),
     ("tower view", "tower"),
     ("control tower", "tower"),
+    ("the tower", "tower"),
     ("ground observer", "ground"),
     ("from the ground", "ground"),
     ("chase", "chase"),
@@ -330,26 +332,145 @@ LENS_WORDS: Dict[str, float] = {
     "wide angle": 24.0, "wide-angle": 24.0, "telephoto": 85.0,
 }
 
+#: Words that imply imagery without naming a view. A prompt with one of
+#: these and NO view word earns the regex path's one clarifying
+#: question (which view?) -- the same question the LLM path may ask --
+#: and, meanwhile, the documented default chase camera, so the spec
+#: still carries what the words did say (a count, a lens).
+IMAGERY_WORDS: Tuple[str, ...] = (
+    "image", "images", "photo", "photos", "photograph", "picture",
+    "pictures", "footage", "film", "video", "frames", "stills",
+    "snapshot", "snapshots", "capture", "render", "camera", "shot",
+)
+CAMERA_QUESTION_ID = "camera_view"
+CAMERA_VIEW_OPTIONS = ("chase", "wingman", "tower", "ground", "cockpit")
 
-def _camera(text: str, aircraft: str, terrain_elevation_m: float):
-    """One CameraSpec when the prompt speaks camera language, else None.
+#: Simple move phrases -> keyframed moves over the whole flight. Each
+#: is ONE documented shape, keyed in absolute seconds over the spec's
+#: duration (a shorter clip is rescaled by the clip selector, see
+#: rescale_moves): "zoom in" doubles the focal length, "zoom out"
+#: halves it; "push in" halves an aircraft-relative offset, "pull back"
+#: doubles it; "orbit" turns the offset a full circle (ORBIT_SEGMENTS
+#: keyframes, a polygon whose chord error is stated). Offsets exist
+#: only on the chase and wingman presets, so a push/pull/orbit asked of
+#: a tower, ground or cockpit view is reported as ignored, by name.
+MOVE_WORDS: Tuple[Tuple[str, str], ...] = (
+    ("zoom in", "zoom_in"), ("zoom out", "zoom_out"),
+    ("push in", "push_in"), ("move closer", "push_in"),
+    ("move in closer", "push_in"),
+    ("pull back", "pull_back"), ("pull away", "pull_back"),
+    ("orbit", "orbit"), ("circle around", "orbit"), ("circle the", "orbit"),
+)
+ZOOM_FACTOR = 2.0
+DOLLY_FACTOR = 2.0
+ORBIT_SEGMENTS = 32
+OFFSET_PRESETS = ("chase", "wingman")
 
-    A named view, an image count ("50 images/frames/stills") or a lens
-    word each earns the camera; everything unstated keeps the documented
-    defaults (source ``default``, plannable). Shot language the
-    vocabulary cannot express still goes to notes via CINEMATIC_WORDS.
+
+def camera_questions(prompt: str) -> List[Dict[str, Any]]:
+    """The regex path's clarifying question, or []: asked exactly when
+    the prompt speaks of imagery and names no view."""
+    text = " ".join(prompt.lower().split())
+    if _view_mentions(text):
+        return []
+    if not any(_search(rf"\b{word}\b", text) for word in IMAGERY_WORDS):
+        return []
+    return [{"id": CAMERA_QUESTION_ID,
+             "question": "Which point of view should the camera take?",
+             "options": list(CAMERA_VIEW_OPTIONS)}]
+
+
+def _view_mentions(text: str) -> List[Tuple[str, str]]:
+    """(phrase, preset) for every view named, in sentence order, each
+    preset once."""
+    found = []
+    for phrase, name in CAMERA_VIEW_WORDS:
+        m = _search(rf"\b{phrase}s?\b", text)       # "tower views" too
+        if m:
+            found.append((m.start(), phrase, name))
+    found.sort()
+    out: List[Tuple[str, str]] = []
+    seen = set()
+    for _, phrase, name in found:
+        if name not in seen:
+            seen.add(name)
+            out.append((phrase, name))
+    return out
+
+
+def _answered_view(answers) -> Optional[Tuple[str, str]]:
+    """The view a camera_view answer names, or None."""
+    for answer in answers or []:
+        if str(answer.get("id")) != CAMERA_QUESTION_ID:
+            continue
+        text = " ".join(str(answer.get("answer", "")).lower().split())
+        mentions = _view_mentions(text)
+        if mentions:
+            return mentions[0]
+        for name in CAMERA_VIEW_OPTIONS:
+            if name in text:
+                return (name, name)
+    return None
+
+
+def move_keyframes(kind: str, camera, duration_s: float) -> Optional[List[Dict]]:
+    """The keyframes one move word means for one camera, or None when
+    that camera cannot make the move (no offset to push, pull or
+    orbit)."""
+    focal = float(camera.focal_length_mm.value)
+    preset = str(camera.preset.value)
+    if kind == "zoom_in":
+        return [{"t_s": 0.0, "focal_length_mm": focal},
+                {"t_s": duration_s, "focal_length_mm": focal * ZOOM_FACTOR}]
+    if kind == "zoom_out":
+        return [{"t_s": 0.0, "focal_length_mm": focal},
+                {"t_s": duration_s, "focal_length_mm": focal / ZOOM_FACTOR}]
+    if preset not in OFFSET_PRESETS:
+        return None
+    f = float(camera.offset_forward_m.value)
+    r = float(camera.offset_right_m.value)
+    u = float(camera.offset_up_m.value)
+    if kind in ("push_in", "pull_back"):
+        scale = (1.0 / DOLLY_FACTOR) if kind == "push_in" else DOLLY_FACTOR
+        return [{"t_s": 0.0, "offset_forward_m": f, "offset_right_m": r,
+                 "offset_up_m": u},
+                {"t_s": duration_s, "offset_forward_m": f * scale,
+                 "offset_right_m": r * scale, "offset_up_m": u * scale}]
+    if kind == "orbit":
+        import math
+
+        frames = []
+        for k in range(ORBIT_SEGMENTS + 1):
+            a = 2.0 * math.pi * k / ORBIT_SEGMENTS
+            frames.append({
+                "t_s": duration_s * k / ORBIT_SEGMENTS,
+                "offset_forward_m": round(f * math.cos(a) - r * math.sin(a), 6),
+                "offset_right_m": round(f * math.sin(a) + r * math.cos(a), 6),
+            })
+        return frames
+    raise ValueError(f"unknown move kind {kind!r}")
+
+
+def _cameras(text: str, aircraft: str, terrain_elevation_m: float,
+             duration_s: float, answers=None):
+    """Every camera the prompt (and a camera_view answer) speaks of, and
+    the notes about what could not be expressed.
+
+    A named view, an image count ("50 images/frames/stills"), a lens
+    word or a move phrase each earns a camera; everything unstated
+    keeps the documented defaults (source ``default``, plannable). The
+    count, the lens and the moves apply to EVERY camera named. Ids are
+    the preset names, exactly as the page's picker names its views.
     """
     from ..scenario.camera import CameraSpec, plan_full_capture
 
-    preset = None
-    preset_phrase = None
-    for phrase, name in CAMERA_VIEW_WORDS:
-        if _search(rf"\b{phrase}\b", text):
-            preset, preset_phrase = name, phrase
-            break
+    notes: List[str] = []
+    mentions = _view_mentions(text)
+    answered = _answered_view(answers)
+    if not mentions and answered is not None:
+        mentions = [answered]
     count = _search(rf"(\d+)\s*(?:images|frames|stills|photos|pictures|"
                     rf"snapshots)\b", text)
-    focal = None
     focal_quantity = None
     m = _search(rf"{NUMBER}\s*mm\s+lens", text)
     if m:
@@ -363,32 +484,87 @@ def _camera(text: str, aircraft: str, terrain_elevation_m: float):
                                   f"mapping: wide angle 24 mm, telephoto "
                                   f"85 mm)")
                 break
-    if preset is None and count is None and focal_quantity is None:
-        return None
-    camera = CameraSpec.defaulted(
-        camera_id="camera0", preset=preset or "chase", aircraft=aircraft,
-        terrain_elevation_m=terrain_elevation_m,
-        frm="camera language in the prompt; documented camera default")
-    if preset is not None:
-        camera.preset = Quantity(value=preset, source="inferred",
-                                 frm=preset_phrase)
-    if count is not None:
-        camera.capture_count = Quantity(
-            value=int(count.group(1)), unit="dimensionless",
-            source="user", frm=count.group(0).strip())
-    else:
-        # No number in the prompt, so nothing to honour exactly: a view
-        # named in words means the whole flight from that view, at the
-        # rate it was recorded -- the same thing the page's picker
-        # gives. Without this a prompt-named camera kept the one-per-
-        # second interval default and a short clip came back as three
-        # stills, which is the complaint the page's picker had already
-        # been fixed for.
-        plan_full_capture(camera, frm="a view named in the prompt with "
-                                      "no count captures the whole clip")
-    if focal_quantity is not None:
-        camera.focal_length_mm = focal_quantity
-    return camera
+    moves: List[Tuple[str, str]] = []
+    for phrase, kind in MOVE_WORDS:
+        if _search(rf"\b{phrase}\b", text) and kind not in [k for _, k in moves]:
+            moves.append((phrase, kind))
+    imagery = any(_search(rf"\b{word}\b", text) for word in IMAGERY_WORDS)
+    if not mentions and count is None and focal_quantity is None \
+            and not moves and not imagery:
+        return [], notes
+    if not mentions:
+        # Imagery, a count, a lens or a move with no view: the documented
+        # default view, and the question (camera_questions) asks which.
+        mentions = [(None, "chase")]
+    cameras = []
+    for phrase, preset in mentions:
+        camera = CameraSpec.defaulted(
+            camera_id=preset, preset=preset, aircraft=aircraft,
+            terrain_elevation_m=terrain_elevation_m,
+            frm="camera language in the prompt; documented camera default")
+        if phrase is not None:
+            camera.preset = Quantity(value=preset, source="inferred",
+                                     frm=phrase)
+        if count is not None:
+            camera.capture_count = Quantity(
+                value=int(count.group(1)), unit="dimensionless",
+                source="user", frm=count.group(0).strip())
+        else:
+            # No number in the prompt, so nothing to honour exactly: a
+            # view named in words means the whole flight from that view,
+            # at the rate it was recorded -- the same thing the page's
+            # picker gives.
+            plan_full_capture(camera, frm="a view named in the prompt with "
+                                          "no count captures the whole clip")
+        if focal_quantity is not None:
+            camera.focal_length_mm = focal_quantity
+        for phrase_m, kind in moves:
+            keyframes = move_keyframes(kind, camera, duration_s)
+            if keyframes is None:
+                notes.append(
+                    f"ignored move {phrase_m!r} for the {preset} view: only "
+                    f"the chase and wingman views carry an offset to push, "
+                    f"pull or orbit")
+                continue
+            camera.moves = _merge_moves(camera.moves, keyframes)
+            notes.append(f"move {phrase_m!r} -> {kind} keyframes over "
+                         f"{duration_s:g} s on the {preset} view")
+        cameras.append(camera)
+    return cameras, notes
+
+
+def _merge_moves(existing: List[Dict], added: List[Dict]) -> List[Dict]:
+    """Keyframes of two moves on one camera, merged by time: a zoom and
+    an orbit together are one keyframe list carrying both fields."""
+    by_t: Dict[float, Dict] = {}
+    for frame in list(existing) + list(added):
+        entry = by_t.setdefault(float(frame["t_s"]), {"t_s": float(frame["t_s"])})
+        for key, value in frame.items():
+            if key != "t_s":
+                entry[key] = value
+    return [by_t[t] for t in sorted(by_t)]
+
+
+def rescale_moves(spec, old_duration_s: float, new_duration_s: float) -> int:
+    """A move phrase spans the whole flight; when the flight's duration
+    is edited (the page's clip selector) every camera whose keyframes
+    ended at the OLD duration is rescaled to end at the new one. Returns
+    how many cameras moved. Keyframes ending elsewhere are someone's
+    stated times and are left alone."""
+    if old_duration_s <= 0 or new_duration_s <= 0:
+        return 0
+    factor = new_duration_s / old_duration_s
+    moved = 0
+    for camera in spec.cameras:
+        if not camera.moves:
+            continue
+        last = max(float(m["t_s"]) for m in camera.moves)
+        if abs(last - old_duration_s) > 1e-9:
+            continue
+        camera.moves = [{**m, "t_s": round(float(m["t_s"]) * factor, 9)}
+                        for m in camera.moves]
+        moved += 1
+    return moved
 
 
 # -- the compiler --------------------------------------------------------
@@ -401,12 +577,18 @@ def _camera(text: str, aircraft: str, terrain_elevation_m: float):
 #: Phase 1); genuinely unexpressible shot language stays reported.
 CINEMATIC_WORDS = (
     "flyby", "fly-by", "cinematic", "dogfight", "airshow", "aerobatic",
-    "shot", "dramatic", "epic",
+    "dramatic", "epic",
+    # a pan is an aim move; every preset aims at the aircraft, so there
+    # is nothing for it to express -- reported, never guessed.
+    "pan left", "pan right", "tilt up", "tilt down",
 )
 
 
-def compile_prompt(prompt: str, name: Optional[str] = None) -> ScenarioSpec:
-    """Turn a prompt into a spec. Does not run anything."""
+def compile_prompt(prompt: str, name: Optional[str] = None,
+                   answers=None) -> ScenarioSpec:
+    """Turn a prompt into a spec. Does not run anything. ``answers``
+    is the page's answer round ([{id, answer}]); the regex path has
+    exactly one question it can answer, camera_view."""
     text = " ".join(prompt.lower().split())
 
     heading = _heading(text)
@@ -447,10 +629,12 @@ def compile_prompt(prompt: str, name: Optional[str] = None) -> ScenarioSpec:
         weather_event=_weather_event(text),
     )
 
-    camera = _camera(text, str(spec.aircraft.value),
-                     float(spec.terrain_elevation.value))
-    if camera is not None:
-        spec.cameras = [camera]
+    cameras, camera_notes = _cameras(
+        text, str(spec.aircraft.value), float(spec.terrain_elevation.value),
+        float(spec.duration.value), answers=answers)
+    if cameras:
+        spec.cameras = cameras
+    spec.notes.extend(camera_notes)
 
     ignored = [w for w in CINEMATIC_WORDS if w in text]
     if ignored:

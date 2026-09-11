@@ -29,6 +29,8 @@ re-planned by callers through ``spec.plan`` with a recorded reason.
 
 from __future__ import annotations
 
+import math
+
 from typing import Dict, List, Optional
 
 from ..scenario.camera import (
@@ -267,6 +269,47 @@ def schedule_violations(camera: CameraSpec,
     return out
 
 
+def moves_violations(camera, index: int = 0) -> List[Violation]:
+    """Keyframed moves: every keyframe a mapping with a finite,
+    non-negative ``t_s`` and only the documented MOVE_KEYS, each a
+    finite number. A key the solver would silently ignore refuses by
+    name (camera.moves) instead."""
+    from .poses import MOVE_KEYS
+
+    out: List[Violation] = []
+    who = f"camera[{index}] {camera.camera_id.value!r}"
+    for k, move in enumerate(camera.moves or []):
+        if not isinstance(move, dict):
+            out.append(Violation("camera.moves",
+                                 f"{who} keyframe {k} is not a mapping"))
+            continue
+        t = move.get("t_s")
+        if not isinstance(t, (int, float)) or isinstance(t, bool) \
+                or not math.isfinite(float(t)) or float(t) < 0.0:
+            out.append(Violation("camera.moves",
+                                 f"{who} keyframe {k} needs a finite, "
+                                 f"non-negative t_s, got {t!r}",
+                                 unit="s"))
+        unknown = sorted(set(move) - set(MOVE_KEYS) - {"t_s"})
+        if unknown:
+            out.append(Violation(
+                "camera.moves",
+                f"{who} keyframe {k} names {unknown}, which no pose "
+                f"solver field reads; keyable: {list(MOVE_KEYS)}"))
+        for key in set(move) & set(MOVE_KEYS):
+            value = move[key]
+            if not isinstance(value, (int, float)) or isinstance(value, bool) \
+                    or not math.isfinite(float(value)):
+                out.append(Violation(
+                    "camera.moves",
+                    f"{who} keyframe {k} {key} must be a finite number, "
+                    f"got {value!r}"))
+        if len(move) == 1:
+            out.append(Violation("camera.moves",
+                                 f"{who} keyframe {k} keys nothing"))
+    return out
+
+
 def validate_cameras(spec) -> List[Violation]:
     """Every scene-free camera check, for the core validator."""
     out: List[Violation] = []
@@ -276,6 +319,7 @@ def validate_cameras(spec) -> List[Violation]:
         out.extend(vocabulary_violations(camera, index))
         out.extend(intrinsics_violations(camera, index))
         out.extend(schedule_violations(camera, index))
+        out.extend(moves_violations(camera, index))
         camera_id = str(camera.camera_id.value)
         if camera_id in seen:
             out.append(Violation(
