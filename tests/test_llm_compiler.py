@@ -901,3 +901,34 @@ def test_a_model_stated_period_is_never_replanned_away():
     assert float(camera.period_s.value) == 2.0
     columns = {"t": [round(i * 0.1, 1) for i in range(221)]}
     assert len(solve_schedule(columns, camera)) == 12
+
+
+def test_a_camera_list_nested_under_fields_is_lifted_not_refused():
+    """Measured on the keyless tier: the model put the camera list under
+    "fields" and the whole response was refused as an unknown field, so
+    the page fell back to the regex compiler. A LIST of camera mappings
+    there is unambiguous and is lifted into place, noted; a camera
+    stated as anything else under that name still refuses by name."""
+    lifted = fake_client({
+        "fields": {"cameras": [{
+            "preset": entry("tower", "inferred", "from the tower"),
+            "capture_count": entry(50, "user", "50 images")}]},
+        "notes": [], "questions": [],
+    })
+    result = compile_prompt_llm("50 images from the tower", client=lifted)
+    assert [str(c.preset.value) for c in result.spec.cameras] == ["tower"]
+    assert result.spec.cameras[0].capture_count.value == 50
+    assert any("nested 'cameras'" in n for n in result.spec.notes)
+    wrapped = fake_client({
+        "fields": {"cameras": {"value": [{
+            "preset": entry("chase", "inferred", "chase")}], "source": "model"}},
+        "notes": [], "questions": [],
+    })
+    assert [str(c.preset.value) for c in
+            compile_prompt_llm("chase the 747", client=wrapped).spec.cameras] == ["chase"]
+    not_a_list = fake_client({
+        "fields": {"cameras": entry("chase", "inferred", "chase")},
+        "notes": [], "questions": [],
+    })
+    with pytest.raises(LLMCompileError, match="unknown field 'cameras'"):
+        compile_prompt_llm("chase the 747", client=not_a_list)

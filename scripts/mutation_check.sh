@@ -1895,6 +1895,12 @@ mutate core/capture/verify.py \
     "applied_pose fails past the director's tolerance" \
     tests/test_render_repro.py || failures=$((failures+1))
 
+mutate core/nl/llm_compiler.py \
+    '    if isinstance(nested, list) and not payload["cameras"]:' \
+    '    if False:  # MUTATED: a nested camera list refuses the whole response' \
+    "a camera list nested under fields is lifted, not refused" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

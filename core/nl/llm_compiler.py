@@ -584,6 +584,22 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
     if not (isinstance(notes, list)
             and all(isinstance(n, str) for n in notes)):
         raise _fail("'notes' is not a list of strings")
+    # A model that nests the camera list one level down, under "fields",
+    # has said something unambiguous in the wrong place (measured on the
+    # keyless tier: the whole response was refused as "unknown field
+    # 'cameras'" and the page fell back to the regex compiler). A LIST
+    # of camera mappings there is lifted to where the schema puts it,
+    # recorded in the notes; anything else under that name still
+    # refuses as the unknown field it is, and every per-camera rail
+    # below stays as strict as before.
+    nested = fields.get("cameras")
+    if isinstance(nested, dict) and isinstance(nested.get("value"), list):
+        nested = nested["value"]
+    if isinstance(nested, list) and not payload["cameras"]:
+        fields.pop("cameras")
+        payload["cameras"] = nested
+        notes.append("the model nested 'cameras' under 'fields'; lifted to "
+                     "the top-level camera list (schema position)")
 
     questions = payload["questions"]
     if not isinstance(questions, list):
