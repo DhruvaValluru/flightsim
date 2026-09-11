@@ -1062,6 +1062,24 @@ unchanged, and the render command is byte-identical to before.
 
 ---
 
+### 2.18 Batches and datasets (Phase 10): verified in, split by flight
+
+`flightsim.batch` runs a matrix of specs, each content-addressed by
+its digest and verified, with a ledger that records failures;
+`flightsim.export` turns runs into COCO / KITTI / WebDataset with a
+card. What IS claimed: an unverified run, or one with a failed check,
+refuses the export by name -- nothing is dropped silently; every frame
+of one simulation (cameras and randomisation excluded from the
+simulation digest) lands on one side of the split; the card states
+the conventions, the split seed and assignment, the verification
+counts including the checks that were NOT RUN, and what is not
+claimed. What is NOT claimed: that the exported labels are anything
+other than the recorded flight's geometry (section 2.15); that a
+KITTI `occluded` value is known without the engine's occlusion pass;
+that any rendered batch has been exported on this machine (no engine).
+
+---
+
 ## 3. Reproducibility: two different claims, kept separate
 
 **Physics** is intended to be bit-reproducible from a spec, and that is a

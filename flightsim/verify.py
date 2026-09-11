@@ -159,10 +159,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("a run directory is required (or --camera-sets SPEC "
                      "--out DIR)")
 
-    from core.capture.verify import verify_run
+    from core.capture.verify import verify_run, write_verification
 
     report = verify_run(args.run_dir, other_run_dir=args.against)
     print(report.render())
+    # The run keeps its verdict: the dataset export (flightsim.export)
+    # refuses a run that has no verification.json or a failed check.
+    written = write_verification(report, args.run_dir)
+    print(f"  recorded: {written}")
     return 0 if report.ok else 1
 
 

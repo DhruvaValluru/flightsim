@@ -87,6 +87,9 @@ class Check:
         :meth:`VerificationReport.render` counts it separately."""
         return self.status != FAIL
 
+    def to_dict(self) -> Dict[str, str]:
+        return {"name": self.name, "status": self.status, "detail": self.detail}
+
 
 @dataclass
 class VerificationReport:
@@ -100,6 +103,18 @@ class VerificationReport:
         if isinstance(status_or_ok, bool):
             status_or_ok = PASS if status_or_ok else FAIL
         self.checks.append(Check(name, status_or_ok, detail))
+
+    def to_dict(self) -> Dict:
+        """The record a run directory keeps (verification.json): every
+        check with its status, and the counts -- NOT RUN counted apart,
+        never as a pass."""
+        return {
+            "ok": self.ok,
+            "passed": sum(c.status == PASS for c in self.checks),
+            "failed": sum(c.status == FAIL for c in self.checks),
+            "not_run": sum(c.status == NOT_RUN for c in self.checks),
+            "checks": [c.to_dict() for c in self.checks],
+        }
 
     def render(self) -> str:
         lines = [f"  [{c.status}] {c.name}: {c.detail}" for c in self.checks]
@@ -2016,3 +2031,17 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
             "different camera set: run flightsim.capture again with "
             "other cameras and pass --against <that run dir>"))
     return report
+
+
+#: Where a run keeps its last verification (written by flightsim.verify
+#: and by the batch runner; read by the dataset export, which refuses a
+#: run without one or with a failed check).
+VERIFICATION_FILE = "verification.json"
+
+
+def write_verification(report: VerificationReport, run_dir) -> Path:
+    import json
+
+    path = Path(run_dir) / VERIFICATION_FILE
+    path.write_text(json.dumps(report.to_dict(), indent=1), encoding="utf-8")
+    return path

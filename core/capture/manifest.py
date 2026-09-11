@@ -221,6 +221,12 @@ def simulation_digest(spec) -> str:
     payload.pop("prompt", None)
     payload.pop("notes", None)
     payload.pop("cameras", None)
+    # Phase 10 (package 7): the randomisation block changes the sun, the
+    # fog, the camera jitter and the livery -- what the frames LOOK like
+    # -- and none of the physics; two runs differing only there flew
+    # one simulation, and a dataset split keyed on this value keeps
+    # them on one side.
+    payload.pop("randomization", None)
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 

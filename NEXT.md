@@ -25,7 +25,16 @@ ABSENT is the canonical default so no digest moved -- `core/scenario/
 randomization.py` + `solar.py` (Meeus/NOAA), sampled sun/fog/camera
 jitter/livery written back as derived, same dict in card + manifest +
 sidecars, `examples/randomized.yaml`; livery C++ UNCOMPILED and no
-variant material ships; gotcha 29). NEXT UP: P10-6 batch + export.
+variant material ships; gotcha 29); P10-6 (`flightsim.batch` over a
+matrix -- content-addressed runs, ledger, resume, workers, verified
+with verification.json -- and `flightsim.export` to COCO/KITTI/
+WebDataset with a card, refusing unverified runs, split by
+simulation_digest which now also excludes the randomisation block;
+`examples/batch_matrix.yaml`). PHASE 10's owner-scoped packages are
+ALL DELIVERED; the Windows verification steps (labels, -linear,
+-deterministic + Gate 10-R, sensor post-pass on real frames, livery
+refusal, a rendered batch export) are listed per package in the
+report.
 
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.

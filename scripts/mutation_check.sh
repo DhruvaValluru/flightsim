@@ -1608,6 +1608,105 @@ mutate core/capture/manifest.py \
     "the manifest carries the same block as the card" \
     tests/test_randomization.py || failures=$((failures+1))
 
+# -- Phase 10, P10-6: batch execution and dataset export --
+
+mutate core/dataset/export.py \
+    '    if not record.is_file():
+        raise ExportError(
+            "export.unverified",' \
+    '    if False:  # MUTATED: an unverified run exports
+        raise ExportError(
+            "export.unverified",' \
+    "an unverified run refuses the export by name" \
+    tests/test_dataset.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '    if failed or not verification.get("ok", False):' \
+    '    if False:  # MUTATED: a failed verification exports' \
+    "a run with a failed check refuses the export" \
+    tests/test_dataset.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '    if missing:
+        raise ExportError(
+            "export.missing_frames",' \
+    '    if False:  # MUTATED: frames with no pixels are silently dropped
+        raise ExportError(
+            "export.missing_frames",' \
+    "a frame with no image refuses unless labels-only" \
+    tests/test_dataset.py || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '    payload.pop("cameras", None)
+    # Phase 10 (package 7)' \
+    '    pass  # MUTATED: the cameras enter the simulation identity
+    # Phase 10 (package 7)' \
+    "the simulation digest ignores the cameras" \
+    tests/test_dataset.py || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '    payload.pop("randomization", None)' \
+    '    pass  # MUTATED: the sampled look enters the simulation identity' \
+    "the simulation digest ignores the randomisation" \
+    tests/test_dataset.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '    random.Random(int(seed)).shuffle(digests)' \
+    '    pass  # MUTATED: the split ignores its seed' \
+    "the split follows its seed" \
+    tests/test_dataset.py || failures=$((failures+1))
+
+mutate core/dataset/batch.py \
+    '        done = {row["run_id"] for row in log.rows() if row.get("ok")}' \
+    '        done = set()  # MUTATED: a resumed batch reruns everything' \
+    "a resumed batch skips what the ledger records" \
+    tests/test_dataset.py || failures=$((failures+1))
+
+mutate core/dataset/batch.py \
+    '        index += 1
+        log.append(row)' \
+    '        index += 1
+        if row.get("ok"): log.append(row)  # MUTATED: failures dropped' \
+    "a failed run is a ledger line" \
+    tests/test_dataset.py || failures=$((failures+1))
+
+mutate core/dataset/batch.py \
+    '                    raise BatchError(
+                        "batch.factors",
+                        f"factor {name!r} is not a spec field ({exc})") from exc' \
+    '                    continue  # MUTATED: an unknown factor is skipped
+                    raise BatchError(
+                        "batch.factors",
+                        f"factor {name!r} is not a spec field ({exc})") from exc' \
+    "an unknown factor refuses before any run" \
+    tests/test_dataset.py || failures=$((failures+1))
+
+mutate core/dataset/batch.py \
+    '                sample_randomization(spec)
+            except RandomizationError as exc:' \
+    '                pass  # MUTATED: the run id names a spec no run has
+            except RandomizationError as exc:' \
+    "the run id is the digest the manifest records" \
+    tests/test_dataset.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '    return math.atan2(-fz, fx)' \
+    '    return math.atan2(fz, fx)  # MUTATED: rotation_y sign' \
+    "KITTI rotation_y follows the stated convention" \
+    tests/test_dataset.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '            flat += [float(kp["u"]), float(kp["v"]), 2]' \
+    '            flat += [float(kp["u"]), float(kp["v"]), 1]  # MUTATED: visible = occluded' \
+    "COCO keypoint visibility is 2 for an in-frame point" \
+    tests/test_dataset.py || failures=$((failures+1))
+
+mutate flightsim/verify.py \
+    '    written = write_verification(report, args.run_dir)' \
+    '    written = Path(args.run_dir)  # MUTATED: the verdict is never recorded' \
+    "flightsim.verify records its verdict" \
+    tests/test_dataset.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

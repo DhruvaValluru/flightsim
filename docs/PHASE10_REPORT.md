@@ -481,3 +481,106 @@ refraction, ~0.5 deg at the horizon, below the 8 deg floor). The sky
 model has no clouds (still task 12), so "visual weather" is fog and
 sun only. Livery variants require an imported material per variant;
 none ship.
+
+## P10-6 -- batch execution and dataset export
+
+**What was built.** Two commands over the existing capture and
+verifier, nothing re-implemented:
+
+- `python -m flightsim.batch matrix.yaml --out DIR`
+  (`core/dataset/batch.py`). A matrix names a base spec, the factors
+  to vary (any spec address the spec's own `set()` takes --
+  `altitude`, `cameras[0].focal_length_mm`, `randomization.enabled`),
+  the run seeds, a design (factorial or one-at-a-time, through
+  `core/experiments/sweep.Design`), a worker cap and the capture
+  options. Every cell x seed is a spec; the planners the capture CLI
+  runs (the randomisation sampler) run when the case is built, so the
+  run id is the digest the run's manifest records -- measured the
+  other way first: an id taken before sampling named a spec no run
+  had, and the test caught it. Runs are content-addressed
+  (`DIR/<digest[:16]>/`): the same spec never runs twice, inserting a
+  level recomputes nothing that did not change, and a level equal to
+  the base value collapses onto one run. Each run is one
+  `flightsim.capture` subprocess with its log kept, then verified
+  in-process with `verification.json` written. `ledger.jsonl` gets one
+  line per run as it completes -- failures included, with the exit
+  code and the log's path; a resumed batch skips captured runs and
+  retries failed captures (a failed VERIFICATION is not retried; it is
+  a finding). `batch.json` records the matrix, the base digest, every
+  run id and the git provenance. `--dry-run` lists the runs; `--workers`
+  caps concurrency; exit 0 only when every run captured AND verified.
+- `python -m flightsim.export RUNS... --out DIR --format coco|kitti|webdataset`
+  (`core/dataset/export.py`). Inputs are run directories or batch
+  directories. Every run must carry a `verification.json` with no
+  failed check -- `flightsim.verify` now writes one beside the
+  manifest, and the batch runner writes one per run -- or the WHOLE
+  export refuses by name (`export.unverified`,
+  `export.verification_failed`): dropping an unchecked run silently
+  is the thing this prevents. A frame with no image refuses
+  (`export.missing_frames`) unless `--labels-only`, which the card
+  records. `--image sensor` exports the sensor-model frames with
+  `labels_sensor`; the 3-D box and horizon are marked pinhole.
+- **The split is by simulation digest.** `simulation_digest` now
+  excludes the randomisation block as it excludes the cameras: two
+  runs differing only in what looked at the flight or in the sampled
+  sun/fog/jitter flew ONE simulation and land on one side of every
+  train/val/test line. Simulations are shuffled by `--split-seed` and
+  dealt greedily by frame count to the stated fractions; the card
+  records the seed and the full assignment.
+- Formats. COCO: one category per airframe, the seven keypoints in
+  `KEYPOINT_NAMES` order with visibility 2/0, bbox `[x, y, w, h]` from
+  the CLIPPED box with `truncation`, the 3-D box and horizon as extra
+  keys, images copied per split. KITTI: `image_2`/`label_2`/`calib`
+  per split; the manifest's camera frame IS KITTI's (x right, y down,
+  z forward), so location is the box centre, `h w l` are the extents
+  down/right/forward, `rotation_y = atan2(-f_z, f_x)` for the body
+  forward axis in camera coordinates, `alpha = rotation_y - atan2(x, z)`
+  wrapped, `occluded` 3 (unknown) unless an engine occlusion fraction
+  was recorded; `P0`-`P3` are the frame's pinhole. WebDataset: sorted
+  keys, fixed shard size, each sample the PNG plus its sidecar
+  verbatim with the export labels and split added, member mtimes
+  fixed so a labels-only export is byte-identical twice.
+- The card (`DATASET_CARD.md` + `dataset.json`): runs with their
+  digests, cameras, solve source, verification counts and which
+  checks were NOT RUN; the split; aircraft, sensor profiles,
+  randomised runs; the label conventions and both format conventions;
+  the airframes' cited dimensions; the software revision; and a
+  "not claimed" list (render reproducibility not established until
+  Gate 10-R runs; labels are the recorded flight's geometry; pinhole
+  quantities under a sensor image; no photometric calibration).
+
+**Tests and guards.** `tests/test_dataset.py`: 14 tests -- matrix
+refusals by name, content addressing and the unknown-factor refusal
+before any run, the exact capture argv, a fake-runner ledger with a
+failure recorded / resume retrying only it / fresh discarding / two
+workers, the real example matrix (four captures, every run verified,
+ledgered and addressed by its manifest's digest), the batch CLI, the
+verify CLI's record, the simulation-digest key, splits keeping a
+simulation together and following the seed, the four export refusals,
+COCO with real pixels and the card (ideal and sensor images), KITTI's
+conventions and files, WebDataset's sorted reproducible shards, and
+the export CLI's exit codes. Thirteen mutation guards, each shown to
+fail its test when removed.
+
+**How to demonstrate.**
+
+    .venv/bin/python -m flightsim.batch examples/batch_matrix.yaml --out runs/batch/demo
+    .venv/bin/python -m flightsim.export runs/batch/demo --out datasets/demo --format coco --labels-only
+    # Windows, with the engine: add "render: true" to the matrix's
+    # capture options, drop --labels-only, and --image sensor for the
+    # sensor frames.
+
+**Not verified here.** No rendered batch exists (no engine): the
+with-pixels export path was exercised on fabricated frames of the
+manifest's declared size, and the sensor-image path on fabricated
+`_sensor.png` files under the ideal profile. The first rendered batch
+on Windows is the check that images, masks and sensor frames all sit
+where the export looks.
+
+**Limitations.** One aircraft per frame (the scene has one); COCO
+`iscrowd` is always 0 and KITTI `occluded` is unknown without the
+engine's occlusion pass. The batch runs captures as subprocesses on
+one machine; there is no cluster scheduler. `one-at-a-time` designs
+follow the sweep module's centre-level rule. Exported images are
+copied, not linked, so a dataset is self-contained and twice the
+disk.
