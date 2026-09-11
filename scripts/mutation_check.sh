@@ -777,10 +777,10 @@ mutate core/nl/llm_compiler.py \
     tests/test_llm_compiler.py || failures=$((failures+1))
 
 mutate core/nl/compiler.py \
-    '    if count is not None:
-        camera.capture_count = Quantity(' \
-    '    if False:  # MUTATED: image counts silently dropped
-        camera.capture_count = Quantity(' \
+    '        if count is not None:
+            camera.capture_count = Quantity(' \
+    '        if False:  # MUTATED: image counts silently dropped
+            camera.capture_count = Quantity(' \
     "a stated image count reaches the camera spec" \
     tests/test_nl_compiler.py || failures=$((failures+1))
 
@@ -1846,6 +1846,54 @@ mutate webapp/capture.py \
 )' \
     "the per-camera view carries the airframe and the conventions" \
     tests/test_webapp_capture.py || failures=$((failures+1))
+
+# -- the derived airframe is written atomically and idempotently (batch workers) --
+
+mutate core/control/derive.py \
+    '        if path.is_file() and path.read_bytes() == data:
+            return False' \
+    '        if False:  # MUTATED: an identical file is rewritten every time
+            return False' \
+    "an identical derived file is never rewritten" \
+    tests/test_control.py || failures=$((failures+1))
+
+mutate core/control/derive.py \
+    '    tmp.write_bytes(data)
+    os.replace(tmp, path)' \
+    '    path.write_bytes(data)  # MUTATED: written in place, readers see a partial file' \
+    "the derived airframe is written atomically" \
+    tests/test_control.py || failures=$((failures+1))
+
+# -- audit fixes: the web camera refusal surface, geographic placement, schema NOT RUN, applied pose --
+
+mutate webapp/server.py \
+    '    if camera_refusals:
+        verdict["ok"] = False
+        verdict["violations"].extend(camera_refusals)' \
+    '    if False:  # MUTATED: camera refusals never reach the page
+        verdict["ok"] = False
+        verdict["violations"].extend(camera_refusals)' \
+    "a buried camera refuses on the web surface" \
+    tests/test_webapp.py || failures=$((failures+1))
+
+mutate core/capture/poses.py \
+    '            north, east = frame.to_local(lat, lon)' \
+    '            north, east = 0.0, 0.0  # MUTATED: geographic placement ignored' \
+    "a geographic placement resolves through the scene projection" \
+    tests/test_camera_poses.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if (version in SUPPORTED_MANIFEST_VERSIONS and version != MANIFEST_VERSION
+            and not schema_path(manifest).is_file()):' \
+    '    if False:  # MUTATED: an older supported manifest FAILS on a schema nobody published' \
+    "json_schema is NOT RUN, not FAIL, for an unpublished older version" \
+    tests/test_capture_schema.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if dist > APPLIED_POSE_TOL_M or angles > APPLIED_POSE_TOL_DEG:' \
+    '        if False:  # MUTATED: a pose the engine did not apply passes' \
+    "applied_pose fails past the director's tolerance" \
+    tests/test_render_repro.py || failures=$((failures+1))
 
 echo
 purge_cache

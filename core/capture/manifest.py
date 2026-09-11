@@ -1,8 +1,8 @@
 """The capture manifest: every frame's geometry, whether or not pixels exist.
 
 ``capture_manifest.json`` is written for EVERY captured run, on every
-platform -- the Linux/Windows half produces it from telemetry alone, and
-the macOS render adds pixels beside it without touching it. A frame
+platform -- the headless half produces it from telemetry alone, and the
+Windows render adds pixels beside it without touching it. A frame
 without recorded geometry is unusable as labeled data; this file is the
 label.
 

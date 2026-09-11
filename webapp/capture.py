@@ -420,11 +420,15 @@ def finish(out: Path, max_overlays: Optional[int] = 24) -> Dict:
     summary the page shows."""
     from core.capture.manifest import read_capture_manifest
     from core.capture.overlay import draw_overlays
-    from core.capture.verify import verify_run
+    from core.capture.verify import verify_run, write_verification
 
     manifest = read_capture_manifest(out / "capture_manifest.json")
     overlays = draw_overlays(manifest, out, max_frames=max_overlays)
     report = verify_run(out)
+    # The SAME verdict under the one name every other path uses
+    # (flightsim.verify writes it; flightsim.export refuses a run
+    # without it), so a web run exports like a CLI run.
+    write_verification(report, out)
     summary = {
         "ok": report.ok,
         "checks": [{"name": c.name, "status": c.status, "detail": c.detail}
@@ -484,5 +488,6 @@ def inventory(out: Path) -> Dict:
         "previews": listing(out / "previews"),
         "clips": clips,
         "has_manifest": manifest_path.is_file(),
-        "has_verify": (out / "verify.json").is_file(),
+        "has_verify": ((out / "verify.json").is_file()
+                       or (out / "verification.json").is_file()),
     }

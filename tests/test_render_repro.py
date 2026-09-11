@@ -193,3 +193,51 @@ def test_frame_integrity_is_not_run_without_digests(tmp_path):
     frames = _frames(tmp_path / "frames" / "chase0", record=False)
     assert verify_frame_integrity(_manifest_for(frames), tmp_path).status == NOT_RUN
     assert verify_frame_integrity(_manifest_for(frames), None).status == NOT_RUN
+
+
+# -- the engine's applied pose, graded Python-side ---------------------------
+
+def _applied_manifest(tmp_path, n=3, camera="chase0"):
+    frames = _frames(tmp_path / "frames" / camera, n=n)
+    manifest = {"frames": []}
+    records = []
+    for i in range(n):
+        pose = {"position_north_m": 100.0 + i, "position_east_m": -5.0,
+                "position_alt_m": 3000.0, "yaw_deg": 10.0, "pitch_deg": -2.0,
+                "roll_deg": 0.0}
+        manifest["frames"].append({"camera_id": camera,
+                                   "file": f"frames/{camera}/frame_{i:04d}.png", **pose})
+        records.append({"frame": f"frame_{i:04d}.png",
+                        "camera_applied_north_m": pose["position_north_m"],
+                        "camera_applied_east_m": pose["position_east_m"],
+                        "camera_applied_alt_m": pose["position_alt_m"],
+                        "camera_applied_yaw_deg": pose["yaw_deg"],
+                        "camera_applied_pitch_deg": pose["pitch_deg"],
+                        "camera_applied_roll_deg": pose["roll_deg"]})
+    (frames / "render.json").write_text(json.dumps({"frame_records": records}),
+                                        encoding="utf-8")
+    return manifest, frames / "render.json"
+
+
+def test_applied_pose_passes_fails_and_is_not_run(tmp_path):
+    from core.capture.verify import verify_applied_pose
+
+    manifest, render_json = _applied_manifest(tmp_path)
+    assert verify_applied_pose(manifest, tmp_path).status == PASS
+    payload = json.loads(render_json.read_text(encoding="utf-8"))
+    payload["frame_records"][1]["camera_applied_east_m"] += 0.2     # 20 cm off
+    render_json.write_text(json.dumps(payload), encoding="utf-8")
+    check = verify_applied_pose(manifest, tmp_path)
+    assert check.status == FAIL and "frame_0001.png" in check.detail
+    payload["frame_records"][1]["camera_applied_east_m"] -= 0.2
+    payload["frame_records"][2]["camera_applied_yaw_deg"] += 0.1     # 0.1 deg off
+    render_json.write_text(json.dumps(payload), encoding="utf-8")
+    check = verify_applied_pose(manifest, tmp_path)
+    assert check.status == FAIL and "frame_0002.png" in check.detail
+    del payload["frame_records"][2]["camera_applied_yaw_deg"]
+    payload["frame_records"] = payload["frame_records"][:2]
+    render_json.write_text(json.dumps(payload), encoding="utf-8")
+    assert "recorded no applied pose" in verify_applied_pose(manifest, tmp_path).detail
+    render_json.unlink()
+    assert verify_applied_pose(manifest, tmp_path).status == NOT_RUN
+    assert verify_applied_pose(manifest, None).status == NOT_RUN

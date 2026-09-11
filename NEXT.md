@@ -48,6 +48,14 @@ check, and Windows named as the render platform in README/platform.py/
 conftest (marker `ue_host`). Regex compiler ids changed from camera0 to
 the preset name.
 
+**Audit closure (2026-09-11, docs/CAMERA_PHASE1_CHECKLIST.md "Audit
+findings closed").** Nine audit findings + one race fixed: web camera
+refusal surface tested, geographic placement tested, `applied_pose`
+verifier check reads the commandlet's `camera_applied_*`, `json_schema`
+NOT RUN for unpublished older versions, stale macOS/count text gone,
+`core/control/derive.py` writes atomically (two batch workers raced on
+tecs.xml -- gotcha 30). The web page shows K/P per frame + run panel.
+
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
 
@@ -283,7 +291,7 @@ guards (selftest refusal, graded-set freeze).
 
 ```bash
 .venv/bin/pytest                          # 395 tests
-./scripts/mutation_check.sh               # 77 guards, all load-bearing
+./scripts/mutation_check.sh               # 77 guards then (260 today), all load-bearing
 ./scripts/ue_preflight.sh                 # "Preflight OK"
 ./scripts/build_ue.sh                     # builds the UE host
 .venv/bin/python experiments/gate5_ue_parity.py    # gate 5 end to end
@@ -589,3 +597,14 @@ the parity discipline, and the do-not-regress list)
     Companion rule: the page's dict always carries the block so an edit
     has a row to land in, while `to_dict()` omits an all-default block
     -- so "absent" and "all defaults" are one digest.
+
+30. **Generated files shared by parallel processes must be written
+    atomically and left alone when unchanged.** Every capture derives
+    the TECS airframe into `build/aircraft/<model>-tecs/`; two batch
+    workers doing it at once rewrote `Systems/tecs.xml` in place and
+    JSBSim in the other process read it half-written ("XML parse
+    error: no element found"), a failure that vanished on re-run.
+    `derive.py::_write_atomic` writes a temp name and `os.replace`s it,
+    and skips an identical rewrite, so the steady state never touches
+    the file. Any other generated-on-demand file (terrain bakes, mesh
+    imports) that a parallel run can reach needs the same shape.

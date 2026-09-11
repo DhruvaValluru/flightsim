@@ -795,6 +795,10 @@ def run_verify(run_id: str):
     which failed, and which could not run and why."""
     path = manager.out_root / run_id / "verify.json"
     if not path.is_file():
+        # A run verified by `flightsim.verify` (or the batch runner)
+        # keeps the same verdict as verification.json.
+        path = manager.out_root / run_id / "verification.json"
+    if not path.is_file():
         return JSONResponse({"error": "no verification summary"},
                             status_code=404)
     return FileResponse(path, media_type="application/json")

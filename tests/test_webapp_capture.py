@@ -1412,3 +1412,19 @@ def test_the_frames_page_shows_matrices_the_run_panel_and_copy_buttons():
     for needle in ("/verify.json", "/schemas/capture_manifest.v5.schema.json",
                    "capture_manifest.json", "pose, matrices, labels"):
         assert needle in gallery, needle
+
+
+def test_the_verdict_route_serves_a_cli_verified_run(tmp_path, monkeypatch):
+    """`flightsim.verify` writes verification.json; the page's verdict
+    route reads it when the web flow's verify.json is absent, and a web
+    run writes verification.json too, so both export alike."""
+    monkeypatch.setattr(manager, "out_root", tmp_path)
+    run = tmp_path / "cli_run"
+    run.mkdir()
+    (run / "verification.json").write_text(json.dumps(
+        {"ok": True, "passed": 1, "failed": 0, "not_run": 0,
+         "checks": [{"name": "json_schema", "status": "PASS", "detail": "ok"}]}),
+        encoding="utf-8")
+    reply = TestClient(app).get("/runs/cli_run/verify.json")
+    assert reply.status_code == 200 and reply.json()["checks"][0]["name"] == "json_schema"
+    assert TestClient(app).get("/runs/nowhere/verify.json").status_code == 404

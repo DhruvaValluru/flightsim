@@ -2033,8 +2033,18 @@ def verify_json_schema(manifest: Dict) -> Check:
     (docs/schemas/capture_manifest.v<N>.schema.json): the contract a
     consumer validates against before parsing. Any violation fails,
     by path."""
+    from .manifest import MANIFEST_VERSION, SUPPORTED_MANIFEST_VERSIONS
     from .schema import SchemaError, schema_path, validate_manifest
 
+    version = manifest.get("manifest_version")
+    if (version in SUPPORTED_MANIFEST_VERSIONS and version != MANIFEST_VERSION
+            and not schema_path(manifest).is_file()):
+        # A supported older manifest with no published contract: there
+        # is nothing to grade it against, and that is NOT a failure of
+        # the manifest -- it is named, not counted as a pass.
+        return Check("json_schema", NOT_RUN,
+                     f"no schema is published for manifest version "
+                     f"{version} (the current version is {MANIFEST_VERSION})")
     try:
         problems = validate_manifest(manifest)
     except SchemaError as exc:
@@ -2045,6 +2055,78 @@ def verify_json_schema(manifest: Dict) -> Check:
                      + "; ".join(problems[:4]))
     return Check("json_schema", PASS,
                  f"valid against {schema_path(manifest).name}")
+
+
+APPLIED_POSE_TOL_M = 0.10       # FlightSimCameraDirector::PositionToleranceCm
+APPLIED_POSE_TOL_DEG = 0.05     # FlightSimCameraDirector::RotationToleranceDeg
+
+
+def verify_applied_pose(manifest: Dict, run_dir=None) -> Check:
+    """The pose the ENGINE reports applying, frame by frame, against the
+    pose the manifest solved. The commandlet writes
+    ``camera_applied_{north,east,alt}_m`` and ``_{yaw,pitch,roll}_deg``
+    into each camera's render.json for exactly this comparison; the
+    director already aborts a render past the same tolerances, and
+    this check is the Python side that reads what it wrote, so a host
+    that silently recomputed a pose could not pass. NOT RUN where no
+    render.json carries applied poses."""
+    if run_dir is None:
+        return Check("applied_pose", NOT_RUN, "no run directory")
+    frames_dir = Path(run_dir) / "frames"
+    applied: Dict[str, Dict[str, Dict]] = {}
+    if frames_dir.is_dir():
+        for camera_dir in sorted(p for p in frames_dir.iterdir() if p.is_dir()):
+            path = camera_dir / "render.json"
+            if not path.is_file():
+                continue
+            try:
+                records = json.loads(path.read_text(encoding="utf-8")).get("frame_records") or []
+            except (OSError, ValueError):
+                continue
+            per_frame = {str(r.get("frame")): r for r in records
+                         if isinstance(r, dict) and "camera_applied_north_m" in r}
+            if per_frame:
+                applied[camera_dir.name] = per_frame
+    if not applied:
+        return Check("applied_pose", NOT_RUN,
+                     "no render.json records the applied camera pose "
+                     "(no render, or an older build)")
+    bad = []
+    counted = 0
+    worst_m = worst_deg = 0.0
+    for record in manifest.get("frames", []):
+        camera = str(record["camera_id"])
+        if camera not in applied:
+            continue
+        name = Path(str(record["file"])).name
+        engine = applied[camera].get(name)
+        if engine is None:
+            bad.append(f"{camera}/{name}: the engine recorded no applied pose")
+            continue
+        counted += 1
+        dist = math.dist(
+            (float(engine["camera_applied_north_m"]),
+             float(engine["camera_applied_east_m"]),
+             float(engine["camera_applied_alt_m"])),
+            (float(record["position_north_m"]), float(record["position_east_m"]),
+             float(record["position_alt_m"])))
+        angles = max(
+            abs((float(engine[f"camera_applied_{axis}_deg"]) - float(record[f"{axis}_deg"])
+                 + 180.0) % 360.0 - 180.0)
+            for axis in ("yaw", "pitch", "roll"))
+        worst_m = max(worst_m, dist)
+        worst_deg = max(worst_deg, angles)
+        if dist > APPLIED_POSE_TOL_M or angles > APPLIED_POSE_TOL_DEG:
+            bad.append(f"{camera}/{name}: applied pose off by {dist:.3f} m / "
+                       f"{angles:.3f} deg")
+    if bad:
+        return Check("applied_pose", FAIL,
+                     f"{len(bad)} frame(s) were not rendered from the solved "
+                     f"pose: " + "; ".join(bad[:4]))
+    return Check("applied_pose", PASS,
+                 f"{counted} frames: the engine applied the solved pose to "
+                 f"{worst_m:.4f} m / {worst_deg:.4f} deg (tol "
+                 f"{APPLIED_POSE_TOL_M} m / {APPLIED_POSE_TOL_DEG} deg)")
 
 
 def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
@@ -2101,6 +2183,7 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     report.checks.append(verify_sensor_undistortion(manifest))
     report.checks.append(verify_sensor_files(manifest, run_dir))
     report.checks.append(verify_frame_integrity(manifest, run_dir))
+    report.checks.append(verify_applied_pose(manifest, run_dir))
 
     if other_run_dir is not None:
         other = read_capture_manifest(

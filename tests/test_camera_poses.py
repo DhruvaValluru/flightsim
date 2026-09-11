@@ -336,3 +336,28 @@ def test_lag_step_is_the_exact_first_order_hold_solution():
     two = lag_step(lag_step(3.0, 10.0, 11.0, 0.1, tau), 11.0, 12.0, 0.1, tau)
     assert one == pytest.approx(two, abs=1e-12)
     assert lag_step(3.0, 10.0, 12.0, 0.0, tau) == 3.0
+
+
+def test_geographic_placement_resolves_through_the_scene_projection():
+    """An explicit camera stated by latitude/longitude sits where the
+    scene frame projects that point, and a keyframed latitude moves it
+    along the projection -- the geographic half of package B."""
+    camera = CameraSpec.defaulted(camera_id="geo", preset="explicit")
+    camera.set("position_mode", "geographic", frm="stated")
+    camera.set("aim_mode", "bearing", frm="stated")
+    lat0, lon0 = FRAME.origin_lat_deg + 0.01, FRAME.origin_lon_deg + 0.02
+    camera.set("position_lat_deg", lat0, frm="stated")
+    camera.set("position_lon_deg", lon0, frm="stated")
+    camera.set("position_alt_m", 500.0, frm="stated")
+    columns = make_columns(duration_s=10.0, dt=0.1)
+    track = solve_pose_track(columns, camera, FRAME)
+    north, east = FRAME.to_local(lat0, lon0)
+    assert track.north_m[0] == pytest.approx(north, abs=1e-9)
+    assert track.east_m[0] == pytest.approx(east, abs=1e-9)
+    assert abs(north) > 100.0 and abs(east) > 100.0      # not the origin
+    camera.moves = [{"t_s": 0.0, "position_lat_deg": lat0},
+                    {"t_s": 10.0, "position_lat_deg": lat0 + 0.01}]
+    moved = solve_pose_track(columns, camera, FRAME)
+    i5 = columns["t"].index(5.0)
+    mid_north, _ = FRAME.to_local(lat0 + 0.005, lon0)
+    assert moved.north_m[i5] == pytest.approx(mid_north, abs=1e-6)

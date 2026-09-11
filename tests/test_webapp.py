@@ -1365,3 +1365,21 @@ def test_a_half_written_bake_is_not_a_bake(control_ridge, monkeypatch):
                         lambda **kw: FakeField())
     runs.ensure_control_ridge()
     assert calls, "the fail-safe must re-synthesise over a half-bake"
+
+
+def test_run_refuses_a_buried_camera_on_the_web_surface(client):
+    """The scene-coupled camera constraints reach the page's verdict
+    exactly as the flight constraints do: the committed refusal example
+    (a camera 600 m under the terrain datum) posted to /run comes back
+    409 naming camera.terrain_clearance, never a run."""
+    import yaml
+
+    from core.scenario.spec import ScenarioSpec
+
+    spec = ScenarioSpec.read(Path(__file__).resolve().parents[1]
+                             / "examples" / "cameras_refusal.yaml")
+    response = client.post("/run", json={"spec": spec.to_dict()})
+    assert response.status_code == 409
+    assert response.json()["refused"] == "validation"
+    assert any(v["constraint"] == "camera.terrain_clearance"
+               for v in response.json()["violations"])

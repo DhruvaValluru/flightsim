@@ -11,8 +11,10 @@ producer's arithmetic. :func:`engine_style_pixel` therefore builds the
 projection the way the commandlet does -- a world-to-camera basis and a
 tangent-of-half-FOV image plane, taking its field of view from the
 recorded focal length and sensor width exactly as
-``FlightSimRenderCommandlet.cpp`` now does -- and imports nothing from
-:mod:`core.capture.verify` or :mod:`core.capture.poses`. If the
+``FlightSimRenderCommandlet.cpp`` now does -- and borrows no projection
+arithmetic from :mod:`core.capture.verify` or :mod:`core.capture.poses`
+(what this file imports from them are the solver that makes the
+fixtures and the checks under test, never a world-to-pixel helper). If the
 manifest's documented projection and that construction disagree, these
 tests fail, which is the whole point.
 

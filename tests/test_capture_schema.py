@@ -132,3 +132,15 @@ def test_projection_matrix_check_passes_fails_and_is_not_run(manifest):
         del record["projection_matrix"]
         del record["intrinsic_matrix"]
     assert verify_projection_matrix(older).status == NOT_RUN
+
+
+def test_json_schema_is_not_run_for_an_older_supported_version_and_fails_for_a_missing_current_one(
+        manifest, tmp_path, monkeypatch):
+    import core.capture.schema as schema_module
+
+    older = copy.deepcopy(manifest)
+    older["manifest_version"] = 4                 # supported, no schema published
+    assert verify_json_schema(older).status == NOT_RUN
+    monkeypatch.setattr(schema_module, "SCHEMA_DIR", tmp_path)   # current file gone
+    check = verify_json_schema(manifest)
+    assert check.status == FAIL and "no schema file" in check.detail

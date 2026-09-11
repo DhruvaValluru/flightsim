@@ -49,7 +49,7 @@ checks reported NOT RUN by name, and rendered frames refused by name
 | --- | --- | --- |
 | Pure function: flight state + camera -> per-sample pose with full intrinsics | done | `solve_pose_track`; `tests/test_camera_poses.py` |
 | Five presets ported; only the cockpit inherits roll; the flag recorded | done | `horizon_stable` / `inherits_roll` per camera block; `tests/test_camera_poses.py` |
-| Explicit placement in scene and geographic coordinates | done | `position_mode` scene / geographic via `SceneFrame` |
+| Explicit placement in scene and geographic coordinates | done | `position_mode` scene / geographic via `SceneFrame`; `tests/test_camera_poses.py::test_geographic_placement_resolves_through_the_scene_projection` (guarded) |
 | Time-keyed moves over position, aim, focal length (and offsets), deterministic, rate-free | done | `MOVE_KEYS`; `_keyframe_value`; `tests/test_camera_poses.py::test_keyframes_agree_across_telemetry_rates` |
 | Poses solved over headless telemetry | done | `flightsim.capture` on any OS |
 | Bit-identical across invocations and across sample rates with fixed keyframes | done | invocation digest test; keyframes bit-identical across rates; lagged presets integrate exactly (first-order hold): chase 0.3 mm / wingman 0.6 mm between 10 and 20 Hz, pinned under 1 cm and stated as the track's own interpolation, not integrator error |
@@ -75,7 +75,7 @@ checks reported NOT RUN by name, and rendered frames refused by name
 | `camera.schedule` | done | `schedule_violations` |
 | `camera.moves` (a keyframe key no solver field reads) | done (gap closure) | `moves_violations`; `tests/test_camera_prompts.py` |
 | A stated camera field is never silently moved | done | `CameraSpec.plan` refuses; `tests/test_camera_spec.py::test_stated_camera_placement_is_never_replanned` |
-| Constraints on the existing refusal surface (web) | done | `/run` verdict carries `camera_scene_violations`; `tests/test_webapp.py` |
+| Constraints on the existing refusal surface (web) | done | `/run` verdict carries `camera_scene_violations`; `tests/test_webapp.py::test_run_refuses_a_buried_camera_on_the_web_surface` posts the committed refusal example and gets `camera.terrain_clearance` (guarded) |
 
 ## Work package E -- capture manifest
 
@@ -104,7 +104,7 @@ checks reported NOT RUN by name, and rendered frames refused by name
 | Solved pose track on the run card | done | `write_run_card(cameras=...)` |
 | Director consumes poses per frame; refuses a track that does not cover the run | done | `FlightSimCameraDirector::SetPoseTrack` / `ApplyPoseAtTime` |
 | One pass per camera into per-camera directories | done | `-camera-index=N`; `scripts/render_ue_scenario.ps1` |
-| Commandlet emits the same fields; fails loudly on solved-vs-applied disagreement | done | applied-pose fields in `render.json`; 10 cm / 0.05 deg; plugin automation tests `scripts\test_ue.ps1` |
+| Commandlet emits the same fields; fails loudly on solved-vs-applied disagreement | done | the director aborts past 10 cm / 0.05 deg (plugin automation tests, `scripts\test_ue.ps1`) AND the Python verifier's `applied_pose` check reads the `camera_applied_*` fields the commandlet writes into `render.json` and grades every frame against the manifest to the same tolerances (`tests/test_render_repro.py::test_applied_pose_passes_fails_and_is_not_run`, guarded); NOT RUN with no render |
 | World-to-pixel helper reused to verify against rendered frames | done | landmarks projected by the commandlet's `ProjectToPixel` into `render.json`; verifier compares (0.00 px over 916 on Windows) |
 
 ## Work package H -- verification
@@ -116,7 +116,7 @@ checks reported NOT RUN by name, and rendered frames refused by name
 | Cross-view consistency (triangulation) | done | `two_view_triangulation`, NOT RUN without independently measured pixels; 0.000 m over 216 sightings on Windows |
 | Refusal coverage | done | `tests/test_camera_validate.py`, `tests/test_camera_verify_corruption.py` |
 | Count exactness across interval, waypoint, event | done | `tests/test_camera_schedule.py` |
-| Mutation guards | done | `scripts/mutation_check.sh`: 260+ guards, all load-bearing on the last full run |
+| Mutation guards | done | `scripts/mutation_check.sh`: 269 guards; every target re-checked against its file after the audit (one stale target retargeted) |
 | Engine parity (rendered frames vs solved manifest) | done, on Windows | Camera Phase 2 measurements in `docs/CAMERA_PHASE2_WINDOWS_PLAN.md` |
 
 ## Work package I -- demonstration and documentation
@@ -144,6 +144,27 @@ sensor profile), the sampled randomisation if any, and the
 verification verdict with the failed and NOT RUN checks named. The
 gallery links the whole-run manifest, the verification JSON, the
 schema, the run card and the provenance once per run.
+
+## Audit findings closed (2026-09-11)
+
+An independent read-only audit of this checklist against the code found
+nine items, all closed the same day: a stale mutation target (the
+image-count guard, retargeted); the web refusal surface for scene-coupled
+camera constraints had no test (now posted and guarded); geographic
+placement had no test (now tested and guarded); three stale "macOS"
+sentences in `scripts/setup.sh`, `core/capture/manifest.py` and
+`examples/cameras_multi.yaml` (rewritten); `examples/cameras_terrain.yaml`
+promised "8/8 PASS" against a verifier that now has 24 checks (count
+removed); the engine-parity test's docstring overstated its independence
+(reworded to what the file does); the commandlet's `camera_applied_*`
+fields had no Python consumer (the `applied_pose` check now grades them);
+`json_schema` failed a supported older manifest for a schema nobody
+published (now NOT RUN by name); stale guard counts in `NEXT.md`
+(annotated). A tenth finding came from running the suite: two batch
+workers deriving the same airframe raced on `tecs.xml` ("no element
+found"); the derived files are now written atomically and never
+rewritten when identical (`core/control/derive.py::_write_atomic`,
+tested and guarded).
 
 ## Out of scope for the phase, since delivered
 

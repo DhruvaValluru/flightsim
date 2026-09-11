@@ -19,8 +19,9 @@
 #       --out runs/terrain --synth-terrain
 #   .venv/bin/python -m flightsim.verify runs/terrain
 #
-# Expected: 30 frames, verification 8/8 PASS, and the pixel render
-# refused by name (ue.platform) off a render-capable machine.
+# Expected: 30 frames, every engine-free verification check PASS (the
+# engine checks report NOT RUN by name), and the pixel render refused by
+# name (ue.platform) off a render-capable machine.
 spec_version: 7
 name: cameras_terrain
 aircraft:

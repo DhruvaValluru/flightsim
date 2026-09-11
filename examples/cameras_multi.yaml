@@ -1,8 +1,9 @@
 # Two cameras, one flight: a chase view and the tower, each capturing
 # EXACTLY 24 images on the shared telemetry clock, so the two frame
 # sets align instant-for-instant (the temporal-alignment property).
-# Runs on any platform -- rendering refuses by name (ue.platform)
-# off-mac while the manifest, previews and verification complete:
+# Runs on any platform -- rendering refuses by name (ue.platform) on a
+# machine without the Windows host while the manifest, previews and
+# verification complete:
 #   .venv/bin/python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo
 #   .venv/bin/python -m flightsim.verify runs/demo
 spec_version: 7
