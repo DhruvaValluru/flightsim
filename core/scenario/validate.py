@@ -214,6 +214,7 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
     from ..capture.validate import validate_cameras
 
     report.violations.extend(validate_cameras(spec))
+    report.violations.extend(validate_randomization(spec))
 
     # -- the definitive check: can this actually be trimmed? -----------
     # Skipped when geometry is already impossible, since trimming below ground
@@ -236,3 +237,79 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
             )
 
     return report
+
+
+def validate_randomization(spec) -> List[Violation]:
+    """The randomisation block's own constraints, refused by name.
+
+    Ranges must be ranges, the year must be inside the cited solar
+    algorithm's stated accuracy, a fog density must be positive (the
+    log-uniform draw needs it), a jitter cannot be negative, and the
+    switch must be a boolean -- a string "false" is true in Python and
+    would randomise a spec whose owner said not to.
+    """
+    from .randomization import YEAR_MAX, YEAR_MIN
+
+    block = spec.randomization
+    out: List[Violation] = []
+
+    def num(name):
+        try:
+            return float(getattr(block, name).value)
+        except (TypeError, ValueError):
+            out.append(Violation(f"randomization.{name}",
+                                 f"randomization.{name} must be a number, "
+                                 f"not {getattr(block, name).value!r}"))
+            return None
+
+    if not isinstance(block.enabled.value, bool):
+        out.append(Violation(
+            "randomization.enabled",
+            f"randomization.enabled must be true or false, not "
+            f"{block.enabled.value!r} (a string 'false' would be truthy)",
+            actual=block.enabled.value))
+    year = num("year")
+    if year is not None and not (YEAR_MIN <= year <= YEAR_MAX):
+        out.append(Violation(
+            "randomization.year",
+            f"year {year:g} is outside {YEAR_MIN}-{YEAR_MAX}, the range the "
+            f"cited solar-position algorithm is stated accurate for",
+            actual=year, limit=f"{YEAR_MIN}-{YEAR_MAX}", unit="year"))
+    for lo_name, hi_name, lo_lim, hi_lim, unit in (
+            ("day_of_year_min", "day_of_year_max", 1, 366, "day"),
+            ("hour_utc_min", "hour_utc_max", 0.0, 24.0, "h"),
+            ("fog_density_min", "fog_density_max", None, None, "1/m")):
+        lo, hi = num(lo_name), num(hi_name)
+        if lo is None or hi is None:
+            continue
+        if lo_lim is not None and not (lo_lim <= lo <= hi_lim and lo_lim <= hi <= hi_lim):
+            out.append(Violation(
+                f"randomization.{lo_name}",
+                f"{lo_name}/{hi_name} must lie in {lo_lim}-{hi_lim} {unit}",
+                actual=f"{lo:g}-{hi:g}", limit=f"{lo_lim}-{hi_lim}", unit=unit))
+        if lo_lim is None and lo <= 0.0:
+            out.append(Violation(
+                f"randomization.{lo_name}",
+                f"{lo_name} must be positive (the fog draw is log-uniform)",
+                actual=lo, limit=0.0, unit=unit))
+        if lo > hi:
+            out.append(Violation(
+                f"randomization.{hi_name}",
+                f"{hi_name} ({hi:g}) is below {lo_name} ({lo:g}): not a range",
+                actual=hi, limit=lo, unit=unit))
+    floor = num("sun_elevation_min_deg")
+    if floor is not None and not (-90.0 <= floor <= 90.0):
+        out.append(Violation("randomization.sun_elevation_min_deg",
+                             "sun_elevation_min_deg must lie in -90..90 deg",
+                             actual=floor, limit="-90..90", unit="deg"))
+    for name, hi in (("camera_jitter_m", None), ("camera_jitter_deg", 180.0),
+                     ("camera_focal_jitter", 0.9)):
+        value = num(name)
+        if value is None:
+            continue
+        if value < 0.0 or (hi is not None and value > hi):
+            out.append(Violation(
+                f"randomization.{name}",
+                f"{name} must be in 0..{hi if hi is not None else 'inf'}",
+                actual=value, limit=hi, unit=getattr(block, name).unit))
+    return out

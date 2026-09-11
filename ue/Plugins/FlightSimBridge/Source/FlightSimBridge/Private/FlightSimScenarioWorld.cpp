@@ -472,6 +472,19 @@ bool FFlightSimScenarioWorld::ReadCard(const FString& Path,
 	// Optional real heightfield collision (Phase 7 1.2).
 	Root->TryGetStringField(TEXT("collision_terrain"), Out.CollisionTerrainPath);
 	Root->TryGetStringField(TEXT("scene_crs"), Out.SceneCrs);
+	// Phase 10 (package 7): the sampled livery, verbatim from the block
+	// Python wrote; the host chooses nothing.
+	const TSharedPtr<FJsonObject>* RandomizationJson = nullptr;
+	if (Root->TryGetObjectField(TEXT("randomization"), RandomizationJson) &&
+	    RandomizationJson != nullptr)
+	{
+		FString Livery;
+		if ((*RandomizationJson)->TryGetStringField(TEXT("livery"), Livery) &&
+		    !Livery.IsEmpty())
+		{
+			Out.Livery = Livery;
+		}
+	}
 
 	bool bHoldState = false;
 	if (!Root->TryGetBoolField(TEXT("hold_state"), bHoldState))

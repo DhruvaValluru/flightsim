@@ -353,3 +353,131 @@ VALIDITY makes from the numbers, not one this module makes. The three
 pins are the known sources of frame variance under a fixed input;
 others (GPU scheduling of temporal effects, driver-level shader
 replacement) are not pinned and would show as `bounded`.
+
+## P10-7 -- domain randomisation: sampled once, recorded, replayable
+
+**What was built.** An optional `randomization` block on the spec
+(`core/scenario/randomization.py`, under SPEC_VERSION 7 -- no bump:
+the canonical form OMITS an all-default block, so every spec written
+before it existed keeps its digest, and "absent" and "all defaults"
+are one spelling, pinned by test). The block is provenanced field for
+field like a camera: its ranges are `default` until stated, and the
+sampler writes every drawn value back as `derived` beside the range it
+came from. The sampler is a planner in the pinned order (after
+`plan_camera_defaults`, before `project_for_ue_host`; also on the
+`flightsim.capture` path), it moves only fields nobody stated, it is
+value-idempotent across `/compile` and `/run`, and it refuses by name
+(`randomization.time_of_day`) when the stated window has no daylight.
+
+What is drawn, and from what:
+
+- **Time of day.** A day of the year and a UTC hour, uniform in the
+  stated windows (defaults: any day of 2024, any hour). The sun's
+  elevation and azimuth follow from the spec's own latitude/longitude
+  by `core/scenario/solar.py`: Meeus, *Astronomical Algorithms* 2nd ed.
+  ch. 25, in NOAA's General Solar Position form -- geometric elevation,
+  no refraction, stated. Tested against the textbook: 61.94 deg at
+  London's solstice noon, declination 23.44, due south; overhead at the
+  equator's equinox noon; north at Sydney's summer noon. A draw with
+  the sun below `sun_elevation_min_deg` (default 8 deg, the dawn look
+  point) is rejected and redrawn, 64 times, then refused: the
+  exposure is calibrated for daylight only. A stated day or hour is
+  used, not redrawn.
+- **Exposure.** NOT drawn: interpolated between the two
+  probe-calibrated look points the harness already renders with
+  (dawn 8 deg -> 10.5, noon 50 deg -> 9.5; gotcha 7) and clamped beyond
+  them. A test pins the anchors to `showcase_matrix.TIME_OF_DAY`, so
+  no palette nobody rendered can enter here (gotcha 6).
+- **Fog.** Log-uniform between the harness's calibrated clear (0.0012)
+  and hazy (0.010) by default; the range is stated and editable.
+- **Camera jitter.** Per camera, each plannable placement field moves
+  by a uniform draw within `camera_jitter_m` (offset or scene
+  placement; geographic placements are not jittered, stated) or
+  `camera_jitter_deg` (bearing aims), the focal length by a fraction.
+  Every draw is taken whether or not its field moves, so a stated
+  field does not shift the others' draws; a stated field is skipped
+  and the skip is a spec note. The un-jittered value is kept in the
+  field's `detail` (`randomization_base`), which is how the second
+  planner pass lands on the same number instead of jittering the
+  jitter -- tested through YAML and three passes.
+- **Livery.** Uniform over the variants an airframe's config declares
+  (`liveries: [...]` in assets/aircraft_config). No shipped airframe
+  declares any, so today every draw is `"default"` and says so. The
+  card carries the name; the commandlet loads
+  `<asset_path_root>/Liveries/<name>` as a material for every slot of
+  every part, and REFUSES by name when the asset is absent -- a record
+  that names one livery over pixels that show another is the failure
+  this prevents. `render.json`'s scene block records the livery
+  applied.
+
+Streams: one per aspect, `sha256("<seed>:randomization:<label>")`
+(the sensor model's convention), so adding a camera cannot move the
+sun. The block's seed derives from the run seed
+(`sha256("<run seed>:randomization") mod MAX_SEED`) when nobody states
+one -- a batch that varies the run seed varies the draws, and nothing
+else does.
+
+**What the render and the record get.** When the block is on, the
+commandlet is given the sampled look (`-sun-elev`, `-sun-azim`,
+`-exposure-bias`, `-fog-density`) from both the web flow and the
+capture CLI; the sun azimuth is converted from compass to the engine's
+yaw convention in one place (`engine_sun_azimuth`: scene X east, Y
+north, a rotator's yaw points along (cos, sin); tested by pointing the
+light at four compass bearings). Randomisation wins over the storm
+look on purpose, and the storm's physics still arrive as card blocks.
+The card and the manifest carry the SAME `randomization` dict (seed,
+day, hour, sun in both conventions, exposure, fog, livery, the solar
+source, and every camera field the jitter moved with base/value/delta);
+every frame sidecar carries it in its context. Off, the block is
+absent from the spec, `null` in the manifest, absent from the card,
+and the commandlet argv is byte-identical to before (the existing pin
+still holds).
+
+**The review table.** The block renders as its own labeled block of
+editable rows on the page (the page's dict always carries the block so
+an edit has a row to land in; `from_dict` normalises a default block
+back to absent). `true`/`false` typed into the switch stay booleans:
+the validator refuses a string there, because a string "false" is
+truthy.
+
+**Tests and guards.** `tests/test_randomization.py`: 22 tests over the
+solar algorithm, canonical absence, round trip, refusals, determinism
+and seed sensitivity, idempotence, the stated-field rule, the look,
+the calibration pins, the azimuth conversion, the daylight refusal,
+liveries, the render command, the card, validation, both endpoints,
+and the capture CLI over the committed `examples/randomized.yaml`
+(card == manifest == sidecar context). Fifteen mutation guards, each
+shown to fail its test when removed.
+
+**How to demonstrate.**
+
+    .venv/bin/pytest tests/test_randomization.py -q
+    .venv/bin/python -m flightsim.capture examples/randomized.yaml --out runs/randomized --card
+    # card.json / capture_manifest.json: "randomization": {...}
+    # web app: set randomization.enabled to true in the table and Run;
+    # the run's card carries the sampled sun/fog/jitter, the render log
+    # shows -sun-elev/-sun-azim/-exposure-bias/-fog-density
+
+**Not verified here.** The livery C++ is UNCOMPILED (no engine); no
+livery asset exists to load, so the first Windows check is that a
+`"default"` livery renders exactly as before and a card naming a
+missing livery refuses by name in the render log. The sampled sun and
+fog have been rendered only through the harness's existing flags, so
+the LOOK of a sampled dawn is whatever those flags already produce;
+no new visual value was introduced.
+
+**What was cut, and why.** Distractor objects (other aircraft,
+vehicles, negatives) are scene content -- the owner removed P10-8 --
+and would land in the label pass as class 2 (terrain-or-other) until
+the mask pass distinguishes them; not built. Sun animation over a
+clip exists in the commandlet (`-sun-elev-end`) and is not driven by
+the block: over a 15-second clip the sun moves under 0.1 deg.
+
+**Limitations.** Exposure follows sun elevation on a straight line
+between two calibrated points; a real camera's auto-exposure is not
+modelled, and a sampled dawn under dense fog is darker than either
+anchor was calibrated for. The sun's position is geometric (no
+refraction, ~0.5 deg at the horizon, below the 8 deg floor). The sky
+model has no clouds (still task 12), so "visual weather" is fog and
+sun only. Livery variants require an imported material per variant;
+none ship.

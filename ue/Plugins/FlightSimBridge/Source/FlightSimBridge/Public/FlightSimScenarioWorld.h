@@ -205,6 +205,11 @@ struct FFlightSimScenarioCard
 	// Phase 9: projected CRS for flat-scene position-coupled blocks
 	// (thermals / downburst / tornado); empty when terrain declares one.
 	FString SceneCrs;
+	// Phase 10 (package 7): the livery the randomisation block sampled,
+	// from card.randomization.livery. "default" (or absent) keeps the
+	// mesh's own materials; any other name must load as a material at
+	// <asset_path_root>/Liveries/<name> or the render refuses by name.
+	FString Livery = TEXT("default");
 };
 
 class FLIGHTSIMBRIDGE_API FFlightSimScenarioWorld

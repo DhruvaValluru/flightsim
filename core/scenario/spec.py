@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from .camera import CameraSpec
+from .randomization import RandomizationSpec
 from .fields import Quantity, Source
 
 # 2 (2026-08-11): environment.surface added (Phase 9.1 ground-cover
@@ -100,6 +101,14 @@ class ScenarioSpec:
     #: digest-relevant. EMPTY means the documented default camera
     #: behaviour -- exactly the pre-camera build, via default_cameras().
     cameras: List["CameraSpec"] = dc_field(default_factory=list)
+    #: Domain randomisation (Phase 10, package 7): a provenanced block
+    #: with its own seed and the drawn values written back as derived
+    #: fields. The documented default is "off", and the canonical form
+    #: OMITS a default block -- so every spec written before the block
+    #: existed keeps its digest, and "absent" and "all defaults" are one
+    #: spelling. Same version 7; no bump.
+    randomization: "RandomizationSpec" = dc_field(
+        default_factory=RandomizationSpec.defaulted)
 
     #: Field order for both serialisation and the rendered table.
     FIELD_ORDER = (
@@ -153,6 +162,15 @@ class ScenarioSpec:
             raise ValueError(f"{field!r} is not a camera field")
         return self.cameras[index], field
 
+    def _randomization_address(self, name: str):
+        """Parse ``randomization.<field>`` -> field or None."""
+        if not name.startswith("randomization."):
+            return None
+        field = name[len("randomization."):]
+        if field not in RandomizationSpec.FIELD_ORDER:
+            raise ValueError(f"{field!r} is not a randomization field")
+        return field
+
     def set(self, name: str, value: Any, frm: str = "edited by hand") -> None:
         """Override a field, recording that a human did it.
 
@@ -164,6 +182,10 @@ class ScenarioSpec:
         camera = self._camera_address(name)
         if camera is not None:
             camera[0].set(camera[1], value, frm=frm)
+            return
+        block_field = self._randomization_address(name)
+        if block_field is not None:
+            self.randomization.set(block_field, value, frm=frm)
             return
         current = getattr(self, name)
         setattr(
@@ -189,6 +211,10 @@ class ScenarioSpec:
         camera = self._camera_address(name)
         if camera is not None:
             camera[0].plan(camera[1], value, frm=frm)
+            return
+        block_field = self._randomization_address(name)
+        if block_field is not None:
+            self.randomization.plan(block_field, value, frm=frm)
             return
         current = getattr(self, name)
         if current.source not in (Source.DEFAULT, Source.DERIVED,
@@ -220,6 +246,11 @@ class ScenarioSpec:
         # "no cameras" (the empty list), so the digest cannot fork on an
         # absent-vs-empty distinction.
         out["cameras"] = [camera.to_dict() for camera in self.cameras]
+        # The randomisation block appears only when it differs from the
+        # documented default: absent IS the default, one spelling, and
+        # pre-block specs keep their digests (no version bump).
+        if not self.randomization.is_default():
+            out["randomization"] = self.randomization.to_dict()
         if self.notes:
             out["notes"] = list(self.notes)
         return out
@@ -244,11 +275,16 @@ class ScenarioSpec:
         if not isinstance(cameras_data, list):
             raise ValueError("spec 'cameras' must be a list of camera "
                              "mappings")
+        randomization_data = data.get("randomization")
+        randomization = (RandomizationSpec.defaulted()
+                         if randomization_data is None
+                         else RandomizationSpec.from_dict(randomization_data))
         return cls(
             name=data.get("name", "scenario"),
             prompt=data.get("prompt"),
             notes=list(data.get("notes", [])),
             cameras=[CameraSpec.from_dict(entry) for entry in cameras_data],
+            randomization=randomization,
             **kwargs,
         )
 
@@ -306,6 +342,12 @@ class ScenarioSpec:
                              f"{len(camera.moves)} keyframes", "-",
                              "; ".join(f"t={m.get('t_s')}s"
                                        for m in camera.moves)))
+        # The randomisation block, when it is not the documented default
+        # (off): ranges and the drawn values, each with its source.
+        if not self.randomization.is_default():
+            for name, q in self.randomization.quantities():
+                rows.append(("randomization", name.replace("_", " "),
+                             q.render(), str(q.source), q.note()))
 
         w_name = max(len(r[1]) for r in rows) + 1
         w_val = max(len(r[2]) for r in rows) + 1

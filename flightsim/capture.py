@@ -205,6 +205,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     report = validate(spec)
     if not report.ok:
         return _refuse(report.violations)
+    # Phase 10: the randomisation block draws its values here too (the
+    # web planners are not on this path); off by default -> no-op. A
+    # window with no daylight refuses by name before any flight.
+    from core.scenario.randomization import (
+        RandomizationError, card_block as randomization_card_block,
+        render_look, sample_randomization,
+    )
+
+    try:
+        sample_randomization(spec)
+    except RandomizationError as exc:
+        print(f"REFUSED -- {exc.constraint}: {exc.message}")
+        return 2
+    if spec.randomization.is_enabled():
+        block = spec.randomization
+        print(f"randomization: seed {int(block.seed.value)}, sun "
+              f"{float(block.sun_elevation_deg.value):.1f} deg elevation / "
+              f"{float(block.sun_azimuth_deg.value):.1f} deg azimuth, fog "
+              f"{float(block.fog_density.value):g} 1/m, livery "
+              f"{block.livery.value}")
     static = static_camera_violations(
         spec, heightfield, frame, tornado,
         )
@@ -278,7 +298,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                      for camera, track, schedule
                      in zip(cameras, tracks, schedules)],
             landmarks=landmarks,
-            scene_crs=frame.crs if frame.declared else None)
+            scene_crs=frame.crs if frame.declared else None,
+            randomization=randomization_card_block(spec))
 
     solve_source = SOLVE_PRE_RUN
     solve_digest = result.output_digest
@@ -469,6 +490,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # masks, 16-bit depth, occlusion -- beside every frame of every
     # camera pass. The wrapper forwards it to each -camera-index pass.
     command.append("-labels")
+    # Phase 10: the sampled look, when the randomisation block is on.
+    # Off, the commandlet's own defaults apply exactly as before.
+    look = render_look(spec)
+    if look is not None:
+        command += [f"-sun-elev={look['sun_elev']}",
+                    f"-sun-azim={look['sun_azim']}",
+                    f"-exposure-bias={look['exposure_bias']}",
+                    f"-fog-density={look['fog_density']}"]
     print(f"rendering {len(cameras)} camera pass(es) into {frames_dir} "
           f"{'in the black void (--void)' if args.void else 'in the visual scene'} ...")
     completed = subprocess.run(command)

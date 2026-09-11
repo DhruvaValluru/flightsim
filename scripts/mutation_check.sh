@@ -1490,6 +1490,124 @@ mutate experiments/gate10_render_repro.py \
     "NOT RUN is not a verdict and not an exit 0" \
     tests/test_render_repro.py || failures=$((failures+1))
 
+# -- Phase 10, P10-7: domain randomisation, sampled once and recorded --
+
+mutate core/scenario/spec.py \
+    '        if not self.randomization.is_default():
+            out["randomization"] = self.randomization.to_dict()' \
+    '        if True:  # MUTATED: a default block is written, so every digest moves
+            out["randomization"] = self.randomization.to_dict()' \
+    "an absent block is the canonical default" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '    if not block.is_enabled():
+        return
+    if block.seed.source' \
+    '    if False:  # MUTATED: an OFF block samples anyway
+        return
+    if block.seed.source' \
+    "an off block draws nothing" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '    if getattr(block, name).source in PLANNABLE:
+        block.plan(name, value, frm=frm)' \
+    '    if True:  # MUTATED: a stated block field is planned over
+        block.plan(name, value, frm=frm)' \
+    "a stated day or hour is used, not redrawn" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '        if position.elevation_deg >= floor:
+            break' \
+    '        if True:  # MUTATED: a night draw is accepted
+            break' \
+    "a draw below the sun floor is rejected" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '        if q.source not in PLANNABLE:
+            note = ' \
+    '        if False:  # MUTATED: a stated camera field is jittered
+            note = ' \
+    "the jitter never moves a stated camera field" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '        base = float(q.detail.get(JITTER_BASE_KEY, q.value))' \
+    '        base = float(q.value)  # MUTATED: the jitter jitters the jitter' \
+    "a second planner pass lands on the same jitter" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '    return (90.0 - float(compass_azimuth_deg)) % 360.0' \
+    '    return float(compass_azimuth_deg) % 360.0  # MUTATED: compass as yaw' \
+    "the engine yaw points at the sun's compass bearing" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '    if sun_elevation_deg <= e0:
+        return b0' \
+    '    if False:  # MUTATED: exposure extrapolated below the dawn point
+        return b0' \
+    "exposure is clamped to the calibrated points" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '    if not block.is_sampled():
+        raise RandomizationError(' \
+    '    if False:  # MUTATED: an unsampled block renders a zero sun
+        raise RandomizationError(' \
+    "an enabled block nobody sampled refuses to render" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '    sampled = randomization_look(spec)
+    if sampled is not None:
+        return sampled' \
+    '    sampled = randomization_look(spec)
+    if False:  # MUTATED: the sample never reaches the render
+        return sampled' \
+    "the render is given the sampled look" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/validate.py \
+    '    if not isinstance(block.enabled.value, bool):' \
+    '    if False:  # MUTATED: a string "false" switches the block on' \
+    "the switch must be a boolean" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/card.py \
+    '    if randomization:
+        # Phase 10 (package 7)' \
+    '    if False:  # MUTATED: the card forgets the sampled look
+        # Phase 10 (package 7)' \
+    "the card carries the sampled block" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '    try:
+        sample_randomization(spec)' \
+    '    try:
+        pass  # MUTATED: the CLI never samples' \
+    "the capture command samples the block" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '    randomization_refusal = sample_randomization_or_refuse(spec)
+    project_for_ue_host(spec)' \
+    '    randomization_refusal = None  # MUTATED: /run never samples
+    project_for_ue_host(spec)' \
+    "/run samples and refuses by name" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '        "randomization": randomization_card_block(spec),' \
+    '        "randomization": None,  # MUTATED: the manifest forgets the block' \
+    "the manifest carries the same block as the card" \
+    tests/test_randomization.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

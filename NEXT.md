@@ -19,8 +19,13 @@ repro.py` three-word verdicts, per-frame sha256 in render.json,
 `-deterministic` pins, `frame_integrity` check, Gate 10-R
 `experiments/gate10_render_repro.py` -- NEVER RUN on an engine, so
 VALIDITY §3 now says "not established in either direction"; the first
-Windows `--card` run is the first verdict). NEXT UP: P10-7
-randomisation, P10-6 batch + export.
+Windows `--card` run is the first verdict); P10-7 (domain
+randomisation: optional `randomization` block under SPEC_VERSION 7 --
+ABSENT is the canonical default so no digest moved -- `core/scenario/
+randomization.py` + `solar.py` (Meeus/NOAA), sampled sun/fog/camera
+jitter/livery written back as derived, same dict in card + manifest +
+sidecars, `examples/randomized.yaml`; livery C++ UNCOMPILED and no
+variant material ships; gotcha 29). NEXT UP: P10-6 batch + export.
 
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
@@ -551,3 +556,15 @@ the parity discipline, and the do-not-regress list)
     enough), and both routes have the one test that can reach the
     guard: a symlink planted inside the run directory, which no filename
     regex can see. A WEAK guard is a finding, not a nuisance.
+
+29. **A planner that adds noise must remember what it added to.** The
+    randomisation jitter runs on /compile AND /run (every planner does,
+    value-idempotent by contract); a jitter that draws `base + delta`
+    from the field's CURRENT value jitters the jitter on the second
+    pass and the run renders a camera the table never showed. The
+    un-jittered value lives in the Quantity's `detail`
+    (`randomization_base`) and every pass draws from it; the test that
+    catches it runs the sampler three times through a YAML round trip.
+    Companion rule: the page's dict always carries the block so an edit
+    has a row to land in, while `to_dict()` omits an all-default block
+    -- so "absent" and "all defaults" are one digest.

@@ -265,6 +265,30 @@ function renderSpec(payload) {
       body.appendChild(row);
     }
   }
+  // The randomisation block (Phase 10): one labeled block of
+  // provenanced, editable rows. Off by default; set enabled to true and
+  // the run draws the sun, fog and camera jitter from the block's seed,
+  // writing each drawn value back as a derived row.
+  if (spec.randomization && spec.randomization.length) {
+    const head = document.createElement("tr");
+    head.innerHTML = `<td colspan="4"><b>randomization</b> ` +
+      `<span class="dim">domain randomisation: off unless enabled</span></td>`;
+    body.appendChild(head);
+    for (const f of spec.randomization) {
+      const row = document.createElement("tr");
+      const key = `randomization.${f.name}`;
+      row.innerHTML =
+        `<td>&nbsp;&nbsp;${f.name}</td>` +
+        `<td><input data-name="${key}" data-block="randomization" ` +
+        `data-field="${f.name}" value="${f.value}">` +
+        `${f.unit ? " " + f.unit : ""}</td>` +
+        `<td class="${sourceClass(f.source)}" data-src="${key}">` +
+        `${f.source}</td>` +
+        `<td class="dim">${provenanceNote(f)}` +
+        `${f.std ? " &mdash; " + f.std : ""}</td>`;
+      body.appendChild(row);
+    }
+  }
   renderCameraPicker();
   // Director's-notes legend: what each source means, in one line.
   $("srcLegend").innerHTML =
@@ -389,12 +413,19 @@ function editedSpecDict() {
   for (const f of compiled.spec.fields) sections[f.name] = f.section;
   document.querySelectorAll("#specTable input").forEach(input => {
     const name = input.dataset.name;
-    // Camera rows edit dict.cameras[i][field]; same source rule.
+    // Camera rows edit dict.cameras[i][field]; randomisation rows edit
+    // dict.randomization[field]; same source rule.
     const entry = input.dataset.camera !== undefined
       ? dict.cameras[+input.dataset.camera][input.dataset.field]
-      : dict[sections[name]][name];
+      : input.dataset.block !== undefined
+        ? dict[input.dataset.block][input.dataset.field]
+        : dict[sections[name]][name];
     const parsed = parseFloat(input.value);
-    const value = Number.isNaN(parsed) ? input.value : parsed;
+    // "true"/"false" typed into a switch row stay booleans: the
+    // validator refuses a string there (a string "false" is truthy).
+    const value = input.value === "true" ? true
+      : input.value === "false" ? false
+      : Number.isNaN(parsed) ? input.value : parsed;
     if (String(entry.value) !== String(value)) {
       entry.value = value;
       entry.source = "user";

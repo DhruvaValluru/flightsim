@@ -1037,6 +1037,31 @@ radiometrically calibrated**. Nothing here is traceable as sensor imagery.
 
 ---
 
+### 2.17 Domain randomisation (Phase 10): drawn once, recorded, never a palette
+
+The `randomization` block draws a time of day, a fog density, a camera
+jitter and a livery from its own seed and writes each drawn value back
+into the spec as a `derived` field beside the range it came from; the
+card, the manifest and every frame sidecar carry the same sampled dict.
+What IS claimed: the sun is where Meeus ch. 25 / NOAA put it for the
+spec's latitude, longitude, date and UTC hour (geometric, no
+refraction); the draws are reproducible from the block's seed (derived
+from the run seed when unstated); a stated field is never moved; the
+second planner pass lands on the same numbers; a window with no
+daylight refuses by name. What is NOT claimed: that a sampled look is
+photometrically right -- exposure is a straight line between the two
+probe-calibrated look points the harness already renders with, clamped
+beyond them, and fog is a range between its calibrated clear and hazy;
+no new visual value was calibrated for this block (gotcha 6). No
+clouds, no refraction, no auto-exposure. Livery variants exist as a
+card key and a refuse-by-name engine hook with NO shipped variant
+material, so every draw today is `"default"`. Distractor objects are
+scene content, cut with P10-8. Off (the documented default), the block
+is absent from the canonical spec, every pre-existing digest is
+unchanged, and the render command is byte-identical to before.
+
+---
+
 ## 3. Reproducibility: two different claims, kept separate
 
 **Physics** is intended to be bit-reproducible from a spec, and that is a

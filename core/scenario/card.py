@@ -124,6 +124,7 @@ def write_run_card(spec: ScenarioSpec, path: Path,
                    turbulence_provider=None,
                    reference_speeds: Optional[Dict[str, object]] = None,
                    tornado: Optional[Dict[str, object]] = None,
+                   randomization: Optional[Dict[str, object]] = None,
                    scene_crs: Optional[str] = None,
                    cameras: Optional[Sequence[Dict[str, object]]] = None,
                    landmarks: Optional[Sequence[Dict[str, object]]] = None,
@@ -240,6 +241,13 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         card["orographic_follow_schedule"] = True
     if collision_terrain:
         card["collision_terrain"] = str(collision_terrain)
+    if randomization:
+        # Phase 10 (package 7): the sampled look the render is given
+        # (sun in both conventions, exposure, fog), the livery the host
+        # applies (refusing by name when the asset is absent), and each
+        # camera field the jitter moved. Computed in
+        # core/scenario/randomization.py; the host derives nothing.
+        card["randomization"] = dict(randomization)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(card, indent=1), encoding="utf-8")
     return path

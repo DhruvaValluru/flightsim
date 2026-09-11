@@ -53,6 +53,7 @@ from webapp.runs import (  # noqa: E402
     pick_scene,
     place_on_scene,
     plan_camera_defaults,
+    sample_randomization_or_refuse,
     plan_flyable_defaults,
     plan_scene_setting,
     plan_terrain_environment,
@@ -133,9 +134,21 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
             } for name, quantity in camera.quantities()],
             "moves": [dict(m) for m in camera.moves],
         })
+    # The randomisation block: one labeled block of provenanced rows,
+    # editable like the others. The page's dict ALWAYS carries the block
+    # (the canonical spec omits a default one) so an edit has a row to
+    # land in; from_dict normalises a default block back to absent.
+    randomization = [{
+        "name": name, "value": quantity.value, "unit": quantity.unit,
+        "source": str(quantity.source), "from": quantity.frm,
+        "std": quantity.std, "detail": quantity.detail,
+    } for name, quantity in spec.randomization.quantities()]
+    spec_dict = spec.to_dict()
+    spec_dict["randomization"] = spec.randomization.to_dict()
     return {"digest": spec.digest(), "name": spec.name,
             "prompt": spec.prompt, "notes": spec.notes,
-            "fields": fields, "cameras": cameras, "dict": spec.to_dict(),
+            "fields": fields, "cameras": cameras,
+            "randomization": randomization, "dict": spec_dict,
             "table": spec.render_table()}
 
 
@@ -249,6 +262,10 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
     # tower does not stay at flat-ground height under planned
     # mountains); stated placements never move.
     plan_camera_defaults(spec)
+    # Phase 10: the randomisation block draws its values (off by
+    # default -> no-op); a window with no daylight refuses by name in
+    # the verdict rather than rendering an uncalibrated night.
+    randomization_refusal = sample_randomization_or_refuse(spec)
 
     payload = {
         "compiler": compiler_used, "model": model, "llm_note": llm_note,
@@ -262,6 +279,9 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         "spec": _spec_payload(spec),
         "validation": _validation_payload(spec),
     }
+    if randomization_refusal is not None:
+        payload["validation"]["ok"] = False
+        payload["validation"]["violations"].append(randomization_refusal)
     return JSONResponse(payload)
 
 
@@ -416,6 +436,10 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # the raster under it; stated placements never move and refuse by
     # name in the verdict below).
     plan_camera_defaults(spec)
+    # Randomisation draws AFTER the camera planner (its jitter is about
+    # the planned placement) and BEFORE the host projection; off by
+    # default. Same sampler as /compile: value-idempotent.
+    randomization_refusal = sample_randomization_or_refuse(spec)
     project_for_ue_host(spec)
 
     # Validation governs the edited spec too: the run endpoint re-validates
@@ -424,6 +448,9 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     if clearance_refusal is not None:
         verdict["ok"] = False
         verdict["violations"].append(clearance_refusal)
+    if randomization_refusal is not None:
+        verdict["ok"] = False
+        verdict["violations"].append(randomization_refusal)
     # Scene-coupled camera checks (Camera Phase 1): world-anchored
     # cameras against the scene raster, its bounds and the modelled
     # tornado core -- the plan_terrain_flight pattern, refused by name

@@ -66,6 +66,10 @@ from core.scenario.camera import (  # noqa: E402
     CHASE_OFFSETS, CameraSpec, default_cameras,
 )
 from core.scenario.card import write_run_card  # noqa: E402
+from core.scenario.randomization import (  # noqa: E402
+    RandomizationError, card_block as randomization_card_block,
+    render_look as randomization_look, sample_randomization,
+)
 from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import MIN_CLEARANCE_M  # noqa: E402
 from core.terrain.glo30 import (  # noqa: E402
@@ -1081,6 +1085,19 @@ def project_for_ue_host(spec: ScenarioSpec) -> None:
                       "airspeed' refuses instead)")
 
 
+def sample_randomization_or_refuse(spec: ScenarioSpec) -> Optional[Dict]:
+    """The randomisation planner for the endpoints: a no-op for a
+    default block; a named refusal dict (the verdict's violation shape)
+    when the stated window has no daylight, instead of an exception
+    the page cannot show."""
+    try:
+        sample_randomization(spec)
+    except RandomizationError as exc:
+        return {"constraint": exc.constraint, "message": exc.message,
+                "actual": None, "limit": None, "unit": None}
+    return None
+
+
 def derive_seed(spec: ScenarioSpec, terrain_coupled: bool = False) -> None:
     """A stochastic spec with the default seed gets one from its digest.
 
@@ -1099,6 +1116,21 @@ def derive_seed(spec: ScenarioSpec, terrain_coupled: bool = False) -> None:
 #: labeled so; the storm's physics arrive as card blocks.
 STORM_LOOK = {"sun_elev": 10.0, "sun_azim": 180.0, "exposure_bias": 9.6,
               "fog_density": 0.007}
+
+
+def render_look_for(spec: ScenarioSpec, event_note) -> Optional[Dict]:
+    """Which look the commandlet is given: the SAMPLED one when the
+    randomisation block is on (its sun, exposure and fog are the
+    record), the storm look when a severe-weather event composed the
+    scene, the harness's noon default otherwise (None -> byte-identical
+    to the pre-camera build, pinned by test). Randomisation wins over
+    the storm look on purpose: the storm's PHYSICS still arrive as card
+    blocks, and a dataset that asked for a sampled sun gets the sun it
+    recorded, not a fixed dim one."""
+    sampled = randomization_look(spec)
+    if sampled is not None:
+        return sampled
+    return STORM_LOOK if event_note else None
 
 
 def _projected_origin(spec: ScenarioSpec, scene: Dict):
@@ -1983,6 +2015,9 @@ class RunManager:
             reference_speeds=reference,
             cameras=capture_cameras,
             landmarks=capture_landmarks,
+            # Phase 10: the sampled sun/fog/exposure/livery and every
+            # camera field the jitter moved -- what the render was given.
+            randomization=randomization_card_block(spec),
         )
         card = write_run_card(spec, out / "card.json", **card_arguments)
         # Prompt/model provenance in a Python-written UTF-8 sidecar; the
@@ -2129,7 +2164,7 @@ class RunManager:
                         # no per-camera host flight existed and the check
                         # reported NOT RUN on every web run.
                         telemetry=telemetry,
-                        look=STORM_LOOK if event_note else None,
+                        look=render_look_for(spec, event_note),
                         camera_flags=camera_flags, extra=extra))
             except CaptureError as exc:
                 # The render log for the pass that failed sits beside its
@@ -2146,7 +2181,7 @@ class RunManager:
                 return
         elif not self._render(card, frames, scene, mesh, aircraft,
                               telemetry=out / "telemetry.json",
-                              look=STORM_LOOK if event_note else None,
+                              look=render_look_for(spec, event_note),
                               camera_flags=camera_flags):
             run.push("failed", "the render commandlet wrote no manifest; "
                                "its last words:\n"

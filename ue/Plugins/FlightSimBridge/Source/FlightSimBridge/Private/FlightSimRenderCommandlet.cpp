@@ -18,6 +18,7 @@
 #include "Engine/Engine.h"
 #include "Engine/SkyLight.h"
 #include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "ImageUtils.h"
@@ -229,11 +230,12 @@ namespace
 		FString License;
 		FString Repo;
 		FString Commit;
+		FString Livery = TEXT("default");
 	};
 
 	bool BuildMeshAirframe(AActor* Aircraft, UFlightSimSurfaceAnimator* Animator,
 	                       const FString& ManifestPath, const FString& CardAircraft,
-	                       FMeshAirframe& Out, FString& Error)
+	                       const FString& Livery, FMeshAirframe& Out, FString& Error)
 	{
 		FString Text;
 		if (!FFileHelper::LoadFileToString(Text, *ManifestPath))
@@ -385,6 +387,43 @@ namespace
 			                     bContinuous);
 			Animator->BindSurfaceComponent(FName(*Bone), HingeComponent);
 		}
+		// Phase 10 (package 7): the sampled livery. "default" is the
+		// mesh's own materials (exactly the previous behaviour); any
+		// other name is a material asset the import step placed at
+		// <asset_path_root>/Liveries/<name>, applied to every slot of
+		// every part. A name that does not load REFUSES by name: a
+		// frame whose record says one livery while the pixels show
+		// another is the failure this exists to prevent.
+		if (!Livery.IsEmpty() && Livery != TEXT("default"))
+		{
+			const FString LiveryPath = FString::Printf(
+				TEXT("%s/Liveries/%s.%s"), *AssetRoot, *Livery, *Livery);
+			UMaterialInterface* LiveryMaterial =
+				LoadObject<UMaterialInterface>(nullptr, *LiveryPath);
+			if (LiveryMaterial == nullptr)
+			{
+				Error = FString::Printf(
+					TEXT("livery '%s' did not load at %s (card randomization.livery); ")
+					TEXT("refusing to render the default livery under a record that ")
+					TEXT("names another"), *Livery, *LiveryPath);
+				return false;
+			}
+			TInlineComponentArray<UStaticMeshComponent*> Parts;
+			Aircraft->GetComponents(Parts);
+			int32 Slots = 0;
+			for (UStaticMeshComponent* Part : Parts)
+			{
+				for (int32 Slot = 0; Slot < Part->GetNumMaterials(); ++Slot)
+				{
+					Part->SetMaterial(Slot, LiveryMaterial);
+					++Slots;
+				}
+			}
+			UE_LOG(LogFlightSimRender, Display,
+			       TEXT("livery '%s' applied to %d material slot(s) of %d part(s)"),
+			       *Livery, Slots, Parts.Num());
+		}
+		Out.Livery = Livery.IsEmpty() ? TEXT("default") : Livery;
 		Out.bLoaded = true;
 		UE_LOG(LogFlightSimRender, Display,
 		       TEXT("mesh airframe '%s' (%s) [%s, %s@%s]: %d surfaces bound"),
@@ -712,7 +751,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	if (!MeshManifestPath.IsEmpty())
 	{
 		if (!BuildMeshAirframe(Scenario.Aircraft, Animator, MeshManifestPath,
-		                       Card.Aircraft, MeshAirframe, Error))
+		                       Card.Aircraft, Card.Livery, MeshAirframe, Error))
 		{
 			return Fail(Error);
 		}
@@ -2078,6 +2117,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				TEXT("flat slab at spec terrain_elevation; visual terrain "
 				     "carries no collision"));
 		}
+	}
+	if (MeshAirframe.bLoaded)
+	{
+		Scene->SetStringField(TEXT("livery"), MeshAirframe.Livery);
 	}
 	if (bVisual)
 	{

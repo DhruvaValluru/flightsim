@@ -174,6 +174,7 @@ from .profile import load_profile, sensor_labels
 from .landmarks import scene_landmarks
 from .poses import PoseTrack, SceneFrame, aircraft_local_track
 from .schedule import CaptureSchedule
+from core.scenario.randomization import card_block as randomization_card_block
 
 MANIFEST_VERSION = 5
 #: Versions this build can READ. Every version here is fully
@@ -526,6 +527,10 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
         "airframe": airframe.to_dict(),
         "label_conventions": label_conventions(),
         "assets": asset_digests(spec, airframe, scene),
+        # Phase 10 (package 7): the sampled look and jitter the render
+        # was given, or null when the block is off. Same dict as the
+        # card's, so the two records cannot disagree.
+        "randomization": randomization_card_block(spec),
         "cameras": camera_blocks,
         "frames": frames,
     }
@@ -547,7 +552,7 @@ SIDECAR_CONTEXT_KEYS = (
     "manifest_version", "spec_digest", "simulation_digest",
     "output_digest", "solve_source", "seed", "aircraft", "scene",
     "frame", "software_revision", "conditions", "state_units",
-    "airframe", "label_conventions", "assets",
+    "airframe", "label_conventions", "assets", "randomization",
 )
 
 
