@@ -1901,6 +1901,57 @@ def verify_sensor_files(manifest: Dict, run_dir=None) -> Check:
                  f"{counted} sensor frames present across {sorted(declared)}")
 
 
+# -- Phase 10, P10-4: the frame on disk is the frame the engine wrote ------
+
+def verify_frame_integrity(manifest: Dict, run_dir=None) -> Check:
+    """The render commandlet records the SHA-256 of every PNG it writes
+    in render.json; the file on disk must hash to it. A replaced,
+    re-encoded or truncated frame fails here BY FRAME -- and so does a
+    frame the manifest names that the engine never recorded. NOT RUN
+    where no render.json carries digests (an older build, or no
+    render)."""
+    from .repro import engine_digests, frame_sha256
+
+    if run_dir is None:
+        return Check("frame_integrity", NOT_RUN, "no run directory")
+    frames_dir = Path(run_dir) / "frames"
+    recorded: Dict[str, Dict[str, str]] = {}
+    if frames_dir.is_dir():
+        for camera_dir in sorted(p for p in frames_dir.iterdir() if p.is_dir()):
+            digests = engine_digests(camera_dir)
+            if digests:
+                recorded[camera_dir.name] = digests
+    if not recorded:
+        return Check("frame_integrity", NOT_RUN,
+                     "no render.json records per-frame sha256 (older engine "
+                     "build, or no render)")
+    bad = []
+    counted = 0
+    for record in manifest.get("frames", []):
+        camera = str(record["camera_id"])
+        if camera not in recorded:
+            continue
+        name = Path(str(record["file"])).name
+        expected = recorded[camera].get(name)
+        path = frames_dir / camera / name
+        if expected is None:
+            bad.append(f"{camera}/{name}: not in the engine's record")
+            continue
+        if not path.is_file():
+            bad.append(f"{camera}/{name}: recorded but absent")
+            continue
+        counted += 1
+        if frame_sha256(path) != expected:
+            bad.append(f"{camera}/{name}: bytes differ from the engine's record")
+    if bad:
+        return Check("frame_integrity", FAIL,
+                     f"{len(bad)} frame(s) are not what the engine wrote: "
+                     + "; ".join(bad[:4]))
+    return Check("frame_integrity", PASS,
+                 f"{counted} frames hash to the engine's own record across "
+                 f"{sorted(recorded)}")
+
+
 def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     """The pass/fail summary over a run directory (CLI: flightsim.verify).
 
@@ -1952,6 +2003,7 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     report.checks.append(verify_depth_range(manifest, run_dir))
     report.checks.append(verify_sensor_undistortion(manifest))
     report.checks.append(verify_sensor_files(manifest, run_dir))
+    report.checks.append(verify_frame_integrity(manifest, run_dir))
 
     if other_run_dir is not None:
         other = read_capture_manifest(

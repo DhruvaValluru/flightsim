@@ -255,3 +255,101 @@ Distorted output is sampled bilinearly from the ideal frame (no
 supersampling), so a strong barrel lens softens edges slightly. The
 sensor frame is 8-bit sRGB PNG regardless of the profile's bit depth,
 which governs quantisation of the linear signal before encoding.
+
+## P10-4 -- render reproducibility, measured, never asserted
+
+**The claim under test.** VALIDITY section 3 has said since Phase 0
+that "rendering will not be bit-deterministic". That sentence was
+written about Movie Render Queue, which this system does not use. The
+frames come from an offscreen SceneCapture in a commandlet with every
+input fixed on every run: warm-up captures of a stated count, manual
+exposure, async shader compilation finished before the first frame,
+the same card, the same build. Whether the pixels come out the same is
+therefore a measurement, and this package is the instrument. The
+sentence in VALIDITY is rewritten to say what is and is not
+established, and nothing more.
+
+**What was built.**
+
+- `core/capture/repro.py` compares two frame sets rendered from one
+  card by one build: SHA-256 of the PNG bytes first, and where the
+  bytes differ, the per-pixel numbers -- maximum absolute difference
+  on any channel, mean absolute, and the fraction of pixels that
+  differ at all. The verdict vocabulary is three words and fixed:
+  `bit-identical` (every frame's bytes equal), `bounded` (at least one
+  frame differs; the numbers bound by how much), `incomplete` (a frame
+  present in one set is absent from the other; nothing is claimed
+  about what is not there). One bit in one pixel is `bounded` with
+  max 1 and fraction 1/N. Nothing rounds, thresholds or forgives.
+- The render commandlet records the SHA-256 of every PNG it writes,
+  per frame, in `render.json` (`frame_records[].sha256`, a
+  self-contained SHA-256 in the plugin -- no engine hash module
+  needed). Two uses: `compare_frame_sets` reports a frame whose bytes
+  do not match the engine's own record APART from a render difference
+  (`engine_digests_agree_with_files: false`) -- a replaced or
+  re-encoded frame is not evidence about rendering; and the verifier's
+  new `frame_integrity` check fails BY FRAME on a file that does not
+  hash to the record, or a frame the manifest names that the engine
+  never recorded, and is NOT RUN (never a pass) where no `render.json`
+  carries digests.
+- `-deterministic`, an additive commandlet switch, pins the three
+  engine behaviours known to vary a frame between runs on the same
+  input: `r.TextureStreaming=0`,
+  `r.Streaming.FullyLoadUsedTextures=1`, `r.ForceLOD=0`. Each pin is
+  logged with the value it took, a console variable absent from a
+  build is reported by name, and `render.json` records
+  `deterministic_pins: true` per frame so a comparison knows what it
+  is comparing.
+- `experiments/gate10_render_repro.py` is Gate 10-R. `--card` renders
+  the card twice through the same wrapper with the same arguments
+  (`-Visual -deterministic`, plus any `--extra`) and compares;
+  `--against A B` compares two existing frame directories. The report
+  is `runs/gate10_render_repro/report.json` with the verdict, its
+  numbers, and a one-paragraph statement that says no more than the
+  numbers. Exit 0 on `bit-identical` or `bounded`, 1 on `incomplete`,
+  2 on NOT RUN -- on a machine with no engine it exits 2 with the
+  `ue.platform` reason and a report that contains no number.
+
+**Tests and guards.** `tests/test_render_repro.py` exercises the
+comparison on synthetic frame sets of the exact layout the commandlet
+writes: identical sets are bit-identical; one bit in one pixel is
+bounded with max 1 and fraction exactly 1/(32*16); a missing frame is
+incomplete; a replaced frame is flagged as the engine's disagreement;
+the gate writes its report in both modes, exits 2 by name with no
+engine, and passes `-deterministic` on both render commands;
+`frame_integrity` passes, fails on a replaced frame, names an
+unrecorded frame, and is NOT RUN without digests. Eight mutation
+guards, each shown to fail its test when removed: the plain-frame
+filter, the incomplete verdict, the bit-identical verdict, the
+engine-record disagreement, the integrity hash compare, the
+unrecorded-frame clause, the `-deterministic` argument, and the NOT
+RUN exit code.
+
+**How to demonstrate.**
+
+    .venv/bin/pytest tests/test_render_repro.py -q
+    # any platform, two existing renders of one card by one build:
+    python experiments/gate10_render_repro.py --against A/frames/chase0 B/frames/chase0
+    # Windows, with the engine (the first real run of Gate 10-R):
+    python experiments/gate10_render_repro.py --card runs/<id>/card.json
+    python -m flightsim.verify runs/<id>      # frame_integrity PASS
+
+**Not verified here.** The C++ (`RenderSha256Hex`, the per-frame
+`sha256`, the `-deterministic` pins) is UNCOMPILED on this machine; the
+first Windows build is the compile check. Gate 10-R has never been run
+against an engine, so NO verdict exists yet: the render reproducibility
+of this system is not established in either direction, and VALIDITY
+section 3 now says exactly that. The first Windows run of `--card`
+produces the first verdict; the report's numbers, whichever word they
+carry, are what VALIDITY quotes next.
+
+**Limitations.** The comparison is of one build on one machine against
+itself; a verdict says nothing about another GPU, driver or engine
+version, and the report records none of those (the run card's
+provenance does). `bounded` reports the numbers and stops; what a
+given bound MEANS for a dataset (whether a label is still exact to
+0.05 px over a frame whose pixels moved by 1 of 255) is a statement
+VALIDITY makes from the numbers, not one this module makes. The three
+pins are the known sources of frame variance under a fixed input;
+others (GPU scheduling of temporal effects, driver-level shader
+replacement) are not pinned and would show as `bounded`.

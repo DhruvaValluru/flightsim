@@ -1045,9 +1045,25 @@ place: fixed timestep set at construction and never varied; step counts derived
 from the fixed rate rather than accumulated from wall time; no RNG anywhere in
 the core; aircraft XML fingerprinted by SHA-256.
 
-**Rendering** will not be bit-deterministic. Movie Render Queue is not
-bit-deterministic and Epic documents no fix. When Phase 6 exists it will be
-described as reproducible-within-tolerance, never as bit-identical.
+**Rendering** is a measurement, not a claim, and as of Phase 10 no
+measurement exists. The earlier text here ("will not be bit-deterministic")
+was written about Movie Render Queue, which this system does not use: the
+frames come from an offscreen SceneCapture in a commandlet with every input
+fixed on every run (stated warm-up count, manual exposure, async shader
+compilation finished before the first frame). Phase 10 built the instrument
+and not yet the result: the commandlet records the SHA-256 of every frame it
+writes, `-deterministic` pins texture streaming and LOD, `core/capture/
+repro.py` compares two renders of one card frame by frame, and Gate 10-R
+(`experiments/gate10_render_repro.py`) renders twice and reports one of
+three words with its numbers -- `bit-identical`, `bounded` (maximum per-pixel
+difference, fraction of pixels differing), or `incomplete`. Gate 10-R has not
+been run on an engine (none here). Until it is, the status is: **render
+reproducibility not established in either direction**. NOT RUN is not a
+verdict. The first Windows run of `--card` produces the first verdict, and
+this paragraph is to be replaced by its numbers. The verifier's
+`frame_integrity` check is independent of that verdict: a frame on disk
+that does not hash to the engine's own record fails by frame, so a replaced
+or re-encoded frame cannot pass as rendered.
 
 Not yet done: floating-point flags on the physics core are unaudited
 (`-ffast-math` must be off), and no run manifest is emitted yet (Phase 7).

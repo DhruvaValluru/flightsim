@@ -13,9 +13,14 @@ verification step, see the report); P10-3 (sensor-model camera
 profiles: SPEC_VERSION 7, `cameras[].profile`, `core/capture/
 profile.py` seeded post-pass, `sensor` block per frame,
 sensor_undistortion/sensor_files checks; the `synthetic_cmos_wide`
-profile is declared illustrative; `-linear` EXR C++ UNCOMPILED here).
-NEXT UP: P10-4 render reproducibility, P10-7 randomisation, P10-6
-batch + export.
+profile is declared illustrative; `-linear` EXR C++ UNCOMPILED here);
+P10-4 (render reproducibility MEASURED not asserted: `core/capture/
+repro.py` three-word verdicts, per-frame sha256 in render.json,
+`-deterministic` pins, `frame_integrity` check, Gate 10-R
+`experiments/gate10_render_repro.py` -- NEVER RUN on an engine, so
+VALIDITY §3 now says "not established in either direction"; the first
+Windows `--card` run is the first verdict). NEXT UP: P10-7
+randomisation, P10-6 batch + export.
 
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.

@@ -24,6 +24,7 @@
 #include "IImageWrapper.h"
 #include "IImageWrapperModule.h"
 #include "Modules/ModuleManager.h"
+#include "HAL/IConsoleManager.h"
 #include "GeoReferencingSystem.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
@@ -110,6 +111,74 @@ namespace
 	constexpr uint8 RenderLabelAircraftInstanceId = 1;
 	constexpr uint8 RenderLabelClassAircraft = 1;
 	constexpr uint8 RenderLabelClassTerrain = 2;
+
+	// -- Phase 10, P10-4: SHA-256 of what was written -----------------------
+	// Self-contained (FIPS 180-4), so the digest recorded in render.json
+	// depends on no engine hashing API that a version could move; the
+	// Python side hashes the same bytes with hashlib and they must agree.
+	constexpr uint32 RenderSha256K[64] = {
+		0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu, 0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u,
+		0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u, 0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u,
+		0xe49b69c1u, 0xefbe4786u, 0x0fc19dc6u, 0x240ca1ccu, 0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau,
+		0x983e5152u, 0xa831c66du, 0xb00327c8u, 0xbf597fc7u, 0xc6e00bf3u, 0xd5a79147u, 0x06ca6351u, 0x14292967u,
+		0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu, 0x53380d13u, 0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u,
+		0xa2bfe8a1u, 0xa81a664bu, 0xc24b8b70u, 0xc76c51a3u, 0xd192e819u, 0xd6990624u, 0xf40e3585u, 0x106aa070u,
+		0x19a4c116u, 0x1e376c08u, 0x2748774cu, 0x34b0bcb5u, 0x391c0cb3u, 0x4ed8aa4au, 0x5b9cca4fu, 0x682e6ff3u,
+		0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u, 0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u};
+
+	FORCEINLINE uint32 RenderRotr(uint32 x, uint32 n) { return (x >> n) | (x << (32 - n)); }
+
+	FString RenderSha256Hex(const uint8* Data, int64 Length)
+	{
+		uint32 H[8] = {0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+		               0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u};
+		// Padding: the message, a 0x80 byte, zeros to 56 mod 64, then the
+		// bit length big-endian.
+		const int64 Padded = ((Length + 9 + 63) / 64) * 64;
+		TArray<uint8> Message;
+		Message.SetNumZeroed(Padded);
+		FMemory::Memcpy(Message.GetData(), Data, Length);
+		Message[Length] = 0x80;
+		const uint64 Bits = static_cast<uint64>(Length) * 8u;
+		for (int32 i = 0; i < 8; ++i)
+		{
+			Message[Padded - 1 - i] = static_cast<uint8>((Bits >> (8 * i)) & 0xffu);
+		}
+		uint32 W[64];
+		for (int64 Chunk = 0; Chunk < Padded; Chunk += 64)
+		{
+			const uint8* Block = Message.GetData() + Chunk;
+			for (int32 i = 0; i < 16; ++i)
+			{
+				W[i] = (uint32(Block[4 * i]) << 24) | (uint32(Block[4 * i + 1]) << 16)
+				     | (uint32(Block[4 * i + 2]) << 8) | uint32(Block[4 * i + 3]);
+			}
+			for (int32 i = 16; i < 64; ++i)
+			{
+				const uint32 s0 = RenderRotr(W[i - 15], 7) ^ RenderRotr(W[i - 15], 18) ^ (W[i - 15] >> 3);
+				const uint32 s1 = RenderRotr(W[i - 2], 17) ^ RenderRotr(W[i - 2], 19) ^ (W[i - 2] >> 10);
+				W[i] = W[i - 16] + s0 + W[i - 7] + s1;
+			}
+			uint32 a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+			for (int32 i = 0; i < 64; ++i)
+			{
+				const uint32 S1 = RenderRotr(e, 6) ^ RenderRotr(e, 11) ^ RenderRotr(e, 25);
+				const uint32 ch = (e & f) ^ (~e & g);
+				const uint32 t1 = h + S1 + ch + RenderSha256K[i] + W[i];
+				const uint32 S0 = RenderRotr(a, 2) ^ RenderRotr(a, 13) ^ RenderRotr(a, 22);
+				const uint32 maj = (a & b) ^ (a & c) ^ (b & c);
+				const uint32 t2 = S0 + maj;
+				h = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+			}
+			H[0] += a; H[1] += b; H[2] += c; H[3] += d; H[4] += e; H[5] += f; H[6] += g; H[7] += h;
+		}
+		FString Hex;
+		for (int32 i = 0; i < 8; ++i)
+		{
+			Hex += FString::Printf(TEXT("%08x"), H[i]);
+		}
+		return Hex;
+	}
 
 	bool RenderWriteGrayPng(const FString& Path, const void* Bytes, int64 NumBytes,
 	                        int32 Width, int32 Height, int32 BitDepth)
@@ -381,7 +450,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		UE_LOG(LogFlightSimRender, Error,
 		       TEXT("usage: -run=FlightSimBridge.FlightSimRender ")
-		       TEXT("-scenario=<run-card.json> -frames=<out-dir> [-fps=5] [-labels] [-linear] "
+		       TEXT("-scenario=<run-card.json> -frames=<out-dir> [-fps=5] [-labels] [-linear] [-deterministic] "
 		            "[-width=960] [-height=540]"));
 		return 1;
 	}
@@ -420,6 +489,35 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// frame_NNNN_linear.exr beside the PNG; the post-pass prefers it when
 	// it can read it. Opt-in, additive.
 	const bool bLinear = FParse::Param(*Params, TEXT("linear"));
+	// Phase 10, P10-4: pin what the renderer would otherwise decide by
+	// timing. Texture streaming brings mips in over wall time; LOD
+	// selection is deterministic in screen size but a forced LOD takes
+	// the question away. Temporal accumulation is handled by the fixed
+	// warm-up captures and an identical capture sequence, and Gate 10-R
+	// measures whether that is enough rather than assuming it.
+	const bool bDeterministic = FParse::Param(*Params, TEXT("deterministic"));
+	if (bDeterministic)
+	{
+		struct FPin { const TCHAR* Name; int32 Value; };
+		const FPin Pins[] = {
+			{TEXT("r.TextureStreaming"), 0},
+			{TEXT("r.Streaming.FullyLoadUsedTextures"), 1},
+			{TEXT("r.ForceLOD"), 0},
+		};
+		for (const FPin& Pin : Pins)
+		{
+			if (IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(Pin.Name))
+			{
+				Variable->Set(Pin.Value, ECVF_SetByCode);
+				UE_LOG(LogFlightSimRender, Display, TEXT("deterministic: %s = %d"), Pin.Name, Pin.Value);
+			}
+			else
+			{
+				UE_LOG(LogFlightSimRender, Warning,
+				       TEXT("deterministic: console variable %s not found in this build"), Pin.Name);
+			}
+		}
+	}
 	// The exposure clause's negative control: render with the default
 	// auto-exposure so the harness can prove its metric actually catches
 	// metering that responds to the scene. A metric no failure can trip is
@@ -1547,6 +1645,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 
 		TSharedPtr<FJsonObject> Record = MakeShared<FJsonObject>();
 		Record->SetStringField(TEXT("frame"), FrameName);
+		// The digest of the bytes that went to disk: the Python side
+		// hashes the file and must get this back (frame_integrity), and
+		// Gate 10-R compares two renders' records directly.
+		Record->SetStringField(TEXT("sha256"), RenderSha256Hex(Png.GetData(), Png.Num()));
+		if (bDeterministic)
+		{
+			Record->SetBoolField(TEXT("deterministic_pins"), true);
+		}
 		Record->SetNumberField(TEXT("t"), Scenario.ReadProperty(TEXT("simulation/sim-time-sec")));
 		Record->SetNumberField(TEXT("roll_deg"),
 		                       Scenario.ReadProperty(TEXT("attitude/phi-rad")) * RenderRadiansToDegrees);

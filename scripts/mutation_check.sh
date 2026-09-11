@@ -1440,6 +1440,56 @@ mutate webapp/runs.py \
     "a camera clip plays at the rate its frames were taken" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Phase 10, P10-4: render reproducibility is measured, never asserted --
+
+mutate core/capture/repro.py \
+    '                  if p.stem[-4:].isdigit() and len(p.stem) == len("frame_0000"))' \
+    '                  )  # MUTATED: masks and depth are compared as frames' \
+    "only the plain frames are compared" \
+    tests/test_render_repro.py || failures=$((failures+1))
+
+mutate core/capture/repro.py \
+    '    if missing:' \
+    '    if False:  # MUTATED: an absent frame is not incomplete' \
+    "a frame missing from one render is incomplete, not ignored" \
+    tests/test_render_repro.py || failures=$((failures+1))
+
+mutate core/capture/repro.py \
+    '    elif compared and identical == compared:' \
+    '    elif compared:  # MUTATED: a differing frame is bit-identical' \
+    "one differing pixel is bounded, not bit-identical" \
+    tests/test_render_repro.py || failures=$((failures+1))
+
+mutate core/capture/repro.py \
+    '            if ea != ha or eb != hb:' \
+    '            if False:  # MUTATED: a replaced frame passes as the engine'"'"'s' \
+    "a frame the engine did not write is reported apart" \
+    tests/test_render_repro.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if frame_sha256(path) != expected:' \
+    '        if False:  # MUTATED: every frame hashes to the record' \
+    "frame_integrity fails on a replaced frame" \
+    tests/test_render_repro.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if expected is None:' \
+    '        if False:  # MUTATED: an unrecorded frame is checked as recorded' \
+    "a frame the engine never recorded is named" \
+    tests/test_render_repro.py || failures=$((failures+1))
+
+mutate experiments/gate10_render_repro.py \
+    '        command += [str(card), str(frames), "-Visual", "-deterministic", *extra]' \
+    '        command += [str(card), str(frames), "-Visual", *extra]  # MUTATED: no pins' \
+    "Gate 10-R renders with the determinism pins" \
+    tests/test_render_repro.py || failures=$((failures+1))
+
+mutate experiments/gate10_render_repro.py \
+    '            return 2' \
+    '            return 0  # MUTATED: NOT RUN exits as a pass' \
+    "NOT RUN is not a verdict and not an exit 0" \
+    tests/test_render_repro.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
