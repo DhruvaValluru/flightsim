@@ -206,5 +206,47 @@
         ]
       ]
     }
+  },
+  "labels": {
+    "dimensions_m": {
+      "length": 70.66,
+      "height": 19.41,
+      "source": "Boeing 747-400 Airplane Characteristics for Airport Planning, D6-58326-1, section 2.2 (overall length 70.66 m, tail height 19.41 m); span is taken from the flown FDM's own <wingspan>"
+    },
+    "keypoints": {
+      "nose": {
+        "structural_in": [
+          0.0,
+          0.0,
+          -24.0
+        ],
+        "basis": "estimate",
+        "source": "the FDM's structural origin taken as the nose tip: its NOSE_LG contact sits 10.06 m aft of the origin, matching the type's nose-gear station (D6-58326-1, section 2.2); z at the CG waterline"
+      },
+      "tail": {
+        "structural_in": [
+          2781.89,
+          0.0,
+          -24.0
+        ],
+        "basis": "estimate",
+        "source": "nose tip + the type's overall length 70.66 m (D6-58326-1, section 2.2) at the CG waterline"
+      },
+      "left_wingtip": {
+        "fdm_wingspan": "left"
+      },
+      "right_wingtip": {
+        "fdm_wingspan": "right"
+      },
+      "nose_gear": {
+        "fdm_contact": "NOSE_LG"
+      },
+      "left_main_gear": {
+        "fdm_contact": "LEFT_MLG"
+      },
+      "right_main_gear": {
+        "fdm_contact": "RIGHT_MLG"
+      }
+    }
   }
 }

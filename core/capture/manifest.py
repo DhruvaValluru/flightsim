@@ -6,11 +6,11 @@ the macOS render adds pixels beside it without touching it. A frame
 without recorded geometry is unusable as labeled data; this file is the
 label.
 
-Schema (``manifest_version`` 4)
+Schema (``manifest_version`` 5)
 -------------------------------
 Top level::
 
-    manifest_version   4
+    manifest_version   5
     spec_digest        SHA-256 of the canonical spec (spec.digest())
     simulation_digest  SHA-256 of the spec with its CAMERAS REMOVED --
                        the "simulation identity": two runs that differ
@@ -47,6 +47,21 @@ Top level::
                        so the render commandlet can project the SAME
                        points through its own world-to-pixel helper for
                        the engine-parity comparison.
+    airframe           the labelled airframe (core.capture.airframe):
+                       cited overall dimensions, the CG in JSBSim's
+                       structural frame, the 3-D box in the body frame,
+                       every keypoint with its body-frame position, its
+                       SOURCE and its basis (fdm / fdm-approximation /
+                       estimate), and the SHA-256 of the config and the
+                       FDM XML the numbers came from
+    label_conventions  how to read the per-frame ``labels`` (frames,
+                       box model, corner order, horizon model)
+    assets             SHA-256 of every asset behind the labels and the
+                       pixels that exists on the producing machine:
+                       aircraft config, FDM XML, mesh manifest (null
+                       with a reason where no mesh is imported), imagery
+                       sidecar; the terrain raster's is ``scene.
+                       terrain_sha256`` as before
     conditions         the CONDITIONS THE RUN WAS ASKED FOR, as stated:
                        every field of the spec's ``initial`` and
                        ``environment`` sections (wind speed and
@@ -103,6 +118,18 @@ Per frame::
                        identical), so a consumer reads the keys rather
                        than assuming a fixed set.
 
+    labels             version 5: the ground-truth labels computed from
+                       the record above and the airframe block, on
+                       every machine (core.capture.labels): bbox_2d and
+                       its unclipped form, truncation, in_frame, the
+                       3-D box in camera coordinates, every keypoint's
+                       pixel and camera position, and the horizon line.
+                       The engine's own per-frame outputs -- instance
+                       and class masks, depth, occlusion fraction --
+                       are written BESIDE the frame by the render
+                       commandlet and read by the verifier; they are
+                       never in this file, which exists without them.
+
 A per-frame SIDECAR, ``frames/<camera_id>/frame_0042.json``, is written
 beside each image (write_frame_sidecars): the frame's own record plus
 the top-level context it is meaningless without. A PNG and its sidecar
@@ -133,16 +160,18 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
+from .airframe import load_airframe
+from .labels import conventions as label_conventions, frame_labels
 from .landmarks import scene_landmarks
 from .poses import PoseTrack, SceneFrame, aircraft_local_track
 from .schedule import CaptureSchedule
 
-MANIFEST_VERSION = 4
+MANIFEST_VERSION = 5
 #: Versions this build can READ. Every version here is fully
-#: interpretable by the current verifier and the page; a version 3
-#: manifest simply has no ``state`` on its frames. Anything else is a
-#: refusal, not a guess.
-SUPPORTED_MANIFEST_VERSIONS = (3, 4)
+#: interpretable by the current verifier and the page: a version 3
+#: manifest has no ``state`` on its frames, a version 4 no ``labels``
+#: and no ``airframe``. Anything else is a refusal, not a guess.
+SUPPORTED_MANIFEST_VERSIONS = (3, 4, 5)
 
 #: Which flight the ``aircraft`` block in every frame record describes.
 #: A v2 manifest could not say, and the answer matters more than any
@@ -257,6 +286,42 @@ def stated_conditions(spec) -> Dict[str, Dict]:
     return out
 
 
+def _file_sha256(path) -> Optional[str]:
+    import hashlib
+
+    path = Path(path)
+    if not path.is_file():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def asset_digests(spec, airframe, scene: Optional[Dict]) -> Dict:
+    """SHA-256 of every asset behind this run's labels and pixels that
+    is on the producing machine. A missing one is null WITH A REASON,
+    never a hash of nothing: the mesh manifest exists only where the
+    asset pipeline has imported the model, and a headless machine has
+    honestly not got one."""
+    repo = Path(__file__).resolve().parents[2]
+    aircraft = str(spec.aircraft.value)
+    mesh_manifest = repo / "assets" / "generated" / aircraft / "mesh_manifest.json"
+    imagery = (scene or {}).get("imagery")
+    return {
+        "aircraft_config": {"path": f"assets/aircraft_config/{aircraft}.json",
+                            "sha256": airframe.config_sha256},
+        "fdm_xml": {"path": airframe.fdm_xml_path,
+                    "sha256": airframe.fdm_xml_sha256},
+        "mesh_manifest": {
+            "path": str(mesh_manifest.relative_to(repo)),
+            "sha256": _file_sha256(mesh_manifest),
+            "note": (None if mesh_manifest.is_file() else
+                     "no mesh imported on the producing machine; the "
+                     "render host's own manifest names the mesh it drew")},
+        "imagery_sidecar": {
+            "path": str(imagery) if imagery else None,
+            "sha256": _file_sha256(imagery) if imagery else None},
+    }
+
+
 def frame_filename(camera_id: str, index: int) -> str:
     """Relative image path, per-camera subdirectory. The renderer that
     produces pixels writes THIS path; headless manifests carry it as
@@ -300,6 +365,10 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
             f"{len(tracks)} pose tracks against {len(schedules)} "
             f"schedules; every camera needs exactly one of each")
     aircraft = aircraft_local_track(columns, frame)
+    # The airframe the labels describe: refused by name (camera.labels)
+    # when it has no cited geometry -- a manifest is never written with
+    # labels that quietly describe a stand-in.
+    airframe = load_airframe(str(spec.aircraft.value))
     flown = spec.cameras if cameras is None else list(cameras)
     cameras_by_id = {str(c.camera_id.value): c for c in flown}
 
@@ -366,6 +435,11 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                 # above are the solver's; this is the recorder's.
                 "state": frame_state(columns, sample_index),
             })
+            # Version 5: the labels, from this very record and the
+            # cited airframe -- the same numbers a consumer reads.
+            frames[-1]["labels"] = frame_labels(
+                frames[-1], frames[-1]["aircraft"], airframe,
+                terrain_elevation_m)
 
     return {
         "manifest_version": MANIFEST_VERSION,
@@ -392,6 +466,9 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
             terrain_elevation_m=terrain_elevation_m),
         "conditions": stated_conditions(spec),
         "state_units": state_units(columns),
+        "airframe": airframe.to_dict(),
+        "label_conventions": label_conventions(),
+        "assets": asset_digests(spec, airframe, scene),
         "cameras": camera_blocks,
         "frames": frames,
     }
@@ -413,6 +490,7 @@ SIDECAR_CONTEXT_KEYS = (
     "manifest_version", "spec_digest", "simulation_digest",
     "output_digest", "solve_source", "seed", "aircraft", "scene",
     "frame", "software_revision", "conditions", "state_units",
+    "airframe", "label_conventions", "assets",
 )
 
 

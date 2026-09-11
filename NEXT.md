@@ -1,5 +1,19 @@
 # Resume here
 
+**Phase 10 (2026-09-11, in progress -- docs/PHASE10_REPORT.md is the
+running report; the owner cut scope to what changes the simulation or
+its data: packages 2, 3, 4, 7, 6 in that order).** DELIVERED: P10-2a
+(the four terrain guards fire on every machine; TERRAIN_DIR seam;
+gotchas 27-28) and P10-2 (ground-truth labels per frame, manifest
+version 5: `core/capture/airframe.py` + `labels.py`, five verifier
+checks that fail on corruption, an additive `-labels` render pass
+writing instance/class masks + 16-bit depth + occlusion -- the C++
+is UNCOMPILED here; first Windows run with `-labels` is the
+verification step, see the report). NEXT UP: P10-3 sensor-model
+camera profiles (SPEC_VERSION 6 -> 7 lands there, the phase's one
+bump), then P10-4 render reproducibility, P10-7 randomisation,
+P10-6 batch + export.
+
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
 

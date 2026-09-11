@@ -465,6 +465,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if terrain_stem:
             command.append(f"-terrain={terrain_stem}")
             command.append("-GeorefTerrain")
+    # Phase 10: the engine half of the labels -- instance and class
+    # masks, 16-bit depth, occlusion -- beside every frame of every
+    # camera pass. The wrapper forwards it to each -camera-index pass.
+    command.append("-labels")
     print(f"rendering {len(cameras)} camera pass(es) into {frames_dir} "
           f"{'in the black void (--void)' if args.void else 'in the visual scene'} ...")
     completed = subprocess.run(command)

@@ -212,5 +212,35 @@
         ]
       ]
     }
+  },
+  "labels": {
+    "dimensions_m": {
+      "length": 37.57,
+      "height": 11.76,
+      "source": "Airbus A320 Aircraft Characteristics Airport and Maintenance Planning (ACAP), section 2-1-1 (overall length 37.57 m, height 11.76 m); span from the flown FDM's own <wingspan>"
+    },
+    "keypoints": {
+      "nose": {
+        "fdm_contact": "NOSE_TIP"
+      },
+      "tail": {
+        "fdm_contact": "TAIL_TIP"
+      },
+      "left_wingtip": {
+        "fdm_contact": "WING_TIP_1"
+      },
+      "right_wingtip": {
+        "fdm_contact": "WING_TIP_2"
+      },
+      "nose_gear": {
+        "fdm_contact": "NOSE_LG"
+      },
+      "left_main_gear": {
+        "fdm_contact": "LEFT_MLG"
+      },
+      "right_main_gear": {
+        "fdm_contact": "RIGHT_MLG"
+      }
+    }
   }
 }

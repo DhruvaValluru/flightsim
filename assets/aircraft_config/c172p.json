@@ -175,5 +175,35 @@
         ]
       ]
     }
+  },
+  "labels": {
+    "dimensions_m": {
+      "length": 8.28,
+      "height": 2.72,
+      "source": "FAA Type Certificate Data Sheet 3A12 / Cessna 172P Pilot's Operating Handbook, section 1 (length 8.28 m, height 2.72 m); span from the flown FDM's own <wingspan>"
+    },
+    "keypoints": {
+      "nose": {
+        "fdm_contact": "NOSE_SKID"
+      },
+      "tail": {
+        "fdm_contact": "TAIL_SKID"
+      },
+      "left_wingtip": {
+        "fdm_contact": "LEFT_TIP"
+      },
+      "right_wingtip": {
+        "fdm_contact": "RIGHT_TIP"
+      },
+      "nose_gear": {
+        "fdm_contact": "NOSE"
+      },
+      "left_main_gear": {
+        "fdm_contact": "LEFT_MAIN"
+      },
+      "right_main_gear": {
+        "fdm_contact": "RIGHT_MAIN"
+      }
+    }
   }
 }

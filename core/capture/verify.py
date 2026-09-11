@@ -1430,6 +1430,349 @@ def verify_alignment(manifest_a: Dict, manifest_b: Dict,
 
 # -- the run summary -----------------------------------------------------
 
+# -- version 5: the labels ------------------------------------------------
+#
+# Four checks, each with a stated independent reference:
+#
+# * label_geometry -- the labels against THIS verifier's own projection
+#   of the airframe block through the aircraft state (the producer's
+#   labels.py never runs here);
+# * keypoints_in_box -- an internal consistency the producer could get
+#   wrong: every in-frame keypoint inside the unclipped box;
+# * label_files -- every per-frame label file the engine DECLARED in
+#   render.json exists on disk (the frame-count contract, extended);
+# * mask_containment / depth_range -- the engine's instance mask and
+#   depth image against the labels, NOT RUN without them.
+
+#: A reprojected label may differ from the producer's by float rounding
+#: and nothing else.
+LABEL_REPROJECTION_TOL_PX = 0.05
+#: A keypoint lies inside the box it belongs to, to half a pixel.
+KEYPOINT_BOX_TOL_PX = 0.5
+#: Of the engine's aircraft-mask pixels, the fraction that must fall
+#: inside the label's 2-D box. The box is the airframe's overall extents,
+#: so the mask should sit INSIDE it; mask pixels outside it are pixels
+#: the labels say are not aircraft.
+MASK_CONTAINMENT_MIN = 0.95
+#: Depth at an aircraft-mask pixel must lie within the 3-D box's depth
+#: span, widened by this much each way (the box is extents, not hull).
+DEPTH_RANGE_SLACK_M = 2.0
+#: The fraction of aircraft-mask pixels that must be within that span.
+DEPTH_IN_RANGE_MIN = 0.99
+#: The instance id the engine writes for the airframe in the mask.
+AIRCRAFT_INSTANCE_ID = 1
+
+
+def _aircraft_axes_enu(state: Dict):
+    """The AIRCRAFT's body axes in (north, east, up) from its recorded
+    Euler angles -- the same rotation as axes_from_euler, which is the
+    verifier's own."""
+    return axes_from_euler(float(state["roll_deg"]),
+                           float(state["pitch_deg"]),
+                           float(state["heading_deg"]))
+
+
+def _body_point_enu(body, state: Dict):
+    """Body (forward, right, down) about the CG -> scene (n, e, up)."""
+    forward, right, up = _aircraft_axes_enu(state)
+    bx, by, bz = body
+    return (float(state["north_m"]) + bx * forward[0] + by * right[0] - bz * up[0],
+            float(state["east_m"]) + bx * forward[1] + by * right[1] - bz * up[1],
+            float(state["alt_m"]) + bx * forward[2] + by * right[2] - bz * up[2])
+
+
+def _labelled_frames(manifest: Dict):
+    return [f for f in manifest.get("frames", [])
+            if isinstance(f.get("labels"), dict)]
+
+
+def verify_labels(manifest: Dict) -> Check:
+    """The labels, re-derived here from the airframe block and the
+    aircraft state through the verifier's own projection."""
+    frames = _labelled_frames(manifest)
+    airframe = manifest.get("airframe")
+    if not frames or not airframe:
+        return Check("label_geometry", NOT_RUN,
+                     "no per-frame labels in this manifest (version < 5)")
+    box = airframe["box_body_m"]
+    corners = [(x, y, z) for x in box["forward"] for y in box["right"]
+               for z in box["down"]]
+    keypoints = {k["name"]: tuple(k["body_m"]) for k in airframe["keypoints"]}
+    worst = 0.0
+    worst_where = ""
+    checked = 0
+    for record in frames:
+        labels = record["labels"]
+        state = record["aircraft"]
+        axes = axes_from_quat(record["quaternion_wxyz"])
+        pixels = [project_point(record, _body_point_enu(c, state), axes)
+                  for c in corners]
+        if all(math.isfinite(u) for u, v, z in pixels):
+            us = [u for u, v, z in pixels]
+            vs = [v for u, v, z in pixels]
+            mine = (min(us), min(vs), max(us), max(vs))
+            theirs = labels.get("bbox_2d_unclipped")
+            if theirs is None:
+                return Check("label_geometry", FAIL,
+                             f"frame {record['camera_id']}/{record['index']}: "
+                             f"every corner projects but the label says the "
+                             f"box is unbounded")
+            for a, b, name in zip(mine, theirs, ("u0", "v0", "u1", "v1")):
+                if abs(a - b) > worst:
+                    worst, worst_where = abs(a - b), (
+                        f"{record['camera_id']}/{record['index']} bbox {name}")
+        elif labels.get("bbox_2d_unclipped") is not None:
+            return Check("label_geometry", FAIL,
+                         f"frame {record['camera_id']}/{record['index']}: a "
+                         f"corner is behind the camera but the label states "
+                         f"a box")
+        for name, body in keypoints.items():
+            theirs = labels.get("keypoints", {}).get(name)
+            if theirs is None:
+                return Check("label_geometry", FAIL,
+                             f"frame {record['camera_id']}/{record['index']}: "
+                             f"keypoint {name!r} is in the airframe block but "
+                             f"not in the labels")
+            u, v, depth = project_point(record, _body_point_enu(body, state),
+                                        axes)
+            if math.isfinite(u):
+                if theirs.get("u") is None:
+                    return Check("label_geometry", FAIL,
+                                 f"{record['camera_id']}/{record['index']} "
+                                 f"keypoint {name!r}: projects, but labelled "
+                                 f"as behind the camera")
+                for a, b, what in ((u, theirs["u"], "u"), (v, theirs["v"], "v"),
+                                   (depth, theirs["depth_m"], "depth")):
+                    if abs(a - b) > worst:
+                        worst, worst_where = abs(a - b), (
+                            f"{record['camera_id']}/{record['index']} "
+                            f"keypoint {name} {what}")
+            elif theirs.get("u") is not None:
+                return Check("label_geometry", FAIL,
+                             f"{record['camera_id']}/{record['index']} "
+                             f"keypoint {name!r}: behind the camera, but "
+                             f"labelled with a pixel")
+        checked += 1
+    ok = worst <= LABEL_REPROJECTION_TOL_PX
+    return Check("label_geometry", PASS if ok else FAIL,
+                 f"{checked} labelled frames re-projected independently; "
+                 f"worst disagreement {worst:.4f} (px or m) at "
+                 f"{worst_where or 'none'}; tolerance "
+                 f"{LABEL_REPROJECTION_TOL_PX}")
+
+
+def verify_keypoints_in_box(manifest: Dict) -> Check:
+    frames = _labelled_frames(manifest)
+    if not frames:
+        return Check("keypoints_in_box", NOT_RUN,
+                     "no per-frame labels in this manifest (version < 5)")
+    outside = []
+    counted = 0
+    for record in frames:
+        labels = record["labels"]
+        box = labels.get("bbox_2d_unclipped")
+        for name, kp in labels.get("keypoints", {}).items():
+            if kp.get("u") is None:
+                continue
+            counted += 1
+            if box is None:
+                continue
+            u0, v0, u1, v1 = box
+            t = KEYPOINT_BOX_TOL_PX
+            if not (u0 - t <= kp["u"] <= u1 + t and v0 - t <= kp["v"] <= v1 + t):
+                outside.append(f"{record['camera_id']}/{record['index']} "
+                               f"{name} at ({kp['u']:.1f}, {kp['v']:.1f}) "
+                               f"outside [{u0:.1f}, {v0:.1f}, {u1:.1f}, "
+                               f"{v1:.1f}]")
+    if outside:
+        return Check("keypoints_in_box", FAIL,
+                     f"{len(outside)} keypoint(s) outside their own box: "
+                     + "; ".join(outside[:3]))
+    return Check("keypoints_in_box", PASS,
+                 f"{counted} projected keypoints, every one inside its "
+                 f"frame's box (tolerance {KEYPOINT_BOX_TOL_PX} px)")
+
+
+def _engine_label_records(run_dir) -> Dict[str, Dict]:
+    """{camera_id: {frame name: the render.json record}} for every
+    per-camera render.json that declares label outputs."""
+    out: Dict[str, Dict] = {}
+    if run_dir is None:
+        return out
+    frames_dir = Path(run_dir) / "frames"
+    if not frames_dir.is_dir():
+        return out
+    for camera_dir in sorted(p for p in frames_dir.iterdir() if p.is_dir()):
+        path = camera_dir / "render.json"
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        records = {r.get("frame"): r for r in _render_frame_records(payload)
+                   if isinstance(r.get("labels"), dict)}
+        if records:
+            out[camera_dir.name] = records
+    return out
+
+
+def verify_label_files(manifest: Dict, run_dir=None) -> Check:
+    """Every label file the engine declared exists -- the frame-count
+    contract extended to the label outputs."""
+    declared = _engine_label_records(run_dir)
+    if not declared:
+        return Check("label_files", NOT_RUN,
+                     "no render.json declares per-frame label outputs "
+                     "(no engine pass, or one that wrote none)")
+    # Per CAMERA: a pass that declared label outputs owes every frame
+    # all three files (the frame-count contract, extended); a pass that
+    # declared none wrote none, and is named rather than failed.
+    missing = []
+    counted = 0
+    undeclared = set()
+    for record in manifest.get("frames", []):
+        camera = str(record["camera_id"])
+        if camera not in declared:
+            undeclared.add(camera)
+            continue
+        name = Path(str(record["file"])).name
+        engine = declared[camera].get(name)
+        if engine is None:
+            missing.append(f"{camera}/{name}: no engine label record")
+            continue
+        for kind in ("mask", "class_mask", "depth"):
+            file = engine["labels"].get(kind)
+            if not file:
+                missing.append(f"{camera}/{name}: {kind} not declared")
+                continue
+            counted += 1
+            if not (Path(run_dir) / "frames" / camera / file).is_file():
+                missing.append(f"{camera}/{name}: {kind} {file} missing")
+    if missing:
+        return Check("label_files", FAIL,
+                     f"{len(missing)} declared label file(s) absent: "
+                     + "; ".join(missing[:4]))
+    note = (f"; {sorted(undeclared)} declared no label outputs"
+            if undeclared else "")
+    return Check("label_files", PASS,
+                 f"{counted} declared label files present across "
+                 f"{sorted(declared)}{note}")
+
+
+def _read_gray_png(path):
+    """A mask or depth PNG as a 2-D integer array, via Pillow."""
+    try:
+        from PIL import Image
+        import numpy as np
+    except ImportError:            # pragma: no cover - Pillow is in the venv
+        return None
+    with Image.open(path) as image:
+        return np.array(image)
+
+
+def verify_mask_containment(manifest: Dict, run_dir=None) -> Check:
+    """The engine's aircraft mask lies inside the label's 2-D box."""
+    declared = _engine_label_records(run_dir)
+    if not declared:
+        return Check("mask_containment", NOT_RUN,
+                     "no engine instance masks to compare against")
+    worst = 1.0
+    worst_where = ""
+    counted = 0
+    for record in _labelled_frames(manifest):
+        camera = str(record["camera_id"])
+        name = Path(str(record["file"])).name
+        engine = declared.get(camera, {}).get(name)
+        if engine is None or not engine["labels"].get("mask"):
+            continue
+        mask = _read_gray_png(Path(run_dir) / "frames" / camera
+                              / engine["labels"]["mask"])
+        if mask is None:
+            return Check("mask_containment", NOT_RUN, "Pillow unavailable")
+        import numpy as np
+
+        ys, xs = np.nonzero(mask == AIRCRAFT_INSTANCE_ID)
+        box = record["labels"].get("bbox_2d")
+        if xs.size == 0:
+            if box is not None and record["labels"].get("in_frame"):
+                return Check("mask_containment", FAIL,
+                             f"{camera}/{name}: the label says the aircraft "
+                             f"is in frame but the engine mask has no "
+                             f"aircraft pixels")
+            continue
+        if box is None:
+            return Check("mask_containment", FAIL,
+                         f"{camera}/{name}: the engine mask shows "
+                         f"{xs.size} aircraft pixels but the label says "
+                         f"nothing of it is in frame")
+        u0, v0, u1, v1 = box
+        inside = ((xs + 0.5 >= u0) & (xs + 0.5 <= u1)
+                  & (ys + 0.5 >= v0) & (ys + 0.5 <= v1)).mean()
+        counted += 1
+        if inside < worst:
+            worst, worst_where = float(inside), f"{camera}/{name}"
+    if counted == 0:
+        return Check("mask_containment", NOT_RUN,
+                     "engine masks declared but none matched a labelled frame")
+    ok = worst >= MASK_CONTAINMENT_MIN
+    return Check("mask_containment", PASS if ok else FAIL,
+                 f"{counted} frames; lowest containment {worst:.3f} at "
+                 f"{worst_where} (min {MASK_CONTAINMENT_MIN})")
+
+
+def verify_depth_range(manifest: Dict, run_dir=None) -> Check:
+    """Depth at the engine's aircraft-mask pixels lies within the 3-D
+    box's depth span."""
+    declared = _engine_label_records(run_dir)
+    if not declared:
+        return Check("depth_range", NOT_RUN,
+                     "no engine depth images to compare against")
+    worst = 1.0
+    worst_where = ""
+    counted = 0
+    for record in _labelled_frames(manifest):
+        camera = str(record["camera_id"])
+        name = Path(str(record["file"])).name
+        engine = declared.get(camera, {}).get(name)
+        if engine is None:
+            continue
+        labels = engine["labels"]
+        if not labels.get("mask") or not labels.get("depth"):
+            continue
+        scale = float(labels.get("depth_scale_m") or 0.0)
+        if scale <= 0.0:
+            return Check("depth_range", FAIL,
+                         f"{camera}/{name}: depth declared with no positive "
+                         f"depth_scale_m")
+        folder = Path(run_dir) / "frames" / camera
+        mask = _read_gray_png(folder / labels["mask"])
+        depth = _read_gray_png(folder / labels["depth"])
+        if mask is None or depth is None:
+            return Check("depth_range", NOT_RUN, "Pillow unavailable")
+        import numpy as np
+
+        aircraft = mask == AIRCRAFT_INSTANCE_ID
+        if not aircraft.any():
+            continue
+        zs = [c[2] for c in record["labels"]["bbox_3d_camera"]["corners_m"]]
+        lo, hi = min(zs) - DEPTH_RANGE_SLACK_M, max(zs) + DEPTH_RANGE_SLACK_M
+        metres = depth[aircraft].astype(float) * scale
+        fraction = float(((metres >= lo) & (metres <= hi)).mean())
+        counted += 1
+        if fraction < worst:
+            worst, worst_where = fraction, (
+                f"{camera}/{name} (span {lo:.1f}-{hi:.1f} m, engine "
+                f"{metres.min():.1f}-{metres.max():.1f} m)")
+    if counted == 0:
+        return Check("depth_range", NOT_RUN,
+                     "engine depth declared but none matched a labelled frame")
+    ok = worst >= DEPTH_IN_RANGE_MIN
+    return Check("depth_range", PASS if ok else FAIL,
+                 f"{counted} frames; lowest in-range fraction {worst:.3f} "
+                 f"at {worst_where} (min {DEPTH_IN_RANGE_MIN})")
+
+
 def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     """The pass/fail summary over a run directory (CLI: flightsim.verify).
 
@@ -1474,6 +1817,11 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     report.checks.append(verify_flight_agreement(manifest, run_dir))
     report.checks.append(verify_host_determinism(run_dir))
     report.checks.append(verify_capture_times(manifest, run_dir))
+    report.checks.append(verify_labels(manifest))
+    report.checks.append(verify_keypoints_in_box(manifest))
+    report.checks.append(verify_label_files(manifest, run_dir))
+    report.checks.append(verify_mask_containment(manifest, run_dir))
+    report.checks.append(verify_depth_range(manifest, run_dir))
 
     if other_run_dir is not None:
         other = read_capture_manifest(

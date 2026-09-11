@@ -68,3 +68,106 @@ and half-bake guards.
 the PLANNERS' guards fire and says nothing about the real ridge's
 slopes or the field's magnitudes there. The real 1024 px ridge stays
 the render path's fail-safe, unchanged.
+
+## P10-2 -- ground-truth labels per frame
+
+**What was built.** Every frame record in a `manifest_version` 5
+manifest carries a `labels` block computed from geometry alone, on
+every machine, from the same record that placed the camera plus a
+cited airframe:
+
+* **The airframe** (`core/capture/airframe.py`). Definitions live in
+  `assets/aircraft_config/<name>.json` under `labels`; the numbers are
+  resolved from the pinned JSBSim model's own XML wherever it has them
+  -- gear from `<contact>` elements, wingtips from the c172p's and
+  A320's structural tip contacts, nose and tail from the A320's
+  `NOSE_TIP`/`TAIL_TIP` and the c172p's skids -- and copied from a
+  cited document only where it does not: the B747's nose and tail are
+  placed by an argument from Boeing D6-58326-1 and carry `basis:
+  estimate` in the manifest; its wingtips are half the FDM `<wingspan>`
+  abeam the aero reference point, `basis: fdm-approximation` (sweep and
+  dihedral not modelled -- stated). Heights come from the type
+  documents (D6-58326-1, Airbus A320 ACAP, TCDS 3A12), spans from the
+  flown FDM. JSBSim's structural frame (inches, x aft, z up, an
+  author-chosen origin) is mapped to the labels' body frame (metres
+  about the CG, x forward, z down -- the point the telemetry describes
+  and the engine places the mesh by). The mapping is pinned by three
+  numbers from nowhere near the code: the c172p's tips at +-5.46 m of
+  a 10.91 m span, the A320's at +-16.96 m of 33.92 m, and the A320's
+  nose-to-tail 37.5 m against the type's 37.57 m. An airframe with no
+  stated geometry (DHC6, p51d, 737, global5000) refuses by name,
+  `camera.labels`; so does a keypoint naming a contact the FDM lacks,
+  or a stated point with no source.
+* **The labels** (`core/capture/labels.py`): `bbox_2d` (the overall-
+  extents box -- nose-to-tail x span x cited height from the gear
+  contacts up -- projected and clipped) and `bbox_2d_unclipped`,
+  `truncation`, `in_frame`, the 3-D box in camera coordinates (centre,
+  extents, the body axes as rows, the eight corners in a documented
+  order), every keypoint's pixel, depth and camera position with an
+  `in_frame` that means in the image -- NOT unoccluded, stated -- and
+  the horizon. The horizon is the datum plane's tangent horizon on a
+  spherical Earth (IUGG mean radius, no refraction, no terrain), solved
+  EXACTLY per image column: the image of a constant-depression cone is
+  a conic, not a line, and the first version's chord through two far
+  points sat 42 px low -- caught by the hand-arithmetic test. The
+  label carries the exact polyline, a least-squares line, and the
+  line's worst deviation from the curve (2.7 px across a 54 deg lens at
+  1 km; it grows as sqrt(altitude)).
+* **The manifest** carries `airframe` (every number with its source and
+  basis, the config and FDM XML SHA-256), `label_conventions`, and
+  `assets` (SHA-256 of the aircraft config, the FDM XML, the mesh
+  manifest where one is imported -- null with a reason where not --
+  and the imagery sidecar). Versions 3 and 4 still read; their label
+  checks report NOT RUN.
+* **The verifier** gained five checks that can fail: `label_geometry`
+  re-projects the airframe block through the aircraft state with the
+  verifier's own projection (0.05 px); `keypoints_in_box`; and three
+  against the engine's per-frame outputs -- `label_files` (every file a
+  render pass declared exists), `mask_containment` (>= 95% of the
+  engine's aircraft-mask pixels inside the label box), `depth_range`
+  (>= 99% of aircraft-mask depths within the 3-D box's span +- 2 m) --
+  each NOT RUN without them. Each is shown to fail on a corrupted
+  manifest or a fabricated inconsistent mask/depth
+  (`tests/test_camera_labels.py`).
+* **The engine half** (`FlightSimRenderCommandlet.cpp`, behind
+  `-labels`, additive): per delivered frame, an instance mask
+  (`frame_NNNN_mask.png`, aircraft = 1), a class mask (`_class.png`: 0
+  sky, 1 aircraft, 2 terrain/other), 16-bit depth (`_depth.png`,
+  metres = value x `depth_scale_m`, saturating at 6553.5 m), and an
+  `occlusion_fraction` from two depth captures -- the aircraft alone
+  and the full scene: a silhouette pixel is visible where the two
+  depths agree. Declared per frame in that camera's `render.json`
+  under `labels`, which is what the verifier reads. Without `-labels`
+  the pass is byte-for-byte the previous one.
+
+**How to demonstrate (any platform).**
+
+    .venv/bin/pytest tests/test_camera_labels.py -q
+    .venv/bin/python -m flightsim.capture examples/cameras_multi.yaml --out runs/labels_demo
+    .venv/bin/python -m flightsim.verify runs/labels_demo
+    # every frame of capture_manifest.json (version 5) carries labels;
+    # label_geometry and keypoints_in_box PASS; the three engine checks
+    # report NOT RUN by name
+
+On Windows, with the engine: add `-labels` to the render pass (the web
+app and `flightsim.capture --render` pass it) and the three engine
+checks run against the masks and depth.
+
+**Not verified here.** The C++ was not compiled or run in this
+environment (no engine). The Python verifier's engine checks are
+exercised against fabricated masks and depth images of the declared
+layout; whether the commandlet writes exactly that layout is the
+Windows verification step: run one two-camera capture with `-labels`,
+confirm `frames/<camera>/render.json` carries a `labels` object per
+frame naming the three files, and that `label_files`,
+`mask_containment` and `depth_range` come back PASS -- or fail, which
+is a finding about the engine pass, not the labels.
+
+**Limitations.** The 2-D box is the airframe's overall extents, not a
+tight silhouette -- honest for what a machine without the mesh can
+know, and the engine mask is the tight one. Keypoint `in_frame` is
+geometric visibility only. B747 nose/tail are estimates and say so.
+Semantic classes are three (sky / aircraft / terrain-or-other): water,
+buildings and other aircraft are not distinguished -- scene content is
+out of this phase's scope by the owner's decision. The horizon ignores
+terrain occlusion; the engine mask is where the skyline is.

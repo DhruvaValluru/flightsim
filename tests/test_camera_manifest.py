@@ -164,7 +164,7 @@ def wide_columns(duration_s=4.0):
 def test_every_frame_carries_the_whole_recorded_row():
     columns = wide_columns()
     manifest = build(columns=columns)
-    assert manifest["manifest_version"] == MANIFEST_VERSION == 4
+    assert manifest["manifest_version"] == MANIFEST_VERSION
     for record in manifest["frames"]:
         i = record["sample_index"]
         state = record["state"]

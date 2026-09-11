@@ -21,6 +21,9 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "ImageUtils.h"
+#include "IImageWrapper.h"
+#include "IImageWrapperModule.h"
+#include "Modules/ModuleManager.h"
 #include "GeoReferencingSystem.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
@@ -92,6 +95,37 @@ namespace
 
 	// World -> pixel through the capture's own transform and FOV, so the
 	// harness can sample known landmarks instead of guessing regions by eye.
+	// -- Phase 10 labels: constants and the 16-bit PNG writer -----------------
+	// Names are per-file-unique (gotcha 3: unity builds merge anonymous
+	// namespaces). Depth beyond RenderLabelDepthSkyCm is "no geometry" --
+	// the sky -- and a silhouette pixel counts as visible where the full
+	// scene's depth and the aircraft-alone depth agree to
+	// RenderLabelDepthAgreeCm. The 16-bit depth PNG stores metres /
+	// RenderLabelDepthScaleM, saturating at RenderLabelDepthSaturationM;
+	// both numbers ride in render.json so no reader has to know them.
+	constexpr float RenderLabelDepthSkyCm = 5.0e6f;          // 50 km
+	constexpr float RenderLabelDepthAgreeCm = 5.0f;
+	constexpr double RenderLabelDepthScaleM = 0.1;
+	constexpr double RenderLabelDepthSaturationM = 6553.5;
+	constexpr uint8 RenderLabelAircraftInstanceId = 1;
+	constexpr uint8 RenderLabelClassAircraft = 1;
+	constexpr uint8 RenderLabelClassTerrain = 2;
+
+	bool RenderWriteGrayPng(const FString& Path, const void* Bytes, int64 NumBytes,
+	                        int32 Width, int32 Height, int32 BitDepth)
+	{
+		IImageWrapperModule& Module =
+			FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+		TSharedPtr<IImageWrapper> Png = Module.CreateImageWrapper(EImageFormat::PNG);
+		if (!Png.IsValid()
+		    || !Png->SetRaw(Bytes, NumBytes, Width, Height, ERGBFormat::Gray, BitDepth))
+		{
+			return false;
+		}
+		const TArray64<uint8> Compressed = Png->GetCompressed();
+		return Compressed.Num() > 0 && FFileHelper::SaveArrayToFile(Compressed, *Path);
+	}
+
 	bool ProjectToPixel(const USceneCaptureComponent2D* Capture, int32 Width,
 	                    int32 Height, const FVector& WorldCm, FVector2D& OutPixel)
 	{
@@ -347,7 +381,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		UE_LOG(LogFlightSimRender, Error,
 		       TEXT("usage: -run=FlightSimBridge.FlightSimRender ")
-		       TEXT("-scenario=<run-card.json> -frames=<out-dir> [-fps=5] "
+		       TEXT("-scenario=<run-card.json> -frames=<out-dir> [-fps=5] [-labels] "
 		            "[-width=960] [-height=540]"));
 		return 1;
 	}
@@ -373,6 +407,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	const bool bShadowShot = Shot == TEXT("shadow");
 	const bool bNoShadows = FParse::Param(*Params, TEXT("NoShadows"));
 	const bool bHideAircraft = FParse::Param(*Params, TEXT("HideAircraft"));
+	// Phase 10 labels: the engine half of the per-frame ground truth --
+	// an instance mask, a class mask, 16-bit depth and an occlusion
+	// fraction beside every delivered frame. Opt-in: without it this
+	// pass is byte-for-byte the previous one.
+	const bool bLabels = FParse::Param(*Params, TEXT("labels"));
 	// The exposure clause's negative control: render with the default
 	// auto-exposure so the harness can prove its metric actually catches
 	// metering that responds to the scene. A metric no failure can trip is
@@ -964,6 +1003,55 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	}
 	Capture->RegisterComponent();
 
+	// -- Phase 10 labels: two depth captures beside the colour one --------
+	// The instance mask is not a stencil pass: the aircraft is rendered
+	// ALONE into a depth target and the full scene into the same target,
+	// and a silhouette pixel is visible exactly where the two depths
+	// agree. No post-process material, no content asset -- nothing the
+	// void scene lacks -- and the readback is raw floats (RCM_MinMax), so
+	// depth is metres, not a normalised picture of metres.
+	UTextureRenderTarget2D* LabelDepthTarget = nullptr;
+	USceneCaptureComponent2D* LabelDepthAll = nullptr;
+	USceneCaptureComponent2D* LabelDepthAircraft = nullptr;
+	if (bLabels)
+	{
+		if (bHideAircraft)
+		{
+			return Fail(TEXT("-labels with -HideAircraft: an instance mask of a "
+			                 "hidden aircraft is nothing; drop one of them"));
+		}
+		LabelDepthTarget = NewObject<UTextureRenderTarget2D>();
+		LabelDepthTarget->RenderTargetFormat = RTF_R32f;
+		LabelDepthTarget->ClearColor = FLinearColor::Black;
+		LabelDepthTarget->bAutoGenerateMips = false;
+		LabelDepthTarget->InitAutoFormat(Width, Height);
+		LabelDepthTarget->UpdateResourceImmediate(true);
+		auto MakeDepthCapture = [&](const TCHAR* Name) -> USceneCaptureComponent2D*
+		{
+			USceneCaptureComponent2D* Depth =
+				NewObject<USceneCaptureComponent2D>(Director, Name);
+			Depth->SetupAttachment(Director->Camera);
+			Depth->SetMobility(EComponentMobility::Movable);
+			Depth->TextureTarget = LabelDepthTarget;
+			Depth->CaptureSource = ESceneCaptureSource::SCS_SceneDepth;
+			Depth->bCaptureEveryFrame = false;
+			Depth->bCaptureOnMovement = false;
+			Depth->bAlwaysPersistRenderingState = true;
+			Depth->FOVAngle = Capture->FOVAngle;
+			Depth->RegisterComponent();
+			return Depth;
+		};
+		LabelDepthAll = MakeDepthCapture(TEXT("LabelDepthAll"));
+		LabelDepthAircraft = MakeDepthCapture(TEXT("LabelDepthAircraft"));
+		LabelDepthAircraft->PrimitiveRenderMode =
+			ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
+		LabelDepthAircraft->ShowOnlyActors.Add(Scenario.Aircraft);
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("labels: instance mask, class mask, 16-bit depth (%.2f m/unit, "
+		            "saturating at %.1f m) and occlusion per delivered frame"),
+		       RenderLabelDepthScaleM, RenderLabelDepthSaturationM);
+	}
+
 	if (!Scenario.BeginPlay(Error)) { return Fail(Error); }
 	if (!Scenario.TrimInWind(Card, Error)) { return Fail(Error); }
 	if (!Scenario.VerifyTrimmedCondition(Card, Error)) { return Fail(Error); }
@@ -1429,6 +1517,107 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		                       Scenario.ReadProperty(TEXT("attitude/theta-rad")) * RenderRadiansToDegrees);
 		Record->SetNumberField(TEXT("aileron_cmd"), Scenario.Movement->Commands.Aileron);
 		Record->SetNumberField(TEXT("camera_roll_deg"), Director->GetCameraRollDegrees());
+		if (bLabels)
+		{
+			// The depth captures see what the colour capture saw: the same
+			// camera (attached to it) and the same lens, re-copied because a
+			// keyframed focal move changes Capture->FOVAngle per frame.
+			LabelDepthAll->FOVAngle = Capture->FOVAngle;
+			LabelDepthAircraft->FOVAngle = Capture->FOVAngle;
+			FTextureRenderTargetResource* DepthResource =
+				LabelDepthTarget->GameThread_GetRenderTargetResource();
+			const FReadSurfaceDataFlags RawFloats(RCM_MinMax, CubeFace_MAX);
+			TArray<FLinearColor> DepthAll;
+			TArray<FLinearColor> DepthAircraft;
+			LabelDepthAll->CaptureScene();
+			FlushRenderingCommands();
+			if (DepthResource == nullptr
+			    || !DepthResource->ReadLinearColorPixels(DepthAll, RawFloats))
+			{
+				return Fail(TEXT("labels: could not read the scene depth back"));
+			}
+			LabelDepthAircraft->CaptureScene();
+			FlushRenderingCommands();
+			if (!DepthResource->ReadLinearColorPixels(DepthAircraft, RawFloats))
+			{
+				return Fail(TEXT("labels: could not read the aircraft depth back"));
+			}
+			const int32 Count = Width * Height;
+			if (DepthAll.Num() != Count || DepthAircraft.Num() != Count)
+			{
+				return Fail(FString::Printf(
+					TEXT("labels: depth readback is %d and %d pixels for a %dx%d frame"),
+					DepthAll.Num(), DepthAircraft.Num(), Width, Height));
+			}
+			TArray<uint8> Mask;
+			TArray<uint8> ClassMask;
+			TArray<uint16> Depth16;
+			Mask.SetNumZeroed(Count);
+			ClassMask.SetNumZeroed(Count);
+			Depth16.SetNumZeroed(Count);
+			int32 Silhouette = 0;
+			int32 Visible = 0;
+			for (int32 i = 0; i < Count; ++i)
+			{
+				const float AllCm = DepthAll[i].R;
+				const float AircraftCm = DepthAircraft[i].R;
+				const bool bAllGeometry = AllCm > 0.0f && AllCm < RenderLabelDepthSkyCm;
+				const bool bAircraftHere =
+					AircraftCm > 0.0f && AircraftCm < RenderLabelDepthSkyCm;
+				if (bAircraftHere)
+				{
+					++Silhouette;
+				}
+				if (bAircraftHere && bAllGeometry
+				    && FMath::Abs(AllCm - AircraftCm) <= RenderLabelDepthAgreeCm)
+				{
+					Mask[i] = RenderLabelAircraftInstanceId;
+					ClassMask[i] = RenderLabelClassAircraft;
+					++Visible;
+				}
+				else if (bAllGeometry)
+				{
+					ClassMask[i] = RenderLabelClassTerrain;
+				}
+				const double Metres = bAllGeometry ? AllCm / 100.0
+				                                   : RenderLabelDepthSaturationM;
+				Depth16[i] = static_cast<uint16>(FMath::Clamp(
+					FMath::RoundToInt(Metres / RenderLabelDepthScaleM), 0, 65535));
+			}
+			const FString Stem = FrameName.LeftChop(4);
+			const FString MaskName = Stem + TEXT("_mask.png");
+			const FString ClassName = Stem + TEXT("_class.png");
+			const FString DepthName = Stem + TEXT("_depth.png");
+			if (!RenderWriteGrayPng(FPaths::Combine(OutputDirectory, MaskName),
+			                        Mask.GetData(), Mask.Num(), Width, Height, 8)
+			    || !RenderWriteGrayPng(FPaths::Combine(OutputDirectory, ClassName),
+			                           ClassMask.GetData(), ClassMask.Num(), Width, Height, 8)
+			    || !RenderWriteGrayPng(FPaths::Combine(OutputDirectory, DepthName),
+			                           Depth16.GetData(),
+			                           static_cast<int64>(Depth16.Num()) * sizeof(uint16),
+			                           Width, Height, 16))
+			{
+				return Fail(FString::Printf(TEXT("labels: could not write the label "
+				                                 "files for %s"), *FrameName));
+			}
+			// Declared per frame, ASCII only (gotcha 13): the verifier reads
+			// exactly these names and refuses a frame whose files are absent.
+			TSharedPtr<FJsonObject> Labels = MakeShared<FJsonObject>();
+			Labels->SetStringField(TEXT("mask"), MaskName);
+			Labels->SetStringField(TEXT("class_mask"), ClassName);
+			Labels->SetStringField(TEXT("depth"), DepthName);
+			Labels->SetNumberField(TEXT("depth_scale_m"), RenderLabelDepthScaleM);
+			Labels->SetNumberField(TEXT("depth_saturation_m"), RenderLabelDepthSaturationM);
+			Labels->SetNumberField(TEXT("silhouette_pixels"), Silhouette);
+			Labels->SetNumberField(TEXT("visible_pixels"), Visible);
+			Labels->SetNumberField(TEXT("occlusion_fraction"),
+			                       Silhouette > 0 ? 1.0 - static_cast<double>(Visible) / Silhouette
+			                                      : 0.0);
+			Labels->SetStringField(TEXT("classes"), TEXT("0 sky, 1 aircraft, 2 terrain or other"));
+			Labels->SetStringField(TEXT("method"),
+			                       TEXT("aircraft-alone depth vs full-scene depth; visible where they agree"));
+			Record->SetObjectField(TEXT("labels"), Labels);
+		}
 		if (bConsumePoses)
 		{
 			// Additive Camera Phase 1 fields (ASCII only -- gotcha 13; the

@@ -142,8 +142,43 @@ function stateTables(state) {
   return html;
 }
 
+// Version 5: the ground-truth labels, read the way a training pipeline
+// reads them -- the box, the keypoints, the horizon -- with the airframe
+// block's own account of where each keypoint's number came from.
+function labelTables(labels, airframe) {
+  const bases = {};
+  for (const k of (airframe && airframe.keypoints) || []) bases[k.name] = k.basis;
+  let html = "";
+  const box = labels.bbox_2d;
+  html += `<div class="group"><b>where the aircraft is in the image</b><table>` +
+    rows([["in_frame", esc(labels.in_frame)],
+          ["bbox_2d (px)", box ? box.map(num).join(", ") : "none in frame"],
+          ["truncation", labels.truncation === null ? "n/a" : num(labels.truncation)],
+          ["cg depth (m)", num(labels.bbox_3d_camera.cg_m[2])],
+          ["3-D box extents (m)", labels.bbox_3d_camera.extents_m.map(num).join(" x ")]]) +
+    `</table></div>`;
+  const pairs = [];
+  for (const [name, kp] of Object.entries(labels.keypoints || {})) {
+    const where = kp.u === null ? "behind the camera"
+      : `${num(kp.u)}, ${num(kp.v)} px, ${num(kp.depth_m)} m` +
+        (kp.in_frame ? "" : " (outside the image)");
+    pairs.push([name, where + (bases[name] ? ` <span class="dim">${esc(bases[name])}</span>` : "")]);
+  }
+  if (pairs.length) html += `<div class="group"><b>keypoints</b><table>${rows(pairs)}</table></div>`;
+  const h = labels.horizon;
+  if (h) {
+    html += `<div class="group"><b>horizon</b><table>` +
+      rows([["dip", `${num(h.dip_deg)} deg`],
+            ["in image", h.in_frame ? h.endpoints_px.map(p => p.map(num).join(", ")).join(" to ") : "no"]]) +
+      `</table></div>`;
+  }
+  return html;
+}
+
+let AIRFRAME = null;   // context.airframe, once the manifest is read
+
 function recordTable(record) {
-  const shown = new Set(["camera_id", "state"]);
+  const shown = new Set(["camera_id", "state", "labels"]);
   let html = "";
   for (const [label, keys] of GROUPS) {
     const pairs = [];
@@ -163,6 +198,9 @@ function recordTable(record) {
       html += `<div class="group"><b>${label}</b>` +
               `<table>${rows(pairs)}</table></div>`;
     }
+  }
+  if (record.labels && typeof record.labels === "object") {
+    html += labelTables(record.labels, AIRFRAME);
   }
   if (record.state && typeof record.state === "object") {
     html += stateTables(record.state);
@@ -222,6 +260,7 @@ async function load() {
 
   const camera = payload.camera || {};
   UNITS = payload.state_units || {};
+  AIRFRAME = payload.airframe || null;
   document.title = `${cameraId} — ${payload.frames.length} frames`;
   document.getElementById("title").textContent =
     `${cameraId} — ${camera.preset || ""} — ${payload.frames.length} frame(s)`;

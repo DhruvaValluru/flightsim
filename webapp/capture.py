@@ -240,8 +240,11 @@ def render_passes(card: Path, frames_root: Path, camera_ids: List[str],
         # pre-run's telemetry.json -- so no per-camera host recording
         # existed and flight_agreement, which keys them by directory,
         # reported NOT RUN on every web run ever made.
+        # -labels: the engine's masks, depth and occlusion beside every
+        # frame (Phase 10). Only the camera path passes it; the
+        # camera-less path's arguments stay pinned byte-identical.
         ok = render(card=card, frames=out,
-                    extra=[f"-camera-index={index}"],
+                    extra=[f"-camera-index={index}", "-labels"],
                     telemetry=out / "host_telemetry.json", **render_kwargs)
         if not ok:
             raise CaptureError(
@@ -331,10 +334,23 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
         f"\n"
         f"frame_NNNN.png   the rendered frame\n"
         f"frame_NNNN.json  that frame's labels: where the camera was, which\n"
-        f"                 way it pointed, the lens, and under 'state' every\n"
+        f"                 way it pointed, the lens; under 'state' every\n"
         f"                 channel the flight recorder logged at that instant\n"
         f"                 (units in context.state_units; the conditions the\n"
-        f"                 run was asked for in context.conditions)\n"
+        f"                 run was asked for in context.conditions); and under\n"
+        f"                 'labels' the ground truth: bbox_2d (px, clipped)\n"
+        f"                 and bbox_2d_unclipped, truncation, in_frame, the\n"
+        f"                 3-D box in camera coordinates, every keypoint's\n"
+        f"                 pixel and camera position, and the horizon line.\n"
+        f"                 context.airframe says where each keypoint's number\n"
+        f"                 came from; context.label_conventions how to read\n"
+        f"                 the frames and the corner order\n"
+        f"frame_NNNN_mask.png / _class.png / _depth.png\n"
+        f"                 when the render pass was run with -labels: the\n"
+        f"                 engine's instance mask (aircraft = 1), class mask\n"
+        f"                 (0 sky, 1 aircraft, 2 terrain/other) and 16-bit\n"
+        f"                 depth (metres = value x depth_scale_m from that\n"
+        f"                 camera's render.json)\n"
         f"manifest.json    this camera's block, all of its frames, the scene's\n"
         f"                 landmarks and the CRS the metres are expressed in\n"
         f"\n"

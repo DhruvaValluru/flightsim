@@ -809,6 +809,88 @@ mutate webapp/server.py \
     "an image path that climbs out of the run directory is refused" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
+# -- Phase 10, P10-2: ground-truth labels per frame ----------------------
+
+mutate core/capture/airframe.py \
+    '    return ((cx - x) * INCH_M, (y - cy) * INCH_M, (cz - z) * INCH_M)' \
+    '    return ((x - cx) * INCH_M, (y - cy) * INCH_M, (cz - z) * INCH_M)  # MUTATED: x aft kept aft' \
+    "the structural frame is mapped to the body frame, x flipped" \
+    tests/test_camera_labels.py || failures=$((failures+1))
+
+mutate core/capture/airframe.py \
+    '    if not isinstance(labels, dict):' \
+    '    if False:  # MUTATED: an airframe with no stated geometry is labelled anyway' \
+    "an airframe with no stated geometry refuses by name" \
+    tests/test_camera_labels.py || failures=$((failures+1))
+
+mutate core/capture/airframe.py \
+    '            if not definition.get("source"):' \
+    '            if False:  # MUTATED: an unsourced stated point is accepted' \
+    "a stated keypoint without a source is refused" \
+    tests/test_camera_labels.py || failures=$((failures+1))
+
+mutate core/capture/airframe.py \
+    '            if contact is None:' \
+    '            if False:  # MUTATED: a contact the FDM lacks silently skipped' \
+    "a keypoint naming a contact the FDM lacks refuses" \
+    tests/test_camera_labels.py || failures=$((failures+1))
+
+mutate core/capture/labels.py \
+    '        truncation = (1.0 - (_area(clipped) / full if clipped else 0.0)' \
+    '        truncation = (0.0 * (_area(clipped) / full if clipped else 0.0)  # MUTATED: never truncated' \
+    "truncation is the clipped-away fraction of the box" \
+    tests/test_camera_labels.py || failures=$((failures+1))
+
+mutate core/capture/labels.py \
+    '    good = [y for y in roots if A + B * y <= 1e-12]' \
+    '    good = list(roots)  # MUTATED: the spurious squared root is allowed' \
+    "the horizon keeps the root that points below level" \
+    tests/test_camera_labels.py || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '            frames[-1]["labels"] = frame_labels(' \
+    '            frames[-1]["labels_unused"] = frame_labels(  # MUTATED: no labels on the frame' \
+    "every frame carries its labels" \
+    tests/test_camera_labels.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    ok = worst <= LABEL_REPROJECTION_TOL_PX' \
+    '    ok = True  # MUTATED: any reprojection disagreement passes' \
+    "labels are graded against an independent reprojection" \
+    tests/test_camera_labels.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if not (u0 - t <= kp["u"] <= u1 + t and v0 - t <= kp["v"] <= v1 + t):' \
+    '            if False:  # MUTATED: a keypoint may lie anywhere' \
+    "every keypoint lies inside its own box" \
+    tests/test_camera_labels.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if not (Path(run_dir) / "frames" / camera / file).is_file():' \
+    '            if False:  # MUTATED: a declared label file need not exist' \
+    "every declared label file exists" \
+    tests/test_camera_labels.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    ok = worst >= MASK_CONTAINMENT_MIN' \
+    '    ok = True  # MUTATED: a mask anywhere in the image passes' \
+    "the engine mask lies inside the label box" \
+    tests/test_camera_labels.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    ok = worst >= DEPTH_IN_RANGE_MIN' \
+    '    ok = True  # MUTATED: any depth at the aircraft passes' \
+    "depth at the aircraft lies within the box's span" \
+    tests/test_camera_labels.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if box is None:
+            return Check("mask_containment", FAIL,' \
+    '        if False:
+            return Check("mask_containment", FAIL,  # MUTATED: a mask with no box is ignored' \
+    "an engine mask where the label says nothing is in frame fails" \
+    tests/test_camera_labels.py || failures=$((failures+1))
+
 mutate webapp/runs.py \
     '    return stem.with_suffix(".r16").is_file() and stem.with_suffix(".json").is_file()' \
     '    return stem.with_suffix(".r16").is_file()  # MUTATED: samples alone count' \

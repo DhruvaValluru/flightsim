@@ -981,6 +981,35 @@ headless host covers **still air and steady wind over flat terrain**
 realisation is per-host (measured, above); orographic wind in the host is the
 verified port of an unvalidated model (§2.8).
 
+### 2.15 Ground-truth labels (Phase 10): what a label is, and is not
+
+Every frame of a version-5 capture manifest carries labels computed from
+geometry alone (`core/capture/labels.py`): a 2-D box, a 3-D box in camera
+coordinates, seven airframe keypoints and the horizon line. What IS
+claimed: the labels are recoverable from the same pose, intrinsics and
+aircraft state the manifest records, through its documented projection;
+the verifier re-derives them independently to 0.05 px and is shown to
+fail when they are moved; every airframe number carries its source and a
+`basis` word (`fdm` for a point the flown JSBSim model states itself,
+`fdm-approximation` for half the FDM wingspan abeam the aero reference
+point, `estimate` for the B747's nose and tail placed by argument from a
+type document); the structural-to-body mapping is pinned by figures from
+outside the code (c172p and A320 tip stations, A320 nose-to-tail against
+the type's length).
+
+What is NOT claimed: the 2-D box is the airframe's OVERALL EXTENTS
+(nose-to-tail x span x cited height), not a silhouette -- a tight box
+needs the engine's instance mask, which is written only by a `-labels`
+render pass and graded against the extents box by containment, never
+equated with it. Keypoint `in_frame` is geometric ("inside the image
+with positive depth"), never "unoccluded". The horizon is the datum
+plane's tangent horizon on a spherical Earth without refraction or
+terrain -- the skyline is the mask's job. Semantic classes are three
+(sky / aircraft / terrain-or-other). Airframes without stated geometry
+refuse by name (`camera.labels`) rather than being labelled as a
+stand-in. Nothing here is a claim about the meshes' dimensional accuracy
+beyond §1.6b's.
+
 ### 2.5 No EO/IR sensor fidelity exists
 
 None has been built. Unreal has no native EO/IR simulation and no MISB/KLV

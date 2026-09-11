@@ -18,6 +18,8 @@ public class FlightSimBridge : ModuleRules
 			// Offscreen frame capture for the two Gate 5 clauses that are
 			// about what a viewer sees (FlightSimRenderCommandlet).
 			"RenderCore", "RHI",
+			// Phase 10 labels: 8/16-bit grey PNGs (FImageUtils writes RGBA8 only).
+			"ImageWrapper",
 			// Gate 6's terrain-in-shot: a mesh built at runtime from the same
 			// baked .r16 heightfield the physics pipeline produces (§3.2).
 			"ProceduralMeshComponent",
