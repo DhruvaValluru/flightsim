@@ -195,6 +195,13 @@ def vocabulary_violations(camera: CameraSpec,
             "camera.preset",
             f"{who}: unknown preset {preset!r}; modelled: "
             f"{', '.join(CAMERA_PRESETS)}"))
+    # camera.profile: the sensor model must exist and cite a source.
+    from .profile import CameraProfileError, load_profile
+
+    try:
+        load_profile(str(camera.profile.value))
+    except CameraProfileError as exc:
+        out.append(Violation("camera.profile", f"{who}: {exc.message}"))
     mode = str(camera.position_mode.value)
     if mode not in POSITION_MODES:
         out.append(Violation(

@@ -6,7 +6,7 @@
 What happens, in order (each step refuses by name rather than
 approximating):
 
-1. the spec is read (spec_version 6 -- older versions refuse by name);
+1. the spec is read (spec_version 7 -- older versions refuse by name);
 2. scene-free validation runs (the full validate(), cameras included);
 3. world-anchored cameras are checked against the scene BEFORE the run
    (terrain clearance, scene bounds, the tornado core);
@@ -86,7 +86,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="validate, run headlessly, and capture a scenario's "
                     "camera geometry")
-    parser.add_argument("spec", help="scenario spec YAML (spec_version 6)")
+    parser.add_argument("spec", help="scenario spec YAML (spec_version 7)")
     parser.add_argument("--out", required=True, help="run directory")
     parser.add_argument("--terrain", default=None,
                         help="baked heightfield stem (<stem>.r16 + .json) "
@@ -476,8 +476,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"REFUSED -- the render wrapper exited {completed.returncode}; "
               f"the manifest and verification above still stand")
         return 1
-    rendered = sorted(frames_dir.rglob("frame_*.png"))
+    rendered = sorted(p for p in frames_dir.rglob("frame_*.png")
+                      if p.stem[-4:].isdigit())
     print(f"  frames:   {len(rendered)} rendered under {frames_dir}")
+
+    # Phase 10: the sensor model as a seeded post-pass, for every camera
+    # whose profile is not the ideal pinhole.
+    from core.capture.profile import apply_profile_to_run
+
+    sensor_written = apply_profile_to_run(out, manifest, int(spec.seed.value))
+    if sensor_written:
+        print("  sensor:   " + ", ".join(f"{cam} x{n} sensor frames"
+                                        for cam, n in sorted(sensor_written.items())))
 
     from core.capture.overlay import draw_overlays
 

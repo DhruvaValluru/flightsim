@@ -45,7 +45,14 @@ from .fields import Quantity, Source
 # The list is digest-relevant, so the version bump changes every digest
 # by design: version-5 dicts refuse by name; completed runs recover
 # from provenance.json, never by re-parsing.
-SPEC_VERSION = 6
+# 7 (2026-09-11): cameras[].profile added (Phase 10, package 3: the
+# sensor model -- lens distortion, rolling shutter, noise, vignetting,
+# applied as a seeded post-pass; "ideal_pinhole" by default). The one
+# version bump of Phase 10: the randomisation block (package 7) lands
+# under this same version as an optional, defaulted section. Version-6
+# dicts refuse by name; completed runs recover from provenance.json.
+# Every digest changes with the version field, by design, as it did at 6.
+SPEC_VERSION = 7
 
 
 @dataclass

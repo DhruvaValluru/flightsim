@@ -285,6 +285,17 @@ def write_manifest(spec, solved: Dict, out: Path, scene: Dict,
     return path
 
 
+def apply_sensor(out: Path, run_seed: int) -> Dict[str, int]:
+    """The sensor post-pass over the run's rendered frames, from the
+    manifest just written. {camera_id: frames written}; empty when
+    every camera is the ideal pinhole."""
+    from core.capture.manifest import read_capture_manifest
+    from core.capture.profile import apply_profile_to_run
+
+    manifest = read_capture_manifest(out / "capture_manifest.json")
+    return apply_profile_to_run(out, manifest, run_seed)
+
+
 #: Everything a labelled set is, per view. The zip is rebuilt when any
 #: of these is newer than it, so a re-render or a re-verify refreshes
 #: the download and nothing else does.

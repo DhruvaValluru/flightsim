@@ -6,7 +6,7 @@
 # use it:
 #   .venv/bin/python -m flightsim.capture examples/cameras_waypoint.yaml \
 #       --out runs/waypoint [--terrain runs/terrain/matterhorn]
-spec_version: 6
+spec_version: 7
 name: cameras_waypoint
 aircraft:
   aircraft:
@@ -254,4 +254,8 @@ cameras:
     unit: s
     source: default
     from: one event is one capture
+  profile:
+    value: ideal_pinhole
+    source: default
+    from: the documented ideal pinhole; the engine's frames are the sensor frames
   moves: []

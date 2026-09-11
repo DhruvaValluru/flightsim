@@ -161,6 +161,9 @@ class CameraSpec:
     event_threshold: Quantity
     event_direction: Quantity
     refractory_s: Quantity
+    #: Sensor-model profile name (core.capture.profile); the ideal
+    #: pinhole by default, so a spec that names none is unchanged.
+    profile: Quantity
 
     #: Keyframed moves: list of dicts, each {"t_s": float} plus any of
     #: the mode's position keys, aim keys, or "focal_length_mm". Data,
@@ -181,6 +184,10 @@ class CameraSpec:
         "trigger", "capture_count", "period_s", "distance_m",
         "event_channel", "event_threshold", "event_direction",
         "refractory_s",
+        # Phase 10: the sensor model applied to this camera's frames
+        # (assets/camera_profiles/<name>.json). "ideal_pinhole" is the
+        # documented default and exactly the previous behaviour.
+        "profile",
     )
 
     # -- access ---------------------------------------------------------
@@ -313,6 +320,9 @@ class CameraSpec:
             event_direction=d("above", frm=frm),
             refractory_s=d(DEFAULT_REFRACTORY_S, "s",
                            frm="one event is one capture"),
+            profile=d("ideal_pinhole",
+                      frm="the documented ideal pinhole; the engine's "
+                          "frames are the sensor frames"),
         )
 
     # -- presentation ---------------------------------------------------

@@ -93,6 +93,7 @@ from webapp.capture import (  # noqa: E402
     solve as capture_solve,
     wants_capture,
     write_manifest as capture_write_manifest,
+    apply_sensor as capture_apply_sensor,
 )
 
 #: Render length cap, seconds. The showcase's own clip length; a spec asking
@@ -2160,6 +2161,13 @@ class RunManager:
                                  "overlays and the verification summary")
             capture_write_manifest(spec, capture_solved, out, scene,
                                    heightfield=capture_heightfield)
+            # Phase 10: the sensor model, as a seeded post-pass over the
+            # rendered frames of every camera whose profile is not the
+            # ideal pinhole. Reproducible from the spec's own seed.
+            sensor_written = capture_apply_sensor(out, int(spec.seed.value))
+            if sensor_written:
+                run.push("sensor", "sensor model applied: " + ", ".join(
+                    f"{cam} x{n}" for cam, n in sorted(sensor_written.items())))
             run.capture = capture_finish(out)
             if not run.capture["ok"]:
                 failed = [c["name"] for c in run.capture["checks"]

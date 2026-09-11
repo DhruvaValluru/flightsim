@@ -118,6 +118,13 @@ Per frame::
                        identical), so a consumer reads the keys rather
                        than assuming a fixed set.
 
+    sensor             version 5: {profile, angular_rate_rad_s,
+                       labels_sensor} -- which sensor model this frame
+                       is passed through (the full profile is on the
+                       camera block), the camera's angular rate in
+                       camera axes (rolling shutter), and the labels
+                       mapped onto that sensor's pixels. For the ideal
+                       pinhole they equal ``labels``.
     labels             version 5: the ground-truth labels computed from
                        the record above and the airframe block, on
                        every machine (core.capture.labels): bbox_2d and
@@ -156,12 +163,14 @@ convention).
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
 from .airframe import load_airframe
 from .labels import conventions as label_conventions, frame_labels
+from .profile import load_profile, sensor_labels
 from .landmarks import scene_landmarks
 from .poses import PoseTrack, SceneFrame, aircraft_local_track
 from .schedule import CaptureSchedule
@@ -286,6 +295,38 @@ def stated_conditions(spec) -> Dict[str, Dict]:
     return out
 
 
+def camera_angular_rate(track: PoseTrack, index: int) -> List[float]:
+    """The camera's angular rate at a sample, rad/s, in CAMERA axes
+    (x right, y down, z forward) -- what the rolling-shutter model
+    needs. From the solved track's neighbouring quaternions: the
+    relative rotation q_i^-1 q_{i+1} as an axis-angle over dt, in the
+    body frame (forward, right, down), then re-ordered to camera axes.
+    The last sample uses the previous interval. A one-sample track
+    turns at zero."""
+    n = len(track.t)
+    if n < 2:
+        return [0.0, 0.0, 0.0]
+    i0 = index if index + 1 < n else index - 1
+    i1 = i0 + 1
+    w0, x0, y0, z0 = track.quat[i0]
+    w1, x1, y1, z1 = track.quat[i1]
+    # q_rel = conj(q0) * q1
+    rw = w0 * w1 + x0 * x1 + y0 * y1 + z0 * z1
+    rx = w0 * x1 - x0 * w1 - y0 * z1 + z0 * y1
+    ry = w0 * y1 + x0 * z1 - y0 * w1 - z0 * x1
+    rz = w0 * z1 - x0 * y1 + y0 * x1 - z0 * w1
+    if rw < 0.0:
+        rw, rx, ry, rz = -rw, -rx, -ry, -rz
+    sin_half = math.sqrt(rx * rx + ry * ry + rz * rz)
+    dt = float(track.t[i1]) - float(track.t[i0])
+    if sin_half < 1e-15 or dt <= 0.0:
+        return [0.0, 0.0, 0.0]
+    angle = 2.0 * math.atan2(sin_half, min(max(rw, -1.0), 1.0))
+    body = (rx / sin_half * angle / dt, ry / sin_half * angle / dt,
+            rz / sin_half * angle / dt)      # (forward, right, down)
+    return [body[1], body[2], body[0]]      # (right, down, forward)
+
+
 def _file_sha256(path) -> Optional[str]:
     import hashlib
 
@@ -381,6 +422,8 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                 f"{schedule.camera_id!r}; refusing a misattributed "
                 f"manifest")
         camera = cameras_by_id.get(track.camera_id)
+        profile = load_profile(str(camera.profile.value) if camera is not None
+                               else "ideal_pinhole")
         camera_blocks.append({
             "camera_id": track.camera_id,
             "preset": track.preset,
@@ -393,6 +436,8 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
             "trigger": schedule.trigger,
             "capture_count": len(schedule),
             "pose_track_digest": track.digest(),
+            # Phase 10: the sensor model, every parameter and its source.
+            "profile": profile.to_dict(),
         })
         fx = (track.width_px / track.sensor_width_mm)
         fy = (track.height_px / track.sensor_height_mm)
@@ -440,6 +485,18 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
             frames[-1]["labels"] = frame_labels(
                 frames[-1], frames[-1]["aircraft"], airframe,
                 terrain_elevation_m)
+            # The sensor model this frame was (or will be) passed
+            # through: the profile's full parameters, the camera's
+            # angular rate for the rolling shutter, and the labels
+            # mapped onto that sensor. The ideal profile maps them onto
+            # themselves.
+            omega = camera_angular_rate(track, sample_index)
+            frames[-1]["sensor"] = {
+                "profile": profile.name,
+                "angular_rate_rad_s": omega,
+                "labels_sensor": sensor_labels(profile, frames[-1],
+                                               frames[-1]["labels"], omega),
+            }
 
     return {
         "manifest_version": MANIFEST_VERSION,

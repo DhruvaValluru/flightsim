@@ -381,7 +381,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		UE_LOG(LogFlightSimRender, Error,
 		       TEXT("usage: -run=FlightSimBridge.FlightSimRender ")
-		       TEXT("-scenario=<run-card.json> -frames=<out-dir> [-fps=5] [-labels] "
+		       TEXT("-scenario=<run-card.json> -frames=<out-dir> [-fps=5] [-labels] [-linear] "
 		            "[-width=960] [-height=540]"));
 		return 1;
 	}
@@ -412,6 +412,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// fraction beside every delivered frame. Opt-in: without it this
 	// pass is byte-for-byte the previous one.
 	const bool bLabels = FParse::Param(*Params, TEXT("labels"));
+	// Phase 10 sensor model: keep the LINEAR frame too. The colour capture
+	// is FinalColorLDR into an sRGB8 target -- tone-mapped and quantised
+	// -- and the Python post-pass has to invert the transfer to get back
+	// to linear light, a stated approximation. -linear adds a second
+	// capture of FinalColorHDR into a float target, written as
+	// frame_NNNN_linear.exr beside the PNG; the post-pass prefers it when
+	// it can read it. Opt-in, additive.
+	const bool bLinear = FParse::Param(*Params, TEXT("linear"));
 	// The exposure clause's negative control: render with the default
 	// auto-exposure so the harness can prove its metric actually catches
 	// metering that responds to the scene. A metric no failure can trip is
@@ -1052,6 +1060,35 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		       RenderLabelDepthScaleM, RenderLabelDepthSaturationM);
 	}
 
+	// -- Phase 10 sensor model: the linear capture ------------------------
+	UTextureRenderTarget2D* LinearTarget = nullptr;
+	USceneCaptureComponent2D* LinearCapture = nullptr;
+	if (bLinear)
+	{
+		LinearTarget = NewObject<UTextureRenderTarget2D>();
+		LinearTarget->RenderTargetFormat = RTF_RGBA16f;
+		LinearTarget->ClearColor = FLinearColor::Black;
+		LinearTarget->bAutoGenerateMips = false;
+		LinearTarget->InitAutoFormat(Width, Height);
+		LinearTarget->UpdateResourceImmediate(true);
+		LinearCapture = NewObject<USceneCaptureComponent2D>(Director, TEXT("LinearCapture"));
+		LinearCapture->SetupAttachment(Director->Camera);
+		LinearCapture->SetMobility(EComponentMobility::Movable);
+		LinearCapture->TextureTarget = LinearTarget;
+		LinearCapture->CaptureSource = ESceneCaptureSource::SCS_FinalColorHDR;
+		LinearCapture->bCaptureEveryFrame = false;
+		LinearCapture->bCaptureOnMovement = false;
+		LinearCapture->bAlwaysPersistRenderingState = true;
+		LinearCapture->FOVAngle = Capture->FOVAngle;
+		LinearCapture->ShowFlags = Capture->ShowFlags;
+		LinearCapture->PostProcessSettings = Capture->PostProcessSettings;
+		LinearCapture->PostProcessBlendWeight = Capture->PostProcessBlendWeight;
+		LinearCapture->HiddenActors = Capture->HiddenActors;
+		LinearCapture->RegisterComponent();
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("linear: FinalColorHDR written as frame_NNNN_linear.exr beside each frame"));
+	}
+
 	if (!Scenario.BeginPlay(Error)) { return Fail(Error); }
 	if (!Scenario.TrimInWind(Card, Error)) { return Fail(Error); }
 	if (!Scenario.VerifyTrimmedCondition(Card, Error)) { return Fail(Error); }
@@ -1617,6 +1654,39 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Labels->SetStringField(TEXT("method"),
 			                       TEXT("aircraft-alone depth vs full-scene depth; visible where they agree"));
 			Record->SetObjectField(TEXT("labels"), Labels);
+		}
+		if (bLinear)
+		{
+			LinearCapture->FOVAngle = Capture->FOVAngle;
+			LinearCapture->CaptureScene();
+			FlushRenderingCommands();
+			FTextureRenderTargetResource* LinearResource =
+				LinearTarget->GameThread_GetRenderTargetResource();
+			TArray<FLinearColor> Linear;
+			if (LinearResource == nullptr
+			    || !LinearResource->ReadLinearColorPixels(
+			           Linear, FReadSurfaceDataFlags(RCM_MinMax, CubeFace_MAX)))
+			{
+				return Fail(TEXT("linear: could not read the HDR capture back"));
+			}
+			IImageWrapperModule& Wrappers =
+				FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+			TSharedPtr<IImageWrapper> Exr = Wrappers.CreateImageWrapper(EImageFormat::EXR);
+			const FString LinearName = FrameName.LeftChop(4) + TEXT("_linear.exr");
+			if (!Exr.IsValid()
+			    || !Exr->SetRaw(Linear.GetData(),
+			                    static_cast<int64>(Linear.Num()) * sizeof(FLinearColor),
+			                    Width, Height, ERGBFormat::RGBAF, 32))
+			{
+				return Fail(TEXT("linear: could not encode the EXR"));
+			}
+			const TArray64<uint8> ExrBytes = Exr->GetCompressed();
+			if (ExrBytes.Num() == 0
+			    || !FFileHelper::SaveArrayToFile(ExrBytes, *FPaths::Combine(OutputDirectory, LinearName)))
+			{
+				return Fail(FString::Printf(TEXT("linear: could not write %s"), *LinearName));
+			}
+			Record->SetStringField(TEXT("linear"), LinearName);
 		}
 		if (bConsumePoses)
 		{

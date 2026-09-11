@@ -4,7 +4,7 @@
 #   inside or on the scene's terrain.
 # A user-stated camera field is never silently moved to pass; edit the
 # spec (position_alt_m) and run again.
-spec_version: 6
+spec_version: 7
 name: cameras_refusal
 aircraft:
   aircraft:
@@ -252,4 +252,8 @@ cameras:
     unit: s
     source: default
     from: one event is one capture
+  profile:
+    value: ideal_pinhole
+    source: default
+    from: the documented ideal pinhole; the engine's frames are the sensor frames
   moves: []

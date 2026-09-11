@@ -64,7 +64,7 @@ def test_spec_version_6_and_the_model_source(spec):
     immovable."""
     from core.scenario.spec import SPEC_VERSION
 
-    assert SPEC_VERSION == 6
+    assert SPEC_VERSION == 7
 
     spec.altitude = Quantity(150.0, "m", Source.MODEL, frm="treetop level")
     reread = ScenarioSpec.from_dict(spec.to_dict())

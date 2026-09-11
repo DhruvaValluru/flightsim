@@ -21,7 +21,7 @@
 #
 # Expected: 30 frames, verification 8/8 PASS, and the pixel render
 # refused by name (ue.platform) off a render-capable machine.
-spec_version: 6
+spec_version: 7
 name: cameras_terrain
 aircraft:
   aircraft:
@@ -269,6 +269,10 @@ cameras:
     unit: s
     source: default
     from: one event is one capture
+  profile:
+    value: ideal_pinhole
+    source: default
+    from: the documented ideal pinhole; the engine's frames are the sensor frames
   moves: []
 - camera_id:
     value: ridgetop
@@ -422,4 +426,8 @@ cameras:
     unit: s
     source: default
     from: one event is one capture
+  profile:
+    value: ideal_pinhole
+    source: default
+    from: the documented ideal pinhole; the engine's frames are the sensor frames
   moves: []

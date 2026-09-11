@@ -171,3 +171,87 @@ Semantic classes are three (sky / aircraft / terrain-or-other): water,
 buildings and other aircraft are not distinguished -- scene content is
 out of this phase's scope by the owner's decision. The horizon ignores
 terrain occlusion; the engine mask is where the skyline is.
+
+## P10-3 -- the sensor model (camera profiles)
+
+**What was built.** A camera profile
+(`assets/camera_profiles/<name>.json`) says what one camera does to an
+ideal picture, and `core/capture/profile.py` applies it as a
+deterministic, seeded post-pass in Python over the render, so the
+result is reproducible from the run's provenance and checkable with no
+engine. `CameraSpec` gained a provenanced `profile` field (the phase's
+one spec bump, 6 -> 7; the examples were regenerated at 7, and a
+version-6 dict refuses by name as every earlier bump did); the default
+is `ideal_pinhole`, so a spec that names none behaves exactly as
+before, and the ideal profile's post-pass is a no-op up to its own
+8-bit ADC. An unknown profile, or one with no source, refuses by name
+(`camera.profile`) in validation.
+
+What a profile carries, and the stated basis of each part: Brown-Conrady
+distortion (k1 k2 k3 p1 p2, the OpenCV parameterisation; forward for
+the labels, Newton inverse for the image and the verifier -- round
+trips to 1e-9); a linear top-to-bottom rolling shutter driven by the
+camera's own angular rate from the solved pose track (translation over
+one readout neglected, stated); cos^4 natural vignetting; exposure and
+ISO as a gain over the profile's reference; EMVA 1288 shot + read noise
+in electrons with the ADC at the profile's bit depth; linear in, sRGB
+8-bit PNG out. The RNG is seeded per (run seed, camera, frame): the
+same run writes the same bytes twice, a different seed different bytes
+(tested).
+
+Two profiles ship. `ideal_pinhole` is the documented default.
+`synthetic_cmos_wide` is EXACTLY what its name and its source say: the
+models are cited (Brown 1966; EMVA 1288; Ray's cos^4) and the numbers
+are hand-chosen within the ranges those references describe -- not a
+calibrated camera, and the profile's `basis: synthetic` and its source
+string say so in the manifest. A calibrated profile for a real camera
+replaces the numbers with measured ones and cites the calibration; the
+loader refuses one that cites nothing.
+
+**Labels follow the pixels.** Every frame record carries `sensor`:
+the profile name, the camera's angular rate in camera axes, and
+`labels_sensor` -- every keypoint and the 3-D box's corners mapped
+onto the sensor (distortion, then the rolling-shutter row/time fixed
+point). The camera block carries the profile's full parameters and
+SHA-256. The verifier's `sensor_undistortion` undistorts and de-rolls
+every sensor keypoint with the MANIFEST'S OWN recorded profile and
+angular rate and requires the pinhole label back to 0.05 px; it is
+shown to fail when the recorded k1 is corrupted, when the angular rate
+is dropped, and when a frame names a different profile than its camera
+block. `sensor_files` checks every sensor frame a camera's
+`sensor.json` declares exists.
+
+**Linear input.** The engine's colour capture is FinalColorLDR into an
+sRGB8 target -- tone-mapped and quantised -- so the post-pass inverts
+the sRGB transfer to get back to linear light and RECORDS that as a
+stated approximation in `sensor.json`. An additive `-linear` option in
+the commandlet captures FinalColorHDR into a float target and writes
+`frame_NNNN_linear.exr` beside the PNG; the post-pass prefers it when
+an EXR reader is installed (OpenEXR is not a dependency of this repo,
+so on a stock machine the PNG path is what runs, and says so).
+
+**How to demonstrate (any platform).**
+
+    .venv/bin/pytest tests/test_camera_profile.py -q
+    # in a spec: cameras[0].profile = synthetic_cmos_wide, then
+    .venv/bin/python -m flightsim.capture <spec> --out runs/sensor_demo
+    .venv/bin/python -m flightsim.verify runs/sensor_demo
+    # sensor_undistortion PASS on the headless manifest; with rendered
+    # frames, frames/<camera>/frame_NNNN_sensor.png beside each frame,
+    # sensor.json naming the profile, the seed and the linear source
+
+**Not verified here.** The `-linear` C++ was not compiled or run (no
+engine). The post-pass over REAL rendered frames was exercised only on
+synthetic stand-ins of the declared layout; the first Windows run with
+a non-ideal profile is the verification step: `sensor_files` PASS and
+a sensor frame that looks like a photograph of the ideal one (barrel,
+fall-off, grain, and a skew under a fast pan).
+
+**Limitations.** The synthetic profile is illustrative, by
+construction. Rolling shutter neglects translation over one readout.
+No chromatic aberration, no motion blur within the exposure, no
+Bayer/demosaic, no lens flare -- each would be a further stated model.
+Distorted output is sampled bilinearly from the ideal frame (no
+supersampling), so a strong barrel lens softens edges slightly. The
+sensor frame is 8-bit sRGB PNG regardless of the profile's bit depth,
+which governs quantisation of the linear signal before encoding.

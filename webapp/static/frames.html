@@ -287,12 +287,32 @@ async function load() {
   for (const record of payload.frames) {
     const name = String(record.file || "").split("/").pop();
     const shots = [];
+    // Beside the ideal render: the sensor-modelled frame, and the engine's
+    // masks and depth when a -labels pass wrote them. Same directory, own
+    // suffixes.
+    const derived = [["_sensor.png", "sensor-modelled frame (the camera profile applied)"],
+                     ["_mask.png", "engine instance mask (aircraft = 1)"],
+                     ["_class.png", "engine class mask (0 sky, 1 aircraft, 2 terrain/other)"],
+                     ["_depth.png", "engine depth, 16-bit"]];
     for (const [kind, label] of [["overlays", "overlay — the manifest's " +
                                   "projection (circle) and the engine's " +
                                   "(cross)"],
                                  ["frames", "rendered frame"],
+                                 ...derived.map(([suffix, text]) =>
+                                   ["frames:" + name.replace(/\.png$/, suffix), text]),
                                  ["previews", "engine-free preview"]]) {
-      if (present[kind].has(name)) {
+      const [dirKind, fileName] = kind.includes(":") ? kind.split(":") : [kind, name];
+      if (present[dirKind].has(fileName)) {
+        const href = `${base}/${dirKind}/${encodeURIComponent(cameraId)}/` +
+                     encodeURIComponent(fileName);
+        shots.push(`<a href="${href}" target="_blank">` +
+                   `<img src="${href}" loading="lazy" decoding="async" ` +
+                   `alt="${esc(label)}"></a>` +
+                   `<div class="dim">${esc(label)} &middot; ` +
+                   `<a href="${href}" download>${esc(fileName)}</a></div>`);
+        continue;
+      }
+      if (false) {
         const href = `${base}/${kind}/${encodeURIComponent(cameraId)}/` +
                      encodeURIComponent(name);
         // Lazily: a continuous capture is one frame per recorded

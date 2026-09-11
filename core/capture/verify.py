@@ -1773,6 +1773,134 @@ def verify_depth_range(manifest: Dict, run_dir=None) -> Check:
                  f"at {worst_where} (min {DEPTH_IN_RANGE_MIN})")
 
 
+# -- Phase 10, P10-3: the sensor model --------------------------------------
+#
+# sensor_undistortion: every sensor-frame keypoint, undistorted and
+# de-rolled with the MANIFEST'S OWN recorded profile and angular rate,
+# must land back on the pinhole label. A recorded distortion that does
+# not describe the sensor labels -- k1 corrupted, a profile swapped, an
+# angular rate dropped -- fails here by the pixel. The inverse model is
+# core.capture.profile's; the forward mapping that made the labels is
+# the producer's, so this closes the loop rather than repeating it.
+#
+# sensor_files: every sensor frame a camera's sensor.json declares
+# exists. NOT RUN when no camera ran the post-pass.
+
+#: Undistort-then-compare tolerance: Newton to 1e-13 in normalised
+#: coordinates leaves float noise, not pixels.
+SENSOR_UNDISTORT_TOL_PX = 0.05
+
+
+def verify_sensor_undistortion(manifest: Dict) -> Check:
+    from .profile import (CameraProfile, CameraProfileError,
+                          pinhole_pixel_from_sensor)
+
+    profiles: Dict[str, CameraProfile] = {}
+    for block in manifest.get("cameras", []):
+        recorded = block.get("profile")
+        if not isinstance(recorded, dict):
+            continue
+        try:
+            profiles[str(block["camera_id"])] = CameraProfile(
+                name=str(recorded["name"]), basis=str(recorded.get("basis", "")),
+                source=str(recorded.get("source", "")),
+                k1=float(recorded["distortion"]["k1"]),
+                k2=float(recorded["distortion"]["k2"]),
+                k3=float(recorded["distortion"]["k3"]),
+                p1=float(recorded["distortion"]["p1"]),
+                p2=float(recorded["distortion"]["p2"]),
+                readout_s=float(recorded["rolling_shutter"]["readout_s"]),
+                exposure_s=float(recorded["exposure"]["time_s"]),
+                reference_exposure_s=float(recorded["exposure"]["reference_time_s"]),
+                iso=float(recorded["exposure"]["iso"]),
+                base_iso=float(recorded["exposure"]["base_iso"]),
+                noise_model=str(recorded["noise"]["model"]),
+                full_well_e=float(recorded["noise"].get("full_well_e", 0.0)),
+                read_noise_e=float(recorded["noise"].get("read_noise_e", 0.0)),
+                vignetting_model=str(recorded["vignetting"]["model"]),
+                vignetting_strength=float(recorded["vignetting"].get("strength", 1.0)),
+                bit_depth=int(recorded.get("bit_depth", 8)))
+        except (KeyError, TypeError, ValueError) as exc:
+            return Check("sensor_undistortion", FAIL,
+                         f"camera {block.get('camera_id')!r}: recorded profile "
+                         f"unreadable ({exc})")
+    frames = [f for f in manifest.get("frames", [])
+              if isinstance(f.get("sensor"), dict)
+              and isinstance(f.get("labels"), dict)]
+    if not frames or not profiles:
+        return Check("sensor_undistortion", NOT_RUN,
+                     "no per-frame sensor block in this manifest (version < 5)")
+    worst = 0.0
+    worst_where = ""
+    counted = 0
+    for record in frames:
+        camera = str(record["camera_id"])
+        profile = profiles.get(camera)
+        if profile is None:
+            return Check("sensor_undistortion", FAIL,
+                         f"{camera}: frames carry a sensor block but the "
+                         f"camera block records no profile")
+        sensor = record["sensor"]
+        if sensor.get("profile") != profile.name:
+            return Check("sensor_undistortion", FAIL,
+                         f"{camera}/{record['index']}: frame names profile "
+                         f"{sensor.get('profile')!r}, camera block "
+                         f"{profile.name!r}")
+        omega = sensor.get("angular_rate_rad_s") or [0.0, 0.0, 0.0]
+        for name, kp in sensor.get("labels_sensor", {}).get("keypoints", {}).items():
+            ideal = record["labels"]["keypoints"].get(name)
+            if kp.get("u") is None or ideal is None or ideal.get("u") is None:
+                continue
+            u, v = pinhole_pixel_from_sensor(profile, record, kp["u"], kp["v"],
+                                             float(ideal["depth_m"]), omega)
+            error = max(abs(u - ideal["u"]), abs(v - ideal["v"]))
+            counted += 1
+            if error > worst:
+                worst, worst_where = error, f"{camera}/{record['index']} {name}"
+    if counted == 0:
+        return Check("sensor_undistortion", NOT_RUN,
+                     "no sensor keypoint had a pinhole counterpart to compare")
+    ok = worst <= SENSOR_UNDISTORT_TOL_PX
+    return Check("sensor_undistortion", PASS if ok else FAIL,
+                 f"{counted} sensor keypoints undistorted with the recorded "
+                 f"profile; worst return error {worst:.4f} px at "
+                 f"{worst_where} (tolerance {SENSOR_UNDISTORT_TOL_PX})")
+
+
+def verify_sensor_files(manifest: Dict, run_dir=None) -> Check:
+    if run_dir is None:
+        return Check("sensor_files", NOT_RUN, "no run directory")
+    declared = {}
+    frames_dir = Path(run_dir) / "frames"
+    if frames_dir.is_dir():
+        for camera_dir in sorted(p for p in frames_dir.iterdir() if p.is_dir()):
+            path = camera_dir / "sensor.json"
+            if path.is_file():
+                try:
+                    declared[camera_dir.name] = json.loads(
+                        path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    return Check("sensor_files", FAIL,
+                                 f"{path} is unreadable")
+    if not declared:
+        return Check("sensor_files", NOT_RUN,
+                     "no camera ran the sensor post-pass (every profile "
+                     "ideal, or no frames rendered)")
+    missing = []
+    counted = 0
+    for camera, entry in declared.items():
+        for item in entry.get("frames", []):
+            counted += 1
+            if not (frames_dir / camera / str(item.get("sensor", ""))).is_file():
+                missing.append(f"{camera}/{item.get('sensor')}")
+    if missing:
+        return Check("sensor_files", FAIL,
+                     f"{len(missing)} declared sensor frame(s) absent: "
+                     + ", ".join(missing[:4]))
+    return Check("sensor_files", PASS,
+                 f"{counted} sensor frames present across {sorted(declared)}")
+
+
 def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     """The pass/fail summary over a run directory (CLI: flightsim.verify).
 
@@ -1822,6 +1950,8 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     report.checks.append(verify_label_files(manifest, run_dir))
     report.checks.append(verify_mask_containment(manifest, run_dir))
     report.checks.append(verify_depth_range(manifest, run_dir))
+    report.checks.append(verify_sensor_undistortion(manifest))
+    report.checks.append(verify_sensor_files(manifest, run_dir))
 
     if other_run_dir is not None:
         other = read_capture_manifest(

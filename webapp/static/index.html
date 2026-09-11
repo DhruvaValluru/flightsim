@@ -1180,7 +1180,9 @@ async function initGallery(runId, run) {
   for (const [key, label, note] of kinds) {
     const perCamera = inventory[key];
     for (const cameraId of Object.keys(perCamera)) {
-      const names = perCamera[cameraId];
+      // The plain frames only: masks, depth and sensor frames sit beside
+      // them under their own suffixes and are shown on the frames page.
+      const names = perCamera[cameraId].filter(n => /^frame_\d{4}\.png$/.test(n));
       const shown = names.slice(0, 60);
       html.push(`<div style="margin-top:10px"><b>${label}</b>` +
         (cameraId ? ` · ${cameraId}` : "") +

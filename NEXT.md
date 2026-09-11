@@ -9,10 +9,13 @@ version 5: `core/capture/airframe.py` + `labels.py`, five verifier
 checks that fail on corruption, an additive `-labels` render pass
 writing instance/class masks + 16-bit depth + occlusion -- the C++
 is UNCOMPILED here; first Windows run with `-labels` is the
-verification step, see the report). NEXT UP: P10-3 sensor-model
-camera profiles (SPEC_VERSION 6 -> 7 lands there, the phase's one
-bump), then P10-4 render reproducibility, P10-7 randomisation,
-P10-6 batch + export.
+verification step, see the report); P10-3 (sensor-model camera
+profiles: SPEC_VERSION 7, `cameras[].profile`, `core/capture/
+profile.py` seeded post-pass, `sensor` block per frame,
+sensor_undistortion/sensor_files checks; the `synthetic_cmos_wide`
+profile is declared illustrative; `-linear` EXR C++ UNCOMPILED here).
+NEXT UP: P10-4 render reproducibility, P10-7 randomisation, P10-6
+batch + export.
 
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.

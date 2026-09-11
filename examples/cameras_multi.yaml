@@ -5,7 +5,7 @@
 # off-mac while the manifest, previews and verification complete:
 #   .venv/bin/python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo
 #   .venv/bin/python -m flightsim.verify runs/demo
-spec_version: 6
+spec_version: 7
 name: cameras_multi
 aircraft:
   aircraft:
@@ -253,6 +253,10 @@ cameras:
     unit: s
     source: default
     from: one event is one capture
+  profile:
+    value: ideal_pinhole
+    source: default
+    from: the documented ideal pinhole; the engine's frames are the sensor frames
   moves: []
 - camera_id:
     value: tower0
@@ -406,4 +410,8 @@ cameras:
     unit: s
     source: default
     from: one event is one capture
+  profile:
+    value: ideal_pinhole
+    source: default
+    from: the documented ideal pinhole; the engine's frames are the sensor frames
   moves: []

@@ -1010,6 +1010,25 @@ refuse by name (`camera.labels`) rather than being labelled as a
 stand-in. Nothing here is a claim about the meshes' dimensional accuracy
 beyond §1.6b's.
 
+### 2.16 The sensor model (Phase 10): a stated model, applied reproducibly
+
+A camera profile applies lens distortion (Brown-Conrady), a rolling
+shutter, cos^4 vignetting, exposure gain and EMVA 1288 shot + read noise
+to the ideal render as a seeded Python post-pass. What IS claimed: the
+pass is deterministic from the run's seed (same bytes twice, tested);
+the labels are mapped through the same profile and the verifier
+recovers the pinhole labels by inverting the RECORDED parameters to
+0.05 px, failing when they are corrupted; every profile cites its source
+and carries a `basis` word, and the shipped `synthetic_cmos_wide` is
+declared illustrative in the manifest itself. What is NOT claimed: that
+any shipped profile describes a real camera (none does -- a calibrated
+one must cite its calibration), radiometric calibration of any kind
+(the linear input is the 8-bit sRGB render inverted, a stated
+approximation until a `-linear` EXR pass is verified on the engine),
+chromatic aberration, intra-exposure motion blur, demosaicing or flare.
+§2.5 stands: none of this is EO/IR sensor fidelity, and nothing here is
+traceable as sensor imagery.
+
 ### 2.5 No EO/IR sensor fidelity exists
 
 None has been built. Unreal has no native EO/IR simulation and no MISB/KLV

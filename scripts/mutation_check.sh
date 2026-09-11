@@ -891,6 +891,80 @@ mutate core/capture/verify.py \
     "an engine mask where the label says nothing is in frame fails" \
     tests/test_camera_labels.py || failures=$((failures+1))
 
+# -- Phase 10, P10-3: the sensor model ------------------------------------
+
+mutate core/capture/profile.py \
+    '    if not str(data.get("source", "")).strip():' \
+    '    if False:  # MUTATED: a profile with no source is accepted' \
+    "a camera profile without a source refuses by name" \
+    tests/test_camera_profile.py || failures=$((failures+1))
+
+mutate core/capture/profile.py \
+    '    if dist.get("model") not in DISTORTION_MODELS:' \
+    '    if False:  # MUTATED: any distortion model word is accepted' \
+    "an unmodelled distortion model refuses" \
+    tests/test_camera_profile.py || failures=$((failures+1))
+
+mutate core/capture/profile.py \
+    '    xd = x * radial + 2.0 * profile.p1 * x * y + profile.p2 * (r2 + 2.0 * x * x)' \
+    '    xd = x * radial  # MUTATED: tangential term dropped' \
+    "the forward distortion is the full Brown-Conrady model" \
+    tests/test_camera_profile.py || failures=$((failures+1))
+
+mutate core/capture/profile.py \
+    '    return profile.readout_s * (v / height - 0.5)' \
+    '    return profile.readout_s * (v / height)  # MUTATED: readout not centred' \
+    "the rolling shutter readout is centred on the frame" \
+    tests/test_camera_profile.py || failures=$((failures+1))
+
+mutate core/capture/profile.py \
+    '        electrons += rng.normal(0.0, profile.read_noise_e, size=electrons.shape)' \
+    '        pass  # MUTATED: no read noise' \
+    "read noise is part of the EMVA 1288 model" \
+    tests/test_camera_profile.py || failures=$((failures+1))
+
+mutate core/capture/profile.py \
+    '    digest = hashlib.sha256(f"{run_seed}:{camera_id}:{index}".encode()).digest()' \
+    '    digest = hashlib.sha256(f"{run_seed}:{camera_id}".encode()).digest()  # MUTATED: every frame the same grain' \
+    "every frame has its own noise stream" \
+    tests/test_camera_profile.py || failures=$((failures+1))
+
+mutate core/capture/profile.py \
+    '        image = image * ((cos_theta ** 4) ** profile.vignetting_strength)[..., None]' \
+    '        image = image * 1.0  # MUTATED: no vignetting' \
+    "cos^4 vignetting reaches the pixels" \
+    tests/test_camera_profile.py || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '    return [body[1], body[2], body[0]]      # (right, down, forward)' \
+    '    return [body[0], body[1], body[2]]      # MUTATED: body axes, not camera axes' \
+    "the angular rate is expressed in camera axes" \
+    tests/test_camera_profile.py || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '                "labels_sensor": sensor_labels(profile, frames[-1],' \
+    '                "labels_sensor": sensor_labels(load_profile("ideal_pinhole"), frames[-1],  # MUTATED' \
+    "the sensor labels are mapped through the camera's own profile" \
+    tests/test_camera_profile.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    ok = worst <= SENSOR_UNDISTORT_TOL_PX' \
+    '    ok = True  # MUTATED: any undistortion error passes' \
+    "sensor labels must undistort back onto the pinhole labels" \
+    tests/test_camera_profile.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if not (frames_dir / camera / str(item.get("sensor", ""))).is_file():' \
+    '            if False:  # MUTATED: a declared sensor frame need not exist' \
+    "every declared sensor frame exists" \
+    tests/test_camera_profile.py || failures=$((failures+1))
+
+mutate core/capture/validate.py \
+    '        load_profile(str(camera.profile.value))' \
+    '        pass  # MUTATED: any profile name validates' \
+    "an unknown camera profile refuses in validation" \
+    tests/test_camera_profile.py || failures=$((failures+1))
+
 mutate webapp/runs.py \
     '    return stem.with_suffix(".r16").is_file() and stem.with_suffix(".json").is_file()' \
     '    return stem.with_suffix(".r16").is_file()  # MUTATED: samples alone count' \
