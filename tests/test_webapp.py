@@ -16,6 +16,133 @@ from webapp.runs import RunManager, derive_seed, pick_scene
 from webapp.server import app, manager
 
 
+# -- the control ridge, on every machine ---------------------------------
+#
+# Every terrain-coupled test below used to skip unless
+# runs/terrain/control_ridge.r16 had been baked here -- so on CI and on
+# any fresh clone the four planners (cross-ridge wind, the rotor card
+# word, the span-station clearance minimum, the orographic pre-flight)
+# were never exercised and their mutation guards reported WEAK. The
+# real ridge is the showcase's 1024 px synthesis (seed 6, 28 deg RMS
+# slope, base 600 m, 30 m posting): measured 247 s to generate, 30.7 km
+# wide, topping at 3299 m with 2699 m of relief. Far too slow for a
+# fixture, so this is the SAME synthesis at 128 px (3-4 s, once per
+# session), shaped by three measured needs and nothing else:
+#
+# * a window centred ONE POSTING WEST OF ITS PEAK: place_on_scene starts
+#   the aircraft at the raster centre and the clearance tests fly north
+#   from there, and their expectations (a 3000 m default raised, a
+#   stated 2500 m refused) need the track to cross the high ground --
+#   on an arbitrary window it did not (measured). Not ON the peak: at a
+#   bilinear apex every span station is over lower ground than the CG,
+#   so the span-aware clearance could not be strictly tighter at its
+#   minimum (measured -- min over stations == the CG figure exactly);
+#   one posting onto the flank puts the start on a slope, as the real
+#   ridge's centre is. The window shrinks symmetrically to stay inside
+#   the raster;
+# * re-posted to span the REAL ridge's 30.7 km: the orographic field's
+#   wavelength is raster width / 8 and its decay height follows, so a
+#   3 km fixture put the decay at its clamped minimum and the field at
+#   cruise altitude was exactly 0.0 m/s (measured -- the coupled and
+#   still-air pre-flights came back identical). At the real extent the
+#   same 6% of the forcing survives 1700 m AGL as on the real ridge;
+# * elevations rescaled onto the real ridge's measured span.
+#
+# All three are recorded in the raster's own provenance.
+
+#: The real control ridge, measured 2026-09-11 (1024 px, seed 6, 30 m).
+CONTROL_RIDGE_BASE_M = 600.0
+CONTROL_RIDGE_PEAK_M = 3299.0
+CONTROL_RIDGE_WIDTH_M = 1024 * 30.0
+
+
+@pytest.fixture(scope="session")
+def control_ridge_root(tmp_path_factory) -> Path:
+    import numpy as np
+
+    from core.terrain.heightfield import Georeference, Heightfield
+    from core.terrain.synthesis import TerrainStatistics, generate
+
+    root = tmp_path_factory.mktemp("terrain")
+    small = generate(size=128, pixel_size_m=30.0,
+                     statistics=TerrainStatistics(rms_slope_deg=28.0),
+                     seed=6, base_elevation_m=CONTROL_RIDGE_BASE_M,
+                     name="control_ridge")
+    z = small.offset_m + small.samples.astype(np.float64) * small.scale_m
+
+    row, col = (int(v) for v in np.unravel_index(int(z.argmax()), z.shape))
+    col -= 1                       # the window's centre: the peak's west flank
+    half = min(row, z.shape[0] - 1 - row, col, z.shape[1] - 1 - col)
+    assert half >= 8, f"seed 6's peak is too close to the edge ({half} px)"
+    z = z[row - half:row + half + 1, col - half:col + half + 1]
+    side = 2 * half + 1
+    pixel_m = CONTROL_RIDGE_WIDTH_M / side
+
+    lo, hi = float(z.min()), float(z.max())
+    z = CONTROL_RIDGE_BASE_M + (z - lo) / (hi - lo) * (
+        CONTROL_RIDGE_PEAK_M - CONTROL_RIDGE_BASE_M)
+    geo = Georeference(crs=small.georeference.crs, pixel_size_m=pixel_m,
+                       origin_x_m=small.georeference.origin_x_m,
+                       origin_y_m=small.georeference.origin_y_m)
+    field = Heightfield.from_elevations(
+        z, geo, name="control_ridge",
+        provenance={"fixture": "tests/test_webapp.py control_ridge_root",
+                    "basis": f"seed-6 synthesis at 128 px, {side} px window "
+                             f"centred one posting west of its peak, "
+                             f"re-posted at "
+                             f"{pixel_m:.0f} m to span the real ridge's "
+                             f"{CONTROL_RIDGE_WIDTH_M / 1000:.1f} km, "
+                             f"elevations rescaled onto its measured span",
+                    "real_ridge_span_m": [CONTROL_RIDGE_BASE_M,
+                                          CONTROL_RIDGE_PEAK_M],
+                    "real_ridge_width_m": CONTROL_RIDGE_WIDTH_M})
+    field.write(root / "control_ridge")
+    return root
+
+
+@pytest.fixture
+def control_ridge(control_ridge_root, monkeypatch) -> Path:
+    """Point the scene picker at the synthetic bake for one test.
+
+    Only TERRAIN_DIR moves: REPO stays, so asset and engine paths are
+    untouched. Returns the bake's stem (Heightfield.read takes it).
+    """
+    monkeypatch.setattr(runs_module, "TERRAIN_DIR", control_ridge_root)
+    return control_ridge_root / "control_ridge"
+
+
+@pytest.fixture
+def no_mesh_provisioning(monkeypatch):
+    """_render_flow provisions the airframe's licensed model on first
+    need, which on a clone without one means a fetch. The card tests
+    are about the card; the model is not their business."""
+    monkeypatch.setattr(runs_module, "ensure_aircraft_model",
+                        lambda spec, report: None)
+
+
+def test_the_fixture_ridge_has_the_real_ridge_s_span(control_ridge):
+    """The expectations below were calibrated against the real ridge's
+    peaks; a fixture that lost the span would make them pass or fail
+    for the wrong reason."""
+    from core.terrain.heightfield import Heightfield
+
+    field = Heightfield.read(control_ridge)
+    stats = field.statistics()
+    assert abs(stats["min_elevation_m"] - CONTROL_RIDGE_BASE_M) < 1.0
+    assert abs(stats["max_elevation_m"] - CONTROL_RIDGE_PEAK_M) < 1.0
+    assert field.provenance["real_ridge_span_m"] == [600.0, 3299.0]
+    # The peak sits one posting east of the centre, where place_on_scene
+    # starts the flight -- so the start is on its flank and the northbound
+    # track crosses the high ground -- and the raster spans what the real
+    # one spans, so the orographic field's extent-derived wavelength and
+    # decay are the real ones.
+    import numpy as np
+    row, col = np.unravel_index(int(field.samples.argmax()), field.samples.shape)
+    assert row == field.height // 2 and col == field.width // 2 + 1
+    width_m, _ = field.extent_m
+    assert abs(width_m - CONTROL_RIDGE_WIDTH_M) <= field.georeference.pixel_size_m * 1.001
+
+
 @pytest.fixture()
 def client():
     return TestClient(app)
@@ -480,15 +607,12 @@ def test_completed_run_survives_a_server_restart(tmp_path):
     assert fresh.get("../../etc") is None
 
 
-def test_control_ridge_spec_is_placed_on_the_ridge():
+def test_control_ridge_spec_is_placed_on_the_ridge(control_ridge):
     """A mountainous spec with the default 0,0 origin moves to the control
     ridge's centre (measured: it rendered empty sky from 500 km away),
     recorded in provenance; specs that earn a real bake or the flat slab
     are untouched."""
     from webapp.runs import REPO, place_on_scene
-
-    if not (REPO / "runs" / "terrain" / "control_ridge.r16").is_file():
-        pytest.skip("no control ridge baked on this machine")
 
     spec = compile_prompt("fly the 747 at 4000 m over 2000 m mountains")
     assert float(spec.latitude.value) == 0.0
@@ -624,13 +748,16 @@ def test_control_ridge_failsafe_synthesises_once(tmp_path, monkeypatch):
     class FakeField:
         def write(self, path):
             Path(str(path) + ".r16").write_bytes(b"synthesised")
+            Path(str(path) + ".json").write_text("{}", encoding="utf-8")
             calls.append(str(path))
 
     def fake_generate(**kwargs):
         assert kwargs["seed"] == 6          # the showcase's exact ridge
         return FakeField()
 
-    monkeypatch.setattr(runs, "REPO", tmp_path)
+    # The terrain dir is its own name now (TERRAIN_DIR), so the
+    # fail-safe is redirected by that alone; REPO stays where it is.
+    monkeypatch.setattr(runs, "TERRAIN_DIR", tmp_path / "runs" / "terrain")
     monkeypatch.setattr("core.terrain.synthesis.generate", fake_generate)
 
     runs.ensure_control_ridge()
@@ -728,7 +855,7 @@ def test_ridge_axis_math_on_synthetic_rasters():
     assert abs(_ridge_axis_deg(diag, 1.0) - 135.0) < 0.5
 
 
-def test_terrain_environment_planned_across_the_ridge():
+def test_terrain_environment_planned_across_the_ridge(control_ridge):
     """Mountains-with-wind is physically different from flatland: the
     SYSTEM-CHOSEN wind is planned ACROSS the scene's principal ridge axis
     and the heading ALONG it, both recorded derived edits. A user-stated
@@ -737,14 +864,10 @@ def test_terrain_environment_planned_across_the_ridge():
     from webapp.runs import (REPO, place_on_scene, plan_terrain_environment,
                              _ridge_axis_deg)
 
-    if not (REPO / "runs" / "terrain" / "control_ridge.r16").is_file():
-        pytest.skip("no control ridge baked on this machine")
-
     from core.terrain.heightfield import Heightfield
 
-    axis = _ridge_axis_deg(
-        *(lambda hf: (hf.samples, hf.scale_m))(
-            Heightfield.read(REPO / "runs" / "terrain" / "control_ridge.r16")))
+    ridge = Heightfield.read(control_ridge)
+    axis = _ridge_axis_deg(ridge.samples, ridge.scale_m)
 
     spec = compile_prompt(
         "fly the 747 at 5000 m and 250 kt over 2000 m mountains in a "
@@ -839,7 +962,7 @@ def test_model_sourced_values_are_plannable():
     assert str(spec.altitude.source) == "derived"
 
 
-def test_terrain_run_is_planned_for_clearance():
+def test_terrain_run_is_planned_for_clearance(control_ridge):
     """Terrain runs fly in coordination with the terrain (measured: a
     3000 m default flew THROUGH 3299 m ridge peaks over a flat slab): a
     DEFAULTED altitude is raised to clear the pre-flown track, recorded;
@@ -847,9 +970,6 @@ def test_terrain_run_is_planned_for_clearance():
     name, never silently moved."""
     from webapp.runs import (REPO, place_on_scene, plan_terrain_flight,
                              pick_scene)
-
-    if not (REPO / "runs" / "terrain" / "control_ridge.r16").is_file():
-        pytest.skip("no control ridge baked on this machine")
 
     spec = compile_prompt(
         "fly the 747 at 250 kt over 2000 m mountains in a strong crosswind")
@@ -871,16 +991,12 @@ def test_terrain_run_is_planned_for_clearance():
     assert plan_terrain_flight(flat) is None        # no terrain, no plan
 
 
-def test_terrain_airflow_is_coupled_when_there_is_wind_and_stated_when_not():
+def test_terrain_airflow_is_coupled_when_there_is_wind_and_stated_when_not(control_ridge):
     """The mountains shape the air the plan flies through: a windy terrain
     spec pre-flies with the SAME orographic field the card will carry; a
     calm spec has honestly nothing to couple (orographic forcing is wind
     over terrain) and gets None, never an invented field."""
     from webapp.runs import _orographic_provider, place_on_scene
-
-    if not (runs_module.REPO / "runs" / "terrain"
-            / "control_ridge.r16").is_file():
-        pytest.skip("no control ridge baked on this machine")
 
     windy = compile_prompt(
         "fly the 747 at 5000 m and 250 kt over 2000 m mountains "
@@ -895,7 +1011,7 @@ def test_terrain_airflow_is_coupled_when_there_is_wind_and_stated_when_not():
     assert _orographic_provider(calm, pick_scene(calm)) is None
 
 
-def test_clearance_track_is_wingspan_aware():
+def test_clearance_track_is_wingspan_aware(control_ridge):
     """clearance_m is the minimum over the airframe's span stations, so a
     banked wingtip tightens the plan: the scripted S-turn track's minimum
     clearance is never above the CG-only figure, and strictly below it
@@ -906,10 +1022,6 @@ def test_clearance_track_is_wingspan_aware():
     from core.terrain.heightfield import Heightfield
     from experiments.showcase_matrix import SHOWCASE_DOUBLET
     from webapp.runs import _fly_clearance_track, place_on_scene
-
-    if not (runs_module.REPO / "runs" / "terrain"
-            / "control_ridge.r16").is_file():
-        pytest.skip("no control ridge baked on this machine")
 
     spec = compile_prompt(
         "fly the 747 at 5000 m and 250 kt over 2000 m mountains")
@@ -925,7 +1037,7 @@ def test_clearance_track_is_wingspan_aware():
             < min(p["cg_clearance_m"] for p in track))
 
 
-def test_windy_terrain_run_card_carries_the_rotor(tmp_path, monkeypatch):
+def test_windy_terrain_run_card_carries_the_rotor(tmp_path, monkeypatch, control_ridge, no_mesh_provisioning):
     """Lee-rotor turbulence rides the same orographic field the card
     carries (gotcha 14: the card word gates the turbulence writes, so the
     provider's own word 'lee-rotor' travels with its pinned properties);
@@ -934,10 +1046,6 @@ def test_windy_terrain_run_card_carries_the_rotor(tmp_path, monkeypatch):
     import json as jsonlib
 
     from webapp.runs import RunState, place_on_scene
-
-    if not (runs_module.REPO / "runs" / "terrain"
-            / "control_ridge.r16").is_file():
-        pytest.skip("no control ridge baked on this machine")
 
     spec = compile_prompt(
         "fly the 747 at 5000 m and 250 kt over 2000 m mountains "
@@ -993,16 +1101,12 @@ def test_windy_terrain_run_card_carries_the_rotor(tmp_path, monkeypatch):
     assert effect["stats"]["n_z"]["baseline"]["rms"] >= 0.0
 
 
-def test_calm_terrain_run_states_why_the_air_is_still(tmp_path, monkeypatch):
+def test_calm_terrain_run_states_why_the_air_is_still(tmp_path, monkeypatch, control_ridge, no_mesh_provisioning):
     """No wind, no orographic field, no rotor -- and the conditions strip
     SAYS so instead of leaving 'calm' to imply the mountains were felt."""
     import json as jsonlib
 
     from webapp.runs import RunState, place_on_scene
-
-    if not (runs_module.REPO / "runs" / "terrain"
-            / "control_ridge.r16").is_file():
-        pytest.skip("no control ridge baked on this machine")
 
     spec = compile_prompt("fly the 747 at 5000 m over 2000 m mountains")
     place_on_scene(spec)
@@ -1035,7 +1139,7 @@ def test_calm_terrain_run_states_why_the_air_is_still(tmp_path, monkeypatch):
     assert not (tmp_path / "calmtest" / "effect.json").exists()
 
 
-def test_preflight_feels_the_orographic_field():
+def test_preflight_feels_the_orographic_field(control_ridge):
     """The plan flies through the same air as the run: with the orographic
     provider attached, the pre-flown track diverges from the still-air one
     (lift/sink moves the aircraft), so a plan through lee sink cannot come
@@ -1047,10 +1151,6 @@ def test_preflight_feels_the_orographic_field():
     from experiments.showcase_matrix import SHOWCASE_DOUBLET
     from webapp.runs import (_fly_clearance_track, _orographic_provider,
                              place_on_scene)
-
-    if not (runs_module.REPO / "runs" / "terrain"
-            / "control_ridge.r16").is_file():
-        pytest.skip("no control ridge baked on this machine")
 
     spec = compile_prompt(
         "fly the 747 at 5000 m and 250 kt over 2000 m mountains "
@@ -1067,17 +1167,13 @@ def test_preflight_feels_the_orographic_field():
     assert max(deltas) > 0.01
 
 
-def test_windy_terrain_run_digest_is_content_addressed(client, monkeypatch):
+def test_windy_terrain_run_digest_is_content_addressed(client, monkeypatch, control_ridge):
     """A windy terrain run is stochastic even with turbulence word 'none'
     (lee-rotor rides the orographic field), so /run derives its seed
     BEFORE answering the digest: the digest in the response must be the
     digest of the spec the worker actually receives, or the card would
     quietly content-address something else."""
     from webapp.server import manager
-
-    if not (runs_module.REPO / "runs" / "terrain"
-            / "control_ridge.r16").is_file():
-        pytest.skip("no control ridge baked on this machine")
 
     captured = {}
 
@@ -1171,7 +1267,10 @@ def test_bake_endpoint_registers_a_pickable_scene(client, monkeypatch,
     location = dynamic_location(51.5, -0.1)
     dynamic_dir = tmp_path / "dynamic"
     dynamic_dir.mkdir()
+    # What a real bake writes: samples AND the heightfield sidecar; the
+    # picker rightly ignores a half-bake (baked()), so the stub is whole.
     (dynamic_dir / f"{location.key}.r16").write_bytes(b"\0\0")
+    (dynamic_dir / f"{location.key}.json").write_text("{}", encoding="utf-8")
     (dynamic_dir / f"{location.key}.scene.json").write_text(jsonlib.dumps({
         "key": location.key, "title": location.title,
         "origin_lat": 51.5, "origin_lon": -0.1, "crs": location.crs,
@@ -1237,3 +1336,32 @@ def test_era5_level_selection_is_nearest_standard_level():
     assert nearest_pressure_level(9000.0) == 300
     assert nearest_pressure_level(1500.0) == 850
     assert nearest_pressure_level(200.0) == 1000
+
+
+def test_a_half_written_bake_is_not_a_bake(control_ridge, monkeypatch):
+    """A .r16 with no .json sidecar cannot be read, so it must not be
+    SELECTED: until 2026-09-11 the scene picker tested the .r16 alone
+    and a stray stub made every terrain spec crash in place_on_scene
+    with a bare FileNotFoundError (measured, in this suite). Now a
+    half-bake is skipped by the picker and re-synthesised by the
+    fail-safe."""
+    import webapp.runs as runs
+    from webapp.runs import place_on_scene
+
+    sidecar = control_ridge.with_suffix(".json")
+    sidecar.unlink()
+    spec = compile_prompt("fly the 747 at 4000 m over 2000 m mountains")
+    assert pick_scene(spec)["key"] == "flat"      # skipped, not crashed
+    place_on_scene(spec)                           # and nothing to read
+
+    calls = []
+
+    class FakeField:
+        def write(self, path):
+            Path(str(path) + ".json").write_text("{}", encoding="utf-8")
+            calls.append(str(path))
+
+    monkeypatch.setattr("core.terrain.synthesis.generate",
+                        lambda **kw: FakeField())
+    runs.ensure_control_ridge()
+    assert calls, "the fail-safe must re-synthesise over a half-bake"

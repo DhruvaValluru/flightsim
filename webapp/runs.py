@@ -34,6 +34,30 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 REPO = Path(__file__).resolve().parents[1]
+
+#: Where baked terrain lives. ONE name for it, so a test can point the
+#: scene picker at a synthetic bake without moving the repo root out from
+#: under the asset and engine paths. Until this existed the four
+#: terrain-coupled planner tests skipped on any clone without a real
+#: bake, and their mutation guards reported WEAK there -- an artifact of
+#: measurement, not a regression (NEXT.md), but one that made four
+#: safeguards unverifiable on CI and on every fresh machine.
+TERRAIN_DIR = REPO / "runs" / "terrain"
+
+
+def baked(stem: Path) -> bool:
+    """True when a bake is WHOLE: the .r16 samples AND the .json sidecar
+    that Heightfield.read needs to interpret them.
+
+    The scene picker used to test the .r16 alone, so a half-written bake
+    -- a crash between the two writes, or a stub left by a test whose
+    redirect had stopped applying (measured, 2026-09-11) -- selected the
+    scene and then crashed every terrain spec in place_on_scene with an
+    unnamed FileNotFoundError. A half-bake is not a bake: it is skipped
+    here, and the fail-safe re-synthesises over it.
+    """
+    stem = Path(stem).with_suffix("")
+    return stem.with_suffix(".r16").is_file() and stem.with_suffix(".json").is_file()
 import sys
 
 sys.path.insert(0, str(REPO))
@@ -156,7 +180,7 @@ def _dynamic_scenes(dynamic_dir: Path) -> List[Dict]:
     for sidecar in sorted(Path(dynamic_dir).glob("*.scene.json")):
         entry = json.loads(sidecar.read_text(encoding="utf-8"))
         raster = Path(dynamic_dir) / f"{entry['key']}.r16"
-        if raster.is_file():
+        if baked(raster):
             entry["terrain"] = str(raster.with_suffix(""))
             scenes.append(entry)
     return scenes
@@ -201,7 +225,7 @@ def bake_on_demand(lat: float, lon: float) -> Dict:
     the scene. Raises (DEMError / URLError by name) rather than writing an
     unverified or empty bake -- open ocean has no tiles and says so."""
     location = dynamic_location(lat, lon)
-    dynamic_dir = REPO / "runs" / "terrain" / "dynamic"
+    dynamic_dir = TERRAIN_DIR / "dynamic"
     raster = dynamic_dir / f"{location.key}.r16"
     if not raster.is_file():
         bake(location, REPO / "data" / "glo30", dynamic_dir)
@@ -231,11 +255,11 @@ def ensure_control_ridge() -> None:
     no network. Real bakes still win wherever they exist, and a USER-
     stated flat place stays honestly flat: this floor only catches
     system-chosen scenes."""
-    terrain_dir = REPO / "runs" / "terrain"
-    if (terrain_dir / "control_ridge.r16").is_file():
+    terrain_dir = TERRAIN_DIR
+    if baked(terrain_dir / "control_ridge"):
         return
     with _CONTROL_RIDGE_LOCK:
-        if (terrain_dir / "control_ridge.r16").is_file():
+        if baked(terrain_dir / "control_ridge"):
             return
         from core.terrain.synthesis import TerrainStatistics, generate
 
@@ -251,11 +275,11 @@ def pick_scene(spec: ScenarioSpec) -> Dict:
     """Choose the scene the spec's geography earns -- never silently."""
     lat = float(spec.latitude.value)
     lon = float(spec.longitude.value)
-    terrain_dir = REPO / "runs" / "terrain"
+    terrain_dir = TERRAIN_DIR
     for key, location in LOCATIONS.items():
         if (abs(lat - location.origin_lat) <= LOCATION_TOLERANCE_DEG
                 and abs(lon - location.origin_lon) <= LOCATION_TOLERANCE_DEG
-                and (terrain_dir / f"{key}.r16").is_file()):
+                and baked(terrain_dir / key)):
             imagery = terrain_dir / f"{key}_imagery.json"
             return {
                 "key": key, "kind": "real (Copernicus GLO-30)",
@@ -280,7 +304,7 @@ def pick_scene(spec: ScenarioSpec) -> Dict:
                          f"parity measured); track pre-flown for clearance",
             }
     if float(spec.terrain_elevation.value) > 0.0:
-        if (terrain_dir / "control_ridge.r16").is_file():
+        if baked(terrain_dir / "control_ridge"):
             return {
                 "key": "control", "kind": "synthesised control ridge",
                 "terrain": str(terrain_dir / "control_ridge"),
@@ -1717,7 +1741,7 @@ class RunManager:
         # with a status line, never silently -- rather than landing on
         # the slab. Render path ONLY: tests and CI never synthesise, so
         # a checkout's scene selection stays deterministic.
-        if not (REPO / "runs" / "terrain" / "control_ridge.r16").is_file():
+        if not baked(TERRAIN_DIR / "control_ridge"):
             run.push("terrain", "synthesising the control-ridge terrain "
                                 "fail-safe (one-time, local)")
             ensure_control_ridge()

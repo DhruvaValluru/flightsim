@@ -677,7 +677,7 @@ def run_camera_clip(run_id: str, camera_id: str):
     path = root / f"{camera_id}.mp4"
     try:
         resolved = path.resolve()
-        resolved.relative_to(root)
+        resolved.relative_to(root)        # the clip stays inside the run
     except (OSError, ValueError):
         return JSONResponse({"error": "no such clip"}, status_code=404)
     if not resolved.is_file():
@@ -704,7 +704,7 @@ def run_image(run_id: str, kind: str, camera_id: str, name: str):
     path = (root if camera_id == "-" else root / camera_id) / name
     try:
         resolved = path.resolve()
-        resolved.relative_to(root)
+        resolved.relative_to(root)        # the image stays inside the run
     except (OSError, ValueError):
         return JSONResponse({"error": "no such image"}, status_code=404)
     if not resolved.is_file():

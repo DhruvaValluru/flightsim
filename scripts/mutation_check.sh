@@ -804,9 +804,21 @@ mutate core/capture/verify.py \
     tests/test_camera_flight_agreement.py || failures=$((failures+1))
 
 mutate webapp/server.py \
-    '        resolved.relative_to(root)' \
-    '        pass  # MUTATED: a path may climb out of the run directory' \
+    '        resolved.relative_to(root)        # the image stays inside the run' \
+    '        pass  # MUTATED: a symlinked image may lead out of the run' \
     "an image path that climbs out of the run directory is refused" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '    return stem.with_suffix(".r16").is_file() and stem.with_suffix(".json").is_file()' \
+    '    return stem.with_suffix(".r16").is_file()  # MUTATED: samples alone count' \
+    "a half-written bake is not a bake" \
+    tests/test_webapp.py || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '        resolved.relative_to(root)        # the clip stays inside the run' \
+    '        pass  # MUTATED: a symlinked clip may lead out of the run' \
+    "a clip path that climbs out of the run directory is refused" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
 mutate core/capture/aircraft_mesh.py \

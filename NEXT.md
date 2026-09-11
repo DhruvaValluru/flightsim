@@ -24,13 +24,14 @@ the report's engine-boundary section carries the exact verification
 steps. Suite 573 tests collected, 114 mutation guards. Measured on a
 raster-less clone (no runs/terrain bakes): 104 guards fire; the FOUR
 terrain-coupled planner guards (ridge-axis wind, rotor card word,
-span-station clearance minimum, orographic pre-flight) report WEAK
-there because their test_webapp tests silently take the flat path
-without a baked raster -- bisected to the pre-camera base commit, so
-it is an environment artifact of guard MEASUREMENT, not a regression;
-they fire on a machine with the bakes. Worth fixing by giving those
-tests a synthetic raster fixture (the camera tests' make_mountain
-pattern) so every guard is machine-independent.
+span-station clearance minimum, orographic pre-flight) reported WEAK
+there because their test_webapp tests silently took the flat path
+without a baked raster. RESOLVED 2026-09-11 (Phase 10, P10-2a):
+tests/test_webapp.py carries a session-scoped synthetic control-ridge
+fixture and webapp.runs.TERRAIN_DIR is the one seam the picker reads,
+so all four fire on every machine (measured here, on this raster-less
+clone) -- docs/PHASE10_REPORT.md has the fixture's three measured
+shaping choices and gotchas 27-28.
 
 **Aircraft fail-safe (2026-09-01, one commit).** A model a machine can
 BUILD is no longer a refusal: the render flow provisions it on first
@@ -506,3 +507,25 @@ the parity discipline, and the do-not-regress list)
     wall-cloud disc was removed (a 700 m disc at chase distance reads
     as a screen-filling artifact); funnel spin runs at the model's own
     core rate omega = v_max/r_core from SIM time (replay-identical).
+
+## Phase 10 gotchas (continuing the numbering)
+
+27. **A test's `REPO` redirect that stops applying writes stubs into the
+    REAL tree.** When the terrain dir became its own name (TERRAIN_DIR),
+    the fail-safe test's `monkeypatch.setattr(runs, "REPO", tmp)` no
+    longer reached `ensure_control_ridge`, and its FakeField wrote an
+    11-byte `control_ridge.r16` into runs/terrain/. The picker then
+    selected the control scene on the .r16 alone and every terrain spec
+    crashed in place_on_scene with a bare FileNotFoundError on the
+    missing .json (four suite failures, none of them in the test that
+    caused it). Now `baked()` requires BOTH files and a half-bake is
+    skipped by the picker and re-synthesised by the fail-safe; and a
+    test that redirects a path must redirect the name the code reads.
+28. **`mutate()` replaces the FIRST occurrence.** Two routes carried the
+    identical line `resolved.relative_to(root)`; the image route's guard
+    had been disabling the CLIP route's check since the clip route landed
+    above it, and reported WEAK for a reason nobody looked for. Every
+    guarded line now has a unique spelling (a trailing comment is
+    enough), and both routes have the one test that can reach the
+    guard: a symlink planted inside the run directory, which no filename
+    regex can see. A WEAK guard is a finding, not a nuisance.

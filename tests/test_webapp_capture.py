@@ -1312,3 +1312,54 @@ def test_the_web_run_s_manifest_writer_leaves_labels_beside_the_frames(tmp_path)
         labels = json.loads(sidecar.read_text(encoding="utf-8"))
         assert labels["frame"]["state"]["lift_n"] == \
             record["state"]["lift_n"]
+
+
+def test_a_symlink_out_of_the_run_directory_is_not_followed(run_dir):
+    """The traversal guard's one reachable case.
+
+    Every path component is regex-matched before a path is built, so no
+    URL can carry `..` to `resolved.relative_to(root)` -- and for two
+    months that line's mutation guard reported WEAK: nothing could reach
+    it. What no regex can see is a SYMLINK planted inside the run
+    directory: `frames/leak -> /somewhere/else` passes the camera-name
+    pattern, `resolve()` follows it, and only the relative_to check
+    stands between the request and a file outside the run. This test is
+    that request.
+    """
+    import os
+
+    outside = run_dir.parent / "outside_the_run"
+    outside.mkdir()
+    (outside / "frame_0000.png").write_bytes(_png())
+    link = run_dir / "frames" / "leak"
+    try:
+        os.symlink(outside, link, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"cannot create a directory symlink here: {exc}")
+
+    reply = TestClient(app).get("/runs/run_test/frames/leak/frame_0000.png")
+    assert reply.status_code == 404, (
+        "a symlink to outside the run directory was followed and served")
+    assert reply.content != _png()
+
+
+def test_a_symlinked_clip_out_of_the_run_directory_is_not_followed(run_dir):
+    """The clip route carries the same guard, and until now the same
+    unreachable one: its mutation target was the FIRST relative_to in
+    the file, which is this route's, so the image route's guard was
+    never the one being disabled -- and this route had no test at all.
+    A clip symlinked from outside the run must not be served."""
+    import os
+
+    outside = run_dir.parent / "outside_clips"
+    outside.mkdir()
+    (outside / "leak.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    (run_dir / "clips").mkdir(exist_ok=True)
+    try:
+        os.symlink(outside / "leak.mp4", run_dir / "clips" / "leak.mp4")
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"cannot create a symlink here: {exc}")
+
+    reply = TestClient(app).get("/runs/run_test/clips/leak.mp4")
+    assert reply.status_code == 404
+    assert b"ftypmp42" not in reply.content
