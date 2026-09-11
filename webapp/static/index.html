@@ -1177,6 +1177,17 @@ async function initGallery(runId, run) {
     html.push(renderVerify(run.capture));
   }
 
+  // The run's own records, once: the whole manifest, its verdict, the
+  // schema it validates against, and the run card the engine consumed.
+  if (run.capture && run.capture.manifest_version !== undefined || cameras.length) {
+    html.push(`<div class="dim" style="margin-top:6px">run files: ` +
+      `<a href="/runs/${runId}/capture_manifest.json">capture manifest</a> &middot; ` +
+      `<a href="/runs/${runId}/verify.json">verification</a> &middot; ` +
+      `<a href="/schemas/capture_manifest.v5.schema.json">manifest schema</a> &middot; ` +
+      `<a href="/runs/${runId}/card.json">run card</a> &middot; ` +
+      `<a href="/runs/${runId}/provenance.json">provenance</a></div>`);
+  }
+
   // Per camera: what it is, and the way in to ITS frames with ITS
   // labels. The strips below are thumbnails; the manifest is the
   // product, and reading one frame's pose used to mean opening
@@ -1192,7 +1203,7 @@ async function initGallery(runId, run) {
       `</span><br>` +
       `<a href="/frames.html?run=${runId}&camera=${id}" target="_blank">` +
       `open all ${shot || camera.capture_count} frame(s) with their ` +
-      `metadata &rarr;</a> <span class="dim">&middot;</span> ` +
+      `pose, matrices, labels and flight state &rarr;</a> <span class="dim">&middot;</span> ` +
       `<a href="/runs/${runId}/cameras/${id}/manifest.json" ` +
       `download="${camera.camera_id}_manifest.json">` +
       `this camera's manifest</a> <span class="dim">&middot;</span> ` +

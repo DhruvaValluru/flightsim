@@ -756,6 +756,24 @@ def run_image(run_id: str, kind: str, camera_id: str, name: str):
     return FileResponse(resolved, media_type=_SERVED_TYPES[resolved.suffix])
 
 
+_SCHEMA_NAME = re.compile(r"^capture_manifest\.v\d+\.schema\.json$")
+
+
+@app.get("/schemas/{name}")
+def schema_file(name: str):
+    """The published capture-manifest schema (docs/schemas/), so the
+    frames page can link the contract every manifest it shows was
+    validated against. Only a schema file's own name is served."""
+    from core.capture.schema import SCHEMA_DIR
+
+    if not _SCHEMA_NAME.match(name):
+        return JSONResponse({"error": "no such schema"}, status_code=404)
+    path = SCHEMA_DIR / name
+    if not path.is_file():
+        return JSONResponse({"error": "no such schema"}, status_code=404)
+    return FileResponse(path, media_type="application/json")
+
+
 @app.get("/runs/{run_id}/capture_manifest.json")
 def run_capture_manifest(run_id: str):
     """The capture manifest: every frame's camera pose, full intrinsics,

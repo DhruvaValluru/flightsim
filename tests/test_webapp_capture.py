@@ -1363,3 +1363,52 @@ def test_a_symlinked_clip_out_of_the_run_directory_is_not_followed(run_dir):
     reply = TestClient(app).get("/runs/run_test/clips/leak.mp4")
     assert reply.status_code == 404
     assert b"ftypmp42" not in reply.content
+
+
+# -- the matrices and the run's records on the page ----------------------
+
+def test_one_camera_s_manifest_carries_the_airframe_and_conventions(labelled_run):
+    """The frames page shows the matrices and labels beside the
+    pictures; the conventions they follow and the airframe they
+    describe ride in the per-camera view, not only the whole-run file."""
+    body = TestClient(app).get(
+        "/runs/run_lbl/cameras/chase0/manifest.json").json()
+    for key in ("airframe", "label_conventions", "assets", "randomization"):
+        assert key in body
+
+
+def test_the_schema_is_served_by_its_own_name_only(tmp_path, monkeypatch):
+    """A file that EXISTS in the schema directory but is not a schema
+    (a decoy planted here) must not be served: the name filter, not the
+    filesystem, decides."""
+    import shutil
+
+    import core.capture.schema as schema_module
+
+    real = schema_module.SCHEMA_DIR / "capture_manifest.v5.schema.json"
+    shutil.copyfile(real, tmp_path / real.name)
+    (tmp_path / "notes.json").write_text("{\"secret\": true}", encoding="utf-8")
+    (tmp_path / "capture_manifest.v5.schema.json.bak").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(schema_module, "SCHEMA_DIR", tmp_path)
+    client = TestClient(app)
+    reply = client.get("/schemas/capture_manifest.v5.schema.json")
+    assert reply.status_code == 200
+    assert reply.json()["properties"]["manifest_version"]["const"] == 5
+    for name in ("notes.json", "capture_manifest.v5.schema.json.bak",
+                 "capture_manifest.v99.schema.json", "..%2f..%2fREADME.md"):
+        reply = client.get(f"/schemas/{name}")
+        assert reply.status_code == 404, name
+        assert b"secret" not in reply.content
+
+
+def test_the_frames_page_shows_matrices_the_run_panel_and_copy_buttons():
+    page = TestClient(app).get("/frames.html").text
+    for needle in ("projection_matrix", "intrinsic_matrix", "matrixTable",
+                   "/schemas/capture_manifest", "verify.json", "runPanel",
+                   "copy this frame's record (JSON)", "simulation digest"):
+        assert needle in page, needle
+    gallery = (Path(__file__).resolve().parents[1]
+               / "webapp" / "static" / "index.html").read_text(encoding="utf-8")
+    for needle in ("/verify.json", "/schemas/capture_manifest.v5.schema.json",
+                   "capture_manifest.json", "pose, matrices, labels"):
+        assert needle in gallery, needle

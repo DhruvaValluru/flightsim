@@ -42,6 +42,10 @@
   .group > b { color: #b9c4cf; font-size: .85em; letter-spacing: .03em;
                text-transform: uppercase; }
   #state { padding: 1rem 1.2rem; }
+  #runpanel-holder { padding: 0 1.2rem; }
+  table.m td.v { text-align: right; font-family: ui-monospace, monospace; padding: 0 .5rem; }
+  .matrix { display: inline-block; vertical-align: top; }
+  button.copy { font-size: .8em; margin-left: .4rem; }
 </style>
 
 <header>
@@ -50,6 +54,7 @@
   <div id="links" style="margin-top:.4rem"></div>
 </header>
 <div id="state" class="dim">loading...</div>
+<div id="runpanel-holder"></div>
 <main id="frames"></main>
 
 <script>
@@ -86,7 +91,31 @@ const GROUPS = [
                  "width_px", "height_px", "fx_px", "fy_px",
                  "principal_point_px", "near_m", "far_m"]],
   ["the aircraft, at that instant", ["aircraft"]],
+  ["the projection, as matrices", ["intrinsic_matrix", "projection_matrix"]],
 ];
+
+// A matrix as rows of numbers, with the JSON one click away: P is what
+// a consumer multiplies, so it must be copyable exactly as recorded.
+function matrixTable(name, matrix) {
+  if (!Array.isArray(matrix) || !matrix.length) return "";
+  const body = matrix.map(row =>
+    `<tr>${(row || []).map(v => `<td class="v">${num(v)}</td>`).join("")}</tr>`).join("");
+  return `<div class="matrix"><span class="k">${esc(name)}</span> ` +
+         `<button class="copy" data-json="${esc(JSON.stringify(matrix))}">copy JSON</button>` +
+         `<table class="m">${body}</table></div>`;
+}
+
+// One click copies the exact recorded value (a matrix, a record); a
+// consumer should never retype a number off a screen.
+document.addEventListener("click", event => {
+  const button = event.target.closest("button.copy");
+  if (!button) return;
+  const text = button.dataset.json;
+  (navigator.clipboard ? navigator.clipboard.writeText(text)
+                       : Promise.reject(new Error("no clipboard")))
+    .then(() => { button.textContent = "copied"; })
+    .catch(() => { window.prompt("copy this:", text); });
+});
 
 // The recorder's whole row at that instant (record.state), grouped the
 // way a person reads a flight: where it was, how it was moving, what
@@ -188,6 +217,9 @@ function recordTable(record) {
       const value = record[key];
       if (key === "aircraft" && value && typeof value === "object") {
         for (const [k, v] of Object.entries(value)) pairs.push([k, num(v)]);
+      } else if (key === "intrinsic_matrix" || key === "projection_matrix") {
+        pairs.push([key === "intrinsic_matrix" ? "K (3x3)" : "P = K [R | t] (3x4)",
+                    matrixTable(key, value)]);
       } else if (Array.isArray(value)) {
         pairs.push([key, value.map(num).join(", ")]);
       } else {
@@ -211,7 +243,65 @@ function recordTable(record) {
       rows(rest.map(([k, v]) => [k, Array.isArray(v)
         ? v.map(num).join(", ") : num(v)])) + `</table></div>`;
   }
+  html += `<div class="group"><button class="copy" ` +
+          `data-json="${esc(JSON.stringify(record))}">copy this frame's record (JSON)</button></div>`;
   return html;
+}
+
+// The run, once: the frame every position is expressed in, the digests
+// that identify it, the scene, the software, the schema the manifest
+// was validated against, the camera's own block, and the verification
+// verdict -- read off the same manifest and verify.json the files carry,
+// so the page cannot say something the record does not.
+function runPanel(payload, camera, base, verify) {
+  const frame = payload.frame || {};
+  const scene = payload.scene || {};
+  const conventions = payload.label_conventions || {};
+  const profile = (camera.profile || {}).name || "ideal_pinhole";
+  const pairs = [
+    ["positions are in", `${esc(frame.crs || "?")} metres about ` +
+      `(${num(frame.origin_lat_deg)}, ${num(frame.origin_lon_deg)}) = ` +
+      `(${num(frame.origin_x_m)}, ${num(frame.origin_y_m)}); north, east, up`],
+    ["camera frame", esc(conventions.camera_frame || "x right, y down, z forward")],
+    ["projection", esc(conventions.projection_matrix || conventions.projection || "")],
+    ["manifest version", `${esc(payload.manifest_version)} &middot; ` +
+      `<a href="/schemas/capture_manifest.v${esc(payload.manifest_version)}.schema.json">` +
+      `JSON Schema</a>`],
+    ["spec digest", `<code>${esc(payload.spec_digest || "")}</code>`],
+    ["simulation digest", `<code>${esc(payload.simulation_digest || "")}</code>`],
+    ["telemetry digest", `<code>${esc(payload.output_digest || "")}</code>`],
+    ["seed", esc(payload.seed)],
+    ["scene", `${esc(scene.key || "flat")}` +
+      (scene.terrain_sha256 ? ` &middot; terrain sha256 <code>${esc(scene.terrain_sha256)}</code>` : "")],
+    ["software revision", `<code>${esc(payload.software_revision || "")}</code>`],
+    ["labels solved over", esc(payload.solve_source || "?")],
+    ["this camera", `${esc(camera.preset || "")} &middot; ` +
+      `${camera.inherits_roll ? "inherits roll" : "horizon-stable"} &middot; ` +
+      `${esc(camera.trigger || "")} trigger, ${esc(camera.capture_count)} frames` +
+      (camera.schedule_basis ? ` (${esc(camera.schedule_basis)})` : "") +
+      ` &middot; profile ${esc(profile)} &middot; pose track ` +
+      `<code>${esc((camera.pose_track_digest || "").slice(0, 16))}</code>`],
+  ];
+  if (payload.randomization) {
+    const r = payload.randomization;
+    pairs.push(["randomisation", `seed ${esc(r.seed)}, sun ${num(r.sun_elevation_deg)} deg ` +
+      `elevation / ${num(r.sun_azimuth_deg)} deg azimuth, fog ${esc(r.fog_density)} 1/m, ` +
+      `livery ${esc(r.livery)}`]);
+  }
+  if (verify && verify.checks) {
+    const failed = verify.checks.filter(c => c.status === "FAIL").map(c => c.name);
+    const notRun = verify.checks.filter(c => c.status === "NOT RUN").map(c => c.name);
+    const passed = verify.checks.length - failed.length - notRun.length;
+    pairs.push(["verification", `<b>${verify.ok === false || failed.length ? "FAILED" : "PASSED"}</b> ` +
+      `&middot; ${passed} passed, ${failed.length} failed, ${notRun.length} not run` +
+      (failed.length ? ` &middot; failed: ${esc(failed.join(", "))}` : "") +
+      (notRun.length ? ` &middot; not run: ${esc(notRun.join(", "))}` : "") +
+      ` &middot; <a href="${base}/verify.json">the full verdict</a>`]);
+  } else {
+    pairs.push(["verification", `not recorded for this run yet`]);
+  }
+  return `<div class="group" id="runpanel"><b>this run, this camera</b>` +
+         `<table>${rows(pairs)}</table></div>`;
 }
 
 function conditionsLine(conditions) {
@@ -272,6 +362,13 @@ async function load() {
     `<span class="badge">spec ${esc((payload.spec_digest || "").slice(0, 12))}</span>` +
     (camera.schedule_basis
       ? `<span class="badge">${esc(camera.schedule_basis)}</span>` : "");
+  let verify = null;
+  try {
+    const reply = await fetch(`${base}/verify.json`);
+    if (reply.ok) verify = await reply.json();
+  } catch (error) { /* the verdict is optional on the page */ }
+  document.getElementById("runpanel-holder").innerHTML =
+    runPanel(payload, camera, base, verify);
   document.getElementById("links").innerHTML =
     `<a href="${base}/cameras/${encodeURIComponent(cameraId)}/frames.zip">` +
     `<b>download every frame with its labels (zip)</b></a> &middot; ` +

@@ -393,6 +393,11 @@ CAMERA_VIEW_KEYS = (
     "output_digest", "solve_source", "seed", "aircraft", "scene",
     "frame", "landmarks", "software_revision", "conditions",
     "state_units",
+    # The airframe the labels describe, the conventions every matrix
+    # and label follows, the asset digests and the sampled look: what
+    # the frames page shows beside the pictures, so nothing a consumer
+    # needs is only in the whole-run file.
+    "airframe", "label_conventions", "assets", "randomization",
 )
 
 

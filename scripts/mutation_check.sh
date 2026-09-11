@@ -1829,6 +1829,24 @@ mutate core/capture/manifest.py \
     "the manifest's P is the record's own projection" \
     tests/test_capture_schema.py || failures=$((failures+1))
 
+# -- the matrices and the run's records on the web page --
+
+mutate webapp/server.py \
+    '    if not _SCHEMA_NAME.match(name):
+        return JSONResponse({"error": "no such schema"}, status_code=404)' \
+    '    if False:  # MUTATED: any name under docs/schemas is served
+        return JSONResponse({"error": "no such schema"}, status_code=404)' \
+    "only a schema file's own name is served" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
+mutate webapp/capture.py \
+    '    "airframe", "label_conventions", "assets", "randomization",
+)' \
+    '    "assets", "randomization",  # MUTATED: no airframe, no conventions
+)' \
+    "the per-camera view carries the airframe and the conventions" \
+    tests/test_webapp_capture.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
