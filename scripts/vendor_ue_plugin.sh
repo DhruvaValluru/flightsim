@@ -22,8 +22,10 @@
 #   2. It did not notice that the plugin's Build.cs stages that data through a
 #      Windows path literal. See the patch below.
 
-# The UE half is macOS-only for now: every render gotcha was measured on
-# Metal/macOS. Off-mac, refuse BY NAME with a pointer to the headless path.
+# This is the macOS/Linux shell wrapper. The maintained render platform is
+# WINDOWS (the .ps1 twin of this script); a Mac builds the same sources but
+# is not the tested path, and Linux has no engine half at all -- so off a
+# Mac this refuses BY NAME with a pointer to the headless path.
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "REFUSED ue.platform: rendered clips currently require macOS."
   echo "The compiler, headless physics, telemetry and the webapp run on"

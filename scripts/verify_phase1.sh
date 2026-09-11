@@ -2,8 +2,9 @@
 # Camera Phase 1, one command: capture, verify, and run the camera tests.
 #
 # Everything here runs on macOS, Windows (scripts\verify_phase1.ps1) and
-# Linux. Rendered photographic frames are macOS-only and are REFUSED BY
-# NAME off it -- that is the designed outcome, not a failure. The
+# Linux. Rendered photographic frames need the Windows host (the render
+# platform) and are REFUSED BY NAME elsewhere -- that is the designed
+# outcome, not a failure. The
 # manifests, the geometry previews and every check below are complete on
 # any platform.
 #
