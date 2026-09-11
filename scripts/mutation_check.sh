@@ -1203,7 +1203,7 @@ mutate webapp/server.py \
     "an added view gets an id no other camera has" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
-mutate webapp/server.py \
+mutate webapp/capture.py \
     '    frames = [f for f in manifest.get("frames", [])
               if str(f.get("camera_id")) == camera_id]' \
     '    frames = list(manifest.get("frames", []))  # MUTATED: every camera' \
@@ -1374,8 +1374,8 @@ mutate core/capture/manifest.py \
     tests/test_camera_manifest.py || failures=$((failures+1))
 
 mutate core/capture/manifest.py \
-    'SUPPORTED_MANIFEST_VERSIONS = (3, 4)' \
-    'SUPPORTED_MANIFEST_VERSIONS = (4,)  # MUTATED: every earlier run refused' \
+    'SUPPORTED_MANIFEST_VERSIONS = (3, 4, 5)' \
+    'SUPPORTED_MANIFEST_VERSIONS = (4, 5)  # MUTATED: every earlier run refused' \
     "a version 3 manifest still reads" \
     tests/test_camera_manifest.py || failures=$((failures+1))
 
