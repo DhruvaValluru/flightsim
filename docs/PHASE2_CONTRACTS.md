@@ -1043,6 +1043,112 @@ escalates in catalogue language. It never writes `capture_manifest.json`
 `write_verification`), and never alters `solve_source`. A scripted rogue
 agent in the tests tries each violation and is denied.
 
+### 7.1 As landed (package H) -- the tool layer as built, and the shape decisions §7 left open
+
+Stated here so the page (I) and any runtime call what exists.
+`core/agent/` (`tools.py`, `policy.py`, `controller.py`, `trace.py`,
+`mcp_server.py`), `flightsim/agent.py`, `scripts/agent_commands.py` ->
+`docs/COMMANDS.md`, `tests/test_agent.py`. Nothing outside `core/agent`
+was changed except `tests/test_messages.py` (the four `authority.*`
+names and G's two campaign names left `ALLOWED_FUTURE` because the
+code now emits them).
+
+* **Ten tools, not nine.** `validate(spec) -> {ok, spec_digest,
+  violations, validation_token}` is the one that MINTS the token; the
+  nine above are as listed with these concrete signatures:
+  `compile(prompt, answers?) -> {spec, spec_digest, questions,
+  refusals, tier, notes}`; `plan_campaign(spec, words="", images=100,
+  seed?, format="coco", policy?, render=False, out?) -> {campaign_id,
+  campaign_dir, spec_digest, policy, estimate, refusals}`;
+  `sample(campaign_id, n=1, start?) -> {cases, refused_slots,
+  next_index}`; `run(case_id, validation_token) -> {run_id, status,
+  frames, yield, verified, drawn, refusals, reason, run_dir}`;
+  `render(run_id, validation_token) -> {run_id, frames, drawn,
+  frames_drawn, note}`; `verify(run_id) -> {checks, verdict, ok,
+  passed, failed, not_run, failures}`; `export(campaign_id, format,
+  validation_token) -> {dataset_path, card, runs, labels_only}`;
+  `inspect(run_id, frame?) -> {overlay_png, records, note}`;
+  `report(campaign_id) -> {yield, coverage, refusals, state, reason,
+  realised_fields, report_path}`. Schemas are drawn from the
+  signatures (`tools.tool_schema`, no pydantic) and `docs/COMMANDS.md`
+  is generated from them (`scripts/agent_commands.py --check` is a
+  test).
+* **The key `refused` is a refusal.** Everywhere in the tool layer a
+  dict with `refused: <name>` (plus `sentence`, `hint`, `message`,
+  `detail`) is a denial or a library refusal; `sample`'s refused SLOTS
+  are therefore `refused_slots` (the one departure from §7's
+  `{cases, refused}`), each with its `refusals`, `reason` and the
+  catalogue `sentence` rendered with the draw counts.
+* **`run` takes a case id or a campaign id.** A case id from `sample`
+  runs ONE slot through `core.campaign.workers.run_index` and appends
+  the same two rows the campaign's single-worker round appends
+  (`running`, then the result); a slot already `verified` is not run
+  again (idempotent on the case id). A campaign id runs the campaign
+  to its target or a named end through `Campaign.run` -- the only
+  place `done` is written; a named end comes back as `{status:
+  "failed", refusals: [name], sentence}` (an outcome, not a denial).
+  The campaign's STATE is not touched by a per-slot run; the
+  controller always finishes with the campaign-id form.
+* **`render` reports; it does not launch an engine.** Pixels come from
+  the capture CLI's own `--render` inside `run` when the campaign was
+  planned with `render=True`; `render` reads the manifest and says
+  `drawn: false` with the reason when there are none. `verify` is
+  read-only (`verify_run(run_dir).to_dict()`; `verification.json` is
+  written only by the run stage through `case_row`). `inspect` draws
+  the overlay only where a frame file exists.
+* **The token** is `sha256(spec_digest + "validated")` (HMAC-free by
+  contract), minted by `validate` only when the spec carries no
+  refusal -- the validator's violations AND a policy defect found by
+  probing slot 0 exactly as `Campaign.plan` does (`randomization.
+  infeasible` is not a defect). `policy.expected_token` recomputes it
+  independently; `run`/`render`/`export` bind to the CAMPAIGN's
+  compiled digest (a case is a sampled derivative of it).
+* **`authority.stated_field` compares provenance, flattened.** The
+  reference is the spec `compile` returned (`policy.flatten`: every
+  `{value, source}` mapping by dotted path, `cameras[0].preset`). A
+  spec input to `validate`/`plan_campaign` is denied when a `user` /
+  `inferred` / `sampled` field moved or was dropped, when a field
+  newly claims one of those sources ("stated on the person's
+  behalf"), or when a system-chosen field changed value without a
+  recorded edit (source `derived` or `model` with a non-empty `from`;
+  a `default` that changed value is a rewrite). After a per-slot
+  `run` the case's `spec.yaml` is compared the same way with
+  `sampled` allowed as new. Policy words / an explicit `policy` are
+  applied as a PLAN edit (`randomization.policy` derived, `from`
+  quoting the words) only to a spec that states no policy; otherwise
+  `authority.stated_field`.
+* **`authority.refusal_is_not_a_run`** is keyed on the digest: every
+  refusal `compile`, `validate` or `plan_campaign` saw is remembered
+  with its rendered sentence, and `run` of that digest is denied with
+  the refusal's own sentence as the message (the catalogue sentence of
+  the rule is the `sentence`). A forged token does not help: this check
+  runs before the token check.
+* **`authority.budget`**: `Budget(max_calls=60, max_resamples_per_slot
+  =3, max_wall_seconds=1800)`; every ATTEMPTED call counts (a denied
+  call too, so a caller denied forever is stopped); a re-sample is a
+  `sample` naming the same `start`; the clock is injectable.
+* **`trace.jsonl`** is `{t, tool, input, output, reason, policy}` as §7
+  says, with a spec input recorded as `{"spec_digest": ...}` and the
+  controller's own decisions as lines whose `tool` is `"controller"`.
+  `policy` is `{ok: true}` or `{ok: false, rule, sentence}`.
+* **The controller is deterministic.** The LLM tier (`Tools(tier=
+  "llm")`, `--tier llm`) interprets the PROMPT into a spec and falls
+  back to the regex compiler, recorded in `tier`; it never chooses
+  tools. A clarifying question is escalated as a question with the
+  `--answer id=<choice>` form, never answered on the person's behalf.
+  Escalations quote the catalogue sentence and the rule name.
+* **Not done here.** The web app's compile-time planner sequence
+  (`webapp/runs.py`: `plan_scene_setting` ... `plan_camera_defaults`)
+  is NOT applied by `compile` and was not moved to core -- it lives in
+  the web app's module and the move edits files this package does not
+  own; the campaign path (compiler -> `flightsim.capture`) is what runs,
+  as in G. No agent runtime (Pydantic AI / Claude Agent SDK) and no
+  runtime pre-tool hook: the limits live in the tools, the first of
+  the two places §7.2 asks for. `core/agent/mcp_server.py` imports
+  `mcp` only inside `serve()`; without the package it prints a sentence
+  and exits 2 (not a catalogued refusal name: it is not a pipeline
+  refusal).
+
 ---
 
 ## 8. The message catalogue and the interface (package I)

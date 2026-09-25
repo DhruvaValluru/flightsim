@@ -2649,6 +2649,61 @@ mutate webapp/generate.py \
     "the guided page reports progress from the ledger" \
     tests/test_webapp_generate.py || failures=$((failures+1))
 
+# Phase 2 package H (contracts §7): the agent's authority. One guard per
+# rule, each the plan's own rubric line: a stated field is never moved
+# (mutate the comparison away and the rogue's doctored spec validates);
+# run/render/export need the token validate() minted for THIS digest
+# (mutate the match away and a forged or foreign token runs a case); a
+# spec carrying a refusal is not run (mutate the check away and the
+# unflyable campaign runs on a forged token); the call budget ends the
+# loop (mutate it away and the fourth call goes through); the token is
+# minted only for a spec with no refusal (mutate and the refused spec
+# gets one); every denial is written to the trace (mutate the write
+# away and the rogue's denials vanish from trace.jsonl).
+mutate core/agent/policy.py \
+    '        moves = stated_moves(self.reference, candidate, allow_new=allow_new)
+        if moves:' \
+    '        moves = stated_moves(self.reference, candidate, allow_new=allow_new)
+        if False:  # MUTATED: a stated field may move' \
+    "authority.stated_field: a user/inferred/sampled field is never moved by a tool input" \
+    tests/test_agent.py || failures=$((failures+1))
+
+mutate core/agent/policy.py \
+    '        if spec_digest is None or token != expected_token(spec_digest):' \
+    '        if False:  # MUTATED: any token matches' \
+    "authority.validation_token: run/render/export need the token minted for this digest" \
+    tests/test_agent.py || failures=$((failures+1))
+
+mutate core/agent/policy.py \
+    '        kept = self.refused.get(str(spec_digest)) if spec_digest else None
+        if kept:' \
+    '        kept = self.refused.get(str(spec_digest)) if spec_digest else None
+        if False:  # MUTATED: a refused spec runs' \
+    "authority.refusal_is_not_a_run: a spec carrying a refusal is denied for run" \
+    tests/test_agent.py || failures=$((failures+1))
+
+mutate core/agent/policy.py \
+    '        if self.calls > int(self.budget.max_calls):' \
+    '        if False:  # MUTATED: no call budget' \
+    "authority.budget: the tool-call allowance ends the loop" \
+    tests/test_agent.py || failures=$((failures+1))
+
+mutate core/agent/tools.py \
+    '        if not refusals:
+            token = mint_token(digest)' \
+    '        if True:  # MUTATED: a refused spec is given a token
+            token = mint_token(digest)' \
+    "the validation token is minted only for a spec with no refusal" \
+    tests/test_agent.py || failures=$((failures+1))
+
+mutate core/agent/tools.py \
+    '        output = denial.as_output()
+        self.trace.record(tool, kwargs, output, reason,' \
+    '        output = denial.as_output()
+        if False: self.trace.record(tool, kwargs, output, reason,  # MUTATED: a denial leaves no trace' \
+    "every policy denial is a line of trace.jsonl" \
+    tests/test_agent.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

@@ -86,9 +86,8 @@ ALLOWED_FUTURE: Dict[str, str] = {
     # now (Check.failure and the FAIL_* constants in core/capture/verify.py).
     # package F (the randomisation policy) landed: randomization.vocabulary,
     # randomization.location and randomization.infeasible are emitted now.
-    # package G: campaigns
-    "storage.budget_exceeded": "G: disk budget",
-    "campaign.target_unreachable": "G: images_target unreachable",
+    # package G (campaigns) landed: storage.budget_exceeded and
+    # campaign.target_unreachable are emitted now (core/campaign/campaign.py).
     "progress.campaign.planned": "G: campaign.json state",
     "progress.campaign.running": "G: campaign.json state",
     "progress.campaign.paused": "G: campaign.json state",
@@ -101,11 +100,8 @@ ALLOWED_FUTURE: Dict[str, str] = {
     "progress.case.rendered": "G: ledger status",
     "progress.case.verified": "G: ledger status",
     "progress.case.failed": "G: ledger status",
-    # package H: authority
-    "authority.stated_field": "H: core/agent/policy.py",
-    "authority.validation_token": "H: core/agent/policy.py",
-    "authority.refusal_is_not_a_run": "H: core/agent/policy.py",
-    "authority.budget": "H: core/agent/policy.py",
+    # package H (the agent's authority) landed: the four authority.* names
+    # are emitted now (core/agent/policy.py Denial(constraint=...)).
     # package I part 2: the page
     "progress.page.ask": "I: generate.html state",
     "progress.page.clarify": "I: generate.html state",
