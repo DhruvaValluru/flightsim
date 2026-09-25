@@ -274,6 +274,15 @@ storage.budget_exceeded:
   hint: "Raise the budget, or ask for fewer images."
 campaign.target_unreachable:
   sentence: "The campaign cannot reach the requested number of images with the variation asked for."
+campaign.arguments:
+  sentence: "The campaign cannot be set up as asked."
+  hint: "Check the number of images, the seed, the worker count, the output folder and the format."
+campaign.state:
+  sentence: "The campaign is not in a state where that action is possible."
+  hint: "A campaign starts once, pauses while running, resumes while paused, and can be cancelled until it is done."
+campaign.duplicate_case:
+  sentence: "The same case was recorded twice in the campaign's ledger, so it was not run again."
+  hint: "Resume the campaign; the duplicate row is kept as evidence and the case is counted once."
 
 # -- the assistant's authority (contracts §7, package H) --------------------
 

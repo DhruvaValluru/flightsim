@@ -60,6 +60,11 @@ PATTERNS: Tuple[Tuple[str, "re.Pattern"], ...] = (
     # refusal a failed check carries by name into verification.json.
     ("failure=", re.compile(r'\bfailure\s*=\s*f?"(' + NAME + r')"')),
     ('FAIL_<X> = "<name>"', re.compile(r'\bFAIL_[A-Z_]+\s*=\s*"(' + NAME + r')"')),
+    # A campaign ledger row's refusal list (contracts §6.3): the names a
+    # worker records for a slot it did not run, rendered by the guided
+    # page from this catalogue.
+    ('"refusals": ["<name>"', re.compile(
+        r'"refusals"\s*:\s*\[\s*"([a-z_]+\.[a-z_]+)"')),
 )
 
 #: Names the contracts assign to exceptions that carry no constraint
