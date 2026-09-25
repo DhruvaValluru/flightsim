@@ -566,6 +566,76 @@ fraction of policy bins holding ≥ k frames. Source of truth per run: the
 manifest's `randomization` block (already copied into every manifest and
 sidecar, manifest.py L545-548) plus `conditions`.
 
+### 5.6 As landed (package F) -- the shape decisions this page left open, and three departures
+
+Stated here so the campaign (G), the tools (H), the page (I) and the
+Look lane implement against what exists.
+
+* **`Source.SAMPLED` joins `core/scenario/fields.py`** (not `spec.py`:
+  the enum lives in fields.py, §5.1 was right). It is absent from all
+  four plannable rules and from `fields.PLANNABLE_SOURCES` by
+  construction (they list members, not exclusions). **Only policy draws
+  are `sampled`**; the seven Phase 10 leaves stay `derived` with their
+  sha256 streams, so `examples/randomized.yaml` samples to the same
+  bytes and digest (pinned).
+* **The block's spec-8 leaves are per-field absent-canonical**:
+  `visibility_km`, `cloud_cover`, `cloud_base_m`, `precipitation`,
+  `hour_local`, `location`, `traffic_count` and the draw record
+  `policy_draws` are optional on read and omitted from `to_dict()` while
+  at their placeholder, so a Phase 10 block keeps its 20 keys, its bytes
+  and its digest. `policy` stays on `ScenarioSpec.randomization_policy`
+  as stage 1 put it (file shape unchanged).
+* **Leaves** (`randomization.POLICY_LEAVES`, the one table the LLM schema
+  is generated from and asserted against): the §5.2 list plus
+  `wind_direction_deg`; `cloud_top_m` is NOT a leaf (derived in the look
+  table as base + a stated thickness; Open-Meteo serves no base or top
+  and `era5.py` was not extended -- the wind request does not return
+  cloud layers, and adding variables to it is an unmeasured network
+  change). `hour_local` admits `choice` over named windows (`dawn 5.5-8`,
+  `morning`, `midday`, `afternoon`, `dusk 17-20`, local mean time by
+  longitude) -- how "dawn and dusk only" is expressed in the nine forms.
+  `location` choices are bake keys OR range names (`LOCATION_RANGES`:
+  alps, sierra_nevada, himalayas, colorado_plateau, great_plains, japan,
+  rockies, cascades); a range with no bake refuses `randomization.location`.
+  `traffic_count` is recorded on the block; it does NOT instantiate
+  `traffic[]` entries (an entry needs an airframe, B's shape).
+* **Seeds**: `SeedSequence(entropy=[draw_index, campaign_seed],
+  spawn_key=(attempt, stable_hash(leaf)))`, PCG64, one stream per leaf
+  and attempt; the campaign seed is the block's own seed; the recorded
+  `seed` detail is the folded integer (1..MAX_SEED).
+* **The refusal record** is `{draw_index, attempt, refusal_name, message,
+  sampled_values}` (two keys more than §5.2), kept on the block's
+  `policy_draws` field (`{draw_index, attempts, max_attempts, refused,
+  seed_derivation, campaign_seed}`) and in the card; an exhausted slot's
+  `RandomizationError("randomization.infeasible")` carries the same list
+  in `.detail["refusals"]` and the spec is left exactly as given.
+* **Stated fields**: a top-level leaf over a user/inferred-stated target
+  refuses `randomization.policy` by name (a draw never moves a stated
+  value); inside the `cameras` group a stated camera field is skipped
+  with a note, the Phase 10 jitter's rule, so a named view keeps its
+  view while its lens still varies. A drawn `location` moves
+  latitude/longitude/terrain_elevation; a DEFAULTED altitude keeps its
+  height above the ground the draw moved (a recorded plan).
+* **The vocabulary refusal** is raised by the sampler from a record the
+  compiler writes (`randomization_policy.detail["unmapped"]`, the quoted
+  sentences), not by `compile_prompt` itself: that is how it reaches the
+  page's verdict, `/run`, the capture command and a batch through the
+  existing wrappers without a new surface. The LLM tier's parser refuses
+  leaf shapes by name (`compile.rejected`); an EMPTY model block falls
+  back to the deterministic vocabulary (the control).
+* **The look block lands at `card.randomization.look`**, not `card.look`:
+  `card.py` is not F's file and the engine already reads the card's
+  `randomization` object (`ReadCard`, livery). Lifting it to `card.look`
+  is one line in `write_run_card` for the Look lane. The card block also
+  gains `policy` (the requested distribution, for §5.5) beside the
+  per-leaf entries and `policy_draws`.
+* **`realised_distribution(runs, policy=None, k=1, bins=8)`** reads each
+  run's `capture_manifest.json` (`randomization` + `frames`); numeric
+  leaves bin over the REQUESTED support (clip / uniform bounds / [0,1]
+  for beta) else the observed range; `coverage` per leaf and overall
+  (mean over leaves with a requested distribution). The picture is
+  `python -m core.scene.realised_plot`.
+
 ---
 
 ## 6. Campaign files (package G) and export layouts (package E)

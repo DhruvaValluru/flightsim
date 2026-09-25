@@ -2229,6 +2229,72 @@ r.Substrate=True' \
     "Substrate stays off until a material is authored for it" \
     tests/test_platform.py || failures=$((failures+1))
 
+# -- Phase 2, package F: the randomisation policy (contracts §5) --------------
+# Each guard names the safeguard it removes; each test below fails
+# without it (confirmed by hand on landing, see docs/PHASE2_REPORT.md).
+
+mutate core/scenario/randomization.py \
+    '            # A refused draw is COUNTED, then re-drawn (never dropped).
+            refused.append({"draw_index": int(draw_index), "attempt": attempt,' \
+    '            # MUTATED: the refused draw is forgotten
+            _forgotten = ({"draw_index": int(draw_index), "attempt": attempt,' \
+    "a refused policy draw is counted, not quietly discarded" \
+    tests/test_randomization_policy.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '    raise RandomizationError(
+        "randomization.infeasible",' \
+    '    spec.__dict__.update(candidate.__dict__)  # MUTATED: the last refused draw ships
+    return
+    raise RandomizationError(
+        "randomization.infeasible",' \
+    "an exhausted slot refuses randomization.infeasible instead of shipping a refused draw" \
+    tests/test_randomization_policy.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    'PLANNABLE = (Source.DEFAULT, Source.DERIVED, Source.MODEL)' \
+    'PLANNABLE = (Source.DEFAULT, Source.DERIVED, Source.MODEL, Source.SAMPLED)  # MUTATED' \
+    "a sampled field is never re-planned" \
+    tests/test_randomization_policy.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '    if policy_q is not None and policy_q.detail.get("unmapped"):' \
+    '    if False:  # MUTATED: an unmapped variation is silently defaulted' \
+    "an unexpressible variation refuses randomization.vocabulary by name" \
+    tests/test_randomization_prompts.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '            names = _new_violations(candidate, baseline, check_feasibility)' \
+    '            names = []  # MUTATED: draws skip validate()' \
+    "every policy draw goes through validate()" \
+    tests/test_randomization_policy.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '        entropy=[int(draw_index), int(campaign_seed)],' \
+    '        entropy=[int(campaign_seed)],  # MUTATED: every draw index is the same draw' \
+    "draws are seeded per (draw index, campaign seed)" \
+    tests/test_randomization_policy.py || failures=$((failures+1))
+
+mutate core/scene/weather_visuals.py \
+    '    return KOSCHMIEDER_CONSTANT / (1000.0 * v)' \
+    '    return KOSCHMIEDER_CONSTANT / v  # MUTATED: per km written as per metre' \
+    "the fog extinction is Koschmieder in the engine's per-metre unit" \
+    tests/test_weather_visuals.py || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '    if re.search(VARIATION_INTENT, consumed, flags=re.IGNORECASE):' \
+    '    if False:  # MUTATED: leftover variation words are ignored' \
+    "the compiler records a variation the vocabulary lacks" \
+    tests/test_randomization_prompts.py || failures=$((failures+1))
+
+mutate core/nl/llm_compiler.py \
+    '        problems = policy_problems({name: value})
+        if problems:' \
+    '        problems = []  # MUTATED: any leaf shape is accepted
+        if problems:' \
+    "the LLM tier refuses a policy leaf of an undocumented form" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

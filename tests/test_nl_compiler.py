@@ -149,3 +149,34 @@ def test_camera_defaults_follow_the_airframe():
 
     assert float(s.cameras[0].offset_forward_m.value) == \
         CHASE_OFFSETS["c172p"][0]
+
+
+# -- randomisation phrases (spec 8, package F) ----------------------------
+
+def test_variation_phrases_write_an_attributed_inferred_policy():
+    s = compile_prompt("fly the 747 at 3000 m in varied weather")
+    policy = s.randomization_policy
+    assert policy.source is Source.INFERRED
+    assert policy.frm == "varied weather"
+    assert set(policy.value) == {"cloud_cover", "visibility_km", "precipitation"}
+    assert policy.detail["attribution"] == {"cloud_cover": "varied weather",
+                                            "visibility_km": "varied weather",
+                                            "precipitation": "varied weather"}
+    assert s.randomization.enabled.value is True
+    assert s.randomization.enabled.source is Source.INFERRED
+    assert "varied weather" in s.randomization.enabled.frm
+    # The prompt's other words compile exactly as before.
+    assert s.altitude.value == 3000.0 and s.altitude.source is Source.USER
+
+
+def test_an_unmapped_variation_is_recorded_for_the_by_name_refusal_not_a_note():
+    from core.scenario.randomization import RandomizationError, sample_randomization
+
+    s = compile_prompt("fly the 747 at 3000 m. vary the moon phase")
+    assert s.randomization_policy.detail["unmapped"] == ["vary the moon phase"]
+    assert not s.randomization.is_enabled()
+    with pytest.raises(RandomizationError) as caught:
+        sample_randomization(s)
+    assert caught.value.constraint == "randomization.vocabulary"
+    assert '"vary the moon phase"' in caught.value.message
+    assert not any("moon" in n for n in s.notes)

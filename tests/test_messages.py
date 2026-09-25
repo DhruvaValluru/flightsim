@@ -94,10 +94,8 @@ ALLOWED_FUTURE: Dict[str, str] = {
     "check.visibility_vs_scene": "D: new check",
     "check.identity_stable": "D: new check",
     "check.applied_intrinsics": "D: new check",
-    # package F: the randomisation policy
-    "randomization.vocabulary": "F: prompt vocabulary miss",
-    "randomization.location": "F: no bake for the named place",
-    "randomization.infeasible": "F: too many refused draws",
+    # package F (the randomisation policy) landed: randomization.vocabulary,
+    # randomization.location and randomization.infeasible are emitted now.
     # package G: campaigns
     "storage.budget_exceeded": "G: disk budget",
     "campaign.target_unreachable": "G: images_target unreachable",

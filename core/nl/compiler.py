@@ -20,10 +20,18 @@ than silently dropped. A parser can only request what its vocabulary can
 express, and the previous build's vocabulary was cinematic, which is why
 "flyby @ mountains" produced a camera move instead of an experiment (§8). This
 vocabulary is conditions-first by construction.
+
+Randomisation phrases (spec 8, contracts §5.3) are the one exception to
+"reported in notes": a sentence that asks to VARY something the
+vocabulary cannot vary is recorded on the policy (``unmapped``) and the
+sampler refuses it by name, ``randomization.vocabulary``, quoting the
+sentence -- on every surface that samples (the page's verdict, /run, the
+capture command, a batch). ``RANDOMIZATION_WORDS`` is the table.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -567,6 +575,222 @@ def rescale_moves(spec, old_duration_s: float, new_duration_s: float) -> int:
     return moved
 
 
+# -- randomisation (spec 8, package F; contracts §5.3) ---------------------
+
+#: The documented policy each phrase family writes (contracts §5.2
+#: numbers). Keyed by family; RANDOMIZATION_WORDS maps phrases to
+#: families. Every leaf here is one core.scenario.randomization
+#: POLICY_LEAVES entry (asserted at import).
+RANDOMIZATION_FAMILIES: Dict[str, Dict[str, Any]] = {
+    "weather": {
+        "cloud_cover": {"beta": [2, 2]},
+        "visibility_km": {"lognormal": {"median": 25, "sigma": 0.6},
+                          "clip": [1, 80]},
+        "precipitation": {"choice": ["none", "rain", "snow"],
+                          "weights": [7, 2, 1], "gated_by": "cloud_cover > 0.6"},
+    },
+    "times_of_day": {
+        "hour_local": {"uniform": [5.5, 20.0]},
+    },
+    "dawn_dusk": {
+        "hour_local": {"choice": ["dawn", "dusk"]},
+    },
+    "lighting": {
+        "hour_local": {"uniform": [5.5, 20.0]},
+        "weather_date": {"uniform_dates": ["2024-01-01", "2024-12-31"]},
+    },
+    "traffic": {
+        "traffic_count": {"poisson": 0.7, "max": 2},
+    },
+    "viewpoints": {
+        "cameras": {
+            "preset": {"choice": ["chase", "tower", "wingman", "ground"]},
+            "focal_length_mm": {"loguniform": [24, 400]},
+            "offset_jitter_m": {"normal": {"sigma": 5}},
+        },
+    },
+}
+
+#: Words that mean "vary": a sentence carrying one that no family below
+#: matched is refused by name. "different" and "mixed" alone are NOT
+#: intent words (too common in ordinary prompts); they count only inside
+#: the phrases below.
+VARIATION_INTENT = (r"\b(?:vary|varied|varying|variety|random|randomly|"
+                    r"randomi[sz]ed?|assorted|various)\b")
+_VARY = (r"(?:varied|varying|variable|random|randomi[sz]ed|mixed|different|"
+         r"assorted|various|a (?:range|variety|mix) of)")
+
+#: Phrase (regex over the lowercased prompt) -> family. Longer phrases
+#: first; every match is removed from the text before the intent scan.
+#: Location ranges are their own family: "across the Rockies" -> a
+#: location choice restricted to that range (refused by name by the
+#: sampler until a bake in the range exists).
+RANDOMIZATION_WORDS: Tuple[Tuple[str, str], ...] = (
+    (rf"{_VARY} weather(?: conditions)?", "weather"),
+    (r"weather (?:that )?varies", "weather"),
+    (r"dawn (?:and|or) dusk(?: only)?", "dawn_dusk"),
+    (r"(?:at )?sunrise (?:and|or) sunset(?: only)?", "dawn_dusk"),
+    (rf"{_VARY} light(?:ing)?(?: conditions)?", "lighting"),
+    (r"light(?:ing)? (?:that )?varies", "lighting"),
+    (rf"{_VARY} times? of (?:the )?day", "times_of_day"),
+    (rf"{_VARY} hours(?: of the day)?", "times_of_day"),
+    (r"(?:at )?all hours(?: of the day)?", "times_of_day"),
+    (r"any time of (?:the )?day", "times_of_day"),
+    (r"throughout the day", "times_of_day"),
+    (rf"{_VARY} (?:viewpoints?|views?|perspectives?|angles|"
+     rf"camera (?:angles?|positions?|placements?|views?))", "viewpoints"),
+    (rf"{_VARY} traffic", "traffic"),
+    (r"(?:other|background|some|with) traffic", "traffic"),
+)
+#: Range words -> the LOCATION_RANGES key (core.scenario.randomization).
+LOCATION_RANGE_WORDS: Tuple[Tuple[str, str], ...] = (
+    ("rocky mountains", "rockies"), ("rockies", "rockies"),
+    ("swiss alps", "alps"), ("the alps", "alps"),
+    ("cascades", "cascades"), ("cascade range", "cascades"),
+    ("sierra nevada", "sierra_nevada"), ("the sierras", "sierra_nevada"),
+    ("himalayas", "himalayas"), ("himalaya", "himalayas"),
+    ("colorado plateau", "colorado_plateau"),
+    ("great plains", "great_plains"),
+)
+_RANGE_PHRASE = r"(?:across|over|above|through|around|along) (?:the )?({words})"
+
+#: What each family's leaves need to be UNSTATED for the family to
+#: apply: a leaf whose target the prompt already states is dropped with
+#: a note, never sampled over a stated value.
+_FAMILY_TARGETS = {
+    "weather_date": ("weather_date",),
+    "hour_local": (),
+    "location": ("latitude", "longitude"),
+}
+
+
+def _sentences(prompt: str) -> List[str]:
+    return [s.strip() for s in re.split(r"[.;!?\n]+", prompt) if s.strip()]
+
+
+def _randomization(text: str, prompt: str, spec) -> Tuple[Dict[str, Any],
+                                                          Dict[str, str],
+                                                          List[str], List[str]]:
+    """(policy, attribution, unmapped sentences, notes) for the prompt.
+
+    Deterministic: every family matched writes its documented leaves,
+    attributed to the quoted phrase (``attribution[leaf] = phrase``); a
+    sentence with variation intent and no family is returned unmapped
+    (the sampler refuses it by name). A leaf whose target field the
+    prompt already states is dropped with a note.
+    """
+    policy: Dict[str, Any] = {}
+    attribution: Dict[str, str] = {}
+    notes: List[str] = []
+    consumed = text
+    matched: List[Tuple[int, str, str]] = []
+    for pattern, family in RANDOMIZATION_WORDS:
+        for m in re.finditer(pattern, consumed, flags=re.IGNORECASE):
+            matched.append((m.start(), m.group(0).strip(), family))
+        consumed = re.sub(pattern, " ", consumed, flags=re.IGNORECASE)
+    words = "|".join(re.escape(w) for w, _ in LOCATION_RANGE_WORDS)
+    for m in re.finditer(_RANGE_PHRASE.format(words=words), consumed,
+                         flags=re.IGNORECASE):
+        key = dict(LOCATION_RANGE_WORDS)[m.group(1).lower()]
+        matched.append((m.start(), m.group(0).strip(), f"location:{key}"))
+    consumed = re.sub(_RANGE_PHRASE.format(words=words), " ", consumed,
+                      flags=re.IGNORECASE)
+    matched.sort()
+    for _, phrase, family in matched:
+        if family.startswith("location:"):
+            leaves: Dict[str, Any] = {
+                "location": {"choice": [family.split(":", 1)[1]]}}
+        else:
+            leaves = RANDOMIZATION_FAMILIES[family]
+        for leaf, distribution in leaves.items():
+            stated = [f for f in _FAMILY_TARGETS.get(leaf, ())
+                      if getattr(spec, f).source in ("user", "inferred")]
+            if stated:
+                notes.append(
+                    f"randomization: {phrase!r} would vary {leaf}, but "
+                    f"{', '.join(stated)} is stated in the prompt; not varied")
+                continue
+            if leaf in policy and policy[leaf] != distribution:
+                notes.append(
+                    f"randomization: {phrase!r} names {leaf} a second way; "
+                    f"the first phrase ({attribution[leaf]!r}) stands")
+                continue
+            policy[leaf] = json.loads(json.dumps(distribution))
+            attribution.setdefault(leaf, phrase)
+    unmapped: List[str] = []
+    if re.search(VARIATION_INTENT, consumed, flags=re.IGNORECASE):
+        # Quote the ORIGINAL sentence(s) carrying the leftover intent.
+        leftover = [s for s in _sentences(consumed)
+                    if re.search(VARIATION_INTENT, s, flags=re.IGNORECASE)]
+        for sentence in _sentences(prompt):
+            probe = sentence.lower()
+            for pattern, _ in RANDOMIZATION_WORDS:
+                probe = re.sub(pattern, " ", probe, flags=re.IGNORECASE)
+            probe = re.sub(_RANGE_PHRASE.format(words=words), " ", probe,
+                           flags=re.IGNORECASE)
+            if re.search(VARIATION_INTENT, probe, flags=re.IGNORECASE):
+                unmapped.append(sentence)
+        if not unmapped:
+            unmapped = leftover
+    return policy, attribution, unmapped, notes
+
+
+def apply_randomization_phrases(spec, prompt: str) -> None:
+    """Write the prompt's randomisation phrases onto ``spec``: the
+    policy (inferred, attributed per leaf), the block switched on by
+    the first phrase, one default camera when viewpoints are to vary
+    and none was named, and the unmapped sentences the sampler refuses
+    by name. A prompt with no variation language changes nothing."""
+    from ..scenario.randomization import enable_for_policy
+
+    text = " ".join(prompt.lower().split())
+    policy, attribution, unmapped, notes = _randomization(text, prompt, spec)
+    spec.notes.extend(notes)
+    if not policy and not unmapped:
+        return
+    phrases = list(dict.fromkeys(attribution.values()))
+    detail: Dict[str, Any] = {"attribution": dict(attribution)}
+    if unmapped:
+        detail["unmapped"] = list(unmapped)
+    spec.randomization_policy = Quantity.inferred(
+        policy, frm="; ".join(phrases) if phrases else "variation asked for "
+                                                        "in words the "
+                                                        "vocabulary lacks",
+        **detail)
+    if policy:
+        enable_for_policy(spec, frm=f"{phrases[0]}: the randomisation "
+                                    f"block is on")
+    if "cameras" in policy and not spec.cameras:
+        from ..scenario.camera import CameraSpec, plan_full_capture
+
+        camera = CameraSpec.defaulted(
+            camera_id="chase", preset="chase", aircraft=str(spec.aircraft.value),
+            terrain_elevation_m=float(spec.terrain_elevation.value),
+            frm=f"{attribution['cameras']!r}: one documented default camera "
+                f"for the viewpoint policy to vary")
+        plan_full_capture(camera, frm="a viewpoint policy with no count "
+                                      "captures the whole clip")
+        spec.cameras = [camera]
+
+
+def _assert_families_are_leaves() -> None:
+    """Import-time guard: every family leaf is a policy leaf the sampler
+    knows (the table is the control, not a second vocabulary)."""
+    from ..scenario.randomization import POLICY_CAMERA_LEAVES, POLICY_LEAVES
+
+    for family, leaves in RANDOMIZATION_FAMILIES.items():
+        for leaf, distribution in leaves.items():
+            if leaf == "cameras":
+                unknown = set(distribution) - set(POLICY_CAMERA_LEAVES)
+            else:
+                unknown = set() if leaf in POLICY_LEAVES else {leaf}
+            assert not unknown, (f"RANDOMIZATION_FAMILIES[{family!r}] names "
+                                 f"leaves the sampler lacks: {sorted(unknown)}")
+
+
+_assert_families_are_leaves()
+
+
 # -- the compiler --------------------------------------------------------
 
 #: Words that describe a shot rather than a condition. Recognised only so they
@@ -635,6 +859,10 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
     if cameras:
         spec.cameras = cameras
     spec.notes.extend(camera_notes)
+
+    # Spec 8: the randomisation phrases, after the cameras exist (a
+    # viewpoint policy varies the cameras the prompt named).
+    apply_randomization_phrases(spec, prompt)
 
     ignored = [w for w in CINEMATIC_WORDS if w in text]
     if ignored:

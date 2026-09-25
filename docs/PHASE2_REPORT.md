@@ -766,3 +766,174 @@ DOES change is the first measurement on the Windows box.
 - The engine target the vendor scripts record is a statement of what
   they target, not a measurement of a 5.7 build; only the vendor run
   and the bridge build on Windows turn it into one.
+
+## P2-F/randomization -- the policy, the prompt vocabulary and the look coupling
+
+**What was measured, and what was defective.** (1) The compiler had
+no randomisation vocabulary at all: `compile_prompt("varied weather
+over the rockies with mixed traffic and random viewpoints at
+different times of day")` returned an all-default B747 spec with
+`notes == []` and no question -- a request for variety was silently a
+request for nothing (re-confirmed on HEAD before this package). (2)
+The sampler wrote every draw as `derived`, so a draw and a planner's
+edit were indistinguishable in the record and a later planner could
+move a drawn value. (3) The LLM parser's top-level key set was a
+literal (`{'fields','notes','questions','cameras'}`), so a fifth key
+would have refused every response until edited; the shape-sentence
+assert did not cover it. (4) The Phase 10 example's sampled digest,
+card block and `to_dict()` were recorded BEFORE any change
+(`scratchpad/pkgF_baseline.json`) and compared after: byte-identical
+(a test now pins the 20-key block and the same numbers beside a
+policy). (5) The web page's `/compile` payload drops the `policy` key:
+`webapp/server.py` L149 overwrites the page dict's `randomization`
+with the block alone, so the digest the page shows differs from the
+one `/run` re-reads once a policy exists (open item, not F's file).
+
+**What was built** (contracts §5.1-5.5, as landed in §5.6; brainstorm
+§5).
+
+* `Source.SAMPLED` (`core/scenario/fields.py`, between `inferred` and
+  `model`), with `detail = {policy, distribution, seed, draw_index}` on
+  every drawn field; excluded from every plannable rule by
+  construction and pinned by a test that tries all four doors (block,
+  spec, camera, and a second sampler pass).
+* `core/scenario/randomization.py`: `POLICY_LEAVES` /
+  `POLICY_CAMERA_LEAVES` (14 leaves + the `cameras` group; each with
+  its admitted forms, kind, bounds, target field), all nine
+  distribution forms with `clip`, `gated_by` and `max`, `policy_stream`
+  (SeedSequence per leaf and attempt from `[draw_index, campaign seed]`,
+  `core.experiments.seeds` discipline), the attempt loop (a private
+  copy of the spec per attempt, every leaf applied, the Phase 10 leaves
+  run on top, `validate()` with the trim check as the gate; a refused
+  draw is COUNTED with its values and re-drawn; 20 attempts then
+  `randomization.infeasible` with every refusal in the error and the
+  spec left untouched), `policy_draws` as the record, `render_look`
+  extended with the look rows, `card_block` gaining one entry per
+  sampled leaf plus `policy`, `policy_draws` and `look`, and
+  `realised_distribution`. Existing keys keep their streams and bytes.
+* `core/nl/compiler.py`: `RANDOMIZATION_WORDS` (phrase regexes ->
+  families) and `RANDOMIZATION_FAMILIES` (the documented leaves per
+  family, asserted at import against the sampler's table), range
+  phrases ("across the Rockies") -> a `location` choice of that range,
+  `apply_randomization_phrases` (policy inferred, attributed per leaf,
+  the block switched on by the first phrase, one default camera when
+  viewpoints are to vary and none was named, a leaf over a stated
+  field dropped with a note), and `VARIATION_INTENT`: a sentence with
+  vary/varied/random/randomise/various/assorted that no family matched
+  is recorded verbatim and refused by the sampler as
+  `randomization.vocabulary`, sentence quoted, on every surface.
+* `core/nl/llm_compiler.py`: `LLM_RANDOMIZATION_LEAVES` (hand-listed,
+  asserted a subset of the sampler's), `RANDOMIZATION_FIELD_VALUE_SCHEMAS`
+  generated from the sampler's table (each leaf admits only its forms
+  and vocabulary; every object refuses additional properties), the
+  fifth top-level key (the shape sentence now says five keys by
+  itself), the parser rails (unknown leaf, entry shape, source, empty
+  phrase, form, vocabulary, shape via `policy_problems`), the overlay
+  as one attributed Quantity, and the deterministic vocabulary as the
+  floor when the model writes no block. The system prompt's
+  randomisation paragraph is generated from the compiler's families.
+* `core/scene/weather_visuals.py`: the one table (contracts §5.4) --
+  Koschmieder `fog_extinction_per_m` (3.912 / (1000 V)), `aerosol`
+  (the Mie scale carrying the same extinction alone), `clouds` (one
+  layer, stated defaults), `precipitation` / `wetness` and the
+  visibility floor, `cloud_drift_mps`, `ev100` per camera from the
+  exposure triple, `not_claimed` in every block; `ENGINE_PARAMETERS`
+  names the engine parameter per key and `RENDER_FLAGS` the four
+  Phase 10 flag names kept for the Look lane. Every row is a pure
+  function with its formula in the docstring, re-implemented by the
+  tests.
+* `core/scene/realised_plot.py`: the picture (`python -m
+  core.scene.realised_plot <run dirs> --out realised.png --json
+  realised.json`).
+* Tests: `tests/test_randomization_policy.py` (20 tests, 29 with the
+  parametrised forms: the enum, the
+  immutability, the absent-canonical block, every form's support, the
+  seeds, the whole contract policy end to end and through YAML, the
+  counted refusals, the cap, the sun-floor refusal inside the loop,
+  gates, ranges, stated fields, unknown leaves, the window choice, the
+  camera group, the realised distribution on fabricated runs and on
+  the sampler's own card blocks, the PNG), `tests/test_randomization_prompts.py`
+  (a 27-prompt corpus scored as a whole, the page's verdict, the
+  byte-identity of prompts with no variation language),
+  `tests/test_weather_visuals.py` (9), additions to
+  `tests/test_llm_compiler.py` (6, incl. 13 parametrised rails) and
+  `tests/test_nl_compiler.py` (2). One pre-existing test moved:
+  `test_the_prompt_s_shape_sentence_is_generated_from_the_schema`
+  pins "five keys" now (the contract's own change), and
+  `tests/test_messages.py` `ALLOWED_FUTURE` drops the three F names
+  the code now emits (its own instruction).
+* Nine mutation guards in `scripts/mutation_check.sh` ("Phase 2,
+  package F"): the refusal recording, the re-draw cap (an exhausted
+  slot must refuse, not ship the last draw), the SAMPLED immutability,
+  the vocabulary refusal, the validate() gate, the per-draw-index
+  seeding, the Koschmieder unit, the compiler's leftover-intent record,
+  the LLM tier's shape rail. Each was applied by hand, its test file
+  run (fails), the source restored byte-identical (sha256 checked) and
+  `__pycache__` purged: 9/9 fire (`scratchpad/pkgF_guards.log`).
+
+**How to demonstrate (any platform).**
+
+    .venv/bin/pytest -q -p no:warnings tests/test_randomization_policy.py \
+        tests/test_randomization_prompts.py tests/test_weather_visuals.py \
+        tests/test_randomization.py tests/test_nl_compiler.py tests/test_llm_compiler.py
+    ./scripts/mutation_check.sh          # the nine "package F" guards report ok
+
+    # the prompt -> policy -> draw path, refusals by name:
+    .venv/bin/python - <<'EOF'
+    from core.nl.compiler import compile_prompt
+    from core.scenario.randomization import sample_randomization, card_block, RandomizationError
+    for prompt in ("fly the a320 at 3000 m in varied weather at different times of day with random viewpoints",
+                   "fly the 747 across the rockies", "fly the 747 and vary the moon phase"):
+        spec = compile_prompt(prompt)
+        try:
+            sample_randomization(spec)
+            block = card_block(spec)
+            print(prompt, "->", {k: block[k] for k in ("visibility_km", "cloud_cover", "precipitation", "hour_local")},
+                  "look:", {k: block["look"][k] for k in ("fog_extinction_per_m", "clouds", "wetness")},
+                  "refused draws:", len(block["policy_draws"]["refused"]))
+        except RandomizationError as exc:
+            print(prompt, "-> REFUSED", exc.constraint, "--", exc.message[:90])
+    EOF
+
+    # the realised distribution of a set of runs, with the picture:
+    .venv/bin/python -m core.scene.realised_plot runs/<campaign>/runs/* --out realised.png --json realised.json
+
+**Not verified here.** Nothing was rendered: which engine component
+carries the fog extinction (`FogDensity` in the block's documented
+per-metre unit vs the atmosphere's Mie scale), the cloud layer's
+altitude and cover as drawn, the wetness scalar and the `ev100`
+manual exposure are the Look lane's Gate 6 clauses on the Windows box;
+this package records the numbers and names the parameters. No C++ was
+touched by F (the flag names and the card block are what both sides
+agree on). No live LLM call was made (the fake client only; the
+prompt paragraph's effect on a real model is Gate 8.1's measurement).
+The `traffic_count` leaf is recorded and not instantiated. Whether
+`apply_historical_weather` (webapp) should treat a `sampled` wind like
+a `user` one when a sampled `weather_date` fetches ERA5 is a
+`webapp/runs.py` decision (today it would overwrite the sampled wind
+with the reanalysis wind as a recorded `user` edit).
+
+**Limitations.**
+
+- A drawn `aircraft` does not re-default the cameras' per-airframe
+  chase offsets set at compile time (a drawn `preset` does re-default
+  the placement); the record says which airframe the offsets were
+  defaulted for.
+- The Rockies and the Cascades have no bake: the contracts' own policy
+  refuses `randomization.location` by name until one lands in
+  `core/terrain/glo30.py` `LOCATIONS` and `LOCATION_RANGES`.
+- A policy over a prompt that already states the leaf's field refuses
+  (top-level) or skips with a note (cameras group) -- never samples over
+  a stated value; the compiler drops such leaves with a note before
+  the sampler sees them.
+- The LLM tier's vocabulary refusal applies only when the model writes
+  NO block; a model that maps some leaves and misses an unexpressible
+  sentence puts it in `notes` (the prompt tells it to), which is not a
+  refusal by name.
+- `card.look` is `card.randomization.look` until `card.py` (not F's)
+  lifts it; `webapp/server.py` L149 must merge, not overwrite, the page
+  dict's `randomization` so the policy survives the page round trip.
+- `realised_distribution` bins numeric leaves over the requested
+  support when the leaf states one; a lognormal/normal/weibull leaf
+  without `clip` is binned over the observed range, so its coverage
+  says how the observed spread was filled, not how a tail was.

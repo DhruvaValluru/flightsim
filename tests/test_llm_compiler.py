@@ -948,13 +948,148 @@ def test_the_prompt_s_shape_sentence_is_generated_from_the_schema():
     keys = tuple(RESPONSE_SCHEMA["properties"])
     assert RESPONSE_TOP_LEVEL_KEYS == keys
     assert "cameras" in keys
+    assert "randomization" in keys          # spec 8, package F: the fifth
     sentence = response_shape_sentence()
     assert sentence in SYSTEM_PROMPT
-    assert "four keys" in sentence
+    assert "five keys" in sentence
     for key in keys:
         assert f'"{key}"' in sentence
     assert "three keys" not in SYSTEM_PROMPT
+    assert "four keys" not in SYSTEM_PROMPT
     # The generator, not the wording, is the contract: a three-key schema
     # would say so.
     assert "three keys" in response_shape_sentence(
         ("fields", "notes", "questions"))
+
+
+# -- spec 8, package F: the bounded randomization key ------------------------
+
+def test_the_randomization_key_is_bounded_by_the_sampler_s_leaves():
+    """Mirrors the cameras discipline: the schema's leaves are a
+    hand-listed subset of the sampler's POLICY_LEAVES (asserted at
+    import), every value object refuses additional properties, and each
+    leaf admits only its own forms and vocabulary."""
+    from core.nl.llm_compiler import (
+        LLM_RANDOMIZATION_CAMERA_LEAVES, LLM_RANDOMIZATION_LEAVES,
+        RANDOMIZATION_CAMERA_VALUE_SCHEMAS, RANDOMIZATION_FIELD_VALUE_SCHEMAS,
+    )
+    from core.scenario.randomization import POLICY_CAMERA_LEAVES, POLICY_LEAVES
+
+    assert set(LLM_RANDOMIZATION_LEAVES) <= set(POLICY_LEAVES)
+    assert set(LLM_RANDOMIZATION_CAMERA_LEAVES) <= set(POLICY_CAMERA_LEAVES)
+    assert set(RANDOMIZATION_FIELD_VALUE_SCHEMAS) == set(LLM_RANDOMIZATION_LEAVES)
+    assert "livery" not in RANDOMIZATION_FIELD_VALUE_SCHEMAS      # YAML only
+    block = RESPONSE_SCHEMA["properties"]["randomization"]
+    assert block["additionalProperties"] is False
+    assert set(block["properties"]) == set(LLM_RANDOMIZATION_LEAVES) | {"cameras"}
+    precipitation = RANDOMIZATION_FIELD_VALUE_SCHEMAS["precipitation"]["properties"]
+    assert set(precipitation) == {"choice", "weights", "gated_by"}
+    assert precipitation["choice"]["items"]["enum"] == ["none", "rain", "snow"]
+    visibility = RANDOMIZATION_FIELD_VALUE_SCHEMAS["visibility_km"]["properties"]
+    assert "lognormal" in visibility and "clip" in visibility and "choice" not in visibility
+    assert set(RANDOMIZATION_CAMERA_VALUE_SCHEMAS) == set(LLM_RANDOMIZATION_CAMERA_LEAVES)
+
+
+def test_a_model_written_policy_lands_as_one_attributed_quantity_and_switches_the_block_on():
+    from core.scenario.fields import Source
+    from core.scenario.randomization import sample_randomization
+
+    client = fake_client({
+        "fields": {"aircraft": entry("A320", "user", "the a320")},
+        "notes": [], "questions": [],
+        "randomization": {
+            "cloud_cover": entry({"beta": [2, 2]}, "inferred", "varied weather"),
+            "visibility_km": entry({"lognormal": {"median": 25, "sigma": 0.6},
+                                    "clip": [1, 80]}, "inferred", "varied weather"),
+            "hour_local": entry({"choice": ["dawn", "dusk"]}, "model", "golden hour"),
+            "cameras": entry({"preset": {"choice": ["chase", "tower"]},
+                              "focal_length_mm": {"loguniform": [24, 400]}},
+                             "inferred", "random viewpoints"),
+        },
+    })
+    result = compile_prompt_llm("the a320 in varied weather at golden hour, random "
+                                "viewpoints", client=client)
+    spec = result.spec
+    policy = spec.randomization_policy
+    assert policy.source is Source.INFERRED                 # the best claimed
+    assert set(policy.value) == {"cloud_cover", "visibility_km", "hour_local", "cameras"}
+    assert policy.detail["attribution"]["hour_local"] == "golden hour"
+    assert policy.detail["sources"]["hour_local"] == "model"
+    assert spec.randomization.enabled.source is Source.INFERRED
+    assert [str(c.camera_id.value) for c in spec.cameras] == ["camera0"]
+    assert validate(spec, check_feasibility=False).ok
+    sample_randomization(spec)
+    assert spec.randomization.cloud_cover.source is Source.SAMPLED
+    assert spec.cameras[0].preset.source is Source.SAMPLED
+    assert ScenarioSpec.from_yaml(spec.to_yaml()).digest() == spec.digest()
+
+
+@pytest.mark.parametrize("block,reason", [
+    ({"cloud_cover": entry({"gaussian": [2, 2]}, "inferred", "x")}, "exactly one of"),
+    ({"cloud_cover": entry({"beta": [2, 2], "uniform": [0, 1]}, "inferred", "x")},
+     "exactly one of"),
+    ({"moon_phase": entry({"choice": ["full"]}, "inferred", "x")}, "unknown policy leaf"),
+    ({"livery": entry({"choice": ["red"]}, "inferred", "x")}, "unknown policy leaf"),
+    ({"cloud_cover": entry({"beta": [2, 2]}, "default", "x")}, "claims source"),
+    ({"cloud_cover": entry({"beta": [2, 2]}, "model", "")}, "no provenance phrase"),
+    ({"cloud_cover": {"value": {"beta": [2, 2]}, "source": "inferred"}},
+     "exactly value/source/from"),
+    ({"cloud_cover": entry("lots", "inferred", "x")}, "distribution mapping"),
+    ({"cloud_cover": entry({"beta": [2]}, "inferred", "x")}, "undocumented form"),
+    ({"precipitation": entry({"choice": ["hail"]}, "inferred", "x")}, "outside the vocabulary"),
+    ({"cameras": entry({"zoom": {"uniform": [1, 2]}}, "inferred", "x")}, "unknown camera leaves"),
+    ({"cameras": entry({"preset": {"choice": ["drone"]}}, "inferred", "x")}, "outside the vocabulary"),
+    ({"traffic_count": entry({"poisson": -1}, "inferred", "x")}, "undocumented form"),
+])
+def test_every_randomization_rail_refuses_by_name(block, reason):
+    client = fake_client({"fields": {}, "notes": [], "questions": [],
+                          "randomization": block})
+    with pytest.raises(LLMCompileError, match=reason):
+        compile_prompt_llm("x", client=client)
+
+
+def test_randomization_not_an_object_and_null_leaves():
+    with pytest.raises(LLMCompileError, match="not an object"):
+        compile_prompt_llm("x", client=fake_client({"fields": {}, "notes": [],
+                                                    "questions": [],
+                                                    "randomization": []}))
+    # A null-valued leaf is omission, as everywhere else.
+    result = compile_prompt_llm("x", client=fake_client({
+        "fields": {}, "notes": [], "questions": [],
+        "randomization": {"cloud_cover": entry(None, "inferred", "x")}}))
+    assert result.spec.randomization_policy is None
+
+
+def test_an_empty_model_block_falls_back_to_the_deterministic_vocabulary():
+    """The regex table is the control: a model that writes no leaves for
+    a documented phrase gets the phrase's leaves anyway, and a sentence
+    the vocabulary cannot vary is recorded for the by-name refusal."""
+    from core.scenario.randomization import RandomizationError, sample_randomization
+
+    empty = fake_client({"fields": {}, "notes": [], "questions": []})
+    spec = compile_prompt_llm("fly the 747 in varied weather", client=empty).spec
+    assert set(spec.randomization_policy.value) == {"cloud_cover", "visibility_km",
+                                                    "precipitation"}
+    assert spec.randomization_policy.detail["attribution"]["cloud_cover"] == "varied weather"
+    spec = compile_prompt_llm("fly the 747 and vary the moon phase",
+                              client=fake_client({"fields": {}, "notes": ["vary the "
+                                                  "moon phase"], "questions": []})).spec
+    assert spec.randomization_policy.detail["unmapped"] == ["fly the 747 and vary the moon phase"]
+    with pytest.raises(RandomizationError) as caught:
+        sample_randomization(spec)
+    assert caught.value.constraint == "randomization.vocabulary"
+    # No variation language, no block: an empty overlay is still
+    # bit-identical to the regex compiler's defaults.
+    plain = compile_prompt_llm("fly the 747 at 3000 m", client=empty).spec
+    assert plain.randomization_policy is None
+    assert plain.digest() == compile_prompt("").digest()
+
+
+def test_the_prompt_teaches_the_documented_phrases_from_the_compiler_s_table():
+    from core.nl.compiler import RANDOMIZATION_FAMILIES
+    from core.nl.llm_compiler import SYSTEM_PROMPT
+
+    assert '"randomization"' in SYSTEM_PROMPT
+    for family in RANDOMIZATION_FAMILIES.values():
+        assert json.dumps(family) in SYSTEM_PROMPT
+    assert "rockies" in SYSTEM_PROMPT and "dawn 5.5-8 h" in SYSTEM_PROMPT
