@@ -1174,12 +1174,23 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// the render thread once per frame, so whatever the camera is pointing at
 	// when the first capture goes out is what the first frame shows. Left at
 	// the default rotation that is empty sky.
+	// The place is the director's own answer (PresetRestingPose): this
+	// preset's offset from the CG, the point every preset updates from,
+	// by the arithmetic the first Tick will use. A station this block
+	// computed itself from the actor origin -- the structural datum,
+	// 33.7 m ahead of the B747's CG -- opened every preset-mode chase clip
+	// 136 m behind the CG with the position lag dragging it in to 170 m
+	// over the first ~1.5 s of written frames (the aircraft a quarter
+	// larger and drifting), and put the wingman at the CHASE offset to
+	// swing ~220 m into its slot: the transient this block exists to
+	// prevent, moved rather than removed.
 	{
-		const FRotator HeadingOnly(0.0, Scenario.Aircraft->GetActorRotation().Yaw, 0.0);
-		const FVector Station = Scenario.Aircraft->GetActorLocation() +
-			HeadingOnly.RotateVector(FVector(Director->ChaseOffsetMetres) * RenderCmPerMetre);
-		FRotator Look = (Scenario.Aircraft->GetActorLocation() - Station).Rotation();
-		Look.Roll = 0.0;
+		FVector Station;
+		FRotator Look;
+		if (!Director->PresetRestingPose(Station, Look))
+		{
+			return Fail(TEXT("the camera has no aircraft to start behind"));
+		}
 		Director->SetActorLocationAndRotation(Station, Look.Quaternion());
 	}
 
@@ -2903,7 +2914,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 	}
 	Root->SetObjectField(TEXT("surface_peak_deg"), Peaks);
-	Root->SetStringField(TEXT("camera_preset"), TEXT("LaggedChase"));
+	// The preset word this pass ran with -- the same value as
+	// scene.camera_preset below (contracts §1: the root key was a
+	// hard-coded "LaggedChase" on every pass, wingman and tower included).
+	// In a consume-poses pass the word is inert and camera_consume_poses
+	// beside it says so: the camera flew the card's solved track.
+	Root->SetStringField(TEXT("camera_preset"), CameraPreset);
 	Root->SetBoolField(TEXT("camera_keeps_horizon_level"), Director->PresetKeepsHorizonLevel());
 	// Camera Phase 1, additive: which solved camera this pass consumed
 	// (numbers only -- gotcha 13; camera id strings live in the

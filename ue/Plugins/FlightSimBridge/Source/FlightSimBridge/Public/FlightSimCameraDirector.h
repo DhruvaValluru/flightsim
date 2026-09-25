@@ -70,12 +70,24 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightSim|Camera")
 	EFlightSimCameraPreset Preset = EFlightSimCameraPreset::LaggedChase;
 
-	// Metres behind and above, for the chase and wingman presets. The
-	// defaults are Python's (core/scenario/camera.py FALLBACK_CHASE_OFFSET
-	// and WINGMAN_OFFSET, Phase 2 Look lane part 2): one rule for both
-	// paths, so a preset that no card and no -chase= flag overrides places
-	// the camera where the solved track would. tests/test_gate6_visual.py
-	// reads these literals and pins them to the Python constants.
+	// Metres behind and above, for the chase and wingman presets. Both
+	// literals are Python's (core/scenario/camera.py FALLBACK_CHASE_OFFSET
+	// and WINGMAN_OFFSET); tests/test_gate6_visual.py reads them from this
+	// text and pins them to those constants. What each one reaches is
+	// different, and stated rather than claimed:
+	//
+	//  * WingmanOffsetMetres is LIVE: the render commandlet keeps it unless
+	//    -wingman-abeam= is given and the interactive host never sets it,
+	//    so a wingman preset flies Python's slot.
+	//  * ChaseOffsetMetres is a FALLBACK that no shipped host flies. The
+	//    render commandlet assigns its shot constant on every preset-mode
+	//    run (-170/0/16 m for the terrain shot, -400/0/200 m for the shadow
+	//    shot -- the framing Gate 6 was measured at) and then -chase=; the
+	//    interactive host assigns -170/0/16 m (FlightSimInteractiveMode.cpp).
+	//    Only a caller that spawns this actor and sets nothing gets this
+	//    value. Python's chase is per airframe (CHASE_OFFSETS; the fallback
+	//    is the B747's), so this literal is the B747's solved chase, not a
+	//    rule any rendered preset-mode chase frame obeys.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightSim|Camera")
 	FVector ChaseOffsetMetres = FVector(-110.0f, 0.0f, 12.0f);
 
@@ -197,6 +209,23 @@ public:
 	// manifest.
 	double GetAppliedFocalLengthMm() const { return AppliedFocalLengthMm; }
 
+	// Where the current preset would put the camera for the target as it
+	// stands NOW, and the look from there to the aim point (level for
+	// every preset but the body-fixed shoulder) -- what a host that places
+	// the camera before the first Tick asks for, so a lagged preset opens
+	// where it will settle instead of flying in. Measured from the same
+	// point the presets update from (TargetAimPoint: the CG, not the actor
+	// origin) with the same arithmetic (HeadingOffsetStation), so the place
+	// the camera is put is the place the first Tick's goal is. The render
+	// commandlet's settle-in placement computed its own station from the
+	// actor origin -- the structural datum, 33.7 m ahead of the B747's CG
+	// -- so once the presets moved to the CG every preset-mode chase clip
+	// opened 136 m behind the CG and was dragged in to 170 m over the
+	// first ~1.5 s (three PositionLagSeconds) of written frames, and the
+	// wingman, pre-placed at the CHASE offset, swung ~220 m into its slot.
+	// False when there is no Target.
+	bool PresetRestingPose(FVector& OutLocation, FRotator& OutLook);
+
 private:
 	// The point every preset aims at and measures its offset from: the
 	// aircraft's CENTRE OF GRAVITY, not the actor origin. The actor origin
@@ -213,6 +242,16 @@ private:
 	// Target is a plain UPROPERTY with no setter, so the component lookup
 	// is refreshed whenever the actor it was cached for changes.
 	void RefreshTargetMovement();
+
+	// The chase and wingman station: OffsetMetres applied in a HEADING-ONLY
+	// frame from the aim point. Yaw is taken from the target so the camera
+	// stays behind it through a turn; pitch and roll are discarded. Using
+	// the full rotation here is precisely the mistake -- the camera would
+	// roll with the aircraft and the roll would vanish. One arithmetic for
+	// the two lagged presets and PresetRestingPose.
+	static FVector HeadingOffsetStation(const FVector& AimPoint,
+	                                    const FTransform& TargetTransform,
+	                                    const FVector& OffsetMetres);
 
 	void UpdateLaggedChase(float DeltaSeconds, const FTransform& TargetTransform);
 	void UpdateCockpitShoulder(const FTransform& TargetTransform);

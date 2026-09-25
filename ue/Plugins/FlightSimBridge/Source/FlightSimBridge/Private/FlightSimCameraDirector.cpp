@@ -85,6 +85,56 @@ FVector AFlightSimCameraDirector::TargetAimPoint(const FTransform& TargetTransfo
 	return TargetTransform.GetLocation();
 }
 
+FVector AFlightSimCameraDirector::HeadingOffsetStation(const FVector& AimPoint,
+                                                       const FTransform& TargetTransform,
+                                                       const FVector& OffsetMetres)
+{
+	const FRotator TargetRotation = TargetTransform.GetRotation().Rotator();
+	const FRotator HeadingOnly(0.0f, TargetRotation.Yaw, 0.0f);
+	return AimPoint + HeadingOnly.RotateVector(OffsetMetres * CmPerMetre);
+}
+
+bool AFlightSimCameraDirector::PresetRestingPose(FVector& OutLocation,
+                                                 FRotator& OutLook)
+{
+	if (Target == nullptr)
+	{
+		return false;
+	}
+	RefreshTargetMovement();
+	const FTransform TargetTransform = Target->GetActorTransform();
+	// Rest where the presets update from: the CG, never the datum.
+	const FVector RestAimPoint = TargetAimPoint(TargetTransform);
+	switch (Preset)
+	{
+	case EFlightSimCameraPreset::GroundObserver:
+		OutLocation = ObserverLocationMetres * CmPerMetre;
+		break;
+	case EFlightSimCameraPreset::Tower:
+		OutLocation = TowerLocationMetres * CmPerMetre;
+		break;
+	case EFlightSimCameraPreset::Wingman:
+		OutLocation = HeadingOffsetStation(RestAimPoint, TargetTransform,
+		                                   WingmanOffsetMetres);
+		break;
+	case EFlightSimCameraPreset::CockpitShoulder:
+		// Body-fixed, exactly the placement UpdateCockpitShoulder makes:
+		// full rotation, roll inherited by declaration.
+		OutLocation = RestAimPoint + TargetTransform.GetRotation().RotateVector(
+			ShoulderOffsetMetres * CmPerMetre);
+		OutLook = TargetTransform.GetRotation().Rotator();
+		return true;
+	case EFlightSimCameraPreset::LaggedChase:
+	default:
+		OutLocation = HeadingOffsetStation(RestAimPoint, TargetTransform,
+		                                   ChaseOffsetMetres);
+		break;
+	}
+	OutLook = (RestAimPoint - OutLocation).Rotation();
+	OutLook.Roll = 0.0f;              // never inherit roll
+	return true;
+}
+
 bool AFlightSimCameraDirector::SetPoseTrack(TArray<double>&& Times,
                                             TArray<FVector>&& Locations,
                                             TArray<FRotator>&& Rotations,
@@ -272,18 +322,12 @@ void AFlightSimCameraDirector::Tick(float DeltaSeconds)
 void AFlightSimCameraDirector::UpdateLaggedChase(float DeltaSeconds,
                                                  const FTransform& TargetTransform)
 {
-	// The offset is applied in a HEADING-ONLY frame: yaw is taken from the
-	// aircraft so the camera stays behind it through a turn, but pitch and roll
-	// are discarded. Using the full rotation here is precisely the mistake --
-	// the camera would roll with the aircraft and the roll would vanish.
-	const FRotator TargetRotation = TargetTransform.GetRotation().Rotator();
-	const FRotator HeadingOnly(0.0f, TargetRotation.Yaw, 0.0f);
-
 	// Offset from the CG, as the Python solver states it -- not from the
-	// actor origin, which is the structural datum.
+	// actor origin, which is the structural datum -- in the heading-only
+	// frame (HeadingOffsetStation: yaw kept, pitch and roll discarded).
 	const FVector AimPoint = TargetAimPoint(TargetTransform);
-	const FVector Goal = AimPoint
-		+ HeadingOnly.RotateVector(ChaseOffsetMetres * CmPerMetre);
+	const FVector Goal = HeadingOffsetStation(AimPoint, TargetTransform,
+	                                          ChaseOffsetMetres);
 
 	SmoothedLocation = SmoothTowards(SmoothedLocation, Goal, DeltaSeconds,
 	                                 PositionLagSeconds);
@@ -332,12 +376,9 @@ void AFlightSimCameraDirector::UpdateFixedPoint(float DeltaSeconds,
 void AFlightSimCameraDirector::UpdateWingman(float DeltaSeconds,
                                              const FTransform& TargetTransform)
 {
-	const FRotator TargetRotation = TargetTransform.GetRotation().Rotator();
-	const FRotator HeadingOnly(0.0f, TargetRotation.Yaw, 0.0f);
-
 	const FVector AimPoint = TargetAimPoint(TargetTransform);
-	const FVector Goal = AimPoint
-		+ HeadingOnly.RotateVector(WingmanOffsetMetres * CmPerMetre);
+	const FVector Goal = HeadingOffsetStation(AimPoint, TargetTransform,
+	                                          WingmanOffsetMetres);
 
 	// Station-keeping is tighter than a chase: a wingman holds position.
 	SmoothedLocation = SmoothTowards(SmoothedLocation, Goal, DeltaSeconds,

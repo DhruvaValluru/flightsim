@@ -19,6 +19,9 @@
 
 #include "FlightSimCameraDirector.h"
 
+#include "Components/SceneComponent.h"
+#include "GameFramework/Actor.h"
+#include "JSBSimMovementComponent.h"
 #include "Misc/AutomationTest.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -200,6 +203,114 @@ bool FFlightSimPoseTrackRefusals::RunTest(const FString&)
 	         Error.Contains(TEXT("lies outside the solved track")));
 	TestFalse(TEXT("a time after the track is refused too"),
 	          Director->ApplyPoseAtTime(2.0, Error));
+	return true;
+}
+
+namespace
+{
+	// An actor standing somewhere definite, pitched and rolled as well as
+	// yawed so a station taken in the full frame would come out
+	// elsewhere, with an optional JSBSim movement component carrying the
+	// B747's CG (core/capture/poses.py: 33.7 m behind the structural
+	// datum in the actor frame). Unregistered and worldless, like the
+	// director the tests above build with NewObject: the transform
+	// arithmetic is all that is exercised.
+	const FVector RestingDatum(120000.0, -45000.0, 300000.0);
+	const FRotator RestingAttitude(-6.0, 30.0, 12.0);   // pitch, yaw, roll
+	const FVector RestingB747CGLocalCm(-3370.6, 0.0, 0.0);
+
+	AActor* TargetActor(bool bWithMovement)
+	{
+		AActor* Target = NewObject<AActor>();
+		USceneComponent* Root = NewObject<USceneComponent>(Target, TEXT("Root"));
+		Target->SetRootComponent(Root);
+		Root->SetWorldLocationAndRotation(RestingDatum, RestingAttitude);
+		if (bWithMovement)
+		{
+			UJSBSimMovementComponent* Movement =
+				NewObject<UJSBSimMovementComponent>(Target, TEXT("Movement"));
+			Movement->CGLocalPosition = RestingB747CGLocalCm;
+			Target->AddOwnedComponent(Movement);
+		}
+		return Target;
+	}
+
+	FVector HeadingOffsetCm(const FVector& From, const FVector& OffsetMetres)
+	{
+		const FRotator HeadingOnly(0.0, RestingAttitude.Yaw, 0.0);
+		return From + HeadingOnly.RotateVector(OffsetMetres * 100.0);
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FFlightSimRestingPoseMeasuresFromTheCG,
+	"FlightSim.CameraDirector.RestingPoseMeasuresFromTheCG",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFlightSimRestingPoseMeasuresFromTheCG::RunTest(const FString&)
+{
+	// The settle-in placement the render commandlet makes before the
+	// first Tick must be the place the first Tick's goal is. The goal
+	// is measured from the CG (TargetAimPoint); a placement measured
+	// from the actor origin -- the structural datum -- started every
+	// preset-mode chase clip the datum-to-CG distance away from where
+	// it would settle, and the position lag wrote the catch-up as
+	// frames. This drives the director's answer at the B747's numbers.
+	const double Tolerance = AFlightSimCameraDirector::PositionToleranceCm;
+	const FVector ChaseOffsetMetres(-170.0, 0.0, 16.0);
+	const FVector WingmanOffsetMetres(-45.0, 180.0, 0.0);
+
+	AActor* Target = TargetActor(true);
+	const FVector CG = Target->GetActorTransform().TransformPosition(RestingB747CGLocalCm);
+	TestTrue(TEXT("the CG is not the datum on this airframe"),
+	         FVector::Dist(CG, RestingDatum) > 3000.0);
+
+	AFlightSimCameraDirector* Director = NewObject<AFlightSimCameraDirector>();
+	Director->Target = Target;
+	Director->Preset = EFlightSimCameraPreset::LaggedChase;
+	Director->ChaseOffsetMetres = ChaseOffsetMetres;
+
+	FVector Station;
+	FRotator Look;
+	TestTrue(TEXT("a director with a target has a resting pose"),
+	         Director->PresetRestingPose(Station, Look));
+	TestTrue(TEXT("the chase rests at its offset from the CG"),
+	         Station.Equals(HeadingOffsetCm(CG, ChaseOffsetMetres), Tolerance));
+	// And not from the datum: the two stations differ by exactly the
+	// CG offset, which is the transient this removes.
+	const FVector FromDatum = HeadingOffsetCm(RestingDatum, ChaseOffsetMetres);
+	TestEqual(TEXT("the datum station is the CG offset away (33.7 m)"),
+	          FVector::Dist(Station, FromDatum), 3370.6, 0.5);
+	TestEqual(TEXT("the look is level -- roll never inherited"),
+	          Look.Roll, 0.0, 1.0e-9);
+	TestTrue(TEXT("the look points at the CG, not the datum"),
+	         Look.Vector().Equals((CG - Station).GetSafeNormal(), 1.0e-6));
+
+	// The wingman rests in ITS slot; the commandlet's old placement put it
+	// at the chase offset and let the lag swing it round.
+	Director->Preset = EFlightSimCameraPreset::Wingman;
+	Director->WingmanOffsetMetres = WingmanOffsetMetres;
+	TestTrue(TEXT("a wingman has a resting pose"),
+	         Director->PresetRestingPose(Station, Look));
+	TestTrue(TEXT("the wingman rests abeam of the CG"),
+	         Station.Equals(HeadingOffsetCm(CG, WingmanOffsetMetres), Tolerance));
+	TestTrue(TEXT("and not at the chase station"),
+	         FVector::Dist(Station, HeadingOffsetCm(CG, ChaseOffsetMetres)) > 10000.0);
+
+	// No movement component: the actor location is the aim point, as
+	// TargetAimPoint says, so the datum station is the right one there.
+	Director->Target = TargetActor(false);
+	Director->Preset = EFlightSimCameraPreset::LaggedChase;
+	TestTrue(TEXT("a bare actor has a resting pose"),
+	         Director->PresetRestingPose(Station, Look));
+	TestTrue(TEXT("measured from the actor location when there is no CG"),
+	         Station.Equals(FromDatum, Tolerance));
+
+	// No target: refused, so the commandlet cannot place a camera behind
+	// nothing and call the frames a run.
+	Director->Target = nullptr;
+	TestFalse(TEXT("no target, no resting pose"),
+	          Director->PresetRestingPose(Station, Look));
 	return true;
 }
 
