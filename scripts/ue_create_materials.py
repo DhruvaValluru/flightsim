@@ -17,6 +17,17 @@ Build-time asset step, command-line only. Two assets:
   (core/terrain/imagery.py), so this material has no registration
   parameters to get wrong: the alignment lives in the data, and the
   landmark-projection check on a rendered frame verifies it.
+
+* /Game/FlightSim/M_VertexColorUnlit -- the tornado funnel marker (below).
+
+* /Game/FlightSim/M_CustomStencilID -- Phase 2 (packages B + C): the
+  post-process material the -labels ID pass renders through. It REPLACES
+  the tonemapper and emits SceneTexture:CustomStencil as a flat float, so
+  the render commandlet's SCS_FinalColorHDR capture reads each pixel's
+  custom-stencil value (= the card's object int_id, set on every labelled
+  mesh component) back as a raw number, anti-aliasing off. The commandlet
+  refuses -labels by name when this asset is absent rather than writing
+  an ID image it did not measure.
 """
 
 import unreal
@@ -110,6 +121,46 @@ def create_vertex_colour_unlit():
     print(f"MATERIAL-CREATED: {full}")
 
 
+def create_custom_stencil_id():
+    """The ID pass's post-process material (Phase 2, contracts section 1).
+
+    Post-process domain, blendable location "Replacing the Tonemapper",
+    one SceneTexture expression reading CustomStencil into emissive
+    colour. Nothing else: no tonemapping, no exposure, no dither, so the
+    value that reaches the RTF_R32f target is the stencil integer the
+    commandlet assigned (verified on Windows by the first -labels frame:
+    render.json labels.non_integer_id_pixels == 0 and numpy.unique of
+    frame_0000_mask.png is a subset of the card's objects[].int_id + 0).
+    """
+    full = f"{PATH}/M_CustomStencilID"
+    if unreal.EditorAssetLibrary.does_asset_exist(full):
+        print(f"MATERIAL-EXISTS: {full}")
+        return
+
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    material = tools.create_asset("M_CustomStencilID", PATH, unreal.Material,
+                                  unreal.MaterialFactoryNew())
+    if material is None:
+        raise SystemExit("could not create material asset")
+
+    material.set_editor_property("material_domain",
+                                 unreal.MaterialDomain.MD_POST_PROCESS)
+    material.set_editor_property(
+        "blendable_location",
+        unreal.BlendableLocation.BL_REPLACING_TONEMAPPER)
+    lib = unreal.MaterialEditingLibrary
+    stencil = lib.create_material_expression(
+        material, unreal.MaterialExpressionSceneTexture, -400, 0)
+    stencil.set_editor_property("scene_texture_id",
+                                unreal.SceneTextureId.PPI_CUSTOM_STENCIL)
+    lib.connect_material_property(stencil, "Color",
+                                  unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    lib.recompile_material(material)
+    unreal.EditorAssetLibrary.save_asset(full)
+    print(f"MATERIAL-CREATED: {full}")
+
+
 create_vertex_colour()
 create_terrain_imagery()
 create_vertex_colour_unlit()
+create_custom_stencil_id()
