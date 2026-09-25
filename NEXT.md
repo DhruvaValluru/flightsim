@@ -627,28 +627,54 @@ the parity discipline, and the do-not-regress list)
     which by FlightGear's convention is the FDM's VRP (`<location
     name="VRP">`: B747 x=1327 in, A320 661.1, c172p 42.6, aft of the
     datum); and `BuildMeshAirframe` attached the body and hinges at the
-    root. Fix (uncompiled here; first Windows build verifies): the
-    converter writes `mesh_manifest.json` version 2 with
-    `mesh_origin_actor_cm` (the VRP mapped by (-x, y, z), plus the
-    config's optional documented `model_origin_offset_m`), the importer
-    treats a version-1 manifest as NOT converted and re-converts it (no
-    editor time: same geometry), the commandlet hangs the body and every
-    hinge under one `MeshOrigin` scene component at that point and
-    records what it drew under render.json `drawn`, the camera presets
-    aim at and offset from the CG (`TargetAimPoint`) as the Python solver
-    does, verify's `drawn_airframe` FAILs by name on a datum-attached mesh
-    or on placeholder boxes under a manifest naming the mesh, and
-    `flightsim.capture --render` now passes `-mesh=` (it never had; it
-    refuses `aircraft.mesh` when the model is not imported). Not verified
-    here: no engine. Windows verification step: re-convert (`python
-    assets_pipeline/convert.py assets/aircraft_config/B747.json`, or let
-    the web app's render flow do it), render one frame with `-mesh=`,
-    and look at the overlay -- the circle (manifest CG) must sit ON the
-    airframe, not 30 m ahead of it; `python -m flightsim.verify
-    runs/<id>` must report `drawn_airframe` PASS with manifest_version 2,
-    and `mask_containment` should now pass where it failed. If the mesh
-    lands 2 x 33.7 m aft instead, the sign of the map is the finding, not
-    the convention: the `mesh_origin_basis` string in the manifest states
-    the argument to check against. Note `scripts/import_aircraft.py` still
-    says "already converted" for a version-1 manifest; use the converter
-    or the web app until it learns `importer.stale_manifest_reason`.
+    root. **What eb5c71d got wrong (found 2026-09-25, before any Windows
+    build):** it wrote `mesh_manifest.json` version 2 with
+    `mesh_origin_actor_cm` = the STAGED FDM's VRP, on the assumption
+    that "the model origin is the VRP". Each FlightGear mesh was
+    modelled against its OWN repository's FDM (FGMEMBERS/747-400's
+    `747-400.xml` has VRP (1263, 0, 0) in; the staged `B747.xml` has
+    (1327, 0, -24)), and some are not built about any VRP. MEASURED from
+    the pinned `.ac` vertices with the repo's own reader
+    (`assets_pipeline.acmodel`), in the actor frame about the model
+    origin: B747 nose +29.80 m / tail -41.14 m (so the VRP rule drew the
+    747 3.9 m AFT of its label); A320 nose -2.53 m (the origin is AHEAD
+    of the nose) / tail -40.09 m (a NEW 19.3 m error); c172p +2.14 /
+    -6.09 m (right to 0.1 m, by luck). **The measured rule (manifest
+    version 3):** `x = labels' nose keypoint (actor) - mesh forward
+    extreme`; `z = main-gear <contact> z (actor) - lowest gear vertex`
+    where the config's documented `gear_geometry` patterns identify gear
+    (B747 gear .ac, c172p `.*Wheel.*`; the A320 config lists no gear
+    part, so its z falls back to the VRP and the manifest SAYS so);
+    `y = 0`; the config's documented `model_origin_offset_m` on top;
+    refusal `aircraft.mesh_extent` when the mesh span disagrees with
+    `labels.dimensions_m.length` by more than 5 %. Measured origins:
+    B747 (-2979.8, 0, +13.9) cm, A320 (+252.6, 0, -94.0), c172p
+    (-118.3, 0, +97.4). The manifest carries the extents, the anchors
+    and `mesh_origin_basis` starting "measured from vertices"; the
+    importer re-converts any manifest below version 3 (no editor time:
+    same geometry). The rest of eb5c71d stands: the commandlet hangs
+    the body and every hinge under one `MeshOrigin` scene component at
+    `mesh_origin_actor_cm` and records what it drew under render.json
+    `drawn`, the camera presets aim at and offset from the CG
+    (`TargetAimPoint`), verify's `drawn_airframe` FAILs by name on a
+    datum-attached mesh or on placeholder boxes under a manifest naming
+    the mesh (its `DRAWN_MESH_MIN_MANIFEST_VERSION` is still 2 and does
+    not yet grade the basis -- the verifier owner's item, CONTRACTS
+    §0.1), and `flightsim.capture --render` passes `-mesh=` (refusing
+    `aircraft.mesh` when the model is not imported). Not verified here:
+    no engine; the mesh-vs-label residual on a rendered frame is a
+    pixel measurement (`mask_vs_geometry`). Windows verification step:
+    re-convert (`python assets_pipeline/convert.py
+    assets/aircraft_config/B747.json`, `scripts/import_aircraft.py` or
+    the web app's render flow -- all re-convert a stale manifest),
+    render one frame with `-mesh=`, and look at the overlay -- the
+    circle (manifest CG) must sit ON the airframe, not 30 m ahead of it
+    and not 4 m behind its nose; `python -m flightsim.verify runs/<id>`
+    must report `drawn_airframe` PASS with manifest_version 3, and
+    `mask_containment` should now pass where it failed. If the mesh
+    lands 2 x 29.8 m aft instead, the sign of the map is the finding,
+    not the measurement: the `mesh_origin_basis` and
+    `origin_measurement` records in the manifest state the numbers to
+    check against. The B747's nose keypoint is itself an `estimate` (the
+    datum taken as the nose tip); if the rendered 747 sits a metre or
+    two off its label along x, the LABEL is the suspect, not the mesh.

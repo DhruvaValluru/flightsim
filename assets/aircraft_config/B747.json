@@ -65,6 +65,13 @@
     "StrobeLight.*",
     "Beacon.*"
   ],
+  "gear_geometry": {
+    "parts": [
+      "Models/747-400_gear\\.ac"
+    ],
+    "objects": [],
+    "source": "every object in 747-400_gear.ac is landing gear (nlg_*, blg_*, wlg_*, nosewheel.NNN are the nose, body and wing gear trucks and their wheels; the modeller named the main-truck wheels 'nosewheel'); the gear doors and wells are in 747-400_fuselage.ac (nlg_*_door) and are not gear contact geometry. Measured 2026-09-25 from the pinned commit: lowest gear vertex -5.625 m below the model origin (the nose wheels), main-truck wheels -4.79 m"
+  },
   "surfaces": {
     "aileron_l_outer": {
       "bone": "aileron_l_outer",

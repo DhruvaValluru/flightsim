@@ -22,9 +22,12 @@ The steps, per aircraft, each skipped when already done:
    converter, per VALIDITY 3.3 -- nothing renders unattributed);
 2. convert -- per-part OBJs + mesh_manifest.json under assets/generated/,
    refusing any mesh/FDM mismatch (VALIDITY 1.4); a manifest older than
-   version 2 (no ``mesh_origin_actor_cm``: the mesh would be attached at
-   the structural datum, 25-30 m off its label) is NOT converted and is
-   re-converted here, geometry unchanged, no editor time;
+   version 3 (version 1: no ``mesh_origin_actor_cm``, the mesh would be
+   attached at the structural datum, 25-30 m off its label; version 2:
+   an origin ASSUMED from the staged FDM's VRP, 3.9 m off on the B747
+   and 19.3 m on the A320, where version 3 MEASURES it from the
+   vertices) is NOT converted and is re-converted here, geometry
+   unchanged, no editor time;
 3. import the manifest into the Unreal project inside UnrealEditor-Cmd
    (scripts/ue_import_aircraft.py), which re-verifies each imported
    mesh's bounds.
@@ -109,32 +112,47 @@ def missing_assets(manifest_path: Path) -> List[str]:
 
 
 #: The manifest version the render commandlet needs to place the mesh
-#: where the label is. Below it (version 1) the manifest carries no
-#: ``mesh_origin_actor_cm``, so the commandlet attached the body at the
-#: actor root -- the JSBSim structural datum -- and drew the B747 33.7 m
-#: forward of its label (the Camera Phase 1 initial run report measured
-#: 25-30 m along the airframe's own axis). Kept as a number here, not
+#: where the label is. Version 1 carried no ``mesh_origin_actor_cm``, so
+#: the commandlet attached the body at the actor root -- the JSBSim
+#: structural datum -- and drew the B747 33.7 m forward of its label
+#: (the Camera Phase 1 initial run report measured 25-30 m along the
+#: airframe's own axis). Version 2 (eb5c71d) carried an origin ASSUMED
+#: to be the staged FDM's VRP, which put the B747 mesh 3.9 m aft of its
+#: label and the A320 19.3 m aft (measured from the pinned vertices:
+#: each FlightGear mesh was modelled against its own repository's FDM,
+#: not the staged one). Version 3 MEASURES the origin from the mesh's
+#: nose extreme and lowest gear vertex. Kept as a number here, not
 #: imported from the converter, so a machine that only IMPORTS can still
 #: tell a stale manifest from a current one.
-MESH_MANIFEST_VERSION = 2
+MESH_MANIFEST_VERSION = 3
 
 
 def stale_manifest_reason(manifest_path: Path) -> Optional[str]:
     """Why an existing manifest must be re-converted, or None when it is
-    current. A manifest without ``version`` 2 or without
-    ``mesh_origin_actor_cm`` was written by the converter that mapped the
-    model about its own origin and said nothing about where that origin
-    sits in the actor; the commandlet would attach its mesh at the
-    structural datum and every mask would be offset by the VRP."""
+    current. A manifest without ``version`` 3 or without
+    ``mesh_origin_actor_cm`` was written by a converter that either said
+    nothing about where the model origin sits in the actor (version 1:
+    the commandlet would attach its mesh at the structural datum and
+    every mask would be offset by the whole origin-to-CG distance) or
+    assumed it from the staged FDM's VRP (version 2: the mesh drawn
+    3.9 m aft of its label on the B747, 19.3 m on the A320). Version 3
+    measures it from the vertices."""
     try:
         manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return f"unreadable ({exc})"
     version = manifest.get("version")
     if not isinstance(version, int) or version < MESH_MANIFEST_VERSION:
+        if isinstance(version, int) and version >= 2:
+            return (f"manifest version {version!r} predates {MESH_MANIFEST_VERSION}: "
+                    f"its mesh origin was assumed from the staged FDM's VRP, "
+                    f"not measured from the vertices (3.9 m off on the B747, "
+                    f"19.3 m on the A320), so the mesh would be drawn off its "
+                    f"label")
         return (f"manifest version {version!r} predates {MESH_MANIFEST_VERSION}: "
                 f"it records no mesh origin, so the mesh would be attached "
-                f"at the structural datum instead of the FDM's VRP")
+                f"at the structural datum instead of where the vertices "
+                f"say the model origin sits")
     origin = manifest.get("mesh_origin_actor_cm")
     if (not isinstance(origin, list) or len(origin) != 3
             or not all(isinstance(v, (int, float)) for v in origin)):

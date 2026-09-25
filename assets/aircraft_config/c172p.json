@@ -30,6 +30,13 @@
     "RearNavLight",
     "nav-light.*"
   ],
+  "gear_geometry": {
+    "parts": [],
+    "objects": [
+      ".*Wheel.*"
+    ],
+    "source": "c172-common.ac names its gear NoseWheel, LeftWheel, RightWheel, NoseWheelStrut, Left/RightWheelStrut, Left/RightWheelBrake; nothing else in the model matches .*Wheel.* (the control yoke is 'yoke'). Measured 2026-09-25 from the pinned commit: lowest gear vertex -1.368 m below the model origin (NoseWheel), main wheels -1.326 m"
+  },
   "surfaces": {
     "aileron_l": {
       "bone": "aileron_l",
