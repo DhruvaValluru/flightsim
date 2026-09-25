@@ -237,6 +237,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # refusal is reported instead of unwinding a stack trace at the
     # instructor. (Measured: flying a 1200 m example over a raster whose
     # ridge reaches 3043 m printed a traceback.)
+    from core.control.autopilot import ClosureError
     from core.fdm.errors import TrimError
     from core.terrain.contact import TerrainImpactError
 
@@ -247,6 +248,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
     except TrimError as exc:
         print(f"REFUSED -- trim: {exc}")
+        return 2
+    except ClosureError as exc:
+        # The held state was not reached (a 747 asked to hold altitude
+        # in severe turbulence, measured): the runner's own refusal to
+        # emit output, named, with its closure table -- not a traceback.
+        print(f"REFUSED -- run.closure: {exc}")
+        print("(the commanded state was not achieved within the declared "
+              "tolerances, so no run was recorded; state hold_state: "
+              "false for the open-loop flight, or ease the conditions)")
         return 2
     columns = result.telemetry.columns
 

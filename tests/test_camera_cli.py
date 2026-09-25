@@ -111,6 +111,19 @@ def test_refusal_example_refuses_by_name(tmp_path, capsys):
     assert not (tmp_path / "refused" / "capture_manifest.json").exists()
 
 
+def test_hazard_example_refuses_by_name(tmp_path, capsys):
+    """The second refusal rule the phase never had an example for: a
+    world-anchored camera stated inside the modelled tornado core is
+    refused before anything flies, by name, and nothing is written."""
+    code = capture_main([str(EXAMPLES / "cameras_hazard_refusal.yaml"),
+                         "--out", str(tmp_path / "funnel")])
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "camera.hazard_intersection" in out
+    assert "camera.terrain_clearance" not in out
+    assert not (tmp_path / "funnel" / "capture_manifest.json").exists()
+
+
 def test_card_carries_the_solved_pose_tracks(tmp_path):
     """python -m flightsim.capture --card: the run card's cameras block
     is the pose solver's own output, verbatim (the consume-verbatim
@@ -410,3 +423,52 @@ def test_capture_leaves_a_label_file_beside_every_frame(demo_run):
     assert "?" not in units.values(), (
         f"a recorded channel with no stated unit: "
         f"{[k for k, v in units.items() if v == '?']}")
+
+
+def test_a_closure_failure_is_a_named_refusal_not_a_traceback(tmp_path,
+                                                             capsys,
+                                                             monkeypatch):
+    """Measured: a 747 asked to HOLD altitude in severe turbulence did not
+    settle within the declared tolerance, and the CLI unwound a
+    ClosureError stack trace at the instructor. The runner's refusal to
+    emit output is a named outcome of the scenario."""
+    from core.control.autopilot import ClosureError
+    import core.scenario.runner as runner_module
+
+    def refuse(*args, **kwargs):
+        raise ClosureError("closure: FAIL\n  FAIL settled  commanded 0.00 "
+                           "m/s, achieved 1.08 (+1.08, tol 1.00)")
+
+    # The CLI imports run_spec at call time from the runner module.
+    monkeypatch.setattr(runner_module, "run_spec", refuse)
+    code = capture_main([str(EXAMPLES / "cameras_multi.yaml"),
+                         "--out", str(tmp_path / "unsettled"),
+                         "--max-previews", "0"])
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "REFUSED -- run.closure" in out
+    assert "Traceback" not in out
+    assert not (tmp_path / "unsettled" / "capture_manifest.json").exists()
+
+
+def test_event_example_captures_on_the_downburst_and_verifies(tmp_path):
+    """The event-driven example the phase never had: frames fire only
+    while the recorded sink rate is below the stated threshold, the
+    count is the event's, and the run verifies."""
+    from core.capture.verify import verify_run
+
+    out = tmp_path / "on_sink"
+    assert capture_main([str(EXAMPLES / "cameras_event_trigger.yaml"),
+                         "--out", str(out), "--max-previews", "0"]) == 0
+    manifest = json.loads((out / "capture_manifest.json")
+                          .read_text(encoding="utf-8"))
+    frames = manifest["frames"]
+    assert len(frames) >= 10
+    assert all(float(f["state"]["climb_rate_mps"]) < -10.0 for f in frames)
+    # Not a clock: the first capture is well into the flight, where the
+    # downburst is, and consecutive captures respect the refractory.
+    assert frames[0]["t_s"] > 5.0
+    gaps = [b["t_s"] - a["t_s"] for a, b in zip(frames, frames[1:])]
+    assert min(gaps) >= 1.0 - 1e-6
+    report = verify_run(out)
+    assert report.ok, report.render()
