@@ -571,7 +571,7 @@ def test_two_ids_swapped_in_every_pass_are_caught_by_geometry(run):
     is where the traffic is."""
     manifest = read_capture_manifest(run / "capture_manifest.json")
     for camera_dir in (run / "frames").iterdir():
-        payload = json.loads((camera_dir / "render.json").read_text())
+        payload = json.loads((camera_dir / "render.json").read_text(encoding="utf-8"))
         for record in payload["frame_records"]:
             for path in [camera_dir / record["labels"]["mask"]] + [
                     camera_dir / d["alone_png"] for d in record["labels"]["objects"]
@@ -636,7 +636,7 @@ def test_a_depth_scaled_by_1_02_fails_depth_vs_geometry(run):
     beyond the nearest keypoint (the tail, from behind) by more than
     1 % + 2 m."""
     for camera_dir in (run / "frames").iterdir():
-        for record in json.loads((camera_dir / "render.json").read_text())["frame_records"]:
+        for record in json.loads((camera_dir / "render.json").read_text(encoding="utf-8"))["frame_records"]:
             f32 = camera_dir / record["labels"]["depth_f32"]
             depth = np.fromfile(f32, dtype="<f4") * 1.02
             depth.astype("<f4").tofile(f32)
@@ -668,7 +668,7 @@ def test_the_occluder_hidden_in_the_full_pass_fails_visibility(run):
     every pixel), so only the overlap-ownership clause can see it: the
     farther object owns pixels the nearer one should."""
     for camera_dir in (run / "frames").iterdir():
-        payload = json.loads((camera_dir / "render.json").read_text())
+        payload = json.loads((camera_dir / "render.json").read_text(encoding="utf-8"))
         for record in payload["frame_records"]:
             alone = next((camera_dir / d["alone_png"] for d in record["labels"]["objects"]
                           if d.get("alone_png") and d["int_id"] == 2), None)
@@ -824,7 +824,7 @@ def test_the_cli_prints_the_gates_and_refuses_export_readiness_on_a_fail(
     out = capsys.readouterr().out
     assert "[FAIL] mask_vs_geometry:" in out
     assert "refused by name: annotation.mask_offset (mask_vs_geometry)" in out
-    recorded = json.loads((tmp_path / "shifted" / "verification.json").read_text())
+    recorded = json.loads((tmp_path / "shifted" / "verification.json").read_text(encoding="utf-8"))
     assert recorded["ok"] is False
     failed = {c["name"]: c for c in recorded["checks"] if c["status"] == "FAIL"}
     assert failed["mask_vs_geometry"]["failure"] == "annotation.mask_offset"

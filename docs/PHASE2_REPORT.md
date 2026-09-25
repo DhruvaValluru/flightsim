@@ -1891,8 +1891,11 @@ in a file this package may only add to. `labels.py`'s
 the verifier uses the contract's 16 and `labels.py` (not this
 package's file) still says the schedule stops at 12. `tests/test_messages.py`
 fails on package G's `campaign.arguments` / `campaign.state` (no
-catalogue entry) and two names G still lists as future -- G's, not
-D's; D's names are retired from `ALLOWED_FUTURE` and the scanner sees
-`failure=` and `FAIL_* =`. Sheets are drawn from the fabricated run's
+catalogue entry) and two names G still lists as future, and
+`tests/test_platform.py`'s utf-8 sweep names `core/campaign/campaign.py`
+and `tests/test_campaign.py` -- G's, not D's; D's names are retired
+from `ALLOWED_FUTURE`, the scanner sees `failure=` and `FAIL_* =`, and
+every text read in D's files states its encoding (the sweep found four
+that did not, fixed before landing). Sheets are drawn from the fabricated run's
 box airframes here; on a real run they show the beauty-less ID image
 (no beauty frame is composited).
