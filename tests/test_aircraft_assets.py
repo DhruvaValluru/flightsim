@@ -428,3 +428,52 @@ def test_a_version_1_manifest_is_stale_and_rebuilds(tmp_path, monkeypatch):
     manifest.write_text(json.dumps(data), encoding="utf-8")
     assert "mesh_origin_actor_cm" in importer.stale_manifest_reason(manifest)
     assert not importer.is_imported("TEST")
+
+
+def test_import_script_re_converts_a_stale_manifest(tmp_path, monkeypatch,
+                                                    capsys):
+    """scripts/import_aircraft.py said 'already converted' for a
+    version-1 manifest -- the one every machine has -- and skipped the
+    converter, so the mesh-origin fix never reached the asset on the
+    documented path. A stale manifest is re-converted, with the reason."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "import_aircraft_script",
+        Path(__file__).resolve().parents[1] / "scripts" / "import_aircraft.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+
+    manifest = tmp_path / "TEST" / "mesh_manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps({"magic": "flightsim-aircraft-mesh",
+                                    "name": "TEST", "version": 1}),
+                        encoding="utf-8")
+    converted = []
+    monkeypatch.setattr(script, "REPO", tmp_path)
+    monkeypatch.setattr(script, "configured_aircraft",
+                        lambda: {"TEST": tmp_path / "TEST.json"})
+    monkeypatch.setattr(script, "unavailable_reason", lambda name: None)
+    monkeypatch.setattr(script, "mesh_manifest_path", lambda name: manifest)
+    monkeypatch.setattr(script, "load_config", lambda name: {"name": name})
+    monkeypatch.setattr(script, "fetch_source",
+                        lambda config, path, report: tmp_path / "src")
+    monkeypatch.setattr(script, "convert",
+                        lambda path, report: converted.append(path) or manifest)
+
+    assert script.main(["TEST", "--no-import"]) == 0
+    out = capsys.readouterr().out
+    assert "re-converting" in out
+    assert "structural datum" in out
+    assert "already converted" not in out
+    assert converted == [tmp_path / "TEST.json"]
+
+    # A current manifest is left alone.
+    manifest.write_text(json.dumps({"magic": "flightsim-aircraft-mesh",
+                                    "name": "TEST", "version": 2,
+                                    "mesh_origin_actor_cm": [-1.0, 0.0, 0.0]}),
+                        encoding="utf-8")
+    converted.clear()
+    assert script.main(["TEST", "--no-import"]) == 0
+    assert "already converted" in capsys.readouterr().out
+    assert converted == []

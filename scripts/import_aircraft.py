@@ -37,7 +37,8 @@ sys.path.insert(0, str(REPO))
 
 from assets_pipeline.importer import (  # noqa: E402
     AircraftAssetError, configured_aircraft, convert, fetch_source,
-    import_manifests, load_config, mesh_manifest_path, unavailable_reason,
+    import_manifests, load_config, mesh_manifest_path,
+    stale_manifest_reason, unavailable_reason,
 )
 
 
@@ -72,10 +73,17 @@ def main(argv=None) -> int:
             skipped.append(name)
             continue
         manifest = mesh_manifest_path(name)
-        if manifest.is_file():
+        stale = stale_manifest_reason(manifest) if manifest.is_file() else None
+        if manifest.is_file() and stale is None:
             print(f"    already converted ({manifest.relative_to(REPO)})")
             manifests.append(manifest)
             continue
+        if stale is not None:
+            # A manifest the converter wrote before it recorded the mesh
+            # origin is not "converted": the mesh would be attached at
+            # the structural datum (NEXT.md gotcha 31). Re-convert; the
+            # source is already at the pinned commit, so no fetch happens.
+            print(f"    re-converting: {stale}")
         # One aircraft's failure must not cost the others their fetch and
         # convert: report it at the end, by name, and keep going.
         try:
