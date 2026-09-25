@@ -198,7 +198,10 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
     Stated coordinates mean "fly at that real place": defaulted and
     placed-on-scene coordinates never trigger (this runs BEFORE
     place_on_scene), and coordinates already on a curated or dynamic bake
-    pass through. The /bake endpoint clears the refusal; nothing here
+    pass through. A place SCENE-SETTING staged is not held to this rule
+    either -- a placeless prompt on a machine without bakes still runs,
+    on the flat slab at the staged datum (pick_scene says so in its
+    label), never on a substituted ridge. The /bake endpoint clears the refusal; nothing here
     downloads anything -- an HTTP /run stays fast and its digest stays the
     digest of what actually runs.
     """
@@ -276,15 +279,29 @@ def ensure_control_ridge() -> None:
         field.write(terrain_dir / "control_ridge")
 
 
+def scene_set(spec: ScenarioSpec) -> bool:
+    """True when the spec's place was chosen by scene-setting (the
+    planner's own provenance string on all three planned fields), as
+    opposed to stated, inferred, or left default."""
+    return (str(spec.latitude.source) == "derived"
+            and str(spec.terrain_elevation.source) == "derived"
+            and str(spec.latitude.frm or "").startswith("scene-setting")
+            and str(spec.terrain_elevation.frm or "").startswith(
+                "scene-setting"))
+
+
 def pick_scene(spec: ScenarioSpec) -> Dict:
     """Choose the scene the spec's geography earns -- never silently."""
     lat = float(spec.latitude.value)
     lon = float(spec.longitude.value)
     terrain_dir = TERRAIN_DIR
+    staged_absent = None
     for key, location in LOCATIONS.items():
         if (abs(lat - location.origin_lat) <= LOCATION_TOLERANCE_DEG
-                and abs(lon - location.origin_lon) <= LOCATION_TOLERANCE_DEG
-                and baked(terrain_dir / key)):
+                and abs(lon - location.origin_lon) <= LOCATION_TOLERANCE_DEG):
+            if not baked(terrain_dir / key):
+                staged_absent = key
+                continue
             imagery = terrain_dir / f"{key}_imagery.json"
             return {
                 "key": key, "kind": "real (Copernicus GLO-30)",
@@ -308,7 +325,14 @@ def pick_scene(spec: ScenarioSpec) -> Dict:
                          f"physics ground is the heightfield raster (AGL "
                          f"parity measured); track pre-flown for clearance",
             }
-    if float(spec.terrain_elevation.value) > 0.0:
+    if float(spec.terrain_elevation.value) > 0.0 and not scene_set(spec):
+        # The ridge stands in for UNNAMED mountains only. A datum that
+        # scene-setting planned for a curated place (413 m for the
+        # Flint Hills) belongs to that place: with its bake absent the
+        # scene is honestly flat at that datum, labelled below -- never
+        # 3299 m peaks under a "413 m" scene (measured: a 3000 m flight
+        # refused terrain.clearance at -89.5 m AGL over "413 m staged
+        # terrain" because the ridge had been substituted).
         if baked(terrain_dir / "control_ridge"):
             return {
                 "key": "control", "kind": "synthesised control ridge",
@@ -319,6 +343,15 @@ def pick_scene(spec: ScenarioSpec) -> Dict:
                          "(AGL parity measured); track pre-flown for "
                          "clearance",
             }
+    if staged_absent is not None and scene_set(spec):
+        return {"key": "flat", "kind": "flat", "terrain": None,
+                "imagery": None,
+                "label": f"the {staged_absent} bake is not on this machine "
+                         f"(scripts/bake_terrain.py {staged_absent} fetches "
+                         f"it); flat slab at its "
+                         f"{float(spec.terrain_elevation.value):g} m datum "
+                         f"until then -- the synthesised ridge is never "
+                         f"substituted for a staged place"}
     return {"key": "flat", "kind": "flat", "terrain": None, "imagery": None,
             "label": "no terrain requested; flat slab at the spec's "
                      "elevation"}

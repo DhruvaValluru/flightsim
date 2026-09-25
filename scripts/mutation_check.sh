@@ -806,6 +806,15 @@ mutate core/capture/verify.py \
     "a chase camera is graded against the offset its keyframes state at that time" \
     tests/test_camera_verify.py || failures=$((failures+1))
 
+# -- Phase 2, package A: the synthesised ridge never stands in for a
+# place scene-setting staged (the -89.5 m AGL refusal over "413 m
+# staged terrain").
+mutate webapp/runs.py \
+    '    if float(spec.terrain_elevation.value) > 0.0 and not scene_set(spec):' \
+    '    if float(spec.terrain_elevation.value) > 0.0:  # MUTATED: ridge under any datum' \
+    "a staged place with no bake is flat at its datum, never the control ridge" \
+    tests/test_webapp.py || failures=$((failures+1))
+
 # -- Camera Phase 2: the capture stage and the web app it reaches.
 mutate core/capture/verify.py \
     '    if worst > tol_m:' \

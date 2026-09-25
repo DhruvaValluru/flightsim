@@ -1383,3 +1383,47 @@ def test_run_refuses_a_buried_camera_on_the_web_surface(client):
     assert response.json()["refused"] == "validation"
     assert any(v["constraint"] == "camera.terrain_clearance"
                for v in response.json()["violations"])
+
+
+def test_a_staged_place_is_never_the_control_ridge(control_ridge):
+    """Measured (Phase 1 initial run report): 'fly the 747 at 3000 m and
+    250 kt' on a machine without the Flint Hills bake was staged on the
+    Flint Hills (a 413 m datum), the picker then substituted the 3299 m
+    synthesised control ridge under that datum, and the clearance
+    pre-flight refused at -89.5 m AGL over "413 m staged terrain" -- a
+    number that cannot be right for the scene the spec describes.
+
+    The ridge stands in for UNNAMED mountains only. With the staged
+    bake absent the scene is honestly flat at the staged datum, the
+    label says which bake is missing and how to fetch it, and the run
+    proceeds -- a placeless prompt on a machine without bakes still runs,
+    as it always did before a render provisioned the ridge.
+    """
+    from core.terrain.glo30 import LOCATIONS
+    from webapp.runs import (needs_dynamic_bake, pick_scene,
+                             plan_scene_setting, plan_terrain_flight,
+                             scene_set)
+
+    spec = compile_prompt("fly the 747 at 3000 m and 250 kt")
+    plan_scene_setting(spec)
+    assert scene_set(spec)
+    assert float(spec.terrain_elevation.value) == 413.0
+    # The fixture's TERRAIN_DIR holds the control ridge and nothing else:
+    # exactly the machine the report was written on.
+    scene = pick_scene(spec)
+    assert scene["key"] != "control", scene
+    assert scene["terrain"] is None
+    assert "flint_hills" in scene["label"]
+    assert "bake_terrain.py flint_hills" in scene["label"]
+    assert "413 m" in scene["label"]
+    assert float(spec.latitude.value) == LOCATIONS["flint_hills"].origin_lat
+    # A staged place is not a stated one: the run is not held for a bake.
+    assert needs_dynamic_bake(spec) is None
+    # No ridge under the flight: no clearance refusal for a 3000 m run.
+    assert plan_terrain_flight(spec) is None
+
+    # Unnamed mountains still earn the ridge, exactly as before.
+    peaks = compile_prompt("fly the 747 at 4000 m over 2000 m mountains")
+    assert not scene_set(peaks)
+    assert pick_scene(peaks)["key"] == "control"
+    assert needs_dynamic_bake(peaks) is None
