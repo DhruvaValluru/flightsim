@@ -2363,6 +2363,16 @@ mutate core/nl/llm_compiler.py \
     "the LLM tier refuses a policy leaf of an undocumented form" \
     tests/test_llm_compiler.py || failures=$((failures+1))
 
+# Phase 2 package A (contracts §9): the ONE render-command builder both
+# the CLI and the web app draw their flags from. The -mesh= forwarding is
+# the line the placeholder rule hangs on: without it the commandlet draws
+# the placeholder boxes under a manifest that names the real mesh.
+mutate core/render/flags.py \
+    '    if mesh is not None:' \
+    '    if False:  # MUTATED: the mesh is never forwarded; the placeholder boxes draw' \
+    "the render builder forwards -mesh= to both callers" \
+    tests/test_render_flags.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

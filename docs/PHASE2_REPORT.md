@@ -1211,3 +1211,102 @@ carries a `traffic` block yet. The C++ writes the depth file on the
 assumption every UE target is little-endian (asserted at compile
 time). `mask.png` now carries EVERY int_id, so on a single-aircraft
 run its terrain pixels are 2 where Phase 10 wrote 0.
+
+## P2-A/render-flags -- one render-command builder for the CLI and the web app
+
+**What was built.** Measured before this item: the CLI's `--render`
+(`flightsim/capture.py`) and the web app's `RunManager._render`
+(`webapp/runs.py`) assembled the FlightSimRender commandlet's flags by
+hand, in two files, and disagreed. The web app passed `-shot=showcase
+-fps= -width= -height=`, the harness's noon look and `-mesh=`; the CLI
+passed `-labels` and (since the placeholder rule) `-mesh=`, but no look
+unless the randomisation block was on, and no size; NEITHER passed
+`-deterministic`, the one flag Gate 10-R proves the frame digests need.
+Nothing compared the two lists, so a flag one of them forgot was
+invisible (the subsystem maps count thirteen hand-built commands in
+all; these two are the ones labelled data comes through). Now:
+
+* `core/render/flags.py` (new package `core/render/`): `render_flags(...)`
+  returns the ORDERED argument list after the editor/project/`-run`
+  tokens -- `-scenario= -frames= -Visual -shot=showcase <preset camera
+  flags> -fps= -width= -height= <look> <launcher tokens> <trailing>
+  <extra> -labels -linear -deterministic -GeorefTerrain -terrain=
+  -imagery= -mesh= -telemetry=` -- with the terrain, imagery, mesh and
+  telemetry tokens present only when given, the void tier stripped of
+  scene and sun, a partial look completed from `DEFAULT_LOOK` key by
+  key, and every opt-in switch emitted at most once (the web app's loop
+  states `-labels` through `extra`). `for_wrapper(flags)` drops exactly
+  what `scripts/render_ue_scenario.ps1` writes itself (`-scenario=
+  -frames= -camera-index= -telemetry=` and the launcher tokens).
+  The builder touches no filesystem and runs no subprocess.
+* `flightsim/capture.py` builds its wrapper command from
+  `for_wrapper(render_flags(...))`; `webapp/runs.py::_render` builds its
+  editor command from `render_flags(...)`. A consume-poses camera pass
+  (the one whose pixels are the dataset; recognised by `-camera-index=`
+  in `extra`) gets `-deterministic`; the legacy single pass and the
+  throw-away solve pass stay byte-identical (no `-labels`, no
+  `-deterministic`, preset camera flags kept).
+* `tests/test_render_flags.py` (10 tests): compiles one spec
+  (`examples/cameras_multi.yaml`), drives BOTH code paths with
+  `subprocess.run` intercepted, and asserts the two flag LISTS are
+  identical apart from the launcher-owned tokens (and, separately, the
+  sets), and that both carry `-mesh=<the same path>`, `-labels`,
+  `-Visual`, the four look flags and `-deterministic`. Also pins the
+  web app's camera-less list against the recorded expectation, the
+  solve pass gaining nothing, `DEFAULT_LOOK` and the size constants
+  equal to `showcase_matrix`'s, the void tier, `for_wrapper`, and the
+  once-only switches.
+* Mutation guard: `scripts/mutation_check.sh` -- "the render builder
+  forwards -mesh= to both callers" (`if mesh is not None:` -> `if
+  False:`). Confirmed by hand: 4 of 10 tests in
+  `tests/test_render_flags.py` fail under the mutation; the file was
+  restored byte-identical (sha256 checked) and `__pycache__` purged.
+* Contracts §9.1 records the four departures from the page: the module
+  name and signature; the launcher tokens inside the list; the CLI
+  taking the web app's default look (and `-shot -fps -width -height
+  -deterministic`) where it took the commandlet's defaults before; and
+  the web app's consume-poses pass dropping its inert `-chase=`/`-camera=
+  chase`, which the one-builder test caught as the only remaining
+  difference.
+
+**How to demonstrate (any platform).**
+
+    .venv/bin/pytest -q -p no:warnings tests/test_render_flags.py
+    .venv/bin/pytest -q -p no:warnings tests/test_camera_spec.py tests/test_camera_cli.py tests/test_randomization.py tests/test_webapp_capture.py tests/test_webapp.py tests/test_powershell_scripts.py   # 317 passed here
+    ./scripts/mutation_check.sh          # "ok  the render builder forwards -mesh= to both callers"
+
+To see the two commands side by side without an engine, run the first
+file with `-k same_flags -s`: the CLI's wrapper command and the web
+app's editor command are captured from the intercepted `subprocess.run`
+and the assertion message lists whatever differs.
+
+**Not verified here.** No engine on this platform, so: that the
+commandlet accepts the combined list on a real pass (every token is one
+it already parsed for one caller or the other; `-shot=showcase` is not
+a shot the commandlet distinguishes from its default, `-width/-height/
+-fps` are overridden by the card's camera under consume-poses -- both
+by reading of `FlightSimRenderCommandlet.cpp`, not by a render); that
+dropping `-chase=`/`-camera=chase` from the consume-poses pass leaves
+the pixels identical (the code replaces the chase placement with the
+track's first pose before the warm-up captures -- by reading); that the
+CLI's frames under the noon look match the web app's for the same spec
+(the first Windows render of one spec through both paths is the
+measurement; `render.json` records the sun either way); that
+`render_ue_scenario.ps1` forwards the longer list to every camera pass
+(it forwards `$args[2..]` verbatim; `tests/test_powershell_scripts.py`
+reads the script, nothing runs it here). No C++ changed.
+
+**Limitations.** The builder owns the flag list, not the placeholder
+refusal: `flightsim/capture.py` still imports
+`webapp.runs.refuse_placeholder_mesh` (the CLI depending on the web
+layer, critique) -- that block was outside this item's files and is an
+open item for whoever owns it. The eleven experiment builders
+(`gate6_visual.py`, `gate10_render_repro.py`, `showcase_matrix.py`, ...)
+still build their own commands; contracts §9 says they migrate next.
+The `.sh` wrapper forwards nothing (two arguments, macOS only), so off
+Windows the forwarded flags reach no engine -- the wrapper refuses
+`ue.platform` first, as before. `webapp/runs.py` keeps its now-unused
+`TIME_OF_DAY` / `VISIBILITY` imports (the import block is not the
+method this item owned). The `.ps1`'s header comment still says
+`-width= -height=` are not passed on the camera path; they now are, and
+are inert there -- the comment is stale, the script's behaviour is not.

@@ -951,6 +951,49 @@ one of the two, stated in the commit. The flags that exist today
 `-telemetry=<cam>/host_telemetry.json` per camera pass and forwards the
 rest. No new flags are added this phase (§5.4 moves look onto the card).
 
+### 9.1 As landed (package A, last item) -- the name, the signature and four stated departures
+
+* **The module is `core/render/flags.py`, the function `render_flags`**
+  (the orchestrator's name for this item; the brainstorm's
+  `core/render/command.py` / `render_command` does not exist and nothing
+  imports it). Signature: `render_flags(card, frames, *, scene, mesh,
+  look, camera_flags, labels=True, linear=False, deterministic=True,
+  void=False, width, height, fps, telemetry=None, extra=())` -- `cameras`
+  became `camera_flags` (the `(inline, trailing)` pair
+  `webapp.runs.camera_render_flags` already produces, for the legacy
+  preset path only), and `telemetry` / `extra` were added because the
+  web app's per-camera loop (`webapp/capture.py`, not this package's
+  file) hands `-camera-index=N -labels` and the per-camera telemetry
+  path in through them. `for_wrapper(flags)` strips what
+  `render_ue_scenario.ps1` writes itself (`-scenario= -frames=
+  -camera-index= -telemetry=` and the launcher tokens).
+* **The launcher tokens are part of the list**, at the position the web
+  app has always put them (mid-list), because the camera-less argument
+  list is pinned byte-identical by `tests/test_camera_spec.py` and the
+  commandlet's parser is order-blind. The wrapper strips them.
+* **The CLI now passes the web app's default look when the
+  randomisation block is off** (`DEFAULT_LOOK` = noon, clear; pinned
+  equal to `showcase_matrix.TIME_OF_DAY["noon"]` + `VISIBILITY["clear"]`)
+  plus `-shot=showcase -fps= -width= -height=` and `-deterministic`.
+  Before, the CLI passed no look and the commandlet's own defaults lit
+  the frames. Two callers cannot produce one flag set unless one moves;
+  the web app's list is the pinned one. `-width/-height/-fps` are inert
+  on every card with a cameras block (the commandlet takes the size
+  from the card's camera and records `applied_width_px`), stated in the
+  module docstring as not claimed.
+* **The web app's per-camera (consume-poses) pass no longer carries
+  `-chase=`/`-camera=chase`**: the test that drives both paths caught
+  them as the one difference. By reading of the commandlet they were
+  inert there (the pose comes from the card, "replacing the chase
+  settle-in placement"; the default preset word is already `chase`);
+  not measured on Windows. The legacy single pass and the solve pass
+  keep them.
+* **The placeholder refusal did NOT move into the builder** (this page
+  said it would): `flightsim/capture.py` still imports
+  `webapp.runs.refuse_placeholder_mesh`, outside the block this item
+  owned. The builder forwards `mesh` verbatim and checks no filesystem;
+  the callers vouch for the path. Open item, stated in the report.
+
 ---
 
 ## 10. Look lane settings (owner decisions stated, measured switches)

@@ -1692,39 +1692,55 @@ class RunManager:
         camera_render_flags (default cameras when none stated -- pinned
         byte-identical to the old hardcoded selection).
         """
+        from core.render.flags import render_flags
+
         project = REPO / "ue" / "FlightSim.uproject"
         frames.mkdir(parents=True, exist_ok=True)
         (frames / "render.json").unlink(missing_ok=True)
-        tod = look or TIME_OF_DAY["noon"]
-        inline, trailing = camera_flags or (
-            [f"-chase={WEBAPP_CHASE.get(aircraft, '-110:0:12')}",
-             "-camera=chase"], [])
+        extra = list(extra or ())
+        # Phase 2 (package A, contracts §9): the flag list comes from the
+        # ONE builder the CLI also uses. Which passes get which flags:
+        #   * a per-camera pass (the capture stage's loop hands in
+        #     -camera-index=N and -labels through ``extra``) is the pass
+        #     whose pixels are the dataset. It gets -deterministic --
+        #     the pins Gate 10-R proves the frame digests need, which no
+        #     web render ever passed before -- and NO preset camera
+        #     flags: under consume-poses the commandlet places the
+        #     camera from the card's own track ("replacing the chase
+        #     settle-in placement", FlightSimRenderCommandlet.cpp) and
+        #     its default preset word is already "chase", so the
+        #     -chase=/-camera=chase this method used to add were inert
+        #     by reading of that code (not measured on Windows). The
+        #     CLI states none, and the one-builder test (tests/
+        #     test_render_flags.py) is what caught the difference.
+        #   * the legacy single-pass preset path and the throw-away
+        #     solve pass (_fly_host, a card without cameras) keep the
+        #     preset flags -- there they place the camera -- and stay
+        #     byte-identical: no -labels, no -deterministic (the
+        #     camera-less list is pinned by test).
+        # -labels is never added here: the loop states it, and the
+        # builder does not emit a switch twice.
+        per_camera = any(token.startswith("-camera-index=")
+                         for token in extra)
+        if camera_flags is None and not per_camera:
+            camera_flags = (
+                [f"-chase={WEBAPP_CHASE.get(aircraft, '-110:0:12')}",
+                 "-camera=chase"], [])
+        inline, trailing = camera_flags or ((), ())
         command = [
             str(EDITOR), str(project), "-run=FlightSimBridge.FlightSimRender",
-            f"-scenario={card}", f"-frames={frames}",
-            "-Visual", "-shot=showcase",
-            *inline,
-            f"-fps={FPS}", f"-width={WIDTH}", f"-height={HEIGHT}",
-            f"-sun-elev={tod['sun_elev']}", f"-sun-azim={tod['sun_azim']}",
-            f"-exposure-bias={tod['exposure_bias']}",
-            f"-fog-density={(look or {}).get('fog_density', VISIBILITY['clear'])}",
-            "-unattended", "-nopause", "-nosplash",
-            "-stdout", "-FullStdOutLogOutput",
-            "-RenderOffScreen", "-AllowCommandletRendering",
-        ]
-        command += list(trailing)
-        command += list(extra or ())
-        if scene.get("terrain"):
-            command += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
-        if scene.get("imagery"):
-            command += [f"-imagery={scene['imagery']}"]
-        if mesh.is_file():
-            command += [f"-mesh={mesh}"]
-        if telemetry is not None:
-            # The SHARED recorder's own file (same component all three hosts
-            # use), stamping the FDM's clock -- the aero panel reads it
-            # verbatim, no resampling.
-            command += [f"-telemetry={telemetry}"]
+        ] + render_flags(
+            card, frames, scene=scene,
+            # The model the run provisioned; absent -> the placeholder
+            # boxes, exactly as before (the solve pass passes Path("")).
+            mesh=mesh if mesh.is_file() else None,
+            look=look, camera_flags=(inline, trailing),
+            labels=False, deterministic=per_camera,
+            width=WIDTH, height=HEIGHT, fps=FPS,
+            # The SHARED recorder's own file (same component all three
+            # hosts use), stamping the FDM's clock -- the aero panel
+            # reads it verbatim, no resampling.
+            telemetry=telemetry, extra=extra)
         log = frames.parent / "render.log"
         with log.open("w") as sink:
             subprocess.run(command, stdout=sink, stderr=subprocess.STDOUT,

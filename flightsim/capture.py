@@ -668,38 +668,52 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     import subprocess
 
     frames_dir = out / "frames"
+    from core.render.flags import (
+        DEFAULT_FPS, DEFAULT_HEIGHT, DEFAULT_WIDTH, for_wrapper, render_flags,
+    )
+
     command = ue_runner_command(REPO, "render_ue_scenario")
     command += [str(out / "card.json"), str(frames_dir)]
+    # Phase 2 (package A, contracts §9): the flags come from the ONE
+    # builder the web app also uses, so the two render paths cannot
+    # disagree by one of them forgetting a flag (measured: this command
+    # never passed -mesh= until the placeholder rule, and neither path
+    # passed -deterministic). The wrapper adds -scenario= -frames= per
+    # run and -camera-index=N -telemetry= per camera pass, plus the
+    # launcher tokens; for_wrapper() strips exactly those.
+    #
     # The scene the frames are taken in. Gate 5's tier is a black void
     # -- deliberately, because its silhouette measurements need one --
     # and the camera phase inherited it by never asking for anything
     # else. The result was a grey airframe on black: no sky, no
-    # horizon, no ground. Correct geometry, and not a picture of a
-    # camera view, which is the whole complaint the phase exists to
-    # answer. -Visual builds the real scene (sun, sky, atmosphere, fog,
-    # and terrain when a bake is present), and the aircraft is then IN
-    # something. --void keeps the old tier for anyone measuring
-    # silhouettes.
-    if not args.void:
-        command.append("-Visual")
-        if terrain_stem:
-            command.append(f"-terrain={terrain_stem}")
-            command.append("-GeorefTerrain")
-    # Phase 10: the engine half of the labels -- instance and class
-    # masks, 16-bit depth, occlusion -- beside every frame of every
-    # camera pass. The wrapper forwards it to each -camera-index pass.
-    command.append("-labels")
-    # The imported mesh, checked above. The wrapper forwards it to each
-    # camera pass; the commandlet refuses a mesh/FDM mismatch itself.
-    command.append(f"-mesh={_mesh_manifest_path(spec)}")
-    # Phase 10: the sampled look, when the randomisation block is on.
-    # Off, the commandlet's own defaults apply exactly as before.
-    look = render_look(spec)
-    if look is not None:
-        command += [f"-sun-elev={look['sun_elev']}",
-                    f"-sun-azim={look['sun_azim']}",
-                    f"-exposure-bias={look['exposure_bias']}",
-                    f"-fog-density={look['fog_density']}"]
+    # horizon, no ground. -Visual builds the real scene (sun, sky,
+    # atmosphere, fog, and terrain when a bake is present), and the
+    # aircraft is then IN something. --void keeps the old tier for
+    # anyone measuring silhouettes (no -Visual, no terrain, no look).
+    #
+    # The look: the sampled one when the randomisation block is on;
+    # off, the builder's DEFAULT_LOOK (the harness's noon, the web
+    # app's default since the showcase matrix). Before the builder this
+    # command passed NO look when the block was off and the commandlet's
+    # own defaults lit the frames (no sun override, fog 0.0025, bias
+    # 11.0); one builder means one default, and the web app's is the
+    # one pinned by test. render.json records the sun either way.
+    #
+    # -labels: the engine half of the labels beside every frame of
+    # every camera pass (Phase 10). -deterministic: the texture/LOD
+    # pins Gate 10-R proves the frame digests need. -mesh=: the
+    # imported model checked above; the commandlet refuses a mesh/FDM
+    # mismatch itself. The size and rate flags are the legacy path's;
+    # every card this command writes carries cameras, so the commandlet
+    # takes the size from the card's own camera and they are inert
+    # (core/render/flags.py says what is and is not claimed).
+    command += for_wrapper(render_flags(
+        out / "card.json", frames_dir,
+        scene={"terrain": terrain_stem},
+        mesh=_mesh_manifest_path(spec),
+        look=render_look(spec), camera_flags=None,
+        labels=True, deterministic=True, void=bool(args.void),
+        width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, fps=DEFAULT_FPS))
     print(f"rendering {len(cameras)} camera pass(es) into {frames_dir} "
           f"{'in the black void (--void)' if args.void else 'in the visual scene'} ...")
     completed = subprocess.run(command)
