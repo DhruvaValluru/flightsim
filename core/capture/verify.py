@@ -449,6 +449,28 @@ def verify_intrinsics(manifest: Dict) -> Check:
 
 # -- check: the solved pose against the stated camera --------------------
 
+def _keyframed_scalar(moves: Sequence[Dict], key: str, t: float,
+                      default: float) -> float:
+    """The value one keyframed camera field states at time ``t``:
+    piecewise-linear between the keyframes that carry ``key``, held at
+    the boundary values outside them, ``default`` when no keyframe
+    carries it. Written here in plain arithmetic on purpose: the
+    verifier grades the solver's track and may not borrow the solver's
+    interpolation to do it."""
+    keyed = sorted((float(m["t_s"]), float(m[key])) for m in (moves or [])
+                   if key in m)
+    if not keyed:
+        return default
+    if t <= keyed[0][0]:
+        return keyed[0][1]
+    if t >= keyed[-1][0]:
+        return keyed[-1][1]
+    for (t0, v0), (t1, v1) in zip(keyed, keyed[1:]):
+        if t0 <= t <= t1:
+            return v1 if t1 == t0 else v0 + (t - t0) / (t1 - t0) * (v1 - v0)
+    return keyed[-1][1]
+
+
 def verify_pose_matches_spec(manifest: Dict) -> Check:
     """The solved track must be the camera the spec asked for.
 
@@ -552,9 +574,20 @@ def verify_pose_matches_spec(manifest: Dict) -> Check:
                     f"{expected_range:.3f} m -- a body-fixed camera is "
                     f"rigid")
         elif preset in ("chase", "wingman"):
-            offset = (float(_spec_value(spec, "offset_forward_m", 0.0)),
-                      float(_spec_value(spec, "offset_right_m", 0.0)),
-                      float(_spec_value(spec, "offset_up_m", 0.0)))
+            # The station the spec states AT THIS FRAME'S TIME: a move
+            # word ("pull back", "push in", "orbit") keyframes the
+            # offset over the flight, and the keyframes are the
+            # contract. Graded against the static offset, a documented
+            # "pull back" failed this check at 172.1 m against a 166.0 m
+            # bound (Phase 1 initial run report) -- the solver had done
+            # exactly what the word asked. Interpolated here with the
+            # verifier's own arithmetic, never the solver's.
+            t_frame = float(record.get("t_s", 0.0))
+            offset = tuple(
+                _keyframed_scalar(moves, key, t_frame,
+                                  float(_spec_value(spec, key, 0.0)))
+                for key in ("offset_forward_m", "offset_right_m",
+                            "offset_up_m"))
             magnitude = math.sqrt(sum(v * v for v in offset))
             # The station is smoothed onto with a time constant, so the
             # camera trails it; the bound is generous enough that lag at

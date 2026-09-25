@@ -796,6 +796,16 @@ mutate core/capture/verify.py \
     "a landmark that does not triangulate back fails cross-view consistency" \
     tests/test_camera_engine_parity.py || failures=$((failures+1))
 
+# -- Phase 2, package A: a keyframed move is the station the verifier
+# grades against; with the keyframes ignored the documented "pull back"
+# fails at 172 m against a 166 m bound (the Phase 1 defect), and the
+# push-in-vs-pull-back corruption must still be caught.
+mutate core/capture/verify.py \
+    '                _keyframed_scalar(moves, key, t_frame,' \
+    '                _keyframed_scalar([], key, t_frame,  # MUTATED: static offset' \
+    "a chase camera is graded against the offset its keyframes state at that time" \
+    tests/test_camera_verify.py || failures=$((failures+1))
+
 # -- Camera Phase 2: the capture stage and the web app it reaches.
 mutate core/capture/verify.py \
     '    if worst > tol_m:' \

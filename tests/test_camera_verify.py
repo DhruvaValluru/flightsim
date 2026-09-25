@@ -207,3 +207,60 @@ def test_verify_run_refuses_a_missing_or_wrong_version_manifest(tmp_path):
     manifest["manifest_version"] = 99
     write_capture_manifest(manifest, tmp_path)
     assert not verify_run(tmp_path).ok
+
+
+# -- keyframed moves are the contract the station is graded against -----
+
+def _pulled_back_manifest(duration_s=40.0):
+    """A chase camera that pulls back over an airliner-speed flight: the
+    documented move doubles the offset, and the solver does exactly
+    that. Phase 1's initial run report recorded this camera failing
+    pose_matches_spec at 172.1 m against a 166.0 m bound, because the
+    check graded the trailing camera against the STATIC spec offset
+    while the spec's own keyframes had moved it."""
+    spec = compile_prompt(
+        f"chase the 747 for {int(duration_s)} seconds and pull back")
+    assert spec.cameras and spec.cameras[0].moves, "the move word must key"
+    columns = make_columns(duration_s=duration_s, speed_mps=144.0)
+    return manifest_for(spec, columns), spec
+
+
+def test_pose_check_grades_a_pulled_back_camera_against_its_keyframes():
+    from core.capture.verify import verify_pose_matches_spec
+
+    manifest, _ = _pulled_back_manifest()
+    check = verify_pose_matches_spec(manifest)
+    assert check.status == PASS, check.detail
+
+
+def test_pose_check_still_fails_when_the_track_ignores_the_keyframes():
+    """The clause is live: a spec that says 'push in' while the recorded
+    track pulled back is a camera that is not where the spec put it."""
+    from core.capture.verify import verify_pose_matches_spec
+
+    manifest, spec = _pulled_back_manifest()
+    camera_id = str(spec.cameras[0].camera_id.value)
+    (entry,) = [b for b in manifest["cameras"]
+                if str(b["camera_id"]) == camera_id]
+    keyed = entry["spec"]["moves"]
+    first, last = keyed[0], keyed[-1]
+    for key in ("offset_forward_m", "offset_right_m", "offset_up_m"):
+        last[key] = 0.5 * first[key]          # push in, not pull back
+    check = verify_pose_matches_spec(manifest)
+    assert check.status == FAIL, check.detail
+    assert "stated station" in check.detail
+
+
+def test_the_phase1_failure_reproduces_when_keyframes_are_not_consulted(
+        monkeypatch):
+    """The defect, kept as a measurement: grade the same pulled-back
+    track against the static offset (what the check did before) and it
+    fails exactly the way the Phase 1 report recorded."""
+    from core.capture import verify as verify_module
+
+    manifest, _ = _pulled_back_manifest()
+    monkeypatch.setattr(verify_module, "_keyframed_scalar",
+                        lambda moves, key, t, default: default)
+    check = verify_module.verify_pose_matches_spec(manifest)
+    assert check.status == FAIL, check.detail
+    assert "stated station" in check.detail
