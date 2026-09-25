@@ -307,3 +307,125 @@ pixel measurement (`mask_vs_geometry`, package D) and is not claimed.
   `drawn_airframe` does not yet grade `drawn.origin_basis`, so a render
   from an eb5c71d manifest would still PASS that check until the
   verifier owner lands contracts §0.1's consequence.
+
+## P2-I/messages -- the message catalogue (package I, part 1: no UI yet)
+
+**What was measured, and what was defective.** The refusal names were
+enumerated from the code, not from the contracts page: a scanner
+written in the test (regexes over `core/`, `webapp/`, `flightsim/` and
+`assets_pipeline/`) finds 85 names in eight shapes -- `Violation("…")`
+first arguments including the multi-line calls, `constraint=` keywords
+and class attributes, `"constraint":` and `"refused":` dict literals,
+`<X>Error("<name>", …)` positional constraints, `getattr(…, "constraint",
+"<default>")` defaults, `"<name>: …"` message prefixes, and every
+`REFUSED -- <name>:` line the CLIs print. Three findings from the scan.
+(1) Contracts §11 listed `camera.track` and `camera.multi_render` as
+error constraints; in the code `camera.track` exists only as a
+`getattr` default in `webapp/capture.py` and `camera.multi_render` only
+as the prefix of a `ValueError` message in `webapp/runs.py` -- both are
+covered, but a scanner that read only `Violation(` and `constraint=`
+would have missed both. (2) Three bare names have no section:
+`trim`, `validation` and `weather` (the CLI's `REFUSED -- trim:` line
+and the web app's `"refused": "validation"` / `"weather"` on a 409);
+they are catalogued as spelled rather than renamed, because
+`scripts/verify_phase1.sh` and the tests grep for the spellings.
+(3) The dynamic names `randomization.{name}` in `validate_randomization`
+expand to eleven real names (every `FIELD_ORDER` field the file names by
+quoted literal); the contracts' "`randomization.<field>` (each
+range/jitter field by name)" is now a list. Six `REFUSED --` lines carry
+NO name (`flightsim/verify.py` L69, L116; `flightsim/capture.py` L162,
+L391, L494, L621: a bare `{exc}` or "the render wrapper exited N") and
+are left as a finding for their owners, not given invented names here.
+The `Violation.render()` string-limit crash the critique named was
+already fixed on HEAD (`_shown`), so the catalogue's string limits
+(`1950-2050`) render verbatim without a special case.
+
+**What was built.** `core/messages/catalog.yaml`: 158 entries -- the
+85 names the code emits, the 23 verifier checks as `check.<name>` plus
+the 7 checks §4 adds, the §11 names later packages will emit, `spec.version`
+/ `manifest.version` / `compile.rejected` / `compile.unavailable` for the
+exceptions that carry no constraint string, `verdict.{pass,fail,not_run}`,
+and the progress states (`progress.campaign.*` from §6.1's `campaign.json`,
+`progress.case.*` from the ledger, `progress.page.*` for the six page
+states). Each entry is `{sentence, hint?}`: plain English, no field
+names or identifiers (a test greps for `snake_case` and `dotted.names`
+in every sentence), numbers through `{placeholders}`, a plural form
+`{n:one|many}` picked by the value of `n`. `core/messages/__init__.py`:
+`render(name, **params)`, `explain(obj) -> {"sentence", "hint", "rule"}`
+over a `Violation`, the web app's five-key dict, an exception with a
+`.constraint` (or one of the four classes the CLI names by hand), or a
+`ValueError` whose sentence identifies it (`spec.version`,
+`manifest.version`, the two `compile.*`). The parameters are the
+refusal's own fields plus `shortfall` (limit − actual), `excess`
+(actual − limit) and `count` (violations in a report), so
+`camera.terrain_clearance` at actual −89.5 / limit 2 reads "The camera's
+path drops 91.5 m below the minimum height above the ground; it must
+stay at least 2 m above the terrain." A missing placeholder renders as
+nothing and the sentence is tidied around the gap; nothing ever raises.
+An unknown name returns the raw name with the technical message under
+it -- and never an invented sentence. `python -m core.messages` lists
+the catalogue; with a name and `key=value` pairs it renders one entry
+and exits 1 when the name is unknown. `tests/test_messages.py` (18
+tests): the scanner is pinned to one real site per shape and a floor of
+80 names, so a regex that quietly finds nothing fails; coverage (every
+scanned name and every `Check("…")` has an entry); liveness (every
+entry is scanned, a check, a pinned exception sentence, or listed in
+`ALLOWED_FUTURE` with its package -- and a name that lands must leave
+that set); rendering with numbers, string limits, plurals for 1 and 3,
+absent placeholders, the unknown-name fallback, the three 409 shapes,
+and the command line. Three mutation guards in
+`scripts/mutation_check.sh`, each applied by hand and confirmed to make
+the test file fail, the source restored byte-identical: an entry
+dropped from the catalogue at load time; the unknown-name fallback
+replaced by an invented sentence; placeholder values dropped from the
+sentence.
+
+**How to demonstrate (any platform).**
+
+    .venv/bin/pytest -q -p no:warnings tests/test_messages.py
+    .venv/bin/python -m core.messages | head -30
+    .venv/bin/python -m core.messages camera.terrain_clearance actual=-89.5 limit=2
+    .venv/bin/python -m core.messages camera.hazard_intersection actual=1
+    .venv/bin/python -m core.messages camera.hazard_intersection actual=3
+    .venv/bin/python -m core.messages no.such_name; echo "exit $?"
+    .venv/bin/python -c "
+    from core.scenario.validate import Violation
+    from core.messages import explain
+    print(explain(Violation('airspeed.stall_margin', 'below 1.05 x Vs',
+                            actual=95.0, limit=118.2, unit='kt CAS')))"
+    scripts/mutation_check.sh 2>&1 | grep -E "catalogue|invented|refusal's own numbers"
+
+The last line prints three `ok` rows; a `WEAK` row is a finding.
+
+**Not verified here.** Nothing in this package touches the engine or
+the C++. The seven sentences for the §4 checks that do not exist yet
+(`check.mask_integers_only` … `check.applied_intrinsics`) and every
+`annotation.*`, `authority.*`, `storage.*`, `campaign.*`, `progress.*`
+and `verdict.*` sentence describe the contract's stated meaning, not
+measured behaviour; they sit in `ALLOWED_FUTURE` until their package
+lands and removes them. `export.unverified_labels` was found in the
+working tree's `core/dataset/export.py` (package E, in flight during
+this build) and is therefore NOT in `ALLOWED_FUTURE`; if E's commit
+does not carry that raise site, the liveness test names it. No web
+page or endpoint reads the catalogue yet (part 2); the CLIs still print
+the technical text.
+
+**Limitations.** The sentences are one author's reading of each rule's
+docstring and message; a rule with several distinct clauses under one
+name (`camera.intrinsics` has six, `camera.identifier` seven) gets one
+sentence that covers the family, with the producer's technical message
+still the specific account. The plural form handles English one/many
+only. The scanner reads source text, not the AST: a name built by
+concatenation, or a `Violation` whose first argument is a variable,
+would not be seen -- today none is, and the eight shapes are pinned by
+test so a ninth shape is a test change, not a silent gap. `explain()`
+classifies un-named exceptions by class NAME (`TrimError`,
+`ClosureError`, `TerrainImpactError`, `WeatherUnavailableError`) and by
+sentence fragment for the two `ValueError`s and `LLMCompileError`, so
+it imports no producer; a renamed class or reworded sentence is caught
+by `test_named_exception_sentences_still_exist` for the fragments and
+NOT for the class names (a finding for part 2: name those four
+exceptions in their own modules). This package appends to
+`scripts/mutation_check.sh` and `docs/PHASE2_CONTRACTS.md`, which the
+brief did not list under its files; the instructor's rules require
+both and the additions are append-only.

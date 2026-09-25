@@ -721,6 +721,25 @@ agent in the tests tries each violation and is denied.
   `BatchError`, `ExportError`, `AircraftAssetError`, `ConvertError`, and
   the `ValueError` sentences (`spec_version`, `manifest_version`,
   `LLMCompileError` "the language model's response was rejected: …").
+* **Landed (package I part 1, `core/messages/`).** `explain(violation |
+  refusal dict | error | name) -> {"sentence", "hint", "rule"}` beside
+  `render(name, **params)`. Placeholders are `{param}` and the plural
+  form `{param:one|many}`, chosen by the numeric value of `param`; the
+  parameters are the refusal's own five fields plus three derived ones,
+  `shortfall` (limit − actual), `excess` (actual − limit) and `count`
+  (violations in a report). An absent placeholder renders as nothing and
+  never raises; an unknown name renders as the raw name with the
+  technical message as the hint, and the coverage test forbids that path
+  for every name the code emits. The catalogue also keys `check.<name>`
+  for every `Check("<name>")` in `verify.py` (the sentence beside the
+  tick), `verdict.{pass,fail,not_run}`, and the progress states
+  `progress.campaign.<state>` (§6.1 `campaign.json`),
+  `progress.case.<status>` (the ledger) and `progress.page.<state>` (the
+  six page states). The bare names the CLIs and the web app print today
+  (`trim`, `validation`, `weather`) are kept as spelled.
+  `tests/test_messages.py` lists every not-yet-emitted name in
+  `ALLOWED_FUTURE` with its package; the package that lands a name
+  removes it there in the same commit.
 * A test asserts every constraint name in the codebase (every
   `Violation("...")` first argument, every `constraint=`/`"constraint":`
   literal, every `*Error("...")` constraint) has an entry, and every
@@ -828,7 +847,9 @@ clause.
 `export.{runs,unverified,verification_failed,image,sensor_labels,
 missing_frames,empty,split,shard_size,format,arguments}`. Named
 `ValueError`s (no constraint string today, catalogued under the new
-names): `spec.version`, `manifest.version`.
+names): `spec.version`, `manifest.version`. The un-named
+`LLMCompileError`s are catalogued as `compile.rejected` (the "response
+was rejected" sentence) and `compile.unavailable` (no provider, no SDK).
 
 **New this phase.** `scene.terrain` (a `terrain_source` the machine
 cannot honour: `baked` with no whole bake stated or given, or a CLI flag

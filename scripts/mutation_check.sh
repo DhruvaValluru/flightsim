@@ -2090,6 +2090,33 @@ mutate webapp/runs.py \
     "baked with nothing baked refuses terrain.unbaked on the web" \
     tests/test_webapp.py || failures=$((failures+1))
 
+# -- Phase 2, package I part 1: the message catalogue --------------------------
+
+mutate core/messages/__init__.py \
+    '        _catalogue = loaded
+    return _catalogue' \
+    '        loaded.pop("camera.terrain_clearance", None)  # MUTATED: an entry vanishes
+        _catalogue = loaded
+    return _catalogue' \
+    "every refusal name the code emits has a catalogue entry" \
+    tests/test_messages.py || failures=$((failures+1))
+
+mutate core/messages/__init__.py \
+    '    return {"sentence": rule or "refused",
+            "hint": technical(obj),' \
+    '    return {"sentence": "This request was refused.",  # MUTATED: invented
+            "hint": technical(obj),' \
+    "an unknown refusal name is shown raw, never given an invented sentence" \
+    tests/test_messages.py || failures=$((failures+1))
+
+mutate core/messages/__init__.py \
+    '            return match.group("one") if one else match.group("many")
+        return shown(value)' \
+    '            return match.group("one") if one else match.group("many")
+        return ""  # MUTATED: every number dropped from the sentence' \
+    "a catalogue sentence carries the refusal's own numbers" \
+    tests/test_messages.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
