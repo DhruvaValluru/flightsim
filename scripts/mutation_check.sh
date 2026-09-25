@@ -1754,6 +1754,77 @@ mutate flightsim/verify.py \
     "flightsim.verify records its verdict" \
     tests/test_dataset.py || failures=$((failures+1))
 
+# -- Phase 2, package E: export formats (YOLO, VOC), the object reader, the card --
+
+mutate core/dataset/export.py \
+    '        raise ExportError(
+            "export.unverified",
+            f"{directory} has no {VERIFICATION_FILE}: run "' \
+    '        raise ExportError(
+            "export.unnamed",  # MUTATED: the refusal loses its name
+            f"{directory} has no {VERIFICATION_FILE}: run "' \
+    "the unverified refusal carries its name (export.unverified)" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '    return splits[sample.simulation_digest]' \
+    '    return SPLITS[int(sample.record["index"]) % 2]  # MUTATED: a frame picks its own side' \
+    "a frame of one flight never straddles train and val, in every format" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '        truncated = int(float(truncation) > 0.0)' \
+    '        truncated = 0  # MUTATED: VOC truncated ignores the truncation' \
+    "VOC truncated follows the truncation key" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '        truncated = int(float(fraction) < 1.0)' \
+    '        truncated = 0  # MUTATED: VOC truncated ignores fraction_in_frame' \
+    "VOC truncated follows fraction_in_frame when a record carries it" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '        occluded = int(float(visible) < VOC_OCCLUDED_BELOW)' \
+    '        occluded = 0  # MUTATED: VOC occluded ignores the visibility' \
+    "VOC occluded follows visible_fraction" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '        difficult = int(extent < threshold)' \
+    '        difficult = 0  # MUTATED: VOC difficult ignores the not-claimed threshold' \
+    "VOC difficult follows the not-claimed pixel threshold" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '    if fraction >= KITTI_VISIBLE_FULL:
+        return 0
+    if fraction >= KITTI_VISIBLE_PARTLY:
+        return 1
+    return 2' \
+    '    return KITTI_OCCLUDED_UNKNOWN  # MUTATED: the visibility is never read' \
+    "KITTI occluded is derived from visible_fraction" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '        if ungraded:
+            raise ExportError(
+                "export.unverified_labels",' \
+    '        if False:  # MUTATED: ungraded masks ship
+            raise ExportError(
+                "export.unverified_labels",' \
+    "a mask the verifier never graded refuses export.unverified_labels" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '    info.mtime = 0
+    info.uid = info.gid = 0' \
+    '    info.mtime = __import__("time").time()  # MUTATED: the member carries the clock
+    info.uid = info.gid = 0' \
+    "a with-pixels WebDataset shard is byte-reproducible" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+
 # -- Camera Phase 1 gap closure: vocabulary, question, moves, lag, matrices, schema --
 
 mutate core/nl/compiler.py \

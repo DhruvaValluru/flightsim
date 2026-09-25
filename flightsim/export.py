@@ -3,15 +3,20 @@
     .venv/bin/python -m flightsim.export runs/batch/demo --out datasets/demo --format coco
     .venv/bin/python -m flightsim.export runs/a runs/b --out datasets/ab --format kitti
     .venv/bin/python -m flightsim.export runs/batch/demo --out datasets/wds --format webdataset --image sensor
+    .venv/bin/python -m flightsim.export runs/batch/demo --out datasets/multi --format yolo,voc,coco
 
 Inputs are run directories (capture_manifest.json inside) or batch
 directories of them. Every run must carry a verification.json with no
 failed check (``python -m flightsim.verify <run>`` writes it; the
 batch runner writes it too) -- an unverified run refuses the export by
 name. Frames are split by simulation digest (one flight, one side).
-The card (DATASET_CARD.md + dataset.json) says what is in the dataset,
-how it was split, the conventions each format uses, and what is NOT
-claimed. Exit 0 on success, 2 on a named refusal.
+``--format`` takes one of coco, kitti, webdataset, yolo, voc or a comma
+list of them; one format writes into --out directly, several write
+--out/<format>/ each, with one card. The card (DATASET_CARD.md +
+dataset.json) says what is in the dataset, which formats were written,
+how it was split, the class balance, the conditions and licences, the
+conventions each format uses, and what is NOT claimed. Exit 0 on
+success, 2 on a named refusal.
 """
 
 from __future__ import annotations
@@ -31,7 +36,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="export verified runs as a dataset")
     parser.add_argument("runs", nargs="+", help="run directories or batch directories")
     parser.add_argument("--out", required=True, help="dataset directory")
-    parser.add_argument("--format", choices=FORMATS, required=True)
+    parser.add_argument("--format", required=True,
+                        help=f"one of {', '.join(FORMATS)}, or a comma list of them "
+                             f"(several formats write --out/<format>/ each)")
     parser.add_argument("--split", default=",".join(str(f) for f in DEFAULT_FRACTIONS),
                         help="train,val,test fractions (sum to 1)")
     parser.add_argument("--split-seed", type=int, default=0,
@@ -61,6 +68,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
     print(f"exported {card['frames']} frame(s) from {len(card['runs'])} run(s) "
           f"as {card['format']} into {args.out}")
+    if len(card["formats"]) > 1:
+        print("  layout: " + ", ".join(f"{f} -> {Path(args.out) / f}" for f in card["formats"]))
     print("  splits: " + ", ".join(f"{s} {n}" for s, n in card["frames_per_split"].items())
           + f" (by simulation digest, seed {card['split']['seed']})")
     print(f"  card:   {Path(args.out) / 'DATASET_CARD.md'}")

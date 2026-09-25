@@ -631,11 +631,19 @@ campaigns/<id>/
 
 ### 6.2 Export layouts (package E) — kept, extended
 
-`core/dataset/export.py` `FORMATS = ("coco", "kitti", "webdataset")` (L59);
-`flightsim.export RUNS... --out DIR --format F [--split 0.8,0.1,0.1]
-[--split-seed 0] [--image ideal|sensor] [--labels-only] [--shard-size 1000]`;
+`core/dataset/export.py` `FORMATS = ("coco", "kitti", "webdataset",
+"yolo", "voc")` (landed, package E);
+`flightsim.export RUNS... --out DIR --format F[,F...] [--split 0.8,0.1,0.1]
+[--split-seed 0] [--image ideal|sensor] [--labels-only] [--shard-size 1000]`
+(one format writes into `DIR` as before; a comma list writes
+`DIR/<format>/` each, with ONE card at `DIR`; the card records `formats`
+and `layout`);
 `load_run` refuses `export.unverified` (no `verification.json`) and
-`export.verification_failed` (any FAIL); splits by `simulation_digest`
+`export.verification_failed` (any FAIL); the runs of one export must
+carry one class list -- a run naming a taxonomy beside one that does not,
+or two different lists, refuses `export.taxonomy` (landed, package E:
+the class list is the manifests' `taxonomy` / `objects[]` when present,
+else the sorted airframe names as Phase 10 wrote COCO categories); splits by `simulation_digest`
 (drops prompt, notes, cameras AND randomization — two runs differing only
 in look land in one split, by design); sample key
 `<run>_<camera_id>_<index:04d>`. Kept layouts:
@@ -656,9 +664,23 @@ in look land in one split, by design); sample key
   byte-reproducible (today `tar.add(path)` leaks the source mtime).
 * **New** writers over the same `Sample`: YOLO (`images/<split>/`,
   `labels/<split>/<key>.txt` normalised `class cx cy w h` from the
-  clipped `bbox_2d`, `data.yaml`), Pascal VOC (`<split>/JPEGImages`,
-  `Annotations/<key>.xml` with `truncated` = truncation > 0, `occluded` =
-  visible_fraction < 1, `ImageSets/Main/<split>.txt`).
+  clipped `bbox_2d`, 0-based class index in taxonomy order, `data.yaml`
+  with `path`/`train`/`val`/`test`/`names`), Pascal VOC -- **as landed
+  (package E)**: the devkit layout at ONE root, `JPEGImages/<key>.png`,
+  `Annotations/<key>.xml`, `ImageSets/Main/{train,val,test}.txt` (the
+  draft's `<split>/JPEGImages` is not what `torchvision`/the devkit read;
+  the split lives in the ImageSets lists), `bndbox` 1-based inclusive
+  integers covering the float box (`floor+1 .. ceil`), `truncated` =
+  `fraction_in_frame < 1` when a record carries that key else
+  `truncation > 0`, `occluded` = `visible_fraction < 0.9` (the plan's
+  threshold; 0 when no visibility was recorded, stated in the card),
+  `difficult` = the clipped box's longer side under the not-claimed
+  pixel threshold (the record's `objects_under_px: N`, else
+  `NOT_CLAIMED_EXTENT_PX = 16`). The reader keys on the PRESENCE of
+  `labels.objects[]`, not the manifest version; a mask on disk that
+  `mask_integers_only` / `mask_vs_geometry` did not PASS refuses
+  `export.unverified_labels` for `coco` and `webdataset` only (the
+  formats that ship it); a run with no mask on disk is unaffected.
 * Card: `dataset.json` + `DATASET_CARD.md` (`dataset_card` L469-529)
   gain class balance, the realised histograms (§5.5), per-asset licences
   from `objects[]`, `render.json` `drawn`/`render_settings`/`look_applied`
@@ -845,7 +867,9 @@ clause.
 `terrain.clearance`, `weather.not_a_place`, `weather.unavailable`,
 `batch.{matrix,base,factors,seeds,design,workers,capture}`,
 `export.{runs,unverified,verification_failed,image,sensor_labels,
-missing_frames,empty,split,shard_size,format,arguments}`. Named
+missing_frames,empty,split,shard_size,format,arguments,taxonomy}`
+(`export.taxonomy` landed with package E: the runs of one export
+disagree on the class list). Named
 `ValueError`s (no constraint string today, catalogued under the new
 names): `spec.version`, `manifest.version`. The un-named
 `LLMCompileError`s are catalogued as `compile.rejected` (the "response

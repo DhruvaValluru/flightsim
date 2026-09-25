@@ -429,3 +429,191 @@ exceptions in their own modules). This package appends to
 `scripts/mutation_check.sh` and `docs/PHASE2_CONTRACTS.md`, which the
 brief did not list under its files; the instructor's rules require
 both and the additions are append-only.
+
+## P2-E/export -- YOLO and Pascal VOC, the object reader, the format list and the card
+
+**What was measured, and what was defective.** Four things, before
+anything was built. (1) `kitti_label_line` read a per-frame
+`engine_labels` key that no producer in the repository writes, so
+KITTI `occluded` was 3 (unknown) on every run by construction -- a
+dead branch, admitted in the Phase 10 report. (2) A with-pixels
+WebDataset shard was NOT reproducible: `tar.add(path)` recorded the
+source PNG's mtime/uid/uname, so the same run exported twice gave
+different bytes (the Phase 10 test only covered the labels-only path;
+the new byte-identity test shows the frozen writer's first member
+carrying a PAX `mtime` header of the fabrication clock). (3) COCO
+categories were one per AIRFRAME name, so a taxonomy (contracts §2.1)
+had nowhere to land, and there was no `segmentation` even where an ID
+mask exists. (4) The card took `label_conventions` from `runs[0]`
+only and named no licence for any asset drawn.
+
+**What was built** (contracts §1, §3 for the records consumed; §6.2
+export layouts; §11 refusals; plan package E).
+
+* Two new writers over the same `Sample`, `core/dataset/export.py`:
+  `yolo` (the Ultralytics detect layout -- `images/<split>/`,
+  `labels/<split>/<key>.txt` with `class cx cy w h` normalised from
+  the CLIPPED `bbox_2d`, 0-based class index in taxonomy order,
+  `data.yaml` with `path`/`train`/`val`/`test`/`names`; every split's
+  two directories exist even when empty) and `voc` (the devkit layout
+  at ONE root -- `JPEGImages/<key>.png` as the PNGs are,
+  `Annotations/<key>.xml` with folder/filename/size and one `object`
+  per labelled object carrying `name`, `truncated`, `occluded`,
+  `difficult`, `bndbox`; `ImageSets/Main/{train,val,test}.txt`).
+  `bndbox` is the devkit's 1-based inclusive integer box covering the
+  float box (`floor+1 .. ceil`). The flags derive from the label
+  record: `truncated` = `fraction_in_frame < 1` when a record carries
+  that key, else `truncation > 0`; `occluded` = `visible_fraction <
+  0.9` (0 when no visibility was recorded -- stated in the card);
+  `difficult` = the clipped box's longer side under the not-claimed
+  pixel threshold (the object's own `objects_under_px: N` entry, else
+  `NOT_CLAIMED_EXTENT_PX = 16`, a `#:`-documented module constant).
+  The contracts' draft VOC layout (`<split>/JPEGImages`) is replaced by
+  the devkit's single root, stated on the contracts page: the split
+  lives in the ImageSets lists, which is what the devkit and
+  torchvision read.
+* The label source, `object_labels`: one entry per labelled object,
+  primary first. When a frame carries `labels.objects[]` (manifest 6,
+  contracts §3) every object is exported with its class resolved from
+  its own `class`/`class_id` or through the manifest's `objects[]` by
+  `id`/`int_id`; the primary takes the 2-D labels already mapped onto
+  the exported image (so `--image sensor` keeps working for it), and
+  any OTHER object under `--image sensor` needs its own
+  `labels_sensor.objects[]` entry or refuses `export.sensor_labels`
+  -- an ideal-pinhole box on a sensor image would be a silently wrong
+  label. Without `objects[]` the one object is the primary airframe
+  from the existing `labels` keys, class = the airframe name. The
+  reader keys on the PRESENCE of `objects[]`, not the manifest
+  version, so it reads on this build (manifest 5) and on the one that
+  writes 6; both shapes are tested with fabricated manifests. The
+  object list is carried OFF `Sample.labels`, so the WebDataset
+  sidecar of a Phase 10 run is unchanged.
+* The class list: `dataset_taxonomy` -- the manifests' `taxonomy` or
+  `objects[]` (class_id order) when present, else the sorted airframe
+  names exactly as Phase 10 wrote COCO categories; a run naming a
+  taxonomy beside one that does not, or two different lists, refuses
+  `export.taxonomy` (new name, added to §11): one dataset, one class
+  list, never a guess.
+* COCO, KITTI and WebDataset kept and extended: COCO categories from
+  the taxonomy, one annotation per object, `visible_fraction` /
+  `occluded_by` / `not_claimed` carried when recorded, and
+  `segmentation` as uncompressed column-major RLE computed with numpy
+  from the frame's `_mask.png` for the object's `int_id` (only where
+  the mask exists; `area` stays `w*h`, `mask_pixels` carries the mask
+  count). KITTI `occluded` from `visible_fraction` (>= 0.95 -> 0, >=
+  0.5 -> 1, else 2; 3 when none was recorded), one line per object
+  with both boxes, the dead `engine_labels` read removed. WebDataset
+  members all written from bytes with mtime 0 / uid 0 / no names, plus
+  `<key>.mask.png`, `<key>.class.png`, `<key>.depth.f32` when those
+  files exist beside the frame.
+* `export.unverified_labels` (contracts §4/§11): a run with a
+  `_mask.png` on disk whose verification carries no PASS for
+  `mask_integers_only` and `mask_vs_geometry` refuses the two formats
+  that would ship the mask (`coco`, `webdataset`) by name; formats
+  that ship no mask export; a run with no mask on disk (every Phase 10
+  run) is unaffected. The two check names are package D's; until D
+  lands, a rendered run with masks refuses these two formats, which
+  is the intended direction of failure.
+* `--format` takes a comma list (`parse_formats`: ordered,
+  de-duplicated, unknown name refuses `export.format`). One format
+  writes into `--out` as before; several write `--out/<format>/`
+  each, with ONE card.
+* The card (`dataset.json` + `DATASET_CARD.md`) gains: `formats` and
+  `layout`; `images` and `instances`; `classes` with `class_order`
+  (manifest taxonomy | airframe names) and `class_balance` (instances
+  and images per class, overall and per split); `conditions` (stated:
+  every `conditions` value with its count and source; sampled: per
+  randomisation key n/min/max/mean for numbers, a count per value
+  otherwise; `randomised_runs`); per run `seed`,
+  `verification.status`/`file`, `masks_shipped`; the `split.policy`
+  sentence beside the seed and assignment; `not_claimed_from_labels`
+  (every distinct per-object `not_claimed` sentence with its record
+  count, also appended to `not_claimed`); `licences` (per object from
+  `objects[].licence`, and per airframe config from its `license`
+  block read from this repository -- null WITH the reason when the
+  file is not here); `label_conventions_by_manifest_version`; YOLO
+  and VOC conventions beside COCO's and KITTI's.
+* Refusals stay by name: `export.unverified` and
+  `export.verification_failed` keep their sentences (both were already
+  named); `export.unverified_labels` and `export.taxonomy` are new.
+  The CLI prints `REFUSED -- <name>: <sentence>` and exits 2 for
+  every one.
+
+**Tests and guards.** `tests/test_dataset_formats.py`, 12 tests, each
+round trip through an INDEPENDENT reader written in the test file:
+pycocotools 2.0.11 (`requirements-dev.txt`; it installed in this
+container and the tests use `COCO`, `mask.frPyObjects` and
+`mask.decode`; a machine without it skips those two tests BY NAME
+rather than passing them), a minimal YOLO text reader against the
+Ultralytics layout, `xml.etree` for VOC, a minimal KITTI line reader,
+`tarfile` for WebDataset -- image counts, category names/ids and box
+coordinates to the pixel (YOLO within 0.01 px of the manifest's
+`bbox_2d`, VOC integers within one pixel, COCO exact, KITTI to its two
+decimals), the expected values read from `capture_manifest.json` with
+json, never from the writer's objects. The Phase 10 writers are pinned
+BYTE-IDENTICAL against a frozen copy of the pre-package-E module
+(`tests/data/export_phase10_frozen.py`, loaded by path) for COCO and
+KITTI with pixels and labels-only WebDataset. A fabricated manifest-6
+run (three objects: primary, a small truncated part-occluded traffic
+aircraft, terrain with a tight box only) checks every writer's
+per-object output and each VOC flag and KITTI occluded value; a mixed
+export refuses `export.taxonomy`; a sensor export of an object without
+sensor labels refuses `export.sensor_labels`; a fabricated `_mask.png`
+refuses `export.unverified_labels` for coco/webdataset, exports for
+yolo, and after the two checks PASS ships as RLE that pycocotools
+decodes to the fabricated rectangle's 24000 pixels and as a
+byte-identical tar member; the split test exports all five formats
+over the four-run batch and reads every tree back to assert no
+simulation digest appears in two splits in any format and each format
+agrees with the card. `tests/test_dataset.py` (14) passes unchanged.
+Nine new mutation guards in `scripts/mutation_check.sh` (the
+unverified refusal's NAME; the split lookup made per-frame; VOC
+truncated via `truncation` and via `fraction_in_frame`; VOC occluded;
+VOC difficult; KITTI occluded; the `export.unverified_labels` refusal;
+the WebDataset member clock) -- each applied by the script's own
+`mutate()` in isolation, its test file run, `export.py` restored
+byte-identical (sha256 checked) and `__pycache__` purged: 9 of 9
+fire. The six Phase 10 guards that target `export.py` were re-run the
+same way against the new module: 6 of 6 fire. Not guarded, and said
+so: the `export.taxonomy` mixed-list refusal in `dataset_taxonomy` --
+removing it still refuses under the same name from `class_index`, so
+a guard there reports WEAK; the refusal is belt and braces.
+
+**How to demonstrate (any platform).**
+
+    .venv/bin/pip install -r requirements-dev.txt          # pycocotools, the independent COCO reader
+    .venv/bin/python -m flightsim.batch examples/batch_matrix.yaml --out runs/batch/demo
+    .venv/bin/python -m flightsim.export runs/batch/demo --out datasets/demo --format yolo,voc,coco,kitti,webdataset --labels-only
+    cat datasets/demo/DATASET_CARD.md                      # formats, class balance, conditions, licences, not claimed
+    head -3 datasets/demo/yolo/data.yaml; ls datasets/demo/voc/ImageSets/Main
+    .venv/bin/pytest -q -p no:warnings tests/test_dataset_formats.py tests/test_dataset.py
+    ./scripts/mutation_check.sh                            # the nine package-E guards are in the P10-6 block's wake
+    # Windows, with the engine: render the matrix (capture: render: true), drop --labels-only;
+    # with package D's mask checks PASS, coco carries segmentation and webdataset the mask members.
+
+**Not verified here.** No rendered run exists in this container:
+every with-pixels path ran on fabricated flat PNGs of the manifest's
+declared size, the mask path on a fabricated 8-bit rectangle, and the
+manifest-6 object records are fabricated to the contracts' §3 shape --
+the first Windows render with package B/C's real `objects[]` is the
+check that the reader's key resolution (`class`/`class_id` on the
+record or through `objects[]`) matches what the producer writes. No
+training stack loaded a tree: the YOLO layout is asserted against
+Ultralytics' documented structure by a minimal reader, the VOC tree
+by `xml.etree`, not by `ultralytics.data` or `torchvision`. The two
+mask checks the `export.unverified_labels` refusal looks for do not
+exist until package D lands. Nothing here compiles C++.
+
+**Limitations.** Objects without a 2-D box are not written by any
+format (a scene object with only a tight box takes it as its box);
+objects without a 3-D box are not KITTI objects. VOC has no "unknown"
+occlusion, so an object with no recorded visibility is written
+`occluded 0` (the card and the not-claimed list say so; KITTI keeps
+3). The COCO `segmentation` is per-object RLE of the ID mask, so on a
+run whose mask is still the single-value aircraft silhouette it is
+the primary's silhouette. Under `--image sensor` only the primary's
+sensor mapping exists today; other objects refuse by name until the
+sensor model maps them. Croissant / HF `dataset_infos` twins and
+Parquet (brainstorm §4) are not written. The realised-distribution
+histograms are n/min/max/mean per sampled key, not binned coverage
+(§5.5 is package F's). Exported images are copied, not linked.
