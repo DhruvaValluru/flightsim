@@ -1310,3 +1310,170 @@ Windows the forwarded flags reach no engine -- the wrapper refuses
 method this item owned). The `.ps1`'s header comment still says
 `-width= -height=` are not passed on the camera path; they now are, and
 are inert there -- the comment is stale, the script's behaviour is not.
+
+## P2-G/campaign -- campaign execution at scale: the campaign object, the index-seeded worker pool, the ledger-derived truth
+
+**What was built.** Measured before this item: the batch runner
+(`core/dataset/batch.py`) submitted every case to a thread pool up
+front, appended rows in completion order, had no state machine, no
+pause/cancel, no watchdog, no disk budget, aborted the whole build on
+the first refused draw, and its "two workers give the same rows" test
+compared only counts (subsystem map, known defects). `grep campaign`
+found nothing. Now:
+
+* `core/campaign/` (new package): **`campaign.py`** -- `Campaign.create
+  (prompt, answers, images, seed, policy, out, format, workers, ...)`,
+  `.open`, `.plan()`, `.sample(n)`, `.run(workers)`, `.pause()`,
+  `.resume()`, `.cancel()`, `.status()`, `.report()`, `.export(format)`;
+  the state machine `planned|running|paused|failed|done|cancelled` with
+  its transition table (`TRANSITIONS`; an illegal move refuses
+  `campaign.state`); `campaign.json`, `control.json` and `report.json`
+  as contracts §6.1 / §6.3, all written atomically. **`ledger.py`** --
+  the append-only, fsynced, truncation-tolerant `ledger.jsonl` keyed
+  on the slot index; `summarise(rows)` computes progress, yield,
+  refusals by name, bytes per case and the next index FROM THE ROWS,
+  and `comparable(rows)` strips timing and machine paths for the
+  cross-worker comparison. **`workers.py`** -- `case_seed(index,
+  campaign_seed)` = `SeedSequence([index, campaign_seed])` folded;
+  `build_case(index, record)` plans the run seed from the index (a
+  stated seed is kept), sets the block's seed to the campaign seed and
+  runs the one sampler with `draw_index=index`; `run_with_watchdog`
+  kills a capture that writes nothing for N seconds; `run_index` is
+  the picklable worker (spawn start method) that writes `runs/<case_id>/
+  spec.yaml`, runs the `flightsim.capture` CLI (the batch's own
+  `capture_command`), verifies through the batch's `case_row`, and
+  returns one row -- or a `refused` row by the sampler's name, or a
+  `campaign.duplicate_case` refusal when the ledger already holds that
+  spec. **`report.py`** -- `build_report` (yield, coverage and realised
+  distributions via `core.scenario.randomization.realised_distribution`
+  over the verified cases, refusals by name split into refused slots
+  and refused attempts inside successful draws, timing, disk) and
+  `render_report` in words.
+* Execution is in ROUNDS: the indices a round runs are decided from
+  the ledger when it starts, `workers` cases are in flight at a time
+  pulled from that list in index order, every completion appends its
+  row and then polls `control.json` and re-checks the disk budget
+  (`bytes_per_case` measured from completed run directories times the
+  cases still needed, against `min(budget, free)`; refused
+  `storage.budget_exceeded` before a round and after every case;
+  unmeasured is no claim). A campaign ends `done` in exactly one place:
+  when the ledger's verified frames reach the target. Below it, it
+  ends `failed` with `campaign.target_unreachable` and the reasons
+  (refused slots by name up to `max_refused_slots`, failed captures,
+  captured-but-unverified cases, two rounds without progress).
+* `flightsim/campaign.py` (new CLI): `python -m flightsim.campaign
+  "<prompt>" --images N --out DIR [--workers W] [--seed S] [--format
+  coco] [--tier regex|llm] [--answer id=text] [--disk-budget-gb G]
+  [--stall-minutes M] [--render] [--plan] [--sample N]`; on an existing
+  `--out`: `--resume`, `--pause`, `--cancel`, `--status`, `--report`,
+  and `--export` after a done run. Exit 0 done, 1 ended otherwise, 2
+  refused before anything ran; refusals print `REFUSED -- <name>:`.
+* `core/dataset/batch.py`: `run_case` factored into `run_capture`
+  (the subprocess) and `case_row` (ok/verify/verification.json), which
+  the campaign's worker reuses so the two ledgers agree key for key;
+  `CAPTURE_OPTIONS` gains `terrain`/`synth_terrain` (contracts §6.1) so
+  a mountain case can run through either runner. `flightsim.batch`'s
+  argv, rows and tests are unchanged (14 + 41 tests green).
+* `tests/test_campaign.py` (13 tests, two of them real headless
+  campaigns): the transition table; every argument and plan refusal by
+  name (`campaign.arguments`, `export.format`, `randomization.vocabulary`,
+  `randomization.location`, the validator's `airspeed.*`); seeds by
+  index with the derivation RE-IMPLEMENTED in the test from
+  `numpy.random.SeedSequence`; previews that never regress a row; a
+  campaign whose every capture fails ends `failed` /
+  `campaign.target_unreachable` with each slot retried exactly once; a
+  hand-written ledger (with a killed half-line) read by a FRESH object
+  reports the truth in `status()`, `report()` and `plan()`; the disk
+  budget refused after the first measured case and again before a
+  resume, then lifted and resumed to done; the watchdog on a sleeping
+  process and a writing one; pause and cancel through `control.json`
+  between cases with the resumed case set equal to the uninterrupted
+  one; a prompt with nothing to vary refusing duplicate slots by name;
+  the CLI's exit codes and words; report and export; and **the exit
+  criterion**: the same 250-image campaign run with `workers=1` and
+  `workers=2` (spawned processes) has identical case ids, seeds,
+  sampled values, `spec_digest` / `simulation_digest` / `output_digest`
+  per manifest, identical `randomization` blocks, and an identical
+  ledger apart from timing and paths.
+* Four mutation guards in `scripts/mutation_check.sh` ("Phase 2
+  package G"): done regardless of yield; seeds by completion order
+  (the number of run directories on disk when the worker starts --
+  identical to the index at one worker, not at two); the budget never
+  enforced; `status()` reading nothing from the ledger. Confirmed by
+  hand: 7, 1, 1 and 5 tests of `tests/test_campaign.py` fail
+  respectively; each file restored byte-identical (sha256 checked) and
+  `__pycache__` purged.
+* Contracts §6.3 states every shape decision and departure: the
+  ledger keyed on `index`, `rendered` = captured but not verified, the
+  compiled `spec` carried in `campaign.json`, rounds rather than a
+  streaming queue, the frames-per-case estimate/measurement rule, the
+  three new refusal names `campaign.state`, `campaign.arguments`,
+  `campaign.duplicate_case`.
+
+**How to demonstrate (any platform).**
+
+    .venv/bin/pytest -q -p no:warnings tests/test_campaign.py                 # 13 passed, ~40 s
+    .venv/bin/pytest -q -p no:warnings tests/test_dataset.py tests/test_dataset_formats.py tests/test_randomization_policy.py   # the suites the factoring touches
+    ./scripts/mutation_check.sh          # the four "Phase 2 package G" guards report ok
+
+    # a real campaign, headless, no engine: three cases of ~96 frames, two workers
+    .venv/bin/python -m flightsim.campaign \
+        "fly the a320 at 3000 m for 10 seconds in varied weather at different times of day, chase view" \
+        --images 250 --seed 7 --workers 2 --out runs/campaigns/demo
+    .venv/bin/python -m flightsim.campaign --out runs/campaigns/demo --report      # in words
+    .venv/bin/python -m flightsim.campaign --out runs/campaigns/demo --status      # the ledger's numbers
+    .venv/bin/python -m core.scene.realised_plot runs/campaigns/demo/runs/* --out realised.png   # the picture (package F's tool)
+
+    # the exit criterion by hand: the same campaign at one worker, then compare
+    .venv/bin/python -m flightsim.campaign "<the same prompt>" --images 250 --seed 7 --workers 1 --out runs/campaigns/demo1
+    .venv/bin/python - <<'EOF'
+    from core.campaign import Campaign
+    from core.campaign.ledger import comparable
+    a, b = Campaign.open("runs/campaigns/demo"), Campaign.open("runs/campaigns/demo1")
+    print("identical:", comparable(a.ledger.rows()) == comparable(b.ledger.rows()))
+    EOF
+
+    # refusals by name, before anything runs
+    .venv/bin/python -m flightsim.campaign "fly the 747 and vary the moon phase" --images 10 --out runs/campaigns/x --plan   # REFUSED -- randomization.vocabulary
+    .venv/bin/python -m flightsim.campaign "<prompt>" --images 250 --disk-budget-gb 0.001 --out runs/campaigns/y            # storage.budget_exceeded after the first measured case
+
+(The JSBSim banner lines on stdout come from the sampler's per-attempt
+trim check; they are the FDM's own and not the campaign's.)
+
+**Not verified here.** No engine on this platform, so: that
+`--render` campaigns draw pixels (each case's `flightsim.capture
+--render` refuses `ue.platform` here and the row records `drawn:
+false`); the `rendered` status on a real render; `bundle_digest` over
+a real `render.json` (null on every row here); the watchdog against a
+stalled commandlet (measured against a sleeping Python process only);
+the throughput knee at 1/2/4 engine instances on one GPU (brainstorm
+§6 says measure it on the target card; `workers` is a cap, nothing
+here chose a value); Windows Error Reporting suppression; the
+`spawn` pool on Windows itself (it is the only start method there and
+the code uses no fork-only path, but this container ran it on Linux
+where `spawn` was explicitly selected). The LLM compile tier
+(`--tier llm`) falls back to regex here (no provider) and records that
+it did; no LLM-compiled campaign has run. `terrain`/`synth_terrain`
+capture options are forwarded by `capture_command` (asserted by no
+test that flies one through a campaign).
+
+**Limitations.** Frames per case are an estimate for the first round
+(recorder cadence 0.1 s; the estimate said 101 where the measurement
+said 96) and measured after -- a campaign may run one round more than
+the minimum, never fewer frames than the target. Failed captures are
+retried once in all (`MAX_ATTEMPTS = 2`) and a captured-but-unverified
+case is never retried (batch semantics), so a campaign whose cases
+verify below the target ends `failed` and says why; nothing here
+diagnoses the verification. A duplicate slot from a prompt with
+nothing to vary is only known once the worker has built it (cheap:
+sampling, no capture, when the ledger already holds the case id;
+when two were in flight together the second is run and then refused
+on collection). The ledger's raw line ORDER still follows completion
+in the pool; `comparable()` is the stated comparison. The web app's
+compile-time planners are not applied (contracts §6.3, package H's
+core-level compile-and-plan); `verification.json` is still written
+non-atomically by `core/capture/verify.py` (not this package's file).
+The report's `coverage` is over 8 bins per numeric leaf with `k = 1`,
+package F's default; three cases cover 30 % of the requested bins,
+which the words say plainly. No picture is drawn by this package;
+`core.scene.realised_plot` is the one for these runs.

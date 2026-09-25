@@ -814,6 +814,128 @@ in look land in one split, by design); sample key
   provenance, and `not_claimed` aggregated per frame; `label_conventions`
   is taken from `runs[0]` today (L521) and becomes per-manifest-version.
 
+### 6.3 As landed (package G) -- the campaign as built, and the shape decisions §6.1 left open
+
+Stated here so the agent (H) and the page (I) call what exists.
+`core/campaign/` (`campaign.py`, `ledger.py`, `workers.py`, `report.py`),
+`flightsim/campaign.py`, `tests/test_campaign.py`; `core/dataset/batch.py`
+factored (`run_capture`, `case_row`; `CAPTURE_OPTIONS` gains `terrain`
+and `synth_terrain`) with `flightsim.batch` byte-identical in behaviour.
+
+* **The API** is the library the plan named: `Campaign.create(prompt,
+  answers, images, seed, policy, out, format, workers, disk_budget_bytes,
+  tier, capture, stall_seconds, max_refused_slots)`, `.open(dir)`,
+  `.plan()`, `.sample(n, start, record)`, `.run(workers, progress,
+  capture_runner)`, `.pause()`, `.resume()`, `.cancel()`, `.status()`,
+  `.report()`, `.export(format, labels_only)`. `CampaignError(constraint,
+  message, detail)` is the refusal, mirroring `BatchError`.
+* **`campaign.json`** carries every §6.1 key and, beside `spec_digest`,
+  the compiled **`spec`** itself (the workers rebuild every case from
+  it and an index; the digest alone rebuilds nothing), plus `id`,
+  `capture` (the CLI options each case runs with), `stall_seconds`,
+  `max_refused_slots`, `reason`, `plan`, `started_utc`, `finished_utc`,
+  `updated_utc`, `campaign_version: 1`. Written atomically (tmp +
+  `os.replace`).
+* **The ledger is keyed on `index`** (the slot), not `case_id`: a
+  refused slot has no spec digest and therefore no case id, and one
+  index maps to one case id by construction. The LATEST row per index
+  is the slot's state. Every dispatch appends a `running` row (with
+  `attempt`); the worker's final row follows. `sampled` rows come only
+  from `.sample(n, record=True)` (a preview) and are never written over
+  a later stage. `status` values as §6.1; **`rendered` means captured
+  (`ok: true`) but not verified** -- the stage before `verified` was
+  reached and the verifier did not pass it (a finding, never retried:
+  batch semantics); `drawn` says whether pixels exist. New row keys
+  beyond §6.1: `attempt`, `campaign_seed`, `seed_derivation`, `sampled`
+  ({leaf: value} of the policy draw), `policy_attempts`, `drawn`,
+  `bytes` (the run directory), `requeue`, `refused_attempts` (the
+  sampler's records, on a refused slot). `yield` = `frames` on a
+  verified row, 0 otherwise.
+* **Seeds**: the campaign seed IS the block's seed (§5.6): a
+  user-stated `randomization.seed` is the campaign seed and `--seed`
+  disagreeing with it refuses `campaign.arguments`; otherwise `--seed`
+  or 1. Per case: `spec.seed` is PLANNED (source `derived`, the
+  derivation quoted) to `1 + SeedSequence([index, campaign_seed]).
+  generate_state(1)[0] mod MAX_SEED` -- a seed the prompt stated is
+  kept; the block's seed is planned to the campaign seed; then
+  `sample_randomization(spec, draw_index=index)`. `case_id =
+  spec.digest()[:16]` after sampling, as the batch.
+* **Rounds, not a streaming queue**: the indices a round runs are
+  decided from the ledger when it starts (retries first: a `sampled`
+  preview, a `running` row a dead process left, a `failed` capture with
+  attempts left -- `MAX_ATTEMPTS = 2` in all; then fresh indices from
+  `next_index`), and a round ends when its last case returns. Inside a
+  round `workers` cases are in flight, pulled from the index list in
+  order (a `ProcessPoolExecutor`, `spawn`; `workers=1` runs inline
+  through the same function). After every completion the control file
+  is polled and the disk budget re-checked. This is what makes the
+  sequence identical at any worker count.
+* **Frames per case** are ESTIMATED for the first round from the
+  recorder's 0.1 s cadence (`estimate_frames`: a continuous camera
+  fires every sample) and MEASURED thereafter from completed cases;
+  the plan records both. §6.1 gave no rule.
+* **Refused slots**: `randomization.infeasible` is a `refused` row and
+  the campaign draws the next index; after `max_refused_slots` (20)
+  refused slots it ends `failed` with `campaign.target_unreachable`.
+  A round that adds no verified frame twice in a row ends the same
+  way. A policy DEFECT (`randomization.policy`, `.vocabulary`,
+  `.location`) and a spec that does not validate are refused by their
+  own names at `plan()`, before any worker starts.
+* **New refusal names** (beyond §11): **`campaign.state`** (an illegal
+  transition: pause when not running, resume/run of done or cancelled),
+  **`campaign.arguments`** (images/workers/seed/budget/tier/capture
+  option the campaign cannot honour; a directory that is already a
+  campaign; a seed disagreeing with a stated one), **`campaign.
+  duplicate_case`** (a slot drew a spec another slot already produced
+  -- a prompt with nothing to vary and a stated run seed; refused
+  before running when the ledger already holds the case id, on
+  collection when the two were in flight together; counts as a refused
+  slot). Catalogue sentences are package I's to add.
+* **Transitions**: planned -> running | cancelled; running -> paused |
+  failed | done | cancelled; paused -> running | cancelled; failed ->
+  running | cancelled (a resume retries; the same refusal repeats by
+  name if nothing changed); done and cancelled are terminal. A crash
+  that is not a named refusal (a broken pool, an interrupt) also ends
+  `failed` with the exception named, so the record never says
+  `running` for a process that is gone.
+* **Disk budget**: `bytes_per_case` = mean run-directory size over
+  captured cases; `projected = bytes_per_case x ceil((target -
+  verified) / frames_per_case)`; `limit = min(disk_budget_bytes,
+  shutil.disk_usage(dir).free)`; refused `storage.budget_exceeded`
+  before a round starts and after every completion. Unmeasured (no
+  completed case yet) is no claim -- the plan says `within_budget:
+  null`.
+* **Watchdog**: `run_with_watchdog(command, log, watch_dir,
+  stall_seconds)` kills a capture when nothing under the run directory
+  and nothing in its log changes for `stall_seconds` (default 20 min;
+  `--stall-minutes`); the row says `requeue: true` with the reason and
+  the slot is re-queued once. Measured here with a sleeping process;
+  never against an engine.
+* **`control.json`** is `{"request": "pause"|"resume"|"cancel",
+  "requested_utc"}`; `pause` is honoured only by a running process
+  (`.pause()` refuses `campaign.state` otherwise); `cancel` on a
+  planned/paused/failed campaign is applied at once. The file is
+  removed when honoured.
+* **`report.json`**: `{campaign, state, reason, prompt, tier,
+  spec_digest, seed, workers, images_target, yield: {frames_verified,
+  frames_captured, fraction_of_target, cases, indices, verified_cases,
+  mean_frames_per_verified_case, drawn_cases}, coverage, realised
+  (realised_distribution over the verified cases' manifests, beside the
+  policy), refusals: {slots, attempts_within_draws, total_by_name},
+  timing, disk, git, not_claimed}`; `flightsim.campaign --report`
+  renders it in words (`core.campaign.report.render_report`). The
+  picture is package F's `python -m core.scene.realised_plot
+  <campaign>/runs/*`.
+* **Not done here**: the web app's compile-time planners
+  (`plan_scene_setting`, `apply_weather_event`, `plan_flyable_defaults`,
+  ... sequenced in `webapp/server.py` L242-280) are NOT applied to the
+  compiled spec -- the campaign takes the batch's path (compiler ->
+  `flightsim.capture`), and §7 moves that sequence to a core-level
+  function under package H. `verification.json` is still written with
+  `Path.write_text` (`core/capture/verify.py` L2359 is not G's file).
+  `-deterministic` is forwarded by the render builder (§9.1) already,
+  so `capture_command` did not gain it.
+
 ---
 
 ## 7. The tool layer and authority limits (package H)

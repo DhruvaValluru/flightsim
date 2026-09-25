@@ -2373,6 +2373,35 @@ mutate core/render/flags.py \
     "the render builder forwards -mesh= to both callers" \
     tests/test_render_flags.py || failures=$((failures+1))
 
+# Phase 2 package G (contracts §6.1): the campaign. Four guards, each
+# the plan's own rubric line: never done below target; seeds derived
+# from the slot INDEX (the exit criterion -- mutate to completion order
+# and the 1-vs-2-worker ledgers diverge); the disk budget refused by
+# name; progress read from the ledger, never from memory.
+mutate core/campaign/campaign.py \
+    '            if verified >= self.target:' \
+    '            if True:  # MUTATED: done regardless of the yield' \
+    "a campaign is never done below its target" \
+    tests/test_campaign.py || failures=$((failures+1))
+
+mutate core/campaign/workers.py \
+    '        spec, seed = build_case(index, record)' \
+    '        spec, seed = build_case(len(os.listdir(os.path.join(out_dir, RUNS_DIR))), record)  # MUTATED: seeded by completion order' \
+    "campaign seeds derive from the slot index, not completion order" \
+    tests/test_campaign.py || failures=$((failures+1))
+
+mutate core/campaign/campaign.py \
+    '        if picture["within_budget"] is False:' \
+    '        if False:  # MUTATED: the disk budget is never enforced' \
+    "the disk budget is refused storage.budget_exceeded by name" \
+    tests/test_campaign.py || failures=$((failures+1))
+
+mutate core/campaign/campaign.py \
+    '        summary = summarise(self.ledger.rows())   # the ledger, never a counter' \
+    '        summary = summarise([])   # MUTATED: nothing read from the ledger' \
+    "campaign progress is computed from the ledger" \
+    tests/test_campaign.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

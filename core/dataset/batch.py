@@ -52,7 +52,10 @@ REPO = Path(__file__).resolve().parents[2]
 
 MATRIX_KEYS = {"base", "factors", "seeds", "design", "workers", "capture"}
 CAPTURE_OPTIONS = {"card": bool, "render": bool, "void": bool,
-                   "no_host_flight": bool, "max_previews": int}
+                   "no_host_flight": bool, "max_previews": int,
+                   # Phase 2 (contracts §6.1): a mountain case can run at
+                   # all -- the CLI's own --terrain <stem> / --synth-terrain.
+                   "terrain": str, "synth_terrain": bool}
 LEDGER = "ledger.jsonl"
 BATCH_RECORD = "batch.json"
 
@@ -150,6 +153,8 @@ def read_matrix(path) -> Matrix:
             raise BatchError("batch.capture", f"capture.{key} must be true/false")
         if kind is int and (not isinstance(value, int) or isinstance(value, bool)):
             raise BatchError("batch.capture", f"capture.{key} must be an integer")
+        if kind is str and not isinstance(value, str):
+            raise BatchError("batch.capture", f"capture.{key} must be a string")
     return Matrix(base=base, factors=factors, seeds=list(seeds), design=design,
                   workers=workers, capture=dict(capture), path=path)
 
@@ -236,39 +241,35 @@ def capture_command(spec_path: Path, run_dir: Path,
             command.append(f"--{flag}")
     if capture.get("no_host_flight"):
         command.append("--no-host-flight")
+    if capture.get("terrain"):
+        command += ["--terrain", str(capture["terrain"])]
+    if capture.get("synth_terrain"):
+        command.append("--synth-terrain")
     return command
 
 
-def run_case(case: BatchCase, out_dir: Path, capture: Dict[str, Any]
-             ) -> Dict[str, Any]:
-    """One run: the spec written, the capture as a subprocess with its
-    log kept, then the verifier over the result and verification.json
-    written. Returns the ledger row. Never raises for a failed capture
-    -- the row says so."""
-    from core.capture.verify import verify_run, write_verification
-
-    run_dir = Path(out_dir) / case.run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
-    spec_path = run_dir / "spec.yaml"
-    case.spec.write(spec_path)
-    command = capture_command(spec_path, run_dir, capture)
-    log = run_dir / "capture.log"
-    started = time.monotonic()
-    with log.open("w", encoding="utf-8") as sink:
+def run_capture(command: List[str], log: Path) -> int:
+    """The capture subprocess, its stdout+stderr kept in ``log``; the
+    exit code. The campaign's watchdog runner has the same signature."""
+    with Path(log).open("w", encoding="utf-8") as sink:
         completed = subprocess.run(command, stdout=sink, stderr=subprocess.STDOUT,
                                    stdin=subprocess.DEVNULL, cwd=str(REPO))
-    row: Dict[str, Any] = {
-        **case.to_dict(),
-        "case_id": case.run_id,          # ResultLog keys on this name
-        "run_dir": str(run_dir),
-        "command": command,
-        "capture_exit": completed.returncode,
-        "wall_seconds": round(time.monotonic() - started, 3),
-    }
-    manifest = run_dir / "capture_manifest.json"
-    if completed.returncode != 0 or not manifest.is_file():
+    return completed.returncode
+
+
+def case_row(row: Dict[str, Any], run_dir: Path, returncode: int,
+             log: Path) -> Dict[str, Any]:
+    """Complete a ledger row after the capture: ``ok`` (exit 0 AND a
+    manifest), then the verifier over the run and verification.json
+    written. The batch and the campaign share this so their rows agree
+    key for key. Never raises for a failed capture -- the row says so."""
+    from core.capture.verify import verify_run, write_verification
+
+    row["capture_exit"] = int(returncode)
+    manifest = Path(run_dir) / "capture_manifest.json"
+    if returncode != 0 or not manifest.is_file():
         row["ok"] = False
-        row["error"] = (f"flightsim.capture exited {completed.returncode}; "
+        row["error"] = (f"flightsim.capture exited {returncode}; "
                         f"its log is {log}")
         row["verified"] = False
         return row
@@ -283,6 +284,31 @@ def run_case(case: BatchCase, out_dir: Path, capture: Dict[str, Any]
             f"{c['name']}: {c['detail']}" for c in summary["checks"]
             if c["status"] == "FAIL")
     return row
+
+
+def run_case(case: BatchCase, out_dir: Path, capture: Dict[str, Any]
+             ) -> Dict[str, Any]:
+    """One run: the spec written, the capture as a subprocess with its
+    log kept, then the verifier over the result and verification.json
+    written. Returns the ledger row. Never raises for a failed capture
+    -- the row says so."""
+    run_dir = Path(out_dir) / case.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    spec_path = run_dir / "spec.yaml"
+    case.spec.write(spec_path)
+    command = capture_command(spec_path, run_dir, capture)
+    log = run_dir / "capture.log"
+    started = time.monotonic()
+    returncode = run_capture(command, log)
+    row: Dict[str, Any] = {
+        **case.to_dict(),
+        "case_id": case.run_id,          # ResultLog keys on this name
+        "run_dir": str(run_dir),
+        "command": command,
+        "capture_exit": returncode,
+        "wall_seconds": round(time.monotonic() - started, 3),
+    }
+    return case_row(row, run_dir, returncode, log)
 
 
 @dataclass
