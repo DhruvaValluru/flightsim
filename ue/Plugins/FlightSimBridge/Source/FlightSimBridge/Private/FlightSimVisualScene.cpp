@@ -5,9 +5,13 @@
 #include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
+#include "Components/SceneComponent.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/VolumetricCloudComponent.h"
+#include "Dom/JsonObject.h"
+#include "Dom/JsonValues.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/ExponentialHeightFog.h"
 #include "Engine/SkyLight.h"
@@ -38,12 +42,23 @@ namespace
 	// this geometry, so it stays.
 	constexpr int32 MaxVerticesPerSide = 257;
 
-	// Budget for the georeferenced instance: a real 1276x905 scene raster at
-	// 257 would drop to ~150 m mesh posting and visibly melt the ridgelines.
-	// 701 keeps a 30 m GLO-30 raster at stride 2 (60 m posting, ~580k
-	// triangles, still comfortable for a static procedural mesh) with
-	// normals still computed from the full-resolution data.
-	constexpr int32 MaxVerticesPerSideGeoreferenced = 701;
+	// Phase 2 (contracts §10): the georeferenced instance is no longer one
+	// section capped at 701 vertices per side (stride 2 on a 30 m GLO-30
+	// raster = 60 m posting). It is TILED: one UProceduralMeshComponent per
+	// tile of at most this many vertices a side (255 quads, ~130k
+	// triangles), at the smallest stride whose triangle count fits the
+	// options' budget (4 M by default: a 1276x905 raster at stride 1 is
+	// 2.3 M triangles, so native 30 m posting). One component per tile,
+	// not one section per tile, so each tile has its own bounds and the
+	// renderer can frustum-cull it. The achieved stride and posting are
+	// RECORDED (TerrainPostingMetres), never assumed.
+	constexpr int32 SceneTerrainTileVerticesPerSide = 256;
+
+	// The engine's default volumetric cloud material, the one the
+	// component's own constructor loads; named here so a component that
+	// came up without it can be refused BY NAME rather than drawing nothing.
+	const TCHAR* const SceneDefaultCloudMaterialPath =
+		TEXT("/Engine/EngineSky/VolumetricClouds/m_SimpleVolumetricCloud_Inst.m_SimpleVolumetricCloud_Inst");
 
 	// Slope/altitude classification (Phase 6B.2). Deliberately simple and
 	// stated as approximated in every manifest: rock above the slope limit,
@@ -88,12 +103,56 @@ namespace
 		}
 		return Valley;
 	}
+
+	// The first scalar parameter of a material whose name contains (or,
+	// when bExact, equals) Needle, case-insensitively. NAME_None when the
+	// material exposes no such parameter -- the caller records "absent"
+	// rather than setting a scalar that drives nothing and calling it
+	// applied.
+	FName FindScalarParameter(const UMaterialInterface* Material,
+	                          const TCHAR* Needle, bool bExact)
+	{
+		if (Material == nullptr)
+		{
+			return NAME_None;
+		}
+		TArray<FMaterialParameterInfo> Infos;
+		TArray<FGuid> Ids;
+		Material->GetAllScalarParameterInfo(Infos, Ids);
+		for (const FMaterialParameterInfo& Info : Infos)
+		{
+			const FString Name = Info.Name.ToString();
+			const bool bMatch = bExact
+				? Name.Equals(Needle, ESearchCase::IgnoreCase)
+				: Name.Contains(Needle, ESearchCase::IgnoreCase);
+			if (bMatch)
+			{
+				return Info.Name;
+			}
+		}
+		return NAME_None;
+	}
+
+	TSharedPtr<FJsonObject> NewRecord()
+	{
+		return MakeShared<FJsonObject>();
+	}
+}
+
+double FFlightSimVisualScene::ExposureValue100(double ApertureF, double ShutterSeconds,
+                                               double Iso)
+{
+	// EV100 = log2(N^2 / t * 100 / ISO): core/capture/exposure.py's formula,
+	// re-implemented, not imported (the test pins this expression).
+	return FMath::Log2((ApertureF * ApertureF / ShutterSeconds) * (100.0 / Iso));
 }
 
 bool FFlightSimVisualScene::Build(UWorld* World,
                                   const FFlightSimVisualSceneOptions& Options,
                                   FString& Error)
 {
+	LookApplied = NewRecord();
+
 	// -- sun ---------------------------------------------------------------
 	// One light. §6.6: Atmosphere Sun Light true, and it must cast shadows --
 	// "its absence was a major tell in the old footage" is about the
@@ -106,15 +165,26 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 	SunLight->SetIntensity(8.0f);
 	SunLight->SetAtmosphereSunLight(true);
 	SunLight->SetCastShadows(Options.bDynamicShadows);
-	// No Nanite in a procedural-mesh scene, so per §6.6's own fallback this
-	// is plain dynamic CSM rather than Virtual Shadow Maps. Push the dynamic
+	// The procedural terrain is a Movable non-Nanite mesh, so the cascade
+	// settings below are what shadow it when virtual shadow maps are off
+	// (VALIDITY §2.13); with r.Shadow.Virtual.Enable=1 (DefaultEngine.ini,
+	// Look lane part 1) the renderer decides, and render.json's
+	// render_settings records which value it found. Push the dynamic
 	// shadow range far enough to cover the near ridge.
 	SunLight->SetDynamicShadowDistanceMovableLight(20000.0f * SceneCmPerMetre);
 	SunLight->SetDynamicShadowCascades(6);
+	{
+		TSharedPtr<FJsonObject> SunRecord = NewRecord();
+		SunRecord->SetNumberField(TEXT("sun_elevation_deg"), -Options.SunRotation.Pitch);
+		SunRecord->SetNumberField(TEXT("engine_sun_yaw_deg"), Options.SunRotation.Yaw);
+		SunRecord->SetStringField(TEXT("component"), TEXT("ADirectionalLight (existing sun)"));
+		SunRecord->SetBoolField(TEXT("cast_shadows"), Options.bDynamicShadows);
+		LookApplied->SetObjectField(TEXT("sun"), SunRecord);
+	}
 
 	// -- atmosphere --------------------------------------------------------
 	AActor* AtmosphereActor = World->SpawnActor<AActor>();
-	USkyAtmosphereComponent* Atmosphere =
+	Atmosphere =
 		NewObject<USkyAtmosphereComponent>(AtmosphereActor, TEXT("SkyAtmosphere"));
 	AtmosphereActor->SetRootComponent(Atmosphere);
 	Atmosphere->SetMobility(EComponentMobility::Movable);
@@ -131,6 +201,31 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 	// §6.6 gotcha 1: transmittance evaluated from the camera's position, or
 	// the ground blacks out at altitude from georeferenced origins.
 	Atmosphere->TransmittanceMinLightElevationAngle = 90.0f;
+	// Phase 2 aerosol (contracts §5.4 row 1): the Mie scattering scale,
+	// applied ONLY when the options carry one (the -aerosol= probe). The
+	// card's look.aerosol is recorded by the commandlet and left unapplied:
+	// the fog row already carries that extinction (double count), and the
+	// value it takes for the Phase 10 default fog is in the hundreds.
+	{
+		TSharedPtr<FJsonObject> AerosolRecord = NewRecord();
+		AerosolRecord->SetStringField(TEXT("component"),
+			TEXT("USkyAtmosphereComponent::MieScatteringScale"));
+		if (Options.AerosolMieScale >= 0.0)
+		{
+			Atmosphere->SetMieScatteringScale(static_cast<float>(Options.AerosolMieScale));
+			AerosolRecord->SetNumberField(TEXT("mie_scattering_scale"), Options.AerosolMieScale);
+			AerosolRecord->SetBoolField(TEXT("applied"), true);
+		}
+		else
+		{
+			AerosolRecord->SetNumberField(TEXT("mie_scattering_scale"), 1.0);
+			AerosolRecord->SetBoolField(TEXT("applied"), false);
+			AerosolRecord->SetStringField(TEXT("note"),
+				TEXT("engine default 1.0; the fog row carries the extinction "
+				     "(applying look.aerosol as well double counts)"));
+		}
+		LookApplied->SetObjectField(TEXT("aerosol"), AerosolRecord);
+	}
 	Atmosphere->RegisterComponent();
 
 	// -- height fog --------------------------------------------------------
@@ -147,6 +242,16 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 	FogComponent->SetFogMaxOpacity(0.92f);
 	FogComponent->SetStartDistance(1500.0f * SceneCmPerMetre);
 	Fog->SetActorLocation(FVector(0, 0, 0));
+	{
+		TSharedPtr<FJsonObject> FogRecord = NewRecord();
+		FogRecord->SetNumberField(TEXT("fog_density"), Options.FogDensity);
+		FogRecord->SetStringField(TEXT("component"),
+			TEXT("UExponentialHeightFogComponent::FogDensity"));
+		FogRecord->SetNumberField(TEXT("fog_height_falloff"), 0.0002);
+		FogRecord->SetNumberField(TEXT("fog_max_opacity"), 0.92);
+		FogRecord->SetNumberField(TEXT("start_distance_m"), 1500.0);
+		LookApplied->SetObjectField(TEXT("fog"), FogRecord);
+	}
 
 	// -- sky light ---------------------------------------------------------
 	ASkyLight* Sky = World->SpawnActor<ASkyLight>();
@@ -156,6 +261,42 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 	// rather than a flat ambient term.
 	SkyComponent->SetRealTimeCapture(true);
 	SkyComponent->SetIntensity(1.0f);
+
+	// -- clouds (Phase 2, contracts §5.4 row 2) ------------------------------
+	if (!BuildClouds(World, Options, Error))
+	{
+		return false;
+	}
+
+	// -- what this phase does NOT draw: recorded, not silent ---------------
+	{
+		TSharedPtr<FJsonObject> DriftRecord = NewRecord();
+		DriftRecord->SetNumberField(TEXT("cloud_drift_mps"), Options.CloudDriftMps);
+		DriftRecord->SetNumberField(TEXT("cloud_drift_from_deg"), Options.CloudDriftFromDeg);
+		DriftRecord->SetBoolField(TEXT("applied"), false);
+		DriftRecord->SetStringField(TEXT("note"),
+			TEXT("not modelled this phase: no per-tick wind offset is written to "
+			     "the cloud material"));
+		LookApplied->SetObjectField(TEXT("cloud_drift"), DriftRecord);
+
+		TSharedPtr<FJsonObject> NightRecord = NewRecord();
+		NightRecord->SetBoolField(TEXT("stars_requested"), Options.bStarsRequested);
+		NightRecord->SetBoolField(TEXT("moon_requested"), Options.bMoonRequested);
+		NightRecord->SetStringField(TEXT("stars"), TEXT("not modelled"));
+		NightRecord->SetStringField(TEXT("moon"), TEXT("not modelled"));
+		NightRecord->SetStringField(TEXT("night_sky"),
+			TEXT("the existing sun below the horizon only (sky atmosphere twilight)"));
+		LookApplied->SetObjectField(TEXT("night"), NightRecord);
+
+		TArray<TSharedPtr<FJsonValue>> NotClaimed;
+		for (const TCHAR* Name : {TEXT("precipitation_particles"), TEXT("moon"),
+		                          TEXT("stars"), TEXT("cloud_drift"), TEXT("sea_state"),
+		                          TEXT("foliage_sway")})
+		{
+			NotClaimed.Add(MakeShared<FJsonValueString>(Name));
+		}
+		LookApplied->SetArrayField(TEXT("not_claimed"), NotClaimed);
+	}
 
 	// -- visible ground ----------------------------------------------------
 	// Gate 6's scene: the plain the aircraft's shadow lands on, at Z=0.
@@ -182,6 +323,21 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 		Ground->SetActorLocation(FVector(0.0, 0.0, 0.0));
 		// The engine plane is 1 m; 100 km on a side reaches past the far ridge.
 		Ground->SetActorScale3D(FVector(100000.0, 100000.0, 1.0));
+	}
+
+	// Precipitation is applied to the georeferenced terrain material below;
+	// until (and unless) that runs, the record says it drove nothing.
+	{
+		TSharedPtr<FJsonObject> PrecipRecord = NewRecord();
+		PrecipRecord->SetStringField(TEXT("precipitation"), Options.Precipitation);
+		PrecipRecord->SetNumberField(TEXT("wetness"), Options.Wetness);
+		PrecipRecord->SetBoolField(TEXT("particles"), false);
+		PrecipRecord->SetStringField(TEXT("particles_note"),
+			TEXT("not drawn this phase: no Niagara rain/snow asset exists in ue/Content"));
+		PrecipRecord->SetStringField(TEXT("wetness_parameter"), TEXT("absent"));
+		PrecipRecord->SetStringField(TEXT("wetness_applied_to"),
+			TEXT("nothing: no terrain material instance in this scene"));
+		LookApplied->SetObjectField(TEXT("precipitation"), PrecipRecord);
 	}
 
 	// -- terrain -----------------------------------------------------------
@@ -301,6 +457,178 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 	return true;
 }
 
+bool FFlightSimVisualScene::BuildClouds(UWorld* World,
+                                        const FFlightSimVisualSceneOptions& Options,
+                                        FString& Error)
+{
+	TSharedPtr<FJsonObject> CloudRecord = NewRecord();
+	CloudRecord->SetStringField(TEXT("component"),
+		TEXT("UVolumetricCloudComponent (LayerBottomAltitude / LayerHeight; "
+		     "coverage through the cloud material)"));
+	CloudRecord->SetNumberField(TEXT("layers_requested"), Options.CloudLayers.Num());
+	if (Options.CloudLayers.Num() == 0)
+	{
+		// No cloud component at all: the scene is byte-identical to Phase
+		// 10's for every card without a cloud layer.
+		CloudRecord->SetBoolField(TEXT("drawn"), false);
+		LookApplied->SetObjectField(TEXT("clouds"), CloudRecord);
+		return true;
+	}
+
+	const FFlightSimCloudLayer& Layer = Options.CloudLayers[0];
+	if (!(Layer.CoverFraction >= 0.0 && Layer.CoverFraction <= 1.0) ||
+	    !(Layer.TopMetres > Layer.BaseMetres))
+	{
+		Error = FString::Printf(
+			TEXT("look.clouds: layer cover %.3f (0..1) with base %.0f m and top %.0f m ")
+			TEXT("(top must exceed base) cannot be drawn"),
+			Layer.CoverFraction, Layer.BaseMetres, Layer.TopMetres);
+		return false;
+	}
+
+	AActor* CloudActor = World->SpawnActor<AActor>();
+	Clouds = NewObject<UVolumetricCloudComponent>(CloudActor, TEXT("VolumetricCloud"));
+	CloudActor->SetRootComponent(Clouds);
+	Clouds->SetMobility(EComponentMobility::Movable);
+	CloudActor->SetActorLocation(FVector::ZeroVector);
+	// Layer geometry in km above the planet surface -- the atmosphere's
+	// planet top sits at this scene's Z = 0 (PlanetTopAtComponentTransform,
+	// spec terrain_elevation_m), so base_m is height above that datum.
+	Clouds->SetLayerBottomAltitude(static_cast<float>(Layer.BaseMetres / 1000.0));
+	Clouds->SetLayerHeight(static_cast<float>((Layer.TopMetres - Layer.BaseMetres) / 1000.0));
+
+	// The engine's default cloud material: the component's constructor
+	// loads it; a build where it did not is refused by name, because a
+	// cloud component with no material draws nothing while "clouds: on"
+	// would be recorded.
+	UMaterialInterface* CloudMaterial = Clouds->Material;
+	if (CloudMaterial == nullptr)
+	{
+		CloudMaterial = LoadObject<UMaterialInterface>(nullptr, SceneDefaultCloudMaterialPath);
+	}
+	if (CloudMaterial == nullptr)
+	{
+		Error = FString::Printf(
+			TEXT("look.clouds: the engine's default volumetric cloud material %s did not ")
+			TEXT("load; refusing to record a cloud layer that draws nothing"),
+			SceneDefaultCloudMaterialPath);
+		return false;
+	}
+	// Coverage goes through the material. The default material's parameter
+	// names are the engine's, not this file's: the first scalar parameter
+	// whose name contains "cover" is set to the layer's cover fraction and
+	// its name recorded; when the material exposes none, that is recorded
+	// as "absent" and only the layer geometry is applied -- stated, so the
+	// Gate 6 cover clause grades a known state rather than a guess.
+	const FName CoverParameter = FindScalarParameter(CloudMaterial, TEXT("cover"), false);
+	UMaterialInstanceDynamic* CloudInstance = UMaterialInstanceDynamic::Create(CloudMaterial, World);
+	if (CoverParameter != NAME_None)
+	{
+		CloudInstance->SetScalarParameterValue(CoverParameter,
+		                                       static_cast<float>(Layer.CoverFraction));
+		CloudRecord->SetStringField(TEXT("cover_parameter"), CoverParameter.ToString());
+	}
+	else
+	{
+		CloudRecord->SetStringField(TEXT("cover_parameter"), TEXT("absent"));
+		UE_LOG(LogFlightSimRender, Warning,
+		       TEXT("look.clouds: the cloud material %s exposes no scalar parameter named ")
+		       TEXT("*cover*; the layer geometry is applied, the cover fraction is NOT"),
+		       *CloudMaterial->GetPathName());
+	}
+	Clouds->SetMaterial(CloudInstance);
+	Clouds->RegisterComponent();
+
+	// Cloud shadows on the directional light (contracts §5.4: "cloud shadows
+	// on"): the sun's own cloud shadow map, so the terrain darkens under the
+	// layer. Whether it does is the Gate 6 cloud clause's measurement.
+	UDirectionalLightComponent* SunLight =
+		Sun != nullptr ? Cast<UDirectionalLightComponent>(Sun->GetLightComponent()) : nullptr;
+	if (SunLight != nullptr)
+	{
+		SunLight->SetCastCloudShadows(true);
+		SunLight->SetCloudShadowStrength(1.0f);
+	}
+
+	CloudRecord->SetBoolField(TEXT("drawn"), true);
+	CloudRecord->SetNumberField(TEXT("cover"), Layer.CoverFraction);
+	CloudRecord->SetNumberField(TEXT("base_m"), Layer.BaseMetres);
+	CloudRecord->SetNumberField(TEXT("top_m"), Layer.TopMetres);
+	CloudRecord->SetNumberField(TEXT("layer_bottom_altitude_km"), Layer.BaseMetres / 1000.0);
+	CloudRecord->SetNumberField(TEXT("layer_height_km"),
+	                            (Layer.TopMetres - Layer.BaseMetres) / 1000.0);
+	CloudRecord->SetStringField(TEXT("base_datum"),
+		TEXT("engine Z=0 (the spec's terrain_elevation_m; planet top at the "
+		     "atmosphere component)"));
+	CloudRecord->SetStringField(TEXT("material"), CloudMaterial->GetPathName());
+	CloudRecord->SetBoolField(TEXT("cloud_shadows"), SunLight != nullptr);
+	CloudRecord->SetNumberField(TEXT("layers_drawn"), 1);
+	if (Options.CloudLayers.Num() > 1)
+	{
+		CloudRecord->SetStringField(TEXT("note"),
+			TEXT("one UVolumetricCloudComponent draws one layer; layers beyond the "
+			     "first are recorded, not drawn"));
+	}
+	LookApplied->SetObjectField(TEXT("clouds"), CloudRecord);
+	UE_LOG(LogFlightSimRender, Display,
+	       TEXT("clouds: cover %.2f, base %.0f m, top %.0f m, cover parameter %s, ")
+	       TEXT("cloud shadows on"),
+	       Layer.CoverFraction, Layer.BaseMetres, Layer.TopMetres,
+	       CoverParameter != NAME_None ? *CoverParameter.ToString() : TEXT("absent"));
+	return true;
+}
+
+UMaterialInterface* FFlightSimVisualScene::ApplyWetness(
+	UWorld* World, UMaterialInterface* Material,
+	const FFlightSimVisualSceneOptions& Options)
+{
+	TSharedPtr<FJsonObject> PrecipRecord = NewRecord();
+	PrecipRecord->SetStringField(TEXT("precipitation"), Options.Precipitation);
+	PrecipRecord->SetNumberField(TEXT("wetness"), Options.Wetness);
+	PrecipRecord->SetBoolField(TEXT("particles"), false);
+	PrecipRecord->SetStringField(TEXT("particles_note"),
+		TEXT("not drawn this phase: no Niagara rain/snow asset exists in ue/Content"));
+	PrecipRecord->SetStringField(TEXT("component"),
+		TEXT("Wetness scalar on the georeferenced terrain material instance"));
+
+	UMaterialInterface* Result = Material;
+	if (Options.Wetness <= 0.0)
+	{
+		// Dry: the material is untouched (byte-identical to Phase 10).
+		PrecipRecord->SetStringField(TEXT("wetness_parameter"), TEXT("not set (dry)"));
+		PrecipRecord->SetStringField(TEXT("wetness_applied_to"), TEXT("nothing (wetness 0)"));
+	}
+	else
+	{
+		// A scalar set on a material that exposes no such parameter drives
+		// nothing; that state is recorded as "absent", never as applied.
+		const FName Parameter = FindScalarParameter(Material, TEXT("Wetness"), true);
+		UMaterialInstanceDynamic* Instance = Cast<UMaterialInstanceDynamic>(Material);
+		if (Instance == nullptr)
+		{
+			Instance = UMaterialInstanceDynamic::Create(Material, World);
+		}
+		Instance->SetScalarParameterValue(TEXT("Wetness"), static_cast<float>(Options.Wetness));
+		Result = Instance;
+		PrecipRecord->SetStringField(TEXT("wetness_parameter"),
+			Parameter != NAME_None ? *Parameter.ToString() : TEXT("absent"));
+		PrecipRecord->SetStringField(TEXT("wetness_applied_to"),
+			Parameter != NAME_None
+				? TEXT("TerrainGeoreferenced material instance")
+				: TEXT("TerrainGeoreferenced material instance, which exposes no "
+				       "Wetness parameter: the scalar drives nothing"));
+		if (Parameter == NAME_None)
+		{
+			UE_LOG(LogFlightSimRender, Warning,
+			       TEXT("precipitation '%s': the terrain material %s exposes no 'Wetness' ")
+			       TEXT("scalar; wetness %.2f was set on the instance and drives nothing"),
+			       *Options.Precipitation, *Material->GetPathName(), Options.Wetness);
+		}
+	}
+	LookApplied->SetObjectField(TEXT("precipitation"), PrecipRecord);
+	return Result;
+}
+
 bool FFlightSimVisualScene::BuildTerrainInstance(UWorld* World, const FString& Name,
                                                  const FVector2D& OriginMetres,
                                                  FString& Error)
@@ -391,11 +719,31 @@ bool FFlightSimVisualScene::BuildTerrainInstance(UWorld* World, const FString& N
 bool FFlightSimVisualScene::BuildGeoreferencedTerrain(
 	UWorld* World, const FFlightSimVisualSceneOptions& Options, FString& Error)
 {
-	const int32 Stride = FMath::Max(1,
-		FMath::DivideAndRoundUp(FMath::Max(Terrain.Width, Terrain.Height),
-		                        MaxVerticesPerSideGeoreferenced));
+	if (Terrain.Width < 2 || Terrain.Height < 2)
+	{
+		Error = FString::Printf(TEXT("terrain raster %dx%d has no quads to triangulate"),
+		                        Terrain.Width, Terrain.Height);
+		return false;
+	}
+	// Phase 2 (contracts §10): the smallest stride whose triangle count fits
+	// the stated budget -- native posting (stride 1) on every raster the
+	// budget admits, and the ACHIEVED stride recorded, never the intended.
+	const int32 Budget = FMath::Max(1, Options.TerrainTriangleBudget);
+	int32 Stride = 1;
+	for (;; ++Stride)
+	{
+		const int64 StrideColumns = (Terrain.Width - 1) / Stride + 1;
+		const int64 StrideRows = (Terrain.Height - 1) / Stride + 1;
+		const int64 StrideTriangles = (StrideColumns - 1) * (StrideRows - 1) * 2;
+		if (StrideTriangles <= Budget || Stride >= FMath::Max(Terrain.Width, Terrain.Height))
+		{
+			break;
+		}
+	}
 	const int32 Columns = (Terrain.Width - 1) / Stride + 1;
 	const int32 Rows = (Terrain.Height - 1) / Stride + 1;
+	TerrainStride = Stride;
+	TerrainPostingMetres = Stride * Terrain.PixelSizeMetres;
 
 	UMaterialInterface* Material =
 		UMaterial::GetDefaultMaterial(EMaterialDomain::MD_Surface);
@@ -472,6 +820,9 @@ bool FFlightSimVisualScene::BuildGeoreferencedTerrain(
 		}
 		Material = VertexColour;
 	}
+	// Phase 2: the precipitation wetness scalar, on whichever material the
+	// terrain draws with (a dynamic instance is made when needed); recorded.
+	Material = ApplyWetness(World, Material, Options);
 
 	TArray<FVector> Vertices;
 	TArray<FVector> Normals;
@@ -530,40 +881,96 @@ bool FFlightSimVisualScene::BuildGeoreferencedTerrain(
 		}
 	}
 
-	TArray<int32> Triangles;
-	Triangles.Reserve((Rows - 1) * (Columns - 1) * 6);
-	for (int32 Row = 0; Row < Rows - 1; ++Row)
+	// Tiles: the decimated grid cut into blocks of at most
+	// SceneTerrainTileVerticesPerSide vertices a side, neighbours sharing
+	// their edge row/column (so there is no seam), one procedural mesh
+	// component per tile under one scene root. Normals were computed from
+	// the full raster above, so shading is continuous across tile edges.
+	AActor* TerrainActor = World->SpawnActor<AActor>();
+	USceneComponent* Root =
+		NewObject<USceneComponent>(TerrainActor, TEXT("TerrainGeoreferenced"));
+	TerrainActor->SetRootComponent(Root);
+	Root->SetMobility(EComponentMobility::Movable);
+	Root->RegisterComponent();
+
+	const int32 TileSpan = SceneTerrainTileVerticesPerSide - 1;   // quads per tile side
+	const int32 TileRows = FMath::DivideAndRoundUp(Rows - 1, TileSpan);
+	const int32 TileColumns = FMath::DivideAndRoundUp(Columns - 1, TileSpan);
+	TerrainTiles = 0;
+	TerrainTriangles = 0;
+	for (int32 TileRow = 0; TileRow < TileRows; ++TileRow)
 	{
-		for (int32 Column = 0; Column < Columns - 1; ++Column)
+		for (int32 TileColumn = 0; TileColumn < TileColumns; ++TileColumn)
 		{
-			const int32 A = Row * Columns + Column;
-			const int32 B = A + 1;
-			const int32 C = A + Columns;
-			const int32 D = C + 1;
-			// Same orientation logic as the offset instances: row index
-			// increases southward, engine +Y is north.
-			Triangles.Append({A, C, B, B, C, D});
+			const int32 Row0 = TileRow * TileSpan;
+			const int32 Row1 = FMath::Min(Row0 + TileSpan, Rows - 1);        // inclusive
+			const int32 Col0 = TileColumn * TileSpan;
+			const int32 Col1 = FMath::Min(Col0 + TileSpan, Columns - 1);     // inclusive
+			const int32 TileRowCount = Row1 - Row0 + 1;
+			const int32 TileColumnCount = Col1 - Col0 + 1;
+			if (TileRowCount < 2 || TileColumnCount < 2)
+			{
+				continue;
+			}
+
+			TArray<FVector> TileVertices;
+			TArray<FVector> TileNormals;
+			TArray<FVector2D> TileUV0;
+			TArray<FLinearColor> TileColours;
+			TileVertices.Reserve(TileRowCount * TileColumnCount);
+			TileNormals.Reserve(TileRowCount * TileColumnCount);
+			TileUV0.Reserve(TileRowCount * TileColumnCount);
+			TileColours.Reserve(TileRowCount * TileColumnCount);
+			for (int32 Row = Row0; Row <= Row1; ++Row)
+			{
+				for (int32 Column = Col0; Column <= Col1; ++Column)
+				{
+					const int32 Index = Row * Columns + Column;
+					TileVertices.Add(Vertices[Index]);
+					TileNormals.Add(Normals[Index]);
+					TileUV0.Add(UV0[Index]);
+					TileColours.Add(Colours[Index]);
+				}
+			}
+
+			TArray<int32> TileTriangles;
+			TileTriangles.Reserve((TileRowCount - 1) * (TileColumnCount - 1) * 6);
+			for (int32 Row = 0; Row < TileRowCount - 1; ++Row)
+			{
+				for (int32 Column = 0; Column < TileColumnCount - 1; ++Column)
+				{
+					const int32 A = Row * TileColumnCount + Column;
+					const int32 B = A + 1;
+					const int32 C = A + TileColumnCount;
+					const int32 D = C + 1;
+					// Same orientation logic as the offset instances: row index
+					// increases southward, engine +Y is north.
+					TileTriangles.Append({A, C, B, B, C, D});
+				}
+			}
+
+			UProceduralMeshComponent* Mesh = NewObject<UProceduralMeshComponent>(
+				TerrainActor, *FString::Printf(TEXT("TerrainTile_r%d_c%d"), TileRow, TileColumn));
+			Mesh->SetupAttachment(Root);
+			Mesh->SetMobility(EComponentMobility::Movable);
+			Mesh->CreateMeshSection_LinearColor(0, TileVertices, TileTriangles, TileNormals,
+			                                    TileUV0, TileColours, {},
+			                                    false /* no collision */);
+			Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Mesh->SetCastShadow(true);
+			Mesh->SetMaterial(0, Material);
+			Mesh->RegisterComponent();
+			++TerrainTiles;
+			TerrainTriangles += TileTriangles.Num() / 3;
 		}
 	}
-
-	AActor* TerrainActor = World->SpawnActor<AActor>();
-	UProceduralMeshComponent* Mesh =
-		NewObject<UProceduralMeshComponent>(TerrainActor, TEXT("TerrainGeoreferenced"));
-	TerrainActor->SetRootComponent(Mesh);
-	Mesh->SetMobility(EComponentMobility::Movable);
-	Mesh->CreateMeshSection_LinearColor(0, Vertices, Triangles, Normals, UV0,
-	                                    Colours, {}, false /* no collision */);
-	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	Mesh->SetCastShadow(true);
-	Mesh->SetMaterial(0, Material);
-	Mesh->RegisterComponent();
 	TerrainActor->SetActorLocation(FVector::ZeroVector);
 
 	UE_LOG(LogFlightSimRender, Display,
-	       TEXT("TerrainGeoreferenced: %d verts, %d triangles (stride %d, %s, "
-	            "snowline %.0f m, classified %s)"),
-	       Vertices.Num(), Triangles.Num() / 3, Stride, *Terrain.Crs,
-	       Terrain.SnowlineMetres,
+	       TEXT("TerrainGeoreferenced: %d verts, %d triangles in %d tiles (stride %d = ")
+	       TEXT("%.0f m posting, budget %d, %s, snowline %.0f m, classified %s)"),
+	       Vertices.Num(), TerrainTriangles, TerrainTiles, Stride, TerrainPostingMetres,
+	       Budget, *Terrain.Crs, Terrain.SnowlineMetres,
 	       Options.bClassifiedMaterial ? TEXT("yes") : TEXT("no"));
 	return true;
 }
@@ -581,4 +988,33 @@ void FFlightSimVisualScene::ApplyManualExposure(USceneCaptureComponent2D* Captur
 	Settings.AutoExposureMethod = EAutoExposureMethod::AEM_Manual;
 	Settings.bOverride_AutoExposureBias = true;
 	Settings.AutoExposureBias = Bias;
+}
+
+double FFlightSimVisualScene::ApplyPhysicalExposure(USceneCaptureComponent2D* Capture,
+                                                    double ApertureF,
+                                                    double ShutterSeconds, double Iso)
+{
+	// Manual metering from the physical camera: the engine computes
+	// EV100 = log2(N^2 / t * 100 / ISO) from these three when
+	// AutoExposureApplyPhysicalCameraExposure is on, and the bias is pinned
+	// to zero so nothing is added to it. Like the bias path this is constant
+	// over a clip; unlike it, the number is the card's, not a probe's. The
+	// extended luminance range (r.DefaultFeature.AutoExposure.
+	// ExtendDefaultLuminanceRange, DefaultEngine.ini) sets the calibration
+	// this EV100 is interpreted against; the commandlet reads that CVar back
+	// into render.json rather than assuming it here.
+	FPostProcessSettings& Settings = Capture->PostProcessSettings;
+	Settings.bOverride_AutoExposureMethod = true;
+	Settings.AutoExposureMethod = EAutoExposureMethod::AEM_Manual;
+	Settings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
+	Settings.AutoExposureApplyPhysicalCameraExposure = 1.0f;
+	Settings.bOverride_CameraShutterSpeed = true;
+	Settings.CameraShutterSpeed = static_cast<float>(1.0 / ShutterSeconds);
+	Settings.bOverride_CameraISO = true;
+	Settings.CameraISO = static_cast<float>(Iso);
+	Settings.bOverride_DepthOfFieldFstop = true;
+	Settings.DepthOfFieldFstop = static_cast<float>(ApertureF);
+	Settings.bOverride_AutoExposureBias = true;
+	Settings.AutoExposureBias = 0.0f;
+	return ExposureValue100(ApertureF, ShutterSeconds, Iso);
 }

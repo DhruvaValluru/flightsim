@@ -148,7 +148,10 @@ not used anywhere and is not adopted). The beauty image may use any
 anti-aliasing and every visual effect; the label passes use **none**
 (rule §3.3 of the brainstorm: `r.AntiAliasingMethod 0`, no temporal
 history, screen percentage 100, show flags off for fog, atmosphere,
-bloom, motion blur, DOF, lens flare, translucency; each label
+bloom, motion blur, DOF, lens flare, translucency and -- added by the Look
+lane, part 2 -- volumetric cloud (`SetCloud(false)`: clouds write no depth
+and the ID pass replaces the tonemapper, but a label capture draws no
+cloud at all); each label
 `USceneCaptureComponent2D` carries its own `ShowFlags` and
 `bAlwaysPersistRenderingState = false` — today the depth captures inherit
 engine defaults, commandlet L1742-1768, and their edge behaviour was
@@ -1134,6 +1137,90 @@ rest. No new flags are added this phase (§5.4 moves look onto the card).
 
 Every switch is recorded in `render.json.render_settings` and has a Gate 6
 clause.
+
+### 10.1 As landed (Look lane, part 2; C++ UNCOMPILED here) -- the shapes and five stated departures
+
+* **`render.json.render_settings`** (root, always written): `console`
+  (every `r.` name this pass relies on -> the value `IConsoleManager`
+  returned as a string, or `"absent"`: `r.AntiAliasingMethod`,
+  `r.DynamicGlobalIlluminationMethod`, `r.ReflectionMethod`,
+  `r.Lumen.HardwareRayTracing`, `r.GenerateMeshDistanceFields`,
+  `r.Shadow.Virtual.Enable`, `r.Nanite.ProjectEnabled`, `r.Nanite`,
+  `r.CustomDepth`, `r.ScreenPercentage`,
+  `r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange`,
+  `r.Substrate`, the three deterministic pins), `anti_aliasing`
+  (`beauty` / `linear` / `labels`: the method name from the CVar when the
+  capture's own AA show flag is on, `"none"` when it is off, a `DEFECT:`
+  string when a label capture's flag is found on), `beauty_show_flags`
+  (the booleans read from the capture), `capture_size_px`,
+  `screen_percentage` (a sentence: captures render at the target size),
+  `exposure_mode` (`auto` | `manual_bias` | `manual_ev100`),
+  `exposure_source`, `ev100` (number or null), `exposure_bias`,
+  `extend_default_luminance_range`, `rhi`, `shader_platform`,
+  `deterministic_pins`, `cockpit_offset_m`, `chase_offset_m`,
+  `wingman_offset_m` (as flown), `preset_offset_rule`.
+* **`render.json.look_applied`** (root, `-Visual` only): one object per
+  §5.4 row -- `sun`, `aerosol` (`mie_scattering_scale`, `applied`,
+  `card_aerosol` when the card carried one), `fog`, `clouds` (`drawn`,
+  `cover`, `base_m`, `top_m`, `cover_parameter` = the material scalar
+  found or `"absent"`, `base_datum`, `cloud_shadows`, `material`),
+  `precipitation` (`wetness`, `wetness_parameter` found or `"absent"`,
+  `wetness_applied_to`, `particles: false`), `cloud_drift` (`applied:
+  false`), `night` (`stars`/`moon`: `"not modelled"`), `exposure`
+  (`mode`, `source`, `ev100`), `not_claimed`, `source` (`card.look` |
+  `card.randomization.look` | flags), `probe_overrides`. Also
+  `scene.terrain_posting_m`, `terrain_stride`, `terrain_tiles`,
+  `terrain_triangles` on georeferenced terrain.
+* **Departure 1 -- probe flags exist.** §9 says no new flags this phase.
+  Six were added, `-cloud-cover= -cloud-base= -cloud-thickness= -aerosol=
+  -precip= -stars -moon`, as PROBE OVERRIDES for the Gate 6 control
+  renders (one control per switch, gotcha 6); the card's `look` block
+  (root `look`, else `randomization.look`, §5.6) is the source of truth
+  and the flags override its row when given, recorded under
+  `look_applied.probe_overrides`. `core/render/flags.py` does not emit
+  them; no Python caller passes them.
+* **Departure 2 -- the card's `aerosol` is recorded, not applied.** The
+  §5.4 row puts the extinction into the fog AND the Mie scale; the look
+  table's own docstring says driving both double counts, and for the
+  Phase 10 default fog the `aerosol` value evaluates to hundreds (a
+  sky-whitening Mie scale). The fog carries the extinction; the
+  atmosphere's Mie scale moves only under `-aerosol=`, and the value the
+  card carried is written beside it as `card_aerosol`.
+* **Departure 3 -- EV100 precedence.** §10 says `-exposure-bias` is kept
+  "as the override". As landed: when the consumed camera carries
+  `cameras[N].exposure {aperture_f, shutter_s, iso}` the physical path
+  runs (bias pinned to 0, `AutoExposureApplyPhysicalCameraExposure` on)
+  and the flag's bias is only recorded; else a Python-computed
+  `look.ev100[camera_id]` is applied through N = 1, ISO = 100,
+  t = 2^-EV100; else the bias path exactly as before. `-AutoExposure`
+  skips all three (the control). The web app always passes
+  `-exposure-bias`, so "flag overrides card" would have made the EV100
+  path unreachable. `core/capture/poses.py` does NOT yet write the
+  camera's exposure triple onto the card (not this stage's file); until
+  it does, the physical path is reachable only through `look.ev100`.
+* **Departure 4 -- one cloud layer.** `UVolumetricCloudComponent` draws
+  one layer; `look.clouds[0]` is drawn, further layers are recorded as
+  not drawn. Coverage goes through the first scalar parameter of the
+  engine's default cloud material whose name contains "cover"; when the
+  material exposes none, `cover_parameter` is `"absent"` and only the
+  layer geometry is applied -- stated, so the cloud clause grades a
+  known state.
+* **Departure 5 -- terrain tiling as procedural components, not
+  Landscape.** One `UProceduralMeshComponent` per 256-vertex tile under
+  one root, at the smallest stride whose triangle count fits a stated
+  budget (`TerrainTriangleBudget`, 4 M: a 1276x905 raster tiles at
+  stride 1 = native 30 m posting); the achieved stride and posting are
+  recorded, the Landscape import path stays the next step.
+* The cockpit rule is Python's (`SHOULDER_OFFSET` unscaled from the CG;
+  the commandlet's span scaling and 1.3 m floor are gone) and the
+  director's chase/wingman defaults are `FALLBACK_CHASE_OFFSET` (-110,
+  0, 12) and `WINGMAN_OFFSET` (-45, 180, 0); the commandlet's shot
+  constants (-170/-400 m) and `-chase=` still override the chase as
+  before. Recorded: the vendored plugin's `CGLocalPosition` pushes a
+  BODY-frame vector through the structural->actor matrix
+  (`UJSBSimMovementComponent::UpdateLocalTransforms`), so y would be
+  sign-wrong for a non-zero CG y; every staged airframe has y = 0. Not
+  patched (vendored).
 
 ---
 

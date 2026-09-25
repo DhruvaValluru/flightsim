@@ -70,15 +70,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightSim|Camera")
 	EFlightSimCameraPreset Preset = EFlightSimCameraPreset::LaggedChase;
 
-	// Metres behind and above, for the chase and wingman presets.
+	// Metres behind and above, for the chase and wingman presets. The
+	// defaults are Python's (core/scenario/camera.py FALLBACK_CHASE_OFFSET
+	// and WINGMAN_OFFSET, Phase 2 Look lane part 2): one rule for both
+	// paths, so a preset that no card and no -chase= flag overrides places
+	// the camera where the solved track would. tests/test_gate6_visual.py
+	// reads these literals and pins them to the Python constants.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightSim|Camera")
-	FVector ChaseOffsetMetres = FVector(-60.0f, 0.0f, 12.0f);
+	FVector ChaseOffsetMetres = FVector(-110.0f, 0.0f, 12.0f);
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightSim|Camera")
-	FVector WingmanOffsetMetres = FVector(-15.0f, 25.0f, 0.0f);
+	FVector WingmanOffsetMetres = FVector(-45.0f, 180.0f, 0.0f);
 
 	// Body-frame offset for the cockpit-shoulder preset, metres. Slightly
-	// behind and above the cockpit, offset toward the left seat.
+	// behind and above the cockpit, offset toward the left seat. Applied
+	// UNSCALED from the CG (Python's SHOULDER_OFFSET rule); the render
+	// commandlet no longer span-scales it.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightSim|Camera")
 	FVector ShoulderOffsetMetres = FVector(-6.0f, -0.5f, 1.6f);
 

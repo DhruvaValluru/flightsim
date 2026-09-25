@@ -39,6 +39,36 @@ airframe is still boxes, the terrain material is the engine default, and there
 is no foliage and no land-cover material (docs/VALIDITY.md records these as
 Phase 6 work remaining). The four properties above are necessary conditions
 the brief names, each of which the old footage measurably lacked.
+
+Phase 2 look clauses (contracts §5.4, §10; brainstorm §9.2, §9.7)
+--------------------------------------------------------------------
+Four more clauses, each a pixel measurement against a control render with
+ONE switch changed (the gotcha 6 pattern), each reporting NOT RUN with its
+measurement stated when its renders do not exist -- which is every run in
+an environment without the engine. They are rendered by ``--look`` and
+graded whenever their directories exist:
+
+* **Cloud base bracket.** The same still with a cloud layer whose base is
+  300 m ABOVE the 300 m flight (600-1400 m) and one whose layer is 300 m
+  BELOW it (20-200 m), each against a no-cloud control. Pixels that change
+  are cloud. With the base above the camera, cloud may change the sky band
+  only; with the layer below, the ground band only. A base drawn at the
+  wrong height fails one side of the bracket. (The brainstorm's "cloud-only
+  depth render" does not exist: volumetrics write no depth.)
+* **Extinction vs visibility_km.** The existing extinction ratio, re-run
+  with the fog density set by Koschmieder (beta = 3.912 / V, re-implemented
+  here, not imported from the producer) at 50 km and at 10 km. The hazy
+  ratio must sit below the clear one by a stated margin. Whether
+  ``FogDensity`` IS a per-metre extinction is what this measures; nothing
+  in the look table claims it.
+* **Wet-surface null test.** The same still with ``-precip=rain`` and
+  ``-precip=none``. The terrain band must change (the wetness scalar
+  reached a material parameter -- and ``look_applied`` must not say the
+  parameter was absent), and the sky band must NOT change: the sky does
+  not get wet, so a change there is a different switch, not wetness.
+* **Exposure holds at -12 deg sun.** The doublet at ``-sun-elev=-12``: the
+  frames must not be black (a clause on black frames measures nothing) and
+  the sky band must hold exactly as the daylight exposure clause demands.
 """
 
 from __future__ import annotations
@@ -116,6 +146,70 @@ THRESHOLDS = {
 #: mountains sit just above the horizon) and as pure sky (top of frame).
 TERRAIN_BAND_ROWS = (80, 235)
 SKY_BAND_ROWS = (0, 50)
+
+# -- Phase 2 look clauses: declared before any frame is measured ----------
+
+#: Rows below the horizon in the terrain shot: the plain under the 300 m
+#: flight, where a cloud layer BELOW the aircraft shows and one above it
+#: cannot.
+CLOUD_GROUND_ROWS = (300, 540)
+#: The cloud base bracket: the layer is placed this far above, then this far
+#: below, the flight altitude of the gate's card (300 m).
+CLOUD_BASE_BRACKET_M = 300.0
+FLIGHT_ALTITUDE_M = 300.0
+#: The two visibilities the extinction clause is re-run at, km.
+VISIBILITY_CLEAR_KM = 50.0
+VISIBILITY_HAZY_KM = 10.0
+#: Koschmieder's constant, ln(1/0.02): RE-IMPLEMENTED here on purpose. The
+#: producer is core/scene/weather_visuals.py; this harness must not import
+#: the thing it measures.
+KOSCHMIEDER = 3.912
+
+LOOK_THRESHOLDS = {
+    #: Cloud on/off must change this many pixels in the band the layer's
+    #: height predicts ...
+    "cloud_min_changed_px": 2000,
+    #: ... and at most this many in the band it cannot reach.
+    "cloud_max_leak_px": 500,
+    #: The hazy (10 km) extinction ratio must sit this far below the clear
+    #: (50 km) one. A fog density that is not an extinction shows no order.
+    "visibility_min_ratio_drop": 0.10,
+    #: Rain on/off must change this many terrain-band pixels ...
+    "wet_min_changed_px": 2000,
+    #: ... and this few sky-band pixels (the null: sky does not get wet).
+    "wet_max_sky_changed_px": 200,
+    #: Mean frame luminance under a -12 deg sun, 8-bit counts: below this the
+    #: frames are black and the exposure clause is vacuous.
+    "night_min_mean_luminance": 2.0,
+}
+
+
+def koschmieder_fog_density(visibility_km: float) -> float:
+    """beta = 3.912 / (1000 V) in 1/m, V in km -- the number handed to
+    -fog-density for the visibility clause (re-implemented, see above)."""
+    return KOSCHMIEDER / (1000.0 * float(visibility_km))
+
+
+#: The look control renders (--look): one switch per pair, everything else
+#: the gate's terrain shot. Values are (shot, extra flags).
+LOOK_RUNS = {
+    "cloud_above": ("terrain", [
+        "-seconds=2", "-cloud-cover=0.9",
+        f"-cloud-base={FLIGHT_ALTITUDE_M + CLOUD_BASE_BRACKET_M:g}",
+        "-cloud-thickness=800"]),
+    "cloud_below": ("terrain", [
+        "-seconds=2", "-cloud-cover=0.9",
+        f"-cloud-base={FLIGHT_ALTITUDE_M - CLOUD_BASE_BRACKET_M + 20:g}",
+        "-cloud-thickness=180"]),
+    "cloud_control": ("terrain", ["-seconds=2", "-cloud-cover=0"]),
+    "visibility_clear": ("terrain", [
+        "-seconds=2", f"-fog-density={koschmieder_fog_density(VISIBILITY_CLEAR_KM):.6g}"]),
+    "visibility_hazy": ("terrain", [
+        "-seconds=2", f"-fog-density={koschmieder_fog_density(VISIBILITY_HAZY_KM):.6g}"]),
+    "wet": ("terrain", ["-seconds=2", "-precip=rain"]),
+    "wet_control": ("terrain", ["-seconds=2", "-precip=none"]),
+    "night": ("terrain", ["-sun-elev=-12", "-sun-azim=180"]),
+}
 
 
 # -- pixels ---------------------------------------------------------------
@@ -320,6 +414,247 @@ def measure_exposure_control(control_dir: Path) -> Check:
     )
 
 
+# -- Phase 2 look clauses -------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LookClause:
+    """A look clause's outcome: PASS, FAIL, or NOT RUN with the measurement
+    it WOULD make stated -- never a silent skip."""
+    name: str
+    status: str          # "PASS" | "FAIL" | "NOT RUN"
+    detail: str
+    measurement: str
+
+    @property
+    def ran(self) -> bool:
+        return self.status != "NOT RUN"
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "PASS"
+
+    def render(self) -> str:
+        tag = {"PASS": "ok  ", "FAIL": "FAIL"}.get(self.status, "----")
+        line = f"  [{tag}] {self.name:30s} {self.detail}"
+        if not self.ran:
+            line += f"\n         measurement: {self.measurement}"
+        return line
+
+
+def _last_frame(frames_dir: Path) -> Path:
+    manifest = json.loads((frames_dir / "render.json").read_text(encoding="utf-8"))
+    return frames_dir / manifest["frame_records"][-1]["frame"]
+
+
+def _look_applied(frames_dir: Path) -> dict:
+    manifest = json.loads((frames_dir / "render.json").read_text(encoding="utf-8"))
+    return manifest.get("look_applied", {}) or {}
+
+
+def changed_mask(a_path: Path, b_path: Path):
+    """Pixels whose mean-RGB differs by the darkening threshold either way."""
+    import numpy as np
+
+    a = luminance(load_rgb(a_path))
+    b = luminance(load_rgb(b_path))
+    return np.abs(a - b) > THRESHOLDS["darkening_threshold"]
+
+
+def _band_count(mask, rows: Tuple[int, int]) -> int:
+    return int(mask[rows[0]:rows[1], :].sum())
+
+
+CLOUD_MEASUREMENT = (
+    "same still, cloud layer 300 m above the flight vs 300 m below it, each "
+    "against a no-cloud control; changed pixels are cloud; above -> sky band "
+    f"rows {SKY_BAND_ROWS} only, below -> ground band rows {CLOUD_GROUND_ROWS} "
+    "only (min changed / max leak px in LOOK_THRESHOLDS)")
+
+
+def measure_cloud_base(above_dir: Path, below_dir: Path, control_dir: Path) -> LookClause:
+    control = _last_frame(control_dir)
+    above = changed_mask(_last_frame(above_dir), control)
+    below = changed_mask(_last_frame(below_dir), control)
+    above_sky = _band_count(above, SKY_BAND_ROWS)
+    above_ground = _band_count(above, CLOUD_GROUND_ROWS)
+    below_sky = _band_count(below, SKY_BAND_ROWS)
+    below_ground = _band_count(below, CLOUD_GROUND_ROWS)
+    minimum = LOOK_THRESHOLDS["cloud_min_changed_px"]
+    leak = LOOK_THRESHOLDS["cloud_max_leak_px"]
+    applied = _look_applied(above_dir).get("clouds", {})
+    ok = (above_sky >= minimum and above_ground <= leak
+          and below_ground >= minimum and below_sky <= leak)
+    return LookClause(
+        "cloud base bracket", "PASS" if ok else "FAIL",
+        f"layer above: {above_sky} sky px / {above_ground} ground px changed; "
+        f"layer below: {below_ground} ground px / {below_sky} sky px "
+        f"(min {minimum}, leak max {leak}; cover parameter "
+        f"{applied.get('cover_parameter', 'unrecorded')})",
+        CLOUD_MEASUREMENT)
+
+
+def peak_contrasts(frames_dir: Path) -> Optional[Dict[str, float]]:
+    """Near/far peak colour distance from the sky above each, or None when
+    a peak is out of frame. The same quantity measure_extinction uses."""
+    import numpy as np
+
+    manifest = json.loads((frames_dir / "render.json").read_text(encoding="utf-8"))
+    record = manifest["frame_records"][-1]
+    landmarks = record.get("landmarks", {})
+    near = landmarks.get("near_peak", {})
+    far = landmarks.get("far_peak", {})
+    if not (near.get("visible") and far.get("visible")):
+        return None
+    rgb = load_rgb(frames_dir / record["frame"])
+
+    def patch_rgb(px: float, py: float, half: int = 6):
+        y0 = max(0, int(py) - half)
+        x0 = max(0, int(px) - half)
+        return rgb[:, y0:int(py) + half + 1, x0:int(px) + half + 1].mean(axis=(1, 2))
+
+    out = {}
+    for name, mark in (("near", near), ("far", far)):
+        peak = patch_rgb(mark["px"], mark["py"] + 8)
+        sky = patch_rgb(mark["px"], mark["py"] - 45)
+        out[name] = float(np.linalg.norm(peak - sky))
+    return out
+
+
+VISIBILITY_MEASUREMENT = (
+    f"the extinction ratio (far/near peak contrast) at -fog-density = "
+    f"3.912/(1000 V) for V = {VISIBILITY_CLEAR_KM:g} km and {VISIBILITY_HAZY_KM:g} km; "
+    "the hazy ratio must sit below the clear one by "
+    f"{LOOK_THRESHOLDS['visibility_min_ratio_drop']:g}, both near contrasts above "
+    f"{THRESHOLDS['min_near_contrast']:g}")
+
+
+def measure_extinction_vs_visibility(clear_dir: Path, hazy_dir: Path) -> LookClause:
+    clear = peak_contrasts(clear_dir)
+    hazy = peak_contrasts(hazy_dir)
+    if clear is None or hazy is None:
+        return LookClause("extinction follows visibility", "FAIL",
+                          "a terrain peak is not in frame; nothing to measure",
+                          VISIBILITY_MEASUREMENT)
+    floor = THRESHOLDS["min_near_contrast"]
+    if clear["near"] < floor or hazy["near"] < floor:
+        return LookClause("extinction follows visibility", "FAIL",
+                          f"near contrast {clear['near']:.1f} / {hazy['near']:.1f} "
+                          f"below {floor:g}; a quotient of noise",
+                          VISIBILITY_MEASUREMENT)
+    ratio_clear = clear["far"] / clear["near"]
+    ratio_hazy = hazy["far"] / hazy["near"]
+    drop = ratio_clear - ratio_hazy
+    ok = drop >= LOOK_THRESHOLDS["visibility_min_ratio_drop"]
+    return LookClause(
+        "extinction follows visibility", "PASS" if ok else "FAIL",
+        f"ratio {ratio_clear:.2f} at {VISIBILITY_CLEAR_KM:g} km vs {ratio_hazy:.2f} at "
+        f"{VISIBILITY_HAZY_KM:g} km (drop {drop:.2f}, threshold "
+        f"{LOOK_THRESHOLDS['visibility_min_ratio_drop']:g}; fog_density applied "
+        f"{_look_applied(hazy_dir).get('fog', {}).get('fog_density', 'unrecorded')})",
+        VISIBILITY_MEASUREMENT)
+
+
+WET_MEASUREMENT = (
+    "same still with -precip=rain vs -precip=none: changed pixels in the terrain "
+    f"band rows {TERRAIN_BAND_ROWS} must exceed the minimum and in the sky band "
+    f"rows {SKY_BAND_ROWS} stay under the null maximum; look_applied.precipitation."
+    "wetness_parameter must not be 'absent'")
+
+
+def measure_wet_surface_null(wet_dir: Path, dry_dir: Path) -> LookClause:
+    applied = _look_applied(wet_dir).get("precipitation", {})
+    parameter = applied.get("wetness_parameter", "unrecorded")
+    if parameter in ("absent", "unrecorded"):
+        return LookClause(
+            "wet surface null test", "FAIL",
+            f"look_applied says the wetness parameter is {parameter}: the scalar "
+            f"drove nothing, so any change measured would not be wetness",
+            WET_MEASUREMENT)
+    mask = changed_mask(_last_frame(wet_dir), _last_frame(dry_dir))
+    terrain = _band_count(mask, TERRAIN_BAND_ROWS)
+    sky = _band_count(mask, SKY_BAND_ROWS)
+    ok = (terrain >= LOOK_THRESHOLDS["wet_min_changed_px"]
+          and sky <= LOOK_THRESHOLDS["wet_max_sky_changed_px"])
+    return LookClause(
+        "wet surface null test", "PASS" if ok else "FAIL",
+        f"{terrain} terrain-band px change with rain (min "
+        f"{LOOK_THRESHOLDS['wet_min_changed_px']}), {sky} sky-band px change "
+        f"(null max {LOOK_THRESHOLDS['wet_max_sky_changed_px']}); parameter "
+        f"{parameter}, wetness {applied.get('wetness', '?')}",
+        WET_MEASUREMENT)
+
+
+NIGHT_MEASUREMENT = (
+    "the doublet at -sun-elev=-12: mean frame luminance above "
+    f"{LOOK_THRESHOLDS['night_min_mean_luminance']:g}/255 (frames not black), the "
+    f"roll sweep above {THRESHOLDS['min_roll_sweep_deg']:g} deg, and the sky band's "
+    f"excursion within {THRESHOLDS['max_sky_excursion']:g}/255 as by day")
+
+
+def measure_exposure_low_sun(night_dir: Path) -> LookClause:
+    manifest = json.loads((night_dir / "render.json").read_text(encoding="utf-8"))
+    records = manifest["frame_records"]
+    means = [float(luminance(load_rgb(night_dir / record["frame"])).mean())
+             for record in records]
+    mean = sum(means) / max(1, len(means))
+    if mean < LOOK_THRESHOLDS["night_min_mean_luminance"]:
+        return LookClause("exposure holds at -12 deg sun", "FAIL",
+                          f"frames average {mean:.2f}/255: black frames cannot "
+                          f"breathe and cannot hold; the clause is vacuous",
+                          NIGHT_MEASUREMENT)
+    rolls = [record["roll_deg"] for record in records]
+    sweep = max(rolls) - min(rolls)
+    if sweep < THRESHOLDS["min_roll_sweep_deg"]:
+        return LookClause("exposure holds at -12 deg sun", "FAIL",
+                          f"the aircraft only rolled {sweep:.1f} deg; tested "
+                          f"without any banking", NIGHT_MEASUREMENT)
+    excursion = sky_excursion(night_dir)
+    sun = _look_applied(night_dir).get("sun", {}).get("sun_elevation_deg", "unrecorded")
+    ok = excursion <= THRESHOLDS["max_sky_excursion"]
+    return LookClause(
+        "exposure holds at -12 deg sun", "PASS" if ok else "FAIL",
+        f"sky band moved {excursion:.2f}/255 over a {sweep:.1f} deg roll sweep "
+        f"(threshold {THRESHOLDS['max_sky_excursion']:g}); frames average "
+        f"{mean:.1f}/255; sun elevation applied {sun}",
+        NIGHT_MEASUREMENT)
+
+
+def look_clauses(out: Path) -> List[LookClause]:
+    """Every Phase 2 look clause: measured when its renders exist under
+    ``out``, else NOT RUN with the measurement stated."""
+    def rendered(*names: str) -> bool:
+        return all((out / name / "render.json").is_file() for name in names)
+
+    clauses: List[LookClause] = []
+    if rendered("cloud_above", "cloud_below", "cloud_control"):
+        clauses.append(measure_cloud_base(out / "cloud_above", out / "cloud_below",
+                                          out / "cloud_control"))
+    else:
+        clauses.append(LookClause("cloud base bracket", "NOT RUN",
+                                  "renders cloud_above / cloud_below / cloud_control "
+                                  "absent (no engine here, or --look not given)",
+                                  CLOUD_MEASUREMENT))
+    if rendered("visibility_clear", "visibility_hazy"):
+        clauses.append(measure_extinction_vs_visibility(out / "visibility_clear",
+                                                        out / "visibility_hazy"))
+    else:
+        clauses.append(LookClause("extinction follows visibility", "NOT RUN",
+                                  "renders visibility_clear / visibility_hazy absent",
+                                  VISIBILITY_MEASUREMENT))
+    if rendered("wet", "wet_control"):
+        clauses.append(measure_wet_surface_null(out / "wet", out / "wet_control"))
+    else:
+        clauses.append(LookClause("wet surface null test", "NOT RUN",
+                                  "renders wet / wet_control absent", WET_MEASUREMENT))
+    if rendered("night"):
+        clauses.append(measure_exposure_low_sun(out / "night"))
+    else:
+        clauses.append(LookClause("exposure holds at -12 deg sun", "NOT RUN",
+                                  "render night absent", NIGHT_MEASUREMENT))
+    return clauses
+
+
 def compose_side_by_side(old_frame: Path, new_frame: Path, out: Path) -> Path:
     """The human-judgment clause's evidence: old footage beside this build."""
     import numpy as np
@@ -372,6 +707,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     default=str(Path.home() / "FlightScene" / "renders"))
     ap.add_argument("--skip-render", action="store_true",
                     help="measure existing renders without re-rendering")
+    ap.add_argument("--look", action="store_true",
+                    help="also render the Phase 2 look controls (LOOK_RUNS); "
+                         "without them the look clauses report NOT RUN")
     args = ap.parse_args(argv)
     # Absolute, because these paths are handed to the editor, whose working
     # directory is its own binary's -- a relative card path resolves to
@@ -420,6 +758,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print("\n  GATE 6: BLOCKED -- a render did not complete.")
             return 2
 
+    if args.look:
+        for name, (shot, extra) in LOOK_RUNS.items():
+            frames = out / name
+            if args.skip_render and (frames / "render.json").is_file():
+                print(f"  [kept] {name}")
+                continue
+            ok = render(editor, project, card, frames, terrain, shot, extra)
+            print(f"  [{'ok  ' if ok else 'FAIL'}] {name} ({shot} shot "
+                  f"{' '.join(extra)})")
+            if not ok:
+                print("\n  GATE 6: BLOCKED -- a look control render did not complete.")
+                return 2
+
     # The terrain the commandlet drew must be the raster baked above (§1.4:
     # one lookup, verified after load -- the renderer's version of it).
     for name in runs:
@@ -465,10 +816,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     else:
         print(f"  no old footage found under {args.old_footage}")
 
-    everything = all(check.ok for check in checks) and side_by_side is not None
+    print(f"\n{RULE}\n5. Phase 2 look clauses (NOT RUN without their control renders)\n{RULE}")
+    looks = look_clauses(out)
+    for clause in looks:
+        print(clause.render())
+
+    everything = (all(check.ok for check in checks) and side_by_side is not None
+                  and all(clause.ok for clause in looks if clause.ran))
     print(f"\n{RULE}\nGATE 6\n{RULE}")
     for check in checks:
         print(f"  [{'PASS' if check.ok else 'FAIL'}] {check.name}")
+    for clause in looks:
+        print(f"  [{clause.status}] {clause.name}")
     print(f"  [{'PASS' if side_by_side else 'FAIL'}] side-by-side produced "
           f"against the old footage")
     if everything:

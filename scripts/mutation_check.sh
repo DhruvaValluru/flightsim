@@ -340,6 +340,73 @@ mutate experiments/gate6_visual.py \
     "exposure control must trip the metric" tests/test_gate6_visual.py \
     || failures=$((failures+1))
 
+# -- Phase 2 Look lane, part 2 guards ------------------------------------
+# Each confirmed by hand in the build container (no engine: the C++ guards
+# are source-text pins, the only measurement possible before a Windows
+# build): apply, run the test file, restore byte-identical, purge caches.
+
+mutate core/capture/exposure.py \
+    '    return math.log2((n * n / t) * (100.0 / s))' \
+    '    return math.log2((n * n / t) * (s / 100.0))  # MUTATED: ISO the wrong way up' \
+    "EV100 puts ISO under the fraction" tests/test_exposure.py \
+    || failures=$((failures+1))
+
+mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Public/FlightSimCameraDirector.h \
+    '	FVector ChaseOffsetMetres = FVector(-110.0f, 0.0f, 12.0f);' \
+    '	FVector ChaseOffsetMetres = FVector(-60.0f, 0.0f, 12.0f);  // MUTATED: the Phase 10 default' \
+    "camera director chase default is Python's" tests/test_gate6_visual.py \
+    || failures=$((failures+1))
+
+mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp \
+    '		// in render.json render_settings.cockpit_offset_m; a small airframe' \
+    '		Director->ShoulderOffsetMetres.Z *= Scale;  // MUTATED: span scaling is back' \
+    "shoulder offset is not span-scaled" tests/test_gate6_visual.py \
+    || failures=$((failures+1))
+
+mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp \
+    '			Label->ShowFlags.SetCloud(false);' \
+    '			Label->ShowFlags.SetCloud(true);  // MUTATED: clouds in the label pass' \
+    "label captures draw no cloud" tests/test_gate6_visual.py \
+    || failures=$((failures+1))
+
+mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp \
+    '			return Variable != nullptr ? Variable->GetString() : FString(TEXT("absent"));' \
+    '			return Variable != nullptr ? Variable->GetString() : FString(TEXT("0"));  // MUTATED: a missing CVar reads as 0' \
+    "render_settings records a missing CVar as absent" tests/test_gate6_visual.py \
+    || failures=$((failures+1))
+
+mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp \
+    '			if (CardLook->TryGetNumberField(TEXT("fog_extinction_per_m"), Value) && Value > 0.0)' \
+    '			if (CardLook->TryGetNumberField(TEXT("fog_extinction"), Value) && Value > 0.0)  // MUTATED: a key the look never writes' \
+    "commandlet reads the look keys weather_visuals writes" tests/test_gate6_visual.py \
+    || failures=$((failures+1))
+
+mutate experiments/gate6_visual.py \
+    '    ok = (above_sky >= minimum and above_ground <= leak
+          and below_ground >= minimum and below_sky <= leak)' \
+    '    ok = above_sky >= minimum  # MUTATED: a layer leaking below the horizon passes' \
+    "cloud base bracket needs both sides" tests/test_gate6_visual.py \
+    || failures=$((failures+1))
+
+mutate experiments/gate6_visual.py \
+    '    ok = drop >= LOOK_THRESHOLDS["visibility_min_ratio_drop"]' \
+    '    ok = True  # MUTATED: no order between 50 km and 10 km required' \
+    "extinction must follow visibility" tests/test_gate6_visual.py \
+    || failures=$((failures+1))
+
+mutate experiments/gate6_visual.py \
+    '    ok = (terrain >= LOOK_THRESHOLDS["wet_min_changed_px"]
+          and sky <= LOOK_THRESHOLDS["wet_max_sky_changed_px"])' \
+    '    ok = terrain >= LOOK_THRESHOLDS["wet_min_changed_px"]  # MUTATED: the sky may get wet' \
+    "wet surface null test needs an unchanged sky" tests/test_gate6_visual.py \
+    || failures=$((failures+1))
+
+mutate experiments/gate6_visual.py \
+    '    if mean < LOOK_THRESHOLDS["night_min_mean_luminance"]:' \
+    '    if False:  # MUTATED: black frames hold their exposure' \
+    "night exposure clause is vacuous on black frames" tests/test_gate6_visual.py \
+    || failures=$((failures+1))
+
 # -- Phase 6B guards ------------------------------------------------------
 
 mutate assets_pipeline/convert.py \

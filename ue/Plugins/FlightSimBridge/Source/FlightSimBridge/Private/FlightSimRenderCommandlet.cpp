@@ -35,6 +35,7 @@
 #include "Serialization/JsonReader.h"
 #include "AssetCompilingManager.h"
 #include "RenderingThread.h"
+#include "RHI.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "ShaderCompiler.h"
@@ -690,7 +691,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// Sun as a time-of-day parameter (dawn / noon / low sun are elevation and
 	// azimuth choices made by the harness and recorded in the manifest).
 	double SunElevationDeg = 0.0, SunAzimuthDeg = 0.0;
-	const bool bSunOverride =
+	// Not const since Phase 2: the card's look block (below) overrides the
+	// pair when it carries a sun.
+	bool bSunOverride =
 		FParse::Value(*Params, TEXT("sun-elev="), SunElevationDeg) &&
 		FParse::Value(*Params, TEXT("sun-azim="), SunAzimuthDeg);
 	// Sun ANIMATION (Phase 7 3.1): end-of-clip elevation/azimuth. The sun
@@ -710,6 +713,24 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	FParse::Value(*Params, TEXT("imagery="), ImagerySidecar);
 	double ExposureBias = 11.0;
 	FParse::Value(*Params, TEXT("exposure-bias="), ExposureBias);
+	// -- Phase 2 Look lane PROBE flags (contracts §5.4, §10) ---------------
+	// The look reaches the engine on the CARD (look / randomization.look,
+	// core/scene/weather_visuals.py); these flags exist for the Gate 6
+	// control renders (one control per switch, the gotcha 6 pattern) and
+	// OVERRIDE the card's row when given. Each is recorded in
+	// render.json look_applied as a probe override. -stars / -moon are
+	// accepted so a request for them is recorded as "not modelled" rather
+	// than silently ignored.
+	double CloudCoverFlag = -1.0, CloudBaseFlag = -1.0, CloudThicknessFlag = -1.0;
+	FParse::Value(*Params, TEXT("cloud-cover="), CloudCoverFlag);
+	FParse::Value(*Params, TEXT("cloud-base="), CloudBaseFlag);
+	FParse::Value(*Params, TEXT("cloud-thickness="), CloudThicknessFlag);
+	double AerosolFlag = -1.0;
+	FParse::Value(*Params, TEXT("aerosol="), AerosolFlag);
+	FString PrecipFlag;
+	FParse::Value(*Params, TEXT("precip="), PrecipFlag);
+	const bool bStarsFlag = FParse::Param(*Params, TEXT("stars"));
+	const bool bMoonFlag = FParse::Param(*Params, TEXT("moon"));
 	// Chase offset override, metres: a 747 framed at -170 m puts a Cessna
 	// eleven pixels wide; the harness knows the airframe, so it chooses.
 	FString ChaseSpec;
@@ -765,12 +786,163 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// measurements depend on it, so it stays byte-for-byte as it was. Gate 6's
 	// is the §6.6 scene, behind -Visual.
 	FFlightSimVisualScene VisualScene;
+	// -- Phase 2 Look lane: the card's look block (contracts §5.4) ---------
+	// The engine consumes what the CARD carries: `look` at the root, else
+	// `randomization.look` (where package F lands it, contracts §5.6). The
+	// keys are exactly core/scene/weather_visuals.py's: fog_extinction_per_m
+	// (-> FogDensity, overriding -fog-density), aerosol (RECORDED, not
+	// applied: the fog row carries that extinction), clouds[{cover, base_m,
+	// top_m}], precipitation + wetness, cloud_drift_mps / cloud_drift_from_deg
+	// (recorded, not applied), ev100{camera_id} and the sun pair. A card
+	// without the block renders byte-identically to Phase 10 from the flags.
+	TSharedPtr<FJsonObject> CardLook;
+	FString LookSource = TEXT("flags (the card carries no look block)");
+	TMap<FString, double> LookEv100;
+	double LookAerosol = 0.0;
+	bool bLookAerosol = false;
+	{
+		FString LookCardText;
+		TSharedPtr<FJsonObject> LookCardRoot;
+		if (FFileHelper::LoadFileToString(LookCardText, *ScenarioPath))
+		{
+			const TSharedRef<TJsonReader<>> LookReader =
+				TJsonReaderFactory<>::Create(LookCardText);
+			FJsonSerializer::Deserialize(LookReader, LookCardRoot);
+		}
+		const TSharedPtr<FJsonObject>* LookField = nullptr;
+		const TSharedPtr<FJsonObject>* RandomizationField = nullptr;
+		if (LookCardRoot.IsValid() &&
+		    LookCardRoot->TryGetObjectField(TEXT("look"), LookField) &&
+		    LookField != nullptr && LookField->IsValid())
+		{
+			CardLook = *LookField;
+			LookSource = TEXT("card.look");
+		}
+		else if (LookCardRoot.IsValid() &&
+		         LookCardRoot->TryGetObjectField(TEXT("randomization"), RandomizationField) &&
+		         RandomizationField != nullptr && RandomizationField->IsValid() &&
+		         (*RandomizationField)->TryGetObjectField(TEXT("look"), LookField) &&
+		         LookField != nullptr && LookField->IsValid())
+		{
+			CardLook = *LookField;
+			LookSource = TEXT("card.randomization.look");
+		}
+		if (CardLook.IsValid())
+		{
+			const TSharedPtr<FJsonObject>* Ev100Json = nullptr;
+			if (CardLook->TryGetObjectField(TEXT("ev100"), Ev100Json) && Ev100Json != nullptr &&
+			    Ev100Json->IsValid())
+			{
+				for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*Ev100Json)->Values)
+				{
+					double Value = 0.0;
+					if (Pair.Value.IsValid() && Pair.Value->TryGetNumber(Value))
+					{
+						LookEv100.Add(Pair.Key, Value);
+					}
+				}
+			}
+			bLookAerosol = CardLook->TryGetNumberField(TEXT("aerosol"), LookAerosol);
+		}
+	}
+	TArray<FString> LookProbeOverrides;
 	if (bVisual)
 	{
 		FFlightSimVisualSceneOptions SceneOptions;
 		SceneOptions.TerrainPath = TerrainPath;
 		SceneOptions.bDynamicShadows = !bNoShadows;
 		SceneOptions.FogDensity = static_cast<float>(FogDensity);
+		if (CardLook.IsValid())
+		{
+			double Value = 0.0;
+			if (CardLook->TryGetNumberField(TEXT("fog_extinction_per_m"), Value) && Value > 0.0)
+			{
+				FogDensity = Value;
+				SceneOptions.FogDensity = static_cast<float>(Value);
+			}
+			double LookSunElevation = 0.0, LookSunAzimuth = 0.0;
+			if (!bSunAnimated &&
+			    CardLook->TryGetNumberField(TEXT("sun_elevation_deg"), LookSunElevation) &&
+			    CardLook->TryGetNumberField(TEXT("engine_sun_azimuth_deg"), LookSunAzimuth))
+			{
+				// The same pair the flags carry (render_look builds both from
+				// one block); the card is the record of truth when present.
+				SunElevationDeg = LookSunElevation;
+				SunAzimuthDeg = LookSunAzimuth;
+				bSunOverride = true;
+			}
+			const TArray<TSharedPtr<FJsonValue>>* CloudsJson = nullptr;
+			if (CardLook->TryGetArrayField(TEXT("clouds"), CloudsJson) && CloudsJson != nullptr)
+			{
+				for (const TSharedPtr<FJsonValue>& Entry : *CloudsJson)
+				{
+					const TSharedPtr<FJsonObject> LayerJson =
+						Entry.IsValid() ? Entry->AsObject() : nullptr;
+					if (!LayerJson.IsValid())
+					{
+						continue;
+					}
+					FFlightSimCloudLayer Layer;
+					LayerJson->TryGetNumberField(TEXT("cover"), Layer.CoverFraction);
+					LayerJson->TryGetNumberField(TEXT("base_m"), Layer.BaseMetres);
+					LayerJson->TryGetNumberField(TEXT("top_m"), Layer.TopMetres);
+					SceneOptions.CloudLayers.Add(Layer);
+				}
+			}
+			FString Word;
+			if (CardLook->TryGetStringField(TEXT("precipitation"), Word))
+			{
+				SceneOptions.Precipitation = Word;
+			}
+			if (CardLook->TryGetNumberField(TEXT("wetness"), Value))
+			{
+				SceneOptions.Wetness = Value;
+			}
+			CardLook->TryGetNumberField(TEXT("cloud_drift_mps"), SceneOptions.CloudDriftMps);
+			CardLook->TryGetNumberField(TEXT("cloud_drift_from_deg"), SceneOptions.CloudDriftFromDeg);
+		}
+		// Probe overrides (Gate 6 controls), each recorded by name.
+		if (CloudCoverFlag >= 0.0)
+		{
+			SceneOptions.CloudLayers.Reset();
+			if (CloudCoverFlag > 0.0)
+			{
+				FFlightSimCloudLayer Layer;
+				Layer.CoverFraction = CloudCoverFlag;
+				// The same stated defaults as weather_visuals.py
+				// (DEFAULT_CLOUD_BASE_M 1500, DEFAULT_CLOUD_THICKNESS_M 1000).
+				Layer.BaseMetres = CloudBaseFlag >= 0.0 ? CloudBaseFlag : 1500.0;
+				Layer.TopMetres = Layer.BaseMetres +
+					(CloudThicknessFlag > 0.0 ? CloudThicknessFlag : 1000.0);
+				SceneOptions.CloudLayers.Add(Layer);
+			}
+			LookProbeOverrides.Add(TEXT("cloud-cover"));
+		}
+		if (AerosolFlag >= 0.0)
+		{
+			SceneOptions.AerosolMieScale = AerosolFlag;
+			LookProbeOverrides.Add(TEXT("aerosol"));
+		}
+		if (!PrecipFlag.IsEmpty())
+		{
+			// The wetness per word restates weather_visuals.WETNESS
+			// (none 0, rain 1.0, snow 0.6); the applied number is recorded.
+			if (PrecipFlag == TEXT("none")) { SceneOptions.Wetness = 0.0; }
+			else if (PrecipFlag == TEXT("rain")) { SceneOptions.Wetness = 1.0; }
+			else if (PrecipFlag == TEXT("snow")) { SceneOptions.Wetness = 0.6; }
+			else
+			{
+				return Fail(FString::Printf(
+					TEXT("look.precipitation: -precip='%s' is not one of none|rain|snow"),
+					*PrecipFlag));
+			}
+			SceneOptions.Precipitation = PrecipFlag;
+			LookProbeOverrides.Add(TEXT("precip"));
+		}
+		SceneOptions.bStarsRequested = bStarsFlag;
+		SceneOptions.bMoonRequested = bMoonFlag;
+		if (bStarsFlag) { LookProbeOverrides.Add(TEXT("stars")); }
+		if (bMoonFlag) { LookProbeOverrides.Add(TEXT("moon")); }
 		if (bGeorefTerrain)
 		{
 			SceneOptions.bGeoreferenced = true;
@@ -951,20 +1123,18 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	else if (CameraPreset == TEXT("shoulder"))
 	{
 		Director->Preset = EFlightSimCameraPreset::CockpitShoulder;
-		// The default shoulder offset is B747-scale; on a c172p it sat
-		// INSIDE the fuselage and recorded overexposed paint
-		// (probe-measured). Scale by the model's own span, with a floor
-		// so small airframes keep the camera above the cabin roof.
-		const double SpanMetres =
-			Scenario.ReadProperty(TEXT("metrics/bw-ft")) * 0.3048;
-		const double Scale = FMath::Clamp(SpanMetres / 64.4, 0.3, 1.0);
-		Director->ShoulderOffsetMetres.X *= Scale;
-		Director->ShoulderOffsetMetres.Y *= Scale;
-		Director->ShoulderOffsetMetres.Z =
-			FMath::Max(Director->ShoulderOffsetMetres.Z * Scale, 1.3);
+		// ONE rule, Python's (core/capture/poses.py: SHOULDER_OFFSET
+		// (-6, -0.5, 1.6) m in the body frame from the CG, unscaled). The
+		// span scaling with a 1.3 m z floor that lived here (Phase 7: a
+		// c172p probe put the B747-scale offset inside the cabin) placed
+		// the legacy preset at a different station from the solved track
+		// on every airframe but the B747 (Phase 2 critique). The director's
+		// default is applied as-is from the CG (TargetAimPoint) and recorded
+		// in render.json render_settings.cockpit_offset_m; a small airframe
+		// that wants a different station states it on its camera spec.
 		UE_LOG(LogFlightSimRender, Display,
-		       TEXT("shoulder camera scaled by span %.1f m: offset ")
-		       TEXT("(%.2f, %.2f, %.2f) m"), SpanMetres,
+		       TEXT("shoulder camera: body offset (%.2f, %.2f, %.2f) m from the CG, ")
+		       TEXT("unscaled (Python's SHOULDER_OFFSET rule)"),
 		       Director->ShoulderOffsetMetres.X,
 		       Director->ShoulderOffsetMetres.Y,
 		       Director->ShoulderOffsetMetres.Z);
@@ -1273,10 +1443,107 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			2.0 * FMath::Atan(CameraSensorWidthMm /
 			                  (2.0 * Director->GetAppliedFocalLengthMm()))));
 	}
-	if (bVisual && !bAutoExposure)
+	// Exposure (Phase 2, contracts §5.4 last row, §10): physical EV100 when
+	// the consumed camera carries an exposure triple on the card
+	// (cameras[N].exposure {aperture_f, shutter_s, iso}); else the Python-
+	// computed look.ev100 for that camera's id; else the Phase 10 bias path,
+	// unchanged. -AutoExposure stays the negative control and skips all
+	// three. Which path ran is recorded in render_settings.exposure_mode.
+	FString ExposureMode = TEXT("auto");
+	FString ExposureSource = TEXT("engine default metering");
+	double AppliedEv100 = 0.0;
+	bool bAppliedEv100 = false;
 	{
-		FFlightSimVisualScene::ApplyManualExposure(Capture,
-			static_cast<float>(ExposureBias));
+		double CardApertureF = 0.0, CardShutterS = 0.0, CardIso = 0.0;
+		bool bCardExposure = false;
+		FString CardCameraId;
+		if (bConsumePoses)
+		{
+			FString ExposureCardText;
+			TSharedPtr<FJsonObject> ExposureCardRoot;
+			if (FFileHelper::LoadFileToString(ExposureCardText, *ScenarioPath))
+			{
+				const TSharedRef<TJsonReader<>> ExposureReader =
+					TJsonReaderFactory<>::Create(ExposureCardText);
+				FJsonSerializer::Deserialize(ExposureReader, ExposureCardRoot);
+			}
+			const TArray<TSharedPtr<FJsonValue>>* ExposureCameras = nullptr;
+			if (ExposureCardRoot.IsValid() &&
+			    ExposureCardRoot->TryGetArrayField(TEXT("cameras"), ExposureCameras) &&
+			    ExposureCameras != nullptr && ExposureCameras->IsValidIndex(ConsumedCameraIndex))
+			{
+				const TSharedPtr<FJsonObject> ExposureCamera =
+					(*ExposureCameras)[ConsumedCameraIndex]->AsObject();
+				const TSharedPtr<FJsonObject>* ExposureJson = nullptr;
+				if (ExposureCamera.IsValid())
+				{
+					ExposureCamera->TryGetStringField(TEXT("camera_id"), CardCameraId);
+					if (ExposureCamera->TryGetObjectField(TEXT("exposure"), ExposureJson) &&
+					    ExposureJson != nullptr && ExposureJson->IsValid())
+					{
+						const bool bShape =
+							(*ExposureJson)->TryGetNumberField(TEXT("aperture_f"), CardApertureF) &&
+							(*ExposureJson)->TryGetNumberField(TEXT("shutter_s"), CardShutterS) &&
+							(*ExposureJson)->TryGetNumberField(TEXT("iso"), CardIso);
+						if (!bShape || !(CardApertureF > 0.0) || !(CardShutterS > 0.0) ||
+						    !(CardIso > 0.0))
+						{
+							return Fail(FString::Printf(
+								TEXT("camera.exposure: cameras[%d].exposure must carry positive ")
+								TEXT("aperture_f, shutter_s and iso; refusing to meter from a ")
+								TEXT("partial triple"),
+								ConsumedCameraIndex));
+						}
+						bCardExposure = true;
+					}
+				}
+			}
+		}
+		if (bVisual && !bAutoExposure)
+		{
+			const double* LookValue =
+				CardCameraId.IsEmpty() ? nullptr : LookEv100.Find(CardCameraId);
+			if (bCardExposure)
+			{
+				AppliedEv100 = FFlightSimVisualScene::ApplyPhysicalExposure(
+					Capture, CardApertureF, CardShutterS, CardIso);
+				bAppliedEv100 = true;
+				ExposureMode = TEXT("manual_ev100");
+				// Numbers only (gotcha 13): the camera id string stays in the
+				// Python-written capture manifest.
+				ExposureSource = FString::Printf(
+					TEXT("cameras[%d].exposure f/%g, %g s, ISO %g"),
+					ConsumedCameraIndex, CardApertureF, CardShutterS, CardIso);
+			}
+			else if (LookValue != nullptr)
+			{
+				// A Python-computed EV100 without a triple: N = 1, ISO = 100,
+				// t = 2^-EV100 maps back to it exactly (core/capture/exposure.py
+				// shutter_for_ev100).
+				AppliedEv100 = FFlightSimVisualScene::ApplyPhysicalExposure(
+					Capture, 1.0, FMath::Pow(2.0, -*LookValue), 100.0);
+				bAppliedEv100 = true;
+				ExposureMode = TEXT("manual_ev100");
+				ExposureSource = FString::Printf(
+					TEXT("look.ev100 for cameras[%d]"), ConsumedCameraIndex);
+			}
+			else
+			{
+				FFlightSimVisualScene::ApplyManualExposure(Capture,
+					static_cast<float>(ExposureBias));
+				ExposureMode = TEXT("manual_bias");
+				ExposureSource = FString::Printf(
+					TEXT("-exposure-bias=%.1f (AutoExposureBias)"), ExposureBias);
+			}
+		}
+		else if (bVisual)
+		{
+			ExposureSource = TEXT("-AutoExposure: the negative control");
+		}
+		else
+		{
+			ExposureSource = TEXT("void scene (no -Visual): engine default metering");
+		}
 	}
 	if (bNoShadows)
 	{
@@ -1477,6 +1744,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Label->ShowFlags.SetFog(false);
 			Label->ShowFlags.SetAtmosphere(false);
 			Label->ShowFlags.SetVolumetricFog(false);
+			// Phase 2 Look lane: volumetric clouds write no depth and the ID
+			// pass replaces the tonemapper, but a label capture draws no
+			// cloud at all (contracts §1, extended by this stage).
+			Label->ShowFlags.SetCloud(false);
 			Label->ShowFlags.SetBloom(false);
 			Label->ShowFlags.SetMotionBlur(false);
 			Label->ShowFlags.SetDepthOfField(false);
@@ -2643,13 +2914,184 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Root->SetNumberField(TEXT("camera_index"),
 		                     static_cast<double>(ConsumedCameraIndex));
 	}
+	// -- Phase 2 (contracts §1, §10): render_settings -- every rendering
+	// console variable this pass set or relies on, READ BACK by its r.
+	// name (the value found, or "absent"), the anti-aliasing method per
+	// capture as the capture's own show flags say, the exposure mode and
+	// EV100, the RHI, and the preset offsets as flown. Nothing here is
+	// what the ini asked for; it is what the engine reported.
+	{
+		TSharedPtr<FJsonObject> RenderSettings = MakeShared<FJsonObject>();
+		auto ConsoleString = [](const TCHAR* Name) -> FString
+		{
+			IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(Name);
+			return Variable != nullptr ? Variable->GetString() : FString(TEXT("absent"));
+		};
+		TSharedPtr<FJsonObject> Console = MakeShared<FJsonObject>();
+		const TCHAR* const ConsoleNames[] = {
+			TEXT("r.AntiAliasingMethod"),
+			TEXT("r.DynamicGlobalIlluminationMethod"),
+			TEXT("r.ReflectionMethod"),
+			TEXT("r.Lumen.HardwareRayTracing"),
+			TEXT("r.GenerateMeshDistanceFields"),
+			TEXT("r.Shadow.Virtual.Enable"),
+			TEXT("r.Nanite.ProjectEnabled"),
+			TEXT("r.Nanite"),
+			TEXT("r.CustomDepth"),
+			TEXT("r.ScreenPercentage"),
+			TEXT("r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange"),
+			TEXT("r.Substrate"),
+			TEXT("r.TextureStreaming"),
+			TEXT("r.Streaming.FullyLoadUsedTextures"),
+			TEXT("r.ForceLOD"),
+		};
+		for (const TCHAR* Name : ConsoleNames)
+		{
+			Console->SetStringField(Name, ConsoleString(Name));
+		}
+		RenderSettings->SetObjectField(TEXT("console"), Console);
+
+		auto AntiAliasingName = [&](bool bShowFlag) -> FString
+		{
+			if (!bShowFlag)
+			{
+				return TEXT("none");
+			}
+			IConsoleVariable* Variable =
+				IConsoleManager::Get().FindConsoleVariable(TEXT("r.AntiAliasingMethod"));
+			if (Variable == nullptr)
+			{
+				return TEXT("absent (show flag on, r.AntiAliasingMethod not found)");
+			}
+			switch (Variable->GetInt())
+			{
+			case 0: return TEXT("none");
+			case 1: return TEXT("FXAA");
+			case 2: return TEXT("TAA");
+			case 3: return TEXT("MSAA");
+			case 4: return TEXT("TSR");
+			default: return FString::Printf(TEXT("unknown(%d)"), Variable->GetInt());
+			}
+		};
+		TSharedPtr<FJsonObject> AntiAliasing = MakeShared<FJsonObject>();
+		AntiAliasing->SetStringField(TEXT("beauty"),
+			AntiAliasingName(Capture->ShowFlags.AntiAliasing != 0));
+		if (LinearCapture != nullptr)
+		{
+			AntiAliasing->SetStringField(TEXT("linear"),
+				AntiAliasingName(LinearCapture->ShowFlags.AntiAliasing != 0));
+		}
+		if (LabelDepthAll != nullptr)
+		{
+			// Measured from the capture, not asserted: a label pass whose
+			// show flag is on is a defect the verifier should see by name.
+			AntiAliasing->SetStringField(TEXT("labels"),
+				LabelDepthAll->ShowFlags.AntiAliasing != 0
+					? TEXT("DEFECT: label capture anti-aliasing show flag is on")
+					: TEXT("none"));
+		}
+		RenderSettings->SetObjectField(TEXT("anti_aliasing"), AntiAliasing);
+
+		TSharedPtr<FJsonObject> BeautyFlags = MakeShared<FJsonObject>();
+		BeautyFlags->SetBoolField(TEXT("anti_aliasing"), Capture->ShowFlags.AntiAliasing != 0);
+		BeautyFlags->SetBoolField(TEXT("temporal_aa"), Capture->ShowFlags.TemporalAA != 0);
+		BeautyFlags->SetBoolField(TEXT("motion_blur"), Capture->ShowFlags.MotionBlur != 0);
+		BeautyFlags->SetBoolField(TEXT("bloom"), Capture->ShowFlags.Bloom != 0);
+		BeautyFlags->SetBoolField(TEXT("fog"), Capture->ShowFlags.Fog != 0);
+		BeautyFlags->SetBoolField(TEXT("atmosphere"), Capture->ShowFlags.Atmosphere != 0);
+		BeautyFlags->SetBoolField(TEXT("volumetric_fog"), Capture->ShowFlags.VolumetricFog != 0);
+		BeautyFlags->SetBoolField(TEXT("cloud"), Capture->ShowFlags.Cloud != 0);
+		BeautyFlags->SetBoolField(TEXT("depth_of_field"), Capture->ShowFlags.DepthOfField != 0);
+		BeautyFlags->SetBoolField(TEXT("lens_flares"), Capture->ShowFlags.LensFlares != 0);
+		BeautyFlags->SetBoolField(TEXT("dynamic_shadows"), Capture->ShowFlags.DynamicShadows != 0);
+		RenderSettings->SetObjectField(TEXT("beauty_show_flags"), BeautyFlags);
+
+		// Scene captures render at their target's size; the screen
+		// percentage CVar is recorded above as found, the size here.
+		TArray<TSharedPtr<FJsonValue>> CaptureSize;
+		CaptureSize.Add(MakeShared<FJsonValueNumber>(Width));
+		CaptureSize.Add(MakeShared<FJsonValueNumber>(Height));
+		RenderSettings->SetArrayField(TEXT("capture_size_px"), CaptureSize);
+		RenderSettings->SetStringField(TEXT("screen_percentage"),
+			TEXT("captures render at capture_size_px; r.ScreenPercentage recorded in console"));
+
+		RenderSettings->SetStringField(TEXT("exposure_mode"), ExposureMode);
+		RenderSettings->SetStringField(TEXT("exposure_source"), ExposureSource);
+		if (bAppliedEv100)
+		{
+			RenderSettings->SetNumberField(TEXT("ev100"), AppliedEv100);
+		}
+		else
+		{
+			RenderSettings->SetField(TEXT("ev100"), MakeShared<FJsonValueNull>());
+		}
+		RenderSettings->SetNumberField(TEXT("exposure_bias"), ExposureBias);
+		RenderSettings->SetStringField(TEXT("extend_default_luminance_range"),
+			ConsoleString(TEXT("r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange")));
+		RenderSettings->SetStringField(TEXT("rhi"), GDynamicRHI->GetName());
+		RenderSettings->SetStringField(TEXT("shader_platform"),
+			LexToString(GMaxRHIShaderPlatform));
+		RenderSettings->SetBoolField(TEXT("deterministic_pins"), bDeterministic);
+
+		auto OffsetArray = [](const FVector& Offset)
+		{
+			TArray<TSharedPtr<FJsonValue>> Out;
+			Out.Add(MakeShared<FJsonValueNumber>(Offset.X));
+			Out.Add(MakeShared<FJsonValueNumber>(Offset.Y));
+			Out.Add(MakeShared<FJsonValueNumber>(Offset.Z));
+			return Out;
+		};
+		RenderSettings->SetArrayField(TEXT("cockpit_offset_m"),
+		                              OffsetArray(Director->ShoulderOffsetMetres));
+		RenderSettings->SetArrayField(TEXT("chase_offset_m"),
+		                              OffsetArray(Director->ChaseOffsetMetres));
+		RenderSettings->SetArrayField(TEXT("wingman_offset_m"),
+		                              OffsetArray(Director->WingmanOffsetMetres));
+		RenderSettings->SetStringField(TEXT("preset_offset_rule"),
+			TEXT("Python's (core/scenario/camera.py FALLBACK_CHASE_OFFSET, WINGMAN_OFFSET, "
+			     "SHOULDER_OFFSET): body offsets from the CG, unscaled; chase as flown "
+			     "is the shot constant or -chase="));
+		Root->SetObjectField(TEXT("render_settings"), RenderSettings);
+	}
+	// -- Phase 2 (contracts §5.4): look_applied -- every weather/sky
+	// parameter the scene actually applied, from the scene's own record.
+	if (bVisual && VisualScene.LookApplied.IsValid())
+	{
+		TSharedPtr<FJsonObject> Look = VisualScene.LookApplied;
+		Look->SetStringField(TEXT("source"), LookSource);
+		if (bLookAerosol && Look->HasTypedField<EJson::Object>(TEXT("aerosol")))
+		{
+			Look->GetObjectField(TEXT("aerosol"))->SetNumberField(TEXT("card_aerosol"), LookAerosol);
+		}
+		TArray<TSharedPtr<FJsonValue>> Overrides;
+		for (const FString& Name : LookProbeOverrides)
+		{
+			Overrides.Add(MakeShared<FJsonValueString>(Name));
+		}
+		Look->SetArrayField(TEXT("probe_overrides"), Overrides);
+		TSharedPtr<FJsonObject> ExposureRecord = MakeShared<FJsonObject>();
+		ExposureRecord->SetStringField(TEXT("mode"), ExposureMode);
+		ExposureRecord->SetStringField(TEXT("source"), ExposureSource);
+		if (bAppliedEv100)
+		{
+			ExposureRecord->SetNumberField(TEXT("ev100"), AppliedEv100);
+		}
+		else
+		{
+			ExposureRecord->SetField(TEXT("ev100"), MakeShared<FJsonValueNull>());
+		}
+		Look->SetObjectField(TEXT("exposure"), ExposureRecord);
+		Root->SetObjectField(TEXT("look_applied"), Look);
+	}
 	TSharedPtr<FJsonObject> Scene = MakeShared<FJsonObject>();
 	Scene->SetBoolField(TEXT("visual"), bVisual);
 	Scene->SetStringField(TEXT("shot"), Shot);
 	Scene->SetBoolField(TEXT("dynamic_shadows"), !bNoShadows);
 	Scene->SetBoolField(TEXT("aircraft_hidden"), bHideAircraft);
 	Scene->SetStringField(TEXT("exposure"), (bVisual && !bAutoExposure)
-		? *FString::Printf(TEXT("manual, AutoExposureBias %.1f"), ExposureBias)
+		? (bAppliedEv100
+			? *FString::Printf(TEXT("manual, EV100 %.2f (physical camera)"), AppliedEv100)
+			: *FString::Printf(TEXT("manual, AutoExposureBias %.1f"), ExposureBias))
 		: TEXT("auto (default metering)"));
 	if (bVisual && !TerrainPath.IsEmpty())
 	{
@@ -2660,6 +3102,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			Scene->SetStringField(TEXT("terrain_crs"), VisualScene.TerrainCrs);
 			Scene->SetStringField(TEXT("terrain_name"), VisualScene.TerrainName);
+			// Phase 2 (contracts §10): the posting the tiled terrain ACHIEVED
+			// (raster pixel size x the stride the triangle budget admitted).
+			Scene->SetNumberField(TEXT("terrain_posting_m"), VisualScene.TerrainPostingMetres);
+			Scene->SetNumberField(TEXT("terrain_stride"), VisualScene.TerrainStride);
+			Scene->SetNumberField(TEXT("terrain_tiles"), VisualScene.TerrainTiles);
+			Scene->SetNumberField(TEXT("terrain_triangles"), VisualScene.TerrainTriangles);
 			if (!VisualScene.ImagerySha256.IsEmpty())
 			{
 				Scene->SetStringField(TEXT("terrain_material"),

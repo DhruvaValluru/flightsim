@@ -1477,3 +1477,222 @@ The report's `coverage` is over 8 bins per numeric leaf with `k = 1`,
 package F's default; three cases cover 30 % of the requested bins,
 which the words say plainly. No picture is drawn by this package;
 `core.scene.realised_plot` is the one for these runs.
+
+## P2-Look/2 -- the visual scene, the beauty/label capture settings and the camera exposure model (C++ UNCOMPILED here)
+
+**What was measured, and what was defective.** (1) No C++ read the
+card's look block: package F's `randomization.look` (fog extinction,
+clouds, precipitation, drift, EV100) was written to every card with a
+policy and consumed by nothing; the scene was lit from the four Phase 10
+flags only, and a frame carried no record of any renderer switch
+(`render_settings` did not exist, so the Look/1 INI settings were
+asserted, never read back). (2) The legacy `-camera=shoulder` path
+span-scaled `ShoulderOffsetMetres` with a 1.3 m z floor
+(`FlightSimRenderCommandlet.cpp`) while `core/capture/poses.py` applies
+`SHOULDER_OFFSET` (-6, -0.5, 1.6) m unscaled from the CG -- the anchor
+agreed since eb5c71d, the magnitude did not (critique); and the
+director's chase/wingman defaults (-60, 0, 12) / (-15, 25, 0) disagreed
+with Python's (-110, 0, 12) / (-45, 180, 0) wherever no flag overrode
+them. (3) The georeferenced terrain was one procedural section capped at
+701 vertices a side: a 30 m GLO-30 raster rendered at 60 m posting, and
+the posting was a comment, not a recorded number. (4) `-exposure-bias`
+was a probe-tuned stop count; the spec-8 exposure triple reached no
+pixel. (5) The look's `aerosol` row, applied literally, evaluates to a
+Mie scattering scale in the HUNDREDS for the Phase 10 default fog
+(`aerosol_scale(visibility_km_for_extinction(0.0025))` = 564): the fog
+already carries that extinction, and driving both whitens the sky.
+
+**What was built.**
+
+- `FlightSimVisualScene.{h,cpp}`: a `UVolumetricCloudComponent`
+  (Engine module, `Components/VolumetricCloudComponent.h`) from the
+  first look cloud layer -- `SetLayerBottomAltitude(base_m/1000)`,
+  `SetLayerHeight((top-base)/1000)` above the scene's ground datum
+  (engine Z=0 = the spec's `terrain_elevation_m`, stated as
+  `base_datum`), the engine's default cloud material through a dynamic
+  instance whose first scalar parameter containing "cover" carries the
+  cover fraction (the name found, or `"absent"`, is recorded; a missing
+  material is refused by name `look.clouds`), cloud shadows on the sun
+  (`SetCastCloudShadows`, `SetCloudShadowStrength 1`); Sky Atmosphere
+  `SetMieScatteringScale` ONLY under `-aerosol=` (the card's value is
+  recorded as `card_aerosol`, departure 2 in contracts 10.1); height fog
+  density from the look's `fog_extinction_per_m` (the card overrides
+  `-fog-density`; whether `FogDensity` IS a per-metre extinction is the
+  new Gate 6 clause's measurement, not a claim); `-precip=rain|snow` /
+  `look.precipitation` sets a `Wetness` scalar on the georeferenced
+  terrain's material instance and records whether the material exposes
+  one (`wetness_parameter`); the sun is the existing light; `-stars`
+  and `-moon` are accepted and recorded `"not modelled"`; cloud drift is
+  recorded with `applied: false`. Every row lands in `LookApplied`, which
+  the commandlet writes as `render.json.look_applied` with its `source`
+  (`card.look` | `card.randomization.look` | flags) and the list of
+  probe overrides.
+- Physical exposure: `ApplyPhysicalExposure(Capture, N, t, ISO)` sets
+  `AEM_Manual`, `AutoExposureApplyPhysicalCameraExposure = 1`,
+  `CameraShutterSpeed = 1/t`, `CameraISO`, `DepthOfFieldFstop` and pins
+  the bias to 0; `ExposureValue100` re-implements
+  `log2(N^2/t * 100/ISO)`. The commandlet runs it when the consumed
+  camera carries `cameras[N].exposure {aperture_f, shutter_s, iso}`
+  (a partial triple is refused by name `camera.exposure`), else applies
+  `look.ev100[camera_id]` through N=1, ISO=100, t=2^-EV100, else the
+  Phase 10 bias path unchanged; `-AutoExposure` skips all three.
+- `render.json.render_settings` (root, every run): the Look/1 console
+  variables READ BACK through `IConsoleManager` (value or `"absent"`),
+  the AA method per capture from each capture's own show flag plus the
+  `r.AntiAliasingMethod` name (0 none / 1 FXAA / 2 TAA / 3 MSAA / 4 TSR;
+  a label capture whose flag is found on is written as `DEFECT:`), the
+  beauty capture's show flags as booleans, `capture_size_px`,
+  `exposure_mode` (`auto` | `manual_bias` | `manual_ev100`),
+  `exposure_source`, `ev100`, `exposure_bias`, the extended-luminance
+  CVar, `rhi`, `shader_platform`, the deterministic pin state, and the
+  three preset offsets as flown. `scene.exposure` says
+  `manual, EV100 14.97 (physical camera)` on the physical path and keeps
+  its two old spellings otherwise (the Gate 6 control check still
+  matches `auto`).
+- Label passes: unchanged in structure; `SetCloud(false)` joins the
+  contracts section 1 show-flag list (recorded there).
+- `core/capture/exposure.py`: `ev100` (refuses `camera.exposure` by
+  name), `PRESET_DEFAULTS` restating the six presets' daylight triple
+  (never importing `core.scenario.camera`; the test is where the two
+  tables meet), `shutter_for_ev100` (the inverse the commandlet uses),
+  `describe`, the `exposure_mode` spellings.
+- Terrain: `BuildGeoreferencedTerrain` builds the decimated grid at the
+  smallest stride whose triangle count fits `TerrainTriangleBudget`
+  (4 M; a 1276x905 raster fits at stride 1 = native 30 m posting) and
+  cuts it into `UProceduralMeshComponent` tiles of at most 256 vertices
+  a side (edges shared, normals from the full raster, one component per
+  tile so each has its own bounds) under one `TerrainGeoreferenced`
+  root; the vertex-colour palette and the imagery drape are untouched
+  (`ClassifyVertex` and the Gate 6 `BuildTerrainInstance` are
+  byte-identical to HEAD, diffed). `scene.terrain_posting_m`,
+  `terrain_stride`, `terrain_tiles`, `terrain_triangles` record what was
+  achieved. The label pass needs no change: it stencils every
+  `UMeshComponent` of every actor.
+- Preset parity: the span scaling is gone from the shoulder block
+  (`render_settings.cockpit_offset_m` records the unscaled body offset);
+  `FlightSimCameraDirector.h` defaults are `FALLBACK_CHASE_OFFSET` and
+  `WINGMAN_OFFSET`, pinned to the Python constants by a test that reads
+  the header text. The commandlet's shot constants (-170 / -400 m) and
+  `-chase=` still override the chase as before, so the header default
+  reaches the interactive host and any caller that does not override.
+- `experiments/gate6_visual.py`: four look clauses (`look_clauses`),
+  each PASS / FAIL / NOT RUN with its measurement stated, rendered by
+  `--look` from `LOOK_RUNS` (one switch per control, gotcha 6) and
+  graded whenever their directories exist: the cloud base bracket (a
+  layer 300 m above the 300 m flight may change the sky band only; one
+  300 m below, the ground band only), extinction vs `visibility_km`
+  (the ratio at Koschmieder fog for 50 km and 10 km, the constant
+  re-implemented), the wet-surface null test (terrain band changes, sky
+  band must not, `wetness_parameter` must not be absent), and exposure
+  at -12 deg sun (frames not black, sky band holds over the doublet).
+  A FAIL counts against the gate only when the clause ran.
+- Tests: `tests/test_exposure.py` (hand-computed 14.966, ISO stops,
+  refusals by name, the two tables, the inverse, the C++ expression
+  pinned) and `tests/test_gate6_visual.py` (each look clause against a
+  frame built to lie, NOT RUN with measurement when unrendered, the
+  controls change one switch each, and the engine-source pins: director
+  defaults = Python constants, no span scaling, every contracts-1 show
+  flag off in `ConfigureLabelCapture`, `render_settings` reads every
+  contracted switch with `"absent"` as the miss value, the commandlet
+  reads exactly `weather_visuals.ENGINE_PARAMETERS`' keys, the terrain
+  budget and posting record).
+- Ten `mutate` guards in `scripts/mutation_check.sh` (EV100 with ISO the
+  wrong way up; the chase default back to -60; span scaling back; the
+  label cloud flag on; a missing CVar recorded as 0; a look key the
+  producer never writes; each of the four look clauses weakened), each
+  applied by hand in this container, its test file run, the file
+  restored byte-identical (sha256 checked) and caches purged: all ten
+  fired.
+
+**How to demonstrate (any platform).**
+
+```
+.venv/bin/pytest -q -p no:warnings -o addopts= tests/test_exposure.py tests/test_gate6_visual.py
+.venv/bin/python -c "from core.capture.exposure import ev100, describe; print(ev100(8, 1/500, 100)); print(describe(8, 1/500, 100))"
+.venv/bin/python experiments/gate6_visual.py --skip-render --out /tmp/no_such_gate   # blocked without an editor; the clause list prints NOT RUN with each measurement
+.venv/bin/python -c "import experiments.gate6_visual as g; [print(c.render()) for c in g.look_clauses(__import__('pathlib').Path('/nonexistent'))]"
+bash scripts/mutation_check.sh          # the ten Look/2 guards report ok
+git diff HEAD~1 -- ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimVisualScene.cpp | grep -c '^-.*ClassifyVertex'   # 0: the palette is untouched
+```
+
+**Windows probes (one control render per switch, the gotcha 6 pattern;
+each is a `--look` control in `LOOK_RUNS`).** After `scripts\build_ue.ps1`
+and `ue_preflight.ps1` on 5.7, from the repo root:
+
+```
+.venv\Scripts\python experiments\gate6_visual.py --look --out runs\gate6_57
+```
+
+renders the Phase 10 six plus `cloud_above`, `cloud_below`,
+`cloud_control`, `visibility_clear`, `visibility_hazy`, `wet`,
+`wet_control`, `night`, then prints the four look clauses with numbers.
+Look at `runs\gate6_57\<name>\frame_0000.png` beside its control (gotcha
+12) and at `render.json` -> `look_applied` (`clouds.cover_parameter`,
+`precipitation.wetness_parameter`: if either says `absent`, the material
+is the finding, not the clause) and `render_settings.console` (every
+value must be the INI's, not `absent`; `anti_aliasing.beauty` should say
+`TSR` and `.labels` `none`). Exposure parity: render one consume-poses
+card twice, once with the bias path and once with `look.ev100`, and
+compare the sky band mean; a difference of more than a few counts at the
+same EV is the calibration constant (extended range) to read off
+`render_settings.extend_default_luminance_range`. Terrain: a
+georeferenced render's `scene.terrain_posting_m` must equal the raster's
+pixel size (30) and `terrain_tiles` about `ceil(1275/255) *
+ceil(904/255)` = 20 for the Matterhorn bake; the ridgelines in the frame
+against the 5.5 60 m-posting control are the picture. A 5.7 first build
+also re-checks these API assumptions, in this order: the
+`Components/VolumetricCloudComponent.h` include and the public `Material`
+member; `SetLayerBottomAltitude` / `SetLayerHeight`;
+`UDirectionalLightComponent::SetCastCloudShadows` /
+`SetCloudShadowStrength`; `USkyAtmosphereComponent::SetMieScatteringScale`;
+`UMaterialInterface::GetAllScalarParameterInfo(TArray<FMaterialParameterInfo>&,
+TArray<FGuid>&)`; `FEngineShowFlags::Cloud` / `SetCloud`; the
+`FPostProcessSettings` physical-camera fields (`bOverride_AutoExposureApplyPhysicalCameraExposure`,
+`CameraShutterSpeed`, `CameraISO`, `DepthOfFieldFstop`);
+`LexToString(GMaxRHIShaderPlatform)` from `RHI.h`;
+`FJsonObject::HasTypedField<EJson::Object>`.
+
+**Not verified here.** No engine: none of the C++ compiles or renders
+in this container. Not one look clause has run -- each reports NOT RUN
+with its measurement; whether `FogDensity` scales as an extinction,
+whether the default cloud material exposes a cover parameter (and by
+what name), whether `M_VertexColor` / `M_TerrainImagery` expose a
+`Wetness` scalar (they were built by `scripts/ue_create_materials.py`
+without one, so the first render is expected to record `absent` and the
+wet clause to FAIL by name until the material gains the parameter),
+whether the engine's EV100 lands within a stop of the recorded number,
+what a 2.3 M-triangle tiled procedural mesh costs per frame, and
+whether the cloud layer's base sits where `base_datum` says, are all
+first-render measurements on the Windows box. The `-precip` particle
+system is not built (stated in every record). The engine-source tests
+measure text, which is the only measurement possible here.
+
+**Limitations.**
+
+- `core/capture/poses.py` does not write `cameras[].exposure` onto the
+  run card (not this stage's file), so today the physical path is
+  reachable only through `look.ev100` (written when a policy exists).
+  One line in the card writer makes the triple path live.
+- `core/render/flags.py` does not emit the six probe flags and no Python
+  caller passes them: the look reaches production renders through the
+  card, the probes through the harness. A card's `aerosol` is never
+  applied (departure 2).
+- One cloud layer is drawn; the commandlet's shot constants still
+  override the chase offset (-170 / -400 m), so the header default
+  reaches only callers that do not set it (the interactive host sets its
+  own -170 m in `FlightSimInteractiveMode.cpp` L198).
+- Sections in one procedural mesh do not frustum-cull; one component per
+  tile does, at the cost of duplicated edge vertices (< 1 %). The
+  Landscape import path (`core/terrain/landscape.py`) stays the next
+  step; VSM on a Movable procedural mesh remains whatever the renderer
+  does with it, read back in `render_settings.console`.
+- Recorded, not patched (vendored plugin):
+  `UJSBSimMovementComponent::UpdateLocalTransforms` pushes
+  `StructuralToBody(0)` -- a BODY-frame vector -- through the
+  structural->actor matrix to form `CGLocalPosition`; x and z come out
+  right by two cancelling sign flips, y would be sign-wrong for a
+  non-zero CG y. Every staged airframe has y = 0.
+- `tests/test_platform.py::test_no_text_io_without_utf8_encoding` fails
+  on this tree for `core/campaign/campaign.py`, `tests/test_annotation_gates.py`
+  and `tests/test_campaign.py` -- files of parallel packages, not this
+  stage's; every text I/O this stage added states `encoding="utf-8"`.

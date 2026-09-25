@@ -8,6 +8,7 @@ dark body, a sky that pumps with bank -- and asserts the measurement says no.
 
 import json
 import math
+import re
 
 import numpy as np
 import pytest
@@ -214,3 +215,303 @@ def test_png_writer_round_trips(tmp_path):
     back = load_rgb(path)
     assert back.shape == rgb.shape
     assert (back == rgb).all()
+
+
+# -- Phase 2 look clauses: each built to lie, each refused -----------------
+
+from pathlib import Path  # noqa: E402
+
+from experiments.gate6_visual import (  # noqa: E402
+    CLOUD_GROUND_ROWS, LOOK_RUNS, LOOK_THRESHOLDS, koschmieder_fog_density,
+    look_clauses, measure_cloud_base, measure_exposure_low_sun,
+    measure_extinction_vs_visibility, measure_wet_surface_null,
+)
+
+REPO = Path(__file__).resolve().parents[1]
+BRIDGE = REPO / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge"
+COMMANDLET = BRIDGE / "Private/FlightSimRenderCommandlet.cpp"
+SCENE = BRIDGE / "Private/FlightSimVisualScene.cpp"
+DIRECTOR_H = BRIDGE / "Public/FlightSimCameraDirector.h"
+
+CLOUD_HEIGHT, CLOUD_WIDTH = 540, 960
+
+
+def tall_frame(sky=(120, 140, 190), ground=(120, 115, 105)):
+    """The gate's real 960x540 geometry: sky above row 260, ground below,
+    so CLOUD_GROUND_ROWS (300..540) is ground and SKY_BAND_ROWS is sky."""
+    rgb = np.zeros((3, CLOUD_HEIGHT, CLOUD_WIDTH), dtype=np.int64)
+    for channel in range(3):
+        rgb[channel, :260, :] = sky[channel]
+        rgb[channel, 260:, :] = ground[channel]
+    return rgb
+
+
+def still(directory, rgb, look=None, records=None):
+    directory.mkdir(parents=True, exist_ok=True)
+    name = "frame_0000.png"
+    write_png_rgb(directory / name, rgb)
+    manifest = {
+        "frames": 1,
+        "scene": {"visual": True, "exposure": "manual, AutoExposureBias 11.0"},
+        "frame_records": records or [{"frame": name, "t": 1.0, "roll_deg": 0.0}],
+    }
+    if look is not None:
+        manifest["look_applied"] = look
+    (directory / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return directory
+
+
+def cloud_scene(tmp_path, above_rows, below_rows):
+    """A control still, then 'clouds' painted into the given row bands."""
+    control = tall_frame()
+    above = control.copy()
+    above[:, above_rows[0]:above_rows[1], :] -= 40
+    below = control.copy()
+    below[:, below_rows[0]:below_rows[1], :] -= 40
+    look = {"clouds": {"drawn": True, "cover_parameter": "CloudCoverage"}}
+    return (still(tmp_path / "cloud_above", above, look),
+            still(tmp_path / "cloud_below", below, look),
+            still(tmp_path / "cloud_control", control))
+
+
+def test_a_layer_above_changes_only_the_sky_and_one_below_only_the_ground(tmp_path):
+    clause = measure_cloud_base(*cloud_scene(tmp_path, SKY_BAND_ROWS, CLOUD_GROUND_ROWS))
+    assert clause.status == "PASS", clause.detail
+    assert clause.ok and clause.ran
+
+
+def test_a_base_drawn_at_the_wrong_height_fails_the_bracket(tmp_path):
+    """The 'above' layer leaking into the ground band: its base is not
+    above the camera, whatever the record says."""
+    leaking = (SKY_BAND_ROWS[0], CLOUD_GROUND_ROWS[1])
+    clause = measure_cloud_base(*cloud_scene(tmp_path, leaking, CLOUD_GROUND_ROWS))
+    assert clause.status == "FAIL"
+
+
+def test_a_layer_that_changes_nothing_is_not_a_cloud(tmp_path):
+    clause = measure_cloud_base(*cloud_scene(tmp_path, (0, 0), (0, 0)))
+    assert clause.status == "FAIL"
+
+
+def extinction_pair(tmp_path, clear_far, hazy_far):
+    rgb = frame()
+    near = (150, 130, 100)
+    out = []
+    for name, far_colour in (("visibility_clear", clear_far), ("visibility_hazy", hazy_far)):
+        image = rgb.copy()
+        paint(image, 80, 88, near)
+        paint(image, 200, 88, far_colour)
+        directory = still(tmp_path / name, image,
+                          look={"fog": {"fog_density": koschmieder_fog_density(10.0)}},
+                          records=[{"frame": "frame_0000.png", "t": 1.0, "roll_deg": 0.0,
+                                    "landmarks": {"near_peak": landmark(80, 80),
+                                                  "far_peak": landmark(200, 80)}}])
+        out.append(directory)
+    return out
+
+
+def test_a_hazier_day_fades_the_far_ridge_more(tmp_path):
+    clear, hazy = extinction_pair(tmp_path, (140, 132, 130), (122, 138, 185))
+    clause = measure_extinction_vs_visibility(clear, hazy)
+    assert clause.status == "PASS", clause.detail
+
+
+def test_a_fog_density_that_is_not_an_extinction_shows_no_order(tmp_path):
+    """Same far contrast at 50 km and 10 km: the number reached nothing."""
+    clear, hazy = extinction_pair(tmp_path, (140, 132, 130), (140, 132, 130))
+    clause = measure_extinction_vs_visibility(clear, hazy)
+    assert clause.status == "FAIL"
+
+
+def test_a_peak_out_of_frame_fails_the_visibility_clause_too(tmp_path):
+    clear, hazy = extinction_pair(tmp_path, (140, 132, 130), (122, 138, 185))
+    manifest = json.loads((hazy / "render.json").read_text(encoding="utf-8"))
+    manifest["frame_records"][-1]["landmarks"]["far_peak"]["visible"] = False
+    (hazy / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert measure_extinction_vs_visibility(clear, hazy).status == "FAIL"
+
+
+def wet_scene(tmp_path, terrain_delta, sky_delta, parameter="Wetness"):
+    dry = frame()
+    wet = dry.copy()
+    wet[:, TERRAIN_BAND_ROWS[0]:TERRAIN_BAND_ROWS[1], :] -= terrain_delta
+    wet[:, SKY_BAND_ROWS[0]:SKY_BAND_ROWS[1], :] -= sky_delta
+    look = {"precipitation": {"precipitation": "rain", "wetness": 1.0,
+                              "wetness_parameter": parameter}}
+    return still(tmp_path / "wet", wet, look), still(tmp_path / "wet_control", dry)
+
+
+def test_rain_that_darkens_the_ground_and_not_the_sky_is_wetness(tmp_path):
+    clause = measure_wet_surface_null(*wet_scene(tmp_path, 30, 0))
+    assert clause.status == "PASS", clause.detail
+
+
+def test_rain_that_changes_the_sky_fails_the_null(tmp_path):
+    """The sky does not get wet; a sky change is another switch."""
+    clause = measure_wet_surface_null(*wet_scene(tmp_path, 30, 30))
+    assert clause.status == "FAIL"
+
+
+def test_a_wetness_parameter_the_material_lacks_fails_by_name(tmp_path):
+    clause = measure_wet_surface_null(*wet_scene(tmp_path, 30, 0, parameter="absent"))
+    assert clause.status == "FAIL"
+    assert "absent" in clause.detail
+
+
+def night_run(tmp_path, sky_for, name="night", ground=(120, 115, 105)):
+    directory = tmp_path / name
+    directory.mkdir()
+    records = []
+    for i in range(40):
+        t = 0.5 * (i + 1)
+        roll = 17.0 * math.sin(max(0.0, (t - 4.0)) / 12.0 * math.pi) \
+            if 4.0 <= t <= 16.0 else 0.0
+        level = sky_for(t, roll)
+        frame_name = f"frame_{i:04d}.png"
+        write_png_rgb(directory / frame_name, frame(sky=(level, level, level), ground=ground))
+        records.append({"frame": frame_name, "t": t, "roll_deg": roll})
+    manifest_for(directory, records)
+    manifest = json.loads((directory / "render.json").read_text(encoding="utf-8"))
+    manifest["look_applied"] = {"sun": {"sun_elevation_deg": -12.0}}
+    (directory / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return directory
+
+
+def test_a_steady_twilight_sky_holds(tmp_path):
+    clause = measure_exposure_low_sun(night_run(tmp_path, lambda t, roll: 40))
+    assert clause.status == "PASS", clause.detail
+
+
+def test_black_night_frames_cannot_pass_the_exposure_clause(tmp_path):
+    clause = measure_exposure_low_sun(
+        night_run(tmp_path, lambda t, roll: 0, ground=(0, 0, 0)))
+    assert clause.status == "FAIL"
+    assert "black" in clause.detail
+
+
+def test_a_twilight_sky_that_pumps_with_bank_breathes(tmp_path):
+    clause = measure_exposure_low_sun(
+        night_run(tmp_path, lambda t, roll: 40 + int(abs(roll))))
+    assert clause.status == "FAIL"
+
+
+def test_every_look_clause_reports_not_run_with_its_measurement_when_unrendered(tmp_path):
+    clauses = look_clauses(tmp_path)
+    assert [clause.name for clause in clauses] == [
+        "cloud base bracket", "extinction follows visibility",
+        "wet surface null test", "exposure holds at -12 deg sun"]
+    for clause in clauses:
+        assert clause.status == "NOT RUN" and not clause.ran and not clause.ok
+        assert clause.measurement, clause.name
+        assert "measurement:" in clause.render()
+
+
+def test_the_look_controls_change_one_switch_each():
+    """Every look run is the terrain shot plus its own switch; the control
+    of each pair carries the switch's 'off' spelling."""
+    assert LOOK_RUNS["cloud_control"][1] == ["-seconds=2", "-cloud-cover=0"]
+    assert "-precip=rain" in LOOK_RUNS["wet"][1]
+    assert "-precip=none" in LOOK_RUNS["wet_control"][1]
+    assert "-sun-elev=-12" in LOOK_RUNS["night"][1]
+    clear = [f for f in LOOK_RUNS["visibility_clear"][1] if f.startswith("-fog-density=")][0]
+    hazy = [f for f in LOOK_RUNS["visibility_hazy"][1] if f.startswith("-fog-density=")][0]
+    assert float(hazy.split("=")[1]) == pytest.approx(3.912 / 10000.0, rel=1e-3)
+    assert float(clear.split("=")[1]) == pytest.approx(3.912 / 50000.0, rel=1e-3)
+    assert all(shot == "terrain" for shot, _ in LOOK_RUNS.values())
+    assert LOOK_THRESHOLDS["cloud_min_changed_px"] > LOOK_THRESHOLDS["cloud_max_leak_px"]
+
+
+# -- engine source pins (UNCOMPILED here; the text is what can be measured) --
+
+
+def _vector_literal(source: str, name: str):
+    match = re.search(rf"FVector {name} = FVector\(([^)]*)\);", source)
+    assert match, name
+    return tuple(float(part.strip().rstrip("f")) for part in match.group(1).split(","))
+
+
+def test_the_camera_director_defaults_are_pythons_constants():
+    """One rule for the legacy preset path and the solved track: the C++
+    defaults are read from the header text and compared with camera.py."""
+    from core.scenario.camera import (FALLBACK_CHASE_OFFSET, SHOULDER_OFFSET,
+                                      WINGMAN_OFFSET)
+
+    header = DIRECTOR_H.read_text(encoding="utf-8")
+    assert _vector_literal(header, "ChaseOffsetMetres") == tuple(FALLBACK_CHASE_OFFSET)
+    assert _vector_literal(header, "WingmanOffsetMetres") == tuple(WINGMAN_OFFSET)
+    assert _vector_literal(header, "ShoulderOffsetMetres") == tuple(SHOULDER_OFFSET)
+
+
+def test_the_commandlet_no_longer_span_scales_the_shoulder_offset():
+    source = COMMANDLET.read_text(encoding="utf-8")
+    block = re.search(r'CameraPreset == TEXT\("shoulder"\)\)\n\t\{(.*?)\n\t\}', source, re.S)
+    assert block, "the shoulder preset block is gone"
+    text = block.group(1)
+    assert "ShoulderOffsetMetres.Z * Scale" not in text
+    assert "metrics/bw-ft" not in text
+    assert "*= Scale" not in text
+    assert "unscaled" in text
+
+
+def test_every_label_capture_is_aa_free_per_contracts_section_1():
+    """The label-pass rule as text: every show flag the contract lists is
+    set false inside ConfigureLabelCapture, and rendering state does not
+    persist (no temporal history)."""
+    source = COMMANDLET.read_text(encoding="utf-8")
+    block = re.search(r"auto ConfigureLabelCapture = \[&\]\(USceneCaptureComponent2D\* Label\)\n\t\t\{(.*?)\n\t\t\};",
+                      source, re.S)
+    assert block, "ConfigureLabelCapture is gone"
+    text = block.group(1)
+    for flag in ("AntiAliasing", "TemporalAA", "ScreenPercentage", "Fog", "Atmosphere",
+                 "VolumetricFog", "Cloud", "Bloom", "MotionBlur", "DepthOfField",
+                 "LensFlares", "Translucency"):
+        assert f"Label->ShowFlags.Set{flag}(false);" in text, flag
+    assert "Label->bAlwaysPersistRenderingState = false;" in text
+
+
+def test_render_settings_reads_every_contracted_switch_back():
+    """render.json.render_settings: the console variables contracts §10
+    names, read through IConsoleManager with 'absent' as the miss value,
+    the AA method per capture, exposure mode and EV100, the offsets."""
+    source = COMMANDLET.read_text(encoding="utf-8")
+    block = re.search(r"TSharedPtr<FJsonObject> RenderSettings = MakeShared<FJsonObject>\(\);(.*?)"
+                      r'Root->SetObjectField\(TEXT\("render_settings"\), RenderSettings\);',
+                      source, re.S)
+    assert block, "render_settings is not written"
+    text = block.group(1)
+    for name in ("r.AntiAliasingMethod", "r.DynamicGlobalIlluminationMethod",
+                 "r.Shadow.Virtual.Enable", "r.Nanite.ProjectEnabled", "r.ScreenPercentage",
+                 "r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange", "r.CustomDepth"):
+        assert f'TEXT("{name}")' in text, name
+    assert 'FString(TEXT("absent"))' in text
+    assert "IConsoleManager::Get().FindConsoleVariable(Name)" in text
+    for key in ("anti_aliasing", "exposure_mode", "ev100", "cockpit_offset_m",
+                "chase_offset_m", "wingman_offset_m", "rhi", "shader_platform"):
+        assert f'TEXT("{key}")' in text, key
+    assert 'Root->SetObjectField(TEXT("look_applied"), Look);' in source
+    assert 'Scene->SetNumberField(TEXT("terrain_posting_m"), VisualScene.TerrainPostingMetres);' in source
+
+
+def test_the_scene_consumes_exactly_the_look_keys_weather_visuals_defines():
+    """The card keys the engine reads are the ones core/scene/weather_visuals.py
+    produces -- read from that module's ENGINE_PARAMETERS, not retyped."""
+    from core.scene.weather_visuals import CARD_LOOK_KEY, ENGINE_PARAMETERS
+
+    source = COMMANDLET.read_text(encoding="utf-8")
+    assert f'TEXT("{CARD_LOOK_KEY}")' in source
+    for key in ENGINE_PARAMETERS:
+        assert f'TEXT("{key}")' in source, f"look key {key} is not read by the commandlet"
+    scene = SCENE.read_text(encoding="utf-8")
+    # The scene never applies the card's aerosol (double count); it records it.
+    assert "MieScatteringScale" in scene
+    assert 'TEXT("card_aerosol")' in source
+
+
+def test_the_terrain_is_tiled_at_a_stated_budget_and_the_posting_recorded():
+    scene = SCENE.read_text(encoding="utf-8")
+    assert "MaxVerticesPerSideGeoreferenced" not in scene
+    assert "constexpr int32 SceneTerrainTileVerticesPerSide = 256;" in scene
+    assert "TerrainPostingMetres = Stride * Terrain.PixelSizeMetres;" in scene
+    assert 'TEXT("TerrainTile_r%d_c%d")' in scene
+    assert "int32 TerrainTriangleBudget = 4000000;" in (
+        BRIDGE / "Public/FlightSimVisualScene.h").read_text(encoding="utf-8")
