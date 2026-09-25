@@ -824,3 +824,175 @@ async def telemetry(socket: WebSocket) -> None:
             await asyncio.sleep(1.0)
     except WebSocketDisconnect:
         return
+
+
+# -- Phase 2, package I part 2: the guided page and its endpoints ---------------
+#
+# Every route below is a thin wrapper over webapp/generate.py (the
+# campaign-facing service layer): the service raises GenerateRefusal
+# carrying the response body already in the catalogue's words, and the
+# route only picks the status code. Nothing above this line changed.
+
+from webapp import generate as generate_module  # noqa: E402
+
+generator = generate_module.GenerateService()
+
+
+class GeneratePlanRequest(BaseModel):
+    prompt: str
+    #: The clarification round, exactly the /compile protocol: the page
+    #: echoes the questions with the answers; the server keeps no state.
+    questions: Optional[List[Dict[str, Any]]] = None
+    answers: Optional[List[Dict[str, str]]] = None
+    images: int = generate_module.DEFAULT_IMAGES
+    format: str = generate_module.DEFAULT_FORMAT
+    tier: str = "llm"
+    seed: Optional[int] = None
+
+
+class GeneratePreviewRequest(BaseModel):
+    #: The plan's compiled spec (payload ``spec``), unchanged.
+    spec: Dict[str, Any]
+    images: int = generate_module.DEFAULT_IMAGES
+    seed: int = 1
+    workers: int = 1
+
+
+class GenerateStartRequest(BaseModel):
+    prompt: str
+    answers: Optional[List[Dict[str, str]]] = None
+    images: int = generate_module.DEFAULT_IMAGES
+    format: str = generate_module.DEFAULT_FORMAT
+    seed: Optional[int] = None
+    workers: int = 1
+    tier: str = "regex"
+    #: The plan's spec digest, so the response can say whether the
+    #: campaign's own compile (Campaign.create) produced the same spec.
+    plan_digest: Optional[str] = None
+    disk_budget_bytes: Optional[int] = None
+
+
+def _generate_call(function, *args, **kwargs):
+    """Run a service call; a GenerateRefusal becomes its status code
+    with the body the service already put into words."""
+    try:
+        return JSONResponse(function(*args, **kwargs))
+    except generate_module.GenerateRefusal as exc:
+        return JSONResponse(exc.payload, status_code=exc.status_code)
+
+
+@app.get("/generate.html", response_class=HTMLResponse)
+def generate_page() -> str:
+    """The guided page: ask, clarify, preview, generate, review, download."""
+    return (STATIC / "generate.html").read_text(encoding="utf-8")
+
+
+@app.post("/generate/plan")
+def generate_plan(request: GeneratePlanRequest) -> JSONResponse:
+    """Prompt -> the compilers' questions (at most three), or the plan
+    preview: a paragraph, the refusals in the catalogue's words (rule
+    name under ``details``), the estimate, the expert command."""
+    return _generate_call(generator.plan, request.prompt, answers=request.answers,
+                          questions=request.questions, images=request.images,
+                          fmt=request.format, tier=request.tier, seed=request.seed)
+
+
+@app.post("/generate/preview")
+def generate_preview(request: GeneratePreviewRequest) -> JSONResponse:
+    """One sample case, run headless with --max-previews 1 (rendered
+    with overlays when an engine is present): the picture's URL and
+    the measured per-case cost."""
+    return _generate_call(generator.preview, request.spec, images=request.images,
+                          seed=request.seed, workers=request.workers)
+
+
+@app.get("/generate/preview/{preview_id}/{kind}/{camera_id}/{name}")
+def generate_preview_image(preview_id: str, kind: str, camera_id: str, name: str):
+    """The preview's picture (overlay or geometry preview), guarded like
+    the run image route."""
+    try:
+        path = generator.preview_image(preview_id, kind, camera_id, name)
+    except generate_module.GenerateRefusal as exc:
+        return JSONResponse(exc.payload, status_code=exc.status_code)
+    return FileResponse(path, media_type="image/png")
+
+
+@app.post("/generate/start")
+def generate_start(request: GenerateStartRequest) -> JSONResponse:
+    """Create the campaign (refused by name before a worker starts) and
+    run it in the background; returns its id and the expert command."""
+    return _generate_call(generator.start, request.prompt, answers=request.answers,
+                          images=request.images, fmt=request.format, seed=request.seed,
+                          workers=request.workers, tier=request.tier,
+                          plan_digest=request.plan_digest,
+                          disk_budget_bytes=request.disk_budget_bytes)
+
+
+@app.post("/generate/{campaign_id}/pause")
+def generate_pause(campaign_id: str) -> JSONResponse:
+    return _generate_call(generator.control, campaign_id, "pause")
+
+
+@app.post("/generate/{campaign_id}/resume")
+def generate_resume(campaign_id: str) -> JSONResponse:
+    return _generate_call(generator.control, campaign_id, "resume")
+
+
+@app.post("/generate/{campaign_id}/cancel")
+def generate_cancel(campaign_id: str) -> JSONResponse:
+    return _generate_call(generator.control, campaign_id, "cancel")
+
+
+@app.get("/generate/{campaign_id}")
+def generate_status(campaign_id: str) -> JSONResponse:
+    """Progress from the ledger in human terms (the polling fallback)."""
+    return _generate_call(generator.progress, campaign_id)
+
+
+@app.get("/generate/{campaign_id}/events")
+def generate_events(campaign_id: str, interval: float = 1.0,
+                    limit: Optional[int] = None):
+    """Server-sent events through StreamingResponse (no sse-starlette):
+    a ``progress`` event now and on every change, ``end`` on a terminal
+    state, ``idle`` when nothing will change until a resume."""
+    from fastapi.responses import StreamingResponse
+
+    try:
+        generator.open(campaign_id)
+    except generate_module.GenerateRefusal as exc:
+        return JSONResponse(exc.payload, status_code=exc.status_code)
+    stream = generator.events(campaign_id, interval=max(0.05, float(interval)), limit=limit)
+    return StreamingResponse(stream, media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no"})
+
+
+@app.get("/generate/{campaign_id}/frames")
+def generate_frames(campaign_id: str) -> JSONResponse:
+    """The gallery: each case's picture with overlays where pixels
+    were drawn, its draw and its verdict."""
+    return _generate_call(generator.frames, campaign_id)
+
+
+@app.get("/generate/{campaign_id}/frames/{case_id}/{kind}/{camera_id}/{name}")
+def generate_frame_image(campaign_id: str, case_id: str, kind: str, camera_id: str,
+                         name: str):
+    try:
+        path = generator.frame_image(campaign_id, case_id, kind, camera_id, name)
+    except generate_module.GenerateRefusal as exc:
+        return JSONResponse(exc.payload, status_code=exc.status_code)
+    return FileResponse(path, media_type="image/png")
+
+
+@app.get("/generate/{campaign_id}/download")
+def generate_download(campaign_id: str, format: Optional[str] = None):
+    """A zip of the export plus its card (the card records the format).
+    The export's own refusals stand, in words, as a 409."""
+    try:
+        result = generator.download(campaign_id, format)
+    except generate_module.GenerateRefusal as exc:
+        return JSONResponse(exc.payload, status_code=exc.status_code)
+    return FileResponse(result["archive"], media_type="application/zip",
+                        filename=result["filename"],
+                        headers={"X-Dataset-Format": result["format"],
+                                 "X-Dataset-Runs": str(result["runs"])})

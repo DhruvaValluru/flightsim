@@ -1899,3 +1899,162 @@ every text read in D's files states its encoding (the sweep found four
 that did not, fixed before landing). Sheets are drawn from the fabricated run's
 box airframes here; on a real run they show the beauty-less ID image
 (no beauty frame is composited).
+
+## P2-I/page -- the non-technical interface (package I, part 2: the guided page over the campaign)
+
+**What was measured, and what was defective.** The page was built
+against the campaign as it landed (package G) and the catalogue
+(part 1), and three things were measured before a line of the page
+was written. (1) A real headless case of a two-second flight costs
+about a second and 1.1 MB on this machine (`Campaign.run` over
+`flightsim.capture`, no engine, `--max-previews 1`), so the tests run
+the REAL pipeline rather than a fake: every campaign in
+`tests/test_webapp_generate.py` flies. (2) The preview's first honest
+run refused: "photos of the a320 over the alps ... tower view" drew
+`location: matterhorn` from the policy and the capture CLI refused
+`camera.terrain_clearance` (the tower placement at -1779 m AGL under
+the massif) with exit 2 -- the campaign row says only "exited 2; its
+log is ..." (`core/dataset/batch.py` `case_row`), so the page would
+have shown nothing but a log path. `capture_refusals()` now reads the
+CLI's `REFUSED -- <name>:` and `[<name>] message (requested X, limit
+Y)` lines and renders them through the catalogue with the numbers:
+"The camera's path drops 1781.2 m below the minimum height above the
+ground; it must stay at least 2 m above the terrain." (3)
+`core/messages/catalog.yaml` has no entry for `campaign.state`,
+`campaign.arguments` or `campaign.duplicate_case` (contracts §6.3 gave
+the sentences to package I; `tests/test_messages.py` already fails on
+HEAD for the first two and for two names package G left in
+`ALLOWED_FUTURE`). The catalogue is not this part's file; the page
+shows the producer's own message for those three with
+`details.catalogued: false`, and the need is stated in contracts §8.
+Also found: `core/agent` (package H) does not exist on this branch, so
+the page calls `core.campaign` directly, as the contract's §8 lists it.
+
+**What was built.** `webapp/generate.py` (new): the campaign-facing
+service layer -- `words()` is the ONE place a refusal is put into
+words for the page (`{sentence, hint, details: {rule, message,
+catalogued, actual?, limit?, unit?}}` from `core.messages.explain`;
+the rule name never enters a default field); `compile_round()` runs
+the compilers' question round exactly as `/compile` does (LLM with the
+regex fallback recorded, or regex with its one camera question; at most
+three questions); `paragraph()` reads the compiled spec into one
+plain-language paragraph (airframe, places, conditions including the
+policy's leaves in words, viewpoints, count, format, flight length);
+`estimate()` states frames per case from the recorder cadence and
+projects disk and time ONLY from a measured case (`basis` says which;
+unmeasured is `None`); `plan_refusals()` renders the validator's
+violations and the sampler's policy defects; `GenerateService.preview`
+runs slot 0 through `core.campaign.workers.run_index` (the campaign's
+own worker function: `--max-previews 1 --card`, plus `--render` when an
+engine is present) and returns the overlay PNG when pixels were drawn
+or the geometry preview otherwise, saying which, with the measured
+`{frames, bytes, wall_seconds}`; `start` is `Campaign.create` +
+`plan()` + `run()` in a daemon thread (one per server process);
+`progress_from()` computes everything the page shows from
+`ledger.jsonl` on every call -- headline in the catalogue's words
+(`progress.campaign.<state>` with done/total), images so far,
+per-status counts with `progress.case.*` sentences, refusals by name
+rendered with their counts, `histograms()` over the rows' `sampled`
+draws (numeric leaves in six bins over the realised range,
+categorical by count), and the time left from the MEASURED mean
+seconds per completed case; `events()` is a server-sent-event
+generator over `StreamingResponse` (no `sse-starlette`): a `progress`
+event now and on every change, `end` on a terminal state, `idle` when
+nothing will change until a resume; `frames()` lists one picture per
+camera per captured case OFF THE DIRECTORIES (overlays, else previews,
+else frames -- a frame the renderer never wrote is never a broken
+image); `download()` is `Campaign.export(format)` zipped with its card.
+`webapp/server.py`: the §8 endpoints (`POST /generate/plan|preview|
+start`, `POST /generate/{id}/pause|resume|cancel`, `GET /generate/{id}`,
+`/events`, `/frames`, `/download?format=`), plus `GET /generate.html`
+and the two guarded image routes; every one a thin wrapper that maps
+`GenerateRefusal` to its status code; nothing above the new block
+changed. `webapp/static/generate.html` (new): one page, six states
+(ask, clarify, preview, generate, review, download), vanilla JS, a dark
+theme, `EventSource` for progress with polling as the fallback, every
+refusal shown as its sentence with the rule name under a `<details>`
+disclosure, every screen's command in the fixed "expert path" footer.
+`webapp/static/index.html`: one link to the new page. Seventeen tests
+in `tests/test_webapp_generate.py` (`TestClient`): the question round
+for an imagery prompt with no viewpoint; the answer round's paragraph
+and unmeasured estimate; the LLM fallback stated; a refusal as a
+catalogue sentence and never a raw name in the default fields (plan
+and 409 shapes, `words()` directly, the log reader); the preview flies
+one case, serves its PNG, measures it and refuses to climb out of its
+directory; a refused capture in words with the log's tail; progress
+from a ledger the test writes by hand (counts, histograms, refusals,
+the time estimate from the measured cost, the truncated last line
+dropped); no time claim before a case; a real campaign to `done` with
+the event stream's `progress` and `end`; the gallery off the
+directories (a deleted picture disappears); the download zip whose
+`dataset.json` names the format (and the campaign's default format,
+and a refused one); an empty campaign's export refused in words;
+cancel/resume through the campaign's transitions. Two mutation guards
+appended to `scripts/mutation_check.sh`, each applied by hand,
+confirmed to make the test file fail, and the source restored
+byte-identical: the catalogue-only rule (the default field made to
+carry the raw rule name) and progress-from-ledger (the ledger read
+replaced by nothing).
+
+**How to demonstrate (any platform).**
+
+    .venv/bin/pytest -q -p no:warnings tests/test_webapp_generate.py
+    .venv/bin/uvicorn webapp.server:app --host 127.0.0.1 --port 8008
+    # then open http://127.0.0.1:8008/generate.html -- try the first example prompt,
+    # answer the camera question, press "Fly one sample and show me", then Generate.
+    # The same flow from the terminal:
+    curl -s localhost:8008/generate/plan -H 'content-type: application/json' -d \
+      '{"prompt":"photos of the a320 for 2 seconds in varied weather","tier":"regex","images":20}' | head -c 600
+    curl -s localhost:8008/generate/plan -H 'content-type: application/json' -d \
+      '{"prompt":"fly the 747 at 500 m over 2000 m terrain, chase view","tier":"regex"}' | .venv/bin/python -m json.tool | grep -A3 sentence
+    curl -s localhost:8008/generate/start -H 'content-type: application/json' -d \
+      '{"prompt":"photos of the a320 for 2 seconds in varied weather","answers":[{"id":"camera_view","answer":"chase"}],"images":20,"tier":"regex"}'
+    curl -s localhost:8008/generate/<id>            # progress from the ledger, in words
+    curl -sN "localhost:8008/generate/<id>/events"  # server-sent events until `end`
+    curl -s localhost:8008/generate/<id>/frames | head -c 400
+    curl -o dataset.zip "localhost:8008/generate/<id>/download?format=yolo" && unzip -p dataset.zip yolo/dataset.json | grep '"format"'
+    scripts/mutation_check.sh 2>&1 | grep "guided page"
+
+The last line prints two `ok` rows; a `WEAK` row is a finding. (The
+script's baseline requires the whole suite green; on HEAD
+`tests/test_messages.py` is red for package G's uncatalogued names, so
+the two guards were confirmed by hand -- the mutation applied, the
+test file run, the file restored byte-identical, `__pycache__`
+purged -- which is what the script does per row.)
+
+**Not verified here.** No pixel: `ue_available()` is False on this
+machine, so every preview and gallery picture in the tests is the
+geometry preview and the `--render` branch of the preview (the overlay
+PNG with mask and box) ran on no engine; the response's `engine` and
+`drawn` say so. The LLM tier's compile-twice caveat (`Campaign.create`
+compiles the prompt itself) was measured only with the regex tier,
+where the digests agree by construction; with a model the start
+response's `recompiled` flag and the page's notice are the only
+guard. The page was exercised through its endpoints and by reading it,
+not in a browser session with a running campaign. Nothing in this
+part touches C++. `workers > 1` goes through the campaign's spawned
+pool untested from the page (the campaign's own test covers 1 vs 2).
+
+**Limitations.** The page is a product surface over one server
+process: one running campaign at a time, a thread per campaign, no
+queue; a server restart loses the thread but not the campaign (the
+record and ledger are the truth, and `resume` continues it). The
+paragraph's wording is one reading of the spec (the compiler's
+`from` strings are quoted for the place); a policy leaf of a shape
+the words do not know is rendered as "varied (<kind>)". Histograms
+cover the leaves the ledger rows record as `sampled` (the policy's
+draws), not the Phase 10 block's derived leaves (sun elevation, fog),
+which live in the manifests -- `report.json`'s `realised` has those.
+The time estimate divides the measured mean by the worker count and
+assumes cases keep costing what the completed ones did. The gallery
+caps at 60 pictures and shows one per camera per case; the frame
+browser (`/frames.html`) remains the way to see every frame. The
+event stream polls the ledger at the interval asked (1 s default);
+`interval` and `limit` exist for tests and for a client that wants
+fewer events. `campaign.state`, `campaign.arguments` and
+`campaign.duplicate_case` render as the producer's message until the
+catalogue carries them (a change to `core/messages/catalog.yaml` and
+`tests/test_messages.py`, which are not this part's files). This
+part appends to `scripts/mutation_check.sh` and to
+`docs/PHASE2_CONTRACTS.md` §8 (the as-landed note and the catalogue
+finding), as the rules require.

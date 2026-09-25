@@ -2631,6 +2631,24 @@ mutate core/campaign/campaign.py \
     "campaign progress is computed from the ledger" \
     tests/test_campaign.py || failures=$((failures+1))
 
+# -- Phase 2, package I part 2: the guided page (contracts §8) ----------------
+# The catalogue-only rule: the page's default fields carry the catalogue's
+# sentence and the rule name lives under details (mutate the one place a
+# refusal is put into words to emit the raw name); progress is read from
+# the ledger file on every call, never from memory (mutate the read away
+# and a ledger the test wrote by hand is no longer reported).
+mutate webapp/generate.py \
+    '        sentence = explained["sentence"]        # the catalogue sentence, never the name' \
+    '        sentence = rule  # MUTATED: the raw rule name in the default field' \
+    "the guided page renders a refusal as the catalogue sentence, never the raw rule name" \
+    tests/test_webapp_generate.py || failures=$((failures+1))
+
+mutate webapp/generate.py \
+    '        rows = campaign.ledger.rows()        # the ledger file, never a counter' \
+    '        rows = []  # MUTATED: nothing read from the ledger' \
+    "the guided page reports progress from the ledger" \
+    tests/test_webapp_generate.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

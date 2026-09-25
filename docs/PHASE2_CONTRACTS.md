@@ -1110,6 +1110,48 @@ agent in the tests tries each violation and is denied.
   disclosure. The expert page stays at `/` and every screen names its
   command (`docs/COMMANDS.md`, generated from the tool schema).
 
+* **Landed (package I part 2, `webapp/generate.py`, `webapp/static/generate.html`).**
+  The endpoints above exist as listed, over `core.campaign` directly
+  (`core/agent` -- package H -- did not exist when this part landed, so
+  the page calls the campaign object the agent will also call; nothing
+  here needs H). Beyond the list: `GET /generate.html` (the page),
+  `GET /generate/preview/{preview_id}/{kind}/{camera_id}/{name}` and
+  `GET /generate/{id}/frames/{case_id}/{kind}/{camera_id}/{name}` (the
+  preview's and the gallery's pictures, guarded exactly like the run
+  image route: fixed kinds `overlays|previews|frames`, matched names,
+  `resolve().relative_to`). `POST /generate/plan` takes `{prompt,
+  questions?, answers?, images, format, tier, seed?}` and returns either
+  `{state: "clarify", questions}` (the compilers' round, at most three)
+  or `{state: "preview", paragraph, refusals[], ok, estimate, spec,
+  spec_digest, expert[]}`; `POST /generate/preview` takes the plan's
+  `spec` (plus `images`, `seed`, `workers`) and runs slot 0 through
+  `core.campaign.workers.run_index` with `--max-previews 1` (and
+  `--render` when `ue_available()`), returning the picture's URL and
+  the MEASURED `{frames, bytes, wall_seconds}` with the estimate
+  recomputed from them -- a capture the CLI refused returns 409 with
+  the log's named refusals in words. `POST /generate/start` creates the
+  campaign through `Campaign.create` (which compiles the prompt itself;
+  the response carries `plan_digest` and `spec_digest` and
+  `recompiled: true` when they differ -- identical by construction with
+  the regex tier) and runs it in a thread; one running campaign per
+  server process (`campaign.state` otherwise). Every refusal body is
+  `{sentence, hint, details: {rule, message, catalogued, actual?,
+  limit?, unit?}}` from `core.messages.explain`: the rule name is never
+  in `sentence` or `hint`. `GET /generate/{id}` and the `progress`
+  events carry `{headline (progress.campaign.<state>), frames_verified,
+  frames_captured, fraction, cases, cases_words (progress.case.*),
+  refusals, refusals_words, varying (histograms over the rows'
+  `sampled`), timing {frames_per_case, seconds_per_case,
+  remaining_cases, seconds_remaining, basis}, disk, expert[]}` computed
+  from `ledger.jsonl` on every call. The download is
+  `<campaign>/downloads/<id>_<format>.zip` of `Campaign.export(format)`'s
+  directory, `dataset.json` (which records `format`) inside.
+  **Finding for the catalogue (not this part's file):** `campaign.state`,
+  `campaign.arguments` and `campaign.duplicate_case` have no entry in
+  `core/messages/catalog.yaml` (§6.3 gave the sentences to package I);
+  the page shows the producer's own message for them, with
+  `details.catalogued: false`, until the entries land.
+
 ---
 
 ## 9. Render command flags — one builder (package A, closes the drift)
