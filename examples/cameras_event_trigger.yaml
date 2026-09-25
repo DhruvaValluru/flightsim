@@ -19,7 +19,7 @@
 #   .venv/bin/python -m flightsim.capture \
 #       examples/cameras_event_trigger.yaml --out runs/on_sink
 #   .venv/bin/python -m flightsim.verify runs/on_sink
-spec_version: 7
+spec_version: 8
 name: cameras_event_trigger
 prompt: chase the 747 at 10000 ft through a thunderstorm for 60 seconds
 aircraft:

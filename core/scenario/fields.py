@@ -138,3 +138,14 @@ class Quantity:
         for key in sorted(self.detail):
             bits.append(f"{key}={self.detail[key]}")
         return "; ".join(bits)
+
+
+#: The one statement of which sources a planner may move. A field the
+#: system chose (defaulted, derived, or the model's declared guess) may be
+#: re-planned; a user-stated or vocabulary-inferred value is never
+#: silently moved (§2.6). ``spec.py``, ``camera.py``,
+#: ``randomization.py`` and ``webapp/runs.py`` carry their own earlier
+#: spellings of this rule (each pinned by a mutation guard); the spec-8
+#: blocks (``blocks.py``, the camera's exposure block) read this one.
+#: Package F's ``Source.SAMPLED`` must be excluded here too when it lands.
+PLANNABLE_SOURCES = (Source.DEFAULT, Source.DERIVED, Source.MODEL)

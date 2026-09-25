@@ -1,26 +1,27 @@
-# The hazard case the phase asks for: a world-anchored camera placed
-# INSIDE THE TORNADO CORE.
+# The event-driven capture the phase asks for: frames are taken WHEN
+# something happens in the flight, not on a clock.
 #
-# "through a tornado" aims the modelled vortex core AT the track: the
-# core sits 45% of the still-air run ahead along the heading (the same
-# placement the run card carries, so the check and the render cannot
-# model two different vortices). This tower camera is stated at that
-# centre, 40 m up -- inside the Rankine core (radius 150 m) and far
-# under its fade top (3000 m). Expected outcome, BY NAME, before
-# anything flies:
+# A 747 flies open-loop through a modelled thunderstorm downburst (the
+# documented composition; see the conditions strip). The chase camera's
+# trigger is an EVENT on a telemetry channel: it captures once a second
+# for as long as the recorded sink rate is below -10 m/s -- the
+# downburst's outflow, well past anything still air does to a trimmed
+# airliner (the still-air drift over this run is under 0.1 m/s).
+# Deterministic: the downburst is a fixed field and the flight is
+# seeded, so the same instants fire on every machine.
 #
-#   REFUSED [camera.hazard_intersection] -- the stated placement sits
-#   inside the modelled tornado core
-#
-# A user-stated camera field is never silently moved to pass; state
-# the tower somewhere outside the core (>150 m from the centre) and run
-# again.
+# Expected outcome: the manifest's frames all carry a recorded
+# climb_rate_mps below -10, the schedule basis names the channel, and
+# `flightsim.verify` passes. An event that never happens is a named
+# refusal (camera.schedule: "... never goes below -10 ...") rather than
+# an empty run: edit event_threshold to -30 to see it.
 #
 #   .venv/bin/python -m flightsim.capture \
-#       examples/cameras_hazard_refusal.yaml --out runs/in_the_funnel
-spec_version: 8
-name: cameras_hazard_refusal
-prompt: tower view of the 747 flying through a tornado over the prairie for 60 seconds
+#       examples/cameras_event_trigger.yaml --out runs/on_sink
+#   .venv/bin/python -m flightsim.verify runs/on_sink
+spec_version: 7
+name: cameras_event_trigger
+prompt: chase the 747 at 10000 ft through a thunderstorm for 60 seconds
 aircraft:
   aircraft:
     value: B747
@@ -28,10 +29,10 @@ aircraft:
     from: '747'
 initial:
   altitude:
-    value: 3000.0
+    value: 3048.0
     unit: m
-    source: default
-    from: mid-altitude cruise
+    source: user
+    from: 10000 ft
   airspeed:
     value: 250.0
     unit: kt
@@ -78,18 +79,18 @@ environment:
     std: MIL-F-8785C Fig.7 (W20, wind speed at 20 ft AGL)
     W20_kt: 0.0
   surface:
-    value: grassland
-    source: inferred
-    from: 'ground cover ''prairie'': roughness + thermal class (surface vocabulary)'
+    value: unspecified
+    source: default
+    from: no ground cover stated; no surface coupling
   weather_date:
     value: none
     source: default
     from: no date stated; spec wind as given
   weather_event:
-    value: tornado
+    value: thunderstorm
     source: inferred
-    from: severe weather 'tornado', aim core (documented composition/model; see conditions
-      strip)
+    from: severe weather 'thunderstorm', aim core (documented composition/model; see
+      conditions strip)
     aim: core
 run:
   duration:
@@ -112,47 +113,47 @@ run:
     source: default
     from: realistic fuel burn
   hold_state:
-    value: true
-    source: default
-    from: hold the commanded state
+    value: false
+    source: user
+    from: 'open loop: the downburst is what the aircraft meets, uncorrected'
 cameras:
 - camera_id:
-    value: tower_in_the_funnel
+    value: chase_on_sink
     source: user
     from: documented camera id
   preset:
-    value: tower
+    value: chase
     source: inferred
-    from: tower view
+    from: chase
   position_mode:
-    value: scene
-    source: user
-    from: stated in scene metres
-  offset_forward_m:
-    value: 0.0
-    unit: m
+    value: offset
     source: default
     from: camera language in the prompt; documented camera default
+  offset_forward_m:
+    value: -110.0
+    unit: m
+    source: default
+    from: per-airframe chase offset table
   offset_right_m:
     value: 0.0
     unit: m
     source: default
-    from: camera language in the prompt; documented camera default
+    from: per-airframe chase offset table
   offset_up_m:
+    value: 12.0
+    unit: m
+    source: default
+    from: per-airframe chase offset table
+  position_north_m:
     value: 0.0
     unit: m
     source: default
     from: camera language in the prompt; documented camera default
-  position_north_m:
-    value: 3472.5
-    unit: m
-    source: user
-    from: ON the modelled tornado core's centre
   position_east_m:
     value: 0.0
     unit: m
-    source: user
-    from: ON the modelled tornado core's centre
+    source: default
+    from: camera language in the prompt; documented camera default
   position_lat_deg:
     value: 0.0
     unit: deg
@@ -164,10 +165,10 @@ cameras:
     source: default
     from: camera language in the prompt; documented camera default
   position_alt_m:
-    value: 40.0
+    value: 0.0
     unit: m
-    source: user
-    from: '40 m above the datum: inside the funnel, well under fade_top'
+    source: default
+    from: camera language in the prompt; documented camera default
   aim_mode:
     value: aircraft
     source: default
@@ -233,14 +234,14 @@ cameras:
     source: default
     from: camera language in the prompt; documented camera default
   trigger:
-    value: continuous
-    source: derived
-    from: a view named in the prompt with no count captures the whole clip
+    value: event
+    source: user
+    from: event-driven capture
   capture_count:
-    value: 10
+    value: 0
     unit: dimensionless
     source: user
-    from: exactly 10 images
+    from: every qualifying instant; the event decides the count
   period_s:
     value: 1.0
     unit: s
@@ -252,22 +253,22 @@ cameras:
     source: default
     from: camera language in the prompt; documented camera default
   event_channel:
-    value: roll_deg
-    source: default
-    from: camera language in the prompt; documented camera default
+    value: climb_rate_mps
+    source: user
+    from: the sink rate the downburst imposes
   event_threshold:
-    value: 30.0
-    source: default
-    from: camera language in the prompt; documented camera default
+    value: -10.0
+    source: user
+    from: '10 m/s down: well past the still-air drift, inside the downburst'
   event_direction:
-    value: above
-    source: default
-    from: camera language in the prompt; documented camera default
+    value: below
+    source: user
+    from: while sinking faster than the threshold
   refractory_s:
-    value: 2.0
+    value: 1.0
     unit: s
-    source: default
-    from: one event is one capture
+    source: user
+    from: one capture per second while the condition holds
   profile:
     value: ideal_pinhole
     source: default

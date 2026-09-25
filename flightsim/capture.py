@@ -6,7 +6,7 @@
 What happens, in order (each step refuses by name rather than
 approximating):
 
-1. the spec is read (spec_version 7 -- older versions refuse by name);
+1. the spec is read (spec_version 8 -- older versions refuse by name);
 2. scene-free validation runs (the full validate(), cameras included);
 3. world-anchored cameras are checked against the scene BEFORE the run
    (terrain clearance, scene bounds, the tornado core);
@@ -93,7 +93,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="validate, run headlessly, and capture a scenario's "
                     "camera geometry")
-    parser.add_argument("spec", help="scenario spec YAML (spec_version 7)")
+    parser.add_argument("spec", help="scenario spec YAML (spec_version 8)")
     parser.add_argument("--out", required=True, help="run directory")
     parser.add_argument("--terrain", default=None,
                         help="baked heightfield stem (<stem>.r16 + .json) "
@@ -104,7 +104,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                              "terrain physics and real raster camera "
                              "checks with no network and no account, "
                              "deterministic from its seed. Ignored when "
-                             "--terrain names a bake.")
+                             "--terrain names a bake. Since spec 8 this "
+                             "flag is an ALIAS for the spec's own "
+                             "scene.terrain_source: synthesised, which "
+                             "needs no flag.")
     parser.add_argument("--max-previews", type=int, default=8,
                         help="cap geometry preview images per run "
                              "(default 8; they are near-identical frame "
@@ -151,7 +154,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from core.scenario.camera import default_cameras
     from core.scenario.runner import run_spec
     from core.scenario.spec import ScenarioSpec
-    from core.scenario.validate import validate
+    from core.scenario.validate import Violation, validate
 
     try:
         spec = ScenarioSpec.read(args.spec)
@@ -233,7 +236,51 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     heightfield = None
     terrain_ground = None
     terrain_stem = args.terrain
-    if terrain_stem is None and args.synth_terrain:
+    # Spec 8: the spec's own scene.terrain_source names the terrain, so
+    # a committed example refuses (or flies) AS ITS HEADER SAYS with no
+    # flag. "auto" is exactly the flag behaviour this block always had;
+    # the flags stay as aliases. A flag that CONTRADICTS a stated source
+    # refuses by name (scene.terrain) rather than dropping either in
+    # silence. Whether the value is one of the four is validate()'s
+    # question (scene.terrain_source); here an unknown value falls
+    # through to validation below, which refuses it.
+    terrain_source = str(spec.scene.terrain_source.value)
+    if terrain_source == "flat":
+        if terrain_stem is not None or args.synth_terrain:
+            return _refuse([Violation(
+                "scene.terrain",
+                "the spec states scene.terrain_source: flat, but "
+                + ("--terrain names a bake" if terrain_stem is not None
+                   else "--synth-terrain asks for a raster")
+                + "; edit the spec or drop the flag -- neither is "
+                  "dropped in silence")])
+        print("terrain: flat at the spec's datum (scene.terrain_source: "
+              "flat)")
+    elif terrain_source == "baked":
+        stated = spec.scene.terrain.value
+        if terrain_stem is None and stated:
+            terrain_stem = str(stated)
+        if terrain_stem is None:
+            return _refuse([Violation(
+                "scene.terrain",
+                "scene.terrain_source is baked but no bake is named: "
+                "state scene.terrain (a <stem>.r16 + .json bake) or pass "
+                "--terrain <stem>")])
+        stem = Path(terrain_stem)
+        if not (stem.with_suffix(".r16").is_file()
+                and stem.with_suffix(".json").is_file()):
+            return _refuse([Violation(
+                "scene.terrain",
+                f"scene.terrain_source is baked but {terrain_stem} is not "
+                f"a whole bake on this machine (<stem>.r16 + .json; "
+                f"scripts/bake_terrain.py fetches a curated one)")])
+    elif terrain_source == "synthesised" and terrain_stem is not None:
+        return _refuse([Violation(
+            "scene.terrain",
+            "the spec states scene.terrain_source: synthesised, but "
+            "--terrain names a bake; edit the spec or drop the flag")])
+    if terrain_stem is None and (args.synth_terrain
+                                 or terrain_source == "synthesised"):
         # Synthesised, not fetched: the same Heightfield a DEM bakes to,
         # centred on this spec's origin so the flight is actually over
         # it, deterministic from its seed, and available on a fresh
@@ -246,7 +293,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             float(spec.latitude.value), float(spec.longitude.value),
             name=f"synth_{spec.name or 'scene'}"))
         print(f"synthesised terrain: {terrain_stem} (deterministic; no "
-              f"network)")
+              f"network; scene.terrain_source: {terrain_source}"
+              f"{' + --synth-terrain' if args.synth_terrain else ''})")
     if terrain_stem:
         from core.terrain.ground import TerrainGround
         from core.terrain.heightfield import Heightfield

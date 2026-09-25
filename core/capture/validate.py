@@ -128,6 +128,28 @@ def intrinsics_violations(camera: CameraSpec,
     return out
 
 
+def exposure_violations(camera: CameraSpec,
+                        index: int = 0) -> List[Violation]:
+    """camera.exposure (spec 8): aperture f-number, shutter seconds and
+    ISO must each be positive numbers. Only the triple's shape is
+    refused here; the EV100 it implies is the Look lane's."""
+    out: List[Violation] = []
+    who = _prefix(index, camera)
+    for name, unit in (("aperture_f", "f-number"), ("shutter_s", "s"),
+                       ("iso", "ISO")):
+        raw = getattr(camera.exposure, name).value
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            value = None
+        if isinstance(raw, bool) or value is None or not value > 0.0:
+            out.append(Violation(
+                "camera.exposure",
+                f"{who}: exposure.{name} must be a positive number",
+                actual=raw, limit=0.0, unit=unit))
+    return out
+
+
 def identifier_violations(camera: CameraSpec,
                           index: int = 0) -> List[Violation]:
     """camera.identifier: an id that cannot safely name a directory.
@@ -318,6 +340,7 @@ def validate_cameras(spec) -> List[Violation]:
         out.extend(identifier_violations(camera, index))
         out.extend(vocabulary_violations(camera, index))
         out.extend(intrinsics_violations(camera, index))
+        out.extend(exposure_violations(camera, index))
         out.extend(schedule_violations(camera, index))
         out.extend(moves_violations(camera, index))
         camera_id = str(camera.camera_id.value)

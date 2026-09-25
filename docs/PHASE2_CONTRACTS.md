@@ -831,7 +831,16 @@ missing_frames,empty,split,shard_size,format,arguments}`. Named
 names): `spec.version`, `manifest.version`.
 
 **New this phase.** `scene.terrain` (a `terrain_source` the machine
-cannot honour), `aircraft.mesh_extent` (§0.1), `annotation.mask_blend`,
+cannot honour: `baked` with no whole bake stated or given, or a CLI flag
+that contradicts the stated source), `scene.terrain_source` (a value
+outside the four), `taxonomy.classes` (empty, non-string or repeated
+class names), `traffic.count` (more than two entries), `traffic.aircraft`
+(not a configured airframe: no `assets/aircraft_config/<name>.json`),
+`traffic.track`, `traffic.range_m`, `randomization.policy` (a leaf not
+of a §5.2 form -- shape only; the semantic refusals below are F's),
+`camera.exposure` (a non-positive aperture, shutter or ISO) -- all
+landed with the spec-8 bump (package A);
+`aircraft.mesh_extent` (§0.1), `annotation.mask_blend`,
 `annotation.mask_offset`, `annotation.box_mismatch`,
 `annotation.depth_range`, `annotation.visibility`, `annotation.identity`,
 `annotation.intrinsics`, `annotation.files`, `aircraft.placeholder_drawn`
@@ -860,6 +869,38 @@ Everything else is unchanged; the digest of a spec that states none of
 these is unchanged by construction (absent blocks are canonical), and
 `simulation_digest` (manifest.py L213-233) keeps dropping `cameras` and
 `randomization` and additionally drops `taxonomy`.
+
+**As landed (package A, the bump commit) -- three shape decisions the
+table above left open, stated here so the other packages implement
+against what exists:**
+
+* `cameras[].exposure` is ALSO absent-canonical: a camera whose triple is
+  the preset's documented default (`ExposureSpec.is_default(preset)`)
+  serialises exactly as it did at 7 (no `exposure` key); a stated or
+  planned triple appears as a nested block `{aperture_f, shutter_s, iso}`
+  of Quantities (units `f-number`, `s`, `ISO`). Addressed as
+  `cameras[i].exposure.<field>`. `EXPOSURE_DEFAULTS` in `camera.py` is
+  keyed per preset with one daylight triple for all of them today
+  (§12's f/8, 1/500 s, ISO 100).
+* `randomization.policy` is one provenanced Quantity whose VALUE is the
+  §5.2 mapping (`{value: {...}, source, from}` under
+  `randomization.policy`), carried on `ScenarioSpec.randomization_policy`
+  rather than inside `RandomizationSpec` (whose 20-field reader is
+  untouched); package F may move the attribute inside the block without
+  changing the file shape. A `randomization` block that holds only
+  `policy` leaves the ranges at their defaults. Validation is
+  structural only (`core/scenario/validate.py` `policy_problems`):
+  fixed scalars are admitted at the top level only; inside a group
+  every member is a distribution leaf or a group.
+* `scene`, `taxonomy` and `traffic[]` live in `core/scenario/blocks.py`
+  (`SceneSpec`, `TaxonomySpec`, `TrafficSpec`, each a
+  `ProvenancedBlock` with the spec's set()/plan() doctrine; the
+  plannable rule they read is `fields.PLANNABLE_SOURCES`). `traffic` is
+  omitted when empty; `MAX_TRAFFIC = 2`; the default track is
+  `crossing`, range 400 m, livery `default`; a traffic entry's
+  `aircraft` is `user`-sourced by construction (it has no documented
+  default). `scene.terrain` is a Quantity whose value is `None` when
+  absent (the block is omitted whole when defaulted).
 
 ---
 

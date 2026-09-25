@@ -253,16 +253,106 @@ def test_terrain_example_captures_over_a_real_raster(tmp_path):
 
 def test_camera_inside_a_mountain_refuses_against_the_raster(tmp_path,
                                                              capsys):
+    """AS DOCUMENTED, with no flag: the example states
+    scene.terrain_source: synthesised (spec 8), so the command its
+    header gives refuses against the ridge. Before the bump the spec
+    carried no terrain reference and the documented command ran it over
+    the flat datum -- valid, and a lie about what the example shows."""
     out = tmp_path / "buried"
     code = capture_main([str(EXAMPLES / "cameras_mountain_refusal.yaml"),
-                         "--out", str(out), "--synth-terrain"])
+                         "--out", str(out)])
     assert code == 2
     printed = capsys.readouterr().out
     assert "camera.terrain_clearance" in printed
     # Against the raster: the reported AGL is the ridge surface's, not
     # the spec's flat datum's.
     assert "m AGL" in printed
+    assert "scene.terrain_source: synthesised" in printed
     assert not (out / "capture_manifest.json").exists()
+
+
+def test_the_synth_terrain_flag_is_still_an_alias(tmp_path, capsys):
+    """--synth-terrain keeps working on a spec whose terrain_source is
+    auto (the cameras_terrain example), and says it is the alias."""
+    spec = ScenarioSpec.read(EXAMPLES / "cameras_mountain_refusal.yaml")
+    spec.set("scene.terrain_source", "auto", frm="test: the flag decides")
+    auto = tmp_path / "auto.yaml"
+    spec.write(auto)
+    # Without the flag an auto spec flies the flat datum: the buried
+    # camera is 2500 m above it, so nothing refuses -- proof the field,
+    # not the flag, is what the committed example now relies on.
+    with_flag = capture_main([str(auto), "--out", str(tmp_path / "flag"),
+                              "--synth-terrain"])
+    assert with_flag == 2
+    printed = capsys.readouterr().out
+    assert "camera.terrain_clearance" in printed
+    assert "--synth-terrain" in printed
+
+
+def test_a_flag_that_contradicts_the_stated_terrain_source_refuses(
+        tmp_path, capsys):
+    """A stated field and a contradicting flag: neither is dropped in
+    silence -- refused by name (scene.terrain) before any flight."""
+    spec = ScenarioSpec.read(EXAMPLES / "cameras_multi.yaml")
+    spec.set("scene.terrain_source", "flat", frm="test")
+    flat = tmp_path / "flat.yaml"
+    spec.write(flat)
+    code = capture_main([str(flat), "--out", str(tmp_path / "x"),
+                         "--synth-terrain"])
+    assert code == 2
+    assert "[scene.terrain]" in capsys.readouterr().out
+    spec.set("scene.terrain_source", "baked", frm="test")
+    baked = tmp_path / "baked.yaml"
+    spec.write(baked)
+    code = capture_main([str(baked), "--out", str(tmp_path / "y")])
+    assert code == 2
+    assert "no bake is named" in capsys.readouterr().out
+    code = capture_main([str(baked), "--out", str(tmp_path / "z"),
+                         "--terrain", str(tmp_path / "nowhere")])
+    assert code == 2
+    assert "not a whole bake" in capsys.readouterr().out
+
+
+# -- every example loads at spec 8 and does what its header says ----------
+
+def _header_outcome(path: Path) -> str:
+    """'refuses:<name>' when the header states REFUSED [<name>], else
+    'valid'."""
+    import re
+
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("#"):
+            break
+        match = re.search(r"REFUSED \[([a-z_.]+)\]", line)
+        if match:
+            return f"refuses:{match.group(1)}"
+    return "valid"
+
+
+@pytest.mark.parametrize("name", sorted(
+    p.name for p in EXAMPLES.glob("*.yaml") if p.name != "batch_matrix.yaml"))
+def test_every_example_loads_at_spec_8_and_matches_its_header(name, tmp_path,
+                                                              capsys):
+    """batch_matrix.yaml is a batch file over cameras_multi.yaml, not a
+    spec (tests/test_dataset.py runs it). Every other example reads at
+    SPEC_VERSION, and either validates (its header states no refusal)
+    or refuses BY THE NAME its header states, with the documented
+    command's flags only (none)."""
+    from core.scenario.spec import SPEC_VERSION
+    from core.scenario.validate import validate
+
+    path = EXAMPLES / name
+    spec = ScenarioSpec.read(path)
+    assert spec.to_dict()["spec_version"] == SPEC_VERSION
+    outcome = _header_outcome(path)
+    if outcome == "valid":
+        report = validate(spec, check_feasibility=False)
+        assert report.ok, report.render()
+    else:
+        expected = outcome.split(":", 1)[1]
+        code = capture_main([str(path), "--out", str(tmp_path / "run")])
+        assert code == 2
+        assert f"[{expected}]" in capsys.readouterr().out
 
 
 def test_synthesised_terrain_is_deterministic(tmp_path):

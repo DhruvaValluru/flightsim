@@ -57,10 +57,14 @@ def test_specs_differing_only_in_cameras_hash_differently(spec):
     assert spec.digest() != with_camera
 
 
-def test_spec_version_5_documents_refuse_by_name(spec_with_camera):
+@pytest.mark.parametrize("version", [5, 7])
+def test_older_spec_versions_refuse_by_name(spec_with_camera, version):
+    """5 (before cameras) and 7 (before the spec-8 blocks): both by the
+    named version error, never a guess at the schema."""
     data = spec_with_camera.to_dict()
-    data["spec_version"] = 5
-    with pytest.raises(ValueError, match="not supported"):
+    data["spec_version"] = version
+    with pytest.raises(ValueError, match=f"spec_version {version} is not "
+                                         f"supported"):
         ScenarioSpec.from_dict(data)
 
 

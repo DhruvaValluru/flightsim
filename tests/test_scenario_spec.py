@@ -54,17 +54,18 @@ def test_every_numeric_field_carries_a_unit(spec):
             assert q.unit is not None, f"{name} has no unit"
 
 
-def test_spec_version_6_and_the_model_source(spec):
-    """SPEC_VERSION is 6: the cameras list arrived (Camera Phase 1), so
-    version-5 dicts refuse by the named version error -- completed runs
-    recover from provenance.json, never by re-parsing. The version-5
-    provenance rules are unchanged: a model-sourced quantity
-    round-trips; plan() may move it (the guess is the system's choice)
-    and the source becomes derived; user and inferred values stay
-    immovable."""
+def test_spec_version_8_and_the_model_source(spec):
+    """SPEC_VERSION is 8 (Phase 2: scene, taxonomy, traffic,
+    randomization.policy and cameras[].exposure, every one optional and
+    absent-canonical), so older dicts refuse by the named version error
+    -- completed runs recover from provenance.json, never by re-parsing.
+    The provenance rules are unchanged since version 5: a model-sourced
+    quantity round-trips; plan() may move it (the guess is the system's
+    choice) and the source becomes derived; user and inferred values
+    stay immovable."""
     from core.scenario.spec import SPEC_VERSION
 
-    assert SPEC_VERSION == 7
+    assert SPEC_VERSION == 8
 
     spec.altitude = Quantity(150.0, "m", Source.MODEL, frm="treetop level")
     reread = ScenarioSpec.from_dict(spec.to_dict())

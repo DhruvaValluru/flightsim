@@ -18,7 +18,7 @@
 #
 #   .venv/bin/python -m flightsim.capture \
 #       examples/cameras_hazard_refusal.yaml --out runs/in_the_funnel
-spec_version: 8
+spec_version: 7
 name: cameras_hazard_refusal
 prompt: tower view of the 747 flying through a tornado over the prairie for 60 seconds
 aircraft:

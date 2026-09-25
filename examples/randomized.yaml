@@ -8,7 +8,7 @@
 # receives the sampled look (-sun-elev/-sun-azim/-exposure-bias/
 # -fog-density) and the card + manifest carry it verbatim.
 #   .venv/bin/python -m flightsim.capture examples/randomized.yaml --out runs/randomized
-spec_version: 7
+spec_version: 8
 name: randomized
 aircraft:
   aircraft:

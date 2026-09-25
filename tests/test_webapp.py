@@ -1427,3 +1427,101 @@ def test_a_staged_place_is_never_the_control_ridge(control_ridge):
     assert not scene_set(peaks)
     assert pick_scene(peaks)["key"] == "control"
     assert needs_dynamic_bake(peaks) is None
+
+
+# -- spec 8: scene.terrain_source in the scene picker ---------------------
+
+@pytest.fixture
+def small_synthesis(monkeypatch):
+    """The real ridge synthesis at 64 px (the 1024 px raster takes
+    minutes), through the same cache and name the CLI uses."""
+    import core.terrain.synthesis as synthesis
+
+    real = synthesis.ensure_ridge_for_origin
+
+    def small(directory, lat_deg, lon_deg, name="demo_ridge", **overrides):
+        overrides.setdefault("size", 64)
+        return real(directory, lat_deg, lon_deg, name=name, **overrides)
+
+    monkeypatch.setattr(synthesis, "ensure_ridge_for_origin", small)
+
+
+def test_terrain_source_flat_forces_the_datum(control_ridge):
+    """A mountainous prompt earns the control ridge under auto; the
+    stated ``flat`` is honoured -- and nothing refuses, because the spec
+    asked for exactly the slab it gets."""
+    spec = compile_prompt("fly the 747 at 4000 m over 2000 m mountains")
+    assert pick_scene(spec)["key"] == "control"
+    spec.set("scene.terrain_source", "flat", frm="test")
+    scene = pick_scene(spec)
+    assert scene["key"] == "flat" and scene["terrain"] is None
+    assert "scene.terrain_source: flat" in scene["label"]
+    assert runs_module.needs_dynamic_bake(spec) is None
+
+
+def test_terrain_source_synthesised_is_the_ridge_at_the_origin(
+        tmp_path, monkeypatch, small_synthesis):
+    """The same synthesis, name and cache key as the CLI's
+    --synth-terrain, written under TERRAIN_DIR; the origin lands on it,
+    it is not the control ridge (never re-placed), and stated
+    coordinates do not refuse terrain.unbaked over it."""
+    from pyproj import Transformer
+
+    from core.terrain.heightfield import Heightfield
+
+    monkeypatch.setattr(runs_module, "TERRAIN_DIR", tmp_path / "terrain")
+    spec = compile_prompt("fly the 747 at 4000 m and 250 kt")
+    spec.set("latitude", 46.5, frm="test")
+    spec.set("longitude", 8.5, frm="test")
+    assert runs_module.needs_dynamic_bake(spec)["constraint"] == "terrain.unbaked"
+    spec.set("scene.terrain_source", "synthesised", frm="test")
+    scene = pick_scene(spec)
+    assert scene["key"] == "synthesised"
+    stem = Path(scene["terrain"])
+    assert stem.parent == tmp_path / "terrain"
+    assert stem.name.startswith("synth_scenario_")
+    field = Heightfield.read(stem)
+    forward = Transformer.from_crs("EPSG:4326", field.georeference.crs,
+                                   always_xy=True)
+    assert field.contains(*forward.transform(8.5, 46.5))
+    assert runs_module.needs_dynamic_bake(spec) is None
+    assert pick_scene(spec) == scene              # cached, same raster
+
+
+def test_terrain_source_baked_refuses_unbaked_by_name(tmp_path, monkeypatch,
+                                                      small_synthesis):
+    """``baked`` with nothing baked (stated or earned) is terrain.unbaked
+    -- whatever the coordinates' source, and never the ridge or the
+    slab; a stated bake that IS on this machine is honoured, absolute
+    or relative to TERRAIN_DIR."""
+    monkeypatch.setattr(runs_module, "TERRAIN_DIR", tmp_path / "terrain")
+    spec = compile_prompt("fly the 747 at 4000 m over 2000 m mountains")
+    spec.set("scene.terrain_source", "baked", frm="test")
+    scene = pick_scene(spec)
+    assert scene["terrain"] is None and scene["refused"] == "terrain.unbaked"
+    refusal = runs_module.needs_dynamic_bake(spec)
+    assert refusal["constraint"] == "terrain.unbaked"
+    assert "scene.terrain" in refusal["message"]
+    spec.set("scene.terrain", "not_here", frm="test")
+    assert runs_module.needs_dynamic_bake(spec)["constraint"] == "terrain.unbaked"
+    # Bake something (the small ridge) and state it.
+    from core.terrain.synthesis import ensure_ridge_for_origin
+
+    stem = ensure_ridge_for_origin(tmp_path / "terrain", 0.0, 0.0,
+                                   name="mine")
+    spec.set("scene.terrain", str(stem), frm="test")
+    scene = pick_scene(spec)
+    assert scene["terrain"] == str(stem) and scene["kind"] == "baked (stated)"
+    assert runs_module.needs_dynamic_bake(spec) is None
+    spec.set("scene.terrain", stem.name, frm="test")       # relative
+    assert pick_scene(spec)["terrain"] == str(stem)
+
+
+def test_terrain_source_auto_is_the_selection_as_before(control_ridge):
+    """The default is byte-for-byte today's picker: the same three
+    outcomes the existing tests pin, reached through the same code."""
+    spec = compile_prompt("fly the 747 at 3000 m and 250 kt")
+    assert pick_scene(spec) == runs_module._auto_scene(spec)
+    assert pick_scene(spec)["key"] == "flat"
+    mountains = compile_prompt("fly the 747 at 4000 m over 2000 m mountains")
+    assert pick_scene(mountains)["key"] == "control"

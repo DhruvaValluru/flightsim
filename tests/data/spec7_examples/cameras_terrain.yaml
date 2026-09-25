@@ -22,7 +22,7 @@
 # Expected: 30 frames, every engine-free verification check PASS (the
 # engine checks report NOT RUN by name), and the pixel render refused by
 # name (ue.platform) off a render-capable machine.
-spec_version: 8
+spec_version: 7
 name: cameras_terrain
 aircraft:
   aircraft:

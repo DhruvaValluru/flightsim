@@ -1084,6 +1084,34 @@ mutate assets_pipeline/importer.py \
     "an import is verified by the assets, not the editor exit code" \
     tests/test_aircraft_assets.py || failures=$((failures+1))
 
+# -- Mesh origin: measured from the vertices (manifest version 3) ---------
+# The pinned-source tests fetch three model repositories; the guards are
+# proven on the synthetic mesh alone, so they stay off the network.
+
+mutate assets_pipeline/convert.py \
+    '    if deviation > MESH_EXTENT_TOLERANCE:' \
+    '    if False:  # MUTATED: a mesh of any length passes as the labelled airframe' \
+    "a mesh whose span is not the labelled length refuses aircraft.mesh_extent" \
+    tests/test_aircraft_assets.py -k "not pinned" || failures=$((failures+1))
+
+mutate assets_pipeline/convert.py \
+    '    origin_x = nose_actor_cm[0] - extents.nose_cm  # the measured rule (x)' \
+    '    origin_x = vrp_actor_cm[0]  # MUTATED: eb5c71d, the staged FDM VRP as the origin' \
+    "the mesh origin x is measured from the nose vertex, not the VRP" \
+    tests/test_aircraft_assets.py -k "not pinned" || failures=$((failures+1))
+
+mutate assets_pipeline/convert.py \
+    '        origin_z = gear_contact_z_cm - extents.gear_lowest_cm  # the measured rule (z)' \
+    '        origin_z = vrp_actor_cm[2]  # MUTATED: the VRP z whatever the gear vertices say' \
+    "the mesh origin z aligns the lowest gear vertex with the main-gear contact" \
+    tests/test_aircraft_assets.py -k "not pinned" || failures=$((failures+1))
+
+mutate assets_pipeline/importer.py \
+    'MESH_MANIFEST_VERSION = 3' \
+    'MESH_MANIFEST_VERSION = 2  # MUTATED: a VRP-origin manifest counts as current' \
+    "a version-2 (VRP-origin) mesh manifest is stale and re-converts" \
+    tests/test_aircraft_assets.py -k "not pinned" || failures=$((failures+1))
+
 mutate webapp/runs.py \
     '    if aircraft not in buildable:' \
     '    if False:  # MUTATED: an airframe with no config renders anyway' \
@@ -1934,6 +1962,133 @@ mutate core/nl/llm_compiler.py \
     '    if False:  # MUTATED: a nested camera list refuses the whole response' \
     "a camera list nested under fields is lifted, not refused" \
     tests/test_llm_compiler.py || failures=$((failures+1))
+
+# -- Phase 2, package A: the spec-8 bump ---------------------------------------
+# Every guarded line is spelled uniquely in its file (mutate() replaces the
+# FIRST occurrence; NEXT.md gotcha 28).
+
+mutate core/scenario/spec.py \
+    '        if not self.scene.is_default():
+            out["scene"] = self.scene.to_dict()' \
+    '        if True:  # MUTATED: a default scene block is written; old digests move
+            out["scene"] = self.scene.to_dict()' \
+    "an absent spec-8 block is the canonical default" \
+    tests/test_spec8_blocks.py || failures=$((failures+1))
+
+mutate core/scenario/camera.py \
+    '        if not self.exposure.is_default(str(self.preset.value)):
+            out["exposure"] = self.exposure.to_dict()' \
+    '        if True:  # MUTATED: a default exposure is written; every camera digest moves
+            out["exposure"] = self.exposure.to_dict()' \
+    "a default exposure is absent from the canonical camera" \
+    tests/test_spec8_blocks.py || failures=$((failures+1))
+
+mutate core/scenario/blocks.py \
+    '        if current.source not in PLANNABLE_SOURCES:
+            raise ValueError(
+                f"plan() only moves defaulted/derived/model fields; "
+                f"{self.BLOCK}.{name} is {current.source.value!r} -- a "' \
+    '        if False:  # MUTATED: stated block fields silently move
+            raise ValueError(
+                f"plan() only moves defaulted/derived/model fields; "
+                f"{self.BLOCK}.{name} is {current.source.value!r} -- a "' \
+    "a stated scene/taxonomy/traffic field is never silently moved" \
+    tests/test_spec8_blocks.py || failures=$((failures+1))
+
+mutate core/scenario/camera.py \
+    '        if current.source not in PLANNABLE_SOURCES:
+            raise ValueError(
+                f"plan() only moves defaulted/derived/model fields; camera "
+                f"exposure.{name} is {current.source.value!r} -- a stated "' \
+    '        if False:  # MUTATED: a stated exposure silently moves
+            raise ValueError(
+                f"plan() only moves defaulted/derived/model fields; camera "
+                f"exposure.{name} is {current.source.value!r} -- a stated "' \
+    "a stated exposure field is never silently moved" \
+    tests/test_spec8_blocks.py || failures=$((failures+1))
+
+mutate core/scenario/validate.py \
+    '    if source not in TERRAIN_SOURCES:' \
+    '    if False:  # MUTATED: any terrain_source word passes' \
+    "an unknown terrain_source refuses by name" \
+    tests/test_spec8_blocks.py || failures=$((failures+1))
+
+mutate core/scenario/validate.py \
+    '    elif len(set(classes)) != len(classes):' \
+    '    elif False:  # MUTATED: a repeated class name passes' \
+    "a repeated taxonomy class refuses by name" \
+    tests/test_spec8_blocks.py || failures=$((failures+1))
+
+mutate core/scenario/validate.py \
+    '    if len(spec.traffic) > MAX_TRAFFIC:' \
+    '    if False:  # MUTATED: any number of traffic aircraft passes' \
+    "more than two traffic aircraft refuse by name" \
+    tests/test_spec8_blocks.py || failures=$((failures+1))
+
+mutate core/scenario/validate.py \
+    '        if aircraft not in airframes:' \
+    '        if False:  # MUTATED: an unconfigured traffic airframe passes' \
+    "an unconfigured traffic airframe refuses by name" \
+    tests/test_spec8_blocks.py || failures=$((failures+1))
+
+mutate core/scenario/validate.py \
+    '            if nested:
+                problems.append(
+                    f"{here}: a group holds distribution leaves (one of "' \
+    '            if False:  # MUTATED: a misspelt distribution reads as a group of fixed values
+                problems.append(
+                    f"{here}: a group holds distribution leaves (one of "' \
+    "a misspelt policy distribution is refused, not read as a group" \
+    tests/test_spec8_blocks.py || failures=$((failures+1))
+
+mutate core/scenario/validate.py \
+    '        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return str(value)' \
+    '        if False:  # MUTATED: every limit is formatted as a number again
+            return str(value)' \
+    "a string limit renders instead of crashing the refusal" \
+    tests/test_spec8_blocks.py || failures=$((failures+1))
+
+mutate core/capture/validate.py \
+    '        if isinstance(raw, bool) or value is None or not value > 0.0:' \
+    '        if False:  # MUTATED: any exposure value passes' \
+    "a non-positive exposure refuses by name" \
+    tests/test_spec8_blocks.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '    if terrain_stem is None and (args.synth_terrain
+                                 or terrain_source == "synthesised"):' \
+    '    if terrain_stem is None and args.synth_terrain:  # MUTATED: the flag alone' \
+    "scene.terrain_source synthesised needs no flag" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '        if terrain_stem is None:
+            return _refuse([Violation(
+                "scene.terrain",
+                "scene.terrain_source is baked but no bake is named: "' \
+    '        if False:  # MUTATED: baked with no bake flies the flat datum
+            return _refuse([Violation(
+                "scene.terrain",
+                "scene.terrain_source is baked but no bake is named: "' \
+    "baked with no bake named refuses by name on the CLI" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '    stated = _stated_terrain_scene(spec)
+    if stated is not None:
+        return stated' \
+    '    stated = None  # MUTATED: the stated terrain_source is ignored
+    if stated is not None:
+        return stated' \
+    "the web picker honours a stated terrain_source" \
+    tests/test_webapp.py || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    '    if scene.get("refused") == "terrain.unbaked":' \
+    '    if False:  # MUTATED: baked with nothing baked runs on the slab' \
+    "baked with nothing baked refuses terrain.unbaked on the web" \
+    tests/test_webapp.py || failures=$((failures+1))
 
 echo
 purge_cache

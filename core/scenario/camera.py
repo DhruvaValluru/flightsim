@@ -46,7 +46,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field as dc_field
 from typing import Any, Dict, List, Optional
 
-from .fields import Quantity, Source
+from .fields import PLANNABLE_SOURCES, Quantity, Source
 
 #: The presets a camera may name. Five ported from the UE director
 #: (chase/ground/wingman/tower/cockpit) plus "explicit": a stated
@@ -117,6 +117,108 @@ DEFAULT_FAR_M = 100_000.0
 #: capture, not a burst of ten at the telemetry rate.
 DEFAULT_REFRACTORY_S = 2.0
 
+#: Spec 8 (contracts §10, §12): the physical exposure triple per preset
+#: -- (aperture f-number, shutter seconds, ISO). One daylight triple
+#: (f/8, 1/500 s, ISO 100) is what the contracts state for every preset
+#: today; the table is keyed per preset so the Look lane can
+#: differentiate them without changing the field's shape. This package
+#: carries and validates the triple; the EV100 mapping
+#: (log2(N^2/t * 100/ISO)) and the engine's exposure are the Look lane's
+#: and are NOT implemented here.
+EXPOSURE_FIELDS = ("aperture_f", "shutter_s", "iso")
+DEFAULT_EXPOSURE = (8.0, 1.0 / 500.0, 100.0)
+EXPOSURE_DEFAULTS: Dict[str, tuple] = {preset: DEFAULT_EXPOSURE
+                                       for preset in CAMERA_PRESETS}
+
+
+@dataclass
+class ExposureSpec:
+    """``cameras[].exposure``: aperture, shutter and ISO, each a
+    provenanced :class:`Quantity`, addressable as
+    ``cameras[0].exposure.aperture_f`` through the spec front door.
+
+    Serialised like the randomisation block, not like the camera's
+    other fields: an all-default exposure is OMITTED from the camera's
+    canonical form, so a spec that states no exposure keeps the digest
+    it had at spec 7 (the bump's one-spelling rule: absent IS the
+    documented default).
+    """
+
+    aperture_f: Quantity
+    shutter_s: Quantity
+    iso: Quantity
+
+    FIELD_ORDER = EXPOSURE_FIELDS
+
+    def quantities(self):
+        for name in self.FIELD_ORDER:
+            yield name, getattr(self, name)
+
+    def set(self, name: str, value: Any, frm: str = "edited by hand") -> None:
+        current = self._field(name)
+        setattr(self, name, Quantity(value=value, unit=current.unit,
+                                     source=Source.USER, frm=frm,
+                                     std=current.std,
+                                     detail=dict(current.detail)))
+
+    def plan(self, name: str, value: Any, frm: str) -> None:
+        """Same doctrine as the camera's: a stated exposure field is
+        never silently moved."""
+        current = self._field(name)
+        if current.source not in PLANNABLE_SOURCES:
+            raise ValueError(
+                f"plan() only moves defaulted/derived/model fields; camera "
+                f"exposure.{name} is {current.source.value!r} -- a stated "
+                f"value is never silently moved")
+        setattr(self, name, Quantity(value=value, unit=current.unit,
+                                     source=Source.DERIVED, frm=frm,
+                                     std=current.std,
+                                     detail=dict(current.detail)))
+
+    def _field(self, name: str) -> Quantity:
+        if name not in self.FIELD_ORDER:
+            raise ValueError(f"{name!r} is not an exposure field")
+        return getattr(self, name)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {name: q.to_dict() for name, q in self.quantities()}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ExposureSpec":
+        if not isinstance(data, dict):
+            raise ValueError("camera 'exposure' must be a mapping of "
+                             "provenanced fields")
+        kwargs = {}
+        for name in cls.FIELD_ORDER:
+            try:
+                kwargs[name] = Quantity.from_dict(data[name])
+            except KeyError as exc:
+                raise ValueError(
+                    f"camera exposure is missing required field "
+                    f"{name}") from exc
+        unknown = set(data) - set(cls.FIELD_ORDER)
+        if unknown:
+            raise ValueError(
+                f"camera exposure carries unknown fields {sorted(unknown)}; "
+                f"refusing to guess at their meaning")
+        return cls(**kwargs)
+
+    def is_default(self, preset: str = "chase") -> bool:
+        """Field for field, source for source, the preset's documented
+        default -- the spelling the canonical camera omits."""
+        return self.to_dict() == self.defaulted(preset).to_dict()
+
+    @classmethod
+    def defaulted(cls, preset: str = "chase",
+                  frm: str = "documented exposure default: daylight "
+                             "f/8, 1/500 s, ISO 100") -> "ExposureSpec":
+        aperture, shutter, iso = EXPOSURE_DEFAULTS.get(preset,
+                                                       DEFAULT_EXPOSURE)
+        d = Quantity.default
+        return cls(aperture_f=d(float(aperture), "f-number", frm=frm),
+                   shutter_s=d(float(shutter), "s", frm=frm),
+                   iso=d(float(iso), "ISO", frm=frm))
+
 
 @dataclass
 class CameraSpec:
@@ -170,6 +272,13 @@ class CameraSpec:
     #: not Quantitys: the WHOLE list is one recorded decision, carried
     #: verbatim and digest-relevant.
     moves: List[Dict[str, Any]] = dc_field(default_factory=list)
+
+    #: Spec 8: the physical exposure triple (aperture_f, shutter_s,
+    #: iso), a provenanced block. The preset's documented default is
+    #: omitted from to_dict, so a camera that states none serialises
+    #: exactly as it did at spec 7. NOT in FIELD_ORDER: it is a nested
+    #: block, addressed as ``cameras[i].exposure.<field>``.
+    exposure: "ExposureSpec" = dc_field(default_factory=ExposureSpec.defaulted)
 
     #: Canonical field order for serialisation and the rendered table.
     FIELD_ORDER = (
@@ -234,6 +343,11 @@ class CameraSpec:
         # "no moves" (the empty-list discipline the cameras list itself
         # follows on the spec).
         out["moves"] = [dict(m) for m in self.moves]
+        # Spec 8: the exposure block appears only when it differs from
+        # the preset's documented default -- absent IS the default, one
+        # spelling, and every spec-7 camera keeps its digest.
+        if not self.exposure.is_default(str(self.preset.value)):
+            out["exposure"] = self.exposure.to_dict()
         return out
 
     @classmethod
@@ -245,7 +359,7 @@ class CameraSpec:
             except KeyError as exc:
                 raise ValueError(
                     f"camera is missing required field {name}") from exc
-        unknown = set(data) - set(cls.FIELD_ORDER) - {"moves"}
+        unknown = set(data) - set(cls.FIELD_ORDER) - {"moves", "exposure"}
         if unknown:
             raise ValueError(
                 f"camera carries unknown fields {sorted(unknown)}; "
@@ -255,7 +369,12 @@ class CameraSpec:
                 isinstance(m, dict) for m in moves):
             raise ValueError("camera 'moves' must be a list of keyframe "
                              "mappings")
-        return cls(moves=[dict(m) for m in moves], **kwargs)
+        exposure_data = data.get("exposure")
+        exposure = (ExposureSpec.defaulted(str(kwargs["preset"].value))
+                    if exposure_data is None
+                    else ExposureSpec.from_dict(exposure_data))
+        return cls(moves=[dict(m) for m in moves], exposure=exposure,
+                   **kwargs)
 
     # -- construction ---------------------------------------------------
 
@@ -323,6 +442,7 @@ class CameraSpec:
             profile=d("ideal_pinhole",
                       frm="the documented ideal pinhole; the engine's "
                           "frames are the sensor frames"),
+            exposure=ExposureSpec.defaulted(preset),
         )
 
     # -- presentation ---------------------------------------------------

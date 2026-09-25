@@ -2,8 +2,11 @@
 #
 # Same synthesised raster as cameras_terrain.yaml (deterministic, no
 # network), centred on this spec's origin, where the ridge surface sits
-# at 3045 m MSL. The camera is stated at 2500 m -- 545 m inside the
-# rock. Expected outcome, BY NAME, before anything runs:
+# at 3045 m MSL. The spec itself says so -- scene.terrain_source:
+# synthesised (spec 8) -- so no flag is needed; --synth-terrain is
+# now an alias of that field. The camera is stated at 2500 m --
+# 545 m inside the rock. Expected outcome, BY NAME, before anything
+# runs:
 #
 #   REFUSED [camera.terrain_clearance] -- the stated placement sits
 #   inside or on the scene's terrain (checked over the whole run window)
@@ -13,9 +16,8 @@
 # is never silently moved to pass; edit position_alt_m and run again.
 #
 #   .venv/bin/python -m flightsim.capture \
-#       examples/cameras_mountain_refusal.yaml --out runs/buried \
-#       --synth-terrain
-spec_version: 7
+#       examples/cameras_mountain_refusal.yaml --out runs/buried
+spec_version: 8
 name: cameras_mountain_refusal
 aircraft:
   aircraft:
@@ -268,3 +270,12 @@ cameras:
     source: default
     from: the documented ideal pinhole; the engine's frames are the sensor frames
   moves: []
+scene:
+  terrain_source:
+    value: synthesised
+    source: user
+    from: the ridge synthesised at this spec's own origin, no flag
+  terrain:
+    value: null
+    source: default
+    from: no bake stem stated; required when terrain_source is baked

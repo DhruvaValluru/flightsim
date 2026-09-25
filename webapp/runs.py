@@ -204,11 +204,26 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
     label), never on a substituted ridge. The /bake endpoint clears the refusal; nothing here
     downloads anything -- an HTTP /run stays fast and its digest stays the
     digest of what actually runs.
+
+    Spec 8: ``scene.terrain_source: baked`` with no whole bake (stated
+    or earned) refuses here too, whatever the coordinates' source -- the
+    spec asked for a bake by name, and neither a ridge nor a slab may
+    stand in for it.
     """
+    scene = pick_scene(spec)
+    if scene.get("refused") == "terrain.unbaked":
+        return {
+            "constraint": "terrain.unbaked",
+            "message": f"{scene['label']}; POST /bake with the coordinates "
+                       f"to fetch and verify GLO-30 there, or state "
+                       f"scene.terrain as a bake on this machine, then run "
+                       f"again",
+            "latitude": float(spec.latitude.value),
+            "longitude": float(spec.longitude.value),
+        }
     if (str(spec.latitude.source) != "user"
             or str(spec.longitude.source) != "user"):
         return None
-    scene = pick_scene(spec)
     # The synthesised control ridge is NOT a place (the ERA5 doctrine):
     # stated coordinates that fall on no real bake refuse here even when
     # a leftover terrain_elevation would otherwise select the control
@@ -290,8 +305,126 @@ def scene_set(spec: ScenarioSpec) -> bool:
                 "scene-setting"))
 
 
+def _stated_terrain_scene(spec: ScenarioSpec) -> Optional[Dict]:
+    """Spec 8: the scene ``scene.terrain_source`` states, or None for
+    ``auto`` (today's selection, below, byte for byte).
+
+    ``flat`` is the datum slab whatever the geography; ``synthesised``
+    is the deterministic ridge centred on the spec's own origin, written
+    under TERRAIN_DIR exactly as the CLI's --synth-terrain writes it
+    (same name, same cache key, so the two share one raster);
+    ``baked`` honours a stated ``scene.terrain`` stem, else the bake the
+    geography earns, and otherwise carries a named refusal
+    (``terrain.unbaked``) that needs_dynamic_bake surfaces -- never a
+    ridge and never a slab standing in for a bake the spec asked for.
+    An unknown value is validation's refusal (scene.terrain_source) and
+    falls through to ``auto`` here so the picker never raises.
+    """
+    source = str(spec.scene.terrain_source.value)
+    datum = float(spec.terrain_elevation.value)
+    if source == "flat":
+        return {"key": "flat", "kind": "flat", "terrain": None,
+                "imagery": None,
+                "label": f"scene.terrain_source: flat -- flat slab at the "
+                         f"spec's {datum:g} m datum, as stated"}
+    if source == "synthesised":
+        from core.terrain.synthesis import ensure_ridge_for_origin
+
+        stem = ensure_ridge_for_origin(
+            TERRAIN_DIR, float(spec.latitude.value),
+            float(spec.longitude.value),
+            name=f"synth_{spec.name or 'scene'}")
+        return {"key": "synthesised", "kind": "synthesised ridge at the "
+                                              "spec origin",
+                "terrain": str(stem), "imagery": None,
+                "label": "scene.terrain_source: synthesised -- a ridge of "
+                         "prescribed statistics (not a place) centred on "
+                         "the spec's own origin, deterministic from its "
+                         "seed; physics ground is the heightfield raster; "
+                         "track pre-flown for clearance"}
+    if source == "baked":
+        stated = spec.scene.terrain.value
+        if stated:
+            stem = Path(str(stated))
+            if not stem.is_absolute() and not baked(stem):
+                stem = TERRAIN_DIR / stem
+            if baked(stem):
+                stem = stem.with_suffix("")
+                return {"key": stem.name, "kind": "baked (stated)",
+                        "terrain": str(stem), "imagery": None,
+                        "label": f"scene.terrain: {stated} -- the stated "
+                                 f"bake; physics ground is the heightfield "
+                                 f"raster; track pre-flown for clearance"}
+            return {"key": "flat", "kind": "flat", "terrain": None,
+                    "imagery": None, "refused": "terrain.unbaked",
+                    "label": f"scene.terrain_source: baked, but "
+                             f"scene.terrain {stated!r} is not a whole "
+                             f"bake on this machine (<stem>.r16 + .json)"}
+        earned = _earned_scene(spec)
+        if earned is not None:
+            return earned
+        return {"key": "flat", "kind": "flat", "terrain": None,
+                "imagery": None, "refused": "terrain.unbaked",
+                "label": "scene.terrain_source: baked, but no bake covers "
+                         "the spec's coordinates and none is stated "
+                         "(scene.terrain)"}
+    return None
+
+
 def pick_scene(spec: ScenarioSpec) -> Dict:
-    """Choose the scene the spec's geography earns -- never silently."""
+    """Choose the scene the spec's geography earns -- never silently.
+
+    Spec 8: a stated ``scene.terrain_source`` other than ``auto`` decides
+    first (:func:`_stated_terrain_scene`); ``auto`` is the selection
+    below, unchanged.
+    """
+    stated = _stated_terrain_scene(spec)
+    if stated is not None:
+        return stated
+    return _auto_scene(spec)
+
+
+def _earned_scene(spec: ScenarioSpec) -> Optional[Dict]:
+    """The REAL bake the spec's coordinates sit on (curated or dynamic),
+    or None. The first half of the auto selection, shared with
+    ``baked``."""
+    lat = float(spec.latitude.value)
+    lon = float(spec.longitude.value)
+    terrain_dir = TERRAIN_DIR
+    for key, location in LOCATIONS.items():
+        if (abs(lat - location.origin_lat) <= LOCATION_TOLERANCE_DEG
+                and abs(lon - location.origin_lon) <= LOCATION_TOLERANCE_DEG):
+            if not baked(terrain_dir / key):
+                continue
+            imagery = terrain_dir / f"{key}_imagery.json"
+            return {
+                "key": key, "kind": "real (Copernicus GLO-30)",
+                "terrain": str(terrain_dir / key),
+                "imagery": str(imagery) if imagery.is_file() else None,
+                "label": f"georeferenced {key} raster at true position; "
+                         f"physics ground is the heightfield raster "
+                         f"(AGL parity measured); track pre-flown for "
+                         f"clearance",
+            }
+    for scene in _dynamic_scenes(terrain_dir / "dynamic"):
+        if (abs(lat - scene["origin_lat"]) <= LOCATION_TOLERANCE_DEG
+                and abs(lon - scene["origin_lon"]) <= LOCATION_TOLERANCE_DEG):
+            return {
+                "key": scene["key"], "kind": "real (Copernicus GLO-30, "
+                                             "on-demand bake)",
+                "terrain": scene["terrain"], "imagery": None,
+                "label": f"GLO-30 bake near {scene['origin_lat']:.3f}, "
+                         f"{scene['origin_lon']:.3f}; identity "
+                         f"source-verified only (no named summits); "
+                         f"physics ground is the heightfield raster (AGL "
+                         f"parity measured); track pre-flown for clearance",
+            }
+    return None
+
+
+def _auto_scene(spec: ScenarioSpec) -> Dict:
+    """``terrain_source: auto`` -- the scene the spec's geography earns,
+    exactly as before spec 8."""
     lat = float(spec.latitude.value)
     lon = float(spec.longitude.value)
     terrain_dir = TERRAIN_DIR

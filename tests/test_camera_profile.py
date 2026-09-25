@@ -196,15 +196,18 @@ def test_gain_vignetting_and_noise_do_what_they_say():
 
 # -- the spec, the manifest and the labels ------------------------------------
 
-def test_spec_version_7_carries_the_profile_and_refuses_version_6():
-    assert SPEC_VERSION == 7
+def test_the_spec_carries_the_profile_and_refuses_version_6():
+    """The profile arrived at spec 7; Phase 2 bumped to 8 (the blocks
+    are absent-canonical, so the camera dict is unchanged). A version-6
+    dict still refuses by name."""
+    assert SPEC_VERSION == 8
     spec = compile_prompt("fly the 747 at 10000 ft and 280 kt")
     camera = CameraSpec.defaulted(camera_id="c", preset="chase", aircraft="B747")
     assert str(camera.profile.value) == DEFAULT_PROFILE
     assert str(camera.profile.source) == "default"
     spec.cameras = [camera]
     data = spec.to_dict()
-    assert data["spec_version"] == 7
+    assert data["spec_version"] == 8
     assert data["cameras"][0]["profile"]["value"] == "ideal_pinhole"
     data["spec_version"] = 6
     with pytest.raises(ValueError, match="spec_version 6"):
