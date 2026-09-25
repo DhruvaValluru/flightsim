@@ -133,6 +133,14 @@ def mono_fonts(sizes: Tuple[int, ...]) -> List:
     return [default for _ in sizes]
 
 
+#: The Unreal Engine major.minor the project pins (`ue/FlightSim.uproject`
+#: EngineAssociation). Phase 2 moved it from 5.5 to 5.7 (brainstorm 9.8,
+#: contracts section 10); the refusal texts and the default install roots
+#: below are built from it so the pin is stated in ONE place on the Python
+#: side. Gate 6 and every render measurement on record were taken on 5.5;
+#: nothing here claims a 5.7 build.
+UE_ENGINE_VERSION = "5.7"
+
 #: What is missing, and the remedy, IN THIS OS's OWN TERMS. One text for
 #: all three lied on two of them: it named a PowerShell preflight to
 #: Linux users, who have no UE half to preflight at all.
@@ -140,7 +148,7 @@ _UE_REFUSAL = {
     "windows": (
         "REFUSED ue.platform: Windows is the supported render platform, "
         "but this\n"
-        "machine is missing Unreal Engine 5.5 or a built FlightSimBridge. "
+        f"machine is missing Unreal Engine {UE_ENGINE_VERSION} or a built FlightSimBridge. "
         "Run\n"
         "    powershell -ExecutionPolicy Bypass -File scripts\\ue_preflight.ps1\n"
         "for the exact missing piece, then scripts\\build_ue.ps1 to build "
@@ -149,7 +157,7 @@ _UE_REFUSAL = {
         "verification\n"
         "all completed without it -- only the pixels are missing."),
     "mac": (
-        "REFUSED ue.platform: no Unreal Engine 5.5 or built FlightSimBridge "
+        f"REFUSED ue.platform: no Unreal Engine {UE_ENGINE_VERSION} or built FlightSimBridge "
         "on this\n"
         "Mac. Run scripts/ue_preflight.sh for the missing piece, then "
         "scripts/build_ue.sh.\n"
@@ -163,7 +171,7 @@ _UE_REFUSAL = {
         "all -- not\n"
         "missing, not unbuilt, not supported. Rendered frames need Windows "
         "with\n"
-        "Unreal Engine 5.5 and the FlightSimBridge built (scripts\\"
+        f"Unreal Engine {UE_ENGINE_VERSION} and the FlightSimBridge built (scripts\\"
         "ue_preflight.ps1\n"
         "there names anything absent). Everything else in this run -- the "
         "flight, the\n"
@@ -184,11 +192,11 @@ def ue_platform_refusal() -> str:
 UE_PLATFORM_REFUSAL = _UE_REFUSAL[os_name()]
 
 #: Default engine install roots, checked AFTER the UE_ROOT env override.
-#: Windows scans for any UE_5.* so a 5.4/5.6 install is still found and
+#: Windows scans for any UE_5.* so a 5.5/5.6 install is still found and
 #: preflight can name the version mismatch instead of "not found".
 _UE_ROOT_DEFAULTS = {
-    "mac": ("/Users/Shared/Epic Games/UE_5.5",),
-    "windows": (r"C:\Program Files\Epic Games\UE_5.5",),
+    "mac": (f"/Users/Shared/Epic Games/UE_{UE_ENGINE_VERSION}",),
+    "windows": (rf"C:\Program Files\Epic Games\UE_{UE_ENGINE_VERSION}",),
     "linux": (),
 }
 

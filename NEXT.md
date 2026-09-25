@@ -678,3 +678,44 @@ the parity discipline, and the do-not-regress list)
     check against. The B747's nose keypoint is itself an `estimate` (the
     datum taken as the nose tip); if the rendered 747 sits a metre or
     two off its label along x, the LABEL is the suspect, not the mesh.
+
+## Phase 2 gotchas (continuing the numbering)
+
+32. **The engine pin moved from 5.5 to 5.7 (2026-09-25) and NOTHING has
+    been built or measured on 5.7 yet.** `ue/FlightSim.uproject`
+    `EngineAssociation`, every script that builds a `UE_5.x` path or
+    compares `Build.version`, `core/util/platform.py`
+    (`UE_ENGINE_VERSION`, one constant for the refusals and the default
+    install roots), the README and CAMERA_WINDOWS all say 5.7; the
+    vendor scripts record `ue_engine_target` in `VENDORED.json` and the
+    Windows preflight notes when that key is absent (the committed
+    VENDORED.json predates the move: the plugin was vendored and
+    measured on 5.5). `tests/test_platform.py` fails on any stale 5.5
+    in those files unless the line says "measured" (history stays; the
+    Gate 6 numbers in VALIDITY 2.13 and the CAMERA_WINDOWS 0.00 m bound
+    were taken on 5.5). Before anything in the Look lane is trusted on
+    5.7: (a) re-run `scripts\vendor_ue_plugin.ps1` and
+    `scripts/check_bridge_api.sh` -- the three patched upstream C++
+    bugs in the vendored JSBSim plugin (FGPropertyNode -> SGPropertyNode,
+    the GetAGLevel ray end in metres not centimetres, the force-start
+    mixture hardcoded full rich; VENDORED.json `local_patches` 2-4) and
+    the Build.cs staging path literal (patch 1) were found and measured
+    on 5.5 against JSBSim v1.2.4 and the plugin itself states 5.0-5.6
+    compatibility, so on 5.7 each patch may be unnecessary, still
+    necessary, or no longer apply cleanly, and only a build says which;
+    (b) re-measure Gate 6 (`experiments/gate6_visual.py`) and Gate 10-R
+    on the Windows box -- the renderer settings that landed with the
+    pin (`ue/Config/DefaultEngine.ini` `[/Script/Engine.RendererSettings]`:
+    Lumen GI + reflections, VSM, Nanite project-enable, TSR, extended
+    luminance range; Substrate OFF) each change the luminance the Gate 6
+    clauses and the vertex palette (gotcha 6) and the exposure biases
+    (gotcha 7) were tuned on, so the FIRST 5.7 render is a probe against
+    a 5.5 control, not a dataset; (c) re-probe the two engine-version-
+    sensitive gotchas, 4 (async asset compilation in commandlets) and 5
+    (Interchange Nanite at import -- the project-level
+    `r.Nanite.ProjectEnabled` is on, the per-mesh import flag stays
+    off). `ue/Source/*.Target.cs` still say `IncludeOrderVersion
+    Unreal5_5` (a compatibility marker, not a pin; the first 5.7 build
+    reports whether to move it) and `flightsim/capture.py` L118 and
+    `experiments/fps_probe.py` still name 5.5 -- outside this stage's
+    files, listed in docs/PHASE2_REPORT.md.

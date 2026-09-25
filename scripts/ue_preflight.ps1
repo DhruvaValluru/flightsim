@@ -35,7 +35,7 @@ Write-Host ""
 # -- engine ---------------------------------------------------------------
 $ueRoot = $env:UE_ROOT
 if (-not $ueRoot) {
-    $ueRoot = "C:\Program Files\Epic Games\UE_5.5"
+    $ueRoot = "C:\Program Files\Epic Games\UE_5.7"
     if (-not (Test-Path $ueRoot)) {
         $found = Get-ChildItem "C:\Program Files\Epic Games" -Directory `
             -Filter "UE_5.*" -ErrorAction SilentlyContinue |
@@ -48,13 +48,14 @@ if (Test-Path $versionFile) {
     $v = Get-Content $versionFile -Raw | ConvertFrom-Json
     $engine = "$($v.MajorVersion).$($v.MinorVersion).$($v.PatchVersion)"
     Say "engine" "UE $engine at $ueRoot"
-    if ("$($v.MajorVersion).$($v.MinorVersion)" -ne "5.5") {
-        Say "" ("note: the project pins EngineAssociation 5.5; the plugin " +
-                "states UE5.0-5.6 compatibility, so $engine may work but " +
-                "5.5 is what was measured")
+    if ("$($v.MajorVersion).$($v.MinorVersion)" -ne "5.7") {
+        Say "" ("note: the project pins EngineAssociation 5.7 (Phase 2, " +
+                "brainstorm 9.8); the vendored plugin states UE5.0-5.6 " +
+                "compatibility and was measured on 5.5, so $engine may " +
+                "work but is not the pinned engine")
     }
 } else {
-    Fail "engine" "not found at $ueRoot (install UE 5.5 from the Epic Games Launcher, or set UE_ROOT)"
+    Fail "engine" "not found at $ueRoot (install UE 5.7 from the Epic Games Launcher, or set UE_ROOT)"
 }
 $editor = Join-Path $ueRoot "Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
 if (-not (Test-Path $editor)) {
@@ -73,7 +74,7 @@ if (Test-Path $vswhere) {
         -property catalog_productDisplayVersion | Select-Object -First 1
     if ($vs) {
         Say "visual studio (C++ tools)" "$vs"
-        # UE 5.5 is built against VS2022's v143 toolset, and so is the
+        # UE 5.5 (measured) was built against VS2022's v143 toolset, and so is the
         # JSBSim vendor build. A NEWER Visual Studio alone is not enough
         # -- measured on a machine with only VS2026 (v180): MSB8020.
         $v143 = Probe $vswhere @("-latest", "-products", "*",
@@ -87,9 +88,11 @@ if (Test-Path $vswhere) {
             $v143 = Get-ChildItem "C:\Program Files*\Microsoft Visual Studio\*\*\VC\Tools\MSVC\14.4*" `
                 -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
         }
-        if ($v143) { Say "v143 toolset (UE 5.5 needs it)" "present" }
+        # 5.7 (the Phase 2 pin) still lists VS2022 v143; whether the 5.7
+        # engine build ALSO accepts a newer toolset is not measured here.
+        if ($v143) { Say "v143 toolset (UE 5.7 needs it)" "present" }
         else {
-            Fail "v143 toolset (UE 5.5 needs it)" "MISSING -- a newer VS alone will not build UE 5.5"
+            Fail "v143 toolset (UE 5.7 needs it)" "MISSING -- a newer VS alone will not build UE 5.7 (measured on 5.5)"
             Write-Host "        winget install --id Microsoft.VisualStudio.2022.BuildTools ``"
             Write-Host "          --override `"--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools ``"
             Write-Host "          --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --includeRecommended`""
@@ -112,6 +115,23 @@ if (Test-Path $vendoredJson) {
         Say "jsbsim Win64 library" "JSBSim.dll + JSBSim.lib present"
     } else {
         Fail "jsbsim Win64 library" "missing -- run scripts\vendor_ue_plugin.ps1"
+    }
+    # Phase 2 moved the engine pin to 5.7 (brainstorm 9.8). The vendor
+    # script records the engine it targeted; a VENDORED.json without the
+    # key predates the move and its three patched upstream bugs (NEXT.md
+    # gotcha 32) have only been measured on 5.5. A note, not a Fail: the
+    # native JSBSim library does not link the engine, the plugin sources
+    # are compiled by UBT against whatever engine builds them.
+    if ($vendored.ue_engine_target) {
+        if ("$($vendored.ue_engine_target)" -eq "5.7") {
+            Say "jsbsim plugin engine target" "vendored for UE $($vendored.ue_engine_target)"
+        } else {
+            Say "jsbsim plugin engine target" ("vendored for UE $($vendored.ue_engine_target), project pins 5.7 " +
+                "-- re-run scripts\vendor_ue_plugin.ps1 and re-check the patches (NEXT.md gotcha 32)")
+        }
+    } else {
+        Say "jsbsim plugin engine target" ("not recorded (vendored before the 5.7 pin; measured on 5.5) " +
+            "-- re-run scripts\vendor_ue_plugin.ps1 on 5.7 and re-check the patches (NEXT.md gotcha 32)")
     }
     $aircraft = Get-ChildItem (Join-Path $plugin "Resources\JSBSim\aircraft") `
         -Directory -ErrorAction SilentlyContinue

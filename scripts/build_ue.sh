@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build the Unreal host with a toolchain UE 5.5 accepts.
+# Build the Unreal host with a toolchain UE 5.7 accepts (the Xcode range
+# below was measured on 5.5; 5.7's has not been checked on a Mac).
 #
 # DEVELOPER_DIR rather than `sudo xcode-select`: the override is per process, so
 # the machine's default Xcode is untouched and no admin password is needed.
@@ -18,7 +19,7 @@ fi
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.5}"
+UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.7}"
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode_16.app/Contents/Developer}"
 TARGET="${1:-FlightSimEditor}"
 

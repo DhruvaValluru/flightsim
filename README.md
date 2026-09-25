@@ -109,7 +109,7 @@ Per-OS setup notes:
   ZERO setup on any OS: a fresh clone compiles a prompt before
   installing anything optional.
 
-**Rendering video clips** needs Unreal Engine 5.5 (free from the Epic
+**Rendering video clips** needs Unreal Engine 5.7 (free from the Epic
 Games Launcher) plus the platform toolchain:
 
 * **macOS** (Xcode 15.2-16.9):

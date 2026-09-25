@@ -11,7 +11,8 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 ```
 
 That gets you everything except pixels. For pixels you also need Unreal
-Engine 5.5 and a built bridge:
+Engine 5.7 (Phase 2 pin; the measurements below were taken on 5.5 and
+are not re-measured on 5.7) and a built bridge:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\ue_preflight.ps1   # names anything missing

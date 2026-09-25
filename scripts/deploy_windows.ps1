@@ -191,7 +191,7 @@ if ($up) {
     Write-Host "  .\.venv\Scripts\python.exe -m flightsim.verify runs\demo"
     Write-Host ""
     Write-Host "Windows is the supported platform for rendered frames. With"
-    Write-Host "Unreal Engine 5.5 installed and scripts\build_ue.ps1 run, add"
+    Write-Host "Unreal Engine 5.7 installed and scripts\build_ue.ps1 run, add"
     Write-Host "--render to the capture command and the frames come out per"
     Write-Host "camera under runs\demo\frames\. Without the engine everything"
     Write-Host "except the pixels still runs."

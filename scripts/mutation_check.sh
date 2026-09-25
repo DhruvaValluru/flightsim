@@ -2188,6 +2188,47 @@ mutate core/messages/__init__.py \
     "a catalogue sentence carries the refusal's own numbers" \
     tests/test_messages.py || failures=$((failures+1))
 
+# --- Phase 2 Look lane part 1: the engine pin and the renderer settings ---
+# (tests/test_platform.py). Text files, not Python; mutate() is a string
+# replace so it applies to them the same way.
+mutate ue/FlightSim.uproject \
+    '"EngineAssociation": "5.7"' \
+    '"EngineAssociation": "5.5"' \
+    "the uproject pins the engine the scripts and refusals name" \
+    tests/test_platform.py || failures=$((failures+1))
+
+mutate core/util/platform.py \
+    'UE_ENGINE_VERSION = "5.7"' \
+    'UE_ENGINE_VERSION = "5.5"  # MUTATED: refusals name the old engine' \
+    "the platform refusals and install roots name the pinned engine" \
+    tests/test_platform.py || failures=$((failures+1))
+
+mutate scripts/ue_preflight.ps1 \
+    '$ueRoot = "C:\Program Files\Epic Games\UE_5.7"' \
+    '$ueRoot = "C:\Program Files\Epic Games\UE_5.5"' \
+    "a stale 5.5 install path in a script is caught by name" \
+    tests/test_platform.py || failures=$((failures+1))
+
+# Two-line targets on purpose (gotcha 28): the ini's comment block quotes
+# each key=value once BEFORE the real assignment, and mutate() replaces
+# the first occurrence -- a one-line target edits the comment and the
+# guard reads WEAK.
+mutate ue/Config/DefaultEngine.ini \
+    'r.DynamicGlobalIlluminationMethod=1
+r.ReflectionMethod=1' \
+    'r.DynamicGlobalIlluminationMethod=0
+r.ReflectionMethod=1' \
+    "the renderer settings are read back from the parsed ini, not asserted" \
+    tests/test_platform.py || failures=$((failures+1))
+
+mutate ue/Config/DefaultEngine.ini \
+    'ExtendDefaultLuminanceRange=True
+r.Substrate=False' \
+    'ExtendDefaultLuminanceRange=True
+r.Substrate=True' \
+    "Substrate stays off until a material is authored for it" \
+    tests/test_platform.py || failures=$((failures+1))
+
 echo
 purge_cache
 if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else

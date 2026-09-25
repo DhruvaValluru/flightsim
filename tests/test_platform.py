@@ -34,7 +34,7 @@ def test_ue_dispatch_windows_needs_engine_and_bridge(monkeypatch, tmp_path):
     UE_ROOT overrides the engine location like FLIGHTSIM_FFMPEG does for
     ffmpeg."""
     monkeypatch.setattr(sys, "platform", "win32")
-    root = tmp_path / "UE_5.5"
+    root = tmp_path / f"UE_{plat.UE_ENGINE_VERSION}"
     monkeypatch.setenv("UE_ROOT", str(root))
     assert plat.find_ue_root() == root
     editor = plat.ue_editor_path()
@@ -59,7 +59,8 @@ def test_ue_dispatch_mac_and_linux_unchanged(monkeypatch):
     monkeypatch.setattr(sys, "platform", "darwin")
     assert plat.ue_available() is True
     assert plat.ue_editor_path() == Path(
-        "/Users/Shared/Epic Games/UE_5.5/Engine/Binaries/Mac/UnrealEditor-Cmd")
+        f"/Users/Shared/Epic Games/UE_{plat.UE_ENGINE_VERSION}"
+        "/Engine/Binaries/Mac/UnrealEditor-Cmd")
     assert plat.ue_bridge_binary(REPO).suffix == ".dylib"
 
     monkeypatch.setattr(sys, "platform", "linux")
@@ -252,3 +253,123 @@ def test_no_text_io_without_utf8_encoding():
     assert not offenders, (
         "text I/O without encoding='utf-8' (Windows cp1252 hazard): "
         + ", ".join(offenders))
+
+
+# --- the engine pin: 5.7 everywhere it is STATED, 5.5 only where it was
+# MEASURED (Phase 2 Look lane part 1; brainstorm 9.8, contracts section 10)
+
+#: Every file that states the engine version to a person or constructs a
+#: path from it. A "5.5" surviving in one of these is a stale pin, unless
+#: the same line says it is a measurement note (see OLD_PIN_ALLOWED).
+ENGINE_PIN_FILES = (
+    "ue/FlightSim.uproject",
+    "core/util/platform.py",
+    "README.md",
+    "docs/CAMERA_WINDOWS.md",
+    "NEXT.md",
+) + tuple(str(p.relative_to(REPO)) for p in
+          sorted((REPO / "scripts").glob("*.ps1"))
+          + sorted((REPO / "scripts").glob("*.sh"))
+          # the mutation runner WRITES the old pin on purpose, to prove
+          # this test catches it; it is not a script that names an engine
+          if p.name != "mutation_check.sh")
+
+#: The old pin, in every spelling the tree used: the Epic install folder,
+#: the prose "UE 5.5" / "Engine 5.5", and the bare quoted "5.5" the
+#: preflight compared Build.version against.
+OLD_PIN = re.compile(r'UE_5\.5\b|Unreal(?: Engine)? 5\.5\b|UE ?5\.5\b|"5\.5"')
+
+#: A line that keeps 5.5 must SAY it is history: the word "measured" (the
+#: Gate 6 / Xcode / toolset measurements were taken on 5.5 and are not
+#: re-measured here) or "5.7" alongside it (a note about the move itself).
+OLD_PIN_ALLOWED = re.compile(r"measured|5\.7", re.IGNORECASE)
+
+
+def test_the_engine_pin_is_5_7_everywhere_it_is_stated():
+    """The project moved from UE 5.5 to 5.7 in one commit, and the pin is
+    stated in the uproject, in every script that builds an install path
+    or checks Build.version, in the platform refusals and in the
+    user-facing docs. A stale 5.5 in any of them sends a person to
+    install the wrong engine or reports a correct install as a version
+    mismatch. Historical measurement notes are allowed by the word on
+    the line, not by file, so a new stale pin cannot hide in an old
+    doc."""
+    stale = []
+    for rel in ENGINE_PIN_FILES:
+        path = REPO / rel
+        for number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), 1):
+            if OLD_PIN.search(line) and not OLD_PIN_ALLOWED.search(line):
+                stale.append(f"{rel}:{number}: {line.strip()}")
+    assert not stale, "stale UE 5.5 pin(s):\n  " + "\n  ".join(stale)
+
+    import json
+    uproject = json.loads((REPO / "ue" / "FlightSim.uproject")
+                          .read_text(encoding="utf-8"))
+    assert uproject["EngineAssociation"] == plat.UE_ENGINE_VERSION == "5.7"
+    for text in plat._UE_REFUSAL.values():
+        assert "5.5" not in text
+    for roots in plat._UE_ROOT_DEFAULTS.values():
+        for root in roots:
+            assert root.endswith("UE_" + plat.UE_ENGINE_VERSION)
+
+
+def _read_ue_ini(path: Path):
+    """{section: {key: value}} for a UE .ini: `;` lines are comments, a
+    key may be prefixed by +/-/./! (array ops; kept verbatim), the last
+    assignment of a key wins. Written here rather than through
+    configparser so keys keep their case (r.CustomDepth is not
+    r.customdepth) and the array prefixes survive."""
+    sections, current = {}, None
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith(";"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            current = line[1:-1]
+            sections.setdefault(current, {})
+            continue
+        assert current is not None, f"{path.name}: value before any section"
+        key, sep, value = line.partition("=")
+        assert sep, f"{path.name}: not key=value: {raw!r}"
+        sections[current][key.strip()] = value.strip()
+    return sections
+
+
+#: The Look lane part-1 renderer settings (contracts section 10). The
+#: values are the ones the ini states; a comment there names the Gate 6
+#: clause each is expected to move. None is measured yet.
+RENDERER_SETTINGS = {
+    "r.CustomDepth": "3",
+    "r.DynamicGlobalIlluminationMethod": "1",
+    "r.ReflectionMethod": "1",
+    "r.Lumen.HardwareRayTracing": "False",
+    "r.GenerateMeshDistanceFields": "True",
+    "r.Shadow.Virtual.Enable": "1",
+    "r.Nanite.ProjectEnabled": "True",
+    "r.AntiAliasingMethod": "4",
+    "r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange": "True",
+    "r.Substrate": "False",
+}
+
+
+def test_default_engine_ini_carries_the_look_lane_renderer_settings():
+    """DefaultEngine.ini had no renderer section at all before Phase 2;
+    every switch here is read back from the parsed INI, section by
+    section, with Substrate explicitly OFF (no material is authored for
+    it) and the fixed-tick lines the JSBSim substep depends on
+    (NEXT.md gotcha 19) still present -- the block was added, nothing
+    removed."""
+    ini = _read_ue_ini(REPO / "ue" / "Config" / "DefaultEngine.ini")
+    renderer = ini.get("/Script/Engine.RendererSettings")
+    assert renderer is not None, "no [/Script/Engine.RendererSettings]"
+    for key, value in RENDERER_SETTINGS.items():
+        assert renderer.get(key) == value, (key, renderer.get(key))
+    windows = ini.get("/Script/WindowsTargetPlatform.WindowsTargetSettings")
+    assert windows is not None
+    assert windows["DefaultGraphicsRHI"] == "DefaultGraphicsRHI_DX12"
+    assert windows["+D3D12TargetedShaderFormats"] == "PCD3D_SM6"
+    engine = ini["/Script/Engine.Engine"]
+    assert engine["bUseFixedFrameRate"] == "True"
+    assert engine["FixedFrameRate"].startswith("120")
+    assert "/Script/AndroidFileServerEditor.AndroidFileServerRuntimeSettings" in ini

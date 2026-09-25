@@ -38,6 +38,10 @@ cd "$(dirname "$0")/.."
 REPO="$PWD"
 
 JSBSIM_VERSION="v1.2.4"
+# The engine this vendoring targets (Phase 2 pin, brainstorm 9.8); recorded
+# in VENDORED.json, not linked by the native library. The patches below were
+# measured on 5.5 and must be re-checked on 5.7 (NEXT.md gotcha 32).
+UE_ENGINE_TARGET="5.7"
 UPSTREAM="https://github.com/JSBSim-Team/jsbsim.git"
 WORK="${TMPDIR:-/tmp}/flightsim-vendor"
 DEST="$REPO/ue/Plugins/JSBSimFlightDynamicsModel"
@@ -225,6 +229,7 @@ cat > "$DEST/VENDORED.json" <<EOF
   "built_with": "upstream $BUILD_SCRIPT (not a reimplementation)",
   "jsbsim_matches_headless_core": true,
   "ue_platform": "$UE_PLATFORM",
+  "ue_engine_target": "$UE_ENGINE_TARGET",
   "library": "Source/ThirdParty/JSBSim/Lib/$UE_PLATFORM/libJSBSim.$LIB_EXT",
   "library_sha256": "$LIB_SHA",
   "header_count": $HEADERS,
@@ -261,6 +266,7 @@ EOF
 echo
 echo "vendored             $DEST"
 echo "  tag                $JSBSIM_VERSION @ ${COMMIT:0:12}"
+echo "  engine target      UE $UE_ENGINE_TARGET (recorded; a 5.7 build is not measured by this script)"
 echo "  built with         upstream $BUILD_SCRIPT"
 echo "  library            libJSBSim.$LIB_EXT"
 [ "$UE_PLATFORM" = "Mac" ] && echo "  architectures      $(lipo -archs "$LIB" 2>/dev/null)"

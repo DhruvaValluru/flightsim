@@ -617,3 +617,152 @@ sensor model maps them. Croissant / HF `dataset_infos` twins and
 Parquet (brainstorm §4) are not written. The realised-distribution
 histograms are n/min/max/mean per sampled key, not binned coverage
 (§5.5 is package F's). Exported images are copied, not linked.
+
+## P2-Look/1 -- the engine pin moves to 5.7 and the renderer is configured (nothing rendered)
+
+**What was measured, and what was defective.** (1) The engine version
+was stated in twenty places and pinned in none: `ue/FlightSim.uproject`
+said 5.5, eleven scripts built a `UE_5.5` path or compared
+`Build.version` against `"5.5"`, `core/util/platform.py` named 5.5 in
+three refusal texts and two default install roots, and the README and
+`docs/CAMERA_WINDOWS.md` told a person to install 5.5. No test read any
+of them, so a move to another engine could leave a stale 5.5 in any one
+of them and the suite would stay green. (2) `ue/Config/DefaultEngine.ini`
+had no `[/Script/Engine.RendererSettings]` section at all (the ue-render
+map): every Gate 6 number on record (`docs/VALIDITY.md` 2.13, macOS,
+UE 5.5) was taken on engine defaults, with no record in any frame of
+which defaults. (3) The vendored JSBSim plugin records the JSBSim tag and
+commit it came from but not the engine it was vendored against, so the
+preflight could not say "this plugin was measured on 5.5, you are on
+5.7". (4) A first draft of the INI mutation guards read WEAK: `mutate()`
+replaces the first occurrence and the ini's own comment block quotes
+each `key=value` before the real assignment (NEXT.md gotcha 28, met
+again in a text file); the targets are now two adjacent real lines.
+
+**What was built.**
+
+- The pin is 5.7 everywhere it is STATED (brainstorm 9.8, contracts
+  section 10): `EngineAssociation`; the default install root and the
+  `Build.version` comparison in `scripts/ue_preflight.ps1`; the install
+  root in `build_ue.ps1`, `build_ue.sh`, `ue_preflight.sh`,
+  `render_ue_scenario.sh`, `run_ue_scenario.sh`, `check_bridge_api.sh`;
+  the next-steps text in `setup.ps1`, `setup.sh`, `deploy_windows.ps1`;
+  the toolset message in `vendor_ue_plugin.ps1`; the README and
+  CAMERA_WINDOWS install lines. `core/util/platform.py` gains ONE
+  constant, `UE_ENGINE_VERSION = "5.7"`, from which the three
+  `ue.platform` refusal texts and the mac/Windows default roots are
+  built, so the Python side states the pin in one place. Where 5.5 was
+  a MEASUREMENT (the v143 toolset, the Xcode 15.2-16.9 range, the
+  vendored plugin's compatibility, the CAMERA_WINDOWS 0.00 m bound)
+  the line keeps 5.5 and says "measured".
+- `scripts/vendor_ue_plugin.{ps1,sh}` carry the engine they target
+  (`$ueEngineTarget` / `UE_ENGINE_TARGET` = 5.7) and RECORD it in
+  `VENDORED.json` as `ue_engine_target` on the next vendor run; the
+  Windows preflight prints a note (not a Fail: the native library does
+  not link the engine) when the key is absent -- as it is in the
+  committed file, which predates the move -- or differs from 5.7, and
+  points at NEXT.md gotcha 32. Gotcha 32 records that the three
+  patched upstream C++ bugs (and the Build.cs staging patch) were
+  measured on 5.5 against a plugin that states 5.0-5.6, so on 5.7 each
+  patch may be unnecessary, still necessary or no longer apply, and
+  that Gate 6, Gate 10-R and gotchas 4 and 5 are re-measured before
+  any 5.7 frame is trusted.
+- `ue/Config/DefaultEngine.ini` gains `[/Script/Engine.RendererSettings]`
+  -- `r.CustomDepth=3` (stencil ids, contracts 2.3), Lumen GI and
+  reflections in software (`r.DynamicGlobalIlluminationMethod=1`,
+  `r.ReflectionMethod=1`, `r.Lumen.HardwareRayTracing=False`,
+  `r.GenerateMeshDistanceFields=True`), virtual shadow maps
+  (`r.Shadow.Virtual.Enable=1`), the Nanite project enable
+  (`r.Nanite.ProjectEnabled=True`; the per-mesh import flag stays OFF,
+  contracts section 10 and gotcha 5), TSR as the beauty default
+  (`r.AntiAliasingMethod=4`; label passes override it to none per
+  capture), the extended luminance range for the EV100 exposure
+  (`r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange=True`),
+  and `r.Substrate=False` with the reason in the file: no material on
+  the branch is authored for it. A comment block above the settings
+  names, per setting, the Gate 6 clause it is EXPECTED to move. It also
+  gains `[/Script/WindowsTargetPlatform.WindowsTargetSettings]` DX12 +
+  SM6, which the three features need. Every pre-existing line, including
+  the fixed-tick pair (gotcha 19) and the AndroidFileServer block
+  (gotcha 8), is kept; the diff is 77 insertions and 0 deletions.
+- Two tests in `tests/test_platform.py`:
+  `test_the_engine_pin_is_5_7_everywhere_it_is_stated` sweeps the
+  uproject, `platform.py`, every `scripts/*.ps1` and `*.sh`, README,
+  CAMERA_WINDOWS and NEXT.md for the old pin in every spelling the
+  tree used (`UE_5.5`, `UE 5.5`, `Engine 5.5`, `"5.5"`) and allows a
+  hit only on a line that says "measured" or names 5.7 -- history is
+  allowed by the word on the line, not by file, so a new stale pin
+  cannot hide in an old document; it also reads the uproject back and
+  checks the refusal texts and roots against the constant.
+  `test_default_engine_ini_carries_the_look_lane_renderer_settings`
+  parses the INI with a small UE-ini reader (case-preserving, array
+  prefixes kept) and reads every setting back by section and key,
+  Substrate OFF included, plus the fixed-tick lines. The two `UE_5.5`
+  pins the older platform tests carried are now derived from the
+  constant.
+- Five `mutate` guards in `scripts/mutation_check.sh`, each confirmed
+  BY HAND to fail `tests/test_platform.py` when applied and to restore
+  byte-identical: the uproject back to 5.5; `UE_ENGINE_VERSION` back to
+  5.5; a stale `UE_5.5` install path in `ue_preflight.ps1`; Lumen GI
+  off in the ini; Substrate on in the ini.
+
+**How to demonstrate (any platform).**
+
+```
+.venv/bin/pytest -q -p no:warnings -o addopts= tests/test_platform.py tests/test_powershell_scripts.py
+grep -rn 'UE_5\.5\|Engine 5\.5\|"5\.5"' ue/FlightSim.uproject core/util/platform.py scripts/ README.md   # only "measured" lines remain
+git diff HEAD~1 -- ue/Config/DefaultEngine.ini | grep -c '^-r\.'    # 0: nothing removed
+.venv/bin/python -c "from core.util import platform as p; print(p.UE_ENGINE_VERSION); print(p.ue_platform_refusal())"
+bash scripts/mutation_check.sh          # the five Look/1 guards report "ok"
+```
+
+On Windows, after `.\scripts\ue_preflight.ps1`: the engine line says
+`UE 5.7.x`, and the `jsbsim plugin engine target` line says
+"not recorded (vendored before the 5.7 pin; measured on 5.5)" until
+`.\scripts\vendor_ue_plugin.ps1` has been re-run on 5.7.
+
+**Not verified here.** No engine is installed in this environment, so:
+the project has NOT been opened or built on 5.7 (the uproject and the
+INI are text edits; UBT may report the `IncludeOrderVersion Unreal5_5`
+in `ue/Source/*.Target.cs` as a warning); the vendored plugin has NOT
+been re-vendored or compiled on 5.7 and its four local patches have not
+been re-checked there; NONE of the renderer settings has been rendered
+-- not one Gate 6 clause has been re-measured, no probe render against a
+5.5 control exists, and the vertex palette (gotcha 6) and the three
+exposure biases (gotcha 7) are known to be invalidated by Lumen and the
+extended luminance range and have not been recalibrated; the commandlet
+does NOT yet record `render.json.render_settings` (a later Look-lane
+stage), so a frame rendered today carries no record of these switches;
+the `.ps1` scripts are lint-checked, not executed (no PowerShell here);
+the Xcode range the Mac preflight checks (15.2-16.9) was measured for
+5.5 and 5.7's range is unchecked, as the script now says. What each
+switch is expected to change is written next to it in the INI; what it
+DOES change is the first measurement on the Windows box.
+
+**Limitations.**
+
+- Outside this stage's files and still naming 5.5: `ue/Source/FlightSim.Target.cs`
+  and `FlightSimEditor.Target.cs` (`IncludeOrderVersion Unreal5_5` -- a
+  compatibility marker; move it to `Unreal5_7` once the 5.7 build says
+  so), `flightsim/capture.py` L118 (a message: "Windows with UE 5.5 and
+  the bridge"), `experiments/fps_probe.py` L55-57 (Mac editor paths),
+  and the historical measurement text in `docs/VALIDITY.md`,
+  `docs/CAMERA_PHASE2_WINDOWS_PLAN.md`, `docs/vva/VV_REPORT.md`, which
+  stays as taken. The sweep test does not cover them; capture.py and
+  fps_probe.py are the two that should be moved in the next stage that
+  owns them.
+- The Windows install-root fallback sorts `UE_5.*` folders by name, so
+  a future `UE_5.10` would sort below `UE_5.7`; the explicit default and
+  `UE_ROOT` are unaffected.
+- `r.Nanite.ProjectEnabled=True` is the project-level enable only. The
+  measured finding (gotcha 5: the capture drew the coarse Nanite fallback)
+  keeps the per-mesh import flag off, so on this branch the setting
+  changes no drawn geometry until that finding is re-probed on 5.7; it
+  is on so that the re-probe is a one-flag experiment.
+- Substrate stays OFF by decision, not by measurement: nothing on the
+  branch is authored for it. `r.Lumen.HardwareRayTracing=False` is the
+  software-first default from contracts section 10; hardware RT is a
+  Look-lane experiment on a card that supports it.
+- The engine target the vendor scripts record is a statement of what
+  they target, not a measurement of a 5.7 build; only the vendor run
+  and the bridge build on Windows turn it into one.

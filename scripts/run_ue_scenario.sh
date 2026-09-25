@@ -25,7 +25,7 @@ fi
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.5}"
+UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.7}"
 EDITOR="$UE_ROOT/Engine/Binaries/Mac/UnrealEditor-Cmd"
 
 if [ "$#" -lt 2 ]; then
