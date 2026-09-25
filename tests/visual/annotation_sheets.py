@@ -26,7 +26,12 @@ under ``build/visual/`` (or ``--out``):
                               by the integer that frame maps the id to,
                               and the engine's echo per camera
 
-Each sheet carries the check's verdict and detail in its caption. The
+Each sheet carries the check's verdict and detail in its caption, and
+``sheets.json`` beside them records, per sheet, the verdict, the
+failure name, whether the sheet was DRAWN and the error if it was not:
+a painter that throws still yields a captioned placeholder (a sheet
+never hides the verdict) but is recorded as not drawn, the CLI exits 1,
+and the test asserts the record and the drawn marks themselves. The
 sheet draws what the verifier measured, through the verifier's own
 helpers; it decides nothing. PIL and numpy only.
 """
@@ -34,6 +39,7 @@ helpers; it decides nothing. PIL and numpy only.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -58,6 +64,9 @@ from tests.visual import draw                                      # noqa: E402
 
 SHEETS = ("mask_integers_only", "mask_vs_geometry", "box_vs_mask",
           "depth_vs_geometry", "visibility_vs_scene", "identity_stable")
+#: The per-sheet record written beside the PNGs: {check: {file, drawn,
+#: error, status, failure, verdict, detail}}.
+SHEETS_RECORD = "sheets.json"
 DEFAULT_OUT = REPO / "build" / "visual"
 #: Frames per sheet: the first frame of each camera, up to this many.
 PANELS = 2
@@ -309,7 +318,8 @@ def sheet_identity_stable(manifest, run_dir) -> Image.Image:
 
 
 def write_sheets(run_dir, out_dir=DEFAULT_OUT) -> Dict[str, Path]:
-    """Every sheet for a run directory; returns {check: path}."""
+    """Every sheet for a run directory; returns {check: path}, and writes
+    ``SHEETS_RECORD`` beside them saying which sheets were drawn."""
     run_dir = Path(run_dir)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -331,17 +341,25 @@ def write_sheets(run_dir, out_dir=DEFAULT_OUT) -> Dict[str, Path]:
         "identity_stable": sheet_identity_stable,
     }
     written: Dict[str, Path] = {}
+    record: Dict[str, Dict] = {}
     for name in SHEETS:
+        verdict = _verdict_lines(checks[name])
         try:
             body = painters[name](manifest, run_dir)
+            drawn, error = True, None
         except Exception as exc:              # a sheet never hides the verdict
+            drawn, error = False, f"{exc.__class__.__name__}: {exc}"
             body = Image.new("RGB", (640, 120), (40, 16, 16))
             ImageDraw.Draw(body).text((8, 8), f"could not draw: {exc}"[:90],
                                       fill=draw.WHITE, font=draw.font(12))
-        sheet = draw.caption(body, _verdict_lines(checks[name]), size=13)
+        sheet = draw.caption(body, verdict, size=13)
         path = out_dir / f"{name}.png"
         sheet.save(path)
         written[name] = path
+        record[name] = {"file": path.name, "drawn": drawn, "error": error,
+                        "status": checks[name].status, "failure": checks[name].failure,
+                        "verdict": verdict[0], "detail": checks[name].detail}
+    (out_dir / SHEETS_RECORD).write_text(json.dumps(record, indent=1), encoding="utf-8")
     return written
 
 
@@ -363,8 +381,19 @@ def main(argv=None) -> int:
             shutil.rmtree(run_dir)
         fabricate_run(run_dir)
         print(f"fabricated run: {run_dir}")
-    for name, path in write_sheets(run_dir, out).items():
-        print(f"  {name}: {path}")
+    written = write_sheets(run_dir, out)
+    record = json.loads((out / SHEETS_RECORD).read_text(encoding="utf-8"))
+    undrawn = 0
+    for name, path in written.items():
+        entry = record[name]
+        note = "" if entry["drawn"] else f"  NOT DRAWN: {entry['error']}"
+        undrawn += not entry["drawn"]
+        print(f"  {name}: {path}  {entry['verdict']}{note}")
+    print(f"  record: {out / SHEETS_RECORD}")
+    if undrawn:
+        print(f"  {undrawn} sheet(s) could not be drawn; the verdicts above stand, "
+              f"the pictures do not")
+        return 1
     return 0
 
 

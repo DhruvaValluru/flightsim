@@ -242,6 +242,12 @@ def test_landmarks_are_recorded_and_land_off_axis(manifest):
 # model's own origin (the FDM's VRP, 33.7 m aft of the datum on the 747).
 # No offline check could see it; render.json's "drawn" object now says
 # what was drawn and where it was attached, and this check reads it.
+#
+# Phase 2 (contracts §0.1): the VRP rule itself was the wrong FDM for
+# two of three airframes -- 3.9 m off on the B747, 19.3 m on the A320 --
+# so a mesh manifest is version 3 only when its origin was MEASURED from
+# the mesh's vertices, and the check grades both the version and the
+# recorded basis. The origin below is the B747's measured one.
 
 def _render_json(run_dir, camera, payload):
     directory = run_dir / "frames" / camera
@@ -250,12 +256,16 @@ def _render_json(run_dir, camera, payload):
                                            encoding="utf-8")
 
 
-def _drawn_mesh(version, origin=(-3370.58, 0.0, -60.96)):
+MEASURED_BASIS = "measured from vertices: nose keypoint (x), main-gear contact (z)"
+VRP_BASIS = ("FDM VRP (no labels block); the VRP is read from the JSBSim XML's "
+             "<location name=\"VRP\"> in the structural frame")
+
+
+def _drawn_mesh(version, origin=(-2980.0, 0.0, 13.9), basis=MEASURED_BASIS):
     return {"host": "unreal", "frames": 3,
             "drawn": {"kind": "mesh", "mesh_origin_actor_cm": list(origin),
                       "manifest_version": version,
-                      "origin_basis": "FlightGear places the model origin at "
-                                      "the FDM's VRP"}}
+                      "origin_basis": basis}}
 
 
 DRAWN_PLACEHOLDER = {
@@ -288,28 +298,76 @@ def test_drawn_airframe_is_not_run_without_a_render(manifest, tmp_path):
     assert "predates" in check.detail
 
 
-def test_a_mesh_drawn_at_the_recorded_origin_passes(manifest, tmp_path):
-    _render_json(tmp_path, "chase0", _drawn_mesh(2))
-    _render_json(tmp_path, "tower0", _drawn_mesh(2))
+def test_a_mesh_drawn_at_the_measured_origin_passes(manifest, tmp_path):
+    """A version-3 manifest whose basis says the origin was measured
+    from the vertices: the only drawn record the check passes."""
+    _render_json(tmp_path, "chase0", _drawn_mesh(3))
+    _render_json(tmp_path, "tower0", _drawn_mesh(3))
     check = verify_drawn_airframe(_expecting_mesh(manifest), tmp_path)
-    assert check.status == PASS
-    assert "-3370.6" in check.detail and "version 2" in check.detail
+    assert check.status == PASS, check.detail
+    assert "-2980.0" in check.detail and "version 3" in check.detail
+    assert "measured from vertices" in check.detail
+    # The commandlet echoes the converter's string; the z-from-VRP
+    # variant starts the same way and is a measured origin too.
+    _render_json(tmp_path, "tower0", _drawn_mesh(
+        3, basis="measured from vertices: nose keypoint (x), VRP (z: no gear "
+                 "geometry identifiable)"))
+    assert verify_drawn_airframe(_expecting_mesh(manifest), tmp_path).status == PASS
 
 
 def test_a_mesh_attached_at_the_datum_fails_by_name(manifest, tmp_path):
     """The defect itself: a version-1 manifest carries no origin, so the
     commandlet attached the mesh at the structural datum. Every mask is
     then offset from its label by the VRP, and the check says so."""
-    _render_json(tmp_path, "chase0", _drawn_mesh(2))
-    _render_json(tmp_path, "tower0", _drawn_mesh(1, origin=(0.0, 0.0, 0.0)))
+    _render_json(tmp_path, "chase0", _drawn_mesh(3))
+    _render_json(tmp_path, "tower0", _drawn_mesh(1, origin=(0.0, 0.0, 0.0),
+                                                 basis=VRP_BASIS))
     check = verify_drawn_airframe(_expecting_mesh(manifest), tmp_path)
     assert check.status == FAIL
+    assert check.failure == "aircraft.placeholder_drawn"
     assert "tower0" in check.detail and "chase0" not in check.detail
     assert "structural datum" in check.detail
     assert "offset from its label" in check.detail
     assert "convert.py" in check.detail
     # No version at all is the same failure.
-    _render_json(tmp_path, "tower0", _drawn_mesh(None))
+    _render_json(tmp_path, "tower0", _drawn_mesh(None, basis=VRP_BASIS))
+    assert verify_drawn_airframe(_expecting_mesh(manifest), tmp_path).status == FAIL
+    # The version clause on its own: a version-1 record whose basis
+    # string happens to read as measured is still refused for the
+    # version, with the datum sentence.
+    _render_json(tmp_path, "tower0", _drawn_mesh(1, origin=(0.0, 0.0, 0.0)))
+    check = verify_drawn_airframe(_expecting_mesh(manifest), tmp_path)
+    assert check.status == FAIL and "structural datum" in check.detail, check.detail
+
+
+def test_a_mesh_placed_by_the_vrp_rule_fails_by_name(manifest, tmp_path):
+    """Contracts §0.1: a version-2 manifest placed the origin by the
+    staged FDM's VRP -- 3.9 m off on the B747, 19.3 m on the A320 -- and
+    the converter now calls it stale. A render from one used to PASS
+    this check (the report said so); it is refused by name, and only
+    mask_vs_geometry (pixels, NOT RUN without an ID bundle) could have
+    caught it otherwise."""
+    _render_json(tmp_path, "chase0", _drawn_mesh(3))
+    _render_json(tmp_path, "tower0", _drawn_mesh(2, origin=(-3370.58, 0.0, -60.96),
+                                                 basis=VRP_BASIS))
+    check = verify_drawn_airframe(_expecting_mesh(manifest), tmp_path)
+    assert check.status == FAIL, check.detail
+    assert check.failure == "aircraft.placeholder_drawn"
+    assert "tower0" in check.detail and "chase0" not in check.detail
+    assert "VRP rule" in check.detail and "3.9 m" in check.detail
+    assert "convert.py" in check.detail
+    # The version clause on its own: version 2 with a measured-looking
+    # basis is still refused for the version.
+    _render_json(tmp_path, "tower0", _drawn_mesh(2))
+    check = verify_drawn_airframe(_expecting_mesh(manifest), tmp_path)
+    assert check.status == FAIL and "VRP rule" in check.detail, check.detail
+    # A manifest that SAYS version 3 but records a rule-placed origin is
+    # graded by the basis it recorded, not the number it claims.
+    _render_json(tmp_path, "tower0", _drawn_mesh(3, basis=VRP_BASIS))
+    check = verify_drawn_airframe(_expecting_mesh(manifest), tmp_path)
+    assert check.status == FAIL, check.detail
+    assert "FDM VRP" in check.detail and "measured from vertices" in check.detail
+    _render_json(tmp_path, "tower0", _drawn_mesh(3, basis=None))
     assert verify_drawn_airframe(_expecting_mesh(manifest), tmp_path).status == FAIL
 
 
@@ -347,7 +405,8 @@ def test_drawn_airframe_is_in_the_run_report(manifest, tmp_path):
     report = verify_run(tmp_path)
     by_name = {c.name: c for c in report.checks}
     assert by_name["drawn_airframe"].status == NOT_RUN
-    _render_json(tmp_path, "chase0", _drawn_mesh(1, origin=(0.0, 0.0, 0.0)))
+    _render_json(tmp_path, "chase0", _drawn_mesh(1, origin=(0.0, 0.0, 0.0),
+                                                 basis=VRP_BASIS))
     report = verify_run(tmp_path)
     by_name = {c.name: c for c in report.checks}
     assert by_name["drawn_airframe"].status == FAIL

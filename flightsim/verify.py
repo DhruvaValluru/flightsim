@@ -24,11 +24,17 @@ Runs :mod:`core.capture.verify` over a run directory written by
 * temporal alignment, with ``--against``.
 
 A check that could not run is named as NOT RUN and is not counted as a
-pass. A FAIL is a refusal BY NAME: its catalogue name (``annotation.*``,
+pass; a version-5 check that a successor replaced on this manifest is
+listed as SUPERSEDED, apart from the checks waiting for evidence. A
+FAIL is a refusal BY NAME: its catalogue name (``annotation.*``,
 ``aircraft.placeholder_drawn``, ...) is printed after the report and
 recorded in ``verification.json`` (``failure`` on the check), and the
-dataset export refuses the run. Exit code 0 when no check failed, 1
-otherwise.
+dataset export refuses the run. A verification never ends in a
+traceback: a declared label file the run does not hold is
+``annotation.files`` on every check that would have read it, a missing
+or unreadable ``--against`` manifest is a named FAIL check, and a check
+that breaks is a FAIL in a sentence -- the verdict is written either
+way. Exit code 0 when no check failed, 1 otherwise.
 """
 
 from __future__ import annotations

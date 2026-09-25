@@ -39,6 +39,7 @@ silently omitted half its checks is worse than a red one.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import math
@@ -134,14 +135,29 @@ class VerificationReport:
         lines = [f"  [{c.status}] {c.name}: {c.detail}" for c in self.checks]
         passed = sum(c.status == PASS for c in self.checks)
         failed = sum(c.status == FAIL for c in self.checks)
-        skipped = [c.name for c in self.checks if c.status == NOT_RUN]
+        # Two kinds of NOT RUN, told apart on the page: a check whose
+        # independent reference is absent (an engine pass, a second run)
+        # and a version-5 check that a successor replaced on this
+        # manifest. The second is waiting for nothing, so it is neither
+        # listed with the first nor counted in "not run"; the status
+        # word and verification.json's counts are unchanged.
+        superseded = [c.name for c in self.checks if is_superseded(c)]
+        skipped = [c.name for c in self.checks
+                   if c.status == NOT_RUN and not is_superseded(c)]
         lines.append(f"verification {'PASSED' if self.ok else 'FAILED'} "
                      f"({passed} passed, {failed} failed, "
-                     f"{len(skipped)} not run)")
+                     f"{len(skipped)} not run"
+                     + (f", {len(superseded)} superseded" if superseded else "")
+                     + ")")
         if skipped:
             lines.append("  NOT RUN (no independent reference available "
                          "for these; they are NOT counted as passes): "
                          + ", ".join(skipped))
+        if superseded:
+            lines.append("  SUPERSEDED on this manifest (each names the check "
+                         "that replaced it above; not counted as passes, and "
+                         "not waiting for any evidence): "
+                         + ", ".join(superseded))
         return "\n".join(lines)
 
 
@@ -1745,10 +1761,19 @@ def verify_label_files(manifest: Dict, run_dir=None) -> Check:
                  f"{sorted(declared)}{note}")
 
 
-#: The mesh manifest version from which the render commandlet attaches
-#: the mesh at the recorded model origin (the FDM's VRP) instead of the
-#: actor root. Named here, not imported from the producer.
-DRAWN_MESH_MIN_MANIFEST_VERSION = 2
+#: The mesh manifest version from which the mesh origin the render
+#: commandlet attaches the mesh at is MEASURED from the mesh's own
+#: vertices (nose keypoint in x, main-gear contact in z; contracts
+#: §0.1). Version 2 placed it by the staged FDM's VRP rule -- 3.9 m off
+#: on the B747, 19.3 m on the A320 -- and version 1 recorded no origin
+#: at all (attached at the structural datum, 33.7 m off on the B747).
+#: Named here, not imported from the producer (assets_pipeline/convert.py
+#: MESH_MANIFEST_VERSION says the same number).
+DRAWN_MESH_MIN_MANIFEST_VERSION = 3
+#: What a measured origin's basis string starts with (the converter's
+#: MESH_ORIGIN_BASIS_MEASURED* strings, echoed by the commandlet under
+#: ``drawn.origin_basis``); a VRP-rule basis never does.
+DRAWN_MESH_ORIGIN_BASIS_PREFIX = "measured from vertices"
 
 
 def _engine_drawn(run_dir) -> Dict[str, Optional[Dict]]:
@@ -1792,11 +1817,19 @@ def verify_drawn_airframe(manifest: Dict, run_dir=None) -> Check:
       manifest's ``assets.mesh_manifest`` names a real mesh (its sha256
       is non-null);
     * FAIL when a mesh was drawn from a manifest older than version
-      ``DRAWN_MESH_MIN_MANIFEST_VERSION``: it carried no origin, so the
-      mesh was attached at the datum and every mask is offset from its
-      label by the VRP;
-    * PASS when the mesh was drawn at a version-2 origin;
+      ``DRAWN_MESH_MIN_MANIFEST_VERSION``: version 1 carried no origin,
+      so the mesh was attached at the datum and every mask is offset
+      from its label by the VRP; version 2 placed it by the VRP rule
+      that is the wrong FDM for two of three airframes (contracts §0.1);
+    * FAIL when the recorded ``origin_basis`` does not start with
+      ``DRAWN_MESH_ORIGIN_BASIS_PREFIX`` -- a manifest that says version
+      3 but places the mesh by a rule is graded by what it says it did;
+    * PASS when the mesh was drawn at a measured origin;
     * NOT RUN with no render.json, or one that predates ``drawn``.
+
+    The failure name is ``aircraft.placeholder_drawn`` for every clause
+    (contracts §4): the pictures show the airframe somewhere other than
+    where the labels describe it.
     """
     drawn_by_camera = _engine_drawn(run_dir)
     if not drawn_by_camera:
@@ -1835,21 +1868,43 @@ def verify_drawn_airframe(manifest: Dict, run_dir=None) -> Check:
             continue
         if (not isinstance(version, (int, float))
                 or version < DRAWN_MESH_MIN_MANIFEST_VERSION):
+            if isinstance(version, (int, float)) and version >= 2:
+                problems.append(
+                    f"{camera}: the mesh was drawn from manifest version "
+                    f"{version!r} (< {DRAWN_MESH_MIN_MANIFEST_VERSION}), which "
+                    f"placed the mesh origin by the staged FDM's VRP rule "
+                    f"instead of measuring it from the mesh's vertices, so "
+                    f"every mask is offset from its label -- 3.9 m on the "
+                    f"B747, 19.3 m on the A320; re-run "
+                    f"assets_pipeline/convert.py and render again")
+            else:
+                problems.append(
+                    f"{camera}: the mesh was drawn from manifest version "
+                    f"{version!r} (< {DRAWN_MESH_MIN_MANIFEST_VERSION}), which "
+                    f"records no mesh origin, so it was attached at the actor "
+                    f"origin -- the JSBSim structural datum -- and every mask "
+                    f"is offset from its label by the FDM's VRP (33.7 m on "
+                    f"the B747); re-run assets_pipeline/convert.py and render "
+                    f"again")
+            continue
+        basis = drawn.get("origin_basis")
+        if not (isinstance(basis, str)
+                and basis.startswith(DRAWN_MESH_ORIGIN_BASIS_PREFIX)):
             problems.append(
-                f"{camera}: the mesh was drawn from manifest version "
-                f"{version!r} (< {DRAWN_MESH_MIN_MANIFEST_VERSION}), which "
-                f"records no mesh origin, so it was attached at the actor "
-                f"origin -- the JSBSim structural datum -- and every mask "
-                f"is offset from its label by the FDM's VRP (33.7 m on "
-                f"the B747); re-run assets_pipeline/convert.py and render "
-                f"again")
+                f"{camera}: the mesh was drawn about an origin whose recorded "
+                f"basis is {basis!r}, not one measured from the mesh's "
+                f"vertices ('{DRAWN_MESH_ORIGIN_BASIS_PREFIX}...'): a rule-"
+                f"placed origin puts the mesh 3.9 m (B747) to 19.3 m (A320) "
+                f"from its label; re-run assets_pipeline/convert.py and "
+                f"render again")
             continue
         origin = drawn.get("mesh_origin_actor_cm")
         origin_text = (", ".join(f"{float(v):.1f}" for v in origin)
                        if isinstance(origin, list) and len(origin) == 3
                        else "?")
         notes.append(f"{camera}: mesh at ({origin_text}) cm in the actor "
-                     f"frame, manifest version {int(version)}")
+                     f"frame, manifest version {int(version)}, origin "
+                     f"{DRAWN_MESH_ORIGIN_BASIS_PREFIX}")
     if problems:
         return Check("drawn_airframe", FAIL,
                      f"{len(problems)} camera(s) drew something other than "
@@ -1860,17 +1915,73 @@ def verify_drawn_airframe(manifest: Dict, run_dir=None) -> Check:
                  f"{len(recorded)} camera(s): " + "; ".join(notes[:4]))
 
 
+class BundleFileError(Exception):
+    """A file the render record declares could not be read from the run
+    directory -- missing, truncated, not an image. The message is the
+    plain sentence the check reports; the failure name is
+    ``annotation.files`` (the same finding label_files makes)."""
+
+
+def _unreadable(path, exc: OSError) -> str:
+    path = Path(path)
+    where = f"{path.parent.name}/{path.name}"
+    if isinstance(exc, FileNotFoundError):
+        return (f"{where} is missing: the render record declares it, but the "
+                f"run directory does not hold it")
+    return f"{where} could not be read as the record declares it ({exc})"
+
+
+def _reads_the_bundle(check):
+    """A check that opens the files the render record declares.
+
+    Measured before this guard: deleting one declared mask from a run
+    ended ``flightsim.verify`` in a FileNotFoundError traceback, exit 1
+    for the wrong reason, no ``refused by name`` line and no
+    verification.json -- a run with no verdict at all. A file the
+    record names and the disk does not hold is now what label_files
+    already calls it, ``annotation.files``, on every check that would
+    have opened it, naming the file in a sentence.
+    """
+    name = check.__name__[len("verify_"):]
+
+    @functools.wraps(check)
+    def guarded(*args, **kwargs) -> Check:
+        try:
+            return check(*args, **kwargs)
+        except BundleFileError as exc:
+            return Check(name, FAIL, str(exc), failure=FAIL_FILES)
+    return guarded
+
+
 def _read_gray_png(path):
-    """A mask or depth PNG as a 2-D integer array, via Pillow."""
+    """A mask or depth PNG as a 2-D integer array, via Pillow; None
+    without Pillow; :class:`BundleFileError` when the file cannot be
+    read."""
     try:
         from PIL import Image
         import numpy as np
     except ImportError:            # pragma: no cover - Pillow is in the venv
         return None
-    with Image.open(path) as image:
-        return np.array(image)
+    try:
+        with Image.open(path) as image:
+            return np.array(image)
+    except OSError as exc:
+        raise BundleFileError(_unreadable(path, exc)) from exc
 
 
+#: What the detail of a version-5 check starts with on a manifest whose
+#: objects[] hands its question to a successor; the summary reads it to
+#: list such checks apart from the ones waiting for evidence.
+SUPERSEDED_MARK = "superseded for manifest"
+
+
+def is_superseded(check: Check) -> bool:
+    """NOT RUN because a successor check took over on this manifest --
+    not because any evidence is missing."""
+    return check.status == NOT_RUN and check.detail.startswith(SUPERSEDED_MARK)
+
+
+@_reads_the_bundle
 def verify_mask_containment(manifest: Dict, run_dir=None) -> Check:
     """The engine's aircraft mask lies inside the label's 2-D box.
 
@@ -1881,7 +1992,7 @@ def verify_mask_containment(manifest: Dict, run_dir=None) -> Check:
     grading the primary twice."""
     if _declared_objects(manifest):
         return Check("mask_containment", NOT_RUN,
-                     f"superseded for manifest {manifest.get('manifest_version')} "
+                     f"{SUPERSEDED_MARK} {manifest.get('manifest_version')} "
                      f"by box_vs_mask (the ID image carries every object's int_id; "
                      f"the tight box of each is graded against its projected hull "
                      f"there); this single-id containment test is the version-5 check")
@@ -1933,6 +2044,7 @@ def verify_mask_containment(manifest: Dict, run_dir=None) -> Check:
                  f"{worst_where} (min {MASK_CONTAINMENT_MIN})")
 
 
+@_reads_the_bundle
 def verify_depth_range(manifest: Dict, run_dir=None) -> Check:
     """Depth at the engine's aircraft-mask pixels lies within the 3-D
     box's depth span.
@@ -1943,7 +2055,7 @@ def verify_depth_range(manifest: Dict, run_dir=None) -> Check:
     NOT RUN naming its successor."""
     if _declared_objects(manifest):
         return Check("depth_range", NOT_RUN,
-                     f"superseded for manifest {manifest.get('manifest_version')} "
+                     f"{SUPERSEDED_MARK} {manifest.get('manifest_version')} "
                      f"by depth_vs_geometry (per object: the depth under the mask "
                      f"against the projected hull band, the nearest keypoint and the "
                      f"record); this single-id span test is the version-5 check")
@@ -2160,7 +2272,10 @@ def _read_depth_metres(folder: Path, labels: Dict, width: int, height: int):
 
     if labels.get("depth_f32"):
         path = folder / str(labels["depth_f32"])
-        raw = np.fromfile(path, dtype="<f4")
+        try:
+            raw = np.fromfile(path, dtype="<f4")
+        except OSError as exc:
+            raise BundleFileError(_unreadable(path, exc)) from exc
         if raw.size != width * height:
             return (f"{path.name}: {raw.size} float32 values for a "
                     f"{width}x{height} frame ({width * height} expected)")
@@ -2413,6 +2528,7 @@ def _bundle_frames(manifest: Dict, run_dir):
 
 # -- the checks ---------------------------------------------------------------
 
+@_reads_the_bundle
 def verify_mask_integers_only(manifest: Dict, run_dir=None) -> Check:
     """The ID image holds the declared object integers and nothing else.
 
@@ -2503,6 +2619,7 @@ def verify_mask_integers_only(manifest: Dict, run_dir=None) -> Check:
                  f"labelled pixel; the engine counted no non-integer ids{note}")
 
 
+@_reads_the_bundle
 def verify_mask_vs_geometry(manifest: Dict, run_dir=None) -> Check:
     """The ID mask sits where the geometry says the object is.
 
@@ -2664,6 +2781,7 @@ def verify_mask_vs_geometry(manifest: Dict, run_dir=None) -> Check:
                  + (f"; {'; '.join(notes)}" if notes else ""))
 
 
+@_reads_the_bundle
 def verify_box_vs_mask(manifest: Dict, run_dir=None) -> Check:
     """The tight box from the ID mask against the projected hull box.
 
@@ -2675,7 +2793,10 @@ def verify_box_vs_mask(manifest: Dict, run_dir=None) -> Check:
     occluder hides; else its visible pixels. The record's
     ``bbox_2d_tight`` is by definition the VISIBLE pixels' box (the
     producer measured the ID image), so it is graded against this
-    module's box of the same visible pixels, to a pixel. Supersedes
+    module's box of the same visible pixels, to a pixel -- and a null
+    record while the ID image holds pixels of the object is failed by
+    name, not skipped (a record the bundle was never attached to). The
+    PASS sentence says how many records were compared. Supersedes
     mask_containment for manifest 6.
     """
     objects = _declared_objects(manifest)
@@ -2687,6 +2808,7 @@ def verify_box_vs_mask(manifest: Dict, run_dir=None) -> Check:
 
     aircraft = _aircraft_entries(objects)
     graded = 0
+    records = 0
     not_claimed = 0
     worst = (1.0, "")
     for record, camera, name, engine, folder in _bundle_frames(manifest, run_dir):
@@ -2705,11 +2827,32 @@ def verify_box_vs_mask(manifest: Dict, run_dir=None) -> Check:
                 continue
             hull = _projected_hull(record, geometry)
             visible = mask == int_id
-            recorded = (_record_object(record, int_id) or {}).get("bbox_2d_tight")
-            if recorded is not None and visible.any():
+            own_record = _record_object(record, int_id)
+            recorded = (own_record or {}).get("bbox_2d_tight")
+            if visible.any():
+                # The ID image holds pixels of this object, so the record
+                # owes a tight box measured from them. A null here is a
+                # record the bundle was never attached to (the producer
+                # leaves the key null until attach_engine_labels runs);
+                # a null cannot be "graded to a pixel" and is failed by
+                # name rather than skipped.
                 ys, xs = np.nonzero(visible)
                 own = (float(xs.min()), float(ys.min()), float(xs.max()) + 1.0,
                        float(ys.max()) + 1.0)
+                if own_record is None:
+                    return Check("box_vs_mask", FAIL,
+                                 f"{where}: the ID image holds {int(xs.size)} "
+                                 f"pixels of it but the frame's labels.objects[] "
+                                 f"has no record for it",
+                                 failure=FAIL_BOX_MISMATCH)
+                if not (isinstance(recorded, (list, tuple)) and len(recorded) == 4):
+                    return Check("box_vs_mask", FAIL,
+                                 f"{where}: the record's bbox_2d_tight is "
+                                 f"{recorded!r} while the ID image holds "
+                                 f"{int(xs.size)} pixels of it (box "
+                                 f"{[round(v, 1) for v in own]}); the record "
+                                 f"was never completed from the bundle",
+                                 failure=FAIL_BOX_MISMATCH)
                 gap = max(abs(float(a) - b) for a, b in zip(recorded, own))
                 if gap > 0.5:
                     return Check("box_vs_mask", FAIL,
@@ -2718,6 +2861,7 @@ def verify_box_vs_mask(manifest: Dict, run_dir=None) -> Check:
                                  f"the box of its own visible pixels "
                                  f"{[round(v, 1) for v in own]} ({gap:.1f} px off)",
                                  failure=FAIL_BOX_MISMATCH)
+                records += 1
             hit, source = _silhouette(folder, labels, mask, int_id)
             if hit is None or hull is None or hull[1] is None or not hit.any():
                 continue        # mask_vs_geometry grades presence
@@ -2749,11 +2893,13 @@ def verify_box_vs_mask(manifest: Dict, run_dir=None) -> Check:
     return Check("box_vs_mask", PASS,
                  f"{graded} object-frames; lowest IoU {worst[0]:.3f} at {worst[1]} "
                  f"(floors {BOX_IOU_MIN_LARGE} at >= {BOX_IOU_LARGE_PX:.0f} px, "
-                 f"{BOX_IOU_MIN_SMALL} at >= {BOX_IOU_MIN_PX:.0f} px)"
+                 f"{BOX_IOU_MIN_SMALL} at >= {BOX_IOU_MIN_PX:.0f} px); {records} "
+                 f"records' bbox_2d_tight re-counted from the ID image to a pixel"
                  + (f"; {not_claimed} under {BOX_IOU_MIN_PX:.0f} px not claimed"
                     if not_claimed else ""))
 
 
+@_reads_the_bundle
 def verify_depth_vs_geometry(manifest: Dict, run_dir=None) -> Check:
     """The depth under the ID mask against the projected geometry.
 
@@ -2767,8 +2913,9 @@ def verify_depth_vs_geometry(manifest: Dict, run_dir=None) -> Check:
     the clause a scaled depth fails: from behind, the tail is the
     nearest surface, and a 2 % scale beyond 200 m moves it past the
     tolerance; (5) the record's depth_min_m / depth_median_m are these
-    pixels, and agree to DEPTH_RECORD_TOL_M. The median against the
-    projected CG depth is reported. Supersedes depth_range for manifest
+    pixels, and agree to DEPTH_RECORD_TOL_M -- a null record under a
+    mask with pixels is failed by name, not skipped. The median against
+    the projected CG depth is reported. Supersedes depth_range for manifest
     6. NOT claimed: a scale under 2 % inside 200 m, where 1 % + 2 m is
     wider than the scale.
     """
@@ -2858,10 +3005,27 @@ def verify_depth_vs_geometry(manifest: Dict, run_dir=None) -> Check:
             if abs(d_median - cg_z) > worst_median[0]:
                 worst_median = (abs(d_median - cg_z), f"{where} (median {d_median:.1f} m, "
                                                       f"CG {cg_z:.1f} m)")
-            recorded = _record_object(record, int_id) or {}
+            recorded = _record_object(record, int_id)
+            if recorded is None:
+                return Check("depth_vs_geometry", FAIL,
+                             f"{where}: the depth file holds {under.size} pixels "
+                             f"under its mask but the frame's labels.objects[] has "
+                             f"no record for it",
+                             failure=FAIL_DEPTH_RANGE)
             for key, own in (("depth_min_m", d_min), ("depth_median_m", d_median)):
                 value = recorded.get(key)
-                if isinstance(value, (int, float)) and abs(float(value) - own) > DEPTH_RECORD_TOL_M:
+                if not isinstance(value, (int, float)) or isinstance(value, bool):
+                    # Every mask pixel has a finite depth (checked above),
+                    # so the record owes the number; a null was never
+                    # attached from the bundle and is not "the same
+                    # pixels to 0.05 m" -- failed by name, not skipped.
+                    return Check("depth_vs_geometry", FAIL,
+                                 f"{where}: the record's {key} is {value!r} while "
+                                 f"the depth file holds {under.size} finite pixels "
+                                 f"under its mask ({own:.2f} m); the record was "
+                                 f"never completed from the bundle",
+                                 failure=FAIL_DEPTH_RANGE)
+                if abs(float(value) - own) > DEPTH_RECORD_TOL_M:
                     return Check("depth_vs_geometry", FAIL,
                                  f"{where}: the record's {key} {float(value):.2f} m is "
                                  f"not what the depth file holds under the mask "
@@ -2877,9 +3041,12 @@ def verify_depth_vs_geometry(manifest: Dict, run_dir=None) -> Check:
                  f"{DEPTH_TOL_FRACTION * 100:.0f} % + {DEPTH_TOL_M:g} m; nearest "
                  f"surface at most {worst_near[0]:.2f} m beyond the nearest keypoint "
                  f"at {worst_near[1] or 'none'}; median depth vs projected CG depth "
-                 f"differs by at most {worst_median[0]:.1f} m at {worst_median[1] or 'none'}")
+                 f"differs by at most {worst_median[0]:.1f} m at {worst_median[1] or 'none'}; "
+                 f"{graded} records' depth_min_m / depth_median_m are the same pixels "
+                 f"to {DEPTH_RECORD_TOL_M:g} m")
 
 
+@_reads_the_bundle
 def verify_visibility_vs_scene(manifest: Dict, run_dir=None) -> Check:
     """The alone passes against the ID pass: what the scene hides.
 
@@ -2896,8 +3063,9 @@ def verify_visibility_vs_scene(manifest: Dict, run_dir=None) -> Check:
     the recorded pixel counts,
     ``visible_fraction`` and ``occluded_by`` (render.json integers; the
     manifest's strings resolved through objects[]) are these same counts,
-    and every occluder named is a declared object. An object's own
-    depth is its projected CG depth (the geometry, independent of the
+    and every occluder named is a declared object (a null recorded
+    ``visible_fraction`` under an alone pass with pixels is failed by
+    name, not skipped). An object's own depth is its projected CG depth (the geometry, independent of the
     engine's depth image, which a wrong ID pass can contradict); only
     an object with no geometry falls back to the median under its
     visible pixels. Each tolerance is VISIBILITY_TOL_FRACTION of the
@@ -3009,13 +3177,26 @@ def verify_visibility_vs_scene(manifest: Dict, run_dir=None) -> Check:
             if isinstance(engine_occ, list) and sorted(int(v) for v in engine_occ) != own_occluders:
                 return fail(f"{where}: render.json occluded_by {engine_occ} but the "
                             f"footprint holds {own_occluders}")
-            recorded = _record_object(record, int_id) or {}
+            recorded = _record_object(record, int_id)
+            if recorded is None:
+                return fail(f"{where}: an alone pass is declared for it but the "
+                            f"frame's labels.objects[] has no record for it")
             rec_fraction = recorded.get("visible_fraction")
-            if (isinstance(rec_fraction, (int, float)) and own_fraction is not None
-                    and abs(float(rec_fraction) - own_fraction) > VISIBILITY_RECORD_TOL):
-                return fail(f"{where}: the manifest's visible_fraction "
-                            f"{float(rec_fraction):.4f} is not the files' "
-                            f"{own_fraction:.4f}")
+            if own_fraction is not None:
+                if (not isinstance(rec_fraction, (int, float))
+                        or isinstance(rec_fraction, bool)):
+                    # The alone pass holds footprint pixels, so the record
+                    # owes the fraction; a null was never attached from
+                    # the bundle and is failed by name, not skipped.
+                    return fail(f"{where}: the manifest's visible_fraction is "
+                                f"{rec_fraction!r} while the alone pass holds "
+                                f"{n_alone} footprint pixels ({n_vis} visible, "
+                                f"{own_fraction:.4f}); the record was never "
+                                f"completed from the bundle")
+                if abs(float(rec_fraction) - own_fraction) > VISIBILITY_RECORD_TOL:
+                    return fail(f"{where}: the manifest's visible_fraction "
+                                f"{float(rec_fraction):.4f} is not the files' "
+                                f"{own_fraction:.4f}")
             rec_occ = recorded.get("occluded_by")
             if isinstance(rec_occ, list):
                 expected = sorted(id_of[o] for o in own_occluders)
@@ -3054,7 +3235,8 @@ def verify_visibility_vs_scene(manifest: Dict, run_dir=None) -> Check:
                  f"hidden pixels explained by something nearer (worst unexplained "
                  f"{worst[0] * 100:.2f} % at {worst[1] or 'none'}; tol "
                  f"{VISIBILITY_TOL_FRACTION * 100:.0f} %), overlaps owned by the nearer "
-                 f"object, and the recorded fractions and occluders re-counted")
+                 f"object, and {graded} records' fractions and occluders re-counted "
+                 f"from the files")
 
 
 def verify_identity_stable(manifest: Dict, run_dir=None,
@@ -3070,7 +3252,11 @@ def verify_identity_stable(manifest: Dict, run_dir=None,
     with ``--against``, the other run's ``objects[]`` must be the same
     mapping when the two runs are of one spec (same ``spec_digest``) --
     a different spec is named, not failed. NOT RUN without a render:
-    the engine's echo is half the evidence.
+    the engine's echo is half the evidence -- and a render.json that
+    declares label records with no root ``objects[]`` echo is no echo:
+    NOT RUN when no camera of the run carries one, FAIL when another
+    camera's does (the same build wrote both). Such a camera never
+    counts toward the sentence that says the engine echoed the list.
     """
     objects = _declared_objects(manifest)
     if not objects:
@@ -3105,6 +3291,7 @@ def verify_identity_stable(manifest: Dict, run_dir=None,
                             f"{key} is {value} in this frame's labels but "
                             f"{reference.get(key)} in objects[]")
     cameras = []
+    unechoed = []
     frames_dir = Path(run_dir) / "frames" if run_dir is not None else None
     if frames_dir is not None and frames_dir.is_dir():
         for camera_dir in sorted(p for p in frames_dir.iterdir() if p.is_dir()):
@@ -3120,19 +3307,6 @@ def verify_identity_stable(manifest: Dict, run_dir=None,
             records = _render_frame_records(payload)
             if not any(isinstance(r.get("labels"), dict) for r in records):
                 continue
-            cameras.append(camera_dir.name)
-            echoed = mapping(payload.get("objects"))
-            for key, value in echoed.items():
-                if reference.get(key) != value:
-                    return fail(f"{camera_dir.name}/render.json: the engine wrote "
-                                f"{key} as {value} where objects[] says "
-                                f"{reference.get(key)} -- the stencils were not "
-                                f"the card's")
-            for value in set(reference.values()) - set(echoed.values()):
-                if echoed:
-                    return fail(f"{camera_dir.name}/render.json: objects[] declares "
-                                f"int_id {value} but the engine's echo does not "
-                                f"name it")
             for r in records:
                 for declared in (r.get("labels") or {}).get("objects") or []:
                     if not isinstance(declared, dict):
@@ -3145,10 +3319,37 @@ def verify_identity_stable(manifest: Dict, run_dir=None,
                         return fail(f"{camera_dir.name}/{r.get('frame')}: the engine "
                                     f"wrote int_id {value}, which objects[] does not "
                                     f"declare")
+            echoed = mapping(payload.get("objects"))
+            if not echoed:
+                # Label records with no root objects[] echo: the engine
+                # did not say which integers it was told, so this camera
+                # is evidence of nothing and never counts toward the
+                # PASS sentence that says the engine echoed the list.
+                unechoed.append(camera_dir.name)
+                continue
+            cameras.append(camera_dir.name)
+            for key, value in echoed.items():
+                if reference.get(key) != value:
+                    return fail(f"{camera_dir.name}/render.json: the engine wrote "
+                                f"{key} as {value} where objects[] says "
+                                f"{reference.get(key)} -- the stencils were not "
+                                f"the card's")
+            for value in sorted(set(reference.values()) - set(echoed.values())):
+                return fail(f"{camera_dir.name}/render.json: objects[] declares "
+                            f"int_id {value} but the engine's echo does not "
+                            f"name it")
+    if unechoed and cameras:
+        return fail(f"{', '.join(unechoed)}: render.json declares label records "
+                    f"but carries no root objects[] echo, while {', '.join(cameras)} "
+                    f"carries one -- the engine did not say which integers it "
+                    f"stencilled for that camera")
     if not cameras:
+        why = (f"{', '.join(unechoed)}: render.json declares label records but "
+               f"carries no root objects[] echo (an older engine build, or the "
+               f"key was dropped)" if unechoed else
+               "no render.json echoes the ids the engine wrote (no engine pass)")
         return Check("identity_stable", NOT_RUN,
-                     f"{frames} frames agree with objects[] {reference}, but no "
-                     f"render.json echoes the ids the engine wrote (no engine pass); "
+                     f"{frames} frames agree with objects[] {reference}, but {why}; "
                      f"the engine's half of the evidence is missing")
     note = ""
     if other_manifest is not None:
@@ -3179,9 +3380,13 @@ def verify_applied_intrinsics(manifest: Dict, run_dir=None) -> Check:
     A render at a different field of view scales every mask by the
     ratio of the tangents -- 1 deg at 55 deg is 2 %, under every mask
     tolerance, which is why this check exists. NOT RUN where no record
-    carries the applied intrinsics.
+    carries the applied intrinsics; FAIL by name when one camera's
+    render.json carries them and another's frame records carry none
+    (the same build wrote both); a camera with no render at all is
+    named in the PASS sentence as not graded.
     """
     applied: Dict[str, Dict[str, Dict]] = {}
+    rendered = set()
     frames_dir = Path(run_dir) / "frames" if run_dir is not None else None
     if frames_dir is not None and frames_dir.is_dir():
         for camera_dir in sorted(p for p in frames_dir.iterdir() if p.is_dir()):
@@ -3192,14 +3397,31 @@ def verify_applied_intrinsics(manifest: Dict, run_dir=None) -> Check:
                 payload = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            per_frame = {str(r.get("frame")): r for r in _render_frame_records(payload)
-                         if isinstance(r, dict) and "applied_fov_deg" in r}
+            records = [r for r in _render_frame_records(payload) if isinstance(r, dict)]
+            if records:
+                rendered.add(camera_dir.name)
+            per_frame = {str(r.get("frame")): r for r in records
+                         if "applied_fov_deg" in r}
             if per_frame:
                 applied[camera_dir.name] = per_frame
     if not applied:
         return Check("applied_intrinsics", NOT_RUN,
                      "no render.json records the applied intrinsics "
                      "(applied_fov_deg et al.; no render, or an older build)")
+    # A camera of this run whose render.json holds frame records but not
+    # one applied lens, while another camera's does: the same build wrote
+    # both, so the omission is the per-frame clause below one level up
+    # -- failed by name, not skipped. A camera with no render at all is
+    # named as not graded in the PASS sentence.
+    manifest_cameras = sorted({str(r["camera_id"]) for r in manifest.get("frames", [])})
+    silent = [c for c in manifest_cameras if c in rendered and c not in applied]
+    if silent:
+        return Check("applied_intrinsics", FAIL,
+                     f"{', '.join(silent)}: the engine recorded no applied intrinsics "
+                     f"for this camera while it did for {sorted(applied)}, so its "
+                     f"frames cannot be shown rendered at the record's lens",
+                     failure=FAIL_INTRINSICS)
+    unrendered = [c for c in manifest_cameras if c not in applied]
     counted = 0
     worst_deg = 0.0
     for record in manifest.get("frames", []):
@@ -3244,9 +3466,10 @@ def verify_applied_intrinsics(manifest: Dict, run_dir=None) -> Check:
         return Check("applied_intrinsics", NOT_RUN,
                      "applied intrinsics recorded but none matched a manifest frame")
     return Check("applied_intrinsics", PASS,
-                 f"{counted} frames rendered at the record's lens and picture size; "
-                 f"worst field-of-view gap {worst_deg:.4f} deg (tol "
-                 f"{APPLIED_FOV_TOL_DEG} deg)")
+                 f"{counted} frames of {sorted(applied)} rendered at the record's "
+                 f"lens and picture size; worst field-of-view gap {worst_deg:.4f} "
+                 f"deg (tol {APPLIED_FOV_TOL_DEG} deg)"
+                 + (f"; {unrendered} not rendered, not graded" if unrendered else ""))
 
 
 # -- Phase 10, P10-3: the sensor model --------------------------------------
@@ -3597,70 +3820,110 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     second capture of the same simulation; landmark reprojection and
     two-view triangulation need rendered frames. None of the three is
     counted as a pass when its reference is absent.
+
+    A verification never ends in a traceback: a check that breaks on a
+    run (a file it did not expect, a defect of its own) is recorded as a
+    FAIL saying so in a sentence, so the run still gets its verdict on
+    disk and the CLI still prints what was refused. The same holds for
+    the ``--against`` run: a missing or unreadable second manifest is a
+    named FAIL check, and the cross-run clauses report NOT RUN.
     """
     from .manifest import read_capture_manifest
 
     report = VerificationReport()
-    path = Path(run_dir) / "capture_manifest.json"
-    if not path.is_file():
-        report.add("manifest_present", False,
-                   f"{path} does not exist; nothing to verify")
+
+    def run(name: str, check, *args) -> None:
+        try:
+            report.checks.append(check(*args))
+        except Exception as exc:        # noqa: BLE001 -- the verdict must be written
+            report.checks.append(Check(
+                name, FAIL,
+                f"the checker hit an error it did not expect while running this "
+                f"check ({exc.__class__.__name__}: {exc}); that is a defect in the "
+                f"checker or a run file it did not expect, and the run is not "
+                f"verified until it is fixed"))
+
+    def read_manifest(where, label: str):
+        """The manifest at ``where`` or None, with the FAIL check that
+        says why (``<label>manifest_present`` / ``<label>manifest_version``)."""
+        path = Path(where) / "capture_manifest.json"
+        if not path.is_file():
+            report.add(f"{label}manifest_present", False,
+                       f"{path} does not exist; nothing to verify"
+                       if not label else
+                       f"--against {Path(where)}: {path} does not exist, so the "
+                       f"second run cannot be compared; cross-run identity and "
+                       f"temporal alignment are NOT RUN")
+            return None
+        try:
+            manifest = read_capture_manifest(path)
+            if not isinstance(manifest, dict):
+                raise ValueError(f"{path} does not hold a manifest object")
+        except (OSError, ValueError, AttributeError) as exc:
+            report.add(f"{label}manifest_version", False,
+                       (f"--against {Path(where)}: " if label else "") + str(exc))
+            return None
+        report.add(f"{label}manifest_version", True,
+                   (f"--against {Path(where)}: " if label else "")
+                   + f"manifest_version {manifest.get('manifest_version')}, "
+                   f"spec {str(manifest.get('spec_digest') or '?')[:16]}")
+        return manifest
+
+    manifest = read_manifest(run_dir, "")
+    if manifest is None:
         return report
-    try:
-        manifest = read_capture_manifest(path)
-    except ValueError as exc:
-        report.add("manifest_version", False, str(exc))
-        return report
-    report.add("manifest_version", True,
-               f"manifest_version {manifest['manifest_version']}, "
-               f"spec {manifest['spec_digest'][:16]}")
 
     finite = True
     for record in manifest.get("frames", []):
         for key in ("t_s", "position_north_m", "position_east_m",
                     "position_alt_m", "fx_px", "fy_px"):
-            if not math.isfinite(record[key]):
+            value = record.get(key) if isinstance(record, dict) else None
+            if not isinstance(value, (int, float)) or not math.isfinite(value):
                 finite = False
     report.add("fields_finite", finite,
                f"{len(manifest.get('frames', []))} frame records checked")
 
-    report.checks.append(verify_json_schema(manifest))
-    report.checks.append(verify_intrinsics(manifest))
-    report.checks.append(verify_projection_matrix(manifest))
-    report.checks.append(verify_pose_matches_spec(manifest))
-    report.checks.append(verify_geometry(manifest))
-    report.checks.append(verify_landmark_reprojection(manifest, run_dir))
-    report.checks.append(verify_triangulation(manifest, run_dir))
-    report.checks.append(verify_counts(manifest))
-    report.checks.append(verify_aircraft_consistency(manifest))
-    report.checks.append(verify_flight_agreement(manifest, run_dir))
-    report.checks.append(verify_host_determinism(run_dir))
-    report.checks.append(verify_capture_times(manifest, run_dir))
-    report.checks.append(verify_labels(manifest))
-    report.checks.append(verify_keypoints_in_box(manifest))
-    report.checks.append(verify_drawn_airframe(manifest, run_dir))
-    report.checks.append(verify_label_files(manifest, run_dir))
-    report.checks.append(verify_mask_containment(manifest, run_dir))
-    report.checks.append(verify_depth_range(manifest, run_dir))
+    run("json_schema", verify_json_schema, manifest)
+    run("intrinsics_match_spec", verify_intrinsics, manifest)
+    run("projection_matrix", verify_projection_matrix, manifest)
+    run("pose_matches_spec", verify_pose_matches_spec, manifest)
+    run("geometry_recovery", verify_geometry, manifest)
+    run("landmark_reprojection", verify_landmark_reprojection, manifest, run_dir)
+    run("cross_view_consistency", verify_triangulation, manifest, run_dir)
+    run("count_exactness", verify_counts, manifest)
+    run("aircraft_state_consistency", verify_aircraft_consistency, manifest)
+    run("flight_agreement", verify_flight_agreement, manifest, run_dir)
+    run("host_determinism", verify_host_determinism, run_dir)
+    run("capture_time_agreement", verify_capture_times, manifest, run_dir)
+    run("label_geometry", verify_labels, manifest)
+    run("keypoints_in_box", verify_keypoints_in_box, manifest)
+    run("drawn_airframe", verify_drawn_airframe, manifest, run_dir)
+    run("label_files", verify_label_files, manifest, run_dir)
+    run("mask_containment", verify_mask_containment, manifest, run_dir)
+    run("depth_range", verify_depth_range, manifest, run_dir)
     # Phase 2, package D (contracts §4): the annotation gates, in the
     # page's order, after the version-5 label checks they supersede.
-    other = None
-    if other_run_dir is not None:
-        other = read_capture_manifest(Path(other_run_dir) / "capture_manifest.json")
-    report.checks.append(verify_mask_integers_only(manifest, run_dir))
-    report.checks.append(verify_mask_vs_geometry(manifest, run_dir))
-    report.checks.append(verify_box_vs_mask(manifest, run_dir))
-    report.checks.append(verify_depth_vs_geometry(manifest, run_dir))
-    report.checks.append(verify_visibility_vs_scene(manifest, run_dir))
-    report.checks.append(verify_identity_stable(manifest, run_dir, other))
-    report.checks.append(verify_applied_intrinsics(manifest, run_dir))
-    report.checks.append(verify_sensor_undistortion(manifest))
-    report.checks.append(verify_sensor_files(manifest, run_dir))
-    report.checks.append(verify_frame_integrity(manifest, run_dir))
-    report.checks.append(verify_applied_pose(manifest, run_dir))
+    other = read_manifest(other_run_dir, "against_") if other_run_dir is not None else None
+    run("mask_integers_only", verify_mask_integers_only, manifest, run_dir)
+    run("mask_vs_geometry", verify_mask_vs_geometry, manifest, run_dir)
+    run("box_vs_mask", verify_box_vs_mask, manifest, run_dir)
+    run("depth_vs_geometry", verify_depth_vs_geometry, manifest, run_dir)
+    run("visibility_vs_scene", verify_visibility_vs_scene, manifest, run_dir)
+    run("identity_stable", verify_identity_stable, manifest, run_dir, other)
+    run("applied_intrinsics", verify_applied_intrinsics, manifest, run_dir)
+    run("sensor_undistortion", verify_sensor_undistortion, manifest)
+    run("sensor_files", verify_sensor_files, manifest, run_dir)
+    run("frame_integrity", verify_frame_integrity, manifest, run_dir)
+    run("applied_pose", verify_applied_pose, manifest, run_dir)
 
     if other is not None:
-        report.checks.append(verify_alignment(manifest, other))
+        run("temporal_alignment", verify_alignment, manifest, other)
+    elif other_run_dir is not None:
+        report.checks.append(Check(
+            "temporal_alignment", NOT_RUN,
+            f"the --against run {Path(other_run_dir)} has no usable manifest "
+            f"(see the against_manifest check above), so there is no second "
+            f"frame set to align"))
     else:
         report.checks.append(Check(
             "temporal_alignment", NOT_RUN,
