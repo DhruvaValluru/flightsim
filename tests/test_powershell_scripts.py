@@ -511,3 +511,76 @@ def test_the_report_calls_git_through_a_resolved_path():
     assert "& $gitExe" in code
     assert not re.search(r"&\s+git\b", code), (
         "every git call must go through the resolved $gitExe path")
+
+
+# ---------------------------------------------------------------------------
+# vswhere and Build Tools installs
+#
+# `ue_preflight.ps1` said FAILED -- "the 'Desktop development with C++'
+# workload is missing" -- on a machine that had it (Phase 1 initial run
+# report). vswhere's default product filter is Community/Professional/
+# Enterprise; a Build Tools install, which is what the winget line the
+# same script prints installs, is invisible to it unless the query says
+# `-products *`. The v143 probe five lines below the failing call already
+# passed it. Every vswhere query that narrows by `-requires` has to say
+# `-products *`, or it is a false alarm waiting for the next machine.
+
+def _joined_continuations(script: Path):
+    """(first line number, logical line) with backtick continuations
+    joined, so a query split over lines is checked as one call."""
+    lines = script.read_text(encoding="utf-8").splitlines()
+    out, buf, start = [], [], None
+    for number, line in enumerate(lines, 1):
+        if start is None:
+            start = number
+        stripped = line.rstrip()
+        if stripped.endswith("`"):
+            buf.append(stripped[:-1])
+            continue
+        buf.append(stripped)
+        out.append((start, " ".join(buf)))
+        buf, start = [], None
+    if buf:
+        out.append((start, " ".join(buf)))
+    return out
+
+
+VSWHERE_QUERY = re.compile(r"\$vswhere\b[^#]*?-requires\b", re.IGNORECASE)
+ALL_PRODUCTS = re.compile(r"-products\s+(\*|\"\*\"|'\*')|\"-products\",\s*\"\*\"",
+                          re.IGNORECASE)
+
+
+@pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
+def test_every_vswhere_requires_query_lists_all_products(script):
+    offenders = []
+    for number, logical in _joined_continuations(script):
+        if logical.lstrip().startswith("#"):
+            continue
+        if VSWHERE_QUERY.search(logical) and not ALL_PRODUCTS.search(logical):
+            offenders.append((number, logical.strip()))
+    assert not offenders, (
+        f"{script.name}: a vswhere query narrows by -requires without "
+        f"-products *, so a Build Tools install reports as missing:\n" +
+        "\n".join(f"  line {n}: {text}" for n, text in offenders))
+
+
+def test_the_vswhere_lint_catches_the_bug_it_was_written_for(tmp_path):
+    shipped = tmp_path / "shipped.ps1"
+    shipped.write_text(
+        "$vs = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `\n"
+        "    -property catalog_productDisplayVersion | Select-Object -First 1\n",
+        encoding="utf-8")
+    bad = [(n, l) for n, l in _joined_continuations(shipped)
+           if VSWHERE_QUERY.search(l) and not ALL_PRODUCTS.search(l)]
+    assert bad, "the shipped false alarm must be caught"
+
+    fixed = tmp_path / "fixed.ps1"
+    fixed.write_text(
+        "$vs = & $vswhere -latest -products * `\n"
+        "    -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `\n"
+        "    -property catalog_productDisplayVersion | Select-Object -First 1\n"
+        "$v = Probe $vswhere @(\"-latest\", \"-products\", \"*\", \"-requires\", \"X\")\n",
+        encoding="utf-8")
+    good = [(n, l) for n, l in _joined_continuations(fixed)
+            if VSWHERE_QUERY.search(l) and not ALL_PRODUCTS.search(l)]
+    assert not good, good

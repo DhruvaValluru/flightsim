@@ -61,7 +61,7 @@ foreach ($install in @($installs)) {
 if (-not $msbuild) {
     # No v143-bearing installation: fall back to the newest MSBuild and
     # let the MSB8020 handler below name the real fix.
-    $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild `
+    $msbuild = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild `
         -find "MSBuild\**\Bin\MSBuild.exe" | Select-Object -First 1
 }
 if (-not $msbuild) {

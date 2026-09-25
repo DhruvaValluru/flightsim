@@ -64,7 +64,12 @@ if (-not (Test-Path $editor)) {
 # -- Visual Studio 2022 C++ toolchain ------------------------------------
 $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
 if (Test-Path $vswhere) {
-    $vs = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+    # -products * : without it vswhere reports only Community/Professional/
+    # Enterprise and says FAILED on a machine whose C++ workload lives in
+    # Build Tools (the v143 probe below already passes it; this call did
+    # not, and the Phase 1 report recorded the false alarm).
+    $vs = & $vswhere -latest -products * `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
         -property catalog_productDisplayVersion | Select-Object -First 1
     if ($vs) {
         Say "visual studio (C++ tools)" "$vs"
