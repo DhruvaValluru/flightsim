@@ -56,6 +56,10 @@ PATTERNS: Tuple[Tuple[str, "re.Pattern"], ...] = (
         r'getattr\([^()]*,\s*"constraint",\s*"([a-z_]+\.[a-z_]+)"\)')),
     ('"<name>: " message prefix', re.compile(
         r'f?"([a-z_]+\.[a-z_]+): ')),
+    # A verifier check's FAIL name (Check.failure, contracts §4): the
+    # refusal a failed check carries by name into verification.json.
+    ("failure=", re.compile(r'\bfailure\s*=\s*f?"(' + NAME + r')"')),
+    ('FAIL_<X> = "<name>"', re.compile(r'\bFAIL_[A-Z_]+\s*=\s*"(' + NAME + r')"')),
 )
 
 #: Names the contracts assign to exceptions that carry no constraint
@@ -77,22 +81,9 @@ NAMED_EXCEPTIONS: Dict[str, Tuple[str, str]] = {
 #: it from here in the same commit; a name that stays here after its
 #: package landed is a finding.
 ALLOWED_FUTURE: Dict[str, str] = {
-    # package D: the annotation gates (contracts §4)
-    "aircraft.placeholder_drawn": "D: drawn_airframe's FAIL name in Check.failure",
-    "annotation.mask_blend": "D: mask_integers_only",
-    "annotation.mask_offset": "D: mask_vs_geometry",
-    "annotation.box_mismatch": "D: box_vs_mask",
-    "annotation.depth_range": "D: depth_vs_geometry",
-    "annotation.visibility": "D: visibility_vs_scene",
-    "annotation.intrinsics": "D: applied_intrinsics",
-    "annotation.files": "D: label_files' FAIL name",
-    "check.mask_integers_only": "D: new check",
-    "check.mask_vs_geometry": "D: new check",
-    "check.box_vs_mask": "D: new check",
-    "check.depth_vs_geometry": "D: new check",
-    "check.visibility_vs_scene": "D: new check",
-    "check.identity_stable": "D: new check",
-    "check.applied_intrinsics": "D: new check",
+    # package D (the annotation gates) landed: the annotation.* names,
+    # aircraft.placeholder_drawn and the seven check.* names are emitted
+    # now (Check.failure and the FAIL_* constants in core/capture/verify.py).
     # package F (the randomisation policy) landed: randomization.vocabulary,
     # randomization.location and randomization.infeasible are emitted now.
     # package G: campaigns
@@ -200,6 +191,8 @@ def test_scanner_sees_every_shape_the_code_uses():
         "camera.multi_render": '"<name>: " message prefix @ webapp/runs.py',
         "ue.platform": "REFUSED -- @ core/util/platform.py",
         "randomization.fog_density_min": "Violation( @ core/scenario/validate.py",
+        "aircraft.placeholder_drawn": "failure= @ core/capture/verify.py",
+        "annotation.mask_offset": 'FAIL_<X> = "<name>" @ core/capture/verify.py',
     }
     missing = {name: site for name, site in expected.items()
                if site not in found.get(name, set())}

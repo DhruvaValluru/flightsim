@@ -350,7 +350,7 @@ class PoseTrack:
         yaw/pitch/roll degrees. The host derives nothing and refuses a
         track that does not cover the run.
         """
-        return {
+        block = {
             "camera_id": self.camera_id,
             "preset": self.preset,
             "horizon_stable": self.horizon_stable,
@@ -363,7 +363,19 @@ class PoseTrack:
             "near_m": self.near_m,
             "far_m": self.far_m,
             "spec": camera.to_dict(),
-            "poses": {
+        }
+        # Spec 8 (contracts section 10): a STATED exposure triple rides
+        # at the block's top level as plain numbers, which is where the
+        # commandlet's ApplyPhysicalExposure reads it
+        # (cameras[N].exposure {aperture_f, shutter_s, iso}). An
+        # all-default exposure is omitted, exactly as the canonical
+        # camera omits it, so every card written before spec 8 is
+        # byte-identical and the engine keeps its documented bias path.
+        exposure = getattr(camera, "exposure", None)
+        if exposure is not None and not exposure.is_default(self.preset):
+            block["exposure"] = {name: float(q.value)
+                                 for name, q in exposure.quantities()}
+        block["poses"] = {
                 "t_s": list(self.t),
                 "north_m": list(self.north_m),
                 "east_m": list(self.east_m),
@@ -372,9 +384,9 @@ class PoseTrack:
                 "pitch_deg": list(self.pitch_deg),
                 "roll_deg": list(self.roll_deg),
                 "focal_length_mm": list(self.focal_length_mm),
-            },
-            "capture_times_s": list(schedule.times),
         }
+        block["capture_times_s"] = list(schedule.times)
+        return block
 
     def sample(self, index: int) -> Dict[str, object]:
         """One pose as the manifest's per-frame mapping."""

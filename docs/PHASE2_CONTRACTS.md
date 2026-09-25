@@ -492,6 +492,71 @@ adopted: a 2 m floor would fail every lagged camera at airliner speed.
 `tests/test_camera_verify.py` L214-266 reproduces the Phase 1 172.1 m vs
 166.0 m failure by monkeypatching `_keyframed_scalar` and stays.
 
+**As landed (package D, `core/capture/verify.py`, `flightsim/verify.py`,
+`scripts/mutation_check.sh`, `tests/visual/annotation_sheets.py`) -- the
+check names, FAIL names, evidence, NOT RUN rules and order above stand;
+five decisions this page left open or worded differently, measured on a
+fabricated bundle (`tests/test_annotation_gates.py`) and stated here:**
+
+* `mask_vs_geometry` grades the centre of the silhouette's tight box
+  against the centre of the projected hull box, not the area centroid
+  against the projected CG. Measured on a perfectly placed box
+  silhouette: a hull is not centred on its CG (the 747's box centre is
+  4.8 m above it -- 6 % of the span from behind), and perspective does
+  not preserve area centroids (at the 185 m wingman slot the near end of
+  a 70 m box projects 1.5x the far end: the area centroid sits 5.6 % of
+  the span from the projected centre). Both would fail a correct render
+  at the 2 % tolerance. The tolerances stay 2 % (centre) and 5 %
+  (extent) of the projected hull, with a 1 px floor for pixel-centre
+  sampling; the area centroid and the projected CG are reported in the
+  detail. The silhouette graded is the object's ALONE pass where the
+  engine wrote one (the object with nothing in front of it), else its
+  visible pixels: an occluded object is not "offset" by its occluder.
+* `box_vs_mask` likewise grades the alone-pass silhouette's tight box
+  against the projected hull box (IoU 0.8 at >= 64 px, 0.5 at >= 16 px,
+  not claimed under 16 px, as above); the record's `bbox_2d_tight` is by
+  definition the VISIBLE pixels' box and is graded against the
+  verifier's box of the same visible pixels, to a pixel.
+* `depth_vs_geometry` cannot bound a 70 m airframe's median depth to 1 %
+  + 2 m from the CG depth alone (the visible surface is up to half a
+  length from the CG; a box hull's nearest corner is up to 0.75 L nearer
+  than any airframe point on a diagonal view). The clauses that hold on
+  any view and still catch a 2 % scale: no sky under the mask; the
+  nearest depth under the mask no nearer than the hull's nearest corner
+  and the farthest no farther than its farthest (the hull contains the
+  airframe); the nearest depth under the mask no FARTHER than the
+  nearest keypoint (a point on the surface bounds the nearest surface
+  from above) -- a 2 % scale beyond 200 m fails this one; and the
+  record's `depth_min_m` / `depth_median_m` are the same pixels to 0.05 m.
+  The median-vs-CG difference is reported. Not claimed: a scale under
+  2 % inside 200 m, where 1 % + 2 m is wider than the scale.
+* `visibility_vs_scene`'s "3 % of the analytic overlap" is applied to
+  the alone footprints themselves (the scene's own second passes), not
+  to projected boxes: visible pixels outside the footprint, hidden
+  footprint pixels nothing nearer explains (sky, background, or a
+  surface beyond the object's depth plus half its length), overlap
+  pixels owned by the farther object where the two depths order them
+  unambiguously, and the recorded counts / fractions / occluders
+  re-counted from the files; every named occluder must be a declared
+  object.
+* `mask_integers_only`: a blend that rounds to a DECLARED integer is
+  invisible to a histogram (ids are contiguous from 1), so the check
+  also reads the class image against each id's class and the engine's
+  own `non_integer_id_pixels`; id-0 pixels with a class are unlabelled
+  geometry, reported not failed.
+* A traffic aircraft's per-frame state is not in the manifest (only the
+  primary's `aircraft` block is); its placement is taken from the
+  record's `bbox_3d_camera` and said so in the detail. The projection,
+  the pixels and the depth are graded; the placement is not
+  independently re-derived. `applied_intrinsics` and the `failure` key
+  landed as written. `mask_containment` / `depth_range` report NOT RUN
+  naming their successor on any manifest that declares `objects[]`.
+  `drawn_airframe` carries `failure: aircraft.placeholder_drawn`; its
+  version-3 / `origin_basis` gate (§0.1) is NOT landed: it would change
+  `test_a_mesh_drawn_at_the_recorded_origin_passes`, which this package
+  may not edit -- an open item, and `mask_vs_geometry` now measures the
+  offset directly from pixels.
+
 ---
 
 ## 5. Randomization policy and the look coupling (package F)

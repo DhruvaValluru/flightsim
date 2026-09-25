@@ -361,3 +361,32 @@ def test_geographic_placement_resolves_through_the_scene_projection():
     i5 = columns["t"].index(5.0)
     mid_north, _ = FRAME.to_local(lat0 + 0.005, lon0)
     assert moved.north_m[i5] == pytest.approx(mid_north, abs=1e-6)
+
+
+def test_card_block_carries_a_stated_exposure_triple_as_numbers():
+    """Spec 8's cameras[].exposure reaches the pixels only through the
+    card: the commandlet's ApplyPhysicalExposure reads
+    cameras[N].exposure {aperture_f, shutter_s, iso} as plain numbers at
+    the block's top level. A defaulted exposure is omitted, so a card
+    written before spec 8 is byte-identical and the engine keeps its
+    documented bias path (Look lane, part 2, open item)."""
+    from core.capture.schedule import solve_schedule
+
+    columns = make_columns(duration_s=4.0)
+    plain = camera_for("chase")
+    plain.set("capture_count", 3, frm="test")
+    track = solve_pose_track(columns, plain, FRAME)
+    block = track.card_block(plain, solve_schedule(columns, plain, FRAME), FRAME)
+    assert "exposure" not in block
+    assert "exposure" not in block["spec"]
+
+    stated = camera_for("chase")
+    stated.set("capture_count", 3, frm="test")
+    stated.exposure.set("aperture_f", 2.8, frm="test: wide open")
+    stated.exposure.set("shutter_s", 1.0 / 1000.0, frm="test: fast")
+    track = solve_pose_track(columns, stated, FRAME)
+    block = track.card_block(stated, solve_schedule(columns, stated, FRAME), FRAME)
+    assert block["exposure"] == {"aperture_f": 2.8, "shutter_s": 0.001,
+                                 "iso": 100.0}
+    assert all(isinstance(v, float) for v in block["exposure"].values())
+    assert list(block)[-2:] == ["poses", "capture_times_s"]

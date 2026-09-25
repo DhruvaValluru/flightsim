@@ -15,10 +15,20 @@ Runs :mod:`core.capture.verify` over a run directory written by
   render host's own projection, which need rendered frames and report
   NOT RUN without them rather than passing on a tautology;
 * count exactness against the number each camera's spec REQUESTED;
+* **the annotation gates** (Phase 2, package D) beside the geometry
+  checks: ``mask_integers_only``, ``mask_vs_geometry``, ``box_vs_mask``,
+  ``depth_vs_geometry``, ``visibility_vs_scene``, ``identity_stable``
+  (across frames, cameras, and -- with ``--against`` -- two runs of
+  one spec) and ``applied_intrinsics``, each graded against the
+  ground-truth bundle the render wrote and NOT RUN without it;
 * temporal alignment, with ``--against``.
 
 A check that could not run is named as NOT RUN and is not counted as a
-pass. Exit code 0 when no check failed, 1 otherwise.
+pass. A FAIL is a refusal BY NAME: its catalogue name (``annotation.*``,
+``aircraft.placeholder_drawn``, ...) is printed after the report and
+recorded in ``verification.json`` (``failure`` on the check), and the
+dataset export refuses the run. Exit code 0 when no check failed, 1
+otherwise.
 """
 
 from __future__ import annotations
@@ -163,6 +173,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     report = verify_run(args.run_dir, other_run_dir=args.against)
     print(report.render())
+    # A failed check refuses export-readiness BY NAME: the catalogue
+    # name of what failed is printed beside the check that found it,
+    # never only buried in the detail text.
+    named = [c for c in report.failures() if c.failure]
+    if named:
+        print("  refused by name: " + ", ".join(
+            f"{c.failure} ({c.name})" for c in named))
     # The run keeps its verdict: the dataset export (flightsim.export)
     # refuses a run that has no verification.json or a failed check.
     written = write_verification(report, args.run_dir)

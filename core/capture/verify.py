@@ -80,6 +80,11 @@ class Check:
     name: str
     status: str
     detail: str
+    #: The catalogue name of what failed (contracts §4, §11), carried on
+    #: FAIL only: a refusal is by name, never only in the prose. None on
+    #: PASS / NOT RUN and on the checks that predate the key; readers of
+    #: verification.json take it by key and tolerate its absence.
+    failure: Optional[str] = None
 
     @property
     def ok(self) -> bool:
@@ -88,7 +93,10 @@ class Check:
         return self.status != FAIL
 
     def to_dict(self) -> Dict[str, str]:
-        return {"name": self.name, "status": self.status, "detail": self.detail}
+        out = {"name": self.name, "status": self.status, "detail": self.detail}
+        if self.status == FAIL and self.failure:
+            out["failure"] = self.failure
+        return out
 
 
 @dataclass
@@ -99,10 +107,16 @@ class VerificationReport:
     def ok(self) -> bool:
         return all(c.ok for c in self.checks)
 
-    def add(self, name: str, status_or_ok, detail: str) -> None:
+    def add(self, name: str, status_or_ok, detail: str,
+            failure: Optional[str] = None) -> None:
         if isinstance(status_or_ok, bool):
             status_or_ok = PASS if status_or_ok else FAIL
-        self.checks.append(Check(name, status_or_ok, detail))
+        self.checks.append(Check(name, status_or_ok, detail, failure))
+
+    def failures(self) -> List[Check]:
+        """The FAIL checks, in report order (their ``failure`` names are
+        what the CLI prints as refusals)."""
+        return [c for c in self.checks if c.status == FAIL]
 
     def to_dict(self) -> Dict:
         """The record a run directory keeps (verification.json): every
@@ -1494,7 +1508,10 @@ def verify_alignment(manifest_a: Dict, manifest_b: Dict,
 # * label_files -- every per-frame label file the engine DECLARED in
 #   render.json exists on disk (the frame-count contract, extended);
 # * mask_containment / depth_range -- the engine's instance mask and
-#   depth image against the labels, NOT RUN without them.
+#   depth image against the labels, NOT RUN without them (version 5;
+#   superseded on manifest 6 by the package-D block further down:
+#   mask_integers_only, mask_vs_geometry, box_vs_mask, depth_vs_geometry,
+#   visibility_vs_scene, identity_stable, applied_intrinsics).
 
 #: A reprojected label may differ from the producer's by float rounding
 #: and nothing else.
@@ -1701,10 +1718,26 @@ def verify_label_files(manifest: Dict, run_dir=None) -> Check:
             counted += 1
             if not (Path(run_dir) / "frames" / camera / file).is_file():
                 missing.append(f"{camera}/{name}: {kind} {file} missing")
+        # Contracts §1 (manifest 6): the raw float depth and each aircraft
+        # object's alone pass are declared by the record when the engine
+        # wrote them; a declared file that is absent is the same finding.
+        # Absent keys are an older bundle, not a missing file.
+        extra = []
+        if engine["labels"].get("depth_f32"):
+            extra.append(("depth_f32", str(engine["labels"]["depth_f32"])))
+        for declared_object in engine["labels"].get("objects") or []:
+            if isinstance(declared_object, dict) and declared_object.get("alone_png"):
+                extra.append((f"alone_{declared_object.get('int_id')}",
+                              str(declared_object["alone_png"])))
+        for kind, file in extra:
+            counted += 1
+            if not (Path(run_dir) / "frames" / camera / file).is_file():
+                missing.append(f"{camera}/{name}: {kind} {file} missing")
     if missing:
         return Check("label_files", FAIL,
                      f"{len(missing)} declared label file(s) absent: "
-                     + "; ".join(missing[:4]))
+                     + "; ".join(missing[:4]),
+                     failure="annotation.files")
     note = (f"; {sorted(undeclared)} declared no label outputs"
             if undeclared else "")
     return Check("label_files", PASS,
@@ -1821,7 +1854,8 @@ def verify_drawn_airframe(manifest: Dict, run_dir=None) -> Check:
         return Check("drawn_airframe", FAIL,
                      f"{len(problems)} camera(s) drew something other than "
                      f"the airframe the labels describe, where they describe "
-                     f"it: " + "; ".join(problems[:4]))
+                     f"it: " + "; ".join(problems[:4]),
+                     failure="aircraft.placeholder_drawn")
     return Check("drawn_airframe", PASS,
                  f"{len(recorded)} camera(s): " + "; ".join(notes[:4]))
 
@@ -1838,7 +1872,19 @@ def _read_gray_png(path):
 
 
 def verify_mask_containment(manifest: Dict, run_dir=None) -> Check:
-    """The engine's aircraft mask lies inside the label's 2-D box."""
+    """The engine's aircraft mask lies inside the label's 2-D box.
+
+    The version-5 check: one instance id, one box. On a manifest that
+    declares ``objects[]`` (version 6) the ID image carries every
+    object's integer and box_vs_mask grades each against its projected
+    hull, so this reports NOT RUN naming its successor rather than
+    grading the primary twice."""
+    if _declared_objects(manifest):
+        return Check("mask_containment", NOT_RUN,
+                     f"superseded for manifest {manifest.get('manifest_version')} "
+                     f"by box_vs_mask (the ID image carries every object's int_id; "
+                     f"the tight box of each is graded against its projected hull "
+                     f"there); this single-id containment test is the version-5 check")
     declared = _engine_label_records(run_dir)
     if not declared:
         return Check("mask_containment", NOT_RUN,
@@ -1889,7 +1935,18 @@ def verify_mask_containment(manifest: Dict, run_dir=None) -> Check:
 
 def verify_depth_range(manifest: Dict, run_dir=None) -> Check:
     """Depth at the engine's aircraft-mask pixels lies within the 3-D
-    box's depth span."""
+    box's depth span.
+
+    The version-5 check. On a manifest that declares ``objects[]``
+    (version 6) depth_vs_geometry grades every aircraft object's depth
+    against its projected hull, keypoints and record, so this reports
+    NOT RUN naming its successor."""
+    if _declared_objects(manifest):
+        return Check("depth_range", NOT_RUN,
+                     f"superseded for manifest {manifest.get('manifest_version')} "
+                     f"by depth_vs_geometry (per object: the depth under the mask "
+                     f"against the projected hull band, the nearest keypoint and the "
+                     f"record); this single-id span test is the version-5 check")
     declared = _engine_label_records(run_dir)
     if not declared:
         return Check("depth_range", NOT_RUN,
@@ -1937,6 +1994,1259 @@ def verify_depth_range(manifest: Dict, run_dir=None) -> Check:
     return Check("depth_range", PASS if ok else FAIL,
                  f"{counted} frames; lowest in-range fraction {worst:.3f} "
                  f"at {worst_where} (min {DEPTH_IN_RANGE_MIN})")
+
+
+# -- Phase 2, package D: the annotation gates (contracts §4) ----------------
+#
+# The per-frame ground-truth bundle (contracts §1) is graded here against
+# the manifest's geometry through THIS module's projection: the ID image,
+# the class image, the depth (.f32, else the 16-bit PNG at its scale), the
+# alone passes and the render.json record. Nothing from the producer
+# (core/capture/labels.py, core/capture/objects.py) runs here; every
+# number the bundle carries is re-derived from the files with numpy and
+# compared against the record and against the projected geometry. Each
+# check names its FAIL from the catalogue (``Check.failure``), reports NOT
+# RUN without its evidence (no bundle; a manifest below 6 declares no
+# ids), and never turns NOT RUN into a pass.
+#
+# What is NOT claimed, stated once for the block:
+#
+# * The hull a mask is graded against is a BOX -- the converter's measured
+#   mesh extent when the very mesh manifest the run cites is on this
+#   machine, else the airframe block's extents box. A real airframe's
+#   silhouette lies inside that box, so the box-vs-mask agreement on an
+#   oblique view is bounded by the contract's tolerances, not measured
+#   here: no engine ran in this environment, and the first rendered frame
+#   measures the residual (see the report).
+# * A traffic aircraft's per-frame state is not recorded in the manifest
+#   (only the primary's ``aircraft`` block is); its placement is taken
+#   from the record's own ``bbox_3d_camera`` and stated so in the detail.
+#   The projection of that placement, the pixels and the depth are graded;
+#   the placement itself is not independently re-derived.
+# * A blended ID value that rounds to a DECLARED integer is invisible to
+#   a histogram (the ids are 1..N, contiguous); the engine's own
+#   ``non_integer_id_pixels`` count, the class image and the geometry
+#   checks are what see such a blend. Stated in mask_integers_only.
+# * Objects whose projected hull spans fewer than BOX_IOU_MIN_PX pixels
+#   are counted and not graded (the contract's "not claimed under 16 px").
+
+#: mask_vs_geometry: the centre of the silhouette's tight box may sit
+#: this fraction of the projected hull span (the larger of its width and
+#: height) from the centre of the projected hull box (contracts §3: 2 %
+#: "centroid vs projected CG" -- see the check for why the two centres
+#: and not the area centroid and the CG). A 3 m mesh-origin shift on a
+#: 70 m airframe seen from abeam is 4 % of the span.
+MASK_CENTROID_TOL_FRACTION = 0.02
+#: mask_vs_geometry: the ID mask's tight-box width and height may differ
+#: from the projected hull box's by this fraction of the hull's
+#: (contracts §3: 5 %; the converter refuses a mesh whose span disagrees
+#: with the cited length by more than the same 5 %).
+MASK_EXTENT_TOL_FRACTION = 0.05
+#: mask_vs_geometry: the pixel floor under both fractions. The ID pass
+#: samples pixel centres, so each rasterised edge of a continuous extent
+#: lands within half a pixel of it: a width is quantised to within one
+#: pixel and a centroid to within half of one, whatever the size. Below
+#: 20 px of span the floor, not the fraction, is the tolerance.
+MASK_TOL_PX = 1.0
+#: box_vs_mask: IoU between the tight box and the projected hull box for
+#: an object whose hull spans at least BOX_IOU_LARGE_PX pixels ...
+BOX_IOU_MIN_LARGE = 0.8
+#: ... and for one spanning BOX_IOU_MIN_PX to BOX_IOU_LARGE_PX pixels.
+BOX_IOU_MIN_SMALL = 0.5
+BOX_IOU_LARGE_PX = 64.0
+#: Below this projected span the box/mask agreement is NOT CLAIMED
+#: (contracts §3); such objects are counted, not graded.
+BOX_IOU_MIN_PX = 16.0
+#: depth_vs_geometry: a measured depth may differ from the geometry's by
+#: this fraction of itself plus DEPTH_TOL_M (contracts §3: 1 % + 2 m).
+#: The band itself -- from the hull's nearest corner to its farthest --
+#: is what grows with the airframe's length.
+DEPTH_TOL_FRACTION = 0.01
+DEPTH_TOL_M = 2.0
+#: depth_vs_geometry: the record's depth_min_m / depth_median_m are the
+#: same pixels this module reads, so they agree to float rounding.
+DEPTH_RECORD_TOL_M = 0.05
+#: visibility_vs_scene: the visible pixels outside an object's alone
+#: footprint, the hidden footprint pixels nothing nearer explains, and
+#: the overlap pixels drawn with the farther object, each as a fraction
+#: of the footprint (or of the overlap) the check tolerates (contracts
+#: §3: 3 % of the analytic overlap). Both passes are AA-free from the
+#: same pose, so the residual on a correct render is edge pixels.
+VISIBILITY_TOL_FRACTION = 0.03
+#: visibility_vs_scene: the recorded visible_fraction is the same two
+#: counts this module makes; agreement to float rounding.
+VISIBILITY_RECORD_TOL = 1e-6
+#: applied_intrinsics: the engine's applied horizontal field of view
+#: against the record's 2 atan(width / 2 fx) (contracts §4: 0.1 deg).
+APPLIED_FOV_TOL_DEG = 0.1
+#: applied_intrinsics: the applied focal length and sensor width against
+#: the record's, in mm (a representation tolerance, not a budget).
+APPLIED_LENS_TOL_MM = 1e-3
+
+#: Failure names (contracts §11), one per check.
+FAIL_MASK_BLEND = "annotation.mask_blend"
+FAIL_MASK_OFFSET = "annotation.mask_offset"
+FAIL_BOX_MISMATCH = "annotation.box_mismatch"
+FAIL_DEPTH_RANGE = "annotation.depth_range"
+FAIL_VISIBILITY = "annotation.visibility"
+FAIL_IDENTITY = "annotation.identity"
+FAIL_INTRINSICS = "annotation.intrinsics"
+FAIL_FILES = "annotation.files"
+
+#: The manifest version from which ``objects[]`` declares the ids the ID
+#: image may hold (contracts §2.4).
+OBJECTS_MIN_MANIFEST_VERSION = 6
+
+_REPO = Path(__file__).resolve().parents[2]
+
+
+def _declared_objects(manifest: Dict) -> List[Dict]:
+    """The manifest's ``objects[]`` (version 6), or [] for an older one."""
+    objects = manifest.get("objects")
+    return [o for o in objects if isinstance(o, dict)] if isinstance(objects, list) else []
+
+
+def _no_objects_reason(manifest: Dict) -> str:
+    return (f"manifest_version {manifest.get('manifest_version')!r} carries no "
+            f"objects[] (version {OBJECTS_MIN_MANIFEST_VERSION} declares the ids "
+            f"the ID image may hold), so there is nothing to grade the bundle against")
+
+
+def _no_bundle_reason() -> str:
+    return ("no render.json declares per-frame label outputs (no engine pass, "
+            "or one without -labels): render on Windows to exercise this")
+
+
+def _labelled_ids(objects: Sequence[Dict]) -> Dict[int, Dict]:
+    """``{int_id: entry}`` for the objects the ID image may carry."""
+    out: Dict[int, Dict] = {}
+    for entry in objects:
+        try:
+            if entry.get("labelled", True) and entry.get("in_scene", True):
+                out[int(entry["int_id"])] = entry
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def _aircraft_entries(objects: Sequence[Dict]) -> List[Dict]:
+    return [e for e in objects if e.get("class") == "aircraft"
+            and e.get("labelled", True) and e.get("in_scene", True)]
+
+
+def _record_object(record: Dict, int_id: int) -> Optional[Dict]:
+    """The frame's ``labels.objects[]`` entry for an id, or None."""
+    for entry in (record.get("labels") or {}).get("objects") or []:
+        if isinstance(entry, dict) and entry.get("int_id") == int_id:
+            return entry
+    return None
+
+
+def _engine_object(engine: Dict, int_id: int) -> Optional[Dict]:
+    """The render.json record's ``labels.objects[]`` entry for an id."""
+    for entry in (engine.get("labels") or {}).get("objects") or []:
+        if isinstance(entry, dict) and entry.get("int_id") == int_id:
+            return entry
+    return None
+
+
+def _read_depth_metres(folder: Path, labels: Dict, width: int, height: int):
+    """The frame's depth as float metres (+inf for sky), from the raw
+    float32 file when declared, else the 16-bit PNG at its stated scale
+    (65535 saturates to +inf). Own numpy reader; refuses a float file of
+    the wrong size (a truncated depth would label everything below the
+    cut as sky) by returning the reason as a string."""
+    import numpy as np
+
+    if labels.get("depth_f32"):
+        path = folder / str(labels["depth_f32"])
+        raw = np.fromfile(path, dtype="<f4")
+        if raw.size != width * height:
+            return (f"{path.name}: {raw.size} float32 values for a "
+                    f"{width}x{height} frame ({width * height} expected)")
+        return raw.reshape(height, width).astype("float64")
+    if labels.get("depth"):
+        array = _read_gray_png(folder / str(labels["depth"]))
+        if array is None:
+            return "Pillow unavailable"
+        scale = float(labels.get("depth_scale_m") or 0.0)
+        if scale <= 0.0:
+            return f"{labels['depth']}: declared with no positive depth_scale_m"
+        metres = array.astype("float64") * scale
+        metres[array >= 65535] = math.inf
+        return metres
+    return "no depth file declared"
+
+
+# -- the geometry an object is graded against ------------------------------
+#
+# Every object is reduced to an oriented box in CAMERA coordinates (x
+# right, y down, z forward): centre, the three body axes, the half
+# extents, the CG, the keypoints. For the primary all of it comes from the
+# frame's own ``aircraft`` state and the manifest's airframe block through
+# this module's rotation and projection; for a traffic aircraft the
+# placement comes from the record (stated).
+
+def _camera_coords(record: Dict, point, axes) -> Tuple[float, float, float]:
+    """A world (north, east, up) point in camera coordinates."""
+    forward, right, up = axes
+    d = (point[0] - record["position_north_m"],
+         point[1] - record["position_east_m"],
+         point[2] - record["position_alt_m"])
+    return (sum(a * b for a, b in zip(right, d)),
+            -sum(a * b for a, b in zip(up, d)),
+            sum(a * b for a, b in zip(forward, d)))
+
+
+def _pinhole(record: Dict, cam) -> Optional[Tuple[float, float]]:
+    """Camera coordinates -> continuous pixel (u, v); None behind the
+    camera. Pixel (x, y) covers [x, x+1) x [y, y+1)."""
+    x, y, z = cam
+    if z <= 0.0:
+        return None
+    cx, cy = record["principal_point_px"]
+    return (cx + record["fx_px"] * x / z, cy + record["fy_px"] * y / z)
+
+
+def _hull_box_body(manifest: Dict, airframe_block: Dict, primary: bool
+                   ) -> Tuple[Dict[str, Tuple[float, float]], str]:
+    """The box an object's pixels are graded against, in body metres
+    about the CG ``{"forward": (aft, fwd), "right": (left, right),
+    "down": (top, bottom)}``, with its basis.
+
+    For the primary, when ``assets.mesh_manifest`` names a file that is
+    on THIS machine with the cited sha256 and carries the converter's
+    measured extent (version >= 3, contracts §0.1): that extent re-based
+    on the CG -- the actor frame is +x forward, +y right, +z up with its
+    origin at the structural datum, the CG sits at (-x, y, z) * 0.0254 of
+    its structural inches, body z is DOWN. The arithmetic is written here
+    (the producer's hull_box_body_m never runs in the verifier). Else the
+    airframe block's extents box, which the labels' own bbox_2d is built
+    from and which test_camera_labels pins against the FDM's XML.
+    """
+    if primary:
+        asset = (manifest.get("assets") or {}).get("mesh_manifest") or {}
+        path, sha = asset.get("path"), asset.get("sha256")
+        if path and sha:
+            candidate = _REPO / str(path)
+            if candidate.is_file() and hashlib.sha256(
+                    candidate.read_bytes()).hexdigest() == str(sha):
+                try:
+                    mesh = json.loads(candidate.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    mesh = {}
+                version = mesh.get("version")
+                extent = mesh.get("mesh_extent_actor_m") or {}
+                origin = mesh.get("mesh_origin_actor_cm")
+                if (isinstance(version, (int, float)) and version >= 3
+                        and origin and all(k in extent for k in "xyz")):
+                    ox, oy, oz = (float(v) / 100.0 for v in origin)
+                    cx, cy, cz = (float(v) for v in airframe_block["cg_structural_in"])
+                    cg = (-cx * 0.0254, cy * 0.0254, cz * 0.0254)
+                    ex, ey, ez = ([float(v) for v in extent[k]] for k in "xyz")
+                    box = {"forward": (ox + ex[0] - cg[0], ox + ex[1] - cg[0]),
+                           "right": (oy + ey[0] - cg[1], oy + ey[1] - cg[1]),
+                           "down": (-(oz + ez[1] - cg[2]), -(oz + ez[0] - cg[2]))}
+                    return box, (f"mesh manifest version {int(version)} "
+                                 f"measured extent ({path}) re-based on the CG")
+    box = airframe_block["box_body_m"]
+    return ({k: (float(box[k][0]), float(box[k][1])) for k in ("forward", "right", "down")},
+            "the airframe block's extents box (no mesh manifest with the cited "
+            "digest on this machine)")
+
+
+def _object_geometry(manifest: Dict, record: Dict, entry: Dict, axes):
+    """The oriented box of one aircraft object in camera coordinates, or
+    ``(None, why)``."""
+    int_id = int(entry["int_id"])
+    if entry.get("role") == "primary" or int_id == AIRCRAFT_INSTANCE_ID:
+        airframe = manifest.get("airframe")
+        state = record.get("aircraft")
+        if not isinstance(airframe, dict) or not isinstance(state, dict):
+            return None, "no airframe block or aircraft state in the manifest"
+        cg = _camera_coords(record, (float(state["north_m"]), float(state["east_m"]),
+                                     float(state["alt_m"])), axes)
+        body_axes = []
+        for unit in ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)):
+            tip = _camera_coords(record, _body_point_enu(unit, state), axes)
+            body_axes.append(tuple(t - c for t, c in zip(tip, cg)))
+        placement = "the frame's aircraft state through the verifier's own rotation"
+    else:
+        block = None
+        for traffic in manifest.get("traffic") or []:
+            if isinstance(traffic, dict) and traffic.get("int_id") == int_id:
+                block = traffic
+        airframe = (block or {}).get("airframe")
+        own = _record_object(record, int_id)
+        box3 = (own or {}).get("bbox_3d_camera") if own else None
+        if not isinstance(airframe, dict):
+            return None, f"{entry.get('id')}: no traffic airframe block in the manifest"
+        if not isinstance(box3, dict) or not box3.get("cg_m") or not box3.get("body_axes_in_camera"):
+            return None, (f"{entry.get('id')}: the record carries no bbox_3d_camera "
+                          f"placement for it")
+        cg = tuple(float(v) for v in box3["cg_m"])
+        body_axes = [tuple(float(v) for v in row) for row in box3["body_axes_in_camera"]]
+        placement = ("the record's bbox_3d_camera placement (the manifest records no "
+                     "per-frame traffic state; the projection and the pixels are graded, "
+                     "the placement is not independently re-derived)")
+    box, basis = _hull_box_body(manifest, airframe, entry.get("role") == "primary"
+                                or int_id == AIRCRAFT_INSTANCE_ID)
+    lo = (box["forward"][0], box["right"][0], box["down"][0])
+    hi = (box["forward"][1], box["right"][1], box["down"][1])
+    centre_body = tuple((a + b) / 2.0 for a, b in zip(lo, hi))
+    half = tuple((b - a) / 2.0 for a, b in zip(lo, hi))
+
+    def place(body):
+        return tuple(cg[i] + sum(body[k] * body_axes[k][i] for k in range(3))
+                     for i in range(3))
+
+    corners = [place((x, y, z)) for x in box["forward"] for y in box["right"]
+               for z in box["down"]]
+    keypoints = {}
+    for kp in airframe.get("keypoints") or []:
+        if isinstance(kp, dict) and kp.get("name") and kp.get("body_m"):
+            keypoints[str(kp["name"])] = place(tuple(float(v) for v in kp["body_m"]))
+    return {
+        "centre": place(centre_body), "axes": body_axes, "half": half,
+        "cg": cg, "corners": corners, "keypoints": keypoints,
+        "length_m": float(box["forward"][1] - box["forward"][0]),
+        "basis": f"{basis}; placement: {placement}",
+    }, ""
+
+
+def _projected_hull(record: Dict, geometry: Dict):
+    """(unclipped box, clipped box, cg pixel) of the object's hull, or
+    ``None`` when a corner is behind the camera."""
+    pixels = [_pinhole(record, c) for c in geometry["corners"]]
+    if any(p is None for p in pixels):
+        return None
+    us = [p[0] for p in pixels]
+    vs = [p[1] for p in pixels]
+    unclipped = (min(us), min(vs), max(us), max(vs))
+    width, height = float(record["width_px"]), float(record["height_px"])
+    clipped = (max(unclipped[0], 0.0), max(unclipped[1], 0.0),
+               min(unclipped[2], width), min(unclipped[3], height))
+    if clipped[2] <= clipped[0] or clipped[3] <= clipped[1]:
+        clipped = None
+    return unclipped, clipped, _pinhole(record, geometry["cg"])
+
+
+def _iou(a, b) -> float:
+    ix0, iy0 = max(a[0], b[0]), max(a[1], b[1])
+    ix1, iy1 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, ix1 - ix0) * max(0.0, iy1 - iy0)
+    area = lambda r: max(0.0, r[2] - r[0]) * max(0.0, r[3] - r[1])
+    union = area(a) + area(b) - inter
+    return inter / union if union > 0.0 else 0.0
+
+
+def _ray_box_depths(record: Dict, geometry: Dict, xs, ys):
+    """For pixel centres (xs, ys): the camera-z depth at which the ray
+    enters and leaves the object's oriented box, and whether it hits it
+    at all. The slab test, vectorised; the ray is parametrised by camera
+    z so the parameter IS the scene depth the engine writes."""
+    import numpy as np
+
+    cx, cy = record["principal_point_px"]
+    d = (np.asarray(xs, dtype=float) + 0.5 - cx) / float(record["fx_px"])
+    e = (np.asarray(ys, dtype=float) + 0.5 - cy) / float(record["fy_px"])
+    ones = np.ones_like(d)
+    t_enter = np.full(d.shape, -np.inf)
+    t_exit = np.full(d.shape, np.inf)
+    hit = np.ones(d.shape, dtype=bool)
+    centre = geometry["centre"]
+    for axis, half in zip(geometry["axes"], geometry["half"]):
+        origin = -sum(a * c for a, c in zip(axis, centre))
+        direction = axis[0] * d + axis[1] * e + axis[2] * ones
+        parallel = np.abs(direction) < 1e-12
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t0 = (-half - origin) / direction
+            t1 = (half - origin) / direction
+        lo, hi = np.minimum(t0, t1), np.maximum(t0, t1)
+        lo = np.where(parallel, -np.inf, lo)
+        hi = np.where(parallel, np.inf, hi)
+        hit &= ~(parallel & (abs(origin) > half))
+        t_enter = np.maximum(t_enter, lo)
+        t_exit = np.minimum(t_exit, hi)
+    hit &= (t_exit >= t_enter) & (t_exit > 0.0)
+    return np.maximum(t_enter, 0.0), t_exit, hit
+
+
+def _alone_files(labels: Dict) -> Dict[int, str]:
+    """``{int_id: alone png}`` the record declares."""
+    out: Dict[int, str] = {}
+    for declared in labels.get("objects") or []:
+        if isinstance(declared, dict) and declared.get("alone_png"):
+            try:
+                out[int(declared["int_id"])] = str(declared["alone_png"])
+            except (KeyError, TypeError, ValueError):
+                continue
+    return out
+
+
+def _silhouette(folder: Path, labels: Dict, mask, int_id: int):
+    """(the object's silhouette, its basis): the alone footprint when the
+    engine wrote one -- the object drawn with nothing in front of it,
+    so occlusion does not shrink it -- else its visible pixels in the
+    ID image. None when the alone file is unreadable."""
+    alone = _alone_files(labels).get(int_id)
+    if alone is None:
+        return mask == int_id, "the ID image (no alone pass declared)"
+    array = _read_gray_png(folder / alone)
+    if array is None or array.shape != mask.shape:
+        return None, f"{alone} is not an image of the frame's size"
+    return array == int_id, f"the alone pass {alone}"
+
+
+def _bundle_frames(manifest: Dict, run_dir):
+    """Yield (record, camera, name, engine record, folder) for every
+    labelled manifest frame with a render.json label record."""
+    declared = _engine_label_records(run_dir)
+    for record in _labelled_frames(manifest):
+        camera = str(record["camera_id"])
+        name = Path(str(record["file"])).name
+        engine = declared.get(camera, {}).get(name)
+        if engine is None:
+            continue
+        yield record, camera, name, engine, Path(run_dir) / "frames" / camera
+
+
+# -- the checks ---------------------------------------------------------------
+
+def verify_mask_integers_only(manifest: Dict, run_dir=None) -> Check:
+    """The ID image holds the declared object integers and nothing else.
+
+    Three clauses, each an independent reading of the bundle: (1) the
+    histogram of ``_mask.png`` -- every non-zero value is a declared,
+    labelled, in-scene ``int_id``; (2) the class image agrees with the
+    ID image pixel for pixel -- a pixel whose id maps to one class while
+    the class image states another is a blended or mis-stencilled edge;
+    (3) the engine's own ``non_integer_id_pixels`` count (the readback
+    floats that were not whole numbers before quantisation) is zero.
+
+    NOT claimed: a blend that rounds to a DECLARED integer (the ids are
+    contiguous from 1) is invisible to the histogram; clause (2) sees it
+    when the class image did not blend the same way, the engine's count
+    sees it at the source, and mask_vs_geometry sees where it lands.
+    Pixels with id 0 but a non-zero class are unlabelled geometry (the
+    engine's ``unlabelled_geometry_pixels``): reported, not failed.
+    """
+    objects = _declared_objects(manifest)
+    if not objects:
+        return Check("mask_integers_only", NOT_RUN, _no_objects_reason(manifest))
+    if not _engine_label_records(run_dir):
+        return Check("mask_integers_only", NOT_RUN, _no_bundle_reason())
+    import numpy as np
+
+    labelled = _labelled_ids(objects)
+    declared_ids = sorted(labelled)
+    class_of = {i: int(e.get("class_id", 0)) for i, e in labelled.items()}
+    seen = set()
+    frames = 0
+    unlabelled = 0
+    for record, camera, name, engine, folder in _bundle_frames(manifest, run_dir):
+        labels = engine["labels"]
+        if not labels.get("mask"):
+            continue
+        mask = _read_gray_png(folder / labels["mask"])
+        if mask is None:
+            return Check("mask_integers_only", NOT_RUN, "Pillow unavailable")
+        if mask.ndim != 2:
+            return Check("mask_integers_only", FAIL,
+                         f"{camera}/{name}: {labels['mask']} has {mask.ndim} "
+                         f"dimensions; an ID image is one integer per pixel",
+                         failure=FAIL_MASK_BLEND)
+        values, counts = np.unique(mask, return_counts=True)
+        undeclared = [(int(v), int(c)) for v, c in zip(values, counts)
+                      if int(v) != 0 and int(v) not in labelled]
+        if undeclared:
+            return Check("mask_integers_only", FAIL,
+                         f"{camera}/{name}: the ID image holds values no object "
+                         f"declares: " + ", ".join(f"{v} ({c} px)" for v, c in undeclared[:6])
+                         + f"; declared ids {declared_ids}",
+                         failure=FAIL_MASK_BLEND)
+        seen.update(int(v) for v in values if int(v) != 0)
+        non_integer = labels.get("non_integer_id_pixels")
+        if isinstance(non_integer, (int, float)) and non_integer > 0:
+            return Check("mask_integers_only", FAIL,
+                         f"{camera}/{name}: the engine read {int(non_integer)} "
+                         f"ID pixels that were not whole numbers (a blended pass); "
+                         f"the ID image was quantised from them",
+                         failure=FAIL_MASK_BLEND)
+        if labels.get("class_mask"):
+            classes = _read_gray_png(folder / labels["class_mask"])
+            if classes is not None and classes.shape == mask.shape:
+                lut = np.zeros(int(mask.max()) + 1, dtype=np.int64)
+                for i, c in class_of.items():
+                    if i < lut.size:
+                        lut[i] = c
+                expected = lut[mask.astype(np.int64)]
+                ided = mask != 0
+                disagree = int(np.count_nonzero(ided & (classes.astype(np.int64) != expected)))
+                if disagree:
+                    return Check("mask_integers_only", FAIL,
+                                 f"{camera}/{name}: {disagree} pixels carry an object "
+                                 f"id whose class is not what the class image states "
+                                 f"(a blended edge takes one image's value and not "
+                                 f"the other's)",
+                                 failure=FAIL_MASK_BLEND)
+                unlabelled += int(np.count_nonzero(~ided & (classes != 0)))
+        frames += 1
+    if frames == 0:
+        return Check("mask_integers_only", NOT_RUN,
+                     "engine label records declared but none matched a labelled frame")
+    note = (f"; {unlabelled} pixels of geometry carry a class but no id "
+            f"(unlabelled, reported not failed)" if unlabelled else "")
+    return Check("mask_integers_only", PASS,
+                 f"{frames} ID images hold only {sorted(seen)} of the declared "
+                 f"{declared_ids} (0 background); the class image agrees at every "
+                 f"labelled pixel; the engine counted no non-integer ids{note}")
+
+
+def verify_mask_vs_geometry(manifest: Dict, run_dir=None) -> Check:
+    """The ID mask sits where the geometry says the object is.
+
+    Per aircraft object per frame, through this module's own rotation
+    and pinhole: the centre of the silhouette's tight box against the
+    centre of the projected hull box, within MASK_CENTROID_TOL_FRACTION
+    of the projected hull span (graded only when the hull lies wholly
+    inside the image: a truncated silhouette has no meaningful centre),
+    and the tight box's width and height against the projected hull
+    box's (within MASK_EXTENT_TOL_FRACTION). A hull inside the image
+    with no pixels, or pixels for a hull outside it, fails outright.
+    The silhouette graded is the object's ALONE pass where the engine
+    wrote one -- the object drawn with nothing in front of it, so an
+    occluder does not shrink or shift it -- else its pixels in the ID
+    image; whether the ID image then shows the right part of that
+    silhouette is visibility_vs_scene's question.
+
+    Contracts §3 says "mask centroid vs projected CG". Measured on a
+    perfectly placed box silhouette and stated on the page: a hull is
+    not centred on its CG (the 747's box centre sits 4.8 m above it,
+    6 % of the span seen from behind), and perspective does not preserve
+    area centroids (at the 185 m wingman slot the near end of a 70 m box
+    projects 1.5x the far end, putting the area centroid 5.6 % of the
+    span from the projected centre). Two extent centres compare like
+    with like; the area centroid and the projected CG are reported in
+    the detail, not graded.
+    This is the check that exposes the Phase 1 offset: a mesh drawn
+    25-30 m ahead of its label moves the centroid by a third of the
+    span. A shift ALONG the line of sight is invisible to it (a chase
+    camera looks down the axis); the second camera sees it, and
+    depth_vs_geometry bounds it.
+    """
+    objects = _declared_objects(manifest)
+    if not objects:
+        return Check("mask_vs_geometry", NOT_RUN, _no_objects_reason(manifest))
+    if not _engine_label_records(run_dir):
+        return Check("mask_vs_geometry", NOT_RUN, _no_bundle_reason())
+    import numpy as np
+
+    aircraft = _aircraft_entries(objects)
+    graded = 0
+    not_claimed = 0
+    skipped: Dict[str, str] = {}
+    worst_centroid = (0.0, "")
+    worst_extent = (0.0, "")
+    for record, camera, name, engine, folder in _bundle_frames(manifest, run_dir):
+        labels = engine["labels"]
+        if not labels.get("mask"):
+            continue
+        mask = _read_gray_png(folder / labels["mask"])
+        if mask is None:
+            return Check("mask_vs_geometry", NOT_RUN, "Pillow unavailable")
+        axes = axes_from_quat(record["quaternion_wxyz"])
+        for entry in aircraft:
+            int_id = int(entry["int_id"])
+            where = f"{camera}/{name} {entry.get('id')}"
+            geometry, why = _object_geometry(manifest, record, entry, axes)
+            if geometry is None:
+                skipped[str(entry.get("id"))] = why
+                continue
+            hull = _projected_hull(record, geometry)
+            hit, source = _silhouette(folder, labels, mask, int_id)
+            if hit is None:
+                return Check("mask_vs_geometry", FAIL, f"{where}: {source}",
+                             failure=FAIL_MASK_OFFSET)
+            pixels = int(np.count_nonzero(hit))
+            if hull is None:
+                if pixels:
+                    return Check("mask_vs_geometry", FAIL,
+                                 f"{where}: {pixels} pixels carry its id in {source} "
+                                 f"while a hull corner is behind the camera",
+                                 failure=FAIL_MASK_OFFSET)
+                continue
+            unclipped, clipped, cg_px = hull
+            if clipped is None:
+                if pixels > BOX_IOU_MIN_PX:
+                    return Check("mask_vs_geometry", FAIL,
+                                 f"{where}: {pixels} pixels carry its id while its "
+                                 f"hull projects outside the image "
+                                 f"({', '.join(f'{v:.0f}' for v in unclipped)})",
+                                 failure=FAIL_MASK_OFFSET)
+                continue
+            hull_w, hull_h = clipped[2] - clipped[0], clipped[3] - clipped[1]
+            span = max(hull_w, hull_h)
+            if span < BOX_IOU_MIN_PX:
+                not_claimed += 1
+                continue
+            if pixels == 0:
+                return Check("mask_vs_geometry", FAIL,
+                             f"{where}: the hull projects inside the image "
+                             f"({span:.0f} px span) but {source} has no pixel of "
+                             f"its id",
+                             failure=FAIL_MASK_OFFSET)
+            ys, xs = np.nonzero(hit)
+            tight_w = float(xs.max() + 1 - xs.min())
+            tight_h = float(ys.max() + 1 - ys.min())
+            extent = max(abs(tight_w - hull_w) / hull_w, abs(tight_h - hull_h) / hull_h)
+            extent_px = max(abs(tight_w - hull_w), abs(tight_h - hull_h))
+            if extent > worst_extent[0]:
+                worst_extent = (extent, f"{where} ({tight_w:.0f}x{tight_h:.0f} px vs "
+                                        f"hull {hull_w:.0f}x{hull_h:.0f})")
+            graded += 1
+            if extent > MASK_EXTENT_TOL_FRACTION and extent_px > MASK_TOL_PX:
+                return Check("mask_vs_geometry", FAIL,
+                             f"{where}: mask extent {tight_w:.0f}x{tight_h:.0f} px "
+                             f"against a projected hull of {hull_w:.0f}x{hull_h:.0f} "
+                             f"px ({extent * 100:.1f} % off, tol "
+                             f"{MASK_EXTENT_TOL_FRACTION * 100:.0f} % or {MASK_TOL_PX:g} "
+                             f"px); basis: "
+                             f"{geometry['basis']}",
+                             failure=FAIL_MASK_OFFSET)
+            inside = (unclipped[0] >= 0.0 and unclipped[1] >= 0.0
+                      and unclipped[2] <= float(record["width_px"])
+                      and unclipped[3] <= float(record["height_px"]))
+            if inside:
+                centre_px = ((unclipped[0] + unclipped[2]) / 2.0,
+                             (unclipped[1] + unclipped[3]) / 2.0)
+                centre_mask = (float(xs.min() + xs.max() + 1) / 2.0,
+                               float(ys.min() + ys.max() + 1) / 2.0)
+                offset = math.dist(centre_mask, centre_px)
+                relative = offset / span
+                if relative > worst_centroid[0]:
+                    worst_centroid = (relative, f"{where} ({offset:.1f} px of "
+                                                f"{span:.0f} px span)")
+                if relative > MASK_CENTROID_TOL_FRACTION and offset > MASK_TOL_PX:
+                    centroid = (float(xs.mean()) + 0.5, float(ys.mean()) + 0.5)
+                    cg_text = (f"({cg_px[0]:.0f}, {cg_px[1]:.0f})"
+                               if cg_px is not None else "behind the camera")
+                    return Check("mask_vs_geometry", FAIL,
+                                 f"{where}: the centre of the mask's box "
+                                 f"({centre_mask[0]:.0f}, {centre_mask[1]:.0f}) sits "
+                                 f"{offset:.1f} px from the centre of the projected "
+                                 f"hull box ({centre_px[0]:.0f}, {centre_px[1]:.0f}) "
+                                 f"-- {relative * 100:.1f} % of the {span:.0f} px hull "
+                                 f"span, tol {MASK_CENTROID_TOL_FRACTION * 100:.0f} % "
+                                 f"or {MASK_TOL_PX:g} px (area centroid "
+                                 f"({centroid[0]:.0f}, {centroid[1]:.0f}), projected "
+                                 f"CG {cg_text}); the pixels of {source} are not "
+                                 f"where the geometry puts the object; basis: "
+                                 f"{geometry['basis']}",
+                                 failure=FAIL_MASK_OFFSET)
+    if graded == 0:
+        why = "; ".join(f"{k}: {v}" for k, v in list(skipped.items())[:3])
+        return Check("mask_vs_geometry", NOT_RUN,
+                     f"no aircraft object could be graded ({not_claimed} under "
+                     f"{BOX_IOU_MIN_PX:.0f} px, not claimed{'; ' + why if why else ''})")
+    notes = []
+    if not_claimed:
+        notes.append(f"{not_claimed} object-frames under {BOX_IOU_MIN_PX:.0f} px not claimed")
+    for key, why in skipped.items():
+        notes.append(f"{key} not graded: {why}")
+    return Check("mask_vs_geometry", PASS,
+                 f"{graded} object-frames; worst box-centre offset "
+                 f"{worst_centroid[0] * 100:.2f} % of span at "
+                 f"{worst_centroid[1] or 'none graded'} (tol "
+                 f"{MASK_CENTROID_TOL_FRACTION * 100:.0f} %); worst extent "
+                 f"{worst_extent[0] * 100:.2f} % at {worst_extent[1] or 'none'} (tol "
+                 f"{MASK_EXTENT_TOL_FRACTION * 100:.0f} %)"
+                 + (f"; {'; '.join(notes)}" if notes else ""))
+
+
+def verify_box_vs_mask(manifest: Dict, run_dir=None) -> Check:
+    """The tight box from the ID mask against the projected hull box.
+
+    IoU at or above BOX_IOU_MIN_LARGE for a hull spanning at least
+    BOX_IOU_LARGE_PX pixels, BOX_IOU_MIN_SMALL down to BOX_IOU_MIN_PX,
+    not claimed below (counted). The tight box graded is the object's
+    silhouette -- its alone pass where the engine wrote one, so that a
+    legitimately occluded object is not failed for the part an
+    occluder hides; else its visible pixels. The record's
+    ``bbox_2d_tight`` is by definition the VISIBLE pixels' box (the
+    producer measured the ID image), so it is graded against this
+    module's box of the same visible pixels, to a pixel. Supersedes
+    mask_containment for manifest 6.
+    """
+    objects = _declared_objects(manifest)
+    if not objects:
+        return Check("box_vs_mask", NOT_RUN, _no_objects_reason(manifest))
+    if not _engine_label_records(run_dir):
+        return Check("box_vs_mask", NOT_RUN, _no_bundle_reason())
+    import numpy as np
+
+    aircraft = _aircraft_entries(objects)
+    graded = 0
+    not_claimed = 0
+    worst = (1.0, "")
+    for record, camera, name, engine, folder in _bundle_frames(manifest, run_dir):
+        labels = engine["labels"]
+        if not labels.get("mask"):
+            continue
+        mask = _read_gray_png(folder / labels["mask"])
+        if mask is None:
+            return Check("box_vs_mask", NOT_RUN, "Pillow unavailable")
+        axes = axes_from_quat(record["quaternion_wxyz"])
+        for entry in aircraft:
+            int_id = int(entry["int_id"])
+            where = f"{camera}/{name} {entry.get('id')}"
+            geometry, why = _object_geometry(manifest, record, entry, axes)
+            if geometry is None:
+                continue
+            hull = _projected_hull(record, geometry)
+            visible = mask == int_id
+            recorded = (_record_object(record, int_id) or {}).get("bbox_2d_tight")
+            if recorded is not None and visible.any():
+                ys, xs = np.nonzero(visible)
+                own = (float(xs.min()), float(ys.min()), float(xs.max()) + 1.0,
+                       float(ys.max()) + 1.0)
+                gap = max(abs(float(a) - b) for a, b in zip(recorded, own))
+                if gap > 0.5:
+                    return Check("box_vs_mask", FAIL,
+                                 f"{where}: the record's bbox_2d_tight "
+                                 f"{[round(float(v), 1) for v in recorded]} is not "
+                                 f"the box of its own visible pixels "
+                                 f"{[round(v, 1) for v in own]} ({gap:.1f} px off)",
+                                 failure=FAIL_BOX_MISMATCH)
+            hit, source = _silhouette(folder, labels, mask, int_id)
+            if hit is None or hull is None or hull[1] is None or not hit.any():
+                continue        # mask_vs_geometry grades presence
+            _, clipped, _ = hull
+            span = max(clipped[2] - clipped[0], clipped[3] - clipped[1])
+            if span < BOX_IOU_MIN_PX:
+                not_claimed += 1
+                continue
+            ys, xs = np.nonzero(hit)
+            tight = (float(xs.min()), float(ys.min()), float(xs.max()) + 1.0,
+                     float(ys.max()) + 1.0)
+            iou = _iou(tight, clipped)
+            floor = BOX_IOU_MIN_LARGE if span >= BOX_IOU_LARGE_PX else BOX_IOU_MIN_SMALL
+            graded += 1
+            if iou < worst[0]:
+                worst = (iou, f"{where} ({span:.0f} px span, floor {floor})")
+            if iou < floor:
+                return Check("box_vs_mask", FAIL,
+                             f"{where}: tight box {[round(v) for v in tight]} of "
+                             f"{source} vs projected hull box "
+                             f"{[round(v) for v in clipped]}: IoU {iou:.3f} below "
+                             f"{floor} for a {span:.0f} px span; basis: "
+                             f"{geometry['basis']}",
+                             failure=FAIL_BOX_MISMATCH)
+    if graded == 0:
+        return Check("box_vs_mask", NOT_RUN,
+                     f"no aircraft object with pixels and a projected hull to grade "
+                     f"({not_claimed} under {BOX_IOU_MIN_PX:.0f} px, not claimed)")
+    return Check("box_vs_mask", PASS,
+                 f"{graded} object-frames; lowest IoU {worst[0]:.3f} at {worst[1]} "
+                 f"(floors {BOX_IOU_MIN_LARGE} at >= {BOX_IOU_LARGE_PX:.0f} px, "
+                 f"{BOX_IOU_MIN_SMALL} at >= {BOX_IOU_MIN_PX:.0f} px)"
+                 + (f"; {not_claimed} under {BOX_IOU_MIN_PX:.0f} px not claimed"
+                    if not_claimed else ""))
+
+
+def verify_depth_vs_geometry(manifest: Dict, run_dir=None) -> Check:
+    """The depth under the ID mask against the projected geometry.
+
+    Per aircraft object per frame, with ``tol(z) = DEPTH_TOL_FRACTION *
+    z + DEPTH_TOL_M``: (1) no mask pixel reads as sky; (2) the nearest
+    depth under the mask is no nearer than the hull's nearest corner and
+    (3) the farthest no farther than its farthest -- the box contains
+    the airframe, so both hold on any view; (4) the nearest depth under
+    the mask is no FARTHER than the nearest keypoint (a keypoint is on
+    the airframe, so the nearest visible surface is at most as deep) --
+    the clause a scaled depth fails: from behind, the tail is the
+    nearest surface, and a 2 % scale beyond 200 m moves it past the
+    tolerance; (5) the record's depth_min_m / depth_median_m are these
+    pixels, and agree to DEPTH_RECORD_TOL_M. The median against the
+    projected CG depth is reported. Supersedes depth_range for manifest
+    6. NOT claimed: a scale under 2 % inside 200 m, where 1 % + 2 m is
+    wider than the scale.
+    """
+    objects = _declared_objects(manifest)
+    if not objects:
+        return Check("depth_vs_geometry", NOT_RUN, _no_objects_reason(manifest))
+    if not _engine_label_records(run_dir):
+        return Check("depth_vs_geometry", NOT_RUN, _no_bundle_reason())
+    import numpy as np
+
+    def tol(z: float) -> float:
+        return DEPTH_TOL_FRACTION * abs(z) + DEPTH_TOL_M
+
+    aircraft = _aircraft_entries(objects)
+    graded = 0
+    worst_median = (0.0, "")
+    worst_near = (-math.inf, "")
+    for record, camera, name, engine, folder in _bundle_frames(manifest, run_dir):
+        labels = engine["labels"]
+        if not labels.get("mask") or not (labels.get("depth_f32") or labels.get("depth")):
+            continue
+        mask = _read_gray_png(folder / labels["mask"])
+        if mask is None:
+            return Check("depth_vs_geometry", NOT_RUN, "Pillow unavailable")
+        depth = _read_depth_metres(folder, labels, int(record["width_px"]),
+                                   int(record["height_px"]))
+        if isinstance(depth, str):
+            return Check("depth_vs_geometry", FAIL, f"{camera}/{name}: {depth}",
+                         failure=FAIL_DEPTH_RANGE)
+        if depth.shape != mask.shape:
+            return Check("depth_vs_geometry", FAIL,
+                         f"{camera}/{name}: depth is {depth.shape[1]}x{depth.shape[0]}, "
+                         f"the ID image {mask.shape[1]}x{mask.shape[0]}",
+                         failure=FAIL_DEPTH_RANGE)
+        axes = axes_from_quat(record["quaternion_wxyz"])
+        for entry in aircraft:
+            int_id = int(entry["int_id"])
+            where = f"{camera}/{name} {entry.get('id')}"
+            hit = mask == int_id
+            if not hit.any():
+                continue
+            geometry, why = _object_geometry(manifest, record, entry, axes)
+            if geometry is None:
+                continue
+            under = depth[hit]
+            sky = int(np.count_nonzero(~np.isfinite(under)))
+            if sky:
+                return Check("depth_vs_geometry", FAIL,
+                             f"{where}: {sky} of {under.size} mask pixels read as sky "
+                             f"(no finite depth) where the ID image says the object is",
+                             failure=FAIL_DEPTH_RANGE)
+            d_min, d_max = float(under.min()), float(under.max())
+            d_median = float(np.median(under))
+            z_corners = [c[2] for c in geometry["corners"]]
+            z_near, z_far = min(z_corners), max(z_corners)
+            if d_min < z_near - tol(z_near):
+                return Check("depth_vs_geometry", FAIL,
+                             f"{where}: nearest depth under the mask {d_min:.1f} m is "
+                             f"nearer than the hull's nearest corner {z_near:.1f} m by "
+                             f"more than {tol(z_near):.1f} m; basis: {geometry['basis']}",
+                             failure=FAIL_DEPTH_RANGE)
+            if d_max > z_far + tol(z_far):
+                return Check("depth_vs_geometry", FAIL,
+                             f"{where}: farthest depth under the mask {d_max:.1f} m is "
+                             f"beyond the hull's farthest corner {z_far:.1f} m by more "
+                             f"than {tol(z_far):.1f} m; basis: {geometry['basis']}",
+                             failure=FAIL_DEPTH_RANGE)
+            if geometry["keypoints"]:
+                nearest_name, nearest = min(geometry["keypoints"].items(),
+                                            key=lambda kv: kv[1][2])
+                z_kp = nearest[2]
+                gap = d_min - z_kp
+                if gap > worst_near[0]:
+                    worst_near = (gap, f"{where} ({nearest_name} at {z_kp:.1f} m, "
+                                       f"mask from {d_min:.1f} m)")
+                if gap > tol(z_kp):
+                    return Check("depth_vs_geometry", FAIL,
+                                 f"{where}: the nearest depth under the mask "
+                                 f"{d_min:.1f} m is {gap:.1f} m FARTHER than the "
+                                 f"nearest keypoint ({nearest_name} projects at "
+                                 f"{z_kp:.1f} m; tol {tol(z_kp):.1f} m) -- a "
+                                 f"surface point cannot be behind a point on the "
+                                 f"surface, so the depth is scaled or shifted; "
+                                 f"basis: {geometry['basis']}",
+                                 failure=FAIL_DEPTH_RANGE)
+            cg_z = geometry["cg"][2]
+            if abs(d_median - cg_z) > worst_median[0]:
+                worst_median = (abs(d_median - cg_z), f"{where} (median {d_median:.1f} m, "
+                                                      f"CG {cg_z:.1f} m)")
+            recorded = _record_object(record, int_id) or {}
+            for key, own in (("depth_min_m", d_min), ("depth_median_m", d_median)):
+                value = recorded.get(key)
+                if isinstance(value, (int, float)) and abs(float(value) - own) > DEPTH_RECORD_TOL_M:
+                    return Check("depth_vs_geometry", FAIL,
+                                 f"{where}: the record's {key} {float(value):.2f} m is "
+                                 f"not what the depth file holds under the mask "
+                                 f"({own:.2f} m)",
+                                 failure=FAIL_DEPTH_RANGE)
+            graded += 1
+    if graded == 0:
+        return Check("depth_vs_geometry", NOT_RUN,
+                     "no aircraft object with mask pixels, a depth file and a "
+                     "projected hull to grade")
+    return Check("depth_vs_geometry", PASS,
+                 f"{graded} object-frames within the hull's depth band at "
+                 f"{DEPTH_TOL_FRACTION * 100:.0f} % + {DEPTH_TOL_M:g} m; nearest "
+                 f"surface at most {worst_near[0]:.2f} m beyond the nearest keypoint "
+                 f"at {worst_near[1] or 'none'}; median depth vs projected CG depth "
+                 f"differs by at most {worst_median[0]:.1f} m at {worst_median[1] or 'none'}")
+
+
+def verify_visibility_vs_scene(manifest: Dict, run_dir=None) -> Check:
+    """The alone passes against the ID pass: what the scene hides.
+
+    Per aircraft object with an alone pass, re-counted from the files:
+    (1) its visible pixels lie inside its alone footprint; (2) every
+    hidden footprint pixel has something NEARER drawn over it -- a
+    declared id at a finite depth no deeper than the object's own depth
+    plus half its length: a footprint pixel showing sky, or something
+    behind the object, is an object the ID pass dropped; (3) where two
+    aircraft footprints overlap and their depths order them
+    unambiguously, the nearer one owns the overlap pixels -- the
+    occluder hidden from the full pass (its stencil missing where the
+    other's footprint is, the depth capture untouched) fails here; (4)
+    the recorded pixel counts,
+    ``visible_fraction`` and ``occluded_by`` (render.json integers; the
+    manifest's strings resolved through objects[]) are these same counts,
+    and every occluder named is a declared object. An object's own
+    depth is its projected CG depth (the geometry, independent of the
+    engine's depth image, which a wrong ID pass can contradict); only
+    an object with no geometry falls back to the median under its
+    visible pixels. Each tolerance is VISIBILITY_TOL_FRACTION of the
+    footprint or of the overlap. NOT RUN without alone passes. The
+    terrain has no alone pass and is graded only as an occluder.
+    """
+    objects = _declared_objects(manifest)
+    if not objects:
+        return Check("visibility_vs_scene", NOT_RUN, _no_objects_reason(manifest))
+    if not _engine_label_records(run_dir):
+        return Check("visibility_vs_scene", NOT_RUN, _no_bundle_reason())
+    import numpy as np
+
+    labelled = _labelled_ids(objects)
+    id_of = {i: str(e.get("id")) for i, e in labelled.items()}
+    aircraft = {int(e["int_id"]): e for e in _aircraft_entries(objects)}
+    graded = 0
+    alone_seen = False
+    worst = (0.0, "")
+
+    def fail(text: str) -> Check:
+        return Check("visibility_vs_scene", FAIL, text, failure=FAIL_VISIBILITY)
+
+    for record, camera, name, engine, folder in _bundle_frames(manifest, run_dir):
+        labels = engine["labels"]
+        if not labels.get("mask"):
+            continue
+        alone_files = _alone_files(labels)
+        if not alone_files:
+            continue
+        alone_seen = True
+        mask = _read_gray_png(folder / labels["mask"])
+        if mask is None:
+            return Check("visibility_vs_scene", NOT_RUN, "Pillow unavailable")
+        depth = _read_depth_metres(folder, labels, int(record["width_px"]),
+                                   int(record["height_px"]))
+        if isinstance(depth, str) or depth.shape != mask.shape:
+            depth = None
+        axes = axes_from_quat(record["quaternion_wxyz"])
+        footprints: Dict[int, object] = {}
+        depths: Dict[int, Optional[float]] = {}
+        half_len: Dict[int, float] = {}
+        for int_id, file in sorted(alone_files.items()):
+            if int_id not in aircraft:
+                return fail(f"{camera}/{name}: an alone pass is declared for id "
+                            f"{int_id}, which is not a labelled aircraft object")
+            alone = _read_gray_png(folder / file)
+            if alone is None or alone.shape != mask.shape:
+                return fail(f"{camera}/{name}: {file} is not an image of the frame's size")
+            footprints[int_id] = alone == int_id
+            geometry, _ = _object_geometry(manifest, record, aircraft[int_id], axes)
+            half_len[int_id] = geometry["length_m"] / 2.0 if geometry else 0.0
+            visible = mask == int_id
+            if geometry is not None:
+                depths[int_id] = geometry["cg"][2]
+            elif depth is not None and visible.any():
+                finite = depth[visible][np.isfinite(depth[visible])]
+                depths[int_id] = float(np.median(finite)) if finite.size else None
+            else:
+                depths[int_id] = None
+        for int_id, footprint in footprints.items():
+            where = f"{camera}/{name} {id_of.get(int_id, int_id)}"
+            n_alone = int(np.count_nonzero(footprint))
+            visible = mask == int_id
+            n_vis = int(np.count_nonzero(visible))
+            stray = int(np.count_nonzero(visible & ~footprint))
+            if stray > VISIBILITY_TOL_FRACTION * max(n_alone, 1):
+                return fail(f"{where}: {stray} pixels carry its id outside its alone "
+                            f"footprint of {n_alone} px -- the ID pass and the alone "
+                            f"pass do not draw it in the same place")
+            hidden = footprint & ~visible
+            if hidden.any():
+                unexplained = hidden & (mask == 0)
+                if depth is not None:
+                    unexplained |= hidden & ~np.isfinite(depth)
+                    if depths.get(int_id) is not None:
+                        limit = depths[int_id] + half_len[int_id] + (
+                            DEPTH_TOL_FRACTION * depths[int_id] + DEPTH_TOL_M)
+                        unexplained |= hidden & (depth > limit)
+                n_bad = int(np.count_nonzero(unexplained))
+                fraction = n_bad / max(n_alone, 1)
+                if fraction > worst[0]:
+                    worst = (fraction, f"{where} ({n_bad} of {n_alone} footprint px)")
+                if n_bad > VISIBILITY_TOL_FRACTION * max(n_alone, 1):
+                    return fail(f"{where}: {n_bad} of its {n_alone} footprint pixels "
+                                f"are hidden with nothing nearer drawn over them (sky, "
+                                f"background, or a surface beyond the object) -- the "
+                                f"ID pass dropped it where nothing occludes it")
+            own_occluders = sorted(int(v) for v in np.unique(mask[footprint])
+                                   if int(v) not in (0, int_id))
+            for occluder in own_occluders:
+                if occluder not in labelled:
+                    return fail(f"{where}: occluded by id {occluder}, which no object "
+                                f"declares")
+            own_fraction = (n_vis / n_alone) if n_alone else None
+            engine_entry = _engine_object(engine, int_id) or {}
+            for key, own in (("pixels", n_vis), ("pixels_alone", n_alone)):
+                value = engine_entry.get(key)
+                if isinstance(value, (int, float)) and int(value) != own:
+                    return fail(f"{where}: render.json says {key} {int(value)}, the "
+                                f"files hold {own}")
+            engine_fraction = engine_entry.get("visible_fraction")
+            if (isinstance(engine_fraction, (int, float)) and own_fraction is not None
+                    and abs(float(engine_fraction) - own_fraction) > VISIBILITY_RECORD_TOL):
+                return fail(f"{where}: render.json visible_fraction "
+                            f"{float(engine_fraction):.4f} is not the files' "
+                            f"{own_fraction:.4f}")
+            engine_occ = engine_entry.get("occluded_by")
+            if isinstance(engine_occ, list) and sorted(int(v) for v in engine_occ) != own_occluders:
+                return fail(f"{where}: render.json occluded_by {engine_occ} but the "
+                            f"footprint holds {own_occluders}")
+            recorded = _record_object(record, int_id) or {}
+            rec_fraction = recorded.get("visible_fraction")
+            if (isinstance(rec_fraction, (int, float)) and own_fraction is not None
+                    and abs(float(rec_fraction) - own_fraction) > VISIBILITY_RECORD_TOL):
+                return fail(f"{where}: the manifest's visible_fraction "
+                            f"{float(rec_fraction):.4f} is not the files' "
+                            f"{own_fraction:.4f}")
+            rec_occ = recorded.get("occluded_by")
+            if isinstance(rec_occ, list):
+                expected = sorted(id_of[o] for o in own_occluders)
+                if sorted(str(v) for v in rec_occ) != expected:
+                    return fail(f"{where}: the manifest's occluded_by {rec_occ} is not "
+                                f"what the footprint holds {expected}")
+            graded += 1
+        ids = sorted(footprints)
+        for i, a in enumerate(ids):
+            for b in ids[i + 1:]:
+                overlap = footprints[a] & footprints[b]
+                n_overlap = int(np.count_nonzero(overlap))
+                if n_overlap == 0 or depths.get(a) is None or depths.get(b) is None:
+                    continue
+                margin = half_len[a] + half_len[b] + DEPTH_TOL_M
+                if abs(depths[a] - depths[b]) <= margin:
+                    continue            # ordering ambiguous at this range
+                near, far = (a, b) if depths[a] < depths[b] else (b, a)
+                wrong = int(np.count_nonzero(overlap & (mask == far)))
+                if wrong > VISIBILITY_TOL_FRACTION * n_overlap:
+                    return fail(f"{camera}/{name}: {id_of.get(far, far)} at "
+                                f"{depths[far]:.0f} m is drawn over "
+                                f"{id_of.get(near, near)} at {depths[near]:.0f} m in "
+                                f"{wrong} of their {n_overlap} overlapping footprint "
+                                f"pixels -- the nearer object is missing from the "
+                                f"full pass")
+    if not alone_seen:
+        return Check("visibility_vs_scene", NOT_RUN,
+                     "the engine declared no alone pass (labels.objects[].alone_png); "
+                     "visibility needs the per-object footprint")
+    if graded == 0:
+        return Check("visibility_vs_scene", NOT_RUN,
+                     "alone passes declared but none matched a labelled frame")
+    return Check("visibility_vs_scene", PASS,
+                 f"{graded} object-frames: visible pixels inside the alone footprint, "
+                 f"hidden pixels explained by something nearer (worst unexplained "
+                 f"{worst[0] * 100:.2f} % at {worst[1] or 'none'}; tol "
+                 f"{VISIBILITY_TOL_FRACTION * 100:.0f} %), overlaps owned by the nearer "
+                 f"object, and the recorded fractions and occluders re-counted")
+
+
+def verify_identity_stable(manifest: Dict, run_dir=None,
+                           other_manifest: Optional[Dict] = None) -> Check:
+    """One id, one integer -- across frames, cameras, and runs of one
+    spec.
+
+    The manifest's ``objects[]`` is the reference. Every frame's
+    ``labels.objects[]`` must map each id to the same integer (frames
+    and cameras); every camera's render.json must echo the same
+    mapping in its root ``objects[]`` and name only those integers in
+    its per-frame records (the engine wrote the stencils it was told);
+    with ``--against``, the other run's ``objects[]`` must be the same
+    mapping when the two runs are of one spec (same ``spec_digest``) --
+    a different spec is named, not failed. NOT RUN without a render:
+    the engine's echo is half the evidence.
+    """
+    objects = _declared_objects(manifest)
+    if not objects:
+        return Check("identity_stable", NOT_RUN, _no_objects_reason(manifest))
+
+    def mapping(entries) -> Dict[str, int]:
+        out: Dict[str, int] = {}
+        for entry in entries or []:
+            if isinstance(entry, dict) and entry.get("id") is not None:
+                try:
+                    out[str(entry["id"])] = int(entry["int_id"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+        return out
+
+    def fail(text: str) -> Check:
+        return Check("identity_stable", FAIL, text, failure=FAIL_IDENTITY)
+
+    reference = mapping(objects)
+    if len(set(reference.values())) != len(reference):
+        return fail(f"objects[] gives one integer to two ids: {reference}")
+    frames = 0
+    for record in manifest.get("frames", []):
+        entries = (record.get("labels") or {}).get("objects")
+        if not isinstance(entries, list):
+            continue
+        frames += 1
+        seen = mapping(entries)
+        for key, value in seen.items():
+            if reference.get(key) != value:
+                return fail(f"{record.get('camera_id')}/{record.get('index')}: "
+                            f"{key} is {value} in this frame's labels but "
+                            f"{reference.get(key)} in objects[]")
+    cameras = []
+    frames_dir = Path(run_dir) / "frames" if run_dir is not None else None
+    if frames_dir is not None and frames_dir.is_dir():
+        for camera_dir in sorted(p for p in frames_dir.iterdir() if p.is_dir()):
+            path = camera_dir / "render.json"
+            if not path.is_file():
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            records = _render_frame_records(payload)
+            if not any(isinstance(r.get("labels"), dict) for r in records):
+                continue
+            cameras.append(camera_dir.name)
+            echoed = mapping(payload.get("objects"))
+            for key, value in echoed.items():
+                if reference.get(key) != value:
+                    return fail(f"{camera_dir.name}/render.json: the engine wrote "
+                                f"{key} as {value} where objects[] says "
+                                f"{reference.get(key)} -- the stencils were not "
+                                f"the card's")
+            for value in set(reference.values()) - set(echoed.values()):
+                if echoed:
+                    return fail(f"{camera_dir.name}/render.json: objects[] declares "
+                                f"int_id {value} but the engine's echo does not "
+                                f"name it")
+            for r in records:
+                for declared in (r.get("labels") or {}).get("objects") or []:
+                    if not isinstance(declared, dict):
+                        continue
+                    try:
+                        value = int(declared["int_id"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if value not in reference.values():
+                        return fail(f"{camera_dir.name}/{r.get('frame')}: the engine "
+                                    f"wrote int_id {value}, which objects[] does not "
+                                    f"declare")
+    if not cameras:
+        return Check("identity_stable", NOT_RUN,
+                     f"{frames} frames agree with objects[] {reference}, but no "
+                     f"render.json echoes the ids the engine wrote (no engine pass); "
+                     f"the engine's half of the evidence is missing")
+    note = ""
+    if other_manifest is not None:
+        other = mapping(_declared_objects(other_manifest))
+        if other_manifest.get("spec_digest") == manifest.get("spec_digest"):
+            if other != reference:
+                return fail(f"the --against run of the same spec maps its objects "
+                            f"{other} where this run maps {reference}")
+            note = "; the --against run of the same spec maps them identically"
+        else:
+            note = ("; the --against run is of a different spec, so cross-run "
+                    "identity (one spec, one list) is not graded against it")
+    return Check("identity_stable", PASS,
+                 f"{len(reference)} objects keep one integer each across {frames} "
+                 f"frames and {len(cameras)} camera(s) ({sorted(cameras)}), and the "
+                 f"engine's render.json echoes the same list{note}")
+
+
+def verify_applied_intrinsics(manifest: Dict, run_dir=None) -> Check:
+    """The lens and picture the ENGINE applied against the record's.
+
+    The commandlet writes ``applied_focal_length_mm``,
+    ``applied_sensor_width_mm``, ``applied_fov_deg``, ``applied_width_px``
+    and ``applied_height_px`` on every consume-poses frame; this reads
+    them back against the record's ``focal_length_mm``,
+    ``sensor_width_mm``, ``width_px``, ``height_px`` and the horizontal
+    field of view they imply, 2 atan(width / 2 fx) (APPLIED_FOV_TOL_DEG).
+    A render at a different field of view scales every mask by the
+    ratio of the tangents -- 1 deg at 55 deg is 2 %, under every mask
+    tolerance, which is why this check exists. NOT RUN where no record
+    carries the applied intrinsics.
+    """
+    applied: Dict[str, Dict[str, Dict]] = {}
+    frames_dir = Path(run_dir) / "frames" if run_dir is not None else None
+    if frames_dir is not None and frames_dir.is_dir():
+        for camera_dir in sorted(p for p in frames_dir.iterdir() if p.is_dir()):
+            path = camera_dir / "render.json"
+            if not path.is_file():
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            per_frame = {str(r.get("frame")): r for r in _render_frame_records(payload)
+                         if isinstance(r, dict) and "applied_fov_deg" in r}
+            if per_frame:
+                applied[camera_dir.name] = per_frame
+    if not applied:
+        return Check("applied_intrinsics", NOT_RUN,
+                     "no render.json records the applied intrinsics "
+                     "(applied_fov_deg et al.; no render, or an older build)")
+    counted = 0
+    worst_deg = 0.0
+    for record in manifest.get("frames", []):
+        camera = str(record["camera_id"])
+        if camera not in applied:
+            continue
+        name = Path(str(record["file"])).name
+        engine = applied[camera].get(name)
+        if engine is None:
+            return Check("applied_intrinsics", FAIL,
+                         f"{camera}/{name}: the engine recorded no applied intrinsics "
+                         f"for this frame while it did for others",
+                         failure=FAIL_INTRINSICS)
+        fov = math.degrees(2.0 * math.atan(float(record["width_px"])
+                                           / (2.0 * float(record["fx_px"]))))
+        gap = abs(float(engine["applied_fov_deg"]) - fov)
+        worst_deg = max(worst_deg, gap)
+        if gap > APPLIED_FOV_TOL_DEG:
+            return Check("applied_intrinsics", FAIL,
+                         f"{camera}/{name}: the engine rendered at "
+                         f"{float(engine['applied_fov_deg']):.3f} deg horizontal field "
+                         f"of view where the record's lens implies {fov:.3f} deg "
+                         f"(tol {APPLIED_FOV_TOL_DEG} deg); every mask is scaled by "
+                         f"the ratio of the tangents",
+                         failure=FAIL_INTRINSICS)
+        for key, mine in (("applied_width_px", "width_px"),
+                          ("applied_height_px", "height_px")):
+            if key in engine and int(engine[key]) != int(record[mine]):
+                return Check("applied_intrinsics", FAIL,
+                             f"{camera}/{name}: {key} {int(engine[key])} where the "
+                             f"record states {mine} {int(record[mine])}",
+                             failure=FAIL_INTRINSICS)
+        for key, mine in (("applied_focal_length_mm", "focal_length_mm"),
+                          ("applied_sensor_width_mm", "sensor_width_mm")):
+            if key in engine and abs(float(engine[key]) - float(record[mine])) > APPLIED_LENS_TOL_MM:
+                return Check("applied_intrinsics", FAIL,
+                             f"{camera}/{name}: {key} {float(engine[key]):.3f} where "
+                             f"the record states {mine} {float(record[mine]):.3f}",
+                             failure=FAIL_INTRINSICS)
+        counted += 1
+    if counted == 0:
+        return Check("applied_intrinsics", NOT_RUN,
+                     "applied intrinsics recorded but none matched a manifest frame")
+    return Check("applied_intrinsics", PASS,
+                 f"{counted} frames rendered at the record's lens and picture size; "
+                 f"worst field-of-view gap {worst_deg:.4f} deg (tol "
+                 f"{APPLIED_FOV_TOL_DEG} deg)")
 
 
 # -- Phase 10, P10-3: the sensor model --------------------------------------
@@ -2332,14 +3642,24 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     report.checks.append(verify_label_files(manifest, run_dir))
     report.checks.append(verify_mask_containment(manifest, run_dir))
     report.checks.append(verify_depth_range(manifest, run_dir))
+    # Phase 2, package D (contracts §4): the annotation gates, in the
+    # page's order, after the version-5 label checks they supersede.
+    other = None
+    if other_run_dir is not None:
+        other = read_capture_manifest(Path(other_run_dir) / "capture_manifest.json")
+    report.checks.append(verify_mask_integers_only(manifest, run_dir))
+    report.checks.append(verify_mask_vs_geometry(manifest, run_dir))
+    report.checks.append(verify_box_vs_mask(manifest, run_dir))
+    report.checks.append(verify_depth_vs_geometry(manifest, run_dir))
+    report.checks.append(verify_visibility_vs_scene(manifest, run_dir))
+    report.checks.append(verify_identity_stable(manifest, run_dir, other))
+    report.checks.append(verify_applied_intrinsics(manifest, run_dir))
     report.checks.append(verify_sensor_undistortion(manifest))
     report.checks.append(verify_sensor_files(manifest, run_dir))
     report.checks.append(verify_frame_integrity(manifest, run_dir))
     report.checks.append(verify_applied_pose(manifest, run_dir))
 
-    if other_run_dir is not None:
-        other = read_capture_manifest(
-            Path(other_run_dir) / "capture_manifest.json")
+    if other is not None:
         report.checks.append(verify_alignment(manifest, other))
     else:
         report.checks.append(Check(
@@ -2357,8 +3677,16 @@ VERIFICATION_FILE = "verification.json"
 
 
 def write_verification(report: VerificationReport, run_dir) -> Path:
+    """Write the verdict atomically: a temporary file in the same
+    directory, then ``os.replace``. Campaign workers (package G) verify
+    runs in parallel while the campaign process reads the verdicts; a
+    reader must see the previous complete file or the new one, never
+    half of a JSON document (NEXT.md gotcha 30)."""
     import json
+    import os
 
     path = Path(run_dir) / VERIFICATION_FILE
-    path.write_text(json.dumps(report.to_dict(), indent=1), encoding="utf-8")
+    staged = path.with_name(f".{VERIFICATION_FILE}.{os.getpid()}.tmp")
+    staged.write_text(json.dumps(report.to_dict(), indent=1), encoding="utf-8")
+    os.replace(staged, path)
     return path

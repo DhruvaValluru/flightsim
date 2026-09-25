@@ -1696,3 +1696,203 @@ measure text, which is the only measurement possible here.
   on this tree for `core/campaign/campaign.py`, `tests/test_annotation_gates.py`
   and `tests/test_campaign.py` -- files of parallel packages, not this
   stage's; every text I/O this stage added states `encoding="utf-8"`.
+
+## P2-D/gates -- the annotation quality gates: seven checks over the ground-truth bundle, refusals by name, mutation guards that fire, visual sheets
+
+**What was measured, and what was defective.** Four things, before
+anything was built. (1) `scripts/mutation_check.sh` carried an aliased
+guard: the 12-space `'            if gap > tol:'` of the chase-station
+entry is a SUBSTRING of the 16-space world-anchored clause 46 lines
+earlier in `verify.py`, and `mutate()` does `str.replace(old, new, 1)`
+-- so the chase entry re-disabled the tower clause, reported "ok" for
+the tower test going red a second time, and the chase clause was never
+tested by the script at all. Both entries now carry their clause's own
+preceding lines (`math.dist(camera, expected)` vs `math.dist(station,
+offset)`) and each was confirmed to fire against its own clause. (2)
+The contract's "mask centroid vs projected CG <= 2 % of the span"
+fails a PERFECT silhouette: a hull is not centred on its CG (the 747's
+box centre is 4.8 m above it, 6 % of the span from behind) and
+perspective does not preserve area centroids (at the 185 m wingman slot
+the near end of a 70 m box projects 1.5x the far end, 5.6 % of the span).
+Measured on the fabricated bundle before the check was written down;
+the check grades the two box centres (contracts §4 "as landed"). (3)
+"depth_min / depth_median vs the projected CG depth at 1 % + 2 m"
+cannot hold: from behind, the visible surface of a 70 m airframe is
+37 m nearer than its CG; a hull box's nearest corner is up to 0.75 L
+nearer than any airframe point on a diagonal view. The clauses that
+hold on any view and still catch a 2 % scale are listed on the page.
+(4) A blur of an 8-bit ID image whose ids are 1, 2, 3 produces only
+1, 2, 3: the histogram check the contract describes cannot see it; the
+class image and the engine's own `non_integer_id_pixels` can.
+
+**What was built** (contracts §4, §11; brainstorm §3.6).
+
+* **Seven checks in `core/capture/verify.py`**, appended after
+  `depth_range` and before `sensor_undistortion`, each PASS / FAIL /
+  NOT RUN, each FAIL carrying its catalogue name in the new
+  `Check.failure` field (`verification.json` gains `"failure"` on FAIL
+  only; every reader takes it by key):
+  `mask_integers_only` (`annotation.mask_blend`: the ID image's values
+  are declared ids; the class image agrees with each id's class; the
+  engine counted no non-integer ids), `mask_vs_geometry`
+  (`annotation.mask_offset`: the alone-pass silhouette's box centre
+  within 2 % of the projected hull span of the projected hull box's
+  centre, its width/height within 5 %, 1 px floor; a hull in frame with
+  no pixels, or pixels with no hull, fails), `box_vs_mask`
+  (`annotation.box_mismatch`: IoU 0.8 at >= 64 px, 0.5 at >= 16 px, not
+  claimed below; the record's `bbox_2d_tight` is its visible pixels'
+  box to a pixel), `depth_vs_geometry` (`annotation.depth_range`: no
+  sky under the mask; the depth band bounded by the hull's nearest and
+  farthest corners; the nearest depth no farther than the nearest
+  keypoint; the record's min/median are the file's), `visibility_vs_scene`
+  (`annotation.visibility`: visible pixels inside the alone footprint;
+  hidden footprint pixels explained by something nearer; overlaps owned
+  by the nearer object; recorded counts, fractions and occluders
+  re-counted; every occluder declared), `identity_stable`
+  (`annotation.identity`: one id, one integer across every frame and
+  camera, the engine's `render.json` echo, and -- with `--against` --
+  a second run of the same spec), `applied_intrinsics`
+  (`annotation.intrinsics`: the engine's applied field of view within
+  0.1 deg of 2 atan(width / 2 fx), the applied picture size and lens the
+  record's). `label_files` also checks the declared `_depth.f32` and
+  every declared alone pass and fails `annotation.files`;
+  `drawn_airframe` fails `aircraft.placeholder_drawn`.
+  `mask_containment` / `depth_range` are kept for version-5 manifests
+  and report NOT RUN naming their successor on any manifest that
+  declares `objects[]`. Every check is NOT RUN without a bundle and
+  without `objects[]`, by sentence. The verifier imports nothing from
+  `labels.py` / `objects.py`: the ID images, alone passes, `.f32` depth
+  and `render.json` are read with numpy and Pillow here; the hull is
+  re-based from the mesh manifest (when the cited file with the cited
+  digest is on this machine) or taken from the airframe block; the
+  projection is `project_point`'s pinhole; the ray-box depths are a
+  slab test written here.
+* **`flightsim.verify`** prints the seven beside the geometry checks,
+  prints `refused by name: annotation.mask_offset (mask_vs_geometry)`
+  after the report for every FAIL that has a name, and records the
+  verdict atomically (a temporary in the run directory, then
+  `os.replace`) -- package G's workers write verdicts in parallel while
+  the campaign reads them. `ok` is false on any FAIL, so the export
+  refuses the run.
+* **`tests/test_annotation_gates.py`** (30 tests): a fabricated run --
+  the producer's manifest 6 over synthetic telemetry (a 747, an A320
+  crossing 400 m ahead, a 600 m chase station and the wingman slot),
+  and a bundle painted by the test's own arithmetic: three elementary
+  rotations for the camera and the airframe, a ray through every pixel
+  centre, the slab test against each airframe's box, a z-buffer over
+  the boxes and the ground plane; the ID image, the class image, the
+  float depth, the 16-bit depth, one alone pass per aircraft and a
+  `render.json` in the commandlet's shape, then `attach_engine_labels`.
+  A consistency test pins the painted primary against the producer's
+  `bbox_2d` to a pixel before anything is graded. The clean run passes
+  every gate and `verify_run().ok`; then every brainstorm §3.6 mutation
+  fails the named check: the mesh origin 3 m along the body axis
+  (`mask_offset` -- named on a wingman frame, every chase frame having
+  passed: a chase camera looks down the axis), two ids swapped in the
+  engine's echo and in a frame's labels (`identity`), swapped in the
+  pixels alone (`visibility`: the primary's id outside its own
+  footprint) and in every pass (`mask_offset`), the ID image blurred
+  (`mask_blend`, through the class image), an undeclared stencil value
+  and an engine non-integer count (`mask_blend`), the depth scaled 1.02
+  with the record re-derived (`depth_range`, the nearest-keypoint
+  clause), the occluder hidden from the full pass (`visibility`, the
+  overlap owned by the farther object), an object dropped where
+  nothing hides it (`visibility`), an undeclared occluder, the applied
+  FOV 1 deg off (`intrinsics`), a declared alone pass missing
+  (`files`), a tight box the record did not measure and a silhouette
+  cut to half its hull (`box_mismatch`), a silhouette shrunk to 80 %
+  at the same centre (`mask_offset`, the extent clause). Also: NOT RUN
+  without a bundle and on a version-5 shape; identity across two runs
+  of one spec passing and failing; the CLI's exit codes, the printed
+  refusal and the recorded `failure`; the atomic verdict.
+* **`tests/visual/annotation_sheets.py`** (+ `draw.py`, PIL only):
+  `write_sheets(run_dir, out)` writes `build/visual/<check>.png` for a
+  real run or the fabricated one, each captioned with the check's
+  verdict: `mask_integers_only.png` (ids colourised, offending pixels
+  red), `mask_vs_geometry.png` (mask edge, projected hull wireframe, CG
+  cross, hull-box centre, mask-box centre), `box_vs_mask.png` (both
+  boxes, IoU stamped), `depth_vs_geometry.png` (heatmap over the
+  aircraft's depth band, the nearest keypoint and its predicted depth
+  beside the measured), `visibility_vs_scene.png` (each alone pass
+  beside the full pass, hidden footprint pixels red),
+  `identity_stable.png` (the id strip: objects x frames x cameras, and
+  the engine's echo). A test writes them on the fabricated run and
+  asserts each exists and is not blank.
+* **Mutation guards** (`scripts/mutation_check.sh`, the package-D
+  block): the two repaired station guards and nineteen new ones -- the
+  `failure` key, the alone-pass file, the two superseded version-5
+  checks, three `mask_integers_only` clauses, the extent and centre
+  clauses of `mask_vs_geometry`, the IoU clause, the nearest-keypoint
+  clause, three `visibility_vs_scene` clauses, the frame and echo
+  clauses of `identity_stable`, the field-of-view clause, the CLI's
+  printed refusal and the atomic verdict write. Every old-string is
+  multi-line or otherwise unique
+  in its file. Each was applied by hand with the script's own
+  replacement, its test file run, the source restored byte-identical
+  (`cmp` against a pristine copy), `__pycache__` purged: 21 of 21 fire (the run found two defects in the block itself first -- an assertion phrase the wrong clause also printed, and an apostrophe idiom that unbalanced the shell and silently skipped three entries -- both fixed and re-confirmed).
+* **Contracts page** (§4 "as landed"): the five departures above,
+  each with its measurement.
+
+**How to demonstrate (any platform).**
+
+    .venv/bin/pytest -q -p no:warnings tests/test_annotation_gates.py tests/test_camera_labels.py tests/test_camera_verify_corruption.py
+    .venv/bin/python tests/visual/annotation_sheets.py            # fabricates build/visual/fabricated_run and writes the six sheets
+    .venv/bin/python -m flightsim.verify build/visual/fabricated_run   # every gate PASS; exit 0
+    .venv/bin/python - <<'EOF'
+    # the Phase 1 defect at a tenth of its size, then the verdict by name
+    from tests.test_annotation_gates import fabricate_run
+    fabricate_run("build/visual/shifted_run", offset_body=(3.0, 0.0, 0.0))
+    EOF
+    .venv/bin/python -m flightsim.verify build/visual/shifted_run     # [FAIL] mask_vs_geometry ... refused by name: annotation.mask_offset; exit 1
+    .venv/bin/python tests/visual/annotation_sheets.py build/visual/shifted_run --out build/visual/shifted
+    ./scripts/mutation_check.sh                                        # the package-D block: every guard 'ok'
+    # A real run, once rendered on Windows with -labels:
+    .venv/bin/python -m flightsim.verify runs/<id> [--against runs/<id2>]
+    .venv/bin/python tests/visual/annotation_sheets.py runs/<id> --out build/visual/<id>
+
+**Not verified here (no engine in this container).** Every number the
+checks grade came from a bundle painted from boxes; no real ID pass,
+alone pass or `.f32` has been read. In particular: whether a real
+airframe's silhouette (not a box) lands inside the 5 % extent, 2 %
+centre and 0.8 IoU tolerances against a box hull on the shipped
+presets -- the first rendered chase and wingman frames measure this,
+and `mask_vs_geometry.png` / `box_vs_mask.png` show it; if a correct
+render fails, the tolerance moves on the contracts page, not in a
+test. Whether the commandlet's alone pass and ID pass rasterise the
+same silhouette to the pixel (the 3 % visibility tolerance assumes
+edge pixels only). Whether the engine's `applied_fov_deg` is the
+horizontal field of view the record implies (the check assumes
+`Capture->FOVAngle` is horizontal, as the commandlet's own FOV formula
+is). That `attach_engine_labels` on a real bundle writes
+`bbox_2d_tight` to the pixel the verifier re-derives (it does on the
+fabricated one). No C++ was touched by this package.
+
+**Limitations.** The hull is a box: the converter's measured extent
+when the cited mesh manifest with the cited digest is on the verifying
+machine, else the airframe block's extents box (this clone: always
+the latter) -- so the checks bound a silhouette by its box, and an
+oblique view of a real airframe is graded against a box larger than
+its silhouette. A traffic aircraft's per-frame state is not in the
+manifest; its placement is the record's `bbox_3d_camera` (stated in
+every detail) and only its projection, pixels and depth are graded
+independently. A shift along a chase camera's line of sight is
+invisible to `mask_vs_geometry` (measured: 3 m at 600 m moves the
+centre 0.06 m); the second camera or `depth_vs_geometry` sees it, and
+a single-camera chase run cannot be cleared of it by this check. A
+depth scale under 2 % inside 200 m is inside 1 % + 2 m and not
+claimed. `mask_integers_only` cannot see a blend that rounds to a
+declared id when the class image blended the same way; the engine's
+`non_integer_id_pixels` is the measurement there. `identity_stable`
+is NOT RUN without a render (the engine's echo is half the evidence).
+`drawn_airframe`'s version-3 / `origin_basis` gate (contracts §0.1) is
+not landed: it changes `test_a_mesh_drawn_at_the_recorded_origin_passes`
+in a file this package may only add to. `labels.py`'s
+`NOT_CLAIMED_OBJECT_PX` (12) and the contract's 16 px IoU floor differ;
+the verifier uses the contract's 16 and `labels.py` (not this
+package's file) still says the schedule stops at 12. `tests/test_messages.py`
+fails on package G's `campaign.arguments` / `campaign.state` (no
+catalogue entry) and two names G still lists as future -- G's, not
+D's; D's names are retired from `ALLOWED_FUTURE` and the scanner sees
+`failure=` and `FAIL_* =`. Sheets are drawn from the fabricated run's
+box airframes here; on a real run they show the beauty-less ID image
+(no beauty frame is composited).

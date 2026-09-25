@@ -1083,15 +1083,33 @@ mutate core/capture/verify.py \
     "an emitted count that is not the count the SPEC requested fails" \
     tests/test_camera_verify_corruption.py || failures=$((failures+1))
 
+# Measured (Phase 2, package D): the 12-space '            if gap > tol:'
+# below is a SUBSTRING of the 16-space world-anchored clause that comes
+# first in verify.py, and mutate() replaces the FIRST occurrence -- so the
+# chase entry re-disabled the tower clause and reported ok for the wrong
+# reason while the chase clause was never tested. Each entry now names
+# its clause by the lines that only it has (NEXT.md gotcha 28).
 mutate core/capture/verify.py \
-    '                if gap > tol:' \
-    '                if False:  # MUTATED: a stated placement may move' \
+    '                gap = math.dist(camera, expected)
+                worst_placement = max(worst_placement, gap)
+                graded += 1
+                if gap > tol:' \
+    '                gap = math.dist(camera, expected)
+                worst_placement = max(worst_placement, gap)
+                graded += 1
+                if False:  # MUTATED: a stated placement may move' \
     "a world-anchored camera moved off its stated position fails" \
     tests/test_camera_verify_corruption.py || failures=$((failures+1))
 
 mutate core/capture/verify.py \
-    '            if gap > tol:' \
-    '            if False:  # MUTATED: a chase camera may leave station' \
+    '            gap = math.dist(station, offset)
+            worst_placement = max(worst_placement, gap)
+            graded += 1
+            if gap > tol:' \
+    '            gap = math.dist(station, offset)
+            worst_placement = max(worst_placement, gap)
+            graded += 1
+            if False:  # MUTATED: a chase camera may leave station' \
     "a chase camera displaced from its stated station fails" \
     tests/test_camera_verify_corruption.py || failures=$((failures+1))
 
@@ -2439,6 +2457,150 @@ mutate core/render/flags.py \
     '    if False:  # MUTATED: the mesh is never forwarded; the placeholder boxes draw' \
     "the render builder forwards -mesh= to both callers" \
     tests/test_render_flags.py || failures=$((failures+1))
+
+# -- Phase 2, package D: the annotation gates (contracts §4) ------------------
+# One guard per clause that can fail a run; each old-string carries enough
+# of its own lines to be unique in the file (mutate() replaces the FIRST
+# occurrence). Each confirmed to fire by hand on landing: applied with this
+# script's replacement, the test file run, the source restored
+# byte-identical, __pycache__ purged (docs/PHASE2_REPORT.md, P2-D).
+
+mutate core/capture/verify.py \
+    '        out = {"name": self.name, "status": self.status, "detail": self.detail}
+        if self.status == FAIL and self.failure:' \
+    '        out = {"name": self.name, "status": self.status, "detail": self.detail}
+        if False:  # MUTATED: a FAIL never carries its name' \
+    "a failed check records its refusal name in verification.json" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        for kind, file in extra:
+            counted += 1
+            if not (Path(run_dir) / "frames" / camera / file).is_file():' \
+    '        for kind, file in extra:
+            counted += 1
+            if False:  # MUTATED: a declared alone pass or .f32 need not exist' \
+    "a declared alone pass or float depth file that is missing fails label_files" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if _declared_objects(manifest):
+        return Check("mask_containment", NOT_RUN,' \
+    '    if False:  # MUTATED: the version-5 check grades a manifest-6 run
+        return Check("mask_containment", NOT_RUN,' \
+    "mask_containment is superseded on a manifest that declares objects[]" \
+    tests/test_camera_labels.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if _declared_objects(manifest):
+        return Check("depth_range", NOT_RUN,' \
+    '    if False:  # MUTATED: the version-5 check grades a manifest-6 run
+        return Check("depth_range", NOT_RUN,' \
+    "depth_range is superseded on a manifest that declares objects[]" \
+    tests/test_camera_labels.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if undeclared:
+            return Check("mask_integers_only", FAIL,' \
+    '        if False:  # MUTATED: any integer in the ID image is accepted
+            return Check("mask_integers_only", FAIL,' \
+    "an ID image value no object declares fails mask_integers_only" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                if disagree:
+                    return Check("mask_integers_only", FAIL,' \
+    '                if False:  # MUTATED: the class image is not read against the ids
+                    return Check("mask_integers_only", FAIL,' \
+    "a blended ID edge whose class the class image contradicts fails mask_integers_only" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if isinstance(non_integer, (int, float)) and non_integer > 0:' \
+    '        if False:  # MUTATED: the engine'"'"'s non-integer count is ignored' \
+    "an engine that read non-integer ids fails mask_integers_only" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if extent > MASK_EXTENT_TOL_FRACTION and extent_px > MASK_TOL_PX:' \
+    '            if False:  # MUTATED: a silhouette of any size passes' \
+    "a silhouette smaller than its projected hull fails mask_vs_geometry" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                if relative > MASK_CENTROID_TOL_FRACTION and offset > MASK_TOL_PX:' \
+    '                if False:  # MUTATED: a silhouette anywhere in the image passes' \
+    "a mesh drawn 3 m from its label fails mask_vs_geometry" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if iou < floor:
+                return Check("box_vs_mask", FAIL,' \
+    '            if False:  # MUTATED: any IoU passes
+                return Check("box_vs_mask", FAIL,' \
+    "a tight box half its projected hull fails box_vs_mask" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                if gap > tol(z_kp):
+                    return Check("depth_vs_geometry", FAIL,' \
+    '                if False:  # MUTATED: the nearest keypoint does not bound the depth
+                    return Check("depth_vs_geometry", FAIL,' \
+    "a depth image scaled by 1.02 fails depth_vs_geometry" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if stray > VISIBILITY_TOL_FRACTION * max(n_alone, 1):' \
+    '            if False:  # MUTATED: pixels outside the alone footprint pass' \
+    "an id drawn outside its own alone footprint fails visibility_vs_scene" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                if n_bad > VISIBILITY_TOL_FRACTION * max(n_alone, 1):' \
+    '                if False:  # MUTATED: a footprint hidden by nothing passes' \
+    "an object dropped from the full pass where nothing hides it fails visibility_vs_scene" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                if wrong > VISIBILITY_TOL_FRACTION * n_overlap:' \
+    '                if False:  # MUTATED: the farther object may own the overlap' \
+    "the occluder hidden in the full pass fails visibility_vs_scene" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        for key, value in seen.items():
+            if reference.get(key) != value:' \
+    '        for key, value in seen.items():
+            if False:  # MUTATED: a frame may map an id to another integer' \
+    "two ids swapped in a frame's labels fail identity_stable" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            for key, value in echoed.items():
+                if reference.get(key) != value:' \
+    '            for key, value in echoed.items():
+                if False:  # MUTATED: the engine'"'"'s echo is not read against objects[]' \
+    "two ids swapped in the engine's echo fail identity_stable" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if gap > APPLIED_FOV_TOL_DEG:' \
+    '        if False:  # MUTATED: any applied field of view passes' \
+    "a render at a field of view one degree off fails applied_intrinsics" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate flightsim/verify.py \
+    '    named = [c for c in report.failures() if c.failure]' \
+    '    named = []  # MUTATED: refusals are not printed by name' \
+    "flightsim.verify prints every refusal by name" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    staged.write_text(json.dumps(report.to_dict(), indent=1), encoding="utf-8")
+    os.replace(staged, path)' \
+    '    path.write_text(json.dumps(report.to_dict(), indent=1), encoding="utf-8")  # MUTATED: written in place, not atomically' \
+    "the verdict is written atomically (a crash mid-write leaves the previous verdict intact)" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
 
 # Phase 2 package G (contracts §6.1): the campaign. Four guards, each
 # the plan's own rubric line: never done below target; seeds derived

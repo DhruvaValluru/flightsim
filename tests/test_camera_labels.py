@@ -373,6 +373,22 @@ def labelled():
     return manifest_for("A320")
 
 
+def as_version_5(manifest):
+    """The same run in the version-5 shape (no objects[], no per-object
+    records). mask_containment and depth_range are the VERSION-5 checks:
+    on a manifest that declares objects[] they report NOT RUN naming
+    box_vs_mask / depth_vs_geometry (contracts §4, package D), so their
+    PASS/FAIL behaviour is pinned on the shape it applies to."""
+    old = copy.deepcopy(manifest)
+    old["manifest_version"] = 5
+    for key in ("objects", "taxonomy", "traffic"):
+        old.pop(key, None)
+    for record in old["frames"]:
+        record["labels"].pop("objects", None)
+        record["sensor"]["labels_sensor"].pop("objects", None)
+    return old
+
+
 def test_the_clean_labels_pass_their_offline_checks(labelled):
     assert verify_labels(labelled).status == PASS
     assert verify_keypoints_in_box(labelled).status == PASS
@@ -469,19 +485,34 @@ def test_consistent_engine_masks_and_depth_pass(tmp_path, labelled):
     write_capture_manifest(labelled, tmp_path)
     _engine_outputs(tmp_path, labelled, "chase0")
     assert verify_label_files(labelled, tmp_path).status == PASS
-    assert verify_mask_containment(labelled, tmp_path).status == PASS
-    assert verify_depth_range(labelled, tmp_path).status == PASS
+    old = as_version_5(labelled)
+    assert verify_mask_containment(old, tmp_path).status == PASS
+    assert verify_depth_range(old, tmp_path).status == PASS
+
+
+def test_the_version_5_checks_are_superseded_on_a_manifest_with_objects(
+        tmp_path, labelled):
+    """A manifest that declares objects[] (version 6) is graded per
+    object by box_vs_mask and depth_vs_geometry; the single-id checks
+    report NOT RUN and name their successor rather than grading the
+    primary twice."""
+    _engine_outputs(tmp_path, labelled, "chase0")
+    assert labelled["manifest_version"] >= 6 and labelled["objects"]
+    check = verify_mask_containment(labelled, tmp_path)
+    assert check.status == NOT_RUN and "box_vs_mask" in check.detail
+    check = verify_depth_range(labelled, tmp_path)
+    assert check.status == NOT_RUN and "depth_vs_geometry" in check.detail
 
 
 def test_a_mask_outside_the_label_box_is_caught(tmp_path, labelled):
     _engine_outputs(tmp_path, labelled, "chase0", consistent=False)
-    check = verify_mask_containment(labelled, tmp_path)
+    check = verify_mask_containment(as_version_5(labelled), tmp_path)
     assert check.status == FAIL, check.detail
 
 
 def test_depth_outside_the_box_span_is_caught(tmp_path, labelled):
     _engine_outputs(tmp_path, labelled, "chase0", depth_ok=False)
-    check = verify_depth_range(labelled, tmp_path)
+    check = verify_depth_range(as_version_5(labelled), tmp_path)
     assert check.status == FAIL, check.detail
 
 
@@ -497,7 +528,7 @@ def test_an_engine_mask_where_the_label_says_nothing_is_in_frame(tmp_path,
                                                                 labelled):
     """The mask shows an aircraft; the label says none is in frame. One
     of them is wrong, and the check must not average them away."""
-    bad = copy.deepcopy(labelled)
+    bad = as_version_5(labelled)
     _engine_outputs(tmp_path, bad, "chase0")
     bad["frames"][0]["labels"]["bbox_2d"] = None
     bad["frames"][0]["labels"]["in_frame"] = False
