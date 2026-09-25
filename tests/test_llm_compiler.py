@@ -932,3 +932,29 @@ def test_a_camera_list_nested_under_fields_is_lifted_not_refused():
     })
     with pytest.raises(LLMCompileError, match="unknown field 'cameras'"):
         compile_prompt_llm("chase the 747", client=not_a_list)
+
+
+def test_the_prompt_s_shape_sentence_is_generated_from_the_schema():
+    """The system prompt said 'three keys, no others' for a whole phase
+    after 'cameras' became the fourth (Phase 1 initial run report). The
+    sentence is now written from RESPONSE_SCHEMA's own key list, and an
+    import-time assert keeps it that way; this test pins the wording
+    the model actually sees."""
+    from core.nl.llm_compiler import (RESPONSE_SCHEMA,
+                                      RESPONSE_TOP_LEVEL_KEYS,
+                                      SYSTEM_PROMPT,
+                                      response_shape_sentence)
+
+    keys = tuple(RESPONSE_SCHEMA["properties"])
+    assert RESPONSE_TOP_LEVEL_KEYS == keys
+    assert "cameras" in keys
+    sentence = response_shape_sentence()
+    assert sentence in SYSTEM_PROMPT
+    assert "four keys" in sentence
+    for key in keys:
+        assert f'"{key}"' in sentence
+    assert "three keys" not in SYSTEM_PROMPT
+    # The generator, not the wording, is the contract: a three-key schema
+    # would say so.
+    assert "three keys" in response_shape_sentence(
+        ("fields", "notes", "questions"))

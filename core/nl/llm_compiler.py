@@ -379,6 +379,33 @@ def _locations_block() -> str:
     return "\n".join(lines)
 
 
+#: The response's top-level keys, in the schema's own order. The system
+#: prompt's shape sentence is GENERATED from this so the two cannot
+#: drift: the prompt said "three keys" for a whole phase after
+#: "cameras" became the fourth (Phase 1 initial run report).
+RESPONSE_TOP_LEVEL_KEYS: Tuple[str, ...] = tuple(RESPONSE_SCHEMA["properties"])
+_COUNT_WORDS = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six",
+                7: "seven", 8: "eight", 9: "nine"}
+
+
+def response_shape_sentence(keys: Tuple[str, ...] = RESPONSE_TOP_LEVEL_KEYS) -> str:
+    """The one sentence in the system prompt that states the top-level
+    shape, written from the schema's key list."""
+    quoted = ", ".join(f'"{k}"' for k in keys)
+    count = _COUNT_WORDS.get(len(keys), str(len(keys)))
+    others = [k for k in keys if k != "fields"]
+    others_quoted = (", ".join(f'"{k}"' for k in others[:-1])
+                     + f' and "{others[-1]}"')
+    example = ", ".join(
+        '"fields": {"<field name>": {"value": ..., "source": "...", '
+        '"from": "..."}, ...}' if k == "fields" else f'"{k}": [...]'
+        for k in keys)
+    return (f"Respond with EXACTLY this top-level shape -- {count} keys "
+            f"({quoted}), no others:\n{{{example}}}\n{others_quoted} are "
+            f'TOP-LEVEL keys beside "fields", never inside\n"fields"; '
+            f'"fields" contains ONLY schema field names.')
+
+
 SYSTEM_PROMPT = """\
 You are the scene DIRECTOR for a flight-simulation compiler. Turn the
 prompt into a COHERENT scene: fill every field the prompt justifies --
@@ -388,11 +415,7 @@ each other and with what the prompt evokes. Every value you write
 declares how it was chosen; a guess you do not declare is the one
 failure this protocol cannot forgive.
 
-Respond with EXACTLY this top-level shape -- three keys, no others:
-{"fields": {"<field name>": {"value": ..., "source": "...", "from": "..."},
- ...}, "notes": [...], "questions": [...]}
-"notes" and "questions" are TOP-LEVEL keys beside "fields", never inside
-"fields"; "fields" contains ONLY schema field names. Each field object
+__RESPONSE_SHAPE__ Each field object
 carries EXACTLY value/source/from -- no "unit", no extra keys. "from" is
 ONLY the quoted prompt phrase, no commentary around it. A value is never
 null, and a field is never written just to state absence ("none",
@@ -536,6 +559,15 @@ Clarifying questions:
   tag. An answer that names a listed place follows the geography rules
   (exact listed coordinates).
 """
+
+SYSTEM_PROMPT = SYSTEM_PROMPT.replace("__RESPONSE_SHAPE__",
+                                      response_shape_sentence())
+assert "__RESPONSE_SHAPE__" not in SYSTEM_PROMPT
+for _key in RESPONSE_TOP_LEVEL_KEYS:
+    assert f'"{_key}"' in SYSTEM_PROMPT, (
+        f"the system prompt never names top-level key {_key!r}")
+assert f"{_COUNT_WORDS[len(RESPONSE_TOP_LEVEL_KEYS)]} keys" in SYSTEM_PROMPT
+del _key
 
 
 # -- parsing: strict, loud, never patched ---------------------------------
