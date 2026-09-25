@@ -648,3 +648,183 @@ def aircraft_local_track(columns: Dict[str, Sequence[float]],
             "heading_deg": float(columns["heading_deg"][i]),
         })
     return out
+
+
+# -- the second aircraft: a scripted traffic track -------------------------
+#
+# Phase 2 (packages B + C, contracts §2.2, brainstorm §3.4). A traffic
+# aircraft is not a second FDM: it is a mesh flown along a track SOLVED
+# HERE from the primary's recorded telemetry, carried on the card as
+# position + attitude keyframes (the camera machinery applied to an
+# actor), and moved by the render host with linear interpolation. The
+# three tracks are the three that produce object-object occlusion:
+#
+#   formation   abeam the primary at ``range_m`` on its right, at its
+#               altitude, copying its attitude sample for sample;
+#   crossing    a straight line at the primary's mean ground speed,
+#               heading the primary's mid-run heading + 90 deg, placed so
+#               that at the run's midpoint the traffic sits exactly
+#               ``range_m`` AHEAD of the primary along its heading -- it
+#               crosses the primary's line there, at the stated range;
+#   overtaking  abeam at ``range_m`` on the primary's right, sliding from
+#               ``range_m`` behind at the first sample to ``range_m``
+#               ahead at the last, same heading, wings level.
+#
+# Crossing and overtaking fly wings-level (roll = pitch = 0); a
+# scripted actor has no dynamics to bank with, and saying so is better
+# than inventing a bank. What is NOT claimed: no collision avoidance,
+# no aerodynamic plausibility of the traffic's speed, no wake.
+
+#: The tracks this solver knows, exactly the spec's vocabulary.
+TRAFFIC_TRACKS = ("formation", "crossing", "overtaking")
+
+
+def _heading_axes(heading_deg: float) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+    """(forward, right) unit vectors in (north, east) for a true heading."""
+    h = math.radians(heading_deg)
+    return (math.cos(h), math.sin(h)), (-math.sin(h), math.cos(h))
+
+
+def _mean_ground_speed(track: Sequence[Dict]) -> float:
+    """Path length over duration of the primary's local track, m/s."""
+    if len(track) < 2:
+        return 0.0
+    length = 0.0
+    for a, b in zip(track, track[1:]):
+        length += math.hypot(b["north_m"] - a["north_m"], b["east_m"] - a["east_m"])
+    duration = float(track[-1]["t_s"]) - float(track[0]["t_s"])
+    return length / duration if duration > 0.0 else 0.0
+
+
+def solve_traffic_track(columns: Dict[str, Sequence[float]], kind: str,
+                        range_m: float, frame: SceneFrame,
+                        object_id: str) -> PoseTrack:
+    """The traffic aircraft's per-sample track relative to the primary's
+    recorded flight: a :class:`PoseTrack` (the camera container reused:
+    ``camera_id`` holds the object's id, ``preset`` the track kind, the
+    lens fields are zero because an aircraft has no lens). Pure: the
+    same telemetry and entry give a bit-identical track (``digest``)."""
+    if kind not in TRAFFIC_TRACKS:
+        raise PoseSolveError(
+            f"camera.poses: traffic track {kind!r} is not one of "
+            f"{TRAFFIC_TRACKS}; the solver invents no path")
+    range_m = float(range_m)
+    if not range_m > 0.0:
+        raise PoseSolveError(
+            f"camera.poses: traffic range {range_m!r} m is not positive")
+    primary = aircraft_local_track(columns, frame)
+    n = len(primary)
+    times = [p["t_s"] for p in primary]
+    north: List[float] = []
+    east: List[float] = []
+    alt: List[float] = []
+    yaw: List[float] = []
+    pitch: List[float] = []
+    roll: List[float] = []
+    if kind == "formation":
+        for p in primary:
+            _, right = _heading_axes(p["heading_deg"])
+            north.append(p["north_m"] + range_m * right[0])
+            east.append(p["east_m"] + range_m * right[1])
+            alt.append(p["alt_m"])
+            yaw.append(p["heading_deg"] % 360.0)
+            pitch.append(p["pitch_deg"])
+            roll.append(p["roll_deg"])
+    elif kind == "crossing":
+        mid = n // 2
+        centre = primary[mid]
+        forward, _ = _heading_axes(centre["heading_deg"])
+        cross_n = centre["north_m"] + range_m * forward[0]
+        cross_e = centre["east_m"] + range_m * forward[1]
+        heading = (centre["heading_deg"] + 90.0) % 360.0
+        along, _ = _heading_axes(heading)
+        speed = _mean_ground_speed(primary)
+        t_mid = float(centre["t_s"])
+        for p in primary:
+            s = speed * (float(p["t_s"]) - t_mid)
+            north.append(cross_n + s * along[0])
+            east.append(cross_e + s * along[1])
+            alt.append(centre["alt_m"])
+            yaw.append(heading)
+            pitch.append(0.0)
+            roll.append(0.0)
+    else:   # overtaking
+        t0, t1 = float(times[0]), float(times[-1])
+        span = t1 - t0
+        for p in primary:
+            forward, right = _heading_axes(p["heading_deg"])
+            fraction = (float(p["t_s"]) - t0) / span if span > 0.0 else 0.5
+            s = range_m * (2.0 * fraction - 1.0)
+            north.append(p["north_m"] + range_m * right[0] + s * forward[0])
+            east.append(p["east_m"] + range_m * right[1] + s * forward[1])
+            alt.append(p["alt_m"])
+            yaw.append(p["heading_deg"] % 360.0)
+            pitch.append(0.0)
+            roll.append(0.0)
+    quats = tuple(euler_to_quat(r, p, y) for r, p, y in zip(roll, pitch, yaw))
+    return PoseTrack(
+        camera_id=str(object_id), preset=str(kind), horizon_stable=False,
+        t=tuple(float(t) for t in times),
+        north_m=tuple(north), east_m=tuple(east), alt_m=tuple(alt),
+        quat=quats, yaw_deg=tuple(yaw), pitch_deg=tuple(pitch),
+        roll_deg=tuple(roll),
+        focal_length_mm=tuple(0.0 for _ in times),
+        sensor_width_mm=0.0, sensor_height_mm=0.0, width_px=0, height_px=0,
+        near_m=0.0, far_m=0.0)
+
+
+def traffic_state(track: PoseTrack, index: int) -> Dict[str, float]:
+    """The traffic aircraft's state at a sample, in the shape of the
+    manifest's ``aircraft`` block (the labels project from it)."""
+    return {
+        "north_m": track.north_m[index], "east_m": track.east_m[index],
+        "alt_m": track.alt_m[index], "roll_deg": track.roll_deg[index],
+        "pitch_deg": track.pitch_deg[index],
+        "heading_deg": track.yaw_deg[index],
+    }
+
+
+#: JSBSim structural inches -> UE actor centimetres: x negated, y and z
+#: as they are (UJSBSimMovementComponent::UpdateLocalTransforms, axis0
+#: (-1, 0, 0); the B747's CG (1327, 0, -24) in lands at (-3370.6, 0,
+#: -61.0) cm, the number the plugin logs).
+STRUCTURAL_IN_TO_ACTOR_CM = 2.54
+
+
+def cg_actor_cm(cg_structural_in: Sequence[float]) -> List[float]:
+    x, y, z = (float(v) for v in cg_structural_in)
+    return [-x * STRUCTURAL_IN_TO_ACTOR_CM, y * STRUCTURAL_IN_TO_ACTOR_CM,
+            z * STRUCTURAL_IN_TO_ACTOR_CM]
+
+
+def traffic_card_block(track: PoseTrack, entry, obj, frame: SceneFrame,
+                       cg_structural_in: Sequence[float],
+                       mesh_manifest: Optional[str]) -> Dict[str, object]:
+    """The run card's ``traffic[]`` entry: the spec fields, the object's
+    ids, where the airframe's CG sits in the actor frame (so the host
+    places the mesh actor's origin at CG - R * cg, exactly as
+    FlightSimScenarioWorld places the FDM actor, deriving nothing), the
+    imported mesh manifest to draw, and the solved keyframes in the same
+    block shape as ``cameras[].poses`` -- consumed verbatim."""
+    return {
+        "id": obj.id,
+        "int_id": obj.int_id,
+        "aircraft": str(entry.aircraft.value),
+        "track": str(entry.track.value),
+        "range_m": float(entry.range_m.value),
+        "livery": str(entry.livery.value),
+        "mesh_manifest": mesh_manifest,
+        "cg_actor_cm": cg_actor_cm(cg_structural_in),
+        "origin_x_m": frame.origin_x_m,
+        "origin_y_m": frame.origin_y_m,
+        "poses": {
+            "t_s": list(track.t),
+            "north_m": list(track.north_m),
+            "east_m": list(track.east_m),
+            "alt_m": list(track.alt_m),
+            "yaw_deg": list(track.yaw_deg),
+            "pitch_deg": list(track.pitch_deg),
+            "roll_deg": list(track.roll_deg),
+        },
+        "track_digest": track.digest(),
+    }

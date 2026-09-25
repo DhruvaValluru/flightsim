@@ -937,3 +937,277 @@ with the reanalysis wind as a recorded `user` edit).
   support when the leaf states one; a lognormal/normal/weibull leaf
   without `clip` is binned over the observed range, so its coverage
   says how the observed spread was filled, not how a tail was.
+
+## P2-B+C/objects -- object identity, the per-frame ground-truth bundle, boxes, depth, occlusion and the second aircraft
+
+**What was measured, and what was defective.** Four things, before
+anything was built. (1) The engine mask was a depth-agreement
+silhouette (aircraft-alone `SCS_SceneDepth` vs full-scene depth within
+5 cm) with exactly one instance id, `ShowOnlyActors = Scenario.Aircraft`
+hard-coded, so a second aircraft could never be masked and nothing
+distinguished "this object was not drawn" from "this object was not
+labelled"; its depth captures inherited the engine's show flags (TSR
+by default on the new `DefaultEngine.ini`), so their edge behaviour was
+whatever the anti-aliasing history gave. (2) No object in the manifest
+had an identity: the exporter's class was the airframe name, KITTI
+`occluded` was a dead 3, and `verify.AIRCRAFT_INSTANCE_ID = 1` was an
+assumption nothing on the producing side stated. (3) The `applied_*`
+intrinsics rode in `render.json` only when the card carried landmarks,
+so a verifier projecting a frame without them had to guess. (4)
+`simulation_digest` did not drop `taxonomy` (contracts §12): renaming
+a class would have split one flight into two dataset sides.
+
+**What was built** (contracts §1, §2.3, §2.4, §3; brainstorm §3.2
+option A, §3.3, §3.4, §3.5).
+
+* **Identity** (`core/capture/objects.py`, new). `compose_objects(spec)`
+  composes the scene's labelled objects ONCE, from the spec: the
+  primary airframe (`aircraft:<fdm>:0`, role `primary`), each traffic
+  entry in spec order (`aircraft:<fdm>:<n>`, role `traffic`), then the
+  terrain (role `scene`); `int_id` is the composition index from 1 --
+  the primary is always 1, so every Phase 10 reader stays true on a
+  single-aircraft run -- and `class_id` is the taxonomy position + 1.
+  A class the taxonomy does not name refuses `taxonomy.classes`; more
+  than 255 objects, or one id composed twice, refuses
+  `annotation.identity` (the name is now emitted by code and leaves
+  `ALLOWED_FUTURE` in `tests/test_messages.py`). `mesh_sha256` is the
+  imported model manifest's digest where this machine has one, null
+  where it has not; `licence` is the config's stated licence name.
+  The same list rides on the run card (`objects[]`, `taxonomy`), in
+  the manifest (`objects[]`, `taxonomy`, `traffic[]`) and in every
+  sidecar (`SIDECAR_CONTEXT_KEYS`).
+* **Manifest 6** (`core/capture/manifest.py`, `labels.py`,
+  `docs/schemas/capture_manifest.v6.schema.json`; v5 stays published
+  and a version-5 file still reads and verifies). Per frame,
+  `labels.objects[]` carries one record per object in the contracts'
+  §3 shape (`object_label_record`): the primary's geometric keys are
+  COPIED from the frame's own `labels` so the two cannot disagree; each
+  traffic aircraft is projected from ITS cited airframe at its
+  scripted state (its own keypoints and 3-D box; `horizon` null); the
+  terrain carries nulls, not zeros. New per object: `bbox_2d_hull`
+  (the converter's version-3 `mesh_extent_actor_m`, re-based from the
+  measured mesh origin onto the CG through the plugin's own
+  structural->actor mapping `(-x, y, z) * 2.54`, projected and clipped
+  like `bbox_2d`; null with a basis on a machine with no imported
+  mesh -- this one), `atmospheric_transmittance` (Koschmieder
+  `exp(-3.912/(1000 V) * |CG|)` when the randomisation block states a
+  `visibility_km`, `exp(-fog_density * |CG|)` when it states a fog
+  density, else 1.0 stated as NOT a measurement), `depth_projected_m`
+  (the CG's camera z), `not_claimed` (`subpixel_mask_accuracy_beyond_
+  range_m: 8000`, `objects_under_px: 12`, the terrain's "no alone
+  pass", and that transmittance is analytic), and a `basis` dict
+  naming the sentence behind each derived value. The five
+  engine-derived keys -- `bbox_2d_tight`, `visible_fraction`,
+  `occluded_by`, `depth_min_m`, `depth_median_m` -- are null with the
+  no-bundle basis at build time. `label_conventions` gains `objects`,
+  `id_mask`, `alone_pass`, `depth_f32`, `visible_fraction`,
+  `bbox_2d_tight`, `bbox_2d_hull`. `labels_sensor.objects[]` maps every
+  non-primary object onto the sensor (null boxes for the terrain, so
+  the exporter sees "no box" rather than no entry).
+* **The post-render step** (`labels.attach_engine_labels(run_dir)`,
+  called by `flightsim.capture --render` after the render passes and
+  before the sensor post-pass). Reads, per frame the manifest names,
+  `frames/<camera>/render.json` and the files ITS record declares --
+  the ID image, `_depth.f32` (else the 16-bit PNG at `depth_scale_m`,
+  stated in the basis), each aircraft's alone png -- and computes with
+  numpy the tight box (pixel (x, y) covers [x, x+1), so the far edges
+  are one past the last pixel, in `bbox_2d`'s units), `visible_fraction
+  = pixels / pixels_alone`, `occluded_by` (the ids found inside the
+  alone footprint, resolved to strings through `objects[]`; an integer
+  the list does not name stays visible as `int_id:<n>`), and the depth
+  min/median under the mask; writes the manifest and every sidecar
+  back with `basis.engine = {files, pixels, pixels_alone, method}`. A
+  frame with no bundle keeps its nulls; a manifest below 6 is left
+  alone and says so; a depth file of the wrong size refuses rather
+  than reshaping. It is the producer of these numbers, not their
+  judge: package D re-derives every one from the same files.
+* **The second aircraft** (`core/capture/poses.py`,
+  `core/scenario/card.py`, `flightsim/capture.py`;
+  `FlightSimScenarioWorld.{h,cpp}`, the commandlet). Not a second FDM:
+  `solve_traffic_track` solves a position + attitude track relative to
+  the primary's recorded telemetry -- `formation` abeam right at
+  `range_m` copying the primary's attitude, `crossing` a straight line
+  at the primary's mean ground speed heading +90 deg placed so that at
+  the run's midpoint the traffic sits exactly `range_m` AHEAD along the
+  primary's heading (it crosses the line there), `overtaking` abeam
+  right sliding from `range_m` behind to `range_m` ahead; crossing and
+  overtaking wings-level, stated on the manifest's
+  `traffic[].attitude_basis`. The track is a `PoseTrack` (the camera
+  container reused, lens fields zero) and rides on the card as
+  `traffic[].poses` in the cameras' block shape, with `cg_actor_cm`
+  (the airframe's CG in the actor frame) and the imported mesh
+  manifest path. Python refuses `aircraft.mesh` by name for a traffic
+  airframe that is not imported, before any flight, with the same
+  words the primary gets. `FFlightSimScenarioWorld::ReadCard` parses
+  `objects[]` (refusing an `int_id` outside 1..255 or one that names
+  two objects, `annotation.identity`), `taxonomy` and `traffic[]`
+  (refusing misaligned or non-increasing keyframes); `Populate` spawns
+  one bare Movable actor per entry; `Step()` places each on its track
+  after the world tick at the FDM's own sim time (linear in position
+  and in each Euler angle, clamped to the track's ends with one log
+  line) through the SAME mapping the camera track uses --
+  `ProjectedToEngine` of `(origin_x + east, origin_y + north, alt)`,
+  `FRotator(pitch, yaw - 90, roll)`, actor origin `= CG - R * cg`
+  exactly as the FDM actor is placed. The commandlet hangs each
+  traffic mesh through `BuildMeshAirframe` (which now tolerates a null
+  animator: surfaces undeflected at their hinges) and refuses
+  `aircraft.mesh` for an entry with no manifest path.
+* **The bundle in C++** (commandlet; UNCOMPILED here). The `-labels`
+  pass now writes: `_mask.png` = the ID IMAGE (8-bit, pixel = `int_id`,
+  0 background), from a Custom Depth Stencil pass -- every
+  `UMeshComponent` in the world gets `SetRenderCustomDepth(true)` +
+  `SetCustomDepthStencilValue(int_id)` (an aircraft actor's its own id,
+  every other mesh the terrain's; `r.CustomDepth=3` is already in
+  `DefaultEngine.ini`), a post-process material
+  `/Game/FlightSim/M_CustomStencilID` emits `SceneTexture:CustomStencil`
+  as a flat float, and a `SCS_FinalColorHDR` capture reads it back as
+  raw floats into an `RTF_R32f` target (the depth pass's own
+  readback path); `_class.png` = `class_id` of each pixel's id (0 for
+  id 0); `_depth.png` kept and `_depth.f32` new (raw little-endian
+  float32, +inf for sky, `static_assert(PLATFORM_LITTLE_ENDIAN)`);
+  `_alone_<int_id>.png` per aircraft object (the ID pass with
+  `PRM_UseShowOnlyList` on that actor alone). Every label capture --
+  depth, ID, each alone -- is configured by one lambda: AntiAliasing,
+  TemporalAA, ScreenPercentage, Fog, Atmosphere, VolumetricFog, Bloom,
+  MotionBlur, DepthOfField, LensFlares and Translucency show flags off,
+  `bAlwaysPersistRenderingState = false`. `render.json` per frame keeps
+  every Phase 10 key (the primary's `silhouette_pixels` /
+  `visible_pixels` / `occlusion_fraction` now from its alone pass and
+  the ID pass) and adds `depth_f32`, `anti_aliasing: "none"`,
+  `classes` generated from the card's taxonomy, `method`, `id_source`
+  (the card's list, or the Phase 10 default pair when a card carries
+  no `objects[]` -- stated, never silent), `unlabelled_geometry_pixels`,
+  `non_integer_id_pixels` (readback floats that were not whole
+  numbers; an AA-free pass gives 0) and `objects[]` with per-object
+  `pixels`, `pixels_alone`, `alone_png`, `visible_fraction`,
+  `occluded_by` (integers), `depth_min_m`, `depth_median_m`. The root
+  gains `objects[]` and `traffic[]`. `applied_focal_length_mm` /
+  `applied_sensor_width_mm` / `applied_fov_deg` / `applied_width_px` /
+  `applied_height_px` are written on EVERY consume-poses frame. The
+  5 cm depth-agreement mask and its constant are gone.
+* **Contract additions stated on the page** (§2.4 and §3 "as landed"):
+  the manifest's `taxonomy` and `traffic[]` keys, the card's three
+  blocks, the uniform per-object key set with `basis`, the render.json
+  `id_source` / pixel counts / root echoes, and the material the ID
+  pass needs.
+
+**Tests and guards.** `tests/test_capture_objects.py` (17 tests):
+composition stability across two compositions and across a camera
+change, primary = 1 and the exact `objects[]` key set; the 256-object
+and duplicate-id refusals by name; a class outside the taxonomy;
+`resolve_ids`; the crossing track's geometry (at the midpoint exactly
+`range_m` ahead along the heading, +90 deg, at the primary's mean
+ground speed in the frame -- NOT asserted as the nominal 120 m/s,
+because the synthetic track's degrees-to-metres scale is not the UTM
+frame's), formation abeam with the copied attitude, overtaking through
+abeam at the midpoint; the card block's `cg_actor_cm` against the
+plugin's own logged number for the B747; the run card's three blocks
+and its byte-identity without them; every manifest-6 record shape, the
+primary copied key for key, the traffic's own 37.5 m box, the terrain's
+nulls; the taxonomy leaves `simulation_digest` alone while traffic does
+not; the hull box from a version-3 manifest (the B747 mesh nose lands
+on the labelled nose to 1 cm) and its refusals; Koschmieder from
+`visibility_km`, from `fog_density`, and 1.0 stated; a version-5 file
+reads, verifies, and `attach_engine_labels` leaves it alone; the
+bundle attach on a FABRICATED bundle (an 8-bit ID png with primary 1,
+traffic 2, terrain 3 below a horizon row; a float32 depth file; alone
+pngs with the primary's footprint grown by 8 px under the traffic; a
+render.json naming every file): tight boxes to the pixel, visible
+fraction and `occluded_by` against the painted geometry, depth
+min/median, the terrain's tight box and depth with NO visible fraction,
+provenance files and counts, the sidecar, the v6 schema, idempotence;
+no bundle keeps the nulls; a truncated `.f32` refuses; and
+`measure_object` by hand on a 6 x 8 array. `tests/test_camera_labels.py`
+pins 6 and `(3, 4, 5, 6)`; `tests/test_capture_schema.py` adds five v6
+corruptions by path and keeps v5 published. Eight new mutation guards
+in `scripts/mutation_check.sh` (the enumerate start; the >255 refusal;
+the tight box's far edge; `visible_fraction`; `occluded_by`; the
+crossing range; the traffic-without-tracks refusal; the depth-size
+refusal) plus the retargeted version-tuple guard: each applied by hand
+with the script's own replacement, its test file run, the source
+restored byte-identical (sha256) and `__pycache__` purged -- 8 of 8
+fire, and the three pre-existing guards on `labels.py` / `manifest.py`
+still fire after the edits. Pre-existing tests changed because the
+contract changed, and why: `tests/test_dataset.py` and
+`tests/test_dataset_formats.py` pinned the exporter's class as the
+airframe name (their own comment: "no taxonomy on a v5 run"); a
+manifest-6 run names classes from the taxonomy (contracts §2.1), so
+they now expect `aircraft` and the six-class list, the byte-identity
+pin against the frozen Phase 10 writer runs on a run REWRITTEN to the
+version-5 shape (the only input on which that pin has meaning), the
+card lists the object's licence beside the config's, and the card
+aggregates the per-object `not_claimed` sentences.
+
+**How to demonstrate (any platform).**
+
+    .venv/bin/pytest -q -p no:warnings tests/test_capture_objects.py tests/test_camera_labels.py tests/test_capture_schema.py tests/test_camera_manifest.py
+    .venv/bin/python -m flightsim.capture examples/cameras_multi.yaml --out runs/objects_demo --max-previews 0
+    .venv/bin/python -c "import json; m=json.load(open('runs/objects_demo/capture_manifest.json')); print(m['manifest_version'], m['objects']); print(json.dumps(m['frames'][0]['labels']['objects'][0], indent=1)[:1500])"
+    .venv/bin/python -m flightsim.verify runs/objects_demo      # json_schema PASS against v6; label checks as before
+    ./scripts/mutation_check.sh                                 # the eight package-B/C guards are in the last block
+    # A spec with traffic (no example ships one yet): add to any example
+    #   traffic:
+    #   - aircraft: {value: A320, source: user, from: "an A320 crossing"}
+    #     track: {value: crossing, source: default, from: documented traffic default}
+    #     range_m: {value: 400.0, unit: m, source: default, from: documented traffic default}
+    #     livery: {value: default, source: default, from: documented traffic default}
+    # and run the same capture: card.json gains objects[]/taxonomy/traffic[], the manifest a second aircraft record per frame.
+
+**Not verified here (no engine in this container).** Every line of
+C++ in this package is UNCOMPILED: `FFlightSimScenarioWorld::ReadCard`
+/ `Populate` / `ApplyTrafficPoses` / `Step`, `BuildMeshAirframe` with a
+null animator, the stencil assignment, the ID captures and their show
+flags, the per-frame bundle, the applied-intrinsics move. The first
+Windows build verifies, in this order: (1) `scripts/ue_create_materials.py`
+must gain `M_CustomStencilID` (this package could not edit that file):
+`unreal.Material` at `/Game/FlightSim`, `material_domain =
+MaterialDomain.MD_POST_PROCESS`, `blendable_location =
+BlendableLocation.BL_REPLACING_TONEMAPPER`, one
+`MaterialExpressionSceneTexture` with `scene_texture_id =
+SceneTextureId.PPI_CUSTOM_STENCIL` connected to `MP_EMISSIVE_COLOR`;
+until it exists `-labels` refuses by name and renders nothing under an
+ID it did not measure; (2) render one frame with `-labels` and check
+`frame_0000_mask.png` holds only the card's ints (`numpy.unique` ==
+a subset of `objects[].int_id` plus 0) and `render.json`
+`labels.non_integer_id_pixels == 0`; (3) `frame_0000_depth.f32` is
+`width*height*4` bytes and `numpy.fromfile(..., '<f4')` under the mask
+agrees with the 16-bit PNG to 0.1 m; (4) `frame_0000_alone_1.png`
+covers `_mask.png == 1` (the primary's alone footprint contains its
+visible pixels), and with a traffic spec `_alone_2.png` exists and the
+primary's `occluded_by` lists it on the frames where the traffic
+crosses in front; (5) the traffic actor's placement: overlay the
+manifest's traffic CG (project `frames[i].labels.objects[1]
+.bbox_3d_camera.cg_m`) on the beauty frame and look -- a mirrored bank
+in a formation track would mean the `FRotator` roll sign differs from
+the camera director's convention (same mapping, unmeasured for an
+aircraft); (6) `python -m flightsim.verify` after `attach_engine_labels`
+ran: `label_files` / `mask_containment` / `depth_range` PASS as before
+(the primary is still 1), and package D's checks grade the new record.
+Also not verified: that `SCS_FinalColorHDR` with a replacing-tonemapper
+blendable returns the stencil value unscaled by exposure on 5.7 (the
+`non_integer_id_pixels` count and D's `mask_integers_only` are the
+measurements); the alone pass with `PRM_UseShowOnlyList` rendering the
+custom-depth pass for the listed actor only.
+
+**Limitations.** Buildings, vegetation and water are taxonomy classes
+with no producer of instances; `cloud` writes no ID. Every non-aircraft
+mesh (terrain, the flat ground plane, the tornado funnel) carries the
+terrain's id -- "terrain or other", as the Phase 10 class string said.
+The terrain gets no alone pass, so its `visible_fraction` is null by
+construction. `atmospheric_transmittance` is analytic along the CG ray
+(no per-pixel fog, no clouds, no precipitation) and is 1.0 with a
+stated basis when the spec states neither a visibility nor a fog
+density -- the render host's default fog is NOT modelled in it. The
+hull box needs a version-3 mesh manifest on the producing machine;
+this clone has none, so every hull box it writes is null with the
+basis. Crossing and overtaking traffic fly wings-level with no
+dynamics, no collision avoidance and a ground speed equal to the
+primary's mean; formation copies the primary's attitude. The
+interactive host (`BuildInto`) does not move traffic (only `Step()`
+does). `webapp/static/index.html` still hard-codes the v5 schema link
+(not this package's file; `frames.html` builds it from the version).
+`flightsim.capture` solves traffic tracks but no committed example
+carries a `traffic` block yet. The C++ writes the depth file on the
+assumption every UE target is little-endian (asserted at compile
+time). `mask.png` now carries EVERY int_id, so on a single-aircraft
+run its terrain pixels are 2 where Phase 10 wrote 0.

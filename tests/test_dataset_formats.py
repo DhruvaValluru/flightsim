@@ -55,6 +55,11 @@ def _runs(batch_dir):
     return sorted(p for p in batch_dir.iterdir() if (p / "capture_manifest.json").is_file())
 
 
+#: The documented class list a manifest-6 run carries (core/scenario/
+#: blocks.py DEFAULT_CLASSES): class_id = position + 1.
+TAXONOMY_6 = ["aircraft", "terrain", "building", "vegetation", "water", "cloud"]
+
+
 def _manifest(run: Path):
     return json.loads((run / "capture_manifest.json").read_text(encoding="utf-8"))
 
@@ -164,14 +169,35 @@ def read_webdataset(root: Path):
 
 # -- the Phase 10 writers are unchanged -------------------------------------------
 
+def _as_version_5(run_dir):
+    """Rewrite a run's manifest to the version-5 shape (no objects[],
+    taxonomy, traffic or per-object records): the input the Phase 10
+    writers were pinned on. Manifest 6 (Phase 2, packages B + C) names
+    classes from the taxonomy, so on a 6 the two writers differ BY
+    CONTRACT (contracts §2.1) and the pin is only meaningful on a 5."""
+    path = run_dir / "capture_manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["manifest_version"] = 5
+    for key in ("objects", "taxonomy", "traffic"):
+        manifest.pop(key, None)
+    for record in manifest["frames"]:
+        record["labels"].pop("objects", None)
+        record.get("sensor", {}).get("labels_sensor", {}).pop("objects", None)
+    path.write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+
+
 def test_phase10_outputs_are_byte_identical_to_the_frozen_writer(batch_dir, tmp_path):
-    """COCO, KITTI and labels-only WebDataset for a run without the new
-    fields: the frozen pre-package-E module and the live one write the
-    same bytes. (A with-pixels WebDataset differs BY DESIGN: the frozen
-    writer leaked the source PNG's mtime, the live one fixes it at 0.)"""
+    """COCO, KITTI and labels-only WebDataset for a VERSION-5 run (no
+    objects[], no taxonomy): the frozen pre-package-E module and the
+    live one write the same bytes. (A with-pixels WebDataset differs BY
+    DESIGN: the frozen writer leaked the source PNG's mtime, the live
+    one fixes it at 0.)"""
     frozen = _frozen_module()
-    run = _runs(batch_dir)[0]
-    _fabricate_frames(run)
+    original = _runs(batch_dir)[0]
+    _fabricate_frames(original)
+    run = tmp_path / "v5"                            # the same run, version-5 shape
+    shutil.copytree(original, run)
+    _as_version_5(run)
     headless = tmp_path / "headless"                 # the same run with no pixels
     shutil.copytree(run, headless, ignore=shutil.ignore_patterns("*.png"))
     for fmt in ("coco", "kitti", "webdataset"):
@@ -203,8 +229,10 @@ def test_yolo_round_trip_with_a_minimal_reader(batch_dir, tmp_path):
     card = export([run], tmp_path / "yolo", "yolo", fractions=(1.0, 0.0, 0.0))
     assert card["formats"] == ["yolo"] and card["frames"] == n
     names, boxes = read_yolo(tmp_path / "yolo")
-    assert names == {0: "B747"}                   # airframe names: no taxonomy on a v5 run
-    assert card["classes"] == ["B747"] and card["class_order"] == "airframe names"
+    # Manifest 6 (contracts §2.1): the classes are the spec's taxonomy in
+    # class_id order, never the airframe names.
+    assert names == dict(enumerate(TAXONOMY_6))
+    assert card["classes"] == TAXONOMY_6 and card["class_order"] == "manifest taxonomy"
     expected = _expected_boxes(run)
     assert set(boxes) == set(expected)
     images = sorted((tmp_path / "yolo" / "images" / "train").glob("*.png"))
@@ -245,7 +273,7 @@ def test_voc_round_trip_with_xml_etree(batch_dir, tmp_path):
             continue
         assert len(objects) == 1
         obj = objects[0]
-        assert obj["name"] == "B747"
+        assert obj["name"] == "aircraft"              # the taxonomy's class (manifest 6)
         xmin, ymin, xmax, ymax = obj["bndbox"]
         # 1-based inclusive integers covering the float box: within a pixel.
         assert xmin - 1 <= box[0] < xmin and ymin - 1 <= box[1] < ymin
@@ -270,7 +298,7 @@ def test_coco_round_trip_with_pycocotools(batch_dir, tmp_path):
     coco = coco_api.COCO(str(tmp_path / "coco" / "annotations" / "instances_train.json"))
     assert len(coco.getImgIds()) == n
     cats = coco.loadCats(coco.getCatIds())
-    assert [(c["id"], c["name"]) for c in cats] == [(1, "B747")]
+    assert [(c["id"], c["name"]) for c in cats] == list(enumerate(TAXONOMY_6, start=1))
     expected = _expected_boxes(run)
     checked = 0
     for image in coco.loadImgs(coco.getImgIds()):
@@ -304,7 +332,7 @@ def test_kitti_round_trip_with_a_minimal_line_reader(batch_dir, tmp_path):
             continue
         assert len(rows) == 1
         row = rows[0]
-        assert row[0] == "B747" and row[2] == "3"        # occluded unknown without an ID pass
+        assert row[0] == "aircraft" and row[2] == "3"    # occluded unknown without an ID pass
         assert [float(v) for v in row[4:8]] == pytest.approx(box, abs=0.005)   # 2 decimals
         centre = record["labels"]["bbox_3d_camera"]["centre_m"]
         assert [float(v) for v in row[11:14]] == pytest.approx(centre, abs=0.0005)
@@ -574,7 +602,7 @@ def test_the_card_carries_counts_conditions_licences_and_the_split_policy(batch_
     assert card["images"] == card["frames"] == 192
     assert card["instances"] == sum(c["instances"] for c in card["class_balance"].values())
     assert card["instances"] > 0
-    per_split = card["class_balance"]["B747"]["per_split"]
+    per_split = card["class_balance"]["aircraft"]["per_split"]   # taxonomy class (manifest 6)
     assert sum(p["instances"] for p in per_split.values()) == card["instances"]
     assert card["split"]["seed"] == 7 and card["split"]["by"] == "simulation_digest"
     assert "one side" in card["split"]["policy"]
@@ -587,15 +615,25 @@ def test_the_card_carries_counts_conditions_licences_and_the_split_policy(batch_
     assert sampled["sun_elevation_deg"]["min"] <= sampled["sun_elevation_deg"]["max"]
     assert sampled["livery"] == {"default": 4}
     licences = card["licences"]
-    assert len(licences) == 1 and licences[0]["licence"] == "GPL-2.0"
-    assert licences[0]["asset"] == "assets/aircraft_config/B747.json"
-    assert sorted(licences[0]["runs"]) == sorted(r["name"] for r in card["runs"])
+    # Manifest 6: the object's own licence (objects[].licence) is listed
+    # beside the airframe config's -- two entries, one licence.
+    assert len(licences) == 2 and {l["licence"] for l in licences} == {"GPL-2.0"}
+    by_kind = {l["kind"]: l for l in licences}
+    assert by_kind["aircraft_config"]["asset"] == "assets/aircraft_config/B747.json"
+    assert by_kind["object"]["asset"] == "aircraft:B747:0"
+    assert sorted(by_kind["aircraft_config"]["runs"]) == sorted(r["name"] for r in card["runs"])
     for run in card["runs"]:
         assert run["seed"] in (1, 2)
         assert run["verification"]["status"] == "passed"
         assert run["masks_shipped"] is False
-    assert card["label_conventions_by_manifest_version"] == {"5": card["label_conventions"]}
-    assert card["not_claimed_from_labels"] == {}
+    assert card["label_conventions_by_manifest_version"] == {"6": card["label_conventions"]}
+    # Manifest 6: every per-object not_claimed sentence is aggregated with
+    # its record count -- 192 frames x (primary + terrain) share two, the
+    # terrain alone says it has no alone pass.
+    aggregated = card["not_claimed_from_labels"]
+    assert aggregated["objects_under_px: 12"] == 384
+    assert aggregated["subpixel_mask_accuracy_beyond_range_m: 8000"] == 384
+    assert [n for n in aggregated if n.startswith("visible_fraction: no alone pass")]
     assert card["not_claimed_extent_px"] == NOT_CLAIMED_EXTENT_PX
     text = (tmp_path / "ds" / "DATASET_CARD.md").read_text(encoding="utf-8")
     for heading in ("## Class balance", "## Conditions", "## Licences", "## Not claimed"):

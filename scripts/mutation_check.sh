@@ -1421,8 +1421,8 @@ mutate core/capture/manifest.py \
     tests/test_camera_manifest.py || failures=$((failures+1))
 
 mutate core/capture/manifest.py \
-    'SUPPORTED_MANIFEST_VERSIONS = (3, 4, 5)' \
-    'SUPPORTED_MANIFEST_VERSIONS = (4, 5)  # MUTATED: every earlier run refused' \
+    'SUPPORTED_MANIFEST_VERSIONS = (3, 4, 5, 6)' \
+    'SUPPORTED_MANIFEST_VERSIONS = (4, 5, 6)  # MUTATED: every earlier run refused' \
     "a version 3 manifest still reads" \
     tests/test_camera_manifest.py || failures=$((failures+1))
 
@@ -2228,6 +2228,74 @@ r.Substrate=False' \
 r.Substrate=True' \
     "Substrate stays off until a material is authored for it" \
     tests/test_platform.py || failures=$((failures+1))
+
+# -- Phase 2, packages B + C: object identity and the per-object record ----
+# Each target is a multi-line, file-unique string (gotcha 28: mutate()
+# replaces the FIRST occurrence).
+
+mutate core/capture/objects.py \
+    '    for number, entry in enumerate(entries, start=1):
+        if entry["id"] in seen:' \
+    '    for number, entry in enumerate(entries, start=2):  # MUTATED: the primary is no longer 1
+        if entry["id"] in seen:' \
+    "int_ids are assigned in composition order from 1: the primary is always 1" \
+    tests/test_capture_objects.py || failures=$((failures+1))
+
+mutate core/capture/objects.py \
+    '    if len(entries) > MAX_INT_ID:
+        raise ObjectIdentityError(' \
+    '    if False:  # MUTATED: a 256th object wraps into another id
+        raise ObjectIdentityError(' \
+    "a scene needing more than 255 ids refuses annotation.identity" \
+    tests/test_capture_objects.py || failures=$((failures+1))
+
+mutate core/capture/labels.py \
+    '        out["bbox_2d_tight"] = [float(xs.min()), float(ys.min()),
+                                float(xs.max()) + 1.0, float(ys.max()) + 1.0]' \
+    '        out["bbox_2d_tight"] = [float(xs.min()), float(ys.min()),
+                                float(xs.max()), float(ys.max())]  # MUTATED: one pixel short' \
+    "the tight box covers the ID pixels, far edges one past the last pixel" \
+    tests/test_capture_objects.py || failures=$((failures+1))
+
+mutate core/capture/labels.py \
+    '        if pixels_alone > 0:
+            out["visible_fraction"] = pixels / pixels_alone' \
+    '        if pixels_alone > 0:
+            out["visible_fraction"] = 1.0  # MUTATED: every object fully visible' \
+    "visible_fraction is ID-pass pixels over alone-pass pixels" \
+    tests/test_capture_objects.py || failures=$((failures+1))
+
+mutate core/capture/labels.py \
+    '            others = np.unique(mask[footprint])
+            out["occluded_by"] = [int(v) for v in others
+                                  if int(v) not in (0, int_id)]' \
+    '            out["occluded_by"] = []  # MUTATED: nobody occludes anybody' \
+    "occluded_by lists the ids found inside the alone-pass footprint" \
+    tests/test_capture_objects.py || failures=$((failures+1))
+
+mutate core/capture/poses.py \
+    '        cross_n = centre["north_m"] + range_m * forward[0]
+        cross_e = centre["east_m"] + range_m * forward[1]' \
+    '        cross_n = centre["north_m"] + 0.5 * range_m * forward[0]  # MUTATED: crosses at half the range
+        cross_e = centre["east_m"] + 0.5 * range_m * forward[1]' \
+    "a crossing track crosses at the stated range" \
+    tests/test_capture_objects.py || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '    if len(traffic_tracks) != len(spec.traffic):
+        raise ValueError(' \
+    '    if False:  # MUTATED: a traffic aircraft with no track is silently unlabelled
+        raise ValueError(' \
+    "a spec with traffic and no solved tracks refuses the manifest" \
+    tests/test_capture_objects.py || failures=$((failures+1))
+
+mutate core/capture/labels.py \
+    '    if raw.size != width * height:
+        raise ValueError(' \
+    '    if False:  # MUTATED: a truncated depth file labels the cut as sky
+        raise ValueError(' \
+    "a depth .f32 of the wrong size refuses rather than reshaping" \
+    tests/test_capture_objects.py || failures=$((failures+1))
 
 # -- Phase 2, package F: the randomisation policy (contracts §5) --------------
 # Each guard names the safeguard it removes; each test below fails

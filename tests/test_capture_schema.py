@@ -43,6 +43,11 @@ def test_the_schema_is_versioned_with_the_writer_and_the_manifest_validates(mani
     schema = load_schema(path)
     assert schema["properties"]["manifest_version"]["const"] == MANIFEST_VERSION
     assert validate_manifest(manifest) == []
+    # The previous version's schema stays published beside it, so a
+    # version-5 run still validates against ITS contract.
+    older = load_schema(path.with_name("capture_manifest.v5.schema.json"))
+    assert older["properties"]["manifest_version"]["const"] == 5
+    assert "objects" not in older["required"]
 
 
 def test_corruptions_fail_by_path(manifest):
@@ -72,6 +77,27 @@ def test_corruptions_fail_by_path(manifest):
     broken["manifest_version"] = 4
     with pytest.raises(SchemaError):          # no v4 schema file: not guessed
         validate_manifest(broken)
+    # Version 6 (Phase 2, packages B + C): the object list and the
+    # per-object records are required, and an int_id the 8-bit stencil
+    # cannot carry fails by path.
+    broken = copy.deepcopy(manifest)
+    del broken["objects"]
+    assert any("missing required key 'objects'" in p for p in validate_manifest(broken))
+    broken = copy.deepcopy(manifest)
+    del broken["frames"][0]["labels"]["objects"]
+    assert any("frames[0].labels: missing required key 'objects'" in p
+               for p in validate_manifest(broken))
+    broken = copy.deepcopy(manifest)
+    broken["objects"][0]["int_id"] = 256
+    assert any("objects[0].int_id" in p for p in validate_manifest(broken))
+    broken = copy.deepcopy(manifest)
+    broken["frames"][2]["labels"]["objects"][0]["visible_fraction"] = "high"
+    assert any("frames[2].labels.objects[0].visible_fraction" in p
+               for p in validate_manifest(broken))
+    broken = copy.deepcopy(manifest)
+    del broken["frames"][1]["labels"]["objects"][0]["basis"]
+    assert any("frames[1].labels.objects[0]: missing required key 'basis'" in p
+               for p in validate_manifest(broken))
 
 
 def test_the_validator_refuses_keywords_it_does_not_enforce(tmp_path):

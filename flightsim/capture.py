@@ -48,6 +48,8 @@ from typing import Optional, Sequence
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
+from core.capture.objects import compose_objects  # noqa: E402
+
 
 def _tornado_hazard_block(spec):
     """The straight-line severe-event placement, in the scene frame:
@@ -80,6 +82,40 @@ def _mesh_manifest_path(spec) -> Path:
     (the web app resolves the same path for its -mesh= argument)."""
     return (REPO / "assets" / "generated" / str(spec.aircraft.value)
             / "mesh_manifest.json")
+
+
+def _traffic_mesh_refusal(spec):
+    """The ``aircraft.mesh`` refusal for the first traffic airframe whose
+    model is not imported on this machine, or None. The web app's own
+    words where its refusal applies (no config, no upstream licence);
+    the build command where the model can be built."""
+    from assets_pipeline.importer import (
+        configured_aircraft, is_imported, unavailable_reason,
+    )
+
+    for index, entry in enumerate(spec.traffic):
+        aircraft = str(entry.aircraft.value)
+        if is_imported(aircraft):
+            continue
+        reason = unavailable_reason(aircraft)
+        if reason:
+            message = (f"traffic[{index}] names the {aircraft}, which has "
+                       f"flight physics but can never render: {reason}")
+        elif aircraft not in configured_aircraft():
+            message = (f"traffic[{index}] names the {aircraft}, for which no "
+                       f"licensed 3-D model is configured; placeholder "
+                       f"airframes never render, for traffic as for the "
+                       f"primary")
+        else:
+            message = (f"traffic[{index}] names the {aircraft}, whose model "
+                       f"is not imported on this machine (no current "
+                       f"assets/generated/{aircraft}/mesh_manifest.json backed "
+                       f"by its ue/Content assets). Build it once with "
+                       f"`python scripts/import_aircraft.py {aircraft}`; a "
+                       f"scripted traffic actor is drawn from the same "
+                       f"imported mesh as a primary would be")
+        return {"constraint": "aircraft.mesh", "message": message}
+    return None
 
 
 def _refuse(violations) -> int:
@@ -232,6 +268,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                       "does not have; refused before any flight, so "
                       "nothing was run or rendered)")
                 return 2
+            # Phase 2 (package B, contracts §2.2): every TRAFFIC airframe
+            # is held to the same rule as the primary -- its mesh must be
+            # imported on this machine or the render refuses aircraft.mesh
+            # by name before any flight. A scripted actor drawn as boxes
+            # under a label that names a type is the same lie.
+            traffic_refusal = _traffic_mesh_refusal(spec)
+            if traffic_refusal is not None:
+                print(f"REFUSED -- {traffic_refusal['constraint']}: "
+                      f"{traffic_refusal['message']}")
+                print("(--render asked for pixels of a traffic model this "
+                      "machine does not have; refused before any flight)")
+                return 2
 
     heightfield = None
     terrain_ground = None
@@ -369,6 +417,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               "camera (the chase view)")
     terrain_datum = float(spec.terrain_elevation.value)
 
+    from core.capture.poses import solve_traffic_track
+
+    traffic_objects = [o for o in compose_objects(spec) if o.role == "traffic"]
+
+    def solve_traffic(flight):
+        """The scripted traffic tracks over one recorded flight (Phase
+        2, package B): solved beside the cameras, from the same
+        telemetry, so the second aircraft's keyframes and the labels
+        that describe it come out of one flight."""
+        return [solve_traffic_track(flight, str(entry.track.value),
+                                    float(entry.range_m.value), frame, obj.id)
+                for entry, obj in zip(spec.traffic, traffic_objects)]
+
     def solve_over(flight):
         """Pose tracks, schedules and their scene violations over one
         recorded flight. Runs twice when the host flies its own: once
@@ -387,6 +448,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     try:
         tracks, schedules, solved_violations = solve_over(columns)
+        traffic_tracks = solve_traffic(columns)
     except ScheduleError as exc:
         print(f"REFUSED -- {exc}")
         return 2
@@ -401,10 +463,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         os_name, ue_available, ue_platform_refusal, ue_runner_command,
     )
 
-    def write_card(path, tracks, schedules, landmarks):
-        """The card the hosts read: spec fields + solved pose tracks."""
+    def write_card(path, tracks, schedules, landmarks, traffic_tracks=()):
+        """The card the hosts read: spec fields + solved pose tracks,
+        the labelled objects and the scripted traffic tracks."""
+        from core.capture.airframe import load_airframe
+        from core.capture.objects import (
+            mesh_manifest_path, objects_block, taxonomy_classes,
+        )
+        from core.capture.poses import traffic_card_block
         from core.scenario.card import write_run_card
 
+        objects = compose_objects(spec)
+        traffic_objs = [o for o in objects if o.role == "traffic"]
+        traffic_blocks = []
+        for entry, obj, track in zip(spec.traffic, traffic_objs, traffic_tracks):
+            name = str(entry.aircraft.value)
+            mesh = mesh_manifest_path(name)
+            traffic_blocks.append(traffic_card_block(
+                track, entry, obj, frame,
+                load_airframe(name).cg_structural_in,
+                str(mesh) if mesh.is_file() else None))
         return write_run_card(
             spec, path,
             cameras=[track.card_block(camera, schedule, frame)
@@ -412,7 +490,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                      in zip(cameras, tracks, schedules)],
             landmarks=landmarks,
             scene_crs=frame.crs if frame.declared else None,
-            randomization=randomization_card_block(spec))
+            randomization=randomization_card_block(spec),
+            objects=objects_block(objects),
+            taxonomy=taxonomy_classes(spec),
+            traffic=traffic_blocks)
 
     solve_source = SOLVE_PRE_RUN
     solve_digest = result.output_digest
@@ -455,7 +536,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # is rewritten below from the re-solved tracks.
         # No landmarks: this pass renders nothing and projects
         # nothing, so it has no use for them.
-        write_card(host_dir / "card.json", tracks, schedules, None)
+        write_card(host_dir / "card.json", tracks, schedules, None,
+                   traffic_tracks)
         host_telemetry = host_telemetry_path(out)
         command = ue_runner_command(REPO, "run_ue_scenario")
         command += [str(host_dir / "card.json"), str(host_telemetry)]
@@ -487,6 +569,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             # The whole record: every frame's ``state`` is cut from it.
             host_columns = read_host_record(host_telemetry)
             tracks, schedules, solved_violations = solve_over(host_columns)
+            traffic_tracks = solve_traffic(host_columns)
         except HostFlightError as exc:
             print(f"REFUSED -- {exc.render()}")
             return 2
@@ -519,7 +602,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         cameras=cameras,
         # The scene's own known landmarks ride into the manifest so the
         # verifier has off-axis points that are not the aircraft.
-        heightfield=heightfield, terrain_elevation_m=terrain_datum)
+        heightfield=heightfield, terrain_elevation_m=terrain_datum,
+        # Phase 2 (package B): the scripted traffic's solved tracks, so
+        # every frame carries a label record for the second aircraft.
+        traffic_tracks=traffic_tracks)
     manifest_path = write_capture_manifest(manifest, out)
     write_frame_sidecars(manifest, out)
     result.telemetry.write_json(out / "telemetry.json")
@@ -548,7 +634,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # card the render passes consume and the manifest that labels
         # their output came out of one flight.
         write_card(out / "card.json", tracks, schedules,
-                   manifest.get("landmarks"))
+                   manifest.get("landmarks"), traffic_tracks)
         print(f"  card:     {out / 'card.json'} (consume-poses; one "
               f"commandlet pass per camera via -camera-index=N)")
 
@@ -624,6 +710,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     rendered = sorted(p for p in frames_dir.rglob("frame_*.png")
                       if p.stem[-4:].isdigit())
     print(f"  frames:   {len(rendered)} rendered under {frames_dir}")
+
+    # Phase 2 (package C): complete every frame's per-object records
+    # from the bundle the engine just wrote -- the tight box from the
+    # ID image, the visible fraction from the alone pass, occluded_by,
+    # the depth under the mask -- and write the manifest and sidecars
+    # back. A frame with no bundle keeps its nulls and says why.
+    from core.capture.labels import attach_engine_labels
+
+    attached = attach_engine_labels(out)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    print(f"  labels:   engine bundle attached on {attached['attached']} of "
+          f"{attached['frames']} frames ({attached['objects']} object "
+          f"records; {attached['without_bundle']} without a bundle)")
 
     # Phase 10: the sensor model as a seeded post-pass, for every camera
     # whose profile is not the ideal pinhole.

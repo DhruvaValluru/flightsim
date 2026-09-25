@@ -84,7 +84,6 @@ ALLOWED_FUTURE: Dict[str, str] = {
     "annotation.box_mismatch": "D: box_vs_mask",
     "annotation.depth_range": "D: depth_vs_geometry",
     "annotation.visibility": "D: visibility_vs_scene",
-    "annotation.identity": "D: identity_stable",
     "annotation.intrinsics": "D: applied_intrinsics",
     "annotation.files": "D: label_files' FAIL name",
     "check.mask_integers_only": "D: new check",

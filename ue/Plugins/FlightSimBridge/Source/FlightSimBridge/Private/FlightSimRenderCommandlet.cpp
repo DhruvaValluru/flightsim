@@ -10,9 +10,11 @@
 
 #include "CineCameraComponent.h"
 #include "Components/DirectionalLightComponent.h"
+#include "Components/MeshComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "EngineUtils.h"
 #include "Dom/JsonObject.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/Engine.h"
@@ -37,6 +39,8 @@
 #include "Serialization/JsonWriter.h"
 #include "ShaderCompiler.h"
 #include "TextureResource.h"
+
+#include <limits>
 
 DEFINE_LOG_CATEGORY(LogFlightSimRender);
 
@@ -100,18 +104,42 @@ namespace
 	// -- Phase 10 labels: constants and the 16-bit PNG writer -----------------
 	// Names are per-file-unique (gotcha 3: unity builds merge anonymous
 	// namespaces). Depth beyond RenderLabelDepthSkyCm is "no geometry" --
-	// the sky -- and a silhouette pixel counts as visible where the full
-	// scene's depth and the aircraft-alone depth agree to
-	// RenderLabelDepthAgreeCm. The 16-bit depth PNG stores metres /
-	// RenderLabelDepthScaleM, saturating at RenderLabelDepthSaturationM;
-	// both numbers ride in render.json so no reader has to know them.
+	// the sky. The 16-bit depth PNG stores metres / RenderLabelDepthScaleM,
+	// saturating at RenderLabelDepthSaturationM; both numbers ride in
+	// render.json so no reader has to know them. (Phase 2 retired the 5 cm
+	// depth-agreement mask; the ID image comes from the stencil pass below
+	// and the instance/class ids here are the DEFAULT pair a card without
+	// objects[] gets.)
 	constexpr float RenderLabelDepthSkyCm = 5.0e6f;          // 50 km
-	constexpr float RenderLabelDepthAgreeCm = 5.0f;
 	constexpr double RenderLabelDepthScaleM = 0.1;
 	constexpr double RenderLabelDepthSaturationM = 6553.5;
 	constexpr uint8 RenderLabelAircraftInstanceId = 1;
 	constexpr uint8 RenderLabelClassAircraft = 1;
 	constexpr uint8 RenderLabelClassTerrain = 2;
+	// Phase 2 (packages B + C): the post-process material that emits the
+	// Custom Depth Stencil as a flat float for the ID pass. Built by
+	// scripts/ue_create_materials.py (MD_PostProcess, blendable location
+	// "Replacing the Tonemapper", EmissiveColor = SceneTexture:CustomStencil).
+	// Absent -> -labels refuses by name; nothing else is written as an ID.
+	constexpr const TCHAR* RenderLabelStencilMaterialPath =
+		TEXT("/Game/FlightSim/M_CustomStencilID.M_CustomStencilID");
+	// The raw depth file is little-endian float32; every UE target is.
+	static_assert(PLATFORM_LITTLE_ENDIAN, "frame_NNNN_depth.f32 is declared little-endian");
+
+	// One labelled object as the -labels pass sees it: the card's ids, the
+	// actor whose mesh components carry the stencil (null for a scene
+	// object like the terrain, whose id goes on every other mesh), and the
+	// alone-pass capture (aircraft only).
+	struct FRenderLabelledObject
+	{
+		FString Id;
+		int32 IntId = 0;
+		int32 ClassId = 0;
+		FString Class;
+		FString Role;
+		AActor* Actor = nullptr;
+		USceneCaptureComponent2D* Alone = nullptr;
+	};
 
 	// -- Phase 10, P10-4: SHA-256 of what was written -----------------------
 	// Self-contained (FIPS 180-4), so the digest recorded in render.json
@@ -388,8 +416,13 @@ namespace
 
 		// A manifest airframe replaces the whole binding table: its bones are
 		// its own (both elevators, split ailerons), and mixing them with the
-		// stock table would make bone lookup ambiguous.
-		Animator->ClearBindings();
+		// stock table would make bone lookup ambiguous. A scripted traffic
+		// actor has no FDM and no animator: its surfaces hang undeflected at
+		// their hinges (Phase 2, packages B + C).
+		if (Animator != nullptr)
+		{
+			Animator->ClearBindings();
+		}
 
 		const TArray<TSharedPtr<FJsonValue>>* Surfaces = nullptr;
 		if (!Manifest->TryGetArrayField(TEXT("surfaces"), Surfaces) || Surfaces == nullptr)
@@ -452,10 +485,13 @@ namespace
 
 			bool bContinuous = false;
 			(*Entry)->TryGetBoolField(TEXT("continuous"), bContinuous);
-			Animator->AddBinding(Property, FName(*Bone),
-			                     static_cast<float>(Scale), RotationAxis,
-			                     bContinuous);
-			Animator->BindSurfaceComponent(FName(*Bone), HingeComponent);
+			if (Animator != nullptr)
+			{
+				Animator->AddBinding(Property, FName(*Bone),
+				                     static_cast<float>(Scale), RotationAxis,
+				                     bContinuous);
+				Animator->BindSurfaceComponent(FName(*Bone), HingeComponent);
+			}
 		}
 		// Phase 10 (package 7): the sampled livery. "default" is the
 		// mesh's own materials (exactly the previous behaviour); any
@@ -844,6 +880,38 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	UE_LOG(LogFlightSimRender, Display, TEXT("%d control surfaces bound to geometry"),
 	       Animator->GetBoundSurfaceCount());
 
+	// -- Phase 2 (packages B + C): the scripted traffic aircraft -----------
+	// Each card traffic entry has a bare actor from Populate; its mesh is
+	// built by the SAME BuildMeshAirframe path as the primary's (manifest
+	// magic, FDM pairing, licence, at ITS measured mesh origin), with no
+	// animator. A traffic entry with no imported mesh refuses by name --
+	// placeholder airframes never render, for traffic as for the primary.
+	TArray<FMeshAirframe> TrafficMeshes;
+	for (int32 Index = 0; Index < Card.Traffic.Num(); ++Index)
+	{
+		const FFlightSimTrafficTrack& Track = Card.Traffic[Index];
+		if (Index >= Scenario.TrafficActors.Num() || Scenario.TrafficActors[Index] == nullptr)
+		{
+			return Fail(FString::Printf(TEXT("traffic '%s' has no actor in the scenario world"),
+			                            *Track.Id));
+		}
+		if (Track.MeshManifestPath.IsEmpty())
+		{
+			return Fail(FString::Printf(
+				TEXT("aircraft.mesh: traffic '%s' (%s) carries no imported mesh manifest on ")
+				TEXT("the card; a scripted traffic actor is drawn from the same imported mesh ")
+				TEXT("as a primary would be, never from placeholder boxes"),
+				*Track.Id, *Track.Aircraft));
+		}
+		FMeshAirframe TrafficMesh;
+		if (!BuildMeshAirframe(Scenario.TrafficActors[Index], nullptr, Track.MeshManifestPath,
+		                       Track.Aircraft, Track.Livery, TrafficMesh, Error))
+		{
+			return Fail(FString::Printf(TEXT("traffic '%s': %s"), *Track.Id, *Error));
+		}
+		TrafficMeshes.Add(TrafficMesh);
+	}
+
 	// A lagged chase that never inherits roll (§1.5). The previous build welded
 	// the camera to the airframe, which put the camera in the body frame, in
 	// which the aircraft is by construction never moving.
@@ -1220,16 +1288,32 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	}
 	Capture->RegisterComponent();
 
-	// -- Phase 10 labels: two depth captures beside the colour one --------
-	// The instance mask is not a stencil pass: the aircraft is rendered
-	// ALONE into a depth target and the full scene into the same target,
-	// and a silhouette pixel is visible exactly where the two depths
-	// agree. No post-process material, no content asset -- nothing the
-	// void scene lacks -- and the readback is raw floats (RCM_MinMax), so
-	// depth is metres, not a normalised picture of metres.
+	// -- Phase 2 labels (packages B + C, contracts §1): the ID pass -------
+	// The instance mask is an ID IMAGE from the Custom Depth Stencil: every
+	// labelled mesh component carries bRenderCustomDepth with its stencil =
+	// the card's int_id (r.CustomDepth=3 in DefaultEngine.ini), a post-
+	// process material emits SceneTexture:CustomStencil as a flat float, and
+	// the capture reads it back as raw floats (RCM_MinMax) into an R32f
+	// target -- the same capture/readback path the depth pass uses. Every
+	// label capture is AA-free: no anti-aliasing, no temporal history, screen
+	// percentage 100, fog/atmosphere/bloom/motion blur/DOF/lens flare/
+	// translucency off, bAlwaysPersistRenderingState false. One "alone" ID
+	// capture per aircraft object (PRM_UseShowOnlyList, that actor only)
+	// generalises Phase 10's aircraft-alone depth pass: visible fraction =
+	// pixels in the full ID pass / pixels in the alone pass, integers over
+	// integers. Phase 10's depth-agreement mask (|scene - alone| <= 5 cm)
+	// is gone: it could not tell two aircraft apart and was never
+	// AA-isolated. The ID image keeps the _mask.png name and the primary
+	// keeps int_id 1, so every Phase 10 reader stays true on a
+	// single-aircraft run.
 	UTextureRenderTarget2D* LabelDepthTarget = nullptr;
+	UTextureRenderTarget2D* LabelIdTarget = nullptr;
 	USceneCaptureComponent2D* LabelDepthAll = nullptr;
-	USceneCaptureComponent2D* LabelDepthAircraft = nullptr;
+	USceneCaptureComponent2D* LabelIdAll = nullptr;
+	TArray<FRenderLabelledObject> Labelled;
+	int32 LabelPrimaryIntId = 0;
+	int32 LabelTerrainIntId = 0;
+	FString LabelIdSource;
 	if (bLabels)
 	{
 		if (bHideAircraft)
@@ -1237,36 +1321,214 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			return Fail(TEXT("-labels with -HideAircraft: an instance mask of a "
 			                 "hidden aircraft is nothing; drop one of them"));
 		}
+		// The objects, from the card (Python composed them; this pass
+		// invents no id). A card written before objects[] existed gets the
+		// Phase 10 ids -- 1 the aircraft, 2 everything else -- and
+		// render.json says so under labels.id_source.
+		if (Card.Objects.Num() > 0)
+		{
+			LabelIdSource = TEXT("card objects[]");
+			for (const FFlightSimSceneObject& Object : Card.Objects)
+			{
+				FRenderLabelledObject Entry;
+				Entry.Id = Object.Id;
+				Entry.IntId = Object.IntId;
+				Entry.ClassId = Object.ClassId;
+				Entry.Class = Object.Class;
+				Entry.Role = Object.Role;
+				if (Object.Role == TEXT("primary"))
+				{
+					Entry.Actor = Scenario.Aircraft;
+					LabelPrimaryIntId = Object.IntId;
+				}
+				else if (Object.Role == TEXT("traffic"))
+				{
+					for (int32 j = 0; j < Card.Traffic.Num() && j < Scenario.TrafficActors.Num(); ++j)
+					{
+						if (Card.Traffic[j].IntId == Object.IntId)
+						{
+							Entry.Actor = Scenario.TrafficActors[j];
+						}
+					}
+					if (Entry.Actor == nullptr)
+					{
+						return Fail(FString::Printf(
+							TEXT("annotation.identity: object '%s' (int_id %d) has role traffic ")
+							TEXT("but no traffic[] entry on the card carries that int_id"),
+							*Object.Id, Object.IntId));
+					}
+				}
+				else if (Object.Class == TEXT("terrain"))
+				{
+					LabelTerrainIntId = Object.IntId;
+				}
+				Labelled.Add(Entry);
+			}
+			if (LabelPrimaryIntId == 0)
+			{
+				return Fail(TEXT("annotation.identity: the card's objects[] names no primary "
+				                 "airframe; the ID image would carry no id for the aircraft "
+				                 "that flew"));
+			}
+		}
+		else
+		{
+			LabelIdSource = TEXT("default ids (card carries no objects[]): 1 the aircraft, "
+			                     "2 terrain or other");
+			FRenderLabelledObject Primary;
+			Primary.Id = FString::Printf(TEXT("aircraft:%s:0"), *Card.Aircraft);
+			Primary.IntId = RenderLabelAircraftInstanceId;
+			Primary.ClassId = RenderLabelClassAircraft;
+			Primary.Class = TEXT("aircraft");
+			Primary.Role = TEXT("primary");
+			Primary.Actor = Scenario.Aircraft;
+			Labelled.Add(Primary);
+			FRenderLabelledObject Terrain;
+			Terrain.Id = TEXT("terrain");
+			Terrain.IntId = RenderLabelClassTerrain;
+			Terrain.ClassId = RenderLabelClassTerrain;
+			Terrain.Class = TEXT("terrain");
+			Terrain.Role = TEXT("scene");
+			Labelled.Add(Terrain);
+			LabelPrimaryIntId = RenderLabelAircraftInstanceId;
+			LabelTerrainIntId = RenderLabelClassTerrain;
+		}
+
+		// Every mesh component in the world carries the stencil of the
+		// object it belongs to: an aircraft actor's its own int_id, every
+		// other mesh (terrain, ground plane, funnel) the terrain's. Editor-
+		// only and hidden-in-game components draw in no capture and get none.
+		TMap<int32, int32> StencilCounts;
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			int32 IntId = LabelTerrainIntId;
+			for (const FRenderLabelledObject& Entry : Labelled)
+			{
+				if (Entry.Actor != nullptr && Entry.Actor == *It)
+				{
+					IntId = Entry.IntId;
+				}
+			}
+			if (IntId <= 0)
+			{
+				continue;
+			}
+			TInlineComponentArray<UMeshComponent*> Meshes;
+			It->GetComponents(Meshes);
+			for (UMeshComponent* Mesh : Meshes)
+			{
+				if (Mesh == nullptr || Mesh->IsEditorOnly() || Mesh->bHiddenInGame)
+				{
+					continue;
+				}
+				Mesh->SetRenderCustomDepth(true);
+				Mesh->SetCustomDepthStencilValue(IntId);
+				StencilCounts.FindOrAdd(IntId)++;
+			}
+		}
+		for (const FRenderLabelledObject& Entry : Labelled)
+		{
+			const int32* Components = StencilCounts.Find(Entry.IntId);
+			UE_LOG(LogFlightSimRender, Display,
+			       TEXT("labels: object '%s' int_id %d class_id %d (%s): stencil on %d mesh component(s)"),
+			       *Entry.Id, Entry.IntId, Entry.ClassId, *Entry.Role, Components ? *Components : 0);
+		}
+
+		UMaterialInterface* StencilMaterial =
+			LoadObject<UMaterialInterface>(nullptr, RenderLabelStencilMaterialPath);
+		if (StencilMaterial == nullptr)
+		{
+			return Fail(FString::Printf(
+				TEXT("-labels needs the post-process material %s (MD_PostProcess, blendable ")
+				TEXT("location 'Replacing the Tonemapper', EmissiveColor = SceneTexture:")
+				TEXT("CustomStencil), which scripts/ue_create_materials.py builds; refusing ")
+				TEXT("to write an ID image from anything else"),
+				RenderLabelStencilMaterialPath));
+		}
+
 		LabelDepthTarget = NewObject<UTextureRenderTarget2D>();
 		LabelDepthTarget->RenderTargetFormat = RTF_R32f;
 		LabelDepthTarget->ClearColor = FLinearColor::Black;
 		LabelDepthTarget->bAutoGenerateMips = false;
 		LabelDepthTarget->InitAutoFormat(Width, Height);
 		LabelDepthTarget->UpdateResourceImmediate(true);
+		LabelIdTarget = NewObject<UTextureRenderTarget2D>();
+		LabelIdTarget->RenderTargetFormat = RTF_R32f;
+		LabelIdTarget->ClearColor = FLinearColor::Black;
+		LabelIdTarget->bAutoGenerateMips = false;
+		LabelIdTarget->InitAutoFormat(Width, Height);
+		LabelIdTarget->UpdateResourceImmediate(true);
+
+		// The label-pass rule (contracts §1, brainstorm §3.3), applied to
+		// every label capture: no anti-aliasing of any kind, no temporal
+		// history, no screen-percentage scaling, and no effect that blends
+		// a pixel with its neighbours or with the air in front of it.
+		auto ConfigureLabelCapture = [&](USceneCaptureComponent2D* Label)
+		{
+			Label->SetupAttachment(Director->Camera);
+			Label->SetMobility(EComponentMobility::Movable);
+			Label->bCaptureEveryFrame = false;
+			Label->bCaptureOnMovement = false;
+			Label->bAlwaysPersistRenderingState = false;
+			Label->FOVAngle = Capture->FOVAngle;
+			Label->ShowFlags.SetAntiAliasing(false);
+			Label->ShowFlags.SetTemporalAA(false);
+			Label->ShowFlags.SetScreenPercentage(false);
+			Label->ShowFlags.SetFog(false);
+			Label->ShowFlags.SetAtmosphere(false);
+			Label->ShowFlags.SetVolumetricFog(false);
+			Label->ShowFlags.SetBloom(false);
+			Label->ShowFlags.SetMotionBlur(false);
+			Label->ShowFlags.SetDepthOfField(false);
+			Label->ShowFlags.SetLensFlares(false);
+			Label->ShowFlags.SetTranslucency(false);
+		};
 		auto MakeDepthCapture = [&](const TCHAR* Name) -> USceneCaptureComponent2D*
 		{
 			USceneCaptureComponent2D* Depth =
 				NewObject<USceneCaptureComponent2D>(Director, Name);
-			Depth->SetupAttachment(Director->Camera);
-			Depth->SetMobility(EComponentMobility::Movable);
 			Depth->TextureTarget = LabelDepthTarget;
 			Depth->CaptureSource = ESceneCaptureSource::SCS_SceneDepth;
-			Depth->bCaptureEveryFrame = false;
-			Depth->bCaptureOnMovement = false;
-			Depth->bAlwaysPersistRenderingState = true;
-			Depth->FOVAngle = Capture->FOVAngle;
+			ConfigureLabelCapture(Depth);
 			Depth->RegisterComponent();
 			return Depth;
 		};
+		auto MakeIdCapture = [&](const TCHAR* Name) -> USceneCaptureComponent2D*
+		{
+			USceneCaptureComponent2D* Id =
+				NewObject<USceneCaptureComponent2D>(Director, Name);
+			Id->TextureTarget = LabelIdTarget;
+			// The post-process chain has to run for the blendable to
+			// replace the tonemapper; FinalColorHDR keeps its output
+			// linear and unquantised, so R is the stencil as a float.
+			Id->CaptureSource = ESceneCaptureSource::SCS_FinalColorHDR;
+			ConfigureLabelCapture(Id);
+			Id->ShowFlags.SetPostProcessing(true);
+			Id->PostProcessSettings.WeightedBlendables.Array.Add(
+				FWeightedBlendable(1.0f, StencilMaterial));
+			Id->PostProcessBlendWeight = 1.0f;
+			Id->RegisterComponent();
+			return Id;
+		};
 		LabelDepthAll = MakeDepthCapture(TEXT("LabelDepthAll"));
-		LabelDepthAircraft = MakeDepthCapture(TEXT("LabelDepthAircraft"));
-		LabelDepthAircraft->PrimitiveRenderMode =
-			ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
-		LabelDepthAircraft->ShowOnlyActors.Add(Scenario.Aircraft);
+		LabelIdAll = MakeIdCapture(TEXT("LabelIdAll"));
+		for (FRenderLabelledObject& Entry : Labelled)
+		{
+			if (Entry.Class != TEXT("aircraft") || Entry.Actor == nullptr)
+			{
+				continue;   // scene objects get no alone pass (pixels_alone null)
+			}
+			Entry.Alone = MakeIdCapture(*FString::Printf(TEXT("LabelIdAlone%d"), Entry.IntId));
+			Entry.Alone->PrimitiveRenderMode =
+				ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
+			Entry.Alone->ShowOnlyActors.Add(Entry.Actor);
+		}
 		UE_LOG(LogFlightSimRender, Display,
-		       TEXT("labels: instance mask, class mask, 16-bit depth (%.2f m/unit, "
-		            "saturating at %.1f m) and occlusion per delivered frame"),
-		       RenderLabelDepthScaleM, RenderLabelDepthSaturationM);
+		       TEXT("labels: ID image (custom stencil, %d objects, %s), class image, depth ")
+		       TEXT("as float32 and 16-bit (%.2f m/unit, saturating at %.1f m), one alone ")
+		       TEXT("pass per aircraft; every label capture AA-free"),
+		       Labelled.Num(), *LabelIdSource, RenderLabelDepthScaleM,
+		       RenderLabelDepthSaturationM);
 	}
 
 	// -- Phase 10 sensor model: the linear capture ------------------------
@@ -1773,16 +2035,18 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Record->SetNumberField(TEXT("camera_roll_deg"), Director->GetCameraRollDegrees());
 		if (bLabels)
 		{
-			// The depth captures see what the colour capture saw: the same
+			// Every label capture sees what the colour capture saw: the same
 			// camera (attached to it) and the same lens, re-copied because a
 			// keyframed focal move changes Capture->FOVAngle per frame.
 			LabelDepthAll->FOVAngle = Capture->FOVAngle;
-			LabelDepthAircraft->FOVAngle = Capture->FOVAngle;
+			LabelIdAll->FOVAngle = Capture->FOVAngle;
 			FTextureRenderTargetResource* DepthResource =
 				LabelDepthTarget->GameThread_GetRenderTargetResource();
+			FTextureRenderTargetResource* IdResource =
+				LabelIdTarget->GameThread_GetRenderTargetResource();
 			const FReadSurfaceDataFlags RawFloats(RCM_MinMax, CubeFace_MAX);
 			TArray<FLinearColor> DepthAll;
-			TArray<FLinearColor> DepthAircraft;
+			TArray<FLinearColor> IdAll;
 			LabelDepthAll->CaptureScene();
 			FlushRenderingCommands();
 			if (DepthResource == nullptr
@@ -1790,58 +2054,183 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			{
 				return Fail(TEXT("labels: could not read the scene depth back"));
 			}
-			LabelDepthAircraft->CaptureScene();
+			LabelIdAll->CaptureScene();
 			FlushRenderingCommands();
-			if (!DepthResource->ReadLinearColorPixels(DepthAircraft, RawFloats))
+			if (IdResource == nullptr
+			    || !IdResource->ReadLinearColorPixels(IdAll, RawFloats))
 			{
-				return Fail(TEXT("labels: could not read the aircraft depth back"));
+				return Fail(TEXT("labels: could not read the ID pass back"));
 			}
 			const int32 Count = Width * Height;
-			if (DepthAll.Num() != Count || DepthAircraft.Num() != Count)
+			if (DepthAll.Num() != Count || IdAll.Num() != Count)
 			{
 				return Fail(FString::Printf(
-					TEXT("labels: depth readback is %d and %d pixels for a %dx%d frame"),
-					DepthAll.Num(), DepthAircraft.Num(), Width, Height));
+					TEXT("labels: depth and ID readbacks are %d and %d pixels for a %dx%d frame"),
+					DepthAll.Num(), IdAll.Num(), Width, Height));
+			}
+			TMap<int32, int32> ClassOfIntId;
+			for (const FRenderLabelledObject& Entry : Labelled)
+			{
+				ClassOfIntId.Add(Entry.IntId, Entry.ClassId);
 			}
 			TArray<uint8> Mask;
 			TArray<uint8> ClassMask;
 			TArray<uint16> Depth16;
+			TArray<float> DepthMetres;
 			Mask.SetNumZeroed(Count);
 			ClassMask.SetNumZeroed(Count);
 			Depth16.SetNumZeroed(Count);
-			int32 Silhouette = 0;
-			int32 Visible = 0;
+			DepthMetres.SetNumZeroed(Count);
+			int32 UnlabelledGeometry = 0;
+			int32 NonIntegerIds = 0;
 			for (int32 i = 0; i < Count; ++i)
 			{
 				const float AllCm = DepthAll[i].R;
-				const float AircraftCm = DepthAircraft[i].R;
 				const bool bAllGeometry = AllCm > 0.0f && AllCm < RenderLabelDepthSkyCm;
-				const bool bAircraftHere =
-					AircraftCm > 0.0f && AircraftCm < RenderLabelDepthSkyCm;
-				if (bAircraftHere)
+				// The stencil comes back as a float; an AA-free pass gives
+				// whole numbers. A non-integer here is a measurement (a
+				// blend or a resample), counted and reported, never hidden
+				// by the rounding.
+				const float IdValue = IdAll[i].R;
+				const int32 IntId = FMath::Clamp(FMath::RoundToInt(IdValue), 0, 255);
+				if (FMath::Abs(IdValue - static_cast<float>(IntId)) > 1.0e-3f)
 				{
-					++Silhouette;
+					++NonIntegerIds;
 				}
-				if (bAircraftHere && bAllGeometry
-				    && FMath::Abs(AllCm - AircraftCm) <= RenderLabelDepthAgreeCm)
+				Mask[i] = static_cast<uint8>(IntId);
+				if (IntId != 0)
 				{
-					Mask[i] = RenderLabelAircraftInstanceId;
-					ClassMask[i] = RenderLabelClassAircraft;
-					++Visible;
+					const int32* ClassId = ClassOfIntId.Find(IntId);
+					ClassMask[i] = ClassId != nullptr
+						? static_cast<uint8>(FMath::Clamp(*ClassId, 0, 255)) : 0;
 				}
 				else if (bAllGeometry)
 				{
-					ClassMask[i] = RenderLabelClassTerrain;
+					++UnlabelledGeometry;   // geometry with no stencil: id 0, class 0
 				}
+				DepthMetres[i] = bAllGeometry ? AllCm / 100.0f
+				                              : std::numeric_limits<float>::infinity();
 				const double Metres = bAllGeometry ? AllCm / 100.0
 				                                   : RenderLabelDepthSaturationM;
 				Depth16[i] = static_cast<uint16>(FMath::Clamp(
 					FMath::RoundToInt(Metres / RenderLabelDepthScaleM), 0, 65535));
 			}
 			const FString Stem = FrameName.LeftChop(4);
+
+			// Per object: pixels in the ID pass, the alone pass (aircraft
+			// only), visible fraction, who occludes it, depth under its mask.
+			TArray<TSharedPtr<FJsonValue>> ObjectRecords;
+			int32 PrimarySilhouette = 0;
+			int32 PrimaryVisible = 0;
+			for (FRenderLabelledObject& Entry : Labelled)
+			{
+				int32 ObjectPixels = 0;
+				TArray<float> Under;
+				for (int32 i = 0; i < Count; ++i)
+				{
+					if (Mask[i] == Entry.IntId)
+					{
+						++ObjectPixels;
+						if (FMath::IsFinite(DepthMetres[i]))
+						{
+							Under.Add(DepthMetres[i]);
+						}
+					}
+				}
+				TSharedPtr<FJsonObject> ObjectJson = MakeShared<FJsonObject>();
+				ObjectJson->SetStringField(TEXT("id"), Entry.Id);
+				ObjectJson->SetNumberField(TEXT("int_id"), Entry.IntId);
+				ObjectJson->SetNumberField(TEXT("class_id"), Entry.ClassId);
+				ObjectJson->SetNumberField(TEXT("pixels"), ObjectPixels);
+				if (Entry.Alone != nullptr)
+				{
+					Entry.Alone->FOVAngle = Capture->FOVAngle;
+					TArray<FLinearColor> IdAlone;
+					Entry.Alone->CaptureScene();
+					FlushRenderingCommands();
+					if (!IdResource->ReadLinearColorPixels(IdAlone, RawFloats)
+					    || IdAlone.Num() != Count)
+					{
+						return Fail(FString::Printf(
+							TEXT("labels: could not read the alone pass of '%s' back"), *Entry.Id));
+					}
+					TArray<uint8> AloneMask;
+					AloneMask.SetNumZeroed(Count);
+					int32 PixelsAlone = 0;
+					TSet<int32> Occluders;
+					for (int32 i = 0; i < Count; ++i)
+					{
+						const int32 Value = FMath::Clamp(FMath::RoundToInt(IdAlone[i].R), 0, 255);
+						if (Value == Entry.IntId)
+						{
+							AloneMask[i] = static_cast<uint8>(Value);
+							++PixelsAlone;
+							if (Mask[i] != 0 && Mask[i] != Entry.IntId)
+							{
+								Occluders.Add(static_cast<int32>(Mask[i]));
+							}
+						}
+					}
+					const FString AloneName = Stem + FString::Printf(TEXT("_alone_%d.png"), Entry.IntId);
+					if (!RenderWriteGrayPng(FPaths::Combine(OutputDirectory, AloneName),
+					                        AloneMask.GetData(), AloneMask.Num(), Width, Height, 8))
+					{
+						return Fail(FString::Printf(TEXT("labels: could not write %s"), *AloneName));
+					}
+					ObjectJson->SetNumberField(TEXT("pixels_alone"), PixelsAlone);
+					ObjectJson->SetStringField(TEXT("alone_png"), AloneName);
+					if (PixelsAlone > 0)
+					{
+						ObjectJson->SetNumberField(TEXT("visible_fraction"),
+						                           static_cast<double>(ObjectPixels) / PixelsAlone);
+					}
+					else
+					{
+						ObjectJson->SetField(TEXT("visible_fraction"), MakeShared<FJsonValueNull>());
+					}
+					TArray<int32> OccluderIds = Occluders.Array();
+					OccluderIds.Sort();
+					TArray<TSharedPtr<FJsonValue>> OccludedBy;
+					for (int32 Occluder : OccluderIds)
+					{
+						OccludedBy.Add(MakeShared<FJsonValueNumber>(Occluder));
+					}
+					ObjectJson->SetArrayField(TEXT("occluded_by"), OccludedBy);
+					if (Entry.IntId == LabelPrimaryIntId)
+					{
+						PrimarySilhouette = PixelsAlone;
+						PrimaryVisible = ObjectPixels;
+					}
+				}
+				else
+				{
+					ObjectJson->SetField(TEXT("pixels_alone"), MakeShared<FJsonValueNull>());
+					ObjectJson->SetField(TEXT("alone_png"), MakeShared<FJsonValueNull>());
+					ObjectJson->SetField(TEXT("visible_fraction"), MakeShared<FJsonValueNull>());
+					ObjectJson->SetArrayField(TEXT("occluded_by"), TArray<TSharedPtr<FJsonValue>>());
+				}
+				if (Under.Num() > 0)
+				{
+					Under.Sort();
+					const int32 N = Under.Num();
+					const double Median = (N % 2 == 1)
+						? Under[N / 2]
+						: 0.5 * (static_cast<double>(Under[N / 2 - 1]) + Under[N / 2]);
+					ObjectJson->SetNumberField(TEXT("depth_min_m"), Under[0]);
+					ObjectJson->SetNumberField(TEXT("depth_median_m"), Median);
+				}
+				else
+				{
+					ObjectJson->SetField(TEXT("depth_min_m"), MakeShared<FJsonValueNull>());
+					ObjectJson->SetField(TEXT("depth_median_m"), MakeShared<FJsonValueNull>());
+				}
+				ObjectRecords.Add(MakeShared<FJsonValueObject>(ObjectJson));
+			}
+
 			const FString MaskName = Stem + TEXT("_mask.png");
 			const FString ClassName = Stem + TEXT("_class.png");
 			const FString DepthName = Stem + TEXT("_depth.png");
+			const FString DepthF32Name = Stem + TEXT("_depth.f32");
 			if (!RenderWriteGrayPng(FPaths::Combine(OutputDirectory, MaskName),
 			                        Mask.GetData(), Mask.Num(), Width, Height, 8)
 			    || !RenderWriteGrayPng(FPaths::Combine(OutputDirectory, ClassName),
@@ -1854,22 +2243,53 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				return Fail(FString::Printf(TEXT("labels: could not write the label "
 				                                 "files for %s"), *FrameName));
 			}
-			// Declared per frame, ASCII only (gotcha 13): the verifier reads
-			// exactly these names and refuses a frame whose files are absent.
+			// The metric depth as raw little-endian float32, row-major,
+			// width*height values, +inf for sky: no library on either side
+			// (numpy.fromfile reads it), nothing lost to a 16-bit scale.
+			TArray64<uint8> DepthBytes;
+			DepthBytes.SetNumUninitialized(static_cast<int64>(Count) * sizeof(float));
+			FMemory::Memcpy(DepthBytes.GetData(), DepthMetres.GetData(), DepthBytes.Num());
+			if (!FFileHelper::SaveArrayToFile(DepthBytes, *FPaths::Combine(OutputDirectory, DepthF32Name)))
+			{
+				return Fail(FString::Printf(TEXT("labels: could not write %s"), *DepthF32Name));
+			}
+			// Declared per frame, ASCII only (gotcha 13): every Phase 10 key
+			// is kept for its readers (the primary's silhouette/visible
+			// counts now come from its alone pass and the ID pass), and the
+			// new keys sit beside them.
 			TSharedPtr<FJsonObject> Labels = MakeShared<FJsonObject>();
 			Labels->SetStringField(TEXT("mask"), MaskName);
 			Labels->SetStringField(TEXT("class_mask"), ClassName);
 			Labels->SetStringField(TEXT("depth"), DepthName);
 			Labels->SetNumberField(TEXT("depth_scale_m"), RenderLabelDepthScaleM);
 			Labels->SetNumberField(TEXT("depth_saturation_m"), RenderLabelDepthSaturationM);
-			Labels->SetNumberField(TEXT("silhouette_pixels"), Silhouette);
-			Labels->SetNumberField(TEXT("visible_pixels"), Visible);
+			Labels->SetNumberField(TEXT("silhouette_pixels"), PrimarySilhouette);
+			Labels->SetNumberField(TEXT("visible_pixels"), PrimaryVisible);
 			Labels->SetNumberField(TEXT("occlusion_fraction"),
-			                       Silhouette > 0 ? 1.0 - static_cast<double>(Visible) / Silhouette
-			                                      : 0.0);
-			Labels->SetStringField(TEXT("classes"), TEXT("0 sky, 1 aircraft, 2 terrain or other"));
+			                       PrimarySilhouette > 0
+			                           ? 1.0 - static_cast<double>(PrimaryVisible) / PrimarySilhouette
+			                           : 0.0);
+			FString Classes = TEXT("0 sky");
+			if (Card.TaxonomyClasses.Num() > 0)
+			{
+				for (int32 i = 0; i < Card.TaxonomyClasses.Num(); ++i)
+				{
+					Classes += FString::Printf(TEXT(", %d %s"), i + 1, *Card.TaxonomyClasses[i]);
+				}
+			}
+			else
+			{
+				Classes = TEXT("0 sky, 1 aircraft, 2 terrain or other");
+			}
+			Labels->SetStringField(TEXT("classes"), Classes);
 			Labels->SetStringField(TEXT("method"),
-			                       TEXT("aircraft-alone depth vs full-scene depth; visible where they agree"));
+			                       TEXT("custom-stencil ID pass, AA off; alone pass per aircraft"));
+			Labels->SetStringField(TEXT("depth_f32"), DepthF32Name);
+			Labels->SetStringField(TEXT("anti_aliasing"), TEXT("none"));
+			Labels->SetStringField(TEXT("id_source"), LabelIdSource);
+			Labels->SetNumberField(TEXT("unlabelled_geometry_pixels"), UnlabelledGeometry);
+			Labels->SetNumberField(TEXT("non_integer_id_pixels"), NonIntegerIds);
+			Labels->SetArrayField(TEXT("objects"), ObjectRecords);
 			Record->SetObjectField(TEXT("labels"), Labels);
 		}
 		if (bLinear)
@@ -2019,8 +2439,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				Landmarks->SetObjectField(LandmarkNames[i], Entry);
 			}
 			Record->SetObjectField(TEXT("landmarks"), Landmarks);
-			// The intrinsics ACTUALLY applied, so a disagreement with the
-			// manifest is visible rather than assumed away.
+		}
+		if (bConsumePoses)
+		{
+			// The intrinsics ACTUALLY applied, on EVERY consume-poses frame
+			// (contracts §1; they used to ride only when the card carried
+			// landmarks), so the verifier projects without guessing and a
+			// disagreement with the manifest is visible rather than assumed
+			// away.
 			Record->SetNumberField(TEXT("applied_focal_length_mm"),
 			                       Director->GetAppliedFocalLengthMm());
 			Record->SetNumberField(TEXT("applied_sensor_width_mm"),
@@ -2148,6 +2574,46 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			                      TEXT("placeholder boxes about the actor origin (structural datum)"));
 		}
 		Root->SetObjectField(TEXT("drawn"), Drawn);
+	}
+	// Phase 2 (packages B + C): the labelled objects this pass wrote ids
+	// for (the card's list, or the default pair), and each traffic mesh
+	// drawn, so a reader of render.json alone resolves every integer in
+	// the ID image and knows which meshes the traffic actors carried.
+	if (bLabels)
+	{
+		TArray<TSharedPtr<FJsonValue>> ObjectList;
+		for (const FRenderLabelledObject& Entry : Labelled)
+		{
+			TSharedPtr<FJsonObject> ObjectJson = MakeShared<FJsonObject>();
+			ObjectJson->SetStringField(TEXT("id"), Entry.Id);
+			ObjectJson->SetNumberField(TEXT("int_id"), Entry.IntId);
+			ObjectJson->SetStringField(TEXT("class"), Entry.Class);
+			ObjectJson->SetNumberField(TEXT("class_id"), Entry.ClassId);
+			ObjectJson->SetStringField(TEXT("role"), Entry.Role);
+			ObjectJson->SetBoolField(TEXT("alone_pass"), Entry.Alone != nullptr);
+			ObjectList.Add(MakeShared<FJsonValueObject>(ObjectJson));
+		}
+		Root->SetArrayField(TEXT("objects"), ObjectList);
+		Root->SetStringField(TEXT("labels_id_source"), LabelIdSource);
+	}
+	if (TrafficMeshes.Num() > 0)
+	{
+		TArray<TSharedPtr<FJsonValue>> TrafficList;
+		for (int32 Index = 0; Index < TrafficMeshes.Num(); ++Index)
+		{
+			TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+			Entry->SetStringField(TEXT("id"), Card.Traffic[Index].Id);
+			Entry->SetNumberField(TEXT("int_id"), Card.Traffic[Index].IntId);
+			Entry->SetStringField(TEXT("mesh_airframe"), TrafficMeshes[Index].MeshAirframe);
+			Entry->SetStringField(TEXT("fdm"), TrafficMeshes[Index].FdmName);
+			Entry->SetStringField(TEXT("license"), TrafficMeshes[Index].License);
+			Entry->SetNumberField(TEXT("manifest_version"), TrafficMeshes[Index].ManifestVersion);
+			Entry->SetStringField(TEXT("origin_basis"), TrafficMeshes[Index].OriginBasis);
+			Entry->SetStringField(TEXT("track"), Card.Traffic[Index].Track);
+			Entry->SetNumberField(TEXT("range_m"), Card.Traffic[Index].RangeMetres);
+			TrafficList.Add(MakeShared<FJsonValueObject>(Entry));
+		}
+		Root->SetArrayField(TEXT("traffic"), TrafficList);
 	}
 	Root->SetNumberField(TEXT("width"), Width);
 	Root->SetNumberField(TEXT("height"), Height);

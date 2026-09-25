@@ -6,16 +6,17 @@ Windows render adds pixels beside it without touching it. A frame
 without recorded geometry is unusable as labeled data; this file is the
 label.
 
-Schema (``manifest_version`` 5)
+Schema (``manifest_version`` 6)
 -------------------------------
 Top level::
 
-    manifest_version   5
+    manifest_version   6
     spec_digest        SHA-256 of the canonical spec (spec.digest())
     simulation_digest  SHA-256 of the spec with its CAMERAS REMOVED --
                        the "simulation identity": two runs that differ
                        only in cameras share it, which is what the
-                       temporal-alignment check keys on
+                       temporal-alignment check keys on (version 6 also
+                       drops the taxonomy: a class list changes no flight)
     output_digest      SHA-256 over the recorded telemetry columns
                        (core.scenario.runner._digest_telemetry) -- of
                        the flight named by ``solve_source``
@@ -74,6 +75,21 @@ Top level::
                        carries, derived once from the recorder's naming
                        convention, so a consumer never has to guess
                        whether a number is metres or feet
+    objects            version 6: every labelled object of the scene,
+                       composed ONCE from the spec (core.capture.objects):
+                       {id, int_id, class, class_id, instance, role,
+                       mesh_sha256, licence, in_scene, labelled}. The
+                       primary airframe is first (int_id 1), traffic in
+                       spec order, then the terrain; the ID image the
+                       render writes holds exactly these integers, and
+                       the same list rides on the run card
+    taxonomy           version 6: the spec's ordered class list
+                       (class_id = position + 1; 0 is sky / nothing)
+    traffic            version 6: one block per scripted traffic
+                       aircraft -- its object ids, spec fields, cited
+                       airframe (as ``airframe`` below, for its own
+                       type) and the solved track's digest (the track
+                       itself rides on the card, as the cameras' do)
     cameras            [per-camera blocks]
     frames             [per-frame records, all cameras, capture order]
 
@@ -136,6 +152,19 @@ Per frame::
                        are written BESIDE the frame by the render
                        commandlet and read by the verifier; they are
                        never in this file, which exists without them.
+                       Version 6 adds ``labels.objects[]``: one record
+                       per labelled object (core.capture.labels.
+                       object_label_record; contracts §3), the primary
+                       first with the same values as ``labels``, then
+                       each traffic aircraft, then the terrain. Its
+                       engine-derived keys (bbox_2d_tight,
+                       visible_fraction, occluded_by, depth_min_m,
+                       depth_median_m) are null with a stated basis
+                       here and are filled in place by
+                       core.capture.labels.attach_engine_labels after a
+                       render -- the one exception to "never in this
+                       file", and it is a post-render step that names
+                       the files each number came from.
 
 A per-frame SIDECAR, ``frames/<camera_id>/frame_0042.json``, is written
 beside each image (write_frame_sidecars): the frame's own record plus
@@ -170,20 +199,26 @@ from typing import Dict, List, Optional, Sequence
 
 from .airframe import load_airframe
 from .labels import (
-    conventions as label_conventions, frame_labels, projection_matrices,
+    camera_axes, conventions as label_conventions, frame_labels,
+    object_label_record, projection_matrices,
+)
+from .objects import (
+    ROLE_PRIMARY, ROLE_TRAFFIC, compose_objects, mesh_manifest_path,
+    objects_block, taxonomy_classes,
 )
 from .profile import load_profile, sensor_labels
 from .landmarks import scene_landmarks
-from .poses import PoseTrack, SceneFrame, aircraft_local_track
+from .poses import PoseTrack, SceneFrame, aircraft_local_track, traffic_state
 from .schedule import CaptureSchedule
 from core.scenario.randomization import card_block as randomization_card_block
 
-MANIFEST_VERSION = 5
+MANIFEST_VERSION = 6
 #: Versions this build can READ. Every version here is fully
 #: interpretable by the current verifier and the page: a version 3
 #: manifest has no ``state`` on its frames, a version 4 no ``labels``
-#: and no ``airframe``. Anything else is a refusal, not a guess.
-SUPPORTED_MANIFEST_VERSIONS = (3, 4, 5)
+#: and no ``airframe``, a version 5 no ``objects`` and no per-object
+#: label records. Anything else is a refusal, not a guess.
+SUPPORTED_MANIFEST_VERSIONS = (3, 4, 5, 6)
 
 #: Which flight the ``aircraft`` block in every frame record describes.
 #: A v2 manifest could not say, and the answer matters more than any
@@ -229,6 +264,10 @@ def simulation_digest(spec) -> str:
     # one simulation, and a dataset split keyed on this value keeps
     # them on one side.
     payload.pop("randomization", None)
+    # Phase 2 (contracts §12): the taxonomy names the dataset's classes
+    # and changes no flight either. Traffic STAYS in: a second aircraft
+    # is in the scene the pixels show.
+    payload.pop("taxonomy", None)
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -393,7 +432,9 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                            cameras=None,
                            heightfield=None,
                            terrain_elevation_m: float = 0.0,
-                           solve_source: str = SOLVE_PRE_RUN) -> Dict:
+                           solve_source: str = SOLVE_PRE_RUN,
+                           traffic_tracks: Optional[Sequence[PoseTrack]] = None,
+                           mesh_manifests: Optional[Dict[str, Dict]] = None) -> Dict:
     """Assemble the manifest mapping (see the module docstring schema).
 
     ``tracks`` and ``schedules`` are parallel per-camera sequences from
@@ -403,6 +444,14 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
     ``cameras`` names the CameraSpecs that actually flew when they are
     not the spec's own (a camera-less spec captured with the documented
     default cameras); the digests stay the spec's.
+
+    Version 6: ``traffic_tracks`` are the solved tracks of the spec's
+    ``traffic[]`` entries, in spec order (``poses.solve_traffic_track``);
+    a spec with traffic and no tracks refuses -- a traffic object with
+    no track has no state to label. ``mesh_manifests`` (aircraft ->
+    the converter's manifest dict) is for tests; by default the
+    imported model's manifest is read from ``assets/generated`` where
+    it exists, and the hull box is null with a basis where it does not.
     """
     if solve_source not in SOLVE_SOURCES:
         raise ValueError(
@@ -421,6 +470,41 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
     airframe = load_airframe(str(spec.aircraft.value))
     flown = spec.cameras if cameras is None else list(cameras)
     cameras_by_id = {str(c.camera_id.value): c for c in flown}
+    # Version 6: the scene's labelled objects, composed once (primary
+    # first, int_id 1), and the traffic aircraft's own airframes and
+    # tracks. A traffic airframe with no cited geometry refuses exactly
+    # as the primary does.
+    objects = compose_objects(spec)
+    traffic_tracks = list(traffic_tracks or [])
+    if len(traffic_tracks) != len(spec.traffic):
+        raise ValueError(
+            f"{len(traffic_tracks)} traffic tracks for {len(spec.traffic)} "
+            f"traffic entries; every scripted aircraft needs exactly one "
+            f"solved track or it has no state to label")
+    traffic_objects = [o for o in objects if o.role == ROLE_TRAFFIC]
+    traffic_airframes = [load_airframe(str(entry.aircraft.value))
+                         for entry in spec.traffic]
+    for track in traffic_tracks:
+        if len(track) != len(columns["t"]):
+            raise ValueError(
+                f"traffic track {track.camera_id!r} has {len(track)} samples "
+                f"where the telemetry has {len(columns['t'])}; refusing a "
+                f"track solved over a different flight")
+    randomization = randomization_card_block(spec)
+
+    def mesh_manifest_for(name: str) -> Optional[Dict]:
+        if mesh_manifests is not None:
+            return mesh_manifests.get(name)
+        path = mesh_manifest_path(name)
+        if not path.is_file():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
+    primary_mesh = mesh_manifest_for(str(spec.aircraft.value))
+    traffic_meshes = [mesh_manifest_for(str(e.aircraft.value)) for e in spec.traffic]
 
     camera_blocks: List[Dict] = []
     frames: List[Dict] = []
@@ -501,6 +585,17 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
             frames[-1]["labels"] = frame_labels(
                 frames[-1], frames[-1]["aircraft"], airframe,
                 terrain_elevation_m)
+            # Version 6: one record per labelled object. The primary's
+            # geometric values are COPIED from the labels above; each
+            # traffic aircraft is projected from its own airframe at its
+            # scripted state; the terrain carries nulls. Engine-derived
+            # keys are null with a basis until attach_engine_labels.
+            axes = camera_axes(frames[-1]["quaternion_wxyz"])
+            frames[-1]["labels"]["objects"] = _object_records(
+                objects, frames[-1], state, airframe, axes,
+                terrain_elevation_m, randomization, primary_mesh,
+                traffic_objects, traffic_airframes, traffic_tracks,
+                traffic_meshes, sample_index)
             # The sensor model this frame was (or will be) passed
             # through: the profile's full parameters, the camera's
             # angular rate for the rolling shutter, and the labels
@@ -513,6 +608,19 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                 "labels_sensor": sensor_labels(profile, frames[-1],
                                                frames[-1]["labels"], omega),
             }
+            # Version 6: every OTHER object mapped onto the same sensor,
+            # so an exporter of the sensor image has a box for each (the
+            # primary's mapping is the block above). A scene object with
+            # no 3-D box maps to null boxes -- stated, so the exporter
+            # sees an entry that says "no box" rather than no entry.
+            frames[-1]["sensor"]["labels_sensor"]["objects"] = [
+                dict({"id": entry["id"], "int_id": entry["int_id"]},
+                     **sensor_labels(
+                         profile, frames[-1],
+                         dict(entry, bbox_3d_camera=entry["bbox_3d_camera"] or {}),
+                         omega))
+                for entry in frames[-1]["labels"]["objects"]
+                if entry["int_id"] != objects[0].int_id]
 
     return {
         "manifest_version": MANIFEST_VERSION,
@@ -545,10 +653,58 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
         # Phase 10 (package 7): the sampled look and jitter the render
         # was given, or null when the block is off. Same dict as the
         # card's, so the two records cannot disagree.
-        "randomization": randomization_card_block(spec),
+        "randomization": randomization,
+        # Version 6: the scene's labelled objects, the class list they
+        # are labelled against, and the traffic aircraft's provenance.
+        "objects": objects_block(objects),
+        "taxonomy": taxonomy_classes(spec),
+        "traffic": [
+            {
+                "id": obj.id, "int_id": obj.int_id,
+                "aircraft": str(entry.aircraft.value),
+                "track": str(entry.track.value),
+                "range_m": float(entry.range_m.value),
+                "livery": str(entry.livery.value),
+                "spec": entry.to_dict(),
+                "track_digest": track.digest(),
+                "airframe": frame_.to_dict(),
+                "attitude_basis": ("copied from the primary sample for "
+                                   "sample" if str(entry.track.value) == "formation"
+                                   else "wings level (roll = pitch = 0): a "
+                                        "scripted actor has no dynamics to bank"),
+            }
+            for obj, entry, track, frame_
+            in zip(traffic_objects, spec.traffic, traffic_tracks, traffic_airframes)
+        ],
         "cameras": camera_blocks,
         "frames": frames,
     }
+
+
+def _object_records(objects, record, primary_state, primary_airframe, axes,
+                    terrain_elevation_m, randomization, primary_mesh,
+                    traffic_objects, traffic_airframes, traffic_tracks,
+                    traffic_meshes, sample_index) -> List[Dict]:
+    """``labels.objects[]`` for one frame, in composition order."""
+    out: List[Dict] = []
+    traffic_index = {o.int_id: i for i, o in enumerate(traffic_objects)}
+    for obj in objects:
+        if obj.role == ROLE_PRIMARY:
+            out.append(object_label_record(
+                obj, record, primary_state, primary_airframe, axes,
+                terrain_elevation_m, randomization, primary_mesh,
+                primary=True, base_labels=record["labels"]))
+        elif obj.role == ROLE_TRAFFIC:
+            i = traffic_index[obj.int_id]
+            out.append(object_label_record(
+                obj, record, traffic_state(traffic_tracks[i], sample_index),
+                traffic_airframes[i], axes, terrain_elevation_m,
+                randomization, traffic_meshes[i]))
+        else:
+            out.append(object_label_record(
+                obj, record, None, None, axes, terrain_elevation_m,
+                randomization))
+    return out
 
 
 def write_capture_manifest(manifest: Dict, directory) -> Path:
@@ -568,6 +724,9 @@ SIDECAR_CONTEXT_KEYS = (
     "output_digest", "solve_source", "seed", "aircraft", "scene",
     "frame", "software_revision", "conditions", "state_units",
     "airframe", "label_conventions", "assets", "randomization",
+    # Version 6: the object list every per-object record resolves
+    # through, the class list, and the traffic provenance.
+    "objects", "taxonomy", "traffic",
 )
 
 

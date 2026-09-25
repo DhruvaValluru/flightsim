@@ -302,7 +302,7 @@ def manifest_for(aircraft="B747"):
 @pytest.mark.parametrize("aircraft", ["B747", "c172p", "A320"])
 def test_every_frame_of_every_labelled_airframe_carries_labels(aircraft):
     manifest = manifest_for(aircraft)
-    assert manifest["manifest_version"] == MANIFEST_VERSION == 5
+    assert manifest["manifest_version"] == MANIFEST_VERSION == 6
     assert manifest["airframe"]["aircraft"] == aircraft
     assert set(k["name"] for k in manifest["airframe"]["keypoints"]) == set(KEYPOINT_NAMES)
     assert manifest["label_conventions"]["body_frame"].startswith("x forward")
@@ -351,7 +351,7 @@ def test_version_4_still_reads_and_its_label_checks_say_not_run(tmp_path):
     assert reread["manifest_version"] == 4
     assert verify_labels(reread).status == NOT_RUN
     assert verify_keypoints_in_box(reread).status == NOT_RUN
-    assert SUPPORTED_MANIFEST_VERSIONS == (3, 4, 5)
+    assert SUPPORTED_MANIFEST_VERSIONS == (3, 4, 5, 6)
 
 
 def test_sidecars_carry_the_airframe_and_the_labels(tmp_path):

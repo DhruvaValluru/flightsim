@@ -128,6 +128,9 @@ def write_run_card(spec: ScenarioSpec, path: Path,
                    scene_crs: Optional[str] = None,
                    cameras: Optional[Sequence[Dict[str, object]]] = None,
                    landmarks: Optional[Sequence[Dict[str, object]]] = None,
+                   objects: Optional[Sequence[Dict[str, object]]] = None,
+                   taxonomy: Optional[Sequence[str]] = None,
+                   traffic: Optional[Sequence[Dict[str, object]]] = None,
                    ) -> Path:
     """Write the spec in the form the UE commandlet reads.
 
@@ -248,6 +251,26 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # camera field the jitter moved. Computed in
         # core/scenario/randomization.py; the host derives nothing.
         card["randomization"] = dict(randomization)
+    if objects:
+        # Phase 2 (package B, contracts §2.3): the scene's labelled
+        # objects with their integer ids, composed ONCE in Python
+        # (core/capture/objects.py). The render host sets every labelled
+        # component's Custom Depth Stencil from this list and never
+        # invents an id; the ID image holds exactly these integers.
+        card["objects"] = [dict(entry) for entry in objects]
+    if taxonomy:
+        # The class list the class image is written against (class_id =
+        # position + 1, 0 = sky); the render.json "classes" sentence is
+        # generated from it.
+        card["taxonomy"] = [str(name) for name in taxonomy]
+    if traffic:
+        # Phase 2 (packages B + C, contracts §2.2): each scripted traffic
+        # aircraft with its solved position + attitude keyframes
+        # (core/capture/poses.py traffic_card_block), the mesh manifest
+        # to draw and where its CG sits in the actor frame. The host
+        # moves a static-mesh actor along the track with linear
+        # interpolation and refuses a track it cannot draw.
+        card["traffic"] = [dict(entry) for entry in traffic]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(card, indent=1), encoding="utf-8")
     return path

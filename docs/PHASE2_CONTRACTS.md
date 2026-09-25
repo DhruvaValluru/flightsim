@@ -217,6 +217,20 @@ primary, now per object and from ID passes rather than a 5 cm depth
 agreement. Atmospheric transmittance is analytic and lives in the Python
 label record (§3), never folded into `visible_fraction`.
 
+**As landed (package C, commandlet, UNCOMPILED here):** the per-frame
+`labels` object also carries `id_source` (`"card objects[]"`, or the
+Phase 10 default pair when the card has none -- stated, never silent),
+`unlabelled_geometry_pixels` (geometry with no stencil: id 0, class 0)
+and `non_integer_id_pixels` (readback floats that were not whole
+numbers: an AA-free pass gives 0; anything else is a measurement the
+verifier grades). `occluded_by` in render.json is a list of INTEGER
+ids (the Python record resolves them to strings). The root gains
+`objects[]` (the ids this pass wrote) and `traffic[]` (each traffic mesh
+drawn: `mesh_airframe`, `fdm`, `license`, `manifest_version`,
+`origin_basis`, `track`, `range_m`). The ID pass needs the post-process
+material `/Game/FlightSim/M_CustomStencilID`; absent, `-labels` refuses
+by name rather than writing an ID image from anything else.
+
 **`render.json` root additions:** `drawn` (done, eb5c71d, commandlet
 L2123-2150: `{kind: "mesh" | "placeholder", mesh_origin_actor_cm: [x, y,
 z] | null, manifest_version: int | null, origin_basis: str, triangles?:
@@ -325,6 +339,30 @@ A missing label is thereby distinguishable from a missing object.
 sentences are kept. `objects` joins `SIDECAR_CONTEXT_KEYS` so every
 `frame_NNNN.json` sidecar carries it.
 
+**As landed (packages B + C, `core/capture/objects.py`, manifest 6) --
+three shape additions this page left open, stated so the other packages
+implement against what exists:**
+
+* Two more top-level manifest keys beside `objects[]`: `taxonomy` (the
+  spec's ordered class list, so a reader resolves `class_id` without
+  the spec) and `traffic[]` (one block per scripted aircraft: `id`,
+  `int_id`, `aircraft`, `track`, `range_m`, `livery`, `spec`,
+  `track_digest`, its cited `airframe` in the same shape as the
+  top-level `airframe`, and `attitude_basis`). Both join
+  `SIDECAR_CONTEXT_KEYS`. `simulation_digest` drops `taxonomy` (§12);
+  `traffic` stays in it (a second aircraft is in the scene the pixels
+  show).
+* The run card carries the same three blocks: `objects[]` verbatim,
+  `taxonomy` (a list of names) and `traffic[]` (§2.2's block plus
+  `mesh_manifest` -- the imported manifest path or null -- and
+  `cg_actor_cm`, the airframe's CG in the UE actor frame, `(-x, y, z)
+  * 2.54` of `cg_structural_in`, so the host places the mesh actor's
+  origin at `CG - R * cg` exactly as it places the FDM actor). Absent
+  blocks are absent: a card of a spec with no traffic is byte-identical
+  in every key it had.
+* `label_conventions` also gains `objects`, `bbox_2d_tight` and
+  `bbox_2d_hull` sentences.
+
 ---
 
 ## 3. Boxes, depth, occlusion — the per-object label record (package C)
@@ -356,7 +394,26 @@ element of `objects[]`, with the same key names:
 ```
 
 The draft's `fraction_in_frame` is dropped: it is `1 − truncation` by the
-existing definition. KITTI `occluded` (export.py L389-392, always 3 today
+existing definition.
+
+**As landed (package C, `labels.object_label_record` /
+`attach_engine_labels`):** every entry has the SAME key set (a scene
+object -- the terrain -- carries `null` for `bbox_2d`,
+`bbox_2d_unclipped`, `truncation`, `in_frame`, `bbox_2d_hull`,
+`atmospheric_transmittance`, `depth_projected_m`, `bbox_3d_camera`, `{}`
+for `keypoints`; `horizon` is `null` on every non-primary entry), plus
+one more key, `basis`: `{bbox_2d_hull, atmospheric_transmittance,
+engine}` -- the sentence behind each derived value. Before a render
+`basis.engine` is the no-bundle sentence and the five engine-derived
+keys are null; `attach_engine_labels(run_dir)` (a post-render Python
+step, numpy over the ID image, the alone pngs and the depth `.f32`)
+fills them in place in the manifest and every sidecar and sets
+`basis.engine` to `{files, pixels, pixels_alone, method}`. `keypoints`
+are carried for every aircraft object (from its own airframe), not only
+the primary; `labels_sensor.objects[]` carries every non-primary
+aircraft's sensor mapping. The ID image (`_mask.png`) holds every
+`int_id`, so on a single-aircraft run its terrain pixels are `2`;
+`AIRCRAFT_INSTANCE_ID = 1` readers are unaffected. KITTI `occluded` (export.py L389-392, always 3 today
 because no producer writes `engine_labels`) is derived from
 `visible_fraction` (≥ 0.95 → 0, ≥ 0.5 → 1, else 2; null → 3).
 

@@ -305,7 +305,10 @@ def test_coco_export_with_real_pixels_and_the_card(batch_dir, tmp_path):
     images = sorted((tmp_path / "coco" / "images" / "train").glob("*.png"))
     assert len(images) == n
     assert {im["file_name"] for im in train["images"]} == {p.name for p in images}
-    assert train["categories"][0]["name"] == "B747"
+    # Manifest 6 (Phase 2, packages B + C; contracts §2.1): the classes
+    # come from the spec's taxonomy, never from what was in the scene --
+    # the primary airframe is class "aircraft", not "B747".
+    assert train["categories"][0]["name"] == "aircraft"
     assert train["categories"][0]["keypoints"] == list(KEYPOINT_NAMES)
     assert train["annotations"], "the chase camera sees the aircraft"
     ann = train["annotations"][0]
@@ -355,7 +358,8 @@ def test_kitti_conventions_and_export(batch_dir, tmp_path):
     lines = [l for p in labels for l in p.read_text(encoding="utf-8").splitlines()]
     assert lines
     fields = lines[0].split()
-    assert len(fields) == 15 and fields[0] == "B747" and fields[2] == "3"
+    # "aircraft": the taxonomy's class on a manifest-6 run (contracts §2.1).
+    assert len(fields) == 15 and fields[0] == "aircraft" and fields[2] == "3"
     h, w, l = (float(v) for v in fields[8:11])
     assert w > 60.0 and l > 60.0 and 0.0 < h < 30.0
     p2 = next(l for l in calib[0].read_text(encoding="utf-8").splitlines() if l.startswith("P2:"))
