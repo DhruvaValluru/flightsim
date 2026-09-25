@@ -234,3 +234,197 @@ def test_the_import_refuses_without_an_engine(tmp_path, monkeypatch):
         importer.import_manifests([write_manifest(tmp_path)],
                                   report=lambda line: None)
     assert caught.value.constraint == "aircraft.mesh_import"
+
+
+# -- where the mesh sits (manifest version 2) ----------------------------
+#
+# Measured in the Camera Phase 1 initial run report: the rendered airframe
+# sat 25-30 m AHEAD of the position the capture manifest recorded for it,
+# along its own axis. The converter maps the FlightGear model about the
+# MODEL's origin (the FDM's VRP, by FlightGear's convention) while the
+# JSBSim plugin makes the actor origin the structural datum; a mesh
+# attached at the actor root is drawn with its VRP on the datum. The
+# manifest now records where the model origin sits in the actor, and a
+# manifest that does not is stale.
+
+FDM_XML = """<?xml version="1.0"?>
+<fdm_config name="testcraft" version="2.0" release="ALPHA">
+  <metrics>
+    <wingarea unit="FT2"> 100 </wingarea>
+    <location name="AERORP" unit="IN"><x> 10 </x><y> 0 </y><z> 0 </z></location>
+    {vrp}
+  </metrics>
+  <mass_balance>
+    <location name="CG" unit="IN"><x> 20 </x><y> 0 </y><z> 5 </z></location>
+  </mass_balance>
+</fdm_config>
+"""
+
+
+def _fdm_xml(tmp_path: Path, vrp: str) -> Path:
+    path = tmp_path / "testcraft.xml"
+    path.write_text(FDM_XML.format(vrp=vrp), encoding="utf-8")
+    return path
+
+
+def test_the_vrp_is_mapped_to_the_actor_frame_in_inches(tmp_path):
+    """Structural x is AFT in inches; the actor's is forward in cm. The
+    (-x, y, z) map is the plugin's StructuralToActorMatrix, whose origin
+    is zero, so the actor origin IS the structural datum."""
+    from assets_pipeline.convert import fdm_vrp_actor_cm
+
+    xml = _fdm_xml(tmp_path, '<location name="VRP" unit="IN">'
+                             '<x> 100 </x><y> 2 </y><z> -4 </z></location>')
+    assert fdm_vrp_actor_cm(xml) == pytest.approx([-254.0, 5.08, -10.16])
+
+
+def test_the_vrp_is_mapped_to_the_actor_frame_in_metres(tmp_path):
+    from assets_pipeline.convert import fdm_vrp_actor_cm
+
+    xml = _fdm_xml(tmp_path, '<location name="VRP" unit="M">'
+                             '<x> 1.5 </x><y> 0 </y><z> 0.25 </z></location>')
+    assert fdm_vrp_actor_cm(xml) == pytest.approx([-150.0, 0.0, 25.0])
+
+
+def test_an_fdm_with_no_vrp_refuses_rather_than_guessing(tmp_path):
+    """(0, 0, 0) would put the mesh on the structural datum -- the very
+    offset this field exists to remove -- so a missing VRP is a named
+    refusal, never a default."""
+    from assets_pipeline.convert import ConvertError, fdm_vrp_actor_cm
+
+    xml = _fdm_xml(tmp_path, "")
+    with pytest.raises(ConvertError, match="REFUSING to place the mesh"):
+        fdm_vrp_actor_cm(xml)
+    with pytest.raises(ConvertError, match="VRP"):
+        fdm_vrp_actor_cm(xml)
+
+
+def test_an_unreadable_vrp_unit_refuses_by_name(tmp_path):
+    from assets_pipeline.convert import ConvertError, fdm_vrp_actor_cm
+
+    xml = _fdm_xml(tmp_path, '<location name="VRP" unit="FURLONG">'
+                             '<x> 1 </x><y> 0 </y><z> 0 </z></location>')
+    with pytest.raises(ConvertError, match="FURLONG"):
+        fdm_vrp_actor_cm(xml)
+
+
+def test_the_committed_b747_vrp_is_33_7_m_aft_of_the_datum():
+    """Pinned numbers: the staged B747.xml states VRP x = 1327 in (aft),
+    so in the actor frame the mesh origin is -1327 * 2.54 cm -- 33.7 m
+    BEHIND the actor origin. Attached at the root, the 747 was drawn
+    33.7 m forward of its label."""
+    from assets_pipeline.convert import fdm_vrp_actor_cm
+    from core.capture.airframe import fdm_xml_path
+
+    origin = fdm_vrp_actor_cm(fdm_xml_path("B747"))
+    assert origin[0] == pytest.approx(-1327 * 2.54)
+    assert origin[1] == pytest.approx(0.0)
+    assert origin[2] == pytest.approx(-24 * 2.54)
+
+
+def test_the_converter_records_the_mesh_origin(tmp_path, monkeypatch):
+    """The manifest carries version 2, the VRP, the (default zero) config
+    offset, their sum, the convention in words, and the XML the VRP was
+    read from with its digest -- provenance beside the number."""
+    import hashlib
+
+    from assets_pipeline import convert as convert_module
+    from tests.test_phase6b import _write_config
+
+    xml = _fdm_xml(tmp_path, '<location name="VRP" unit="IN">'
+                             '<x> 100 </x><y> 0 </y><z> -4 </z></location>')
+    monkeypatch.setattr(convert_module, "fdm_xml_path", lambda fdm: xml)
+    manifest_path = convert_module.convert(_write_config(tmp_path),
+                                           tmp_path / "out", importer.REPO)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["version"] == 2
+    assert manifest["vrp_actor_cm"] == pytest.approx([-254.0, 0.0, -10.16])
+    assert manifest["model_origin_offset_actor_cm"] == [0.0, 0.0, 0.0]
+    assert manifest["mesh_origin_actor_cm"] == pytest.approx([-254.0, 0.0, -10.16])
+    assert "VRP" in manifest["mesh_origin_basis"]
+    assert "(-x, y, z)" in manifest["mesh_origin_basis"]
+    assert manifest["vrp_source"]["fdm_xml"] == str(xml)
+    assert manifest["vrp_source"]["sha256"] == hashlib.sha256(
+        xml.read_bytes()).hexdigest()
+    assert importer.stale_manifest_reason(manifest_path) is None
+
+
+def test_a_documented_model_origin_offset_is_added_to_the_vrp(tmp_path,
+                                                             monkeypatch):
+    from assets_pipeline import convert as convert_module
+    from tests.test_phase6b import _write_config
+
+    xml = _fdm_xml(tmp_path, '<location name="VRP" unit="IN">'
+                             '<x> 100 </x><y> 0 </y><z> 0 </z></location>')
+    monkeypatch.setattr(convert_module, "fdm_xml_path", lambda fdm: xml)
+    config_path = _write_config(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["model_origin_offset_m"] = [1.0, -0.5, 0.25]
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    manifest = json.loads(convert_module.convert(
+        config_path, tmp_path / "out", importer.REPO).read_text(encoding="utf-8"))
+    assert manifest["model_origin_offset_actor_cm"] == pytest.approx([100.0, -50.0, 25.0])
+    assert manifest["mesh_origin_actor_cm"] == pytest.approx([-154.0, -50.0, 25.0])
+
+    config["model_origin_offset_m"] = [1.0, "up"]
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(convert_module.ConvertError, match="model_origin_offset_m"):
+        convert_module.convert(config_path, tmp_path / "out", importer.REPO)
+
+
+def test_a_version_1_manifest_is_stale_and_rebuilds(tmp_path, monkeypatch):
+    """The manifests already on every machine were written by the
+    converter that said nothing about the origin. They must NOT count as
+    converted: ensure_model re-converts (source already fetched at the
+    pinned commit -> one converter run, no editor), and says why."""
+    monkeypatch.setattr(importer, "REPO", tmp_path)
+    monkeypatch.setattr(importer, "GENERATED", tmp_path / "assets" / "generated")
+    monkeypatch.setattr(importer, "CONFIG_DIR", tmp_path / "assets" / "aircraft_config")
+    config_dir = tmp_path / "assets" / "aircraft_config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "TEST.json").write_text(json.dumps({
+        "name": "TEST", "source_dir": "../aircraft_src/TEST",
+        "license": {"repo": "local", "commit": "0" * 40, "file": "COPYING"},
+    }), encoding="utf-8")
+    manifest = write_manifest(tmp_path)          # no version at all
+    place_assets(tmp_path)
+    assert importer.stale_manifest_reason(manifest) is not None
+    assert "structural datum" in importer.stale_manifest_reason(manifest)
+    assert not importer.is_converted("TEST")
+    assert not importer.is_imported("TEST")
+
+    def current(manifest_path: Path) -> None:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        data.update({"version": 2, "mesh_origin_actor_cm": [-3370.58, 0.0, -60.96]})
+        manifest_path.write_text(json.dumps(data), encoding="utf-8")
+
+    steps = []
+    monkeypatch.setattr(importer, "fetch_source",
+                        lambda config, path, report: steps.append("fetch"))
+
+    def fake_convert(config_path, report):
+        steps.append("convert")
+        current(manifest)
+        return manifest
+
+    monkeypatch.setattr(importer, "convert", fake_convert)
+    monkeypatch.setattr(importer, "import_manifests",
+                        lambda manifests, report: steps.append("import"))
+    lines = []
+    assert importer.ensure_model("TEST", report=lines.append) == manifest
+    assert steps == ["fetch", "convert"]          # no editor: geometry unchanged
+    assert any("stale" in line and "re-converting" in line for line in lines)
+
+    # Current now: converted, imported, and a second ensure touches nothing.
+    assert importer.stale_manifest_reason(manifest) is None
+    assert importer.is_converted("TEST") and importer.is_imported("TEST")
+    importer.ensure_model("TEST", report=lines.append)
+    assert steps == ["fetch", "convert"]
+
+    # Version 2 WITHOUT the field is equally stale: the version is a
+    # claim, the field is what the commandlet reads.
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    del data["mesh_origin_actor_cm"]
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    assert "mesh_origin_actor_cm" in importer.stale_manifest_reason(manifest)
+    assert not importer.is_imported("TEST")

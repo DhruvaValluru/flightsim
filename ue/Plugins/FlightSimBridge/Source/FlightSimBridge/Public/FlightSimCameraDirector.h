@@ -21,6 +21,7 @@
 #include "FlightSimCameraDirector.generated.h"
 
 class UCineCameraComponent;
+class UJSBSimMovementComponent;
 
 UENUM(BlueprintType)
 enum class EFlightSimCameraPreset : uint8
@@ -190,11 +191,33 @@ public:
 	double GetAppliedFocalLengthMm() const { return AppliedFocalLengthMm; }
 
 private:
+	// The point every preset aims at and measures its offset from: the
+	// aircraft's CENTRE OF GRAVITY, not the actor origin. The actor origin
+	// is the JSBSim structural datum (33.7 m ahead of the B747's CG), and
+	// the Python pose solver (core/capture/poses.py) states every offset
+	// from the CG -- the point the telemetry's lat/lon/alt describe -- so
+	// a preset that used the actor location framed a point 25-30 m ahead
+	// of the airframe (Camera Phase 1 initial run report, the cockpit
+	// preset that reported the aircraft out of frame while the mask held
+	// 434k aircraft pixels). CGLocalPosition when the target carries a
+	// UJSBSimMovementComponent; the actor location otherwise.
+	FVector TargetAimPoint(const FTransform& TargetTransform) const;
+
+	// Target is a plain UPROPERTY with no setter, so the component lookup
+	// is refreshed whenever the actor it was cached for changes.
+	void RefreshTargetMovement();
+
 	void UpdateLaggedChase(float DeltaSeconds, const FTransform& TargetTransform);
 	void UpdateCockpitShoulder(const FTransform& TargetTransform);
 	void UpdateFixedPoint(float DeltaSeconds, const FVector& WorldLocation,
 	                      const FVector& TargetLocation);
 	void UpdateWingman(float DeltaSeconds, const FTransform& TargetTransform);
+
+	UPROPERTY()
+	AActor* TargetMovementOwner = nullptr;
+
+	UPROPERTY()
+	UJSBSimMovementComponent* TargetMovement = nullptr;
 
 	// Aim is smoothed here rather than by attaching to the target, so the
 	// camera lags the aircraft instead of moving with it.

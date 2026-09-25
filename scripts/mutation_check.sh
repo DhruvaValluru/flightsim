@@ -1914,6 +1914,21 @@ mutate core/capture/verify.py \
     "applied_pose fails past the director's tolerance" \
     tests/test_render_repro.py || failures=$((failures+1))
 
+mutate core/capture/verify.py \
+    '        if (not isinstance(version, (int, float))
+                or version < DRAWN_MESH_MIN_MANIFEST_VERSION):' \
+    '        if False:  # MUTATED: a mesh attached at the structural datum passes' \
+    "drawn_airframe fails on a mesh drawn from a manifest with no origin" \
+    tests/test_camera_verify_corruption.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if expected_sha is not None:
+                problems.append(' \
+    '            if False:  # MUTATED: placeholder boxes pass under a manifest naming the mesh
+                problems.append(' \
+    "drawn_airframe fails on placeholder boxes where the manifest names a mesh" \
+    tests/test_camera_verify_corruption.py || failures=$((failures+1))
+
 mutate core/nl/llm_compiler.py \
     '    if isinstance(nested, list) and not payload["cameras"]:' \
     '    if False:  # MUTATED: a nested camera list refuses the whole response' \

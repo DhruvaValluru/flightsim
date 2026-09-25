@@ -75,6 +75,13 @@ def _tornado_hazard_block(spec):
     }
 
 
+def _mesh_manifest_path(spec) -> Path:
+    """Where the imported model's manifest lives for this spec's aircraft
+    (the web app resolves the same path for its -mesh= argument)."""
+    return (REPO / "assets" / "generated" / str(spec.aircraft.value)
+            / "mesh_manifest.json")
+
+
 def _refuse(violations) -> int:
     print("REFUSED -- by name:")
     for v in violations:
@@ -161,6 +168,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # the engine, and only then hit the commandlet's named refusal.
         # Project first, say what moved, and solve the poses over the
         # flight the host will actually fly.
+        from core.util.platform import ue_available
         from webapp.runs import project_for_ue_host
 
         # spec.quantities() yields (section, name, quantity).
@@ -174,6 +182,53 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                   "calibrated airspeed only):")
             for line in moved:
                 print(f"  {line}")
+
+        # The MESH the frames will draw, checked here for the same reason
+        # the projection is: before any flight. The web app has passed
+        # -mesh= since the placeholder rule; this command never did, so a
+        # CLI --render drew the placeholder boxes -- forbidden on any
+        # machine (owner's rule 2026-08-31) -- under a manifest whose
+        # assets block named the real mesh. Imported (a CURRENT manifest
+        # AND its .uassets) -> the render pass gets -mesh=; otherwise
+        # REFUSE by name, with the web app's own words where its refusal
+        # applies (no config, no upstream license) and the build command
+        # where the model can be built. Only where the engine is: off
+        # Windows/Mac the render is refused later as ue.platform and the
+        # manifest is the deliverable, exactly as before.
+        if ue_available():
+            from assets_pipeline.importer import is_imported
+            from webapp.runs import refuse_placeholder_mesh
+
+            aircraft = str(spec.aircraft.value)
+            mesh_manifest = _mesh_manifest_path(spec)
+            if not is_imported(aircraft):
+                refusal = refuse_placeholder_mesh(spec)
+                if refusal is None:
+                    refusal = {
+                        "constraint": "aircraft.mesh",
+                        "message": (
+                            f"the {aircraft} model is not imported on this "
+                            f"machine (no current "
+                            f"{mesh_manifest.relative_to(REPO)} backed by "
+                            f"its ue/Content assets), and placeholder "
+                            f"airframes never render. Build it once with "
+                            f"`python scripts/import_aircraft.py "
+                            f"{aircraft}` (fetch at the pinned commit, "
+                            f"convert, import into the Unreal project), or "
+                            f"render through the web app, which provisions "
+                            f"it itself; a manifest older than version 2 "
+                            f"(no mesh origin -- the mesh would be drawn at "
+                            f"the structural datum, 25-30 m off its label) "
+                            f"re-converts with `python "
+                            f"assets_pipeline/convert.py "
+                            f"assets/aircraft_config/{aircraft}.json`"),
+                    }
+                print(f"REFUSED -- {refusal['constraint']}: "
+                      f"{refusal['message']}")
+                print("(--render asked for pixels of a model this machine "
+                      "does not have; refused before any flight, so "
+                      "nothing was run or rendered)")
+                return 2
 
     heightfield = None
     terrain_ground = None
@@ -500,6 +555,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # masks, 16-bit depth, occlusion -- beside every frame of every
     # camera pass. The wrapper forwards it to each -camera-index pass.
     command.append("-labels")
+    # The imported mesh, checked above. The wrapper forwards it to each
+    # camera pass; the commandlet refuses a mesh/FDM mismatch itself.
+    command.append(f"-mesh={_mesh_manifest_path(spec)}")
     # Phase 10: the sampled look, when the randomisation block is on.
     # Off, the commandlet's own defaults apply exactly as before.
     look = render_look(spec)

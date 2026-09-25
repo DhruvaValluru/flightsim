@@ -231,6 +231,21 @@ namespace
 		FString Repo;
 		FString Commit;
 		FString Livery = TEXT("default");
+		// Manifest version 2 (Camera Phase 2, package A): where the model's
+		// origin sits in the ACTOR frame, cm. The converter's vertices are
+		// about the model's own origin -- the FDM's visual reference point,
+		// by FlightGear's convention -- while the actor origin is the JSBSim
+		// structural datum (UJSBSimMovementComponent::UpdateLocalTransforms:
+		// StructuralToActor negates X about StructuralFrameOrigin, zero).
+		// Attached at the root, the B747 mesh sat 33.7 m (its VRP x =
+		// 1327 in) forward of the CG the label describes; the Phase 1
+		// initial run report measured 25-30 m along the airframe's axis.
+		// A version-1 manifest has no origin: zero, drawn at the datum, and
+		// render.json says so under "drawn" so the verifier fails it.
+		FVector MeshOriginActorCm = FVector::ZeroVector;
+		int32 ManifestVersion = 0;
+		FString OriginBasis;
+		double Triangles = 0.0;
 	};
 
 	bool BuildMeshAirframe(AActor* Aircraft, UFlightSimSurfaceAnimator* Animator,
@@ -293,6 +308,61 @@ namespace
 		Manifest->TryGetStringField(TEXT("asset_path_root"), AssetRoot);
 		USceneComponent* Root = Aircraft->GetRootComponent();
 
+		// Where the model's origin sits in the actor (manifest version 2).
+		double VersionNumber = 0.0;
+		Manifest->TryGetNumberField(TEXT("version"), VersionNumber);
+		Out.ManifestVersion = static_cast<int32>(VersionNumber);
+		const TArray<TSharedPtr<FJsonValue>>* OriginField = nullptr;
+		if (Manifest->TryGetArrayField(TEXT("mesh_origin_actor_cm"), OriginField) &&
+		    OriginField != nullptr && OriginField->Num() == 3)
+		{
+			Out.MeshOriginActorCm = FVector((*OriginField)[0]->AsNumber(),
+			                                (*OriginField)[1]->AsNumber(),
+			                                (*OriginField)[2]->AsNumber());
+			Manifest->TryGetStringField(TEXT("mesh_origin_basis"), Out.OriginBasis);
+		}
+		else
+		{
+			// Not a refusal: the frames still render, but every mask is
+			// offset from its label by the VRP, and render.json's "drawn"
+			// object records it so verify's drawn_airframe check FAILS by
+			// name rather than the offset being found by eye.
+			Out.OriginBasis = TEXT("no mesh_origin_actor_cm in the manifest (version < 2): ")
+			                  TEXT("attached at the actor origin, the structural datum");
+			UE_LOG(LogFlightSimRender, Warning,
+			       TEXT("mesh manifest '%s' (version %d) records no mesh_origin_actor_cm: ")
+			       TEXT("the mesh is attached at the actor origin -- the JSBSim structural ")
+			       TEXT("datum -- and is drawn offset from its label by the FDM's VRP ")
+			       TEXT("(33.7 m forward on the B747). Fix: re-run assets_pipeline/convert.py ")
+			       TEXT("on assets/aircraft_config/%s.json (the web app's render flow ")
+			       TEXT("re-converts a stale manifest itself) and render again."),
+			       *ManifestPath, Out.ManifestVersion, *Out.Name);
+		}
+		const TSharedPtr<FJsonObject>* TriangleCounts = nullptr;
+		if (Manifest->TryGetObjectField(TEXT("triangles"), TriangleCounts) &&
+		    TriangleCounts != nullptr && TriangleCounts->IsValid())
+		{
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*TriangleCounts)->Values)
+			{
+				double Count = 0.0;
+				if (Pair.Value.IsValid() && Pair.Value->TryGetNumber(Count))
+				{
+					Out.Triangles += Count;
+				}
+			}
+		}
+		// ONE component at the model's origin; the body and every hinge hang
+		// under it. The hinge mids are stated in the same model-about-origin
+		// frame as the vertices, so they move with it and each surface stays
+		// on its hinge line. FlightSimScenarioWorld's placement (the actor
+		// origin that puts the CG on the commanded point) is untouched: this
+		// moves the geometry within the actor, not the actor.
+		USceneComponent* MeshOrigin = NewObject<USceneComponent>(Aircraft, TEXT("MeshOrigin"));
+		MeshOrigin->SetupAttachment(Root);
+		MeshOrigin->SetMobility(EComponentMobility::Movable);
+		MeshOrigin->RegisterComponent();
+		MeshOrigin->SetRelativeLocation(Out.MeshOriginActorCm);
+
 		auto LoadPart = [&](const FString& Part) -> UStaticMesh*
 		{
 			const FString Path = FString::Printf(TEXT("%s/%s.%s"), *AssetRoot, *Part, *Part);
@@ -310,7 +380,7 @@ namespace
 		}
 		UStaticMeshComponent* BodyComponent =
 			NewObject<UStaticMeshComponent>(Aircraft, TEXT("MeshBody"));
-		BodyComponent->SetupAttachment(Root);
+		BodyComponent->SetupAttachment(MeshOrigin);
 		BodyComponent->SetMobility(EComponentMobility::Movable);
 		BodyComponent->SetStaticMesh(Body);
 		BodyComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -364,7 +434,7 @@ namespace
 			}
 			USceneComponent* HingeComponent = NewObject<USceneComponent>(
 				Aircraft, *FString::Printf(TEXT("%sHinge"), *Bone));
-			HingeComponent->SetupAttachment(Root);
+			HingeComponent->SetupAttachment(MeshOrigin);
 			HingeComponent->SetMobility(EComponentMobility::Movable);
 			HingeComponent->RegisterComponent();
 			HingeComponent->SetRelativeLocation(HingeMid);
@@ -426,9 +496,11 @@ namespace
 		Out.Livery = Livery.IsEmpty() ? TEXT("default") : Livery;
 		Out.bLoaded = true;
 		UE_LOG(LogFlightSimRender, Display,
-		       TEXT("mesh airframe '%s' (%s) [%s, %s@%s]: %d surfaces bound"),
+		       TEXT("mesh airframe '%s' (%s) [%s, %s@%s]: %d surfaces bound; ")
+		       TEXT("manifest version %d, origin (%.1f, %.1f, %.1f) cm in the actor frame"),
 		       *Out.Name, *Out.MeshAirframe, *Out.License, *Out.Repo,
-		       *Out.Commit.Left(12), Surfaces->Num());
+		       *Out.Commit.Left(12), Surfaces->Num(), Out.ManifestVersion,
+		       Out.MeshOriginActorCm.X, Out.MeshOriginActorCm.Y, Out.MeshOriginActorCm.Z);
 		return true;
 	}
 
@@ -2047,6 +2119,35 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	else
 	{
 		Root->SetStringField(TEXT("airframe"), TEXT("placeholder boxes, not a visual asset"));
+	}
+	// Camera Phase 2 (package A): what was DRAWN and where within the
+	// actor, so verify's drawn_airframe check grades the frames against
+	// the mesh the manifest expected without inferring it from other keys.
+	// A mesh from a version-1 manifest reports its origin as the zero it
+	// was actually attached at, and the version that caused it.
+	{
+		TSharedPtr<FJsonObject> Drawn = MakeShared<FJsonObject>();
+		if (MeshAirframe.bLoaded)
+		{
+			Drawn->SetStringField(TEXT("kind"), TEXT("mesh"));
+			TArray<TSharedPtr<FJsonValue>> Origin;
+			Origin.Add(MakeShared<FJsonValueNumber>(MeshAirframe.MeshOriginActorCm.X));
+			Origin.Add(MakeShared<FJsonValueNumber>(MeshAirframe.MeshOriginActorCm.Y));
+			Origin.Add(MakeShared<FJsonValueNumber>(MeshAirframe.MeshOriginActorCm.Z));
+			Drawn->SetArrayField(TEXT("mesh_origin_actor_cm"), Origin);
+			Drawn->SetNumberField(TEXT("manifest_version"), MeshAirframe.ManifestVersion);
+			Drawn->SetStringField(TEXT("origin_basis"), MeshAirframe.OriginBasis);
+			Drawn->SetNumberField(TEXT("triangles"), MeshAirframe.Triangles);
+		}
+		else
+		{
+			Drawn->SetStringField(TEXT("kind"), TEXT("placeholder"));
+			Drawn->SetField(TEXT("mesh_origin_actor_cm"), MakeShared<FJsonValueNull>());
+			Drawn->SetField(TEXT("manifest_version"), MakeShared<FJsonValueNull>());
+			Drawn->SetStringField(TEXT("origin_basis"),
+			                      TEXT("placeholder boxes about the actor origin (structural datum)"));
+		}
+		Root->SetObjectField(TEXT("drawn"), Drawn);
 	}
 	Root->SetNumberField(TEXT("width"), Width);
 	Root->SetNumberField(TEXT("height"), Height);

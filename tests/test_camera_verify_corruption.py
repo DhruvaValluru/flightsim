@@ -20,6 +20,7 @@ safeguard in turn and confirm the matching test then fails.
 """
 
 import copy
+import json
 import math
 
 import pytest
@@ -29,8 +30,8 @@ from core.capture.poses import solve_pose_track
 from core.capture.schedule import solve_schedule
 from core.capture.verify import (
     FAIL, NOT_RUN, PASS, verify_aircraft_consistency, verify_counts,
-    verify_geometry, verify_intrinsics, verify_pose_matches_spec,
-    verify_triangulation,
+    verify_drawn_airframe, verify_geometry, verify_intrinsics,
+    verify_pose_matches_spec, verify_triangulation,
 )
 from core.nl.compiler import compile_prompt
 from core.scenario.camera import CameraSpec
@@ -230,3 +231,124 @@ def test_landmarks_are_recorded_and_land_off_axis(manifest):
     assert worst_radius > 0.5, (
         f"landmarks only reach {worst_radius:.2f} of the half-diagonal; "
         f"the projection is never exercised near the frame edge")
+
+
+# -- drawn_airframe: the pixels show the airframe where the labels say ----
+#
+# Measured (Camera Phase 1 initial run report): the rendered B747 sat
+# 25-30 m ahead of the position the manifest recorded for it, and every
+# mask with it. The commandlet attached the mesh at the actor root (the
+# JSBSim structural datum) while the converter's vertices are about the
+# model's own origin (the FDM's VRP, 33.7 m aft of the datum on the 747).
+# No offline check could see it; render.json's "drawn" object now says
+# what was drawn and where it was attached, and this check reads it.
+
+def _render_json(run_dir, camera, payload):
+    directory = run_dir / "frames" / camera
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "render.json").write_text(json.dumps(payload),
+                                           encoding="utf-8")
+
+
+def _drawn_mesh(version, origin=(-3370.58, 0.0, -60.96)):
+    return {"host": "unreal", "frames": 3,
+            "drawn": {"kind": "mesh", "mesh_origin_actor_cm": list(origin),
+                      "manifest_version": version,
+                      "origin_basis": "FlightGear places the model origin at "
+                                      "the FDM's VRP"}}
+
+
+DRAWN_PLACEHOLDER = {
+    "host": "unreal", "frames": 3,
+    "drawn": {"kind": "placeholder", "mesh_origin_actor_cm": None,
+              "manifest_version": None,
+              "origin_basis": "placeholder boxes about the actor origin "
+                              "(structural datum)"}}
+
+
+def _expecting_mesh(manifest):
+    """The manifest as a machine with the mesh imported writes it: the
+    assets block carries the mesh manifest's digest."""
+    expecting = copy.deepcopy(manifest)
+    expecting.setdefault("assets", {})["mesh_manifest"] = {
+        "path": "assets/generated/B747/mesh_manifest.json",
+        "sha256": "b747" * 16, "note": None}
+    return expecting
+
+
+def test_drawn_airframe_is_not_run_without_a_render(manifest, tmp_path):
+    assert verify_drawn_airframe(manifest, None).status == NOT_RUN
+    assert verify_drawn_airframe(manifest, tmp_path).status == NOT_RUN
+    # An older engine build: render.json with no 'drawn' record does not
+    # say where the mesh was attached, so the offset cannot be ruled out
+    # -- NOT RUN, named, never a pass.
+    _render_json(tmp_path, "chase0", {"host": "unreal", "frames": 3})
+    check = verify_drawn_airframe(manifest, tmp_path)
+    assert check.status == NOT_RUN
+    assert "predates" in check.detail
+
+
+def test_a_mesh_drawn_at_the_recorded_origin_passes(manifest, tmp_path):
+    _render_json(tmp_path, "chase0", _drawn_mesh(2))
+    _render_json(tmp_path, "tower0", _drawn_mesh(2))
+    check = verify_drawn_airframe(_expecting_mesh(manifest), tmp_path)
+    assert check.status == PASS
+    assert "-3370.6" in check.detail and "version 2" in check.detail
+
+
+def test_a_mesh_attached_at_the_datum_fails_by_name(manifest, tmp_path):
+    """The defect itself: a version-1 manifest carries no origin, so the
+    commandlet attached the mesh at the structural datum. Every mask is
+    then offset from its label by the VRP, and the check says so."""
+    _render_json(tmp_path, "chase0", _drawn_mesh(2))
+    _render_json(tmp_path, "tower0", _drawn_mesh(1, origin=(0.0, 0.0, 0.0)))
+    check = verify_drawn_airframe(_expecting_mesh(manifest), tmp_path)
+    assert check.status == FAIL
+    assert "tower0" in check.detail and "chase0" not in check.detail
+    assert "structural datum" in check.detail
+    assert "offset from its label" in check.detail
+    assert "convert.py" in check.detail
+    # No version at all is the same failure.
+    _render_json(tmp_path, "tower0", _drawn_mesh(None))
+    assert verify_drawn_airframe(_expecting_mesh(manifest), tmp_path).status == FAIL
+
+
+def test_placeholder_boxes_under_a_manifest_that_names_the_mesh_fail(
+        manifest, tmp_path):
+    """The other way to draw the wrong thing: the render launched without
+    -mesh= (the CLI did this for a whole phase) while the manifest's
+    assets block names the real mesh."""
+    _render_json(tmp_path, "chase0", DRAWN_PLACEHOLDER)
+    check = verify_drawn_airframe(_expecting_mesh(manifest), tmp_path)
+    assert check.status == FAIL
+    assert "placeholder" in check.detail and "-mesh=" in check.detail
+    assert "b747b747b747" in check.detail
+    # With no mesh expected (none on the producing machine, sha null) the
+    # boxes are what the record said; PASS with the honest detail.
+    assert manifest["assets"]["mesh_manifest"]["sha256"] is None
+    check = verify_drawn_airframe(manifest, tmp_path)
+    assert check.status == PASS and "expected no mesh" in check.detail
+
+
+def test_an_unknown_drawn_kind_fails(manifest, tmp_path):
+    _render_json(tmp_path, "chase0", {"drawn": {"kind": "sprite"}})
+    check = verify_drawn_airframe(manifest, tmp_path)
+    assert check.status == FAIL and "sprite" in check.detail
+
+
+def test_drawn_airframe_is_in_the_run_report(manifest, tmp_path):
+    """Wired beside the other engine checks: a run directory with no
+    render reports it NOT RUN by name; one with a datum-attached mesh
+    fails the whole verification."""
+    from core.capture.verify import verify_run
+
+    (tmp_path / "capture_manifest.json").write_text(json.dumps(manifest),
+                                                    encoding="utf-8")
+    report = verify_run(tmp_path)
+    by_name = {c.name: c for c in report.checks}
+    assert by_name["drawn_airframe"].status == NOT_RUN
+    _render_json(tmp_path, "chase0", _drawn_mesh(1, origin=(0.0, 0.0, 0.0)))
+    report = verify_run(tmp_path)
+    by_name = {c.name: c for c in report.checks}
+    assert by_name["drawn_airframe"].status == FAIL
+    assert not report.ok

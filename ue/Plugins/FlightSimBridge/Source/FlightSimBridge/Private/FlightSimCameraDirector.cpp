@@ -1,6 +1,7 @@
 #include "FlightSimCameraDirector.h"
 
 #include "CineCameraComponent.h"
+#include "JSBSimMovementComponent.h"
 
 namespace
 {
@@ -58,6 +59,30 @@ bool AFlightSimCameraDirector::PresetKeepsHorizonLevel() const
 float AFlightSimCameraDirector::GetCameraRollDegrees() const
 {
 	return GetActorRotation().Roll;
+}
+
+void AFlightSimCameraDirector::RefreshTargetMovement()
+{
+	if (Target == TargetMovementOwner)
+	{
+		return;
+	}
+	TargetMovementOwner = Target;
+	TargetMovement = Target != nullptr
+		? Target->FindComponentByClass<UJSBSimMovementComponent>()
+		: nullptr;
+}
+
+FVector AFlightSimCameraDirector::TargetAimPoint(const FTransform& TargetTransform) const
+{
+	// CGLocalPosition is in the actor frame (cm), so the actor transform
+	// carries it into the world -- the same arithmetic the scenario world
+	// inverts to place the actor (Origin = TargetCG - R * CGLocalPosition).
+	if (TargetMovement != nullptr)
+	{
+		return TargetTransform.TransformPosition(TargetMovement->CGLocalPosition);
+	}
+	return TargetTransform.GetLocation();
 }
 
 bool AFlightSimCameraDirector::SetPoseTrack(TArray<double>&& Times,
@@ -209,12 +234,15 @@ void AFlightSimCameraDirector::Tick(float DeltaSeconds)
 		return;
 	}
 
+	RefreshTargetMovement();
 	const FTransform TargetTransform = Target->GetActorTransform();
+	// Every preset aims at, and offsets from, the CG (see TargetAimPoint).
+	const FVector AimPoint = TargetAimPoint(TargetTransform);
 
 	if (!bInitialised)
 	{
 		SmoothedLocation = GetActorLocation();
-		SmoothedAimPoint = TargetTransform.GetLocation();
+		SmoothedAimPoint = AimPoint;
 		bInitialised = true;
 	}
 
@@ -222,11 +250,11 @@ void AFlightSimCameraDirector::Tick(float DeltaSeconds)
 	{
 	case EFlightSimCameraPreset::GroundObserver:
 		UpdateFixedPoint(DeltaSeconds, ObserverLocationMetres * CmPerMetre,
-		                 TargetTransform.GetLocation());
+		                 AimPoint);
 		break;
 	case EFlightSimCameraPreset::Tower:
 		UpdateFixedPoint(DeltaSeconds, TowerLocationMetres * CmPerMetre,
-		                 TargetTransform.GetLocation());
+		                 AimPoint);
 		break;
 	case EFlightSimCameraPreset::Wingman:
 		UpdateWingman(DeltaSeconds, TargetTransform);
@@ -251,13 +279,15 @@ void AFlightSimCameraDirector::UpdateLaggedChase(float DeltaSeconds,
 	const FRotator TargetRotation = TargetTransform.GetRotation().Rotator();
 	const FRotator HeadingOnly(0.0f, TargetRotation.Yaw, 0.0f);
 
-	const FVector Goal = TargetTransform.GetLocation()
+	// Offset from the CG, as the Python solver states it -- not from the
+	// actor origin, which is the structural datum.
+	const FVector AimPoint = TargetAimPoint(TargetTransform);
+	const FVector Goal = AimPoint
 		+ HeadingOnly.RotateVector(ChaseOffsetMetres * CmPerMetre);
 
 	SmoothedLocation = SmoothTowards(SmoothedLocation, Goal, DeltaSeconds,
 	                                 PositionLagSeconds);
-	SmoothedAimPoint = SmoothTowards(SmoothedAimPoint,
-	                                 TargetTransform.GetLocation(),
+	SmoothedAimPoint = SmoothTowards(SmoothedAimPoint, AimPoint,
 	                                 DeltaSeconds, AimLagSeconds);
 
 	SetActorLocation(SmoothedLocation);
@@ -277,7 +307,8 @@ void AFlightSimCameraDirector::UpdateCockpitShoulder(
 	// frame the aircraft never moves and the world banks; nothing recorded
 	// from this camera may be graded as aircraft motion.
 	const FQuat Rotation = TargetTransform.GetRotation();
-	SetActorLocation(TargetTransform.GetLocation()
+	// Body-frame offset from the CG (the solver's origin), not the datum.
+	SetActorLocation(TargetAimPoint(TargetTransform)
 	                 + Rotation.RotateVector(ShoulderOffsetMetres * CmPerMetre));
 	SetActorRotation(Rotation);
 }
@@ -304,14 +335,14 @@ void AFlightSimCameraDirector::UpdateWingman(float DeltaSeconds,
 	const FRotator TargetRotation = TargetTransform.GetRotation().Rotator();
 	const FRotator HeadingOnly(0.0f, TargetRotation.Yaw, 0.0f);
 
-	const FVector Goal = TargetTransform.GetLocation()
+	const FVector AimPoint = TargetAimPoint(TargetTransform);
+	const FVector Goal = AimPoint
 		+ HeadingOnly.RotateVector(WingmanOffsetMetres * CmPerMetre);
 
 	// Station-keeping is tighter than a chase: a wingman holds position.
 	SmoothedLocation = SmoothTowards(SmoothedLocation, Goal, DeltaSeconds,
 	                                 PositionLagSeconds * 0.5f);
-	SmoothedAimPoint = SmoothTowards(SmoothedAimPoint,
-	                                 TargetTransform.GetLocation(),
+	SmoothedAimPoint = SmoothTowards(SmoothedAimPoint, AimPoint,
 	                                 DeltaSeconds, AimLagSeconds);
 
 	SetActorLocation(SmoothedLocation);

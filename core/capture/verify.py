@@ -1487,6 +1487,10 @@ def verify_alignment(manifest_a: Dict, manifest_b: Dict,
 #   labels.py never runs here);
 # * keypoints_in_box -- an internal consistency the producer could get
 #   wrong: every in-frame keypoint inside the unclipped box;
+# * drawn_airframe -- the engine's render.json says WHAT it drew (a real
+#   mesh or placeholder boxes) and WHERE within the actor it attached it;
+#   a mesh attached at the structural datum is offset from every label
+#   by the FDM's VRP, FAIL by name. NOT RUN without a render.
 # * label_files -- every per-frame label file the engine DECLARED in
 #   render.json exists on disk (the frame-count contract, extended);
 # * mask_containment / depth_range -- the engine's instance mask and
@@ -1706,6 +1710,120 @@ def verify_label_files(manifest: Dict, run_dir=None) -> Check:
     return Check("label_files", PASS,
                  f"{counted} declared label files present across "
                  f"{sorted(declared)}{note}")
+
+
+#: The mesh manifest version from which the render commandlet attaches
+#: the mesh at the recorded model origin (the FDM's VRP) instead of the
+#: actor root. Named here, not imported from the producer.
+DRAWN_MESH_MIN_MANIFEST_VERSION = 2
+
+
+def _engine_drawn(run_dir) -> Dict[str, Optional[Dict]]:
+    """{camera_id: render.json['drawn'] or None} for every camera that
+    has a render.json; None where the record predates the key."""
+    out: Dict[str, Optional[Dict]] = {}
+    if run_dir is None:
+        return out
+    frames_dir = Path(run_dir) / "frames"
+    if not frames_dir.is_dir():
+        return out
+    for camera_dir in sorted(p for p in frames_dir.iterdir() if p.is_dir()):
+        path = camera_dir / "render.json"
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        drawn = payload.get("drawn") if isinstance(payload, dict) else None
+        out[camera_dir.name] = drawn if isinstance(drawn, dict) else None
+    return out
+
+
+def verify_drawn_airframe(manifest: Dict, run_dir=None) -> Check:
+    """The frames show the airframe the manifest describes, where it
+    describes it.
+
+    Measured (Camera Phase 1 initial run report): the rendered B747 sat
+    25-30 m AHEAD of the position the manifest recorded for it, along
+    its own axis, and every mask with it -- the converter maps the
+    FlightGear model about the model's own origin (the FDM's visual
+    reference point, 33.7 m aft of the datum on the 747) while the
+    commandlet attached the mesh at the actor root, which is the JSBSim
+    structural datum. The label, built from the telemetry's CG, was
+    right; the pixels were not. Nothing in the manifest could show it,
+    so the commandlet now records under ``drawn`` what it drew and
+    where it attached it, and this check reads that record:
+
+    * FAIL, by name, when placeholder boxes were drawn while the
+      manifest's ``assets.mesh_manifest`` names a real mesh (its sha256
+      is non-null);
+    * FAIL when a mesh was drawn from a manifest older than version
+      ``DRAWN_MESH_MIN_MANIFEST_VERSION``: it carried no origin, so the
+      mesh was attached at the datum and every mask is offset from its
+      label by the VRP;
+    * PASS when the mesh was drawn at a version-2 origin;
+    * NOT RUN with no render.json, or one that predates ``drawn``.
+    """
+    drawn_by_camera = _engine_drawn(run_dir)
+    if not drawn_by_camera:
+        return Check("drawn_airframe", NOT_RUN,
+                     "no render.json (no engine pass); what was drawn is "
+                     "unknown here")
+    recorded = {c: d for c, d in drawn_by_camera.items() if d is not None}
+    if not recorded:
+        return Check("drawn_airframe", NOT_RUN,
+                     "render.json predates the 'drawn' record (older engine "
+                     "build): it does not say where the mesh was attached, "
+                     "so the 25-30 m datum offset cannot be ruled out")
+    mesh_asset = (manifest.get("assets") or {}).get("mesh_manifest") or {}
+    expected_sha = mesh_asset.get("sha256")
+    expected_path = mesh_asset.get("path") or "assets/generated/<aircraft>/mesh_manifest.json"
+    problems = []
+    notes = []
+    for camera, drawn in sorted(recorded.items()):
+        kind = drawn.get("kind")
+        version = drawn.get("manifest_version")
+        if kind == "placeholder":
+            if expected_sha is not None:
+                problems.append(
+                    f"{camera}: placeholder boxes were drawn while the "
+                    f"manifest expected the mesh {expected_path} "
+                    f"(sha256 {str(expected_sha)[:12]}); the render was "
+                    f"launched without -mesh=")
+            else:
+                notes.append(f"{camera}: placeholder boxes; the manifest "
+                             f"expected no mesh (none on the producing "
+                             f"machine)")
+            continue
+        if kind != "mesh":
+            problems.append(f"{camera}: drawn.kind {kind!r} is neither "
+                            f"'mesh' nor 'placeholder'")
+            continue
+        if (not isinstance(version, (int, float))
+                or version < DRAWN_MESH_MIN_MANIFEST_VERSION):
+            problems.append(
+                f"{camera}: the mesh was drawn from manifest version "
+                f"{version!r} (< {DRAWN_MESH_MIN_MANIFEST_VERSION}), which "
+                f"records no mesh origin, so it was attached at the actor "
+                f"origin -- the JSBSim structural datum -- and every mask "
+                f"is offset from its label by the FDM's VRP (33.7 m on "
+                f"the B747); re-run assets_pipeline/convert.py and render "
+                f"again")
+            continue
+        origin = drawn.get("mesh_origin_actor_cm")
+        origin_text = (", ".join(f"{float(v):.1f}" for v in origin)
+                       if isinstance(origin, list) and len(origin) == 3
+                       else "?")
+        notes.append(f"{camera}: mesh at ({origin_text}) cm in the actor "
+                     f"frame, manifest version {int(version)}")
+    if problems:
+        return Check("drawn_airframe", FAIL,
+                     f"{len(problems)} camera(s) drew something other than "
+                     f"the airframe the labels describe, where they describe "
+                     f"it: " + "; ".join(problems[:4]))
+    return Check("drawn_airframe", PASS,
+                 f"{len(recorded)} camera(s): " + "; ".join(notes[:4]))
 
 
 def _read_gray_png(path):
@@ -2210,6 +2328,7 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     report.checks.append(verify_capture_times(manifest, run_dir))
     report.checks.append(verify_labels(manifest))
     report.checks.append(verify_keypoints_in_box(manifest))
+    report.checks.append(verify_drawn_airframe(manifest, run_dir))
     report.checks.append(verify_label_files(manifest, run_dir))
     report.checks.append(verify_mask_containment(manifest, run_dir))
     report.checks.append(verify_depth_range(manifest, run_dir))

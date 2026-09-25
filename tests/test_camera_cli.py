@@ -472,3 +472,100 @@ def test_event_example_captures_on_the_downburst_and_verifies(tmp_path):
     assert min(gaps) >= 1.0 - 1e-6
     report = verify_run(out)
     assert report.ok, report.render()
+
+
+# -- the mesh the render draws --------------------------------------------
+#
+# Measured (Camera Phase 1 initial run report): the CLI's --render never
+# passed -mesh= (the web app has since the placeholder rule), so the
+# commandlet drew the placeholder boxes under a manifest whose assets
+# block named the real mesh. Imported -> the wrapper gets -mesh=; not
+# imported -> aircraft.mesh, by name, before any flight or engine time.
+
+def _is_render_wrapper(command) -> bool:
+    return "render_ue_scenario" in str(command[0])
+
+
+def _fake_run(commands):
+    """Intercepts the render WRAPPER only; every other subprocess (the
+    manifest's git rev-parse probe, say) runs for real."""
+    import subprocess
+
+    real_run = subprocess.run
+
+    def run(command, **kwargs):
+        if not _is_render_wrapper(command):
+            return real_run(command, **kwargs)
+        commands.append([str(part) for part in command])
+
+        class Done:
+            returncode = 0
+        return Done()
+    return run
+
+
+def test_render_passes_the_imported_mesh_to_the_wrapper(tmp_path, monkeypatch):
+    import core.util.platform as platform_module
+    import assets_pipeline.importer as importer_module
+
+    commands = []
+    monkeypatch.setattr(platform_module, "ue_available", lambda: True)
+    monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
+    monkeypatch.setattr("subprocess.run", _fake_run(commands))
+    out = tmp_path / "rendered"
+    code = capture_main([str(EXAMPLES / "cameras_multi.yaml"), "--out", str(out),
+                         "--max-previews", "0", "--render", "--no-host-flight"])
+    assert code == 0
+    assert len(commands) == 1                     # one render wrapper call
+    spec = ScenarioSpec.read(EXAMPLES / "cameras_multi.yaml")
+    repo = Path(__file__).resolve().parents[1]
+    expected = repo / "assets" / "generated" / str(spec.aircraft.value) / "mesh_manifest.json"
+    assert [a for a in commands[0] if a.startswith("-mesh=")] == [f"-mesh={expected}"]
+    assert "-labels" in commands[0]
+    assert (out / "capture_manifest.json").is_file()
+
+
+def test_render_refuses_an_unimported_mesh_before_any_flight(tmp_path, capsys,
+                                                             monkeypatch):
+    import core.util.platform as platform_module
+    import assets_pipeline.importer as importer_module
+
+    import subprocess
+
+    real_run = subprocess.run
+
+    def never(command, **kwargs):
+        if _is_render_wrapper(command):
+            raise AssertionError(f"the wrapper was launched: {command}")
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr(platform_module, "ue_available", lambda: True)
+    monkeypatch.setattr(importer_module, "is_imported", lambda name: False)
+    monkeypatch.setattr("subprocess.run", never)
+    out = tmp_path / "refused"
+    code = capture_main([str(EXAMPLES / "cameras_multi.yaml"), "--out", str(out),
+                         "--max-previews", "0", "--render", "--no-host-flight"])
+    assert code == 2
+    text = capsys.readouterr().out
+    assert "REFUSED -- aircraft.mesh" in text
+    assert "scripts/import_aircraft.py" in text
+    assert "structural datum" in text
+    # Before any flight: nothing was run, nothing written.
+    assert not out.exists()
+
+
+def test_without_the_engine_an_unimported_mesh_is_not_a_refusal(tmp_path,
+                                                                 monkeypatch):
+    """Off Windows/Mac the render is refused later as ue.platform and the
+    manifest is the deliverable, exactly as before: the mesh check applies
+    only where the engine is."""
+    import core.util.platform as platform_module
+    import assets_pipeline.importer as importer_module
+
+    monkeypatch.setattr(platform_module, "ue_available", lambda: False)
+    monkeypatch.setattr(importer_module, "is_imported", lambda name: False)
+    out = tmp_path / "engineless"
+    code = capture_main([str(EXAMPLES / "cameras_multi.yaml"), "--out", str(out),
+                         "--max-previews", "0", "--render", "--no-host-flight"])
+    assert code == 0
+    assert (out / "capture_manifest.json").is_file()

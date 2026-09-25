@@ -608,3 +608,47 @@ the parity discipline, and the do-not-regress list)
     and skips an identical rewrite, so the steady state never touches
     the file. Any other generated-on-demand file (terrain bakes, mesh
     imports) that a parallel run can reach needs the same shape.
+
+## Camera Phase 2 gotchas (continuing the numbering)
+
+31. **The actor origin is the JSBSim structural datum, not the model's
+    origin -- a mesh attached at the actor root is drawn 33.7 m ahead of
+    its label on the B747.** Measured in the Camera Phase 1 initial run
+    report: the rendered airframe sat 25-30 m AHEAD of the position the
+    capture manifest recorded for it, along its own axis, and every mask
+    with it; the cockpit preset reported the aircraft out of frame while
+    its mask held 434k aircraft pixels -- same cause. Mechanism:
+    `UJSBSimMovementComponent::UpdateLocalTransforms` maps structural ->
+    actor by (-x, y, z) about `StructuralFrameOrigin` (zero), so the
+    actor origin IS the datum and `CGLocalPosition` is measured from it;
+    `FlightSimScenarioWorld` places the actor so the CG lands on the
+    commanded point (correct); `assets_pipeline/acmodel.py` maps the
+    FlightGear model to the actor frame about the MODEL's own origin,
+    which by FlightGear's convention is the FDM's VRP (`<location
+    name="VRP">`: B747 x=1327 in, A320 661.1, c172p 42.6, aft of the
+    datum); and `BuildMeshAirframe` attached the body and hinges at the
+    root. Fix (uncompiled here; first Windows build verifies): the
+    converter writes `mesh_manifest.json` version 2 with
+    `mesh_origin_actor_cm` (the VRP mapped by (-x, y, z), plus the
+    config's optional documented `model_origin_offset_m`), the importer
+    treats a version-1 manifest as NOT converted and re-converts it (no
+    editor time: same geometry), the commandlet hangs the body and every
+    hinge under one `MeshOrigin` scene component at that point and
+    records what it drew under render.json `drawn`, the camera presets
+    aim at and offset from the CG (`TargetAimPoint`) as the Python solver
+    does, verify's `drawn_airframe` FAILs by name on a datum-attached mesh
+    or on placeholder boxes under a manifest naming the mesh, and
+    `flightsim.capture --render` now passes `-mesh=` (it never had; it
+    refuses `aircraft.mesh` when the model is not imported). Not verified
+    here: no engine. Windows verification step: re-convert (`python
+    assets_pipeline/convert.py assets/aircraft_config/B747.json`, or let
+    the web app's render flow do it), render one frame with `-mesh=`,
+    and look at the overlay -- the circle (manifest CG) must sit ON the
+    airframe, not 30 m ahead of it; `python -m flightsim.verify
+    runs/<id>` must report `drawn_airframe` PASS with manifest_version 2,
+    and `mask_containment` should now pass where it failed. If the mesh
+    lands 2 x 33.7 m aft instead, the sign of the map is the finding, not
+    the convention: the `mesh_origin_basis` string in the manifest states
+    the argument to check against. Note `scripts/import_aircraft.py` still
+    says "already converted" for a version-1 manifest; use the converter
+    or the web app until it learns `importer.stale_manifest_reason`.
