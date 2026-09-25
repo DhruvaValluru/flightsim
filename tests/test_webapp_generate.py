@@ -180,13 +180,21 @@ def test_words_keeps_the_rule_out_of_every_default_field():
     assert rendered["details"] == {"rule": "airspeed.stall_margin", "message": "below 1.05 x Vs",
                                    "catalogued": True, "actual": 95.0, "limit": 118.2,
                                    "unit": "kt CAS"}
-    # An uncatalogued name (a finding for the catalogue): the producer's
-    # own message stands in, the name is still only under details.
+    # The three campaign refusals are catalogued (0958a45): the page
+    # shows the catalogue sentence, never the producer's text.
     from core.campaign import CampaignError
 
     rendered = generate_module.words(CampaignError("campaign.state", "a done campaign cannot pause"))
-    assert rendered["sentence"] == "a done campaign cannot pause"
-    assert rendered["details"]["rule"] == "campaign.state"
+    assert rendered["sentence"] == "The campaign is not in a state where that action is possible."
+    assert rendered["details"] == {"rule": "campaign.state", "message": "a done campaign cannot pause",
+                                   "catalogued": True, "detail": {}}
+    # An uncatalogued name (a name the catalogue genuinely lacks): the
+    # producer's own message stands in, the name is still only under
+    # details, and the gap is visible as catalogued: false.
+    rendered = generate_module.words(CampaignError("campaign.no_such_rule", "the producer's own words"))
+    assert rendered["sentence"] == "the producer's own words"
+    assert rendered["hint"] == ""
+    assert rendered["details"]["rule"] == "campaign.no_such_rule"
     assert rendered["details"]["catalogued"] is False
 
 
@@ -281,6 +289,10 @@ def test_progress_is_read_from_a_ledger_the_test_wrote(client):
     names = {r["details"]["rule"]: r for r in payload["refusals_words"]}
     assert set(names) == {"randomization.infeasible", "randomization.sun_elevation_min_deg"}
     assert names["randomization.infeasible"]["count"] == 1
+    # The sentence reads correctly without the draw count (the ledger's
+    # refusal list carries names only): no "of came out" gap.
+    assert names["randomization.infeasible"]["sentence"].startswith("Every attempt to draw")
+    assert "(" not in names["randomization.infeasible"]["sentence"]
     assert not any(_rule_named(r) for r in payload["refusals_words"])
     # What is varying: histograms over the rows' draws (the refused slot drew nothing).
     varying = payload["varying"]
@@ -338,7 +350,10 @@ def test_start_runs_the_campaign_and_the_stream_emits(client):
     assert kinds[0] == "progress" and kinds[-1] == "end"
     data = [json.loads(l[len("data: "):]) for l in events if l.startswith("data: ")]
     assert data[0]["state"] == "done" and data[0]["frames_verified"] >= IMAGES
-    assert data[0]["headline"] == "Every requested image has been generated and checked."
+    # Nothing here claims a picture was drawn: the done sentence names the
+    # labels; the drawn-aware tail is the page's to pass (progress_from).
+    assert data[0]["headline"].startswith("Every requested image has its labels generated and checked")
+    assert "has been generated" not in data[0]["headline"]
     # Pause after done is an illegal transition: refused, not a 500.
     paused = client.post(f"/generate/{campaign_id}/pause")
     assert paused.status_code == 409 and paused.json()["details"]["rule"] == "campaign.state"

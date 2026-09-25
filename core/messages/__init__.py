@@ -14,12 +14,16 @@ keyword parameters.
 Placeholders. ``{name}`` is replaced by the parameter's value (numbers
 shown short: ``89.5``, ``2``, ``1.2e+06``); ``{name:one|many}`` is a
 plural form chosen by the numeric value of ``name`` (exactly 1 picks
-the first). A placeholder with no value renders as nothing and the
-sentence is tidied around the gap; rendering never raises. The
-parameters :func:`explain` offers are the refusal's own fields plus
-three derived ones: ``shortfall`` (limit - actual), ``excess``
-(actual - limit) when both are numbers, and ``count`` (the number of
-violations a report carries).
+the first; a yes/no value picks the first when yes). A placeholder
+with no value renders as nothing and the sentence is tidied around the
+gap: a bracketed aside in which every placeholder is absent is dropped
+whole, since "(of)" says nothing; rendering never raises. The
+parameters :func:`explain` offers are the refusal's own fields, the
+keys of its ``detail`` mapping where the error class carries one (the
+campaign and randomisation errors), plus three derived ones:
+``shortfall`` (limit - actual), ``excess`` (actual - limit) when both
+are numbers, and ``count`` (the number of violations a report
+carries).
 
 What is NOT claimed. The catalogue does not decide whether something
 is refused -- the validators do, by name, and this module never
@@ -136,9 +140,24 @@ def shown(value: Any) -> str:
     return str(value)
 
 
+#: Marks left by :func:`fill` on a placeholder that rendered as nothing
+#: (``_ABSENT``) or as a value (``_PRESENT``); :func:`_tidy` reads them
+#: to drop an aside that lost every number, then strips them.
+_ABSENT, _PRESENT = "\x00", "\x01"
+
+
 def _tidy(text: str) -> str:
-    """Close the gaps an absent placeholder leaves: doubled spaces, empty
-    brackets, a stray space before punctuation."""
+    """Close the gaps an absent placeholder leaves: an aside whose every
+    placeholder is absent (``(of)``), doubled spaces, empty brackets, a
+    stray space before punctuation."""
+    def aside(match: "re.Match") -> str:
+        inner = match.group(1)
+        if _ABSENT in inner and _PRESENT not in inner:
+            return ""
+        return match.group(0)
+
+    text = re.sub(r"\(([^()]*)\)", aside, text)
+    text = text.replace(_ABSENT, "").replace(_PRESENT, "")
     text = re.sub(r"\(\s*\)", "", text)
     text = re.sub(r"\(\s+", "(", text)
     text = re.sub(r"\s+\)", ")", text)
@@ -149,19 +168,22 @@ def _tidy(text: str) -> str:
 
 def fill(template: str, params: Mapping[str, Any]) -> str:
     """Fill ``{name}`` and ``{name:one|many}`` from ``params``; a missing
-    or None parameter renders as nothing. Never raises."""
+    or None parameter renders as nothing, and a bracketed aside whose
+    every placeholder is missing is dropped whole. Never raises."""
     def replace(match: "re.Match") -> str:
         name = match.group("name")
         value = params.get(name)
         if match.group("one") is not None:
             if value is None:
-                return ""
+                return _ABSENT
             try:
                 one = float(value) == 1.0
             except (TypeError, ValueError):
                 one = False
             return match.group("one") if one else match.group("many")
-        return shown(value)
+        if value is None:
+            return _ABSENT
+        return _PRESENT + shown(value)
 
     return _tidy(_PLACEHOLDER.sub(replace, template))
 
@@ -241,14 +263,22 @@ def technical(obj: Any) -> str:
 
 def params_of(obj: Any) -> Dict[str, Any]:
     """The placeholder values a refusal offers: its own fields, every
-    other key of a dict, and the derived ``shortfall`` / ``excess`` /
-    ``count``."""
+    other key of a dict, the keys of an error's ``detail`` mapping (the
+    numbers behind ``storage.budget_exceeded`` and
+    ``randomization.infeasible`` live only there), and the derived
+    ``shortfall`` / ``excess`` / ``count``. An own field wins over a
+    detail key of the same name."""
     params: Dict[str, Any] = {}
     if isinstance(obj, Mapping):
         for key, value in obj.items():
             if isinstance(key, str):
                 params[key] = value
     else:
+        detail = getattr(obj, "detail", None)
+        if isinstance(detail, Mapping):
+            for key, value in detail.items():
+                if isinstance(key, str) and value is not None:
+                    params[key] = value
         for key in ("constraint", "message", "actual", "limit", "unit"):
             value = getattr(obj, key, None)
             if value is not None:

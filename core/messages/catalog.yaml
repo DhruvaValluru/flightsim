@@ -9,10 +9,15 @@
 #              arrive through {placeholders} filled from the refusal itself
 #              (actual, limit, unit, and the derived shortfall = limit -
 #              actual, excess = actual - limit, count = number of
-#              violations). A plural form is {param:one|many} and picks by
-#              the numeric value of param ("{actual} {actual:draw|draws}").
-#              A placeholder with no value renders as nothing; it never
-#              raises.
+#              violations), or from the error's own detail mapping where
+#              the numbers live only there (the campaign and randomisation
+#              errors). A plural form is {param:one|many} and picks by the
+#              numeric value of param ("{actual} {actual:draw|draws}"); a
+#              yes/no value picks the first form when yes. A placeholder
+#              with no value renders as nothing, and a bracketed aside in
+#              which every placeholder is absent is dropped whole, so a
+#              sentence reads correctly with or without its numbers; it
+#              never raises.
 #   hint       optional; what to do about it.
 #
 # tests/test_messages.py holds the two-way check: every name the code
@@ -94,7 +99,7 @@ randomization.vocabulary:
 randomization.location:
   sentence: "No terrain is prepared for that place, so the scene cannot be varied over it."
 randomization.infeasible:
-  sentence: "{refused} of {draws} {draws:draw|draws} came out impossible to fly, so the variation asked for cannot be met."
+  sentence: "Every attempt to draw this scenario came out impossible to fly ({draws} {draws:try|tries}), so the variation asked for cannot be met."
   hint: "Narrow the ranges, or ask for fewer images."
 
 # -- the spec 8 blocks: scene, taxonomy, traffic (core/scenario/validate.py) --
@@ -270,10 +275,11 @@ annotation.files:
 # -- campaigns and storage (contracts §6, package G) ------------------------
 
 storage.budget_exceeded:
-  sentence: "The campaign would need more disk space than allowed ({actual} of {limit} {unit})."
+  sentence: "The campaign would need more disk space than allowed (about {projected_bytes} bytes still to write, against a limit of {limit_bytes})."
   hint: "Raise the budget, or ask for fewer images."
 campaign.target_unreachable:
-  sentence: "The campaign cannot reach the requested number of images with the variation asked for."
+  sentence: "The campaign could not reach the requested number of images, so it stopped."
+  hint: "Either too many draws were refused, or repeated flights added no checked pictures; the technical note says which."
 campaign.arguments:
   sentence: "The campaign cannot be set up as asked."
   hint: "Check the number of images, the seed, the worker count, the output folder and the format."
@@ -281,8 +287,8 @@ campaign.state:
   sentence: "The campaign is not in a state where that action is possible."
   hint: "A campaign starts once, pauses while running, resumes while paused, and can be cancelled until it is done."
 campaign.duplicate_case:
-  sentence: "The same case was recorded twice in the campaign's ledger, so it was not run again."
-  hint: "Resume the campaign; the duplicate row is kept as evidence and the case is counted once."
+  sentence: "Two scenarios came out identical because the request leaves nothing to vary between them, so the second was not flown."
+  hint: "Ask for something to vary, or for fewer images."
 
 # -- the assistant's authority (contracts §7, package H) --------------------
 
@@ -379,8 +385,6 @@ verdict.pass:
   sentence: "Passed."
 verdict.fail:
   sentence: "Failed."
-verdict.not_run:
-  sentence: "Not checked yet: this needs a render first."
 
 progress.campaign.planned:
   sentence: "The campaign is planned and waiting to start."
@@ -392,7 +396,7 @@ progress.campaign.paused:
 progress.campaign.failed:
   sentence: "The campaign stopped on an error."
 progress.campaign.done:
-  sentence: "Every requested image has been generated and checked."
+  sentence: "Every requested image has its labels generated and checked{drawn:, and its picture drawn|; no picture was drawn on this machine}."
 progress.campaign.cancelled:
   sentence: "The campaign was cancelled."
 
@@ -401,9 +405,9 @@ progress.case.sampled:
 progress.case.refused:
   sentence: "This draw was refused and recorded."
 progress.case.running:
-  sentence: "Flying and rendering this scenario."
+  sentence: "Flying this scenario and writing its labels."
 progress.case.rendered:
-  sentence: "Pictures rendered; checking them."
+  sentence: "Flown and recorded; checking the labels{drawn:, and the pictures|}."
 progress.case.verified:
   sentence: "Checked."
 progress.case.failed:
