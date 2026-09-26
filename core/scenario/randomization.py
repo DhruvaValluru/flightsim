@@ -42,7 +42,13 @@ What is sampled, and by what:
 Every stream is its own: sha256 over ``"<seed>:randomization:<label>"``
 (the sensor model's convention, core.capture.profile.frame_seed), so
 adding a camera does not change the sun, and the block's seed derives
-from the run seed when the user gave none.
+from the run seed when the user gave none. A campaign case folds its
+index into the label (``"draw <index>:<label>"``, index 0 being the
+single-run path with the label bare), so every case of a campaign
+draws its own day, hour, fog, livery and camera jitter from the one
+campaign seed; the index is recorded on each drawn field's detail
+(``draw_index``) so a second pass -- the capture command re-reading
+the case's spec -- lands on the same numbers.
 
 **The policy (spec 8, contracts §5; package F).** ``randomization.policy``
 is a mapping of distribution leaves over named parameters
@@ -345,11 +351,34 @@ def derive_block_seed(run_seed: int) -> int:
     return int.from_bytes(digest[:8], "big") % MAX_SEED
 
 
-def stream(seed: int, label: str) -> np.random.Generator:
+def stream(seed: int, label: str, draw_index: int = 0) -> np.random.Generator:
     """One generator per aspect, from the block seed and the aspect's
-    name. Adding a camera cannot move the sun."""
+    name. Adding a camera cannot move the sun. ``draw_index`` is the
+    campaign's case index: 0 (the single run) leaves the label bare, so
+    ``examples/randomized.yaml`` samples exactly as it always did; any
+    other index prefixes it, so case 3 of a campaign is not case 2."""
+    label = _phase10_label(label, draw_index)
     digest = hashlib.sha256(f"{int(seed)}:randomization:{label}".encode()).digest()
     return np.random.default_rng(int.from_bytes(digest[:8], "big"))
+
+
+def _phase10_label(label: str, draw_index: int) -> str:
+    return f"draw {int(draw_index)}:{label}" if int(draw_index) else label
+
+
+def _draw_phrase(draw_index: int) -> str:
+    """", draw 3" in a Phase 10 field's provenance; nothing for draw 0."""
+    return f", draw {int(draw_index)}" if int(draw_index) else ""
+
+
+def recorded_phase10_draw_index(block: "RandomizationSpec") -> int:
+    """The case index a Phase 10 leaf was drawn at, read back from its
+    detail (0 when none says: the single-run path records nothing)."""
+    for name in ("fog_density", "day_of_year", "hour_utc", "livery"):
+        recorded = getattr(block, name).detail.get("draw_index")
+        if recorded is not None:
+            return int(recorded)
+    return 0
 
 
 # -- the pure parts ----------------------------------------------------
@@ -400,13 +429,20 @@ def declared_liveries(aircraft: str, config_dir: Optional[Path] = None
 # -- the sampler (a planner) --------------------------------------------
 
 def _plan_unless_stated(block: RandomizationSpec, name: str, value: Any,
-                        frm: str) -> None:
+                        frm: str, draw_index: int = 0) -> None:
     if getattr(block, name).source in PLANNABLE:
         block.plan(name, value, frm=frm)
+        if int(draw_index):
+            # A campaign case records its index beside the value, so a
+            # second pass (the capture command) draws the same case.
+            q = getattr(block, name)
+            setattr(block, name, replace(
+                q, detail={**q.detail, "draw_index": int(draw_index)}))
 
 
-def _sample_time_of_day(spec, block: RandomizationSpec, seed: int) -> None:
-    rng = stream(seed, "time_of_day")
+def _sample_time_of_day(spec, block: RandomizationSpec, seed: int,
+                        draw_index: int = 0) -> None:
+    rng = stream(seed, "time_of_day", draw_index)
     year = int(block.year.value)
     doy_stated = block.day_of_year.source not in PLANNABLE
     hour_stated = block.hour_utc.source not in PLANNABLE
@@ -430,10 +466,11 @@ def _sample_time_of_day(spec, block: RandomizationSpec, seed: int) -> None:
             f"UTC at ({lat:.3f}, {lon:.3f}) put the sun at or above "
             f"{floor:g} deg; the exposure is calibrated for daylight only "
             f"-- narrow the window or lower sun_elevation_min_deg")
-    frm = (f"drawn from the time-of-day stream of seed {seed} (attempt "
-           f"{attempt + 1}), sun above {floor:g} deg")
-    _plan_unless_stated(block, "day_of_year", doy, frm)
-    _plan_unless_stated(block, "hour_utc", round(hour, 4), frm)
+    frm = (f"drawn from the time-of-day stream of seed {seed}"
+           f"{_draw_phrase(draw_index)} (attempt {attempt + 1}), sun above "
+           f"{floor:g} deg")
+    _plan_unless_stated(block, "day_of_year", doy, frm, draw_index)
+    _plan_unless_stated(block, "hour_utc", round(hour, 4), frm, draw_index)
     solar_frm = (f"solar position at ({lat:.3f}, {lon:.3f}), {year} day "
                  f"{doy} {hour:.2f} h UTC -- {SOLAR_SOURCE}")
     _plan_unless_stated(block, "sun_elevation_deg",
@@ -449,17 +486,18 @@ def _sample_time_of_day(spec, block: RandomizationSpec, seed: int) -> None:
         f"clamped beyond them")
 
 
-def _sample_fog(block: RandomizationSpec, seed: int) -> None:
-    rng = stream(seed, "fog")
+def _sample_fog(block: RandomizationSpec, seed: int, draw_index: int = 0) -> None:
+    rng = stream(seed, "fog", draw_index)
     lo, hi = float(block.fog_density_min.value), float(block.fog_density_max.value)
     density = math.exp(rng.uniform(math.log(lo), math.log(hi)))
     _plan_unless_stated(block, "fog_density", float(f"{density:.6g}"),
                         f"log-uniform in [{lo:g}, {hi:g}] 1/m from the fog "
-                        f"stream of seed {seed}")
+                        f"stream of seed {seed}{_draw_phrase(draw_index)}",
+                        draw_index)
 
 
 def _sample_livery(spec, block: RandomizationSpec, seed: int,
-                   config_dir: Optional[Path]) -> None:
+                   config_dir: Optional[Path], draw_index: int = 0) -> None:
     aircraft = str(spec.aircraft.value)
     variants = declared_liveries(aircraft, config_dir)
     if not variants:
@@ -468,11 +506,11 @@ def _sample_livery(spec, block: RandomizationSpec, seed: int,
                             f"(assets/aircraft_config 'liveries'); the "
                             f"mesh's own materials")
         return
-    rng = stream(seed, "livery")
+    rng = stream(seed, "livery", draw_index)
     choice = variants[int(rng.integers(0, len(variants)))]
     _plan_unless_stated(block, "livery", choice,
                         f"uniform over {variants} from the livery stream "
-                        f"of seed {seed}")
+                        f"of seed {seed}{_draw_phrase(draw_index)}", draw_index)
 
 
 #: Which camera fields a jitter may move, by the camera's mode, and
@@ -491,9 +529,10 @@ _AIM_FIELDS = {
 }
 
 
-def _jitter_camera(spec, camera, seed: int, block: RandomizationSpec) -> None:
+def _jitter_camera(spec, camera, seed: int, block: RandomizationSpec,
+                   draw_index: int = 0) -> None:
     camera_id = str(camera.camera_id.value)
-    rng = stream(seed, f"camera:{camera_id}")
+    rng = stream(seed, f"camera:{camera_id}", draw_index)
     jm = float(block.camera_jitter_m.value)
     jd = float(block.camera_jitter_deg.value)
     jf = float(block.camera_focal_jitter.value)
@@ -520,14 +559,19 @@ def _jitter_camera(spec, camera, seed: int, block: RandomizationSpec) -> None:
         if kind == "fraction":
             value = base * (1.0 + draw)
             frm = (f"{base:g} x (1 {draw:+.4f}) from the camera stream of "
-                   f"seed {seed} (focal jitter +/-{jf:g})")
+                   f"seed {seed}{_draw_phrase(draw_index)} (focal jitter "
+                   f"+/-{jf:g})")
         else:
             value = base + draw
             frm = (f"{base:g} {draw:+.4f} from the camera stream of seed "
-                   f"{seed} (jitter +/-{jm:g} m / +/-{jd:g} deg)")
+                   f"{seed}{_draw_phrase(draw_index)} (jitter +/-{jm:g} m / "
+                   f"+/-{jd:g} deg)")
+        detail = {**q.detail, JITTER_BASE_KEY: base}
+        if int(draw_index):
+            detail["draw_index"] = int(draw_index)
         setattr(camera, name, replace(
             q, value=round(value, 4), source=Source.DERIVED, frm=frm,
-            detail={**q.detail, JITTER_BASE_KEY: base}))
+            detail=detail))
 
 
 # -- the policy (spec 8, contracts §5.2) ----------------------------------
@@ -576,8 +620,12 @@ TURBULENCE_STD = "MIL-F-8785C Fig.7 (W20, wind speed at 20 ft AGL)"
 #: The leaves a policy may name (contracts §5.2), each with the
 #: distribution forms it admits, its value type, its bounds (a draw
 #: outside them is a refused draw, recorded and re-drawn) and the field
-#: it writes. ``core.nl.llm_compiler`` builds its bounded schema from
-#: this table and asserts against it at import.
+#: it writes. A CIRCULAR leaf (a compass direction, a clock hour) has a
+#: ``period``: a draw outside its bounds is wrapped modulo the period
+#: and the wrap is written in the field's provenance, so a normal
+#: around north is a normal around north, not a one-sided truncation.
+#: ``core.nl.llm_compiler`` builds its bounded schema from this table
+#: and asserts against it at import.
 POLICY_LEAVES: Dict[str, Dict[str, Any]] = {
     "location": {"forms": ("choice",), "kind": "word",
                  "target": "block.location",
@@ -587,7 +635,8 @@ POLICY_LEAVES: Dict[str, Dict[str, Any]] = {
                      "bounds": None},
     "hour_local": {"forms": ("uniform", "choice", "normal"), "kind": "number",
                    "target": "block.hour_local", "unit": "h",
-                   "bounds": (0.0, 24.0), "words": tuple(HOUR_WINDOWS)},
+                   "bounds": (0.0, 24.0), "words": tuple(HOUR_WINDOWS),
+                   "period": 24.0},
     "visibility_km": {"forms": ("lognormal", "uniform", "loguniform", "normal"),
                       "kind": "number", "target": "block.visibility_km",
                       "unit": "km", "bounds": (0.05, 400.0)},
@@ -605,7 +654,8 @@ POLICY_LEAVES: Dict[str, Dict[str, Any]] = {
                       "unit": "kt", "bounds": (0.0, 200.0)},
     "wind_direction_deg": {"forms": ("uniform", "choice", "normal"),
                            "kind": "number", "target": "spec.wind_direction",
-                           "unit": "deg", "bounds": (0.0, 360.0)},
+                           "unit": "deg", "bounds": (0.0, 360.0),
+                           "period": 360.0},
     "turbulence": {"forms": ("choice",), "kind": "word",
                    "target": "spec.turbulence", "unit": None, "bounds": None,
                    "words": tuple(TURBULENCE_LEVELS)},
@@ -687,29 +737,110 @@ def _distribution_of(leaf: Dict[str, Any]) -> Dict[str, Any]:
     return json.loads(json.dumps(leaf))
 
 
-def _gate_open(gate: str, drawn: Dict[str, Any], path: str) -> bool:
-    """``"cloud_cover > 0.6"`` against this attempt's drawn values; a
-    gate naming an undrawn leaf refuses the policy by name."""
+_NUMBER_TEXT = re.compile(r"^[-+]?\d+(?:\.\d+)?$")
+_WORD_OPS = ("==", "!=")
+
+
+def _gate_parts(gate: Any, path: str) -> tuple:
+    """(leaf, op, rhs) of ``"cloud_cover > 0.6"``, or a named refusal."""
     m = _GATE.match(str(gate))
     if m is None:
         raise RandomizationError(
             "randomization.policy",
             f"{path}: gated_by {gate!r} is not '<leaf> <op> <value>'")
-    name, op, rhs = m.groups()
+    return m.groups()
+
+
+def _leaf_words(leaf: Any) -> Optional[List[str]]:
+    """The words a choice leaf draws among, or None for a leaf that
+    draws numbers (any other form, or a choice among numbers)."""
+    if isinstance(leaf, dict) and "choice" in leaf and leaf["choice"] \
+            and all(isinstance(c, str) for c in leaf["choice"]):
+        return [str(c) for c in leaf["choice"]]
+    return None
+
+
+def _gate_problem(path: str, gate: Any, earlier: Dict[str, Any]) -> Optional[str]:
+    """Why ``gate`` cannot be judged against the leaves drawn before
+    it: a number leaf compared to a word, a word leaf compared to a
+    number or ordered (< >), a word the leaf never draws. None when
+    the gate is sound."""
+    try:
+        name, op, rhs = _gate_parts(gate, path)
+    except RandomizationError as exc:
+        return exc.message
+    leaf = earlier.get(name)
+    if not isinstance(leaf, dict):
+        return (f"{path}: gated_by names {name!r}, which is not a leaf drawn "
+                f"before it in this policy (order the gated leaf after it)")
+    words = _leaf_words(leaf)
+    if words is None:
+        if not _NUMBER_TEXT.match(rhs):
+            return (f"{path}: gated_by {gate!r} compares {name}, which draws a "
+                    f"number, to the word {rhs!r}; give a number")
+        return None
+    if op not in _WORD_OPS:
+        return (f"{path}: gated_by {gate!r} orders {name}, which draws a word "
+                f"(one of {words}); a word is compared with == or != only")
+    if _NUMBER_TEXT.match(rhs):
+        return (f"{path}: gated_by {gate!r} compares {name}, which draws a word "
+                f"(one of {words}), to a number; name one of its words")
+    if rhs not in words:
+        return (f"{path}: gated_by {gate!r} names {rhs!r}, which {name} never "
+                f"draws (its choices are {words})")
+    return None
+
+
+def gate_problems(policy: Any, path: str = "randomization.policy") -> List[str]:
+    """Every ``gated_by`` in ``policy`` the sampler could not judge,
+    in the policy's own words -- checked before any attempt is drawn,
+    so a campaign refuses it at plan time and no worker ever sees a
+    comparison of a number to a word. Shape problems are
+    ``core.scenario.validate.policy_problems``'s; this is the gates'
+    typing, and validate() may call it beside that one."""
+    if not isinstance(policy, dict):
+        return []
+    problems: List[str] = []
+    earlier: Dict[str, Any] = {}
+    for name, leaf in policy.items():
+        if isinstance(leaf, dict) and "gated_by" in leaf and name not in POLICY_GROUPS:
+            problem = _gate_problem(f"{path}.{name}", leaf["gated_by"], earlier)
+            if problem is not None:
+                problems.append(problem)
+        earlier[name] = leaf
+    return problems
+
+
+def _gate_open(gate: str, drawn: Dict[str, Any], path: str) -> bool:
+    """``"cloud_cover > 0.6"`` against this attempt's drawn values; a
+    gate naming an undrawn leaf, or comparing a number to a word (or
+    a word to a number, or ordering words), refuses the policy by
+    name -- never a bare comparison error, never a string ordering."""
+    name, op, rhs = _gate_parts(gate, path)
     if name not in drawn:
         raise RandomizationError(
             "randomization.policy",
             f"{path}: gated_by names {name!r}, which is not a leaf drawn "
             f"before it in this policy (order the gated leaf after it)")
     lhs = drawn[name]
-    try:
-        rhs_value: Any = float(rhs)
-        lhs = float(lhs)
-    except (TypeError, ValueError):
-        rhs_value = rhs
-    return {">": lhs > rhs_value, ">=": lhs >= rhs_value, "<": lhs < rhs_value,
-            "<=": lhs <= rhs_value, "==": lhs == rhs_value,
-            "!=": lhs != rhs_value}[op]
+    if isinstance(lhs, str):
+        if op not in _WORD_OPS or _NUMBER_TEXT.match(rhs):
+            raise RandomizationError(
+                "randomization.policy",
+                f"{path}: gated_by {gate!r} cannot be judged: {name} drew the "
+                f"word {lhs!r}, and a word is compared to a word with == or "
+                f"!= only")
+        return (lhs == rhs) if op == "==" else (lhs != rhs)
+    if not _NUMBER_TEXT.match(rhs):
+        raise RandomizationError(
+            "randomization.policy",
+            f"{path}: gated_by {gate!r} cannot be judged: {name} drew the "
+            f"number {lhs!r}, and a number is compared to a number, not to "
+            f"the word {rhs!r}")
+    lhs_value, rhs_value = float(lhs), float(rhs)
+    return {">": lhs_value > rhs_value, ">=": lhs_value >= rhs_value,
+            "<": lhs_value < rhs_value, "<=": lhs_value <= rhs_value,
+            "==": lhs_value == rhs_value, "!=": lhs_value != rhs_value}[op]
 
 
 def _leaf_forms(leaf: Dict[str, Any]) -> List[str]:
@@ -810,6 +941,14 @@ def _apply_leaf(spec, path: str, name: str, leaf: Dict[str, Any], value: Any,
     elif entry["kind"] == "integer":
         value = int(round(float(value)))
     bounds = entry["bounds"]
+    period = entry.get("period")
+    if period is not None and bounds is not None and not isinstance(value, str) \
+            and not (bounds[0] <= value <= bounds[1]):
+        # A circular leaf: 365 deg IS 5 deg, 24.5 h IS 0.5 h. Wrapped,
+        # not refused, and the wrap is on the record.
+        raw = value
+        value = round(float(value) % float(period), 4)
+        frm = f"{frm}; {raw:g} wrapped modulo {period:g} (a circular leaf)"
     if bounds is not None and not isinstance(value, str) \
             and not (bounds[0] <= value <= bounds[1]):
         raise _DrawRefused(
@@ -850,7 +989,8 @@ def _apply_leaf(spec, path: str, name: str, leaf: Dict[str, Any], value: Any,
             spec.plan("altitude", round(new_terrain + height, 1),
                       frm=f"{height:g} m above the ground {path} drew "
                           f"({value}: {new_terrain:g} m)")
-        block.location = _sampled(value, None, frm, path, leaf, seed, draw_index)
+        block.location = _sampled(value, None, frm, path, leaf, seed, draw_index,
+                                  **extra)
         return
     if name == "weather_date":
         from datetime import date
@@ -878,7 +1018,8 @@ def _apply_leaf(spec, path: str, name: str, leaf: Dict[str, Any], value: Any,
             hour = float(value)
         if _stated(block.hour_utc):
             _refuse_stated_target(path, "randomization.hour_utc", block.hour_utc)
-        block.hour_local = _sampled(hour, "h", frm, path, leaf, seed, draw_index)
+        block.hour_local = _sampled(hour, "h", frm, path, leaf, seed, draw_index,
+                                    **extra)
         utc = round((hour - float(spec.longitude.value) / DEGREES_PER_HOUR) % 24.0, 4)
         block.hour_utc = _sampled(
             utc, "h", f"{frm}; hour_utc = (hour_local - longitude / "
@@ -901,7 +1042,7 @@ def _apply_leaf(spec, path: str, name: str, leaf: Dict[str, Any], value: Any,
     if name == "turbulence":
         spec.turbulence = _sampled(value, None, frm, path, leaf, seed,
                                    draw_index, std=TURBULENCE_STD,
-                                   W20_kt=TURBULENCE_LEVELS[value])
+                                   W20_kt=TURBULENCE_LEVELS[value], **extra)
         return
     if name == "livery":
         variants = declared_liveries(str(spec.aircraft.value), config_dir)
@@ -1045,8 +1186,15 @@ def _policy_attempt(spec, policy: Dict[str, Any], seed_base: int,
             # other leaf is not drawn; both recorded.
             if "choice" in leaf:
                 value = leaf["choice"][0]
+                if name == "location":
+                    # A range name stands for its bakes: the first of
+                    # them, as the open path would resolve it.
+                    value = _location_choices(path, [value])[0]
+                # The leaf's own stream seed is recorded (the contract's
+                # derivation), though the gate spared it a draw.
+                _, seed = policy_stream(seed_base, draw_index, attempt, path)
                 drawn[name] = value
-                _apply_leaf(spec, path, name, leaf, value, 0, draw_index,
+                _apply_leaf(spec, path, name, leaf, value, seed, draw_index,
                             config_dir, gated=str(leaf["gated_by"]))
             continue
         if name == "location":
@@ -1120,6 +1268,14 @@ def _sample_policy(spec, config_dir: Optional[Path], draw_index: int,
             "randomization.policy",
             "randomization.policy is not of the documented form: "
             + "; ".join(problems))
+    gates = gate_problems(policy)
+    if gates:
+        # Refused before any attempt: a gate the sampler cannot judge
+        # is a defect of the policy, not of a draw.
+        raise RandomizationError(
+            "randomization.policy",
+            "randomization.policy has a condition the sampler cannot judge: "
+            + "; ".join(gates))
     seed_base = int(block.seed.value)
     baseline = set(_new_violations(spec, set(), check_feasibility))
     refused: List[Dict[str, Any]] = []
@@ -1129,7 +1285,7 @@ def _sample_policy(spec, config_dir: Optional[Path], draw_index: int,
         try:
             _policy_attempt(candidate, policy, seed_base, draw_index, attempt,
                             config_dir, drawn)
-            _sample_phase10_leaves(candidate, config_dir)
+            _sample_phase10_leaves(candidate, config_dir, draw_index)
             names = _new_violations(candidate, baseline, check_feasibility)
             if names:
                 raise _DrawRefused(names[0], "refused by validate(): "
@@ -1168,16 +1324,19 @@ def _plain(values: Dict[str, Any]) -> Dict[str, Any]:
     return json.loads(json.dumps(values, default=str))
 
 
-def _sample_phase10_leaves(spec, config_dir: Optional[Path]) -> None:
+def _sample_phase10_leaves(spec, config_dir: Optional[Path],
+                           draw_index: int = 0) -> None:
     """The Phase 10 leaves (time of day, fog, livery, camera jitter):
-    exactly the streams and outputs they always had."""
+    exactly the streams and outputs they always had for draw 0 (the
+    single run); a campaign case's index is folded into every stream,
+    so the cases of one campaign differ in all of them."""
     block = spec.randomization
     seed = int(block.seed.value)
-    _sample_time_of_day(spec, block, seed)
-    _sample_fog(block, seed)
-    _sample_livery(spec, block, seed, config_dir)
+    _sample_time_of_day(spec, block, seed, draw_index)
+    _sample_fog(block, seed, draw_index)
+    _sample_livery(spec, block, seed, config_dir, draw_index)
     for camera in spec.cameras:
-        _jitter_camera(spec, camera, seed, block)
+        _jitter_camera(spec, camera, seed, block, draw_index)
 
 
 def sample_randomization(spec, config_dir: Optional[Path] = None,
@@ -1189,9 +1348,13 @@ def sample_randomization(spec, config_dir: Optional[Path] = None,
     Value-idempotent: a second pass draws the same numbers.
 
     ``draw_index`` is the campaign's case index (0 for a single run;
-    the recorded one on a second pass); ``check_feasibility`` runs the
-    trim check on every policy draw (validate()'s definitive answer;
-    a fraction of a second each).
+    the recorded one on a second pass -- the policy's ``policy_draws``
+    record, else the ``draw_index`` detail the Phase 10 leaves carry);
+    it seeds the policy's streams AND the Phase 10 streams, so two
+    cases of a campaign differ in their day, hour, fog, livery and
+    camera jitter, not only in the leaves the policy names.
+    ``check_feasibility`` runs the trim check on every policy draw
+    (validate()'s definitive answer; a fraction of a second each).
     """
     policy_q = spec.randomization_policy
     if policy_q is not None and policy_q.detail.get("unmapped"):
@@ -1225,10 +1388,11 @@ def sample_randomization(spec, config_dir: Optional[Path] = None,
         block.plan("seed", derive_block_seed(int(spec.seed.value)),
                    frm=f"derived from run seed {int(spec.seed.value)}: "
                        f"sha256('<run seed>:randomization') mod {MAX_SEED}")
+    if draw_index is None:
+        recorded = block.policy_draws.value
+        draw_index = (int(recorded["draw_index"]) if isinstance(recorded, dict)
+                      else recorded_phase10_draw_index(block))
     if policy_q is not None:
-        if draw_index is None:
-            recorded = block.policy_draws.value
-            draw_index = int(recorded["draw_index"]) if isinstance(recorded, dict) else 0
         try:
             _sample_policy(spec, config_dir, int(draw_index), check_feasibility)
         except RandomizationError:
@@ -1239,7 +1403,7 @@ def sample_randomization(spec, config_dir: Optional[Path] = None,
             block.__dict__.clear()
             block.__dict__.update(untouched_block)
             raise
-    _sample_phase10_leaves(spec, config_dir)
+    _sample_phase10_leaves(spec, config_dir, int(draw_index))
 
 
 # -- what the render and the record take ---------------------------------
@@ -1340,10 +1504,38 @@ def card_block(spec) -> Optional[Dict[str, Any]]:
             q = getattr(spec, name)
             if q.source == Source.SAMPLED:
                 out[POLICY_LEAF_OF_SPEC_FIELD[name]] = q.value
+        cameras = sampled_camera_values(spec)
+        if cameras:
+            out["cameras"] = cameras
         if isinstance(block.policy_draws.value, dict):
             out["policy_draws"] = _plain(block.policy_draws.value)
         out["policy"] = _plain(spec.randomization_policy.value)
         out[weather_visuals.CARD_LOOK_KEY] = look
+    return out
+
+
+def sampled_camera_values(spec) -> Dict[str, Dict[str, Any]]:
+    """{camera_id: {leaf: value}} for every cameras-group leaf the
+    policy drew on each camera: ``preset`` and ``focal_length_mm`` as
+    drawn, ``offset_jitter_m`` as the per-axis delta the draw added
+    ({field: delta}). What the record carries so the realised
+    distribution can count the group the policy asked for."""
+    out: Dict[str, Dict[str, Any]] = {}
+    for camera in spec.cameras:
+        sampled: Dict[str, Any] = {}
+        for field in ("preset", "focal_length_mm"):
+            q = getattr(camera, field)
+            if q.source == Source.SAMPLED:
+                sampled[field] = q.value
+        deltas: Dict[str, float] = {}
+        for field in ("offset_forward_m", "offset_right_m", "offset_up_m"):
+            q = getattr(camera, field)
+            if q.source == Source.SAMPLED and JITTER_BASE_KEY in q.detail:
+                deltas[field] = round(float(q.value) - float(q.detail[JITTER_BASE_KEY]), 4)
+        if deltas:
+            sampled["offset_jitter_m"] = deltas
+        if sampled:
+            out[str(camera.camera_id.value)] = sampled
     return out
 
 
@@ -1382,11 +1574,196 @@ def _requested_support(leaf: Any) -> Optional[tuple]:
     return None
 
 
+def _flat_requested(policy: Dict[str, Any]) -> Dict[str, Any]:
+    """{leaf: distribution} with the cameras group flattened to
+    ``cameras.<leaf>`` and fixed scalars (``sun_elevation_min_deg: 2``)
+    left out: the leaves a policy asks the realised distribution to
+    cover, every one of which gets a coverage -- 0 when nothing was
+    recorded for it, never silently absent."""
+    flat: Dict[str, Any] = {}
+    for name, leaf in policy.items():
+        if not isinstance(leaf, dict):
+            continue
+        if name in POLICY_GROUPS:
+            for sub, sub_leaf in leaf.items():
+                if isinstance(sub_leaf, dict):
+                    flat[f"{name}.{sub}"] = sub_leaf
+            continue
+        flat[name] = leaf
+    return flat
+
+
+def _leaf_entry(name: str) -> Optional[Dict[str, Any]]:
+    if name.startswith("cameras."):
+        return POLICY_CAMERA_LEAVES.get(name[len("cameras."):])
+    return POLICY_LEAVES.get(name)
+
+
+def _bin_kind(name: str, leaf: Any, counts: Dict[Any, int]) -> str:
+    """How a leaf is binned, from its requested form first and the
+    recorded values second: ``windows`` (an hour_local choice among
+    named windows), ``words`` (a choice), ``integers`` (one bin per
+    integer of the requested support), ``dates`` (equal date bins over
+    the requested span), or ``numbers`` (equal bins over the requested
+    support, else the observed range)."""
+    entry = _leaf_entry(name) or {}
+    words = _leaf_words(leaf)
+    if isinstance(leaf, dict) and "uniform_dates" in leaf:
+        return "dates"
+    if words is not None:
+        if entry.get("kind") == "number" and entry.get("words"):
+            return "windows"
+        return "words"
+    if entry.get("kind") == "integer":
+        return "integers"
+    if counts:
+        numeric = all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                      for v in counts)
+        return "numbers" if numeric else "words"
+    if isinstance(leaf, dict) and (set(leaf) & {"uniform", "loguniform", "normal",
+                                                "lognormal", "beta", "weibull",
+                                                "poisson"}):
+        return "numbers"
+    return "words"
+
+
+def _equal_bins(lo: float, hi: float, bins: int, counts: Dict[Any, int],
+                key=float, label=lambda x: f"{x:g}") -> tuple:
+    """``bins`` equal-width bins over [lo, hi] (ONE bin when hi == lo:
+    a single requested or observed value is one bin, fully covered
+    when hit), each value placed by ``key``."""
+    if hi <= lo:
+        edges = [(lo, lo)]
+    else:
+        width = (hi - lo) / bins
+        edges = [(lo + i * width, lo + (i + 1) * width) for i in range(bins)]
+    hist = {f"{label(a)}..{label(b)}": 0 for a, b in edges}
+    labels = list(hist)
+    for value, n in counts.items():
+        x = key(value)
+        if len(edges) == 1:
+            i = 0
+        else:
+            i = int((x - lo) / ((hi - lo) / bins))
+            i = min(max(i, 0), bins - 1)
+        hist[labels[i]] += n
+    return hist, labels
+
+
+def _integer_support(name: str, leaf: Any) -> List[int]:
+    """The integers an integer leaf can draw: its choices, the clip or
+    uniform range, 0..max for a poisson with a max, else the leaf's
+    documented bounds."""
+    entry = _leaf_entry(name) or {}
+    if isinstance(leaf, dict):
+        if "choice" in leaf:
+            return sorted({int(round(float(c))) for c in leaf["choice"]})
+        for form in ("clip", "uniform"):
+            if form in leaf:
+                lo, hi = leaf[form]
+                return list(range(int(math.ceil(float(lo))), int(math.floor(float(hi))) + 1))
+        if "poisson" in leaf and "max" in leaf:
+            return list(range(0, int(leaf["max"]) + 1))
+    bounds = entry.get("bounds")
+    if bounds is not None:
+        return list(range(int(bounds[0]), int(bounds[1]) + 1))
+    return []
+
+
+def _bin_leaf(name: str, leaf: Any, counts: Dict[Any, int], bins: int) -> tuple:
+    """(histogram, expected bins, support) for one leaf: the histogram
+    keyed by the bins the REQUEST defines, plus any recorded value
+    that falls outside them (kept, shown, never counted as a
+    requested bin)."""
+    kind = _bin_kind(name, leaf, counts)
+    if kind == "windows":
+        windows = [w for w in leaf["choice"] if w in HOUR_WINDOWS]
+        hist = {w: 0 for w in windows}
+        for value, n in counts.items():
+            if isinstance(value, str):
+                label = value
+            else:
+                x = float(value)
+                label = next((w for w in windows
+                              if HOUR_WINDOWS[w][0] <= x <= HOUR_WINDOWS[w][1]),
+                             "outside the requested windows")
+            hist[label] = hist.get(label, 0) + n
+        return hist, windows, "the named hour windows"
+    if kind == "integers":
+        support = _integer_support(name, leaf)
+        hist = {str(i): 0 for i in support}
+        for value, n in counts.items():
+            hist[str(value)] = hist.get(str(value), 0) + n
+        return hist, [str(i) for i in support], "one bin per integer of the requested support"
+    if kind == "dates":
+        from datetime import date
+
+        lo, hi = (date.fromisoformat(v).toordinal() for v in leaf["uniform_dates"])
+        dated = {v: n for v, n in counts.items() if isinstance(v, str)}
+        n_bins = min(bins, hi - lo + 1)
+        hist, labels = _equal_bins(
+            float(lo), float(hi), n_bins, dated,
+            key=lambda v: float(date.fromisoformat(v).toordinal()),
+            label=lambda x: date.fromordinal(int(round(x))).isoformat())
+        for value, n in counts.items():
+            if not isinstance(value, str):
+                hist[str(value)] = hist.get(str(value), 0) + n
+        return hist, labels, f"{n_bins} equal date bins over the requested span"
+    if kind == "numbers":
+        numeric = {v: n for v, n in counts.items()
+                   if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        requested = _requested_support(leaf)
+        if requested is not None:
+            lo, hi = requested
+            support = "the requested support"
+        elif numeric:
+            lo, hi = float(min(numeric)), float(max(numeric))
+            support = "the observed range (the leaf states no support)"
+        else:
+            return {}, [], "nothing recorded and no support stated"
+        hist, labels = _equal_bins(lo, hi, bins, numeric)
+        for value, n in counts.items():
+            if value not in numeric:
+                hist[str(value)] = hist.get(str(value), 0) + n
+        return hist, labels, support
+    # words: a choice's options are the bins; a location range name
+    # stands for the bakes in it.
+    hist = {str(v): n for v, n in sorted(counts.items(), key=lambda kv: str(kv[0]))}
+    if isinstance(leaf, dict) and "choice" in leaf:
+        expected = [str(v) for v in leaf["choice"]]
+        if name == "location":
+            try:
+                expected = list(dict.fromkeys(
+                    _location_choices("realised", list(leaf["choice"]))))
+            except RandomizationError:
+                pass
+        support = "the requested choices"
+    else:
+        expected = list(hist)
+        support = "the observed values (the leaf is not a choice)"
+    for label in expected:
+        hist.setdefault(label, 0)
+    return hist, expected, support
+
+
+def _camera_frame_weights(record: Dict[str, Any]) -> Dict[str, int]:
+    """Frames per camera id from the manifest's frame list (empty when
+    the frames name no camera: the run's weight then stands for each)."""
+    frames = record.get("frames")
+    per_camera: Dict[str, int] = {}
+    if isinstance(frames, list):
+        for frame in frames:
+            if isinstance(frame, dict) and frame.get("camera_id") is not None:
+                cid = str(frame["camera_id"])
+                per_camera[cid] = per_camera.get(cid, 0) + 1
+    return per_camera
+
+
 def realised_distribution(runs, policy: Optional[Dict[str, Any]] = None,
                           k: int = 1, bins: int = 8) -> Dict[str, Any]:
     """Histograms of every sampled field over the FRAMES that exported,
     beside the requested distribution, with ``coverage`` = the fraction
-    of policy bins holding at least ``k`` frames (contracts §5.5).
+    of REQUESTED bins holding at least ``k`` frames (contracts §5.5).
 
     ``runs``: run directories (their ``capture_manifest.json``) or
     manifest-shaped dicts; each contributes its ``randomization`` block
@@ -1394,6 +1771,19 @@ def realised_distribution(runs, policy: Optional[Dict[str, Any]] = None,
     list or an integer). ``policy``: the requested leaves (taken from
     the first run's ``randomization.policy`` record when absent).
     Refusals are counted from each run's ``policy_draws``.
+
+    The bins are the request's, by the leaf's form: a choice's
+    options; an ``hour_local`` choice of named windows, the windows;
+    an integer leaf, one bin per integer it can draw; a
+    ``uniform_dates`` span, up to ``bins`` equal date bins over it; a
+    numeric leaf, ``bins`` equal bins over its clip / uniform bounds /
+    [0, 1] for beta, else over the OBSERVED range (a normal or
+    lognormal without ``clip`` states no support, and its coverage
+    then says how the observed spread was filled, not how a tail was;
+    each field's ``support`` says which). A requested leaf with
+    nothing recorded is a field at coverage 0, never absent; the
+    ``cameras`` group is counted per camera from the record's
+    ``cameras`` entry (``offset_jitter_m`` per axis delta).
     """
     per_leaf: Dict[str, Dict[Any, int]] = {}
     refusals: Dict[str, int] = {}
@@ -1412,54 +1802,43 @@ def realised_distribution(runs, policy: Optional[Dict[str, Any]] = None,
         n_frames += weight
         if not requested and isinstance(block.get("policy"), dict):
             requested = dict(block["policy"])
-        for name in list(POLICY_LEAVES) + [f"cameras.{n}" for n in POLICY_CAMERA_LEAVES]:
+        for name in POLICY_LEAVES:
             if name in block:
                 per_leaf.setdefault(name, {})
                 per_leaf[name][block[name]] = per_leaf[name].get(block[name], 0) + weight
+        cameras = block.get("cameras")
+        if isinstance(cameras, dict):
+            camera_weights = _camera_frame_weights(record)
+            for camera_id, sampled in cameras.items():
+                if not isinstance(sampled, dict):
+                    continue
+                w = camera_weights.get(str(camera_id), weight)
+                for leaf_name, value in sampled.items():
+                    key = f"cameras.{leaf_name}"
+                    values = list(value.values()) if isinstance(value, dict) else [value]
+                    per_leaf.setdefault(key, {})
+                    for v in values:
+                        per_leaf[key][v] = per_leaf[key].get(v, 0) + w
         draws = block.get("policy_draws")
         if isinstance(draws, dict):
             for refused in draws.get("refused", []):
                 name = str(refused.get("refusal_name"))
                 refusals[name] = refusals.get(name, 0) + 1
+    flat = _flat_requested(requested)
+    for name in flat:
+        per_leaf.setdefault(name, {})     # requested, maybe unrecorded: coverage 0
     fields: Dict[str, Any] = {}
     coverages: List[float] = []
     for name, counts in sorted(per_leaf.items()):
-        leaf = requested.get(name)
-        numeric = all(isinstance(v, (int, float)) and not isinstance(v, bool)
-                      for v in counts)
-        if numeric and counts:
-            support = _requested_support(leaf) or (min(counts), max(counts))
-            lo, hi = support
-            width = (hi - lo) / bins if hi > lo else 1.0
-            hist = {f"{lo + i * width:g}..{lo + (i + 1) * width:g}": 0
-                    for i in range(bins)}
-            labels = list(hist)
-            for value, n in counts.items():
-                i = int((float(value) - lo) / width) if hi > lo else 0
-                i = min(max(i, 0), bins - 1)
-                hist[labels[i]] += n
-            expected_bins = labels
-        else:
-            hist = {str(v): n for v, n in sorted(counts.items(), key=lambda kv: str(kv[0]))}
-            expected_bins = ([str(v) for v in leaf["choice"]]
-                             if isinstance(leaf, dict) and "choice" in leaf
-                             else list(hist))
-            if name == "location" and isinstance(leaf, dict) and "choice" in leaf:
-                # a range name stands for the bakes in it: those are the bins
-                try:
-                    expected_bins = list(dict.fromkeys(
-                        _location_choices("realised", list(leaf["choice"]))))
-                except RandomizationError:
-                    pass
-            for label in expected_bins:
-                hist.setdefault(label, 0)
+        leaf = flat.get(name)
+        hist, expected_bins, support = _bin_leaf(name, leaf, counts, bins)
         covered = sum(1 for label in expected_bins if hist.get(label, 0) >= k)
         coverage = covered / len(expected_bins) if expected_bins else 0.0
         if leaf is not None:
             coverages.append(coverage)
         fields[name] = {"histogram": hist, "requested": leaf,
                         "bins": len(expected_bins), "coverage": round(coverage, 4),
-                        "frames": sum(counts.values())}
+                        "frames": sum(counts.values()), "support": support}
     return {
         "runs": n_runs, "frames": n_frames, "k": int(k),
         "fields": fields,
