@@ -228,9 +228,14 @@ and `non_integer_id_pixels` (readback floats that were not whole
 numbers: an AA-free pass gives 0; anything else is a measurement the
 verifier grades). `occluded_by` in render.json is a list of INTEGER
 ids (the Python record resolves them to strings). The root gains
-`objects[]` (the ids this pass wrote) and `traffic[]` (each traffic mesh
-drawn: `mesh_airframe`, `fdm`, `license`, `manifest_version`,
-`origin_basis`, `track`, `range_m`). The ID pass needs the post-process
+`objects[]` (the ids this pass wrote), `labels_id_source` (the same
+`"card objects[]"` / default-pair statement as the per-frame
+`labels.id_source`, once at the root; written by the commandlet,
+`FlightSimRenderCommandlet.cpp`, and read by no Python today -- the
+verifier and the page read the per-frame key) and `traffic[]` (each
+traffic mesh drawn: `mesh_airframe`, `fdm`, `license`,
+`manifest_version`, `origin_basis`, `track`, `range_m`). The ID pass
+needs the post-process
 material `/Game/FlightSim/M_CustomStencilID`; absent, `-labels` refuses
 by name rather than writing an ID image from anything else.
 
@@ -360,9 +365,16 @@ implement against what exists:**
   `mesh_manifest` -- the imported manifest path or null -- and
   `cg_actor_cm`, the airframe's CG in the UE actor frame, `(-x, y, z)
   * 2.54` of `cg_structural_in`, so the host places the mesh actor's
-  origin at `CG - R * cg` exactly as it places the FDM actor). Absent
-  blocks are absent: a card of a spec with no traffic is byte-identical
-  in every key it had.
+  origin at `CG - R * cg` exactly as it places the FDM actor). Each
+  card traffic block is therefore `id`, `int_id`, `aircraft`, `track`,
+  `range_m`, `livery`, `mesh_manifest`, `cg_actor_cm`, `origin_x_m`,
+  `origin_y_m` and `poses`: `origin_x_m` / `origin_y_m` are the scene
+  frame's projected origin that the block's `poses` are relative to
+  (`core/capture/poses.py` `traffic_card_block`), and the scenario
+  world REQUIRES both (`FlightSimScenarioWorld.cpp` reads them with
+  `ReadNumber` and refuses the card without them), so a producer
+  written from this page has to emit them. Absent blocks are absent: a
+  card of a spec with no traffic is byte-identical in every key it had.
 * `label_conventions` also gains `objects`, `bbox_2d_tight` and
   `bbox_2d_hull` sentences.
 
@@ -462,9 +474,15 @@ tolerate it). Today the FAIL name lives only in the detail text.
 | `applied_intrinsics` | `render.json` `applied_focal_length_mm` / `applied_fov_deg` / `applied_width_px` / `applied_height_px` vs the record's `focal_length_mm`, `width_px`, `height_px` (0.1° of FOV) | `annotation.intrinsics` | — | new (these keys are read by no check today) |
 | `label_files` (kept, L1672) | every declared file exists | `annotation.files` | — | extended for the new files |
 
-Mutations that must fail (the visual test applies each and asserts):
-shift the mesh origin by 3 m; swap two ids; blur the ID image; scale depth
-by 1.02; hide the occluder in the full pass; FOV off by 1°. Every new
+Mutations that must fail -- each applied to the fabricated bundle and
+asserted by the verifier tests in `tests/test_annotation_gates.py`, not
+by the sheet writer: shift the mesh origin by 3 m; swap two ids; blur
+the ID image; scale depth by 1.02; hide the occluder in the full pass;
+FOV off by 1°. The visual sheets are written for the clean run (every
+sheet drawn, `[PASS]` in its record) and for the 3 m origin shift (the
+`mask_vs_geometry` sheet's record carries `[FAIL] mask_vs_geometry --
+annotation.mask_offset`); the other five mutations have no sheet of
+their failing run, only the verifier's verdict. Every new
 `mutate` entry uses a multi-line, file-unique old-string: `mutate()` does
 `str.replace(old, new, 1)`, and the 12-space `if gap > tol:` guard at
 script L1026-1029 silently disables the 16-space clause at verify.py L557

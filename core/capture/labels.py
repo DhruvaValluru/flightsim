@@ -491,8 +491,12 @@ def conventions() -> Dict:
 #: claim boundary, not a tolerance (those live in verify.py).
 NOT_CLAIMED_SUBPIXEL_RANGE_M = 8000.0
 #: An object whose projected extent is under this many pixels is
-#: recorded but its box/mask agreement is not claimed (the verifier's
-#: IoU schedule stops there too; contracts §3).
+#: recorded but its box/mask agreement is not claimed. Stated here as
+#: 12 px; the verifier's own IoU schedule (core/capture/verify.py
+#: BOX_IOU_MIN_PX) and contracts §3 stop at 16 px, so an object of 12
+#: to 16 px is claimed by this record and graded by no check -- the
+#: two numbers are not yet one (the export's NOT_CLAIMED_EXTENT_PX is
+#: also 16).
 NOT_CLAIMED_OBJECT_PX = 12
 #: Koschmieder's constant: the extinction that leaves 2 % contrast at
 #: the meteorological visibility, beta = 3.912 / V.

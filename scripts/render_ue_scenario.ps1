@@ -16,9 +16,12 @@
 #
 # The output frame size and the field of view come from the card's own
 # solved camera (the commandlet reads width_px / height_px /
-# sensor_width_mm and the per-sample focal_length_mm), so -width= and
-# -height= are NOT passed on the camera path: the manifest's intrinsics
-# and the rendered pixels are the same numbers or the commandlet refuses.
+# sensor_width_mm and the per-sample focal_length_mm). The callers
+# (core/render/flags.py, for the CLI and the web app alike) still pass
+# -width= -height= -fps= through this wrapper, but on the camera path the
+# commandlet takes the size from the card and those three flags are
+# inert: the manifest's intrinsics and the rendered pixels are the same
+# numbers or the commandlet refuses.
 #
 # The two flags that matter (same as the .sh, same reasons):
 #   -AllowCommandletRendering   commandlets default to a null RHI; without

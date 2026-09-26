@@ -336,6 +336,15 @@ range/jitter field by name)" is now a list. Six `REFUSED --` lines carry
 NO name (`flightsim/verify.py` L69, L116; `flightsim/capture.py` L162,
 L391, L494, L621: a bare `{exc}` or "the render wrapper exited N") and
 are left as a finding for their owners, not given invented names here.
+(As landed, `flightsim/capture.py`: an unreadable spec now prints
+`REFUSED -- spec.read:` (a new name; its catalogue entry is an open
+item on `catalog.yaml`), the host-flight error prints
+`REFUSED -- capture.host_flight:` in the colon form rather than its
+bracketed one, the render wrapper's exit prints `REFUSED --
+camera.render:`, and the two `{exc}` lines are ScheduleError's, whose
+text begins with `camera.schedule:`, which
+`tests/test_capture_cli_words.py` asserts rather than assumes. The two
+in `flightsim/verify.py` remain open.)
 The `Violation.render()` string-limit crash the critique named was
 already fixed on HEAD (`_shown`), so the catalogue's string limits
 (`1950-2050`) render verbatim without a special case.
@@ -1364,10 +1373,21 @@ found nothing. Now:
 * `flightsim/campaign.py` (new CLI): `python -m flightsim.campaign
   "<prompt>" --images N --out DIR [--workers W] [--seed S] [--format
   coco] [--tier regex|llm] [--answer id=text] [--disk-budget-gb G]
-  [--stall-minutes M] [--render] [--plan] [--sample N]`; on an existing
-  `--out`: `--resume`, `--pause`, `--cancel`, `--status`, `--report`,
-  and `--export` after a done run. Exit 0 done, 1 ended otherwise, 2
-  refused before anything ran; refusals print `REFUSED -- <name>:`.
+  [--stall-minutes M] [--render] [--plan] [--sample N] [--export]`; on
+  an existing `--out`: `--resume`, `--pause`, `--cancel`, `--status`
+  and `--report`. `--export` exports the verified runs only in the
+  invocation that runs the campaign to `done` (the creating one, or a
+  `--resume` that finishes it): measured at 7b0a39a, `--out DIR
+  --export` alone is refused `campaign.arguments` (its sentence lists
+  the five existing-campaign actions and not `--export`), `--status
+  --export` and `--report --export` print and return before the export,
+  and `--resume --export` on a done campaign is refused
+  `campaign.state`. A campaign already done exports through
+  `python -m flightsim.export DIR/runs --out ... --format ...` (the
+  runs directory; the campaign directory itself is refused
+  `export.runs`). Making `--export` an existing-campaign action is an
+  open item on `flightsim/campaign.py`. Exit 0 done, 1 ended otherwise,
+  2 refused before anything ran; refusals print `REFUSED -- <name>:`.
 * `core/dataset/batch.py`: `run_case` factored into `run_capture`
   (the subprocess) and `case_row` (ok/verify/verification.json), which
   the campaign's worker reuses so the two ledgers agree key for key;
@@ -1816,8 +1836,16 @@ class image and the engine's own `non_integer_id_pixels` can.
   beside the measured), `visibility_vs_scene.png` (each alone pass
   beside the full pass, hidden footprint pixels red),
   `identity_stable.png` (the id strip: objects x frames x cameras, and
-  the engine's echo). A test writes them on the fabricated run and
-  asserts each exists and is not blank.
+  the engine's echo). Three tests: one writes them on the clean
+  fabricated run and asserts each sheet's marks by colour count and
+  its record `[PASS]`; one writes them on the 3 m origin-shifted run
+  and asserts the `mask_vs_geometry` record carries `[FAIL]
+  mask_vs_geometry -- annotation.mask_offset`; one makes a painter
+  throw and asserts the record says `drawn: false` and the CLI exits
+  1. The other five mutations (id swap, blurred ID image, depth x1.02,
+  hidden occluder, FOV +1 deg) are applied and asserted by the
+  verifier tests in `tests/test_annotation_gates.py`, with no sheet of
+  their failing run.
 * **Mutation guards** (`scripts/mutation_check.sh`, the package-D
   block): the two repaired station guards and nineteen new ones -- the
   `failure` key, the alone-pass file, the two superseded version-5
@@ -1920,13 +1948,23 @@ CLI's `REFUSED -- <name>:` and `[<name>] message (requested X, limit
 Y)` lines and renders them through the catalogue with the numbers:
 "The camera's path drops 1781.2 m below the minimum height above the
 ground; it must stay at least 2 m above the terrain." (3)
-`core/messages/catalog.yaml` has no entry for `campaign.state`,
-`campaign.arguments` or `campaign.duplicate_case` (contracts §6.3 gave
-the sentences to package I; `tests/test_messages.py` already fails on
-HEAD for the first two and for two names package G left in
-`ALLOWED_FUTURE`). The catalogue is not this part's file; the page
-shows the producer's own message for those three with
-`details.catalogued: false`, and the need is stated in contracts §8.
+`core/messages/catalog.yaml` had no entry for `campaign.state`,
+`campaign.arguments` or `campaign.duplicate_case` when this part
+landed (contracts §6.3 gave the sentences to package I;
+`tests/test_messages.py` failed on that HEAD for the first two and for
+two names package G left in `ALLOWED_FUTURE`). The catalogue is not
+this part's file; the page showed the producer's own message for
+those three with `details.catalogued: false`, and the need was stated
+in contracts §8. **As landed since:** commit 0958a45 added the three
+entries and `tests/test_messages.py` passed at that commit (18
+passed); the page now renders those three through the catalogue like
+every other name. Measured at 7b0a39a: `tests/test_webapp_generate.py`
+passes (45 passed across it and `tests/test_messages.py`, one
+failure), and `test_messages.py::test_every_refusal_name_in_the_code_
+has_a_catalogue_entry` fails again for four names later packages
+emit without an entry (`export.run_names`, `export.verification_stale`,
+`export.out_directory`, `compile.unreachable`) -- the same shape of
+gap, on the catalogue's file, not this part's.
 Also found: `core/agent` (package H) does not exist on this branch, so
 the page calls `core.campaign` directly, as the contract's §8 lists it.
 
@@ -2052,9 +2090,11 @@ browser (`/frames.html`) remains the way to see every frame. The
 event stream polls the ledger at the interval asked (1 s default);
 `interval` and `limit` exist for tests and for a client that wants
 fewer events. `campaign.state`, `campaign.arguments` and
-`campaign.duplicate_case` render as the producer's message until the
-catalogue carries them (a change to `core/messages/catalog.yaml` and
-`tests/test_messages.py`, which are not this part's files). This
+`campaign.duplicate_case` rendered as the producer's message until
+the catalogue carried them; it does since 0958a45 (a change to
+`core/messages/catalog.yaml` and `tests/test_messages.py`, which are
+not this part's files), so they now render as the catalogue's
+sentence with `details.catalogued: true`. This
 part appends to `scripts/mutation_check.sh` and to
 `docs/PHASE2_CONTRACTS.md` §8 (the as-landed note and the catalogue
 finding), as the rules require.
@@ -2187,13 +2227,17 @@ and the move to core is an open item that edits I's files. A per-slot
 `run` does not move the campaign's state (the controller finishes
 through the campaign-id form, which does). Denied calls count against
 the budget by design. `test_messages.py::test_every_refusal_name_in_
-the_code_has_a_catalogue_entry` fails at HEAD before this package
-(`campaign.arguments` and `campaign.state` are emitted by G and have
-no catalogue entry; I's to add) and still fails after it, as does
+the_code_has_a_catalogue_entry` failed at the HEAD before this package
+(`campaign.arguments` and `campaign.state` are emitted by G and had
+no catalogue entry; I's to add) and still failed after it (as landed:
+0958a45 added them and the test passed at that commit; at 7b0a39a it
+fails again for four names of later packages, stated in P2-I/page
+above), as did
 `test_platform.py::test_no_text_io_without_utf8_encoding` (eight
 text I/O calls without an encoding in `core/campaign/campaign.py`,
 `tests/test_campaign.py` and `webapp/generate.py` -- G's and I's
-files; every call in this package names `utf-8`); this package
+files; every call in this package names `utf-8`; it passes at
+7b0a39a, 11 passed); this package
 adds no new refusal name and no offender. `Campaign` has no `create_from_spec`: when
 the tool layer's spec differs from the campaign's own compile (the LLM
 tier, or policy words planned on), `plan_campaign` writes the adopted

@@ -39,9 +39,12 @@ Exit codes: 0 = captured (even when rendering was refused by name);
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
+import os
 import sys
+import threading
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -49,6 +52,104 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
 from core.capture.objects import compose_objects  # noqa: E402
+from core.util.platform import UE_ENGINE_VERSION  # noqa: E402
+
+#: The lines the JSBSim library prints from C++ on every FGFDMExec
+#: construction (three banner lines and, once, a "startup beginning"
+#: line, each wrapped in blank lines). Measured: 12 banners on the
+#: two-camera example before the spec line, burying "spec ... valid"
+#: and the refusal a non-technical reader is looking for.
+#: FGJSBBase.debug_lvl = 0 does not gate them (core/fdm/fdm.py), so
+#: they are filtered at the file-descriptor level by
+#: quiet_library_banners below; --verbose keeps them.
+LIBRARY_BANNER_PREFIXES = (
+    b"JSBSim Flight Dynamics Model",
+    b"[JSBSim-ML",
+    b"JSBSim startup beginning",
+)
+
+
+def _is_library_banner(line: bytes) -> bool:
+    return line.strip().startswith(LIBRARY_BANNER_PREFIXES)
+
+
+def _relay_without_banners(read_end: int, out_fd: int) -> None:
+    """Copy every line from the pipe to the real stdout except the
+    library banner lines and the blank lines that frame them. Blank
+    lines are held until the next line says whether they framed a
+    banner, so a program's own blank line still arrives."""
+    pending_blank = 0
+    after_banner = False
+    tail = b""
+
+    def emit(line: bytes) -> None:
+        nonlocal pending_blank, after_banner
+        if _is_library_banner(line):
+            pending_blank = 0
+            after_banner = True
+            return
+        if not line.strip():
+            if not after_banner:
+                pending_blank += 1
+            return
+        os.write(out_fd, b"\n" * pending_blank + line)
+        pending_blank = 0
+        after_banner = False
+
+    try:
+        while True:
+            chunk = os.read(read_end, 65536)
+            if not chunk:
+                break
+            tail += chunk
+            while b"\n" in tail:
+                line, tail = tail.split(b"\n", 1)
+                emit(line + b"\n")
+        if tail:
+            emit(tail)
+        if pending_blank and not after_banner:
+            os.write(out_fd, b"\n" * pending_blank)
+    finally:
+        os.close(read_end)
+
+
+@contextlib.contextmanager
+def quiet_library_banners(enabled: bool = True):
+    """Run a block with the JSBSim startup banners kept off stdout.
+
+    The banners are written by C++ straight to file descriptor 1, so
+    no Python-level redirection sees them: fd 1 is pointed at a pipe
+    for the block, a thread relays the pipe to the real stdout and
+    drops exactly the banner lines (LIBRARY_BANNER_PREFIXES), and fd 1
+    is restored before the block's caller prints again. Everything
+    else -- the spec line, the refusals, a subprocess's own words --
+    arrives in order. With ``enabled`` false (--verbose) the block runs
+    untouched; so does a process with no usable stdout.
+    """
+    if not enabled:
+        yield
+        return
+    try:
+        sys.stdout.flush()
+        saved = os.dup(1)
+    except (OSError, ValueError, AttributeError):
+        yield
+        return
+    read_end, write_end = os.pipe()
+    os.dup2(write_end, 1)
+    os.close(write_end)
+    relay = threading.Thread(target=_relay_without_banners,
+                             args=(read_end, saved), daemon=True)
+    relay.start()
+    try:
+        yield
+    finally:
+        try:
+            sys.stdout.flush()
+        finally:
+            os.dup2(saved, 1)  # the pipe's last writer closes: the relay ends
+            relay.join()
+            os.close(saved)
 
 
 def _tornado_hazard_block(spec):
@@ -125,7 +226,7 @@ def _refuse(violations) -> int:
     return 2
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="validate, run headlessly, and capture a scenario's "
                     "camera geometry")
@@ -151,9 +252,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                              "scene). 0 writes none.")
     parser.add_argument("--render", action="store_true",
                         help="also render the frames through the solved "
-                             "poses (Windows with UE 5.5 and the bridge "
-                             "built; refuses by name anywhere else). "
-                             "Implies --card.")
+                             f"poses (Windows with UE {UE_ENGINE_VERSION} "
+                             "and the bridge built; refuses by name "
+                             "anywhere else). Implies --card.")
     parser.add_argument("--void", action="store_true",
                         help="render in the black-void scene instead of "
                              "the visual one: no sky, no horizon, no "
@@ -175,8 +276,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                              "consume-poses mode on a render-capable "
                              "machine (-camera-index=N, one pass per "
                              "camera)")
-    args = parser.parse_args(argv)
+    parser.add_argument("--verbose", action="store_true",
+                        help="keep the flight model's own startup lines "
+                             "(the JSBSim banner it prints once per "
+                             "flight model it builds) on the output. "
+                             "Off by default so what this command says "
+                             "-- the spec line, the results, a refusal "
+                             "-- is not buried under them.")
+    return parser
 
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = build_parser().parse_args(argv)
+    with quiet_library_banners(enabled=not args.verbose):
+        return _run(args)
+
+
+def _run(args: argparse.Namespace) -> int:
     from core.capture.manifest import (
         build_capture_manifest, write_capture_manifest,
         write_frame_sidecars,
@@ -195,7 +311,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         spec = ScenarioSpec.read(args.spec)
     except ValueError as exc:
-        print(f"REFUSED -- {exc}")
+        # A file that is not a spec (unreadable YAML, a missing field,
+        # a version this build does not read): named, so the catalogue
+        # can put it into words like every other refusal.
+        print(f"REFUSED -- spec.read: {exc}")
         return 2
 
     if args.render:
@@ -450,6 +569,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         tracks, schedules, solved_violations = solve_over(columns)
         traffic_tracks = solve_traffic(columns)
     except ScheduleError as exc:
+        # str(exc) begins with its rule name: "camera.schedule: ...".
         print(f"REFUSED -- {exc}")
         return 2
     if solved_violations:
@@ -571,9 +691,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             tracks, schedules, solved_violations = solve_over(host_columns)
             traffic_tracks = solve_traffic(host_columns)
         except HostFlightError as exc:
-            print(f"REFUSED -- {exc.render()}")
+            print(f"REFUSED -- {exc.constraint}: {exc.message}")
             return 2
         except ScheduleError as exc:
+            # str(exc) begins with its rule name: "camera.schedule: ...".
             print(f"REFUSED -- {exc}")
             return 2
         # The host's flight is a different flight, so the scene checks
@@ -718,8 +839,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
           f"{'in the black void (--void)' if args.void else 'in the visual scene'} ...")
     completed = subprocess.run(command)
     if completed.returncode != 0:
-        print(f"REFUSED -- the render wrapper exited {completed.returncode}; "
-              f"the manifest and verification above still stand")
+        # The renderer drew no pictures: the catalogue's camera.render.
+        print(f"REFUSED -- camera.render: the render wrapper exited "
+              f"{completed.returncode} and drew no pictures; the manifest "
+              f"and verification above still stand")
         return 1
     rendered = sorted(p for p in frames_dir.rglob("frame_*.png")
                       if p.stem[-4:].isdigit())
