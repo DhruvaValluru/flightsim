@@ -2649,7 +2649,7 @@ mutate flightsim/capture.py \
 # And that description stays off the card's own flight model.
 mutate flightsim/capture.py \
     '    spool_fd, spool_path = tempfile.mkstemp(prefix="flightsim-stdout-", suffix=".spool")' \
-    '    spool_path = None; spool_fd, _writer = os.pipe()  # MUTATED: a pipe again' \
+    '    _r, spool_fd = os.pipe(); spool_path = f"/dev/fd/{_r}"  # MUTATED: a pipe again, relayed' \
     "the quieted stdout is a spool file, never a pipe (a full pipe deadlocks a GIL-holding writer)" \
     tests/test_capture_cli_words.py || failures=$((failures+1))
 

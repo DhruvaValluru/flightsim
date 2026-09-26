@@ -161,20 +161,49 @@ def test_a_writer_that_holds_the_gil_cannot_deadlock_the_quieted_stdout():
     assert out.count(b"\n") == 60003
 
 
-def test_the_quieted_stdout_is_a_regular_file_never_a_pipe(capfd):
+def test_the_quieted_stdout_is_a_regular_file_never_a_pipe(capfd, tmp_path, monkeypatch):
     """The property the deadlock test rests on, read directly: inside
     the block fd 1 is a regular file, whose writes never wait for a
-    reader -- not a FIFO."""
+    reader -- not a FIFO. The spool lands in this test's own directory
+    (mkstemp honours tempfile.tempdir), so a spool some killed process
+    left in the machine's temp directory is not this test's claim."""
     import tempfile
 
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     with quiet_library_banners():
         mode = os.fstat(1).st_mode
         os.write(1, b"spooled\n")
     assert stat.S_ISREG(mode) and not stat.S_ISFIFO(mode)
     assert capfd.readouterr().out == "spooled\n"
-    leftovers = [p for p in os.listdir(tempfile.gettempdir())
-                 if p.startswith("flightsim-stdout-")]
-    assert leftovers == [], leftovers
+    assert os.listdir(tmp_path) == [], os.listdir(tmp_path)
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"),
+                    reason="Windows cannot unlink an open file: a killed "
+                           "process's spool stays until its name is removed "
+                           "at the end of a block that completes")
+def test_a_process_killed_inside_the_block_leaves_no_spool_on_posix(tmp_path):
+    """The campaign's watchdog kills a stalled capture child outright,
+    so the block's own clean-up never runs there. On POSIX the spool's
+    name is dropped as soon as the writer and the reader both hold the
+    file, so the kill leaves nothing in the temp directory."""
+    script = (
+        "import os, sys, tempfile, time\n"
+        "sys.path.insert(0, os.getcwd())\n"
+        "tempfile.tempdir = sys.argv[1]\n"
+        "from flightsim.capture import quiet_library_banners\n"
+        "with quiet_library_banners():\n"
+        "    print('in the block', flush=True)\n"
+        "    time.sleep(60)\n")
+    child = subprocess.Popen([sys.executable, "-c", script, str(tmp_path)], cwd=REPO,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        assert child.stdout.readline().rstrip() == b"in the block"   # relayed: it is inside
+    finally:
+        child.kill()
+        child.wait(timeout=30)
+    assert os.listdir(tmp_path) == [], os.listdir(tmp_path)
+
 
 
 def test_the_run_card_flight_model_prints_no_aircraft_description(capfd):

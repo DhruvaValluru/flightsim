@@ -210,8 +210,16 @@ for a reader), the card's model runs at debug level 0, and
 GIL-holding writer, in a subprocess with a timeout, must return with
 the banner dropped and every other line kept), the file-not-pipe
 property and the quiet card, each with a mutation guard. CI prints the
-newest `capture.log` tails when a job fails, so the next Windows-only
-finding costs one cycle, not two. NEXT.md gotcha 33.
+newest `capture.log` tails when a job fails or is cut off, so the next
+Windows-only finding costs one cycle, not two. An adversarial review of
+the fix added: the spool's name is dropped early on POSIX so a child the
+watchdog kills leaves nothing behind (tested), a fallback to the plain
+banner when no temp directory or thread is available (exercised), and a
+Windows-console path -- `sys.stdout` there writes with WriteConsoleW on
+fd 1's current handle and fails once that handle is a file, so the block
+prints through a plain file object; that path is UNMEASURED here and is
+the first thing to run in a PowerShell window on the Windows box.
+NEXT.md gotcha 33.
 
 ## P2-A/spec8 -- the SPEC_VERSION 8 bump and `scene.terrain_source`
 

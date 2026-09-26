@@ -36,9 +36,10 @@ jobs:
       # stdout under pytest's temp root, one capture.log per run; a job
       # that fails prints the tail of the newest ones so its log says
       # what the child process said (the Windows deadlock of run
-      # 36217163564 took a cycle to see without this).
+      # 36217163564 took a cycle to see without this). A job the hour
+      # cap cancels is not a failure, so the step runs on cancelled() too.
       - name: capture logs of the runs the failed suite made
-        if: failure()
+        if: failure() || cancelled()
         shell: python
         run: |
           import tempfile
@@ -47,6 +48,9 @@ jobs:
 
           root = Path(tempfile.gettempdir())
           logs = {p.resolve() for p in root.glob("pytest-of-*/pytest-*/**/capture.log")}
+          # A capture child killed inside quiet_library_banners never unlinks
+          # its spool on Windows: its last unrelayed stdout is there.
+          logs |= {p.resolve() for p in root.glob("flightsim-stdout-*.spool")}
           logs = sorted(logs, key=lambda p: p.stat().st_mtime, reverse=True)[:12]
           if not logs:
               print(f"no capture.log under {root}")

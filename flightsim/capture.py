@@ -134,13 +134,21 @@ def _relay_without_banners(read_end: int, out_fd: int) -> None:
 
 
 def _tail_without_banners(path: str, out_fd: int, stop: threading.Event,
-                          poll_seconds: float = 0.05) -> None:
+                          poll_seconds: float = 0.05,
+                          opened: Optional[threading.Event] = None) -> None:
     """Follow the spool file at ``path`` from its start, relaying every
     new byte through the filter, until ``stop`` is set and the file has
     been read to its end. ``stop`` is set only after the last write, so
-    an empty read that FOLLOWS the flag means nothing is left."""
+    an empty read that FOLLOWS the flag means nothing is left.
+    ``opened`` is set once the reader holds the file (or failed to), so
+    the caller can drop the file's name where the OS allows it."""
     stream = _BannerFilter(out_fd)
-    with open(path, "rb", buffering=0) as source:
+    try:
+        source = open(path, "rb", buffering=0)
+    finally:
+        if opened is not None:
+            opened.set()          # on failure too: the caller's wait must return
+    with source:
         while True:
             stopping = stop.is_set()
             chunk = source.read(65536)
@@ -162,7 +170,7 @@ def _flush_c_stdout() -> None:
 
         runtime = ctypes.CDLL("ucrtbase" if sys.platform.startswith("win") else None)
         runtime.fflush(None)
-    except (OSError, AttributeError):
+    except (ImportError, OSError, AttributeError):
         pass
 
 
@@ -176,9 +184,12 @@ def quiet_library_banners(enabled: bool = True):
     line but the banner lines (LIBRARY_BANNER_PREFIXES) to the real
     stdout, and fd 1 is restored before the block's caller prints
     again. Everything else -- the spec line, the refusals, a
-    subprocess's own words -- arrives in order. With ``enabled`` false
-    (--verbose) the block runs untouched; so does a process with no
-    usable stdout.
+    subprocess's own words -- arrives in order, up to ``poll_seconds``
+    (50 ms) after it was written; stderr is not held, so it can run
+    ahead of stdout by that much. With ``enabled`` false (--verbose)
+    the block runs untouched; so does a process with no usable stdout,
+    no usable temp directory or no thread to spare (then the banner
+    shows, and nothing is lost).
 
     A file, never a pipe. The first version of this used os.pipe(). A
     pipe has a fixed buffer that a writer fills and then BLOCKS on
@@ -205,19 +216,53 @@ def quiet_library_banners(enabled: bool = True):
     except (OSError, ValueError, AttributeError):
         yield
         return
-    spool_fd, spool_path = tempfile.mkstemp(prefix="flightsim-stdout-", suffix=".spool")
+    try:
+        spool_fd, spool_path = tempfile.mkstemp(prefix="flightsim-stdout-", suffix=".spool")
+    except OSError:
+        os.close(saved)            # no usable temp directory: the banner shows
+        yield
+        return
     os.dup2(spool_fd, 1)
     os.close(spool_fd)
     stop = threading.Event()
+    opened = threading.Event()
     relay = threading.Thread(target=_tail_without_banners,
-                             args=(spool_path, saved, stop), daemon=True)
-    relay.start()
+                             args=(spool_path, saved, stop, 0.05, opened), daemon=True)
+    try:
+        relay.start()
+    except RuntimeError:           # no thread to follow the spool: fd 1 back, banner shows
+        os.dup2(saved, 1)
+        os.close(saved)
+        with contextlib.suppress(OSError):
+            os.unlink(spool_path)
+        yield
+        return
+    if os.name != "nt":
+        # Both handles are open, so the name can go now and a process
+        # killed inside the block (the campaign's watchdog) leaves no
+        # file behind. Windows refuses to unlink an open file without
+        # FILE_SHARE_DELETE, so there the name goes at the end.
+        opened.wait()
+        with contextlib.suppress(OSError):
+            os.unlink(spool_path)
+    # A Windows console: sys.stdout writes with WriteConsoleW on fd 1's
+    # CURRENT handle (winconsoleio.c re-reads it per write), which is
+    # now the spool file, and WriteConsole fails on a file. For the
+    # block, print through a plain file object on fd 1 instead; the
+    # relay's os.write on the saved console handle takes bytes.
+    raw = getattr(getattr(sys.stdout, "buffer", None), "raw", None)
+    console = sys.stdout if type(raw).__name__ == "_WindowsConsoleIO" else None
+    if console is not None:
+        sys.stdout = open(1, "w", buffering=1, closefd=False,
+                          encoding="utf-8", errors="backslashreplace")
     try:
         yield
     finally:
         try:
             sys.stdout.flush()
         finally:
+            if console is not None:
+                sys.stdout = console
             _flush_c_stdout()
             os.dup2(saved, 1)      # this process's last writer to the spool is gone
             stop.set()             # after the writes: the relay reads to the end, then stops

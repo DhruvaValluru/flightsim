@@ -789,5 +789,15 @@ the parity discipline, and the do-not-regress list)
     a thread follows (a write to a file never waits), the card's model
     runs at debug level 0 like core.fdm's, and a test writes 0.6 MB
     through the C runtime with the GIL held and must return. CI now
-    prints the newest capture.log tails when a job fails.
+    prints the newest capture.log tails when a job fails or is cut off.
+    Two more things the review of that fix found, both in the block:
+    on POSIX the spool's name is dropped as soon as writer and reader
+    hold it, so a child the watchdog kills leaves no file (tested;
+    Windows cannot unlink an open file, so there the name goes at the
+    end); and in a real Windows console sys.stdout is _WindowsConsoleIO,
+    which writes with WriteConsoleW on fd 1's CURRENT handle -- the
+    spool -- and fails, so the block swaps in a plain file object on fd
+    1 for its duration. That console path is UNMEASURED here (CI's
+    stdout is a pipe): the first `python -m flightsim.capture` in a
+    PowerShell window on the Windows box is its test.
 
