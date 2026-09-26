@@ -22,9 +22,13 @@ webapp, c70dcc4 export, 7b0a39a randomisation, e3efd98 misc, 418489f
 guards), then cd5c96a (the code pass beside this docs pass: the five
 nameless refusals catalogued, `--export` an action on a done campaign,
 `Target.cs` on Unreal5_7, the 16 px line, the Wetness parameter) and
-this docs pass. Measured at cd5c96a: 366 mutation guards, every target
-unique (`--check-targets`, 6 s); the named test files green (330 tests
-across eleven files, `tests/test_messages.py` included). Every C++
+this docs pass, then 573bff6 (the 74 guards the area fixers proposed,
+73 fired and one retargeted, guard 186 dropped with its reason, and
+`tests/test_mutation_targets.py`). Measured at 573bff6: 439 mutation
+guards, every target unique (`--check-targets`); the whole suite green
+(`.venv/bin/pytest -q`, exit 0, one network-pinned test skipped by
+name); `./scripts/mutation_check.sh` end to end: see the Phase 2 report's
+first section for the count measured on this checkout. Every C++
 change is UNCOMPILED here. WINDOWS, in this
 order: build on 5.7 (`ue_preflight.ps1`, `vendor_ue_plugin.ps1` -- the
 four local plugin patches were measured on 5.5 -- `build_ue.ps1`);

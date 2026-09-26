@@ -2545,11 +2545,24 @@ generic `ValueError` (today `words()` puts the producer's text in the
 sentence with `catalogued: false`, unreachable from the page's own
 flow).
 
-**Still open -- mutation guards proposed and verified by hand, not in
-`scripts/mutation_check.sh`** (each was applied with the script's own
-`mutate()` semantics and made its test fail; the exact lines are in the
-fixers' reports; the script holds 366 at cd5c96a and cd5c96a's own new
-safeguards have none yet): 13 for the verifier round (a missing declared
+**Landed after this section was written: the proposed mutation guards.**
+573bff6 put all 74 proposed guard lines into `scripts/mutation_check.sh`
+(73 fired verbatim on the first pass; the sampled-wind guard was
+retargeted to the two-line clause it guards and then fired; guard 186,
+the per-camera manifest route, was dropped because its only importable
+mutation is not caught by the existing test -- the script says so and
+names the one-line assertion that brings it back), and added
+`tests/test_mutation_targets.py`, which reads every guard and refuses an
+orphaned or ambiguous target. The script holds 439 guards at 573bff6.
+The list below is kept as the record of what each round proposed; what
+remains open from it is only cd5c96a's own new safeguards (the duration
+maximum, the `--export` action, the Wetness parameter, the `Target.cs`
+pin, the verify-command binding, the done sentence), which have no
+guard yet.
+
+**As proposed by the fixers, all now in the script** (each was applied
+with the script's own `mutate()` semantics and made its test fail):
+13 for the verifier round (a missing declared
 bundle file, a check that breaks, a bad `--against`, an unechoed
 `objects[]`, null box / depth / visible-fraction records, a silently
 dropped camera, `origin_basis`, superseded checks in the summary, the
