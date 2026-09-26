@@ -8,6 +8,179 @@ shares are on docs/PHASE2_CONTRACTS.md; a section here names the
 contract clauses it implements and states plainly where it landed
 something the contract left open.
 
+## How to read this report, and what the instructor runs
+
+**The phase in one paragraph.** Phase 2 is the annotated, randomised
+dataset pipeline: nine packages -- A (the SPEC_VERSION 8 bump,
+`scene.terrain_source`, the mesh origin measured from vertices, one
+render-command builder), B (object identity, the taxonomy, the second
+aircraft), C (the per-frame ground-truth bundle: masks, class image,
+depth, boxes, occlusion), D (the annotation quality gates and their
+sheets), E (the export writers and the card), F (the randomisation
+policy and its prompt vocabulary), G (the campaign: an index-seeded
+worker pool with the ledger as the only truth), H (the agent with
+stated authority) and I (the message catalogue and the guided page) --
+plus the Look lane (the engine pin to 5.7, the renderer settings, the
+visual scene consuming the card's look, the exposure model). It lives on
+the branch `claude/relaxed-cori-gccjvx` (the phase2 branch). Everything
+Python was measured in this container; every C++ change (the bridge
+plugin, the render commandlet, the visual scene, the camera director) is
+UNCOMPILED here -- read as text, pinned by tests that read the source,
+rendered by nobody -- and each section's "Not verified here" paragraph
+says what the first Windows render must show. The sections below are in
+the order the packages landed; each names its contract clauses
+(docs/PHASE2_CONTRACTS.md), what it measured, how to demonstrate it on
+any platform, what it did not verify, and where a later round changed
+it ("as landed since", with the commit). Every test count and pass/fail
+statement is stamped with the commit it was measured at; the ones in
+this section were measured at 418489f, the HEAD this section was
+written on, and re-measured at cd5c96a, the code pass that landed
+beside it (each statement says which).
+
+**The instructor's command list, mapped to what exists.** Each
+invocation was checked against `--help` at 418489f (on Windows,
+`.\.venv\Scripts\python.exe` for `.venv/bin/python`).
+
+* `flightsim.campaign` -> `flightsim/campaign.py` (package G):
+  `python -m flightsim.campaign "<prompt>" --images N --out DIR
+  [--workers W] [--seed S] [--format coco] [--tier regex|llm]
+  [--answer id=text] [--disk-budget-gb G] [--stall-minutes M] [--render]
+  [--plan] [--sample N] [--export]`; on an existing `--out`: `--resume`,
+  `--pause`, `--cancel`, `--status`, `--report`. Measured here:
+  `--plan --answer camera_view=chase` on the page's first example prompt
+  prints the plan and exits 0. Since cd5c96a `--export` on an existing
+  `--out` is an action like `--report`: a done campaign exports its
+  verified runs, any other state is refused `campaign.state` (P2-G
+  records the behaviour measured before that, at 7b0a39a).
+* `flightsim.export` -> `flightsim/export.py` (package E):
+  `python -m flightsim.export RUNS... --out DIR --format
+  coco,kitti,webdataset,yolo,voc [--split 0.8,0.1,0.1] [--split-seed S]
+  [--image ideal|sensor] [--labels-only] [--shard-size N]`; a campaign's
+  runs are `DIR/runs` (the campaign directory itself is refused
+  `export.runs`).
+* `flightsim.verify` -> `flightsim/verify.py` (package D extends it):
+  `python -m flightsim.verify RUN_DIR [--against RUN_DIR_2]
+  [--camera-sets SPEC --out DIR [--render]]`.
+* `pytest tests/test_annotation_*.py` -> one file exists,
+  `tests/test_annotation_gates.py` (43 tests at 418489f), with
+  `tests/test_camera_verify_corruption.py` and `tests/test_camera_labels.py`
+  beside it: `.venv/bin/pytest -q -p no:warnings tests/test_annotation_gates.py
+  tests/test_camera_labels.py tests/test_camera_verify_corruption.py`.
+* `tests/visual/annotation_sheets.py` -> as named:
+  `.venv/bin/python tests/visual/annotation_sheets.py [RUN_DIR] [--out DIR]`.
+  With no run it fabricates `build/visual/fabricated_run` and writes the
+  six sheets and `sheets.json`; it exits 1 printing NOT DRAWN when a
+  painter threw. Then `.venv/bin/python -m flightsim.verify
+  build/visual/fabricated_run` prints `verification PASSED (21 passed, 0
+  failed, 9 not run, 2 superseded)` and exits 0 (measured here).
+* the guided page -> `webapp/static/generate.html` over
+  `webapp/generate.py` (package I): `.venv/bin/uvicorn webapp.server:app
+  --port 8008`, then http://127.0.0.1:8008/generate.html. The same flow
+  from a terminal (`POST /generate/plan`, `/preview`, `/start`, `GET
+  /generate/<id>`, `/events`, `/frames`, `/download?format=`) is in
+  P2-I/page's demonstration.
+* the guards -> `scripts/mutation_check.sh`: `./scripts/mutation_check.sh`
+  runs all 366 (it needs a green suite first; at 418489f it stopped on
+  `tests/test_messages.py`, green again at cd5c96a);
+  `./scripts/mutation_check.sh --check-targets` proves every target
+  occurs exactly once with no pytest (366 of 366, 6.0 s measured here at
+  cd5c96a); `--from N --to M`, `--match REGEX` and
+  `--no-suite` run a window of it -- a subset, not the contract.
+
+**The plan's exit criteria** (docs/PHASE2_BRAINSTORM.md §12, "what
+perfect means"), one line each: what is demonstrated here, what waits
+for Windows.
+
+* ID masks hold only declared integers on every frame:
+  `mask_integers_only` grades it (`annotation.mask_blend`) on the
+  fabricated bundle; a real ID pass through `M_CustomStencilID` with
+  anti-aliasing off waits for Windows.
+* Mask centroid within 2 % and extent within 5 % of the projected hull
+  on every preset and airframe: `mask_vs_geometry` (the two box centres,
+  contracts §4 as landed) fails the 3 m shift here; real silhouettes
+  against a box hull on the shipped presets wait for Windows.
+* Tight-box vs hull IoU >= 0.8 for objects >= 64 px: `box_vs_mask` with
+  the IoU schedule down to 16 px, demonstrated on the fabricated bundle;
+  real pixels wait.
+* Depth under the mask within 1 % + 2 m: `depth_vs_geometry` (the
+  nearest-keypoint clause, as landed) here; a real `.f32` waits.
+* Visibility reproduces a scripted occlusion within 3 %:
+  `visibility_vs_scene` over the alone passes, with a fabricated
+  occluder here; the commandlet's alone pass waits.
+* Every check has a mutation guard that fires and a sheet in
+  `build/visual/`: 366 guards, every target unique, six sheets --
+  demonstrated; guard 186 reports WEAK until its test-side assertion
+  lands (Open findings).
+* Identical scenario set and bundle digests at 1 and 4 workers: measured
+  here at 1 and 2 workers on headless captures
+  (`tests/test_campaign.py::test_the_same_campaign_at_one_and_two_workers_is_identical`;
+  a duplicate slot is refused by index at any worker count since
+  53ddff3); a rendered campaign at 1 and 2 workers waits for Windows,
+  4 workers for the GPU box.
+* The eight Look clauses (extinction vs visibility, cloud base, cloud
+  shadows, wet-surface specular, night exposure, terrain posting and
+  VSM, PBR airframe and livery swap, the sim-to-real smoke test): nothing
+  is demonstrated here -- every look clause reports NOT RUN with its
+  measurement, the wet-surface materials gained their `Wetness`
+  parameter in cd5c96a unverified in any editor, no real frames exist
+  for the smoke test; all of it
+  waits for `gate6_visual.py --look` on Windows and the calibration run
+  that freezes the thresholds.
+* One prompt, at most three questions, a preview with a real overlay,
+  live progress, a download that loads in Ultralytics and `pycocotools`
+  without edits: the questions, the progress from the ledger and the
+  download are measured here (COCO read back by `pycocotools` 2.0.11 in
+  `tests/test_dataset_formats.py`; YOLO by a minimal reader against the
+  Ultralytics layout -- Ultralytics itself is not installed and is not
+  claimed); the preview here is a headless capture's geometry preview,
+  and a real overlay on rendered pixels waits for Windows.
+* Every default-path message is in the catalogue and a test proves the
+  names are in step: `tests/test_messages.py` scans every emit site
+  (Python and, since the cpp round, the engine's C++ text) -- green at
+  0958a45 and b6342d0, red at 418489f on five names of later rounds,
+  green again at cd5c96a once their entries landed (23 passed).
+* The agent's trace explains every decision in one sentence:
+  `tests/test_agent.py` (P2-H), demonstrated here.
+
+**The Windows verification order** (each step's measurement is named in
+the section it belongs to; nothing rendered is claimed until it runs):
+
+1. Build on 5.7: `.\scripts\ue_preflight.ps1` (says what is missing),
+   `.\scripts\vendor_ue_plugin.ps1` (the Win64 JSBSim library; the four
+   local plugin patches were measured on 5.5 and each may or may not
+   still apply -- NEXT.md gotcha 32), `.\scripts\build_ue.ps1`.
+2. `UnrealEditor-Cmd <project> -run=pythonscript
+   -script=scripts/ue_create_materials.py` -- the four materials,
+   `M_CustomStencilID` for the ID pass among them; the `Wetness`
+   parameter the wet clause needs landed in cd5c96a, and whether the
+   editor builds those nodes as written and `ApplyWetness` finds the
+   parameter is this step's measurement (`wetness_parameter` in
+   `render.json`).
+3. Re-convert the airframes: `python scripts/import_aircraft.py` (mesh
+   manifest 3, origin measured from vertices; a version-2 manifest is
+   now refused by `drawn_airframe`).
+4. The first `-labels` frame: `.\scripts\capture_windows.ps1
+   examples\cameras_multi.yaml runs\demo` (that is `flightsim.capture
+   --render` then `flightsim.verify`), then
+   `python tests/visual/annotation_sheets.py runs\demo` -- the six
+   sheets on real pixels; the tolerances move on the contracts page if
+   a correct render fails them.
+5. `python -m experiments.gate6_visual --look` (the look controls in
+   `LOOK_RUNS`; the plain-script form in "Run the gates" needs the repo
+   root on `PYTHONPATH`).
+6. `python experiments/gate10_render_repro.py --card runs\demo\card.json`
+   (Gate 10-R: the first render-reproducibility verdict on an engine).
+7. A rendered campaign at 1 and 2 workers: `python -m flightsim.campaign
+   "<prompt>" --images N --out runs\c1 --render --workers 1`, the same
+   with `--workers 2` into `runs\c2`, then compare the two ledgers
+   (`core.campaign.ledger.comparable`) and the bundle digests, and
+   `--export` from the finishing invocation.
+
+**Open findings.** Every item a fixer of the review pass marked not
+fixed, not landed, or architectural is listed at the end of this report
+under "Open findings", with the proposer's patch or reasoning in one
+line each, as of cd5c96a.
+
 ## P2-A/spec8 -- the SPEC_VERSION 8 bump and `scene.terrain_source`
 
 **What was measured, and what was defective.** Three things were
@@ -303,17 +476,22 @@ pixel measurement (`mask_vs_geometry`, package D) and is not claimed.
   line. Both the task's `mesh_extents_actor_cm` shape and the
   contract's `mesh_extent_actor_m` shape are written.
 * Verifier follow-ups (`core/capture/verify.py`, not this package's
-  file): `DRAWN_MESH_MIN_MANIFEST_VERSION` is still 2 and
-  `drawn_airframe` does not yet grade `drawn.origin_basis`, so a render
-  from an eb5c71d manifest would still PASS that check until the
-  verifier owner lands contracts §0.1's consequence.
+  file) -- **landed in fbeb686**: `DRAWN_MESH_MIN_MANIFEST_VERSION = 3`
+  (a version-2 manifest is refused with the VRP-rule sentence, 3.9 m
+  B747 / 19.3 m A320; below 2 with the datum sentence) and
+  `drawn_airframe` grades `drawn.origin_basis` by the `measured from
+  vertices` prefix, both as `aircraft.placeholder_drawn`, so a render
+  from an eb5c71d manifest now FAILS that check by name
+  (`tests/test_camera_verify_corruption.py`).
 
 ## P2-I/messages -- the message catalogue (package I, part 1: no UI yet)
 
 **What was measured, and what was defective.** The refusal names were
 enumerated from the code, not from the contracts page: a scanner
 written in the test (regexes over `core/`, `webapp/`, `flightsim/` and
-`assets_pipeline/`) finds 85 names in eight shapes -- `Violation("…")`
+`assets_pipeline/`; since the cpp round also the engine's
+`TEXT("<name>: ")` prefixes under `ue/Plugins/FlightSimBridge/Source`,
+read as text) found 85 names in eight shapes when this part landed -- `Violation("…")`
 first arguments including the multi-line calls, `constraint=` keywords
 and class attributes, `"constraint":` and `"refused":` dict literals,
 `<X>Error("<name>", …)` positional constraints, `getattr(…, "constraint",
@@ -337,8 +515,8 @@ NO name (`flightsim/verify.py` L69, L116; `flightsim/capture.py` L162,
 L391, L494, L621: a bare `{exc}` or "the render wrapper exited N") and
 are left as a finding for their owners, not given invented names here.
 (As landed, `flightsim/capture.py`: an unreadable spec now prints
-`REFUSED -- spec.read:` (a new name; its catalogue entry is an open
-item on `catalog.yaml`), the host-flight error prints
+`REFUSED -- spec.read:` (a new name; its catalogue entry landed in
+cd5c96a), the host-flight error prints
 `REFUSED -- capture.host_flight:` in the colon form rather than its
 bracketed one, the render wrapper's exit prints `REFUSED --
 camera.render:`, and the two `{exc}` lines are ScheduleError's, whose
@@ -534,7 +712,14 @@ export layouts; §11 refusals; plan package E).
   every `conditions` value with its count and source; sampled: per
   randomisation key n/min/max/mean for numbers, a count per value
   otherwise; `randomised_runs`); per run `seed`,
-  `verification.status`/`file`, `masks_shipped`; the `split.policy`
+  `verification.status`/`file`, `masks_shipped` -- and since c70dcc4
+  per run `render` (drawn / `render_settings` / `look_applied` per
+  camera, or `render_note` for a headless run), `labels_shipped`,
+  `verification_bound_to_manifest` with `manifest_sha256`, and
+  `airframes`; the card's `aircraft` now lists every airframe with
+  `primary_aircraft` beside it; `licences` is one entry per distinct
+  (asset, licence, mesh) with a `note` on disagreement; YOLO `data.yaml`
+  writes no `path` key (Ultralytics resolves the root from the file); the `split.policy`
   sentence beside the seed and assignment; `not_claimed_from_labels`
   (every distinct per-object `not_claimed` sentence with its record
   count, also appended to `not_claimed`); `licences` (per object from
@@ -544,9 +729,14 @@ export layouts; §11 refusals; plan package E).
   and VOC conventions beside COCO's and KITTI's.
 * Refusals stay by name: `export.unverified` and
   `export.verification_failed` keep their sentences (both were already
-  named); `export.unverified_labels` and `export.taxonomy` are new.
-  The CLI prints `REFUSED -- <name>: <sentence>` and exits 2 for
-  every one.
+  named); `export.unverified_labels` and `export.taxonomy` are new;
+  c70dcc4 added `export.run_names` (two different runs with one folder
+  name), `export.verification_stale` (the manifest changed since its
+  verdict) and `export.out_directory` (a different picture already under
+  the same name), and `export.unverified_labels` now covers the class
+  image and the depth file as well as the mask (their catalogue entries
+  landed in cd5c96a). The CLI
+  prints `REFUSED -- <name>: <sentence>` and exits 2 for every one.
 
 **Tests and guards.** `tests/test_dataset_formats.py`, 12 tests, each
 round trip through an INDEPENDENT reader written in the test file:
@@ -835,8 +1025,8 @@ one `/run` re-reads once a policy exists (open item, not F's file).
   asserted a subset of the sampler's), `RANDOMIZATION_FIELD_VALUE_SCHEMAS`
   generated from the sampler's table (each leaf admits only its forms
   and vocabulary; every object refuses additional properties), the
-  fifth top-level key (the shape sentence now says five keys by
-  itself), the parser rails (unknown leaf, entry shape, source, empty
+  fifth top-level key at the time (the shape sentence said five keys by
+  itself; it says six since `traffic` joined in 2ef240d), the parser rails (unknown leaf, entry shape, source, empty
   phrase, form, vocabulary, shape via `policy_problems`), the overlay
   as one attributed Quantity, and the deterministic vocabulary as the
   floor when the model writes no block. The system prompt's
@@ -868,7 +1058,8 @@ one `/run` re-reads once a policy exists (open item, not F's file).
   `tests/test_llm_compiler.py` (6, incl. 13 parametrised rails) and
   `tests/test_nl_compiler.py` (2). One pre-existing test moved:
   `test_the_prompt_s_shape_sentence_is_generated_from_the_schema`
-  pins "five keys" now (the contract's own change), and
+  pinned "five keys" then and pins "six keys" since 2ef240d added
+  `traffic` (the contract's own change), and
   `tests/test_messages.py` `ALLOWED_FUTURE` drops the three F names
   the code now emits (its own instruction).
 * Nine mutation guards in `scripts/mutation_check.sh` ("Phase 2,
@@ -916,7 +1107,10 @@ this package records the numbers and names the parameters. No C++ was
 touched by F (the flag names and the card block are what both sides
 agree on). No live LLM call was made (the fake client only; the
 prompt paragraph's effect on a real model is Gate 8.1's measurement).
-The `traffic_count` leaf is recorded and not instantiated. Whether
+The `traffic_count` leaf is recorded and not instantiated; a second
+aircraft itself is reachable from a prompt on both tiers since 2ef240d
+("with an A320 crossing"), while `taxonomy` and `scene` stay YAML-only
+and no committed example carries a `traffic` block. Whether
 `apply_historical_weather` (webapp) should treat a `sampled` wind like
 a `user` one when a sampled `weather_date` fetches ERA5 is a
 `webapp/runs.py` decision (today it would overwrite the sampled wind
@@ -1135,8 +1329,14 @@ crossing range; the traffic-without-tracks refusal; the depth-size
 refusal) plus the retargeted version-tuple guard: each applied by hand
 with the script's own replacement, its test file run, the source
 restored byte-identical (sha256) and `__pycache__` purged -- 8 of 8
-fire, and the three pre-existing guards on `labels.py` / `manifest.py`
-still fire after the edits. Pre-existing tests changed because the
+fire; two of the three pre-existing guards on `labels.py` /
+`manifest.py` still fired after the edits, and the third ("the manifest
+carries the same block as the card") was orphaned by this package's
+rewrite of the manifest's randomization line and retargeted in 418489f,
+which also found four other guards orphaned by later packages and ten
+targets that occurred more than once; `./scripts/mutation_check.sh
+--check-targets` now proves every target occurs exactly once (366 of
+366, 5.9 s measured here at 418489f). Pre-existing tests changed because the
 contract changed, and why: `tests/test_dataset.py` and
 `tests/test_dataset_formats.py` pinned the exporter's class as the
 airframe name (their own comment: "no taxonomy on a v5 run"); a
@@ -1213,10 +1413,11 @@ basis. Crossing and overtaking traffic fly wings-level with no
 dynamics, no collision avoidance and a ground speed equal to the
 primary's mean; formation copies the primary's attitude. The
 interactive host (`BuildInto`) does not move traffic (only `Step()`
-does). `webapp/static/index.html` still hard-codes the v5 schema link
-(not this package's file; `frames.html` builds it from the version).
-`flightsim.capture` solves traffic tracks but no committed example
-carries a `traffic` block yet. The C++ writes the depth file on the
+does). `webapp/static/index.html` builds the schema link from
+`run.capture.manifest_version` as `frames.html` does (fixed in the
+review round, 5bd6864). `flightsim.capture` solves traffic tracks; a
+prompt reaches them on both tiers since 2ef240d, and still no committed
+example carries a `traffic` block. The C++ writes the depth file on the
 assumption every UE target is little-endian (asserted at compile
 time). `mask.png` now carries EVERY int_id, so on a single-aircraft
 run its terrain pixels are 2 where Phase 10 wrote 0.
@@ -1377,7 +1578,8 @@ found nothing. Now:
   an existing `--out`: `--resume`, `--pause`, `--cancel`, `--status`
   and `--report`. `--export` exports the verified runs only in the
   invocation that runs the campaign to `done` (the creating one, or a
-  `--resume` that finishes it): measured at 7b0a39a, `--out DIR
+  `--resume` that finishes it): measured at 7b0a39a (and
+  `flightsim/campaign.py` is unchanged from there to 418489f), `--out DIR
   --export` alone is refused `campaign.arguments` (its sentence lists
   the five existing-campaign actions and not `--export`), `--status
   --export` and `--report --export` print and return before the export,
@@ -1385,8 +1587,11 @@ found nothing. Now:
   `campaign.state`. A campaign already done exports through
   `python -m flightsim.export DIR/runs --out ... --format ...` (the
   runs directory; the campaign directory itself is refused
-  `export.runs`). Making `--export` an existing-campaign action is an
-  open item on `flightsim/campaign.py`. Exit 0 done, 1 ended otherwise,
+  `export.runs`). **As landed since (cd5c96a):** `--export` on an
+  existing `--out` is an action like `--report` -- a done campaign
+  exports its verified runs into its own folder; a campaign in any other
+  state is refused `campaign.state`, never resumed (measured on a 2-case
+  headless campaign in `tests/test_campaign.py`). Exit 0 done, 1 ended otherwise,
   2 refused before anything ran; refusals print `REFUSED -- <name>:`.
 * `core/dataset/batch.py`: `run_case` factored into `run_capture`
   (the subprocess) and `case_row` (ok/verify/verification.json), which
@@ -1432,7 +1637,7 @@ found nothing. Now:
 
 **How to demonstrate (any platform).**
 
-    .venv/bin/pytest -q -p no:warnings tests/test_campaign.py                 # 13 passed, ~40 s
+    .venv/bin/pytest -q -p no:warnings tests/test_campaign.py                 # 16 passed at 418489f (13 when the package landed), ~40 s
     .venv/bin/pytest -q -p no:warnings tests/test_dataset.py tests/test_dataset_formats.py tests/test_randomization_policy.py   # the suites the factoring touches
     ./scripts/mutation_check.sh          # the four "Phase 2 package G" guards report ok
 
@@ -1485,17 +1690,24 @@ retried once in all (`MAX_ATTEMPTS = 2`) and a captured-but-unverified
 case is never retried (batch semantics), so a campaign whose cases
 verify below the target ends `failed` and says why; nothing here
 diagnoses the verification. A duplicate slot from a prompt with
-nothing to vary is only known once the worker has built it (cheap:
-sampling, no capture, when the ledger already holds the case id;
-when two were in flight together the second is run and then refused
-on collection). The ledger's raw line ORDER still follows completion
+nothing to vary is known before dispatch since 53ddff3: the pool builds
+the slot's case id from its index (cheap: sampling, no capture) and
+claims it for the lowest index, so the duplicate is refused before
+running and the row is the same at any worker count (measured at two
+workers in `tests/test_campaign.py`). The ledger's raw line ORDER still follows completion
 in the pool; `comparable()` is the stated comparison. The web app's
 compile-time planners are not applied (contracts §6.3, package H's
-core-level compile-and-plan); `verification.json` is still written
-non-atomically by `core/capture/verify.py` (not this package's file).
-The report's `coverage` is over 8 bins per numeric leaf with `k = 1`,
-package F's default; three cases cover 30 % of the requested bins,
-which the words say plainly. No picture is drawn by this package;
+core-level compile-and-plan); `verification.json` has been written
+atomically by `core/capture/verify.py` since f1a7563 (this sentence
+once said otherwise). The report's `coverage` is over the requested
+bins with `k = 1`: a choice's options, an `hour_local` window choice's
+named windows, one bin per integer a count can draw, up to 8 equal date
+bins over a requested date span, 8 equal bins over a numeric leaf's clip
+/ uniform bounds / [0, 1] for beta, else over the observed range (each
+field says which under `support`); the cameras group is counted per
+camera; a requested leaf nothing recorded is at coverage 0 (7b0a39a).
+The 30 % three cases covered when this was first measured was under the
+older 8-bins-per-leaf rule; whatever the number is, the words say it. No picture is drawn by this package;
 `core.scene.realised_plot` is the one for these runs.
 
 ## P2-Look/2 -- the visual scene, the beauty/label capture settings and the camera exposure model (C++ UNCOMPILED here)
@@ -1593,8 +1805,12 @@ already carries that extinction, and driving both whitens the sky.
   `FlightSimCameraDirector.h` defaults are `FALLBACK_CHASE_OFFSET` and
   `WINGMAN_OFFSET`, pinned to the Python constants by a test that reads
   the header text. The commandlet's shot constants (-170 / -400 m) and
-  `-chase=` still override the chase as before, so the header default
-  reaches the interactive host and any caller that does not override.
+  `-chase=` override the chase on every preset-mode run and the
+  interactive host sets its own -170 m (`FlightSimInteractiveMode.cpp`
+  L198), so the header's chase default reaches no shipped host: only the
+  wingman default is live, and the claimed chase parity between the
+  legacy preset and the solved track exists in no rendered frame. The
+  header comment states this (6a71639).
 - `experiments/gate6_visual.py`: four look clauses (`look_clauses`),
   each PASS / FAIL / NOT RUN with its measurement stated, rendered by
   `--look` from `LOOK_RUNS` (one switch per control, gotcha 6) and
@@ -1673,13 +1889,30 @@ TArray<FGuid>&)`; `FEngineShowFlags::Cloud` / `SetCloud`; the
 `FJsonObject::HasTypedField<EJson::Object>`.
 
 **Not verified here.** No engine: none of the C++ compiles or renders
-in this container. Not one look clause has run -- each reports NOT RUN
+in this container. The cpp round's fixes are read, not rendered: the
+settle-in placement (6a71639) now asks the director for the preset's
+resting pose (`PresetRestingPose`, measured from the CG) instead of a
+station from the actor origin -- the structural datum, 33.7 m ahead of
+the B747's CG, which opened every preset-mode chase clip 136 m behind
+the CG with the lag dragging it in over the first ~1.5 s of written
+frames -- so by reading, frame_0000 of a preset-mode chase opens at the
+CG-based station (no 33.7 m transient, no ~220 m wingman swing). The
+reproduction the finding names (`labels.silhouette_pixels` /
+`aircraft_ground` px over frame_0000..0015 against frame_0050 at
+`-camera=chase -fps=10`) is what a Windows render should confirm; it is
+UNMEASURED until then. The interactive host has no pre-placement at all
+(its camera flies in from the world origin); it could call
+`PresetRestingPose` after its preset chain, but that changes what the
+live viewport shows and is in no finding. Not one look clause has run -- each reports NOT RUN
 with its measurement; whether `FogDensity` scales as an extinction,
 whether the default cloud material exposes a cover parameter (and by
 what name), whether `M_VertexColor` / `M_TerrainImagery` expose a
 `Wetness` scalar (they were built by `scripts/ue_create_materials.py`
-without one, so the first render is expected to record `absent` and the
-wet clause to FAIL by name until the material gains the parameter),
+without one; cd5c96a added the parameter to both creators, with the
+name read from the C++ by `tests/test_ue_materials.py`, and the node
+and pin names it uses are checked by nobody until the editor builds
+them -- so the first render records `absent` or the parameter, and says
+which),
 whether the engine's EV100 lands within a stop of the recorded number,
 what a 2.3 M-triangle tiled procedural mesh costs per frame, and
 whether the cloud layer's base sits where `base_datum` says, are all
@@ -1712,10 +1945,13 @@ measure text, which is the only measurement possible here.
   structural->actor matrix to form `CGLocalPosition`; x and z come out
   right by two cancelling sign flips, y would be sign-wrong for a
   non-zero CG y. Every staged airframe has y = 0.
-- `tests/test_platform.py::test_no_text_io_without_utf8_encoding` fails
-  on this tree for `core/campaign/campaign.py`, `tests/test_annotation_gates.py`
-  and `tests/test_campaign.py` -- files of parallel packages, not this
-  stage's; every text I/O this stage added states `encoding="utf-8"`.
+- `tests/test_platform.py::test_no_text_io_without_utf8_encoding` failed
+  on this tree when this stage landed, for `core/campaign/campaign.py`,
+  `tests/test_annotation_gates.py` and `tests/test_campaign.py` -- files
+  of parallel packages, not this stage's; every text I/O this stage
+  added states `encoding="utf-8"`. Fixed in 53ddff3 (the lint's
+  `def open(` false positive and the six real sites); measured at
+  418489f: 11 passed.
 
 ## P2-D/gates -- the annotation quality gates: seven checks over the ground-truth bundle, refusals by name, mutation guards that fire, visual sheets
 
@@ -1847,7 +2083,10 @@ class image and the engine's own `non_integer_id_pixels` can.
   verifier tests in `tests/test_annotation_gates.py`, with no sheet of
   their failing run.
 * **Mutation guards** (`scripts/mutation_check.sh`, the package-D
-  block): the two repaired station guards and nineteen new ones -- the
+  block): the two repaired station guards and nineteen new ones (the
+  verifier round fbeb686 proposed thirteen more for its own fixes, each
+  verified by hand to make its test fail; they are not in the script at
+  418489f -- see "Open findings") -- the
   `failure` key, the alone-pass file, the two superseded version-5
   checks, three `mask_integers_only` clauses, the extent and centre
   clauses of `mask_vs_geometry`, the IoU clause, the nearest-keypoint
@@ -1865,7 +2104,7 @@ class image and the engine's own `non_integer_id_pixels` can.
 
     .venv/bin/pytest -q -p no:warnings tests/test_annotation_gates.py tests/test_camera_labels.py tests/test_camera_verify_corruption.py
     .venv/bin/python tests/visual/annotation_sheets.py            # fabricates build/visual/fabricated_run and writes the six sheets
-    .venv/bin/python -m flightsim.verify build/visual/fabricated_run   # every gate PASS; exit 0
+    .venv/bin/python -m flightsim.verify build/visual/fabricated_run   # "verification PASSED (21 passed, 0 failed, 9 not run, 2 superseded)"; exit 0 (measured at 418489f)
     .venv/bin/python - <<'EOF'
     # the Phase 1 defect at a tenth of its size, then the verdict by name
     from tests.test_annotation_gates import fabricate_run
@@ -1912,16 +2151,25 @@ claimed. `mask_integers_only` cannot see a blend that rounds to a
 declared id when the class image blended the same way; the engine's
 `non_integer_id_pixels` is the measurement there. `identity_stable`
 is NOT RUN without a render (the engine's echo is half the evidence).
-`drawn_airframe`'s version-3 / `origin_basis` gate (contracts §0.1) is
-not landed: it changes `test_a_mesh_drawn_at_the_recorded_origin_passes`
-in a file this package may only add to. `labels.py`'s
-`NOT_CLAIMED_OBJECT_PX` (12) and the contract's 16 px IoU floor differ;
-the verifier uses the contract's 16 and `labels.py` (not this
-package's file) still says the schedule stops at 12. `tests/test_messages.py`
-fails on package G's `campaign.arguments` / `campaign.state` (no
-catalogue entry) and two names G still lists as future, and
-`tests/test_platform.py`'s utf-8 sweep names `core/campaign/campaign.py`
-and `tests/test_campaign.py` -- G's, not D's; D's names are retired
+`drawn_airframe`'s version-3 / `origin_basis` gate (contracts §0.1) was
+not landed with the package (it changes
+`test_a_mesh_drawn_at_the_recorded_origin_passes` in a file the package
+could only add to); it landed in fbeb686 and is pinned in
+`tests/test_camera_verify_corruption.py`. `labels.py`'s
+`NOT_CLAIMED_OBJECT_PX` (12) and the contract's 16 px IoU floor
+differed; the verifier used the contract's 16 and `labels.py` (not this
+package's file) said the schedule stops at 12 -- 16 in both since
+cd5c96a, the three constants pinned equal by a test. `tests/test_messages.py`
+failed, when D landed, on package G's `campaign.arguments` /
+`campaign.state` (no catalogue entry) and two names G still listed as
+future (closed in 0958a45), and `tests/test_platform.py`'s utf-8 sweep
+named `core/campaign/campaign.py` and `tests/test_campaign.py` -- G's,
+not D's (closed in 53ddff3; 11 passed at 418489f). Measured at 418489f:
+`tests/test_annotation_gates.py` 43 passed; `tests/test_messages.py` 22
+passed and 1 failed on five names of later rounds (`export.run_names`,
+`export.verification_stale`, `export.out_directory`,
+`compile.unreachable`, `spec.read`); green again at cd5c96a (23
+passed) once the entries landed. D's names are retired
 from `ALLOWED_FUTURE`, the scanner sees `failure=` and `FAIL_* =`, and
 every text read in D's files states its encoding (the sweep found four
 that did not, fixed before landing). Sheets are drawn from the fabricated run's
@@ -1964,7 +2212,10 @@ failure), and `test_messages.py::test_every_refusal_name_in_the_code_
 has_a_catalogue_entry` fails again for four names later packages
 emit without an entry (`export.run_names`, `export.verification_stale`,
 `export.out_directory`, `compile.unreachable`) -- the same shape of
-gap, on the catalogue's file, not this part's.
+gap, on the catalogue's file, not this part's. Measured again at
+418489f: `tests/test_webapp_generate.py` 24 passed;
+`tests/test_messages.py` 22 passed, 1 failed on those four names plus
+`spec.read`; green again at cd5c96a (23 passed) once the entries landed.
 Also found: `core/agent` (package H) does not exist on this branch, so
 the page calls `core.campaign` directly, as the contract's §8 lists it.
 
@@ -1974,8 +2225,9 @@ words for the page (`{sentence, hint, details: {rule, message,
 catalogued, actual?, limit?, unit?}}` from `core.messages.explain`;
 the rule name never enters a default field); `compile_round()` runs
 the compilers' question round exactly as `/compile` does (LLM with the
-regex fallback recorded, or regex with its one camera question; at most
-three questions); `paragraph()` reads the compiled spec into one
+regex fallback recorded, or regex with its two questions -- the
+aircraft when the name is not one the vocabulary knows, and the camera
+view -- since 2ef240d; at most three questions); `paragraph()` reads the compiled spec into one
 plain-language paragraph (airframe, places, conditions including the
 policy's leaves in words, viewpoints, count, format, flight length);
 `estimate()` states frames per case from the recorder cadence and
@@ -2013,7 +2265,8 @@ theme, `EventSource` for progress with polling as the fallback, every
 refusal shown as its sentence with the rule name under a `<details>`
 disclosure, every screen's command in the fixed "expert path" footer.
 `webapp/static/index.html`: one link to the new page. Seventeen tests
-in `tests/test_webapp_generate.py` (`TestClient`): the question round
+in `tests/test_webapp_generate.py` when this part landed, 24 at 418489f
+after the review rounds (`TestClient`): the question round
 for an imagery prompt with no viewpoint; the answer round's paragraph
 and unmeasured estimate; the LLM fallback stated; a refusal as a
 catalogue sentence and never a raw name in the default fields (plan
@@ -2044,7 +2297,7 @@ replaced by nothing).
     curl -s localhost:8008/generate/plan -H 'content-type: application/json' -d \
       '{"prompt":"photos of the a320 for 2 seconds in varied weather","tier":"regex","images":20}' | head -c 600
     curl -s localhost:8008/generate/plan -H 'content-type: application/json' -d \
-      '{"prompt":"fly the 747 at 500 m over 2000 m terrain, chase view","tier":"regex"}' | .venv/bin/python -m json.tool | grep -A3 sentence
+      '{"prompt":"fly the 747 at 500 m over 2000 m terrain, chase view","tier":"regex"}' | .venv/bin/python -m json.tool | grep -A3 sentence   # refused altitude.terrain_clearance, in words: a 120 s scenario (a bare 'm' is metres, never minutes, since 2ef240d)
     curl -s localhost:8008/generate/start -H 'content-type: application/json' -d \
       '{"prompt":"photos of the a320 for 2 seconds in varied weather","answers":[{"id":"camera_view","answer":"chase"}],"images":20,"tier":"regex"}'
     curl -s localhost:8008/generate/<id>            # progress from the ledger, in words
@@ -2054,9 +2307,10 @@ replaced by nothing).
     scripts/mutation_check.sh 2>&1 | grep "guided page"
 
 The last line prints two `ok` rows; a `WEAK` row is a finding. (The
-script's baseline requires the whole suite green; on HEAD
-`tests/test_messages.py` is red for package G's uncatalogued names, so
-the two guards were confirmed by hand -- the mutation applied, the
+script's baseline requires the whole suite green; on the HEAD this part
+landed on `tests/test_messages.py` was red for package G's uncatalogued
+names, at 418489f red again for five names of later rounds, green at
+cd5c96a -- so the two guards were confirmed by hand -- the mutation applied, the
 test file run, the file restored byte-identical, `__pycache__`
 purged -- which is what the script does per row.)
 
@@ -2083,6 +2337,10 @@ the words do not know is rendered as "varied (<kind>)". Histograms
 cover the leaves the ledger rows record as `sampled` (the policy's
 draws), not the Phase 10 block's derived leaves (sun elevation, fog),
 which live in the manifests -- `report.json`'s `realised` has those.
+Since 7b0a39a every case of a campaign draws its own day, hour, fog,
+livery and camera jitter (the case index folded into the Phase 10
+streams; draw 0 unchanged), where before only the policy's leaves varied
+between cases; the page's histograms still show the policy's draws only.
 The time estimate divides the measured mean by the worker count and
 assumes cases keep costing what the completed ones did. The gallery
 caps at 60 pictures and shows one per camera per case; the frame
@@ -2231,15 +2489,169 @@ the_code_has_a_catalogue_entry` failed at the HEAD before this package
 (`campaign.arguments` and `campaign.state` are emitted by G and had
 no catalogue entry; I's to add) and still failed after it (as landed:
 0958a45 added them and the test passed at that commit; at 7b0a39a it
-fails again for four names of later packages, stated in P2-I/page
-above), as did
+failed again for four names of later packages, and at 418489f for those
+four plus `spec.read`, stated in P2-I/page above; green at cd5c96a once
+the entries landed), as did
 `test_platform.py::test_no_text_io_without_utf8_encoding` (eight
 text I/O calls without an encoding in `core/campaign/campaign.py`,
 `tests/test_campaign.py` and `webapp/generate.py` -- G's and I's
 files; every call in this package names `utf-8`; it passes at
-7b0a39a, 11 passed); this package
+7b0a39a and at 418489f, 11 passed); this package
 adds no new refusal name and no offender. `Campaign` has no `create_from_spec`: when
 the tool layer's spec differs from the campaign's own compile (the LLM
 tier, or policy words planned on), `plan_campaign` writes the adopted
 spec into `campaign.json` through the campaign's own `_save` and says
 so in `tier` -- a classmethod on G's file would be cleaner.
+
+## Open findings -- what the review pass left unlanded, as of cd5c96a
+
+Each line is an item a fixer of the review pass reported outside its
+own files and could not change, with that fixer's patch or reasoning.
+Status is as of cd5c96a, the code pass that landed beside this docs
+pass; the first list is what that pass closed, the rest is still open.
+Items the fixers marked NOT REAL at HEAD (the `index.html` v5 link;
+`write_verification` non-atomic) are not listed: the tree already held
+the fix and only the wording was stale, corrected above.
+
+**Closed in cd5c96a** (each with a test; see that commit's message):
+catalogue entries for `export.run_names`, `export.verification_stale`,
+`export.out_directory`, `compile.unreachable`, `spec.read`,
+`verify.capture`, `look.clouds` and `look.precipitation`, with
+`export.unverified_labels` covering the class image and depth and
+`run.duration` stating both bounds (`tests/test_messages.py` 23 passed,
+its scanner reading the plugin's `TEXT("<name>: ")` refusals);
+`flightsim/verify.py`'s two unnamed lines named (`spec.read`,
+`verify.capture`) and the verify command binding its verdict to the
+manifest through the runners' own `bind_verification` (so a run checked
+at the command line is no longer "unbound" in the card);
+`flightsim/capture.py`'s two `ScheduleError` lines printing the name
+once; `--export` on an existing `--out` as an action like `--report`;
+`ue/Source/*.Target.cs` on `Unreal5_7`; `NOT_CLAIMED_OBJECT_PX` 12 -> 16
+with the three constants pinned equal; `MAX_DURATION_S = 3600`; the
+unused `webapp/runs.py` imports; the `Wetness` parameter in both terrain
+materials (node and pin names unverified until the editor builds them);
+the three cpp source pins and the camera-director defaults docstring in
+`tests/test_gate6_visual.py`; `progress.campaign.done` carrying the
+numbers the page passes with the "no picture was drawn" tail.
+
+**Still open -- catalogue** (`core/messages/catalog.yaml`; proposed, not
+required by any test): `verify.against_manifest` ("The second run given
+for comparison has no readable manifest, so the two runs cannot be
+compared.") and `verify.checker_error` ("The checker itself failed on
+this run; the run is not verified until that is fixed.") for the two
+unnamed FAIL checks fbeb686 added, then `failure=` on those `Check(...)`
+calls in `verify_run`; `spec.unreadable` for a spec whose read raises a
+generic `ValueError` (today `words()` puts the producer's text in the
+sentence with `catalogued: false`, unreachable from the page's own
+flow).
+
+**Still open -- mutation guards proposed and verified by hand, not in
+`scripts/mutation_check.sh`** (each was applied with the script's own
+`mutate()` semantics and made its test fail; the exact lines are in the
+fixers' reports; the script holds 366 at cd5c96a and cd5c96a's own new
+safeguards have none yet): 13 for the verifier round (a missing declared
+bundle file, a check that breaks, a bad `--against`, an unechoed
+`objects[]`, null box / depth / visible-fraction records, a silently
+dropped camera, `origin_basis`, superseded checks in the summary, the
+cited mesh extent, an undrawn sheet, the projected hull) against
+`tests/test_annotation_gates.py` / `tests/test_camera_verify_corruption.py`;
+4 for the cpp round (the resting pose from the CG, the settle-in
+placement, the root `camera_preset`, the JSON headers) against
+`tests/test_gate6_visual.py`; 13 for the compiler round (the traffic
+clause, a second airframe, a bare `m`, conjunctions, dangling items, an
+unknown aircraft, the aircraft question and answer, `tower camera`, the
+LLM tier's traffic rails, the transport failure); 4 for the catalogue
+round (the detail merge, the dropped aside, the done sentence, the
+duplicate-case sentence); 2 for the campaign round (a duplicate slot by
+index, a refused slot's draws); 10 for the webapp round (a sampled wind,
+the synthesised ridge, the served `.f32`, the policy in the page digest,
+the bare catalogued name, the catalogue deciding what is a name, an
+uncatalogued reason, the raised datum, the schema link version, no
+exception text on the page); 11 for the export round (the three new
+refusals, the taxonomy check before any file, ungraded class image and
+depth, YOLO's `path` key, licence disagreement, COCO keypoints on
+airframes only, render provenance on the card, every airframe named,
+the batch runner binding its verdict); 13 for the randomisation round
+(the case index in the streams, gate typing, the number-vs-word and
+word-ordering refusals, a shut gate's range name and seed, window /
+integer / date bins, one-value bins, the cameras group, an unrecorded
+leaf, the circular wrap); 4 for the capture CLI (`spec.read` by name,
+the banner off the default path, the help's engine version, the relay
+dropping exactly the banner lines).
+
+**Still open -- code items with a patch given:**
+
+* `core/capture/verify.py` `write_verification`: also write
+  `manifest_sha256` (sha256 of `capture_manifest.json`) so every writer
+  binds its verdict -- cd5c96a bound the `flightsim.verify` command
+  through `bind_verification`, and `webapp/capture.py`'s verdicts are
+  still unbound (the card says so for such runs).
+* `core/scenario/validate.py` `validate_policy`: call
+  `randomization.gate_problems` after `policy_problems` so `validate()`
+  (the page's `/compile` verdict) refuses a bad gate before `plan()`
+  does (which already refuses through the sampler's probe).
+* `core/campaign/campaign.py` `Campaign.create`: the prompt's "500
+  images" is a per-camera `capture_count` by the camera contract, so it
+  can disagree with `--images` / the page's `images`; refuse
+  `campaign.arguments` when both are stated and differ, or default
+  `images` to the stated sum, and say in the paragraph that the frames
+  come from one scenario when one case is enough -- a contract-level
+  choice, not made.
+* `core/nl/llm_compiler.py`: on the LLM tier an unknown aircraft goes to
+  `notes` and the spec keeps the default B747; a rail turning such a note
+  into the aircraft question is a follow-up (the regex tier refuses
+  `aircraft.exists` since 2ef240d).
+* `core/nl/compiler.py` L367: mountain words raise `terrain_elevation`
+  to 2000 m but never set `scene.terrain_source: synthesised`; whether
+  they should is a contract choice (§5 scene) -- the page's paragraph
+  states the flat datum instead.
+* `webapp/generate.py`: L182's note doubles "offline compiler" (use
+  `words(exc)["sentence"]` with the details beside it); the plan's
+  `llm_available` is a configured flag, true while unreachable (derive
+  it from `compiled["tier"] == "llm"` or drop it); the L24 docstring
+  still calls the three campaign sentences "a finding for the
+  catalogue"; the `compile_round` docstring and `webapp/server.py` L214
+  say the regex path has "exactly one" question (it has two since
+  2ef240d: the aircraft, the camera view).
+* `webapp/server.py` download: add `X-Dataset-Labels-Only` and have
+  `generate.html` say "Labels only: no picture was drawn on this
+  machine." when it is set; the Download screen never says so today.
+* `core/campaign/workers.py` `sampled_values`: ledger rows record only
+  the policy's leaves, not the Phase 10 leaves that now vary per case nor
+  the cameras-group draws (the manifests have them); optional.
+* `tests/test_webapp_capture.py`: guard 186 ("the per-camera manifest
+  route validates the name it is given") is WEAK on HEAD -- Starlette
+  refuses the bad names before the route; the assertion that makes it
+  bite is `assert "chase0" not in reply.text` after the existing
+  `capture_manifest` check (a lookup's 404 lists the run's cameras).
+  Until it lands `./scripts/mutation_check.sh` reports that one guard
+  WEAK and exits 1, honestly.
+* `tests/test_mutation_targets.py` (new): run
+  `scripts/mutation_check.sh --check-targets` from the suite so a
+  refactor cannot orphan a guard again (skip where bash is absent).
+* `tests/test_platform.py`: extend the stale-version lint to match
+  `Unreal5_5` as well as `UE_5.5` / `UE 5.5` / `"5.5"` (cd5c96a moved the
+  pin and left the lint alone; the `.cs` pin lives in
+  `tests/test_gate6_visual.py`).
+* `experiments/gate6_visual.py` L87-90: `from core.util.platform import
+  ue_editor_path` sits three lines above the script's own
+  `sys.path.insert(0, <repo>)`, so the plain-script form in README's
+  "Run the gates" fails with `ModuleNotFoundError: core` from a fresh
+  shell (measured here); `python -m experiments.gate6_visual` runs.
+  Move the import below the insert (seen while checking `--help` for
+  this report's first section; not a fixer's item).
+
+**Architectural, or waiting on a render:**
+
+* The settle-in fix (6a71639) is unmeasured on Windows; the interactive
+  host has no pre-placement at all and could call `PresetRestingPose`
+  after its preset chain, which changes the live viewport and is in no
+  finding.
+* Making the header's -110 / 12 m chase default live in both hosts
+  would change the Gate 6 framing measured at -170 / 16 and the contract
+  sentence that the shot constants and `-chase=` override; left as the
+  wording in P2-Look/2 until a Windows render re-pins it.
+* The `Wetness` material graph (cd5c96a) uses UE Python API node and pin
+  names (`MaterialExpressionLinearInterpolate` A / B / Alpha,
+  `MaterialExpressionOneMinus`) that only the editor can check; the
+  first `-run=pythonscript` on Windows is the test.

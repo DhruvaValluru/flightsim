@@ -1,5 +1,51 @@
 # Resume here
 
+**Phase 2 (2026-09-26, branch `claude/relaxed-cori-gccjvx` -- the phase2
+branch; docs/PHASE2_REPORT.md is the report, docs/PHASE2_CONTRACTS.md
+the contracts, read the report's first section first).** LANDED: the
+nine packages and the Look lane -- A (SPEC_VERSION 8, `scene.
+terrain_source`, the mesh origin measured from vertices, one render-
+command builder `core/render/flags.py`), B + C (object identity,
+`objects[]`, the per-frame ground-truth bundle: masks, class image,
+float32 depth, boxes, occlusion, the scripted second aircraft), D (the
+annotation gates in `core/capture/verify.py`, sheets in `tests/visual/`),
+E (COCO/KITTI/WebDataset/YOLO/VOC with a card), F (the randomisation
+policy, `Source.SAMPLED`, the prompt vocabulary), G (`flightsim.
+campaign`: index-seeded worker pool, the ledger as the truth), H (`core/
+agent`: ten typed tools, a deterministic policy, a trace), I (the
+message catalogue `core/messages/` and the guided page `/generate.html`),
+the Look lane (engine pin 5.7, `DefaultEngine.ini` renderer switches,
+the visual scene consuming the card's look, the EV100 exposure model)
+-- then a review pass of nine area fixers (fbeb686 verifier, 6a71639
+cpp, 2ef240d compiler, b6342d0 catalogue, 53ddff3 campaign, 5bd6864
+webapp, c70dcc4 export, 7b0a39a randomisation, e3efd98 misc, 418489f
+guards), then cd5c96a (the code pass beside this docs pass: the five
+nameless refusals catalogued, `--export` an action on a done campaign,
+`Target.cs` on Unreal5_7, the 16 px line, the Wetness parameter) and
+this docs pass. Measured at cd5c96a: 366 mutation guards, every target
+unique (`--check-targets`, 6 s); the named test files green (330 tests
+across eleven files, `tests/test_messages.py` included). Every C++
+change is UNCOMPILED here. WINDOWS, in this
+order: build on 5.7 (`ue_preflight.ps1`, `vendor_ue_plugin.ps1` -- the
+four local plugin patches were measured on 5.5 -- `build_ue.ps1`);
+`ue_create_materials.py` in the editor (M_CustomStencilID for the ID
+pass; the Wetness parameter landed in cd5c96a, unverified in any
+editor); re-convert the airframes
+(`scripts/import_aircraft.py`: mesh manifest 3, a version-2 manifest is
+refused by `drawn_airframe`); the first `-labels` frame
+(`capture_windows.ps1`, then `tests/visual/annotation_sheets.py` on that
+run); `experiments/gate6_visual.py --look`; `experiments/
+gate10_render_repro.py --card`; a rendered campaign at 1 and 2 workers
+(`flightsim.campaign --render --workers 1|2`, compare the ledgers). Two
+SHARED-INDEX commits to know about when reading history: f1a7563
+("Card: a stated camera exposure triple ...") also holds package D --
+the annotation gates, `tests/test_annotation_gates.py`, the sheets and
+their guards rode in from the shared index and 763b325 says so; 28e78fa
+(the spec-8 bump) holds four mesh-origin guards the same way. The
+report's "Open findings" section lists every item the fixers left
+unlanded with its patch. CLAUDE.md's owner rule STANDS: no scheduled
+check-ins, no PR monitoring, report once and stop.
+
 **Phase 10 (2026-09-11, in progress -- docs/PHASE10_REPORT.md is the
 running report; the owner cut scope to what changes the simulation or
 its data: packages 2, 3, 4, 7, 6 in that order).** DELIVERED: P10-2a
@@ -714,8 +760,10 @@ the parity discipline, and the do-not-regress list)
     sensitive gotchas, 4 (async asset compilation in commandlets) and 5
     (Interchange Nanite at import -- the project-level
     `r.Nanite.ProjectEnabled` is on, the per-mesh import flag stays
-    off). `ue/Source/*.Target.cs` still say `IncludeOrderVersion
-    Unreal5_5` (a compatibility marker, not a pin; the first 5.7 build
-    reports whether to move it) and `flightsim/capture.py` L118 and
-    `experiments/fps_probe.py` still name 5.5 -- outside this stage's
-    files, listed in docs/PHASE2_REPORT.md.
+    off). `ue/Source/*.Target.cs` said `IncludeOrderVersion
+    Unreal5_5` until cd5c96a moved both to `Unreal5_7` (pinned from
+    `UE_ENGINE_VERSION` in tests/test_gate6_visual.py; the first 5.7
+    build reports whether the include order compiles clean);
+    `flightsim/capture.py`'s help reads `UE_ENGINE_VERSION` since
+    e3efd98; `experiments/fps_probe.py` is outside this stage's files,
+    listed in docs/PHASE2_REPORT.md.

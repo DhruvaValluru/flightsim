@@ -249,7 +249,9 @@ Lumen, VSM, Nanite, screen percentage, exposure mode and EV100, RHI and
 shader model), `look_applied` (the weather/sky parameters actually
 applied, §5.4). The root `camera_preset` is hard-coded `"LaggedChase"`
 today (L2068) — fixed to the real preset (`scene.camera_preset` is the
-truthful one). The per-frame `applied_focal_length_mm`,
+truthful one). **As landed (6a71639):** the root is `CameraPreset`, the
+same word as `scene.camera_preset`; a consume-poses pass marks it inert
+via `camera_consume_poses`. The per-frame `applied_focal_length_mm`,
 `applied_sensor_width_mm`, `applied_fov_deg`, `applied_width_px`,
 `applied_height_px` (L2024-2031) are written on EVERY frame, not only when
 the card carried landmarks, so the verifier can project without
@@ -303,6 +305,13 @@ refusal `aircraft.mesh` (`webapp/runs.py` `refuse_placeholder_mesh`
 L795-878, `flightsim/capture.py` L196-232) applies to every traffic
 airframe, and the commandlet's own mesh/FDM pairing refusal (L269-290)
 is per actor.
+
+**As landed (2ef240d):** `traffic` is reachable from a prompt on both
+tiers -- the regex tier's "with / and / plus <airframe> crossing | in
+formation | alongside | overtaking [<n> m]" clause and the LLM tier's
+bounded `traffic` key (at most two entries, each needing an airframe,
+unknown fields refused). `taxonomy` and `scene` stay YAML-only, and no
+committed example carries a `traffic` block.
 
 ### 2.3 Object ids
 
@@ -570,10 +579,15 @@ fabricated bundle (`tests/test_annotation_gates.py`) and stated here:**
   landed as written. `mask_containment` / `depth_range` report NOT RUN
   naming their successor on any manifest that declares `objects[]`.
   `drawn_airframe` carries `failure: aircraft.placeholder_drawn`; its
-  version-3 / `origin_basis` gate (§0.1) is NOT landed: it would change
-  `test_a_mesh_drawn_at_the_recorded_origin_passes`, which this package
-  may not edit -- an open item, and `mask_vs_geometry` now measures the
-  offset directly from pixels.
+  version-3 / `origin_basis` gate (§0.1) was NOT landed with the package
+  (it changes `test_a_mesh_drawn_at_the_recorded_origin_passes`, which
+  the package could not edit) and **landed in fbeb686**:
+  `DRAWN_MESH_MIN_MANIFEST_VERSION = 3` (a version-2 manifest is refused
+  with the VRP-rule sentence, 3.9 m B747 / 19.3 m A320; below 2 with the
+  datum sentence) and `drawn.origin_basis` is graded by the
+  `measured from vertices` prefix, both under `aircraft.placeholder_drawn`
+  (`tests/test_camera_verify_corruption.py`). `mask_vs_geometry` measures
+  the offset directly from pixels either way.
 
 ---
 
@@ -655,7 +669,11 @@ and re-drawn up to `max_attempts` (20) before the slot is
 `randomization.infeasible`. Seeds: per draw
 `numpy.random.SeedSequence([draw_index, campaign_seed])` (§6); the block's
 own `derive_block_seed` sha256 stream (L241-246) stays for the Phase 10
-leaves so `examples/randomized.yaml` samples identically.
+leaves so `examples/randomized.yaml` samples identically. **As landed
+since (7b0a39a):** a campaign case folds its index into the stream label
+(`draw <n>:<label>`; draw 0 keeps the bare label, so
+`examples/randomized.yaml` still samples byte for byte), so every case
+draws its own day, hour, fog, livery and camera jitter.
 
 ### 5.3 Prompt vocabulary
 
@@ -666,7 +684,8 @@ an `_randomization(text)` extractor after `_cameras` (L632-637) are new.
 `core/nl/llm_compiler.py`: `RANDOMIZATION_FIELD_VALUE_SCHEMAS` with an
 import-time assert against the policy leaves (mirror L275-279), a bounded
 `randomization` key in `RESPONSE_SCHEMA` (L304-345; `response_shape_sentence`
-then says five keys by itself), and the LITERAL key set in `_parse_payload`
+then says six keys by itself -- five when this was written; `traffic`
+joined the top level in 2ef240d), and the LITERAL key set in `_parse_payload`
 L611-613 edited (it does not read `RESPONSE_TOP_LEVEL_KEYS`).
 
 | Phrase | Policy |
@@ -776,7 +795,12 @@ Look lane implement against what exists.
   run's `capture_manifest.json` (`randomization` + `frames`); numeric
   leaves bin over the REQUESTED support (clip / uniform bounds / [0,1]
   for beta) else the observed range; `coverage` per leaf and overall
-  (mean over leaves with a requested distribution). The picture is
+  (mean over leaves with a requested distribution). **Extended, not
+  contradicted, in 7b0a39a:** a choice bins over its options, an
+  `hour_local` window choice over its named windows, an integer leaf one
+  bin per integer it can draw, a date span up to 8 equal bins over the
+  requested span, and the cameras group is counted per camera; a
+  requested leaf nothing recorded is at coverage 0. The picture is
   `python -m core.scene.realised_plot`.
 
 ---
@@ -834,8 +858,10 @@ campaigns/<id>/
 * Disk: budget from a measured sample render × items against
   `shutil.disk_usage`, refused by name (`storage.budget_exceeded`) before
   starting and re-checked per batch; `verification.json` is written
-  atomically (tmp + `os.replace`; `write_verification` uses
-  `Path.write_text` today, L2359).
+  atomically (tmp + `os.replace`; `write_verification` has done so since
+  f1a7563 -- `tests/test_annotation_gates.py::test_write_verification_is_atomic`
+  and a guard in `scripts/mutation_check.sh`; the `Path.write_text` this
+  line once cited is gone).
 * A campaign that cannot reach its target ends `failed` with `reason`
   (`campaign.target_unreachable`), never `done` at a lower count.
 * CLI: `python -m flightsim.campaign "<prompt>" --images N --out DIR
@@ -851,8 +877,10 @@ campaigns/<id>/
 (one format writes into `DIR` as before; a comma list writes
 `DIR/<format>/` each, with ONE card at `DIR`; the card records `formats`
 and `layout`);
-`load_run` refuses `export.unverified` (no `verification.json`) and
-`export.verification_failed` (any FAIL); the runs of one export must
+`load_run` refuses `export.unverified` (no `verification.json`),
+`export.verification_failed` (any FAIL) and, since c70dcc4,
+`export.verification_stale` (a verdict bound to a `manifest_sha256` that
+no longer matches the manifest's bytes); the runs of one export must
 carry one class list -- a run naming a taxonomy beside one that does not,
 or two different lists, refuses `export.taxonomy` (landed, package E:
 the class list is the manifests' `taxonomy` / `objects[]` when present,
@@ -897,7 +925,8 @@ in look land in one split, by design); sample key
 * Card: `dataset.json` + `DATASET_CARD.md` (`dataset_card` L469-529)
   gain class balance, the realised histograms (§5.5), per-asset licences
   from `objects[]`, `render.json` `drawn`/`render_settings`/`look_applied`
-  provenance, and `not_claimed` aggregated per frame; `label_conventions`
+  provenance (landed in c70dcc4: per run `render` per camera, or
+  `render_note` for a headless run), and `not_claimed` aggregated per frame; `label_conventions`
   is taken from `runs[0]` today (L521) and becomes per-manifest-version.
 
 ### 6.3 As landed (package G) -- the campaign as built, and the shape decisions §6.1 left open
@@ -936,7 +965,10 @@ and `synth_terrain`) with `flightsim.batch` byte-identical in behaviour.
   ({leaf: value} of the policy draw), `policy_attempts`, `drawn`,
   `bytes` (the run directory), `requeue`, `refused_attempts` (the
   sampler's records, on a refused slot). `yield` = `frames` on a
-  verified row, 0 otherwise.
+  verified row, 0 otherwise. Since 53ddff3 the ledger summary carries
+  `refused_attempt_names` (the constraint each refused slot's draws hit,
+  tallied) and `report.json` carries it as
+  `refusals.attempts_within_refused_slots`.
 * **Seeds**: the campaign seed IS the block's seed (§5.6): a
   user-stated `randomization.seed` is the campaign seed and `--seed`
   disagreeing with it refuses `campaign.arguments`; otherwise `--seed`
@@ -974,9 +1006,11 @@ and `synth_terrain`) with `flightsim.batch` byte-identical in behaviour.
   campaign; a seed disagreeing with a stated one), **`campaign.
   duplicate_case`** (a slot drew a spec another slot already produced
   -- a prompt with nothing to vary and a stated run seed; refused
-  before running when the ledger already holds the case id, on
-  collection when the two were in flight together; counts as a refused
-  slot). Catalogue sentences are package I's to add.
+  before running: when the ledger already holds the case id, or when a
+  lower slot dispatched beside it in the same window drew it (the case
+  id is built from the index before dispatch, 53ddff3); the lower index
+  is always the keeper, so the row is the same at any worker count;
+  counts as a refused slot). Catalogue sentences landed in 0958a45.
 * **Transitions**: planned -> running | cancelled; running -> paused |
   failed | done | cancelled; paused -> running | cancelled; failed ->
   running | cancelled (a resume retries; the same refusal repeats by
@@ -1176,7 +1210,10 @@ code now emits them).
   `{param}` placeholders; the rule name is kept beside the sentence.
   `core/messages/__init__.py render(name, **params)`. The names it must
   cover are the ones the code emits today (§11 lists them) plus this
-  phase's; the shapes they arrive in are three: the `Violation` dict
+  phase's -- since the cpp round the scanner also reads the engine's
+  `TEXT("<name>: ")` prefixes under `ue/Plugins/FlightSimBridge/Source`
+  (`look.clouds`, `look.precipitation`) as text, the C++ being
+  uncompiled here; the shapes they arrive in are three: the `Violation` dict
   `{constraint, message, actual, limit, unit}` (validate.py L38-53;
   `webapp/runs.py` emits the same five keys as a plain dict), the
   `.constraint` attribute of `RandomizationError`, `PoseSolveError`,
@@ -1195,7 +1232,9 @@ code now emits them).
   technical message as the hint, and the coverage test forbids that path
   for every name the code emits. The catalogue also keys `check.<name>`
   for every `Check("<name>")` in `verify.py` (the sentence beside the
-  tick), `verdict.{pass,fail,not_run}`, and the progress states
+  tick), `verdict.{pass,fail}` (`verdict.not_run` was removed in b6342d0
+  as never shown: a NOT RUN check is listed, not verdicted), and the
+  progress states
   `progress.campaign.<state>` (§6.1 `campaign.json`),
   `progress.case.<status>` (the ledger) and `progress.page.<state>` (the
   six page states). The bare names the CLIs and the web app print today
@@ -1270,11 +1309,11 @@ code now emits them).
   from `ledger.jsonl` on every call. The download is
   `<campaign>/downloads/<id>_<format>.zip` of `Campaign.export(format)`'s
   directory, `dataset.json` (which records `format`) inside.
-  **Finding for the catalogue (not this part's file):** `campaign.state`,
-  `campaign.arguments` and `campaign.duplicate_case` have no entry in
-  `core/messages/catalog.yaml` (§6.3 gave the sentences to package I);
-  the page shows the producer's own message for them, with
-  `details.catalogued: false`, until the entries land.
+  **Finding for the catalogue, closed:** `campaign.state`,
+  `campaign.arguments` and `campaign.duplicate_case` had no entry in
+  `core/messages/catalog.yaml` when this part landed (§6.3 gave the
+  sentences to package I). The three entries landed in 0958a45; the page
+  shows their catalogue sentences with `details.catalogued: true`.
 
 ---
 
@@ -1484,6 +1523,13 @@ disagree on the class list). Named
 names): `spec.version`, `manifest.version`. The un-named
 `LLMCompileError`s are catalogued as `compile.rejected` (the "response
 was rejected" sentence) and `compile.unavailable` (no provider, no SDK).
+Since 2ef240d a transport failure is
+`LLMCompileError(constraint="compile.unreachable")` (the model could not
+be reached; the offline compiler was used); its catalogue entry landed
+in cd5c96a, which also catalogued `spec.read`, `verify.capture`,
+`look.clouds`, `look.precipitation`, `export.run_names`,
+`export.verification_stale` and `export.out_directory` -- every name the
+review pass's code emits, `tests/test_messages.py` green again.
 
 **New this phase.** `scene.terrain` (a `terrain_source` the machine
 cannot honour: `baked` with no whole bake stated or given, or a CLI flag
@@ -1600,7 +1646,10 @@ Each change this revision made to the draft (15e0bc9), with the evidence.
    `requirements.txt` confirms.
 7. **`applied_*` intrinsics on every frame** and the root `camera_preset`
    lie (L2068) — ue-render map known_defects; new `applied_intrinsics`
-   check because no Python check reads those keys (verifier map).
+   check because no Python check reads those keys (verifier map). The
+   root `camera_preset` lie is fixed in the cpp fixer's commit 6a71639
+   (root = `CameraPreset`, the same word as `scene.camera_preset`; a
+   consume-poses pass marks it inert via `camera_consume_poses`).
 8. **Label record names are the code's**: `bbox_2d`, `bbox_2d_unclipped`,
    `truncation`, `in_frame`, `bbox_3d_camera`, `keypoints`, `horizon`
    (schema `labels.required`); `bbox_2d` is the OVERALL extents box, not
@@ -1633,7 +1682,8 @@ Each change this revision made to the draft (15e0bc9), with the evidence.
 14. **Campaign ledger extends the batch ledger** (`run_case` row keys,
     batch.py L269-293; `batch.json` keys; completion-order rows; resume
     semantics; `run_id` after sampling; `CAPTURE_OPTIONS` lacks terrain;
-    `-deterministic` passed by nobody; `write_verification` not atomic).
+    `-deterministic` passed by nobody; `write_verification` not atomic --
+    atomic since f1a7563).
 15. **Export layouts stated from the code** (§6.2: `FORMATS`, COCO/KITTI/
     WebDataset trees, `load_run` refusals, split key, sample key;
     `pycocotools` not a dependency; WebDataset mtime leak).

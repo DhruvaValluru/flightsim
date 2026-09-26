@@ -10,6 +10,20 @@ pixels), Gate 6 on its four measurable clauses with a placeholder airframe. See
 [docs/VALIDITY.md](docs/VALIDITY.md) for exactly what that does and does not
 support — the scope statements are the point of this project.
 
+**Phase 2 (2026-09-26, branch `claude/relaxed-cori-gccjvx`): the
+annotated, randomised dataset pipeline.** A guided page at
+`/generate.html` takes one prompt to a campaign (at most three
+questions, a plan in words, one measured sample, progress from the
+ledger, a gallery, a download); the campaign CLI `python -m
+flightsim.campaign "<prompt>" --images N --out DIR [--workers W]
+[--render]` runs the same thing from a terminal; `python -m
+flightsim.export RUNS --out DIR --format coco,kitti,webdataset,yolo,voc`
+writes the dataset with its card and refuses unverified runs by name.
+Everything Python is measured on any machine; the rendered half (the
+`-labels` masks and depth on real pixels, the look clauses) waits for the
+Windows build on UE 5.7 -- [docs/PHASE2_REPORT.md](docs/PHASE2_REPORT.md)
+opens with the instructor's commands and the Windows verification order.
+
 ## Quick start (any machine, ~2 minutes)
 
 ```bash
