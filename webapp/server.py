@@ -146,7 +146,16 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
         "std": quantity.std, "detail": quantity.detail,
     } for name, quantity in spec.randomization.quantities()]
     spec_dict = spec.to_dict()
-    spec_dict["randomization"] = spec.randomization.to_dict()
+    # The block's own dict (always present for the page) MERGED with the
+    # policy the canonical form carries under the same key: the policy
+    # lives on ScenarioSpec.randomization_policy, not on the block, so
+    # replacing the section wholesale dropped it and the page's digest
+    # (of this dict, re-read by /run) forked from the one shown here.
+    randomization_section = spec.randomization.to_dict()
+    canonical_section = spec_dict.get("randomization") or {}
+    if "policy" in canonical_section:
+        randomization_section["policy"] = canonical_section["policy"]
+    spec_dict["randomization"] = randomization_section
     return {"digest": spec.digest(), "name": spec.name,
             "prompt": spec.prompt, "notes": spec.notes,
             "fields": fields, "cameras": cameras,
@@ -600,9 +609,13 @@ def run_effect(run_id: str):
 #: filename.
 _IMAGE_KINDS = {"frames": "frames", "overlays": "overlays",
                 "previews": "previews"}
-#: A frame image, or a frame's own label sidecar beside it.
-_IMAGE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,80}\.(png|json)$")
-_SERVED_TYPES = {".png": "image/png", ".json": "application/json"}
+#: A frame image, a frame's own label sidecar beside it, or the metric
+#: depth the label bundle declares under ``labels.depth_f32`` (raw
+#: little-endian float32, contracts §8): the one bundle member that is
+#: neither a PNG nor JSON, served as bytes.
+_IMAGE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,80}\.(png|json|f32)$")
+_SERVED_TYPES = {".png": "image/png", ".json": "application/json",
+                 ".f32": "application/octet-stream"}
 _CAMERA_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
@@ -750,8 +763,8 @@ def run_image(run_id: str, kind: str, camera_id: str, name: str):
     if not resolved.is_file():
         return JSONResponse({"error": "no such image"}, status_code=404)
     # A sidecar only lives beside a FRAME; overlays and previews carry
-    # no labels of their own, and a .json under them is not ours.
-    if resolved.suffix == ".json" and kind != "frames":
+    # no labels of their own, and a .json or .f32 under them is not ours.
+    if resolved.suffix in (".json", ".f32") and kind != "frames":
         return JSONResponse({"error": "no such image"}, status_code=404)
     return FileResponse(resolved, media_type=_SERVED_TYPES[resolved.suffix])
 

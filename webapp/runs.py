@@ -596,6 +596,11 @@ def camera_render_flags(spec: ScenarioSpec):
 #: the user's words, and a value they command that cannot fly is refused
 #: by name, not silently moved. This line is load-bearing.
 PLANNABLE_SOURCES = ("default", "model", "derived")
+#: Scene keys that are NOT a place: the control ridge the geography
+#: earns and the ridge ``scene.terrain_source: synthesised`` states are
+#: both prescribed statistics at arbitrary coordinates, so nothing that
+#: needs a real place (historical weather) may key on their origin.
+SYNTHESISED_SCENE_KEYS = ("control", "synthesised")
 
 
 def _fly_clearance_track(spec: ScenarioSpec, ground, script,
@@ -1363,25 +1368,32 @@ def apply_historical_weather(spec: ScenarioSpec) -> Optional[Dict]:
     """ERA5 reanalysis wind for a dated spec, as recorded pre-digest edits.
 
     None (applied, or nothing to do) or a named refusal dict. Rules, in
-    order: no date -> nothing; a USER-stated wind is never moved (the date
-    goes to notes instead); the synthesised control ridge is NOT A PLACE,
-    so a dated spec there refuses by name; an unreachable archive refuses
-    by name rather than guessing a wind.
+    order: no date -> nothing; a wind that is not plannable -- stated by
+    the user, inferred from their phrase, or SAMPLED by the policy (a
+    drawn value is as fixed as a stated one, contracts §5.1) -- is never
+    moved (the date goes to notes instead); a synthesised ridge is NOT A
+    PLACE, whether it is the control ridge the geography earned or the
+    one ``scene.terrain_source: synthesised`` states, so a dated spec
+    there refuses by name; an unreachable archive refuses by name rather
+    than guessing a wind.
     """
     date = str(spec.weather_date.value)
     if date == "none":
         return None
-    if (str(spec.wind_speed.source) == "user"
-            or str(spec.wind_direction.source) == "user"):
+    if (str(spec.wind_speed.source) not in PLANNABLE_SOURCES
+            or str(spec.wind_direction.source) not in PLANNABLE_SOURCES):
+        how = ("drawn" if "sampled" in (str(spec.wind_speed.source),
+                                        str(spec.wind_direction.source))
+               else "stated")
         spec.notes.append(
-            f"weather_date {date}: the stated wind wins; ERA5 not applied "
-            f"(a stated value is never silently moved)")
+            f"weather_date {date}: the {how} wind wins; ERA5 not applied "
+            f"(a {how} value is never silently moved)")
         return None
-    if pick_scene(spec)["key"] == "control":
+    if pick_scene(spec)["key"] in SYNTHESISED_SCENE_KEYS:
         return {
             "constraint": "weather.not_a_place",
-            "message": "historical weather needs a real place; the "
-                       "synthesised control ridge is not one. Name a real "
+            "message": "historical weather needs a real place; a "
+                       "synthesised ridge is not one. Name a real "
                        "location or state coordinates.",
         }
     from core.environment.era5 import (

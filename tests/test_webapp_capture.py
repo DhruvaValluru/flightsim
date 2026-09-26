@@ -1409,7 +1409,7 @@ def test_the_frames_page_shows_matrices_the_run_panel_and_copy_buttons():
         assert needle in page, needle
     gallery = (Path(__file__).resolve().parents[1]
                / "webapp" / "static" / "index.html").read_text(encoding="utf-8")
-    for needle in ("/verify.json", "/schemas/capture_manifest.v5.schema.json",
+    for needle in ("/verify.json", "/schemas/capture_manifest.v${manifestVersion}.schema.json",
                    "capture_manifest.json", "pose, matrices, labels"):
         assert needle in gallery, needle
 
@@ -1428,3 +1428,41 @@ def test_the_verdict_route_serves_a_cli_verified_run(tmp_path, monkeypatch):
     reply = TestClient(app).get("/runs/cli_run/verify.json")
     assert reply.status_code == 200 and reply.json()["checks"][0]["name"] == "json_schema"
     assert TestClient(app).get("/runs/nowhere/verify.json").status_code == 404
+
+
+def test_the_metric_depth_the_bundle_declares_is_served_beside_the_frame(wide_run):
+    """``labels.depth_f32`` names ``frame_NNNN_depth.f32`` (raw float32,
+    contracts §8): the one bundle member that is neither PNG nor JSON.
+    The frame route serves it as bytes -- and only under frames/, like
+    the label sidecar."""
+    out, manifest = wide_run
+    record = manifest["frames"][0]
+    camera, name = record["camera_id"], Path(record["file"]).name
+    depth_name = name[:-4] + "_depth.f32"
+    payload = bytes(range(16))
+    (out / "frames" / camera / depth_name).write_bytes(payload)
+    client = TestClient(app)
+    reply = client.get(f"/runs/run_wide/frames/{camera}/{depth_name}")
+    assert reply.status_code == 200, reply.text
+    assert reply.headers["content-type"].startswith("application/octet-stream")
+    assert reply.content == payload
+    (out / "overlays" / camera).mkdir(parents=True, exist_ok=True)
+    (out / "overlays" / camera / depth_name).write_bytes(payload)
+    assert client.get(f"/runs/run_wide/overlays/{camera}/{depth_name}").status_code == 404
+    assert client.get(f"/runs/run_wide/frames/{camera}/{name[:-4]}.f32.txt").status_code == 404
+
+
+def test_the_expert_page_links_the_schema_of_the_manifest_version_it_shows():
+    """Contracts §0: a manifest bump includes this link. The page builds
+    it from the run's own ``capture.manifest_version`` (as frames.html
+    does), and the schema for the version the writer stamps is served."""
+    from core.capture.manifest import MANIFEST_VERSION
+    from webapp.server import STATIC
+
+    page = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert "capture_manifest.v5.schema.json" not in page
+    assert "capture_manifest.v${manifestVersion}.schema.json" in page
+    assert "Number(run.capture.manifest_version)" in page
+    reply = TestClient(app).get(f"/schemas/capture_manifest.v{MANIFEST_VERSION}.schema.json")
+    assert reply.status_code == 200
+    assert reply.json()["properties"]["manifest_version"]["const"] == MANIFEST_VERSION

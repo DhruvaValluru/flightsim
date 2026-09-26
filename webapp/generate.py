@@ -222,15 +222,37 @@ def paragraph(spec: ScenarioSpec, images: int, fmt: str) -> str:
               if spec.randomization_policy is not None else None)
     policy = policy if isinstance(policy, dict) else {}
     aircraft = str(spec.aircraft.value)
-    # Places.
-    if isinstance(policy.get("location"), dict) and policy["location"].get("choice"):
-        places = "over " + ", ".join(str(p) for p in policy["location"]["choice"])
-        places += " (a place drawn per scenario)"
+    # Places, and the ground under the flight AS A HEADLESS CASE FLIES IT
+    # (flightsim.capture with no terrain flag): the ridge
+    # scene.terrain_source: synthesised states, the bake ``baked`` names,
+    # else the flat slab at terrain_elevation -- a mountain word raises
+    # that datum (the compiler's "mountainous terrain"), not the ground,
+    # so the paragraph says no hills are in the pictures rather than
+    # calling a 2000 m slab "sea level".
+    drawn_place = isinstance(policy.get("location"), dict) and policy["location"].get("choice")
+    terrain_source = str(spec.scene.terrain_source.value)
+    datum = float(spec.terrain_elevation.value)
+    if terrain_source == "synthesised":
+        ground = "over a synthesised ridge (hills of prescribed shape, not a real place)"
+    elif terrain_source == "baked":
+        ground = "over the named terrain bake"
+    elif drawn_place:
+        ground = ("over flat ground raised to each drawn place's datum; "
+                  "no hills or mountains are in the pictures")
+    elif datum > 0:
+        ground = (f"over flat ground raised to a {datum:g} m datum "
+                  f"({spec.terrain_elevation.frm}); no hills or mountains are "
+                  f"in the pictures")
+    else:
+        ground = "over flat ground at sea level"
+    if drawn_place:
+        places = (f"{ground}, at " + ", ".join(str(p) for p in policy["location"]["choice"])
+                  + " (a place drawn per scenario)")
     elif str(spec.latitude.source) != "default" or str(spec.longitude.source) != "default":
-        places = (f"near {float(spec.latitude.value):.2f} N, "
+        places = (f"{ground}, near {float(spec.latitude.value):.2f} N, "
                   f"{float(spec.longitude.value):.2f} E ({spec.latitude.frm})")
     else:
-        places = "over flat ground at sea level (no place was named)"
+        places = f"{ground} (no place was named)"
     # Conditions.
     conditions: List[str] = []
     wind = float(spec.wind_speed.value)
@@ -424,7 +446,9 @@ class GenerateService:
         try:
             spec = ScenarioSpec.from_dict(spec_dict)
         except (ValueError, KeyError) as exc:
-            raise GenerateRefusal({"error": f"spec did not parse: {exc}"}, 400)
+            # By name where the catalogue knows the sentence (spec.version);
+            # the producer's text under details otherwise, never a traceback.
+            raise GenerateRefusal(words(exc), 400)
         images = _positive_int(images, "images")
         refusals = plan_refusals(spec)
         if refusals:
@@ -625,8 +649,11 @@ class GenerateService:
             run_dir = Path(row["run_dir"])
             if not run_dir.is_dir():
                 continue
+            views = camera_views(run_dir)
             for picture in pictures(run_dir, per_camera=1):
                 items.append({
+                    "camera_words": views.get(picture["camera_id"])
+                                    or _camera_id_words(picture["camera_id"]),
                     "index": index, "case_id": row["case_id"],
                     "status": row.get("status"),
                     "status_words": state_words(f"progress.case.{row.get('status')}"),
@@ -789,10 +816,15 @@ def _guarded_image(root: Path, case_id: Optional[str], kind: str, camera_id: str
     return resolved
 
 
-#: The capture CLI's refusal lines: ``REFUSED -- <name>: ...`` and the
-#: validator's ``[<name>] message`` rows under ``REFUSED -- by name:``.
-_LOG_REFUSED = re.compile(r"^REFUSED\s*--\s*([a-z_]+(?:\.[a-z_]+)+)\s*:\s*(.*)$")
-_LOG_BRACKET = re.compile(r"^\s*\[([a-z_]+(?:\.[a-z_]+)+)\]\s*(.*)$")
+#: The capture CLI's refusal lines: ``REFUSED -- <name>: ...`` (the name
+#: dotted, or bare as the catalogue spells ``trim``) and the validator's
+#: ``[<name>] message`` rows under ``REFUSED -- by name:``. Whether the
+#: head IS a name is the catalogue's question (``is_catalogued``), not
+#: the regex's shape; a line that names no rule (``REFUSED -- <exception
+#: text>``) is read by its sentence where the catalogue recognises one.
+_LOG_REFUSED = re.compile(r"^REFUSED\s*--\s*([a-z_]+(?:\.[a-z_]+)*)\s*:\s*(.*)$")
+_LOG_BRACKET = re.compile(r"^\s*\[([a-z_]+(?:\.[a-z_]+)*)\]\s*(.*)$")
+_LOG_NAMELESS = re.compile(r"^REFUSED\s*--\s*(.+)$")
 _LOG_NUMBERS = re.compile(r"\(requested\s+(-?[0-9.]+)\s*([^,]*),\s*limit\s+(-?[0-9.]+)\s*([^)]*)\)\s*$")
 
 
@@ -807,9 +839,17 @@ def capture_refusals(log: Path) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for line in text.splitlines():
         match = _LOG_REFUSED.match(line.strip()) or _LOG_BRACKET.match(line)
-        if not match:
-            continue
-        rule, message = match.group(1), match.group(2).strip()
+        if match and (is_catalogued(match.group(1)) or "." in match.group(1)):
+            # A dotted head is a rule name as spelled (catalogued or not:
+            # words() shows the gap); a bare head is one only when the
+            # catalogue keeps it bare (``trim``), else it is a sentence.
+            rule, message = match.group(1), match.group(2).strip()
+        else:
+            nameless = _LOG_NAMELESS.match(line.strip())
+            named = name_of(nameless.group(1).strip()) if nameless else None
+            if not named or not is_catalogued(named):
+                continue                # no name the catalogue knows: the log tail says it
+            rule, message = named, nameless.group(1).strip()
         refusal: Dict[str, Any] = {"constraint": rule, "message": message}
         numbers = _LOG_NUMBERS.search(message)
         if numbers:
@@ -830,6 +870,29 @@ def log_tail(log: Path, lines: int = 12) -> List[str]:
         return []
     kept = [l for l in text.splitlines() if l.strip() and "JSBSim" not in l]
     return kept[-lines:]
+
+
+def camera_views(run_dir: Path) -> Dict[str, str]:
+    """``{camera_id: "<preset> view"}`` from the run's own manifest, so
+    the gallery names the view a person asked for (the preset word) and
+    not the directory name the capture gave it; {} when no manifest."""
+    path = Path(run_dir) / "capture_manifest.json"
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    out: Dict[str, str] = {}
+    for camera in manifest.get("cameras") or []:
+        if isinstance(camera, dict) and camera.get("camera_id") and camera.get("preset"):
+            out[str(camera["camera_id"])] = f"{camera['preset']} view"
+    return out
+
+
+def _camera_id_words(camera_id: str) -> str:
+    """A camera id with no manifest preset, read as words: ``tower_0``
+    -> ``tower view``."""
+    stem = re.sub(r"[_-]?\d+$", "", str(camera_id)).replace("_", " ").strip()
+    return f"{stem} view" if stem else str(camera_id)
 
 
 def histograms(rows: List[Dict[str, Any]], bins: int = HISTOGRAM_BINS) -> Dict[str, Any]:
@@ -867,15 +930,28 @@ def histograms(rows: List[Dict[str, Any]], bins: int = HISTOGRAM_BINS) -> Dict[s
     return out
 
 
-def _reason_words(reason: Optional[str]) -> Optional[Dict[str, Any]]:
+def _reason_words(reason: Optional[str], state: str = FAILED, **numbers: Any
+                  ) -> Optional[Dict[str, Any]]:
+    """A campaign record's ``reason`` (or a worker thread's error) in
+    words. A head the catalogue knows (``campaign.target_unreachable:
+    ...``) renders as that refusal. Any other text -- the ledger's own
+    tally on ``done``, a control request, an exception's ``TypeName:
+    message`` -- is NOT a sentence for the page: the state's catalogue
+    sentence (``progress.campaign.<state>``) is, and the producer's text
+    stays under ``details.message`` for the disclosure."""
     if not reason:
         return None
     head, sep, tail = str(reason).partition(":")
     rule = head.strip()
     if sep and is_catalogued(rule):
         return words({"constraint": rule, "message": tail.strip()})
-    return {"sentence": str(reason), "hint": "", "details": {"rule": "", "message": str(reason),
-                                                              "catalogued": False}}
+    state_rule = f"progress.campaign.{state}"
+    if not is_catalogued(state_rule):
+        state_rule = f"progress.campaign.{FAILED}"
+    explained = explain(state_rule, **numbers)
+    return {"sentence": explained["sentence"], "hint": explained["hint"],
+            "details": {"rule": state_rule, "message": str(reason), "catalogued": True,
+                        **{k: v for k, v in numbers.items() if v is not None}}}
 
 
 def progress_from(record: Dict[str, Any], rows: List[Dict[str, Any]], directory: Path,
@@ -904,14 +980,22 @@ def progress_from(record: Dict[str, Any], rows: List[Dict[str, Any]], directory:
     refused_words = [{**words({"constraint": name, "message": f"{count} slot(s)"}, count=count),
                       "count": count}
                      for name, count in summary["refusals"].items()]
+    drawn = any(bool(r.get("drawn")) for r in latest.values())
+    cases_verified = sum(1 for r in latest.values() if r.get("verified"))
+    numbers = {"done": verified, "total": target, "drawn": drawn,
+               "frames_verified": verified, "images_target": target,
+               "cases_verified": cases_verified}
     cases_words = {status: {"count": summary["cases"][status],
-                            "sentence": state_words(f"progress.case.{status}")}
+                            "sentence": state_words(f"progress.case.{status}", drawn=drawn)}
                    for status in STATUSES}
-    headline = state_words(f"progress.campaign.{state}", done=verified, total=target)
+    headline = state_words(f"progress.campaign.{state}", **numbers)
     return {
         "id": record["id"], "state": state, "headline": headline,
-        "reason": record.get("reason"), "reason_words": _reason_words(record.get("reason")),
+        "reason": record.get("reason"),
+        "reason_words": _reason_words(record.get("reason"), state, **numbers),
         "thread_error": thread_error,
+        "thread_error_words": _reason_words(thread_error, FAILED),
+        "cases_verified": cases_verified, "drawn": drawn,
         "images_target": target, "frames_verified": verified,
         "frames_captured": summary["frames_captured"],
         "fraction": round(min(1.0, verified / target), 4) if target else 0.0,
@@ -952,4 +1036,5 @@ def _control_request(directory: Path) -> Optional[str]:
 
 __all__ = ["GenerateService", "GenerateRefusal", "words", "state_words", "compile_round",
            "paragraph", "estimate", "plan_refusals", "histograms", "progress_from",
-           "pictures", "expert_campaign", "capture_refusals", "CAPTURE_RUNNER", "DEFAULT_ROOT", "FORMATS"]
+           "pictures", "camera_views", "expert_campaign", "capture_refusals",
+           "CAPTURE_RUNNER", "DEFAULT_ROOT", "FORMATS"]

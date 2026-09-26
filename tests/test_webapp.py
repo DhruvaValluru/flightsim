@@ -1525,3 +1525,75 @@ def test_terrain_source_auto_is_the_selection_as_before(control_ridge):
     assert pick_scene(spec)["key"] == "flat"
     mountains = compile_prompt("fly the 747 at 4000 m over 2000 m mountains")
     assert pick_scene(mountains)["key"] == "control"
+
+
+def test_compile_keeps_the_policy_so_the_page_digest_is_the_run_digest(client):
+    """The page's dict carries the randomisation block for editing, and
+    the policy the canonical form serialises under the same key must ride
+    with it: /run re-reads this dict, so a dropped policy meant the
+    digest shown on the page was not the digest of what ran."""
+    from core.scenario.spec import ScenarioSpec
+
+    compiled = client.post("/compile", json={
+        "prompt": "fly the a320 at 3000 m in varied weather, chase view",
+        "compiler": "regex"}).json()
+    page_dict = compiled["spec"]["dict"]
+    assert "policy" in page_dict["randomization"], page_dict["randomization"].keys()
+    assert "cloud_cover" in page_dict["randomization"]["policy"]["value"]
+    reread = ScenarioSpec.from_dict(page_dict)
+    assert reread.randomization_policy is not None
+    assert reread.digest() == compiled["spec"]["digest"]
+    assert page_dict["randomization"]["policy"] == reread.to_dict()["randomization"]["policy"]
+
+
+def test_historical_weather_never_moves_a_sampled_wind(monkeypatch):
+    """A wind the policy DREW is as fixed as one the user stated
+    (contracts §5.1): ERA5 must not overwrite it as if it were a default.
+    The fetch is stubbed and must not even be consulted."""
+    from webapp.runs import apply_historical_weather
+
+    def must_not_fetch(lat, lon, date, altitude_m):
+        raise AssertionError("ERA5 was consulted for a sampled wind")
+
+    monkeypatch.setattr("core.environment.era5.fetch_reanalysis_wind",
+                        must_not_fetch)
+    from core.scenario.fields import Quantity, Source
+
+    spec = compile_prompt("fly the 747 at 9000 m and 250 kt on 2024-01-15")
+    draw = {"policy": "randomization.policy.wind_speed_kt",
+            "distribution": "uniform", "seed": 7, "draw_index": 0}
+    for name, value in (("wind_speed", 17.0), ("wind_direction", 200.0)):
+        current = getattr(spec, name)
+        setattr(spec, name, Quantity(value=value, unit=current.unit,
+                                     source=Source.SAMPLED,
+                                     frm="drawn by the policy", detail=dict(draw)))
+    assert str(spec.wind_speed.source) == "sampled"
+    assert apply_historical_weather(spec) is None
+    assert float(spec.wind_speed.value) == 17.0
+    assert float(spec.wind_direction.value) == 200.0
+    assert str(spec.wind_speed.source) == "sampled"
+    assert any("drawn wind wins" in n for n in spec.notes)
+
+
+def test_historical_weather_refuses_the_stated_synthesised_ridge(
+        tmp_path, monkeypatch, small_synthesis):
+    """``scene.terrain_source: synthesised`` at real coordinates is a
+    ridge of prescribed statistics, not the place those coordinates
+    name: a dated spec over it refuses weather.not_a_place exactly as
+    the control ridge does, and the archive is never asked."""
+    from webapp.runs import apply_historical_weather
+
+    def must_not_fetch(lat, lon, date, altitude_m):
+        raise AssertionError("ERA5 was consulted for a synthesised ridge")
+
+    monkeypatch.setattr("core.environment.era5.fetch_reanalysis_wind",
+                        must_not_fetch)
+    monkeypatch.setattr(runs_module, "TERRAIN_DIR", tmp_path / "terrain")
+    spec = compile_prompt("fly the 747 at 4000 m and 250 kt on 2024-01-15")
+    spec.set("latitude", 46.5, frm="test")
+    spec.set("longitude", 8.5, frm="test")
+    spec.set("scene.terrain_source", "synthesised", frm="test")
+    assert pick_scene(spec)["key"] == "synthesised"
+    refusal = apply_historical_weather(spec)
+    assert refusal is not None and refusal["constraint"] == "weather.not_a_place"
+    assert str(spec.wind_speed.source) == "default"     # nothing moved

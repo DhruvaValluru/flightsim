@@ -406,13 +406,15 @@
   function renderProgress(p) {
     S.progress = p;
     $('progWords').textContent = p.headline;
-    $('progCount').textContent = `${p.frames_verified} of ${p.images_target} images checked · ${p.frames_captured} captured`;
+    $('progCount').textContent = `${p.frames_verified} of ${p.images_target} images checked, from ${p.cases_verified} scenario${p.cases_verified === 1 ? '' : 's'} · ${p.frames_captured} captured`;
     $('progBar').style.width = Math.round(100 * p.fraction) + '%';
     const t = p.timing;
     $('progTiming').textContent = t.seconds_remaining == null
       ? 'Time left: ' + t.basis
       : `About ${fmtSeconds(t.seconds_remaining)} left (${fmtSeconds(t.seconds_per_case)} per scenario measured over completed ones, ${t.workers} worker${t.workers > 1 ? 's' : ''}).`;
-    $('progReason').innerHTML = p.reason_words && p.state !== 'done' ? refusalHtml(p.reason_words) : (p.thread_error ? `<p class="dim small">${esc(p.thread_error)}</p>` : '');
+    // Always words from the catalogue; an exception's own text (a broken
+    // worker pool) sits under the disclosure, never on the default path.
+    $('progReason').innerHTML = p.reason_words && p.state !== 'done' ? refusalHtml(p.reason_words) : (p.thread_error_words ? refusalHtml(p.thread_error_words) : '');
     $('pause').disabled = p.state !== 'running'; $('resume').disabled = !(p.state === 'paused' || p.state === 'failed' || p.state === 'planned');
     $('cancel').disabled = p.state === 'done' || p.state === 'cancelled';
     $('toReview').style.display = (p.frames_captured > 0) ? '' : 'none';
@@ -432,7 +434,8 @@
       ? p.refusals_words.map((r) => `<div class="refusal"><span class="dim">${r.count} ×</span> ${esc(r.sentence)}` + (r.details && r.details.rule ? `<details><summary>rule</summary><code>${esc(r.details.rule)}</code></details>` : '') + `</div>`).join('')
       : '<span class="dim">Nothing has been refused.</span>';
     const cw = p.cases_words || {};
-    $('progCases').textContent = Object.keys(cw).filter((s) => cw[s].count).map((s) => `${cw[s].count} ${s} — ${cw[s].sentence}`).join('   ·   ');
+    // The count and the catalogue's sentence; the ledger's status word is a code name and stays out.
+    $('progCases').textContent = Object.keys(cw).filter((s) => cw[s].count).map((s) => `${cw[s].count} × ${cw[s].sentence}`).join('   ·   ');
     if (p.state === 'done') { $('h-generate').textContent = p.headline; }
   }
   async function control(what) {
@@ -455,11 +458,11 @@
     $('gallery').innerHTML = r.data.items.map((it) => {
       const v = it.verification; const mark = it.verified ? '<span class="tick">✓ checked</span>' : (it.status === 'rendered' ? '<span class="cross">✗ a check failed</span>' : `<span class="na">${esc(it.status_words)}</span>`);
       const drawn = Object.entries(it.sampled || {}).map(([k, v]) => k.replace(/_/g, ' ') + ' ' + (typeof v === 'number' ? +v.toFixed(2) : v)).join(', ');
-      return `<figure><img src="${esc(it.url)}" loading="lazy" alt="${esc(it.case_id)}"><figcaption>${mark} · ${esc(it.camera_id)}` + (v ? ` · ${v.passed} passed, ${v.failed} failed, ${v.not_run} not run` : '') + (drawn ? `<br>${esc(drawn)}` : '') + `</figcaption></figure>`;
+      return `<figure><img src="${esc(it.url)}" loading="lazy" alt="${esc(it.case_id)}"><figcaption>${mark} · ${esc(it.camera_words || it.camera_id)}` + (v ? ` · ${v.passed} passed, ${v.failed} failed, ${v.not_run} not run` : '') + (drawn ? `<br>${esc(drawn)}` : '') + `</figcaption></figure>`;
     }).join('') || '<p class="dim">No pictures yet.</p>';
     const p = S.progress || {};
     const cw = p.cases_words || {};
-    $('checks').innerHTML = Object.keys(cw).filter((s) => cw[s].count).map((s) => `<div>${s === 'verified' ? '<span class="tick">✓</span>' : (s === 'failed' || s === 'refused' ? '<span class="cross">✗</span>' : '<span class="na">·</span>')} ${cw[s].count} ${s}: ${esc(cw[s].sentence)}</div>`).join('') || '<span class="dim">No checks recorded yet.</span>';
+    $('checks').innerHTML = Object.keys(cw).filter((s) => cw[s].count).map((s) => `<div>${s === 'verified' ? '<span class="tick">✓</span>' : (s === 'failed' || s === 'refused' ? '<span class="cross">✗</span>' : '<span class="na">·</span>')} ${cw[s].count} × ${esc(cw[s].sentence)}</div>`).join('') || '<span class="dim">No checks recorded yet.</span>';
     show('review', r.data.expert);
   }
   $('toDownload').onclick = () => { $('dlFormat').value = (S.progress && S.progress.format) || $('format').value; $('dlRefusal').innerHTML = ''; show('download', [`curl -o dataset.zip "/generate/${S.campaign}/download?format=${$('dlFormat').value}"`]); };

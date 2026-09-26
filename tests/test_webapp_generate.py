@@ -440,3 +440,118 @@ def test_the_paragraph_reads_the_spec_not_a_template():
     assert "tower view" in words and "30 s" in words and "VOC" in words
     one = generate_module.paragraph(compile_prompt("fly the a320"), 1, "coco")
     assert one.startswith("1 image of the A320") and "chase view (the default" in one
+
+
+# -- the findings of the phase-2 review (webapp area) ---------------------------
+
+def test_a_bare_catalogued_name_and_a_nameless_refused_line_are_read_by_name(tmp_path):
+    """``flightsim.capture`` prints ``REFUSED -- trim: ...`` (a bare name
+    the catalogue keeps as spelled) and ``REFUSED -- <exception text>``
+    for a spec it cannot read; whether a head is a name is the
+    catalogue's question, not the regex's shape (a dot was required)."""
+    log = tmp_path / "capture.log"
+    log.write_text("REFUSED -- trim: no trim at 60 kt\n"
+                   "REFUSED -- terrain.impact: x\n", encoding="utf-8")
+    refusals = generate_module.capture_refusals(log)
+    assert [r["details"]["rule"] for r in refusals] == ["trim", "terrain.impact"]
+    assert refusals[0]["details"]["catalogued"] is True
+    assert not _rule_named(refusals[0]) and refusals[0]["sentence"].endswith(".")
+    # A nameless line whose sentence the catalogue recognises (spec.version).
+    log.write_text("REFUSED -- spec_version 99 is not supported by this build\n",
+                   encoding="utf-8")
+    versioned = generate_module.capture_refusals(log)
+    assert len(versioned) == 1 and versioned[0]["details"]["rule"] == "spec.version"
+    # A head that merely looks like a name is not one: no invented refusal.
+    log.write_text("REFUSED -- by name:\nREFUSED -- not_a_rule: whatever\n", encoding="utf-8")
+    assert generate_module.capture_refusals(log) == []
+
+
+def test_the_paragraph_says_what_ground_a_mountain_prompt_really_flies_over():
+    """'over mountains' raises the flat datum to 2000 m (the compiler's
+    inferred terrain_elevation); no ridge is synthesised unless
+    scene.terrain_source says so. The plan must say that, not 'sea level'."""
+    from core.nl.compiler import compile_prompt
+
+    spec = compile_prompt("500 images of airliners over mountains in varied weather and "
+                          "lighting, chase and tower views",
+                          answers=[{"id": "aircraft", "answer": "B747"}])
+    assert float(spec.terrain_elevation.value) == 2000.0
+    words = generate_module.paragraph(spec, 3, "coco")
+    assert words.startswith("3 images of the B747, over flat ground raised to a 2000 m datum")
+    assert "no hills or mountains are in the pictures" in words
+    assert "no place was named" in words and "sea level" not in words
+    spec.set("scene.terrain_source", "synthesised", frm="test")
+    ridge = generate_module.paragraph(spec, 3, "coco")
+    assert "over a synthesised ridge" in ridge and "not a real place" in ridge
+    flat = generate_module.paragraph(compile_prompt("fly the a320"), 1, "coco")
+    assert "over flat ground at sea level (no place was named)" in flat
+
+
+def test_an_uncatalogued_reason_never_reaches_the_sentence():
+    """A worker-pool crash writes ``BrokenProcessPool: ...`` into the
+    record; the page's sentence is the catalogue's for the state and the
+    exception's text stays under the disclosure."""
+    raw = "BrokenProcessPool: A process in the process pool was terminated abruptly"
+    rendered = generate_module._reason_words(raw, "failed")
+    assert rendered["sentence"] == "The campaign stopped on an error."
+    assert rendered["details"]["message"] == raw
+    assert rendered["details"]["rule"] == "progress.campaign.failed"
+    assert "BrokenProcessPool" not in rendered["sentence"] + rendered["hint"]
+    # A catalogued head still renders as that refusal.
+    named = generate_module._reason_words("campaign.target_unreachable: 3 slot(s) refused", "failed")
+    assert named["details"]["rule"] == "campaign.target_unreachable"
+    assert named["sentence"].startswith("The campaign could not reach")
+    # The ledger's own tally on done is the state's sentence with the numbers under details.
+    done = generate_module._reason_words("1000 verified frame(s) of 3", "done",
+                                         done=1000, total=3, cases_verified=1)
+    assert done["sentence"].startswith("Every requested image has its labels generated and checked")
+    assert done["details"]["cases_verified"] == 1 and done["details"]["message"] == "1000 verified frame(s) of 3"
+
+
+def test_progress_puts_a_thread_error_and_the_done_tally_in_words(client):
+    root = generator.root
+    campaign = Campaign.create(ASKS_VIEW, answers=ANSWER, images=3, seed=7,
+                               out=root / "0123456789ab", tier="regex")
+    ledger = Ledger(campaign.dir / "ledger.jsonl")
+    ledger.append({"index": 0, "status": "verified", "case_id": "c" * 16, "run_dir": "x",
+                   "ok": True, "verified": True, "frames": 1000, "yield": 1000, "bytes": 10,
+                   "wall_seconds": 1.0, "sampled": {}})
+    campaign._transition("running")
+    campaign._transition("done", "1000 verified frame(s) of 3")
+    payload = generate_module.progress_from(
+        campaign.record, ledger.rows(), campaign.dir,
+        thread_error="BrokenProcessPool: A process in the process pool was terminated abruptly")
+    assert payload["state"] == "done" and payload["cases_verified"] == 1
+    assert payload["frames_verified"] == 1000 and payload["images_target"] == 3
+    assert payload["reason_words"]["details"]["catalogued"] is True
+    assert payload["reason_words"]["sentence"] == payload["headline"]
+    assert payload["thread_error_words"]["sentence"] == "The campaign stopped on an error."
+    assert "BrokenProcessPool" in payload["thread_error_words"]["details"]["message"]
+    for key in ("headline", "reason_words", "thread_error_words"):
+        value = payload[key]["sentence"] if isinstance(payload[key], dict) else payload[key]
+        assert "BrokenProcessPool" not in value and "verified frame(s)" not in value
+    assert generate_module.progress_from(campaign.record, ledger.rows(), campaign.dir)[
+        "thread_error_words"] is None
+
+
+def test_the_gallery_names_the_view_not_the_camera_directory(done_client, done_campaign):
+    items = done_client.get(f"/generate/{done_campaign['id']}/frames").json()["items"]
+    assert items and all(it["camera_words"] == "chase view" for it in items)
+    assert generate_module._camera_id_words("tower_0") == "tower view"
+    assert generate_module._camera_id_words("chase") == "chase view"
+    assert generate_module.camera_views(Path("/nonexistent")) == {}
+
+
+def test_the_page_s_default_path_interpolates_no_code_identifier():
+    """The page prints the count with the catalogue's sentence, the view's
+    words and the catalogue's error sentence -- never the ledger's status
+    key, the camera directory or an exception's text."""
+    html = (generate_module.REPO / "webapp" / "static" / "generate.html").read_text(encoding="utf-8")
+    assert "${cw[s].count} ${s}" not in html
+    assert "${cw[s].count} × ${cw[s].sentence}" in html
+    assert "it.camera_words || it.camera_id" in html
+    assert "refusalHtml(p.thread_error_words)" in html
+    assert "esc(p.thread_error)" not in html
+    expert = (generate_module.REPO / "webapp" / "static" / "index.html").read_text(encoding="utf-8")
+    assert "capture_manifest.v5" not in expert
+    assert "capture_manifest.v${manifestVersion}.schema.json" in expert

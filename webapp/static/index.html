@@ -1182,10 +1182,18 @@ async function initGallery(runId, run) {
   // The run's own records, once: the whole manifest, its verdict, the
   // schema it validates against, and the run card the engine consumed.
   if (run.capture && run.capture.manifest_version !== undefined || cameras.length) {
+    // The schema link is built from the version the run's manifest
+    // states (as frames.html does), never a hard-coded number: a bump
+    // in core/capture/manifest.py must not leave this page pointing a
+    // reader at a schema that lacks the new sections.
+    const manifestVersion = run.capture ? Number(run.capture.manifest_version) : NaN;
+    const schemaLink = Number.isInteger(manifestVersion)
+      ? `<a href="/schemas/capture_manifest.v${manifestVersion}.schema.json">manifest schema (v${manifestVersion})</a> &middot; `
+      : '';
     html.push(`<div class="dim" style="margin-top:6px">run files: ` +
       `<a href="/runs/${runId}/capture_manifest.json">capture manifest</a> &middot; ` +
       `<a href="/runs/${runId}/verify.json">verification</a> &middot; ` +
-      `<a href="/schemas/capture_manifest.v5.schema.json">manifest schema</a> &middot; ` +
+      schemaLink +
       `<a href="/runs/${runId}/card.json">run card</a> &middot; ` +
       `<a href="/runs/${runId}/provenance.json">provenance</a></div>`);
   }
