@@ -55,6 +55,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..environment.surface import SURFACE_CLASSES
+from ..scenario.blocks import MAX_TRAFFIC, TRAFFIC_TRACKS, TrafficSpec
 from ..scenario.camera import (CAMERA_PRESETS, CameraSpec,
                                plan_full_capture)
 from ..scenario.fields import Quantity, Source
@@ -165,8 +166,27 @@ class LLMCompileError(Exception):
     Raised for transport failures, refusals, malformed JSON, unknown fields,
     out-of-vocabulary values and wrong types. The message is user-facing:
     the web app renders it as the outcome of /compile rather than guessing
-    at a repair.
+    at a repair -- so it is a plain sentence, never an exception's repr.
+    ``constraint`` is the catalogue name when the failure has its own
+    (``compile.unreachable``: the call never reached a model); the
+    sentence-named ones (``compile.rejected``, ``compile.unavailable``)
+    leave it None. ``details`` carries the technical text (the transport
+    error's class and message) for a log or a disclosure, never for the
+    default path.
     """
+
+    def __init__(self, message: str, constraint: Optional[str] = None,
+                 details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message)
+        self.message = message
+        self.constraint = constraint
+        self.details = dict(details or {})
+
+
+#: The sentence a transport failure shows: what happened and what the
+#: person can do, with nothing of the exception in it.
+UNREACHABLE_SENTENCE = ("the language model could not be reached; the "
+                        "offline compiler is available meanwhile")
 
 
 @dataclass(frozen=True)
@@ -282,6 +302,20 @@ _unknown_camera = set(CAMERA_FIELD_VALUE_SCHEMAS) - _CAMERA_FIELDS
 assert not _unknown_camera, (
     f"llm_compiler camera schema names non-camera fields: "
     f"{_unknown_camera}")
+
+#: Spec 8 (contracts §2.2): the traffic fields the model may write --
+#: the airframe (the one field with no default), the track and the
+#: range; the livery stays with YAML. Bounded by MAX_TRAFFIC entries.
+TRAFFIC_FIELD_VALUE_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "aircraft": {"type": "string", "enum": list(AIRCRAFT_MODELS)},
+    "track": {"type": "string", "enum": list(TRAFFIC_TRACKS)},
+    "range_m": {"type": "number",
+                "description": "metres from the primary aircraft"},
+}
+_unknown_traffic = set(TRAFFIC_FIELD_VALUE_SCHEMAS) - set(TrafficSpec.FIELD_ORDER)
+assert not _unknown_traffic, (
+    f"llm_compiler traffic schema names non-traffic fields: "
+    f"{_unknown_traffic}")
 
 #: Spec 8 (contracts §5.3): the policy leaves the model may write, a
 #: deliberately hand-listed subset of the sampler's POLICY_LEAVES (the
@@ -452,6 +486,22 @@ RESPONSE_SCHEMA: Dict[str, Any] = {
                     "description": "camera leaves, applied to every camera",
                     "properties": dict(RANDOMIZATION_CAMERA_VALUE_SCHEMAS),
                 }),
+            },
+        },
+        "traffic": {
+            "type": "array",
+            "maxItems": MAX_TRAFFIC,
+            "description": "Other aircraft the prompt asks to fly beside "
+                           "the primary; [] when it names none.",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["aircraft"],
+                "properties": {
+                    name: _field_schema(value_schema)
+                    for name, value_schema
+                    in TRAFFIC_FIELD_VALUE_SCHEMAS.items()
+                },
             },
         },
     },
@@ -650,6 +700,19 @@ prompt has no camera or capture language):
   with no camera language at all gets no camera and no question: the
   documented default view applies.
 
+Traffic ("traffic" is a top-level list beside "fields"; [] when the
+prompt names no second aircraft):
+- "with an A320 crossing 400 m ahead", "a 737 in formation", "a
+  Cessna overtaking" -> one entry per other aircraft, at most two,
+  each carrying provenanced fields exactly like "fields": aircraft
+  (REQUIRED, the airframe named), track (formation | crossing |
+  overtaking, when the prompt says how it flies), range_m (metres
+  from the primary, when stated). Nothing else; livery and geometry
+  are not yours to invent. The PRIMARY aircraft stays in "fields".
+- A second aircraft named without a track is still a traffic entry
+  (the documented default track applies); a formation or a crowd the
+  list cannot hold ("a squadron", "busy airspace") goes to "notes".
+
 """ + _randomization_block() + """
 
 """ + _locations_block() + """
@@ -758,13 +821,13 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
     # language) -- the same OpenAI-compat tolerance the two list keys
     # above get; every per-entry rail below stays fully strict.
     payload.setdefault("cameras", [])
-    # Spec 8: an absent randomization block claims what {} does.
+    # Spec 8: an absent randomization block claims what {} does, and an
+    # absent traffic list what [] does.
     payload.setdefault("randomization", {})
-    if set(payload) != {"fields", "notes", "questions", "cameras",
-                        "randomization"}:
+    payload.setdefault("traffic", [])
+    if set(payload) != set(RESPONSE_TOP_LEVEL_KEYS):
         raise _fail(f"top-level keys {sorted(payload)} != "
-                    f"['cameras', 'fields', 'notes', 'questions', "
-                    f"'randomization']")
+                    f"{sorted(RESPONSE_TOP_LEVEL_KEYS)}")
     fields, notes = payload["fields"], payload["notes"]
     if not isinstance(fields, dict):
         raise _fail("'fields' is not an object")
@@ -1021,6 +1084,52 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
         if problems:
             raise _fail("randomization leaf of an undocumented form: "
                         + "; ".join(problems))
+
+    # -- traffic (spec 8, contracts §2.2): the same rails as a camera --
+    traffic = payload["traffic"]
+    if not isinstance(traffic, list):
+        raise _fail("'traffic' is not a list")
+    if len(traffic) > MAX_TRAFFIC:
+        raise _fail(f"{len(traffic)} traffic aircraft exceed the cap of "
+                    f"{MAX_TRAFFIC}")
+    for index, block in enumerate(traffic):
+        if not isinstance(block, dict) or not block:
+            raise _fail(f"traffic {index} must be an object of traffic "
+                        f"fields")
+        for name in [n for n, e in block.items()
+                     if isinstance(e, dict) and e.get("value") is None]:
+            del block[name]
+        if "aircraft" not in block:
+            raise _fail(f"traffic {index} names no aircraft; the airframe "
+                        f"is the one traffic field with no default")
+        for name, entry in block.items():
+            if name not in TRAFFIC_FIELD_VALUE_SCHEMAS:
+                raise _fail(f"traffic {index}: unknown traffic field "
+                            f"{name!r}")
+            if not isinstance(entry, dict) \
+                    or set(entry) != {"value", "source", "from"}:
+                raise _fail(f"traffic {index} field {name!r} must carry "
+                            f"exactly value/source/from")
+            if entry["source"] not in ("user", "inferred", "model"):
+                raise _fail(f"traffic {index} field {name!r} claims source "
+                            f"{entry['source']!r}; only 'user', "
+                            f"'inferred' or 'model' may be claimed")
+            if not (isinstance(entry["from"], str)
+                    and entry["from"].strip()):
+                raise _fail(f"traffic {index} field {name!r} has no "
+                            f"provenance phrase")
+            value_schema = TRAFFIC_FIELD_VALUE_SCHEMAS[name]
+            value = entry["value"]
+            if value_schema["type"] == "number":
+                if isinstance(value, bool) \
+                        or not isinstance(value, (int, float)):
+                    raise _fail(f"traffic {index} field {name!r} value "
+                                f"{value!r} is not a number")
+            elif "enum" in value_schema \
+                    and value not in value_schema["enum"]:
+                raise _fail(f"traffic {index} field {name!r} value "
+                            f"{value!r} is outside the vocabulary "
+                            f"{value_schema['enum']}")
     return payload
 
 
@@ -1133,8 +1242,13 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
         )
     except LLMCompileError:
         raise
-    except Exception as exc:   # transport/API errors, shown not swallowed
-        raise _fail(f"API call failed ({type(exc).__name__}: {exc})") from exc
+    except Exception as exc:   # transport/API errors: named, never swallowed
+        # The call never reached a model, so nothing was "rejected": the
+        # sentence says what happened in words, and the exception's
+        # class and text ride in details for a log, not the page.
+        raise LLMCompileError(
+            UNREACHABLE_SENTENCE, constraint="compile.unreachable",
+            details={"error": f"{type(exc).__name__}: {exc}"}) from exc
 
     if getattr(response, "stop_reason", None) == "refusal":
         raise _fail("the model declined the request (stop_reason=refusal)")
@@ -1186,6 +1300,23 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
         plan_full_capture(camera, frm="a view named in the prompt with "
                                       "no count captures the whole clip")
         spec.cameras.append(camera)
+
+    # Spec 8 (contracts §2.2): every traffic aircraft the model named,
+    # the documented defaults under the fields it did not state.
+    for block in payload["traffic"]:
+        aircraft_entry = block["aircraft"]
+        entry = TrafficSpec.defaulted(str(aircraft_entry["value"]))
+        for name, field_entry in block.items():
+            current = getattr(entry, name)
+            value = field_entry["value"]
+            if TRAFFIC_FIELD_VALUE_SCHEMAS[name]["type"] == "number":
+                value = float(value)
+            setattr(entry, name, Quantity(
+                value=value, unit=current.unit,
+                source={"user": Source.USER, "inferred": Source.INFERRED,
+                        "model": Source.MODEL}[field_entry["source"]],
+                frm=field_entry["from"].strip()))
+        spec.traffic.append(entry)
 
     # Spec 8: the policy the model wrote, one provenanced Quantity whose
     # value is the leaf mapping, attributed per leaf; the block switches

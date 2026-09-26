@@ -71,6 +71,12 @@ CORPUS = [
      {"presets": ["cockpit"], "moves": set(), "ignored": True, "question": False}),
     ("chase view of the 747, pan left across the ridge",
      {"presets": ["chase"], "moves": set(), "question": False}),
+    # "<preset> camera" names the view like "<preset> view" (the guided
+    # page asked "which point of view?" of a prompt saying "tower camera").
+    ("fly the 747 at 400 m over 1000 m mountains with a tower camera at 400 m",
+     {"presets": ["tower"], "question": False}),
+    ("a ground camera on the a320 at 2000 ft",
+     {"presets": ["ground"], "question": False}),
 ]
 
 

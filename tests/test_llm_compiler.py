@@ -223,12 +223,34 @@ def test_refusal_stop_reason_is_an_error():
 
 
 def test_api_failure_is_reported_not_swallowed():
+    """A transport failure is named (compile.unreachable) and told in
+    a plain sentence; the exception's class and text ride in details,
+    never in what the page shows (measured on the guided page: the
+    default tier's note read 'API call failed (URLError: <urlopen
+    error Tunnel connection failed: 403 Forbidden>)' and said
+    'rejected' for a call that never reached a model)."""
+    from core.messages import name_of
+
     def create(**kwargs):
-        raise ConnectionError("network unreachable")
+        raise ConnectionError("Tunnel connection failed: 403 Forbidden")
 
     client = SimpleNamespace(messages=SimpleNamespace(create=create))
-    with pytest.raises(LLMCompileError, match="API call failed"):
+    with pytest.raises(LLMCompileError) as err:
         compile_prompt_llm("anything", client=client)
+    message = str(err.value)
+    assert message == ("the language model could not be reached; the "
+                       "offline compiler is available meanwhile")
+    assert "rejected" not in message
+    assert "Error" not in message and "403" not in message
+    assert err.value.constraint == "compile.unreachable"
+    assert name_of(err.value) == "compile.unreachable"
+    assert err.value.details == {
+        "error": "ConnectionError: Tunnel connection failed: 403 Forbidden"}
+    # A response the model DID give still says so, by the old name.
+    with pytest.raises(LLMCompileError) as rejected:
+        compile_prompt_llm("anything", client=fake_client("not json"))
+    assert rejected.value.constraint is None
+    assert name_of(rejected.value) == "compile.rejected"
 
 
 # -- schema consistency ----------------------------------------------------
@@ -949,13 +971,15 @@ def test_the_prompt_s_shape_sentence_is_generated_from_the_schema():
     assert RESPONSE_TOP_LEVEL_KEYS == keys
     assert "cameras" in keys
     assert "randomization" in keys          # spec 8, package F: the fifth
+    assert "traffic" in keys                # spec 8, contracts §2.2: the sixth
     sentence = response_shape_sentence()
     assert sentence in SYSTEM_PROMPT
-    assert "five keys" in sentence
+    assert "six keys" in sentence
     for key in keys:
         assert f'"{key}"' in sentence
     assert "three keys" not in SYSTEM_PROMPT
     assert "four keys" not in SYSTEM_PROMPT
+    assert "five keys" not in SYSTEM_PROMPT
     # The generator, not the wording, is the contract: a three-key schema
     # would say so.
     assert "three keys" in response_shape_sentence(
@@ -1093,3 +1117,78 @@ def test_the_prompt_teaches_the_documented_phrases_from_the_compiler_s_table():
     for family in RANDOMIZATION_FAMILIES.values():
         assert json.dumps(family) in SYSTEM_PROMPT
     assert "rockies" in SYSTEM_PROMPT and "dawn 5.5-8 h" in SYSTEM_PROMPT
+
+
+# -- traffic (spec 8, contracts §2.2): the LLM tier can state the second aircraft --
+
+def _traffic_payload(*entries):
+    return {"fields": {}, "notes": [], "questions": [], "traffic": list(entries)}
+
+
+def test_the_model_can_state_a_traffic_aircraft_with_provenance():
+    """Before this, _parse_payload accepted exactly {fields, notes,
+    questions, cameras, randomization}: the second-aircraft label path
+    was reachable from YAML only. The contract's own example
+    (source user, from "an A320 crossing") now compiles."""
+    result = compile_prompt_llm("a B747 with an A320 crossing", client=fake_client(
+        _traffic_payload({
+            "aircraft": entry("A320", "user", "an A320 crossing"),
+            "track": entry("crossing", "user", "crossing"),
+            "range_m": entry(650, "user", "650 m ahead"),
+        })))
+    assert len(result.spec.traffic) == 1
+    traffic = result.spec.traffic[0]
+    assert str(traffic.aircraft.value) == "A320"
+    assert str(traffic.aircraft.source) == "user"
+    assert traffic.aircraft.frm == "an A320 crossing"
+    assert str(traffic.track.value) == "crossing"
+    assert float(traffic.range_m.value) == 650.0
+    assert str(traffic.range_m.source) == "user"
+    assert str(traffic.livery.source) == "default"     # YAML's field, defaulted
+    # Serialises as the contract's block and survives the round trip.
+    block = result.spec.to_dict()["traffic"][0]
+    assert block["aircraft"] == {"value": "A320", "source": "user",
+                                 "from": "an A320 crossing"}
+    assert ScenarioSpec.from_dict(result.spec.to_dict()).digest() == result.spec.digest()
+    assert validate(result.spec, check_feasibility=False).ok
+    # An absent key claims what [] does; a stated track alone keeps the range default.
+    plain = compile_prompt_llm("fly the 747", client=fake_client(
+        {"fields": {}, "notes": [], "questions": []}))
+    assert plain.spec.traffic == []
+    ranged = compile_prompt_llm("x", client=fake_client(_traffic_payload(
+        {"aircraft": entry("c172p", "user", "a cessna")})))
+    assert str(ranged.spec.traffic[0].track.value) == "crossing"
+    assert str(ranged.spec.traffic[0].track.source) == "default"
+
+
+@pytest.mark.parametrize("payload,reason", [
+    (_traffic_payload({"track": entry("crossing")}), "names no aircraft"),
+    (_traffic_payload({"aircraft": entry("dragon")}), "outside the vocabulary"),
+    (_traffic_payload({"aircraft": entry("A320"), "livery": entry("red")}),
+     "unknown traffic field"),
+    (_traffic_payload({"aircraft": entry("A320"), "track": entry("orbit")}),
+     "outside the vocabulary"),
+    (_traffic_payload({"aircraft": entry("A320"), "range_m": entry("far")}),
+     "not a number"),
+    (_traffic_payload({"aircraft": {"value": "A320", "source": "user"}}),
+     "exactly value/source/from"),
+    (_traffic_payload({"aircraft": entry("A320", "guess")}), "claims source"),
+    (_traffic_payload(*[{"aircraft": entry("A320")}] * 3), "exceed the cap"),
+    ({"fields": {}, "notes": [], "questions": [], "traffic": {"aircraft": "A320"}},
+     "not a list"),
+])
+def test_a_traffic_entry_faces_the_same_rails_as_a_camera(payload, reason):
+    with pytest.raises(LLMCompileError, match=reason):
+        compile_prompt_llm("anything", client=fake_client(payload))
+
+
+def test_the_traffic_schema_is_bounded_and_tied_to_the_block():
+    from core.nl.llm_compiler import TRAFFIC_FIELD_VALUE_SCHEMAS
+    from core.scenario.blocks import MAX_TRAFFIC, TrafficSpec
+
+    schema = RESPONSE_SCHEMA["properties"]["traffic"]
+    assert schema["maxItems"] == MAX_TRAFFIC
+    assert schema["items"]["required"] == ["aircraft"]
+    assert set(schema["items"]["properties"]) == set(TRAFFIC_FIELD_VALUE_SCHEMAS)
+    assert set(TRAFFIC_FIELD_VALUE_SCHEMAS) < set(TrafficSpec.FIELD_ORDER)
+    assert "livery" not in TRAFFIC_FIELD_VALUE_SCHEMAS

@@ -89,6 +89,59 @@ WIND_RELATIVE: Dict[str, float] = {
 
 NUMBER = r"(-?\d+(?:\.\d+)?)"
 
+#: The regex path's aircraft question (asked beside the camera one, see
+#: :func:`camera_questions`): the options are plain names, each a phrase
+#: AIRCRAFT_WORDS maps, so a chosen option compiles through the same
+#: vocabulary as the prompt.
+AIRCRAFT_QUESTION_ID = "aircraft"
+AIRCRAFT_QUESTION = "Which aircraft should fly?"
+AIRCRAFT_OPTIONS: Tuple[str, ...] = (
+    "Boeing 747", "Airbus A320", "Cessna 172", "Boeing 737", "Global 5000",
+    "F-16", "F-15",
+)
+
+#: Words that name a KIND of aircraft, not a type ("a small plane",
+#: "airliners"): the question is asked and, meanwhile, the documented
+#: default flies -- it is a member of the kind, the way the default
+#: chase view is a view. A SPECIFIC name the vocabulary lacks ("the
+#: dragon", "a Pilatus PC-12") is the person speaking: it is carried as
+#: stated and refused by name (``aircraft.exists``), never replaced.
+AIRCRAFT_CLASS_WORDS: Tuple[str, ...] = (
+    "plane", "planes", "aircraft", "airplane", "airplanes", "aeroplane",
+    "aeroplanes", "airliner", "airliners", "jet", "jets", "jetliner",
+    "jetliners", "transport", "transports", "fighter", "fighters",
+)
+
+#: Words a flight or imagery verb may be followed by that are NOT the
+#: thing flown: no subject is named, the documented default applies and
+#: nothing is asked (exactly today's behaviour for "fly at 6000 m").
+_NOT_A_SUBJECT = frozenset("""
+at over above across through into in on from with for along around under
+below toward towards up down out low high fast slow slowly quickly north
+south east west heading straight level it them this that these those same
+again then and or to by of off the a an my our your some one two
+mountain mountains ridge ridges terrain valley canyon peak peaks hill hills
+ground sea ocean desert forest city coast coastline river lake island
+tornado twister storm thunderstorm cloud clouds rain snow fog weather wind
+winds crosswind headwind tailwind sunrise sunset dawn dusk night day
+morning evening noon sun moon sky horizon
+chase wingman tower cockpit camera cameras view views image images photo
+photos picture pictures footage film video frames stills snapshot
+snapshots capture render shot shots scene scenes flight flights approach
+landing takeoff climb descent cruise
+yosemite matterhorn fuji everest alps rockies himalayas kansas
+""".split())
+_SUBJECT_VERBS = (r"(?:fly|flying|flies|chase|chasing|follow|following|"
+                  r"track|tracking|film|filming|photograph|photographing|"
+                  r"render|rendering|simulate|simulating|land|landing)")
+_SUBJECT_OF = (r"(?:images?|photos?|photographs?|pictures?|stills|frames|"
+               r"footage|video|shots?|snapshots?|captures?|renders?|"
+               r"dataset|views?|camera)\s+of")
+_SUBJECT_PHRASE = re.compile(
+    rf"\b(?:{_SUBJECT_VERBS}|{_SUBJECT_OF})\s+"
+    r"(?:(?:the|a|an|my|our|some|this|that)\s+)?"
+    r"([a-z][a-z0-9-]*)(?:\s+([a-z][a-z0-9-]*))?", re.IGNORECASE)
+
 
 def _search(pattern: str, text: str) -> Optional[re.Match]:
     return re.search(pattern, text, flags=re.IGNORECASE)
@@ -97,12 +150,141 @@ def _search(pattern: str, text: str) -> Optional[re.Match]:
 # -- individual extractors ----------------------------------------------
 
 
-def _aircraft(text: str) -> Quantity:
+def _named_subject(text: str) -> Optional[Tuple[str, bool]]:
+    """``(phrase, is_class_word)`` for the thing a flight or imagery
+    verb names when no AIRCRAFT_WORDS phrase matched, or None when the
+    slot after the verb is empty (a preposition, a place, a number)."""
+    for phrase, _ in AIRCRAFT_WORDS:
+        if phrase in text:
+            return None
+    for m in _SUBJECT_PHRASE.finditer(text):
+        first, second = m.group(1), m.group(2)
+        if first in _NOT_A_SUBJECT or first[0].isdigit():
+            continue
+        if first in AIRCRAFT_CLASS_WORDS:
+            return first, True
+        if second in AIRCRAFT_CLASS_WORDS:
+            return f"{first} {second}", True
+        if second and second not in _NOT_A_SUBJECT \
+                and not second[0].isdigit():
+            return f"{first} {second}", False
+        return first, False
+    return None
+
+
+def aircraft_question(text: str) -> Optional[Dict[str, Any]]:
+    """The aircraft question, when the prompt names a kind of aircraft
+    or a name the vocabulary lacks; None when it names a known type or
+    no aircraft at all."""
+    if _named_subject(" ".join(text.lower().split())) is None:
+        return None
+    return {"id": AIRCRAFT_QUESTION_ID, "question": AIRCRAFT_QUESTION,
+            "options": list(AIRCRAFT_OPTIONS)}
+
+
+def _answered_aircraft(answers) -> Optional[Quantity]:
+    """The aircraft an ``aircraft`` answer names (source ``user``, the
+    question and answer recorded), or None when nothing answered it.
+    An answer the vocabulary cannot map is still the person speaking:
+    it is carried as stated and refused by name, never defaulted."""
+    for answer in answers or []:
+        if str(answer.get("id")) != AIRCRAFT_QUESTION_ID:
+            continue
+        text = " ".join(str(answer.get("answer", "")).lower().split())
+        if not text:
+            continue
+        frm = f'answer to "{AIRCRAFT_QUESTION}": "{answer.get("answer")}"'
+        for phrase, model in AIRCRAFT_WORDS:
+            if phrase in text:
+                return Quantity.user(model, frm=frm)
+        for model in dict((m, None) for _, m in AIRCRAFT_WORDS):
+            if model.lower() == text:
+                return Quantity.user(model, frm=frm)
+        return Quantity.user(text, frm=frm)
+    return None
+
+
+def _aircraft(text: str, answers=None) -> Quantity:
     for phrase, model in AIRCRAFT_WORDS:
         if phrase in text:
             return Quantity.user(model, frm=phrase)
+    answered = _answered_aircraft(answers)
+    if answered is not None:
+        return answered
+    subject = _named_subject(text)
+    if subject is not None and not subject[1]:
+        # A name the vocabulary lacks is stated, not guessed around:
+        # validate() refuses it as aircraft.exists, by name.
+        return Quantity.user(subject[0], frm=subject[0])
     return Quantity.default("B747", frm="widest measured trim envelope of the "
                                         "candidate transports")
+
+
+def _other_airframes(text: str, primary: str) -> List[str]:
+    """Aircraft phrases naming a model other than the primary, in the
+    text with the traffic clauses removed: a second aircraft the
+    compiler could not place."""
+    out: List[str] = []
+    seen = {primary}
+    for phrase, model in AIRCRAFT_WORDS:
+        if model not in seen and _search(rf"\b{re.escape(phrase)}\b", text):
+            seen.add(model)
+            out.append(phrase)
+    return out
+
+
+# -- traffic (spec 8, contracts §2.2): the scripted second aircraft ------
+
+#: Track words -> the TRAFFIC_TRACKS kind (core.scenario.blocks).
+TRAFFIC_TRACK_WORDS: Tuple[Tuple[str, str], ...] = (
+    ("in formation", "formation"), ("formation", "formation"),
+    ("alongside", "formation"),
+    ("crossing", "crossing"), ("crosses", "crossing"),
+    ("overtaking", "overtaking"), ("overtakes", "overtaking"),
+    ("passing", "overtaking"),
+)
+_AIRCRAFT_ALT = "|".join(re.escape(p) for p, _ in
+                         sorted(AIRCRAFT_WORDS, key=lambda e: -len(e[0])))
+_TRACK_ALT = "|".join(re.escape(p) for p, _ in
+                      sorted(TRAFFIC_TRACK_WORDS, key=lambda e: -len(e[0])))
+#: "with an A320 crossing 400 m ahead", "and a 737 in formation": a
+#: lead-in word, an airframe the vocabulary knows, a track word, an
+#: optional range. The lead-in is required so "the 747 crossing the
+#: alps" stays the primary's own flight.
+TRAFFIC_PHRASE = re.compile(
+    rf"\b(?:with|and|plus)\s+(?:(?:an?|the|another|one|a second)\s+)?"
+    rf"(?P<aircraft>{_AIRCRAFT_ALT})\s+(?:(?:traffic|aircraft)\s+)?"
+    rf"(?P<track>{_TRACK_ALT})\b"
+    rf"(?:\s+(?:at|from|about|some|roughly)?\s*(?P<range>\d+(?:\.\d+)?)\s*"
+    r"(?P<unit>km|m|metres?|meters?)\b"
+    r"(?:\s+(?:ahead|away|off|out|behind|abeam|to the side|in front))?)?",
+    re.IGNORECASE)
+
+
+def _traffic(text: str):
+    """(traffic entries, the text with their clauses removed). Every
+    field a clause states is ``user`` with the phrase; the rest are the
+    documented traffic defaults. More entries than the contract allows
+    are all recorded and refused by name (``traffic.count``), never
+    silently dropped."""
+    from ..scenario.blocks import TrafficSpec
+
+    entries = []
+    for m in TRAFFIC_PHRASE.finditer(text):
+        model = dict(AIRCRAFT_WORDS)[m.group("aircraft").lower()]
+        track = dict(TRAFFIC_TRACK_WORDS)[m.group("track").lower()]
+        clause = m.group(0).strip()
+        entry = TrafficSpec.defaulted(model, track=track)
+        entry.aircraft = Quantity.user(model, frm=clause)
+        entry.track = Quantity.user(track, frm=m.group("track"))
+        if m.group("range"):
+            metres = float(m.group("range"))
+            if m.group("unit").lower() == "km":
+                metres *= 1000.0
+            entry.range_m = Quantity.user(
+                metres, "m", frm=f"{m.group('range')} {m.group('unit')}")
+        entries.append(entry)
+    return entries, TRAFFIC_PHRASE.sub(" ", text)
 
 
 #: A terrain phrase: "over 3000 m terrain", "above 9000 ft ridge".
@@ -302,7 +484,11 @@ def _duration(text: str) -> Quantity:
     m = _search(rf"(?:for|during|over)\s+{NUMBER}\s*(?:s|sec|secs|second|seconds)\b", text)
     if m:
         return Quantity.user(float(m.group(1)), "s", frm=m.group(0).strip())
-    m = _search(rf"(?:for|during|over)\s+{NUMBER}\s*(?:m|min|mins|minute|minutes)\b", text)
+    # Minutes are spelled out: a bare "m" is metres everywhere else in
+    # this vocabulary, and "over 2000 m terrain" once compiled to a
+    # 2000-minute flight (a user-stated field that was wrong, which the
+    # provenance rules can never catch).
+    m = _search(rf"(?:for|during|over)\s+{NUMBER}\s*(?:min|mins|minute|minutes)\b", text)
     if m:
         return Quantity.user(float(m.group(1)) * 60.0, "s", frm=m.group(0).strip())
     return Quantity.default(120.0, "s", frm="long enough to settle and observe")
@@ -326,6 +512,8 @@ CAMERA_VIEW_WORDS: Tuple[Tuple[str, str], ...] = (
     ("wingman", "wingman"),
     ("from the tower", "tower"),
     ("tower view", "tower"),
+    ("tower camera", "tower"),
+    ("ground camera", "ground"),
     ("control tower", "tower"),
     ("the tower", "tower"),
     ("ground observer", "ground"),
@@ -376,16 +564,24 @@ OFFSET_PRESETS = ("chase", "wingman")
 
 
 def camera_questions(prompt: str) -> List[Dict[str, Any]]:
-    """The regex path's clarifying question, or []: asked exactly when
-    the prompt speaks of imagery and names no view."""
+    """The regex path's clarifying questions, or []: the aircraft when
+    the prompt names a kind of aircraft or a name the vocabulary lacks
+    (:func:`aircraft_question`), and the view when the prompt speaks of
+    imagery and names no view. Each is asked once; the answer round
+    compiles with the answers and asks nothing."""
     text = " ".join(prompt.lower().split())
+    questions: List[Dict[str, Any]] = []
+    asked = aircraft_question(text)
+    if asked is not None:
+        questions.append(asked)
     if _view_mentions(text):
-        return []
+        return questions
     if not any(_search(rf"\b{word}\b", text) for word in IMAGERY_WORDS):
-        return []
-    return [{"id": CAMERA_QUESTION_ID,
-             "question": "Which point of view should the camera take?",
-             "options": list(CAMERA_VIEW_OPTIONS)}]
+        return questions
+    questions.append({"id": CAMERA_QUESTION_ID,
+                      "question": "Which point of view should the camera take?",
+                      "options": list(CAMERA_VIEW_OPTIONS)})
+    return questions
 
 
 def _view_mentions(text: str) -> List[Tuple[str, str]]:
@@ -642,6 +838,58 @@ RANDOMIZATION_WORDS: Tuple[Tuple[str, str], ...] = (
     (rf"{_VARY} traffic", "traffic"),
     (r"(?:other|background|some|with) traffic", "traffic"),
 )
+#: The nouns the phrase table can vary, for a conjunction: "varied
+#: weather and lighting" is every noun varied, not the first. An item
+#: the table cannot vary is reported in a note (see _dangling_items),
+#: never silently dropped.
+_FAMILY_NOUN = (r"(?:weather(?: conditions)?|light(?:ing)?(?: conditions)?|"
+                r"times? of (?:the )?day|hours(?: of the day)?|"
+                r"viewpoints?|views?|perspectives?|angles|"
+                r"camera (?:angles?|positions?|placements?|views?)|traffic)")
+_CONJUNCTION = re.compile(
+    rf"\b({_VARY})\s+({_FAMILY_NOUN})\s*(?:,|,?\s*and|,?\s*or)\s+"
+    rf"(?={_FAMILY_NOUN}\b)", re.IGNORECASE)
+_DANGLING = re.compile(
+    rf"\b(?:{_VARY})\s+{_FAMILY_NOUN}\s*(?:,|,?\s*and|,?\s*or)\s+"
+    rf"(?!(?:{_VARY})\b)([a-z][a-z-]*)", re.IGNORECASE)
+
+
+def _expand_conjunctions(text: str) -> str:
+    """'varied weather and lighting' -> 'varied weather varied lighting'
+    (and on through a list), so each noun meets the phrase table."""
+    previous = None
+    while previous != text:
+        previous = text
+        text = _CONJUNCTION.sub(lambda m: f"{m.group(1)} {m.group(2)} "
+                                          f"{m.group(1)} ", text)
+    return text
+
+
+#: Words after "varied weather and ..." that do not name a thing to
+#: vary: the list has ended and the sentence moved on.
+_NOT_A_VARIED_ITEM = frozenset("""
+the a an some more then also at over above across through into in on
+from with for along around under below toward towards up down out to by
+of off it them this that these those
+chase wingman tower cockpit ground camera cameras view views image images
+photo photos picture pictures footage film video frames stills snapshot
+snapshots capture render shot shots
+""".split())
+
+
+def _dangling_items(text: str) -> List[Tuple[str, str]]:
+    """(phrase, item) for every 'varied <noun> and <item>' whose item
+    the table cannot vary and which is not a view, an article or a
+    preposition -- the request the compiler read and could not honour."""
+    out = []
+    for m in _DANGLING.finditer(text):
+        item = m.group(1).lower()
+        if item in _NOT_A_VARIED_ITEM or re.fullmatch(_FAMILY_NOUN, item):
+            continue
+        out.append((m.group(0).strip(), item))
+    return out
+
+
 #: Range words -> the LOCATION_RANGES key (core.scenario.randomization).
 LOCATION_RANGE_WORDS: Tuple[Tuple[str, str], ...] = (
     ("rocky mountains", "rockies"), ("rockies", "rockies"),
@@ -682,7 +930,12 @@ def _randomization(text: str, prompt: str, spec) -> Tuple[Dict[str, Any],
     policy: Dict[str, Any] = {}
     attribution: Dict[str, str] = {}
     notes: List[str] = []
-    consumed = text
+    for phrase, item in _dangling_items(text):
+        notes.append(
+            f"randomization: {phrase!r} -- the vocabulary cannot vary "
+            f"{item!r}, so it is not varied; only the rest of the phrase "
+            f"is")
+    consumed = _expand_conjunctions(text)
     matched: List[Tuple[int, str, str]] = []
     for pattern, family in RANDOMIZATION_WORDS:
         for m in re.finditer(pattern, consumed, flags=re.IGNORECASE):
@@ -723,7 +976,7 @@ def _randomization(text: str, prompt: str, spec) -> Tuple[Dict[str, Any],
         leftover = [s for s in _sentences(consumed)
                     if re.search(VARIATION_INTENT, s, flags=re.IGNORECASE)]
         for sentence in _sentences(prompt):
-            probe = sentence.lower()
+            probe = _expand_conjunctions(sentence.lower())
             for pattern, _ in RANDOMIZATION_WORDS:
                 probe = re.sub(pattern, " ", probe, flags=re.IGNORECASE)
             probe = re.sub(_RANGE_PHRASE.format(words=words), " ", probe,
@@ -812,13 +1065,18 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
                    answers=None) -> ScenarioSpec:
     """Turn a prompt into a spec. Does not run anything. ``answers``
     is the page's answer round ([{id, answer}]); the regex path has
-    exactly one question it can answer, camera_view."""
+    two questions it can answer, aircraft and camera_view
+    (:func:`camera_questions`)."""
     text = " ".join(prompt.lower().split())
+    # The second aircraft's clause leaves the text first: its airframe
+    # is not the primary and its range is not an altitude.
+    traffic, text = _traffic(text)
+    aircraft = _aircraft(text, answers)
+    model = str(aircraft.value)
 
     heading = _heading(text)
     airspeed, airspeed_kind = _airspeed(text)
     if airspeed is None:
-        model = str(_aircraft(text).value)
         airspeed = Quantity.default(
             CRUISE_DEFAULT_KT.get(model, 250.0), "kt",
             frm=f"typical cruise for the {model}")
@@ -828,7 +1086,7 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
     spec = ScenarioSpec(
         name=name or _name_from(text),
         prompt=prompt,
-        aircraft=_aircraft(text),
+        aircraft=aircraft,
         altitude=_altitude(text),
         airspeed=airspeed,
         airspeed_kind=airspeed_kind,
@@ -852,6 +1110,15 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
         weather_date=_weather_date(text),
         weather_event=_weather_event(text),
     )
+
+    if traffic:
+        spec.traffic = traffic
+    for phrase in _other_airframes(text, model):
+        spec.notes.append(
+            f"a second aircraft {phrase!r} is named but not as traffic, so "
+            f"it is not in the scene; say 'with the {phrase} crossing', "
+            f"'in formation' or 'overtaking' to fly it as a scripted "
+            f"second aircraft")
 
     cameras, camera_notes = _cameras(
         text, str(spec.aircraft.value), float(spec.terrain_elevation.value),
