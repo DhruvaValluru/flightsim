@@ -98,11 +98,16 @@ def summarise(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     """Progress and yield FROM THE ROWS: counts per status over the
     latest row of every index, verified frames (the yield), captured
     frames, refusals by name (refused slots and the refused attempts
-    inside successful draws), the next free index, timing totals."""
+    inside successful draws), the names that refused the attempts
+    INSIDE the refused slots (``refused_attempt_names``: a slot refused
+    ``randomization.infeasible`` carries the constraint each of its
+    draws hit -- the one to narrow the policy against), the next free
+    index, timing totals."""
     latest = latest_by_index(rows)
     counts = {status: 0 for status in STATUSES}
     frames_verified = frames_captured = 0
     refusals: Dict[str, int] = {}
+    refused_attempt_names: Dict[str, int] = {}
     wall = 0.0
     bytes_measured: List[int] = []
     verified_dirs: List[str] = []
@@ -114,6 +119,11 @@ def summarise(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
             counts[status] += 1
         for name in row.get("refusals") or []:
             refusals[str(name)] = refusals.get(str(name), 0) + 1
+        if status == STATUS_REFUSED:
+            for attempt in row.get("refused_attempts") or []:
+                name = attempt.get("refusal_name") if isinstance(attempt, dict) else None
+                if name:
+                    refused_attempt_names[str(name)] = refused_attempt_names.get(str(name), 0) + 1
         if status == STATUS_VERIFIED:
             frames_verified += int(row.get("yield") or 0)
             if row.get("run_dir"):
@@ -135,6 +145,7 @@ def summarise(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
         "frames_verified": frames_verified,
         "frames_captured": frames_captured,
         "refusals": dict(sorted(refusals.items())),
+        "refused_attempt_names": dict(sorted(refused_attempt_names.items())),
         "failed_captures": failed_captures,
         "unverified": unverified,
         "wall_seconds": round(wall, 3),

@@ -206,7 +206,9 @@ def test_no_text_io_without_utf8_encoding():
     binary = re.compile(r"""['"][rwax]\+?b['"]|['"]b[rwax]['"]""")
     # Patterns built by concatenation so this file's own source never
     # contains the literal tokens the scan looks for.
-    targets = [re.compile(r"(?<![\w.])" + "open" + r"\("),
+    # A method DEFINITION named open (``def open(cls, directory)`` on a
+    # campaign, a service) is not a call and opens nothing: skipped.
+    targets = [re.compile(r"(?<![\w.])(?<!def )" + "open" + r"\("),
                re.compile(r"\." + "read_text" + r"\("),
                re.compile(r"\." + "write_text" + r"\(")]
 
@@ -239,6 +241,8 @@ def test_no_text_io_without_utf8_encoding():
                 i += 1
         return text[start + 1:]
 
+    assert not targets[0].search("    def " + "open" + "(cls, directory):")
+    assert targets[0].search("    with " + "open" + "(path) as fh:")
     offenders = []
     for root in ("core", "webapp", "experiments", "scripts", "tests"):
         for path in sorted((REPO / root).rglob("*.py")):

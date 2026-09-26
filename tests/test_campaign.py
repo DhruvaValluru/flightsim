@@ -144,7 +144,7 @@ def test_create_and_plan_refuse_by_name_before_anything_runs(tmp_path):
     assert plan["frames_per_case"]["estimate"] == estimate_frames(ScenarioSpec.from_dict(c.record["spec"]))
     assert plan["seed_derivation"] == "SeedSequence([index, campaign_seed])"
     assert plan["disk"]["within_budget"] is None          # unmeasured: no claim
-    assert json.loads((tmp_path / "y" / "campaign.json").read_text())["plan"] == plan
+    assert json.loads((tmp_path / "y" / "campaign.json").read_text(encoding="utf-8"))["plan"] == plan
 
 
 # -- seeds by index -------------------------------------------------------------------------
@@ -211,7 +211,7 @@ def test_a_campaign_never_reports_done_below_target(tmp_path):
     assert {r["status"] for r in latest.values()} == {"failed"}
     assert {r["attempt"] for r in latest.values()} == {MAX_ATTEMPTS}   # retried once, then left
     assert all(r["ok"] is False and r["capture_exit"] == 1 for r in latest.values())
-    assert all("broke" in Path(r["run_dir"], "capture.log").read_text() for r in latest.values())
+    assert all("broke" in Path(r["run_dir"], "capture.log").read_text(encoding="utf-8") for r in latest.values())
     # Every dispatch is a row: sampled nothing, running then failed per attempt.
     statuses = [r["status"] for r in fresh.ledger.rows()]
     assert statuses.count("running") == statuses.count("failed") == 2 * len(latest)
@@ -233,7 +233,7 @@ def test_progress_is_computed_from_the_ledger_a_restarted_process_reports_the_tr
                    "ok": True, "verified": False, "frames": 40, "yield": 0, "bytes": 3000})
     ledger.append({"index": 3, "status": "failed", "attempt": 1,
                    "ok": False, "verified": False, "frames": 0, "yield": 0})
-    with (tmp_path / "c" / "ledger.jsonl").open("a") as fh:
+    with (tmp_path / "c" / "ledger.jsonl").open("a", encoding="utf-8") as fh:
         fh.write('{"index": 4, "status": "verified", "yield": 99')   # killed mid-write
     # Not the object that wrote it: a fresh open, nothing in memory.
     fresh = Campaign.open(tmp_path / "c")
@@ -299,7 +299,7 @@ def test_the_watchdog_kills_a_silent_capture_and_spares_one_that_writes(tmp_path
             "import time, pathlib, sys\n"
             "p = pathlib.Path(sys.argv[1])\n"
             "for i in range(8):\n"
-            "    p.write_text(str(i)); time.sleep(0.25)\n",
+            "    p.write_text(str(i), encoding='utf-8'); time.sleep(0.25)\n",
             str(tmp_path / "heartbeat.txt")]
     code, stalled = run_with_watchdog(busy, tmp_path / "busy.log", tmp_path, 0.6)
     assert (code, stalled) == (0, False)
@@ -361,8 +361,8 @@ def test_the_same_campaign_at_one_and_two_workers_is_identical(campaigns):
     assert [a[i]["sampled"] for i in sorted(a)] == [b[i]["sampled"] for i in sorted(b)]
     assert len({a[i]["case_id"] for i in a}) == 3          # three distinct specs
     for i in a:
-        ma = json.loads(Path(a[i]["run_dir"], "capture_manifest.json").read_text())
-        mb = json.loads(Path(b[i]["run_dir"], "capture_manifest.json").read_text())
+        ma = json.loads(Path(a[i]["run_dir"], "capture_manifest.json").read_text(encoding="utf-8"))
+        mb = json.loads(Path(b[i]["run_dir"], "capture_manifest.json").read_text(encoding="utf-8"))
         assert ma["spec_digest"] == mb["spec_digest"] == a[i]["spec_digest"]
         assert ma["simulation_digest"] == mb["simulation_digest"] == a[i]["simulation_digest"]
         assert ma["output_digest"] == mb["output_digest"] == a[i]["output_digest"]
@@ -391,7 +391,7 @@ def test_the_report_and_the_export_read_the_verified_cases(campaigns):
     assert report["disk"]["bytes_per_case"] > 0 and report["disk"]["measured_over"] == 3
     words = render_report(report)
     assert "done" in words and "coverage:" in words and "not claimed" in words
-    written = json.loads((c.dir / "report.json").read_text())
+    written = json.loads((c.dir / "report.json").read_text(encoding="utf-8"))
     assert written["yield"] == report["yield"]
     result = c.export("coco")
     assert result["labels_only"] is True and result["runs"] == 3
@@ -418,6 +418,73 @@ def test_a_prompt_with_nothing_to_vary_refuses_duplicate_slots_by_name(tmp_path)
     assert len(dupes) == 2 and all(r["refusals"] == ["campaign.duplicate_case"] for r in dupes)
     assert all(r["case_id"] == latest[0]["case_id"] for r in dupes)
     assert not any("run_dir" in r for r in dupes)        # refused before running
+
+
+def test_duplicate_slots_are_refused_by_index_not_by_completion_order_at_two_workers(tmp_path):
+    """The case the contract names (a stated seed, nothing to vary):
+    slots 0 and 1 draw one spec and are dispatched together at two
+    workers. The keeper is the LOWER INDEX, decided before slot 1 is
+    handed to a worker, so slot 1 refuses itself before running (no run
+    directory, no attempt) and the ledger is the one a single worker
+    writes -- not whichever slot happened to return first."""
+    prompt = "fly the 747 at 10000 ft for 10 seconds, chase view"
+    ledgers = {}
+    for workers in (1, 2):
+        c = Campaign.create(prompt, images=150, seed=3, out=tmp_path / f"w{workers}",
+                            stall_seconds=None, max_refused_slots=1)
+        spec = ScenarioSpec.from_dict(c.record["spec"])
+        spec.set("seed", 5, frm="stated by the test")      # a stated seed, no policy
+        c.record["spec"] = spec.to_dict()
+        c._save()
+        with pytest.raises(CampaignError) as err:
+            c.run(workers=workers, capture_runner="tests.test_campaign:failing_capture")
+        assert err.value.constraint == "campaign.target_unreachable"
+        assert "campaign.duplicate_case" in err.value.message
+        latest = Campaign.open(tmp_path / f"w{workers}").ledger.latest()
+        assert sorted(latest) == [0, 1]
+        assert latest[0]["status"] == "failed", (workers, latest[0])      # the keeper ran
+        assert latest[1]["status"] == "refused", (workers, latest[1])
+        assert latest[1]["refusals"] == ["campaign.duplicate_case"]
+        assert latest[1]["case_id"] == latest[0]["case_id"]
+        assert "slot 0" in latest[1]["reason"]
+        assert "run_dir" not in latest[1] and "capture_exit" not in latest[1]
+        ledgers[workers] = c.ledger.rows()
+    # The whole ledger apart from timing and machine paths (the failed
+    # capture's error names its log by path).
+    assert comparable(ledgers[1], drop=("error", "reason")) == \
+        comparable(ledgers[2], drop=("error", "reason"))
+
+
+def test_a_refused_slot_names_the_constraint_its_draws_hit(tmp_path):
+    """A slot refused ``randomization.infeasible`` carries the constraint
+    each of its draws hit; the campaign's totals, the unreachable
+    message and the report name it too, so the person knows what to
+    narrow the policy against -- not only that twenty draws failed."""
+    c = Campaign.create("fly at 10000 ft and 280 kt for 60 seconds", images=100, seed=1,
+                        out=tmp_path / "c", policy={"aircraft": {"choice": ["c172p"]}},
+                        max_refused_slots=2, stall_seconds=None)
+    with pytest.raises(CampaignError) as err:
+        c.run(workers=1)
+    assert err.value.constraint == "campaign.target_unreachable"
+    assert "randomization.infeasible x2" in err.value.message
+    assert "envelope.trim_feasible" in err.value.message
+    assert "narrow the policy against envelope.trim_feasible" in err.value.message
+    rows = list(c.ledger.latest().values())
+    assert all(r["status"] == "refused" for r in rows) and len(rows) == 2
+    hits = sum(len(r["refused_attempts"]) for r in rows)
+    assert all(a["refusal_name"] == "envelope.trim_feasible"
+               for r in rows for a in r["refused_attempts"])
+    status = c.status()
+    assert status["refusals"] == {"randomization.infeasible": 2}
+    assert status["refused_attempt_names"] == {"envelope.trim_feasible": hits}
+    summary = summarise(c.ledger.rows())
+    assert summary["refused_attempt_names"] == {"envelope.trim_feasible": hits}
+    report = c.report()
+    assert report["refusals"]["slots"] == {"randomization.infeasible": 2}
+    assert report["refusals"]["attempts_within_refused_slots"] == {"envelope.trim_feasible": hits}
+    assert report["refusals"]["attempts_within_draws"] == {}
+    words = render_report(report)
+    assert f"envelope.trim_feasible x{hits}" in words and "narrow the policy" in words
 
 
 # -- the CLI -------------------------------------------------------------------------------------

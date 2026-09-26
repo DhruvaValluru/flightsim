@@ -86,6 +86,9 @@ def build_report(campaign, k: int = 1, bins: int = 8) -> Dict[str, Any]:
         "refusals": {
             "slots": dict(sorted(slot_refusals.items())),
             "attempts_within_draws": dict(sorted(attempt_refusals.items())),
+            # The constraints the refused slots' own draws hit: what
+            # ``randomization.infeasible`` stands for in this campaign.
+            "attempts_within_refused_slots": summary["refused_attempt_names"],
             "total_by_name": summary["refusals"],
         },
         "timing": {
@@ -140,6 +143,11 @@ def render_report(report: Dict[str, Any]) -> str:
         attempts = ", ".join(f"{k} x{v}" for k, v in
                              refusals["attempts_within_draws"].items()) or "none"
         lines.append(f"  refusals: slots {slots}; attempts inside draws {attempts}")
+        within = refusals.get("attempts_within_refused_slots") or {}
+        if within:
+            lines.append("  refused slots' draws were refused "
+                         + ", ".join(f"{k} x{v}" for k, v in within.items())
+                         + " -- narrow the policy against these")
     else:
         lines.append("  refusals: none")
     t = report["timing"]

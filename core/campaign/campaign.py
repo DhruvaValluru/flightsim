@@ -559,9 +559,16 @@ class Campaign:
         reasons: List[str] = []
         limit = int(self.record.get("max_refused_slots") or MAX_REFUSED_SLOTS)
         if refused_slots >= limit:
+            # The slot's own name first, then the constraints its draws
+            # hit (what the policy must be narrowed against).
+            within = summary.get("refused_attempt_names") or {}
             reasons.append(f"{refused_slots} slot(s) refused "
-                           f"({', '.join(f'{k} x{v}' for k, v in summary['refusals'].items()) or 'no names'}); "
-                           f"the limit is {limit} -- narrow the policy")
+                           f"({', '.join(f'{k} x{v}' for k, v in summary['refusals'].items()) or 'no names'}"
+                           + (f"; their draws were refused "
+                              f"{', '.join(f'{k} x{v}' for k, v in within.items())}"
+                              if within else "")
+                           + f"); the limit is {limit} -- narrow the policy"
+                           + (f" against {', '.join(within)}" if within else ""))
         if stalled_rounds >= MAX_ROUNDS_WITHOUT_PROGRESS:
             reasons.append(f"{stalled_rounds} round(s) added no verified frame: "
                            f"{summary['failed_captures']} failed capture(s), "
@@ -602,8 +609,14 @@ class Campaign:
         queue = list(indices)
         stall = self.record.get("stall_seconds")
         attempts = {i: int(latest.get(i, {}).get("attempt") or 0) for i in queue}
-        seen_case_ids = {r.get("case_id"): i for i, r in latest.items()
-                         if r.get("case_id") and r.get("status") != STATUS_REFUSED}
+        # {case_id: the LOWEST index holding it}: the keeper of a spec two
+        # slots drew is decided by index, never by which finished first,
+        # so the ledger is the same at any worker count.
+        seen_case_ids: Dict[str, int] = {}
+        for i in sorted(latest):
+            r = latest[i]
+            if r.get("case_id") and r.get("status") != STATUS_REFUSED:
+                seen_case_ids.setdefault(str(r["case_id"]), i)
         stop: Any = None             # None | 'paused' | 'cancelled' | CampaignError
 
         def dispatch_row(index: int) -> int:
@@ -614,12 +627,30 @@ class Campaign:
                                 "started_utc": utc_now()})
             return attempts[index]
 
+        def claim_case(index: int) -> None:
+            """Before a slot is dispatched beside slots still in flight:
+            its case id (built from the index, deterministic) is claimed
+            for the lowest index that drew it, so a duplicate dispatched
+            in the same window refuses itself in the worker before
+            running -- the same row, at the same index, as at one worker.
+            A slot the sampler refuses claims nothing (the worker
+            writes its refused row)."""
+            try:
+                spec, _seed = build_case(index, self.record)
+            except RandomizationError:
+                return
+            case_id = spec.digest()[:16]
+            seen_case_ids[case_id] = min(index, seen_case_ids.get(case_id, index))
+
         def collect(row: Dict[str, Any]) -> Optional[int]:
             """Append the row; return an index to re-queue, if any."""
             index = int(row["index"])
             case_id = row.get("case_id") if row.get("status") != STATUS_REFUSED else None
-            if case_id and seen_case_ids.get(case_id, index) != index:
-                other = seen_case_ids[case_id]
+            other = seen_case_ids.get(case_id, index) if case_id else index
+            if case_id and other < index:
+                # The safety net for a case that was in flight beside its
+                # keeper: the lower index keeps the spec, whatever finished
+                # first.
                 row = {**row, "status": STATUS_REFUSED, "yield": 0,
                        "refusals": ["campaign.duplicate_case"],
                        "reason": (f"slot {index} drew the spec slot {other} already "
@@ -670,6 +701,7 @@ class Campaign:
                 while queue or in_flight:
                     while queue and len(in_flight) < n_workers and stop is None:
                         index = queue.pop(0)
+                        claim_case(index)      # by index, before anything is in flight with it
                         attempt = dispatch_row(index)
                         future = pool.submit(run_index, index, self.record, str(self.dir),
                                              attempt, stall, capture_runner,
@@ -745,6 +777,7 @@ class Campaign:
             "fraction": round(min(1.0, summary["frames_verified"] / self.target), 4),
             "cases": summary["cases"], "indices": summary["indices"],
             "refusals": summary["refusals"],
+            "refused_attempt_names": summary["refused_attempt_names"],
             "control": self._control(),
             "workers": self.record.get("workers"),
         }

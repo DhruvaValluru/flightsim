@@ -225,10 +225,12 @@ def run_index(index: int, record: Dict[str, Any], out_dir: str,
     (``"package.module:function"``) with ``run_with_watchdog``'s
     signature, for tests that stand in for the CLI; the real one is
     the default. A name, not a callable, so the pool can pickle it.
-    ``seen_case_ids`` ({case_id: index} the ledger already holds) lets
-    a slot that drew a spec another slot produced refuse
-    ``campaign.duplicate_case`` before running it again; the campaign
-    checks again on collection for cases that were in flight together.
+    ``seen_case_ids`` ({case_id: the lowest index that drew it}: the
+    ledger's cases plus the ones the campaign claimed by index before
+    dispatching this slot beside them) lets a slot that drew a spec
+    another slot produced refuse ``campaign.duplicate_case`` before
+    running it again -- the keeper is the lower INDEX, never the slot
+    that finished first, so the row is the same at any worker count.
     """
     started_utc = utc_now()
     started = time.monotonic()
