@@ -41,7 +41,11 @@ each, with ONE card at ``<out>``):
 * ``yolo``        -- the Ultralytics detect layout: ``images/<split>/``,
   ``labels/<split>/<key>.txt`` with ``class cx cy w h`` normalised to
   the image (0-based class index in taxonomy order), ``data.yaml`` with
-  ``path``, ``train``, ``val``, ``test`` and ``names``.
+  ``train``, ``val``, ``test`` and ``names`` and NO ``path`` key: with
+  one, Ultralytics resolves the split directories against its own
+  datasets directory (or the process's working directory), not against
+  the yaml; without one it resolves them beside the yaml, which is
+  where they are.
 * ``voc``         -- the Pascal VOC devkit layout at ONE root:
   ``JPEGImages/<key>.png`` (the PNGs as they are; the directory name is
   the devkit's), ``Annotations/<key>.xml`` (folder, filename, size,
@@ -74,20 +78,35 @@ with the labels mapped onto that sensor (``labels_sensor``); the
 default is the ideal frame with the ideal labels. The 3-D box and the
 horizon are pinhole quantities either way and are marked as such.
 
+Provenance: a verdict that names the manifest it graded
+(``verification.json`` ``manifest_sha256``, written by the batch and
+campaign runners through ``bind_verification``) is compared with the
+manifest on disk, and a manifest changed since -- a re-render, a label
+pass, a hand edit -- refuses ``export.verification_stale`` by name; a
+verdict without that key (an older verifier) is accepted and the card
+says the binding is missing. Each camera's ``render.json`` ``drawn``,
+``render_settings`` and ``look_applied`` are copied into the card per
+run (null, with the reason, for a headless run), so what the engine
+drew and every rendering switch reach the dataset's consumer.
+
 What is NOT claimed by this module: it does not check a label -- it
-reads the verifier's verdict and refuses without a green one; it does
-not read ``render.json`` (the per-object visibility it exports is what
-the manifest record carries); it does not decide a taxonomy (it
-refuses ``export.taxonomy`` when the runs disagree); the YOLO and VOC
-writers have been round-tripped through independent readers on
-fabricated pixels only, never through a training stack.
+reads the verifier's verdict and refuses without a green one; it reads
+``render.json`` for the card's provenance only, never for a label (the
+per-object visibility it exports is what the manifest record carries);
+it does not decide a taxonomy (it refuses ``export.taxonomy`` when the
+runs disagree, and an object whose class is outside the list refuses
+before a file is written); the YOLO and VOC writers have been
+round-tripped through independent readers on fabricated pixels only,
+never through a training stack.
 """
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import math
+import os
 import random
 import shutil
 import tarfile
@@ -127,16 +146,40 @@ NOT_CLAIMED_EXTENT_KEY = "objects_under_px"
 #: (verify.AIRCRAFT_INSTANCE_ID, re-stated here rather than imported:
 #: the export does not import the verifier's numbers).
 PRIMARY_INT_ID = 1
-#: Formats that ship the ID mask (COCO ``segmentation``, WebDataset
-#: ``.mask.png``); a run whose masks the verifier never graded refuses
-#: ``export.unverified_labels`` for these when a mask is on disk.
-MASK_SHIPPING_FORMATS = ("coco", "webdataset")
-#: The verifier checks that grade the ID mask (contracts §4).
+#: The verifier checks that grade the ID mask (contracts §4); the
+#: class image is graded by the same pair (``mask_integers_only`` reads
+#: it against the ID mask, ``mask_vs_geometry`` places that mask).
 MASK_CHECKS = ("mask_integers_only", "mask_vs_geometry")
+#: The verifier checks that grade the raw depth image.
+DEPTH_CHECKS = ("depth_range", "depth_vs_geometry")
 #: The label files the render commandlet writes beside a frame
 #: (contracts §1): suffix -> WebDataset member extension.
 LABEL_FILES = (("_mask.png", "mask.png"), ("_class.png", "class.png"),
                ("_depth.f32", "depth.f32"))
+#: The checks that must PASS before a label file ships, per suffix.
+LABEL_FILE_CHECKS = {"_mask.png": MASK_CHECKS, "_class.png": MASK_CHECKS,
+                     "_depth.f32": DEPTH_CHECKS}
+#: The label files each format ships: COCO carries the ID mask as
+#: ``segmentation``, WebDataset every file found beside the frame. A
+#: run whose file the verifier never graded refuses
+#: ``export.unverified_labels`` for these when that file is on disk.
+SHIPPED_LABEL_FILES = {"coco": ("_mask.png",),
+                       "webdataset": tuple(s for s, _ in LABEL_FILES)}
+#: Formats that ship the ID mask (Phase 10 API, kept).
+MASK_SHIPPING_FORMATS = tuple(SHIPPED_LABEL_FILES)
+#: The key a verdict carries to name the manifest it graded (the
+#: sha256 of ``capture_manifest.json`` as bytes); written by
+#: ``bind_verification``, compared by ``load_run``.
+MANIFEST_DIGEST_KEY = "manifest_sha256"
+#: The engine's per-camera record and the root keys the card carries
+#: from it as provenance (contracts §6.2): what was drawn, every
+#: rendering switch, the look actually applied.
+RENDER_JSON = "render.json"
+RENDER_PROVENANCE_KEYS = ("drawn", "render_settings", "look_applied")
+#: The taxonomy class that is an airframe (core/scenario/blocks.py
+#: DEFAULT_CLASSES[0]); COCO's airframe keypoints are declared on it
+#: and on the airframe-name classes of a run without a taxonomy.
+AIRCRAFT_CLASS = "aircraft"
 
 
 class ExportError(ValueError):
@@ -153,10 +196,35 @@ class Run:
     directory: Path
     manifest: Dict[str, Any]
     verification: Dict[str, Any]
+    #: sha256 of capture_manifest.json as read; the verdict's
+    #: ``manifest_sha256`` matched it (or the verdict carries none).
+    manifest_sha256: str = ""
+    #: {camera_id: {drawn, render_settings, look_applied}} from each
+    #: camera's render.json; empty for a run with none (headless).
+    render: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     @property
     def name(self) -> str:
         return self.directory.name
+
+    @property
+    def verification_bound(self) -> bool:
+        """The verdict names the manifest it graded."""
+        return MANIFEST_DIGEST_KEY in self.verification
+
+    def airframes(self) -> List[str]:
+        """Every airframe in the run: the primary (``aircraft``) and each
+        ``objects[]`` entry named ``aircraft:<airframe>:<n>`` (contracts
+        §3 -- the traffic aircraft are objects, not the manifest's
+        ``aircraft``)."""
+        names = {str(self.manifest["aircraft"])}
+        for entry in self.manifest.get("objects") or []:
+            if not isinstance(entry, dict) or entry.get("class") != AIRCRAFT_CLASS:
+                continue
+            parts = str(entry.get("id", "")).split(":")
+            if len(parts) == 3 and parts[0] == AIRCRAFT_CLASS and parts[1]:
+                names.add(parts[1])
+        return sorted(names)
 
 
 def discover_runs(paths: Iterable) -> List[Path]:
@@ -185,7 +253,68 @@ def discover_runs(paths: Iterable) -> List[Path]:
         if key not in seen:
             seen.add(key)
             unique.append(path)
+    # Every frame is keyed by its run's directory name, so two DIFFERENT
+    # runs with one name would write one set of files over the other:
+    # the first run's pixels under the second run's boxes. Refuse.
+    by_name: Dict[str, List[Path]] = {}
+    for path in unique:
+        by_name.setdefault(path.name, []).append(path)
+    clashes = {name: paths for name, paths in by_name.items() if len(paths) > 1}
+    if clashes:
+        name, paths = sorted(clashes.items())[0]
+        raise ExportError(
+            "export.run_names",
+            f"{len(paths)} different runs share the name {name!r} ({paths[0]} "
+            f"and {paths[1]}); every exported frame is named after its run, so "
+            f"export them from directories with distinct names")
     return unique
+
+
+def manifest_digest(directory) -> str:
+    """sha256 of ``capture_manifest.json`` as bytes: the identity a
+    verdict is bound to."""
+    return hashlib.sha256((Path(directory) / "capture_manifest.json").read_bytes()).hexdigest()
+
+
+def bind_verification(directory) -> Path:
+    """Record in a run's ``verification.json`` the digest of the manifest
+    it graded (``manifest_sha256``), so ``load_run`` can tell a verdict
+    from a verdict on labels that changed since. Written atomically
+    (a staged file, then ``os.replace``) like the verdict itself; the
+    batch and campaign runners call this right after the verifier."""
+    directory = Path(directory)
+    record = directory / VERIFICATION_FILE
+    verification = json.loads(record.read_text(encoding="utf-8"))
+    verification[MANIFEST_DIGEST_KEY] = manifest_digest(directory)
+    staged = record.with_name(f".{VERIFICATION_FILE}.{os.getpid()}.bind.tmp")
+    staged.write_text(json.dumps(verification, indent=1), encoding="utf-8")
+    os.replace(staged, record)
+    return record
+
+
+def render_provenance(directory) -> Dict[str, Dict[str, Any]]:
+    """{camera_id: {drawn, render_settings, look_applied}} read from
+    ``frames/<camera>/render.json`` for every camera that has one; a
+    key the record lacks is None. Nothing else of render.json is read:
+    the labels come from the manifest."""
+    out: Dict[str, Dict[str, Any]] = {}
+    frames = Path(directory) / "frames"
+    if not frames.is_dir():
+        return out
+    for camera in sorted(p for p in frames.iterdir() if p.is_dir()):
+        path = camera / RENDER_JSON
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            payload = None
+        if not isinstance(payload, dict):
+            out[camera.name] = {k: None for k in RENDER_PROVENANCE_KEYS}
+            out[camera.name]["note"] = f"{path} is not a JSON record"
+            continue
+        out[camera.name] = {k: payload.get(k) for k in RENDER_PROVENANCE_KEYS}
+    return out
 
 
 def load_run(directory) -> Run:
@@ -209,7 +338,17 @@ def load_run(directory) -> Run:
             "export.verification_failed",
             f"{directory} failed verification ({', '.join(failed) or 'ok=false'}); "
             f"refusing to export it")
-    return Run(directory=directory, manifest=manifest, verification=verification)
+    digest = manifest_digest(directory)
+    bound = verification.get(MANIFEST_DIGEST_KEY)
+    if bound is not None and str(bound) != digest:
+        raise ExportError(
+            "export.verification_stale",
+            f"{directory}'s labels changed after they were checked "
+            f"(capture_manifest.json is not the file the verdict graded: "
+            f"{digest[:12]} now, {str(bound)[:12]} then); run "
+            f"`python -m flightsim.verify {directory}` again before exporting")
+    return Run(directory=directory, manifest=manifest, verification=verification,
+               manifest_sha256=digest, render=render_provenance(directory))
 
 
 # -- the taxonomy --------------------------------------------------------
@@ -279,6 +418,16 @@ def dataset_taxonomy(samples: Sequence["Sample"]) -> Tuple[List[str], str]:
     if named:
         return list(named.pop()), "manifest taxonomy"
     return sorted({s.aircraft for s in samples}), "airframe names"
+
+
+def refuse_classes_outside_taxonomy(samples: Sequence["Sample"],
+                                    names: Sequence[str]) -> None:
+    """Every object of every frame resolves in the taxonomy, checked
+    BEFORE a directory is made: a refusal raised from inside a writer
+    would leave a half-written tree with no card."""
+    for sample in samples:
+        for obj in sample.objects:
+            class_index(obj, names)
 
 
 def class_index(obj: Dict[str, Any], names: Sequence[str]) -> int:
@@ -550,34 +699,44 @@ def collect_samples(runs: Sequence[Run], image: str = "ideal",
     return samples
 
 
-def refuse_unverified_labels(samples: Sequence[Sample], formats: Sequence[str]) -> List[str]:
-    """A format that ships the ID mask (``MASK_SHIPPING_FORMATS``) may
-    not ship one the verifier never graded: when a ``_mask.png`` is on
-    disk for any frame of a run whose verification carries no PASS for
-    every check in ``MASK_CHECKS``, refuse ``export.unverified_labels``
-    by name. A run with no mask on disk ships no mask and is not
-    affected (every Phase 10 run). Returns the runs whose masks are
-    shipped, for the card."""
-    if not any(f in MASK_SHIPPING_FORMATS for f in formats):
-        return []
-    shipped: List[str] = []
+def refuse_unverified_labels(samples: Sequence[Sample], formats: Sequence[str]
+                             ) -> Dict[str, List[str]]:
+    """A format may not ship a label file the verifier never graded:
+    for every file a chosen format ships (``SHIPPED_LABEL_FILES``: the
+    ID mask for COCO; the ID mask, the class image and the depth for
+    WebDataset) that is on disk for any frame of a run, every check in
+    ``LABEL_FILE_CHECKS`` for it must be PASS in the run's verdict, or
+    the export refuses ``export.unverified_labels`` by name. A run with
+    none of those files on disk ships none and is not affected (every
+    Phase 10 run). Returns {run name: the suffixes shipped}, for the
+    card."""
+    suffixes: List[str] = []
+    for fmt in formats:
+        for suffix in SHIPPED_LABEL_FILES.get(fmt, ()):
+            if suffix not in suffixes:
+                suffixes.append(suffix)
+    shipped: Dict[str, List[str]] = {}
+    if not suffixes:
+        return shipped
     for run in {s.run.name: s.run for s in samples}.values():
-        has_mask = any(label_file_path(run, s.record, "_mask.png").is_file()
-                       for s in samples if s.run is run)
-        if not has_mask:
-            continue
         passed = {c.get("name") for c in run.verification.get("checks", [])
                   if c.get("status") == "PASS"}
-        ungraded = [name for name in MASK_CHECKS if name not in passed]
-        if ungraded:
-            raise ExportError(
-                "export.unverified_labels",
-                f"{run.directory} has ID masks on disk that the verifier did not "
-                f"grade ({', '.join(ungraded)} not PASS); a format that ships "
-                f"masks ({', '.join(f for f in formats if f in MASK_SHIPPING_FORMATS)}) "
-                f"refuses them -- verify the run on a build with those checks, "
-                f"or export a format without masks")
-        shipped.append(run.name)
+        for suffix in suffixes:
+            on_disk = any(label_file_path(run, s.record, suffix).is_file()
+                          for s in samples if s.run is run)
+            if not on_disk:
+                continue
+            ungraded = [name for name in LABEL_FILE_CHECKS[suffix] if name not in passed]
+            if ungraded:
+                ships = [f for f in formats if suffix in SHIPPED_LABEL_FILES.get(f, ())]
+                raise ExportError(
+                    "export.unverified_labels",
+                    f"{run.directory} has {suffix} label files on disk that the "
+                    f"verifier did not grade ({', '.join(ungraded)} not PASS); a "
+                    f"format that ships them ({', '.join(ships)}) refuses them -- "
+                    f"verify the run on a build with those checks, or export a "
+                    f"format without them")
+            shipped.setdefault(run.name, []).append(suffix)
     return shipped
 
 
@@ -642,11 +801,22 @@ def _keypoints_coco(labels: Dict[str, Any]) -> Tuple[List[float], int]:
 
 
 def _place_image(sample: Sample, target: Path) -> Optional[str]:
+    """Copy the frame under its key. A file already there with the same
+    bytes is left (a re-export); one with DIFFERENT bytes refuses
+    ``export.out_directory`` by name -- keeping it would put another
+    export's pixels under this run's labels."""
     if sample.image is None:
         return None
     target.parent.mkdir(parents=True, exist_ok=True)
-    if not target.exists():
-        shutil.copyfile(sample.image, target)
+    if target.exists():
+        if target.read_bytes() != sample.image.read_bytes():
+            raise ExportError(
+                "export.out_directory",
+                f"{target} already holds a different image than {sample.image} "
+                f"(the dataset directory was used for another export); export "
+                f"into an empty directory")
+        return target.name
+    shutil.copyfile(sample.image, target)
     return target.name
 
 
@@ -676,13 +846,57 @@ def mask_rle(mask_path: Path, int_id: int) -> Optional[Dict[str, Any]]:
             "counts": [int(c) for c in counts]}
 
 
+def airframe_classes(samples: Sequence[Sample], names: Sequence[str]) -> List[str]:
+    """The taxonomy classes that are airframes: ``AIRCRAFT_CLASS`` when
+    the list names it, and every class of an object that carries the
+    airframe keypoints (the airframe-name classes of a run without a
+    taxonomy). Only these declare COCO keypoints and a skeleton."""
+    classes = {n for n in names if n == AIRCRAFT_CLASS}
+    for sample in samples:
+        for obj in sample.objects:
+            if obj.get("keypoints") and obj["class_name"] in names:
+                classes.add(obj["class_name"])
+    return [n for n in names if n in classes]
+
+
+def coco_categories(samples: Sequence[Sample], names: Sequence[str]) -> List[Dict[str, Any]]:
+    """One category per taxonomy class. An airframe class keeps the
+    seven keypoints and the airframe skeleton under supercategory
+    ``aircraft``; any other class is its own supercategory with no
+    keypoints (a terrain annotation has none to declare)."""
+    airframes = set(airframe_classes(samples, names))
+    categories = []
+    for i, name in enumerate(names):
+        if name in airframes:
+            categories.append({"id": i + 1, "name": name, "supercategory": AIRCRAFT_CLASS,
+                               "keypoints": list(KEYPOINT_NAMES),
+                               "skeleton": [[1, 2], [3, 4], [1, 5], [6, 7]]})
+        else:
+            categories.append({"id": i + 1, "name": name, "supercategory": name})
+    return categories
+
+
+def coco_licenses(runs: Sequence[Run]) -> List[Dict[str, Any]]:
+    """COCO's ``licenses`` list from the manifests' ``objects[]``
+    licences (manifest 6): one entry per distinct asset / licence /
+    mesh, ``name`` the licence as stated (``unknown`` when none was).
+    A version-5 run states none and the list stays empty."""
+    out = []
+    for entry in asset_licences(runs):
+        if entry["kind"] != "object":
+            continue
+        out.append({"id": len(out) + 1, "name": entry["licence"] or "unknown",
+                    "url": "", "asset": entry["asset"],
+                    "mesh_sha256": entry.get("mesh_sha256"), "runs": entry["runs"]})
+    return out
+
+
 def export_coco(samples: Sequence[Sample], out: Path, splits: Dict[str, str]
                 ) -> Dict[str, int]:
     names, _ = dataset_taxonomy(samples)
-    categories = [{"id": i + 1, "name": name, "supercategory": "aircraft",
-                   "keypoints": list(KEYPOINT_NAMES),
-                   "skeleton": [[1, 2], [3, 4], [1, 5], [6, 7]]}
-                  for i, name in enumerate(names)]
+    categories = coco_categories(samples, names)
+    licenses = coco_licenses(sorted({s.run.name: s.run for s in samples}.values(),
+                                    key=lambda r: r.name))
     per_split: Dict[str, Dict[str, list]] = {
         s: {"images": [], "annotations": []} for s in SPLITS}
     image_id = 0
@@ -734,7 +948,7 @@ def export_coco(samples: Sequence[Sample], out: Path, splits: Dict[str, str]
     for split, content in per_split.items():
         payload = {"info": {"description": "flightsim labelled frames",
                             "conventions": "see DATASET_CARD.md"},
-                   "licenses": [], "categories": categories, **content}
+                   "licenses": licenses, "categories": categories, **content}
         (out / "annotations" / f"instances_{split}.json").write_text(
             json.dumps(payload, indent=1), encoding="utf-8")
         counts[split] = len(content["images"])
@@ -923,11 +1137,14 @@ def export_yolo(samples: Sequence[Sample], out: Path, splits: Dict[str, str]
         (out / "labels" / split / f"{sample.key}.txt").write_text(
             "".join(line + "\n" for line in lines), encoding="utf-8")
         counts[split] += 1
-    data = {"path": ".",
-            "train": "images/train", "val": "images/val", "test": "images/test",
+    # No ``path`` key on purpose: Ultralytics resolves a relative
+    # ``path`` against its datasets directory or the working directory,
+    # and only an ABSENT one against the yaml's own directory.
+    data = {"train": "images/train", "val": "images/val", "test": "images/test",
             "names": {i: name for i, name in enumerate(names)},
             "flightsim": {"class_order": source,
                           "box": "clipped bbox_2d, normalised cx cy w h",
+                          "path": "no path key: the split directories are beside this file",
                           "card": "../DATASET_CARD.md or DATASET_CARD.md"}}
     (out / "data.yaml").write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     return counts
@@ -1070,14 +1287,19 @@ def asset_licences(runs: Sequence[Run]) -> List[Dict[str, Any]]:
     (``licence`` per object, manifest 6) and from the ``assets``
     block: the airframe config file each run names (its ``license``
     block, read from this repository when the file is here; otherwise
-    null WITH the reason). A licence is never guessed."""
+    null WITH the reason). A licence is never guessed, and never
+    attributed to a run that stated another: an object id that two
+    runs record with different licences or mesh hashes gets one entry
+    per distinct pair, each with its own runs and a ``note`` naming
+    the disagreement."""
     repo = Path(__file__).resolve().parents[2]
-    entries: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    entries: Dict[Tuple[str, ...], Dict[str, Any]] = {}
     for run in runs:
         for obj in run.manifest.get("objects") or []:
             if not isinstance(obj, dict) or obj.get("licence") is None and obj.get("mesh_sha256") is None:
                 continue
-            key = ("object", str(obj.get("id")))
+            key = ("object", str(obj.get("id")), str(obj.get("licence")),
+                   str(obj.get("mesh_sha256")))
             entry = entries.setdefault(key, {
                 "asset": str(obj.get("id")), "kind": "object",
                 "licence": obj.get("licence"), "mesh_sha256": obj.get("mesh_sha256"),
@@ -1110,6 +1332,16 @@ def asset_licences(runs: Sequence[Run]) -> List[Dict[str, Any]]:
                             "licence_detail": licence, "note": note,
                             "source": f"{path} license block", "runs": []}
         entries[key]["runs"].append(run.name)
+    by_asset: Dict[str, List[Dict[str, Any]]] = {}
+    for key, entry in entries.items():
+        if key[0] == "object":
+            by_asset.setdefault(entry["asset"], []).append(entry)
+    for asset, variants in by_asset.items():
+        if len(variants) > 1:
+            for entry in variants:
+                entry["note"] = (f"the runs disagree: {asset} is recorded with "
+                                 f"{len(variants)} different licence / mesh pairs; "
+                                 f"this entry's runs stated this one")
     return [entries[k] for k in sorted(entries)]
 
 
@@ -1194,8 +1426,17 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
                  splits: Dict[str, str], counts: Dict[str, int], fmt: str,
                  fractions, seed: int, image: str, labels_only: bool,
                  formats: Optional[Sequence[str]] = None,
-                 masks_shipped: Sequence[str] = ()) -> Dict[str, Any]:
+                 masks_shipped: Sequence[str] = (),
+                 labels_shipped: Optional[Dict[str, Sequence[str]]] = None
+                 ) -> Dict[str, Any]:
     formats = list(formats) if formats else [fmt]
+    shipped: Dict[str, List[str]] = {name: list(s) for name, s in (labels_shipped or {}).items()}
+    for name in masks_shipped:
+        if "_mask.png" not in shipped.setdefault(name, []):
+            shipped[name].append("_mask.png")
+    member_of = dict(LABEL_FILES)
+    unbound = [r.name for r in runs if not r.verification_bound]
+    headless = [r.name for r in runs if not r.render]
     cameras = sorted({(s.run.name, str(s.record["camera_id"])) for s in samples})
     profiles = sorted({str(s.record.get("sensor", {}).get("profile", "ideal_pinhole"))
                        for s in samples})
@@ -1239,14 +1480,23 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
                              "file": str(r.directory / VERIFICATION_FILE)},
             "not_run": [c["name"] for c in r.verification.get("checks", [])
                         if c.get("status") == "NOT RUN"],
-            "masks_shipped": r.name in masks_shipped,
+            "masks_shipped": "_mask.png" in shipped.get(r.name, []),
+            "labels_shipped": [member_of[s] for s in shipped.get(r.name, [])],
+            "verification_bound_to_manifest": r.verification_bound,
+            "manifest_sha256": r.manifest_sha256,
+            "airframes": r.airframes(),
+            "render": (r.render if r.render else None),
+            "render_note": (None if r.render else
+                            f"no {RENDER_JSON} under frames/ (a headless capture): "
+                            f"nothing was drawn and no rendering switch is recorded"),
         } for r in runs],
         "split": {"by": "simulation_digest", "fractions": list(fractions),
                   "seed": int(seed), "assignment": dict(splits),
                   "policy": ("simulations shuffled by the seed, dealt greedily by "
                              "frame count to the fractions; every frame of one "
                              "simulation digest lands on one side")},
-        "aircraft": sorted({s.aircraft for s in samples}),
+        "aircraft": sorted({name for r in runs for name in r.airframes()}),
+        "primary_aircraft": sorted({s.aircraft for s in samples}),
         "cameras": [f"{run}/{cam}" for run, cam in cameras],
         "sensor_profiles": profiles,
         "randomised_runs": randomised,
@@ -1276,6 +1526,9 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
         },
         "yolo_conventions": {
             "layout": "Ultralytics detect: images/<split>/, labels/<split>/<key>.txt, data.yaml",
+            "path": ("data.yaml names no path key: Ultralytics then resolves train/val/test "
+                     "beside the yaml, where they are (a relative path would be resolved "
+                     "against its datasets directory or the working directory instead)"),
             "line": "class cx cy w h normalised to the image from the CLIPPED bbox_2d",
             "class": f"0-based index in taxonomy order ({taxonomy_source})",
         },
@@ -1293,9 +1546,12 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
         "not_claimed": [
             "render reproducibility: not established in either direction "
             "until Gate 10-R runs on an engine (VALIDITY section 3)",
-            "labels are the headless geometry of the recorded flight; the "
-            "engine's masks and depth, where present, are checked against "
-            "them by the verifier, not substituted for them",
+            "labels are the headless geometry of the recorded flight; an "
+            "engine ID mask, class image or depth ships only in a format that "
+            "carries it (COCO: the ID mask; WebDataset: all three) and only "
+            "from a run whose verdict has every check for that file PASS "
+            "(refused by name otherwise); it is never substituted for the "
+            "geometry",
             "the 3-D box and the horizon are pinhole quantities even when "
             "the sensor image is exported",
             "no photometric calibration: sun, fog and exposure are the "
@@ -1305,7 +1561,14 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
             "an object's VOC occluded flag is 0, and its KITTI occluded is 3, "
             "when no visibility was recorded (every run without an ID pass)",
         ] + [f"labels: {item} ({n} object record(s))"
-             for item, n in labels_not_claimed.items()],
+             for item, n in labels_not_claimed.items()]
+          + ([f"run(s) {', '.join(unbound)}: the verdict names no manifest digest "
+              f"(a verifier that did not record which manifest it graded), so a "
+              f"label edited after that verification could not have been told "
+              f"apart from the verified ones"] if unbound else [])
+          + ([f"run(s) {', '.join(headless)}: no {RENDER_JSON} -- nothing was "
+              f"drawn by an engine and no rendering switch or applied look is "
+              f"recorded"] if headless else []),
         "software_revision": software_revision(),
         "manifest_versions": sorted({int(r.manifest["manifest_version"]) for r in runs}),
     }
@@ -1322,7 +1585,8 @@ def render_card(card: Dict[str, Any]) -> str:
         f"Instances: {card['instances']} over {len(card['classes'])} class(es) "
         f"({card['class_order']}): " + ", ".join(
             f"{name} {c['instances']}" for name, c in card["class_balance"].items()),
-        f"Aircraft: {', '.join(card['aircraft'])}",
+        f"Aircraft: {', '.join(card['aircraft'])} (primary: "
+        f"{', '.join(card.get('primary_aircraft', card['aircraft']))})",
         f"Sensor profiles: {', '.join(card['sensor_profiles'])}",
         f"Split by simulation digest, fractions {card['split']['fractions']}, "
         f"seed {card['split']['seed']}: {len(card['split']['assignment'])} "
@@ -1341,7 +1605,14 @@ def render_card(card: Dict[str, Any]) -> str:
             f"verification {v['passed']} passed / {v['failed']} failed / "
             f"{v['not_run']} not run"
             + (f" (NOT RUN: {', '.join(run['not_run'])})" if run["not_run"] else "")
-            + (" -- randomised" if run["randomization"] else ""))
+            + ("" if run.get("verification_bound_to_manifest", True)
+               else ", verdict not bound to the manifest")
+            + (f", label files shipped: {', '.join(run['labels_shipped'])}"
+               if run.get("labels_shipped") else "")
+            + (" -- randomised" if run["randomization"] else "")
+            + (f"; airframes {', '.join(run['airframes'])}" if run.get("airframes") else "")
+            + (f"; render: {', '.join(sorted(run['render']))}" if run.get("render")
+               else f"; {run.get('render_note', 'no render record')}"))
     lines += ["", "## Class balance", ""]
     for name, c in card["class_balance"].items():
         per_split = ", ".join(f"{s} {p['instances']}" for s, p in c["per_split"].items())
@@ -1386,8 +1657,9 @@ def export(paths: Sequence, out, fmt, fractions=DEFAULT_FRACTIONS,
     out = Path(out)
     runs = [load_run(d) for d in discover_runs(paths)]
     samples = collect_samples(runs, image=image, labels_only=labels_only)
-    dataset_taxonomy(samples)                       # refuses a mixed class list first
-    masks_shipped = refuse_unverified_labels(samples, formats)
+    names, _ = dataset_taxonomy(samples)            # refuses a mixed class list first
+    refuse_classes_outside_taxonomy(samples, names)  # ...and a stray class, before any file
+    labels_shipped = refuse_unverified_labels(samples, formats)
     splits = assign_splits(samples, fractions, seed)
     out.mkdir(parents=True, exist_ok=True)
     counts: Dict[str, int] = {}
@@ -1400,7 +1672,7 @@ def export(paths: Sequence, out, fmt, fractions=DEFAULT_FRACTIONS,
             counts = WRITERS[name](samples, target, splits)
     card = dataset_card(runs, samples, splits, counts, ",".join(formats), fractions,
                         seed, image, labels_only, formats=formats,
-                        masks_shipped=masks_shipped)
+                        labels_shipped=labels_shipped)
     (out / CARD_JSON).write_text(json.dumps(card, indent=1), encoding="utf-8")
     (out / CARD_MD).write_text(render_card(card), encoding="utf-8")
     return card

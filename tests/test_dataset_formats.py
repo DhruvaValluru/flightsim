@@ -14,10 +14,12 @@ the pre-package-E module (``tests/data/export_phase10_frozen.py``) on a
 run that carries none of the new fields.
 """
 
+import hashlib
 import importlib.util
 import json
 import math
 import shutil
+import struct
 import sys
 import tarfile
 from pathlib import Path
@@ -30,8 +32,9 @@ from PIL import Image
 from core.capture.verify import VERIFICATION_FILE
 from core.dataset.batch import read_matrix, run_batch
 from core.dataset.export import (
-    ExportError, NOT_CLAIMED_EXTENT_PX, assign_splits, collect_samples,
-    discover_runs, export, load_run, parse_formats,
+    ExportError, MANIFEST_DIGEST_KEY, NOT_CLAIMED_EXTENT_PX, assign_splits,
+    bind_verification, collect_samples, discover_runs, export, load_run,
+    parse_formats,
 )
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
@@ -95,16 +98,44 @@ def _frozen_module():
 
 # -- independent readers ---------------------------------------------------------
 
+#: Ultralytics' DATASETS_DIR stand-in: a directory that does not exist,
+#: so a data.yaml whose relative ``path`` is resolved against it (as the
+#: loader does) points at nothing and the reader says so.
+DATASETS_DIR = Path("/nonexistent/ultralytics-datasets")
+
+
+def yolo_root(yaml_path: Path, data: dict, datasets_dir: Path = DATASETS_DIR) -> Path:
+    """The dataset root exactly as Ultralytics ``check_det_dataset``
+    finds it: ``path`` when present -- a relative one resolved against
+    its DATASETS_DIR (older releases) or the process's working directory
+    (newer ones), never against the yaml -- else the yaml's own
+    directory."""
+    stated = data.get("path")
+    if not stated:
+        return yaml_path.parent
+    root = Path(str(stated))
+    if not root.is_absolute():
+        root = (datasets_dir / root).resolve()
+    return root
+
+
 def read_yolo(root: Path):
     """The Ultralytics detect layout: data.yaml names + labels/<split>/*.txt
     -> {key: (split, [(class_idx, x0, y0, x1, y1) in pixels])}, using the
-    image size from the PNG when present, else the caller's."""
-    data = yaml.safe_load((root / "data.yaml").read_text(encoding="utf-8"))
+    image size from the PNG when present, else the caller's. The split
+    directories are resolved from data.yaml the way Ultralytics resolves
+    them (``yolo_root``), so a ``path`` that sends the loader elsewhere
+    fails here too."""
+    yaml_path = root / "data.yaml"
+    data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
     names = data["names"]
     assert isinstance(names, dict) and list(names) == list(range(len(names)))
     assert data["train"] == "images/train" and data["val"] == "images/val"
+    resolved = yolo_root(yaml_path, data)
+    assert resolved == root, f"data.yaml sends Ultralytics to {resolved}, not to {root}"
     boxes = {}
     for split in ("train", "val", "test"):
+        assert (resolved / data[split]).is_dir(), f"{split} not found beside the yaml"
         assert (root / "images" / split).is_dir() and (root / "labels" / split).is_dir()
         for txt in sorted((root / "labels" / split).glob("*.txt")):
             lines = []
@@ -184,6 +215,7 @@ def _as_version_5(run_dir):
         record["labels"].pop("objects", None)
         record.get("sensor", {}).get("labels_sensor", {}).pop("objects", None)
     path.write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+    bind_verification(run_dir)      # the fixture's verdict is for the manifest it fabricates
 
 
 def test_phase10_outputs_are_byte_identical_to_the_frozen_writer(batch_dir, tmp_path):
@@ -441,6 +473,7 @@ def _fabricate_objects_run(source: Path, target: Path) -> Path:
              "visible_fraction": None, "occluded_by": [], "not_claimed": []},
         ]
     (target / "capture_manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+    bind_verification(target)       # the fixture's verdict is for the manifest it fabricates
     return target
 
 
@@ -490,6 +523,20 @@ def test_manifest6_objects_export_every_object_with_its_class(batch_dir, tmp_pat
     train = json.loads((tmp_path / "ds" / "coco" / "annotations" / "instances_train.json")
                        .read_text(encoding="utf-8"))
     assert [(c["id"], c["name"]) for c in train["categories"]] == [(1, "aircraft"), (2, "terrain")]
+    # The airframe category alone declares the keypoints and the skeleton;
+    # terrain is its own supercategory with none (its annotations have none).
+    aircraft_cat, terrain_cat = train["categories"]
+    assert aircraft_cat["supercategory"] == "aircraft" and len(aircraft_cat["keypoints"]) == 7
+    assert terrain_cat["supercategory"] == "terrain"
+    assert "keypoints" not in terrain_cat and "skeleton" not in terrain_cat
+    # COCO's licenses list is the objects[] aggregation, not empty.
+    assert {(l["asset"], l["name"]) for l in train["licenses"]} == \
+        {("aircraft:B747:0", "GPL-2.0"), ("aircraft:A320:1", "GPL-2.0")}
+    # The card names EVERY airframe whose instances are in the dataset.
+    assert card["aircraft"] == ["A320", "B747"] and card["primary_aircraft"] == ["B747"]
+    assert card["runs"][0]["airframes"] == ["A320", "B747"]
+    assert "Aircraft: A320, B747 (primary: B747)" in \
+        (tmp_path / "ds" / "DATASET_CARD.md").read_text(encoding="utf-8")
     image_id = next(im["id"] for im in train["images"] if im["file_name"] == f"{key}.png")
     anns = [a for a in train["annotations"] if a["image_id"] == image_id]
     assert [a["category_id"] for a in anns] == [1, 1, 2]
@@ -639,3 +686,212 @@ def test_the_card_carries_counts_conditions_licences_and_the_split_policy(batch_
     for heading in ("## Class balance", "## Conditions", "## Licences", "## Not claimed"):
         assert heading in text
     assert "GPL-2.0" in text and "voc bndbox" in text
+
+
+# -- two runs, one name: refused, never overwritten ---------------------------------------
+
+def test_two_different_runs_with_one_directory_name_refuse_by_name(batch_dir, tmp_path):
+    """Every frame is keyed by its run's name; two DIFFERENT runs under
+    the same name would put one run's pixels under the other's boxes."""
+    a, b = _runs(batch_dir)[:2]
+    assert _manifest(a)["simulation_digest"] != _manifest(b)["simulation_digest"]
+    shutil.copytree(a, tmp_path / "batch_a" / a.name)
+    shutil.copytree(b, tmp_path / "batch_b" / a.name)          # b under a's name
+    with pytest.raises(ExportError) as caught:
+        export([tmp_path / "batch_a", tmp_path / "batch_b"], tmp_path / "collide",
+               "yolo,coco", fractions=(1.0, 0.0, 0.0), labels_only=True)
+    assert caught.value.constraint == "export.run_names"
+    assert a.name in caught.value.message and "distinct names" in caught.value.message
+    assert not (tmp_path / "collide").exists()
+    # The SAME run given twice (two spellings of one path) is one run.
+    card = export([a, a.parent / "." / a.name, a.parent], tmp_path / "once",
+                  "yolo", fractions=(1.0, 0.0, 0.0), labels_only=True)
+    assert len(card["runs"]) == 4                       # the batch's four, each once
+    # A dataset directory that already holds a DIFFERENT image under a
+    # key refuses rather than keeping it under this run's labels.
+    n = _fabricate_frames(a)
+    export([a], tmp_path / "reused", "yolo", fractions=(1.0, 0.0, 0.0))
+    export([a], tmp_path / "reused", "yolo", fractions=(1.0, 0.0, 0.0))   # same bytes: fine
+    placed = sorted((tmp_path / "reused" / "images" / "train").glob("*.png"))
+    assert len(placed) == n
+    Image.new("RGB", (8, 8), (255, 0, 0)).save(placed[0])
+    with pytest.raises(ExportError) as caught:
+        export([a], tmp_path / "reused", "yolo", fractions=(1.0, 0.0, 0.0))
+    assert caught.value.constraint == "export.out_directory"
+
+
+# -- the verdict is bound to the manifest it graded ---------------------------------------
+
+def test_a_manifest_edited_after_verification_refuses_stale_by_name(batch_dir, tmp_path):
+    a = _runs(batch_dir)[0]
+    # The batch runner bound its verdicts: the key is the manifest's sha256.
+    verdict = json.loads((a / VERIFICATION_FILE).read_text(encoding="utf-8"))
+    assert verdict[MANIFEST_DIGEST_KEY] == \
+        hashlib.sha256((a / "capture_manifest.json").read_bytes()).hexdigest()
+    run = tmp_path / "edited"
+    shutil.copytree(a, run)
+    manifest = _manifest(run)
+    for record in manifest["frames"]:
+        record["labels"]["bbox_2d"] = [0.0, 0.0, 5.0, 5.0]
+    (run / "capture_manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+    with pytest.raises(ExportError) as caught:
+        export([run], tmp_path / "stale", "yolo", labels_only=True)
+    assert caught.value.constraint == "export.verification_stale"
+    assert "flightsim.verify" in caught.value.message
+    assert not (tmp_path / "stale").exists()
+    # The CLI refuses by the same name, exit 2, no traceback.
+    from flightsim.export import main
+    assert main([str(run), "--out", str(tmp_path / "stale2"), "--format", "yolo",
+                 "--labels-only"]) == 2
+    # Re-verified (here: re-bound, as the runner does after the verifier), it exports
+    # with the edited boxes, and the card carries the digest.
+    bind_verification(run)
+    card = export([run], tmp_path / "rebound", "yolo", fractions=(1.0, 0.0, 0.0), labels_only=True)
+    assert card["runs"][0]["verification_bound_to_manifest"] is True
+    assert card["runs"][0]["manifest_sha256"] == \
+        hashlib.sha256((run / "capture_manifest.json").read_bytes()).hexdigest()
+    # A verdict without the key (an older verifier) is accepted, and the
+    # card says the binding is missing -- in the run's entry and in what
+    # is not claimed.
+    verdict = json.loads((run / VERIFICATION_FILE).read_text(encoding="utf-8"))
+    del verdict[MANIFEST_DIGEST_KEY]
+    (run / VERIFICATION_FILE).write_text(json.dumps(verdict), encoding="utf-8")
+    card = export([run], tmp_path / "unbound", "yolo", fractions=(1.0, 0.0, 0.0), labels_only=True)
+    assert card["runs"][0]["verification_bound_to_manifest"] is False
+    assert any("names no manifest digest" in item for item in card["not_claimed"])
+    assert "verdict not bound to the manifest" in \
+        (tmp_path / "unbound" / "DATASET_CARD.md").read_text(encoding="utf-8")
+
+
+# -- YOLO data.yaml loads beside the yaml ---------------------------------------------------
+
+def test_yolo_data_yaml_names_no_path_so_ultralytics_resolves_beside_it(batch_dir, tmp_path):
+    run = _runs(batch_dir)[1]
+    card = export([run], tmp_path / "yolo", "yolo", fractions=(1.0, 0.0, 0.0), labels_only=True)
+    data = yaml.safe_load((tmp_path / "yolo" / "data.yaml").read_text(encoding="utf-8"))
+    assert "path" not in data
+    assert yolo_root(tmp_path / "yolo" / "data.yaml", data) == tmp_path / "yolo"
+    assert all((tmp_path / "yolo" / data[s]).is_dir() for s in ("train", "val", "test"))
+    # What the loader would have done with the old `path: .`.
+    assert yolo_root(tmp_path / "yolo" / "data.yaml", {**data, "path": "."}) != tmp_path / "yolo"
+    assert "no path key" in card["yolo_conventions"]["path"]
+
+
+# -- a stray class refuses before a file is written ------------------------------------------
+
+def test_a_class_outside_the_taxonomy_refuses_before_anything_is_written(batch_dir, tmp_path):
+    run = _fabricate_objects_run(_runs(batch_dir)[2], tmp_path / "stray")
+    manifest = _manifest(run)
+    manifest["frames"][-1]["labels"]["objects"][0]["class_id"] = 99
+    (run / "capture_manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+    bind_verification(run)
+    with pytest.raises(ExportError) as caught:
+        export([run], tmp_path / "out", "voc", labels_only=True)
+    assert caught.value.constraint == "export.taxonomy"
+    assert "class_id 99" in caught.value.message
+    assert not (tmp_path / "out").exists()
+
+
+# -- licences: never attributed to a run that stated another --------------------------------
+
+def test_runs_that_disagree_on_an_assets_licence_get_one_entry_each(batch_dir, tmp_path):
+    a = _fabricate_objects_run(_runs(batch_dir)[0], tmp_path / "lic_a")
+    b = _fabricate_objects_run(_runs(batch_dir)[1], tmp_path / "lic_b")
+    manifest = _manifest(b)
+    for entry in manifest["objects"]:
+        if entry["id"] == "aircraft:B747:0":
+            entry["licence"], entry["mesh_sha256"] = "CC-BY-4.0", "c" * 64
+    (b / "capture_manifest.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+    bind_verification(b)
+    card = export([a, b], tmp_path / "ds", "yolo,coco", fractions=(1.0, 0.0, 0.0), labels_only=True)
+    primary = [e for e in card["licences"] if e["asset"] == "aircraft:B747:0"]
+    assert {(e["licence"], e["mesh_sha256"], tuple(e["runs"])) for e in primary} == \
+        {("GPL-2.0", "a" * 64, ("lic_a",)), ("CC-BY-4.0", "c" * 64, ("lic_b",))}
+    assert all("disagree" in e["note"] for e in primary)
+    traffic = [e for e in card["licences"] if e["asset"] == "aircraft:A320:1"]
+    assert len(traffic) == 1 and sorted(traffic[0]["runs"]) == ["lic_a", "lic_b"]
+    assert "note" not in traffic[0]
+    text = (tmp_path / "ds" / "DATASET_CARD.md").read_text(encoding="utf-8")
+    assert "CC-BY-4.0" in text and "GPL-2.0" in text
+    train = json.loads((tmp_path / "ds" / "coco" / "annotations" / "instances_train.json")
+                       .read_text(encoding="utf-8"))
+    assert {(l["asset"], l["name"]) for l in train["licenses"]} >= \
+        {("aircraft:B747:0", "GPL-2.0"), ("aircraft:B747:0", "CC-BY-4.0")}
+
+
+# -- every shipped label file is gated, and the card says which shipped ----------------------
+
+def test_class_and_depth_files_refuse_until_graded_then_ship_and_are_listed(batch_dir, tmp_path):
+    run = tmp_path / "label_run"
+    shutil.copytree(_runs(batch_dir)[3], run)
+    _fabricate_frames(run)
+    record = _manifest(run)["frames"][0]
+    key = f"{run.name}_{record['camera_id']}_{int(record['index']):04d}"
+    width, height = int(record["width_px"]), int(record["height_px"])
+    frame = run / record["file"]
+    depth = frame.with_name(frame.stem + "_depth.f32")
+    depth.write_bytes(struct.pack(f"<{width * height}f", *([1234.5] * (width * height))))
+    # Depth on disk, depth checks NOT RUN: WebDataset refuses by name, naming the file.
+    with pytest.raises(ExportError) as caught:
+        export([run], tmp_path / "refused", "webdataset", fractions=(1.0, 0.0, 0.0), shard_size=100)
+    assert caught.value.constraint == "export.unverified_labels"
+    assert "_depth.f32" in caught.value.message and "depth_range" in caught.value.message
+    # COCO ships no depth: not affected. YOLO ships no label file at all.
+    export([run], tmp_path / "coco", "coco", fractions=(1.0, 0.0, 0.0))
+    export([run], tmp_path / "yolo", "yolo", fractions=(1.0, 0.0, 0.0))
+    # A class image on disk, the mask checks NOT RUN: refused, naming the file.
+    depth.unlink()
+    Image.new("L", (width, height), 0).save(frame.with_name(frame.stem + "_class.png"))
+    with pytest.raises(ExportError) as caught:
+        export([run], tmp_path / "refused2", "webdataset", fractions=(1.0, 0.0, 0.0), shard_size=100)
+    assert "_class.png" in caught.value.message and "mask_integers_only" in caught.value.message
+    # Graded (fabricated PASS -- no engine here): both ship, and the card lists them per run.
+    depth.write_bytes(struct.pack(f"<{width * height}f", *([1234.5] * (width * height))))
+    verification = json.loads((run / VERIFICATION_FILE).read_text(encoding="utf-8"))
+    verification["checks"] += [{"name": n, "status": "PASS", "detail": "test"} for n in
+                               ("mask_integers_only", "mask_vs_geometry",
+                                "depth_range", "depth_vs_geometry")]
+    (run / VERIFICATION_FILE).write_text(json.dumps(verification), encoding="utf-8")
+    card = export([run], tmp_path / "shipped", "webdataset", fractions=(1.0, 0.0, 0.0), shard_size=100)
+    assert card["runs"][0]["labels_shipped"] == ["class.png", "depth.f32"]
+    assert card["runs"][0]["masks_shipped"] is False
+    members = read_webdataset(tmp_path / "shipped")
+    assert set(members[key][1]) == {"png", "json", "class.png", "depth.f32"}
+    assert members[key][1]["depth.f32"] == depth.read_bytes()
+    assert any("class image or depth ships only" in item for item in card["not_claimed"])
+    assert "label files shipped: class.png, depth.f32" in \
+        (tmp_path / "shipped" / "DATASET_CARD.md").read_text(encoding="utf-8")
+
+
+# -- render.json provenance reaches the card ------------------------------------------------
+
+def test_render_json_drawn_settings_and_look_reach_the_card(batch_dir, tmp_path):
+    a = _runs(batch_dir)[0]
+    headless = export([a], tmp_path / "headless", "yolo", fractions=(1.0, 0.0, 0.0), labels_only=True)
+    assert headless["runs"][0]["render"] is None
+    assert "no render.json" in headless["runs"][0]["render_note"]
+    assert any("no render.json" in item for item in headless["not_claimed"])
+    run = tmp_path / "rendered"
+    shutil.copytree(a, run)
+    cameras = sorted({r["camera_id"] for r in _manifest(run)["frames"]})
+    provenance = {
+        "drawn": {"kind": "mesh", "mesh_origin_actor_cm": [-2979.8, 0.0, 13.9],
+                  "manifest_version": 3, "origin_basis": "measured from vertices (fabricated)"},
+        "render_settings": {"console": {"r.CustomDepth": 3, "r.AntiAliasingMethod": 0},
+                            "exposure_mode": "manual", "shader_model": "SM6"},
+        "look_applied": {"sun": {"sun_elevation_deg": 35.0}, "fog": {"fog_density": 0.02}},
+    }
+    for camera in cameras:
+        (run / "frames" / camera).mkdir(parents=True, exist_ok=True)
+        (run / "frames" / camera / "render.json").write_text(
+            json.dumps({"host": "unreal", "frames": 0, "frame_records": [], **provenance}),
+            encoding="utf-8")
+    card = export([run], tmp_path / "rendered_ds", "yolo", fractions=(1.0, 0.0, 0.0), labels_only=True)
+    assert card["runs"][0]["render_note"] is None
+    assert sorted(card["runs"][0]["render"]) == cameras
+    for camera in cameras:
+        assert card["runs"][0]["render"][camera] == provenance
+    assert not any("no render.json" in item for item in card["not_claimed"])
+    assert card["runs"][0]["render"][cameras[0]]["render_settings"]["console"]["r.CustomDepth"] == 3
+    on_disk = json.loads((tmp_path / "rendered_ds" / "dataset.json").read_text(encoding="utf-8"))
+    assert on_disk["runs"][0]["render"][cameras[0]]["look_applied"]["sun"]["sun_elevation_deg"] == 35.0

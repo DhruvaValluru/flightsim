@@ -264,6 +264,7 @@ def case_row(row: Dict[str, Any], run_dir: Path, returncode: int,
     written. The batch and the campaign share this so their rows agree
     key for key. Never raises for a failed capture -- the row says so."""
     from core.capture.verify import verify_run, write_verification
+    from core.dataset.export import bind_verification
 
     row["capture_exit"] = int(returncode)
     manifest = Path(run_dir) / "capture_manifest.json"
@@ -275,6 +276,7 @@ def case_row(row: Dict[str, Any], run_dir: Path, returncode: int,
         return row
     report = verify_run(run_dir)
     write_verification(report, run_dir)
+    bind_verification(run_dir)      # the verdict names the manifest it graded
     summary = report.to_dict()
     row["verified"] = bool(summary["ok"])
     row["verification"] = {k: summary[k] for k in ("ok", "passed", "failed", "not_run")}

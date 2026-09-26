@@ -9,7 +9,10 @@ Inputs are run directories (capture_manifest.json inside) or batch
 directories of them. Every run must carry a verification.json with no
 failed check (``python -m flightsim.verify <run>`` writes it; the
 batch runner writes it too) -- an unverified run refuses the export by
-name. Frames are split by simulation digest (one flight, one side).
+name, and so does a run whose manifest changed after the batch runner's
+verdict was written (re-run the verifier). Two different runs with one
+directory name refuse too: every exported frame is named after its
+run. Frames are split by simulation digest (one flight, one side).
 ``--format`` takes one of coco, kitti, webdataset, yolo, voc or a comma
 list of them; one format writes into --out directly, several write
 --out/<format>/ each, with one card. The card (DATASET_CARD.md +
