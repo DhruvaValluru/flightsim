@@ -1031,6 +1031,15 @@ mutate webapp/runs.py \
     "a staged place with no bake is flat at its datum, never the control ridge" \
     tests/test_webapp.py || failures=$((failures+1))
 
+# -- Phase 2, package I part 2 (CI fix): the page renders only with an
+# engine AND every airframe's imported model; ue_available() alone sent
+# the macOS runner into aircraft.mesh on every preview and campaign.
+mutate webapp/generate.py \
+    '    missing = [name for name in names if not is_imported(name)]' \
+    '    missing = []  # MUTATED: an engine alone decides; the model is never checked' \
+    "the guided page renders only when every airframe's model is imported" \
+    tests/test_webapp_generate.py || failures=$((failures+1))
+
 # -- Camera Phase 2: the capture stage and the web app it reaches.
 mutate core/capture/verify.py \
     '    if worst > tol_m:' \

@@ -586,3 +586,49 @@ def test_the_done_headline_carries_the_numbers_and_says_whether_a_picture_was_dr
     assert payload["headline"] == (
         "Every requested image has its labels generated and checked "
         "(1001 pictures from 2 scenarios, 3 asked for), and its picture drawn.")
+
+
+def test_the_page_renders_only_with_an_engine_and_the_model(client, monkeypatch):
+    """Measured on the macOS CI runner: ue_available() is True on every
+    Mac by design, so the preview and the campaign asked for --render
+    with no model imported and the capture refused aircraft.mesh -- a
+    campaign that ended 'failed' on a machine that could have drawn the
+    geometry preview. Rendering is decided by render_here(): the engine
+    AND an imported model for every airframe, with the reason in words."""
+    from core.nl.compiler import compile_prompt
+
+    spec = compile_prompt(ASKS_VIEW + ", chase view")
+    monkeypatch.setattr(generate_module, "ue_available", lambda: False)
+    render, note = generate_module.render_here(spec)
+    assert render is False and "no engine" in note
+
+    monkeypatch.setattr(generate_module, "ue_available", lambda: True)
+    monkeypatch.setattr(generate_module, "is_imported", lambda name: False)
+    render, note = generate_module.render_here(spec)
+    assert render is False and "not imported" in note and "A320" in note
+
+    monkeypatch.setattr(generate_module, "is_imported", lambda name: True)
+    render, note = generate_module.render_here(spec)
+    assert render is True and "rendered" in note
+
+    # A traffic airframe counts too: the scene draws it.
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(generate_module, "is_imported",
+                        lambda name: name != "B747")
+    spec.traffic.append(SimpleNamespace(aircraft=SimpleNamespace(value="B747")))
+    render, note = generate_module.render_here(spec)
+    assert render is False and "B747" in note and "A320" not in note
+    spec.traffic.pop()
+
+    # The preview on the 'engine but no model' machine falls back to the
+    # geometry preview and says so, instead of refusing by aircraft.mesh.
+    monkeypatch.setattr(generate_module, "is_imported", lambda name: False)
+    plan = client.post("/generate/plan", json={"prompt": ASKS_VIEW, "tier": "regex",
+                                               "images": IMAGES, "answers": ANSWER}).json()
+    response = client.post("/generate/preview", json={"spec": plan["spec"], "images": IMAGES})
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["engine"] is False and payload["drawn"] is False
+    assert "not imported" in payload["render_note"]
+    assert payload["picture"]["kind"] == "previews"

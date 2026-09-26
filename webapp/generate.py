@@ -58,7 +58,10 @@ import uuid
 import zipfile
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+
+from assets_pipeline.importer import is_imported
+from core.util.platform import ue_available
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from core.campaign import Campaign, CampaignError
 from core.campaign.campaign import (
@@ -99,6 +102,31 @@ _CASE_RE = re.compile(r"^[a-f0-9]{16}$")
 _CAMERA_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _IMAGE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,80}\.png$")
 IMAGE_KINDS = ("overlays", "previews", "frames")
+
+
+
+def render_here(spec) -> Tuple[bool, str]:
+    """Whether THIS machine can draw the spec's pixels, and why not when
+    it cannot: the engine half AND an imported model for every airframe
+    the scene draws. ``ue_available()`` alone is not the test -- it is
+    true on every Mac by design (the sources build there), and a page
+    that asked for ``--render`` on that alone sent the capture into its
+    ``aircraft.mesh`` refusal on a machine with no model (measured: the
+    macOS CI runner, every preview and campaign refused). The headless
+    path is the honest fallback, and the sentence says which."""
+    if not ue_available():
+        return False, ("no engine on this machine: the geometry preview stands in "
+                       "for the picture")
+    names = [str(spec.aircraft.value)]
+    for entry in getattr(spec, "traffic", None) or []:
+        names.append(str(entry.aircraft.value))
+    missing = [name for name in names if not is_imported(name)]
+    if missing:
+        return False, (f"the {', '.join(missing)} model is not imported on this "
+                       f"machine, so nothing is rendered; the geometry preview "
+                       f"stands in for the picture (scripts/import_aircraft.py "
+                       f"{' '.join(missing)} imports it)")
+    return True, "an engine and every airframe's model are present: the picture is rendered"
 
 
 class GenerateRefusal(Exception):
@@ -441,8 +469,6 @@ class GenerateService:
         the pixels) is the picture; otherwise the geometry preview is,
         and the response says which. The case is measured (frames,
         bytes, seconds) and the estimate is recomputed from it."""
-        from core.util.platform import ue_available
-
         try:
             spec = ScenarioSpec.from_dict(spec_dict)
         except (ValueError, KeyError) as exc:
@@ -453,7 +479,7 @@ class GenerateService:
         refusals = plan_refusals(spec)
         if refusals:
             raise GenerateRefusal({**refusals[0], "refusals": refusals})
-        engine = bool(ue_available())
+        engine, render_note = render_here(spec)
         record = {"spec": spec.to_dict(), "seed": int(seed),
                   "capture": {"max_previews": 1, "card": True, **({"render": True} if engine else {})}}
         preview_id = uuid.uuid4().hex[:12]
@@ -492,6 +518,7 @@ class GenerateService:
             "status_words": state_words(f"progress.case.{row.get('status')}"),
             "reason": row.get("reason"),
             "engine": engine,
+            "render_note": render_note,
             "drawn": bool(row.get("drawn")),
             "picture": ({"kind": picture["kind"], "camera_id": picture["camera_id"],
                          "name": picture["name"],
@@ -530,8 +557,6 @@ class GenerateService:
         """Create the campaign (``Campaign.create``: compiles, refuses
         by name) and run it in a thread. One running campaign per
         server process."""
-        from core.util.platform import ue_available
-
         prompt = str(prompt or "").strip()
         if not prompt:
             raise GenerateRefusal({"error": "empty prompt"}, 400)
@@ -541,9 +566,9 @@ class GenerateService:
                 "campaign.state",
                 f"campaign {running} is still running in this server; pause or cancel "
                 f"it before starting another")))
+        # Rendering is decided once the prompt has compiled (the airframe
+        # is known then): render_here() below, never ue_available() alone.
         capture = {"max_previews": 1, "card": True}
-        if ue_available():
-            capture["render"] = True
         campaign_id = uuid.uuid4().hex[:12]
         try:
             campaign = Campaign.create(
@@ -552,6 +577,10 @@ class GenerateService:
                 disk_budget_bytes=disk_budget_bytes,
                 tier=tier if tier in ("llm", "regex") else "regex",
                 capture=capture)
+            render, render_note = render_here(campaign._spec())
+            if render:
+                campaign.record["capture"]["render"] = True
+                campaign._save()
             plan = campaign.plan()          # refuses by name before a worker starts
         except CampaignError as exc:
             raise GenerateRefusal(words(exc))
@@ -562,6 +591,7 @@ class GenerateService:
                 "spec_digest": digest, "plan_digest": plan_digest,
                 "recompiled": bool(plan_digest and plan_digest != digest),
                 "tier": campaign.record["tier"], "plan": plan,
+                "render": render, "render_note": render_note,
                 "directory": str(campaign.dir),
                 "expert": [expert_campaign(prompt, images, fmt, seed, answers=answers,
                                            tier=tier, out=campaign.dir, workers=workers)]}
