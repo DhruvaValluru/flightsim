@@ -50,6 +50,9 @@ def done_campaign(tmp_path_factory):
     started = service.start(ASKS_VIEW, answers=ANSWER, images=IMAGES, fmt="coco",
                             seed=7, workers=1, tier="regex")
     service.wait(started["id"], timeout=120)
+    assert not service.threads[started["id"]].is_alive(), (
+        f"campaign thread still running after 120 s; recorded error: "
+        f"{service.errors.get(started['id'])!r}")
     campaign = Campaign.open(root / started["id"])
     assert campaign.state == "done", campaign.record
     return {"root": root, "id": started["id"], "service": service}
@@ -340,9 +343,14 @@ def test_start_runs_the_campaign_and_the_stream_emits(client):
     campaign_id = started["id"]
     # A second campaign while one runs is refused in words.
     generator.wait(campaign_id, timeout=120)
+    # A campaign thread still alive here is a hang, not a slow run: say
+    # so with what it recorded, instead of streaming events forever.
+    assert not generator.threads[campaign_id].is_alive(), (
+        f"campaign thread still running after 120 s; recorded error: "
+        f"{generator.errors.get(campaign_id)!r}")
     assert Campaign.open(generator.root / campaign_id).state == "done"
     events = []
-    with client.stream("GET", f"/generate/{campaign_id}/events?interval=0.05") as stream:
+    with client.stream("GET", f"/generate/{campaign_id}/events?interval=0.05&limit=200") as stream:
         assert stream.headers["content-type"].startswith("text/event-stream")
         for line in stream.iter_lines():
             events.append(line)
