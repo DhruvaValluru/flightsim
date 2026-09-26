@@ -555,3 +555,34 @@ def test_the_page_s_default_path_interpolates_no_code_identifier():
     expert = (generate_module.REPO / "webapp" / "static" / "index.html").read_text(encoding="utf-8")
     assert "capture_manifest.v5" not in expert
     assert "capture_manifest.v${manifestVersion}.schema.json" in expert
+
+
+def test_the_done_headline_carries_the_numbers_and_says_whether_a_picture_was_drawn(tmp_path):
+    """Measured at 5bd6864: the done headline read 'Every requested image
+    has its labels generated and checked' whatever the tally, and
+    progress_from passed no numbers to the sentence. The page passes
+    done / total / cases_verified / drawn; the catalogue's done sentence
+    carries them, and its tail says 'no picture was drawn on this
+    machine' unless a case was drawn."""
+    campaign = Campaign.create(ASKS_VIEW, answers=ANSWER, images=3, seed=7,
+                               out=tmp_path / "0123456789ab", tier="regex")
+    ledger = Ledger(campaign.dir / "ledger.jsonl")
+    ledger.append({"index": 0, "status": "verified", "case_id": "c" * 16, "run_dir": "x",
+                   "ok": True, "verified": True, "frames": 1000, "yield": 1000, "bytes": 10,
+                   "wall_seconds": 1.0, "sampled": {}})
+    campaign._transition("running")
+    campaign._transition("done", "1000 verified frame(s) of 3")
+    payload = generate_module.progress_from(campaign.record, ledger.rows(), campaign.dir)
+    assert payload["headline"] == (
+        "Every requested image has its labels generated and checked "
+        "(1000 pictures from 1 scenario, 3 asked for); no picture was drawn on this machine.")
+    assert payload["reason_words"]["sentence"] == payload["headline"]
+    assert "generated and checked." not in payload["headline"]
+    ledger.append({"index": 1, "status": "verified", "case_id": "d" * 16, "run_dir": "y",
+                   "ok": True, "verified": True, "frames": 1, "yield": 1, "bytes": 10,
+                   "wall_seconds": 1.0, "sampled": {}, "drawn": True})
+    payload = generate_module.progress_from(campaign.record, ledger.rows(), campaign.dir)
+    assert payload["drawn"] is True
+    assert payload["headline"] == (
+        "Every requested image has its labels generated and checked "
+        "(1001 pictures from 2 scenarios, 3 asked for), and its picture drawn.")

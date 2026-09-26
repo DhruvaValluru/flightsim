@@ -82,7 +82,7 @@ def _camera_sets(args) -> int:
     try:
         spec = ScenarioSpec.read(spec_path)
     except ValueError as exc:
-        print(f"REFUSED -- {exc}")
+        print(f"REFUSED -- spec.read: {exc}")
         return 2
     cameras = list(spec.cameras or [])
     if len(cameras) < 2:
@@ -129,7 +129,7 @@ def _camera_sets(args) -> int:
         directories[name] = out / name
         code = _capture(written, directories[name], args.render)
         if code != 0:
-            print(f"REFUSED -- the {name} capture exited {code}; "
+            print(f"REFUSED -- verify.capture: the {name} capture exited {code}; "
                   f"alignment needs both")
             return code
 
@@ -176,6 +176,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                      "--out DIR)")
 
     from core.capture.verify import verify_run, write_verification
+    from core.dataset.export import bind_verification
 
     report = verify_run(args.run_dir, other_run_dir=args.against)
     print(report.render())
@@ -189,6 +190,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # The run keeps its verdict: the dataset export (flightsim.export)
     # refuses a run that has no verification.json or a failed check.
     written = write_verification(report, args.run_dir)
+    # ...bound to the manifest it graded (manifest_sha256), as the batch
+    # and campaign runners bind theirs: an export can then tell this
+    # verdict from one on labels that changed since, and the dataset
+    # card no longer says the verdict is unbound for a run checked here.
+    bind_verification(args.run_dir)
     print(f"  recorded: {written}")
     return 0 if report.ok else 1
 

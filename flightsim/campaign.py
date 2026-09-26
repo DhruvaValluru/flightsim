@@ -77,7 +77,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--report", action="store_true",
                         help="write report.json and print it in words")
     parser.add_argument("--export", action="store_true",
-                        help="after a done campaign, export the verified runs")
+                        help="export the verified runs of a done campaign (in the "
+                             "running invocation, or later on its --out)")
     args = parser.parse_args(argv)
 
     from core.campaign import Campaign, CampaignError
@@ -85,7 +86,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from core.dataset.export import ExportError
 
     try:
-        if args.resume or args.pause or args.cancel or args.status or args.report:
+        if (args.resume or args.pause or args.cancel or args.status or args.report
+                or (args.export and not args.prompt)):
             campaign = Campaign.open(args.out)
             if args.pause:
                 status = campaign.pause()
@@ -105,13 +107,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(render_report(campaign.report()))
                 print(f"  written: {campaign.dir / 'report.json'}")
                 return 0
-            status = campaign.resume(workers=args.workers,
-                                     progress=lambda line: print("  " + line))
+            if args.export and not args.resume:
+                # --export alone on an existing --out: a done campaign's
+                # verified runs, exported now; anything else is refused
+                # by name rather than resumed behind the caller's back.
+                if campaign.state != "done":
+                    raise CampaignError(
+                        "campaign.state",
+                        f"a campaign that is {campaign.state} cannot export; "
+                        f"only a done campaign can (resume it first)")
+                status = campaign.status()
+            else:
+                status = campaign.resume(workers=args.workers,
+                                         progress=lambda line: print("  " + line))
         else:
             if not args.prompt or args.images is None:
                 print("REFUSED -- campaign.arguments: a new campaign needs a prompt "
                       "and --images N (or --resume/--pause/--cancel/--status/"
-                      "--report on an existing --out)")
+                      "--report/--export on an existing --out)")
                 return 2
             try:
                 answers = _answers(args.answer)

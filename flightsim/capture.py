@@ -219,6 +219,15 @@ def _traffic_mesh_refusal(spec):
     return None
 
 
+def _after_name(exc: Exception) -> str:
+    """The text of an error whose str() begins with its own rule name
+    (``ScheduleError``: "camera.schedule: ..."), without that head, so
+    a REFUSED line prints the name once."""
+    text = str(exc)
+    head = f"{getattr(exc, 'constraint', '')}: "
+    return text[len(head):] if head != ": " and text.startswith(head) else text
+
+
 def _refuse(violations) -> int:
     print("REFUSED -- by name:")
     for v in violations:
@@ -569,8 +578,8 @@ def _run(args: argparse.Namespace) -> int:
         tracks, schedules, solved_violations = solve_over(columns)
         traffic_tracks = solve_traffic(columns)
     except ScheduleError as exc:
-        # str(exc) begins with its rule name: "camera.schedule: ...".
-        print(f"REFUSED -- {exc}")
+        # The name once, at the head: str(exc) already begins with it.
+        print(f"REFUSED -- {exc.constraint}: {_after_name(exc)}")
         return 2
     if solved_violations:
         return _refuse(solved_violations)
@@ -694,8 +703,8 @@ def _run(args: argparse.Namespace) -> int:
             print(f"REFUSED -- {exc.constraint}: {exc.message}")
             return 2
         except ScheduleError as exc:
-            # str(exc) begins with its rule name: "camera.schedule: ...".
-            print(f"REFUSED -- {exc}")
+            # The name once, at the head: str(exc) already begins with it.
+            print(f"REFUSED -- {exc.constraint}: {_after_name(exc)}")
             return 2
         # The host's flight is a different flight, so the scene checks
         # run again over it. A camera that cleared the ridge on the

@@ -81,8 +81,6 @@ from experiments.showcase_matrix import (  # noqa: E402
     FPS,
     HEIGHT,
     SHOWCASE_DOUBLET,
-    TIME_OF_DAY,
-    VISIBILITY,
     WIDTH,
     encode_clip,
 )

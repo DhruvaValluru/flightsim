@@ -678,7 +678,7 @@ def test_the_card_carries_counts_conditions_licences_and_the_split_policy(batch_
     # its record count -- 192 frames x (primary + terrain) share two, the
     # terrain alone says it has no alone pass.
     aggregated = card["not_claimed_from_labels"]
-    assert aggregated["objects_under_px: 12"] == 384
+    assert aggregated[f"objects_under_px: {NOT_CLAIMED_EXTENT_PX}"] == 384
     assert aggregated["subpixel_mask_accuracy_beyond_range_m: 8000"] == 384
     assert [n for n in aggregated if n.startswith("visible_fraction: no alone pass")]
     assert card["not_claimed_extent_px"] == NOT_CLAIMED_EXTENT_PX
@@ -895,3 +895,49 @@ def test_render_json_drawn_settings_and_look_reach_the_card(batch_dir, tmp_path)
     assert card["runs"][0]["render"][cameras[0]]["render_settings"]["console"]["r.CustomDepth"] == 3
     on_disk = json.loads((tmp_path / "rendered_ds" / "dataset.json").read_text(encoding="utf-8"))
     assert on_disk["runs"][0]["render"][cameras[0]]["look_applied"]["sun"]["sun_elevation_deg"] == 35.0
+
+
+# -- one number for "too small to claim", in the producer, the verifier and the export --
+
+def test_the_not_claimed_extent_is_one_number_across_producer_verifier_and_export(batch_dir):
+    """Contracts §3: an object under 16 px is not claimed. Measured before
+    the fix: the label producer stopped at 12 (core/capture/labels.py
+    NOT_CLAIMED_OBJECT_PX) while the verifier's IoU schedule
+    (BOX_IOU_MIN_PX) and the export (NOT_CLAIMED_EXTENT_PX) stopped at
+    16, so an object of 12-16 px was claimed by the record and graded by
+    no check. The three are imported here, not retyped, and the number a
+    real run writes into its records is the same one."""
+    from core.capture import labels, verify
+
+    assert labels.NOT_CLAIMED_OBJECT_PX == 16
+    assert labels.NOT_CLAIMED_OBJECT_PX == verify.BOX_IOU_MIN_PX == NOT_CLAIMED_EXTENT_PX
+    objects = _manifest(_runs(batch_dir)[0])["frames"][0]["labels"]["objects"]
+    assert objects
+    for obj in objects:
+        assert f"objects_under_px: {labels.NOT_CLAIMED_OBJECT_PX}" in obj["not_claimed"]
+        assert "objects_under_px: 12" not in obj["not_claimed"]
+
+
+def test_the_verify_command_binds_its_verdict_to_the_manifest(batch_dir, tmp_path):
+    """Only the batch and campaign runners bound their verdicts; a run
+    checked with `python -m flightsim.verify` carried no manifest_sha256,
+    so the dataset card said its verdict was not bound to the manifest.
+    The command now binds like the runners: the digest in
+    verification.json is the manifest's, and a manifest edited afterwards
+    is told apart from the verdict (export.verification_stale)."""
+    from core.dataset.export import manifest_digest
+    from flightsim.verify import main as verify_main
+
+    run = tmp_path / "cli_verified"
+    shutil.copytree(_runs(batch_dir)[0], run)
+    (run / VERIFICATION_FILE).unlink()
+    assert verify_main([str(run)]) == 0
+    verdict = json.loads((run / VERIFICATION_FILE).read_text(encoding="utf-8"))
+    assert verdict[MANIFEST_DIGEST_KEY] == manifest_digest(run)
+    loaded = load_run(run)
+    assert loaded is not None
+    manifest = run / "capture_manifest.json"
+    manifest.write_text(manifest.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    with pytest.raises(ExportError) as info:
+        load_run(run)
+    assert info.value.constraint == "export.verification_stale"

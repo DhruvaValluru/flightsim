@@ -520,3 +520,41 @@ def test_the_campaign_cli_runs_reports_and_refuses_by_exit_code(tmp_path, capsys
     assert not (tmp_path / "s" / "ledger.jsonl").exists()
     assert main(["--out", str(tmp_path / "s"), "--cancel"]) == 0
     assert "cancelled" in capsys.readouterr().out
+
+
+def test_the_cli_exports_a_done_campaign_later_on_its_out(tmp_path, capsys):
+    """Measured at 7b0a39a: `--out DIR --export` alone on a done campaign
+    was refused campaign.arguments (a new campaign needs a prompt), so the
+    smoke path 'run, then export' could not be typed. --export on an
+    existing --out is now an action like --report: a done campaign's
+    verified runs land in <out>/datasets/<format> and the card names the
+    format; a campaign that is not done is refused campaign.state, never
+    resumed behind the caller's back."""
+    from flightsim.campaign import main
+
+    out = tmp_path / "later"
+    # A 2-case headless campaign, run to done in one invocation.
+    assert main([PROMPT, "--images", "100", "--seed", "7", "--out", str(out),
+                 "--workers", "1"]) == 0
+    printed = capsys.readouterr().out
+    assert "done" in printed and not (out / "datasets").exists()
+    assert Campaign.open(out).state == DONE
+    cases = [r for r in Ledger(out / "ledger.jsonl").rows() if r.get("status") == "verified"]
+    assert len(cases) >= 2
+    # Later: export alone, on the same --out.
+    assert main(["--out", str(out), "--export"]) == 0
+    printed = capsys.readouterr().out
+    assert "exported" in printed and "(labels only: no pixels were drawn)" in printed
+    fmt = Campaign.open(out).record["format"]
+    dataset = out / "datasets" / fmt
+    assert dataset.is_dir() and (dataset / "DATASET_CARD.md").is_file()
+    assert fmt in (dataset / "DATASET_CARD.md").read_text(encoding="utf-8")
+    assert str(dataset) in printed
+    # A campaign that is not done: refused by name, and not resumed.
+    planned = tmp_path / "planned"
+    assert main([PROMPT, "--images", "10", "--out", str(planned), "--plan"]) == 0
+    capsys.readouterr()
+    assert main(["--out", str(planned), "--export"]) == 2
+    printed = capsys.readouterr().out
+    assert printed.startswith("REFUSED -- campaign.state:"), printed
+    assert not (planned / "ledger.jsonl").exists()

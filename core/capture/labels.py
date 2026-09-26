@@ -494,10 +494,12 @@ NOT_CLAIMED_SUBPIXEL_RANGE_M = 8000.0
 #: recorded but its box/mask agreement is not claimed. Stated here as
 #: 12 px; the verifier's own IoU schedule (core/capture/verify.py
 #: BOX_IOU_MIN_PX) and contracts §3 stop at 16 px, so an object of 12
-#: to 16 px is claimed by this record and graded by no check -- the
-#: two numbers are not yet one (the export's NOT_CLAIMED_EXTENT_PX is
-#: also 16).
-NOT_CLAIMED_OBJECT_PX = 12
+#: the verifier's IoU schedule (BOX_IOU_MIN_PX) and the export's
+#: NOT_CLAIMED_EXTENT_PX stop at the same 16 px (contracts §3), so no
+#: object is claimed by this record and graded by no check; a test pins
+#: the three numbers to each other (the verifier stays independent: it
+#: does not import this one).
+NOT_CLAIMED_OBJECT_PX = 16
 #: Koschmieder's constant: the extinction that leaves 2 % contrast at
 #: the meteorological visibility, beta = 3.912 / V.
 KOSCHMIEDER_K = 3.912

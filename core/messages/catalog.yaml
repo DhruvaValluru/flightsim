@@ -41,7 +41,8 @@ airspeed.stall_margin:
 airspeed.approach_speed:
   sentence: "An approach at {actual} knots is far too fast for this aircraft to land; {limit} knots is the most a landing allows."
 run.duration:
-  sentence: "The flight has to last longer than zero seconds."
+  sentence: "The flight has to last longer than zero seconds and no longer than an hour."
+  hint: "Ask for a flight of between one second and an hour (3600 seconds); a longer one is a session, not a scenario."
 run.rate:
   sentence: "The simulation has to take more than zero steps per second."
 environment.wind_speed:
@@ -204,6 +205,17 @@ validation:
   sentence: "The scenario failed {count} {count:check|checks}; each is explained below."
 verify.camera_sets:
   sentence: "The two camera sets given to the checker do not describe the same cameras."
+verify.capture:
+  sentence: "One of the two captures the checker needed did not complete, so the two cannot be compared."
+
+# -- the engine's look (FlightSimVisualScene.cpp, FlightSimRenderCommandlet.cpp) --
+
+look.clouds:
+  sentence: "The cloud layer could not be drawn: its cover has to lie between none and full, its top has to sit above its base, and the renderer's own cloud material has to load."
+  hint: "State a cover between 0 and 1 and a top above the base; if both are right, the renderer's cloud material is missing on this machine."
+look.precipitation:
+  sentence: "The precipitation named is not one the renderer draws; it draws none, rain or snow."
+  hint: "Ask for none, rain or snow."
 
 # -- the batch runner (core/dataset/batch.py) --------------------------------
 
@@ -226,13 +238,22 @@ batch.capture:
 
 export.runs:
   sentence: "One of the given folders is neither a finished run nor a folder of runs."
+export.run_names:
+  sentence: "Two different runs have the same folder name, so their frames would overwrite each other."
+  hint: "Put them in folders with different names, then export again."
+export.verification_stale:
+  sentence: "A run's labels changed after they were checked, so the old check no longer counts."
+  hint: "Run the checker on it again."
+export.out_directory:
+  sentence: "The dataset folder already holds a different picture under the same name from an earlier export."
+  hint: "Export into an empty folder."
 export.unverified:
   sentence: "A run was never checked, so its labels cannot be exported."
   hint: "Run the checker on it first."
 export.verification_failed:
   sentence: "A run failed its checks, so it cannot be exported."
 export.unverified_labels:
-  sentence: "A run's masks were never checked against the geometry, so a format that ships masks cannot take them."
+  sentence: "A run's mask, class image or depth was never checked against the geometry, so a format that ships it cannot take it."
 export.image:
   sentence: "The export asks for a kind of picture the runs do not have; each frame comes as the ideal or the sensor image."
 export.sensor_labels:
@@ -306,6 +327,9 @@ authority.budget:
 spec.version:
   sentence: "This scenario file was written by a different version of the system and cannot be read."
   hint: "Recreate it with this version."
+spec.read:
+  sentence: "This scenario file could not be read as a scenario."
+  hint: "Check that it is the YAML this version writes, with every required section."
 manifest.version:
   sentence: "This capture record was written by a version of the system this one cannot read."
 compile.rejected:
@@ -313,6 +337,9 @@ compile.rejected:
   hint: "Try again, rephrase, or use the offline compiler."
 compile.unavailable:
   sentence: "No language model is set up on this server; the offline compiler is still available."
+compile.unreachable:
+  sentence: "The language model could not be reached, so the offline compiler was used."
+  hint: "Check the server's network or language-model settings; the offline compiler needs neither."
 
 # -- verifier checks, by name (core/capture/verify.py) -----------------------
 # One sentence per check: what it measures, in the affirmative. The UI
@@ -396,7 +423,7 @@ progress.campaign.paused:
 progress.campaign.failed:
   sentence: "The campaign stopped on an error."
 progress.campaign.done:
-  sentence: "Every requested image has its labels generated and checked{drawn:, and its picture drawn|; no picture was drawn on this machine}."
+  sentence: "Every requested image has its labels generated and checked ({done} {done:picture|pictures} from {cases_verified} {cases_verified:scenario|scenarios}, {total} asked for){drawn:, and its picture drawn|; no picture was drawn on this machine}."
 progress.campaign.cancelled:
   sentence: "The campaign was cancelled."
 

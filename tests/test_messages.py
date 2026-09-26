@@ -126,6 +126,22 @@ def _sources():
             yield path, path.read_text(encoding="utf-8")
 
 
+#: The engine emits refusals too (contracts §8: every refusal name the code
+#: emits): a C++ TEXT("<name>: ...") message prefix in the plugin, read as
+#: text because the C++ is uncompiled here. A UE_LOG warning that reuses a
+#: refusal's name is the same name and needs no second entry.
+CPP_SCANNED = ("ue/Plugins/FlightSimBridge/Source",)
+CPP_PATTERNS: Tuple[Tuple[str, "re.Pattern"], ...] = (
+    ('TEXT("<name>: " message prefix', re.compile(r'TEXT\("([a-z_]+\.[a-z_]+): ')),
+)
+
+
+def _cpp_sources():
+    for top in CPP_SCANNED:
+        for path in sorted((REPO / top).rglob("*.cpp")):
+            yield path, path.read_text(encoding="utf-8")
+
+
 def _field_order() -> Tuple[str, ...]:
     """RandomizationSpec.FIELD_ORDER read from its source, not imported."""
     text = (REPO / "core/scenario/randomization.py").read_text(encoding="utf-8")
@@ -186,6 +202,11 @@ def scan_codebase() -> Dict[str, Set[str]]:
             for match in pattern.finditer(text):
                 for name in _expand(match.group(1), text, rel):
                     found.setdefault(name, set()).add(f"{label} @ {rel}")
+    for path, text in _cpp_sources():
+        rel = str(path.relative_to(REPO))
+        for label, pattern in CPP_PATTERNS:
+            for match in pattern.finditer(text):
+                found.setdefault(match.group(1), set()).add(f"{label} @ {rel}")
     return found
 
 
@@ -225,6 +246,14 @@ def test_scanner_sees_every_shape_the_code_uses():
         "progress.campaign.done": '"progress.*" / "verdict.*" literal @ webapp/generate.py',
         "verdict.pass": '"progress.*" / "verdict.*" literal @ webapp/generate.py',
         "campaign.duplicate_case": '"refusals": ["<name>" @ core/campaign/workers.py',
+        # the engine's own refusals, read from the uncompiled C++
+        "look.clouds": 'TEXT("<name>: " message prefix @ ue/Plugins/FlightSimBridge/Source/'
+                       'FlightSimBridge/Private/FlightSimVisualScene.cpp',
+        "look.precipitation": 'TEXT("<name>: " message prefix @ ue/Plugins/FlightSimBridge/'
+                              'Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp',
+        # the CLIs' remaining refusals, each by a literal name
+        "spec.read": "REFUSED -- @ flightsim/verify.py",
+        "verify.capture": "REFUSED -- @ flightsim/verify.py",
     }
     missing = {name: site for name, site in expected.items()
                if site not in found.get(name, set())}
@@ -390,13 +419,22 @@ def test_plural_reads_correctly_for_one_and_for_three():
 def test_a_yes_no_value_picks_the_plural_form():
     """The done state's tail is chosen by whether any picture was drawn
     (the page passes drawn=any(row.drawn)); with no answer the sentence
-    claims neither, and 'labels' is what it says was generated."""
+    claims neither, and 'labels' is what it says was generated. The
+    numbers the page passes (done, cases_verified, total) fill a
+    bracketed aside that is dropped whole when none is given."""
     base = "Every requested image has its labels generated and checked"
     assert render("progress.campaign.done") == base + "."
     assert render("progress.campaign.done", drawn=False) == (
         base + "; no picture was drawn on this machine.")
     assert render("progress.campaign.done", drawn=True) == (
         base + ", and its picture drawn.")
+    assert render("progress.campaign.done", done=192, total=150, cases_verified=2,
+                  drawn=False) == (
+        base + " (192 pictures from 2 scenarios, 150 asked for); no picture was "
+        "drawn on this machine.")
+    assert render("progress.campaign.done", done=1, total=1, cases_verified=1,
+                  drawn=True) == (
+        base + " (1 picture from 1 scenario, 1 asked for), and its picture drawn.")
     assert render("progress.case.rendered") == "Flown and recorded; checking the labels."
     assert render("progress.case.rendered", drawn=True) == (
         "Flown and recorded; checking the labels, and the pictures.")

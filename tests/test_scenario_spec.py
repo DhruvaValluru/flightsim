@@ -109,3 +109,31 @@ def test_quantity_detail_survives_round_trip():
     q = Quantity.inferred("moderate", frm="moderate turbulence",
                           std="MIL-F-8785C Fig.7", W20_kt=30.0)
     assert Quantity.from_dict(q.to_dict()).detail["W20_kt"] == 30.0
+
+
+def test_a_duration_above_an_hour_is_refused_by_name(spec):
+    """The LLM tier or a hand-written YAML can state 120000 s; nothing
+    refused it, and a campaign would integrate and write frames for
+    hours on a number nobody meant. Above MAX_DURATION_S (an hour) the
+    validator refuses run.duration by name, with the number and the
+    limit, and the catalogue puts both bounds into one sentence."""
+    import dataclasses
+
+    from core.messages import explain
+    from core.scenario.validate import MAX_DURATION_S, validate
+
+    assert MAX_DURATION_S == 3600.0
+    assert validate(spec, check_feasibility=False).ok
+    spec.duration = dataclasses.replace(spec.duration, value=MAX_DURATION_S)
+    assert validate(spec, check_feasibility=False).ok          # the bound is inclusive
+    spec.duration = dataclasses.replace(spec.duration, value=120000.0)
+    report = validate(spec, check_feasibility=False)
+    named = [v for v in report.violations if v.constraint == "run.duration"]
+    assert not report.ok and len(named) == 1
+    violation = named[0]
+    assert violation.actual == 120000.0 and violation.limit == MAX_DURATION_S
+    assert violation.unit == "s" and "session, not a scenario" in violation.message
+    words = explain(violation)
+    assert words["rule"] == "run.duration"
+    assert "no longer than an hour" in words["sentence"]
+    assert "3600" in words["hint"]

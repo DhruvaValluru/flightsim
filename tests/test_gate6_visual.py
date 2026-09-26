@@ -431,8 +431,13 @@ def _vector_literal(source: str, name: str):
 
 
 def test_the_camera_director_defaults_are_pythons_constants():
-    """One rule for the legacy preset path and the solved track: the C++
-    defaults are read from the header text and compared with camera.py."""
+    """The C++ defaults are read from the header text and compared with
+    camera.py. What they reach differs, and the header says so: the
+    wingman default is live (only -wingman-abeam= overrides it); the chase
+    default is a fallback no shipped host flies -- the commandlet's shot
+    constants (-170/16, -400/200) and -chase=, and the interactive host's
+    own -170/16, override it on every preset-mode run -- so this pins the
+    fallback, not a rendered frame."""
     from core.scenario.camera import (FALLBACK_CHASE_OFFSET, SHOULDER_OFFSET,
                                       WINGMAN_OFFSET)
 
@@ -515,3 +520,63 @@ def test_the_terrain_is_tiled_at_a_stated_budget_and_the_posting_recorded():
     assert 'TEXT("TerrainTile_r%d_c%d")' in scene
     assert "int32 TerrainTriangleBudget = 4000000;" in (
         BRIDGE / "Public/FlightSimVisualScene.h").read_text(encoding="utf-8")
+
+
+def test_the_settle_in_placement_is_the_directors_resting_pose():
+    """The commandlet's pre-placement asks the director where the preset
+    rests (PresetRestingPose: this preset's offset from the CG, the point
+    every preset updates from) instead of computing a station from the
+    actor origin -- the structural datum, 33.7 m ahead of the B747's CG,
+    which opened every preset-mode chase clip 136 m behind the CG with
+    the lag dragging it in over the first ~1.5 s of written frames."""
+    source = COMMANDLET.read_text(encoding="utf-8")
+    block = re.search(r"// Start it where it will settle\.(.*?)\n\t\}\n", source, re.S)
+    assert block, "the settle-in placement is gone"
+    text = block.group(1)
+    assert "Director->PresetRestingPose(Station, Look)" in text
+    assert "GetActorLocation()" not in text
+    director = (BRIDGE / "Private/FlightSimCameraDirector.cpp").read_text(encoding="utf-8")
+    body = re.search(r"bool AFlightSimCameraDirector::PresetRestingPose\((.*?)\n\}\n",
+                     director, re.S)
+    assert body, "PresetRestingPose is gone"
+    assert "TargetAimPoint(TargetTransform)" in body.group(1)
+    assert "RefreshTargetMovement()" in body.group(1)
+    assert "GetLocation()" not in body.group(1)
+    # One arithmetic: the definition, the two lagged presets, the resting pose.
+    assert director.count("HeadingOffsetStation(") >= 5
+
+
+def test_render_json_root_camera_preset_is_the_preset_that_flew():
+    """Contracts §1: the root camera_preset was a hard-coded "LaggedChase"
+    on every pass, wingman and tower included; it carries the preset word
+    the pass ran with, the same value as scene.camera_preset."""
+    source = COMMANDLET.read_text(encoding="utf-8")
+    assert 'Root->SetStringField(TEXT("camera_preset"), CameraPreset);' in source
+    assert 'Scene->SetStringField(TEXT("camera_preset"), CameraPreset);' in source
+    assert 'TEXT("camera_preset"), TEXT("LaggedChase")' not in source
+
+
+def test_the_plugin_includes_only_the_json_headers_the_engine_ships():
+    """Dom/JsonValues.h (plural) exists in no UE 5.x tree; the include
+    stopped the first Windows build (C1083) before anything could be
+    measured. The Json module's Dom/ holds JsonObject.h and JsonValue.h."""
+    shipped = {"Dom/JsonObject.h", "Dom/JsonValue.h"}
+    for path in list(BRIDGE.rglob("*.cpp")) + list(BRIDGE.rglob("*.h")):
+        for header in re.findall(r'#include "(Dom/[^"]+)"', path.read_text(encoding="utf-8")):
+            assert header in shipped, f"{path.name} includes {header}, which the engine does not ship"
+
+
+def test_the_build_targets_include_order_is_the_pinned_engines():
+    """The two Target.cs files state an EngineIncludeOrderVersion; it
+    was left at Unreal5_5 when the pin moved to 5.7, and UnrealBuildTool
+    then compiles the project against the older include order (a warning
+    on every build, and the header shims the engine kept for 5.5 rather
+    than 5.7's). The enum name is built from the one pinned version,
+    core.util.platform.UE_ENGINE_VERSION, so this moves with the pin."""
+    from core.util.platform import UE_ENGINE_VERSION
+
+    wanted = "EngineIncludeOrderVersion.Unreal" + UE_ENGINE_VERSION.replace(".", "_")
+    for name in ("FlightSim.Target.cs", "FlightSimEditor.Target.cs"):
+        text = (REPO / "ue/Source" / name).read_text(encoding="utf-8")
+        assert f"IncludeOrderVersion = {wanted};" in text, f"{name} does not pin {wanted}"
+        assert "Unreal5_5" not in text, f"{name} still says Unreal5_5"

@@ -31,6 +31,12 @@ from .spec import ScenarioSpec
 
 #: Minimum clearance above terrain for an airborne start.
 MIN_CLEARANCE_M = 30.0
+#: The longest flight that is a scenario: an hour. A capture is minutes
+#: of flight at a stated rate; a stated duration above this (the LLM
+#: tier or a hand-written YAML can say 120000 s) would integrate and
+#: write frames for hours on a number nobody meant, so it is refused by
+#: name before any worker starts rather than run to exhaustion.
+MAX_DURATION_S = 3600.0
 #: Commanded speed must exceed the measured stall by this factor.
 STALL_MARGIN = 1.05
 
@@ -183,6 +189,15 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
         report.violations.append(
             Violation("run.duration", "duration must be positive",
                       actual=float(spec.duration.value), limit=0.0, unit="s")
+        )
+    elif float(spec.duration.value) > MAX_DURATION_S:
+        report.violations.append(
+            Violation("run.duration",
+                      "a duration longer than an hour is a session, not a "
+                      "scenario: a capture is minutes of flight, and this "
+                      "would integrate and write frames for hours",
+                      actual=float(spec.duration.value), limit=MAX_DURATION_S,
+                      unit="s")
         )
     if float(spec.rate.value) <= 0:
         report.violations.append(
