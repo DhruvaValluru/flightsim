@@ -22,6 +22,44 @@ cd "$(dirname "$0")/.."
 PY=.venv/bin/python
 PYTEST=.venv/bin/pytest
 
+# Options. The contract is the plain run: the full suite green, every guard
+# applied and its test red, the full suite green again. The options exist so
+# a review window can cover part of it, and so a refactor that rewrites a
+# guarded line is caught in seconds rather than discovered as a SKIP forty
+# minutes into a run (that happened: manifest 6 rewrote the "randomization"
+# line and orphaned its guard).
+#
+#   --check-targets   apply nothing, run no test: report every guard whose
+#                     target string is absent from its file or occurs more
+#                     than once (a duplicate would mutate the wrong site);
+#                     exit 1 when any guard is orphaned
+#   --list            print each guard's number, label and file; run nothing
+#   --from N, --to M  run guards N..M only (numbers as --list prints them)
+#   --match REGEX     run only guards whose label matches REGEX (grep -E)
+#   --no-suite        skip the full-suite baseline and final pass
+#
+# A subset run is a smoke test, not the contract, and says so at the end.
+mode=run; from_n=1; to_n=""; match=""; run_suite=1
+need_value() { [ $# -ge 2 ] || { echo "$1 needs a value (try --help)" >&2; exit 2; }; }
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --check-targets) mode=check; run_suite=0 ;;
+        --list) mode=list; run_suite=0 ;;
+        --from) need_value "$@"; from_n="$2"; shift ;;
+        --to) need_value "$@"; to_n="$2"; shift ;;
+        --match) need_value "$@"; match="$2"; shift ;;
+        --no-suite) run_suite=0 ;;
+        -h|--help) sed -n '/^# Options\./,/^mode=/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
+case "$from_n${to_n:-1}" in *[!0-9]*) echo "--from/--to take guard numbers" >&2; exit 2 ;; esac
+
+# Every guard is one `mutate` call at column zero, so the count is the total
+# the running "[n/total]" tag is measured against.
+total=$(grep -c '^mutate ' "$0")
+
 purge_cache() {
     find . -name __pycache__ -type d -not -path "./.venv/*" -exec rm -rf {} + 2>/dev/null
     local prefix
@@ -31,11 +69,66 @@ purge_cache() {
     fi
 }
 
+# The source file mutated right now and its pristine copy. A run that is
+# interrupted mid-guard (Ctrl-C, a `timeout` kill, a lost terminal) must put
+# the file back: before this trap existed a killed run left
+# core/scenario/randomization.py mutated in the working tree.
+mutated_file=""; mutated_backup=""
+restore_mutation() {
+    if [ -n "$mutated_backup" ] && [ -f "$mutated_backup" ]; then
+        cp "$mutated_backup" "$mutated_file" && rm -f "$mutated_backup"
+        purge_cache
+        echo "  restored $mutated_file after the run was interrupted" >&2
+    fi
+    mutated_file=""; mutated_backup=""
+}
+trap 'restore_mutation; exit 130' INT
+trap 'restore_mutation; exit 143' TERM
+trap 'restore_mutation' EXIT
+
+# check_target <file> <old> <label> <tag>: the guard's target must occur in
+# its file exactly once. Zero means a refactor orphaned the guard; more than
+# one means the mutation would land on the first site, which may not be the
+# guarded one.
+check_target() {
+    $PY - "$1" "$2" "$3" "$4" <<'EOF'
+import sys
+path, old, label, tag = sys.argv[1:5]
+try:
+    n = open(path).read().count(old)
+except OSError as exc:
+    print(f"  MISSING   {tag} {label} -- {exc}")
+    sys.exit(1)
+if n == 1:
+    print(f"  ok        {tag} {label}")
+elif n == 0:
+    print(f"  MISSING   {tag} {label} -- target not found in {path}: {old!r}")
+    sys.exit(1)
+else:
+    print(f"  AMBIGUOUS {tag} {label} -- target occurs {n} times in {path}: {old!r}")
+    sys.exit(1)
+EOF
+}
+
+guard_n=0; ran=0
 # mutate <file> <python-repr-of-old> <python-repr-of-new> <label> <tests...>
 mutate() {
     local file="$1" old="$2" new="$3" label="$4"; shift 4
+    guard_n=$((guard_n+1))
+    local tag="[$guard_n/$total]"
+    if [ "$guard_n" -lt "$from_n" ]; then return 0; fi
+    if [ -n "$to_n" ] && [ "$guard_n" -gt "$to_n" ]; then return 0; fi
+    if [ -n "$match" ] && ! printf '%s\n' "$label" | grep -Eq -- "$match"; then return 0; fi
+    ran=$((ran+1))
+    case "$mode" in
+        list) echo "  $tag $label  ($file)"; return 0 ;;
+        check) check_target "$file" "$old" "$label" "$tag"; return $? ;;
+    esac
+
     local backup; backup=$(mktemp)
     cp "$file" "$backup"
+    mutated_file="$file"; mutated_backup="$backup"
+    local t0=$SECONDS
 
     if ! $PY - "$file" "$old" "$new" <<'EOF'
 import sys
@@ -46,29 +139,41 @@ if old not in src:
 open(path, "w").write(src.replace(old, new, 1))
 EOF
     then
-        echo "  SKIP  $label -- could not apply mutation"
-        cp "$backup" "$file"; rm -f "$backup"; return 1
+        echo "  SKIP  $tag $label -- could not apply mutation"
+        cp "$backup" "$file"; rm -f "$backup"
+        mutated_file=""; mutated_backup=""
+        return 1
     fi
 
     purge_cache
     if $PYTEST "$@" -q >/dev/null 2>&1; then
-        echo "  WEAK  $label -- tests still pass with the guard removed"
+        echo "  WEAK  $tag $label -- tests still pass with the guard removed ($((SECONDS-t0))s)"
         local result=1
     else
-        echo "  ok    $label -- tests fail with the guard removed"
+        echo "  ok    $tag $label -- tests fail with the guard removed ($((SECONDS-t0))s)"
         local result=0
     fi
-    cp "$backup" "$file"; rm -f "$backup"; purge_cache
+    cp "$backup" "$file"; rm -f "$backup"
+    mutated_file=""; mutated_backup=""
+    purge_cache
     return $result
 }
 
-echo "Baseline:"
-purge_cache
-if $PYTEST -q >/dev/null 2>&1; then echo "  ok    suite is green"; else
-    echo "  ABORT suite is not green before mutating"; exit 1; fi
+case "$mode" in
+    list) echo "Guards ($total):" ;;
+    check) echo "Targets (each must occur exactly once in its file):" ;;
+esac
+if [ "$run_suite" -eq 1 ]; then
+    echo "Baseline:"
+    purge_cache
+    if $PYTEST -q >/dev/null 2>&1; then echo "  ok    suite is green"; else
+        echo "  ABORT suite is not green before mutating"; exit 1; fi
+fi
 
-echo
-echo "Mutations (each must make its test fail):"
+if [ "$mode" = run ]; then
+    echo
+    echo "Mutations (each must make its test fail):"
+fi
 failures=0
 
 mutate core/fdm/properties.py \
@@ -560,8 +665,10 @@ mutate core/environment/stack.py \
 # -- Phase 8: the LLM compiler and the web front door --------------------
 
 mutate core/nl/llm_compiler.py \
-    '        if entry["source"] not in ("user", "inferred", "model"):' \
-    '        if False:  # MUTATED: a model may claim default provenance' \
+    '            raise _fail(f"field {name!r} must carry exactly value/source/from")
+        if entry["source"] not in ("user", "inferred", "model"):' \
+    '            raise _fail(f"field {name!r} must carry exactly value/source/from")
+        if False:  # MUTATED: a model may claim default provenance' \
     "the model cannot claim provenance it does not have" \
     tests/test_llm_compiler.py || failures=$((failures+1))
 
@@ -592,8 +699,10 @@ mutate webapp/runs.py \
 # -- the scene director's rails (2026-08-13) ------------------------------
 
 mutate core/nl/llm_compiler.py \
-    '        if not (isinstance(entry["from"], str) and entry["from"].strip()):' \
-    '        if False:  # MUTATED: undeclared guesses accepted' \
+    '        if not (isinstance(entry["from"], str) and entry["from"].strip()):
+            # The load-bearing rail for guesses' \
+    '        if False:  # MUTATED: undeclared guesses accepted
+            # The load-bearing rail for guesses' \
     "a model guess with no declared reason is refused" \
     tests/test_llm_compiler.py || failures=$((failures+1))
 
@@ -710,8 +819,8 @@ mutate webapp/server.py \
     tests/test_webapp.py || failures=$((failures+1))
 
 mutate webapp/runs.py \
-    '    if (str(spec.wind_speed.source) == "user"' \
-    '    if False and (str(spec.wind_speed.source) == "user"' \
+    '    if (str(spec.wind_speed.source) not in PLANNABLE_SOURCES' \
+    '    if False and (str(spec.wind_speed.source) not in PLANNABLE_SOURCES' \
     "a stated wind is never overwritten by reanalysis" \
     tests/test_webapp.py || failures=$((failures+1))
 
@@ -780,8 +889,10 @@ mutate core/capture/schedule.py \
     tests/test_camera_schedule.py || failures=$((failures+1))
 
 mutate core/capture/schedule.py \
-    '        if last is None or t[i] - last >= refractory:' \
-    '        if True:  # MUTATED: refractory ignored, one capture per sample' \
+    '        if (dn * dn + de * de) ** 0.5 <= radius:
+            if last is None or t[i] - last >= refractory:' \
+    '        if (dn * dn + de * de) ** 0.5 <= radius:
+            if True:  # MUTATED: refractory ignored, one capture per sample' \
     "the refractory period collapses bursts" \
     tests/test_camera_schedule.py || failures=$((failures+1))
 
@@ -952,8 +1063,12 @@ mutate core/capture/verify.py \
     tests/test_camera_labels.py || failures=$((failures+1))
 
 mutate core/capture/verify.py \
-    '            if not (Path(run_dir) / "frames" / camera / file).is_file():' \
-    '            if False:  # MUTATED: a declared label file need not exist' \
+    '                continue
+            counted += 1
+            if not (Path(run_dir) / "frames" / camera / file).is_file():' \
+    '                continue
+            counted += 1
+            if False:  # MUTATED: a declared label file need not exist' \
     "every declared label file exists" \
     tests/test_camera_labels.py || failures=$((failures+1))
 
@@ -1217,8 +1332,10 @@ mutate webapp/runs.py \
     tests/test_aircraft_assets.py || failures=$((failures+1))
 
 mutate webapp/runs.py \
-    '            run.push("failed", f"[{exc.constraint}] {exc.message}")' \
-    '            pass  # MUTATED: a failed model build is not named' \
+    '        except AircraftAssetError as exc:
+            run.push("failed", f"[{exc.constraint}] {exc.message}")' \
+    '        except AircraftAssetError as exc:
+            pass  # MUTATED: a failed model build is not named' \
     "a failed model build fails the run BY NAME" \
     tests/test_aircraft_assets.py || failures=$((failures+1))
 
@@ -1344,8 +1461,11 @@ mutate webapp/capture.py \
 
 mutate webapp/server.py \
     '    if not _CAMERA_NAME.match(camera_id):
-        return JSONResponse({"error": "no such camera"}, status_code=404)' \
-    '    if False:  # MUTATED: any string may name a camera' \
+        return JSONResponse({"error": "no such camera"}, status_code=404)
+    path = manager.out_root / run_id / "capture_manifest.json"' \
+    '    if False:  # MUTATED: any string may name a camera
+        return JSONResponse({"error": "no such camera"}, status_code=404)
+    path = manager.out_root / run_id / "capture_manifest.json"' \
     "the per-camera manifest route validates the name it is given" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
@@ -1419,8 +1539,10 @@ mutate core/nl/llm_compiler.py \
     tests/test_llm_compiler.py || failures=$((failures+1))
 
 mutate webapp/static/frames.html \
-    'loading="lazy" decoding="async" ' \
-    '' \
+    'loading="lazy" decoding="async" ` +
+                   `alt="${esc(label)}"' \
+    '` +
+                   `alt="${esc(label)}"' \
     "the frame browser lazily loads hundreds of images" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
@@ -1554,7 +1676,7 @@ mutate webapp/capture.py \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
 mutate webapp/server.py \
-    '    if resolved.suffix == ".json" and kind != "frames":' \
+    '    if resolved.suffix in (".json", ".f32") and kind != "frames":' \
     '    if False:  # MUTATED: any .json under any image dir is served' \
     "a json outside frames is not a label file" \
     tests/test_webapp_capture.py || failures=$((failures+1))
@@ -1605,8 +1727,10 @@ mutate core/capture/verify.py \
     tests/test_render_repro.py || failures=$((failures+1))
 
 mutate core/capture/verify.py \
-    '        if expected is None:' \
-    '        if False:  # MUTATED: an unrecorded frame is checked as recorded' \
+    '        path = frames_dir / camera / name
+        if expected is None:' \
+    '        path = frames_dir / camera / name
+        if False:  # MUTATED: an unrecorded frame is checked as recorded' \
     "a frame the engine never recorded is named" \
     tests/test_render_repro.py || failures=$((failures+1))
 
@@ -1617,8 +1741,10 @@ mutate experiments/gate10_render_repro.py \
     tests/test_render_repro.py || failures=$((failures+1))
 
 mutate experiments/gate10_render_repro.py \
-    '            return 2' \
-    '            return 0  # MUTATED: NOT RUN exits as a pass' \
+    '            print(f"report: {report_path}")
+            return 2' \
+    '            print(f"report: {report_path}")
+            return 0  # MUTATED: NOT RUN exits as a pass' \
     "NOT RUN is not a verdict and not an exit 0" \
     tests/test_render_repro.py || failures=$((failures+1))
 
@@ -1667,8 +1793,10 @@ mutate core/scenario/randomization.py \
     tests/test_randomization.py || failures=$((failures+1))
 
 mutate core/scenario/randomization.py \
-    '        base = float(q.detail.get(JITTER_BASE_KEY, q.value))' \
-    '        base = float(q.value)  # MUTATED: the jitter jitters the jitter' \
+    '        base = float(q.detail.get(JITTER_BASE_KEY, q.value))
+        if kind == "fraction":' \
+    '        base = float(q.value)  # MUTATED: the jitter jitters the jitter
+        if kind == "fraction":' \
     "a second planner pass lands on the same jitter" \
     tests/test_randomization.py || failures=$((failures+1))
 
@@ -1735,7 +1863,7 @@ mutate webapp/server.py \
     tests/test_randomization.py || failures=$((failures+1))
 
 mutate core/capture/manifest.py \
-    '        "randomization": randomization_card_block(spec),' \
+    '        "randomization": randomization,' \
     '        "randomization": None,  # MUTATED: the manifest forgets the block' \
     "the manifest carries the same block as the card" \
     tests/test_randomization.py || failures=$((failures+1))
@@ -1892,12 +2020,10 @@ mutate core/dataset/export.py \
     tests/test_dataset_formats.py || failures=$((failures+1))
 
 mutate core/dataset/export.py \
-    '        if ungraded:
-            raise ExportError(
-                "export.unverified_labels",' \
-    '        if False:  # MUTATED: ungraded masks ship
-            raise ExportError(
-                "export.unverified_labels",' \
+    '            if ungraded:
+                ships = [f for f in formats if suffix in SHIPPED_LABEL_FILES.get(f, ())]' \
+    '            if False:  # MUTATED: ungraded masks ship
+                ships = [f for f in formats if suffix in SHIPPED_LABEL_FILES.get(f, ())]' \
     "a mask the verifier never graded refuses export.unverified_labels" \
     tests/test_dataset_formats.py || failures=$((failures+1))
 
@@ -1924,10 +2050,10 @@ mutate core/nl/compiler.py \
 
 mutate core/nl/compiler.py \
     '    if _view_mentions(text):
-        return []
+        return questions
     if not any(' \
     '    if False:  # MUTATED: a named view still asks which view
-        return []
+        return questions
     if not any(' \
     "a named view is never asked about" \
     tests/test_camera_prompts.py || failures=$((failures+1))
@@ -2266,10 +2392,8 @@ mutate core/messages/__init__.py \
     tests/test_messages.py || failures=$((failures+1))
 
 mutate core/messages/__init__.py \
-    '            return match.group("one") if one else match.group("many")
-        return shown(value)' \
-    '            return match.group("one") if one else match.group("many")
-        return ""  # MUTATED: every number dropped from the sentence' \
+    '        return _PRESENT + shown(value)' \
+    '        return _PRESENT  # MUTATED: every number dropped from the sentence' \
     "a catalogue sentence carries the refusal's own numbers" \
     tests/test_messages.py || failures=$((failures+1))
 
@@ -2704,15 +2828,35 @@ mutate core/agent/tools.py \
     "every policy denial is a line of trace.jsonl" \
     tests/test_agent.py || failures=$((failures+1))
 
-echo
-purge_cache
-if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
-    echo "Restored: SUITE IS NOT GREEN -- a restore failed"; exit 1; fi
+if [ "$guard_n" -ne "$total" ]; then
+    echo "INTERNAL: $guard_n mutate calls ran but $total are written; the count is off" >&2
+    exit 1
+fi
+
+if [ "$run_suite" -eq 1 ]; then
+    echo
+    purge_cache
+    if $PYTEST -q >/dev/null 2>&1; then echo "Restored: suite is green"; else
+        echo "Restored: SUITE IS NOT GREEN -- a restore failed"; exit 1; fi
+fi
 
 echo
+case "$mode" in
+    list) exit 0 ;;
+    check)
+        if [ "$failures" -eq 0 ]; then
+            echo "All $ran target(s) occur exactly once in their file."
+        else
+            echo "$failures of $ran target(s) are missing or ambiguous: their guards cannot fire."
+        fi
+        exit "$failures" ;;
+esac
 if [ "$failures" -eq 0 ]; then
-    echo "All guards are load-bearing."
+    echo "All $ran guard(s) run are load-bearing. (${SECONDS}s)"
 else
-    echo "$failures guard(s) are not covered by a failing test."
+    echo "$failures of $ran guard(s) run are not covered by a failing test. (${SECONDS}s)"
+fi
+if [ "$ran" -ne "$total" ] || [ "$run_suite" -ne 1 ]; then
+    echo "This was a subset ($ran of $total guards; full suite $([ "$run_suite" -eq 1 ] && echo run || echo skipped)); the contract is the plain run."
 fi
 exit "$failures"
