@@ -512,6 +512,44 @@ mutate experiments/gate6_visual.py \
     "night exposure clause is vacuous on black frames" tests/test_gate6_visual.py \
     || failures=$((failures+1))
 
+# -- engine source pins from the Phase 2 review round (cpp area) --------
+# Still text pins (no engine here): the settle-in placement asks the
+# director for the preset's resting pose measured from the CG, never a
+# station computed from the actor origin (the datum 33.7 m ahead of the
+# B747's CG opened every preset-mode chase clip 136 m behind); the
+# render.json root camera_preset is the preset that flew, not a
+# hard-coded "LaggedChase"; the plugin includes only the Json headers
+# UE ships (Dom/JsonValues.h stopped the first Windows build). Literal
+# tabs inside the targets, as the C++ is indented.
+mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimCameraDirector.cpp \
+    '	// Rest where the presets update from: the CG, never the datum.
+	const FVector RestAimPoint = TargetAimPoint(TargetTransform);' \
+    '	const FVector RestAimPoint = TargetTransform.GetLocation();  // MUTATED: the datum, not the CG' \
+    "resting pose measures from the CG" \
+    tests/test_gate6_visual.py || failures=$((failures+1))
+
+mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp \
+    '		if (!Director->PresetRestingPose(Station, Look))' \
+    '		Station = Scenario.Aircraft->GetActorLocation();  // MUTATED: the datum station is back
+		if (false)' \
+    "settle-in placement is the director's resting pose" \
+    tests/test_gate6_visual.py || failures=$((failures+1))
+
+mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp \
+    '	Root->SetStringField(TEXT("camera_preset"), CameraPreset);' \
+    '	Root->SetStringField(TEXT("camera_preset"), TEXT("LaggedChase"));  // MUTATED: the hard-coded lie' \
+    "render.json root camera_preset is the preset that flew" \
+    tests/test_gate6_visual.py || failures=$((failures+1))
+
+mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimVisualScene.cpp \
+    '#include "Dom/JsonObject.h"
+#include "Engine/DirectionalLight.h"' \
+    '#include "Dom/JsonObject.h"
+#include "Dom/JsonValues.h"  // MUTATED: a header no engine ships
+#include "Engine/DirectionalLight.h"' \
+    "plugin includes only the Json headers the engine ships" \
+    tests/test_gate6_visual.py || failures=$((failures+1))
+
 # -- Phase 6B guards ------------------------------------------------------
 
 mutate assets_pipeline/convert.py \
@@ -1459,15 +1497,16 @@ mutate webapp/capture.py \
     "a camera's manifest carries that camera's frames and no others" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
-mutate webapp/server.py \
-    '    if not _CAMERA_NAME.match(camera_id):
-        return JSONResponse({"error": "no such camera"}, status_code=404)
-    path = manager.out_root / run_id / "capture_manifest.json"' \
-    '    if False:  # MUTATED: any string may name a camera
-        return JSONResponse({"error": "no such camera"}, status_code=404)
-    path = manager.out_root / run_id / "capture_manifest.json"' \
-    "the per-camera manifest route validates the name it is given" \
-    tests/test_webapp_capture.py || failures=$((failures+1))
+# No guard on the per-camera manifest route's name check (webapp/server.py
+# run_camera_manifest, _CAMERA_NAME): the one that stood here mutated the
+# check into a bodiless `if False:` -- a syntax error, so its "ok" was a
+# broken import, never a test -- and the honest mutation (the check
+# removed, the module importable) is WEAK: '..', '..%2f..' and 'a/b' are
+# refused by the router before the route, and a 65-character name falls
+# through to camera_view(), which 404s too. It returns when
+# tests/test_webapp_capture.py::test_the_per_camera_route_refuses_an_unusable_name
+# also asserts `"chase0" not in reply.text` (a lookup's 404 lists the
+# run's cameras; the check's 404 does not).
 
 mutate webapp/runs.py \
     '        chosen = (named or [line.strip() for line in lines])[-keep:]' \
@@ -2036,6 +2075,97 @@ mutate core/dataset/export.py \
     tests/test_dataset_formats.py || failures=$((failures+1))
 
 
+# -- Phase 2, package E review round: the export's refusals and the card --
+# Each refusal by name before a file is written (two runs with one
+# folder name, a manifest edited after its verdict, a different picture
+# already under the key, a class outside the taxonomy, a class image or
+# depth no check graded); YOLO data.yaml carries no path key; a licence
+# disagreement between runs is one entry each; render.json provenance
+# and every airframe reach the card; the batch runner binds every
+# verdict to the manifest it graded.
+mutate core/dataset/export.py \
+    '    if clashes:
+        name, paths = sorted(clashes.items())[0]
+        raise ExportError(
+            "export.run_names",' \
+    '    if False:  # MUTATED: two runs with one name export over each other
+        name, paths = sorted(clashes.items())[0]
+        raise ExportError(
+            "export.run_names",' \
+    "two different runs with one directory name refuse export.run_names" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '    if bound is not None and str(bound) != digest:
+        raise ExportError(
+            "export.verification_stale",' \
+    '    if False:  # MUTATED: a manifest edited after verification exports under the old verdict
+        raise ExportError(
+            "export.verification_stale",' \
+    "a manifest changed since its verdict refuses export.verification_stale" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '        if target.read_bytes() != sample.image.read_bytes():
+            raise ExportError(
+                "export.out_directory",' \
+    '        if False:  # MUTATED: a different image already there is kept
+            raise ExportError(
+                "export.out_directory",' \
+    "a dataset directory holding a different image refuses export.out_directory" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '    refuse_classes_outside_taxonomy(samples, names)  # ...and a stray class, before any file' \
+    '    pass  # MUTATED: a stray class is only found while writing' \
+    "a class outside the taxonomy refuses before a file is written" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    'LABEL_FILE_CHECKS = {"_mask.png": MASK_CHECKS, "_class.png": MASK_CHECKS,
+                     "_depth.f32": DEPTH_CHECKS}' \
+    'LABEL_FILE_CHECKS = {"_mask.png": MASK_CHECKS, "_class.png": (),
+                     "_depth.f32": ()}  # MUTATED: class image and depth ship ungraded' \
+    "an ungraded class image or depth refuses export.unverified_labels" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '    data = {"train": "images/train", "val": "images/val", "test": "images/test",' \
+    '    data = {"path": ".", "train": "images/train", "val": "images/val", "test": "images/test",  # MUTATED' \
+    "YOLO data.yaml names no path key" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '            key = ("object", str(obj.get("id")), str(obj.get("licence")),
+                   str(obj.get("mesh_sha256")))' \
+    '            key = ("object", str(obj.get("id")))  # MUTATED: the first run'"'"'s licence wins' \
+    "runs that disagree on an asset licence get one entry each" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '            categories.append({"id": i + 1, "name": name, "supercategory": name})' \
+    '            categories.append({"id": i + 1, "name": name, "supercategory": AIRCRAFT_CLASS, "keypoints": list(KEYPOINT_NAMES), "skeleton": [[1, 2], [3, 4], [1, 5], [6, 7]]})  # MUTATED' \
+    "COCO keypoints are declared on the airframe categories only" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '        out[camera.name] = {k: payload.get(k) for k in RENDER_PROVENANCE_KEYS}' \
+    '        out[camera.name] = {k: None for k in RENDER_PROVENANCE_KEYS}  # MUTATED' \
+    "render.json drawn / render_settings / look_applied reach the card" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '        "aircraft": sorted({name for r in runs for name in r.airframes()}),' \
+    '        "aircraft": sorted({s.aircraft for s in samples}),  # MUTATED: the primary only' \
+    "the card names every airframe in the dataset" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
+mutate core/dataset/batch.py \
+    '    bind_verification(run_dir)      # the verdict names the manifest it graded' \
+    '    pass  # MUTATED: the batch verdict is not bound' \
+    "the batch runner binds every verdict to its manifest" \
+    tests/test_dataset_formats.py || failures=$((failures+1))
+
 # -- Camera Phase 1 gap closure: vocabulary, question, moves, lag, matrices, schema --
 
 mutate core/nl/compiler.py \
@@ -2245,6 +2375,44 @@ mutate core/nl/llm_compiler.py \
     "a camera list nested under fields is lifted, not refused" \
     tests/test_llm_compiler.py || failures=$((failures+1))
 
+# -- the expert page, Phase 2 review round (webapp area) ----------------
+# A sampled wind is as fixed as a stated one and the stated synthesised
+# ridge is never re-planned as a place; the depth .f32 the bundle
+# declares is served; the page's digest keeps the policy; the schema
+# link is built from the manifest version shown. Each target is spelled
+# once in its file; the -k selector names the test that fails.
+mutate webapp/runs.py \
+    '    if (str(spec.wind_speed.source) not in PLANNABLE_SOURCES
+            or str(spec.wind_direction.source) not in PLANNABLE_SOURCES):' \
+    '    if (str(spec.wind_speed.source) == "user"  # MUTATED: a sampled wind is re-planned
+            or str(spec.wind_direction.source) == "user"):' \
+    "a sampled wind is as fixed as a stated one" \
+    tests/test_webapp.py -k sampled_wind || failures=$((failures+1))
+
+mutate webapp/runs.py \
+    'if pick_scene(spec)["key"] in SYNTHESISED_SCENE_KEYS:' \
+    'if pick_scene(spec)["key"] == "control":  # MUTATED' \
+    "the stated synthesised ridge is not a place" \
+    tests/test_webapp.py -k synthesised_ridge || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '{1,80}\.(png|json|f32)$' \
+    '{1,80}\.(png|json)$' \
+    "the depth .f32 the bundle declares is served" \
+    tests/test_webapp_capture.py -k metric_depth || failures=$((failures+1))
+
+mutate webapp/server.py \
+    '    if "policy" in canonical_section:' \
+    '    if False:  # MUTATED: the policy is dropped from the page dict' \
+    "the page digest is the run digest with a policy" \
+    tests/test_webapp.py -k policy_so_the_page || failures=$((failures+1))
+
+mutate webapp/static/index.html \
+    'capture_manifest.v${manifestVersion}.schema.json' \
+    'capture_manifest.v5.schema.json' \
+    "the expert page links the schema of the version it shows" \
+    tests/test_webapp_capture.py -k schema_of_the_manifest_version || failures=$((failures+1))
+
 # -- Phase 2, package A: the spec-8 bump ---------------------------------------
 # Every guarded line is spelled uniquely in its file (mutate() replaces the
 # FIRST occurrence; NEXT.md gotcha 28).
@@ -2396,6 +2564,74 @@ mutate core/messages/__init__.py \
     '        return _PRESENT  # MUTATED: every number dropped from the sentence' \
     "a catalogue sentence carries the refusal's own numbers" \
     tests/test_messages.py || failures=$((failures+1))
+
+# -- the catalogue, Phase 2 review round: numbers reach the sentence ------
+# An error's detail numbers reach its catalogue sentence; a bracketed
+# aside whose every number is absent is dropped whole; the done sentence
+# names labels and says whether a picture was drawn; campaign.duplicate_case
+# says what workers.py refuses (the two yaml targets are the sentence
+# lines themselves, spelled once in the catalogue).
+mutate core/messages/__init__.py \
+    '        detail = getattr(obj, "detail", None)
+        if isinstance(detail, Mapping):' \
+    '        detail = None  # MUTATED: the error'"'"'s detail numbers never reach the sentence
+        if isinstance(detail, Mapping):' \
+    "an error's detail numbers reach its catalogue sentence" \
+    tests/test_messages.py || failures=$((failures+1))
+
+mutate core/messages/__init__.py \
+    '        if _ABSENT in inner and _PRESENT not in inner:
+            return ""' \
+    '        if False:  # MUTATED: an aside that lost every number is kept, "(of)"
+            return ""' \
+    "a bracketed aside whose every number is absent is dropped whole" \
+    tests/test_messages.py || failures=$((failures+1))
+
+mutate core/messages/catalog.yaml \
+    '  sentence: "Every requested image has its labels generated and checked ({done} {done:picture|pictures} from {cases_verified} {cases_verified:scenario|scenarios}, {total} asked for){drawn:, and its picture drawn|; no picture was drawn on this machine}."' \
+    '  sentence: "Every requested image has been generated and checked."' \
+    "the done sentence names labels and is drawn-aware" \
+    tests/test_messages.py || failures=$((failures+1))
+
+mutate core/messages/catalog.yaml \
+    '  sentence: "Two scenarios came out identical because the request leaves nothing to vary between them, so the second was not flown."' \
+    '  sentence: "The same case was recorded twice in the ledger, so it was not run again."' \
+    "campaign.duplicate_case says what workers.py refuses" \
+    tests/test_messages.py || failures=$((failures+1))
+
+# -- the capture command's own words (misc review round) ------------------
+# An unreadable spec is refused by name; the flight model's banner stays
+# off the default path and the relay drops exactly the banner lines;
+# --help states the engine that is pinned rather than a stale number.
+mutate flightsim/capture.py \
+    '        print(f"REFUSED -- spec.read: {exc}")' \
+    '        print(f"REFUSED -- {exc}")  # MUTATED: no name' \
+    "an unreadable spec is refused by name (spec.read)" \
+    tests/test_capture_cli_words.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '    with quiet_library_banners(enabled=not args.verbose):' \
+    '    with quiet_library_banners(enabled=False):  # MUTATED: the banner is back' \
+    "the flight model's banner stays off the default path" \
+    tests/test_capture_cli_words.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '                             f"poses (Windows with UE {UE_ENGINE_VERSION} "' \
+    '                             "poses (Windows with UE 5.5 "  # MUTATED: stale pin' \
+    "capture --help states the pinned engine version" \
+    tests/test_capture_cli_words.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '        if _is_library_banner(line):
+            pending_blank = 0
+            after_banner = True
+            return' \
+    '        if False:  # MUTATED: banner lines relayed
+            pending_blank = 0
+            after_banner = True
+            return' \
+    "the relay drops exactly the banner lines" \
+    tests/test_capture_cli_words.py || failures=$((failures+1))
 
 # --- Phase 2 Look lane part 1: the engine pin and the renderer settings ---
 # (tests/test_platform.py). Text files, not Python; mutate() is a string
@@ -2572,6 +2808,206 @@ mutate core/nl/llm_compiler.py \
     "the LLM tier refuses a policy leaf of an undocumented form" \
     tests/test_llm_compiler.py || failures=$((failures+1))
 
+# -- Phase 2, package F review round: campaign draws, gates, coverage -----
+# A campaign case folds its index into the Phase 10 streams (draw 0
+# unchanged); a gate is typed and refused by name before any draw; a
+# shut gate resolves a location range name and records its stream seed;
+# coverage is over the requested bins (windows, integers, dates, one
+# drawn value one bin); the cameras group reaches the record; a
+# requested leaf nothing recorded is at coverage 0; a compass draw wraps.
+mutate core/scenario/randomization.py \
+    '    return f"draw {int(draw_index)}:{label}" if int(draw_index) else label' \
+    '    return label  # MUTATED: every campaign case draws the single run'"'"'s day, fog and jitter' \
+    "a campaign case folds its index into the Phase 10 streams" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '            if problem is not None:
+                problems.append(problem)' \
+    '            if False:  # MUTATED: a gate the sampler cannot judge is drawn anyway
+                problems.append(problem)' \
+    "a gate is typed before any draw" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '    if not _NUMBER_TEXT.match(rhs):
+        raise RandomizationError(' \
+    '    if False:  # MUTATED: a number is compared to a word
+        raise RandomizationError(' \
+    "the gate judge refuses a number against a word" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '        if op not in _WORD_OPS or _NUMBER_TEXT.match(rhs):' \
+    '        if False:  # MUTATED: words are ordered as strings' \
+    "the gate judge refuses an ordered or numbered word" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '                    value = _location_choices(path, [value])[0]' \
+    '                    value = value  # MUTATED: the range name reaches LOCATIONS[...]' \
+    "a shut gate resolves a location range name" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '                _, seed = policy_stream(seed_base, draw_index, attempt, path)' \
+    '                seed = 0  # MUTATED: a gated leaf records seed 0' \
+    "a shut gate records the leaf's stream seed" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '        if entry.get("kind") == "number" and entry.get("words"):
+            return "windows"' \
+    '        if False:  # MUTATED: window choices binned as words
+            return "windows"' \
+    "named hour windows are the requested bins" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '    if entry.get("kind") == "integer":
+        return "integers"' \
+    '    if False:  # MUTATED: a count is binned 8 ways
+        return "integers"' \
+    "an integer leaf has one bin per integer" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '    if isinstance(leaf, dict) and "uniform_dates" in leaf:
+        return "dates"' \
+    '    if False:  # MUTATED: dates are their own bins
+        return "dates"' \
+    "a date span is binned over the requested span" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '    if hi <= lo:
+        edges = [(lo, lo)]' \
+    '    if False:  # MUTATED: one value is spread over 8 bins
+        edges = [(lo, lo)]' \
+    "one drawn value is one bin" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '        cameras = sampled_camera_values(spec)
+        if cameras:' \
+    '        cameras = {}  # MUTATED: the cameras group never reaches the record
+        if cameras:' \
+    "the cameras group reaches the record" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '    for name in flat:
+        per_leaf.setdefault(name, {})' \
+    '    for name in ():  # MUTATED: an unrecorded leaf is silently absent
+        per_leaf.setdefault(name, {})' \
+    "a requested leaf nothing recorded is at coverage 0" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '        value = round(float(value) % float(period), 4)' \
+    '        value = value  # MUTATED: a draw past 360 is refused, not wrapped' \
+    "a circular leaf wraps instead of refusing" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+# -- the NL compiler, Phase 2 review round (compiler area) ----------------
+# A traffic clause fills the traffic block and a second airframe the
+# compiler cannot place is reported; a bare m is metres; a conjunction
+# varies every noun and an item the vocabulary cannot vary is reported;
+# an unrecognised aircraft is asked about, never replaced by the default,
+# and the answer compiles; the LLM tier refuses a traffic entry with no
+# aircraft, more than the contract's two, or an unknown field, and a
+# transport failure is named compile.unreachable and told in words.
+mutate core/nl/compiler.py \
+    '    traffic, text = _traffic(text)' \
+    '    traffic, text = [], text  # MUTATED: the second aircraft clause is ignored' \
+    "a traffic clause fills the traffic block" \
+    tests/test_nl_compiler.py || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '    for phrase in _other_airframes(text, model):' \
+    '    for phrase in []:  # MUTATED: a second airframe is dropped silently' \
+    "a second airframe the compiler cannot place is reported" \
+    tests/test_nl_compiler.py || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '(?:min|mins|minute|minutes)\b", text)' \
+    '(?:m|min|mins|minute|minutes)\b", text)' \
+    "a bare m is metres, never minutes" \
+    tests/test_nl_compiler.py || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '    consumed = _expand_conjunctions(text)' \
+    '    consumed = text  # MUTATED: varied weather and lighting varies the weather only' \
+    "a conjunction varies every noun" \
+    tests/test_nl_compiler.py || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '    for phrase, item in _dangling_items(text):' \
+    '    for phrase, item in []:  # MUTATED: an item the vocabulary cannot vary is dropped' \
+    "an item the vocabulary cannot vary is reported" \
+    tests/test_nl_compiler.py || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '    if subject is not None and not subject[1]:' \
+    '    if False:  # MUTATED: an unknown aircraft name falls through to the default' \
+    "an unrecognised aircraft is never replaced by the default" \
+    tests/test_nl_compiler.py || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '    asked = aircraft_question(text)
+    if asked is not None:' \
+    '    asked = None  # MUTATED: the aircraft question is never asked
+    if asked is not None:' \
+    "the aircraft question is asked" \
+    tests/test_nl_compiler.py || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '    answered = _answered_aircraft(answers)
+    if answered is not None:
+        return answered' \
+    '    if False:  # MUTATED: the aircraft answer is ignored
+        return None' \
+    "the aircraft answer compiles" \
+    tests/test_nl_compiler.py || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '    ("tower camera", "tower"),' \
+    '    ("tower cameraX", "tower"),  # MUTATED' \
+    "tower camera names the tower view" \
+    tests/test_camera_prompts.py || failures=$((failures+1))
+
+mutate core/nl/llm_compiler.py \
+    '        if "aircraft" not in block:
+            raise _fail(' \
+    '        if False:  # MUTATED: a traffic entry with no airframe is accepted
+            raise _fail(' \
+    "the LLM tier refuses a traffic entry with no aircraft" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
+mutate core/nl/llm_compiler.py \
+    '    if len(traffic) > MAX_TRAFFIC:
+        raise _fail(' \
+    '    if False:  # MUTATED: any number of traffic aircraft is accepted
+        raise _fail(' \
+    "the LLM tier caps traffic at the contract's two" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
+mutate core/nl/llm_compiler.py \
+    '            if name not in TRAFFIC_FIELD_VALUE_SCHEMAS:
+                raise _fail(' \
+    '            if False:  # MUTATED: unknown traffic fields are accepted
+                raise _fail(' \
+    "the LLM tier refuses an unknown traffic field" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
+mutate core/nl/llm_compiler.py \
+    '        raise LLMCompileError(
+            UNREACHABLE_SENTENCE, constraint="compile.unreachable",
+            details={"error": f"{type(exc).__name__}: {exc}"}) from exc' \
+    '        raise _fail(f"API call failed ({type(exc).__name__}: {exc})") from exc  # MUTATED' \
+    "a transport failure is named and told in words" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
 # Phase 2 package A (contracts §9): the ONE render-command builder both
 # the CLI and the web app draw their flags from. The -mesh= forwarding is
 # the line the placeholder rule hangs on: without it the commandlet draws
@@ -2726,6 +3162,102 @@ mutate core/capture/verify.py \
     "the verdict is written atomically (a crash mid-write leaves the previous verdict intact)" \
     tests/test_annotation_gates.py || failures=$((failures+1))
 
+# -- Phase 2, package D review round: the verifier's own failures ---------
+# A declared bundle file the disk does not hold is annotation.files on
+# every check that reads it and a check that breaks is a FAIL in a
+# sentence, the verdict written either way; a bad --against is a named
+# FAIL; a render.json with no objects[] echo is not the engine's word; a
+# null bbox, depth or visible_fraction is graded, not skipped; a rendered
+# camera with no applied lens is not skipped; the origin_basis gate; the
+# summary's superseded list; the cited mesh extent as the hull; and the
+# annotation sheets record what they drew.
+mutate core/capture/verify.py \
+    '        except BundleFileError as exc:
+            return Check(name, FAIL, str(exc), failure=FAIL_FILES)' \
+    '        except ():  # MUTATED: a declared file the disk does not hold is a traceback
+            return Check(name, FAIL, str(exc), failure=FAIL_FILES)' \
+    "a missing declared bundle file is annotation.files on every check that reads it, never a traceback" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        except Exception as exc:        # noqa: BLE001 -- the verdict must be written' \
+    '        except ():  # MUTATED: a check that breaks ends the verification with no verdict' \
+    "a check that breaks is a FAIL in a sentence and the verdict is still written" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    other = read_manifest(other_run_dir, "against_") if other_run_dir is not None else None' \
+    '    other = read_capture_manifest(Path(other_run_dir) / "capture_manifest.json") if other_run_dir is not None else None  # MUTATED: a bad --against is a traceback' \
+    "a missing or unreadable --against manifest is a named FAIL check, never a traceback" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            echoed = mapping(payload.get("objects"))
+            if not echoed:' \
+    '            echoed = mapping(payload.get("objects"))
+            if False:  # MUTATED: a render.json with no objects[] echo counts as the engine'"'"'s word' \
+    "identity_stable never counts a render.json without an objects[] echo as the engine's echo" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                if not (isinstance(recorded, (list, tuple)) and len(recorded) == 4):' \
+    '                if False:  # MUTATED: a null bbox_2d_tight is skipped, not graded' \
+    "box_vs_mask fails a null bbox_2d_tight where the ID image holds pixels" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                if not isinstance(value, (int, float)) or isinstance(value, bool):' \
+    '                if False:  # MUTATED: a null depth record is skipped, not graded' \
+    "depth_vs_geometry fails a null depth_min_m / depth_median_m under a mask with pixels" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                if (not isinstance(rec_fraction, (int, float))
+                        or isinstance(rec_fraction, bool)):' \
+    '                if False:  # MUTATED: a null visible_fraction is skipped, not graded' \
+    "visibility_vs_scene fails a null visible_fraction under an alone pass with pixels" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    silent = [c for c in manifest_cameras if c in rendered and c not in applied]' \
+    '    silent = []  # MUTATED: a rendered camera with no applied lens is skipped silently' \
+    "applied_intrinsics fails a rendered camera that recorded no applied intrinsics while another did" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        basis = drawn.get("origin_basis")
+        if not (isinstance(basis, str)
+                and basis.startswith(DRAWN_MESH_ORIGIN_BASIS_PREFIX)):' \
+    '        basis = drawn.get("origin_basis")
+        if False:  # MUTATED: a rule-placed origin passes drawn_airframe' \
+    "drawn_airframe fails a mesh whose origin_basis is not measured from vertices" \
+    tests/test_camera_verify_corruption.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        superseded = [c.name for c in self.checks if is_superseded(c)]' \
+    '        superseded = []  # MUTATED: superseded checks are listed as waiting for evidence' \
+    "the summary lists superseded checks apart from those waiting for evidence" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                if (isinstance(version, (int, float)) and version >= 3
+                        and origin and all(k in extent for k in "xyz")):' \
+    '                if False:  # MUTATED: the cited mesh extent is never the hull' \
+    "the hull is the cited mesh manifest's measured extent when that file is on this machine" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate tests/visual/annotation_sheets.py \
+    '            drawn, error = False, f"{exc.__class__.__name__}: {exc}"' \
+    '            drawn, error = True, None  # MUTATED: an undrawn sheet is recorded as drawn' \
+    "a sheet whose painter threw is recorded as not drawn" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate tests/visual/annotation_sheets.py \
+    '            draw.wire(pen, corners, draw.YELLOW)' \
+    '            pass  # MUTATED: the projected hull is never drawn' \
+    "mask_vs_geometry.png shows the projected hull" \
+    tests/test_annotation_gates.py || failures=$((failures+1))
+
 # Phase 2 package G (contracts §6.1): the campaign. Four guards, each
 # the plan's own rubric line: never done below target; seeds derived
 # from the slot INDEX (the exit criterion -- mutate to completion order
@@ -2755,6 +3287,21 @@ mutate core/campaign/campaign.py \
     "campaign progress is computed from the ledger" \
     tests/test_campaign.py || failures=$((failures+1))
 
+# Package G review round: a duplicate slot is refused by index before
+# dispatch (the ledger is the same at any worker count), and a refused
+# slot's draws name the constraint they hit.
+mutate core/campaign/campaign.py \
+    '            seen_case_ids[case_id] = min(index, seen_case_ids.get(case_id, index))' \
+    '            pass  # MUTATED: nothing claimed by index; the first slot to return keeps the spec' \
+    "a duplicate slot is refused by index, never by completion order (the ledger is the same at any worker count)" \
+    tests/test_campaign.py || failures=$((failures+1))
+
+mutate core/campaign/ledger.py \
+    '                if name:' \
+    '                if False:  # MUTATED: the refused slots'"'"' draws are never named' \
+    "a refused slot's draws name the constraint they hit in the campaign's totals and the unreachable message" \
+    tests/test_campaign.py || failures=$((failures+1))
+
 # -- Phase 2, package I part 2: the guided page (contracts §8) ----------------
 # The catalogue-only rule: the page's default fields carry the catalogue's
 # sentence and the rule name lives under details (mutate the one place a
@@ -2772,6 +3319,40 @@ mutate webapp/generate.py \
     '        rows = []  # MUTATED: nothing read from the ledger' \
     "the guided page reports progress from the ledger" \
     tests/test_webapp_generate.py || failures=$((failures+1))
+
+# Package I part 2 review round: the capture log is read by the name the
+# catalogue keeps (the catalogue, not the regex, decides what is a name);
+# an uncatalogued reason never reaches the sentence; the paragraph says a
+# mountain word raised the datum; the page prints no exception text.
+mutate webapp/generate.py \
+    '_LOG_REFUSED = re.compile(r"^REFUSED\s*--\s*([a-z_]+(?:\.[a-z_]+)*)\s*:\s*(.*)$")' \
+    '_LOG_REFUSED = re.compile(r"^REFUSED\s*--\s*([a-z_]+(?:\.[a-z_]+)+)\s*:\s*(.*)$")  # MUTATED' \
+    "a bare catalogued name in the capture log is read" \
+    tests/test_webapp_generate.py -k bare_catalogued_name || failures=$((failures+1))
+
+mutate webapp/generate.py \
+    '        if match and (is_catalogued(match.group(1)) or "." in match.group(1)):' \
+    '        if match:  # MUTATED: the regex shape decides' \
+    "the catalogue, not the regex, decides what is a name" \
+    tests/test_webapp_generate.py -k bare_catalogued_name || failures=$((failures+1))
+
+mutate webapp/generate.py \
+    '    return {"sentence": explained["sentence"], "hint": explained["hint"],' \
+    '    return {"sentence": str(reason), "hint": explained["hint"],  # MUTATED' \
+    "an uncatalogued reason never reaches the sentence" \
+    tests/test_webapp_generate.py -k uncatalogued_reason || failures=$((failures+1))
+
+mutate webapp/generate.py \
+    '    elif datum > 0:' \
+    '    elif False:  # MUTATED: the raised datum is not said' \
+    "the paragraph says a mountain word raised the datum" \
+    tests/test_webapp_generate.py -k mountain_prompt_really || failures=$((failures+1))
+
+mutate webapp/static/generate.html \
+    'refusalHtml(p.thread_error_words)' \
+    '`<p>${esc(p.thread_error)}</p>`' \
+    "the page never prints an exception's text on the default path" \
+    tests/test_webapp_generate.py -k interpolates_no_code_identifier || failures=$((failures+1))
 
 # Phase 2 package H (contracts §7): the agent's authority. One guard per
 # rule, each the plan's own rubric line: a stated field is never moved
