@@ -23,7 +23,9 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+from .blocks import SceneSpec, TaxonomySpec, TrafficSpec
 from .camera import CameraSpec
+from .randomization import RandomizationSpec
 from .fields import Quantity, Source
 
 # 2 (2026-08-11): environment.surface added (Phase 9.1 ground-cover
@@ -45,7 +47,25 @@ from .fields import Quantity, Source
 # The list is digest-relevant, so the version bump changes every digest
 # by design: version-5 dicts refuse by name; completed runs recover
 # from provenance.json, never by re-parsing.
-SPEC_VERSION = 6
+# 7 (2026-09-11): cameras[].profile added (Phase 10, package 3: the
+# sensor model -- lens distortion, rolling shutter, noise, vignetting,
+# applied as a seeded post-pass; "ideal_pinhole" by default). The one
+# version bump of Phase 10: the randomisation block (package 7) lands
+# under this same version as an optional, defaulted section. Version-6
+# dicts refuse by name; completed runs recover from provenance.json.
+# Every digest changes with the version field, by design, as it did at 6.
+# 8 (2026-09-25): Phase 2's one bump (docs/PHASE2_CONTRACTS.md §0, §12):
+# scene.terrain_source + scene.terrain (package A), taxonomy.classes and
+# traffic[] (B), randomization.policy (F), cameras[].exposure (Look).
+# Every new block is OPTIONAL and absent-canonical (serialised like the
+# randomisation block, not like cameras): a spec that states none of
+# them has the same canonical form it had at 7 apart from this version
+# field -- pinned by a test against the committed version-7 examples.
+# The bump is what makes the new blocks safe: a version-7 reader
+# tolerates unknown top-level keys and would silently DROP them.
+# Version-7 dicts refuse by name; completed runs recover from
+# provenance.json, never by re-parsing.
+SPEC_VERSION = 8
 
 
 @dataclass
@@ -93,6 +113,34 @@ class ScenarioSpec:
     #: digest-relevant. EMPTY means the documented default camera
     #: behaviour -- exactly the pre-camera build, via default_cameras().
     cameras: List["CameraSpec"] = dc_field(default_factory=list)
+    #: Domain randomisation (Phase 10, package 7): a provenanced block
+    #: with its own seed and the drawn values written back as derived
+    #: fields. The documented default is "off", and the canonical form
+    #: OMITS a default block -- so every spec written before the block
+    #: existed keeps its digest, and "absent" and "all defaults" are one
+    #: spelling. Same version 7; no bump.
+    randomization: "RandomizationSpec" = dc_field(
+        default_factory=RandomizationSpec.defaulted)
+    #: Spec 8 (package F's field, carried here): the randomisation
+    #: POLICY -- a mapping of distribution leaves (contracts §5.2),
+    #: carried whole as one provenanced Quantity (its value is the
+    #: mapping) and serialised under ``randomization.policy``. Absent
+    #: is the documented default ("no sampling"). This package validates
+    #: its SHAPE only (each leaf one of the documented distribution
+    #: forms); the meaning of each leaf and the sampling are package F's
+    #: and are not implemented here. It rides on the spec rather than on
+    #: RandomizationSpec so the block's own 20-field reader (which
+    #: refuses unknown keys) is untouched; the on-disk shape is the
+    #: contract's, and package F may move the attribute inside the block
+    #: without changing a file.
+    randomization_policy: Optional[Quantity] = None
+    #: Spec 8, package A: where the terrain comes from (absent-canonical).
+    scene: "SceneSpec" = dc_field(default_factory=SceneSpec.defaulted)
+    #: Spec 8, package B's field: the ordered class list (absent-canonical).
+    taxonomy: "TaxonomySpec" = dc_field(default_factory=TaxonomySpec.defaulted)
+    #: Spec 8, package B's field: scripted traffic aircraft, at most
+    #: MAX_TRAFFIC; an empty list is the default and is omitted.
+    traffic: List["TrafficSpec"] = dc_field(default_factory=list)
 
     #: Field order for both serialisation and the rendered table.
     FIELD_ORDER = (
@@ -133,7 +181,7 @@ class ScenarioSpec:
         """
         import re
 
-        match = re.fullmatch(r"cameras\[(\d+)\]\.(\w+)", name)
+        match = re.fullmatch(r"cameras\[(\d+)\]\.(\w+)(?:\.(\w+))?", name)
         if match is None:
             return None
         index = int(match.group(1))
@@ -142,9 +190,43 @@ class ScenarioSpec:
                 f"spec has {len(self.cameras)} camera(s); {name} does not "
                 f"exist")
         field = match.group(2)
-        if field not in CameraSpec.FIELD_ORDER:
+        # Spec 8: ``cameras[i].exposure.<field>`` addresses the nested
+        # exposure block, which carries the same set()/plan() doctrine.
+        if field == "exposure" and match.group(3) is not None:
+            return self.cameras[index].exposure, match.group(3)
+        if match.group(3) is not None or field not in CameraSpec.FIELD_ORDER:
             raise ValueError(f"{field!r} is not a camera field")
         return self.cameras[index], field
+
+    def _block_address(self, name: str):
+        """Parse ``scene.<field>``, ``taxonomy.<field>`` or
+        ``traffic[<i>].<field>`` -> (block, field) or None. The blocks
+        carry the spec's own set()/plan() doctrine."""
+        import re
+
+        match = re.fullmatch(r"(scene|taxonomy)\.(\w+)", name)
+        if match is not None:
+            block = getattr(self, match.group(1))
+            return block, match.group(2)
+        match = re.fullmatch(r"traffic\[(\d+)\]\.(\w+)", name)
+        if match is not None:
+            index = int(match.group(1))
+            if index >= len(self.traffic):
+                raise ValueError(
+                    f"spec has {len(self.traffic)} traffic entr"
+                    f"{'y' if len(self.traffic) == 1 else 'ies'}; {name} "
+                    f"does not exist")
+            return self.traffic[index], match.group(2)
+        return None
+
+    def _randomization_address(self, name: str):
+        """Parse ``randomization.<field>`` -> field or None."""
+        if not name.startswith("randomization."):
+            return None
+        field = name[len("randomization."):]
+        if field not in RandomizationSpec.FIELD_ORDER:
+            raise ValueError(f"{field!r} is not a randomization field")
+        return field
 
     def set(self, name: str, value: Any, frm: str = "edited by hand") -> None:
         """Override a field, recording that a human did it.
@@ -157,6 +239,18 @@ class ScenarioSpec:
         camera = self._camera_address(name)
         if camera is not None:
             camera[0].set(camera[1], value, frm=frm)
+            return
+        block = self._block_address(name)
+        if block is not None:
+            block[0].set(block[1], value, frm=frm)
+            return
+        if name == "randomization.policy":
+            self.randomization_policy = Quantity(
+                value=value, source=Source.USER, frm=frm)
+            return
+        block_field = self._randomization_address(name)
+        if block_field is not None:
+            self.randomization.set(block_field, value, frm=frm)
             return
         current = getattr(self, name)
         setattr(
@@ -182,6 +276,25 @@ class ScenarioSpec:
         camera = self._camera_address(name)
         if camera is not None:
             camera[0].plan(camera[1], value, frm=frm)
+            return
+        block = self._block_address(name)
+        if block is not None:
+            block[0].plan(block[1], value, frm=frm)
+            return
+        if name == "randomization.policy":
+            current = self.randomization_policy
+            if current is not None and current.source not in (
+                    Source.DEFAULT, Source.DERIVED, Source.MODEL):
+                raise ValueError(
+                    f"plan() only moves defaulted/derived/model fields; "
+                    f"randomization.policy is {current.source.value!r} -- "
+                    f"a stated value is never silently moved")
+            self.randomization_policy = Quantity(
+                value=value, source=Source.DERIVED, frm=frm)
+            return
+        block_field = self._randomization_address(name)
+        if block_field is not None:
+            self.randomization.plan(block_field, value, frm=frm)
             return
         current = getattr(self, name)
         if current.source not in (Source.DEFAULT, Source.DERIVED,
@@ -213,6 +326,26 @@ class ScenarioSpec:
         # "no cameras" (the empty list), so the digest cannot fork on an
         # absent-vs-empty distinction.
         out["cameras"] = [camera.to_dict() for camera in self.cameras]
+        # The randomisation block appears only when it differs from the
+        # documented default: absent IS the default, one spelling, and
+        # pre-block specs keep their digests (no version bump).
+        if not self.randomization.is_default():
+            out["randomization"] = self.randomization.to_dict()
+        # Spec 8: the policy rides under the same key (contracts §5.2);
+        # absent is "no sampling" and is omitted.
+        if self.randomization_policy is not None:
+            out.setdefault("randomization", {})["policy"] = (
+                self.randomization_policy.to_dict())
+        # Spec 8 blocks, each absent-canonical: a spec that states none
+        # of them keeps the canonical form it had at 7 (apart from the
+        # version field). The order is documentary only; the digest
+        # sorts keys.
+        if not self.scene.is_default():
+            out["scene"] = self.scene.to_dict()
+        if not self.taxonomy.is_default():
+            out["taxonomy"] = self.taxonomy.to_dict()
+        if self.traffic:
+            out["traffic"] = [entry.to_dict() for entry in self.traffic]
         if self.notes:
             out["notes"] = list(self.notes)
         return out
@@ -237,11 +370,44 @@ class ScenarioSpec:
         if not isinstance(cameras_data, list):
             raise ValueError("spec 'cameras' must be a list of camera "
                              "mappings")
+        randomization_data = data.get("randomization")
+        policy = None
+        if isinstance(randomization_data, dict) and "policy" in randomization_data:
+            # The policy is lifted out before the block's own reader
+            # (which refuses unknown keys) sees the rest; a policy-only
+            # block leaves the ranges at their defaults.
+            randomization_data = dict(randomization_data)
+            policy_data = randomization_data.pop("policy")
+            if not isinstance(policy_data, dict) or "value" not in policy_data:
+                raise ValueError("randomization.policy must be a "
+                                 "provenanced mapping ({value, source, "
+                                 "from})")
+            policy = Quantity.from_dict(policy_data)
+            if not randomization_data:
+                randomization_data = None
+        randomization = (RandomizationSpec.defaulted()
+                         if randomization_data is None
+                         else RandomizationSpec.from_dict(randomization_data))
+        scene_data = data.get("scene")
+        scene = (SceneSpec.defaulted() if scene_data is None
+                 else SceneSpec.from_dict(scene_data))
+        taxonomy_data = data.get("taxonomy")
+        taxonomy = (TaxonomySpec.defaulted() if taxonomy_data is None
+                    else TaxonomySpec.from_dict(taxonomy_data))
+        traffic_data = data.get("traffic", [])
+        if not isinstance(traffic_data, list):
+            raise ValueError("spec 'traffic' must be a list of traffic "
+                             "mappings")
         return cls(
             name=data.get("name", "scenario"),
             prompt=data.get("prompt"),
             notes=list(data.get("notes", [])),
             cameras=[CameraSpec.from_dict(entry) for entry in cameras_data],
+            randomization=randomization,
+            randomization_policy=policy,
+            scene=scene,
+            taxonomy=taxonomy,
+            traffic=[TrafficSpec.from_dict(entry) for entry in traffic_data],
             **kwargs,
         )
 
@@ -299,6 +465,36 @@ class ScenarioSpec:
                              f"{len(camera.moves)} keyframes", "-",
                              "; ".join(f"t={m.get('t_s')}s"
                                        for m in camera.moves)))
+            # Spec 8: a stated exposure renders with its sources; the
+            # preset's default is not a row, exactly as it is not a key.
+            if not camera.exposure.is_default(str(camera.preset.value)):
+                for name, q in camera.exposure.quantities():
+                    rows.append((section, f"exposure {name}", q.render(),
+                                 str(q.source), q.note()))
+        # The randomisation block, when it is not the documented default
+        # (off): ranges and the drawn values, each with its source.
+        if not self.randomization.is_default():
+            for name, q in self.randomization.quantities():
+                rows.append(("randomization", name.replace("_", " "),
+                             q.render(), str(q.source), q.note()))
+        if self.randomization_policy is not None:
+            q = self.randomization_policy
+            leaves = sorted(q.value) if isinstance(q.value, dict) else []
+            rows.append(("randomization", "policy", f"{len(leaves)} leaves",
+                         str(q.source),
+                         "; ".join(bit for bit in (q.note(),
+                                                   ", ".join(leaves)) if bit)))
+        # Spec 8 blocks, when stated.
+        for block_name, block in (("scene", self.scene),
+                                  ("taxonomy", self.taxonomy)):
+            if not block.is_default():
+                for name, q in block.quantities():
+                    rows.append((block_name, name.replace("_", " "),
+                                 q.render(), str(q.source), q.note()))
+        for index, entry in enumerate(self.traffic):
+            for name, q in entry.quantities():
+                rows.append((f"traffic[{index}]", name.replace("_", " "),
+                             q.render(), str(q.source), q.note()))
 
         w_name = max(len(r[1]) for r in rows) + 1
         w_val = max(len(r[2]) for r in rows) + 1

@@ -109,6 +109,11 @@
     ".*[Ll]ogo.*"
   ],
   "hinge_note": "hinge lines estimated from each surface's own leading-edge geometry plus the part offset (assets_pipeline/estimate_hinges.py); verified on screen by gate5_realmesh, not assumed",
+  "gear_geometry": {
+    "parts": [],
+    "objects": [],
+    "source": "this config lists NO landing-gear part: the A320family gear models live under Models/LandingGears/ and are not among the parts above, and the fuselage's Gear* objects (GearLDoor, GearNWell, ...) are doors and wells, not tyres. With no gear vertices the converter anchors z on the FDM VRP and says so in mesh_origin_basis; adding the gear parts (and their assembly-XML offsets) is what would make z measured. Measured 2026-09-25 from the pinned commit: the lowest drawn vertex is a nacelle at -3.27 m"
+  },
   "surfaces": {
     "aileron_l": {
       "bone": "aileron_l",
@@ -211,6 +216,36 @@
           7.7622
         ]
       ]
+    }
+  },
+  "labels": {
+    "dimensions_m": {
+      "length": 37.57,
+      "height": 11.76,
+      "source": "Airbus A320 Aircraft Characteristics Airport and Maintenance Planning (ACAP), section 2-1-1 (overall length 37.57 m, height 11.76 m); span from the flown FDM's own <wingspan>"
+    },
+    "keypoints": {
+      "nose": {
+        "fdm_contact": "NOSE_TIP"
+      },
+      "tail": {
+        "fdm_contact": "TAIL_TIP"
+      },
+      "left_wingtip": {
+        "fdm_contact": "WING_TIP_1"
+      },
+      "right_wingtip": {
+        "fdm_contact": "WING_TIP_2"
+      },
+      "nose_gear": {
+        "fdm_contact": "NOSE_LG"
+      },
+      "left_main_gear": {
+        "fdm_contact": "LEFT_MLG"
+      },
+      "right_main_gear": {
+        "fdm_contact": "RIGHT_MLG"
+      }
     }
   }
 }

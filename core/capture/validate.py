@@ -29,6 +29,8 @@ re-planned by callers through ``spec.plan`` with a recorded reason.
 
 from __future__ import annotations
 
+import math
+
 from typing import Dict, List, Optional
 
 from ..scenario.camera import (
@@ -48,6 +50,33 @@ MAX_RESOLUTION_PX = 8192
 #: Lens/sensor physicality rails, generous around real hardware.
 MAX_FOCAL_MM = 2000.0
 MAX_SENSOR_MM = 120.0
+
+#: A camera identifier NAMES A DIRECTORY: the manifest's per-frame
+#: ``file`` is ``frames/<camera_id>/frame_00042.png`` and the preview
+#: renderer writes ``previews/<camera_id>/``. So the identifier faces
+#: the strictest of the three filesystems this project runs on rather
+#: than each one's own surprise. Measured before this rail existed: a
+#: camera id of ``../../pwned`` wrote its preview images OUTSIDE the run
+#: directory on Linux, and a ``:`` or a reserved device name is an
+#: unrecoverable file-creation failure on Windows halfway
+#: through a run.
+CAMERA_ID_MAX_LEN = 64
+_CAMERA_ID_ALLOWED = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.")
+#: Directory names this project itself owns inside a run. A camera may
+#: not take one: ``host_flight/`` holds the flight the UE host flew
+#: before the poses were solved, and the verifier keys host telemetry by
+#: its parent directory name -- so a camera called "host_flight" would
+#: put two different flights under one key and silently shadow one.
+#: Refused rather than renamed, like every other stated field.
+RESERVED_CAMERA_IDS = frozenset({"host_flight"})
+
+#: Windows reserves these stems whatever the extension, on every drive.
+_WINDOWS_RESERVED = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
 
 
 def _prefix(index: int, camera: CameraSpec) -> str:
@@ -99,6 +128,85 @@ def intrinsics_violations(camera: CameraSpec,
     return out
 
 
+def exposure_violations(camera: CameraSpec,
+                        index: int = 0) -> List[Violation]:
+    """camera.exposure (spec 8): aperture f-number, shutter seconds and
+    ISO must each be positive numbers. Only the triple's shape is
+    refused here; the EV100 it implies is the Look lane's."""
+    out: List[Violation] = []
+    who = _prefix(index, camera)
+    for name, unit in (("aperture_f", "f-number"), ("shutter_s", "s"),
+                       ("iso", "ISO")):
+        raw = getattr(camera.exposure, name).value
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            value = None
+        if isinstance(raw, bool) or value is None or not value > 0.0:
+            out.append(Violation(
+                "camera.exposure",
+                f"{who}: exposure.{name} must be a positive number",
+                actual=raw, limit=0.0, unit=unit))
+    return out
+
+
+def identifier_violations(camera: CameraSpec,
+                          index: int = 0) -> List[Violation]:
+    """camera.identifier: an id that cannot safely name a directory.
+
+    Refused by name rather than sanitised, for the same reason every
+    other stated field is: silently rewriting a user's camera id would
+    put the frames somewhere they did not ask for, and the manifest
+    would then label images by a name the run never used.
+    """
+    out: List[Violation] = []
+    who = _prefix(index, camera)
+    value = camera.camera_id.value
+    if not isinstance(value, str) or not value:
+        out.append(Violation(
+            "camera.identifier",
+            f"{who}: the camera id must be a non-empty string; it names "
+            f"the directory the frames are written to"))
+        return out
+    if len(value) > CAMERA_ID_MAX_LEN:
+        out.append(Violation(
+            "camera.identifier",
+            f"{who}: the camera id is {len(value)} characters; the limit "
+            f"is {CAMERA_ID_MAX_LEN}",
+            actual=float(len(value)), limit=float(CAMERA_ID_MAX_LEN)))
+    bad = sorted({c for c in value if c not in _CAMERA_ID_ALLOWED})
+    if bad:
+        out.append(Violation(
+            "camera.identifier",
+            f"{who}: the camera id contains {bad} -- it names a "
+            f"directory on every platform, so letters, digits, '_', "
+            f"'-' and '.' only"))
+    if value in (".", "..") or value.startswith("."):
+        out.append(Violation(
+            "camera.identifier",
+            f"{who}: a camera id may not be '.', '..' or start with a "
+            f"dot; it would escape or hide the frame directory"))
+    if value.endswith((".", " ")):
+        out.append(Violation(
+            "camera.identifier",
+            f"{who}: a camera id may not end in a dot or a space; "
+            f"Windows silently strips both and the frames would land "
+            f"under a name the manifest does not carry"))
+    if value.split(".")[0].upper() in _WINDOWS_RESERVED:
+        out.append(Violation(
+            "camera.identifier",
+            f"{who}: {value!r} is a reserved device name on Windows; "
+            f"the frame directory could never be created there"))
+    if value in RESERVED_CAMERA_IDS:
+        out.append(Violation(
+            "camera.identifier",
+            f"{who}: {value!r} is a directory this run writes itself, "
+            f"and the verifier keys host telemetry by directory name -- "
+            f"two flights under one key, one of them shadowed. Reserved: "
+            f"{sorted(RESERVED_CAMERA_IDS)}"))
+    return out
+
+
 def vocabulary_violations(camera: CameraSpec,
                           index: int = 0) -> List[Violation]:
     """camera.preset: words outside the modelled vocabulary refuse by
@@ -111,6 +219,13 @@ def vocabulary_violations(camera: CameraSpec,
             "camera.preset",
             f"{who}: unknown preset {preset!r}; modelled: "
             f"{', '.join(CAMERA_PRESETS)}"))
+    # camera.profile: the sensor model must exist and cite a source.
+    from .profile import CameraProfileError, load_profile
+
+    try:
+        load_profile(str(camera.profile.value))
+    except CameraProfileError as exc:
+        out.append(Violation("camera.profile", f"{who}: {exc.message}"))
     mode = str(camera.position_mode.value)
     if mode not in POSITION_MODES:
         out.append(Violation(
@@ -176,14 +291,58 @@ def schedule_violations(camera: CameraSpec,
     return out
 
 
+def moves_violations(camera, index: int = 0) -> List[Violation]:
+    """Keyframed moves: every keyframe a mapping with a finite,
+    non-negative ``t_s`` and only the documented MOVE_KEYS, each a
+    finite number. A key the solver would silently ignore refuses by
+    name (camera.moves) instead."""
+    from .poses import MOVE_KEYS
+
+    out: List[Violation] = []
+    who = f"camera[{index}] {camera.camera_id.value!r}"
+    for k, move in enumerate(camera.moves or []):
+        if not isinstance(move, dict):
+            out.append(Violation("camera.moves",
+                                 f"{who} keyframe {k} is not a mapping"))
+            continue
+        t = move.get("t_s")
+        if not isinstance(t, (int, float)) or isinstance(t, bool) \
+                or not math.isfinite(float(t)) or float(t) < 0.0:
+            out.append(Violation("camera.moves",
+                                 f"{who} keyframe {k} needs a finite, "
+                                 f"non-negative t_s, got {t!r}",
+                                 unit="s"))
+        unknown = sorted(set(move) - set(MOVE_KEYS) - {"t_s"})
+        if unknown:
+            out.append(Violation(
+                "camera.moves",
+                f"{who} keyframe {k} names {unknown}, which no pose "
+                f"solver field reads; keyable: {list(MOVE_KEYS)}"))
+        for key in set(move) & set(MOVE_KEYS):
+            value = move[key]
+            if not isinstance(value, (int, float)) or isinstance(value, bool) \
+                    or not math.isfinite(float(value)):
+                out.append(Violation(
+                    "camera.moves",
+                    f"{who} keyframe {k} {key} must be a finite number, "
+                    f"got {value!r}"))
+        if len(move) == 1:
+            out.append(Violation("camera.moves",
+                                 f"{who} keyframe {k} keys nothing"))
+    return out
+
+
 def validate_cameras(spec) -> List[Violation]:
     """Every scene-free camera check, for the core validator."""
     out: List[Violation] = []
     seen = set()
     for index, camera in enumerate(spec.cameras):
+        out.extend(identifier_violations(camera, index))
         out.extend(vocabulary_violations(camera, index))
         out.extend(intrinsics_violations(camera, index))
+        out.extend(exposure_violations(camera, index))
         out.extend(schedule_violations(camera, index))
+        out.extend(moves_violations(camera, index))
         camera_id = str(camera.camera_id.value)
         if camera_id in seen:
             out.append(Violation(

@@ -981,11 +981,120 @@ headless host covers **still air and steady wind over flat terrain**
 realisation is per-host (measured, above); orographic wind in the host is the
 verified port of an unvalidated model (§2.8).
 
+### 2.15 Ground-truth labels (Phase 10): what a label is, and is not
+
+Every frame of a version-5 capture manifest carries labels computed from
+geometry alone (`core/capture/labels.py`): a 2-D box, a 3-D box in camera
+coordinates, seven airframe keypoints and the horizon line. What IS
+claimed: the labels are recoverable from the same pose, intrinsics and
+aircraft state the manifest records, through its documented projection;
+the verifier re-derives them independently to 0.05 px and is shown to
+fail when they are moved; every airframe number carries its source and a
+`basis` word (`fdm` for a point the flown JSBSim model states itself,
+`fdm-approximation` for half the FDM wingspan abeam the aero reference
+point, `estimate` for the B747's nose and tail placed by argument from a
+type document); the structural-to-body mapping is pinned by figures from
+outside the code (c172p and A320 tip stations, A320 nose-to-tail against
+the type's length).
+
+What is NOT claimed: the 2-D box is the airframe's OVERALL EXTENTS
+(nose-to-tail x span x cited height), not a silhouette -- a tight box
+needs the engine's instance mask, which is written only by a `-labels`
+render pass and graded against the extents box by containment, never
+equated with it. Keypoint `in_frame` is geometric ("inside the image
+with positive depth"), never "unoccluded". The horizon is the datum
+plane's tangent horizon on a spherical Earth without refraction or
+terrain -- the skyline is the mask's job. Semantic classes are three
+(sky / aircraft / terrain-or-other). Airframes without stated geometry
+refuse by name (`camera.labels`) rather than being labelled as a
+stand-in. Nothing here is a claim about the meshes' dimensional accuracy
+beyond §1.6b's.
+
+### 2.16 The sensor model (Phase 10): a stated model, applied reproducibly
+
+A camera profile applies lens distortion (Brown-Conrady), a rolling
+shutter, cos^4 vignetting, exposure gain and EMVA 1288 shot + read noise
+to the ideal render as a seeded Python post-pass. What IS claimed: the
+pass is deterministic from the run's seed (same bytes twice, tested);
+the labels are mapped through the same profile and the verifier
+recovers the pinhole labels by inverting the RECORDED parameters to
+0.05 px, failing when they are corrupted; every profile cites its source
+and carries a `basis` word, and the shipped `synthetic_cmos_wide` is
+declared illustrative in the manifest itself. What is NOT claimed: that
+any shipped profile describes a real camera (none does -- a calibrated
+one must cite its calibration), radiometric calibration of any kind
+(the linear input is the 8-bit sRGB render inverted, a stated
+approximation until a `-linear` EXR pass is verified on the engine),
+chromatic aberration, intra-exposure motion blur, demosaicing or flare.
+§2.5 stands: none of this is EO/IR sensor fidelity, and nothing here is
+traceable as sensor imagery.
+
 ### 2.5 No EO/IR sensor fidelity exists
 
 None has been built. Unreal has no native EO/IR simulation and no MISB/KLV
 support. A post-process "thermal look" would be visually plausible and **not
 radiometrically calibrated**. Nothing here is traceable as sensor imagery.
+
+---
+
+### 2.17 Domain randomisation (Phase 10): drawn once, recorded, never a palette
+
+The `randomization` block draws a time of day, a fog density, a camera
+jitter and a livery from its own seed and writes each drawn value back
+into the spec as a `derived` field beside the range it came from; the
+card, the manifest and every frame sidecar carry the same sampled dict.
+What IS claimed: the sun is where Meeus ch. 25 / NOAA put it for the
+spec's latitude, longitude, date and UTC hour (geometric, no
+refraction); the draws are reproducible from the block's seed (derived
+from the run seed when unstated); a stated field is never moved; the
+second planner pass lands on the same numbers; a window with no
+daylight refuses by name. What is NOT claimed: that a sampled look is
+photometrically right -- exposure is a straight line between the two
+probe-calibrated look points the harness already renders with, clamped
+beyond them, and fog is a range between its calibrated clear and hazy;
+no new visual value was calibrated for this block (gotcha 6). No
+clouds, no refraction, no auto-exposure. Livery variants exist as a
+card key and a refuse-by-name engine hook with NO shipped variant
+material, so every draw today is `"default"`. Distractor objects are
+scene content, cut with P10-8. Off (the documented default), the block
+is absent from the canonical spec, every pre-existing digest is
+unchanged, and the render command is byte-identical to before.
+
+---
+
+### 2.18 Batches and datasets (Phase 10): verified in, split by flight
+
+`flightsim.batch` runs a matrix of specs, each content-addressed by
+its digest and verified, with a ledger that records failures;
+`flightsim.export` turns runs into COCO / KITTI / WebDataset with a
+card. What IS claimed: an unverified run, or one with a failed check,
+refuses the export by name -- nothing is dropped silently; every frame
+of one simulation (cameras and randomisation excluded from the
+simulation digest) lands on one side of the split; the card states
+the conventions, the split seed and assignment, the verification
+counts including the checks that were NOT RUN, and what is not
+claimed. What is NOT claimed: that the exported labels are anything
+other than the recorded flight's geometry (section 2.15); that a
+KITTI `occluded` value is known without the engine's occlusion pass;
+that any rendered batch has been exported on this machine (no engine).
+
+---
+
+### 2.19 The manifest's contract (gap closure): schema, matrices, lag
+
+What IS claimed: every capture manifest validates against the published
+JSON Schema of its version (`docs/schemas/`), checked by the verifier;
+every frame's `projection_matrix` reproduces the recorded parameters'
+projection to 0.001 px (measured 2.5e-9); the lagged camera presets
+integrate their time constants exactly over each telemetry interval, so
+a change of sample rate moves a chase camera by the aircraft track's own
+interpolation residual (measured 0.3 mm on the reference track) and not
+by integrator error. What is NOT claimed: bit-identical lagged poses
+across sample rates -- the two rates sample a different goal signal, and
+the residual is pinned under a centimetre, not at zero; and the validator
+here enforces the subset of JSON Schema the file uses (it refuses a file
+that uses more), so a consumer with a full validator sees exactly the
+same contract, no more.
 
 ---
 
@@ -997,9 +1106,25 @@ place: fixed timestep set at construction and never varied; step counts derived
 from the fixed rate rather than accumulated from wall time; no RNG anywhere in
 the core; aircraft XML fingerprinted by SHA-256.
 
-**Rendering** will not be bit-deterministic. Movie Render Queue is not
-bit-deterministic and Epic documents no fix. When Phase 6 exists it will be
-described as reproducible-within-tolerance, never as bit-identical.
+**Rendering** is a measurement, not a claim, and as of Phase 10 no
+measurement exists. The earlier text here ("will not be bit-deterministic")
+was written about Movie Render Queue, which this system does not use: the
+frames come from an offscreen SceneCapture in a commandlet with every input
+fixed on every run (stated warm-up count, manual exposure, async shader
+compilation finished before the first frame). Phase 10 built the instrument
+and not yet the result: the commandlet records the SHA-256 of every frame it
+writes, `-deterministic` pins texture streaming and LOD, `core/capture/
+repro.py` compares two renders of one card frame by frame, and Gate 10-R
+(`experiments/gate10_render_repro.py`) renders twice and reports one of
+three words with its numbers -- `bit-identical`, `bounded` (maximum per-pixel
+difference, fraction of pixels differing), or `incomplete`. Gate 10-R has not
+been run on an engine (none here). Until it is, the status is: **render
+reproducibility not established in either direction**. NOT RUN is not a
+verdict. The first Windows run of `--card` produces the first verdict, and
+this paragraph is to be replaced by its numbers. The verifier's
+`frame_integrity` check is independent of that verdict: a frame on disk
+that does not hash to the engine's own record fails by frame, so a replaced
+or re-encoded frame cannot pass as rendered.
 
 Not yet done: floating-point flags on the physics core are unaudited
 (`-ffast-math` must be off), and no run manifest is emitted yet (Phase 7).

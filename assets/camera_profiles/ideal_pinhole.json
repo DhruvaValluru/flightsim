@@ -1,0 +1,12 @@
+{
+  "name": "ideal_pinhole",
+  "basis": "ideal",
+  "source": "this repository: the capture manifest's documented pinhole model (core/capture/manifest.py) -- no distortion, no rolling shutter, no noise, no vignetting; the frames the engine writes are the sensor frames",
+  "distortion": {"model": "brown-conrady", "k1": 0.0, "k2": 0.0, "k3": 0.0, "p1": 0.0, "p2": 0.0},
+  "rolling_shutter": {"readout_s": 0.0, "direction": "top-to-bottom"},
+  "exposure": {"time_s": 0.001, "reference_time_s": 0.001, "iso": 100, "base_iso": 100},
+  "noise": {"model": "none"},
+  "vignetting": {"model": "none"},
+  "colour": {"linear_source": "engine EXR when present, else the 8-bit sRGB PNG inverted through the sRGB transfer (stated approximation)", "output": "sRGB 8-bit PNG"},
+  "bit_depth": 8
+}

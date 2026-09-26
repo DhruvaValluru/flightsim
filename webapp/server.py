@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import replace
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -31,7 +32,9 @@ import sys
 
 sys.path.insert(0, str(REPO))
 
-from core.nl.compiler import compile_prompt  # noqa: E402
+from core.nl.compiler import (  # noqa: E402
+    camera_questions, compile_prompt, rescale_moves,
+)
 from core.nl.llm_compiler import (  # noqa: E402
     LLMCompileError,
     compile_prompt_llm,
@@ -52,6 +55,7 @@ from webapp.runs import (  # noqa: E402
     pick_scene,
     place_on_scene,
     plan_camera_defaults,
+    sample_randomization_or_refuse,
     plan_flyable_defaults,
     plan_scene_setting,
     plan_terrain_environment,
@@ -88,6 +92,22 @@ class RunRequest(BaseModel):
     provenance: Dict[str, Any] = {}
 
 
+class CameraRequest(BaseModel):
+    """Add or remove one camera on the spec the page is holding.
+
+    The page sends the whole spec dict and gets the whole payload back,
+    so the 32 defaults of a new camera come from ``CameraSpec.defaulted``
+    -- the one place that knows them -- rather than being duplicated in
+    JavaScript where they would drift.
+    """
+
+    spec: Dict[str, Any]
+    #: Add: the preset the new camera takes (CAMERA_PRESETS).
+    preset: Optional[str] = None
+    #: Remove: the index to drop. Exactly one of preset/remove.
+    remove: Optional[int] = None
+
+
 def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
     fields = []
     for section, name, quantity in spec.quantities():
@@ -105,6 +125,9 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
         cameras.append({
             "index": index,
             "camera_id": str(camera.camera_id.value),
+            # The header names the view, so the page does not have to dig
+            # it out of the field list to say what this block is.
+            "preset": str(camera.preset.value),
             "fields": [{
                 "name": name, "value": quantity.value,
                 "unit": quantity.unit, "source": str(quantity.source),
@@ -113,9 +136,30 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
             } for name, quantity in camera.quantities()],
             "moves": [dict(m) for m in camera.moves],
         })
+    # The randomisation block: one labeled block of provenanced rows,
+    # editable like the others. The page's dict ALWAYS carries the block
+    # (the canonical spec omits a default one) so an edit has a row to
+    # land in; from_dict normalises a default block back to absent.
+    randomization = [{
+        "name": name, "value": quantity.value, "unit": quantity.unit,
+        "source": str(quantity.source), "from": quantity.frm,
+        "std": quantity.std, "detail": quantity.detail,
+    } for name, quantity in spec.randomization.quantities()]
+    spec_dict = spec.to_dict()
+    # The block's own dict (always present for the page) MERGED with the
+    # policy the canonical form carries under the same key: the policy
+    # lives on ScenarioSpec.randomization_policy, not on the block, so
+    # replacing the section wholesale dropped it and the page's digest
+    # (of this dict, re-read by /run) forked from the one shown here.
+    randomization_section = spec.randomization.to_dict()
+    canonical_section = spec_dict.get("randomization") or {}
+    if "policy" in canonical_section:
+        randomization_section["policy"] = canonical_section["policy"]
+    spec_dict["randomization"] = randomization_section
     return {"digest": spec.digest(), "name": spec.name,
             "prompt": spec.prompt, "notes": spec.notes,
-            "fields": fields, "cameras": cameras, "dict": spec.to_dict(),
+            "fields": fields, "cameras": cameras,
+            "randomization": randomization, "dict": spec_dict,
             "table": spec.render_table()}
 
 
@@ -158,15 +202,21 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
                           if result.transcript else None)
         except LLMCompileError as exc:
             # The offline compiler is the documented fallback; the UI states
-            # the switch and why, never silently. The regex compiler never
-            # asks and never sees answers: it compiles the ORIGINAL prompt,
-            # even when the LLM died between the question and answer rounds.
-            spec = compile_prompt(prompt)
+            # the switch and why, never silently. It compiles the ORIGINAL
+            # prompt plus whatever the answer round said to its one
+            # question (camera_view), even when the LLM died between the
+            # question and answer rounds.
+            spec = compile_prompt(prompt, answers=request.answers)
             compiler_used = "regex (llm unavailable)"
             llm_note = str(exc)
+            questions = [] if request.answers else camera_questions(prompt)
     else:
-        spec = compile_prompt(prompt)
+        # The regex path has exactly one clarifying question: which view,
+        # when the prompt speaks of imagery and names none. Asked once;
+        # the answer round compiles with the answer and asks nothing.
+        spec = compile_prompt(prompt, answers=request.answers)
         compiler_used = "regex"
+        questions = [] if request.answers else camera_questions(prompt)
 
     # The answer round must never LOSE the question round. The protocol is
     # stateless: round 2 re-extracts everything from the whole conversation,
@@ -203,7 +253,12 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
             return JSONResponse(
                 {"error": f"clip length must be in (0, {CLIP_SECONDS:g}] s"},
                 status_code=400)
+        previous = float(spec.duration.value)
         spec.set("duration", seconds, frm="clip length selector (web UI)")
+        # A move phrase spans the whole flight: keyframes that ended at
+        # the old duration end at the new one (stated keyframe times
+        # elsewhere are left alone).
+        rescale_moves(spec, previous, seconds)
 
     # Planning happens BEFORE the table and verdict are built, so what the
     # user reviews is what will run: the weather event's documented
@@ -229,6 +284,10 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
     # tower does not stay at flat-ground height under planned
     # mountains); stated placements never move.
     plan_camera_defaults(spec)
+    # Phase 10: the randomisation block draws its values (off by
+    # default -> no-op); a window with no daylight refuses by name in
+    # the verdict rather than rendering an uncalibrated night.
+    randomization_refusal = sample_randomization_or_refuse(spec)
 
     payload = {
         "compiler": compiler_used, "model": model, "llm_note": llm_note,
@@ -242,7 +301,90 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         "spec": _spec_payload(spec),
         "validation": _validation_payload(spec),
     }
+    if randomization_refusal is not None:
+        payload["validation"]["ok"] = False
+        payload["validation"]["violations"].append(randomization_refusal)
     return JSONResponse(payload)
+
+
+@app.post("/cameras")
+def cameras_endpoint(request: CameraRequest) -> JSONResponse:
+    """One more point of view, or one fewer.
+
+    Camera Phase 1 made the camera a spec element and the page learned to
+    EDIT one; it could never add a second, because the compiler builds at
+    most one CameraSpec and nothing else appended to the list. So the
+    phase's own flagship demonstration -- several views of one flight --
+    was reachable from a YAML file and not from the app. Everything
+    downstream already handled N cameras: the planners enumerate them,
+    the capture stage solves a track each, and the render runs one
+    commandlet pass per camera.
+
+    Refusals are the validator's, by name. A duplicate or unusable
+    ``camera_id`` is refused rather than silently renamed, for the reason
+    every stated field is: the id names the directory the frames land in
+    and the manifest labels them by it.
+    """
+    from core.capture.validate import validate_cameras
+    from core.scenario.camera import CameraSpec, plan_full_capture
+
+    try:
+        spec = ScenarioSpec.from_dict(request.spec)
+    except (ValueError, KeyError) as exc:
+        return JSONResponse({"error": f"spec did not parse: {exc}"},
+                            status_code=400)
+
+    if request.remove is not None:
+        if not 0 <= request.remove < len(spec.cameras):
+            return JSONResponse(
+                {"error": f"camera[{request.remove}] does not exist; the "
+                          f"spec states {len(spec.cameras)}"},
+                status_code=400)
+        spec.cameras.pop(request.remove)
+        return JSONResponse(_spec_payload(spec))
+
+    # The preset is NOT checked here. core.capture.validate owns that
+    # vocabulary and its refusal already names the modelled set --
+    # duplicating it would be a second place to keep in step, and a
+    # check that cannot fire (measured: disabling it changed nothing,
+    # because validate_cameras below caught every case first).
+    preset = str(request.preset or "")
+
+    # A NEW id, not a renamed one. Ids name directories, so a collision
+    # would put two cameras' frames in one place; picking the next free
+    # suffix keeps them distinct without touching any id already stated.
+    taken = {str(camera.camera_id.value) for camera in spec.cameras}
+    camera_id = preset
+    suffix = 0
+    while camera_id in taken:
+        suffix += 1
+        camera_id = f"{preset}{suffix}"
+
+    camera = CameraSpec.defaulted(
+        camera_id=camera_id, preset=preset,
+        aircraft=str(spec.aircraft.value),
+        terrain_elevation_m=float(spec.terrain_elevation.value),
+        frm=f"added from the page as a {preset} view")
+    # A view added from the page captures CONTINUOUSLY: every recorded
+    # sample, for as long as the clip lasts. Picking a viewpoint and a
+    # clip length should give that many seconds of that view -- a
+    # simulation from that angle -- not the three stills the one-per-
+    # second default produced on a three-second clip. Planned rather
+    # than set: the page chose it, the user did not state it, so an
+    # edit in the review table still wins.
+    plan_full_capture(
+        camera, frm="a view added from the page captures the whole clip")
+    spec.cameras.append(camera)
+
+    violations = validate_cameras(spec)
+    if violations:
+        spec.cameras.pop()
+        first = violations[0]
+        return JSONResponse(
+            {"refused": first.constraint,
+             "error": "; ".join(v.render() for v in violations)},
+            status_code=409)
+    return JSONResponse(_spec_payload(spec))
 
 
 @app.post("/run")
@@ -316,6 +458,10 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # the raster under it; stated placements never move and refuse by
     # name in the verdict below).
     plan_camera_defaults(spec)
+    # Randomisation draws AFTER the camera planner (its jitter is about
+    # the planned placement) and BEFORE the host projection; off by
+    # default. Same sampler as /compile: value-idempotent.
+    randomization_refusal = sample_randomization_or_refuse(spec)
     project_for_ue_host(spec)
 
     # Validation governs the edited spec too: the run endpoint re-validates
@@ -324,6 +470,9 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     if clearance_refusal is not None:
         verdict["ok"] = False
         verdict["violations"].append(clearance_refusal)
+    if randomization_refusal is not None:
+        verdict["ok"] = False
+        verdict["violations"].append(randomization_refusal)
     # Scene-coupled camera checks (Camera Phase 1): world-anchored
     # cameras against the scene raster, its bounds and the modelled
     # tornado core -- the plan_terrain_flight pattern, refused by name
@@ -341,10 +490,10 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # must hear that first -- measured 2026-08-31 on a fresh Windows
     # clone, which was told to import aircraft models when the real
     # blocker was that no Unreal host existed there at all.
-    from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
+    from core.util.platform import ue_available, ue_platform_refusal
 
     if not ue_available():
-        return JSONResponse({"refused": UE_PLATFORM_REFUSAL,
+        return JSONResponse({"refused": ue_platform_refusal(),
                              "constraint": "ue.platform"}, status_code=409)
     # Placeholder airframes never render (owner's rule, extended
     # 2026-08-31: on ANY machine). Checked AFTER validation on purpose:
@@ -371,7 +520,7 @@ def status_endpoint() -> JSONResponse:
     # llm_available is a presence check (SDK + key in THIS process's
     # environment) so the page can state the compiler up front instead of
     # discovering a fallback after a spin. platform/render_available are
-    # the same pattern for the UE half: off-mac the page says so up front
+    # the same pattern for the UE half: without the Windows host the page says so up front
     # and a run refuses ue.platform by name instead of 500ing.
     from core.util.platform import os_name, ue_available
 
@@ -453,6 +602,221 @@ def run_effect(run_id: str):
     return FileResponse(path, media_type="application/json")
 
 
+#: Image kinds the page may fetch, and where each lives under the run.
+#: A fixed map, not a caller-supplied path: these routes take names from
+#: the browser, so the only defence that actually holds is refusing to
+#: build a path out of anything but a known directory plus a matched
+#: filename.
+_IMAGE_KINDS = {"frames": "frames", "overlays": "overlays",
+                "previews": "previews"}
+#: A frame image, a frame's own label sidecar beside it, or the metric
+#: depth the label bundle declares under ``labels.depth_f32`` (raw
+#: little-endian float32, contracts §8): the one bundle member that is
+#: neither a PNG nor JSON, served as bytes.
+_IMAGE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,80}\.(png|json|f32)$")
+_SERVED_TYPES = {".png": "image/png", ".json": "application/json",
+                 ".f32": "application/octet-stream"}
+_CAMERA_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+@app.get("/runs/{run_id}/images")
+def run_images(run_id: str):
+    """What images this run produced, per camera and per kind.
+
+    The page renders its gallery from this. Read off the directories
+    rather than the manifest: a frame the manifest names but the
+    renderer never wrote must not appear as an image the page then
+    fails to load.
+    """
+    from webapp.capture import inventory
+
+    run = manager.get(run_id)
+    out = manager.out_root / run_id
+    if run is None or not out.is_dir():
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    return JSONResponse(inventory(out))
+
+
+@app.get("/runs/{run_id}/cameras/{camera_id}/manifest.json")
+def run_camera_manifest(run_id: str, camera_id: str):
+    """ONE camera's labels: its block, its frames, and their context.
+
+    The whole-run manifest carries every camera's frames in one list,
+    which is right for verification and wrong for a person -- or a
+    training pipeline -- that wants "the tower view". This is that view
+    on its own, self-contained: the camera's own spec block, only its
+    frame records, and the shared context those records are meaningless
+    without (the CRS the metres are in, the scene and its raster digest,
+    the landmarks, which flight the labels were solved over, and the
+    digests that identify the run).
+
+    DECLARED BEFORE the generic image route on purpose: that route's
+    path pattern also matches this one, and while its .png check would
+    404 rather than serve anything wrong, the 404 would be the answer.
+    """
+    if not _CAMERA_NAME.match(camera_id):
+        return JSONResponse({"error": "no such camera"}, status_code=404)
+    path = manager.out_root / run_id / "capture_manifest.json"
+    if not path.is_file():
+        return JSONResponse(
+            {"error": "this run stated no cameras, so it took the legacy "
+                      "single-clip path and wrote no capture manifest"},
+            status_code=404)
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return JSONResponse({"error": f"manifest unreadable: {exc}"},
+                            status_code=500)
+
+    from webapp.capture import camera_view
+
+    view = camera_view(manifest, camera_id)
+    if view is None:
+        return JSONResponse(
+            {"error": f"this run has no camera {camera_id!r}; it states "
+                      f"{[c.get('camera_id') for c in manifest.get('cameras', [])]}"},
+            status_code=404)
+    return JSONResponse({**view, "run_id": run_id})
+
+
+@app.get("/runs/{run_id}/cameras/{camera_id}/frames.zip")
+def run_camera_archive(run_id: str, camera_id: str):
+    """ONE view as a download: every frame, each frame's own labels
+    beside it, the camera's manifest and a README.
+
+    The page shows frames; this is how they leave it. A consumer who
+    wants "the wingman view" gets a folder in which every PNG sits next
+    to a JSON carrying where the camera was, which way it pointed, the
+    lens, and everything the flight recorder logged at that instant --
+    not a folder of pictures and a manifest to cross-reference by hand.
+
+    Same name discipline as the image route, and DECLARED BEFORE it for
+    the same reason the manifest route is.
+    """
+    from webapp.capture import frames_archive
+
+    if not _CAMERA_NAME.match(camera_id):
+        return JSONResponse({"error": "no such camera"}, status_code=404)
+    out = manager.out_root / run_id
+    if not out.is_dir():
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    archive = frames_archive(out, camera_id)
+    if archive is None:
+        return JSONResponse(
+            {"error": f"camera {camera_id!r} has no frames on disk in "
+                      f"this run"},
+            status_code=404)
+    return FileResponse(archive, media_type="application/zip",
+                        filename=f"{run_id}_{camera_id}_frames.zip")
+
+
+@app.get("/frames.html", response_class=HTMLResponse)
+def frames_page() -> str:
+    """The per-camera frame browser: every image beside its own labels."""
+    return (STATIC / "frames.html").read_text(encoding="utf-8")
+
+
+@app.get("/runs/{run_id}/clips/{camera_id}.mp4")
+def run_camera_clip(run_id: str, camera_id: str):
+    """One camera's own clip: that many seconds of THAT view.
+
+    Guarded exactly like the image routes -- the id comes off a URL and
+    names a file -- and declared before the generic image route, whose
+    pattern also matches this path.
+    """
+    if not _CAMERA_NAME.match(camera_id):
+        return JSONResponse({"error": "no such clip"}, status_code=404)
+    root = (manager.out_root / run_id / "clips").resolve()
+    path = root / f"{camera_id}.mp4"
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(root)        # the clip stays inside the run
+    except (OSError, ValueError):
+        return JSONResponse({"error": "no such clip"}, status_code=404)
+    if not resolved.is_file():
+        return JSONResponse({"error": "no such clip"}, status_code=404)
+    return FileResponse(resolved, media_type="video/mp4")
+
+
+@app.get("/runs/{run_id}/{kind}/{camera_id}/{name}")
+def run_image(run_id: str, kind: str, camera_id: str, name: str):
+    """One rendered frame, overlay or preview.
+
+    The frames a run renders have always survived on disk; until now
+    nothing served them, so the only visual output the page could show
+    was a single mp4. Every path component is validated against a
+    pattern and the resolved path is required to stay inside the run
+    directory -- a name like ``..%2f..%2fetc%2fpasswd`` gets a 404, not
+    a file.
+    """
+    if kind not in _IMAGE_KINDS or not _IMAGE_NAME.match(name):
+        return JSONResponse({"error": "no such image"}, status_code=404)
+    if camera_id != "-" and not _CAMERA_NAME.match(camera_id):
+        return JSONResponse({"error": "no such image"}, status_code=404)
+    root = (manager.out_root / run_id / _IMAGE_KINDS[kind]).resolve()
+    path = (root if camera_id == "-" else root / camera_id) / name
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(root)        # the image stays inside the run
+    except (OSError, ValueError):
+        return JSONResponse({"error": "no such image"}, status_code=404)
+    if not resolved.is_file():
+        return JSONResponse({"error": "no such image"}, status_code=404)
+    # A sidecar only lives beside a FRAME; overlays and previews carry
+    # no labels of their own, and a .json or .f32 under them is not ours.
+    if resolved.suffix in (".json", ".f32") and kind != "frames":
+        return JSONResponse({"error": "no such image"}, status_code=404)
+    return FileResponse(resolved, media_type=_SERVED_TYPES[resolved.suffix])
+
+
+_SCHEMA_NAME = re.compile(r"^capture_manifest\.v\d+\.schema\.json$")
+
+
+@app.get("/schemas/{name}")
+def schema_file(name: str):
+    """The published capture-manifest schema (docs/schemas/), so the
+    frames page can link the contract every manifest it shows was
+    validated against. Only a schema file's own name is served."""
+    from core.capture.schema import SCHEMA_DIR
+
+    if not _SCHEMA_NAME.match(name):
+        return JSONResponse({"error": "no such schema"}, status_code=404)
+    path = SCHEMA_DIR / name
+    if not path.is_file():
+        return JSONResponse({"error": "no such schema"}, status_code=404)
+    return FileResponse(path, media_type="application/json")
+
+
+@app.get("/runs/{run_id}/capture_manifest.json")
+def run_capture_manifest(run_id: str):
+    """The capture manifest: every frame's camera pose, full intrinsics,
+    the aircraft state at that instant and the scene's landmarks. This is
+    what makes the images usable as labelled data rather than just
+    pictures, and it is written for camera-carrying runs."""
+    path = manager.out_root / run_id / "capture_manifest.json"
+    if not path.is_file():
+        return JSONResponse(
+            {"error": "no capture manifest: this run stated no cameras, so "
+                      "it took the legacy single-clip path"},
+            status_code=404)
+    return FileResponse(path, media_type="application/json")
+
+
+@app.get("/runs/{run_id}/verify.json")
+def run_verify(run_id: str):
+    """The verification summary for a captured run: which checks passed,
+    which failed, and which could not run and why."""
+    path = manager.out_root / run_id / "verify.json"
+    if not path.is_file():
+        # A run verified by `flightsim.verify` (or the batch runner)
+        # keeps the same verdict as verification.json.
+        path = manager.out_root / run_id / "verification.json"
+    if not path.is_file():
+        return JSONResponse({"error": "no verification summary"},
+                            status_code=404)
+    return FileResponse(path, media_type="application/json")
+
+
 @app.get("/runs/{run_id}/provenance.json")
 def run_provenance(run_id: str):
     path = manager.out_root / run_id / "provenance.json"
@@ -473,3 +837,175 @@ async def telemetry(socket: WebSocket) -> None:
             await asyncio.sleep(1.0)
     except WebSocketDisconnect:
         return
+
+
+# -- Phase 2, package I part 2: the guided page and its endpoints ---------------
+#
+# Every route below is a thin wrapper over webapp/generate.py (the
+# campaign-facing service layer): the service raises GenerateRefusal
+# carrying the response body already in the catalogue's words, and the
+# route only picks the status code. Nothing above this line changed.
+
+from webapp import generate as generate_module  # noqa: E402
+
+generator = generate_module.GenerateService()
+
+
+class GeneratePlanRequest(BaseModel):
+    prompt: str
+    #: The clarification round, exactly the /compile protocol: the page
+    #: echoes the questions with the answers; the server keeps no state.
+    questions: Optional[List[Dict[str, Any]]] = None
+    answers: Optional[List[Dict[str, str]]] = None
+    images: int = generate_module.DEFAULT_IMAGES
+    format: str = generate_module.DEFAULT_FORMAT
+    tier: str = "llm"
+    seed: Optional[int] = None
+
+
+class GeneratePreviewRequest(BaseModel):
+    #: The plan's compiled spec (payload ``spec``), unchanged.
+    spec: Dict[str, Any]
+    images: int = generate_module.DEFAULT_IMAGES
+    seed: int = 1
+    workers: int = 1
+
+
+class GenerateStartRequest(BaseModel):
+    prompt: str
+    answers: Optional[List[Dict[str, str]]] = None
+    images: int = generate_module.DEFAULT_IMAGES
+    format: str = generate_module.DEFAULT_FORMAT
+    seed: Optional[int] = None
+    workers: int = 1
+    tier: str = "regex"
+    #: The plan's spec digest, so the response can say whether the
+    #: campaign's own compile (Campaign.create) produced the same spec.
+    plan_digest: Optional[str] = None
+    disk_budget_bytes: Optional[int] = None
+
+
+def _generate_call(function, *args, **kwargs):
+    """Run a service call; a GenerateRefusal becomes its status code
+    with the body the service already put into words."""
+    try:
+        return JSONResponse(function(*args, **kwargs))
+    except generate_module.GenerateRefusal as exc:
+        return JSONResponse(exc.payload, status_code=exc.status_code)
+
+
+@app.get("/generate.html", response_class=HTMLResponse)
+def generate_page() -> str:
+    """The guided page: ask, clarify, preview, generate, review, download."""
+    return (STATIC / "generate.html").read_text(encoding="utf-8")
+
+
+@app.post("/generate/plan")
+def generate_plan(request: GeneratePlanRequest) -> JSONResponse:
+    """Prompt -> the compilers' questions (at most three), or the plan
+    preview: a paragraph, the refusals in the catalogue's words (rule
+    name under ``details``), the estimate, the expert command."""
+    return _generate_call(generator.plan, request.prompt, answers=request.answers,
+                          questions=request.questions, images=request.images,
+                          fmt=request.format, tier=request.tier, seed=request.seed)
+
+
+@app.post("/generate/preview")
+def generate_preview(request: GeneratePreviewRequest) -> JSONResponse:
+    """One sample case, run headless with --max-previews 1 (rendered
+    with overlays when an engine is present): the picture's URL and
+    the measured per-case cost."""
+    return _generate_call(generator.preview, request.spec, images=request.images,
+                          seed=request.seed, workers=request.workers)
+
+
+@app.get("/generate/preview/{preview_id}/{kind}/{camera_id}/{name}")
+def generate_preview_image(preview_id: str, kind: str, camera_id: str, name: str):
+    """The preview's picture (overlay or geometry preview), guarded like
+    the run image route."""
+    try:
+        path = generator.preview_image(preview_id, kind, camera_id, name)
+    except generate_module.GenerateRefusal as exc:
+        return JSONResponse(exc.payload, status_code=exc.status_code)
+    return FileResponse(path, media_type="image/png")
+
+
+@app.post("/generate/start")
+def generate_start(request: GenerateStartRequest) -> JSONResponse:
+    """Create the campaign (refused by name before a worker starts) and
+    run it in the background; returns its id and the expert command."""
+    return _generate_call(generator.start, request.prompt, answers=request.answers,
+                          images=request.images, fmt=request.format, seed=request.seed,
+                          workers=request.workers, tier=request.tier,
+                          plan_digest=request.plan_digest,
+                          disk_budget_bytes=request.disk_budget_bytes)
+
+
+@app.post("/generate/{campaign_id}/pause")
+def generate_pause(campaign_id: str) -> JSONResponse:
+    return _generate_call(generator.control, campaign_id, "pause")
+
+
+@app.post("/generate/{campaign_id}/resume")
+def generate_resume(campaign_id: str) -> JSONResponse:
+    return _generate_call(generator.control, campaign_id, "resume")
+
+
+@app.post("/generate/{campaign_id}/cancel")
+def generate_cancel(campaign_id: str) -> JSONResponse:
+    return _generate_call(generator.control, campaign_id, "cancel")
+
+
+@app.get("/generate/{campaign_id}")
+def generate_status(campaign_id: str) -> JSONResponse:
+    """Progress from the ledger in human terms (the polling fallback)."""
+    return _generate_call(generator.progress, campaign_id)
+
+
+@app.get("/generate/{campaign_id}/events")
+def generate_events(campaign_id: str, interval: float = 1.0,
+                    limit: Optional[int] = None):
+    """Server-sent events through StreamingResponse (no sse-starlette):
+    a ``progress`` event now and on every change, ``end`` on a terminal
+    state, ``idle`` when nothing will change until a resume."""
+    from fastapi.responses import StreamingResponse
+
+    try:
+        generator.open(campaign_id)
+    except generate_module.GenerateRefusal as exc:
+        return JSONResponse(exc.payload, status_code=exc.status_code)
+    stream = generator.events(campaign_id, interval=max(0.05, float(interval)), limit=limit)
+    return StreamingResponse(stream, media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no"})
+
+
+@app.get("/generate/{campaign_id}/frames")
+def generate_frames(campaign_id: str) -> JSONResponse:
+    """The gallery: each case's picture with overlays where pixels
+    were drawn, its draw and its verdict."""
+    return _generate_call(generator.frames, campaign_id)
+
+
+@app.get("/generate/{campaign_id}/frames/{case_id}/{kind}/{camera_id}/{name}")
+def generate_frame_image(campaign_id: str, case_id: str, kind: str, camera_id: str,
+                         name: str):
+    try:
+        path = generator.frame_image(campaign_id, case_id, kind, camera_id, name)
+    except generate_module.GenerateRefusal as exc:
+        return JSONResponse(exc.payload, status_code=exc.status_code)
+    return FileResponse(path, media_type="image/png")
+
+
+@app.get("/generate/{campaign_id}/download")
+def generate_download(campaign_id: str, format: Optional[str] = None):
+    """A zip of the export plus its card (the card records the format).
+    The export's own refusals stand, in words, as a 409."""
+    try:
+        result = generator.download(campaign_id, format)
+    except generate_module.GenerateRefusal as exc:
+        return JSONResponse(exc.payload, status_code=exc.status_code)
+    return FileResponse(result["archive"], media_type="application/zip",
+                        filename=result["filename"],
+                        headers={"X-Dataset-Format": result["format"],
+                                 "X-Dataset-Runs": str(result["runs"])})

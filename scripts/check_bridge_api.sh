@@ -14,7 +14,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.5}"
+UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.7}"
 PLUGIN="ue/Plugins/JSBSimFlightDynamicsModel"
 BRIDGE="ue/Plugins/FlightSimBridge"
 STATUS=0

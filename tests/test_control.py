@@ -321,3 +321,51 @@ def test_acceptance_reports_each_violated_criterion():
     failures = Acceptance(max_overshoot_pct=5.0, max_settling_time_s=5.0,
                           max_abs_sse=0.1).check(r)
     assert len(failures) >= 2
+
+
+# -- the derived airframe is written atomically and idempotently ---------
+
+def test_derive_never_rewrites_an_identical_file(tmp_path):
+    """Two captures at once derive the same airframe into one build
+    directory. The steady state must not touch the files (a reader in
+    the other process would see a truncated tecs.xml), so a second
+    derive of identical content leaves the inode and mtime alone."""
+    import os
+
+    from core.control.derive import derive
+
+    first = derive("c172p", build_dir=tmp_path)
+    tecs = first.xml_path.parent / "Systems" / "tecs.xml"
+    before = (os.stat(tecs).st_ino, os.stat(tecs).st_mtime_ns,
+              os.stat(first.xml_path).st_mtime_ns)
+    second = derive("c172p", build_dir=tmp_path)
+    assert second.xml_path == first.xml_path
+    after = (os.stat(tecs).st_ino, os.stat(tecs).st_mtime_ns,
+             os.stat(first.xml_path).st_mtime_ns)
+    assert after == before
+    assert not [p for p in tecs.parent.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_write_atomic_leaves_the_old_file_whole_when_the_write_dies(tmp_path, monkeypatch):
+    """The atomic write: a failure before the rename leaves the previous
+    complete file in place (never a partial one), and a completed write
+    replaces it whole."""
+    import os
+
+    from core.control import derive as module
+
+    target = tmp_path / "tecs.xml"
+    target.write_bytes(b"<old/>")
+    real_replace = os.replace
+
+    def dying_replace(src, dst):
+        raise OSError("disk went away")
+
+    monkeypatch.setattr(module.os, "replace", dying_replace)
+    with pytest.raises(OSError):
+        module._write_atomic(target, b"<new>partial")
+    assert target.read_bytes() == b"<old/>"
+    monkeypatch.setattr(module.os, "replace", real_replace)
+    assert module._write_atomic(target, b"<new/>") is True
+    assert target.read_bytes() == b"<new/>"
+    assert module._write_atomic(target, b"<new/>") is False

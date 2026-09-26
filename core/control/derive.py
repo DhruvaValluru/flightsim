@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -118,6 +119,32 @@ def _insert_system(xml_text: str) -> str:
     )
 
 
+def _write_atomic(path: Path, data: bytes) -> bool:
+    """Write ``data`` to ``path`` so that no reader ever sees a partial
+    file, and not at all when the file already holds exactly ``data``.
+
+    Every capture derives the same airframe into the same build
+    directory. Two captures running at once (a batch with workers > 1)
+    used to rewrite tecs.xml in place, and JSBSim in the other process
+    read it half-written: "XML parse error: no element found" on a file
+    that was correct a millisecond later. Writing to a temporary name
+    in the same directory and renaming over the target is atomic on
+    POSIX and on NTFS (os.replace), so a reader gets the old complete
+    file or the new complete file; and skipping an identical rewrite
+    means the steady state never touches the file at all. Returns
+    whether the file was written."""
+    path = Path(path)
+    try:
+        if path.is_file() and path.read_bytes() == data:
+            return False
+    except OSError:
+        pass
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+    return True
+
+
 def derive(
     base_aircraft: str,
     build_dir: Optional[Path] = None,
@@ -157,13 +184,13 @@ def derive(
     systems_dir.mkdir(parents=True, exist_ok=True)
 
     xml_path = aircraft_dir / f"{name}.xml"
-    xml_path.write_text(derived_text, encoding="utf-8")
-    (systems_dir / "tecs.xml").write_text(system_text, encoding="utf-8")
+    _write_atomic(xml_path, derived_text.encode("utf-8"))
+    _write_atomic(systems_dir / "tecs.xml", system_text.encode("utf-8"))
 
     # Aircraft-local files the stock model may reference by relative name.
     for sibling in base.xml_path.parent.iterdir():
         if sibling.is_file() and sibling != base.xml_path:
-            shutil.copy2(sibling, aircraft_dir / sibling.name)
+            _write_atomic(aircraft_dir / sibling.name, sibling.read_bytes())
 
     return DerivedAircraft(
         name=name,

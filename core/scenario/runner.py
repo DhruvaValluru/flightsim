@@ -8,9 +8,11 @@ Determinism
 -----------
 The output digest is a SHA-256 over the recorded telemetry. Nothing
 time-varying, path-dependent or wall-clock-dependent enters it, so two runs from
-the same spec produce the same digest -- which is what Gate 1 checks. There is
-no RNG anywhere in the current core; when Phase 3 introduces turbulence, its
-seed is already a spec field and will feed a per-subsystem generator (§7.4).
+the same spec produce the same digest -- which is what Gate 1 checks. Every
+stochastic subsystem -- Dryden turbulence, the gust front, Allen thermals and
+the randomisation block -- draws from a stream seeded from the spec
+(``spec.seed`` and the block's own seed; ``core/experiments/seeds.py``
+derives per-subsystem streams), never from global or wall-clock state (§7.4).
 """
 
 from __future__ import annotations

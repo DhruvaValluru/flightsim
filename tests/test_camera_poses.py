@@ -236,3 +236,157 @@ def test_quaternion_matches_euler():
     q = euler_to_quat(0.0, 0.0, 90.0)
     assert q[0] == pytest.approx(math.cos(math.radians(45.0)))
     assert q[3] == pytest.approx(math.sin(math.radians(45.0)))
+
+
+# -- what sample-rate independence actually covers -----------------------
+#
+# The phase asks for bit-identical solving "across sample-rate changes
+# that do not alter keyframe times". That holds for a KEYFRAMED solution,
+# which is a continuous function being sampled
+# (test_keyframes_agree_across_telemetry_rates above). It does NOT hold
+# for the lagged presets: alpha = 1 - exp(-dt/tau) driven by a moving
+# goal is a zero-order-hold discretisation, and a first-order lag
+# tracking a ramp trails by v*tau. Exact invariance is impossible in
+# principle -- the goal is only known at sample times -- so the honest
+# thing is to MEASURE the sensitivity and pin a bound, not to claim it
+# away.
+
+def _manoeuvring(dt, duration_s=20.0):
+    return make_columns(
+        duration_s=duration_s, dt=dt, speed_mps=140.0,
+        heading=lambda t: (10.0 * math.sin(t / 6.0)) % 360.0,
+        roll=lambda t: 15.0 * math.sin(t / 6.0),
+        altitude=lambda t: 3000.0 + 2.0 * t)
+
+
+# Bounds MEASURED on the track below with the exact first-order-hold
+# integrator (chase 0.0003 m / 0.0001 deg, wingman 0.0006 / 0.0002,
+# tower and cockpit exactly 0), then rounded up for headroom. Under the
+# previous zero-order-hold update the same track measured chase 3.294 m
+# / 0.032 deg and wingman 3.212 / 0.047: that was integrator error, and
+# it is gone; what remains is the aircraft track's own interpolation. The "ground" preset is deliberately absent: this
+# synthetic track flies due north from the origin and the ground
+# observer sits 1500 m due north of it, so the aircraft passes THROUGH
+# the camera and the look direction flips 180 degrees. That is geometry,
+# not rate sensitivity, and a bound there would be measuring the wrong
+# thing.
+@pytest.mark.parametrize("preset,bound_m,bound_deg", [
+    ("cockpit", 1e-9, 1e-9),      # body-fixed: no filter, exactly invariant
+    ("tower", 1e-9, 0.001),       # world-anchored: only the aim is lagged, exactly
+    ("chase", 0.01, 0.001),
+    ("wingman", 0.01, 0.001),
+])
+def test_lagged_presets_rate_sensitivity_is_bounded(preset, bound_m,
+                                                    bound_deg):
+    """Measured, not assumed. Halving the telemetry interval moves a
+    lagged camera by a bounded amount at shared sample times; an
+    unbounded move would mean the recorded geometry depended on how fast
+    the flight happened to be sampled."""
+    camera = CameraSpec.defaulted(camera_id="c", preset=preset,
+                                  aircraft="B747")
+    coarse = solve_pose_track(_manoeuvring(0.1), camera, FRAME)
+    fine = solve_pose_track(_manoeuvring(0.05), camera, FRAME)
+    fine_at = {t: i for i, t in enumerate(fine.t)}
+    worst_m = worst_deg = 0.0
+    for i, t in enumerate(coarse.t):
+        j = fine_at[t]
+        worst_m = max(worst_m, math.dist(
+            (coarse.north_m[i], coarse.east_m[i], coarse.alt_m[i]),
+            (fine.north_m[j], fine.east_m[j], fine.alt_m[j])))
+        worst_deg = max(worst_deg, abs(
+            (coarse.yaw_deg[i] - fine.yaw_deg[j] + 180.0) % 360.0 - 180.0))
+    assert worst_m <= bound_m, f"{preset}: {worst_m:.3f} m across rates"
+    assert worst_deg <= bound_deg, f"{preset}: {worst_deg:.3f} deg"
+
+
+def test_the_lagged_presets_are_rate_invariant_to_the_input_not_bit_identical():
+    """The complement of the bound, kept honest in both directions: the
+    lagged chase is NOT bit-identical across rates (the two rates sample
+    the aircraft track differently, so the goal the filter follows is
+    not the same signal) -- but the residual is the track's, not the
+    integrator's, and stays under a centimetre. A residual back above
+    that means someone reintroduced integrator error."""
+    camera = CameraSpec.defaulted(camera_id="c", preset="chase",
+                                  aircraft="B747")
+    coarse = solve_pose_track(_manoeuvring(0.1), camera, FRAME)
+    fine = solve_pose_track(_manoeuvring(0.05), camera, FRAME)
+    fine_at = {t: i for i, t in enumerate(fine.t)}
+    worst = max(
+        math.dist((coarse.north_m[i], coarse.east_m[i], coarse.alt_m[i]),
+                  (fine.north_m[j], fine.east_m[j], fine.alt_m[j]))
+        for i, t in enumerate(coarse.t) for j in [fine_at[t]])
+    assert 0.0 < worst < 0.01, worst
+
+
+def test_lag_step_is_the_exact_first_order_hold_solution():
+    """Against the closed form: a goal ramping at constant slope settles
+    to (goal - slope * tau), whatever the step size; and a step taken in
+    one interval equals the same step taken in two halves."""
+    from core.capture.poses import lag_step
+
+    tau, slope = 0.45, 140.0
+    y = 0.0
+    x_prev = 0.0
+    for _ in range(400):                 # 40 s at 0.1 s
+        x_now = x_prev + slope * 0.1
+        y = lag_step(y, x_prev, x_now, 0.1, tau)
+        x_prev = x_now
+    assert y == pytest.approx(x_prev - slope * tau, abs=1e-6)
+    one = lag_step(3.0, 10.0, 12.0, 0.2, tau)
+    two = lag_step(lag_step(3.0, 10.0, 11.0, 0.1, tau), 11.0, 12.0, 0.1, tau)
+    assert one == pytest.approx(two, abs=1e-12)
+    assert lag_step(3.0, 10.0, 12.0, 0.0, tau) == 3.0
+
+
+def test_geographic_placement_resolves_through_the_scene_projection():
+    """An explicit camera stated by latitude/longitude sits where the
+    scene frame projects that point, and a keyframed latitude moves it
+    along the projection -- the geographic half of package B."""
+    camera = CameraSpec.defaulted(camera_id="geo", preset="explicit")
+    camera.set("position_mode", "geographic", frm="stated")
+    camera.set("aim_mode", "bearing", frm="stated")
+    lat0, lon0 = FRAME.origin_lat_deg + 0.01, FRAME.origin_lon_deg + 0.02
+    camera.set("position_lat_deg", lat0, frm="stated")
+    camera.set("position_lon_deg", lon0, frm="stated")
+    camera.set("position_alt_m", 500.0, frm="stated")
+    columns = make_columns(duration_s=10.0, dt=0.1)
+    track = solve_pose_track(columns, camera, FRAME)
+    north, east = FRAME.to_local(lat0, lon0)
+    assert track.north_m[0] == pytest.approx(north, abs=1e-9)
+    assert track.east_m[0] == pytest.approx(east, abs=1e-9)
+    assert abs(north) > 100.0 and abs(east) > 100.0      # not the origin
+    camera.moves = [{"t_s": 0.0, "position_lat_deg": lat0},
+                    {"t_s": 10.0, "position_lat_deg": lat0 + 0.01}]
+    moved = solve_pose_track(columns, camera, FRAME)
+    i5 = columns["t"].index(5.0)
+    mid_north, _ = FRAME.to_local(lat0 + 0.005, lon0)
+    assert moved.north_m[i5] == pytest.approx(mid_north, abs=1e-6)
+
+
+def test_card_block_carries_a_stated_exposure_triple_as_numbers():
+    """Spec 8's cameras[].exposure reaches the pixels only through the
+    card: the commandlet's ApplyPhysicalExposure reads
+    cameras[N].exposure {aperture_f, shutter_s, iso} as plain numbers at
+    the block's top level. A defaulted exposure is omitted, so a card
+    written before spec 8 is byte-identical and the engine keeps its
+    documented bias path (Look lane, part 2, open item)."""
+    from core.capture.schedule import solve_schedule
+
+    columns = make_columns(duration_s=4.0)
+    plain = camera_for("chase")
+    plain.set("capture_count", 3, frm="test")
+    track = solve_pose_track(columns, plain, FRAME)
+    block = track.card_block(plain, solve_schedule(columns, plain, FRAME), FRAME)
+    assert "exposure" not in block
+    assert "exposure" not in block["spec"]
+
+    stated = camera_for("chase")
+    stated.set("capture_count", 3, frm="test")
+    stated.exposure.set("aperture_f", 2.8, frm="test: wide open")
+    stated.exposure.set("shutter_s", 1.0 / 1000.0, frm="test: fast")
+    track = solve_pose_track(columns, stated, FRAME)
+    block = track.card_block(stated, solve_schedule(columns, stated, FRAME), FRAME)
+    assert block["exposure"] == {"aperture_f": 2.8, "shutter_s": 0.001,
+                                 "iso": 100.0}
+    assert all(isinstance(v, float) for v in block["exposure"].values())
+    assert list(block)[-2:] == ["poses", "capture_times_s"]

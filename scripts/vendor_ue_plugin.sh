@@ -22,8 +22,10 @@
 #   2. It did not notice that the plugin's Build.cs stages that data through a
 #      Windows path literal. See the patch below.
 
-# The UE half is macOS-only for now: every render gotcha was measured on
-# Metal/macOS. Off-mac, refuse BY NAME with a pointer to the headless path.
+# This is the macOS/Linux shell wrapper. The maintained render platform is
+# WINDOWS (the .ps1 twin of this script); a Mac builds the same sources but
+# is not the tested path, and Linux has no engine half at all -- so off a
+# Mac this refuses BY NAME with a pointer to the headless path.
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "REFUSED ue.platform: rendered clips currently require macOS."
   echo "The compiler, headless physics, telemetry and the webapp run on"
@@ -36,6 +38,10 @@ cd "$(dirname "$0")/.."
 REPO="$PWD"
 
 JSBSIM_VERSION="v1.2.4"
+# The engine this vendoring targets (Phase 2 pin, brainstorm 9.8); recorded
+# in VENDORED.json, not linked by the native library. The patches below were
+# measured on 5.5 and must be re-checked on 5.7 (NEXT.md gotcha 32).
+UE_ENGINE_TARGET="5.7"
 UPSTREAM="https://github.com/JSBSim-Team/jsbsim.git"
 WORK="${TMPDIR:-/tmp}/flightsim-vendor"
 DEST="$REPO/ue/Plugins/JSBSimFlightDynamicsModel"
@@ -223,6 +229,7 @@ cat > "$DEST/VENDORED.json" <<EOF
   "built_with": "upstream $BUILD_SCRIPT (not a reimplementation)",
   "jsbsim_matches_headless_core": true,
   "ue_platform": "$UE_PLATFORM",
+  "ue_engine_target": "$UE_ENGINE_TARGET",
   "library": "Source/ThirdParty/JSBSim/Lib/$UE_PLATFORM/libJSBSim.$LIB_EXT",
   "library_sha256": "$LIB_SHA",
   "header_count": $HEADERS,
@@ -259,6 +266,7 @@ EOF
 echo
 echo "vendored             $DEST"
 echo "  tag                $JSBSIM_VERSION @ ${COMMIT:0:12}"
+echo "  engine target      UE $UE_ENGINE_TARGET (recorded; a 5.7 build is not measured by this script)"
 echo "  built with         upstream $BUILD_SCRIPT"
 echo "  library            libJSBSim.$LIB_EXT"
 [ "$UE_PLATFORM" = "Mac" ] && echo "  architectures      $(lipo -archs "$LIB" 2>/dev/null)"

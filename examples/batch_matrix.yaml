@@ -1,0 +1,19 @@
+# A batch: the multi-camera example flown at two altitudes, each at
+# two seeds, with the randomisation block on -- four runs, each
+# content-addressed by its spec digest, captured by flightsim.capture
+# and verified, with one ledger line per run. Resumable; failures are
+# recorded, not dropped. Then export the verified runs as a dataset:
+#   .venv/bin/python -m flightsim.batch examples/batch_matrix.yaml --out runs/batch/demo
+#   .venv/bin/python -m flightsim.export runs/batch/demo --out datasets/demo --format coco --labels-only
+# (--labels-only because a headless machine has no frames; on Windows
+# add "render: true" below and drop the flag.)
+base: cameras_multi.yaml
+design: factorial
+factors:
+  - field: altitude
+    levels: [1500, 3000]
+  - field: randomization.enabled
+    levels: [true]
+seeds: [1, 2]
+workers: 2
+capture: {card: true, max_previews: 0}

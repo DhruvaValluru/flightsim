@@ -57,6 +57,12 @@ def discovered_engine_mixture(spec: ScenarioSpec) -> float:
 
     def attempt(mixture: float):
         fdm = jsbsim.FGFDMExec(jsbsim.get_default_root_dir())
+        # Quiet, as core.fdm's own instance is: at the library's default
+        # level load_model prints the whole aircraft description (16 KB
+        # for the A320, measured in every campaign capture.log) -- the
+        # bytes that filled a 4 KB Windows pipe (flightsim/capture.py,
+        # quiet_library_banners).
+        fdm.set_debug_level(0)
         fdm.load_model(aircraft)
         fdm.set_dt(1.0 / float(spec.rate.value))
         # _IC_PRIORITY's safe order: position, attitude (beta before psi),
@@ -124,8 +130,13 @@ def write_run_card(spec: ScenarioSpec, path: Path,
                    turbulence_provider=None,
                    reference_speeds: Optional[Dict[str, object]] = None,
                    tornado: Optional[Dict[str, object]] = None,
+                   randomization: Optional[Dict[str, object]] = None,
                    scene_crs: Optional[str] = None,
                    cameras: Optional[Sequence[Dict[str, object]]] = None,
+                   landmarks: Optional[Sequence[Dict[str, object]]] = None,
+                   objects: Optional[Sequence[Dict[str, object]]] = None,
+                   taxonomy: Optional[Sequence[str]] = None,
+                   traffic: Optional[Sequence[Dict[str, object]]] = None,
                    ) -> Path:
     """Write the spec in the form the UE commandlet reads.
 
@@ -221,6 +232,14 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # which refuses (never extrapolates) a track that does not
         # cover the run.
         card["cameras"] = [dict(entry) for entry in cameras]
+    if landmarks:
+        # Camera Phase 2: the SAME known static world points the capture
+        # manifest records. The commandlet projects them through its own
+        # world-to-pixel helper and writes the pixels into render.json;
+        # the verifier projects them through the manifest and compares.
+        # Two implementations of one projection -- the only reprojection
+        # check in this system that is not the manifest talking to itself.
+        card["landmarks"] = [dict(entry) for entry in landmarks]
     if log_profile:
         card["log_profile"] = dict(log_profile)
     if thermals:
@@ -231,6 +250,33 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         card["orographic_follow_schedule"] = True
     if collision_terrain:
         card["collision_terrain"] = str(collision_terrain)
+    if randomization:
+        # Phase 10 (package 7): the sampled look the render is given
+        # (sun in both conventions, exposure, fog), the livery the host
+        # applies (refusing by name when the asset is absent), and each
+        # camera field the jitter moved. Computed in
+        # core/scenario/randomization.py; the host derives nothing.
+        card["randomization"] = dict(randomization)
+    if objects:
+        # Phase 2 (package B, contracts §2.3): the scene's labelled
+        # objects with their integer ids, composed ONCE in Python
+        # (core/capture/objects.py). The render host sets every labelled
+        # component's Custom Depth Stencil from this list and never
+        # invents an id; the ID image holds exactly these integers.
+        card["objects"] = [dict(entry) for entry in objects]
+    if taxonomy:
+        # The class list the class image is written against (class_id =
+        # position + 1, 0 = sky); the render.json "classes" sentence is
+        # generated from it.
+        card["taxonomy"] = [str(name) for name in taxonomy]
+    if traffic:
+        # Phase 2 (packages B + C, contracts §2.2): each scripted traffic
+        # aircraft with its solved position + attitude keyframes
+        # (core/capture/poses.py traffic_card_block), the mesh manifest
+        # to draw and where its CG sits in the actor frame. The host
+        # moves a static-mesh actor along the track with linear
+        # interpolation and refuses a track it cannot draw.
+        card["traffic"] = [dict(entry) for entry in traffic]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(card, indent=1), encoding="utf-8")
     return path

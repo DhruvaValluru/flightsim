@@ -36,6 +36,49 @@ struct FFlightSimControlInput
 	double Rudder = 0.0;
 };
 
+// Phase 2 (package B, contracts §2.3): one labelled object of the scene, as
+// composed in Python (core/capture/objects.py) and carried on the card's
+// objects[] list. The render host sets every labelled component's Custom
+// Depth Stencil to IntId and never invents an id of its own; the ID image
+// it writes holds exactly these integers.
+struct FFlightSimSceneObject
+{
+	FString Id;                 // "aircraft:B747:0", "terrain", ...
+	int32 IntId = 0;            // 1..255 (the primary airframe is always 1)
+	FString Class;              // taxonomy class name
+	int32 ClassId = 0;          // taxonomy position + 1 (0 is sky / nothing)
+	FString Role;               // primary | traffic | scene
+};
+
+// Phase 2 (packages B + C, contracts §2.2): a scripted traffic aircraft. Not
+// a second FDM: a static-mesh actor moved along a track SOLVED IN PYTHON
+// (core/capture/poses.py solve_traffic_track) and carried here as position
+// + attitude keyframes on the card's own sample clock, in the same block
+// shape as cameras[].poses. The host interpolates linearly and derives
+// nothing; the CG offset says where the airframe's CG sits in the actor
+// frame so the mesh actor is placed exactly as the FDM actor is (origin =
+// CG - R * cg).
+struct FFlightSimTrafficTrack
+{
+	FString Id;
+	int32 IntId = 0;
+	FString Aircraft;
+	FString Track;              // formation | crossing | overtaking
+	double RangeMetres = 0.0;
+	FString Livery = TEXT("default");
+	FString MeshManifestPath;   // empty when Python found no imported mesh
+	FVector CgActorCm = FVector::ZeroVector;
+	double OriginXMetres = 0.0;
+	double OriginYMetres = 0.0;
+	TArray<double> Times;
+	TArray<double> NorthMetres;
+	TArray<double> EastMetres;
+	TArray<double> AltMetres;
+	TArray<double> YawDegrees;  // true heading
+	TArray<double> PitchDegrees;
+	TArray<double> RollDegrees;
+};
+
 // One scenario, as much of a core.scenario.spec.ScenarioSpec as this host can
 // honour. Fields it cannot honour are not defaulted away: ReadCard refuses the
 // run instead (§2.7). A spec that asks for turbulence and gets still air is the
@@ -205,6 +248,19 @@ struct FFlightSimScenarioCard
 	// Phase 9: projected CRS for flat-scene position-coupled blocks
 	// (thermals / downburst / tornado); empty when terrain declares one.
 	FString SceneCrs;
+	// Phase 10 (package 7): the livery the randomisation block sampled,
+	// from card.randomization.livery. "default" (or absent) keeps the
+	// mesh's own materials; any other name must load as a material at
+	// <asset_path_root>/Liveries/<name> or the render refuses by name.
+	FString Livery = TEXT("default");
+	// Phase 2 (package B): the scene's labelled objects and class list,
+	// verbatim from the card (empty on a card written before objects[]
+	// existed; the render commandlet then labels with the Phase 10 ids and
+	// says so in render.json).
+	TArray<FFlightSimSceneObject> Objects;
+	TArray<FString> TaxonomyClasses;
+	// Phase 2 (packages B + C): the scripted traffic aircraft, in card order.
+	TArray<FFlightSimTrafficTrack> Traffic;
 };
 
 class FLIGHTSIMBRIDGE_API FFlightSimScenarioWorld
@@ -338,6 +394,20 @@ public:
 	AGeoReferencingSystem* GeoReferencing = nullptr;
 	AActor* Aircraft = nullptr;
 	UJSBSimMovementComponent* Movement = nullptr;
+	// Phase 2 (packages B + C): one bare actor per card traffic entry, in
+	// card order, placed on its track at every Step() (after the world
+	// tick, at the FDM's own sim time, so a frame captured after Step sees
+	// the primary, the traffic and the camera at one instant). The render
+	// commandlet hangs the mesh under it and sets its stencil; this class
+	// only moves it. Empty when the card carries no traffic.
+	TArray<AActor*> TrafficActors;
+
+	// Where each traffic actor's CG is at TimeSeconds, linearly interpolated
+	// between its keyframes (clamped to the track's ends outside them, logged
+	// once: the FDM ticks from t = 0 while the recorded track starts one
+	// sample in). Public so the commandlet can place the actors before the
+	// first capture.
+	void ApplyTrafficPoses(double TimeSeconds);
 
 private:
 	// Everything after world creation: georeferencing, ground, aircraft,
@@ -430,4 +500,9 @@ private:
 	// is deterministic and replay-identical.
 	AActor* TornadoFunnel = nullptr;
 	double TornadoOmegaDegPerSec = 0.0;
+
+	// Phase 2: the traffic tracks, copied from the card at Populate so
+	// Step() needs no card reference for them; parallel to TrafficActors.
+	TArray<FFlightSimTrafficTrack> TrafficTracks;
+	bool bTrafficClampWarned = false;
 };

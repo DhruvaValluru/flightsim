@@ -6,8 +6,10 @@
 # element of the integration -- the plugin's macOS support, the native library,
 # the bridge sources -- is in place. What is missing is a compiler version.
 
-# The UE half is macOS-only for now: every render gotcha was measured on
-# Metal/macOS. Off-mac, refuse BY NAME with a pointer to the headless path.
+# This is the macOS/Linux shell wrapper. The maintained render platform is
+# WINDOWS (the .ps1 twin of this script); a Mac builds the same sources but
+# is not the tested path, and Linux has no engine half at all -- so off a
+# Mac this refuses BY NAME with a pointer to the headless path.
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "REFUSED ue.platform: rendered clips currently require macOS."
   echo "The compiler, headless physics, telemetry and the webapp run on"
@@ -18,7 +20,7 @@ fi
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.5}"
+UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.7}"
 STATUS=0
 
 say() { printf '  %-34s %s\n' "$1" "$2"; }
@@ -87,7 +89,9 @@ if [ -x scripts/check_bridge_api.sh ]; then
 fi
 
 # -- the toolchain ----------------------------------------------------------
-# UE 5.5 accepts Xcode 15.2 through 16.9 and hard-refuses anything else; UBT
+# UE 5.5 (measured) accepted Xcode 15.2 through 16.9 and hard-refused anything else (the
+# range 5.7, the Phase 2 pin, accepts has NOT been checked on a Mac; UBT names
+# it itself if this range is wrong, and macOS is not the tested path); UBT
 # reports this itself as "Found Sdk Version=..., MaxRequired=16.9.0". macOS 26
 # ships Xcode 26, which is outside that range, so a second Xcode is needed.
 #
@@ -113,7 +117,7 @@ for candidate in "${DEVELOPER_DIR:-}" \
 done
 
 if [ -z "$USABLE" ]; then
-    fail "xcode (build toolchain)" "no Xcode in UE 5.5's supported range 15.2-16.9"
+    fail "xcode (build toolchain)" "no Xcode in the 15.2-16.9 range measured for UE 5.5 (5.7's range unchecked)"
     cat <<'EOF'
 
   Install Xcode 16.x alongside the system one -- it does not need to become the

@@ -55,11 +55,18 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..environment.surface import SURFACE_CLASSES
-from ..scenario.camera import CAMERA_PRESETS, CameraSpec
+from ..scenario.blocks import MAX_TRAFFIC, TRAFFIC_TRACKS, TrafficSpec
+from ..scenario.camera import (CAMERA_PRESETS, CameraSpec,
+                               plan_full_capture)
 from ..scenario.fields import Quantity, Source
+from ..scenario.randomization import (
+    HOUR_WINDOWS, LOCATION_RANGES, POLICY_CAMERA_LEAVES, POLICY_LEAVES,
+    enable_for_policy,
+)
 from ..scenario.spec import ScenarioSpec
 from ..terrain.glo30 import LOCATIONS
-from .compiler import TURBULENCE_STD, TURBULENCE_WORDS, compile_prompt, _name_from
+from .compiler import (RANDOMIZATION_FAMILIES, TURBULENCE_STD, TURBULENCE_WORDS,
+                       apply_randomization_phrases, compile_prompt, _name_from)
 
 #: The model the compiler asks for. Recorded verbatim in the result so the
 #: manifest can say which model produced the spec.
@@ -159,8 +166,27 @@ class LLMCompileError(Exception):
     Raised for transport failures, refusals, malformed JSON, unknown fields,
     out-of-vocabulary values and wrong types. The message is user-facing:
     the web app renders it as the outcome of /compile rather than guessing
-    at a repair.
+    at a repair -- so it is a plain sentence, never an exception's repr.
+    ``constraint`` is the catalogue name when the failure has its own
+    (``compile.unreachable``: the call never reached a model); the
+    sentence-named ones (``compile.rejected``, ``compile.unavailable``)
+    leave it None. ``details`` carries the technical text (the transport
+    error's class and message) for a log or a disclosure, never for the
+    default path.
     """
+
+    def __init__(self, message: str, constraint: Optional[str] = None,
+                 details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message)
+        self.message = message
+        self.constraint = constraint
+        self.details = dict(details or {})
+
+
+#: The sentence a transport failure shows: what happened and what the
+#: person can do, with nothing of the exception in it.
+UNREACHABLE_SENTENCE = ("the language model could not be reached; the "
+                        "offline compiler is available meanwhile")
 
 
 @dataclass(frozen=True)
@@ -277,6 +303,112 @@ assert not _unknown_camera, (
     f"llm_compiler camera schema names non-camera fields: "
     f"{_unknown_camera}")
 
+#: Spec 8 (contracts §2.2): the traffic fields the model may write --
+#: the airframe (the one field with no default), the track and the
+#: range; the livery stays with YAML. Bounded by MAX_TRAFFIC entries.
+TRAFFIC_FIELD_VALUE_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "aircraft": {"type": "string", "enum": list(AIRCRAFT_MODELS)},
+    "track": {"type": "string", "enum": list(TRAFFIC_TRACKS)},
+    "range_m": {"type": "number",
+                "description": "metres from the primary aircraft"},
+}
+_unknown_traffic = set(TRAFFIC_FIELD_VALUE_SCHEMAS) - set(TrafficSpec.FIELD_ORDER)
+assert not _unknown_traffic, (
+    f"llm_compiler traffic schema names non-traffic fields: "
+    f"{_unknown_traffic}")
+
+#: Spec 8 (contracts §5.3): the policy leaves the model may write, a
+#: deliberately hand-listed subset of the sampler's POLICY_LEAVES (the
+#: livery and wind-direction leaves stay with YAML), each value the
+#: distribution leaf itself in the documented forms. Bounded: the
+#: schema per leaf admits only that leaf's forms and vocabulary.
+LLM_RANDOMIZATION_LEAVES: Tuple[str, ...] = (
+    "location", "weather_date", "hour_local", "visibility_km", "cloud_cover",
+    "precipitation", "wind_speed_kt", "turbulence", "surface", "aircraft",
+    "traffic_count",
+)
+LLM_RANDOMIZATION_CAMERA_LEAVES: Tuple[str, ...] = (
+    "preset", "focal_length_mm", "offset_jitter_m",
+)
+# The same generated-not-hand-copied discipline as the camera schema:
+# a leaf listed here that the sampler does not know fails at import.
+_unknown_policy = set(LLM_RANDOMIZATION_LEAVES) - set(POLICY_LEAVES)
+assert not _unknown_policy, (
+    f"llm_compiler randomization schema names leaves the sampler lacks: "
+    f"{_unknown_policy}")
+_unknown_policy_camera = (set(LLM_RANDOMIZATION_CAMERA_LEAVES)
+                          - set(POLICY_CAMERA_LEAVES))
+assert not _unknown_policy_camera, (
+    f"llm_compiler randomization camera schema names leaves the sampler "
+    f"lacks: {_unknown_policy_camera}")
+
+_NUMBER_PAIR = {"type": "array", "items": {"type": "number"},
+                "minItems": 2, "maxItems": 2}
+_FORM_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "choice": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "uniform": _NUMBER_PAIR, "loguniform": _NUMBER_PAIR, "beta": _NUMBER_PAIR,
+    "normal": {"type": "object", "additionalProperties": False,
+               "required": ["sigma"],
+               "properties": {"mean": {"type": "number"},
+                              "sigma": {"type": "number"}}},
+    "lognormal": {"type": "object", "additionalProperties": False,
+                  "required": ["median", "sigma"],
+                  "properties": {"median": {"type": "number"},
+                                 "sigma": {"type": "number"}}},
+    "weibull": {"type": "object", "additionalProperties": False,
+                "required": ["k", "lambda"],
+                "properties": {"k": {"type": "number"},
+                               "lambda": {"type": "number"}}},
+    "poisson": {"type": "number"},
+    "uniform_dates": {"type": "array", "items": {"type": "string"},
+                      "minItems": 2, "maxItems": 2,
+                      "description": "[\"YYYY-MM-DD\", \"YYYY-MM-DD\"]"},
+}
+
+
+def _leaf_value_schema(entry: Dict[str, Any], name: str) -> Dict[str, Any]:
+    """One policy leaf's value: an object naming exactly one of the
+    leaf's admitted distribution forms, plus its modifiers."""
+    properties: Dict[str, Any] = {}
+    for form in entry["forms"]:
+        schema = json.loads(json.dumps(_FORM_SCHEMAS[form]))
+        if form == "choice":
+            words = entry.get("words")
+            if name == "location":
+                words = tuple(LOCATIONS) + tuple(LOCATION_RANGES)
+            if words:
+                schema["items"] = {"type": "string", "enum": list(words)}
+        properties[form] = schema
+    if "choice" in entry["forms"]:
+        properties["weights"] = {"type": "array", "items": {"type": "number"},
+                                 "minItems": 1}
+    if entry["kind"] in ("number", "integer"):
+        properties["clip"] = _NUMBER_PAIR
+    if "poisson" in entry["forms"]:
+        properties["max"] = {"type": "number"}
+    properties["gated_by"] = {"type": "string",
+                              "description": "'<leaf> <op> <value>' over a "
+                                             "leaf drawn before this one"}
+    unit = entry.get("unit")
+    return {"type": "object", "additionalProperties": False,
+            "properties": properties,
+            "description": f"distribution over {name}"
+                           + (f" ({unit})" if unit else "")
+                           + f"; exactly one of {list(entry['forms'])}"}
+
+
+RANDOMIZATION_FIELD_VALUE_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    name: _leaf_value_schema(POLICY_LEAVES[name], name)
+    for name in LLM_RANDOMIZATION_LEAVES
+}
+RANDOMIZATION_CAMERA_VALUE_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    name: _leaf_value_schema(POLICY_CAMERA_LEAVES[name], name)
+    for name in LLM_RANDOMIZATION_CAMERA_LEAVES
+}
+#: The group key of the randomization block (its value is a mapping of
+#: camera leaves, applied to every camera).
+RANDOMIZATION_GROUP = "cameras"
+
 #: Canonical unit per numeric field -- a redundant "unit" key in a model
 #: response is tolerated ONLY when it states exactly this.
 CANONICAL_UNITS: Dict[str, str] = {
@@ -340,6 +472,38 @@ RESPONSE_SCHEMA: Dict[str, Any] = {
                 },
             },
         },
+        "randomization": {
+            "type": "object",
+            "additionalProperties": False,
+            "description": "The variation the prompt asks for, one entry "
+                           "per policy leaf; {} when nothing is to vary.",
+            "properties": {
+                **{name: _field_schema(value_schema)
+                   for name, value_schema
+                   in RANDOMIZATION_FIELD_VALUE_SCHEMAS.items()},
+                RANDOMIZATION_GROUP: _field_schema({
+                    "type": "object", "additionalProperties": False,
+                    "description": "camera leaves, applied to every camera",
+                    "properties": dict(RANDOMIZATION_CAMERA_VALUE_SCHEMAS),
+                }),
+            },
+        },
+        "traffic": {
+            "type": "array",
+            "maxItems": MAX_TRAFFIC,
+            "description": "Other aircraft the prompt asks to fly beside "
+                           "the primary; [] when it names none.",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["aircraft"],
+                "properties": {
+                    name: _field_schema(value_schema)
+                    for name, value_schema
+                    in TRAFFIC_FIELD_VALUE_SCHEMAS.items()
+                },
+            },
+        },
     },
 }
 
@@ -378,6 +542,69 @@ def _locations_block() -> str:
     return "\n".join(lines)
 
 
+def _randomization_block() -> str:
+    """The randomisation paragraph, generated from the deterministic
+    compiler's RANDOMIZATION_FAMILIES (the control) and the sampler's
+    ranges -- never hand-copied."""
+    lines = ['Randomisation ("randomization" is a top-level object beside '
+             '"fields"; {} when the prompt asks for NOTHING to vary):',
+             '- A prompt that asks to VARY something writes one entry per '
+             'policy leaf, {"value": <distribution leaf>, "source", "from"}, '
+             'the value being the leaf itself in one of its documented '
+             'forms. The documented phrases and the leaves they mean (the '
+             'deterministic vocabulary; write these EXACT leaves for these '
+             'phrases):']
+    phrases = {"weather": "varied weather", "times_of_day": "different times "
+               "of day", "dawn_dusk": "dawn and dusk only",
+               "lighting": "varied lighting", "traffic": "mixed traffic",
+               "viewpoints": "random viewpoints"}
+    for family, leaves in RANDOMIZATION_FAMILIES.items():
+        lines.append(f'  "{phrases[family]}" -> {json.dumps(leaves)}')
+    ranges = ", ".join(sorted(LOCATION_RANGES))
+    lines.append('  "across the Rockies" / "over the Alps" -> {"location": '
+                 '{"choice": ["rockies"]}} -- range names: ' + ranges + '; '
+                 'bake names: ' + ", ".join(LOCATIONS) + '. A range with no '
+                 'bake is refused BY NAME downstream; write it anyway.')
+    lines.append('- hour_local is local mean time; its choice form names '
+                 'windows: ' + ", ".join(f"{k} {v[0]:g}-{v[1]:g} h"
+                                         for k, v in HOUR_WINDOWS.items()) + '.')
+    lines.append('- A leaf is written ONLY for something the prompt asks to '
+                 'vary; a fixed value ("at dawn", "in rain") is a "fields" '
+                 'entry or a note, never a leaf. Never vary a field the '
+                 'prompt states.')
+    lines.append('- A variation the leaves cannot express ("vary the moon '
+                 'phase") goes to "notes" verbatim; the deterministic '
+                 'vocabulary refuses it by name.')
+    return "\n".join(lines)
+
+
+#: The response's top-level keys, in the schema's own order. The system
+#: prompt's shape sentence is GENERATED from this so the two cannot
+#: drift: the prompt said "three keys" for a whole phase after
+#: "cameras" became the fourth (Phase 1 initial run report).
+RESPONSE_TOP_LEVEL_KEYS: Tuple[str, ...] = tuple(RESPONSE_SCHEMA["properties"])
+_COUNT_WORDS = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six",
+                7: "seven", 8: "eight", 9: "nine"}
+
+
+def response_shape_sentence(keys: Tuple[str, ...] = RESPONSE_TOP_LEVEL_KEYS) -> str:
+    """The one sentence in the system prompt that states the top-level
+    shape, written from the schema's key list."""
+    quoted = ", ".join(f'"{k}"' for k in keys)
+    count = _COUNT_WORDS.get(len(keys), str(len(keys)))
+    others = [k for k in keys if k != "fields"]
+    others_quoted = (", ".join(f'"{k}"' for k in others[:-1])
+                     + f' and "{others[-1]}"')
+    example = ", ".join(
+        '"fields": {"<field name>": {"value": ..., "source": "...", '
+        '"from": "..."}, ...}' if k == "fields" else f'"{k}": [...]'
+        for k in keys)
+    return (f"Respond with EXACTLY this top-level shape -- {count} keys "
+            f"({quoted}), no others:\n{{{example}}}\n{others_quoted} are "
+            f'TOP-LEVEL keys beside "fields", never inside\n"fields"; '
+            f'"fields" contains ONLY schema field names.')
+
+
 SYSTEM_PROMPT = """\
 You are the scene DIRECTOR for a flight-simulation compiler. Turn the
 prompt into a COHERENT scene: fill every field the prompt justifies --
@@ -387,11 +614,7 @@ each other and with what the prompt evokes. Every value you write
 declares how it was chosen; a guess you do not declare is the one
 failure this protocol cannot forgive.
 
-Respond with EXACTLY this top-level shape -- three keys, no others:
-{"fields": {"<field name>": {"value": ..., "source": "...", "from": "..."},
- ...}, "notes": [...], "questions": [...]}
-"notes" and "questions" are TOP-LEVEL keys beside "fields", never inside
-"fields"; "fields" contains ONLY schema field names. Each field object
+__RESPONSE_SHAPE__ Each field object
 carries EXACTLY value/source/from -- no "unit", no extra keys. "from" is
 ONLY the quoted prompt phrase, no commentary around it. A value is never
 null, and a field is never written just to state absence ("none",
@@ -477,6 +700,21 @@ prompt has no camera or capture language):
   with no camera language at all gets no camera and no question: the
   documented default view applies.
 
+Traffic ("traffic" is a top-level list beside "fields"; [] when the
+prompt names no second aircraft):
+- "with an A320 crossing 400 m ahead", "a 737 in formation", "a
+  Cessna overtaking" -> one entry per other aircraft, at most two,
+  each carrying provenanced fields exactly like "fields": aircraft
+  (REQUIRED, the airframe named), track (formation | crossing |
+  overtaking, when the prompt says how it flies), range_m (metres
+  from the primary, when stated). Nothing else; livery and geometry
+  are not yours to invent. The PRIMARY aircraft stays in "fields".
+- A second aircraft named without a track is still a traffic entry
+  (the documented default track applies); a formation or a crowd the
+  list cannot hold ("a squadron", "busy airspace") goes to "notes".
+
+""" + _randomization_block() + """
+
 """ + _locations_block() + """
 
 Geography rules:
@@ -536,6 +774,15 @@ Clarifying questions:
   (exact listed coordinates).
 """
 
+SYSTEM_PROMPT = SYSTEM_PROMPT.replace("__RESPONSE_SHAPE__",
+                                      response_shape_sentence())
+assert "__RESPONSE_SHAPE__" not in SYSTEM_PROMPT
+for _key in RESPONSE_TOP_LEVEL_KEYS:
+    assert f'"{_key}"' in SYSTEM_PROMPT, (
+        f"the system prompt never names top-level key {_key!r}")
+assert f"{_COUNT_WORDS[len(RESPONSE_TOP_LEVEL_KEYS)]} keys" in SYSTEM_PROMPT
+del _key
+
 
 # -- parsing: strict, loud, never patched ---------------------------------
 
@@ -574,15 +821,35 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
     # language) -- the same OpenAI-compat tolerance the two list keys
     # above get; every per-entry rail below stays fully strict.
     payload.setdefault("cameras", [])
-    if set(payload) != {"fields", "notes", "questions", "cameras"}:
+    # Spec 8: an absent randomization block claims what {} does, and an
+    # absent traffic list what [] does.
+    payload.setdefault("randomization", {})
+    payload.setdefault("traffic", [])
+    if set(payload) != set(RESPONSE_TOP_LEVEL_KEYS):
         raise _fail(f"top-level keys {sorted(payload)} != "
-                    f"['cameras', 'fields', 'notes', 'questions']")
+                    f"{sorted(RESPONSE_TOP_LEVEL_KEYS)}")
     fields, notes = payload["fields"], payload["notes"]
     if not isinstance(fields, dict):
         raise _fail("'fields' is not an object")
     if not (isinstance(notes, list)
             and all(isinstance(n, str) for n in notes)):
         raise _fail("'notes' is not a list of strings")
+    # A model that nests the camera list one level down, under "fields",
+    # has said something unambiguous in the wrong place (measured on the
+    # keyless tier: the whole response was refused as "unknown field
+    # 'cameras'" and the page fell back to the regex compiler). A LIST
+    # of camera mappings there is lifted to where the schema puts it,
+    # recorded in the notes; anything else under that name still
+    # refuses as the unknown field it is, and every per-camera rail
+    # below stays as strict as before.
+    nested = fields.get("cameras")
+    if isinstance(nested, dict) and isinstance(nested.get("value"), list):
+        nested = nested["value"]
+    if isinstance(nested, list) and not payload["cameras"]:
+        fields.pop("cameras")
+        payload["cameras"] = nested
+        notes.append("the model nested 'cameras' under 'fields'; lifted to "
+                     "the top-level camera list (schema position)")
 
     questions = payload["questions"]
     if not isinstance(questions, list):
@@ -751,6 +1018,118 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
                 raise _fail(f"camera {index} field {name!r} value "
                             f"{value!r} is outside the vocabulary "
                             f"{value_schema['enum']}")
+
+    # -- randomization (spec 8): every rail strict, shape by name ------
+    randomization = payload["randomization"]
+    if not isinstance(randomization, dict):
+        raise _fail("'randomization' is not an object of policy leaves")
+    from ..scenario.validate import policy_problems
+
+    for name in [n for n, e in list(randomization.items())
+                 if isinstance(e, dict) and e.get("value") is None]:
+        del randomization[name]
+    for name, entry in randomization.items():
+        if name not in RANDOMIZATION_FIELD_VALUE_SCHEMAS \
+                and name != RANDOMIZATION_GROUP:
+            raise _fail(f"randomization: unknown policy leaf {name!r}; the "
+                        f"leaves are {sorted(RANDOMIZATION_FIELD_VALUE_SCHEMAS)}"
+                        f" and the group {RANDOMIZATION_GROUP!r}")
+        if not isinstance(entry, dict) \
+                or set(entry) != {"value", "source", "from"}:
+            raise _fail(f"randomization leaf {name!r} must carry exactly "
+                        f"value/source/from")
+        if entry["source"] not in ("user", "inferred", "model"):
+            raise _fail(f"randomization leaf {name!r} claims source "
+                        f"{entry['source']!r}; only 'user', 'inferred' or "
+                        f"'model' may be claimed")
+        if not (isinstance(entry["from"], str) and entry["from"].strip()):
+            raise _fail(f"randomization leaf {name!r} has no provenance "
+                        f"phrase; a variation must quote the phrase that "
+                        f"asked for it")
+        value = entry["value"]
+        if not isinstance(value, dict) or not value:
+            raise _fail(f"randomization leaf {name!r} value must be a "
+                        f"distribution mapping")
+        if name == RANDOMIZATION_GROUP:
+            unknown = set(value) - set(RANDOMIZATION_CAMERA_VALUE_SCHEMAS)
+            if unknown:
+                raise _fail(f"the randomization block's cameras group names "
+                            f"unknown camera leaves {sorted(unknown)}; the "
+                            f"leaves are "
+                            f"{sorted(RANDOMIZATION_CAMERA_VALUE_SCHEMAS)}")
+            for sub, sub_leaf in value.items():
+                allowed = RANDOMIZATION_CAMERA_VALUE_SCHEMAS[sub]["properties"] \
+                    .get("choice", {}).get("items", {}).get("enum")
+                if allowed is not None and isinstance(sub_leaf, dict) \
+                        and isinstance(sub_leaf.get("choice"), list):
+                    outside = [v for v in sub_leaf["choice"] if v not in allowed]
+                    if outside:
+                        raise _fail(f"randomization camera leaf {sub!r} choice "
+                                    f"{outside} is outside the vocabulary "
+                                    f"{allowed}")
+        else:
+            forms = [f for f in POLICY_LEAVES[name]["forms"] if f in value]
+            if len(forms) != 1:
+                raise _fail(f"randomization leaf {name!r} must name exactly "
+                            f"one of {list(POLICY_LEAVES[name]['forms'])}")
+            allowed = RANDOMIZATION_FIELD_VALUE_SCHEMAS[name]["properties"] \
+                .get("choice", {}).get("items", {}).get("enum")
+            if allowed is not None and isinstance(value.get("choice"), list):
+                outside = [v for v in value["choice"] if v not in allowed]
+                if outside:
+                    raise _fail(f"randomization leaf {name!r} choice "
+                                f"{outside} is outside the vocabulary "
+                                f"{allowed}")
+        problems = policy_problems({name: value})
+        if problems:
+            raise _fail("randomization leaf of an undocumented form: "
+                        + "; ".join(problems))
+
+    # -- traffic (spec 8, contracts §2.2): the same rails as a camera --
+    traffic = payload["traffic"]
+    if not isinstance(traffic, list):
+        raise _fail("'traffic' is not a list")
+    if len(traffic) > MAX_TRAFFIC:
+        raise _fail(f"{len(traffic)} traffic aircraft exceed the cap of "
+                    f"{MAX_TRAFFIC}")
+    for index, block in enumerate(traffic):
+        if not isinstance(block, dict) or not block:
+            raise _fail(f"traffic {index} must be an object of traffic "
+                        f"fields")
+        for name in [n for n, e in block.items()
+                     if isinstance(e, dict) and e.get("value") is None]:
+            del block[name]
+        if "aircraft" not in block:
+            raise _fail(f"traffic {index} names no aircraft; the airframe "
+                        f"is the one traffic field with no default")
+        for name, entry in block.items():
+            if name not in TRAFFIC_FIELD_VALUE_SCHEMAS:
+                raise _fail(f"traffic {index}: unknown traffic field "
+                            f"{name!r}")
+            if not isinstance(entry, dict) \
+                    or set(entry) != {"value", "source", "from"}:
+                raise _fail(f"traffic {index} field {name!r} must carry "
+                            f"exactly value/source/from")
+            if entry["source"] not in ("user", "inferred", "model"):
+                raise _fail(f"traffic {index} field {name!r} claims source "
+                            f"{entry['source']!r}; only 'user', "
+                            f"'inferred' or 'model' may be claimed")
+            if not (isinstance(entry["from"], str)
+                    and entry["from"].strip()):
+                raise _fail(f"traffic {index} field {name!r} has no "
+                            f"provenance phrase")
+            value_schema = TRAFFIC_FIELD_VALUE_SCHEMAS[name]
+            value = entry["value"]
+            if value_schema["type"] == "number":
+                if isinstance(value, bool) \
+                        or not isinstance(value, (int, float)):
+                    raise _fail(f"traffic {index} field {name!r} value "
+                                f"{value!r} is not a number")
+            elif "enum" in value_schema \
+                    and value not in value_schema["enum"]:
+                raise _fail(f"traffic {index} field {name!r} value "
+                            f"{value!r} is outside the vocabulary "
+                            f"{value_schema['enum']}")
     return payload
 
 
@@ -863,8 +1242,13 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
         )
     except LLMCompileError:
         raise
-    except Exception as exc:   # transport/API errors, shown not swallowed
-        raise _fail(f"API call failed ({type(exc).__name__}: {exc})") from exc
+    except Exception as exc:   # transport/API errors: named, never swallowed
+        # The call never reached a model, so nothing was "rejected": the
+        # sentence says what happened in words, and the exception's
+        # class and text ride in details for a log, not the page.
+        raise LLMCompileError(
+            UNREACHABLE_SENTENCE, constraint="compile.unreachable",
+            details={"error": f"{type(exc).__name__}: {exc}"}) from exc
 
     if getattr(response, "stop_reason", None) == "refusal":
         raise _fail("the model declined the request (stop_reason=refusal)")
@@ -909,7 +1293,62 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
                 source={"user": Source.USER, "inferred": Source.INFERRED,
                         "model": Source.MODEL}[entry["source"]],
                 frm=entry["from"].strip()))
+        # Same rule as the regex compiler and the page's picker: a view
+        # the model named without a count is the whole clip from that
+        # view. A count or a trigger the model DID state is a stated
+        # field and is left exactly as it is.
+        plan_full_capture(camera, frm="a view named in the prompt with "
+                                      "no count captures the whole clip")
         spec.cameras.append(camera)
+
+    # Spec 8 (contracts §2.2): every traffic aircraft the model named,
+    # the documented defaults under the fields it did not state.
+    for block in payload["traffic"]:
+        aircraft_entry = block["aircraft"]
+        entry = TrafficSpec.defaulted(str(aircraft_entry["value"]))
+        for name, field_entry in block.items():
+            current = getattr(entry, name)
+            value = field_entry["value"]
+            if TRAFFIC_FIELD_VALUE_SCHEMAS[name]["type"] == "number":
+                value = float(value)
+            setattr(entry, name, Quantity(
+                value=value, unit=current.unit,
+                source={"user": Source.USER, "inferred": Source.INFERRED,
+                        "model": Source.MODEL}[field_entry["source"]],
+                frm=field_entry["from"].strip()))
+        spec.traffic.append(entry)
+
+    # Spec 8: the policy the model wrote, one provenanced Quantity whose
+    # value is the leaf mapping, attributed per leaf; the block switches
+    # on. An EMPTY block falls back to the deterministic vocabulary --
+    # the control -- which maps the documented phrases and records an
+    # unmapped variation for the sampler to refuse by name.
+    randomization = payload["randomization"]
+    if randomization:
+        policy = {name: entry["value"] for name, entry in randomization.items()}
+        attribution = {name: entry["from"].strip()
+                       for name, entry in randomization.items()}
+        sources = {name: entry["source"] for name, entry in randomization.items()}
+        best = ("user" if "user" in sources.values() else
+                "inferred" if "inferred" in sources.values() else "model")
+        phrases = list(dict.fromkeys(attribution.values()))
+        spec.randomization_policy = Quantity(
+            value=policy, source=Source(best), frm="; ".join(phrases),
+            detail={"attribution": attribution, "sources": sources})
+        enable_for_policy(spec, frm=f"{phrases[0]}: the randomisation block "
+                                    f"is on")
+        if RANDOMIZATION_GROUP in policy and not spec.cameras:
+            camera = CameraSpec.defaulted(
+                camera_id="camera0", preset="chase",
+                aircraft=str(spec.aircraft.value),
+                terrain_elevation_m=float(spec.terrain_elevation.value),
+                frm=f"{attribution[RANDOMIZATION_GROUP]!r}: one documented "
+                    f"default camera for the viewpoint policy to vary")
+            plan_full_capture(camera, frm="a viewpoint policy with no count "
+                                          "captures the whole clip")
+            spec.cameras.append(camera)
+    else:
+        apply_randomization_phrases(spec, prompt)
 
     # The event AIM rides in the quantity's detail (digest-relevant: it
     # decides whether the vortex axis sits ON the track or 2.5 core radii

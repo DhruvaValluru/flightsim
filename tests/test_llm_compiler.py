@@ -223,12 +223,34 @@ def test_refusal_stop_reason_is_an_error():
 
 
 def test_api_failure_is_reported_not_swallowed():
+    """A transport failure is named (compile.unreachable) and told in
+    a plain sentence; the exception's class and text ride in details,
+    never in what the page shows (measured on the guided page: the
+    default tier's note read 'API call failed (URLError: <urlopen
+    error Tunnel connection failed: 403 Forbidden>)' and said
+    'rejected' for a call that never reached a model)."""
+    from core.messages import name_of
+
     def create(**kwargs):
-        raise ConnectionError("network unreachable")
+        raise ConnectionError("Tunnel connection failed: 403 Forbidden")
 
     client = SimpleNamespace(messages=SimpleNamespace(create=create))
-    with pytest.raises(LLMCompileError, match="API call failed"):
+    with pytest.raises(LLMCompileError) as err:
         compile_prompt_llm("anything", client=client)
+    message = str(err.value)
+    assert message == ("the language model could not be reached; the "
+                       "offline compiler is available meanwhile")
+    assert "rejected" not in message
+    assert "Error" not in message and "403" not in message
+    assert err.value.constraint == "compile.unreachable"
+    assert name_of(err.value) == "compile.unreachable"
+    assert err.value.details == {
+        "error": "ConnectionError: Tunnel connection failed: 403 Forbidden"}
+    # A response the model DID give still says so, by the old name.
+    with pytest.raises(LLMCompileError) as rejected:
+        compile_prompt_llm("anything", client=fake_client("not json"))
+    assert rejected.value.constraint is None
+    assert name_of(rejected.value) == "compile.rejected"
 
 
 # -- schema consistency ----------------------------------------------------
@@ -844,3 +866,329 @@ def test_camera_schema_is_generated_from_cameraspec():
     assert set(CAMERA_FIELD_VALUE_SCHEMAS) <= set(CameraSpec.FIELD_ORDER)
     assert RESPONSE_SCHEMA["properties"]["cameras"]["items"][
         "additionalProperties"] is False
+
+
+def test_a_model_named_view_with_no_count_captures_the_whole_clip():
+    """Same rule as the regex compiler and the page's picker.
+
+    A camera the model named without a number used to keep the
+    `interval` default -- one frame a second, so three stills on a
+    three-second clip. It now plans `continuous`: every recorded
+    sample, ten a second, for as long as the clip lasts.
+    """
+    client = fake_client({
+        "fields": {}, "notes": [], "questions": [],
+        "cameras": [{"preset": entry("tower", "inferred",
+                                     "from the tower")}],
+    })
+    camera = compile_prompt_llm("from the tower",
+                                client=client).spec.cameras[0]
+    assert str(camera.trigger.value) == "continuous"
+    assert str(camera.trigger.source) == "derived"
+
+
+def test_a_model_stated_count_keeps_its_exact_contract():
+    """`continuous` cannot honour a count, so a counted camera keeps
+    the interval trigger rather than becoming a schedule refusal."""
+    from core.capture.schedule import solve_schedule
+
+    client = fake_client({
+        "fields": {}, "notes": [], "questions": [],
+        "cameras": [{"capture_count": entry(50, "user", "50 images")}],
+    })
+    camera = compile_prompt_llm("50 images",
+                                client=client).spec.cameras[0]
+    assert str(camera.trigger.value) == "interval"
+    columns = {"t": [round(i * 0.1, 1) for i in range(221)]}
+    assert len(solve_schedule(columns, camera)) == 50
+
+
+def test_a_model_stated_period_is_never_replanned_away():
+    """The rate is the other way of asking for an interval capture.
+
+    `trigger` is not in the LLM's camera vocabulary, so the model can
+    only ask for an interval capture by its COUNT or its PERIOD.
+    `continuous` ignores period_s entirely, so planning it over a
+    stated one would drop the request without a word.
+    """
+    from core.capture.schedule import solve_schedule
+
+    client = fake_client({
+        "fields": {}, "notes": [], "questions": [],
+        "cameras": [{"period_s": entry(2.0, "user", "one every 2 s")}],
+    })
+    camera = compile_prompt_llm("one every 2 seconds",
+                                client=client).spec.cameras[0]
+    assert str(camera.trigger.value) == "interval"
+    assert float(camera.period_s.value) == 2.0
+    columns = {"t": [round(i * 0.1, 1) for i in range(221)]}
+    assert len(solve_schedule(columns, camera)) == 12
+
+
+def test_a_camera_list_nested_under_fields_is_lifted_not_refused():
+    """Measured on the keyless tier: the model put the camera list under
+    "fields" and the whole response was refused as an unknown field, so
+    the page fell back to the regex compiler. A LIST of camera mappings
+    there is unambiguous and is lifted into place, noted; a camera
+    stated as anything else under that name still refuses by name."""
+    lifted = fake_client({
+        "fields": {"cameras": [{
+            "preset": entry("tower", "inferred", "from the tower"),
+            "capture_count": entry(50, "user", "50 images")}]},
+        "notes": [], "questions": [],
+    })
+    result = compile_prompt_llm("50 images from the tower", client=lifted)
+    assert [str(c.preset.value) for c in result.spec.cameras] == ["tower"]
+    assert result.spec.cameras[0].capture_count.value == 50
+    assert any("nested 'cameras'" in n for n in result.spec.notes)
+    wrapped = fake_client({
+        "fields": {"cameras": {"value": [{
+            "preset": entry("chase", "inferred", "chase")}], "source": "model"}},
+        "notes": [], "questions": [],
+    })
+    assert [str(c.preset.value) for c in
+            compile_prompt_llm("chase the 747", client=wrapped).spec.cameras] == ["chase"]
+    not_a_list = fake_client({
+        "fields": {"cameras": entry("chase", "inferred", "chase")},
+        "notes": [], "questions": [],
+    })
+    with pytest.raises(LLMCompileError, match="unknown field 'cameras'"):
+        compile_prompt_llm("chase the 747", client=not_a_list)
+
+
+def test_the_prompt_s_shape_sentence_is_generated_from_the_schema():
+    """The system prompt said 'three keys, no others' for a whole phase
+    after 'cameras' became the fourth (Phase 1 initial run report). The
+    sentence is now written from RESPONSE_SCHEMA's own key list, and an
+    import-time assert keeps it that way; this test pins the wording
+    the model actually sees."""
+    from core.nl.llm_compiler import (RESPONSE_SCHEMA,
+                                      RESPONSE_TOP_LEVEL_KEYS,
+                                      SYSTEM_PROMPT,
+                                      response_shape_sentence)
+
+    keys = tuple(RESPONSE_SCHEMA["properties"])
+    assert RESPONSE_TOP_LEVEL_KEYS == keys
+    assert "cameras" in keys
+    assert "randomization" in keys          # spec 8, package F: the fifth
+    assert "traffic" in keys                # spec 8, contracts §2.2: the sixth
+    sentence = response_shape_sentence()
+    assert sentence in SYSTEM_PROMPT
+    assert "six keys" in sentence
+    for key in keys:
+        assert f'"{key}"' in sentence
+    assert "three keys" not in SYSTEM_PROMPT
+    assert "four keys" not in SYSTEM_PROMPT
+    assert "five keys" not in SYSTEM_PROMPT
+    # The generator, not the wording, is the contract: a three-key schema
+    # would say so.
+    assert "three keys" in response_shape_sentence(
+        ("fields", "notes", "questions"))
+
+
+# -- spec 8, package F: the bounded randomization key ------------------------
+
+def test_the_randomization_key_is_bounded_by_the_sampler_s_leaves():
+    """Mirrors the cameras discipline: the schema's leaves are a
+    hand-listed subset of the sampler's POLICY_LEAVES (asserted at
+    import), every value object refuses additional properties, and each
+    leaf admits only its own forms and vocabulary."""
+    from core.nl.llm_compiler import (
+        LLM_RANDOMIZATION_CAMERA_LEAVES, LLM_RANDOMIZATION_LEAVES,
+        RANDOMIZATION_CAMERA_VALUE_SCHEMAS, RANDOMIZATION_FIELD_VALUE_SCHEMAS,
+    )
+    from core.scenario.randomization import POLICY_CAMERA_LEAVES, POLICY_LEAVES
+
+    assert set(LLM_RANDOMIZATION_LEAVES) <= set(POLICY_LEAVES)
+    assert set(LLM_RANDOMIZATION_CAMERA_LEAVES) <= set(POLICY_CAMERA_LEAVES)
+    assert set(RANDOMIZATION_FIELD_VALUE_SCHEMAS) == set(LLM_RANDOMIZATION_LEAVES)
+    assert "livery" not in RANDOMIZATION_FIELD_VALUE_SCHEMAS      # YAML only
+    block = RESPONSE_SCHEMA["properties"]["randomization"]
+    assert block["additionalProperties"] is False
+    assert set(block["properties"]) == set(LLM_RANDOMIZATION_LEAVES) | {"cameras"}
+    precipitation = RANDOMIZATION_FIELD_VALUE_SCHEMAS["precipitation"]["properties"]
+    assert set(precipitation) == {"choice", "weights", "gated_by"}
+    assert precipitation["choice"]["items"]["enum"] == ["none", "rain", "snow"]
+    visibility = RANDOMIZATION_FIELD_VALUE_SCHEMAS["visibility_km"]["properties"]
+    assert "lognormal" in visibility and "clip" in visibility and "choice" not in visibility
+    assert set(RANDOMIZATION_CAMERA_VALUE_SCHEMAS) == set(LLM_RANDOMIZATION_CAMERA_LEAVES)
+
+
+def test_a_model_written_policy_lands_as_one_attributed_quantity_and_switches_the_block_on():
+    from core.scenario.fields import Source
+    from core.scenario.randomization import sample_randomization
+
+    client = fake_client({
+        "fields": {"aircraft": entry("A320", "user", "the a320")},
+        "notes": [], "questions": [],
+        "randomization": {
+            "cloud_cover": entry({"beta": [2, 2]}, "inferred", "varied weather"),
+            "visibility_km": entry({"lognormal": {"median": 25, "sigma": 0.6},
+                                    "clip": [1, 80]}, "inferred", "varied weather"),
+            "hour_local": entry({"choice": ["dawn", "dusk"]}, "model", "golden hour"),
+            "cameras": entry({"preset": {"choice": ["chase", "tower"]},
+                              "focal_length_mm": {"loguniform": [24, 400]}},
+                             "inferred", "random viewpoints"),
+        },
+    })
+    result = compile_prompt_llm("the a320 in varied weather at golden hour, random "
+                                "viewpoints", client=client)
+    spec = result.spec
+    policy = spec.randomization_policy
+    assert policy.source is Source.INFERRED                 # the best claimed
+    assert set(policy.value) == {"cloud_cover", "visibility_km", "hour_local", "cameras"}
+    assert policy.detail["attribution"]["hour_local"] == "golden hour"
+    assert policy.detail["sources"]["hour_local"] == "model"
+    assert spec.randomization.enabled.source is Source.INFERRED
+    assert [str(c.camera_id.value) for c in spec.cameras] == ["camera0"]
+    assert validate(spec, check_feasibility=False).ok
+    sample_randomization(spec)
+    assert spec.randomization.cloud_cover.source is Source.SAMPLED
+    assert spec.cameras[0].preset.source is Source.SAMPLED
+    assert ScenarioSpec.from_yaml(spec.to_yaml()).digest() == spec.digest()
+
+
+@pytest.mark.parametrize("block,reason", [
+    ({"cloud_cover": entry({"gaussian": [2, 2]}, "inferred", "x")}, "exactly one of"),
+    ({"cloud_cover": entry({"beta": [2, 2], "uniform": [0, 1]}, "inferred", "x")},
+     "exactly one of"),
+    ({"moon_phase": entry({"choice": ["full"]}, "inferred", "x")}, "unknown policy leaf"),
+    ({"livery": entry({"choice": ["red"]}, "inferred", "x")}, "unknown policy leaf"),
+    ({"cloud_cover": entry({"beta": [2, 2]}, "default", "x")}, "claims source"),
+    ({"cloud_cover": entry({"beta": [2, 2]}, "model", "")}, "no provenance phrase"),
+    ({"cloud_cover": {"value": {"beta": [2, 2]}, "source": "inferred"}},
+     "exactly value/source/from"),
+    ({"cloud_cover": entry("lots", "inferred", "x")}, "distribution mapping"),
+    ({"cloud_cover": entry({"beta": [2]}, "inferred", "x")}, "undocumented form"),
+    ({"precipitation": entry({"choice": ["hail"]}, "inferred", "x")}, "outside the vocabulary"),
+    ({"cameras": entry({"zoom": {"uniform": [1, 2]}}, "inferred", "x")}, "unknown camera leaves"),
+    ({"cameras": entry({"preset": {"choice": ["drone"]}}, "inferred", "x")}, "outside the vocabulary"),
+    ({"traffic_count": entry({"poisson": -1}, "inferred", "x")}, "undocumented form"),
+])
+def test_every_randomization_rail_refuses_by_name(block, reason):
+    client = fake_client({"fields": {}, "notes": [], "questions": [],
+                          "randomization": block})
+    with pytest.raises(LLMCompileError, match=reason):
+        compile_prompt_llm("x", client=client)
+
+
+def test_randomization_not_an_object_and_null_leaves():
+    with pytest.raises(LLMCompileError, match="not an object"):
+        compile_prompt_llm("x", client=fake_client({"fields": {}, "notes": [],
+                                                    "questions": [],
+                                                    "randomization": []}))
+    # A null-valued leaf is omission, as everywhere else.
+    result = compile_prompt_llm("x", client=fake_client({
+        "fields": {}, "notes": [], "questions": [],
+        "randomization": {"cloud_cover": entry(None, "inferred", "x")}}))
+    assert result.spec.randomization_policy is None
+
+
+def test_an_empty_model_block_falls_back_to_the_deterministic_vocabulary():
+    """The regex table is the control: a model that writes no leaves for
+    a documented phrase gets the phrase's leaves anyway, and a sentence
+    the vocabulary cannot vary is recorded for the by-name refusal."""
+    from core.scenario.randomization import RandomizationError, sample_randomization
+
+    empty = fake_client({"fields": {}, "notes": [], "questions": []})
+    spec = compile_prompt_llm("fly the 747 in varied weather", client=empty).spec
+    assert set(spec.randomization_policy.value) == {"cloud_cover", "visibility_km",
+                                                    "precipitation"}
+    assert spec.randomization_policy.detail["attribution"]["cloud_cover"] == "varied weather"
+    spec = compile_prompt_llm("fly the 747 and vary the moon phase",
+                              client=fake_client({"fields": {}, "notes": ["vary the "
+                                                  "moon phase"], "questions": []})).spec
+    assert spec.randomization_policy.detail["unmapped"] == ["fly the 747 and vary the moon phase"]
+    with pytest.raises(RandomizationError) as caught:
+        sample_randomization(spec)
+    assert caught.value.constraint == "randomization.vocabulary"
+    # No variation language, no block: an empty overlay is still
+    # bit-identical to the regex compiler's defaults.
+    plain = compile_prompt_llm("fly the 747 at 3000 m", client=empty).spec
+    assert plain.randomization_policy is None
+    assert plain.digest() == compile_prompt("").digest()
+
+
+def test_the_prompt_teaches_the_documented_phrases_from_the_compiler_s_table():
+    from core.nl.compiler import RANDOMIZATION_FAMILIES
+    from core.nl.llm_compiler import SYSTEM_PROMPT
+
+    assert '"randomization"' in SYSTEM_PROMPT
+    for family in RANDOMIZATION_FAMILIES.values():
+        assert json.dumps(family) in SYSTEM_PROMPT
+    assert "rockies" in SYSTEM_PROMPT and "dawn 5.5-8 h" in SYSTEM_PROMPT
+
+
+# -- traffic (spec 8, contracts §2.2): the LLM tier can state the second aircraft --
+
+def _traffic_payload(*entries):
+    return {"fields": {}, "notes": [], "questions": [], "traffic": list(entries)}
+
+
+def test_the_model_can_state_a_traffic_aircraft_with_provenance():
+    """Before this, _parse_payload accepted exactly {fields, notes,
+    questions, cameras, randomization}: the second-aircraft label path
+    was reachable from YAML only. The contract's own example
+    (source user, from "an A320 crossing") now compiles."""
+    result = compile_prompt_llm("a B747 with an A320 crossing", client=fake_client(
+        _traffic_payload({
+            "aircraft": entry("A320", "user", "an A320 crossing"),
+            "track": entry("crossing", "user", "crossing"),
+            "range_m": entry(650, "user", "650 m ahead"),
+        })))
+    assert len(result.spec.traffic) == 1
+    traffic = result.spec.traffic[0]
+    assert str(traffic.aircraft.value) == "A320"
+    assert str(traffic.aircraft.source) == "user"
+    assert traffic.aircraft.frm == "an A320 crossing"
+    assert str(traffic.track.value) == "crossing"
+    assert float(traffic.range_m.value) == 650.0
+    assert str(traffic.range_m.source) == "user"
+    assert str(traffic.livery.source) == "default"     # YAML's field, defaulted
+    # Serialises as the contract's block and survives the round trip.
+    block = result.spec.to_dict()["traffic"][0]
+    assert block["aircraft"] == {"value": "A320", "source": "user",
+                                 "from": "an A320 crossing"}
+    assert ScenarioSpec.from_dict(result.spec.to_dict()).digest() == result.spec.digest()
+    assert validate(result.spec, check_feasibility=False).ok
+    # An absent key claims what [] does; a stated track alone keeps the range default.
+    plain = compile_prompt_llm("fly the 747", client=fake_client(
+        {"fields": {}, "notes": [], "questions": []}))
+    assert plain.spec.traffic == []
+    ranged = compile_prompt_llm("x", client=fake_client(_traffic_payload(
+        {"aircraft": entry("c172p", "user", "a cessna")})))
+    assert str(ranged.spec.traffic[0].track.value) == "crossing"
+    assert str(ranged.spec.traffic[0].track.source) == "default"
+
+
+@pytest.mark.parametrize("payload,reason", [
+    (_traffic_payload({"track": entry("crossing")}), "names no aircraft"),
+    (_traffic_payload({"aircraft": entry("dragon")}), "outside the vocabulary"),
+    (_traffic_payload({"aircraft": entry("A320"), "livery": entry("red")}),
+     "unknown traffic field"),
+    (_traffic_payload({"aircraft": entry("A320"), "track": entry("orbit")}),
+     "outside the vocabulary"),
+    (_traffic_payload({"aircraft": entry("A320"), "range_m": entry("far")}),
+     "not a number"),
+    (_traffic_payload({"aircraft": {"value": "A320", "source": "user"}}),
+     "exactly value/source/from"),
+    (_traffic_payload({"aircraft": entry("A320", "guess")}), "claims source"),
+    (_traffic_payload(*[{"aircraft": entry("A320")}] * 3), "exceed the cap"),
+    ({"fields": {}, "notes": [], "questions": [], "traffic": {"aircraft": "A320"}},
+     "not a list"),
+])
+def test_a_traffic_entry_faces_the_same_rails_as_a_camera(payload, reason):
+    with pytest.raises(LLMCompileError, match=reason):
+        compile_prompt_llm("anything", client=fake_client(payload))
+
+
+def test_the_traffic_schema_is_bounded_and_tied_to_the_block():
+    from core.nl.llm_compiler import TRAFFIC_FIELD_VALUE_SCHEMAS
+    from core.scenario.blocks import MAX_TRAFFIC, TrafficSpec
+
+    schema = RESPONSE_SCHEMA["properties"]["traffic"]
+    assert schema["maxItems"] == MAX_TRAFFIC
+    assert schema["items"]["required"] == ["aircraft"]
+    assert set(schema["items"]["properties"]) == set(TRAFFIC_FIELD_VALUE_SCHEMAS)
+    assert set(TRAFFIC_FIELD_VALUE_SCHEMAS) < set(TrafficSpec.FIELD_ORDER)
+    assert "livery" not in TRAFFIC_FIELD_VALUE_SCHEMAS

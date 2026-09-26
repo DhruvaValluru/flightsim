@@ -1,0 +1,12 @@
+{
+  "name": "synthetic_cmos_wide",
+  "basis": "synthetic",
+  "source": "ILLUSTRATIVE VALUES, NOT A CALIBRATED CAMERA. Models: lens distortion per Brown (1966, 'Decentering distortion of lenses', Photometric Engineering 32) in the OpenCV calib3d parameterisation (k1 k2 k3 radial, p1 p2 tangential); rolling shutter as a linear top-to-bottom readout; noise per the EMVA 1288 linear camera model (shot noise Poisson in electrons, Gaussian read noise, full-well ADC); natural vignetting as the cos^4 law (Ray, Applied Photographic Optics, 3rd ed., ch. 22). The numbers are hand-chosen within ranges those references describe as typical of a wide CMOS module; a calibrated profile for a real camera replaces them with measured ones and cites the calibration.",
+  "distortion": {"model": "brown-conrady", "k1": -0.25, "k2": 0.06, "k3": -0.008, "p1": 0.0004, "p2": -0.0002},
+  "rolling_shutter": {"readout_s": 0.020, "direction": "top-to-bottom"},
+  "exposure": {"time_s": 0.002, "reference_time_s": 0.002, "iso": 400, "base_iso": 100},
+  "noise": {"model": "emva1288", "full_well_e": 12000, "read_noise_e": 3.5},
+  "vignetting": {"model": "cos4", "strength": 1.0},
+  "colour": {"linear_source": "engine EXR when present, else the 8-bit sRGB PNG inverted through the sRGB transfer (stated approximation)", "output": "sRGB 8-bit PNG quantised at bit_depth first"},
+  "bit_depth": 12
+}

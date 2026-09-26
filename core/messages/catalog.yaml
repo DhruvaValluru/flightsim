@@ -1,0 +1,454 @@
+# The message catalogue (contracts §8, §11; brainstorm §8.2).
+#
+# One entry per refusal name, per verifier check and per progress state.
+# The KEY is the rule name exactly as the code spells it (a Violation's
+# constraint, an error class's .constraint, a "REFUSED -- <name>:" line,
+# a Check("<name>")). Each entry carries:
+#
+#   sentence   plain English, no field names or code identifiers; numbers
+#              arrive through {placeholders} filled from the refusal itself
+#              (actual, limit, unit, and the derived shortfall = limit -
+#              actual, excess = actual - limit, count = number of
+#              violations), or from the error's own detail mapping where
+#              the numbers live only there (the campaign and randomisation
+#              errors). A plural form is {param:one|many} and picks by the
+#              numeric value of param ("{actual} {actual:draw|draws}"); a
+#              yes/no value picks the first form when yes. A placeholder
+#              with no value renders as nothing, and a bracketed aside in
+#              which every placeholder is absent is dropped whole, so a
+#              sentence reads correctly with or without its numbers; it
+#              never raises.
+#   hint       optional; what to do about it.
+#
+# tests/test_messages.py holds the two-way check: every name the code
+# emits has an entry here, and every entry here is either emitted by the
+# code today or listed in that test's ALLOWED_FUTURE with the package that
+# will emit it. The sentences describe what each rule REFUSES; they do not
+# claim the rule is exhaustive, and a sentence for a name a later package
+# adds describes the contract's stated meaning, not measured behaviour.
+
+# -- the scenario itself (core/scenario/validate.py) -------------------------
+
+aircraft.exists:
+  sentence: "There is no flight model for that aircraft, so nothing can be simulated."
+  hint: "Choose one of the configured aircraft."
+altitude.terrain_clearance:
+  sentence: "A starting height of {actual} m is too close to the ground there; it needs to be at least {limit} m above sea level."
+  hint: "Ask for a higher start, or a lower place."
+airspeed.stall_margin:
+  sentence: "A speed of {actual} knots is too slow for this aircraft to keep flying; it needs at least {limit} knots."
+  hint: "Ask for a faster speed."
+airspeed.approach_speed:
+  sentence: "An approach at {actual} knots is far too fast for this aircraft to land; {limit} knots is the most a landing allows."
+run.duration:
+  sentence: "The flight has to last longer than zero seconds and no longer than an hour."
+  hint: "Ask for a flight of between one second and an hour (3600 seconds); a longer one is a session, not a scenario."
+run.rate:
+  sentence: "The simulation has to take more than zero steps per second."
+environment.wind_speed:
+  sentence: "A wind speed cannot be negative."
+environment.wind_direction:
+  sentence: "A wind direction has to lie between 0 and 360 degrees; {actual} is outside that."
+environment.surface:
+  sentence: "That kind of ground cover is not modelled."
+  hint: "Choose grassland, desert, ocean, forest or city."
+environment.weather_event:
+  sentence: "That kind of severe weather is not modelled; only a thunderstorm or a tornado can be asked for."
+envelope.trim_feasible:
+  sentence: "This aircraft cannot fly steadily at the requested speed, height and weight; its flight model does not reach there."
+  hint: "Change the speed or the altitude, or choose another aircraft."
+
+# -- the variation block (core/scenario/validate.py, randomization.py) -------
+
+randomization.enabled:
+  sentence: "The variation switch has to be simply on or off."
+randomization.year:
+  sentence: "The year {actual} is outside the years the sun-position model is accurate for ({limit})."
+randomization.day_of_year_min:
+  sentence: "The days of the year to vary over ({actual}) have to lie within {limit}."
+randomization.day_of_year_max:
+  sentence: "The last day to vary over ({actual}) comes before the first ({limit}); that is not a range."
+randomization.hour_utc_min:
+  sentence: "The hours of the day to vary over ({actual}) have to lie within {limit}."
+randomization.hour_utc_max:
+  sentence: "The last hour to vary over ({actual}) comes before the first ({limit}); that is not a range."
+randomization.fog_density_min:
+  sentence: "The lightest fog to vary over has to be more than zero."
+randomization.fog_density_max:
+  sentence: "The thickest fog to vary over ({actual}) is lighter than the lightest ({limit}); that is not a range."
+randomization.sun_elevation_min_deg:
+  sentence: "The lowest sun angle to allow has to lie between 90 degrees below and 90 degrees above the horizon; {actual} is outside that."
+randomization.camera_jitter_m:
+  sentence: "The camera position wobble has to be zero or more metres; {actual} is not."
+randomization.camera_jitter_deg:
+  sentence: "The camera pointing wobble has to lie between 0 and {limit} degrees; {actual} is outside that."
+randomization.camera_focal_jitter:
+  sentence: "The lens wobble has to lie between 0 and {limit} of the focal length; {actual} is outside that."
+randomization.policy:
+  sentence: "One of the variation rules is not written in a form the system knows."
+  hint: "Each rule names one of the documented distributions and its numbers."
+randomization.livery:
+  sentence: "The aircraft's paint schemes are not listed in a form that can be chosen from."
+randomization.time_of_day:
+  sentence: "No time in the requested days and hours would put the sun high enough in the sky at that place."
+  hint: "Widen the days or the hours, or lower the sun angle floor."
+randomization.unsampled:
+  sentence: "Variation is switched on but the values were never drawn before rendering."
+  hint: "Run the planning step first."
+randomization.vocabulary:
+  sentence: "A word in the request asks for a kind of variation the system does not have."
+randomization.location:
+  sentence: "No terrain is prepared for that place, so the scene cannot be varied over it."
+randomization.infeasible:
+  sentence: "Every attempt to draw this scenario came out impossible to fly ({draws} {draws:try|tries}), so the variation asked for cannot be met."
+  hint: "Narrow the ranges, or ask for fewer images."
+
+# -- the spec 8 blocks: scene, taxonomy, traffic (core/scenario/validate.py) --
+
+scene.terrain_source:
+  sentence: "The ground can only come from one of four sources: chosen automatically, flat, synthesised, or prepared from real terrain."
+scene.terrain:
+  sentence: "The named terrain cannot be used here: it is either not prepared on this machine or does not match what was asked for."
+  hint: "Prepare the terrain first, or ask for flat or synthesised ground."
+taxonomy.classes:
+  sentence: "The list of object classes has to name at least one class, each exactly once."
+traffic.count:
+  sentence: "At most {limit} other aircraft can share the scene; {actual} were asked for."
+traffic.aircraft:
+  sentence: "One of the other aircraft asked for has no 3-D model configured."
+traffic.track:
+  sentence: "One of the other aircraft asks for a flight path the system does not know; it can fly in formation, cross, or overtake."
+traffic.range_m:
+  sentence: "The distance to another aircraft has to be more than zero metres."
+
+# -- cameras, scene-free (core/capture/validate.py) --------------------------
+
+camera.identifier:
+  sentence: "That camera name cannot be used as a folder name on every computer."
+  hint: "Use letters, digits, dashes, underscores and dots, and avoid names the system reserves."
+camera.preset:
+  sentence: "The camera asks for a viewpoint, position mode or aiming mode the system does not model, or two cameras share one name."
+camera.profile:
+  sentence: "The camera's sensor model is not one the system has on file."
+camera.intrinsics:
+  sentence: "One of the camera's lens or sensor settings ({actual} {unit}) is outside what a real camera can have; the limit is {limit} {unit}."
+camera.exposure:
+  sentence: "The camera's aperture, shutter time and ISO each have to be more than zero."
+camera.schedule:
+  sentence: "The camera's capture timing cannot produce any pictures as stated."
+  hint: "Give it a positive interval, distance or count inside the flight."
+camera.moves:
+  sentence: "One of the camera's keyframed movements is not written in a form the system knows."
+
+# -- cameras against the scene (core/capture/validate.py, poses.py, ...) -----
+
+camera.terrain_clearance:
+  sentence: "The camera's path drops {shortfall} m below the minimum height above the ground; it must stay at least {limit} m above the terrain."
+  hint: "Raise the camera, or move it away from the high ground."
+camera.scene_bounds:
+  sentence: "Part of the camera's path leaves the area where terrain and imagery exist."
+camera.hazard_intersection:
+  sentence: "The camera would sit inside the tornado's core at {actual} {actual:point|points} along its path; those frames are refused rather than rendered blank."
+camera.poses:
+  sentence: "The camera's path could not be worked out from the flight."
+camera.labels:
+  sentence: "This aircraft cannot be labelled: its outline points are not on file."
+camera.track:
+  sentence: "The camera's solved path breaks one of the scene rules."
+  hint: "The technical note under this message names which."
+camera.render:
+  sentence: "The renderer produced no pictures for one of the cameras."
+camera.multi_render:
+  sentence: "Several cameras were sent down a path that can only render one."
+capture.host_flight:
+  sentence: "The recorded flight cannot be used to place the cameras."
+
+# -- the machine (core/util/platform.py, assets_pipeline/) --------------------
+
+ffmpeg.missing:
+  sentence: "The video tool (ffmpeg) is not installed on this machine, so no clip can be assembled."
+  hint: "Install ffmpeg and run again."
+ue.platform:
+  sentence: "Rendered pictures need Windows with Unreal Engine and the bridge built; this machine has no renderer. Everything except the pixels was produced."
+  hint: "Run the preflight script on a Windows machine with the engine installed."
+aircraft.mesh:
+  sentence: "This aircraft has real flight physics but no licensed 3-D model that can be rendered."
+  hint: "Choose an aircraft with a model, or import one."
+aircraft.mesh_import:
+  sentence: "The aircraft's 3-D model could not be fetched, converted or imported on this machine."
+aircraft.mesh_extent:
+  sentence: "The aircraft's 3-D model does not measure the size its flight model says it is."
+aircraft.placeholder_drawn:
+  sentence: "The pictures show a stand-in shape, not the real aircraft model, so they cannot be labelled."
+
+# -- terrain and weather (webapp/runs.py, flightsim/capture.py) --------------
+
+terrain.unbaked:
+  sentence: "No terrain has been prepared for the coordinates asked for."
+  hint: "Prepare the terrain there first (it downloads once), then run again."
+terrain.clearance:
+  sentence: "The planned flight would descend too close to the terrain along its path."
+terrain.impact:
+  sentence: "The aircraft hit the terrain during the flight."
+trim:
+  sentence: "The aircraft could not be settled into steady flight at the requested condition."
+run.closure:
+  sentence: "The flight never reached the commanded state closely enough to count as a run."
+weather.not_a_place:
+  sentence: "Historical weather needs a real place; the practice ridge is not one."
+  hint: "Name a real location or give coordinates."
+weather.unavailable:
+  sentence: "The weather archive could not answer for that place and date."
+weather:
+  sentence: "The historical weather could not be applied to this scenario."
+validation:
+  sentence: "The scenario failed {count} {count:check|checks}; each is explained below."
+verify.camera_sets:
+  sentence: "The two camera sets given to the checker do not describe the same cameras."
+verify.capture:
+  sentence: "One of the two captures the checker needed did not complete, so the two cannot be compared."
+
+# -- the engine's look (FlightSimVisualScene.cpp, FlightSimRenderCommandlet.cpp) --
+
+look.clouds:
+  sentence: "The cloud layer could not be drawn: its cover has to lie between none and full, its top has to sit above its base, and the renderer's own cloud material has to load."
+  hint: "State a cover between 0 and 1 and a top above the base; if both are right, the renderer's cloud material is missing on this machine."
+look.precipitation:
+  sentence: "The precipitation named is not one the renderer draws; it draws none, rain or snow."
+  hint: "Ask for none, rain or snow."
+
+# -- the batch runner (core/dataset/batch.py) --------------------------------
+
+batch.matrix:
+  sentence: "The batch file is missing or not in a form the system can read."
+batch.base:
+  sentence: "The base scenario the batch refers to cannot be found or loaded."
+batch.factors:
+  sentence: "One of the batch's varied settings names no field or has no values to try."
+batch.seeds:
+  sentence: "The batch's list of seeds has to be whole numbers, each listed once."
+batch.design:
+  sentence: "The batch asks for a design the system does not know; it can try every combination, or one setting at a time."
+batch.workers:
+  sentence: "The number of parallel workers has to be a whole number of at least one."
+batch.capture:
+  sentence: "One of the batch's capture options is not one the system accepts."
+
+# -- export (core/dataset/export.py, flightsim/export.py) -------------------
+
+export.runs:
+  sentence: "One of the given folders is neither a finished run nor a folder of runs."
+export.run_names:
+  sentence: "Two different runs have the same folder name, so their frames would overwrite each other."
+  hint: "Put them in folders with different names, then export again."
+export.verification_stale:
+  sentence: "A run's labels changed after they were checked, so the old check no longer counts."
+  hint: "Run the checker on it again."
+export.out_directory:
+  sentence: "The dataset folder already holds a different picture under the same name from an earlier export."
+  hint: "Export into an empty folder."
+export.unverified:
+  sentence: "A run was never checked, so its labels cannot be exported."
+  hint: "Run the checker on it first."
+export.verification_failed:
+  sentence: "A run failed its checks, so it cannot be exported."
+export.unverified_labels:
+  sentence: "A run's mask, class image or depth was never checked against the geometry, so a format that ships it cannot take it."
+export.image:
+  sentence: "The export asks for a kind of picture the runs do not have; each frame comes as the ideal or the sensor image."
+export.sensor_labels:
+  sentence: "A run's labels do not follow the sensor model its pictures were made with, so they cannot be exported together."
+export.missing_frames:
+  sentence: "A run's records refer to pictures that were never rendered."
+export.empty:
+  sentence: "There is nothing to export: no frame carries a label."
+export.split:
+  sentence: "The training share has to be a fraction between 0 and 1."
+export.shard_size:
+  sentence: "The shard size has to be a positive number of frames."
+export.format:
+  sentence: "That export format is not one the system writes."
+export.taxonomy:
+  sentence: "The runs do not agree on one list of object classes, or an object names a class outside it, so one dataset cannot hold them."
+  hint: "Export runs with different class lists separately."
+export.arguments:
+  sentence: "The export command's arguments could not be understood."
+
+# -- the checker's per-run findings (contracts §4, package D) ----------------
+
+annotation.mask_blend:
+  sentence: "The object mask contains blended edge values instead of whole object numbers."
+annotation.mask_offset:
+  sentence: "The object mask does not sit where the aircraft's geometry says it should."
+annotation.box_mismatch:
+  sentence: "The drawn box does not match the object's mask."
+annotation.depth_range:
+  sentence: "The measured distance under the mask does not agree with the aircraft's distance."
+annotation.visibility:
+  sentence: "The stated visibility does not match what the scene actually hides."
+annotation.identity:
+  sentence: "An object's number changed between frames, cameras or runs."
+annotation.intrinsics:
+  sentence: "The renderer used a different lens or picture size than the record states."
+annotation.files:
+  sentence: "A label file the record declares is missing."
+
+# -- campaigns and storage (contracts §6, package G) ------------------------
+
+storage.budget_exceeded:
+  sentence: "The campaign would need more disk space than allowed (about {projected_bytes} bytes still to write, against a limit of {limit_bytes})."
+  hint: "Raise the budget, or ask for fewer images."
+campaign.target_unreachable:
+  sentence: "The campaign could not reach the requested number of images, so it stopped."
+  hint: "Either too many draws were refused, or repeated flights added no checked pictures; the technical note says which."
+campaign.arguments:
+  sentence: "The campaign cannot be set up as asked."
+  hint: "Check the number of images, the seed, the worker count, the output folder and the format."
+campaign.state:
+  sentence: "The campaign is not in a state where that action is possible."
+  hint: "A campaign starts once, pauses while running, resumes while paused, and can be cancelled until it is done."
+campaign.duplicate_case:
+  sentence: "Two scenarios came out identical because the request leaves nothing to vary between them, so the second was not flown."
+  hint: "Ask for something to vary, or for fewer images."
+
+# -- the assistant's authority (contracts §7, package H) --------------------
+
+authority.stated_field:
+  sentence: "The assistant tried to change a value you stated; stated values are never moved."
+authority.validation_token:
+  sentence: "That step needs a scenario that passed validation exactly as it is now."
+authority.refusal_is_not_a_run:
+  sentence: "A scenario carrying a refusal cannot be run."
+authority.budget:
+  sentence: "The assistant used up its allowance of attempts or time for this request."
+
+# -- file versions and the compiler (ValueError / LLMCompileError sentences) --
+
+spec.version:
+  sentence: "This scenario file was written by a different version of the system and cannot be read."
+  hint: "Recreate it with this version."
+spec.read:
+  sentence: "This scenario file could not be read as a scenario."
+  hint: "Check that it is the YAML this version writes, with every required section."
+manifest.version:
+  sentence: "This capture record was written by a version of the system this one cannot read."
+compile.rejected:
+  sentence: "The language model's answer could not be accepted as a scenario."
+  hint: "Try again, rephrase, or use the offline compiler."
+compile.unavailable:
+  sentence: "No language model is set up on this server; the offline compiler is still available."
+compile.unreachable:
+  sentence: "The language model could not be reached, so the offline compiler was used."
+  hint: "Check the server's network or language-model settings; the offline compiler needs neither."
+
+# -- verifier checks, by name (core/capture/verify.py) -----------------------
+# One sentence per check: what it measures, in the affirmative. The UI
+# shows it beside the tick; a FAIL carries its own annotation.* name.
+
+check.intrinsics_match_spec:
+  sentence: "The camera's lens and picture size match what was asked for."
+check.pose_matches_spec:
+  sentence: "The camera stayed at the station it was asked to hold."
+check.geometry_recovery:
+  sentence: "The aircraft is in front of every camera that claims to see it, and its two recorded orientations agree."
+check.capture_time_agreement:
+  sentence: "Each picture is from the instant its record states."
+check.landmark_reprojection:
+  sentence: "Known landmarks appear where the camera model says they should."
+check.cross_view_consistency:
+  sentence: "Two cameras seeing one landmark agree on where it is."
+check.count_exactness:
+  sentence: "Each camera produced exactly the number of pictures asked for."
+check.aircraft_state_consistency:
+  sentence: "Every camera records the same aircraft state for the same moment."
+check.flight_agreement:
+  sentence: "The flight the pictures show is the flight the labels describe."
+check.host_determinism:
+  sentence: "Two runs of the same flight produced the same recording."
+check.temporal_alignment:
+  sentence: "Two runs of the same flight line up frame for frame."
+check.label_geometry:
+  sentence: "The labels agree with the aircraft's geometry, re-derived independently."
+check.keypoints_in_box:
+  sentence: "Every labelled point on the aircraft lies inside its box."
+check.label_files:
+  sentence: "Every label file the record declares exists."
+check.drawn_airframe:
+  sentence: "The pictures show the real aircraft model where the record places it."
+check.mask_containment:
+  sentence: "The aircraft's mask lies inside its box."
+check.depth_range:
+  sentence: "The distances under the aircraft's mask lie within its box in depth."
+check.sensor_undistortion:
+  sentence: "Undoing the lens distortion puts points back where the ideal camera says."
+check.sensor_files:
+  sentence: "Every sensor-model file the record declares exists."
+check.frame_integrity:
+  sentence: "Every picture file is present and matches its recorded fingerprint."
+check.projection_matrix:
+  sentence: "The camera's projection numbers reproduce the labelled points."
+check.json_schema:
+  sentence: "The record follows the published format for its version."
+check.applied_pose:
+  sentence: "The camera pose the renderer used matches the one that was solved."
+check.mask_integers_only:
+  sentence: "The object mask holds only whole object numbers, with no blended edges."
+check.mask_vs_geometry:
+  sentence: "The object mask sits where the aircraft's geometry says it should."
+check.box_vs_mask:
+  sentence: "The drawn box matches the object's mask."
+check.depth_vs_geometry:
+  sentence: "The measured distance under the mask agrees with the aircraft's distance."
+check.visibility_vs_scene:
+  sentence: "The stated visibility matches what the scene actually hides."
+check.identity_stable:
+  sentence: "Each object keeps one number across frames, cameras and runs."
+check.applied_intrinsics:
+  sentence: "The renderer used the lens and picture size the record states."
+
+# -- verdicts and progress states (contracts §4, §6.1, §8) -------------------
+
+verdict.pass:
+  sentence: "Passed."
+verdict.fail:
+  sentence: "Failed."
+
+progress.campaign.planned:
+  sentence: "The campaign is planned and waiting to start."
+progress.campaign.running:
+  sentence: "Generating: {done} of {total} {total:image|images} so far."
+progress.campaign.paused:
+  sentence: "Paused; nothing is being generated."
+  hint: "Resume when ready."
+progress.campaign.failed:
+  sentence: "The campaign stopped on an error."
+progress.campaign.done:
+  sentence: "Every requested image has its labels generated and checked ({done} {done:picture|pictures} from {cases_verified} {cases_verified:scenario|scenarios}, {total} asked for){drawn:, and its picture drawn|; no picture was drawn on this machine}."
+progress.campaign.cancelled:
+  sentence: "The campaign was cancelled."
+
+progress.case.sampled:
+  sentence: "A scenario was drawn."
+progress.case.refused:
+  sentence: "This draw was refused and recorded."
+progress.case.running:
+  sentence: "Flying this scenario and writing its labels."
+progress.case.rendered:
+  sentence: "Flown and recorded; checking the labels{drawn:, and the pictures|}."
+progress.case.verified:
+  sentence: "Checked."
+progress.case.failed:
+  sentence: "This scenario failed and was recorded."
+
+progress.page.ask:
+  sentence: "Describe the pictures you want."
+progress.page.clarify:
+  sentence: "A few questions before generating."
+progress.page.preview:
+  sentence: "Here is what will be generated."
+progress.page.generate:
+  sentence: "Generating."
+progress.page.review:
+  sentence: "Review the pictures and the checks."
+progress.page.download:
+  sentence: "Choose a format and download."

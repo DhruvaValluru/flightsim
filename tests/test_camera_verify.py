@@ -18,6 +18,9 @@ from core.capture.verify import (
     project_point, verify_alignment, verify_counts, verify_geometry,
     verify_run, verify_triangulation,
 )
+from core.capture.verify import (
+    FAIL, NOT_RUN, PASS, verify_aircraft_consistency,
+)
 from core.nl.compiler import compile_prompt
 from core.scenario.camera import CameraSpec
 
@@ -118,25 +121,42 @@ def test_geometry_recovery_catches_an_out_of_frame_aim():
     assert not verify_geometry(manifest).ok
 
 
-def test_triangulation_passes_and_catches_misattributed_states():
+def test_triangulation_needs_independently_measured_pixels():
+    """Phase 1 triangulated the aircraft across two cameras and reported
+    0.0000 m. Both rays were cast through each record's copy of ONE
+    aircraft array, so they met at that point whatever the poses were:
+    the check passed with a camera displaced 300 m and with every focal
+    length scaled 1.7x (tests/test_camera_verify_corruption.py).
+
+    Two-view consistency needs pixels this module did not itself
+    compute -- the engine's own ProjectToPixel output in render.json.
+    Without them the honest report is NOT RUN, not a pass.
+    """
     manifest = two_camera_manifest()
-    check = verify_triangulation(manifest)
-    assert check.ok, check.detail
+    check = verify_triangulation(manifest, run_dir=None)
+    assert check.status == NOT_RUN
+    assert not any(word in check.detail for word in ("0.0000", "PASS"))
+
+
+def test_the_manifest_agrees_with_itself_about_the_aircraft():
+    """What Phase 1's triangulation test was really testing, under a
+    name that says so: two cameras capturing one telemetry sample must
+    record the same aircraft state for it."""
+    assert verify_aircraft_consistency(two_camera_manifest()).status == PASS
 
     bad = two_camera_manifest()
     for record in bad["frames"]:
         if record["camera_id"] == "tower0":
-            record["aircraft"]["north_m"] += 50.0   # a different instant
-    assert not verify_triangulation(bad).ok
+            record["aircraft"]["north_m"] += 50.0
+    assert verify_aircraft_consistency(bad).status == FAIL
 
 
-def test_triangulation_reports_not_exercised_for_one_camera():
+def test_consistency_reports_not_run_for_one_camera():
     """No false pass, no false failure: a single camera cannot be
     cross-checked and the report says so in words."""
     manifest = manifest_for(spec_with(counted("chase", "solo")))
-    check = verify_triangulation(manifest)
-    assert check.ok
-    assert "NOT EXERCISED" in check.detail
+    check = verify_aircraft_consistency(manifest)
+    assert check.status == NOT_RUN
 
 
 def test_count_exactness_passes_and_catches_a_dropped_frame():
@@ -187,3 +207,60 @@ def test_verify_run_refuses_a_missing_or_wrong_version_manifest(tmp_path):
     manifest["manifest_version"] = 99
     write_capture_manifest(manifest, tmp_path)
     assert not verify_run(tmp_path).ok
+
+
+# -- keyframed moves are the contract the station is graded against -----
+
+def _pulled_back_manifest(duration_s=40.0):
+    """A chase camera that pulls back over an airliner-speed flight: the
+    documented move doubles the offset, and the solver does exactly
+    that. Phase 1's initial run report recorded this camera failing
+    pose_matches_spec at 172.1 m against a 166.0 m bound, because the
+    check graded the trailing camera against the STATIC spec offset
+    while the spec's own keyframes had moved it."""
+    spec = compile_prompt(
+        f"chase the 747 for {int(duration_s)} seconds and pull back")
+    assert spec.cameras and spec.cameras[0].moves, "the move word must key"
+    columns = make_columns(duration_s=duration_s, speed_mps=144.0)
+    return manifest_for(spec, columns), spec
+
+
+def test_pose_check_grades_a_pulled_back_camera_against_its_keyframes():
+    from core.capture.verify import verify_pose_matches_spec
+
+    manifest, _ = _pulled_back_manifest()
+    check = verify_pose_matches_spec(manifest)
+    assert check.status == PASS, check.detail
+
+
+def test_pose_check_still_fails_when_the_track_ignores_the_keyframes():
+    """The clause is live: a spec that says 'push in' while the recorded
+    track pulled back is a camera that is not where the spec put it."""
+    from core.capture.verify import verify_pose_matches_spec
+
+    manifest, spec = _pulled_back_manifest()
+    camera_id = str(spec.cameras[0].camera_id.value)
+    (entry,) = [b for b in manifest["cameras"]
+                if str(b["camera_id"]) == camera_id]
+    keyed = entry["spec"]["moves"]
+    first, last = keyed[0], keyed[-1]
+    for key in ("offset_forward_m", "offset_right_m", "offset_up_m"):
+        last[key] = 0.5 * first[key]          # push in, not pull back
+    check = verify_pose_matches_spec(manifest)
+    assert check.status == FAIL, check.detail
+    assert "stated station" in check.detail
+
+
+def test_the_phase1_failure_reproduces_when_keyframes_are_not_consulted(
+        monkeypatch):
+    """The defect, kept as a measurement: grade the same pulled-back
+    track against the static offset (what the check did before) and it
+    fails exactly the way the Phase 1 report recorded."""
+    from core.capture import verify as verify_module
+
+    manifest, _ = _pulled_back_manifest()
+    monkeypatch.setattr(verify_module, "_keyframed_scalar",
+                        lambda moves, key, t, default: default)
+    check = verify_module.verify_pose_matches_spec(manifest)
+    assert check.status == FAIL, check.detail
+    assert "stated station" in check.detail

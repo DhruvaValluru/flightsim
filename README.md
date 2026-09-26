@@ -10,6 +10,20 @@ pixels), Gate 6 on its four measurable clauses with a placeholder airframe. See
 [docs/VALIDITY.md](docs/VALIDITY.md) for exactly what that does and does not
 support — the scope statements are the point of this project.
 
+**Phase 2 (2026-09-26, branch `claude/relaxed-cori-gccjvx`): the
+annotated, randomised dataset pipeline.** A guided page at
+`/generate.html` takes one prompt to a campaign (at most three
+questions, a plan in words, one measured sample, progress from the
+ledger, a gallery, a download); the campaign CLI `python -m
+flightsim.campaign "<prompt>" --images N --out DIR [--workers W]
+[--render]` runs the same thing from a terminal; `python -m
+flightsim.export RUNS --out DIR --format coco,kitti,webdataset,yolo,voc`
+writes the dataset with its card and refuses unverified runs by name.
+Everything Python is measured on any machine; the rendered half (the
+`-labels` masks and depth on real pixels, the look clauses) waits for the
+Windows build on UE 5.7 -- [docs/PHASE2_REPORT.md](docs/PHASE2_REPORT.md)
+opens with the instructor's commands and the Windows verification order.
+
 ## Quick start (any machine, ~2 minutes)
 
 ```bash
@@ -58,24 +72,27 @@ The page states which tier is active next to the Interpret button.
 
 One codebase, platform dispatch inside it (`core/util/platform.py`):
 
-| | macOS | Linux | Windows |
+| | Windows | macOS | Linux |
 |---|---|---|---|
 | Prompt → LLM compile → spec → validate | ✓ | ✓ | ✓ |
-| Headless JSBSim physics + telemetry | ✓ | ✓ | ✓ |
-| Web app on localhost:8008, terrain baking, effect reports | ✓ | ✓ | ✓ |
-| Rendered video clips (Unreal Engine host) | ✓ | refused by name | ✓ after the build below |
+| Headless JSBSim physics + telemetry, capture manifests, labels, verification | ✓ | ✓ | ✓ |
+| Web app on localhost:8008, terrain baking, effect reports, batch + export | ✓ | ✓ | ✓ |
+| Rendered frames and clips (Unreal Engine host) | ✓ after the build below | builds from the same sources; not the tested path | refused by name |
 
-Everything in the first three rows is pure Python and is exercised by CI
-on all three OSes. The UE render half runs on macOS (where every render
-calibration was measured, on Metal) and on Windows once the build steps
-below have produced the bridge -- until then Windows refuses as
-`ue.platform` with the exact missing piece, and the web app still
-delivers the headless half (spec, provenance, validation, telemetry).
-The render calibrations were measured on Metal only, so on Windows run
-`experiments/gate6_visual.py` once after building: it re-measures the
+**Windows is the render platform.** Every rendered result since Camera
+Phase 2 (landmark reprojection 0.00 px, two-view triangulation 0.000 m,
+the `-labels` masks and depth, the sensor frames, Gate 10-R) is measured
+or is to be measured on Windows, and every capture-and-render
+instruction in the docs is a PowerShell command. Until the build steps
+below have produced the bridge, Windows refuses as `ue.platform` with
+the exact missing piece, and everything in the first three rows still
+completes. Everything in those rows is pure Python and is exercised by
+CI on all three OSes. macOS builds the same sources (the original
+calibrations were measured there, on Metal) but is not maintained as a
+render path this phase; Linux is headless-only. After building on
+Windows run `experiments/gate6_visual.py` once: it re-measures the
 visual clauses from the rendered pixels on YOUR machine, which is the
-project's standard of evidence -- a green Gate 6 there is the Windows
-render claim. Linux remains headless-only.
+project's standard of evidence.
 
 Per-OS setup notes:
 
@@ -106,7 +123,7 @@ Per-OS setup notes:
   ZERO setup on any OS: a fresh clone compiles a prompt before
   installing anything optional.
 
-**Rendering video clips** needs Unreal Engine 5.5 (free from the Epic
+**Rendering video clips** needs Unreal Engine 5.7 (free from the Epic
 Games Launcher) plus the platform toolchain:
 
 * **macOS** (Xcode 15.2-16.9):
@@ -228,18 +245,46 @@ gate, the breadth behind Gate 5's single case:
 ## Capture camera geometry (Camera Phase 1, any platform)
 
 Cameras are spec elements (provenanced, validated, digest-relevant --
-see `docs/CAMERA_PHASE1_REPORT.md`). A run captures a DEFINED number of
-frames, each with full recoverable geometry, engine or no engine:
+see `docs/CAMERA_PHASE1_REPORT.md` and `docs/CAMERA_WINDOWS.md`, and
+`docs/CAMERA_PHASE1_GRADE.md` for what was measured wrong at the phase
+merge and what is still open). A run captures a DEFINED number of
+frames, each with full recoverable geometry, engine or no engine.
+
+**One command, every platform** -- captures a specification twice with
+different camera sets and reports alignment, geometry recovery and
+cross-view consistency in one pass/fail summary:
 
 ```bash
+./scripts/verify_phase1.sh          # Windows: .\scripts\verify_phase1.ps1
+```
+
+Or the pieces:
+
+```bash
+.venv/bin/python -m flightsim.demo
 .venv/bin/python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo
 .venv/bin/python -m flightsim.verify runs/demo
 ```
 
-Off macOS the pixel render refuses by name (`ue.platform`) while the
-capture manifest, geometry previews and verification complete; the
-refusal example (`examples/cameras_refusal.yaml`) shows a camera placed
-inside terrain refused as `camera.terrain_clearance`.
+Without the engine the pixel render refuses by name (`ue.platform`)
+while the capture manifest, geometry previews and verification complete.
+
+Committed examples, all runnable with no network and no account:
+
+| example | what it shows | expected |
+|---|---|---|
+| `cameras_multi.yaml` | two cameras, one flight, 24 images each | 48 frames |
+| `cameras_waypoint.yaml` | waypoint capture along the flown track | frames each 400 m |
+| `cameras_terrain.yaml` | waypoint + counted capture over a REAL raster (`--synth-terrain`) | 30 frames |
+| `cameras_refusal.yaml` | a camera under the terrain datum | `REFUSED [camera.terrain_clearance]` |
+| `cameras_mountain_refusal.yaml` | a camera INSIDE a mountain, checked against the raster (`--synth-terrain`) | `REFUSED [camera.terrain_clearance]` |
+| `cameras_event_trigger.yaml` | an EVENT-driven capture: frames only while the recorded sink rate in a thunderstorm downburst is below -10 m/s | ~29 frames, all with `climb_rate_mps < -10` |
+| `cameras_hazard_refusal.yaml` | a tower camera stated INSIDE the modelled tornado core | `REFUSED [camera.hazard_intersection]` |
+
+`--synth-terrain` synthesises a deterministic raster centred on the
+spec's own origin (spectral construction plus thermal and hydraulic
+erosion), so the terrain examples run over real ground on a fresh clone.
+`--terrain <bake stem>` remains the path for real geography.
 
 ## Run the tests
 

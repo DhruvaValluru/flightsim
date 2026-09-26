@@ -10,17 +10,24 @@
 
 #include "CineCameraComponent.h"
 #include "Components/DirectionalLightComponent.h"
+#include "Components/MeshComponent.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "EngineUtils.h"
 #include "Dom/JsonObject.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/Engine.h"
 #include "Engine/SkyLight.h"
 #include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "ImageUtils.h"
+#include "IImageWrapper.h"
+#include "IImageWrapperModule.h"
+#include "Modules/ModuleManager.h"
+#include "HAL/IConsoleManager.h"
 #include "GeoReferencingSystem.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
@@ -28,10 +35,13 @@
 #include "Serialization/JsonReader.h"
 #include "AssetCompilingManager.h"
 #include "RenderingThread.h"
+#include "RHI.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "ShaderCompiler.h"
 #include "TextureResource.h"
+
+#include <limits>
 
 DEFINE_LOG_CATEGORY(LogFlightSimRender);
 
@@ -92,6 +102,129 @@ namespace
 
 	// World -> pixel through the capture's own transform and FOV, so the
 	// harness can sample known landmarks instead of guessing regions by eye.
+	// -- Phase 10 labels: constants and the 16-bit PNG writer -----------------
+	// Names are per-file-unique (gotcha 3: unity builds merge anonymous
+	// namespaces). Depth beyond RenderLabelDepthSkyCm is "no geometry" --
+	// the sky. The 16-bit depth PNG stores metres / RenderLabelDepthScaleM,
+	// saturating at RenderLabelDepthSaturationM; both numbers ride in
+	// render.json so no reader has to know them. (Phase 2 retired the 5 cm
+	// depth-agreement mask; the ID image comes from the stencil pass below
+	// and the instance/class ids here are the DEFAULT pair a card without
+	// objects[] gets.)
+	constexpr float RenderLabelDepthSkyCm = 5.0e6f;          // 50 km
+	constexpr double RenderLabelDepthScaleM = 0.1;
+	constexpr double RenderLabelDepthSaturationM = 6553.5;
+	constexpr uint8 RenderLabelAircraftInstanceId = 1;
+	constexpr uint8 RenderLabelClassAircraft = 1;
+	constexpr uint8 RenderLabelClassTerrain = 2;
+	// Phase 2 (packages B + C): the post-process material that emits the
+	// Custom Depth Stencil as a flat float for the ID pass. Built by
+	// scripts/ue_create_materials.py (MD_PostProcess, blendable location
+	// "Replacing the Tonemapper", EmissiveColor = SceneTexture:CustomStencil).
+	// Absent -> -labels refuses by name; nothing else is written as an ID.
+	constexpr const TCHAR* RenderLabelStencilMaterialPath =
+		TEXT("/Game/FlightSim/M_CustomStencilID.M_CustomStencilID");
+	// The raw depth file is little-endian float32; every UE target is.
+	static_assert(PLATFORM_LITTLE_ENDIAN, "frame_NNNN_depth.f32 is declared little-endian");
+
+	// One labelled object as the -labels pass sees it: the card's ids, the
+	// actor whose mesh components carry the stencil (null for a scene
+	// object like the terrain, whose id goes on every other mesh), and the
+	// alone-pass capture (aircraft only).
+	struct FRenderLabelledObject
+	{
+		FString Id;
+		int32 IntId = 0;
+		int32 ClassId = 0;
+		FString Class;
+		FString Role;
+		AActor* Actor = nullptr;
+		USceneCaptureComponent2D* Alone = nullptr;
+	};
+
+	// -- Phase 10, P10-4: SHA-256 of what was written -----------------------
+	// Self-contained (FIPS 180-4), so the digest recorded in render.json
+	// depends on no engine hashing API that a version could move; the
+	// Python side hashes the same bytes with hashlib and they must agree.
+	constexpr uint32 RenderSha256K[64] = {
+		0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu, 0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u,
+		0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u, 0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u,
+		0xe49b69c1u, 0xefbe4786u, 0x0fc19dc6u, 0x240ca1ccu, 0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau,
+		0x983e5152u, 0xa831c66du, 0xb00327c8u, 0xbf597fc7u, 0xc6e00bf3u, 0xd5a79147u, 0x06ca6351u, 0x14292967u,
+		0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu, 0x53380d13u, 0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u,
+		0xa2bfe8a1u, 0xa81a664bu, 0xc24b8b70u, 0xc76c51a3u, 0xd192e819u, 0xd6990624u, 0xf40e3585u, 0x106aa070u,
+		0x19a4c116u, 0x1e376c08u, 0x2748774cu, 0x34b0bcb5u, 0x391c0cb3u, 0x4ed8aa4au, 0x5b9cca4fu, 0x682e6ff3u,
+		0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u, 0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u};
+
+	FORCEINLINE uint32 RenderRotr(uint32 x, uint32 n) { return (x >> n) | (x << (32 - n)); }
+
+	FString RenderSha256Hex(const uint8* Data, int64 Length)
+	{
+		uint32 H[8] = {0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+		               0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u};
+		// Padding: the message, a 0x80 byte, zeros to 56 mod 64, then the
+		// bit length big-endian.
+		const int64 Padded = ((Length + 9 + 63) / 64) * 64;
+		TArray<uint8> Message;
+		Message.SetNumZeroed(Padded);
+		FMemory::Memcpy(Message.GetData(), Data, Length);
+		Message[Length] = 0x80;
+		const uint64 Bits = static_cast<uint64>(Length) * 8u;
+		for (int32 i = 0; i < 8; ++i)
+		{
+			Message[Padded - 1 - i] = static_cast<uint8>((Bits >> (8 * i)) & 0xffu);
+		}
+		uint32 W[64];
+		for (int64 Chunk = 0; Chunk < Padded; Chunk += 64)
+		{
+			const uint8* Block = Message.GetData() + Chunk;
+			for (int32 i = 0; i < 16; ++i)
+			{
+				W[i] = (uint32(Block[4 * i]) << 24) | (uint32(Block[4 * i + 1]) << 16)
+				     | (uint32(Block[4 * i + 2]) << 8) | uint32(Block[4 * i + 3]);
+			}
+			for (int32 i = 16; i < 64; ++i)
+			{
+				const uint32 s0 = RenderRotr(W[i - 15], 7) ^ RenderRotr(W[i - 15], 18) ^ (W[i - 15] >> 3);
+				const uint32 s1 = RenderRotr(W[i - 2], 17) ^ RenderRotr(W[i - 2], 19) ^ (W[i - 2] >> 10);
+				W[i] = W[i - 16] + s0 + W[i - 7] + s1;
+			}
+			uint32 a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+			for (int32 i = 0; i < 64; ++i)
+			{
+				const uint32 S1 = RenderRotr(e, 6) ^ RenderRotr(e, 11) ^ RenderRotr(e, 25);
+				const uint32 ch = (e & f) ^ (~e & g);
+				const uint32 t1 = h + S1 + ch + RenderSha256K[i] + W[i];
+				const uint32 S0 = RenderRotr(a, 2) ^ RenderRotr(a, 13) ^ RenderRotr(a, 22);
+				const uint32 maj = (a & b) ^ (a & c) ^ (b & c);
+				const uint32 t2 = S0 + maj;
+				h = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+			}
+			H[0] += a; H[1] += b; H[2] += c; H[3] += d; H[4] += e; H[5] += f; H[6] += g; H[7] += h;
+		}
+		FString Hex;
+		for (int32 i = 0; i < 8; ++i)
+		{
+			Hex += FString::Printf(TEXT("%08x"), H[i]);
+		}
+		return Hex;
+	}
+
+	bool RenderWriteGrayPng(const FString& Path, const void* Bytes, int64 NumBytes,
+	                        int32 Width, int32 Height, int32 BitDepth)
+	{
+		IImageWrapperModule& Module =
+			FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+		TSharedPtr<IImageWrapper> Png = Module.CreateImageWrapper(EImageFormat::PNG);
+		if (!Png.IsValid()
+		    || !Png->SetRaw(Bytes, NumBytes, Width, Height, ERGBFormat::Gray, BitDepth))
+		{
+			return false;
+		}
+		const TArray64<uint8> Compressed = Png->GetCompressed();
+		return Compressed.Num() > 0 && FFileHelper::SaveArrayToFile(Compressed, *Path);
+	}
+
 	bool ProjectToPixel(const USceneCaptureComponent2D* Capture, int32 Width,
 	                    int32 Height, const FVector& WorldCm, FVector2D& OutPixel)
 	{
@@ -126,11 +259,27 @@ namespace
 		FString License;
 		FString Repo;
 		FString Commit;
+		FString Livery = TEXT("default");
+		// Manifest version 2 (Camera Phase 2, package A): where the model's
+		// origin sits in the ACTOR frame, cm. The converter's vertices are
+		// about the model's own origin -- the FDM's visual reference point,
+		// by FlightGear's convention -- while the actor origin is the JSBSim
+		// structural datum (UJSBSimMovementComponent::UpdateLocalTransforms:
+		// StructuralToActor negates X about StructuralFrameOrigin, zero).
+		// Attached at the root, the B747 mesh sat 33.7 m (its VRP x =
+		// 1327 in) forward of the CG the label describes; the Phase 1
+		// initial run report measured 25-30 m along the airframe's axis.
+		// A version-1 manifest has no origin: zero, drawn at the datum, and
+		// render.json says so under "drawn" so the verifier fails it.
+		FVector MeshOriginActorCm = FVector::ZeroVector;
+		int32 ManifestVersion = 0;
+		FString OriginBasis;
+		double Triangles = 0.0;
 	};
 
 	bool BuildMeshAirframe(AActor* Aircraft, UFlightSimSurfaceAnimator* Animator,
 	                       const FString& ManifestPath, const FString& CardAircraft,
-	                       FMeshAirframe& Out, FString& Error)
+	                       const FString& Livery, FMeshAirframe& Out, FString& Error)
 	{
 		FString Text;
 		if (!FFileHelper::LoadFileToString(Text, *ManifestPath))
@@ -188,6 +337,61 @@ namespace
 		Manifest->TryGetStringField(TEXT("asset_path_root"), AssetRoot);
 		USceneComponent* Root = Aircraft->GetRootComponent();
 
+		// Where the model's origin sits in the actor (manifest version 2).
+		double VersionNumber = 0.0;
+		Manifest->TryGetNumberField(TEXT("version"), VersionNumber);
+		Out.ManifestVersion = static_cast<int32>(VersionNumber);
+		const TArray<TSharedPtr<FJsonValue>>* OriginField = nullptr;
+		if (Manifest->TryGetArrayField(TEXT("mesh_origin_actor_cm"), OriginField) &&
+		    OriginField != nullptr && OriginField->Num() == 3)
+		{
+			Out.MeshOriginActorCm = FVector((*OriginField)[0]->AsNumber(),
+			                                (*OriginField)[1]->AsNumber(),
+			                                (*OriginField)[2]->AsNumber());
+			Manifest->TryGetStringField(TEXT("mesh_origin_basis"), Out.OriginBasis);
+		}
+		else
+		{
+			// Not a refusal: the frames still render, but every mask is
+			// offset from its label by the VRP, and render.json's "drawn"
+			// object records it so verify's drawn_airframe check FAILS by
+			// name rather than the offset being found by eye.
+			Out.OriginBasis = TEXT("no mesh_origin_actor_cm in the manifest (version < 2): ")
+			                  TEXT("attached at the actor origin, the structural datum");
+			UE_LOG(LogFlightSimRender, Warning,
+			       TEXT("mesh manifest '%s' (version %d) records no mesh_origin_actor_cm: ")
+			       TEXT("the mesh is attached at the actor origin -- the JSBSim structural ")
+			       TEXT("datum -- and is drawn offset from its label by the FDM's VRP ")
+			       TEXT("(33.7 m forward on the B747). Fix: re-run assets_pipeline/convert.py ")
+			       TEXT("on assets/aircraft_config/%s.json (the web app's render flow ")
+			       TEXT("re-converts a stale manifest itself) and render again."),
+			       *ManifestPath, Out.ManifestVersion, *Out.Name);
+		}
+		const TSharedPtr<FJsonObject>* TriangleCounts = nullptr;
+		if (Manifest->TryGetObjectField(TEXT("triangles"), TriangleCounts) &&
+		    TriangleCounts != nullptr && TriangleCounts->IsValid())
+		{
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*TriangleCounts)->Values)
+			{
+				double Count = 0.0;
+				if (Pair.Value.IsValid() && Pair.Value->TryGetNumber(Count))
+				{
+					Out.Triangles += Count;
+				}
+			}
+		}
+		// ONE component at the model's origin; the body and every hinge hang
+		// under it. The hinge mids are stated in the same model-about-origin
+		// frame as the vertices, so they move with it and each surface stays
+		// on its hinge line. FlightSimScenarioWorld's placement (the actor
+		// origin that puts the CG on the commanded point) is untouched: this
+		// moves the geometry within the actor, not the actor.
+		USceneComponent* MeshOrigin = NewObject<USceneComponent>(Aircraft, TEXT("MeshOrigin"));
+		MeshOrigin->SetupAttachment(Root);
+		MeshOrigin->SetMobility(EComponentMobility::Movable);
+		MeshOrigin->RegisterComponent();
+		MeshOrigin->SetRelativeLocation(Out.MeshOriginActorCm);
+
 		auto LoadPart = [&](const FString& Part) -> UStaticMesh*
 		{
 			const FString Path = FString::Printf(TEXT("%s/%s.%s"), *AssetRoot, *Part, *Part);
@@ -205,7 +409,7 @@ namespace
 		}
 		UStaticMeshComponent* BodyComponent =
 			NewObject<UStaticMeshComponent>(Aircraft, TEXT("MeshBody"));
-		BodyComponent->SetupAttachment(Root);
+		BodyComponent->SetupAttachment(MeshOrigin);
 		BodyComponent->SetMobility(EComponentMobility::Movable);
 		BodyComponent->SetStaticMesh(Body);
 		BodyComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -213,8 +417,13 @@ namespace
 
 		// A manifest airframe replaces the whole binding table: its bones are
 		// its own (both elevators, split ailerons), and mixing them with the
-		// stock table would make bone lookup ambiguous.
-		Animator->ClearBindings();
+		// stock table would make bone lookup ambiguous. A scripted traffic
+		// actor has no FDM and no animator: its surfaces hang undeflected at
+		// their hinges (Phase 2, packages B + C).
+		if (Animator != nullptr)
+		{
+			Animator->ClearBindings();
+		}
 
 		const TArray<TSharedPtr<FJsonValue>>* Surfaces = nullptr;
 		if (!Manifest->TryGetArrayField(TEXT("surfaces"), Surfaces) || Surfaces == nullptr)
@@ -259,7 +468,7 @@ namespace
 			}
 			USceneComponent* HingeComponent = NewObject<USceneComponent>(
 				Aircraft, *FString::Printf(TEXT("%sHinge"), *Bone));
-			HingeComponent->SetupAttachment(Root);
+			HingeComponent->SetupAttachment(MeshOrigin);
 			HingeComponent->SetMobility(EComponentMobility::Movable);
 			HingeComponent->RegisterComponent();
 			HingeComponent->SetRelativeLocation(HingeMid);
@@ -277,16 +486,58 @@ namespace
 
 			bool bContinuous = false;
 			(*Entry)->TryGetBoolField(TEXT("continuous"), bContinuous);
-			Animator->AddBinding(Property, FName(*Bone),
-			                     static_cast<float>(Scale), RotationAxis,
-			                     bContinuous);
-			Animator->BindSurfaceComponent(FName(*Bone), HingeComponent);
+			if (Animator != nullptr)
+			{
+				Animator->AddBinding(Property, FName(*Bone),
+				                     static_cast<float>(Scale), RotationAxis,
+				                     bContinuous);
+				Animator->BindSurfaceComponent(FName(*Bone), HingeComponent);
+			}
 		}
+		// Phase 10 (package 7): the sampled livery. "default" is the
+		// mesh's own materials (exactly the previous behaviour); any
+		// other name is a material asset the import step placed at
+		// <asset_path_root>/Liveries/<name>, applied to every slot of
+		// every part. A name that does not load REFUSES by name: a
+		// frame whose record says one livery while the pixels show
+		// another is the failure this exists to prevent.
+		if (!Livery.IsEmpty() && Livery != TEXT("default"))
+		{
+			const FString LiveryPath = FString::Printf(
+				TEXT("%s/Liveries/%s.%s"), *AssetRoot, *Livery, *Livery);
+			UMaterialInterface* LiveryMaterial =
+				LoadObject<UMaterialInterface>(nullptr, *LiveryPath);
+			if (LiveryMaterial == nullptr)
+			{
+				Error = FString::Printf(
+					TEXT("livery '%s' did not load at %s (card randomization.livery); ")
+					TEXT("refusing to render the default livery under a record that ")
+					TEXT("names another"), *Livery, *LiveryPath);
+				return false;
+			}
+			TInlineComponentArray<UStaticMeshComponent*> Parts;
+			Aircraft->GetComponents(Parts);
+			int32 Slots = 0;
+			for (UStaticMeshComponent* Part : Parts)
+			{
+				for (int32 Slot = 0; Slot < Part->GetNumMaterials(); ++Slot)
+				{
+					Part->SetMaterial(Slot, LiveryMaterial);
+					++Slots;
+				}
+			}
+			UE_LOG(LogFlightSimRender, Display,
+			       TEXT("livery '%s' applied to %d material slot(s) of %d part(s)"),
+			       *Livery, Slots, Parts.Num());
+		}
+		Out.Livery = Livery.IsEmpty() ? TEXT("default") : Livery;
 		Out.bLoaded = true;
 		UE_LOG(LogFlightSimRender, Display,
-		       TEXT("mesh airframe '%s' (%s) [%s, %s@%s]: %d surfaces bound"),
+		       TEXT("mesh airframe '%s' (%s) [%s, %s@%s]: %d surfaces bound; ")
+		       TEXT("manifest version %d, origin (%.1f, %.1f, %.1f) cm in the actor frame"),
 		       *Out.Name, *Out.MeshAirframe, *Out.License, *Out.Repo,
-		       *Out.Commit.Left(12), Surfaces->Num());
+		       *Out.Commit.Left(12), Surfaces->Num(), Out.ManifestVersion,
+		       Out.MeshOriginActorCm.X, Out.MeshOriginActorCm.Y, Out.MeshOriginActorCm.Z);
 		return true;
 	}
 
@@ -347,7 +598,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		UE_LOG(LogFlightSimRender, Error,
 		       TEXT("usage: -run=FlightSimBridge.FlightSimRender ")
-		       TEXT("-scenario=<run-card.json> -frames=<out-dir> [-fps=5] "
+		       TEXT("-scenario=<run-card.json> -frames=<out-dir> [-fps=5] [-labels] [-linear] [-deterministic] "
 		            "[-width=960] [-height=540]"));
 		return 1;
 	}
@@ -373,6 +624,48 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	const bool bShadowShot = Shot == TEXT("shadow");
 	const bool bNoShadows = FParse::Param(*Params, TEXT("NoShadows"));
 	const bool bHideAircraft = FParse::Param(*Params, TEXT("HideAircraft"));
+	// Phase 10 labels: the engine half of the per-frame ground truth --
+	// an instance mask, a class mask, 16-bit depth and an occlusion
+	// fraction beside every delivered frame. Opt-in: without it this
+	// pass is byte-for-byte the previous one.
+	const bool bLabels = FParse::Param(*Params, TEXT("labels"));
+	// Phase 10 sensor model: keep the LINEAR frame too. The colour capture
+	// is FinalColorLDR into an sRGB8 target -- tone-mapped and quantised
+	// -- and the Python post-pass has to invert the transfer to get back
+	// to linear light, a stated approximation. -linear adds a second
+	// capture of FinalColorHDR into a float target, written as
+	// frame_NNNN_linear.exr beside the PNG; the post-pass prefers it when
+	// it can read it. Opt-in, additive.
+	const bool bLinear = FParse::Param(*Params, TEXT("linear"));
+	// Phase 10, P10-4: pin what the renderer would otherwise decide by
+	// timing. Texture streaming brings mips in over wall time; LOD
+	// selection is deterministic in screen size but a forced LOD takes
+	// the question away. Temporal accumulation is handled by the fixed
+	// warm-up captures and an identical capture sequence, and Gate 10-R
+	// measures whether that is enough rather than assuming it.
+	const bool bDeterministic = FParse::Param(*Params, TEXT("deterministic"));
+	if (bDeterministic)
+	{
+		struct FPin { const TCHAR* Name; int32 Value; };
+		const FPin Pins[] = {
+			{TEXT("r.TextureStreaming"), 0},
+			{TEXT("r.Streaming.FullyLoadUsedTextures"), 1},
+			{TEXT("r.ForceLOD"), 0},
+		};
+		for (const FPin& Pin : Pins)
+		{
+			if (IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(Pin.Name))
+			{
+				Variable->Set(Pin.Value, ECVF_SetByCode);
+				UE_LOG(LogFlightSimRender, Display, TEXT("deterministic: %s = %d"), Pin.Name, Pin.Value);
+			}
+			else
+			{
+				UE_LOG(LogFlightSimRender, Warning,
+				       TEXT("deterministic: console variable %s not found in this build"), Pin.Name);
+			}
+		}
+	}
 	// The exposure clause's negative control: render with the default
 	// auto-exposure so the harness can prove its metric actually catches
 	// metering that responds to the scene. A metric no failure can trip is
@@ -398,7 +691,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// Sun as a time-of-day parameter (dawn / noon / low sun are elevation and
 	// azimuth choices made by the harness and recorded in the manifest).
 	double SunElevationDeg = 0.0, SunAzimuthDeg = 0.0;
-	const bool bSunOverride =
+	// Not const since Phase 2: the card's look block (below) overrides the
+	// pair when it carries a sun.
+	bool bSunOverride =
 		FParse::Value(*Params, TEXT("sun-elev="), SunElevationDeg) &&
 		FParse::Value(*Params, TEXT("sun-azim="), SunAzimuthDeg);
 	// Sun ANIMATION (Phase 7 3.1): end-of-clip elevation/azimuth. The sun
@@ -418,6 +713,24 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	FParse::Value(*Params, TEXT("imagery="), ImagerySidecar);
 	double ExposureBias = 11.0;
 	FParse::Value(*Params, TEXT("exposure-bias="), ExposureBias);
+	// -- Phase 2 Look lane PROBE flags (contracts §5.4, §10) ---------------
+	// The look reaches the engine on the CARD (look / randomization.look,
+	// core/scene/weather_visuals.py); these flags exist for the Gate 6
+	// control renders (one control per switch, the gotcha 6 pattern) and
+	// OVERRIDE the card's row when given. Each is recorded in
+	// render.json look_applied as a probe override. -stars / -moon are
+	// accepted so a request for them is recorded as "not modelled" rather
+	// than silently ignored.
+	double CloudCoverFlag = -1.0, CloudBaseFlag = -1.0, CloudThicknessFlag = -1.0;
+	FParse::Value(*Params, TEXT("cloud-cover="), CloudCoverFlag);
+	FParse::Value(*Params, TEXT("cloud-base="), CloudBaseFlag);
+	FParse::Value(*Params, TEXT("cloud-thickness="), CloudThicknessFlag);
+	double AerosolFlag = -1.0;
+	FParse::Value(*Params, TEXT("aerosol="), AerosolFlag);
+	FString PrecipFlag;
+	FParse::Value(*Params, TEXT("precip="), PrecipFlag);
+	const bool bStarsFlag = FParse::Param(*Params, TEXT("stars"));
+	const bool bMoonFlag = FParse::Param(*Params, TEXT("moon"));
 	// Chase offset override, metres: a 747 framed at -170 m puts a Cessna
 	// eleven pixels wide; the harness knows the airframe, so it chooses.
 	FString ChaseSpec;
@@ -473,12 +786,163 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// measurements depend on it, so it stays byte-for-byte as it was. Gate 6's
 	// is the §6.6 scene, behind -Visual.
 	FFlightSimVisualScene VisualScene;
+	// -- Phase 2 Look lane: the card's look block (contracts §5.4) ---------
+	// The engine consumes what the CARD carries: `look` at the root, else
+	// `randomization.look` (where package F lands it, contracts §5.6). The
+	// keys are exactly core/scene/weather_visuals.py's: fog_extinction_per_m
+	// (-> FogDensity, overriding -fog-density), aerosol (RECORDED, not
+	// applied: the fog row carries that extinction), clouds[{cover, base_m,
+	// top_m}], precipitation + wetness, cloud_drift_mps / cloud_drift_from_deg
+	// (recorded, not applied), ev100{camera_id} and the sun pair. A card
+	// without the block renders byte-identically to Phase 10 from the flags.
+	TSharedPtr<FJsonObject> CardLook;
+	FString LookSource = TEXT("flags (the card carries no look block)");
+	TMap<FString, double> LookEv100;
+	double LookAerosol = 0.0;
+	bool bLookAerosol = false;
+	{
+		FString LookCardText;
+		TSharedPtr<FJsonObject> LookCardRoot;
+		if (FFileHelper::LoadFileToString(LookCardText, *ScenarioPath))
+		{
+			const TSharedRef<TJsonReader<>> LookReader =
+				TJsonReaderFactory<>::Create(LookCardText);
+			FJsonSerializer::Deserialize(LookReader, LookCardRoot);
+		}
+		const TSharedPtr<FJsonObject>* LookField = nullptr;
+		const TSharedPtr<FJsonObject>* RandomizationField = nullptr;
+		if (LookCardRoot.IsValid() &&
+		    LookCardRoot->TryGetObjectField(TEXT("look"), LookField) &&
+		    LookField != nullptr && LookField->IsValid())
+		{
+			CardLook = *LookField;
+			LookSource = TEXT("card.look");
+		}
+		else if (LookCardRoot.IsValid() &&
+		         LookCardRoot->TryGetObjectField(TEXT("randomization"), RandomizationField) &&
+		         RandomizationField != nullptr && RandomizationField->IsValid() &&
+		         (*RandomizationField)->TryGetObjectField(TEXT("look"), LookField) &&
+		         LookField != nullptr && LookField->IsValid())
+		{
+			CardLook = *LookField;
+			LookSource = TEXT("card.randomization.look");
+		}
+		if (CardLook.IsValid())
+		{
+			const TSharedPtr<FJsonObject>* Ev100Json = nullptr;
+			if (CardLook->TryGetObjectField(TEXT("ev100"), Ev100Json) && Ev100Json != nullptr &&
+			    Ev100Json->IsValid())
+			{
+				for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*Ev100Json)->Values)
+				{
+					double Value = 0.0;
+					if (Pair.Value.IsValid() && Pair.Value->TryGetNumber(Value))
+					{
+						LookEv100.Add(Pair.Key, Value);
+					}
+				}
+			}
+			bLookAerosol = CardLook->TryGetNumberField(TEXT("aerosol"), LookAerosol);
+		}
+	}
+	TArray<FString> LookProbeOverrides;
 	if (bVisual)
 	{
 		FFlightSimVisualSceneOptions SceneOptions;
 		SceneOptions.TerrainPath = TerrainPath;
 		SceneOptions.bDynamicShadows = !bNoShadows;
 		SceneOptions.FogDensity = static_cast<float>(FogDensity);
+		if (CardLook.IsValid())
+		{
+			double Value = 0.0;
+			if (CardLook->TryGetNumberField(TEXT("fog_extinction_per_m"), Value) && Value > 0.0)
+			{
+				FogDensity = Value;
+				SceneOptions.FogDensity = static_cast<float>(Value);
+			}
+			double LookSunElevation = 0.0, LookSunAzimuth = 0.0;
+			if (!bSunAnimated &&
+			    CardLook->TryGetNumberField(TEXT("sun_elevation_deg"), LookSunElevation) &&
+			    CardLook->TryGetNumberField(TEXT("engine_sun_azimuth_deg"), LookSunAzimuth))
+			{
+				// The same pair the flags carry (render_look builds both from
+				// one block); the card is the record of truth when present.
+				SunElevationDeg = LookSunElevation;
+				SunAzimuthDeg = LookSunAzimuth;
+				bSunOverride = true;
+			}
+			const TArray<TSharedPtr<FJsonValue>>* CloudsJson = nullptr;
+			if (CardLook->TryGetArrayField(TEXT("clouds"), CloudsJson) && CloudsJson != nullptr)
+			{
+				for (const TSharedPtr<FJsonValue>& Entry : *CloudsJson)
+				{
+					const TSharedPtr<FJsonObject> LayerJson =
+						Entry.IsValid() ? Entry->AsObject() : nullptr;
+					if (!LayerJson.IsValid())
+					{
+						continue;
+					}
+					FFlightSimCloudLayer Layer;
+					LayerJson->TryGetNumberField(TEXT("cover"), Layer.CoverFraction);
+					LayerJson->TryGetNumberField(TEXT("base_m"), Layer.BaseMetres);
+					LayerJson->TryGetNumberField(TEXT("top_m"), Layer.TopMetres);
+					SceneOptions.CloudLayers.Add(Layer);
+				}
+			}
+			FString Word;
+			if (CardLook->TryGetStringField(TEXT("precipitation"), Word))
+			{
+				SceneOptions.Precipitation = Word;
+			}
+			if (CardLook->TryGetNumberField(TEXT("wetness"), Value))
+			{
+				SceneOptions.Wetness = Value;
+			}
+			CardLook->TryGetNumberField(TEXT("cloud_drift_mps"), SceneOptions.CloudDriftMps);
+			CardLook->TryGetNumberField(TEXT("cloud_drift_from_deg"), SceneOptions.CloudDriftFromDeg);
+		}
+		// Probe overrides (Gate 6 controls), each recorded by name.
+		if (CloudCoverFlag >= 0.0)
+		{
+			SceneOptions.CloudLayers.Reset();
+			if (CloudCoverFlag > 0.0)
+			{
+				FFlightSimCloudLayer Layer;
+				Layer.CoverFraction = CloudCoverFlag;
+				// The same stated defaults as weather_visuals.py
+				// (DEFAULT_CLOUD_BASE_M 1500, DEFAULT_CLOUD_THICKNESS_M 1000).
+				Layer.BaseMetres = CloudBaseFlag >= 0.0 ? CloudBaseFlag : 1500.0;
+				Layer.TopMetres = Layer.BaseMetres +
+					(CloudThicknessFlag > 0.0 ? CloudThicknessFlag : 1000.0);
+				SceneOptions.CloudLayers.Add(Layer);
+			}
+			LookProbeOverrides.Add(TEXT("cloud-cover"));
+		}
+		if (AerosolFlag >= 0.0)
+		{
+			SceneOptions.AerosolMieScale = AerosolFlag;
+			LookProbeOverrides.Add(TEXT("aerosol"));
+		}
+		if (!PrecipFlag.IsEmpty())
+		{
+			// The wetness per word restates weather_visuals.WETNESS
+			// (none 0, rain 1.0, snow 0.6); the applied number is recorded.
+			if (PrecipFlag == TEXT("none")) { SceneOptions.Wetness = 0.0; }
+			else if (PrecipFlag == TEXT("rain")) { SceneOptions.Wetness = 1.0; }
+			else if (PrecipFlag == TEXT("snow")) { SceneOptions.Wetness = 0.6; }
+			else
+			{
+				return Fail(FString::Printf(
+					TEXT("look.precipitation: -precip='%s' is not one of none|rain|snow"),
+					*PrecipFlag));
+			}
+			SceneOptions.Precipitation = PrecipFlag;
+			LookProbeOverrides.Add(TEXT("precip"));
+		}
+		SceneOptions.bStarsRequested = bStarsFlag;
+		SceneOptions.bMoonRequested = bMoonFlag;
+		if (bStarsFlag) { LookProbeOverrides.Add(TEXT("stars")); }
+		if (bMoonFlag) { LookProbeOverrides.Add(TEXT("moon")); }
 		if (bGeorefTerrain)
 		{
 			SceneOptions.bGeoreferenced = true;
@@ -529,6 +993,33 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		ASkyLight* Sky = World->SpawnActor<ASkyLight>();
 		Sky->GetLightComponent()->SetMobility(EComponentMobility::Movable);
 		Sky->GetLightComponent()->SetIntensity(1.1f);
+
+		// ...and a fill from the opposite hemisphere, because in this scene
+		// that SkyLight delivers NOTHING. Its source is the captured scene,
+		// and the scene is a deliberately black void: it captures black and
+		// adds black. So the airframe was lit from exactly one direction,
+		// and every surface facing away from the sun rendered at 13/255 --
+		// the background's own noise floor, below the 24 that separates
+		// aircraft from void. Measured on the tower camera, which looks UP
+		// at the belly from 68 deg below: 18 of 24 frames came back with
+		// literally nothing above the background, while the solved pose had
+		// the aircraft dead centre (648, 360) and 25 px across the whole
+		// time. The frames were empty because the belly is unlit, not
+		// because the camera was aimed wrong.
+		//
+		// A mirrored key at half intensity is the studio answer: it lights
+		// the shadow side to ~65/255 against the sunlit side's ~130, so an
+		// observer anywhere on the sphere sees an airframe, and the sun is
+		// still visibly the sun. It casts no shadows -- a second shadowing
+		// directional light would put a contradictory shadow under the
+		// aircraft in the -Visual scene's terms and this tier has no ground
+		// to catch one anyway. It cannot brighten the background: a
+		// directional light illuminates surfaces, and the void has none.
+		ADirectionalLight* Fill = World->SpawnActor<ADirectionalLight>();
+		Fill->GetLightComponent()->SetMobility(EComponentMobility::Movable);
+		Fill->SetActorRotation(FRotator(35.0, -40.0, 0.0));
+		Fill->GetLightComponent()->SetIntensity(4.0f);
+		Fill->GetLightComponent()->SetCastShadows(false);
 	}
 
 	UFlightSimSurfaceAnimator* Animator =
@@ -540,7 +1031,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	if (!MeshManifestPath.IsEmpty())
 	{
 		if (!BuildMeshAirframe(Scenario.Aircraft, Animator, MeshManifestPath,
-		                       Card.Aircraft, MeshAirframe, Error))
+		                       Card.Aircraft, Card.Livery, MeshAirframe, Error))
 		{
 			return Fail(Error);
 		}
@@ -560,6 +1051,38 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	}
 	UE_LOG(LogFlightSimRender, Display, TEXT("%d control surfaces bound to geometry"),
 	       Animator->GetBoundSurfaceCount());
+
+	// -- Phase 2 (packages B + C): the scripted traffic aircraft -----------
+	// Each card traffic entry has a bare actor from Populate; its mesh is
+	// built by the SAME BuildMeshAirframe path as the primary's (manifest
+	// magic, FDM pairing, licence, at ITS measured mesh origin), with no
+	// animator. A traffic entry with no imported mesh refuses by name --
+	// placeholder airframes never render, for traffic as for the primary.
+	TArray<FMeshAirframe> TrafficMeshes;
+	for (int32 Index = 0; Index < Card.Traffic.Num(); ++Index)
+	{
+		const FFlightSimTrafficTrack& Track = Card.Traffic[Index];
+		if (Index >= Scenario.TrafficActors.Num() || Scenario.TrafficActors[Index] == nullptr)
+		{
+			return Fail(FString::Printf(TEXT("traffic '%s' has no actor in the scenario world"),
+			                            *Track.Id));
+		}
+		if (Track.MeshManifestPath.IsEmpty())
+		{
+			return Fail(FString::Printf(
+				TEXT("aircraft.mesh: traffic '%s' (%s) carries no imported mesh manifest on ")
+				TEXT("the card; a scripted traffic actor is drawn from the same imported mesh ")
+				TEXT("as a primary would be, never from placeholder boxes"),
+				*Track.Id, *Track.Aircraft));
+		}
+		FMeshAirframe TrafficMesh;
+		if (!BuildMeshAirframe(Scenario.TrafficActors[Index], nullptr, Track.MeshManifestPath,
+		                       Track.Aircraft, Track.Livery, TrafficMesh, Error))
+		{
+			return Fail(FString::Printf(TEXT("traffic '%s': %s"), *Track.Id, *Error));
+		}
+		TrafficMeshes.Add(TrafficMesh);
+	}
 
 	// A lagged chase that never inherits roll (§1.5). The previous build welded
 	// the camera to the airframe, which put the camera in the body frame, in
@@ -600,20 +1123,18 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	else if (CameraPreset == TEXT("shoulder"))
 	{
 		Director->Preset = EFlightSimCameraPreset::CockpitShoulder;
-		// The default shoulder offset is B747-scale; on a c172p it sat
-		// INSIDE the fuselage and recorded overexposed paint
-		// (probe-measured). Scale by the model's own span, with a floor
-		// so small airframes keep the camera above the cabin roof.
-		const double SpanMetres =
-			Scenario.ReadProperty(TEXT("metrics/bw-ft")) * 0.3048;
-		const double Scale = FMath::Clamp(SpanMetres / 64.4, 0.3, 1.0);
-		Director->ShoulderOffsetMetres.X *= Scale;
-		Director->ShoulderOffsetMetres.Y *= Scale;
-		Director->ShoulderOffsetMetres.Z =
-			FMath::Max(Director->ShoulderOffsetMetres.Z * Scale, 1.3);
+		// ONE rule, Python's (core/capture/poses.py: SHOULDER_OFFSET
+		// (-6, -0.5, 1.6) m in the body frame from the CG, unscaled). The
+		// span scaling with a 1.3 m z floor that lived here (Phase 7: a
+		// c172p probe put the B747-scale offset inside the cabin) placed
+		// the legacy preset at a different station from the solved track
+		// on every airframe but the B747 (Phase 2 critique). The director's
+		// default is applied as-is from the CG (TargetAimPoint) and recorded
+		// in render.json render_settings.cockpit_offset_m; a small airframe
+		// that wants a different station states it on its camera spec.
 		UE_LOG(LogFlightSimRender, Display,
-		       TEXT("shoulder camera scaled by span %.1f m: offset ")
-		       TEXT("(%.2f, %.2f, %.2f) m"), SpanMetres,
+		       TEXT("shoulder camera: body offset (%.2f, %.2f, %.2f) m from the CG, ")
+		       TEXT("unscaled (Python's SHOULDER_OFFSET rule)"),
 		       Director->ShoulderOffsetMetres.X,
 		       Director->ShoulderOffsetMetres.Y,
 		       Director->ShoulderOffsetMetres.Z);
@@ -653,12 +1174,23 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// the render thread once per frame, so whatever the camera is pointing at
 	// when the first capture goes out is what the first frame shows. Left at
 	// the default rotation that is empty sky.
+	// The place is the director's own answer (PresetRestingPose): this
+	// preset's offset from the CG, the point every preset updates from,
+	// by the arithmetic the first Tick will use. A station this block
+	// computed itself from the actor origin -- the structural datum,
+	// 33.7 m ahead of the B747's CG -- opened every preset-mode chase clip
+	// 136 m behind the CG with the position lag dragging it in to 170 m
+	// over the first ~1.5 s of written frames (the aircraft a quarter
+	// larger and drifting), and put the wingman at the CHASE offset to
+	// swing ~220 m into its slot: the transient this block exists to
+	// prevent, moved rather than removed.
 	{
-		const FRotator HeadingOnly(0.0, Scenario.Aircraft->GetActorRotation().Yaw, 0.0);
-		const FVector Station = Scenario.Aircraft->GetActorLocation() +
-			HeadingOnly.RotateVector(FVector(Director->ChaseOffsetMetres) * RenderCmPerMetre);
-		FRotator Look = (Scenario.Aircraft->GetActorLocation() - Station).Rotation();
-		Look.Roll = 0.0;
+		FVector Station;
+		FRotator Look;
+		if (!Director->PresetRestingPose(Station, Look))
+		{
+			return Fail(TEXT("the camera has no aircraft to start behind"));
+		}
 		Director->SetActorLocationAndRotation(Station, Look.Quaternion());
 	}
 
@@ -676,6 +1208,27 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	int32 ConsumedCameraIndex = 0;
 	double CameraOriginXMetres = 0.0;
 	double CameraOriginYMetres = 0.0;
+	// The solved camera's own sensor, so the field of view can follow the
+	// solved focal length instead of a hardcoded constant. Camera Phase 2:
+	// a manifest that names a lens the frames were not taken through is a
+	// plausible fiction, and every label derived from it is wrong at the
+	// edges of the frame.
+	double CameraSensorWidthMm = 0.0;
+	// Known static world points, solved in Python and carried on the card.
+	// This commandlet projects them through its OWN ProjectToPixel; the
+	// Python verifier projects the same points through the manifest. Two
+	// implementations of one projection is the only independent
+	// reprojection check in this system.
+	TArray<FString> LandmarkNames;
+	TArray<FVector> LandmarkProjectedMetres;
+	// The capture SCHEDULE: the simulation times this camera is meant to
+	// produce an image at, solved in Python. Without it the commandlet
+	// wrote every rendered frame at the clip's frame rate and numbered
+	// them from zero, so a manifest promising 24 images at scheduled
+	// times pointed at the first 24 frames of the run -- real files, the
+	// wrong pictures. The count contract has to reach the pixels.
+	TArray<double> CaptureTimes;
+	int32 NextCapture = 0;
 	{
 		FParse::Value(*Params, TEXT("camera-index="), ConsumedCameraIndex);
 		FString CardText;
@@ -708,6 +1261,34 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				return Fail(TEXT("cameras block is missing origin_x_m/"
 				                 "origin_y_m/poses; refusing to guess the frame"));
 			}
+			// The output frame and the lens are part of the recorded
+			// label. Taking them from the card (where core/capture/poses.py
+			// put them) rather than from -width=/-height= and a constant
+			// FOVAngle is what makes the manifest describe the pixels that
+			// were actually produced.
+			double CameraWidthPx = 0.0;
+			double CameraHeightPx = 0.0;
+			if (!CameraJson->TryGetNumberField(TEXT("width_px"), CameraWidthPx) ||
+			    !CameraJson->TryGetNumberField(TEXT("height_px"), CameraHeightPx) ||
+			    !CameraJson->TryGetNumberField(TEXT("sensor_width_mm"),
+			                                   CameraSensorWidthMm))
+			{
+				return Fail(TEXT("cameras block is missing width_px/"
+				                 "height_px/sensor_width_mm; refusing to "
+				                 "render through a lens the manifest does "
+				                 "not name"));
+			}
+			if (CameraWidthPx < 1.0 || CameraHeightPx < 1.0 ||
+			    CameraSensorWidthMm <= 0.0)
+			{
+				return Fail(FString::Printf(
+					TEXT("cameras block states a %.0fx%.0f output on a "
+					     "%.4f mm sensor; not a camera"),
+					CameraWidthPx, CameraHeightPx, CameraSensorWidthMm));
+			}
+			Width = FMath::RoundToInt(CameraWidthPx);
+			Height = FMath::RoundToInt(CameraHeightPx);
+
 			const TArray<TSharedPtr<FJsonValue>>* Times = nullptr;
 			const TArray<TSharedPtr<FJsonValue>>* Norths = nullptr;
 			const TArray<TSharedPtr<FJsonValue>>* Easts = nullptr;
@@ -715,6 +1296,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			const TArray<TSharedPtr<FJsonValue>>* Yaws = nullptr;
 			const TArray<TSharedPtr<FJsonValue>>* Pitches = nullptr;
 			const TArray<TSharedPtr<FJsonValue>>* Rolls = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Focals = nullptr;
+			if (!(*PosesJson)->TryGetArrayField(TEXT("focal_length_mm"),
+			                                    Focals))
+			{
+				return Fail(TEXT("camera pose track is missing "
+				                 "focal_length_mm; the field of view is "
+				                 "solved, never assumed"));
+			}
 			if (!(*PosesJson)->TryGetArrayField(TEXT("t_s"), Times) ||
 			    !(*PosesJson)->TryGetArrayField(TEXT("north_m"), Norths) ||
 			    !(*PosesJson)->TryGetArrayField(TEXT("east_m"), Easts) ||
@@ -730,7 +1319,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			const int32 Count = Times->Num();
 			if (Norths->Num() != Count || Easts->Num() != Count ||
 			    Alts->Num() != Count || Yaws->Num() != Count ||
-			    Pitches->Num() != Count || Rolls->Num() != Count)
+			    Pitches->Num() != Count || Rolls->Num() != Count ||
+			    Focals->Num() != Count)
 			{
 				return Fail(TEXT("camera pose track arrays disagree about "
 				                 "their length; refusing a misaligned track"));
@@ -738,9 +1328,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			TArray<double> TrackTimes;
 			TArray<FVector> TrackLocations;
 			TArray<FRotator> TrackRotations;
+			TArray<double> TrackFocalLengthsMm;
 			TrackTimes.Reserve(Count);
 			TrackLocations.Reserve(Count);
 			TrackRotations.Reserve(Count);
+			TrackFocalLengthsMm.Reserve(Count);
 			for (int32 i = 0; i < Count; ++i)
 			{
 				TrackTimes.Add((*Times)[i]->AsNumber());
@@ -755,12 +1347,63 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 					(*Pitches)[i]->AsNumber(),
 					(*Yaws)[i]->AsNumber() - 90.0,
 					(*Rolls)[i]->AsNumber()));
+				TrackFocalLengthsMm.Add((*Focals)[i]->AsNumber());
 			}
 			if (!Director->SetPoseTrack(MoveTemp(TrackTimes),
 			                            MoveTemp(TrackLocations),
-			                            MoveTemp(TrackRotations), Error))
+			                            MoveTemp(TrackRotations),
+			                            MoveTemp(TrackFocalLengthsMm),
+			                            Error))
 			{
 				return Fail(Error);
+			}
+
+			const TArray<TSharedPtr<FJsonValue>>* CaptureTimesJson = nullptr;
+			if (CameraJson->TryGetArrayField(TEXT("capture_times_s"),
+			                                 CaptureTimesJson) &&
+			    CaptureTimesJson != nullptr)
+			{
+				for (const TSharedPtr<FJsonValue>& Value : *CaptureTimesJson)
+				{
+					CaptureTimes.Add(Value->AsNumber());
+				}
+			}
+			if (CaptureTimes.Num() == 0)
+			{
+				return Fail(TEXT("cameras block carries no capture_times_s; "
+				                 "refusing to guess which frames the "
+				                 "manifest names"));
+			}
+
+			// The card's landmarks, expressed like every other card
+			// position: local north/east about this camera block's own
+			// projected origin, altitude MSL.
+			const TArray<TSharedPtr<FJsonValue>>* LandmarksJson = nullptr;
+			if (CardRoot->TryGetArrayField(TEXT("landmarks"), LandmarksJson) &&
+			    LandmarksJson != nullptr)
+			{
+				for (const TSharedPtr<FJsonValue>& Value : *LandmarksJson)
+				{
+					const TSharedPtr<FJsonObject> Landmark = Value->AsObject();
+					if (!Landmark.IsValid())
+					{
+						continue;
+					}
+					FString LandmarkName;
+					double North = 0.0, East = 0.0, Alt = 0.0;
+					if (!Landmark->TryGetStringField(TEXT("name"), LandmarkName) ||
+					    !Landmark->TryGetNumberField(TEXT("north_m"), North) ||
+					    !Landmark->TryGetNumberField(TEXT("east_m"), East) ||
+					    !Landmark->TryGetNumberField(TEXT("alt_m"), Alt))
+					{
+						return Fail(TEXT("a landmark is missing name/"
+						                 "north_m/east_m/alt_m"));
+					}
+					LandmarkNames.Add(LandmarkName);
+					LandmarkProjectedMetres.Add(FVector(
+						CameraOriginXMetres + East,
+						CameraOriginYMetres + North, Alt));
+				}
 			}
 			bConsumePoses = true;
 			UE_LOG(LogFlightSimRender, Display,
@@ -768,7 +1411,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			       ConsumedCameraIndex, CamerasJson->Num(), Count);
 			// Place the camera at its first solved pose before the warm-up
 			// captures, replacing the chase settle-in placement above.
-			if (!Director->ApplyPoseAtTime(0.0, Error))
+			// "First solved pose" is the track's own start, not t=0: the
+			// telemetry recorder's first sample is one step in.
+			if (!Director->ApplyPoseAtTime(Director->TrackStartSeconds(),
+			                               Error))
 			{
 				return Fail(Error);
 			}
@@ -794,11 +1440,121 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// The void scene frames a silhouette tightly; the visual scene needs the
 	// terrain and sky in shot, and §6.6's manual exposure so the image does
 	// not re-meter as the bright-ground fraction changes with bank.
+	// Preset mode keeps the measured constants. Consume-poses mode takes
+	// the field of view from the SOLVED LENS -- horizontal FOV =
+	// 2*atan(sensor_width / (2*focal_length)) -- so the intrinsics in the
+	// capture manifest describe the frames that were actually rendered.
+	// The hardcoded 55 deg differed from the documented default lens
+	// (35 mm on a 36 mm sensor, 54.43 deg) by about 7 px 600 px off centre,
+	// permanently and in every frame, with nothing checking it.
 	Capture->FOVAngle = bVisual ? 55.0f : 24.0f;
-	if (bVisual && !bAutoExposure)
+	if (bConsumePoses)
 	{
-		FFlightSimVisualScene::ApplyManualExposure(Capture,
-			static_cast<float>(ExposureBias));
+		Capture->FOVAngle = static_cast<float>(FMath::RadiansToDegrees(
+			2.0 * FMath::Atan(CameraSensorWidthMm /
+			                  (2.0 * Director->GetAppliedFocalLengthMm()))));
+	}
+	// Exposure (Phase 2, contracts §5.4 last row, §10): physical EV100 when
+	// the consumed camera carries an exposure triple on the card
+	// (cameras[N].exposure {aperture_f, shutter_s, iso}); else the Python-
+	// computed look.ev100 for that camera's id; else the Phase 10 bias path,
+	// unchanged. -AutoExposure stays the negative control and skips all
+	// three. Which path ran is recorded in render_settings.exposure_mode.
+	FString ExposureMode = TEXT("auto");
+	FString ExposureSource = TEXT("engine default metering");
+	double AppliedEv100 = 0.0;
+	bool bAppliedEv100 = false;
+	{
+		double CardApertureF = 0.0, CardShutterS = 0.0, CardIso = 0.0;
+		bool bCardExposure = false;
+		FString CardCameraId;
+		if (bConsumePoses)
+		{
+			FString ExposureCardText;
+			TSharedPtr<FJsonObject> ExposureCardRoot;
+			if (FFileHelper::LoadFileToString(ExposureCardText, *ScenarioPath))
+			{
+				const TSharedRef<TJsonReader<>> ExposureReader =
+					TJsonReaderFactory<>::Create(ExposureCardText);
+				FJsonSerializer::Deserialize(ExposureReader, ExposureCardRoot);
+			}
+			const TArray<TSharedPtr<FJsonValue>>* ExposureCameras = nullptr;
+			if (ExposureCardRoot.IsValid() &&
+			    ExposureCardRoot->TryGetArrayField(TEXT("cameras"), ExposureCameras) &&
+			    ExposureCameras != nullptr && ExposureCameras->IsValidIndex(ConsumedCameraIndex))
+			{
+				const TSharedPtr<FJsonObject> ExposureCamera =
+					(*ExposureCameras)[ConsumedCameraIndex]->AsObject();
+				const TSharedPtr<FJsonObject>* ExposureJson = nullptr;
+				if (ExposureCamera.IsValid())
+				{
+					ExposureCamera->TryGetStringField(TEXT("camera_id"), CardCameraId);
+					if (ExposureCamera->TryGetObjectField(TEXT("exposure"), ExposureJson) &&
+					    ExposureJson != nullptr && ExposureJson->IsValid())
+					{
+						const bool bShape =
+							(*ExposureJson)->TryGetNumberField(TEXT("aperture_f"), CardApertureF) &&
+							(*ExposureJson)->TryGetNumberField(TEXT("shutter_s"), CardShutterS) &&
+							(*ExposureJson)->TryGetNumberField(TEXT("iso"), CardIso);
+						if (!bShape || !(CardApertureF > 0.0) || !(CardShutterS > 0.0) ||
+						    !(CardIso > 0.0))
+						{
+							return Fail(FString::Printf(
+								TEXT("camera.exposure: cameras[%d].exposure must carry positive ")
+								TEXT("aperture_f, shutter_s and iso; refusing to meter from a ")
+								TEXT("partial triple"),
+								ConsumedCameraIndex));
+						}
+						bCardExposure = true;
+					}
+				}
+			}
+		}
+		if (bVisual && !bAutoExposure)
+		{
+			const double* LookValue =
+				CardCameraId.IsEmpty() ? nullptr : LookEv100.Find(CardCameraId);
+			if (bCardExposure)
+			{
+				AppliedEv100 = FFlightSimVisualScene::ApplyPhysicalExposure(
+					Capture, CardApertureF, CardShutterS, CardIso);
+				bAppliedEv100 = true;
+				ExposureMode = TEXT("manual_ev100");
+				// Numbers only (gotcha 13): the camera id string stays in the
+				// Python-written capture manifest.
+				ExposureSource = FString::Printf(
+					TEXT("cameras[%d].exposure f/%g, %g s, ISO %g"),
+					ConsumedCameraIndex, CardApertureF, CardShutterS, CardIso);
+			}
+			else if (LookValue != nullptr)
+			{
+				// A Python-computed EV100 without a triple: N = 1, ISO = 100,
+				// t = 2^-EV100 maps back to it exactly (core/capture/exposure.py
+				// shutter_for_ev100).
+				AppliedEv100 = FFlightSimVisualScene::ApplyPhysicalExposure(
+					Capture, 1.0, FMath::Pow(2.0, -*LookValue), 100.0);
+				bAppliedEv100 = true;
+				ExposureMode = TEXT("manual_ev100");
+				ExposureSource = FString::Printf(
+					TEXT("look.ev100 for cameras[%d]"), ConsumedCameraIndex);
+			}
+			else
+			{
+				FFlightSimVisualScene::ApplyManualExposure(Capture,
+					static_cast<float>(ExposureBias));
+				ExposureMode = TEXT("manual_bias");
+				ExposureSource = FString::Printf(
+					TEXT("-exposure-bias=%.1f (AutoExposureBias)"), ExposureBias);
+			}
+		}
+		else if (bVisual)
+		{
+			ExposureSource = TEXT("-AutoExposure: the negative control");
+		}
+		else
+		{
+			ExposureSource = TEXT("void scene (no -Visual): engine default metering");
+		}
 	}
 	if (bNoShadows)
 	{
@@ -809,6 +1565,282 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Capture->HiddenActors.Add(Scenario.Aircraft);
 	}
 	Capture->RegisterComponent();
+
+	// -- Phase 2 labels (packages B + C, contracts §1): the ID pass -------
+	// The instance mask is an ID IMAGE from the Custom Depth Stencil: every
+	// labelled mesh component carries bRenderCustomDepth with its stencil =
+	// the card's int_id (r.CustomDepth=3 in DefaultEngine.ini), a post-
+	// process material emits SceneTexture:CustomStencil as a flat float, and
+	// the capture reads it back as raw floats (RCM_MinMax) into an R32f
+	// target -- the same capture/readback path the depth pass uses. Every
+	// label capture is AA-free: no anti-aliasing, no temporal history, screen
+	// percentage 100, fog/atmosphere/bloom/motion blur/DOF/lens flare/
+	// translucency off, bAlwaysPersistRenderingState false. One "alone" ID
+	// capture per aircraft object (PRM_UseShowOnlyList, that actor only)
+	// generalises Phase 10's aircraft-alone depth pass: visible fraction =
+	// pixels in the full ID pass / pixels in the alone pass, integers over
+	// integers. Phase 10's depth-agreement mask (|scene - alone| <= 5 cm)
+	// is gone: it could not tell two aircraft apart and was never
+	// AA-isolated. The ID image keeps the _mask.png name and the primary
+	// keeps int_id 1, so every Phase 10 reader stays true on a
+	// single-aircraft run.
+	UTextureRenderTarget2D* LabelDepthTarget = nullptr;
+	UTextureRenderTarget2D* LabelIdTarget = nullptr;
+	USceneCaptureComponent2D* LabelDepthAll = nullptr;
+	USceneCaptureComponent2D* LabelIdAll = nullptr;
+	TArray<FRenderLabelledObject> Labelled;
+	int32 LabelPrimaryIntId = 0;
+	int32 LabelTerrainIntId = 0;
+	FString LabelIdSource;
+	if (bLabels)
+	{
+		if (bHideAircraft)
+		{
+			return Fail(TEXT("-labels with -HideAircraft: an instance mask of a "
+			                 "hidden aircraft is nothing; drop one of them"));
+		}
+		// The objects, from the card (Python composed them; this pass
+		// invents no id). A card written before objects[] existed gets the
+		// Phase 10 ids -- 1 the aircraft, 2 everything else -- and
+		// render.json says so under labels.id_source.
+		if (Card.Objects.Num() > 0)
+		{
+			LabelIdSource = TEXT("card objects[]");
+			for (const FFlightSimSceneObject& Object : Card.Objects)
+			{
+				FRenderLabelledObject Entry;
+				Entry.Id = Object.Id;
+				Entry.IntId = Object.IntId;
+				Entry.ClassId = Object.ClassId;
+				Entry.Class = Object.Class;
+				Entry.Role = Object.Role;
+				if (Object.Role == TEXT("primary"))
+				{
+					Entry.Actor = Scenario.Aircraft;
+					LabelPrimaryIntId = Object.IntId;
+				}
+				else if (Object.Role == TEXT("traffic"))
+				{
+					for (int32 j = 0; j < Card.Traffic.Num() && j < Scenario.TrafficActors.Num(); ++j)
+					{
+						if (Card.Traffic[j].IntId == Object.IntId)
+						{
+							Entry.Actor = Scenario.TrafficActors[j];
+						}
+					}
+					if (Entry.Actor == nullptr)
+					{
+						return Fail(FString::Printf(
+							TEXT("annotation.identity: object '%s' (int_id %d) has role traffic ")
+							TEXT("but no traffic[] entry on the card carries that int_id"),
+							*Object.Id, Object.IntId));
+					}
+				}
+				else if (Object.Class == TEXT("terrain"))
+				{
+					LabelTerrainIntId = Object.IntId;
+				}
+				Labelled.Add(Entry);
+			}
+			if (LabelPrimaryIntId == 0)
+			{
+				return Fail(TEXT("annotation.identity: the card's objects[] names no primary "
+				                 "airframe; the ID image would carry no id for the aircraft "
+				                 "that flew"));
+			}
+		}
+		else
+		{
+			LabelIdSource = TEXT("default ids (card carries no objects[]): 1 the aircraft, "
+			                     "2 terrain or other");
+			FRenderLabelledObject Primary;
+			Primary.Id = FString::Printf(TEXT("aircraft:%s:0"), *Card.Aircraft);
+			Primary.IntId = RenderLabelAircraftInstanceId;
+			Primary.ClassId = RenderLabelClassAircraft;
+			Primary.Class = TEXT("aircraft");
+			Primary.Role = TEXT("primary");
+			Primary.Actor = Scenario.Aircraft;
+			Labelled.Add(Primary);
+			FRenderLabelledObject Terrain;
+			Terrain.Id = TEXT("terrain");
+			Terrain.IntId = RenderLabelClassTerrain;
+			Terrain.ClassId = RenderLabelClassTerrain;
+			Terrain.Class = TEXT("terrain");
+			Terrain.Role = TEXT("scene");
+			Labelled.Add(Terrain);
+			LabelPrimaryIntId = RenderLabelAircraftInstanceId;
+			LabelTerrainIntId = RenderLabelClassTerrain;
+		}
+
+		// Every mesh component in the world carries the stencil of the
+		// object it belongs to: an aircraft actor's its own int_id, every
+		// other mesh (terrain, ground plane, funnel) the terrain's. Editor-
+		// only and hidden-in-game components draw in no capture and get none.
+		TMap<int32, int32> StencilCounts;
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			int32 IntId = LabelTerrainIntId;
+			for (const FRenderLabelledObject& Entry : Labelled)
+			{
+				if (Entry.Actor != nullptr && Entry.Actor == *It)
+				{
+					IntId = Entry.IntId;
+				}
+			}
+			if (IntId <= 0)
+			{
+				continue;
+			}
+			TInlineComponentArray<UMeshComponent*> Meshes;
+			It->GetComponents(Meshes);
+			for (UMeshComponent* Mesh : Meshes)
+			{
+				if (Mesh == nullptr || Mesh->IsEditorOnly() || Mesh->bHiddenInGame)
+				{
+					continue;
+				}
+				Mesh->SetRenderCustomDepth(true);
+				Mesh->SetCustomDepthStencilValue(IntId);
+				StencilCounts.FindOrAdd(IntId)++;
+			}
+		}
+		for (const FRenderLabelledObject& Entry : Labelled)
+		{
+			const int32* Components = StencilCounts.Find(Entry.IntId);
+			UE_LOG(LogFlightSimRender, Display,
+			       TEXT("labels: object '%s' int_id %d class_id %d (%s): stencil on %d mesh component(s)"),
+			       *Entry.Id, Entry.IntId, Entry.ClassId, *Entry.Role, Components ? *Components : 0);
+		}
+
+		UMaterialInterface* StencilMaterial =
+			LoadObject<UMaterialInterface>(nullptr, RenderLabelStencilMaterialPath);
+		if (StencilMaterial == nullptr)
+		{
+			return Fail(FString::Printf(
+				TEXT("-labels needs the post-process material %s (MD_PostProcess, blendable ")
+				TEXT("location 'Replacing the Tonemapper', EmissiveColor = SceneTexture:")
+				TEXT("CustomStencil), which scripts/ue_create_materials.py builds; refusing ")
+				TEXT("to write an ID image from anything else"),
+				RenderLabelStencilMaterialPath));
+		}
+
+		LabelDepthTarget = NewObject<UTextureRenderTarget2D>();
+		LabelDepthTarget->RenderTargetFormat = RTF_R32f;
+		LabelDepthTarget->ClearColor = FLinearColor::Black;
+		LabelDepthTarget->bAutoGenerateMips = false;
+		LabelDepthTarget->InitAutoFormat(Width, Height);
+		LabelDepthTarget->UpdateResourceImmediate(true);
+		LabelIdTarget = NewObject<UTextureRenderTarget2D>();
+		LabelIdTarget->RenderTargetFormat = RTF_R32f;
+		LabelIdTarget->ClearColor = FLinearColor::Black;
+		LabelIdTarget->bAutoGenerateMips = false;
+		LabelIdTarget->InitAutoFormat(Width, Height);
+		LabelIdTarget->UpdateResourceImmediate(true);
+
+		// The label-pass rule (contracts §1, brainstorm §3.3), applied to
+		// every label capture: no anti-aliasing of any kind, no temporal
+		// history, no screen-percentage scaling, and no effect that blends
+		// a pixel with its neighbours or with the air in front of it.
+		auto ConfigureLabelCapture = [&](USceneCaptureComponent2D* Label)
+		{
+			Label->SetupAttachment(Director->Camera);
+			Label->SetMobility(EComponentMobility::Movable);
+			Label->bCaptureEveryFrame = false;
+			Label->bCaptureOnMovement = false;
+			Label->bAlwaysPersistRenderingState = false;
+			Label->FOVAngle = Capture->FOVAngle;
+			Label->ShowFlags.SetAntiAliasing(false);
+			Label->ShowFlags.SetTemporalAA(false);
+			Label->ShowFlags.SetScreenPercentage(false);
+			Label->ShowFlags.SetFog(false);
+			Label->ShowFlags.SetAtmosphere(false);
+			Label->ShowFlags.SetVolumetricFog(false);
+			// Phase 2 Look lane: volumetric clouds write no depth and the ID
+			// pass replaces the tonemapper, but a label capture draws no
+			// cloud at all (contracts §1, extended by this stage).
+			Label->ShowFlags.SetCloud(false);
+			Label->ShowFlags.SetBloom(false);
+			Label->ShowFlags.SetMotionBlur(false);
+			Label->ShowFlags.SetDepthOfField(false);
+			Label->ShowFlags.SetLensFlares(false);
+			Label->ShowFlags.SetTranslucency(false);
+		};
+		auto MakeDepthCapture = [&](const TCHAR* Name) -> USceneCaptureComponent2D*
+		{
+			USceneCaptureComponent2D* Depth =
+				NewObject<USceneCaptureComponent2D>(Director, Name);
+			Depth->TextureTarget = LabelDepthTarget;
+			Depth->CaptureSource = ESceneCaptureSource::SCS_SceneDepth;
+			ConfigureLabelCapture(Depth);
+			Depth->RegisterComponent();
+			return Depth;
+		};
+		auto MakeIdCapture = [&](const TCHAR* Name) -> USceneCaptureComponent2D*
+		{
+			USceneCaptureComponent2D* Id =
+				NewObject<USceneCaptureComponent2D>(Director, Name);
+			Id->TextureTarget = LabelIdTarget;
+			// The post-process chain has to run for the blendable to
+			// replace the tonemapper; FinalColorHDR keeps its output
+			// linear and unquantised, so R is the stencil as a float.
+			Id->CaptureSource = ESceneCaptureSource::SCS_FinalColorHDR;
+			ConfigureLabelCapture(Id);
+			Id->ShowFlags.SetPostProcessing(true);
+			Id->PostProcessSettings.WeightedBlendables.Array.Add(
+				FWeightedBlendable(1.0f, StencilMaterial));
+			Id->PostProcessBlendWeight = 1.0f;
+			Id->RegisterComponent();
+			return Id;
+		};
+		LabelDepthAll = MakeDepthCapture(TEXT("LabelDepthAll"));
+		LabelIdAll = MakeIdCapture(TEXT("LabelIdAll"));
+		for (FRenderLabelledObject& Entry : Labelled)
+		{
+			if (Entry.Class != TEXT("aircraft") || Entry.Actor == nullptr)
+			{
+				continue;   // scene objects get no alone pass (pixels_alone null)
+			}
+			Entry.Alone = MakeIdCapture(*FString::Printf(TEXT("LabelIdAlone%d"), Entry.IntId));
+			Entry.Alone->PrimitiveRenderMode =
+				ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
+			Entry.Alone->ShowOnlyActors.Add(Entry.Actor);
+		}
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("labels: ID image (custom stencil, %d objects, %s), class image, depth ")
+		       TEXT("as float32 and 16-bit (%.2f m/unit, saturating at %.1f m), one alone ")
+		       TEXT("pass per aircraft; every label capture AA-free"),
+		       Labelled.Num(), *LabelIdSource, RenderLabelDepthScaleM,
+		       RenderLabelDepthSaturationM);
+	}
+
+	// -- Phase 10 sensor model: the linear capture ------------------------
+	UTextureRenderTarget2D* LinearTarget = nullptr;
+	USceneCaptureComponent2D* LinearCapture = nullptr;
+	if (bLinear)
+	{
+		LinearTarget = NewObject<UTextureRenderTarget2D>();
+		LinearTarget->RenderTargetFormat = RTF_RGBA16f;
+		LinearTarget->ClearColor = FLinearColor::Black;
+		LinearTarget->bAutoGenerateMips = false;
+		LinearTarget->InitAutoFormat(Width, Height);
+		LinearTarget->UpdateResourceImmediate(true);
+		LinearCapture = NewObject<USceneCaptureComponent2D>(Director, TEXT("LinearCapture"));
+		LinearCapture->SetupAttachment(Director->Camera);
+		LinearCapture->SetMobility(EComponentMobility::Movable);
+		LinearCapture->TextureTarget = LinearTarget;
+		LinearCapture->CaptureSource = ESceneCaptureSource::SCS_FinalColorHDR;
+		LinearCapture->bCaptureEveryFrame = false;
+		LinearCapture->bCaptureOnMovement = false;
+		LinearCapture->bAlwaysPersistRenderingState = true;
+		LinearCapture->FOVAngle = Capture->FOVAngle;
+		LinearCapture->ShowFlags = Capture->ShowFlags;
+		LinearCapture->PostProcessSettings = Capture->PostProcessSettings;
+		LinearCapture->PostProcessBlendWeight = Capture->PostProcessBlendWeight;
+		LinearCapture->HiddenActors = Capture->HiddenActors;
+		LinearCapture->RegisterComponent();
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("linear: FinalColorHDR written as frame_NNNN_linear.exr beside each frame"));
+	}
 
 	if (!Scenario.BeginPlay(Error)) { return Fail(Error); }
 	if (!Scenario.TrimInWind(Card, Error)) { return Fail(Error); }
@@ -1160,7 +2192,32 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			return Fail(Error + TEXT("; frames written so far are not a complete run"));
 		}
-		if (Step % StepsPerFrame != 0)
+		// Consume-poses captures on the SCHEDULE, not on the clip's frame
+		// grid. Three things follow from putting the gate here:
+		//
+		//  * the frame delivered for a scheduled instant is taken within
+		//    one SUBSTEP of it (8 ms at 120 Hz) instead of within one
+		//    clip frame (200 ms at 5 Hz) -- at cruise that was 30 m of
+		//    aircraft motion between what a record says and what its
+		//    picture shows;
+		//  * the pose is applied only at instants the track covers, so
+		//    the host's first frame at t=0 (the recorder's first sample
+		//    is one step in) is skipped rather than refused;
+		//  * nothing renders that is not going to be written, instead of
+		//    rendering the whole clip and discarding all but the
+		//    scheduled frames.
+		if (bConsumePoses)
+		{
+			const double Now =
+				Scenario.ReadProperty(TEXT("simulation/sim-time-sec"));
+			if (NextCapture >= CaptureTimes.Num() ||
+			    Now + 0.5 * DeltaSeconds < CaptureTimes[NextCapture])
+			{
+				continue;
+			}
+			++NextCapture;
+		}
+		else if (Step % StepsPerFrame != 0)
 		{
 			continue;
 		}
@@ -1188,6 +2245,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			{
 				return Fail(Error);
 			}
+			// A keyframed focal-length move has to reach the PIXELS, not
+			// only the manifest, or the recorded intrinsics stop
+			// describing the frames partway through the run.
+			Capture->FOVAngle = static_cast<float>(FMath::RadiansToDegrees(
+				2.0 * FMath::Atan(CameraSensorWidthMm /
+				                  (2.0 * Director->GetAppliedFocalLengthMm()))));
 		}
 
 		// Component render-state updates are queued and flushed at end of
@@ -1214,12 +2277,20 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				++Lit;
 			}
 		}
+		// The blank-frame floor applies to the frames actually DELIVERED.
+		// It used to see every rendered frame because every rendered
+		// frame was written; now that the schedule gates writing, an
+		// unwritten frame is nobody's frame. The floor itself is
+		// unchanged and still absolute: one blank delivered frame fails
+		// the run.
 		if (Lit == 0)
 		{
 			++BlankFrames;
 		}
 
-		const FString FrameName = FString::Printf(TEXT("frame_%04d.png"), Captured);
+		const FString FrameName = FString::Printf(
+			TEXT("frame_%04d.png"),
+			bConsumePoses ? NextCapture - 1 : Captured);
 		TArray64<uint8> Png;
 		FImageUtils::PNGCompressImageArray(Width, Height, Pixels, Png);
 		if (!FFileHelper::SaveArrayToFile(Png, *FPaths::Combine(OutputDirectory, FrameName)))
@@ -1229,6 +2300,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 
 		TSharedPtr<FJsonObject> Record = MakeShared<FJsonObject>();
 		Record->SetStringField(TEXT("frame"), FrameName);
+		// The digest of the bytes that went to disk: the Python side
+		// hashes the file and must get this back (frame_integrity), and
+		// Gate 10-R compares two renders' records directly.
+		Record->SetStringField(TEXT("sha256"), RenderSha256Hex(Png.GetData(), Png.Num()));
+		if (bDeterministic)
+		{
+			Record->SetBoolField(TEXT("deterministic_pins"), true);
+		}
 		Record->SetNumberField(TEXT("t"), Scenario.ReadProperty(TEXT("simulation/sim-time-sec")));
 		Record->SetNumberField(TEXT("roll_deg"),
 		                       Scenario.ReadProperty(TEXT("attitude/phi-rad")) * RenderRadiansToDegrees);
@@ -1236,6 +2315,298 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		                       Scenario.ReadProperty(TEXT("attitude/theta-rad")) * RenderRadiansToDegrees);
 		Record->SetNumberField(TEXT("aileron_cmd"), Scenario.Movement->Commands.Aileron);
 		Record->SetNumberField(TEXT("camera_roll_deg"), Director->GetCameraRollDegrees());
+		if (bLabels)
+		{
+			// Every label capture sees what the colour capture saw: the same
+			// camera (attached to it) and the same lens, re-copied because a
+			// keyframed focal move changes Capture->FOVAngle per frame.
+			LabelDepthAll->FOVAngle = Capture->FOVAngle;
+			LabelIdAll->FOVAngle = Capture->FOVAngle;
+			FTextureRenderTargetResource* DepthResource =
+				LabelDepthTarget->GameThread_GetRenderTargetResource();
+			FTextureRenderTargetResource* IdResource =
+				LabelIdTarget->GameThread_GetRenderTargetResource();
+			const FReadSurfaceDataFlags RawFloats(RCM_MinMax, CubeFace_MAX);
+			TArray<FLinearColor> DepthAll;
+			TArray<FLinearColor> IdAll;
+			LabelDepthAll->CaptureScene();
+			FlushRenderingCommands();
+			if (DepthResource == nullptr
+			    || !DepthResource->ReadLinearColorPixels(DepthAll, RawFloats))
+			{
+				return Fail(TEXT("labels: could not read the scene depth back"));
+			}
+			LabelIdAll->CaptureScene();
+			FlushRenderingCommands();
+			if (IdResource == nullptr
+			    || !IdResource->ReadLinearColorPixels(IdAll, RawFloats))
+			{
+				return Fail(TEXT("labels: could not read the ID pass back"));
+			}
+			const int32 Count = Width * Height;
+			if (DepthAll.Num() != Count || IdAll.Num() != Count)
+			{
+				return Fail(FString::Printf(
+					TEXT("labels: depth and ID readbacks are %d and %d pixels for a %dx%d frame"),
+					DepthAll.Num(), IdAll.Num(), Width, Height));
+			}
+			TMap<int32, int32> ClassOfIntId;
+			for (const FRenderLabelledObject& Entry : Labelled)
+			{
+				ClassOfIntId.Add(Entry.IntId, Entry.ClassId);
+			}
+			TArray<uint8> Mask;
+			TArray<uint8> ClassMask;
+			TArray<uint16> Depth16;
+			TArray<float> DepthMetres;
+			Mask.SetNumZeroed(Count);
+			ClassMask.SetNumZeroed(Count);
+			Depth16.SetNumZeroed(Count);
+			DepthMetres.SetNumZeroed(Count);
+			int32 UnlabelledGeometry = 0;
+			int32 NonIntegerIds = 0;
+			for (int32 i = 0; i < Count; ++i)
+			{
+				const float AllCm = DepthAll[i].R;
+				const bool bAllGeometry = AllCm > 0.0f && AllCm < RenderLabelDepthSkyCm;
+				// The stencil comes back as a float; an AA-free pass gives
+				// whole numbers. A non-integer here is a measurement (a
+				// blend or a resample), counted and reported, never hidden
+				// by the rounding.
+				const float IdValue = IdAll[i].R;
+				const int32 IntId = FMath::Clamp(FMath::RoundToInt(IdValue), 0, 255);
+				if (FMath::Abs(IdValue - static_cast<float>(IntId)) > 1.0e-3f)
+				{
+					++NonIntegerIds;
+				}
+				Mask[i] = static_cast<uint8>(IntId);
+				if (IntId != 0)
+				{
+					const int32* ClassId = ClassOfIntId.Find(IntId);
+					ClassMask[i] = ClassId != nullptr
+						? static_cast<uint8>(FMath::Clamp(*ClassId, 0, 255)) : 0;
+				}
+				else if (bAllGeometry)
+				{
+					++UnlabelledGeometry;   // geometry with no stencil: id 0, class 0
+				}
+				DepthMetres[i] = bAllGeometry ? AllCm / 100.0f
+				                              : std::numeric_limits<float>::infinity();
+				const double Metres = bAllGeometry ? AllCm / 100.0
+				                                   : RenderLabelDepthSaturationM;
+				Depth16[i] = static_cast<uint16>(FMath::Clamp(
+					FMath::RoundToInt(Metres / RenderLabelDepthScaleM), 0, 65535));
+			}
+			const FString Stem = FrameName.LeftChop(4);
+
+			// Per object: pixels in the ID pass, the alone pass (aircraft
+			// only), visible fraction, who occludes it, depth under its mask.
+			TArray<TSharedPtr<FJsonValue>> ObjectRecords;
+			int32 PrimarySilhouette = 0;
+			int32 PrimaryVisible = 0;
+			for (FRenderLabelledObject& Entry : Labelled)
+			{
+				int32 ObjectPixels = 0;
+				TArray<float> Under;
+				for (int32 i = 0; i < Count; ++i)
+				{
+					if (Mask[i] == Entry.IntId)
+					{
+						++ObjectPixels;
+						if (FMath::IsFinite(DepthMetres[i]))
+						{
+							Under.Add(DepthMetres[i]);
+						}
+					}
+				}
+				TSharedPtr<FJsonObject> ObjectJson = MakeShared<FJsonObject>();
+				ObjectJson->SetStringField(TEXT("id"), Entry.Id);
+				ObjectJson->SetNumberField(TEXT("int_id"), Entry.IntId);
+				ObjectJson->SetNumberField(TEXT("class_id"), Entry.ClassId);
+				ObjectJson->SetNumberField(TEXT("pixels"), ObjectPixels);
+				if (Entry.Alone != nullptr)
+				{
+					Entry.Alone->FOVAngle = Capture->FOVAngle;
+					TArray<FLinearColor> IdAlone;
+					Entry.Alone->CaptureScene();
+					FlushRenderingCommands();
+					if (!IdResource->ReadLinearColorPixels(IdAlone, RawFloats)
+					    || IdAlone.Num() != Count)
+					{
+						return Fail(FString::Printf(
+							TEXT("labels: could not read the alone pass of '%s' back"), *Entry.Id));
+					}
+					TArray<uint8> AloneMask;
+					AloneMask.SetNumZeroed(Count);
+					int32 PixelsAlone = 0;
+					TSet<int32> Occluders;
+					for (int32 i = 0; i < Count; ++i)
+					{
+						const int32 Value = FMath::Clamp(FMath::RoundToInt(IdAlone[i].R), 0, 255);
+						if (Value == Entry.IntId)
+						{
+							AloneMask[i] = static_cast<uint8>(Value);
+							++PixelsAlone;
+							if (Mask[i] != 0 && Mask[i] != Entry.IntId)
+							{
+								Occluders.Add(static_cast<int32>(Mask[i]));
+							}
+						}
+					}
+					const FString AloneName = Stem + FString::Printf(TEXT("_alone_%d.png"), Entry.IntId);
+					if (!RenderWriteGrayPng(FPaths::Combine(OutputDirectory, AloneName),
+					                        AloneMask.GetData(), AloneMask.Num(), Width, Height, 8))
+					{
+						return Fail(FString::Printf(TEXT("labels: could not write %s"), *AloneName));
+					}
+					ObjectJson->SetNumberField(TEXT("pixels_alone"), PixelsAlone);
+					ObjectJson->SetStringField(TEXT("alone_png"), AloneName);
+					if (PixelsAlone > 0)
+					{
+						ObjectJson->SetNumberField(TEXT("visible_fraction"),
+						                           static_cast<double>(ObjectPixels) / PixelsAlone);
+					}
+					else
+					{
+						ObjectJson->SetField(TEXT("visible_fraction"), MakeShared<FJsonValueNull>());
+					}
+					TArray<int32> OccluderIds = Occluders.Array();
+					OccluderIds.Sort();
+					TArray<TSharedPtr<FJsonValue>> OccludedBy;
+					for (int32 Occluder : OccluderIds)
+					{
+						OccludedBy.Add(MakeShared<FJsonValueNumber>(Occluder));
+					}
+					ObjectJson->SetArrayField(TEXT("occluded_by"), OccludedBy);
+					if (Entry.IntId == LabelPrimaryIntId)
+					{
+						PrimarySilhouette = PixelsAlone;
+						PrimaryVisible = ObjectPixels;
+					}
+				}
+				else
+				{
+					ObjectJson->SetField(TEXT("pixels_alone"), MakeShared<FJsonValueNull>());
+					ObjectJson->SetField(TEXT("alone_png"), MakeShared<FJsonValueNull>());
+					ObjectJson->SetField(TEXT("visible_fraction"), MakeShared<FJsonValueNull>());
+					ObjectJson->SetArrayField(TEXT("occluded_by"), TArray<TSharedPtr<FJsonValue>>());
+				}
+				if (Under.Num() > 0)
+				{
+					Under.Sort();
+					const int32 N = Under.Num();
+					const double Median = (N % 2 == 1)
+						? Under[N / 2]
+						: 0.5 * (static_cast<double>(Under[N / 2 - 1]) + Under[N / 2]);
+					ObjectJson->SetNumberField(TEXT("depth_min_m"), Under[0]);
+					ObjectJson->SetNumberField(TEXT("depth_median_m"), Median);
+				}
+				else
+				{
+					ObjectJson->SetField(TEXT("depth_min_m"), MakeShared<FJsonValueNull>());
+					ObjectJson->SetField(TEXT("depth_median_m"), MakeShared<FJsonValueNull>());
+				}
+				ObjectRecords.Add(MakeShared<FJsonValueObject>(ObjectJson));
+			}
+
+			const FString MaskName = Stem + TEXT("_mask.png");
+			const FString ClassName = Stem + TEXT("_class.png");
+			const FString DepthName = Stem + TEXT("_depth.png");
+			const FString DepthF32Name = Stem + TEXT("_depth.f32");
+			if (!RenderWriteGrayPng(FPaths::Combine(OutputDirectory, MaskName),
+			                        Mask.GetData(), Mask.Num(), Width, Height, 8)
+			    || !RenderWriteGrayPng(FPaths::Combine(OutputDirectory, ClassName),
+			                           ClassMask.GetData(), ClassMask.Num(), Width, Height, 8)
+			    || !RenderWriteGrayPng(FPaths::Combine(OutputDirectory, DepthName),
+			                           Depth16.GetData(),
+			                           static_cast<int64>(Depth16.Num()) * sizeof(uint16),
+			                           Width, Height, 16))
+			{
+				return Fail(FString::Printf(TEXT("labels: could not write the label "
+				                                 "files for %s"), *FrameName));
+			}
+			// The metric depth as raw little-endian float32, row-major,
+			// width*height values, +inf for sky: no library on either side
+			// (numpy.fromfile reads it), nothing lost to a 16-bit scale.
+			TArray64<uint8> DepthBytes;
+			DepthBytes.SetNumUninitialized(static_cast<int64>(Count) * sizeof(float));
+			FMemory::Memcpy(DepthBytes.GetData(), DepthMetres.GetData(), DepthBytes.Num());
+			if (!FFileHelper::SaveArrayToFile(DepthBytes, *FPaths::Combine(OutputDirectory, DepthF32Name)))
+			{
+				return Fail(FString::Printf(TEXT("labels: could not write %s"), *DepthF32Name));
+			}
+			// Declared per frame, ASCII only (gotcha 13): every Phase 10 key
+			// is kept for its readers (the primary's silhouette/visible
+			// counts now come from its alone pass and the ID pass), and the
+			// new keys sit beside them.
+			TSharedPtr<FJsonObject> Labels = MakeShared<FJsonObject>();
+			Labels->SetStringField(TEXT("mask"), MaskName);
+			Labels->SetStringField(TEXT("class_mask"), ClassName);
+			Labels->SetStringField(TEXT("depth"), DepthName);
+			Labels->SetNumberField(TEXT("depth_scale_m"), RenderLabelDepthScaleM);
+			Labels->SetNumberField(TEXT("depth_saturation_m"), RenderLabelDepthSaturationM);
+			Labels->SetNumberField(TEXT("silhouette_pixels"), PrimarySilhouette);
+			Labels->SetNumberField(TEXT("visible_pixels"), PrimaryVisible);
+			Labels->SetNumberField(TEXT("occlusion_fraction"),
+			                       PrimarySilhouette > 0
+			                           ? 1.0 - static_cast<double>(PrimaryVisible) / PrimarySilhouette
+			                           : 0.0);
+			FString Classes = TEXT("0 sky");
+			if (Card.TaxonomyClasses.Num() > 0)
+			{
+				for (int32 i = 0; i < Card.TaxonomyClasses.Num(); ++i)
+				{
+					Classes += FString::Printf(TEXT(", %d %s"), i + 1, *Card.TaxonomyClasses[i]);
+				}
+			}
+			else
+			{
+				Classes = TEXT("0 sky, 1 aircraft, 2 terrain or other");
+			}
+			Labels->SetStringField(TEXT("classes"), Classes);
+			Labels->SetStringField(TEXT("method"),
+			                       TEXT("custom-stencil ID pass, AA off; alone pass per aircraft"));
+			Labels->SetStringField(TEXT("depth_f32"), DepthF32Name);
+			Labels->SetStringField(TEXT("anti_aliasing"), TEXT("none"));
+			Labels->SetStringField(TEXT("id_source"), LabelIdSource);
+			Labels->SetNumberField(TEXT("unlabelled_geometry_pixels"), UnlabelledGeometry);
+			Labels->SetNumberField(TEXT("non_integer_id_pixels"), NonIntegerIds);
+			Labels->SetArrayField(TEXT("objects"), ObjectRecords);
+			Record->SetObjectField(TEXT("labels"), Labels);
+		}
+		if (bLinear)
+		{
+			LinearCapture->FOVAngle = Capture->FOVAngle;
+			LinearCapture->CaptureScene();
+			FlushRenderingCommands();
+			FTextureRenderTargetResource* LinearResource =
+				LinearTarget->GameThread_GetRenderTargetResource();
+			TArray<FLinearColor> Linear;
+			if (LinearResource == nullptr
+			    || !LinearResource->ReadLinearColorPixels(
+			           Linear, FReadSurfaceDataFlags(RCM_MinMax, CubeFace_MAX)))
+			{
+				return Fail(TEXT("linear: could not read the HDR capture back"));
+			}
+			IImageWrapperModule& Wrappers =
+				FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+			TSharedPtr<IImageWrapper> Exr = Wrappers.CreateImageWrapper(EImageFormat::EXR);
+			const FString LinearName = FrameName.LeftChop(4) + TEXT("_linear.exr");
+			if (!Exr.IsValid()
+			    || !Exr->SetRaw(Linear.GetData(),
+			                    static_cast<int64>(Linear.Num()) * sizeof(FLinearColor),
+			                    Width, Height, ERGBFormat::RGBAF, 32))
+			{
+				return Fail(TEXT("linear: could not encode the EXR"));
+			}
+			const TArray64<uint8> ExrBytes = Exr->GetCompressed();
+			if (ExrBytes.Num() == 0
+			    || !FFileHelper::SaveArrayToFile(ExrBytes, *FPaths::Combine(OutputDirectory, LinearName)))
+			{
+				return Fail(FString::Printf(TEXT("linear: could not write %s"), *LinearName));
+			}
+			Record->SetStringField(TEXT("linear"), LinearName);
+		}
 		if (bConsumePoses)
 		{
 			// Additive Camera Phase 1 fields (ASCII only -- gotcha 13; the
@@ -1327,9 +2698,68 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// Landmarks, projected through the camera of record, so the harness
 		// samples known world points instead of guessing regions by eye. The
 		// aircraft ground point is its position dropped to the visual ground.
-		if (bVisual)
+		// Camera Phase 2: the card's own landmarks, projected through THIS
+		// capture's transform and field of view, so the Python verifier can
+		// grade its projection against the engine's. Written whenever the
+		// card carried landmarks, independently of the Gate 6 visual set
+		// below.
+		if (LandmarkNames.Num() > 0)
 		{
 			TSharedPtr<FJsonObject> Landmarks = MakeShared<FJsonObject>();
+			for (int32 i = 0; i < LandmarkNames.Num(); ++i)
+			{
+				FVector EngineLocation;
+				Scenario.GeoReferencing->ProjectedToEngine(
+					LandmarkProjectedMetres[i], EngineLocation);
+				FVector2D Pixel;
+				const bool bVisible = ProjectToPixel(Capture, Width, Height,
+				                                     EngineLocation, Pixel);
+				TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+				Entry->SetBoolField(TEXT("visible"), bVisible);
+				Entry->SetNumberField(TEXT("px"), Pixel.X);
+				Entry->SetNumberField(TEXT("py"), Pixel.Y);
+				Landmarks->SetObjectField(LandmarkNames[i], Entry);
+			}
+			Record->SetObjectField(TEXT("landmarks"), Landmarks);
+		}
+		if (bConsumePoses)
+		{
+			// The intrinsics ACTUALLY applied, on EVERY consume-poses frame
+			// (contracts §1; they used to ride only when the card carried
+			// landmarks), so the verifier projects without guessing and a
+			// disagreement with the manifest is visible rather than assumed
+			// away.
+			Record->SetNumberField(TEXT("applied_focal_length_mm"),
+			                       Director->GetAppliedFocalLengthMm());
+			Record->SetNumberField(TEXT("applied_sensor_width_mm"),
+			                       CameraSensorWidthMm);
+			Record->SetNumberField(TEXT("applied_fov_deg"),
+			                       Capture->FOVAngle);
+			Record->SetNumberField(TEXT("applied_width_px"), Width);
+			Record->SetNumberField(TEXT("applied_height_px"), Height);
+		}
+
+		if (bVisual)
+		{
+			// ADD to the card's landmarks; do not replace them. These four
+			// are Gate 6's scene features and the card's are the camera
+			// phase's reference set, and both have always been written to
+			// one field name -- so this block silently overwrote however
+			// many the card carried with exactly four. The block above says
+			// it writes "independently of the Gate 6 visual set below",
+			// which was true of the writing and not of the result.
+			//
+			// It cost nothing while nothing rendered with -Visual, and
+			// everything the moment something did: 36 landmarks became 4,
+			// none of them named in the manifest, and both engine-referenced
+			// checks -- the two this phase exists for -- went from PASS to
+			// NOT RUN inside a summary that still said PASSED. The two name
+			// sets are disjoint (air_*/ground_*/terrain_* against
+			// near_peak/far_peak/valley/aircraft_ground), so they merge.
+			const TSharedPtr<FJsonObject>* Existing = nullptr;
+			TSharedPtr<FJsonObject> Landmarks =
+				Record->TryGetObjectField(TEXT("landmarks"), Existing)
+					? *Existing : MakeShared<FJsonObject>();
 			auto AddLandmark = [&](const TCHAR* LandmarkName, const FVector& WorldCm)
 			{
 				FVector2D Pixel;
@@ -1356,6 +2786,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		++Captured;
 	}
 
+	if (bConsumePoses && NextCapture != CaptureTimes.Num())
+	{
+		return Fail(FString::Printf(
+			TEXT("consume-poses: emitted %d of the %d scheduled images; "
+			     "the run ended before the schedule did, so the manifest "
+			     "would name frames that do not exist"),
+			NextCapture, CaptureTimes.Num()));
+	}
 	if (Captured == 0)
 	{
 		return Fail(TEXT("no frames were captured"));
@@ -1390,6 +2828,75 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		Root->SetStringField(TEXT("airframe"), TEXT("placeholder boxes, not a visual asset"));
 	}
+	// Camera Phase 2 (package A): what was DRAWN and where within the
+	// actor, so verify's drawn_airframe check grades the frames against
+	// the mesh the manifest expected without inferring it from other keys.
+	// A mesh from a version-1 manifest reports its origin as the zero it
+	// was actually attached at, and the version that caused it.
+	{
+		TSharedPtr<FJsonObject> Drawn = MakeShared<FJsonObject>();
+		if (MeshAirframe.bLoaded)
+		{
+			Drawn->SetStringField(TEXT("kind"), TEXT("mesh"));
+			TArray<TSharedPtr<FJsonValue>> Origin;
+			Origin.Add(MakeShared<FJsonValueNumber>(MeshAirframe.MeshOriginActorCm.X));
+			Origin.Add(MakeShared<FJsonValueNumber>(MeshAirframe.MeshOriginActorCm.Y));
+			Origin.Add(MakeShared<FJsonValueNumber>(MeshAirframe.MeshOriginActorCm.Z));
+			Drawn->SetArrayField(TEXT("mesh_origin_actor_cm"), Origin);
+			Drawn->SetNumberField(TEXT("manifest_version"), MeshAirframe.ManifestVersion);
+			Drawn->SetStringField(TEXT("origin_basis"), MeshAirframe.OriginBasis);
+			Drawn->SetNumberField(TEXT("triangles"), MeshAirframe.Triangles);
+		}
+		else
+		{
+			Drawn->SetStringField(TEXT("kind"), TEXT("placeholder"));
+			Drawn->SetField(TEXT("mesh_origin_actor_cm"), MakeShared<FJsonValueNull>());
+			Drawn->SetField(TEXT("manifest_version"), MakeShared<FJsonValueNull>());
+			Drawn->SetStringField(TEXT("origin_basis"),
+			                      TEXT("placeholder boxes about the actor origin (structural datum)"));
+		}
+		Root->SetObjectField(TEXT("drawn"), Drawn);
+	}
+	// Phase 2 (packages B + C): the labelled objects this pass wrote ids
+	// for (the card's list, or the default pair), and each traffic mesh
+	// drawn, so a reader of render.json alone resolves every integer in
+	// the ID image and knows which meshes the traffic actors carried.
+	if (bLabels)
+	{
+		TArray<TSharedPtr<FJsonValue>> ObjectList;
+		for (const FRenderLabelledObject& Entry : Labelled)
+		{
+			TSharedPtr<FJsonObject> ObjectJson = MakeShared<FJsonObject>();
+			ObjectJson->SetStringField(TEXT("id"), Entry.Id);
+			ObjectJson->SetNumberField(TEXT("int_id"), Entry.IntId);
+			ObjectJson->SetStringField(TEXT("class"), Entry.Class);
+			ObjectJson->SetNumberField(TEXT("class_id"), Entry.ClassId);
+			ObjectJson->SetStringField(TEXT("role"), Entry.Role);
+			ObjectJson->SetBoolField(TEXT("alone_pass"), Entry.Alone != nullptr);
+			ObjectList.Add(MakeShared<FJsonValueObject>(ObjectJson));
+		}
+		Root->SetArrayField(TEXT("objects"), ObjectList);
+		Root->SetStringField(TEXT("labels_id_source"), LabelIdSource);
+	}
+	if (TrafficMeshes.Num() > 0)
+	{
+		TArray<TSharedPtr<FJsonValue>> TrafficList;
+		for (int32 Index = 0; Index < TrafficMeshes.Num(); ++Index)
+		{
+			TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+			Entry->SetStringField(TEXT("id"), Card.Traffic[Index].Id);
+			Entry->SetNumberField(TEXT("int_id"), Card.Traffic[Index].IntId);
+			Entry->SetStringField(TEXT("mesh_airframe"), TrafficMeshes[Index].MeshAirframe);
+			Entry->SetStringField(TEXT("fdm"), TrafficMeshes[Index].FdmName);
+			Entry->SetStringField(TEXT("license"), TrafficMeshes[Index].License);
+			Entry->SetNumberField(TEXT("manifest_version"), TrafficMeshes[Index].ManifestVersion);
+			Entry->SetStringField(TEXT("origin_basis"), TrafficMeshes[Index].OriginBasis);
+			Entry->SetStringField(TEXT("track"), Card.Traffic[Index].Track);
+			Entry->SetNumberField(TEXT("range_m"), Card.Traffic[Index].RangeMetres);
+			TrafficList.Add(MakeShared<FJsonValueObject>(Entry));
+		}
+		Root->SetArrayField(TEXT("traffic"), TrafficList);
+	}
 	Root->SetNumberField(TEXT("width"), Width);
 	Root->SetNumberField(TEXT("height"), Height);
 	Root->SetNumberField(TEXT("frames"), Captured);
@@ -1407,7 +2914,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 	}
 	Root->SetObjectField(TEXT("surface_peak_deg"), Peaks);
-	Root->SetStringField(TEXT("camera_preset"), TEXT("LaggedChase"));
+	// The preset word this pass ran with -- the same value as
+	// scene.camera_preset below (contracts §1: the root key was a
+	// hard-coded "LaggedChase" on every pass, wingman and tower included).
+	// In a consume-poses pass the word is inert and camera_consume_poses
+	// beside it says so: the camera flew the card's solved track.
+	Root->SetStringField(TEXT("camera_preset"), CameraPreset);
 	Root->SetBoolField(TEXT("camera_keeps_horizon_level"), Director->PresetKeepsHorizonLevel());
 	// Camera Phase 1, additive: which solved camera this pass consumed
 	// (numbers only -- gotcha 13; camera id strings live in the
@@ -1418,13 +2930,184 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Root->SetNumberField(TEXT("camera_index"),
 		                     static_cast<double>(ConsumedCameraIndex));
 	}
+	// -- Phase 2 (contracts §1, §10): render_settings -- every rendering
+	// console variable this pass set or relies on, READ BACK by its r.
+	// name (the value found, or "absent"), the anti-aliasing method per
+	// capture as the capture's own show flags say, the exposure mode and
+	// EV100, the RHI, and the preset offsets as flown. Nothing here is
+	// what the ini asked for; it is what the engine reported.
+	{
+		TSharedPtr<FJsonObject> RenderSettings = MakeShared<FJsonObject>();
+		auto ConsoleString = [](const TCHAR* Name) -> FString
+		{
+			IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(Name);
+			return Variable != nullptr ? Variable->GetString() : FString(TEXT("absent"));
+		};
+		TSharedPtr<FJsonObject> Console = MakeShared<FJsonObject>();
+		const TCHAR* const ConsoleNames[] = {
+			TEXT("r.AntiAliasingMethod"),
+			TEXT("r.DynamicGlobalIlluminationMethod"),
+			TEXT("r.ReflectionMethod"),
+			TEXT("r.Lumen.HardwareRayTracing"),
+			TEXT("r.GenerateMeshDistanceFields"),
+			TEXT("r.Shadow.Virtual.Enable"),
+			TEXT("r.Nanite.ProjectEnabled"),
+			TEXT("r.Nanite"),
+			TEXT("r.CustomDepth"),
+			TEXT("r.ScreenPercentage"),
+			TEXT("r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange"),
+			TEXT("r.Substrate"),
+			TEXT("r.TextureStreaming"),
+			TEXT("r.Streaming.FullyLoadUsedTextures"),
+			TEXT("r.ForceLOD"),
+		};
+		for (const TCHAR* Name : ConsoleNames)
+		{
+			Console->SetStringField(Name, ConsoleString(Name));
+		}
+		RenderSettings->SetObjectField(TEXT("console"), Console);
+
+		auto AntiAliasingName = [&](bool bShowFlag) -> FString
+		{
+			if (!bShowFlag)
+			{
+				return TEXT("none");
+			}
+			IConsoleVariable* Variable =
+				IConsoleManager::Get().FindConsoleVariable(TEXT("r.AntiAliasingMethod"));
+			if (Variable == nullptr)
+			{
+				return TEXT("absent (show flag on, r.AntiAliasingMethod not found)");
+			}
+			switch (Variable->GetInt())
+			{
+			case 0: return TEXT("none");
+			case 1: return TEXT("FXAA");
+			case 2: return TEXT("TAA");
+			case 3: return TEXT("MSAA");
+			case 4: return TEXT("TSR");
+			default: return FString::Printf(TEXT("unknown(%d)"), Variable->GetInt());
+			}
+		};
+		TSharedPtr<FJsonObject> AntiAliasing = MakeShared<FJsonObject>();
+		AntiAliasing->SetStringField(TEXT("beauty"),
+			AntiAliasingName(Capture->ShowFlags.AntiAliasing != 0));
+		if (LinearCapture != nullptr)
+		{
+			AntiAliasing->SetStringField(TEXT("linear"),
+				AntiAliasingName(LinearCapture->ShowFlags.AntiAliasing != 0));
+		}
+		if (LabelDepthAll != nullptr)
+		{
+			// Measured from the capture, not asserted: a label pass whose
+			// show flag is on is a defect the verifier should see by name.
+			AntiAliasing->SetStringField(TEXT("labels"),
+				LabelDepthAll->ShowFlags.AntiAliasing != 0
+					? TEXT("DEFECT: label capture anti-aliasing show flag is on")
+					: TEXT("none"));
+		}
+		RenderSettings->SetObjectField(TEXT("anti_aliasing"), AntiAliasing);
+
+		TSharedPtr<FJsonObject> BeautyFlags = MakeShared<FJsonObject>();
+		BeautyFlags->SetBoolField(TEXT("anti_aliasing"), Capture->ShowFlags.AntiAliasing != 0);
+		BeautyFlags->SetBoolField(TEXT("temporal_aa"), Capture->ShowFlags.TemporalAA != 0);
+		BeautyFlags->SetBoolField(TEXT("motion_blur"), Capture->ShowFlags.MotionBlur != 0);
+		BeautyFlags->SetBoolField(TEXT("bloom"), Capture->ShowFlags.Bloom != 0);
+		BeautyFlags->SetBoolField(TEXT("fog"), Capture->ShowFlags.Fog != 0);
+		BeautyFlags->SetBoolField(TEXT("atmosphere"), Capture->ShowFlags.Atmosphere != 0);
+		BeautyFlags->SetBoolField(TEXT("volumetric_fog"), Capture->ShowFlags.VolumetricFog != 0);
+		BeautyFlags->SetBoolField(TEXT("cloud"), Capture->ShowFlags.Cloud != 0);
+		BeautyFlags->SetBoolField(TEXT("depth_of_field"), Capture->ShowFlags.DepthOfField != 0);
+		BeautyFlags->SetBoolField(TEXT("lens_flares"), Capture->ShowFlags.LensFlares != 0);
+		BeautyFlags->SetBoolField(TEXT("dynamic_shadows"), Capture->ShowFlags.DynamicShadows != 0);
+		RenderSettings->SetObjectField(TEXT("beauty_show_flags"), BeautyFlags);
+
+		// Scene captures render at their target's size; the screen
+		// percentage CVar is recorded above as found, the size here.
+		TArray<TSharedPtr<FJsonValue>> CaptureSize;
+		CaptureSize.Add(MakeShared<FJsonValueNumber>(Width));
+		CaptureSize.Add(MakeShared<FJsonValueNumber>(Height));
+		RenderSettings->SetArrayField(TEXT("capture_size_px"), CaptureSize);
+		RenderSettings->SetStringField(TEXT("screen_percentage"),
+			TEXT("captures render at capture_size_px; r.ScreenPercentage recorded in console"));
+
+		RenderSettings->SetStringField(TEXT("exposure_mode"), ExposureMode);
+		RenderSettings->SetStringField(TEXT("exposure_source"), ExposureSource);
+		if (bAppliedEv100)
+		{
+			RenderSettings->SetNumberField(TEXT("ev100"), AppliedEv100);
+		}
+		else
+		{
+			RenderSettings->SetField(TEXT("ev100"), MakeShared<FJsonValueNull>());
+		}
+		RenderSettings->SetNumberField(TEXT("exposure_bias"), ExposureBias);
+		RenderSettings->SetStringField(TEXT("extend_default_luminance_range"),
+			ConsoleString(TEXT("r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange")));
+		RenderSettings->SetStringField(TEXT("rhi"), GDynamicRHI->GetName());
+		RenderSettings->SetStringField(TEXT("shader_platform"),
+			LexToString(GMaxRHIShaderPlatform));
+		RenderSettings->SetBoolField(TEXT("deterministic_pins"), bDeterministic);
+
+		auto OffsetArray = [](const FVector& Offset)
+		{
+			TArray<TSharedPtr<FJsonValue>> Out;
+			Out.Add(MakeShared<FJsonValueNumber>(Offset.X));
+			Out.Add(MakeShared<FJsonValueNumber>(Offset.Y));
+			Out.Add(MakeShared<FJsonValueNumber>(Offset.Z));
+			return Out;
+		};
+		RenderSettings->SetArrayField(TEXT("cockpit_offset_m"),
+		                              OffsetArray(Director->ShoulderOffsetMetres));
+		RenderSettings->SetArrayField(TEXT("chase_offset_m"),
+		                              OffsetArray(Director->ChaseOffsetMetres));
+		RenderSettings->SetArrayField(TEXT("wingman_offset_m"),
+		                              OffsetArray(Director->WingmanOffsetMetres));
+		RenderSettings->SetStringField(TEXT("preset_offset_rule"),
+			TEXT("Python's (core/scenario/camera.py FALLBACK_CHASE_OFFSET, WINGMAN_OFFSET, "
+			     "SHOULDER_OFFSET): body offsets from the CG, unscaled; chase as flown "
+			     "is the shot constant or -chase="));
+		Root->SetObjectField(TEXT("render_settings"), RenderSettings);
+	}
+	// -- Phase 2 (contracts §5.4): look_applied -- every weather/sky
+	// parameter the scene actually applied, from the scene's own record.
+	if (bVisual && VisualScene.LookApplied.IsValid())
+	{
+		TSharedPtr<FJsonObject> Look = VisualScene.LookApplied;
+		Look->SetStringField(TEXT("source"), LookSource);
+		if (bLookAerosol && Look->HasTypedField<EJson::Object>(TEXT("aerosol")))
+		{
+			Look->GetObjectField(TEXT("aerosol"))->SetNumberField(TEXT("card_aerosol"), LookAerosol);
+		}
+		TArray<TSharedPtr<FJsonValue>> Overrides;
+		for (const FString& Name : LookProbeOverrides)
+		{
+			Overrides.Add(MakeShared<FJsonValueString>(Name));
+		}
+		Look->SetArrayField(TEXT("probe_overrides"), Overrides);
+		TSharedPtr<FJsonObject> ExposureRecord = MakeShared<FJsonObject>();
+		ExposureRecord->SetStringField(TEXT("mode"), ExposureMode);
+		ExposureRecord->SetStringField(TEXT("source"), ExposureSource);
+		if (bAppliedEv100)
+		{
+			ExposureRecord->SetNumberField(TEXT("ev100"), AppliedEv100);
+		}
+		else
+		{
+			ExposureRecord->SetField(TEXT("ev100"), MakeShared<FJsonValueNull>());
+		}
+		Look->SetObjectField(TEXT("exposure"), ExposureRecord);
+		Root->SetObjectField(TEXT("look_applied"), Look);
+	}
 	TSharedPtr<FJsonObject> Scene = MakeShared<FJsonObject>();
 	Scene->SetBoolField(TEXT("visual"), bVisual);
 	Scene->SetStringField(TEXT("shot"), Shot);
 	Scene->SetBoolField(TEXT("dynamic_shadows"), !bNoShadows);
 	Scene->SetBoolField(TEXT("aircraft_hidden"), bHideAircraft);
 	Scene->SetStringField(TEXT("exposure"), (bVisual && !bAutoExposure)
-		? *FString::Printf(TEXT("manual, AutoExposureBias %.1f"), ExposureBias)
+		? (bAppliedEv100
+			? *FString::Printf(TEXT("manual, EV100 %.2f (physical camera)"), AppliedEv100)
+			: *FString::Printf(TEXT("manual, AutoExposureBias %.1f"), ExposureBias))
 		: TEXT("auto (default metering)"));
 	if (bVisual && !TerrainPath.IsEmpty())
 	{
@@ -1435,6 +3118,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		{
 			Scene->SetStringField(TEXT("terrain_crs"), VisualScene.TerrainCrs);
 			Scene->SetStringField(TEXT("terrain_name"), VisualScene.TerrainName);
+			// Phase 2 (contracts §10): the posting the tiled terrain ACHIEVED
+			// (raster pixel size x the stride the triangle budget admitted).
+			Scene->SetNumberField(TEXT("terrain_posting_m"), VisualScene.TerrainPostingMetres);
+			Scene->SetNumberField(TEXT("terrain_stride"), VisualScene.TerrainStride);
+			Scene->SetNumberField(TEXT("terrain_tiles"), VisualScene.TerrainTiles);
+			Scene->SetNumberField(TEXT("terrain_triangles"), VisualScene.TerrainTriangles);
 			if (!VisualScene.ImagerySha256.IsEmpty())
 			{
 				Scene->SetStringField(TEXT("terrain_material"),
@@ -1459,6 +3148,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				TEXT("flat slab at spec terrain_elevation; visual terrain "
 				     "carries no collision"));
 		}
+	}
+	if (MeshAirframe.bLoaded)
+	{
+		Scene->SetStringField(TEXT("livery"), MeshAirframe.Livery);
 	}
 	if (bVisual)
 	{
