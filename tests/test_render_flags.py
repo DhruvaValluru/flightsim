@@ -166,7 +166,7 @@ def _cli_command(out, monkeypatch):
     monkeypatch.setattr(platform_module, "ue_available", lambda: True)
     monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
     monkeypatch.setattr("subprocess.run", _fake_subprocess(
-        commands, lambda c: "render_ue_scenario" in str(c[0])))
+        commands, lambda c: any("render_ue_scenario" in str(p) for p in c)))
     code = capture_main([str(SPEC), "--out", str(out), "--max-previews", "0",
                          "--render", "--no-host-flight"])
     assert code == 0
@@ -310,7 +310,7 @@ def test_the_cli_void_tier_forwards_no_scene(imported_repo, tmp_path,
     monkeypatch.setattr(platform_module, "ue_available", lambda: True)
     monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
     monkeypatch.setattr("subprocess.run", _fake_subprocess(
-        commands, lambda c: "render_ue_scenario" in str(c[0])))
+        commands, lambda c: any("render_ue_scenario" in str(p) for p in c)))
     code = capture_main([str(SPEC), "--out", str(tmp_path / "void"),
                          "--max-previews", "0", "--render",
                          "--no-host-flight", "--void"])

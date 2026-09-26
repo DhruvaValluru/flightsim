@@ -573,7 +573,11 @@ def test_event_example_captures_on_the_downburst_and_verifies(tmp_path):
 # imported -> aircraft.mesh, by name, before any flight or engine time.
 
 def _is_render_wrapper(command) -> bool:
-    return "render_ue_scenario" in str(command[0])
+    """The wrapper anywhere in the command: on Windows it is the -File
+    argument of a powershell prefix, not the first token (measured: the
+    real PowerShell wrapper ran on Windows CI while this looked at
+    command[0])."""
+    return any("render_ue_scenario" in str(part) for part in command)
 
 
 def _fake_run(commands):

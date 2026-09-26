@@ -197,13 +197,13 @@ def scan_codebase() -> Dict[str, Set[str]]:
     found in ("<shape> @ <relative path>")."""
     found: Dict[str, Set[str]] = {}
     for path, text in _sources():
-        rel = str(path.relative_to(REPO))
+        rel = path.relative_to(REPO).as_posix()     # the same site string on Windows
         for label, pattern in PATTERNS:
             for match in pattern.finditer(text):
                 for name in _expand(match.group(1), text, rel):
                     found.setdefault(name, set()).add(f"{label} @ {rel}")
     for path, text in _cpp_sources():
-        rel = str(path.relative_to(REPO))
+        rel = path.relative_to(REPO).as_posix()     # the same site string on Windows
         for label, pattern in CPP_PATTERNS:
             for match in pattern.finditer(text):
                 found.setdefault(match.group(1), set()).add(f"{label} @ {rel}")

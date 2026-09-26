@@ -219,6 +219,14 @@ Windows-console path -- `sys.stdout` there writes with WriteConsoleW on
 fd 1's current handle and fails once that handle is a file, so the block
 prints through a plain file object; that path is UNMEASURED here and is
 the first thing to run in a PowerShell window on the Windows box.
+With the deadlock gone the Windows suite ran to its end for the first
+time (12 min) and showed three tests that were Windows-blind, none of
+them about the code under test: two render tests whose fake
+`subprocess.run` recognised the wrapper only as the command's first
+token (on Windows it is the `-File` argument of a `powershell` prefix,
+so the real wrapper ran and exited 1), and the message scanner's site
+strings, which carried backslashes there; the predicates now look at
+every token and the scanner reports POSIX paths on every OS.
 NEXT.md gotcha 33.
 
 ## P2-A/spec8 -- the SPEC_VERSION 8 bump and `scene.terrain_source`

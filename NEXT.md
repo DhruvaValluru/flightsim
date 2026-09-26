@@ -799,5 +799,10 @@ the parity discipline, and the do-not-regress list)
     spool -- and fails, so the block swaps in a plain file object on fd
     1 for its duration. That console path is UNMEASURED here (CI's
     stdout is a pipe): the first `python -m flightsim.capture` in a
-    PowerShell window on the Windows box is its test.
+    PowerShell window on the Windows box is its test. A test that fakes
+    `subprocess.run` for the render wrapper must recognise the wrapper
+    ANYWHERE in the command (`ue_runner_command` puts a powershell
+    prefix before `-File <script>.ps1` on Windows), and a test that
+    pins a site by relative path must compare `as_posix()` paths: both
+    were Windows-blind until the suite first ran to its end there.
 
