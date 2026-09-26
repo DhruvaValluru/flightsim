@@ -2632,14 +2632,31 @@ mutate flightsim/capture.py \
 
 mutate flightsim/capture.py \
     '        if _is_library_banner(line):
-            pending_blank = 0
-            after_banner = True
+            self.pending_blank = 0
+            self.after_banner = True
             return' \
     '        if False:  # MUTATED: banner lines relayed
-            pending_blank = 0
-            after_banner = True
+            self.pending_blank = 0
+            self.after_banner = True
             return' \
     "the relay drops exactly the banner lines" \
+    tests/test_capture_cli_words.py || failures=$((failures+1))
+
+# The quieted stdout is a spool FILE, never a pipe: a full pipe blocks a
+# writer that holds the GIL (the flight model's C++) while the relay
+# thread waits for that GIL -- the Windows CI deadlock of run 36217163564
+# (4 KB anonymous pipes; the A320 description printed on load is 16 KB).
+# And that description stays off the card's own flight model.
+mutate flightsim/capture.py \
+    '    spool_fd, spool_path = tempfile.mkstemp(prefix="flightsim-stdout-", suffix=".spool")' \
+    '    spool_path = None; spool_fd, _writer = os.pipe()  # MUTATED: a pipe again' \
+    "the quieted stdout is a spool file, never a pipe (a full pipe deadlocks a GIL-holding writer)" \
+    tests/test_capture_cli_words.py || failures=$((failures+1))
+
+mutate core/scenario/card.py \
+    '        fdm.set_debug_level(0)' \
+    '        fdm.set_debug_level(1)  # MUTATED: the aircraft description is printed on load' \
+    "the run card's flight model prints no aircraft description" \
     tests/test_capture_cli_words.py || failures=$((failures+1))
 
 # --- Phase 2 Look lane part 1: the engine pin and the renderer settings ---

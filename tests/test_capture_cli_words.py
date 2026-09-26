@@ -13,6 +13,9 @@ bracketed form, the render wrapper's exit).
 
 import os
 import re
+import stat
+import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -103,6 +106,93 @@ def test_verbose_keeps_the_library_banner(tmp_path, capfd):
     out = capfd.readouterr().out
     assert "JSBSim Flight Dynamics Model" in out
     assert "valid; running headlessly" in out
+
+
+#: A writer that holds the GIL while it writes, the way the flight
+#: model's C++ does: the C runtime's write(2) through ctypes.PyDLL, which
+#: keeps the GIL for the call. It pushes two banners around 0.6 MB of
+#: lines -- more than any pipe holds -- through the quieted stdout.
+GIL_HELD_WRITER = r"""
+import ctypes, os, sys
+sys.path.insert(0, os.getcwd())
+from flightsim.capture import quiet_library_banners
+BANNER = (b"\n\n     JSBSim Flight Dynamics Model v1.2.4 Feb  7 2026 11:12:49\n"
+          b"            [JSBSim-ML v2.0]\n\nJSBSim startup beginning ...\n\n")
+body = b"".join(b"line %d\n" % i for i in range(60000))
+payload = BANNER + body + BANNER
+if sys.platform.startswith("win"):
+    write = ctypes.PyDLL("ucrtbase")._write
+    write.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    write.restype = ctypes.c_int
+else:
+    write = ctypes.PyDLL(None).write
+    write.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_size_t]
+    write.restype = ctypes.c_ssize_t
+with quiet_library_banners():
+    print("before", flush=True)
+    done = 0
+    while done < len(payload):
+        n = write(1, payload[done:], len(payload) - done)
+        if n <= 0:
+            raise OSError("the C runtime's write failed")
+        done += n
+    print("after", flush=True)
+print("block left")
+"""
+
+
+def test_a_writer_that_holds_the_gil_cannot_deadlock_the_quieted_stdout():
+    """Measured before the fix, with this writer: the pipe version of
+    quiet_library_banners never returned (60 s, no output). The writer
+    filled the pipe and blocked with the GIL held; the relay thread
+    needed the GIL to drain it. On Windows CI, whose anonymous pipes
+    hold 4 KB, the 16 KB aircraft description the card's flight model
+    printed on load did the same to every capture child under the
+    campaign (run 36217163564). Through a spool file the writer never
+    waits: the block returns, the banner is dropped, every other line
+    arrives in order, and nothing is left in the temp directory."""
+    completed = subprocess.run([sys.executable, "-c", GIL_HELD_WRITER], cwd=REPO,
+                               capture_output=True, timeout=120)
+    assert completed.returncode == 0, completed.stderr.decode(errors="replace")[-2000:]
+    out = completed.stdout.replace(b"\r\n", b"\n")
+    assert b"JSBSim" not in out
+    assert out.startswith(b"before\nline 0\nline 1\n"), out[:80]
+    assert out.endswith(b"line 59999\nafter\nblock left\n"), out[-80:]
+    assert out.count(b"\n") == 60003
+
+
+def test_the_quieted_stdout_is_a_regular_file_never_a_pipe(capfd):
+    """The property the deadlock test rests on, read directly: inside
+    the block fd 1 is a regular file, whose writes never wait for a
+    reader -- not a FIFO."""
+    import tempfile
+
+    with quiet_library_banners():
+        mode = os.fstat(1).st_mode
+        os.write(1, b"spooled\n")
+    assert stat.S_ISREG(mode) and not stat.S_ISFIFO(mode)
+    assert capfd.readouterr().out == "spooled\n"
+    leftovers = [p for p in os.listdir(tempfile.gettempdir())
+                 if p.startswith("flightsim-stdout-")]
+    assert leftovers == [], leftovers
+
+
+def test_the_run_card_flight_model_prints_no_aircraft_description(capfd):
+    """The card's engine-mixture discovery loads the model in a flight
+    model of its own. At the library's default debug level that load
+    printed the whole aircraft description -- 16 KB for the A320,
+    measured in every campaign capture.log -- the bytes that filled a
+    4 KB Windows pipe. core.fdm's instance has always run at level 0;
+    the card's does now. The cache is cleared so the model loads."""
+    from core.scenario.card import _MIXTURE_CACHE, discovered_engine_mixture
+    from core.scenario.spec import ScenarioSpec
+
+    spec = ScenarioSpec.read(EXAMPLES / "cameras_multi.yaml")
+    _MIXTURE_CACHE.clear()
+    discovered_engine_mixture(spec)
+    out = capfd.readouterr().out
+    assert "Reading Aircraft Configuration File" not in out, out[:400]
+    assert "Aircraft Metrics" not in out
 
 
 def test_the_help_names_the_engine_version_that_is_pinned(capsys):

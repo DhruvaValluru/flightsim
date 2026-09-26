@@ -57,6 +57,12 @@ def discovered_engine_mixture(spec: ScenarioSpec) -> float:
 
     def attempt(mixture: float):
         fdm = jsbsim.FGFDMExec(jsbsim.get_default_root_dir())
+        # Quiet, as core.fdm's own instance is: at the library's default
+        # level load_model prints the whole aircraft description (16 KB
+        # for the A320, measured in every campaign capture.log) -- the
+        # bytes that filled a 4 KB Windows pipe (flightsim/capture.py,
+        # quiet_library_banners).
+        fdm.set_debug_level(0)
         fdm.load_model(aircraft)
         fdm.set_dt(1.0 / float(spec.rate.value))
         # _IC_PRIORITY's safe order: position, attitude (beta before psi),

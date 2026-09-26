@@ -32,3 +32,26 @@ jobs:
           # zero-config relay default) but no test calls the network --
           # the suite injects mock clients everywhere.
           FLIGHTSIM_LLM: none
+      # A campaign test that failed or hung leaves the capture command's
+      # stdout under pytest's temp root, one capture.log per run; a job
+      # that fails prints the tail of the newest ones so its log says
+      # what the child process said (the Windows deadlock of run
+      # 36217163564 took a cycle to see without this).
+      - name: capture logs of the runs the failed suite made
+        if: failure()
+        shell: python
+        run: |
+          import tempfile
+          import time
+          from pathlib import Path
+
+          root = Path(tempfile.gettempdir())
+          logs = {p.resolve() for p in root.glob("pytest-of-*/pytest-*/**/capture.log")}
+          logs = sorted(logs, key=lambda p: p.stat().st_mtime, reverse=True)[:12]
+          if not logs:
+              print(f"no capture.log under {root}")
+          for path in logs:
+              lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+              when = time.strftime("%H:%M:%S", time.gmtime(path.stat().st_mtime))
+              print(f"== {path} ({len(lines)} lines, last written {when} UTC)")
+              print("\n".join(lines[-40:]))

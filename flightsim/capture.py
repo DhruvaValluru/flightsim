@@ -44,6 +44,7 @@ import json
 import math
 import os
 import sys
+import tempfile
 import threading
 from pathlib import Path
 from typing import Optional, Sequence
@@ -73,44 +74,96 @@ def _is_library_banner(line: bytes) -> bool:
     return line.strip().startswith(LIBRARY_BANNER_PREFIXES)
 
 
-def _relay_without_banners(read_end: int, out_fd: int) -> None:
-    """Copy every line from the pipe to the real stdout except the
-    library banner lines and the blank lines that frame them. Blank
-    lines are held until the next line says whether they framed a
-    banner, so a program's own blank line still arrives."""
-    pending_blank = 0
-    after_banner = False
-    tail = b""
+class _BannerFilter:
+    """A line filter over a byte stream: every line reaches ``out_fd``
+    except the library banner lines and the blank lines that frame
+    them. Blank lines are held until the next line says whether they
+    framed a banner, so a program's own blank line still arrives.
+    ``feed`` takes the stream in any chunking; ``close`` releases what
+    a stream without a final newline still holds."""
 
-    def emit(line: bytes) -> None:
-        nonlocal pending_blank, after_banner
+    def __init__(self, out_fd: int) -> None:
+        self.out_fd = out_fd
+        self.pending_blank = 0
+        self.after_banner = False
+        self.tail = b""
+
+    def emit(self, line: bytes) -> None:
         if _is_library_banner(line):
-            pending_blank = 0
-            after_banner = True
+            self.pending_blank = 0
+            self.after_banner = True
             return
         if not line.strip():
-            if not after_banner:
-                pending_blank += 1
+            if not self.after_banner:
+                self.pending_blank += 1
             return
-        os.write(out_fd, b"\n" * pending_blank + line)
-        pending_blank = 0
-        after_banner = False
+        os.write(self.out_fd, b"\n" * self.pending_blank + line)
+        self.pending_blank = 0
+        self.after_banner = False
 
+    def feed(self, chunk: bytes) -> None:
+        self.tail += chunk
+        while b"\n" in self.tail:
+            line, self.tail = self.tail.split(b"\n", 1)
+            self.emit(line + b"\n")
+
+    def close(self) -> None:
+        if self.tail:
+            self.emit(self.tail)
+            self.tail = b""
+        if self.pending_blank and not self.after_banner:
+            os.write(self.out_fd, b"\n" * self.pending_blank)
+        self.pending_blank = 0
+
+
+def _relay_without_banners(read_end: int, out_fd: int) -> None:
+    """Copy a pipe to ``out_fd`` through the filter until every writer
+    has closed it. The tests push bytes through this form; the command
+    itself spools to a FILE (``quiet_library_banners`` says why a pipe
+    is the wrong channel for a writer that holds the GIL)."""
+    stream = _BannerFilter(out_fd)
     try:
         while True:
             chunk = os.read(read_end, 65536)
             if not chunk:
                 break
-            tail += chunk
-            while b"\n" in tail:
-                line, tail = tail.split(b"\n", 1)
-                emit(line + b"\n")
-        if tail:
-            emit(tail)
-        if pending_blank and not after_banner:
-            os.write(out_fd, b"\n" * pending_blank)
+            stream.feed(chunk)
+        stream.close()
     finally:
         os.close(read_end)
+
+
+def _tail_without_banners(path: str, out_fd: int, stop: threading.Event,
+                          poll_seconds: float = 0.05) -> None:
+    """Follow the spool file at ``path`` from its start, relaying every
+    new byte through the filter, until ``stop`` is set and the file has
+    been read to its end. ``stop`` is set only after the last write, so
+    an empty read that FOLLOWS the flag means nothing is left."""
+    stream = _BannerFilter(out_fd)
+    with open(path, "rb", buffering=0) as source:
+        while True:
+            stopping = stop.is_set()
+            chunk = source.read(65536)
+            if chunk:
+                stream.feed(chunk)
+                continue
+            if stopping:
+                break
+            stop.wait(poll_seconds)
+    stream.close()
+
+
+def _flush_c_stdout() -> None:
+    """Flush the C runtime's stdout, where a library's last unflushed
+    bytes can sit, so they reach the spool before fd 1 is restored.
+    Best effort: a runtime that cannot be reached changes nothing."""
+    try:
+        import ctypes
+
+        runtime = ctypes.CDLL("ucrtbase" if sys.platform.startswith("win") else None)
+        runtime.fflush(None)
+    except (OSError, AttributeError):
+        pass
 
 
 @contextlib.contextmanager
@@ -118,13 +171,30 @@ def quiet_library_banners(enabled: bool = True):
     """Run a block with the JSBSim startup banners kept off stdout.
 
     The banners are written by C++ straight to file descriptor 1, so
-    no Python-level redirection sees them: fd 1 is pointed at a pipe
-    for the block, a thread relays the pipe to the real stdout and
-    drops exactly the banner lines (LIBRARY_BANNER_PREFIXES), and fd 1
-    is restored before the block's caller prints again. Everything
-    else -- the spec line, the refusals, a subprocess's own words --
-    arrives in order. With ``enabled`` false (--verbose) the block runs
-    untouched; so does a process with no usable stdout.
+    no Python-level redirection sees them: for the block, fd 1 is
+    pointed at a SPOOL FILE, a thread follows the file and relays every
+    line but the banner lines (LIBRARY_BANNER_PREFIXES) to the real
+    stdout, and fd 1 is restored before the block's caller prints
+    again. Everything else -- the spec line, the refusals, a
+    subprocess's own words -- arrives in order. With ``enabled`` false
+    (--verbose) the block runs untouched; so does a process with no
+    usable stdout.
+
+    A file, never a pipe. The first version of this used os.pipe(). A
+    pipe has a fixed buffer that a writer fills and then BLOCKS on
+    until the reader drains it, and the library writes while holding
+    the GIL (its C++ never releases it), so the relay thread could not
+    run to drain it and the process hung with the writer waiting for
+    the reader and the reader waiting for the GIL. Linux pipes hold
+    64 KB and a run's output is smaller, so it passed here; Windows
+    anonymous pipes hold 4 KB and the aircraft description JSBSim
+    prints while loading a model is 16 KB in one call, so on Windows
+    CI every capture under the campaign deadlocked until the watchdog
+    killed it (run 36217163564: the token test failed after one 120 s
+    stall, the end-to-end test hung past pytest's 15 min). A write to
+    a file never waits for a reader; the deadlock test in
+    tests/test_capture_cli_words.py writes more than any pipe holds
+    while holding the GIL and must return.
     """
     if not enabled:
         yield
@@ -135,11 +205,12 @@ def quiet_library_banners(enabled: bool = True):
     except (OSError, ValueError, AttributeError):
         yield
         return
-    read_end, write_end = os.pipe()
-    os.dup2(write_end, 1)
-    os.close(write_end)
-    relay = threading.Thread(target=_relay_without_banners,
-                             args=(read_end, saved), daemon=True)
+    spool_fd, spool_path = tempfile.mkstemp(prefix="flightsim-stdout-", suffix=".spool")
+    os.dup2(spool_fd, 1)
+    os.close(spool_fd)
+    stop = threading.Event()
+    relay = threading.Thread(target=_tail_without_banners,
+                             args=(spool_path, saved, stop), daemon=True)
     relay.start()
     try:
         yield
@@ -147,9 +218,13 @@ def quiet_library_banners(enabled: bool = True):
         try:
             sys.stdout.flush()
         finally:
-            os.dup2(saved, 1)  # the pipe's last writer closes: the relay ends
+            _flush_c_stdout()
+            os.dup2(saved, 1)      # this process's last writer to the spool is gone
+            stop.set()             # after the writes: the relay reads to the end, then stops
             relay.join()
             os.close(saved)
+            with contextlib.suppress(OSError):
+                os.unlink(spool_path)
 
 
 def _tornado_hazard_block(spec):

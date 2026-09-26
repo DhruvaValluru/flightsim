@@ -772,3 +772,22 @@ the parity discipline, and the do-not-regress list)
     `flightsim/capture.py`'s help reads `UE_ENGINE_VERSION` since
     e3efd98; `experiments/fps_probe.py` is outside this stage's files,
     listed in docs/PHASE2_REPORT.md.
+33. **Never put an os.pipe() between a writer that holds the GIL and a
+    Python reader thread.** `flightsim/capture.py quiet_library_banners`
+    first pointed fd 1 at a pipe and relayed it through a thread to keep
+    the JSBSim banner off stdout. A pipe's buffer is finite; a writer
+    that fills it blocks until the reader drains it; the library's C++
+    writes without releasing the GIL, so the relay thread never got to
+    drain it: writer waits for reader, reader waits for the GIL. Linux
+    pipes hold 64 KB (a run prints less), Windows anonymous pipes hold
+    4 KB, and the card's flight model printed the 16 KB A320 description
+    on `load_model` (debug level left at 1) -- so on Windows CI every
+    capture child under the campaign hung silently, the 120 s watchdog
+    killed it, the token test failed and the end-to-end test hung past
+    pytest's 15 min (run 36217163564; found only after pytest-timeout
+    was added, b51368b). Fix: the block spools fd 1 to a temp FILE that
+    a thread follows (a write to a file never waits), the card's model
+    runs at debug level 0 like core.fdm's, and a test writes 0.6 MB
+    through the C runtime with the GIL held and must return. CI now
+    prints the newest capture.log tails when a job fails.
+

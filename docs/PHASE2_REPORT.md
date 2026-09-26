@@ -186,6 +186,33 @@ fixed, not landed, or architectural is listed at the end of this report
 under "Open findings", with the proposer's patch or reasoning in one
 line each, as of cd5c96a.
 
+**Measured after the PR opened: the Windows CI deadlock.** The first
+CI runs of this branch went green on ubuntu and macOS and hung on
+Windows with no log, past the job's six-hour default. pytest-timeout
+(b51368b) turned the hang into a stack: the campaign's watchdog loop
+polling a capture child that never exited, from
+`tests/test_agent.py::test_cooperative_agent_completes_a_tiny_headless_campaign_end_to_end`,
+with `test_rogue_agent_cannot_run_without_a_token` failed just before
+it after exactly one 120 s stall (run 36217163564). Root cause, then
+reproduced here: `flightsim/capture.py quiet_library_banners` pointed
+fd 1 at an `os.pipe()` and relayed it through a thread to keep the
+JSBSim banner off stdout; the library writes from C++ while holding
+the GIL, so once the pipe was full the writer waited for the relay
+thread and the relay thread waited for the GIL. Linux pipes hold
+64 KB and no run prints that much; Windows anonymous pipes hold 4 KB
+and the run card's flight model printed the 16 KB A320 description on
+`load_model` (its debug level was the library default, unlike
+core.fdm's). A writer that holds the GIL and writes 0.6 MB reproduced
+the hang on Linux in one call (60 s, no output). Fix: fd 1 is spooled
+to a temp file that a thread follows (a write to a file never waits
+for a reader), the card's model runs at debug level 0, and
+`tests/test_capture_cli_words.py` keeps the deadlock test (the same
+GIL-holding writer, in a subprocess with a timeout, must return with
+the banner dropped and every other line kept), the file-not-pipe
+property and the quiet card, each with a mutation guard. CI prints the
+newest `capture.log` tails when a job fails, so the next Windows-only
+finding costs one cycle, not two. NEXT.md gotcha 33.
+
 ## P2-A/spec8 -- the SPEC_VERSION 8 bump and `scene.terrain_source`
 
 **What was measured, and what was defective.** Three things were
