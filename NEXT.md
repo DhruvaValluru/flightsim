@@ -27,8 +27,9 @@ this docs pass, then 573bff6 (the 74 guards the area fixers proposed,
 `tests/test_mutation_targets.py`). Measured at 573bff6: 439 mutation
 guards, every target unique (`--check-targets`); the whole suite green
 (`.venv/bin/pytest -q`, exit 0, one network-pinned test skipped by
-name); `./scripts/mutation_check.sh` end to end: see the Phase 2 report's
-first section for the count measured on this checkout. Every C++
+name); `./scripts/mutation_check.sh` end to end at 1e7c0b1: all 439 guards
+load-bearing, 0 WEAK, 0 SKIP, suite green after the last restore
+(4418 s). Every C++
 change is UNCOMPILED here. WINDOWS, in this
 order: build on 5.7 (`ue_preflight.ps1`, `vendor_ue_plugin.ps1` -- the
 four local plugin patches were measured on 5.5 -- `build_ue.ps1`);

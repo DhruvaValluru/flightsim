@@ -86,6 +86,11 @@ invocation was checked against `--help` at 418489f (on Windows,
   occurs exactly once with no pytest (366 of 366, 6.0 s measured here at
   cd5c96a); `--from N --to M`, `--match REGEX` and
   `--no-suite` run a window of it -- a subset, not the contract.
+  MEASURED on this checkout at 1e7c0b1 (Linux, no engine): the whole
+  suite green first (`.venv/bin/pytest -q`, 1418 tests, exit 0, one
+  network-pinned test skipped by name), then every one of the 439
+  guards load-bearing -- 0 WEAK, 0 SKIP -- and the suite green again
+  after the last restore; 4418 s end to end.
 
 **The plan's exit criteria** (docs/PHASE2_BRAINSTORM.md §12, "what
 perfect means"), one line each: what is demonstrated here, what waits
