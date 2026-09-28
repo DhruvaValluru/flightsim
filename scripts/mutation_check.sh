@@ -3435,6 +3435,267 @@ mutate core/agent/tools.py \
     "every policy denial is a line of trace.jsonl" \
     tests/test_agent.py || failures=$((failures+1))
 
+# -- the advancement additions, batch 1 part 1: geoid, limits, instruments, modes, DIS ----
+mutate core/terrain/geoid.py \
+    '    if expected_sha256 is not None and digest != expected_sha256:' \
+    '    if False and expected_sha256 is not None and digest != expected_sha256:  # MUTATED: any grid passes' \
+    "a geoid grid with the wrong sha256 is refused by name" tests/test_geoid.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/geoid.py \
+    '        dy = fy - iy
+        dx = fx - ix' \
+    '        dy = float(round(fy - iy))  # MUTATED: nearest neighbour
+        dx = float(round(fx - ix))' \
+    "the geoid undulation is bilinear, not nearest-neighbour" tests/test_geoid.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/geoid.py \
+    'with_value=float(n), without_value=0.0,' \
+    'with_value=float(n), without_value=float(n),  # MUTATED: the null test measures nothing' \
+    "the undulation record's null test compares N against 0" tests/test_geoid.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/geoid.py \
+    '        "undulation_m": None,' \
+    '        "undulation_m": 0.0,  # MUTATED: absence recorded as zero' \
+    "a flat or synthesised scene records the undulation as null, never zero" tests/test_geoid.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/glo30.py \
+    '    baked.provenance["datum"] = datum_for_heightfield(baked)' \
+    '    pass  # MUTATED: the sidecar carries no datum block' \
+    "the bake sidecar carries the datum block" tests/test_geoid.py \
+    || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '        "datum": datum,' \
+    '        "datum": None,  # MUTATED: the manifest carries no datum block' \
+    "the capture manifest carries the datum block" tests/test_geoid.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/card.py \
+    '        card["datum"] = dict(datum)' \
+    '        pass  # MUTATED: the card drops the datum' \
+    "the run card carries the datum block" tests/test_geoid.py \
+    || failures=$((failures+1))
+
+mutate core/telemetry/limits.py \
+    '        return 1 if value > limit else 0' \
+    '        return 1 if value >= limit else 0  # MUTATED: a sample AT the limit is flagged' \
+    "limits.monitor: the comparison is strict -- at a positive limit is not beyond it" \
+    tests/test_limits.py || failures=$((failures+1))
+
+mutate core/telemetry/limits.py \
+    '    return 1 if value < limit else 0' \
+    '    return 1 if value <= limit else 0  # MUTATED: a sample AT the negative limit is flagged' \
+    "limits.monitor: the comparison is strict -- at a negative limit is not beyond it" \
+    tests/test_limits.py || failures=$((failures+1))
+
+mutate core/telemetry/limits.py \
+    '        count = int(sum(flags))' \
+    '        count = 0  # MUTATED: the per-limit summary never counts' \
+    "limits.monitor: the per-limit count is the number of flagged samples" \
+    tests/test_limits.py || failures=$((failures+1))
+
+mutate core/telemetry/limits.py \
+    '    any_count = int(sum(any_flags))' \
+    '    any_count = 0  # MUTATED: any_exceedance never counts' \
+    "limits.monitor: the any_exceedance count is the number of flagged samples" \
+    tests/test_limits.py || failures=$((failures+1))
+
+mutate core/telemetry/limits.py \
+    '    constraint = "limits.config"' \
+    '    constraint = "limits.misconfigured"  # MUTATED: the refusal loses its name' \
+    "limits.config: a malformed limits table refuses by that name" \
+    tests/test_limits.py || failures=$((failures+1))
+
+mutate core/telemetry/limits.py \
+    '    if unknown:
+        raise refuse(f"unknown keys {unknown}; a limits block carries "' \
+    '    if False:  # MUTATED: an unknown key is ignored, so a misspelt limit is never monitored
+        raise refuse(f"unknown keys {unknown}; a limits block carries "' \
+    "limits.config: an unknown key in the limits block is refused, not ignored" \
+    tests/test_limits.py || failures=$((failures+1))
+
+mutate core/telemetry/limits.py \
+    '    if not isinstance(config, dict) or "limits" not in config:
+        return None' \
+    '    if not isinstance(config, dict) or "limits" not in config:
+        raise LimitsConfigError(aircraft, "no limits block")  # MUTATED: an airframe without a table refuses' \
+    "limits: an airframe without a limits block is recorded unmonitored and never refuses" \
+    tests/test_limits.py || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '    if limits_record is not None:
+        attach_record(manifest, limits_record)' \
+    '    if False:  # MUTATED: the limits.monitor record is never attached
+        attach_record(manifest, limits_record)' \
+    "limits.monitor: the AppliedVariable record is attached to the run manifest" \
+    tests/test_limits.py || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '        "limits": limits_block,' \
+    '        "limits": None,  # MUTATED: the manifest carries no limits block' \
+    "limits: the run manifest carries the limits block (table and summary)" \
+    tests/test_limits.py || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '    limits_block, limits_record = monitor_run(recorder, str(spec.aircraft.value))' \
+    '    limits_block, limits_record = monitor_run(recorder, str(spec.aircraft.value))
+    output_digest = _digest_telemetry(recorder)  # MUTATED: the digest is taken after the flags are added' \
+    "limits: output_digest covers the recorded telemetry, taken before the monitor annotates" \
+    tests/test_limits.py || failures=$((failures+1))
+
+mutate core/telemetry/recorder.py \
+    '        if len(values) != len(self):
+            raise ValueError(f"annotation {name!r} has {len(values)} values for "' \
+    '        if False:  # MUTATED: an annotation of the wrong length is accepted
+            raise ValueError(f"annotation {name!r} has {len(values)} values for "' \
+    "recorder.annotate: a derived column must have one value per sample" \
+    tests/test_limits.py || failures=$((failures+1))
+
+mutate core/telemetry/instruments.py \
+    '    rng = generator(int(seed), "imu", int(replicate))' \
+    '    rng = generator(int(seed), "gps", int(replicate))  # MUTATED: the IMU borrows the GPS stream' \
+    "instruments: each instrument draws from its own named seed stream" tests/test_instruments.py || failures=$((failures+1))
+
+mutate core/telemetry/instruments.py \
+    '        [cp * sy, sr * sp * sy + cr * cy, cr * sp * sy - sr * cy],' \
+    '        [cp * sy, sr * sp * sy + cr * cy, cr * sp * sy + sr * cy],  # MUTATED: one sign of the rotation' \
+    "instruments: the GPS lever arm is rotated by the attitude" tests/test_instruments.py || failures=$((failures+1))
+
+mutate core/telemetry/instruments.py \
+    '        if t[i] >= next_fix - 1e-9:' \
+    '        if True:  # MUTATED: a fix every sample, no hold' \
+    "instruments: the GPS holds the last fix between fixes" tests/test_instruments.py || failures=$((failures+1))
+
+mutate core/telemetry/instruments.py \
+    '    alpha = dt / (tau_s + dt)' \
+    '    alpha = 1.0  # MUTATED: no lag' \
+    "instruments: the pitot-static lag is the stated first-order filter" tests/test_instruments.py || failures=$((failures+1))
+
+mutate core/telemetry/instruments.py \
+    '    if result.data is None:
+        return None' \
+    '    if False:  # MUTATED: the ideal profile writes a file
+        return None' \
+    "instruments: the ideal profile writes nothing" tests/test_instruments.py || failures=$((failures+1))
+
+mutate core/telemetry/instruments_check.py \
+    'SIGMA_FACTOR = 1.5' \
+    'SIGMA_FACTOR = 3.0  # MUTATED: the band swallows a doubled noise' \
+    "instruments check: the residual band refuses a doubled noise" tests/test_instruments.py || failures=$((failures+1))
+
+mutate core/telemetry/instruments_check.py \
+    '        if list(columns[name]) != list(truth_columns[name]):' \
+    '        if False:  # MUTATED: the truth beside the measurement is not compared' \
+    "instruments check: the truth beside the measurement is the recorder's" tests/test_instruments.py || failures=$((failures+1))
+
+mutate core/telemetry/instruments_check.py \
+    '                if not math.isfinite(drawn) or abs(drawn) > BIAS_SIGMAS * rep + 1e-12:' \
+    '                if False:  # MUTATED: any drawn bias is accepted' \
+    "instruments check: a drawn bias lies within the stated repeatability" tests/test_instruments.py || failures=$((failures+1))
+
+mutate core/telemetry/instruments_check.py \
+    '            or record["null_test"].get("ok") is not True:' \
+    '            or False:  # MUTATED: a null test that measured nothing passes' \
+    "instruments check: the record's null test measured a difference" tests/test_instruments.py || failures=$((failures+1))
+
+mutate core/experiments/seeds.py \
+    '    "imu",' \
+    '    # MUTATED: no imu stream' \
+    "seeds: the instrument streams are declared" tests/test_instruments.py || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '    write_measured(measured, out)' \
+    '    pass  # MUTATED: the measured file is not written' \
+    "capture: --instruments writes telemetry_measured.json" tests/test_instruments.py || failures=$((failures+1))
+
+mutate core/fdm/linearize.py \
+    '        J[:, j] = (f_plus - f_minus) / (2.0 * step)' \
+    '        J[:, j] = (f_plus - f_minus) / step  # MUTATED: the central difference divided by the step, not twice it' \
+    "modes.residual: the finite-difference Jacobian divides by twice the step" \
+    tests/test_modes.py || failures=$((failures+1))
+
+mutate core/fdm/linearize.py \
+    'RESIDUAL_STEP = 1e-4' \
+    'RESIDUAL_STEP = 1e-1  # MUTATED: a perturbation of 0.1 rad / 0.1 ft/s straddles the tables' \
+    "modes.residual: the independent perturbation is 1e-4 in each state's own unit" \
+    tests/test_modes.py || failures=$((failures+1))
+
+mutate core/fdm/modes.py \
+    '    pairs = sorted((e for e in eigenvalues if e.imag > tol), key=lambda e: -abs(e))' \
+    '    pairs = sorted((e for e in eigenvalues if e.imag > tol), key=lambda e: abs(e))  # MUTATED: the slower pair is named first' \
+    "the short period is the faster longitudinal pair, the Dutch roll the faster lateral pair" \
+    tests/test_modes.py || failures=$((failures+1))
+
+mutate core/fdm/modes.py \
+    '            "B": {1: (0.30, 2.00), 2: (0.20, 2.00), 3: (0.15, math.inf)},' \
+    '            "B": {1: (0.70, 2.00), 2: (0.20, 2.00), 3: (0.15, math.inf)},  # MUTATED: Level 1 floor raised' \
+    "MIL-F-8785C Table IV: Category B Level 1 short-period damping is 0.30 to 2.00" \
+    tests/test_modes.py || failures=$((failures+1))
+
+mutate core/fdm/linearize.py \
+    '    if not residual.ok:' \
+    '    if False:  # MUTATED: a residual beyond the bound is not refused' \
+    "modes.residual: a Jacobian residual beyond the bound is refused by name" \
+    tests/test_modes.py || failures=$((failures+1))
+
+mutate core/fdm/linearize.py \
+    '    if not getattr(fdm, "is_trimmed", False):' \
+    '    if False:  # MUTATED: an untrimmed state is linearised' \
+    "modes.untrimmed: only a trimmed FDM is linearised" \
+    tests/test_modes.py || failures=$((failures+1))
+
+mutate core/fdm/modes.py \
+    '    entry = AIRFRAME_CLASS.get(str(aircraft))
+    if entry is None:' \
+    '    entry = AIRFRAME_CLASS.get(str(aircraft))
+    if False:  # MUTATED: an airframe without a class is graded' \
+    "modes.airframe_class: an airframe with no stated class is refused, not guessed" \
+    tests/test_modes.py || failures=$((failures+1))
+
+mutate core/interop/dis.py \
+    '"fff" "ddd" "fff"' \
+    '"ddd" "fff" "fff"' \
+    "DIS byte layout: velocity and location swapped" tests/test_dis.py || failures=$((failures+1))
+
+mutate core/interop/dis.py \
+    'h_ellipsoidal_m = altitude_m + undulation_m' \
+    'h_ellipsoidal_m = altitude_m + 0.0 * undulation_m' \
+    "DIS ellipsoidal height (+N)" tests/test_dis.py || failures=$((failures+1))
+
+mutate core/interop/dis.py \
+    'if isinstance(n, (int, float)) and not isinstance(n, bool):' \
+    'if False:' \
+    "DIS datum block undulation read" tests/test_dis.py || failures=$((failures+1))
+
+mutate core/interop/geodesy.py \
+    'psi = math.atan2(r[0][1], r[0][0])' \
+    'psi = math.atan2(r[1][0], r[0][0])' \
+    "DIS Euler convention: psi off the matrix" tests/test_dis.py || failures=$((failures+1))
+
+mutate core/interop/geodesy.py \
+    'return matmul(rot_x(phi_rad), matmul(rot_y(theta_rad), rot_z(psi_rad)))' \
+    'return matmul(rot_z(psi_rad), matmul(rot_y(theta_rad), rot_x(phi_rad)))' \
+    "DIS Euler convention: rotation order" tests/test_dis.py || failures=$((failures+1))
+
+mutate core/interop/dis.py \
+    'TIMESTAMP_UNITS_PER_HOUR = 2 ** 31' \
+    'TIMESTAMP_UNITS_PER_HOUR = 2 ** 32' \
+    "DIS timestamp units" tests/test_dis.py || failures=$((failures+1))
+
+mutate core/interop/geodesy.py \
+    'z = (n * (1.0 - WGS84_E2) + h_m) * math.sin(lat)' \
+    'z = (n + h_m) * math.sin(lat)' \
+    "WGS 84 ECEF flattening" tests/test_dis.py || failures=$((failures+1))
+
+mutate core/interop/dis.py \
+    'if version != PROTOCOL_VERSION or pdu_type != PDU_TYPE_ENTITY_STATE:' \
+    'if False:' \
+    "DIS PDU version and type refusal" tests/test_dis.py || failures=$((failures+1))
+
 if [ "$guard_n" -ne "$total" ]; then
     echo "INTERNAL: $guard_n mutate calls ran but $total are written; the count is off" >&2
     exit 1

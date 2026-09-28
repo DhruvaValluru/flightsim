@@ -21,6 +21,10 @@ as index-seeded cases by a worker pool, the ledger the only truth.
 ``python -m flightsim.agent``    -- the same campaign driven by the
 typed tools under a stated policy, with a trace beside the dataset.
 
+``python -m flightsim.dis``      -- a run's telemetry as an IEEE
+1278.1-2012 Entity State PDU stream (one PDU per sample) with a JSON
+sidecar, or a stream decoded back into geodetic words (core.interop.dis).
+
 Nothing lives here but argument parsing and wiring: every behaviour is
 core/'s, tested there.
 """

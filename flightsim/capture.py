@@ -405,6 +405,17 @@ def build_parser() -> argparse.ArgumentParser:
                              "consume-poses mode on a render-capable "
                              "machine (-camera-index=N, one pass per "
                              "camera)")
+    parser.add_argument("--instruments", default=None, metavar="PROFILE",
+                        help="instrument error profile (assets/instrument_"
+                             "profiles/<PROFILE>.json: ideal, tactical, "
+                             "consumer_mems) applied to the recorded "
+                             "telemetry AFTER the run as an observer: an "
+                             "IMU, a GPS receiver, a pitot-static system "
+                             "and a magnetometer, each writing a "
+                             "<truth>_meas channel beside the truth into "
+                             "telemetry_measured.json. The default, ideal, "
+                             "writes nothing and says so; an unknown "
+                             "profile refuses by name before any flight.")
     parser.add_argument("--verbose", action="store_true",
                         help="keep the flight model's own startup lines "
                              "(the JSBSim banner it prints once per "
@@ -444,6 +455,21 @@ def _run(args: argparse.Namespace) -> int:
         # a version this build does not read): named, so the catalogue
         # can put it into words like every other refusal.
         print(f"REFUSED -- spec.read: {exc}")
+        return 2
+
+    # The instrument profile is a pre-flight gate like the cameras: a
+    # name this build has no file for refuses before any engine or
+    # flight time is spent.
+    from core.telemetry.instruments import (
+        InstrumentProfileError, describe as describe_instruments,
+        load_profile as load_instrument_profile, measure as measure_instruments,
+        write_measured,
+    )
+
+    try:
+        instrument_profile = load_instrument_profile(args.instruments or "ideal")
+    except InstrumentProfileError as exc:
+        print(f"REFUSED -- {exc.constraint}: {exc.message}")
         return 2
 
     if args.render:
@@ -856,9 +882,21 @@ def _run(args: argparse.Namespace) -> int:
         # Phase 2 (package B): the scripted traffic's solved tracks, so
         # every frame carries a label record for the second aircraft.
         traffic_tracks=traffic_tracks)
+    # The instrument models over the HEADLESS recording (the flight
+    # telemetry.json describes); the record rides in the capture manifest
+    # (ADVANCEMENTS_CONTRACTS rule 0) and the measured file, if any, is
+    # written beside telemetry.json below.
+    from core.scenario.runner import attach_record
+
+    measured = measure_instruments(
+        result.telemetry.to_dict(), instrument_profile, int(spec.seed.value),
+        source="user" if args.instruments is not None else "default")
+    attach_record(manifest, measured.record)
     manifest_path = write_capture_manifest(manifest, out)
     write_frame_sidecars(manifest, out)
     result.telemetry.write_json(out / "telemetry.json")
+    write_measured(measured, out)
+    print("  " + describe_instruments(measured))
     spec.write(out / "scenario.yaml")
     (out / "run.json").write_text(json.dumps({
         "spec_digest": result.spec_digest,
@@ -871,6 +909,11 @@ def _run(args: argparse.Namespace) -> int:
         "samples": len(result.telemetry),
         "solve_source": solve_source,
         "solve_digest": solve_digest,
+        # The limits monitor's block and the applied-variable records of
+        # the headless flight (core/telemetry/limits.py, core/records.py),
+        # so a campaign report can count exceedances per case.
+        "limits": result.manifest.get("limits"),
+        "applied_variables": result.manifest.get("applied_variables"),
     }, indent=1), encoding="utf-8")
 
     if args.card or args.render:

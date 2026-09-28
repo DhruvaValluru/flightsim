@@ -8,6 +8,7 @@
 *.jpg binary
 *.mp4 binary
 *.r16 binary
+*.pgm binary
 *.tif binary
 *.ttc binary
 *.ttf binary

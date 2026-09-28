@@ -35,6 +35,17 @@ Top level::
     scene              {key, terrain, terrain_sha256} -- terrain_sha256
                        is the SHA-256 of the raw .r16 samples
                        (Heightfield.digest()), null for flat scenes
+    datum              P10 (optional; absent in manifests written before
+                       it): the vertical datum of the scene's heights
+                       (core/terrain/geoid.py datum_block): the datum
+                       name, the geoid model, undulation_m at the scene
+                       origin with its source and bilinear bound, the
+                       EGM96-vs-EGM2008 model difference bound, and the
+                       ellipsoidal height of the origin; undulation_m
+                       is null (never 0) on a flat or synthesised scene
+    applied_variables  P10 (optional): core.records.records_block over
+                       every introduced variable's AppliedVariable, each
+                       with its null test; here scene.geoid_undulation_m
     frame              SceneFrame.provenance(): the CRS every position
                        in this file is expressed in, and the projected
                        origin of the local north/east metres
@@ -210,7 +221,11 @@ from .profile import load_profile, sensor_labels
 from .landmarks import scene_landmarks
 from .poses import PoseTrack, SceneFrame, aircraft_local_track, traffic_state
 from .schedule import CaptureSchedule
+from core.records import records_block
 from core.scenario.randomization import card_block as randomization_card_block
+from core.terrain.geoid import (
+    datum_for_heightfield, flat_datum_block, undulation_variable,
+)
 
 MANIFEST_VERSION = 6
 #: Versions this build can READ. Every version here is fully
@@ -302,6 +317,8 @@ def channel_unit(name: str) -> str:
         return "g"
     if name in _DIMENSIONLESS:
         return "1"
+    if name.startswith("exceed_") or name == "any_exceedance":
+        return "1"       # a 0/1 flag: the limits monitor's derived columns
     for suffix, unit in _UNIT_SUFFIXES:
         if name.endswith(suffix):
             return unit
@@ -411,6 +428,22 @@ def asset_digests(spec, airframe, scene: Optional[Dict]) -> Dict:
     }
 
 
+def scene_datum(heightfield, terrain_elevation_m: float) -> Dict:
+    """The manifest's ``datum`` block for the scene that flew.
+
+    A heightfield with a real-place origin gets the geoid block
+    (core/terrain/geoid.py: its sidecar's own, or one evaluated from
+    the provenance origin for a bake from before the block existed); a
+    synthesised ridge gets the synthesised block; no heightfield at all
+    is the flat slab at the spec's terrain elevation. What is NOT done:
+    no height in the manifest is converted -- the block records what the
+    heights are, and ``undulation_m`` is null (not 0) where none applies.
+    """
+    if heightfield is None:
+        return flat_datum_block(float(terrain_elevation_m))
+    return datum_for_heightfield(heightfield)
+
+
 def frame_filename(camera_id: str, index: int) -> str:
     """Relative image path, per-camera subdirectory. The renderer that
     produces pixels writes THIS path; headless manifests carry it as
@@ -505,6 +538,12 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
 
     primary_mesh = mesh_manifest_for(str(spec.aircraft.value))
     traffic_meshes = [mesh_manifest_for(str(e.aircraft.value)) for e in spec.traffic]
+    # P10: the vertical datum of the scene's heights. A georeferenced
+    # heightfield carries its bake's block (or has one evaluated from its
+    # provenance origin); a flat slab or a synthesised ridge says so with
+    # the undulation null, never zero. Copied from the scene, computed
+    # nowhere here; the verifier re-evaluates N with its own reader.
+    datum = scene_datum(heightfield, terrain_elevation_m)
 
     camera_blocks: List[Dict] = []
     frames: List[Dict] = []
@@ -640,6 +679,11 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
             "terrain": (scene or {}).get("terrain"),
             "terrain_sha256": terrain_sha256,
         },
+        # P10 (optional, absent-canonical for older readers): the vertical
+        # datum block, and the applied-variable records (core/records.py)
+        # -- one per introduced variable, each with its null test.
+        "datum": datum,
+        "applied_variables": records_block([undulation_variable(datum)]),
         "frame": frame.provenance(),
         "software_revision": software_revision(),
         "landmarks": scene_landmarks(
@@ -727,6 +771,9 @@ SIDECAR_CONTEXT_KEYS = (
     # Version 6: the object list every per-object record resolves
     # through, the class list, and the traffic provenance.
     "objects", "taxonomy", "traffic",
+    # P10: the vertical datum and the applied-variable records; None in
+    # a sidecar cut from a manifest written before they existed.
+    "datum", "applied_variables",
 )
 
 

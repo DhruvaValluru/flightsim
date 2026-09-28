@@ -30,6 +30,27 @@ from core.terrain.synthesis import TerrainStatistics, generate  # noqa: E402
 DEFAULT_KEYS = ("matterhorn", "yosemite", "control")
 
 
+def datum_line(key: str, raw: Path) -> str:
+    """The vertical-datum line for a bake (P10), read back from ITS
+    sidecar: the geoid undulation at the origin, the interpolation
+    bound, and the ellipsoidal height of the origin. A bake from before
+    the datum block says so rather than printing a number it lacks."""
+    from core.terrain.heightfield import Heightfield
+
+    datum = Heightfield.read(raw).provenance.get("datum") or {}
+    n = datum.get("undulation_m")
+    if not isinstance(n, (int, float)):
+        return (f"  {'':<18} datum: no datum block in the sidecar (baked "
+                f"before the geoid landed); re-bake to record it")
+    return (f"  {'':<18} datum: heights {datum.get('vertical_datum_of_heights')}; "
+            f"geoid N = {n:+.2f} m at the origin ({datum.get('geoid_model')}, "
+            f"bilinear +-{datum.get('bilinear_error_bound_m')} m; "
+            f"EGM96-EGM2008 bound {datum.get('model_difference_bound_m')} m); "
+            f"origin {datum.get('orthometric_height_of_origin_m'):.1f} m "
+            f"orthometric = {datum.get('ellipsoidal_height_of_origin_m'):.1f} m "
+            f"ellipsoidal")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("keys", nargs="*",
@@ -66,10 +87,12 @@ def main(argv=None) -> int:
         raw = terrain_dir / f"{key}.r16"
         if raw.is_file():
             print(f"  {key:<18} already baked ({raw})")
+            print(datum_line(key, raw))
             continue
         print(f"  {key:<18} baking from GLO-30 (fetch + ingest + verify)")
         bake(LOCATIONS[key], REPO / "data" / "glo30", terrain_dir)
         print(f"  {key:<18} done")
+        print(datum_line(key, raw))
 
     print()
     print("Baked. The web app picks these up immediately (no restart needed):")

@@ -832,10 +832,16 @@ The dataset's own limits, which are not defects of the pipeline:
   source to within resampling tolerance). Finer detail than 30 m does not
   exist in the data, and the render mesh is built at stride 2 (60 m posting)
   with normals from the full 30 m raster.
-* Heights are EGM2008 orthometric treated as ellipsoidal by the scene's
-  georeferencing, so absolute ECEF placement is off by the local geoid
-  undulation (~+50 m Alps, ~−30 m Sierra). Relative geometry within a scene —
-  aircraft against ridgeline — is unaffected, which is what the frames show.
+* Heights are EGM2008 orthometric and JSBSim's sea level is the WGS 84
+  ellipsoid, so absolute ECEF placement is off by the local geoid undulation N
+  (measured from the committed EGM96 grid: +52.52 m Matterhorn, −25.94 m
+  Yosemite, +41.47 m Fuji, −29.84 m Everest, −23.40 m Grand Canyon, −30.54 m
+  Flint Hills). Since the advancement addition I1 every bake sidecar, run card
+  and capture manifest carries a `datum` block stating N, its source and bounds
+  and the ellipsoidal height of the origin (`core/terrain/geoid.py`); no height
+  is converted, and the verifier re-evaluates N with its own reader. Relative
+  geometry within a scene — aircraft against ridgeline — is unaffected, which
+  is what the frames show.
 * Terrain colouring on the **control ridge** (and as fallback) is a
   slope/altitude classification (rock, scrub, valley floor, snow above the
   location's approximate snowline) written into vertex colours. It is

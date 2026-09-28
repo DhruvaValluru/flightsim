@@ -137,6 +137,7 @@ def write_run_card(spec: ScenarioSpec, path: Path,
                    objects: Optional[Sequence[Dict[str, object]]] = None,
                    taxonomy: Optional[Sequence[str]] = None,
                    traffic: Optional[Sequence[Dict[str, object]]] = None,
+                   datum: Optional[Dict[str, object]] = None,
                    ) -> Path:
     """Write the spec in the form the UE commandlet reads.
 
@@ -209,6 +210,19 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         card["wind_schedule"] = [dict(entry) for entry in wind_schedule]
     if orographic:
         card["orographic"] = dict(orographic)
+        # The vertical datum block rides in from the bake's sidecar
+        # through orographic_card_block; it is the card's, not the
+        # wind model's, so it is lifted to the top level and the
+        # orographic block keeps exactly the keys the C++ port reads.
+        if datum is None and isinstance(card["orographic"].get("datum"), dict):
+            datum = card["orographic"].pop("datum")
+    if datum:
+        # P10: which vertical datum the scene's heights are in, the geoid
+        # undulation at the origin with its source and bounds, and the
+        # ellipsoidal height of the origin (core/terrain/geoid.py). No
+        # host converts a height from it; it is the record of what the
+        # heights ARE, carried verbatim.
+        card["datum"] = dict(datum)
     # Phase 7 blocks: every parameter computed here, in the providers'
     # own modules, and carried verbatim -- the C++ ports derive nothing.
     if downburst:

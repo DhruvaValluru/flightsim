@@ -1,0 +1,39 @@
+{
+  "name": "ideal",
+  "basis": "ideal",
+  "source": "this repository: the recorded channels ARE the measurement -- no bias, no noise, no lag, no hold, no lever arm. The default; with it, no telemetry_measured.json is written and the capture says so in one line.",
+  "references": [
+    "IEEE Std 952-2020 (Allan-variance terms named by the error model; every term is zero here)"
+  ],
+  "imu": {
+    "accelerometer": {
+      "bias_repeatability_mg": 0.0,
+      "velocity_random_walk_mps_per_sqrt_h": 0.0,
+      "bias_instability_mg": 0.0,
+      "correlation_time_s": 100.0
+    },
+    "gyro": {
+      "bias_repeatability_deg_per_h": 0.0,
+      "angle_random_walk_deg_per_sqrt_h": 0.0,
+      "bias_instability_deg_per_h": 0.0,
+      "correlation_time_s": 100.0
+    }
+  },
+  "gps": {
+    "north_east_sigma_m": 0.0,
+    "vertical_sigma_m": 0.0,
+    "velocity_sigma_mps": 0.0,
+    "update_rate_hz": 10.0,
+    "antenna_offset_body_m": [0.0, 0.0, 0.0]
+  },
+  "pitot_static": {
+    "cas_sigma_kt": 0.0,
+    "cas_lag_s": 0.0,
+    "pressure_altitude_sigma_m": 0.0,
+    "pressure_altitude_lag_s": 0.0
+  },
+  "magnetometer": {
+    "hard_iron_sigma_fraction": 0.0,
+    "heading_sigma_deg": 0.0
+  }
+}

@@ -255,5 +255,34 @@
         "fdm_contact": "RIGHT_MLG"
       }
     }
+  },
+  "limits": {
+    "category": {
+      "value": "transport",
+      "regulation": "14 CFR 25.337 (transport category)",
+      "source": "FAA TCDS A20WE (Boeing 747-400), certification basis 14 CFR Part 25 -- unverified here: from memory of the TCDS"
+    },
+    "n_z_pos_g": {
+      "value": 2.5,
+      "source": "14 CFR 25.337(b): positive limit manoeuvring load factor n = 2.1 + 24000/(W+10000), not less than 2.5; 2.5 at the 747-400's weights"
+    },
+    "n_z_neg_g": {
+      "value": -1.0,
+      "source": "14 CFR 25.337(c): negative limit manoeuvring load factor not less than -1.0 up to V_C"
+    },
+    "speed_limit_kt": {
+      "value": 365.0,
+      "kind": "V_MO",
+      "source": "unverified here: from memory of the 747-400 Airplane Flight Manual limitations (V_MO 365 KIAS); compared here against JSBSim calibrated airspeed without a position-error correction"
+    },
+    "m_mo": {
+      "value": 0.92,
+      "source": "unverified here: from memory of the 747-400 Airplane Flight Manual limitations (M_MO 0.92)"
+    },
+    "alpha_stall_deg": {
+      "value": null,
+      "reason": "the JSBSim B747 model states no alpha limit (no <alphalimits> element; grep of B747.xml, 2026-09-28)"
+    },
+    "note": "The JSBSim B747 model is a generic 747; the placard values are the -400's. Measured 2026-09-28: the model trims and flies at 385 kt CAS at 1500 m (V_MO + 20) and at Mach 0.89 at 11000 m, so both speed limits are reachable on this model."
   }
 }

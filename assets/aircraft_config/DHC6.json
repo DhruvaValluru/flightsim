@@ -153,5 +153,34 @@
         ]
       ]
     }
+  },
+  "limits": {
+    "category": {
+      "value": "normal",
+      "regulation": "14 CFR 23.337 (normal category)",
+      "source": "FAA TCDS A9EA (DHC-6 Twin Otter): certification basis CAR 3 normal category, whose 3.186 states the same load factors as 14 CFR 23.337 as it read before Amendment 23-64 (2017): (a)(1) positive limit manoeuvring load factor n = 2.1 + 24000/(W+10000), not less than 3.8 for the normal category; (b)(1) negative limit not less than 0.4 x positive = -1.52 -- unverified here: from memory of the TCDS"
+    },
+    "n_z_pos_g": {
+      "value": 3.8,
+      "source": "14 CFR 23.337 as it read before Amendment 23-64 (2017): (a)(1) positive limit manoeuvring load factor n = 2.1 + 24000/(W+10000), not less than 3.8 for the normal category; (b)(1) negative limit not less than 0.4 x positive = -1.52 -- normal category +3.8 g"
+    },
+    "n_z_neg_g": {
+      "value": -1.52,
+      "source": "14 CFR 23.337 as it read before Amendment 23-64 (2017): (a)(1) positive limit manoeuvring load factor n = 2.1 + 24000/(W+10000), not less than 3.8 for the normal category; (b)(1) negative limit not less than 0.4 x positive = -1.52 -- normal category -0.4 x 3.8 = -1.52 g"
+    },
+    "speed_limit_kt": {
+      "value": 170.0,
+      "kind": "V_NE",
+      "source": "unverified here: from memory of the DHC-6-300 Airplane Flight Manual limitations (V_NE 170 KIAS); compared here against JSBSim calibrated airspeed without a position-error correction"
+    },
+    "m_mo": {
+      "value": null,
+      "reason": "a turboprop of this class has no Mach operating limit; none is published for the DHC-6"
+    },
+    "alpha_stall_deg": {
+      "value": null,
+      "reason": "the JSBSim DHC6 model states no alpha limit (no <alphalimits> element; grep of DHC6.xml, 2026-09-28)"
+    },
+    "note": "Not flown here: the prompt compiler does not map 'DHC6' to this FDM name (measured 2026-09-28: 'fly the DHC6' compiles to aircraft 'dhc6', refused aircraft.exists); a spec that sets aircraft 'DHC6' by hand loads the model."
   }
 }

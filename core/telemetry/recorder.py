@@ -99,6 +99,10 @@ class Recorder:
         #: Annotations: (time, label). Marks events so a chart can show when a
         #: control input or condition change was applied.
         self.events: List[Dict[str, Any]] = []
+        #: Columns added AFTER the run by an observer (the limits
+        #: monitor's 0/1 flags): derived from the recorded columns, never
+        #: read from JSBSim, named here so a reader can tell them apart.
+        self.derived: List[str] = []
         self._next_sample = 0.0
 
     # -- recording -----------------------------------------------------
@@ -127,6 +131,26 @@ class Recorder:
             self._fdm.step()
             self.sample()
 
+    def annotate(self, name: str, values) -> None:
+        """Add a DERIVED column after the run, one value per sample.
+
+        For observers that grade the recording (core.telemetry.limits):
+        the column rides beside the recorded ones so every per-frame
+        consumer sees it, and ``derived`` names it as not-from-JSBSim.
+        Refuses a name that would shadow a recorded channel and a
+        length that does not match the run -- a flag column shorter
+        than the telemetry would label the wrong frames.
+        """
+        if name in self.columns:
+            raise ValueError(f"{name!r} is already a column; an annotation "
+                             f"never overwrites a recorded channel")
+        values = list(values)
+        if len(values) != len(self):
+            raise ValueError(f"annotation {name!r} has {len(values)} values for "
+                             f"{len(self)} samples")
+        self.columns[name] = values
+        self.derived.append(name)
+
     # -- output --------------------------------------------------------
 
     def __len__(self) -> int:
@@ -145,6 +169,7 @@ class Recorder:
             "interval_s": self.interval_s,
             "samples": len(self),
             "events": self.events,
+            "derived": list(self.derived),
             "columns": self.columns,
         }
 

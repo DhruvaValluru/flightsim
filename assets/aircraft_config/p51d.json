@@ -150,5 +150,34 @@
         ]
       ]
     }
+  },
+  "limits": {
+    "category": {
+      "value": "military",
+      "regulation": "14 CFR 23.337 aerobatic category, applied as a stated PROXY",
+      "source": "the P-51D is a military type with no 14 CFR 23 category; the aerobatic-category envelope (+6.0/-3.0 g) is applied as a proxy. The type's own flight manual (AN 01-60JE-1) states a higher limit from memory (about +8 g at 8000 lb) -- unverified here"
+    },
+    "n_z_pos_g": {
+      "value": 6.0,
+      "source": "14 CFR 23.337(a)(3) (pre-Amendment 23-64 text): aerobatic category positive limit manoeuvring load factor 6.0 -- applied as a proxy for a military type, see category"
+    },
+    "n_z_neg_g": {
+      "value": -3.0,
+      "source": "14 CFR 23.337(b)(3) (pre-Amendment 23-64 text): aerobatic category negative limit -0.5 x 6.0 = -3.0 -- applied as a proxy for a military type, see category"
+    },
+    "speed_limit_kt": {
+      "value": 439.0,
+      "kind": "V_NE",
+      "source": "unverified here: from memory of the P-51D flight manual AN 01-60JE-1 dive placard 505 mph IAS = 505 x 0.868976 = 438.8 kt; compared here against JSBSim calibrated airspeed without a position-error correction"
+    },
+    "m_mo": {
+      "value": null,
+      "reason": "the P-51D manual states its dive limit in mph IAS, not Mach; no Mach operating limit is published"
+    },
+    "alpha_stall_deg": {
+      "value": null,
+      "reason": "the JSBSim p51d model states no alpha limit (no <alphalimits> element; grep of p51d.xml, 2026-09-28)"
+    },
+    "note": "Measured 2026-09-28: the JSBSim p51d cannot be trimmed at 250 or 460 kt CAS at 1500 m (refused envelope.trim_feasible), so a run beyond V_NE is unreachable on this model at that condition."
   }
 }

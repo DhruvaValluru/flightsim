@@ -212,5 +212,34 @@
         "fdm_contact": "RIGHT_MAIN"
       }
     }
+  },
+  "limits": {
+    "category": {
+      "value": "normal",
+      "regulation": "14 CFR 23.337 (normal category)",
+      "source": "FAA TCDS 3A12 (Cessna 172P): certification basis CAR 3, whose 3.186 states the same normal-category load factors as 14 CFR 23.337 as it read before Amendment 23-64 (2017): (a)(1) positive limit manoeuvring load factor n = 2.1 + 24000/(W+10000), not less than 3.8 for the normal category; (b)(1) negative limit not less than 0.4 x positive = -1.52 -- unverified here: from memory of the TCDS"
+    },
+    "n_z_pos_g": {
+      "value": 3.8,
+      "source": "14 CFR 23.337 as it read before Amendment 23-64 (2017): (a)(1) positive limit manoeuvring load factor n = 2.1 + 24000/(W+10000), not less than 3.8 for the normal category; (b)(1) negative limit not less than 0.4 x positive = -1.52 -- normal category +3.8 g"
+    },
+    "n_z_neg_g": {
+      "value": -1.52,
+      "source": "14 CFR 23.337 as it read before Amendment 23-64 (2017): (a)(1) positive limit manoeuvring load factor n = 2.1 + 24000/(W+10000), not less than 3.8 for the normal category; (b)(1) negative limit not less than 0.4 x positive = -1.52 -- normal category -0.4 x 3.8 = -1.52 g"
+    },
+    "speed_limit_kt": {
+      "value": 163.0,
+      "kind": "V_NE",
+      "source": "unverified here: from memory of the Cessna 172P Pilot's Operating Handbook section 2 (Limitations): V_NE 163 KIAS (160 KCAS); compared here against JSBSim calibrated airspeed without a position-error correction"
+    },
+    "m_mo": {
+      "value": null,
+      "reason": "a piston single has no Mach operating limit; none is published for the 172P"
+    },
+    "alpha_stall_deg": {
+      "value": null,
+      "reason": "the JSBSim c172p model states no alpha limit (no <alphalimits> element; grep of c172p.xml, 2026-09-28); the validator's CLmax alpha is a derived quantity, not a stated limit"
+    },
+    "note": "Measured 2026-09-28: the c172p aero tables here cannot be trimmed above V_NE (170 kt and 183 kt CAS at 1500 m are refused envelope.trim_feasible), so a run beyond this speed limit is unreachable on this model; the load-factor limits are reachable through the gust and turbulence providers."
   }
 }

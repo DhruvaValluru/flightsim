@@ -41,6 +41,14 @@ SUBSYSTEMS = (
     "terrain",
     "sensor_noise",
     "dispersion",
+    # The instrument models (core/telemetry/instruments.py), one stream
+    # each so a profile change in one instrument never re-rolls another's
+    # errors: an IMU that shares a stream with the GPS would change its
+    # bias when the GPS update rate changed.
+    "imu",
+    "gps",
+    "pitot_static",
+    "magnetometer",
 )
 
 DERIVATION = (

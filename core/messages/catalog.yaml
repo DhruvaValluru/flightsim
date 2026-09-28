@@ -130,6 +130,9 @@ camera.preset:
   sentence: "The camera asks for a viewpoint, position mode or aiming mode the system does not model, or two cameras share one name."
 camera.profile:
   sentence: "The camera's sensor model is not one the system has on file."
+instruments.profile:
+  sentence: "The instrument error profile asked for is not one the system has on file, or its file does not say where its numbers come from."
+  hint: "Choose ideal, tactical or consumer MEMS, or add a profile file of the same shape beside those three that cites its sources."
 camera.intrinsics:
   sentence: "One of the camera's lens or sensor settings ({actual} {unit}) is outside what a real camera can have; the limit is {limit} {unit}."
 camera.exposure:
@@ -183,6 +186,9 @@ aircraft.placeholder_drawn:
 
 # -- terrain and weather (webapp/runs.py, flightsim/capture.py) --------------
 
+terrain.geoid:
+  sentence: "The geoid grid that relates sea level to the Earth's ellipsoid is missing or is not the one this build was measured with."
+  hint: "Restore assets/geoid/egm96-15.pgm from the source named in assets/geoid/README.md; a different grid is refused, not interpolated."
 terrain.unbaked:
   sentence: "No terrain has been prepared for the coordinates asked for."
   hint: "Prepare the terrain there first (it downloads once), then run again."
@@ -292,6 +298,15 @@ annotation.intrinsics:
   sentence: "The renderer used a different lens or picture size than the record states."
 annotation.files:
   sentence: "A label file the record declares is missing."
+instruments.file:
+  sentence: "The measured-telemetry file is unreadable or was written for a version this build does not read."
+instruments.truth:
+  sentence: "The truth beside the measured channels is not this run's own recording."
+  hint: "Re-run the capture with the same instrument profile so the measured file and the telemetry come from one flight."
+instruments.record:
+  sentence: "The measured-telemetry file carries no record of the instrument profile it applied, or a record whose null test measured no difference."
+instruments.residual:
+  sentence: "A measured channel's errors are not the size the instrument profile states, or the receiver did not hold its last fix between fixes."
 
 # -- campaigns and storage (contracts §6, package G) ------------------------
 
@@ -452,3 +467,43 @@ progress.page.review:
   sentence: "Review the pictures and the checks."
 progress.page.download:
   sentence: "Choose a format and download."
+
+# -- the DIS entity-state feed (core/interop/dis.py, flightsim/dis.py) ------
+
+interop.dis.run:
+  sentence: "That folder holds no recorded flight, so no entity-state stream can be written from it."
+  hint: "Point at a run folder written by the capture command; it holds the recorded flight."
+interop.dis.channels:
+  sentence: "The recorded flight carries no position or attitude columns, so its state cannot be put into the standard form."
+  hint: "Capture the run again with this build; older recordings did not sample latitude and longitude."
+interop.dis.airframe:
+  sentence: "That aircraft has no entry in the entity-type table, so its kind cannot be stated in the standard form."
+  hint: "Choose one of the tabulated aircraft, or add a row for it with its enumeration."
+interop.dis.entity_id:
+  sentence: "An entity identifier has to fit in sixteen bits (0 to 65535) and an exercise identifier in eight (0 to 255)."
+interop.dis.stream:
+  sentence: "That file is not a stream of whole entity-state messages of the version this build reads."
+  hint: "Give a file written by the feed command; a truncated or foreign file is refused rather than read part-way."
+interop.dis.arguments:
+  sentence: "Either a run folder and an output file to write, or a stream file to decode, has to be given."
+
+# -- limit monitoring (core/telemetry/limits.py) --------------------------------
+
+limits.config:
+  sentence: "This aircraft's limit table is malformed, so its flight cannot be checked against its envelope."
+  hint: "Correct the aircraft's limit table: every limit is a number with its source, or left empty with the reason."
+
+# -- modal analysis (core/fdm/linearize.py, core/fdm/modes.py, flightsim/modes.py) ------
+
+modes.untrimmed:
+  sentence: "The aircraft has not been trimmed, so there is no steady flight condition whose small motions can be analysed."
+  hint: "Trim the aircraft first; the modal analysis describes small motions about a steady condition."
+modes.linearization:
+  sentence: "The flight model could not be linearised about this condition."
+  hint: "The installed JSBSim must provide its linearisation and the model must carry the eight classical states (speed, angle of attack, pitch attitude and rate; sideslip, bank, roll rate, yaw rate)."
+modes.residual:
+  sentence: "The linear model does not reproduce the flight model's own accelerations closely enough to be trusted, so no modes are reported for this condition."
+  hint: "An independent check of the linearisation differs from it beyond the stated bound; the condition may sit on a table breakpoint of the flight model."
+modes.airframe_class:
+  sentence: "No handling-qualities class is stated for this aircraft, so its modes cannot be graded against the bands."
+  hint: "State the aircraft's MIL-F-8785C class in the modal analysis table; a class is never guessed."

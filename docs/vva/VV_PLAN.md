@@ -45,7 +45,7 @@ in advance rather than discovering it at reporting time.
 | A2 | Turbulence σ_w vs W20 | MIL-F-8785C low-altitude relation σ_w = 0.1·W20 | the standard itself | validated |
 | A3 | Takeoff ground roll | **none available** | — | inconclusive |
 | A4 | Engine spool time | **none available** | — | inconclusive |
-| A5 | Short-period / Dutch-roll damping | MIL-F-8785C Level 1 bands | — | **not attempted**: requires linearisation this build does not perform |
+| A5 | Short-period / Dutch-roll damping | MIL-F-8785C Level 1 bands (encoded, unverified here) | — | attempted: linearised with JSBSim's FGLinearization about the trimmed state, graded per class and category; unvalidated for want of a flight-test referent |
 | A6 | Transport delay | 14 CFR Part 60 ≤150 ms | — | not applicable: interactive host does not build |
 
 Reporting form is ASME V&V 20: comparison error `E = S − D` against validation

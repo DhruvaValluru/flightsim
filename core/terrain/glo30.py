@@ -43,6 +43,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from .dem import DEMError, ingest
+from .geoid import datum_for_heightfield
 from .heightfield import Heightfield
 
 BUCKET = "https://copernicus-dem-30m.s3.amazonaws.com"
@@ -389,6 +390,12 @@ def orographic_card_block(baked_path, origin_lat: float, origin_lon: float,
         "origin_x_m": float(origin_x),
         "origin_y_m": float(origin_y),
         "lee": True,
+        # The vertical datum block (P10), from the sidecar when the bake
+        # wrote one, else evaluated from its provenance origin. The card
+        # writer lifts it to the card's top level (``datum``); the C++
+        # orographic reader takes named fields only and derives nothing
+        # from it.
+        "datum": datum_for_heightfield(baked),
     }
 
 
@@ -431,7 +438,7 @@ def bake(location: Location, cache_dir, out_dir,
     baked.provenance.update({
         "dataset": "Copernicus GLO-30 DSM (30 m surface model)",
         "attribution": ATTRIBUTION,
-        "vertical_datum": "EGM2008 orthometric (treated as MSL)",
+        "vertical_datum": "EGM2008 orthometric (GLO-30); see the datum block",
         "tiles": {stem: tile_shas[tile_path(Path(cache_dir), stem).name]
                   for stem in location.tiles},
         "bbox_deg": location.bbox,
@@ -445,6 +452,12 @@ def bake(location: Location, cache_dir, out_dir,
             "DSM: canopy and buildings included; 30 m posting smooths "
             "summits and cliffs; finer detail than 30 m is not in the data"),
     })
+    # The vertical datum, stated (P10): the heights are EGM2008
+    # orthometric, JSBSim's sea level is the ellipsoid, and the geoid
+    # undulation N at the origin is what separates them. Evaluated from
+    # the provenance origin just written, so the block and the origin
+    # cannot disagree; nothing in the raster is moved.
+    baked.provenance["datum"] = datum_for_heightfield(baked)
     raw = baked.write(out_dir / location.key)
     return raw, verification
 

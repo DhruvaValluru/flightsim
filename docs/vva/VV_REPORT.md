@@ -32,7 +32,7 @@ attempted, not failed.
 | A2 | Turbulence σ_w vs W20 | measured 0.107·W20 vs 0.1·W20 | — | validated |
 | A3 | Takeoff ground roll | — | — | **inconclusive** — no referent |
 | A4 | Engine spool time | — | — | **inconclusive** — no referent |
-| A5 | Short-period damping | — | — | **not attempted** — no linearisation |
+| A5 | Short-period damping | S only, no D: ζ_sp 0.610 / ω_sp 7.01 rad/s (c172p 1200 m, 100 kt); 0.225 / 2.53 (A320 3000 m, 250 kt); 0.503 / 1.30 (B747 3000 m, 250 kt) — JSBSim FGLinearization, independent Jacobian residual ≤ 3.2e-3 | — | **attempted, unvalidated** — against MIL-F-8785C Table IV Cat B (bands unverified here): Level 1 c172p and B747, Level 2 A320 (ζ_sp < 0.30); Dutch roll ζ 0.185 / 0.561 / 0.343 all Level 1; no flight-test referent, so a level describes the model, not the aeroplane (`python -m flightsim.modes`, tests/test_modes.py) |
 | A6 | Transport delay | — | — | not applicable |
 
 **Most of this table is inconclusive, and that is the result.** A1's agreement

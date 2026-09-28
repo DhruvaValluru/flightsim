@@ -30,6 +30,9 @@ from ..environment.turbulence import DrydenTurbulence
 from ..environment.wind import SteadyWind
 from ..fdm import FlightDynamics, TrimMode, mode_for
 from ..fdm import units as u
+from ..records import AppliedVariable, records_block
+from ..fdm.modes import modes_block
+from ..telemetry.limits import monitor_run
 from ..telemetry.recorder import Recorder
 from .spec import ScenarioSpec
 from .validate import ValidationReport, validate
@@ -294,7 +297,18 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         if assert_closure:
             closure.raise_if_failed()
 
+    # The digest covers the RECORDED telemetry (the docstring's claim), so
+    # it is taken before any observer annotates the columns: the limit
+    # flags below are derived from these columns and a change to a
+    # placard value must not change the digest of a flight it did not
+    # touch.
     output_digest = _digest_telemetry(recorder)
+    # Limit monitoring (gap P5): the run graded against the airframe's
+    # stated envelope, flags written beside the recorded columns so every
+    # per-frame consumer (core.capture.manifest.frame_state) carries them.
+    # An airframe with no stated limits is recorded unmonitored; a
+    # malformed table refuses by name (limits.config).
+    limits_block, limits_record = monitor_run(recorder, str(spec.aircraft.value))
     manifest = {
         "spec_digest": spec.digest(),
         "spec": spec.to_dict(),
@@ -307,6 +321,13 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
                              else contact.provenance()),
         "output_digest": output_digest,
         "samples": len(recorder),
+        "limits": limits_block,
+        # Modal analysis (gap M2, row A5): a RESULT about the trim, computed
+        # on its own FDM so the recorded flight is untouched (measured:
+        # linearising an executive disturbs it; the digest above is unchanged
+        # with this block computed). A refusal is recorded by name here,
+        # not raised: a result about a run never aborts the run.
+        "modes": modes_block(spec),
         "validation": {
             "ok": report.ok,
             "warnings": list(report.warnings),
@@ -328,8 +349,24 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
             "signs": autopilot.signs.as_properties(),
             "gains": autopilot.gains(),
         }
+    if limits_record is not None:
+        attach_record(manifest, limits_record)
     return RunResult(spec.digest(), output_digest, recorder, report, manifest,
                      closure)
+
+
+def attach_record(manifest: Dict[str, Any], record: AppliedVariable) -> None:
+    """Add one ``AppliedVariable`` to the manifest's ``applied_variables``
+    block (ADVANCEMENTS_CONTRACTS rule 0), creating the block when it is absent. A name
+    already in the block is refused: one variable, one record."""
+    block = manifest.get("applied_variables")
+    if block is None:
+        manifest["applied_variables"] = records_block([record])
+        return
+    names = [r["name"] for r in block["applied_variables"]]
+    if record.name in names:
+        raise ValueError(f"applied variable {record.name!r} is already recorded")
+    block["applied_variables"].append(record.to_dict())
 
 
 def _digest_telemetry(recorder: Recorder) -> str:

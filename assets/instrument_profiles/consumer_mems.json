@@ -1,0 +1,46 @@
+{
+  "name": "consumer_mems",
+  "basis": "synthetic",
+  "source": "ILLUSTRATIVE VALUES OF A CONSUMER MEMS SUITE, NOT A CALIBRATED INSTRUMENT. IMU terms are the IEEE Std 952-2020 Allan-variance terms at the magnitudes a consumer MEMS datasheet states (noise density 400 ug/sqrt(Hz) = 0.235 m/s/sqrt(h) VRW; 0.005 dps/sqrt(Hz) = 0.3 deg/sqrt(h) ARW), the bias instabilities and repeatabilities at survey-typical values for the grade; the GPS numbers follow a consumer receiver's stated CEP class; pitot-static and magnetometer numbers are hand-chosen within the ranges the cited documents describe as typical. Every number is 'unverified here'.",
+  "references": [
+    "IEEE Std 952-2020 (Allan-variance terms) -- unverified here",
+    "Groves, P. D. (2013), Principles of GNSS, Inertial, and Multisensor Integrated Navigation Systems, 2nd ed., Artech House, Table 4.1 (consumer grade: gyro bias >100 deg/h, accelerometer bias >10 mg) -- unverified here",
+    "El-Sheimy, N., Hou, H., Niu, X. (2008), Analysis and Modeling of Inertial Sensors Using Allan Variance, IEEE Trans. Instrumentation and Measurement 57(1) -- unverified here",
+    "Woodman, O. J. (2007), An introduction to inertial navigation, UCAM-CL-TR-696 -- unverified here",
+    "InvenSense MPU-6050 Product Specification rev 3.4 (gyro rate noise spectral density 0.005 dps/sqrt(Hz); accelerometer noise power spectral density 400 ug/sqrt(Hz)) -- public datasheet, unverified here",
+    "u-blox NEO-M8 data sheet (horizontal position accuracy 2.5 m CEP; velocity accuracy 0.05 m/s; navigation update rate up to 10 Hz, 5 Hz typical) -- public datasheet, unverified here",
+    "Titterton, D. H., Weston, J. L. (2004), Strapdown Inertial Navigation Technology, 2nd ed., IET (lever arm) -- unverified here",
+    "Caruso, M. J. (2000), Applications of Magnetic Sensors for Low Cost Compass Systems, IEEE PLANS (hard-iron offsets) -- unverified here"
+  ],
+  "imu": {
+    "accelerometer": {
+      "bias_repeatability_mg": 10.0,
+      "velocity_random_walk_mps_per_sqrt_h": 0.235,
+      "bias_instability_mg": 0.1,
+      "correlation_time_s": 50.0
+    },
+    "gyro": {
+      "bias_repeatability_deg_per_h": 360.0,
+      "angle_random_walk_deg_per_sqrt_h": 0.3,
+      "bias_instability_deg_per_h": 15.0,
+      "correlation_time_s": 50.0
+    }
+  },
+  "gps": {
+    "north_east_sigma_m": 2.5,
+    "vertical_sigma_m": 5.0,
+    "velocity_sigma_mps": 0.1,
+    "update_rate_hz": 5.0,
+    "antenna_offset_body_m": [-0.5, 0.0, -0.6]
+  },
+  "pitot_static": {
+    "cas_sigma_kt": 1.0,
+    "cas_lag_s": 0.5,
+    "pressure_altitude_sigma_m": 5.0,
+    "pressure_altitude_lag_s": 0.5
+  },
+  "magnetometer": {
+    "hard_iron_sigma_fraction": 0.05,
+    "heading_sigma_deg": 1.5
+  }
+}

@@ -15,8 +15,10 @@ F's tool); this module writes the JSON and the words.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from core.scenario.randomization import realised_distribution
 
@@ -30,6 +32,43 @@ def _seconds_between(start: Any, end: Any) -> Any:
     except (TypeError, ValueError):
         return None
     return round((b - a).total_seconds(), 3)
+
+
+def _exceedances(rows) -> Optional[Dict[str, Any]]:
+    """The limits monitor's summary over the verified cases' ``run.json``
+    (core/telemetry/limits.py: ``limits.summary.any_exceedance`` and the
+    per-limit counts). None when no verified run carries the block --
+    a campaign captured before the monitor existed says nothing rather
+    than 'no exceedances'."""
+    monitored = unmonitored = with_exceedance = samples = 0
+    by_limit: Dict[str, int] = {}
+    for row in rows:
+        if not row.get("run_dir"):
+            continue
+        try:
+            limits = json.loads((Path(row["run_dir"]) / "run.json")
+                                .read_text(encoding="utf-8")).get("limits")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if not isinstance(limits, dict):
+            continue
+        if not limits.get("monitored"):
+            unmonitored += 1
+            continue
+        monitored += 1
+        summary = limits.get("summary") or {}
+        count = int((summary.get("any_exceedance") or {}).get("count") or 0)
+        samples += count
+        if count:
+            with_exceedance += 1
+        for key, entry in (summary.get("per_limit") or {}).items():
+            if entry.get("monitored") and entry.get("count"):
+                by_limit[key] = by_limit.get(key, 0) + int(entry["count"])
+    if not monitored and not unmonitored:
+        return None
+    return {"cases_monitored": monitored, "cases_unmonitored": unmonitored,
+            "cases_with_exceedance": with_exceedance, "samples_flagged": samples,
+            "by_limit": dict(sorted(by_limit.items()))}
 
 
 def build_report(campaign, k: int = 1, bins: int = 8) -> Dict[str, Any]:
@@ -83,6 +122,7 @@ def build_report(campaign, k: int = 1, bins: int = 8) -> Dict[str, Any]:
         },
         "coverage": realised.get("coverage"),
         "realised": realised,
+        "exceedances": _exceedances(verified_rows),
         "refusals": {
             "slots": dict(sorted(slot_refusals.items())),
             "attempts_within_draws": dict(sorted(attempt_refusals.items())),
@@ -150,6 +190,15 @@ def render_report(report: Dict[str, Any]) -> str:
                          + " -- narrow the policy against these")
     else:
         lines.append("  refusals: none")
+    exceedances = report.get("exceedances")
+    if exceedances:
+        by = ", ".join(f"{k} x{v}" for k, v in exceedances["by_limit"].items()) or "none"
+        lines.append(f"  exceedances: {exceedances['cases_with_exceedance']} of "
+                     f"{exceedances['cases_monitored']} monitored case(s) beyond a "
+                     f"stated limit, {exceedances['samples_flagged']} sample(s) "
+                     f"flagged ({by})"
+                     + (f"; {exceedances['cases_unmonitored']} case(s) unmonitored"
+                        if exceedances["cases_unmonitored"] else ""))
     t = report["timing"]
     lines.append(f"  timing: started {t.get('started_utc')}, finished {t.get('finished_utc')}"
                  + (f", {t['elapsed_seconds']:.0f} s elapsed" if t.get("elapsed_seconds") is not None else "")

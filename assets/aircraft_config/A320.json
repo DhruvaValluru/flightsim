@@ -247,5 +247,34 @@
         "fdm_contact": "RIGHT_MLG"
       }
     }
+  },
+  "limits": {
+    "category": {
+      "value": "transport",
+      "regulation": "14 CFR 25.337 (transport category)",
+      "source": "EASA TCDS A.064 (A320 family), certification basis JAR/CS-25 -- unverified here: from memory of the TCDS; 14 CFR 25.337 states the same load factors"
+    },
+    "n_z_pos_g": {
+      "value": 2.5,
+      "source": "14 CFR 25.337(b): positive limit manoeuvring load factor n = 2.1 + 24000/(W+10000), not less than 2.5 and need not exceed 3.8; 2.5 at the A320's weights"
+    },
+    "n_z_neg_g": {
+      "value": -1.0,
+      "source": "14 CFR 25.337(c): negative limit manoeuvring load factor not less than -1.0 up to V_C"
+    },
+    "speed_limit_kt": {
+      "value": 350.0,
+      "kind": "V_MO",
+      "source": "unverified here: from memory of the A320 FCOM Limitations (V_MO 350 KIAS); compared here against JSBSim calibrated airspeed without a position-error correction"
+    },
+    "m_mo": {
+      "value": 0.82,
+      "source": "unverified here: from memory of the A320 FCOM Limitations (M_MO 0.82)"
+    },
+    "alpha_stall_deg": {
+      "value": null,
+      "reason": "the JSBSim A320 model states no alpha limit (no <alphalimits> element; grep of A320.xml, 2026-09-28); the type's alpha-protection thresholds are flight-control laws, not modelled here"
+    },
+    "note": "Measured 2026-09-28: the JSBSim A320 trims and flies at 370 kt CAS at 1500 m (V_MO + 20), so a run beyond the speed limit is reachable on this model and is the null test in tests/test_limits.py."
   }
 }
