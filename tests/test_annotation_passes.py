@@ -553,15 +553,18 @@ def test_the_default_list_is_byte_identical_to_the_pre_passes_builder():
     """The exact list the builder made before ``passes`` existed, for the
     CLI's call shape (labels and deterministic on, terrain, mesh)."""
     from core.render.flags import DEFAULT_LOOK
+    # The engine flags carry the platform's own path form (backslashes on
+    # Windows, where the commandlet runs), so the pins are spelt through Path.
+    card, frames, mesh = (str(Path(p)) for p in ("/c/card.json", "/c/frames", "/c/mesh.json"))
     assert _flags() == [
-        "-scenario=/c/card.json", "-frames=/c/frames", "-Visual", "-shot=showcase",
+        f"-scenario={card}", f"-frames={frames}", "-Visual", "-shot=showcase",
         "-fps=30", "-width=1280", "-height=720",
         f"-sun-elev={DEFAULT_LOOK['sun_elev']}", f"-sun-azim={DEFAULT_LOOK['sun_azim']}",
         f"-exposure-bias={DEFAULT_LOOK['exposure_bias']}",
         f"-fog-density={DEFAULT_LOOK['fog_density']}",
         "-unattended", "-nopause", "-nosplash", "-stdout", "-FullStdOutLogOutput",
         "-RenderOffScreen", "-AllowCommandletRendering",
-        "-labels", "-deterministic", "-GeorefTerrain", "-terrain=ridge", "-mesh=/c/mesh.json",
+        "-labels", "-deterministic", "-GeorefTerrain", "-terrain=ridge", f"-mesh={mesh}",
     ]
 
 

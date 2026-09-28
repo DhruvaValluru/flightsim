@@ -194,8 +194,10 @@ class GeoidGrid:
     def source(self) -> Dict[str, Any]:
         """Provenance of every N this grid returns."""
         return {
-            "file": str(Path(self.path).relative_to(REPO)
-                        if str(self.path).startswith(str(REPO)) else self.path),
+            # POSIX form on every platform: the record is compared across
+            # machines, and a Windows producer must write what a Linux one does.
+            "file": (Path(self.path).relative_to(REPO).as_posix()
+                     if str(self.path).startswith(str(REPO)) else str(self.path)),
             "sha256": self.sha256,
             "tarball_sha256": TARBALL_SHA256,
             "tarball_url": TARBALL_URL,

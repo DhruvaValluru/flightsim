@@ -259,7 +259,7 @@ def load_limits(aircraft: str, config_dir: Optional[Path] = None) -> Optional[Li
     if not isinstance(config, dict) or "limits" not in config:
         return None
     try:
-        rel = str(path.resolve().relative_to(REPO))
+        rel = path.resolve().relative_to(REPO).as_posix()   # the same string on Windows
     except ValueError:
         rel = str(path)
     return parse_limits(aircraft, config["limits"], config_path=rel,
