@@ -954,6 +954,13 @@ def _run(args: argparse.Namespace) -> int:
 
         block = manifest.setdefault(
             "applied_variables", {"record_version": RECORD_VERSION, "applied_variables": []})
+        # D1: the headless flight's scene.geoid_undulation_m record carries
+        # the appended channels' readback and the measured invariance; it
+        # replaces the manifest's block-only record of the same name.
+        flown_by_name = {r["name"]: r for r in flown}
+        block["applied_variables"] = [
+            flown_by_name.get(r["name"], r) if r["name"] == "scene.geoid_undulation_m" else r
+            for r in block["applied_variables"]]
         present = {r["name"] for r in block["applied_variables"]}
         block["applied_variables"].extend(r for r in flown if r["name"] not in present)
     manifest_path = write_capture_manifest(manifest, out)

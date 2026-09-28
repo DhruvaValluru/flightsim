@@ -688,3 +688,97 @@ Integrated from the returned text: nine catalogue entries, 32 guards plus four f
 ### Measured here
 
 All six null pairs on the c172p (1500 m, 100 kt, 3 s; ~2 s each): hot day 847.60 m of density altitude and 30.000 K; humid 35.99 m and 90.000 %; +30 degC 847.60 m; 990 hPa 188.85 m of pressure altitude and 19.40 hPa; 60 % humidity 532.3 Pa; a 5 degC dew point 98.26 %, 871.7 Pa, 39.30 m. A worded spec runs the word's pair only. The affected suites green; every guard target occurs exactly once; the four new guards fire.
+
+## P2 -- the XML-injection pipeline: three physics layers enter the stock model by rewriting its XML, at neutral values to the bit (blueprint section 1, corrections 1-3)
+
+**What landed.** `core/control/derive.py` is now an ordered pipeline over the stock aircraft XML (`tecs? -> failures -> icing -> icing_alpha -> gust_rotation`), four new system templates under `core/control/systems/`, `FlightDynamics.with_injections` beside an unchanged `with_tecs`, and `tests/test_derive_injections.py` (32 tests, 1.3 s). The default derivation is pinned unchanged: `derive("c172p")` still builds `c172p-tecs` from the same template with the same hash, and `with_injections("c172p", ("tecs",))` loads it under `expected_derived_sha256` = that hash.
+
+**Measured here (JSBSim 1.2.4, c172p, 120 Hz).**
+
+* *Neutral bit-identity (V18).* Stock vs derived, 8 s trimmed elevator step (-0.3 at 1 s), 960 steps x 15 properties: worst |diff| **0.0** for failures alone, icing alone, icing_alpha alone, gust_rotation alone and all four together. Every injected property reads back **exactly** what was written (12 properties, before and after three steps).
+* *Correction 1, re-measured.* The research's pass-through actuator (reading and writing `fcs/elevator-cmd-norm`) with authority 0.5 and -0.3 written once: **-0.15, -0.075, -0.0375, -0.01875, ... 7e-5 by step 12** -- the command floats to zero between the host's writes. The re-anchored chain (the FCS input moved to `failure/<s>/cmd-in`, the host's property untouched) holds **-0.15 on all 100 steps**, and the elevator sits at 0.01495360487503992 rad, equal to the bit to the stock airframe commanded -0.15. The blueprint's literal "actuator output = fcs/<s>-cmd-norm" was therefore not built; the chain writes the new property.
+* *JSBSim's own malfunctions on the injected actuator, position read back:* `fail_stuck` holds -0.15 through six steps of a +0.8 command; `fail_zero` -> 0 (elevator 0.07515610487503992 rad, trim only); `fail_hardover` -> +1 for a positive command (0.40135 rad, the airframe's +23 deg) and -1 for a negative one (-0.39710561145647316 rad).
+* *Icing factor.* Lift factor 0.8 on the trimmed c172p at 1500 m / 100 kt CAS: **1872.5287 -> 1498.0230 lbf** on the next step, 0.8 x to 1e-12 relative (every LIFT function wrapped, 31 wraps over the six axes). The research's 2772 -> 2322 lbf (ratio 0.838) was another state and a partial wrap; the whole-axis factor is the claim, the pinned number is this one.
+* *A JSBSim correction found while building icing_alpha.* A `<system>` computing alpha + shift reads the PREVIOUS step's alpha (the Systems model runs before FGAuxiliary): measured lag 5.3e-4 .. 1.5e-3 rad over six steps, and 6.8e-9 rad even at the trim's first step, so a system route is not bit-identical at shift 0. The sum is injected as a pre-axis `<function>` in `<aerodynamics>` instead: difference **0.0** at every step; the test pins `icing/alpha-effective-rad == aero/alpha-rad + shift` to the bit at shift 0 and 0.05 rad while alpha moves > 5e-4 rad per step. (Candidate for docs/JSBSIM_CORRECTIONS.md, owned by the integrator.)
+* *Stall-onset shift.* Static sweep 8..22 deg in 0.25 deg steps at 100 kt CAS: the c172p lift peak at 16.25 deg requested (CL 1.4490; achieved alpha 15.95 deg) moves to **14.25 deg** (CL 1.4497) with the shift 2 deg (0.0349066 rad): **-2.0 deg**, the shift at the sweep's resolution.
+* *Rotational gust.* p-equivalent 0.3 rad/s summed into the Clp term for 2 s from the longitudinal trim: roll **-30.2129 deg** against **-3.6706 deg** at 0 (p -0.2594 vs -0.0313 rad/s); the research read -30.3 vs -2.7 deg at its state. 0 is bit-identical (above).
+* *Refusals, each measured on a real stock file:* DHC6 failures -> `derivation.anchor_missing` (its FCS lives in `Conventional Controls.xml`, a shared system file); p51d icing_alpha -> anchor_missing (lift against `aero/alpha-deg`); f16 failures -> anchor_missing (`<test value="fcs/aileron-cmd-norm">` reads the command outside an `<input>`); f16 icing_alpha -> anchor_missing (five alpha-rad tables); a fabricated c172p with two roll-rate terms -> anchor_missing; unknown / repeated / empty selection and deriving `c172p-fail-ice-alpha-gust` again -> `derivation.injection_conflict`; an appended byte on the built airframe or on `Systems/icing.xml`, and `with_injections(..., expected_derived_sha256="0"*64)` -> `derivation.hash_mismatch`. A320 and B747 derive with all four; p51d with three.
+* *Headless vs host (correction 2).* `c172p-fail-ice-alpha-gust` and `c172p-tecs-fail-ice-alpha-gust` differ by exactly one airframe line (`    <system file="tecs"/>`) and the one `Systems/tecs.xml`; the other system files are byte-equal.
+* *Guards.* 23 `mutate` lines returned (re-anchor, the cumulative-loop template, the eight neutral defaults, the wrap, the alpha substitution, the roll sum, the two hash checks and the door call, the five anchor/conflict refusals, the order, the suffix): each applied on the working copy, **23/23 fire**, nine files restored byte-identically (sha256 checked).
+
+**The records.** Four driven variables carry a measured `reached` null test in an `AppliedVariable` built by `derive.injection_variable` (readback exact, model block versioned by the template hash, the derivation's hashes as parameters; `to_dict`/`from_dict` round trip pinned); the other eight carry the record at their neutral value with no null test. Template digests: failures.xml.tmpl fb9b4600256d..., icing.xml 295f3b0c4992..., icing_alpha.xml 8d935995c633..., gust_rotation.xml 25c585d6b59f.... The registry text (spec_path None until P3/P5/P6/P7 land the blocks) and two floors (1 N for `lift_n`/`side_force_n`, 0.1 deg/s for `roll_rate_dps`, stated) are integration patches.
+
+**Windows note.** The host has never loaded a derived airframe: the aircraft root is hard-coded in the vendored plugin (`JSBSimMovementComponent.cpp` L411-423) and the host refuses `hold_state`. Correction 2's fifth local patch (configurable aircraft path + sha256 at the door, `VENDORED.json`) is the named next step; `ue/` is untouched here, and `verify_hashes(derived, expected_derived_sha256)` is the Python side of that door. W1 (plugin build with the patched path and the logged hash equal to the manifest's) and W6 (jammed surface constant in host telemetry) stay NOT RUN.
+
+**Not claimed.** No airframe's icing, failure or gust response is validated (a factor scales a whole axis; the alpha shift moves the LIFT table only; the gust reaches the roll-damping term only); `icing/eta` maps to nothing until P5; the failure chain has no rate limit, lag or hydraulic topology; the rewrites hang on the stock files' spelling of their anchors; the pre-existing `tecs.xml` keeps 12 non-ASCII comment lines (not this item's); nothing engine-side reads any of it; no version bumped.
+
+## D1 -- the EGM2008 datum extension and the datum blocks: the bakes' own geoid, cubic, cropped for an independent evaluator, declared in the spec, applied at export (gap P10)
+
+### What was measured, and what was defective
+
+* The EGM2008 5-minute grid fetched here from sourceforge (tarball 10,414,793 bytes, sha256 `9a57c143...` as recorded; member `geoids/egm2008-5.pgm` 18,671,444 bytes, sha256 `96d55e88...` as the research measured; header MaxBilinearError 0.478, MaxCubicError 0.294, RMS 0.012 / 0.005 m, 4320 x 2161). N(0, 0) = 17.226 m bilinear and 17.225 m cubic (EGM96: 17.163 / 17.161). The six origins (EGM2008 cubic / bilinear): Matterhorn +54.780 / +54.756, Yosemite -25.431 / -25.432, Fuji +42.421 / +42.413, Everest -28.897 / -28.968, Grand Canyon -23.435 / -23.419, Flint Hills -30.305 / -30.304 m; the bilinear numbers reproduce the blueprint's to 0.01 m, and the live EGM2008 - EGM96 difference reproduces the curated table (2.231 at the Matterhorn) to 0.001 m.
+* GeographicLib's default is the 12-point cubic, not the bilinear the branch had: the three transfer matrices were transcribed from GeographicLib 2.3 `Geoid.cpp` (fetched: tarball sha256 `31148478...`, 1,701,815 bytes) and re-derived exactly in rational arithmetic from the stencil weights (C3 over 240, C3N over 372, C3S = C3N under y -> 1 - y over 372); the cubic differs from the bilinear by 0.024 m at the Matterhorn origin (EGM2008) and 0.044 m (EGM96), within the headers' bounds everywhere tested.
+* N varies over a scene: over the six curated bboxes on a quarter-node lattice the EGM2008 cubic range is Matterhorn 1.232 m (364 points), Yosemite 3.388 m, Fuji 1.792 m, Everest 3.241 m, Grand Canyon 0.813 m, Flint Hills 0.600 m -- the blueprint's 0.6-3.4 m, now recorded in every block as the bound on taking the origin's N.
+* A node-aligned crop IS independently evaluable: PROJ 9.3 `+inv +proj=vgridshift` on the written `.gtx` reads the grid's bilinear value at the Matterhorn origin to 1.2e-6 m (EGM2008, 7 x 10 nodes, 45.75..46.25 N, 7.333..8.083 E) and 6e-7 m (EGM96, 5 x 6 nodes), worst 1.9e-6 / 2.1e-6 m over 100 interior points, inf one node outside; `+inv` reads +17.226 m at (0, 0) and the forward pipeline -17.226 m; a header corner moved half a node misses the origin by 0.043 m (a third: 0.028 m) -- beyond the 0.01 m tolerance, which is why the alignment is recorded and checked.
+* The datum block moves nothing inside the simulation and everything at export: on the synthetic bake (real bake path, EGM2008 cubic, N0 = +53.850 m at 45.9 N 7.1 E) the c172p flight with the spec's datum block stated and without it gives identical output digests (0 of the recorded columns differ), and the exported ECEF radial distance from `hae_m` minus that of JSBSim's altitude taken as ellipsoidal is +53.8495 m at every one of 28 samples, worst |difference - N0| 3.03e-4 m (the ellipsoidal normal against the geocentric radius), both flights in 1.8 s.
+* Appending the channels after the digest is measurable: the recorded (non-derived) columns re-digest to `output_digest` on every run (the flat c172p run, the bake run, the A320 limits runs under the patched pins); the guard that appends them before the digest fails that pin.
+
+### What was built
+
+* `core/terrain/geoid.py`: `load_egm2008` / `fetch_egm2008` / `egm2008_grid` / `grid_for_model` (refusals `geoid.grid_missing`, `geoid.grid_digest`, measured on an absent file, the EGM96 grid under the EGM2008 name, a self-described EGM2008 PGM with another digest, and a fabricated tarball); `GeoidGrid.undulation_cubic` with `_raw` (pole reflection, wrap), `undulation_at`, `interpolation_bound_m`, `posting_deg`, `model_key`; `gtx_crop_nodes`, `write_gtx`, `GtxCrop` / `read_gtx`, `interior_samples`, `write_geoid_samples`, `write_gtx_bundle` (`datum.outside_grid` on a crop beyond a pole and on a point beyond a crop); `undulation_range`, `physics_frame_block`, `datum_block` extended (every I1 key kept), `bake_datum`, `model_key_of`, `datum_for_heightfield(require_block)` (`datum.sidecar_without_datum`), `dted_block` (`dted.metadata_incomplete`), `cdb_descriptor_block`, `datum_spec_problems` (`datum.physics_frame_unsupported`, `datum.model_mismatch`), `check_model_declared`, `undulation_variable(datum, run)`.
+* `core/terrain/glo30.py`: `bake(..., geoid_model="auto")` chooses and refuses before fetching, writes `<key>_geoid.gtx` (6 x 6 nodes, 184 bytes on the synthetic scene) and `<key>_geoid.json`, and extends the sidecar with the re-evaluated block, `geoid_files`, `dted` (25 DSI fields, 8 ACC fields with the declared u_D and the bake's own verification) and `cdb_descriptor`.
+* `core/scenario/blocks.py` `DatumSpec` (three fields, the vocabulary and its standards) and `core/scenario/spec.py` (the optional `datum` block behind `set()` / `plan()`, absent-canonical: the eight committed examples keep their digests, pinned).
+* `core/scenario/runner.py`: `refuse_datum_spec`, `scene_datum_for` (before the flight), `datum_run` (after the digest: the two derived columns, the readback, the invariance, the record), `_digest_columns`; the manifest's `datum` key and the record attached after the atmosphere's.
+* `experiments/datum_null_test.py`: the two-flight measurement above, printed and written with the run's record.
+* 44 tests in `tests/test_geoid.py` (17 new; 4 skip by name without the cached grid) and 22 in `tests/test_datum_block.py`; 20 mutation guards, each applied to the real file and shown to fail its tests, each file restored byte-identically (sha256 checked). The verifier text (`verify_datum` v2 and `verify_datum_independent`) executed from the patch string against verify.py's own `Check` on a real bake: PASS, and FAIL by name on eight corruptions (a flipped byte, a corner off the nodes, negated nodes, nodes raised 0.05 m, a stale block, a missing file, stale samples, 99 samples).
+
+### How to demonstrate (any platform)
+
+    find . -name __pycache__ -type d -prune -exec rm -rf {} +
+    .venv/bin/python -c "from core.terrain.geoid import fetch_egm2008; print(fetch_egm2008())"   # sourceforge, 10 MB; the digests are checked
+    .venv/bin/pytest -q -o addopts="" -p no:cacheprovider -p no:warnings tests/test_geoid.py tests/test_datum_block.py -rs   # 66 passed (4 skip without the cache)
+    .venv/bin/python - <<'EOF'
+    from core.terrain.geoid import egm2008_grid, default_grid
+    from core.terrain.glo30 import LOCATIONS
+    g, e = egm2008_grid(), default_grid()
+    print("(0,0)", round(g.undulation(0, 0), 3), round(g.undulation_cubic(0, 0), 3), round(e.undulation(0, 0), 3))
+    for k, loc in LOCATIONS.items():
+        print(f"{k:13s} EGM2008 cubic {g.undulation_cubic(loc.origin_lat, loc.origin_lon):+8.3f}  bilinear {g.undulation(loc.origin_lat, loc.origin_lon):+8.3f}")
+    EOF
+    # (0,0) 17.226 17.225 17.163; matterhorn +54.780 / +54.756; yosemite -25.431 / -25.432; ...
+    .venv/bin/python -m experiments.datum_null_test          # bounded: digests identical True; reached: +53.8495 m (N0 +53.850); worst |d - N0| 3.03e-04 m
+    .venv/bin/python -m flightsim.capture examples/cameras_waypoint.yaml --out runs/d1 --max-previews 0 && .venv/bin/python -m flightsim.verify runs/d1
+    # verification PASSED (11 passed, 0 failed, 24 not run, 2 superseded); frame state carries hae_m and undulation_m (0.0 on the flat slab)
+    .venv/bin/python scripts/bake_terrain.py matterhorn      # needs the GLO-30 bucket; expected: EGM2008 5-minute grid, cubic +-0.294 m, N = +54.78 m
+    scripts/mutation_check.sh --match "^datum:" --no-suite   # after the integrator appends the 20 guards
+
+### Not verified here
+
+* A real GLO-30 bake (the bucket was not fetched): the sidecar, the crop and the DTED block were measured on a synthetic tile through the real bake path; the first `scripts/bake_terrain.py matterhorn` on a networked machine is that verification (expected N = +54.78 m cubic, crop 7 x 10 nodes).
+* The verifier clauses inside `core/capture/verify.py`, `validate_datum` in the validator, the registry entries, the capture manifest's flown record and the four pin changes in other items' tests: returned as 14 integration patches, all applied together to the real files here (254 passed, 1 skipped over 11 test files; a capture and `flightsim.verify` end to end) and restored byte-identically.
+* The catalogue entries (eight returned; `tests/test_messages.py` names exactly the seven refusals until they land).
+* Pavlis et al. 2012 (the 0.10 m declared model uncertainty), the tide system of the grids, MIL-PRF-89020B, OGC CDB and the Copernicus DEM Product Handbook could not be fetched: every number and field name taken from them is marked declared or `[unverified here]`.
+* Nothing engine-side: the host recorder's `undulation_m` / `hae_m` are the C++ contract (`host_channels`); the render.json `georeference` block and Gate 6's `datum_pixels_invariant` are the Windows order's.
+
+### Limitations
+
+* N is the scene origin's for the whole flight; the per-scene range (0.60-3.39 m at the curated scenes) is recorded as the bound, and a per-sample evaluation from the crop is the named next step.
+* On a scene with no geoid the `undulation_m` column carries 0 by the frame's definition (as the DIS feed's I5.3 handling) and `hae_m` equals `altitude_m`; the datum block keeps `undulation_m` null and the record says which is which.
+* EGM96 blocks stay bilinear (the in-tree verifier clause); the cubic alternative is available on both grids (`undulation_at`) but a cubic EGM96 block is only what a caller asks for.
+* The verifier's `datum_independent` is independent of the producer's interpolation code, not of its data: the only external anchors are the recorded tarball digests and N(0, 0).
+* The limits monitor's derived-column pins and the atmosphere registry pin needed patches (the two datum channels are derived columns too); the derived list now reads `[undulation_m, hae_m, <flags>]`.
+* The other item's uncommitted work (`core/control/derive.py`, `core/fdm/fdm.py`, `tests/test_control.py`, the new `core/control/systems/*.xml*`, `tests/test_derive_injections.py`) was present in the working tree while these tests ran; the D1 tests are green with it and its three `derivation.*` names are the only other uncovered catalogue names.
+
+## Wave 2 integration (P2 with D1)
+
+Integrated from the returned text: eleven catalogue entries (three `derivation.*`, seven `geoid.*` / `datum.*` / `dted.*`, `check.datum_independent`), 44 guards, the two contracts and report sections, and the patches to core/registry.py (P2's twelve injected properties and their helper; D1's three datum words), core/record_null.py (floors in N and deg/s), core/capture/verify.py (the datum block replaced by the test-pinned P10 / D1 text; `datum_independent` run after the datum clause), core/scenario/validate.py (`validate_datum`), flightsim/capture.py (the datum record into the capture manifest), scripts/bake_terrain.py (the datum line names the interpolation and its bound), docs/JSBSIM_CORRECTIONS.md (section 15) and the test pins that enumerate registry names, derived columns and per-run records.
+
+### What integration measured, and what was defective
+
+* D1's verifier patch named its replacement text by reference ("the constant in tests/test_geoid.py") rather than carrying it; the block was reconstructed from that pinned constant, so the file and the pin agree by construction. Both items' other patches applied by exact text, one (the datum registry entries) re-anchored after P2's entries landed first in the same file.
+* tests/test_mutation_targets.py read 569 of 590 guards: 21 D1 guards ended in a `# fires: yes` comment after `|| failures=$((failures+1))`, which the parser's line-end anchor does not read. Comments removed; the parser reads 590; every target occurs exactly once.
+* The registry population pin listed neither P2's twelve injected properties nor (until D1's own test patch landed) the datum words; extended to four enumerated groups.
+
+### Measured here
+
+The affected suites: 482 passed, 1 skipped (58.8 s). The 44 wave-2 guards: all fire in the integrated tree (151 s). Full suite: see the commit.

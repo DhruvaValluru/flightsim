@@ -428,6 +428,10 @@ reason stated, the other two properties at zero.
 
 ---
 
+## 15. A `<system>` reads the previous step's `aero/alpha-rad`; an aerodynamics `<function>` reads this step's (measured 2026-09-28, P2)
+
+In the 1.2.4 schedule the Systems model runs before FGAuxiliary, so an `<fcs_function>` in a `<system>` that copies `aero/alpha-rad` holds the PREVIOUS step's alpha: measured on a trimmed c172p under an elevator step, the copy lags by 5.3e-4, 6.7e-4, 9.8e-4, 1.26e-3, 1.52e-3 rad over five steps (6.8e-9 rad even on the trim's first step). A `<function>` declared at the top of `<aerodynamics>` is evaluated by FGAerodynamics before the axes with the current alpha: difference 0.0 at every step. The icing stall-onset shift (`core/control/derive.py`, injection `icing_alpha`) therefore computes `icing/alpha-effective-rad` as a pre-axis aerodynamics function, not as a system, and its neutral value is bit-identical to the stock airframe because of it.
+
 ## Model envelope boundaries (measured, not published)
 
 Where each stock model's aero tables give out, from `experiments/envelope_probe.py`.

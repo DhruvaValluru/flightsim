@@ -369,3 +369,26 @@ def test_write_atomic_leaves_the_old_file_whole_when_the_write_dies(tmp_path, mo
     assert module._write_atomic(target, b"<new/>") is True
     assert target.read_bytes() == b"<new/>"
     assert module._write_atomic(target, b"<new/>") is False
+
+
+# -- the derivation became a pipeline (P2); the TECS derivation is unchanged ----
+
+def test_with_tecs_is_the_tecs_injection_and_nothing_else(tmp_path):
+    """``derive(name)`` and ``with_injections(name, ("tecs",))`` build the
+    same airframe (same name, same derived hash, same tecs.xml bytes), and
+    the provenance keeps its four original keys beside the new list."""
+    from core.control.derive import derive
+
+    build = tmp_path / "aircraft"
+    plain = derive("c172p", build_dir=build)
+    explicit = derive("c172p", build_dir=build, injections=("tecs",))
+    assert plain.name == explicit.name == "c172p-tecs"
+    assert plain.derived_sha256 == explicit.derived_sha256
+    assert plain.injection_names == ("tecs",)
+    prov = plain.provenance()
+    assert {"derived_from", "base_sha256", "tecs_template_sha256", "derived_sha256",
+            "engine_count"} <= set(prov)
+    assert prov["injections"][0]["template_sha256"] == prov["tecs_template_sha256"]
+    fdm = FlightDynamics.with_injections("c172p", ("tecs",), build_dir=build,
+                                         expected_derived_sha256=plain.derived_sha256)
+    assert fdm.has_autopilot and fdm.derived.derived_sha256 == plain.derived_sha256

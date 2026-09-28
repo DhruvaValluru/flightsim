@@ -4220,7 +4220,7 @@ def verify_albedo_range(manifest: Dict, run_dir=None) -> Check:
                  + sky_note)
 
 
-# -- P10: the vertical datum ------------------------------------------------
+# -- P10 / D1: the vertical datum ---------------------------------------------
 
 #: How far the manifest's geoid undulation may sit from the checker's own
 #: re-evaluation of the same grid. Two bilinear readers of one file agree
@@ -4228,14 +4228,24 @@ def verify_albedo_range(manifest: Dict, run_dir=None) -> Check:
 #: grid's own bilinear bound is 1.152 m), a wrong origin, a wrong grid.
 DATUM_TOL_M = 0.01
 FAIL_DATUM = "scene.datum"
-#: The committed EGM96 grid the checker reads for itself (assets/geoid).
+#: The committed EGM96 grid the checker reads for itself (assets/geoid),
+#: and the EGM2008 grid of the bake cache (data/geoid; not committed, so
+#: an EGM2008 block is NOT RUN here when the cache lacks it -- the crop
+#: check below covers it from the bake's own files).
 DATUM_GRID = Path(__file__).resolve().parents[2] / "assets" / "geoid" / "egm96-15.pgm"
+DATUM_GRID_EGM2008 = Path(__file__).resolve().parents[2] / "data" / "geoid" / "egm2008-5.pgm"
 DATUM_KEYS = (
     "vertical_datum_of_heights", "geoid_model", "origin_lat_deg",
     "origin_lon_deg", "undulation_m", "undulation_source",
     "bilinear_error_bound_m", "model_difference_bound_m",
     "orthometric_height_of_origin_m", "ellipsoidal_height_of_origin_m", "note",
 )
+#: The independent evaluation of the bake's .gtx crop (PROJ vgridshift,
+#: +inv so +N is read; bilinear on the nodes) against the producer's
+#: bilinear values from the FULL grid: 0.01 m (measured 2e-6 m on a
+#: node-aligned crop; a crop misaligned by one third of a node misses by
+#: 0.06 m at the Matterhorn origin).
+DATUM_INDEPENDENT_TOL_M = 0.01
 
 
 def _own_undulation(path, lat_deg: float, lon_deg: float):
@@ -4267,20 +4277,36 @@ def _own_undulation(path, lat_deg: float, lon_deg: float):
     return offset + scale * value, hashlib.sha256(data).hexdigest()
 
 
+def _datum_model(datum: Dict) -> str:
+    """Which grid the block was evaluated with, from its key or, for a
+    block written before the key existed, from the model's name."""
+    key = datum.get("geoid_model_key")
+    if key in ("EGM2008", "EGM96"):
+        return key
+    return "EGM2008" if "EGM2008" in str(datum.get("geoid_model")) else "EGM96"
+
+
 def verify_datum(manifest: Dict) -> Check:
     """The scene's vertical datum block against the checker's own geoid.
 
     NOT RUN on a scene with no georeferenced heights (a flat slab or a
-    synthesised ridge: ``undulation_m`` is null there, by contract) and
-    on a manifest written before the block existed. Otherwise the block
-    must carry every key of DATUM_KEYS, name the grid the checker holds
-    (by sha256), state an undulation within DATUM_TOL_M of the checker's
-    own bilinear evaluation at the recorded origin, and an ellipsoidal
-    height equal to orthometric + undulation. FAIL by name (scene.datum)
-    on any of these. What is NOT checked: that the heights themselves
-    are EGM2008 orthometric (the bake's provenance says so; no second
-    source is available here), and the EGM96-EGM2008 difference beyond
-    the stated bound.
+    synthesised ridge: ``undulation_m`` is null there, by contract), on
+    a manifest written before the block existed, and on an EGM2008
+    block when the checker's machine has no EGM2008 grid in its cache
+    (the grid is not committed; ``datum_independent`` re-measures such
+    a block from the bake's own crop). Otherwise the block must carry
+    every key of DATUM_KEYS, name the grid the checker holds (by
+    sha256), state a bilinear undulation within DATUM_TOL_M of the
+    checker's own bilinear evaluation at the recorded origin (a block
+    interpolated another way carries ``undulation_bilinear_m`` beside
+    ``undulation_m``, and the two may differ by no more than the
+    header's two bounds), and an ellipsoidal height equal to
+    orthometric + undulation. FAIL by name (scene.datum) on any of
+    these. What is NOT checked: that the heights themselves are EGM2008
+    orthometric (the bake's provenance says so; no second source is
+    available here), the EGM96-EGM2008 difference beyond the stated
+    bound, and the cubic interpolation itself (its bound is checked,
+    its arithmetic is the crop check's business).
     """
     datum = manifest.get("datum")
     if not isinstance(datum, dict):
@@ -4297,25 +4323,47 @@ def verify_datum(manifest: Dict) -> Check:
                      f"the datum block lacks {missing}; a block that does not say "
                      f"where its undulation came from cannot be checked",
                      failure=FAIL_DATUM)
-    if not DATUM_GRID.is_file():
+    model = _datum_model(datum)
+    grid = DATUM_GRID_EGM2008 if model == "EGM2008" else DATUM_GRID
+    if not grid.is_file():
+        if model == "EGM2008":
+            return Check("datum", NOT_RUN,
+                         f"the block was evaluated with EGM2008 and the checker's cache "
+                         f"has no EGM2008 grid ({grid}; not committed); the bake's own "
+                         f"crop is re-measured by datum_independent instead")
         return Check("datum", FAIL,
-                     f"the checker's own geoid grid {DATUM_GRID} is absent, so the "
+                     f"the checker's own geoid grid {grid} is absent, so the "
                      f"manifest's undulation cannot be re-evaluated (see "
                      f"assets/geoid/README.md)", failure=FAIL_DATUM)
-    own, digest = _own_undulation(DATUM_GRID, datum["origin_lat_deg"], datum["origin_lon_deg"])
+    own, digest = _own_undulation(grid, datum["origin_lat_deg"], datum["origin_lon_deg"])
     recorded = (datum.get("undulation_source") or {}).get("sha256")
     if recorded != digest:
         return Check("datum", FAIL,
                      f"the manifest's undulation came from a grid with sha256 "
-                     f"{str(recorded)[:16]}..., the checker's is {digest[:16]}...; "
+                     f"{str(recorded)[:16]}..., the checker's {model} grid is {digest[:16]}...; "
                      f"two grids cannot be compared", failure=FAIL_DATUM)
     stated = float(datum["undulation_m"])
-    if abs(stated - own) > DATUM_TOL_M:
+    interpolation = str(datum.get("interpolation") or "bilinear")
+    bilinear = stated if interpolation == "bilinear" else datum.get("undulation_bilinear_m")
+    if not isinstance(bilinear, (int, float)):
         return Check("datum", FAIL,
-                     f"the manifest states an undulation of {stated:.3f} m at "
+                     f"the block is interpolated {interpolation!r} and carries no "
+                     f"undulation_bilinear_m to re-evaluate against", failure=FAIL_DATUM)
+    bilinear = float(bilinear)
+    if abs(bilinear - own) > DATUM_TOL_M:
+        return Check("datum", FAIL,
+                     f"the manifest states a bilinear undulation of {bilinear:.3f} m at "
                      f"({datum['origin_lat_deg']}, {datum['origin_lon_deg']}); the "
                      f"checker's own bilinear read of the same grid gives {own:.3f} m "
                      f"(tolerance {DATUM_TOL_M} m)", failure=FAIL_DATUM)
+    if interpolation != "bilinear":
+        allowed = float(datum.get("bilinear_error_bound_m") or 0.0) + float(
+            datum.get("interpolation_error_bound_m") or 0.0)
+        if abs(stated - bilinear) > allowed:
+            return Check("datum", FAIL,
+                         f"the {interpolation} undulation {stated:.3f} m sits {abs(stated - bilinear):.3f} m "
+                         f"from the bilinear one {bilinear:.3f} m, beyond the header's two "
+                         f"bounds ({allowed:.3f} m)", failure=FAIL_DATUM)
     ellipsoidal = float(datum["ellipsoidal_height_of_origin_m"])
     orthometric = float(datum["orthometric_height_of_origin_m"])
     if abs(ellipsoidal - (orthometric + stated)) > 1e-6:
@@ -4324,10 +4372,112 @@ def verify_datum(manifest: Dict) -> Check:
                      f"{orthometric:.3f} m + undulation {stated:.3f} m",
                      failure=FAIL_DATUM)
     return Check("datum", PASS,
-                 f"heights {datum['vertical_datum_of_heights']}; undulation "
-                 f"{stated:+.3f} m at the origin agrees with the checker's own "
-                 f"read of the grid to {abs(stated - own):.4f} m; ellipsoidal "
+                 f"heights {datum['vertical_datum_of_heights']}; {model} {interpolation} undulation "
+                 f"{stated:+.3f} m at the origin (bilinear {bilinear:+.3f} m) agrees with the "
+                 f"checker's own read of the grid to {abs(bilinear - own):.4f} m; ellipsoidal "
                  f"origin {ellipsoidal:.1f} m = orthometric {orthometric:.1f} m + N")
+
+
+def verify_datum_independent(manifest: Dict, run_dir=None) -> Check:
+    """The bake's own geoid crop (``<stem>_geoid.gtx``, a node-aligned
+    NOAA gtx of the model's nodes) evaluated by PROJ -- code this
+    checker and the producer share nothing with -- against the values
+    the producer recorded from the FULL grid (``<stem>_geoid.json``): the
+    origin's bilinear undulation and 100 interior points, each within
+    DATUM_INDEPENDENT_TOL_M, with ``+inv`` so the grid's +N is read (a
+    forward pipeline reads -N and fails by 2N), the crop's header
+    corner on whole nodes of its posting, and inf one node outside the
+    crop. Independent of the producer's interpolation CODE, not of its
+    DATA: the grid the crop was cut from is the producer's, anchored
+    only by its recorded sha256. NOT RUN without a georeferenced block,
+    a gtx sub-block, a bake path (``scene.terrain``) or pyproj; FAIL
+    (scene.datum) on an absent or altered file, a misaligned corner, a
+    residual beyond the tolerance, or a finite value outside the crop.
+    """
+    datum = manifest.get("datum")
+    if not isinstance(datum, dict) or datum.get("undulation_m") is None:
+        return Check("datum_independent", NOT_RUN,
+                     "no georeferenced datum block; no crop to evaluate")
+    gtx = datum.get("gtx")
+    if not isinstance(gtx, dict):
+        return Check("datum_independent", NOT_RUN,
+                     "the datum block carries no gtx crop (a bake from before the crop "
+                     "was written); re-bake to get one")
+    stem = (manifest.get("scene") or {}).get("terrain")
+    if not stem:
+        return Check("datum_independent", NOT_RUN,
+                     "the manifest names no bake (scene.terrain), so the crop beside it "
+                     "cannot be found")
+    try:
+        from pyproj import Transformer
+    except ImportError:
+        return Check("datum_independent", NOT_RUN, "pyproj is not installed here")
+    import struct
+
+    folder = Path(str(stem)).parent
+    path = folder / str(gtx.get("file"))
+    samples_path = folder / str(gtx.get("samples_file"))
+    for file, expected in ((path, gtx.get("sha256")), (samples_path, gtx.get("samples_sha256"))):
+        if not file.is_file():
+            return Check("datum_independent", FAIL,
+                         f"the bake's geoid file {file} is absent", failure=FAIL_DATUM)
+        digest = hashlib.sha256(file.read_bytes()).hexdigest()
+        if digest != expected:
+            return Check("datum_independent", FAIL,
+                         f"{file.name} has sha256 {digest[:16]}..., not the block's "
+                         f"{str(expected)[:16]}...; the crop is not the one the bake wrote",
+                         failure=FAIL_DATUM)
+    lat0, lon0, dlat, dlon, rows, cols = struct.unpack(">ddddii", path.read_bytes()[:40])
+    posting = float(gtx.get("posting_deg") or 0.0)
+    if (abs(dlat - posting) > 1e-12 or abs(dlon - posting) > 1e-12
+            or abs(lat0 / dlat - round(lat0 / dlat)) > 1e-6
+            or abs(lon0 / dlon - round(lon0 / dlon)) > 1e-6
+            or (rows, cols) != (gtx.get("rows"), gtx.get("cols"))):
+        return Check("datum_independent", FAIL,
+                     f"the crop's corner ({lat0}, {lon0}) or steps ({dlat}, {dlon}) are not "
+                     f"whole nodes of the {posting} deg posting the block records "
+                     f"({rows}x{cols} vs {gtx.get('rows')}x{gtx.get('cols')})",
+                     failure=FAIL_DATUM)
+    samples = json.loads(samples_path.read_text(encoding="utf-8"))
+    interior = samples.get("interior") or {}
+    evaluator = Transformer.from_pipeline(f"+inv +proj=vgridshift +grids={path}")
+    origin_lat, origin_lon = float(datum["origin_lat_deg"]), float(datum["origin_lon_deg"])
+    stated = datum.get("undulation_bilinear_m", datum.get("undulation_m"))
+    at_origin = evaluator.transform(origin_lon, origin_lat, 0.0)[2]
+    if not math.isfinite(at_origin) or abs(at_origin - float(stated)) > DATUM_INDEPENDENT_TOL_M:
+        return Check("datum_independent", FAIL,
+                     f"PROJ reads {at_origin:+.3f} m from the crop at the origin; the block "
+                     f"states {float(stated):+.3f} m (bilinear); tolerance "
+                     f"{DATUM_INDEPENDENT_TOL_M} m (a sign flip reads -N)", failure=FAIL_DATUM)
+    worst = 0.0
+    points = list(zip(interior.get("lat_deg", ()), interior.get("lon_deg", ()),
+                      interior.get("undulation_bilinear_m", ())))
+    if len(points) < 100:
+        return Check("datum_independent", FAIL,
+                     f"the samples file records {len(points)} interior points; 100 are "
+                     f"the contract", failure=FAIL_DATUM)
+    for lat, lon, expected in points:
+        value = evaluator.transform(float(lon), float(lat), 0.0)[2]
+        residual = abs(value - float(expected)) if math.isfinite(value) else float("inf")
+        worst = max(worst, residual)
+    if worst > DATUM_INDEPENDENT_TOL_M:
+        return Check("datum_independent", FAIL,
+                     f"PROJ's evaluation of the crop disagrees with the producer's full-grid "
+                     f"values by up to {worst:.4f} m over {len(points)} interior points "
+                     f"(tolerance {DATUM_INDEPENDENT_TOL_M} m): the crop's nodes or their "
+                     f"alignment are not the grid's", failure=FAIL_DATUM)
+    outside = [evaluator.transform(lon0, lat0 + rows * dlat, 0.0)[2],
+               evaluator.transform(lon0 - dlon, lat0, 0.0)[2]]
+    if any(math.isfinite(v) for v in outside):
+        return Check("datum_independent", FAIL,
+                     f"the crop answers {outside} one node outside its stated extent; a "
+                     f"crop that is not bounded is not the crop the block describes",
+                     failure=FAIL_DATUM)
+    return Check("datum_independent", PASS,
+                 f"PROJ +inv vgridshift on {path.name} ({rows}x{cols} nodes at {posting:.6f} deg, "
+                 f"corner on whole nodes) reads {at_origin:+.3f} m at the origin (block "
+                 f"{float(stated):+.3f} m) and agrees with the producer's full-grid values to "
+                 f"{worst:.2e} m over {len(points)} interior points; inf outside")
 
 
 # -- Advancement I3: the instrument models' measured channels ---------------
@@ -4448,6 +4598,7 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     run("instruments", verify_instruments, manifest, run_dir)
     # P10: the vertical datum block against the checker's own geoid read.
     run("datum", verify_datum, manifest)
+    run("datum_independent", verify_datum_independent, manifest, run_dir)
     # I6 (gap S3): the ground-truth passes -- NOT RUN without their files,
     # never a pass on absence.
     run("normals_vs_depth", verify_normals_vs_depth, manifest, run_dir)

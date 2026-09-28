@@ -63,12 +63,17 @@ NULL_FLOOR_TEMPERATURE_K = 0.1
 NULL_FLOOR_HUMIDITY_PCT = 0.1
 NULL_FLOOR_PRESSURE_HPA = 0.1
 NULL_FLOOR_VAPOUR_PA = 1.0
+#: The injections' channels (P2): a stated 1 N (the lift factor 0.8 moved 1666 N;
+#: the trimmed c172p's own one-step drift is 1e-3 N) and 0.1 deg/s.
+NULL_FLOOR_FORCE_N = 1.0
+NULL_FLOOR_RATE_DPS = 0.1
 NULL_FLOOR_REFERENCE = (
     "10 x the numerical noise measured on this branch (docs/vva/VV_REPORT.md row V9: "
     "peak altitude difference 0.098 m between 1/60 and 1/120 s, 0.048 m between 1/120 "
     "and 1/240 s, observed order p = 1.03): altitude 0.5 m, angles 0.05 deg, speeds 0.1 kt; "
     "the atmosphere's own channels a stated tenth of a unit (0.1 K, 0.1 %, 0.1 hPa, 1 Pa), "
-    "above their measured read-back noise and below the smallest vocabulary step")
+    "above their measured read-back noise and below the smallest vocabulary step; the "
+    "injections' force and rate channels a stated 1 N and 0.1 deg/s (P2)")
 
 #: Floor per channel unit; a unit not listed has no floor (reported, not graded).
 FLOORS_BY_UNIT: Dict[str, float] = {
@@ -80,6 +85,8 @@ FLOORS_BY_UNIT: Dict[str, float] = {
     "%": NULL_FLOOR_HUMIDITY_PCT,
     "hPa": NULL_FLOOR_PRESSURE_HPA,
     "Pa": NULL_FLOOR_VAPOUR_PA,
+    "N": NULL_FLOOR_FORCE_N,
+    "deg/s": NULL_FLOOR_RATE_DPS,
 }
 
 

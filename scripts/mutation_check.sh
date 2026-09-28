@@ -4076,6 +4076,297 @@ mutate core/record_null.py \
     "the humidity null floor is the stated tenth of a percent" tests/test_record_null.py \
     || failures=$((failures+1))
 
+# -- the advancement additions, wave 2: P2 the XML-injection pipeline (failures re-anchored, icing, icing_alpha, gust_rotation) ----
+# P2 -- the XML-injection pipeline. Every guard below was applied on the
+# working copy, its test file run with -x (pytest rc 1 under each mutation),
+# and the file restored byte-identically (sha256sum -c, all OK). Fires: yes, 23/23.
+
+mutate core/control/derive.py \
+    '        fcs = _input_pattern(f"fcs/{surface}-cmd-norm").sub(
+            f"<input>failure/{surface}/cmd-in</input>", fcs)' \
+    '        fcs = fcs  # MUTATED: the FCS keeps reading the host command; the chain is bypassed' \
+    "the surface command is re-anchored to the failure chain" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/systems/failures.xml.tmpl \
+    '      <output>failure/@SURFACE@/cmd-in</output>' \
+    '      <output>fcs/@SURFACE@-cmd-norm</output>' \
+    "the failure chain writes a new property, not the host one (no cumulative loop)" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/systems/icing.xml \
+    '  <property value="1.0">icing/lift-factor</property>' \
+    '  <property value="0.9">icing/lift-factor</property>' \
+    "icing lift factor is neutral at 1.0" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/systems/icing.xml \
+    '  <property value="1.0">icing/drag-factor</property>' \
+    '  <property value="0.9">icing/drag-factor</property>' \
+    "icing drag factor is neutral at 1.0" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/systems/icing.xml \
+    '  <property value="1.0">icing/side-factor</property>' \
+    '  <property value="0.9">icing/side-factor</property>' \
+    "icing side factor is neutral at 1.0" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/systems/icing.xml \
+    '  <property value="1.0">icing/roll-factor</property>' \
+    '  <property value="0.9">icing/roll-factor</property>' \
+    "icing roll factor is neutral at 1.0" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/systems/icing.xml \
+    '  <property value="1.0">icing/pitch-factor</property>' \
+    '  <property value="0.9">icing/pitch-factor</property>' \
+    "icing pitch factor is neutral at 1.0" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/systems/icing.xml \
+    '  <property value="1.0">icing/yaw-factor</property>' \
+    '  <property value="0.9">icing/yaw-factor</property>' \
+    "icing yaw factor is neutral at 1.0" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/systems/icing_alpha.xml \
+    '  <property value="0.0">icing/alpha-shift-rad</property>' \
+    '  <property value="0.01">icing/alpha-shift-rad</property>' \
+    "the icing alpha shift is neutral at 0" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/systems/gust_rotation.xml \
+    '  <property value="0.0">gust/p-equivalent-rad_sec</property>' \
+    '  <property value="0.01">gust/p-equivalent-rad_sec</property>' \
+    "the gust equivalent roll rate is neutral at 0" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/derive.py \
+    '    wrapped = (f"\n{pad}<product>\n{pad}    <property>{factor}</property>"' \
+    '    wrapped = (f"\n{pad}<product>\n{pad}    <value>1.0</value>"  # MUTATED: no factor' \
+    "every axis function is wrapped by its icing factor" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/derive.py \
+    '                      rf"\g<1>{ALPHA_EFFECTIVE_PROPERTY}\g<2>", m.group(0)),' \
+    '                      rf"\g<1>{ALPHA_PROPERTY}\g<2>", m.group(0)),  # MUTATED: table keeps alpha' \
+    "the LIFT table reads the effective alpha" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/derive.py \
+    '                f"\n{pad}    <property>{GUST_P_PROPERTY}</property>\n{pad}</sum>")' \
+    '                f"\n{pad}    <value>0.0</value>\n{pad}</sum>")  # MUTATED: no gust term' \
+    "the roll-damping term sums the gust roll rate" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/derive.py \
+    '        if actual != want:' \
+    '        if False:  # MUTATED: a changed build copy passes the hash check' \
+    "a built file that no longer hashes as recorded is refused" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/derive.py \
+    '    if (expected_derived_sha256 is not None
+            and derived.derived_sha256 != expected_derived_sha256):' \
+    '    if False:  # MUTATED: the expected hash is never compared' \
+    "a derivation not matching the expected hash is refused at the door" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/fdm/fdm.py \
+    '        verify_hashes(spec, expected_derived_sha256)' \
+    '        pass  # MUTATED: nothing is hashed before the load' \
+    "with_injections hashes the derived airframe before loading it" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/derive.py \
+    '        if inputs == 0:' \
+    '        if False:  # MUTATED: a surface with no FCS input is not refused' \
+    "a surface whose FCS input is absent is refused by name" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/derive.py \
+    '        if mentions != inputs:' \
+    '        if False:  # MUTATED: a command read outside an <input> is not refused' \
+    "a surface command read outside an input is an ambiguous anchor" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/derive.py \
+    '    if len(with_alpha) != 1:' \
+    '    if False:  # MUTATED: zero or several alpha tables are not refused' \
+    "the LIFT axis needs exactly one alpha table for the shift" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/derive.py \
+    '    if terms != 1 or mentions != 1:' \
+    '    if False:  # MUTATED: a second roll-rate term is not refused' \
+    "the ROLL axis needs exactly one roll-rate term for the gust sum" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/derive.py \
+    '        if clash:' \
+    '        if False:  # MUTATED: a derived airframe is derived again' \
+    "injecting on top of an injection is a conflict" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/derive.py \
+    'INJECTION_ORDER = ("tecs", "failures", "icing", "icing_alpha", "gust_rotation")' \
+    'INJECTION_ORDER = ("failures", "tecs", "icing", "icing_alpha", "gust_rotation")  # MUTATED' \
+    "injections apply in the fixed order tecs, failures, icing, icing_alpha, gust_rotation" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+
+mutate core/control/derive.py \
+    '        anchor_test=_failures_anchor, suffix="fail", system_file="Systems/failures.xml",' \
+    '        anchor_test=_failures_anchor, suffix="ice", system_file="Systems/failures.xml",  # MUTATED' \
+    "the derivation suffix encodes the injection set" tests/test_derive_injections.py \
+    || failures=$((failures+1))
+# -- the advancement additions, wave 2: D1 the EGM2008 datum extension (each applied to the real file here, its tests red, restored byte-identically) --
+mutate core/terrain/geoid.py \
+    '    if expected_sha256 is not None and expected_sha256 != digest:' \
+    '    if False and expected_sha256 is not None and expected_sha256 != digest:  # MUTATED: any EGM2008 grid passes' \
+    "datum: an EGM2008 grid with the wrong sha256 is refused by name (geoid.grid_digest)" tests/test_geoid.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/geoid.py \
+    '    if digest != EGM2008_TARBALL_SHA256:' \
+    '    if False:  # MUTATED: any tarball is extracted' \
+    "datum: a fetched tarball with the wrong sha256 is refused before extraction" tests/test_geoid.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/geoid.py \
+    '    if south * step < -90.0 or north * step > 90.0:' \
+    '    if False:  # MUTATED: a crop may leave the grid' \
+    "datum: a crop that would leave the grid refuses datum.outside_grid" tests/test_geoid.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/geoid.py \
+    '        if not (0.0 <= fy <= self.rows - 1 and 0.0 <= fx <= self.cols - 1):' \
+    '        if False:  # MUTATED: a point outside the crop is interpolated anyway' \
+    "datum: a point outside the crop refuses datum.outside_grid" tests/test_geoid.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/geoid.py \
+    '        return self.offset_m + self.scale_m * float(value)' \
+    '        return self.undulation(lat_deg, lon_deg)  # MUTATED: the cubic is the bilinear' \
+    "datum: the cubic interpolation is GeographicLib's 12-point fit, not the bilinear" tests/test_geoid.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/geoid.py \
+    '        matrix = _C3N if iy == 0 else (_C3S if iy == self.height - 2 else _C3)' \
+    '        matrix = _C3  # MUTATED: the interior matrix at the poles' \
+    "datum: the polar rows use the constrained transfer matrices" tests/test_geoid.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/geoid.py \
+    '    header = struct.pack(">ddddii", crop["lat_south"], crop["lon_west"], step, step, rows, cols)' \
+    '    header = struct.pack(">ddddii", crop["lat_south"] + step / 3.0, crop["lon_west"], step, step, rows, cols)  # MUTATED: the crop corner is not a node' \
+    "datum: the gtx crop is node-aligned (its corner is a whole node of the posting)" tests/test_geoid.py tests/test_datum_block.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/geoid.py \
+    '    if actual != declared:' \
+    '    if False:  # MUTATED: a declared model is never checked against the bake'"'"'s' \
+    "datum: a declared geoid model that is not the bake's refuses datum.model_mismatch" tests/test_datum_block.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/geoid.py \
+    '    if actual is None:
+        raise DatumError(
+            "datum.model_mismatch",' \
+    '    if False:
+        raise DatumError(
+            "datum.model_mismatch",' \
+    "datum: a declared model on a scene with no geoid refuses datum.model_mismatch" tests/test_datum_block.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/geoid.py \
+    '    if require_block:
+        raise DatumError(' \
+    '    if False:  # MUTATED: a bake without its block is evaluated on the fly
+        raise DatumError(' \
+    "datum: a georeferenced bake without its datum block refuses datum.sidecar_without_datum" tests/test_datum_block.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/geoid.py \
+    '    if vertical != VERTICAL_ORTHOMETRIC:' \
+    '    if False:  # MUTATED: ellipsoidal heights are accepted and flown as orthometric' \
+    "datum: ellipsoidal heights refuse datum.physics_frame_unsupported" tests/test_datum_block.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/geoid.py \
+    '    if frame != PHYSICS_FRAME_ORTHOMETRIC:' \
+    '    if False:  # MUTATED: the ellipsoid physics frame is accepted' \
+    "datum: the ellipsoid physics frame refuses datum.physics_frame_unsupported" tests/test_datum_block.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/geoid.py \
+    '    missing = [key for key in DTED_REQUIRED if provenance.get(key) is None]' \
+    '    missing = []  # MUTATED: blanks are documented' \
+    "datum: DTED metadata that cannot name its source refuses dted.metadata_incomplete" tests/test_datum_block.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '    output_digest = _digest_telemetry(recorder)
+    # Gap P10 (D1): the two datum channels appended AFTER the digest so no
+    # digest moves (measured: the recorded columns re-digest identically),
+    # with the readback and the record.
+    datum_record = datum_run(spec, recorder, scene_datum, output_digest)' \
+    '    datum_record = datum_run(spec, recorder, scene_datum, "")  # MUTATED: the datum channels are appended BEFORE the digest
+    output_digest = _digest_telemetry(recorder)' \
+    "datum: undulation_m and hae_m are appended AFTER the output digest (the digest pin)" tests/test_datum_block.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '    refuse_datum_spec(spec)
+' \
+    '    pass  # MUTATED: the runner flies an ellipsoidal datum block
+' \
+    "datum: the runner refuses a datum block it cannot fly before the flight" tests/test_datum_block.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '    attach_record(manifest, datum_record)
+' \
+    '    pass  # MUTATED: the scene.geoid_undulation_m record is never attached to the run
+' \
+    "datum: the run manifest carries the scene.geoid_undulation_m record with its readback" tests/test_datum_block.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/spec.py \
+    '        if not self.datum.is_default():
+            out["datum"] = self.datum.to_dict()' \
+    '        if True:  # MUTATED: the default datum block is serialised and every digest moves
+            out["datum"] = self.datum.to_dict()' \
+    "datum: the block is absent-canonical (the committed examples keep their digests)" tests/test_datum_block.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/glo30.py \
+    '    baked.provenance["dted"] = dted_block(baked)' \
+    '    pass  # MUTATED: no DTED metadata in the sidecar' \
+    "datum: the bake sidecar carries the DTED-style metadata" tests/test_datum_block.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/glo30.py \
+    '    grid = grid_for_model(geoid_model)
+' \
+    '    grid = grid_for_model("EGM96")  # MUTATED: the asked-for model is ignored
+' \
+    "datum: a bake that asks for EGM2008 refuses geoid.grid_missing when the cache lacks it" tests/test_datum_block.py \
+    || failures=$((failures+1))
+
+# The two verifier guards target core/capture/verify.py once integration patch 0 lands (the same strings); measured here by mutating the identical patch text in tests/test_geoid.py: both fire.
+mutate core/capture/verify.py \
+    '    evaluator = Transformer.from_pipeline(f"+inv +proj=vgridshift +grids={path}")' \
+    '    evaluator = Transformer.from_pipeline(f"+proj=vgridshift +grids={path}")  # MUTATED: the forward pipeline reads -N' \
+    "datum: the independent evaluation uses +inv (the forward vgridshift reads -N)" tests/test_datum_block.py \
+    || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if worst > DATUM_INDEPENDENT_TOL_M:' \
+    '    if False:  # MUTATED: the interior residual is not graded' \
+    "datum: datum_independent holds the 100 interior points to 0.01 m" tests/test_datum_block.py \
+    || failures=$((failures+1))
+
 if [ "$guard_n" -ne "$total" ]; then
     echo "INTERNAL: $guard_n mutate calls ran but $total are written; the count is off" >&2
     exit 1

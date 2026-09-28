@@ -205,6 +205,44 @@ class FlightDynamics:
             derived=spec,
         )
 
+    @classmethod
+    def with_injections(
+        cls,
+        base_aircraft: str,
+        injections: tuple,
+        rate_hz: float = DEFAULT_RATE_HZ,
+        root_dir: Optional[Path] = None,
+        build_dir: Optional[Path] = None,
+        debug_level: int = 0,
+        expected_derived_sha256: Optional[str] = None,
+    ) -> "FlightDynamics":
+        """Load ``base_aircraft`` with the selected XML injections attached
+        (``tecs``, ``failures``, ``icing``, ``icing_alpha``, ``gust_rotation``;
+        core/control/derive.py applies them in that fixed order).
+
+        The stock model is never modified. Before JSBSim reads anything the
+        built files are re-hashed against what the derivation recorded and,
+        when ``expected_derived_sha256`` is given (a manifest's), the
+        derivation's hash is checked against it: ``derivation.hash_mismatch``
+        otherwise, so an airframe is never flown under a hash it does not
+        have. :meth:`with_tecs` is unchanged and equals
+        ``with_injections(name, ("tecs",))``.
+        """
+        from ..control.derive import derive, verify_hashes
+
+        spec = derive(base_aircraft, build_dir=build_dir, root_dir=root_dir,
+                      injections=tuple(injections))
+        verify_hashes(spec, expected_derived_sha256)
+        return cls(
+            spec.name,
+            rate_hz=rate_hz,
+            root_dir=spec.aircraft_path.parent,
+            debug_level=debug_level,
+            engine_path=spec.engine_path,
+            systems_path=spec.systems_path,
+            derived=spec,
+        )
+
     # -- identity ------------------------------------------------------
 
     @property

@@ -580,3 +580,39 @@ atmosphere.humidity_conflict:
 atmosphere.profile:
   sentence: "That kind of day is not one this build can set up; the named climatic profiles have not been transcribed with their sources."
   hint: "Choose one of the day words (a standard day, standard plus 15 or 20 degrees, a hot day, a cold day, a humid day), or state the numbers."
+
+# -- the advancement additions, batch1 -----------------------------------
+derivation.anchor_missing:
+  sentence: "The stock flight model has no place, or no single place, where this addition hooks in, so it was not built rather than guessed at."
+  hint: "Choose an aircraft whose flight model carries the three control inputs, the lift table against angle of attack and one roll-damping term in the usual form, or leave that addition out."
+derivation.injection_conflict:
+  sentence: "That set of additions cannot be built together: one is unknown, one is repeated, none was chosen, or the flight model already carries what an addition would add."
+  hint: "Select each addition once from the known ones, and start from the stock flight model, not from one that was already derived."
+derivation.hash_mismatch:
+  sentence: "The generated flight model on disk is not the one that was recorded, so it will not be flown under that record."
+  hint: "Regenerate the derived flight model; never edit the generated copy."
+geoid.grid_missing:
+  sentence: "The EGM2008 geoid grid is not in the fetched-data cache, so heights cannot be related to the ellipsoid with the geoid model the terrain was made with."
+  hint: "Fetch the recorded GeographicLib tarball into the cache, or prepare the terrain with the committed EGM96 grid and accept the stated difference."
+geoid.grid_digest:
+  sentence: "The fetched geoid grid, or the tarball it came in, is not the one this build was measured with."
+  hint: "Fetch the recorded tarball again; a grid with another digest is refused, not interpolated."
+datum.outside_grid:
+  sentence: "The point or the scene lies outside the geoid grid's coverage, so no sea-level offset can be interpolated for it."
+  hint: "Keep the flight inside the prepared scene, or prepare a scene that covers it; a crop that would reach beyond the poles cannot be cut."
+datum.sidecar_without_datum:
+  sentence: "The prepared terrain names a real place but carries no vertical datum block, so the run cannot say which geoid its heights are on."
+  hint: "Prepare the terrain again with the current bake; a datum is never worked out on the fly for a flight."
+datum.model_mismatch:
+  sentence: "The scenario declares a geoid model that is not the one the prepared terrain carries, or one this build does not know."
+  hint: "Declare the model the terrain was prepared with (or none), or prepare the terrain again with the declared one."
+datum.physics_frame_unsupported:
+  sentence: "Heights above the ellipsoid, or flying the physics on the ellipsoid, are not supported: the flight model flies heights above the geoid and the offset is applied where a position leaves the simulation."
+  hint: "State heights above the geoid and the matching physics frame, or leave the datum block out."
+dted.metadata_incomplete:
+  sentence: "The prepared terrain cannot fill in its DTED-style metadata because its record lacks the origin, the extent, the source tiles, the datum or the verification."
+  hint: "Prepare the terrain again with the current bake, which records all of them."
+check.datum_independent:
+  sentence: "An independent map-projection library re-measures the sea-level offset from the crop of the geoid grid written beside the prepared terrain, at the origin and a hundred points inside it, and finds nothing outside the crop."
+
+# Placement: the seven refusal names beside terrain.geoid under "terrain and weather"; check.datum_independent beside check.datum under "the verifier clauses of batch 1". No new FAIL name: datum_independent fails as scene.datum (its sentence already says the offset disagrees with the checker's own reading). Trialled: tests/test_messages.py's uncovered set is exactly these seven names plus three derivation.* names from the other item's working tree.

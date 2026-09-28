@@ -43,7 +43,10 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from .dem import DEMError, ingest
-from .geoid import datum_for_heightfield
+from .geoid import (
+    bake_datum, cdb_descriptor_block, datum_for_heightfield, dted_block, grid_for_model,
+    write_gtx_bundle,
+)
 from .heightfield import Heightfield
 
 BUCKET = "https://copernicus-dem-30m.s3.amazonaws.com"
@@ -400,15 +403,32 @@ def orographic_card_block(baked_path, origin_lat: float, origin_lon: float,
 
 
 def bake(location: Location, cache_dir, out_dir,
-         ground_sample_distance_m: float = 30.0) -> Tuple[Path, Dict]:
+         ground_sample_distance_m: float = 30.0,
+         geoid_model: str = "auto") -> Tuple[Path, Dict]:
     """Fetch, mosaic, ingest, verify and write one location's heightfield.
 
     Returns the ``.r16`` path and the verification report. Raises
     :class:`DEMError` if verification fails -- an unverified real-terrain bake
     must not be renderable by accident.
+
+    ``geoid_model`` (gap P10, D1): ``auto`` evaluates the datum block with
+    the EGM2008 5-minute grid when it is in the bake cache (``data/geoid``,
+    fetched by ``core.terrain.geoid.fetch_egm2008``) and with the committed
+    EGM96 grid otherwise, the difference stated in the block; ``EGM2008``
+    refuses by name (``geoid.grid_missing`` / ``geoid.grid_digest``) when
+    the cache lacks it or holds another file; ``EGM96`` uses the committed
+    grid. Beside the raster the bake writes ``<key>_geoid.gtx`` (the
+    node-aligned crop of the chosen grid around the scene bbox, evaluable
+    by PROJ) and ``<key>_geoid.json`` (the origin and 100 interior points
+    from the full grid). The sidecar's provenance gains ``dted`` (the
+    MIL-PRF-89020B-style fields with the GLO-30 accuracies as declared
+    u_D) and ``cdb_descriptor`` (documentation only).
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    # The geoid grid is chosen (and refused by name) BEFORE any tile is
+    # fetched: a bake that would end without its datum is not started.
+    grid = grid_for_model(geoid_model)
 
     tile_paths = fetch(location, cache_dir)
     tile_shas = {p.name: sha256_of(p) for p in tile_paths}
@@ -458,6 +478,23 @@ def bake(location: Location, cache_dir, out_dir,
     # the provenance origin just written, so the block and the origin
     # cannot disagree; nothing in the raster is moved.
     baked.provenance["datum"] = datum_for_heightfield(baked)
+    # D1: the block re-evaluated with the bake's chosen grid (EGM2008 when
+    # cached, else EGM96 with the difference stated), the scene bbox and
+    # the .gtx crop written beside the raster; the origin and its
+    # orthometric height are the block's own just written above.
+    gtx = write_gtx_bundle(grid, location.bbox, out_dir, location.key,
+                           location.origin_lat, location.origin_lon)
+    baked.provenance["datum"] = bake_datum(baked.provenance["datum"], grid,
+                                           location.bbox, gtx, location_key=location.key)
+    baked.provenance["geoid_files"] = {
+        "gtx": gtx["file"], "gtx_sha256": gtx["sha256"],
+        "samples": gtx["samples_file"], "samples_sha256": gtx["samples_sha256"],
+    }
+    # DTED / CDB-grade metadata (documentation only; nothing is written in
+    # either format): every field from the bake, the standards' field
+    # names marked unverified where they could not be fetched.
+    baked.provenance["dted"] = dted_block(baked)
+    baked.provenance["cdb_descriptor"] = cdb_descriptor_block(baked)
     raw = baked.write(out_dir / location.key)
     return raw, verification
 

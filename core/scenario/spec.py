@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from .blocks import AtmosphereSpec, SceneSpec, TaxonomySpec, TrafficSpec
+from .blocks import AtmosphereSpec, DatumSpec, SceneSpec, TaxonomySpec, TrafficSpec
 from .camera import CameraSpec
 from .randomization import RandomizationSpec
 from .fields import Quantity, Source
@@ -147,6 +147,11 @@ class ScenarioSpec:
     #: ISA day is the default and is omitted, so every committed spec-8
     #: example keeps its digest (pinned by test).
     atmosphere: "AtmosphereSpec" = dc_field(default_factory=AtmosphereSpec.defaulted)
+    #: Gap P10, D1 (still spec 8; the integrator bumps once): the vertical
+    #: datum the run declares -- vertical, physics_frame, geoid_model --
+    #: absent-canonical: the orthometric frame is the default and is
+    #: omitted, so every committed spec-8 example keeps its digest.
+    datum: "DatumSpec" = dc_field(default_factory=DatumSpec.defaulted)
 
     #: Field order for both serialisation and the rendered table.
     FIELD_ORDER = (
@@ -210,7 +215,7 @@ class ScenarioSpec:
         carry the spec's own set()/plan() doctrine."""
         import re
 
-        match = re.fullmatch(r"(scene|taxonomy|atmosphere)\.(\w+)", name)
+        match = re.fullmatch(r"(scene|taxonomy|atmosphere|datum)\.(\w+)", name)
         if match is not None:
             block = getattr(self, match.group(1))
             return block, match.group(2)
@@ -355,6 +360,9 @@ class ScenarioSpec:
         # Gap P1: the atmosphere block, absent-canonical like the others.
         if not self.atmosphere.is_default():
             out["atmosphere"] = self.atmosphere.to_dict()
+        # Gap P10 (D1): the datum block, absent-canonical like the others.
+        if not self.datum.is_default():
+            out["datum"] = self.datum.to_dict()
         if self.notes:
             out["notes"] = list(self.notes)
         return out
@@ -410,6 +418,9 @@ class ScenarioSpec:
         atmosphere_data = data.get("atmosphere")
         atmosphere = (AtmosphereSpec.defaulted() if atmosphere_data is None
                       else AtmosphereSpec.from_dict(atmosphere_data))
+        datum_data = data.get("datum")
+        datum = (DatumSpec.defaulted() if datum_data is None
+                 else DatumSpec.from_dict(datum_data))
         return cls(
             name=data.get("name", "scenario"),
             prompt=data.get("prompt"),
@@ -421,6 +432,7 @@ class ScenarioSpec:
             taxonomy=taxonomy,
             traffic=[TrafficSpec.from_dict(entry) for entry in traffic_data],
             atmosphere=atmosphere,
+            datum=datum,
             **kwargs,
         )
 
@@ -500,7 +512,8 @@ class ScenarioSpec:
         # Spec 8 blocks, when stated.
         for block_name, block in (("scene", self.scene),
                                   ("taxonomy", self.taxonomy),
-                                  ("atmosphere", self.atmosphere)):
+                                  ("atmosphere", self.atmosphere),
+                                  ("datum", self.datum)):
             if not block.is_default():
                 for name, q in block.quantities():
                     rows.append((block_name, name.replace("_", " "),

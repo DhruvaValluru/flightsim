@@ -246,6 +246,7 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
     report.violations.extend(validate_policy(spec))
     report.violations.extend(validate_registry(spec))
     report.violations.extend(validate_atmosphere(spec))
+    report.violations.extend(validate_datum(spec))
 
     # -- the definitive check: can this actually be trimmed? -----------
     # Skipped when geometry is already impossible, since trimming below ground
@@ -442,6 +443,19 @@ def validate_blocks(spec) -> List[Violation]:
 
 
 # -- the atmosphere block (gap P1) -------------------------------------------
+
+def validate_datum(spec) -> List[Violation]:
+    """D1: the datum block's refusals by name (core/terrain/geoid.py
+    datum_spec_problems, the one list for the validator and the runner):
+    ``datum.physics_frame_unsupported`` for ellipsoidal heights or the
+    ellipsoid physics frame, ``datum.model_mismatch`` for a model this
+    build does not carry. The match against the bake's model is the
+    runner's, where the spec meets the bake."""
+    from ..terrain.geoid import datum_spec_problems
+
+    return [Violation(problem.constraint, problem.message)
+            for problem in datum_spec_problems(getattr(spec, "datum", None))]
+
 
 def validate_atmosphere(spec) -> List[Violation]:
     """The atmosphere block's own constraints, refused by name.

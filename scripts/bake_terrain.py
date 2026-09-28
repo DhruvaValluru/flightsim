@@ -44,7 +44,8 @@ def datum_line(key: str, raw: Path) -> str:
                 f"before the geoid landed); re-bake to record it")
     return (f"  {'':<18} datum: heights {datum.get('vertical_datum_of_heights')}; "
             f"geoid N = {n:+.2f} m at the origin ({datum.get('geoid_model')}, "
-            f"bilinear +-{datum.get('bilinear_error_bound_m')} m; "
+            f"{datum.get('interpolation', 'bilinear')} "
+            f"+-{datum.get('interpolation_error_bound_m', datum.get('bilinear_error_bound_m'))} m; "
             f"EGM96-EGM2008 bound {datum.get('model_difference_bound_m')} m); "
             f"origin {datum.get('orthometric_height_of_origin_m'):.1f} m "
             f"orthometric = {datum.get('ellipsoidal_height_of_origin_m'):.1f} m "

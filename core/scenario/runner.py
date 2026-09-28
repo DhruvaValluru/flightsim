@@ -30,10 +30,14 @@ from ..environment.turbulence import DrydenTurbulence
 from ..environment.wind import SteadyWind
 from ..fdm import FlightDynamics, TrimMode, mode_for
 from ..fdm import units as u
-from ..records import AppliedVariable, records_block
+from ..records import AppliedVariable, Readback, records_block
 from ..fdm.modes import modes_block
 from ..telemetry.limits import monitor_run
 from ..telemetry.recorder import Recorder
+from ..terrain.geoid import (
+    TELEMETRY_COLUMNS as DATUM_COLUMNS, check_model_declared, datum_for_heightfield,
+    datum_spec_problems, flat_datum_block, undulation_variable,
+)
 from .spec import ScenarioSpec
 from .validate import ValidationReport, validate
 
@@ -260,6 +264,14 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
     report = validate(spec) if validate_first else ValidationReport(spec.digest())
     if validate_first:
         report.raise_if_invalid()
+    # Gap P10 (D1): a datum block this build cannot fly (ellipsoidal
+    # heights, the ellipsoid physics frame, an unknown model) is refused
+    # by name BEFORE the flight, whether or not the validator ran.
+    refuse_datum_spec(spec)
+    # The scene's datum block and the spec's declaration against it are
+    # resolved BEFORE the flight: a bake without its block or a model the
+    # bake does not carry refuses by name here, not after the flight.
+    scene_datum = scene_datum_for(spec, terrain_ground)
 
     environment = environment_for(spec)
     fdm = configure_from_spec(spec, environment)
@@ -331,6 +343,10 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
     # placard value must not change the digest of a flight it did not
     # touch.
     output_digest = _digest_telemetry(recorder)
+    # Gap P10 (D1): the two datum channels appended AFTER the digest so no
+    # digest moves (measured: the recorded columns re-digest identically),
+    # with the readback and the record.
+    datum_record = datum_run(spec, recorder, scene_datum, output_digest)
     # Limit monitoring (gap P5): the run graded against the airframe's
     # stated envelope, flags written beside the recorded columns so every
     # per-frame consumer (core.capture.manifest.frame_state) carries them.
@@ -350,6 +366,7 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         "output_digest": output_digest,
         "samples": len(recorder),
         "limits": limits_block,
+        "datum": scene_datum,
         # Modal analysis (gap M2, row A5): a RESULT about the trim, computed
         # on its own FDM so the recorded flight is untouched (measured:
         # linearising an executive disturbs it; the digest above is unchanged
@@ -383,8 +400,94 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
     # read-back and null measurement and the per-step read-back.
     for record in environment.applied_variables():
         attach_record(manifest, record)
+    # Gap P10 (D1): the datum record, with the appended channels' readback
+    # and the measured invariance.
+    attach_record(manifest, datum_record)
     return RunResult(spec.digest(), output_digest, recorder, report, manifest,
                      closure)
+
+
+def refuse_datum_spec(spec: ScenarioSpec) -> None:
+    """Refuse by name (``datum.physics_frame_unsupported``,
+    ``datum.model_mismatch``) a spec datum block this build cannot fly;
+    the first problem is raised (the validator lists them all)."""
+    problems = datum_spec_problems(getattr(spec, "datum", None))
+    if problems:
+        raise problems[0]
+
+
+def scene_datum_for(spec: ScenarioSpec, terrain_ground) -> Dict[str, Any]:
+    """The scene's datum block for a run, and the spec's declaration
+    checked against it (gap P10, D1). The block is the bake's recorded
+    one when the run flies over a georeferenced heightfield (a bake
+    whose sidecar carries none refuses ``datum.sidecar_without_datum``:
+    re-bake), the synthesised block over a ridge that is no real place,
+    the flat block otherwise. A ``datum.geoid_model`` the spec declares
+    must be the bake's (``datum.model_mismatch``)."""
+    heightfield = getattr(terrain_ground, "heightfield", None)
+    if heightfield is None:
+        block = flat_datum_block(float(spec.terrain_elevation.value))
+    else:
+        block = datum_for_heightfield(heightfield, require_block=True)
+    declared = spec.datum.geoid_model.value if hasattr(spec, "datum") else None
+    check_model_declared(declared, block)
+    return block
+
+
+def datum_run(spec: ScenarioSpec, recorder: Recorder, block: Dict[str, Any],
+              output_digest: str) -> AppliedVariable:
+    """The run's datum channels and record (gap P10, blueprint section 5,
+    D1). AFTER the output digest was taken, ``undulation_m`` (N at the
+    scene origin, constant; 0 where no geoid applies, by the frame's
+    definition -- the block keeps null) and ``hae_m`` (altitude_m +
+    undulation_m) are annotated as derived columns, the appended column
+    is read back, and the recorded columns are re-digested to show the
+    digest did not move. Returns the ``scene.geoid_undulation_m`` record.
+    """
+    declared = spec.datum.geoid_model.value if hasattr(spec, "datum") else None
+    n = block.get("undulation_m")
+    applied = isinstance(n, (int, float))
+    n_column = float(n) if applied else 0.0
+    altitude = recorder.series("altitude_m")
+    recorder.annotate(DATUM_COLUMNS[0], [n_column] * len(altitude))
+    recorder.annotate(DATUM_COLUMNS[1], [float(a) + n_column for a in altitude])
+    # Readback of the appended column from the recorder's own store (not
+    # JSBSim's: nothing is written to the FDM), graded exact.
+    hae = recorder.series(DATUM_COLUMNS[1])
+    readback = Readback(
+        property=f"telemetry.{DATUM_COLUMNS[1]}[0]", value=float(hae[0]),
+        written=float(altitude[0]) + n_column, tolerance=0.0, tolerance_kind="absolute",
+        basis="the recorder's annotate stores the list given and refuses to shadow a "
+              "recorded channel; read back from recorder.columns after the run "
+              "(measured exact on the c172p and A320); this grades the recorder's "
+              "store, not JSBSim's property store, to which nothing is written")
+    # The invariance: the RECORDED columns (every column not derived)
+    # re-digest to the output digest taken before the channels existed.
+    recorded = {name: values for name, values in recorder.columns.items()
+                if name not in recorder.derived}
+    after = _digest_columns(recorded)
+    invariance = {
+        "quantity": "recorded telemetry columns changed by appending the datum channels",
+        "unit": "columns", "with": 0.0 if after == output_digest else 1.0, "without": 0.0,
+        "difference": 0.0 if after == output_digest else 1.0, "threshold": 0.0,
+        "kind": "bounded", "ok": after == output_digest,
+        "output_digest": output_digest, "recorded_digest_after_channels": after,
+        "derived_columns": list(recorder.derived),
+        "note": ("the channels ride beside the recorded columns as derived ones and are "
+                 "not in output_digest; the two-run form (digest identical with and "
+                 "without the spec datum block, exported ECEF radial difference = N0) "
+                 "is experiments/datum_null_test.py"),
+    }
+    run = {
+        "readback": readback,
+        "invariance": invariance,
+        "spec_datum": {name: {"value": q.value, "source": str(q.source), "from": q.frm}
+                       for name, q in spec.datum.quantities()} if hasattr(spec, "datum") else None,
+        "declared_model": declared,
+        "applied": applied,
+        "samples": len(altitude),
+    }
+    return undulation_variable(block, run=run)
 
 
 def attach_record(manifest: Dict[str, Any], record: AppliedVariable) -> None:
@@ -408,9 +511,15 @@ def _digest_telemetry(recorder: Recorder) -> str:
     rounded: two runs that differ in the last bit must produce different
     digests, or the reproducibility claim is not being tested.
     """
+    return _digest_columns(recorder.columns)
+
+
+def _digest_columns(columns: Dict[str, Any]) -> str:
+    """The same digest over a mapping of columns (the runner's own
+    re-check that appended channels moved nothing)."""
     h = hashlib.sha256()
-    for name in sorted(recorder.columns):
+    for name in sorted(columns):
         h.update(name.encode())
-        for value in recorder.columns[name]:
+        for value in columns[name]:
             h.update(repr(value).encode())
     return h.hexdigest()

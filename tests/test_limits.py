@@ -403,7 +403,7 @@ def test_the_run_manifest_carries_the_block_the_record_and_the_flags_per_frame(a
     assert manifest["limits"]["config_path"] == "assets/aircraft_config/A320.json"
     assert manifest["limits"]["table"]["category"]["value"] == "transport"
     records = read_records(manifest["applied_variables"])
-    assert [r["name"] for r in records] == ["limits.monitor"]
+    assert [r["name"] for r in records] == ["limits.monitor", "scene.geoid_undulation_m"]
     record = records[0]
     assert record["source"] == "derived"
     assert record["model"] == "exceedance monitor against the certification envelope"
@@ -419,7 +419,9 @@ def test_the_run_manifest_carries_the_block_the_record_and_the_flags_per_frame(a
     json.dumps(manifest)
     written = a320_beyond.write(tmp_path / "run")
     telemetry = json.loads((written / "telemetry.json").read_text(encoding="utf-8"))
-    assert telemetry["derived"] == record["telemetry_columns"]
+    # The flags are derived columns; D1's datum channels (undulation_m,
+    # hae_m) are derived too and precede them.
+    assert telemetry["derived"] == ["undulation_m", "hae_m"] + record["telemetry_columns"]
     assert telemetry["columns"]["exceed_vne_or_vmo"][0] == 1
 
 
@@ -430,7 +432,7 @@ def test_the_output_digest_covers_the_recorded_telemetry_not_the_flags(a320_crui
     derived = set(a320_cruise.telemetry.derived)
     recorded = {k: v for k, v in cols.items() if k not in derived}
     assert derived == {"exceed_nz_pos", "exceed_nz_neg", "exceed_vne_or_vmo",
-                       "exceed_mmo", ANY_COLUMN}
+                       "exceed_mmo", ANY_COLUMN, "undulation_m", "hae_m"}
     assert digest_columns(recorded) == a320_cruise.output_digest
     assert digest_columns(cols) != a320_cruise.output_digest
 

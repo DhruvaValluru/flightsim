@@ -25,6 +25,14 @@ PHYSICS = ("atmosphere.temperature_deviation_c", "atmosphere.sea_level_pressure_
 #: The block's fifth field: a word the provider expands into the numeric
 #: fields, so it writes no property of its own but is the variable that moved.
 WORDS = ("atmosphere.day",)
+DATUM = ("datum.vertical", "datum.physics_frame", "datum.geoid_model")
+#: P2's injected properties: written after load and held by the property
+#: store; no spec field until each physics item lands (P3 failures, P5
+#: icing, P6/P7 gust), so no section is claimed for them yet.
+INJECTED = ("failures.elevator_authority", "failures.aileron_authority",
+            "failures.rudder_authority", "icing.lift_factor", "icing.drag_factor",
+            "icing.side_factor", "icing.roll_factor", "icing.pitch_factor", "icing.yaw_factor",
+            "icing.eta", "icing.alpha_shift_rad", "gust.p_equivalent_rad_s")
 
 
 def _entry(**overrides):
@@ -37,7 +45,8 @@ def _entry(**overrides):
 # -- the population ------------------------------------------------------------
 
 def test_every_batch_1_variable_and_every_physics_variable_is_registered():
-    assert set(REGISTRY.names()) == set(BATCH_1) | set(PHYSICS) | set(WORDS)
+    assert set(REGISTRY.names()) == (set(BATCH_1) | set(PHYSICS) | set(WORDS) | set(DATUM)
+                                     | set(INJECTED))
     for name in BATCH_1:
         entry = REGISTRY.get(name)
         assert entry.spec_path is None and entry.null_value is NO_NULL
@@ -52,11 +61,24 @@ def test_every_batch_1_variable_and_every_physics_variable_is_registered():
         assert entry.spec_path == name and entry.unit == "word"
         assert not entry.jsbsim_writes and entry.readback_tolerance is None
         assert entry.effect_channels and entry.null_value == "isa"
-    assert REGISTRY.sections() == ("atmosphere",)
-    # Every spec field of the atmosphere block is claimed: the validator's
-    # record.unregistered check is what a stated day meets first.
-    from core.scenario.blocks import AtmosphereSpec
-    assert set(REGISTRY.spec_fields()) == {f"atmosphere.{f}" for f in AtmosphereSpec.FIELD_ORDER}
+    for name in DATUM:
+        entry = REGISTRY.get(name)
+        assert entry.spec_path == name and entry.unit == "word"
+        assert not entry.jsbsim_writes and entry.readback_tolerance is None
+        assert [c.name for c in entry.effect_channels] == ["undulation_m", "hae_m"]
+    assert REGISTRY.get("datum.geoid_model").null_value is None
+    for name in INJECTED:
+        entry = REGISTRY.get(name)
+        assert entry.spec_path is None and entry.null_value is NO_NULL
+        assert entry.jsbsim_writes and entry.readback_tolerance is not None
+        assert entry.null_basis                     # the neutral value, and why it is neutral
+    assert REGISTRY.sections() == ("atmosphere", "datum")
+    # Every spec field of the atmosphere and datum blocks is claimed: the
+    # validator's record.unregistered check is what a stated block meets first.
+    from core.scenario.blocks import AtmosphereSpec, DatumSpec
+    assert set(REGISTRY.spec_fields()) == (
+        {f"atmosphere.{f}" for f in AtmosphereSpec.FIELD_ORDER}
+        | {f"datum.{f}" for f in DatumSpec.FIELD_ORDER})
 
 
 def test_the_physics_readback_tolerances_are_the_measured_ones():

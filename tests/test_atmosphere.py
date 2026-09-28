@@ -603,7 +603,7 @@ def test_every_registered_atmosphere_field_names_channels_the_run_records(isa_ru
     no recorder writes; measured here, and pinned)."""
     recorded = set(isa_run.telemetry.columns)
     fields = {f"atmosphere.{f}" for f in AtmosphereSpec.FIELD_ORDER}
-    assert set(REGISTRY.spec_fields()) == fields
+    assert set(REGISTRY.spec_fields()) >= fields      # D1 adds the datum block's fields
     for name in fields:
         entry = REGISTRY.get(name)
         missing = [c.name for c in entry.effect_channels if c.name not in recorded]

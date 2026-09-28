@@ -331,6 +331,28 @@ _RH_REASON = ("measured here on the c172p (JSBSim 1.2.4): atmosphere/RH 0.5 read
               "saturation vapour pressure via dew-point-R; 1e-6 relative covers both readings "
               "with margin and is far below any effect the value has")
 
+_INJECTED = ("measured here on the c172p (JSBSim 1.2.4): a <property> declared by an injected "
+             "system reads back the value written to the last bit, before and after stepping "
+             "(tests/test_derive_injections.py)")
+
+
+def _injected(name: str, prop: str, unit: str, null_basis: str,
+              channels: Tuple[Tuple[str, str], ...], host: Tuple[str, ...]) -> VariableRecord:
+    """A P2 injection property (core/control/derive.py): written after load
+    and held by the property store; no spec field until its physics item
+    lands (P3 failures, P5 icing, P6/P7 gust), so no section is claimed and
+    the producer measures the null test."""
+    return VariableRecord(
+        name=name, spec_path=None, unit=unit,
+        jsbsim_writes=(JsbsimWrite(prop, "after load; held by the property store every step"),),
+        effect_channels=tuple(EffectChannel(c, u) for c, u in channels),
+        null_basis=null_basis,
+        readback_tolerance=ReadbackTolerance(0.0, "absolute", _INJECTED),
+        u_input_rule=UInputRule(note="no vocabulary until the block lands; the neutral default "
+                                     "has no spread"),
+        host_channels=host)
+
+
 REGISTRY = Registry((
     # -- batch 1: observers and derived quantities (no spec field) ----------
     VariableRecord(
@@ -433,4 +455,78 @@ REGISTRY = Registry((
                                      "never the word; a user's word has u_x 0 and the default "
                                      "is the standard day"),
         host_channels=("density_altitude_m",)),
+    # -- P2: the XML injections. Each writes one property an injected system
+    #    declares; the spec fields land with P3 (failures), P5 (icing) and
+    #    P6/P7 (gust), so no section is claimed yet and the null tests are the
+    #    producer's (tests/test_derive_injections.py, measured on the c172p).
+    _injected("failures.elevator_authority", "failure/elevator/authority", "1",
+              "1.0 is full authority: the chain is x * 1.0, bit-identical to the stock airframe",
+              (("pitch_deg", "deg"),), ("pitch_deg",)),
+    _injected("failures.aileron_authority", "failure/aileron/authority", "1",
+              "1.0 is full authority: the chain is x * 1.0, bit-identical to the stock airframe",
+              (("roll_deg", "deg"),), ("roll_deg",)),
+    _injected("failures.rudder_authority", "failure/rudder/authority", "1",
+              "1.0 is full authority: the chain is x * 1.0, bit-identical to the stock airframe",
+              (("beta_deg", "deg"),), ("beta_deg",)),
+    _injected("icing.lift_factor", "icing/lift-factor", "1",
+              "1.0 scales the LIFT axis by one: bit-identical to the stock airframe (0.8 read 1872.5287 -> 1498.0230 lbf)",
+              (("lift_n", "N"), ("altitude_m", "m")), ("lift_n",)),
+    _injected("icing.drag_factor", "icing/drag-factor", "1",
+              "1.0 scales the DRAG axis by one: bit-identical to the stock airframe",
+              (("tas_kt", "kt"),), ("tas_kt",)),
+    _injected("icing.side_factor", "icing/side-factor", "1",
+              "1.0 scales the SIDE axis by one: bit-identical to the stock airframe",
+              (("side_force_n", "N"),), ("side_force_n",)),
+    _injected("icing.roll_factor", "icing/roll-factor", "1",
+              "1.0 scales the ROLL axis by one: bit-identical to the stock airframe",
+              (("roll_deg", "deg"),), ("roll_deg",)),
+    _injected("icing.pitch_factor", "icing/pitch-factor", "1",
+              "1.0 scales the PITCH axis by one: bit-identical to the stock airframe",
+              (("pitch_deg", "deg"),), ("pitch_deg",)),
+    _injected("icing.yaw_factor", "icing/yaw-factor", "1",
+              "1.0 scales the YAW axis by one: bit-identical to the stock airframe",
+              (("beta_deg", "deg"),), ("beta_deg",)),
+    _injected("icing.eta", "icing/eta", "1",
+              "0 is no ice; declared for the icing provider (P5), read by nothing until it lands, "
+              "so no effect channel is named", (), ()),
+    _injected("icing.alpha_shift_rad", "icing/alpha-shift-rad", "rad",
+              "0 leaves the LIFT table's alpha as aero/alpha-rad: bit-identical (2 deg moved the lift peak -2.0 deg)",
+              (("alpha_deg", "deg"), ("lift_n", "N")), ("alpha_deg",)),
+    _injected("gust.p_equivalent_rad_s", "gust/p-equivalent-rad_sec", "rad/s",
+              "0 adds nothing to the roll-damping term: bit-identical (0.3 rad/s for 2 s rolled -30.21 vs -3.67 deg)",
+              (("roll_deg", "deg"), ("roll_rate_dps", "deg/s")), ("roll_deg", "roll_rate_dps")),
+    # -- D1: the datum block (spec fields land with D1). The three words
+    # declare and check; the applied variable is scene.geoid_undulation_m
+    # (its record carries the channels' readback), so a pair on any of them
+    # is the bounded invariance experiments/datum_null_test.py measures:
+    # the recorded columns are identical, the channels are recorded either
+    # way (0 where no geoid applies, by the frame's definition).
+    VariableRecord(
+        name="datum.vertical", spec_path="datum.vertical", unit="word",
+        effect_channels=(EffectChannel("undulation_m", "m"), EffectChannel("hae_m", "m")),
+        null_value="orthometric",
+        null_basis="the heights as built: orthometric numbers in JSBSim's ellipsoidal slot; "
+                   "'ellipsoidal' is refused by name (datum.physics_frame_unsupported), so no "
+                   "pair can fly it",
+        u_input_rule=UInputRule(note="a word: no bin, no spread; the datum's uncertainty is "
+                                     "the geoid model's declared u_model_m on the applied record"),
+        host_channels=("undulation_m", "hae_m")),
+    VariableRecord(
+        name="datum.physics_frame", spec_path="datum.physics_frame", unit="word",
+        effect_channels=(EffectChannel("undulation_m", "m"), EffectChannel("hae_m", "m")),
+        null_value="orthometric",
+        null_basis="the frame as built (C2); 'ellipsoid' (C3) is refused by name until the "
+                   "physics frame handles it",
+        u_input_rule=UInputRule(note="a word: no bin, no spread"),
+        host_channels=("undulation_m", "hae_m")),
+    VariableRecord(
+        name="datum.geoid_model", spec_path="datum.geoid_model", unit="word",
+        effect_channels=(EffectChannel("undulation_m", "m"), EffectChannel("hae_m", "m")),
+        null_value=None,
+        null_basis="unstated: the bake's own model is accepted; a stated model is checked "
+                   "against the bake's (datum.model_mismatch) and moves no channel -- the "
+                   "pair is the bounded invariance (digests identical, measured)",
+        u_input_rule=UInputRule(note="a word: no bin, no spread; the model's declared "
+                                     "u_model_m rides on the applied record"),
+        host_channels=("undulation_m", "hae_m")),
 ))

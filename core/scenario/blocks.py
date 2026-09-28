@@ -109,6 +109,33 @@ ATMOSPHERE_RANGES: Dict[str, tuple] = {
 #: ISA sea-level pressure in the spec's unit.
 ISA_SEA_LEVEL_PRESSURE_HPA = 1013.25
 
+#: The datum block's vocabulary (blueprint section 5, D1). ``vertical``
+#: names the datum of the heights the run works in: ``orthometric`` is
+#: the branch as built (GLO-30 heights are EGM2008 orthometric and are
+#: fed to JSBSim unchanged); ``ellipsoidal`` is recognised so it is
+#: refused by name (``datum.physics_frame_unsupported``) rather than
+#: guessed. ``physics_frame`` names the frame the physics flies in:
+#: ``orthometric`` (C2: the internal frame stays and is named, the geoid
+#: is applied where a coordinate leaves the system) or ``ellipsoid``
+#: (C3: refused by the same name until the physics frame handles it).
+#: ``geoid_model`` declares which model the bake must carry (``EGM2008``
+#: or ``EGM96``); null accepts the bake's own, a mismatch refuses
+#: ``datum.model_mismatch`` where the spec meets the bake.
+DATUM_VERTICALS = ("orthometric", "ellipsoidal")
+DATUM_PHYSICS_FRAMES = ("orthometric", "ellipsoid")
+DATUM_GEOID_MODELS = ("EGM2008", "EGM96")
+DATUM_STANDARDS: Dict[str, str] = {
+    "orthometric": "heights above the geoid (EGM2008 for GLO-30, EPSG:3855); JSBSim "
+                   "h-sl carries the number unchanged and ECEF is formed at export "
+                   "as altitude + undulation (WGS 84 / EGM2008 per the blueprint)",
+    "ellipsoidal": "heights above the WGS 84 ellipsoid (EPSG:4979); not flown until "
+                   "the physics frame handles it (refused by name)",
+    "physics_frame": "the blueprint's C2: orthometric core, geoid at every ellipsoid "
+                     "boundary; C3 (the ellipsoid frame) documented and refused",
+    "EGM2008": "Pavlis et al. 2012 (unverified here); GeographicLib egm2008-5 grid",
+    "EGM96": "Lemoine et al. 1998 (unverified here); GeographicLib egm96-15 grid",
+}
+
 
 def configured_airframes(config_dir: Optional[Path] = None) -> List[str]:
     """Every airframe with an asset-pipeline config -- the ones a
@@ -300,6 +327,41 @@ class AtmosphereSpec(ProvenancedBlock):
                                           frm=f"day: {word}",
                                           std=DAY_STANDARDS[word])
         return out
+
+
+@dataclass
+class DatumSpec(ProvenancedBlock):
+    """``datum``: the vertical datum the run declares (gap P10, D1).
+    Absent-canonical: the orthometric frame is the default and is
+    omitted from the canonical form, so every committed spec-8 example
+    keeps its digest. Only the defaults are flown today: ``ellipsoidal``
+    heights and the ``ellipsoid`` physics frame refuse by name
+    (``datum.physics_frame_unsupported``); a declared ``geoid_model`` is
+    checked against the bake's block by the runner
+    (``datum.model_mismatch``). The block declares and checks; it
+    converts no height and moves no trajectory (measured: the output
+    digest is identical with and without it)."""
+
+    vertical: Quantity
+    physics_frame: Quantity
+    geoid_model: Quantity
+
+    FIELD_ORDER = ("vertical", "physics_frame", "geoid_model")
+    BLOCK = "datum"
+
+    @classmethod
+    def defaulted(cls) -> "DatumSpec":
+        return cls(
+            vertical=Quantity.default(
+                "orthometric", frm="the heights as built: orthometric numbers in "
+                                   "JSBSim's ellipsoidal slot",
+                std=DATUM_STANDARDS["orthometric"]),
+            physics_frame=Quantity.default(
+                "orthometric", frm="the physics frame as built (C2)",
+                std=DATUM_STANDARDS["physics_frame"]),
+            geoid_model=Quantity.default(
+                None, frm="no model declared: the bake's own model is accepted"),
+        )
 
 
 @dataclass
