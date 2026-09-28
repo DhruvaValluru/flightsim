@@ -1,0 +1,1348 @@
+# The advancement additions: the best way to build them, researched
+
+Written 2026-09-28 on `claude/relaxed-cori-gccjvx` (= `phase2`). The branch is at
+`efb12d7` (one commit past the `7c3227c` the research was commissioned against:
+it added `core/records.py`, `docs/ADVANCEMENTS_CONTRACTS.md` and
+`docs/ADVANCEMENTS_REPORT.md`), and the working tree carries UNCOMMITTED items that
+this blueprint builds on rather than duplicates: `core/telemetry/limits.py`
+(the limit observer, `limits` blocks in the five `assets/aircraft_config/*.json`),
+`core/terrain/geoid.py` + `assets/geoid/egm96-15.pgm` (the EGM96 datum block, wired
+into `glo30.py`, `card.py`, `manifest.py`), `core/telemetry/instruments.py` (a
+post-hoc instrument observer over the 10 Hz telemetry), `core/interop/geodesy.py`
+(WGS 84 ECEF and the DIS Euler convention), `core/fdm/linearize.py` + `modes.py`.
+Versions today: `SPEC_VERSION = 8`, `MANIFEST_VERSION = 6`, `SUPPORTED (3,4,5,6)`,
+`RECORD_VERSION = 1`, 442 mutation guards, 1551 tests collected.
+
+**What this answers.** `docs/PHASE3_GAP_ANALYSIS.md` measured the branch against a
+government-grade flight simulation for data collection and named the gaps in five
+areas: physics layers, the record every variable returns, sensing, the world, and
+interoperability with the vertical datum. The owner asked for the best way to build
+each, as an ADDITION to the branch (not a phase). This document is that answer.
+
+**How it was researched.** Five research passes and five independent skeptic passes,
+read-only, against the installed JSBSim 1.2.4 in `.venv`, pyproj 3.6.1 / PROJ 9.3.0,
+rasterio, numpy; JSBSim v1.2.4 sources fetched from `raw.githubusercontent.com`
+(FGWinds, FGStandardAtmosphere, FGAuxiliary, FGAccelerations, FGTurbine, FGPiston,
+FGActuator, FGMassBalance, FGAerodynamics), open-dis-cpp headers, the IGRF-13 `.shc`
+file, the Microsoft building-footprints README, the GeoReferencing plugin mirror, the
+ESA WorldCover `N45E006` tile tags through a ranged GET, and the GeographicLib
+EGM2008-5 grid. Standards hosts (eCFR, NTRS, FAA, ICAO, DTIC, IEEE, ASME, OGC, Epic,
+SISO, NGA, Zenodo, Fab) are blocked at the proxy: every citation to them is from
+knowledge and marked **[unverified here]**. Every number called "measured" below was
+measured in this container during the research or skeptic sessions, or is named as a
+Windows step. Where a skeptic refuted a research claim, the refutation is stated and
+the design follows it.
+
+**The rules the best way must fit** (`docs/ADVANCEMENTS_CONTRACTS.md` §0): every value
+provenanced (user > inferred > sampled > model > derived > default); refusals by name
+from `core/messages/catalog.yaml` with the two-way test; verifier independence
+(`core/capture/verify.py` imports nothing from `core`); measured not asserted (a null
+test here, a Gate 6 clause with a control render on Windows, ASME V&V 20 reporting
+with declared `u_D`); a test that fails without each safeguard and a mutation guard;
+physics injected into stock JSBSim models by rewriting the aircraft XML
+(`core/control/derive.py`), never by editing vendored data; every introduced variable
+returns the `AppliedVariable` record; versions bump ONCE by the integrator; shared
+files integrated by one integrator from text the item returns; docs that state what is
+NOT claimed.
+
+---
+
+## Versions and keys, decided once for the whole addition
+
+These are fixed here so every area below is consistent. No item bumps a version; each
+returns its keys as optional, absent-canonical blocks under the current versions; the
+integrator bumps each version once, in one commit, when the last item of the addition
+lands.
+
+| Version | Today | After the addition | Forced by |
+|---|---|---|---|
+| `SPEC_VERSION` (`core/scenario/spec.py`) | 8 | **9** | new blocks `atmosphere`, `loading`, `icing`, `failures`, `wake`, `turbulence_model`, `wind_profile`, `instruments`, `record`, `runway`, `datum`, `dis`; camera sub-blocks `stereo`, `bands`, `passes`, `ir`, `exposure_compensation_ev`; scene fields `land_cover`, `vegetation`, `buildings`, `night`, `sun_lux`; environment `precipitation_rate_mmh` |
+| `MANIFEST_VERSION` (`core/capture/manifest.py`) | 6 | **7**, `SUPPORTED (3,4,5,6,7)`, `docs/schemas/capture_manifest.v7.schema.json` (v6 kept) | `applied_variables` at record 2, `uncertainty`, `instruments`, per-camera `sensing`, per-frame `passes`/`radiometry`, `scene.land_cover/buildings/runway`, `frame.vertical_datum`, `interop.dis`, new `state_units` suffixes |
+| `RECORD_VERSION` (`core/records.py`) | 1 | **2** | `readback`, `jsbsim_writes`, `uncertainty`, structured `model`, `NullTest.kind` (`reached` \| `bounded`) |
+| Capture bundle version | unchanged | unchanged | every new file is additive (`_normal.f32`, `_flow.f32`, `_linear.f32`, `passes.json`, `instruments.npz`, `dis_entity_state.bin`, `frame_NNNN_landcover.png`) |
+| Terrain sidecar | 1 | 1 | `provenance` is a free dict: `datum`, `dted`, `cdb_descriptor`, `landcover` are added inside it |
+| `instruments.json` | – | 1 (new) | – |
+| Experiments manifest (`core/experiments/manifest.py`) | 1 | 1 | untouched |
+| `report.json` / `dataset.json` | unversioned | gain `record_version: 2` | additive blocks `variables`, `uncertainty`, `instruments`, `datasheet` |
+| `render.json` root | – | gains `georeference`, `world_applied`, `calibration`; `environment` gains the physics delivery keys; `labels` gains `normal`, `basecolor`, `velocity`, `normal_axes`, `normal_encoding`, `landcover`; `render_settings.console` gains the read-backs named per area | absent-canonical; the verifier grades a key only when present |
+| Run card blocks (`core/scenario/card.py`) | – | `derived_aircraft`, `atmosphere_properties`, `loading_properties`, `failure_schedule`, `icing_schedule`, `gust_table`, `wake`, `layered_wind`, `vertical_datum` (in tree), `dis`, `world`, `look.night`, `look.precipitation` | fixed key order, exact counts, refused by name on the host |
+
+Shared files, append-only per item, integrated by the integrator: `core/messages/catalog.yaml`,
+`scripts/mutation_check.sh`, `docs/ADVANCEMENTS_CONTRACTS.md`, `docs/ADVANCEMENTS_REPORT.md`,
+`docs/VALIDITY.md`, `docs/JSBSIM_CORRECTIONS.md`, `docs/vva/VV_PLAN.md`, `docs/vva/VV_REPORT.md`,
+`NEXT.md`, `flightsim/capture.py` argument wiring, and — for this addition — **`core/capture/verify.py`**:
+every item returns its check functions as text pinned by its own tests (the precedent is
+`tests/test_geoid.py::VERIFY_DATUM_PATCH`), never edits the file. The two-way message scanner's
+file list (`tests/test_messages.py`) is extended by the integrator to the new editor module and
+editor scripts in the same commit that lands their first refusal name.
+
+---
+
+## 1. Physics layers
+
+Non-standard atmosphere and humidity, icing, weight and balance, limit monitoring,
+failure modes, wake-vortex encounter, von Kármán turbulence beside Dryden, layered
+wind shear.
+
+### State of the art
+
+Qualification models fly the US Standard Atmosphere 1976 as the datum and express every
+off-standard day as a temperature deviation (ISA+ΔT), a sea-level pressure and a
+humidity, with climatic extremes from MIL-HDBK-310 (1997); 14 CFR Part 60 QPS App. A
+states weight, CG, altitude AND temperature per objective test; Part 25 performance is
+given at ISA, ISA+15/+20 [all unverified here]. Turbulence and shear follow MIL-F-8785C
+(1980) §3.7.2 (Dryden and von Kármán forms, the σ/L ladders, Fig. 7 exceedance table),
+§3.7.3.2 (log shear, z₀ = 0.15 / 2.0 ft) and §3.7.3.3 (1-cosine gust), with the rational
+filter forms in MIL-STD-1797A / MIL-HDBK-1797 App. A and the discrete-time implementations
+of Beal (JGCD 16(1), 1993) and Shinozuka & Jan (JSV 25(1), 1972); wind-shear training uses
+AC 120-41, the FAA Windshear Training Aid (1987), ICAO Doc 9817 and the Oseguera-Bowles /
+Vicroy downburst models (the latter already in `core/environment/downburst.py`) [unverified
+here]. Icing is regulated by 14 CFR Part 25 App. C/O, AC 20-73A, AC 25-25A and, for
+simulators, Part 60 FSTD Directive 2 (2016); the published dynamic model is the η·k
+coefficient form of Bragg et al. (AIAA 2000-0360) with k-values for the NASA Twin Otter
+(Ratvasky & Ranaudo, NASA TM-105977) [unverified here]. Load-factor and speed limits come
+from 14 CFR 23.337 / 25.337 / 23.1505 / 25.1505 and the POH/AFM; failures from the Part 60
+Table A1B malfunction library; wake encounters from the Burnham-Hallock profile
+(DOT-TSC-FAA-79-103 Vol. IV), Sarpkaya (J. Aircraft 37(1), 2000) and Holzapfel's P2P
+(J. Aircraft 40(2), 2003), reviewed by Gerz, Holzapfel & Darracq (PAS 38, 2002) [unverified here].
+
+**Where the installed JSBSim 1.2.4 stands (verified from the fetched v1.2.4 sources and
+measured here).** `FGStandardAtmosphere.cpp` applies `atmosphere/delta-T` as a bias
+(L265, L348-369), `P-sl-psf` as an off-standard sea-level pressure, dew point → vapour
+pressure by a Magnus form whose constants are **Sonntag 1990's** (a = 611.2 Pa, b = 17.62,
+c = 243.12 °C, `FGStandardAtmosphere.h` L365-367 — the research cited Alduchov & Eskridge
+1996; the skeptic corrected it), a moist gas constant (L614) and density altitude by
+barometric inversion (L528-556). Measured: dew point 518.67 R at ISA SL → RH 100 %, ρ
+0.002377 → 0.002362 slug/ft³ (−0.63 %; the textbook 1 − 0.378 e/p gives −0.64 %), DA
++217.5 ft; ΔT +36 R with P_sl 2000 psf → T 554.67 R, ρ 0.002101, DA 4164 ft; ρ unchanged
+over five per-step rewrites; a dew point above T is **silently capped** with a stdout line
+(a hazard the addition refuses instead). `FGWinds.h` enum `tType {ttNone, ttStandard,
+ttCulp, ttMilspec, ttTustin}` — **no von Kármán type**; the header's "turb-type 4 resp. 5"
+comment is off by one against the enum (closes VALIDITY §4's item: ttMilspec = 3, ttTustin
+= 4 as the branch measured). `Run()` (L145-157) zeroes `vTurbulenceNED` when turb-type is
+0 and overwrites it otherwise (a 10 fps write to `turb-north-fps` reads 0.00 after one
+step), while `vGustNED` is never reset and `vTotalWind = wind + gust + cosineGust + turb`
+(a 7 fps `gust-north-fps` write persists at 7.00 after 11 steps, additive beside an active
+Dryden process); `p-turb-rad_sec` is read-only (L566-568). `FGActuator.cpp` L145-171:
+`fail_zero` → 0, `fail_hardover` → clip limit, `fail_stuck` → previous output, bound as
+`<name>/malfunction/fail_*` (L293-295) — none of the branch's airframes declares an
+`<actuator>`. `FGMassBalance` ties `inertia/pointmass-weight-lbs[i]` and
+`pointmass-location-{X,Y,Z}-inches[i]` RW; c172p carries five stations (CG 42.12 in at
+1880 lb; +300 lb at station 1 → 41.28 in, 2180 lb); p51d 13; DHC6 and f16 one; A320 and
+B747 none. `aero/alpha-max-rad` is declared only by c172p (`<alphalimits>` max 0.28 rad,
+`c172p.xml` L401-404; the uncommitted `c172p.json` note saying otherwise is wrong and is
+corrected by this addition). Engine-out: on a trimmed A320, `propulsion/engine[1]/set-running
+= 0` cuts thrust 11918 → 0 lbf on the next step; `cutoff_cmd` **works before a trim and is
+ignored after one** (the research called it a no-op; the skeptic measured the condition).
+Piston magneto/mixture cut takes 3-6 s to die (`FGPiston.cpp` L508, L593-598: RPM < 0.8
+idle or IHP < 0.125 hp).
+
+### Candidates
+
+| Candidate | Description | Verdict |
+|---|---|---|
+| C1 Property writes only | Every layer through per-step or one-time property writes; icing and the wake's roll moment refused as undeliverable | Rejected: two of eight layers permanently not claimed; a jam cannot hold at FDM rate from Python |
+| **C2 Generalised XML injection + property writes** | `derive.py` becomes an ordered injection pipeline (failures, icing, gust rotation, optional TECS) over the stock XML; the other layers through the environment stack | **Chosen**, with the skeptic's corrections applied below |
+| C3 Python disturbance engine via `<external_reactions>` | Wind field sampled at wing stations, forces applied externally | Rejected: double-counts the airframe's own rate derivatives (base.py §2.4), a second aerodynamics path the verifier cannot check, ~3× effort |
+| C4 Patch vendored JSBSim (ttVonKarman, writable turb, icing multiplier) | C++ fork of the pinned 1.2.4 | Rejected here: cannot be compiled or measured in this container, breaks the pinned hash; recorded as the upstream follow-up |
+
+### The chosen way and why
+
+C2: three layers that must live inside the aero/FCS model (icing factors and stall-alpha
+shift, control failures, rotational gust) enter by XML injection; five that do not
+(non-standard atmosphere, W&B, limits as the in-tree observer, engine-out, translational
+wake and von Kármán gusts through the persisting `atmosphere/gust-*-fps` channel, layered
+shear through the wind channel) enter through the environment stack. It is the best way
+for THIS repository because every seam already exists and was measured: the
+`AtmosphereProvider` slot is defined and unused (no subclass anywhere in `core`), the gust
+channel persists and is additive (FGWinds L157), `derive.py` already proves the
+rewrite-not-edit rule, and all three injections were shown **bit-identical at neutral
+values** (worst |diff| 0.0 over 8 s of a trimmed elevator-step run on c172p; re-run by the
+skeptic) and effective when driven (lift factor 0.8 drops lift 2772 → 2322 lbf on the next
+step; p-equivalent 0.3 rad/s for 2 s rolls to −30.3° vs −2.7°; `fail_stuck` holds the
+elevator at the failing step's position). It keeps JSBSim's validated Dryden and
+malfunction code in the loop rather than duplicating (C3) or forking (C4) it.
+
+**Corrections applied (the skeptic refuted or amended these; the design follows the skeptic):**
+
+1. **The failures actuator loop.** The research's pass-through `<actuator>` reading and
+   writing `fcs/<s>-cmd-norm` applies an authority gain CUMULATIVELY (measured: authority
+   0.5 with a command written once decays −0.15, −0.075, −0.0375 … to zero in ~10 steps),
+   and the host writes control inputs only at scheduled times, so any authority < 1 would
+   float to zero. The injection therefore **re-anchors** the airframe's `<flight_control>`
+   input (or TECS's output) to a new property `failure/<s>/cmd-in` and lets the actuator
+   write `fcs/<s>-cmd-norm`; a second anchor rewrite per surface, refused by name
+   (`derivation.anchor_missing`) when the airframe's FCS input cannot be found, with a test
+   that authority 0.5 holds 0.5 × command over 100 steps with the command written once.
+2. **The host has never loaded a derived airframe.** The aircraft root is hard-coded in
+   the vendored plugin (`JSBSimMovementComponent.cpp` L411-423), not in FlightSimBridge,
+   and the host refuses `hold_state`, so TECS is never on the host. The derived-airframe
+   load is a **fifth local patch to the vendored plugin** (configurable aircraft path +
+   sha256 check, recorded in `VENDORED.json`), each injection is independently
+   selectable, the derivation name encodes the set (`c172p-fail-ice-gust` vs
+   `c172p-tecs-fail-ice-gust`), and a test pins that the headless and host derivations
+   differ only by the TECS system.
+3. **No `physics_layers[]` block.** Each layer returns one `AppliedVariable` into
+   `applied_variables` (record 2, §2 below). `core/telemetry/limits.py` (in tree) is
+   extended, not replaced; `loading` and `icing` blocks go into the same
+   `assets/aircraft_config/<name>.json` beside `limits` (the repo has no `data/`
+   directory). **Five airframes** are configured (A320, B747, DHC6, c172p, p51d); an f16
+   config is a prerequisite before any f16 limit or failure claim.
+4. **Wake generator.** `poses.solve_traffic_track` builds traffic AFTER the flight from the
+   primary's recorded telemetry, so formation/crossing traffic cannot be a wake generator
+   (circular), and `base.Position` carries no heading. The `wake` spec block carries its
+   own fixed generator track (a fourth `TRAFFIC_TRACKS` kind `wake_generator`: scene-NED
+   start, heading, speed, altitude, weight and span from the JSBSim XML or the spec), the
+   traffic mesh is then placed on it, and `GustProvider.p_equivalent_at` takes an
+   `OwnShipState` (position + heading) argument.
+5. **Von Kármán scale lengths**: L_u = 2 L_v = 2 L_w = 2500 ft above 2000 ft (MIL-F-8785C
+   convention), L_w = h and L_u = L_v = h/(0.177 + 0.000823 h)^1.2 below 1000 ft as
+   FGWinds does; the spectral convention (8785C vs 1797) is named in the model block; a
+   spectrum-slope and integral-scale check is added because the σ check alone does not
+   catch a wrong L.
+6. **Pre-trim hook.** `EnvironmentStack.configure()` runs after the trim, so a hot day or a
+   payload would be invisible to the trim solver; the addition adds `stack.prepare(fdm)`
+   called between `set_initial_conditions` and `trim`, with a test that the trim throttle
+   differs at ΔT = +30 vs 0 and that `inertia/cg-x-in` read back before trim equals the
+   hand CG within 0.1 in.
+7. **DHC6 IS the Twin Otter**: the Bragg 2000 / TM-105977 k-table applies to it directly
+   (no proxy flag); c172p carries it with the proxy flag; the transports and p51d refuse
+   `icing.airframe_data` (a Twin Otter table on a B747 is a guess, not a proxy).
+8. **`cutoff_cmd`** is documented as "ignored after a trim; use `set-running`" with the
+   measured conditions, not as a no-op.
+9. **Verifier scope**: the `gust_channel_sum` and wake-selftest checks are DELIVERY checks
+   (same producer on both sides) and are labelled so; the independent physics check is a
+   two-line Hallock-Burnham re-implementation in `verify.py` from the card's Γ₀ / r_c,
+   plus the closed-form checks in producer tests.
+10. **Limits table**: the c172p V_NE is resolved to one value with the POH section cited
+    (158 KIAS / 160 KCAS, 1981 POH §2 [unverified here]), and the alpha_stall reason is
+    corrected (the XML declares `<alphalimits>`).
+11. **Effort**: 45-55 agent-days for the Python half plus the plugin patch, not 32; the
+    eight Windows checks are outside the estimate.
+
+### Blueprint
+
+**Files.**
+
+* `core/control/derive.py` — `Injection(name, template, rewrite, anchor_test)` applied in
+  fixed order `[tecs?, failures, icing, icing_alpha, gust_rotation]`; provenance gains
+  `injections[]` with template sha256s; suffix encodes the set; refusals
+  `derivation.anchor_missing`, `derivation.injection_conflict`, `derivation.hash_mismatch`.
+* `core/control/systems/failures.xml.tmpl` — per surface {elevator, aileron, rudder}:
+  `failure/<s>/authority` (1.0), `failure/<s>/cmd-in` (re-anchored FCS input), `<pure_gain>`,
+  `<actuator name="failure/<s>/actuator">` with `<clipto>` ±1 writing `fcs/<s>-cmd-norm`.
+* `core/control/systems/icing.xml` — `icing/{lift,drag,pitch,roll,yaw,side}-factor` (1.0),
+  `icing/eta` (0); every `<function>` in the six axes wrapped in `<product>`.
+  `icing_alpha`: `icing/alpha-shift-rad` (0) and a system computing
+  `icing/alpha-effective-rad = aero/alpha-rad + shift`, substituted as the LIFT table's
+  independentVar (the stall-onset cue Part 60 Directive 2 asks for; its own null test).
+* `core/control/systems/gust_rotation.xml` — `gust/p-equivalent-rad_sec` (0) summed into
+  the ROLL-axis Clp function's `velocities/p-aero-rad_sec`; refused when the anchor is
+  absent or ambiguous.
+* `core/environment/base.py` — `GustProvider` (wind into the gust channel;
+  `p_equivalent_at(own_ship, t)`), `OwnShipState`; `core/environment/stack.py` —
+  `prepare(fdm)` pre-trim hook, gust sum written every step including zero,
+  atmosphere writes before trim and every step, observer hook (§2).
+* `core/environment/atmosphere.py` — `NonStandardAtmosphere(AtmosphereProvider)`:
+  `temperature_deviation_c` → `atmosphere/delta-T` (R bias), `sea_level_pressure_hpa` →
+  `P-sl-psf`, `dew_point_c` | `relative_humidity_pct` → `dew-point-R`; refuses a dew point
+  above T; vocabulary ISA / ISA+15 / ISA+20 / hot day (+30 °C, a stated choice inside the
+  MIL-HDBK-310 1 % hot column) / cold day (−40 °C) / humid, ranges ΔT −60..+45 °C, p_SL
+  870..1085 hPa; `expected_density_ratio()` for the null test; named MIL-HDBK-310
+  profiles refused (`atmosphere.profile`) until transcribed with provenance.
+* `core/environment/von_karman.py` — MIL-F-8785C vK spectra, the same σ ladder as FGWinds
+  L276-288 (0.1 W20 below 1000 ft; Fig. 7 POE table above 2000 ft), Shinozuka-Jan
+  sum-of-cosines (N = 256 log-spaced frequencies, phases from seed stream `von_karman`),
+  frozen field convected at the trim TAS (stated), realised at FDM rate into a table
+  (`%.17g` strings on the card so both hosts write the same numbers); p_g from
+  σ_p = 1.9 σ_w/√(L_w b), L_p = √(L_w b)/2.6 (Yeager NASA CR-1998-206937 eqs. 8, 10 as
+  transcribed in FGWinds L292-295); q_g, r_g not delivered.
+* `core/environment/wake.py` — `WakeVortexPair(GustProvider)`: Γ₀ = W/(ρ V b₀), b₀ = π b/4,
+  w₀ = Γ₀/(2π b₀), r_c = 0.035 b; Burnham-Hallock V(r) = Γ/(2π r) · r²/(r² + r_c²) per
+  vortex; optional Sarpkaya decay with ε*, N* as declared inputs (else none, age recorded);
+  p_eq = (12/b³) ∫ w(y) y dy over the own span (uniform-lift strip theory, 32-point
+  Gauss-Legendre); RCR where the airframe's aileron term is readable.
+* `core/environment/shear.py` — `LayeredWind` (piecewise-linear layers, layer index and
+  dV/dz reported), `MilSpecShear` (§3.7.3.2 log law, z₀ 0.15 / 2.0 ft), `NwpFixture`
+  (cached `assets/nwp/<name>.json` with URL, fetched_at, sha256, levels; refuses
+  `weather.fixture_missing` / `weather.fixture_digest`; heights are standard-atmosphere
+  heights of the level pressure, stated).
+* `core/environment/icing.py` — η(t) = η_max · clamp((t − onset)/ramp, 0, 1); k-table from
+  the `icing` block of `assets/aircraft_config/<fdm>.json`; severity words {trace 0.05,
+  light 0.10, moderate 0.20, severe 0.30} as a STATED mapping (AIM 7-1-19 words are pilot
+  reports); Part 25 App. C/O envelope words recorded as metadata only.
+* `core/scenario/loading.py` — payload stations by name, fuel by kg or fraction, applied
+  once in `prepare()`; hand CG vs `inertia/cg-x-in` within 0.1 in; refuses
+  `loading.station_unknown`, `loading.station_mass`, `loading.max_weight`,
+  `loading.cg_envelope`, `loading.datum_unverified` (until the arm-comparison test is green
+  for that airframe: c172p XML arms 36/70/95 in vs POH 37/73/95 in is a 3-inch inference),
+  `loading.fuel_range`.
+* `core/telemetry/limits.py` (in tree) — extended with `alpha_margin_deg`,
+  `speed_margin_kt`, `mach_margin`, `nz_margin_g`, `stall_warn_norm`; flag columns renamed
+  to the `_flag` suffix (§2); campaign summary.
+* `core/telemetry/failures.py` — `FailureSchedule` events `{kind, target, at_s, value}` →
+  writes at the first step with t ≥ at_s: `engine_out` (`set-running = 0` turbine;
+  `magneto_cmd = 0` piston with the 3-6 s die-off stated), `control_jam`
+  (`fail_stuck`, position read back), `hardover`, `float` (`fail_zero`),
+  `authority_loss`; channels `failure_state_flag`, `engine_thrust_n[i]`, `engine_n1_pct[i]`
+  or `engine_rpm`; `failures_applied[]` with read-back.
+* `core/fdm/state.py` — `density_altitude_m`, `pressure_altitude_m`, `rh_pct`,
+  `vapour_pressure_pa`, `cg_x_m`, `iyy_kgm2`, `gust_{north,east,down}_mps`,
+  `stall_warn_norm`, engine channels (NaN when absent); `REQUIRED_PROPERTIES` extended;
+  recorder `DEFAULT_CHANNELS` extended (recorded, not graded by Gate 5).
+* `core/scenario/spec.py`, `blocks.py`, `validate.py`, `runner.py`, `card.py`,
+  `randomization.py` — the blocks listed in the versions table; new policy leaves with the
+  sampled-provenance record; `realised_distribution` counts them.
+* `core/capture/poses.py` — `wake_generator` track kind.
+* `experiments/gate3b_layers.py` — the null ladder V13-V20, A7-A9.
+* `docs/JSBSIM_CORRECTIONS.md` §14-§17 (cutoff_cmd after trim; turb-*-fps never externally
+  writable; gust-*-fps persists so must be written every step; FGWinds.h "4 resp. 5" vs enum
+  3/4); `docs/VALIDITY.md` §2.20-2.27.
+* UE: `FlightSimScenarioWorld.cpp/.h` (the card blocks with the `turbulence_properties`
+  discipline; loading batch after `RunIC` and before the trim; atmosphere batch before trim
+  and each step; per-step gust batch beside the wind batch; failure schedule once at
+  t ≥ t_s), `FlightSimWake.h/.cpp` (line-for-line port of `wake.py` with a selftest block,
+  the downburst precedent), `FlightSimTelemetryRecorder.cpp` (channel table extended),
+  `JSBSimMovementComponent.cpp` (local patch 5: aircraft path + hash), `VENDORED.json`.
+
+**Models and parameters.** Atmosphere: T(h) = T_ISA(h) + ΔT (bias route; graded route
+unused and said so), p_SL via `P-sl-psf`, Sonntag-Magnus e_s(T), mixture gas constant,
+barometric inversion for DA/PA (US Standard Atmosphere 1976 [unverified here]; A&E 1996's
+~0.1 % difference in e_s enters `u_D` of row A7). Von Kármán: Φ_u = σ_u²(2L_u/π)/[1 +
+(1.339 L_u Ω)²]^{5/6}, Φ_w = σ_w²(L_w/π)[1 + (8/3)(1.339 L_w Ω)²]/[1 + (1.339 L_w Ω)²]^{11/6}
+(MIL-F-8785C §3.7.2.1 [unverified here]). Wake: Burnham-Hallock 1982, Sarpkaya 2000, Proctor
+core radius convention [unverified here]. Icing: C_A,iced = (1 + η k_A) C_A (Bragg 2000)
+plus a stated alpha shift. W&B: CG = Σ m x / Σ m over empty weight, stations and tanks;
+envelope polygon from the POH/AFM [unverified here]. Limits: 23.337 / 25.337 (n = 2.1 +
+24000/(W+10000) clamped 2.5..3.8) / MIL-A-8861B; V_NE / V_MO / M_MO [unverified here];
+α_stall from `measure_lift_curve` (derived). Failures: the measured JSBSim semantics. Shear:
+§3.7.3.2 log law; layered interpolation; NWP fixture heights as stated.
+
+**Data each variable returns** (one `AppliedVariable` each, record 2): applied
+{value, unit, source, from, std}, readback {property, value, agrees, tolerance}, model
+{name, standard, version, parameters, references}, per-step channels (atmosphere:
+`density_altitude_m`, `pressure_altitude_m`, `rh_pct`, `vapour_pressure_pa`, `sigma`; vK:
+`gust_*_mps`, `gust_p_equivalent_rad_s`, realised σ_u/v/w and the −5/3 slope on the table;
+wake: `wake_{u,v,w}_mps`, `wake_p_eq_rad_s`, `wake_gamma_m2_s`, `wake_age_s`, offsets,
+`wake_rcr`; icing: `icing_eta`, the six factors, `icing_alpha_shift_deg`; W&B: `cg_x_m`,
+`iyy_kgm2`, `cg_envelope_margin_in`, the pre-trim read-back pair; limits: the margins and
+`_flag` columns; failures: `failure_state_flag`, engine channels, `failures_applied[]`;
+shear: `wind_layer_index`, `shear_dv_dz_per_s`, `wind_profile_speed_mps`), per-frame state
+(automatic: `frame.state` carries every recorder column), realised distribution (campaign
+report rows for ΔT, dew point, fuel fraction, payload mass, η_max, at_s, generator range,
+turbulence model share), null test (§ verification), `not_claimed[]`.
+
+**Engine side.** Written and pinned by source-reading tests, never compiled here: the
+card blocks with fixed key order and exact counts (refusals `card.atmosphere_properties`,
+`card.loading_properties`, `card.failure_schedule`, `card.gust_table`,
+`card.derived_aircraft`, `gust_table.length`); the derived airframe loaded through the
+plugin's patched aircraft path with the XML sha256 checked at the door; `render.json
+environment` gains `atmosphere_delivery`, `loading_applied`, `loading_readback_cg_in`,
+`failure_schedule_applied[]`, `gust_delivery` ('table' | 'wake_port'), `gust_rows_applied`,
+`wake_selftest[]`, `derived_aircraft_sha256`, `layered_wind`. No CVars, no editor Python.
+
+**Verification here** (all on JSBSim 1.2.4 in `.venv`): V13 hand CG vs `inertia/cg-x-in`
+within 0.1 in on five airframes and the c172p arm test; V14 limits self-trip (a scripted
+4 g pull-up trips n_z, a dive trips V_NE) and the verifier's recomputation; V15 failure
+timing (write lands at the first step with t ≥ t_s; jam holds the surface within 1e-6 rad;
+engine-out thrust 0 on the next step; authority 0.5 holds over 100 steps); V16 wake field
+(analytic V(r_c) = Γ/(4π r_c), far-field zero, divergence-free pair, p_eq of uniform w = 0
+and of w = p·y = p); V17 layered interpolation and dV/dz; V18 derivation bit-identity per
+injection per airframe at neutral values over 8 s, anchors refused by name where absent;
+V19 atmosphere read-back and per-step stability; V20 the gust channel equals the summed
+provider contributions and persists only while written. Null ladder `gate3b`: ΔT 0 vs +30
+(TAS/CAS ratio within 0.5 % of 1/√σ); dry vs 100 % RH (ρ ratio within 0.05 % of 1 − 0.378
+e/p → A7 at declared u_D); vK vs none and vK vs Dryden at the same σ (σ_w within 10 % → A9);
+encounter vs none (peak roll > 5° at a stated geometry); η 0 vs 0.2 (lift at fixed α falls
+by the factor within 1 % on the first step); 0 vs 300 lb aft (CG moves, trim elevator
+differs); engine-out vs none on the A320; jam vs none; layered vs uniform wind. A8: JSBSim
+ISA at ΔT = 0 vs the US Standard Atmosphere 1976 table at 0/3000/11000 m (transcribed,
+unverified here). Mutation guards: one per safeguard (dew-point refusal, re-anchor rewrite,
+pre-trim hook, vK L relation, wake r_c, η mapping, CG tolerance, at_s comparison, gust
+written-when-zero), each with the failing test named in the `mutate` line.
+
+**Verification on Windows** (appended to `docs/PHASE2_REPORT.md`'s order): W1 plugin
+build with the patched aircraft path and the logged XML hash equal to the manifest's;
+W2 Gate 5 parity extended to the new channels; W3 atmosphere batch before the host trim
+(trim throttle within the parity bound at ΔT = +30); W4 host `cg-x-in` read-back within
+0.1 in of the card's expected CG; W5 gust table row-for-row bit-identical, wake selftest
+within 1e-9 m/s; W6 failure `t_applied` within one step, jammed surface constant in host
+telemetry; W7 every new `environment` key present, verifier engine checks NOT RUN → PASS;
+W8 Gate 10-R with all layers on.
+
+**Refusal names.** `atmosphere.temperature_deviation`, `atmosphere.sea_level_pressure`,
+`atmosphere.dew_point`, `atmosphere.humidity_conflict`, `atmosphere.profile`,
+`loading.station_unknown`, `loading.station_mass`, `loading.max_weight`,
+`loading.cg_envelope`, `loading.datum_unverified`, `loading.fuel_range`,
+`limits.category_unknown`, `limits.data_missing`, `icing.severity`, `icing.eta_range`,
+`icing.envelope`, `icing.airframe_data`, `failures.kind`, `failures.target`,
+`failures.time`, `failures.actuator_missing`, `failures.value`, `wake.generator`,
+`wake.model`, `wake.decay`, `turbulence.model`, `wind_profile.kind`, `wind_profile.layers`,
+`weather.fixture_missing`, `weather.fixture_digest`, `derivation.anchor_missing`,
+`derivation.injection_conflict`, `derivation.hash_mismatch`, `card.atmosphere_properties`,
+`card.loading_properties`, `card.failure_schedule`, `card.gust_table`,
+`card.derived_aircraft`, `gust_table.length`.
+
+**Not claimed.** No airframe's icing response is validated; the DHC6 k-table is the
+published Twin Otter set [unverified here] and every other airframe's is a proxy or a
+refusal; the factor form scales whole tables, the alpha shift is a stated cue, there is no
+accretion, LWC/MVD or temperature dependence. MIL-HDBK-310 named profiles are not
+implemented; the graded-delta route is unused. The wake has a stated core radius, no Crow
+instability, no ground effect, no stratification-dependent decay unless parameterised, a
+strip-theory roll moment only (no tail, no yaw/pitch moment). Von Kármán q_g, r_g are not
+delivered, the field is frozen at the trim TAS and realised as a table, not a live filter.
+The limit monitor flags exceedances and models no damage or protection system; every limit
+number is a transcription with its source string. Failures are the measured JSBSim
+semantics (no fire, no hydraulic topology, no asymmetric-thrust compensation — TECS has no
+lateral loop, so post-engine-out is "energy held, no yaw compensation"); sensor failures
+are not in this cut. Layered shear has no time evolution; NWP heights are
+standard-atmosphere heights. The W&B envelope of any airframe whose datum test has not
+passed is refused. The engine half is source-read only. The scorecard ceiling stays 2.
+
+---
+
+## 2. The record every variable returns
+
+Applied value with provenance and read-back, model and parameters, per-step effect,
+per-frame state, realised distribution, null test, ASME V&V 20 uncertainty, exported
+columns; instrument models beside truth; a generated traceability table; datasheet-grade
+documentation.
+
+### State of the art
+
+ASME V&V 20-2009 reports E = S − D against u_val = √(u_D² + u_num² + u_input²), u_num from
+a refinement study (Richardson / Roache's GCI) and u_input by propagating input
+uncertainties (GUM JCGM 100:2008 eq. 10) [unverified here; the exact section numbers of
+V&V 20 are cited by topic, not number, because the standard is unreachable here].
+NASA-STD-7009A makes results uncertainty, results robustness and input pedigree scored
+credibility factors; MIL-STD-3022 fixes the V&V Plan / Report / Accreditation documents
+[unverified here]. W3C PROV-DM and NIST AI RMF ask for documented lineage; Gebru et al.
+("Datasheets for Datasets", CACM 64(12), 2021) fix seven datasheet sections; ISO/IEC 5259
+(2024) gives ML data-quality measures; MLCommons Croissant 1.0 is the machine-readable form;
+DO-178C §5.5/6.3 and ISO/IEC/IEEE 29148 define bidirectional traceability [unverified here].
+Instrument models are parameterised by Allan-variance coefficients (IEEE Std 952-2020
+Annex C, IEEE Std 1293-2018, El-Sheimy, Hou & Niu IEEE TIM 57(1), 2008), GPS by the SPS
+Performance Standard (5th ed., 2020) and Groves (2013) ch. 4/14 lever arms, pitot-static by
+Gracey NASA RP-1046 and 14 CFR 25.1323 (3 % or 5 kt), magnetometers by IGRF-13 (Alken et al.
+2021 — the degree-1 coefficients g₁₀ = −29404.8, g₁₁ = −1450.9, h₁₁ = 4652.5 nT at 2020.0
+were **verified here** from the fetched `IGRF13.shc`) [others unverified here].
+
+**Where the branch stands (read here).** `core/records.py` (record 1) already carries
+`AppliedVariable{name, value, unit, source, model, parameters, references,
+properties_written, telemetry_columns, frame_keys, null_test, not_claimed}` and
+`NullTest.ok = |with − without| ≥ threshold`; the frame record's `state` is the whole
+recorder row (`manifest.frame_state`), so any new column reaches every frame, sidecar and
+WebDataset sample with no exporter change as long as its unit suffix is known;
+`core/validation/reference.py` has the V&V 20 form for six quantities in one report; V9
+measured 0.098 m (1/60 vs 1/120) then 0.048 m (1/120 vs 1/240), observed order p ≈ 1.03;
+`FlightDynamics(rate_hz=…)` and `set_dt` work (measured); physics costs 0.88 s (c172p) and
+0.94 s (B747, moderate turbulence) per 60 s flight through the real runner, so (n + 2) runs
+per case are affordable; `core/telemetry/instruments.py` (in tree) is a **post-hoc observer
+over the 10 Hz telemetry** (σ = density/√dt at the recorder interval), which is candidate
+D — right as the host-flight fallback, wrong as an IMU at sensor rate. Readback measured:
+`atmosphere/delta-T` 36 → 36.0 exactly, `pointmass-weight-lbs[1]` 300 → 300.0 exactly,
+`P-sl-psf` 2000 → 2000.0 exactly, but `atmosphere/RH` 0.5 → 0.49999996684 (6.6e-8
+relative, a round trip through Magnus vapour pressure) and `T-sl-R` is a derived output,
+not an input.
+
+### Candidates
+
+| Candidate | Description | Verdict |
+|---|---|---|
+| A Extend in place (columns, conditions, not_claimed) | No new contract; conditions block records the request | Rejected: records the request, not the applied value; no readback, model, null numbers or uncertainty travel with the run |
+| **B One variable-record contract with registry, readback, null pair, dt/2 twin, verifier checks, report/export flattening** | Extends `core/records.py` in place | **Chosen**, with the corrections below |
+| C Standards-native graph (PROV JSON-LD, Croissant) | Second serialisation of the same facts | Deferred: no JSON-LD/RDF library in the venv; a later exporter over B's blocks |
+| D Instruments post-hoc over 10 Hz telemetry | The in-tree module | Kept ONLY as the host-flight fallback with `rate_basis` stated |
+
+### The chosen way and why
+
+B, built as an extension of what landed: `core/records.py` goes to **record 2** (the
+docstring says a key addition bumps it): `readback{property, value, agrees, tolerance,
+basis}`, `jsbsim_writes[{property, when}]`, `uncertainty{u_input, u_num}`, `model` as a
+structured block `{name, standard, version, parameters, references}` (the string form kept
+as `model_name`), and `NullTest.kind ∈ {reached, bounded}` — the skeptic (World and
+Datum passes) showed that invariance tests ("Nanite leaves the depth pass unchanged",
+"the datum moves no pixel", "the base colour is identical under two suns") cannot be
+expressed with `ok = |Δ| ≥ threshold`; `bounded` gives `ok = |Δ| ≤ bound`. A registry
+(`core/registry.py`, not a new `core/record/` package one letter from `records.py`) makes
+"every introduced variable returns this record" a test: a spec field outside the registry
+refuses `record.unregistered`. The reasons it fits: the Quantity ladder and the Term/std
+citation already exist, so the record is those two shapes joined; physics is cheap enough
+for a with/without pair and a dt/2 twin per case; verifier independence is preserved by a
+second implementation of each check in `verify.py`; `frame.state` already carries every
+column.
+
+**Corrections applied:** no `core/record/` package and no `applied` manifest key (the key is
+`applied_variables`, the shape is `core/records.py`'s); no version bump by this item; the
+IMU truth specific force is **f_R = g·(N_x, N_y, −N_z) + ṗ_i × R + ω_i × (ω_i × R)** in body
+axes with NO gravity term — `FGAuxiliary.cpp` L213-224 computes `vPilotAccel` from
+`vBodyAccel = Force/Mass` without gravity and `udot/vdot/wdot` include Coriolis and gravity
+(`FGAccelerations.cpp` L188-202; fetched here), so the research's "a_cg + … + gravity" was
+wrong; readback tolerance is a **per-registry-entry** field (RH 1e-6 relative with the
+measured reason; delta-T and pointmass 0, exact); effect-channel units are carried
+explicitly by the registry and `state_units` consults it before the suffix table, a `_flag`
+suffix is added for dimensionless flags (the in-tree limits columns `exceed_*` are renamed
+`*_flag` before '?' becomes a refusal), `_kgm3` added; the Allan estimator in `verify.py`
+is the overlapping form written from the definition with a lazy numpy import (as the image
+readers do), while the producer self-report uses the non-overlapping form, so agreement is
+evidence rather than a copy; `sensitivity_pairs` defaults to TRUE for any variable whose
+u_x is non-zero (the null-pair secant is labelled "connectivity sensitivity, not GUM c_i");
+the observer hook is added to BOTH step loops (`runner.py` explicit loop and
+`stack.run_for`) with a test that each path records the same number of FDM-rate samples;
+Titterton & Weston is cited as chs 4-6 for sensor errors; `@pytest.mark.requirement` is
+registered in `pytest.ini` with `--strict-markers`; effort 35-50 agent-days for the full
+scope, cut in the order (1) record + readback + null pair + u_num/u_input + report/tabular,
+(2) FDM-rate IMU and GPS, (3) pitot-static and magnetometer, (4) datasheet and traceability.
+
+### Blueprint
+
+**Files.** `core/records.py` (record 2), `core/registry.py` (`VariableRecord` entries:
+name, spec_path, unit, jsbsim_writes, effect_channels with units, null_value,
+readback_tolerance, u_input_rule, host_channels; refuses duplicates, `record.null_value`,
+`record.effect_channel`, `record.effect_channel_unit`), `core/record_null.py`
+(`run_null_pair`: the identical case at the null value; effect per channel {peak_abs, rms,
+unit, floor}; output digests; verdict), `core/uncertainty.py` (u_num from a dt/2 twin,
+turbulence off, Richardson with observed p from the three-rate study when run else
+assumed 1 with Fs = 3; u_input by GUM eq. 10 with u_x by source rank: user 0 unless a
+tolerance is stated, inferred (b/2)/√3 for a vocabulary bin of width b, sampled 0,
+model/default the registry's declared spread; central ±u_x pairs), `core/telemetry/instruments.py`
+(in tree; gains the FDM-rate observer path with `rate_basis` 'fdm loop', the corrected
+specific force, lever arms, seeds `imu`/`gps`/`pitot_static`/`magnetometer`/`null_test` in
+`core/experiments/seeds.py` — never reusing the declared-but-unused `sensor_noise`),
+`core/telemetry/instruments_check.py` (in tree), `assets/instrument_profiles/*.json` (in tree;
+every parameter with a `source`, refused by name when blank), `core/dataset/tabular.py`
+(`frames.npz` + `frames.csv` with a units row + `columns.json`; `read_tabular()` independent
+reader; refuses `export.tabular_units`), `core/dataset/datasheet.py` (Gebru's seven
+sections + ISO/IEC 5259-2 measures: completeness, accuracy, consistency, provenance
+coverage, currency; the distribution section names the GPL airframe restriction),
+`core/validation/traceability.py` + `docs/REQUIREMENTS.yaml` + `docs/TRACEABILITY.md`
+(requirement ids R-<AREA>-<nn>; tests harvested by `ast`, guards by the existing
+`parse_guards`; `tests/test_traceability.py` asserts regenerated == committed, every
+requirement has ≥ 1 test and ≥ 1 guard or a stated reason, no test cites an unknown id, a
+`reviewed_by` field with 'none' as the honest value), `core/campaign/report.py`
+(`variables`, `uncertainty`, `instruments` blocks; `record_version: 2`),
+`core/dataset/export.py` (dataset card gains `variables`, `instruments`, `uncertainty`,
+`datasheet`), `core/scenario/spec.py` blocks `instruments{imu, gps, pitot_static,
+magnetometer: profile + lever_arm_m}` and `record{null_tests, convergence,
+sensitivity_pairs}`, `core/capture/manifest.py` (`uncertainty`, `instruments` top-level;
+`SIDECAR_CONTEXT_KEYS` += the two; suffix table += `_mps2`, `_rads`, `_ut`, `_hpa`, `_k`,
+`_pct`, `_kgm3`, `_flag`), `ue/.../FlightSimTelemetryRecorder.cpp` (host channels of every
+registry entry, pinned equal to `REGISTRY.host_channels` by a source-reading test in the
+`tests/test_aero_channels.py` pattern).
+
+**Models and parameters.** Readback tolerance per entry as measured. Null-effect floors =
+10 × the V9 numerical noise (altitude 0.5 m, angles 0.05°, speeds 0.1 kt). u_num: e =
+|S_dt − S_dt/2|/(2^p − 1), GCI = Fs·e (Roache 1994; V&V 20 solution-verification section
+[unverified here]). IMU (IEEE 952 Annex C; 1293; El-Sheimy 2008): N, B, K, b₀, k,
+misalignment per axis; profiles are "representative of the class, not a device datasheet";
+sensor frame stated (JSBSim body x forward, y right, z down; the N_z sign flip). GPS (SPS PS
+5th ed.; Groves ch. 14): white σ 1.5 m / 3 m, Gauss-Markov σ 2 m τ 60 s, velocity σ 0.05
+m/s, 5 Hz held between fixes, antenna lever arm. Pitot-static (Gracey; 25.1323): τ_s 0.2 s,
+τ_t 0.05 s, position-error table (default zero, stated), σ 5 Pa; CAS from q_c and P by
+JSBSim's own relation recomputed. Magnetometer: tilted dipole from the verified IGRF-13
+degree-1 terms, hard/soft iron, σ 0.1 µT, declared "dipole, a few degrees of declination
+error, not IGRF/WMM". Allan: overlapping σ²(τ) = 1/(2τ²(N − 2m)) Σ(θ_{k+2m} − 2θ_{k+m} +
+θ_k)²; agreement |adev/(N/√τ) − 1| < 0.25 at short τ; B and K NOT RUN when T < 100 τ_B —
+one long deterministic soak (3600 s, ~55 s of physics here) per profile in the campaign
+report so B is measured once.
+
+**Data each variable returns.** `applied_variables[i]` at record 2 (value, unit, source,
+from, std, readback, model, jsbsim_writes, effect channels, `frame_keys` = `state.<channel>`,
+null_test{kind, null_value, digests, effect per channel, verdict, basis}, uncertainty{u_input
+{value, unit, rule, sensitivity}, u_num{srq: value, basis}}, not_claimed); `uncertainty`
+top-level {u_num per SRQ (altitude_m, north_m, east_m, tas_kt, pitch/roll/heading_deg),
+u_input per variable, u_val per SRQ, form: "ASME V&V 20; u_D absent per run"}; `instruments`
+{profiles, seeds, rate_hz, rate_basis, file, columns, allan_self_report, not_claimed};
+`instruments.npz` at FDM rate (truth_* and meas_*); the 10 Hz recorder samples the latest
+measured value so frames carry meas_* beside truth; report `variables.<name>{n, min, max,
+mean, sd, hist, sources, null_verdicts, effect_median, effect_p95}`; `frames.npz`/`csv`
+columns `applied__<name>`, `applied__<name>__source` (0-5 by rank, 6 absent),
+`state__<channel>`, `u_num__<srq>`, `null__<name>__verdict`, labels; WebDataset sidecar
+gains `export.applied`.
+
+**Engine side.** Only the host recorder's property list; host-flight instruments are
+post-hoc at the recorded rate with `rate_basis` 'recorded telemetry, 10 Hz' and
+`instrument_allan` NOT RUN below the profile's minimum rate.
+
+**Verification here.** Readback on delta-T, pointmass, P-sl (exact) and RH (1e-6);
+null pairs and dt/2 twins ~0.9 s each; Allan recovery of a synthetic stream's N within
+25 %; GPS lever arm recovered from a rolling truth track; specific force at R = 0 equals
+g·(N_x, N_y, −N_z) and at R ≠ 0 the rotational terms match a finite-difference check;
+no '?' unit for any registered channel; v7 schema validates a manifest with the blocks
+present and with them null-with-basis; traceability regenerated == committed; datasheet
+sections and 5259 measures finite on a two-case campaign; tabular round trip; the
+message two-way test; VV rows V21 (readback), V22 (null per variable), V23 (Allan),
+V24 (u_num per run) filled from a run here; mutation guards on the readback tolerance
+field, null floor, Allan tolerance, unit table, registry refusal, traceability equality,
+datasheet required sections, the N_z sign.
+
+**Verification on Windows.** Host telemetry carries the registry's effect channels
+(Gate 5 parity extended, same names, within the stated tolerances); a host-flight
+capture's `applied_variables` reads back from the host's own JSBSim.
+
+**Refusal names.** `record.unregistered`, `record.null_value`, `record.effect_channel`,
+`record.effect_channel_unit`, `record.readback`, `record.convergence`,
+`record.uncertainty_basis`, `instrument.profile`, `instrument.lever_arm`,
+`instrument.rate`, `export.tabular_units`, `datasheet.incomplete`, `traceability.orphan`;
+verifier checks `applied_readback`, `null_effect`, `instrument_allan`,
+`instrument_lever_arm`, `uncertainty_present` (each with a `check.*` catalogue sentence).
+
+**Not claimed.** A null test is connectivity and one-sided sensitivity, not correctness.
+u_num is from one dt/2 twin on a deterministic variant with an assumed order unless the
+three-rate study ran; u_input is first-order propagation; no referent is added by this
+area, so u_D stays absent per run and the V&V 20 form is not a validation (the one
+computable referent — density altitude against the 1976 tables at the applied ΔT — is
+row A8 of §1). Instrument profiles are stated class models, no device is calibrated, the
+Allan check measures that the model produced the noise it declares; B and K are NOT RUN
+on 60 s runs. The magnetometer is a tilted dipole. Host-flight instruments are post-hoc.
+No label uncertainty from pose uncertainty in this cut (a stated follow-on: u_label_px
+through the projection Jacobian). No PROV-O or Croissant output; identifiers (run id, spec
+digest, variable name) are stable so a later exporter needs no new fields. No independent
+V&V agent; the traceability table records `reviewed_by: none`.
+
+---
+
+## 3. Sensing
+
+A stated linear-radiance path, spectral bands as a declared proxy, an IR proxy, PSF/MTF
+and intra-exposure motion blur, and new ground-truth passes (world normals, optical flow,
+base colour, stereo disparity, point clouds with ids, amodal boxes and masks).
+
+### State of the art
+
+The programme-grade EO/IR chain is a spectral scene model (DIRSIG — Goodenough & Brown
+2017; MODTRAN 6 — Berk et al. 2014), an EMVA 1288 Release 4.0 sensor model and an NVESD
+NV-IPM performance model; exposure is standardised by ISO 2720 (H = q t L/N², q = 0.65) and
+ISO 12232:2019 (S_sat = 78/H_sat); real-time engines claiming physical units follow Lagarde
+& de Rousiers 2014 §5 (L_max = 2^EV100 · 78/(q S) = 1.2 · 2^EV100 cd/m²), which Unreal's
+manual exposure implements with an additional lens attenuation `r.EyeAdaptation.LensAttenuation`
+(default 0.78) — **the research omitted this factor; the skeptic's recomputation shows
+Epic's own worked example (18 % under 100 000 lx at EV100 15 → ≈ 0.18) only comes out with
+0.78 in the denominator** [all unverified here]. Optics follow Goodman's diffraction MTF
+and ISO 12233:2023 e-SFR; motion blur the accumulation buffer (Haeberli & Akeley 1990) or
+the velocity-line reconstruction (McGuire et al. 2012). The honest thermal codes (DIRSIG,
+MuSES, OKTAL-SE) solve a heat balance; everything short of that is a proxy and is called
+one. Perception ground truth follows KITTI (disparity uint16 ×256; flow uint16 u·64 + 2¹⁵
+with a validity channel; velodyne float32 N×4 with REFLECTANCE as the fourth column),
+KITTI 2015 rigid-object flow (Menze & Geiger 2015 — exactly this situation), MPI-Sintel
+occlusion masks, Virtual KITTI 2 (forward and backward flow), Hypersim (HDR radiance,
+normals, reflectance per pixel) and the amodal conventions of Zhu et al. 2017 / KINS
+[unverified here].
+
+**Where the branch stands (read here).** The commandlet captures `SCS_SceneDepth` (f32,
++inf sky), the ID pass through `M_CustomStencilID`, an `-linear` `SCS_FinalColorHDR`
+capture written as EXR (which this container cannot read: no OpenEXR; `profile.read_linear_frame`
+silently falls back to inverting the 8-bit sRGB PNG); the alone pass is already the
+amodal silhouette; `bbox_2d_unclipped` and `visible_fraction` exist; traffic tracks are
+rigid per-frame states; the recorder columns carry Mach and the atmosphere state the IR
+proxy needs. The visual scene sets the sun to **8.0** and the sky light to 1.0
+(`FlightSimVisualScene.cpp` L164, L262), not lux: at f/8, 1/500 s, ISO 100 (EV100 14.97,
+L_max ≈ 38 400 cd/m²) an 18 % surface reads 1.2e-5 — **black**. This is a LATENT DEFECT
+TODAY, not only a prerequisite: `ApplyPhysicalExposure` is taken whenever a card carries
+`cameras[].exposure` (commandlet L1513-1525). `verify.py` imports nothing from the
+producers; `DEPTH_TOL_FRACTION` / `DEPTH_TOL_M` exist for the flow and disparity validity
+tests.
+
+### Candidates
+
+| Candidate | Description | Verdict |
+|---|---|---|
+| C1 Everything in the engine (Movie Render Graph layers, Lens File, engine motion blur, thermal post-process look) | A second producer beside the run-card commandlet | Rejected: forks the capture route every gate is pinned to; MRG ids are per actor; a thermal look without radiometry is what VALIDITY §2.5 forbids; one piece kept (accumulation) |
+| **C2 Minimal engine, Python derives, verifier re-derives** | Engine adds normals, base colour, a calibration frame, a physical sun, optional accumulation, a linear .f32; Python derives flow, disparity, points, amodal, radiance, PSF, blur, IR proxy | **Chosen**, with the corrections below |
+| C3 Band-swapped materials rendered per band | Per-class reflectance/emissive materials | Deferred until land cover exists (§4); recorded as the next step |
+| C4 Couple DIRSIG / MuSES / MODTRAN | The actual state of the art | Rejected here: licensed, unreachable, a phase of its own (PHASE2_BRAINSTORM §9.4) |
+
+### The chosen way and why
+
+C2 as the core, C1's accumulation as an opt-in engine flag, C3 recorded for after land
+cover. Only C2 keeps the verifier's independence (every new channel graded from the same
+files with the verifier's own projection, as `mask_vs_geometry` is today); the Python
+derivations and their null tests run on synthetic bundles here; the C++ delta follows the
+existing `MakeDepthCapture` pattern; the physics additions (ΔT, dew point) feed the IR
+proxy through `frame.state`; the depth, alone pass, unclipped box and rigid traffic states
+already exist, so flow, disparity, points and amodal are derivations.
+
+**Corrections applied:** the exposure model is **v = L_v/(1.2 · A · 2^(EV100 − EC))** with
+A = the read-back `r.EyeAdaptation.LensAttenuation`, recorded in `sensing.radiometry`, the
+grey card predicted with A, the whole constant 'predicted' until `calibration.json` exists,
+and a guard on A as well as on 1.2; sun illuminance goes into the existing
+`core/scenario/solar.py` (no second `solar.py`), and because Bird & Hulstrom 1981 is a
+BROADBAND model with no spectrum to integrate against V(λ), the lux comes from the
+broadband DNI times a declared luminous efficacy (Perez et al. 1990, Solar Energy 44(5)
+[unverified here]) with provenance 'model' — SPCTRAL2 (Bird & Riordan 1986) is the named
+upgrade; accumulation uses a dedicated AA-off capture (the beauty pass runs TSR with
+persistent history, so sub-pose captures through it would ghost), poses interpolated from
+the **10 Hz** solved track (not 120 Hz; the engine's 120 Hz substeps place the aircraft),
+and `-accumulate` records k = 1 when the predicted blur is under 0.25 px (at f/8, 1/500 s
+the daylight triple is sub-pixel at every preset range: 0.28 m of travel at 140 m/s), so
+Gate 10-R stays bit-identical by default; flow is FORWARD AND BACKWARD (Virtual KITTI 2)
+from the neighbouring 10 Hz telemetry samples rather than the neighbouring captured frames
+(capture periods are seconds and chase presets lag), the last frame's forward flow null
+with a basis; the point cloud is float32 N×4 with reflectance **0** (no intensity model,
+stated) and ids in a sidecar `frame_NNNN_points_id.u8`; `amodal_bbox_2d` is the TIGHT box
+of the alone-pass pixels (engine-derived) checked against `bbox_2d_unclipped` + 2 px, not
+the hull box itself; the IR proxy is keyed on the base-colour PALETTE class per pixel
+(rock/snow/grass palette words, each row cited) with a stated solar-loading term from the
+normal pass, because the class image carries only aircraft and terrain; the commandlet
+writes `frame_NNNN_linear.f32` (3 × float32 LE, sha256 in render.json) and the radiance
+path and verifier refuse `sensing.radiometry` when only the PNG exists; `blur_vs_flow`
+measures blur length from the verifier's OWN keypoint displacement between bracketing
+telemetry samples; `points_vs_geometry` becomes `points_vs_depth` (a consistency check)
+plus a heightfield check from the sidecar for terrain points; the calibration frame gains a
+5° slanted-edge quad so `psf_slanted_edge` runs on a real render; the stereo right camera
+is materialised as a `CameraSpec` with `position_mode 'stereo_right'` appended to
+`spec.cameras` by the solver (the CLI renders exactly `spec.cameras` and
+`verify_pose_matches_spec` leaves unknown ids ungraded), with a stereo clause and the same
+terrain/hazard track checks as the left; `normal_encoding` ('raw' | 'unit_offset') is
+recorded from a probe on the calibration frame and refused when absent; eleven `check.*`
+catalogue entries accompany the eleven verifier checks; the twelve sensing variables are
+`AppliedVariable`s appended through the runner helper; no version bump by this item; the
+timing claim is "a few seconds per frame in numpy" (the research's 1.9 s was not
+reproducible; a re-timing gave 2.9 s single-threaded) until `tests/test_passes.py`'s
+timing fixture records it; effort ~30 days Python, ~12 days engine written-and-pinned,
+Windows unestimated, with the sun-in-lux change and the exposure re-pin FIRST.
+
+### Blueprint
+
+**Files.** `core/capture/radiometry.py` (calibration chain, band proxy over
+`assets/sensor_bands/rgb_proxy.json` with `proxy: true`, `assets/cie/vlambda_1nm.csv` and
+`assets/illuminants/astm_g173_direct.csv` cached with sha256 — refused by name when absent,
+nothing invented in code), `core/scenario/solar.py` (+ `illuminance_lux`), `core/capture/optics.py`
+(diffraction MTF × Gaussian aberration term, kernel by inverse FFT, sha256 and predicted
+MTF50 recorded), `core/capture/blur.py` (velocity-line integral, N = max(3, ⌈2|f| t_exp/dt⌉),
+symmetric window, `engine_accumulation` when the bundle says so), `core/capture/passes.py`
+(forward/backward flow with occluded/out-of-frame validity bits, disparity, points,
+amodal naming, `passes.json`, reads `_normal.f32`/`_basecolor.f32`), `core/capture/stereo.py`
++ `core/scenario/camera.py` (`stereo_right`), `core/capture/thermal.py` (IR proxy; refuses
+`sensing.ir_table`, `sensing.ir_transmittance`), `core/capture/profile.py` (optional
+`optics`, `motion_blur`, `radiometry`, `bands` blocks; post-pass order radiance → PSF →
+blur → vignetting → geometry → exposure/noise/ADC; shipped profiles keep their digests),
+`core/capture/labels.py` (amodal fields, `passes.json` attachment), `core/dataset/passes_export.py`
+(KITTI flow/disparity png, velodyne .bin + id sidecar, normals f32/16-bit; an independent
+reader round-trips each), `core/render/flags.py` (`-passes=`, `-accumulate=`, `-calibration`,
+`-sun-lux`; the CLI/web-app parity test), `verify.py` check text (`normals_vs_depth`,
+`flow_vs_keypoints`, `flow_static_null`, `disparity_vs_right_depth`, `points_vs_depth`,
+`amodal_contains_visible`, `albedo_two_suns`, `psf_slanted_edge`, `blur_vs_flow`,
+`radiometry_grey_card`, `ir_proxy_declared`), `docs/SENSING.md`, `docs/VALIDITY.md` §2.5
+and §2.16 amended. UE: `FlightSimRenderCommandlet.cpp` (`MakeNormalCapture` SCS_Normal
+RTF_RGBA16f, `MakeBaseColorCapture` SCS_BaseColor under `ConfigureLabelCapture`; optional
+velocity cross-check through `M_Velocity` with `bAlwaysPersistRenderingState true`; the
+calibration frame: emissive grey quad at stated cd/m², white Lambertian quad under the
+sun with sky light off, slanted-edge quad; `-accumulate=K` on a dedicated AA-off capture;
+the linear `.f32` writer), `FlightSimVisualScene.cpp` (`SetIntensity(lux)`, `light_units
+'physical'`), `scripts/ue_create_materials.py` (`M_Velocity`, `M_WorldNormal` fallback,
+`M_GreyCard`), `tests/test_ue_passes_source.py`.
+
+**Spec and manifest keys.** `cameras[i].stereo{baseline_m, side}`, `bands{name}`,
+`passes[]`, `ir{band, thermal_table}`, `exposure_compensation_ev`; `scene.sun_lux`; manifest
+per-camera `sensing{radiometry{ev100, exposure_compensation_ev, lens_attenuation,
+luminance_cd_m2_per_unit, working_colour_space, calibration_status}, bands, optics,
+motion_blur, stereo, ir}`, per-frame `passes{…}` and `radiometry`; `labels.objects[]
+.amodal_bbox_2d`, `amodal_mask` with basis; render.json `labels.normal/basecolor/velocity`,
+`labels.normal_axes`, `labels.normal_encoding`, `render_settings` read-backs
+(`r.EyeAdaptation.LensAttenuation`, `r.UsePreExposure`, `r.VelocityOutputPass`, `r.Substrate`,
+working colour space), `look_applied.sun.lux`, root `calibration{grey_card_nits, predicted,
+measured, ratio, mtf50_measured}`, `frame_records[].accumulation{k, t0_s, t1_s}`.
+
+**Models and parameters.** Exposure chain as corrected (ISO 2720, ISO 12232, Lagarde
+2014 §5.1, UE lens attenuation [unverified here]). Band proxy L_e,band = L_v,ch/(683 ·
+K_band), K_band from the stated illuminant and CIE 1924 V(λ). Optics MTF_diff(ν) =
+(2/π)[acos(ν/ν_c) − (ν/ν_c)√(1 − (ν/ν_c)²)], ν_c = 1/(λN), × exp(−2π²σ²ν²). Flow per Menze &
+Geiger 2015 with the verifier's depth tolerance for occlusion. Normals: GBuffer world
+normal → ENU by the recorded matrix; verifier gradient normals from back-projected depth,
+median angle < 3°, p95 < the mesh's max dihedral. Disparity d = f_x B/Z. IR: L_band =
+τ(R)[ε_c ∫B_λ(T_c) + (1 − ε_c) L_down] + (1 − τ)B_band(T_air); T_skin = T_∞(1 + r(γ − 1)/2 M²),
+r = 0.89; T_c per palette class with sources; ε from the ASTER library rows cited; τ from a
+provenanced table (refuse when absent — never Koschmieder in the LWIR); L_down from a
+stated sky model or refused; bands LWIR 8-12 µm, MWIR 3-5 µm; `proxy: true` always.
+
+**Data each variable returns.** Per the §2 record: radiance calibration (applied ev100,
+EC, A, sun_lux; per-frame luminance per unit and calibration_status; null: EC +1 halves v
+on the synthetic and on the grey card); bands (identity weights reproduce the frame); optics
+(kernel sha, predicted vs measured MTF50; absent → bit-identical); blur (taps or K, max and
+per-object mean blur px; exposure 0 → identical); flow (files, valid/occluded fractions,
+|flow| p50/p95; static → zero; hidden-aircraft control → terrain flow); normals (axes,
+encoding; rotated camera → same world normals); albedo (two suns → identical, `bounded`);
+disparity (baseline, d range; B → 0 gives d → 0); points (N per object; sky contributes
+none); amodal (ratio equals 1/visible_fraction); IR (band, tables, T_skin, τ at CG range;
+τ = 1 vs τ(R) grows with range; ε = 1 → Planck map).
+
+**Verification here.** All Python on synthetic bundles (the `test_camera_verify_corruption.py`
+pattern): the radiometry chain with A; kernel energy 1 and e-SFR MTF50 within 5 % of
+analytic; a moving synthetic edge blurs by |f| t_exp/dt within 0.25 px; flow keypoint
+agreement within 0.25 px with the occlusion bit and the dropped z-test caught; normals of a
+plane and sphere within 1°; disparity vs synthetic right depth; amodal containment; Planck
+integral vs Stefan-Boltzmann within 1 % over 0.1-1000 µm; the stereo rig by construction;
+spec/manifest canonical-form pins; the KITTI writers round-tripped by an independent reader;
+the twelve `AppliedVariable`s present; the C++/editor-Python source pins; flag parity;
+mutation guards on 1.2, A, q = 0.65, the z-test, the validity bit, the τ refusal,
+containment, the two-suns null, window symmetry, the 0.25 px accumulation rule.
+
+**Verification on Windows.** (1) the exposure defect: sun in lux and every Gate 6 exposure
+clause re-pinned (the −exposure-bias 9.5/10.5/11.0 values are in the old scale); (2) grey
+card within 2 % with A, Lambertian quad ρE/π, `calibration_status` → 'measured'; (3)
+SCS_Normal encoding and axes on the quad, `normals_vs_depth` on a real bundle; (4) albedo
+two suns; (5) engine velocity vs Python flow under the aircraft mask (p95 px reported); (6)
+accumulation vs Python blur at a long-exposure triple (1/60 s dusk); (7) stereo on real
+frames; (8) Gate 10-R with passes on; (9) the IR preview inspected once (a human clause).
+
+**Refusal names.** `sensing.radiometry`, `sensing.band`, `sensing.optics`,
+`sensing.motion_blur`, `sensing.stereo`, `sensing.pass`, `sensing.ir_table`,
+`sensing.ir_transmittance`, `sensing.sun_lux`, `sensing.exposure_units` (the manual EV100
+path refuses on the 8-lux sun until it is physical), `annotation.normals`,
+`annotation.flow`, `annotation.disparity`, `annotation.points`, `annotation.amodal`,
+`annotation.albedo`, `annotation.psf`, `annotation.blur`, `annotation.radiometry`,
+`annotation.ir_proxy`; eleven `check.*` sentences.
+
+**Not claimed.** No spectral rendering, no BRDF spectra: the band model is a linear proxy
+over three sRGB/Rec.709 channels. Radiance is photometric luminance per channel converted
+by a stated illuminant; the constant 1.2·A·2^EV100 is predicted until the grey card
+measures it and carries no traceable chain to a reference luminance (stated as a gap; a
+future clause ties it to an ISO 12232 saturation exposure with u_D). No EO/IR sensor
+fidelity (VALIDITY §2.5 stands): the IR proxy has no heat balance, no plume, no
+sub-object temperatures, no validation, and a user-provided transmittance table. The PSF
+is shift-invariant. Python blur is linear-motion, not occlusion-aware. Flow is exact for
+rigid bodies only. Normals are vertex-interpolated GBuffer normals. Albedo is the base
+colour input. Disparity is rectified by construction. Points are depth back-projections
+with no beam model. Amodal masks are for aircraft only. The sun's lux is a clear-sky
+model with a declared efficacy. The consumer of each pass is named in the dataset card.
+
+---
+
+## 4. World
+
+Land cover, a UE Landscape at native posting with Nanite as a measured toggle, imagery
+as SVT + RVT, PCG vegetation, buildings from cached footprints, a runway scene family,
+night (moon, starfield, night exposure), precipitation, cloud drift from wind, licence-clean
+airframes.
+
+### State of the art
+
+Government visual databases are OGC CDB (OGC 15-113r5/r6; elevation, imagery, raster
+material, vector features, models in WGS 84 tiles with the datum stated) or DTED
+(MIL-PRF-89020B); land cover is a classified raster with a legend and an accuracy
+statement — ESA WorldCover 10 m v200 (2021), 11 classes, CC BY 4.0, ~76.7 % overall
+accuracy (Zanaga et al. 2022 [figure unverified here]); vegetation and structures are
+instances from those layers (CityGML 2.0 LoD1 = extruded footprints); airports follow
+ICAO Annex 14 Vol I ch. 5.2/5.3 and FAA AC 150/5340-1M / -30J; the night sky comes from
+ephemerides (Meeus 1998 ch. 47/48; Krisciunas & Schaefer 1991; full-moon illuminance
+0.05-0.3 lx per **Kyba, Mohar & Posch 2017, A&G 58(1)** — the research's "Sci. Rep. 7:1"
+was the wrong venue) and the Yale BSC5; precipitation is a drop-size distribution
+(Marshall & Palmer 1948) with a fall-speed law (Gunn & Kinzer 1949; Atlas et al. 1973)
+[all unverified here]. Licensing for a distributed dataset: Copernicus DEM attribution,
+WorldCover CC BY 4.0, Microsoft footprints CDLA-Permissive-2.0 (**verified here** from the
+fetched README), Overture ODbL, Google Open Buildings CC BY 4.0 / ODbL (covers the Everest
+scene, which has ~no footprints), Fab Standard Licence with the NoAI tag, CC0 packs, NASA
+3D Resources [unverified here except the README].
+
+**Where the branch stands (read and measured here).** `core/terrain/landscape.py` is
+Gate-4 verified (valid layouts, Z-scale 1/512 m per unit, round trip) and unused by the
+render path; `imagery.py` has `TexelGrid` at 3 texels per DEM pixel and `verify_drape`;
+the WorldCover `N45E006` tile was opened here through `/vsicurl` in 0.81 s with the licence,
+legend, product_version and tiling tags read from the GeoTIFF (a 6000×3000 window covering
+the Matterhorn crop read in 2.5 s: 70 snow/ice 37 %, 60 bare 25 %, 30 grassland 19 %, 100
+moss 9 %, 10 tree 9 %, 50 built-up 0.3 %, 80 water 0.5 %); `position/terrain-elevation-asl-ft`
+is writable and moves `h-agl-ft` and `aero/h_b-mac-ft` one step later (the runway pad null
+test is measurable through `core/terrain/ground.py`); `LogProfileWind` clamps at 300 m so
+cloud drift equals the spec wind today; the visual scene's sun is 8.0 with a bias exposure,
+so night is meaningless until the physical EV100 path lands (§3); the commandlet reads
+CVars back by name and applies `ConfigureLabelCapture` to the depth and ID captures only;
+the stencil loop iterates `UMeshComponent` (L1694-1705) — **a `ULandscapeComponent` is a
+`UPrimitiveComponent`, not a `UMeshComponent`, so a Landscape would get no stencil**; the
+imagery drape is EOX Sentinel-2 cloudless 2016 under **CC-BY-SA 4.0**.
+
+### Candidates
+
+| Candidate | Description | Verdict |
+|---|---|---|
+| A Stay procedural (land-cover vertex channel, instanced meshes on the ProceduralMesh terrain) | No Landscape | Rejected: keeps CSM-not-VSM, no distance field, no Nanite/RVT/SVT, so the Look-lane items cannot be measured |
+| **B Editor-built Landscape scene assets keyed by the bake's sha256** | Editor module + scene builder + commandlet loads and checks | **Chosen**, after B′ is evaluated first |
+| B′ Landscape built IN the commandlet from the bake | The commandlet runs in `UnrealEditor-Cmd` where `WITH_EDITOR` is true, so `ALandscape::Import` is callable in-process | **Evaluated first** (the skeptic's point): one entry point, no binary .umap, no staleness state; kept as the fallback when the saved level is stale |
+| C Cesium for Unreal | Streamed world | Rejected: Community tier excludes funded research, tiles are not sha256'd inputs, breaks the one-flight rule and Gate 10-R |
+| D Everything in Python (painted textures) | No geometry | Rejected: labels would be paint, `mask_vs_geometry` has nothing to check |
+
+### The chosen way and why
+
+B with B′ tried first: the Landscape exporter exists and is verified, the GLO-30 discipline
+(named source, sha256 per tile, verify-against-source, refuse an unverified bake) transfers
+unchanged to WorldCover (same 3×3° lookup, same reproject onto the bake's frame, nearest
+because categorical, the same random-texel push-back), labels stay on the one route the
+verifier checks (with the stencil-loop fix), every world item keeps the null-test form (with
+vs without on data here, a Gate 6 clause per switch on Windows), and licensing becomes a
+recorded, refusable fact per asset.
+
+**Corrections applied:** the Marshall-Palmer closure with the Atlas fall speed
+over-predicts R by 13-19 % (measured here: R = 4 → 4.73 mm/h), so Λ is solved numerically
+to reproduce the stated R (the MP Λ recorded beside it) and D₀ = 3.67/Λ is the median-volume
+diameter fed to the streak model (v(D₀) ≈ 4.1-4.6 m/s), with v(2 mm) = 6.5 m/s kept only as
+the Gunn-Kinzer anchor test; the streak is the RELATIVE velocity (drop − camera, in camera
+axes) × shutter × f_x / Z per camera per frame (a ground camera gives 5 px where a 60 m/s
+camera gives 48 px at the same triple), both lengths recorded; snow gets its own fall speed
+(~1 m/s, Gunn & Marshall 1958 / Sekhon & Srivastava 1970 [unverified here]) or is stated
+absent; surface inference from the dominant WorldCover class infers ROUGHNESS ONLY — a
+`SurfaceClass` couples Allen thermals too, and a glacier scene must not fly desert
+updrafts — through new classes `snow`/`bare` with `thermals None`, refusing
+`landcover.surface_inference` where no mapping exists, and the inferred z₀ is its own
+`AppliedVariable` with the 50 m AGL null test (13.7 vs 20 kt over forest, measured
+arithmetic); the stencil loop moves to `UPrimitiveComponent` with a source pin and a
+Windows clause that the terrain int_id survives on a `-scene=` render, and the Nanite
+clause covers the ID and depth passes (the branch measured Nanite meshes drawing the
+coarse fallback in scene captures on 5.5); the verifier unprojects the depth ITSELF (K, P,
+depth → ENU → the bake's affine → class raster; no pyproj needed because the class raster
+shares the bake's projected grid) and grades the engine image three-way against its own
+and against `labels.py`'s; invariance null tests use the `bounded` kind (§2); the land-cover
+ID pass samples the class-code raster imported as an 8-bit nearest-filtered no-mip
+non-sRGB texture, not an argmax of blended Landscape weights; Meeus example 47.a is pinned
+as geocentric λ = 133.1627°, β = −3.2291°, Δ = 368 409.7 km and separately apparent
+λ = 133.1673° with the nutation term; the licence gate is PER ASSET (imagery CC-BY-SA,
+land cover, DEM, footprints, airframes, star catalogue) with `{licence, share_alike,
+attribution_required, dataset_distribution_permitted, ai_training_permitted}` and a
+per-dataset verdict — the CC-BY-SA imagery gets a recorded verdict, never silence; the SVT
+clause claims residency/memory, not size (no committed scene exceeds 8192 texels); the
+`ALandscape::Import` signature test is a consistency pin of our call site, the first
+Windows compile is the verification, and NEXT.md carries the fallback route; `objects.py`'s
+id rule gains `:all` aggregates with the scene threaded into `object_entries(spec, scene)`
+and the composition test re-pinned; `-scene=` is appended after `-imagery=` with the
+ordering pin re-declared; buildings extruded on a DSM are double-counted, so each
+footprint pad is lowered to a DTM estimate (the ring minimum around the footprint, stated)
+before extrusion; `flatten_pad` writes a NEW provenanced bake (new sha256, new datum block),
+never a mutation of the existing one; the scanner file list is extended by the integrator;
+effort ~30-40 days Python and 40-60 days engine, the engine half unestimated until the
+first compile.
+
+### Blueprint
+
+**Files.** `core/terrain/landcover.py` (WorldCover fetch by ranged COG window with the
+tags copied verbatim, nearest rasterisation onto `TexelGrid`, `<key>_landcover.u8` +
+sidecar, `verify_against_source` ≥ 0.98 exact-match and per-class area within 2 %;
+refuses `landcover.tile_missing`, `landcover.unverified`, `landcover.legend`),
+`core/terrain/weightmaps.py` (one uint8 layer per class at Landscape resolution, argmax
+round trip, `CLASS_OF_COVER` taxonomy map), `core/terrain/landscape.py` (weight layers,
+import manifest with `datum`), `core/environment/surface.py` (`snow`, `bare` classes),
+`core/scene/vegetation.py` (density table with source 'default' until a referent lands —
+GEDI L2B canopy cover named as the candidate; the label says 'placement synthetic'),
+`core/scene/buildings.py` (cached `assets/buildings/<key>.jsonl` + provenance sidecar;
+refuses `buildings.uncached`, `buildings.licence`, `buildings.unverified`; LoD1 with the
+DTM pad; height sources recorded — 6 m default with no CityGML basis, stated),
+`core/scene/runway.py` (`RunwaySpec`; Annex 14 §5.2 markings raster at 0.1 m/px; §5.3
+light positions with Appendix 2 candela values named as the missing photometry;
+`flatten_pad` → new bake; refuses `runway.geometry`, `runway.taxonomy`,
+`runway.terrain_mismatch`, `runway.markings`), `core/scene/night.py` (Meeus ch. 47/48;
+K&S 1991 eq. 20 illuminance; night flag at −6°; starfield from a cached BSC5 with sha256
+or a seeded procedural field recorded as such), `core/scene/precipitation.py` (fitted Λ,
+D₀, relative streak vector, Atlas 1953 extinction reconciled with the Koschmieder fog row
+so nothing double-counts), `core/scene/weather_visuals.py` (drift from the providers at
+cloud base; night and precipitation rows), `core/scene/world_record.py`, `core/capture/labels.py`
+(`landcover_class_from_depth`), `core/capture/objects.py` (`:all` aggregates),
+`core/assets/licence.py` (the per-asset gate; refuses `aircraft.licence_dataset`,
+`aircraft.licence_noai`, `asset.licence`), `scripts/bake_landcover.py`,
+`scripts/ue_build_scene.py`, `scripts/ue_create_materials.py` (`M_Landscape`,
+`M_LandcoverID`, `M_Starfield`, `M_RainStreaks`, `M_AirframePaint`, `M_Runway`), verifier
+check text (`landcover_vs_geometry`, `building_vs_footprint`, `runway_vs_geometry`,
+`night_exposure` with a threshold derived from the K&S sky luminance through the EV100 of
+record, `world_record`). UE: `FlightSimBridgeEditor` module (`ImportLandscape`,
+`BuildNanite`, sha tag) if B′ proves insufficient; `FlightSimVisualScene.cpp` (scene level
+load with the sha check; moon as the second directional light `AtmosphereSunLightIndex 1`;
+starfield sphere; rain blendable on the beauty capture only; drift vector parameter per
+tick; `world_applied`), `FlightSimRenderCommandlet.cpp` (`-scene=`, the land-cover ID pass,
+the primitive-component stencil loop, read-backs `landscape.RenderNanite`, `r.VirtualTextures`,
+`r.MegaLights`, `r.Substrate`, PCG counts), `ue/Config/DefaultEngine.ini`, `FlightSim.uproject`.
+
+**Spec and manifest keys.** `scene.land_cover`, `scene.vegetation`, `scene.buildings`,
+`scene.night`, `runway{…}`, `environment.precipitation_rate_mmh`, `environment.surface`
+with source 'inferred' (roughness only); card `world{scene_level, terrain_sha256,
+sidecars + sha256s, layers[]}`, `look.night`, `look.precipitation`; manifest
+`scene.land_cover{dataset, license, attribution, product_tile, sha256, class_fractions,
+dominant_class, per_class_accuracy (from the PUM when transcribed)}`, `scene.buildings`,
+`scene.runway`, `objects[]` with `vegetation:all` / `building:all`, `label_conventions
+.landcover_image`, `licences[]` per asset with verdicts; render.json `world_applied{
+landscape, imagery, land_cover, vegetation, buildings, runway, night, precipitation,
+cloud_drift, materials}`, `labels.landcover`.
+
+**Models and parameters.** WorldCover v200 legend as read from the tile; Landscape
+encoding as Gate 4; taxonomy map {10,20,95}→vegetation, 50→building, {80,90}→water,
+rest→terrain; roughness map 10→forest, 20/30/40/100→grassland, 60→bare, 70→snow
+(z₀ 'smooth'), 50→city, 80/90/95→water (Stull 1988 Table 9-6 as in `surface.py`);
+LoD1 per CityGML 2.0; Annex 14 Table 5-1 dimensions [unverified here]; Meeus ch. 47/48;
+K&S 1991; Kyba, Mohar & Posch 2017; BSC5; MP DSD with fitted Λ; Atlas et al. 1973 v(D);
+MIL-HDBK-310 rain-rate bounds [unverified here]; Substrate slab + clear coat (5.7
+Production-Ready per the announcement summary, unverified here).
+
+**Data each variable returns.** Per the §2 record: land cover (dataset, licence, tile,
+sha, class fractions, dominant class, inferred z₀; per frame the land-cover image path,
+fractions in view, agreement; null: z₀ inferred vs unspecified at 50 m AGL ≥ 0.5 kt);
+Landscape (layout, z-scale, posting, nanite read-back; null `bounded`: depth pass Nanite
+on vs off max |dz| < posting/2); vegetation (density table, expected count, biome asset
+sha; instances in view; null: PCG on vs off ≥ 1 % of frame over tree cover with the
+aircraft mask unchanged); buildings (source, licence, count, height-source histogram,
+residual px); runway (spec, marking area, light count, pad statistics; per step AGL over
+the pad; null here: h_agl at the threshold with vs without the pad ≥ 1 m); night (moon
+elevation/azimuth/phase/illuminance, stars mode; sky-band mean; null: moon on/off, stars
+on/off at −18°); precipitation (rate, Λ fitted and MP, D₀, v_t, stationary and relative
+streak px, density; null: streaks change both bands, wetness only the terrain band); cloud
+drift (m/s and from-deg with source 'wind at cloud base'; offset per frame; null: 30 s
+doublet with drift vs without, Gate 10-R run with drift on both sides); airframe material
+(licence verdict, livery parameters, substrate read-back; null `bounded`: mask/depth/class
+byte-identical while the beauty differs).
+
+**Verification here.** Network-pinned WorldCover test (skips by name) pinning the
+measured histogram and tags; offline 11-class fixture through rasterise + verify with
+corruption tests (row flip, wrong tile name, code outside the legend); weightmap argmax
+and sum; import manifest against Gate 4; the verifier's own unprojection reproducing the
+fixture exactly and failing on a shifted engine image; buildings fixture with refusals and
+volume = area × height and the DTM pad; runway marking area to 1 %, stripe counts per
+width, `flatten_pad` moving h_agl through JSBSim ≥ 1 m, a new bake sha; Meeus 47.a pins;
+illuminance monotone in phase; starfield determinism; precipitation closure with fitted Λ
+within 1 %, v(2 mm) = 6.5 m/s, streak linear in shutter and inverse in range; cloud drift
+equals the provider wind at base with a layered fixture; world_record with both null
+kinds; source pins (every `/Game` path created by a script, every parameter name
+exposed, the primitive-component loop, the rain blendable on the beauty capture only);
+mutation guards on the area check, argmax, licence allow-list, taxonomy refusal, pad null,
+night threshold, agreement threshold, sha tag, the roughness-only inference, the fitted Λ.
+
+**Verification on Windows.** (1) `ue_build_scene.py` (or the B′ in-process build) on
+control_ridge then matterhorn; (2) a `-scene=` render with `world_applied.landscape
+.sha256_tag` == card terrain sha, posting 30 m, the terrain int_id present in the mask,
+Gate 6's four clauses re-pinned on the Landscape; (3) Nanite on/off over depth, ID and
+beauty; (4) SVT on/off landmark drape identical; (5) land-cover ID pass agreement ≥ 0.95;
+(6) PCG on/off; (7) buildings on/off on a scene with a town; (8) runway mask residual < 2
+px, lights on/off at −12°, MegaLights probe; (9) moon and stars at −18° with exposure
+holding, `night.sun_units` exercised on the bias path; (10) streaks on/off vs the wet
+control, relative streak length within 30 % of prediction; (11) cloud drift doublet; (12)
+Substrate on/off; (13) a 1- and 2-worker campaign and Gate 10-R on the Landscape scene.
+
+**Refusal names.** `landcover.tile_missing`, `landcover.unverified`, `landcover.legend`,
+`landcover.surface_inference`, `terrain.landscape_layout`, `terrain.landscape_missing`,
+`terrain.landscape_stale`, `imagery.virtual_texture`, `vegetation.biome_asset`,
+`vegetation.count_mismatch`, `buildings.uncached`, `buildings.licence`,
+`buildings.unverified`, `buildings.ids`, `runway.geometry`, `runway.taxonomy`,
+`runway.terrain_mismatch`, `runway.markings`, `night.sun_units`, `look.moon`,
+`look.stars`, `look.precipitation_rate`, `look.precipitation_particles`,
+`look.cloud_drift_parameter`, `aircraft.licence_dataset`, `aircraft.licence_noai`,
+`asset.licence`, `material.substrate`; checks `check.landcover_vs_geometry`,
+`check.building_vs_footprint`, `check.runway_vs_geometry`, `check.night_exposure`,
+`check.world_record`.
+
+**Not claimed.** No resemblance to the real place beyond the sources' accuracy (WorldCover
+2021 vs 2016-17 imagery vs 2010-15 DSM; the vintage mismatch is recorded, with the
+fraction of built-up pixels whose DSM−DTM < 2 m as the measured number, not reconciled).
+No per-instance ids for trees or buildings (8-bit stencil); no species, seasons or crop
+state; densities are scene dressing. LoD1 only; no OSM anywhere. Runway without taxiways,
+aprons, signage or photometry; no ground-roll validation (P8 open). The moon disc is the
+atmosphere light's; no airglow or light pollution; procedural stars when the catalogue is
+absent. Screen-space rain with a physical length, no volumetric rain, no accumulation;
+particles are a probe. Cloud drift only if the cloud material exposes an offset. Nanite
+Landscape, Nanite Foliage, MegaLights and Substrate are measured toggles with no claimed
+benefit. The GPL airframes render internally and refuse export; no PBR airframe exists
+until a licence-clean one lands. Nothing engine-side is verified here.
+
+---
+
+## 5. Interoperability and datums
+
+A DIS entity-state feed (IEEE 1278.1-2012), CIGI/HLA out of scope with reasons,
+DTED/CDB-grade metadata in the terrain sidecar, and the vertical datum.
+
+### State of the art
+
+DoD federations exchange entity state in geocentric WGS 84 metres (IEEE 1278.1-2012;
+RPR FOM SISO-STD-001.1-2015); terrain databases store ORTHOMETRIC heights (DTED: EGM96;
+Copernicus GLO-30: EGM2008, EPSG:3855, LE90 < 4 m per the Product Handbook [unverified
+here]; CDB: WGS 84 with the vertical datum stated [unverified here]); the geoid is
+applied at the ellipsoid boundary, the flight model flies on the ellipsoid, the
+atmosphere is a function of geopotential altitude. The reference geoid is EGM2008 (Pavlis
+et al. 2012, ±5-10 cm vs GPS/levelling), the compound CRS EPSG:9518 (**verified here** in
+the PROJ 9.3 database), evaluated by PROJ `vgridshift`. Image generators are driven over
+CIGI (SISO-STD-013-2014) with a start/end-of-frame handshake; a batch producer driven by a
+run card is a legitimate offline IG provided its interface is documented and the entity
+state is available in the standard form [unverified here].
+
+**Where the branch stands (measured here).** JSBSim 1.2.4's sea level IS the WGS 84
+ellipsoid (`inertial/sea-level-radius_ft` = 2.08895e7 ft at 46 N; `position/ecef-*` agrees
+with pyproj EPSG:4979 → 4978 to **3.4 cm** — the research's 1.5 cm was optimistic). The
+branch feeds orthometric numbers into that ellipsoidal slot everywhere (`ic/h-sl-ft`,
+`terrain-elevation-asl-ft`, `AGeoReferencingSystem::OriginAltitude`); the GeoReferencing
+plugin converts through PROJ to EPSG:4978 with no geoid (verified on the community
+mirror). The undulations at the six origins (EGM2008 / EGM96): matterhorn +54.76/+52.52,
+yosemite −25.43/−25.94, fuji +42.41/+41.47, everest −28.97/−29.84, grand_canyon
+−23.42/−23.40, flint_hills −30.30/−30.54 m; (0,0) = 17.23/17.16 m; bbox ranges 0.6-3.4 m.
+The physical consequence inside the simulation is small and quantified: gravity −1.65e-5
+relative at N = 52.5 m, ISA density evaluated at the orthometric number, local curvature
+< 1 mm over 30 km; the consumer-visible error is absolute ECEF placement, radially off by
+N. pyproj here has no geoid grid (a ballpark pipeline returns the input unchanged); a
+numpy-written NOAA `.gtx` crop IS evaluated offline by `Transformer.from_pipeline` —
+**forward vgridshift SUBTRACTS N** (the verifier must use `+inv`), a node-misaligned crop
+disagrees by 0.058 m while a node-aligned crop agrees to 1.6e-6 m, and PROJ returns inf
+in the crop's outer cell. JSBSim can fly on the ellipsoid and keep ISA on the geoid with
+a uniform ΔT = L·N₀ and P_sl scaled by (1 + L N₀/T₀)^{g/(RL)} (|Δρ/ρ| ≤ 1.6e-5 to 8 km,
+1.3e-3 at 12 km; the `T-sl-R` knob leaves up to 1e-3 below 3 km). **In the tree already:**
+`core/terrain/geoid.py` (EGM96-15 committed asset, `datum_block`, `undulation_variable`
+named `scene.geoid_undulation_m`, refusal `terrain.geoid`, verifier check `datum` with
+failure `scene.datum`, pinned patch text in `tests/test_geoid.py`) wired into `glo30.py`,
+`card.py`, `manifest.py`; `core/interop/geodesy.py` (WGS 84 closed-form ECEF, NED-in-ECEF,
+the DIS Euler convention — a passive `Rx(φ)·Ry(θ)·Rz(ψ)`, reconstruction to 2.2e-16). The
+144-byte Entity State PDU struct format `>BBBBIHBB HHH BB BBHBBBB BBHBBBB fff ddd fff I B15s
+fff fff B11s I` packs to exactly 144 bytes and matches the open-dis-cpp dis7 headers
+fetched here; the 2³¹-units-per-hour timestamp with the LSB absolute flag and the ECEF
+axes are confirmed from the open-dis tutorial fetched here.
+
+### Candidates
+
+| Candidate | Description | Verdict |
+|---|---|---|
+| C1 Declare only (P10's closing step) | Record N at the origin, change nothing | Insufficient: the number is never used; no interoperability gap closes |
+| **C2 Orthometric core, geoid at every ellipsoid boundary** | The internal frame stays and is named; N applied where a coordinate leaves the system (DIS location, DTED/CDB metadata, `hae_m`) | **Chosen**, built on the in-tree module |
+| C3 Ellipsoidal core with a geoid-referenced atmosphere | JSBSim and the engine fly at HAE; ISA restored by the measured recipe | Documented as the end-state switch `datum.physics_frame: ellipsoid`, refused by name now: changes every trajectory for no consumer-visible gain over C2 |
+| C4 Convert the raster to HAE at bake | Add N to every sample | Rejected: breaks `check_summits`, every terrain digest, the 'm MSL' vocabulary, and moves the atmosphere off the geoid |
+
+### The chosen way and why
+
+C2, as an EXTENSION of `core/terrain/geoid.py` and `core/interop/geodesy.py` — the skeptic
+showed the research's fresh `core/geodesy` package, its `datum.vertical` record name and
+its `geoid.*`/`datum.*` refusals would produce two datum blocks, two records and two
+verifier checks for one fact and fail the in-tree pins. It corrects the thing actually
+wrong (absolute coordinates leaving the system) to the reference model's accuracy, at the
+boundary, without touching a digest, gate or parity result; the geoid evaluation is
+independently checkable here; the DIS feed makes the datum fix load-bearing (a PDU without
+it is 55 m underground at the Matterhorn).
+
+**Corrections applied:** keep the in-tree names (`scene.geoid_undulation_m`,
+`terrain.geoid`, `scene.datum`, the block keys `undulation_m`, `undulation_source`,
+`bilinear_error_bound_m`, `model_difference_bound_m`, `ellipsoidal_height_of_origin_m`) and
+add only what is new; add the **EGM2008-5 grid** as a second model (fetched into the bake
+cache from sourceforge with the recorded tarball sha256
+`9a57c14330ac609132d324906822a9da9de265ad9b9087779793eb7080852970`, refusals
+`geoid.grid_missing` / `geoid.grid_digest`) because the bakes ARE EGM2008 and EGM96's 13.7 m
+global bound (2.2 m at the Matterhorn) is not a government-grade u_D; the cubic 12-point
+interpolation GeographicLib defaults to (MaxCubicError 0.294 m, read from the header) is
+implemented, bilinear kept as the stated alternative; `write_gtx` snaps the crop to
+5-minute nodes with a one-node margin and the verifier's pipeline is `+inv +proj=vgridshift`
+with the sign asserted at (0,0) = +17.2 m; the DIS timestamp is `int(round(…)) % 2**31` (a
+`round()` within 0.84 µs of the hour overflows to 33 bits — measured); the DRM world
+acceleration is checked against a central difference at the mid-sample or at the 1/120 s
+step (a 0.1 s one-sided difference misses by 0.069 m/s² on a banked c172p — measured); the
+JSBSim ECEF cross-check bound is 0.1 m with 3.4 cm recorded; the product is named a
+**"full-rate Entity State PDU log (IEEE 1278.1-2012 layout, protocol version 7)"**, with an
+optional DR-thresholded emitter (thresholds and 5 s heartbeat as declared parameters) whose
+measurable claim is that the thresholded stream reconstructs the full-rate one within the
+thresholds; `datum_independent` is stated as independent of the interpolation CODE, not the
+DATA (the only external anchors are N(0,0) and the tarball sha; NGA's calculator is blocked:
+A7 'not attempted'); the DIS `marking` defaults to '' and the airframe-key marking is
+derived at export with source 'derived' (a `ProvenancedBlock` default cannot depend on the
+airframe); the `T-sl-R` residual is quoted by altitude with sign; effort 8-10 days on the
+in-tree module.
+
+### Blueprint
+
+**Files.** `core/terrain/geoid.py` (EGM2008-5 model, cubic interpolation, `write_gtx`
+node-aligned, bbox min/max, `u_model_m` 0.10, tide system 'not verified here', `dted` and
+`cdb_descriptor` sub-blocks, `physics_frame`), `core/terrain/glo30.py` (bake writes
+`<key>_geoid.gtx`, the extended `provenance['datum']`, `provenance['dted']` with
+MIL-PRF-89020B DSI/ACC-level fields and the GLO-30 accuracies as declared u_D and the
+EGM2008-vs-EGM96 divergence stated), `core/interop/geodesy.py` (in tree),
+`core/interop/dis.py` (`EntityStatePdu` encode/decode, timestamp, DRM 4 with body p/q/r
+and the world acceleration from recorded quantities only; refuses `dis.entity_type_unknown`,
+`dis.marking_too_long`, `dis.frame_without_geodetic`, `dis.timestamp_epoch_missing`),
+`core/interop/dis_stream.py` (`dis_entity_state.bin` + `.json` index; optional thresholded
+emitter; optional UDP sender off by default, never in a campaign worker),
+`assets/dis_entity_types.yaml` (one row per airframe with the SISO-REF-010 edition, UID and
+table cited — entered from the standard, never guessed; the table ships EMPTY and
+`dis.entity_type_unknown` fires until someone with the PDF fills it), `core/scenario/blocks.py`
+(`datum{vertical, physics_frame}`, `dis{site, application, entity, force_id, marking,
+timestamp_mode}`), `core/scenario/runner.py` (extra channels `undulation_m`, `hae_m`
+appended AFTER the output digest), `flightsim/capture.py` (`--dis`, `--dis-udp`, `--cigi`
+and `--hla` refusing `interop.cigi_not_implemented` / `interop.hla_not_implemented`),
+`experiments/datum_null_test.py`, verifier check text (`datum_independent` with `+inv`,
+`dis_roundtrip` with the verifier's own struct decode, location vs pyproj within 0.05 m,
+Euler within 1e-4 rad, monotonic timestamps), `tests/test_ue_georeference.py`. UE:
+`FFlightSimScenarioCard.VerticalDatum` parsed and logged, never applied; render.json root
+`georeference{geographic_crs, projected_crs, origin, vertical_convention: "orthometric
+heights passed to AGeoReferencingSystem as ellipsoidal; engine ECEF radially low by
+undulation_origin_m", undulation_origin_m}`.
+
+**Models and parameters.** N(lat, lon) from EGM2008-5 (cubic; header bounds as u_D);
+HAE = h_ortho + N (EPSG:3855 → 4979); WGS 84 a = 6378137, 1/f = 298.257223563; DIS Euler
+per `geodesy.py`; timestamp 2³¹/h; DRM 4 (RVW); C2 residuals as measured; C3 recipe
+documented with its table; DTED metadata fields from MIL-PRF-89020B [unverified here].
+
+**Data each variable returns.** `scene.geoid_undulation_m` (in tree, extended: model,
+grid sha, interpolation, bounds, min/max, gtx sha, physics_frame; `telemetry_columns`
+[undulation_m, hae_m]; `frame_keys` [state.undulation_m, state.hae_m] plus
+`frame.vertical_datum`; null tests: N vs 0 at the origin (in tree) AND the exported ECEF
+radial difference with vs without = N₀ ± 0.5 m, with the flight `output_digest` identical
+as a `bounded` invariance); `dis.entity_state` (ids, septuplet, marking; model
+"full-rate Entity State PDU log"; parameters {timestamp_mode, epoch, pdu_count, interval,
+emitter: full-rate | thresholded}; `frame_keys` [dis.pdu_index, dis.byte_offset]; null:
+decoded location error with N (~0.02 m) vs without (= N₀)); `terrain.dted` (sidecar block,
+by reference).
+
+**Engine side.** The card struct and the render.json block only; GeoReferencing settings
+unchanged; no CVars, no editor Python, no plugin change.
+
+**Verification here.** `GeoidGrid` parses both PGMs (header values as data), N(0,0) =
+17.226/17.163, the six origins, longitude wrap; cubic vs bilinear difference within the
+header bounds; `+inv` vgridshift on the node-aligned `.gtx` within 0.01 m at the origins
+and 100 interior points, inf outside; `geodesy.py` vs pyproj to 1 cm at 1000 points and vs
+JSBSim to 0.1 m; DIS encode/decode identity, 144 bytes, timestamp units, LSB and the
+%2³¹ rollover at 3600 − 1e-9 s, entity-table and marking refusals, DRM acceleration vs the
+central difference; the datum null test (digest identical, radial difference N₀ ± 0.5);
+the bake sidecar with datum/dted/cdb and the `.gtx` sha; spec canonical-form pins;
+corruption tests for the verifier (a PDU moved 1 m, an Euler sign flipped, a stale
+undulation); source pins for the card parse and the georeference strings; guards on the
+grid sha check, the outside-grid refusal, N added at export, the struct length, the
+timestamp LSB and modulo, the `+inv` token, the verifier tolerance; VV rows V25 (geoid
+independent evaluation), V26 (DIS round trip), A7 'not attempted, host blocked'.
+
+**Verification on Windows.** The card's block verbatim in render.json `georeference` with
+`ProjectedCRS` equal to the sidecar's; Gate 6 control clause `datum_pixels_invariant`
+(every frame sha256 equal with and without the block); host-vs-headless parity unchanged;
+the PDU log read by Wireshark's DIS dissector or the `opendis` package as the independent
+decoder (neither is in the venv).
+
+**Refusal names.** `terrain.geoid` (in tree), `scene.datum` (in tree), `geoid.grid_missing`,
+`geoid.grid_digest`, `datum.outside_grid`, `datum.sidecar_without_datum`,
+`datum.model_mismatch`, `datum.physics_frame_unsupported`, `dis.entity_type_unknown`,
+`dis.marking_too_long`, `dis.frame_without_geodetic`, `dis.timestamp_epoch_missing`,
+`interop.cigi_not_implemented`, `interop.hla_not_implemented`, `dted.metadata_incomplete`;
+checks `check.datum` (in tree), `check.datum_independent`, `check.dis_roundtrip`.
+
+**Not claimed.** No live federation (one-way log, optional UDP; no receipt of other
+entities, no PDU types beyond Entity State, appearance bits and articulation not set
+deliberately); no HLA/RPR FOM; no CIGI (the run card is documented as the offline IG
+interface with a field-to-packet correspondence table as documentation); no CDB datastore
+and no DTED file (a GDAL-written DTED tile is the named next step, rasterio is present);
+the geoid is applied at the export boundary only — JSBSim's raw ECEF and the engine's
+internal ECEF remain radially low by N and are labelled so; the tide system is not
+verified; deflection of the vertical (up to ~30″ in the Alps) is not modelled and
+orientations are ellipsoid-normal referenced; the SISO-REF-010 septuplets are not
+asserted by this research; whether JSBSim converts geometric to geopotential altitude
+inside `FGStandardAtmosphere` is to be measured, not assumed, before the model string
+claims it; nothing about the flight changes.
+
+---
+
+## Implementation order and parallelism
+
+Two agents at a time, file-disjoint ownership; the integrator lands one commit between
+waves (catalogue entries, guards, docs sections, verifier patch text, `flightsim/capture.py`
+wiring, the scanner file list). Waves are ordered so that no two concurrent items touch
+the same file; the dependency that orders them is named.
+
+| Wave | Agent A | Agent B | Why this pairing |
+|---|---|---|---|
+| 0 | Integrator: commit the in-tree items (limits, geoid EGM96, instruments post-hoc, interop geodesy, modes) as Batch 1 | — | Everything below builds on them |
+| 1 | R1 record 2 + registry + null pair + uncertainty | P1 non-standard atmosphere + `stack.prepare` | R1 owns `records.py`; P1 owns `atmosphere.py`, `stack.py` |
+| 2 | P2 injection pipeline (failures re-anchored, icing, icing_alpha, gust_rotation) | D1 EGM2008 datum extension | disjoint: `core/control` vs `core/terrain/geoid.py` |
+| 3 | P6 GustProvider + von Kármán + layered shear (takes `base.py`, `stack.py` after P1) | W1 land cover + weightmaps + roughness inference | disjoint |
+| 4 | P4 loading (uses `prepare` from P1; `loading` block in aircraft_config) | P3 failure schedule (needs P2, R1) | disjoint |
+| 5 | P5 icing provider + `icing` blocks (needs P2) | D2 DIS log + entity table + spec blocks (needs D1, R1) | disjoint |
+| 6 | P7 wake (needs P2, P6; owns `poses.py` for the generator track) | S1 radiometry + solar lux + optics + blur + profile blocks (needs R1) | disjoint |
+| 7 | R2 FDM-rate instruments (owns `stack.py` after P6, `runner.py` loop hook) | W2 buildings + runway (+ new bake) | disjoint |
+| 8 | S2 passes + stereo + amodal + exporters (owns `labels.py`, `camera.py`) | R3 report + tabular + datasheet + traceability (owns `report.py`, `export.py`) | disjoint |
+| 9 | S3 IR proxy (needs S1, P1) | W3 night + precipitation + cloud drift + weather_visuals (needs P6) | disjoint |
+| 10 | P8 gate3b null ladder + VV rows + JSBSIM_CORRECTIONS text (needs P1-P7) | W4 land-cover labels + objects `:all` + licence gate (needs W1, S2) | disjoint |
+| 11 | S4 sensing engine side: commandlet passes, calibration, accumulation, sun lux, linear .f32, materials | P9 physics engine side: ScenarioWorld blocks, plugin patch 5, wake port, recorder channels | disjoint C++ files |
+| 12 | W5 world engine side: B′ evaluation, editor module, scene builder, visual scene, commandlet `-scene=` (after S4) | INT-final: spec 9 / manifest 7 / record 2 / schema v7 / examples regenerated / version tests / D2's render.json georeference pin (after S4) | commandlet handed from S4 to W5 |
+
+Estimated agent-days (Python-side unless stated): P1 4, P2 6, P3 3, P4 3, P5 3, P6 6,
+P7 4, P8 3, P9 6 (engine, written and pinned), R1 6, R2 5, R3 6, S1 7, S2 8, S3 4, S4 8
+(engine), W1 6, W2 5, W3 5, W4 4, W5 12 (engine), D1 3, D2 4, integrator 10 across the
+waves — about 131 agent-days, ~65 calendar days at two agents, plus a Windows verification
+pass that is not estimated here.
+
+## Exit criteria
+
+1. Every introduced variable returns a record-2 `AppliedVariable` with readback, model,
+   effect channels, a null test of the right kind and an uncertainty block; a spec field
+   outside the registry refuses `record.unregistered`.
+2. Every refusal name above has a catalogue entry, an emitter, a test that fails without
+   it and a `mutate` guard with its failing test named; `--check-targets` green; the
+   two-way scanner green over the extended file list.
+3. `verify.py` still imports nothing from `core`; every new check has a `check.*`
+   sentence and a corruption test that fails by name; every Windows-only check reports
+   NOT RUN with its measurement stated.
+4. The version-8 examples digest unchanged apart from the version line under spec 9;
+   manifest 7 validates against `capture_manifest.v7.schema.json` with every new block
+   present and with each null-with-basis; `SUPPORTED (3,4,5,6,7)`.
+5. `docs/vva/VV_REPORT.md` rows V13-V26 and A7-A9 filled from runs here in ASME V&V 20
+   form with declared u_D; `docs/VALIDITY.md` states what is not claimed per layer; the
+   dataset card and datasheet carry the proxies and the per-asset licence verdicts.
+6. The Windows order below is appended to `docs/PHASE2_REPORT.md` with every clause NOT
+   RUN; the scorecard ceiling stays 2 and the accreditation statement is unchanged.
+
+## Windows verification order
+
+After the 5.7 build and `ue_create_materials.py`: (1) physics W1-W8 (derived airframe
+hash, parity on the new channels, atmosphere and loading before trim, gust table
+row-for-row, failure timing, environment keys, Gate 10-R); (2) the exposure defect: sun in
+lux, every Gate 6 exposure clause re-pinned, `sensing.exposure_units` exercised; (3)
+sensing clauses 2-9 (grey card with A, normal encoding, albedo two suns, velocity vs flow,
+accumulation at a long-exposure triple, stereo, Gate 10-R with passes, the IR preview);
+(4) the datum `georeference` block and `datum_pixels_invariant`; (5) world clauses 1-13
+(B′ or the scene build, Landscape parity and the terrain int_id, Nanite over depth/ID/beauty,
+SVT, land-cover agreement, PCG, buildings, runway, night at −18°, precipitation, drift,
+Substrate, the campaign and Gate 10-R on the Landscape scene); (6) host-flight instruments
+post-hoc with `rate_basis` stated and a host-flight `applied_variables` read-back.
+
+## References
+
+Verified here (fetched or measured in this container): JSBSim v1.2.4 sources
+`FGWinds.cpp/.h`, `FGStandardAtmosphere.cpp/.h`, `FGAuxiliary.cpp/.h`,
+`FGAccelerations.cpp`, `FGTurbine.cpp`, `FGPiston.cpp`, `FGActuator.cpp`,
+`FGMassBalance.cpp`, `FGAerodynamics.cpp` (raw.githubusercontent.com, tag v1.2.4);
+the JSBSim 1.2.4 property catalogue and every probe quoted above; IGRF-13 `IGRF13.shc`
+(IAGA-VMOD/ppigrf, sha256 3575…3522); open-dis-cpp dis7 headers and the open-dis tutorial
+(Timestamps, CoordinateSystems, EntityStatePDUs); Microsoft GlobalMLBuildingFootprints
+README (CDLA-Permissive-2.0); ESA WorldCover `N45E006` GeoTIFF tags and window histogram;
+GeographicLib `egm2008-5.pgm` header and tarball sha256; the Nobatgeldi/GeoReferencing
+mirror; the PROJ 9.3 database (EPSG:9518 present, no EGM2008 grid installed); the
+repository files named in each section at efb12d7 with the dirty tree.
+
+Unverified here (cited from knowledge; hosts blocked): MIL-F-8785C (1980); MIL-STD-1797A
+(1990); MIL-HDBK-1797 (1997); MIL-HDBK-310 (1997); MIL-STD-210C; MIL-A-8861B;
+MIL-STD-3022 (2012); MIL-PRF-89020B; US Standard Atmosphere 1976 (NASA-TM-X-74335); ICAO
+Doc 7488/3, Doc 9817, Doc 9625, Annex 14 Vol I; 14 CFR Part 25 App. C and O, 25.335,
+25.337, 25.1323, 25.1505, 23.337, 23.1505, Part 60 App. A and FSTD Directive 2; FAA AC
+20-73A, 25-25A, 91-74B, 120-41, 61-23, 150/5340-1M, 150/5340-30J; FAA/Boeing Windshear
+Training Aid (1987); Yeager NASA CR-1998-206937; Beal JGCD 16(1) 1993; Shinozuka & Jan
+JSV 25(1) 1972; Hoblit 1988; Sonntag Z. Meteorol. 40 (1990); Alduchov & Eskridge J. Appl.
+Meteor. 35 (1996); Bragg et al. AIAA 2000-0360; Bragg, Broeren & Blumenthal PAS 41 (2005);
+Ratvasky & Ranaudo NASA TM-105977; NASA/TM-1999-208901; NASA TM-2007-214936; Lampton &
+Valasek AST 2012; Burnham & Hallock DOT-TSC-FAA-79-103 Vol. IV; Hallock & Burnham AIAA
+97-0060; Proctor AIAA 98-0589; Sarpkaya J. Aircraft 37(1) 2000; Holzapfel J. Aircraft
+40(2) 2003; Gerz, Holzapfel & Darracq PAS 38 (2002); Hahn ICAS 2002; Oseguera & Bowles
+NASA TM-4023; Vicroy NASA TM-104053; Hersbach et al. QJRMS 146 (2020); Stull 1988; Cessna
+172P POH (1981) §2, §6; Airbus A320 FCOM and Boeing 747-400 AFM limitations; ASME V&V
+20-2009; Roache J. Fluids Eng. 116(3) 1994; JCGM 100:2008; NASA-STD-7009A (2016); DoDI
+5000.61; IEEE Std 952-2020; IEEE Std 1293-2018; El-Sheimy, Hou & Niu IEEE TIM 57(1) 2008;
+Groves 2013; Titterton & Weston 2004 chs 4-6, 12; GPS SPS Performance Standard 5th ed.
+2020; Gracey NASA RP-1046; Alken et al. EPS 73:49 (2021); Gebru et al. CACM 64(12) 2021;
+ISO/IEC 5259-1..4:2024; MLCommons Croissant 1.0; W3C PROV-DM 2013; NIST AI 100-1; RTCA
+DO-178C, DO-330; ISO/IEC/IEEE 29148:2018; Lagarde & de Rousiers 2014; ISO 2720:1974; ISO
+12232:2019; ISO 12233:2023; EMVA 1288 Release 4.0; Goodman 2005 §6.3; CIE 018:2019; ASTM
+G173-03; Bird & Hulstrom SERI/TR-642-761 (1981); Bird & Riordan J. Clim. Appl. Meteorol.
+25 (1986); Perez et al. Solar Energy 44(5) 1990; Kasten & Young Appl. Opt. 28(22) 1989;
+Hillaire EGSR 2020; Haeberli & Akeley 1990; Potmesil & Chakravarty 1983; McGuire et al.
+I3D 2012; Menze & Geiger CVPR 2015; Geiger et al. CVPR 2012 / IJRR 2013; Butler et al.
+ECCV 2012; Baker et al. IJCV 92 (2011); Mayer et al. CVPR 2016; Cabon et al. arXiv
+2001.10773; Wang et al. IROS 2020; Fonder & Van Droogenbroeck CVPRW 2019; Roberts et al.
+ICCV 2021; Zhu et al. CVPR 2017; Qi et al. CVPR 2019; Goodenough & Brown JSTARS 2017; Berk
+et al. SPIE 9088 (2014); Kneizys et al. AFGL-TR-88-0177; Teaney & Reynolds SPIE 7662;
+Baldridge et al. RSE 113 (2009); Koschmieder 1924; Jiang et al. WACV 2013; Anderson,
+Fundamentals of Aerodynamics; Incropera & DeWitt; OGC CDB 15-113r5/r6, OGC 23-034;
+CityGML 2.0 OGC 12-019; Zanaga et al. 2022 doi:10.5281/zenodo.7254221; Meeus 1998 chs
+25, 47, 48; Krisciunas & Schaefer PASP 103 (1991); Kyba, Mohar & Posch A&G 58(1) 2017;
+Hoffleit & Warren BSC5 CDS V/50; Marshall & Palmer J. Meteor. 5 (1948); Gunn & Kinzer J.
+Meteor. 6 (1949); Atlas, Srivastava & Sekhon Rev. Geophys. 11 (1973); Atlas J. Meteor. 10
+(1953); Gunn & Marshall 1958; Sekhon & Srivastava 1970; Overture Maps ODbL; Google Open
+Buildings v3; Fab Standard Licence (NoAI); Creative Commons CC0 / CC BY 4.0 / CC BY-SA 4.0;
+NASA 3D Resources; IEEE Std 1278.1-2012; SISO-REF-010; SISO-STD-013-2014 (CIGI 4.0);
+IEEE Std 1516-2010; SISO-STD-001.1-2015 / SISO-STD-001-2015; Copernicus DEM Product
+Handbook GEO1988-CopernicusDEM-SPE-002 i5.0; Pavlis et al. JGR 117 B04406 (2012); Lemoine
+et al. NASA/TP-1998-206861; NIMA TR8350.2 / NGA.STND.0036; EPSG 4326/4979/4978/3855/
+5773/9518; Unreal Engine 5.7 API and CVars named in §3-§4 (ESceneCaptureSource,
+ESceneTextureId, FPostProcessSettings, `r.EyeAdaptation.LensAttenuation`,
+`r.UsePreExposure`, `r.VelocityOutputPass`, `r.Substrate`, `r.VirtualTextures`,
+`landscape.RenderNanite`, `r.MegaLights`, ALandscape::Import, URuntimeVirtualTexture,
+PCG Biome Core, USkyAtmosphere two-light support, AGeoReferencingSystem); Movie Render
+Graph. Reachable but not read: the JSBSim Reference Manual (jsbsim.sourceforge.net).
