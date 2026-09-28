@@ -546,3 +546,145 @@ water and cropland move between years). The class map is a majority, so a 4/3/2
 cell is labelled by its plurality. A cached whole tile's size is not checked. The
 scene bbox derived from a bake path is padded 5 source cells; a bake that exceeds
 its location's bbox records the excess as nodata rather than fetching more.
+
+## I8 -- the record every variable returns, made checkable (record 2, the registry, the null pair, the uncertainty block)
+
+### What was measured, and what was defective
+
+* Readback on a trimmed c172p (JSBSim 1.2.4), each property written then read after three steps: `atmosphere/delta-T` 36 -> 36.0 (difference 0.0), `atmosphere/P-sl-psf` 2000 -> 2000.0 (0.0), `inertia/pointmass-weight-lbs[1]` 300 -> 300.0 (0.0), `atmosphere/RH` 0.5 -> 0.5000000000505 (1.0e-10 relative; 0.37 -> 0.37000000003846584, 1.0e-10) and 0.5 -> 0.5 exactly before any step. The research session's 6.6e-8 was at another state; the registry's 1e-6 relative covers both readings by two orders. So delta-T, P-sl and the pointmass are registered exact (0 absolute); RH 1e-6 relative with the reason in the entry.
+* Record 1 had no way to say "this variable must NOT change the output": every invariance the World and Datum skeptics asked for read as a failed `reached`. `NullTest.kind = bounded` gives ok = |d| <= bound (measured: 0 vs 0 with bound 0.5 is ok as bounded and not ok as reached; 2.0 with bound 0.5 is the reverse).
+* `state_units` reported `?` for any channel without a suffix: with the registry consulted first, every registered channel of the 8 entries and the 30 s c172p capture has a unit (measured: no `?` in the demo manifest's `state_units`; `temperature_k` reads `K`, `rh_pct` `%`, `f_x_mps2` `m/s^2`).
+* A one-second c172p flight costs 1.30 s at 120 Hz and 1.39 s at 240 Hz (trim dominates), so a null pair costs 2.21 s and a dt/2 twin 2.33 s at one second (both measured in the tests and printed), 2.2 s for the twin of the 30 s example inside the patched capture.
+* The recorder's sample count differs by one between rates (11 samples at 120 Hz, 10 at 240 Hz over one second: the `t < self._next_sample` accumulation), so the twin's SRQs are interpolated onto the coarse sample times (280 compared on the 30 s run) rather than compared index by index. The recorder fix belongs to its owner (open issue, same as I3's).
+* One real null pair on the c172p over a test registry (no spec-8 field is a registered variable yet; `environment.wind_speed` stands in, 10 kt against still air, one second): `wind_speed_mps` peak 5.144 m/s (reached, floor 0.051), altitude peak 0.8035 m (reached: the wind is present at trim so the trimmed state differs), latitude 2.0e-6 deg (below the 0.05 deg floor), output digests differ, verdict reached, the record's null test ok.
+* One real dt/2 twin on the c172p, one second: u_num altitude 3.5e-5 m, tas 2.0e-3 kt, heading 6.7e-3 deg. On the 30 s example through the patched capture: altitude diff 0.106 m -> u_num 0.318 m (Fs 3, p 1; consistent with V9's 0.098 m at 60/120 Hz), north 1.14 -> 3.41 m, east 1.28 -> 3.85 m, tas 0.018 -> 0.054 kt, pitch 0.0074 -> 0.022 deg, roll 0.045 -> 0.135 deg, heading 0.145 -> 0.435 deg; u_input empty (no registered spec field stated); u_val = u_num per SRQ; form "ASME V&V 20; u_D absent per run".
+* The committed spec-8 examples digest exactly as at HEAD (eight sha256s pinned; measured twice: in the working tree and from `git archive HEAD` in the scratchpad) and state no claimed section, so `record.unregistered` refuses nothing today.
+
+### What was built
+
+* `core/records.py`: record 2 under `RECORD_VERSION` 1 -- `from`, `std`, `Readback`, `JsbsimWrite`, `Model` (`model_block`), the shape-checked `uncertainty`, `NullTest.kind` in {reached, bounded}, `from_dict` on every shape. Every new key is absent until set; the twelve record-1 keys are pinned by test; `null_test.kind` is emitted always.
+* `core/registry.py`: `VariableRecord`, `Registry`, `REGISTRY` with the four batch-1 entries and the four atmosphere entries (JSBSim properties, when written, effect channels with units, null values with their basis, readback tolerances with measured reasons, u_input bin widths / spreads, host channels); `unregistered_fields`, `require_registered`, `stated_variables`, `channel_units`, `host_channels`; the four refusals by name; duplicates and malformed entries as ValueError.
+* `core/record_null.py`: `run_null_pair`, `null_pairs_for_spec`, `null_pairs_block`, `attach_null_pair`, the floor constants with the V9 reference, `NullPair.null_test()`.
+* `core/uncertainty.py`: `u_num_twin`, `three_rate_study`, `richardson`, `observed_order`, `twin_spec`, `srq_series`, `u_x`, `central_sensitivity`, `u_input_for`, `u_val`, `uncertainty_block`, `uncertainty_for_run`, `record_u_num`.
+* `core/capture/manifest.py`: eight new unit suffixes, `suffix_unit()`, the registry-first `channel_unit`, `build_capture_manifest(uncertainty=)` (key written only when given), `SIDECAR_CONTEXT_KEYS` += `uncertainty`.
+* The four record-1 producers emit `model_block`, `from` and `std`; `landcover_records` re-types through `AppliedVariable.from_dict` (a landcover.json written before record 2 reads unchanged, tested by the 22 landcover tests).
+* 44 tests in the four R1 files (5.9 s of JSBSim in three of them); 12 mutation guards, each applied to the real file and shown to fail the tests, each file restored byte-identically.
+
+### How to demonstrate (any platform)
+
+    find . -name __pycache__ -type d -prune -exec rm -rf {} +
+    .venv/bin/pytest -q -p no:cacheprovider -p no:warnings tests/test_records.py tests/test_registry.py tests/test_record_null.py tests/test_uncertainty.py -rA | grep -E "null pair|dt/2 twin|passed"
+    # prints: null pair c172p 1 s: 2.21 s; altitude peak 0.8035 m; lat peak 2.00e-06 deg
+    #         dt/2 twin c172p 1 s: 2.33 s; u_num altitude 3.518e-05 m, tas 2.031e-03 kt, heading 6.746e-03 deg
+    .venv/bin/python -c "from core.registry import REGISTRY; print(REGISTRY.unregistered_fields({'atmosphere': {'temperature_deviation_c': {'value': 15}, 'foo': {'value': 1}}}))"
+    # prints: ['atmosphere.foo']
+    .venv/bin/python -c "from core.registry import REGISTRY; REGISTRY.get('atmosphere.nothing')"
+    # raises: record.unregistered: 'atmosphere.nothing' is not a registered variable (registered: ...)
+    .venv/bin/python -c "from core.capture.manifest import channel_unit as u; print(u('temperature_k'), u('rh_pct'), u('f_x_mps2'), u('rho_kgm3'), u('stall_flag'), u('unknown_thing'))"
+    # prints: 1 % m/s^2 kg/m^3 1 ?
+    # after the flightsim/capture.py patch lands (run here on a scratch copy of the patched file):
+    .venv/bin/python -m flightsim.capture examples/cameras_waypoint.yaml --out runs/r1 --max-previews 0 --null-tests --uncertainty
+    # prints: null tests: 0 pair(s) flown (this spec states no registered variable)
+    #         uncertainty: dt/2 twin flown; u_num altitude 3.179e-01 m (ASME V&V 20; u_D absent per run)
+    .venv/bin/python -m flightsim.verify runs/r1      # verification PASSED (11 passed, 0 failed, 24 not run, 2 superseded)
+    .venv/bin/pytest -q -p no:cacheprovider -p no:warnings tests/test_geoid.py tests/test_limits.py tests/test_instruments.py tests/test_landcover.py tests/test_platform.py
+    scripts/mutation_check.sh --match "readback|null floor|null pair|bounded|suffix|registry|record.unregistered|effect channel|u_num" --no-suite
+
+### Not verified here
+
+* The `--null-tests` / `--uncertainty` options inside `flightsim/capture.py` and the `validate_registry` call inside `core/scenario/validate.py` (returned as integration patches; each applied to a scratch copy, compiled, and exercised -- the capture end to end on the 30 s example, the validator on a fake spec dict and on the real example).
+* A null pair or a sensitivity pair on a REAL registered spec field: no spec-8 field is registered; the mechanics ran on a test registry over `environment.wind_speed` and on fake runners. The first real pairs are P1's (the atmosphere block).
+* The dew-point-R readback tolerance (stated at 1e-6 relative, not measured: no dew-point write was probed).
+* The host recorder's channels (`REGISTRY.host_channels()`): a contract for the C++ recorder, no engine here.
+* The message catalogue's two-way test with the four new names (entries returned, not written).
+
+### Limitations
+
+* `RECORD_VERSION` stays 1: the structured model rides as `model_block` beside the string `model`; at the integrator's bump the blueprint's spelling (`model` = block, `model_name` = string) is a rename in `to_dict`/`from_dict` and in the four producers' readers.
+* The limits monitor's `exceed_*` columns keep their names (the blueprint's `*_flag` rename is the limits owner's and would move I2's contract and 38 tests); `channel_unit` keeps its `exceed_` special case AND the registry entry, so no `?` appears either way.
+* The null floors are three constants by unit (m, deg, kt, m/s); Pa, %, g, `1` have no floor and are reported ungraded. u_num's order is assumed 1 unless `three_rate_study` ran (three extra flights); the sensitivity is a secant at the final common sample.
+* `srq_series` derives north/east from lat/lon with the WGS 84 radii at the first sample (fine over a 30 s track, not over a long one).
+* `null_spec_dict` rewrites the spec's dict and re-reads it: a section the spec's `from_dict` does not carry (any block a later wave adds without `to_dict` support) would be silently dropped in BOTH runs and the pair would compare a run with itself -- `digests.differ: false` and verdict `silent` make that visible, and `record.null_value` catches the stated-equals-null case, but not a dropped section.
+* The parallel item's uncommitted edits (`core/environment/atmosphere.py`, `core/scenario/spec.py`, `validate.py`, `runner.py`, `stack.py`, `state.py`, `recorder.py`, `blocks.py`, `card.py`) were present in the working tree while these tests ran; the R1 tests are green with them and the example digests equal HEAD's.
+
+## P1 -- the non-standard atmosphere and humidity: a stated day written before the trim and every step, read back, recorded per variable, and measured against the closed form (gap P1)
+
+### What was measured, and what was defective
+
+* `atmosphere/delta-T` was never written and no humidity was ever set; `EnvironmentStack.configure()` runs AFTER the trim, so a day written there would trim the aircraft in ISA air. Measured with the pre-trim hook removed (the mutation guard's failing test): the trimmed throttle is identical with and without the hot day; with the hook, delta-T +30 degC moves the trimmed throttle 0.7392 -> 0.7488 on the c172p (1500 m / 100 kt) and 0.9418 -> 0.9550 on the A320 (6000 m / 250 kt).
+* JSBSim caps a dew point silently, twice, and prints: `dew-point-R` 540 written at ISA sea level reads back 518.67 (RH 100 %); a dew point of 10 degC written together with a +20 degC bias BEFORE any recomputation is capped at the pre-bias 5.25 degC ("Dew point temperature has been capped to 501.124") because `SetDewPoint` checks against the last computed temperature and pressure; 500 R written at 5000 ft reads back 499.63 R (the per-altitude vapour table, looked up at the pressure altitude on the write). Each is now a refusal by name at the scene (`atmosphere.dew_point`) and a counted limit along the flight.
+* The closed form transcribed from `FGStandardAtmosphere.cpp` (v1.2.4, fetched) reproduces what the installed build delivers through the provider's own `prepare` on a real FDM over 2 airframes x 6 days (c172p 1500 m and A320 6000 m; +30, -40, +20/990 hPa/-10 degC dew point, RH 90 %, +45/1085 hPa, -60/870 hPa/-90 degC): worst relative error density 2.2e-16, temperature 1.9e-16, pressure 2.8e-16, RH 8.8e-15, vapour pressure 2.6e-15, density altitude 2.3e-14, pressure altitude 8.4e-16 -- the tests pin 0.5 %. ISA at 0 / 3000 / 11000 m agrees to 1e-9 relative. The Magnus constants reproduce JSBSim's 35.540351 psf saturation at 518.67 R only with JSBSim's own 47.88 psf-to-Pa factor (with the exact factor: 5e-6 off), so the source's factor is used there and only there.
+* JSBSim's `atmosphere/sigma` divides by the DAY's sea-level density (measured 1.0 at sea level with +30 degC), not the standard day's; the item's `sigma` is the ISA ratio and the tests compare densities.
+* The read-back after a step is not the property store alone: the dew point moves with one step's pressure change (JSBSim conserves the vapour mass fraction): 1.5e-6 R over 360 steps (c172p, 3 s), 2.3e-7 R over 600 steps (A320 autopilot, 5 s); delta-T and P-sl-psf read back with 0.0 error on every step; before the trim all three read back with 0.0 error.
+* `compile_prompt` defaults `hold_state` to true and the autopilot's sign probe trims every airframe at a fixed 6000 m / 280 kt, which the c172p cannot reach ("udot doesn't appear to be trimmable"): any "fly the c172p" prompt fails in `run_spec` at HEAD, independent of this item (the tests state hold_state false; open issue).
+
+### What was built
+
+* `core/environment/atmosphere.py`: the transcription (constants, tables, lapse rates, biased breakpoints, layer pressure, Magnus, mass fraction, both cap lookups, moist gas constant, the two altitude inversions), `closed_form` / `expected_density_ratio` in SI, `problems()` (the five refusals, one list for validator and provider), `day_problem()`, and `NonStandardAtmosphere`: `from_spec`, `writes_at`, `dew_point_write_r` (the least of stated / modelled T / JSBSim's held T / the cap), `properties` (every step, counted), `observe` (read back before each write), `prepare` (before the trim: write, re-latch, read; per-variable with/without densities; exact read-back; the closed-form prediction), `applied_variables` (one record per stated variable; refuses a run never prepared), `card_block` (fixed key order), `vocabulary`, `provenance`.
+* `EnvironmentStack.prepare(fdm)` (the pre-trim hook), the `observe` call at the top of `apply`, `applied_variables()`; `configure_from_spec(spec, environment=None)` calls `environment.prepare(fdm)` between the initial conditions and the trim (the feasibility probe gets a stack holding the atmosphere alone); `run_spec` builds the stack first, passes it in, and attaches the records after the limits record.
+* `AtmosphereSpec` (five provenanced fields, `resolved()` applying the day word to defaulted fields only), the optional `atmosphere` spec field behind `set()`/`plan()`, `validate_atmosphere`, the `atmosphere_properties` card block, four `REQUIRED_PROPERTIES`, four state fields plus `pressure_hpa`, six recorder channels.
+* Measured on the demonstration run (c172p, 1500 m / 100 kt, hot_day + 990 hPa + RH 60 %): density at the initial altitude 1.058113 -> 0.971876 kg/m3 after delta-T (54.0 R written), -> 0.949570 after P-sl-psf (2067.657989 psf), -> 0.934988 after dew-point-R (539.025531 R, the dew point RH 60 % implies at 35.25 degC): three null tests ok at threshold 0.1 %; delivered = predicted to 1e-9 (T 308.4023 K, P 840.6309 hPa, DA 2727.886 m, PA 1548.033 m, RH 60.0000, e 3415.066 Pa); the first telemetry sample carries the same six numbers; the trimmed throttle 0.7565. The ISA-trimmed aircraft held at its trim controls for 5 s: mean climb rate -0.059 m/s in ISA against -1.516 m/s in +30 degC air (c172p), +0.011 against -0.810 m/s (A320). The A320 autopilot (TECS) flight on the hot humid day holds closure (altitude 6000.02 m within 15 m, settled). Two runs of the same hot spec give the same output digest; the hot digest differs from ISA's; a STATED zero deviation differs from the default run only at the floating-point floor (4.0e-10 N lift, 3.5e-11 kg weight, 1.6e-13 deg pitch: the re-latch runs the models one more pass) -- pinned under 1e-8, bit-identity not claimed. A 60 s c172p flight costs 2.43 s (ISA) and 2.18 s (hot, humid, three writes and three read-backs per step): no measurable cost. Every committed spec example (8 spec files) keeps its canonical form and digest. 60 tests in tests/test_atmosphere.py (5.8 s); 20 mutation guards, each applied to the real file and shown to fail the tests, each restored byte-identically (sha256 checked).
+* A real capture with the block stated (`examples/cameras_waypoint.yaml` + hot_day, 990 hPa, RH 60 %): 5 frames in 1.86 s, `flightsim.verify` PASSED (11 passed, 0 failed, 24 not run), the frame sidecars carry the six channels with units, run.json carries the three atmosphere records beside `limits.monitor`, the card carries `atmosphere_properties` in the fixed order, everything ASCII.
+
+### How to demonstrate (any platform)
+
+    find . -name __pycache__ -type d -prune -exec rm -rf {} +
+    .venv/bin/pytest -o addopts="" -q -p no:cacheprovider -p no:warnings tests/test_atmosphere.py     # 60 passed
+    .venv/bin/python - <<'EOF'
+    from core.nl.compiler import compile_prompt
+    from core.scenario.runner import run_spec
+    spec = compile_prompt("fly the c172p at 1500 m and 100 kt for 3 seconds"); spec.set("hold_state", False)
+    spec.set("atmosphere.day", "hot_day"); spec.set("atmosphere.sea_level_pressure_hpa", 990.0); spec.set("atmosphere.relative_humidity_pct", 60.0)
+    r = run_spec(spec)
+    for rec in r.manifest["applied_variables"]["applied_variables"]:
+        if rec["name"].startswith("atmosphere."):
+            n = rec["null_test"]; p = rec["parameters"]
+            print(rec["name"], rec["value"], rec["source"], "written", p["written"], "density", round(n["without"], 6), "->", round(n["with"], 6), n["ok"], "per-step max error", p["per_step_readback"]["max_abs_error"])
+    print("first sample", {c: round(r.telemetry.series(c)[0], 3) for c in ("density_altitude_m", "pressure_altitude_m", "rh_pct", "vapour_pressure_pa", "temperature_k", "pressure_hpa")})
+    EOF
+    # atmosphere.temperature_deviation_c 30.0 inferred written 54.0 density 1.058113 -> 0.971876 True per-step max error {'atmosphere/delta-T': 0.0, 'atmosphere/P-sl-psf': 0.0, 'atmosphere/dew-point-R': 1.5e-06}
+    # atmosphere.sea_level_pressure_hpa 990.0 user written 2067.6579890818557 density 0.971876 -> 0.94957 True ...
+    # atmosphere.relative_humidity_pct 60.0 user written 539.0255314802437 density 0.94957 -> 0.934988 True ...
+    # first sample {'density_altitude_m': 2727.886, 'pressure_altitude_m': 1548.033, 'rh_pct': 60.0, 'vapour_pressure_pa': 3415.066, 'temperature_k': 308.402, 'pressure_hpa': 840.631}
+    .venv/bin/python -c "from core.nl.compiler import compile_prompt; from core.scenario.validate import validate; s = compile_prompt('fly the c172p at 1500 m and 100 kt for 3 seconds'); s.set('atmosphere.dew_point_c', 20.0); print(validate(s, check_feasibility=False).render())"
+    # ... REJECTED -- 1 constraint violated: [atmosphere.dew_point] dew point exceeds the modelled air temperature at the scene (5.25 degC at 1500 m); JSBSim would silently cap it there (requested 20 degC, limit 5.25 degC)
+    .venv/bin/python - <<'EOF'
+    from core.scenario.spec import ScenarioSpec
+    spec = ScenarioSpec.read("examples/cameras_waypoint.yaml")
+    spec.set("atmosphere.day", "hot_day"); spec.set("atmosphere.relative_humidity_pct", 60.0); spec.set("atmosphere.sea_level_pressure_hpa", 990.0)
+    spec.write("runs/hot_humid_waypoint.yaml")
+    EOF
+    .venv/bin/python -m flightsim.capture runs/hot_humid_waypoint.yaml --out runs/p1_demo --max-previews 0 --card
+    # captured: 5 frames across 1 camera(s); card: runs/p1_demo/card.json  (card.json -> "atmosphere_properties": delta-T 54.0, P-sl-psf 2067.658, dew-point-R 542.311, applied, dew_point_rule, stated)
+    .venv/bin/python -m flightsim.verify runs/p1_demo        # verification PASSED (11 passed, 0 failed, 24 not run, 2 superseded)
+    scripts/mutation_check.sh --match "^atmosphere:" --no-suite      # after the integrator appends the 20 guards
+
+### Not verified here
+
+* Any number against a real atmosphere: JSBSim's standard day is taken as the US Standard Atmosphere 1976 on the source's word (not compared with the published tables), the Magnus constants on Sonntag as the source cites him, the day words are stated choices (MIL-HDBK-310 is unreachable here).
+* The engine side: the card block is pinned; no host applies it (W3 of the blueprint's Windows order: the host trim throttle within the parity bound at delta-T +30).
+* The five catalogue entries and integration patch 3 (the records lifted into the capture manifest) landed at integration; see "Wave 1 integration" below.
+
+### Limitations
+
+* The dew point is held constant along the flight and limited to the modelled temperature and the vapour cap where the air would not admit it (counted, recorded); no humidity profile with height, no inversion, no changed lapse rate; RH 0 is dry air and writes nothing (its record's null test is honestly not ok).
+* A relative humidity is stated at the scene's INITIAL altitude on the modelled temperature there; the dew point it implies is what is written and read back.
+* A stated 1013.25 hPa writes 2116.2166 psf, 5.4e-6 below JSBSim's own 2116.228 psf (the exact conversion factor); the default block writes nothing.
+* A stated standard day is not bit-identical to the default flight (the pre-trim re-latch; pinned under 1e-8 per column).
+* The prompt compiler has no atmosphere vocabulary; the block is stated through YAML or `spec.set`.
+* Record 1 shape: the read-back rides in `parameters.readback` / `parameters.per_step_readback` until the integrator lifts it into record 2's `readback` / `jsbsim_writes` fields.
+
+## Wave 1 integration (R1 with P1)
+
+Integrated from the returned text: nine catalogue entries, 32 guards plus four for the reconciliation below, the contracts and report sections, and the patches to `flightsim/capture.py` (the `--null-tests` and `--uncertainty` opt-ins; the records lifted into the capture manifest), `core/scenario/validate.py` (the registry check) and `core/fdm/fdm.py` (`relatch_initial_conditions`).
+
+### What integration measured, and what was defective
+
+* A stated day was refused by the validator: the registry claimed the `atmosphere` section with four entries and the block has five fields (the `day` word). Registered; the registry's spec fields now equal the block's field order, pinned.
+* Two registry entries named `sigma` as an effect channel; no recorder writes it, so their null pairs would have refused `record.effect_channel`. Replaced by the recorded `temperature_k` and `pressure_hpa`; pinned that every spec-field entry's channels are recorded columns.
+* The null of an absent field removed the key from the spec dict; every provenanced block lists all its fields, so `from_dict` refused the null spec ("missing required field"). The null is now the field unstated (`value: null`, provenance `derived`), and a spec's unstated fields run no pair.
+* Floors for the atmosphere's own channels were absent (their effects were ungraded): a stated tenth of a unit, said so in the reference sentence.
+
+### Measured here
+
+All six null pairs on the c172p (1500 m, 100 kt, 3 s; ~2 s each): hot day 847.60 m of density altitude and 30.000 K; humid 35.99 m and 90.000 %; +30 degC 847.60 m; 990 hPa 188.85 m of pressure altitude and 19.40 hPa; 60 % humidity 532.3 Pa; a 5 degC dew point 98.26 %, 871.7 Pa, 39.30 m. A worded spec runs the word's pair only. The affected suites green; every guard target occurs exactly once; the four new guards fire.

@@ -46,6 +46,11 @@ Top level::
     applied_variables  P10 (optional): core.records.records_block over
                        every introduced variable's AppliedVariable, each
                        with its null test; here scene.geoid_undulation_m
+    uncertainty        R1 (optional; present only when the capture ran
+                       --uncertainty): core.uncertainty's ASME V&V 20
+                       block -- u_num per SRQ from the dt/2 twin, u_input
+                       per registered variable, u_val per SRQ, and the
+                       form "ASME V&V 20; u_D absent per run"
     frame              SceneFrame.provenance(): the CRS every position
                        in this file is expressed in, and the projected
                        origin of the local north/east metres
@@ -295,12 +300,28 @@ def simulation_digest(spec) -> str:
 #: unit is recoverable from the name alone. Longest suffix first, so
 #: ``_mps`` is not read as ``_s``.
 _UNIT_SUFFIXES = (
+    # R1 (record 2): the physics and sensing waves' channels -- specific
+    # force, angular rate, magnetic field, pressure in hPa, temperature
+    # in K, a percentage, density, and a 0/1 flag. Longest first, so
+    # ``_mps2`` is not read as ``_mps`` nor ``_rads`` as ``_rad``.
+    ("_kgm3", "kg/m^3"), ("_mps2", "m/s^2"), ("_rads", "rad/s"),
+    ("_flag", "1"), ("_hpa", "hPa"), ("_pct", "%"),
     ("_dps", "deg/s"), ("_mps", "m/s"), ("_rad", "rad"), ("_deg", "deg"),
-    ("_kt", "kt"), ("_kg", "kg"), ("_pa", "Pa"), ("_m", "m"), ("_n", "N"),
-    ("_s", "s"),
+    ("_kt", "kt"), ("_kg", "kg"), ("_pa", "Pa"), ("_ut", "uT"), ("_m", "m"),
+    ("_n", "N"), ("_k", "K"), ("_s", "s"),
 )
 #: Channels whose name carries no unit because they have none.
 _DIMENSIONLESS = frozenset({"t", "mach", "n_z", "throttle_cmd"})
+
+
+def suffix_unit(name: str) -> str:
+    """The suffix convention alone: the unit a channel's NAME says, or
+    ``"?"``. The registry checks its declared units against this so a
+    registered channel can never contradict its own name."""
+    for suffix, unit in _UNIT_SUFFIXES:
+        if name.endswith(suffix):
+            return unit
+    return "?"
 
 
 def channel_unit(name: str) -> str:
@@ -308,9 +329,12 @@ def channel_unit(name: str) -> str:
 
     ``t`` is seconds; ``mach``, ``n_z`` (load factor, in g) and
     ``throttle_cmd`` (normalised 0..1) carry no suffix and are stated
-    here. Anything unrecognised is reported as ``"?"`` rather than
-    guessed, so a new channel with an unconventional name shows up as
-    a question in the manifest instead of a silent wrong unit.
+    here. A channel the variable registry (core/registry.py) declares
+    takes the registry's unit BEFORE the suffix table, so an effect
+    channel with no suffix (``sigma``) is never a question mark.
+    Anything unrecognised is reported as ``"?"`` rather than guessed,
+    so a new channel with an unconventional name shows up as a
+    question in the manifest instead of a silent wrong unit.
     """
     if name == "t":
         return "s"
@@ -318,12 +342,21 @@ def channel_unit(name: str) -> str:
         return "g"
     if name in _DIMENSIONLESS:
         return "1"
+    registered = _registered_channel_units().get(name)
+    if registered is not None:
+        return registered
     if name.startswith("exceed_") or name == "any_exceedance":
         return "1"       # a 0/1 flag: the limits monitor's derived columns
-    for suffix, unit in _UNIT_SUFFIXES:
-        if name.endswith(suffix):
-            return unit
-    return "?"
+    return suffix_unit(name)
+
+
+def _registered_channel_units() -> Dict[str, str]:
+    """The registry's {channel: unit}, imported inside the function: the
+    registry checks its units against :func:`suffix_unit`, so the two
+    modules meet only in function bodies."""
+    from ..registry import REGISTRY
+
+    return REGISTRY.channel_units()
 
 
 def frame_state(columns: Dict[str, Sequence[float]], index: int) -> Dict:
@@ -468,8 +501,15 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                            terrain_elevation_m: float = 0.0,
                            solve_source: str = SOLVE_PRE_RUN,
                            traffic_tracks: Optional[Sequence[PoseTrack]] = None,
-                           mesh_manifests: Optional[Dict[str, Dict]] = None) -> Dict:
+                           mesh_manifests: Optional[Dict[str, Dict]] = None,
+                           uncertainty: Optional[Dict] = None) -> Dict:
     """Assemble the manifest mapping (see the module docstring schema).
+
+    ``uncertainty`` (R1, optional): the run's ASME V&V 20 block from
+    core/uncertainty.py (u_num per SRQ from the dt/2 twin, u_input per
+    variable, u_val per SRQ, the form). Absent-canonical: the key is
+    written only when a block is given, so a manifest built without one
+    is byte-identical to before the parameter existed.
 
     ``tracks`` and ``schedules`` are parallel per-camera sequences from
     the solver and scheduler. Everything is taken verbatim -- this
@@ -662,7 +702,7 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                 for entry in frames[-1]["labels"]["objects"]
                 if entry["int_id"] != objects[0].int_id]
 
-    return {
+    manifest = {
         "manifest_version": MANIFEST_VERSION,
         "spec_digest": spec.digest(),
         "simulation_digest": simulation_digest(spec),
@@ -726,6 +766,12 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
         "cameras": camera_blocks,
         "frames": frames,
     }
+    # R1 (optional, absent-canonical): the V&V 20 uncertainty block rides
+    # only when the capture ran the dt/2 twin (--uncertainty); a manifest
+    # without it carries no key, so older readers and digests are unmoved.
+    if uncertainty is not None:
+        manifest["uncertainty"] = dict(uncertainty)
+    return manifest
 
 
 def _object_records(objects, record, primary_state, primary_airframe, axes,
@@ -777,6 +823,9 @@ SIDECAR_CONTEXT_KEYS = (
     # P10: the vertical datum and the applied-variable records; None in
     # a sidecar cut from a manifest written before they existed.
     "datum", "applied_variables",
+    # R1: the run's uncertainty block; None unless the capture ran the
+    # dt/2 twin (--uncertainty).
+    "uncertainty",
 )
 
 

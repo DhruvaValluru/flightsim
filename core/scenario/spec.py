@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from .blocks import SceneSpec, TaxonomySpec, TrafficSpec
+from .blocks import AtmosphereSpec, SceneSpec, TaxonomySpec, TrafficSpec
 from .camera import CameraSpec
 from .randomization import RandomizationSpec
 from .fields import Quantity, Source
@@ -141,6 +141,12 @@ class ScenarioSpec:
     #: Spec 8, package B's field: scripted traffic aircraft, at most
     #: MAX_TRAFFIC; an empty list is the default and is omitted.
     traffic: List["TrafficSpec"] = dc_field(default_factory=list)
+    #: Gap P1 (still spec 8; the integrator bumps once): the day the
+    #: flight is in -- temperature deviation, sea-level pressure, dew
+    #: point or relative humidity, a day word -- absent-canonical: the
+    #: ISA day is the default and is omitted, so every committed spec-8
+    #: example keeps its digest (pinned by test).
+    atmosphere: "AtmosphereSpec" = dc_field(default_factory=AtmosphereSpec.defaulted)
 
     #: Field order for both serialisation and the rendered table.
     FIELD_ORDER = (
@@ -204,7 +210,7 @@ class ScenarioSpec:
         carry the spec's own set()/plan() doctrine."""
         import re
 
-        match = re.fullmatch(r"(scene|taxonomy)\.(\w+)", name)
+        match = re.fullmatch(r"(scene|taxonomy|atmosphere)\.(\w+)", name)
         if match is not None:
             block = getattr(self, match.group(1))
             return block, match.group(2)
@@ -346,6 +352,9 @@ class ScenarioSpec:
             out["taxonomy"] = self.taxonomy.to_dict()
         if self.traffic:
             out["traffic"] = [entry.to_dict() for entry in self.traffic]
+        # Gap P1: the atmosphere block, absent-canonical like the others.
+        if not self.atmosphere.is_default():
+            out["atmosphere"] = self.atmosphere.to_dict()
         if self.notes:
             out["notes"] = list(self.notes)
         return out
@@ -398,6 +407,9 @@ class ScenarioSpec:
         if not isinstance(traffic_data, list):
             raise ValueError("spec 'traffic' must be a list of traffic "
                              "mappings")
+        atmosphere_data = data.get("atmosphere")
+        atmosphere = (AtmosphereSpec.defaulted() if atmosphere_data is None
+                      else AtmosphereSpec.from_dict(atmosphere_data))
         return cls(
             name=data.get("name", "scenario"),
             prompt=data.get("prompt"),
@@ -408,6 +420,7 @@ class ScenarioSpec:
             scene=scene,
             taxonomy=taxonomy,
             traffic=[TrafficSpec.from_dict(entry) for entry in traffic_data],
+            atmosphere=atmosphere,
             **kwargs,
         )
 
@@ -486,7 +499,8 @@ class ScenarioSpec:
                                                    ", ".join(leaves)) if bit)))
         # Spec 8 blocks, when stated.
         for block_name, block in (("scene", self.scene),
-                                  ("taxonomy", self.taxonomy)):
+                                  ("taxonomy", self.taxonomy),
+                                  ("atmosphere", self.atmosphere)):
             if not block.is_default():
                 for name, q in block.quantities():
                     rows.append((block_name, name.replace("_", " "),

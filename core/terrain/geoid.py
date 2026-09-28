@@ -62,7 +62,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from core.records import AppliedVariable, NullTest
+from core.records import AppliedVariable, Model, NullTest
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -379,6 +379,19 @@ def undulation_variable(datum: Dict[str, Any]) -> AppliedVariable:
         telemetry_columns=(),
         frame_keys=(),
         null_test=null_test,
+        # Record 2: the structured model beside the string, the provenance
+        # text and the citation. Nothing is written to JSBSim, so there is
+        # no readback and no jsbsim_writes (an honest absence, not a gap).
+        model_block=Model(
+            name="EGM96 bilinear", standard="EGM96 (Lemoine et al. 1998)",
+            version=MODEL_NAME,
+            parameters={"interpolation": INTERPOLATION,
+                        "bilinear_error_bound_m": datum.get("bilinear_error_bound_m"),
+                        "applied": georeferenced},
+            references=REFERENCES),
+        frm=("the scene origin's undulation, bilinear on the committed grid"
+             if georeferenced else "no georeferenced heights: not evaluated"),
+        std="GeographicLib egm96-15 header (MaxBilinearError 1.152)",
         not_claimed=(
             "no height is converted: JSBSim h-sl stays ellipsoidal and the "
             "orthometric heights fed to it are unchanged, so JSBSim altitude "

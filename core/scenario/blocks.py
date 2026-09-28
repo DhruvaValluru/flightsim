@@ -61,6 +61,54 @@ MAX_TRAFFIC = 2
 #: randomisation block reads liveries from).
 CONFIG_DIR = Path(__file__).resolve().parents[2] / "assets" / "aircraft_config"
 
+#: The atmosphere's ``day`` vocabulary (gap P1): each word is a STATED
+#: choice of numbers, not a transcription of a climatic standard. A word
+#: fills a numeric field only while that field is at its default; a
+#: stated number always wins. ``humid`` states relative humidity (at the
+#: scene's initial altitude) and leaves the temperature alone.
+DAY_WORDS: Dict[str, Dict[str, float]] = {
+    "isa": {},
+    "isa_plus_15": {"temperature_deviation_c": 15.0},
+    "isa_plus_20": {"temperature_deviation_c": 20.0},
+    "hot_day": {"temperature_deviation_c": 30.0},
+    "cold_day": {"temperature_deviation_c": -40.0},
+    "humid": {"relative_humidity_pct": 90.0},
+}
+#: What each word rests on, in the spec's ``std`` field.
+DAY_STANDARDS: Dict[str, str] = {
+    "isa": "US Standard Atmosphere 1976 (ISA): no deviation [unverified here]",
+    "isa_plus_15": "ISA +15 degC: the conventional 'hot' certification day "
+                   "(a stated choice)",
+    "isa_plus_20": "ISA +20 degC: the conventional 'very hot' day (a stated "
+                   "choice)",
+    "hot_day": "+30 degC over ISA: a stated choice inside MIL-HDBK-310's 1 % "
+               "hot column as remembered [unverified here]; not the handbook's "
+               "profile",
+    "cold_day": "-40 degC over ISA: a stated choice for a cold day; not "
+                "MIL-HDBK-310's cold profile",
+    "humid": "90 % relative humidity at the scene: a stated choice for a humid "
+             "day; not MIL-HDBK-310's humidity profile",
+}
+#: MIL-HDBK-310 named profiles: recognised so they are refused by name
+#: (``atmosphere.profile``) rather than guessed, until transcribed with
+#: provenance.
+NAMED_PROFILES = ("mil_hdbk_310_hot", "mil_hdbk_310_cold", "mil_hdbk_310_humid",
+                  "mil_hdbk_310_high_altitude")
+#: The ranges the atmosphere accepts (validate.py refuses outside them):
+#: temperature deviation -60..+45 degC, sea-level pressure 870..1085 hPa
+#: (the recorded extremes: 870 hPa in Typhoon Tip 1979, 1085 hPa at
+#: Tosontsengel 2001 [unverified here]), relative humidity 0..100 %, dew
+#: point -90..60 degC (colder than any surface air on record; hotter than
+#: the Magnus fit's stated range).
+ATMOSPHERE_RANGES: Dict[str, tuple] = {
+    "temperature_deviation_c": (-60.0, 45.0),
+    "sea_level_pressure_hpa": (870.0, 1085.0),
+    "relative_humidity_pct": (0.0, 100.0),
+    "dew_point_c": (-90.0, 60.0),
+}
+#: ISA sea-level pressure in the spec's unit.
+ISA_SEA_LEVEL_PRESSURE_HPA = 1013.25
+
 
 def configured_airframes(config_dir: Optional[Path] = None) -> List[str]:
     """Every airframe with an asset-pipeline config -- the ones a
@@ -190,6 +238,68 @@ class TaxonomySpec(ProvenancedBlock):
     def defaulted(cls) -> "TaxonomySpec":
         return cls(classes=Quantity.default(
             list(DEFAULT_CLASSES), frm="the documented class list"))
+
+
+@dataclass
+class AtmosphereSpec(ProvenancedBlock):
+    """``atmosphere``: the day the flight is in (gap P1). Every field a
+    provenanced Quantity; absent-canonical (the ISA day is the default
+    and is omitted from the canonical form, so a spec that states
+    nothing keeps its digest). A stated dew point and a stated relative
+    humidity together are refused by name at validation
+    (``atmosphere.humidity_conflict``); the ranges are ATMOSPHERE_RANGES."""
+
+    temperature_deviation_c: Quantity
+    sea_level_pressure_hpa: Quantity
+    dew_point_c: Quantity
+    relative_humidity_pct: Quantity
+    day: Quantity
+
+    FIELD_ORDER = ("temperature_deviation_c", "sea_level_pressure_hpa",
+                   "dew_point_c", "relative_humidity_pct", "day")
+    BLOCK = "atmosphere"
+    NUMERIC_FIELDS = ("temperature_deviation_c", "sea_level_pressure_hpa",
+                      "dew_point_c", "relative_humidity_pct")
+
+    @classmethod
+    def defaulted(cls) -> "AtmosphereSpec":
+        return cls(
+            temperature_deviation_c=Quantity.default(
+                0.0, "degC", frm="the standard day: no deviation from ISA",
+                std=DAY_STANDARDS["isa"]),
+            sea_level_pressure_hpa=Quantity.default(
+                ISA_SEA_LEVEL_PRESSURE_HPA, "hPa",
+                frm="the standard day: ISA sea-level pressure",
+                std=DAY_STANDARDS["isa"]),
+            dew_point_c=Quantity.default(
+                None, "degC", frm="dry air: no water vapour"),
+            relative_humidity_pct=Quantity.default(
+                None, "%", frm="dry air: no water vapour"),
+            day=Quantity.default("isa", frm="the standard day"),
+        )
+
+    def resolved(self) -> Dict[str, Quantity]:
+        """The effective numeric fields once the ``day`` word has filled
+        the ones left at their default: a stated number is never moved
+        by a word; a word's humidity fills nothing when either humidity
+        field is stated. Each filled field is ``inferred`` from the word
+        with the word's citation. An unknown word fills nothing here (it
+        is refused by name at validation)."""
+        out = {name: getattr(self, name) for name in self.NUMERIC_FIELDS}
+        word = self.day.value
+        implied = DAY_WORDS.get(word, {}) if isinstance(word, str) else {}
+        humidity_stated = any(
+            out[name].source is not Source.DEFAULT
+            for name in ("dew_point_c", "relative_humidity_pct"))
+        for name, value in implied.items():
+            if out[name].source is not Source.DEFAULT:
+                continue
+            if name == "relative_humidity_pct" and humidity_stated:
+                continue
+            out[name] = Quantity.inferred(value, out[name].unit,
+                                          frm=f"day: {word}",
+                                          std=DAY_STANDARDS[word])
+        return out
 
 
 @dataclass

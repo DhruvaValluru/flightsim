@@ -70,6 +70,13 @@ def environment_for(spec: ScenarioSpec) -> EnvironmentStack:
     stack = EnvironmentStack()
     from ..environment.surface import surface_class
 
+    # Gap P1: the stated day (temperature deviation, sea-level pressure,
+    # humidity), written before the trim (stack.prepare) and every step.
+    # The standard day adds no provider and records no variable.
+    atmosphere = atmosphere_for(spec)
+    if atmosphere is not None:
+        stack.add(atmosphere)
+
     surface = surface_class(str(spec.surface.value))
     wind_speed = float(spec.wind_speed.value)
     if surface is not None and wind_speed > 0.0:
@@ -144,6 +151,13 @@ def environment_for(spec: ScenarioSpec) -> EnvironmentStack:
     return stack
 
 
+def atmosphere_for(spec: ScenarioSpec):
+    """The non-standard atmosphere a spec asks for, or None for ISA."""
+    from ..environment.atmosphere import NonStandardAtmosphere
+
+    return NonStandardAtmosphere.from_spec(spec)
+
+
 @dataclass(frozen=True)
 class RunResult:
     spec_digest: str
@@ -168,13 +182,21 @@ def wind_components_fps(speed_kt: float, from_deg: float):
     return (-speed_fps * math.cos(radians), -speed_fps * math.sin(radians))
 
 
-def configure_from_spec(spec: ScenarioSpec) -> FlightDynamics:
+def configure_from_spec(spec: ScenarioSpec,
+                        environment: Optional[EnvironmentStack] = None) -> FlightDynamics:
     """Build and trim an FDM from a spec.
 
     Shared by :func:`run_spec` and the validator's feasibility probe, so that
     validation exercises exactly the configuration the run will use. Two
     separate setup paths would drift, and a validator that passes a scenario the
     runner then fails to trim is worse than no validator.
+
+    ``environment`` is the stack the run will step with; its pre-trim hook
+    (``EnvironmentStack.prepare``) runs between the initial conditions and
+    the trim so the trim solver sees the stated day (gap P1: a hot day
+    written after the trim would leave the trim in ISA air, measured as a
+    different throttle). The feasibility probe passes none and gets a
+    stack holding the atmosphere alone.
     """
     wind_speed = float(spec.wind_speed.value)
     # A spec that commands a state needs the controller; one that only sets an
@@ -196,6 +218,12 @@ def configure_from_spec(spec: ScenarioSpec) -> FlightDynamics:
             "terrain-elevation-ft": u.m_to_ft(float(spec.terrain_elevation.value)),
         }
     )
+    # The pre-trim hook: the atmosphere (and any later pre-trim provider)
+    # is written now, between the initial conditions and the trim.
+    if environment is None:
+        atmosphere = atmosphere_for(spec)
+        environment = EnvironmentStack([atmosphere] if atmosphere is not None else [])
+    environment.prepare(fdm)
 
     # Steady wind is written before trim so the aircraft is trimmed *in* the
     # conditions it will fly rather than dropped into them afterwards.
@@ -233,7 +261,8 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
     if validate_first:
         report.raise_if_invalid()
 
-    fdm = configure_from_spec(spec)
+    environment = environment_for(spec)
+    fdm = configure_from_spec(spec, environment)
     contact = None
     if terrain_ground is not None:
         # The wings feel the terrain, not just the CG (core.terrain.contact):
@@ -249,7 +278,6 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         impact = contact.check(fdm.state(), 0.0)
         if impact is not None:
             raise TerrainImpactError(impact)
-    environment = environment_for(spec)
     # Turbulence seeds a stochastic process, so it is configured once, after
     # trim and before stepping. Re-writing it inside the loop would re-seed the
     # generator every frame and destroy the correlated noise.
@@ -351,6 +379,10 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         }
     if limits_record is not None:
         attach_record(manifest, limits_record)
+    # Gap P1: one record per stated atmosphere variable, with the pre-trim
+    # read-back and null measurement and the per-step read-back.
+    for record in environment.applied_variables():
+        attach_record(manifest, record)
     return RunResult(spec.digest(), output_digest, recorder, report, manifest,
                      closure)
 

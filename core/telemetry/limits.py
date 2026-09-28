@@ -42,7 +42,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from ..records import AppliedVariable, NullTest
+from ..records import AppliedVariable, Model, NullTest
 
 REPO = Path(__file__).resolve().parents[2]
 CONFIG_DIR = REPO / "assets" / "aircraft_config"
@@ -470,6 +470,16 @@ def applied_variable(limits: LimitsTable, result: MonitorResult,
         telemetry_columns=result.columns,
         frame_keys=result.columns,
         null_test=null,
+        # Record 2: the structured model, the provenance text and the
+        # citation. An observer writes no JSBSim property: no readback.
+        model_block=Model(
+            name=MODEL, standard=limits.regulation or "14 CFR 23.337 / 25.337",
+            version="strict comparison, 0/1 flags per monitored limit",
+            parameters={"comparison": COMPARISON, "probe_offset": dict(PROBE_OFFSET),
+                        "category": limits.category},
+            references=tuple(references)),
+        frm=f"the {limits.aircraft} limit table ({limits.config_path})",
+        std="14 CFR 23.337 / 25.337 (load factors); placards per the table's sources",
         not_claimed=(
             "position-error correction: placard KIAS limits are compared against "
             "JSBSim calibrated airspeed (velocities/vc-kts)",

@@ -80,6 +80,13 @@ REQUIRED_PROPERTIES = (
     "atmosphere/rho-slugs_ft3",
     "atmosphere/T-R",
     "atmosphere/P-psf",
+    # The non-standard atmosphere's returns (gap P1): density and pressure
+    # altitude by JSBSim's own inversion, relative humidity (percent) and
+    # vapour pressure. All four probed on the live catalog.
+    "atmosphere/density-altitude",
+    "atmosphere/pressure-altitude",
+    "atmosphere/RH",
+    "atmosphere/vapor-pressure-psf",
     "atmosphere/total-wind-north-fps",
     "atmosphere/total-wind-east-fps",
     "atmosphere/total-wind-down-fps",
@@ -182,6 +189,13 @@ class AircraftState:
     density_kgm3: float
     temperature_k: float
     pressure_pa: float
+    # -- the non-standard atmosphere's returns (gap P1), read from JSBSim's
+    #    own density-altitude / pressure-altitude inversions, RH (percent)
+    #    and vapour pressure. Recorded, not graded by Gate 5.
+    density_altitude_m: float
+    pressure_altitude_m: float
+    rh_pct: float
+    vapour_pressure_pa: float
 
     # -- total wind actually reaching the FDM: steady + gust + turbulence.
     #    Reading the *total* rather than the commanded wind is what makes an
@@ -221,6 +235,11 @@ class AircraftState:
         if self.wind_speed_mps < 1e-9:
             return 0.0
         return (math.degrees(math.atan2(-self.wind_east_mps, -self.wind_north_mps))) % 360.0
+
+    @property
+    def pressure_hpa(self) -> float:
+        """Static pressure in hectopascals, the unit the atmosphere is stated in."""
+        return self.pressure_pa / 100.0
 
     @property
     def flight_path_angle_deg(self) -> float:
@@ -291,6 +310,10 @@ class AircraftState:
             density_kgm3=u.slugft3_to_kgm3(g("atmosphere/rho-slugs_ft3")),
             temperature_k=u.rankine_to_kelvin(g("atmosphere/T-R")),
             pressure_pa=u.psf_to_pa(g("atmosphere/P-psf")),
+            density_altitude_m=u.ft_to_m(g("atmosphere/density-altitude")),
+            pressure_altitude_m=u.ft_to_m(g("atmosphere/pressure-altitude")),
+            rh_pct=g("atmosphere/RH"),
+            vapour_pressure_pa=u.psf_to_pa(g("atmosphere/vapor-pressure-psf")),
             wind_north_mps=u.fps_to_mps(g("atmosphere/total-wind-north-fps")),
             wind_east_mps=u.fps_to_mps(g("atmosphere/total-wind-east-fps")),
             wind_down_mps=u.fps_to_mps(g("atmosphere/total-wind-down-fps")),

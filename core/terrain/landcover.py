@@ -82,7 +82,7 @@ from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
-from ..records import AppliedVariable, NullTest, records_block
+from ..records import AppliedVariable, Model, NullTest, records_block
 from .glo30 import Location, sha256_of
 
 BUCKET = "https://esa-worldcover.s3.eu-central-1.amazonaws.com"
@@ -667,6 +667,16 @@ def landcover_variable(fractions: Dict[str, float], nodata_fraction: float,
         telemetry_columns=(),
         frame_keys=(),
         null_test=null_test,
+        # Record 2: the structured model and the provenance text. Derived
+        # from the bake; nothing is written to JSBSim, so no readback.
+        model_block=Model(
+            name="ESA WorldCover v200 2021 majority/fraction",
+            standard="ESA WorldCover 2021 v200 product (10 m, 11-class legend)",
+            version="v200", parameters={"nodata_fraction": float(nodata_fraction),
+                                        "dominant_class": dominant},
+            references=REFERENCES),
+        frm="the WorldCover tiles rasterised onto the bake grid",
+        std="ESA WorldCover product user manual v2.0 (accuracy 76.7 +/- 0.5 %)",
         not_claimed=(
             "nothing in the engine reads the weightmaps yet: no landscape "
             "layer, material or PCG biome consumes them, no vegetation or "
@@ -700,23 +710,10 @@ def landcover_records(bake_path) -> list:
         return []
     document = json.loads(path.read_text(encoding="utf-8"))
     records = (document.get("applied_variables") or {}).get("applied_variables") or []
-    out = []
-    for record in records:
-        null = record.get("null_test")
-        out.append(AppliedVariable(
-            name=record["name"], value=record["value"], unit=record["unit"],
-            source=record["source"], model=record["model"],
-            parameters=dict(record.get("parameters") or {}),
-            references=tuple(record.get("references") or ()),
-            properties_written=tuple(record.get("properties_written") or ()),
-            telemetry_columns=tuple(record.get("telemetry_columns") or ()),
-            frame_keys=tuple(record.get("frame_keys") or ()),
-            null_test=None if null is None else NullTest(
-                quantity=null["quantity"], unit=null["unit"],
-                with_value=null["with"], without_value=null["without"],
-                threshold=null["threshold"], note=null.get("note", "")),
-            not_claimed=tuple(record.get("not_claimed") or ())))
-    return out
+    # Record 1 or record 2: AppliedVariable.from_dict reads every key the
+    # JSON has and leaves the rest at its default (a landcover.json written
+    # before record 2 carries no model_block and re-types without one).
+    return [AppliedVariable.from_dict(record) for record in records]
 
 
 def rasterise(location_or_bake: Union[Location, str, Path], cache_dir, out_dir,

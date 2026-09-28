@@ -1102,6 +1102,33 @@ here enforces the subset of JSON Schema the file uses (it refuses a file
 that uses more), so a consumer with a full validator sees exactly the
 same contract, no more.
 
+### 2.20 The non-standard atmosphere (P1): a stated day, delivered and read back
+
+What IS claimed: a stated temperature deviation (-60..+45 degC), sea-level
+pressure (870..1085 hPa) and dew point or relative humidity are written to
+JSBSim's `delta-T`, `P-sl-psf` and `dew-point-R` BEFORE the trim and every step,
+read back on every step (delta-T and P-sl-psf exactly; the dew point within one
+step's pressure change, 1.5e-6 R measured), and recorded per variable with a
+null test measured on the same FDM (density before against after each write);
+the delivered density, temperature, pressure, density altitude, pressure
+altitude, humidity and vapour pressure agree with the closed form transcribed
+from the installed JSBSim's own source to 1e-13 relative (pinned at 0.5 %);
+the trim sees the day (the trimmed throttle moves, measured on the c172p and
+the A320); the day words are stated choices with their citation strings. What
+is NOT claimed: that JSBSim's standard day is the US Standard Atmosphere 1976
+(taken on the source's word); any MIL-HDBK-310 profile (`hot_day` is +30 degC,
+a stated choice inside the handbook's 1 % hot column as remembered, unverified
+here; the named profiles are refused `atmosphere.profile`); a temperature
+inversion, a changed lapse rate or a humidity profile with height (the dew
+point is held constant along the flight and limited to the modelled
+temperature and the vapour cap where the air would not admit it, the limited
+steps counted); bit-identity of a run that STATES the standard day with the
+default run (the pre-trim measurement re-latches the initial conditions; the
+difference is pinned under 1e-8 in every column); the engine side (the card
+block carries the exact writes in a fixed key order and no host applies them
+yet); a prompt that says "hot day" (the compiler has no atmosphere vocabulary;
+the block is stated in the spec).
+
 ---
 
 ## 3. Reproducibility: two different claims, kept separate

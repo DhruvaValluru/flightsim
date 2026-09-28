@@ -399,6 +399,35 @@ vocabulary must carry, not a claim the coupling still holds.
 
 ---
 
+## 14. The dew point is capped silently, twice, against the LAST computed state
+
+`atmosphere/dew-point-R` is not stored as written. `FGStandardAtmosphere::SetDewPoint`
+converts it to a vapour pressure (the Magnus form, a = 611.2 Pa, b = 17.62,
+c = 243.12 degC) and `SetVaporPressure` to a vapour mass fraction using the
+pressure of the LAST `Calculate`; `ValidateVaporMassFraction` then caps the
+fraction at saturation -- against the saturated vapour pressure of the last
+computed TEMPERATURE -- and at a per-altitude table of record-high fractions
+(35000 ppm at sea level, 38 ppm at 16 km), looked up at the PRESSURE altitude on
+the write and at the geometric altitude on every step. Each cap prints a line to
+the C++ stderr and raises nothing. Measured on 1.2.4: `dew-point-R` 540 written
+at ISA sea level reads back 518.67 (RH 100 %); a dew point of 10 degC written
+together with a +20 degC `delta-T` before any recomputation is capped at the
+pre-bias 5.25 degC ("Dew point temperature has been capped to 501.124"); 500 R
+written at 5000 ft reads back 499.63 R (the table). A dew point read back AFTER a
+step also differs from the one written by one step's pressure change (1.5e-6 R
+per step on a c172p at 1500 m): the mass fraction, not the dew point, is what
+JSBSim conserves.
+
+Consequences (core/environment/atmosphere.py): write `delta-T` and `P-sl-psf`
+first and recompute (`run_ic` before the trim; a step during the flight) before
+writing the dew point; never write a dew point above the temperature JSBSim
+currently holds or beyond the table's dew point at the current pressure; refuse
+both by name at the scene (`atmosphere.dew_point`) rather than let the cap print;
+and grade the per-step read-back of the dew point at 1e-6 relative with the
+reason stated, the other two properties at zero.
+
+---
+
 ## Model envelope boundaries (measured, not published)
 
 Where each stock model's aero tables give out, from `experiments/envelope_probe.py`.

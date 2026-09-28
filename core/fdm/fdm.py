@@ -278,6 +278,25 @@ class FlightDynamics:
         self._ic_applied = True
         self._trimmed = False
 
+    def relatch_initial_conditions(self) -> None:
+        """Re-run ``run_ic`` on the initial conditions already applied.
+
+        Recomputes the atmosphere (and every model's initial pass) at the
+        ICs without advancing time: measured, sim time stays 0.0 and a
+        written ``atmosphere/delta-T`` survives it. The non-standard
+        atmosphere's pre-trim measurement (core/environment/atmosphere.py)
+        calls this between its writes. Not bit-neutral: one more model
+        pass moves the trimmed state at the floating-point floor (measured
+        4e-10 N of lift), which is why the default (ISA) path never calls it.
+        """
+        if not self._ic_applied:
+            raise SimulationError(
+                "relatch_initial_conditions() needs set_initial_conditions() first"
+            )
+        if not self._exec.run_ic():
+            raise SimulationError(f"run_ic() failed on re-latch for {self.model.name!r}")
+        self.props.refresh()
+
     def _verify_initial_conditions(
         self, requested: Dict[str, float], tolerance: float
     ) -> None:

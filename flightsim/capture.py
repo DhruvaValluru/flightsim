@@ -422,6 +422,20 @@ def build_parser() -> argparse.ArgumentParser:
                              "telemetry_measured.json. The default, ideal, "
                              "writes nothing and says so; an unknown "
                              "profile refuses by name before any flight.")
+    parser.add_argument("--null-tests", action="store_true",
+                        help="R1: after the flight, fly the identical case once per "
+                             "registered variable the spec states (core/registry.py) "
+                             "with that variable at its null value, and write the "
+                             "measured effect per channel, both digests and the "
+                             "verdict into run.json and the capture manifest "
+                             "(null_tests; the record's null_test when the variable "
+                             "has a record). Off by default: no extra flight.")
+    parser.add_argument("--uncertainty", action="store_true",
+                        help="R1: after the flight, fly the dt/2 twin (rate doubled, "
+                             "turbulence off) and write the ASME V&V 20 block -- u_num "
+                             "per SRQ, u_input per registered variable, u_val, u_D "
+                             "absent -- into run.json and the capture manifest "
+                             "(uncertainty). Off by default: no extra flight.")
     parser.add_argument("--verbose", action="store_true",
                         help="keep the flight model's own startup lines "
                              "(the JSBSim banner it prints once per "
@@ -691,6 +705,30 @@ def _run(args: argparse.Namespace) -> int:
         return 2
     columns = result.telemetry.columns
 
+    # R1 (opt-in): the null pairs and the dt/2 twin, each an extra flight
+    # of the same spec through run_spec, measured after the recorded one.
+    # Neither touches the recorded flight or its digest.
+    null_pairs = {}
+    uncertainty_block = None
+    if args.null_tests or args.uncertainty:
+        import functools
+        from core.record_null import null_pairs_for_spec
+        from core.uncertainty import uncertainty_for_run
+
+        extra_runner = functools.partial(run_spec, assert_closure=False,
+                                         terrain_ground=terrain_ground)
+        if args.null_tests:
+            null_pairs = null_pairs_for_spec(spec, runner=extra_runner)
+            print(f"  null tests: {len(null_pairs)} pair(s) flown"
+                  + "".join(f"; {name}: {pair.verdict}" for name, pair in null_pairs.items())
+                  + ("" if null_pairs else " (this spec states no registered variable)"))
+        if args.uncertainty:
+            uncertainty_block = uncertainty_for_run(spec, runner=extra_runner,
+                                                    base_result=result)
+            alt = uncertainty_block["u_num"]["srq"]["altitude_m"]
+            print(f"  uncertainty: dt/2 twin flown; u_num altitude {alt['value']:.3e} m "
+                  f"({uncertainty_block['form']})")
+
     cameras = spec.cameras or default_cameras(spec)
     if not spec.cameras:
         print("no camera stated: capturing with the documented default "
@@ -887,7 +925,16 @@ def _run(args: argparse.Namespace) -> int:
         heightfield=heightfield, terrain_elevation_m=terrain_datum,
         # Phase 2 (package B): the scripted traffic's solved tracks, so
         # every frame carries a label record for the second aircraft.
-        traffic_tracks=traffic_tracks)
+        traffic_tracks=traffic_tracks,
+        # R1: the V&V 20 block, or None (then no key: absent-canonical).
+        uncertainty=uncertainty_block)
+    if null_pairs:
+        from core.record_null import attach_null_pair, null_pairs_block
+
+        manifest["null_tests"] = null_pairs_block(null_pairs)
+        for pair in null_pairs.values():
+            attach_null_pair(manifest, pair)
+            attach_null_pair(result.manifest, pair)
     # The instrument models over the HEADLESS recording (the flight
     # telemetry.json describes); the record rides in the capture manifest
     # (ADVANCEMENTS_CONTRACTS rule 0) and the measured file, if any, is
@@ -898,6 +945,17 @@ def _run(args: argparse.Namespace) -> int:
         result.telemetry.to_dict(), instrument_profile, int(spec.seed.value),
         source="user" if args.instruments is not None else "default")
     attach_record(manifest, measured.record)
+    # The headless flight's own applied variables (the limits monitor, the
+    # atmosphere; core/scenario/runner.py) ride in the capture manifest too,
+    # one record per name, never repeated (they are already in run.json).
+    flown = (result.manifest.get("applied_variables") or {}).get("applied_variables", [])
+    if flown:
+        from core.records import RECORD_VERSION
+
+        block = manifest.setdefault(
+            "applied_variables", {"record_version": RECORD_VERSION, "applied_variables": []})
+        present = {r["name"] for r in block["applied_variables"]}
+        block["applied_variables"].extend(r for r in flown if r["name"] not in present)
     manifest_path = write_capture_manifest(manifest, out)
     write_frame_sidecars(manifest, out)
     result.telemetry.write_json(out / "telemetry.json")
@@ -920,6 +978,10 @@ def _run(args: argparse.Namespace) -> int:
         # so a campaign report can count exceedances per case.
         "limits": result.manifest.get("limits"),
         "applied_variables": result.manifest.get("applied_variables"),
+        # R1 (opt-in; null when the option was off): the null pairs and
+        # the uncertainty block of the headless flight.
+        "null_tests": manifest.get("null_tests"),
+        "uncertainty": uncertainty_block,
     }, indent=1), encoding="utf-8")
 
     if args.card or args.render:

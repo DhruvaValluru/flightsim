@@ -85,7 +85,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 
 from ..experiments.seeds import DERIVATION, derive, generator
-from ..records import AppliedVariable, NullTest, records_block
+from ..records import AppliedVariable, Model, NullTest, records_block
 
 REPO = Path(__file__).resolve().parents[2]
 PROFILE_DIR = REPO / "assets" / "instrument_profiles"
@@ -667,6 +667,17 @@ def _record(profile: InstrumentProfile, source: str, seeds, measured: Sequence[s
             note="'without' is the ideal profile, whose measurement equals the truth "
                  "by construction (0 exactly); the ideal profile itself therefore "
                  "measures no difference and its null test is not ok"),
+        # Record 2: the structured model and the provenance text. An
+        # observer over the recording writes no JSBSim property: no readback.
+        model_block=Model(
+            name=MODEL, standard="IEEE Std 952-2020 terms; GPS SPS PS; Caruso 2000",
+            version=f"profile {profile.name} (sha256 {profile.sha256})",
+            parameters={"basis": profile.basis, "rate_basis": "recorded telemetry, 10 Hz",
+                        "file": None if profile.is_ideal else MEASURED_FILE},
+            references=tuple(profile.references)),
+        frm=(f"--instruments {profile.name}" if source == "user"
+             else "the documented default profile (ideal)"),
+        std=profile.source,
         not_claimed=(
             "scale-factor, misalignment, g-sensitivity, quantisation and temperature "
             "errors", "the rate random walk term", "GPS multipath, ionospheric, clock "

@@ -3842,6 +3842,240 @@ mutate core/capture/verify.py \
     "the verifier refuses an undulation from a grid other than its own" tests/test_geoid.py \
     || failures=$((failures+1))
 
+# -- the advancement additions, wave 1: record 2 and the registry (R1), the non-standard atmosphere (P1) ----
+mutate core/records.py \
+    '        return abs(self.difference) <= allowed' \
+    '        return True  # MUTATED: every readback agrees' \
+    "a readback is graded against its tolerance" tests/test_records.py \
+    || failures=$((failures+1))
+
+mutate core/records.py \
+    '            allowed = allowed * abs(float(self.written))' \
+    '            allowed = allowed * 1e9  # MUTATED: relative means anything' \
+    "a relative readback tolerance scales by the written value" tests/test_records.py \
+    || failures=$((failures+1))
+
+mutate core/records.py \
+    '            return abs(self.difference) <= float(self.threshold)' \
+    '            return abs(self.difference) >= float(self.threshold)  # MUTATED: bounded reads as reached' \
+    "the bounded null test is ok only at or under its bound" tests/test_records.py \
+    || failures=$((failures+1))
+
+mutate core/record_null.py \
+    'NULL_FLOOR_ALTITUDE_M = 0.5' \
+    'NULL_FLOOR_ALTITUDE_M = 0.0  # MUTATED: any altitude effect counts' \
+    "the altitude null floor is 10 x the V9 noise" tests/test_record_null.py \
+    || failures=$((failures+1))
+
+mutate core/record_null.py \
+    '    if applied == entry.null_value:' \
+    '    if False:  # MUTATED: a run may be paired with itself' \
+    "a null pair refuses the value that is already the null" tests/test_record_null.py \
+    || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '("_kgm3", "kg/m^3"), ("_mps2", "m/s^2"), ("_rads", "rad/s"),' \
+    '("_kgm3", "kg/m^3"), ("_mps2", "m/s"), ("_rads", "rad/s"),  # MUTATED: specific force in m/s' \
+    "the m/s^2 suffix reads as m/s^2, not m/s" tests/test_registry.py \
+    || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '    registered = _registered_channel_units().get(name)' \
+    '    registered = None  # MUTATED: the registry is never consulted' \
+    "state_units consults the registry before the suffix table" tests/test_registry.py \
+    || failures=$((failures+1))
+
+mutate core/registry.py \
+    '                if f"{section}.{leaf}" not in claimed:' \
+    '                if False:  # MUTATED: every spec field is registered' \
+    "a spec field outside the registry refuses record.unregistered" tests/test_registry.py \
+    || failures=$((failures+1))
+
+mutate core/registry.py \
+    '            raise RecordError("record.unregistered",
+                              f"{name!r} is not a registered variable (registered: "
+                              f"{'"'"', '"'"'.join(self.names())})") from None' \
+    '            return next(iter(self._entries.values()))  # MUTATED: an unknown name gets the first entry' \
+    "an unknown variable name refuses record.unregistered" tests/test_registry.py \
+    || failures=$((failures+1))
+
+mutate core/registry.py \
+    '            if suffix != "?" and suffix != channel.unit:' \
+    '            if False:  # MUTATED: a unit may contradict its name' \
+    "an effect channel unit that contradicts its name refuses" tests/test_registry.py \
+    || failures=$((failures+1))
+
+mutate core/uncertainty.py \
+    '    e = abs(float(difference)) / (ratio ** p - 1.0)' \
+    '    e = abs(float(difference))  # MUTATED: no Richardson denominator' \
+    "u_num divides the twin difference by 2^p - 1" tests/test_uncertainty.py \
+    || failures=$((failures+1))
+
+mutate core/uncertainty.py \
+    '    return {"error_estimate": e, "gci": fs * e}' \
+    '    return {"error_estimate": e, "gci": e}  # MUTATED: no safety factor' \
+    "u_num carries the GCI safety factor" tests/test_uncertainty.py \
+    || failures=$((failures+1))
+
+mutate core/environment/atmosphere.py \
+    '    if temperature_deviation_c is not None and not lo <= temperature_deviation_c <= hi:' \
+    '    if False and temperature_deviation_c is not None and not lo <= temperature_deviation_c <= hi:  # MUTATED: any deviation passes' \
+    "atmosphere: a temperature deviation outside -60..+45 degC is refused by name" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/environment/atmosphere.py \
+    '    if sea_level_pressure_hpa is not None and not lo <= sea_level_pressure_hpa <= hi:' \
+    '    if False and sea_level_pressure_hpa is not None and not lo <= sea_level_pressure_hpa <= hi:  # MUTATED: any pressure passes' \
+    "atmosphere: a sea-level pressure outside 870..1085 hPa is refused by name" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/environment/atmosphere.py \
+    '    if dew_point_c is not None and relative_humidity_pct is not None:' \
+    '    if False and dew_point_c is not None and relative_humidity_pct is not None:  # MUTATED: both humidity fields accepted' \
+    "atmosphere: a dew point and a relative humidity together are refused by name" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/environment/atmosphere.py \
+    '    if celsius_to_rankine(dew_point_c) > t_scene_r:' \
+    '    if False and celsius_to_rankine(dew_point_c) > t_scene_r:  # MUTATED: JSBSim'"'"'s silent cap is reached' \
+    "atmosphere: a dew point above the scene temperature is refused by name, not capped by JSBSim" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/environment/atmosphere.py \
+    '    if e < p_scene and vapour_mass_fraction(e, p_scene) > cap:' \
+    '    if False and e < p_scene and vapour_mass_fraction(e, p_scene) > cap:  # MUTATED: the vapour cap is reached silently' \
+    "atmosphere: a dew point beyond the model's vapour cap is refused by name" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/environment/atmosphere.py \
+    '    if word in DAY_WORDS:
+        return None' \
+    '    if True:  # MUTATED: any day word passes
+        return None' \
+    "atmosphere: a MIL-HDBK-310 profile or an unknown day word is refused by name" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '    environment.prepare(fdm)
+' \
+    '    pass  # MUTATED: the atmosphere is written only after the trim
+' \
+    "atmosphere: the day is written BEFORE the trim (the trimmed throttle differs)" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/environment/stack.py \
+    '                observe(fdm)' \
+    '                pass  # MUTATED: nothing is read back per step' \
+    "atmosphere: every step's write is read back before the next" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/environment/stack.py \
+    '            writes.update(provider.properties(position, time_s))' \
+    '            pass  # MUTATED: the atmosphere is not written per step' \
+    "atmosphere: the day is written every step" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/environment/atmosphere.py \
+    '        "sigma": rho / (P_SL_PSF / (R_DRY * T_SL_R)),' \
+    '        "sigma": 1.01 * rho / (P_SL_PSF / (R_DRY * T_SL_R)),  # MUTATED: the predicted ratio is 1 % off' \
+    "atmosphere: expected_density_ratio is the delivered density over the ISA sea-level density" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/environment/atmosphere.py \
+    '    return (fraction * R_WATER + R_DRY) / (1.0 + fraction)' \
+    '    return R_DRY  # MUTATED: the dry gas constant, water ignored' \
+    "atmosphere: the closed form carries the moist gas constant" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/environment/atmosphere.py \
+    '                unit="kg/m3", with_value=with_, without_value=without,' \
+    '                unit="kg/m3", with_value=with_, without_value=with_,  # MUTATED: the null test measures nothing' \
+    "atmosphere: each variable's null test is the density before against after its write" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/environment/atmosphere.py \
+    'CARD_KEYS = (PROPERTY_DELTA_T, PROPERTY_P_SL, PROPERTY_DEW_POINT,' \
+    'CARD_KEYS = (PROPERTY_P_SL, PROPERTY_DELTA_T, PROPERTY_DEW_POINT,  # MUTATED: the key order moved' \
+    "atmosphere: the card block's keys are in the fixed order" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/card.py \
+    '        card["atmosphere_properties"] = atmosphere' \
+    '        pass  # MUTATED: the card drops the atmosphere' \
+    "atmosphere: the run card carries the atmosphere_properties block" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/spec.py \
+    '        if not self.atmosphere.is_default():
+            out["atmosphere"] = self.atmosphere.to_dict()' \
+    '        if True:  # MUTATED: the default block is serialised and every digest moves
+            out["atmosphere"] = self.atmosphere.to_dict()' \
+    "atmosphere: the block is absent-canonical (the committed examples keep their digests)" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/blocks.py \
+    '            if out[name].source is not Source.DEFAULT:
+                continue' \
+    '            if False:  # MUTATED: the day word overwrites a stated number
+                continue' \
+    "atmosphere: a day word fills only defaulted fields; a stated number wins" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/environment/atmosphere.py \
+    '        if t_r < value:
+            value, limited = t_r, "temperature"' \
+    '        if False and t_r < value:  # MUTATED: the dew point is written above the air temperature
+            value, limited = t_r, "temperature"' \
+    "atmosphere: the per-step dew point is limited to the modelled air temperature" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/environment/atmosphere.py \
+    '    if relative_humidity_pct <= 0.0:
+        return None' \
+    '    if False and relative_humidity_pct <= 0.0:  # MUTATED: zero humidity hits the Magnus pole
+        return None' \
+    "atmosphere: zero humidity is dry air and writes nothing" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/telemetry/recorder.py \
+    '    "density_altitude_m",
+    "pressure_altitude_m",' \
+    '    # MUTATED: the density and pressure altitudes are not recorded' \
+    "atmosphere: the density and pressure altitudes are recorded channels" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/validate.py \
+    '    report.violations.extend(validate_atmosphere(spec))' \
+    '    pass  # MUTATED: the validator never looks at the atmosphere' \
+    "atmosphere: validate() refuses the atmosphere block by name" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+# -- wave 1 integration: the registry meets the block --------------------------------
+mutate core/registry.py \
+    '        name="atmosphere.day", spec_path="atmosphere.day", unit="word",' \
+    '        name="atmosphere.day", spec_path=None, unit="word",  # MUTATED: the word is not a spec field' \
+    "the day word is a registered spec field" tests/test_registry.py \
+    || failures=$((failures+1))
+
+mutate core/registry.py \
+    '                         EffectChannel("temperature_k", "K"), EffectChannel("tas_kt", "kt")),' \
+    '                         EffectChannel("sigma", "1"), EffectChannel("tas_kt", "kt")),  # MUTATED: an unrecorded channel' \
+    "a registered effect channel is a recorded column" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/record_null.py \
+    '        if stated.get("value") is None:
+            continue                     # unstated (a block lists every field): nothing applied' \
+    '        pass  # MUTATED: an unstated field runs a pair against its null' \
+    "an unstated field runs no null pair" tests/test_atmosphere.py \
+    || failures=$((failures+1))
+
+mutate core/record_null.py \
+    'NULL_FLOOR_HUMIDITY_PCT = 0.1' \
+    'NULL_FLOOR_HUMIDITY_PCT = 0.0  # MUTATED: any humidity effect counts' \
+    "the humidity null floor is the stated tenth of a percent" tests/test_record_null.py \
+    || failures=$((failures+1))
+
 if [ "$guard_n" -ne "$total" ]; then
     echo "INTERNAL: $guard_n mutate calls ran but $total are written; the count is off" >&2
     exit 1

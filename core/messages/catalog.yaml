@@ -547,3 +547,36 @@ check.albedo_range:
 # annotation.* beside annotation.files, the three check.* beside
 # check.depth_vs_geometry. Trialled against tests/test_messages.py (22 passed;
 # only another item's terrain.landcover names remained).
+
+# -- the variable registry (core/registry.py, core/scenario/validate.py) ------
+
+record.unregistered:
+  sentence: "The scenario states a setting that no registered variable returns a record for, so its effect could not be measured or traced."
+  hint: "Register the variable with its unit, its off value and the channels it moves, or remove the setting."
+record.null_value:
+  sentence: "This variable has no off value to compare against, so the with-and-without flight cannot be run for it."
+  hint: "State the value that means off for it, or ask for a value other than that one."
+record.effect_channel:
+  sentence: "This variable names no recorded channel it could have moved, so its effect cannot be measured."
+  hint: "Register the channel the variable moves, and record it."
+record.effect_channel_unit:
+  sentence: "A channel this variable moves has no unit, or a unit that contradicts its name, so its effect could not be stated."
+  hint: "Give the channel the unit its name says."
+
+# -- the non-standard atmosphere (core/environment/atmosphere.py) -------------
+
+atmosphere.temperature_deviation:
+  sentence: "The temperature deviation from the standard day has to lie between 60 degrees colder and 45 degrees hotter; {actual} is outside that."
+  hint: "Ask for a day between 60 degrees colder and 45 degrees hotter than standard, or use one of the day words."
+atmosphere.sea_level_pressure:
+  sentence: "A sea-level pressure has to lie between 870 and 1085 hectopascals, the recorded extremes; {actual} is outside that."
+  hint: "Ask for a pressure between 870 and 1085 hectopascals."
+atmosphere.dew_point:
+  sentence: "The air's moisture cannot be set up as asked: the dew point cannot be above the air temperature where the flight starts, the humidity has to lie between 0 and 100 percent, and the model admits only so much water vapour at that height."
+  hint: "Lower the dew point or the humidity, or choose a warmer day; the simulation would otherwise cap the moisture silently."
+atmosphere.humidity_conflict:
+  sentence: "A dew point and a relative humidity were both stated; they are one quantity said two ways."
+  hint: "State one of the two."
+atmosphere.profile:
+  sentence: "That kind of day is not one this build can set up; the named climatic profiles have not been transcribed with their sources."
+  hint: "Choose one of the day words (a standard day, standard plus 15 or 20 degrees, a hot day, a cold day, a humid day), or state the numbers."

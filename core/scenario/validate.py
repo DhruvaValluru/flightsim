@@ -244,6 +244,8 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
     report.violations.extend(validate_randomization(spec))
     report.violations.extend(validate_blocks(spec))
     report.violations.extend(validate_policy(spec))
+    report.violations.extend(validate_registry(spec))
+    report.violations.extend(validate_atmosphere(spec))
 
     # -- the definitive check: can this actually be trimmed? -----------
     # Skipped when geometry is already impossible, since trimming below ground
@@ -266,6 +268,20 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
             )
 
     return report
+
+
+def validate_registry(spec) -> List[Violation]:
+    """R1: every spec field under a section the variable registry claims
+    (core/registry.py; today ``atmosphere``) must be a registered variable,
+    so "every introduced variable returns the record" is checked at
+    validation rather than discovered in a manifest. A spec that states
+    no claimed section (every spec-8 field) yields nothing."""
+    from ..registry import unregistered_fields
+
+    return [Violation("record.unregistered",
+                      f"{path} is a spec field no registered variable returns the "
+                      f"record for; register it in core/registry.py or drop it")
+            for path in unregistered_fields(spec.to_dict())]
 
 
 def validate_randomization(spec) -> List[Violation]:
@@ -422,6 +438,63 @@ def validate_blocks(spec) -> List[Violation]:
                 "traffic.range_m",
                 f"{who}: range_m must be a positive distance",
                 actual=entry.range_m.value, limit=0.0, unit="m"))
+    return out
+
+
+# -- the atmosphere block (gap P1) -------------------------------------------
+
+def validate_atmosphere(spec) -> List[Violation]:
+    """The atmosphere block's own constraints, refused by name.
+
+    The ``day`` word must be in the vocabulary (a MIL-HDBK-310 named
+    profile is refused ``atmosphere.profile`` until transcribed); every
+    numeric field must be a number or absent; the temperature deviation
+    lies in -60..+45 degC (``atmosphere.temperature_deviation``), the
+    sea-level pressure in 870..1085 hPa (``atmosphere.sea_level_pressure``);
+    dew point and relative humidity are not both stated
+    (``atmosphere.humidity_conflict``); the humidity lies in 0..100 %,
+    the dew point in its range and at or below the modelled air
+    temperature at the scene's initial altitude and under the model's
+    vapour cap there (``atmosphere.dew_point`` -- the two values JSBSim
+    would otherwise cap silently). The checks are the provider's own
+    (core.environment.atmosphere.problems), so what validation refuses
+    and what the run refuses are one list.
+    """
+    from ..environment.atmosphere import day_problem, problems
+
+    block = spec.atmosphere
+    out: List[Violation] = []
+    refused = day_problem(block.day.value)
+    if refused is not None:
+        out.append(Violation(refused.constraint, refused.message,
+                             actual=refused.actual))
+    resolved = block.resolved()
+    numbers = {}
+    names = {"temperature_deviation_c": "atmosphere.temperature_deviation",
+             "sea_level_pressure_hpa": "atmosphere.sea_level_pressure",
+             "dew_point_c": "atmosphere.dew_point",
+             "relative_humidity_pct": "atmosphere.dew_point"}
+    for field in block.NUMERIC_FIELDS:
+        value = resolved[field].value
+        if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+            if value is not None:
+                out.append(Violation(
+                    names[field],
+                    f"atmosphere.{field} must be a number or absent, not "
+                    f"{value!r}", actual=value))
+            numbers[field] = None
+        else:
+            numbers[field] = float(value)
+    if any(v.constraint != "atmosphere.profile" for v in out):
+        return out
+    for refused in problems(numbers["temperature_deviation_c"],
+                            numbers["sea_level_pressure_hpa"],
+                            numbers["dew_point_c"],
+                            numbers["relative_humidity_pct"],
+                            float(spec.altitude.value)):
+        out.append(Violation(refused.constraint, refused.message,
+                             actual=refused.actual, limit=refused.limit,
+                             unit=refused.unit))
     return out
 
 

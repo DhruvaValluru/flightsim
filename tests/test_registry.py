@@ -1,0 +1,248 @@
+"""The variable registry (core/registry.py): every introduced variable has
+an entry; the refusals by name; the manifest consults it before the
+suffix table; the readbacks measured on the c172p; the committed
+examples keep their digests.
+"""
+
+import contextlib
+import io
+from pathlib import Path
+
+import pytest
+
+from core.capture.manifest import channel_unit, state_units, suffix_unit
+from core.records import JsbsimWrite, Readback
+from core.registry import (
+    HPA_TO_PSF, NO_NULL, REGISTRY, EffectChannel, ReadbackTolerance, RecordError, Registry,
+    UInputRule, VariableRecord, unregistered_fields,
+)
+
+REPO = Path(__file__).resolve().parents[1]
+
+BATCH_1 = ("scene.geoid_undulation_m", "limits.monitor", "instruments.profile", "scene.landcover")
+PHYSICS = ("atmosphere.temperature_deviation_c", "atmosphere.sea_level_pressure_hpa",
+           "atmosphere.dew_point_c", "atmosphere.relative_humidity_pct")
+#: The block's fifth field: a word the provider expands into the numeric
+#: fields, so it writes no property of its own but is the variable that moved.
+WORDS = ("atmosphere.day",)
+
+
+def _entry(**overrides):
+    fields = dict(name="test.thing", spec_path="test.thing", unit="m",
+                  null_value=0.0, null_basis="zero is off")
+    fields.update(overrides)
+    return VariableRecord(**fields)
+
+
+# -- the population ------------------------------------------------------------
+
+def test_every_batch_1_variable_and_every_physics_variable_is_registered():
+    assert set(REGISTRY.names()) == set(BATCH_1) | set(PHYSICS) | set(WORDS)
+    for name in BATCH_1:
+        entry = REGISTRY.get(name)
+        assert entry.spec_path is None and entry.null_value is NO_NULL
+        assert entry.null_basis                     # why there is no spec null, stated
+    for name in PHYSICS:
+        entry = REGISTRY.get(name)
+        assert entry.spec_path == name
+        assert entry.jsbsim_writes and entry.readback_tolerance is not None
+        assert entry.effect_channels
+    for name in WORDS:
+        entry = REGISTRY.get(name)
+        assert entry.spec_path == name and entry.unit == "word"
+        assert not entry.jsbsim_writes and entry.readback_tolerance is None
+        assert entry.effect_channels and entry.null_value == "isa"
+    assert REGISTRY.sections() == ("atmosphere",)
+    # Every spec field of the atmosphere block is claimed: the validator's
+    # record.unregistered check is what a stated day meets first.
+    from core.scenario.blocks import AtmosphereSpec
+    assert set(REGISTRY.spec_fields()) == {f"atmosphere.{f}" for f in AtmosphereSpec.FIELD_ORDER}
+
+
+def test_the_physics_readback_tolerances_are_the_measured_ones():
+    dt = REGISTRY.get("atmosphere.temperature_deviation_c")
+    assert dt.jsbsim_writes == (JsbsimWrite("atmosphere/delta-T", "before trim and every step"),)
+    assert dt.readback_tolerance.value == 0.0 and dt.readback_tolerance.kind == "absolute"
+    psl = REGISTRY.get("atmosphere.sea_level_pressure_hpa")
+    assert psl.jsbsim_writes[0].property == "atmosphere/P-sl-psf"
+    assert psl.readback_tolerance.value == 0.0
+    assert psl.null_value == 1013.25
+    rh = REGISTRY.get("atmosphere.relative_humidity_pct")
+    assert rh.jsbsim_writes[0].property == "atmosphere/RH"
+    assert rh.readback_tolerance.value == 1e-6 and rh.readback_tolerance.kind == "relative"
+    assert "Magnus" in rh.readback_tolerance.reason      # the reason is stated
+    assert REGISTRY.get("atmosphere.dew_point_c").null_value is None   # absent = dry air
+    assert HPA_TO_PSF == pytest.approx(2.08854342, rel=1e-8)
+
+
+def test_the_registry_serialises_and_lists_its_channels():
+    d = REGISTRY.to_dict()
+    assert d["atmosphere.temperature_deviation_c"]["readback_tolerance"]["value"] == 0.0
+    assert d["scene.geoid_undulation_m"]["has_null_value"] is False
+    assert d["atmosphere.dew_point_c"]["has_null_value"] is True
+    units = REGISTRY.channel_units()
+    assert units["temperature_k"] == "K" and units["density_altitude_m"] == "m"
+    assert units["rh_pct"] == "%" and units["pressure_hpa"] == "hPa"
+    assert "sigma" not in units          # not a recorded channel: no entry may name it
+    assert "density_altitude_m" in REGISTRY.host_channels()
+    assert REGISTRY.spec_fields()["atmosphere.temperature_deviation_c"] == "atmosphere.temperature_deviation_c"
+
+
+# -- the refusals, by name -------------------------------------------------------
+
+def test_an_unknown_variable_refuses_record_unregistered():
+    with pytest.raises(RecordError) as err:
+        REGISTRY.get("atmosphere.nothing")
+    assert err.value.constraint == "record.unregistered"
+    assert "atmosphere.nothing" in str(err.value)
+
+
+def test_a_spec_field_outside_the_registry_refuses_record_unregistered():
+    data = {"atmosphere": {"temperature_deviation_c": {"value": 15.0, "source": "user"},
+                           "lapse_rate_k_per_km": {"value": 6.5, "source": "user"}}}
+    assert unregistered_fields(data) == ["atmosphere.lapse_rate_k_per_km"]
+    with pytest.raises(RecordError) as err:
+        REGISTRY.require_registered(data)
+    assert err.value.constraint == "record.unregistered"
+    # A spec that states no claimed section (every spec-8 example) reports nothing.
+    assert unregistered_fields({"initial": {"altitude": {"value": 1.0}}}) == []
+    assert REGISTRY.stated_variables(data) == {
+        "atmosphere.temperature_deviation_c": {"value": 15.0, "source": "user"}}
+
+
+def test_a_spec_field_variable_without_a_null_value_refuses_record_null_value():
+    with pytest.raises(RecordError) as err:
+        _entry(null_value=NO_NULL)
+    assert err.value.constraint == "record.null_value"
+    _entry(spec_path=None, null_value=NO_NULL, null_basis="an observer")   # allowed
+    _entry(null_value=None)                                                # absent = null
+
+
+def test_an_effect_channel_without_a_unit_or_against_its_name_refuses():
+    with pytest.raises(RecordError) as err:
+        _entry(effect_channels=(EffectChannel("sigma", ""),))
+    assert err.value.constraint == "record.effect_channel_unit"
+    with pytest.raises(RecordError) as err:
+        _entry(effect_channels=(EffectChannel("density_altitude_m", "ft"),))
+    assert err.value.constraint == "record.effect_channel_unit"
+    assert "says 'm'" in str(err.value)
+    _entry(effect_channels=(EffectChannel("sigma", "1"),))                 # no suffix: fine
+    _entry(effect_channels=(EffectChannel("density_altitude_m", "m"),))    # agrees: fine
+
+
+def test_duplicates_and_malformed_entries_are_programming_errors():
+    reg = Registry((_entry(),))
+    with pytest.raises(ValueError, match="already registered"):
+        reg.register(_entry())
+    with pytest.raises(ValueError, match="claimed by both"):
+        reg.register(_entry(name="test.other"))
+    with pytest.raises(ValueError, match="readback tolerance"):
+        _entry(jsbsim_writes=(JsbsimWrite("atmosphere/delta-T", "setup"),))
+    with pytest.raises(ValueError, match="dotted"):
+        _entry(name="thing")
+    with pytest.raises(ValueError, match="basis"):
+        _entry(null_basis="")
+    with pytest.raises(ValueError, match="reason"):
+        ReadbackTolerance(0.0, "absolute", "")
+    with pytest.raises(ValueError, match="positive"):
+        UInputRule(bin_width=0.0)
+
+
+# -- the manifest consults the registry before the suffix table ------------------
+
+def test_state_units_takes_the_registry_unit_first_and_never_a_question_mark():
+    columns = {name: [0.0] for name in REGISTRY.channel_units()}
+    columns.update({"t": [0.0], "altitude_m": [1.0]})
+    units = state_units(columns)
+    assert "?" not in units.values()
+    assert units["temperature_k"] == "K" and units["rh_pct"] == "%"
+    assert units["vapour_pressure_pa"] == "Pa" and units["pressure_hpa"] == "hPa"
+    assert units["any_exceedance"] == "1"
+    assert channel_unit("something_unknown") == "?"        # still a question, not a guess
+
+
+def test_the_new_unit_suffixes_read_back():
+    assert suffix_unit("f_x_mps2") == "m/s^2"
+    assert suffix_unit("omega_rads") == "rad/s"
+    assert suffix_unit("b_north_ut") == "uT"
+    assert suffix_unit("p_sl_hpa") == "hPa"
+    assert suffix_unit("t_static_k") == "K"
+    assert suffix_unit("rh_pct") == "%"
+    assert suffix_unit("rho_kgm3") == "kg/m^3"
+    assert suffix_unit("stall_flag") == "1"
+    # Longest-first: none of the new suffixes shadows an old one.
+    assert suffix_unit("v_mps") == "m/s" and suffix_unit("q_rad") == "rad"
+    assert suffix_unit("qbar_pa") == "Pa" and suffix_unit("m_kg") == "kg"
+    assert suffix_unit("cas_kt") == "kt" and suffix_unit("north_m") == "m"
+    assert channel_unit("f_x_mps2") == "m/s^2"
+
+
+# -- the committed examples keep their digests ------------------------------------
+
+EXAMPLE_DIGESTS = {
+    "examples/cameras_event_trigger.yaml": "cb2f5b5500584bd84c8aa84749c854a9c67f1c366db2ec97e9cb0c8ee150b8b0",
+    "examples/cameras_hazard_refusal.yaml": "148f87bc37eab96c8f029e048dbf4f8328ad3247fa0596f10e71c81914d509de",
+    "examples/cameras_mountain_refusal.yaml": "58a36aa0943b0dd895d79c89d7031525b6fc29e55ec47b927b4b3e7ccbfb2496",
+    "examples/cameras_multi.yaml": "84e53a6931489f90fec8d0a750a1fd745bb630d0a2186befba659c68e2396f45",
+    "examples/cameras_refusal.yaml": "d3565392215f6db2b66060c41554d10b4916779b9319e2c3a7063b3a04eb6a9a",
+    "examples/cameras_terrain.yaml": "4b7b5dbdc8ba0a04cb3408f6e70c19be3d0e28c4053762ee30551c23d751acf3",
+    "examples/cameras_waypoint.yaml": "9760294005e1efcae1777ad4a2035fe3733d219428c477c6c7caf2f0220b2372",
+    "examples/randomized.yaml": "102d38250e4b7c9b4b6737af5e3e2886fad0748aa4e7af825ce8388e4fe7fda1",
+}
+
+
+def test_a_spec_that_states_no_registered_field_keeps_its_digest_and_needs_no_record():
+    """Absent-canonical: the registry adds no key to a spec, so every
+    committed example digests as it did at HEAD 9ec2c31 (measured then,
+    pinned here), states no claimed section, and refuses nothing."""
+    from core.scenario.spec import ScenarioSpec
+
+    for path, digest in EXAMPLE_DIGESTS.items():
+        spec = ScenarioSpec.read(REPO / path)
+        assert spec.digest() == digest, path
+        data = spec.to_dict()
+        assert not any(section in data for section in REGISTRY.sections()), path
+        assert unregistered_fields(data) == []
+        assert REGISTRY.stated_variables(data) == {}
+
+
+# -- the readbacks, measured on the c172p --------------------------------------------
+
+@pytest.mark.timeout(120)
+def test_the_physics_readbacks_measure_as_the_registry_declares():
+    """Write each registered property on a trimmed c172p, step three
+    times, read back: delta-T, P-sl and the pointmass exact; RH within
+    the 1e-6 relative tolerance (measured 1.0e-10 here)."""
+    from core.scenario.runner import configure_from_spec
+    from core.scenario.spec import ScenarioSpec
+
+    spec = ScenarioSpec.read(REPO / "examples/cameras_waypoint.yaml")
+    spec.set("duration", 1.0)
+    with contextlib.redirect_stdout(io.StringIO()):
+        fdm = configure_from_spec(spec)
+    cases = [
+        ("atmosphere.temperature_deviation_c", "atmosphere/delta-T", 36.0),
+        ("atmosphere.sea_level_pressure_hpa", "atmosphere/P-sl-psf", 1000.0 * HPA_TO_PSF),
+        ("atmosphere.relative_humidity_pct", "atmosphere/RH", 0.5),
+    ]
+    readbacks = {}
+    for name, prop, written in cases:
+        entry = REGISTRY.get(name)
+        assert entry.jsbsim_writes[0].property == prop
+        fdm.props.set(prop, written)
+        with contextlib.redirect_stdout(io.StringIO()):
+            for _ in range(3):
+                fdm.step()
+        readbacks[name] = Readback(prop, fdm.props.get(prop), written,
+                                   entry.readback_tolerance.value,
+                                   entry.readback_tolerance.kind,
+                                   entry.readback_tolerance.reason)
+    for name, rb in readbacks.items():
+        assert rb.agrees, (name, rb.to_dict())
+    assert readbacks["atmosphere.temperature_deviation_c"].difference == 0.0
+    assert readbacks["atmosphere.sea_level_pressure_hpa"].difference == 0.0
+    rh = readbacks["atmosphere.relative_humidity_pct"]
+    assert abs(rh.difference) / 0.5 < 1e-6
+    # The W&B station the loading wave will write: exact, measured here too.
+    fdm.props.set("inertia/pointmass-weight-lbs[1]", 300.0)
+    assert fdm.props.get("inertia/pointmass-weight-lbs[1]") == 300.0

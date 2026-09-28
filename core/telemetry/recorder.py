@@ -61,6 +61,16 @@ DEFAULT_CHANNELS = (
     "v_north_mps",
     "v_east_mps",
     "v_down_mps",
+    # -- the atmosphere block (gap P1): what the FDM's atmosphere delivered
+    # at the sample -- density and pressure altitude by JSBSim's own
+    # inversion, humidity, vapour pressure, temperature and pressure.
+    # Recorded, NOT graded: the Gate 5 comparison set is unchanged.
+    "density_altitude_m",
+    "pressure_altitude_m",
+    "rh_pct",
+    "vapour_pressure_pa",
+    "temperature_k",
+    "pressure_hpa",
 )
 
 

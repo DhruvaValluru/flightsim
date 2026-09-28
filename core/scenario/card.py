@@ -115,6 +115,22 @@ def discovered_engine_mixture(spec: ScenarioSpec) -> float:
     return float(mixture)
 
 
+def atmosphere_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
+    """The ``atmosphere_properties`` block for a spec, or None for the
+    standard day (no block: the host writes nothing). Keys in the fixed
+    order ``core.environment.atmosphere.CARD_KEYS``."""
+    from core.environment.atmosphere import CARD_KEYS, NonStandardAtmosphere
+
+    provider = NonStandardAtmosphere.from_spec(spec)
+    if provider is None:
+        return None
+    block = provider.card_block()
+    if tuple(block) != CARD_KEYS:
+        raise RuntimeError(f"atmosphere card keys {list(block)} are not the "
+                           f"fixed order {list(CARD_KEYS)}")
+    return block
+
+
 def write_run_card(spec: ScenarioSpec, path: Path,
                    control_inputs: Sequence[Dict[str, float]] = (),
                    duration_s: Optional[float] = None,
@@ -200,6 +216,13 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         provider = DrydenTurbulence(str(spec.turbulence.value),
                                     seed=int(spec.seed.value))
         card["turbulence_properties"] = provider.configure()
+    atmosphere = atmosphere_card_block(spec)
+    if atmosphere is not None:
+        # Gap P1: the EXACT JSBSim property writes the headless provider
+        # makes (delta-T in R, P-sl in psf, dew point in R; null = not
+        # written), in a fixed key order, so the UE host applies the same
+        # numbers before its trim and every step and derives nothing.
+        card["atmosphere_properties"] = atmosphere
     if reference_speeds:
         # Display-only (the HUD/panel stall-margin marks): the MODEL's own
         # measured Vs and CLmax with their basis string (§2.4), so the marks

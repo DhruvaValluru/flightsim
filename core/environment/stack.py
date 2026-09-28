@@ -89,6 +89,39 @@ class EnvironmentStack:
 
     # -- application ----------------------------------------------------
 
+    def prepare(self, fdm) -> Dict[str, Any]:
+        """The pre-trim hook. Call once, after the initial conditions and
+        BEFORE the trim (gap P1).
+
+        ``configure`` runs after the trim, so anything written there is
+        invisible to the trim solver: a hot day applied that way trims the
+        aircraft in ISA air and then flies it in hot air (measured: the
+        trimmed throttle differs). Atmosphere providers are written here,
+        through their own ``prepare(fdm)`` when they have one (which also
+        measures the with/without pair for the record) and through
+        ``properties`` otherwise. Returns each provider's report by name.
+        """
+        report: Dict[str, Any] = {}
+        for provider in self.atmosphere:
+            hook = getattr(provider, "prepare", None)
+            if hook is not None:
+                report[provider.name] = hook(fdm)
+            else:
+                writes = provider.properties(self.position_of(fdm), fdm.sim_time)
+                fdm.props.set_many(writes)
+                report[provider.name] = {"writes": writes}
+        return report
+
+    def applied_variables(self) -> List[Any]:
+        """Every ``AppliedVariable`` the providers return (those that
+        define ``applied_variables``), in provider order."""
+        out: List[Any] = []
+        for provider in self.providers:
+            hook = getattr(provider, "applied_variables", None)
+            if hook is not None:
+                out.extend(hook())
+        return out
+
     def configure(self, fdm) -> None:
         """One-time setup. Call once, before stepping, after trim.
 
@@ -112,6 +145,14 @@ class EnvironmentStack:
         """
         position = self.position_of(fdm)
         time_s = fdm.sim_time
+
+        # The atmosphere read-back: what the previous step was given is read
+        # back BEFORE this step's write, so the record says whether a JSBSim
+        # step overwrote it (it does not, measured; recorded, not assumed).
+        for provider in self.atmosphere:
+            observe = getattr(provider, "observe", None)
+            if observe is not None:
+                observe(fdm)
 
         wind = self.wind_at(position, time_s)
         writes = {
