@@ -320,3 +320,28 @@ def test_the_cli_void_tier_forwards_no_scene(imported_repo, tmp_path,
     assert not [t for t in command if t.startswith(("-sun-", "-terrain="))]
     assert f"-mesh={mesh}" in command
     assert "-labels" in command and "-deterministic" in command
+
+
+def test_the_cli_passes_argument_reaches_the_command_and_its_absence_adds_nothing(
+        imported_repo, tmp_path, monkeypatch):
+    """I6: --passes normal,albedo becomes one -passes= token in the
+    builder's order; without the argument no token starts with -passes."""
+    import assets_pipeline.importer as importer_module
+    import core.util.platform as platform_module
+
+    repo, mesh = imported_repo
+    commands = []
+    monkeypatch.setattr(platform_module, "ue_available", lambda: True)
+    monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
+    monkeypatch.setattr("subprocess.run", _fake_subprocess(
+        commands, lambda c: any("render_ue_scenario" in str(p) for p in c)))
+    code = capture_main([str(SPEC), "--out", str(tmp_path / "passes"),
+                         "--max-previews", "0", "--render", "--no-host-flight",
+                         "--passes", "albedo,normal"])
+    assert code == 0
+    assert [t for t in commands[0] if t.startswith("-passes")] == ["-passes=normal,albedo"]
+    commands.clear()
+    code = capture_main([str(SPEC), "--out", str(tmp_path / "plain"),
+                         "--max-previews", "0", "--render", "--no-host-flight"])
+    assert code == 0
+    assert not [t for t in commands[0] if t.startswith("-passes")]

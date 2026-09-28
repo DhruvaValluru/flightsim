@@ -529,7 +529,7 @@ def test_datum_handling_is_named_in_all_three_cases(tmp_path):
     assert datum_for_run(applied)["undulation_m"] == 52.52
     # card.json is read when the manifest carries no block
     card_run = write_run(tmp_path / "card", telemetry, manifest=False)
-    (card_run / "card.json").write_text(json.dumps({"datum": dict(MATTERHORN_DATUM, undulation_m=-25.94)}))
+    (card_run / "card.json").write_text(json.dumps({"datum": dict(MATTERHORN_DATUM, undulation_m=-25.94)}), encoding="utf-8")
     block = datum_for_run(card_run)
     assert block["undulation_m"] == -25.94 and block["source_file"] == "card.json"
     # no manifest at all: the aircraft comes from the provenance name minus -tecs
@@ -599,10 +599,10 @@ def test_cli_writes_one_pdu_per_sample_of_a_real_run(real_run, tmp_path):
          "--site", "7", "--application", "3", "--entity", "42"],
         cwd=str(REPO), capture_output=True, text=True, timeout=300)
     assert result.returncode == 0, result.stdout + result.stderr
-    telemetry = json.loads((real_run / "telemetry.json").read_text())
+    telemetry = json.loads((real_run / "telemetry.json").read_text(encoding="utf-8"))
     n = len(telemetry["columns"]["t"])
     assert n > 1
-    manifest = json.loads((out.parent / "dis_manifest.json").read_text())
+    manifest = json.loads((out.parent / "dis_manifest.json").read_text(encoding="utf-8"))
     assert manifest["pdu_count"] == manifest["samples"] == n
     assert manifest["one_pdu_per_sample"] is True
     assert manifest["stream_bytes"] == n * 144 == out.stat().st_size

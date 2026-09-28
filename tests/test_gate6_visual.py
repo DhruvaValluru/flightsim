@@ -399,7 +399,8 @@ def test_every_look_clause_reports_not_run_with_its_measurement_when_unrendered(
     clauses = look_clauses(tmp_path)
     assert [clause.name for clause in clauses] == [
         "cloud base bracket", "extinction follows visibility",
-        "wet surface null test", "exposure holds at -12 deg sun"]
+        "wet surface null test", "exposure holds at -12 deg sun",
+        "albedo sun invariance"]
     for clause in clauses:
         assert clause.status == "NOT RUN" and not clause.ran and not clause.ok
         assert clause.measurement, clause.name
@@ -419,6 +420,75 @@ def test_the_look_controls_change_one_switch_each():
     assert float(clear.split("=")[1]) == pytest.approx(3.912 / 50000.0, rel=1e-3)
     assert all(shot == "terrain" for shot, _ in LOOK_RUNS.values())
     assert LOOK_THRESHOLDS["cloud_min_changed_px"] > LOOK_THRESHOLDS["cloud_max_leak_px"]
+    # I6: the albedo pair differs in the sun alone, and both carry the pass.
+    high, low = LOOK_RUNS["albedo_sun_high"][1], LOOK_RUNS["albedo_sun_low"][1]
+    assert "-sun-elev=60" in high and "-sun-elev=15" in low
+    assert [f for f in high if not f.startswith("-sun-elev=")] == \
+        [f for f in low if not f.startswith("-sun-elev=")]
+    assert "-labels" in high and "-passes=albedo" in high
+
+
+# -- I6: the albedo sun-invariance clause, against fabricated renders --------
+
+from core.capture.labels import write_rgb16_png  # noqa: E402
+from experiments.gate6_visual import (  # noqa: E402
+    ALBEDO_MEASUREMENT, measure_albedo_sun_invariance,
+)
+
+
+def albedo_render(directory, beauty_ground, albedo, name_it=True):
+    """A render with -passes=albedo: a beauty still and the 16-bit albedo
+    its record names (or does not, when ``name_it`` is False)."""
+    still(directory, frame(ground=beauty_ground))   # the wet clause's geometry
+    if albedo is not None:
+        write_rgb16_png(directory / "frame_0000_albedo.png", albedo)
+    manifest = json.loads((directory / "render.json").read_text(encoding="utf-8"))
+    manifest["frame_records"][-1]["albedo_png"] = (
+        "frame_0000_albedo.png" if name_it and albedo is not None else None)
+    (directory / "render.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return directory
+
+
+def _albedo_image(value, shade_rows=None, delta=0):
+    image = np.full((HEIGHT, WIDTH, 3), value, dtype=np.uint16)
+    if shade_rows is not None:
+        image[shade_rows[0]:shade_rows[1], :, :] = value + delta
+    return image
+
+
+def test_an_albedo_that_ignores_the_sun_passes(tmp_path):
+    high = albedo_render(tmp_path / "high", (120, 115, 105), _albedo_image(30000))
+    low = albedo_render(tmp_path / "low", (60, 58, 52), _albedo_image(30000))
+    clause = measure_albedo_sun_invariance(high, low)
+    assert clause.ok, clause.detail
+    assert "0.000 %" in clause.detail
+
+
+def test_an_albedo_that_darkens_with_the_sun_fails(tmp_path):
+    """A base colour the low sun shaded (1000 counts of 65535 over the
+    ground rows) is lighting leaking into the albedo."""
+    high = albedo_render(tmp_path / "high", (120, 115, 105), _albedo_image(30000))
+    low = albedo_render(tmp_path / "low", (60, 58, 52),
+                        _albedo_image(30000, (90, 180), -1000))
+    clause = measure_albedo_sun_invariance(high, low)
+    assert clause.ran and not clause.ok
+    assert "50.000 %" in clause.detail       # 90 of 180 rows changed
+
+
+def test_a_sun_change_that_moved_no_beauty_pixel_makes_the_clause_vacuous(tmp_path):
+    high = albedo_render(tmp_path / "high", (120, 115, 105), _albedo_image(30000))
+    low = albedo_render(tmp_path / "low", (120, 115, 105), _albedo_image(30000))
+    clause = measure_albedo_sun_invariance(high, low)
+    assert clause.ran and not clause.ok and "vacuous" in clause.detail
+
+
+def test_a_render_whose_record_names_no_albedo_fails_by_the_record(tmp_path):
+    high = albedo_render(tmp_path / "high", (120, 115, 105), _albedo_image(30000),
+                         name_it=False)
+    low = albedo_render(tmp_path / "low", (60, 58, 52), _albedo_image(30000))
+    clause = measure_albedo_sun_invariance(high, low)
+    assert clause.ran and not clause.ok and "names no albedo_png" in clause.detail
+    assert clause.measurement == ALBEDO_MEASUREMENT
 
 
 # -- engine source pins (UNCOMPILED here; the text is what can be measured) --
@@ -580,3 +650,131 @@ def test_the_build_targets_include_order_is_the_pinned_engines():
         text = (REPO / "ue/Source" / name).read_text(encoding="utf-8")
         assert f"IncludeOrderVersion = {wanted};" in text, f"{name} does not pin {wanted}"
         assert "Unreal5_5" not in text, f"{name} still says Unreal5_5"
+
+
+# -- I6 (gap S3): the ground-truth passes, as C++ text (UNCOMPILED here) ------
+
+MATERIALS_SCRIPT = REPO / "scripts/ue_create_materials.py"
+
+
+def _source() -> str:
+    return COMMANDLET.read_text(encoding="utf-8")
+
+
+def _constant(source: str, name: str) -> float:
+    match = re.search(rf"constexpr float {name} = ([0-9.]+)f;", source)
+    assert match, name
+    return float(match.group(1))
+
+
+def test_the_three_pass_materials_are_loaded_by_the_paths_the_script_creates():
+    source = _source()
+    for name in ("M_WorldNormalPass", "M_VelocityPass", "M_BaseColorPass"):
+        assert f'TEXT("/Game/FlightSim/{name}.{name}")' in source, name
+    for word, path in (("normal", "RenderPassNormalMaterialPath"),
+                       ("velocity", "RenderPassVelocityMaterialPath"),
+                       ("albedo", "RenderPassBaseColorMaterialPath")):
+        assert f'LoadPassMaterial(TEXT("{word}"), {path}, ' in source, word
+    assert "PPI_WorldNormal" in source and "PPI_Velocity" in source and "PPI_BaseColor" in source
+
+
+def test_every_pass_capture_goes_through_the_label_pass_route():
+    """MakePassCapture: SCS_FinalColorHDR, ConfigureLabelCapture (the
+    AA-free rule), the pass material as the one blendable; the velocity
+    alone keeps its rendering state (it is a difference against the
+    previous frame) and forces static geometry to write a vector."""
+    source = _source()
+    block = re.search(r"auto MakePassCapture = \[&\]\((.*?)\n\t\t\t\};", source, re.S)
+    assert block, "MakePassCapture is gone"
+    text = block.group(1)
+    assert "ConfigureLabelCapture(Pass);" in text
+    assert "Pass->CaptureSource = ESceneCaptureSource::SCS_FinalColorHDR;" in text
+    assert "FWeightedBlendable(1.0f, Material)" in text
+    assert "PassVelocity->bAlwaysPersistRenderingState = true;" in source
+    assert 'FindConsoleVariable(TEXT("r.Velocity.ForceOutput"))' in source
+    assert 'TEXT("r.Velocity.ForceOutput"),' in source        # read back in render_settings
+    assert "PassVelocityTarget = MakePassTarget(RTF_RGBA32f);" in source
+    assert "PassNormalTarget = MakePassTarget(RTF_RGBA16f);" in source
+    assert "PassAlbedoTarget = MakePassTarget(RTF_RGBA16f);" in source
+
+
+def test_the_velocity_pass_renders_before_the_beauty_capture():
+    """The engine keeps a primitive's previous transform for the first
+    scene render after it changed; the velocity capture has to be that
+    render. Pinned as ORDER inside the run loop."""
+    source = _source()
+    loop = source.index("for (int32 Step = 0; Step < Steps; ++Step)")
+    velocity = source.index("PassVelocity->CaptureScene();", loop)
+    beauty = source.index("Capture->CaptureScene();", loop)
+    assert velocity < beauty
+    assert source.index("World->SendAllEndOfFrameUpdates();", loop) < velocity
+
+
+def test_the_pass_files_and_record_keys_are_the_contracted_ones():
+    source = _source()
+    for suffix in ('TEXT("_normal.png")', 'TEXT("_flow.f32")', 'TEXT("_albedo.png")'):
+        assert f"PassStem + {suffix}" in source, suffix
+    for key in ("normal_png", "flow_f32", "albedo_png"):
+        assert f'Record->SetStringField(TEXT("{key}"), ' in source, key
+        assert f'Record->SetField(TEXT("{key}"), MakeShared<FJsonValueNull>());' in source, key
+    assert 'Record->SetBoolField(TEXT("flow_first_frame"), !bFlowHasPrevious);' in source
+    assert 'Root->SetObjectField(TEXT("passes"), Passes);' in source
+    # The writes sit under the pass switches: no pass, no file, no key.
+    assert "if (bPasses)\n\t\t{\n\t\t\tconst int32 PassCount = Width * Height;" in source
+
+
+def test_the_first_flow_frame_is_zeros_and_the_sign_is_screen_down():
+    source = _source()
+    assert "Flow.SetNumZeroed(PassCount * 2);" in source
+    assert "if (bFlowHasPrevious)\n\t\t\t\t{" in source
+    assert "const float DxPx = NdcX * 0.5f * Width;" in source
+    assert "const float DyPx = -NdcY * 0.5f * Height;" in source
+    assert "bFlowHasPrevious = true;" in source
+
+
+def test_the_signed_offset_encoding_is_one_number_in_three_places():
+    """The material writes value * 0.5 + 0.5, the commandlet inverts it
+    and re-encodes the normal with the same 0.5 offset the Python reader
+    undoes: one pair of constants, pinned across the three files."""
+    from core.capture.labels import NORMAL_ENCODE_OFFSET, NORMAL_ENCODE_SCALE
+
+    source = _source()
+    script = MATERIALS_SCRIPT.read_text(encoding="utf-8")
+    scale = float(re.search(r"^SIGNED_SCALE = ([0-9.]+)$", script, re.M).group(1))
+    offset = float(re.search(r"^SIGNED_OFFSET = ([0-9.]+)$", script, re.M).group(1))
+    assert (scale, offset) == (0.5, 0.5)
+    assert _constant(source, "RenderPassSignedScale") == scale
+    assert _constant(source, "RenderPassSignedOffset") == offset
+    assert _constant(source, "RenderPassNormalEncodeScale") == NORMAL_ENCODE_SCALE
+    assert _constant(source, "RenderPassNormalEncodeOffset") == NORMAL_ENCODE_OFFSET
+    assert _constant(source, "RenderPassPngMax") == 65535.0
+    assert "(Raw[i].R - RenderPassSignedOffset) / RenderPassSignedScale" in source
+    assert "N.X * RenderPassNormalEncodeScale + RenderPassNormalEncodeOffset" in source
+
+
+def test_the_normal_is_written_in_the_scene_frame():
+    source = _source()
+    assert "GetENUVectorsAtEngineLocation(" in source
+    assert ("FVector::DotProduct(Engine, North),\n\t\t\t\t\t                    "
+            "FVector::DotProduct(Engine, East),\n\t\t\t\t\t                    "
+            "FVector::DotProduct(Engine, Up)") in source
+
+
+def test_the_pass_refusals_are_by_name():
+    source = _source()
+    assert 'TEXT("labels.pass_material: -passes=%s needs the post-process material ")' in source
+    assert 'TEXT("labels.pass_unknown: -passes names \'%s\'; the passes this build ")' in source
+    assert 'TEXT("labels.pass_needs_labels: -passes rides the label-pass route ")' in source
+    assert "if (bPasses && !bLabels)" in source
+    # The refusals come before any pass is built and after Fail exists.
+    assert source.index("auto Fail = ") < source.index("labels.pass_unknown: ")
+    assert source.index("labels.pass_needs_labels: ") < source.index("auto MakePassCapture")
+
+
+def test_the_pass_words_are_the_builders():
+    from core.render.flags import PASS_NAMES
+
+    source = _source()
+    for word in PASS_NAMES:
+        assert f'Word == TEXT("{word}")' in source, word
+    assert 'FParse::Value(*Params, TEXT("passes="), PassesArg);' in source

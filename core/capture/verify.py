@@ -3813,6 +3813,536 @@ def verify_applied_pose(manifest: Dict, run_dir=None) -> Check:
                  f"{APPLIED_POSE_TOL_M} m / {APPLIED_POSE_TOL_DEG} deg)")
 
 
+# -- I6 (gap S3): the ground-truth passes -------------------------------------
+#
+# The commandlet's -passes=normal,velocity,albedo writes frame_NNNN_normal.png
+# (16-bit, (n * 0.5 + 0.5) * 65535, n in the scene frame north/east/up),
+# frame_NNNN_flow.f32 (little-endian float32 (dx, dy) pixels, +x right, +y
+# down, previous captured frame to this one; the first frame zeros) and
+# frame_NNNN_albedo.png (16-bit linear base colour), named on the render.json
+# record as normal_png / flow_f32 / albedo_png. Each check below reads the
+# file with this module's OWN reader and grades it against something the
+# engine did not write it from: the normals against the depth file through
+# the record's intrinsics, the flow against the keypoints' motion through the
+# manifest's states and poses, the albedo against the beauty picture. NOT RUN
+# without the file it needs; never a pass on absence.
+
+#: Median angle allowed between the normal the depth implies and the normal
+#: the pass wrote, over smooth-depth pixels.
+NORMAL_ANGLE_TOL_DEG = 10.0
+#: A pixel is "smooth" when its depth and its four neighbours' are finite
+#: and no neighbour differs by more than this fraction of the depth: a
+#: silhouette edge or the sky is not a surface to differentiate across.
+#: 0.02 keeps a plane up to about 87 deg off the view ray at fx = 1000 px.
+SMOOTH_DEPTH_FRACTION = 0.02
+#: Fewer smooth pixels than this and the frame is not graded.
+NORMAL_MIN_SMOOTH_PIXELS = 100
+#: Median pixel error allowed between the flow at a keypoint's pixel and
+#: the keypoint's projected displacement from the previous frame.
+FLOW_TOL_PX = 2.0
+#: Fewer keypoints inside the ID image than this, across the run, and the
+#: flow is not graded.
+FLOW_MIN_KEYPOINTS = 3
+#: The albedo must differ from the beauty picture (both as 8-bit) by more
+#: than ALBEDO_DIFFERENT_COUNTS on at least this fraction of pixels.
+ALBEDO_MIN_DIFFERENT_FRACTION = 0.01
+ALBEDO_DIFFERENT_COUNTS = 2
+PASS_PNG16_MAX = 65535.0
+
+FAIL_NORMALS = "annotation.normals"
+FAIL_FLOW = "annotation.flow"
+FAIL_ALBEDO = "annotation.albedo"
+
+
+def _read_rgb16(path):
+    """A 16-bit RGB(A) PNG as an (h, w, 3) uint16 array through rasterio
+    (own reader: Pillow hands a 16-bit RGB PNG back as 8-bit).
+    :class:`BundleFileError` when it cannot be read; a string when it is
+    not the 16-bit three-channel file the contract declares."""
+    import numpy as np
+    try:
+        import rasterio
+        from rasterio.errors import RasterioIOError
+    except ImportError:            # pragma: no cover - rasterio is in the venv
+        return "rasterio unavailable"
+    path = Path(path)
+    if not path.is_file():
+        raise BundleFileError(_unreadable(path, FileNotFoundError(str(path))))
+    try:
+        with rasterio.open(path) as dataset:
+            if dataset.count < 3:
+                return f"{path.name}: {dataset.count} channel(s), not three"
+            if dataset.dtypes[0] != "uint16":
+                return f"{path.name}: {dataset.dtypes[0]} samples, not 16-bit"
+            planes = dataset.read((1, 2, 3))
+    except (RasterioIOError, OSError) as exc:
+        raise BundleFileError(_unreadable(path, OSError(str(exc)))) from exc
+    return np.ascontiguousarray(np.transpose(planes, (1, 2, 0)))
+
+
+def _read_flow(path, width: int, height: int):
+    """``frame_NNNN_flow.f32`` as (h, w, 2) float64 pixels; a string when
+    the size is not width*height*2 float32 values."""
+    import numpy as np
+
+    path = Path(path)
+    try:
+        raw = np.fromfile(path, dtype="<f4")
+    except OSError as exc:
+        raise BundleFileError(_unreadable(path, exc)) from exc
+    if raw.size != width * height * 2:
+        return (f"{path.name}: {raw.size} float32 values for a {width}x{height} "
+                f"flow ({width * height * 2} expected)")
+    return raw.reshape(height, width, 2).astype("float64")
+
+
+def _pass_frames(manifest: Dict, run_dir, key: str):
+    """Yield (record, camera, name, engine, folder, file) for every bundle
+    frame whose render.json record declares the pass file under ``key``."""
+    for record, camera, name, engine, folder in _bundle_frames(manifest, run_dir):
+        file = engine.get(key)
+        if isinstance(file, str) and file:
+            yield record, camera, name, engine, folder, file
+
+
+def _no_pass_reason(word: str, key: str) -> str:
+    return (f"no render.json frame record declares {key} (no -passes={word}, or no "
+            f"engine pass at all): render on Windows with -labels -passes={word} to "
+            f"exercise this")
+
+
+@_reads_the_bundle
+def verify_normals_vs_depth(manifest: Dict, run_dir=None) -> Check:
+    """The normal pass against the depth file.
+
+    Per frame with a normal image and a float32 depth: the camera-space
+    surface normal at every interior pixel from the depth by central
+    differences of the back-projected points (the record's fx, fy,
+    principal point; x right, y down, z forward), oriented toward the
+    camera; the pass's scene-frame normal rotated into the camera by the
+    record's quaternion through this module's own axes; the angle between
+    them over SMOOTH pixels (finite depth at the pixel and its four
+    neighbours, no neighbour more than SMOOTH_DEPTH_FRACTION of the depth
+    away). The median over those pixels must be under
+    NORMAL_ANGLE_TOL_DEG; a normal image rotated by more than that fails
+    by name (annotation.normals). NOT RUN without the normal image or the
+    float32 depth (the 16-bit PNG at 0.1 m quantises the differences).
+    NOT claimed: silhouette edges, the sky, and pixels the depth resolves
+    at under the smoothness rule -- a surface at grazing incidence.
+    """
+    frames = list(_pass_frames(manifest, run_dir, "normal_png"))
+    if not frames:
+        return Check("normals_vs_depth", NOT_RUN, _no_pass_reason("normal", "normal_png"))
+    import numpy as np
+
+    graded = 0
+    skipped = []
+    worst = (0.0, "")
+    for record, camera, name, engine, folder, file in frames:
+        labels = engine["labels"]
+        where = f"{camera}/{name}"
+        if not labels.get("depth_f32"):
+            return Check("normals_vs_depth", NOT_RUN,
+                         f"{where}: the normals are graded against the float32 depth "
+                         f"and the record declares none (the 16-bit PNG at its "
+                         f"0.1 m step quantises the finite differences)")
+        width, height = int(record["width_px"]), int(record["height_px"])
+        depth = _read_depth_metres(folder, labels, width, height)
+        if isinstance(depth, str):
+            return Check("normals_vs_depth", FAIL, f"{where}: {depth}", failure=FAIL_NORMALS)
+        stored = _read_rgb16(folder / file)
+        if isinstance(stored, str):
+            return Check("normals_vs_depth", FAIL, f"{where}: {stored}", failure=FAIL_NORMALS)
+        if stored.shape[:2] != depth.shape:
+            return Check("normals_vs_depth", FAIL,
+                         f"{where}: the normal image is {stored.shape[1]}x{stored.shape[0]}, "
+                         f"the depth {depth.shape[1]}x{depth.shape[0]}", failure=FAIL_NORMALS)
+        # The pass's normal, decoded here: v / 65535 -> [0, 1] -> [-1, 1].
+        n_scene = (stored.astype("float64") / PASS_PNG16_MAX - 0.5) * 2.0
+        forward, right, up = axes_from_quat(record["quaternion_wxyz"])
+        rows = np.array([right, [-c for c in up], forward], dtype="float64")   # x, y, z
+        n_cam_pass = n_scene @ rows.T
+        length = np.linalg.norm(n_cam_pass, axis=2)
+        n_cam_pass = n_cam_pass / np.where(length > 1e-9, length, 1.0)[..., None]
+        # The depth's normal: back-project, differentiate, cross, orient.
+        fx, fy = float(record["fx_px"]), float(record["fy_px"])
+        cx, cy = (float(c) for c in record["principal_point_px"])
+        u = np.arange(width, dtype="float64")[None, :]
+        v = np.arange(height, dtype="float64")[:, None]
+        z = depth
+        points = np.stack([(u - cx) / fx * z, (v - cy) / fy * z, z], axis=2)
+        interior = (slice(1, -1), slice(1, -1))
+        d_du = (points[1:-1, 2:] - points[1:-1, :-2]) * 0.5
+        d_dv = (points[2:, 1:-1] - points[:-2, 1:-1]) * 0.5
+        n_depth = np.cross(d_du, d_dv)
+        length = np.linalg.norm(n_depth, axis=2)
+        n_depth = n_depth / np.where(length > 1e-12, length, 1.0)[..., None]
+        facing = np.einsum("ijk,ijk->ij", n_depth, points[interior])
+        n_depth = np.where((facing > 0.0)[..., None], -n_depth, n_depth)
+        centre = z[interior]
+        finite = np.isfinite(centre)
+        smooth = finite.copy()
+        for neighbour in (z[1:-1, 2:], z[1:-1, :-2], z[2:, 1:-1], z[:-2, 1:-1]):
+            with np.errstate(invalid="ignore"):
+                near = np.isfinite(neighbour) & (
+                    np.abs(neighbour - centre) <= SMOOTH_DEPTH_FRACTION * np.abs(centre))
+            smooth &= near
+        smooth &= length > 1e-12
+        count = int(np.count_nonzero(smooth))
+        if count < NORMAL_MIN_SMOOTH_PIXELS:
+            skipped.append(f"{where} ({count} smooth pixels)")
+            continue
+        cosine = np.einsum("ijk,ijk->ij", n_depth, n_cam_pass[interior])
+        angle = np.degrees(np.arccos(np.clip(cosine[smooth], -1.0, 1.0)))
+        median = float(np.median(angle))
+        if median > worst[0]:
+            worst = (median, f"{where} ({count} smooth pixels)")
+        if median > NORMAL_ANGLE_TOL_DEG:
+            return Check("normals_vs_depth", FAIL,
+                         f"{where}: the pass's normals sit a median {median:.1f} deg "
+                         f"from the normals the depth implies over {count} smooth "
+                         f"pixels (tolerance {NORMAL_ANGLE_TOL_DEG:g} deg): the normal "
+                         f"image is not the surface the depth shows -- a wrong axis, "
+                         f"frame or sign", failure=FAIL_NORMALS)
+        graded += 1
+    if graded == 0:
+        return Check("normals_vs_depth", NOT_RUN,
+                     f"no frame with at least {NORMAL_MIN_SMOOTH_PIXELS} smooth-depth "
+                     f"pixels to differentiate ({'; '.join(skipped[:3]) or 'none'})")
+    return Check("normals_vs_depth", PASS,
+                 f"{graded} frames: the pass's normals agree with the depth's to a "
+                 f"median of at most {worst[0]:.2f} deg at {worst[1]} (tolerance "
+                 f"{NORMAL_ANGLE_TOL_DEG:g} deg, smooth pixels only)"
+                 + (f"; not graded: {'; '.join(skipped[:3])}" if skipped else ""))
+
+
+@_reads_the_bundle
+def verify_flow_vs_motion(manifest: Dict, run_dir=None) -> Check:
+    """The flow at the primary airframe's keypoints against their motion.
+
+    Per camera, the labelled frames in time order; for every consecutive
+    pair whose later frame declares a flow file: each keypoint of the
+    airframe block placed by the two frames' aircraft states and
+    projected through the two records with this module's own rotation
+    and pinhole; the predicted displacement (u_now - u_prev, v_now -
+    v_prev) against the flow sampled at the pixel containing (u_now,
+    v_now), for keypoints inside the image whose pixel carries the
+    primary's int_id in the ID image. The median |error| over all such
+    keypoints in the run must be under FLOW_TOL_PX; a scaled or negated
+    flow fails by name (annotation.flow). A frame flagged
+    flow_first_frame must be all zeros. NOT RUN without a flow file, with
+    one frame per camera, or with fewer than FLOW_MIN_KEYPOINTS keypoints
+    inside the mask. NOT claimed: the flow between the two frames at a
+    keypoint the airframe itself occludes (its pixel shows a nearer
+    surface of the same rigid body; the tolerance absorbs the parallax
+    at the ranges the datasets fly), and any pixel off the airframe.
+    """
+    objects = _declared_objects(manifest)
+    if not objects:
+        return Check("flow_vs_motion", NOT_RUN, _no_objects_reason(manifest))
+    declared = _engine_label_records(run_dir)
+    if not declared:
+        return Check("flow_vs_motion", NOT_RUN, _no_bundle_reason())
+    primary = None
+    for entry in _aircraft_entries(objects):
+        if entry.get("role") == "primary" or int(entry.get("int_id", 0)) == AIRCRAFT_INSTANCE_ID:
+            primary = entry
+    airframe = manifest.get("airframe")
+    keypoints = [(str(kp["name"]), tuple(float(c) for c in kp["body_m"]))
+                 for kp in ((airframe or {}).get("keypoints") or [])
+                 if isinstance(kp, dict) and kp.get("name") and kp.get("body_m")]
+    if primary is None or not keypoints:
+        return Check("flow_vs_motion", NOT_RUN,
+                     "the manifest names no primary airframe with keypoints to "
+                     "predict a displacement for")
+    primary_id = int(primary["int_id"])
+    import numpy as np
+
+    by_camera: Dict[str, List[Dict]] = {}
+    for record in _labelled_frames(manifest):
+        by_camera.setdefault(str(record["camera_id"]), []).append(record)
+    any_flow = False
+    pairs = 0
+    first_frames = 0
+    errors: List[Tuple[float, str]] = []
+    for camera, records in by_camera.items():
+        records.sort(key=lambda r: float(r["t_s"]))
+        folder = Path(run_dir) / "frames" / camera
+        prev: Optional[Dict] = None
+        for record in records:
+            name = Path(str(record["file"])).name
+            engine = declared.get(camera, {}).get(name)
+            file = (engine or {}).get("flow_f32")
+            if not isinstance(file, str) or not file:
+                prev = record
+                continue
+            any_flow = True
+            where = f"{camera}/{name}"
+            width, height = int(record["width_px"]), int(record["height_px"])
+            flow = _read_flow(folder / file, width, height)
+            if isinstance(flow, str):
+                return Check("flow_vs_motion", FAIL, f"{where}: {flow}", failure=FAIL_FLOW)
+            if engine.get("flow_first_frame") or prev is None:
+                if np.any(flow != 0.0):
+                    return Check("flow_vs_motion", FAIL,
+                                 f"{where}: the record flags the first frame of the "
+                                 f"camera (all zeros by contract) but the flow file "
+                                 f"holds {int(np.count_nonzero(flow.any(axis=2)))} moving "
+                                 f"pixels", failure=FAIL_FLOW)
+                first_frames += 1
+                prev = record
+                continue
+            labels = engine.get("labels") or {}
+            mask = _read_gray_png(folder / labels["mask"]) if labels.get("mask") else None
+            state_now, state_prev = record.get("aircraft"), prev.get("aircraft")
+            if not isinstance(state_now, dict) or not isinstance(state_prev, dict):
+                return Check("flow_vs_motion", NOT_RUN,
+                             f"{where}: no aircraft state on the frame pair to move "
+                             f"the keypoints by")
+            axes_now = axes_from_quat(record["quaternion_wxyz"])
+            axes_prev = axes_from_quat(prev["quaternion_wxyz"])
+            for kp_name, body in keypoints:
+                p_now = _pinhole(record, _camera_coords(
+                    record, _body_point_enu(body, state_now), axes_now))
+                p_prev = _pinhole(prev, _camera_coords(
+                    prev, _body_point_enu(body, state_prev), axes_prev))
+                if p_now is None or p_prev is None:
+                    continue
+                px, py = int(math.floor(p_now[0])), int(math.floor(p_now[1]))
+                if not (0 <= px < width and 0 <= py < height):
+                    continue
+                if mask is not None and int(mask[py, px]) != primary_id:
+                    continue
+                du_pred = p_now[0] - p_prev[0]
+                dv_pred = p_now[1] - p_prev[1]
+                du, dv = float(flow[py, px, 0]), float(flow[py, px, 1])
+                error = math.hypot(du - du_pred, dv - dv_pred)
+                errors.append((error, f"{where} {kp_name} (flow {du:+.2f},{dv:+.2f} px, "
+                                      f"predicted {du_pred:+.2f},{dv_pred:+.2f} px)"))
+            pairs += 1
+            prev = record
+    if not any_flow:
+        return Check("flow_vs_motion", NOT_RUN, _no_pass_reason("velocity", "flow_f32"))
+    if pairs == 0:
+        return Check("flow_vs_motion", NOT_RUN,
+                     f"{first_frames} first frame(s) checked as zeros, but no camera "
+                     f"has a second flow frame to grade motion on")
+    if len(errors) < FLOW_MIN_KEYPOINTS:
+        return Check("flow_vs_motion", NOT_RUN,
+                     f"only {len(errors)} keypoint sample(s) fall inside the primary's "
+                     f"ID image over {pairs} frame pair(s) (minimum {FLOW_MIN_KEYPOINTS})")
+    values = np.array([e for e, _ in errors])
+    median = float(np.median(values))
+    worst = max(errors, key=lambda e: e[0])
+    if median > FLOW_TOL_PX:
+        return Check("flow_vs_motion", FAIL,
+                     f"the flow at the primary's keypoints is a median {median:.2f} px "
+                     f"from their projected displacement over {len(errors)} samples in "
+                     f"{pairs} frame pair(s) (tolerance {FLOW_TOL_PX:g} px); worst "
+                     f"{worst[0]:.2f} px at {worst[1]} -- a scaled, negated or "
+                     f"mis-based motion vector", failure=FAIL_FLOW)
+    return Check("flow_vs_motion", PASS,
+                 f"{len(errors)} keypoint samples over {pairs} frame pair(s): the flow "
+                 f"is a median {median:.2f} px from the keypoints' projected displacement "
+                 f"(tolerance {FLOW_TOL_PX:g} px), worst {worst[0]:.2f} px at {worst[1]}; "
+                 f"{first_frames} first frame(s) all zeros as declared")
+
+
+@_reads_the_bundle
+def verify_albedo_range(manifest: Dict, run_dir=None) -> Check:
+    """The albedo pass: present, 16-bit three-channel at the record's
+    size, every value finite and in [0, 1] as read, and NOT the beauty
+    picture -- as 8-bit the two must differ by more than
+    ALBEDO_DIFFERENT_COUNTS on at least ALBEDO_MIN_DIFFERENT_FRACTION of
+    pixels (a base colour that equals the lit, tone-mapped frame was
+    not a base colour pass). The mean albedo over sky pixels (depth
+    +inf) is reported, not graded. Sun invariance is Gate 6's albedo
+    clause on Windows (experiments/gate6_visual.py), not this check.
+    NOT RUN without an albedo file.
+    """
+    frames = list(_pass_frames(manifest, run_dir, "albedo_png"))
+    if not frames:
+        return Check("albedo_range", NOT_RUN, _no_pass_reason("albedo", "albedo_png"))
+    import numpy as np
+
+    graded = 0
+    least = (1.0, "")
+    sky_means: List[float] = []
+    for record, camera, name, engine, folder, file in frames:
+        where = f"{camera}/{name}"
+        width, height = int(record["width_px"]), int(record["height_px"])
+        stored = _read_rgb16(folder / file)
+        if isinstance(stored, str):
+            return Check("albedo_range", FAIL, f"{where}: {stored}", failure=FAIL_ALBEDO)
+        if stored.shape[:2] != (height, width):
+            return Check("albedo_range", FAIL,
+                         f"{where}: the albedo image is {stored.shape[1]}x{stored.shape[0]}, "
+                         f"the record says {width}x{height}", failure=FAIL_ALBEDO)
+        values = stored.astype("float64") / PASS_PNG16_MAX
+        if not np.all(np.isfinite(values)) or float(values.min()) < 0.0 or float(values.max()) > 1.0:
+            return Check("albedo_range", FAIL,
+                         f"{where}: albedo values outside [0, 1] or not finite as read",
+                         failure=FAIL_ALBEDO)
+        beauty = _read_gray_png(folder / str(engine.get("frame") or name))
+        if beauty is None:
+            return Check("albedo_range", NOT_RUN, "Pillow unavailable")
+        if beauty.ndim != 3 or beauty.shape[:2] != (height, width):
+            return Check("albedo_range", FAIL,
+                         f"{where}: the beauty frame is not an RGB image of {width}x{height}",
+                         failure=FAIL_ALBEDO)
+        albedo8 = np.rint(values * 255.0)
+        beauty8 = beauty[:, :, :3].astype("float64")
+        different = np.any(np.abs(albedo8 - beauty8) > ALBEDO_DIFFERENT_COUNTS, axis=2)
+        fraction = float(different.mean())
+        if fraction < least[0]:
+            least = (fraction, where)
+        if fraction < ALBEDO_MIN_DIFFERENT_FRACTION:
+            return Check("albedo_range", FAIL,
+                         f"{where}: the albedo differs from the beauty picture on only "
+                         f"{fraction * 100:.2f} % of pixels (minimum "
+                         f"{ALBEDO_MIN_DIFFERENT_FRACTION * 100:g} %): a base colour that "
+                         f"equals the lit, tone-mapped frame was not a base colour pass",
+                         failure=FAIL_ALBEDO)
+        labels = engine.get("labels") or {}
+        if labels.get("depth_f32"):
+            depth = _read_depth_metres(folder, labels, width, height)
+            if not isinstance(depth, str) and depth.shape == (height, width):
+                sky = ~np.isfinite(depth)
+                if sky.any():
+                    sky_means.append(float(values[sky].mean()))
+        graded += 1
+    sky_note = (f"; mean albedo over sky pixels {max(sky_means):.4f} at most "
+                f"(reported, not graded)" if sky_means else "")
+    return Check("albedo_range", PASS,
+                 f"{graded} albedo images: 16-bit, finite, in [0, 1], and unlike the "
+                 f"beauty picture on at least {least[0] * 100:.1f} % of pixels at "
+                 f"{least[1]} (minimum {ALBEDO_MIN_DIFFERENT_FRACTION * 100:g} %)"
+                 + sky_note)
+
+
+# -- P10: the vertical datum ------------------------------------------------
+
+#: How far the manifest's geoid undulation may sit from the checker's own
+#: re-evaluation of the same grid. Two bilinear readers of one file agree
+#: to floating-point; 0.01 m catches a nearest-neighbour producer (the
+#: grid's own bilinear bound is 1.152 m), a wrong origin, a wrong grid.
+DATUM_TOL_M = 0.01
+FAIL_DATUM = "scene.datum"
+#: The committed EGM96 grid the checker reads for itself (assets/geoid).
+DATUM_GRID = Path(__file__).resolve().parents[2] / "assets" / "geoid" / "egm96-15.pgm"
+DATUM_KEYS = (
+    "vertical_datum_of_heights", "geoid_model", "origin_lat_deg",
+    "origin_lon_deg", "undulation_m", "undulation_source",
+    "bilinear_error_bound_m", "model_difference_bound_m",
+    "orthometric_height_of_origin_m", "ellipsoidal_height_of_origin_m", "note",
+)
+
+
+def _own_undulation(path, lat_deg: float, lon_deg: float):
+    """The checker's OWN GeographicLib-PGM reader (it never imports
+    core.terrain.geoid): header offset/scale, big-endian uint16 samples
+    from 90N 0E, bilinear on the four surrounding nodes. Returns (N in
+    metres, the file's sha256)."""
+    import re
+
+    import numpy as np
+
+    data = Path(path).read_bytes()
+    match = re.match(rb"P5\s*(?:#[^\n]*\n\s*)*(\d+)\s+(\d+)\s*(?:#[^\n]*\n\s*)*(\d+)\s", data)
+    header = data[:match.end()].decode("ascii", "replace")
+    width, height = int(match.group(1)), int(match.group(2))
+    offset = float(re.search(r"# Offset (\S+)", header).group(1))
+    scale = float(re.search(r"# Scale (\S+)", header).group(1))
+    values = np.frombuffer(data, dtype=">u2", offset=match.end(),
+                           count=width * height).reshape(height, width)
+    fy = (90.0 - float(lat_deg)) * (height - 1) / 180.0
+    fx = (float(lon_deg) % 360.0) * width / 360.0
+    iy = min(int(math.floor(fy)), height - 2)
+    ix = int(math.floor(fx)) % width
+    dy, dx, ix1 = fy - iy, fx - ix, (ix + 1) % width
+    value = (float(values[iy, ix]) * (1.0 - dx) * (1.0 - dy)
+             + float(values[iy, ix1]) * dx * (1.0 - dy)
+             + float(values[iy + 1, ix]) * (1.0 - dx) * dy
+             + float(values[iy + 1, ix1]) * dx * dy)
+    return offset + scale * value, hashlib.sha256(data).hexdigest()
+
+
+def verify_datum(manifest: Dict) -> Check:
+    """The scene's vertical datum block against the checker's own geoid.
+
+    NOT RUN on a scene with no georeferenced heights (a flat slab or a
+    synthesised ridge: ``undulation_m`` is null there, by contract) and
+    on a manifest written before the block existed. Otherwise the block
+    must carry every key of DATUM_KEYS, name the grid the checker holds
+    (by sha256), state an undulation within DATUM_TOL_M of the checker's
+    own bilinear evaluation at the recorded origin, and an ellipsoidal
+    height equal to orthometric + undulation. FAIL by name (scene.datum)
+    on any of these. What is NOT checked: that the heights themselves
+    are EGM2008 orthometric (the bake's provenance says so; no second
+    source is available here), and the EGM96-EGM2008 difference beyond
+    the stated bound.
+    """
+    datum = manifest.get("datum")
+    if not isinstance(datum, dict):
+        return Check("datum", NOT_RUN,
+                     "the manifest carries no datum block (written before the "
+                     "vertical datum landed); nothing to re-evaluate")
+    if datum.get("undulation_m") is None:
+        return Check("datum", NOT_RUN,
+                     f"no georeferenced heights ({datum.get('vertical_datum_of_heights')}): "
+                     f"the undulation is null by contract and there is nothing to re-evaluate")
+    missing = [key for key in DATUM_KEYS if key not in datum]
+    if missing:
+        return Check("datum", FAIL,
+                     f"the datum block lacks {missing}; a block that does not say "
+                     f"where its undulation came from cannot be checked",
+                     failure=FAIL_DATUM)
+    if not DATUM_GRID.is_file():
+        return Check("datum", FAIL,
+                     f"the checker's own geoid grid {DATUM_GRID} is absent, so the "
+                     f"manifest's undulation cannot be re-evaluated (see "
+                     f"assets/geoid/README.md)", failure=FAIL_DATUM)
+    own, digest = _own_undulation(DATUM_GRID, datum["origin_lat_deg"], datum["origin_lon_deg"])
+    recorded = (datum.get("undulation_source") or {}).get("sha256")
+    if recorded != digest:
+        return Check("datum", FAIL,
+                     f"the manifest's undulation came from a grid with sha256 "
+                     f"{str(recorded)[:16]}..., the checker's is {digest[:16]}...; "
+                     f"two grids cannot be compared", failure=FAIL_DATUM)
+    stated = float(datum["undulation_m"])
+    if abs(stated - own) > DATUM_TOL_M:
+        return Check("datum", FAIL,
+                     f"the manifest states an undulation of {stated:.3f} m at "
+                     f"({datum['origin_lat_deg']}, {datum['origin_lon_deg']}); the "
+                     f"checker's own bilinear read of the same grid gives {own:.3f} m "
+                     f"(tolerance {DATUM_TOL_M} m)", failure=FAIL_DATUM)
+    ellipsoidal = float(datum["ellipsoidal_height_of_origin_m"])
+    orthometric = float(datum["orthometric_height_of_origin_m"])
+    if abs(ellipsoidal - (orthometric + stated)) > 1e-6:
+        return Check("datum", FAIL,
+                     f"ellipsoidal height {ellipsoidal:.3f} m is not orthometric "
+                     f"{orthometric:.3f} m + undulation {stated:.3f} m",
+                     failure=FAIL_DATUM)
+    return Check("datum", PASS,
+                 f"heights {datum['vertical_datum_of_heights']}; undulation "
+                 f"{stated:+.3f} m at the origin agrees with the checker's own "
+                 f"read of the grid to {abs(stated - own):.4f} m; ellipsoidal "
+                 f"origin {ellipsoidal:.1f} m = orthometric {orthometric:.1f} m + N")
+
+
+# -- Advancement I3: the instrument models' measured channels ---------------
+
+def verify_instruments(manifest: Dict, run_dir=None) -> Check:
+    """telemetry_measured.json against the profile it carries and the
+    recorder's truth beside it (core/telemetry/instruments_check.py, which
+    imports nothing from the producer). NOT RUN when the run has no
+    measured file (the ideal profile, or none stated)."""
+    from ..telemetry.instruments_check import check_instruments
+
+    result = check_instruments(run_dir)
+    return Check("instruments", result.status, result.detail, result.failure)
+
+
 def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     """The pass/fail summary over a run directory (CLI: flightsim.verify).
 
@@ -3915,6 +4445,14 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     run("sensor_files", verify_sensor_files, manifest, run_dir)
     run("frame_integrity", verify_frame_integrity, manifest, run_dir)
     run("applied_pose", verify_applied_pose, manifest, run_dir)
+    run("instruments", verify_instruments, manifest, run_dir)
+    # P10: the vertical datum block against the checker's own geoid read.
+    run("datum", verify_datum, manifest)
+    # I6 (gap S3): the ground-truth passes -- NOT RUN without their files,
+    # never a pass on absence.
+    run("normals_vs_depth", verify_normals_vs_depth, manifest, run_dir)
+    run("flow_vs_motion", verify_flow_vs_motion, manifest, run_dir)
+    run("albedo_range", verify_albedo_range, manifest, run_dir)
 
     if other is not None:
         run("temporal_alignment", verify_alignment, manifest, other)

@@ -124,7 +124,33 @@ namespace
 	// Absent -> -labels refuses by name; nothing else is written as an ID.
 	constexpr const TCHAR* RenderLabelStencilMaterialPath =
 		TEXT("/Game/FlightSim/M_CustomStencilID.M_CustomStencilID");
+	// I6 (gap S3): the ground-truth passes -passes=normal,velocity,albedo.
+	// Each renders through a post-process material built by
+	// scripts/ue_create_materials.py on the M_CustomStencilID pattern
+	// (MD_PostProcess, blendable location "Replacing the Tonemapper", one
+	// SceneTexture node into emissive): ESceneTextureId PPI_WorldNormal,
+	// PPI_Velocity and PPI_BaseColor in UE 5.7. Absent -> the pass refuses
+	// by name (labels.pass_material), like -labels does. The two SIGNED
+	// textures reach the target as value * RenderPassSignedScale +
+	// RenderPassSignedOffset (the script's SIGNED_SCALE / SIGNED_OFFSET,
+	// pinned equal by test) because whether a tonemapper-replacing
+	// emissive keeps a negative value through the FinalColorHDR readback
+	// is not established here; the decode below inverts it.
+	constexpr const TCHAR* RenderPassNormalMaterialPath =
+		TEXT("/Game/FlightSim/M_WorldNormalPass.M_WorldNormalPass");
+	constexpr const TCHAR* RenderPassVelocityMaterialPath =
+		TEXT("/Game/FlightSim/M_VelocityPass.M_VelocityPass");
+	constexpr const TCHAR* RenderPassBaseColorMaterialPath =
+		TEXT("/Game/FlightSim/M_BaseColorPass.M_BaseColorPass");
+	constexpr float RenderPassSignedScale = 0.5f;
+	constexpr float RenderPassSignedOffset = 0.5f;
+	// frame_NNNN_normal.png stores (n * 0.5 + 0.5) * 65535 per channel,
+	// n the unit normal in the scene frame (north, east, up).
+	constexpr float RenderPassNormalEncodeScale = 0.5f;
+	constexpr float RenderPassNormalEncodeOffset = 0.5f;
+	constexpr float RenderPassPngMax = 65535.0f;
 	// The raw depth file is little-endian float32; every UE target is.
+	// The flow file (frame_NNNN_flow.f32, I6) is declared the same way.
 	static_assert(PLATFORM_LITTLE_ENDIAN, "frame_NNNN_depth.f32 is declared little-endian");
 
 	// One labelled object as the -labels pass sees it: the card's ids, the
@@ -218,6 +244,31 @@ namespace
 		TSharedPtr<IImageWrapper> Png = Module.CreateImageWrapper(EImageFormat::PNG);
 		if (!Png.IsValid()
 		    || !Png->SetRaw(Bytes, NumBytes, Width, Height, ERGBFormat::Gray, BitDepth))
+		{
+			return false;
+		}
+		const TArray64<uint8> Compressed = Png->GetCompressed();
+		return Compressed.Num() > 0 && FFileHelper::SaveArrayToFile(Compressed, *Path);
+	}
+
+	// I6: a 16-bit RGBA PNG through the same wrapper call the 16-bit depth
+	// PNG uses (the engine's PNG wrapper writes Gray, RGBA or BGRA -- not
+	// RGB -- so the fourth channel is a constant 65535 and every reader
+	// takes the first three). Values are native uint16, interleaved
+	// R G B A, row-major.
+	bool RenderWriteRgba16Png(const FString& Path, const TArray<uint16>& Rgba,
+	                          int32 Width, int32 Height)
+	{
+		if (Rgba.Num() != Width * Height * 4)
+		{
+			return false;
+		}
+		IImageWrapperModule& Module =
+			FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+		TSharedPtr<IImageWrapper> Png = Module.CreateImageWrapper(EImageFormat::PNG);
+		if (!Png.IsValid()
+		    || !Png->SetRaw(Rgba.GetData(), static_cast<int64>(Rgba.Num()) * sizeof(uint16),
+		                    Width, Height, ERGBFormat::RGBA, 16))
 		{
 			return false;
 		}
@@ -599,7 +650,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		UE_LOG(LogFlightSimRender, Error,
 		       TEXT("usage: -run=FlightSimBridge.FlightSimRender ")
 		       TEXT("-scenario=<run-card.json> -frames=<out-dir> [-fps=5] [-labels] [-linear] [-deterministic] "
-		            "[-width=960] [-height=540]"));
+		            "[-passes=normal,velocity,albedo] [-width=960] [-height=540]"));
 		return 1;
 	}
 	double FramesPerSecond = 5.0;
@@ -637,6 +688,28 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// frame_NNNN_linear.exr beside the PNG; the post-pass prefers it when
 	// it can read it. Opt-in, additive.
 	const bool bLinear = FParse::Param(*Params, TEXT("linear"));
+	// I6 (gap S3): -passes=normal,velocity,albedo -- the ground-truth
+	// passes beside the label bundle, each optional, none by default (so
+	// a run without the flag is byte-for-byte the previous one). Only the
+	// words are read here; an unknown word and -passes without -labels
+	// are refused by name once Fail exists (below the scene build).
+	FString PassesArg;
+	FParse::Value(*Params, TEXT("passes="), PassesArg);
+	bool bPassNormal = false, bPassVelocity = false, bPassAlbedo = false;
+	FString UnknownPass;
+	{
+		TArray<FString> PassWords;
+		PassesArg.ParseIntoArray(PassWords, TEXT(","), true);
+		for (FString& Word : PassWords)
+		{
+			Word.TrimStartAndEndInline();
+			if (Word == TEXT("normal")) { bPassNormal = true; }
+			else if (Word == TEXT("velocity")) { bPassVelocity = true; }
+			else if (Word == TEXT("albedo")) { bPassAlbedo = true; }
+			else if (UnknownPass.IsEmpty()) { UnknownPass = Word; }
+		}
+	}
+	const bool bPasses = bPassNormal || bPassVelocity || bPassAlbedo;
 	// Phase 10, P10-4: pin what the renderer would otherwise decide by
 	// timing. Texture streaming brings mips in over wall time; LOD
 	// selection is deterministic in screen size but a forced LOD takes
@@ -1592,6 +1665,32 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	int32 LabelPrimaryIntId = 0;
 	int32 LabelTerrainIntId = 0;
 	FString LabelIdSource;
+	// I6 (gap S3): the ground-truth pass captures, built inside the label
+	// block below because they ride ConfigureLabelCapture (AA-free, no
+	// fog, no atmosphere, no cloud, no translucency) and are graded
+	// against the label bundle's depth and ID image.
+	UMaterialInterface* PassNormalMaterial = nullptr;
+	UMaterialInterface* PassVelocityMaterial = nullptr;
+	UMaterialInterface* PassAlbedoMaterial = nullptr;
+	UTextureRenderTarget2D* PassNormalTarget = nullptr;
+	UTextureRenderTarget2D* PassVelocityTarget = nullptr;
+	UTextureRenderTarget2D* PassAlbedoTarget = nullptr;
+	USceneCaptureComponent2D* PassNormal = nullptr;
+	USceneCaptureComponent2D* PassVelocity = nullptr;
+	USceneCaptureComponent2D* PassAlbedo = nullptr;
+	if (!UnknownPass.IsEmpty())
+	{
+		return Fail(FString::Printf(
+			TEXT("labels.pass_unknown: -passes names '%s'; the passes this build ")
+			TEXT("writes are normal, velocity and albedo"), *UnknownPass));
+	}
+	if (bPasses && !bLabels)
+	{
+		return Fail(TEXT("labels.pass_needs_labels: -passes rides the label-pass route ")
+		            TEXT("(the AA-free captures, the depth the normals are checked ")
+		            TEXT("against, the ID image the flow is sampled under); pass ")
+		            TEXT("-labels too"));
+	}
 	if (bLabels)
 	{
 		if (bHideAircraft)
@@ -1811,6 +1910,109 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		       TEXT("pass per aircraft; every label capture AA-free"),
 		       Labelled.Num(), *LabelIdSource, RenderLabelDepthScaleM,
 		       RenderLabelDepthSaturationM);
+
+		// -- I6 (gap S3): the ground-truth passes ----------------------------
+		// Each pass is one more AA-free capture through ConfigureLabelCapture
+		// (the ID pass's route: SCS_FinalColorHDR, post-processing on, the
+		// pass material as the one blendable replacing the tonemapper), into
+		// a float target. Normal and base colour take RGBA16f; the velocity
+		// takes RGBA32f because its offset encoding puts a one-pixel motion
+		// at 0.5 + 0.0016 (1280 px wide), where a half float's step is
+		// 4.9e-4 -- 0.31 px of quantisation against a 2 px verifier
+		// tolerance. A missing material refuses the pass by name.
+		if (bPasses)
+		{
+			auto LoadPassMaterial = [&](const TCHAR* Word, const TCHAR* Path,
+			                            UMaterialInterface*& Material) -> bool
+			{
+				Material = LoadObject<UMaterialInterface>(nullptr, Path);
+				if (Material == nullptr)
+				{
+					Error = FString::Printf(
+						TEXT("labels.pass_material: -passes=%s needs the post-process material ")
+						TEXT("%s (MD_PostProcess, blendable location 'Replacing the Tonemapper', ")
+						TEXT("EmissiveColor = SceneTexture), which scripts/ue_create_materials.py ")
+						TEXT("builds; refusing to write a %s pass from anything else"),
+						Word, Path, Word);
+					return false;
+				}
+				return true;
+			};
+			auto MakePassTarget = [&](ETextureRenderTargetFormat Format) -> UTextureRenderTarget2D*
+			{
+				UTextureRenderTarget2D* Target = NewObject<UTextureRenderTarget2D>();
+				Target->RenderTargetFormat = Format;
+				Target->ClearColor = FLinearColor::Black;
+				Target->bAutoGenerateMips = false;
+				Target->InitAutoFormat(Width, Height);
+				Target->UpdateResourceImmediate(true);
+				return Target;
+			};
+			auto MakePassCapture = [&](const TCHAR* Name, UTextureRenderTarget2D* Target,
+			                           UMaterialInterface* Material) -> USceneCaptureComponent2D*
+			{
+				USceneCaptureComponent2D* Pass = NewObject<USceneCaptureComponent2D>(Director, Name);
+				Pass->TextureTarget = Target;
+				Pass->CaptureSource = ESceneCaptureSource::SCS_FinalColorHDR;
+				ConfigureLabelCapture(Pass);
+				Pass->ShowFlags.SetPostProcessing(true);
+				Pass->PostProcessSettings.WeightedBlendables.Array.Add(
+					FWeightedBlendable(1.0f, Material));
+				Pass->PostProcessBlendWeight = 1.0f;
+				Pass->RegisterComponent();
+				return Pass;
+			};
+			if (bPassNormal)
+			{
+				if (!LoadPassMaterial(TEXT("normal"), RenderPassNormalMaterialPath, PassNormalMaterial))
+				{
+					return Fail(Error);
+				}
+				PassNormalTarget = MakePassTarget(RTF_RGBA16f);
+				PassNormal = MakePassCapture(TEXT("PassWorldNormal"), PassNormalTarget, PassNormalMaterial);
+			}
+			if (bPassVelocity)
+			{
+				if (!LoadPassMaterial(TEXT("velocity"), RenderPassVelocityMaterialPath, PassVelocityMaterial))
+				{
+					return Fail(Error);
+				}
+				PassVelocityTarget = MakePassTarget(RTF_RGBA32f);
+				PassVelocity = MakePassCapture(TEXT("PassVelocity"), PassVelocityTarget, PassVelocityMaterial);
+				// The velocity is a DIFFERENCE against the previous frame, so
+				// this one capture keeps its view state (the previous view
+				// matrices live in it); every other label capture drops it.
+				PassVelocity->bAlwaysPersistRenderingState = true;
+				// Static geometry writes no velocity by default (the camera's
+				// own motion over it is reconstructed from depth elsewhere and
+				// is not in the buffer); force every primitive to write one so
+				// the terrain's flow is in the file too.
+				if (IConsoleVariable* Force = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Velocity.ForceOutput")))
+				{
+					Force->Set(1, ECVF_SetByCode);
+				}
+				else
+				{
+					UE_LOG(LogFlightSimRender, Warning,
+					       TEXT("passes: console variable r.Velocity.ForceOutput not found in this build; ")
+					       TEXT("static geometry may carry zero flow"));
+				}
+			}
+			if (bPassAlbedo)
+			{
+				if (!LoadPassMaterial(TEXT("albedo"), RenderPassBaseColorMaterialPath, PassAlbedoMaterial))
+				{
+					return Fail(Error);
+				}
+				PassAlbedoTarget = MakePassTarget(RTF_RGBA16f);
+				PassAlbedo = MakePassCapture(TEXT("PassBaseColor"), PassAlbedoTarget, PassAlbedoMaterial);
+			}
+			UE_LOG(LogFlightSimRender, Display,
+			       TEXT("passes: normal %s, velocity %s, albedo %s -- each an AA-free capture ")
+			       TEXT("through the ID pass's route; frame_NNNN_normal.png, _flow.f32, _albedo.png"),
+			       bPassNormal ? TEXT("on") : TEXT("off"), bPassVelocity ? TEXT("on") : TEXT("off"),
+			       bPassAlbedo ? TEXT("on") : TEXT("off"));
+		}
 	}
 
 	// -- Phase 10 sensor model: the linear capture ------------------------
@@ -2184,6 +2386,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	TArray<FColor> Pixels;
 	int32 Captured = 0;
 	int32 BlankFrames = 0;
+	// I6: the flow of a frame is from the previous CAPTURED frame of this
+	// pass; the first one has no previous and writes zeros, saying so.
+	bool bFlowHasPrevious = false;
 
 	for (int32 Step = 0; Step < Steps; ++Step)
 	{
@@ -2258,6 +2463,34 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// sees the scene from before the aircraft and its surfaces moved.
 		World->SendAllEndOfFrameUpdates();
 		FlushRenderingCommands();
+		// I6: the velocity pass renders FIRST after the step, before the
+		// beauty capture. Engine source reading (FScene velocity data): a
+		// primitive's previous transform is kept only for the first scene
+		// render after its transform changed; the next render resets
+		// previous = current and its motion vector reads zero. Every other
+		// pass therefore runs after the beauty capture and this one cannot.
+		// What is NOT claimed: that the beauty frame rendered after this
+		// extra scene render is byte-identical to one rendered without
+		// -passes=velocity (Gate 10-R compares like with like), and that
+		// the vector's time base is the previous CAPTURED frame rather than
+		// the previous scene render -- the verifier's flow_vs_motion grades
+		// that on the first Windows bundle.
+		TArray<FLinearColor> VelocityRaw;
+		if (PassVelocity != nullptr)
+		{
+			PassVelocity->FOVAngle = Capture->FOVAngle;
+			PassVelocity->CaptureScene();
+			FlushRenderingCommands();
+			FTextureRenderTargetResource* VelocityResource =
+				PassVelocityTarget->GameThread_GetRenderTargetResource();
+			if (VelocityResource == nullptr
+			    || !VelocityResource->ReadLinearColorPixels(
+			           VelocityRaw, FReadSurfaceDataFlags(RCM_MinMax, CubeFace_MAX))
+			    || VelocityRaw.Num() != Width * Height)
+			{
+				return Fail(TEXT("passes: could not read the velocity pass back"));
+			}
+		}
 		Capture->CaptureScene();
 		FlushRenderingCommands();
 
@@ -2607,6 +2840,168 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			}
 			Record->SetStringField(TEXT("linear"), LinearName);
 		}
+		// -- I6 (gap S3): the ground-truth passes, written beside the frame --
+		// Record keys normal_png / flow_f32 / albedo_png are null when the
+		// pass is off, so a reader never infers a file from a name.
+		if (bPasses)
+		{
+			const int32 PassCount = Width * Height;
+			const FString PassStem = FrameName.LeftChop(4);
+			auto ReadPass = [&](USceneCaptureComponent2D* Pass, UTextureRenderTarget2D* Target,
+			                    const TCHAR* Word, TArray<FLinearColor>& Out) -> bool
+			{
+				Pass->FOVAngle = Capture->FOVAngle;
+				Pass->CaptureScene();
+				FlushRenderingCommands();
+				FTextureRenderTargetResource* PassResource = Target->GameThread_GetRenderTargetResource();
+				if (PassResource == nullptr
+				    || !PassResource->ReadLinearColorPixels(
+				           Out, FReadSurfaceDataFlags(RCM_MinMax, CubeFace_MAX))
+				    || Out.Num() != PassCount)
+				{
+					Error = FString::Printf(TEXT("passes: could not read the %s pass back"), Word);
+					return false;
+				}
+				return true;
+			};
+			auto Png16 = [](double Value) -> uint16
+			{
+				return static_cast<uint16>(FMath::Clamp(
+					FMath::RoundToInt(Value * RenderPassPngMax), 0, 65535));
+			};
+
+			if (PassNormal != nullptr)
+			{
+				TArray<FLinearColor> Raw;
+				if (!ReadPass(PassNormal, PassNormalTarget, TEXT("normal"), Raw))
+				{
+					return Fail(Error);
+				}
+				// The GBuffer normal is in ENGINE world axes; the file is in
+				// the scene frame the manifest speaks (north, east, up), so
+				// the verifier rotates it by the camera axes it already has.
+				// The ENU vectors are taken once per frame at the camera: over
+				// a frame's extent they turn by hundredths of a degree, far
+				// inside the 10 deg the verifier grades at. Sky pixels carry
+				// whatever the cleared GBuffer decodes to and are not claimed;
+				// the depth file says where the sky is.
+				FVector East, North, Up;
+				Scenario.GeoReferencing->GetENUVectorsAtEngineLocation(
+					Director->GetActorLocation(), East, North, Up);
+				TArray<uint16> Rgba;
+				Rgba.SetNumUninitialized(PassCount * 4);
+				int32 UnitPixels = 0;
+				for (int32 i = 0; i < PassCount; ++i)
+				{
+					const FVector Engine(
+						(Raw[i].R - RenderPassSignedOffset) / RenderPassSignedScale,
+						(Raw[i].G - RenderPassSignedOffset) / RenderPassSignedScale,
+						(Raw[i].B - RenderPassSignedOffset) / RenderPassSignedScale);
+					const FVector Scene(FVector::DotProduct(Engine, North),
+					                    FVector::DotProduct(Engine, East),
+					                    FVector::DotProduct(Engine, Up));
+					const double Length = Scene.Size();
+					if (FMath::Abs(Length - 1.0) < 0.05)
+					{
+						++UnitPixels;
+					}
+					const FVector N = Length > 1.0e-6 ? Scene / Length : FVector::ZeroVector;
+					Rgba[4 * i + 0] = Png16(N.X * RenderPassNormalEncodeScale + RenderPassNormalEncodeOffset);
+					Rgba[4 * i + 1] = Png16(N.Y * RenderPassNormalEncodeScale + RenderPassNormalEncodeOffset);
+					Rgba[4 * i + 2] = Png16(N.Z * RenderPassNormalEncodeScale + RenderPassNormalEncodeOffset);
+					Rgba[4 * i + 3] = 65535;
+				}
+				const FString NormalName = PassStem + TEXT("_normal.png");
+				if (!RenderWriteRgba16Png(FPaths::Combine(OutputDirectory, NormalName), Rgba, Width, Height))
+				{
+					return Fail(FString::Printf(TEXT("passes: could not write %s"), *NormalName));
+				}
+				Record->SetStringField(TEXT("normal_png"), NormalName);
+				Record->SetNumberField(TEXT("normal_unit_pixels"), UnitPixels);
+			}
+			else
+			{
+				Record->SetField(TEXT("normal_png"), MakeShared<FJsonValueNull>());
+			}
+
+			if (PassVelocity != nullptr)
+			{
+				// Decoded clip-space delta (x right, y UP, [-1, 1] across the
+				// image) from the previous frame to this one, at this pixel;
+				// screen +y is down, hence the sign on dy. Verified on Windows
+				// by the verifier's flow_vs_motion, not here.
+				TArray<float> Flow;
+				Flow.SetNumZeroed(PassCount * 2);
+				int32 MovingPixels = 0;
+				if (bFlowHasPrevious)
+				{
+					for (int32 i = 0; i < PassCount; ++i)
+					{
+						const float NdcX = (VelocityRaw[i].R - RenderPassSignedOffset) / RenderPassSignedScale;
+						const float NdcY = (VelocityRaw[i].G - RenderPassSignedOffset) / RenderPassSignedScale;
+						const float DxPx = NdcX * 0.5f * Width;
+						const float DyPx = -NdcY * 0.5f * Height;
+						Flow[2 * i + 0] = DxPx;
+						Flow[2 * i + 1] = DyPx;
+						if (FMath::Abs(DxPx) > 0.01f || FMath::Abs(DyPx) > 0.01f)
+						{
+							++MovingPixels;
+						}
+					}
+				}
+				const FString FlowName = PassStem + TEXT("_flow.f32");
+				TArray64<uint8> FlowBytes;
+				FlowBytes.SetNumUninitialized(static_cast<int64>(Flow.Num()) * sizeof(float));
+				FMemory::Memcpy(FlowBytes.GetData(), Flow.GetData(), FlowBytes.Num());
+				if (!FFileHelper::SaveArrayToFile(FlowBytes, *FPaths::Combine(OutputDirectory, FlowName)))
+				{
+					return Fail(FString::Printf(TEXT("passes: could not write %s"), *FlowName));
+				}
+				Record->SetStringField(TEXT("flow_f32"), FlowName);
+				Record->SetBoolField(TEXT("flow_first_frame"), !bFlowHasPrevious);
+				Record->SetNumberField(TEXT("flow_moving_pixels"), MovingPixels);
+				bFlowHasPrevious = true;
+			}
+			else
+			{
+				Record->SetField(TEXT("flow_f32"), MakeShared<FJsonValueNull>());
+			}
+
+			if (PassAlbedo != nullptr)
+			{
+				TArray<FLinearColor> Raw;
+				if (!ReadPass(PassAlbedo, PassAlbedoTarget, TEXT("albedo"), Raw))
+				{
+					return Fail(Error);
+				}
+				TArray<uint16> Rgba;
+				Rgba.SetNumUninitialized(PassCount * 4);
+				int32 ClampedPixels = 0;
+				for (int32 i = 0; i < PassCount; ++i)
+				{
+					const FLinearColor& C = Raw[i];
+					if (C.R < 0.0f || C.R > 1.0f || C.G < 0.0f || C.G > 1.0f || C.B < 0.0f || C.B > 1.0f)
+					{
+						++ClampedPixels;
+					}
+					Rgba[4 * i + 0] = Png16(FMath::Clamp(C.R, 0.0f, 1.0f));
+					Rgba[4 * i + 1] = Png16(FMath::Clamp(C.G, 0.0f, 1.0f));
+					Rgba[4 * i + 2] = Png16(FMath::Clamp(C.B, 0.0f, 1.0f));
+					Rgba[4 * i + 3] = 65535;
+				}
+				const FString AlbedoName = PassStem + TEXT("_albedo.png");
+				if (!RenderWriteRgba16Png(FPaths::Combine(OutputDirectory, AlbedoName), Rgba, Width, Height))
+				{
+					return Fail(FString::Printf(TEXT("passes: could not write %s"), *AlbedoName));
+				}
+				Record->SetStringField(TEXT("albedo_png"), AlbedoName);
+				Record->SetNumberField(TEXT("albedo_clamped_pixels"), ClampedPixels);
+			}
+			else
+			{
+				Record->SetField(TEXT("albedo_png"), MakeShared<FJsonValueNull>());
+			}
+		}
 		if (bConsumePoses)
 		{
 			// Additive Camera Phase 1 fields (ASCII only -- gotcha 13; the
@@ -2878,6 +3273,62 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Root->SetArrayField(TEXT("objects"), ObjectList);
 		Root->SetStringField(TEXT("labels_id_source"), LabelIdSource);
 	}
+	// I6 (gap S3): what the ground-truth passes wrote and how each file
+	// is encoded, so a reader of render.json alone can decode them
+	// (ASCII only -- gotcha 13). Absent when no pass ran.
+	if (bPasses)
+	{
+		TSharedPtr<FJsonObject> Passes = MakeShared<FJsonObject>();
+		if (bPassNormal)
+		{
+			TSharedPtr<FJsonObject> Normal = MakeShared<FJsonObject>();
+			Normal->SetStringField(TEXT("file"), TEXT("frame_NNNN_normal.png"));
+			Normal->SetStringField(TEXT("encoding"),
+				TEXT("16-bit RGBA PNG; R,G,B = (n * 0.5 + 0.5) * 65535 for the unit normal n; A = 65535"));
+			Normal->SetStringField(TEXT("frame"),
+				TEXT("scene (north, east, up), +up is the third channel; camera-space is R * n with R "
+				     "the camera's (right, -up, forward) rows from the manifest quaternion"));
+			Normal->SetStringField(TEXT("material"), RenderPassNormalMaterialPath);
+			Normal->SetStringField(TEXT("scene_texture"), TEXT("PPI_WorldNormal"));
+			Normal->SetStringField(TEXT("anti_aliasing"), TEXT("none"));
+			Normal->SetStringField(TEXT("not_claimed"),
+				TEXT("sky pixels (the depth file says where): the cleared GBuffer normal"));
+			Passes->SetObjectField(TEXT("normal"), Normal);
+		}
+		if (bPassVelocity)
+		{
+			TSharedPtr<FJsonObject> Velocity = MakeShared<FJsonObject>();
+			Velocity->SetStringField(TEXT("file"), TEXT("frame_NNNN_flow.f32"));
+			Velocity->SetStringField(TEXT("encoding"),
+				TEXT("little-endian float32 pairs (dx, dy), row-major, width*height pairs, pixels; "
+				     "screen +x right, +y down; the displacement of the surface at this pixel from "
+				     "the previous captured frame of this pass to this one"));
+			Velocity->SetStringField(TEXT("first_frame"),
+				TEXT("all zeros, flagged flow_first_frame: true on its record"));
+			Velocity->SetStringField(TEXT("material"), RenderPassVelocityMaterialPath);
+			Velocity->SetStringField(TEXT("scene_texture"), TEXT("PPI_Velocity"));
+			Velocity->SetStringField(TEXT("anti_aliasing"), TEXT("none"));
+			Velocity->SetStringField(TEXT("not_claimed"),
+				TEXT("the time base equals the capture interval (engine source reading; graded by "
+				     "the verifier's flow_vs_motion on a rendered bundle); the beauty frame's "
+				     "digest with this pass on equals the digest without it"));
+			Passes->SetObjectField(TEXT("velocity"), Velocity);
+		}
+		if (bPassAlbedo)
+		{
+			TSharedPtr<FJsonObject> Albedo = MakeShared<FJsonObject>();
+			Albedo->SetStringField(TEXT("file"), TEXT("frame_NNNN_albedo.png"));
+			Albedo->SetStringField(TEXT("encoding"),
+				TEXT("16-bit RGBA PNG; R,G,B = linear base colour in [0, 1] * 65535; A = 65535"));
+			Albedo->SetStringField(TEXT("material"), RenderPassBaseColorMaterialPath);
+			Albedo->SetStringField(TEXT("scene_texture"), TEXT("PPI_BaseColor"));
+			Albedo->SetStringField(TEXT("anti_aliasing"), TEXT("none"));
+			Albedo->SetStringField(TEXT("not_claimed"),
+				TEXT("sun invariance is measured by Gate 6's albedo clause on Windows, not here"));
+			Passes->SetObjectField(TEXT("albedo"), Albedo);
+		}
+		Root->SetObjectField(TEXT("passes"), Passes);
+	}
 	if (TrafficMeshes.Num() > 0)
 	{
 		TArray<TSharedPtr<FJsonValue>> TrafficList;
@@ -2960,6 +3411,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			TEXT("r.TextureStreaming"),
 			TEXT("r.Streaming.FullyLoadUsedTextures"),
 			TEXT("r.ForceLOD"),
+			// I6: set to 1 by -passes=velocity so static geometry writes a
+			// motion vector; read back like the rest.
+			TEXT("r.Velocity.ForceOutput"),
 		};
 		for (const TCHAR* Name : ConsoleNames)
 		{

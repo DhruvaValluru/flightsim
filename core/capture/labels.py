@@ -709,6 +709,206 @@ def read_depth_png(path: Path, scale_m: float, saturation_m: float):
     return metres
 
 
+# -- I6 (gap S3): the ground-truth passes beside the label bundle --------------
+#
+# The commandlet's -passes=normal,velocity,albedo writes, per frame:
+#
+#   frame_NNNN_normal.png   16-bit RGBA PNG, R,G,B = (n * 0.5 + 0.5) * 65535
+#                           for the unit normal n in the SCENE frame
+#                           (north, east, up); A = 65535
+#   frame_NNNN_flow.f32     little-endian float32 pairs (dx, dy), row-major,
+#                           width*height pairs, PIXELS, screen +x right and
+#                           +y down: the displacement of the surface at this
+#                           pixel from the previous captured frame to this
+#                           one; the first frame of a camera is all zeros and
+#                           its record says flow_first_frame: true
+#   frame_NNNN_albedo.png   16-bit RGBA PNG, R,G,B = linear base colour in
+#                           [0, 1] * 65535; A = 65535
+#
+# and names them on the frame record (normal_png / flow_f32 / albedo_png,
+# null when the pass is off) with the encodings under render.json's root
+# "passes". The readers here decode exactly that and nothing else; the
+# 16-bit PNGs go through rasterio because Pillow returns a 16-bit RGB PNG
+# as 8-bit (measured here: mode RGB, uint8), which would throw away the
+# low byte of every normal. What is NOT claimed: that any file was ever
+# written by an engine -- the commandlet is uncompiled off Windows -- and
+# that a value in a file is right; the verifier grades that
+# (normals_vs_depth, flow_vs_motion, albedo_range) from its own readers.
+
+#: The encoding of a signed unit vector in the normal PNG: stored =
+#: (n * NORMAL_ENCODE_SCALE + NORMAL_ENCODE_OFFSET) * PNG16_MAX. The same
+#: numbers as the commandlet's RenderPassNormalEncodeScale / Offset.
+NORMAL_ENCODE_SCALE = 0.5
+NORMAL_ENCODE_OFFSET = 0.5
+PNG16_MAX = 65535
+
+#: The record keys the passes add to a render.json frame record, by pass
+#: word, and the file suffix each declares.
+PASS_RECORD_KEYS = {"normal": "normal_png", "velocity": "flow_f32",
+                    "albedo": "albedo_png"}
+PASS_FILE_SUFFIXES = {"normal": "_normal.png", "velocity": "_flow.f32",
+                      "albedo": "_albedo.png"}
+
+
+def read_rgb16_png(path: Path):
+    """A 16-bit RGB or RGBA PNG as an (h, w, 3) uint16 array (alpha
+    dropped). Refuses a file that is not 16-bit or has fewer than three
+    channels: an 8-bit file here is one that lost its low byte somewhere."""
+    import numpy as np
+    import rasterio
+    from rasterio.errors import RasterioIOError
+
+    try:
+        with rasterio.open(path) as dataset:
+            if dataset.count < 3:
+                raise ValueError(f"{path.name}: {dataset.count} channel(s); a "
+                                 f"normal or albedo image has three")
+            if dataset.dtypes[0] != "uint16":
+                raise ValueError(f"{path.name}: {dataset.dtypes[0]} samples; the "
+                                 f"pass files are 16-bit")
+            planes = dataset.read((1, 2, 3))
+    except RasterioIOError as exc:
+        raise OSError(f"{path.name}: {exc}") from exc
+    return np.ascontiguousarray(np.transpose(planes, (1, 2, 0))).astype(np.uint16)
+
+
+def write_rgb16_png(path: Path, rgb) -> Path:
+    """An (h, w, 3) uint16 array as a 16-bit RGB PNG (filter 0, zlib) --
+    the writer synthetic bundles and tests use; the engine writes its
+    own through UE's PNG wrapper (RGBA). Round-trips through
+    :func:`read_rgb16_png` bit for bit (measured here)."""
+    import struct
+    import zlib
+
+    import numpy as np
+
+    rgb = np.asarray(rgb)
+    if rgb.ndim != 3 or rgb.shape[2] != 3 or rgb.dtype != np.uint16:
+        raise ValueError(f"write_rgb16_png wants an (h, w, 3) uint16 array, got "
+                         f"{rgb.shape} {rgb.dtype}")
+    height, width, _ = rgb.shape
+    rows = rgb.astype(">u2").tobytes()
+    stride = width * 6
+    raw = b"".join(b"\x00" + rows[y * stride:(y + 1) * stride] for y in range(height))
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        return (struct.pack(">I", len(body)) + kind + body
+                + struct.pack(">I", zlib.crc32(kind + body) & 0xffffffff))
+
+    header = struct.pack(">IIBBBBB", width, height, 16, 2, 0, 0, 0)
+    path = Path(path)
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
+                     + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
+    return path
+
+
+def encode_normals(normals):
+    """(h, w, 3) float unit normals in [-1, 1] -> the uint16 the PNG
+    stores, exactly the commandlet's rounding."""
+    import numpy as np
+
+    scaled = (np.asarray(normals, dtype=np.float64) * NORMAL_ENCODE_SCALE
+              + NORMAL_ENCODE_OFFSET) * PNG16_MAX
+    return np.clip(np.rint(scaled), 0, PNG16_MAX).astype(np.uint16)
+
+
+def read_normal_png(path: Path):
+    """``frame_NNNN_normal.png`` -> (h, w, 3) float32 normals in the
+    scene frame (north, east, up), each channel v / 65535 * 2 - 1. Not
+    re-normalised: a reader that wants unit length checks it (the
+    verifier does, and reports the pixels that are not)."""
+    import numpy as np
+
+    stored = read_rgb16_png(Path(path)).astype(np.float32) / PNG16_MAX
+    return (stored - NORMAL_ENCODE_OFFSET) / NORMAL_ENCODE_SCALE
+
+
+def read_flow_f32(path: Path, width: int, height: int):
+    """``frame_NNNN_flow.f32`` -> (h, w, 2) float32 (dx, dy) pixels.
+    Refuses a file whose size is not width*height*8: a truncated flow
+    would read as zero motion below the cut."""
+    import numpy as np
+
+    path = Path(path)
+    raw = np.fromfile(path, dtype="<f4")
+    if raw.size != width * height * 2:
+        raise ValueError(
+            f"{path.name}: {raw.size} float32 values for a {width}x{height} "
+            f"flow (expected {width * height * 2}; file is "
+            f"{path.stat().st_size} bytes, not {width * height * 8})")
+    return raw.reshape(height, width, 2)
+
+
+def read_albedo_png(path: Path):
+    """``frame_NNNN_albedo.png`` -> (h, w, 3) float32 linear base colour
+    in [0, 1] (v / 65535)."""
+    import numpy as np
+
+    return read_rgb16_png(Path(path)).astype(np.float32) / PNG16_MAX
+
+
+def passes_declared(engine_record: Dict) -> Dict[str, Optional[str]]:
+    """``{pass word: file name or None}`` from a render.json frame
+    record's normal_png / flow_f32 / albedo_png keys. A record written
+    before the passes existed has none of the keys and declares none."""
+    out: Dict[str, Optional[str]] = {}
+    for word, key in PASS_RECORD_KEYS.items():
+        value = engine_record.get(key)
+        out[word] = str(value) if isinstance(value, str) and value else None
+    return out
+
+
+def passes_record(files_per_frame: Sequence[int], words: Sequence[str]):
+    """The ``AppliedVariable`` for the passes a bundle carried
+    (ADVANCEMENTS_CONTRACTS rule 0), from what :func:`attach_engine_labels`
+    counted: the pass words seen and the number of pass files each
+    frame declared. The null test is with-versus-without as measured on
+    this bundle: the mean pass files per frame the records declare
+    against the zero a commandlet run without ``-passes=`` declares (the
+    writes sit under the pass switches, pinned by source test; a record
+    without the keys is what every pre-I6 bundle carries). Not claimed:
+    that the files' contents are right (the verifier's three checks),
+    or that any engine wrote them (uncompiled here)."""
+    from ..records import AppliedVariable, NullTest
+
+    frames = len(files_per_frame)
+    mean_files = (sum(files_per_frame) / frames) if frames else 0.0
+    return AppliedVariable(
+        name="render.passes",
+        value=list(words),
+        unit="pass",
+        source="user",
+        model=("engine post-process passes: SceneTexture WorldNormal / Velocity / "
+               "BaseColor through tonemapper-replacing materials, AA-free "
+               "(FlightSimRenderCommandlet.cpp -passes=)"),
+        parameters={
+            "normal_encoding": "(n * 0.5 + 0.5) * 65535, scene frame (north, east, up)",
+            "flow_encoding": "float32 (dx, dy) pixels, +x right, +y down, previous "
+                             "captured frame to this one, first frame zeros",
+            "albedo_encoding": "linear base colour [0, 1] * 65535",
+            "frames_with_passes": int(sum(1 for n in files_per_frame if n > 0)),
+            "frames": frames,
+        },
+        references=("UE 5.7 ESceneTextureId PPI_WorldNormal, PPI_Velocity, PPI_BaseColor",
+                    "docs/PHASE3_GAP_ANALYSIS.md S3"),
+        properties_written=("r.Velocity.ForceOutput=1 when velocity is on",),
+        telemetry_columns=(),
+        frame_keys=("labels.passes.normal", "labels.passes.velocity",
+                    "labels.passes.albedo"),
+        null_test=NullTest(
+            quantity="ground-truth pass files declared per frame", unit="file",
+            with_value=float(mean_files), without_value=0.0, threshold=1.0,
+            note="without -passes= the record carries no normal_png / flow_f32 / "
+                 "albedo_png key (the writes are under the pass switches; source "
+                 "pin in tests/test_gate6_visual.py)"),
+        not_claimed=("file contents (graded by verify.normals_vs_depth, "
+                     "flow_vs_motion, albedo_range)",
+                     "engine execution (the commandlet is uncompiled off Windows)",
+                     "the velocity's time base equals the capture interval",
+                     "sun invariance of the albedo (Gate 6 clause, Windows only)"),
+    )
+
+
 def measure_object(mask, depth, int_id: int, alone=None) -> Dict:
     """What the bundle says about ONE object: pixel counts, the tight
     box, the visible fraction, who occludes it and the depth under it.
@@ -764,6 +964,21 @@ def _bundle_records(camera_dir: Path) -> Dict[str, Dict]:
             if isinstance(r, dict) and isinstance(r.get("labels"), dict)}
 
 
+def _attach_record(manifest: Dict, record) -> None:
+    """Put one ``AppliedVariable`` into the manifest's ``applied_variables``
+    block (ADVANCEMENTS_CONTRACTS rule 0), creating the block when absent
+    and REPLACING a record of the same name: attach is re-run after every
+    render, and the passes record describes this bundle, not the last."""
+    from ..records import records_block
+
+    block = manifest.get("applied_variables")
+    if not isinstance(block, dict) or not isinstance(block.get("applied_variables"), list):
+        manifest["applied_variables"] = records_block([record])
+        return
+    kept = [r for r in block["applied_variables"] if r.get("name") != record.name]
+    block["applied_variables"] = kept + [record.to_dict()]
+
+
 def attach_engine_labels(run_dir, write: bool = True) -> Dict:
     """Complete a manifest-6 run's per-object records from the render
     bundle beside its frames, and write the manifest and every sidecar
@@ -780,6 +995,12 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
     the files each number came from. A frame with no bundle keeps its
     nulls and the no-bundle basis; a manifest below version 6 has no
     per-object records and is left untouched (returned as such).
+
+    I6: records under each frame's ``labels.passes`` which ground-truth
+    passes the bundle declares (``{"normal": file|None, "velocity": ...,
+    "albedo": ...}``) -- names only, nothing opened -- and, when any is
+    declared, the ``render.passes`` AppliedVariable under the manifest's
+    ``applied_variables`` (:func:`passes_record`).
 
     The producer of the numbers, not their judge: the verifier (package
     D) re-derives every one of them from the same files and grades them
@@ -803,6 +1024,8 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
         return summary
     objects = manifest.get("objects") or []
     bundles: Dict[str, Dict[str, Dict]] = {}
+    pass_files_per_frame: List[int] = []
+    pass_words_seen: set = set()
     for frame in manifest.get("frames", []):
         summary["frames"] += 1
         camera = str(frame["camera_id"])
@@ -858,7 +1081,20 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
                            "re-derives these from the same files"),
             }
             summary["objects"] += 1
+        # I6: which ground-truth passes this frame's record declares, by
+        # name (the files are not opened here; the verifier reads them).
+        declared_passes = passes_declared(engine)
+        frame.setdefault("labels", {})["passes"] = declared_passes
+        pass_files_per_frame.append(sum(1 for v in declared_passes.values() if v))
+        for word, value in declared_passes.items():
+            if value:
+                pass_words_seen.add(word)
         summary["attached"] += 1
+    if pass_words_seen:
+        record = passes_record(pass_files_per_frame,
+                               [w for w in PASS_RECORD_KEYS if w in pass_words_seen])
+        _attach_record(manifest, record)
+        summary["passes"] = sorted(pass_words_seen)
     if write and summary["attached"]:
         write_capture_manifest(manifest, run_dir)
         write_frame_sidecars(manifest, run_dir)

@@ -222,6 +222,7 @@ from .landmarks import scene_landmarks
 from .poses import PoseTrack, SceneFrame, aircraft_local_track, traffic_state
 from .schedule import CaptureSchedule
 from core.records import records_block
+from core.terrain.landcover import landcover_records
 from core.scenario.randomization import card_block as randomization_card_block
 from core.terrain.geoid import (
     datum_for_heightfield, flat_datum_block, undulation_variable,
@@ -683,7 +684,9 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
         # datum block, and the applied-variable records (core/records.py)
         # -- one per introduced variable, each with its null test.
         "datum": datum,
-        "applied_variables": records_block([undulation_variable(datum)]),
+        "applied_variables": records_block(
+            [undulation_variable(datum)]
+            + landcover_records((scene or {}).get("terrain"))),
         "frame": frame.provenance(),
         "software_revision": software_revision(),
         "landmarks": scene_landmarks(

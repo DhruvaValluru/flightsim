@@ -440,3 +440,161 @@ as good as the run's datum block (EGM96 bilinear, its stated bounds); a
 run without one is orthometric treated as ellipsoidal, and says so.
 Absolute timestamps are decodable, never written. No gimbal-lock handling
 beyond `atan2` at |theta| = 90 deg exactly.
+
+## I6. Normals, motion-vector and albedo ground-truth passes (gap S3)
+
+**Engine side (uncompiled here; pinned by source-reading tests in `tests/test_gate6_visual.py`).**
+`-passes=normal,velocity,albedo` (each word optional, none by default; an argument list without it is byte-identical to before) adds three AA-free captures to the `-labels` bundle, each through `ConfigureLabelCapture` (the ID pass's route: no AA/TAA, screen percentage 100, no fog/atmosphere/volumetric fog/cloud/bloom/motion blur/DOF/lens flares/translucency), `SCS_FinalColorHDR`, with one post-process material replacing the tonemapper. The materials are built by `scripts/ue_create_materials.py` on the `M_CustomStencilID` pattern (`MD_PostProcess`, `BL_ReplacingTonemapper`, one `SceneTexture` node into emissive):
+
+| pass | material | UE 5.7 `ESceneTextureId` | target | file |
+|---|---|---|---|---|
+| normal | `/Game/FlightSim/M_WorldNormalPass` | `PPI_WorldNormal` (Python `PPI_WORLD_NORMAL`) | RGBA16f | `frame_NNNN_normal.png` |
+| velocity | `/Game/FlightSim/M_VelocityPass` | `PPI_Velocity` (`PPI_VELOCITY`) | RGBA32f | `frame_NNNN_flow.f32` |
+| albedo | `/Game/FlightSim/M_BaseColorPass` | `PPI_BaseColor` (`PPI_BASE_COLOR`) | RGBA16f | `frame_NNNN_albedo.png` |
+
+The two signed textures are offset in the material (`value * SIGNED_SCALE + SIGNED_OFFSET`, 0.5/0.5, = the commandlet's `RenderPassSignedScale/Offset`, pinned equal by test) and decoded in the commandlet, because a negative emissive surviving the tonemapper-replacing chain is not established. The velocity target is RGBA32f because the offset encoding puts a one-pixel motion at 0.5 + 0.0016 (1280 px wide), where a half float's step is 4.9e-4 = 0.31 px against the verifier's 2 px. The velocity capture alone keeps `bAlwaysPersistRenderingState = true` (its value is a difference against the previous frame), sets `r.Velocity.ForceOutput = 1` (read back under `render_settings.console`), and renders FIRST after the physics step, before the beauty capture (engine source reading: a primitive's previous transform survives only the first scene render after it changed).
+
+**Files per frame** (bundle addition; no version bump; every key optional and absent-canonical):
+* `frame_NNNN_normal.png`: 16-bit RGBA PNG; R,G,B = `(n * 0.5 + 0.5) * 65535` for the unit normal `n` in the SCENE frame (north, east, up) -- converted from engine axes per frame with `GetENUVectorsAtEngineLocation` at the camera; A = 65535 (UE's PNG wrapper writes no RGB; readers take the first three channels).
+* `frame_NNNN_flow.f32`: little-endian float32 pairs (dx, dy), row-major, width*height pairs, PIXELS, screen +x right, +y down: the displacement of the surface at this pixel from the previous captured frame of this pass to this one (decoded clip-space delta, x right / y up, times (W/2, -H/2)). The first frame of a camera is all zeros and its record says `flow_first_frame: true`.
+* `frame_NNNN_albedo.png`: 16-bit RGBA PNG; R,G,B = linear base colour in [0, 1] * 65535; A = 65535.
+
+**render.json**: frame records gain `normal_png`, `flow_f32`, `albedo_png` (the file name, or `null` when the pass is off), `normal_unit_pixels`, `flow_first_frame`, `flow_moving_pixels`, `albedo_clamped_pixels`; the root gains `passes` (`{normal|velocity|albedo: {file, encoding, frame, material, scene_texture, anti_aliasing: "none", not_claimed}}`) and `render_settings.console["r.Velocity.ForceOutput"]`.
+
+**Refusals by name** (commandlet): `labels.pass_material` (a pass asset absent), `labels.pass_unknown` (a word other than normal/velocity/albedo), `labels.pass_needs_labels` (`-passes` without `-labels`); all after `Fail` exists and before any pass is built. The builder (`core/render/flags.py passes_flag`) refuses an unknown word itself (ValueError).
+
+**Python side (measured here).** `core/render/flags.py`: `render_flags(..., passes=())` emits `-passes=<words in PASS_NAMES order>` after the opt-in switches only when asked. `core/capture/labels.py`: `read_rgb16_png`, `write_rgb16_png`, `encode_normals`, `read_normal_png`, `read_flow_f32` (refuses a wrong size), `read_albedo_png`, `passes_declared`, `passes_record`; `attach_engine_labels` records `labels.passes = {normal, velocity, albedo: file|null}` per frame and the `render.passes` AppliedVariable under the capture manifest's `applied_variables` (replacing a same-named record on re-run). Readers go through rasterio: Pillow returns a 16-bit RGB PNG as 8-bit (measured).
+
+**Verifier** (`core/capture/verify.py`, own readers, no producer import), each NOT RUN without its file, never a pass on absence:
+* `normals_vs_depth`: camera-space normals from the float32 depth by central differences through the record's pinhole, oriented toward the camera, vs the pass's scene normal rotated by the record's quaternion; median angle over smooth pixels (finite depth at the pixel and its four neighbours, neighbours within `SMOOTH_DEPTH_FRACTION` 0.02 of the depth, at least `NORMAL_MIN_SMOOTH_PIXELS` 100) `< NORMAL_ANGLE_TOL_DEG` 10. FAIL `annotation.normals`. NOT RUN with only the 16-bit depth PNG.
+* `flow_vs_motion`: per camera, consecutive labelled frames in `t_s` order; each airframe keypoint placed by the two aircraft states and projected through the two records with the verifier's own rotation and pinhole; predicted (du, dv) vs the flow at the pixel containing the keypoint, for keypoints inside the image whose pixel carries the primary's int_id; median |error| `< FLOW_TOL_PX` 2 over at least `FLOW_MIN_KEYPOINTS` 3 samples; a `flow_first_frame` file must be zeros. FAIL `annotation.flow`. NOT RUN with one frame per camera.
+* `albedo_range`: 16-bit three-channel at the record's size, finite, in [0, 1], and unlike the beauty frame (as 8-bit, `> ALBEDO_DIFFERENT_COUNTS` 2 on `>= ALBEDO_MIN_DIFFERENT_FRACTION` 1 % of pixels); mean albedo over sky pixels reported, not graded. FAIL `annotation.albedo`. Sun invariance is Gate 6's clause.
+
+**Gate 6** (`experiments/gate6_visual.py`, Windows only): look clause "albedo sun invariance" from `LOOK_RUNS` `albedo_sun_high` / `albedo_sun_low` (`-labels -passes=albedo`, sun 60 vs 15 deg, all else equal): the beauty frames must differ on `>= 2000` terrain-band pixels (control) and the albedo images on `<= 0.1 %` of pixels beyond 257 counts of 65535; a record naming no albedo fails by the record.
+
+**Not claimed**: that any engine wrote a file (uncompiled here); the `PPI_Velocity` decoding and the (W/2, -H/2) pixel conversion; that the vector's time base is the previous captured frame rather than the previous scene render; that the beauty digest with `-passes=velocity` equals the digest without it (Gate 10-R compares like with like); the sky pixels of the normal image; `GetENUVectorsAtEngineLocation` and the sign of north in the engine frame (a horizontal plane cannot show a north flip; Gate 6's 30 deg RMS slopes can); flow at keypoints the airframe itself occludes beyond the 2 px tolerance; flow on static geometry when `r.Velocity.ForceOutput` is absent from the build.
+
+**New keys for the integrator's one bump**: render.json frame `normal_png`, `flow_f32`, `albedo_png`, `normal_unit_pixels`, `flow_first_frame`, `flow_moving_pixels`, `albedo_clamped_pixels`; render.json root `passes`; capture manifest frame `labels.passes`; `applied_variables` record `render.passes`.
+
+## I7 -- land cover from ESA WorldCover (gap S5, the data half)
+
+**Owner files.** `core/terrain/landcover.py` (new), `scripts/bake_landcover.py`
+(new), `tests/test_landcover.py` (new). Nothing engine-side reads the output yet;
+the engine half of S5 (a landscape material or PCG biome consuming the weightmaps)
+is a later item and nothing here claims it.
+
+**The source, measured.** ESA WorldCover 10 m 2021 v200: 3x3 degree COGs, EPSG:4326,
+one uint8 band, pixel exactly 1/12000 degree (nominally 10 m), nodata 0, from the
+public bucket `https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/
+ESA_WorldCover_10m_2021_v200_<N36W120>_Map.tif` (stem = south-west corner). Licence
+**CC BY 4.0**; attribution and citation as the product user manual states them
+(`v200/2021/docs/WorldCover_PUM_V2.0.pdf` in the bucket, 4,102,952 bytes, sha256
+`4301a3d95260d88bd4315f43ccf2a12ef74ad391109b9f36e22b6e51d8490107`, sections 5.1
+and 5.2, Table 3, section 6). The DOI `10.5281/zenodo.7254221` is in the manual's
+citation text; zenodo.org and doi.org are blocked by this container's proxy, so
+the DOI itself is unverified here and the record says so. Reachability: a ranged
+GET returned 206; rasterio `/vsicurl/` opened the 115 MB N36W120 tile and read the
+Yosemite window (4800 x 3000 px) in 2.7 s with NO GDAL proxy options set (GDAL's
+curl reads `https_proxy` and `CURL_CA_BUNDLE` from the environment; the module
+still passes `GDAL_HTTP_PROXY` / `CURL_CA_BUNDLE` from the environment when present,
+plus `GDAL_DISABLE_READDIR_ON_OPEN=EMPTY_DIR`). So only the scene window is read;
+no whole tile is downloaded. A whole tile already in the cache dir under its bucket
+name is read locally instead.
+
+**The legend** (`LEGEND`, code -> key): 10 tree_cover, 20 shrubland, 30 grassland,
+40 cropland, 50 built_up, 60 bare_sparse, 70 snow_ice, 80 permanent_water,
+90 herbaceous_wetland, 95 mangroves, 100 moss_lichen; plus `nodata` (0).
+`WEIGHT_KEYS` = the 11 keys + `nodata`, in that order.
+
+**`fetch(location, cache_dir, bbox=None) -> dict`.** Windows of every tile the bbox
+touches (`tiles_for_bbox`: a maximum edge exactly on a boundary belongs to the tile
+below it -- Everest's 87.00 E stays in N27E084; the Grand Canyon crop crosses 36 N
+and mosaics N33W114 + N36W114), mosaicked on the product's global grid, every value
+checked against the legend, written to
+`<cache>/ESA_WorldCover_10m_2021_v200_<key>_crop_4326.tif` + `.json`. Returned and
+written provenance: `{dataset, product_version, year, bucket, posting_deg,
+posting_m_nominal, license, license_url, license_note, attribution, citation,
+location, bbox_deg, tiles: {stem: {url, read: "vsicurl window" | "cached whole
+tile", window: {col_off, row_off, width, height}, etag, content_length,
+last_modified | sha256 (cached tile)}}, crop: {file, width, height, origin_lon_deg,
+origin_lat_deg}, sha256 (of the crop), path}`. A cached crop whose recorded sha256
+still matches and whose bbox is the same is returned without the network.
+
+**`read_grid(bake_path) -> BakeGrid`.** From the bake's `.json` sidecar only
+(`georeference.{crs, origin_x_m, origin_y_m, pixel_size_m}`, `width`, `height`,
+`sha256`, `name`); refuses `terrain.landcover_grid` when the sidecar is absent,
+unreadable, or lacks any of those keys.
+
+**`rasterise(location_or_bake, cache_dir, out_dir, bake_path=None, source_4326=None,
+texels_per_cell=3) -> (scene_dir, document)`.** `location_or_bake` is a curated
+`Location` (bake = `out_dir/<key>.r16` unless `bake_path`) or a bake path (the bbox
+is then derived from the grid's own corners and edge midpoints, padded 5 source
+cells). The fine grid is the bake's CRS/origin/extent subdivided k x k (k = 3 for a
+30 m bake, dropped while an edge would exceed 8192 as the imagery drape does);
+classes are reprojected nearest-neighbour; per bake cell the count of fine cells per
+class becomes a weight `255 * count / k^2` rounded by the largest remainder so the
+sum over the 12 maps is exactly 255 in every cell. Written to
+`out_dir/<bake stem>_landcover/`: `<key>_weight.png` x 12 (8-bit L), `class_map.png`
+(majority legend code, 0 = nodata), `landcover.json`:
+
+    dataset, product_version, year, model ("ESA WorldCover v200 2021 majority/fraction")
+    posting_deg (1/12000), posting_m_nominal (10.0)
+    license ("CC BY 4.0"), license_url, license_note, attribution, citation
+    source {dataset, bucket, location, bbox_deg, tiles, crop, path}
+    sha256                       the source crop's digest
+    classes [{code, key, title, rgb, file, fraction}] x 11
+    fractions {key: fraction over the bake grid, nodata counted in the total}
+    nodata_fraction, coverage, dominant_class
+    grid {crs, origin_x_m, origin_y_m, cell_size_m, width, height, bake_sha256,
+          aligned_to_bake, texels_per_cell, texel_size_m, fine_width, fine_height}
+    weightmaps {key: {file, sha256}}, class_map {file, sha256, encoding}
+    weight_sum_per_cell {min, max, expected: 255}
+    verification_vs_source {samples, agreement, ok}
+    applied_variables            records_block([scene.landcover]), record_version 1
+    not_claimed
+
+Verification before anything is written: 400 random fine texels pushed
+projected -> geographic -> source pixel, class for class; `ok` needs >= 90 % of the
+samples inside the source and agreement >= 0.9 (measured: 100.0 % Yosemite, 99.2 %
+Grand Canyon; a row flip scores < 0.6 and is refused).
+
+**Refusals by name.** `terrain.landcover` (`LandcoverError.constraint`; `reason` =
+`unreachable` | `corrupt` | `unverified`): a tile unreachable or unreadable, a file
+whose CRS is not 4326, whose pixel is not 1/12000 degree north-up, whose origin is
+not the stem's corner, or with more than one uint8 band, values outside the legend,
+or a rasterisation that disagrees with its source. `terrain.landcover_grid`
+(`LandcoverGridError.constraint`): sidecar absent or without the grid keys. The
+script prints `REFUSED -- <name>: ...` once and exits 1.
+
+**The record** (`landcover_variable`, `scene.landcover`): value = the dominant
+legend key, unit "WorldCover legend class (dominant); fractions in parameters",
+source `derived`, model `ESA WorldCover v200 2021 majority/fraction`, parameters
+{fractions, nodata_fraction, dominant_class, license, attribution, posting_deg,
+posting_m_nominal, texels_per_cell, grid, source_sha256, verification_vs_source,
+weight_encoding}, references (the Zanaga et al. 2022 citation; the manual with its
+sha256), no properties written, no telemetry columns, no frame keys; null test =
+the dominant class's fraction (with) against the uniform prior 1/11 (without),
+threshold 0.05 (Yosemite: 0.6866 vs 0.0909, difference 0.5957, ok). The licence and
+attribution ride inside the record's parameters so a manifest that lifts the record
+carries them. `landcover_records(bake_path)` re-types the JSON's record for a
+manifest's `records_block` and returns `[]` for a bake without land cover
+(absent-canonical, never a zero record); `scene_dir_for(bake_path)` is the lookup
+rule (`<bake stem>_landcover/` beside the bake).
+
+**Licence-clean distribution.** CC BY 4.0 permits redistribution with attribution;
+`license_note` in every `landcover.json` states the requirement and `attribution`
+carries the line `(c) ESA WorldCover project 2021 / Contains modified Copernicus
+Sentinel data (2021) processed by ESA WorldCover consortium`. A dataset card built
+from a scene that carries land cover must lift that line (open issue for the export
+integrator).
+
+**Not claimed.** Nothing in the engine reads the weightmaps: no landscape layer,
+material or PCG biome consumes them, no vegetation or structure is placed, no
+rendered pixel changes. The classes are the product's estimate (global overall
+accuracy 76.7 +/- 0.5 %, North America 74.6 +/- 1.2 %, per its manual) and are not
+re-validated here. 2021 classes are not temporally aligned with the 2016-2017
+imagery drape or the 2010-2015 GLO-30 heights. A weight is a fraction of 10 m cells
+in a bake cell, not of area; the 10 m posting is nominal. A cached whole tile's
+size is not checked (only its CRS, posting, origin and band). No version was
+bumped: `landcover.json`, `scene_dir_for` and `landcover_records` are optional and
+absent-canonical.

@@ -189,6 +189,12 @@ aircraft.placeholder_drawn:
 terrain.geoid:
   sentence: "The geoid grid that relates sea level to the Earth's ellipsoid is missing or is not the one this build was measured with."
   hint: "Restore assets/geoid/egm96-15.pgm from the source named in assets/geoid/README.md; a different grid is refused, not interpolated."
+terrain.landcover:
+  sentence: "The land cover map for this place could not be fetched, or the file is not the ESA WorldCover map it is supposed to be."
+  hint: "Check that the ESA WorldCover bucket is reachable, or remove the cached window and fetch again; a map with values outside the legend, or one that disagrees with its source, is refused rather than guessed at."
+terrain.landcover_grid:
+  sentence: "The prepared terrain does not say where its grid sits, so land cover cannot be placed on it."
+  hint: "Prepare the terrain again with the current bake so its sidecar carries the grid, then run the land cover step."
 terrain.unbaked:
   sentence: "No terrain has been prepared for the coordinates asked for."
   hint: "Prepare the terrain there first (it downloads once), then run again."
@@ -507,3 +513,37 @@ modes.residual:
 modes.airframe_class:
   sentence: "No handling-qualities class is stated for this aircraft, so its modes cannot be graded against the bands."
   hint: "State the aircraft's MIL-F-8785C class in the modal analysis table; a class is never guessed."
+
+# -- the verifier clauses of batch 1 (datum, instruments) ------------------------
+scene.datum:
+  sentence: "The recorded height of sea level above the Earth's ellipsoid at the scene origin does not agree with the checker's own reading of the same geoid grid."
+check.datum:
+  sentence: "The scene's vertical datum block names its geoid grid and states the sea-level offset the checker re-measures from it."
+check.instruments:
+  sentence: "Every measured channel's errors match the instrument profile it claims, with this run's own recording beside it."
+labels.pass_material:
+  sentence: "The material a ground-truth pass renders through is not in the project, so that pass cannot be written."
+  hint: "Run the material script in the editor once to create it."
+labels.pass_unknown:
+  sentence: "A requested ground-truth pass is not one this build writes."
+  hint: "Ask for normal, velocity or albedo."
+labels.pass_needs_labels:
+  sentence: "The ground-truth passes ride the label passes and were asked for without them."
+  hint: "Ask for the labels too."
+annotation.normals:
+  sentence: "The surface normals disagree with the surface the measured distances show."
+annotation.flow:
+  sentence: "The motion vectors at the aircraft disagree with how far it moved between frames."
+annotation.albedo:
+  sentence: "The base colour image is missing, out of range, or is the lit picture itself."
+check.normals_vs_depth:
+  sentence: "The surface normals agree with the surface the measured distances show."
+check.flow_vs_motion:
+  sentence: "The motion vectors at the aircraft agree with how far it moved between frames."
+check.albedo_range:
+  sentence: "The base colour image is present, in range, and not the lit picture."
+
+# Placement: the three labels.* beside the other labels.* entries, the three
+# annotation.* beside annotation.files, the three check.* beside
+# check.depth_vs_geometry. Trialled against tests/test_messages.py (22 passed;
+# only another item's terrain.landcover names remained).

@@ -93,6 +93,30 @@ _SWITCHES: Tuple[str, ...] = (
     "-Visual", "-GeorefTerrain", "-labels", "-linear", "-deterministic",
 )
 
+#: The ground-truth passes the commandlet knows (I6, gap S3), in the
+#: order ``-passes=`` states them: ``normal`` (frame_NNNN_normal.png),
+#: ``velocity`` (frame_NNNN_flow.f32), ``albedo`` (frame_NNNN_albedo.png).
+#: Each is optional; the commandlet refuses an unknown word by name
+#: (labels.pass_unknown) and a missing material by name
+#: (labels.pass_material). The builder emits the flag ONLY when asked,
+#: so every argument list pinned before the passes existed is
+#: byte-identical (tests/test_annotation_passes.py measures that).
+PASS_NAMES: Tuple[str, ...] = ("normal", "velocity", "albedo")
+
+
+def passes_flag(passes: Iterable[str]) -> Optional[str]:
+    """``-passes=a,b`` for the requested passes in :data:`PASS_NAMES`
+    order, or None for none. Repeats collapse. A word the commandlet
+    does not know is refused HERE (ValueError) rather than sent: the
+    commandlet would refuse it too, but after building the scene."""
+    wanted = {str(name).strip().lower() for name in passes if str(name).strip()}
+    unknown = sorted(wanted - set(PASS_NAMES))
+    if unknown:
+        raise ValueError(f"unknown render pass(es) {unknown}; the passes are "
+                         f"{list(PASS_NAMES)}")
+    ordered = [name for name in PASS_NAMES if name in wanted]
+    return f"-passes={','.join(ordered)}" if ordered else None
+
 
 def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
                  mesh, look: Optional[Mapping[str, Any]],
@@ -100,7 +124,8 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
                  labels: bool = True, linear: bool = False,
                  deterministic: bool = True, void: bool = False,
                  width: int, height: int, fps: float,
-                 telemetry=None, extra: Iterable[str] = ()) -> List[str]:
+                 telemetry=None, extra: Iterable[str] = (),
+                 passes: Iterable[str] = ()) -> List[str]:
     """The ORDERED argument list for the FlightSimRender commandlet,
     after the ``<editor> <project> -run=FlightSimBridge.FlightSimRender``
     tokens.
@@ -141,6 +166,16 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
     flags (the web app's per-camera ``-camera-index=N -labels``); a
     switch already present there is not emitted twice.
 
+    ``passes``: the ground-truth passes (:data:`PASS_NAMES`) to add
+    beside the label bundle -- ``-passes=normal,velocity,albedo`` after
+    the opt-in switches. Empty (the default) emits NOTHING, so every
+    list pinned before the passes existed is unchanged; the commandlet
+    refuses ``-passes`` without ``-labels`` by name
+    (labels.pass_needs_labels), and this builder does not second-guess
+    it. Not claimed here: that the engine writes the files -- the
+    commandlet is uncompiled off Windows (source pins in
+    ``tests/test_gate6_visual.py``).
+
     Returns a new list every call. Behaviour byte-identical to the web
     app's pre-builder command for every flag it passed (pinned by
     ``tests/test_camera_spec.py`` and ``tests/test_render_flags.py``).
@@ -174,6 +209,11 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
     for switch, on in wanted:
         if on and switch not in flags:
             flags.append(switch)
+    # I6: the ground-truth passes, only when asked (an empty list adds
+    # no token, so the pinned lists stand byte for byte).
+    pass_token = passes_flag(passes)
+    if pass_token is not None and pass_token not in flags:
+        flags.append(pass_token)
     if not void and scene.get("terrain"):
         flags += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
     if not void and scene.get("imagery"):

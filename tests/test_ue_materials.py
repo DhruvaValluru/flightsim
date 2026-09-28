@@ -18,6 +18,9 @@ BRIDGE = REPO / "ue" / "Plugins" / "FlightSimBridge" / "Source" / "FlightSimBrid
 
 LOADED = re.compile(r"/Game/FlightSim/(M_[A-Za-z0-9_]+)")
 CREATED = re.compile(r'create_asset\("(M_[A-Za-z0-9_]+)"')
+#: I6: the pass materials are created from a table, one row per pass
+#: word: ("M_Name", "PPI_SCENE_TEXTURE", signed).
+PASS_ROW = re.compile(r'"(normal|velocity|albedo)": \("(M_[A-Za-z0-9_]+)", "(PPI_[A-Z_]+)", (True|False)\)')
 
 
 def loaded_in_cpp():
@@ -28,7 +31,8 @@ def loaded_in_cpp():
 
 
 def created_by_script():
-    return set(CREATED.findall(SCRIPT.read_text(encoding="utf-8")))
+    text = SCRIPT.read_text(encoding="utf-8")
+    return set(CREATED.findall(text)) | {name for _, name, _, _ in PASS_ROW.findall(text)}
 
 
 def test_every_material_the_commandlet_loads_is_created_by_the_script():
@@ -101,3 +105,46 @@ def test_both_terrain_materials_expose_the_wetness_parameter_the_cpp_sets():
         # The helper owns both outputs: nothing else in the creator wires
         # roughness or base colour, so the parameter is never shadowed.
         assert "MP_ROUGHNESS" not in body and "MP_BASE_COLOR" not in body, creator
+
+
+# -- I6 (gap S3): the three ground-truth pass materials -----------------------
+
+def test_the_pass_materials_are_the_three_the_commandlet_loads_with_their_scene_textures():
+    """One table row per pass word: the UE 5.7 ESceneTextureId values
+    PPI_WorldNormal / PPI_Velocity / PPI_BaseColor in the Python enum's
+    spelling, the normal and the velocity flagged SIGNED (offset-encoded),
+    the base colour not."""
+    text = SCRIPT.read_text(encoding="utf-8")
+    rows = {word: (name, ppi, signed == "True")
+            for word, name, ppi, signed in PASS_ROW.findall(text)}
+    assert rows == {
+        "normal": ("M_WorldNormalPass", "PPI_WORLD_NORMAL", True),
+        "velocity": ("M_VelocityPass", "PPI_VELOCITY", True),
+        "albedo": ("M_BaseColorPass", "PPI_BASE_COLOR", False),
+    }
+    loaded = loaded_in_cpp()
+    for name, _, _ in rows.values():
+        assert name in loaded, f"the commandlet never loads {name}"
+
+
+def test_a_pass_material_replaces_the_tonemapper_and_offsets_a_signed_texture():
+    """The M_CustomStencilID shape (post-process domain, replacing the
+    tonemapper, SceneTexture into emissive) plus, for a signed texture,
+    Color * SIGNED_SCALE + SIGNED_OFFSET through a Multiply and an Add;
+    an unsigned one goes straight to emissive."""
+    text = SCRIPT.read_text(encoding="utf-8")
+    assert "SIGNED_SCALE = 0.5\n" in text and "SIGNED_OFFSET = 0.5\n" in text
+    body = _body(text, "create_pass_material")
+    assert "MaterialDomain.MD_POST_PROCESS" in body
+    assert "BlendableLocation.BL_REPLACING_TONEMAPPER" in body
+    assert "getattr(unreal.SceneTextureId, scene_texture_id)" in body
+    assert 'scale.set_editor_property("r", SIGNED_SCALE)' in body
+    assert 'offset.set_editor_property("r", SIGNED_OFFSET)' in body
+    assert "MaterialExpressionMultiply" in body and "MaterialExpressionAdd" in body
+    assert body.count("MP_EMISSIVE_COLOR") == 2      # the signed and the plain branch
+    assert 'lib.connect_material_expressions(texture, "Color", scaled, "A")' in body
+    assert 'lib.connect_material_property(encoded, "",' in body
+    # Called at import like the others, so one editor run builds all seven.
+    for creator in ("create_world_normal_pass", "create_velocity_pass",
+                    "create_base_colour_pass"):
+        assert re.search(rf"^{creator}\(\)", text, re.M), creator

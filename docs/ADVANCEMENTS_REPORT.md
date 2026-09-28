@@ -395,3 +395,154 @@ so no wrap occurs in practice. Appearance and capabilities are zero.
 Gimbal lock at |theta| = 90 deg exactly returns one valid pair of angles.
 The `not_claimed` list in the sidecar and I5.8 in the contracts say the
 rest.
+
+## I6. Normals, motion-vector and albedo ground-truth passes (gap S3)
+
+### What was measured, and what was defective
+* The bundle carried masks, class, depth, visibility and boxes only (`FlightSimRenderCommandlet.cpp` label block, 5 file kinds per frame); no normal, motion-vector or base-colour ground truth existed anywhere in the tree (0 occurrences of `PPI_WorldNormal`, `PPI_Velocity`, `PPI_BaseColor` before this item).
+* Pillow 11.3.0 opens a 16-bit RGB PNG as mode RGB uint8 (measured on a 4x4 file holding 0x1234: the low byte is gone); rasterio 1.4.3 reads the same file as uint16 exactly, 0.055 s at 1280x720. A filter-0 zlib encoder written in numpy (0.232 s at 1280x720) round-trips through rasterio bit for bit. So the readers cannot go through Pillow.
+* A half float's step at 0.5 is 2^-11 = 4.88e-4; on a 1280 px wide frame an offset-encoded motion vector would quantise at 0.31 px -- 15 % of the 2 px verifier tolerance. The velocity target is therefore RGBA32f, the other two RGBA16f as designed.
+
+### What was built
+* Commandlet: `-passes=` parsing, three refusals by name, three pass captures through `ConfigureLabelCapture` + `SCS_FinalColorHDR` + one blendable, the velocity capture first after the step with persisted view state and `r.Velocity.ForceOutput=1`, per-frame writes (`RenderWriteRgba16Png`, float32 flow), record keys null when off, root `passes` block with encodings (+289 lines, ASCII in every engine-read string; 0 non-ASCII characters added).
+* `scripts/ue_create_materials.py`: `create_pass_material` from a three-row table (`PASS_MATERIALS`), `SIGNED_SCALE/OFFSET` 0.5/0.5 wired through Multiply + Add for the two signed textures; three creators called at import.
+* `core/render/flags.py`: `PASS_NAMES`, `passes_flag`, `passes=` on `render_flags`; the default list is pinned token for token.
+* `core/capture/labels.py`: six readers/writers, `passes_declared`, `passes_record` (the AppliedVariable), `attach_engine_labels` records `labels.passes` per frame and `render.passes` in `applied_variables`.
+* `core/capture/verify.py`: `normals_vs_depth`, `flow_vs_motion`, `albedo_range`, registered in `verify_run` after `applied_pose`; three FAIL names.
+* `experiments/gate6_visual.py`: the "albedo sun invariance" look clause with its control (NOT RUN here, stated measurement).
+* Tests: `tests/test_annotation_passes.py` (30, new), 13 clause and source-pin tests in `tests/test_gate6_visual.py` (49 total), 2 in `tests/test_ue_materials.py`.
+
+Measured on the synthetic bundles (`tests/test_annotation_passes.py`, 320x180, fx = fy = 400 px, identity camera at the scene origin):
+* Normals: a plane 20 m below the camera, normal (-0.3, 0.1, 1)/|.|, its depth painted per pixel through the pinhole; the verifier's depth-derived normals agree with the encoded plane normal to a median 0.06 deg over 50 244 smooth pixels (PASS); the same image rotated 5 deg about east measures 4.92 deg (PASS, under the 10 deg tolerance); rotated 30 deg measures 29.8 deg and FAILS `annotation.normals`.
+* Flow: a 70 x 60 x 10 m box 600 m north, translated (0, +6, +2) m between two frames 0.2 s apart; 294 box pixels, |flow| 4.48 px everywhere on the box; the flow painted from where each visible surface point WAS. The verifier's keypoint prediction is a median 0.26 px from the painted flow (worst 0.49 px at the nose, whose pixel shows the aft face 70 m nearer: the stated parallax) -> PASS; scaled by 2 -> median 4.74 px FAIL `annotation.flow`; negated -> 8.69 px FAIL; a first frame holding one moving pixel FAILS; one frame -> NOT RUN; a flow file 8 bytes short FAILS.
+* Albedo: a flat 20000/65535 image beside a random beauty frame differs on 100 % of pixels -> PASS with "mean albedo over sky pixels 0.3052" reported; the beauty frame re-encoded as 16-bit differs on 0.00 % -> FAIL `annotation.albedo`; an 8-bit albedo is refused ("uint8 samples, not 16-bit"); absent -> NOT RUN.
+* Attach: two frames declaring flow (both), normal and albedo (one) -> `labels.passes` per frame as declared, `render.passes` value `["normal","velocity","albedo"]`, null test with 2.0 files per frame vs 0.0, threshold 1, ok; a second attach leaves one record. Without pass keys: all null, no record.
+* Flags: `passes=["albedo","normal","velocity","normal"]` -> one token `-passes=normal,velocity,albedo` after `-deterministic`, before `-GeorefTerrain`; `passes=()` equals the omitted argument and the 23-token pre-passes list exactly; `passes=["normals"]` raises.
+* Gate 6 clause on fabricated stills: identical albedo under two suns -> PASS "0.000 %"; albedo shaded by 1000 counts over the ground rows -> FAIL at 50.000 % changed; beauty unchanged between suns -> FAIL "vacuous"; a record naming no albedo -> FAIL by the record.
+* Mutation: 14 guards each applied, 1 failed each, restored byte-identically. `--check-targets`: 486/486 targets still unique.
+
+### How to demonstrate (any platform)
+```
+find . -name __pycache__ -type d -prune -exec rm -rf {} +
+.venv/bin/pytest -q -p no:cacheprovider -p no:warnings --override-ini="addopts=" tests/test_annotation_passes.py
+.venv/bin/pytest -q -p no:cacheprovider -p no:warnings --override-ini="addopts=" tests/test_gate6_visual.py tests/test_ue_materials.py tests/test_render_flags.py
+bash scripts/mutation_check.sh --check-targets
+bash scripts/mutation_check.sh --no-suite --match "0.5 offset|flow|normals_vs_depth|albedo|passes|velocity capture|pass material"   # once the guards are integrated
+```
+On Windows with the engine: `UnrealEditor-Cmd ue/FlightSim.uproject -run=pythonscript -script=scripts/ue_create_materials.py` (creates the seven materials, MATERIAL-CREATED lines), then `python -m flightsim.capture <spec> --out runs/i6 --render --passes normal,velocity,albedo` (after the capture.py patch), `python -m flightsim.verify runs/i6` (the three checks move from NOT RUN to a verdict), and `python experiments/gate6_visual.py --look` for the albedo clause.
+
+### Not verified here
+Everything the engine does: that the three materials compile and the `PPI_*` ids are accepted by 5.7's Python enum; that the tonemapper-replacing emissive reaches the float target unclamped (the 0.5 offset exists so that it need not); the `PPI_Velocity` decoding and its clip-space (x right, y up) convention and the (W/2, -H/2) conversion; that rendering the velocity capture first makes its time base the previous captured frame (the verifier's `flow_vs_motion` is the measurement, threshold 2 px); `GetENUVectorsAtEngineLocation` at the camera and the sign of north in the engine frame; what the cleared GBuffer decodes to on sky pixels; UE's PNG wrapper writing RGBA at 16 bits in the byte order rasterio reads (the same call the 16-bit depth PNG uses); `r.Velocity.ForceOutput` existing in the build (a warning names its absence). The catalogue entries and the capture.py `--passes` wiring are returned, not applied.
+
+### Limitations
+The velocity's time base is a design tension stated in the source: the engine's motion vector is a difference against the previous scene render, the contract promises the previous captured frame, and the capture loop renders several passes per instant; the commandlet orders the velocity capture first and the verifier decides on the first Windows bundle. A run with `-passes=velocity` renders one more scene before the beauty capture, so its beauty digest is not claimed equal to a run without (Gate 10-R must compare equal flag lists) and TSR/motion blur in the beauty capture may see a zeroed object velocity. Keypoints the airframe itself occludes are graded against a nearer surface of the same rigid body (0.49 px at 600 m on the synthetic box; larger nearer and under rotation) inside the 2 px tolerance. The normals check grades smooth-depth pixels only (no silhouettes, no sky) and needs the float32 depth. The albedo check proves the pass is not the beauty picture and is in range; correctness of the base colour is Gate 6's Windows clause. The synthetic bundles are painted by the test's own arithmetic, which shares the pinhole convention with the verifier by design; what an engine's pixels do inside the tolerances is not measured in this container.
+
+## I7 -- land cover from ESA WorldCover (gap S5, the data half)
+
+**What was measured, and what was defective.** The branch's world carried height
+(GLO-30), an imagery drape and a vertex palette classified by slope and altitude
+(approximated, VALIDITY.md); no land cover source, no weightmap, and the words
+"landcover", "WorldCover" and "land cover" occur in neither the advancement
+contracts, the report, NEXT.md, README.md nor the message catalogue (grep, HEAD
+efb12d7). Measured here on 2026-09-28: the WorldCover bucket answers a ranged GET
+with 206 and a HEAD with `Content-Length: 115482414`, ETag
+`"71495d1ab2ce752b50fb08dbdf36f360-14"`, Last-Modified 2022-10-26 for N36W120;
+rasterio `/vsicurl/` opened it (36000 x 36000, uint8, nodata 0, 1024 x 1024 blocks,
+overviews 2..64, pixel 8.333e-05 degree) and read the Yosemite bbox window (4800 x
+3000 px, 14.4 M cells) in 2.7 s, with three proxy configurations (none;
+GDAL_HTTP_PROXY only; CURL_CA_BUNDLE only) all opening the tile -- so the scene
+window is read and no tile is downloaded. The raw window's classes: 10 tree cover
+9,834,908 (68.30 %), 30 grassland 3,136,402, 60 bare 1,359,376, 80 water 43,737,
+20 shrubland 12,411, 100 moss 6,219, 50 built-up 5,613, 70 snow 1,327, 40 cropland
+6, 90 wetland 1 -- every value in the legend, none of 95. The product user manual
+was fetched from the bucket (4,102,952 bytes, sha256 `4301a3d9...8490107`, text
+read with pypdf installed into the scratchpad, not the venv): licence "Creative
+Commons Attribution 4.0 International", attribution text and the Zanaga et al. 2022
+citation with `doi:10.5281/zenodo.7254221`, Table 3 legend with colours, global
+overall accuracy 76.7 +/- 0.5 % (North America 74.6 +/- 1.2 %). zenodo.org,
+doi.org and esa-worldcover.org are blocked (CONNECT 403), so the DOI is unverified
+here.
+
+**What was built.** `core/terrain/landcover.py`: `fetch` (windowed vsicurl reads or
+cached whole tiles, mosaic on the product's global grid, legend check, crop written
+with sha256 + `.json` provenance carrying licence, attribution and citation, the
+bucket's ETag/size/date per tile), `read_grid` (the bake sidecar's grid, refused
+`terrain.landcover_grid` when missing), `reproject_classes` (nearest onto the bake
+grid subdivided 3 x 3), `weight_counts` / `weightmaps` (255 x fraction with
+largest-remainder rounding: exact 255 per cell), `majority_map`,
+`verify_against_source` (400 texels pushed back to the source), `landcover_variable`
+(the `scene.landcover` AppliedVariable with its null test), `rasterise` (the whole
+step, refusing `terrain.landcover` by name when the source is unreachable, corrupt
+or unverified), `landcover_records` / `scene_dir_for` (the manifest hook).
+`scripts/bake_landcover.py --location <key> --cache <dir> --out <dir> [--bake PATH]
+[--source TIF]`. `tests/test_landcover.py`: 22 tests -- synthetic COGs written with
+rasterio (quadrants of 10/30/60/80) on an aligned 4326 grid give exactly 0.25 per
+class and pure 255/0 cells; a grid shifted one source pixel gives the exact thirds
+(170 / 85) against weights re-derived in the test from the source array; a UTM 11 N
+grid sums to exactly 255 per cell within 0.05 of a quarter each; the JSON carries
+the record (record_version 1, source derived, null test 0.25 vs 1/11 ok, licence
+and attribution inside the parameters); garbage bytes, a value 37, a row-flipped
+rasterisation and a wrong-posting cached tile refuse `terrain.landcover` by name;
+a sidecar without `origin_x_m` or absent refuses `terrain.landcover_grid`; two
+synthetic tiles under their bucket names mosaic across 39 N offline with both
+sha256s recorded; the script exits 0 printing the attribution, 1 with `REFUSED --
+<name>:`, 2 for an unknown location; the verifier's source never mentions land
+cover; everything the engine or a reader sees is ASCII.
+
+Measured end to end on real data (this container, no engine): Yosemite -- GLO-30
+bake 1151 x 894 cells at 30 m (EPSG:32611, source verification mean 0.82 m, p95
+excess 7.05 m, 4.4 s), then land cover in 11.6 s first run (7.3 s on the cache
+hit, no network): window col 2400 / row 13800, 4800 x 3000 px, crop 993,703 bytes,
+sha256 `f104dd16635c74a2550eaa801a428f1f46de1a01a25cbc898d988e192d00df9c`; fine
+grid 3453 x 2682; tree cover 68.66 %, grassland 21.69 %, bare/sparse 9.18 %,
+permanent water 0.31 %, shrubland 0.08 %, built-up 0.04 %, moss/lichen 0.03 %,
+snow/ice 0.01 %, cropland 4e-07, wetland 1e-07, mangroves 0; nodata 2.1e-06 (19
+fine cells at the bake's edge); weights sum 255..255 in every cell; 400 of 400
+texels agree with the source; null test 0.6866 vs 0.0909 = 0.5957 >= 0.05.
+Grand Canyon (bbox 35.98 N crosses the 36 N tile edge): tiles N33W114 (120,157,309
+bytes; window 3240 x 240 at row 0) and N36W114 (124,750,491 bytes; 3240 x 2400 at
+row 33600) mosaicked to 3240 x 2640; bake 802 x 806 in EPSG:32612; tree cover
+30.15 %, grassland 24.31 %, bare/sparse 23.25 %, shrubland 21.33 %, water 0.91 %,
+built-up 0.05 %; 99.2 % of 400 texels agree (boundary texels between the 10 m
+geographic and the 10 m UTM grids); 9.5 s; sha256 `42886763...0faf43`. Eight
+mutation guards, each applied by hand, each firing (1 to 5 tests red), the file
+restored byte-identically (sha256 `74073ac0...8dc3` before and after).
+
+**How to demonstrate (any platform).**
+
+    .venv/bin/pytest -q -p no:cacheprovider -p no:warnings -o addopts= tests/test_landcover.py
+        # 22 passed in ~5 s; the real-tile test is skipped by name when the bucket is unreachable
+    .venv/bin/python scripts/bake_terrain.py yosemite
+        # GLO-30 bake into runs/terrain (downloads one 41 MB tile once)
+    .venv/bin/python scripts/bake_landcover.py --location yosemite --cache data/worldcover --out runs/terrain
+        # ~12 s: runs/terrain/yosemite_landcover/{tree_cover_weight.png, ..., nodata_weight.png,
+        # class_map.png, landcover.json}; prints the fractions, the source sha256 and the
+        # attribution line; exit 1 with "REFUSED -- terrain.landcover: ..." or
+        # "REFUSED -- terrain.landcover_grid: ..." when refused
+    .venv/bin/python scripts/bake_landcover.py --location grand_canyon --cache data/worldcover --out runs/terrain
+        # the two-tile mosaic path (after `scripts/bake_terrain.py grand_canyon`)
+    .venv/bin/python -c "import json; d=json.load(open('runs/terrain/yosemite_landcover/landcover.json')); print(d['fractions'], d['weight_sum_per_cell'], d['applied_variables']['applied_variables'][0]['null_test'])"
+    ./scripts/mutation_check.sh --match "land cover|landcover|255|WorldCover|uniform prior"   # once the guards land
+    (Windows: .\.venv\Scripts\python.exe for .venv/bin/python; `data/glo30` and `runs/` are gitignored, `data/worldcover` should join them)
+
+**Not verified here.** Nothing engine-side: no material, landscape layer or PCG
+biome reads the weightmaps, so no rendered pixel is measured; the first Windows
+render with a consumer must show the class map on the geometry (a landmark
+projection, as the imagery drape's Gate 6 clause does). The DOI's resolution
+(blocked proxy). WorldCover's own class accuracy (the manual's 76.7 %, not measured
+here). Behaviour when the bucket rate-limits or changes a tile (the ETag and size
+are recorded so a change is visible; no retry logic beyond GDAL's own). The whole
+suite was not run (owner instruction); tests/test_messages.py fails on the two new
+names until the catalogue entries land.
+
+**Limitations.** Weights are fractions of 10 m cells, not of area; the 10 m posting
+is 1/12000 degree (9.3 m N-S, 7.3 m E-W at 37 N), so a bake cell's 3 x 3 fine cells
+sample the source unevenly and the UTM-grid agreement is 99.2 % rather than 100 %
+at Grand Canyon. Largest-remainder rounding makes the sum exact but a single
+weight can be up to one count from 255 x fraction. Nearest-neighbour reprojection
+is deliberate (a class is a label); a class narrower than one fine cell can vanish.
+2021 classes are not the drape's 2016-2017 or the DEM's 2010-2015 state (snow,
+water and cropland move between years). The class map is a majority, so a 4/3/2
+cell is labelled by its plurality. A cached whole tile's size is not checked. The
+scene bbox derived from a bake path is padded 5 source cells; a bake that exceeds
+its location's bbox records the excess as nodata rather than fetching more.

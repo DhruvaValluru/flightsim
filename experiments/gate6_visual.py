@@ -181,6 +181,15 @@ LOOK_THRESHOLDS = {
     #: Mean frame luminance under a -12 deg sun, 8-bit counts: below this the
     #: frames are black and the exposure clause is vacuous.
     "night_min_mean_luminance": 2.0,
+    #: I6 albedo sun invariance: the two albedo images (16-bit) may differ
+    #: by more than this many counts (1/255 of full scale) on at most
+    #: ``albedo_max_changed_fraction`` of their pixels ...
+    "albedo_tolerance_counts": 257,
+    "albedo_max_changed_fraction": 0.001,
+    #: ... while the two BEAUTY frames must differ on at least this many
+    #: terrain-band pixels, or the sun switch moved nothing and the
+    #: invariance is vacuous.
+    "albedo_control_min_changed_px": 2000,
 }
 
 
@@ -209,6 +218,13 @@ LOOK_RUNS = {
     "wet": ("terrain", ["-seconds=2", "-precip=rain"]),
     "wet_control": ("terrain", ["-seconds=2", "-precip=none"]),
     "night": ("terrain", ["-sun-elev=-12", "-sun-azim=180"]),
+    # I6: the albedo pass under two suns, everything else equal. The base
+    # colour is what the lights see, not what they make; the beauty
+    # frames must change and the albedo images must not.
+    "albedo_sun_high": ("terrain", [
+        "-seconds=2", "-labels", "-passes=albedo", "-sun-elev=60", "-sun-azim=180"]),
+    "albedo_sun_low": ("terrain", [
+        "-seconds=2", "-labels", "-passes=albedo", "-sun-elev=15", "-sun-azim=180"]),
 }
 
 
@@ -620,6 +636,65 @@ def measure_exposure_low_sun(night_dir: Path) -> LookClause:
         NIGHT_MEASUREMENT)
 
 
+ALBEDO_MEASUREMENT = (
+    "same still rendered with -labels -passes=albedo under a 60 deg and a 15 deg "
+    "sun: the two frame_NNNN_albedo.png (16-bit, read here) must agree within "
+    f"{LOOK_THRESHOLDS['albedo_tolerance_counts']} counts on all but "
+    f"{LOOK_THRESHOLDS['albedo_max_changed_fraction'] * 100:g} % of pixels, while "
+    f"the two beauty frames differ on at least "
+    f"{LOOK_THRESHOLDS['albedo_control_min_changed_px']} terrain-band pixels "
+    f"(rows {TERRAIN_BAND_ROWS}); each render.json must name the albedo file")
+
+
+def _last_albedo(frames_dir: Path) -> Optional[Path]:
+    """The last frame's albedo file as its render.json record names it
+    (never inferred from a file name), or None when the record does not."""
+    manifest = json.loads((frames_dir / "render.json").read_text(encoding="utf-8"))
+    name = manifest["frame_records"][-1].get("albedo_png")
+    return frames_dir / name if isinstance(name, str) and name else None
+
+
+def measure_albedo_sun_invariance(high_dir: Path, low_dir: Path) -> LookClause:
+    """I6: the base colour must not depend on the sun. Two renders that
+    differ only in sun elevation: their beauty frames must differ (the
+    control -- a sun that changed no pixel proves nothing) and their
+    albedo images must be identical within the stated tolerance. NOT RUN
+    off Windows; measured on the pixels only, never on the flag."""
+    import numpy as np
+
+    high, low = _last_albedo(high_dir), _last_albedo(low_dir)
+    if high is None or low is None:
+        return LookClause("albedo sun invariance", "FAIL",
+                          "a render.json names no albedo_png on its last frame: the "
+                          "pass did not run, so there is no base colour to compare",
+                          ALBEDO_MEASUREMENT)
+    beauty = changed_mask(_last_frame(high_dir), _last_frame(low_dir))
+    control = _band_count(beauty, TERRAIN_BAND_ROWS)
+    if control < LOOK_THRESHOLDS["albedo_control_min_changed_px"]:
+        return LookClause("albedo sun invariance", "FAIL",
+                          f"the beauty frames differ on only {control} terrain-band px "
+                          f"between the 60 and 15 deg suns (control minimum "
+                          f"{LOOK_THRESHOLDS['albedo_control_min_changed_px']}): the sun "
+                          f"switch moved nothing, so an unchanged albedo is vacuous",
+                          ALBEDO_MEASUREMENT)
+    a, b = load_rgb(high), load_rgb(low)
+    if a.shape != b.shape:
+        return LookClause("albedo sun invariance", "FAIL",
+                          f"albedo images of different shapes {a.shape} / {b.shape}",
+                          ALBEDO_MEASUREMENT)
+    changed = np.any(np.abs(a - b) > LOOK_THRESHOLDS["albedo_tolerance_counts"], axis=0)
+    fraction = float(changed.mean())
+    ok = fraction <= LOOK_THRESHOLDS["albedo_max_changed_fraction"]
+    return LookClause(
+        "albedo sun invariance", "PASS" if ok else "FAIL",
+        f"albedo differs on {fraction * 100:.3f} % of pixels between the two suns "
+        f"(max {LOOK_THRESHOLDS['albedo_max_changed_fraction'] * 100:g} %, tolerance "
+        f"{LOOK_THRESHOLDS['albedo_tolerance_counts']} counts of 65535); beauty "
+        f"changed on {control} terrain-band px (control min "
+        f"{LOOK_THRESHOLDS['albedo_control_min_changed_px']})",
+        ALBEDO_MEASUREMENT)
+
+
 def look_clauses(out: Path) -> List[LookClause]:
     """Every Phase 2 look clause: measured when its renders exist under
     ``out``, else NOT RUN with the measurement stated."""
@@ -652,6 +727,14 @@ def look_clauses(out: Path) -> List[LookClause]:
     else:
         clauses.append(LookClause("exposure holds at -12 deg sun", "NOT RUN",
                                   "render night absent", NIGHT_MEASUREMENT))
+    if rendered("albedo_sun_high", "albedo_sun_low"):
+        clauses.append(measure_albedo_sun_invariance(out / "albedo_sun_high",
+                                                     out / "albedo_sun_low"))
+    else:
+        clauses.append(LookClause("albedo sun invariance", "NOT RUN",
+                                  "renders albedo_sun_high / albedo_sun_low absent "
+                                  "(no engine here, or --look not given)",
+                                  ALBEDO_MEASUREMENT))
     return clauses
 
 

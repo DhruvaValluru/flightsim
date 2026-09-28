@@ -298,15 +298,15 @@ def test_orographic_block_and_run_card_carry_the_datum(tmp_path):
     assert orographic["datum"] == block
     spec = compile_prompt("fly the 747 at 10000 ft and 280 kt")
     card = json.loads(write_run_card(spec, tmp_path / "card.json",
-                                     orographic=orographic).read_text("utf-8"))
+                                     orographic=orographic).read_text(encoding="utf-8"))
     assert card["datum"] == block
     # Lifted, not duplicated: the orographic block keeps exactly the keys
     # the C++ port reads.
     assert "datum" not in card["orographic"]
-    assert (tmp_path / "card.json").read_text("utf-8").isascii()
+    assert (tmp_path / "card.json").read_text(encoding="utf-8").isascii()
     # And an explicit datum wins over none.
     card2 = json.loads(write_run_card(spec, tmp_path / "card2.json",
-                                      datum=block).read_text("utf-8"))
+                                      datum=block).read_text(encoding="utf-8"))
     assert card2["datum"] == block
 
 

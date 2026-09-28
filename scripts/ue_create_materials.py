@@ -36,11 +36,43 @@ without an engine, so the Windows build is where they are checked.
   mesh component) back as a raw number, anti-aliasing off. The commandlet
   refuses -labels by name when this asset is absent rather than writing
   an ID image it did not measure.
+
+* /Game/FlightSim/M_WorldNormalPass, M_VelocityPass, M_BaseColorPass --
+  I6 (gap S3): the three ground-truth passes -passes=normal,velocity,
+  albedo render through, built on the M_CustomStencilID pattern (post-
+  process domain, replacing the tonemapper, one SceneTexture node into
+  emissive). The SceneTexture ids are the UE 5.7 ESceneTextureId values
+  PPI_WorldNormal, PPI_Velocity and PPI_BaseColor (Python enum spellings
+  PPI_WORLD_NORMAL, PPI_VELOCITY, PPI_BASE_COLOR). The normal and the
+  velocity are SIGNED, and whether a tonemapper-replacing emissive keeps
+  a negative value through the FinalColorHDR readback is not established
+  here, so both are offset in the material (value * 0.5 + 0.5,
+  SIGNED_SCALE / SIGNED_OFFSET below) and decoded back in the commandlet;
+  base colour is already in [0, 1]. What the Velocity node's output IS
+  (the decoded clip-space delta, x right, y up, from the previous scene
+  frame) is engine source reading, verified on Windows by the verifier's
+  flow_vs_motion check on the first rendered bundle -- not here. The
+  commandlet refuses each pass by name (labels.pass_material) when its
+  asset is absent.
 """
 
 import unreal
 
 PATH = "/Game/FlightSim"
+
+#: I6: a signed scene texture (world normal, velocity) is written to the
+#: pass target as value * SIGNED_SCALE + SIGNED_OFFSET, so [-1, 1] lands
+#: in [0, 1]; the commandlet inverts it (FlightSimRenderCommandlet.cpp
+#: RenderPassSignedScale / RenderPassSignedOffset, pinned equal by test).
+SIGNED_SCALE = 0.5
+SIGNED_OFFSET = 0.5
+
+#: The three pass materials and their scene texture, by pass word.
+PASS_MATERIALS = {
+    "normal": ("M_WorldNormalPass", "PPI_WORLD_NORMAL", True),
+    "velocity": ("M_VelocityPass", "PPI_VELOCITY", True),
+    "albedo": ("M_BaseColorPass", "PPI_BASE_COLOR", False),
+}
 
 #: The parameter ApplyWetness looks up by this exact name
 #: (FlightSimVisualScene.cpp FindScalarParameter(Material, TEXT("Wetness"))).
@@ -204,7 +236,78 @@ def create_custom_stencil_id():
     print(f"MATERIAL-CREATED: {full}")
 
 
+def create_pass_material(name, scene_texture_id, signed):
+    """One ground-truth pass material (I6): the M_CustomStencilID shape
+    -- post-process domain, blendable location "Replacing the
+    Tonemapper", one SceneTexture node into emissive colour -- with, for
+    a SIGNED texture, the offset encoding value * SIGNED_SCALE +
+    SIGNED_OFFSET wired through a Multiply and an Add so the readback
+    never depends on a negative emissive surviving the chain. Nothing
+    tone-maps, exposes or dithers the value. Not run without an engine:
+    the node and pin names are the UE Python API's, checked on Windows.
+    """
+    full = f"{PATH}/{name}"
+    if unreal.EditorAssetLibrary.does_asset_exist(full):
+        print(f"MATERIAL-EXISTS: {full}")
+        return
+
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    material = tools.create_asset(name, PATH, unreal.Material,
+                                  unreal.MaterialFactoryNew())
+    if material is None:
+        raise SystemExit("could not create material asset")
+
+    material.set_editor_property("material_domain",
+                                 unreal.MaterialDomain.MD_POST_PROCESS)
+    material.set_editor_property(
+        "blendable_location",
+        unreal.BlendableLocation.BL_REPLACING_TONEMAPPER)
+    lib = unreal.MaterialEditingLibrary
+    texture = lib.create_material_expression(
+        material, unreal.MaterialExpressionSceneTexture, -600, 0)
+    texture.set_editor_property("scene_texture_id",
+                                getattr(unreal.SceneTextureId, scene_texture_id))
+    if signed:
+        scale = lib.create_material_expression(
+            material, unreal.MaterialExpressionConstant, -600, 200)
+        scale.set_editor_property("r", SIGNED_SCALE)
+        offset = lib.create_material_expression(
+            material, unreal.MaterialExpressionConstant, -400, 200)
+        offset.set_editor_property("r", SIGNED_OFFSET)
+        scaled = lib.create_material_expression(
+            material, unreal.MaterialExpressionMultiply, -400, 0)
+        lib.connect_material_expressions(texture, "Color", scaled, "A")
+        lib.connect_material_expressions(scale, "", scaled, "B")
+        encoded = lib.create_material_expression(
+            material, unreal.MaterialExpressionAdd, -200, 0)
+        lib.connect_material_expressions(scaled, "", encoded, "A")
+        lib.connect_material_expressions(offset, "", encoded, "B")
+        lib.connect_material_property(encoded, "",
+                                      unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    else:
+        lib.connect_material_property(texture, "Color",
+                                      unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    lib.recompile_material(material)
+    unreal.EditorAssetLibrary.save_asset(full)
+    print(f"MATERIAL-CREATED: {full}")
+
+
+def create_world_normal_pass():
+    create_pass_material(*PASS_MATERIALS["normal"])
+
+
+def create_velocity_pass():
+    create_pass_material(*PASS_MATERIALS["velocity"])
+
+
+def create_base_colour_pass():
+    create_pass_material(*PASS_MATERIALS["albedo"])
+
+
 create_vertex_colour()
 create_terrain_imagery()
 create_vertex_colour_unlit()
 create_custom_stencil_id()
+create_world_normal_pass()
+create_velocity_pass()
+create_base_colour_pass()

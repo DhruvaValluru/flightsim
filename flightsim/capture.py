@@ -390,6 +390,12 @@ def build_parser() -> argparse.ArgumentParser:
                              "terrain, just the lit airframe. What the "
                              "silhouette measurements want, and nothing "
                              "else")
+    parser.add_argument("--passes", default=None, metavar="WORDS",
+                        help="with --render, also write the ground-truth "
+                             "passes beside the label bundle: a comma list "
+                             "of normal, velocity, albedo (I6; each optional; "
+                             "frame_NNNN_normal.png / _flow.f32 / "
+                             "_albedo.png). None by default.")
     parser.add_argument("--no-host-flight", action="store_true",
                         help="with --render, skip the host's own solve "
                              "flight and solve the poses over the "
@@ -1006,7 +1012,8 @@ def _run(args: argparse.Namespace) -> int:
         mesh=_mesh_manifest_path(spec),
         look=render_look(spec), camera_flags=None,
         labels=True, deterministic=True, void=bool(args.void),
-        width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, fps=DEFAULT_FPS))
+        width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, fps=DEFAULT_FPS,
+        passes=[w for w in (args.passes or "").split(",") if w.strip()]))
     print(f"rendering {len(cameras)} camera pass(es) into {frames_dir} "
           f"{'in the black void (--void)' if args.void else 'in the visual scene'} ...")
     completed = subprocess.run(command)

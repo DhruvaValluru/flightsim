@@ -3696,6 +3696,152 @@ mutate core/interop/dis.py \
     'if False:' \
     "DIS PDU version and type refusal" tests/test_dis.py || failures=$((failures+1))
 
+# -- the advancement additions, batch 1 part 2: passes, land cover, the held verifier guards ----
+mutate core/capture/labels.py \
+    '    return (stored - NORMAL_ENCODE_OFFSET) / NORMAL_ENCODE_SCALE' \
+    '    return stored / NORMAL_ENCODE_SCALE  # MUTATED: no 0.5 offset' \
+    "the normal reader undoes the 0.5 offset" \
+    tests/test_annotation_passes.py || failures=$((failures+1))
+
+mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp \
+    'constexpr float RenderPassNormalEncodeOffset = 0.5f;' \
+    'constexpr float RenderPassNormalEncodeOffset = 0.0f;' \
+    "the commandlet encodes normals with the 0.5 offset the reader undoes" \
+    tests/test_gate6_visual.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                du_pred = p_now[0] - p_prev[0]' \
+    '                du_pred = p_prev[0] - p_now[0]  # MUTATED: flow sign' \
+    "the flow is graded as previous-to-current, not the reverse" \
+    tests/test_annotation_passes.py || failures=$((failures+1))
+
+mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp \
+    'const float DyPx = -NdcY * 0.5f * Height;' \
+    'const float DyPx = NdcY * 0.5f * Height;' \
+    "the flow's dy is screen-down (clip y is up)" \
+    tests/test_gate6_visual.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    'NORMAL_ANGLE_TOL_DEG = 10.0' \
+    'NORMAL_ANGLE_TOL_DEG = 1000.0' \
+    "a normal image 30 deg off the depth fails normals_vs_depth" \
+    tests/test_annotation_passes.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    'FLOW_TOL_PX = 2.0' \
+    'FLOW_TOL_PX = 1000.0' \
+    "a flow scaled by two fails flow_vs_motion" \
+    tests/test_annotation_passes.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    'ALBEDO_MIN_DIFFERENT_FRACTION = 0.01' \
+    'ALBEDO_MIN_DIFFERENT_FRACTION = 0.0' \
+    "an albedo that is the beauty picture fails albedo_range" \
+    tests/test_annotation_passes.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                if np.any(flow != 0.0):' \
+    '                if False:  # MUTATED: any first frame passes' \
+    "a first flow frame that is not zeros fails" \
+    tests/test_annotation_passes.py || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    'FAIL_FLOW = "annotation.flow"' \
+    'FAIL_FLOW = "annotation.flows"' \
+    "a failed flow check carries its catalogue name" \
+    tests/test_annotation_passes.py || failures=$((failures+1))
+
+mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp \
+    'TEXT("labels.pass_material: -passes=%s needs the post-process material ")' \
+    'TEXT("labels.pass_materials: -passes=%s needs the post-process material ")' \
+    "a missing pass material refuses by its catalogue name" \
+    tests/test_gate6_visual.py || failures=$((failures+1))
+
+mutate core/render/flags.py \
+    '    if pass_token is not None and pass_token not in flags:' \
+    '    if False:  # MUTATED: -passes= never emitted' \
+    "the builder emits -passes= when asked" \
+    tests/test_annotation_passes.py || failures=$((failures+1))
+
+mutate core/capture/labels.py \
+    '    if pass_words_seen:' \
+    '    if False:  # MUTATED: no passes record' \
+    "attach records the render.passes applied variable" \
+    tests/test_annotation_passes.py || failures=$((failures+1))
+
+mutate experiments/gate6_visual.py \
+    '    if control < LOOK_THRESHOLDS["albedo_control_min_changed_px"]:' \
+    '    if False:  # MUTATED: no control' \
+    "the albedo clause is vacuous when the sun moved no beauty pixel" \
+    tests/test_gate6_visual.py || failures=$((failures+1))
+
+mutate ue/Plugins/FlightSimBridge/Source/FlightSimBridge/Private/FlightSimRenderCommandlet.cpp \
+    'PassVelocity->bAlwaysPersistRenderingState = true;' \
+    'PassVelocity->bAlwaysPersistRenderingState = false;' \
+    "the velocity capture keeps its view state" \
+    tests/test_gate6_visual.py || failures=$((failures+1))
+
+mutate core/terrain/landcover.py \
+    '    raw = stack * 255.0 / float(k * k)' \
+    '    raw = stack * 255.0 / float(k)  # MUTATED: fraction over k, not k^2' \
+    "weights are 255 times the fraction of k^2 fine cells" tests/test_landcover.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/landcover.py \
+    '    extra = (rank < remainder[None, :, :]).astype(np.float64)' \
+    '    extra = np.zeros_like(base)  # MUTATED: remainders never distributed' \
+    "largest-remainder rounding sums to exactly 255" tests/test_landcover.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/landcover.py \
+    '        "sha256": provenance["sha256"],' \
+    '        "sha256": None,  # MUTATED: source digest not recorded' \
+    "landcover.json records the source sha256" tests/test_landcover.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/landcover.py \
+    '    constraint = "terrain.landcover"' \
+    '    constraint = "terrain.land_cover"  # MUTATED: refusal renamed' \
+    "a bad land cover source refuses terrain.landcover by name" tests/test_landcover.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/landcover.py \
+    '    constraint = "terrain.landcover_grid"' \
+    '    constraint = "terrain.land_cover_grid"  # MUTATED: refusal renamed' \
+    "a bake without a grid refuses terrain.landcover_grid by name" tests/test_landcover.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/landcover.py \
+    '    "(c) ESA WorldCover project 2021 / Contains modified Copernicus "' \
+    '    "(c) a land cover product / Contains modified Copernicus "  # MUTATED' \
+    "the CC BY 4.0 attribution line is the manual's" tests/test_landcover.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/landcover.py \
+    '    report["ok"] = bool(compared >= samples * 0.9
+                        and report["agreement"] >= VERIFY_MIN_AGREEMENT)' \
+    '    report["ok"] = True  # MUTATED: every rasterisation verifies' \
+    "rasterised classes must agree with the source window" tests/test_landcover.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/landcover.py \
+    'without_value=prior,' \
+    'without_value=float(legend[dominant]),  # MUTATED: null test against itself' \
+    "the land cover null test compares against the uniform prior" tests/test_landcover.py \
+    || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    'DATUM_TOL_M = 0.01' \
+    'DATUM_TOL_M = 1e9  # MUTATED: any undulation agrees' \
+    "the verifier holds the manifest undulation to 0.01 m of its own read" tests/test_geoid.py \
+    || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if recorded != digest:' \
+    '    if False and recorded != digest:  # MUTATED: any grid is the same grid' \
+    "the verifier refuses an undulation from a grid other than its own" tests/test_geoid.py \
+    || failures=$((failures+1))
+
 if [ "$guard_n" -ne "$total" ]; then
     echo "INTERNAL: $guard_n mutate calls ran but $total are written; the count is off" >&2
     exit 1
