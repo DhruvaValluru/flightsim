@@ -247,6 +247,8 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
     report.violations.extend(validate_registry(spec))
     report.violations.extend(validate_atmosphere(spec))
     report.violations.extend(validate_datum(spec))
+    report.violations.extend(validate_turbulence_model(spec))
+    report.violations.extend(validate_wind_profile(spec))
 
     # -- the definitive check: can this actually be trimmed? -----------
     # Skipped when geometry is already impossible, since trimming below ground
@@ -509,6 +511,135 @@ def validate_atmosphere(spec) -> List[Violation]:
         out.append(Violation(refused.constraint, refused.message,
                              actual=refused.actual, limit=refused.limit,
                              unit=refused.unit))
+    return out
+
+
+# -- the turbulence model and the wind profile (P6) ---------------------------
+
+def validate_turbulence_model(spec) -> List[Violation]:
+    """The ``turbulence_model`` block's own constraints, refused by name
+    (``turbulence.model``): the model is ``dryden`` or ``von_karman``; the
+    intensity, when stated, is a turbulence word the providers know or a
+    W20 in knots at or above zero (the Dryden path takes the words only:
+    a number needs the von Karman model); the seed, when stated, is an
+    integer inside the range JSBSim can represent (the Dryden seed) or
+    non-negative (the von Karman stream)."""
+    from ..environment.turbulence import MAX_JSBSIM_SEED, W20_KT
+    from .blocks import TURBULENCE_MODELS
+
+    block = spec.turbulence_model
+    out: List[Violation] = []
+    model = block.model.value
+    if model not in TURBULENCE_MODELS:
+        out.append(Violation(
+            "turbulence.model",
+            f"turbulence_model.model must be one of {list(TURBULENCE_MODELS)}, not {model!r}",
+            actual=model))
+        return out
+    intensity = block.intensity.value
+    if intensity is not None:
+        if isinstance(intensity, str):
+            if intensity not in W20_KT:
+                out.append(Violation(
+                    "turbulence.model",
+                    f"turbulence_model.intensity {intensity!r} is not a turbulence word "
+                    f"({sorted(W20_KT)}) or a W20 in knots", actual=intensity))
+        elif isinstance(intensity, bool) or not isinstance(intensity, (int, float)):
+            out.append(Violation(
+                "turbulence.model",
+                f"turbulence_model.intensity must be a word or a W20 in knots, not "
+                f"{intensity!r}", actual=intensity))
+        elif float(intensity) < 0.0:
+            out.append(Violation(
+                "turbulence.model", "turbulence_model.intensity (W20) cannot be negative",
+                actual=float(intensity), limit=0.0, unit="kt"))
+        elif model == "dryden":
+            out.append(Violation(
+                "turbulence.model",
+                f"the dryden model takes an intensity word ({sorted(W20_KT)}); a W20 of "
+                f"{intensity:g} kt needs the von_karman model", actual=intensity, unit="kt"))
+    seed = block.seed.value
+    if seed is not None:
+        if isinstance(seed, bool) or not isinstance(seed, int):
+            out.append(Violation(
+                "turbulence.model", f"turbulence_model.seed must be an integer, not {seed!r}",
+                actual=seed))
+        elif not 0 <= seed < MAX_JSBSIM_SEED:
+            out.append(Violation(
+                "turbulence.model",
+                f"turbulence_model.seed must lie in 0..{MAX_JSBSIM_SEED - 1} (the range "
+                f"JSBSim represents; a larger seed saturates)",
+                actual=seed, limit=MAX_JSBSIM_SEED - 1, unit="seed"))
+    return out
+
+
+def validate_wind_profile(spec) -> List[Violation]:
+    """The ``wind_profile`` block's own constraints, refused by name: the
+    kind is one of the four (``wind_profile.kind``); ``layered`` needs
+    layers of at least two ascending non-negative
+    [altitude_m, speed_kt, direction_deg] triples (``wind_profile.layers``,
+    the provider's own list); ``milspec`` needs z0 of 0.15 or 2.0 ft and
+    a scene starting 3..1000 ft above ground (``wind_profile.kind``);
+    ``nwp`` needs a cached fixture whose digest matches
+    (``weather.fixture_missing`` / ``weather.fixture_digest``); a field
+    another kind reads, stated beside a non-uniform kind, is refused under
+    ``wind_profile.kind`` (one profile at a time); under the uniform kind
+    a stated companion field is recorded by the runner as unread, so
+    nothing is silently ignored and the null pair of ``kind`` can run."""
+    from ..environment.shear import (
+        ShearError, layer_problems, load_fixture, milspec_problems,
+    )
+    from ..fdm import units as u
+    from .blocks import WIND_PROFILE_KINDS
+
+    block = spec.wind_profile
+    out: List[Violation] = []
+    kind = block.kind.value
+    if kind not in WIND_PROFILE_KINDS:
+        out.append(Violation(
+            "wind_profile.kind",
+            f"wind_profile.kind must be one of {list(WIND_PROFILE_KINDS)}, not {kind!r}",
+            actual=kind))
+        return out
+    stated = {name: getattr(block, name).value for name in ("layers", "roughness_ft", "fixture")}
+    reads = {"uniform": (), "layered": ("layers",), "milspec": ("roughness_ft",),
+             "nwp": ("fixture",)}[kind]
+    for name, value in stated.items():
+        if value is not None and name not in reads and kind != "uniform":
+            # Two profiles' fields together (layers with an nwp fixture,
+            # a fixture with the milspec z0): a conflict, refused. Under the
+            # uniform kind a stated companion field is NOT applied and the
+            # runner records it as unread (the null pair of ``kind`` is
+            # exactly that spec), never silently.
+            out.append(Violation(
+                "wind_profile.kind",
+                f"wind_profile.{name} is stated but the {kind!r} profile does not read it "
+                f"(another kind's field); state one profile", actual=name))
+    if kind == "layered":
+        if stated["layers"] is None:
+            out.append(Violation("wind_profile.layers",
+                                 "a layered profile states its layers "
+                                 "([altitude_m, speed_kt, direction_deg], at least two)"))
+        for problem in layer_problems(stated["layers"]) if stated["layers"] is not None else ():
+            out.append(Violation(problem.constraint, problem.message, actual=problem.actual,
+                                 limit=problem.limit, unit=problem.unit))
+    elif kind == "milspec":
+        z0 = stated["roughness_ft"]
+        if z0 is not None and (isinstance(z0, bool) or not isinstance(z0, (int, float))):
+            out.append(Violation("wind_profile.kind",
+                                 f"wind_profile.roughness_ft must be a number, not {z0!r}",
+                                 actual=z0))
+            z0 = None
+        agl_ft = u.m_to_ft(float(spec.altitude.value) - float(spec.terrain_elevation.value))
+        for problem in milspec_problems(z0, agl_ft):
+            out.append(Violation(problem.constraint, problem.message, actual=problem.actual,
+                                 limit=problem.limit, unit=problem.unit))
+    elif kind == "nwp":
+        name = stated["fixture"]
+        try:
+            load_fixture(name)
+        except ShearError as problem:
+            out.append(Violation(problem.constraint, problem.message))
     return out
 
 

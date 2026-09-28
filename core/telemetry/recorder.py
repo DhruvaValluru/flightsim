@@ -71,6 +71,19 @@ DEFAULT_CHANNELS = (
     "vapour_pressure_pa",
     "temperature_k",
     "pressure_hpa",
+    # -- the gust and wind-profile channels (P6): the gust channel as JSBSim
+    # holds it (the stack's summed gust, read back), the equivalent roll
+    # rate the derived airframe received (0 on a stock one), the base
+    # wind's horizontal speed (the profile's speed at the altitude). The
+    # profile's layer index and dV/dz are not JSBSim's: the runner records
+    # them through Recorder ``extra`` from the stack (STACK_CHANNELS in
+    # core/environment/stack.py). Recorded, NOT graded: the Gate 5
+    # comparison set is unchanged.
+    "gust_north_mps",
+    "gust_east_mps",
+    "gust_down_mps",
+    "gust_p_equivalent_rad_s",
+    "wind_profile_speed_mps",
 )
 
 

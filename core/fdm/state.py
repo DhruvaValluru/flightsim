@@ -90,10 +90,24 @@ REQUIRED_PROPERTIES = (
     "atmosphere/total-wind-north-fps",
     "atmosphere/total-wind-east-fps",
     "atmosphere/total-wind-down-fps",
+    # P6: the gust channel (RW, persists until written again; the stack
+    # writes it every step) and the base wind the stack writes, read back
+    # as what the FDM holds. All five probed on the live catalog.
+    "atmosphere/gust-north-fps",
+    "atmosphere/gust-east-fps",
+    "atmosphere/gust-down-fps",
+    "atmosphere/wind-north-fps",
+    "atmosphere/wind-east-fps",
     "fcs/elevator-pos-rad",
     "fcs/rudder-pos-rad",
     "fcs/throttle-cmd-norm",
 )
+
+#: P6: the equivalent roll rate of a rotational gust, declared ONLY by an
+#: airframe derived with the gust_rotation injection (core/control/derive.py).
+#: Read when the loaded model has it; recorded as 0.0 when it does not
+#: (nothing reached the airframe), with the record saying ``absent``.
+P_EQUIVALENT_PROPERTY = "gust/p-equivalent-rad_sec"
 
 #: Control-surface positions, read for mesh articulation (§5 Phase 5) and for
 #: the burn-in. Not every airframe defines every one, so these are resolved
@@ -205,6 +219,19 @@ class AircraftState:
     wind_east_mps: float
     wind_down_mps: float
 
+    # -- the gust channel (P6): what JSBSim holds in atmosphere/gust-*-fps,
+    #    i.e. the summed gust the stack wrote, read back; the equivalent
+    #    roll rate the derived airframe received (0.0 on a stock airframe,
+    #    which declares no such property); and the base wind's horizontal
+    #    speed (atmosphere/wind-*-fps: the summed WindProvider wind, the
+    #    profile's speed at the aircraft's altitude when one is stated).
+    #    Recorded, not graded by Gate 5.
+    gust_north_mps: float
+    gust_east_mps: float
+    gust_down_mps: float
+    gust_p_equivalent_rad_s: float
+    wind_profile_speed_mps: float
+
     # -- control surface positions, for articulation and burn-in
     surfaces: Dict[str, float] = field(default_factory=dict)
 
@@ -269,6 +296,9 @@ class AircraftState:
         construction avoids a catalog lookup per surface per frame.
         """
         g = props.get
+        has = getattr(props, "has", None)
+        p_equivalent = (g(P_EQUIVALENT_PROPERTY)
+                        if has is not None and has(P_EQUIVALENT_PROPERTY) else 0.0)
         return cls(
             t=g("simulation/sim-time-sec"),
             lat_deg=g("position/lat-geod-deg"),
@@ -317,5 +347,11 @@ class AircraftState:
             wind_north_mps=u.fps_to_mps(g("atmosphere/total-wind-north-fps")),
             wind_east_mps=u.fps_to_mps(g("atmosphere/total-wind-east-fps")),
             wind_down_mps=u.fps_to_mps(g("atmosphere/total-wind-down-fps")),
+            gust_north_mps=u.fps_to_mps(g("atmosphere/gust-north-fps")),
+            gust_east_mps=u.fps_to_mps(g("atmosphere/gust-east-fps")),
+            gust_down_mps=u.fps_to_mps(g("atmosphere/gust-down-fps")),
+            gust_p_equivalent_rad_s=p_equivalent,
+            wind_profile_speed_mps=u.fps_to_mps(math.hypot(g("atmosphere/wind-north-fps"),
+                                                           g("atmosphere/wind-east-fps"))),
             surfaces={n.split("/")[-1]: g(n) for n in surface_names},
         )

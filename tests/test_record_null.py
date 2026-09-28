@@ -231,9 +231,12 @@ def test_pairs_for_a_spec_run_only_the_registered_fields_it_states_off_null():
     assert list(pairs) == ["environment.wind_speed"]
     block = null_pairs_block(pairs)
     assert block["environment.wind_speed"]["verdict"] == "reached"
-    # The committed example against the REAL registry: no registered spec
-    # field exists in spec 8, so no pair runs (nothing is flown).
-    assert null_pairs_for_spec(spec_with_wind(10.0), runner=fake_runner) == {}
+    # The committed example against the REAL registry (W1 registered the
+    # environment section): the 10 kt wind is the one field off its null,
+    # so exactly the wind pair runs -- the fake runner records every
+    # channel the real entry names (wind_speed_mps, lat_deg, altitude_m).
+    assert list(null_pairs_for_spec(spec_with_wind(10.0), runner=fake_runner)) == [
+        "environment.wind_speed"]
 
 
 def test_attach_null_pair_writes_into_the_variables_record_or_says_it_could_not():

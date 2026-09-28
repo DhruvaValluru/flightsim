@@ -33,6 +33,16 @@ INJECTED = ("failures.elevator_authority", "failures.aileron_authority",
             "failures.rudder_authority", "icing.lift_factor", "icing.drag_factor",
             "icing.side_factor", "icing.roll_factor", "icing.pitch_factor", "icing.yaw_factor",
             "icing.eta", "icing.alpha_shift_rad", "gust.p_equivalent_rad_s")
+#: P6: the turbulence model and wind profile blocks, one entry per field (the
+#: words included); the model and kind words write the gust / wind channels.
+P6 = ("turbulence_model.model", "turbulence_model.intensity", "turbulence_model.seed",
+      "wind_profile.kind", "wind_profile.layers", "wind_profile.roughness_ft",
+      "wind_profile.fixture")
+#: W1: the environment section, claimed whole once environment.surface (the
+#: roughness inference's spec field) is registered, so every spec-8 field of
+#: it is an entry with its default as the null.
+ENVIRONMENT = ("environment.wind_speed", "environment.wind_direction", "environment.turbulence",
+               "environment.surface", "environment.weather_date", "environment.weather_event")
 
 
 def _entry(**overrides):
@@ -46,7 +56,12 @@ def _entry(**overrides):
 
 def test_every_batch_1_variable_and_every_physics_variable_is_registered():
     assert set(REGISTRY.names()) == (set(BATCH_1) | set(PHYSICS) | set(WORDS) | set(DATUM)
-                                     | set(INJECTED))
+                                     | set(INJECTED) | set(P6) | set(ENVIRONMENT))
+    for name in P6:
+        entry = REGISTRY.get(name)
+        assert entry.spec_path == name and entry.effect_channels and entry.null_basis
+    assert REGISTRY.get("turbulence_model.model").null_value == "dryden"
+    assert REGISTRY.get("wind_profile.kind").null_value == "uniform"
     for name in BATCH_1:
         entry = REGISTRY.get(name)
         assert entry.spec_path is None and entry.null_value is NO_NULL
@@ -72,13 +87,30 @@ def test_every_batch_1_variable_and_every_physics_variable_is_registered():
         assert entry.spec_path is None and entry.null_value is NO_NULL
         assert entry.jsbsim_writes and entry.readback_tolerance is not None
         assert entry.null_basis                     # the neutral value, and why it is neutral
-    assert REGISTRY.sections() == ("atmosphere", "datum")
-    # Every spec field of the atmosphere and datum blocks is claimed: the
-    # validator's record.unregistered check is what a stated block meets first.
-    from core.scenario.blocks import AtmosphereSpec, DatumSpec
+    for name in ENVIRONMENT:
+        entry = REGISTRY.get(name)
+        assert entry.spec_path == name and entry.null_value is not NO_NULL
+        assert entry.effect_channels and entry.null_basis
+    surface = REGISTRY.get("environment.surface")
+    assert surface.unit == "word" and surface.null_value == "unspecified"
+    assert [w.property for w in surface.jsbsim_writes] == [
+        "atmosphere/wind-north-fps", "atmosphere/wind-east-fps", "atmosphere/wind-down-fps"]
+    assert surface.readback_tolerance.value == 0.0
+    assert REGISTRY.sections() == ("atmosphere", "datum", "environment", "turbulence_model",
+                                   "wind_profile")
+    # Every spec field of the claimed blocks, and every environment quantity
+    # of the spec, is claimed: the validator's record.unregistered check is
+    # what a stated block meets first.
+    from core.scenario.blocks import (
+        AtmosphereSpec, DatumSpec, TurbulenceModelSpec, WindProfileSpec,
+    )
+    from core.scenario.spec import ScenarioSpec
     assert set(REGISTRY.spec_fields()) == (
         {f"atmosphere.{f}" for f in AtmosphereSpec.FIELD_ORDER}
-        | {f"datum.{f}" for f in DatumSpec.FIELD_ORDER})
+        | {f"datum.{f}" for f in DatumSpec.FIELD_ORDER}
+        | {f"turbulence_model.{f}" for f in TurbulenceModelSpec.FIELD_ORDER}
+        | {f"wind_profile.{f}" for f in WindProfileSpec.FIELD_ORDER}
+        | {f"{sec}.{n}" for sec, n in ScenarioSpec.FIELD_ORDER if sec == "environment"})
 
 
 def test_the_physics_readback_tolerances_are_the_measured_ones():
@@ -192,6 +224,10 @@ def test_the_new_unit_suffixes_read_back():
     assert suffix_unit("rh_pct") == "%"
     assert suffix_unit("rho_kgm3") == "kg/m^3"
     assert suffix_unit("stall_flag") == "1"
+    # A per-second name is never read as seconds (P6's two channels; the
+    # registry keeps no table of its own -- this one, longest first).
+    assert suffix_unit("gust_p_equivalent_rad_s") == "rad/s"
+    assert suffix_unit("shear_dv_dz_per_s") == "1/s"
     # Longest-first: none of the new suffixes shadows an old one.
     assert suffix_unit("v_mps") == "m/s" and suffix_unit("q_rad") == "rad"
     assert suffix_unit("qbar_pa") == "Pa" and suffix_unit("m_kg") == "kg"
@@ -216,16 +252,17 @@ EXAMPLE_DIGESTS = {
 def test_a_spec_that_states_no_registered_field_keeps_its_digest_and_needs_no_record():
     """Absent-canonical: the registry adds no key to a spec, so every
     committed example digests as it did at HEAD 9ec2c31 (measured then,
-    pinned here), states no claimed section, and refuses nothing."""
+    pinned here), states the environment section only (W1 registers all
+    six of its fields, so nothing is unregistered), and refuses nothing."""
     from core.scenario.spec import ScenarioSpec
 
     for path, digest in EXAMPLE_DIGESTS.items():
         spec = ScenarioSpec.read(REPO / path)
         assert spec.digest() == digest, path
         data = spec.to_dict()
-        assert not any(section in data for section in REGISTRY.sections()), path
+        assert [s for s in REGISTRY.sections() if s in data] == ["environment"], path
         assert unregistered_fields(data) == []
-        assert REGISTRY.stated_variables(data) == {}
+        assert set(REGISTRY.stated_variables(data)) == set(ENVIRONMENT), path
 
 
 # -- the readbacks, measured on the c172p --------------------------------------------

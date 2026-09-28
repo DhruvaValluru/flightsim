@@ -576,7 +576,8 @@ def test_the_registry_entries_claim_every_datum_field_and_name_recorded_channels
             assert channel.name in flat_run.telemetry.columns, channel.name
     data = spec_for(geoid_model="EGM2008").to_dict()
     assert registry.unregistered_fields(data) == []
-    assert set(registry.stated_variables(data)) == {"datum.vertical", "datum.physics_frame",
+    assert {n for n in registry.stated_variables(data)
+            if n.startswith("datum.")} == {"datum.vertical", "datum.physics_frame",
                                                     "datum.geoid_model"}
     if "datum" in REGISTRY.sections():
         assert set(REGISTRY.spec_fields()) >= {f"datum.{f}" for f in DatumSpec.FIELD_ORDER}

@@ -131,6 +131,53 @@ def atmosphere_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
     return block
 
 
+def gust_table_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
+    """The ``gust_table`` block for a spec (P6), or None when the model is
+    not von_karman (no block: the host writes nothing into the gust
+    channel). The table is built exactly as the headless run builds it:
+    the spec's environment stack prepared on an FDM at the initial
+    conditions (the atmosphere first, then the true airspeed and span
+    JSBSim reports), so the rows the card carries are the run's rows
+    (pinned equal by test). Keys in the fixed order
+    ``core.environment.von_karman.CARD_KEYS``; rows as %.17g strings."""
+    from core.environment.von_karman import CARD_KEYS, VonKarmanTurbulence
+    from core.scenario.runner import environment_for, fdm_at_initial_conditions
+
+    stack = environment_for(spec)
+    providers = [p for p in stack.gust if isinstance(p, VonKarmanTurbulence)]
+    if not providers:
+        return None
+    fdm = fdm_at_initial_conditions(spec)
+    stack.prepare(fdm)
+    block = providers[0].card_block()
+    if tuple(block) != CARD_KEYS:
+        raise RuntimeError(f"gust_table card keys {list(block)} are not the fixed order "
+                           f"{list(CARD_KEYS)}")
+    expected = int(round(float(spec.duration.value) * float(spec.rate.value))) + 1
+    if len(block["rows"]) != expected:
+        raise RuntimeError(f"gust_table has {len(block['rows'])} rows for {expected} steps")
+    return block
+
+
+def layered_wind_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
+    """The ``layered_wind`` block for a spec (P6), or None for the uniform
+    kind: the profile's own ``card_block`` (layers as [altitude_m,
+    speed_kt, direction_deg]; the milspec law sampled at fixed heights
+    AGL with its z0; the fixture's layers with its digest as the source)
+    in the fixed order ``core.environment.shear.CARD_KEYS``."""
+    from core.environment.shear import CARD_KEYS
+    from core.scenario.runner import wind_profile_for
+
+    provider = wind_profile_for(spec)
+    if provider is None:
+        return None
+    block = provider.card_block()
+    if tuple(block) != CARD_KEYS:
+        raise RuntimeError(f"layered_wind card keys {list(block)} are not the fixed order "
+                           f"{list(CARD_KEYS)}")
+    return block
+
+
 def write_run_card(spec: ScenarioSpec, path: Path,
                    control_inputs: Sequence[Dict[str, float]] = (),
                    duration_s: Optional[float] = None,
@@ -216,6 +263,41 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         provider = DrydenTurbulence(str(spec.turbulence.value),
                                     seed=int(spec.seed.value))
         card["turbulence_properties"] = provider.configure()
+    if turbulence_provider is None:
+        # P6: the turbulence_model block. von_karman: the field rides in
+        # the gust_table block below and JSBSim's own Dryden process is
+        # switched OFF exactly as the headless stack does (turb-type 0),
+        # so the host never runs both. dryden with a stated intensity word
+        # or seed: the provider the runner builds, and the card's word is
+        # the stated one (the host keys its turbulence writes on the word).
+        from core.environment.turbulence import DrydenTurbulence
+
+        model_block = spec.turbulence_model
+        intensity = model_block.intensity.value
+        seed = spec.seed.value if model_block.seed.value is None else model_block.seed.value
+        if str(model_block.model.value) == "von_karman":
+            card["turbulence_properties"] = DrydenTurbulence("none").configure()
+        elif intensity is not None or model_block.seed.value is not None:
+            word = str(spec.turbulence.value) if intensity is None else str(intensity)
+            card["turbulence"] = word
+            if word != "none":
+                card["turbulence_properties"] = DrydenTurbulence(word, seed=int(seed)).configure()
+            else:
+                card.pop("turbulence_properties", None)
+    gust_table = gust_table_card_block(spec)
+    if gust_table is not None:
+        # P6: the von Karman table, row for row (%.17g), with the digest of
+        # its rows; the host applies row i into atmosphere/gust-*-fps at
+        # step i (rotating u, v by the card's heading_deg) and into
+        # gust/p-equivalent-rad_sec where the airframe declares it, and
+        # refuses card.gust_table / gust_table.length otherwise.
+        card["gust_table"] = gust_table
+    layered_wind = layered_wind_card_block(spec)
+    if layered_wind is not None:
+        # P6: the wind profile as layers the host interpolates between;
+        # it REPLACES the uniform wind (wind_speed_kt / wind_direction_deg
+        # stay on the card as what the spec said).
+        card["layered_wind"] = layered_wind
     atmosphere = atmosphere_card_block(spec)
     if atmosphere is not None:
         # Gap P1: the EXACT JSBSim property writes the headless provider

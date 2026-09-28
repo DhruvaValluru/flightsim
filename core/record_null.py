@@ -32,10 +32,14 @@ correctness -- it says the variable reached the equations of motion and
 by how much on this run, not that the amount is right. The floors grade
 against the integrator's noise at the branch's stock rates; a run at
 another rate has other noise. A channel with no floor is reported, not
-graded. Today no spec-8 field is a registered spec field (the atmosphere
-block lands with P1), so :func:`null_pairs_for_spec` over a committed
-example returns nothing -- measured in tests/test_record_null.py, where
-the mechanics are exercised on a test registry over ``environment.wind_speed``.
+graded. The environment section's six spec-8 fields are registered (W1,
+with the roughness inference's ``environment.surface``), so
+:func:`null_pairs_for_spec` over a committed example runs a pair for each
+of them the example states off its null (a stated wind, a surface word,
+a weather event) and none for the rest -- measured in
+tests/test_record_null.py, where the mechanics are exercised on a test
+registry over ``environment.wind_speed`` and the committed example runs
+exactly that one pair against the real one.
 """
 
 from __future__ import annotations
@@ -67,13 +71,19 @@ NULL_FLOOR_VAPOUR_PA = 1.0
 #: the trimmed c172p's own one-step drift is 1e-3 N) and 0.1 deg/s.
 NULL_FLOOR_FORCE_N = 1.0
 NULL_FLOOR_RATE_DPS = 0.1
+#: The wind profile's gradient (P6): a stated 1e-4 1/s, a hundredth of the
+#: layered example's 0.0077 1/s (10 kt over 1000 m) and far above the
+#: recorder's own float noise; the roll gust in rad/s is the 0.1 deg/s floor.
+NULL_FLOOR_SHEAR_PER_S = 1e-4
+NULL_FLOOR_RATE_RAD_S = NULL_FLOOR_RATE_DPS * 3.141592653589793 / 180.0
 NULL_FLOOR_REFERENCE = (
     "10 x the numerical noise measured on this branch (docs/vva/VV_REPORT.md row V9: "
     "peak altitude difference 0.098 m between 1/60 and 1/120 s, 0.048 m between 1/120 "
     "and 1/240 s, observed order p = 1.03): altitude 0.5 m, angles 0.05 deg, speeds 0.1 kt; "
     "the atmosphere's own channels a stated tenth of a unit (0.1 K, 0.1 %, 0.1 hPa, 1 Pa), "
     "above their measured read-back noise and below the smallest vocabulary step; the "
-    "injections' force and rate channels a stated 1 N and 0.1 deg/s (P2)")
+    "injections' force and rate channels a stated 1 N and 0.1 deg/s (P2); the wind "
+    "profile's gradient a stated 1e-4 1/s and the roll gust the same 0.1 deg/s in rad/s (P6)")
 
 #: Floor per channel unit; a unit not listed has no floor (reported, not graded).
 FLOORS_BY_UNIT: Dict[str, float] = {
@@ -87,6 +97,8 @@ FLOORS_BY_UNIT: Dict[str, float] = {
     "Pa": NULL_FLOOR_VAPOUR_PA,
     "N": NULL_FLOOR_FORCE_N,
     "deg/s": NULL_FLOOR_RATE_DPS,
+    "1/s": NULL_FLOOR_SHEAR_PER_S,
+    "rad/s": NULL_FLOOR_RATE_RAD_S,
 }
 
 

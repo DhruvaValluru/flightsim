@@ -4367,6 +4367,204 @@ mutate core/capture/verify.py \
     "datum: datum_independent holds the 100 interior points to 0.01 m" tests/test_datum_block.py \
     || failures=$((failures+1))
 
+# -- the advancement additions, wave 3: W1 land-cover weightmaps, the layer import manifest and the roughness inference ----
+mutate core/terrain/weightmaps.py \
+    '    extra = (rank < remainder[None, :, :]).astype(np.float64)' \
+    '    extra = np.zeros_like(base)  # MUTATED: remainders never distributed' \
+    "Landscape layers sum to exactly 255 at every texel" tests/test_weightmaps.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/weightmaps.py \
+    '    best = np.argmax(legend, axis=0)' \
+    '    best = np.argmin(legend, axis=0)  # MUTATED: the smallest layer wins' \
+    "the argmax round trip takes the largest layer" tests/test_weightmaps.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/weightmaps.py \
+    '    if code not in LEGEND_CODES:' \
+    '    if code not in LEGEND_CODES and False:  # MUTATED: a foreign code is never refused' \
+    "a code outside the legend refuses landcover.legend" tests/test_weightmaps.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/weightmaps.py \
+    '    constraint = "landcover.legend"' \
+    '    constraint = "landcover.legend_code"  # MUTATED: refusal renamed' \
+    "the taxonomy refusal is named landcover.legend" tests/test_weightmaps.py \
+    || failures=$((failures+1))
+
+mutate core/environment/surface.py \
+    'DOMINANCE_THRESHOLD = 0.5' \
+    'DOMINANCE_THRESHOLD = 0.0  # MUTATED: any plurality infers' \
+    "the dominant class must hold half the scene" tests/test_surface_inference.py \
+    || failures=$((failures+1))
+
+mutate core/environment/surface.py \
+    '    return replace(cls, thermals=None,' \
+    '    return replace(cls, thermals=cls.thermals,  # MUTATED: the word'"'"'s thermals ride along' \
+    "the land cover inference infers roughness only" tests/test_surface_inference.py \
+    || failures=$((failures+1))
+
+mutate core/environment/surface.py \
+    '    source: str = "inferred"' \
+    '    source: str = "derived"  # MUTATED: provenance word' \
+    "an inferred surface carries provenance inferred" tests/test_surface_inference.py \
+    || failures=$((failures+1))
+
+mutate core/environment/surface.py \
+    '    if str(quantity.value) != UNSPECIFIED or str(quantity.source) != "default":' \
+    '    if str(quantity.value) != UNSPECIFIED:  # MUTATED: a stated unspecified is overridden' \
+    "a user-stated surface beats the inference" tests/test_surface_inference.py \
+    || failures=$((failures+1))
+
+mutate core/environment/surface.py \
+    '    constraint = "landcover.surface_inference"' \
+    '    constraint = "landcover.surface_inferred"  # MUTATED: refusal renamed' \
+    "the inference refusal is named landcover.surface_inference" tests/test_surface_inference.py \
+    || failures=$((failures+1))
+
+mutate core/environment/surface.py \
+    'NULL_WIND_THRESHOLD_KT = 0.5' \
+    'NULL_WIND_THRESHOLD_KT = 50.0  # MUTATED: no effect reaches' \
+    "the surface record's null test is graded at 0.5 kt" tests/test_surface_inference.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/landscape.py \
+    '    if bake.get("sha256") != field.digest():' \
+    '    if False:  # MUTATED: any bake verifies' \
+    "a bake whose sha256 is not the manifest's refuses terrain.landscape_stale" tests/test_weightmaps.py tests/test_terrain.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/landscape.py \
+    '    manifest["datum"] = bake_datum_block(field)' \
+    '    manifest["datum"] = {"undulation_m": None}  # MUTATED: the bake'"'"'s datum not copied' \
+    "the import manifest copies the bake's datum block" tests/test_weightmaps.py tests/test_terrain.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/landscape.py \
+    '        if layout != spec.layout or resolution != spec.resolution:' \
+    '        if False:  # MUTATED: any layout accepted' \
+    "a layer of another layout refuses terrain.landscape_layout" tests/test_weightmaps.py tests/test_terrain.py \
+    || failures=$((failures+1))
+
+mutate core/terrain/landscape.py \
+    '        "sum_ok": bool(checked) and int(total.min()) == 255 and int(total.max()) == 255,' \
+    '        "sum_ok": bool(checked),  # MUTATED: the sum is not graded' \
+    "the layer sum is graded at 255 in the import verification" tests/test_terrain.py \
+    || failures=$((failures+1))
+mutate core/scenario/runner.py \
+    '        except SurfaceInferenceError as exc:' \
+    '        except ():  # MUTATED: the inference refusal escapes and stops the flight' \
+    "a scene the roughness map cannot read flies the default surface and says why" tests/test_surface_inference.py \
+    || failures=$((failures+1))
+
+# -- the advancement additions, wave 3: P6 the gust provider, von Karman turbulence and layered shear ----
+# P6 -- every guard below was applied on the real file, its test file(s) run with -x
+# (pytest rc 1, or 2 where the mutation refuses at import), and the file restored
+# byte-identically (sha256 compared). Fires: yes, 17/17.
+
+mutate core/environment/stack.py \
+    '        writes.update(gust_writes)' \
+    '        if self.gust:  # MUTATED: the gust channel is written only while a provider exists
+            writes.update(gust_writes)' \
+    "the gust sum is written every step, zero included, because the channel persists" tests/test_gust_provider.py tests/test_environment.py \
+    || failures=$((failures+1))
+
+mutate core/environment/von_karman.py \
+    'L_VW_HIGH_FT = L_U_HIGH_FT / 2.0' \
+    'L_VW_HIGH_FT = L_U_HIGH_FT  # MUTATED: L_u = L_v = L_w' \
+    "the von Karman scale lengths above 2000 ft are L_u = 2 L_v = 2 L_w = 2500 ft" tests/test_von_karman.py \
+    || failures=$((failures+1))
+
+mutate core/environment/von_karman.py \
+    'LOW_ALTITUDE_FT = 1000.0' \
+    'LOW_ALTITUDE_FT = 500.0  # MUTATED: the low band ends at 500 ft' \
+    "the sigma ladder branches at 1000 ft as FGWinds L276 does" tests/test_von_karman.py \
+    || failures=$((failures+1))
+
+mutate core/environment/von_karman.py \
+    '    return sigma ** 2 * (2.0 * length / math.pi) / (1.0 + x * x) ** (5.0 / 6.0)' \
+    '    return sigma ** 2 * (2.0 * length / math.pi) / (1.0 + x * x) ** (1.0)  # MUTATED: a -2 slope' \
+    "the realised u spectrum falls as Omega^-5/3 (fitted on the table)" tests/test_von_karman.py \
+    || failures=$((failures+1))
+
+mutate core/environment/von_karman.py \
+    'SEED_STREAM = "von_karman"' \
+    'SEED_STREAM = "turbulence"  # MUTATED: another subsystem'"'"'s stream' \
+    "the von Karman phases come from the named stream von_karman" tests/test_von_karman.py \
+    || failures=$((failures+1))
+
+mutate core/environment/von_karman.py \
+    'ROW_FORMAT = "%.17g"' \
+    'ROW_FORMAT = "%.15g"  # MUTATED: two digits short of a round trip' \
+    "the card rows are %.17g strings that round-trip to the same doubles" tests/test_von_karman.py tests/test_gust_provider.py \
+    || failures=$((failures+1))
+
+mutate core/environment/shear.py \
+    '    if any(b <= a for a, b in zip(altitudes, altitudes[1:])):' \
+    '    if False:  # MUTATED: unsorted layers accepted' \
+    "layers must be strictly ascending in altitude (wind_profile.layers)" tests/test_shear.py \
+    || failures=$((failures+1))
+
+mutate core/environment/shear.py \
+    'MILSPEC_MAX_HEIGHT_FT = 1000.0' \
+    'MILSPEC_MAX_HEIGHT_FT = 10000.0  # MUTATED: the log law claimed to 10000 ft' \
+    "the MIL-F-8785C log law is valid 3..1000 ft AGL and refused outside" tests/test_shear.py \
+    || failures=$((failures+1))
+
+mutate core/environment/shear.py \
+    '    if not isinstance(expected, str) or expected != digest:' \
+    '    if not isinstance(expected, str):  # MUTATED: an altered fixture accepted' \
+    "an NWP fixture whose sha256 is not its sidecar's refuses weather.fixture_digest" tests/test_shear.py \
+    || failures=$((failures+1))
+
+mutate core/environment/stack.py \
+    '                                else "property" if self._p_equivalent else "absent")' \
+    '                                else "property")  # MUTATED: delivery claimed on a stock airframe' \
+    "the roll gust delivery is recorded absent where the airframe declares no property" tests/test_gust_provider.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '        stack.add(DrydenTurbulence("none"))' \
+    '        stack.add(DrydenTurbulence(intensity, seed=seed))  # MUTATED: Dryden runs beside the field' \
+    "the von Karman model switches JSBSim's own Dryden process off" tests/test_gust_provider.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '    if profile_wind is not None:' \
+    '    if False:  # MUTATED: the uniform wind written before the trim' \
+    "a wind profile's wind at the initial altitude is the one written before the trim" tests/test_shear.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/validate.py \
+    '        elif model == "dryden":' \
+    '        elif False:  # MUTATED: a W20 number silently accepted by the Dryden path' \
+    "a numeric W20 with the dryden model refuses turbulence.model" tests/test_gust_provider.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/card.py \
+    '    stack.prepare(fdm)' \
+    '    pass  # MUTATED: the card table is not built from the FDM' \
+    "the gust_table card block is built as the run builds it" tests/test_gust_provider.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    'extra={**SURFACES, **environment.recorder_extras()}' \
+    'extra=dict(SURFACES)' \
+    "the wind profile's layer index and gradient are recorded columns" tests/test_shear.py \
+    || failures=$((failures+1))
+
+mutate core/capture/manifest.py \
+    '    ("_rad_s", "rad/s"), ("_per_s", "1/s"),' \
+    '    # MUTATED: no per-second suffixes; _rad_s and _per_s read as seconds' \
+    "a per-second channel name is never read as seconds" tests/test_registry.py \
+    || failures=$((failures+1))
+
+mutate core/fdm/state.py \
+    '                        if has is not None and has(P_EQUIVALENT_PROPERTY) else 0.0)' \
+    '                        if False else 0.0)  # MUTATED: the delivered roll gust never recorded' \
+    "the equivalent roll rate the derived airframe received is recorded" tests/test_gust_provider.py \
+    || failures=$((failures+1))
+
 if [ "$guard_n" -ne "$total" ]; then
     echo "INTERNAL: $guard_n mutate calls ran but $total are written; the count is off" >&2
     exit 1

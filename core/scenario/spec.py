@@ -23,7 +23,10 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from .blocks import AtmosphereSpec, DatumSpec, SceneSpec, TaxonomySpec, TrafficSpec
+from .blocks import (
+    AtmosphereSpec, DatumSpec, SceneSpec, TaxonomySpec, TrafficSpec,
+    TurbulenceModelSpec, WindProfileSpec,
+)
 from .camera import CameraSpec
 from .randomization import RandomizationSpec
 from .fields import Quantity, Source
@@ -152,6 +155,14 @@ class ScenarioSpec:
     #: absent-canonical: the orthometric frame is the default and is
     #: omitted, so every committed spec-8 example keeps its digest.
     datum: "DatumSpec" = dc_field(default_factory=DatumSpec.defaulted)
+    #: Gap P2, P6 (still spec 8; the integrator bumps once): the
+    #: turbulence spectrum (dryden = today's path | von_karman) with its
+    #: intensity and seed, and the wind profile (uniform = today's path |
+    #: layered | milspec | nwp) -- both absent-canonical: the defaults are
+    #: omitted, so every committed spec-8 example keeps its digest.
+    turbulence_model: "TurbulenceModelSpec" = dc_field(
+        default_factory=TurbulenceModelSpec.defaulted)
+    wind_profile: "WindProfileSpec" = dc_field(default_factory=WindProfileSpec.defaulted)
 
     #: Field order for both serialisation and the rendered table.
     FIELD_ORDER = (
@@ -215,7 +226,7 @@ class ScenarioSpec:
         carry the spec's own set()/plan() doctrine."""
         import re
 
-        match = re.fullmatch(r"(scene|taxonomy|atmosphere|datum)\.(\w+)", name)
+        match = re.fullmatch(r"(scene|taxonomy|atmosphere|datum|turbulence_model|wind_profile)\.(\w+)", name)
         if match is not None:
             block = getattr(self, match.group(1))
             return block, match.group(2)
@@ -363,6 +374,11 @@ class ScenarioSpec:
         # Gap P10 (D1): the datum block, absent-canonical like the others.
         if not self.datum.is_default():
             out["datum"] = self.datum.to_dict()
+        # P6: the turbulence model and the wind profile, absent-canonical.
+        if not self.turbulence_model.is_default():
+            out["turbulence_model"] = self.turbulence_model.to_dict()
+        if not self.wind_profile.is_default():
+            out["wind_profile"] = self.wind_profile.to_dict()
         if self.notes:
             out["notes"] = list(self.notes)
         return out
@@ -421,6 +437,12 @@ class ScenarioSpec:
         datum_data = data.get("datum")
         datum = (DatumSpec.defaulted() if datum_data is None
                  else DatumSpec.from_dict(datum_data))
+        turbulence_data = data.get("turbulence_model")
+        turbulence_model = (TurbulenceModelSpec.defaulted() if turbulence_data is None
+                            else TurbulenceModelSpec.from_dict(turbulence_data))
+        profile_data = data.get("wind_profile")
+        wind_profile = (WindProfileSpec.defaulted() if profile_data is None
+                        else WindProfileSpec.from_dict(profile_data))
         return cls(
             name=data.get("name", "scenario"),
             prompt=data.get("prompt"),
@@ -433,6 +455,8 @@ class ScenarioSpec:
             traffic=[TrafficSpec.from_dict(entry) for entry in traffic_data],
             atmosphere=atmosphere,
             datum=datum,
+            turbulence_model=turbulence_model,
+            wind_profile=wind_profile,
             **kwargs,
         )
 
@@ -513,7 +537,9 @@ class ScenarioSpec:
         for block_name, block in (("scene", self.scene),
                                   ("taxonomy", self.taxonomy),
                                   ("atmosphere", self.atmosphere),
-                                  ("datum", self.datum)):
+                                  ("datum", self.datum),
+                                  ("turbulence_model", self.turbulence_model),
+                                  ("wind_profile", self.wind_profile)):
             if not block.is_default():
                 for name, q in block.quantities():
                     rows.append((block_name, name.replace("_", " "),

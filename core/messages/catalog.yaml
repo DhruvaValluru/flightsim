@@ -616,3 +616,44 @@ check.datum_independent:
   sentence: "An independent map-projection library re-measures the sea-level offset from the crop of the geoid grid written beside the prepared terrain, at the origin and a hundred points inside it, and finds nothing outside the crop."
 
 # Placement: the seven refusal names beside terrain.geoid under "terrain and weather"; check.datum_independent beside check.datum under "the verifier clauses of batch 1". No new FAIL name: datum_independent fails as scene.datum (its sentence already says the offset disagrees with the checker's own reading). Trialled: tests/test_messages.py's uncovered set is exactly these seven names plus three derivation.* names from the other item's working tree.
+
+# -- the advancement additions, batch1 -----------------------------------
+landcover.legend:
+  sentence: "A land cover code outside the map's legend has no class in the scene's taxonomy."
+  hint: "Rebuild the land cover from the ESA WorldCover map; a code the legend does not carry is refused, never guessed into a class."
+landcover.surface_inference:
+  sentence: "No single kind of ground covers enough of this scene for its roughness to be inferred from the land cover."
+  hint: "State the ground cover in the scenario (grassland, desert, ocean, forest, city, snow or bare), or fly a scene where one kind covers at least half of it."
+terrain.landscape_layout:
+  sentence: "A land cover layer is laid out for a different landscape size than the height map."
+  hint: "Export the layers and the height map together from the same prepared terrain; a layer of another size would be resampled silently by the editor."
+terrain.landscape_missing:
+  sentence: "The prepared terrain carries no vertical datum, so a landscape import cannot state the datum of its heights."
+  hint: "Prepare the terrain again with the current bake so its sidecar carries the datum block, then export the landscape."
+terrain.landscape_stale:
+  sentence: "The prepared terrain or one of its land cover layers no longer matches what the landscape import recorded."
+  hint: "Export the landscape again from the current prepared terrain; a landscape built from another bake is refused rather than imported."
+turbulence.model:
+  sentence: "The turbulence model asked for cannot be delivered: the model is unknown, the intensity is neither a known word nor a wind speed at 20 ft, a numbered intensity was given to the Dryden model, or the seed is not a whole number the simulation can represent."
+  hint: "Choose the Dryden or the von Karman model; give the intensity as light, moderate, severe or none, or as a 20-ft wind speed in knots with the von Karman model; keep the seed a whole number below 2147483647."
+wind_profile.kind:
+  sentence: "The wind profile asked for cannot be flown: its kind is unknown, the MIL-F-8785C shear law was asked for outside 3 to 1000 ft above ground or with a roughness length other than its two stated values, or another kind's setting was stated beside it."
+  hint: "Choose uniform, layered, milspec or nwp; start a milspec flight between 3 and 1000 ft above ground with a roughness of 0.15 or 2.0 ft; state one profile's settings at a time."
+wind_profile.layers:
+  sentence: "The wind layers are not a profile: a layered wind needs at least two layers of height, speed and direction, in rising order of height, with no negative height or speed and directions within a compass turn."
+  hint: "List the layers from the lowest height upward, each as height in metres, speed in knots and the direction the wind blows from in degrees."
+weather.fixture_missing:
+  sentence: "No cached weather profile of that name is on hand, so the flight cannot use it; nothing is fetched during a run."
+  hint: "Name a profile whose data and provenance files are both cached under the weather fixtures directory, or choose another wind profile kind."
+weather.fixture_digest:
+  sentence: "The cached weather profile does not match the digest its provenance file records, so it is not the profile that was cached."
+  hint: "Restore the cached profile from its source, or refresh both files together."
+card.gust_table:
+  sentence: "The run card's gust table is malformed: a key is missing or out of order, a row is not five numbers, or the digest of the rows does not match, so the host applies no gust."
+  hint: "Regenerate the card from the scenario; the table is written by the scenario tools, never by hand."
+gust_table.length:
+  sentence: "The run card's gust table does not have one row per simulation step of the flight it is for, so the host cannot apply it step for step."
+  hint: "Regenerate the card with the same duration and rate as the flight."
+card.layered_wind:
+  sentence: "The run card's wind profile block is malformed: a key is missing or out of order, or a layer is not a height, a speed and a direction, so the host applies no profile."
+  hint: "Regenerate the card from the scenario."

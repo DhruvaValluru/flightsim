@@ -1,4 +1,6 @@
-"""The spec-8 blocks: ``scene``, ``taxonomy`` and ``traffic[]``.
+"""The spec-8 blocks: ``scene``, ``taxonomy``, ``traffic[]``, and the
+physics additions' ``atmosphere``, ``datum``, ``turbulence_model`` and
+``wind_profile``.
 
 Phase 2 (contracts §2.1, §2.2, §12) adds three top-level blocks to the
 scenario spec. Each is serialised like the randomisation block, NOT
@@ -134,6 +136,38 @@ DATUM_STANDARDS: Dict[str, str] = {
                      "boundary; C3 (the ellipsoid frame) documented and refused",
     "EGM2008": "Pavlis et al. 2012 (unverified here); GeographicLib egm2008-5 grid",
     "EGM96": "Lemoine et al. 1998 (unverified here); GeographicLib egm96-15 grid",
+}
+
+
+#: P6: the turbulence models a spec may name. ``dryden`` is today's path
+#: (JSBSim's own Dryden filters, core/environment/turbulence.py), the
+#: default and absent-canonical; ``von_karman`` is the Python-realised
+#: MIL-F-8785C von Karman field delivered through the gust channel
+#: (core/environment/von_karman.py). Any other word refuses
+#: ``turbulence.model``.
+TURBULENCE_MODELS = ("dryden", "von_karman")
+TURBULENCE_MODEL_STANDARDS: Dict[str, str] = {
+    "dryden": "MIL-F-8785C Dryden spectra through JSBSim 1.2.4 FGWinds ttTustin "
+              "(the branch's measured path)",
+    "von_karman": "MIL-F-8785C 3.7.2.1 von Karman spectra, Shinozuka-Jan sum of "
+                  "cosines, delivered through atmosphere/gust-*-fps [unverified here]",
+}
+#: P6: the wind profile kinds. ``uniform`` is today's path (the spec's
+#: wind_speed / wind_direction everywhere, or the surface-class log
+#: profile), the default and absent-canonical; ``layered`` states
+#: ``layers`` of [altitude_m, speed_kt, direction_deg]; ``milspec`` is the
+#: MIL-F-8785C 3.7.3.2 log law with W20 = the spec's wind speed and
+#: ``roughness_ft`` 0.15 or 2.0; ``nwp`` names a cached ``fixture`` under
+#: assets/nwp. Any other word refuses ``wind_profile.kind``.
+WIND_PROFILE_KINDS = ("uniform", "layered", "milspec", "nwp")
+WIND_PROFILE_STANDARDS: Dict[str, str] = {
+    "uniform": "the spec's wind everywhere (the branch as built)",
+    "layered": "piecewise-linear speed and direction between stated layers, held "
+               "beyond the first and last (a stated interpolation)",
+    "milspec": "MIL-F-8785C 3.7.3.2 log law u(h) = W20 ln(h/z0)/ln(20/z0), z0 0.15 or "
+               "2.0 ft, 3 ft <= h <= 1000 ft [unverified here]",
+    "nwp": "a cached NWP profile at the standard-atmosphere height of each level "
+           "pressure (stated)",
 }
 
 
@@ -361,6 +395,72 @@ class DatumSpec(ProvenancedBlock):
                 std=DATUM_STANDARDS["physics_frame"]),
             geoid_model=Quantity.default(
                 None, frm="no model declared: the bake's own model is accepted"),
+        )
+
+
+@dataclass
+class TurbulenceModelSpec(ProvenancedBlock):
+    """``turbulence_model`` (P6): which continuous-turbulence spectrum the
+    flight is in. Absent-canonical: ``dryden`` with the environment's own
+    turbulence word and the run seed is the default and is omitted, so
+    every committed spec-8 example keeps its digest. ``intensity`` is an
+    existing turbulence word (light / moderate / severe / none) or a W20
+    in knots; null means the environment's ``turbulence`` word applies.
+    ``seed`` null means the run's ``seed``. The validator refuses an
+    unknown model (``turbulence.model``); the registry claims every
+    field (``record.unregistered`` otherwise)."""
+
+    model: Quantity
+    intensity: Quantity
+    seed: Quantity
+
+    FIELD_ORDER = ("model", "intensity", "seed")
+    BLOCK = "turbulence_model"
+
+    @classmethod
+    def defaulted(cls) -> "TurbulenceModelSpec":
+        return cls(
+            model=Quantity.default(
+                "dryden", frm="today's path: JSBSim's own Dryden filters",
+                std=TURBULENCE_MODEL_STANDARDS["dryden"]),
+            intensity=Quantity.default(
+                None, frm="unstated: the environment's turbulence word applies"),
+            seed=Quantity.default(
+                None, frm="unstated: the run's seed applies"),
+        )
+
+
+@dataclass
+class WindProfileSpec(ProvenancedBlock):
+    """``wind_profile`` (P6): how the horizontal wind varies with height.
+    Absent-canonical: ``uniform`` is the default and is omitted, so every
+    committed spec-8 example keeps its digest. ``layers`` is a list of
+    [altitude_m, speed_kt, direction_deg] for ``layered`` (at least two,
+    ascending, none negative: ``wind_profile.layers``); ``roughness_ft``
+    is the milspec z0 (0.15 or 2.0 ft; null = 0.15); ``fixture`` names a
+    cached profile under assets/nwp for ``nwp`` (``weather.fixture_missing``
+    / ``weather.fixture_digest``)."""
+
+    kind: Quantity
+    layers: Quantity
+    roughness_ft: Quantity
+    fixture: Quantity
+
+    FIELD_ORDER = ("kind", "layers", "roughness_ft", "fixture")
+    BLOCK = "wind_profile"
+
+    @classmethod
+    def defaulted(cls) -> "WindProfileSpec":
+        return cls(
+            kind=Quantity.default(
+                "uniform", frm="today's path: the spec's wind everywhere",
+                std=WIND_PROFILE_STANDARDS["uniform"]),
+            layers=Quantity.default(
+                None, frm="unstated: no layers (the kind is not layered)"),
+            roughness_ft=Quantity.default(
+                None, "ft", frm="unstated: the milspec z0 of 0.15 ft when the kind is milspec"),
+            fixture=Quantity.default(
+                None, frm="unstated: no cached profile (the kind is not nwp)"),
         )
 
 

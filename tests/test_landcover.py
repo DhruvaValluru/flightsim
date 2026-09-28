@@ -84,13 +84,21 @@ def quadrant_classes(size: int = SIZE) -> np.ndarray:
 
 
 def write_bake(out_dir: Path, key: str, crs: str, origin_x: float,
-               origin_y: float, pixel: float, width: int, height: int) -> Path:
-    """A bake with the sidecar Heightfield.write really writes."""
+               origin_y: float, pixel: float, width: int, height: int,
+               datum: bool = False) -> Path:
+    """A bake with the sidecar Heightfield.write really writes. With
+    ``datum`` the sidecar carries the synthesised datum block a real bake
+    carries (core.terrain.geoid.datum_for_heightfield), which the
+    Landscape import manifest copies (W1)."""
     z = np.linspace(1000.0, 1500.0, width * height).reshape(height, width)
     field = Heightfield.from_elevations(
         z, Georeference(crs, origin_x, origin_y, pixel,
                         is_projected=not crs.endswith("4326")),
         name=key, provenance={"synthetic": True})
+    if datum:
+        from core.terrain.geoid import datum_for_heightfield
+
+        field.provenance["datum"] = datum_for_heightfield(field)
     return field.write(out_dir / key)
 
 
@@ -504,16 +512,53 @@ def run_script(*args):
 
 
 def test_the_script_writes_the_scene_and_prints_the_attribution(tmp_path, quadrant_source):
+    """With the bake-grid maps (I7), the script writes the Landscape-
+    resolution layers, the Landscape heightmap and the import manifest
+    carrying the bake's datum (W1), and prints the measured round trip."""
     bake = write_bake(tmp_path, "aligned", "EPSG:4326", LON0, LAT0,
-                      3 * PIXEL_DEG, SIZE // 3, SIZE // 3)
+                      3 * PIXEL_DEG, SIZE // 3, SIZE // 3, datum=True)
     result = run_script("--location", "aligned", "--cache", str(tmp_path / "cache"),
                         "--out", str(tmp_path), "--bake", str(bake),
                         "--source", str(quadrant_source))
     assert result.returncode == 0, result.stdout + result.stderr
     assert REQUIRED_ATTRIBUTION in result.stdout
     assert "Tree cover" in result.stdout and "25.00 %" in result.stdout
-    assert (tmp_path / "aligned_landcover" / "landcover.json").is_file()
+    scene_dir = tmp_path / "aligned_landcover"
+    assert (scene_dir / "landcover.json").is_file()
     assert result.stdout.isascii()
+    # W1: the Landscape half beside the bake-grid maps.
+    assert "Landscape layers 12 x 127x127" in result.stdout
+    assert "argmax round trip" in result.stdout and "import manifest" in result.stdout
+    assert "W5 (Windows)" in result.stdout
+    assert (scene_dir / "aligned_landcover_layers.json").is_file()
+    assert (scene_dir / "aligned_landcover_10.u8").stat().st_size == 127 * 127
+    manifest = json.loads((scene_dir / "aligned_landscape.json").read_text(encoding="utf-8"))
+    assert len(manifest["weight_layers"]) == 12
+    assert manifest["datum"]["vertical_datum_of_heights"].startswith("synthesised heightfield")
+    assert manifest["bake"]["sha256"] == Heightfield.read(bake).digest()
+    assert (scene_dir / "aligned_landscape.r16").stat().st_size == 127 * 127 * 2
+
+
+def test_the_script_refuses_the_landscape_manifest_for_a_bake_without_a_datum(tmp_path, quadrant_source):
+    """A bake without its datum block writes its bake-grid maps and then
+    refuses terrain.landscape_missing by name (exit 1): a Landscape whose
+    heights state no datum is the P10 error again. --no-landscape keeps
+    the bake-grid-only behaviour (exit 0, no layer written)."""
+    bake = write_bake(tmp_path, "aligned", "EPSG:4326", LON0, LAT0,
+                      3 * PIXEL_DEG, SIZE // 3, SIZE // 3)
+    result = run_script("--location", "aligned", "--cache", str(tmp_path / "cache"),
+                        "--out", str(tmp_path), "--bake", str(bake),
+                        "--source", str(quadrant_source))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "REFUSED -- terrain.landscape_missing:" in result.stdout
+    assert (tmp_path / "aligned_landcover" / "landcover.json").is_file()
+    assert not (tmp_path / "aligned_landcover" / "aligned_landscape.json").is_file()
+    result = run_script("--location", "aligned", "--cache", str(tmp_path / "cache"),
+                        "--out", str(tmp_path), "--bake", str(bake),
+                        "--source", str(quadrant_source), "--no-landscape")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Landscape layers" not in result.stdout
+    assert not (tmp_path / "aligned_landcover" / "aligned_landcover_layers.json").is_file()
 
 
 def test_the_script_refuses_by_name_and_exits_one(tmp_path, quadrant_source):
@@ -545,11 +590,17 @@ def test_the_verifier_never_imports_the_landcover_producer():
 
 def test_everything_the_engine_or_a_reader_sees_is_ascii(tmp_path, quadrant_source):
     for rel in ("core/terrain/landcover.py", "scripts/bake_landcover.py",
-                "tests/test_landcover.py"):
+                "tests/test_landcover.py", "core/terrain/weightmaps.py",
+                "core/environment/surface.py",
+                "tests/test_weightmaps.py", "tests/test_surface_inference.py"):
         assert (REPO / rel).read_text(encoding="utf-8").isascii(), rel
     bake = write_bake(tmp_path, "aligned", "EPSG:4326", LON0, LAT0,
-                      3 * PIXEL_DEG, SIZE // 3, SIZE // 3)
+                      3 * PIXEL_DEG, SIZE // 3, SIZE // 3, datum=True)
     scene_dir, doc = rasterise(bake, tmp_path / "cache", tmp_path,
                                source_4326=quadrant_source)
     assert (scene_dir / "landcover.json").read_text(encoding="utf-8").isascii()
+    from core.terrain.weightmaps import export_layers
+
+    sidecar, _ = export_layers(scene_dir)
+    assert sidecar.read_text(encoding="utf-8").isascii()
     assert all(name.isascii() for name in (p.name for p in scene_dir.iterdir()))

@@ -18,15 +18,42 @@ metres-per-pixel times 100, since Unreal works in centimetres.
 Everything needed to invert the encoding is written alongside the raster, and
 :func:`verify_round_trip` inverts it here rather than trusting the arithmetic --
 which is what Gate 4 checks.
+
+The import manifest (work item W1)
+----------------------------------
+The ``.json`` beside the ``.r16`` is the Landscape import's manifest. Beside
+the Gate 4 keys it MAY carry (absent-canonical: a manifest written before
+this extension reads unchanged):
+
+* ``weight_layers[]`` -- one entry per land-cover layer at the Landscape's
+  resolution (core/terrain/weightmaps.py): ``{code, class, key, file,
+  sha256, layout, resolution}``; a layer whose layout differs from the
+  heightmap's refuses ``terrain.landscape_layout`` -- the editor would
+  resample it silently against the geometry;
+* ``datum`` -- the bake sidecar's own ``provenance.datum`` block (batch 1's
+  vertical datum, copied verbatim, never re-evaluated); a bake without the
+  block refuses ``terrain.landscape_missing`` (re-bake: a Landscape whose
+  heights have no stated datum is the P10 error again);
+* ``bake`` -- ``{name, sha256, width, height, pixel_size_m}`` of the bake the
+  manifest was built from; at verification a bake whose sha256 differs from
+  the manifest's refuses ``terrain.landscape_stale``.
+
+:func:`verify_round_trip` grades the layers too when the manifest carries
+them: every layer file's sha256, the layout against the heightmap's, and the
+sum over the layers (255 at every texel).
+
+Not claimed: nothing here runs in the editor (the import itself is W5, a
+Windows step); the manifest states what to import and checks it here.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -46,6 +73,19 @@ VALID_SECTIONS_PER_COMPONENT = (1, 2)
 
 class LandscapeError(Exception):
     """The heightfield cannot be imported as a Landscape as configured."""
+
+
+class LandscapeManifestError(LandscapeError):
+    """The import manifest cannot be trusted; refused by name
+    (``.constraint``): ``terrain.landscape_layout`` (a weight layer's
+    layout differs from the heightmap's), ``terrain.landscape_missing``
+    (the bake carries no datum block to copy), ``terrain.landscape_stale``
+    (the bake or a layer file differs from what the manifest recorded)."""
+
+    def __init__(self, constraint: str, message: str) -> None:
+        self.constraint = constraint
+        self.message = message
+        super().__init__(f"{constraint}: {message}")
 
 
 @dataclass(frozen=True)
@@ -241,8 +281,9 @@ def decode(spec: LandscapeImport) -> np.ndarray:
     return spec.min_elevation_m + samples / U16_MAX * relief
 
 
-def verify_round_trip(field: Heightfield, spec: LandscapeImport
-                      ) -> Dict[str, float]:
+def verify_round_trip(field: Heightfield, spec: LandscapeImport,
+                      manifest: Optional[Dict[str, Any]] = None,
+                      layer_dir: Optional[Path] = None) -> Dict[str, Any]:
     """Compare decoded Landscape elevations against the source heightfield.
 
     Gate 4's "round-trip a known elevation and confirm the metres come back
@@ -250,6 +291,10 @@ def verify_round_trip(field: Heightfield, spec: LandscapeImport
     causes and different fixes: quantisation is the 16-bit encoding and is
     irreducible, while resampling error comes from the resolution change and
     would be zero if the raster were already a valid Landscape size.
+
+    With ``manifest`` (the import manifest, W1) the weight layers are graded
+    too (:func:`verify_layers`): the result gains ``layers``, and a stale
+    bake or layer, or a layer of another layout, refuses by name.
     """
     decoded = decode(spec)
     reference = resample_to(field, spec.resolution)
@@ -261,7 +306,7 @@ def verify_round_trip(field: Heightfield, spec: LandscapeImport
     resampled_relief = float(reference.max() - reference.min())
     aspect_source = ((field.width - 1) / (field.height - 1)) if field.height > 1 else 1.0
     aspect_landscape = (spec.scale_x / spec.scale_y) if spec.scale_y else 1.0
-    return {
+    result: Dict[str, Any] = {
         "resolution": float(spec.resolution),
         "max_error_m": float(error.max()),
         "mean_error_m": float(error.mean()),
@@ -273,4 +318,160 @@ def verify_round_trip(field: Heightfield, spec: LandscapeImport
         "aspect_source": aspect_source,
         "aspect_landscape": aspect_landscape,
         "aspect_error": abs(aspect_source - aspect_landscape),
+    }
+    if manifest is not None:
+        result["layers"] = verify_layers(field, spec, manifest, layer_dir)
+    return result
+
+
+# -- the import manifest: weight layers and the datum (W1) ---------------------
+
+#: The keys the manifest gains beside the Gate 4 keys, absent-canonical.
+MANIFEST_LAYER_KEYS = ("code", "class", "key", "file", "sha256", "layout", "resolution")
+
+
+def _sha256_of(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _layout_of(data: Dict[str, Any]) -> LandscapeLayout:
+    return LandscapeLayout(int(data["quads_per_section"]),
+                           int(data["sections_per_component"]),
+                           int(data["components"]))
+
+
+def bake_datum_block(field: Heightfield) -> Dict[str, Any]:
+    """The bake sidecar's ``provenance.datum`` block, copied verbatim;
+    refuses ``terrain.landscape_missing`` when the bake carries none --
+    a Landscape whose heights have no stated vertical datum would put the
+    P10 error back into the scene. Nothing is re-evaluated here."""
+    block = (field.provenance or {}).get("datum")
+    if not isinstance(block, dict) or "undulation_m" not in block \
+            or "vertical_datum_of_heights" not in block:
+        raise LandscapeManifestError(
+            "terrain.landscape_missing",
+            f"bake {field.name!r} carries no vertical datum block (provenance.datum "
+            f"with undulation_m and vertical_datum_of_heights); re-bake it with "
+            f"scripts/bake_terrain.py so the Landscape import states its datum")
+    return json.loads(json.dumps(block))
+
+
+def import_manifest(field: Heightfield, spec: LandscapeImport,
+                    layers: Sequence[Dict[str, Any]],
+                    layer_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """The import manifest with ``weight_layers``, ``datum`` and ``bake``,
+    written to ``spec.raw_path.with_suffix('.json')`` (over the Gate 4
+    keys, which it keeps). ``layers`` are the weightmaps sidecar's
+    ``layers`` entries; their files sit beside the manifest unless
+    ``layer_dir`` says otherwise (the manifest records the file NAME, so
+    an importer resolves it against the manifest's own directory).
+
+    Refuses ``terrain.landscape_layout`` for a layer whose layout or
+    resolution is not the heightmap's, ``terrain.landscape_missing`` for
+    a bake without its datum block, ``terrain.landscape_stale`` for a
+    layer file absent or differing from its recorded sha256.
+    """
+    manifest = spec.to_dict()
+    layer_dir = Path(layer_dir) if layer_dir is not None else Path(spec.raw_path).parent
+    entries: List[Dict[str, Any]] = []
+    for layer in layers:
+        layout = _layout_of(layer["layout"])
+        resolution = int(layer["resolution"])
+        if layout != spec.layout or resolution != spec.resolution:
+            raise LandscapeManifestError(
+                "terrain.landscape_layout",
+                f"layer {layer['file']} is {layout.describe()} but the heightmap is "
+                f"{spec.layout.describe()}; the editor would resample the layer "
+                f"silently against the geometry")
+        path = layer_dir / str(layer["file"])
+        if not path.is_file():
+            raise LandscapeManifestError(
+                "terrain.landscape_stale", f"layer file {path} is absent")
+        if _sha256_of(path) != layer["sha256"]:
+            raise LandscapeManifestError(
+                "terrain.landscape_stale",
+                f"layer file {path} differs from the sha256 its sidecar recorded")
+        entries.append({key: layer[key] for key in MANIFEST_LAYER_KEYS})
+    manifest["weight_layers"] = entries
+    manifest["datum"] = bake_datum_block(field)
+    manifest["bake"] = {
+        "name": field.name, "sha256": field.digest(),
+        "width": field.width, "height": field.height,
+        "pixel_size_m": field.georeference.pixel_size_m,
+    }
+    manifest["layer_encoding"] = ("raw uint8, resolution x resolution row-major, row 0 "
+                                  "north; 255 = the whole texel; the layers sum to 255")
+    out = Path(spec.raw_path).with_suffix(".json")
+    out.write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+    return manifest
+
+
+def read_import_manifest(path) -> Tuple[LandscapeImport, Dict[str, Any]]:
+    """The manifest back: the ``LandscapeImport`` and the whole dict
+    (``weight_layers``, ``datum``, ``bake`` when present)."""
+    path = Path(path).with_suffix(".json")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    layout = _layout_of(data["layout"])
+    spec = LandscapeImport(
+        raw_path=path.with_suffix(".r16"), resolution=int(data["resolution"]),
+        layout=layout,
+        scale_x=float(data["scale"]["x"]), scale_y=float(data["scale"]["y"]),
+        scale_z=float(data["scale"]["z"]),
+        min_elevation_m=float(data["min_elevation_m"]),
+        max_elevation_m=float(data["max_elevation_m"]),
+        pixel_size_m=float(data["pixel_size_m"]["x"]),
+        pixel_size_y_m=float(data["pixel_size_m"]["y"]),
+        covered_x_m=float(data["ground_extent_m"]["x"]),
+        covered_y_m=float(data["ground_extent_m"]["y"]))
+    return spec, data
+
+
+def verify_layers(field: Heightfield, spec: LandscapeImport, manifest: Dict[str, Any],
+                  layer_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """The layer half of the round trip: the bake's sha256 against the
+    manifest's (``terrain.landscape_stale``), every layer's layout against
+    the heightmap's (``terrain.landscape_layout``), every layer file's
+    sha256 (``terrain.landscape_stale``), and the sum over the layers at
+    every texel (255). Returns the measured numbers."""
+    bake = manifest.get("bake") or {}
+    if bake.get("sha256") != field.digest():
+        raise LandscapeManifestError(
+            "terrain.landscape_stale",
+            f"the bake's sha256 {field.digest()[:12]}... is not the manifest's "
+            f"{str(bake.get('sha256'))[:12]}...; the Landscape was built from another "
+            f"bake -- export it again")
+    layer_dir = Path(layer_dir) if layer_dir is not None else Path(spec.raw_path).parent
+    layers = manifest.get("weight_layers") or []
+    total = np.zeros((spec.resolution, spec.resolution), dtype=np.int64)
+    checked = []
+    for layer in layers:
+        layout = _layout_of(layer["layout"])
+        if layout != spec.layout or int(layer["resolution"]) != spec.resolution:
+            raise LandscapeManifestError(
+                "terrain.landscape_layout",
+                f"layer {layer['file']} is {layout.describe()} but the heightmap is "
+                f"{spec.layout.describe()}")
+        path = layer_dir / str(layer["file"])
+        if not path.is_file() or _sha256_of(path) != layer["sha256"]:
+            raise LandscapeManifestError(
+                "terrain.landscape_stale",
+                f"layer file {path} is absent or differs from its recorded sha256")
+        data = np.fromfile(path, dtype=np.uint8)
+        if data.size != spec.resolution * spec.resolution:
+            raise LandscapeManifestError(
+                "terrain.landscape_layout",
+                f"layer file {path} holds {data.size} bytes, not {spec.resolution}^2")
+        total += data.reshape(spec.resolution, spec.resolution)
+        checked.append(int(layer["code"]))
+    return {
+        "layers": len(checked), "codes": checked,
+        "sum_min": int(total.min()) if checked else 0,
+        "sum_max": int(total.max()) if checked else 0,
+        "sum_ok": bool(checked) and int(total.min()) == 255 and int(total.max()) == 255,
+        "datum_copied": bool((manifest.get("datum") or {}).get("vertical_datum_of_heights")),
+        "bake_sha256": field.digest(),
     }

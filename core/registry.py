@@ -199,10 +199,18 @@ class VariableRecord:
         }
 
 
+#: P6: two channel names end in ``_s`` for a PER-SECOND unit, which the
+#: manifest's suffix table would read as seconds (``_s``): the equivalent
+#: roll rate (rad/s) and the shear gradient (1/s). Resolved here first, so
+#: the registry's declared unit is what the manifest reports for them and
+#: the name never contradicts the unit. (An integration patch adds the two
+#: suffixes to the manifest's own table before ``_s``.)
 def _suffix_unit(name: str) -> str:
-    """The recorder's suffix convention for a channel name, or ``?``.
-    Imported lazily: the manifest consults this registry first, so the
-    two modules meet only inside function bodies."""
+    """The recorder's suffix convention for a channel name, or ``?`` --
+    ONE table (core/capture/manifest.py, longest suffix first, so a
+    per-second name such as ``_rad_s`` or ``_per_s`` is never read as
+    seconds). Imported lazily: the manifest consults this registry first,
+    so the two modules meet only inside function bodies."""
     from .capture.manifest import suffix_unit
 
     return suffix_unit(name)
@@ -334,6 +342,17 @@ _RH_REASON = ("measured here on the c172p (JSBSim 1.2.4): atmosphere/RH 0.5 read
 _INJECTED = ("measured here on the c172p (JSBSim 1.2.4): a <property> declared by an injected "
              "system reads back the value written to the last bit, before and after stepping "
              "(tests/test_derive_injections.py)")
+
+
+_GUST_EXACT = ("measured here on the c172p (JSBSim 1.2.4): atmosphere/gust-*-fps holds the value "
+               "written to the last bit until written again (7 fps read 7.0 after 11 steps; "
+               "0.0 read-back error on every step of a 3 s von Karman run, "
+               "tests/test_gust_provider.py); the stack reads each property back before "
+               "the next step's write")
+_WIND_EXACT = ("measured here on the c172p (JSBSim 1.2.4): atmosphere/wind-*-fps reads back the "
+               "value written to the last bit before the next write (0.0 error on every "
+               "step of a 3 s layered run, tests/test_shear.py); a uniform wind set once "
+               "persists (tests/test_environment.py)")
 
 
 def _injected(name: str, prop: str, unit: str, null_basis: str,
@@ -495,6 +514,101 @@ REGISTRY = Registry((
     _injected("gust.p_equivalent_rad_s", "gust/p-equivalent-rad_sec", "rad/s",
               "0 adds nothing to the roll-damping term: bit-identical (0.3 rad/s for 2 s rolled -30.21 vs -3.67 deg)",
               (("roll_deg", "deg"), ("roll_rate_dps", "deg/s")), ("roll_deg", "roll_rate_dps")),
+    # -- P6: the turbulence model and the wind profile blocks. The model and
+    #    kind WORDS are the variables that moved (dryden / uniform are the
+    #    branch as built); the von Karman field writes the gust channel
+    #    every step (read back exact: the channel persists to the bit,
+    #    measured), the profiles write the wind channel every step (read
+    #    back exact). Effect channels are recorded columns (lesson b):
+    #    the gust channel as JSBSim holds it, the aircraft's altitude and
+    #    roll; the profile's delivered speed (JSBSim's wind-*-fps), its
+    #    gradient and layer index (the stack's own columns; the index has
+    #    no floor and is reported, not graded).
+    VariableRecord(
+        name="turbulence_model.model", spec_path="turbulence_model.model", unit="word",
+        jsbsim_writes=(JsbsimWrite("atmosphere/gust-north-fps", "every step, zero included (the channel persists)"),
+                       JsbsimWrite("atmosphere/gust-east-fps", "every step, zero included (the channel persists)"),
+                       JsbsimWrite("atmosphere/gust-down-fps", "every step, zero included (the channel persists)"),
+                       JsbsimWrite("gust/p-equivalent-rad_sec", "every step where the derived airframe declares it")),
+        effect_channels=(EffectChannel("gust_north_mps", "m/s"), EffectChannel("gust_east_mps", "m/s"),
+                         EffectChannel("gust_down_mps", "m/s"),
+                         EffectChannel("gust_p_equivalent_rad_s", "rad/s"),
+                         EffectChannel("altitude_m", "m"), EffectChannel("roll_deg", "deg")),
+        null_value="dryden",
+        null_basis="today's path: JSBSim's own Dryden filters at the environment's turbulence "
+                   "word; the gust channel then reads 0 every step (measured)",
+        readback_tolerance=ReadbackTolerance(0.0, "absolute", _GUST_EXACT),
+        u_input_rule=UInputRule(note="a word: no bin, no spread"),
+        host_channels=("gust_north_mps", "gust_east_mps", "gust_down_mps", "gust_p_equivalent_rad_s")),
+    VariableRecord(
+        name="turbulence_model.intensity", spec_path="turbulence_model.intensity",
+        unit="W20 kt | word",
+        effect_channels=(EffectChannel("gust_north_mps", "m/s"), EffectChannel("gust_east_mps", "m/s"),
+                         EffectChannel("gust_down_mps", "m/s"), EffectChannel("altitude_m", "m"),
+                         EffectChannel("roll_deg", "deg")),
+        null_value=None,
+        null_basis="unstated: the environment's turbulence word applies to the named model "
+                   "(the field only replaces that word)",
+        u_input_rule=UInputRule(bin_width=15.0, declared_spread=0.0,
+                                note="the words sit 15 kt of W20 apart (light 15, moderate 30, "
+                                     "severe 45): b = 15 kt is the gap (a stated choice); a "
+                                     "numeric W20 has u_x 0"),
+        host_channels=("gust_north_mps", "gust_east_mps", "gust_down_mps")),
+    VariableRecord(
+        name="turbulence_model.seed", spec_path="turbulence_model.seed", unit="1",
+        effect_channels=(EffectChannel("gust_north_mps", "m/s"), EffectChannel("gust_east_mps", "m/s"),
+                         EffectChannel("gust_down_mps", "m/s"), EffectChannel("altitude_m", "m")),
+        null_value=None,
+        null_basis="unstated: the run's seed applies (the von Karman phases through the "
+                   "'von_karman' stream, the Dryden process through JSBSim's randomseed)",
+        u_input_rule=UInputRule(note="a seed has no spread: another seed is another realisation, "
+                                     "not an uncertainty"),
+        host_channels=()),
+    VariableRecord(
+        name="wind_profile.kind", spec_path="wind_profile.kind", unit="word",
+        jsbsim_writes=(JsbsimWrite("atmosphere/wind-north-fps", "before trim (at the initial altitude) and every step"),
+                       JsbsimWrite("atmosphere/wind-east-fps", "before trim (at the initial altitude) and every step"),
+                       JsbsimWrite("atmosphere/wind-down-fps", "before trim (at the initial altitude) and every step")),
+        effect_channels=(EffectChannel("wind_profile_speed_mps", "m/s"),
+                         EffectChannel("shear_dv_dz_per_s", "1/s"),
+                         EffectChannel("wind_layer_index", "1"),
+                         EffectChannel("altitude_m", "m")),
+        null_value="uniform",
+        null_basis="today's path: the spec's wind everywhere (or the surface class's log "
+                   "profile); the layer index and the gradient then read 0",
+        readback_tolerance=ReadbackTolerance(0.0, "absolute", _WIND_EXACT),
+        u_input_rule=UInputRule(note="a word: no bin, no spread"),
+        host_channels=("wind_profile_speed_mps", "wind_layer_index", "shear_dv_dz_per_s")),
+    VariableRecord(
+        name="wind_profile.layers", spec_path="wind_profile.layers", unit="[m, kt, deg]",
+        effect_channels=(EffectChannel("wind_profile_speed_mps", "m/s"),
+                         EffectChannel("shear_dv_dz_per_s", "1/s"),
+                         EffectChannel("wind_layer_index", "1")),
+        null_value=None,
+        null_basis="unstated: no layers (the kind is then not layered; a layered kind without "
+                   "layers refuses wind_profile.layers)",
+        u_input_rule=UInputRule(note="a stated list: u_x 0 unless a tolerance is stated"),
+        host_channels=("wind_profile_speed_mps",)),
+    VariableRecord(
+        name="wind_profile.roughness_ft", spec_path="wind_profile.roughness_ft", unit="ft",
+        effect_channels=(EffectChannel("wind_profile_speed_mps", "m/s"),
+                         EffectChannel("shear_dv_dz_per_s", "1/s")),
+        null_value=None,
+        null_basis="unstated: the milspec z0 of 0.15 ft (the specification's Category C "
+                   "value) is used when the kind is milspec",
+        u_input_rule=UInputRule(note="the specification states two discrete values (0.15 or "
+                                     "2.0 ft), not a distribution: no bin, no spread"),
+        host_channels=("wind_profile_speed_mps",)),
+    VariableRecord(
+        name="wind_profile.fixture", spec_path="wind_profile.fixture", unit="name",
+        effect_channels=(EffectChannel("wind_profile_speed_mps", "m/s"),
+                         EffectChannel("wind_layer_index", "1")),
+        null_value=None,
+        null_basis="unstated: no cached profile (the kind is then not nwp; an nwp kind "
+                   "without a fixture refuses weather.fixture_missing)",
+        u_input_rule=UInputRule(note="a file name: no bin, no spread; the profile's own "
+                                     "uncertainty is the model's, not carried"),
+        host_channels=("wind_profile_speed_mps",)),
     # -- D1: the datum block (spec fields land with D1). The three words
     # declare and check; the applied variable is scene.geoid_undulation_m
     # (its record carries the channels' readback), so a pair on any of them
@@ -529,4 +643,91 @@ REGISTRY = Registry((
         u_input_rule=UInputRule(note="a word: no bin, no spread; the model's declared "
                                      "u_model_m rides on the applied record"),
         host_channels=("undulation_m", "hae_m")),
+    # -- W1: the environment section. Registering environment.surface (the
+    #    roughness inference's spec field) claims the whole section, so every
+    #    spec-8 field of it is registered here with its default as the null.
+    #    The five others are pre-existing fields whose providers' writes are
+    #    recorded in the environment provenance, not here; they are
+    #    registered so the validator's record.unregistered check passes for
+    #    every spec and so a null pair can be run for each. Every effect
+    #    channel is a recorded column (measured on a real run's
+    #    telemetry.columns, tests/test_surface_inference.py).
+    VariableRecord(
+        name="environment.wind_speed", spec_path="environment.wind_speed", unit="kt",
+        effect_channels=(EffectChannel("wind_speed_mps", "m/s"), EffectChannel("lat_deg", "deg"),
+                         EffectChannel("altitude_m", "m")),
+        null_value=0.0,
+        null_basis="still air: the spec default (0 kt attaches no wind provider); the pair "
+                   "of 10 kt against still air moves wind_speed_mps by 5.14 m/s and altitude "
+                   "by 0.80 m on the c172p (tests/test_record_null.py)",
+        u_input_rule=UInputRule(bin_width=10.0, declared_spread=0.0,
+                                note="the strength words sit 0 / 8 / 15 / 25 / 40 kt apart; "
+                                     "b = 10 kt is the median step (a stated choice); the "
+                                     "default still air has no spread"),
+        host_channels=("wind_speed_mps",)),
+    VariableRecord(
+        name="environment.wind_direction", spec_path="environment.wind_direction", unit="deg",
+        effect_channels=(EffectChannel("wind_north_mps", "m/s"),
+                         EffectChannel("wind_east_mps", "m/s")),
+        null_value=0.0,
+        null_basis="the spec default 0 deg (from the north); with a stated speed the "
+                   "components move, in still air nothing does and no pair is run",
+        u_input_rule=UInputRule(note="no direction bin: a compass word is not a bin this "
+                                     "registry states"),
+        host_channels=("wind_north_mps", "wind_east_mps")),
+    VariableRecord(
+        name="environment.turbulence", spec_path="environment.turbulence", unit="word",
+        effect_channels=(EffectChannel("wind_north_mps", "m/s"),
+                         EffectChannel("wind_east_mps", "m/s"),
+                         EffectChannel("wind_down_mps", "m/s")),
+        null_value="none",
+        null_basis="'none': JSBSim turb-type 0, the spec default (the Gate 3 null ladder "
+                   "measured the intensity words against it)",
+        u_input_rule=UInputRule(note="a word: no bin, no spread; the intensity word maps to "
+                                     "a MIL-F-8785C W20 the provider records"),
+        host_channels=("wind_north_mps", "wind_east_mps", "wind_down_mps")),
+    VariableRecord(
+        name="environment.surface", spec_path="environment.surface", unit="word",
+        jsbsim_writes=(JsbsimWrite("atmosphere/wind-north-fps",
+                                   "every step (the stack's summed wind)"),
+                       JsbsimWrite("atmosphere/wind-east-fps",
+                                   "every step (the stack's summed wind)"),
+                       JsbsimWrite("atmosphere/wind-down-fps",
+                                   "every step (the stack's summed wind)")),
+        effect_channels=(EffectChannel("wind_speed_mps", "m/s"),
+                         EffectChannel("wind_north_mps", "m/s"),
+                         EffectChannel("wind_east_mps", "m/s")),
+        null_value="unspecified",
+        null_basis="the unstated default word: no surface coupling, the steady wind; the "
+                   "pair measured on the c172p at 50 m AGL in 15 kt (inferred 'forest' "
+                   "against 'unspecified') moves wind_speed_mps by 2.424 m/s = 4.71 kt "
+                   "(tests/test_surface_inference.py)",
+        readback_tolerance=ReadbackTolerance(
+            0.0, "absolute",
+            "measured here on the trimmed c172p (JSBSim 1.2.4): atmosphere/wind-north-fps, "
+            "-east-fps and -down-fps written 12.5 read back 12.5 before and after three "
+            "steps, total-wind 12.5 with no turbulence (tests/test_surface_inference.py)"),
+        u_input_rule=UInputRule(note="a word: no bin, no spread; the class's z0 is a table "
+                                     "row (Stull 1988 Table 9-6), its own uncertainty not "
+                                     "stated"),
+        host_channels=("wind_speed_mps",)),
+    VariableRecord(
+        name="environment.weather_date", spec_path="environment.weather_date", unit="word",
+        effect_channels=(EffectChannel("wind_speed_mps", "m/s"),
+                         EffectChannel("wind_north_mps", "m/s"),
+                         EffectChannel("wind_east_mps", "m/s")),
+        null_value="none",
+        null_basis="'none': no historical weather, the spec's own wind (the default word; "
+                   "an ERA5 date needs the network, blocked here, so no pair is measured "
+                   "in this container)",
+        u_input_rule=UInputRule(note="an ISO date or 'none': no bin, no spread")),
+    VariableRecord(
+        name="environment.weather_event", spec_path="environment.weather_event", unit="word",
+        effect_channels=(EffectChannel("wind_down_mps", "m/s"),
+                         EffectChannel("wind_north_mps", "m/s"),
+                         EffectChannel("wind_east_mps", "m/s")),
+        null_value="none",
+        null_basis="'none': no severe-weather feature placed, the spec default",
+        u_input_rule=UInputRule(note="a word: no bin, no spread"),
+        host_channels=("wind_down_mps",)),
 ))

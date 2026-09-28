@@ -103,7 +103,13 @@ NAMED_EXCEPTIONS: Dict[str, Tuple[str, str]] = {
 #: progress.campaign.* / progress.case.* states the page renders from the
 #: record and the ledger), H (the agent: the four authority.* names) and
 #: I (the page: progress.page.* and verdict.*), so the list is empty.
-ALLOWED_FUTURE: Dict[str, str] = {}
+ALLOWED_FUTURE: Dict[str, str] = {
+    # P6's host-side card refusals: emitted by the engine's ScenarioWorld (P9),
+    # which is uncompiled here; the catalogue carries the contract's sentence.
+    "card.gust_table": "P9 physics engine side (FlightSimScenarioWorld)",
+    "gust_table.length": "P9 physics engine side (FlightSimScenarioWorld)",
+    "card.layered_wind": "P9 physics engine side (FlightSimScenarioWorld)",
+}
 
 #: Catalogue sentences the guided page carries as static text rather
 #: than reading them through state_words: the two screens that are
@@ -150,6 +156,13 @@ def _field_order() -> Tuple[str, ...]:
     return tuple(re.findall(r'"([a-z_]+)"', match.group(1)))
 
 
+def _function_scope(text: str, name: str) -> str:
+    """The body of ``def <name>`` up to the next top-level definition."""
+    start = text.index(f"def {name}")
+    end = text.find("\ndef ", start + 1)
+    return text[start:] if end < 0 else text[start:end]
+
+
 def _ledger_statuses() -> Tuple[str, ...]:
     """The ledger's STATUS_* literals read from their source (contracts
     §6.1), not imported."""
@@ -181,8 +194,12 @@ def _expand(name: str, text: str, where: str) -> Set[str]:
         return {name}
     prefix = name.split("{", 1)[0]
     if prefix == "randomization.":
+        # The literal must be named by the EMITTING function, not anywhere
+        # in the file: a "seed" quoted by the turbulence validator (P6) is
+        # not a randomisation field the f-string can reach.
+        scope = _function_scope(text, "validate_randomization") if "def validate_randomization" in text else text
         return {prefix + field for field in _field_order()
-                if f'"{field}"' in text}
+                if f'"{field}"' in scope}
     if prefix == "progress.case.":
         return {prefix + status for status in _ledger_statuses()}
     if prefix == "progress.campaign.":

@@ -26,7 +26,7 @@ from typing import Any, Dict, Optional
 
 from ..control.autopilot import Autopilot, ClosureReport, ClosureTolerance
 from ..environment.stack import EnvironmentStack
-from ..environment.turbulence import DrydenTurbulence
+from ..environment.turbulence import DrydenTurbulence, W20_KT
 from ..environment.wind import SteadyWind
 from ..fdm import FlightDynamics, TrimMode, mode_for
 from ..fdm import units as u
@@ -64,15 +64,27 @@ class UnimplementedConditionError(Exception):
     """
 
 
-def environment_for(spec: ScenarioSpec) -> EnvironmentStack:
+def environment_for(spec: ScenarioSpec, landcover_json=None) -> EnvironmentStack:
     """Build the provider stack a spec asks for.
 
     Turbulence is a real provider from Phase 3 onward, so it is no longer
     refused -- but an intensity word the provider does not know still is,
     rather than being quietly rounded to something it does know.
+
+    ``landcover_json`` (W1): the georeferenced bake's ``landcover.json``
+    when the run flies over one. With it, a surface the spec leaves at
+    its default is INFERRED from the dominant land cover class --
+    roughness only, through the same log-profile path a stated word
+    takes, recorded as ``environment.surface`` with provenance
+    ``inferred``. A surface the user or the prompt stated is never
+    overridden (provenance user beats inferred); a scene the map cannot
+    read (no class holds half of it) infers nothing, flies the default
+    surface, and says why in ``stack.notes``.
     """
     stack = EnvironmentStack()
-    from ..environment.surface import surface_class
+    from ..environment.surface import (
+        InferredRoughnessWind, SurfaceInferenceError, infer_surface_for_spec, surface_class,
+    )
 
     # Gap P1: the stated day (temperature deviation, sea-level pressure,
     # humidity), written before the trim (stack.prepare) and every step.
@@ -82,7 +94,36 @@ def environment_for(spec: ScenarioSpec) -> EnvironmentStack:
         stack.add(atmosphere)
 
     surface = surface_class(str(spec.surface.value))
+    # W1: the roughness inferred from the bake's dominant land cover when
+    # no surface is stated; the inferred class carries no thermals
+    # (roughness only), so the thermal branch below attaches nothing. A
+    # scene the map cannot read (no class holds half of it, or a legend
+    # code outside the map) is NOT a refusal of the flight -- the user
+    # stated no surface, and the default stands -- but the reason is
+    # recorded beside the providers (stack.notes) so the manifest says why
+    # nothing was inferred.
+    inferred = None
+    if surface is None:
+        try:
+            inferred = infer_surface_for_spec(spec, landcover_json)
+        except SurfaceInferenceError as exc:
+            stack.notes.append({"provider": "surface_inference", "applied": False,
+                                "constraint": "landcover.surface_inference",
+                                "reason": str(exc)})
+    if inferred is not None:
+        surface = inferred.surface
     wind_speed = float(spec.wind_speed.value)
+    profile = wind_profile_for(spec)
+    if profile is not None:
+        # P6: a stated wind profile CARRIES the whole horizontal wind
+        # (layered / nwp: the layers; milspec: the log law from the spec's
+        # wind as W20), in place of the uniform or surface-log wind, and
+        # the trim is done in its wind at the initial altitude
+        # (configure_from_spec). The surface class's roughness is then
+        # not applied to the wind (its thermals still are), so the
+        # uniform providers below see no wind to add.
+        stack.add(profile)
+        wind_speed = 0.0
     if surface is not None and wind_speed > 0.0:
         # The surface-layer log profile CARRIES the whole horizontal wind
         # (reference at the layer top): at and above 300 m AGL it is held at
@@ -92,10 +133,17 @@ def environment_for(spec: ScenarioSpec) -> EnvironmentStack:
         # cruise, a stated approximation below 300 m (BRIEF_PHASE9 9.1).
         from ..environment.wind import LogProfileWind
 
-        stack.add(LogProfileWind(
-            u.kt_to_mps(wind_speed), float(spec.wind_direction.value),
-            reference_height_m=LogProfileWind.SURFACE_LAYER_TOP_M,
-            terrain=surface.roughness))
+        if inferred is not None:
+            # The same profile, returning the environment.surface record
+            # with the null measurement it takes on the run.
+            stack.add(InferredRoughnessWind(
+                inferred, u.kt_to_mps(wind_speed), float(spec.wind_direction.value),
+                reference_height_m=LogProfileWind.SURFACE_LAYER_TOP_M))
+        else:
+            stack.add(LogProfileWind(
+                u.kt_to_mps(wind_speed), float(spec.wind_direction.value),
+                reference_height_m=LogProfileWind.SURFACE_LAYER_TOP_M,
+                terrain=surface.roughness))
     elif wind_speed > 0.0:
         stack.add(SteadyWind(u.kt_to_mps(wind_speed),
                              float(spec.wind_direction.value)))
@@ -145,14 +193,97 @@ def environment_for(spec: ScenarioSpec) -> EnvironmentStack:
             stack.add(Downburst(centre_n, centre_e))
 
     intensity = str(spec.turbulence.value)
+    model_block = spec.turbulence_model
+    model = str(model_block.model.value)
+    stated_intensity = model_block.intensity.value
+    seed = int(spec.seed.value) if model_block.seed.value is None else int(model_block.seed.value)
+    if model == "von_karman":
+        # P6: the von Karman field through the gust channel; JSBSim's own
+        # Dryden process is switched OFF (turb-type 0) so the two spectra
+        # never add. The table is built in stack.prepare from the FDM's
+        # pre-trim true airspeed and span.
+        from ..environment.von_karman import VonKarmanTurbulence
+
+        word_or_w20 = intensity if stated_intensity is None else stated_intensity
+        if isinstance(word_or_w20, str) and word_or_w20 not in W20_KT:
+            raise UnimplementedConditionError(
+                f"spec requests {word_or_w20!r} turbulence, which no provider implements")
+        if not (isinstance(word_or_w20, str) and word_or_w20 == "none") and not (
+                not isinstance(word_or_w20, str) and float(word_or_w20) == 0.0):
+            stack.add(VonKarmanTurbulence(
+                word_or_w20 if isinstance(word_or_w20, str) else float(word_or_w20),
+                seed=seed, altitude_m=float(spec.altitude.value),
+                duration_s=float(spec.duration.value), rate_hz=float(spec.rate.value),
+                heading_deg=float(spec.heading.value),
+                stated={name: _stated(getattr(model_block, name))
+                        for name in model_block.FIELD_ORDER}))
+        stack.add(DrydenTurbulence("none"))
+        return stack
+    if stated_intensity is not None:
+        intensity = str(stated_intensity)
     try:
-        stack.add(DrydenTurbulence(intensity, seed=int(spec.seed.value)))
+        stack.add(DrydenTurbulence(intensity, seed=seed))
     except ValueError as exc:
         raise UnimplementedConditionError(
             f"spec requests {intensity!r} turbulence, which no provider "
             f"implements: {exc}"
         ) from exc
     return stack
+
+
+def _stated(quantity) -> Optional[Dict[str, Any]]:
+    """A block field's value with its provenance, or None when it is at
+    its default (nothing stated)."""
+    if quantity.value is None or str(quantity.source) == "default":
+        return None
+    return {"value": quantity.value, "source": str(quantity.source),
+            "from": quantity.frm, "std": quantity.std}
+
+
+def wind_profile_applied(spec: ScenarioSpec) -> Dict[str, Any]:
+    """What the ``wind_profile`` block did on this run: its kind, the
+    fields the kind read, and any stated field it did NOT read (only
+    possible under the uniform kind, where a companion field of another
+    kind is carried but not applied -- said here, never silently)."""
+    block = spec.wind_profile
+    kind = str(block.kind.value)
+    reads = {"uniform": (), "layered": ("layers",), "milspec": ("roughness_ft",),
+             "nwp": ("fixture",)}.get(kind, ())
+    unread = [name for name in ("layers", "roughness_ft", "fixture")
+              if getattr(block, name).value is not None and name not in reads]
+    return {"kind": kind, "applied": kind != "uniform", "reads": list(reads),
+            "unread_stated_fields": unread,
+            "note": ("the uniform kind applies the spec's wind; a stated companion field "
+                     "is carried, not applied" if unread else "")}
+
+
+def wind_profile_for(spec: ScenarioSpec):
+    """The wind profile provider a spec asks for (P6), or None for the
+    uniform kind: ``layered`` from the stated layers, ``milspec`` from the
+    spec's wind as W20 with the stated (or 0.15 ft) z0, ``nwp`` from the
+    cached fixture. Each is told the scene (initial altitude, terrain,
+    the uniform wind it replaces) for its record's null test."""
+    block = spec.wind_profile
+    kind = str(block.kind.value)
+    if kind == "uniform":
+        return None
+    from ..environment.shear import LayeredWind, MilSpecShear, NwpFixture
+
+    if kind == "layered":
+        provider = LayeredWind(block.layers.value)
+    elif kind == "milspec":
+        z0 = block.roughness_ft.value
+        provider = MilSpecShear(float(spec.wind_speed.value), float(spec.wind_direction.value),
+                                None if z0 is None else float(z0))
+    elif kind == "nwp":
+        provider = NwpFixture(str(block.fixture.value))
+    else:
+        raise UnimplementedConditionError(
+            f"spec requests wind profile {kind!r}, which no provider implements")
+    provider.set_scene(float(spec.altitude.value), float(spec.terrain_elevation.value),
+                       u.kt_to_mps(float(spec.wind_speed.value)))
+    provider.stated = {name: _stated(getattr(block, name)) for name in block.FIELD_ORDER}
+    return provider
 
 
 def atmosphere_for(spec: ScenarioSpec):
@@ -203,6 +334,58 @@ def configure_from_spec(spec: ScenarioSpec,
     stack holding the atmosphere alone.
     """
     wind_speed = float(spec.wind_speed.value)
+    fdm = fdm_at_initial_conditions(spec)
+    # The pre-trim hook: the atmosphere (and any later pre-trim provider)
+    # is written now, between the initial conditions and the trim.
+    if environment is None:
+        atmosphere = atmosphere_for(spec)
+        environment = EnvironmentStack([atmosphere] if atmosphere is not None else [])
+    environment.prepare(fdm)
+
+    # Steady wind is written before trim so the aircraft is trimmed *in* the
+    # conditions it will fly rather than dropped into them afterwards.
+    # Turbulence is deliberately NOT active during trim: a stochastic
+    # disturbance makes the trim solver chase noise.
+    north_fps, east_fps = trim_wind_fps(spec, environment, fdm)
+    fdm.props.set_many(
+        {
+            "atmosphere/wind-north-fps": north_fps,
+            "atmosphere/wind-east-fps": east_fps,
+            "atmosphere/wind-down-fps": 0.0,
+            "atmosphere/turb-type": 0.0,
+        }
+    )
+
+    fdm.start_engines()
+    # A crosswind start needs the lateral axes solved as well (§5 Phase 0).
+    fdm.trim(mode_for(crosswind=wind_speed > 0.0))
+    if bool(spec.mass_held.value):
+        fdm.hold_mass(True)
+    return fdm
+
+
+def trim_wind_fps(spec: ScenarioSpec, environment: EnvironmentStack, fdm) -> tuple:
+    """The (north, east) wind in fps written before the trim: the spec's
+    uniform wind, or -- P6 -- a stated wind profile's wind at the initial
+    altitude, since the profile carries the whole wind. Measured (docs/
+    JSBSIM_CORRECTIONS.md 18): JSBSim's own trim resets atmosphere/wind-*
+    to 0, so the write reaches the trim solver in neither case (the
+    trimmed throttle is identical with and without it) and the first
+    per-step write restores the wind; the profile's write is made all the
+    same so the two paths are one path, and the limitation is stated."""
+    north_fps, east_fps = wind_components_fps(float(spec.wind_speed.value),
+                                              float(spec.wind_direction.value))
+    profile_wind = environment.profile_wind_at(environment.position_of(fdm))
+    if profile_wind is not None:
+        north_fps, east_fps = u.mps_to_fps(profile_wind.north), u.mps_to_fps(profile_wind.east)
+    return north_fps, east_fps
+
+
+def fdm_at_initial_conditions(spec: ScenarioSpec) -> FlightDynamics:
+    """The FDM a spec names, at the spec's initial conditions, before any
+    provider is prepared and before the trim (shared by
+    :func:`configure_from_spec` and the card's gust-table projection, so
+    the two read the same true airspeed and span)."""
     # A spec that commands a state needs the controller; one that only sets an
     # initial condition does not. Building the derived airframe unconditionally
     # would change the model hash of every run for no reason.
@@ -222,37 +405,12 @@ def configure_from_spec(spec: ScenarioSpec,
             "terrain-elevation-ft": u.m_to_ft(float(spec.terrain_elevation.value)),
         }
     )
-    # The pre-trim hook: the atmosphere (and any later pre-trim provider)
-    # is written now, between the initial conditions and the trim.
-    if environment is None:
-        atmosphere = atmosphere_for(spec)
-        environment = EnvironmentStack([atmosphere] if atmosphere is not None else [])
-    environment.prepare(fdm)
-
-    # Steady wind is written before trim so the aircraft is trimmed *in* the
-    # conditions it will fly rather than dropped into them afterwards.
-    # Turbulence is deliberately NOT active during trim: a stochastic
-    # disturbance makes the trim solver chase noise.
-    north_fps, east_fps = wind_components_fps(wind_speed, float(spec.wind_direction.value))
-    fdm.props.set_many(
-        {
-            "atmosphere/wind-north-fps": north_fps,
-            "atmosphere/wind-east-fps": east_fps,
-            "atmosphere/wind-down-fps": 0.0,
-            "atmosphere/turb-type": 0.0,
-        }
-    )
-
-    fdm.start_engines()
-    # A crosswind start needs the lateral axes solved as well (§5 Phase 0).
-    fdm.trim(mode_for(crosswind=wind_speed > 0.0))
-    if bool(spec.mass_held.value):
-        fdm.hold_mass(True)
     return fdm
 
 
 def run_spec(spec: ScenarioSpec, validate_first: bool = True,
-             assert_closure: bool = True, terrain_ground=None) -> RunResult:
+             assert_closure: bool = True, terrain_ground=None,
+             landcover_json=None) -> RunResult:
     """Run a scenario. Raises rather than running something it cannot deliver.
 
     ``terrain_ground`` (Phase 7 1.2): a :class:`core.terrain.ground.
@@ -260,6 +418,11 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
     step, replacing the spec's flat terrain elevation exactly as the UE
     host's heightfield collision replaces its slab -- both answer from the
     same baked raster.
+
+    ``landcover_json`` (W1): the bake's ``landcover.json``, read only with
+    ``terrain_ground`` (a georeferenced run): an unstated surface is then
+    inferred from the dominant land cover class, roughness only, and
+    recorded as ``environment.surface`` with provenance ``inferred``.
     """
     report = validate(spec) if validate_first else ValidationReport(spec.digest())
     if validate_first:
@@ -273,7 +436,8 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
     # bake does not carry refuses by name here, not after the flight.
     scene_datum = scene_datum_for(spec, terrain_ground)
 
-    environment = environment_for(spec)
+    environment = environment_for(
+        spec, landcover_json if terrain_ground is not None else None)
     fdm = configure_from_spec(spec, environment)
     contact = None
     if terrain_ground is not None:
@@ -300,7 +464,9 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         autopilot = Autopilot(fdm)
         autopilot.engage()
 
-    recorder = Recorder(fdm, interval_s=0.1, extra=SURFACES)
+    # P6: the stack's own columns (the wind profile's layer index and
+    # dV/dz) ride beside the surfaces; every other channel is JSBSim's.
+    recorder = Recorder(fdm, interval_s=0.1, extra={**SURFACES, **environment.recorder_extras()})
     recorder.sample(force=True)
     recorder.mark("trimmed" if autopilot is None else "trimmed, autopilot engaged")
     if autopilot is None and terrain_ground is None:
@@ -358,6 +524,10 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         "spec": spec.to_dict(),
         "fdm": fdm.provenance(),
         "environment": environment.provenance(),
+        # P6: what the stack wrote and read back on the wind and gust
+        # channels, and whether the roll gust had a property to go to.
+        "environment_delivery": {**environment.delivery_report(),
+                                 "wind_profile": wind_profile_applied(spec)},
         "physics_ground": ("flat slab (spec terrain elevation)"
                            if terrain_ground is None
                            else terrain_ground.provenance()),

@@ -577,6 +577,7 @@ def _run(args: argparse.Namespace) -> int:
 
     heightfield = None
     terrain_ground = None
+    landcover_json = None
     terrain_stem = args.terrain
     # Spec 8: the spec's own scene.terrain_source names the terrain, so
     # a committed example refuses (or flies) AS ITS HEADER SAYS with no
@@ -643,6 +644,12 @@ def _run(args: argparse.Namespace) -> int:
 
         heightfield = Heightfield.read(Path(terrain_stem))
         terrain_ground = TerrainGround(heightfield)
+        # W1: the bake's land cover (scripts/bake_landcover.py), when baked,
+        # lets the runner infer the roughness of an unstated surface.
+        from core.terrain.landcover import scene_dir_for
+
+        candidate = scene_dir_for(Path(terrain_stem)) / "landcover.json"
+        landcover_json = candidate if candidate.is_file() else None
 
     frame = SceneFrame.for_spec(spec, heightfield)
     tornado = _tornado_hazard_block(spec)
@@ -687,7 +694,7 @@ def _run(args: argparse.Namespace) -> int:
     from core.terrain.contact import TerrainImpactError
 
     try:
-        result = run_spec(spec, terrain_ground=terrain_ground)
+        result = run_spec(spec, terrain_ground=terrain_ground, landcover_json=landcover_json)
     except TerrainImpactError as exc:
         print(f"REFUSED -- terrain.impact: {exc}")
         return 2
@@ -716,7 +723,8 @@ def _run(args: argparse.Namespace) -> int:
         from core.uncertainty import uncertainty_for_run
 
         extra_runner = functools.partial(run_spec, assert_closure=False,
-                                         terrain_ground=terrain_ground)
+                                         terrain_ground=terrain_ground,
+                                         landcover_json=landcover_json)
         if args.null_tests:
             null_pairs = null_pairs_for_spec(spec, runner=extra_runner)
             print(f"  null tests: {len(null_pairs)} pair(s) flown"

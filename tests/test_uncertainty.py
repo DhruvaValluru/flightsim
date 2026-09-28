@@ -211,14 +211,23 @@ def test_u_val_is_the_root_sum_square_with_u_d_absent():
     assert any("u_D" in s for s in block["not_claimed"])
 
 
-def test_uncertainty_for_run_over_the_committed_example_has_no_registered_input_today():
-    """No spec-8 field is a registered spec field: u_input is empty and
-    u_val equals u_num per SRQ; the base result is reused when given."""
+def test_uncertainty_for_run_over_the_committed_example_carries_the_environment_inputs_at_zero():
+    """Since W1 the environment section is registered whole, so the
+    committed example states six registered inputs -- every one at its
+    default (or a user value with no tolerance), u_x 0 by the rule, no
+    pair run -- and u_val still equals u_num per SRQ; the base result is
+    reused when given."""
     spec = base_spec()
     base = fake_runner(spec)
     block = uncertainty_for_run(spec, runner=fake_runner, base_result=base)
-    assert block["u_input"] == {}
+    assert set(block["u_input"]) == {
+        "environment.wind_speed", "environment.wind_direction", "environment.turbulence",
+        "environment.surface", "environment.weather_date", "environment.weather_event"}
+    for name, part in block["u_input"].items():
+        assert part["value"] == 0.0 and part["sensitivity"] is None, name
+        assert part["sensitivity_basis"].startswith("no pair run: u_x is 0"), name
     assert block["u_val"]["altitude_m"]["value"] == pytest.approx(block["u_num"]["srq"]["altitude_m"]["value"])
+    assert all(v == 0.0 for v in block["u_val"]["altitude_m"]["u_input_terms"].values())
     with_wind = Registry((_wind_entry(),))
     spec.set("wind_speed", 10.0, frm="strong wind")
     data = spec.to_dict()
