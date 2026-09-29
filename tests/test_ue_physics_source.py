@@ -46,7 +46,7 @@ from core.messages import is_catalogued
 from core.registry import REGISTRY
 from core.scenario import card as card_module
 from core.scenario import loading
-from core.telemetry import failures
+from core.telemetry import failures, limits
 
 REPO = Path(__file__).resolve().parents[1]
 BRIDGE = REPO / "ue/Plugins/FlightSimBridge/Source/FlightSimBridge"
@@ -591,6 +591,12 @@ def channel_table():
     return {column: (prop, required == "true") for column, prop, required in rows}
 
 
+#: The limits monitor's 0/1 flag columns (post-run annotations on both
+#: hosts), under INT-final's *_flag names and the exceed_* names before.
+LIMIT_FLAG_COLUMNS = ({column for _, column, *_ in limits.CHECKS} | {limits.ANY_COLUMN}
+                      | set(limits.FLAG_RENAMES))
+
+
 def test_the_recorder_carries_every_registry_host_channel():
     table = channel_table()
     missing = [c for c in REGISTRY.host_channels() if c not in table]
@@ -601,7 +607,7 @@ def test_the_recorder_carries_every_registry_host_channel():
             continue
         name = prop[len("host:"):]
         assert name == column, column
-        if column.startswith("exceed_") or column == "any_exceedance":
+        if column in LIMIT_FLAG_COLUMNS:
             # Post-run annotations on both hosts: optional, never served.
             assert not required and f'TEXT("{name}")' not in host, column
         else:

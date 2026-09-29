@@ -78,9 +78,6 @@
     "buildings": {
      "anyOf": [
       {
-       "type": "null"
-      },
-      {
        "type": "object",
        "required": [
         "key",
@@ -103,10 +100,10 @@
         "document_sha256": {
          "anyOf": [
           {
-           "type": "null"
+           "$ref": "#/$defs/sha256"
           },
           {
-           "$ref": "#/$defs/sha256"
+           "type": "null"
           }
          ]
         },
@@ -115,14 +112,14 @@
          "const": "building:all"
         }
        }
+      },
+      {
+       "type": "null"
       }
      ]
     },
     "runway": {
      "anyOf": [
-      {
-       "type": "null"
-      },
       {
        "type": "object",
        "required": [
@@ -142,24 +139,27 @@
         "document_sha256": {
          "anyOf": [
           {
-           "type": "null"
+           "$ref": "#/$defs/sha256"
           },
           {
-           "$ref": "#/$defs/sha256"
+           "type": "null"
           }
          ]
         }
        }
+      },
+      {
+       "type": "null"
       }
      ]
     },
     "land_cover": {
      "anyOf": [
       {
-       "type": "null"
+       "type": "object"
       },
       {
-       "type": "object"
+       "type": "null"
       }
      ]
     }
@@ -177,13 +177,13 @@
     "vertical_datum": {
      "anyOf": [
       {
-       "type": "null"
-      },
-      {
        "type": [
         "string",
         "object"
        ]
+      },
+      {
+       "type": "null"
       }
      ]
     }
@@ -305,9 +305,6 @@
   "datum": {
    "anyOf": [
     {
-     "type": "null"
-    },
-    {
      "type": "object",
      "required": [
       "vertical_datum_of_heights",
@@ -331,14 +328,14 @@
        ]
       }
      }
+    },
+    {
+     "type": "null"
     }
    ]
   },
   "applied_variables": {
    "anyOf": [
-    {
-     "type": "null"
-    },
     {
      "type": "object",
      "required": [
@@ -357,14 +354,14 @@
        }
       }
      }
+    },
+    {
+     "type": "null"
     }
    ]
   },
   "uncertainty": {
    "anyOf": [
-    {
-     "type": "null"
-    },
     {
      "type": "object",
      "required": [
@@ -394,14 +391,14 @@
        }
       }
      }
+    },
+    {
+     "type": "null"
     }
    ]
   },
   "instruments": {
    "anyOf": [
-    {
-     "type": "null"
-    },
     {
      "type": "object",
      "required": [
@@ -437,10 +434,10 @@
       "sha256": {
        "anyOf": [
         {
-         "type": "null"
+         "$ref": "#/$defs/sha256"
         },
         {
-         "$ref": "#/$defs/sha256"
+         "type": "null"
         }
        ]
       },
@@ -454,14 +451,14 @@
        "type": "array"
       }
      }
+    },
+    {
+     "type": "null"
     }
    ]
   },
   "null_tests": {
    "anyOf": [
-    {
-     "type": "null"
-    },
     {
      "type": "object",
      "additionalProperties": {
@@ -496,14 +493,14 @@
        }
       }
      }
+    },
+    {
+     "type": "null"
     }
    ]
   },
   "look": {
    "anyOf": [
-    {
-     "type": "null"
-    },
     {
      "type": "object",
      "required": [
@@ -513,20 +510,20 @@
       "night": {
        "anyOf": [
         {
-         "type": "null"
+         "type": "object"
         },
         {
-         "type": "object"
+         "type": "null"
         }
        ]
       },
       "precipitation": {
        "anyOf": [
         {
-         "type": "null"
+         "type": "object"
         },
         {
-         "type": "object"
+         "type": "null"
         }
        ]
       },
@@ -536,22 +533,22 @@
       "night_sky": {
        "anyOf": [
         {
-         "type": "null"
+         "type": "object"
         },
         {
-         "type": "object"
+         "type": "null"
         }
        ]
       }
      }
+    },
+    {
+     "type": "null"
     }
    ]
   },
   "landcover": {
    "anyOf": [
-    {
-     "type": "null"
-    },
     {
      "type": "object",
      "required": [
@@ -583,14 +580,14 @@
        "type": "object"
       }
      }
+    },
+    {
+     "type": "null"
     }
    ]
   },
   "licences": {
    "anyOf": [
-    {
-     "type": "null"
-    },
     {
      "type": "array",
      "items": {
@@ -639,28 +636,31 @@
        }
       }
      }
+    },
+    {
+     "type": "null"
     }
    ]
   },
   "interop": {
    "anyOf": [
     {
-     "type": "null"
-    },
-    {
      "type": "object",
      "properties": {
       "dis": {
        "anyOf": [
         {
-         "type": "null"
+         "type": "object"
         },
         {
-         "type": "object"
+         "type": "null"
         }
        ]
       }
      }
+    },
+    {
+     "type": "null"
     }
    ]
   }
@@ -750,9 +750,6 @@
     "sensing": {
      "anyOf": [
       {
-       "type": "null"
-      },
-      {
        "type": "object",
        "required": [
         "requested_by"
@@ -767,60 +764,60 @@
         "exposure": {
          "anyOf": [
           {
-           "type": "null"
+           "type": "object"
           },
           {
-           "type": "object"
+           "type": "null"
           }
          ]
         },
         "radiometry": {
          "anyOf": [
           {
-           "type": "null"
+           "type": "object"
           },
           {
-           "type": "object"
+           "type": "null"
           }
          ]
         },
         "bands": {
          "anyOf": [
           {
-           "type": "null"
+           "type": "object"
           },
           {
-           "type": "object"
+           "type": "null"
           }
          ]
         },
         "optics": {
          "anyOf": [
           {
-           "type": "null"
+           "type": "object"
           },
           {
-           "type": "object"
+           "type": "null"
           }
          ]
         },
         "motion_blur": {
          "anyOf": [
           {
-           "type": "null"
+           "type": "object"
           },
           {
-           "type": "object"
+           "type": "null"
           }
          ]
         },
         "ir": {
          "anyOf": [
           {
-           "type": "null"
+           "type": "object"
           },
           {
-           "type": "object"
+           "type": "null"
           }
          ]
         },
@@ -828,14 +825,14 @@
          "type": "string"
         }
        }
+      },
+      {
+       "type": "null"
       }
      ]
     },
     "stereo": {
      "anyOf": [
-      {
-       "type": "null"
-      },
       {
        "type": "object",
        "required": [
@@ -867,6 +864,9 @@
          "type": "string"
         }
        }
+      },
+      {
+       "type": "null"
       }
      ]
     }
@@ -1081,10 +1081,10 @@
       "landcover": {
        "anyOf": [
         {
-         "type": "null"
+         "type": "object"
         },
         {
-         "type": "object"
+         "type": "null"
         }
        ]
       }
@@ -1112,9 +1112,6 @@
     "radiometry": {
      "anyOf": [
       {
-       "type": "null"
-      },
-      {
        "type": "object",
        "required": [
         "luminance_cd_m2_per_unit",
@@ -1125,14 +1122,14 @@
          "type": "string"
         }
        }
+      },
+      {
+       "type": "null"
       }
      ]
     },
     "passes": {
      "anyOf": [
-      {
-       "type": "null"
-      },
       {
        "type": "object",
        "required": [
@@ -1146,14 +1143,14 @@
          }
         }
        }
+      },
+      {
+       "type": "null"
       }
      ]
     },
     "ir": {
      "anyOf": [
-      {
-       "type": "null"
-      },
       {
        "type": "object",
        "required": [
@@ -1179,14 +1176,14 @@
          "type": "string"
         }
        }
+      },
+      {
+       "type": "null"
       }
      ]
     },
     "dis": {
      "anyOf": [
-      {
-       "type": "null"
-      },
       {
        "type": "object",
        "required": [
@@ -1209,6 +1206,9 @@
          "minimum": 0
         }
        }
+      },
+      {
+       "type": "null"
       }
      ]
     }
@@ -1624,10 +1624,10 @@
     "null_test": {
      "anyOf": [
       {
-       "type": "null"
+       "$ref": "#/$defs/null_test"
       },
       {
-       "$ref": "#/$defs/null_test"
+       "type": "null"
       }
      ]
     },
@@ -1648,9 +1648,6 @@
     },
     "readback": {
      "anyOf": [
-      {
-       "type": "null"
-      },
       {
        "type": "object",
        "required": [
@@ -1680,6 +1677,9 @@
          "type": "string"
         }
        }
+      },
+      {
+       "type": "null"
       }
      ]
     },
@@ -1703,9 +1703,6 @@
     },
     "model": {
      "anyOf": [
-      {
-       "type": "null"
-      },
       {
        "type": "object",
        "required": [
@@ -1732,14 +1729,14 @@
          "type": "array"
         }
        }
+      },
+      {
+       "type": "null"
       }
      ]
     },
     "uncertainty": {
      "anyOf": [
-      {
-       "type": "null"
-      },
       {
        "type": "object",
        "required": [
@@ -1750,9 +1747,6 @@
         "u_input": {
          "anyOf": [
           {
-           "type": "null"
-          },
-          {
            "type": "object",
            "required": [
             "value",
@@ -1760,14 +1754,14 @@
             "rule",
             "sensitivity"
            ]
+          },
+          {
+           "type": "null"
           }
          ]
         },
         "u_num": {
          "anyOf": [
-          {
-           "type": "null"
-          },
           {
            "type": "object",
            "required": [
@@ -1775,10 +1769,16 @@
             "value",
             "basis"
            ]
+          },
+          {
+           "type": "null"
           }
          ]
         }
        }
+      },
+      {
+       "type": "null"
       }
      ]
     }

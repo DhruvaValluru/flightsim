@@ -358,7 +358,8 @@ def test_state_units_takes_the_registry_unit_first_and_never_a_question_mark():
     assert "?" not in units.values()
     assert units["temperature_k"] == "K" and units["rh_pct"] == "%"
     assert units["vapour_pressure_pa"] == "Pa" and units["pressure_hpa"] == "hPa"
-    assert units["any_exceedance"] == "1"
+    assert units["any_exceedance_flag"] == "1" and units["nz_pos_flag"] == "1"   # INT-final's names
+    assert suffix_unit("vne_or_vmo_flag") == "1"          # read from the name alone now
     assert channel_unit("something_unknown") == "?"        # still a question, not a guess
 
 

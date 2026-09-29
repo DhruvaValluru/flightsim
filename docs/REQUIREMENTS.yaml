@@ -1,7 +1,8 @@
 # The requirements of the advancement additions (ADVANCEMENTS_BLUEPRINT
 # section 2, work item R3): one requirement per landed addition item --
 # batch 1 (I1-I8), waves 1-6 (P1, P2, D1, W1, P6, P4, P3, P5, D2, P7, S1)
-# and the items built in the current wave (R2, W2, S2, S3, W3, R3) -- each
+# and the items built after them (R2, W2, S2, S3, W3, R3, P8, W4, S4, P9,
+# W5, INT) -- each
 # citing the document section it comes from and mapped to the tests that
 # exist for it.
 #
@@ -257,7 +258,7 @@ requirements:
       Flow, disparity and the stereo rig, points and amodal masks are
       written as data with passes.json and exported beside the frames.
     source: {document: docs/ADVANCEMENTS_BLUEPRINT.md, section: "3. Sensing"}
-    tests: [tests/test_annotation_passes.py]
+    tests: [tests/test_passes.py, tests/test_stereo.py, tests/test_passes_export.py]
     guard_reason: "lean build: none"
 
   - id: R-SEN-04
@@ -277,7 +278,7 @@ requirements:
       Night lighting, precipitation and cloud drift with the wind at cloud
       base are coupled to the look and recorded in the world record.
     source: {document: docs/ADVANCEMENTS_BLUEPRINT.md, section: "4. World"}
-    tests: [tests/test_weather_visuals.py]
+    tests: [tests/test_night.py, tests/test_precipitation.py]
     guard_reason: "lean build: none"
 
   - id: R-REC-04
@@ -292,4 +293,69 @@ requirements:
       matrix is generated, committed and checked.
     source: {document: docs/ADVANCEMENTS_BLUEPRINT.md, section: "2. The record every variable returns"}
     tests: [tests/test_campaign_report.py, tests/test_tabular.py, tests/test_datasheet.py, tests/test_traceability.py]
+    guard_reason: "lean build: none"
+
+  - id: R-PHY-10
+    item: P8
+    title: Gate 3b, the layers against their references
+    statement: >-
+      Each physics layer is flown against its stated reference (closed
+      form, published data or the second host) and the step convergence of
+      the layered run is measured and committed.
+    source: {document: docs/ADVANCEMENTS_BLUEPRINT.md, section: "1. Physics layers"}
+    tests: [tests/test_gate3b.py]
+    guard_reason: "lean build: none"
+
+  - id: R-WLD-05
+    item: W4
+    title: Land-cover labels, aggregates and licences
+    statement: >-
+      Land-cover classes reach the label passes, vegetation and buildings
+      carry aggregate object ids, and every cached world source carries its
+      licence into the manifests.
+    source: {document: docs/ADVANCEMENTS_BLUEPRINT.md, section: "4. World"}
+    tests: [tests/test_landcover_labels.py, tests/test_licence.py]
+    guard_reason: "lean build: none"
+
+  - id: R-SEN-05
+    item: S4
+    title: The engine's sensing passes
+    statement: >-
+      The render commandlet writes the flow, disparity, amodal and
+      calibration passes and applies the sensing flags from the card.
+    source: {document: docs/ADVANCEMENTS_BLUEPRINT.md, section: "3. Sensing"}
+    tests: [tests/test_ue_passes_source.py]
+    guard_reason: "lean build: none"
+
+  - id: R-PHY-11
+    item: P9
+    title: The physics layers on the engine host
+    statement: >-
+      The engine host applies the card's atmosphere, loading, icing, gusts,
+      failures and wake as the headless run does, records the same host
+      channels, and reports its environment in render.json for the verifier.
+    source: {document: docs/ADVANCEMENTS_BLUEPRINT.md, section: "1. Physics layers"}
+    tests: [tests/test_ue_physics_source.py, tests/test_aero_channels.py]
+    guard_reason: "lean build: none"
+
+  - id: R-WLD-06
+    item: W5
+    title: The world built in the editor
+    statement: >-
+      The editor module builds the scene's buildings, runway, vegetation and
+      land cover from the world documents and the commandlet loads it by
+      name, refusing a missing or stale scene.
+    source: {document: docs/ADVANCEMENTS_BLUEPRINT.md, section: "4. World"}
+    tests: [tests/test_ue_world_source.py]
+    guard_reason: "lean build: none"
+
+  - id: R-INT-05
+    item: INT
+    title: The one version bump
+    statement: >-
+      The spec, capture manifest and record versions are raised once for
+      all the additions, the older versions still read, and the examples
+      re-pinned.
+    source: {document: docs/ADVANCEMENTS_BLUEPRINT.md, section: "Versions and keys, decided once for the whole addition"}
+    tests: [tests/test_versions.py]
     guard_reason: "lean build: none"

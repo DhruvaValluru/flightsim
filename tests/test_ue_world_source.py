@@ -264,6 +264,16 @@ def test_the_scene_document_and_the_card_members(tmp_path):
     # The document the render reads is ASCII (gotcha 13).
     path = scene_script.write_scene_document(document, tmp_path / "ridge_scene.json")
     path.read_bytes().decode("ascii")
+    # The capture command's --scene: the same members reach the card's world
+    # block, and a missing document or bake refuses world.scene_missing.
+    from flightsim import capture
+
+    assert capture._scene_members(path, stem) == members
+    assert capture._with_scene({"terrain": str(stem)}, members) == {"terrain": str(stem), **members}
+    assert capture._with_scene(None, members) is None
+    for missing in (capture._scene_members(tmp_path / "none.json", stem),
+                    capture._scene_members(path, None)):
+        assert [v.constraint for v in missing["violations"]] == ["world.scene_missing"]
 
 
 def test_the_scene_script_is_plain_python_until_the_editor_half():
@@ -505,10 +515,12 @@ def test_scene_is_emitted_only_when_asked_right_after_imagery():
     assert asked[asked.index("-imagery=drape.json") + 1] == "-scene=/abs/ridge_scene.json"
     assert [t for t in asked if t != "-scene=/abs/ridge_scene.json"] == default
     assert not [t for t in flags(void=True, scene_document="/x.json") if t.startswith(SCENE_PREFIX)]
-    # Parity: neither caller asks for it, so the CLI and the web app still
-    # build one list (tests/test_render_flags.py compares them).
-    for caller in (REPO / "flightsim" / "capture.py", REPO / "webapp" / "runs.py"):
-        assert "scene_document" not in caller.read_text(encoding="utf-8"), caller.name
+    # Parity: the web app never asks for it and the CLI only under --scene
+    # (None otherwise), so the two still build one default list
+    # (tests/test_render_flags.py compares them).
+    assert "scene_document" not in (REPO / "webapp" / "runs.py").read_text(encoding="utf-8")
+    assert ('scene_document=str(args.scene) if getattr(args, "scene", None) else None'
+            in (REPO / "flightsim" / "capture.py").read_text(encoding="utf-8"))
 
 
 def _world_run(tmp_path, moon_index=1, streak=12.5):

@@ -454,14 +454,16 @@ REGISTRY = Registry((
                                      "grid's bilinear bound 1.152 m, stated in the record")),
     VariableRecord(
         name="limits.monitor", spec_path=None, unit="g | kt CAS | Mach | deg (per key)",
-        effect_channels=(EffectChannel("exceed_nz_pos", "1"), EffectChannel("exceed_nz_neg", "1"),
-                         EffectChannel("exceed_vne_or_vmo", "1"), EffectChannel("exceed_mmo", "1"),
-                         EffectChannel("exceed_alpha_stall", "1"),
-                         EffectChannel("any_exceedance", "1")),
+        # INT-final: the flag columns carry the _flag suffix (exceed_* and
+        # any_exceedance before; core/telemetry/limits.py FLAG_RENAMES).
+        effect_channels=(EffectChannel("nz_pos_flag", "1"), EffectChannel("nz_neg_flag", "1"),
+                         EffectChannel("vne_or_vmo_flag", "1"), EffectChannel("mmo_flag", "1"),
+                         EffectChannel("alpha_stall_flag", "1"),
+                         EffectChannel("any_exceedance_flag", "1")),
         null_basis="no spec field: an observer; the producer's null test offsets the run's "
                    "own samples across the probe limit",
-        host_channels=("exceed_nz_pos", "exceed_nz_neg", "exceed_vne_or_vmo", "exceed_mmo",
-                       "exceed_alpha_stall", "any_exceedance")),
+        host_channels=("nz_pos_flag", "nz_neg_flag", "vne_or_vmo_flag", "mmo_flag",
+                       "alpha_stall_flag", "any_exceedance_flag")),
     VariableRecord(
         name="instruments.profile", spec_path=None, unit="profile",
         null_basis="no spec field (a CLI option until the instruments block lands): the "

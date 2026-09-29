@@ -86,17 +86,17 @@ def test_monitor_flags_are_exact_on_synthetic_columns():
         alpha_deg=[2.0, 3.0, 4.0, 5.0, 6.0])
     result = monitor(cols, table())
     assert result.flags == {
-        "exceed_nz_pos": [0, 1, 0, 0, 0],
-        "exceed_nz_neg": [0, 0, 0, 1, 0],
-        "exceed_vne_or_vmo": [0, 1, 0, 0, 1],
-        "exceed_mmo": [0, 1, 0, 0, 1],
+        "nz_pos_flag": [0, 1, 0, 0, 0],
+        "nz_neg_flag": [0, 0, 0, 1, 0],
+        "vne_or_vmo_flag": [0, 1, 0, 0, 1],
+        "mmo_flag": [0, 1, 0, 0, 1],
         ANY_COLUMN: [0, 1, 0, 1, 1],
     }
     s = result.summary
     assert s["samples"] == 5
     assert s["monitored"] == ["n_z_pos_g", "n_z_neg_g", "speed_limit_kt", "m_mo"]
     assert s["unmonitored"] == {"alpha_stall_deg": "the model states none"}
-    assert "exceed_alpha_stall" not in result.flags
+    assert "alpha_stall_flag" not in result.flags
     nz = s["per_limit"]["n_z_pos_g"]
     assert nz["count"] == 1 and nz["first_exceedance_s"] == 0.1
     assert nz["worst_margin"] == pytest.approx(2.5 - 2.6)
@@ -120,10 +120,10 @@ def test_a_sample_exactly_at_the_limit_is_not_flagged():
                    cas_kt=[350.0, 350.0, 350.0 + 1e-9, 0.0],
                    mach=[0.82, 0.82, 0.82 + 1e-9, 0.0])
     result = monitor(cols, table())
-    assert result.flags["exceed_nz_pos"] == [0, 0, 1, 0]
-    assert result.flags["exceed_nz_neg"] == [0, 0, 0, 1]
-    assert result.flags["exceed_vne_or_vmo"] == [0, 0, 1, 0]
-    assert result.flags["exceed_mmo"] == [0, 0, 1, 0]
+    assert result.flags["nz_pos_flag"] == [0, 0, 1, 0]
+    assert result.flags["nz_neg_flag"] == [0, 0, 0, 1]
+    assert result.flags["vne_or_vmo_flag"] == [0, 0, 1, 0]
+    assert result.flags["mmo_flag"] == [0, 0, 1, 0]
     assert result.summary["per_limit"]["n_z_pos_g"]["worst_margin"] == pytest.approx(-1e-9)
 
 
@@ -132,7 +132,7 @@ def test_summary_count_is_the_number_of_flagged_samples():
     result = monitor(cols, table())
     assert result.summary["per_limit"]["n_z_pos_g"]["count"] == 7
     assert result.summary["any_exceedance"]["count"] == 7
-    assert sum(result.flags["exceed_nz_pos"]) == 7
+    assert sum(result.flags["nz_pos_flag"]) == 7
 
 
 def test_an_unstated_limit_writes_no_column_and_says_why():
@@ -140,7 +140,7 @@ def test_an_unstated_limit_writes_no_column_and_says_why():
     about a limit that was never compared."""
     result = monitor(columns(n_z=[1.0], cas_kt=[100.0], mach=[0.3]),
                      table(m_mo={"value": None, "reason": "no Mach limit published"}))
-    assert "exceed_mmo" not in result.flags
+    assert "mmo_flag" not in result.flags
     assert result.summary["per_limit"]["m_mo"] == {
         "limit": None, "unit": "Mach", "kind": None, "channel": "mach",
         "column": None, "monitored": False, "reason": "no Mach limit published"}
@@ -149,8 +149,8 @@ def test_an_unstated_limit_writes_no_column_and_says_why():
 
 def test_a_missing_channel_is_reported_not_guessed():
     result = monitor(columns(n_z=[1.0, 3.0]), table())
-    assert result.flags["exceed_nz_pos"] == [0, 1]
-    assert "exceed_vne_or_vmo" not in result.flags
+    assert result.flags["nz_pos_flag"] == [0, 1]
+    assert "vne_or_vmo_flag" not in result.flags
     assert result.summary["unmonitored"]["speed_limit_kt"] == "channel 'cas_kt' not recorded"
     assert result.summary["per_limit"]["speed_limit_kt"]["monitored"] is False
     assert result.summary["per_limit"]["speed_limit_kt"]["limit"] == 350.0
@@ -175,13 +175,13 @@ def test_annotate_writes_the_flags_beside_the_recorded_columns():
     rec = recorder_from(cols)
     result = monitor(rec.columns, table())
     added = annotate(rec, result)
-    assert added == ["exceed_nz_pos", "exceed_nz_neg", "exceed_vne_or_vmo",
-                     "exceed_mmo", ANY_COLUMN]
+    assert added == ["nz_pos_flag", "nz_neg_flag", "vne_or_vmo_flag",
+                     "mmo_flag", ANY_COLUMN]
     assert rec.derived == added
-    assert rec.columns["exceed_nz_pos"] == [0, 1, 0]
+    assert rec.columns["nz_pos_flag"] == [0, 1, 0]
     assert rec.to_dict()["derived"] == added
     # The per-frame state copies every column, flags included, unchanged.
-    assert frame_state(rec.columns, 1)["exceed_nz_pos"] == 1.0
+    assert frame_state(rec.columns, 1)["nz_pos_flag"] == 1.0
     assert frame_state(rec.columns, 1)[ANY_COLUMN] == 1.0
     assert frame_state(rec.columns, 0)[ANY_COLUMN] == 0.0
 
@@ -199,7 +199,7 @@ def test_recorder_annotate_refuses_a_clash_and_a_wrong_length():
 
 def test_null_test_measures_both_sides_of_the_limit_from_the_runs_own_samples():
     inside = null_test(columns(cas_kt=[300.0, 330.0, 320.0], n_z=[1.0] * 3), table())
-    assert inside.quantity == "samples flagged exceed_vne_or_vmo"
+    assert inside.quantity == "samples flagged vne_or_vmo_flag"
     # Peak 330 -> pushed to 370: 300 -> 340 (inside), 330 -> 370, 320 -> 360.
     assert (inside.with_value, inside.without_value) == (2.0, 0.0)
     assert inside.ok and "flown inside" in inside.note and "+40.000" in inside.note
@@ -210,7 +210,7 @@ def test_null_test_measures_both_sides_of_the_limit_from_the_runs_own_samples():
     # Peak 1.4 g -> pushed to 3.0 g (limit 2.5 + 0.5): 0.5 -> 2.1 (inside), 1.4 -> 3.0.
     by_g = null_test(columns(n_z=[0.5, 1.4]),
                      table(speed_limit_kt={"value": None, "reason": "none"}))
-    assert by_g.quantity == "samples flagged exceed_nz_pos"
+    assert by_g.quantity == "samples flagged nz_pos_flag"
     assert (by_g.with_value, by_g.without_value) == (1.0, 0.0) and "+1.600" in by_g.note
     assert null_test(columns(alpha_deg=[1.0]), table()) is None
 
@@ -341,7 +341,7 @@ def test_monitor_run_returns_the_block_and_the_record(tmp_path):
     assert block["summary"]["columns_in_output_digest"] is False
     assert block["summary"]["interval_s"] == 0.1
     assert record.name == "limits.monitor"
-    assert rec.columns["exceed_nz_pos"] == [0, 1]
+    assert rec.columns["nz_pos_flag"] == [0, 1]
 
 
 # -- the manifest ---------------------------------------------------------------------------
@@ -394,8 +394,8 @@ def test_a_real_run_beyond_v_mo_flags_every_sample_and_cruise_flags_none(a320_be
     assert cruise["summary"]["any_exceedance"]["count"] == 0
     assert cruise["summary"]["any_exceedance"]["first_exceedance_s"] is None
     assert cruise["summary"]["per_limit"]["speed_limit_kt"]["worst_margin"] == pytest.approx(100.0, abs=0.5)
-    assert set(a320_beyond.telemetry.columns["exceed_vne_or_vmo"]) == {1}
-    assert set(a320_cruise.telemetry.columns["exceed_vne_or_vmo"]) == {0}
+    assert set(a320_beyond.telemetry.columns["vne_or_vmo_flag"]) == {1}
+    assert set(a320_cruise.telemetry.columns["vne_or_vmo_flag"]) == {0}
 
 
 def test_the_run_manifest_carries_the_block_the_record_and_the_flags_per_frame(a320_beyond, tmp_path):
@@ -414,15 +414,15 @@ def test_the_run_manifest_carries_the_block_the_record_and_the_flags_per_frame(a
     assert "flown beyond" in record["null_test"]["note"]
     # Every per-frame state carries the flags (core.capture.manifest.frame_state, unchanged).
     state = frame_state(a320_beyond.telemetry.columns, 3)
-    assert state["exceed_vne_or_vmo"] == 1.0 and state[ANY_COLUMN] == 1.0
-    assert state["exceed_nz_pos"] == 0.0
+    assert state["vne_or_vmo_flag"] == 1.0 and state[ANY_COLUMN] == 1.0
+    assert state["nz_pos_flag"] == 0.0
     json.dumps(manifest)
     written = a320_beyond.write(tmp_path / "run")
     telemetry = json.loads((written / "telemetry.json").read_text(encoding="utf-8"))
     # The flags are derived columns; D1's datum channels (undulation_m,
     # hae_m) are derived too and precede them.
     assert telemetry["derived"] == ["undulation_m", "hae_m"] + record["telemetry_columns"]
-    assert telemetry["columns"]["exceed_vne_or_vmo"][0] == 1
+    assert telemetry["columns"]["vne_or_vmo_flag"][0] == 1
 
 
 def test_the_output_digest_covers_the_recorded_telemetry_not_the_flags(a320_cruise):
@@ -431,8 +431,8 @@ def test_the_output_digest_covers_the_recorded_telemetry_not_the_flags(a320_crui
     cols = a320_cruise.telemetry.columns
     derived = set(a320_cruise.telemetry.derived)
     recorded = {k: v for k, v in cols.items() if k not in derived}
-    assert derived == {"exceed_nz_pos", "exceed_nz_neg", "exceed_vne_or_vmo",
-                       "exceed_mmo", ANY_COLUMN, "undulation_m", "hae_m"}
+    assert derived == {"nz_pos_flag", "nz_neg_flag", "vne_or_vmo_flag",
+                       "mmo_flag", ANY_COLUMN, "undulation_m", "hae_m"}
     assert digest_columns(recorded) == a320_cruise.output_digest
     assert digest_columns(cols) != a320_cruise.output_digest
 
@@ -452,6 +452,6 @@ def test_the_c172p_cannot_be_flown_beyond_v_ne_here_and_says_so():
     limits = cruise.manifest["limits"]
     assert limits["summary"]["monitored"] == ["n_z_pos_g", "n_z_neg_g", "speed_limit_kt"]
     assert limits["summary"]["any_exceedance"]["count"] == 0
-    assert "exceed_mmo" not in cruise.telemetry.columns
+    assert "mmo_flag" not in cruise.telemetry.columns
     record = read_records(cruise.manifest["applied_variables"])[0]
     assert record["null_test"]["ok"] is True and "flown inside" in record["null_test"]["note"]

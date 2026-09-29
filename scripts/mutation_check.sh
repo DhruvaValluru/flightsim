@@ -384,7 +384,7 @@ mutate experiments/host_parity_matrix.py \
     || failures=$((failures+1))
 
 mutate experiments/host_parity_matrix.py \
-    '        elif _sha256(source) != _sha256(target):' \
+    '        elif _sha256_lf(source) != _sha256_lf(target):' \
     '        elif False:  # MUTATED: the hosts may load different aircraft files' \
     "both hosts load identical model XML" tests/test_parity_matrix.py \
     || failures=$((failures+1))
@@ -1676,8 +1676,8 @@ mutate core/capture/manifest.py \
     tests/test_camera_manifest.py || failures=$((failures+1))
 
 mutate core/capture/manifest.py \
-    'SUPPORTED_MANIFEST_VERSIONS = (3, 4, 5, 6)' \
-    'SUPPORTED_MANIFEST_VERSIONS = (4, 5, 6)  # MUTATED: every earlier run refused' \
+    'SUPPORTED_MANIFEST_VERSIONS = (3, 4, 5, 6, 7)' \
+    'SUPPORTED_MANIFEST_VERSIONS = (4, 5, 6, 7)  # MUTATED: every earlier run refused' \
     "a version 3 manifest still reads" \
     tests/test_camera_manifest.py || failures=$((failures+1))
 
@@ -2132,9 +2132,9 @@ mutate core/dataset/export.py \
 
 mutate core/dataset/export.py \
     'LABEL_FILE_CHECKS = {"_mask.png": MASK_CHECKS, "_class.png": MASK_CHECKS,
-                     "_depth.f32": DEPTH_CHECKS}' \
+                     "_depth.f32": DEPTH_CHECKS, **PASS_FILE_CHECKS,' \
     'LABEL_FILE_CHECKS = {"_mask.png": MASK_CHECKS, "_class.png": (),
-                     "_depth.f32": ()}  # MUTATED: class image and depth ship ungraded' \
+                     "_depth.f32": (), **PASS_FILE_CHECKS,  # MUTATED: class image and depth ship ungraded' \
     "an ungraded class image or depth refuses export.unverified_labels" \
     tests/test_dataset_formats.py || failures=$((failures+1))
 
@@ -4689,9 +4689,9 @@ mutate core/fdm/state.py \
 mutate core/telemetry/recorder.py \
     '    "cg_x_m",
     "iyy_kgm2",
-)' \
+    # -- the measured channels (R2)' \
     '    # MUTATED: the loading channels are not recorded
-)' \
+    # -- the measured channels (R2)' \
     "loading: cg_x_m and iyy_kgm2 are recorded columns" tests/test_loading.py \
     || failures=$((failures+1))
 
@@ -5321,8 +5321,8 @@ mutate core/registry.py \
     || failures=$((failures+1))
 
 mutate core/scenario/blocks.py \
-    '    OPTIONAL_FIELDS = ("sun_lux",)' \
-    '    OPTIONAL_FIELDS = ()  # MUTATED: sun_lux always serialises' \
+    '    OPTIONAL_FIELDS = ("sun_lux", "buildings", "night")' \
+    '    OPTIONAL_FIELDS = ("buildings", "night")  # MUTATED: sun_lux always serialises' \
     "S1 blocks: sun_lux is absent-canonical inside the scene block (the mountain example keeps its digest)" tests/test_sensing_block.py \
     || failures=$((failures+1))
 

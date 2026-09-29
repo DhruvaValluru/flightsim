@@ -839,6 +839,47 @@ def apply_profile_to_run(run_dir, manifest: Dict, run_seed: int) -> Dict:
                                "blur": blocks["blur"]}
         entry["frames"].append(item)
         written[camera] = written.get(camera, 0) + 1
+    # S4: the calibration frame (render.json calibration.slanted_edge.frame)
+    # is not a manifest frame; it takes the same post-pass, still (no
+    # rotation, no flow), with the camera's own intrinsics, so the
+    # verifier's slanted-edge check measures the PSF actually applied.
+    templates = {}
+    for record in manifest.get("frames", []):
+        templates.setdefault(str(record["camera_id"]), record)
+    for camera, record in templates.items():
+        profile = load_profile((profiles.get(camera) or {}).get("name", DEFAULT_PROFILE))
+        if profile.is_ideal:
+            continue
+        folder = run_dir / "frames" / camera
+        try:
+            render = json.loads((folder / "render.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        edge = ((render.get("calibration") or {}).get("slanted_edge") or {}) \
+            if isinstance(render, dict) else {}
+        name = edge.get("frame") if isinstance(edge, dict) else None
+        frame = folder / str(name) if name else None
+        if frame is None or not frame.is_file():
+            continue
+        seed = frame_seed(run_seed, camera, -1)
+        linear, source_note = read_linear_frame(frame)
+        exposure = exposures.get(camera) or _camera_exposure({"preset": "chase"})
+        out, blocks = apply_profile_detailed(
+            linear, profile, record, [0.0, 0.0, 0.0], seed, exposure_s=exposure["shutter_s"],
+            aperture_f=exposure["aperture_f"])
+        srgb = (np.round(linear_to_srgb(out) * 255.0)).astype(np.uint8)
+        target = frame.with_name(frame.stem + "_sensor.png")
+        Image.fromarray(srgb, mode="RGB").save(target)
+        entry = per_camera.setdefault(camera, {
+            "profile": profile.to_dict(), "frames": [], "linear_source": source_note,
+            "post_pass_order": list(POST_PASS_ORDER)})
+        item = {"frame": frame.name, "sensor": target.name, "seed": seed,
+                "angular_rate_rad_s": [0.0, 0.0, 0.0], "calibration": True}
+        if any(blocks[k] is not None for k in ("radiance", "psf", "blur")):
+            item["sensing"] = {"stages": list(blocks["stages"]),
+                               "radiance": blocks["radiance"], "psf": blocks["psf"],
+                               "blur": blocks["blur"]}
+        entry["frames"].append(item)
     for camera, entry in per_camera.items():
         (run_dir / "frames" / camera / "sensor.json").write_text(
             json.dumps(entry, indent=1), encoding="utf-8")

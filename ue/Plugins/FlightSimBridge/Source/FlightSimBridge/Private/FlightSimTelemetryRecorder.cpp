@@ -129,12 +129,12 @@ const FFlightSimTelemetryChannel GFlightSimTelemetryChannels[] = {
 	// hosts -- core/telemetry/limits.py monitor() over the recorded n_z,
 	// cas_kt, mach and alpha_deg columns -- so the host records them null
 	// and the annotation fills them where the headless run's are filled.
-	{TEXT("exceed_nz_pos"), TEXT("host:exceed_nz_pos"), 1.0, false},
-	{TEXT("exceed_nz_neg"), TEXT("host:exceed_nz_neg"), 1.0, false},
-	{TEXT("exceed_vne_or_vmo"), TEXT("host:exceed_vne_or_vmo"), 1.0, false},
-	{TEXT("exceed_mmo"), TEXT("host:exceed_mmo"), 1.0, false},
-	{TEXT("exceed_alpha_stall"), TEXT("host:exceed_alpha_stall"), 1.0, false},
-	{TEXT("any_exceedance"), TEXT("host:any_exceedance"), 1.0, false},
+	{TEXT("nz_pos_flag"), TEXT("host:nz_pos_flag"), 1.0, false},
+	{TEXT("nz_neg_flag"), TEXT("host:nz_neg_flag"), 1.0, false},
+	{TEXT("vne_or_vmo_flag"), TEXT("host:vne_or_vmo_flag"), 1.0, false},
+	{TEXT("mmo_flag"), TEXT("host:mmo_flag"), 1.0, false},
+	{TEXT("alpha_stall_flag"), TEXT("host:alpha_stall_flag"), 1.0, false},
+	{TEXT("any_exceedance_flag"), TEXT("host:any_exceedance_flag"), 1.0, false},
 };
 
 // The prefix of a row served by the scenario world rather than JSBSim.

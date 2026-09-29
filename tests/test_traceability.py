@@ -49,7 +49,8 @@ def test_every_requirement_has_a_test_and_a_guard_or_a_stated_reason(loaded):
     # One requirement per landed item and per item of this wave.
     items = {r.item.split()[0] for r in requirements}
     assert items >= {"I1", "I2", "I3", "I4", "I5", "I6", "I7", "I8", "P1", "P2", "D1", "W1",
-                     "P6", "P4", "P3", "P5", "D2", "P7", "S1", "R2", "W2", "S2", "S3", "W3", "R3"}
+                     "P6", "P4", "P3", "P5", "D2", "P7", "S1", "R2", "W2", "S2", "S3", "W3", "R3",
+                     "P8", "W4", "S4", "P9", "W5", "INT"}
     for r in requirements:
         assert ID_FORM.match(r.id) and r.area in AREAS, r.id
 

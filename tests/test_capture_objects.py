@@ -253,8 +253,8 @@ def test_the_run_card_carries_objects_taxonomy_and_traffic(tmp_path):
 def test_manifest_6_carries_objects_and_a_record_per_object():
     spec = spec_with([("A320", "crossing")])
     manifest = manifest_with(spec)
-    assert manifest["manifest_version"] == MANIFEST_VERSION == 6
-    assert SUPPORTED_MANIFEST_VERSIONS == (3, 4, 5, 6)
+    assert manifest["manifest_version"] == MANIFEST_VERSION == 7   # objects since 6
+    assert SUPPORTED_MANIFEST_VERSIONS == (3, 4, 5, 6, 7)
     assert [o["id"] for o in manifest["objects"]] == [
         "aircraft:B747:0", "aircraft:A320:1", "terrain"]
     assert manifest["taxonomy"][:2] == ["aircraft", "terrain"]

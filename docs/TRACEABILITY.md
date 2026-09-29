@@ -37,16 +37,23 @@ lists. Areas: PHY physics layers, REC the record every variable returns, SEN sen
 | R-SEN-02 | S1 | **Radiometry, optics and motion blur.** The sun is stated in lux, the exposure chain in radiometric terms, and the optics point-spread function and motion blur are applied by stated models from the profile blocks. | docs/ADVANCEMENTS_CONTRACTS.md -- S1 -- radiometry, the sun in lux | `tests/test_radiometry.py`<br>`tests/test_optics.py`<br>`tests/test_blur.py`<br>`tests/test_exposure.py` | none | 21 | none |
 | R-REC-03 | R2 | **Instruments at the FDM rate.** The instrument models run inside the step loop at the FDM rate with the corrected specific force and lever arms, write instruments.npz beside the run and self-report their Allan deviation, checked by the independent overlapping estimator. | docs/ADVANCEMENTS_BLUEPRINT.md -- 2. The record every variable returns | `tests/test_instruments.py`<br>`tests/test_instruments_check.py`<br>`tests/test_record_block.py` | none | 11; lean build: none | none |
 | R-WLD-03 | W2 | **Buildings and the runway.** Building footprints from a cached, licence-checked set and a runway with its markings are placed on the terrain with stable identifiers and their records. | docs/ADVANCEMENTS_BLUEPRINT.md -- 4. World | `tests/test_buildings.py`<br>`tests/test_runway.py` | none | 0; lean build: none | none |
-| R-SEN-03 | S2 | **The passes as data.** Flow, disparity and the stereo rig, points and amodal masks are written as data with passes.json and exported beside the frames. | docs/ADVANCEMENTS_BLUEPRINT.md -- 3. Sensing | `tests/test_annotation_passes.py` | none | 10; lean build: none | none |
+| R-SEN-03 | S2 | **The passes as data.** Flow, disparity and the stereo rig, points and amodal masks are written as data with passes.json and exported beside the frames. | docs/ADVANCEMENTS_BLUEPRINT.md -- 3. Sensing | `tests/test_passes.py`<br>`tests/test_stereo.py`<br>`tests/test_passes_export.py` | none | 0; lean build: none | none |
 | R-SEN-04 | S3 | **The IR proxy.** An infrared band proxy is derived from the radiometry and the atmosphere along the flight, stated as a proxy. | docs/ADVANCEMENTS_BLUEPRINT.md -- 3. Sensing | `tests/test_thermal.py` | none | 0; lean build: none | none |
-| R-WLD-04 | W3 | **Night, precipitation and cloud drift.** Night lighting, precipitation and cloud drift with the wind at cloud base are coupled to the look and recorded in the world record. | docs/ADVANCEMENTS_BLUEPRINT.md -- 4. World | `tests/test_weather_visuals.py` | none | 1; lean build: none | none |
-| R-REC-04 | R3 | **The report and card at record 2, the tabular export, the datasheet and traceability.** The campaign report and the dataset card state record_version 2 and carry the variables, uncertainty and instruments blocks; the tabular export writes frames.npz and frames.csv with a units row that an independent reader round-trips; the datasheet fills Gebru's seven sections and the ISO/IEC 5259-2 measures from the records; and this matrix is generated, committed and checked. | docs/ADVANCEMENTS_BLUEPRINT.md -- 2. The record every variable returns | `tests/test_campaign_report.py`<br>`tests/test_tabular.py`<br>`tests/test_datasheet.py`<br>`tests/test_traceability.py` | `tests/test_campaign_report.py::test_a_case_without_the_twin_is_named_not_summarised`<br>`tests/test_campaign_report.py::test_the_card_carries_the_same_blocks_as_the_report`<br>`tests/test_campaign_report.py::test_the_instruments_block_reads_each_cases_block`<br>`tests/test_campaign_report.py::test_the_report_in_words_names_the_record_2_blocks`<br>`tests/test_campaign_report.py::test_the_report_states_record_version_2_and_the_record_constant_stays_1`<br>`tests/test_campaign_report.py::test_the_uncertainty_block_summarises_each_cases_twin`<br>`tests/test_campaign_report.py::test_the_variables_block_is_the_cases_own_records`<br>`tests/test_datasheet.py::test_an_unfillable_section_refuses_datasheet_incomplete`<br>`tests/test_datasheet.py::test_the_5259_measures_are_finite_and_recomputed_by_their_formulas`<br>`tests/test_datasheet.py::test_the_card_states_record_2_and_words_the_datasheet`<br>`tests/test_datasheet.py::test_the_seven_sections_are_filled_from_the_campaigns_records`<br>`tests/test_tabular.py::test_a_column_without_a_unit_refuses_by_name_before_any_file`<br>`tests/test_tabular.py::test_the_export_writes_the_table_and_the_card_names_it`<br>`tests/test_tabular.py::test_the_files_are_the_same_bytes_every_time`<br>`tests/test_tabular.py::test_the_reader_catches_a_writer_that_drifts`<br>`tests/test_tabular.py::test_the_reader_imports_nothing_from_the_writer`<br>`tests/test_tabular.py::test_the_table_round_trips_through_the_independent_reader`<br>`tests/test_tabular.py::test_the_units_row_states_every_columns_unit`<br>`tests/test_tabular.py::test_the_webdataset_sidecar_carries_export_applied`<br>`tests/test_traceability.py::test_a_citation_of_an_unknown_id_refuses_orphan`<br>`tests/test_traceability.py::test_an_untraced_requirement_refuses_uncovered`<br>`tests/test_traceability.py::test_every_requirement_has_a_test_and_a_guard_or_a_stated_reason`<br>`tests/test_traceability.py::test_reviewed_by_is_the_honest_none`<br>`tests/test_traceability.py::test_the_citations_are_harvested_by_ast_and_land_on_requirements`<br>`tests/test_traceability.py::test_the_committed_table_equals_a_fresh_generation`<br>`tests/test_traceability.py::test_the_guards_are_read_by_the_suites_own_parser`<br>`tests/test_traceability.py::test_the_regeneration_script_checks_and_writes` | 0; lean build: none | none |
+| R-WLD-04 | W3 | **Night, precipitation and cloud drift.** Night lighting, precipitation and cloud drift with the wind at cloud base are coupled to the look and recorded in the world record. | docs/ADVANCEMENTS_BLUEPRINT.md -- 4. World | `tests/test_night.py`<br>`tests/test_precipitation.py` | none | 0; lean build: none | none |
+| R-REC-04 | R3 | **The report and card at record 2, the tabular export, the datasheet and traceability.** The campaign report and the dataset card state record_version 2 and carry the variables, uncertainty and instruments blocks; the tabular export writes frames.npz and frames.csv with a units row that an independent reader round-trips; the datasheet fills Gebru's seven sections and the ISO/IEC 5259-2 measures from the records; and this matrix is generated, committed and checked. | docs/ADVANCEMENTS_BLUEPRINT.md -- 2. The record every variable returns | `tests/test_campaign_report.py`<br>`tests/test_tabular.py`<br>`tests/test_datasheet.py`<br>`tests/test_traceability.py` | `tests/test_campaign_report.py::test_a_case_without_the_twin_is_named_not_summarised`<br>`tests/test_campaign_report.py::test_the_card_carries_the_same_blocks_as_the_report`<br>`tests/test_campaign_report.py::test_the_instruments_block_reads_each_cases_block`<br>`tests/test_campaign_report.py::test_the_report_in_words_names_the_record_2_blocks`<br>`tests/test_campaign_report.py::test_the_report_states_record_version_2_the_record_constant`<br>`tests/test_campaign_report.py::test_the_uncertainty_block_summarises_each_cases_twin`<br>`tests/test_campaign_report.py::test_the_variables_block_is_the_cases_own_records`<br>`tests/test_datasheet.py::test_an_unfillable_section_refuses_datasheet_incomplete`<br>`tests/test_datasheet.py::test_the_5259_measures_are_finite_and_recomputed_by_their_formulas`<br>`tests/test_datasheet.py::test_the_card_states_record_2_and_words_the_datasheet`<br>`tests/test_datasheet.py::test_the_seven_sections_are_filled_from_the_campaigns_records`<br>`tests/test_tabular.py::test_a_column_without_a_unit_refuses_by_name_before_any_file`<br>`tests/test_tabular.py::test_the_export_writes_the_table_and_the_card_names_it`<br>`tests/test_tabular.py::test_the_files_are_the_same_bytes_every_time`<br>`tests/test_tabular.py::test_the_reader_catches_a_writer_that_drifts`<br>`tests/test_tabular.py::test_the_reader_imports_nothing_from_the_writer`<br>`tests/test_tabular.py::test_the_table_round_trips_through_the_independent_reader`<br>`tests/test_tabular.py::test_the_units_row_states_every_columns_unit`<br>`tests/test_tabular.py::test_the_webdataset_sidecar_carries_export_applied`<br>`tests/test_traceability.py::test_a_citation_of_an_unknown_id_refuses_orphan`<br>`tests/test_traceability.py::test_an_untraced_requirement_refuses_uncovered`<br>`tests/test_traceability.py::test_every_requirement_has_a_test_and_a_guard_or_a_stated_reason`<br>`tests/test_traceability.py::test_reviewed_by_is_the_honest_none`<br>`tests/test_traceability.py::test_the_citations_are_harvested_by_ast_and_land_on_requirements`<br>`tests/test_traceability.py::test_the_committed_table_equals_a_fresh_generation`<br>`tests/test_traceability.py::test_the_guards_are_read_by_the_suites_own_parser`<br>`tests/test_traceability.py::test_the_regeneration_script_checks_and_writes` | 0; lean build: none | none |
+| R-PHY-10 | P8 | **Gate 3b, the layers against their references.** Each physics layer is flown against its stated reference (closed form, published data or the second host) and the step convergence of the layered run is measured and committed. | docs/ADVANCEMENTS_BLUEPRINT.md -- 1. Physics layers | `tests/test_gate3b.py` | none | 0; lean build: none | none |
+| R-WLD-05 | W4 | **Land-cover labels, aggregates and licences.** Land-cover classes reach the label passes, vegetation and buildings carry aggregate object ids, and every cached world source carries its licence into the manifests. | docs/ADVANCEMENTS_BLUEPRINT.md -- 4. World | `tests/test_landcover_labels.py`<br>`tests/test_licence.py` | none | 0; lean build: none | none |
+| R-SEN-05 | S4 | **The engine's sensing passes.** The render commandlet writes the flow, disparity, amodal and calibration passes and applies the sensing flags from the card. | docs/ADVANCEMENTS_BLUEPRINT.md -- 3. Sensing | `tests/test_ue_passes_source.py` | none | 0; lean build: none | none |
+| R-PHY-11 | P9 | **The physics layers on the engine host.** The engine host applies the card's atmosphere, loading, icing, gusts, failures and wake as the headless run does, records the same host channels, and reports its environment in render.json for the verifier. | docs/ADVANCEMENTS_BLUEPRINT.md -- 1. Physics layers | `tests/test_ue_physics_source.py`<br>`tests/test_aero_channels.py` | none | 2; lean build: none | none |
+| R-WLD-06 | W5 | **The world built in the editor.** The editor module builds the scene's buildings, runway, vegetation and land cover from the world documents and the commandlet loads it by name, refusing a missing or stale scene. | docs/ADVANCEMENTS_BLUEPRINT.md -- 4. World | `tests/test_ue_world_source.py` | none | 0; lean build: none | none |
+| R-INT-05 | INT | **The one version bump.** The spec, capture manifest and record versions are raised once for all the additions, the older versions still read, and the examples re-pinned. | docs/ADVANCEMENTS_BLUEPRINT.md -- Versions and keys, decided once for the whole addition | `tests/test_versions.py` | none | 0; lean build: none | none |
 
 ## Tests to requirements
 
 | Test | Requirements |
 |---|---|
-| `tests/test_annotation_passes.py` | R-SEN-01, R-SEN-03 |
+| `tests/test_aero_channels.py` | R-PHY-11 |
+| `tests/test_annotation_passes.py` | R-SEN-01 |
 | `tests/test_atmosphere.py` | R-PHY-03 |
 | `tests/test_blur.py` | R-SEN-02 |
 | `tests/test_buildings.py` | R-WLD-03 |
@@ -55,7 +62,7 @@ lists. Areas: PHY physics layers, REC the record every variable returns, SEN sen
 | `tests/test_campaign_report.py::test_the_card_carries_the_same_blocks_as_the_report` | R-REC-04 |
 | `tests/test_campaign_report.py::test_the_instruments_block_reads_each_cases_block` | R-REC-04 |
 | `tests/test_campaign_report.py::test_the_report_in_words_names_the_record_2_blocks` | R-REC-04 |
-| `tests/test_campaign_report.py::test_the_report_states_record_version_2_and_the_record_constant_stays_1` | R-REC-04 |
+| `tests/test_campaign_report.py::test_the_report_states_record_version_2_the_record_constant` | R-REC-04 |
 | `tests/test_campaign_report.py::test_the_uncertainty_block_summarises_each_cases_twin` | R-REC-04 |
 | `tests/test_campaign_report.py::test_the_variables_block_is_the_cases_own_records` | R-REC-04 |
 | `tests/test_datasheet.py` | R-REC-04 |
@@ -71,16 +78,23 @@ lists. Areas: PHY physics layers, REC the record every variable returns, SEN sen
 | `tests/test_exposure.py` | R-SEN-02 |
 | `tests/test_failures.py` | R-PHY-07 |
 | `tests/test_failures_block.py` | R-PHY-07 |
+| `tests/test_gate3b.py` | R-PHY-10 |
 | `tests/test_geoid.py` | R-INT-01 |
 | `tests/test_gust_provider.py` | R-PHY-05 |
 | `tests/test_icing.py` | R-PHY-08 |
 | `tests/test_instruments.py` | R-REC-01, R-REC-03 |
 | `tests/test_instruments_check.py` | R-REC-03 |
 | `tests/test_landcover.py` | R-WLD-01 |
+| `tests/test_landcover_labels.py` | R-WLD-05 |
+| `tests/test_licence.py` | R-WLD-05 |
 | `tests/test_limits.py` | R-PHY-01 |
 | `tests/test_loading.py` | R-PHY-06 |
 | `tests/test_modes.py` | R-PHY-02 |
+| `tests/test_night.py` | R-WLD-04 |
 | `tests/test_optics.py` | R-SEN-02 |
+| `tests/test_passes.py` | R-SEN-03 |
+| `tests/test_passes_export.py` | R-SEN-03 |
+| `tests/test_precipitation.py` | R-WLD-04 |
 | `tests/test_radiometry.py` | R-SEN-02 |
 | `tests/test_record_block.py` | R-REC-03 |
 | `tests/test_record_null.py` | R-REC-02 |
@@ -88,6 +102,7 @@ lists. Areas: PHY physics layers, REC the record every variable returns, SEN sen
 | `tests/test_registry.py` | R-REC-02 |
 | `tests/test_runway.py` | R-WLD-03 |
 | `tests/test_shear.py` | R-PHY-05 |
+| `tests/test_stereo.py` | R-SEN-03 |
 | `tests/test_surface_inference.py` | R-WLD-02 |
 | `tests/test_tabular.py` | R-REC-04 |
 | `tests/test_tabular.py::test_a_column_without_a_unit_refuses_by_name_before_any_file` | R-REC-04 |
@@ -108,10 +123,13 @@ lists. Areas: PHY physics layers, REC the record every variable returns, SEN sen
 | `tests/test_traceability.py::test_the_committed_table_equals_a_fresh_generation` | R-REC-04 |
 | `tests/test_traceability.py::test_the_guards_are_read_by_the_suites_own_parser` | R-REC-04 |
 | `tests/test_traceability.py::test_the_regeneration_script_checks_and_writes` | R-REC-04 |
+| `tests/test_ue_passes_source.py` | R-SEN-05 |
+| `tests/test_ue_physics_source.py` | R-PHY-11 |
+| `tests/test_ue_world_source.py` | R-WLD-06 |
 | `tests/test_uncertainty.py` | R-REC-02 |
+| `tests/test_versions.py` | R-INT-05 |
 | `tests/test_von_karman.py` | R-PHY-05 |
 | `tests/test_wake.py` | R-PHY-09 |
-| `tests/test_weather_visuals.py` | R-WLD-04 |
 | `tests/test_weightmaps.py` | R-WLD-02 |
 
 ## Not claimed

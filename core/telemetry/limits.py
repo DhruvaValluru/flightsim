@@ -59,14 +59,24 @@ SPEED_KINDS = ("V_NE", "V_MO")
 
 #: (limit key, flag column, telemetry channel, sense, unit). ``above``:
 #: flagged when value > limit; ``below``: flagged when value < limit.
+#: The flag columns carry the recorder's ``_flag`` suffix (unit ``1``,
+#: read from the name alone); before INT-final they were spelled
+#: ``exceed_<x>`` and ``any_exceedance`` (FLAG_RENAMES).
 CHECKS: Tuple[Tuple[str, str, str, str, str], ...] = (
-    ("n_z_pos_g", "exceed_nz_pos", "n_z", "above", "g"),
-    ("n_z_neg_g", "exceed_nz_neg", "n_z", "below", "g"),
-    ("speed_limit_kt", "exceed_vne_or_vmo", "cas_kt", "above", "kt CAS"),
-    ("m_mo", "exceed_mmo", "mach", "above", "Mach"),
-    ("alpha_stall_deg", "exceed_alpha_stall", "alpha_deg", "above", "deg"),
+    ("n_z_pos_g", "nz_pos_flag", "n_z", "above", "g"),
+    ("n_z_neg_g", "nz_neg_flag", "n_z", "below", "g"),
+    ("speed_limit_kt", "vne_or_vmo_flag", "cas_kt", "above", "kt CAS"),
+    ("m_mo", "mmo_flag", "mach", "above", "Mach"),
+    ("alpha_stall_deg", "alpha_stall_flag", "alpha_deg", "above", "deg"),
 )
-ANY_COLUMN = "any_exceedance"
+ANY_COLUMN = "any_exceedance_flag"
+#: The INT-final rename, old column -> new column (the manifest's
+#: state_units, the registry and the host recorder follow it).
+FLAG_RENAMES: Dict[str, str] = {
+    "exceed_nz_pos": "nz_pos_flag", "exceed_nz_neg": "nz_neg_flag",
+    "exceed_vne_or_vmo": "vne_or_vmo_flag", "exceed_mmo": "mmo_flag",
+    "exceed_alpha_stall": "alpha_stall_flag", "any_exceedance": ANY_COLUMN,
+}
 COMPARISON = ("strict: a sample is flagged when its value is beyond the limit "
               "(> a positive limit, < a negative one); a sample exactly at the "
               "limit is not flagged")

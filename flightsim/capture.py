@@ -350,6 +350,42 @@ def _after_name(exc: Exception) -> str:
     return text[len(head):] if head != ": " and text.startswith(head) else text
 
 
+def _scene_members(scene_path, terrain_stem):
+    """W5: the world-block members of the scene document
+    scripts/ue_build_scene.py wrote (its ``world_card_members``), or
+    ``{"violations": [...]}``: world.scene_missing when the document is
+    not here or there is no bake to draw it on."""
+    import importlib.util
+
+    from core.scenario.validate import Violation
+
+    path = Path(scene_path)
+    if terrain_stem is None or not path.is_file():
+        return {"violations": [Violation(
+            "world.scene_missing",
+            (f"--scene {path} is not on this machine" if not path.is_file() else
+             "--scene loads a Landscape over a terrain bake; this capture has none "
+             "(pass --terrain)"))]}
+    builder = Path(__file__).resolve().parents[1] / "scripts" / "ue_build_scene.py"
+    module_spec = importlib.util.spec_from_file_location("ue_build_scene", builder)
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+    try:
+        members = module.world_card_members(json.loads(path.read_text(encoding="utf-8")))
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        return {"violations": [Violation(
+            "world.scene_missing", f"--scene {path} is not a scene document ({exc})")]}
+    return members
+
+
+def _with_scene(block, scene_members):
+    """The card's world block with the scene's members merged in (W5);
+    the block unchanged when no scene was named."""
+    if block is None or not scene_members:
+        return block
+    return {**block, **scene_members}
+
+
 def _world_documents(spec, terrain_stem, landcover_json=None):
     """W2's world, built for a capture (wired by W4): the runway's
     flatten pad and its record (core/scene/runway.py; the flight then
@@ -481,6 +517,14 @@ def build_parser() -> argparse.ArgumentParser:
                              "_albedo.png). None by default.")
     # S1: the sensing opt-ins (core/render/flags.py sensing_flags; S4
     # honours them in the commandlet, uncompiled here).
+    parser.add_argument("--scene", default=None,
+                        help="with --render and --terrain, the scene document "
+                             "scripts/ue_build_scene.py wrote for the bake "
+                             "(<stem>_scene.json): the render loads that Landscape "
+                             "scene level (-scene=) and the card's world block carries "
+                             "its level, terrain sha256, sidecar and layer digests, "
+                             "matched by the host at load (world.scene_stale). Off by "
+                             "default: the procedural terrain.")
     parser.add_argument("--calibration", action="store_true",
                         help="with --render, also render the calibration frame per camera: an "
                              "emissive grey card, a Lambertian white quad under the sun alone "
@@ -839,6 +883,14 @@ def _run(args: argparse.Namespace) -> int:
               f"pad {terrain_stem})")
     if world_documents["buildings_document"]:
         print(f"buildings: {world_documents['buildings_document']}")
+    # W5: the editor-built scene (opt-in): its members ride the card's world
+    # block and -scene= reaches the render.
+    scene_members = None
+    if getattr(args, "scene", None):
+        scene_members = _scene_members(args.scene, terrain_stem)
+        if "violations" in scene_members:
+            return _refuse(scene_members["violations"])
+        print(f"scene: {args.scene} (level {scene_members['scene_level']})")
     if terrain_stem:
         from core.terrain.ground import TerrainGround
         from core.terrain.heightfield import Heightfield
@@ -1092,12 +1144,14 @@ def _run(args: argparse.Namespace) -> int:
             # W2 (wired by W4, absent-canonical): the world the host draws --
             # the flown terrain, the buildings and runway documents with
             # their sha256s -- only when the spec states either.
-            world=(world_card_block(terrain_stem,
-                                    heightfield.digest() if heightfield else None,
-                                    world_documents["buildings_document"],
-                                    world_documents["runway_document"])
-                   if (world_documents["buildings_document"]
-                       or world_documents["runway_document"]) else None))
+            world=_with_scene(
+                world_card_block(terrain_stem,
+                                 heightfield.digest() if heightfield else None,
+                                 world_documents["buildings_document"],
+                                 world_documents["runway_document"])
+                if (world_documents["buildings_document"]
+                    or world_documents["runway_document"] or scene_members) else None,
+                scene_members))
 
     solve_source = SOLVE_PRE_RUN
     solve_digest = result.output_digest
@@ -1451,7 +1505,8 @@ def _run(args: argparse.Namespace) -> int:
         passes=sorted({w for w in (args.passes or "").split(",") if w.strip()}
                       | set(engine_pass_words(cameras))),
         calibration=bool(args.calibration), sun_lux=sun_lux_flag,
-        accumulate=args.accumulate))
+        accumulate=args.accumulate,
+        scene_document=str(args.scene) if getattr(args, "scene", None) else None))
     print(f"rendering {len(cameras)} camera pass(es) into {frames_dir} "
           f"{'in the black void (--void)' if args.void else 'in the visual scene'} ...")
     completed = subprocess.run(command)

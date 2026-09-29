@@ -795,6 +795,9 @@ interop.hla_not_implemented:
   hint: "Use the entity-state stream, which is the interoperability product this build offers."
 check.dis_roundtrip:
   sentence: "The entity-state stream is read back by the checker's own reading of the standard's message layout: every message's position agrees with an independent map-projection library's conversion of the recorded place, its attitude with the checker's own composition of the recorded heading, pitch and roll, and its clock never runs backwards."
+check.georeference:
+  sentence: "The place the render host says it put the scene agrees with the run's own record: the same map projection, the same origin, the stated way sea-level heights reach the engine, and the same sea-level offset at the origin, on every camera."
+  hint: "Render again with this version's engine build so the host writes where it placed the scene."
 
 # -- the advancement additions, batch1 -----------------------------------
 wake.generator:

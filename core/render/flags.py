@@ -162,8 +162,10 @@ def sensing_flags(calibration: bool = False, sun_lux=None, accumulate=None) -> L
             raise ValueError(f"-sun-lux takes a positive number of lux, not {sun_lux!r}")
         # repr: the shortest text that round-trips the double, so the
         # host's lux is the one the grey-card check predicts (":g" kept six
-        # digits and could miss the 1e-6 comparison).
-        out.append(f"{SUN_LUX_PREFIX}{lux!r}")
+        # digits and could miss the 1e-6 comparison); a whole number keeps
+        # its old spelling (95788, not 95788.0).
+        text = repr(lux)
+        out.append(f"{SUN_LUX_PREFIX}{text[:-2] if text.endswith('.0') else text}")
     if accumulate is not None:
         if isinstance(accumulate, bool) or int(accumulate) != accumulate or int(accumulate) < 1:
             raise ValueError(f"-accumulate takes a whole number of sub-exposures >= 1, not {accumulate!r}")

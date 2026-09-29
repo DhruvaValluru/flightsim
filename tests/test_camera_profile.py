@@ -368,6 +368,39 @@ def test_the_post_pass_writes_a_sensor_frame_beside_each_rendered_frame(tmp_path
     assert verify_sensor_files(manifest, None).status == NOT_RUN
 
 
+def test_the_post_pass_also_takes_the_calibration_frame(tmp_path):
+    """S4's calibration frame is not a manifest frame; the post-pass takes
+    it too (still, the camera's intrinsics), so psf_slanted_edge measures
+    the PSF actually applied."""
+    manifest, _ = manifest_with("synthetic_cmos_wide")
+    for record in manifest["frames"]:
+        record["width_px"], record["height_px"] = 64, 36
+        record["fx_px"] = record["fy_px"] = 62.2
+        record["principal_point_px"] = [32.0, 18.0]
+        path = tmp_path / record["file"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _png(path)
+    folder = tmp_path / "frames" / "chase0"
+    _png(folder / "calibration_0000.png")
+    (folder / "render.json").write_text(json.dumps({"calibration": {"slanted_edge": {
+        "frame": "calibration_0000.png", "quad_px": [[4, 4], [40, 4], [40, 30], [4, 30]]}}}),
+        encoding="utf-8")
+    written = apply_profile_to_run(tmp_path, manifest, run_seed=11)
+    assert written == {"chase0": 6}            # the count stays the manifest frames'
+    sensor_json = json.loads((folder / "sensor.json").read_text(encoding="utf-8"))
+    item = next(f for f in sensor_json["frames"] if f["frame"] == "calibration_0000.png")
+    assert item["calibration"] is True and item["angular_rate_rad_s"] == [0.0, 0.0, 0.0]
+    assert (folder / item["sensor"]).is_file()
+    # The tower camera is ideal: no calibration sensor frame there.
+    tower = tmp_path / "frames" / "tower0"
+    tower.mkdir(parents=True, exist_ok=True)
+    _png(tower / "calibration_0000.png")
+    (tower / "render.json").write_text(json.dumps({"calibration": {"slanted_edge": {
+        "frame": "calibration_0000.png", "quad_px": [[0, 0], [8, 8]]}}}), encoding="utf-8")
+    apply_profile_to_run(tmp_path, manifest, run_seed=11)
+    assert not (tower / "calibration_0000_sensor.png").exists()
+
+
 def test_read_noise_is_what_a_dark_frame_shows():
     """Shot noise vanishes with the signal; read noise does not. A black
     frame through the synthetic sensor is not black: 3.5 electrons of

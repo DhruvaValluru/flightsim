@@ -397,8 +397,11 @@ def channel_unit(name: str) -> str:
     registered = _registered_channel_units().get(name)
     if registered is not None:
         return registered
+    # The limits monitor's 0/1 flags end in _flag since INT-final (the
+    # suffix table reads them); a run recorded before the rename still
+    # carries exceed_* / any_exceedance and reads 1 here.
     if name.startswith("exceed_") or name == "any_exceedance":
-        return "1"       # a 0/1 flag: the limits monitor's derived columns
+        return "1"
     return suffix_unit(name)
 
 

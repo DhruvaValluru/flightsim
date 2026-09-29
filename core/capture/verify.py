@@ -4721,6 +4721,116 @@ def verify_dis_roundtrip(manifest: Dict, run_dir=None) -> Check:
                  f"timestamps {mode} and strictly increasing, ids and marking as indexed")
 
 
+# -- D2 / INT-final: the render host's georeference block ---------------------
+
+#: The keys of render.json's root ``georeference`` block (blueprint section 5,
+#: the D2 engine side), in the order the host writes them.
+GEOREFERENCE_KEYS = ("geographic_crs", "projected_crs", "origin", "vertical_convention",
+                     "undulation_origin_m")
+#: The geographic CRS the manifest's origin latitude and longitude are in.
+GEOREFERENCE_GEOGRAPHIC_CRS = "EPSG:4326"
+#: The one vertical convention the host may state (the heights it hands the
+#: engine are orthometric; the engine reads them as ellipsoidal).
+GEOREFERENCE_VERTICAL_CONVENTION = (
+    "orthometric heights passed to AGeoReferencingSystem as ellipsoidal; engine ECEF "
+    "radially low by undulation_origin_m")
+#: The host copies the card's numbers: the origin within a centimetre (1e-7 deg
+#: of latitude is 1.1 cm), the projected origin and the undulation within 1 mm.
+GEOREFERENCE_TOL_DEG = 1e-7
+GEOREFERENCE_TOL_M = 1e-3
+FAIL_GEOREFERENCE = "check.georeference"
+
+
+def verify_georeference(manifest: Dict, run_dir=None) -> Check:
+    """Every render.json that carries a root ``georeference`` block agrees
+    with the manifest: all five keys present; ``geographic_crs``
+    EPSG:4326; ``projected_crs`` the manifest frame's CRS; ``origin``
+    {lat_deg, lon_deg, x_m, y_m} the frame's origin (1e-7 deg, 1 mm);
+    ``vertical_convention`` the one stated sentence; ``undulation_origin_m``
+    the manifest datum's ``undulation_m`` (1 mm; null where the datum's is
+    null -- a flat or synthesised scene has none); every camera's block
+    the same. NOT RUN without a render.json carrying the block (no engine
+    pass, or an engine build before it), never a pass on absence; FAIL
+    (check.georeference) on the first disagreement, by camera and key."""
+    if run_dir is None:
+        return Check("georeference", NOT_RUN, "no run directory: no render.json to read")
+    blocks: Dict[str, object] = {}
+    for path in sorted(Path(run_dir).rglob("render.json")):
+        try:
+            render = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(render, dict) and "georeference" in render:
+            blocks[path.parent.name] = render["georeference"]
+    if not blocks:
+        return Check("georeference", NOT_RUN,
+                     "no render.json carries a georeference block (no engine pass, or an "
+                     "engine build before the block): the engine's datum convention is "
+                     "unknown here")
+    frame = manifest.get("frame") or {}
+    datum = manifest.get("datum") or {}
+    expected_n = datum.get("undulation_m")
+
+    def fail(detail: str) -> Check:
+        return Check("georeference", FAIL, detail, FAIL_GEOREFERENCE)
+
+    first = None
+    for camera, block in blocks.items():
+        where = f"{camera}/render.json georeference"
+        if not isinstance(block, dict):
+            return fail(f"{where} is not a mapping")
+        missing = [key for key in GEOREFERENCE_KEYS if key not in block]
+        if missing:
+            return fail(f"{where} lacks {missing}")
+        if block["geographic_crs"] != GEOREFERENCE_GEOGRAPHIC_CRS:
+            return fail(f"{where} geographic_crs {block['geographic_crs']!r}, not "
+                        f"{GEOREFERENCE_GEOGRAPHIC_CRS}")
+        if block["projected_crs"] != frame.get("crs"):
+            return fail(f"{where} projected_crs {block['projected_crs']!r}, the manifest "
+                        f"frame's is {frame.get('crs')!r}")
+        origin = block["origin"]
+        if not isinstance(origin, dict):
+            return fail(f"{where} origin is not a mapping of lat_deg, lon_deg, x_m, y_m")
+        for key, frame_key, tol in (("lat_deg", "origin_lat_deg", GEOREFERENCE_TOL_DEG),
+                                    ("lon_deg", "origin_lon_deg", GEOREFERENCE_TOL_DEG),
+                                    ("x_m", "origin_x_m", GEOREFERENCE_TOL_M),
+                                    ("y_m", "origin_y_m", GEOREFERENCE_TOL_M)):
+            try:
+                off = abs(float(origin[key]) - float(frame[frame_key]))
+            except (KeyError, TypeError, ValueError):
+                return fail(f"{where} origin.{key} cannot be compared with the manifest "
+                            f"frame's {frame_key}")
+            if not off <= tol:
+                return fail(f"{where} origin.{key} is {off:.3g} from the manifest frame's "
+                            f"{frame_key} (tolerance {tol:g})")
+        if block["vertical_convention"] != GEOREFERENCE_VERTICAL_CONVENTION:
+            return fail(f"{where} vertical_convention {block['vertical_convention']!r} is "
+                        f"not the stated one")
+        n = block["undulation_origin_m"]
+        if expected_n is None or n is None:
+            if not (expected_n is None and n is None):
+                return fail(f"{where} undulation_origin_m {n!r}, the manifest datum's "
+                            f"undulation_m {expected_n!r}")
+        else:
+            try:
+                off = abs(float(n) - float(expected_n))
+            except (TypeError, ValueError):
+                return fail(f"{where} undulation_origin_m {n!r} is not a number")
+            if not off <= GEOREFERENCE_TOL_M:
+                return fail(f"{where} undulation_origin_m {float(n):.4f} m, the manifest "
+                            f"datum's {float(expected_n):.4f} m (tolerance "
+                            f"{GEOREFERENCE_TOL_M} m)")
+        if first is None:
+            first = (camera, block)
+        elif block != first[1]:
+            return fail(f"{where} differs from {first[0]}'s: one scene, one georeference")
+    return Check("georeference", PASS,
+                 f"{len(blocks)} render.json georeference block(s) agree with the manifest: "
+                 f"{frame.get('crs')} about the frame origin, the stated vertical "
+                 f"convention, undulation at the origin "
+                 f"{'null (no georeferenced heights)' if expected_n is None else f'{float(expected_n):.3f} m'}")
+
+
 # -- Advancement I3: the instrument models' measured channels ---------------
 
 def verify_instruments(manifest: Dict, run_dir=None) -> Check:
@@ -8104,6 +8214,9 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     # D2: the Entity State PDU log against the recording, by the checker's
     # own decode -- NOT RUN without a stream, never a pass on absence.
     run("dis_roundtrip", verify_dis_roundtrip, manifest, run_dir)
+    # D2 / INT-final: the render host's georeference block against the
+    # manifest's frame and datum -- NOT RUN without it, never a pass on absence.
+    run("georeference", verify_georeference, manifest, run_dir)
     # P7: the wake card's five selftest vectors against the checker's own
     # Burnham-Hallock pair and strip-theory quadrature; the host's vectors
     # against the card's where a render.json carries them.

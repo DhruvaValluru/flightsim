@@ -24,6 +24,23 @@ Everything Python is measured on any machine; the rendered half (the
 Windows build on UE 5.7 -- [docs/PHASE2_REPORT.md](docs/PHASE2_REPORT.md)
 opens with the instructor's commands and the Windows verification order.
 
+**The advancement addition (2026-09-29, same branch; versions bumped once,
+INT-final after checkpoint `78d11df`): spec 9, capture manifest 7, record 2.**
+Physics layers a spec can state (a non-standard day and humidity,
+payload and fuel with the centre of gravity read back, a failure
+schedule, icing, a wake-vortex encounter, von Kármán turbulence, layered
+and log-law wind), each written into JSBSim and read back; one record per
+introduced variable (`model` block and `model_name`, readback, JSBSim
+writes, a with-and-without null test, ASME V&V 20 uncertainty); instruments
+at the FDM rate; sensing (radiometry, optics, blur, ground-truth passes,
+stereo, an IR proxy); world (land cover, buildings, a runway, night and
+rain); EGM2008 datums and a DIS entity-state log. Every block is
+optional: a spec 8 file still reads unless it states a spec 9 block
+(refused by name), and the schema `docs/schemas/capture_manifest.v7.schema.json`
+sits beside v6. The engine side is C++ written and pinned by source tests
+but not compiled here; what is measured and what waits for Windows is in
+[docs/ADVANCEMENTS_REPORT.md](docs/ADVANCEMENTS_REPORT.md).
+
 ## Quick start (any machine, ~2 minutes)
 
 ```bash
