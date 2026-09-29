@@ -89,6 +89,22 @@ says the binding is missing. Each camera's ``render.json`` ``drawn``,
 run (null, with the reason, for a headless run), so what the engine
 drew and every rendering switch reach the dataset's consumer.
 
+Licences (W4, core/assets/licence.py): before any file is written every
+asset the export would ship -- an airframe whose MESH an engine drew
+into shipped pixels or label files, a livery, the terrain, the land
+cover a shipped label reads, the buildings, the runway markings -- is
+graded against a stated allow-list, and a refused one refuses the whole
+export by name (``aircraft.licence_dataset``: a GPL airframe renders
+internally and refuses export; ``aircraft.licence_noai``: a licence
+forbidding machine-learning use; ``asset.licence``: no licence record,
+or a scene asset off the list). The card's ``licences[]`` carries every
+asset's verdict (allowed, refused, not shipped) and why, and
+``licence_gate`` the rule, the list and the ``dataset.licences`` record;
+the verdicts are the records' words, not legal advice. The land-cover
+image (``_landcover.png``) ships in WebDataset once
+``landcover_vs_geometry`` PASSes, and ``label_conventions.landcover_image``
+says how to read it.
+
 What is NOT claimed by this module: it does not check a label -- it
 reads the verifier's verdict and refuses without a green one; it reads
 ``render.json`` for the card's provenance only, never for a label (the
@@ -169,10 +185,15 @@ PASS_FILE_CHECKS = {"_flow_fw.f32": FLOW_CHECKS, "_flow_fw_valid.u8": FLOW_CHECK
                     "_disparity.f32": ("disparity_vs_right_depth",),
                     "_points.f32": ("points_vs_depth",), "_points_id.u8": ("points_vs_depth",),
                     "_normal.png": ("normals_vs_depth",)}
-LABEL_FILES = LABEL_FILES + PASS_FILES
+#: W4: the land-cover image beside a frame (core/capture/labels.py), graded
+#: by the verifier's own unprojection before it ships.
+LANDCOVER_FILES = (("_landcover.png", "landcover.png"),)
+LANDCOVER_CHECKS = ("landcover_vs_geometry",)
+LABEL_FILES = LABEL_FILES + PASS_FILES + LANDCOVER_FILES
 #: The checks that must PASS before a label file ships, per suffix.
 LABEL_FILE_CHECKS = {"_mask.png": MASK_CHECKS, "_class.png": MASK_CHECKS,
-                     "_depth.f32": DEPTH_CHECKS, **PASS_FILE_CHECKS}
+                     "_depth.f32": DEPTH_CHECKS, **PASS_FILE_CHECKS,
+                     "_landcover.png": LANDCOVER_CHECKS}
 #: The label files each format ships: COCO carries the ID mask as
 #: ``segmentation``, WebDataset every file found beside the frame. A
 #: run whose file the verifier never graded refuses
@@ -657,6 +678,10 @@ def object_labels(run: Run, record: Dict[str, Any], labels: Dict[str, Any],
             box = entry.get("bbox_2d")
             if box is None:
                 box = entry.get("bbox_2d_tight")
+            if box is None:
+                # W4: an aggregate (building:all, vegetation:all) whose
+                # members no engine stencil drew takes the land-cover box.
+                box = entry.get("landcover_bbox_2d")
             unclipped, truncation = entry.get("bbox_2d_unclipped"), entry.get("truncation")
             keypoints = entry.get("keypoints", {}) or {}
             in_frame = entry.get("in_frame", box is not None)
@@ -1403,6 +1428,104 @@ def asset_licences(runs: Sequence[Run]) -> List[Dict[str, Any]]:
     return [entries[k] for k in sorted(entries)]
 
 
+def _label_digests(samples: Sequence["Sample"]) -> List[str]:
+    """One sha256 per exported label record (the frame's labels and its
+    objects): what the licence gate's null test compares before and after."""
+    return [hashlib.sha256(json.dumps({"labels": s.labels, "objects": s.objects},
+                                      sort_keys=True, default=str).encode("utf-8")).hexdigest()
+            for s in samples]
+
+
+def run_ships(run: Run, samples: Sequence["Sample"], labels_only: bool,
+              labels_shipped: Dict[str, Sequence[str]]) -> Dict[str, bool]:
+    """What the export carries of one run, for the licence gate: engine
+    pixels (a run the engine drew, exported with its images), engine label
+    files (any shipped), a derived land-cover label (a frame carrying
+    ``labels.landcover``), and whether the engine drew an airframe MESH."""
+    from core.assets.licence import mesh_drawn
+
+    own = [s for s in samples if s.run is run]
+    return {
+        "pixels": bool(run.render) and not labels_only and any(s.image is not None for s in own),
+        "label_files": bool(labels_shipped.get(run.name)),
+        "labels": any(isinstance((s.record.get("labels") or {}).get("landcover"), dict)
+                      and (s.record["labels"]["landcover"].get("file")) for s in own),
+        "mesh_drawn": mesh_drawn(run.manifest, run.render),
+    }
+
+
+def licence_gate(runs: Sequence[Run], samples: Sequence["Sample"], labels_only: bool,
+                 labels_shipped: Dict[str, Sequence[str]]) -> Dict[str, Any]:
+    """W4: the per-asset licence gate (core/assets/licence.py) over every
+    run the export ships, run BEFORE any file is written: a refused asset
+    raises its own name (``aircraft.licence_dataset``,
+    ``aircraft.licence_noai``, ``asset.licence``) as an ExportError and
+    nothing is left behind. Returns the verdicts with the
+    ``dataset.licences`` record (its null test: the label records the gate
+    changed, measured, against 0)."""
+    from core.assets.licence import LicenceError, enforce, gate, gate_record, run_assets
+
+    before = _label_digests(samples)
+    result = gate((run.name, run_assets(run.manifest),
+                   run_ships(run, samples, labels_only, labels_shipped)) for run in runs)
+    after = _label_digests(samples)
+    changed = sum(1 for a, b in zip(before, after) if a != b)
+    result["record"] = gate_record(result, changed, len(before)).to_dict()
+    try:
+        enforce(result)
+    except LicenceError as exc:
+        raise ExportError(exc.constraint, exc.message) from exc
+    return result
+
+
+#: The gate's asset name for an airframe (core/assets/licence.py).
+def _gate_asset_of(entry: Dict[str, Any]) -> Optional[str]:
+    if entry.get("kind") == "object":
+        parts = str(entry.get("asset")).split(":")
+        return f"airframe:{parts[1]}" if len(parts) == 3 and parts[0] == AIRCRAFT_CLASS else None
+    if entry.get("kind") == "aircraft_config":
+        return f"airframe:{Path(str(entry.get('asset'))).stem}"
+    return None
+
+
+def licences_with_verdicts(runs: Sequence[Run], gate_result: Optional[Dict[str, Any]]
+                           ) -> List[Dict[str, Any]]:
+    """The card's ``licences[]``: every entry :func:`asset_licences`
+    lists, each with the gate's verdict on its asset, then every other
+    asset the gate graded (the scene's terrain, land cover, buildings,
+    runway markings, a livery) -- one list, each entry with ``verdict``,
+    ``refusal`` (null unless refused), ``reason`` and ``obligations``."""
+    entries = asset_licences(runs)
+    if gate_result is None:
+        return entries
+    verdicts = {v["asset"]: v for v in gate_result["verdicts"]}
+    used = set()
+    for entry in entries:
+        asset = _gate_asset_of(entry)
+        verdict = verdicts.get(asset) if asset else None
+        if verdict is None:
+            continue
+        used.add(asset)
+        entry.update({"verdict": verdict["verdict"], "refusal": verdict["refusal"],
+                      "reason": verdict["reason"] if verdict["verdict"] == "refused"
+                      else "; ".join(verdict["shipped_as"]),
+                      "obligations": verdict["obligations"], "ml_use": verdict["ml_use"]})
+    for verdict in gate_result["verdicts"]:
+        if verdict["asset"] in used:
+            continue
+        entries.append({
+            "asset": verdict["asset"], "kind": verdict["kind"], "licence": verdict["licence"],
+            "spdx": verdict["spdx"], "source": verdict.get("source"),
+            "attribution": verdict.get("attribution"), "sha256": verdict.get("sha256"),
+            "ml_use": verdict["ml_use"], "runs": list(verdict["runs"]),
+            "note": verdict.get("note"), "verdict": verdict["verdict"],
+            "refusal": verdict["refusal"],
+            "reason": verdict["reason"] if verdict["verdict"] == "refused"
+            else "; ".join(verdict["shipped_as"]),
+            "obligations": verdict["obligations"]})
+    return entries
+
+
 def _numeric(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
@@ -1486,7 +1609,8 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
                  formats: Optional[Sequence[str]] = None,
                  masks_shipped: Sequence[str] = (),
                  labels_shipped: Optional[Dict[str, Sequence[str]]] = None,
-                 tabular: Optional[Dict[str, Any]] = None
+                 tabular: Optional[Dict[str, Any]] = None,
+                 licence_gate_result: Optional[Dict[str, Any]] = None
                  ) -> Dict[str, Any]:
     formats = list(formats) if formats else [fmt]
     shipped: Dict[str, List[str]] = {name: list(s) for name, s in (labels_shipped or {}).items()}
@@ -1560,8 +1684,10 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
         "sensor_profiles": profiles,
         "randomised_runs": randomised,
         "conditions": conditions_summary(runs),
-        "licences": asset_licences(runs),
-        "label_conventions": first.get("label_conventions"),
+        # W4: every asset's licence with the gate's verdict (allowed,
+        # refused, not shipped) and why; the gate itself below.
+        "licences": licences_with_verdicts(runs, licence_gate_result),
+        "label_conventions": _card_label_conventions(runs, first.get("label_conventions")),
         "label_conventions_by_manifest_version": conventions_by_version,
         "airframes": {r.manifest["aircraft"]: r.manifest.get("airframe") for r in runs},
         "kitti_conventions": {
@@ -1634,7 +1760,34 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
         "software_revision": software_revision(),
         "manifest_versions": sorted({int(r.manifest["manifest_version"]) for r in runs}),
     }
+    if licence_gate_result is not None:
+        # W4: the gate's rule, the allow-list it read, the counts and the
+        # dataset.licences record -- the records' words, not legal advice.
+        card["licence_gate"] = {
+            key: licence_gate_result[key] for key in ("rule", "allow_list", "not_claimed")}
+        card["licence_gate"]["counts"] = licence_gate_result["record"]["parameters"]["counts"]
+        card["licence_gate"]["record"] = licence_gate_result["record"]
+        card["not_claimed"].append(
+            "licence verdicts: the assets' own licence records against a stated allow-list, "
+            "not legal advice")
     return record_blocks(card, runs, tabular)
+
+
+def _card_label_conventions(runs: Sequence[Run], conventions: Optional[Dict[str, Any]]
+                            ) -> Optional[Dict[str, Any]]:
+    """The first manifest's label conventions, plus (W4) the land-cover
+    image's sentence when any run carries a land-cover legend."""
+    blocks = [r.manifest["landcover"] for r in runs if isinstance(r.manifest.get("landcover"), dict)]
+    if not blocks:
+        return conventions
+    out = dict(conventions or {})
+    image = blocks[0].get("image") or {}
+    out["landcover_image"] = (
+        f"frame_NNNN{image.get('suffix', '_landcover.png')}: {image.get('encoding')}; "
+        f"{image.get('method')}; {image.get('cell_rule')}; the legend (code, key, title, "
+        f"taxonomy word) is each run's manifest landcover.legend; the aggregates "
+        f"building:all and vegetation:all take landcover_bbox_2d from it")
+    return out
 
 
 def record_blocks(card: Dict[str, Any], runs: Sequence[Run],
@@ -1771,7 +1924,15 @@ def render_card(card: Dict[str, Any]) -> str:
     for entry in card["licences"]:
         lines.append(f"- {entry['kind']} `{entry['asset']}`: {entry['licence'] or 'unknown'}"
                      + (f" ({entry['note']})" if entry.get("note") else "")
-                     + f" -- {len(entry['runs'])} run(s)")
+                     + f" -- {len(entry['runs'])} run(s)"
+                     + (f"; verdict **{entry['verdict']}**" if entry.get("verdict") else "")
+                     + (f" ({entry['reason']})" if entry.get("verdict") and entry.get("reason")
+                        else "")
+                     + (f"; {'; '.join(entry['obligations'])}" if entry.get("obligations")
+                        else ""))
+    if card.get("licence_gate"):
+        lines.append(f"- the gate: {card['licence_gate']['rule']}; the verdicts are the "
+                     f"records' words, not legal advice")
     lines += ["", "## Conventions", ""]
     for key in ("coco_conventions", "kitti_conventions", "yolo_conventions", "voc_conventions"):
         for name, text in card[key].items():
@@ -1801,6 +1962,9 @@ def export(paths: Sequence, out, fmt, fractions=DEFAULT_FRACTIONS,
     names, _ = dataset_taxonomy(samples)            # refuses a mixed class list first
     refuse_classes_outside_taxonomy(samples, names)  # ...and a stray class, before any file
     labels_shipped = refuse_unverified_labels(samples, formats)
+    # W4: the per-asset licence gate -- a refused asset refuses by name
+    # here, before the output directory or any file exists.
+    gate_result = licence_gate(runs, samples, labels_only, labels_shipped)
     splits = assign_splits(samples, fractions, seed)
     table = None
     if tabular:
@@ -1822,7 +1986,8 @@ def export(paths: Sequence, out, fmt, fractions=DEFAULT_FRACTIONS,
             counts = WRITERS[name](samples, target, splits)
     card = dataset_card(runs, samples, splits, counts, ",".join(formats), fractions,
                         seed, image, labels_only, formats=formats,
-                        labels_shipped=labels_shipped, tabular=table)
+                        labels_shipped=labels_shipped, tabular=table,
+                        licence_gate_result=gate_result)
     (out / CARD_JSON).write_text(json.dumps(card, indent=1), encoding="utf-8")
     (out / CARD_MD).write_text(render_card(card), encoding="utf-8")
     return card

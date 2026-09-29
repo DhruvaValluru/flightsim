@@ -994,7 +994,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		       TEXT("-scenario=<run-card.json> -frames=<out-dir> [-fps=5] [-labels] [-linear] [-deterministic] "
 		            "[-passes=normal,velocity,albedo] [-width=960] [-height=540] "
 		            "[-calibration] [-sun-lux=<lux>] [-accumulate=<K>] [-velocity-check] "
-		            "[-normal-source=scs|material]"));
+		            "[-normal-source=scs|material] [-scene=<scene document>]"));
 		return 1;
 	}
 	double FramesPerSecond = 5.0;
@@ -1141,6 +1141,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// approximated classification for the real locations.
 	FString ImagerySidecar;
 	FParse::Value(*Params, TEXT("imagery="), ImagerySidecar);
+	// W5: -scene=<scene document> (scripts/ue_build_scene.py): the Landscape
+	// scene level in place of the procedural terrain, matched against the
+	// card's world block at load (FlightSimVisualScene LoadSceneLevel). Absent
+	// = the procedural route, byte-for-byte the previous one.
+	FString ScenePath;
+	FParse::Value(*Params, TEXT("scene="), ScenePath);
 	double ExposureBias = 11.0;
 	FParse::Value(*Params, TEXT("exposure-bias="), ExposureBias);
 	// -- Phase 2 Look lane PROBE flags (contracts §5.4, §10) ---------------
@@ -1275,6 +1281,28 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			bLookAerosol = CardLook->TryGetNumberField(TEXT("aerosol"), LookAerosol);
 		}
 	}
+	// W5: the card as JSON for the world engine side -- its world block (the
+	// scene is matched against it), its look block (the moon, the stars, the
+	// rain, the drift), its latitude (the starfield's pole). A card with
+	// neither block and no -scene= renders byte-identically to before.
+	TSharedPtr<FJsonObject> WorldCardRoot;
+	{
+		FString WorldCardText;
+		if (FFileHelper::LoadFileToString(WorldCardText, *ScenarioPath))
+		{
+			const TSharedRef<TJsonReader<>> WorldReader = TJsonReaderFactory<>::Create(WorldCardText);
+			FJsonSerializer::Deserialize(WorldReader, WorldCardRoot);
+		}
+	}
+	const bool bWorldAsked = !ScenePath.IsEmpty() ||
+		(WorldCardRoot.IsValid() && (WorldCardRoot->HasField(TEXT("world")) ||
+		                             WorldCardRoot->HasField(TEXT("look"))));
+	if (!ScenePath.IsEmpty() && !(bVisual && bGeorefTerrain))
+	{
+		return Fail(FString::Printf(
+			TEXT("world.scene_missing: -scene=%s loads a Landscape into the georeferenced visual ")
+			TEXT("scene; pass -Visual -GeorefTerrain (the void tier has no world)"), *ScenePath));
+	}
 	TArray<FString> LookProbeOverrides;
 	// S4: the sun in lux (0 = the unitless 8.0 sun every Gate 6 clause was
 	// tuned on) and where the number came from.
@@ -1404,6 +1432,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		SceneOptions.bMoonRequested = bMoonFlag;
 		if (bStarsFlag) { LookProbeOverrides.Add(TEXT("stars")); }
 		if (bMoonFlag) { LookProbeOverrides.Add(TEXT("moon")); }
+		// W5: the scene level, the card the world is matched against and
+		// drawn from, and where the cached star catalogue lives (the repo's
+		// assets/stars, one level above the project).
+		SceneOptions.SceneDocumentPath = ScenePath;
+		SceneOptions.Card = WorldCardRoot;
+		SceneOptions.StarCataloguePath = FPaths::ConvertRelativePathToFull(
+			FPaths::Combine(FPaths::ProjectDir(), TEXT(".."), TEXT("assets"), TEXT("stars"),
+			                TEXT("bsc5-short.json")));
 		if (bGeorefTerrain)
 		{
 			SceneOptions.bGeoreferenced = true;
@@ -2039,6 +2075,29 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Capture->HiddenActors.Add(Scenario.Aircraft);
 	}
 	Capture->RegisterComponent();
+	// W5: the rain streaks, on the BEAUTY capture only (the label captures
+	// below never receive a look blendable), for this camera's streak on the
+	// card (cameras[N].camera_id under consume-poses; the card's only streak
+	// otherwise). A card without a rain rate adds nothing.
+	if (bVisual)
+	{
+		FString RainCameraId;
+		const TArray<TSharedPtr<FJsonValue>>* RainCameras = nullptr;
+		if (bConsumePoses && WorldCardRoot.IsValid() &&
+		    WorldCardRoot->TryGetArrayField(TEXT("cameras"), RainCameras) && RainCameras != nullptr &&
+		    RainCameras->IsValidIndex(ConsumedCameraIndex))
+		{
+			const TSharedPtr<FJsonObject> RainCamera = (*RainCameras)[ConsumedCameraIndex]->AsObject();
+			if (RainCamera.IsValid())
+			{
+				RainCamera->TryGetStringField(TEXT("camera_id"), RainCameraId);
+			}
+		}
+		if (!VisualScene.ApplyRainToBeauty(Capture, RainCameraId, Error))
+		{
+			return Fail(Error);
+		}
+	}
 
 	// -- Phase 2 labels (packages B + C, contracts §1): the ID pass -------
 	// The instance mask is an ID IMAGE from the Custom Depth Stencil: every

@@ -35,6 +35,33 @@
 // cloud drift per tick (recorded, not applied), no sea state, no foliage.
 // UNCOMPILED here (no engine in the build container); the first Windows
 // build verifies.
+//
+// W5 (the world engine side, docs/ADVANCEMENTS_BLUEPRINT.md section 4;
+// UNCOMPILED here, pinned by tests/test_ue_world_source.py, verified by the
+// first Windows build):
+//
+//  * -scene=<scene document> (scripts/ue_build_scene.py): the Landscape
+//    scene level, built in the editor by FlightSimBridgeEditor's
+//    ImportLandscape from W1's import manifest, is loaded into the
+//    georeferenced world IN PLACE of the procedural terrain, at the
+//    engine position of the bake's south-west sample. The Landscape
+//    actor's sha256 tag must equal the card's world.terrain_sha256 (and the
+//    bake's own digest); the scene level and the land-cover layers must be
+//    the card's; the georeferencing's axes must be the ones the scene was
+//    built for. Anything else is refused world.scene_stale by name; a
+//    scene that cannot be loaded at all world.scene_missing.
+//  * the moon: a SECOND directional light, AtmosphereSunLightIndex 1, in
+//    lux, from the card's look.night (refused look.moon / night.sun_units);
+//  * the starfield: a sphere drawn with M_Starfield from the card's
+//    stars_mode (the cached BSC5, its sha256 checked, or the procedural
+//    law; refused look.stars), hidden from every label capture;
+//  * rain: the M_RainStreaks blendable on the BEAUTY capture only, never a
+//    label capture (refused look.precipitation_particles);
+//  * cloud drift: the cloud material's wind offset advanced per tick from
+//    the card's look.cloud_drift (refused look.cloud_drift_parameter);
+//  * world_applied{landscape, imagery, land_cover, vegetation, buildings,
+//    runway, night, precipitation, cloud_drift, materials} for render.json,
+//    graded by core/capture/verify.py check.world_record where present.
 
 #pragma once
 
@@ -45,12 +72,58 @@
 class AActor;
 class ADirectionalLight;
 class AGeoReferencingSystem;
+class ALandscapeProxy;
+class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UProceduralMeshComponent;
 class USceneCaptureComponent2D;
 class USkyAtmosphereComponent;
+class UTexture;
+class UTexture2D;
 class UVolumetricCloudComponent;
 class UWorld;
+
+// W5: the actor tags a scene level carries. FlightSimBridgeEditor's
+// ImportLandscape writes the terrain pair, scripts/ue_build_scene.py the
+// rest (its TAG_* constants, pinned equal by tests/test_ue_world_source.py);
+// the render reads them and nothing else identifies a scene actor.
+namespace FlightSimWorld
+{
+	// The Landscape actor of a scene level.
+	inline constexpr const TCHAR* TerrainTag = TEXT("FlightSim.Terrain");
+	// "FlightSim.TerrainSha256=<the bake's sha256>": the digest the Landscape
+	// was imported from (W1's manifest bake.sha256, the bake sidecar's own).
+	inline constexpr const TCHAR* TerrainSha256TagPrefix = TEXT("FlightSim.TerrainSha256=");
+	// The actors whose primitives carry the card's vegetation:all /
+	// building:all int_id in the ID pass (the 8-bit stencil's aggregates).
+	inline constexpr const TCHAR* VegetationTag = TEXT("FlightSim.vegetation");
+	inline constexpr const TCHAR* BuildingTag = TEXT("FlightSim.building");
+	// The runway plane and its lights: ground, stencilled as the terrain.
+	inline constexpr const TCHAR* RunwayTag = TEXT("FlightSim.runway");
+	// The object ids the two aggregate tags answer to (core/capture/objects.py).
+	inline constexpr const TCHAR* VegetationObjectId = TEXT("vegetation:all");
+	inline constexpr const TCHAR* BuildingObjectId = TEXT("building:all");
+}
+
+// W5: the land-cover ID pass's registration, measured at scene load (never
+// assumed): the engine position of the bake grid's north-west cell and the
+// signed engine step of one cell east (X) and one row south (Y), both
+// through the georeferencing system, so M_LandcoverID maps a pixel's world
+// position to the class-code raster cell exactly as the verifier's own
+// unprojection maps it to the bake's affine.
+struct FFlightSimLandcoverPass
+{
+	bool bReady = false;
+	UTexture* ClassMap = nullptr;
+	FString ClassMapAsset;
+	FString ClassMapSha256;
+	FVector OriginCm = FVector::ZeroVector;    // the NW cell (row 0, col 0), engine cm
+	double CellXCm = 0.0;                      // one column east, engine X cm
+	double CellYCm = 0.0;                      // one row south, engine Y cm (signed)
+	double SkewCm = 0.0;                       // the cross terms, recorded
+	int32 GridWidth = 0;
+	int32 GridHeight = 0;
+};
 
 // One cloud layer as the card's look block states it
 // (core/scene/weather_visuals.py cloud_layers: {cover, base_m, top_m}).
@@ -143,6 +216,21 @@ struct FFlightSimVisualSceneOptions
 	// Triangle budget for the georeferenced terrain (contracts §10: native
 	// posting up to a STATED budget). The stride is the smallest that fits.
 	int32 TerrainTriangleBudget = 4000000;
+
+	// -- W5: the world engine side ------------------------------------------
+	// -scene=<scene document> (scripts/ue_build_scene.py writes it beside the
+	// bake): the Landscape scene level loaded in place of the procedural
+	// terrain. Empty = the procedural route, byte-identical to before.
+	FString SceneDocumentPath;
+	// The run card as parsed JSON: its world block (terrain_sha256,
+	// scene_level, layers[]) is what the scene is matched against at load,
+	// its look block (night, precipitation, cloud_drift) what the world look
+	// draws, its latitude_deg what the starfield's pole is tilted by. Null =
+	// no card-driven world look (every W5 row recorded as not asked).
+	TSharedPtr<FJsonObject> Card;
+	// Where the cached star catalogue lives (assets/stars/bsc5-short.json);
+	// only read for stars_mode catalogue.
+	FString StarCataloguePath;
 };
 
 class FLIGHTSIMBRIDGE_API FFlightSimVisualScene
@@ -218,7 +306,88 @@ public:
 	// that it was recorded and NOT applied and why. Valid after Build().
 	TSharedPtr<FJsonObject> LookApplied;
 
+	// -- W5: the world engine side ------------------------------------------
+	// The card's look rows the world look draws: the moon (the second
+	// directional light), the starfield sphere and the cloud drift; refused by
+	// name (look.moon, night.sun_units, look.stars, look.cloud_drift_parameter)
+	// when they cannot be drawn exactly. Called by Build after the clouds.
+	bool BuildWorldLook(UWorld* World, const FFlightSimVisualSceneOptions& Options,
+	                    FString& Error);
+
+	// The rain: M_RainStreaks as a post-process blendable on the BEAUTY
+	// capture only (the label captures never see it: their ConfigureLabelCapture
+	// adds no blendable of the look), streak length and direction from the
+	// card's look.precipitation.streak_px[CameraId]. A card without a rain
+	// rate adds nothing. Refused look.precipitation_particles when the
+	// material is absent or the card carries no streak for this camera.
+	bool ApplyRainToBeauty(USceneCaptureComponent2D* Beauty, const FString& CameraId,
+	                       FString& Error);
+
+	// Per tick, before the captures: the cloud material's wind offset at the
+	// FDM's own time (the drift vector parameter), and the rain streaks'
+	// phase. Deterministic in TimeSeconds (Gate 10-R).
+	void AdvanceWorld(double TimeSeconds);
+
+	// The moon light's rotation from the card's elevation and COMPASS azimuth:
+	// the sun's convention (core/scenario/randomization.py engine_sun_azimuth:
+	// the yaw toward a compass bearing b is 90 - b; the light travels 180
+	// degrees from it), so FRotator(-elevation, 270 - azimuth, 0).
+	static FRotator MoonRotation(double ElevationDeg, double CompassAzimuthDeg);
+
+	// The cloud offset after Seconds of drift at Mps FROM FromDeg (the
+	// meteorological direction): downwind, metres, engine X east / Y north.
+	static FVector CloudDriftOffsetMetres(double Mps, double FromDeg, double Seconds);
+
+	// The starfield sphere's orientation: local Z the celestial pole (tilted
+	// to the latitude), local X the direction of right ascension 0h at the
+	// local sidereal angle, in the engine frame X east / Y north / Z up.
+	static FQuat StarfieldRotation(double LatitudeDeg, double LocalSiderealDeg);
+
+	// Everything the world look and the scene level applied, for render.json
+	// world_applied (the ten keys; a row the card did not ask for says so).
+	TSharedPtr<FJsonObject> WorldApplied;
+	// Actors the label captures must not see (the starfield sphere): the
+	// label passes are byte-identical with the world look on and off.
+	TArray<AActor*> BeautyOnlyActors;
+	// The scene level's Landscape (null on the procedural route).
+	ALandscapeProxy* SceneLandscape = nullptr;
+	ADirectionalLight* Moon = nullptr;
+	AActor* Starfield = nullptr;
+	// The land-cover ID pass's registration (bReady only on a scene with a
+	// class map).
+	FFlightSimLandcoverPass Landcover;
+	// The scene document's layers [{code, key, sha256}] as loaded.
+	TArray<TSharedPtr<FJsonValue>> SceneLayers;
+	// Components the scene level tagged, counted at load (the stencil loop
+	// gives them their aggregate ids).
+	int32 VegetationComponents = 0;
+	int32 VegetationInstances = 0;
+	int32 PcgComponents = 0;
+	int32 BuildingComponents = 0;
+	int32 RunwayComponents = 0;
+	// The card's look.precipitation row (null without a rain rate).
+	TSharedPtr<FJsonObject> CardPrecipitation;
+
 private:
+	// W5: the scene level in place of the procedural terrain (see the file
+	// comment). Called by Build on the georeferenced route when the options
+	// carry a scene document.
+	bool LoadSceneLevel(UWorld* World, const FFlightSimVisualSceneOptions& Options,
+	                    FString& Error);
+	// W5: the transient star texture for the sphere, from the catalogue or the
+	// procedural law; returns the star count drawn.
+	UTexture2D* BuildStarTexture(const FString& Mode, const FFlightSimVisualSceneOptions& Options,
+	                             int32& StarCount, FString& Source, FString& Error);
+	// W5: the cloud material instance and its drift parameter (NAME_None when
+	// the material exposes none), kept for AdvanceWorld.
+	UMaterialInstanceDynamic* CloudMaterialInstance = nullptr;
+	FName CloudDriftParameter;
+	double DriftMps = 0.0;
+	double DriftFromDeg = 0.0;
+	UMaterialInstanceDynamic* RainInstance = nullptr;
+	// W5: the scene document (-scene=), parsed once in Build.
+	TSharedPtr<FJsonObject> SceneDocument;
+
 	bool BuildTerrainInstance(UWorld* World, const FString& Name,
 	                          const FVector2D& OriginMetres, FString& Error);
 	bool BuildGeoreferencedTerrain(UWorld* World,

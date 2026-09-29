@@ -6500,6 +6500,196 @@ def verify_runway_vs_geometry(manifest: Dict, run_dir=None) -> Check:
                                       "mask: the drape is a Windows step)")
 
 
+# -- W4: the land-cover image against the bake's class grid ----------------------
+#
+# The checker's OWN unprojection (this module's rotation and pinhole; the
+# producer, core/capture/labels.py, is not imported): every pixel with a
+# finite positive depth, through its centre, carried back along its ray,
+# placed in the frame's projected CRS and looked up in the class map the
+# manifest names (its sha256 held to the manifest's), cell (row, col) =
+# (floor((origin_y - y) / cell), floor((x - origin_x) / cell)); nodata (0)
+# for sky, off the bake, and the ID image's aircraft pixels.
+
+#: The share of a frame's labelled pixels (labelled in either image) on
+#: which the written image and the checker's must agree, and the share of
+#: the checker's labelled pixels the engine's land-cover ID pass (W5) must
+#: agree with where a bundle declares one (the blueprint's clause).
+LANDCOVER_AGREEMENT_MIN = 0.95
+#: The land-cover image's nodata code.
+LANDCOVER_NODATA = 0
+#: The render.json record key naming the engine's land-cover ID pass.
+LANDCOVER_ENGINE_KEY = "landcover_png"
+FAIL_LANDCOVER = "check.landcover_vs_geometry"
+
+
+def _own_landcover(record: Dict, depth, grid, codes, origin, exclude=None):
+    """The checker's land-cover image of one frame (see the section note)."""
+    import numpy as np
+
+    forward, right, up = axes_from_quat(record["quaternion_wxyz"])
+    cx, cy = (float(v) for v in record["principal_point_px"])
+    fx, fy = float(record["fx_px"]), float(record["fy_px"])
+    height, width = depth.shape
+    rows, cols = np.mgrid[0:height, 0:width]
+    z = np.asarray(depth, dtype=np.float64)
+    finite = np.isfinite(z) & (z > 0.0)
+    z = np.where(finite, z, 0.0)
+    d = (cols + 0.5 - cx) / fx
+    e = (rows + 0.5 - cy) / fy
+    north = float(record["position_north_m"]) + z * (forward[0] + d * right[0] - e * up[0])
+    east = float(record["position_east_m"]) + z * (forward[1] + d * right[1] - e * up[1])
+    gx, gy, cell, gw, gh = grid
+    col = np.floor((origin[0] + east - gx) / cell)
+    row = np.floor((gy - (origin[1] + north)) / cell)
+    inside = finite & (col >= 0) & (col < gw) & (row >= 0) & (row < gh)
+    out = np.zeros((height, width), dtype=np.int64)
+    out[inside] = codes[row[inside].astype(np.int64), col[inside].astype(np.int64)]
+    if exclude is not None:
+        out[exclude] = LANDCOVER_NODATA
+    return out
+
+
+@_reads_the_bundle
+def verify_landcover_vs_geometry(manifest: Dict, run_dir=None) -> Check:
+    """Each frame's land-cover image against the bake's class grid.
+
+    The manifest's ``landcover`` block names the class map (its sha256
+    held to the manifest's), the grid and the legend; each labelled
+    frame's ``labels.landcover`` names its image (its sha256 held to the
+    record's). Per frame with a depth in its bundle, the checker cuts its
+    own image by its own unprojection and the written one must agree on
+    at least LANDCOVER_AGREEMENT_MIN of the pixels labelled in either;
+    every code must be in the manifest's legend. Where the bundle also
+    declares the engine's land-cover ID pass (``labels.landcover_png``,
+    W5), it must agree with the checker's image on the same share of the
+    checker's labelled pixels. FAIL (check.landcover_vs_geometry) on a
+    class map or image that changed, a CRS or shape mismatch, a code off
+    the legend, or either agreement below the bound. NOT RUN without a
+    landcover block, its class map on this machine, a render bundle, or a
+    frame whose image sits beside a depth. What is NOT checked: that
+    WorldCover is right about the ground (its own 76.7 % accuracy), a
+    per-instance identity (none is claimed)."""
+    name = "landcover_vs_geometry"
+    block = manifest.get("landcover")
+    if not isinstance(block, dict):
+        return Check("landcover_vs_geometry", NOT_RUN,
+                     "the manifest names no land cover (no landcover block): nothing to "
+                     "carry the frames onto")
+    class_block = block.get("class_map") or {}
+    path = _world_file(class_block.get("file"), run_dir)
+    if path is None:
+        return Check(name, NOT_RUN, f"the class map {class_block.get('file')!r} is not on this "
+                                    f"machine: no grid to grade the land-cover images against")
+    digest = _world_sha256(path)
+    if digest != class_block.get("sha256"):
+        return Check(name, FAIL, f"{path.name}: sha256 {digest[:16]}... is not the manifest's "
+                                 f"{str(class_block.get('sha256'))[:16]}...: the land cover "
+                                 f"changed after the capture", failure=FAIL_LANDCOVER)
+    grid_block = block.get("grid") or {}
+    try:
+        grid = (float(grid_block["origin_x_m"]), float(grid_block["origin_y_m"]),
+                float(grid_block["cell_size_m"]), int(grid_block["width"]),
+                int(grid_block["height"]))
+        crs = str(grid_block["crs"])
+        legend = {int(entry["code"]) for entry in block["legend"]}
+    except (KeyError, TypeError, ValueError) as exc:
+        return Check(name, FAIL, f"the landcover block lacks what the unprojection needs "
+                                 f"({exc!r})", failure=FAIL_LANDCOVER)
+    if grid[2] <= 0.0:
+        return Check(name, FAIL, f"the grid's cell size {grid[2]!r} is not positive",
+                     failure=FAIL_LANDCOVER)
+    codes = _read_gray_png(path)
+    if codes is None:
+        return Check(name, NOT_RUN, "Pillow unavailable")
+    if codes.shape[:2] != (grid[4], grid[3]):
+        return Check(name, FAIL, f"{path.name} is {codes.shape[1]}x{codes.shape[0]}, the grid "
+                                 f"{grid[3]}x{grid[4]}", failure=FAIL_LANDCOVER)
+    origin = _frame_grid_origin(manifest)
+    if origin is None:
+        return Check(name, NOT_RUN, "the manifest declares no projected frame, so no surface "
+                                    "point can be placed on the grid")
+    if origin[0] != crs:
+        return Check(name, FAIL, f"the land cover's grid is in {crs}, the manifest's frame in "
+                                 f"{origin[0]}", failure=FAIL_LANDCOVER)
+    if not _engine_label_records(run_dir):
+        return Check(name, NOT_RUN, _no_bundle_reason())
+    import numpy as np
+
+    aircraft = [int(o["int_id"]) for o in _declared_objects(manifest)
+                if o.get("class") == "aircraft" and o.get("int_id") is not None]
+    frames = engine_frames = 0
+    worst, engine_worst = 1.0, 1.0
+    for record, camera, fname, engine, folder in _bundle_frames(manifest, run_dir):
+        written = (record.get("labels") or {}).get("landcover")
+        if not isinstance(written, dict) or not written.get("file"):
+            continue
+        labels = engine["labels"]
+        width, height = int(record["width_px"]), int(record["height_px"])
+        depth = _read_depth_metres(folder, labels, width, height)
+        if isinstance(depth, str):
+            continue
+        image_path = folder / str(written["file"])
+        if not image_path.is_file():
+            return Check(name, FAIL, f"{camera}/{fname}: the land-cover image {written['file']} "
+                                     f"the record names is not on disk", failure=FAIL_LANDCOVER)
+        if written.get("sha256") != _world_sha256(image_path):
+            return Check(name, FAIL, f"{camera}/{fname}: {image_path.name} is not the image the "
+                                     f"record's sha256 names", failure=FAIL_LANDCOVER)
+        image = _read_gray_png(image_path).astype(np.int64)
+        if image.shape != (height, width):
+            return Check(name, FAIL, f"{camera}/{fname}: {image_path.name} is {image.shape[1]}x"
+                                     f"{image.shape[0]}, the frame {width}x{height}",
+                         failure=FAIL_LANDCOVER)
+        stray = sorted(int(c) for c in np.unique(image) if int(c) not in legend)
+        if stray:
+            return Check(name, FAIL, f"{camera}/{fname}: codes {stray} are not in the manifest's "
+                                     f"legend", failure=FAIL_LANDCOVER)
+        exclude = None
+        if labels.get("mask") and aircraft:
+            mask = _read_gray_png(folder / str(labels["mask"]))
+            if mask is not None and mask.shape[:2] == (height, width):
+                exclude = np.isin(mask, aircraft)
+        own = _own_landcover(record, depth, grid, codes, origin[1:], exclude)
+        labelled = (own != LANDCOVER_NODATA) | (image != LANDCOVER_NODATA)
+        compared = int(np.count_nonzero(labelled))
+        agreed = int(np.count_nonzero(labelled & (own == image)))
+        fraction = (agreed / compared) if compared else 1.0
+        frames += 1
+        worst = min(worst, fraction)
+        if fraction < LANDCOVER_AGREEMENT_MIN:
+            return Check(name, FAIL,
+                         f"{camera}/{fname}: the land-cover image agrees with the checker's own "
+                         f"unprojection on {fraction:.1%} of {compared} labelled pixels (bound "
+                         f"{LANDCOVER_AGREEMENT_MIN:.0%})", failure=FAIL_LANDCOVER)
+        engine_file = labels.get(LANDCOVER_ENGINE_KEY)
+        if engine_file:
+            engine_image = _read_gray_png(folder / str(engine_file))
+            if engine_image is None or engine_image.shape[:2] != (height, width):
+                return Check(name, FAIL, f"{camera}/{fname}: the engine's land-cover pass "
+                                         f"{engine_file} is not a {width}x{height} image",
+                             failure=FAIL_LANDCOVER)
+            mine = own != LANDCOVER_NODATA
+            count = int(np.count_nonzero(mine))
+            share = (int(np.count_nonzero(mine & (engine_image.astype(np.int64) == own)))
+                     / count) if count else 1.0
+            engine_frames += 1
+            engine_worst = min(engine_worst, share)
+            if share < LANDCOVER_AGREEMENT_MIN:
+                return Check(name, FAIL,
+                             f"{camera}/{fname}: the engine's land-cover ID pass agrees with the "
+                             f"checker's image on {share:.1%} of {count} labelled pixels (bound "
+                             f"{LANDCOVER_AGREEMENT_MIN:.0%})", failure=FAIL_LANDCOVER)
+    if frames == 0:
+        return Check(name, NOT_RUN, "no labelled frame carries a land-cover image beside a depth")
+    return Check(name, PASS,
+                 f"{frames} land-cover image(s) agree with the checker's own unprojection onto "
+                 f"the class grid (worst {worst:.1%}; bound {LANDCOVER_AGREEMENT_MIN:.0%})"
+                 + (f"; the engine's land-cover ID pass agrees on {engine_frames} frame(s) "
+                    f"(worst {engine_worst:.1%})" if engine_frames else
+                    "; engine half NOT RUN (no bundle declares the land-cover ID pass: W5, a "
+                    "Windows step)"))
+
+
 # -- S2: the passes as data -- flow, disparity, points, amodal ------------------
 #
 # The derived passes (core/capture/passes.py; the amodal keys by
@@ -7739,6 +7929,9 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     # without their evidence, never a pass on absence.
     run("building_vs_footprint", verify_building_vs_footprint, manifest, run_dir)
     run("runway_vs_geometry", verify_runway_vs_geometry, manifest, run_dir)
+    # W4: each frame's land-cover image against the bake's class grid by the
+    # checker's own unprojection (and the engine's ID pass where declared).
+    run("landcover_vs_geometry", verify_landcover_vs_geometry, manifest, run_dir)
     # I6 (gap S3): the ground-truth passes -- NOT RUN without their files,
     # never a pass on absence.
     run("normals_vs_depth", verify_normals_vs_depth, manifest, run_dir)

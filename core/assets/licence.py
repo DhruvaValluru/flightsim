@@ -158,6 +158,7 @@ _ALIASES = {
     "CDLAPERMISSIVE2.0": "CDLA-Permissive-2.0",
     "ODBL1.0": "ODbL-1.0", "ODBL": "ODbL-1.0",
     "SYNTHETIC": SYNTHETIC, "OWN": OWN, "FLIGHTSIM": OWN,
+    "COPERNICUSDEMLICENCE": COPERNICUS_DEM, "COPERNICUSDEM": COPERNICUS_DEM,
 }
 
 NOT_CLAIMED = (
@@ -424,8 +425,8 @@ def run_assets(manifest: Dict[str, Any], config_dir: Optional[Path] = None
         out.extend(dict(r) for r in stated if isinstance(r, dict))
     else:
         scene = manifest.get("scene") or {}
-        document = (scene.get("land_cover") or {}).get("document") \
-            if isinstance(scene.get("land_cover"), dict) else None
+        document = (manifest.get("landcover") or {}).get("document") \
+            if isinstance(manifest.get("landcover"), dict) else None
         out.extend(scene_licence_records(
             {"terrain": scene.get("terrain"),
              "buildings_document": (scene.get("buildings") or {}).get("document")
@@ -467,20 +468,24 @@ def verdict_for(entry: Dict[str, Any], shipped: bool) -> Dict[str, Any]:
             obligations.append("attribution: " + (entry.get("attribution") or "as the licence states"))
         if allowed["share_alike"]:
             obligations.append(f"share-alike: the content drawn from it is under {spdx}")
-    refusal = reason = None
+    error: Optional[LicenceError] = None
     if entry.get("licence") is None:
-        refusal = "asset.licence"
-        reason = (f"{entry['asset']} has no licence record"
-                  + (f" ({entry['note']})" if entry.get("note") else ""))
+        error = LicenceError("asset.licence",
+                             f"{entry['asset']} has no licence record"
+                             + (f" ({entry['note']})" if entry.get("note") else ""))
     elif entry.get("ml_use") == "forbidden":
-        refusal = "aircraft.licence_noai" if aircraft else "asset.licence"
         reason = f"{entry['asset']} is under {entry['licence']}, which forbids machine-learning use"
+        error = (LicenceError("aircraft.licence_noai", reason) if aircraft
+                 else LicenceError("asset.licence", reason))
     elif allowed is None:
-        refusal = "aircraft.licence_dataset" if aircraft else "asset.licence"
         reason = (f"{entry['asset']} is under {entry['licence']}, which is not on the allow-list "
                   f"for distributing a dataset"
                   + (" (a GPL airframe renders internally and refuses export)"
                      if is_copyleft_code(spdx) else ""))
+        error = (LicenceError("aircraft.licence_dataset", reason) if aircraft
+                 else LicenceError("asset.licence", reason))
+    refusal = None if error is None else error.constraint
+    reason = None if error is None else error.message
     if not shipped:
         verdict = "not shipped"
     else:

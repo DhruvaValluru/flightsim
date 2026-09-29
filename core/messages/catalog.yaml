@@ -948,6 +948,22 @@ check.building_vs_footprint:
 check.runway_vs_geometry:
   sentence: "The threshold the checker finds in the runway's marking raster, projected into each frame on the runway's plane, sits on the runway's own threshold within the stated pixel residual."
 
+# -- W4: land-cover labels per frame and the per-asset licence gate ------------
+annotation.landcover:
+  sentence: "A frame's land-cover image cannot be made or trusted: the land-cover class map is missing or has changed since the capture, it is on another map projection than the scene, or it holds a class outside the legend."
+  hint: "Bake the land cover again beside the terrain and capture again, or capture the scene without land cover."
+check.landcover_vs_geometry:
+  sentence: "Each frame's land-cover image, cut again by the checker's own reading of the depth onto the land-cover grid, agrees with the written image, and with the engine's land-cover pass where one was rendered, on nearly every labelled pixel."
+aircraft.licence_dataset:
+  sentence: "An aircraft whose licence is not on the list of licences a dataset may be distributed under would be drawn in the exported pixels or label files; a GNU GPL aircraft renders for internal use only and refuses export."
+  hint: "Export the annotations without its pixels and label files, or fly an aircraft under a licence the list allows."
+aircraft.licence_noai:
+  sentence: "An aircraft or its paint scheme is under a licence that forbids machine-learning use, and the export would ship its drawn pixels or label files."
+  hint: "Export the annotations without its pixels and label files, or choose another aircraft or paint scheme."
+asset.licence:
+  sentence: "A scene asset the export would ship has no licence record, is under a licence that is not on the list a dataset may be distributed under, or forbids machine-learning use."
+  hint: "Record the asset's licence beside it, replace it with an asset under an allowed licence, or export without the content drawn from it."
+
 # -- S2: the passes as data -- flow, disparity, points, amodal ----------------
 sensing.stereo:
   sentence: "The stereo rig cannot be built: its baseline is not a positive number within the bound a rig may state, it names a side other than the right, or the right camera's name would be too long or already taken."

@@ -348,6 +348,86 @@ def _after_name(exc: Exception) -> str:
     return text[len(head):] if head != ": " and text.startswith(head) else text
 
 
+def _world_documents(spec, terrain_stem, landcover_json=None):
+    """W2's world, built for a capture (wired by W4): the runway's
+    flatten pad and its record (core/scene/runway.py; the flight then
+    flies over the PAD, the heights the host draws), and the buildings
+    document over the flown bake (core/scene/buildings.py; the vintage
+    fraction against the land cover's built-up class when the bake has
+    land cover). Returns ``{"terrain", "buildings_document",
+    "runway_document"}`` or ``{"violations": [...]}`` -- each refusal by
+    its own name, before any flight. A spec stating neither returns the
+    terrain unchanged and two Nones (absent-canonical)."""
+    from core.scenario.validate import Violation
+    from core.scene import runway as rw
+
+    out = {"terrain": terrain_stem, "buildings_document": None, "runway_document": None}
+    try:
+        runway = rw.RunwaySpec.from_block(getattr(spec, "runway", None))
+    except rw.RunwayError as exc:
+        return {"violations": [Violation(exc.constraint, exc.message)]}
+    key = getattr(getattr(spec, "scene", None), "buildings", None)
+    key = None if key is None else key.value
+    if runway is None and key is None:
+        return out
+    if not terrain_stem:
+        return {"violations": [Violation(
+            "runway.terrain_mismatch" if runway is not None else "scene.terrain",
+            ("the runway does not lie on any terrain: a flat scene has no bake to "
+             "flatten it into; state scene.terrain_source synthesised or baked"
+             if runway is not None else
+             "scene.buildings needs a terrain bake to seat its blocks on; a flat scene "
+             "has none (state scene.terrain_source synthesised or baked)"))]}
+    if runway is not None:
+        from core.terrain.glo30 import ensure_runway_pad
+        from core.terrain.heightfield import Heightfield
+
+        try:
+            pad_stem = ensure_runway_pad(terrain_stem, runway)
+        except rw.RunwayError as exc:
+            return {"violations": [Violation(exc.constraint, exc.message)]}
+        pad = Heightfield.read(pad_stem)
+        parent = Heightfield.read(Path(terrain_stem))
+        meta = json.loads(Path(pad_stem).with_suffix(".json").read_text(encoding="utf-8"))
+        statistics = ((meta.get("provenance") or {}).get("runway_pad") or {}).get("statistics")
+        raster, rects, counts = rw.markings_raster(runway)
+        measurement = rw.measure_markings(raster, rects)
+        png = rw.write_markings_png(raster, rw.markings_path_for(pad_stem))
+        lights, light_counts = rw.light_positions(runway)
+        document = rw.runway_document(
+            runway, rw.RunwayGeometry.for_spec(runway, pad.georeference.crs),
+            rw.markings_block(runway, png, counts, measurement),
+            {"counts": light_counts, "positions": lights},
+            {"key": pad.name, "stem": str(pad_stem), "sha256": pad.digest(),
+             "parent_stem": str(terrain_stem), "parent_sha256": parent.digest(),
+             "statistics": statistics or {}},
+            None, null_test_basis=("not measured by the capture: scripts/bake_runway.py "
+                                   "--null-test flies the pad against its parent"))
+        out["runway_document"] = str(rw.write_runway_document(
+            document, rw.document_path_for(pad_stem)))
+        out["terrain"] = str(pad_stem)
+    if key is not None:
+        from core.scene.buildings import BuildingsError, ensure_buildings_document
+
+        codes = None
+        if landcover_json is not None:
+            import numpy as np
+            from PIL import Image
+
+            document = json.loads(Path(landcover_json).read_text(encoding="utf-8"))
+            class_map = Path(landcover_json).parent / str(
+                (document.get("class_map") or {}).get("file", "class_map.png"))
+            if class_map.is_file():
+                with Image.open(class_map) as image:
+                    codes = np.asarray(image)
+        try:
+            out["buildings_document"] = str(ensure_buildings_document(
+                str(key), out["terrain"], built_codes=codes))
+        except BuildingsError as exc:
+            return {"violations": [Violation(exc.constraint, exc.message)]}
+    return out
+
+
 def _refuse(violations) -> int:
     print("REFUSED -- by name:")
     for v in violations:
@@ -738,17 +818,30 @@ def _run(args: argparse.Namespace) -> int:
               f"network; scene.terrain_source: {terrain_source}"
               f"{' + --synth-terrain' if args.synth_terrain else ''})")
     if terrain_stem:
+        # W1: the bake's land cover (scripts/bake_landcover.py), when baked,
+        # lets the runner infer the roughness of an unstated surface. Found
+        # beside the PARENT bake: a runway pad (below) shares its grid.
+        from core.terrain.landcover import scene_dir_for
+
+        candidate = scene_dir_for(Path(terrain_stem)) / "landcover.json"
+        landcover_json = candidate if candidate.is_file() else None
+    # W2 (wired by W4): the runway's pad and record, the buildings document;
+    # the flight flies over the pad when the spec states a runway.
+    world_documents = _world_documents(spec, terrain_stem, landcover_json)
+    if "violations" in world_documents:
+        return _refuse(world_documents["violations"])
+    terrain_stem = world_documents["terrain"]
+    if world_documents["runway_document"]:
+        print(f"runway: {world_documents['runway_document']} (the flight flies over the "
+              f"pad {terrain_stem})")
+    if world_documents["buildings_document"]:
+        print(f"buildings: {world_documents['buildings_document']}")
+    if terrain_stem:
         from core.terrain.ground import TerrainGround
         from core.terrain.heightfield import Heightfield
 
         heightfield = Heightfield.read(Path(terrain_stem))
         terrain_ground = TerrainGround(heightfield)
-        # W1: the bake's land cover (scripts/bake_landcover.py), when baked,
-        # lets the runner infer the roughness of an unstated surface.
-        from core.terrain.landcover import scene_dir_for
-
-        candidate = scene_dir_for(Path(terrain_stem)) / "landcover.json"
-        landcover_json = candidate if candidate.is_file() else None
 
     frame = SceneFrame.for_spec(spec, heightfield)
     tornado = _tornado_hazard_block(spec)
@@ -958,8 +1051,11 @@ def _run(args: argparse.Namespace) -> int:
         )
         from core.capture.poses import traffic_card_block
         from core.scenario.card import write_run_card
+        from core.scene.runway import world_card_block
 
-        objects = compose_objects(spec)
+        # W4: the land cover's aggregates ride in objects[] exactly as the
+        # manifest composes them (the same land-cover document decides).
+        objects = compose_objects(spec, landcover=landcover_json is not None)
         traffic_objs = [o for o in objects if o.role == "traffic"]
         traffic_blocks = []
         for entry, obj, track in zip(spec.traffic, traffic_objs, traffic_tracks):
@@ -989,7 +1085,16 @@ def _run(args: argparse.Namespace) -> int:
             randomization=randomization_card_block(spec),
             objects=objects_block(objects),
             taxonomy=taxonomy_classes(spec),
-            traffic=traffic_blocks)
+            traffic=traffic_blocks,
+            # W2 (wired by W4, absent-canonical): the world the host draws --
+            # the flown terrain, the buildings and runway documents with
+            # their sha256s -- only when the spec states either.
+            world=(world_card_block(terrain_stem,
+                                    heightfield.digest() if heightfield else None,
+                                    world_documents["buildings_document"],
+                                    world_documents["runway_document"])
+                   if (world_documents["buildings_document"]
+                       or world_documents["runway_document"]) else None))
 
     solve_source = SOLVE_PRE_RUN
     solve_digest = result.output_digest
@@ -1092,7 +1197,13 @@ def _run(args: argparse.Namespace) -> int:
         output_digest=solve_digest,
         solve_source=solve_source,
         scene={"key": "terrain" if heightfield else "flat",
-               "terrain": terrain_stem},
+               "terrain": terrain_stem,
+               # W2 / W4 (absent-canonical): the world documents and the
+               # land cover (found beside the parent bake), only when present.
+               **{name: str(value) for name, value in (
+                   ("buildings_document", world_documents["buildings_document"]),
+                   ("runway_document", world_documents["runway_document"]),
+                   ("landcover_document", landcover_json)) if value}},
         terrain_sha256=heightfield.digest() if heightfield else None,
         # The cameras that actually flew (default_cameras for a
         # camera-less spec); the digests stay the spec's own.
