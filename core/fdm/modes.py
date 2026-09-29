@@ -100,6 +100,8 @@ AIRFRAME_CLASS: Dict[str, Dict[str, str]] = {
                                        "transport); B747 MTOW about 380 t -- unverified here"},
     "p51d": {"class": "IV", "source": "MIL-F-8785C 3.1.1 Class IV, high-manoeuvrability "
                                       "(fighter); P-51D -- unverified here"},
+    "A4": {"class": "IV", "source": "MIL-F-8785C 3.1.1 Class IV, high-manoeuvrability "
+                                    "(attack / fighter); A-4 Skyhawk -- unverified here"},
     "f16": {"class": "IV", "source": "MIL-F-8785C 3.1.1 Class IV, high-manoeuvrability "
                                      "(fighter); F-16 -- unverified here"},
 }

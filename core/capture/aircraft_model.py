@@ -41,6 +41,10 @@ AIRFRAMES: Dict[str, Dict[str, float]] = {
              "sweep": 0.0, "high_wing": True},
     "p51d": {"length_m": 9.8, "span_m": 11.3, "engines": 0,
              "sweep": 0.08, "high_wing": False},
+    # A-4: one engine inside the fuselage (no nacelles), 33 deg leading-edge
+    # sweep, low delta-like wing; dimensions as assets/aircraft_config/A4.json.
+    "A4": {"length_m": 12.27, "span_m": 8.38, "engines": 0,
+           "sweep": 0.58, "high_wing": False},
 }
 FALLBACK = "B747"
 
