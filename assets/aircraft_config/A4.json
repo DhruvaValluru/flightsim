@@ -6,17 +6,12 @@
     "A-4",
     "A-4 (JSBSim)"
   ],
-  "mesh_airframe": "McDonnell Douglas A-4E/F/G/H/K Skyhawk (the owner's own FSX / P3D model, 2020; converted locally, never committed)",
+  "mesh_airframe": "none: the A-4 is physics-only (no licensed model)",
   "source_dir": "../aircraft_src/A4",
   "license": {
-    "license_name": "All rights reserved; used with the author's permission",
-    "file": "NOTICE.txt",
-    "attribution": "A-4 Skyhawk (A-4E/F/G/H/K) 3D model and textures © 2020 Dhruva Valluru. All rights reserved. Used in this dataset with the author's permission.",
-    "author": "Dhruva Valluru (the project owner)",
-    "permission": "the owner, as the model's author and copyright holder, authorised converting the model, using rendered images of it in the public dataset, and using it in this project (2026-09-29); the downloaded package ships no licence text of its own",
-    "not_redistributed": "the model, its textures and the paint kit are never committed to this public repository (assets/aircraft_src/ and assets/generated/ are gitignored)",
-    "trademarks": "the paint kit's liveries carry real insignia (US Navy, Blue Angels, Top Gun, Israeli and Australian roundels); the Blue Angels name and emblem are US Navy trademarks -- research renders only, check before any commercial use",
-    "unavailable": "the licence is settled, but the geometry is not yet here: the package ships only as FSX / P3D Windows installers (no loose .mdl, no editable source), so nothing can be converted until the model is exported to OBJ / FBX (from the author's original source, or the installed .mdl via ModelConverterX on Windows) and placed with NOTICE.txt (the attribution line as its first line) in assets/aircraft_src/A4/. Physics-only until then."
+    "license_name": "none usable",
+    "file": null,
+    "unavailable": "no licensed A-4 model. The FSX / P3D A-4E/F/G/H/K package the owner downloaded is by Dino Cattaneo / IndiaFoxtEcho Visual Simulations (c) 2019 (its flight manual's credits; every aircraft.cfg says ui_createdby=\"IndiaFoxtEcho Visual Simulations\"), its visual model is partly based on MeshFactory meshes bought through TurboSquid, and its terms read: 'Other than for personal uses of the purchaser, copying, modifying or redistributing this software is illegal.' Converting it and rendering it into a public dataset is neither, so it is not used; an earlier commit that credited the owner as its author was wrong and is corrected here. Physics-only until a model whose licence allows it exists (written permission from IndiaFoxtEcho, or an openly licensed A-4 model)."
   },
   "parts": [],
   "labels": {

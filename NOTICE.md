@@ -7,11 +7,6 @@ gitignored), and every render manifest carries its source and licence.
 
 ## Aircraft models
 
-- **A-4 Skyhawk (A-4E/F/G/H/K)**: A-4 Skyhawk (A-4E/F/G/H/K) 3D model and
-  textures © 2020 Dhruva Valluru. All rights reserved. Used in this dataset
-  with the author's permission. Liveries carry real-world insignia; the Blue
-  Angels name and emblem are US Navy trademarks (research use).
-  Config: `assets/aircraft_config/A4.json`.
 - **c172p, A320, B747, DHC-6, P-51D**: FlightGear models under the licence
   each upstream repository ships, pinned by commit in
   `assets/aircraft_config/<name>.json` (an airframe whose upstream ships no
