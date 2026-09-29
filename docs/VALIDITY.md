@@ -1031,15 +1031,32 @@ any shipped profile describes a real camera (none does -- a calibrated
 one must cite its calibration), radiometric calibration of any kind
 (the linear input is the 8-bit sRGB render inverted, a stated
 approximation until a `-linear` EXR pass is verified on the engine),
-chromatic aberration, intra-exposure motion blur, demosaicing or flare.
-§2.5 stands: none of this is EO/IR sensor fidelity, and nothing here is
-traceable as sensor imagery.
+chromatic aberration, demosaicing or flare. S1 adds, each measured on
+synthetic frames and pinned (docs/SENSING.md): a diffraction x Gaussian PSF
+applied as one shift-invariant kernel (the e-SFR MTF50 within 1.3 % of the
+analytic one; sub-pixel kernels alias and say so), a velocity-line motion
+blur over the shutter (within 0.25 px of |f| t_exp / dt for streaks of 2 px
+and longer; wider below), and a STATED radiance path: one unit of the
+linear frame is 1.2 x A x 2^(EV100 - EC) cd/m^2, `predicted` until the
+engine's grey card (S4) measures it -- the constant has no traceable chain
+to a reference luminance, and until the sun is set in lux the chain is
+refused by name (`sensing.exposure_units`: an 18 % card under today's 8.0
+sun reads 1.5e-5 of full scale). The band model is a declared proxy over
+three sRGB / Rec.709 channels through cached CIE and ASTM tables, not a
+spectral rendering. §2.5 stands: none of this is EO/IR sensor fidelity,
+and nothing here is traceable as sensor imagery.
 
 ### 2.5 No EO/IR sensor fidelity exists
 
 None has been built. Unreal has no native EO/IR simulation and no MISB/KLV
 support. A post-process "thermal look" would be visually plausible and **not
 radiometrically calibrated**. Nothing here is traceable as sensor imagery.
+S1 states a photometric radiance path (luminance per unit of the linear frame
+under the manual EV100, a band proxy through cached CIE 1924 V(lambda) and
+ASTM G173-03 tables, the sun in lux from a clear-sky model) and records its
+status per frame as `predicted`, `measured` (only after S4's grey card) or
+`refused` (the engine's sun is not in lux); it is a stated proxy with a
+stated gap, not a calibration, and the IR proxy (S3) has not been built.
 
 ---
 

@@ -138,3 +138,23 @@ def test_the_engine_pins_the_bias_to_zero_on_the_physical_path():
     assert "AutoExposureBias = 0.0f" in text
     assert "AutoExposureMethod = EAutoExposureMethod::AEM_Manual" in text
     assert "CameraShutterSpeed = static_cast<float>(1.0 / ShutterSeconds)" in text
+
+
+# -- S1: what the EV100 is worth in candela per square metre --------------------
+
+
+def test_the_daylight_ev100_means_29952_cd_per_m2_per_unit_with_the_lens_attenuation():
+    """The chain both hosts share, continued: 1.2 x 0.78 x 2^EV100 is the
+    luminance one unit of the linear frame stands for. At the daylight
+    triple that is 29 952 cd/m^2 (38 400 without A); the engine's 8.0 sun
+    puts an 18 % card at 1.5e-5 of full scale, which is the defect
+    sensing.exposure_units names until the sun is set in lux."""
+    from core.capture import radiometry
+
+    value = ev100(8.0, 1.0 / 500.0, 100.0)
+    assert radiometry.luminance_per_unit(value) == pytest.approx(1.2 * 0.78 * 2 ** value, rel=1e-12)
+    assert radiometry.luminance_per_unit(value) == pytest.approx(29951.6, abs=0.5)
+    assert radiometry.luminance_per_unit(value, lens_attenuation=1.0) == pytest.approx(38400.0, rel=1e-9)
+    assert radiometry.grey_card_prediction(8.0, value) < 2e-5
+    with pytest.raises(radiometry.RadiometryError, match="sensing.exposure_units"):
+        radiometry.exposure_units_check({"sun": {"intensity": 8.0}}, value)

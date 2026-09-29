@@ -253,6 +253,35 @@ def icing_schedule_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]
     return block
 
 
+def wake_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
+    """The ``wake`` block for a spec (P7), or None when no generator is
+    stated (no block: the host places no generator and writes nothing).
+    Built exactly as the headless run builds it: the spec's environment
+    stack prepared on an FDM at the initial conditions (the atmosphere
+    first, then the density, the own span and the true airspeed JSBSim
+    reports), so Gamma_0, b_0, r_c, the decay, the geometry and the five
+    selftest vectors the host port must reproduce to 1e-9 are the run's
+    own numbers. Keys in the fixed order ``core.environment.wake.CARD_KEYS``;
+    the host refuses ``card.wake`` otherwise."""
+    from core.environment.wake import CARD_KEYS, SELFTEST_COUNT, SELFTEST_KEYS, WakeVortexPair
+    from core.scenario.runner import environment_for, fdm_at_initial_conditions
+
+    stack = environment_for(spec)
+    providers = [p for p in stack.gust if isinstance(p, WakeVortexPair)]
+    if not providers:
+        return None
+    fdm = fdm_at_initial_conditions(spec)
+    prepared = stack.prepare(fdm)        # Gamma_0 from the run's own pre-trim numbers
+    assert providers[0].name in prepared
+    block = providers[0].card_block()
+    if tuple(block) != CARD_KEYS:
+        raise RuntimeError(f"wake card keys {list(block)} are not the fixed order {list(CARD_KEYS)}")
+    vectors = block["selftest"]
+    if len(vectors) != SELFTEST_COUNT or any(tuple(v) != SELFTEST_KEYS for v in vectors):
+        raise RuntimeError(f"wake selftest is not {SELFTEST_COUNT} vectors of {list(SELFTEST_KEYS)}")
+    return block
+
+
 def write_run_card(spec: ScenarioSpec, path: Path,
                    control_inputs: Sequence[Dict[str, float]] = (),
                    duration_s: Optional[float] = None,
@@ -402,6 +431,13 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # step of its run clock into the derived airframe (P9 loads it)
         # and refuses card.icing_schedule otherwise.
         card["icing_schedule"] = icing_schedule
+    wake = wake_card_block(spec)
+    if wake is not None:
+        # P7: the generator's pair -- Gamma_0, b_0, r_c, the decay, the
+        # geometry and the selftest vectors; the host's port evaluates
+        # the same field, checks the vectors to 1e-9 and refuses
+        # card.wake otherwise (P9's Windows step).
+        card["wake"] = wake
     if reference_speeds:
         # Display-only (the HUD/panel stall-margin marks): the MODEL's own
         # measured Vs and CLmax with their basis string (§2.4), so the marks

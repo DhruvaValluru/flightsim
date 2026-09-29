@@ -1,6 +1,6 @@
 """The spec-8 blocks: ``scene``, ``taxonomy``, ``traffic[]``, and the
 physics additions' ``atmosphere``, ``datum``, ``turbulence_model``,
-``wind_profile`` and ``loading``.
+``wind_profile``, ``loading`` and ``wake``.
 
 Phase 2 (contracts §2.1, §2.2, §12) adds three top-level blocks to the
 scenario spec. Each is serialised like the randomisation block, NOT
@@ -286,7 +286,19 @@ class SceneSpec(ProvenancedBlock):
     #: otherwise.
     terrain: Quantity
 
-    FIELD_ORDER = ("terrain_source", "terrain")
+    #: S1: the sun's direct normal illuminance in lux the render is
+    #: handed (-sun-lux=), or None = unstated (the engine's own sun, 8.0
+    #: unitless today, stands; the capture manifest then carries the
+    #: clear-sky model's value with provenance model). Refused
+    #: ``sensing.sun_lux`` outside (0, 133 100] lx (core/scenario/solar.py).
+    sun_lux: Quantity
+
+    FIELD_ORDER = ("terrain_source", "terrain", "sun_lux")
+    #: The fields a scene block may LEAVE OUT: each is filled from the
+    #: default when absent and omitted when at it, so a block written
+    #: before the field existed keeps its canonical form and digest
+    #: (examples/cameras_mountain_refusal.yaml states a scene block).
+    OPTIONAL_FIELDS = ("sun_lux",)
     BLOCK = "scene"
 
     @classmethod
@@ -299,7 +311,43 @@ class SceneSpec(ProvenancedBlock):
             terrain=Quantity.default(
                 None, frm="no bake stem stated; required when "
                           "terrain_source is baked"),
+            sun_lux=Quantity.default(
+                None, "lx", frm="no sun stated: the engine's own sun stands; the "
+                                "capture manifest carries the clear-sky model's "
+                                "value (source model)"),
         )
+
+    def to_dict(self) -> Dict[str, Any]:
+        defaults = self.defaulted()
+        out: Dict[str, Any] = {}
+        for name, q in self.quantities():
+            if name in self.OPTIONAL_FIELDS and q.to_dict() == getattr(defaults, name).to_dict():
+                continue
+            out[name] = q.to_dict()
+        return out
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SceneSpec":
+        if not isinstance(data, dict):
+            raise ValueError(f"spec '{cls.BLOCK}' must be a mapping of "
+                             f"provenanced fields")
+        defaults = cls.defaulted()
+        kwargs = {}
+        for name in cls.FIELD_ORDER:
+            if name in cls.OPTIONAL_FIELDS and name not in data:
+                kwargs[name] = getattr(defaults, name)
+                continue
+            try:
+                kwargs[name] = Quantity.from_dict(data[name])
+            except KeyError as exc:
+                raise ValueError(
+                    f"{cls.BLOCK} is missing required field {name}") from exc
+        unknown = set(data) - set(cls.FIELD_ORDER)
+        if unknown:
+            raise ValueError(
+                f"{cls.BLOCK} carries unknown fields {sorted(unknown)}; "
+                f"refusing to guess at their meaning")
+        return cls(**kwargs)
 
 
 @dataclass
@@ -728,6 +776,106 @@ class DisSpec(ProvenancedBlock):
             timestamp_mode=Quantity.default("relative", frm="relative timestamps: simulation "
                                                             "time past the hour, LSB 0",
                                             std=DIS_STANDARDS["timestamp_mode"]),
+        )
+
+
+#: P7: the wake block's vocabulary. ``model`` names the circulation decay:
+#: ``none`` (Gamma_0 held; the age is recorded either way) or ``sarpkaya``
+#: (Sarpkaya 2000 with ``eps_star`` and ``n_star`` as declared inputs);
+#: any other word refuses ``wake.model``. The generator is a configured
+#: airframe whose flight model states a weight and a span
+#: (``wake.generator`` otherwise); the geometry is the own ship's offset
+#: from the pair's centreline (right, up) and the wake's age there --
+#: ``separation_s`` (the generator passed that many seconds before the
+#: run's first step) or a held ``age_s``, one of the two (``wake.geometry``
+#: otherwise). The physics is core/environment/wake.py's.
+WAKE_DECAY_MODELS = ("none", "sarpkaya")
+WAKE_STANDARDS: Dict[str, str] = {
+    "generator": "the generating airframe's weight W (inertia/weight-lbs as the JSBSim model "
+                 "ships) and span b (metrics/bw-ft): Gamma_0 = W / (rho V b_0), b_0 = pi b / 4, "
+                 "r_c = 0.035 b (Proctor's convention) [unverified here]",
+    "generator_speed_kt": "the generator's true airspeed V in Gamma_0 = W / (rho V b_0); null = "
+                          "the own ship's true airspeed at the initial conditions (a stated choice)",
+    "lateral_offset_m": "the own CG's offset to the right of the pair's centreline at the run's "
+                        "first step (positive right, in the frame of the own initial heading)",
+    "vertical_offset_m": "the own CG's height above the pair's centreline at the run's first "
+                         "step (positive up)",
+    "separation_s": "the wake's age at the own ship's position at the run's first step; along "
+                    "the run the age is separation_s + t - x_along / V_g (a stated kinematic rule)",
+    "age_s": "the wake's age held constant along the run (the generator and the own ship taken "
+             "as flying the same speed: a stated choice)",
+    "model": "Burnham & Hallock (1982) tangential profile V(r) = Gamma/(2 pi r) r^2/(r^2 + r_c^2) "
+             "per vortex, the pair summed; 'none' holds Gamma_0 [unverified here]",
+    "sarpkaya": "Sarpkaya, J. Aircraft 37(1) 2000: T = t w_0/b_0, demise at T_d = "
+                "(0.7475/eps*)^(4/3) with a stated N* bound; the history taken linear to demise "
+                "[from memory, unverified here]",
+    "eps_star": "the non-dimensional eddy dissipation rate (eps b_0)^(1/3) / w_0, a declared "
+                "input of the sarpkaya decay, 0 < eps* <= 1 [unverified here]",
+    "n_star": "the non-dimensional Brunt-Vaisala frequency N b_0 / w_0, a declared input of the "
+              "sarpkaya decay, 0..1 (a stated bound on the demise) [unverified here]",
+}
+
+
+@dataclass
+class WakeSpec(ProvenancedBlock):
+    """``wake`` (P7): the wake-vortex encounter. Absent-canonical: no wake
+    (no generator) is the default and is omitted, so every committed
+    spec-8 example keeps its digest. ``generator`` names the generating
+    airframe (``wake.generator`` when it is not configured or states no
+    span or weight); ``generator_speed_kt`` its speed (null = the own
+    ship's); ``lateral_offset_m`` / ``vertical_offset_m`` the own CG's
+    offset from the pair's centreline (right, up); ``separation_s`` or a
+    held ``age_s`` the wake's age (``wake.geometry`` for neither, both, a
+    negative age or a non-number); ``model`` the decay (``wake.model``);
+    ``eps_star`` / ``n_star`` the sarpkaya inputs (``wake.decay`` when
+    missing or out of range; carried, not applied, beside ``none``). A
+    stated generator flies the own airframe derived with the
+    ``gust_rotation`` injection; the field, the read-back and the records
+    are core/environment/wake.py's. A block with no generator applies
+    nothing and the runner records its stated fields as unread."""
+
+    generator: Quantity
+    generator_speed_kt: Quantity
+    lateral_offset_m: Quantity
+    vertical_offset_m: Quantity
+    separation_s: Quantity
+    age_s: Quantity
+    model: Quantity
+    eps_star: Quantity
+    n_star: Quantity
+
+    FIELD_ORDER = ("generator", "generator_speed_kt", "lateral_offset_m", "vertical_offset_m",
+                   "separation_s", "age_s", "model", "eps_star", "n_star")
+    BLOCK = "wake"
+
+    @classmethod
+    def defaulted(cls) -> "WakeSpec":
+        return cls(
+            generator=Quantity.default(
+                None, frm="unstated: no wake (no generating aircraft)",
+                std=WAKE_STANDARDS["generator"]),
+            generator_speed_kt=Quantity.default(
+                None, "kt", frm="unstated: the own ship's true airspeed at the initial conditions",
+                std=WAKE_STANDARDS["generator_speed_kt"]),
+            lateral_offset_m=Quantity.default(
+                0.0, "m", frm="centred on the pair's centreline",
+                std=WAKE_STANDARDS["lateral_offset_m"]),
+            vertical_offset_m=Quantity.default(
+                0.0, "m", frm="at the height of the pair's centreline",
+                std=WAKE_STANDARDS["vertical_offset_m"]),
+            separation_s=Quantity.default(
+                None, "s", frm="unstated: an encounter states separation_s or age_s",
+                std=WAKE_STANDARDS["separation_s"]),
+            age_s=Quantity.default(
+                None, "s", frm="unstated: an encounter states separation_s or age_s",
+                std=WAKE_STANDARDS["age_s"]),
+            model=Quantity.default(
+                "none", frm="no decay: the initial circulation held",
+                std=WAKE_STANDARDS["model"]),
+            eps_star=Quantity.default(
+                None, "1", frm="unstated: no sarpkaya decay", std=WAKE_STANDARDS["eps_star"]),
+            n_star=Quantity.default(
+                None, "1", frm="unstated: no stratification bound", std=WAKE_STANDARDS["n_star"]),
         )
 
 

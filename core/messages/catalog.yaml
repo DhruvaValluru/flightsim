@@ -747,3 +747,54 @@ interop.hla_not_implemented:
   hint: "Use the entity-state stream, which is the interoperability product this build offers."
 check.dis_roundtrip:
   sentence: "The entity-state stream is read back by the checker's own reading of the standard's message layout: every message's position agrees with an independent map-projection library's conversion of the recorded place, its attitude with the checker's own composition of the recorded heading, pitch and roll, and its clock never runs backwards."
+
+# -- the advancement additions, batch1 -----------------------------------
+wake.generator:
+  sentence: "The generating aircraft for the wake has to be one of the configured aircraft whose flight model states a weight and a wingspan; that one is not, so the strength of its vortex pair cannot be computed."
+  hint: "Name one of the configured aircraft as the generator, or leave the wake out."
+wake.geometry:
+  sentence: "The wake encounter's geometry is incomplete or not a number: the offsets and the generator's speed are numbers, and exactly one of the separation time and the held age says how old the wake is, never both, never negative."
+  hint: "State the sideways and vertical offsets in metres and either the separation in seconds or the held age in seconds."
+wake.model:
+  sentence: "The wake's decay model has to be either none (the initial circulation held) or the named decay model with declared inputs; that word is neither."
+  hint: "Choose none or the named decay model."
+wake.decay:
+  sentence: "The named decay model needs its non-dimensional dissipation rate above zero and at most one, and a stratification frequency between zero and one when stated; that input is missing or out of range."
+  hint: "Declare the dissipation rate in its range, and the stratification frequency if it is meant, or choose no decay."
+card.wake:
+  sentence: "The run card's wake block is malformed: a key is missing or out of order, or the five selftest vectors do not reproduce in the host's port of the field, so the host places no wake."
+  hint: "Regenerate the card from the scenario; the block is written by the scenario tools, never by hand."
+check.wake_selftest:
+  sentence: "The run card's wake selftest vectors are re-evaluated by the checker's own reading of the vortex-pair profile and the strip-theory integral, and, where a render host wrote its own, those against the card's."
+
+# Placement: the four wake.* names beside the icing.* entries under the advancement additions (after card.icing_schedule's hint); card.wake beside card.icing_schedule (ALLOWED_FUTURE until P9, patch below); check.wake_selftest beside check.dis_roundtrip (live once the verify.py patch lands: FAIL_WAKE = "check.wake_selftest" is the emitter, so the catalogue entry and the verifier patch land in one commit). Measured on the patched copy with these six appended: tests/test_messages.py's uncovered set is exactly S1's six sensing.* names; every sentence passes the identifier regex and ends as a sentence.
+sensing.radiometry:
+  sentence: "The luminance chain cannot be formed: a spectral table it needs is absent or altered, or a lens attenuation is not a fraction of the light passed."
+  hint: "Run the table fetch script named in the message, or state a lens attenuation between zero and one."
+sensing.band:
+  sentence: "The band file cannot be used: it is absent, does not declare itself a proxy, or names a band or a channel the tables cannot integrate."
+  hint: "Name a band file that exists under the sensor bands folder and declares itself a proxy."
+sensing.optics:
+  sentence: "The optics block cannot be applied: an unknown model, a non-positive wavelength or f-number, a negative aberration width, or an even kernel support."
+  hint: "State the diffraction model with a positive wavelength and f-number and an odd support."
+sensing.motion_blur:
+  sentence: "The motion blur block cannot be applied: an unknown model, a non-positive flow interval, or a streak too long to integrate."
+  hint: "State the velocity-line model with a positive flow interval."
+sensing.sun_lux:
+  sentence: "A sun of {actual} lux cannot be lit: it must be a positive number no brighter than the {limit} lux of the sun above the atmosphere."
+  hint: "State a sun between one lux and the extraterrestrial illuminance, or leave it unstated."
+sensing.exposure_units:
+  sentence: "The engine's sun is not set in lux while the exposure is a manual value that expects lux, so the picture's luminance means nothing: an eighteen percent grey card would render black."
+  hint: "Render with the sun in physical units before reading luminance off the frames."
+annotation.psf:
+  sentence: "The point spread measured on the calibration edge disagrees with the kernel the manifest says was applied."
+annotation.blur:
+  sentence: "The motion streak recorded for a frame disagrees with the streak the flow pass predicts over the exposure."
+annotation.radiometry:
+  sentence: "The grey card the engine rendered disagrees with the luminance the calibration chain predicted."
+check.psf_slanted_edge:
+  sentence: "The point spread applied to the frames is measured by the checker's own slanted-edge method on the calibration edge and agrees with the manifest's predicted resolution."
+check.blur_vs_flow:
+  sentence: "The motion streak recorded for each frame agrees with the streak the flow pass predicts over the exposure."
+check.radiometry_grey_card:
+  sentence: "The grey card the engine rendered agrees with the luminance the calibration chain predicted."

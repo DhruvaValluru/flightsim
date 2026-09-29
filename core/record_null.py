@@ -89,6 +89,10 @@ NULL_FLOOR_RPM = 10.0
 NULL_FLOOR_MASS_KG = 0.5
 NULL_FLOOR_INERTIA_KGM2 = 1.0
 NULL_FLOOR_CG_M = 0.1 * 0.0254
+#: The wake's circulation channel (P7): a stated 1 m^2/s, 0.3 % of the B747's
+#: Gamma_0 (338 m^2/s at 250 kt) and far above the column's float noise (constant
+#: to the bit under the none model); the age column (s) carries no floor.
+NULL_FLOOR_CIRCULATION_M2_S = 1.0
 NULL_FLOOR_REFERENCE = (
     "10 x the numerical noise measured on this branch (docs/vva/VV_REPORT.md row V9: "
     "peak altitude difference 0.098 m between 1/60 and 1/120 s, 0.048 m between 1/120 "
@@ -118,6 +122,7 @@ FLOORS_BY_UNIT: Dict[str, float] = {
     "rpm": NULL_FLOOR_RPM,
     "kg": NULL_FLOOR_MASS_KG,
     "kg m^2": NULL_FLOOR_INERTIA_KGM2,
+    "m^2/s": NULL_FLOOR_CIRCULATION_M2_S,
 }
 #: Floor per channel NAME, consulted before the unit table (P4: the CG).
 #: The icing's own channels (P5): eta and the six factors are dimensionless

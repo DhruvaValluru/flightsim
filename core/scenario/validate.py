@@ -253,6 +253,7 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
     report.violations.extend(validate_loading(spec))
     report.violations.extend(validate_dis(spec))
     report.violations.extend(validate_icing(spec))
+    report.violations.extend(validate_wake(spec))
 
     # -- the definitive check: can this actually be trimmed? -----------
     # Skipped when geometry is already impossible, since trimming below ground
@@ -399,6 +400,15 @@ def validate_blocks(spec) -> List[Violation]:
             "scene.terrain",
             f"scene.terrain must be a bake stem (<stem>.r16 + .json) or "
             f"absent, not {stem!r}"))
+    # S1: a stated sun is a positive number of lux no brighter than the
+    # extraterrestrial one (core/scenario/solar.py, the same sentence the
+    # manifest and the render flags refuse with).
+    from .solar import sun_lux_problem
+
+    sun_problem = sun_lux_problem(getattr(spec.scene, "sun_lux", None) and spec.scene.sun_lux.value)
+    if sun_problem:
+        out.append(Violation("sensing.sun_lux", sun_problem,
+                             actual=spec.scene.sun_lux.value, limit=133100.0, unit="lx"))
 
     classes = spec.taxonomy.classes.value
     if (not isinstance(classes, list) or not classes
@@ -873,6 +883,48 @@ def validate_failures(spec) -> List[Violation]:
                       limit=problem.limit, unit=problem.unit)
             for problem in problems(block.events.value, float(spec.duration.value),
                                     str(spec.aircraft.value))]
+
+
+# -- the wake block (P7) --------------------------------------------------------------
+
+def validate_wake(spec) -> List[Violation]:
+    """The ``wake`` block's own constraints, refused by name through the
+    provider's own list (core.environment.wake.problems, so what
+    validation refuses is what the provider refuses): ``wake.generator``
+    (an airframe that is not configured, or whose model states no span
+    or no weight), ``wake.geometry`` (an offset or speed that is not a
+    number, neither or both of separation and age, a negative age),
+    ``wake.model`` (an unknown decay model), ``wake.decay`` (sarpkaya
+    with eps* missing or out of range, N* out of range), and
+    ``derivation.anchor_missing`` when the OWN airframe's ROLL axis
+    cannot take the gust_rotation injection (the injection's own anchor
+    test over the stock XML, nothing written). The default block, and a
+    block naming no generator (nothing applied; recorded as unread by
+    the runner), yield nothing."""
+    from ..environment.wake import problems
+
+    block = getattr(spec, "wake", None)
+    if block is None or block.is_default() or block.generator.value is None:
+        return []
+    out = [Violation(problem.constraint, problem.message, actual=problem.actual,
+                     limit=problem.limit, unit=problem.unit)
+           for problem in problems(block.generator.value, block.generator_speed_kt.value,
+                                   block.lateral_offset_m.value, block.vertical_offset_m.value,
+                                   block.separation_s.value, block.age_s.value, block.model.value,
+                                   block.eps_star.value, block.n_star.value)]
+    from ..control.derive import INJECTIONS, DerivationError
+    from ..fdm import aircraft as ac
+
+    try:
+        text = ac.resolve(str(spec.aircraft.value)).xml_path.read_text(encoding="utf-8")
+        INJECTIONS["gust_rotation"].anchor_test(text)
+    except DerivationError as exc:
+        out.append(Violation(exc.constraint,
+                             f"the wake's equivalent roll rate needs the gust_rotation injection, "
+                             f"which this airframe cannot take: {exc}"))
+    except Exception:
+        pass        # an unknown aircraft is aircraft.exists, refused above
+    return out
 
 
 # -- the icing block (P5) ------------------------------------------------------------

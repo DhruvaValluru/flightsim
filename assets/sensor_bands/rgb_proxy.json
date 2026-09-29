@@ -1,0 +1,20 @@
+{
+  "name": "rgb_proxy",
+  "proxy": true,
+  "basis": "stated",
+  "source": "this repository (S1): three rectangular wavelength windows standing in for the engine's sRGB / Rec.709 channels, a DECLARED proxy with no spectral rendering behind it; the windows are the conventional blue / green / red thirds of the visible range, not a measured camera response",
+  "channels": ["R", "G", "B"],
+  "illuminant": "astm_g173_direct",
+  "bands": {
+    "red":   {"channel": "R", "window_nm": [580.0, 680.0]},
+    "green": {"channel": "G", "window_nm": [490.0, 580.0]},
+    "blue":  {"channel": "B", "window_nm": [400.0, 490.0]}
+  },
+  "weights": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+  "not_claimed": [
+    "no spectral rendering: the engine shades three sRGB / Rec.709 channels and nothing in this file changes that",
+    "no BRDF spectra and no camera quantum efficiency: the windows are declared, not measured",
+    "the band radiance L_e = L_v / (683 K_band) is a photometric proxy converted through the STATED illuminant (ASTM G173-03 direct) and CIE 1924 V(lambda); a scene lit by another spectrum is not represented",
+    "the identity weights reproduce the frame (the null test); any other weights are a stated mixing, not a calibration"
+  ]
+}

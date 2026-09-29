@@ -415,6 +415,35 @@ def _injected(name: str, prop: str, unit: str, null_basis: str,
         host_channels=host)
 
 
+_WAKE_EXACT = ("measured here on the c172p derived with the gust_rotation injection (JSBSim "
+               "1.2.4): atmosphere/gust-*-fps and gust/p-equivalent-rad_sec read back the value "
+               "written to the last bit before the next step's write on every step of a 4 s "
+               "wake encounter (max |error| 0.0 on all four properties, tests/test_wake.py); "
+               "the stack reads each back before it writes")
+_WAKE_WRITES = (
+    JsbsimWrite("atmosphere/gust-north-fps", "every step, zero included (the stack's summed gust)"),
+    JsbsimWrite("atmosphere/gust-east-fps", "every step, zero included (the stack's summed gust)"),
+    JsbsimWrite("atmosphere/gust-down-fps", "every step, zero included (the stack's summed gust)"),
+    JsbsimWrite("gust/p-equivalent-rad_sec", "every step (the airframe is derived with the "
+                                             "gust_rotation injection when a generator is stated)"),
+)
+
+
+def _wake(leaf: str, spec_path: str, unit: str, null_value: Any, null_basis: str,
+          channels: Tuple[Tuple[str, str], ...], note: str) -> VariableRecord:
+    """One P7 wake field: every field drives the same four writes (the
+    pair's field is one function of them all), read back exact; the
+    effect channels are recorded columns of every run."""
+    return VariableRecord(
+        name=f"wake.{leaf}", spec_path=spec_path, unit=unit,
+        jsbsim_writes=_WAKE_WRITES,
+        effect_channels=tuple(EffectChannel(c, u) for c, u in channels),
+        null_value=null_value, null_basis=null_basis,
+        readback_tolerance=ReadbackTolerance(0.0, "absolute", _WAKE_EXACT),
+        u_input_rule=UInputRule(note=note),
+        host_channels=tuple(c for c, _ in channels if c.startswith("wake_")))
+
+
 REGISTRY = Registry((
     # -- batch 1: observers and derived quantities (no spec field) ----------
     VariableRecord(
@@ -1081,6 +1110,81 @@ REGISTRY = Registry((
         null_basis="no marking stated: the airframe key is derived at export (source "
                    "derived); moves no recorded column",
         u_input_rule=UInputRule(note="a text: no bin, no spread")),
+    # -- P7: the wake block. The generator WORD is the variable that moved
+    #    (null None = no wake, nothing applied); the pair's field goes into
+    #    the three gust properties every step through the stack's sum and
+    #    its equivalent roll rate into gust/p-equivalent-rad_sec (the own
+    #    airframe is derived with the gust_rotation injection when a
+    #    generator is stated), each read back exact (measured). Effect
+    #    channels are recorded columns of every run (lesson b): the wake's
+    #    own columns (the runner's Recorder extras from the provider, 0
+    #    without one) beside the gust channel, roll and altitude.
+    #    wake_gamma_m2_s (m^2/s, the circulation at the age) is an effect
+    #    channel of the six entries whose variable enters it (the speed
+    #    through Gamma_0, the model / eps* / N* through the decay, the ages
+    #    through the decayed circulation) and of NO other: the generator's
+    #    pair moves the column from Gamma_0 to 0 by construction (grading
+    #    it would call every generator pair reached, the far-offset control
+    #    included), and the offsets do not enter it. Its floor is
+    #    record_null.NULL_FLOOR_CIRCULATION_M2_S; the manifest's _m2_s suffix
+    #    reads it as a circulation, never seconds.
+    _wake("generator", "wake.generator", "word", None,
+          "no wake: no generating aircraft, the spec default (nothing derived, nothing "
+          "written); the pair of a B747 generator against none on the c172p rolls it past "
+          "5 deg and diverges the flight (tests/test_wake.py)",
+          (("wake_v_mps", "m/s"), ("wake_w_mps", "m/s"), ("wake_p_eq_rad_s", "rad/s"),
+           ("gust_down_mps", "m/s"), ("gust_p_equivalent_rad_s", "rad/s"),
+           ("roll_deg", "deg"), ("roll_rate_dps", "deg/s"), ("altitude_m", "m"),
+           ("wake_rcr", "1")),
+          note="a word: no bin, no spread"),
+    _wake("generator_speed_kt", "wake.generator_speed_kt", "kt", None,
+          "unstated: the own ship's true airspeed at the initial conditions stands in for the "
+          "generator's (a stated choice); Gamma_0 is inversely proportional to it",
+          (("wake_gamma_m2_s", "m^2/s"), ("wake_v_mps", "m/s"), ("wake_w_mps", "m/s"),
+           ("wake_p_eq_rad_s", "rad/s"), ("roll_deg", "deg")),
+          note="a stated speed: u_x 0; no vocabulary"),
+    _wake("lateral_offset_m", "wake.lateral_offset_m", "m", 0.0,
+          "centred on the pair's centreline (the spec default, 0 m); 300 m against 0 is the "
+          "far-offset control that barely moves the aircraft (tests/test_wake.py)",
+          (("wake_lateral_m", "m"), ("wake_v_mps", "m/s"), ("wake_w_mps", "m/s"),
+           ("wake_p_eq_rad_s", "rad/s"), ("roll_deg", "deg")),
+          note="a stated offset: u_x 0; no vocabulary"),
+    _wake("vertical_offset_m", "wake.vertical_offset_m", "m", 0.0,
+          "at the pair's height (the spec default, 0 m)",
+          (("wake_vertical_m", "m"), ("wake_v_mps", "m/s"), ("wake_w_mps", "m/s"),
+           ("wake_p_eq_rad_s", "rad/s"), ("roll_deg", "deg")),
+          note="a stated offset: u_x 0; no vocabulary"),
+    _wake("separation_s", "wake.separation_s", "s", None,
+          "unstated: the age is then age_s, which an encounter needs (neither refuses "
+          "wake.geometry, so the pair is refused by name -- the variable that moves the age "
+          "is the one stated)",
+          (("wake_age_s", "s"), ("wake_gamma_m2_s", "m^2/s"), ("wake_p_eq_rad_s", "rad/s"),
+           ("roll_deg", "deg")),
+          note="a stated time: u_x 0"),
+    _wake("age_s", "wake.age_s", "s", None,
+          "unstated: the age is then separation_s (the pair is refused by name when neither "
+          "is stated: wake.geometry)",
+          (("wake_age_s", "s"), ("wake_gamma_m2_s", "m^2/s"), ("wake_p_eq_rad_s", "rad/s"),
+           ("roll_deg", "deg")),
+          note="a stated time: u_x 0"),
+    _wake("model", "wake.model", "word", "none",
+          "'none': Gamma_0 held over the run (the spec default); sarpkaya against it decays "
+          "the circulation with the age (a declared-input model, unverified here)",
+          (("wake_gamma_m2_s", "m^2/s"), ("wake_p_eq_rad_s", "rad/s"), ("wake_v_mps", "m/s"),
+           ("wake_w_mps", "m/s"), ("roll_deg", "deg")),
+          note="a word: no bin, no spread"),
+    _wake("eps_star", "wake.eps_star", "1", None,
+          "unstated: no sarpkaya decay (the model none); beside the none model a stated "
+          "eps* is carried, not applied, and the record says so",
+          (("wake_gamma_m2_s", "m^2/s"), ("wake_p_eq_rad_s", "rad/s"), ("wake_v_mps", "m/s"),
+           ("wake_w_mps", "m/s"), ("roll_deg", "deg")),
+          note="a declared dimensionless input: u_x 0 unless a tolerance is stated"),
+    _wake("n_star", "wake.n_star", "1", None,
+          "unstated: no stratification bound on the demise (the sarpkaya demise time from "
+          "eps* alone); beside the none model carried, not applied",
+          (("wake_gamma_m2_s", "m^2/s"), ("wake_p_eq_rad_s", "rad/s"), ("wake_v_mps", "m/s"),
+           ("wake_w_mps", "m/s"), ("roll_deg", "deg")),
+          note="a declared dimensionless input: u_x 0 unless a tolerance is stated"),
     VariableRecord(
         name="dis.timestamp_mode", spec_path="dis.timestamp_mode", unit="word",
         effect_channels=(EffectChannel("lat_deg", "deg"), EffectChannel("lon_deg", "deg"),
@@ -1089,4 +1193,70 @@ REGISTRY = Registry((
         null_basis="relative timestamps (simulation time past the hour, LSB 0), the in-tree "
                    "default; absolute needs the exporter's epoch; moves no recorded column",
         u_input_rule=UInputRule(note="a word: no bin, no spread")),
+    # -- S1: the scene section, claimed whole. terrain_source and terrain
+    #    were spec-8 fields the registry did not claim (no scene section
+    #    was registered); sun_lux joins them, so the three ride together.
+    #    None reaches an equation of motion: the effect channels are the
+    #    recorded columns the scene's consumers read (the terrain-impact
+    #    check and the labels read the position; the sun model reads the
+    #    origin's latitude and longitude), and a pair is a bounded
+    #    invariance measured silent (tests/test_sensing_block.py).
+    VariableRecord(
+        name="scene.terrain_source", spec_path="scene.terrain_source", unit="word",
+        effect_channels=(EffectChannel("lat_deg", "deg"), EffectChannel("lon_deg", "deg"),
+                         EffectChannel("altitude_m", "m")),
+        null_value="auto",
+        null_basis="'auto': today's scene selection (the web app's pick_scene, the CLI's "
+                   "--terrain / --synth-terrain), the spec default; moves no recorded column",
+        u_input_rule=UInputRule(note="a word: no bin, no spread")),
+    VariableRecord(
+        name="scene.terrain", spec_path="scene.terrain", unit="text",
+        effect_channels=(EffectChannel("lat_deg", "deg"), EffectChannel("lon_deg", "deg"),
+                         EffectChannel("altitude_m", "m")),
+        null_value=None,
+        null_basis="unstated: no bake stem (required only when terrain_source is baked); "
+                   "moves no recorded column",
+        u_input_rule=UInputRule(note="a text: no bin, no spread")),
+    VariableRecord(
+        name="scene.sun_lux", spec_path="scene.sun_lux", unit="lx",
+        effect_channels=(EffectChannel("lat_deg", "deg"), EffectChannel("lon_deg", "deg")),
+        null_value=None,
+        null_basis="unstated: the engine's own sun stands (8.0, unitless -- the defect "
+                   "sensing.exposure_units names) and the capture manifest carries the "
+                   "clear-sky model's lux with source model; a stated sun is a render "
+                   "input and moves no recorded column (measured: equal output digests, "
+                   "peak 0 on lat_deg and lon_deg, verdict silent)",
+        u_input_rule=UInputRule(declared_spread=0.0,
+                                note="a stated lux: u_x 0 unless a tolerance is stated; the "
+                                     "model value's spread is not declared (a broadband "
+                                     "clear-sky model with a constant efficacy)")),
+    # -- S1: the four sensing variables, observers. Their spec fields are
+    #    cameras[i].exposure_compensation_ev / cameras[i].bands (list
+    #    elements the section.leaf address cannot claim) and the profile's
+    #    optional blocks; each returns its record through the capture
+    #    manifest's per-camera sensing block with a null test measured on a
+    #    synthetic frame by core/capture/radiometry.py sensing_records.
+    VariableRecord(
+        name="sensing.radiometry", spec_path=None, unit="cd/m^2 per unit",
+        null_basis="no section.leaf spec field (cameras[i].exposure_compensation_ev is a list "
+                   "element): the producer measures EC +1 halving the luminance per unit on "
+                   "a synthetic frame (reached, threshold half the value)",
+        u_input_rule=UInputRule(note="the lens attenuation is the console default until read "
+                                     "back; no spread is declared for a predicted constant")),
+    VariableRecord(
+        name="sensing.bands", spec_path=None, unit="band",
+        null_basis="no section.leaf spec field (cameras[i].bands is a list element): the "
+                   "producer measures identity weights reproducing the frame (bounded, 0)",
+        u_input_rule=UInputRule(note="a declared proxy: no spread")),
+    VariableRecord(
+        name="sensing.optics", spec_path=None, unit="cycles/px",
+        null_basis="a profile block, no spec field: the producer measures an absent block "
+                   "leaving the frame bit-identical (bounded, 0) and the e-SFR MTF50 beside "
+                   "the prediction",
+        u_input_rule=UInputRule(note="stated wavelength, f-number and sigma: no spread")),
+    VariableRecord(
+        name="sensing.motion_blur", spec_path=None, unit="px",
+        null_basis="a profile block, no spec field: the producer measures exposure 0 leaving "
+                   "the frame identical (bounded, 0)",
+        u_input_rule=UInputRule(note="a stated shutter and flow interval: no spread")),
 ))

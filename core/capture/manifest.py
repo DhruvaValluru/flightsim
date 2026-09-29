@@ -223,6 +223,9 @@ from .objects import (
     objects_block, taxonomy_classes,
 )
 from .profile import load_profile, sensor_labels
+from .radiometry import (
+    camera_sensing_block, frame_radiometry_block, sensing_records, sun_lux_for_spec,
+)
 from .landmarks import scene_landmarks
 from .poses import PoseTrack, SceneFrame, aircraft_local_track, traffic_state
 from .schedule import CaptureSchedule
@@ -307,6 +310,8 @@ _UNIT_SUFFIXES = (
     ("_kgm3", "kg/m^3"), ("_kgm2", "kg m^2"), ("_mps2", "m/s^2"), ("_rads", "rad/s"),
     ("_flag", "1"), ("_hpa", "hPa"), ("_pct", "%"),
     ("_rad_s", "rad/s"), ("_per_s", "1/s"),
+    # P7: a circulation (wake_gamma_m2_s, m^2/s); before _s so it is never seconds.
+    ("_m2_s", "m^2/s"),
     # P3: a piston engine's speed (engine<i>_rpm, the failure schedule's
     # recorder extras); no old suffix ends in it.
     ("_rpm", "rpm"),
@@ -506,7 +511,8 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                            solve_source: str = SOLVE_PRE_RUN,
                            traffic_tracks: Optional[Sequence[PoseTrack]] = None,
                            mesh_manifests: Optional[Dict[str, Dict]] = None,
-                           uncertainty: Optional[Dict] = None) -> Dict:
+                           uncertainty: Optional[Dict] = None,
+                           wake_generator=None) -> Dict:
     """Assemble the manifest mapping (see the module docstring schema).
 
     ``uncertainty`` (R1, optional): the run's ASME V&V 20 block from
@@ -554,14 +560,25 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
     # as the primary does.
     objects = compose_objects(spec)
     traffic_tracks = list(traffic_tracks or [])
-    if len(traffic_tracks) != len(spec.traffic):
+    traffic_entries = list(spec.traffic)
+    if wake_generator is not None:
+        # P7: the wake generator, labelled like a traffic aircraft: its
+        # object (composed last among the traffic), its airframe and the
+        # straight track the physics placed it on.
+        from ..scenario.blocks import TrafficSpec
+
+        _wake_object, wake_aircraft, wake_track = wake_generator
+        traffic_entries.append(TrafficSpec.defaulted(
+            str(wake_aircraft), "wake_generator", frm="the wake block's generator (P7)"))
+        traffic_tracks.append(wake_track)
+    if len(traffic_tracks) != len(traffic_entries):
         raise ValueError(
-            f"{len(traffic_tracks)} traffic tracks for {len(spec.traffic)} "
+            f"{len(traffic_tracks)} traffic tracks for {len(traffic_entries)} "
             f"traffic entries; every scripted aircraft needs exactly one "
             f"solved track or it has no state to label")
     traffic_objects = [o for o in objects if o.role == ROLE_TRAFFIC]
     traffic_airframes = [load_airframe(str(entry.aircraft.value))
-                         for entry in spec.traffic]
+                         for entry in traffic_entries]
     for track in traffic_tracks:
         if len(track) != len(columns["t"]):
             raise ValueError(
@@ -582,7 +599,7 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
             return None
 
     primary_mesh = mesh_manifest_for(str(spec.aircraft.value))
-    traffic_meshes = [mesh_manifest_for(str(e.aircraft.value)) for e in spec.traffic]
+    traffic_meshes = [mesh_manifest_for(str(e.aircraft.value)) for e in traffic_entries]
     # P10: the vertical datum of the scene's heights. A georeferenced
     # heightfield carries its bake's block (or has one evaluated from its
     # provenance origin); a flat slab or a synthesised ridge says so with
@@ -592,6 +609,10 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
 
     camera_blocks: List[Dict] = []
     frames: List[Dict] = []
+    # S1: the scene's sun in lux (stated, or the clear-sky model at the
+    # look's elevation) rides in every sensing block; evaluated once.
+    sun_lux = sun_lux_for_spec(spec)
+    sensing_variables: List = []
     for track, schedule in zip(tracks, schedules):
         if track.camera_id != schedule.camera_id:
             raise ValueError(
@@ -601,6 +622,10 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
         camera = cameras_by_id.get(track.camera_id)
         profile = load_profile(str(camera.profile.value) if camera is not None
                                else "ideal_pinhole")
+        # S1: the per-camera sensing block, or None when nobody asked
+        # (absent-canonical: the camera block then gains no key).
+        sensing = (camera_sensing_block(camera, profile, sun_lux, spec=spec)
+                   if camera is not None else None)
         camera_blocks.append({
             "camera_id": track.camera_id,
             "preset": track.preset,
@@ -616,6 +641,15 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
             # Phase 10: the sensor model, every parameter and its source.
             "profile": profile.to_dict(),
         })
+        if sensing is not None:
+            camera_blocks[-1]["sensing"] = sensing
+            if not sensing_variables:
+                sensing_variables = sensing_records(sensing)
+                sensing["records"] = "applied_variables (this camera)"
+            else:
+                sensing["records"] = ("applied_variables carries the first sensing camera's "
+                                      "records; this block is the same models at this "
+                                      "camera's own parameters")
         fx = (track.width_px / track.sensor_width_mm)
         fy = (track.height_px / track.sensor_height_mm)
         for number, sample_index in enumerate(schedule.indices):
@@ -692,6 +726,10 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                 "labels_sensor": sensor_labels(profile, frames[-1],
                                                frames[-1]["labels"], omega),
             }
+            # S1: what one unit of this frame is worth (predicted until the
+            # grey card measures it), on a camera with a sensing block.
+            if sensing is not None:
+                frames[-1]["radiometry"] = frame_radiometry_block(sensing)
             # Version 6: every OTHER object mapped onto the same sensor,
             # so an exporter of the sensor image has a box for each (the
             # primary's mapping is the block above). A scene object with
@@ -730,7 +768,8 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
         "datum": datum,
         "applied_variables": records_block(
             [undulation_variable(datum)]
-            + landcover_records((scene or {}).get("terrain"))),
+            + landcover_records((scene or {}).get("terrain"))
+            + list(sensing_variables)),
         "frame": frame.provenance(),
         "software_revision": software_revision(),
         "landmarks": scene_landmarks(
@@ -765,7 +804,7 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                                         "scripted actor has no dynamics to bank"),
             }
             for obj, entry, track, frame_
-            in zip(traffic_objects, spec.traffic, traffic_tracks, traffic_airframes)
+            in zip(traffic_objects, traffic_entries, traffic_tracks, traffic_airframes)
         ],
         "cameras": camera_blocks,
         "frames": frames,

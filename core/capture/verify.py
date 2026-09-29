@@ -4731,6 +4731,483 @@ def verify_instruments(manifest: Dict, run_dir=None) -> Check:
     result = check_instruments(run_dir)
     return Check("instruments", result.status, result.detail, result.failure)
 
+# -- S1: the sensing checks -- the PSF on the calibration edge, the blur against
+#    the flow, the grey card against the predicted chain ---------------------------
+
+#: The checker's own e-SFR MTF50 against the manifest's predicted one, as a
+#: fraction (the producer measured 0.45 % and 1.3 % on synthetic edges; 5 % is
+#: the blueprint's clause).
+PSF_MTF50_TOL = 0.05
+#: A recorded streak against the flow's prediction: the larger of this many
+#: pixels and this fraction of the prediction (the producer's own estimator
+#: holds 0.25 px for streaks of 2 px and longer).
+BLUR_TOL_PX = 0.25
+BLUR_TOL_FRACTION = 0.10
+#: The grey card's measured / predicted ratio (S4's calibration.json) must sit
+#: within this of one.
+GREY_CARD_TOL = 0.02
+FAIL_PSF = "annotation.psf"
+FAIL_BLUR = "annotation.blur"
+FAIL_RADIOMETRY = "annotation.radiometry"
+
+
+def _sensing_cameras(manifest, key):
+    """{camera_id: sensing block} over the camera blocks whose ``sensing``
+    carries a ``key`` block (the capture manifest's cameras[i].sensing)."""
+    out = {}
+    for block in manifest.get("cameras", []) or []:
+        sensing = block.get("sensing") if isinstance(block, dict) else None
+        if isinstance(sensing, dict) and isinstance(sensing.get(key), dict):
+            out[str(block.get("camera_id"))] = sensing
+    return out
+
+
+def _sensing_json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _sensing_read_linear_gray(path):
+    """An 8-bit sRGB PNG as linear gray in [0, 1] by the checker's own sRGB
+    inverse (IEC 61966-2-1: c / 12.92 below 0.04045, ((c + 0.055) / 1.055)^2.4
+    above), channels averaged; None when it cannot be read."""
+    import numpy as np
+
+    try:
+        from PIL import Image
+
+        with Image.open(path) as image:
+            rgb = np.asarray(image.convert("RGB"), dtype=np.float64) / 255.0
+    except (OSError, ImportError):
+        return None
+    linear = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+    return linear.mean(axis=2)
+
+
+def _sensing_own_mtf50(gray, oversample=4):
+    """The checker's OWN e-SFR (ISO 12233 from the definition, written apart
+    from the producer's): each row's edge at the half-level crossing between
+    the row's 10th and 90th percentile levels, linearly interpolated; a
+    least-squares line through the crossings; every pixel's distance along
+    the edge normal binned at 1 / oversample px into the edge spread
+    function; the line spread function by finite difference under a
+    Hamming window; the MTF by FFT; MTF50 at the first half crossing.
+    None when no edge is found."""
+    import numpy as np
+
+    image = np.asarray(gray, dtype=np.float64)
+    height, width = image.shape
+    rows, crossings = [], []
+    for y in range(height):
+        row = image[y]
+        lo, hi = np.percentile(row, 10), np.percentile(row, 90)
+        if hi - lo <= 1e-9:
+            continue
+        level = 0.5 * (lo + hi)
+        rising = row[-1] > row[0]
+        above = row >= level if rising else row <= level
+        idx = np.flatnonzero(above)
+        if idx.size == 0 or idx[0] == 0:
+            continue
+        i = int(idx[0])
+        v0, v1 = row[i - 1], row[i]
+        if v1 == v0:
+            continue
+        crossings.append((i - 1) + (level - v0) / (v1 - v0))
+        rows.append(float(y))
+    if len(rows) < 3:
+        return None
+    slope, intercept = np.polyfit(np.asarray(rows), np.asarray(crossings), 1)
+    cos_theta = 1.0 / math.sqrt(1.0 + slope * slope)
+    ys, xs = np.mgrid[0:height, 0:width].astype(np.float64)
+    distance = (xs - (intercept + slope * ys)) * cos_theta
+    bins = np.floor(distance * oversample).astype(int)
+    bins -= bins.min()
+    counts = np.bincount(bins.ravel())
+    sums = np.bincount(bins.ravel(), weights=image.ravel())
+    esf = np.full(len(counts), np.nan)
+    esf[counts > 0] = sums[counts > 0] / counts[counts > 0]
+    first = esf[counts > 0][0]
+    for i in range(len(esf)):
+        if np.isnan(esf[i]):
+            esf[i] = esf[i - 1] if i > 0 else first
+    lsf = np.diff(esf) * np.hamming(len(esf) - 1)
+    spectrum = np.abs(np.fft.rfft(lsf))
+    if spectrum[0] <= 0.0:
+        return None
+    mtf = spectrum / spectrum[0]
+    freqs = np.fft.rfftfreq(len(lsf), d=1.0 / oversample)
+    below = np.flatnonzero(mtf < 0.5)
+    if below.size == 0:
+        return float(freqs[-1])
+    i = int(below[0])
+    if i == 0:
+        return 0.0
+    return float(freqs[i - 1] + (0.5 - mtf[i - 1]) * (freqs[i] - freqs[i - 1]) / (mtf[i] - mtf[i - 1]))
+
+
+def verify_psf_slanted_edge(manifest: Dict, run_dir=None) -> Check:
+    """The PSF the sensor post-pass applied, measured by the checker's own
+    e-SFR on the calibration frame's slanted-edge quad (render.json root
+    ``calibration.slanted_edge {frame, quad_px}``, S4) and held to the
+    manifest's predicted MTF50 within PSF_MTF50_TOL; the kernel sensor.json
+    says it applied must be the manifest's. NOT RUN without a sensing.optics
+    block, a run directory or a calibration edge; FAIL annotation.psf."""
+    import numpy as np
+
+    cameras = _sensing_cameras(manifest, "optics")
+    if not cameras:
+        return Check("psf_slanted_edge", NOT_RUN,
+                     "no camera carries a sensing.optics block: no PSF was applied")
+    if run_dir is None:
+        return Check("psf_slanted_edge", NOT_RUN, "no run directory: the sensor frames are not here")
+    graded, details = 0, []
+    for camera, sensing in cameras.items():
+        folder = Path(run_dir) / "frames" / camera
+        render = _sensing_json(folder / "render.json") or {}
+        calibration = render.get("calibration") if isinstance(render, dict) else None
+        edge = calibration.get("slanted_edge") if isinstance(calibration, dict) else None
+        if not isinstance(edge, dict) or not edge.get("frame") or not edge.get("quad_px"):
+            details.append(f"{camera}: no calibration frame with a slanted-edge quad "
+                           f"(render with -calibration on Windows, S4)")
+            continue
+        frame_name = str(edge["frame"])
+        sensor_json = _sensing_json(folder / "sensor.json") or {}
+        item = next((f for f in sensor_json.get("frames", []) if f.get("frame") == frame_name), None)
+        if item is None or not item.get("sensor"):
+            return Check("psf_slanted_edge", FAIL,
+                         f"{camera}: the calibration frame {frame_name} has no sensor frame in "
+                         f"sensor.json, so the PSF was never applied to the edge", failure=FAIL_PSF)
+        applied = ((item.get("sensing") or {}).get("psf") or {}).get("kernel_sha256")
+        expected = sensing["optics"].get("kernel_sha256")
+        if applied != expected:
+            return Check("psf_slanted_edge", FAIL,
+                         f"{camera}: the kernel applied to {frame_name} ({str(applied)[:16]}..) is "
+                         f"not the manifest's ({str(expected)[:16]}..)", failure=FAIL_PSF)
+        gray = _sensing_read_linear_gray(folder / str(item["sensor"]))
+        if gray is None:
+            return Check("psf_slanted_edge", FAIL,
+                         f"{camera}: the sensor frame {item['sensor']} cannot be read", failure=FAIL_PSF)
+        quad = np.asarray(edge["quad_px"], dtype=np.float64).reshape(-1, 2)
+        u0 = max(0, int(math.floor(quad[:, 0].min())))
+        u1 = min(gray.shape[1], int(math.ceil(quad[:, 0].max())))
+        v0 = max(0, int(math.floor(quad[:, 1].min())))
+        v1 = min(gray.shape[0], int(math.ceil(quad[:, 1].max())))
+        crop = gray[v0:v1, u0:u1]
+        if crop.shape[0] < 8 or crop.shape[1] < 8:
+            return Check("psf_slanted_edge", FAIL,
+                         f"{camera}: the slanted-edge quad is {crop.shape[1]} x {crop.shape[0]} px, "
+                         f"too small to measure", failure=FAIL_PSF)
+        measured = _sensing_own_mtf50(crop)
+        if measured is None:
+            return Check("psf_slanted_edge", FAIL,
+                         f"{camera}: no edge was found inside the slanted-edge quad of {frame_name}",
+                         failure=FAIL_PSF)
+        predicted = float(sensing["optics"]["mtf50_predicted_cyc_per_px"])
+        error = abs(measured - predicted) / predicted if predicted > 0.0 else math.inf
+        if error > PSF_MTF50_TOL:
+            return Check("psf_slanted_edge", FAIL,
+                         f"{camera}: the checker's own e-SFR reads MTF50 {measured:.4f} cycles/px on "
+                         f"the calibration edge against the manifest's predicted {predicted:.4f} "
+                         f"({error * 100:.1f} %, tolerance {PSF_MTF50_TOL * 100:.0f} %)",
+                         failure=FAIL_PSF)
+        graded += 1
+        details.append(f"{camera}: MTF50 {measured:.4f} cycles/px by the checker's own e-SFR against "
+                       f"{predicted:.4f} predicted ({error * 100:.1f} %)")
+    if graded == 0:
+        return Check("psf_slanted_edge", NOT_RUN, "; ".join(details))
+    return Check("psf_slanted_edge", PASS, "; ".join(details))
+
+
+def _sensing_read_flow(path, width, height):
+    """frame_NNNN_flow.f32 as (h, w, 2) float64 pixels; None when the size
+    is not width x height x 2 float32 values."""
+    import numpy as np
+
+    try:
+        raw = np.fromfile(path, dtype="<f4")
+    except OSError:
+        return None
+    if raw.size != width * height * 2:
+        return None
+    return raw.reshape(height, width, 2).astype("float64")
+
+
+def verify_blur_vs_flow(manifest: Dict, run_dir=None) -> Check:
+    """The streak the sensor post-pass recorded per frame (sensor.json
+    ``sensing.blur.blur_px_max``) against the checker's own prediction from
+    the engine's flow pass: the 95th percentile of |flow| over the frame
+    (pixels since the previous captured frame) divided by the capture
+    interval, times the exposure. Held within the larger of BLUR_TOL_PX and
+    BLUR_TOL_FRACTION of the prediction. NOT RUN without a sensing.motion_blur
+    block, a run directory, or any frame with a flow file (S2's pass); a
+    frame the engine accumulated (S4) is not graded here and says so.
+    FAIL annotation.blur."""
+    import numpy as np
+
+    cameras = _sensing_cameras(manifest, "motion_blur")
+    if not cameras:
+        return Check("blur_vs_flow", NOT_RUN,
+                     "no camera carries a sensing.motion_blur block: no blur was applied")
+    if run_dir is None:
+        return Check("blur_vs_flow", NOT_RUN, "no run directory: the flow files are not here")
+    graded, worst, notes = 0, 0.0, []
+    for camera, sensing in cameras.items():
+        folder = Path(run_dir) / "frames" / camera
+        render = _sensing_json(folder / "render.json") or {}
+        records = render.get("frame_records") if isinstance(render, dict) else None
+        engine = {r.get("frame"): r for r in records if isinstance(r, dict)} if isinstance(records, list) else {}
+        sensor_json = _sensing_json(folder / "sensor.json") or {}
+        applied = {f.get("frame"): f for f in sensor_json.get("frames", []) if isinstance(f, dict)}
+        frames = sorted((f for f in manifest.get("frames", []) if str(f.get("camera_id")) == camera),
+                        key=lambda f: float(f.get("t_s", 0.0)))
+        for previous, record in zip(frames, frames[1:]):
+            name = Path(str(record.get("file"))).name
+            flow_file = ((engine.get(name) or {}).get("labels") or {}).get("flow_f32")
+            if not flow_file:
+                continue
+            blur = ((applied.get(name) or {}).get("sensing") or {}).get("blur")
+            if not isinstance(blur, dict):
+                continue
+            if blur.get("applied_by") == "engine_accumulation":
+                notes.append(f"{camera}/{name}: the engine accumulated k = {blur.get('k')} sub-exposures; "
+                             f"graded on Windows against the accumulation (S4), not here")
+                continue
+            width, height = int(record["width_px"]), int(record["height_px"])
+            flow = _sensing_read_flow(folder / str(flow_file), width, height)
+            if flow is None:
+                return Check("blur_vs_flow", FAIL,
+                             f"{camera}/{name}: {flow_file} is not {width} x {height} x 2 float32 values",
+                             failure=FAIL_BLUR)
+            speed = np.hypot(flow[..., 0], flow[..., 1])
+            finite = speed[np.isfinite(speed)]
+            if finite.size == 0:
+                return Check("blur_vs_flow", FAIL, f"{camera}/{name}: the flow holds no finite value",
+                             failure=FAIL_BLUR)
+            interval = float(record.get("t_s", 0.0)) - float(previous.get("t_s", 0.0))
+            if interval <= 0.0:
+                return Check("blur_vs_flow", FAIL,
+                             f"{camera}/{name}: the capture interval before this frame is {interval} s",
+                             failure=FAIL_BLUR)
+            predicted = float(np.percentile(finite, 95)) * float(blur.get("exposure_s", 0.0)) / interval
+            recorded = blur.get("blur_px_max")
+            if not isinstance(recorded, (int, float)):
+                return Check("blur_vs_flow", FAIL, f"{camera}/{name}: no streak length recorded",
+                             failure=FAIL_BLUR)
+            tolerance = max(BLUR_TOL_PX, BLUR_TOL_FRACTION * predicted)
+            error = abs(float(recorded) - predicted)
+            worst = max(worst, error)
+            if error > tolerance:
+                return Check("blur_vs_flow", FAIL,
+                             f"{camera}/{name}: the recorded streak {float(recorded):.2f} px against "
+                             f"{predicted:.2f} px from the flow's 95th percentile over {interval:g} s "
+                             f"at {float(blur.get('exposure_s', 0.0)):g} s exposure (tolerance "
+                             f"{tolerance:.2f} px)", failure=FAIL_BLUR)
+            graded += 1
+    if graded == 0:
+        reason = ("no frame with a flow file (render with -labels -passes=velocity; the flow pass is "
+                  "I6's, its keypoint check S2's)")
+        if notes:
+            reason = reason + "; " + "; ".join(notes)
+        return Check("blur_vs_flow", NOT_RUN, reason)
+    return Check("blur_vs_flow", PASS,
+                 f"{graded} frame(s): the recorded streak within {worst:.3f} px of the flow's prediction "
+                 f"(tolerance max({BLUR_TOL_PX} px, {BLUR_TOL_FRACTION * 100:.0f} %))"
+                 + ("; " + "; ".join(notes) if notes else ""))
+
+
+def verify_radiometry_grey_card(manifest: Dict, run_dir=None) -> Check:
+    """The calibration chain's constant against the grey card the engine
+    rendered (S4's frames/<camera>/calibration.json {predicted, measured,
+    ratio}): the file's prediction must be the manifest's grey_card_predicted
+    (1e-6 relative), the ratio the file's own measured / predicted (1e-6),
+    within GREY_CARD_TOL of one, and the manifest's calibration_status
+    'measured'. NOT RUN without a sensing.radiometry block, a run directory
+    or a calibration file, and when the chain was refused
+    sensing.exposure_units (the sun is not in lux). FAIL annotation.radiometry."""
+    cameras = _sensing_cameras(manifest, "radiometry")
+    if not cameras:
+        return Check("radiometry_grey_card", NOT_RUN,
+                     "no camera carries a sensing.radiometry block")
+    if run_dir is None:
+        return Check("radiometry_grey_card", NOT_RUN, "no run directory: no calibration file is here")
+    graded, details = 0, []
+    for camera, sensing in cameras.items():
+        block = sensing["radiometry"]
+        if block.get("calibration_status") == "refused":
+            details.append(f"{camera}: the chain was refused by name -- {block.get('calibration_basis')}")
+            continue
+        calibration = _sensing_json(Path(run_dir) / "frames" / camera / "calibration.json")
+        if calibration is None:
+            details.append(f"{camera}: no calibration.json (render with -calibration on Windows, S4): "
+                           f"the constant stays {block.get('calibration_status')}")
+            continue
+        try:
+            predicted = float(calibration["predicted"])
+            measured = float(calibration["measured"])
+            ratio = float(calibration["ratio"])
+        except (KeyError, TypeError, ValueError):
+            return Check("radiometry_grey_card", FAIL,
+                         f"{camera}: calibration.json lacks predicted / measured / ratio",
+                         failure=FAIL_RADIOMETRY)
+        own = block.get("grey_card_predicted")
+        if not isinstance(own, (int, float)) or predicted <= 0.0 \
+                or abs(predicted - float(own)) > 1e-6 * abs(predicted):
+            return Check("radiometry_grey_card", FAIL,
+                         f"{camera}: calibration.json predicts {predicted!r} for the grey card where the "
+                         f"manifest's chain predicts {own!r}", failure=FAIL_RADIOMETRY)
+        if abs(ratio - measured / predicted) > 1e-6 * max(1.0, abs(ratio)):
+            return Check("radiometry_grey_card", FAIL,
+                         f"{camera}: calibration.json's ratio {ratio:.6f} is not its own measured / "
+                         f"predicted {measured / predicted:.6f}", failure=FAIL_RADIOMETRY)
+        if block.get("calibration_status") != "measured":
+            return Check("radiometry_grey_card", FAIL,
+                         f"{camera}: a calibration file exists but the manifest's chain is "
+                         f"{block.get('calibration_status')!r}, not measured", failure=FAIL_RADIOMETRY)
+        if abs(ratio - 1.0) > GREY_CARD_TOL:
+            return Check("radiometry_grey_card", FAIL,
+                         f"{camera}: the grey card measured {ratio:.4f} of its prediction "
+                         f"(tolerance {GREY_CARD_TOL * 100:.0f} %)", failure=FAIL_RADIOMETRY)
+        graded += 1
+        details.append(f"{camera}: grey card measured / predicted {ratio:.4f}")
+    if graded == 0:
+        return Check("radiometry_grey_card", NOT_RUN, "; ".join(details))
+    return Check("radiometry_grey_card", PASS, "; ".join(details))
+
+
+# -- P7: the wake-vortex pair's selftest vectors -------------------------------
+
+#: How far the checker's own evaluation of the card's field may sit from
+#: the card's vectors, and a host's from the card's: 1e-9 m/s and rad/s
+#: (the blueprint's bound; two IEEE-754 evaluations of one closed form).
+WAKE_SELFTEST_TOL = 1e-9
+FAIL_WAKE = "check.wake_selftest"
+WAKE_SELFTEST_KEYS = ("y_m", "z_m", "age_s", "u_mps", "v_mps", "w_mps", "p_eq_rad_s")
+
+
+def _wake_vortex_speed(r, gamma, r_c):
+    """Burnham-Hallock, written from the definition: Gamma/(2 pi r) x r^2/(r^2 + r_c^2)."""
+    return gamma * r / (2.0 * math.pi * (r * r + r_c * r_c))
+
+
+def _wake_pair(y, z, gamma, b_0, r_c):
+    """(v, w_up) of the pair: starboard (+b_0/2) counter-clockwise seen from
+    behind, port (-b_0/2) clockwise; y right, z up."""
+    v = w = 0.0
+    for y0, sign in ((0.5 * b_0, 1.0), (-0.5 * b_0, -1.0)):
+        dy, dz = y - y0, z
+        r = math.hypot(dy, dz)
+        if r > 0.0:
+            s = _wake_vortex_speed(r, gamma, r_c)
+            v += sign * s * (-dz / r)
+            w += sign * s * (dy / r)
+    return v, w
+
+
+def _wake_p_eq(y, z, gamma, b_0, r_c, span):
+    """(12/b^3) int w_up(y + s) s ds over the span by 32-point Gauss-Legendre
+    (numpy's nodes; the producer's rule of the same order, re-written)."""
+    import numpy as np
+
+    nodes, weights = np.polynomial.legendre.leggauss(32)
+    total = 0.0
+    for x, wt in zip(nodes, weights):
+        s = 0.5 * span * float(x)
+        total += float(wt) * s * _wake_pair(y + s, z, gamma, b_0, r_c)[1]
+    return 12.0 / span ** 3 * total * 0.5 * span
+
+
+def verify_wake_selftest(manifest: Dict, run_dir=None) -> Check:
+    """The run card's ``wake`` block against the checker's own evaluation
+    of the same closed forms: for each of the five selftest vectors, u = 0,
+    (v, w down) from the checker's Burnham-Hallock pair at the card's
+    Gamma at the age, b_0 and r_c, and p_eq from the checker's own
+    strip-theory quadrature over the card's own span, each within
+    WAKE_SELFTEST_TOL; then, where a render host wrote
+    ``environment.wake_selftest`` into a render.json (P9), the host's
+    vectors against the card's within the same bound. NOT RUN without a
+    run directory, a card.json or a wake block (no wake was stated), and
+    the host half is reported NOT RUN inside the detail when no render.json
+    carries the key. FAIL (check.wake_selftest) on a block missing a key,
+    a vector that does not reproduce, or a host vector that differs. What
+    is NOT checked: Gamma_0 itself against the generator's weight (the card
+    states it; the generator's data are the producer's), the decay's
+    history (the card's circulation at the age is taken as stated), and
+    that the field reached the aircraft (the delivery is the run's own
+    read-back)."""
+    if run_dir is None:
+        return Check("wake_selftest", NOT_RUN, "no run directory: no card to read")
+    card_path = Path(run_dir) / "card.json"
+    if not card_path.is_file():
+        return Check("wake_selftest", NOT_RUN, "no card.json in the run directory")
+    try:
+        card = json.loads(card_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return Check("wake_selftest", FAIL, f"card.json could not be read: {exc}", FAIL_WAKE)
+    wake = card.get("wake") if isinstance(card, dict) else None
+    if not isinstance(wake, dict):
+        return Check("wake_selftest", NOT_RUN, "the card states no wake: nothing to re-evaluate")
+    try:
+        b_0 = float(wake["b_0"])
+        r_c = float(wake["r_c"])
+        gamma = float(wake["decay"]["gamma_at_age_0_m2_s"])
+        span = float(wake["geometry"]["own_span_m"])
+        vectors = list(wake["selftest"])
+    except (KeyError, TypeError, ValueError) as exc:
+        return Check("wake_selftest", FAIL,
+                     f"the wake block lacks a key the re-evaluation needs: {exc!r}", FAIL_WAKE)
+    if len(vectors) != 5 or any(tuple(v) != WAKE_SELFTEST_KEYS for v in vectors):
+        return Check("wake_selftest", FAIL,
+                     f"the selftest is not five vectors of {list(WAKE_SELFTEST_KEYS)}", FAIL_WAKE)
+    worst = 0.0
+    for vector in vectors:
+        y, z = float(vector["y_m"]), float(vector["z_m"])
+        v, w_up = _wake_pair(y, z, gamma, b_0, r_c)
+        own = {"u_mps": 0.0, "v_mps": v, "w_mps": -w_up,
+               "p_eq_rad_s": _wake_p_eq(y, z, gamma, b_0, r_c, span)}
+        for key, value in own.items():
+            worst = max(worst, abs(float(vector[key]) - value))
+    if worst > WAKE_SELFTEST_TOL:
+        return Check("wake_selftest", FAIL,
+                     f"the card's selftest vectors differ from the checker's own Burnham-Hallock "
+                     f"pair and strip-theory quadrature by up to {worst:.3e} (bound "
+                     f"{WAKE_SELFTEST_TOL:g})", FAIL_WAKE)
+    host_worst = None
+    host_files = 0
+    for path in sorted(Path(run_dir).rglob("render.json")):
+        try:
+            render = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        host = (render.get("environment") or {}).get("wake_selftest") if isinstance(render, dict) else None
+        if not isinstance(host, list):
+            continue
+        host_files += 1
+        if len(host) != len(vectors):
+            return Check("wake_selftest", FAIL,
+                         f"{path.name} carries {len(host)} host vectors for the card's "
+                         f"{len(vectors)}", FAIL_WAKE)
+        for ours, theirs in zip(vectors, host):
+            for key in ("u_mps", "v_mps", "w_mps", "p_eq_rad_s"):
+                try:
+                    diff = abs(float(ours[key]) - float(theirs[key]))
+                except (KeyError, TypeError, ValueError):
+                    return Check("wake_selftest", FAIL,
+                                 f"{path.name}'s host vector lacks {key}", FAIL_WAKE)
+                host_worst = diff if host_worst is None else max(host_worst, diff)
+    if host_worst is not None and host_worst > WAKE_SELFTEST_TOL:
+        return Check("wake_selftest", FAIL,
+                     f"the render host's wake selftest differs from the card's vectors by up to "
+                     f"{host_worst:.3e} (bound {WAKE_SELFTEST_TOL:g})", FAIL_WAKE)
+    return Check("wake_selftest", PASS,
+                 f"five vectors re-evaluated by the checker's own pair and quadrature, worst "
+                 f"{worst:.3e}; host half "
+                 + ("NOT RUN (no render.json carries environment.wake_selftest: the host port "
+                    "is a Windows step)" if host_worst is None else
+                    f"PASS over {host_files} render.json, worst {host_worst:.3e}"))
+
 
 def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     """The pass/fail summary over a run directory (CLI: flightsim.verify).
@@ -4841,11 +5318,21 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     # D2: the Entity State PDU log against the recording, by the checker's
     # own decode -- NOT RUN without a stream, never a pass on absence.
     run("dis_roundtrip", verify_dis_roundtrip, manifest, run_dir)
+    # P7: the wake card's five selftest vectors against the checker's own
+    # Burnham-Hallock pair and strip-theory quadrature; the host's vectors
+    # against the card's where a render.json carries them.
+    run("wake_selftest", verify_wake_selftest, manifest, run_dir)
     # I6 (gap S3): the ground-truth passes -- NOT RUN without their files,
     # never a pass on absence.
     run("normals_vs_depth", verify_normals_vs_depth, manifest, run_dir)
     run("flow_vs_motion", verify_flow_vs_motion, manifest, run_dir)
     run("albedo_range", verify_albedo_range, manifest, run_dir)
+    # S1 (gap S1/S2): the PSF on the calibration edge, the blur against
+    # the flow, the grey card against the chain -- each NOT RUN without
+    # its evidence, never a pass on absence.
+    run("psf_slanted_edge", verify_psf_slanted_edge, manifest, run_dir)
+    run("blur_vs_flow", verify_blur_vs_flow, manifest, run_dir)
+    run("radiometry_grey_card", verify_radiometry_grey_card, manifest, run_dir)
 
     if other is not None:
         run("temporal_alignment", verify_alignment, manifest, other)

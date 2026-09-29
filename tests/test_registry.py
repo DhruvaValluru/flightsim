@@ -66,6 +66,18 @@ LOADING = ("loading.payload_kg", "loading.fuel_kg", "loading.fuel_fraction")
 #: recorded column (the export reads them), nulls are the block's defaults.
 DIS = ("dis.site", "dis.application", "dis.entity", "dis.force_id", "dis.marking",
        "dis.timestamp_mode")
+#: S1: the scene section claimed whole (nulls the block's defaults; the
+#: effect channels are the columns the scene's consumers read) and the
+#: four sensing observers (no section.leaf spec field: cameras[i].<field>
+#: is a list element; recorded through the manifest's sensing block).
+SCENE = ("scene.terrain_source", "scene.terrain", "scene.sun_lux")
+SENSING = ("sensing.radiometry", "sensing.bands", "sensing.optics", "sensing.motion_blur")
+#: P7: the wake block, one entry per field (the generator and decay words
+#: included); every field drives the four gust / roll-property writes,
+#: read back exact; nulls are the block's defaults (no generator = no wake).
+WAKE = ("wake.generator", "wake.generator_speed_kt", "wake.lateral_offset_m",
+        "wake.vertical_offset_m", "wake.separation_s", "wake.age_s", "wake.model",
+        "wake.eps_star", "wake.n_star")
 
 
 def _entry(**overrides):
@@ -81,7 +93,26 @@ def test_every_batch_1_variable_and_every_physics_variable_is_registered():
     assert set(REGISTRY.names()) == (set(BATCH_1) | set(PHYSICS) | set(WORDS) | set(DATUM)
                                      | set(INJECTED) | set(P6) | set(ENVIRONMENT)
                                      | set(LOADING) | set(FAILURES) | set(FAILURE_KINDS)
-                                     | set(ICING) | set(ICING_FACTORS) | set(DIS))
+                                     | set(ICING) | set(ICING_FACTORS) | set(DIS) | set(WAKE)
+                                     | set(SCENE) | set(SENSING))
+    for name in SCENE:
+        entry = REGISTRY.get(name)
+        assert entry.spec_path == name and entry.null_value is not NO_NULL
+        assert not entry.jsbsim_writes and entry.effect_channels and entry.null_basis
+    assert REGISTRY.get("scene.terrain_source").null_value == "auto"
+    assert REGISTRY.get("scene.terrain").null_value is None
+    assert REGISTRY.get("scene.sun_lux").null_value is None and REGISTRY.get("scene.sun_lux").unit == "lx"
+    for name in SENSING:
+        entry = REGISTRY.get(name)
+        assert entry.spec_path is None and entry.null_value is NO_NULL and entry.null_basis
+    for name in WAKE:
+        entry = REGISTRY.get(name)
+        assert entry.spec_path == name and entry.null_value is not NO_NULL
+        assert entry.jsbsim_writes and entry.readback_tolerance is not None
+        assert entry.effect_channels and entry.null_basis
+        assert [w.property for w in entry.jsbsim_writes][-1] == "gust/p-equivalent-rad_sec"
+    assert REGISTRY.get("wake.generator").null_value is None
+    assert REGISTRY.get("wake.model").null_value == "none"
     for name in DIS:
         entry = REGISTRY.get(name)
         assert entry.spec_path == name and entry.null_value is not NO_NULL
@@ -154,13 +185,13 @@ def test_every_batch_1_variable_and_every_physics_variable_is_registered():
         assert entry.effect_channels and entry.null_basis
     assert REGISTRY.get("loading.payload_kg").readback_tolerance.value == 0.1
     assert REGISTRY.sections() == ("atmosphere", "datum", "dis", "environment", "failures", "icing",
-                                   "loading", "turbulence_model", "wind_profile")
+                                   "loading", "scene", "turbulence_model", "wake", "wind_profile")
     # Every spec field of the claimed blocks, and every environment quantity
     # of the spec, is claimed: the validator's record.unregistered check is
     # what a stated block meets first.
     from core.scenario.blocks import (
         AtmosphereSpec, DatumSpec, DisSpec, FailuresSpec, IcingSpec, LoadingSpec, TurbulenceModelSpec,
-        WindProfileSpec,
+        SceneSpec, WakeSpec, WindProfileSpec,
     )
     from core.scenario.spec import ScenarioSpec
     assert set(REGISTRY.spec_fields()) == (
@@ -172,6 +203,8 @@ def test_every_batch_1_variable_and_every_physics_variable_is_registered():
         | {f"failures.{f}" for f in FailuresSpec.FIELD_ORDER}
         | {f"icing.{f}" for f in IcingSpec.FIELD_ORDER}
         | {f"dis.{f}" for f in DisSpec.FIELD_ORDER}
+        | {f"wake.{f}" for f in WakeSpec.FIELD_ORDER}
+        | {f"scene.{f}" for f in SceneSpec.FIELD_ORDER}
         | {f"{sec}.{n}" for sec, n in ScenarioSpec.FIELD_ORDER if sec == "environment"})
 
 
@@ -291,6 +324,7 @@ def test_the_new_unit_suffixes_read_back():
     # registry keeps no table of its own -- this one, longest first).
     assert suffix_unit("gust_p_equivalent_rad_s") == "rad/s"
     assert suffix_unit("shear_dv_dz_per_s") == "1/s"
+    assert suffix_unit("wake_gamma_m2_s") == "m^2/s"       # P7: a circulation, never seconds
     # Longest-first: none of the new suffixes shadows an old one.
     assert suffix_unit("v_mps") == "m/s" and suffix_unit("q_rad") == "rad"
     assert suffix_unit("qbar_pa") == "Pa" and suffix_unit("m_kg") == "kg"
@@ -323,9 +357,15 @@ def test_a_spec_that_states_no_registered_field_keeps_its_digest_and_needs_no_re
         spec = ScenarioSpec.read(REPO / path)
         assert spec.digest() == digest, path
         data = spec.to_dict()
-        assert [s for s in REGISTRY.sections() if s in data] == ["environment"], path
+        # S1: the one example that states a scene block now states a
+        # claimed section (scene, its two fields registered); its sun_lux
+        # is absent-canonical, so the digest above is unchanged.
+        states_scene = "scene" in data
+        expected_sections = ["environment", "scene"] if states_scene else ["environment"]
+        assert [s for s in REGISTRY.sections() if s in data] == expected_sections, path
         assert unregistered_fields(data) == []
-        assert set(REGISTRY.stated_variables(data)) == set(ENVIRONMENT), path
+        expected = set(ENVIRONMENT) | ({"scene.terrain_source", "scene.terrain"} if states_scene else set())
+        assert set(REGISTRY.stated_variables(data)) == expected, path
 
 
 # -- the readbacks, measured on the c172p --------------------------------------------

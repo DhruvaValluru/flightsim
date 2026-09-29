@@ -396,6 +396,27 @@ def build_parser() -> argparse.ArgumentParser:
                              "of normal, velocity, albedo (I6; each optional; "
                              "frame_NNNN_normal.png / _flow.f32 / "
                              "_albedo.png). None by default.")
+    # S1: the sensing opt-ins (core/render/flags.py sensing_flags; S4
+    # honours them in the commandlet, uncompiled here).
+    parser.add_argument("--calibration", action="store_true",
+                        help="with --render, also render the calibration frame per camera: an "
+                             "emissive grey card, a Lambertian white quad under the sun alone "
+                             "and a 5 degree slanted-edge quad (calibration.json beside the "
+                             "bundle; the grey-card ratio makes the radiometry 'measured' and "
+                             "the edge quad runs the verifier's psf_slanted_edge). Off by "
+                             "default.")
+    parser.add_argument("--sun-lux", default=None, metavar="LUX|auto",
+                        help="with --render, set the sun in physical units: a number of lux, "
+                             "or 'auto' for the spec's scene.sun_lux, else the clear-sky model "
+                             "at the look's sun elevation (core/scenario/solar.py, provenance "
+                             "model). Refused by name (sensing.sun_lux) outside (0, 133100]. "
+                             "Off by default: the engine's own sun (8.0, unitless) stands and "
+                             "the radiometry chain records sensing.exposure_units.")
+    parser.add_argument("--accumulate", type=int, default=None, metavar="K",
+                        help="with --render, ask the engine for K sub-exposure captures per "
+                             "frame on a dedicated AA-off capture (motion blur by "
+                             "accumulation; the Python velocity-line blur is then recorded, "
+                             "not applied). Off by default.")
     parser.add_argument("--no-host-flight", action="store_true",
                         help="with --render, skip the host's own solve "
                              "flight and solve the poses over the "
@@ -824,15 +845,26 @@ def _run(args: argparse.Namespace) -> int:
     from core.capture.poses import solve_traffic_track
 
     traffic_objects = [o for o in compose_objects(spec) if o.role == "traffic"]
+    # P7: the wake generator is the last traffic-role object when the spec
+    # states one; its track is the straight line the physics placed it on
+    # (the run manifest's wake card geometry), solved beside the traffic.
+    wake_geometry = ((result.manifest.get("wake") or {}).get("card") or {}).get("generator")
+    wake_object = (traffic_objects[len(spec.traffic)]
+                   if wake_geometry and len(traffic_objects) > len(spec.traffic) else None)
 
     def solve_traffic(flight):
         """The scripted traffic tracks over one recorded flight (Phase
         2, package B): solved beside the cameras, from the same
         telemetry, so the second aircraft's keyframes and the labels
-        that describe it come out of one flight."""
-        return [solve_traffic_track(flight, str(entry.track.value),
-                                    float(entry.range_m.value), frame, obj.id)
-                for entry, obj in zip(spec.traffic, traffic_objects)]
+        that describe it come out of one flight. The wake generator's
+        track (P7) rides last."""
+        tracks = [solve_traffic_track(flight, str(entry.track.value),
+                                      float(entry.range_m.value), frame, obj.id)
+                  for entry, obj in zip(spec.traffic, traffic_objects)]
+        if wake_object is not None:
+            tracks.append(solve_traffic_track(flight, "wake_generator", 0.0, frame,
+                                              wake_object.id, wake=wake_geometry))
+        return tracks
 
     def solve_over(flight):
         """Pose tracks, schedules and their scene violations over one
@@ -886,6 +918,16 @@ def _run(args: argparse.Namespace) -> int:
             mesh = mesh_manifest_path(name)
             traffic_blocks.append(traffic_card_block(
                 track, entry, obj, frame,
+                load_airframe(name).cg_structural_in,
+                str(mesh) if mesh.is_file() else None))
+        if wake_object is not None and len(traffic_tracks) > len(spec.traffic):
+            # P7: the wake generator, drawn on the track the physics stated.
+            from core.capture.poses import wake_generator_card_block
+
+            name = str(wake_geometry["aircraft"])
+            mesh = mesh_manifest_path(name)
+            traffic_blocks.append(wake_generator_card_block(
+                traffic_tracks[len(spec.traffic)], name, wake_geometry, wake_object, frame,
                 load_airframe(name).cg_structural_in,
                 str(mesh) if mesh.is_file() else None))
         return write_run_card(
@@ -1011,7 +1053,11 @@ def _run(args: argparse.Namespace) -> int:
         heightfield=heightfield, terrain_elevation_m=terrain_datum,
         # Phase 2 (package B): the scripted traffic's solved tracks, so
         # every frame carries a label record for the second aircraft.
-        traffic_tracks=traffic_tracks,
+        traffic_tracks=traffic_tracks[:len(spec.traffic)],
+        # P7: the wake generator's object, airframe and track, labelled
+        # like a traffic aircraft (None when no generator is stated).
+        wake_generator=(None if wake_object is None else
+                        (wake_object, str(wake_geometry["aircraft"]), traffic_tracks[len(spec.traffic)])),
         # R1: the V&V 20 block, or None (then no key: absent-canonical).
         uncertainty=uncertainty_block)
     if null_pairs:
@@ -1189,6 +1235,32 @@ def _run(args: argparse.Namespace) -> int:
     # every card this command writes carries cameras, so the commandlet
     # takes the size from the card's own camera and they are inert
     # (core/render/flags.py says what is and is not claimed).
+    # S1: the sun in lux the render is handed -- the stated number, or
+    # 'auto' (the spec's scene.sun_lux, else the clear-sky model at the
+    # look's sun elevation), refused sensing.sun_lux by name here, before
+    # any render time is spent. None = the option was not given.
+    sun_lux_flag = None
+    if args.sun_lux is not None:
+        from core.capture.radiometry import sun_lux_for_spec
+        from core.scenario.solar import SunLuxError, sun_lux_problem
+
+        try:
+            if str(args.sun_lux).strip().lower() == "auto":
+                sun_block = sun_lux_for_spec(spec)
+                if sun_block.get("value") is None:
+                    raise SunLuxError(f"no sun to evaluate: {sun_block.get('from')}")
+                sun_lux_flag = float(sun_block["value"])
+            else:
+                try:
+                    sun_lux_flag = float(args.sun_lux)
+                except ValueError:
+                    raise SunLuxError(f"--sun-lux takes a number of lux or 'auto', not {args.sun_lux!r}")
+                problem = sun_lux_problem(sun_lux_flag)
+                if problem:
+                    raise SunLuxError(problem)
+        except SunLuxError as exc:
+            print(f"REFUSED -- {exc.constraint}: {exc.message}")
+            return 2
     command += for_wrapper(render_flags(
         out / "card.json", frames_dir,
         scene={"terrain": terrain_stem},
@@ -1196,7 +1268,9 @@ def _run(args: argparse.Namespace) -> int:
         look=render_look(spec), camera_flags=None,
         labels=True, deterministic=True, void=bool(args.void),
         width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, fps=DEFAULT_FPS,
-        passes=[w for w in (args.passes or "").split(",") if w.strip()]))
+        passes=[w for w in (args.passes or "").split(",") if w.strip()],
+        calibration=bool(args.calibration), sun_lux=sun_lux_flag,
+        accumulate=args.accumulate))
     print(f"rendering {len(cameras)} camera pass(es) into {frames_dir} "
           f"{'in the black void (--void)' if args.void else 'in the visual scene'} ...")
     completed = subprocess.run(command)
@@ -1231,6 +1305,21 @@ def _run(args: argparse.Namespace) -> int:
     if sensor_written:
         print("  sensor:   " + ", ".join(f"{cam} x{n} sensor frames"
                                         for cam, n in sorted(sensor_written.items())))
+
+    # S1: the radiometry chain after the render -- the lens attenuation
+    # read back, the sun's light units checked (sensing.exposure_units by
+    # name when the engine's sun is not in lux), the grey card's ratio
+    # when a calibration frame exists (S4) -- written back per camera and
+    # per frame.
+    from core.capture.radiometry import attach_render_radiometry
+
+    radiometry = attach_render_radiometry(out, manifest)
+    if radiometry["cameras"]:
+        write_capture_manifest(manifest, out)
+        write_frame_sidecars(manifest, out)
+        print(f"  sensing:  radiometry on {radiometry['cameras']} camera(s); "
+              f"{len(radiometry['measured'])} measured by a grey card, "
+              f"{len(radiometry['refused'])} refused sensing.exposure_units (the sun is not in lux)")
 
     from core.capture.overlay import draw_overlays
 

@@ -26,6 +26,7 @@ from typing import Any, Dict, Optional
 
 from ..control.autopilot import Autopilot, ClosureReport, ClosureTolerance
 from ..environment.icing import icing_injections_for
+from ..environment.wake import TELEMETRY_COLUMNS as WAKE_COLUMNS, WakeVortexPair, unread_wake_fields, wake_injections_for
 from ..environment.stack import EnvironmentStack
 from ..environment.turbulence import DrydenTurbulence, W20_KT
 from ..environment.wind import SteadyWind
@@ -108,6 +109,21 @@ def environment_for(spec: ScenarioSpec, landcover_json=None) -> EnvironmentStack
     icing = icing_for(spec)
     if icing is not None:
         stack.add(icing)
+    # P7: the wake-vortex pair (a GustProvider: the stack sums it into the
+    # gust channel every step and delivers its equivalent roll rate where
+    # the derived airframe declares the property). A block that names no
+    # generator applies nothing -- the user asked for no encounter -- and
+    # its stated fields are recorded as unread beside the providers.
+    wake = wake_for(spec)
+    if wake is not None:
+        stack.add(wake)
+    else:
+        unread = unread_wake_fields(spec)
+        if unread:
+            stack.notes.append({"provider": "wake_vortex_pair", "applied": False,
+                                "reason": "no generator named: the stated wake fields are "
+                                          "carried, not applied",
+                                "unread_stated_fields": unread})
 
     surface = surface_class(str(spec.surface.value))
     # W1: the roughness inferred from the bake's dominant land cover when
@@ -318,6 +334,34 @@ def loading_for(spec: ScenarioSpec):
     return LoadingProvider.from_spec(spec)
 
 
+def wake_for(spec: ScenarioSpec):
+    """The wake-vortex pair a spec asks for (P7: the generator's pair at
+    the stated geometry, delivered through the gust channel and the
+    gust_rotation injection), or None for the default block and for a
+    block naming no generator. Refuses by name what the validator
+    refuses (the generator's data included)."""
+    return WakeVortexPair.from_spec(spec)
+
+
+def wake_recorder_extras(environment: EnvironmentStack) -> Dict[str, Any]:
+    """The nine wake columns (core/environment/wake.py TELEMETRY_COLUMNS)
+    for every run: the provider's last evaluation where the stack holds a
+    wake, 0.0 where it does not (nothing reached the aircraft)."""
+    for provider in environment.gust:
+        if isinstance(provider, WakeVortexPair):
+            return provider.recorder_extras()
+    return {column: (lambda _fdm: 0.0) for column in WAKE_COLUMNS}
+
+
+def wake_block(environment: EnvironmentStack) -> Optional[Dict[str, Any]]:
+    """The run manifest's ``wake`` block from the stack's wake provider
+    (P7), or None when the spec stated no generator."""
+    for provider in environment.gust:
+        if isinstance(provider, WakeVortexPair):
+            return provider.manifest_block()
+    return None
+
+
 def icing_for(spec: ScenarioSpec):
     """The icing provider a spec asks for (P5: the severity ramp driving
     the six injected axis factors and the stall-onset cue), or None for
@@ -442,6 +486,13 @@ def fdm_at_initial_conditions(spec: ScenarioSpec) -> FlightDynamics:
     if icing_injections:
         injections = tuple(dict.fromkeys(
             (("tecs",) if bool(spec.hold_state.value) else ()) + injections + icing_injections))
+    # P7: a stated wake generator flies the airframe derived with the
+    # gust_rotation injection (the equivalent roll rate needs the
+    # property), beside whatever the other blocks selected.
+    wake_injections = wake_injections_for(spec)
+    if wake_injections:
+        injections = tuple(dict.fromkeys(
+            (("tecs",) if bool(spec.hold_state.value) else ()) + injections + wake_injections))
     if injections:
         # P3: a scheduled surface failure acts on the failure chain the
         # failures injection carries (core/control/derive.py), so the
@@ -540,8 +591,11 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
     # dV/dz) ride beside the surfaces; every other channel is JSBSim's.
     # P3: the schedule's failure_state_flag and the engine channels of
     # this airframe beside them (core/telemetry/failures.py).
+    # P7: the wake's nine columns beside them (the provider's own numbers,
+    # not JSBSim's: the gust channel holds the stack's SUM), 0 on a run
+    # without a wake.
     recorder = Recorder(fdm, interval_s=0.1, extra={**SURFACES, **environment.recorder_extras()}
-                        | schedule.recorder_extras())
+                        | schedule.recorder_extras() | wake_recorder_extras(environment))
     recorder.sample(force=True)
     recorder.mark("trimmed" if autopilot is None else "trimmed, autopilot engaged")
     if autopilot is None and terrain_ground is None:
@@ -621,6 +675,9 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         # P5: the icing schedule as delivered -- the k-table, the pre-trim
         # measurement, the per-step read-back; null for the default block.
         "icing": icing_block(environment),
+        # P7: the wake as delivered -- Gamma_0, the geometry, the decay,
+        # the per-step peaks and the card; null for the default block.
+        "wake": wake_block(environment),
         # Modal analysis (gap M2, row A5): a RESULT about the trim, computed
         # on its own FDM so the recorded flight is untouched (measured:
         # linearising an executive disturbs it; the digest above is unchanged

@@ -147,7 +147,35 @@ def exposure_violations(camera: CameraSpec,
                 "camera.exposure",
                 f"{who}: exposure.{name} must be a positive number",
                 actual=raw, limit=0.0, unit=unit))
+    # S1: the exposure compensation (stops) rides beside the triple.
+    ec = getattr(getattr(camera, "exposure_compensation_ev", None), "value", 0.0)
+    try:
+        ec_value = float(ec)
+    except (TypeError, ValueError):
+        ec_value = None
+    if isinstance(ec, bool) or ec_value is None or not math.isfinite(ec_value) \
+            or abs(ec_value) > MAX_EXPOSURE_COMPENSATION_EV:
+        out.append(Violation(
+            "camera.exposure",
+            f"{who}: exposure_compensation_ev must be a number of stops within "
+            f"+-{MAX_EXPOSURE_COMPENSATION_EV:g}",
+            actual=ec, limit=MAX_EXPOSURE_COMPENSATION_EV, unit="EV"))
+    # S1: a stated band file must load (assets/sensor_bands/<name>.json).
+    band = getattr(getattr(camera, "bands", None), "value", None)
+    if band is not None:
+        from .radiometry import RadiometryError, load_bands
+
+        try:
+            load_bands(str(band))
+        except RadiometryError as exc:
+            out.append(Violation(exc.constraint, f"{who}: {exc.message}"))
     return out
+
+
+#: S1: the widest exposure compensation a camera may state (stops); a
+#: stated choice -- ten stops either way is a factor of a thousand, past
+#: any bracket a physical camera offers.
+MAX_EXPOSURE_COMPENSATION_EV = 10.0
 
 
 def identifier_violations(camera: CameraSpec,
@@ -222,10 +250,17 @@ def vocabulary_violations(camera: CameraSpec,
     # camera.profile: the sensor model must exist and cite a source.
     from .profile import CameraProfileError, load_profile
 
+    from .blur import MotionBlurError
+    from .optics import OpticsError
+    from .radiometry import RadiometryError
+
     try:
         load_profile(str(camera.profile.value))
     except CameraProfileError as exc:
         out.append(Violation("camera.profile", f"{who}: {exc.message}"))
+    except (OpticsError, MotionBlurError, RadiometryError) as exc:
+        # S1: a profile's optional block, refused by that block's own name.
+        out.append(Violation(exc.constraint, f"{who}: profile {camera.profile.value!r}: {exc.message}"))
     mode = str(camera.position_mode.value)
     if mode not in POSITION_MODES:
         out.append(Violation(

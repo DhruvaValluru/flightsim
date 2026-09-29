@@ -103,6 +103,20 @@ _SWITCHES: Tuple[str, ...] = (
 #: byte-identical (tests/test_annotation_passes.py measures that).
 PASS_NAMES: Tuple[str, ...] = ("normal", "velocity", "albedo")
 
+#: S1 (gap S1/S2): three opt-in sensing flags for the commandlet (S4
+#: implements them; uncompiled here). ``-calibration`` adds the
+#: calibration frame (emissive grey card, Lambertian white quad under
+#: the sun alone, a 5 degree slanted-edge quad; calibration.json);
+#: ``-sun-lux=<lux>`` sets the directional light in physical units
+#: (light_units 'physical' in look_applied); ``-accumulate=<K>`` asks for
+#: K sub-exposure captures on a dedicated AA-off capture (k = 1 recorded
+#: when the predicted blur is under 0.25 px). Each is emitted ONLY when
+#: asked, after the passes flag, so every list pinned before them is
+#: byte-identical (tests/test_render_flags.py measures that).
+CALIBRATION_FLAG = "-calibration"
+SUN_LUX_PREFIX = "-sun-lux="
+ACCUMULATE_PREFIX = "-accumulate="
+
 
 def passes_flag(passes: Iterable[str]) -> Optional[str]:
     """``-passes=a,b`` for the requested passes in :data:`PASS_NAMES`
@@ -118,6 +132,33 @@ def passes_flag(passes: Iterable[str]) -> Optional[str]:
     return f"-passes={','.join(ordered)}" if ordered else None
 
 
+def sensing_flags(calibration: bool = False, sun_lux=None, accumulate=None) -> List[str]:
+    """The S1 opt-in tokens in their fixed order: ``-calibration``,
+    ``-sun-lux=<lux>``, ``-accumulate=<K>``; an empty list when nothing is
+    asked. A sun that is not a positive finite number of lux, or an
+    accumulation that is not an integer of at least 1, is refused HERE
+    (ValueError) rather than sent: the commandlet would refuse it too,
+    but after building the scene."""
+    import math
+
+    out: List[str] = []
+    if calibration:
+        out.append(CALIBRATION_FLAG)
+    if sun_lux is not None:
+        try:
+            lux = float(sun_lux)
+        except (TypeError, ValueError):
+            raise ValueError(f"-sun-lux takes a number of lux, not {sun_lux!r}")
+        if isinstance(sun_lux, bool) or not math.isfinite(lux) or lux <= 0.0:
+            raise ValueError(f"-sun-lux takes a positive number of lux, not {sun_lux!r}")
+        out.append(f"{SUN_LUX_PREFIX}{lux:g}")
+    if accumulate is not None:
+        if isinstance(accumulate, bool) or int(accumulate) != accumulate or int(accumulate) < 1:
+            raise ValueError(f"-accumulate takes a whole number of sub-exposures >= 1, not {accumulate!r}")
+        out.append(f"{ACCUMULATE_PREFIX}{int(accumulate)}")
+    return out
+
+
 def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
                  mesh, look: Optional[Mapping[str, Any]],
                  camera_flags: Optional[Tuple[Sequence[str], Sequence[str]]],
@@ -125,7 +166,8 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
                  deterministic: bool = True, void: bool = False,
                  width: int, height: int, fps: float,
                  telemetry=None, extra: Iterable[str] = (),
-                 passes: Iterable[str] = ()) -> List[str]:
+                 passes: Iterable[str] = (), calibration: bool = False,
+                 sun_lux=None, accumulate=None) -> List[str]:
     """The ORDERED argument list for the FlightSimRender commandlet,
     after the ``<editor> <project> -run=FlightSimBridge.FlightSimRender``
     tokens.
@@ -176,6 +218,12 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
     commandlet is uncompiled off Windows (source pins in
     ``tests/test_gate6_visual.py``).
 
+    ``calibration`` / ``sun_lux`` / ``accumulate`` (S1): the sensing
+    opt-ins, :func:`sensing_flags`, after the passes flag and only when
+    asked -- the default list is byte-identical to the one before they
+    existed. Not claimed here: that the engine honours them (S4,
+    uncompiled off Windows).
+
     Returns a new list every call. Behaviour byte-identical to the web
     app's pre-builder command for every flag it passed (pinned by
     ``tests/test_camera_spec.py`` and ``tests/test_render_flags.py``).
@@ -214,6 +262,10 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
     pass_token = passes_flag(passes)
     if pass_token is not None and pass_token not in flags:
         flags.append(pass_token)
+    # S1: the sensing opt-ins, only when asked, after the passes flag.
+    for token in sensing_flags(calibration, sun_lux, accumulate):
+        if token not in flags:
+            flags.append(token)
     if not void and scene.get("terrain"):
         flags += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
     if not void and scene.get("imagery"):

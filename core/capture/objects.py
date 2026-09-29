@@ -203,6 +203,22 @@ def object_entries(spec, config_dir: Optional[Path] = None) -> List[Dict]:
             "licence": licence_of(aircraft, config_dir),
             "in_scene": True, "labelled": True,
         })
+    # P7: the wake generator (the spec's wake block) is one more scripted
+    # aircraft, composed after the traffic entries with the next instance
+    # number, so its mesh and its label ride like a traffic aircraft's.
+    wake = getattr(spec, "wake", None)
+    generator = None if wake is None else wake.generator.value
+    if generator is not None:
+        index = len(spec.traffic) + 1
+        entries.append({
+            "id": f"aircraft:{generator}:{index}",
+            "class_name": CLASS_AIRCRAFT,
+            "class_id": class_id_of(classes, CLASS_AIRCRAFT),
+            "instance": index, "role": ROLE_TRAFFIC,
+            "mesh_sha256": mesh_sha256(str(generator)),
+            "licence": licence_of(str(generator), config_dir),
+            "in_scene": True, "labelled": True,
+        })
     # The scene classes present. The render scene always draws a ground
     # -- a raster or the flat datum plane -- so the terrain object is in
     # every scene and labelled (its pixels carry its int_id in the ID

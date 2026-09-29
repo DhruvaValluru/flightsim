@@ -130,6 +130,32 @@ DEFAULT_EXPOSURE = (8.0, 1.0 / 500.0, 100.0)
 EXPOSURE_DEFAULTS: Dict[str, tuple] = {preset: DEFAULT_EXPOSURE
                                        for preset in CAMERA_PRESETS}
 
+#: S1 (still spec 8; the integrator bumps once): two per-camera sensing
+#: fields, each a provenanced Quantity NOT in FIELD_ORDER and
+#: absent-canonical like ``exposure``: ``exposure_compensation_ev`` (EC,
+#: stops; +1 halves the luminance a unit of the linear frame stands
+#: for, core/capture/radiometry.py) and ``bands`` (the band file the
+#: radiance stage mixes by, assets/sensor_bands/<name>.json, or None).
+#: The defaults are omitted from the canonical camera, so every
+#: committed example keeps its digest (pinned by test); the registry
+#: cannot claim a list element (its sections are mappings), so both are
+#: recorded through the capture manifest's per-camera ``sensing`` block
+#: with their own null tests (docs/SENSING.md).
+SENSING_FIELDS = ("exposure_compensation_ev", "bands")
+DEFAULT_EXPOSURE_COMPENSATION_EV = 0.0
+DEFAULT_BANDS = None
+
+
+def default_sensing_fields() -> Dict[str, Quantity]:
+    """The two S1 camera fields at their documented defaults."""
+    return {
+        "exposure_compensation_ev": Quantity.default(
+            DEFAULT_EXPOSURE_COMPENSATION_EV, "EV",
+            frm="no exposure compensation: the manual EV100 as computed"),
+        "bands": Quantity.default(
+            DEFAULT_BANDS, frm="no band file stated: the three rendered channels as they are"),
+    }
+
 
 @dataclass
 class ExposureSpec:
@@ -280,6 +306,13 @@ class CameraSpec:
     #: block, addressed as ``cameras[i].exposure.<field>``.
     exposure: "ExposureSpec" = dc_field(default_factory=ExposureSpec.defaulted)
 
+    #: S1: exposure compensation (stops) and the band file, each a
+    #: Quantity, absent-canonical (see SENSING_FIELDS); addressed as
+    #: ``cameras[i].exposure_compensation_ev`` / ``cameras[i].bands``.
+    exposure_compensation_ev: Quantity = dc_field(
+        default_factory=lambda: default_sensing_fields()["exposure_compensation_ev"])
+    bands: Quantity = dc_field(default_factory=lambda: default_sensing_fields()["bands"])
+
     #: Canonical field order for serialisation and the rendered table.
     FIELD_ORDER = (
         "camera_id", "preset", "position_mode",
@@ -348,7 +381,20 @@ class CameraSpec:
         # spelling, and every spec-7 camera keeps its digest.
         if not self.exposure.is_default(str(self.preset.value)):
             out["exposure"] = self.exposure.to_dict()
+        # S1: the two sensing fields ride only when they differ from the
+        # documented default -- absent IS the default, one spelling.
+        defaults = default_sensing_fields()
+        for name in SENSING_FIELDS:
+            q = getattr(self, name)
+            if q.to_dict() != defaults[name].to_dict():
+                out[name] = q.to_dict()
         return out
+
+    def sensing_stated(self) -> bool:
+        """Whether either S1 field differs from its default."""
+        defaults = default_sensing_fields()
+        return any(getattr(self, name).to_dict() != defaults[name].to_dict()
+                   for name in SENSING_FIELDS)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "CameraSpec":
@@ -359,7 +405,12 @@ class CameraSpec:
             except KeyError as exc:
                 raise ValueError(
                     f"camera is missing required field {name}") from exc
-        unknown = set(data) - set(cls.FIELD_ORDER) - {"moves", "exposure"}
+        sensing = default_sensing_fields()
+        for name in SENSING_FIELDS:
+            if data.get(name) is not None:
+                sensing[name] = Quantity.from_dict(data[name])
+        kwargs.update(sensing)
+        unknown = set(data) - set(cls.FIELD_ORDER) - {"moves", "exposure"} - set(SENSING_FIELDS)
         if unknown:
             raise ValueError(
                 f"camera carries unknown fields {sorted(unknown)}; "

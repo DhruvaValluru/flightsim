@@ -26,7 +26,7 @@ import yaml
 from .blocks import (
     AtmosphereSpec, DatumSpec, DisSpec, FailuresSpec, IcingSpec, LoadingSpec, SceneSpec,
     TaxonomySpec,
-    TrafficSpec, TurbulenceModelSpec, WindProfileSpec,
+    TrafficSpec, TurbulenceModelSpec, WakeSpec, WindProfileSpec,
 )
 from .camera import CameraSpec
 from .randomization import RandomizationSpec
@@ -185,6 +185,12 @@ class ScenarioSpec:
     #: timestamp_mode -- absent-canonical: the documented defaults are
     #: omitted, so every committed spec-8 example keeps its digest.
     dis: "DisSpec" = dc_field(default_factory=DisSpec.defaulted)
+    #: P7 (still spec 8; the integrator bumps once): the wake-vortex
+    #: encounter -- generator, its speed, the own ship's offsets from the
+    #: pair, the wake's age, the decay and its inputs -- absent-canonical:
+    #: no wake is the default and is omitted, so every committed spec-8
+    #: example keeps its digest.
+    wake: "WakeSpec" = dc_field(default_factory=WakeSpec.defaulted)
 
     #: Field order for both serialisation and the rendered table.
     FIELD_ORDER = (
@@ -248,7 +254,7 @@ class ScenarioSpec:
         carry the spec's own set()/plan() doctrine."""
         import re
 
-        match = re.fullmatch(r"(scene|taxonomy|atmosphere|datum|turbulence_model|wind_profile|loading|failures|icing|dis)\.(\w+)", name)
+        match = re.fullmatch(r"(scene|taxonomy|atmosphere|datum|turbulence_model|wind_profile|loading|failures|icing|dis|wake)\.(\w+)", name)
         if match is not None:
             block = getattr(self, match.group(1))
             return block, match.group(2)
@@ -413,6 +419,9 @@ class ScenarioSpec:
         # D2: the dis block, absent-canonical like the others.
         if not self.dis.is_default():
             out["dis"] = self.dis.to_dict()
+        # P7: the wake block, absent-canonical like the others.
+        if not self.wake.is_default():
+            out["wake"] = self.wake.to_dict()
         if self.notes:
             out["notes"] = list(self.notes)
         return out
@@ -489,6 +498,9 @@ class ScenarioSpec:
         dis_data = data.get("dis")
         dis = (DisSpec.defaulted() if dis_data is None
                else DisSpec.from_dict(dis_data))
+        wake_data = data.get("wake")
+        wake = (WakeSpec.defaulted() if wake_data is None
+                else WakeSpec.from_dict(wake_data))
         return cls(
             name=data.get("name", "scenario"),
             prompt=data.get("prompt"),
@@ -507,6 +519,7 @@ class ScenarioSpec:
             failures=failures,
             icing=icing,
             dis=dis,
+            wake=wake,
             **kwargs,
         )
 
@@ -593,7 +606,8 @@ class ScenarioSpec:
                                   ("loading", self.loading),
                                   ("failures", self.failures),
                                   ("icing", self.icing),
-                                  ("dis", self.dis)):
+                                  ("dis", self.dis),
+                                  ("wake", self.wake)):
             if not block.is_default():
                 for name, q in block.quantities():
                     rows.append((block_name, name.replace("_", " "),

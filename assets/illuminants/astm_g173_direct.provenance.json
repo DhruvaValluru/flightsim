@@ -1,0 +1,17 @@
+{
+ "table": "ASTM G173-03 reference spectra (AM1.5): extraterrestrial, global tilt 37 deg, direct + circumsolar; W m^-2 nm^-1, 280-4000 nm",
+ "primary_source": "https://www.nrel.gov/grid/solar-resource/assets/data/astmg173.xls",
+ "primary_description": "NREL Reference Air Mass 1.5 Spectra, ASTM G173-03 (direct + circumsolar column)",
+ "fetched_from": "https://raw.githubusercontent.com/pvlib/pvlib-python/main/pvlib/data/ASTMG173.csv",
+ "fetched_kind": "mirror",
+ "fetched_description": "pvlib/pvlib-python ASTMG173.csv (BSD-3-Clause; NREL's G173-03 table verbatim)",
+ "fetched_at_utc": "2026-09-29T02:02:15+00:00",
+ "fetched_bytes_sha256": "91964ac23c0ec82dbbda4a7f160a5f5faf551dfe18ffae7e2446d74b57ee7859",
+ "primary_verified": false,
+ "transform": "the CSV's four numeric columns, title and header lines dropped; values unchanged",
+ "licence": "ASTM G173-03 reference spectra as published by NREL (US government work); mirror packaging BSD-3-Clause (pvlib)",
+ "unit": "W m^-2 nm^-1",
+ "file": "astm_g173_direct.csv",
+ "sha256": "38ef043723ace03a0ccbf86575c04ff2d4e161f0e94ccfbdbf9537406226f66c",
+ "bytes": 57327
+}

@@ -375,6 +375,13 @@ class PoseTrack:
         if exposure is not None and not exposure.is_default(self.preset):
             block["exposure"] = {name: float(q.value)
                                  for name, q in exposure.quantities()}
+        # S1: the exposure compensation (stops) and the band file, plain
+        # values, only when stated -- the same absent-canonical rule.
+        if getattr(camera, "sensing_stated", None) is not None and camera.sensing_stated():
+            block["sensing"] = {
+                "exposure_compensation_ev": float(camera.exposure_compensation_ev.value or 0.0),
+                "bands": camera.bands.value,
+            }
         block["poses"] = {
                 "t_s": list(self.t),
                 "north_m": list(self.north_m),
@@ -685,10 +692,26 @@ def aircraft_local_track(columns: Dict[str, Sequence[float]],
 # Crossing and overtaking fly wings-level (roll = pitch = 0); a
 # scripted actor has no dynamics to bank with, and saying so is better
 # than inventing a bank. What is NOT claimed: no collision avoidance,
-# no aerodynamic plausibility of the traffic's speed, no wake.
+# no aerodynamic plausibility of the traffic's speed; the three traffic
+# tracks trail no wake.
+#
+# P7 adds a fourth kind the spec's ``traffic[]`` vocabulary does NOT
+# carry (core/scenario/blocks.py TRAFFIC_TRACKS stays the three): the
+# ``wake_generator`` -- the aircraft whose vortex pair the own ship
+# meets (the spec's ``wake`` block). Its track is NOT relative to the
+# primary sample by sample (that would be circular: the primary's
+# recorded flight is the response to the wake): it is a straight line
+# from the own ship's FIRST sample, ahead along the own initial heading
+# by ``ahead_m``, ``right_m`` to the side, ``above_m`` up, flown at
+# ``speed_mps`` on that heading, wings level -- the geometry
+# core/environment/wake.py states (``generator_geometry``), so the mesh
+# is drawn where the physics put the generator.
 
-#: The tracks this solver knows, exactly the spec's vocabulary.
-TRAFFIC_TRACKS = ("formation", "crossing", "overtaking")
+#: The tracks this solver knows: the spec's three traffic tracks and the
+#: wake generator.
+TRAFFIC_TRACKS = ("formation", "crossing", "overtaking", "wake_generator")
+#: The keys a wake_generator geometry mapping carries (core/environment/wake.py).
+WAKE_GEOMETRY_KEYS = ("heading_deg", "speed_mps", "ahead_m", "right_m", "above_m")
 
 
 def _heading_axes(heading_deg: float) -> Tuple[Tuple[float, float], Tuple[float, float]]:
@@ -710,16 +733,20 @@ def _mean_ground_speed(track: Sequence[Dict]) -> float:
 
 def solve_traffic_track(columns: Dict[str, Sequence[float]], kind: str,
                         range_m: float, frame: SceneFrame,
-                        object_id: str) -> PoseTrack:
+                        object_id: str, wake: Optional[Dict] = None) -> PoseTrack:
     """The traffic aircraft's per-sample track relative to the primary's
     recorded flight: a :class:`PoseTrack` (the camera container reused:
     ``camera_id`` holds the object's id, ``preset`` the track kind, the
     lens fields are zero because an aircraft has no lens). Pure: the
-    same telemetry and entry give a bit-identical track (``digest``)."""
+    same telemetry and entry give a bit-identical track (``digest``).
+    The ``wake_generator`` kind takes its geometry mapping (P7;
+    ``range_m`` is then the along-track lead and is read from it)."""
     if kind not in TRAFFIC_TRACKS:
         raise PoseSolveError(
             f"camera.poses: traffic track {kind!r} is not one of "
             f"{TRAFFIC_TRACKS}; the solver invents no path")
+    if kind == "wake_generator":
+        return solve_wake_generator_track(columns, wake, frame, object_id)
     range_m = float(range_m)
     if not range_m > 0.0:
         raise PoseSolveError(
@@ -783,6 +810,87 @@ def solve_traffic_track(columns: Dict[str, Sequence[float]], kind: str,
         focal_length_mm=tuple(0.0 for _ in times),
         sensor_width_mm=0.0, sensor_height_mm=0.0, width_px=0, height_px=0,
         near_m=0.0, far_m=0.0)
+
+
+def solve_wake_generator_track(columns: Dict[str, Sequence[float]],
+                               geometry: Optional[Dict], frame: SceneFrame,
+                               object_id: str) -> PoseTrack:
+    """The wake generator's per-sample track (P7): a straight line from
+    the own ship's FIRST recorded sample, displaced ``ahead_m`` along the
+    own initial heading, ``right_m`` to its right and ``above_m`` up, and
+    flown at ``speed_mps`` on that heading from that point, wings level,
+    altitude held. Refuses by name a geometry that is missing a key, a
+    non-positive speed or a negative lead (the generator is ahead by
+    construction: a negative lead would put the wake's source behind the
+    aircraft that is said to be flying through it). Pure."""
+    if not isinstance(geometry, dict) or any(k not in geometry for k in WAKE_GEOMETRY_KEYS):
+        raise PoseSolveError(
+            f"camera.poses: a wake_generator track needs a geometry mapping with "
+            f"{list(WAKE_GEOMETRY_KEYS)} (core/environment/wake.py generator_geometry); "
+            f"the solver invents no placement")
+    speed = float(geometry["speed_mps"])
+    ahead = float(geometry["ahead_m"])
+    if not speed > 0.0:
+        raise PoseSolveError(
+            f"camera.poses: the wake generator's speed {speed!r} m/s is not positive")
+    if ahead < 0.0:
+        raise PoseSolveError(
+            f"camera.poses: the wake generator's lead {ahead!r} m is negative; the "
+            f"generator flies ahead of the aircraft in its wake")
+    primary = aircraft_local_track(columns, frame)
+    first = primary[0]
+    heading = float(geometry["heading_deg"]) % 360.0
+    forward, right = _heading_axes(heading)
+    start_n = first["north_m"] + ahead * forward[0] + float(geometry["right_m"]) * right[0]
+    start_e = first["east_m"] + ahead * forward[1] + float(geometry["right_m"]) * right[1]
+    alt = first["alt_m"] + float(geometry["above_m"])
+    t0 = float(first["t_s"])
+    times = [float(p["t_s"]) for p in primary]
+    north = [start_n + speed * (t - t0) * forward[0] for t in times]
+    east = [start_e + speed * (t - t0) * forward[1] for t in times]
+    quats = tuple(euler_to_quat(0.0, 0.0, heading) for _ in times)
+    return PoseTrack(
+        camera_id=str(object_id), preset="wake_generator", horizon_stable=False,
+        t=tuple(times), north_m=tuple(north), east_m=tuple(east),
+        alt_m=tuple(alt for _ in times), quat=quats,
+        yaw_deg=tuple(heading for _ in times), pitch_deg=tuple(0.0 for _ in times),
+        roll_deg=tuple(0.0 for _ in times),
+        focal_length_mm=tuple(0.0 for _ in times),
+        sensor_width_mm=0.0, sensor_height_mm=0.0, width_px=0, height_px=0,
+        near_m=0.0, far_m=0.0)
+
+
+def wake_generator_card_block(track: PoseTrack, aircraft: str, geometry: Dict,
+                              obj, frame: SceneFrame, cg_structural_in: Sequence[float],
+                              mesh_manifest: Optional[str]) -> Dict[str, object]:
+    """The run card's ``traffic[]`` entry for the wake generator (P7): the
+    same shape as a traffic entry (``track`` ``wake_generator``,
+    ``range_m`` the along-track lead, the default livery) plus the
+    geometry the physics stated, so the host draws the generator's mesh
+    where the wake's source is and derives nothing."""
+    return {
+        "id": obj.id,
+        "int_id": obj.int_id,
+        "aircraft": str(aircraft),
+        "track": "wake_generator",
+        "range_m": float(geometry["ahead_m"]),
+        "livery": "default",
+        "mesh_manifest": mesh_manifest,
+        "cg_actor_cm": cg_actor_cm(cg_structural_in),
+        "origin_x_m": frame.origin_x_m,
+        "origin_y_m": frame.origin_y_m,
+        "wake_geometry": {k: float(geometry[k]) for k in WAKE_GEOMETRY_KEYS},
+        "poses": {
+            "t_s": list(track.t),
+            "north_m": list(track.north_m),
+            "east_m": list(track.east_m),
+            "alt_m": list(track.alt_m),
+            "yaw_deg": list(track.yaw_deg),
+            "pitch_deg": list(track.pitch_deg),
+            "roll_deg": list(track.roll_deg),
+        },
+        "track_digest": track.digest(),
+    }
 
 
 def traffic_state(track: PoseTrack, index: int) -> Dict[str, float]:

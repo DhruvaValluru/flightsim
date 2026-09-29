@@ -2753,7 +2753,7 @@ mutate core/capture/poses.py \
     tests/test_capture_objects.py || failures=$((failures+1))
 
 mutate core/capture/manifest.py \
-    '    if len(traffic_tracks) != len(spec.traffic):
+    '    if len(traffic_tracks) != len(traffic_entries):
         raise ValueError(' \
     '    if False:  # MUTATED: a traffic aircraft with no track is silently unlabelled
         raise ValueError(' \
@@ -5082,6 +5082,282 @@ mutate core/telemetry/recorder.py \
     '    "yaw_rate_dps",' \
     '    # "yaw_rate_dps",  # MUTATED: the yaw rate is not recorded' \
     "DIS D2: the recorder records the body yaw rate the RVW block needs" tests/test_dis_block.py \
+    || failures=$((failures+1))
+
+# -- the advancement additions, wave 6: P7 the wake-vortex pair and S1 radiometry (the sun in lux, optics, blur, the profile blocks) ----
+# P7: the wake-vortex pair (core/environment/wake.py); the tests are selected with -k so the file is named.
+mutate core/environment/wake.py \
+    'CORE_RADIUS_FACTOR = 0.035' \
+    'CORE_RADIUS_FACTOR = 0.05  # MUTATED: another core-radius convention' \
+    "wake: the core radius is r_c = 0.035 b (Proctor's convention)" tests/test_wake.py -k "test_the_closed_forms_b0_rc_gamma0_and_w0" \
+    || failures=$((failures+1))
+mutate core/environment/wake.py \
+    '    return float(gamma_m2_s) * r / (2.0 * math.pi * (r * r + float(r_c_m) ** 2))' \
+    '    return float(gamma_m2_s) * r / (2.0 * math.pi * (r * r + 2.0 * float(r_c_m) ** 2))  # MUTATED: the core factor doubled' \
+    "wake: the Burnham-Hallock core factor gives V(r_c) = Gamma / (4 pi r_c)" tests/test_wake.py -k "test_v16_burnham_hallock_at_the_core_radius_is_gamma_over_4_pi_rc" \
+    || failures=$((failures+1))
+mutate core/environment/wake.py \
+    'B0_FACTOR = math.pi / 4.0' \
+    'B0_FACTOR = math.pi / 3.0  # MUTATED: another vortex spacing' \
+    "wake: the vortex spacing is b_0 = pi b / 4" tests/test_wake.py -k "test_the_closed_forms_b0_rc_gamma0_and_w0" \
+    || failures=$((failures+1))
+mutate core/environment/wake.py \
+    'GL_POINTS = 32' \
+    'GL_POINTS = 2  # MUTATED: a two-point rule' \
+    "wake: the strip-theory integral is 32-point Gauss-Legendre" tests/test_wake.py -k "test_the_32_point_quadrature_matches_a_fine_rule_on_the_pair_field or test_the_card_block_carries_the_pair_in_the_fixed_key_order_with_the_selftest_vectors" \
+    || failures=$((failures+1))
+mutate core/environment/wake.py \
+    '    for y0, sign in ((+0.5 * spacing_m, +1.0), (-0.5 * spacing_m, -1.0)):' \
+    '    for y0, sign in ((+0.5 * spacing_m, +1.0), (-0.5 * spacing_m, +1.0)):  # MUTATED: both vortices turn the same way' \
+    "wake: the pair is counter-rotating, so the far field decays as a dipole" tests/test_wake.py -k "test_v16_the_far_field_tends_to_zero_as_a_dipole" \
+    || failures=$((failures+1))
+mutate core/environment/wake.py \
+    '    return 3.0 / b * total' \
+    '    return -3.0 / b * total  # MUTATED: the sign of the equivalent roll rate' \
+    "wake: a linear upwash p y gives p_eq = p (the strip-theory sign)" tests/test_wake.py -k "test_v16_p_eq_of_a_uniform_upwash_is_0_and_of_a_linear_one_is_p" \
+    || failures=$((failures+1))
+mutate core/environment/wake.py \
+    '    elif model == "sarpkaya":' \
+    '    elif model == "sarpkaya" and eps_star is not None:  # MUTATED: a missing eps* is not refused' \
+    "wake: the sarpkaya decay without eps* is refused wake.decay" tests/test_wake.py -k "test_problems_refuse_by_name_and_a_block_without_a_generator_yields_nothing" \
+    || failures=$((failures+1))
+mutate core/environment/wake.py \
+    '        elif not (_number(eps_star) and EPS_STAR_RANGE[0] < float(eps_star) <= EPS_STAR_RANGE[1]):' \
+    '        elif not _number(eps_star):  # MUTATED: any number is admitted as eps*' \
+    "wake: eps* outside 0 < eps* <= 1 is refused wake.decay" tests/test_wake.py -k "test_validation_refuses_the_wake_problems_by_name" \
+    || failures=$((failures+1))
+mutate core/environment/wake.py \
+    '    if not stated:' \
+    '    if False:  # MUTATED: an encounter without an age is accepted' \
+    "wake: an encounter states separation_s or age_s (wake.geometry)" tests/test_wake.py -k "test_validation_refuses_the_wake_problems_by_name" \
+    || failures=$((failures+1))
+mutate core/environment/wake.py \
+    '        probes = ((0.0, 0.0), (0.5 * b0 + rc, 0.0), (0.5 * b0, 0.5 * b0),' \
+    '        probes = ((0.0, 0.0), (0.5 * b0 + 2.0 * rc, 0.0), (0.5 * b0, 0.5 * b0),  # MUTATED: the second probe moved' \
+    "wake: the card's five selftest vectors are the pinned probes" tests/test_wake.py -k "test_the_card_block_carries_the_pair_in_the_fixed_key_order_with_the_selftest_vectors" \
+    || failures=$((failures+1))
+mutate core/environment/wake.py \
+    'CARD_KEYS = ("generator", "gamma_0", "b_0", "r_c", "decay", "geometry", "selftest")' \
+    'CARD_KEYS = ("gamma_0", "generator", "b_0", "r_c", "decay", "geometry", "selftest")  # MUTATED: another key order' \
+    "wake: the card block's keys are in the fixed order the host reads" tests/test_wake.py -k "test_the_card_block_carries_the_pair_in_the_fixed_key_order_with_the_selftest_vectors" \
+    || failures=$((failures+1))
+mutate core/environment/wake.py \
+    '    return INJECTIONS' \
+    '    return ()  # MUTATED: a stated wake flies the stock airframe' \
+    "wake: a stated generator flies the airframe derived with the gust_rotation injection" tests/test_wake.py -k "test_the_demo_run_flies_the_derived_airframe_delivers_the_field_and_reads_it_back" \
+    || failures=$((failures+1))
+mutate core/capture/radiometry.py \
+    'CALIBRATION_CONSTANT = 1.2' \
+    'CALIBRATION_CONSTANT = 1.0  # MUTATED: not ISO 12232'"'"'s 78 over ISO 2720'"'"'s 65' \
+    "S1 radiometry: the calibration constant is 1.2 = 78 / (0.65 x 100)" tests/test_radiometry.py \
+    || failures=$((failures+1))
+
+mutate core/capture/radiometry.py \
+    'LENS_ATTENUATION_DEFAULT = 0.78' \
+    'LENS_ATTENUATION_DEFAULT = 1.0  # MUTATED: no lens attenuation' \
+    "S1 radiometry: the lens attenuation A = 0.78 divides the luminance per unit" tests/test_radiometry.py \
+    || failures=$((failures+1))
+
+mutate core/capture/radiometry.py \
+    '    return CALIBRATION_CONSTANT * a * math.pow(2.0, ev - ec)' \
+    '    return CALIBRATION_CONSTANT * a * math.pow(2.0, ev + ec)  # MUTATED: the EC sign' \
+    "S1 radiometry: +1 EC halves the luminance per unit" tests/test_radiometry.py \
+    || failures=$((failures+1))
+
+mutate core/capture/radiometry.py \
+    '    return float(np.trapezoid(s * v * w, grid) / denominator)' \
+    '    return float(np.trapezoid(s * w, grid) / denominator)  # MUTATED: V(lambda) dropped from K_band' \
+    "S1 radiometry: K_band integrates the illuminant under V(lambda)" tests/test_radiometry.py \
+    || failures=$((failures+1))
+
+mutate core/capture/radiometry.py \
+    '    if not path.is_file():
+        raise RadiometryError("sensing.radiometry",' \
+    '    if False:  # MUTATED: an absent table is not refused
+        raise RadiometryError("sensing.radiometry",' \
+    "S1 radiometry: an absent table refuses sensing.radiometry" tests/test_radiometry.py \
+    || failures=$((failures+1))
+
+mutate core/capture/radiometry.py \
+    '    if digest != recorded:' \
+    '    if False and digest != recorded:  # MUTATED: an altered table is accepted' \
+    "S1 radiometry: a table whose digest is not its sidecar's refuses sensing.radiometry" tests/test_radiometry.py \
+    || failures=$((failures+1))
+
+mutate core/capture/radiometry.py \
+    '    if data.get("proxy") is not True:' \
+    '    if False:  # MUTATED: a band file need not declare itself a proxy' \
+    "S1 radiometry: a band file not declared a proxy refuses sensing.band" tests/test_radiometry.py \
+    || failures=$((failures+1))
+
+mutate core/capture/radiometry.py \
+    '    if units == PHYSICAL_LIGHT_UNITS:
+        return numbers' \
+    '    if True:  # MUTATED: any light unit passes as lux
+        return numbers' \
+    "S1 radiometry: a sun not in lux refuses sensing.exposure_units" tests/test_radiometry.py \
+    || failures=$((failures+1))
+
+mutate core/capture/radiometry.py \
+    '    if not asked:
+        return None' \
+    '    if False:  # MUTATED: every camera gets a sensing block
+        return None' \
+    "S1 manifest: the sensing block is absent-canonical (written only when asked)" tests/test_sensing_block.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/solar.py \
+    'DIRECT_LUMINOUS_EFFICACY_LM_PER_W = 107.92' \
+    'DIRECT_LUMINOUS_EFFICACY_LM_PER_W = 100.0  # MUTATED: not the G173 direct spectrum'"'"'s' \
+    "S1 solar: the declared efficacy is the one recomputed from the cached tables" tests/test_radiometry.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/solar.py \
+    '    if lux > SUN_LUX_MAX:
+        raise SunLuxError(' \
+    '    if False:  # MUTATED: no ceiling on the sun
+        raise SunLuxError(' \
+    "S1 solar: a sun above the extraterrestrial illuminance refuses sensing.sun_lux" tests/test_radiometry.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/solar.py \
+    '    if elevation <= 0.0:' \
+    '    if elevation <= -90.0:  # MUTATED: a sun below the horizon still shines' \
+    "S1 solar: below the horizon the direct sun is 0 lx with its reason" tests/test_radiometry.py \
+    || failures=$((failures+1))
+
+mutate core/capture/optics.py \
+    '    return 1.0 / (_positive(wavelength_m, "the wavelength") * _positive(f_number, "the f-number"))' \
+    '    return 2.0 / (_positive(wavelength_m, "the wavelength") * _positive(f_number, "the f-number"))  # MUTATED' \
+    "S1 optics: the diffraction cutoff is 1 / (lambda N)" tests/test_optics.py \
+    || failures=$((failures+1))
+
+mutate core/capture/optics.py \
+    '    psf = psf / total                                        # energy 1' \
+    '    psf = psf / (2.0 * total)                                # MUTATED: energy one half' \
+    "S1 optics: the kernel is normalised to energy 1" tests/test_optics.py \
+    || failures=$((failures+1))
+
+mutate core/capture/blur.py \
+    '    n = max(MIN_TAPS, int(math.ceil(2.0 * blur_px)))' \
+    '    n = max(MIN_TAPS, int(math.ceil(blur_px)))  # MUTATED: taps a pixel apart' \
+    "S1 blur: N = max(3, ceil(2 L)) taps" tests/test_blur.py \
+    || failures=$((failures+1))
+
+mutate core/capture/blur.py \
+    '    return tuple(float(length_px) * (k / (n - 1) - 0.5) for k in range(n))' \
+    '    return tuple(float(length_px) * (k / (n - 1)) for k in range(n))  # MUTATED: one-sided window' \
+    "S1 blur: the tap window is symmetric about the capture instant" tests/test_blur.py \
+    || failures=$((failures+1))
+
+mutate core/capture/blur.py \
+    '    if length_max == 0.0:
+        return frame, block                                     # the null: nothing moved' \
+    '    if False:  # MUTATED: exposure 0 still resamples the frame
+        return frame, block' \
+    "S1 blur: exposure 0 returns the frame itself (the null)" tests/test_blur.py \
+    || failures=$((failures+1))
+
+mutate core/capture/profile.py \
+    '    for stage in POST_PASS_ORDER:' \
+    '    for stage in reversed(POST_PASS_ORDER):  # MUTATED: the stages run backwards' \
+    "S1 profile: the post-pass runs in POST_PASS_ORDER" tests/test_camera_profile.py \
+    || failures=$((failures+1))
+
+mutate core/capture/profile.py \
+    'POST_PASS_ORDER = ("radiance", "psf", "blur", "vignetting", "geometry",
+                   "exposure", "noise", "adc")' \
+    'POST_PASS_ORDER = ("radiance", "blur", "psf", "vignetting", "geometry",
+                   "exposure", "noise", "adc")  # MUTATED: blur before the PSF' \
+    "S1 profile: the post-pass order is radiance, psf, blur, vignetting, geometry, exposure, noise, adc" tests/test_camera_profile.py \
+    || failures=$((failures+1))
+
+mutate core/capture/profile.py \
+    '    if profile.optics is None:
+        return image
+    from .optics import convolve, optics_block' \
+    '    if profile.optics is None:
+        import dataclasses; profile = dataclasses.replace(profile, optics={"model": "diffraction_gaussian", "sigma_um": 100.0})  # MUTATED
+    from .optics import convolve, optics_block' \
+    "S1 profile: an absent optics block leaves the frame bit-identical" tests/test_optics.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/camera.py \
+    '            if q.to_dict() != defaults[name].to_dict():
+                out[name] = q.to_dict()' \
+    '            if True:  # MUTATED: the sensing fields always serialise
+                out[name] = q.to_dict()' \
+    "S1 camera: the two sensing fields are absent-canonical (every example keeps its digest)" tests/test_registry.py \
+    || failures=$((failures+1))
+
+mutate core/render/flags.py \
+    '    for token in sensing_flags(calibration, sun_lux, accumulate):' \
+    '    for token in sensing_flags(True, sun_lux, accumulate):  # MUTATED: -calibration by default' \
+    "S1 flags: the sensing flags are emitted only when asked (the default list is byte-identical)" tests/test_render_flags.py tests/test_annotation_passes.py \
+    || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if error > PSF_MTF50_TOL:' \
+    '        if False and error > PSF_MTF50_TOL:  # MUTATED: any MTF50 passes' \
+    "S1 verify: psf_slanted_edge fails annotation.psf beyond the MTF50 tolerance" tests/test_radiometry.py \
+    || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if error > tolerance:' \
+    '            if False and error > tolerance:  # MUTATED: any streak passes' \
+    "S1 verify: blur_vs_flow fails annotation.blur beyond the streak tolerance" tests/test_radiometry.py \
+    || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        if abs(ratio - 1.0) > GREY_CARD_TOL:' \
+    '        if False:  # MUTATED: any grey-card ratio passes' \
+    "S1 verify: radiometry_grey_card fails annotation.radiometry beyond 2 %" tests/test_radiometry.py \
+    || failures=$((failures+1))
+
+mutate core/registry.py \
+    '        name="scene.sun_lux", spec_path="scene.sun_lux", unit="lx",' \
+    '        name="scene.sun_lux", spec_path="scene.sun_lux", unit="lux",  # MUTATED' \
+    "S1 registry: scene.sun_lux is registered in lux (lx)" tests/test_sensing_block.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/blocks.py \
+    '    OPTIONAL_FIELDS = ("sun_lux",)' \
+    '    OPTIONAL_FIELDS = ()  # MUTATED: sun_lux always serialises' \
+    "S1 blocks: sun_lux is absent-canonical inside the scene block (the mountain example keeps its digest)" tests/test_sensing_block.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/validate.py \
+    '    if sun_problem:' \
+    '    if False:  # MUTATED: a stated sun is never refused' \
+    "S1 validate: a stated sun outside its range refuses sensing.sun_lux" tests/test_sensing_block.py \
+    || failures=$((failures+1))
+
+mutate core/capture/validate.py \
+    '        except RadiometryError as exc:
+            out.append(Violation(exc.constraint, f"{who}: {exc.message}"))' \
+    '        except RadiometryError as exc:
+            pass  # MUTATED: an unknown band file is not refused' \
+    "S1 capture validate: an unknown band file refuses sensing.band" tests/test_sensing_block.py \
+    || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '        calibration=bool(args.calibration), sun_lux=sun_lux_flag,' \
+    '        calibration=False, sun_lux=sun_lux_flag,  # MUTATED: --calibration ignored' \
+    "S1 capture: --calibration reaches the render command" tests/test_sensing_block.py \
+    || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '                if problem:
+                    raise SunLuxError(problem)' \
+    '                if False:  # MUTATED: a bad sun reaches the render
+                    raise SunLuxError(problem)' \
+    "S1 capture: a --sun-lux outside its range is refused before any render" tests/test_sensing_block.py \
+    || failures=$((failures+1))
+
+mutate core/capture/poses.py \
+    '        if getattr(camera, "sensing_stated", None) is not None and camera.sensing_stated():' \
+    '        if False:  # MUTATED: the card never carries the sensing keys' \
+    "S1 poses: the card's camera entry carries the stated sensing keys" tests/test_sensing_block.py \
     || failures=$((failures+1))
 
 

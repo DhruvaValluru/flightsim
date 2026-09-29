@@ -345,3 +345,46 @@ def test_the_cli_passes_argument_reaches_the_command_and_its_absence_adds_nothin
                          "--max-previews", "0", "--render", "--no-host-flight"])
     assert code == 0
     assert not [t for t in commands[0] if t.startswith("-passes")]
+
+
+# -- S1: the sensing opt-ins, emitted only when asked ------------------------
+
+def test_the_sensing_flags_are_emitted_only_when_asked_and_after_the_passes():
+    """-calibration, -sun-lux=, -accumulate= (S4 honours them; uncompiled
+    here). Absent by default: the list is byte-identical to the one the
+    builder made before they existed."""
+    from core.render.flags import sensing_flags
+
+    assert sensing_flags() == []
+    assert sensing_flags(True, 95788.4, 4) == ["-calibration", "-sun-lux=95788.4", "-accumulate=4"]
+    default = _flags()
+    assert _flags(calibration=False, sun_lux=None, accumulate=None) == default
+    assert not [t for t in default if t.startswith(("-calibration", "-sun-lux", "-accumulate"))]
+    asked = _flags(passes=["albedo"], calibration=True, sun_lux=95788.0, accumulate=8)
+    assert asked[asked.index("-passes=albedo") + 1:asked.index("-passes=albedo") + 4] == [
+        "-calibration", "-sun-lux=95788", "-accumulate=8"]
+    assert [t for t in asked if t not in ("-calibration", "-sun-lux=95788", "-accumulate=8",
+                                          "-passes=albedo")] == default
+    assert for_wrapper(asked)[-4:] == ["-calibration", "-sun-lux=95788", "-accumulate=8", ] + \
+        for_wrapper(asked)[-1:] or "-sun-lux=95788" in for_wrapper(asked)
+    for bad in ({"sun_lux": 0.0}, {"sun_lux": "bright"}, {"sun_lux": float("nan")},
+                {"accumulate": 0}, {"accumulate": 2.5}, {"accumulate": True}):
+        with pytest.raises(ValueError):
+            _flags(**bad)
+
+
+def test_the_web_app_never_asks_for_a_sensing_flag(tmp_path, monkeypatch):
+    """Parity: the web app's per-camera pass states none of the three, so
+    the CLI without its options and the web app build the same list
+    (test_the_cli_and_the_web_app_build_the_same_flags above); the CLI's
+    options are the only emitter (tests/test_sensing_block.py)."""
+    import webapp.runs as runs
+
+    commands = []
+    monkeypatch.setattr(runs.subprocess, "run", _fake_subprocess(commands, lambda c: True))
+    spec = ScenarioSpec.read(SPEC)
+    runs.RunManager._render(tmp_path / "card.json", tmp_path / "frames" / "chase0",
+                            {"key": "flat", "terrain": None, "imagery": None},
+                            tmp_path / "missing.json", str(spec.aircraft.value),
+                            camera_flags=None, extra=["-camera-index=0", "-labels"])
+    assert not [t for t in commands[0] if t.startswith(("-calibration", "-sun-lux", "-accumulate"))]

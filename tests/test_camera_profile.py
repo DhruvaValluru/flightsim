@@ -391,3 +391,121 @@ def test_read_noise_is_what_a_dark_frame_shows():
     # And no read noise means a black frame stays black.
     quiet = replace(cmos, read_noise_e=0.0)
     assert not (apply_profile(dark, quiet, rec, (0, 0, 0), seed=5) > 0).any()
+
+
+# -- S1: the optional blocks, the pinned post-pass order, the shipped digests ---
+
+import hashlib as _hashlib
+from pathlib import Path as _Path
+
+_REPO = _Path(__file__).resolve().parents[1]
+#: The two shipped profiles, byte for byte, as they were before S1 (measured).
+SHIPPED_PROFILE_DIGESTS = {
+    "ideal_pinhole": "33b20db22deae38bc097cd383c7fecf0e68cbb39cbec1d380a3ca19e4cb4d865",
+    "synthetic_cmos_wide": "664496ae283b8bbb35b6451694ef2dcfaa7de420f8fd76463ff469579f832ab9",
+}
+
+
+def test_the_shipped_profiles_keep_their_digests_and_carry_no_optional_block():
+    from core.capture.profile import OPTIONAL_BLOCKS
+
+    for name, digest in SHIPPED_PROFILE_DIGESTS.items():
+        path = _REPO / "assets" / "camera_profiles" / f"{name}.json"
+        assert _hashlib.sha256(path.read_bytes()).hexdigest() == digest, name
+        profile = load_profile(name)
+        assert profile.sha256 == digest
+        for key in OPTIONAL_BLOCKS:
+            assert getattr(profile, key) is None
+            assert key not in profile.to_dict()
+    assert OPTIONAL_BLOCKS == {"optics": "sensing.optics", "motion_blur": "sensing.motion_blur",
+                               "radiometry": "sensing.radiometry", "bands": "sensing.band"}
+
+
+def test_the_post_pass_order_is_pinned_and_the_stages_run_in_it(tmp_path):
+    """radiance -> psf -> blur -> vignetting -> geometry -> exposure ->
+    noise -> adc: the tuple, and the order the stages actually append
+    themselves in on a profile that runs every one of them."""
+    from core.capture.profile import POST_PASS_ORDER, apply_profile_detailed
+
+    assert POST_PASS_ORDER == ("radiance", "psf", "blur", "vignetting", "geometry",
+                               "exposure", "noise", "adc")
+    data = json.loads((_REPO / "assets/camera_profiles/synthetic_cmos_wide.json").read_text(encoding="utf-8"))
+    data["name"] = "everything"
+    data["optics"] = {"model": "diffraction_gaussian", "sigma_um": 30.0}
+    data["motion_blur"] = {"model": "velocity_line", "dt_s": 0.1}
+    data["radiometry"] = {"lens_attenuation": 0.8, "working_colour_space": "sRGB linear"}
+    data["bands"] = {"name": "rgb_proxy"}
+    (tmp_path / "everything.json").write_text(json.dumps(data), encoding="utf-8")
+    profile = load_profile("everything", profile_dir=tmp_path)
+    assert profile.stages() == POST_PASS_ORDER
+    assert profile.to_dict()["optics"]["model"] == "diffraction_gaussian"
+    assert profile.to_dict()["bands"]["proxy"] is True and profile.to_dict()["radiometry"]["lens_attenuation"] == 0.8
+    rec = {"width_px": 64, "height_px": 36, "fx_px": 62.2, "fy_px": 62.2, "principal_point_px": [32.0, 18.0],
+           "sensor_width_mm": 36.0, "sensor_height_mm": 20.25}
+    img = np.full((36, 64, 3), 0.2)
+    out, blocks = apply_profile_detailed(img, profile, rec, (0.0, 0.5, 0.0), 3, aperture_f=8.0, exposure_s=0.01)
+    assert tuple(blocks["stages"]) == POST_PASS_ORDER
+    assert blocks["radiance"]["identity_weights"] is True and blocks["psf"]["kernel_energy"] == pytest.approx(1.0)
+    assert blocks["blur"]["flow_source"] == "camera_angular_rate"
+    assert out.shape == img.shape
+
+
+@pytest.mark.parametrize("key, block, name", [
+    ("optics", {"model": "airy"}, "sensing.optics"),
+    ("motion_blur", {"model": "velocity_line", "dt_s": -1}, "sensing.motion_blur"),
+    ("radiometry", {"lens_attenuation": 2.0}, "sensing.radiometry"),
+    ("radiometry", {"gamma": 2.2}, "sensing.radiometry"),
+    ("bands", {"name": "nowhere"}, "sensing.band"),
+    ("bands", {}, "sensing.band"),
+])
+def test_a_malformed_optional_block_refuses_by_its_own_name(tmp_path, key, block, name):
+    data = json.loads((_REPO / "assets/camera_profiles/ideal_pinhole.json").read_text(encoding="utf-8"))
+    data["name"] = "bad"
+    data[key] = block
+    (tmp_path / "bad.json").write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(Exception) as info:
+        load_profile("bad", profile_dir=tmp_path)
+    assert getattr(info.value, "constraint", None) == name
+    assert str(info.value).startswith(name + ": ")
+    data[key] = "text"
+    (tmp_path / "bad.json").write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(CameraProfileError, match="mapping"):
+        load_profile("bad", profile_dir=tmp_path)
+
+
+def test_the_run_level_pass_records_the_sensing_blocks_per_frame(tmp_path, monkeypatch):
+    """A profile with an optics block and a motion-blur block: sensor.json
+    carries the post-pass order and each frame's psf / blur blocks."""
+    import core.capture.profile as profile_module
+
+    data = json.loads((_REPO / "assets/camera_profiles/ideal_pinhole.json").read_text(encoding="utf-8"))
+    data["name"] = "sensing_run"
+    data["optics"] = {"model": "diffraction_gaussian", "sigma_um": 60.0}
+    data["motion_blur"] = {"model": "velocity_line", "dt_s": 0.1}
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    (profiles / "sensing_run.json").write_text(json.dumps(data), encoding="utf-8")
+    for shipped in ("ideal_pinhole", "synthetic_cmos_wide"):
+        (profiles / f"{shipped}.json").write_bytes((_REPO / "assets/camera_profiles" / f"{shipped}.json").read_bytes())
+    monkeypatch.setattr(profile_module, "PROFILE_DIR", profiles)
+    manifest, _ = manifest_with("sensing_run")
+    for record in manifest["frames"]:
+        record["width_px"], record["height_px"] = 64, 36
+        record["fx_px"] = record["fy_px"] = 62.2
+        record["principal_point_px"] = [32.0, 18.0]
+    write_capture_manifest(manifest, tmp_path)
+    for record in manifest["frames"]:
+        path = tmp_path / record["file"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _png(path)
+    written = apply_profile_to_run(tmp_path, manifest, run_seed=11)
+    assert written == {"chase0": 6}
+    sensor_json = json.loads((tmp_path / "frames" / "chase0" / "sensor.json").read_text(encoding="utf-8"))
+    assert sensor_json["post_pass_order"] == list(profile_module.POST_PASS_ORDER)
+    for item in sensor_json["frames"]:
+        sensing = item["sensing"]
+        assert sensing["stages"] == ["psf", "blur", "adc"]
+        assert sensing["psf"]["kernel_energy"] == pytest.approx(1.0) and len(sensing["psf"]["kernel_sha256"]) == 64
+        assert sensing["blur"]["applied_by"] == "python_velocity_line"
+        assert sensing["blur"]["exposure_s"] == pytest.approx(1.0 / 500.0)     # the camera's own shutter
+        assert sensing["radiance"] is None
