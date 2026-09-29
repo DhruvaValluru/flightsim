@@ -486,7 +486,12 @@ def test_engine_out_on_the_a320_turbine_is_zero_thrust_from_the_next_step_and_st
     assert recorder.columns["engine0_thrust_n"][0] > u.lbf_to_n(11900.0)
     assert recorder.columns["engine0_n1_pct"][-1] < 25.0 < 80.0 < recorder.columns["engine1_n1_pct"][-1]
     assert "engine0_rpm" not in recorder.columns
-    assert all(math.isfinite(v) for c in recorder.columns.values() for v in c)
+    # The R2 measured channels are NaN when no instruments are stated (not
+    # measured); every other column is finite.
+    assert all(math.isfinite(v) for name, c in recorder.columns.items()
+               if not name.startswith("meas_") for v in c)
+    assert all(math.isnan(v) for name, c in recorder.columns.items()
+               if name.startswith("meas_") for v in c)
 
 
 @pytest.mark.timeout(300)

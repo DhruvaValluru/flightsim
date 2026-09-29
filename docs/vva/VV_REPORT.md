@@ -64,11 +64,13 @@ output `gate3b_layers.json` sha256
 | A8 (no pair) | — | — | row A8 | **PASS** |
 
 **The ladder found a defect the layers' own tests did not.** A stated day
-keeps the initial TRUE airspeed: the c172p asked for 100 kt CAS flies 95.83
+kept the initial TRUE airspeed: the c172p asked for 100 kt CAS flew 95.83
 kt CAS at ΔT +30 °C (99.80 kt at 100 % RH), TAS 107.537 kt on both sides to
-3e-13 (docs/JSBSIM_CORRECTIONS.md §27). The atmosphere is right (TAS/CAS
-matches σ); the stated airspeed is not what is flown, so V2 does not hold
-for CAS on a stated day. Open.
+3e-13 (docs/JSBSIM_CORRECTIONS.md §27). The atmosphere was right (TAS/CAS
+matches σ); the stated airspeed was not what was flown. **Fixed**: the
+requested airspeed is re-stated before the pre-trim re-latch
+(core/fdm/fdm.py; the engine host does the same); the delta-T row now
+measures 100.0 kt CAS on both sides and TAS 112.214 vs 107.537 kt.
 
 **The three-rate study** (`.venv/bin/python -m experiments.gate3b_convergence`,
 same tree, the committed c172p example, 1200 m / 100 kt CAS open loop,
@@ -138,7 +140,7 @@ Full measurements in [../JSBSIM_CORRECTIONS.md](../JSBSIM_CORRECTIONS.md).
 11. Reprojection corners filled with fabricated terrain: slopes to 84.9° where p99 of real data is 23.3°.
 12. Non-square DEM into a square Landscape squashed the ground by 1.47× while every elevation still read back correctly.
 13. **Seeds ≥ INT_MAX saturate to 2147483647**, so sweep replicates ran identical realisations while the manifest recorded different seeds.
-14. A stated non-standard day keeps the initial TRUE airspeed: 100 kt CAS asked, **95.83 kt CAS flown** at ΔT +30 °C (Gate 3b; open).
+14. A stated non-standard day keeps the initial TRUE airspeed: 100 kt CAS asked, **95.83 kt CAS flown** at ΔT +30 °C (Gate 3b; fixed: the requested airspeed is re-stated before the re-latch).
 15. The dt/2 twin and the three-rate study compared recordings on JSBSim's raw clock, which a piston's crank starts at a rate-dependent time: the observed order read ≈ 0.6 everywhere and the altitude difference was **25×** the integration error (Gate 3b; fixed in core/uncertainty.py).
 
 Defect 13 was found by the degenerate-replicate detector, which is exactly what

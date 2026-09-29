@@ -1294,10 +1294,11 @@ much; A7 compares JSBSim with the same ideal-gas identity it implements
 table and A9's ladder are transcriptions (unverified here); the observed
 orders describe one flight of one airframe (lateral SRQs converge slowly,
 roll not at all over 10 s). The ladder found one thing the layers' own tests
-did not: a stated day keeps the initial TRUE airspeed (the pre-trim re-latch
-keeps the IC's TAS), so the c172p asked for 100 kt CAS at +30 degC flies
-95.8 kt CAS -- an open defect of the stated airspeed on a non-standard day
-(docs/JSBSIM_CORRECTIONS.md section 27). No layer adds a referent for the
+did not: a stated day kept the initial TRUE airspeed (the pre-trim re-latch
+kept the IC's TAS), so the c172p asked for 100 kt CAS at +30 degC flew
+95.8 kt CAS (docs/JSBSIM_CORRECTIONS.md section 27). Fixed: the requested
+airspeed is re-stated before the re-latch (core/fdm/fdm.py and the engine
+plugin); the delta-T row now measures 100.0 kt CAS on both sides. No layer adds a referent for the
 aircraft; the credibility scorecard's ceiling stays 2 and nothing here
 raises it.
 

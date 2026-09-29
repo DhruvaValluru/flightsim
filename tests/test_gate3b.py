@@ -95,20 +95,21 @@ def test_the_humidity_row_reproduces_a7_from_a_one_second_pair(humidity_row):
 
 
 def test_the_delta_t_row_reproduces_and_measures_the_cas_the_stated_day_flies():
-    """TAS / CAS within 0.5 % of 1 / sqrt(sigma) in both runs (0.046 % and
-    0.056 % measured). The same pair measures that the stated day keeps the
-    initial TRUE airspeed (107.537 kt both runs, to 1e-12) and so flies a
-    lower CAS (95.83 kt for 100 kt stated at +30 degC): the pre-trim
-    re-latch keeps the IC's TAS. If this ever moves, VV_REPORT's ladder row
-    and VALIDITY 2.27 must say so."""
+    """TAS / CAS within 0.5 % of 1 / sqrt(sigma) in both runs (0.050 % and
+    0.056 % measured). The stated day flies the CAS asked (100.0 kt both
+    runs, to 1e-9: the requested airspeed is re-stated before the pre-trim
+    re-latch, core/fdm/fdm.py) and so a higher TRUE airspeed (112.214 kt at
+    +30 degC against 107.537 kt, +4.676 kt). Before that fix the re-latch
+    kept the IC's TAS and the stated day flew 95.83 kt CAS; VV_REPORT's
+    ladder row and VALIDITY 2.27 say so."""
     row = ladder.run_rung(ladder.rung("delta_t"), seconds=1.0)
     assert row["status"] == "PASS" and row["criterion_ok"] is True
     m = row["measured"]
     for side in ("with", "without"):
         assert m[side]["relative_error"] <= ladder.TAS_CAS_TOLERANCE
-    assert abs(m["tas_difference_kt"]) < 1e-9
-    assert m["with"]["cas_kt"] == pytest.approx(95.83, abs=0.05)
-    assert m["without"]["cas_kt"] == pytest.approx(100.0, abs=1e-6)
+        assert m[side]["cas_kt"] == pytest.approx(100.0, abs=1e-6)
+    assert abs(m["cas_difference_kt"]) < 1e-9
+    assert m["tas_difference_kt"] == pytest.approx(4.676, abs=0.01)
 
 
 # -- A8 -----------------------------------------------------------------------------------

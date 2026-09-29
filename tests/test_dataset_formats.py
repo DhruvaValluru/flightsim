@@ -706,7 +706,7 @@ def test_the_card_carries_counts_conditions_licences_and_the_split_policy(batch_
         assert run["seed"] in (1, 2)
         assert run["verification"]["status"] == "passed"
         assert run["masks_shipped"] is False
-    assert card["label_conventions_by_manifest_version"] == {"6": card["label_conventions"]}
+    assert card["label_conventions_by_manifest_version"] == {"7": card["label_conventions"]}
     # Manifest 6: every per-object not_claimed sentence is aggregated with
     # its record count -- 192 frames x (primary + terrain) share two, the
     # terrain alone says it has no alone pass.

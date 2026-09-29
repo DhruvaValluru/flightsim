@@ -1241,6 +1241,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	TMap<FString, double> LookEv100;
 	double LookAerosol = 0.0;
 	bool bLookAerosol = false;
+	// W3: the weather look's rain rate and its extinction -- recorded, not
+	// applied here (the streaks come from the card's world look block, the
+	// extinction is already inside fog_extinction_per_m).
+	double LookRainRateMmh = 0.0, LookRainExtinction = 0.0;
+	bool bLookRainRate = false, bLookRainExtinction = false;
 	{
 		FString LookCardText;
 		TSharedPtr<FJsonObject> LookCardRoot;
@@ -1284,6 +1289,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				}
 			}
 			bLookAerosol = CardLook->TryGetNumberField(TEXT("aerosol"), LookAerosol);
+			bLookRainRate = CardLook->TryGetNumberField(TEXT("precipitation_rate_mmh"), LookRainRateMmh);
+			bLookRainExtinction = CardLook->TryGetNumberField(TEXT("rain_extinction_per_m"),
+			                                                  LookRainExtinction);
 		}
 	}
 	// W5: the card as JSON for the world engine side -- its world block (the
@@ -4753,7 +4761,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			const int32 V0 = FMath::Clamp(FMath::CeilToInt(Min.Y + InsetV), 0, Height);
 			const int32 V1 = FMath::Clamp(FMath::FloorToInt(Max.Y - InsetV), 0, Height);
 			double Sum = 0.0, SumR = 0.0, SumG = 0.0, SumB = 0.0;
-			int32 Pixels = 0;
+			int32 QuadPixels = 0;
 			for (int32 V = V0; V < V1; ++V)
 			{
 				for (int32 U = U0; U < U1; ++U)
@@ -4763,24 +4771,24 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 					SumR += C.R;
 					SumG += C.G;
 					SumB += C.B;
-					++Pixels;
+					++QuadPixels;
 				}
 			}
-			if (Pixels == 0)
+			if (QuadPixels == 0)
 			{
 				return -1.0;
 			}
-			const double Measured = Sum / Pixels;
+			const double Measured = Sum / QuadPixels;
 			Out = MakeShared<FJsonObject>();
 			Out->SetNumberField(TEXT("predicted"), Predicted);
 			Out->SetNumberField(TEXT("measured"), Measured);
 			Out->SetNumberField(TEXT("ratio"), Measured / Predicted);
-			Out->SetNumberField(TEXT("pixels"), Pixels);
+			Out->SetNumberField(TEXT("pixels"), QuadPixels);
 			Out->SetArrayField(TEXT("quad_px"), QuadArray(U0, V0, U1, V1));
 			TArray<TSharedPtr<FJsonValue>> MeanRgb;
-			MeanRgb.Add(MakeShared<FJsonValueNumber>(SumR / Pixels));
-			MeanRgb.Add(MakeShared<FJsonValueNumber>(SumG / Pixels));
-			MeanRgb.Add(MakeShared<FJsonValueNumber>(SumB / Pixels));
+			MeanRgb.Add(MakeShared<FJsonValueNumber>(SumR / QuadPixels));
+			MeanRgb.Add(MakeShared<FJsonValueNumber>(SumG / QuadPixels));
+			MeanRgb.Add(MakeShared<FJsonValueNumber>(SumB / QuadPixels));
 			Out->SetArrayField(TEXT("mean_rgb"), MeanRgb);
 			return Measured;
 		};
@@ -5312,6 +5320,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		if (bLookAerosol && Look->HasTypedField<EJson::Object>(TEXT("aerosol")))
 		{
 			Look->GetObjectField(TEXT("aerosol"))->SetNumberField(TEXT("card_aerosol"), LookAerosol);
+		}
+		if (bLookRainRate)
+		{
+			Look->SetNumberField(TEXT("card_precipitation_rate_mmh"), LookRainRateMmh);
+		}
+		if (bLookRainExtinction)
+		{
+			Look->SetNumberField(TEXT("card_rain_extinction_per_m"), LookRainExtinction);
 		}
 		TArray<TSharedPtr<FJsonValue>> Overrides;
 		for (const FString& Name : LookProbeOverrides)

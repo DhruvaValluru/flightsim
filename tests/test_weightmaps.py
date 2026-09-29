@@ -320,9 +320,26 @@ def test_a_bake_or_layer_that_differs_from_the_manifest_refuses_terrain_landscap
     assert name_of(err.value) == "terrain.landscape_stale"
 
 
+
+def _verify_imports():
+    """Every module core/capture/verify.py imports (the AST, not its text:
+    the verifier names land-cover keys it grades, never the producer)."""
+    import ast
+
+    tree = ast.parse((REPO / "core" / "capture" / "verify.py").read_text(encoding="utf-8"))
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            base = ("." * node.level) + (node.module or "")
+            names.add(base)
+            names.update(f"{base}.{alias.name}" for alias in node.names)
+    return names
+
 def test_the_verifier_never_imports_the_weightmap_producer():
-    text = (REPO / "core" / "capture" / "verify.py").read_text(encoding="utf-8")
-    assert "weightmaps" not in text and "landscape" not in text
+    assert not [name for name in _verify_imports()
+                if "weightmaps" in name or "landscape" in name]
 
 
 # -- the real bakes, measured when present ---------------------------------------------
