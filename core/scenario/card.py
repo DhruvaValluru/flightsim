@@ -227,6 +227,32 @@ def failure_schedule_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object
     return block
 
 
+def icing_schedule_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
+    """The ``icing_schedule`` block for a spec (P5), or None for the
+    default block (no ice: the host flies the stock airframe and writes
+    nothing). The severity ramp's numbers (eta_max resolved from the word
+    or the number, onset and ramp on the host's own run clock, the alpha
+    shift at full eta), the airframe's six k coefficients and their
+    source, in the fixed key order ``core.environment.icing.CARD_KEYS``
+    with exactly six table entries; the host writes eta(t), the six
+    factors 1 + eta k and the shift at the top of every step into the
+    derived airframe and refuses ``card.icing_schedule`` otherwise. A
+    projection of the spec and the config: no FDM is built here."""
+    from core.environment.icing import CARD_KEYS, K_KEYS, IcingProvider
+
+    provider = IcingProvider.from_spec(spec)
+    if provider is None:
+        return None
+    block = provider.card_block()
+    if tuple(block) != CARD_KEYS:
+        raise RuntimeError(f"icing_schedule card keys {list(block)} are not the fixed order "
+                           f"{list(CARD_KEYS)}")
+    if tuple(block["k_table"]) != K_KEYS:
+        raise RuntimeError(f"icing_schedule k_table keys {list(block['k_table'])} are not "
+                           f"the fixed order {list(K_KEYS)}")
+    return block
+
+
 def write_run_card(spec: ScenarioSpec, path: Path,
                    control_inputs: Sequence[Dict[str, float]] = (),
                    duration_s: Optional[float] = None,
@@ -369,6 +395,13 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # writes; the host applies each at the first step with t >= at_s
         # of its run clock and refuses card.failure_schedule otherwise.
         card["failure_schedule"] = failure_schedule
+    icing_schedule = icing_schedule_card_block(spec)
+    if icing_schedule is not None:
+        # P5: the severity ramp and the airframe's k-table; the host
+        # writes eta(t), the six factors and the shift at the top of every
+        # step of its run clock into the derived airframe (P9 loads it)
+        # and refuses card.icing_schedule otherwise.
+        card["icing_schedule"] = icing_schedule
     if reference_speeds:
         # Display-only (the HUD/panel stall-margin marks): the MODEL's own
         # measured Vs and CLmax with their basis string (§2.4), so the marks

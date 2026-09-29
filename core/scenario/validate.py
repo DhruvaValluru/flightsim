@@ -251,6 +251,8 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
     report.violations.extend(validate_wind_profile(spec))
     report.violations.extend(validate_failures(spec))
     report.violations.extend(validate_loading(spec))
+    report.violations.extend(validate_dis(spec))
+    report.violations.extend(validate_icing(spec))
 
     # -- the definitive check: can this actually be trimmed? -----------
     # Skipped when geometry is already impossible, since trimming below ground
@@ -459,6 +461,23 @@ def validate_datum(spec) -> List[Violation]:
 
     return [Violation(problem.constraint, problem.message)
             for problem in datum_spec_problems(getattr(spec, "datum", None))]
+
+
+def validate_dis(spec) -> List[Violation]:
+    """D2: the dis block's refusals by name (core/interop/dis_stream.py
+    dis_spec_problems, the one list for the validator and the exporter):
+    ``interop.dis.entity_id`` for a site, application or entity outside
+    0..65535, ``dis.force_id`` outside 0..255, ``dis.marking_too_long``
+    over 11 ASCII characters, ``dis.timestamp_mode`` for a word other
+    than relative or absolute. The epoch an absolute mode needs is the
+    exporter's option and is refused there (``dis.timestamp_epoch_missing``)."""
+    from ..interop.dis_stream import dis_spec_problems
+
+    block = getattr(spec, "dis", None)
+    values = ({name: q.value for name, q in block.quantities()}
+              if block is not None and not block.is_default() else None)
+    return [Violation(problem.constraint, problem.message)
+            for problem in dis_spec_problems(values)]
 
 
 def validate_atmosphere(spec) -> List[Violation]:
@@ -853,4 +872,30 @@ def validate_failures(spec) -> List[Violation]:
     return [Violation(problem.constraint, problem.message, actual=problem.actual,
                       limit=problem.limit, unit=problem.unit)
             for problem in problems(block.events.value, float(spec.duration.value),
+                                    str(spec.aircraft.value))]
+
+
+# -- the icing block (P5) ------------------------------------------------------------
+
+def validate_icing(spec) -> List[Violation]:
+    """The ``icing`` block's own constraints, refused by name through the
+    provider's own list (core.environment.icing.problems, so what
+    validation refuses is what the provider refuses): ``icing.severity``
+    (a word outside the stated mapping), ``icing.eta_range`` (eta_max
+    outside 0..1, a negative onset or ramp, an alpha shift outside its
+    stated bound or not a number), ``icing.envelope`` (an unknown envelope
+    word), ``icing.airframe_data`` (a stated block on an airframe with no
+    k-table, or a malformed table). The default block (no ice) yields
+    nothing."""
+    from ..environment.icing import problems
+
+    block = getattr(spec, "icing", None)
+    if block is None or block.is_default():
+        return []
+    resolved = block.resolved()
+    return [Violation(problem.constraint, problem.message, actual=problem.actual,
+                      limit=problem.limit, unit=problem.unit)
+            for problem in problems(block.severity.value, resolved["eta_max"].value,
+                                    block.onset_s.value, block.ramp_s.value,
+                                    block.alpha_shift_deg.value, block.envelope.value,
                                     str(spec.aircraft.value))]

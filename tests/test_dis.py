@@ -687,3 +687,277 @@ def test_docstrings_say_what_is_not_claimed():
         text = (REPO / rel).read_text(encoding="utf-8")
         assert "NOT claimed" in text or "not claimed" in text.lower(), rel
         assert all(ord(c) < 128 for c in text), f"{rel}: non-ASCII"
+
+
+# =========================================================================
+# D2: the entity-type table, the timestamp modes, the marking, the geodetic
+# frame check and the RVW dead reckoning from recorded quantities
+# (core/interop/dis.py, extended in place; the stream is tests/test_dis_stream.py).
+# =========================================================================
+
+import yaml
+
+from core.interop.dis import (
+    ENTITY_TYPE_FIELDS, ENTITY_TYPE_POLICIES, ENTITY_TYPE_TABLE_PATH, TIMESTAMP_MODES,
+    central_difference, entity_type_row, load_entity_type_table, marking_for, parse_epoch,
+    rvw_vectors, sample_frames, standard_entity_type, timestamp_for,
+)
+from core.scenario.blocks import configured_airframes
+
+
+def _filled_table(tmp_path: Path, aircraft: str = "c172p", **fields) -> Path:
+    table = yaml.safe_load(ENTITY_TYPE_TABLE_PATH.read_text(encoding="utf-8"))
+    septuplet = {"kind": 1, "domain": 2, "country": 225, "category": 84, "subcategory": 1,
+                 "specific": 0, "extra": 0}
+    septuplet.update(fields)
+    table["airframes"][aircraft]["entity_type"] = septuplet
+    table["airframes"][aircraft]["reason"] = "test: a row filled as the standard's would be"
+    path = tmp_path / "filled.yaml"
+    path.write_text(yaml.safe_dump(table, sort_keys=False), encoding="utf-8")
+    return path
+
+
+# -- the standard table ships empty ---------------------------------------------------
+
+def test_the_standard_table_has_a_row_per_configured_airframe_and_ships_empty():
+    """One row per assets/aircraft_config airframe, each citing the
+    standard and carrying a null septuplet with the reason, so the
+    standard policy refuses dis.entity_type_unknown for every one of
+    them until someone with the document fills a row; the file is ASCII."""
+    table = load_entity_type_table()
+    assert table["table_version"] == 1
+    assert sorted(table["airframes"]) == configured_airframes()
+    assert table["reason"] == "entered from the standard, never guessed"
+    assert "SISO-REF-010" in table["standard"]["name"]
+    assert "unverified here" in table["standard"]["edition"]
+    for key, row in table["airframes"].items():
+        assert row["entity_type"] is None, key
+        assert row["reason"] == "entered from the standard, never guessed", key
+        assert "SISO-REF-010" in row["siso_reference"], key
+        with pytest.raises(DisError) as exc:
+            standard_entity_type(key)
+        assert exc.value.constraint == "dis.entity_type_unknown"
+        assert "never guessed" in exc.value.message and key in exc.value.message
+    assert ENTITY_TYPE_TABLE_PATH.read_text(encoding="utf-8").isascii()
+    with pytest.raises(DisError) as exc:
+        standard_entity_type("Shuttle")
+    assert exc.value.constraint == "dis.entity_type_unknown"
+
+
+def test_a_filled_row_is_read_from_the_standard_table_and_a_malformed_one_refuses(tmp_path):
+    table = load_entity_type_table(_filled_table(tmp_path))
+    entity_type, row = standard_entity_type("c172p", table)
+    assert entity_type.to_tuple() == (1, 2, 225, 84, 1, 0, 0)
+    assert row["reason"].startswith("test:")
+    resolved = entity_type_row("c172p", "standard", table)
+    assert resolved["source"] == "standard" and resolved["septuplet"]["country"] == 225
+    assert all("entered from the standard" in b for b in resolved["basis"].values())
+    # A field out of range, a missing field, a wrong shape: refused, never clipped.
+    for bad in ({"country": 70000}, {"kind": 256}, {"extra": -1}, {"kind": True}):
+        with pytest.raises(DisError) as exc:
+            standard_entity_type("c172p", load_entity_type_table(_filled_table(tmp_path, **bad)))
+        assert exc.value.constraint == "dis.entity_type_unknown"
+    broken = yaml.safe_load(_filled_table(tmp_path).read_text(encoding="utf-8"))
+    del broken["airframes"]["c172p"]["entity_type"]["extra"]
+    with pytest.raises(DisError) as exc:
+        standard_entity_type("c172p", broken)
+    assert exc.value.constraint == "dis.entity_type_unknown"
+    # An absent or unreadable table is the same refusal.
+    with pytest.raises(DisError) as exc:
+        load_entity_type_table(tmp_path / "absent.yaml")
+    assert exc.value.constraint == "dis.entity_type_unknown"
+    (tmp_path / "wrong.yaml").write_text("table_version: 2\nairframes: []\n", encoding="utf-8")
+    with pytest.raises(DisError) as exc:
+        load_entity_type_table(tmp_path / "wrong.yaml")
+    assert exc.value.constraint == "dis.entity_type_unknown"
+
+
+def test_the_three_policies_resolve_as_documented():
+    """standard refuses while the table is empty; fallback is the
+    documented in-tree ENTITY_TYPES row (from memory, 'unverified here',
+    saying the standard row is empty); unspecified is 0 = Other in every
+    field with the septuplet recorded as absent; an unknown policy is a
+    programming error and an airframe outside the fallback refuses
+    interop.dis.airframe as in batch 1."""
+    assert ENTITY_TYPE_POLICIES == ("standard", "fallback", "unspecified")
+    with pytest.raises(DisError) as exc:
+        entity_type_row("B747", "standard")
+    assert exc.value.constraint == "dis.entity_type_unknown"
+    fallback = entity_type_row("B747", "fallback")
+    assert fallback["source"] == "fallback"
+    assert fallback["type"] == ENTITY_TYPES["B747"]["type"]
+    assert fallback["septuplet"] == ENTITY_TYPES["B747"]["type"].to_dict()
+    assert "unverified here" in fallback["basis"]["country"]
+    assert "row is empty" in fallback["basis"]["fallback"]
+    assert fallback["standard_row"]["entity_type"] is None
+    f16 = entity_type_row("f16", "fallback")
+    assert "row is absent" in f16["basis"]["fallback"] and f16["standard_row"] is None
+    unspecified = entity_type_row("B747", "unspecified")
+    assert unspecified["type"] == EntityType() and unspecified["septuplet"] is None
+    assert unspecified["type"].to_tuple() == (0,) * 7
+    assert "never guessed" in unspecified["basis"]["all"]
+    with pytest.raises(DisError) as exc:
+        entity_type_row("Shuttle", "fallback")
+    assert exc.value.constraint == "interop.dis.airframe"
+    with pytest.raises(ValueError):
+        entity_type_row("B747", "guess")
+    assert ENTITY_TYPE_FIELDS == ("kind", "domain", "country", "category", "subcategory",
+                                  "specific", "extra")
+
+
+# -- the timestamp modes -----------------------------------------------------------
+
+def test_absolute_timestamps_carry_the_epoch_and_the_lsb_and_relative_stay_as_batch_1():
+    """absolute: units past the hour of epoch + t with LSB 1, computed by
+    hand here from the epoch's seconds past its hour; relative: exactly
+    batch 1's field (LSB 0); the modulo rollover at the hour in both."""
+    assert TIMESTAMP_MODES == ("relative", "absolute")
+    epoch = parse_epoch("2026-09-29T10:15:30Z")           # 10:15:30 UTC: 930 s past the hour
+    assert epoch % 3600.0 == pytest.approx(930.0)
+    assert parse_epoch("2026-09-29T12:15:30+02:00") == epoch       # the same instant
+    field = timestamp_for(12.5, "absolute", epoch)
+    assert field & 1 == 1
+    assert field >> 1 == int(round((930.0 + 12.5) / 3600.0 * 2 ** 31))
+    assert timestamp_for(12.5, "relative") == timestamp_from_seconds(12.5)
+    assert timestamp_for(12.5, "relative") & 1 == 0
+    # Past the hour boundary: epoch 930 s + t 2670 s = 3600 s -> 0 units (the wrap).
+    assert timestamp_for(2670.0, "absolute", epoch) >> 1 == 0
+    assert timestamp_for(2670.0 + 3599.9999999, "absolute", epoch) < 2 ** 32
+    # The epoch's own seconds are taken past ITS hour first: a 1.7e9 s
+    # epoch loses nothing to the 1.676 us unit (the hand value above).
+    seconds, absolute = seconds_from_timestamp(field)
+    assert absolute and abs(seconds - 942.5) < 3600.0 / 2 ** 31
+
+
+def test_absolute_without_an_epoch_refuses_by_name_and_a_bad_epoch_too():
+    with pytest.raises(DisError) as exc:
+        parse_epoch(None)
+    assert exc.value.constraint == "dis.timestamp_epoch_missing"
+    for bad in ("", "   ", "yesterday", "2026-09-29T10:00:00"):     # the last: no UTC offset
+        with pytest.raises(DisError) as exc:
+            parse_epoch(bad)
+        assert exc.value.constraint == "dis.timestamp_epoch_missing", bad
+    with pytest.raises(DisError) as exc:
+        timestamp_for(1.0, "absolute", None)
+    assert exc.value.constraint == "dis.timestamp_epoch_missing"
+    with pytest.raises(DisError) as exc:
+        timestamp_for(1.0, "sidereal")
+    assert exc.value.constraint == "dis.timestamp_mode"
+
+
+# -- the marking ----------------------------------------------------------------------
+
+def test_the_marking_comes_from_the_run_and_over_eleven_ascii_refuses_by_name():
+    assert marking_for("", "c172p") == (b"c172p", "derived")
+    assert marking_for(None, "B747") == (b"B747", "derived")
+    assert marking_for("N12345", "c172p") == (b"N12345", "user")
+    assert marking_for("ABCDEFGHIJK", "x") == (b"ABCDEFGHIJK", "user")      # exactly 11
+    for bad, aircraft in (("ABCDEFGHIJKL", "x"), ("", "an-airframe-key-too-long"),
+                          ("café", "x")):
+        with pytest.raises(DisError) as exc:
+            marking_for(bad, aircraft)
+        assert exc.value.constraint == "dis.marking_too_long"
+
+
+# -- the geodetic frame per sample --------------------------------------------------------
+
+def test_a_recorded_frame_without_a_geodetic_place_refuses_by_name():
+    telemetry = make_telemetry(n=4)
+    cols = telemetry["columns"]
+    for missing in ("lat_deg", "lon_deg"):
+        broken = {k: v for k, v in cols.items() if k != missing}
+        with pytest.raises(DisError) as exc:
+            sample_frames(broken)
+        assert exc.value.constraint == "dis.frame_without_geodetic"
+        assert missing in exc.value.message
+    without_height = {k: v for k, v in cols.items() if k != "altitude_m"}
+    with pytest.raises(DisError) as exc:
+        sample_frames(without_height)
+    assert exc.value.constraint == "dis.frame_without_geodetic"
+    for value in (float("nan"), None, float("inf")):
+        broken = {k: list(v) for k, v in cols.items()}
+        broken["lat_deg"][2] = value
+        with pytest.raises(DisError) as exc:
+            sample_frames(broken)
+        assert exc.value.constraint == "dis.frame_without_geodetic"
+        assert "sample 2" in exc.value.message
+    broken = {k: list(v) for k, v in cols.items()}
+    broken["heading_deg"] = broken["heading_deg"][:-1]
+    with pytest.raises(DisError) as exc:
+        sample_frames(broken)
+    assert exc.value.constraint == "dis.frame_without_geodetic"
+
+
+def test_the_geoid_is_applied_at_export_from_the_recorded_hae_column():
+    """With D1's hae_m column the location is pyproj's ECEF of (lat, lon,
+    hae_m): the radial error with N is at floating point and without N
+    equals N0 (52.52 m here) -- measured, the null test's two sides."""
+    telemetry = make_telemetry(n=3)
+    cols = telemetry["columns"]
+    n0 = 52.52
+    cols["undulation_m"] = [n0] * 3
+    cols["hae_m"] = [a + n0 for a in cols["altitude_m"]]
+    frames, height = sample_frames(cols)
+    assert height["hae_source"].startswith("hae_m:")
+    for i, frame in enumerate(frames):
+        assert frame["hae_m"] == cols["altitude_m"][i] + n0 and frame["undulation_m"] == n0
+        with_n = pyproj_ecef(cols["lat_deg"][i], cols["lon_deg"][i], cols["altitude_m"][i] + n0)
+        without_n = pyproj_ecef(cols["lat_deg"][i], cols["lon_deg"][i], cols["altitude_m"][i])
+        assert math.dist(frame["location"], with_n) < 1e-6
+        assert abs(math.dist(frame["location"], without_n) - n0) < 1e-3
+        assert abs((math.hypot(*frame["location"]) - math.hypot(*without_n)) - n0) < 1e-3
+    # Without the column: altitude_m + the datum handling's N (batch 1's three cases).
+    del cols["hae_m"], cols["undulation_m"]
+    frames, height = sample_frames(cols, {"undulation_m": n0, "handling": "datum: test"})
+    assert "+52.520 m" in height["hae_source"]
+    assert frames[0]["hae_m"] == cols["altitude_m"][0] + n0 and frames[0]["undulation_m"] is None
+    frames, height = sample_frames(cols, None)
+    assert frames[0]["hae_m"] == cols["altitude_m"][0] and "no geoid block" in height["hae_source"]
+
+
+# -- DRM 4 from recorded quantities only -----------------------------------------------
+
+def test_the_rvw_acceleration_is_the_central_difference_of_the_recorded_ecef_velocity():
+    """v_north = c t^2: the central difference is exactly 2 c t at every
+    interior sample (a forward difference misses by c dt); one-sided at
+    the ends; p and q are the recorded rates; r is the recorded yaw rate
+    when present, else the attitude's central difference."""
+    c, dt, n = 0.4, 0.1, 7
+    telemetry = make_telemetry(n=n, dt=dt, heading_rate_dps=3.0, pitch=0.0, roll=0.0,
+                               lat0=20.0, lon0=-30.0)
+    cols = telemetry["columns"]
+    for k in ("lat_deg", "lon_deg", "altitude_m"):
+        cols[k] = [cols[k][0]] * n
+    cols["v_north_mps"] = [60.0 + c * t * t for t in cols["t"]]
+    cols["roll_rate_dps"] = [1.5] * n
+    cols["pitch_rate_dps"] = [-2.5] * n
+    frames, _ = sample_frames(cols)
+    vectors, source = rvw_vectors(frames, cols)
+    assert "central difference" in source["linear_acceleration"]
+    assert source["r"].startswith("yaw_rate_dps not recorded")
+    for i in range(1, n - 1):
+        expected = geodesy.ned_to_ecef_vector(20.0, -30.0, (2.0 * c * cols["t"][i], 0.0, 0.0))
+        assert math.dist(vectors[i][0], expected) < 1e-9, i
+        forward = geodesy.ned_to_ecef_vector(20.0, -30.0, (2.0 * c * cols["t"][i] + c * dt, 0.0, 0.0))
+        assert math.dist(vectors[i][0], forward) > 0.9 * c * dt          # not the forward difference
+        p, q, r = vectors[i][1]
+        assert math.degrees(p) == pytest.approx(1.5) and math.degrees(q) == pytest.approx(-2.5)
+        assert math.degrees(r) == pytest.approx(3.0, abs=1e-4)
+    first = geodesy.ned_to_ecef_vector(20.0, -30.0, (c * dt, 0.0, 0.0))        # one-sided
+    assert math.dist(vectors[0][0], first) < 1e-9
+    assert math.dist(central_difference([(0.0,), (1.0,), (4.0,)], [0.0, 1.0, 2.0], 1), (2.0,)) < 1e-12
+    assert central_difference([(0.0,), (1.0,), (4.0,)], [0.0, 1.0, 2.0], 2) == (3.0,)
+    assert central_difference([(5.0, 6.0)], [0.0], 0) == (0.0, 0.0)
+    # A recorded yaw rate is taken as it is.
+    cols["yaw_rate_dps"] = [7.0] * n
+    vectors, source = rvw_vectors(frames, cols)
+    assert source["r"].startswith("recorded yaw_rate_dps")
+    assert all(math.degrees(v[1][2]) == pytest.approx(7.0) for v in vectors)
+
+
+def test_d2_texts_are_ascii_and_say_what_is_not_claimed():
+    for rel in ("core/interop/dis.py", "core/interop/dis_stream.py", "flightsim/dis.py",
+                "assets/dis_entity_types.yaml"):
+        text = (REPO / rel).read_text(encoding="utf-8")
+        assert text.isascii(), rel
+    assert "NOT claimed" in (REPO / "core/interop/dis_stream.py").read_text(encoding="utf-8")

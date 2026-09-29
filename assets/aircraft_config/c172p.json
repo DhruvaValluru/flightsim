@@ -383,5 +383,37 @@
     },
     "policy_station": "Co-Pilot",
     "policy_station_reason": "the front passenger seat: the seat a payload draw fills (a stated choice)"
+  },
+  "icing": {
+    "source": "PROXY: the DHC6 (Twin Otter) row of assets/aircraft_config/DHC6.json applied to a single-engine high-wing piston aeroplane, a stated proxy (blueprint correction 7) -- no Cessna 172 icing coefficients are transcribed; the row itself is from memory of Bragg et al. AIAA 2000-0360 [unverified here]",
+    "model": "Bragg et al. 2000 factor form C_A,iced = (1 + eta k_A) C_A, applied per axis to the WHOLE axis by the icing injection (a stated simplification: Bragg's k applies to one coefficient of the axis)",
+    "proxy": true,
+    "proxy_of": "DHC6",
+    "k_table": {
+      "k_lift": {
+        "value": -0.09,
+        "source": "PROXY of the DHC6 row: k'_CLalpha of the Twin Otter set as remembered (the lift-curve slope loss) [unverified here]; applied to the whole LIFT axis"
+      },
+      "k_drag": {
+        "value": 0.34,
+        "source": "PROXY of the DHC6 row: k'_CD0 of the Twin Otter set as remembered (the parasite drag rise) [unverified here]; applied to the whole DRAG axis"
+      },
+      "k_pitch": {
+        "value": -0.2,
+        "source": "PROXY of the DHC6 row: k'_Cmalpha of the Twin Otter set as remembered (the tail's pitch stiffness loss) [unverified here]; applied to the whole PITCH axis"
+      },
+      "k_roll": {
+        "value": -0.1,
+        "source": "PROXY of the DHC6 row: k'_Clp of the Twin Otter set as remembered (roll damping loss) [unverified here]; applied to the whole ROLL axis"
+      },
+      "k_yaw": {
+        "value": -0.1,
+        "source": "PROXY of the DHC6 row: k'_Cnbeta of the Twin Otter set as remembered (directional stiffness loss) [unverified here]; applied to the whole YAW axis"
+      },
+      "k_side": {
+        "value": -0.2,
+        "source": "PROXY of the DHC6 row: k'_CYbeta of the Twin Otter set as remembered [unverified here]; applied to the whole SIDE axis"
+      }
+    }
   }
 }

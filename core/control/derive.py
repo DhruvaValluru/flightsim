@@ -696,10 +696,23 @@ def derive(
     for rel, text in system_texts.items():
         _write_atomic(aircraft_dir / rel, text.encode("utf-8"))
 
-    # Aircraft-local files the stock model may reference by relative name.
+    # Aircraft-local files the stock model may reference by relative name,
+    # and the aircraft-local SUBDIRECTORIES some stock models keep their
+    # engine, thruster and system files in (the DHC6: Engines/PT6A-27.xml,
+    # Engines/Propeller.xml, Systems/*.xml -- without them the derived DHC6
+    # refuses to load, "Could not open file: Propeller", measured by P5).
+    # An injected system file written above is never overwritten by a stock
+    # file of the same relative name.
     for sibling in base.xml_path.parent.iterdir():
         if sibling.is_file() and sibling != base.xml_path:
             _write_atomic(aircraft_dir / sibling.name, sibling.read_bytes())
+        elif sibling.is_dir():
+            for inner in sorted(p for p in sibling.rglob("*") if p.is_file()):
+                rel = inner.relative_to(base.xml_path.parent).as_posix()
+                if rel in system_texts:
+                    continue
+                (aircraft_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+                _write_atomic(aircraft_dir / rel, inner.read_bytes())
 
     tecs = next((r for r in records if r.name == "tecs"), None)
     return DerivedAircraft(

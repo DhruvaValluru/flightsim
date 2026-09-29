@@ -978,3 +978,150 @@ Integrated from the returned text: fourteen catalogue entries, 33 guards, the tw
 ### Measured here
 
 The affected suites: 640 passed, 1 skipped (97.3 s) before the two repairs, 50 on the repaired files after; tests/test_loading.py 40 passed (the 29 module-scoped flights and pairs); 655 guard targets each occurring exactly once; the 33 wave-4 guards and the retargeted one: see below. Full suite: see the commit.
+
+## P5 -- the icing provider: Bragg's factor form on a severity ramp, written every step to the derived airframe and read back exactly, the lift falling by the factor on the first step (gap P3; blueprint section 1)
+
+### What was measured, and what was defective
+
+* The lift at fixed alpha falls by exactly the factor on the first step (P8's ladder row, eta 0 vs 0.2): two identically trimmed c172p (1500 m / 100 kt, the DHC6 row as a named proxy), the provider's first-step writes made on each, one step: 1872.5287 lbf un-iced, 1838.8232 lbf iced, 0.982 x to 1.1e-16 relative, alpha 0.38578 deg on both; the DHC6 (1500 m / 120 kt, its own row) 10078.629 -> 9897.214 lbf, the same ratio. "Within 1 %" is met exactly because the whole LIFT axis is wrapped (P2's form).
+* The trimmed flight diverges: eta 0.2 against 0 on the c172p over 3 s moves `lift_n` 100.4 N, `drag_n` 75.5 N, `pitch_deg` 0.134 deg, `tas_kt` 0.40 kt (reached) and `altitude_m` 0.25 m (below the floor); over 10 s altitude 3.86 m, pitch 0.79 deg, TAS 0.51 kt. On the DHC6 3 s: altitude 0.61 m, pitch 0.31 deg, TAS 0.24 kt, lift 725.7 N, drag 349.8 N; 10 s: altitude 6.80 m, pitch 1.08 deg, TAS 0.50 kt.
+* Every one of the eight injected properties reads back 0.0 from the value written on every one of 359 checked steps of a 360-step run (both airframes); the neutral values written before the trim read back unchanged after it.
+* The aerodynamic forces at the initial conditions recompute only on a model pass (`run_ic`): the factor 0.8 leaves the lift at 1476.19 lbf until the re-latch, 1183.91 lbf after it. Each re-latch moves the c172p's IC lift by about 0.1 lbf (7e-5 relative; the DHC6 0.0), so the pre-trim measurement quotes its ratio against that: c172p 0.98222 for the factor 0.982, DHC6 0.982 exactly.
+* The alpha shift moves the stall-onset alpha: P2's static sweep re-made through the provider's writes on the c172p moves the lift peak 16.25 -> 14.25 deg (-2.0 deg for 2 deg at full eta); in flight the 2 deg cue at eta 0.2 moves alpha 0.72 deg, lift 3697 N, altitude 17.7 m and pitch 11.8 deg over 3 s (DHC6: 0.84 deg, 11147 N, 7.9 m, 3.7 deg).
+* A stated eta 0 keeps every recorded column within 4.0e-10 of the stock run (the five pre-trim re-latches), trimmed elevator 4.306127613982291 vs 4.306127613982379 deg; bit-identity is not claimed and the digests differ.
+* The run clock: JSBSim's clock at the c172p's first step is 4.875 s (the crank), so `onset_s` counts from the first step; an onset of 1 s lands at step 120 where the accumulated clock reads 1.00000000000005 s (P3's 5e-14), and a 1 s ramp from it spans 121 steps (120..240). The recorded `icing_eta` column carries 0 through sample 10 and the ramp from sample 11 (a sample is taken after the step whose write was made at its top).
+* DEFECTIVE, found and patched: the derived DHC6 does not load at HEAD -- core/control/derive.py copies the stock model's sibling FILES only, and the DHC6 keeps `Engines/PT6A-27.xml`, `Engines/Propeller.xml` and its four `Systems/*.xml` in aircraft-local subdirectories ("Could not open file: Propeller", measured). The returned derive patch copies the subdirectories (never overwriting an injected system file); with it the derived DHC6 loads and its hashes are unchanged (idempotent, measured). tests/test_icing.py flies the DHC6 through a stand-in that copies the same files into the build directory, so the test is green at HEAD and a no-op once the patch lands.
+* The severity words are a STATED mapping (trace 0.05, light 0.10, moderate 0.20, severe 0.30) inside the 0..0.3 range of Bragg's Twin Otter cases; AIM 7-1-19's words are pilot reports of an accretion rate. Said in every record and in the catalogue sentence.
+* The k-table numbers (k_lift -0.09, k_drag +0.34, k_pitch -0.20, k_roll -0.10, k_yaw -0.10, k_side -0.20) are a transcription from memory of the published Twin Otter k' set (Bragg et al. AIAA 2000-0360); the paper is not reachable from this container and every entry is marked `[unverified here]`. The A320, B747 and p51d carry no block and refuse `icing.airframe_data` by name (measured).
+
+### What was built
+
+* `core/environment/icing.py`: the k-table reader (`parse_icing_config`, `load_k_table`, `require_k_table`), `problems` (the one refusal list), `eta_at`, `icing_injections_for`, `IcingProvider` (`from_spec`, `prepare` before the trim with the five-relatch with/without measurement, `properties` every step, `observe` every step before the write, `applied_variables`, `card_block`, `manifest_block`, `vocabulary`, `provenance`).
+* The `icing` block in `assets/aircraft_config/DHC6.json` (the Twin Otter row) and `c172p.json` (the same row, `proxy: true, proxy_of: DHC6`), insert-only, ASCII; `IcingSpec` (severity, eta_max, onset_s, ramp_s, alpha_shift_deg, envelope; absent-canonical, the eight committed examples' digests unchanged, pinned); `validate_icing`; `icing_for` / the stack / the derived airframe / the manifest's `icing` block in the runner; `icing_schedule_card_block` and the card's `icing_schedule`; the eight `icing_*` channels on the state and the recorder (0 / 1.0 / 0 on a stock airframe, never NaN); the registry: P2's eight icing entries given their spec fields (icing.eta -> eta_max, icing.alpha_shift_rad -> alpha_shift_deg) or kept as producer-measured observers (the six factors), plus icing.severity / onset_s / ramp_s / envelope; the `icing_eta_max` and `icing_onset_s` policy leaves with their card and realised-distribution counting.
+* Measured on the demonstration run (c172p, 1500 m / 100 kt, eta_max 0.2, 3 s, 1.33 s wall): `c172p-ice-alpha` derived; 360 writes, 359 read-backs at 0.0; the trim sample carries eta 0 and factors 1.0; from the first sample eta 0.2, factors 0.982 / 1.068 / 0.96 / 0.98 / 0.98 / 0.96; seven records (`icing.eta` + six factors) each with readback agrees, jsbsim_writes, the model block and a null test: eta and lift 6566.15 -> 6449.44 N (0.98222), drag 842.8 -> 900.1 N, pitch 4048.35 -> 3923.26 N m, roll -223.56 -> -219.58, yaw 28.70 -> 30.65 N m reached, side 0 -> 0 honestly not reached; the manifest ASCII; the default block records nothing, its manifest block is null and the per-run record list stays `[limits.monitor, scene.geoid_undulation_m]`.
+* A stated word, onset, ramp, shift and envelope each return a record: light / 1 s / 1 s / 2 deg / appendix_c -> `icing.severity` (readback of eta 0.10, the lift null test), `icing.onset_s` (first iced step at 1.00000000000005 s against 0, threshold one step), `icing.ramp_s` (121 steps to full against 1), `icing.alpha_shift_rad` (0.034907 rad, lift at the ICs 6566 -> 11378 N with the full shift), `icing.envelope` (bounded, 0 properties written).
+* A real capture (`examples/cameras_waypoint.yaml` + severity moderate, onset 2 s, ramp 5 s, shift 2 deg; `--card --null-tests`): 16.8 s wall for the 30 s flight plus four pair flights; four pairs reached (`icing.severity`, `icing.onset_s`, `icing.ramp_s`, `icing.alpha_shift_rad`) and written into the records by `attach_null_pair`; `flightsim.verify` PASSED (11 passed, 0 failed, 25 not run, 2 superseded); the capture manifest's `applied_variables` = geoid, instruments, limits, the four stated fields and the six factors; `card.json` carries `icing_schedule` in the fixed order (eta_max 0.2, onset 2.0, ramp 5.0, the six k values, the PROXY source); the last frame's state carries eta 0.2, the factors and the 2.0 deg shift with units 1 / deg; everything ASCII.
+* 32 tests in tests/test_icing.py (35 s); 17 mutation guards, each applied on a copy of the tree, shown to fail its named test (exit 1) and the file restored byte-identically (sha256 compared): 1-2 s each for the pure ones, 8-11 s for the ones that fly (the fires log is scratchpad/p5/fires_g{1,2,3}.txt).
+
+### How to demonstrate (any platform)
+
+    find . -name __pycache__ -type d -prune -exec rm -rf {} +
+    .venv/bin/pytest -q -p no:cacheprovider -p no:warnings tests/test_icing.py          # 32 passed
+    .venv/bin/python - <<'EOF'
+    from core.nl.compiler import compile_prompt
+    from core.scenario.runner import run_spec
+    spec = compile_prompt("fly the c172p at 1500 m and 100 kt for 3 seconds"); spec.set("hold_state", False)
+    spec.set("icing.severity", "moderate"); spec.set("icing.alpha_shift_deg", 2.0)
+    r = run_spec(spec)
+    b = r.manifest["icing"]
+    print(r.manifest["fdm"]["aircraft"]["name"], "read-backs", b["per_step_readback"]["steps_checked"], "max error", max(b["per_step_readback"]["max_abs_error"].values()), "pre-trim lift ratio", round(b["prepared"]["lift_ratio_with_factors"], 5))
+    for rec in r.manifest["applied_variables"]["applied_variables"]:
+        if rec["name"].startswith("icing."):
+            n = rec["null_test"]; rb = rec.get("readback")
+            print(rec["name"], rec["value"], "readback", None if rb is None else (rb["property"], rb["value"], rb["agrees"]), "null", round(n["without"], 2), "->", round(n["with"], 2), n["unit"], n["ok"])
+    print("first sample", {c: round(r.telemetry.series(c)[1], 4) for c in ("icing_eta", "icing_lift_factor", "icing_alpha_shift_deg", "lift_n")})
+    EOF
+    # c172p-ice-alpha read-backs 359 max error 0.0 pre-trim lift ratio 0.98222
+    # icing.severity moderate readback ('icing/eta', 0.2, True) null 6566.15 -> 6449.44 N True
+    # icing.alpha_shift_rad 0.0349 readback ('icing/alpha-shift-rad', 0.0349066, True) null 6566.08 -> 11377.6 N True
+    # icing.lift_factor 0.982 ... icing.side_factor 0.96 null 0.0 -> 0.0 N False (symmetric ICs, said so)
+    .venv/bin/python -c "from core.nl.compiler import compile_prompt; from core.scenario.validate import validate; s = compile_prompt('fly the A320 at 6000 m and 250 kt for 3 seconds'); s.set('icing.severity', 'moderate'); print(validate(s, check_feasibility=False).render())"
+    # ... REJECTED -- 1 constraint violated: [icing.airframe_data] A320: no icing k-table is configured for this airframe ...
+    .venv/bin/python -m flightsim.capture <spec with the icing block stated> --out runs/p5_demo --max-previews 0 --card --null-tests
+    .venv/bin/python -m flightsim.verify runs/p5_demo        # verification PASSED (11 passed, 0 failed, 25 not run, 2 superseded)
+    scripts/mutation_check.sh --match "^icing:" --no-suite   # after the integrator appends the 17 guards
+
+### Not verified here
+
+* The k-table: every number is from memory of Bragg et al. 2000 and marked `[unverified here]`; no Cessna 172 icing coefficient exists here (the c172p row is a proxy, said so in its source, its record and its card).
+* The engine side -- **W9 (named, not run)**: the host loads `<fdm>-ice-alpha` through the plugin's patched aircraft path (P9's fifth local patch) with the XML sha256 checked at the door, applies `icing_schedule` at the top of every step of its own run clock (eta(t), the six factors 1 + eta k, the shift), refuses `card.icing_schedule` when a key is missing or out of order or the table is not six numbers, and its first-step lift ratio must equal the card's lift factor exactly (0.982 for eta 0.2 on the demonstration card); the eight `icing_*` channels within the Gate 5 parity bound (W2).
+* The five catalogue entries, the seventeen guards, the per-channel floors, the derive subdirectory copy, the ALLOWED_FUTURE line and the registry-test pins land at integration (patches below).
+
+### Limitations
+
+* The provider is an `AtmosphereProvider` by type (P4's precedent): the stack's atmosphere slot carries the three hooks; a `PreTrimProvider` base would be the cleaner home.
+* The factor scales the WHOLE axis: with k_pitch on the PITCH axis the elevator's Cm_delta_e is scaled with Cm_alpha, and with k_lift the C_L0 and C_L_delta_e terms with C_Lalpha -- a stated simplification of Bragg's per-coefficient k.
+* The pre-trim with/without measurement re-latches the initial conditions five times; on the c172p each re-latch moves the IC lift by 0.1 lbf (the ratio reads 0.98222 for 0.982) and the recorded flight by 4.0e-10; the DHC6 shows neither.
+* At HEAD the eta and factor channels have no floor (unit 1): the two-flight pairs are graded on the aero and attitude columns and the channels are reported; integration patch 1 gives them their own floors (0.01 / 0.001) without moving any pin.
+* The DHC6 flies only with the derive patch (or the test's stand-in); the p51d refuses `icing.airframe_data` before its lift-in-degrees table would refuse `icing_alpha`.
+* `hold_state` derives `c172p-tecs-ice-alpha` (measured) but no iced held-state flight was flown: the c172p cannot hold its state here (P3's finding) and the A320 has no k-table.
+* The prompt compiler has no icing vocabulary; the block is stated through YAML or `spec.set`.
+* The other item of this wave (D2) is editing core/interop and flightsim/dis.py in this same working tree; its seven `dis.*` refusal names are uncatalogued there, so tests/test_messages.py stays red at HEAD+tree until its entries land (mine are covered by the entries above).
+
+### JSBSIM_CORRECTIONS candidates for the integrator
+
+* The aerodynamic forces at the initial conditions are stale until a model pass: a factor written into an injected `<product>` wrap reads through `forces/fwz-aero-lbs` only after `run_ic` (1476.19 -> 1183.91 lbf for 0.8), the same stale-until-pass rule P4 measured for `inertia/cg-x-in`; each `run_ic` moves the cranked c172p's IC lift by 0.1 lbf.
+* (derive.py, not JSBSim) a stock model whose engine, thruster or system files live in aircraft-local subdirectories (the DHC6) needs them beside the derived airframe: JSBSim resolves `<thruster file="Propeller">` against the aircraft directory's `Engines/` before the engine path.
+
+## D2 -- the DIS entity-state stream: the full-rate Entity State PDU log beside the manifest, the empty-by-design entity table, the dis block, and the verifier's own round trip (gap I1; blueprint section 5)
+
+Contract: docs/ADVANCEMENTS_CONTRACTS.md D2. Measured at ec655e2 on 2026-09-29 in the Linux container (JSBSim 1.2.4, pyproj 3.6.1 / PROJ 9.3.0, no engine); the wiring this item does not own measured on a scratch worktree of HEAD with every D2 patch applied.
+
+### What was measured, and what was defective
+
+* Batch 1's feed wrote an Entity State PDU log after the fact with an entity type written from memory, forward-difference dead reckoning, relative timestamps only, an orthometric-or-datum height and no verifier clause. The telemetry now carries D1's `hae_m` (so the geoid is applied at the export boundary from a recorded column) and, with the recorder patch, `yaw_rate_dps` (`velocities/r-rad_sec`, which the state already read and the recorder dropped -- I3's measured "3 absent" instrument channels were n_x, n_y and this one; with the patch the tactical profile measures 13 channels on a real capture, pinned).
+* The entity type had no honest source: SISO-REF-010 could not be fetched, so the standard table ships with every septuplet null and the stream REFUSES by name until a person with the document fills a row; 5 rows (the configured airframes), 5 refusals measured, the remembered batch-1 rows kept only as the marked fallback (`--dis-entity-type fallback`), 0 = Other as the third way (`unspecified`, the absence recorded).
+* The geoid at export, on a georeferenced flight through the real bake path (the synthetic peak of tests/test_datum_block.py, EGM2008 cubic, N0 = +53.850 m, c172p 3 s, 28 samples, 1.0 s flight): the decoded first PDU sits 0.000e+00 m from pyproj's EPSG:4979 -> 4978 of the recorded place at `hae_m`, and 53.8498 m (= N0 to 1e-4) from the same place at the orthometric height -- the record's null test (threshold the branch's 0.5 m altitude floor), reached, with `u_input` 0.10 m from the bake's declared u_model_m; every one of the 28 PDUs re-decoded lands on pyproj to 0.0 m. (The blueprint's "~0.02 m with N" was the JSBSim-ECEF cross-check's residual; JSBSim's own ECEF is not recorded, so the export's reference here is pyproj and the residual is at floating point.)
+* Dead reckoning from recorded quantities only: on v = c t^2 the central difference is exact (2 c t) where the forward difference misses by c dt (pinned, guarded). On the 60 s B747 event run (558 samples, largest acceleration 3.778 m/s^2) central minus forward acceleration is 0.0789 m/s^2 worst, 0.0281 rms (the blueprint measured 0.069 on a banked c172p); the recorded q against batch 1's forward-difference rotation rate 0.0743 deg/s worst (|q| to 4.34 deg/s); the recorded r against the attitude's central difference 0.0043 deg/s worst, 0.0026 rms on the georeferenced run (|r| to 0.863 deg/s).
+* Timestamps: absolute mode hand-checked (epoch 2026-09-29T10:15:30Z + 12.5 s = 942.5 s past the hour, LSB 1); worst error against the sample clock 8.345e-7 s (115 PDUs) and 8.369e-7 s (558 PDUs), unit 1.676 us; the modulo rollover keeps 3599.9999999 s inside 32 bits (without it: 2^32, a 33-bit field).
+* The thresholded emitter reconstructs the full-rate stream within its thresholds, measured on every thresholded stream and written into the index: the 60 s event run writes 21 of 558 PDUs (3.8 %) at 1 m / 3 deg / 5 s with worst reconstruction 0.9997 m and 2.829 deg (0.22 s); 44 (7.9 %) at 0.1 m / 0.5 deg with 0.0984 m and 0.458 deg; the straight 12 s run 3 of 115 (the heartbeat alone), 0.034 m and 1.6e-4 rad. A fabricated turning, accelerating, kinematically consistent flight (120 samples) re-measures the position claim in the test with the kinematic formula written out and shows a tighter threshold emits more.
+* Writing costs nothing the flight notices: 0.082 s for 558 PDUs (80352 bytes), 0.015 s for 28; a UDP send to a local receiver delivers 5 datagrams equal to the file's bytes in order; with the socket constructor forbidden the default path writes the file untouched; a campaign case refuses before any socket exists.
+* The block reaches no equation of motion: six null pairs flown for real (site 7, application 3, entity 42, force_id 1, marking N12345, timestamp_mode absolute, each against its null; 12 c172p flights of 1 s) give equal output digests and peak 0.0 on lat_deg, lon_deg and hae_m -- verdict silent, the bounded invariance the registry basis states.
+* The verifier's own decode (nothing imported from core/interop) on the 558-PDU capture: PASS, location 0.00e+00 m (tolerance 0.05 m), orientation 1.19e-7 rad (tolerance 1e-4 rad), timestamps strictly increasing; `flightsim.verify` prints `[PASS] dis_roundtrip` (12 passed, 0 failed, 25 not run, 2 superseded) and NOT RUN on a capture without `--dis`. FAIL by name (`check.dis_roundtrip`) on: a PDU moved 1.000 m (a 0.02 m move still passes), phi negated, psi negated, a stale undulation (52.5 m), a clock stepped back 0.17 s, a changed site id, a frame key at a PDU the stream does not hold, a header length altered, a record without its files.
+* The catalogue scanner over the working tree names exactly the seven `dis.*` refusals (with the other item's four `icing.*` names present concurrently); over the patched worktree the ten names returned (the seven, the two `interop.*`, `check.dis_roundtrip`); with the returned entries appended to the worktree's catalogue tests/test_messages.py is green (23 passed).
+
+### What was built
+
+* `core/interop/dis.py` (extended in place, every batch-1 name kept): `load_entity_type_table`, `standard_entity_type`, `entity_type_row` (the three policies), `parse_epoch`, `timestamp_for`, `marking_for`, `sample_frames`, `central_difference`, `rvw_vectors`; refusals `dis.entity_type_unknown`, `dis.timestamp_epoch_missing`, `dis.timestamp_mode`, `dis.marking_too_long`, `dis.frame_without_geodetic`.
+* `assets/dis_entity_types.yaml`: the standard table, five rows, every septuplet null with the reason, the SISO-REF-010 edition / UIDs / table cited (UIDs as remembered, marked).
+* `core/interop/dis_stream.py`: `StreamOptions`, `dis_spec_problems`, `options_from_spec`, `preflight`, `in_campaign_worker`, `extrapolate` (RVW), `build_stream`, `reconstruction`, `location_null_test`, `stream_record`, `UdpSender`, `parse_udp_target`, `write_stream`, `read_index`, `frame_keys_for`, `attach_frame_keys`; refusals `dis.force_id`, `dis.udp_in_campaign` and the ones above.
+* `flightsim/dis.py`: the `--stream` form (`RUN_DIR --stream [--out-dir] [--emitter] [--timestamp-mode --epoch] [--entity-type] [--marking] [--force-id] [--udp]`), so a run captured before the option existed gets its log after the fact.
+* Tests: tests/test_dis.py 43 (32 batch-1 kept + 11 new), tests/test_dis_stream.py 20 (the verifier text executed against verify.py's own Check with nine corruption cases), tests/test_dis_block.py 19 (returned as a new-file patch; measured green on the patched worktree together with the 24 other affected files: 575 tests, every one green but the two catalogue tests that wait for the returned entries, 1 skip). 27 mutation guards, each applied on the real file and shown to fail its tests, each file restored byte-identically (sha256 checked): 15 on the owned files in the working tree (first reds in tests/test_dis.py and tests/test_dis_stream.py), 12 on the patched files in the worktree (the five verifier guards fail the pin test first and, with it deselected, the corruption tests themselves; the capture guards fail the capture tests; the recorder guard the capture's r-source assertion).
+
+### How to demonstrate (any platform)
+
+    find . -name __pycache__ -type d -prune -exec rm -rf {} +
+    .venv/bin/pytest -q -p no:cacheprovider -p no:warnings tests/test_dis.py tests/test_dis_stream.py tests/test_dis_block.py    # 82 passed once the patches land
+    .venv/bin/python -m flightsim.capture examples/cameras_event_trigger.yaml --out runs/d2 --max-previews 0 --dis
+    #   REFUSED -- dis.entity_type_unknown: the entity-type table's row for 'B747' carries no septuplet (entered from the standard, never guessed); ...   (before any flight)
+    .venv/bin/python -m flightsim.capture examples/cameras_event_trigger.yaml --out runs/d2 --max-previews 0 --dis --dis-entity-type fallback
+    #   dis:      558 Entity State PDU(s) (full_rate) in runs/d2/dis_entity_state.bin, index dis_entity_state.json, keys on 29 frame(s); entity type fallback; timestamps relative; udp off
+    .venv/bin/python -m flightsim.verify runs/d2                # [PASS] dis_roundtrip: 558 Entity State PDUs walked by the checker's own layout: location within 0.00e+00 m ...
+    .venv/bin/python -m flightsim.dis runs/d2 --stream --entity-type unspecified --emitter thresholded --timestamp-mode absolute --epoch 2026-09-29T10:00:00Z
+    #   wrote 21 Entity State PDU(s) for 558 telemetry sample(s) ... emitter thresholded (21 emitted, 537 suppressed)
+    .venv/bin/python -m flightsim.dis --decode runs/d2/dis_entity_state.bin --limit 3
+    .venv/bin/python -m flightsim.capture examples/cameras_multi.yaml --out runs/x --cigi     # REFUSED -- interop.cigi_not_implemented: ...
+    scripts/mutation_check.sh --match "^DIS D2" --no-suite      # the 27 guards, once integrated
+
+### Not verified here
+
+* No DIS consumer read the stream: the wire form is checked by two readings of IEEE 1278.1-2012 written from memory (the batch-1 test's decoder and the verifier's walk), not by a second implementation. Wireshark's DIS dissector on a pcap of the UDP datagrams, or `opendis`'s PDU factory over the file's 144-byte chunks, is the networked / Windows step; neither is in the venv.
+* SISO-REF-010 was not fetched: the septuplets are not asserted (the table ships empty), the cited UIDs are from memory, the force-id enumeration and the default thresholds are as remembered.
+* No real GLO-30 bake: the geoid-at-export null test was measured on the synthetic peak through the real bake path (EGM2008 cubic, from the bake cache).
+* Everything in the integration patches (the block, the validator, the registry, the recorder channel, the capture options, the verifier clause, the test pins) was applied and measured on a scratch worktree of HEAD, not in the working tree the other item is editing.
+
+### Limitations
+
+* The entity type policy `standard` refuses on every airframe out of the box: that is the honest state of the table, and `--dis-entity-type fallback | unspecified` are the two stated ways out until a row is filled.
+* One entity per stream (the primary airframe; traffic aircraft are scripted meshes with no telemetry).
+* The epoch is an option of the export (`--dis-epoch`), not a spec field: an instant is not part of the reproducible scenario.
+* r is a recorded rate only on captures made after the recorder patch; older recordings get the attitude's central difference and the index says so.
+* The run-card `dis` block the blueprint's table lists is not added: no host applies it, the card's C++ reader is P9's, and the CIGI correspondence is documentation (the contracts table).
+
+### VV rows (docs/vva/VV_REPORT.md, section 1)
+
+| V26 | DIS round trip: the Entity State PDU log against the recording, by the checker's own decode | **PASS** here. 558 PDUs of the 60 s B747 run: location within 0.00e+00 m of pyproj EPSG:4979 -> 4978 at the recorded (lat, lon, hae_m) (tolerance 0.05 m), orientation within 1.19e-7 rad of the checker's own Euler composition (tolerance 1e-4 rad), timestamps strictly increasing (8.4e-7 s off the sample clock); on a georeferenced bake (EGM2008, N0 = +53.850 m) the export lands on pyproj with N and 53.850 m off without; FAIL by name on a PDU moved 1 m, a flipped Euler sign, a stale undulation, a clock stepped back. Not attempted: an independent DIS decoder (Wireshark / opendis, networked) | tests/test_dis_stream.py, tests/test_dis_block.py; `python -m flightsim.verify <run>` (dis_roundtrip) |
+
+## Wave 5 integration (P5 with D2)
+
+Integrated from the returned text: fifteen catalogue entries, 44 guards, the two contracts and report sections, P5's nine patches (the eta / factor floors, the derive.py subdirectory fix, the registry-test pins, `card.icing_schedule` allowed as future) and D2's 24 (the `dis` block through blocks.py, spec.py, validate.py, the registry, the recorder's yaw rate, the capture command's `--dis` / `--dis-udp` / `--cigi` / `--hla`, the verifier's `dis_roundtrip` clause pinned by tests/test_dis_stream.py, the registry-test and instruments pins, and tests/test_dis_block.py as a new file).
+
+### What integration measured, and what was defective
+
+* Ten of D2's hunks no longer matched once P5's edits to the same anchors had landed; merged by hand as the unions both items described.
+* Nothing else was defective: every other patch applied by exact text; the affected suites were green on the first run after the merges (726 passed).
+* Wave 4's CI (run 36503916763): Ubuntu green; Windows red on eight shear tests and two derivation pins, macOS red on two gust pins. Two causes. (a) `.gitattributes` says `* text=auto`, so a Windows checkout writes the NWP fixture JSON and the vendored JSBSim XML with CRLF: the fixture's sha256 no longer matches its sidecar and the derivation's hashes no longer match the Linux constants. The files a hash contract covers (the vendored JSBSim data, the injected templates, the weather fixtures, the entity table) are now `-text`. (b) JSBSim's Dryden generator draws from the platform's C++ random library, so "the same seed" gives a different channel per platform (w ratio 1.86 Linux, 2.13 Windows, 2.60 macOS; the Dryden pair's roll 4.56 Linux, 6.22 macOS); the two pins that depended on it are bands with the three measurements in their docstrings. The von Karman table (our own numpy field) is unaffected.
+
+### Measured here
+
+The affected suites (28 files): 726 passed (144 s); 699 guard targets each occurring exactly once; the 44 wave-5 guards: see below. Full suite: see the commit.

@@ -520,9 +520,10 @@ def test_the_cli_option_writes_the_measured_file_beside_the_telemetry(c172p_meas
     assert data["profile"]["name"] == "tactical" and data["samples"] == telemetry["samples"]
     assert data["truth_sha256"] == hashlib.sha256((out / "telemetry.json").read_bytes()).hexdigest()
     assert {e["measured"] for e in data["channels"]} == {
-        "n_z_meas", "roll_rate_dps_meas", "pitch_rate_dps_meas", "lat_deg_meas",
-        "lon_deg_meas", "altitude_m_gps_meas", "v_north_mps_meas", "v_east_mps_meas",
-        "v_down_mps_meas", "cas_kt_meas", "altitude_m_baro_meas", "heading_deg_meas"}
+        "n_z_meas", "roll_rate_dps_meas", "pitch_rate_dps_meas", "yaw_rate_dps_meas",
+        "lat_deg_meas", "lon_deg_meas", "altitude_m_gps_meas", "v_north_mps_meas",
+        "v_east_mps_meas", "v_down_mps_meas", "cas_kt_meas", "altitude_m_baro_meas",
+        "heading_deg_meas"}
     record = data["applied_variables"]["applied_variables"][0]
     assert record["name"] == "instruments.profile" and record["source"] == "user"
     assert record["null_test"]["ok"] is True

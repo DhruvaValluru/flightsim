@@ -239,5 +239,36 @@
     },
     "policy_station": "name",
     "policy_station_reason": "the model's one station (the XML names it \"name\"): a payload draw replaces its 230 lb"
+  },
+  "icing": {
+    "source": "Bragg, Hutchison, Merret, Oltman, Pokhariyal, AIAA 2000-0360, the Twin Otter k'_CA set of the Smart Icing Systems research (NASA Glenn Twin Otter, Ratvasky et al.), transcribed from memory [unverified here: the paper is not reachable from this container]; the DHC6 IS the Twin Otter (blueprint correction 7), so the row applies directly",
+    "model": "Bragg et al. 2000 factor form C_A,iced = (1 + eta k_A) C_A, applied per axis to the WHOLE axis by the icing injection (a stated simplification: Bragg's k applies to one coefficient of the axis)",
+    "proxy": false,
+    "k_table": {
+      "k_lift": {
+        "value": -0.09,
+        "source": "k'_CLalpha of the Twin Otter set as remembered (the lift-curve slope loss) [unverified here]; applied to the whole LIFT axis"
+      },
+      "k_drag": {
+        "value": 0.34,
+        "source": "k'_CD0 of the Twin Otter set as remembered (the parasite drag rise) [unverified here]; applied to the whole DRAG axis"
+      },
+      "k_pitch": {
+        "value": -0.2,
+        "source": "k'_Cmalpha of the Twin Otter set as remembered (the tail's pitch stiffness loss) [unverified here]; applied to the whole PITCH axis"
+      },
+      "k_roll": {
+        "value": -0.1,
+        "source": "k'_Clp of the Twin Otter set as remembered (roll damping loss) [unverified here]; applied to the whole ROLL axis"
+      },
+      "k_yaw": {
+        "value": -0.1,
+        "source": "k'_Cnbeta of the Twin Otter set as remembered (directional stiffness loss) [unverified here]; applied to the whole YAW axis"
+      },
+      "k_side": {
+        "value": -0.2,
+        "source": "k'_CYbeta of the Twin Otter set as remembered [unverified here]; applied to the whole SIDE axis"
+      }
+    }
   }
 }

@@ -4788,6 +4788,302 @@ mutate core/registry.py \
     "failures: the registry claims the block's field" tests/test_failures_block.py tests/test_registry.py \
     || failures=$((failures+1))
 
+# -- the advancement additions, wave 5: P5 the icing provider and D2 the DIS entity-state stream ----
+mutate core/environment/icing.py \
+    '        fraction = min(1.0, max(0.0, (t - onset_s) / ramp_s))' \
+    '        fraction = (t - onset_s) / ramp_s  # MUTATED: no clamp, eta runs past eta_max and below 0' \
+    "icing: the severity ramp is clamped to 0..eta_max" tests/test_icing.py \
+    || failures=$((failures+1))
+
+mutate core/environment/icing.py \
+    '        return {axis: 1.0 + eta * self.values[axis] for axis in AXES}' \
+    '        return {axis: 1.0 + self.values[axis] for axis in AXES}  # MUTATED: the factor ignores eta' \
+    "icing: the factor form is 1 + eta k per axis (Bragg)" tests/test_icing.py \
+    || failures=$((failures+1))
+
+mutate core/environment/icing.py \
+    '        writes = self.writes_at(t)
+        s = self.schedule' \
+    '        writes = {} if self.steps_written else self.writes_at(t)  # MUTATED: written on the first step only
+        s = self.schedule' \
+    "icing: the eight properties are written every step" tests/test_icing.py \
+    || failures=$((failures+1))
+
+mutate core/environment/icing.py \
+    '            errors[prop] = max(errors.get(prop, 0.0), abs(read - written))' \
+    '            errors[prop] = 0.0  # MUTATED: every read-back is reported as agreeing' \
+    "icing: the per-step read-back error is measured, not assumed" tests/test_icing.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/blocks.py \
+    'ICING_SEVERITY_WORDS: Dict[str, float] = {"trace": 0.05, "light": 0.10, "moderate": 0.20,
+                                          "severe": 0.30}' \
+    'ICING_SEVERITY_WORDS: Dict[str, float] = {"trace": 0.05, "light": 0.10, "moderate": 0.25,
+                                          "severe": 0.30}  # MUTATED: another moderate' \
+    "icing: the severity words are the stated mapping to eta" tests/test_icing.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/blocks.py \
+    '        if eta.source is Source.DEFAULT or eta.value is None:' \
+    '        if True:  # MUTATED: the word overrides a stated number' \
+    "icing: a stated eta_max wins over the severity word" tests/test_icing.py \
+    || failures=$((failures+1))
+
+mutate core/environment/icing.py \
+    '    elif not ETA_RANGE[0] <= float(eta_max) <= ETA_RANGE[1]:' \
+    '    elif False:  # MUTATED: any eta_max is accepted' \
+    "icing: eta_max outside 0..1 is refused by name" tests/test_icing.py \
+    || failures=$((failures+1))
+
+mutate core/environment/icing.py \
+    '    table = load_k_table(aircraft, config_dir)
+    if table is None:' \
+    '    table = load_k_table(aircraft, config_dir)
+    if False:  # MUTATED: an airframe without a k-table is not refused' \
+    "icing: an airframe with no k-table is refused by name" tests/test_icing.py \
+    || failures=$((failures+1))
+
+mutate core/environment/icing.py \
+    'CARD_KEYS = ("eta_max", "onset_s", "ramp_s", "alpha_shift_deg", "k_table", "source")' \
+    'CARD_KEYS = ("onset_s", "eta_max", "ramp_s", "alpha_shift_deg", "k_table", "source")  # MUTATED: another key order' \
+    "icing: the card block's keys are in the fixed order the host reads" tests/test_icing.py \
+    || failures=$((failures+1))
+
+mutate core/environment/icing.py \
+    '        return math.radians(self.alpha_shift_deg) * (eta / self.eta_max)' \
+    '        return math.radians(self.alpha_shift_deg)  # MUTATED: the full shift whatever eta' \
+    "icing: the alpha shift is a linear cue in eta" tests/test_icing.py \
+    || failures=$((failures+1))
+
+mutate core/environment/icing.py \
+    '        fdm.props.set_many(neutral)
+        fdm.relatch_initial_conditions()
+        restored = self._measure(fdm)' \
+    '        fdm.props.set_many(writes)  # MUTATED: the factors at eta_max are left for the trim
+        fdm.relatch_initial_conditions()
+        restored = self._measure(fdm)' \
+    "icing: the trim is of the un-iced aircraft (neutral values before the trim)" tests/test_icing.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '    icing_injections = icing_injections_for(spec)' \
+    '    icing_injections = ()  # MUTATED: the stock airframe is flown with the block stated' \
+    "icing: a stated block derives the airframe with the icing and icing_alpha injections" tests/test_icing.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '    icing = icing_for(spec)
+    if icing is not None:
+        stack.add(icing)' \
+    '    icing = None  # MUTATED: the icing provider is never attached
+    if icing is not None:
+        stack.add(icing)' \
+    "icing: the provider is in the stack (neutral before the trim, eta every step)" tests/test_icing.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/spec.py \
+    '        if not self.icing.is_default():' \
+    '        if True:  # MUTATED: the default block is serialised too' \
+    "icing: the block is absent-canonical (every committed example keeps its digest)" tests/test_icing.py tests/test_registry.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/validate.py \
+    '    report.violations.extend(validate_icing(spec))' \
+    '    pass  # MUTATED: the icing block is never validated' \
+    "icing: the validator refuses the block by name" tests/test_icing.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/card.py \
+    '        card["icing_schedule"] = icing_schedule' \
+    '        pass  # MUTATED: the card carries no icing schedule' \
+    "icing: the card carries the icing_schedule block" tests/test_icing.py \
+    || failures=$((failures+1))
+
+mutate core/registry.py \
+    '        name="icing.eta", spec_path="icing.eta_max", unit="1",' \
+    '        name="icing.eta", spec_path=None, unit="1",  # MUTATED: the block'"'"'s number is unclaimed' \
+    "icing: the registry claims the block's fields" tests/test_icing.py \
+    || failures=$((failures+1))
+mutate core/interop/dis.py \
+    'ESPDU_LENGTH = 144' \
+    'ESPDU_LENGTH = 148  # MUTATED: the struct length is not the wire length' \
+    "DIS D2: the Entity State PDU struct length is 144 bytes" tests/test_dis.py \
+    || failures=$((failures+1))
+
+mutate core/interop/dis.py \
+    '    return (units << 1) | (TIMESTAMP_ABSOLUTE_BIT if absolute else 0)' \
+    '    return (units << 1)  # MUTATED: the absolute flag never reaches the LSB' \
+    "DIS D2: the timestamp LSB carries the absolute flag" tests/test_dis.py \
+    || failures=$((failures+1))
+
+mutate core/interop/dis.py \
+    '                      * TIMESTAMP_UNITS_PER_HOUR)) % TIMESTAMP_UNITS_PER_HOUR' \
+    '                      * TIMESTAMP_UNITS_PER_HOUR))  # MUTATED: no modulo rollover at the hour' \
+    "DIS D2: the timestamp rolls over modulo 2^31 at the hour (a round within a unit of the hour overflows to 33 bits)" tests/test_dis.py \
+    || failures=$((failures+1))
+
+mutate core/interop/dis.py \
+    '    return timestamp_from_seconds(past_hour, absolute=True)' \
+    '    return timestamp_from_seconds(past_hour, absolute=False)  # MUTATED: absolute mode writes LSB 0' \
+    "DIS D2: the absolute timestamp mode sets the LSB" tests/test_dis.py tests/test_dis_stream.py \
+    || failures=$((failures+1))
+
+mutate core/interop/dis.py \
+    '    if epoch is None or not str(epoch).strip():
+        raise DisError("dis.timestamp_epoch_missing",' \
+    '    if epoch is None:
+        return 0.0  # MUTATED: a missing epoch is silently the Unix epoch
+    if not str(epoch).strip():
+        raise DisError("dis.timestamp_epoch_missing",' \
+    "DIS D2: absolute timestamps without an epoch refuse dis.timestamp_epoch_missing" tests/test_dis.py tests/test_dis_stream.py \
+    || failures=$((failures+1))
+
+mutate core/interop/dis.py \
+    '    if len(text) > MARKING_MAX_CHARACTERS or not text.isascii():
+        raise DisError("dis.marking_too_long",' \
+    '    if False:  # MUTATED: any marking is accepted and truncated on the wire
+        raise DisError("dis.marking_too_long",' \
+    "DIS D2: a marking over 11 ASCII characters refuses dis.marking_too_long" tests/test_dis.py \
+    || failures=$((failures+1))
+
+mutate core/interop/dis_stream.py \
+    '        if len(text) > MARKING_MAX_CHARACTERS or not text.isascii():
+            out.append(DisError("dis.marking_too_long",' \
+    '        if False:  # MUTATED: the block accepts any marking
+            out.append(DisError("dis.marking_too_long",' \
+    "DIS D2: the dis block's marking is checked by the validator's list" tests/test_dis_stream.py \
+    || failures=$((failures+1))
+
+mutate core/interop/dis.py \
+    '        heights = columns["hae_m"]' \
+    '        heights = columns["altitude_m"] if "altitude_m" in columns else columns["hae_m"]  # MUTATED: the orthometric height is exported' \
+    "DIS D2: the geoid undulation is added at the export boundary (hae_m, not altitude_m)" tests/test_dis.py tests/test_dis_stream.py \
+    || failures=$((failures+1))
+
+mutate core/interop/dis.py \
+    '    lo, hi = max(0, i - 1), min(n - 1, i + 1)' \
+    '    lo, hi = i, min(n - 1, i + 1)  # MUTATED: a forward difference' \
+    "DIS D2: the DRM acceleration is the central difference of the recorded ECEF velocity" tests/test_dis.py \
+    || failures=$((failures+1))
+
+mutate core/interop/dis.py \
+    '        bad = [c for c, v in values.items() if not _finite(v)]' \
+    '        bad = []  # MUTATED: a frame without a finite place is exported' \
+    "DIS D2: a recorded frame without a finite geodetic place refuses dis.frame_without_geodetic" tests/test_dis.py \
+    || failures=$((failures+1))
+
+mutate core/interop/dis.py \
+    '    if septuplet is None:
+        raise DisError("dis.entity_type_unknown",' \
+    '    if septuplet is None:
+        return EntityType(1, 2, 0, 0, 0, 0, 0), row  # MUTATED: an empty row is guessed
+    if False:
+        raise DisError("dis.entity_type_unknown",' \
+    "DIS D2: an empty standard-table row refuses dis.entity_type_unknown, never a guessed septuplet" tests/test_dis.py tests/test_dis_stream.py \
+    || failures=$((failures+1))
+
+mutate core/interop/dis.py \
+    '    return {"type": EntityType(), "septuplet": None, "source": "unspecified",' \
+    '    return {"type": EntityType(1, 2, 0, 0, 0, 0, 0), "septuplet": None, "source": "unspecified",  # MUTATED: Platform-Air guessed' \
+    "DIS D2: the unspecified policy writes 0 = Other in every field" tests/test_dis.py tests/test_dis_stream.py \
+    || failures=$((failures+1))
+
+mutate core/interop/dis_stream.py \
+    '    if udp is not None:
+        sender = UdpSender(*udp)' \
+    '    if True:  # MUTATED: a socket is opened and datagrams sent by default
+        sender = UdpSender(*(udp or ("127.0.0.1", 3000)))' \
+    "DIS D2: the UDP sender is off by default (no socket without a target)" tests/test_dis_stream.py \
+    || failures=$((failures+1))
+
+mutate core/interop/dis_stream.py \
+    '    if udp is not None and in_campaign_worker(out_dir):' \
+    '    if False and udp is not None and in_campaign_worker(out_dir):  # MUTATED: a campaign case may send' \
+    "DIS D2: a campaign case refuses dis.udp_in_campaign before any socket exists" tests/test_dis_stream.py \
+    || failures=$((failures+1))
+
+mutate core/interop/dis_stream.py \
+    '        if (position_error > options.position_threshold_m' \
+    '        if (position_error > 1e9 * options.position_threshold_m  # MUTATED: the position threshold never fires' \
+    "DIS D2: the thresholded emitter reconstructs the full-rate stream within its position threshold" tests/test_dis_stream.py \
+    || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    'DIS_LOCATION_TOL_M = 0.05' \
+    'DIS_LOCATION_TOL_M = 500.0  # MUTATED: a PDU moved a metre or a stale undulation passes' \
+    "DIS D2: the verifier holds every PDU location to 0.05 m of pyproj" tests/test_dis_stream.py \
+    || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    'DIS_EULER_TOL_RAD = 1e-4' \
+    'DIS_EULER_TOL_RAD = 10.0  # MUTATED: a flipped Euler sign passes' \
+    "DIS D2: the verifier holds every PDU orientation to 1e-4 rad of its own composition" tests/test_dis_stream.py \
+    || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    phi = math.atan2(m[1][2], m[2][2])
+    return psi, theta, phi' \
+    '    phi = -math.atan2(m[1][2], m[2][2])  # MUTATED: the checker'"'"'s own roll sign flipped
+    return psi, theta, phi' \
+    "DIS D2: the verifier's own Euler composition agrees with the wire" tests/test_dis_stream.py \
+    || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '            if seconds <= previous:' \
+    '            if False and seconds <= previous:  # MUTATED: a clock that runs backwards passes' \
+    "DIS D2: the verifier requires strictly increasing timestamps" tests/test_dis_stream.py \
+    || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if record is None and not have_files:
+        return Check("dis_roundtrip", NOT_RUN,' \
+    '    if False:  # MUTATED: a run without a stream fails instead of NOT RUN
+        return Check("dis_roundtrip", NOT_RUN,' \
+    "DIS D2: the verifier reports NOT RUN without a stream, never a pass or a fail on absence" tests/test_dis_stream.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/validate.py \
+    '    report.violations.extend(validate_dis(spec))' \
+    '    pass  # MUTATED: the dis block is not validated' \
+    "DIS D2: the validator refuses the dis block's fields by name" tests/test_dis_block.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/spec.py \
+    '        if not self.dis.is_default():' \
+    '        if True:  # MUTATED: the default dis block is serialised too' \
+    "DIS D2: the dis block is absent-canonical (every committed example keeps its digest)" tests/test_dis_block.py tests/test_registry.py \
+    || failures=$((failures+1))
+
+mutate core/registry.py \
+    '        name="dis.site", spec_path="dis.site", unit="1",' \
+    '        name="dis.site", spec_path=None, unit="1",  # MUTATED: the field is unclaimed' \
+    "DIS D2: the registry claims every field of the dis block" tests/test_dis_block.py tests/test_registry.py \
+    || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '    if args.cigi:' \
+    '    if False and args.cigi:  # MUTATED: --cigi runs a capture as if it spoke CIGI' \
+    "DIS D2: --cigi refuses interop.cigi_not_implemented before anything runs" tests/test_dis_block.py \
+    || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '            preflight(str(spec.aircraft.value), dis_options)' \
+    '            pass  # MUTATED: no pre-flight gate; the refusal comes after the flight' \
+    "DIS D2: the DIS refusals are printed before any flight" tests/test_dis_block.py \
+    || failures=$((failures+1))
+
+mutate flightsim/capture.py \
+    '        keyed = attach_frame_keys(manifest, dis_index)' \
+    '        keyed = 0  # MUTATED: no frame carries its PDU keys' \
+    "DIS D2: every frame record carries dis.pdu_index and dis.byte_offset" tests/test_dis_block.py \
+    || failures=$((failures+1))
+
+mutate core/telemetry/recorder.py \
+    '    "yaw_rate_dps",' \
+    '    # "yaw_rate_dps",  # MUTATED: the yaw rate is not recorded' \
+    "DIS D2: the recorder records the body yaw rate the RVW block needs" tests/test_dis_block.py \
+    || failures=$((failures+1))
+
 
 if [ "$guard_n" -ne "$total" ]; then
     echo "INTERNAL: $guard_n mutate calls ran but $total are written; the count is off" >&2

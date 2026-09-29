@@ -4480,6 +4480,245 @@ def verify_datum_independent(manifest: Dict, run_dir=None) -> Check:
                  f"{worst:.2e} m over {len(points)} interior points; inf outside")
 
 
+# -- D2: the DIS entity-state stream round trip ------------------------------
+
+#: The full-rate Entity State PDU log a capture writes beside its manifest
+#: with --dis (core/interop/dis_stream.py) and its index. The checker walks
+#: the bytes with its own reading of IEEE 1278.1-2012 7.2.2 and imports
+#: nothing from the producer package.
+DIS_STREAM_FILE = "dis_entity_state.bin"
+DIS_INDEX_FILE = "dis_entity_state.json"
+DIS_RECORD_NAME = "dis.entity_state"
+DIS_PDU_LENGTH = 144
+DIS_TIMESTAMP_UNITS_PER_HOUR = 2 ** 31
+#: Location: the wire's float64 ECEF against pyproj's EPSG:4979 -> EPSG:4978
+#: of the recorded (lat, lon, hae_m). 0.05 m holds the export to the 3.4 cm
+#: the JSBSim ECEF cross-check measured (blueprint section 5) while a PDU
+#: moved 1 m, or a stale undulation (|N| >= 17 m at every committed scene),
+#: fails. Euler: 1e-4 rad against the checker's own composition (the wire is
+#: float32, ~1e-7 rad at pi); a flipped sign misses by 2|angle|. Timestamps:
+#: strictly increasing after one hour unwrap.
+DIS_LOCATION_TOL_M = 0.05
+DIS_EULER_TOL_RAD = 1e-4
+FAIL_DIS_ROUNDTRIP = "check.dis_roundtrip"
+
+
+def _dis_walk(data: bytes):
+    """The checker's OWN reading of the Entity State PDU (IEEE 1278.1-2012
+    7.2.2 with the version-7 header): (offset, fields) per PDU, walking by
+    the header's length field. Raises ValueError on anything that is not
+    whole version-7 Entity State PDUs of 144 bytes."""
+    import struct
+
+    pdus = []
+    offset = 0
+    while offset < len(data):
+        if len(data) - offset < 12:
+            raise ValueError(f"{len(data) - offset} trailing bytes at {offset} are shorter "
+                             f"than a PDU header")
+        version, exercise, pdu_type, family = struct.unpack(">BBBB", data[offset:offset + 4])
+        timestamp = struct.unpack(">I", data[offset + 4:offset + 8])[0]
+        length = struct.unpack(">H", data[offset + 8:offset + 10])[0]
+        if version != 7 or pdu_type != 1 or family != 1:
+            raise ValueError(f"PDU at {offset} is version {version}, type {pdu_type}, "
+                             f"family {family}; not a version-7 Entity State PDU")
+        if length != DIS_PDU_LENGTH or offset + length > len(data):
+            raise ValueError(f"PDU at {offset} declares {length} bytes; {len(data) - offset} "
+                             f"remain and this reader takes {DIS_PDU_LENGTH}")
+        chunk = data[offset:offset + length]
+        site, application, entity = struct.unpack(">HHH", chunk[12:18])
+        force_id, n_params = struct.unpack(">BB", chunk[18:20])
+        pdus.append((offset, {
+            "exercise_id": exercise, "timestamp": timestamp,
+            "site": site, "application": application, "entity": entity,
+            "force_id": force_id, "variable_parameters": n_params,
+            "entity_type": struct.unpack(">BBHBBBB", chunk[20:28]),
+            "velocity": struct.unpack(">fff", chunk[36:48]),
+            "location": struct.unpack(">ddd", chunk[48:72]),
+            "orientation": struct.unpack(">fff", chunk[72:84]),
+            "dr_algorithm": chunk[88], "marking": chunk[129:140],
+            "time_past_hour_s": (timestamp >> 1) * 3600.0 / DIS_TIMESTAMP_UNITS_PER_HOUR,
+            "absolute": bool(timestamp & 1),
+        }))
+        offset += length
+    return pdus
+
+
+def _dis_own_euler(lat_deg, lon_deg, heading_deg, pitch_deg, roll_deg):
+    """The checker's own DIS orientation (psi, theta, phi, radians): the
+    body-from-ECEF matrix composed as body-from-NED (passive yaw about
+    down, pitch about the new right axis, roll about the new forward
+    axis) times NED-from-ECEF (rows north, east, down at the place), the
+    angles read off it as theta = asin(-r02), psi = atan2(r01, r00),
+    phi = atan2(r12, r22). Written here from the definition, not taken
+    from the producer."""
+    lat, lon = math.radians(lat_deg), math.radians(lon_deg)
+    sl, cl, so, co = math.sin(lat), math.cos(lat), math.sin(lon), math.cos(lon)
+    ned_from_ecef = ((-sl * co, -sl * so, cl), (-so, co, 0.0), (-cl * co, -cl * so, -sl))
+    h, p, r = (math.radians(heading_deg), math.radians(pitch_deg), math.radians(roll_deg))
+    ch, sh, cp, sp, cr, sr = math.cos(h), math.sin(h), math.cos(p), math.sin(p), math.cos(r), math.sin(r)
+    yaw = ((ch, sh, 0.0), (-sh, ch, 0.0), (0.0, 0.0, 1.0))
+    pitch = ((cp, 0.0, -sp), (0.0, 1.0, 0.0), (sp, 0.0, cp))
+    roll = ((1.0, 0.0, 0.0), (0.0, cr, sr), (0.0, -sr, cr))
+
+    def mul(a, b):
+        return tuple(tuple(sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3))
+                     for i in range(3))
+
+    m = mul(roll, mul(pitch, mul(yaw, ned_from_ecef)))
+    theta = math.asin(max(-1.0, min(1.0, -m[0][2])))
+    psi = math.atan2(m[0][1], m[0][0])
+    phi = math.atan2(m[1][2], m[2][2])
+    return psi, theta, phi
+
+
+def _dis_hae(columns, datum):
+    """The ellipsoidal height per sample the stream should carry: the
+    recorded hae_m, else altitude_m plus the manifest datum's numeric
+    undulation, else altitude_m (a scene with no geoid)."""
+    if "hae_m" in columns:
+        return [float(h) for h in columns["hae_m"]], "hae_m"
+    n = (datum or {}).get("undulation_m") if isinstance(datum, dict) else None
+    n = float(n) if isinstance(n, (int, float)) and not isinstance(n, bool) else 0.0
+    return [float(a) + n for a in columns["altitude_m"]], f"altitude_m + {n:+.3f} m"
+
+
+def verify_dis_roundtrip(manifest: Dict, run_dir=None) -> Check:
+    """The Entity State PDU log against the recording it was made from,
+    by the checker's own decode: every PDU's location within
+    DIS_LOCATION_TOL_M of pyproj's EPSG:4979 -> EPSG:4978 of the
+    telemetry's (lat, lon, hae_m) at the PDU's sample, its orientation
+    within DIS_EULER_TOL_RAD of the checker's own DIS Euler angles from
+    the recorded heading, pitch, roll and place, the timestamps strictly
+    increasing (one hour unwrap allowed) with the LSB the index's mode
+    says, the ids and marking the index's, the index's offsets the walk's,
+    every frame's dis keys pointing at a PDU of the stream. NOT RUN
+    without a stream (no file, no index and no dis.entity_state record),
+    without telemetry.json, or without pyproj; FAIL (check.dis_roundtrip)
+    on a record without its files, a stream that does not walk, a PDU
+    moved, an angle wrong, a stale undulation, a non-monotonic clock."""
+    run_dir = Path(run_dir) if run_dir is not None else None
+    records = ((manifest.get("applied_variables") or {}).get("applied_variables") or [])
+    record = next((r for r in records if isinstance(r, dict) and r.get("name") == DIS_RECORD_NAME), None)
+    stream_path = run_dir / DIS_STREAM_FILE if run_dir is not None else None
+    index_path = run_dir / DIS_INDEX_FILE if run_dir is not None else None
+    have_files = (stream_path is not None and stream_path.is_file()
+                  and index_path is not None and index_path.is_file())
+    if record is None and not have_files:
+        return Check("dis_roundtrip", NOT_RUN,
+                     "no Entity State PDU log: the run was captured without --dis "
+                     "(no dis_entity_state.bin, no index, no dis.entity_state record)")
+    if not have_files:
+        return Check("dis_roundtrip", FAIL,
+                     f"the manifest carries a {DIS_RECORD_NAME} record but {DIS_STREAM_FILE} "
+                     f"or {DIS_INDEX_FILE} is absent from the run directory",
+                     failure=FAIL_DIS_ROUNDTRIP)
+    telemetry_path = run_dir / "telemetry.json"
+    if not telemetry_path.is_file():
+        return Check("dis_roundtrip", NOT_RUN,
+                     "no telemetry.json beside the stream, so there is no recording to "
+                     "compare it with")
+    try:
+        from pyproj import Transformer
+    except ImportError:
+        return Check("dis_roundtrip", NOT_RUN, "pyproj is not installed here")
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        columns = json.loads(telemetry_path.read_text(encoding="utf-8"))["columns"]
+        pdus = _dis_walk(stream_path.read_bytes())
+    except (ValueError, KeyError, OSError) as exc:
+        return Check("dis_roundtrip", FAIL,
+                     f"the stream, its index or the telemetry could not be read as what it "
+                     f"claims to be: {exc}", failure=FAIL_DIS_ROUNDTRIP)
+    offsets = [offset for offset, _ in pdus]
+    samples = index.get("sample_indices")
+    if (index.get("byte_offsets") != offsets or index.get("pdu_count") != len(pdus)
+            or not isinstance(samples, list) or len(samples) != len(pdus)):
+        return Check("dis_roundtrip", FAIL,
+                     f"the index lists {index.get('pdu_count')} PDUs over "
+                     f"{len(samples) if isinstance(samples, list) else '?'} samples; the "
+                     f"checker's walk finds {len(pdus)} at offsets {offsets[:3]}...",
+                     failure=FAIL_DIS_ROUNDTRIP)
+    needed = ("t", "lat_deg", "lon_deg", "heading_deg", "pitch_deg", "roll_deg")
+    missing = [c for c in needed if c not in columns]
+    if missing or ("hae_m" not in columns and "altitude_m" not in columns):
+        return Check("dis_roundtrip", FAIL,
+                     f"the telemetry lacks {missing or ['hae_m / altitude_m']}, so the "
+                     f"stream cannot be checked against the recording",
+                     failure=FAIL_DIS_ROUNDTRIP)
+    heights, height_source = _dis_hae(columns, manifest.get("datum"))
+    to_ecef = Transformer.from_crs("EPSG:4979", "EPSG:4978", always_xy=True)
+    ids = index.get("entity_id") or {}
+    mode = index.get("timestamp_mode")
+    marking = str((index.get("marking") or {}).get("text", "")).encode("ascii", "replace")
+    worst_location = 0.0
+    worst_euler = 0.0
+    previous = None
+    for k, (offset, pdu) in enumerate(pdus):
+        s = samples[k]
+        if not isinstance(s, int) or not 0 <= s < len(columns["t"]):
+            return Check("dis_roundtrip", FAIL,
+                         f"PDU {k} names sample {s!r}, outside the recording's "
+                         f"{len(columns['t'])} samples", failure=FAIL_DIS_ROUNDTRIP)
+        lat, lon = float(columns["lat_deg"][s]), float(columns["lon_deg"][s])
+        expected = to_ecef.transform(lon, lat, heights[s])
+        distance = math.dist(pdu["location"], expected)
+        worst_location = max(worst_location, distance)
+        if distance > DIS_LOCATION_TOL_M:
+            return Check("dis_roundtrip", FAIL,
+                         f"PDU {k} (sample {s}) sits {distance:.3f} m from pyproj's ECEF of "
+                         f"the recorded place at {height_source} (tolerance "
+                         f"{DIS_LOCATION_TOL_M} m): a moved PDU or a stale undulation",
+                         failure=FAIL_DIS_ROUNDTRIP)
+        own = _dis_own_euler(lat, lon, float(columns["heading_deg"][s]),
+                             float(columns["pitch_deg"][s]), float(columns["roll_deg"][s]))
+        for name, mine, theirs in zip(("psi", "theta", "phi"), own, pdu["orientation"]):
+            error = abs((float(theirs) - mine + math.pi) % (2.0 * math.pi) - math.pi)
+            worst_euler = max(worst_euler, error)
+            if error > DIS_EULER_TOL_RAD:
+                return Check("dis_roundtrip", FAIL,
+                             f"PDU {k} (sample {s}) {name} = {float(theirs):+.6f} rad; the "
+                             f"checker's own composition gives {mine:+.6f} rad (tolerance "
+                             f"{DIS_EULER_TOL_RAD} rad)", failure=FAIL_DIS_ROUNDTRIP)
+        if (pdu["site"], pdu["application"], pdu["entity"]) != (
+                ids.get("site"), ids.get("application"), ids.get("entity")):
+            return Check("dis_roundtrip", FAIL,
+                         f"PDU {k} carries entity id {pdu['site']}:{pdu['application']}:"
+                         f"{pdu['entity']}; the index says {ids}", failure=FAIL_DIS_ROUNDTRIP)
+        if pdu["marking"].rstrip(b"\0") != marking:
+            return Check("dis_roundtrip", FAIL,
+                         f"PDU {k} is marked {pdu['marking']!r}; the index says {marking!r}",
+                         failure=FAIL_DIS_ROUNDTRIP)
+        if pdu["absolute"] != (mode == "absolute"):
+            return Check("dis_roundtrip", FAIL,
+                         f"PDU {k}'s timestamp LSB says {'absolute' if pdu['absolute'] else 'relative'}; "
+                         f"the index says {mode!r}", failure=FAIL_DIS_ROUNDTRIP)
+        seconds = pdu["time_past_hour_s"]
+        if previous is not None:
+            if seconds < previous - 1800.0:
+                seconds += 3600.0                      # one wrap at the hour
+            if seconds <= previous:
+                return Check("dis_roundtrip", FAIL,
+                             f"PDU {k}'s timestamp ({seconds:.6f} s past the hour) is not "
+                             f"after PDU {k - 1}'s ({previous:.6f} s)", failure=FAIL_DIS_ROUNDTRIP)
+        previous = seconds
+    for f, frame in enumerate(manifest.get("frames") or []):
+        keys = frame.get("dis") if isinstance(frame, dict) else None
+        if not isinstance(keys, dict) or keys.get("pdu_index") is None:
+            continue
+        k = keys.get("pdu_index")
+        if not isinstance(k, int) or not 0 <= k < len(pdus) or keys.get("byte_offset") != offsets[k]:
+            return Check("dis_roundtrip", FAIL,
+                         f"frame {f} names PDU {k!r} at byte {keys.get('byte_offset')!r}, which "
+                         f"the stream does not hold at that offset", failure=FAIL_DIS_ROUNDTRIP)
+    return Check("dis_roundtrip", PASS,
+                 f"{len(pdus)} Entity State PDUs walked by the checker's own layout: location "
+                 f"within {worst_location:.2e} m of pyproj at {height_source} (tolerance "
+                 f"{DIS_LOCATION_TOL_M} m), orientation within {worst_euler:.2e} rad of the "
+                 f"checker's own Euler composition (tolerance {DIS_EULER_TOL_RAD} rad), "
+                 f"timestamps {mode} and strictly increasing, ids and marking as indexed")
+
+
 # -- Advancement I3: the instrument models' measured channels ---------------
 
 def verify_instruments(manifest: Dict, run_dir=None) -> Check:
@@ -4599,6 +4838,9 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     # P10: the vertical datum block against the checker's own geoid read.
     run("datum", verify_datum, manifest)
     run("datum_independent", verify_datum_independent, manifest, run_dir)
+    # D2: the Entity State PDU log against the recording, by the checker's
+    # own decode -- NOT RUN without a stream, never a pass on absence.
+    run("dis_roundtrip", verify_dis_roundtrip, manifest, run_dir)
     # I6 (gap S3): the ground-truth passes -- NOT RUN without their files,
     # never a pass on absence.
     run("normals_vs_depth", verify_normals_vs_depth, manifest, run_dir)

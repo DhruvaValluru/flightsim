@@ -436,6 +436,43 @@ def build_parser() -> argparse.ArgumentParser:
                              "per SRQ, u_input per registered variable, u_val, u_D "
                              "absent -- into run.json and the capture manifest "
                              "(uncertainty). Off by default: no extra flight.")
+    # D2: the interoperability exports (core/interop/dis_stream.py).
+    parser.add_argument("--dis", action="store_true",
+                        help="after the flight, write the full-rate IEEE 1278.1-2012 "
+                             "Entity State PDU log dis_entity_state.bin and its index "
+                             "dis_entity_state.json into the run directory, attach the "
+                             "dis.entity_state record and the per-frame PDU keys to the "
+                             "capture manifest. The spec's dis block labels it; the entity "
+                             "type comes from the standard table and is refused by name "
+                             "while that table is empty (--dis-entity-type chooses "
+                             "otherwise). Off by default.")
+    parser.add_argument("--dis-udp", default=None, metavar="HOST:PORT",
+                        help="with --dis: also send one datagram per PDU to HOST:PORT "
+                             "after the file is written. Off by default; refused by name "
+                             "in a campaign case (dis.udp_in_campaign).")
+    parser.add_argument("--dis-entity-type", choices=("standard", "fallback", "unspecified"),
+                        default="standard",
+                        help="with --dis: the entity type's source -- the standard table "
+                             "(assets/dis_entity_types.yaml; refused while its row is "
+                             "empty), the remembered fallback row (marked unverified), or "
+                             "0 = Other with the septuplet recorded as absent")
+    parser.add_argument("--dis-epoch", default=None, metavar="ISO",
+                        help="with --dis and a spec dis.timestamp_mode of absolute: the "
+                             "UTC instant of simulation time 0 (e.g. 2026-09-29T10:00:00Z); "
+                             "refused by name when absolute is asked without it")
+    parser.add_argument("--dis-emitter", choices=("full_rate", "thresholded"),
+                        default="full_rate",
+                        help="with --dis: one PDU per telemetry sample, or the dead-"
+                             "reckoning thresholded emitter (1 m, 3 deg, 5 s heartbeat, "
+                             "recorded with its measured reconstruction)")
+    parser.add_argument("--cigi", action="store_true",
+                        help="refused by name (interop.cigi_not_implemented): no CIGI "
+                             "session exists; the run card is the documented offline "
+                             "image-generator interface")
+    parser.add_argument("--hla", action="store_true",
+                        help="refused by name (interop.hla_not_implemented): no HLA "
+                             "federation or RPR FOM exists; the DIS log is the "
+                             "interoperability product")
     parser.add_argument("--verbose", action="store_true",
                         help="keep the flight model's own startup lines "
                              "(the JSBSim banner it prints once per "
@@ -448,6 +485,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    # D2: the two interfaces this build does not speak are refused by name
+    # before any flight, never approximated.
+    if args.cigi:
+        print("REFUSED -- interop.cigi_not_implemented: no CIGI session is implemented; "
+              "the run card (card.json) is the documented offline image-generator "
+              "interface (docs/ADVANCEMENTS_CONTRACTS.md, D2)")
+        return 2
+    if args.hla:
+        print("REFUSED -- interop.hla_not_implemented: no HLA federation and no RPR FOM "
+              "is implemented; the Entity State PDU log (--dis) is the interoperability "
+              "product")
+        return 2
+    if args.dis_udp and not args.dis:
+        args.dis = True
     with quiet_library_banners(enabled=not args.verbose):
         return _run(args)
 
@@ -491,6 +542,33 @@ def _run(args: argparse.Namespace) -> int:
     except InstrumentProfileError as exc:
         print(f"REFUSED -- {exc.constraint}: {exc.message}")
         return 2
+
+    # D2: the Entity State PDU log's own pre-flight gate -- the entity type
+    # (the standard table refuses while empty), an absolute mode's epoch,
+    # the marking, the block's ids, the UDP target and the campaign rule --
+    # so a refusal is printed before any flight, and the write after the
+    # flight cannot refuse on anything the user chose.
+    dis_options = None
+    dis_udp = None
+    if args.dis:
+        from core.interop.dis import DisError
+        from core.interop.dis_stream import (
+            in_campaign_worker, options_from_spec, parse_udp_target, preflight,
+        )
+
+        try:
+            dis_udp = parse_udp_target(args.dis_udp)
+            if dis_udp is not None and in_campaign_worker(Path(args.out)):
+                raise DisError("dis.udp_in_campaign",
+                               f"{args.out} is a campaign case's run directory; a campaign "
+                               f"writes the stream file and sends nothing")
+            dis_options = options_from_spec(
+                spec, epoch=args.dis_epoch, emitter=args.dis_emitter,
+                entity_type_policy=args.dis_entity_type)
+            preflight(str(spec.aircraft.value), dis_options)
+        except DisError as exc:
+            print(f"REFUSED -- {exc.constraint}: {exc.message}")
+            return 2
 
     if args.render:
         # The render hosts have no autopilot, take only calibrated
@@ -971,6 +1049,34 @@ def _run(args: argparse.Namespace) -> int:
             for r in block["applied_variables"]]
         present = {r["name"] for r in block["applied_variables"]}
         block["applied_variables"].extend(r for r in flown if r["name"] not in present)
+    # D2: the Entity State PDU log beside the manifest, from the recorded
+    # telemetry (the geoid applied at export through D1's hae_m column) and
+    # labelled by the spec's dis block; its record rides in the capture
+    # manifest and run.json, its PDU keys in every frame record.
+    if dis_options is not None:
+        from core.interop.dis import DisError
+        from core.interop.dis_stream import INDEX_FILE, STREAM_FILE, attach_frame_keys, write_stream
+        from core.records import AppliedVariable
+
+        try:
+            dis_index = write_stream(out, telemetry=result.telemetry.to_dict(),
+                                     datum=manifest.get("datum"),
+                                     aircraft=str(spec.aircraft.value),
+                                     options=dis_options, udp=dis_udp)
+        except DisError as exc:
+            print(f"REFUSED -- {exc.constraint}: {exc.message}")
+            return 2
+        dis_record = AppliedVariable.from_dict(
+            dis_index["applied_variables"]["applied_variables"][0])
+        attach_record(manifest, dis_record)
+        attach_record(result.manifest, dis_record)
+        keyed = attach_frame_keys(manifest, dis_index)
+        print(f"  dis:      {dis_index['pdu_count']} Entity State PDU(s) "
+              f"({dis_index['emitter']['kind']}) in {out / STREAM_FILE}, index "
+              f"{INDEX_FILE}, keys on {keyed} frame(s); entity type "
+              f"{dis_index['entity_type']['source']}; timestamps "
+              f"{dis_index['timestamp_mode']}; udp "
+              f"{'sent ' + str(dis_index['udp']['datagrams']) if dis_index['udp']['sent'] else 'off'}")
     manifest_path = write_capture_manifest(manifest, out)
     write_frame_sidecars(manifest, out)
     result.telemetry.write_json(out / "telemetry.json")

@@ -87,7 +87,50 @@ What is NOT claimed
   not the FDM's own accelerations and rates; the sidecar says which
   columns they came from and the report measures how far the derived
   p and q sit from the recorded ones on a real run.
-* Absolute (LSB 1) timestamps are decodable, never written.
+* Absolute (LSB 1) timestamps are decodable; the batch-1 ``feed`` never
+  writes them (the D2 stream below does, with its epoch stated).
+
+D2 (blueprint section 5, work item D2): what this module gained
+-----------------------------------------------------------------
+Everything above is batch 1 and keeps its names and its meaning
+(``feed``, ``pdus_from_telemetry``, ``dead_reckoning_vectors`` are the
+forward-difference feed the I5 contract describes). The full-rate
+stream that a capture writes beside its manifest lives in
+core/interop/dis_stream.py and is built from the pieces added here:
+
+* the ENTITY TYPE has two tiers. :data:`ENTITY_TYPE_TABLE_PATH`
+  (assets/dis_entity_types.yaml) is the STANDARD table: one row per
+  configured airframe naming the SISO-REF-010 edition, UID and table
+  the septuplet is to be copied from, shipped with every septuplet
+  null and the reason 'entered from the standard, never guessed', so
+  :func:`standard_entity_type` refuses ``dis.entity_type_unknown`` by
+  name until someone with the standard fills a row. :data:`ENTITY_TYPES`
+  above is retained as the DOCUMENTED FALLBACK (values from memory, per
+  field 'unverified here'), reached only when a caller asks for the
+  ``fallback`` policy; :func:`entity_type_row` resolves the three
+  policies (``standard`` | ``fallback`` | ``unspecified``, the last
+  writing the enumeration's own 0 = Other in every field and recording
+  the septuplet's absence). The batch-1 ``feed`` keeps the fallback.
+* the TIMESTAMP has two modes: ``relative`` (the in-tree 2^31 units per
+  hour of simulation time, LSB 0) and ``absolute`` (LSB 1, the units
+  past the hour of a stated UTC epoch plus the sample time; without an
+  epoch :func:`parse_epoch` refuses ``dis.timestamp_epoch_missing``).
+* the MARKING comes from the run: the spec's ``dis.marking`` when
+  stated, else the airframe key derived at export; over 11 ASCII bytes
+  refuses ``dis.marking_too_long``.
+* the GEODETIC frame is checked per sample: a recording whose columns or
+  values lack latitude, longitude or an ellipsoidal height refuses
+  ``dis.frame_without_geodetic`` (:func:`sample_frames`); the geoid is
+  applied at the export boundary -- ``hae_m`` = orthometric + N, D1's
+  recorded channel when the run has it, else the datum block's N as
+  :func:`datum_for_run` handles it.
+* dead reckoning DRM 4 (RVW) from RECORDED quantities only
+  (:func:`rvw_vectors`): p and q from ``roll_rate_dps`` /
+  ``pitch_rate_dps``, r from ``yaw_rate_dps`` when the recording has it
+  and otherwise the yaw component of the central difference of the
+  recorded body-from-ECEF attitude; the world linear acceleration is the
+  CENTRAL difference of the recorded ECEF velocity (one-sided at the
+  ends), never a model's output.
 """
 
 from __future__ import annotations
@@ -97,6 +140,7 @@ import json
 import math
 import struct
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -799,3 +843,342 @@ def describe(pdu: EntityStatePdu) -> Dict[str, Any]:
     d.update({"lat_deg": lat, "lon_deg": lon, "h_ellipsoidal_m": h,
               "heading_deg": heading, "pitch_deg": pitch, "roll_deg": roll})
     return d
+
+
+# ===========================================================================
+# D2: the entity-type table, the timestamp modes, the marking, the geodetic
+# frame check and the RVW dead reckoning from recorded quantities.
+# ===========================================================================
+
+#: The standard table: one row per configured airframe citing the
+#: SISO-REF-010 edition, UID and table the septuplet is to be copied
+#: from. It ships with every septuplet null (see the file's own
+#: ``reason``); a septuplet appears there only when someone with the
+#: standard enters it.
+ENTITY_TYPE_TABLE_PATH = Path(__file__).resolve().parents[2] / "assets" / "dis_entity_types.yaml"
+ENTITY_TYPE_TABLE_VERSION = 1
+ENTITY_TYPE_FIELDS = ("kind", "domain", "country", "category", "subcategory", "specific", "extra")
+#: The three ways a stream may fill the entity type field.
+ENTITY_TYPE_POLICIES = ("standard", "fallback", "unspecified")
+ENTITY_TYPE_REASON_EMPTY = "entered from the standard, never guessed"
+
+#: The two timestamp modes (IEEE 1278.1-2012 6.2.8: the LSB says which).
+TIMESTAMP_MODES = ("relative", "absolute")
+
+#: The DIS entity marking: 11 bytes, character set 1 (ASCII).
+MARKING_MAX_CHARACTERS = MARKING_LENGTH
+
+#: The columns the D2 stream reads per sample, and the optional ones it
+#: uses when the recording has them (D1's ellipsoidal height, the yaw rate).
+FRAME_COLUMNS = ("t", "lat_deg", "lon_deg", "heading_deg", "pitch_deg", "roll_deg",
+                 "v_north_mps", "v_east_mps", "v_down_mps")
+RATE_COLUMNS = ("roll_rate_dps", "pitch_rate_dps")
+OPTIONAL_COLUMNS = ("hae_m", "undulation_m", "altitude_m", "yaw_rate_dps")
+
+
+def _yaml():
+    import yaml
+
+    return yaml
+
+
+def load_entity_type_table(path=ENTITY_TYPE_TABLE_PATH) -> Dict[str, Any]:
+    """assets/dis_entity_types.yaml as data: ``{table_version, standard
+    {name, edition, uid, table, note}, reason, airframes {key: {...}}}``.
+    A table that is absent, unreadable or not of this shape refuses
+    ``dis.entity_type_unknown`` too: a stream cannot say what it does
+    not have."""
+    path = Path(path)
+    if not path.is_file():
+        raise DisError("dis.entity_type_unknown",
+                       f"the entity-type table {path} is absent; no airframe's "
+                       f"enumeration can be stated")
+    try:
+        table = _yaml().safe_load(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001 -- any parse failure is the same refusal
+        raise DisError("dis.entity_type_unknown",
+                       f"the entity-type table {path} could not be read: {exc}")
+    if (not isinstance(table, dict) or table.get("table_version") != ENTITY_TYPE_TABLE_VERSION
+            or not isinstance(table.get("airframes"), dict)
+            or not isinstance(table.get("standard"), dict)):
+        raise DisError("dis.entity_type_unknown",
+                       f"the entity-type table {path} is not a version-"
+                       f"{ENTITY_TYPE_TABLE_VERSION} table with a standard block and "
+                       f"an airframes mapping")
+    return table
+
+
+def standard_entity_type(aircraft: str, table: Optional[Dict[str, Any]] = None
+                         ) -> Tuple[EntityType, Dict[str, Any]]:
+    """The septuplet the STANDARD table holds for an airframe and its row,
+    or ``dis.entity_type_unknown`` by name: no row, or a row whose
+    septuplet is still null ('entered from the standard, never
+    guessed'). A filled row must carry all seven fields in range."""
+    table = load_entity_type_table() if table is None else table
+    row = table["airframes"].get(str(aircraft))
+    if not isinstance(row, dict):
+        raise DisError("dis.entity_type_unknown",
+                       f"airframe {aircraft!r} has no row in the entity-type table; the "
+                       f"table names {sorted(table['airframes'])}")
+    septuplet = row.get("entity_type")
+    if septuplet is None:
+        raise DisError("dis.entity_type_unknown",
+                       f"the entity-type table's row for {aircraft!r} carries no "
+                       f"septuplet ({row.get('reason') or table.get('reason')}); enter it "
+                       f"from {row.get('siso_reference') or table['standard'].get('name')} "
+                       f"or ask for the fallback or unspecified policy")
+    if not isinstance(septuplet, dict) or set(septuplet) != set(ENTITY_TYPE_FIELDS):
+        raise DisError("dis.entity_type_unknown",
+                       f"the entity-type table's row for {aircraft!r} is not the seven "
+                       f"fields {list(ENTITY_TYPE_FIELDS)}")
+    values = []
+    for name in ENTITY_TYPE_FIELDS:
+        value = septuplet[name]
+        limit = 0xFFFF if name == "country" else 0xFF
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= limit:
+            raise DisError("dis.entity_type_unknown",
+                           f"the entity-type table's {aircraft!r} {name} {value!r} is not an "
+                           f"integer in 0..{limit}")
+        values.append(int(value))
+    return EntityType(*values), row
+
+
+def entity_type_row(aircraft: str, policy: str = "standard",
+                    table: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """The entity type a stream writes for an airframe, by policy:
+
+    * ``standard``: the standard table's septuplet (refuses
+      ``dis.entity_type_unknown`` while the row is empty);
+    * ``fallback``: the documented fallback :data:`ENTITY_TYPES` (values
+      from memory, 'unverified here'; ``interop.dis.airframe`` outside it),
+      with the standard row's citation beside it when the table has one;
+    * ``unspecified``: the enumeration's own 0 (Other) in every field,
+      the septuplet recorded as absent with the reason.
+
+    Returns ``{type, septuplet, source, basis, standard_row, policy}``;
+    ``septuplet`` is the seven-field dict or None (its absence)."""
+    if policy not in ENTITY_TYPE_POLICIES:
+        raise ValueError(f"entity type policy {policy!r} is not one of {ENTITY_TYPE_POLICIES}")
+    table = load_entity_type_table() if table is None else table
+    standard_row = table["airframes"].get(str(aircraft))
+    standard_row = dict(standard_row) if isinstance(standard_row, dict) else None
+    if policy == "standard":
+        entity_type, row = standard_entity_type(aircraft, table)
+        return {"type": entity_type, "septuplet": entity_type.to_dict(), "source": "standard",
+                "basis": {name: f"{row.get('siso_reference')}: entered from the standard"
+                          for name in ENTITY_TYPE_FIELDS},
+                "standard_row": row, "policy": policy}
+    if policy == "fallback":
+        row = entity_type_for(aircraft)
+        basis = dict(row["basis"])
+        basis["fallback"] = ("the documented fallback table core/interop/dis.py ENTITY_TYPES, "
+                             "values from memory; the standard table's row is "
+                             + ("empty" if standard_row is not None else "absent"))
+        return {"type": row["type"], "septuplet": row["type"].to_dict(), "source": "fallback",
+                "basis": basis, "standard_row": standard_row, "policy": policy}
+    return {"type": EntityType(), "septuplet": None, "source": "unspecified",
+            "basis": {"all": "0 = Other in every field, the enumeration's own unspecified "
+                             "value; the septuplet is absent: " + ENTITY_TYPE_REASON_EMPTY},
+            "standard_row": standard_row, "policy": policy}
+
+
+# -- the timestamp modes ---------------------------------------------------------
+
+def parse_epoch(epoch: Optional[str]) -> float:
+    """A stated UTC epoch (ISO 8601, e.g. ``2026-09-29T10:00:00Z``) as
+    seconds since 1970-01-01T00:00:00Z. None, or a text that is not an
+    instant, refuses ``dis.timestamp_epoch_missing``: an absolute
+    timestamp without a stated epoch would be a guess."""
+    if epoch is None or not str(epoch).strip():
+        raise DisError("dis.timestamp_epoch_missing",
+                       "absolute timestamps were asked for and no epoch was stated; give "
+                       "the UTC instant of simulation time 0 (ISO 8601, e.g. "
+                       "2026-09-29T10:00:00Z) or use relative timestamps")
+    text = str(epoch).strip()
+    if text.endswith("Z") or text.endswith("z"):
+        text = text[:-1] + "+00:00"
+    try:
+        instant = datetime.fromisoformat(text)
+    except ValueError:
+        raise DisError("dis.timestamp_epoch_missing",
+                       f"the epoch {epoch!r} is not an ISO 8601 instant "
+                       f"(e.g. 2026-09-29T10:00:00Z)") from None
+    if instant.tzinfo is None:
+        raise DisError("dis.timestamp_epoch_missing",
+                       f"the epoch {epoch!r} carries no UTC offset; an instant without one "
+                       f"is not an epoch")
+    return instant.astimezone(timezone.utc).timestamp()
+
+
+def timestamp_for(t_s: float, mode: str, epoch_unix_s: Optional[float] = None) -> int:
+    """The timestamp field for a sample: ``relative`` is the in-tree
+    units of simulation time past the hour (LSB 0); ``absolute`` is the
+    units past the hour of epoch + t (LSB 1), the epoch's own seconds
+    past its hour taken first so a 1.7e9 s epoch loses no precision to
+    the 1.676 us unit."""
+    if mode not in TIMESTAMP_MODES:
+        raise DisError("dis.timestamp_mode",
+                       f"timestamp mode {mode!r} is not one of {TIMESTAMP_MODES}")
+    if mode == "relative":
+        return timestamp_from_seconds(float(t_s))
+    if epoch_unix_s is None:
+        raise DisError("dis.timestamp_epoch_missing",
+                       "absolute timestamps need an epoch; none was given")
+    past_hour = (float(epoch_unix_s) % SECONDS_PER_HOUR) + float(t_s)
+    return timestamp_from_seconds(past_hour, absolute=True)
+
+
+# -- the marking --------------------------------------------------------------------
+
+def marking_for(marking: Optional[str], aircraft: str) -> Tuple[bytes, str]:
+    """The 11-byte ASCII marking and where it came from: the stated text
+    (``user``) or, when none was stated, the airframe key (``derived``).
+    More than 11 characters, or a character outside ASCII, refuses
+    ``dis.marking_too_long`` (the wire field is 11 bytes of character
+    set 1 = ASCII; nothing is truncated or replaced silently)."""
+    text = "" if marking is None else str(marking)
+    source = "user"
+    if not text:
+        text, source = str(aircraft), "derived"
+    if len(text) > MARKING_MAX_CHARACTERS or not text.isascii():
+        raise DisError("dis.marking_too_long",
+                       f"the marking {text!r} ({len(text)} characters) does not fit the "
+                       f"11-byte ASCII marking field"
+                       + ("" if text.isascii() else "; it carries a non-ASCII character"))
+    return text.encode("ascii"), source
+
+
+# -- the geodetic frame per sample --------------------------------------------------
+
+def _finite(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def sample_frames(columns: Dict[str, Any], datum: Optional[Dict[str, Any]] = None
+                  ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Every sample's geodetic frame for the wire, and how the
+    ellipsoidal height was formed: D1's recorded ``hae_m`` (orthometric
+    + N, the geoid applied at export) when the recording carries it,
+    else ``altitude_m`` + the datum block's N as :func:`datum_for_run`
+    handles it (``datum`` is that handling dict, or None for 0 with the
+    'no geoid block' note). Refuses ``dis.frame_without_geodetic`` for a
+    recording without latitude, longitude or a height column, columns
+    of unequal length, or a sample whose value is not a finite number:
+    a PDU with a guessed place is worse than none."""
+    missing = [c for c in ("lat_deg", "lon_deg") if c not in columns]
+    if missing:
+        raise DisError("dis.frame_without_geodetic",
+                       f"the recording carries no {missing} column, so no sample has a "
+                       f"geodetic place to put on the wire")
+    if "hae_m" in columns:
+        hae_source = ("hae_m: the recorded ellipsoidal height (altitude_m + undulation_m, "
+                      "the geoid applied at export by core/scenario/runner.py datum_run)")
+        heights = columns["hae_m"]
+        n_column = columns.get("undulation_m")
+    elif "altitude_m" in columns:
+        handling = datum or {"undulation_m": 0.0, "handling": DATUM_ABSENT}
+        n = float(handling.get("undulation_m") or 0.0)
+        hae_source = f"altitude_m + {n:+.3f} m ({handling.get('handling')})"
+        heights = [None if not _finite(h) else float(h) + n for h in columns["altitude_m"]]
+        n_column = None
+    else:
+        raise DisError("dis.frame_without_geodetic",
+                       "the recording carries neither hae_m nor altitude_m, so no sample "
+                       "has an ellipsoidal height")
+    others = [c for c in FRAME_COLUMNS if c not in columns]
+    if others:
+        raise DisError("dis.frame_without_geodetic",
+                       f"the recording lacks the columns a PDU's attitude and velocity need: "
+                       f"{others}")
+    lengths = {len(columns[c]) for c in FRAME_COLUMNS} | {len(heights)}
+    if len(lengths) != 1:
+        raise DisError("dis.frame_without_geodetic",
+                       f"the recording's columns differ in length: {sorted(lengths)}")
+    frames: List[Dict[str, Any]] = []
+    for i in range(len(columns["t"])):
+        values = {c: columns[c][i] for c in FRAME_COLUMNS}
+        values["hae_m"] = heights[i]
+        bad = [c for c, v in values.items() if not _finite(v)]
+        if bad:
+            raise DisError("dis.frame_without_geodetic",
+                           f"sample {i} has no finite {bad}; a PDU cannot be written for a "
+                           f"frame without a geodetic place")
+        lat, lon, h = float(values["lat_deg"]), float(values["lon_deg"]), float(values["hae_m"])
+        heading, pitch, roll = (float(values["heading_deg"]), float(values["pitch_deg"]),
+                                float(values["roll_deg"]))
+        ned = (float(values["v_north_mps"]), float(values["v_east_mps"]), float(values["v_down_mps"]))
+        frames.append({
+            "index": i, "t_s": float(values["t"]),
+            "lat_deg": lat, "lon_deg": lon, "hae_m": h,
+            "undulation_m": (float(n_column[i]) if n_column is not None and _finite(n_column[i])
+                             else None),
+            "location": geodesy.geodetic_to_ecef(lat, lon, h),
+            "velocity": geodesy.ned_to_ecef_vector(lat, lon, ned),
+            "orientation": geodesy.dis_euler_from_ned(lat, lon, heading, pitch, roll),
+            "body_from_ecef": geodesy.body_from_ecef_via_ned(lat, lon, heading, pitch, roll),
+        })
+    return frames, {"hae_source": hae_source, "samples": len(frames)}
+
+
+# -- DRM 4 (RVW) from recorded quantities only -------------------------------------
+
+def central_difference(values: Sequence[Sequence[float]], times: Sequence[float],
+                       i: int) -> Tuple[float, ...]:
+    """d(values)/dt at sample ``i``: the central difference over the
+    neighbours, one-sided at either end, zeros for a lone sample or a
+    zero interval. Every operand is a recorded quantity."""
+    n = len(values)
+    if n < 2:
+        return tuple(0.0 for _ in values[0]) if n else ()
+    lo, hi = max(0, i - 1), min(n - 1, i + 1)
+    dt = float(times[hi]) - float(times[lo])
+    if dt <= 0.0:
+        return tuple(0.0 for _ in values[i])
+    return tuple((float(values[hi][k]) - float(values[lo][k])) / dt for k in range(len(values[i])))
+
+
+def rvw_vectors(frames: Sequence[Dict[str, Any]], columns: Dict[str, Any]
+                ) -> Tuple[List[Tuple[Tuple[float, float, float], Tuple[float, float, float]]],
+                           Dict[str, str]]:
+    """(linear acceleration ECEF, angular velocity body) per sample for
+    DRM 4, and the provenance of each component: the acceleration is the
+    central difference of the recorded ECEF velocity (never a model's);
+    p and q are the recorded ``roll_rate_dps`` / ``pitch_rate_dps``; r is
+    the recorded ``yaw_rate_dps`` when the recording has it, else the
+    yaw component of the central difference of the recorded
+    body-from-ECEF attitude (rotation_vector_between over the
+    neighbours, in the sample's own body frame)."""
+    times = [f["t_s"] for f in frames]
+    velocities = [f["velocity"] for f in frames]
+    has_yaw = "yaw_rate_dps" in columns
+    source = {
+        "linear_acceleration": "central difference of the recorded ECEF velocity "
+                               "(v_north_mps, v_east_mps, v_down_mps rotated at the sample's "
+                               "place) over the neighbouring samples; one-sided at the ends",
+        "p": "recorded roll_rate_dps (deg/s -> rad/s)",
+        "q": "recorded pitch_rate_dps (deg/s -> rad/s)",
+        "r": ("recorded yaw_rate_dps (deg/s -> rad/s)" if has_yaw else
+              "yaw_rate_dps not recorded: the yaw component of the central difference of "
+              "the recorded body-from-ECEF attitude over the neighbouring samples"),
+    }
+    out = []
+    for i, frame in enumerate(frames):
+        accel = central_difference(velocities, times, i) if frames else (0.0, 0.0, 0.0)
+        if len(accel) != 3:
+            accel = (0.0, 0.0, 0.0)
+        p = math.radians(float(columns["roll_rate_dps"][i])) if "roll_rate_dps" in columns else 0.0
+        q = math.radians(float(columns["pitch_rate_dps"][i])) if "pitch_rate_dps" in columns else 0.0
+        if has_yaw:
+            r = math.radians(float(columns["yaw_rate_dps"][i]))
+        elif len(frames) >= 2:
+            lo, hi = max(0, i - 1), min(len(frames) - 1, i + 1)
+            dt = times[hi] - times[lo]
+            rotation = geodesy.rotation_vector_between(frames[lo]["body_from_ecef"],
+                                                       frames[hi]["body_from_ecef"])
+            r = rotation[2] / dt if dt > 0.0 else 0.0
+        else:
+            r = 0.0
+        out.append((tuple(accel), (p, q, r)))  # type: ignore[arg-type]
+    if "roll_rate_dps" not in columns or "pitch_rate_dps" not in columns:
+        source["p"] = source["q"] = "rate columns not recorded: 0"
+    return out, source

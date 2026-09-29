@@ -701,3 +701,49 @@ failures.value:
 card.failure_schedule:
   sentence: "The run card's failure schedule is malformed: a key is missing or out of order, an event is not a kind, a target, a time, a property and a value, or the count does not match, so the host applies no failure."
   hint: "Regenerate the card from the scenario; the schedule is written by the scenario tools, never by hand."
+
+# -- the advancement additions, batch1 -----------------------------------
+icing.severity:
+  sentence: "The icing severity word is not one this build maps: the words are trace, light, moderate and severe, each a stated fraction of the iced-coefficient scale, not a pilot report."
+  hint: "Choose trace, light, moderate or severe, or state the severity as a number between 0 and 1."
+icing.eta_range:
+  sentence: "The icing schedule cannot be delivered as asked: the severity has to be a number between 0 and 1 (not {actual}), the onset and the ramp cannot be negative, and the stall-onset shift has to be a number within ten degrees of zero."
+  hint: "Keep the severity in 0..1, the onset and ramp at or above zero seconds, and the stall-onset shift within its stated bound."
+icing.envelope:
+  sentence: "The icing envelope named is not one this build records: only the Part 25 Appendix C and Appendix O words are accepted, and they are recorded as a note, never applied."
+  hint: "Name the Appendix C or Appendix O envelope, or leave it out."
+icing.airframe_data:
+  sentence: "No icing coefficient table is configured for this aircraft, so an iced flight of it would be a guess rather than a proxy; the Twin Otter set is the Twin Otter's, and the Cessna carries it as a named proxy."
+  hint: "Choose the Twin Otter or the Cessna, or give the aircraft a coefficient table with its sources."
+card.icing_schedule:
+  sentence: "The run card's icing schedule is malformed: a key is missing or out of order, or the coefficient table is not six numbers, so the host ices nothing."
+  hint: "Regenerate the card from the scenario; the schedule is written by the scenario tools, never by hand."
+dis.entity_type_unknown:
+  sentence: "The standard's entity-type numbers for that aircraft have not been entered in the entity-type table, so the stream cannot state what kind of entity it is."
+  hint: "Enter the seven numbers from the cited edition of the enumeration standard into the table's row, or ask for the remembered fallback row (marked unverified) or for the unspecified type."
+dis.marking_too_long:
+  sentence: "An entity marking has to be at most eleven plain ASCII characters; that one is longer or carries another character."
+  hint: "Shorten the marking to eleven ASCII characters, or leave it out and the aircraft's name is used."
+dis.frame_without_geodetic:
+  sentence: "A recorded sample has no latitude, longitude or height, so no entity-state message can be written for it."
+  hint: "Capture the run again with this build; every sample must carry a finite geodetic place before it can be put on the wire."
+dis.timestamp_epoch_missing:
+  sentence: "Absolute timestamps were asked for without the instant that simulation time zero corresponds to."
+  hint: "State the epoch as a UTC instant (for example 2026-09-29T10:00:00Z), or use relative timestamps."
+dis.timestamp_mode:
+  sentence: "The timestamp mode has to be relative or absolute."
+  hint: "Choose relative (simulation time past the hour) or absolute (a stated epoch plus the sample time)."
+dis.force_id:
+  sentence: "The force identifier has to be a whole number between 0 and 255."
+  hint: "Use 0 for no side, or the enumeration's value for the side the entity is on."
+dis.udp_in_campaign:
+  sentence: "A campaign case writes the entity-state stream to a file and never sends it on a network."
+  hint: "Run the capture on its own to send datagrams; a campaign is reproducible batch work, not an exercise."
+interop.cigi_not_implemented:
+  sentence: "No image-generator session over the CIGI interface exists in this build; the run card is the documented offline interface to the image generator."
+  hint: "Use the run card and the render command; a live CIGI session is not available."
+interop.hla_not_implemented:
+  sentence: "No HLA federation and no reference federation object model exists in this build."
+  hint: "Use the entity-state stream, which is the interoperability product this build offers."
+check.dis_roundtrip:
+  sentence: "The entity-state stream is read back by the checker's own reading of the standard's message layout: every message's position agrees with an independent map-projection library's conversion of the recorded place, its attitude with the checker's own composition of the recorded heading, pitch and roll, and its clock never runs backwards."

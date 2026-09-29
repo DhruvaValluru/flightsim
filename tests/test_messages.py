@@ -111,6 +111,7 @@ ALLOWED_FUTURE: Dict[str, str] = {
     "card.layered_wind": "P9 physics engine side (FlightSimScenarioWorld)",
     "card.loading_properties": "P9 physics engine side (FlightSimScenarioWorld)",
     "card.failure_schedule": "P9 physics engine side (FlightSimScenarioWorld)",
+    "card.icing_schedule": "P9 physics engine side (FlightSimScenarioWorld)",
 }
 
 #: Catalogue sentences the guided page carries as static text rather

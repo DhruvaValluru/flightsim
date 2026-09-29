@@ -24,8 +24,9 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from .blocks import (
-    AtmosphereSpec, DatumSpec, FailuresSpec, LoadingSpec, SceneSpec, TaxonomySpec, TrafficSpec,
-    TurbulenceModelSpec, WindProfileSpec,
+    AtmosphereSpec, DatumSpec, DisSpec, FailuresSpec, IcingSpec, LoadingSpec, SceneSpec,
+    TaxonomySpec,
+    TrafficSpec, TurbulenceModelSpec, WindProfileSpec,
 )
 from .camera import CameraSpec
 from .randomization import RandomizationSpec
@@ -173,6 +174,17 @@ class ScenarioSpec:
     #: empty list is the default and is omitted, so every committed
     #: spec-8 example keeps its digest.
     failures: "FailuresSpec" = dc_field(default_factory=FailuresSpec.defaulted)
+    #: P5 (still spec 8; the integrator bumps once): the icing severity
+    #: ramp -- severity word | eta_max, onset_s, ramp_s, alpha_shift_deg,
+    #: envelope word -- absent-canonical: no ice (the stock airframe) is
+    #: the default and is omitted, so every committed spec-8 example
+    #: keeps its digest.
+    icing: "IcingSpec" = dc_field(default_factory=IcingSpec.defaulted)
+    #: D2 (still spec 8; the integrator bumps once): how the Entity State
+    #: PDU log is labelled -- site, application, entity, force_id, marking,
+    #: timestamp_mode -- absent-canonical: the documented defaults are
+    #: omitted, so every committed spec-8 example keeps its digest.
+    dis: "DisSpec" = dc_field(default_factory=DisSpec.defaulted)
 
     #: Field order for both serialisation and the rendered table.
     FIELD_ORDER = (
@@ -236,7 +248,7 @@ class ScenarioSpec:
         carry the spec's own set()/plan() doctrine."""
         import re
 
-        match = re.fullmatch(r"(scene|taxonomy|atmosphere|datum|turbulence_model|wind_profile|loading|failures)\.(\w+)", name)
+        match = re.fullmatch(r"(scene|taxonomy|atmosphere|datum|turbulence_model|wind_profile|loading|failures|icing|dis)\.(\w+)", name)
         if match is not None:
             block = getattr(self, match.group(1))
             return block, match.group(2)
@@ -395,6 +407,12 @@ class ScenarioSpec:
         # P3: the failure schedule, absent-canonical like the others.
         if not self.failures.is_default():
             out["failures"] = self.failures.to_dict()
+        # P5: the icing block, absent-canonical like the others.
+        if not self.icing.is_default():
+            out["icing"] = self.icing.to_dict()
+        # D2: the dis block, absent-canonical like the others.
+        if not self.dis.is_default():
+            out["dis"] = self.dis.to_dict()
         if self.notes:
             out["notes"] = list(self.notes)
         return out
@@ -465,6 +483,12 @@ class ScenarioSpec:
         failures_data = data.get("failures")
         failures = (FailuresSpec.defaulted() if failures_data is None
                     else FailuresSpec.from_dict(failures_data))
+        icing_data = data.get("icing")
+        icing = (IcingSpec.defaulted() if icing_data is None
+                 else IcingSpec.from_dict(icing_data))
+        dis_data = data.get("dis")
+        dis = (DisSpec.defaulted() if dis_data is None
+               else DisSpec.from_dict(dis_data))
         return cls(
             name=data.get("name", "scenario"),
             prompt=data.get("prompt"),
@@ -481,6 +505,8 @@ class ScenarioSpec:
             wind_profile=wind_profile,
             loading=loading,
             failures=failures,
+            icing=icing,
+            dis=dis,
             **kwargs,
         )
 
@@ -565,7 +591,9 @@ class ScenarioSpec:
                                   ("turbulence_model", self.turbulence_model),
                                   ("wind_profile", self.wind_profile),
                                   ("loading", self.loading),
-                                  ("failures", self.failures)):
+                                  ("failures", self.failures),
+                                  ("icing", self.icing),
+                                  ("dis", self.dis)):
             if not block.is_default():
                 for name, q in block.quantities():
                     rows.append((block_name, name.replace("_", " "),

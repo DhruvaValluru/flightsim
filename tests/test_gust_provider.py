@@ -412,7 +412,11 @@ def test_the_null_pairs_measure_vk_against_none_and_against_dryden():
     channel moves 3.40 / 3.95 / 3.43 m/s, altitude 0.59 m, roll 4.47 deg.
     model von_karman vs dryden at the same word: the gust channel is the
     von Karman field itself (Dryden's lives in JSBSim's turb channel, 0
-    on the gust one), altitude 0.51 m, roll 4.55 deg apart; both reached."""
+    on the gust one), altitude 0.51 m, roll 4.55 deg apart on Linux; both
+    reached. The Dryden side is JSBSim's own generator, whose random
+    sequence is the platform's C++ library's (measured: the same seed gave
+    roll 4.56 deg on Linux and 6.22 deg on macOS, CI run 36503916763), so
+    the Dryden pair's numbers are a band here, not a constant."""
     none = run_null_pair(spec_for("fly the c172p at 1500 m and 100 kt for 3 seconds",
                                   model="von_karman", intensity="moderate"), "turbulence_model.intensity")
     assert none.verdict == "reached" and none.digests_differ and none.null_value is None
@@ -425,7 +429,7 @@ def test_the_null_pairs_measure_vk_against_none_and_against_dryden():
     assert dryden.verdict == "reached" and dryden.null_value == "dryden"
     effect = dryden.to_dict()["effect"]
     assert effect["gust_north_mps"]["reached"] and effect["altitude_m"]["reached"]
-    assert effect["roll_deg"]["peak_abs"] == pytest.approx(4.555, abs=0.1)
+    assert 2.0 < effect["roll_deg"]["peak_abs"] < 10.0     # 4.56 Linux, 6.22 macOS: a band
     assert effect["gust_p_equivalent_rad_s"]["peak_abs"] == 0.0     # absent on both stock runs
 
 
@@ -440,7 +444,10 @@ def test_the_same_sigma_comparison_with_dryden_is_at_the_ladder_not_the_delivere
     commanded ladder and NOT in the delivered channel; the comparable
     quantity is the ladder, and the aircraft's responses are compared in
     the null pair above. The bounds here are broad on purpose: they pin
-    that the Dryden channel is neither silent nor within 10 %."""
+    that the Dryden channel is neither silent nor within 10 %. The channel
+    is JSBSim's own generator on the platform's C++ random library: the w
+    ratio measured 1.86 on Linux, 2.13 on Windows and 2.60 on macOS (CI run
+    36503916763), so the band is 1.3 to 4.0."""
     fdm = trimmed()
     dryden = DrydenTurbulence("moderate", seed=7)
     stack = EnvironmentStack([dryden])
@@ -461,8 +468,8 @@ def test_the_same_sigma_comparison_with_dryden_is_at_the_ladder_not_the_delivere
     assert dryden.poe_index == vk.poe_index == 3
     assert vk.table[:, 3].std() == pytest.approx(ladder, rel=0.005)
     ratio = turb.std(axis=0) / ladder
-    assert ratio[2] == pytest.approx(1.86, abs=0.15)
-    assert ratio[1] > 3.0 and ratio[0] == pytest.approx(1.09, abs=0.15)
+    assert 1.3 < ratio[2] < 4.0                  # 1.86 / 2.13 / 2.60 across the three platforms
+    assert ratio[1] > 3.0 and 0.6 < ratio[0] < 2.0
     assert not abs(ratio[2] - 1.0) < 0.10        # the delivered channel is NOT within 10 %
 
 

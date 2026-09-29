@@ -38,6 +38,10 @@ DEFAULT_CHANNELS = (
     "n_z",
     "pitch_rate_dps",
     "roll_rate_dps",
+    # -- D2: the body yaw rate (velocities/r-rad_sec), the third rate DRM 4
+    # (RVW) needs, so the Entity State PDU log carries a recorded r. Recorded,
+    # NOT graded: the Gate 5 comparison set is unchanged.
+    "yaw_rate_dps",
     "track_deg",
     "crab_deg",
     "wind_speed_mps",
@@ -84,6 +88,18 @@ DEFAULT_CHANNELS = (
     "gust_down_mps",
     "gust_p_equivalent_rad_s",
     "wind_profile_speed_mps",
+    # -- the icing (P5): the severity eta the provider wrote, the six axis
+    # factors (1 + eta k) the derived airframe's aerodynamics read, and the
+    # stall-onset shift in degrees; 0 / 1.0 / 0 on a stock airframe.
+    # Recorded, NOT graded: the Gate 5 comparison set is unchanged.
+    "icing_eta",
+    "icing_lift_factor",
+    "icing_drag_factor",
+    "icing_pitch_factor",
+    "icing_roll_factor",
+    "icing_yaw_factor",
+    "icing_side_factor",
+    "icing_alpha_shift_deg",
     # -- the loading (P4): the centre of gravity (m aft of the XML datum) and
     # the pitch inertia (kg m^2) FGMassBalance holds at the sample; weight_kg
     # above is the gross mass. Recorded, NOT graded: the Gate 5 comparison

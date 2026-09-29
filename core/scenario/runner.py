@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from ..control.autopilot import Autopilot, ClosureReport, ClosureTolerance
+from ..environment.icing import icing_injections_for
 from ..environment.stack import EnvironmentStack
 from ..environment.turbulence import DrydenTurbulence, W20_KT
 from ..environment.wind import SteadyWind
@@ -100,6 +101,13 @@ def environment_for(spec: ScenarioSpec, landcover_json=None) -> EnvironmentStack
     loading = loading_for(spec)
     if loading is not None:
         stack.add(loading)
+    # P5: the icing severity ramp, written to the derived airframe's
+    # injected properties at their neutral values before the trim and as
+    # eta(t) every step (read back before the next write). The default
+    # block adds no provider, derives nothing and records no variable.
+    icing = icing_for(spec)
+    if icing is not None:
+        stack.add(icing)
 
     surface = surface_class(str(spec.surface.value))
     # W1: the roughness inferred from the bake's dominant land cover when
@@ -310,6 +318,16 @@ def loading_for(spec: ScenarioSpec):
     return LoadingProvider.from_spec(spec)
 
 
+def icing_for(spec: ScenarioSpec):
+    """The icing provider a spec asks for (P5: the severity ramp driving
+    the six injected axis factors and the stall-onset cue), or None for
+    the default block (no ice: the stock airframe). Refuses by name what
+    the validator refuses (the airframe's k-table included)."""
+    from ..environment.icing import IcingProvider
+
+    return IcingProvider.from_spec(spec)
+
+
 @dataclass(frozen=True)
 class RunResult:
     spec_digest: str
@@ -360,6 +378,11 @@ def configure_from_spec(spec: ScenarioSpec,
         # the aircraft the run trims.
         environment = EnvironmentStack([p for p in (atmosphere_for(spec), loading_for(spec))
                                         if p is not None])
+        # P5: the icing provider is a pre-trim provider too (its neutral
+        # writes and the pre-trim measurement), so the probe carries it.
+        icing = icing_for(spec)
+        if icing is not None:
+            environment.add(icing)
     environment.prepare(fdm)
 
     # Steady wind is written before trim so the aircraft is trimmed *in* the
@@ -410,6 +433,15 @@ def fdm_at_initial_conditions(spec: ScenarioSpec) -> FlightDynamics:
     # initial condition does not. Building the derived airframe unconditionally
     # would change the model hash of every run for no reason.
     injections = failure_injections_for(spec)
+    # P5: a stated icing block flies the airframe derived with the icing
+    # and icing_alpha injections (behind TECS when the state is held, and
+    # beside the failures chain when one is scheduled; derive.py applies
+    # the set in its fixed order). The default block leaves the path and
+    # the hashes as they were.
+    icing_injections = icing_injections_for(spec)
+    if icing_injections:
+        injections = tuple(dict.fromkeys(
+            (("tecs",) if bool(spec.hold_state.value) else ()) + injections + icing_injections))
     if injections:
         # P3: a scheduled surface failure acts on the failure chain the
         # failures injection carries (core/control/derive.py), so the
@@ -586,6 +618,9 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         "datum": scene_datum,
         # P3: what the schedule wrote, when, and what read back.
         "failures": schedule.report(),
+        # P5: the icing schedule as delivered -- the k-table, the pre-trim
+        # measurement, the per-step read-back; null for the default block.
+        "icing": icing_block(environment),
         # Modal analysis (gap M2, row A5): a RESULT about the trim, computed
         # on its own FDM so the recorded flight is untouched (measured:
         # linearising an executive disturbs it; the digest above is unchanged
@@ -637,6 +672,17 @@ def loading_block(environment: EnvironmentStack) -> Optional[Dict[str, Any]]:
 
     for provider in environment.atmosphere:
         if isinstance(provider, LoadingProvider):
+            return provider.manifest_block()
+    return None
+
+
+def icing_block(environment: EnvironmentStack) -> Optional[Dict[str, Any]]:
+    """The run manifest's ``icing`` block from the stack's icing provider
+    (P5), or None when the spec stated none."""
+    from ..environment.icing import IcingProvider
+
+    for provider in environment.atmosphere:
+        if isinstance(provider, IcingProvider):
             return provider.manifest_block()
     return None
 

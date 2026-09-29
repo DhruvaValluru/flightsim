@@ -98,7 +98,8 @@ NULL_FLOOR_REFERENCE = (
     "injections' force and rate channels a stated 1 N and 0.1 deg/s (P2); the wind "
     "profile's gradient a stated 1e-4 1/s and the roll gust the same 0.1 deg/s in rad/s (P6); "
     "the loading's mass a stated 0.5 kg, its pitch inertia a stated 1 kg m^2, and the CG "
-    "channel its own 0.00254 m, the V13 tolerance (P4)")
+    "channel its own 0.00254 m, the V13 tolerance (P4); the icing's eta a stated 0.01 and "
+    "each of its six factors a stated 0.001, per channel (P5)")
 
 #: Floor per channel unit; a unit not listed has no floor (reported, not graded).
 FLOORS_BY_UNIT: Dict[str, float] = {
@@ -119,7 +120,21 @@ FLOORS_BY_UNIT: Dict[str, float] = {
     "kg m^2": NULL_FLOOR_INERTIA_KGM2,
 }
 #: Floor per channel NAME, consulted before the unit table (P4: the CG).
-FLOORS_BY_CHANNEL: Dict[str, float] = {"cg_x_m": NULL_FLOOR_CG_M}
+#: The icing's own channels (P5): eta and the six factors are dimensionless
+#: (unit 1, which carries no floor -- the flag columns are 1 too and are
+#: reported, not graded), so each carries its OWN floor: a stated 0.01 for
+#: eta (a fifth of the smallest severity word, 0.05; the read-back error is
+#: 0.0 on every step) and a stated 0.001 for a factor (below the smallest
+#: change a word makes, trace x k_lift = 0.05 x 0.09 = 0.0045, and far above
+#: the read-back's 0.0); the shift in degrees takes the angle floor.
+NULL_FLOOR_ICING_ETA = 0.01
+NULL_FLOOR_ICING_FACTOR = 1e-3
+FLOORS_BY_CHANNEL: Dict[str, float] = {
+    "cg_x_m": NULL_FLOOR_CG_M,
+    "icing_eta": NULL_FLOOR_ICING_ETA,
+    **{f"icing_{axis}_factor": NULL_FLOOR_ICING_FACTOR
+       for axis in ("lift", "drag", "pitch", "roll", "yaw", "side")},
+}
 
 
 def floor_for_unit(unit: str) -> Optional[float]:

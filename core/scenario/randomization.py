@@ -680,6 +680,15 @@ POLICY_LEAVES: Dict[str, Dict[str, Any]] = {
                       "bounds": (0.05, 1.0)},
     "payload_kg": {"forms": ("uniform", "normal", "choice", "lognormal"), "kind": "number",
                    "target": "loading.payload", "unit": "kg", "bounds": (0.0, 1000.0)},
+    # P5: the icing. icing_eta_max draws the severity as a number in 0..1
+    # (the words sit at 0.05..0.30) and icing_onset_s the run-clock time
+    # the ice begins (0..3600 s, the longest scenario); both refused by
+    # name on an airframe with no k-table. A drawn onset past the run's
+    # end is a clean flight, recorded as such by the provider.
+    "icing_eta_max": {"forms": ("uniform", "beta", "choice", "normal"), "kind": "number",
+                      "target": "icing.eta_max", "unit": "1", "bounds": (0.0, 1.0)},
+    "icing_onset_s": {"forms": ("uniform", "choice", "normal", "lognormal"), "kind": "number",
+                      "target": "icing.onset_s", "unit": "s", "bounds": (0.0, 3600.0)},
 }
 #: The ``cameras`` group: applied to EVERY camera of the spec.
 POLICY_CAMERA_LEAVES: Dict[str, Dict[str, Any]] = {
@@ -975,6 +984,10 @@ def _apply_leaf(spec, path: str, name: str, leaf: Dict[str, Any], value: Any,
         field = target[len("loading."):]
         if _stated(getattr(spec.loading, field)):
             _refuse_stated_target(path, f"loading.{field}", getattr(spec.loading, field))
+    elif target.startswith("icing."):
+        field = target[len("icing."):]
+        if _stated(getattr(spec.icing, field)):
+            _refuse_stated_target(path, f"icing.{field}", getattr(spec.icing, field))
     else:
         field = target[len("spec."):]
         if _stated(getattr(spec, field)):
@@ -983,6 +996,20 @@ def _apply_leaf(spec, path: str, name: str, leaf: Dict[str, Any], value: Any,
     if name == "fuel_fraction":
         spec.loading.fuel_fraction = _sampled(value, "1", frm, path, leaf, seed, draw_index,
                                               **extra)
+        return
+    if name in ("icing_eta_max", "icing_onset_s"):
+        from ..environment.icing import load_k_table
+
+        if load_k_table(str(spec.aircraft.value)) is None:
+            raise RandomizationError(
+                "randomization.policy",
+                f"{path}: {spec.aircraft.value} has no icing table a draw can fill (no icing "
+                f"block in its aircraft config; the Twin Otter set is the DHC6's and the c172p's "
+                f"named proxy)")
+        if name == "icing_eta_max":
+            spec.icing.eta_max = _sampled(value, "1", frm, path, leaf, seed, draw_index, **extra)
+        else:
+            spec.icing.onset_s = _sampled(value, "s", frm, path, leaf, seed, draw_index, **extra)
         return
     if name == "payload_kg":
         from .loading import load_loading_config
@@ -1545,6 +1572,12 @@ def card_block(spec) -> Optional[Dict[str, Any]]:
             drawn = spec.loading.payload.value
             out["payload_kg"] = (next(iter(drawn.values())) if isinstance(drawn, dict) and drawn
                                  else drawn)
+        # P5: the icing leaves, counted by the realised distribution as the
+        # drawn numbers.
+        if spec.icing.eta_max.source == Source.SAMPLED:
+            out["icing_eta_max"] = spec.icing.eta_max.value
+        if spec.icing.onset_s.source == Source.SAMPLED:
+            out["icing_onset_s"] = spec.icing.onset_s.value
         cameras = sampled_camera_values(spec)
         if cameras:
             out["cameras"] = cameras

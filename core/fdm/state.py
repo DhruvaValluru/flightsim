@@ -114,6 +114,16 @@ REQUIRED_PROPERTIES = (
 #: (nothing reached the airframe), with the record saying ``absent``.
 P_EQUIVALENT_PROPERTY = "gust/p-equivalent-rad_sec"
 
+#: P5: the icing properties, declared ONLY by an airframe derived with the
+#: ``icing`` (eta and the six factors) and ``icing_alpha`` (the shift)
+#: injections (core/control/derive.py). Read when the loaded model has them;
+#: recorded as 0 / 1.0 / 0 when it does not (nothing reached the airframe:
+#: the stock model is x * 1.0 and alpha + 0, said in the record), never NaN.
+ICING_ETA_PROPERTY = "icing/eta"
+ICING_FACTOR_PROPERTIES = tuple(f"icing/{axis}-factor" for axis in
+                                ("lift", "drag", "pitch", "roll", "yaw", "side"))
+ICING_SHIFT_PROPERTY = "icing/alpha-shift-rad"
+
 #: P4: slug ft^2 -> kg m^2, from the density factor the units module states
 #: (1 slug = KGM3_PER_SLUGFT3 kg/m^3 x 1 ft^3; times ft^2): 1.35581795 kg m^2.
 KGM2_PER_SLUGFT2 = u.KGM3_PER_SLUGFT3 * u.M_PER_FT ** 5
@@ -247,6 +257,20 @@ class AircraftState:
     cg_x_m: float
     iyy_kgm2: float
 
+    # -- the icing (P5): the severity eta and the six axis factors the
+    #    derived airframe's aerodynamics multiply by (1 + eta k, written
+    #    every step by the icing provider), and the stall-onset shift in
+    #    degrees. 0 / 1.0 / 0 on a stock airframe, which declares none of
+    #    them. Recorded, not graded by Gate 5.
+    icing_eta: float
+    icing_lift_factor: float
+    icing_drag_factor: float
+    icing_pitch_factor: float
+    icing_roll_factor: float
+    icing_yaw_factor: float
+    icing_side_factor: float
+    icing_alpha_shift_deg: float
+
     # -- control surface positions, for articulation and burn-in
     surfaces: Dict[str, float] = field(default_factory=dict)
 
@@ -314,6 +338,11 @@ class AircraftState:
         has = getattr(props, "has", None)
         p_equivalent = (g(P_EQUIVALENT_PROPERTY)
                         if has is not None and has(P_EQUIVALENT_PROPERTY) else 0.0)
+        iced = has is not None and has(ICING_ETA_PROPERTY)
+        factors = ([g(p) for p in ICING_FACTOR_PROPERTIES] if iced
+                   else [1.0] * len(ICING_FACTOR_PROPERTIES))
+        shift_deg = (math.degrees(g(ICING_SHIFT_PROPERTY))
+                     if has is not None and has(ICING_SHIFT_PROPERTY) else 0.0)
         return cls(
             t=g("simulation/sim-time-sec"),
             lat_deg=g("position/lat-geod-deg"),
@@ -370,5 +399,10 @@ class AircraftState:
                                                            g("atmosphere/wind-east-fps"))),
             cg_x_m=u.ft_to_m(g("inertia/cg-x-in") / 12.0),
             iyy_kgm2=g("inertia/iyy-slugs_ft2") * KGM2_PER_SLUGFT2,
+            icing_eta=g(ICING_ETA_PROPERTY) if iced else 0.0,
+            icing_lift_factor=factors[0], icing_drag_factor=factors[1],
+            icing_pitch_factor=factors[2], icing_roll_factor=factors[3],
+            icing_yaw_factor=factors[4], icing_side_factor=factors[5],
+            icing_alpha_shift_deg=shift_deg,
             surfaces={n.split("/")[-1]: g(n) for n in surface_names},
         )

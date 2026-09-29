@@ -27,12 +27,21 @@ PHYSICS = ("atmosphere.temperature_deviation_c", "atmosphere.sea_level_pressure_
 WORDS = ("atmosphere.day",)
 DATUM = ("datum.vertical", "datum.physics_frame", "datum.geoid_model")
 #: P2's injected properties: written after load and held by the property
-#: store; no spec field until each physics item lands (P3 failures, P5
-#: icing, P6/P7 gust), so no section is claimed for them yet.
+#: store; the failure authorities and the roll gust have no spec field
+#: until their items land (P3's kinds are registered separately; P6/P7
+#: gust); P5 gave the icing ones their spec fields (ICING below) and kept
+#: the six factors as producer-measured observers (ICING_FACTORS).
 INJECTED = ("failures.elevator_authority", "failures.aileron_authority",
-            "failures.rudder_authority", "icing.lift_factor", "icing.drag_factor",
-            "icing.side_factor", "icing.roll_factor", "icing.pitch_factor", "icing.yaw_factor",
-            "icing.eta", "icing.alpha_shift_rad", "gust.p_equivalent_rad_s")
+            "failures.rudder_authority", "gust.p_equivalent_rad_s")
+#: P5: the icing block -- the number (icing.eta reads icing.eta_max), the
+#: word, the onset, the ramp, the shift (icing.alpha_shift_rad reads
+#: icing.alpha_shift_deg) and the envelope word; the six factors are
+#: written every step from eta and the airframe's k-table and have no
+#: spec field of their own.
+ICING = ("icing.eta", "icing.severity", "icing.onset_s", "icing.ramp_s",
+         "icing.alpha_shift_rad", "icing.envelope")
+ICING_FACTORS = ("icing.lift_factor", "icing.drag_factor", "icing.side_factor",
+                 "icing.roll_factor", "icing.pitch_factor", "icing.yaw_factor")
 #: P6: the turbulence model and wind profile blocks, one entry per field (the
 #: words included); the model and kind words write the gust / wind channels.
 P6 = ("turbulence_model.model", "turbulence_model.intensity", "turbulence_model.seed",
@@ -53,6 +62,10 @@ FAILURE_KINDS = ("failures.engine_out", "failures.control_jam", "failures.hardov
 #: value is the {station: kg} mapping); every write is made once before
 #: the trim, the payload read back through cg-x-in against the hand CG.
 LOADING = ("loading.payload_kg", "loading.fuel_kg", "loading.fuel_fraction")
+#: D2: the dis block, one entry per field; none writes a property or moves a
+#: recorded column (the export reads them), nulls are the block's defaults.
+DIS = ("dis.site", "dis.application", "dis.entity", "dis.force_id", "dis.marking",
+       "dis.timestamp_mode")
 
 
 def _entry(**overrides):
@@ -67,7 +80,27 @@ def _entry(**overrides):
 def test_every_batch_1_variable_and_every_physics_variable_is_registered():
     assert set(REGISTRY.names()) == (set(BATCH_1) | set(PHYSICS) | set(WORDS) | set(DATUM)
                                      | set(INJECTED) | set(P6) | set(ENVIRONMENT)
-                                     | set(LOADING) | set(FAILURES) | set(FAILURE_KINDS))
+                                     | set(LOADING) | set(FAILURES) | set(FAILURE_KINDS)
+                                     | set(ICING) | set(ICING_FACTORS) | set(DIS))
+    for name in DIS:
+        entry = REGISTRY.get(name)
+        assert entry.spec_path == name and entry.null_value is not NO_NULL
+        assert not entry.jsbsim_writes and entry.readback_tolerance is None
+        assert [c.name for c in entry.effect_channels] == ["lat_deg", "lon_deg", "hae_m"]
+    assert REGISTRY.get("dis.marking").null_value == ""
+    assert REGISTRY.get("dis.timestamp_mode").null_value == "relative"
+    for name in ICING:
+        entry = REGISTRY.get(name)
+        assert entry.spec_path.startswith("icing.") and entry.null_value is not NO_NULL
+        assert entry.effect_channels and entry.null_basis
+    assert REGISTRY.get("icing.eta").spec_path == "icing.eta_max"
+    assert REGISTRY.get("icing.eta").null_value == 0.0
+    assert REGISTRY.get("icing.alpha_shift_rad").spec_path == "icing.alpha_shift_deg"
+    assert REGISTRY.get("icing.severity").null_value is None
+    for name in ICING_FACTORS:
+        entry = REGISTRY.get(name)
+        assert entry.spec_path is None and entry.null_value is NO_NULL
+        assert entry.jsbsim_writes and entry.readback_tolerance is not None and entry.null_basis
     events = REGISTRY.get("failures.events")
     assert events.spec_path == "failures.events" and events.null_value == [] and events.unit == "events"
     for name in FAILURE_KINDS:
@@ -120,13 +153,14 @@ def test_every_batch_1_variable_and_every_physics_variable_is_registered():
         assert entry.jsbsim_writes and entry.readback_tolerance is not None
         assert entry.effect_channels and entry.null_basis
     assert REGISTRY.get("loading.payload_kg").readback_tolerance.value == 0.1
-    assert REGISTRY.sections() == ("atmosphere", "datum", "environment", "failures", "loading",
-                                   "turbulence_model", "wind_profile")
+    assert REGISTRY.sections() == ("atmosphere", "datum", "dis", "environment", "failures", "icing",
+                                   "loading", "turbulence_model", "wind_profile")
     # Every spec field of the claimed blocks, and every environment quantity
     # of the spec, is claimed: the validator's record.unregistered check is
     # what a stated block meets first.
     from core.scenario.blocks import (
-        AtmosphereSpec, DatumSpec, FailuresSpec, LoadingSpec, TurbulenceModelSpec, WindProfileSpec,
+        AtmosphereSpec, DatumSpec, DisSpec, FailuresSpec, IcingSpec, LoadingSpec, TurbulenceModelSpec,
+        WindProfileSpec,
     )
     from core.scenario.spec import ScenarioSpec
     assert set(REGISTRY.spec_fields()) == (
@@ -136,6 +170,8 @@ def test_every_batch_1_variable_and_every_physics_variable_is_registered():
         | {f"wind_profile.{f}" for f in WindProfileSpec.FIELD_ORDER}
         | {f"loading.{f}" for f in LoadingSpec.FIELD_ORDER}
         | {f"failures.{f}" for f in FailuresSpec.FIELD_ORDER}
+        | {f"icing.{f}" for f in IcingSpec.FIELD_ORDER}
+        | {f"dis.{f}" for f in DisSpec.FIELD_ORDER}
         | {f"{sec}.{n}" for sec, n in ScenarioSpec.FIELD_ORDER if sec == "environment"})
 
 

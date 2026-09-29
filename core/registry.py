@@ -355,6 +355,49 @@ _WIND_EXACT = ("measured here on the c172p (JSBSim 1.2.4): atmosphere/wind-*-fps
                "persists (tests/test_environment.py)")
 
 
+_ICING_EXACT = ("measured here on the c172p (JSBSim 1.2.4): a <property> declared by an injected "
+                "system reads back the value written to the last bit, before and after stepping "
+                "(P2); the icing provider reads each of its eight properties back at the top of "
+                "the following step, before that step's write, and the largest error over a 3 s "
+                "run is 0.0 (tests/test_icing.py)")
+_ICING_WRITES = (
+    JsbsimWrite("icing/eta", "0 before the trim (the trim is of the un-iced aircraft); eta(t) at "
+                             "the top of every step from the run's first step"),
+    JsbsimWrite("icing/lift-factor", "1.0 before the trim; 1 + eta(t) k_lift at the top of every step"),
+    JsbsimWrite("icing/drag-factor", "1.0 before the trim; 1 + eta(t) k_drag at the top of every step"),
+    JsbsimWrite("icing/pitch-factor", "1.0 before the trim; 1 + eta(t) k_pitch at the top of every step"),
+    JsbsimWrite("icing/roll-factor", "1.0 before the trim; 1 + eta(t) k_roll at the top of every step"),
+    JsbsimWrite("icing/yaw-factor", "1.0 before the trim; 1 + eta(t) k_yaw at the top of every step"),
+    JsbsimWrite("icing/side-factor", "1.0 before the trim; 1 + eta(t) k_side at the top of every step"),
+    JsbsimWrite("icing/alpha-shift-rad", "0 before the trim; radians(alpha_shift_deg) eta(t) / eta_max "
+                                         "at the top of every step"),
+)
+_ICING_ETA_CHANNELS = (
+    EffectChannel("icing_eta", "1"), EffectChannel("icing_lift_factor", "1"),
+    EffectChannel("icing_drag_factor", "1"), EffectChannel("lift_n", "N"),
+    EffectChannel("drag_n", "N"), EffectChannel("altitude_m", "m"),
+    EffectChannel("pitch_deg", "deg"), EffectChannel("tas_kt", "kt"),
+)
+
+
+def _icing_factor(axis: str, channels: Tuple[Tuple[str, str], ...], null_basis: str) -> VariableRecord:
+    """One of P2's six icing factors (P5 writes it every step): no spec
+    field of its own -- the airframe's k-table and the eta the spec states
+    decide it -- so the producer's pre-trim measurement is its null test."""
+    return VariableRecord(
+        name=f"icing.{axis}_factor", spec_path=None, unit="1",
+        jsbsim_writes=(JsbsimWrite(f"icing/{axis}-factor",
+                                   f"1.0 before the trim; 1 + eta(t) k_{axis} at the top of every step"),),
+        effect_channels=(EffectChannel(f"icing_{axis}_factor", "1"),)
+                        + tuple(EffectChannel(c, u) for c, u in channels),
+        null_basis=null_basis,
+        readback_tolerance=ReadbackTolerance(0.0, "absolute", _ICING_EXACT),
+        u_input_rule=UInputRule(note="derived from eta and the airframe's k (a transcription "
+                                     "[unverified here] or a named proxy): no spread is declared "
+                                     "for k; eta's bin rides on icing.eta"),
+        host_channels=(f"icing_{axis}_factor",))
+
+
 def _injected(name: str, prop: str, unit: str, null_basis: str,
               channels: Tuple[Tuple[str, str], ...], host: Tuple[str, ...]) -> VariableRecord:
     """A P2 injection property (core/control/derive.py): written after load
@@ -487,30 +530,119 @@ REGISTRY = Registry((
     _injected("failures.rudder_authority", "failure/rudder/authority", "1",
               "1.0 is full authority: the chain is x * 1.0, bit-identical to the stock airframe",
               (("beta_deg", "deg"),), ("beta_deg",)),
-    _injected("icing.lift_factor", "icing/lift-factor", "1",
-              "1.0 scales the LIFT axis by one: bit-identical to the stock airframe (0.8 read 1872.5287 -> 1498.0230 lbf)",
-              (("lift_n", "N"), ("altitude_m", "m")), ("lift_n",)),
-    _injected("icing.drag_factor", "icing/drag-factor", "1",
-              "1.0 scales the DRAG axis by one: bit-identical to the stock airframe",
-              (("tas_kt", "kt"),), ("tas_kt",)),
-    _injected("icing.side_factor", "icing/side-factor", "1",
-              "1.0 scales the SIDE axis by one: bit-identical to the stock airframe",
-              (("side_force_n", "N"),), ("side_force_n",)),
-    _injected("icing.roll_factor", "icing/roll-factor", "1",
-              "1.0 scales the ROLL axis by one: bit-identical to the stock airframe",
-              (("roll_deg", "deg"),), ("roll_deg",)),
-    _injected("icing.pitch_factor", "icing/pitch-factor", "1",
-              "1.0 scales the PITCH axis by one: bit-identical to the stock airframe",
-              (("pitch_deg", "deg"),), ("pitch_deg",)),
-    _injected("icing.yaw_factor", "icing/yaw-factor", "1",
-              "1.0 scales the YAW axis by one: bit-identical to the stock airframe",
-              (("beta_deg", "deg"),), ("beta_deg",)),
-    _injected("icing.eta", "icing/eta", "1",
-              "0 is no ice; declared for the icing provider (P5), read by nothing until it lands, "
-              "so no effect channel is named", (), ()),
-    _injected("icing.alpha_shift_rad", "icing/alpha-shift-rad", "rad",
-              "0 leaves the LIFT table's alpha as aero/alpha-rad: bit-identical (2 deg moved the lift peak -2.0 deg)",
-              (("alpha_deg", "deg"), ("lift_n", "N")), ("alpha_deg",)),
+    # -- P5: the icing block gives P2's icing.* injected properties their
+    #    spec fields. eta_max (the number, or the severity WORD's stated
+    #    value) drives every write: icing/eta and the six factors 1 + eta k
+    #    (Bragg et al. 2000, the airframe's k-table from its config) at the
+    #    top of every step, neutral before the trim; the six factors have
+    #    no spec field of their own (the k-table is the airframe's, the
+    #    variable that moves is eta) and keep the producer's measured null
+    #    tests. Effect channels are recorded columns: the provider's own
+    #    icing_* columns (unit 1, the shift in degrees) beside the axis's
+    #    force / moment / attitude columns (core/telemetry/recorder.py).
+    _icing_factor("lift", (("lift_n", "N"), ("altitude_m", "m"), ("tas_kt", "kt")),
+                  "1.0 scales the LIFT axis by one: bit-identical to the stock airframe (0.8 read "
+                  "1872.5287 -> 1498.0230 lbf, P2); the provider writes 1 + eta k_lift"),
+    _icing_factor("drag", (("drag_n", "N"), ("tas_kt", "kt"), ("altitude_m", "m")),
+                  "1.0 scales the DRAG axis by one: bit-identical to the stock airframe; the "
+                  "provider writes 1 + eta k_drag"),
+    _icing_factor("side", (("side_force_n", "N"), ("beta_deg", "deg")),
+                  "1.0 scales the SIDE axis by one: bit-identical to the stock airframe; the "
+                  "provider writes 1 + eta k_side (the axis is near zero at symmetric initial "
+                  "conditions, so the pre-trim measurement is honestly not reached there)"),
+    _icing_factor("roll", (("roll_deg", "deg"), ("roll_rate_dps", "deg/s")),
+                  "1.0 scales the ROLL axis by one: bit-identical to the stock airframe; the "
+                  "provider writes 1 + eta k_roll"),
+    _icing_factor("pitch", (("pitch_deg", "deg"), ("pitch_rate_dps", "deg/s"),
+                            ("altitude_m", "m")),
+                  "1.0 scales the PITCH axis by one: bit-identical to the stock airframe; the "
+                  "provider writes 1 + eta k_pitch"),
+    _icing_factor("yaw", (("beta_deg", "deg"), ("heading_deg", "deg")),
+                  "1.0 scales the YAW axis by one: bit-identical to the stock airframe; the "
+                  "provider writes 1 + eta k_yaw"),
+    VariableRecord(
+        name="icing.eta", spec_path="icing.eta_max", unit="1",
+        jsbsim_writes=_ICING_WRITES,
+        effect_channels=_ICING_ETA_CHANNELS,
+        null_value=0.0,
+        null_basis="no ice: eta 0 writes every factor 1.0 and the shift 0, and the derived "
+                   "airframe is then bit-identical to the stock one (P2, measured over 8 s); "
+                   "the pair 0.2 against 0 on the c172p (proxy row) moves lift_n on the first "
+                   "step by the factor and diverges the trimmed flight (tests/test_icing.py)",
+        readback_tolerance=ReadbackTolerance(0.0, "absolute", _ICING_EXACT),
+        u_input_rule=UInputRule(bin_width=0.1, declared_spread=0.0,
+                                note="the severity words sit 0.05 / 0.10 / 0.20 / 0.30 apart; "
+                                     "b = 0.1 is the gap between the two upper words (a stated "
+                                     "choice) for a word-inferred eta; a stated number has u_x 0; "
+                                     "the default (no ice) has no spread"),
+        host_channels=("icing_eta", "icing_lift_factor", "icing_drag_factor",
+                       "icing_pitch_factor", "icing_roll_factor", "icing_yaw_factor",
+                       "icing_side_factor")),
+    VariableRecord(
+        name="icing.severity", spec_path="icing.severity", unit="word",
+        jsbsim_writes=_ICING_WRITES,
+        effect_channels=_ICING_ETA_CHANNELS,
+        null_value=None,
+        null_basis="unstated: no severity word; eta_max is then the stated number or 0 (no ice). "
+                   "The word is a stated mapping to eta (trace 0.05, light 0.10, moderate 0.20, "
+                   "severe 0.30); a stated number beside it wins, so the word's pair is then "
+                   "silent by construction (said in the record)",
+        readback_tolerance=ReadbackTolerance(0.0, "absolute", _ICING_EXACT),
+        u_input_rule=UInputRule(note="a word carries no bin of its own: the eta it maps to "
+                                     "carries the 0.1 bin; the AIM pilot-report words are not "
+                                     "values of eta"),
+        host_channels=("icing_eta",)),
+    VariableRecord(
+        name="icing.onset_s", spec_path="icing.onset_s", unit="s",
+        jsbsim_writes=(JsbsimWrite("icing/eta", "eta(t) at the top of every step, 0 while t < onset_s "
+                                                "on the run clock"),),
+        effect_channels=(EffectChannel("icing_eta", "1"), EffectChannel("lift_n", "N"),
+                         EffectChannel("altitude_m", "m"), EffectChannel("pitch_deg", "deg"),
+                         EffectChannel("tas_kt", "kt")),
+        null_value=0.0,
+        null_basis="the run's first step: eta rises from t = 0 (the spec default); a later onset "
+                   "keeps the flight clean until then, so the pair against 0 moves the channels "
+                   "over the steps before the onset",
+        readback_tolerance=ReadbackTolerance(0.0, "absolute", _ICING_EXACT),
+        u_input_rule=UInputRule(note="a stated time: u_x 0; a sampled one is the draw"),
+        host_channels=("icing_eta",)),
+    VariableRecord(
+        name="icing.ramp_s", spec_path="icing.ramp_s", unit="s",
+        jsbsim_writes=(JsbsimWrite("icing/eta", "eta(t) at the top of every step, rising linearly "
+                                                "over ramp_s from the onset"),),
+        effect_channels=(EffectChannel("icing_eta", "1"), EffectChannel("lift_n", "N"),
+                         EffectChannel("altitude_m", "m"), EffectChannel("pitch_deg", "deg"),
+                         EffectChannel("tas_kt", "kt")),
+        null_value=0.0,
+        null_basis="a step: ramp 0 puts eta at eta_max on the first step at or past the onset "
+                   "(the spec default); a ramp spreads the rise over its seconds",
+        readback_tolerance=ReadbackTolerance(0.0, "absolute", _ICING_EXACT),
+        u_input_rule=UInputRule(note="a stated duration: u_x 0"),
+        host_channels=("icing_eta",)),
+    VariableRecord(
+        name="icing.alpha_shift_rad", spec_path="icing.alpha_shift_deg", unit="rad",
+        jsbsim_writes=(JsbsimWrite("icing/alpha-shift-rad",
+                                   "0 before the trim; radians(alpha_shift_deg) eta(t) / eta_max at "
+                                   "the top of every step"),),
+        effect_channels=(EffectChannel("icing_alpha_shift_deg", "deg"),
+                         EffectChannel("alpha_deg", "deg"), EffectChannel("lift_n", "N"),
+                         EffectChannel("altitude_m", "m"), EffectChannel("pitch_deg", "deg")),
+        null_value=0.0,
+        null_basis="0 leaves the LIFT table's alpha as aero/alpha-rad: bit-identical (P2: 2 deg "
+                   "moved the lift peak -2.0 deg in a static sweep); the spec states degrees, the "
+                   "property is radians, and the cue is linear in eta (the full shift at eta_max)",
+        readback_tolerance=ReadbackTolerance(0.0, "absolute", _ICING_EXACT),
+        u_input_rule=UInputRule(note="a stated cue: u_x 0; no vocabulary"),
+        host_channels=("icing_alpha_shift_deg",)),
+    VariableRecord(
+        name="icing.envelope", spec_path="icing.envelope", unit="word",
+        effect_channels=(EffectChannel("icing_eta", "1"), EffectChannel("lift_n", "N")),
+        null_value=None,
+        null_basis="unstated: no envelope named. The word (Part 25 Appendix C or O) is recorded "
+                   "as metadata and applied nowhere, so its pair is silent by construction and "
+                   "the record says so (a bounded invariance, like the datum words)",
+        u_input_rule=UInputRule(note="a word: no bin, no spread; it enters no equation"),
+        host_channels=()),
     _injected("gust.p_equivalent_rad_s", "gust/p-equivalent-rad_sec", "rad/s",
               "0 adds nothing to the roll-damping term: bit-identical (0.3 rad/s for 2 s rolled -30.21 vs -3.67 deg)",
               (("roll_deg", "deg"), ("roll_rate_dps", "deg/s")), ("roll_deg", "roll_rate_dps")),
@@ -904,4 +1036,57 @@ REGISTRY = Registry((
         readback_tolerance=ReadbackTolerance(0.0, "absolute", _INJECTED),
         u_input_rule=UInputRule(note="the remaining authority, stated: u_x 0; no vocabulary"),
         host_channels=("elevator_deg", "aileron_deg", "rudder_deg")),
+    # -- D2: the dis block. Six fields that label the Entity State PDU log
+    #    the capture writes with --dis; none reaches the flight (measured:
+    #    the output digest is the same with and without the block), so the
+    #    effect channels are the recorded columns the export READS -- the
+    #    pair on any field is a bounded invariance that measures 0 on each
+    #    of them, verdict silent, and the record's own null test (the
+    #    decoded location with the geoid against without) is the producer's.
+    #    Nulls are the block's defaults; the words carry no bin.
+    VariableRecord(
+        name="dis.site", spec_path="dis.site", unit="1",
+        effect_channels=(EffectChannel("lat_deg", "deg"), EffectChannel("lon_deg", "deg"),
+                         EffectChannel("hae_m", "m")),
+        null_value=1,
+        null_basis="the documented default entity identifier 1:1:1; the export reads the "
+                   "channels and moves none (measured: peak 0 on each, digests equal)",
+        u_input_rule=UInputRule(note="an identifier: no bin, no spread")),
+    VariableRecord(
+        name="dis.application", spec_path="dis.application", unit="1",
+        effect_channels=(EffectChannel("lat_deg", "deg"), EffectChannel("lon_deg", "deg"),
+                         EffectChannel("hae_m", "m")),
+        null_value=1,
+        null_basis="the documented default entity identifier 1:1:1; moves no recorded column",
+        u_input_rule=UInputRule(note="an identifier: no bin, no spread")),
+    VariableRecord(
+        name="dis.entity", spec_path="dis.entity", unit="1",
+        effect_channels=(EffectChannel("lat_deg", "deg"), EffectChannel("lon_deg", "deg"),
+                         EffectChannel("hae_m", "m")),
+        null_value=1,
+        null_basis="the documented default entity identifier 1:1:1; moves no recorded column",
+        u_input_rule=UInputRule(note="an identifier: no bin, no spread")),
+    VariableRecord(
+        name="dis.force_id", spec_path="dis.force_id", unit="1",
+        effect_channels=(EffectChannel("lat_deg", "deg"), EffectChannel("lon_deg", "deg"),
+                         EffectChannel("hae_m", "m")),
+        null_value=0,
+        null_basis="force id 0 (Other), the documented default; moves no recorded column",
+        u_input_rule=UInputRule(note="an enumeration: no bin, no spread")),
+    VariableRecord(
+        name="dis.marking", spec_path="dis.marking", unit="text",
+        effect_channels=(EffectChannel("lat_deg", "deg"), EffectChannel("lon_deg", "deg"),
+                         EffectChannel("hae_m", "m")),
+        null_value="",
+        null_basis="no marking stated: the airframe key is derived at export (source "
+                   "derived); moves no recorded column",
+        u_input_rule=UInputRule(note="a text: no bin, no spread")),
+    VariableRecord(
+        name="dis.timestamp_mode", spec_path="dis.timestamp_mode", unit="word",
+        effect_channels=(EffectChannel("lat_deg", "deg"), EffectChannel("lon_deg", "deg"),
+                         EffectChannel("hae_m", "m")),
+        null_value="relative",
+        null_basis="relative timestamps (simulation time past the hour, LSB 0), the in-tree "
+                   "default; absolute needs the exporter's epoch; moves no recorded column",
+        u_input_rule=UInputRule(note="a word: no bin, no spread")),
 ))

@@ -572,6 +572,165 @@ class FailuresSpec(ProvenancedBlock):
             [], frm="no failure scheduled", std=FAILURE_STANDARDS["none"]))
 
 
+#: P5: the icing block's vocabulary. The severity WORDS are a STATED
+#: mapping to Bragg's eta (core/environment/icing.py SEVERITY_WORDS: trace
+#: 0.05, light 0.10, moderate 0.20, severe 0.30); the AIM 7-1-19 words are
+#: pilot reports of an accretion rate, not values of eta. The envelope
+#: words (14 CFR Part 25 Appendix C / O) are recorded as metadata and
+#: applied nowhere. ``eta_max`` in 0..1; ``onset_s`` and ``ramp_s`` on the
+#: run clock (seconds since the run's first step); ``alpha_shift_deg`` the
+#: stated linear stall-onset cue at full eta.
+ICING_SEVERITY_WORDS: Dict[str, float] = {"trace": 0.05, "light": 0.10, "moderate": 0.20,
+                                          "severe": 0.30}
+ICING_ENVELOPE_WORDS = ("appendix_c", "appendix_o")
+ICING_STANDARDS: Dict[str, str] = {
+    "severity": "a stated mapping of the AIM 7-1-19 pilot-report words to Bragg et al. 2000's "
+                "eta (trace 0.05, light 0.10, moderate 0.20, severe 0.30) [unverified here]",
+    "eta_max": "Bragg et al. 2000 (AIAA 2000-0360): C_A,iced = (1 + eta k_A) C_A per axis, "
+               "through the icing injection's six factors [unverified here]",
+    "onset_s": "the run-clock time (seconds since the run's first step) at which eta begins "
+               "to rise: a stated schedule, not an accretion model",
+    "ramp_s": "eta(t) = eta_max clamp((t - onset_s) / ramp_s, 0, 1): a stated linear ramp; "
+              "0 is a step",
+    "alpha_shift_deg": "the stall-onset cue 14 CFR Part 60 FSTD Directive 2 asks for, as a "
+                       "stated linear shift of the LIFT table's alpha (alpha_shift_deg eta / "
+                       "eta_max) through the icing_alpha injection [unverified here]",
+    "envelope": "14 CFR Part 25 Appendix C (continuous / intermittent maximum) or Appendix O "
+                "(supercooled large drops): recorded as metadata, applied nowhere "
+                "[unverified here]",
+}
+
+
+@dataclass
+class IcingSpec(ProvenancedBlock):
+    """``icing`` (P5): the severity ramp the flight is iced with. Absent-
+    canonical: no ice (the stock airframe) is the default and is omitted,
+    so every committed spec-8 example keeps its digest. ``severity`` is a
+    word (``icing.severity`` otherwise) that fills ``eta_max`` while the
+    number is at its default -- a stated number always wins (the day
+    word's doctrine); ``eta_max`` in 0..1, ``onset_s`` and ``ramp_s`` at or
+    above 0, ``alpha_shift_deg`` within a stated bound (``icing.eta_range``
+    otherwise); ``envelope`` a word (``icing.envelope`` otherwise), metadata
+    only. A stated block flies the airframe derived with the ``icing`` and
+    ``icing_alpha`` injections and needs the airframe's k-table
+    (``icing.airframe_data`` otherwise); the writes, the read-back and the
+    records are core/environment/icing.py's."""
+
+    severity: Quantity
+    eta_max: Quantity
+    onset_s: Quantity
+    ramp_s: Quantity
+    alpha_shift_deg: Quantity
+    envelope: Quantity
+
+    FIELD_ORDER = ("severity", "eta_max", "onset_s", "ramp_s", "alpha_shift_deg", "envelope")
+    BLOCK = "icing"
+
+    @classmethod
+    def defaulted(cls) -> "IcingSpec":
+        return cls(
+            severity=Quantity.default(
+                None, frm="unstated: no severity word", std=ICING_STANDARDS["severity"]),
+            eta_max=Quantity.default(
+                None, "1", frm="unstated: no ice (eta 0) unless a severity word says",
+                std=ICING_STANDARDS["eta_max"]),
+            onset_s=Quantity.default(
+                0.0, "s", frm="the run's first step", std=ICING_STANDARDS["onset_s"]),
+            ramp_s=Quantity.default(
+                0.0, "s", frm="a step to eta_max at the onset", std=ICING_STANDARDS["ramp_s"]),
+            alpha_shift_deg=Quantity.default(
+                0.0, "deg", frm="no stall-onset cue", std=ICING_STANDARDS["alpha_shift_deg"]),
+            envelope=Quantity.default(
+                None, frm="unstated: no envelope named", std=ICING_STANDARDS["envelope"]),
+        )
+
+    def resolved(self) -> Dict[str, Quantity]:
+        """The effective ``eta_max``: a stated number wins; else the
+        severity word's value (``inferred`` from the word); else 0 (no
+        ice, ``inferred`` from the absence). An unknown word fills nothing
+        here (it is refused by name at validation)."""
+        eta = self.eta_max
+        word = self.severity.value
+        if eta.source is Source.DEFAULT or eta.value is None:
+            if isinstance(word, str) and word in ICING_SEVERITY_WORDS:
+                eta = Quantity.inferred(ICING_SEVERITY_WORDS[word], "1",
+                                        frm=f"severity: {word}", std=ICING_STANDARDS["severity"])
+            elif eta.value is None:
+                eta = Quantity.inferred(0.0, "1", frm="no severity and no eta_max stated: no ice",
+                                        std=ICING_STANDARDS["eta_max"])
+        return {"eta_max": eta}
+
+
+#: D2 (blueprint section 5): the ``dis`` block's vocabulary. The entity
+#: identifier is the standard's site / application / entity triple, each
+#: 0..65535 (``interop.dis.entity_id`` outside); ``force_id`` is the 8-bit
+#: force enumeration, 0 Other the default (``dis.force_id`` outside 0..255);
+#: ``marking`` is the 11-character ASCII entity marking, '' meaning the
+#: airframe key derived at export (``dis.marking_too_long`` beyond 11 or
+#: outside ASCII); ``timestamp_mode`` is ``relative`` (simulation time past
+#: the hour, LSB 0) or ``absolute`` (a stated UTC epoch plus the sample
+#: time, LSB 1; the epoch is the exporter's option and is refused by name,
+#: ``dis.timestamp_epoch_missing``, when absent). The block labels the
+#: export; it moves no trajectory.
+DIS_TIMESTAMP_MODES = ("relative", "absolute")
+DIS_STANDARDS: Dict[str, str] = {
+    "entity_id": "IEEE 1278.1-2012 Entity Identifier record: site, application, entity, "
+                 "16 bits each [cited from memory]",
+    "force_id": "IEEE 1278.1-2012 Entity State PDU force id with SISO-REF-010's force "
+                "enumeration (0 Other, 1 Friendly, 2 Opposing, 3 Neutral) [from memory, "
+                "unverified here]",
+    "marking": "IEEE 1278.1-2012 Entity Marking record: character set 1 (ASCII), 11 "
+               "characters, NUL padded [cited from memory]",
+    "timestamp_mode": "IEEE 1278.1-2012 timestamp: 31 bits of 3600 / 2^31 s past the hour, "
+                      "LSB 1 absolute / 0 relative [cited from memory]",
+}
+
+
+@dataclass
+class DisSpec(ProvenancedBlock):
+    """``dis`` (D2): how the run's Entity State PDU log is labelled --
+    the entity identifier triple, the force id, the marking and the
+    timestamp mode. Absent-canonical: the documented defaults (1:1:1,
+    force 0, the airframe key as marking, relative timestamps) are
+    omitted from the canonical form, so every committed spec-8 example
+    keeps its digest. The validator refuses ``interop.dis.entity_id``,
+    ``dis.force_id``, ``dis.marking_too_long`` and ``dis.timestamp_mode``
+    (core/interop/dis_stream.py dis_spec_problems, the one list for the
+    validator and the exporter); the registry claims every field
+    (``record.unregistered`` otherwise). Nothing here is applied to the
+    flight: the block is read by the exporter after it, and the
+    ``dis.entity_state`` record carries what was written."""
+
+    site: Quantity
+    application: Quantity
+    entity: Quantity
+    force_id: Quantity
+    marking: Quantity
+    timestamp_mode: Quantity
+
+    FIELD_ORDER = ("site", "application", "entity", "force_id", "marking", "timestamp_mode")
+    BLOCK = "dis"
+
+    @classmethod
+    def defaulted(cls) -> "DisSpec":
+        return cls(
+            site=Quantity.default(1, frm="the documented default entity identifier 1:1:1",
+                                  std=DIS_STANDARDS["entity_id"]),
+            application=Quantity.default(1, frm="the documented default entity identifier 1:1:1",
+                                         std=DIS_STANDARDS["entity_id"]),
+            entity=Quantity.default(1, frm="the documented default entity identifier 1:1:1",
+                                    std=DIS_STANDARDS["entity_id"]),
+            force_id=Quantity.default(0, frm="force id 0, Other: no side is stated",
+                                      std=DIS_STANDARDS["force_id"]),
+            marking=Quantity.default("", frm="no marking stated: the airframe key is derived "
+                                             "at export",
+                                     std=DIS_STANDARDS["marking"]),
+            timestamp_mode=Quantity.default("relative", frm="relative timestamps: simulation "
+                                                            "time past the hour, LSB 0",
+                                            std=DIS_STANDARDS["timestamp_mode"]),
+        )
+
+
 @dataclass
 class TrafficSpec(ProvenancedBlock):
     """One scripted traffic aircraft (contracts §2.2)."""
