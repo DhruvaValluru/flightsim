@@ -715,7 +715,7 @@ def applied_variable(check: Dict[str, Any], datum: Dict[str, Any],
         value=pdu_count,
         unit="PDU",
         source="derived",
-        model=MODEL,
+        model_name=MODEL,
         parameters={
             "protocol_version": PROTOCOL_VERSION, "pdu_type": PDU_TYPE_ENTITY_STATE,
             "pdu_length_bytes": ESPDU_LENGTH,

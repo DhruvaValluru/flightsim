@@ -244,7 +244,7 @@ def test_the_thresholded_stream_reconstructs_the_full_rate_one_within_the_thresh
     times = [telemetry["columns"]["t"][s] for s in index["sample_indices"]]
     assert max(b - a for a, b in zip(times, times[1:])) <= 5.0 + 1e-9
     record = read_records(index["applied_variables"])[0]
-    assert record["model"].startswith("DR-thresholded")
+    assert record["model_name"].startswith("DR-thresholded")
     assert record["parameters"]["emitter"] == "thresholded"
     assert record["parameters"]["emitter_parameters"]["heartbeat_s"] == 5.0
 
@@ -332,7 +332,7 @@ def test_the_record_carries_the_ids_the_septuplet_the_marking_and_the_measured_n
     (record,) = read_records(block)
     assert record["name"] == "dis.entity_state" and record["unit"] == "PDU"
     assert record["value"] == 6 and record["source"] == "derived"
-    assert record["model"] == "full-rate Entity State PDU log (IEEE 1278.1-2012 layout, protocol version 7)"
+    assert record["model_name"] == "full-rate Entity State PDU log (IEEE 1278.1-2012 layout, protocol version 7)"
     p = record["parameters"]
     assert p["entity_id"] == {"site": 7, "application": 1, "entity": 42}
     assert p["entity_type"] == {"kind": 1, "domain": 2, "country": 225, "category": 84,
@@ -354,7 +354,7 @@ def test_the_record_carries_the_ids_the_septuplet_the_marking_and_the_measured_n
     assert abs(p["location_check"]["radial_with_n_m"]) < 1e-6
     # Record 2: the readback of the written bytes, the model block, the uncertainty.
     assert record["readback"]["agrees"] and record["readback"]["property"].startswith("dis_entity_state.bin")
-    assert record["model_block"]["standard"] == "IEEE 1278.1-2012"
+    assert record["model"]["standard"] == "IEEE 1278.1-2012"
     assert record["uncertainty"]["u_num"] is None
     assert record["uncertainty"]["u_input"] is None          # no u_model_m in this datum
     assert any("septuplet is not asserted" in s for s in record["not_claimed"])

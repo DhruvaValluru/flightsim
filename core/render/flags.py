@@ -117,6 +117,15 @@ CALIBRATION_FLAG = "-calibration"
 SUN_LUX_PREFIX = "-sun-lux="
 ACCUMULATE_PREFIX = "-accumulate="
 
+#: W5 (the world engine side): ``-scene=<scene document>`` -- the Landscape
+#: scene level scripts/ue_build_scene.py built for the bake, loaded by the
+#: commandlet in place of the procedural terrain and matched against the
+#: card's world block (refused world.scene_stale / world.scene_missing
+#: there). Emitted ONLY when asked, right after ``-imagery=`` (the ordering
+#: pin in tests/test_ue_world_source.py), never on the void tier, so every
+#: list pinned before it is byte-identical.
+SCENE_PREFIX = "-scene="
+
 
 def passes_flag(passes: Iterable[str]) -> Optional[str]:
     """``-passes=a,b`` for the requested passes in :data:`PASS_NAMES`
@@ -170,7 +179,7 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
                  width: int, height: int, fps: float,
                  telemetry=None, extra: Iterable[str] = (),
                  passes: Iterable[str] = (), calibration: bool = False,
-                 sun_lux=None, accumulate=None) -> List[str]:
+                 sun_lux=None, accumulate=None, scene_document=None) -> List[str]:
     """The ORDERED argument list for the FlightSimRender commandlet,
     after the ``<editor> <project> -run=FlightSimBridge.FlightSimRender``
     tokens.
@@ -227,6 +236,12 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
     existed. Not claimed here: that the engine honours them (S4,
     uncompiled off Windows).
 
+    ``scene_document`` (W5): the scene document of the bake's Landscape
+    scene level (``<stem>_scene.json``, scripts/ue_build_scene.py), as
+    :data:`SCENE_PREFIX` right after ``-imagery=``; None (the default)
+    emits nothing, and the void tier never gets it. Forwarded verbatim;
+    the commandlet checks it (and refuses without ``-GeorefTerrain``).
+
     Returns a new list every call. Behaviour byte-identical to the web
     app's pre-builder command for every flag it passed (pinned by
     ``tests/test_camera_spec.py`` and ``tests/test_render_flags.py``).
@@ -273,6 +288,9 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
         flags += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
     if not void and scene.get("imagery"):
         flags += [f"-imagery={scene['imagery']}"]
+    if not void and scene_document is not None:
+        # W5: only when asked, after -imagery= (the default list stands).
+        flags.append(f"{SCENE_PREFIX}{scene_document}")
     if mesh is not None:
         # The one line the placeholder rule hangs on: a render without
         # it draws boxes under a manifest that names the real mesh.

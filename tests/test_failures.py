@@ -410,7 +410,7 @@ def test_v15_hardover_and_jam_on_the_c172p_land_read_back_and_hold(build):
     assert events.telemetry_columns == (FLAG_COLUMN, "engine0_thrust_n", "engine0_rpm")
     # Every record is a valid record-2 AppliedVariable with a model block.
     for record in records.values():
-        assert isinstance(record, AppliedVariable) and record.model_block is not None
+        assert isinstance(record, AppliedVariable) and record.model is not None
         assert record.null_test is not None and record.not_claimed
         AppliedVariable.from_dict(record.to_dict())
 

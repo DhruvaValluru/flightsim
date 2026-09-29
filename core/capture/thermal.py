@@ -997,7 +997,7 @@ def ir_records(block: Mapping[str, Any]) -> List[Any]:
               "transmittance_synthetic": bool(block["transmittance"]["synthetic"])}
     ir = AppliedVariable(
         name="sensing.ir", value=float(ref["t_skin_k"]), unit="K", source="derived",
-        model=str(block["model"]),
+        model_name=str(block["model"]),
         parameters=dict(common, t_skin_k=float(ref["t_skin_k"]), mach=float(ref["mach"]),
                         air_temperature_k=float(ref["air_temperature_k"]),
                         recovery_factor=RECOVERY_FACTOR, gamma=GAMMA_AIR,
@@ -1021,7 +1021,7 @@ def ir_records(block: Mapping[str, Any]) -> List[Any]:
                           tolerance=0.0, tolerance_kind="absolute",
                           basis="T_skin recomputed from the frame's recorded Mach and air temperature "
                                 "equals the block's"),
-        model_block=Model(name="IR band radiance proxy", standard="Planck (SI 2019 constants)",
+        model=Model(name="IR band radiance proxy", standard="Planck (SI 2019 constants)",
                           version=str(block["thermal_table"]["name"]),
                           parameters={"recovery_factor": RECOVERY_FACTOR, "gamma": GAMMA_AIR,
                                       "band_um": list(BANDS_UM[band])},
@@ -1031,7 +1031,7 @@ def ir_records(block: Mapping[str, Any]) -> List[Any]:
     if tau_value is not None and tau_again is not None:
         records.append(AppliedVariable(
             name="sensing.ir_transmittance", value=float(tau_value), unit="1", source="derived",
-            model=f"tau(R) interpolated linearly in the provenanced table {transmittance.name} "
+            model_name=f"tau(R) interpolated linearly in the provenanced table {transmittance.name} "
                   f"({'SYNTHETIC' if transmittance.synthetic else 'stated source'})",
             parameters=dict(common, cg_range_m=float(ref["cg_range_m"]),
                             transmittance=dict(block["transmittance"]),

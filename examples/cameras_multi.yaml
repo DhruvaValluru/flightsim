@@ -6,7 +6,7 @@
 # verification complete:
 #   .venv/bin/python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo
 #   .venv/bin/python -m flightsim.verify runs/demo
-spec_version: 8
+spec_version: 9
 name: cameras_multi
 aircraft:
   aircraft:

@@ -610,7 +610,7 @@ def radiometry_record(block: Mapping[str, Any], null_with: float, null_without: 
     return AppliedVariable(
         name="sensing.radiometry", value=per_unit, unit="cd/m^2 per unit",
         source="derived",
-        model=str(block["model"]),
+        model_name=str(block["model"]),
         parameters={k: block[k] for k in ("ev100", "exposure_compensation_ev", "lens_attenuation",
                                           "lens_attenuation_basis", "calibration_constant",
                                           "working_colour_space", "sun_lux", "grey_card_predicted",
@@ -639,7 +639,7 @@ def radiometry_record(block: Mapping[str, Any], null_with: float, null_without: 
                                  "the chain used" if read_back else
                                  "no render here: the default 0.78 was used and is what the chain "
                                  "used; the read-back is a Windows step")),
-        model_block=Model(name="manual exposure calibration chain",
+        model=Model(name="manual exposure calibration chain",
                           standard="ISO 2720:1974; ISO 12232:2019", version="Lagarde 2014 s5.1 + UE lens attenuation",
                           parameters={"calibration_constant": CALIBRATION_CONSTANT, "lens_attenuation": a},
                           references=tuple(block["references"])),
@@ -659,7 +659,7 @@ def bands_record(block: Mapping[str, Any], null_max_abs_difference: float, frame
     return AppliedVariable(
         name="sensing.bands", value=list(factors), unit="band",
         source="user" if not block.get("defaulted") else "default",
-        model=str(block["model"]),
+        model_name=str(block["model"]),
         parameters={"band_file": table["name"], "band_file_sha256": table["sha256"],
                     "windows_nm": {k: v["window_nm"] for k, v in table["bands"].items()},
                     "weights": table["weights"], "k_band": factors,
@@ -681,7 +681,7 @@ def bands_record(block: Mapping[str, Any], null_max_abs_difference: float, frame
         readback=Readback(property=f"k_band[{first}]", value=float(factors[first]),
                           written=float(factors[first]), tolerance=0.0, tolerance_kind="absolute",
                           basis="K_band recomputed from the cached tables equals the block's"),
-        model_block=Model(name="band proxy over three rendered channels", standard="CIE 018:2019; ASTM G173-03",
+        model=Model(name="band proxy over three rendered channels", standard="CIE 018:2019; ASTM G173-03",
                           version="rgb_proxy", parameters={"k_band": factors},
                           references=("cached tables, sha256 recorded",)),
     )

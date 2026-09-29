@@ -569,8 +569,8 @@ def test_each_stated_field_returns_its_record_2_with_readback_writes_and_a_measu
     assert payload["jsbsim_writes"] == [{"property": "inertia/pointmass-weight-lbs[3]", "when": ld.WHEN}]
     assert payload["properties_written"] == ["inertia/pointmass-weight-lbs[3]"]
     assert payload["telemetry_columns"] == list(TELEMETRY_COLUMNS) == payload["frame_keys"]
-    assert payload["model_block"]["name"] == "hand W&B"
-    assert payload["model_block"]["parameters"]["station_arms_in"]["Baggage"] == 95.0
+    assert payload["model"]["name"] == "hand W&B"
+    assert payload["model"]["parameters"]["station_arms_in"]["Baggage"] == 95.0
     null = payload["null_test"]
     assert null["kind"] == "reached" and null["ok"] is True and null["unit"] == "in"
     assert null["without"] == pytest.approx(42.11702127659574)

@@ -834,7 +834,7 @@ def injection_variable(
                               f"{derived.name!r} was not derived with ({derived.injection_names})")
     return AppliedVariable(
         name=name, value=float(value), unit=unit, source=source,
-        model=f"JSBSim XML injection '{injection}' (core/control/derive.py)",
+        model_name=f"JSBSim XML injection '{injection}' (core/control/derive.py)",
         parameters={"injection": injection, "property": prop, "neutral_value": neutral,
                     "derived_aircraft": derived.name, "base_sha256": derived.base_sha256,
                     "template_sha256": record.template_sha256,
@@ -857,7 +857,7 @@ def injection_variable(
         readback=Readback(property=prop, value=float(readback_value), written=float(value),
                           tolerance=0.0, tolerance_kind="absolute", basis=READBACK_BASIS),
         jsbsim_writes=(JsbsimWrite(prop, "after load; held by the property store every step"),),
-        model_block=Model(
+        model=Model(
             name=f"XML injection '{injection}'",
             standard="none: a stated multiplier / shift / gain in the stock JSBSim model",
             version=record.template_sha256[:12],

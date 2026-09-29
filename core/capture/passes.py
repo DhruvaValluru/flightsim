@@ -828,7 +828,7 @@ def pass_records(gathered: Dict[str, List[Dict]]) -> List:
         p95 = [s["magnitude_p95_px"] for s in flows if s.get("magnitude_p95_px") is not None]
         out.append(AppliedVariable(
             name="passes.flow", value=max(p95) if p95 else 0.0, unit="px", source="derived",
-            model=("rigid-object optical flow, forward and backward to the neighbouring "
+            model_name=("rigid-object optical flow, forward and backward to the neighbouring "
                    "telemetry samples, validity bits by the z-test (Menze & Geiger 2015)"),
             parameters={"directions": len(flows),
                         "valid_fraction_min": min(s["valid_fraction"] for s in flows),
@@ -858,7 +858,7 @@ def pass_records(gathered: Dict[str, List[Dict]]) -> List:
         stated, _ = derive_disparity(record, depth, float(disparities[0]["baseline_m"]))
         out.append(AppliedVariable(
             name="passes.disparity", value=float(disparities[0]["baseline_m"]), unit="m",
-            source="user", model="d = f_x B / Z over a rig rectified by construction",
+            source="user", model_name="d = f_x B / Z over a rig rectified by construction",
             parameters={"frames": len(disparities),
                         "d_min_px": min((s["d_min_px"] for s in disparities
                                          if s["d_min_px"] is not None), default=None),
@@ -880,7 +880,7 @@ def pass_records(gathered: Dict[str, List[Dict]]) -> List:
         sky_points = int(cloud.shape[0]) - int(np.count_nonzero(np.isfinite(depth)))
         out.append(AppliedVariable(
             name="passes.points", value=int(sum(s["total"] for s in points)), unit="point",
-            source="derived", model="depth back-projection per pixel, ids from the ID image",
+            source="derived", model_name="depth back-projection per pixel, ids from the ID image",
             parameters={"frames": len(points), "reflectance": 0.0,
                         "per_object_total": _sum_counts(s["per_object"] for s in points)},
             frame_keys=("passes.derived.points",),
@@ -927,7 +927,7 @@ def amodal_record(ratios: Sequence[float], refused: int):
     return AppliedVariable(
         name="passes.amodal", value=(sum(finite) / len(finite)) if finite else None, unit="1",
         source="derived",
-        model="the tight box and footprint of each aircraft's alone pass (basis 'alone pass')",
+        model_name="the tight box and footprint of each aircraft's alone pass (basis 'alone pass')",
         parameters={"objects": len(ratios), "refused": int(refused)},
         references=("Zhu et al. 2017, Semantic amodal segmentation (CVPR)",),
         frame_keys=("labels.objects[].amodal_bbox_2d", "labels.objects[].amodal_mask"),

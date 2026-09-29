@@ -265,7 +265,7 @@ def test_the_record_carries_the_readback_the_writes_and_a_measured_null_test(inf
     assert abs(null.difference) == pytest.approx(4.712, abs=0.01) and null.ok
     assert record.parameters["dominant_fraction"] == pytest.approx(0.6866)
     assert record.parameters["thermals"] is None
-    assert record.model_block.parameters["z0_m"] == 1.0
+    assert record.model.parameters["z0_m"] == 1.0
     assert any("roughness only" in s for s in record.not_claimed)
     d = record.to_dict()
     assert d["from"] == inferred.frm and d["readback"]["agrees"] is True

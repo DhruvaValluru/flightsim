@@ -221,7 +221,7 @@ def test_the_record_is_a_valid_applied_variable():
     record = applied_variable(table(), result, null_test(cols, table()))
     assert isinstance(record, AppliedVariable)
     assert record.name == "limits.monitor" and record.source == "derived"
-    assert record.model == "exceedance monitor against the certification envelope"
+    assert record.model_name == "exceedance monitor against the certification envelope"
     assert record.properties_written == ()
     assert record.telemetry_columns == record.frame_keys == result.columns
     assert record.value == {"n_z_pos_g": 2.5, "n_z_neg_g": -1.0, "speed_limit_kt": 350.0,
@@ -354,7 +354,7 @@ def test_attach_record_creates_the_block_and_refuses_a_repeat():
     assert [r["name"] for r in read_records(manifest["applied_variables"])] == ["limits.monitor"]
     with pytest.raises(ValueError, match="already recorded"):
         attach_record(manifest, record)
-    other = AppliedVariable(name="other.thing", value=1, unit="1", source="user", model="m")
+    other = AppliedVariable(name="other.thing", value=1, unit="1", source="user", model_name="m")
     attach_record(manifest, other)
     assert [r["name"] for r in read_records(manifest["applied_variables"])] == [
         "limits.monitor", "other.thing"]
@@ -406,7 +406,7 @@ def test_the_run_manifest_carries_the_block_the_record_and_the_flags_per_frame(a
     assert [r["name"] for r in records] == ["limits.monitor", "scene.geoid_undulation_m"]
     record = records[0]
     assert record["source"] == "derived"
-    assert record["model"] == "exceedance monitor against the certification envelope"
+    assert record["model_name"] == "exceedance monitor against the certification envelope"
     assert record["telemetry_columns"] == manifest["limits"]["summary"]["columns_added"]
     assert record["null_test"]["ok"] is True
     assert record["null_test"]["with"] == len(a320_beyond.telemetry)

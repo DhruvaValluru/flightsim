@@ -562,7 +562,7 @@ def gate_record(result: Dict[str, Any], labels_changed: int, labels_total: int):
     return AppliedVariable(
         name="dataset.licences", value="refused" if result["refused"] else "allowed",
         unit="verdict", source="derived",
-        model="per-asset licence gate: records against a stated allow-list",
+        model_name="per-asset licence gate: records against a stated allow-list",
         parameters={"verdicts": [{k: e.get(k) for k in ("asset", "kind", "licence", "spdx",
                                                         "ml_use", "verdict", "refusal")}
                                  for e in result["verdicts"]],
@@ -574,7 +574,7 @@ def gate_record(result: Dict[str, Any], labels_changed: int, labels_total: int):
             kind="bounded",
             note=f"the {labels_total} label records' digests before and after the gate ran; "
                  f"the gate reads licence records and writes none of a label"),
-        model_block=Model(name="per-asset licence gate", standard="none (a stated allow-list)",
+        model=Model(name="per-asset licence gate", standard="none (a stated allow-list)",
                           version="W4", parameters={"allow_list": sorted(ALLOW_LIST)},
                           references=("core/assets/licence.py",)),
         frm="the assets' own licence records (configs, sidecars, documents)",

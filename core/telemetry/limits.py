@@ -453,7 +453,7 @@ def applied_variable(limits: LimitsTable, result: MonitorResult,
         value=stated,
         unit="g | kt CAS | Mach | deg (per key)",
         source="derived",
-        model=MODEL,
+        model_name=MODEL,
         parameters={
             "aircraft": limits.aircraft,
             "category": limits.category,
@@ -472,7 +472,7 @@ def applied_variable(limits: LimitsTable, result: MonitorResult,
         null_test=null,
         # Record 2: the structured model, the provenance text and the
         # citation. An observer writes no JSBSim property: no readback.
-        model_block=Model(
+        model=Model(
             name=MODEL, standard=limits.regulation or "14 CFR 23.337 / 25.337",
             version="strict comparison, 0/1 flags per monitored limit",
             parameters={"comparison": COMPARISON, "probe_offset": dict(PROBE_OFFSET),

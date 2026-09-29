@@ -4,7 +4,7 @@
 #   inside or on the scene's terrain.
 # A user-stated camera field is never silently moved to pass; edit the
 # spec (position_alt_m) and run again.
-spec_version: 8
+spec_version: 9
 name: cameras_refusal
 aircraft:
   aircraft:

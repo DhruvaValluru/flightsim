@@ -458,7 +458,7 @@ def test_each_stated_variable_returns_its_record_with_a_measured_null_test(hot_h
         assert null["threshold"] == pytest.approx(0.001 * null["without"])
         assert record["telemetry_columns"] == list(TELEMETRY_COLUMNS)
         assert record["frame_keys"] == list(TELEMETRY_COLUMNS)
-        assert record["model"].startswith("JSBSim 1.2.4 FGStandardAtmosphere")
+        assert record["model_name"].startswith("JSBSim 1.2.4 FGStandardAtmosphere")
         assert any("FGStandardAtmosphere.cpp" in ref for ref in record["references"])
         assert record["not_claimed"]
         assert record["parameters"]["route"].startswith("bias")

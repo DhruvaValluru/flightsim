@@ -923,7 +923,7 @@ def passes_record(files_per_frame: Sequence[int], words: Sequence[str]):
         value=list(words),
         unit="pass",
         source="user",
-        model=("engine post-process passes: SceneTexture WorldNormal / Velocity / "
+        model_name=("engine post-process passes: SceneTexture WorldNormal / Velocity / "
                "BaseColor through tonemapper-replacing materials, AA-free "
                "(FlightSimRenderCommandlet.cpp -passes=)"),
         parameters={
@@ -1411,7 +1411,7 @@ def landcover_label_record(block: Dict, frames: Sequence[Dict]):
         name="labels.landcover", value=dominant,
         unit="WorldCover legend class (dominant in view); fractions in parameters",
         source="derived",
-        model="depth back-projection onto the bake's WorldCover class grid",
+        model_name="depth back-projection onto the bake's WorldCover class grid",
         parameters={
             "dataset": block.get("dataset"), "tiles": block.get("tiles"),
             "source_sha256": block.get("source_sha256"),
@@ -1437,7 +1437,7 @@ def landcover_label_record(block: Dict, frames: Sequence[Dict]):
                   f"({bake_dominant}); with = the per-frame land-cover image, mean over "
                   f"{len(labelled)} labelled frame(s): a frame over forest reads forest, "
                   f"a frame over the lake reads water")),
-        model_block=Model(name="land-cover image from depth", standard="ESA WorldCover v200 legend",
+        model=Model(name="land-cover image from depth", standard="ESA WorldCover v200 legend",
                           version="W4", parameters={"nodata": LANDCOVER_NODATA,
                                                     "agreement_min": LANDCOVER_AGREEMENT_MIN},
                           references=references),
@@ -1465,12 +1465,17 @@ def _attach_record(manifest: Dict, record) -> None:
     block (ADVANCEMENTS_CONTRACTS rule 0), creating the block when absent
     and REPLACING a record of the same name: attach is re-run after every
     render, and the passes record describes this bundle, not the last."""
-    from ..records import records_block
+    from ..records import RECORD_VERSION, read_records, records_block
 
     block = manifest.get("applied_variables")
     if not isinstance(block, dict) or not isinstance(block.get("applied_variables"), list):
         manifest["applied_variables"] = records_block([record])
         return
+    if block.get("record_version") != RECORD_VERSION:
+        # INT-final: a block written at record 1 is renamed to record 2
+        # (or refused by name) before a record-2 dict joins it.
+        block["applied_variables"] = list(read_records(block))
+        block["record_version"] = RECORD_VERSION
     kept = [r for r in block["applied_variables"] if r.get("name") != record.name]
     block["applied_variables"] = kept + [record.to_dict()]
 

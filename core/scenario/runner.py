@@ -32,7 +32,7 @@ from ..environment.turbulence import DrydenTurbulence, W20_KT
 from ..environment.wind import SteadyWind
 from ..fdm import FlightDynamics, TrimMode, mode_for
 from ..fdm import units as u
-from ..records import AppliedVariable, Readback, records_block
+from ..records import RECORD_VERSION, AppliedVariable, Readback, read_records, records_block
 from ..registry import RecordError
 from ..telemetry.instruments import (
     INSTRUMENTS_FILE, InstrumentError, InstrumentObserver, instruments_from_spec,
@@ -906,6 +906,12 @@ def attach_record(manifest: Dict[str, Any], record: AppliedVariable) -> None:
     names = [r["name"] for r in block["applied_variables"]]
     if record.name in names:
         raise ValueError(f"applied variable {record.name!r} is already recorded")
+    if block.get("record_version") != RECORD_VERSION:
+        # INT-final: an older block is read (renamed to record 2, or
+        # refused by name) before a record-2 dict joins it -- one block,
+        # one version.
+        block["applied_variables"] = list(read_records(block))
+        block["record_version"] = RECORD_VERSION
     block["applied_variables"].append(record.to_dict())
 
 

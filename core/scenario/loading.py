@@ -1047,7 +1047,7 @@ class LoadingProvider(AtmosphereProvider):
             out.append(AppliedVariable(
                 name="loading.payload_kg",
                 value={load.station.name: load.kg for load in plan.station_loads()},
-                unit="kg per station", source=plan.payload.source, model=MODEL,
+                unit="kg per station", source=plan.payload.source, model_name=MODEL,
                 parameters={**common_parameters,
                             "stations": [{**s, "readback": prepared["readback"][s["property"]]}
                                          for s in station_steps]},
@@ -1071,7 +1071,7 @@ class LoadingProvider(AtmosphereProvider):
                           "tolerance is the blueprint's 0.1 in); 'written' is the hand value, "
                           "not a property write"),
                 jsbsim_writes=tuple(JsbsimWrite(s["property"], WHEN) for s in station_steps),
-                model_block=model_block,
+                model=model_block,
             ))
         fuel = plan.fuel_kg if plan.fuel_kg is not None else plan.fuel_fraction
         if fuel is not None:
@@ -1081,7 +1081,7 @@ class LoadingProvider(AtmosphereProvider):
             out.append(AppliedVariable(
                 name="loading.fuel_kg" if plan.fuel_kg is not None else "loading.fuel_fraction",
                 value=fuel.value, unit="kg" if plan.fuel_kg is not None else "1",
-                source=fuel.source, model=MODEL,
+                source=fuel.source, model_name=MODEL,
                 parameters={**common_parameters,
                             "fuel_fill_rule": FUEL_FILL_RULE,
                             "total_fuel_lb": sum(tl.lb for tl in tank_loads),
@@ -1111,7 +1111,7 @@ class LoadingProvider(AtmosphereProvider):
                           "the crank then burns 0.0055 lb on the c172p before the trim (recorded "
                           "under post_trim, not graded here)"),
                 jsbsim_writes=tuple(JsbsimWrite(t["property"], WHEN) for t in step["tanks"]),
-                model_block=model_block,
+                model=model_block,
             ))
         return out
 

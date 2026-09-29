@@ -261,7 +261,7 @@ def blur_record(block: Mapping[str, Any], null_max_abs_difference: float):
     expected = tap_count(float(length)) if length is not None else None
     return AppliedVariable(
         name="sensing.motion_blur", value=length, unit="px", source="user",
-        model="velocity-line integral over the exposure, N = max(3, ceil(2 |f| t_exp / dt)) symmetric taps",
+        model_name="velocity-line integral over the exposure, N = max(3, ceil(2 |f| t_exp / dt)) symmetric taps",
         parameters={k: block.get(k) for k in ("model", "applied_by", "exposure_s", "dt_s", "taps",
                                               "blur_px_max", "blur_px_mean", "flow_source", "window",
                                               "sub_pixel", "sub_pixel_taps", "k", "t0_s", "t1_s")},
@@ -281,7 +281,7 @@ def blur_record(block: Mapping[str, Any], null_max_abs_difference: float):
                   Readback(property="taps", value=float(taps), written=float(expected),
                            tolerance=0.0, tolerance_kind="absolute",
                            basis="the tap count the integral used equals max(3, ceil(2 L)) for its own L")),
-        model_block=Model(name="velocity_line", standard="McGuire et al. 2012 (linear case)", version="S1",
+        model=Model(name="velocity_line", standard="McGuire et al. 2012 (linear case)", version="S1",
                           parameters={"taps": taps, "dt_s": block.get("dt_s"), "exposure_s": block.get("exposure_s")},
                           references=tuple(block["references"])),
     )

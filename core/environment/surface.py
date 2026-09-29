@@ -376,7 +376,7 @@ class InferredRoughnessWind(LogProfileWind):
         return AppliedVariable(
             name="environment.surface",
             value=inf.surface.roughness, unit="word", source=inf.source,
-            model=model.name,
+            model_name=model.name,
             parameters={"surface_word": inf.word, "z0_m": self.z0_m,
                         "dominant_code": inf.code, "dominant_class": inf.key,
                         "dominant_fraction": inf.fraction, "threshold": inf.threshold,
@@ -407,4 +407,4 @@ class InferredRoughnessWind(LogProfileWind):
             jsbsim_writes=tuple(JsbsimWrite(p, "every step (the stack sums the wind "
                                                 "providers and writes the total)")
                                 for p in JSBSIM_WIND_PROPERTIES),
-            model_block=model)
+            model=model)

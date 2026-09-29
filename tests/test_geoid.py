@@ -354,7 +354,7 @@ def test_flat_manifest_carries_the_flat_block_and_an_unapplied_record():
     (record,) = [r for r in records if r["name"] == "scene.geoid_undulation_m"]
     assert record["value"] is None and record["null_test"] is None
     assert record["source"] == "derived"
-    assert "not applied" in record["model"]
+    assert "not applied" in record["model_name"]
 
 
 def test_georeferenced_manifest_carries_the_block_and_the_record_with_its_null_test():
@@ -366,13 +366,13 @@ def test_georeferenced_manifest_carries_the_block_and_the_record_with_its_null_t
     assert manifest["datum"] == block
     (record,) = [r for r in read_records(manifest["applied_variables"])
                  if r["name"] == "scene.geoid_undulation_m"]
-    for key in ("name", "value", "unit", "source", "model", "parameters",
+    for key in ("name", "value", "unit", "source", "model_name", "parameters",
                 "references", "properties_written", "telemetry_columns",
                 "frame_keys", "null_test", "not_claimed"):
         assert key in record, key
     assert record["value"] == pytest.approx(52.52, abs=0.01)
     assert record["unit"] == "m" and record["source"] == "derived"
-    assert record["model"] == "EGM96 bilinear"
+    assert record["model_name"] == "EGM96 bilinear"
     assert record["parameters"]["grid_sha256"] == GRID_SHA256
     null = record["null_test"]
     assert null["with"] == pytest.approx(52.52, abs=0.01) and null["without"] == 0.0
@@ -1136,7 +1136,7 @@ def test_an_egm2008_datum_block_is_cubic_with_the_bounds_the_crop_and_the_frame(
     assert bounds["undulation_min_m"] <= block["undulation_m"] <= bounds["undulation_max_m"]
     assert 0.5 < bounds["undulation_range_m"] < 3.5      # the blueprint's 0.6-3.4 m bbox ranges
     record = undulation_variable(block).to_dict()
-    assert record["model"] == "EGM2008 cubic" and record["null_test"]["threshold"] == 0.294
+    assert record["model_name"] == "EGM2008 cubic" and record["null_test"]["threshold"] == 0.294
     assert record["telemetry_columns"] == ["undulation_m", "hae_m"]
     assert record["frame_keys"] == ["state.undulation_m", "state.hae_m"]
     assert record["uncertainty"]["u_input"]["value"] == 0.10

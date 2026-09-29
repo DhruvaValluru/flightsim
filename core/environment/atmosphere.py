@@ -843,7 +843,7 @@ class NonStandardAtmosphere(AtmosphereProvider):
                 parameters["dew_point_c"] = self.dew_point_c
             out.append(AppliedVariable(
                 name=f"atmosphere.{field}", value=stated.value, unit=unit,
-                source=stated.source, model=MODEL, parameters=parameters,
+                source=stated.source, model_name=MODEL, parameters=parameters,
                 references=REFERENCES + ((stated.std,) if stated.std else ()),
                 properties_written=() if step.get("dry") else (prop,),
                 telemetry_columns=TELEMETRY_COLUMNS, frame_keys=TELEMETRY_COLUMNS,

@@ -311,7 +311,7 @@ def test_the_layered_run_returns_the_kind_and_layers_records(layered_run):
     assert kind["null_test"]["without"] == pytest.approx(u.kt_to_mps(20.0))
     assert kind["null_test"]["ok"] and kind["null_test"]["kind"] == "reached"
     assert kind["telemetry_columns"] == list(TELEMETRY_COLUMNS)
-    assert kind["model_block"]["name"].startswith("layered wind")
+    assert kind["model"]["name"].startswith("layered wind")
     assert kind["parameters"]["per_step_readback"]["agrees"] is True
     layers = records["wind_profile.layers"]
     assert layers["value"] == LAYERS and layers["unit"] == "[m, kt, deg]"

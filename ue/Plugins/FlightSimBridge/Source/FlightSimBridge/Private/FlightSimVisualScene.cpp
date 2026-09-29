@@ -1749,6 +1749,27 @@ bool FFlightSimVisualScene::BuildWorldLook(UWorld* World,
 		}
 		WorldApplied->SetObjectField(TEXT("cloud_drift"), Row);
 	}
+
+	// The Look lane's not-claimed list loses what this build now draws (the
+	// rain leaves it in ApplyRainToBeauty).
+	{
+		const bool bDrifting = CloudMaterialInstance != nullptr && CloudDriftParameter != NAME_None &&
+		                       DriftMps > 0.0;
+		TArray<TSharedPtr<FJsonValue>> NotClaimed;
+		for (const TCHAR* Name : {TEXT("precipitation_particles"), TEXT("moon"), TEXT("stars"),
+		                          TEXT("cloud_drift"), TEXT("sea_state"), TEXT("foliage_sway")})
+		{
+			const FString Word(Name);
+			const bool bDrawn = (Word == TEXT("moon") && Moon != nullptr) ||
+			                    (Word == TEXT("stars") && Starfield != nullptr) ||
+			                    (Word == TEXT("cloud_drift") && bDrifting);
+			if (!bDrawn)
+			{
+				NotClaimed.Add(MakeShared<FJsonValueString>(Word));
+			}
+		}
+		LookApplied->SetArrayField(TEXT("not_claimed"), NotClaimed);
+	}
 	return true;
 }
 
@@ -1828,6 +1849,21 @@ bool FFlightSimVisualScene::ApplyRainToBeauty(USceneCaptureComponent2D* Beauty,
 		TEXT("screen-space streaks with the card's relative length; no volumetric rain, splashes ")
 		TEXT("or accumulation; the linear and accumulation captures carry no streaks"));
 	WorldApplied->SetObjectField(TEXT("precipitation"), Row);
+	// The streaks are drawn now: the Look lane's not-claimed list drops them.
+	const TArray<TSharedPtr<FJsonValue>>* NotClaimed = nullptr;
+	if (LookApplied.IsValid() && LookApplied->TryGetArrayField(TEXT("not_claimed"), NotClaimed) &&
+	    NotClaimed != nullptr)
+	{
+		TArray<TSharedPtr<FJsonValue>> Kept;
+		for (const TSharedPtr<FJsonValue>& Value : *NotClaimed)
+		{
+			if (Value.IsValid() && Value->AsString() != TEXT("precipitation_particles"))
+			{
+				Kept.Add(Value);
+			}
+		}
+		LookApplied->SetArrayField(TEXT("not_claimed"), Kept);
+	}
 	return true;
 }
 

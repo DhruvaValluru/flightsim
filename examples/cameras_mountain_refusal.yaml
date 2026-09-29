@@ -17,7 +17,7 @@
 #
 #   .venv/bin/python -m flightsim.capture \
 #       examples/cameras_mountain_refusal.yaml --out runs/buried
-spec_version: 8
+spec_version: 9
 name: cameras_mountain_refusal
 aircraft:
   aircraft:

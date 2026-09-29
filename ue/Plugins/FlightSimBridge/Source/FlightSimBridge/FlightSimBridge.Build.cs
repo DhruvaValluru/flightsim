@@ -30,6 +30,10 @@ public class FlightSimBridge : ModuleRules
 			// post-process settings all live in "Engine" (already above);
 			// LexToString(EShaderPlatform) for render.json render_settings
 			// is in "RHI" (already above). No new module is required.
+			// W5: the scene level's Landscape (ALandscapeProxy, ULandscapeInfo)
+			// read by FlightSimVisualScene LoadSceneLevel; level streaming is
+			// "Engine".
+			"Landscape",
 		});
 	}
 }

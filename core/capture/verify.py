@@ -5903,9 +5903,13 @@ UNCERTAINTY_RSS_TOL = 1e-9
 
 
 def _applied_records(manifest: Dict):
-    """The record-1 applied_variables list, or None."""
+    """The applied_variables list of a record-1 or record-2 block (the
+    keys these checks read -- name, readback, null_test -- are spelled the
+    same at both), or None."""
+    from core.records import READABLE_RECORD_VERSIONS
+
     block = manifest.get("applied_variables")
-    if not isinstance(block, dict) or block.get("record_version") != 1:
+    if not isinstance(block, dict) or block.get("record_version") not in READABLE_RECORD_VERSIONS:
         return None
     records = block.get("applied_variables")
     return records if isinstance(records, list) else None
@@ -5917,11 +5921,11 @@ def verify_applied_readback(manifest: Dict) -> Check:
     (|value - written| against the tolerance, absolute or relative to
     |written|) and never from its ``agrees`` flag alone; a record whose
     flag contradicts the arithmetic fails too. NOT RUN without a
-    record-1 block or when no record carries a readback."""
+    record-1 or record-2 block or when no record carries a readback."""
     records = _applied_records(manifest)
     if records is None:
         return Check("applied_readback", NOT_RUN,
-                     "no applied_variables block (record_version 1) in the manifest")
+                     "no applied_variables block (record_version 1 or 2) in the manifest")
     checked, problems = 0, []
     for record in records:
         readback = record.get("readback") if isinstance(record, dict) else None
@@ -5963,12 +5967,12 @@ def verify_null_effect(manifest: Dict) -> Check:
     with that ``ok``. The rule for silence: a ``silent`` verdict is an
     honest measurement and passes; it FAILS by name only when the record
     CLAIMS OTHERWISE -- ``ok`` true, or a ``reached`` verdict, beside a
-    difference below the threshold. NOT RUN without a record-1 block or
-    a null test."""
+    difference below the threshold. NOT RUN without a record-1 or
+    record-2 block or a null test."""
     records = _applied_records(manifest)
     if records is None:
         return Check("null_effect", NOT_RUN,
-                     "no applied_variables block (record_version 1) in the manifest")
+                     "no applied_variables block (record_version 1 or 2) in the manifest")
     checked, silent, problems = 0, [], []
     for record in records:
         null = record.get("null_test") if isinstance(record, dict) else None
@@ -7808,6 +7812,189 @@ def verify_night_exposure(manifest: Dict, run_dir=None) -> Check:
                                          + "; ".join(details[:4]))
 
 
+# -- W5: the world the render host says it applied ------------------------------------
+
+FAIL_WORLD_RECORD = "check.world_record"
+#: render.json world_applied's keys (FlightSimVisualScene.cpp), every one present
+#: whenever the block is.
+WORLD_APPLIED_KEYS = ("landscape", "imagery", "land_cover", "vegetation", "buildings",
+                      "runway", "night", "precipitation", "cloud_drift", "materials")
+#: The world's measured toggles, read back into render_settings.console: a
+#: number or 'absent' (FlightSimRenderCommandlet.cpp).
+WORLD_READBACK_CVARS = ("landscape.RenderNanite", "r.VirtualTextures", "r.MegaLights",
+                        "r.Substrate")
+#: The moon is the atmosphere's second light (index 1; the sun is 0).
+WORLD_MOON_LIGHT_INDEX = 1
+#: The aggregate objects' ids (core/capture/objects.py), restated.
+WORLD_AGGREGATE_IDS = {"vegetation": "vegetation:all", "buildings": "building:all"}
+
+
+def _world_close(a, b, rel=1e-6) -> bool:
+    try:
+        a, b = float(a), float(b)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(a) and math.isfinite(b) and abs(a - b) <= rel * max(1.0, abs(a), abs(b))
+
+
+def verify_world_record(manifest: Dict, run_dir=None) -> Check:
+    """The world look and the scene level against the run's own card.
+
+    Two clauses, each graded only where its evidence is: (1) the manifest's
+    ``scene.world`` record (W3) carries exactly the card's ``look`` block
+    (the record says what the host was handed); (2) every render.json that
+    carries ``world_applied`` (W5) carries all ten keys, and each row the
+    host DREW agrees with the card: the Landscape's sha256 tag is the bake's
+    and the card's ``world.terrain_sha256``, matched, with the measured
+    north axis the scene's; the moon is light index 1 at the card's lux,
+    elevation and azimuth in physical units; the stars are the card's mode,
+    hidden from the label captures; the rain is on the beauty capture only
+    at the card's relative streak length for that camera; the cloud drift
+    drives a named parameter at the card's speed and direction; the
+    aggregates carry the card's vegetation:all / building:all int_id; the
+    land-cover ID pass wrote every image its frame records name; each
+    material is 'loaded' or 'absent'; the world read-backs
+    (landscape.RenderNanite, r.VirtualTextures, r.MegaLights, r.Substrate)
+    are a number or 'absent'. NOT RUN when neither is present (the engine
+    side is a Windows step) -- never a pass on absence. FAIL
+    (check.world_record) on the first disagreement. What is NOT checked:
+    the pixels (the Windows clauses), the land-cover agreement
+    (landcover_vs_geometry)."""
+    name = "world_record"
+    card: Dict = {}
+    if run_dir is not None and (Path(run_dir) / "card.json").is_file():
+        try:
+            loaded = json.loads((Path(run_dir) / "card.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            return Check(name, FAIL, f"card.json could not be read: {exc}", failure=FAIL_WORLD_RECORD)
+        card = loaded if isinstance(loaded, dict) else {}
+    look = card.get("look") if isinstance(card.get("look"), dict) else None
+    card_world = card.get("world") if isinstance(card.get("world"), dict) else {}
+    graded = 0
+
+    def fail(where: str, why: str) -> Check:
+        return Check(name, FAIL, f"{where}: {why}", failure=FAIL_WORLD_RECORD)
+
+    records = _applied_records(manifest) or []
+    record = next((r for r in records if isinstance(r, dict) and r.get("name") == "scene.world"),
+                  None)
+    if record is not None and look is not None:
+        graded += 1
+        if record.get("value") != look:
+            return fail("manifest", "the scene.world record's value is not the card's look block")
+
+    for camera, folder, payload in _s4_renders(run_dir):
+        world = payload.get("world_applied")
+        if not isinstance(world, dict):
+            continue
+        graded += 1
+        missing = [key for key in WORLD_APPLIED_KEYS if key not in world]
+        if missing:
+            return fail(camera, f"world_applied lacks {missing}")
+        for path, state in (world.get("materials") or {}).items():
+            if state not in ("loaded", "absent"):
+                return fail(camera, f"the material {path} is {state!r}, neither loaded nor absent")
+        land = world["landscape"] if isinstance(world["landscape"], dict) else {}
+        if land.get("drawn"):
+            tag, bake = land.get("sha256_tag"), land.get("bake_sha256")
+            if not tag or tag != bake:
+                return fail(camera, f"the Landscape's sha256 tag {str(tag)[:12]} is not the bake's "
+                                    f"{str(bake)[:12]}")
+            wanted = card_world.get("terrain_sha256")
+            if wanted and tag != wanted:
+                return fail(camera, f"the Landscape's sha256 tag {str(tag)[:12]} is not the card's "
+                                    f"world.terrain_sha256 {str(wanted)[:12]}")
+            if land.get("matched") is not True:
+                return fail(camera, "the scene level is drawn but not recorded as matched")
+            if land.get("north_axis_measured") != land.get("north_axis_scene"):
+                return fail(camera, "the scene was built for another north axis than the one "
+                                    "the georeferencing gives")
+        night = world["night"] if isinstance(world["night"], dict) else {}
+        if night.get("asked"):
+            card_night = (look or {}).get("night")
+            if not isinstance(card_night, dict):
+                return fail(camera, "the host drew a night the card does not carry")
+            moon = night.get("moon") or {}
+            if moon.get("drawn"):
+                if moon.get("atmosphere_sun_light_index") != WORLD_MOON_LIGHT_INDEX:
+                    return fail(camera, f"the moon is atmosphere light "
+                                        f"{moon.get('atmosphere_sun_light_index')!r}, not "
+                                        f"{WORLD_MOON_LIGHT_INDEX}")
+                if moon.get("light_units") != "physical":
+                    return fail(camera, "the moon's light is not in physical units")
+                for row_key, card_key in (("intensity_lux", "illuminance_lux"),
+                                          ("elevation_deg", "moon_elevation_deg"),
+                                          ("azimuth_deg", "moon_azimuth_deg")):
+                    if not _world_close(moon.get(row_key), card_night.get(card_key)):
+                        return fail(camera, f"the moon's {row_key} {moon.get(row_key)!r} is not the "
+                                            f"card's {card_key} {card_night.get(card_key)!r}")
+            stars = night.get("stars") or {}
+            if stars.get("drawn"):
+                if stars.get("mode") != card_night.get("stars_mode"):
+                    return fail(camera, f"the stars are {stars.get('mode')!r}, the card asks for "
+                                        f"{card_night.get('stars_mode')!r}")
+                if stars.get("label_captures") != "hidden":
+                    return fail(camera, "the starfield is not hidden from the label captures")
+        rain = world["precipitation"] if isinstance(world["precipitation"], dict) else {}
+        if rain.get("drawn"):
+            card_rain = (look or {}).get("precipitation")
+            if not isinstance(card_rain, dict):
+                return fail(camera, "the host drew rain the card does not carry")
+            if rain.get("applied_to") != "beauty":
+                return fail(camera, f"the rain streaks are on {rain.get('applied_to')!r}, not the "
+                                    f"beauty capture only")
+            streaks = card_rain.get("streak_px") or {}
+            streak = streaks.get(camera) if camera in streaks else (
+                next(iter(streaks.values())) if len(streaks) == 1 else None)
+            if not isinstance(streak, dict) or not _world_close(
+                    rain.get("streak_length_px"), streak.get("relative_px")):
+                return fail(camera, f"the streak length {rain.get('streak_length_px')!r} px is not "
+                                    f"the card's relative streak for this camera")
+        drift = world["cloud_drift"] if isinstance(world["cloud_drift"], dict) else {}
+        if drift.get("drawn"):
+            card_drift = (look or {}).get("cloud_drift")
+            if not isinstance(card_drift, dict):
+                return fail(camera, "the host drifted clouds the card does not ask to drift")
+            if not drift.get("parameter"):
+                return fail(camera, "the cloud drift is drawn through no named parameter")
+            for key in ("mps", "from_deg"):
+                if not _world_close(drift.get(key), card_drift.get(key)):
+                    return fail(camera, f"the drift's {key} {drift.get(key)!r} is not the card's "
+                                        f"{card_drift.get(key)!r}")
+        objects = {str(o.get("id")): o.get("int_id") for o in card.get("objects") or []
+                   if isinstance(o, dict)}
+        for key, object_id in WORLD_AGGREGATE_IDS.items():
+            row = world[key] if isinstance(world[key], dict) else {}
+            if row.get("drawn") and "int_id" in row and object_id in objects \
+                    and row["int_id"] != objects[object_id]:
+                return fail(camera, f"the {key} carried int_id {row['int_id']!r}, the card's "
+                                    f"{object_id} is {objects[object_id]!r}")
+        cover = world["land_cover"] if isinstance(world["land_cover"], dict) else {}
+        if cover.get("drawn"):
+            for frame in payload.get("frame_records") or []:
+                image = ((frame or {}).get("labels") or {}).get("landcover_png")
+                if image and not (folder / str(image)).is_file():
+                    return fail(camera, f"the land-cover ID image {image} its frame names is not "
+                                        f"on disk")
+        console = ((payload.get("render_settings") or {}).get("console") or {})
+        for cvar in WORLD_READBACK_CVARS:
+            if cvar not in console:
+                continue
+            value = str(console[cvar]).strip()
+            if value == "absent":
+                continue
+            try:
+                float(value) if value.lower() not in ("true", "false") else None
+            except ValueError:
+                return fail(camera, f"the read-back {cvar} is {value!r}, neither a number nor "
+                                    f"'absent'")
+    if graded == 0:
+        return Check(name, NOT_RUN, "no scene.world record beside a card look and no render.json "
+                                    "world_applied: the world engine side is a Windows step")
+    return Check(name, PASS, f"{graded} world record(s) agree with the card; the pixels are the "
+                             f"Windows clauses")
+
+
 def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     """The pass/fail summary over a run directory (CLI: flightsim.verify).
 
@@ -7954,6 +8141,10 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     # W3: a night frame's sky against the checker's own K&S sky through the
     # EV100 of record -- NOT RUN without a night frame, never a pass on absence.
     run("night_exposure", verify_night_exposure, manifest, run_dir)
+    # W5: the world the render host applied (render.json world_applied) and
+    # the scene.world record, against the run's card -- each key graded only
+    # where present, NOT RUN otherwise, never a pass on absence.
+    run("world_record", verify_world_record, manifest, run_dir)
     # S2: the passes as data -- flow against the checker's own projection
     # and z-test, the static null, disparity against the right camera's
     # depth, the points against the depth, the amodal masks against the

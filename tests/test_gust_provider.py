@@ -264,8 +264,8 @@ def test_the_block_defaults_to_dryden_and_is_absent_canonical():
     assert reread.digest() == spec.digest()
     assert list(reread.to_dict()["turbulence_model"]) == list(TurbulenceModelSpec.FIELD_ORDER)
     for path, digest in {
-        "examples/cameras_waypoint.yaml": "9760294005e1efcae1777ad4a2035fe3733d219428c477c6c7caf2f0220b2372",
-        "examples/randomized.yaml": "102d38250e4b7c9b4b6737af5e3e2886fad0748aa4e7af825ce8388e4fe7fda1",
+        "examples/cameras_waypoint.yaml": "aba90b44eae4644a139cf65d8f593cdadd9b78cc320c15f9642d79fb4fee2f00",
+        "examples/randomized.yaml": "bc9982ba15a79c63a1c748eacb70efddc753c174532e80735019b48904309428",
     }.items():
         assert ScenarioSpec.read(REPO / path).digest() == digest, path
 
@@ -374,9 +374,9 @@ def test_the_von_karman_run_returns_the_model_record_with_readback_and_null_test
     assert null["with"] == pytest.approx(2.174, abs=0.02) and null["without"] == 0.0
     assert record["telemetry_columns"] == list(TELEMETRY_COLUMNS)
     assert record["frame_keys"] == list(TELEMETRY_COLUMNS)
-    assert record["model_block"]["name"].startswith("von Karman")
-    assert record["model_block"]["parameters"]["L_relation_above_2000_ft"] == "L_u = 2 L_v = 2 L_w = 2500 ft"
-    assert "MIL-F-8785C" in record["model_block"]["parameters"]["spectral_convention"]
+    assert record["model"]["name"].startswith("von Karman")
+    assert record["model"]["parameters"]["L_relation_above_2000_ft"] == "L_u = 2 L_v = 2 L_w = 2500 ft"
+    assert "MIL-F-8785C" in record["model"]["parameters"]["spectral_convention"]
     assert record["parameters"]["delivery"]["p_equivalent"] == "absent"
     assert record["parameters"]["per_step_readback"]["agrees"] is True
     assert record["parameters"]["table"]["rows"] == 361

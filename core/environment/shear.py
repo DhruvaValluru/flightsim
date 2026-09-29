@@ -284,7 +284,7 @@ class _ProfileProvider(WindProvider):
             "uniform_speed_mps": self.uniform_speed_mps,
         }
         parameters.update(self.record_parameters())
-        common = dict(model=self.model_block().name, model_block=self.model_block(),
+        common = dict(model_name=self.model_block().name, model=self.model_block(),
                       references=REFERENCES, properties_written=WIND_PROPERTIES,
                       jsbsim_writes=tuple(JsbsimWrite(p, "before trim (at the initial "
                                                           "altitude) and every step")

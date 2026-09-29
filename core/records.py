@@ -10,8 +10,8 @@ introduces, the run carries:
   mapping (``std``);
 * the MODEL that consumed it, with its parameters and the references
   the model comes from (designation, section, author, year) -- as a
-  string (``model``) and, at record 2, as a structured block
-  (``model_block``: name, standard, version, parameters, references);
+  string (``model_name``) and as a structured block (``model``: name,
+  standard, version, parameters, references);
 * WHERE it went: the JSBSim or engine properties written, and at
   record 2 WHEN each JSBSim property is written (``jsbsim_writes``)
   and the READBACK of the property against the value written, graded
@@ -35,17 +35,24 @@ sequence of them into the block the run manifest and the capture
 manifest carry under ``applied_variables``. Readers key on
 ``record_version``.
 
-Record 2 under version 1 (ADVANCEMENTS_BLUEPRINT "Versions and keys").
-Every record-2 field is OPTIONAL with a default, and the emitted dict
-gains its key only when the field is set, so a record-1 producer and
-its readers keep working unchanged and a block written before this
-module changed serialises byte-identically. ``RECORD_VERSION`` is NOT
-bumped here: the integrator bumps it once when the addition closes.
-Until then the structured model rides beside the string under
-``model_block``; at the bump it becomes ``model`` and the string
-``model_name`` (the blueprint's final spelling). ``kind`` is emitted
-on every null test because the arithmetic that grades it is not
-recoverable without it; record-1 producers all mean ``reached``.
+Record 2 (``RECORD_VERSION`` 2, the integrator's one bump of the
+advancement addition; ADVANCEMENTS_BLUEPRINT "Versions and keys"). The
+structured model block is ``model`` and the model's one-line name is
+``model_name``; at record 1 the string was ``model`` and the block (in
+the builds that wrote record-2 fields under version 1) rode beside it
+as ``model_block``. Every other record-2 field (``from``, ``std``,
+``readback``, ``jsbsim_writes``, ``model``, ``uncertainty``) is
+OPTIONAL and emitted only when set, so the canonical dict of a record
+that sets none of them is the twelve record-1 keys with ``model``
+spelled ``model_name``. ``kind`` is emitted on every null test because
+the arithmetic that grades it is not recoverable without it; record-1
+producers all mean ``reached``.
+
+Reading. :func:`read_records` reads a block at record 1 or 2 and hands
+back record-2 dicts: a record-1 dict is renamed (``model`` ->
+``model_name``, ``model_block`` -> ``model``) and nothing else is
+touched (:func:`upgrade_record`). :meth:`AppliedVariable.from_dict`
+reads either shape. Any other version is refused by name.
 
 NOT claimed: a record says what was applied, read back and measured;
 it does not say the model is right. The null test is connectivity and
@@ -59,7 +66,14 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 #: Bumped when a key is added or renamed; readers refuse by name.
-RECORD_VERSION = 1
+#: 2 (2026-09-29, INT-final): readback, jsbsim_writes, uncertainty, the
+#: structured ``model`` block (the string renamed ``model_name``) and
+#: ``NullTest.kind`` are the canonical shape.
+RECORD_VERSION = 2
+
+#: The record versions :func:`read_records` reads (a record-1 block is
+#: handed back renamed to record 2; see :func:`upgrade_record`).
+READABLE_RECORD_VERSIONS = (1, 2)
 
 #: The provenance words the spec uses, in precedence order (fields.py).
 SOURCES = ("user", "inferred", "sampled", "model", "derived", "default")
@@ -256,13 +270,13 @@ def check_uncertainty(block: Mapping[str, Any]) -> Dict[str, Any]:
 
 @dataclass(frozen=True)
 class AppliedVariable:
-    """One introduced variable, as applied to one run."""
+    """One introduced variable, as applied to one run (record 2)."""
 
     name: str                                   # dotted: "atmosphere.temperature_deviation_c"
     value: Any
     unit: str
     source: str                                 # one of SOURCES
-    model: str                                  # "ISA deviation (US Standard Atmosphere 1976 graded)"
+    model_name: str                             # "ISA deviation (US Standard Atmosphere 1976 graded)"
     parameters: Dict[str, Any] = field(default_factory=dict)
     references: Tuple[str, ...] = ()
     properties_written: Tuple[str, ...] = ()    # JSBSim / engine properties
@@ -275,14 +289,17 @@ class AppliedVariable:
     std: Optional[str] = None                   # the citation backing the mapping
     readback: Optional[Readback] = None
     jsbsim_writes: Tuple[JsbsimWrite, ...] = ()
-    model_block: Optional[Model] = None
+    model: Optional[Model] = None               # the structured model block
     uncertainty: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:
         if self.source not in SOURCES:
             raise ValueError(f"{self.name}: source {self.source!r} is not one of {SOURCES}")
-        if not self.model:
-            raise ValueError(f"{self.name}: a record without a model says nothing")
+        if not self.model_name or not isinstance(self.model_name, str):
+            raise ValueError(f"{self.name}: a record without a model name says nothing")
+        if self.model is not None and not isinstance(self.model, Model):
+            raise ValueError(f"{self.name}: the model block is a Model, not "
+                             f"{type(self.model).__name__} (the one-line name is model_name)")
         if self.uncertainty is not None:
             object.__setattr__(self, "uncertainty", check_uncertainty(self.uncertainty))
         for write in self.jsbsim_writes:
@@ -293,7 +310,7 @@ class AppliedVariable:
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {
             "name": self.name, "value": self.value, "unit": self.unit,
-            "source": self.source, "model": self.model,
+            "source": self.source, "model_name": self.model_name,
             "parameters": dict(self.parameters),
             "references": list(self.references),
             "properties_written": list(self.properties_written),
@@ -311,23 +328,25 @@ class AppliedVariable:
             out["readback"] = self.readback.to_dict()
         if self.jsbsim_writes:
             out["jsbsim_writes"] = [w.to_dict() for w in self.jsbsim_writes]
-        if self.model_block is not None:
-            out["model_block"] = self.model_block.to_dict()
+        if self.model is not None:
+            out["model"] = self.model.to_dict()
         if self.uncertainty is not None:
             out["uncertainty"] = dict(self.uncertainty)
         return out
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "AppliedVariable":
-        """A record back out of its dict, record 1 or record 2: every
-        record-2 key is read when present and left at its default when
-        not. Nothing is recomputed."""
+        """A record back out of its dict, record 1 or record 2 (a dict
+        without ``model_name`` is a record-1 dict and is renamed first,
+        :func:`upgrade_record`): every record-2 key is read when present
+        and left at its default when not. Nothing is recomputed."""
+        data = upgrade_record(data)
         null = data.get("null_test")
         readback = data.get("readback")
-        model_block = data.get("model_block")
+        model = data.get("model")
         return cls(
             name=data["name"], value=data["value"], unit=data["unit"],
-            source=data["source"], model=data["model"],
+            source=data["source"], model_name=data["model_name"],
             parameters=dict(data.get("parameters") or {}),
             references=tuple(data.get("references") or ()),
             properties_written=tuple(data.get("properties_written") or ()),
@@ -339,9 +358,29 @@ class AppliedVariable:
             readback=None if readback is None else Readback.from_dict(readback),
             jsbsim_writes=tuple(JsbsimWrite.from_dict(w)
                                 for w in (data.get("jsbsim_writes") or ())),
-            model_block=None if model_block is None else Model.from_dict(model_block),
+            model=None if model is None else Model.from_dict(model),
             uncertainty=data.get("uncertainty"),
         )
+
+
+def upgrade_record(data: Mapping[str, Any]) -> Dict[str, Any]:
+    """One record dict in the record-2 spelling. A record-1 dict (the
+    model's name under ``model``, a string, and -- from the builds that
+    wrote record-2 fields under version 1 -- the block under
+    ``model_block``) is renamed: ``model`` -> ``model_name``,
+    ``model_block`` -> ``model``; every other key and value is handed
+    back as it was, in its order. A record-2 dict comes back as a copy."""
+    if "model_name" in data or not isinstance(data.get("model"), str):
+        return dict(data)
+    out: Dict[str, Any] = {}
+    for key, value in data.items():
+        if key == "model":
+            out["model_name"] = value
+        elif key == "model_block":
+            out["model"] = value
+        else:
+            out[key] = value
+    return out
 
 
 def records_block(variables: Sequence[AppliedVariable]) -> Dict[str, Any]:
@@ -354,9 +393,15 @@ def records_block(variables: Sequence[AppliedVariable]) -> Dict[str, Any]:
 
 
 def read_records(block: Dict[str, Any]) -> Tuple[Dict[str, Any], ...]:
-    """The records back out of a block; refuses an unknown version by name."""
+    """The records back out of a block, as record-2 dicts: a record-2
+    block's dicts as written, a record-1 block's renamed by
+    :func:`upgrade_record`. Refuses any other version by name."""
     version = block.get("record_version")
-    if version != RECORD_VERSION:
+    if version not in READABLE_RECORD_VERSIONS:
         raise ValueError(f"applied_variables record_version {version!r} "
-                         f"(this build reads {RECORD_VERSION})")
-    return tuple(block.get("applied_variables", ()))
+                         f"(this build reads {READABLE_RECORD_VERSIONS}, "
+                         f"writes {RECORD_VERSION})")
+    records = tuple(block.get("applied_variables", ()))
+    if version == RECORD_VERSION:
+        return records
+    return tuple(upgrade_record(r) if isinstance(r, Mapping) else r for r in records)

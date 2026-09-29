@@ -24,6 +24,8 @@ PASS_ROW = re.compile(r'"(normal|velocity|albedo)": \("(M_[A-Za-z0-9_]+)", "(PPI
 #: S4: the two unencoded post-process materials, one row per use:
 #: ("M_Name", "PPI_SCENE_TEXTURE").
 LINEAR_ROW = re.compile(r'"(normal_fallback|velocity_check)": \("(M_[A-Za-z0-9_]+)", "(PPI_[A-Z_]+)"\)')
+#: W5: the world materials are created through new_material("M_Name").
+NEW_MATERIAL = re.compile(r'new_material\("(M_[A-Za-z0-9_]+)"\)')
 
 
 def loaded_in_cpp():
@@ -36,7 +38,8 @@ def loaded_in_cpp():
 def created_by_script():
     text = SCRIPT.read_text(encoding="utf-8")
     return (set(CREATED.findall(text)) | {name for _, name, _, _ in PASS_ROW.findall(text)}
-            | {name for _, name, _ in LINEAR_ROW.findall(text)})
+            | {name for _, name, _ in LINEAR_ROW.findall(text)}
+            | set(NEW_MATERIAL.findall(text)))
 
 
 def test_every_material_the_commandlet_loads_is_created_by_the_script():
@@ -161,7 +164,10 @@ def test_a_pass_material_replaces_the_tonemapper_and_offsets_a_signed_texture():
 #: nothing loads) on a fresh machine.
 ALL_CREATED = {"M_VertexColor", "M_TerrainImagery", "M_VertexColorUnlit", "M_CustomStencilID",
                "M_WorldNormalPass", "M_VelocityPass", "M_BaseColorPass",
-               "M_WorldNormal", "M_Velocity", "M_GreyCard"}
+               "M_WorldNormal", "M_Velocity", "M_GreyCard",
+               # W5: the world materials.
+               "M_Landscape", "M_LandcoverID", "M_Starfield", "M_RainStreaks",
+               "M_AirframePaint", "M_Runway"}
 COMMANDLET_CPP = BRIDGE / "Private" / "FlightSimRenderCommandlet.cpp"
 
 
@@ -218,3 +224,90 @@ def test_the_grey_card_is_a_lambertian_with_the_two_parameters_the_commandlet_se
         value = re.search(rf'^{constant} = "(\w+)"$', text, re.M).group(1)
         assert f'{cpp_name} = TEXT("{value}");' in cpp, constant
     assert re.search(r"^create_grey_card\(\)", text, re.M)
+
+
+# -- W5 (the world engine side): the six world materials ------------------------
+
+SCENE_CPP_TEXT = SCENE_CPP.read_text(encoding="utf-8")
+EDITOR = REPO / "ue" / "Plugins" / "FlightSimBridge" / "Source" / "FlightSimBridgeEditor"
+
+
+def _tuple(text: str, name: str):
+    match = re.search(rf"^{name} = \((.*?)\)\n", text, re.M | re.S)
+    assert match, name
+    return tuple(re.findall(r'"([A-Za-z_]+)"', match.group(1)))
+
+
+def test_the_world_materials_are_created_once_each_and_called_at_import():
+    text = SCRIPT.read_text(encoding="utf-8")
+    world = _tuple(text, "WORLD_MATERIALS")
+    assert world == ("M_Landscape", "M_LandcoverID", "M_Starfield", "M_RainStreaks",
+                     "M_AirframePaint", "M_Runway")
+    assert set(NEW_MATERIAL.findall(text)) == set(world)
+    for name in world:
+        assert text.count(f'new_material("{name}")') == 1, name
+        assert f'finish(material, "{name}")' in text, name
+    for creator in ("create_landscape", "create_landcover_id", "create_starfield",
+                    "create_rain_streaks", "create_airframe_paint", "create_runway"):
+        assert re.search(rf"^{creator}\(\)$", text, re.M), creator
+    # Every /Game path the world C++ names (runtime and editor) is created.
+    for path in list(BRIDGE.rglob("*.cpp")) + list(EDITOR.rglob("*.cpp")):
+        for name in LOADED.findall(path.read_text(encoding="utf-8")):
+            assert name in created_by_script(), (path.name, name)
+    loaded = loaded_in_cpp()
+    assert set(world) <= loaded, set(world) - loaded
+
+
+def test_the_world_parameters_the_cpp_sets_are_the_ones_the_script_exposes():
+    text = SCRIPT.read_text(encoding="utf-8")
+    commandlet = COMMANDLET_CPP.read_text(encoding="utf-8")
+    # M_LandcoverID: every parameter the commandlet sets is exposed, and back.
+    exposed = _tuple(text, "LANDCOVER_PARAMETERS")
+    set_in_cpp = set(re.findall(r'LandcoverInstance->Set(?:Scalar|Texture)ParameterValue\(TEXT\("(\w+)"\)',
+                                commandlet))
+    assert set_in_cpp == set(exposed)
+    body = _body(text, "create_landcover_id")
+    for name in exposed:
+        assert f'"{name}"' in body or name == "ClassMap" and 'texture_parameter(material, lib, "ClassMap", True' in body
+    assert "MaterialDomain.MD_POST_PROCESS" in body and "BL_REPLACING_TONEMAPPER" in body
+    assert "SceneTextureId.PPI_CUSTOM_STENCIL" in body and "MaterialExpressionRound" in body
+    # M_Starfield / M_RainStreaks: the names FlightSimVisualScene.cpp sets.
+    for constant, cpp in (("STARFIELD_MAP_PARAMETER", "SceneStarMapParameter"),
+                          ("STARFIELD_INTENSITY_PARAMETER", "SceneStarIntensityParameter")):
+        value = re.search(rf'^{constant} = "(\w+)"$', text, re.M).group(1)
+        assert f'{cpp} = TEXT("{value}");' in SCENE_CPP_TEXT, constant
+    rain = _tuple(text, "RAIN_PARAMETERS")
+    for value, cpp in zip(rain, ("SceneRainLengthParameter", "SceneRainDirectionParameter",
+                                 "SceneRainDensityParameter", "SceneRainPhaseParameter")):
+        assert f'{cpp} = TEXT("{value}");' in SCENE_CPP_TEXT, cpp
+    streaks = _body(text, "create_rain_streaks")
+    assert "BL_BEFORE_TONEMAPPING" in streaks and "PPI_POST_PROCESS_INPUT0" in streaks
+    assert "length, direction, density, phase = RAIN_PARAMETERS" in streaks
+    stars = _body(text, "create_starfield")
+    assert "MSM_UNLIT" in stars and "BLEND_ADDITIVE" in stars and '"two_sided", True' in stars
+    assert "MaterialExpressionArctangent2" in stars and "MaterialExpressionArccosine" in stars
+    # M_Landscape: the layers are the weight keys (W1's layer names), wetness kept.
+    from core.terrain.landcover import LEGEND, WEIGHT_KEYS
+
+    assert _tuple(text, "LANDSCAPE_LAYERS") == WEIGHT_KEYS
+    for entry in LEGEND:
+        assert f'"{entry.key}": {tuple(entry.rgb)}' in text, entry.key
+    landscape = _body(text, "create_landscape")
+    assert "MaterialExpressionLandscapeLayerBlend" in landscape
+    assert "LB_WEIGHT_BLEND" in landscape and 'f"Layer {key}"' in landscape
+    assert "add_wetness(material, lib, colour" in landscape
+    for name in ("LandscapeTexels", "ImageryFlipV", "ImageryWeight"):
+        assert f'"{name}"' in landscape, name
+    # M_AirframePaint: the clear-coat model and its five parameters.
+    paint = _body(text, "create_airframe_paint")
+    assert "MSM_CLEAR_COAT" in paint and "MP_CUSTOM_DATA0" in paint and "MP_CUSTOM_DATA1" in paint
+    assert _tuple(text, "AIRFRAME_PAINT_PARAMETERS") == (
+        "PaintColour", "Roughness", "Metallic", "ClearCoat", "ClearCoatRoughness")
+    # M_Runway: the markings raster lerps the surface to the paint, then wetness.
+    runway = _body(text, "create_runway")
+    assert _tuple(text, "RUNWAY_PARAMETERS") == ("Markings", "SurfaceColour", "PaintColour", "Wetness")
+    assert 'lib.connect_material_expressions(markings, "R", colour, "Alpha")' in runway
+    assert "add_wetness(material, lib, colour" in runway
+    # The linear samplers get a non-sRGB default of their own class.
+    helper = _body(text, "texture_parameter")
+    assert "SAMPLERTYPE_LINEAR_COLOR" in helper and "linear_default_texture()" in helper

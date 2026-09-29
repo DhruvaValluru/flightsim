@@ -1792,9 +1792,9 @@ def _card_label_conventions(runs: Sequence[Run], conventions: Optional[Dict[str,
 
 def record_blocks(card: Dict[str, Any], runs: Sequence[Run],
                   tabular: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Record 2 on the card (R3): ``record_version`` 2 (the card's statement
-    of the blocks it carries; core.records.RECORD_VERSION stays 1 until the
-    INT-final bump), the ``variables``, ``uncertainty`` and ``instruments``
+    """Record 2 on the card (R3): ``record_version`` 2 (core.records.
+    RECORD_VERSION since the INT-final bump: the shape of the records the
+    blocks summarise), the ``variables``, ``uncertainty`` and ``instruments``
     blocks over the exported runs' own records (the campaign report's
     functions, core/campaign/report.py), the ``tabular`` declaration when
     one was written, and the ``datasheet`` (core/dataset/datasheet.py) --

@@ -537,9 +537,9 @@ def test_each_driven_effect_is_a_measured_null_test_in_an_applied_variable(build
         assert rec.parameters["neutral_value"] == neutral
         assert rec.parameters["derived_sha256"] == spec.derived_sha256
         assert rec.jsbsim_writes[0].property == prop
-        assert rec.model_block is not None and rec.model_block.version == rec.parameters["template_sha256"][:12]
+        assert rec.model is not None and rec.model.version == rec.parameters["template_sha256"][:12]
         d = rec.to_dict()
-        assert {"readback", "jsbsim_writes", "model_block", "from"} <= set(d)
+        assert {"readback", "jsbsim_writes", "model", "from"} <= set(d)
         assert AppliedVariable.from_dict(d).to_dict() == d
         records.append(rec)
     assert [r.name for r in records] == list(driven)

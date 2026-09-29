@@ -658,7 +658,7 @@ def landcover_variable(fractions: Dict[str, float], nodata_fraction: float,
         name="scene.landcover",
         value=dominant, unit="WorldCover legend class (dominant); fractions in parameters",
         source="derived",
-        model="ESA WorldCover v200 2021 majority/fraction",
+        model_name="ESA WorldCover v200 2021 majority/fraction",
         parameters={"fractions": legend, "nodata_fraction": float(nodata_fraction),
                     "dominant_class": dominant, "license": LICENSE,
                     "attribution": ATTRIBUTION, **parameters},
@@ -669,7 +669,7 @@ def landcover_variable(fractions: Dict[str, float], nodata_fraction: float,
         null_test=null_test,
         # Record 2: the structured model and the provenance text. Derived
         # from the bake; nothing is written to JSBSim, so no readback.
-        model_block=Model(
+        model=Model(
             name="ESA WorldCover v200 2021 majority/fraction",
             standard="ESA WorldCover 2021 v200 product (10 m, 11-class legend)",
             version="v200", parameters={"nodata_fraction": float(nodata_fraction),
@@ -712,7 +712,8 @@ def landcover_records(bake_path) -> list:
     records = (document.get("applied_variables") or {}).get("applied_variables") or []
     # Record 1 or record 2: AppliedVariable.from_dict reads every key the
     # JSON has and leaves the rest at its default (a landcover.json written
-    # before record 2 carries no model_block and re-types without one).
+    # at record 1 is renamed on the way in: its string model becomes
+    # model_name, a model_block -- if it carries one -- the model block).
     return [AppliedVariable.from_dict(record) for record in records]
 
 

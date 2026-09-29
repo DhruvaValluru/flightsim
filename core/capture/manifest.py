@@ -6,11 +6,28 @@ Windows render adds pixels beside it without touching it. A frame
 without recorded geometry is unusable as labeled data; this file is the
 label.
 
-Schema (``manifest_version`` 6)
+Schema (``manifest_version`` 7)
 -------------------------------
+Version 7 (INT-final, the advancement addition's one bump): every block
+the addition's items wrote under version 6 as optional and
+absent-canonical is now part of the published contract
+(docs/schemas/capture_manifest.v7.schema.json; v6 kept beside it):
+``datum``, ``applied_variables`` at record 2, ``uncertainty``,
+``instruments``, ``null_tests``, ``look``, ``landcover``, ``licences``,
+``scene.buildings`` / ``scene.runway``, per-camera ``sensing`` and
+``stereo``, per-frame ``radiometry``, ``passes``, ``ir``, ``dis`` and
+``labels.landcover``, the aggregate object ids ``building:all`` / ``vegetation:all``, and the new
+``state_units`` suffixes. The schema also declares the blueprint's
+``scene.land_cover``, ``frame.vertical_datum`` and ``interop.dis`` as
+optional; no producer in this build writes them (the land cover rides
+in ``landcover``, the vertical datum in ``datum``, the DIS record in
+``applied_variables`` and each frame's ``dis``). Each stays optional: a
+manifest that carries none of them differs from a version-6 one only
+in this number.
+
 Top level::
 
-    manifest_version   6
+    manifest_version   7
     spec_digest        SHA-256 of the canonical spec (spec.digest())
     simulation_digest  SHA-256 of the spec with its CAMERAS REMOVED --
                        the "simulation identity": two runs that differ
@@ -261,13 +278,14 @@ from core.terrain.geoid import (
     datum_for_heightfield, flat_datum_block, undulation_variable,
 )
 
-MANIFEST_VERSION = 6
+MANIFEST_VERSION = 7
 #: Versions this build can READ. Every version here is fully
 #: interpretable by the current verifier and the page: a version 3
 #: manifest has no ``state`` on its frames, a version 4 no ``labels``
 #: and no ``airframe``, a version 5 no ``objects`` and no per-object
-#: label records. Anything else is a refusal, not a guess.
-SUPPORTED_MANIFEST_VERSIONS = (3, 4, 5, 6)
+#: label records, a version 6 the addition's blocks only as
+#: unpublished optional keys. Anything else is a refusal, not a guess.
+SUPPORTED_MANIFEST_VERSIONS = (3, 4, 5, 6, 7)
 
 #: Which flight the ``aircraft`` block in every frame record describes.
 #: A v2 manifest could not say, and the answer matters more than any

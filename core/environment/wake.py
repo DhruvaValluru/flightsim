@@ -956,7 +956,7 @@ class WakeVortexPair(GustProvider):
             "unread_stated_fields": list(self.unread_stated_fields),
             "card": {k: v for k, v in self.card_block().items() if k != "selftest"},
         }
-        common = dict(model=MODEL_NAME, model_block=self.model_block(), references=REFERENCES,
+        common = dict(model_name=MODEL_NAME, model=self.model_block(), references=REFERENCES,
                       properties_written=tuple(properties), jsbsim_writes=writes,
                       telemetry_columns=TELEMETRY_COLUMNS, frame_keys=TELEMETRY_COLUMNS,
                       readback=readback, null_test=null, not_claimed=self._not_claimed(p_delivery))

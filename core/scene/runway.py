@@ -862,7 +862,7 @@ def runway_variable(document: Dict[str, Any]) -> AppliedVariable:
     null = document.get("null_test")
     return AppliedVariable(
         name="scene.runway", value=spec["designator"], unit="word", source="user",
-        model="ICAO Annex 14 Vol I sections 5.2 (markings) and 5.3 (lights); a least-squares "
+        model_name="ICAO Annex 14 Vol I sections 5.2 (markings) and 5.3 (lights); a least-squares "
               "runway plane flattened into a new bake with a graded shoulder",
         parameters={
             "spec": spec, "geometry": document["geometry"],
@@ -875,7 +875,7 @@ def runway_variable(document: Dict[str, Any]) -> AppliedVariable:
                     "[unverified here]",),
         properties_written=(), telemetry_columns=("agl_m",), frame_keys=("state.agl_m",),
         null_test=None if null is None else NullTest.from_dict(null),
-        model_block=Model(
+        model=Model(
             name="Annex 14 runway markings, lights and flatten pad",
             standard="ICAO Annex 14 Vol I ch. 5.2 / 5.3 [unverified here]", version="W2",
             parameters={"px_m": PX_M, "area_tolerance": MARKING_AREA_TOL,

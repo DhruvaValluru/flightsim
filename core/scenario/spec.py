@@ -70,7 +70,52 @@ from .fields import Quantity, Source
 # tolerates unknown top-level keys and would silently DROP them.
 # Version-7 dicts refuse by name; completed runs recover from
 # provenance.json, never by re-parsing.
-SPEC_VERSION = 8
+# 9 (2026-09-29): the advancement addition's one bump (INT-final;
+# docs/ADVANCEMENTS_BLUEPRINT.md "Versions and keys"). The blocks the
+# addition's items landed under 8 as OPTIONAL, absent-canonical keys --
+# SPEC9_BLOCKS, SPEC9_SCENE_FIELDS, SPEC9_ENVIRONMENT_FIELDS and
+# SPEC9_CAMERA_FIELDS below -- are version 9's. Each stays optional and
+# absent-canonical, so a version-9 spec that states none of them is a
+# version-8 spec with this one number changed (pinned against the
+# committed version-8 examples, frozen under tests/data/spec8_examples).
+# The rule for older dicts, unlike 7 -> 8: a version-8 dict still READS
+# (it becomes a version-9 spec; the digest moves with the hashed version
+# line only), UNLESS it states a version-9 block -- that is refused by
+# name (spec.version, naming the block), because a version-8 reader
+# built before the block existed would have dropped or refused it, so a
+# file claiming 8 and carrying it was not written by any version-8
+# writer. Version 7 and older refuse by name as before. (The field
+# notes below were written under 8: where they say an example "keeps its
+# digest", read "keeps its canonical form"; the version line moved.)
+SPEC_VERSION = 9
+
+#: The versions from_dict reads: this one, and 8 without a version-9 block.
+READABLE_SPEC_VERSIONS = (8, 9)
+
+#: Version 9's top-level blocks (each absent-canonical).
+SPEC9_BLOCKS = ("atmosphere", "datum", "turbulence_model", "wind_profile", "loading",
+                "failures", "icing", "dis", "wake", "instruments", "record", "runway")
+#: Version 9's optional fields inside version-8 sections.
+SPEC9_SCENE_FIELDS = ("sun_lux", "buildings", "night")
+SPEC9_ENVIRONMENT_FIELDS = ("precipitation_rate_mmh",)
+SPEC9_CAMERA_FIELDS = ("exposure_compensation_ev", "bands", "stereo", "passes", "ir")
+
+
+def spec9_keys_in(data: Dict[str, Any]) -> List[str]:
+    """Every version-9 key a spec dict states, dotted (``wake``,
+    ``scene.night``, ``cameras[0].ir``); [] for a dict that states none."""
+    found = [name for name in SPEC9_BLOCKS if data.get(name) is not None]
+    for section, names in (("scene", SPEC9_SCENE_FIELDS),
+                           ("environment", SPEC9_ENVIRONMENT_FIELDS)):
+        block = data.get(section)
+        if isinstance(block, dict):
+            found += [f"{section}.{name}" for name in names if block.get(name) is not None]
+    cameras = data.get("cameras")
+    for index, camera in enumerate(cameras if isinstance(cameras, list) else []):
+        if isinstance(camera, dict):
+            found += [f"cameras[{index}].{name}" for name in SPEC9_CAMERA_FIELDS
+                      if camera.get(name) is not None]
+    return found
 
 
 def _default_precipitation_rate() -> Quantity:
@@ -153,18 +198,18 @@ class ScenarioSpec:
     #: Spec 8, package B's field: scripted traffic aircraft, at most
     #: MAX_TRAFFIC; an empty list is the default and is omitted.
     traffic: List["TrafficSpec"] = dc_field(default_factory=list)
-    #: Gap P1 (still spec 8; the integrator bumps once): the day the
+    #: Gap P1 (spec 9: INT-final's bump): the day the
     #: flight is in -- temperature deviation, sea-level pressure, dew
     #: point or relative humidity, a day word -- absent-canonical: the
     #: ISA day is the default and is omitted, so every committed spec-8
     #: example keeps its digest (pinned by test).
     atmosphere: "AtmosphereSpec" = dc_field(default_factory=AtmosphereSpec.defaulted)
-    #: Gap P10, D1 (still spec 8; the integrator bumps once): the vertical
+    #: Gap P10, D1 (spec 9: INT-final's bump): the vertical
     #: datum the run declares -- vertical, physics_frame, geoid_model --
     #: absent-canonical: the orthometric frame is the default and is
     #: omitted, so every committed spec-8 example keeps its digest.
     datum: "DatumSpec" = dc_field(default_factory=DatumSpec.defaulted)
-    #: Gap P2, P6 (still spec 8; the integrator bumps once): the
+    #: Gap P2, P6 (spec 9: INT-final's bump): the
     #: turbulence spectrum (dryden = today's path | von_karman) with its
     #: intensity and seed, and the wind profile (uniform = today's path |
     #: layered | milspec | nwp) -- both absent-canonical: the defaults are
@@ -172,34 +217,34 @@ class ScenarioSpec:
     turbulence_model: "TurbulenceModelSpec" = dc_field(
         default_factory=TurbulenceModelSpec.defaulted)
     wind_profile: "WindProfileSpec" = dc_field(default_factory=WindProfileSpec.defaulted)
-    #: Gap P4 (still spec 8; the integrator bumps once): the payload
+    #: Gap P4 (spec 9: INT-final's bump): the payload
     #: stations and the fuel the flight starts with -- absent-canonical:
     #: the XML's own loading is the default and is omitted, so every
     #: committed spec-8 example keeps its digest.
     loading: "LoadingSpec" = dc_field(default_factory=LoadingSpec.defaulted)
-    #: P3 (still spec 8; the integrator bumps once): the failure schedule
+    #: P3 (spec 9: INT-final's bump): the failure schedule
     #: -- events of {kind, target, at_s, value} -- absent-canonical: the
     #: empty list is the default and is omitted, so every committed
     #: spec-8 example keeps its digest.
     failures: "FailuresSpec" = dc_field(default_factory=FailuresSpec.defaulted)
-    #: P5 (still spec 8; the integrator bumps once): the icing severity
+    #: P5 (spec 9: INT-final's bump): the icing severity
     #: ramp -- severity word | eta_max, onset_s, ramp_s, alpha_shift_deg,
     #: envelope word -- absent-canonical: no ice (the stock airframe) is
     #: the default and is omitted, so every committed spec-8 example
     #: keeps its digest.
     icing: "IcingSpec" = dc_field(default_factory=IcingSpec.defaulted)
-    #: D2 (still spec 8; the integrator bumps once): how the Entity State
+    #: D2 (spec 9: INT-final's bump): how the Entity State
     #: PDU log is labelled -- site, application, entity, force_id, marking,
     #: timestamp_mode -- absent-canonical: the documented defaults are
     #: omitted, so every committed spec-8 example keeps its digest.
     dis: "DisSpec" = dc_field(default_factory=DisSpec.defaulted)
-    #: P7 (still spec 8; the integrator bumps once): the wake-vortex
+    #: P7 (spec 9: INT-final's bump): the wake-vortex
     #: encounter -- generator, its speed, the own ship's offsets from the
     #: pair, the wake's age, the decay and its inputs -- absent-canonical:
     #: no wake is the default and is omitted, so every committed spec-8
     #: example keeps its digest.
     wake: "WakeSpec" = dc_field(default_factory=WakeSpec.defaulted)
-    #: R2 (still spec 8; the integrator bumps once): the instrument models
+    #: R2 (spec 9: INT-final's bump): the instrument models
     #: at the FDM rate -- imu, gps, pitot_static, magnetometer, each a
     #: profile with a lever arm -- and the record block -- null_tests,
     #: convergence, sensitivity_pairs -- both absent-canonical: the ideal
@@ -207,13 +252,13 @@ class ScenarioSpec:
     #: omitted, so every committed spec-8 example keeps its digest.
     instruments: "InstrumentsSpec" = dc_field(default_factory=InstrumentsSpec.defaulted)
     record: "RecordSpec" = dc_field(default_factory=RecordSpec.defaulted)
-    #: W3 (still spec 8; the integrator bumps once): the rain rate in mm/h
+    #: W3 (spec 9: INT-final's bump): the rain rate in mm/h
     #: under ``environment`` -- the fitted drop-size distribution, the
     #: streaks and the reconciled extinction (core/scene/precipitation.py)
     #: -- absent-canonical: unstated is omitted from the environment
     #: section, so every committed spec-8 example keeps its digest.
     precipitation_rate_mmh: Quantity = dc_field(default_factory=_default_precipitation_rate)
-    #: W2 (still spec 8; the integrator bumps once): one runway --
+    #: W2 (spec 9: INT-final's bump): one runway --
     #: designator, threshold, heading, length, width, surface, markings --
     #: absent-canonical: no runway is the default and is omitted, so
     #: every committed spec-8 example keeps its digest.
@@ -468,10 +513,22 @@ class ScenarioSpec:
     def from_dict(cls, data: Dict[str, Any]) -> "ScenarioSpec":
         version = data.get("spec_version")
         if version != SPEC_VERSION:
-            raise ValueError(
-                f"spec_version {version!r} is not supported by this build "
-                f"(expects {SPEC_VERSION}). Refusing to guess at the schema."
-            )
+            if version not in READABLE_SPEC_VERSIONS:
+                raise ValueError(
+                    f"spec_version {version!r} is not supported by this build "
+                    f"(expects {SPEC_VERSION}; reads {READABLE_SPEC_VERSIONS}). "
+                    f"Refusing to guess at the schema."
+                )
+            # Version 8 reads only as the file a version-8 writer could
+            # have written: a version-9 key under it is refused by name.
+            stated = spec9_keys_in(data)
+            if stated:
+                raise ValueError(
+                    f"spec_version {version!r} with the version-9 block(s) "
+                    f"{', '.join(stated)} is not supported by this build: those "
+                    f"blocks are spec_version {SPEC_VERSION}'s, so state "
+                    f"spec_version: {SPEC_VERSION}. Refusing to guess at the schema."
+                )
         kwargs = {}
         for section, name in cls.FIELD_ORDER:
             try:

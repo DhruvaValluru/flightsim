@@ -300,8 +300,8 @@ def test_landcover_json_carries_the_record_the_sha256_the_licence_and_the_attrib
     (record,) = read_records(block)
     assert record["name"] == "scene.landcover"
     assert record["source"] == "derived"
-    assert record["model"] == "ESA WorldCover v200 2021 majority/fraction"
-    for key in ("name", "value", "unit", "source", "model", "parameters",
+    assert record["model_name"] == "ESA WorldCover v200 2021 majority/fraction"
+    for key in ("name", "value", "unit", "source", "model_name", "parameters",
                 "references", "properties_written", "telemetry_columns",
                 "frame_keys", "null_test", "not_claimed"):
         assert key in record, key

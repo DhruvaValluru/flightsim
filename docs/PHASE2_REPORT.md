@@ -245,6 +245,53 @@ the section it belongs to; nothing rendered is claimed until it runs):
       environment keys -- and `flightsim.verify` turns `host_physics` from
       NOT RUN to PASS;
    h. W8 -- Gate 10-R (step 6) on the all-blocks card.
+10. W5, the world engine side (the FlightSimBridgeEditor module, the
+    `-scene=` route, the land-cover ID pass, the primitive-component
+    stencil loop, the moon, the stars, the rain, the cloud drift; C++ and
+    editor Python uncompiled here, pinned by
+    `tests/test_ue_world_source.py`; the verdicts are `check.world_record`
+    and `check.landcover_vs_geometry`, NOT RUN until a render carries
+    `world_applied`):
+    a. rebuild (the new editor module; the PCG and GeometryScripting
+       plugins), rerun step 2 (`M_Landscape`, `M_LandcoverID`,
+       `M_Starfield`, `M_RainStreaks`, `M_AirframePaint`, `M_Runway`,
+       `T_LinearDefault`), then `ue_build_scene.py --terrain
+       runs\terrain\control_ridge` and then `--terrain
+       runs\terrain\matterhorn` (after `bake_landcover.py` for each): the
+       log's `ImportLandscape` line and `<stem>_scene.json`; a stale layer
+       or manifest is refused `terrain.landscape_stale` by name;
+    b. a `-scene=<stem>_scene.json -Visual -GeorefTerrain -labels` render:
+       `world_applied.landscape.sha256_tag` equal to the card's
+       `world.terrain_sha256`, `posting_m` 30, the terrain int_id present
+       in the mask (the stencil loop reaches the Landscape's components),
+       `north_axis_measured` equal to the scene's (else rebuild with
+       `--north-axis` as the refusal says), and Gate 6's four clauses
+       re-pinned on the Landscape;
+    c. Nanite on / off (`--nanite on|off`, `landscape.RenderNanite` read
+       back) over depth, ID and beauty; SVT on / off (`r.VirtualTextures`)
+       with the landmark drape identical;
+    d. the land-cover ID pass: `labels.landcover_png` per frame agreeing
+       >= 0.95 with the checker's own unprojection
+       (`landcover_vs_geometry`); `skew_cm` near 0;
+    e. PCG on / off (`--biome`) and buildings on / off (`--buildings` on a
+       scene with a town): the `vegetation:all` / `building:all` ids in
+       the mask, the aircraft mask unchanged;
+    f. the runway: the mask residual < 2 px (`runway_vs_geometry`), the
+       lights on / off at -12 deg with the MegaLights probe
+       (`r.MegaLights`);
+    g. the moon and the stars at -18 deg with exposure holding
+       (`night_exposure`), the moon light index 1 and its lux read back;
+       `night.sun_units` exercised on the bias path;
+    h. the streaks on / off against the wet control (both bands change
+       with the streaks, only the terrain band with wetness; the label
+       passes byte-identical), the relative streak within 30 % of the
+       card's;
+    i. the cloud drift doublet (30 s, drift against none, the offset the
+       predicted distance; refused `look.cloud_drift_parameter` if the
+       engine's cloud material exposes no wind offset);
+    j. Substrate on / off (`r.Substrate`) over `M_AirframePaint`;
+    k. a 1- and 2-worker campaign (step 7) and Gate 10-R (step 6) on the
+       Landscape scene.
 
 **Open findings.** Every item a fixer of the review pass marked not
 fixed, not landed, or architectural is listed at the end of this report

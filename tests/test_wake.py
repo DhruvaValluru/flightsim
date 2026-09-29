@@ -453,8 +453,8 @@ def test_the_stated_fields_return_their_records_with_readback_and_null_test(demo
         assert [w["property"] for w in r["jsbsim_writes"]] == list(r["properties_written"])
         assert len(r["jsbsim_writes"]) == 4
         assert r["telemetry_columns"] == list(TELEMETRY_COLUMNS) == r["frame_keys"]
-        assert r["model_block"]["name"] == "Burnham-Hallock vortex pair with uniform-lift strip theory"
-        assert r["model_block"]["parameters"]["gamma_0_m2_s"] == GAMMA_0
+        assert r["model"]["name"] == "Burnham-Hallock vortex pair with uniform-lift strip theory"
+        assert r["model"]["parameters"]["gamma_0_m2_s"] == GAMMA_0
         assert r["null_test"]["kind"] == "reached" and r["null_test"]["ok"] is True
         assert r["null_test"]["with"] == pytest.approx(0.2392, abs=1e-3)
         assert r["parameters"]["per_step_readback"]["agrees"] is True

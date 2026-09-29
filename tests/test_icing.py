@@ -73,17 +73,18 @@ from core.telemetry.recorder import DEFAULT_CHANNELS
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLES = REPO / "examples"
-#: The committed spec-8 examples' digests at HEAD (tests/test_registry.py
-#: pins the same eight): the block adds no key to a spec that states none.
+#: The committed examples' digests, re-pinned at spec 9 (INT-final;
+#: tests/test_registry.py pins the same eight): the block adds no key to a
+#: spec that states none.
 EXAMPLE_DIGESTS = {
-    "examples/cameras_event_trigger.yaml": "cb2f5b5500584bd84c8aa84749c854a9c67f1c366db2ec97e9cb0c8ee150b8b0",
-    "examples/cameras_hazard_refusal.yaml": "148f87bc37eab96c8f029e048dbf4f8328ad3247fa0596f10e71c81914d509de",
-    "examples/cameras_mountain_refusal.yaml": "58a36aa0943b0dd895d79c89d7031525b6fc29e55ec47b927b4b3e7ccbfb2496",
-    "examples/cameras_multi.yaml": "84e53a6931489f90fec8d0a750a1fd745bb630d0a2186befba659c68e2396f45",
-    "examples/cameras_refusal.yaml": "d3565392215f6db2b66060c41554d10b4916779b9319e2c3a7063b3a04eb6a9a",
-    "examples/cameras_terrain.yaml": "4b7b5dbdc8ba0a04cb3408f6e70c19be3d0e28c4053762ee30551c23d751acf3",
-    "examples/cameras_waypoint.yaml": "9760294005e1efcae1777ad4a2035fe3733d219428c477c6c7caf2f0220b2372",
-    "examples/randomized.yaml": "102d38250e4b7c9b4b6737af5e3e2886fad0748aa4e7af825ce8388e4fe7fda1",
+    "examples/cameras_event_trigger.yaml": "cecfcf1a5882d34fd97bdd7cbdbc6a69710d9c7956f835a897fbf1c712ab2ccf",
+    "examples/cameras_hazard_refusal.yaml": "bcd32ebe8fed244be2bd8f6761a879b3bbe965c6d3c884fbc65b3deb2b12e9ea",
+    "examples/cameras_mountain_refusal.yaml": "d49cbc463d0f402ef39d95b86325d97d6fdfa4fb89ea414ab47e066b949cfe6c",
+    "examples/cameras_multi.yaml": "995ec65631ba52092140458c7799eb3c7a6b82a9baa1807f9c017724ae4c5390",
+    "examples/cameras_refusal.yaml": "04d38d5b97052b61181530e544df1cb56c3b6037e85e7ffd1ee0e663d398c055",
+    "examples/cameras_terrain.yaml": "e57b408868065d75c99ca3711627601c199b43c3d50dd2675ac6e2b1c20b1325",
+    "examples/cameras_waypoint.yaml": "aba90b44eae4644a139cf65d8f593cdadd9b78cc320c15f9642d79fb4fee2f00",
+    "examples/randomized.yaml": "bc9982ba15a79c63a1c748eacb70efddc753c174532e80735019b48904309428",
 }
 #: The DHC6 row as configured (a transcription from memory of the Twin
 #: Otter set, [unverified here]); the c172p carries the same numbers as a
@@ -484,7 +485,7 @@ def test_each_stated_field_and_each_factor_returns_its_record_2(iced_run):
     assert [w["property"] for w in eta["jsbsim_writes"]] == list(PROPERTIES)
     assert eta["properties_written"] == list(PROPERTIES)
     assert eta["telemetry_columns"] == list(TELEMETRY_COLUMNS) == eta["frame_keys"]
-    model = eta["model_block"]
+    model = eta["model"]
     assert model["name"] == "Bragg factor form with a severity ramp"
     assert "(1 + eta k_A)" in model["standard"] and "clamp" in model["standard"]
     assert model["parameters"]["k_table"] == {f"k_{a}": DHC6_K[a] for a in AXES}

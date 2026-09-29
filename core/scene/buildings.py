@@ -546,7 +546,7 @@ def buildings_variable(document: Dict[str, Any]) -> AppliedVariable:
     count = int(document["count"])
     return AppliedVariable(
         name="scene.buildings", value=count, unit="buildings", source="derived",
-        model="CityGML 2.0 LoD1: footprints extruded to one height on a DTM pad",
+        model_name="CityGML 2.0 LoD1: footprints extruded to one height on a DTM pad",
         parameters={
             "key": document["key"], "file": document["file"], "sha256": document["sha256"],
             "licence": document["licence"], "attribution": document["provenance"].get("attribution"),
@@ -569,7 +569,7 @@ def buildings_variable(document: Dict[str, Any]) -> AppliedVariable:
             note="without = no footprint set stated: no building composed, no building:all "
                  "object; with = the cached set over the bake; the pixel null (buildings "
                  "on/off in the ID image) is Windows clause 7, not run here"),
-        model_block=Model(
+        model=Model(
             name="CityGML 2.0 LoD1 extrusion", standard="OGC CityGML 2.0 (OGC 12-019)",
             version="LoD1",
             parameters={"default_height_m": document["default_height_m"],

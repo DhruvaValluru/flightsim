@@ -33,9 +33,9 @@ verified cases' own records (each case's ``capture_manifest.json`` and
   from its ``instruments.profile`` record (the recorded-rate path), and
   ``instruments.npz`` beside the case re-hashed against the block's sha256.
 
-``record_version`` 2 here is the report's statement of the blocks it
-carries; ``core.records.RECORD_VERSION`` stays 1 until the INT-final item
-bumps it (the blueprint's "versions bump once").
+``record_version`` here is ``core.records.RECORD_VERSION`` (2 since the
+INT-final bump): the record shape the blocks summarise and the shape
+every record the report reads is written in.
 """
 
 from __future__ import annotations
@@ -47,15 +47,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from core.records import SOURCES
+from core.records import RECORD_VERSION, SOURCES
 from core.scenario.randomization import realised_distribution
 
 from .ledger import STATUSES, summarise
 
 #: The record shape report.json (and the dataset card) summarises: the
-#: blueprint's "report.json / dataset.json gain record_version: 2". Not
-#: core.records.RECORD_VERSION, which the INT-final item bumps.
-REPORT_RECORD_VERSION = 2
+#: blueprint's "report.json / dataset.json gain record_version: 2" --
+#: core.records.RECORD_VERSION itself since the INT-final bump.
+REPORT_RECORD_VERSION = RECORD_VERSION
 
 #: The provenance rank of a source word (fields.py precedence: user 0 ..
 #: default 5) and the rank of a variable a case does not carry.

@@ -521,7 +521,7 @@ def stream_record(build: StreamBuild, data: bytes, null: Dict[str, Any],
     thresholded = options.emitter == "thresholded"
     return AppliedVariable(
         name=RECORD_NAME, value=len(build.pdus), unit="PDU", source="derived",
-        model=MODEL_THRESHOLDED if thresholded else MODEL_FULL_RATE,
+        model_name=MODEL_THRESHOLDED if thresholded else MODEL_FULL_RATE,
         parameters={
             "timestamp_mode": options.timestamp_mode, "epoch": options.epoch,
             "pdu_count": len(build.pdus), "interval": build.timestamp.get("interval_s"),
@@ -580,7 +580,7 @@ def stream_record(build: StreamBuild, data: bytes, null: Dict[str, Any],
             "interface",
         ),
         readback=readback,
-        model_block=Model(
+        model=Model(
             name="Entity State PDU log", standard="IEEE 1278.1-2012",
             version=f"protocol version {PROTOCOL_VERSION}",
             parameters={"pdu_type": PDU_TYPE_ENTITY_STATE, "pdu_length_bytes": ESPDU_LENGTH,

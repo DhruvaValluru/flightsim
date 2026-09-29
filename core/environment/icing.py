@@ -749,12 +749,12 @@ class IcingProvider(AtmosphereProvider):
         def eta_record(name: str, stated: Stated, unit: str, null: NullTest,
                        extra: Optional[Dict[str, Any]] = None) -> AppliedVariable:
             return AppliedVariable(
-                name=name, value=stated.value, unit=unit, source=stated.source, model=MODEL,
+                name=name, value=stated.value, unit=unit, source=stated.source, model_name=MODEL,
                 parameters={**common, **(extra or {})}, references=REFERENCES + ((stated.std,) if stated.std else ()),
                 properties_written=PROPERTIES, telemetry_columns=TELEMETRY_COLUMNS,
                 frame_keys=TELEMETRY_COLUMNS, null_test=null, not_claimed=not_claimed,
                 frm=stated.frm, std=stated.std, readback=self._readback_of(PROPERTY_ETA),
-                jsbsim_writes=all_writes, model_block=model)
+                jsbsim_writes=all_writes, model=model)
 
         severity = self.stated["severity"]
         if severity is not None:
@@ -801,7 +801,7 @@ class IcingProvider(AtmosphereProvider):
         if shift.source != "default":
             out.append(AppliedVariable(
                 name="icing.alpha_shift_rad", value=math.radians(self.alpha_shift_deg), unit="rad",
-                source=shift.source, model=MODEL,
+                source=shift.source, model_name=MODEL,
                 parameters={**common, "alpha_shift_deg": self.alpha_shift_deg,
                             "cue": "linear in eta: the full shift at eta_max, 0 at 0"},
                 references=REFERENCES + ((shift.std,) if shift.std else ()),
@@ -820,13 +820,13 @@ class IcingProvider(AtmosphereProvider):
                           f"for 2 deg on the c172p), re-measured in tests/test_icing.py")),
                 not_claimed=not_claimed, frm=shift.frm, std=shift.std,
                 readback=self._readback_of(PROPERTY_SHIFT),
-                jsbsim_writes=(JsbsimWrite(PROPERTY_SHIFT, WHEN_SHIFT),), model_block=model))
+                jsbsim_writes=(JsbsimWrite(PROPERTY_SHIFT, WHEN_SHIFT),), model=model))
         envelope = self.stated["envelope"]
         if envelope is not None:
             written_for_word = [p for p in PROPERTIES if "envelope" in p]
             out.append(AppliedVariable(
                 name="icing.envelope", value=envelope.value, unit="word", source=envelope.source,
-                model=MODEL + " (the envelope word is metadata: applied nowhere)",
+                model_name=MODEL + " (the envelope word is metadata: applied nowhere)",
                 parameters={**common, "standard": ENVELOPE_STANDARDS[envelope.value],
                             "applied": False},
                 references=REFERENCES + ((envelope.std,) if envelope.std else ()),
@@ -840,13 +840,13 @@ class IcingProvider(AtmosphereProvider):
                          "so the invariance is bounded at 0"),
                 not_claimed=not_claimed + ("the envelope word enters no equation: no LWC, MVD or "
                                            "temperature is modelled",),
-                frm=envelope.frm, std=envelope.std, model_block=model))
+                frm=envelope.frm, std=envelope.std, model=model))
         row = "a named proxy row" if self.k_table.proxy else "the airframe's own row"
         for axis in AXES:
             prop = FACTOR_PROPERTIES[axis]
             out.append(AppliedVariable(
                 name=f"icing.{axis}_factor", value=prepared["factors_at_eta_max"][axis], unit="1",
-                source="derived", model=MODEL,
+                source="derived", model_name=MODEL,
                 parameters={**common, "axis": axis, "k": self.k_table.values[axis],
                             "k_source": self.k_table.sources[axis],
                             "factor_at_eta_max": prepared["factors_at_eta_max"][axis],
@@ -856,7 +856,7 @@ class IcingProvider(AtmosphereProvider):
                 null_test=self._pre_trim_null(axis), not_claimed=not_claimed,
                 frm=f"1 + eta k_{axis} with k_{axis} = {self.k_table.values[axis]:g} ({row})",
                 std=self.k_table.sources[axis], readback=self._readback_of(prop),
-                jsbsim_writes=(JsbsimWrite(prop, WHEN_FACTOR),), model_block=model))
+                jsbsim_writes=(JsbsimWrite(prop, WHEN_FACTOR),), model=model))
         return out
 
     # -- the card, the manifest, the vocabulary ------------------------------------------

@@ -400,7 +400,7 @@ def optics_record(block: Mapping[str, Any], null_max_abs_difference: float,
 
     return AppliedVariable(
         name="sensing.optics", value=float(block["mtf50_predicted_cyc_per_px"]), unit="cycles/px",
-        source="user", model="diffraction MTF x Gaussian aberration; kernel by inverse FFT, energy 1",
+        source="user", model_name="diffraction MTF x Gaussian aberration; kernel by inverse FFT, energy 1",
         parameters={k: block[k] for k in ("model", "wavelength_nm", "f_number", "f_number_basis",
                                           "sigma_um", "pixel_pitch_um", "support_px",
                                           "cutoff_cyc_per_px", "mtf50_predicted_cyc_per_px",
@@ -422,7 +422,7 @@ def optics_record(block: Mapping[str, Any], null_max_abs_difference: float,
         readback=Readback(property="kernel_energy", value=float(block["kernel_energy"]), written=1.0,
                           tolerance=1e-12, tolerance_kind="absolute",
                           basis="the normalised kernel sums to 1 to float64 round-off"),
-        model_block=Model(name="diffraction_gaussian PSF", standard="Goodman ch. 6",
+        model=Model(name="diffraction_gaussian PSF", standard="Goodman ch. 6",
                           version="S1", parameters={k: block[k] for k in ("wavelength_nm", "f_number", "sigma_um")},
                           references=tuple(block["references"])),
     )

@@ -6,7 +6,9 @@
 What happens, in order (each step refuses by name rather than
 approximating):
 
-1. the spec is read (spec_version 8 -- older versions refuse by name);
+1. the spec is read (spec_version 9; 8 reads when it states no
+   version-9 block -- older versions, and a version-9 block under 8,
+   refuse by name);
 2. scene-free validation runs (the full validate(), cameras included);
 3. world-anchored cameras are checked against the scene BEFORE the run
    (terrain clearance, scene bounds, the tornado core);
@@ -439,7 +441,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="validate, run headlessly, and capture a scenario's "
                     "camera geometry")
-    parser.add_argument("spec", help="scenario spec YAML (spec_version 8)")
+    parser.add_argument("spec", help="scenario spec YAML (spec_version 9, or 8 without "
+                                     "a version-9 block)")
     parser.add_argument("--out", required=True, help="run directory")
     parser.add_argument("--terrain", default=None,
                         help="baked heightfield stem (<stem>.r16 + .json) "

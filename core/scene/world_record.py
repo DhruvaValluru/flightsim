@@ -242,7 +242,7 @@ def world_record(spec, look: Optional[Dict[str, Any]] = None) -> Optional[Applie
     frm = "; ".join(str(q.frm) for q in stated if q.frm) or None
     return AppliedVariable(
         name=RECORD_NAME, value=card_look(look), unit="look", source=source,
-        model=("the world look: Meeus ch. 47/48 moon with K&S 1991 light, BSC5 or procedural "
+        model_name=("the world look: Meeus ch. 47/48 moon with K&S 1991 light, BSC5 or procedural "
                "stars, Marshall-Palmer rain with a fitted Lambda and Atlas 1973 fall speed, "
                "Atlas 1953 extinction reconciled with Koschmieder, the wind providers at "
                "cloud base"),
@@ -256,7 +256,7 @@ def world_record(spec, look: Optional[Dict[str, Any]] = None) -> Optional[Applie
                         "every prediction is a number computed here; every measurement is a "
                         "named Windows clause; nothing engine-side is verified here")),
         frm=frm,
-        model_block=Model(name="world look (W3)", standard="Meeus 1998; K&S 1991; MP 1948; "
+        model=Model(name="world look (W3)", standard="Meeus 1998; K&S 1991; MP 1948; "
                                                           "Atlas 1953, 1973",
                           version="1",
                           parameters={"sky_band_elevation_deg": SKY_BAND_ELEVATION_DEG,

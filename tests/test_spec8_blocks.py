@@ -55,12 +55,13 @@ def names(violations):
 
 # -- the bump itself --------------------------------------------------------
 
-def test_spec_version_is_8_and_a_version_7_dict_refuses_by_name(spec):
+def test_a_version_7_dict_refuses_by_name_at_spec_9(spec):
     """The same refusal every earlier bump used: a ValueError naming the
-    version, never a guess at the schema."""
-    assert SPEC_VERSION == 8
+    version, never a guess at the schema. (Spec 9, INT-final, still reads
+    8; tests/test_versions.py pins that rule.)"""
+    assert SPEC_VERSION == 9
     data = spec.to_dict()
-    assert data["spec_version"] == 8
+    assert data["spec_version"] == 9
     data["spec_version"] = 7
     with pytest.raises(ValueError, match="spec_version 7 is not supported"):
         ScenarioSpec.from_dict(data)
@@ -91,7 +92,7 @@ def test_a_committed_version_7_example_keeps_its_canonical_form_at_8(name):
     upgraded = copy.deepcopy(frozen)
     upgraded["spec_version"] = 8
     reread = ScenarioSpec.from_dict(upgraded).to_dict()
-    assert reread["spec_version"] == 8
+    assert reread["spec_version"] == SPEC_VERSION == 9     # 8 reads, as 9
     # Field for field, the version-7 form.
     assert {k: v for k, v in reread.items() if k != "spec_version"} == \
         {k: v for k, v in frozen.items() if k != "spec_version"}
@@ -107,21 +108,23 @@ def test_a_committed_version_7_example_keeps_its_canonical_form_at_8(name):
 def test_the_committed_examples_are_the_frozen_ones_plus_the_version_line():
     """The regeneration went through the writer: every example differs
     from its frozen version-7 copy by the version line alone -- except
-    the mountain refusal, which gained the scene block it documents."""
+    the mountain refusal, which gained the scene block it documents.
+    (The examples are at spec 9 since INT-final; that regeneration moved
+    the version line again and nothing else.)"""
     for frozen_path in sorted(SPEC7.glob("*.yaml")):
         current = (EXAMPLES / frozen_path.name).read_text(encoding="utf-8")
         frozen = frozen_path.read_text(encoding="utf-8")
         current_body = yaml.safe_load(current)
         frozen_body = yaml.safe_load(frozen)
-        assert current_body["spec_version"] == 8
-        frozen_body["spec_version"] = 8
+        assert current_body["spec_version"] == SPEC_VERSION == 9
+        frozen_body["spec_version"] = SPEC_VERSION
         if frozen_path.name == "cameras_mountain_refusal.yaml":
             frozen_body["scene"] = current_body["scene"]
             assert current_body["scene"]["terrain_source"]["value"] == \
                 "synthesised"
             assert current_body["scene"]["terrain_source"]["source"] == "user"
         else:
-            assert current.replace("spec_version: 8", "spec_version: 7") == \
+            assert current.replace("spec_version: 9", "spec_version: 7") == \
                 frozen
         assert current_body == frozen_body
 

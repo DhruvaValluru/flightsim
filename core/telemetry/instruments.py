@@ -773,7 +773,7 @@ def _record(profile: InstrumentProfile, source: str, seeds, measured: Sequence[s
         value=profile.name,
         unit="profile",
         source=source,
-        model=MODEL,
+        model_name=MODEL,
         parameters={
             "profile": profile.to_dict(),
             "seed_streams": {s: seeds.for_subsystem(s) for s in STREAMS},
@@ -806,7 +806,7 @@ def _record(profile: InstrumentProfile, source: str, seeds, measured: Sequence[s
                  "measures no difference and its null test is not ok"),
         # Record 2: the structured model and the provenance text. An
         # observer over the recording writes no JSBSim property: no readback.
-        model_block=Model(
+        model=Model(
             name=MODEL, standard="IEEE Std 952-2020 terms; GPS SPS PS; Caruso 2000",
             version=f"profile {profile.name} (sha256 {profile.sha256})",
             parameters={"basis": profile.basis, "rate_basis": RECORDED_RATE_BASIS,
@@ -1619,12 +1619,12 @@ class InstrumentObserver:
                 name=f"instruments.{name}",
                 value={"profile": spec.profile.name, "lever_arm_m": list(spec.lever_arm_m)},
                 unit="profile + m", source=spec.source,
-                model=f"{MODEL} at the FDM rate ({name})",
+                model_name=f"{MODEL} at the FDM rate ({name})",
                 parameters=parameters, references=tuple(spec.profile.references),
                 properties_written=(), telemetry_columns=tuple(columns),
                 frame_keys=tuple(f"state.{c}" for c in columns),
                 null_test=null,
-                model_block=Model(
+                model=Model(
                     name=f"{MODEL} at the FDM rate", standard=_instrument_standard(name),
                     version=f"profile {spec.profile.name} (sha256 {spec.profile.sha256})",
                     parameters={"rate_basis": FDM_RATE_BASIS, "rate_hz": self.rate_hz,

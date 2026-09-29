@@ -126,6 +126,11 @@ namespace
 	// Absent -> -labels refuses by name; nothing else is written as an ID.
 	constexpr const TCHAR* RenderLabelStencilMaterialPath =
 		TEXT("/Game/FlightSim/M_CustomStencilID.M_CustomStencilID");
+	// W5: the land-cover ID pass's post-process material (scripts/
+	// ue_create_materials.py LANDCOVER_PARAMETERS: ClassMap, OriginX, OriginY,
+	// CellX, CellY, GridWidth, GridHeight, TerrainStencil).
+	constexpr const TCHAR* RenderLandcoverMaterialPath =
+		TEXT("/Game/FlightSim/M_LandcoverID.M_LandcoverID");
 	// I6 (gap S3): the ground-truth passes -passes=normal,velocity,albedo.
 	// Each renders through a post-process material built by
 	// scripts/ue_create_materials.py on the M_CustomStencilID pattern
@@ -2125,6 +2130,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	int32 LabelPrimaryIntId = 0;
 	int32 LabelTerrainIntId = 0;
 	FString LabelIdSource;
+	// W5: the land-cover ID pass (M_LandcoverID), under -labels on a -scene=
+	// render whose scene carries a class map: one more AA-free capture, the
+	// class code per pixel as frame_NNNN_landcover_id.png (render.json
+	// labels.landcover_png, graded against the checker's own unprojection by
+	// core/capture/verify.py landcover_vs_geometry).
+	UTextureRenderTarget2D* LandcoverTarget = nullptr;
+	USceneCaptureComponent2D* LabelLandcover = nullptr;
 	// I6 (gap S3): the ground-truth pass captures, built inside the label
 	// block below because they ride ConfigureLabelCapture (AA-free, no
 	// fog, no atmosphere, no cloud, no translucency) and are graded
@@ -2317,14 +2329,60 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			LabelTerrainIntId = RenderLabelClassTerrain;
 		}
 
-		// Every mesh component in the world carries the stencil of the
+		// Every primitive component in the world carries the stencil of the
 		// object it belongs to: an aircraft actor's its own int_id, every
-		// other mesh (terrain, ground plane, funnel) the terrain's. Editor-
-		// only and hidden-in-game components draw in no capture and get none.
+		// other primitive (terrain, ground plane, funnel) the terrain's.
+		// Editor-only and hidden-in-game components draw in no capture and
+		// get none.
+		//
+		// W5: the loop runs over UPrimitiveComponent, not UMeshComponent: a
+		// ULandscapeComponent is a primitive and not a mesh, so the old loop
+		// left a scene level's Landscape without the terrain id (blueprint
+		// section 4). An actor the scene level tagged FlightSim.vegetation /
+		// FlightSim.building carries the card's vegetation:all /
+		// building:all int_id (one aggregate each: the 8-bit stencil has no
+		// room for instances); a beauty-only actor (the starfield) carries
+		// none. A tagged actor whose aggregate the card does not name is
+		// refused (annotation.identity), never labelled terrain.
+		int32 LabelVegetationIntId = 0;
+		int32 LabelBuildingIntId = 0;
+		for (const FRenderLabelledObject& Entry : Labelled)
+		{
+			if (Entry.Id == FlightSimWorld::VegetationObjectId)
+			{
+				LabelVegetationIntId = Entry.IntId;
+			}
+			else if (Entry.Id == FlightSimWorld::BuildingObjectId)
+			{
+				LabelBuildingIntId = Entry.IntId;
+			}
+		}
 		TMap<int32, int32> StencilCounts;
 		for (TActorIterator<AActor> It(World); It; ++It)
 		{
+			if (VisualScene.BeautyOnlyActors.Contains(*It))
+			{
+				continue;
+			}
 			int32 IntId = LabelTerrainIntId;
+			const TCHAR* Aggregate = nullptr;
+			if (It->ActorHasTag(FName(FlightSimWorld::VegetationTag)))
+			{
+				IntId = LabelVegetationIntId;
+				Aggregate = FlightSimWorld::VegetationObjectId;
+			}
+			else if (It->ActorHasTag(FName(FlightSimWorld::BuildingTag)))
+			{
+				IntId = LabelBuildingIntId;
+				Aggregate = FlightSimWorld::BuildingObjectId;
+			}
+			if (Aggregate != nullptr && IntId <= 0)
+			{
+				return Fail(FString::Printf(
+					TEXT("annotation.identity: the scene level carries '%s' tagged for %s, and the ")
+					TEXT("card's objects[] names no %s; its pixels would carry another object's id"),
+					*It->GetName(), Aggregate, Aggregate));
+			}
 			for (const FRenderLabelledObject& Entry : Labelled)
 			{
 				if (Entry.Actor != nullptr && Entry.Actor == *It)
@@ -2336,16 +2394,16 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			{
 				continue;
 			}
-			TInlineComponentArray<UMeshComponent*> Meshes;
-			It->GetComponents(Meshes);
-			for (UMeshComponent* Mesh : Meshes)
+			TInlineComponentArray<UPrimitiveComponent*> Primitives;
+			It->GetComponents(Primitives);
+			for (UPrimitiveComponent* Primitive : Primitives)
 			{
-				if (Mesh == nullptr || Mesh->IsEditorOnly() || Mesh->bHiddenInGame)
+				if (Primitive == nullptr || Primitive->IsEditorOnly() || Primitive->bHiddenInGame)
 				{
 					continue;
 				}
-				Mesh->SetRenderCustomDepth(true);
-				Mesh->SetCustomDepthStencilValue(IntId);
+				Primitive->SetRenderCustomDepth(true);
+				Primitive->SetCustomDepthStencilValue(IntId);
 				StencilCounts.FindOrAdd(IntId)++;
 			}
 		}
@@ -2409,6 +2467,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Label->ShowFlags.SetDepthOfField(false);
 			Label->ShowFlags.SetLensFlares(false);
 			Label->ShowFlags.SetTranslucency(false);
+			// W5: the world look is the beauty's alone -- the starfield
+			// sphere is hidden here, and no look blendable (the rain) is
+			// ever added to a label capture -- so mask, class and depth are
+			// byte-identical with the world look on and off.
+			Label->HiddenActors.Append(VisualScene.BeautyOnlyActors);
 		};
 		auto MakeDepthCapture = [&](const TCHAR* Name) -> USceneCaptureComponent2D*
 		{
@@ -2439,6 +2502,59 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		};
 		LabelDepthAll = MakeDepthCapture(TEXT("LabelDepthAll"));
 		LabelIdAll = MakeIdCapture(TEXT("LabelIdAll"));
+		// W5: the land-cover ID pass. M_LandcoverID (post-process, replacing
+		// the tonemapper) reconstructs each pixel's world position from its
+		// depth, carries it onto the bake grid with the registration the scene
+		// load MEASURED (FFlightSimLandcoverPass), samples the class-code
+		// raster nearest-filtered, and emits the code where the custom stencil
+		// is the terrain's int_id (0 elsewhere: sky, aircraft, buildings,
+		// vegetation). Refused by name when the scene asks for it and the
+		// material or the class map is absent.
+		const TSharedPtr<FJsonObject>* LandcoverAsked = nullptr;
+		const bool bLandcoverAsked = VisualScene.WorldApplied.IsValid() &&
+			VisualScene.WorldApplied->TryGetObjectField(TEXT("land_cover"), LandcoverAsked) &&
+			LandcoverAsked != nullptr && (*LandcoverAsked)->GetBoolField(TEXT("asked"));
+		if (bLandcoverAsked)
+		{
+			UMaterialInterface* LandcoverMaterial =
+				LoadObject<UMaterialInterface>(nullptr, RenderLandcoverMaterialPath);
+			if (LandcoverMaterial == nullptr || !VisualScene.Landcover.bReady)
+			{
+				return Fail(FString::Printf(
+					TEXT("labels.landcover_pass: the scene carries land cover and the ID pass needs %s ")
+					TEXT("(scripts/ue_create_materials.py) and the class map %s (scripts/")
+					TEXT("ue_build_scene.py); %s"),
+					RenderLandcoverMaterialPath, *VisualScene.Landcover.ClassMapAsset,
+					LandcoverMaterial == nullptr ? TEXT("the material did not load")
+					                             : TEXT("the class map did not load")));
+			}
+			const FFlightSimLandcoverPass& Pass = VisualScene.Landcover;
+			UMaterialInstanceDynamic* LandcoverInstance =
+				UMaterialInstanceDynamic::Create(LandcoverMaterial, Director);
+			LandcoverInstance->SetTextureParameterValue(TEXT("ClassMap"), Pass.ClassMap);
+			LandcoverInstance->SetScalarParameterValue(TEXT("OriginX"), static_cast<float>(Pass.OriginCm.X));
+			LandcoverInstance->SetScalarParameterValue(TEXT("OriginY"), static_cast<float>(Pass.OriginCm.Y));
+			LandcoverInstance->SetScalarParameterValue(TEXT("CellX"), static_cast<float>(Pass.CellXCm));
+			LandcoverInstance->SetScalarParameterValue(TEXT("CellY"), static_cast<float>(Pass.CellYCm));
+			LandcoverInstance->SetScalarParameterValue(TEXT("GridWidth"), static_cast<float>(Pass.GridWidth));
+			LandcoverInstance->SetScalarParameterValue(TEXT("GridHeight"), static_cast<float>(Pass.GridHeight));
+			LandcoverInstance->SetScalarParameterValue(TEXT("TerrainStencil"), static_cast<float>(LabelTerrainIntId));
+			LandcoverTarget = NewObject<UTextureRenderTarget2D>();
+			LandcoverTarget->RenderTargetFormat = RTF_R32f;
+			LandcoverTarget->ClearColor = FLinearColor::Black;
+			LandcoverTarget->bAutoGenerateMips = false;
+			LandcoverTarget->InitAutoFormat(Width, Height);
+			LandcoverTarget->UpdateResourceImmediate(true);
+			LabelLandcover = NewObject<USceneCaptureComponent2D>(Director, TEXT("LabelLandcover"));
+			LabelLandcover->TextureTarget = LandcoverTarget;
+			LabelLandcover->CaptureSource = ESceneCaptureSource::SCS_FinalColorHDR;
+			ConfigureLabelCapture(LabelLandcover);
+			LabelLandcover->ShowFlags.SetPostProcessing(true);
+			LabelLandcover->PostProcessSettings.WeightedBlendables.Array.Add(
+				FWeightedBlendable(1.0f, LandcoverInstance));
+			LabelLandcover->PostProcessBlendWeight = 1.0f;
+			LabelLandcover->RegisterComponent();
+		}
 		for (FRenderLabelledObject& Entry : Labelled)
 		{
 			if (Entry.Class != TEXT("aircraft") || Entry.Actor == nullptr)
@@ -3170,6 +3286,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			const double Azim = FMath::Lerp(SunAzimuthDeg, SunAzimuthEndDeg, Fraction);
 			VisualScene.Sun->SetActorRotation(FRotator(-Elev, Azim + 180.0, 0.0));
 		}
+		// W5: the world look per tick at the FDM's own time -- the cloud
+		// material's drift offset and the rain phase -- before any capture of
+		// this step (deterministic in the step: Gate 10-R).
+		if (bVisual)
+		{
+			VisualScene.AdvanceWorld(Scenario.ReadProperty(TEXT("simulation/sim-time-sec")));
+		}
 
 		// Consume-poses: drive the camera by SIMULATION time before the
 		// render-state flush, so the capture sees the solved pose for this
@@ -3560,6 +3683,60 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Labels->SetNumberField(TEXT("unlabelled_geometry_pixels"), UnlabelledGeometry);
 			Labels->SetNumberField(TEXT("non_integer_id_pixels"), NonIntegerIds);
 			Labels->SetArrayField(TEXT("objects"), ObjectRecords);
+			// W5: the land-cover ID pass -- the WorldCover code per pixel of
+			// terrain (0 for sky and every non-terrain id), 8-bit, AA-free,
+			// read back as raw floats like the ID pass; a non-integer value is
+			// a measurement (a blend or a resample), counted, never hidden.
+			if (LabelLandcover != nullptr)
+			{
+				LabelLandcover->FOVAngle = Capture->FOVAngle;
+				TArray<FLinearColor> LandcoverRaw;
+				LabelLandcover->CaptureScene();
+				FlushRenderingCommands();
+				FTextureRenderTargetResource* LandcoverResource =
+					LandcoverTarget->GameThread_GetRenderTargetResource();
+				if (LandcoverResource == nullptr
+				    || !LandcoverResource->ReadLinearColorPixels(LandcoverRaw, RawFloats)
+				    || LandcoverRaw.Num() != Count)
+				{
+					return Fail(TEXT("labels.landcover_pass: could not read the land-cover ID pass back"));
+				}
+				TArray<uint8> LandcoverCodes;
+				LandcoverCodes.SetNumZeroed(Count);
+				int32 LandcoverNonInteger = 0;
+				TMap<int32, int32> LandcoverCounts;
+				for (int32 i = 0; i < Count; ++i)
+				{
+					const float Value = LandcoverRaw[i].R;
+					const int32 Code = FMath::Clamp(FMath::RoundToInt(Value), 0, 255);
+					if (FMath::Abs(Value - static_cast<float>(Code)) > 1.0e-3f)
+					{
+						++LandcoverNonInteger;
+					}
+					LandcoverCodes[i] = static_cast<uint8>(Code);
+					if (Code != 0)
+					{
+						LandcoverCounts.FindOrAdd(Code)++;
+					}
+				}
+				// Not the Python image's name (<stem>_landcover.png, core/
+				// capture/labels.py): the engine's pass sits beside it.
+				const FString LandcoverName = Stem + TEXT("_landcover_id.png");
+				if (!RenderWriteGrayPng(FPaths::Combine(OutputDirectory, LandcoverName),
+				                        LandcoverCodes.GetData(), LandcoverCodes.Num(), Width, Height, 8))
+				{
+					return Fail(FString::Printf(TEXT("labels.landcover_pass: could not write %s"),
+					                            *LandcoverName));
+				}
+				TSharedPtr<FJsonObject> CodeCounts = MakeShared<FJsonObject>();
+				for (const TPair<int32, int32>& Pair : LandcoverCounts)
+				{
+					CodeCounts->SetNumberField(FString::FromInt(Pair.Key), Pair.Value);
+				}
+				Labels->SetStringField(TEXT("landcover_png"), LandcoverName);
+				Labels->SetObjectField(TEXT("landcover_codes"), CodeCounts);
+				Labels->SetNumberField(TEXT("landcover_non_integer_pixels"), LandcoverNonInteger);
+			}
 			Record->SetObjectField(TEXT("labels"), Labels);
 			LabelDepthThisFrame = MoveTemp(DepthMetres);
 		}
@@ -4982,6 +5159,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			TEXT("r.EyeAdaptation.LensAttenuation"),
 			TEXT("r.UsePreExposure"),
 			TEXT("r.VelocityOutputPass"),
+			// W5: the world's measured toggles, read back (each a Windows
+			// on/off clause, no benefit claimed): Nanite on the Landscape,
+			// streaming virtual textures, MegaLights (the runway lights'
+			// probe) -- r.Substrate is above.
+			TEXT("landscape.RenderNanite"),
+			TEXT("r.VirtualTextures"),
+			TEXT("r.MegaLights"),
+			TEXT("r.MegaLights.EnableForProject"),
 		};
 		for (const TCHAR* Name : ConsoleNames)
 		{
@@ -5168,6 +5353,45 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	if (Calibration.IsValid())
 	{
 		Root->SetObjectField(TEXT("calibration"), Calibration);
+	}
+	// W5: world_applied -- what the scene level and the world look drew, the
+	// ten keys (landscape, imagery, land_cover, vegetation, buildings, runway,
+	// night, precipitation, cloud_drift, materials), each row saying whether
+	// the card or -scene= asked for it; graded by core/capture/verify.py
+	// check.world_record where present. Absent (render.json byte-identical to
+	// before) when the card carries no world or look block and no -scene= was
+	// given.
+	if (bVisual && bWorldAsked && VisualScene.WorldApplied.IsValid())
+	{
+		TSharedPtr<FJsonObject> WorldRecord = VisualScene.WorldApplied;
+		const TSharedPtr<FJsonObject>* Vegetation = nullptr;
+		if (WorldRecord->TryGetObjectField(TEXT("vegetation"), Vegetation) && Vegetation != nullptr)
+		{
+			// The stencil the aggregates carried in this pass (0 without -labels).
+			int32 VegetationId = 0, BuildingId = 0;
+			for (const FRenderLabelledObject& Entry : Labelled)
+			{
+				if (Entry.Id == FlightSimWorld::VegetationObjectId) { VegetationId = Entry.IntId; }
+				if (Entry.Id == FlightSimWorld::BuildingObjectId) { BuildingId = Entry.IntId; }
+			}
+			(*Vegetation)->SetNumberField(TEXT("int_id"), VegetationId);
+			const TSharedPtr<FJsonObject>* Buildings = nullptr;
+			if (WorldRecord->TryGetObjectField(TEXT("buildings"), Buildings) && Buildings != nullptr)
+			{
+				(*Buildings)->SetNumberField(TEXT("int_id"), BuildingId);
+			}
+		}
+		const TSharedPtr<FJsonObject>* LandCover = nullptr;
+		if (WorldRecord->TryGetObjectField(TEXT("land_cover"), LandCover) && LandCover != nullptr)
+		{
+			(*LandCover)->SetBoolField(TEXT("drawn"), LabelLandcover != nullptr);
+			(*LandCover)->SetStringField(TEXT("file"), TEXT("frame_NNNN_landcover_id.png"));
+			(*LandCover)->SetStringField(TEXT("encoding"),
+				TEXT("8-bit grey PNG: the WorldCover legend code of the terrain under each pixel, ")
+				TEXT("0 for sky and every non-terrain id; AA-free; labels.landcover_png per frame"));
+			(*LandCover)->SetNumberField(TEXT("terrain_stencil"), LabelTerrainIntId);
+		}
+		Root->SetObjectField(TEXT("world_applied"), WorldRecord);
 	}
 	// S4: how every linear file this pass wrote is laid out, so a reader of
 	// render.json alone decodes it (ASCII only -- gotcha 13). Absent when
@@ -5383,6 +5607,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	}
 	Environment->SetBoolField(TEXT("orographic_follow_schedule"),
 	                          Card.bOrographicFollowSchedule);
+	// P9: what the physics blocks did (core/capture/verify.py check.host_physics
+	// grades each key where present), beside this commandlet's own keys.
+	Scenario.AppendEnvironmentReport(Card, Environment);
 	Root->SetObjectField(TEXT("environment"), Environment);
 	Root->SetArrayField(TEXT("frame_records"), FrameRecords);
 

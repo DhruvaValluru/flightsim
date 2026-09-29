@@ -110,10 +110,9 @@ ALLOWED_FUTURE: Dict[str, str] = {
     # card.atmosphere_properties / card.derived_aircraft: each is now a
     # "REFUSED -- <name>: <sentence>" emitter in FlightSimScenarioWorld.cpp
     # that the C++ scan below reads, so none is claimed as future.)
-    # W3's host-side look refusals: emitted by the render host's world look
-    # (W5, FlightSimVisualScene), uncompiled here.
-    "look.precipitation_particles": "W5 world engine side (FlightSimVisualScene M_RainStreaks)",
-    "look.cloud_drift_parameter": "W5 world engine side (FlightSimVisualScene cloud offset)",
+    # (W5 landed W3's host-side look refusals -- look.precipitation_particles,
+    # look.cloud_drift_parameter -- as TEXT("<name>: ...") emitters in
+    # FlightSimVisualScene.cpp that the C++ scan reads, so neither is future.)
 }
 
 #: Catalogue sentences the guided page carries as static text rather

@@ -1327,7 +1327,7 @@ def undulation_variable(datum: Dict[str, Any],
         name=VARIABLE_NAME,
         value=float(n) if georeferenced else None,
         unit="m", source="derived",
-        model=model_name if georeferenced else f"{model_name} (not applied: no georeferenced heights)",
+        model_name=model_name if georeferenced else f"{model_name} (not applied: no georeferenced heights)",
         parameters=parameters,
         references=REFERENCES,
         properties_written=(),
@@ -1338,7 +1338,7 @@ def undulation_variable(datum: Dict[str, Any],
         # text and the citation. Nothing is written to JSBSim, so there is
         # no jsbsim_writes; the readback (when a run supplies it) grades
         # the recorder's appended column, not JSBSim's property store.
-        model_block=Model(
+        model=Model(
             name=model_name, standard=STANDARDS[key],
             version=MODEL_NAMES[key],
             parameters={"interpolation": method,

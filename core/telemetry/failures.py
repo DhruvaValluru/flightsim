@@ -915,7 +915,7 @@ class FailureSchedule:
                 value=(float(event.value) if event.kind == "authority_loss"
                        else (st.written if st.written is not None else 1.0)),
                 unit="1", source=self.source,
-                model=MODEL_NAMES[event.kind], parameters=parameters,
+                model_name=MODEL_NAMES[event.kind], parameters=parameters,
                 references=REFERENCES + ((self.std,) if self.std else ()),
                 properties_written=tuple(dict.fromkeys(p for p, _ in st.writes)),
                 telemetry_columns=columns, frame_keys=columns,
@@ -927,7 +927,7 @@ class FailureSchedule:
                 frm=self.frm, std=self.std, readback=readback,
                 jsbsim_writes=tuple(JsbsimWrite(p, f"once, at the first step with t >= {event.at_s:g} s")
                                     for p in dict.fromkeys(p for p, _ in st.writes)),
-                model_block=Model(name=MODEL_NAMES[event.kind],
+                model=Model(name=MODEL_NAMES[event.kind],
                                   standard="none: JSBSim 1.2.4's own controls, measured",
                                   version="JSBSim 1.2.4", parameters=model_parameters,
                                   references=REFERENCES),
@@ -963,7 +963,7 @@ class FailureSchedule:
         columns = (FLAG_COLUMN,) + tuple(self._engine_columns)
         return AppliedVariable(
             name="failures.events", value=[e.to_dict() for e in self.events], unit="events",
-            source=self.source, model="failure schedule (core/telemetry/failures.py)",
+            source=self.source, model_name="failure schedule (core/telemetry/failures.py)",
             parameters={"count": len(self.events), "applied_count": len(self.applied),
                         "applied": self.applied, "needs_injection": self.needs_injection,
                         "steps": self.steps, "dt_s": self._dt,
@@ -981,7 +981,7 @@ class FailureSchedule:
                      "attach_null_pair replaces this test with the pair's when it is run"),
             not_claimed=NOT_CLAIMED,
             frm=self.frm, std=self.std, readback=readback,
-            model_block=Model(name="failure schedule", standard="none",
+            model=Model(name="failure schedule", standard="none",
                               version="JSBSim 1.2.4",
                               parameters={"kinds": list(KINDS), "surfaces": list(SURFACES),
                                           "hook": "FlightDynamics step hook, before each step"},

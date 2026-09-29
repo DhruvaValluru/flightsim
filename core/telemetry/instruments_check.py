@@ -16,7 +16,7 @@ What is checked, in order, with the refusal name each FAIL carries:
 * ``instruments.truth``: ``telemetry.json`` is beside it, hashes to the
   ``truth_sha256`` the file recorded, and every truth column in the file
   equals the recorder's column value for value.
-* ``instruments.record``: the ``applied_variables`` block is version 1 and
+* ``instruments.record``: the ``applied_variables`` block is record 1 or 2 and
   holds the ``instruments.profile`` record naming the file's profile,
   with a null test that measured a difference.
 * ``instruments.residual``: per channel, the residual (measured minus
@@ -270,10 +270,10 @@ def check_instruments(run_dir) -> CheckResult:
     # -- the record ------------------------------------------------------
     block = data.get("applied_variables")
     records = block.get("applied_variables") if isinstance(block, dict) else None
-    if not isinstance(block, dict) or block.get("record_version") != 1 \
+    if not isinstance(block, dict) or block.get("record_version") not in (1, 2) \
             or not isinstance(records, list):
-        return CheckResult(FAIL, "the measured file carries no version-1 applied_variables "
-                                 "block", failure="instruments.record")
+        return CheckResult(FAIL, "the measured file carries no record-1 or record-2 "
+                                 "applied_variables block", failure="instruments.record")
     record = next((r for r in records if isinstance(r, dict) and r.get("name") == RECORD_NAME), None)
     if record is None or record.get("value") != profile.get("name") \
             or not isinstance(record.get("null_test"), dict) \

@@ -66,10 +66,10 @@ def report(campaign):
     return campaign.report()
 
 
-def test_the_report_states_record_version_2_and_the_record_constant_stays_1(campaign, report):
-    """R-REC-04: report.json says record_version 2 (the blocks it carries);
-    core.records.RECORD_VERSION stays 1 until the INT-final bump."""
-    assert REPORT_RECORD_VERSION == 2 and RECORD_VERSION == 1
+def test_the_report_states_record_version_2_the_record_constant(campaign, report):
+    """R-REC-04: report.json says record_version 2 (the blocks it carries),
+    which since the INT-final bump IS core.records.RECORD_VERSION."""
+    assert REPORT_RECORD_VERSION == RECORD_VERSION == 2
     assert report["record_version"] == 2
     written = json.loads((campaign.dir / "report.json").read_text(encoding="utf-8"))
     assert written["record_version"] == 2

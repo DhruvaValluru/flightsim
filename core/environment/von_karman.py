@@ -676,7 +676,7 @@ class VonKarmanTurbulence(GustProvider):
             "the engine side: the card block is pinned; nothing applies it here",
         ) + (() if p_delivery == "property" else (
             "the roll gust on this airframe: gust/p-equivalent-rad_sec is absent",))
-        common = dict(model=MODEL_NAME, model_block=self.model_block(), references=REFERENCES,
+        common = dict(model_name=MODEL_NAME, model=self.model_block(), references=REFERENCES,
                       properties_written=tuple(properties), jsbsim_writes=writes,
                       telemetry_columns=TELEMETRY_COLUMNS, frame_keys=TELEMETRY_COLUMNS,
                       readback=readback, not_claimed=not_claimed)

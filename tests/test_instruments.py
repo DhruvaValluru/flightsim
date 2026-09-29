@@ -201,7 +201,7 @@ def test_synthetic_truth_statistics_match_the_tactical_profile():
     # The null test measured a trace; the record names the columns.
     record = result.record
     assert record.name == "instruments.profile" and record.value == "tactical"
-    assert record.source == "user" and record.model == I.MODEL
+    assert record.source == "user" and record.model_name == I.MODEL
     assert record.null_test.ok and record.null_test.without_value == 0.0
     assert set(record.telemetry_columns) == {e["measured"] for e in result.data["channels"]}
     assert record.frame_keys == () and record.properties_written == ()
@@ -795,7 +795,7 @@ def test_each_stated_instrument_returns_its_record_with_a_measured_null_test(sta
         assert record["parameters"]["rate_hz"] == 120.0
         assert set(record["parameters"]["seed_streams"]) == set(I.OBSERVER_STREAMS)
         assert record["parameters"]["lever_arm_m"] == TACTICAL_ARMS[name]
-        assert record["model_block"]["parameters"]["rate_basis"] == "fdm loop"
+        assert record["model"]["parameters"]["rate_basis"] == "fdm loop"
         assert record["readback"]["agrees"] is True and record["readback"]["tolerance"] == 0.0
         assert record["properties_written"] == [] and "jsbsim_writes" not in record
         assert any("no device is calibrated" in n for n in record["not_claimed"])

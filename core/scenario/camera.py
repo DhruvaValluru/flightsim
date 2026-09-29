@@ -130,7 +130,7 @@ DEFAULT_EXPOSURE = (8.0, 1.0 / 500.0, 100.0)
 EXPOSURE_DEFAULTS: Dict[str, tuple] = {preset: DEFAULT_EXPOSURE
                                        for preset in CAMERA_PRESETS}
 
-#: S1 (still spec 8; the integrator bumps once): two per-camera sensing
+#: S1 (spec 9: INT-final's bump): two per-camera sensing
 #: fields, each a provenanced Quantity NOT in FIELD_ORDER and
 #: absent-canonical like ``exposure``: ``exposure_compensation_ev`` (EC,
 #: stops; +1 halves the luminance a unit of the linear frame stands
@@ -157,7 +157,7 @@ def default_sensing_fields() -> Dict[str, Quantity]:
     }
 
 
-#: S2 (still spec 8): the stereo rig and the ground-truth passes a camera
+#: S2 (spec 9): the stereo rig and the ground-truth passes a camera
 #: asks for, each a provenanced Quantity NOT in FIELD_ORDER and
 #: absent-canonical like the S1 fields: ``stereo`` ({baseline_m, side}, or
 #: None -- core/capture/stereo.py derives the right camera) and ``passes``
@@ -175,7 +175,7 @@ def default_pass_fields() -> Dict[str, Quantity]:
     }
 
 
-#: S3 (still spec 8): the IR proxy a camera asks for, ``cameras[i].ir`` =
+#: S3 (spec 9): the IR proxy a camera asks for, ``cameras[i].ir`` =
 #: {band, thermal_table} (core/capture/thermal.py: band LWIR or MWIR, the
 #: table under assets/thermal/), or None -- a provenanced Quantity NOT in
 #: FIELD_ORDER, absent-canonical like the S1 / S2 fields, so every committed

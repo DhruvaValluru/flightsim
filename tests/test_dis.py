@@ -631,7 +631,7 @@ def test_cli_writes_one_pdu_per_sample_of_a_real_run(real_run, tmp_path):
     assert manifest["applied_variables"]["record_version"] == RECORD_VERSION
     (record,) = records
     assert record["name"] == "interop.dis" and record["source"] == "derived"
-    assert record["model"] == "IEEE 1278.1-2012 ESPDU"
+    assert record["model_name"] == "IEEE 1278.1-2012 ESPDU"
     assert record["value"] == n and record["unit"] == "PDU"
     assert record["null_test"]["with"] < 1e-3 and record["null_test"]["threshold"] == 1e-3
     assert record["null_test"]["ok"] is True

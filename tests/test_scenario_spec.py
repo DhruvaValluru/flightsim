@@ -54,18 +54,20 @@ def test_every_numeric_field_carries_a_unit(spec):
             assert q.unit is not None, f"{name} has no unit"
 
 
-def test_spec_version_8_and_the_model_source(spec):
-    """SPEC_VERSION is 8 (Phase 2: scene, taxonomy, traffic,
-    randomization.policy and cameras[].exposure, every one optional and
-    absent-canonical), so older dicts refuse by the named version error
-    -- completed runs recover from provenance.json, never by re-parsing.
+def test_spec_version_9_and_the_model_source(spec):
+    """SPEC_VERSION is 9 (the advancement addition's blocks, every one
+    optional and absent-canonical; 8 was Phase 2's scene, taxonomy,
+    traffic, randomization.policy and cameras[].exposure). A version-8
+    dict still reads when it states no version-9 block; older dicts
+    refuse by the named version error -- completed runs recover from
+    provenance.json, never by re-parsing.
     The provenance rules are unchanged since version 5: a model-sourced
     quantity round-trips; plan() may move it (the guess is the system's
     choice) and the source becomes derived; user and inferred values
     stay immovable."""
     from core.scenario.spec import SPEC_VERSION
 
-    assert SPEC_VERSION == 8
+    assert SPEC_VERSION == 9
 
     spec.altitude = Quantity(150.0, "m", Source.MODEL, frm="treetop level")
     reread = ScenarioSpec.from_dict(spec.to_dict())
@@ -82,6 +84,11 @@ def test_spec_version_8_and_the_model_source(spec):
     old["spec_version"] = 5
     with pytest.raises(ValueError, match="not supported"):
         ScenarioSpec.from_dict(old)
+    old["spec_version"] = 7
+    with pytest.raises(ValueError, match="spec_version 7 is not supported"):
+        ScenarioSpec.from_dict(old)
+    old["spec_version"] = 8                      # no version-9 block: reads, at 9
+    assert ScenarioSpec.from_dict(old).to_dict()["spec_version"] == 9
 
 
 def test_unsupported_spec_version_is_refused(spec):

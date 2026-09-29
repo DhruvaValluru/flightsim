@@ -371,7 +371,7 @@ def test_the_datum_block_moves_no_recorded_column_and_the_export_moves_by_n0(nul
     assert null_report["bake"]["geoid_model"] == ("EGM2008" if EGM2008_CACHED else "EGM96")
     record = null_report["run_record"]
     assert record["value"] == n0 and record["null_test"]["ok"]
-    assert record["model"] == (f"{null_report['bake']['geoid_model']} "
+    assert record["model_name"] == (f"{null_report['bake']['geoid_model']} "
                                f"{null_report['bake']['interpolation']}")
     assert record["readback"]["agrees"] and record["parameters"]["invariance"]["ok"]
     assert record["parameters"]["declared_model"] == null_report["bake"]["geoid_model"]
