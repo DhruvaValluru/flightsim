@@ -190,12 +190,14 @@ def test_a_missing_or_altered_fixture_refuses_by_name(tmp_path):
     assert info.value.constraint == "weather.fixture_missing"
     data = (REPO / "assets/nwp" / f"{FIXTURE}.json").read_text(encoding="utf-8")
     sidecar = (REPO / "assets/nwp" / f"{FIXTURE}.provenance.json").read_text(encoding="utf-8")
-    (tmp_path / f"{FIXTURE}.json").write_text(data.replace("3.0", "3.5"), encoding="utf-8")
-    (tmp_path / f"{FIXTURE}.provenance.json").write_text(sidecar, encoding="utf-8")
+    # newline="\n": the digest is over bytes, and a Windows write_text would
+    # turn the fixture's LF into CRLF (measured: CI run 36509604836).
+    (tmp_path / f"{FIXTURE}.json").write_text(data.replace("3.0", "3.5"), encoding="utf-8", newline="\n")
+    (tmp_path / f"{FIXTURE}.provenance.json").write_text(sidecar, encoding="utf-8", newline="\n")
     with pytest.raises(ShearError) as info:
         load_fixture(FIXTURE, tmp_path)
     assert info.value.constraint == "weather.fixture_digest"
-    (tmp_path / f"{FIXTURE}.json").write_text(data, encoding="utf-8")
+    (tmp_path / f"{FIXTURE}.json").write_text(data, encoding="utf-8", newline="\n")
     assert load_fixture(FIXTURE, tmp_path)["levels"][0] == [1000.0, 3.0, 4.0]
     (tmp_path / f"{FIXTURE}.provenance.json").unlink()
     with pytest.raises(ShearError) as info:
