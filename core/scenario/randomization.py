@@ -669,6 +669,17 @@ POLICY_LEAVES: Dict[str, Dict[str, Any]] = {
     "traffic_count": {"forms": ("poisson", "choice", "uniform"),
                       "kind": "integer", "target": "block.traffic_count",
                       "unit": "dimensionless", "bounds": (0, 2)},
+    # P4: the loading. fuel_fraction fills every tank to the drawn fraction
+    # of its capacity (0 excluded: the engines need fuel); payload_kg puts
+    # the drawn mass at the airframe's configured policy station (the
+    # c172p's front passenger seat; refused by name on an airframe with
+    # none). A draw over the station's maximum, the maximum weight or the
+    # envelope is a refused draw at validation, recorded and re-drawn.
+    "fuel_fraction": {"forms": ("uniform", "beta", "choice", "normal"), "kind": "number",
+                      "target": "loading.fuel_fraction", "unit": "1",
+                      "bounds": (0.05, 1.0)},
+    "payload_kg": {"forms": ("uniform", "normal", "choice", "lognormal"), "kind": "number",
+                   "target": "loading.payload", "unit": "kg", "bounds": (0.0, 1000.0)},
 }
 #: The ``cameras`` group: applied to EVERY camera of the spec.
 POLICY_CAMERA_LEAVES: Dict[str, Dict[str, Any]] = {
@@ -960,11 +971,33 @@ def _apply_leaf(spec, path: str, name: str, leaf: Dict[str, Any], value: Any,
         if _stated(getattr(block, field)):
             _refuse_stated_target(path, f"randomization.{field}",
                                   getattr(block, field))
+    elif target.startswith("loading."):
+        field = target[len("loading."):]
+        if _stated(getattr(spec.loading, field)):
+            _refuse_stated_target(path, f"loading.{field}", getattr(spec.loading, field))
     else:
         field = target[len("spec."):]
         if _stated(getattr(spec, field)):
             _refuse_stated_target(path, field, getattr(spec, field))
 
+    if name == "fuel_fraction":
+        spec.loading.fuel_fraction = _sampled(value, "1", frm, path, leaf, seed, draw_index,
+                                              **extra)
+        return
+    if name == "payload_kg":
+        from .loading import load_loading_config
+
+        config = load_loading_config(str(spec.aircraft.value), config_dir)
+        if config is None or config.policy_station is None:
+            raise RandomizationError(
+                "randomization.policy",
+                f"{path}: {spec.aircraft.value} has no payload station a draw can fill "
+                f"({'no loading block' if config is None else config.policy_station_reason})")
+        spec.loading.payload = _sampled(
+            {config.policy_station: value}, "kg per station",
+            f"{frm}: at the {config.policy_station!r} station ({config.policy_station_reason})",
+            path, leaf, seed, draw_index, **extra)
+        return
     if name == "location":
         from ..nl.llm_compiler import LOCATION_TERRAIN_ELEVATION_M
         from ..terrain.glo30 import LOCATIONS
@@ -1504,6 +1537,14 @@ def card_block(spec) -> Optional[Dict[str, Any]]:
             q = getattr(spec, name)
             if q.source == Source.SAMPLED:
                 out[POLICY_LEAF_OF_SPEC_FIELD[name]] = q.value
+        # P4: the loading leaves, counted by the realised distribution as
+        # the drawn number (the payload draw is one mass at one station).
+        if spec.loading.fuel_fraction.source == Source.SAMPLED:
+            out["fuel_fraction"] = spec.loading.fuel_fraction.value
+        if spec.loading.payload.source == Source.SAMPLED:
+            drawn = spec.loading.payload.value
+            out["payload_kg"] = (next(iter(drawn.values())) if isinstance(drawn, dict) and drawn
+                                 else drawn)
         cameras = sampled_camera_values(spec)
         if cameras:
             out["cameras"] = cameras

@@ -43,6 +43,16 @@ P6 = ("turbulence_model.model", "turbulence_model.intensity", "turbulence_model.
 #: it is an entry with its default as the null.
 ENVIRONMENT = ("environment.wind_speed", "environment.wind_direction", "environment.turbulence",
                "environment.surface", "environment.weather_date", "environment.weather_event")
+#: P3: the failure schedule -- the block's one field (the event list, null
+#: the empty list) and the five kinds (no spec field of their own; the
+#: producer's measured null tests).
+FAILURES = ("failures.events",)
+FAILURE_KINDS = ("failures.engine_out", "failures.control_jam", "failures.hardover",
+                 "failures.float", "failures.authority_loss")
+#: P4: the loading block, one entry per field (payload is one field whose
+#: value is the {station: kg} mapping); every write is made once before
+#: the trim, the payload read back through cg-x-in against the hand CG.
+LOADING = ("loading.payload_kg", "loading.fuel_kg", "loading.fuel_fraction")
 
 
 def _entry(**overrides):
@@ -56,7 +66,15 @@ def _entry(**overrides):
 
 def test_every_batch_1_variable_and_every_physics_variable_is_registered():
     assert set(REGISTRY.names()) == (set(BATCH_1) | set(PHYSICS) | set(WORDS) | set(DATUM)
-                                     | set(INJECTED) | set(P6) | set(ENVIRONMENT))
+                                     | set(INJECTED) | set(P6) | set(ENVIRONMENT)
+                                     | set(LOADING) | set(FAILURES) | set(FAILURE_KINDS))
+    events = REGISTRY.get("failures.events")
+    assert events.spec_path == "failures.events" and events.null_value == [] and events.unit == "events"
+    for name in FAILURE_KINDS:
+        entry = REGISTRY.get(name)
+        assert entry.spec_path is None and entry.null_value is NO_NULL
+        assert entry.jsbsim_writes and entry.readback_tolerance is not None
+        assert entry.effect_channels and entry.null_basis
     for name in P6:
         entry = REGISTRY.get(name)
         assert entry.spec_path == name and entry.effect_channels and entry.null_basis
@@ -96,13 +114,19 @@ def test_every_batch_1_variable_and_every_physics_variable_is_registered():
     assert [w.property for w in surface.jsbsim_writes] == [
         "atmosphere/wind-north-fps", "atmosphere/wind-east-fps", "atmosphere/wind-down-fps"]
     assert surface.readback_tolerance.value == 0.0
-    assert REGISTRY.sections() == ("atmosphere", "datum", "environment", "turbulence_model",
-                                   "wind_profile")
+    for name in LOADING:
+        entry = REGISTRY.get(name)
+        assert entry.spec_path.startswith("loading.") and entry.null_value is None
+        assert entry.jsbsim_writes and entry.readback_tolerance is not None
+        assert entry.effect_channels and entry.null_basis
+    assert REGISTRY.get("loading.payload_kg").readback_tolerance.value == 0.1
+    assert REGISTRY.sections() == ("atmosphere", "datum", "environment", "failures", "loading",
+                                   "turbulence_model", "wind_profile")
     # Every spec field of the claimed blocks, and every environment quantity
     # of the spec, is claimed: the validator's record.unregistered check is
     # what a stated block meets first.
     from core.scenario.blocks import (
-        AtmosphereSpec, DatumSpec, TurbulenceModelSpec, WindProfileSpec,
+        AtmosphereSpec, DatumSpec, FailuresSpec, LoadingSpec, TurbulenceModelSpec, WindProfileSpec,
     )
     from core.scenario.spec import ScenarioSpec
     assert set(REGISTRY.spec_fields()) == (
@@ -110,6 +134,8 @@ def test_every_batch_1_variable_and_every_physics_variable_is_registered():
         | {f"datum.{f}" for f in DatumSpec.FIELD_ORDER}
         | {f"turbulence_model.{f}" for f in TurbulenceModelSpec.FIELD_ORDER}
         | {f"wind_profile.{f}" for f in WindProfileSpec.FIELD_ORDER}
+        | {f"loading.{f}" for f in LoadingSpec.FIELD_ORDER}
+        | {f"failures.{f}" for f in FailuresSpec.FIELD_ORDER}
         | {f"{sec}.{n}" for sec, n in ScenarioSpec.FIELD_ORDER if sec == "environment"})
 
 
@@ -223,6 +249,7 @@ def test_the_new_unit_suffixes_read_back():
     assert suffix_unit("t_static_k") == "K"
     assert suffix_unit("rh_pct") == "%"
     assert suffix_unit("rho_kgm3") == "kg/m^3"
+    assert suffix_unit("iyy_kgm2") == "kg m^2"        # P4: the pitch-inertia channel
     assert suffix_unit("stall_flag") == "1"
     # A per-second name is never read as seconds (P6's two channels; the
     # registry keeps no table of its own -- this one, longest first).

@@ -284,5 +284,75 @@
       "reason": "the JSBSim B747 model states no alpha limit (no <alphalimits> element; grep of B747.xml, 2026-09-28)"
     },
     "note": "The JSBSim B747 model is a generic 747; the placard values are the -400's. Measured 2026-09-28: the model trims and flies at 385 kt CAS at 1500 m (V_MO + 20) and at Mach 0.89 at 11000 m, so both speed limits are reachable on this model."
+  },
+  "loading": {
+    "source": "JSBSim 1.2.4 aircraft/B747/B747.xml <mass_balance> and <propulsion> as shipped in the .venv wheel (read 2026-09-28); the maximum weight from memory of the 747-400 type data [unverified here]",
+    "datum": {
+      "xml": "the B747.xml <location> x in inches, positive aft (the JSBSim structural frame); the XML names no reference point",
+      "poh": "the AFM balance envelope is stated in percent MAC against a datum the XML does not name [unverified here]",
+      "arm_comparison": {
+        "status": "unverified",
+        "reason": "no handbook arm is transcribed and the envelope is in percent MAC of an unnamed datum: the XML CG cannot be placed on the handbook chart, so the envelope check is refused by name (loading.datum_unverified) and the loading is flown at the XML's own arms"
+      }
+    },
+    "empty_weight": {
+      "lb": 523816.0,
+      "arm_in": 1327.0,
+      "source": "B747.xml <emptywt> 523816 LBS at <location name=\"CG\"> x 1327 in"
+    },
+    "stations": [],
+    "tanks": [
+      {
+        "index": 0,
+        "arm_in": 1327.0,
+        "poh_arm_in": null,
+        "capacity_lb": 10912.8,
+        "default_lb": 5456.4,
+        "source": "B747.xml tank 0: <capacity> 10912.8 LBS, <contents> 5456.4 LBS at x 1327 in (every tank sits at the empty CG, so fuel moves the CG by nothing)"
+      },
+      {
+        "index": 1,
+        "arm_in": 1327.0,
+        "poh_arm_in": null,
+        "capacity_lb": 10912.8,
+        "default_lb": 5456.4,
+        "source": "B747.xml tank 1: <capacity> 10912.8 LBS, <contents> 5456.4 LBS at x 1327 in (every tank sits at the empty CG, so fuel moves the CG by nothing)"
+      },
+      {
+        "index": 2,
+        "arm_in": 1327.0,
+        "poh_arm_in": null,
+        "capacity_lb": 10912.8,
+        "default_lb": 5456.4,
+        "source": "B747.xml tank 2: <capacity> 10912.8 LBS, <contents> 5456.4 LBS at x 1327 in (every tank sits at the empty CG, so fuel moves the CG by nothing)"
+      },
+      {
+        "index": 3,
+        "arm_in": 1327.0,
+        "poh_arm_in": null,
+        "capacity_lb": 10912.8,
+        "default_lb": 5456.4,
+        "source": "B747.xml tank 3: <capacity> 10912.8 LBS, <contents> 5456.4 LBS at x 1327 in (every tank sits at the empty CG, so fuel moves the CG by nothing)"
+      },
+      {
+        "index": 4,
+        "arm_in": 1327.0,
+        "poh_arm_in": null,
+        "capacity_lb": 10912.8,
+        "default_lb": 5456.4,
+        "source": "B747.xml tank 4: <capacity> 10912.8 LBS, <contents> 5456.4 LBS at x 1327 in (every tank sits at the empty CG, so fuel moves the CG by nothing)"
+      }
+    ],
+    "max_takeoff_weight": {
+      "kg": 396890.0,
+      "lb": 874992.7,
+      "source": "from memory of the Boeing 747-400 maximum takeoff weight 396890 kg (875000 lb) [unverified here]"
+    },
+    "cg_envelope": {
+      "polygon": null,
+      "reason": "the handbook envelope is in percent MAC against a datum this XML does not name; not transcribed"
+    },
+    "policy_station": null,
+    "policy_station_reason": "the JSBSim B747 declares no point-mass station: a payload draw has nowhere to go and refuses by name"
   }
 }

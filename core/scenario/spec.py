@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from .blocks import (
-    AtmosphereSpec, DatumSpec, SceneSpec, TaxonomySpec, TrafficSpec,
+    AtmosphereSpec, DatumSpec, FailuresSpec, LoadingSpec, SceneSpec, TaxonomySpec, TrafficSpec,
     TurbulenceModelSpec, WindProfileSpec,
 )
 from .camera import CameraSpec
@@ -163,6 +163,16 @@ class ScenarioSpec:
     turbulence_model: "TurbulenceModelSpec" = dc_field(
         default_factory=TurbulenceModelSpec.defaulted)
     wind_profile: "WindProfileSpec" = dc_field(default_factory=WindProfileSpec.defaulted)
+    #: Gap P4 (still spec 8; the integrator bumps once): the payload
+    #: stations and the fuel the flight starts with -- absent-canonical:
+    #: the XML's own loading is the default and is omitted, so every
+    #: committed spec-8 example keeps its digest.
+    loading: "LoadingSpec" = dc_field(default_factory=LoadingSpec.defaulted)
+    #: P3 (still spec 8; the integrator bumps once): the failure schedule
+    #: -- events of {kind, target, at_s, value} -- absent-canonical: the
+    #: empty list is the default and is omitted, so every committed
+    #: spec-8 example keeps its digest.
+    failures: "FailuresSpec" = dc_field(default_factory=FailuresSpec.defaulted)
 
     #: Field order for both serialisation and the rendered table.
     FIELD_ORDER = (
@@ -226,7 +236,7 @@ class ScenarioSpec:
         carry the spec's own set()/plan() doctrine."""
         import re
 
-        match = re.fullmatch(r"(scene|taxonomy|atmosphere|datum|turbulence_model|wind_profile)\.(\w+)", name)
+        match = re.fullmatch(r"(scene|taxonomy|atmosphere|datum|turbulence_model|wind_profile|loading|failures)\.(\w+)", name)
         if match is not None:
             block = getattr(self, match.group(1))
             return block, match.group(2)
@@ -379,6 +389,12 @@ class ScenarioSpec:
             out["turbulence_model"] = self.turbulence_model.to_dict()
         if not self.wind_profile.is_default():
             out["wind_profile"] = self.wind_profile.to_dict()
+        # P4: the loading block, absent-canonical like the others.
+        if not self.loading.is_default():
+            out["loading"] = self.loading.to_dict()
+        # P3: the failure schedule, absent-canonical like the others.
+        if not self.failures.is_default():
+            out["failures"] = self.failures.to_dict()
         if self.notes:
             out["notes"] = list(self.notes)
         return out
@@ -443,6 +459,12 @@ class ScenarioSpec:
         profile_data = data.get("wind_profile")
         wind_profile = (WindProfileSpec.defaulted() if profile_data is None
                         else WindProfileSpec.from_dict(profile_data))
+        loading_data = data.get("loading")
+        loading = (LoadingSpec.defaulted() if loading_data is None
+                   else LoadingSpec.from_dict(loading_data))
+        failures_data = data.get("failures")
+        failures = (FailuresSpec.defaulted() if failures_data is None
+                    else FailuresSpec.from_dict(failures_data))
         return cls(
             name=data.get("name", "scenario"),
             prompt=data.get("prompt"),
@@ -457,6 +479,8 @@ class ScenarioSpec:
             datum=datum,
             turbulence_model=turbulence_model,
             wind_profile=wind_profile,
+            loading=loading,
+            failures=failures,
             **kwargs,
         )
 
@@ -539,7 +563,9 @@ class ScenarioSpec:
                                   ("atmosphere", self.atmosphere),
                                   ("datum", self.datum),
                                   ("turbulence_model", self.turbulence_model),
-                                  ("wind_profile", self.wind_profile)):
+                                  ("wind_profile", self.wind_profile),
+                                  ("loading", self.loading),
+                                  ("failures", self.failures)):
             if not block.is_default():
                 for name, q in block.quantities():
                     rows.append((block_name, name.replace("_", " "),

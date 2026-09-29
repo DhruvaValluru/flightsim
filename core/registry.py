@@ -721,6 +721,77 @@ REGISTRY = Registry((
                    "an ERA5 date needs the network, blocked here, so no pair is measured "
                    "in this container)",
         u_input_rule=UInputRule(note="an ISO date or 'none': no bin, no spread")),
+    # -- P4: the loading block. payload is a mapping {station: kg} (one
+    #    field, one entry: the record's value is the mapping and its
+    #    parameters carry each station's write and read-back); the fuel is
+    #    a mass or a fraction of capacity. Every write is made ONCE before
+    #    the trim; the read-back that grades the payload is JSBSim's cg-x-in
+    #    against the hand CG (V13, 0.1 in; measured 1e-12 in on five
+    #    airframes), the tank contents read back exact. Effect channels are
+    #    recorded columns (lesson b): cg_x_m, iyy_kgm2 and weight_kg (P4's
+    #    two new channels and the existing gross mass), the trimmed elevator
+    #    (the runner's SURFACES column), pitch and altitude.
+    VariableRecord(
+        name="loading.payload_kg", spec_path="loading.payload", unit="kg per station",
+        jsbsim_writes=(JsbsimWrite("inertia/pointmass-weight-lbs[i]",
+                                   "once, before the trim (after the atmosphere writes)"),),
+        effect_channels=(EffectChannel("cg_x_m", "m"), EffectChannel("iyy_kgm2", "kg m^2"),
+                         EffectChannel("weight_kg", "kg"), EffectChannel("elevator_deg", "deg"),
+                         EffectChannel("pitch_deg", "deg"), EffectChannel("altitude_m", "m")),
+        null_value=None,
+        null_basis="unstated: the XML's own point-mass weights stand (the c172p's 180 lb "
+                   "pilot, its four empty seats and baggage); the pair of 136 kg at the "
+                   "aft-most seat (70 in) against the XML loading moves cg_x_m by 0.0974 m, "
+                   "the trimmed elevator by 0.223 deg, pitch by 0.548 deg and weight_kg by "
+                   "136 kg on the c172p at 1500 m / 100 kt (tests/test_loading.py)",
+        readback_tolerance=ReadbackTolerance(
+            0.1, "absolute",
+            "V13: inertia/cg-x-in read back after the station writes and a re-latch of the "
+            "initial conditions against the hand CG over the XML's own arms, in inches; "
+            "measured 1e-12 in on the c172p, A320, B747, DHC6 and p51d (the property store "
+            "itself returns each pointmass-weight-lbs[i] to the bit: 300 -> 300.0); the "
+            "tolerance is the blueprint's"),
+        u_input_rule=UInputRule(note="a stated mass per station: u_x 0 unless a tolerance "
+                                     "is stated; no vocabulary"),
+        host_channels=("cg_x_m", "iyy_kgm2")),
+    VariableRecord(
+        name="loading.fuel_kg", spec_path="loading.fuel_kg", unit="kg",
+        jsbsim_writes=(JsbsimWrite("propulsion/tank[i]/contents-lbs",
+                                   "once, before the trim (after the atmosphere writes)"),),
+        effect_channels=(EffectChannel("weight_kg", "kg"), EffectChannel("cg_x_m", "m"),
+                         EffectChannel("iyy_kgm2", "kg m^2"), EffectChannel("elevator_deg", "deg"),
+                         EffectChannel("altitude_m", "m")),
+        null_value=None,
+        null_basis="unstated: the XML's own tank contents stand (the c172p's 2 x 100 lb); "
+                   "the mass is shared between the tanks in proportion to capacity",
+        readback_tolerance=ReadbackTolerance(
+            0.0, "absolute",
+            "measured here on the c172p and A320 (JSBSim 1.2.4): propulsion/tank[i]/contents-lbs "
+            "reads back the value written to the last bit before the engine start (130.0 -> "
+            "130.0, 19500.0 -> 19500.0); the crank then burns 0.0055 lb on the c172p before "
+            "the trim, recorded separately and not graded"),
+        u_input_rule=UInputRule(note="a stated mass: u_x 0 unless a tolerance is stated"),
+        host_channels=("weight_kg", "cg_x_m")),
+    VariableRecord(
+        name="loading.fuel_fraction", spec_path="loading.fuel_fraction", unit="1",
+        jsbsim_writes=(JsbsimWrite("propulsion/tank[i]/contents-lbs",
+                                   "once, before the trim (after the atmosphere writes)"),),
+        effect_channels=(EffectChannel("weight_kg", "kg"), EffectChannel("cg_x_m", "m"),
+                         EffectChannel("iyy_kgm2", "kg m^2"), EffectChannel("elevator_deg", "deg"),
+                         EffectChannel("altitude_m", "m")),
+        null_value=None,
+        null_basis="unstated: the XML's own tank contents stand (the c172p's 200 of 370 lb, "
+                   "0.54 of capacity); full against that moves weight_kg by 77.1 kg, cg_x_m "
+                   "by 0.0292 m and the trimmed elevator by 0.183 deg on the c172p "
+                   "(tests/test_loading.py)",
+        readback_tolerance=ReadbackTolerance(
+            0.0, "absolute",
+            "measured here on the c172p and A320 (JSBSim 1.2.4): propulsion/tank[i]/contents-lbs "
+            "reads back the value written to the last bit before the engine start; the "
+            "fraction is written as fraction x capacity per tank"),
+        u_input_rule=UInputRule(note="a stated fraction: u_x 0 unless a tolerance is stated; "
+                                     "a sampled one is the draw"),
+        host_channels=("weight_kg", "cg_x_m")),
     VariableRecord(
         name="environment.weather_event", spec_path="environment.weather_event", unit="word",
         effect_channels=(EffectChannel("wind_down_mps", "m/s"),
@@ -730,4 +801,107 @@ REGISTRY = Registry((
         null_basis="'none': no severe-weather feature placed, the spec default",
         u_input_rule=UInputRule(note="a word: no bin, no spread"),
         host_channels=("wind_down_mps",)),
+    # -- P3: the failure schedule. The block has ONE field, the event list,
+    #    so failures.events claims the section (null = no events, the
+    #    default) and each kind has its own entry with no spec field (the
+    #    events are list entries, not leaves), its writes, the read-back
+    #    tolerance measured here and the recorded channels it moves
+    #    (tests/test_failures.py, tests/test_failures_block.py). Every
+    #    channel is a recorded column of every run: failure_state_flag and
+    #    engine0_thrust_n through the schedule's recorder extras (every
+    #    configured airframe has an engine 0; a turbine's engine<i>_n1_pct
+    #    and a piston's engine<i>_rpm are recorded where the airframe has
+    #    them and named by the event's record, never invented), the
+    #    surfaces through the runner's SURFACES extras.
+    VariableRecord(
+        name="failures.events", spec_path="failures.events", unit="events",
+        effect_channels=(EffectChannel("failure_state_flag", "1"),
+                         EffectChannel("altitude_m", "m"), EffectChannel("heading_deg", "deg"),
+                         EffectChannel("pitch_deg", "deg"), EffectChannel("tas_kt", "kt")),
+        null_value=[],
+        null_basis="no events: every engine and surface as the model ships it (the spec "
+                   "default); the pair of a schedule against none moves the flag column "
+                   "and the flight (hardover on the c172p, engine-out and a jam under "
+                   "TECS on the A320: tests/test_failures_block.py)",
+        u_input_rule=UInputRule(note="a stated list of events: u_x 0; the times are stated, "
+                                     "not sampled"),
+        host_channels=("failure_state_flag",)),
+    VariableRecord(
+        name="failures.engine_out", spec_path=None, unit="1",
+        jsbsim_writes=(JsbsimWrite("propulsion/active_engine", "once, at the first step with t >= at_s (set to the engine, then restored to -1)"),
+                       JsbsimWrite("propulsion/cutoff_cmd", "once, at the first step with t >= at_s (turbine)"),
+                       JsbsimWrite("propulsion/magneto_cmd", "once, at the first step with t >= at_s (piston)")),
+        effect_channels=(EffectChannel("altitude_m", "m"), EffectChannel("tas_kt", "kt"),
+                         EffectChannel("heading_deg", "deg"),
+                         EffectChannel("engine0_thrust_n", "N"),
+                         EffectChannel("failure_state_flag", "1")),
+        null_basis="no spec field of its own (an event of failures.events): the producer "
+                   "measures thrust before the write against thrust once the engine has "
+                   "settled (A320 53125 N -> 0 on the next step; c172p 1008 N -> -52 N at 2 s)",
+        readback_tolerance=ReadbackTolerance(
+            0.0, "absolute",
+            "measured here (JSBSim 1.2.4): propulsion/cutoff_cmd read with active_engine set "
+            "to the engine reads 1.0 exactly on the next step (A320); magneto_cmd is write-only "
+            "(FGPropulsion.cpp L819-L820), so the piston's read-back property is "
+            "engine[i]/set-running, which reads 0.0 exactly on the next step (c172p); a bare "
+            "set-running 0 relights both engine types on the next step and is not the write"),
+        u_input_rule=UInputRule(note="a switch: no bin, no spread"),
+        host_channels=("failure_state_flag", "engine0_thrust_n", "engine1_thrust_n",
+                       "engine0_n1_pct", "engine1_n1_pct", "engine0_rpm", "engine1_rpm")),
+    VariableRecord(
+        name="failures.control_jam", spec_path=None, unit="1",
+        jsbsim_writes=(JsbsimWrite("failure/<surface>/actuator/malfunction/fail_stuck",
+                                   "once, at the first step with t >= at_s"),),
+        effect_channels=(EffectChannel("elevator_deg", "deg"), EffectChannel("aileron_deg", "deg"),
+                         EffectChannel("rudder_deg", "deg"), EffectChannel("pitch_deg", "deg"),
+                         EffectChannel("roll_deg", "deg"), EffectChannel("heading_deg", "deg"),
+                         EffectChannel("altitude_m", "m"), EffectChannel("failure_state_flag", "1")),
+        null_basis="no spec field of its own: the producer measures the hold (max drift 0.0 "
+                   "rad over 100 steps on the c172p and the A320) as a bounded test; the "
+                   "with/without pair is the schedule's",
+        readback_tolerance=ReadbackTolerance(0.0, "absolute", _INJECTED),
+        u_input_rule=UInputRule(note="a switch: no bin, no spread"),
+        host_channels=("elevator_deg", "aileron_deg", "rudder_deg")),
+    VariableRecord(
+        name="failures.hardover", spec_path=None, unit="1",
+        jsbsim_writes=(JsbsimWrite("failure/<surface>/actuator/malfunction/fail_hardover",
+                                   "once, at the first step with t >= at_s"),),
+        effect_channels=(EffectChannel("elevator_deg", "deg"), EffectChannel("aileron_deg", "deg"),
+                         EffectChannel("rudder_deg", "deg"), EffectChannel("pitch_deg", "deg"),
+                         EffectChannel("roll_deg", "deg"), EffectChannel("heading_deg", "deg"),
+                         EffectChannel("altitude_m", "m"), EffectChannel("failure_state_flag", "1")),
+        null_basis="no spec field of its own: the producer measures the surface position on "
+                   "the step after the write against the step before (c172p elevator 0.0752 "
+                   "-> 0.4014 rad)",
+        readback_tolerance=ReadbackTolerance(0.0, "absolute", _INJECTED),
+        u_input_rule=UInputRule(note="a switch: no bin, no spread"),
+        host_channels=("elevator_deg", "aileron_deg", "rudder_deg")),
+    VariableRecord(
+        name="failures.float", spec_path=None, unit="1",
+        jsbsim_writes=(JsbsimWrite("failure/<surface>/actuator/malfunction/fail_zero",
+                                   "once, at the first step with t >= at_s"),),
+        effect_channels=(EffectChannel("elevator_deg", "deg"), EffectChannel("aileron_deg", "deg"),
+                         EffectChannel("rudder_deg", "deg"), EffectChannel("pitch_deg", "deg"),
+                         EffectChannel("roll_deg", "deg"), EffectChannel("heading_deg", "deg"),
+                         EffectChannel("altitude_m", "m"), EffectChannel("failure_state_flag", "1")),
+        null_basis="no spec field of its own: the producer measures the surface position on "
+                   "the step after the write against the step before (a zero command floats "
+                   "to where it already was and is honestly not reached)",
+        readback_tolerance=ReadbackTolerance(0.0, "absolute", _INJECTED),
+        u_input_rule=UInputRule(note="a switch: no bin, no spread"),
+        host_channels=("elevator_deg", "aileron_deg", "rudder_deg")),
+    VariableRecord(
+        name="failures.authority_loss", spec_path=None, unit="1",
+        jsbsim_writes=(JsbsimWrite("failure/<surface>/authority",
+                                   "once, at the first step with t >= at_s"),),
+        effect_channels=(EffectChannel("elevator_deg", "deg"), EffectChannel("aileron_deg", "deg"),
+                         EffectChannel("rudder_deg", "deg"), EffectChannel("pitch_deg", "deg"),
+                         EffectChannel("roll_deg", "deg"), EffectChannel("heading_deg", "deg"),
+                         EffectChannel("altitude_m", "m"), EffectChannel("failure_state_flag", "1")),
+        null_basis="no spec field of its own: the producer measures the actuator output on "
+                   "the step after the write against the step before (c172p: -0.3 -> -0.15 "
+                   "at authority 0.5, held on 100 steps)",
+        readback_tolerance=ReadbackTolerance(0.0, "absolute", _INJECTED),
+        u_input_rule=UInputRule(note="the remaining authority, stated: u_x 0; no vocabulary"),
+        host_channels=("elevator_deg", "aileron_deg", "rudder_deg")),
 ))

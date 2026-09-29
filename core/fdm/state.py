@@ -98,6 +98,11 @@ REQUIRED_PROPERTIES = (
     "atmosphere/gust-down-fps",
     "atmosphere/wind-north-fps",
     "atmosphere/wind-east-fps",
+    # P4: the centre of gravity (inches aft of the XML datum) and the pitch
+    # inertia FGMassBalance holds, read back every sample. Both probed on
+    # the live catalog (read-only).
+    "inertia/cg-x-in",
+    "inertia/iyy-slugs_ft2",
     "fcs/elevator-pos-rad",
     "fcs/rudder-pos-rad",
     "fcs/throttle-cmd-norm",
@@ -108,6 +113,10 @@ REQUIRED_PROPERTIES = (
 #: Read when the loaded model has it; recorded as 0.0 when it does not
 #: (nothing reached the airframe), with the record saying ``absent``.
 P_EQUIVALENT_PROPERTY = "gust/p-equivalent-rad_sec"
+
+#: P4: slug ft^2 -> kg m^2, from the density factor the units module states
+#: (1 slug = KGM3_PER_SLUGFT3 kg/m^3 x 1 ft^3; times ft^2): 1.35581795 kg m^2.
+KGM2_PER_SLUGFT2 = u.KGM3_PER_SLUGFT3 * u.M_PER_FT ** 5
 
 #: Control-surface positions, read for mesh articulation (§5 Phase 5) and for
 #: the burn-in. Not every airframe defines every one, so these are resolved
@@ -232,6 +241,12 @@ class AircraftState:
     gust_p_equivalent_rad_s: float
     wind_profile_speed_mps: float
 
+    # -- the loading (P4): the CG in metres aft of the XML datum (JSBSim's
+    #    inertia/cg-x-in over 12 and to metres) and the pitch inertia in
+    #    kg m^2 (inertia/iyy-slugs_ft2). Recorded, not graded by Gate 5.
+    cg_x_m: float
+    iyy_kgm2: float
+
     # -- control surface positions, for articulation and burn-in
     surfaces: Dict[str, float] = field(default_factory=dict)
 
@@ -353,5 +368,7 @@ class AircraftState:
             gust_p_equivalent_rad_s=p_equivalent,
             wind_profile_speed_mps=u.fps_to_mps(math.hypot(g("atmosphere/wind-north-fps"),
                                                            g("atmosphere/wind-east-fps"))),
+            cg_x_m=u.ft_to_m(g("inertia/cg-x-in") / 12.0),
+            iyy_kgm2=g("inertia/iyy-slugs_ft2") * KGM2_PER_SLUGFT2,
             surfaces={n.split("/")[-1]: g(n) for n in surface_names},
         )

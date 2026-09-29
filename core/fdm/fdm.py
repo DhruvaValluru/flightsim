@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Callable, Dict, List, Optional
 
 import jsbsim
 
@@ -178,6 +178,10 @@ class FlightDynamics:
         self._ic_applied = False
         self._engines_started = False
         self._frozen_tanks: Optional[Dict[str, float]] = None
+        #: P3: callables run at the top of every :meth:`step`, in the
+        #: order registered (the failure schedule's ``apply``). Empty by
+        #: default, so a run that registers none steps exactly as before.
+        self._step_hooks: List[Callable[["FlightDynamics"], None]] = []
 
     @classmethod
     def with_tecs(
@@ -561,10 +565,28 @@ class FlightDynamics:
     def mass_held(self) -> bool:
         return self._frozen_tanks is not None
 
+    def register_step_hook(self, hook: Callable[["FlightDynamics"], None]) -> None:
+        """Run ``hook(fdm)`` at the top of every :meth:`step`, before the
+        integration (P3: the failure schedule's ``apply``). The one
+        per-step seam both of the runner's loops share, so a write that
+        must land at the first step past a stated time lands there in
+        either loop. Hooks run in registration order; a hook is never
+        run twice per step; nothing else about :meth:`step` changes.
+        """
+        if not callable(hook):
+            raise TypeError(f"a step hook is callable, not {hook!r}")
+        self._step_hooks.append(hook)
+
+    @property
+    def step_hooks(self) -> tuple:
+        return tuple(self._step_hooks)
+
     def step(self) -> None:
         """Advance exactly one fixed timestep."""
         if self._frozen_tanks is not None:
             self.props.set_many(self._frozen_tanks)
+        for hook in self._step_hooks:
+            hook(self)
         if not self._exec.run():
             raise SimulationError(
                 f"JSBSim run() returned false at t={self.sim_time:.3f}s"

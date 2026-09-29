@@ -179,5 +179,218 @@
       "reason": "the JSBSim p51d model states no alpha limit (no <alphalimits> element; grep of p51d.xml, 2026-09-28)"
     },
     "note": "Measured 2026-09-28: the JSBSim p51d cannot be trimmed at 250 or 460 kt CAS at 1500 m (refused envelope.trim_feasible), so a run beyond V_NE is unreachable on this model at that condition."
+  },
+  "loading": {
+    "source": "JSBSim 1.2.4 aircraft/p51d/p51d.xml <mass_balance> and <propulsion> as shipped in the .venv wheel (read 2026-09-28) and aircraft/p51d/Systems/weapons-weight.xml; the maximum weight from memory of the P-51D flight manual [unverified here]",
+    "datum": {
+      "xml": "the p51d.xml <location> x in inches, positive aft (the JSBSim structural frame); the XML names no reference point",
+      "poh": "not transcribed",
+      "arm_comparison": {
+        "status": "unverified",
+        "reason": "no flight-manual arm is transcribed for the P-51D: the envelope check is refused by name (loading.datum_unverified) and the loading is flown at the XML's own arms"
+      }
+    },
+    "empty_weight": {
+      "lb": 7125.0,
+      "arm_in": 96.5,
+      "source": "p51d.xml <emptywt> 7125 LBS at <location name=\"CG\"> x 96.5 in"
+    },
+    "stations": [
+      {
+        "name": "pilot",
+        "index": 0,
+        "arm_in": 98.0,
+        "poh_arm_in": null,
+        "default_lb": 180.0,
+        "max_kg": 150.0,
+        "loadable": true,
+        "source": "p51d.xml <pointmass name=\"pilot\"> 180 LBS at x 98 in; a stated choice, not a handbook limit: 150 kg per seat; the handbook bounds the seats through the maximum weight and the envelope, not per seat"
+      },
+      {
+        "name": "Ammo right inner gun",
+        "index": 1,
+        "arm_in": 97.0,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "p51d.xml <pointmass name=\"Ammo right inner gun\"> 0 LBS at x 97 in",
+        "reason": "written every model pass by Systems/weapons-weight.xml (an <output> of a system function): 300 lb written here reads back 0.0 after one model pass (measured 2026-09-28), so a stated mass for it cannot be delivered"
+      },
+      {
+        "name": "Ammo left inner gun",
+        "index": 2,
+        "arm_in": 97.0,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "p51d.xml <pointmass name=\"Ammo left inner gun\"> 0 LBS at x 97 in",
+        "reason": "written every model pass by Systems/weapons-weight.xml (an <output> of a system function): 300 lb written here reads back 0.0 after one model pass (measured 2026-09-28), so a stated mass for it cannot be delivered"
+      },
+      {
+        "name": "Ammo right middle gun",
+        "index": 3,
+        "arm_in": 97.0,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "p51d.xml <pointmass name=\"Ammo right middle gun\"> 0 LBS at x 97 in",
+        "reason": "written every model pass by Systems/weapons-weight.xml (an <output> of a system function): 300 lb written here reads back 0.0 after one model pass (measured 2026-09-28), so a stated mass for it cannot be delivered"
+      },
+      {
+        "name": "Ammo left middle gun",
+        "index": 4,
+        "arm_in": 97.0,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "p51d.xml <pointmass name=\"Ammo left middle gun\"> 0 LBS at x 97 in",
+        "reason": "written every model pass by Systems/weapons-weight.xml (an <output> of a system function): 300 lb written here reads back 0.0 after one model pass (measured 2026-09-28), so a stated mass for it cannot be delivered"
+      },
+      {
+        "name": "Ammo right outer gun",
+        "index": 5,
+        "arm_in": 97.0,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "p51d.xml <pointmass name=\"Ammo right outer gun\"> 0 LBS at x 97 in",
+        "reason": "written every model pass by Systems/weapons-weight.xml (an <output> of a system function): 300 lb written here reads back 0.0 after one model pass (measured 2026-09-28), so a stated mass for it cannot be delivered"
+      },
+      {
+        "name": "Ammo left outer gun",
+        "index": 6,
+        "arm_in": 97.0,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "p51d.xml <pointmass name=\"Ammo left outer gun\"> 0 LBS at x 97 in",
+        "reason": "written every model pass by Systems/weapons-weight.xml (an <output> of a system function): 300 lb written here reads back 0.0 after one model pass (measured 2026-09-28), so a stated mass for it cannot be delivered"
+      },
+      {
+        "name": "left rockets",
+        "index": 7,
+        "arm_in": 97.0,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "p51d.xml <pointmass name=\"left rockets\"> 0 LBS at x 97 in",
+        "reason": "written every model pass by Systems/weapons-weight.xml (an <output> of a system function): 300 lb written here reads back 0.0 after one model pass (measured 2026-09-28), so a stated mass for it cannot be delivered"
+      },
+      {
+        "name": "right rockets",
+        "index": 8,
+        "arm_in": 97.0,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "p51d.xml <pointmass name=\"right rockets\"> 0 LBS at x 97 in",
+        "reason": "written every model pass by Systems/weapons-weight.xml (an <output> of a system function): 300 lb written here reads back 0.0 after one model pass (measured 2026-09-28), so a stated mass for it cannot be delivered"
+      },
+      {
+        "name": "left bomb",
+        "index": 9,
+        "arm_in": 97.0,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "p51d.xml <pointmass name=\"left bomb\"> 0 LBS at x 97 in",
+        "reason": "written every model pass by Systems/weapons-weight.xml (an <output> of a system function): 300 lb written here reads back 0.0 after one model pass (measured 2026-09-28), so a stated mass for it cannot be delivered"
+      },
+      {
+        "name": "right bomb",
+        "index": 10,
+        "arm_in": 97.0,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "p51d.xml <pointmass name=\"right bomb\"> 0 LBS at x 97 in",
+        "reason": "written every model pass by Systems/weapons-weight.xml (an <output> of a system function): 300 lb written here reads back 0.0 after one model pass (measured 2026-09-28), so a stated mass for it cannot be delivered"
+      },
+      {
+        "name": "left drop tank",
+        "index": 11,
+        "arm_in": 97.0,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "p51d.xml <pointmass name=\"left drop tank\"> 0 LBS at x 97 in",
+        "reason": "written every model pass by Systems/weapons-weight.xml (an <output> of a system function): 300 lb written here reads back 0.0 after one model pass (measured 2026-09-28), so a stated mass for it cannot be delivered"
+      },
+      {
+        "name": "right drop tank",
+        "index": 12,
+        "arm_in": 97.0,
+        "poh_arm_in": null,
+        "default_lb": 0.0,
+        "max_kg": 0.0,
+        "loadable": false,
+        "source": "p51d.xml <pointmass name=\"right drop tank\"> 0 LBS at x 97 in",
+        "reason": "written every model pass by Systems/weapons-weight.xml (an <output> of a system function): 300 lb written here reads back 0.0 after one model pass (measured 2026-09-28), so a stated mass for it cannot be delivered"
+      }
+    ],
+    "tanks": [
+      {
+        "index": 0,
+        "arm_in": 110.0,
+        "poh_arm_in": null,
+        "capacity_lb": 607.21,
+        "default_lb": 396.0,
+        "source": "p51d.xml tank 0 (left wing): <capacity> 607.21 LBS, <contents> 396 LBS at x 110 in"
+      },
+      {
+        "index": 1,
+        "arm_in": 110.0,
+        "poh_arm_in": null,
+        "capacity_lb": 607.21,
+        "default_lb": 396.0,
+        "source": "p51d.xml tank 1 (right wing): <capacity> 607.21 LBS, <contents> 396 LBS at x 110 in"
+      },
+      {
+        "index": 2,
+        "arm_in": 130.0,
+        "poh_arm_in": null,
+        "capacity_lb": 561.0,
+        "default_lb": 0.0,
+        "source": "p51d.xml tank 2 (fuselage): <capacity> 561 LBS, <contents> 0 LBS at x 130 in"
+      },
+      {
+        "index": 3,
+        "arm_in": 97.5,
+        "poh_arm_in": null,
+        "capacity_lb": 495.0,
+        "default_lb": 0.0,
+        "source": "p51d.xml tank 3 (left drop): <capacity> 495 LBS, <contents> 0 LBS at x 97.5 in; the proportional fill rule fills it beside the wing tanks"
+      },
+      {
+        "index": 4,
+        "arm_in": 97.5,
+        "poh_arm_in": null,
+        "capacity_lb": 495.0,
+        "default_lb": 0.0,
+        "source": "p51d.xml tank 4 (right drop): <capacity> 495 LBS, <contents> 0 LBS at x 97.5 in; the proportional fill rule fills it beside the wing tanks"
+      }
+    ],
+    "max_takeoff_weight": {
+      "kg": 5488.5,
+      "lb": 12100.0,
+      "source": "from memory of the P-51D flight manual AN 01-60JE-1 maximum takeoff weight about 12100 lb [unverified here]"
+    },
+    "cg_envelope": {
+      "polygon": null,
+      "reason": "no flight-manual envelope transcribed for the P-51D"
+    },
+    "policy_station": "pilot",
+    "policy_station_reason": "the one loadable station (the twelve others are written by a system every pass): a payload draw replaces the XML's 180 lb pilot"
   }
 }

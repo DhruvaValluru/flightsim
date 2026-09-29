@@ -657,3 +657,47 @@ gust_table.length:
 card.layered_wind:
   sentence: "The run card's wind profile block is malformed: a key is missing or out of order, or a layer is not a height, a speed and a direction, so the host applies no profile."
   hint: "Regenerate the card from the scenario."
+
+# -- the advancement additions, batch1 -----------------------------------
+loading.config:
+  sentence: "This aircraft's loading table is missing, malformed, or not the flight model's own, so a loading cannot be set up for it."
+  hint: "Give the aircraft a loading table transcribed from its flight model: the empty weight, each station with its arm and its maximum, each tank with its capacity, every number with its source."
+loading.station_unknown:
+  sentence: "There is no payload station of that name on this aircraft, or that station cannot be loaded, so the mass has nowhere to go."
+  hint: "Name one of the aircraft's loadable stations."
+loading.station_mass:
+  sentence: "A mass of {actual} {unit} at a station is negative or over that station's maximum of {limit} {unit}."
+  hint: "Ask for a mass between zero and the station's maximum."
+loading.fuel_range:
+  sentence: "The fuel load cannot be set up as asked: it has to be more than zero and no more than the tanks hold, a fraction has to lie between 0 and 1, and the fuel is stated either as a mass or as a fraction, not both."
+  hint: "Ask for a fuel mass the tanks can hold, or a fraction of their capacity between 0 and 1."
+loading.max_weight:
+  sentence: "The loaded aircraft would weigh {actual} {unit}, more than its maximum takeoff weight of {limit} {unit}."
+  hint: "Lighten the payload or the fuel."
+loading.cg_envelope:
+  sentence: "With that loading the centre of gravity ({actual} inches aft of the reference point) lies outside the aircraft's balance envelope."
+  hint: "Move mass forward or aft, or lighten the load; the envelope and the arms it is checked against come from the handbook and are marked unverified."
+loading.datum_unverified:
+  sentence: "The balance envelope cannot be checked for this aircraft: its flight model's stations have not been matched to the handbook's reference point, so the loading is flown at the model's own arms and no envelope is claimed."
+  hint: "The check runs only for an aircraft whose station arms were compared with the handbook's; the loading itself is not refused."
+card.loading_properties:
+  sentence: "The run card's loading block is malformed, or the centre of gravity read back after the writes is not the expected one, so the host applies no loading."
+  hint: "Regenerate the card from the scenario; the block is written by the scenario tools, never by hand."
+failures.kind:
+  sentence: "A scheduled failure names a kind this build does not model, or is not written as a kind, a target, a time and a value, so nothing was scheduled."
+  hint: "Choose an engine out, a control jam, a hardover, a float or an authority loss, and write each event as those four parts."
+failures.target:
+  sentence: "A scheduled failure names a surface or an engine this aircraft does not have, so it could not be applied to anything."
+  hint: "Name the elevator, the aileron or the rudder for a control failure, or an engine number the aircraft has for an engine out."
+failures.time:
+  sentence: "A scheduled failure's time is not usable: it is negative, later than the end of the flight, not a number, or the events are not in time order."
+  hint: "Give each event a time within the flight, in seconds from its start, and list the events in order."
+failures.actuator_missing:
+  sentence: "A control failure was asked for on an aircraft whose flight model carries no failure chain for that surface, so it would have gone nowhere."
+  hint: "Choose an aircraft whose flight model can carry the control failure chain, or schedule an engine out instead."
+failures.value:
+  sentence: "The remaining authority of a control has to be a number between 0 and 1 (not {actual}), and only an authority loss takes a value."
+  hint: "State the remaining authority between 0 and 1 for an authority loss, and no value for the other kinds."
+card.failure_schedule:
+  sentence: "The run card's failure schedule is malformed: a key is missing or out of order, an event is not a kind, a target, a time, a property and a value, or the count does not match, so the host applies no failure."
+  hint: "Regenerate the card from the scenario; the schedule is written by the scenario tools, never by hand."

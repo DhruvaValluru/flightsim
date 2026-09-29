@@ -32,6 +32,7 @@ from ..fdm import FlightDynamics, TrimMode, mode_for
 from ..fdm import units as u
 from ..records import AppliedVariable, Readback, records_block
 from ..fdm.modes import modes_block
+from ..telemetry.failures import FailureSchedule, failure_injections_for
 from ..telemetry.limits import monitor_run
 from ..telemetry.recorder import Recorder
 from ..terrain.geoid import (
@@ -92,6 +93,13 @@ def environment_for(spec: ScenarioSpec, landcover_json=None) -> EnvironmentStack
     atmosphere = atmosphere_for(spec)
     if atmosphere is not None:
         stack.add(atmosphere)
+    # P4: the loading (payload stations and fuel), written ONCE before the
+    # trim through the same pre-trim hook, AFTER the atmosphere writes
+    # (the stack runs its pre-trim providers in the order added). The
+    # default block adds no provider and records no variable.
+    loading = loading_for(spec)
+    if loading is not None:
+        stack.add(loading)
 
     surface = surface_class(str(spec.surface.value))
     # W1: the roughness inferred from the bake's dominant land cover when
@@ -293,6 +301,15 @@ def atmosphere_for(spec: ScenarioSpec):
     return NonStandardAtmosphere.from_spec(spec)
 
 
+def loading_for(spec: ScenarioSpec):
+    """The loading a spec asks for (P4: payload stations and fuel, written
+    once before the trim), or None for the default block (the XML's own
+    loading). Refuses by name what the validator refuses."""
+    from .loading import LoadingProvider
+
+    return LoadingProvider.from_spec(spec)
+
+
 @dataclass(frozen=True)
 class RunResult:
     spec_digest: str
@@ -338,8 +355,11 @@ def configure_from_spec(spec: ScenarioSpec,
     # The pre-trim hook: the atmosphere (and any later pre-trim provider)
     # is written now, between the initial conditions and the trim.
     if environment is None:
-        atmosphere = atmosphere_for(spec)
-        environment = EnvironmentStack([atmosphere] if atmosphere is not None else [])
+        # The feasibility probe's stack: the two pre-trim providers only
+        # (the atmosphere, then the loading), so the probe trims exactly
+        # the aircraft the run trims.
+        environment = EnvironmentStack([p for p in (atmosphere_for(spec), loading_for(spec))
+                                        if p is not None])
     environment.prepare(fdm)
 
     # Steady wind is written before trim so the aircraft is trimmed *in* the
@@ -389,9 +409,19 @@ def fdm_at_initial_conditions(spec: ScenarioSpec) -> FlightDynamics:
     # A spec that commands a state needs the controller; one that only sets an
     # initial condition does not. Building the derived airframe unconditionally
     # would change the model hash of every run for no reason.
-    build = (FlightDynamics.with_tecs if bool(spec.hold_state.value)
-             else FlightDynamics)
-    fdm = build(str(spec.aircraft.value), rate_hz=float(spec.rate.value))
+    injections = failure_injections_for(spec)
+    if injections:
+        # P3: a scheduled surface failure acts on the failure chain the
+        # failures injection carries (core/control/derive.py), so the
+        # airframe is derived with it (behind TECS when the state is
+        # held). An engine-out alone writes JSBSim's own propulsion
+        # controls and needs no derivation.
+        fdm = FlightDynamics.with_injections(str(spec.aircraft.value), injections,
+                                             rate_hz=float(spec.rate.value))
+    else:
+        build = (FlightDynamics.with_tecs if bool(spec.hold_state.value)
+                 else FlightDynamics)
+        fdm = build(str(spec.aircraft.value), rate_hz=float(spec.rate.value))
     fdm.set_initial_conditions(
         {
             "h-sl-ft": u.m_to_ft(float(spec.altitude.value)),
@@ -459,6 +489,16 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
     # generator every frame and destroy the correlated noise.
     environment.configure(fdm)
 
+    # P3: the failure schedule. Bound to the trimmed FDM (every property
+    # it writes must exist: failures.actuator_missing / failures.target
+    # by name otherwise) and applied at the top of every step through the
+    # FDM's step hook, so both loops below see it; each event lands at
+    # the first step with t >= at_s on the run clock and is read back on
+    # the following step (failures_applied[] in the manifest).
+    schedule = FailureSchedule.from_spec(spec)
+    schedule.bind(fdm)
+    fdm.register_step_hook(schedule.apply)
+
     autopilot = None
     if bool(spec.hold_state.value):
         autopilot = Autopilot(fdm)
@@ -466,7 +506,10 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
 
     # P6: the stack's own columns (the wind profile's layer index and
     # dV/dz) ride beside the surfaces; every other channel is JSBSim's.
-    recorder = Recorder(fdm, interval_s=0.1, extra={**SURFACES, **environment.recorder_extras()})
+    # P3: the schedule's failure_state_flag and the engine channels of
+    # this airframe beside them (core/telemetry/failures.py).
+    recorder = Recorder(fdm, interval_s=0.1, extra={**SURFACES, **environment.recorder_extras()}
+                        | schedule.recorder_extras())
     recorder.sample(force=True)
     recorder.mark("trimmed" if autopilot is None else "trimmed, autopilot engaged")
     if autopilot is None and terrain_ground is None:
@@ -536,7 +579,13 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         "output_digest": output_digest,
         "samples": len(recorder),
         "limits": limits_block,
+        # P4: what the loading wrote before the trim, the checks against the
+        # loaded model, the pre-trim measurement and the post-trim read-back;
+        # null for the default block (the XML's own loading, nothing written).
+        "loading": loading_block(environment),
         "datum": scene_datum,
+        # P3: what the schedule wrote, when, and what read back.
+        "failures": schedule.report(),
         # Modal analysis (gap M2, row A5): a RESULT about the trim, computed
         # on its own FDM so the recorded flight is untouched (measured:
         # linearising an executive disturbs it; the digest above is unchanged
@@ -570,11 +619,26 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
     # read-back and null measurement and the per-step read-back.
     for record in environment.applied_variables():
         attach_record(manifest, record)
+    # P3: one record per scheduled failure (readback, the in-run null
+    # test) and one for the spec field; nothing for an empty schedule.
+    for record in schedule.applied_variables(recorder):
+        attach_record(manifest, record)
     # Gap P10 (D1): the datum record, with the appended channels' readback
     # and the measured invariance.
     attach_record(manifest, datum_record)
     return RunResult(spec.digest(), output_digest, recorder, report, manifest,
                      closure)
+
+
+def loading_block(environment: EnvironmentStack) -> Optional[Dict[str, Any]]:
+    """The run manifest's ``loading`` block from the stack's loading
+    provider, or None when the spec stated none."""
+    from .loading import LoadingProvider
+
+    for provider in environment.atmosphere:
+        if isinstance(provider, LoadingProvider):
+            return provider.manifest_block()
+    return None
 
 
 def refuse_datum_spec(spec: ScenarioSpec) -> None:

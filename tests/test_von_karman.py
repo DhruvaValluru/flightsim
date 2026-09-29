@@ -225,9 +225,13 @@ def test_the_same_seed_gives_the_same_table_to_the_bit_and_another_seed_differs(
     c = provider(seed=8).build(TAS_MPS, SPAN_M)
     assert np.array_equal(a, b)
     assert not np.array_equal(a, c) and a[:, 0].tolist() == c[:, 0].tolist()
+    # The values pin the algorithm, not the machine: a 256-term cosine sum
+    # differs at 1e-14 relative between CI hosts (measured: run 36497924281,
+    # all three platforms), so bit identity is claimed within one process
+    # (a == b above) and the numbers to 1e-12.
     assert provider(seed=7).build(TAS_MPS, SPAN_M)[1].tolist() == pytest.approx(
         [1 / 120.0, -2.8446120819651921, 2.4122232716735685, 2.8392513736911078,
-         -0.0040209645713615069], abs=1e-15)
+         -0.0040209645713615069], rel=1e-12)
 
 
 def test_a_silent_intensity_builds_a_table_of_zeros():
@@ -257,16 +261,19 @@ def test_the_card_rows_are_17_significant_digit_strings_that_round_trip():
         assert row == [ROW_FORMAT % v for v in values]
         assert [float(s) for s in row] == list(values)
         assert all(s.isascii() for s in row)
-    assert rows[1] == ["0.0083333333333333332", "-2.8446120819651921", "2.4122232716735685",
-                       "2.8392513736911078", "-0.0040209645713615069"]
+    # The text carries whatever doubles THIS host computed (1e-14 apart
+    # between machines, as above); what is portable is the round trip.
+    assert [float(v) for v in rows[1]] == pytest.approx(
+        [0.0083333333333333332, -2.8446120819651921, 2.4122232716735685, 2.8392513736911078,
+         -0.0040209645713615069], rel=1e-12)
+    assert all(len(v.split("e")[0].replace("-", "").replace(".", "").lstrip("0")) <= 17 for v in rows[1])
     block = p.card_block()
     assert tuple(block) == CARD_KEYS
     assert block["model"] == "von_karman" and block["seed"] == 7
     assert block["sigma"] == pytest.approx([u.fps_to_mps(7.181364829396326)] * 3)
     assert block["L"] == pytest.approx([762.0, 381.0, 381.0])
     assert block["tas_mps"] == TAS_MPS and block["dt_s"] == 1 / 120.0
-    assert block["sha256"] == p.rows_sha256(rows)
-    assert block["sha256"] == "acd2ceacc2422818ae0c80580fb294fd4a6a7869d89bae4f9cadc56c4d805ca5"
+    assert block["sha256"] == p.rows_sha256(rows)      # the writing host's text, not a constant
     assert json.dumps(block).isascii()
     with pytest.raises(ValueError):
         provider().card_rows()                    # not built

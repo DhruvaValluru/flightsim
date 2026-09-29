@@ -304,9 +304,12 @@ _UNIT_SUFFIXES = (
     # force, angular rate, magnetic field, pressure in hPa, temperature
     # in K, a percentage, density, and a 0/1 flag. Longest first, so
     # ``_mps2`` is not read as ``_mps`` nor ``_rads`` as ``_rad``.
-    ("_kgm3", "kg/m^3"), ("_mps2", "m/s^2"), ("_rads", "rad/s"),
+    ("_kgm3", "kg/m^3"), ("_kgm2", "kg m^2"), ("_mps2", "m/s^2"), ("_rads", "rad/s"),
     ("_flag", "1"), ("_hpa", "hPa"), ("_pct", "%"),
     ("_rad_s", "rad/s"), ("_per_s", "1/s"),
+    # P3: a piston engine's speed (engine<i>_rpm, the failure schedule's
+    # recorder extras); no old suffix ends in it.
+    ("_rpm", "rpm"),
     ("_dps", "deg/s"), ("_mps", "m/s"), ("_rad", "rad"), ("_deg", "deg"),
     ("_kt", "kt"), ("_kg", "kg"), ("_pa", "Pa"), ("_ut", "uT"), ("_m", "m"),
     ("_n", "N"), ("_k", "K"), ("_s", "s"),

@@ -1,6 +1,6 @@
 """The spec-8 blocks: ``scene``, ``taxonomy``, ``traffic[]``, and the
-physics additions' ``atmosphere``, ``datum``, ``turbulence_model`` and
-``wind_profile``.
+physics additions' ``atmosphere``, ``datum``, ``turbulence_model``,
+``wind_profile`` and ``loading``.
 
 Phase 2 (contracts §2.1, §2.2, §12) adds three top-level blocks to the
 scenario spec. Each is serialised like the randomisation block, NOT
@@ -168,6 +168,23 @@ WIND_PROFILE_STANDARDS: Dict[str, str] = {
                "2.0 ft, 3 ft <= h <= 1000 ft [unverified here]",
     "nwp": "a cached NWP profile at the standard-atmosphere height of each level "
            "pressure (stated)",
+}
+
+
+#: P4: what each ``loading`` field rests on, in the spec's ``std`` field.
+#: The stations and tanks are the loaded JSBSim model's own (the XML's
+#: point masses and tanks at the XML's arms); the handbook numbers the
+#: aircraft_config block carries beside them are marked there.
+LOADING_STANDARDS: Dict[str, str] = {
+    "payload": "JSBSim FGMassBalance point masses: inertia/pointmass-weight-lbs[i] at the "
+               "XML's own arm (inertia/pointmass-location-X-inches[i]), the station named "
+               "as assets/aircraft_config/<fdm>.json lists it; written once before the trim",
+    "fuel_kg": "JSBSim FGTank contents: propulsion/tank[i]/contents-lbs, the stated mass "
+               "shared between the tanks in proportion to their capacities (a stated fill "
+               "rule); written once before the trim",
+    "fuel_fraction": "JSBSim FGTank contents: every tank filled to the stated fraction of "
+                     "its capacity (capacity from the XML through the aircraft_config "
+                     "block); written once before the trim",
 }
 
 
@@ -462,6 +479,97 @@ class WindProfileSpec(ProvenancedBlock):
             fixture=Quantity.default(
                 None, frm="unstated: no cached profile (the kind is not nwp)"),
         )
+
+
+@dataclass
+class LoadingSpec(ProvenancedBlock):
+    """``loading`` (P4): the payload stations and the fuel the flight
+    starts with. Absent-canonical: the XML's own loading (its point
+    masses and tank contents as shipped) is the default and is omitted,
+    so every committed spec-8 example keeps its digest. ``payload`` is a
+    mapping {station name: kg} over the stations the airframe's
+    aircraft_config ``loading`` block names (an unknown or unloadable
+    station refuses ``loading.station_unknown``; a negative mass or one
+    over the station's maximum ``loading.station_mass``); ``fuel_kg`` is
+    the total fuel mass, shared between the tanks in proportion to
+    capacity, ``fuel_fraction`` fills every tank to that fraction of its
+    capacity -- one of the two, never both (``loading.fuel_range``, also
+    for a negative mass, one over the tanks' capacity or a fraction
+    outside 0..1). The sum over the airframe's maximum takeoff weight
+    refuses ``loading.max_weight``; a CG outside the handbook polygon
+    ``loading.cg_envelope`` where the airframe's datum comparison admits
+    the check. The writes, the hand calculation and the read-back are
+    core/scenario/loading.py's."""
+
+    payload: Quantity
+    fuel_kg: Quantity
+    fuel_fraction: Quantity
+
+    FIELD_ORDER = ("payload", "fuel_kg", "fuel_fraction")
+    BLOCK = "loading"
+
+    @classmethod
+    def defaulted(cls) -> "LoadingSpec":
+        return cls(
+            payload=Quantity.default(
+                None, "kg per station",
+                frm="unstated: the XML's own point-mass weights stand",
+                std=LOADING_STANDARDS["payload"]),
+            fuel_kg=Quantity.default(
+                None, "kg", frm="unstated: the XML's own tank contents stand",
+                std=LOADING_STANDARDS["fuel_kg"]),
+            fuel_fraction=Quantity.default(
+                None, "1", frm="unstated: the XML's own tank contents stand",
+                std=LOADING_STANDARDS["fuel_fraction"]),
+        )
+
+
+#: P3: the failure kinds a schedule may name (core/telemetry/failures.py
+#: KINDS) and what each rests on, in the spec's ``std`` field. Every kind is
+#: JSBSim 1.2.4's own control, measured here; none is a statement about an
+#: aeroplane.
+FAILURE_KINDS = ("engine_out", "control_jam", "hardover", "float", "authority_loss")
+FAILURE_STANDARDS: Dict[str, str] = {
+    "none": "no failure: every engine and surface as the JSBSim model ships it",
+    "engine_out": "JSBSim 1.2.4 FGPropulsion cutoff_cmd (turbine, FGTurbine::Off) or "
+                  "magneto_cmd 0 (piston, FGPiston::doEngineStartup), for the target engine; "
+                  "measured on the A320 and the c172p",
+    "control_jam": "JSBSim 1.2.4 FGActuator fail_stuck on the injected failure chain (P2): "
+                   "the actuator holds the previous step's output; measured on the c172p",
+    "hardover": "JSBSim 1.2.4 FGActuator fail_hardover: the input replaced by the clip limit "
+                "of its sign (-1 / +1); measured on the c172p",
+    "float": "JSBSim 1.2.4 FGActuator fail_zero: the input replaced by 0; measured on the c172p",
+    "authority_loss": "the injected failure chain's gain failure/<surface>/authority (P2, "
+                      "blueprint correction 1): value x command held; measured on the c172p",
+}
+
+
+@dataclass
+class FailuresSpec(ProvenancedBlock):
+    """``failures`` (P3): the failure schedule. One field, ``events``, a
+    list of ``{kind, target, at_s, value}`` mappings in time order: kind
+    in FAILURE_KINDS, target a surface (elevator / aileron / rudder) for
+    the surface kinds or an engine index for ``engine_out``, ``at_s``
+    seconds after the run's first step (the write lands at the first
+    step at or past it), ``value`` the remaining authority in 0..1 for
+    ``authority_loss`` and null otherwise. Absent-canonical: the empty
+    list is the default and is omitted, so every committed spec-8
+    example keeps its digest. The validator refuses ``failures.kind``,
+    ``failures.target``, ``failures.time``, ``failures.value`` and
+    ``failures.actuator_missing`` (core/telemetry/failures.py problems);
+    the registry claims the field (``record.unregistered`` otherwise).
+    A surface failure makes the runner derive the airframe with the
+    failures injection; an engine-out alone needs no derivation."""
+
+    events: Quantity
+
+    FIELD_ORDER = ("events",)
+    BLOCK = "failures"
+
+    @classmethod
+    def defaulted(cls) -> "FailuresSpec":
+        return cls(events=Quantity.default(
+            [], frm="no failure scheduled", std=FAILURE_STANDARDS["none"]))
 
 
 @dataclass

@@ -90,6 +90,13 @@ def test_the_floors_are_ten_times_the_v9_noise_with_the_reference_stated():
     assert floor_for_unit("K") == 0.1 and floor_for_unit("%") == 0.1
     assert floor_for_unit("hPa") == 0.1 and floor_for_unit("Pa") == 1.0
     assert "stated" in NULL_FLOOR_REFERENCE and "0.1 K" in NULL_FLOOR_REFERENCE
+    # P4: the loading's mass and inertia floors, and the CG channel's own floor (the
+    # V13 tolerance) ahead of the metre floor its unit would give it.
+    from core import record_null as rn
+    assert rn.floor_for_unit("kg") == 0.5 and rn.floor_for_unit("kg m^2") == 1.0
+    assert rn.floor_for_channel("cg_x_m", "m") == pytest.approx(0.00254)
+    assert rn.floor_for_channel("altitude_m", "m") == 0.5
+    assert "0.00254 m" in NULL_FLOOR_REFERENCE
 
 
 def test_an_effect_below_its_floor_is_not_reached_and_no_floor_is_ungraded():

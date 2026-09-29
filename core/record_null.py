@@ -76,6 +76,19 @@ NULL_FLOOR_RATE_DPS = 0.1
 #: recorder's own float noise; the roll gust in rad/s is the 0.1 deg/s floor.
 NULL_FLOOR_SHEAR_PER_S = 1e-4
 NULL_FLOOR_RATE_RAD_S = NULL_FLOOR_RATE_DPS * 3.141592653589793 / 180.0
+#: The piston engine's rpm channel (P3): a stated 10 rpm -- a hundredth of
+#: the c172p's measured engine-out drop (2300 -> 697 rpm) and far above the
+#: trimmed engine's own step-to-step wander (0.01 rpm, measured).
+NULL_FLOOR_RPM = 10.0
+#: The loading's channels (P4): a stated 0.5 kg for a mass (the c172p crank burns
+#: 0.0025 kg before the trim, measured) and a stated 1 kg m^2 for the pitch inertia
+#: (136 kg at the rear seat moved it 73 kg m^2); the CG channel carries its OWN
+#: floor (FLOORS_BY_CHANNEL): the V13 tolerance 0.1 in = 0.00254 m, not the 0.5 m
+#: altitude floor a metre channel would otherwise carry (136 kg moves the c172p's
+#: CG 0.097 m; 0.5 m would grade every plausible loading silent).
+NULL_FLOOR_MASS_KG = 0.5
+NULL_FLOOR_INERTIA_KGM2 = 1.0
+NULL_FLOOR_CG_M = 0.1 * 0.0254
 NULL_FLOOR_REFERENCE = (
     "10 x the numerical noise measured on this branch (docs/vva/VV_REPORT.md row V9: "
     "peak altitude difference 0.098 m between 1/60 and 1/120 s, 0.048 m between 1/120 "
@@ -83,7 +96,9 @@ NULL_FLOOR_REFERENCE = (
     "the atmosphere's own channels a stated tenth of a unit (0.1 K, 0.1 %, 0.1 hPa, 1 Pa), "
     "above their measured read-back noise and below the smallest vocabulary step; the "
     "injections' force and rate channels a stated 1 N and 0.1 deg/s (P2); the wind "
-    "profile's gradient a stated 1e-4 1/s and the roll gust the same 0.1 deg/s in rad/s (P6)")
+    "profile's gradient a stated 1e-4 1/s and the roll gust the same 0.1 deg/s in rad/s (P6); "
+    "the loading's mass a stated 0.5 kg, its pitch inertia a stated 1 kg m^2, and the CG "
+    "channel its own 0.00254 m, the V13 tolerance (P4)")
 
 #: Floor per channel unit; a unit not listed has no floor (reported, not graded).
 FLOORS_BY_UNIT: Dict[str, float] = {
@@ -99,12 +114,23 @@ FLOORS_BY_UNIT: Dict[str, float] = {
     "deg/s": NULL_FLOOR_RATE_DPS,
     "1/s": NULL_FLOOR_SHEAR_PER_S,
     "rad/s": NULL_FLOOR_RATE_RAD_S,
+    "rpm": NULL_FLOOR_RPM,
+    "kg": NULL_FLOOR_MASS_KG,
+    "kg m^2": NULL_FLOOR_INERTIA_KGM2,
 }
+#: Floor per channel NAME, consulted before the unit table (P4: the CG).
+FLOORS_BY_CHANNEL: Dict[str, float] = {"cg_x_m": NULL_FLOOR_CG_M}
 
 
 def floor_for_unit(unit: str) -> Optional[float]:
     """The null-effect floor for a channel unit, or None when none is stated."""
     return FLOORS_BY_UNIT.get(unit)
+
+
+def floor_for_channel(name: str, unit: str) -> Optional[float]:
+    """The floor for a channel: its own (FLOORS_BY_CHANNEL) before its unit's."""
+    own = FLOORS_BY_CHANNEL.get(name)
+    return own if own is not None else floor_for_unit(unit)
 
 
 @dataclass(frozen=True)
@@ -199,6 +225,7 @@ class NullPair:
             "verdict": self.verdict,
             "floors": {"altitude_m": NULL_FLOOR_ALTITUDE_M, "angle_deg": NULL_FLOOR_ANGLE_DEG,
                        "speed_kt": NULL_FLOOR_SPEED_KT, "by_unit": dict(FLOORS_BY_UNIT),
+                       "by_channel": dict(FLOORS_BY_CHANNEL),
                        "reference": NULL_FLOOR_REFERENCE},
             "basis": self.basis, "elapsed_s": self.elapsed_s, "notes": list(self.notes),
             "null_test": self.null_test().to_dict(),
@@ -271,7 +298,7 @@ def _effects(entry: VariableRecord, with_cols: Mapping[str, Sequence[float]],
         k = int(np.argmax(np.abs(d)))
         effects.append(ChannelEffect(
             channel=channel.name, unit=channel.unit, peak_abs=float(abs(d[k])),
-            rms=float(np.sqrt(np.mean(d * d))), floor=floor_for_unit(channel.unit),
+            rms=float(np.sqrt(np.mean(d * d))), floor=floor_for_channel(channel.name, channel.unit),
             samples=n, peak_index=k, with_at_peak=float(a[k]), without_at_peak=float(b[k])))
     return tuple(effects), notes
 

@@ -249,6 +249,8 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
     report.violations.extend(validate_datum(spec))
     report.violations.extend(validate_turbulence_model(spec))
     report.violations.extend(validate_wind_profile(spec))
+    report.violations.extend(validate_failures(spec))
+    report.violations.extend(validate_loading(spec))
 
     # -- the definitive check: can this actually be trimmed? -----------
     # Skipped when geometry is already impossible, since trimming below ground
@@ -643,6 +645,32 @@ def validate_wind_profile(spec) -> List[Violation]:
     return out
 
 
+# -- the loading block (P4) ------------------------------------------------------
+
+def validate_loading(spec) -> List[Violation]:
+    """The ``loading`` block's refusals by name (core/scenario/loading.py
+    ``LoadingPlan.problems``, the one list for the validator and the
+    provider): ``loading.config`` (a stated block on an airframe without
+    one, or a malformed block), ``loading.station_unknown``,
+    ``loading.station_mass``, ``loading.fuel_range``, ``loading.max_weight``,
+    ``loading.cg_envelope`` (where the airframe's arm comparison admits the
+    check; elsewhere the check is recorded as not made, never refused --
+    the user asked for a loading, not for an envelope). The default block
+    yields nothing."""
+    from .loading import LoadingError, LoadingPlan
+
+    try:
+        plan = LoadingPlan.from_spec(spec)
+    except LoadingError as exc:
+        return [Violation(exc.constraint, exc.message, actual=exc.actual, limit=exc.limit,
+                          unit=exc.unit)]
+    if plan is None:
+        return []
+    return [Violation(problem.constraint, problem.message, actual=problem.actual,
+                      limit=problem.limit, unit=problem.unit)
+            for problem in plan.problems()]
+
+
 # -- spec 8 randomization.policy: shape only ---------------------------------
 
 #: The documented distribution forms (contracts §5.2) and the shape of
@@ -803,3 +831,26 @@ def validate_policy(spec) -> List[Violation]:
     return [Violation("randomization.policy",
                       "randomization.policy is not of the documented form: "
                       + "; ".join(problems))]
+
+
+def validate_failures(spec) -> List[Violation]:
+    """The ``failures`` block's own constraints, refused by name through
+    the producer's own list (core.telemetry.failures.problems, so what
+    validation refuses is what the schedule refuses): ``failures.kind``
+    (an unknown kind or a malformed event), ``failures.target`` (a
+    surface outside elevator / aileron / rudder, an engine index the
+    airframe lacks), ``failures.time`` (negative, beyond the run, not a
+    number, out of order), ``failures.value`` (an authority outside
+    0..1, or a value on a kind that takes none), and
+    ``failures.actuator_missing`` (a surface failure on an airframe the
+    failures injection cannot anchor on). A default block (no events)
+    yields nothing."""
+    from ..telemetry.failures import problems
+
+    block = getattr(spec, "failures", None)
+    if block is None or block.is_default():
+        return []
+    return [Violation(problem.constraint, problem.message, actual=problem.actual,
+                      limit=problem.limit, unit=problem.unit)
+            for problem in problems(block.events.value, float(spec.duration.value),
+                                    str(spec.aircraft.value))]

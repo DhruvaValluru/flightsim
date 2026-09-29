@@ -131,6 +131,31 @@ def atmosphere_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
     return block
 
 
+def loading_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
+    """The ``loading_properties`` block for a spec (P4), or None for the
+    default block (no block: the host writes nothing and flies the XML's
+    own loading). The EXACT JSBSim writes -- one entry per stated station
+    (name, property, lbs) and per tank (index, property, lbs) -- the CG the
+    host must read back within ``tolerance_in`` after the writes and
+    BEFORE its trim, and the datum the arms are in, in the fixed key order
+    ``core.scenario.loading.CARD_KEYS``. A projection of the spec and the
+    airframe's config: no FDM is built here (the run's own read-back is
+    the record's)."""
+    from core.scenario.loading import CARD_KEYS, LoadingPlan
+
+    plan = LoadingPlan.from_spec(spec)
+    if plan is None:
+        return None
+    problems = plan.problems()
+    if problems:
+        raise problems[0]
+    block = plan.card_block()
+    if tuple(block) != CARD_KEYS:
+        raise RuntimeError(f"loading card keys {list(block)} are not the fixed order "
+                           f"{list(CARD_KEYS)}")
+    return block
+
+
 def gust_table_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
     """The ``gust_table`` block for a spec (P6), or None when the model is
     not von_karman (no block: the host writes nothing into the gust
@@ -175,6 +200,30 @@ def layered_wind_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
     if tuple(block) != CARD_KEYS:
         raise RuntimeError(f"layered_wind card keys {list(block)} are not the fixed order "
                            f"{list(CARD_KEYS)}")
+    return block
+
+
+def failure_schedule_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
+    """The ``failure_schedule`` block for a spec (P3), or None when no
+    failure is scheduled (no block: the host writes nothing). Events in
+    the fixed key order ``core.telemetry.failures.CARD_EVENT_KEYS``
+    (kind, target, at_s, property, value) and ``count``; ``at_s`` is on
+    the host's own run clock (seconds after its first step) and an
+    engine property is written with ``propulsion/active_engine`` set to
+    the target and restored. A host that cannot apply an event exactly
+    refuses ``card.failure_schedule``."""
+    from core.telemetry.failures import CARD_KEYS, FailureSchedule
+
+    schedule = FailureSchedule.from_spec(spec)
+    if not len(schedule):
+        return None
+    block = schedule.card_block()
+    if tuple(block) != CARD_KEYS:
+        raise RuntimeError(f"failure_schedule card keys {list(block)} are not the fixed "
+                           f"order {list(CARD_KEYS)}")
+    if block["count"] != len(block["events"]):
+        raise RuntimeError(f"failure_schedule count {block['count']} for "
+                           f"{len(block['events'])} events")
     return block
 
 
@@ -305,6 +354,21 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # written), in a fixed key order, so the UE host applies the same
         # numbers before its trim and every step and derives nothing.
         card["atmosphere_properties"] = atmosphere
+    loading = loading_card_block(spec)
+    if loading is not None:
+        # P4: the EXACT point-mass and tank writes the headless run makes
+        # once before its trim, with the hand CG the host reads inertia/cg-x-in
+        # back against (within tolerance_in) before its trim, and the datum
+        # the arms are in; refused card.loading_properties by the host when a
+        # key is missing or out of order, an entry is not (name, property,
+        # lbs), or the read-back misses.
+        card["loading_properties"] = loading
+    failure_schedule = failure_schedule_card_block(spec)
+    if failure_schedule is not None:
+        # P3: the schedule, event for event with the property each
+        # writes; the host applies each at the first step with t >= at_s
+        # of its run clock and refuses card.failure_schedule otherwise.
+        card["failure_schedule"] = failure_schedule
     if reference_speeds:
         # Display-only (the HUD/panel stall-margin marks): the MODEL's own
         # measured Vs and CLmax with their basis string (§2.4), so the marks

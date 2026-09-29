@@ -880,3 +880,101 @@ Integrated from the returned text: thirteen catalogue entries, 31 guards plus on
 ### Measured here
 
 The affected suites: 567 passed, 4 skipped (104.9 s) before the guard repair, 49 on the repaired files after it; 622 guard targets each occurring exactly once; the 32 wave-3 guards all fire (338 s for the run that found the weak one, 2 s for its re-run). Full suite: 1930 passed, 4 skipped, one R1 test whose premise ("no spec-8 field is registered") W1 ended -- restated to the six environment inputs at u_x 0 -- then green.
+
+## P4 -- loading: payload stations and fuel written once before the trim, the centre of gravity read back against the hand calculation on five airframes, the trimmed state measured with and without (gap P4)
+
+### What was measured, and what was defective
+
+* Point-mass stations and `inertia/cg-x-in` existed and were never varied (PHASE3_GAP_ANALYSIS P4). Measured on JSBSim 1.2.4: the hand calculation `CG = sum(m x) / sum(m)` over the XML's `<emptywt>` at its CG location, every `<pointmass>` and every `<tank>` at the XML's own inches equals `inertia/cg-x-in` on all five configured airframes after writes and a re-latch: c172p 7.1e-15 in (46.679151 in with 136 kg at the rear seat and full fuel), A320 0.0 in (653.528372 in at 0.8 fuel), B747 6.8e-13 in (1327.000000 in with 20000 kg of fuel: every tank sits at the empty CG), DHC6 2.8e-14 in (209.351653 in), p51d 1.4e-14 in (99.264218 in) -- V13 at the 0.1 in tolerance, with margin of thirteen orders.
+* The CG property is STALE until a model pass: 300 lb written to the c172p's baggage station reads `cg-x-in` 42.11702 in until `run_ic`, then 49.39450 in. The loading re-latches the initial conditions after every write (two guards, each fires).
+* A write after the trim is the wrong order, measured: 300 lb at the baggage station written AFTER the trim keeps the trimmed elevator at 4.3061 deg and the aircraft, held at its trim controls, pitches 0.386 -> 9.722 deg and climbs 20.0 m in 5 s (20.29 m and 9.56 deg from the unloaded flight); written BEFORE the trim the elevator goes to 5.5368 deg (throttle 0.7392 -> 0.7584, CG +7.28 in = +0.185 m) and the loaded aircraft holds altitude like the unloaded one (-0.289 m against -0.291 m in 5 s). The loading therefore rides in `EnvironmentStack.prepare`, after the atmosphere writes, and the validator's feasibility probe trims the loaded aircraft (its CG after the trim is the hand value; guard fires).
+* The p51d's twelve weapon stations are written by `Systems/weapons-weight.xml` every pass: 300 lb written reads 0.0 after one pass (the pilot station holds). They are configured unloadable with that reason and refuse `loading.station_unknown`.
+* The c172p handbook arms do not equal the XML's: 37 / 73 / 95 in against 36 / 70 / 95 in (the wing tanks 48 against 56 in). Both are recorded; the XML datum is TAKEN AS the handbook datum with a 3 in uncertainty (status `inferred`); the four other airframes have no handbook half (status `unverified`) and their envelope check is recorded as not made, by name, never refused from the runner.
+* The engine crank burns 0.0055 lb of the c172p's fuel before the trim (sim time 4.875 s), so the tank read-back is taken before the start and the post-trim state is recorded beside it (the trim moved the CG -4.4e-5 in).
+* A tank's capacity is not a property; it is recovered from `pct-full` and agrees with every configured capacity to 1e-9 (the cross-check every prepare makes; a configured arm 5 in off refuses `loading.config` before any write, measured).
+* The "0 vs 136 kg at the aft-most station" pair cannot fly on the c172p as worded: the aft-most station is the baggage area (95 in), whose handbook maximum is 120 lb (54.4 kg), and 300 lb there would also put the CG at 49.39 in, aft of the 47.3 in limit -- both refusals measured by name. The pair was flown at the aft-most SEAT (70 in) with 136 kg and at the baggage area with its 54.4 kg maximum (numbers below).
+
+### What was built
+
+* `core/scenario/loading.py`: the config reader (`parse_loading_config`, `load_loading_config`, refusing `loading.config`), `Station` / `Tank` / `LoadingConfig`, `point_in_polygon` (even-odd, on-edge inside), `hand_cg_in`, `LoadingPlan` (`from_spec`, `station_loads`, `tank_loads` with the proportional fill rule, `masses_and_arms`, `hand_cg_in`, `gross_lb`, `problems` -- the one refusal list --, `envelope_check`, `require_envelope`, `card_block`), `LoadingProvider` (`prepare` before the trim: cross-check, per-station writes with re-latch and read, the tanks, exact read-backs, the hand CG check; `observe` once after the trim; `applied_variables`; `manifest_block`; `card_block`; `provenance`).
+* The `loading` block in the five `assets/aircraft_config/*.json` (insert-only; empty weight, stations by name with XML and handbook arms, maxima and sources, tanks with capacities, the maximum takeoff weight, the envelope polygon or its reason, the datum comparison, the policy station); `LoadingSpec` (payload, fuel_kg, fuel_fraction; absent-canonical: the eight committed examples' digests unchanged, pinned); `validate_loading`; `loading_for` / the stack wiring / the manifest's `loading` block in the runner; `loading_card_block` and the card's `loading_properties`; `cg_x_m` and `iyy_kgm2` on the state and the recorder; three registry entries; the `fuel_fraction` and `payload_kg` policy leaves with their card and realised-distribution counting.
+* Measured on the demonstration run (c172p, 1500 m / 100 kt, hot day, 136 kg at "Right Passenger", full fuel): CG 42.11702 -> 45.95224 in after the seat -> 46.67915 in after the tanks (hand 46.67915 in); first sample `cg_x_m` 1.185649 m, `iyy_kgm2` 1980.18, `weight_kg` 1065.86; elevator 4.3417 deg against 4.3061 deg unloaded; the two records carry record-2 `readback` (cg-x-in against the hand CG, agrees; tank 0 contents 185.0 = 185.0), `jsbsim_writes`, `model_block`, and null tests ok (CG 42.117 -> 45.952 in at threshold 0.1 in; fuel 90.72 -> 167.83 kg at threshold 0.5 kg); the manifest lists the atmosphere before the loading; two runs give one output digest, which differs from the unloaded run's; the default block records nothing and its manifest block is null (the existing per-run record list `[limits.monitor, scene.geoid_undulation_m]` unchanged).
+* Null pairs through `core.record_null.run_null_pair` on the c172p (3 s, ~2.7 s per pair, digests differ, verdict reached): 136 kg at the aft-most seat -> `cg_x_m` 0.0974 m, `iyy_kgm2` 73.1 kg m^2, `weight_kg` 136.0 kg, `elevator_deg` 0.223 deg, `pitch_deg` 0.548 deg (both reached), `altitude_m` 0.018 m; 54.4 kg at the baggage area -> 0.0806 m, 98.5 kg m^2, elevator 0.500 deg, pitch 0.179 deg; full fuel against the XML's 200 lb -> 77.11 kg, 0.0292 m, 30.2 kg m^2, elevator 0.183 deg; 150 kg of fuel -> 59.28 kg, 0.0229 m, elevator 0.141 deg; full against half fuel (two runs) -> 83.9 kg, 0.0321 m, 33.1 kg m^2, elevator 0.199 deg, pitch 0.354 deg, altitude 0.0015 m. With the floors patch applied temporarily (mass 0.5 kg, inertia 1 kg m^2, the CG channel's own 0.00254 m) `cg_x_m`, `iyy_kgm2` and `weight_kg` all read `reached`; without it the metre floor grades `cg_x_m` silent at 0.0974 m and the two new units are ungraded (said so in the record).
+* A real capture (`examples/cameras_waypoint.yaml` + the loading, `--card --null-tests`): 23.3 s wall for the 30 s flight plus four pair flights; `flightsim.verify` PASSED (0 failed, 25 not run, 2 superseded); the capture manifest's `applied_variables` = geoid, instruments, limits, `loading.payload_kg`, `loading.fuel_fraction`; `null_tests` both reached; `card.json` carries `loading_properties` in the fixed order; frame 0 state `cg_x_m` 1.18565 m / `iyy_kgm2` 1980.18 with units m / kg m^2; everything ASCII. A 60 s loaded run costs 2.27 s against 2.83 s unloaded.
+* 41 tests in tests/test_loading.py (39 + 2 added, all green; the full file 4 min); 20 mutation guards, each applied on a copy of the tree, shown to fail its named test, and the file restored byte-identically (sha256 compared) -- the fires log is scratchpad/guard_results.txt.
+
+### How to demonstrate (any platform)
+
+    find . -name __pycache__ -type d -prune -exec rm -rf {} +
+    .venv/bin/pytest -q -p no:cacheprovider -p no:warnings tests/test_loading.py          # 41 passed
+    .venv/bin/python - <<'EOF'
+    from core.nl.compiler import compile_prompt
+    from core.scenario.runner import run_spec
+    spec = compile_prompt("fly the c172p at 1500 m and 100 kt for 3 seconds"); spec.set("hold_state", False)
+    spec.set("loading.payload", {"Right Passenger": 136.0}); spec.set("loading.fuel_fraction", 1.0)
+    r = run_spec(spec)
+    for rec in r.manifest["applied_variables"]["applied_variables"]:
+        if rec["name"].startswith("loading."):
+            rb = rec["readback"]; n = rec["null_test"]
+            print(rec["name"], rec["value"], "readback", rb["property"], round(rb["value"], 5), "vs", round(rb["written"], 5), rb["agrees"], "null", round(n["without"], 3), "->", round(n["with"], 3), n["unit"], n["ok"])
+    print("first sample", {c: round(r.telemetry.series(c)[0], 4) for c in ("cg_x_m", "iyy_kgm2", "weight_kg", "elevator_deg")})
+    EOF
+    # loading.payload_kg {'Right Passenger': 136.0} readback inertia/cg-x-in 46.67915 vs 46.67915 True null 42.117 -> 45.952 in True
+    # loading.fuel_fraction 1.0 readback propulsion/tank/contents-lbs 185.0 vs 185.0 True null 90.718 -> 167.829 kg True
+    # first sample {'cg_x_m': 1.1856, 'iyy_kgm2': 1980.1789, 'weight_kg': 1065.8593, 'elevator_deg': 4.3417}
+    .venv/bin/python -c "from core.nl.compiler import compile_prompt; from core.scenario.validate import validate; s = compile_prompt('fly the c172p at 1500 m and 100 kt for 3 seconds'); s.set('loading.payload', {'Baggage': 136.0}); print(validate(s, check_feasibility=False).render())"
+    # ... REJECTED -- 1 constraint violated: [loading.station_mass] c172p: 136 kg at 'Baggage' is over its stated maximum (...max 120 lb = 54.4 kg from memory of the Cessna 172P POH ...) (requested 136 kg, limit 54.4 kg)
+    .venv/bin/python -m flightsim.capture <spec with the loading stated> --out runs/p4_demo --max-previews 0 --card --null-tests
+    .venv/bin/python -m flightsim.verify runs/p4_demo        # verification PASSED (0 failed, 25 not run, 2 superseded)
+    scripts/mutation_check.sh --match "^loading:" --no-suite   # after the integrator appends the 20 guards
+
+### Not verified here
+
+* Every handbook number: the c172p arms, the 150 kg seat maximum (a stated choice), the 120 lb baggage limit, the envelope polygon and the five maximum takeoff weights are from memory and marked `[unverified here]` in the configs; the arm comparison's handbook half exists for the c172p only.
+* The engine side -- **W4 (named, not run)**: the host applies `loading_properties` after `RunIC` and before its trim, reads `inertia/cg-x-in` back and it must lie within `tolerance_in` (0.1 in) of `expected_cg_in` (46.679 in on the demonstration card), refusing `card.loading_properties` otherwise; the host's `cg_x_m` and `iyy_kgm2` within the Gate 5 parity bound of the headless run's (W2).
+* The eight catalogue entries, the twenty guards, the two floors, the `_kgm2` suffix and the ALLOWED_FUTURE line land at integration (patches below).
+
+### Limitations
+
+* The loading provider is an `AtmosphereProvider` by type: the stack's pre-trim hook is its atmosphere slot and `core/environment/stack.py` / `base.py` are not this item's; a `PreTrimProvider` base would be the cleaner home.
+* Only `cg-x-in` is compared; JSBSim also moves the lateral and vertical CG, recorded nowhere here.
+* A stated fuel MASS is shared in proportion to capacity (the p51d's drop tanks fill beside its wing tanks); no priority, unusable fuel or schedule.
+* The realised distribution's counting of the two leaves is measured on a fabricated record; no campaign with them was run here.
+* Without integration patch 1 the CG channel is graded against the 0.5 m altitude floor (silent at 0.097 m) and `weight_kg` / `iyy_kgm2` are ungraded.
+* The prompt compiler has no loading vocabulary; the block is stated through YAML or `spec.set`.
+* Observed, not this item's: the open-loop unloaded c172p descends 317 m over 60 s at 1500 m / 100 kt while the loaded one holds 1483 m; the trim's behaviour at HEAD, unchanged here.
+
+## P3 -- the failure schedule (measured 2026-09-28/29, JSBSim 1.2.4 in .venv, 120 Hz)
+
+**Refuted before building, from the vendored source and the A320.** The blueprint's turbine engine-out write ``propulsion/engine[i]/set-running = 0`` gives thrust 0.0 on ONE step: 11943.05 lbf trimmed, 0.000 on step 1, 11942.99 on step 2 and 11942.96 at 5 s (FGTurbine.cpp L146-L147 enters tpStart with Cutoff false and qbar 210 psf > 30; L292-L309 relights). JSBSim's cutoff (active_engine i, cutoff_cmd 1, active_engine -1) gives 0.000 lbf on every one of 600 steps, set-running 0.0, N1 83.66 -> 83.31 (step 1) -> 50.69 (1 s) -> 19.89 % (5 s), engine 1 11924.65 lbf. The piston's set-running 0 reads 1.0 on the next step (FGPiston.cpp L595-L598, windmilling relatch); magneto_cmd 0 reads back nothing (write-only, FGPropulsion.cpp L819-L820: the catalog says (W)), set-running 0.0 on the next step, power 89.07 -> -3.54 hp, thrust 226.68 lbf halved at step 47 (0.39 s), 10 % at 1.30 s, zero at step 201 (1.68 s), -40.6 lbf at 4 s; rpm 2299.9 -> 1386 (2 s) -> 823 (5 s) -> 697 (8 s) -> 686 (10 s); the mixture cutoff route differs by 0.3 % at most. Stated in the module docstring and the record's model block with the source lines.
+
+**V15, the timing.** Run clock zero = JSBSim's sim time at the run's first step (c172p 4.900 s because the engine start cranks; A320 0.0083 s). Measured t_applied - at_s: c172p hardover at 1.0 -> 1.00000000000005 s (5e-14 late), jam at 0.0 -> 0.0 (the first step), A320 cutoff at 1.0 -> 1.00833 s (one dt late: 120 accumulated dt sum below 1.0); all within one step; every write read back on the following step with agrees true (14 of 14 events across the tests).
+
+**The jam hold, the hardover, the float, the authority.** c172p (1500 m / 100 kt, ``("failures",)`` derivation): rudder jam at 0 s holds the rudder at 0.0 rad with max drift 0.0 over 100 steps; elevator hardover at 1 s moves the elevator from the trim-only 0.07515610487503992 rad to the +23 deg stop 0.40135 rad on the next step (null test reached, threshold 8.73e-4 rad); float of an elevator commanded -0.3 writes cmd-in 0 and the elevator returns to 0.07515610487503992 rad; float of an uncommanded aileron 0 -> 0, honestly not reached; authority 0.5 on -0.3 written once: cmd-in -0.15 on the read-back step and on every one of the next 100 (drift 0.0), elevator 0.01495360487503992 rad (P2's number to the bit). A320 with ``("tecs", "failures")``: the elevator jammed at 1 s holds at -0.12645121403107676 rad with drift 0.0 over 100 steps while TECS moved the command (range > 0 over those steps). A jam and an authority loss on the same surface: the jam wins and the authority hold reports max drift 0.1 (ok false) -- said, not hidden.
+
+**Null pairs** (run_null_pair on failures.events, ~2.5 s per c172p pair, ~1 s per A320 pair; digests differ in all seven): c172p hardover 84.06 m / 4.87 deg / 53.31 deg pitch / 20.43 kt (reached); c172p jam 0.0 everywhere (silent: the open-loop command never moves; TECS cannot engage on the c172p here -- measured TrimError in the sign probe at 6000 m / 280 kt -- so the jam that diverges a flight is measured on the A320); c172p engine-out 8 s: 1.88 m / 4.14 deg / 1.94 deg / 14.83 kt; A320 engine-out open loop 3.08 m / 0.82 deg / 0.73 deg / 7.26 kt; under TECS 10.05 m / 0.63 deg / 1.29 deg / 3.03 kt ("energy held" is what the loop does, the measured altitude excursion is 10 m in 6 s; no yaw compensation, 0.63 deg); A320 jam under TECS calm 0.020 m (silent), in moderate turbulence 1.59 m / 1.50 deg pitch / 0.27 kt (reached; heading 0.014 deg below floor). attach_null_pair writes the hardover pair into the ``failures.events`` record (verdict reached).
+
+**The channels.** The c172p run records ``failure_state_flag``, ``engine0_thrust_n`` (1008.39 N at the first sample), ``engine0_rpm`` (2266.2); the A320 run ``engine0/1_thrust_n`` (thrust 0 on every sample after 1.05 s of the run, > 50 kN before) and ``engine0/1_n1_pct`` (19.9 / 83.7 at the end); the flag is 0 on samples 0..10 and 1 from sample 11 for an event at 1 s (the sample at 1.0 s precedes the write inside the following step). No NaN token in telemetry.json or the manifest (measured); ``state_units`` reports N / % / rpm / 1 with no ``?``. The "NaN where absent" design was built first and measured to break tests/test_atmosphere.py's column-by-column pin and, more seriously, the browser's JSON.parse in webapp/static/index.html; it was replaced by per-airframe columns (open issue 2).
+
+**Wiring on the patched tree** (scratch copy of HEAD 5ca68f0 + patches): tests/test_failures_block.py 20 passed; the eight committed examples' digests unchanged; the validator refuses all eight bad schedules by name and the DHC6 jam as failures.actuator_missing before any flight; the c172p run derives ``c172p-fail`` (suffix ``-fail``), the A320 engine-out run flies the stock airframe, the A320 jam under hold_state derives ``A320-tecs-fail``; the manifest's ``failures`` block, the four records (``limits.monitor``, ``failures.hardover[0]``, ``failures.engine_out[1]``, ``failures.events``, ``scene.geoid_undulation_m`` in that order) and the card block (``magneto_cmd`` 0 for the c172p engine-out, ``cutoff_cmd`` 1 for the A320) as specified; 336 neighbouring tests green including tests/test_mutation_targets.py (guard 620's target kept through ``{...} | schedule.recorder_extras()``) and tests/test_messages.py with the six entries.
+
+**Guards**: 13, all measured to fire (each on a copy, the file restored byte-identically).
+
+**JSBSIM_CORRECTIONS candidates for the integrator** (sections 19-22): a turbine's set-running 0 relights within one step in flight; a piston's set-running 0 is relatched by the windmilling propeller; magneto_cmd is tied with no getter (write-only); the sim clock at a run's first step is the engine start's cranking time, so a scheduled time counts from the first recorded sample.
+
+## Wave 4 integration (P4 with P3)
+
+Integrated from the returned text: fourteen catalogue entries, 33 guards, the two contracts and report sections, P4's patches (the loading floors and the per-channel floor table in core/record_null.py with their pin, the `_kgm2` suffix, `card.loading_properties` allowed as future) and P3's 26 patches (the `failures` block through core/scenario/blocks.py, spec.py, validate.py, runner.py, card.py, core/registry.py, the `_rpm` suffix and floor, the registry-test pins, `card.failure_schedule` allowed as future, and tests/test_failures_block.py as a new file).
+
+### What integration measured, and what was defective
+
+* Eleven of P3's hunks no longer matched once P4's edits to the same anchors had landed; each was merged by hand as the union the two items described.
+* P3's guards field carried a prose paragraph after the last guard; it broke the script (`bash -n`) and the target parser. Removed.
+* R1's `_mps2` guard lost its target when P4 extended the suffix line; retargeted.
+* P4's null-pair pin expected the pitch channel as the strongest relative to its floor; P4's own floors patch makes the mass channel the strongest (136 kg over 0.5 kg). The pin now says so.
+
+* Wave 3's CI (run 36497924281) was red on all three platforms on two P6 pins: the von Karman table's first row to 1e-15 and its `%.17g` strings byte for byte, plus the rows' sha256 as a constant. A 256-term cosine sum differs at 1e-14 relative between hosts. The same-seed pin is now bit identity within one process plus the values to 1e-12; the sha256 pin is the writing host's own text. The card's contract stands: the host reads the text, it recomputes nothing.
+
+### Measured here
+
+The affected suites: 640 passed, 1 skipped (97.3 s) before the two repairs, 50 on the repaired files after; tests/test_loading.py 40 passed (the 29 module-scoped flights and pairs); 655 guard targets each occurring exactly once; the 33 wave-4 guards and the retargeted one: see below. Full suite: see the commit.

@@ -84,6 +84,12 @@ DEFAULT_CHANNELS = (
     "gust_down_mps",
     "gust_p_equivalent_rad_s",
     "wind_profile_speed_mps",
+    # -- the loading (P4): the centre of gravity (m aft of the XML datum) and
+    # the pitch inertia (kg m^2) FGMassBalance holds at the sample; weight_kg
+    # above is the gross mass. Recorded, NOT graded: the Gate 5 comparison
+    # set is unchanged.
+    "cg_x_m",
+    "iyy_kgm2",
 )
 
 

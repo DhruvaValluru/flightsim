@@ -3874,8 +3874,8 @@ mutate core/record_null.py \
     || failures=$((failures+1))
 
 mutate core/capture/manifest.py \
-    '("_kgm3", "kg/m^3"), ("_mps2", "m/s^2"), ("_rads", "rad/s"),' \
-    '("_kgm3", "kg/m^3"), ("_mps2", "m/s"), ("_rads", "rad/s"),  # MUTATED: specific force in m/s' \
+    '("_kgm3", "kg/m^3"), ("_kgm2", "kg m^2"), ("_mps2", "m/s^2"), ("_rads", "rad/s"),' \
+    '("_kgm3", "kg/m^3"), ("_kgm2", "kg m^2"), ("_mps2", "m/s"), ("_rads", "rad/s"),  # MUTATED: specific force in m/s' \
     "the m/s^2 suffix reads as m/s^2, not m/s" tests/test_registry.py \
     || failures=$((failures+1))
 
@@ -4564,6 +4564,230 @@ mutate core/fdm/state.py \
     '                        if False else 0.0)  # MUTATED: the delivered roll gust never recorded' \
     "the equivalent roll rate the derived airframe received is recorded" tests/test_gust_provider.py \
     || failures=$((failures+1))
+
+# -- the advancement additions, wave 4: P4 loading (payload, fuel, the CG read back) and P3 the failure schedule ----
+mutate core/scenario/loading.py \
+    'CG_TOLERANCE_IN = 0.1' \
+    'CG_TOLERANCE_IN = 10.0  # MUTATED: the hand CG may sit ten inches from JSBSim'"'"'s' \
+    "loading: the hand CG is read back against JSBSim's cg-x-in within 0.1 in (V13)" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/loading.py \
+    '        if not cg_check["agrees"]:' \
+    '        if False:  # MUTATED: a hand CG outside the tolerance is accepted' \
+    "loading: a hand CG that misses JSBSim's cg-x-in by more than the tolerance is refused by name" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '    loading = loading_for(spec)
+    if loading is not None:
+        stack.add(loading)' \
+    '    loading = None  # MUTATED: the loading is never attached, so nothing is written before the trim
+    if loading is not None:
+        stack.add(loading)' \
+    "loading: the stations and tanks are written once before the trim, after the atmosphere" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '        environment = EnvironmentStack([p for p in (atmosphere_for(spec), loading_for(spec))' \
+    '        environment = EnvironmentStack([p for p in (atmosphere_for(spec),)  # MUTATED: the probe trims the unloaded aircraft' \
+    "loading: the validator's feasibility probe trims the loaded aircraft" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/loading.py \
+    '            fdm.relatch_initial_conditions()
+            now = self._read(fdm)
+            steps.append({"variable": "payload",' \
+    '            pass  # MUTATED: no re-latch, so the CG property is the stale one
+            now = self._read(fdm)
+            steps.append({"variable": "payload",' \
+    "loading: the initial conditions are re-latched after each station write so FGMassBalance recomputes the CG" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/loading.py \
+    '            if station.key == key:' \
+    '            if True:  # MUTATED: any name resolves to the first station' \
+    "loading: a station the airframe does not list is refused by name" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/loading.py \
+    '            if kg > station.max_kg:' \
+    '            if False:  # MUTATED: any mass passes the station maximum' \
+    "loading: a mass over the station's stated maximum is refused by name" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/loading.py \
+    '        if gross_kg > self.config.max_takeoff_weight_kg:' \
+    '        if False and gross_kg > self.config.max_takeoff_weight_kg:  # MUTATED: no maximum weight' \
+    "loading: the gross weight summed over empty weight, stations and fuel is held to the maximum takeoff weight" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/loading.py \
+    '                inside = not inside' \
+    '                inside = inside  # MUTATED: the crossing count never toggles' \
+    "loading: the envelope test is a point-in-polygon crossing count" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/loading.py \
+    '            if not 0.0 < fraction <= 1.0:' \
+    '            if False:  # MUTATED: any fuel fraction passes' \
+    "loading: a fuel fraction outside 0..1 is refused by name" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/loading.py \
+    '            if kg <= 0.0:' \
+    '            if kg < 0.0:  # MUTATED: a zero fuel load is accepted' \
+    "loading: a fuel load of zero leaves the engines nothing to start on and is refused by name" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/loading.py \
+    '        refusal = self.config.envelope_refusal()
+        if refusal is not None:
+            raise refusal
+        return self.envelope_check()' \
+    '        refusal = None  # MUTATED: the envelope is checked on an unverified datum
+        if refusal is not None:
+            raise refusal
+        return self.envelope_check()' \
+    "loading: the envelope check asked for on an airframe whose arm comparison is not green is refused by name" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/loading.py \
+    'CARD_KEYS = ("stations", "tanks", "expected_cg_in", "tolerance_in", "datum")' \
+    'CARD_KEYS = ("tanks", "stations", "expected_cg_in", "tolerance_in", "datum")  # MUTATED: another key order' \
+    "loading: the card block's keys are in the fixed order the host reads" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/loading.py \
+    '            if abs(arm - station.arm_in) > 1e-6:
+                raise refuse(f"arm of station {station.name!r} in", station.arm_in, arm)' \
+    '            if False:  # MUTATED: a configured arm that is not the model'"'"'s passes
+                raise refuse(f"arm of station {station.name!r} in", station.arm_in, arm)' \
+    "loading: a configured station arm that is not the loaded model's is refused by name before any write" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/card.py \
+    '    loading = loading_card_block(spec)
+    if loading is not None:' \
+    '    loading = None  # MUTATED: the card never carries the loading
+    if loading is not None:' \
+    "loading: the run card carries the loading_properties block for a stated loading" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/validate.py \
+    '    report.violations.extend(validate_loading(spec))' \
+    '    pass  # MUTATED: the loading is never validated' \
+    "loading: the validator names the loading refusals" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/fdm/state.py \
+    '            cg_x_m=u.ft_to_m(g("inertia/cg-x-in") / 12.0),' \
+    '            cg_x_m=0.0,  # MUTATED: the CG is not read from JSBSim' \
+    "loading: the CG is recorded every sample from JSBSim's inertia/cg-x-in" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/telemetry/recorder.py \
+    '    "cg_x_m",
+    "iyy_kgm2",
+)' \
+    '    # MUTATED: the loading channels are not recorded
+)' \
+    "loading: cg_x_m and iyy_kgm2 are recorded columns" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '    elif target.startswith("loading."):' \
+    '    elif False:  # MUTATED: a loading leaf falls through to the spec fields' \
+    "loading: the fuel_fraction and payload_kg policy leaves write the loading block" tests/test_loading.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/loading.py \
+    '            fdm.relatch_initial_conditions()
+            now = self._read(fdm)
+            steps.append({"variable": "fuel_kg" if plan.fuel_kg is not None else "fuel_fraction",' \
+    '            pass  # MUTATED: no re-latch after the tank writes, so the CG property is the stale one
+            now = self._read(fdm)
+            steps.append({"variable": "fuel_kg" if plan.fuel_kg is not None else "fuel_fraction",' \
+    "loading: the initial conditions are re-latched after the tank writes so FGMassBalance recomputes the CG" tests/test_loading.py \
+    || failures=$((failures+1))
+mutate core/telemetry/failures.py \
+    '            if t >= event.at_s:' \
+    '            if t > event.at_s:  # MUTATED: the step AT the stated time is skipped' \
+    "failures: an event lands at the first step at or past its time (>= not >)" tests/test_failures.py \
+    || failures=$((failures+1))
+
+mutate core/telemetry/failures.py \
+    '        t = sim_time - self.first_call_t' \
+    '        t = sim_time - self.first_call_t - 0.05  # MUTATED: six steps late' \
+    "failures: the write lands within one step of the stated time (V15)" tests/test_failures.py \
+    || failures=$((failures+1))
+
+mutate core/telemetry/failures.py \
+    'JAM_HOLD_TOLERANCE_RAD = 1e-6' \
+    'JAM_HOLD_TOLERANCE_RAD = 1e-1  # MUTATED: a drifting surface passes as held' \
+    "failures: a jammed surface holds within 1e-6 rad over 100 steps" tests/test_failures.py \
+    || failures=$((failures+1))
+
+mutate core/telemetry/failures.py \
+    '                threshold=NULL_FLOOR_FORCE_N, kind="reached",' \
+    '                threshold=1e9, kind="reached",  # MUTATED: no thrust change ever reaches' \
+    "failures: the engine-out null test grades thrust after against before at the force floor" tests/test_failures.py \
+    || failures=$((failures+1))
+
+mutate core/telemetry/failures.py \
+    '        elif not 0.0 <= float(value) <= 1.0:' \
+    '        elif False and not 0.0 <= float(value) <= 1.0:  # MUTATED: any authority passes' \
+    "failures: an authority outside 0..1 is refused by name" tests/test_failures.py \
+    || failures=$((failures+1))
+
+mutate core/telemetry/failures.py \
+    '                if not has(switch):' \
+    '                if False and not has(switch):  # MUTATED: a stock airframe is written to' \
+    "failures: a surface failure on an airframe without the chain is refused by name" tests/test_failures.py \
+    || failures=$((failures+1))
+
+mutate core/telemetry/failures.py \
+    '        st.agrees = (st.readback == st.written)' \
+    '        st.agrees = True  # MUTATED: the readback is asserted, not measured' \
+    "failures: the readback agreement is measured against the value written" tests/test_failures.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/validate.py \
+    '    report.violations.extend(validate_failures(spec))' \
+    '    report.violations.extend([])  # MUTATED: the schedule is never validated' \
+    "failures: the validator refuses a bad schedule by name" tests/test_failures_block.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '    fdm.register_step_hook(schedule.apply)' \
+    '    pass  # MUTATED: the schedule is bound and never applied' \
+    "failures: the runner applies the schedule through the step hook" tests/test_failures_block.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/runner.py \
+    '    if injections:' \
+    '    if False and injections:  # MUTATED: the stock airframe is flown' \
+    "failures: a surface failure derives the airframe with the failures injection" tests/test_failures_block.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/card.py \
+    '        card["failure_schedule"] = failure_schedule' \
+    '        pass  # MUTATED: the card carries no schedule' \
+    "failures: the card carries the failure_schedule block" tests/test_failures_block.py \
+    || failures=$((failures+1))
+
+mutate core/scenario/spec.py \
+    '        if not self.failures.is_default():' \
+    '        if True:  # MUTATED: the default block is serialised too' \
+    "failures: the block is absent-canonical (every committed example keeps its digest)" tests/test_failures_block.py tests/test_registry.py \
+    || failures=$((failures+1))
+
+mutate core/registry.py \
+    '        name="failures.events", spec_path="failures.events", unit="events",' \
+    '        name="failures.events", spec_path=None, unit="events",  # MUTATED: the block is unclaimed' \
+    "failures: the registry claims the block's field" tests/test_failures_block.py tests/test_registry.py \
+    || failures=$((failures+1))
+
 
 if [ "$guard_n" -ne "$total" ]; then
     echo "INTERNAL: $guard_n mutate calls ran but $total are written; the count is off" >&2
