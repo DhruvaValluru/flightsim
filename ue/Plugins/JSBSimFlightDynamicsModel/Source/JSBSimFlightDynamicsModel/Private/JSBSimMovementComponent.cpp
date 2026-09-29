@@ -688,6 +688,14 @@ void UJSBSimMovementComponent::PrepareJSBSim()
 			node->setStringValue(TCHAR_TO_UTF8(*PreTrimValues[Write]));
 			if (PreTrimRelatchAfter.IsValidIndex(Write) && PreTrimRelatchAfter[Write])
 			{
+				// JSBSim keeps the initial speed as TRUE airspeed, converted
+				// from the requested CAS with the atmosphere of the moment:
+				// after a stated day the same TAS is another CAS (measured
+				// headless: 100 kt asked at +30 degC flew 95.83 kt). The CAS
+				// is re-stated in its own terms before every re-latch, as
+				// core/fdm/fdm.py relatch_initial_conditions re-states
+				// ic/vc-kts, so both hosts trim at the card's airspeed.
+				IC->SetVcalibratedKtsIC(InitialCalibratedAirSpeedKts);
 				Exec->RunIC();
 			}
 		}

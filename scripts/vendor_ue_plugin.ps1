@@ -3,7 +3,10 @@
 #
 # The plugin's patched sources, headers and aircraft data are already
 # committed (vendored on mac from the same v1.2.4 tag; see VENDORED.json,
-# including the four recorded local patches). What Windows is missing is
+# including the recorded local patches: the four upstream fixes and P9's
+# patches 5 and 6, the derived-airframe root with its XML sha256 at the
+# door and the pre-trim batch, kept as scripts\jsbsim_plugin_patches_5_6.diff
+# for the .sh re-vendoring). What Windows is missing is
 # only the native library: Source\ThirdParty\JSBSim\Lib\JSBSim.dll + .lib,
 # which the plugin's own Build.cs expects at exactly that path.
 #

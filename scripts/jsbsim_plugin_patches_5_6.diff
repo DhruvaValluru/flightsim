@@ -1,5 +1,5 @@
 diff --git a/ue/Plugins/JSBSimFlightDynamicsModel/Source/JSBSimFlightDynamicsModel/Private/JSBSimMovementComponent.cpp b/ue/Plugins/JSBSimFlightDynamicsModel/Source/JSBSimFlightDynamicsModel/Private/JSBSimMovementComponent.cpp
-index a7eb9c9..041ab67 100644
+index a7eb9c9..0d57d3e 100644
 --- a/ue/Plugins/JSBSimFlightDynamicsModel/Source/JSBSimFlightDynamicsModel/Private/JSBSimMovementComponent.cpp
 +++ b/ue/Plugins/JSBSimFlightDynamicsModel/Source/JSBSimFlightDynamicsModel/Private/JSBSimMovementComponent.cpp
 @@ -54,6 +54,78 @@
@@ -147,7 +147,7 @@ index a7eb9c9..041ab67 100644
  		Exec->SetEnginePath(SGPath(TCHAR_TO_UTF8(*EnginePath)));
  		Exec->SetSystemsPath(SGPath(TCHAR_TO_UTF8(*SystemPath)));
  		// Prepare Initial Conditions
-@@ -537,6 +661,53 @@ void UJSBSimMovementComponent::PrepareJSBSim()
+@@ -537,6 +661,61 @@ void UJSBSimMovementComponent::PrepareJSBSim()
  		}
  	}
  
@@ -178,6 +178,14 @@ index a7eb9c9..041ab67 100644
 +			node->setStringValue(TCHAR_TO_UTF8(*PreTrimValues[Write]));
 +			if (PreTrimRelatchAfter.IsValidIndex(Write) && PreTrimRelatchAfter[Write])
 +			{
++				// JSBSim keeps the initial speed as TRUE airspeed, converted
++				// from the requested CAS with the atmosphere of the moment:
++				// after a stated day the same TAS is another CAS (measured
++				// headless: 100 kt asked at +30 degC flew 95.83 kt). The CAS
++				// is re-stated in its own terms before every re-latch, as
++				// core/fdm/fdm.py relatch_initial_conditions re-states
++				// ic/vc-kts, so both hosts trim at the card's airspeed.
++				IC->SetVcalibratedKtsIC(InitialCalibratedAirSpeedKts);
 +				Exec->RunIC();
 +			}
 +		}

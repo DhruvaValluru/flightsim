@@ -512,6 +512,46 @@ NO_BUNDLE_BASIS = ("no engine bundle read: bbox_2d_tight, visible_fraction, "
                    "render.json, the ID image, the depth .f32 and the alone "
                    "passes")
 
+#: W4: what each aggregate object (core/capture/objects.py) gathers and
+#: where its mask comes from -- the ``aggregate`` key of its label record
+#: (:func:`aggregate_record` adds the legend codes from the taxonomy map).
+AGGREGATE_RECORDS: Dict[str, Dict] = {
+    "building:all": {
+        "gathers": "every building of the scene as one object",
+        "taxonomy": "building",
+        "masks": ("the land-cover class image: the pixels whose WorldCover code the "
+                  "taxonomy map calls building -> landcover_bbox_2d, landcover_pixels, "
+                  "landcover_mask; the ID image carries its int_id only where an engine "
+                  "drew a stated footprint set's LoD1 blocks (the stencil loop, W5)"),
+        "per_instance_ids": ("none: the ID image is the 8-bit Custom Depth Stencil (at "
+                             "most 255 ids) and a scene's buildings outnumber it; the "
+                             "per-building ids of a footprint set live in its buildings "
+                             "document"),
+    },
+    "vegetation:all": {
+        "gathers": "every tree, shrub and mangrove of the scene as one object",
+        "taxonomy": "vegetation",
+        "masks": ("the land-cover class image: the pixels whose WorldCover code the "
+                  "taxonomy map calls vegetation -> landcover_bbox_2d, landcover_pixels, "
+                  "landcover_mask; the ID image carries its int_id only where an engine "
+                  "drew foliage with the stencil (W5, Windows)"),
+        "per_instance_ids": ("none: the 8-bit stencil cannot carry an id per tree, and no "
+                             "tree has an identity in the land cover; no species, no season"),
+    },
+}
+
+
+def aggregate_record(object_id: str) -> Optional[Dict]:
+    """The ``aggregate`` block of an aggregate object's label record, with
+    the legend codes its taxonomy word covers; None for any other object."""
+    base = AGGREGATE_RECORDS.get(str(object_id))
+    if base is None:
+        return None
+    from ..terrain.weightmaps import CLASS_OF_COVER
+
+    return {**base, "codes": sorted(c for c, word in CLASS_OF_COVER.items()
+                                    if word == base["taxonomy"])}
+
 
 def hull_box_body_m(mesh_manifest: Optional[Dict], airframe: Airframe
                     ) -> Tuple[Optional[Dict[str, Tuple[float, float]]], str]:
@@ -660,9 +700,9 @@ def object_label_record(obj, record: Dict, state: Optional[Dict],
                                               "object (no single range)")
         # W4: an aggregate (building:all, vegetation:all) says what it
         # gathers and where its mask comes from; absent on every other object.
-        aggregate = AGGREGATE_RECORDS.get(str(obj.id))
+        aggregate = aggregate_record(str(obj.id))
         if aggregate is not None:
-            entry["aggregate"] = dict(aggregate)
+            entry["aggregate"] = aggregate
     for key in ENGINE_LABEL_KEYS:
         entry[key] = [] if key == "occluded_by" else None
     basis["engine"] = NO_BUNDLE_BASIS
@@ -1013,6 +1053,399 @@ def amodal_labels(alone, mask, int_id: int, alone_file: Optional[str]) -> Dict:
     }
 
 
+# -- W4: the land-cover label per frame ----------------------------------------------
+#
+# A frame's LAND-COVER IMAGE is the bake's WorldCover class grid seen
+# through the frame's own depth: every pixel with a finite positive depth
+# is carried back into the scene along its own ray (the pinhole above,
+# pixel (u, v) through its centre (u + 0.5, v + 0.5), the depth planar
+# along the camera's forward axis, as depth_f32 states it), the scene
+# point is placed in the frame's projected CRS (x = origin_x + east,
+# y = origin_y + north), and the pixel takes the class code of the bake
+# cell holding that point: cell (row, col) = (floor((origin_y - y) / c),
+# floor((x - origin_x) / c)) for the grid's upper-left origin and cell
+# size c -- a cell is its area, as core/terrain/landcover.py counts it.
+#
+#   frame_NNNN_landcover.png   8-bit grey PNG beside the frame: the
+#                              WorldCover legend code per pixel; 0 is
+#                              NODATA -- sky (no finite depth), off the
+#                              bake, a cell the source had no data for,
+#                              or a pixel the ID image gives an aircraft
+#                              (an airframe is not ground cover)
+#
+# The legend (codes, keys, titles, the taxonomy word of each) rides in the
+# manifest's top-level ``landcover`` block (:func:`manifest_landcover_block`);
+# per frame ``labels.landcover`` carries the file, its sha256, the fractions
+# in view (per legend class and per taxonomy word, over all the frame's
+# pixels, nodata stated beside them), the dominant class, and -- when the
+# engine's land-cover ID pass exists (``labels.landcover_png`` on the
+# render.json record; M_LandcoverID, W5, a Windows step) -- the fraction of
+# this image's labelled pixels the engine pass agrees with. The aggregates
+# (building:all, vegetation:all) take their box and mask from this image.
+#
+# Not claimed: no per-instance ids; no species or season; the classes are
+# WorldCover's own (76.7 % overall accuracy per its manual), 2021, and
+# not re-validated; the engine's pass is W5's, uncompiled here; a pixel
+# carries the class of the bake cell under its surface point, not of what
+# the engine draws there (the agreement measures that, when it exists).
+
+#: The land-cover image's suffix beside a frame, and its nodata code.
+LANDCOVER_SUFFIX = "_landcover.png"
+LANDCOVER_NODATA = 0
+#: The render.json frame record's ``labels`` key naming the engine's
+#: land-cover ID pass (W5: M_LandcoverID, the class code per pixel from
+#: the Landscape layers; 8-bit, the legend codes, 0 where no layer).
+ENGINE_LANDCOVER_KEY = "landcover_png"
+#: The agreement the engine pass must reach against this image (the
+#: blueprint's Windows clause; graded by verify.landcover_vs_geometry).
+LANDCOVER_AGREEMENT_MIN = 0.95
+LANDCOVER_METHOD = ("the frame's depth carried back along each pixel's own ray into "
+                    "the scene, placed on the bake's WorldCover class grid; nodata for "
+                    "sky, off the bake, a nodata cell, or an aircraft pixel in the ID image")
+LANDCOVER_NOT_CLAIMED = (
+    "no per-instance ids: building:all and vegetation:all are one object each (the "
+    "8-bit stencil)",
+    "no species and no season: the WorldCover classes only",
+    "the classes are the product's estimate (76.7 +/- 0.5 % overall accuracy per its "
+    "manual), 2021, not re-validated here",
+    "the engine's land-cover ID pass is W5's Windows step (M_LandcoverID), uncompiled here; "
+    "an agreement is recorded only when a bundle carries that pass",
+)
+
+
+class LandcoverLabelError(Exception):
+    """The land-cover image of a frame cannot be made or trusted; named
+    ``annotation.landcover`` (a class map missing or changed since the
+    manifest named it, a grid in another CRS than the frame, a code
+    outside the legend)."""
+
+    constraint = "annotation.landcover"
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+        super().__init__(f"annotation.landcover: {message}")
+
+
+def _sha256_file(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def landcover_document_for(terrain) -> Optional[Path]:
+    """The ``landcover.json`` beside a bake (core/terrain/landcover.py
+    ``scene_dir_for``), or None for no terrain or no land cover."""
+    if not terrain:
+        return None
+    from ..terrain.landcover import scene_dir_for
+
+    path = scene_dir_for(Path(str(terrain))) / "landcover.json"
+    return path if path.is_file() else None
+
+
+def landcover_legend() -> List[Dict]:
+    """The legend the image's codes resolve through: nodata first, then
+    WorldCover's eleven classes, each with its taxonomy word."""
+    from ..terrain.landcover import LEGEND
+    from ..terrain.weightmaps import CLASS_OF_COVER
+
+    return ([{"code": LANDCOVER_NODATA, "key": "nodata", "title": "No data", "taxonomy": None,
+              "rgb": [0, 0, 0]}]
+            + [{"code": c.code, "key": c.key, "title": c.title,
+                "taxonomy": CLASS_OF_COVER[c.code], "rgb": list(c.rgb)} for c in LEGEND])
+
+
+def manifest_landcover_block(document) -> Optional[Dict]:
+    """The capture manifest's ``landcover`` block from a bake's
+    ``landcover.json``: the dataset, tiles and digests, the class map
+    (path + sha256) and grid the images are cut from, the legend, the
+    image's encoding and cell rule, the aggregates' codes, the engine
+    pass's key. None for no document (absent-canonical: a scene without
+    land cover carries no key)."""
+    if document is None:
+        return None
+    path = Path(str(document))
+    if not path.is_file():
+        return None
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    grid = doc.get("grid") or {}
+    class_map = doc.get("class_map") or {}
+    source = doc.get("source") or {}
+    tiles = source.get("tiles") or {}
+    return {
+        "dataset": doc.get("dataset"),
+        "license": doc.get("license"),
+        "attribution": doc.get("attribution"),
+        "citation": doc.get("citation"),
+        "document": str(path),
+        "document_sha256": _sha256_file(path),
+        "source_sha256": doc.get("sha256"),
+        "tiles": sorted(str(t) for t in tiles),
+        "crop": source.get("crop"),
+        "class_map": {"file": str(path.parent / str(class_map.get("file", "class_map.png"))),
+                      "sha256": class_map.get("sha256"),
+                      "encoding": class_map.get("encoding")},
+        "grid": {key: grid.get(key) for key in ("crs", "origin_x_m", "origin_y_m",
+                                                "cell_size_m", "width", "height",
+                                                "bake_sha256")},
+        "fractions": doc.get("fractions"),
+        "dominant_class": doc.get("dominant_class"),
+        "legend": landcover_legend(),
+        "nodata": LANDCOVER_NODATA,
+        "image": {"suffix": LANDCOVER_SUFFIX,
+                  "encoding": "8-bit grey PNG beside the frame: the WorldCover legend code "
+                              "per pixel (the legend above); 0 = nodata",
+                  "method": LANDCOVER_METHOD,
+                  "cell_rule": "a scene point (x, y) in the grid's CRS falls in cell (row, col) "
+                               "= (floor((origin_y - y) / cell), floor((x - origin_x) / cell)); "
+                               "the origin is the grid's upper-left corner",
+                  "pixel_ray": "pixel (u, v) through its centre (u + 0.5, v + 0.5); the depth "
+                               "is planar along the camera's forward axis"},
+        "aggregates": {object_id: aggregate_record(object_id)["codes"]
+                       for object_id in AGGREGATE_RECORDS},
+        "engine_pass": {"key": ENGINE_LANDCOVER_KEY,
+                        "agreement_min": LANDCOVER_AGREEMENT_MIN,
+                        "status": "the engine's land-cover ID pass (M_LandcoverID) is W5's "
+                                  "Windows step; agreement is recorded only where a bundle "
+                                  "declares it"},
+        "not_claimed": list(LANDCOVER_NOT_CLAIMED),
+    }
+
+
+def read_class_map(block: Dict, run_dir=None):
+    """The class map the block names, checked against its sha256 and the
+    grid's shape; refuses ``annotation.landcover`` otherwise."""
+    import numpy as np
+
+    where = (block.get("class_map") or {}).get("file")
+    path = Path(str(where)) if where else None
+    if (path is None or not path.is_file()) and run_dir is not None and where:
+        candidate = Path(run_dir) / Path(str(where)).name
+        path = candidate if candidate.is_file() else path
+    if path is None or not path.is_file():
+        raise LandcoverLabelError(f"the class map {where!r} the manifest names is not on this "
+                                  f"machine; no land-cover image can be cut from it")
+    digest = _sha256_file(path)
+    if digest != (block.get("class_map") or {}).get("sha256"):
+        raise LandcoverLabelError(f"{path.name}: sha256 {digest[:16]}... is not the manifest's "
+                                  f"{str((block.get('class_map') or {}).get('sha256'))[:16]}...: "
+                                  f"the land cover changed after the capture")
+    codes = _read_id_png(path)
+    grid = block.get("grid") or {}
+    if codes.shape != (int(grid.get("height", -1)), int(grid.get("width", -1))):
+        raise LandcoverLabelError(f"{path.name} is {codes.shape[1]}x{codes.shape[0]}, the grid "
+                                  f"says {grid.get('width')}x{grid.get('height')}")
+    return np.asarray(codes, dtype=np.uint8)
+
+
+def landcover_class_from_depth(depth, record: Dict, grid: Dict, class_map,
+                               frame_origin: Tuple[float, float], exclude=None):
+    """The frame's land-cover image: (h, w) uint8 WorldCover codes, 0
+    (nodata) where the depth is sky (not finite, not positive), the
+    surface point is off the bake, the cell is nodata, or ``exclude``
+    (a boolean mask: the aircraft pixels of the ID image) is set.
+
+    ``depth`` is (h, w) metres, planar along the camera's forward axis;
+    ``record`` the manifest frame record (pose and intrinsics); ``grid``
+    the block's grid (``origin_x_m``, ``origin_y_m``, ``cell_size_m``,
+    ``width``, ``height``); ``class_map`` the (height, width) code grid;
+    ``frame_origin`` the manifest frame's projected ``(origin_x_m,
+    origin_y_m)`` (the local north/east metres are about it)."""
+    import numpy as np
+
+    z = np.asarray(depth, dtype=np.float64)
+    h, w = z.shape
+    forward, right, up = camera_axes(record["quaternion_wxyz"])
+    cx, cy = (float(v) for v in record["principal_point_px"])
+    fx, fy = float(record["fx_px"]), float(record["fy_px"])
+    d = ((np.arange(w, dtype=np.float64) + 0.5 - cx) / fx)[None, :]
+    e = ((np.arange(h, dtype=np.float64) + 0.5 - cy) / fy)[:, None]
+    valid = np.isfinite(z) & (z > 0.0)
+    zv = np.where(valid, z, 0.0)
+    north = float(record["position_north_m"]) + zv * (forward[0] + d * right[0] - e * up[0])
+    east = float(record["position_east_m"]) + zv * (forward[1] + d * right[1] - e * up[1])
+    x = float(frame_origin[0]) + east
+    y = float(frame_origin[1]) + north
+    cell = float(grid["cell_size_m"])
+    col = np.floor((x - float(grid["origin_x_m"])) / cell)
+    row = np.floor((float(grid["origin_y_m"]) - y) / cell)
+    width, height = int(grid["width"]), int(grid["height"])
+    inside = valid & (col >= 0) & (col < width) & (row >= 0) & (row < height)
+    out = np.zeros((h, w), dtype=np.uint8)
+    out[inside] = np.asarray(class_map)[row[inside].astype(np.int64), col[inside].astype(np.int64)]
+    if exclude is not None:
+        out[np.asarray(exclude, dtype=bool)] = LANDCOVER_NODATA
+    return out
+
+
+def landcover_fractions(image) -> Dict:
+    """The fractions in view: per legend class and per taxonomy word, over
+    ALL the frame's pixels (nodata stated beside them, so they sum to 1),
+    the dominant class (most pixels, ties by legend order; None when
+    nothing is labelled). A code outside the legend refuses
+    ``annotation.landcover``: an unknown class is never counted."""
+    import numpy as np
+
+    from ..terrain.landcover import LEGEND
+    from ..terrain.weightmaps import CLASS_OF_COVER, TAXONOMY
+
+    counts = np.bincount(np.asarray(image, dtype=np.uint8).ravel(), minlength=256)
+    known = {LANDCOVER_NODATA} | {c.code for c in LEGEND}
+    stray = [int(c) for c in np.nonzero(counts)[0] if int(c) not in known]
+    if stray:
+        raise LandcoverLabelError(f"codes {stray} are not in the WorldCover legend")
+    total = int(np.asarray(image).size)
+    fractions = {c.key: float(counts[c.code]) / total for c in LEGEND}
+    labelled = total - int(counts[LANDCOVER_NODATA])
+    dominant = None
+    if labelled:
+        dominant = max(LEGEND, key=lambda c: (int(counts[c.code]), -LEGEND.index(c))).key
+    taxonomy = {word: sum(float(counts[code]) for code, w in CLASS_OF_COVER.items()
+                          if w == word) / total for word in TAXONOMY}
+    return {"pixels": total, "labelled_pixels": labelled,
+            "fractions": fractions,
+            "nodata_fraction": float(counts[LANDCOVER_NODATA]) / total,
+            "taxonomy_fractions": taxonomy, "dominant": dominant}
+
+
+def landcover_agreement(image, engine) -> Dict:
+    """The engine pass against this image over this image's LABELLED
+    pixels: the fraction whose engine code equals it (the engine's 0
+    where this image has a class counts as disagreement)."""
+    import numpy as np
+
+    image = np.asarray(image)
+    engine = np.asarray(engine)
+    if engine.shape != image.shape:
+        raise LandcoverLabelError(f"the engine's land-cover pass is {engine.shape[1]}x"
+                                  f"{engine.shape[0]}, the frame {image.shape[1]}x{image.shape[0]}")
+    labelled = image != LANDCOVER_NODATA
+    compared = int(np.count_nonzero(labelled))
+    agreed = int(np.count_nonzero(labelled & (engine == image)))
+    fraction = (agreed / compared) if compared else None
+    return {"compared": compared, "agreed": agreed, "agreement": fraction,
+            "min": LANDCOVER_AGREEMENT_MIN,
+            "ok": None if fraction is None else bool(fraction >= LANDCOVER_AGREEMENT_MIN)}
+
+
+def aggregate_from_landcover(image, codes: Sequence[int]) -> Dict:
+    """An aggregate's box and pixel count from the land-cover image: the
+    tight box (bbox_2d_tight's convention: far edges one past the last
+    pixel) around the pixels whose code is one of ``codes``."""
+    import numpy as np
+
+    hit = np.isin(np.asarray(image), np.asarray(list(codes), dtype=np.uint8))
+    pixels = int(np.count_nonzero(hit))
+    box = None
+    if pixels:
+        ys, xs = np.nonzero(hit)
+        box = [float(xs.min()), float(ys.min()), float(xs.max()) + 1.0, float(ys.max()) + 1.0]
+    return {"landcover_bbox_2d": box, "landcover_pixels": pixels,
+            "landcover_fraction": pixels / float(hit.size)}
+
+
+def write_landcover_png(path: Path, image) -> Path:
+    """The land-cover image as an 8-bit grey PNG (read back bit for bit
+    by :func:`_read_id_png`)."""
+    import numpy as np
+    from PIL import Image
+
+    Image.fromarray(np.ascontiguousarray(image, dtype=np.uint8)).save(path)
+    return Path(path)
+
+
+def frame_landcover(block: Dict, class_map, record: Dict, frame_origin, depth, mask,
+                    aircraft_ids: Sequence[int], camera_dir: Path, engine_labels: Dict,
+                    depth_file: str, write: bool = True):
+    """One frame's land-cover image, written beside the frame, and its
+    ``labels.landcover`` block; returns ``(block, image)``."""
+    import numpy as np
+
+    grid = block["grid"]
+    exclude = np.isin(mask, np.asarray(list(aircraft_ids), dtype=mask.dtype)) \
+        if mask is not None and aircraft_ids else None
+    image = landcover_class_from_depth(depth, record, grid, class_map, frame_origin, exclude)
+    stem = Path(str(record["file"])).name[:-len(".png")]
+    name = f"{stem}{LANDCOVER_SUFFIX}"
+    path = Path(camera_dir) / name
+    if write:
+        write_landcover_png(path, image)
+    out = {"file": name, "sha256": _sha256_file(path) if path.is_file() else None,
+           "depth": depth_file, **landcover_fractions(image),
+           "method": LANDCOVER_METHOD, "agreement": None,
+           "engine_pass": None}
+    engine_file = engine_labels.get(ENGINE_LANDCOVER_KEY)
+    if isinstance(engine_file, str) and engine_file:
+        engine = _read_id_png(Path(camera_dir) / engine_file)
+        out["engine_pass"] = engine_file
+        out["agreement"] = landcover_agreement(image, engine)
+    else:
+        out["agreement_basis"] = ("no engine land-cover ID pass in this bundle (W5, Windows): "
+                                  "no agreement is claimed")
+    return out, image
+
+
+def landcover_label_record(block: Dict, frames: Sequence[Dict]):
+    """The ``labels.landcover`` record (record 2) over the frames that got
+    a land-cover image. Null test: without a per-frame label a frame is
+    read as the bake's dominant class (every in-view pixel); with it, the
+    measured share of its labelled pixels in ANOTHER class -- a frame
+    over forest reads forest, a frame over the lake reads water."""
+    from ..records import AppliedVariable, Model, NullTest
+
+    labelled = [f for f in frames if f.get("labelled_pixels")]
+    total = sum(int(f["pixels"]) for f in frames) or 1
+    keys = list((frames[0]["fractions"] if frames else {}).keys())
+    in_view = {k: sum(f["fractions"][k] * f["pixels"] for f in frames) / total for k in keys}
+    bake_dominant = block.get("dominant_class")
+    others = [1.0 - (f["fractions"].get(bake_dominant, 0.0) * f["pixels"] / f["labelled_pixels"])
+              for f in labelled]
+    with_value = (sum(others) / len(others)) if others else 0.0
+    agreements = [f["agreement"]["agreement"] for f in frames
+                  if isinstance(f.get("agreement"), dict)
+                  and f["agreement"].get("agreement") is not None]
+    dominant = max(in_view, key=lambda k: (in_view[k], -keys.index(k))) if in_view else None
+    references = ("ESA WorldCover 10 m 2021 v200 (product user manual v2.0)",
+                  "core/capture/labels.py landcover_class_from_depth")
+    return AppliedVariable(
+        name="labels.landcover", value=dominant,
+        unit="WorldCover legend class (dominant in view); fractions in parameters",
+        source="derived",
+        model="depth back-projection onto the bake's WorldCover class grid",
+        parameters={
+            "dataset": block.get("dataset"), "tiles": block.get("tiles"),
+            "source_sha256": block.get("source_sha256"),
+            "class_map_sha256": (block.get("class_map") or {}).get("sha256"),
+            "document_sha256": block.get("document_sha256"),
+            "frames": len(frames), "labelled_frames": len(labelled),
+            "fractions_in_view": in_view,
+            "nodata_fraction": sum(f["nodata_fraction"] * f["pixels"] for f in frames) / total,
+            "frame_dominants": [f.get("dominant") for f in frames],
+            "bake_dominant": bake_dominant,
+            "agreement": ({"frames": len(agreements), "min": min(agreements),
+                           "mean": sum(agreements) / len(agreements),
+                           "threshold": LANDCOVER_AGREEMENT_MIN} if agreements else None),
+            "license": block.get("license"), "attribution": block.get("attribution"),
+        },
+        references=references,
+        frame_keys=("labels.landcover",),
+        null_test=NullTest(
+            quantity="share of a frame's labelled pixels outside the bake's dominant class",
+            unit="fraction", with_value=float(with_value), without_value=0.0,
+            threshold=0.05, kind="reached",
+            note=(f"without = every in-view pixel read as the bake's dominant class "
+                  f"({bake_dominant}); with = the per-frame land-cover image, mean over "
+                  f"{len(labelled)} labelled frame(s): a frame over forest reads forest, "
+                  f"a frame over the lake reads water")),
+        model_block=Model(name="land-cover image from depth", standard="ESA WorldCover v200 legend",
+                          version="W4", parameters={"nodata": LANDCOVER_NODATA,
+                                                    "agreement_min": LANDCOVER_AGREEMENT_MIN},
+                          references=references),
+        frm="the frame's depth and pose, the bake's WorldCover class map",
+        std="ESA WorldCover product user manual v2.0 (the legend, Table 3)",
+        not_claimed=LANDCOVER_NOT_CLAIMED)
+
+
 def _bundle_records(camera_dir: Path) -> Dict[str, Dict]:
     """``{frame name: render.json record}`` for the records that declare
     label outputs, or {} when this camera has no render.json."""
@@ -1094,6 +1527,24 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
                     if isinstance(o, dict) and o.get("class") == "aircraft"}
     amodal_ratios: List[Optional[float]] = []
     amodal_refused = 0
+    # W4: the land-cover image per frame, when the manifest names land
+    # cover (its top-level ``landcover`` block); the class map is read
+    # once, checked against its digest, and a refusal is recorded by name.
+    landcover_block = manifest.get("landcover") if isinstance(manifest.get("landcover"), dict) else None
+    landcover_frames: List[Dict] = []
+    class_map = None
+    landcover_refusal: Optional[LandcoverLabelError] = None
+    frame_block = manifest.get("frame") or {}
+    if landcover_block is not None:
+        try:
+            if str((landcover_block.get("grid") or {}).get("crs")) != str(frame_block.get("crs")):
+                raise LandcoverLabelError(
+                    f"the land cover's grid is in {(landcover_block.get('grid') or {}).get('crs')}, "
+                    f"the frame in {frame_block.get('crs')}; a surface point cannot be placed")
+            class_map = read_class_map(landcover_block, run_dir)
+        except LandcoverLabelError as exc:
+            landcover_refusal = exc
+            summary["landcover"] = {"refused": exc.constraint, "reason": exc.message}
     for frame in manifest.get("frames", []):
         summary["frames"] += 1
         camera = str(frame["camera_id"])
@@ -1166,6 +1617,35 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
                     basis["amodal"] = amodal["basis"]
                     amodal_ratios.append(amodal["amodal_ratio"])
             summary["objects"] += 1
+        # W4: the frame's land-cover image, its fractions in view and the
+        # aggregates' boxes from it (needs the depth; recorded by name when
+        # the land cover cannot be used).
+        if landcover_block is not None and depth is not None:
+            frame_labels_block = frame.setdefault("labels", {})
+            if landcover_refusal is not None:
+                frame_labels_block["landcover"] = {"refused": landcover_refusal.constraint,
+                                                   "reason": landcover_refusal.message}
+            else:
+                try:
+                    lc, lc_image = frame_landcover(
+                        landcover_block, class_map, frame,
+                        (float(frame_block["origin_x_m"]), float(frame_block["origin_y_m"])),
+                        depth, mask, sorted(aircraft_ids), camera_dir, labels,
+                        files["depth"], write=write)
+                except LandcoverLabelError as exc:
+                    frame_labels_block["landcover"] = {"refused": exc.constraint,
+                                                       "reason": exc.message}
+                else:
+                    frame_labels_block["landcover"] = lc
+                    landcover_frames.append(lc)
+                    for entry in entries:
+                        aggregate = aggregate_record(str(entry.get("id")))
+                        if aggregate is None:
+                            continue
+                        entry.update(aggregate_from_landcover(lc_image, aggregate["codes"]))
+                        entry["landcover_mask"] = {
+                            "file": lc["file"], "codes": aggregate["codes"],
+                            "encoding": "the land-cover image's pixels whose code is one of codes"}
         # I6: which ground-truth passes this frame's record declares, by
         # name (the files are not opened here; the verifier reads them).
         declared_passes = passes_declared(engine)
@@ -1188,6 +1668,12 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
 
         _attach_record(manifest, amodal_record(amodal_ratios, amodal_refused))
         summary["amodal"] = {"objects": len(amodal_ratios), "refused": amodal_refused}
+    # W4: the land-cover record over the frames that got an image.
+    if landcover_frames:
+        _attach_record(manifest, landcover_label_record(landcover_block, landcover_frames))
+        summary["landcover"] = {"frames": len(landcover_frames),
+                                "agreements": sum(1 for f in landcover_frames
+                                                  if f.get("agreement") is not None)}
     if any(isinstance(f.get("passes"), dict) for f in manifest.get("frames", [])):
         from .passes import attach_passes
 

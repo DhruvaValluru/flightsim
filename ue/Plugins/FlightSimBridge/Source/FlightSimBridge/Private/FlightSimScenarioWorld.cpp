@@ -88,6 +88,25 @@ namespace
 		return FString::Printf(TEXT("%.17g"), Value);
 	}
 
+	// Python's int(round(x)): half to EVEN (von_karman.py n_rows and
+	// row_at), where FMath::RoundToInt rounds half up -- a 2.5 would count
+	// 3 rows here and 2 there.
+	int32 PhysicsPythonRound(double X)
+	{
+		const double Floor = std::floor(X);
+		const double Fraction = X - Floor;
+		const int64 Lower = static_cast<int64>(Floor);
+		if (Fraction > 0.5)
+		{
+			return static_cast<int32>(Lower + 1);
+		}
+		if (Fraction < 0.5)
+		{
+			return static_cast<int32>(Lower);
+		}
+		return static_cast<int32>(Lower % 2 == 0 ? Lower : Lower + 1);
+	}
+
 	// A fixed table's length as int32 (UE_ARRAY_COUNT is a size_t, and a
 	// signed/unsigned comparison is an error under the Windows warning set).
 	template <typename T, SIZE_T N>
@@ -531,7 +550,7 @@ namespace
 			(*Block)->TryGetStringField(TEXT("model"), Out.GustTableModel);
 			// Row i is the field at step i: one row per step of the flight
 			// the card is for, the first included (von_karman.py n_rows).
-			const int32 ExpectedRows = FMath::RoundToInt(Out.DurationSeconds * Out.RateHz) + 1;
+			const int32 ExpectedRows = PhysicsPythonRound(Out.DurationSeconds * Out.RateHz) + 1;
 			if (Rows->Num() != ExpectedRows)
 			{
 				return RefuseCard(Error, FString::Printf(
@@ -1859,8 +1878,10 @@ bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
 	// NonStandardAtmosphere.prepare), then the loading (after each station,
 	// once after the tanks, as LoadingProvider.prepare), then the icing's
 	// neutral values (IcingProvider.prepare: the trim is of the UN-iced
-	// aircraft). The CG and the CAS the re-latched ICs give are read back
-	// for BindPhysicsBlocks. Empty for every card without these blocks, so
+	// aircraft). The plugin re-states the card's CAS before every re-latch
+	// (the headless relatch_initial_conditions does the same: JSBSim holds
+	// the IC speed as TAS). The CG and the CAS the re-latched ICs give are
+	// read back for BindPhysicsBlocks. Empty for every card without these blocks, so
 	// the plugin's sequence is then exactly upstream's.
 	{
 		TArray<FString> BatchProperties;
@@ -2253,19 +2274,17 @@ bool FFlightSimScenarioWorld::VerifyTrimmedCondition(const FFlightSimScenarioCar
 		Wrong.Add(FString::Printf(TEXT("altitude %.3f m, commanded %.3f m"),
 		                          AchievedAltitude, Card.AltitudeMetres));
 	}
-	// P9: after a pre-trim batch the trim holds the true airspeed the ICs
-	// latched in ISA air, so on a stated day the CAS it achieves is the one
-	// the re-latched ICs read (the headless run flies the same: its
-	// atmosphere is written after the ICs and before the trim, which holds
-	// the TAS). The check is then against that read-back, logged with the
-	// card's number so the difference the day makes is on the record.
-	double ExpectedAirspeed = Card.AirspeedKnots;
+	// P9: the plugin's pre-trim batch re-states the card's CAS before each
+	// re-latch (LOCAL PATCH 6, as core/fdm/fdm.py relatch_initial_conditions
+	// re-states ic/vc-kts), so on a stated day the trim is still at the
+	// card's airspeed; the re-latched ICs' CAS is logged beside it as the
+	// witness that the re-statement reached JSBSim.
+	const double ExpectedAirspeed = Card.AirspeedKnots;
 	if (bPreTrimCasRead)
 	{
-		ExpectedAirspeed = PreTrimCasKnots;
 		UE_LOG(LogFlightSimScenario, Display,
-		       TEXT("  CAS checked against the re-latched ICs after the pre-trim batch: ")
-		       TEXT("%.3f kt (card %.3f kt)"), PreTrimCasKnots, Card.AirspeedKnots);
+		       TEXT("  CAS of the re-latched ICs after the pre-trim batch: %.3f kt ")
+		       TEXT("(card %.3f kt)"), PreTrimCasKnots, Card.AirspeedKnots);
 	}
 	if (FMath::Abs(AchievedAirspeed - ExpectedAirspeed) > AirspeedCheckKnots)
 	{
@@ -3050,7 +3069,7 @@ void FFlightSimScenarioWorld::ApplyPhysicsStepWrites(const FFlightSimScenarioCar
 	if (Card.bGustTable)
 	{
 		// VonKarmanTurbulence.row_at: round((t - t_first) * rate).
-		const int32 Row = FMath::RoundToInt(RunClockSeconds * Card.RateHz);
+		const int32 Row = PhysicsPythonRound(RunClockSeconds * Card.RateHz);
 		if (Row >= 0 && Row < Card.GustRowU.Num())
 		{
 			const double Psi = Card.HeadingDegrees * PhysicsDegToRad;

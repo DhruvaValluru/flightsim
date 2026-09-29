@@ -153,7 +153,8 @@ the section it belongs to; nothing rendered is claimed until it runs):
 1. Build on 5.7: `.\scripts\ue_preflight.ps1` (says what is missing),
    `.\scripts\vendor_ue_plugin.ps1` (the Win64 JSBSim library; the four
    local plugin patches were measured on 5.5 and each may or may not
-   still apply -- NEXT.md gotcha 32), `.\scripts\build_ue.ps1`.
+   still apply -- NEXT.md gotcha 32; P9's patches 5 and 6 have never been
+   built, step 9a), `.\scripts\build_ue.ps1`.
 2. `UnrealEditor-Cmd <project> -run=pythonscript
    -script=scripts/ue_create_materials.py` -- the four materials,
    `M_CustomStencilID` for the ID pass among them; the `Wetness`
@@ -211,6 +212,39 @@ the section it belongs to; nothing rendered is claimed until it runs):
       prediction from a separate `-passes=velocity` render;
    g. stereo on real frames (S2's rig through the same commandlet), then
       Gate 10-R (step 6) with `-passes=normal,albedo` on.
+9. P9, the physics engine side (C++ uncompiled here, pinned by
+   `tests/test_ue_physics_source.py`; the render verdicts are
+   `check.host_physics` and `check.wake_selftest`, NOT RUN until an engine
+   report exists). One card per block, then one with all of them:
+   a. W1 -- rebuild with plugin patches 5 and 6 (VENDORED.json): a card
+      with a `derived_aircraft` block loads from its `aircraft_root`, and
+      the log line `XML sha256 <h> at the door, card/manifest <h>` shows
+      the two hashes equal to the manifest's `fdm.derivation.derived_sha256`;
+      a one-byte edit of the built XML is refused `card.derived_aircraft`;
+   b. W2 -- Gate 5 (`python experiments/gate5_ue_parity.py`) with the
+      recorder's new channels (every `REGISTRY.host_channels()` column)
+      compared as recorded, not graded;
+   c. W3 -- a `delta-T +30` day: the pre-trim batch line in the log sits
+      after the plugin's RunIC and before its trim, the re-latched CAS
+      equals the card's, and the trimmed throttle is within the parity
+      bound of the headless trim on the same card;
+   d. W4 -- a loading: `inertia/cg-x-in` read back before the trim within
+      0.1 in of the card's `expected_cg_in` (`loading_readback_cg_in`);
+   e. W5 -- a von Karman gust: `gust_north/east/down_mps` in host telemetry
+      equal row for row to the table (bit-identical in the fps written),
+      zero past its end; a wake card: the startup selftest line within
+      1e-9 m/s and `check.wake_selftest` PASS on the host half;
+   f. W6 -- a control jam and an engine-out: each `t_applied_s` within one
+      step at or past `at_s`, the jammed surface constant in the host's
+      `*_deg` column after it, the engine staying out;
+   g. W7 -- `render.json` carries every key the card's blocks call for
+      (`atmosphere_delivery`, `loading_applied`, `failure_schedule_applied`,
+      `gust_delivery`, `gust_rows_applied`, `wake_selftest`,
+      `derived_aircraft_sha256`, `layered_wind`, `icing_applied`) -- the
+      render commandlet must call `AppendEnvironmentReport` beside its own
+      environment keys -- and `flightsim.verify` turns `host_physics` from
+      NOT RUN to PASS;
+   h. W8 -- Gate 10-R (step 6) on the all-blocks card.
 
 **Open findings.** Every item a fixer of the review pass marked not
 fixed, not landed, or architectural is listed at the end of this report

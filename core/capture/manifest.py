@@ -62,6 +62,20 @@ Top level::
                        rate_basis, instruments.npz beside the manifest
                        with its sha256 and columns, the residuals and
                        the Allan self-report, what is not claimed
+    landcover          W4 (optional; present only when the scene's bake
+                       has land cover): the WorldCover legend every
+                       frame_NNNN_landcover.png's codes resolve through
+                       (0 = nodata), the class map + sha256 and grid the
+                       images are cut from, the dataset, tiles and
+                       digests, the aggregates' codes, the engine pass's
+                       key (core/capture/labels.py
+                       manifest_landcover_block); each frame's
+                       ``labels.landcover`` is attached with the depth
+    licences           W4 (optional; present when the scene names an
+                       asset): one licence record per scene asset --
+                       terrain, imagery, land cover, buildings, runway
+                       markings (core/assets/licence.py); the export's
+                       gate grades them
     frame              SceneFrame.provenance(): the CRS every position
                        in this file is expressed in, and the projected
                        origin of the local north/east metres
@@ -599,7 +613,15 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
     # first, int_id 1), and the traffic aircraft's own airframes and
     # tracks. A traffic airframe with no cited geometry refuses exactly
     # as the primary does.
-    objects = compose_objects(spec)
+    # W4: the scene's land cover (the scene dict's ``landcover_document``,
+    # else the landcover.json beside its bake) composes the aggregates and
+    # carries the legend block; None -- no key, no aggregate -- without it.
+    from .labels import landcover_document_for, manifest_landcover_block
+
+    landcover_document = ((scene or {}).get("landcover_document")
+                          or landcover_document_for((scene or {}).get("terrain")))
+    landcover_block = manifest_landcover_block(landcover_document)
+    objects = compose_objects(spec, landcover=landcover_block is not None)
     traffic_tracks = list(traffic_tracks or [])
     traffic_entries = list(spec.traffic)
     if wake_generator is not None:
@@ -922,6 +944,18 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
     # stated an instrument (the default ideal set writes no file and no key).
     if instruments is not None:
         manifest["instruments"] = dict(instruments)
+    # W4 (optional, absent-canonical): the land cover's legend block (the
+    # codes every frame_NNNN_landcover.png carries, the class map and grid
+    # they are cut from; per-frame labels.landcover is attached with the
+    # depth, core/capture/labels.py), and the scene assets' licence records
+    # (core/assets/licence.py; the airframes' ride on objects[].licence).
+    if landcover_block is not None:
+        manifest["landcover"] = landcover_block
+    from core.assets.licence import scene_licence_records
+
+    licences = scene_licence_records(scene, landcover_document)
+    if licences:
+        manifest["licences"] = licences
     return manifest
 
 
@@ -980,6 +1014,9 @@ SIDECAR_CONTEXT_KEYS = (
     # R2: the FDM-rate instruments block; None unless the spec stated an
     # instrument (core/telemetry/instruments.py InstrumentObserver).
     "instruments",
+    # W4: the land-cover legend and the scene assets' licence records;
+    # None unless the scene has land cover / a licensed scene asset.
+    "landcover", "licences",
 )
 
 

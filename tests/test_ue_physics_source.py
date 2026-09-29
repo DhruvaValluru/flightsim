@@ -152,7 +152,8 @@ def test_every_refusal_is_named_logged_and_catalogued():
 def test_gust_table_length_and_digest_follow_the_writer():
     reader = body(text(WORLD_CPP), "bool ReadPhysicsBlocks(")
     # von_karman: one row per step and the first -- int(round(d * r)) + 1.
-    assert "FMath::RoundToInt(Out.DurationSeconds * Out.RateHz) + 1" in reader
+    # (Python's int(round(x)) is half to even: PhysicsPythonRound, run below.)
+    assert "PhysicsPythonRound(Out.DurationSeconds * Out.RateHz) + 1" in reader
     # rows_sha256: fields joined by one space, rows by one newline, ASCII.
     assert 'RowsText += TEXT(" ");' in reader and 'RowsText += TEXT("\\n");' in reader
     assert "Fields->Num() != 5" in reader
@@ -173,6 +174,20 @@ def test_the_pre_trim_batch_runs_after_runic_and_before_the_trim():
     trim = prepare.index("DoTrim();")
     assert run_ic < batch < write < relatch < trim
     assert "PreTrimRelatchAfter[Write]" in prepare[write:relatch]
+    # The card's CAS is re-stated before every re-latch, as the headless
+    # re-latch re-states ic/vc-kts (JSBSim holds the IC speed as TAS: a
+    # stated day would otherwise trim both hosts at different airspeeds).
+    restate = prepare.index("IC->SetVcalibratedKtsIC(InitialCalibratedAirSpeedKts);", write)
+    assert write < restate < relatch
+    import inspect
+
+    from core.fdm.fdm import FlightDynamics
+
+    headless = inspect.getsource(FlightDynamics.relatch_initial_conditions)
+    assert '"ic/vc-kts"' in headless and headless.index("set_many(speed)") < \
+        headless.index("self._exec.run_ic()")
+    verify_trim = body(text(WORLD_CPP), "bool FFlightSimScenarioWorld::VerifyTrimmedCondition(")
+    assert "const double ExpectedAirspeed = Card.AirspeedKnots;" in verify_trim
     # The bridge hands the batch over before BeginPlay runs PrepareJSBSim,
     # atmosphere first (re-latched after each write), then the loading,
     # then the icing's neutral values.
@@ -217,7 +232,7 @@ def test_every_step_writes_the_atmosphere_icing_and_gust_and_times_the_failures(
         assert f"\n{line}\n" in steps, line
     assert "double GustNorthMps = 0.0;" in steps
     # The table's row for the step, rotated by the card's heading.
-    assert "FMath::RoundToInt(RunClockSeconds * Card.RateHz)" in steps
+    assert "PhysicsPythonRound(RunClockSeconds * Card.RateHz)" in steps
     assert "Along * FMath::Cos(Psi) - Right * FMath::Sin(Psi)" in steps
     # The failure schedule: once each, at the first step with t >= at_s.
     assert "FailureDone[Index] || !(RunClockSeconds >= Event.AtSeconds)" in steps
@@ -289,6 +304,7 @@ typedef int32_t int32;
 typedef uint8_t uint8;
 typedef uint32_t uint32;
 typedef uint64_t uint64;
+typedef int64_t int64;
 typedef size_t SIZE_T;
 #define TEXT(x) x
 #define FLIGHTSIMBRIDGE_API
@@ -368,6 +384,12 @@ static FString Hash(int Which, const char* Path)
 
 int main(int Argc, char** Argv)
 {
+	if (Argc > 1 && std::strcmp(Argv[1], "round") == 0)
+	{
+		double X = 0.0;
+		while (std::scanf("%lf", &X) == 1) { std::printf("%d\n", Physics::PhysicsPythonRound(X)); }
+		return 0;
+	}
 	if (Argc > 1 && std::strcmp(Argv[1], "sha") == 0)
 	{
 		std::printf("%s %s\n", Hash(5, Argv[2]).S.c_str(), Hash(9, Argv[2]).S.c_str());
@@ -433,7 +455,8 @@ def port(tmp_path_factory):
     work = tmp_path_factory.mktemp("wakeport")
     (work / "CoreMinimal.h").write_text(SHIM, encoding="utf-8")
     patch5 = body(text(MOVEMENT_CPP), "namespace JSBSimLocalPatch5")
-    physics = body(text(WORLD_CPP), "FString PhysicsSha256Hex(")
+    physics = (body(text(WORLD_CPP), "FString PhysicsSha256Hex(") + "\n"
+               + body(text(WORLD_CPP), "int32 PhysicsPythonRound("))
     driver = DRIVER.replace("@PATCH5@", patch5).replace("@PHYSICS@", physics)
     (work / "driver.cpp").write_text(driver, encoding="utf-8")
     binary = work / "wakeport"
@@ -549,6 +572,17 @@ def test_both_sha256_routines_are_hashlibs(port, tmp_path):
         assert door == rows == hashlib.sha256(payload).hexdigest(), index
 
 
+def test_the_row_count_and_row_index_round_as_python_does(port):
+    """von_karman.py counts int(round(d * r)) + 1 rows and indexes
+    int(round(t * r)): Python rounds half to even, so the host does too."""
+    values = [0.0, 0.5, 1.5, 2.5, 3.5, 3.4999999999999996, 7.2, 359.99999999999994,
+              360.0, 360.5, 361.5, 1.0 / 120.0 * 120.0, 2.9999999999999996 * 120.0]
+    result = subprocess.run([str(port), "round"], input=" ".join(repr(v) for v in values),
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert [int(x) for x in result.stdout.split()] == [int(round(v)) for v in values]
+
+
 # -- the recorder's channel table ----------------------------------------------------------
 
 def channel_table():
@@ -629,6 +663,7 @@ def test_vendored_json_records_patches_5_and_6():
     assert "AircraftRootOverride" in by_number[5]["change"]
     assert "ExpectedAircraftXmlSha256" in by_number[5]["change"]
     assert "after its RunIC" in by_number[6]["change"] and "before DoTrim" in by_number[6]["change"]
+    assert "SetVcalibratedKtsIC" in by_number[6]["change"]
     for patch in by_number.values():
         assert patch["applied"] == "yes" and "Windows build" in patch["verification"]
     # A fresh vendoring re-applies them (the diff is the committed change).
@@ -637,6 +672,13 @@ def test_vendored_json_records_patches_5_and_6():
     diff = text(REPO / "scripts/jsbsim_plugin_patches_5_6.diff")
     assert "LOCAL PATCH 5" in diff and "LOCAL PATCH 6" in diff
     assert diff.isascii()
+    # The diff is the committed change, not a stale copy of it: every line
+    # it adds is in the plugin source as committed.
+    committed = set(text(MOVEMENT_CPP).splitlines()) | set(text(MOVEMENT_H).splitlines())
+    added = [line[1:] for line in diff.splitlines()
+             if line.startswith("+") and not line.startswith("+++")]
+    assert added and not [line for line in added if line not in committed]
+    assert "\t\t\t\tIC->SetVcalibratedKtsIC(InitialCalibratedAirSpeedKts);" in added
 
 
 def test_every_engine_file_this_item_writes_is_ascii():

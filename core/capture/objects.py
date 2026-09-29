@@ -14,10 +14,26 @@ The rules, stated once:
 
 * ``id`` is ``aircraft:<fdm>:<n>`` (n = 0 the primary, 1.. the traffic
   entries in spec order), ``terrain``, ``building:all`` (W2: one
-  aggregate for a stated footprint set, composed after the terrain),
-  ``vegetation:<n>``. A string, never a hash: two runs of one spec name
-  one object the same way, and a reader can tell an aircraft from a
-  building without a table.
+  aggregate for a stated footprint set, composed after the terrain;
+  W4: also for a scene whose bake has land cover),
+  ``vegetation:all`` (W4: one aggregate for a scene whose bake has land
+  cover, composed last). A string, never a hash: two runs of one spec
+  name one object the same way, and a reader can tell an aircraft from
+  a building without a table.
+* The aggregates (W4) are ONE object each, never one per tree or per
+  building: the ID image is the 8-bit Custom Depth Stencil, and a
+  scene's trees and blocks outnumber its 255 values, so a per-instance
+  id is exactly what the stencil cannot carry (stated, not worked
+  around; the per-building ids live in the buildings document, and no
+  tree has an id at all). Their class is the taxonomy word the
+  land-cover legend maps to (core/terrain/weightmaps.py CLASS_OF_COVER:
+  tree cover, shrubland, mangroves -> vegetation; built-up -> building)
+  and each is composed only when the spec's taxonomy names that class
+  (a trimmed taxonomy composes none, rather than refusing a scene for
+  cover it did not ask to label). Their boxes and masks per frame come
+  from the land-cover class image (core/capture/labels.py
+  ``landcover_class_from_depth``); the aggregate's ``int_id`` is where
+  the engine's stencil loop (W5, Windows) draws its members.
 * ``int_id`` is assigned in COMPOSITION ORDER starting at 1. The primary
   aircraft is composed first, so its ``int_id`` is always 1 and every
   Phase 10 reader (``verify.AIRCRAFT_INSTANCE_ID = 1``, the frames page
@@ -47,10 +63,12 @@ What is NOT claimed: this module says which objects exist and what
 integer each carries. Whether the ID image actually holds only those
 integers is the verifier's ``mask_integers_only`` (package D); whether
 a traffic mesh is on the render host is the ``aircraft.mesh`` refusal
-in ``flightsim/capture.py``; buildings, vegetation and water are
-classes in the taxonomy with no producer of instances this phase, so
-no entry of those classes is composed, and ``cloud`` is a class in the
-visibility record only (volumetrics write no ID).
+in ``flightsim/capture.py``; buildings and vegetation are composed only
+as the two aggregates above (no per-instance id for a tree or a
+building, no species, no season), water has no object at all (its
+pixels carry their land-cover code in the class image only), and
+``cloud`` is a class in the visibility record only (volumetrics write
+no ID).
 """
 
 from __future__ import annotations
@@ -84,6 +102,11 @@ CLASS_TERRAIN = "terrain"
 #: no per-instance ids; they live in the buildings document).
 CLASS_BUILDING = "building"
 BUILDING_ALL_ID = "building:all"
+#: W4: the land cover's vegetation aggregate (no per-tree ids: the stencil).
+CLASS_VEGETATION = "vegetation"
+VEGETATION_ALL_ID = "vegetation:all"
+#: W4: every aggregate object id, and the taxonomy class each carries.
+AGGREGATE_CLASSES = {BUILDING_ALL_ID: CLASS_BUILDING, VEGETATION_ALL_ID: CLASS_VEGETATION}
 
 
 class ObjectIdentityError(Exception):
@@ -182,10 +205,15 @@ def licence_of(aircraft: str, config_dir: Optional[Path] = None) -> Optional[str
     return str(licence) if licence else None
 
 
-def object_entries(spec, config_dir: Optional[Path] = None) -> List[Dict]:
+def object_entries(spec, config_dir: Optional[Path] = None,
+                   landcover: bool = False) -> List[Dict]:
     """The scene's objects in COMPOSITION ORDER, not yet numbered:
     primary airframe, traffic in spec order, then the scene objects.
-    Each entry is a SceneObject's fields minus ``int_id``."""
+    Each entry is a SceneObject's fields minus ``int_id``. ``landcover``
+    (W4): the scene's bake carries land cover, so the ``building:all``
+    and ``vegetation:all`` aggregates are composed (each only when the
+    taxonomy names its class; absent-canonical: False composes exactly
+    the list composed before W4)."""
     classes = taxonomy_classes(spec)
     primary = str(spec.aircraft.value)
     entries: List[Dict] = [{
@@ -264,6 +292,23 @@ def object_entries(spec, config_dir: Optional[Path] = None) -> List[Dict]:
             "licence": licence_of_key(str(key)),
             "in_scene": True, "labelled": True,
         })
+    # W4: a scene with land cover composes the aggregates the legend's
+    # taxonomy map names -- building:all (when no footprint set composed
+    # it above) then vegetation:all, after every earlier object, so no
+    # earlier int_id moves. One id each: the 8-bit stencil's limit.
+    if landcover:
+        composed = {e["id"] for e in entries}
+        for object_id in (BUILDING_ALL_ID, VEGETATION_ALL_ID):
+            name = AGGREGATE_CLASSES[object_id]
+            if object_id in composed or name not in classes:
+                continue
+            entries.append({
+                "id": object_id, "class_name": name,
+                "class_id": class_id_of(classes, name),
+                "instance": 0, "role": ROLE_SCENE,
+                "mesh_sha256": None, "licence": None,
+                "in_scene": True, "labelled": True,
+            })
     return entries
 
 
@@ -293,10 +338,23 @@ def assign_int_ids(entries: Sequence[Dict]) -> List[SceneObject]:
     return objects
 
 
-def compose_objects(spec, config_dir: Optional[Path] = None) -> List[SceneObject]:
+def compose_objects(spec, config_dir: Optional[Path] = None,
+                    landcover: bool = False) -> List[SceneObject]:
     """The scene's labelled objects, numbered: the one list the card, the
-    manifest and the ID image share."""
-    return assign_int_ids(object_entries(spec, config_dir))
+    manifest and the ID image share. ``landcover`` (W4) composes the
+    land cover's aggregates (:func:`object_entries`)."""
+    return assign_int_ids(object_entries(spec, config_dir, landcover=landcover))
+
+
+def aggregate_objects(objects: Sequence) -> List[Dict]:
+    """The aggregate objects (``building:all``, ``vegetation:all``) of a
+    list of SceneObjects or ``objects[]`` dicts, as dicts."""
+    out = []
+    for o in objects:
+        entry = o.to_dict() if isinstance(o, SceneObject) else dict(o)
+        if entry.get("id") in AGGREGATE_CLASSES:
+            out.append(entry)
+    return out
 
 
 def objects_block(objects: Sequence[SceneObject]) -> List[Dict]:
