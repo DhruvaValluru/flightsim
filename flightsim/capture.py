@@ -756,6 +756,18 @@ def _run(args: argparse.Namespace) -> int:
     report = validate(spec)
     if not report.ok:
         return _refuse(report.violations)
+    # R2: the spec's record block asks for the extra flights the options
+    # --null-tests / --uncertainty ask for (either side asking is honoured;
+    # the options stay), and its convergence rates for the three-rate
+    # study. An uncertainty block needs a u_x rule for every stated
+    # variable: refused by name before any flight when one has none.
+    record_asks = spec.record.asks(null_tests=args.null_tests, uncertainty=args.uncertainty)
+    if record_asks["uncertainty"]:
+        from core.scenario.validate import uncertainty_basis_violations
+
+        basis_violations = uncertainty_basis_violations(spec)
+        if basis_violations:
+            return _refuse(basis_violations)
     # Phase 10: the randomisation block draws its values here too (the
     # web planners are not on this path); off by default -> no-op. A
     # window with no daylight refuses by name before any flight.
@@ -790,12 +802,19 @@ def _run(args: argparse.Namespace) -> int:
     # ridge reaches 3043 m printed a traceback.)
     from core.control.autopilot import ClosureError
     from core.fdm.errors import TrimError
+    from core.registry import RecordError
+    from core.telemetry.instruments import InstrumentError
     from core.terrain.contact import TerrainImpactError
 
     try:
         result = run_spec(spec, terrain_ground=terrain_ground, landcover_json=landcover_json)
     except TerrainImpactError as exc:
         print(f"REFUSED -- terrain.impact: {exc}")
+        return 2
+    except (RecordError, InstrumentError) as exc:
+        # R2: a registered write that read back outside its tolerance
+        # (record.readback), or an instruments block the runner refuses.
+        print(f"REFUSED -- {exc.constraint}: {exc.message}")
         return 2
     except TrimError as exc:
         print(f"REFUSED -- trim: {exc}")
@@ -814,9 +833,10 @@ def _run(args: argparse.Namespace) -> int:
     # R1 (opt-in): the null pairs and the dt/2 twin, each an extra flight
     # of the same spec through run_spec, measured after the recorded one.
     # Neither touches the recorded flight or its digest.
+    # R2: asked by the options OR by the spec's record block (record_asks).
     null_pairs = {}
     uncertainty_block = None
-    if args.null_tests or args.uncertainty:
+    if record_asks["null_tests"] or record_asks["uncertainty"]:
         import functools
         from core.record_null import null_pairs_for_spec
         from core.uncertainty import uncertainty_for_run
@@ -824,22 +844,46 @@ def _run(args: argparse.Namespace) -> int:
         extra_runner = functools.partial(run_spec, assert_closure=False,
                                          terrain_ground=terrain_ground,
                                          landcover_json=landcover_json)
-        if args.null_tests:
+        if record_asks["null_tests"]:
             null_pairs = null_pairs_for_spec(spec, runner=extra_runner)
             print(f"  null tests: {len(null_pairs)} pair(s) flown"
                   + "".join(f"; {name}: {pair.verdict}" for name, pair in null_pairs.items())
-                  + ("" if null_pairs else " (this spec states no registered variable)"))
-        if args.uncertainty:
-            uncertainty_block = uncertainty_for_run(spec, runner=extra_runner,
-                                                    base_result=result)
+                  + ("" if null_pairs else " (this spec states no registered variable)")
+                  + f" [asked by {record_asks['asked_by']['null_tests'].lstrip('+')}]")
+        if record_asks["uncertainty"]:
+            # R2: record.convergence's three rates run the three-rate
+            # study (dt, dt/2, dt/4 from the first rate, turbulence off);
+            # its observed order per SRQ feeds u_num instead of p = 1.
+            convergence = None
+            if record_asks["convergence_rates_hz"]:
+                from core.uncertainty import three_rate_study
+
+                study_spec = ScenarioSpec.from_dict(spec.to_dict())
+                study_spec.set("rate", record_asks["convergence_rates_hz"][0],
+                               frm="record.convergence: the three-rate study's first rate")
+                convergence = three_rate_study(study_spec, runner=extra_runner)
+                print(f"  convergence: three-rate study at {convergence['rates_hz']} Hz; "
+                      f"observed order {convergence['observed_p']}")
+            uncertainty_block = uncertainty_for_run(
+                spec, runner=extra_runner, base_result=result,
+                observed_p=None if convergence is None else convergence["observed_p"])
+            if convergence is not None:
+                uncertainty_block["convergence"] = convergence
             alt = uncertainty_block["u_num"]["srq"]["altitude_m"]
             print(f"  uncertainty: dt/2 twin flown; u_num altitude {alt['value']:.3e} m "
-                  f"({uncertainty_block['form']})")
+                  f"({uncertainty_block['form']}) "
+                  f"[asked by {record_asks['asked_by']['uncertainty'].lstrip('+')}]")
 
     cameras = spec.cameras or default_cameras(spec)
     if not spec.cameras:
         print("no camera stated: capturing with the documented default "
               "camera (the chase view)")
+    # S2: each stated stereo rig's right camera, materialised and appended
+    # (core/capture/stereo.py); its track and schedule are derived from the
+    # left's in solve_over, and it meets the same scene checks.
+    from core.capture.stereo import is_stereo_right, solve_rig, with_stereo_right
+
+    cameras = with_stereo_right(cameras)
     terrain_datum = float(spec.terrain_elevation.value)
 
     from core.capture.poses import solve_traffic_track
@@ -873,8 +917,13 @@ def _run(args: argparse.Namespace) -> int:
         over the host's telemetry for the labels that ship."""
         tracks, schedules = [], []
         for camera in cameras:
+            if is_stereo_right(camera):
+                tracks.append(None)            # derived below from the left's
+                schedules.append(None)
+                continue
             tracks.append(solve_pose_track(flight, camera, frame))
             schedules.append(solve_schedule(flight, camera, frame))
+        solve_rig(cameras, tracks, schedules)
         violations = []
         for track in tracks:
             violations.extend(track_violations(
@@ -1059,7 +1108,12 @@ def _run(args: argparse.Namespace) -> int:
         wake_generator=(None if wake_object is None else
                         (wake_object, str(wake_geometry["aircraft"]), traffic_tracks[len(spec.traffic)])),
         # R1: the V&V 20 block, or None (then no key: absent-canonical).
-        uncertainty=uncertainty_block)
+        uncertainty=uncertainty_block,
+        # R2: the FDM-rate instruments block of the headless flight when
+        # the spec stated an instrument (instruments.npz is written beside
+        # the manifest below); None -- no key -- for the default ideal set.
+        instruments=(result.manifest.get("instruments")
+                     if result.instruments is not None and result.instruments.stated else None))
     if null_pairs:
         from core.record_null import attach_null_pair, null_pairs_block
 
@@ -1128,6 +1182,13 @@ def _run(args: argparse.Namespace) -> int:
     result.telemetry.write_json(out / "telemetry.json")
     write_measured(measured, out)
     print("  " + describe_instruments(measured))
+    # R2: the FDM-rate truth_* / meas_* file of the headless flight, when
+    # the spec stated an instrument (its sha256 is the manifest's block's).
+    if result.instruments is not None and result.instruments.write(out) is not None:
+        fdm_block = result.manifest["instruments"]
+        print(f"  instruments at the FDM rate: {fdm_block['steps']} steps at "
+              f"{fdm_block['rate_hz']:g} Hz, {fdm_block['fixes']} GPS fixes -> "
+              f"{fdm_block['file']} (sha256 {fdm_block['sha256'][:16]})")
     spec.write(out / "scenario.yaml")
     (out / "run.json").write_text(json.dumps({
         "spec_digest": result.spec_digest,
@@ -1149,6 +1210,9 @@ def _run(args: argparse.Namespace) -> int:
         # the uncertainty block of the headless flight.
         "null_tests": manifest.get("null_tests"),
         "uncertainty": uncertainty_block,
+        # R2: the FDM-rate instruments block of the headless flight (file
+        # null for the default ideal set).
+        "instruments": result.manifest.get("instruments"),
     }, indent=1), encoding="utf-8")
 
     if args.card or args.render:
@@ -1199,6 +1263,7 @@ def _run(args: argparse.Namespace) -> int:
     from core.render.flags import (
         DEFAULT_FPS, DEFAULT_HEIGHT, DEFAULT_WIDTH, for_wrapper, render_flags,
     )
+    from core.capture.passes import engine_words as engine_pass_words
 
     command = ue_runner_command(REPO, "render_ue_scenario")
     command += [str(out / "card.json"), str(frames_dir)]
@@ -1268,7 +1333,9 @@ def _run(args: argparse.Namespace) -> int:
         look=render_look(spec), camera_flags=None,
         labels=True, deterministic=True, void=bool(args.void),
         width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, fps=DEFAULT_FPS,
-        passes=[w for w in (args.passes or "").split(",") if w.strip()],
+        # S2: the engine words any camera's passes[] names ride beside --passes.
+        passes=sorted({w for w in (args.passes or "").split(",") if w.strip()}
+                      | set(engine_pass_words(cameras))),
         calibration=bool(args.calibration), sun_lux=sun_lux_flag,
         accumulate=args.accumulate))
     print(f"rendering {len(cameras)} camera pass(es) into {frames_dir} "
@@ -1291,11 +1358,22 @@ def _run(args: argparse.Namespace) -> int:
     # back. A frame with no bundle keeps its nulls and says why.
     from core.capture.labels import attach_engine_labels
 
-    attached = attach_engine_labels(out)
+    from core.capture.passes import PassError
+
+    try:
+        attached = attach_engine_labels(out)
+    except PassError as exc:
+        # S2: a derived pass the bundle cannot supply, refused by its name.
+        print(f"REFUSED -- {exc.constraint}: {exc.message}")
+        return 2
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     print(f"  labels:   engine bundle attached on {attached['attached']} of "
           f"{attached['frames']} frames ({attached['objects']} object "
           f"records; {attached['without_bundle']} without a bundle)")
+    derived = attached.get("derived_passes")
+    if derived and derived.get("derived"):
+        print(f"  passes:   flow / disparity / points derived on {derived['derived']} "
+              f"frame(s); passes.json under {', '.join(derived['cameras'])}")
 
     # Phase 10: the sensor model as a seeded post-pass, for every camera
     # whose profile is not the ideal pinhole.
@@ -1320,6 +1398,19 @@ def _run(args: argparse.Namespace) -> int:
         print(f"  sensing:  radiometry on {radiometry['cameras']} camera(s); "
               f"{len(radiometry['measured'])} measured by a grey card, "
               f"{len(radiometry['refused'])} refused sensing.exposure_units (the sun is not in lux)")
+
+    # S3: the IR proxy per frame from the render's ID image and depth, on
+    # every camera whose manifest block carries sensing.ir (a declared
+    # proxy: frame_NNNN_ir.f32 beside its frame_NNNN_ir.json declaration).
+    from core.capture.thermal import render_ir_frames
+
+    ir_frames = render_ir_frames(out, manifest)
+    if ir_frames["cameras"]:
+        write_capture_manifest(manifest, out)
+        write_frame_sidecars(manifest, out)
+        print(f"  ir proxy: {ir_frames['written']} frame(s) on {ir_frames['cameras']} camera(s), "
+              f"{ir_frames['without_bundle']} without an ID image and depth (a proxy, not "
+              f"sensor imagery); previews under {out / 'ir_preview'}")
 
     from core.capture.overlay import draw_overlays
 

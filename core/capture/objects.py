@@ -13,7 +13,8 @@ else (contracts §2.3, §2.4).
 The rules, stated once:
 
 * ``id`` is ``aircraft:<fdm>:<n>`` (n = 0 the primary, 1.. the traffic
-  entries in spec order), ``terrain``, ``building:<n>``,
+  entries in spec order), ``terrain``, ``building:all`` (W2: one
+  aggregate for a stated footprint set, composed after the terrain),
   ``vegetation:<n>``. A string, never a hash: two runs of one spec name
   one object the same way, and a reader can tell an aircraft from a
   building without a table.
@@ -79,6 +80,10 @@ ROLE_SCENE = "scene"
 
 CLASS_AIRCRAFT = "aircraft"
 CLASS_TERRAIN = "terrain"
+#: W2: the buildings' one aggregate object (the 8-bit stencil's limit:
+#: no per-instance ids; they live in the buildings document).
+CLASS_BUILDING = "building"
+BUILDING_ALL_ID = "building:all"
 
 
 class ObjectIdentityError(Exception):
@@ -233,6 +238,32 @@ def object_entries(spec, config_dir: Optional[Path] = None) -> List[Dict]:
         "mesh_sha256": None, "licence": None,
         "in_scene": True, "labelled": True,
     })
+    # W2: a stated footprint set (scene.buildings) composes ONE aggregate
+    # object, building:all, after the terrain (so every earlier int_id is
+    # unmoved): the 8-bit stencil cannot carry an id per building, so the
+    # per-instance ids live in the buildings document, not the ID image
+    # (stated). mesh_sha256 is the cached set's own digest (the sidecar's
+    # sha256 of the footprint file), licence its licence word; both null
+    # when the set is not cached here (the capture refuses that by name).
+    scene = getattr(spec, "scene", None)
+    buildings = getattr(scene, "buildings", None)
+    key = None if buildings is None else buildings.value
+    if key is not None:
+        from core.scene.buildings import licence_of_key, read_provenance, BuildingsError
+
+        try:
+            digest = read_provenance(str(key)).get("sha256")
+        except BuildingsError:
+            digest = None
+        entries.append({
+            "id": BUILDING_ALL_ID,
+            "class_name": CLASS_BUILDING,
+            "class_id": class_id_of(classes, CLASS_BUILDING),
+            "instance": 0, "role": ROLE_SCENE,
+            "mesh_sha256": str(digest) if isinstance(digest, str) else None,
+            "licence": licence_of_key(str(key)),
+            "in_scene": True, "labelled": True,
+        })
     return entries
 
 

@@ -180,6 +180,37 @@ the section it belongs to; nothing rendered is claimed until it runs):
    with `--workers 2` into `runs\c2`, then compare the two ledgers
    (`core.campaign.ledger.comparable`) and the bundle digests, and
    `--export` from the finishing invocation.
+8. S4, the sensing engine side (C++ and editor Python uncompiled here,
+   pinned by `tests/test_ue_passes_source.py`; each step's verdict is a
+   `flightsim.verify` check that is NOT RUN until it runs):
+   a. rerun step 2 (`M_WorldNormal`, `M_Velocity`, `M_GreyCard` are
+      created); then the exposure defect: one `-Visual` render on the
+      manual-EV100 path without and with `-sun-lux=`, `engine_readbacks`
+      PASS and the grey card black (unitless 8.0 sun) versus mid-scale;
+      the bias values 9.5 / 10.5 / 11.0 are the old scale and Gate 6's
+      four exposure clauses are re-pinned against the lux sun here;
+   b. the grey card within 2 %: `-calibration -sun-lux=<lux>` --
+      `calibration_frame` and `radiometry_grey_card` PASS (the emissive
+      quad's ratio tests one emissive unit = 1 cd/m^2);
+   c. the normal encoding and axes on the quad: `-labels -passes=normal`
+      over a known plane -- `labels.normal_encoding` names what
+      `SCS_Normal` holds, `engine_linear_passes` and `normals_vs_depth`
+      PASS; if refused `labels.normal_encoding`, rerun with
+      `-normal-source=material`;
+   d. the two-suns albedo: `-passes=albedo` at two sun elevations --
+      `frame_NNNN_basecolor.f32` equal within the half-float step on the
+      geometry pixels;
+   e. the engine velocity against the Python flow: `-labels
+      -velocity-check` -- `velocity_readback` PASS and
+      `labels.velocity.p95_px` against the flow's p95 over the same
+      interval (`negative_raw_values` says whether a signed emissive
+      survives);
+   f. the accumulation against the Python blur at 1/60 s at dusk:
+      `-accumulate=8` on a camera with that shutter -- `engine_accumulation`
+      PASS, and the sensor frame's streak against `blur_vs_flow`'s
+      prediction from a separate `-passes=velocity` render;
+   g. stereo on real frames (S2's rig through the same commandlet), then
+      Gate 10-R (step 6) with `-passes=normal,albedo` on.
 
 **Open findings.** Every item a fixer of the review pass marked not
 fixed, not landed, or architectural is listed at the end of this report

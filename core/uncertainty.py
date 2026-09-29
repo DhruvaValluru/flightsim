@@ -14,7 +14,12 @@ reporting of grid refinement studies", J. Fluids Eng. 116(3); ASME V&V
 three-rate study the order is ASSUMED p = 1 (V9 observed 1.03 on this
 branch) with the two-rate safety factor Fs = 3; when
 :func:`three_rate_study` ran, its observed p per SRQ is used with
-Fs = 1.25. Which one applies is stated in every ``basis``.
+Fs = 1.25. Which one applies is stated in every ``basis``. With no
+order handed in, the committed study (``data/convergence/
+gate3b_convergence.json``, experiments/gate3b_convergence.py) supplies
+it when the run is that study's case (:func:`study_observed_p`: the same
+aircraft file and JSBSim, one of its first two rates), capped at the
+integrators' formal order 1; any other run keeps the assumption.
 
 **u_input** (:func:`u_x`, :func:`u_input_for`). GUM JCGM 100:2008 eq. 10,
 first order: u_input(SRQ) = |c_i| u_x with c_i the sensitivity of the
@@ -47,8 +52,11 @@ the first sample. Nothing here validates the model.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import time
+from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 from .registry import REGISTRY, Registry, VariableRecord
@@ -66,6 +74,17 @@ FS_THREE_RATE = 1.25
 ASSUMED_ORDER = 1.0
 #: The refinement ratio: the twin runs at twice the rate.
 REFINEMENT_RATIO = 2.0
+#: P8: the committed three-rate study (experiments/gate3b_convergence.py
+#: writes it), read by :func:`study_observed_p` when a run IS its case.
+CONVERGENCE_STUDY_PATH = Path(__file__).resolve().parents[1] / "data" / "convergence" / "gate3b_convergence.json"
+#: The formal order of JSBSim 1.2.4's default integrators, read from the
+#: property tree on the c172p: rotational rate and attitude by rectangular
+#: Euler (``simulation/integrator/rate/rotational`` and
+#: ``position/rotational`` = 1), translational rate Adams-Bashforth 2 (3),
+#: position Adams-Bashforth 3 (4) -- the coupled system is first order. The
+#: committed study's observed order is used up to it (Roache: an observed
+#: order above the formal one is not trusted).
+FORMAL_ORDER = 1.0
 
 FORM = "ASME V&V 20; u_D absent per run"
 
@@ -146,9 +165,17 @@ def _default_runner() -> Callable[[Any], Any]:
 def _peak_difference(coarse_t, coarse, fine_t, fine) -> Tuple[float, int]:
     """Peak |coarse - fine| with the fine series interpolated onto the
     coarse sample times (the two recorders do not sample at the same
-    instants); the comparison stops at the last common time."""
+    instants); the comparison stops at the last common time. Both clocks
+    are taken from their own first sample (the trimmed state): a piston
+    engine's crank ends on a rate-dependent step, so JSBSim's clock at the
+    first sample differs between rates (P8, the c172p example: 4.933 /
+    4.900 / 4.879 s at 60 / 120 / 240 Hz) and a comparison on the raw
+    clock measured that phase shift -- 25 x the altitude difference on
+    the elapsed time -- instead of the integration error."""
     import numpy as np
 
+    coarse_t = coarse_t - coarse_t[0]
+    fine_t = fine_t - fine_t[0]
     t_end = min(float(coarse_t[-1]), float(fine_t[-1]))
     keep = coarse_t <= t_end + 1e-9
     fine_on_coarse = np.interp(coarse_t[keep], fine_t, fine)
@@ -157,18 +184,65 @@ def _peak_difference(coarse_t, coarse, fine_t, fine) -> Tuple[float, int]:
     return float(d[k]), int(np.sum(keep))
 
 
+def study_observed_p(base, spec, path=None) -> Optional[Dict[str, Any]]:
+    """The committed three-rate study's orders when it applies to this run
+    (P8): the same aircraft file (sha256) on the same JSBSim version, the
+    run's rate one of the study's first two rates (so the dt/2 twin's pair
+    lies inside the studied range). Each positive finite order is capped
+    at :data:`FORMAL_ORDER`. None when the file is absent or unreadable,
+    the base run carries no manifest (a fake runner), or the run is not
+    the study's case -- u_num then keeps the assumed order."""
+    target = Path(path) if path is not None else CONVERGENCE_STUDY_PATH
+    manifest = getattr(base, "manifest", None)
+    if not target.is_file() or not isinstance(manifest, Mapping):
+        return None
+    try:
+        raw = target.read_bytes()
+        study = json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError):
+        return None
+    applies = study.get("applies_to") if isinstance(study, Mapping) else None
+    fdm = manifest.get("fdm") if isinstance(manifest.get("fdm"), Mapping) else {}
+    if not isinstance(applies, Mapping):
+        return None
+    try:
+        rates = [float(r) for r in applies.get("rates_hz") or ()]
+        rate = float(spec.rate.value)
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if (len(rates) != 3 or rate not in rates[:2]
+            or (fdm.get("aircraft") or {}).get("sha256") != applies.get("aircraft_sha256")
+            or fdm.get("jsbsim_version") != applies.get("jsbsim_version")):
+        return None
+    orders = {srq: min(float(p), FORMAL_ORDER)
+              for srq, p in (study.get("observed_p") or {}).items()
+              if srq in SRQS and isinstance(p, (int, float)) and not isinstance(p, bool)
+              and math.isfinite(float(p)) and float(p) > 0.0}
+    if not orders:
+        return None
+    return {"observed_p": orders, "path": target.name, "sha256": hashlib.sha256(raw).hexdigest(),
+            "rates_hz": rates, "formal_order": FORMAL_ORDER}
+
+
 def u_num_twin(spec, runner: Optional[Callable[[Any], Any]] = None,
                observed_p: Optional[Mapping[str, float]] = None,
-               base_result=None) -> Dict[str, Any]:
+               base_result=None, study_path=None) -> Dict[str, Any]:
     """u_num per SRQ from the dt/2 twin. ``observed_p`` (from
     :func:`three_rate_study`) switches the estimate to the observed order
-    with Fs = 1.25; otherwise p = 1 assumed, Fs = 3. ``base_result``
-    reuses an already-flown base run; the twin is always flown here."""
+    with Fs = 1.25; otherwise the committed study (:func:`study_observed_p`,
+    ``study_path`` to point elsewhere) does when the run is its case, and
+    otherwise p = 1 is assumed with Fs = 3. ``base_result`` reuses an
+    already-flown base run; the twin is always flown here."""
     import numpy as np
 
     run = runner if runner is not None else _default_runner()
     t0 = time.perf_counter()
     base = base_result if base_result is not None else run(spec)
+    study = None
+    if observed_p is None:
+        study = study_observed_p(base, spec, path=study_path)
+        if study is not None:
+            observed_p = study["observed_p"]
     twin = twin_spec(spec)
     fine = run(twin)
     elapsed = time.perf_counter() - t0
@@ -186,6 +260,9 @@ def u_num_twin(spec, runner: Optional[Callable[[Any], Any]] = None,
         diff, n = _peak_difference(coarse_t, base_srq[srq], fine_t, fine_srq[srq])
         if observed_p is not None and srq in observed_p:
             p, fs, order_basis = float(observed_p[srq]), FS_THREE_RATE, "observed from the three-rate study"
+            if study is not None:
+                order_basis += (f" {study['path']} (sha256 {study['sha256'][:12]}), capped at the "
+                                f"formal order {FORMAL_ORDER:g}")
         else:
             p, fs, order_basis = ASSUMED_ORDER, FS_TWO_RATE, "assumed (no three-rate study; V9 observed 1.03)"
         est = richardson(diff, p, fs)
@@ -203,6 +280,8 @@ def u_num_twin(spec, runner: Optional[Callable[[Any], Any]] = None,
                  "rate_hz": float(twin.rate.value), "turbulence": str(twin.turbulence.value)},
         "base": {"spec_digest": base.spec_digest, "output_digest": base.output_digest,
                  "rate_hz": float(spec.rate.value)},
+        "order_source": (study if study is not None else
+                         "given" if observed_p is not None else "assumed"),
         "elapsed_s": elapsed,
         "reference": "Roache 1994 (GCI); ASME V&V 20-2009 solution verification [unverified here]",
     }

@@ -1230,6 +1230,96 @@ REGISTRY = Registry((
                                 note="a stated lux: u_x 0 unless a tolerance is stated; the "
                                      "model value's spread is not declared (a broadband "
                                      "clear-sky model with a constant efficacy)")),
+    # -- W2: the cached footprint set (scene.buildings) and the runway block,
+    #    one entry per field; nulls are the absent block's (no set, no
+    #    runway). None writes a JSBSim property. The buildings are a render
+    #    input and the building:all object (bounded invariance on the
+    #    position columns, as the other scene fields); the runway's fields
+    #    shape the flatten pad, the new bake whose heights the ground
+    #    callback reads, so agl_m is the column they move (the record's
+    #    null test: h_agl at the threshold with vs without the pad >= 1 m,
+    #    core/scene/runway.py measure_pad_null).
+    VariableRecord(
+        name="scene.buildings", spec_path="scene.buildings", unit="text",
+        effect_channels=(EffectChannel("lat_deg", "deg"), EffectChannel("lon_deg", "deg"),
+                         EffectChannel("altitude_m", "m")),
+        null_value=None,
+        null_basis="unstated: no footprint set, no buildings composed and no building:all "
+                   "object; a stated set is a render input and moves no recorded column",
+        u_input_rule=UInputRule(note="a cache key: no bin, no spread")),
+    *(VariableRecord(
+        name=f"runway.{leaf}", spec_path=f"runway.{leaf}", unit=unit,
+        effect_channels=(EffectChannel("agl_m", "m"),),
+        null_value=null,
+        null_basis=basis,
+        u_input_rule=UInputRule(note=note))
+      for leaf, unit, null, basis, note in (
+          ("designator", "word", None,
+           "unstated: no runway, no pad bake, the parent bake's heights under the aircraft",
+           "a word: no bin, no spread"),
+          ("threshold_lat_deg", "deg", None,
+           "unstated: no runway (the pad's plane is placed from the threshold)",
+           "a stated coordinate: u_x 0 unless a tolerance is stated"),
+          ("threshold_lon_deg", "deg", None,
+           "unstated: no runway (the pad's plane is placed from the threshold)",
+           "a stated coordinate: u_x 0 unless a tolerance is stated"),
+          ("heading_deg", "deg", None,
+           "unstated: no runway (the pad's footprint is oriented by the heading)",
+           "a stated heading: u_x 0 unless a tolerance is stated"),
+          ("length_m", "m", None,
+           "unstated: no runway (the pad's footprint length)",
+           "a stated length: u_x 0 unless a tolerance is stated"),
+          ("width_m", "m", None,
+           "unstated: no runway (the pad's footprint width)",
+           "a stated width: u_x 0 unless a tolerance is stated"),
+          ("surface", "word", "asphalt",
+           "'asphalt', the block's default word; a scene-dressing word with no friction "
+           "model, so no surface word moves agl_m (bounded)",
+           "a word: no bin, no spread"),
+          ("markings", "word", "standard",
+           "'standard', the five Annex 14 elements; the raster is draped by the engine and "
+           "moves no recorded column (bounded)",
+           "a word or list: no bin, no spread"),
+      )),
+    # -- W3: the night sky, the rain rate and the world record. A look
+    #    variable's effects are on the RENDER: neither spec field reaches an
+    #    equation of motion, so its effect channels are the recorded columns
+    #    its producer reads (the origin; the flight's speed and height, which
+    #    no rain drag moves) and its registry pair is a bounded invariance,
+    #    measured silent; the render-side effects are scene.world's reached
+    #    predictions (core/scene/world_record.py), each a number computed
+    #    here and measured by a named Windows clause, stated so.
+    VariableRecord(
+        name="scene.night", spec_path="scene.night", unit="mapping {moon, stars, utc}",
+        effect_channels=(EffectChannel("lat_deg", "deg"), EffectChannel("lon_deg", "deg")),
+        null_value=None,
+        null_basis="unstated: no moon light and no starfield, the engine's sky as before; a "
+                   "stated night reads the origin and moves no recorded column (a bounded "
+                   "invariance on lat_deg and lon_deg); its render-side effect is "
+                   "scene.world's moon and stars predictions with their Windows clauses",
+        u_input_rule=UInputRule(note="words and a moment: no bin, no spread")),
+    VariableRecord(
+        name="environment.precipitation_rate_mmh",
+        spec_path="environment.precipitation_rate_mmh", unit="mm/h",
+        effect_channels=(EffectChannel("altitude_m", "m"), EffectChannel("tas_kt", "kt")),
+        null_value=None,
+        null_basis="unstated: no rain rate (the precipitation word, if drawn, keeps its "
+                   "visibility floor); no rain drag, water ingestion or wet-runway friction is "
+                   "modelled, so a stated rate moves no recorded column (a bounded "
+                   "invariance); its render-side effect is scene.world's streak prediction "
+                   "and the reconciled fog row",
+        u_input_rule=UInputRule(bin_width=5.1, declared_spread=0.0,
+                                note="the rain intensity words' moderate band 2.5-7.6 mm/h "
+                                     "(AMS glossary [unverified here]) is the bin a word "
+                                     "maps into, b = 5.1 mm/h, a stated choice")),
+    VariableRecord(
+        name="scene.world", spec_path=None, unit="look",
+        null_basis="no section.leaf spec field of its own: assembled from scene.night, "
+                   "environment.precipitation_rate_mmh and the wind at cloud base "
+                   "(core/scene/world_record.py); the record carries both null kinds -- "
+                   "reached render-side predictions, each a number here and a named Windows "
+                   "clause, and the bounded label invariance",
+        u_input_rule=UInputRule(note="a derived look: no spread declared")),
     # -- S1: the four sensing variables, observers. Their spec fields are
     #    cameras[i].exposure_compensation_ev / cameras[i].bands (list
     #    elements the section.leaf address cannot claim) and the profile's
@@ -1259,4 +1349,118 @@ REGISTRY = Registry((
         null_basis="a profile block, no spec field: the producer measures exposure 0 leaving "
                    "the frame identical (bounded, 0)",
         u_input_rule=UInputRule(note="a stated shutter and flow interval: no spread")),
+    # -- S2: the four derived passes, observers. Their spec fields are
+    #    cameras[i].passes (the words) and cameras[i].stereo ({baseline_m,
+    #    side}), list elements the section.leaf address cannot claim; each
+    #    returns its record through the capture manifest's applied_variables
+    #    after a render, its null test measured on a synthetic scene by
+    #    core/capture/passes.py (pass_records, amodal_record).
+    VariableRecord(
+        name="passes.flow", spec_path=None, unit="px",
+        null_basis="no section.leaf spec field (cameras[i].passes is a list element): the "
+                   "producer measures a static scene giving zero flow (bounded, 0) and the "
+                   "hidden-aircraft control giving terrain flow",
+        u_input_rule=UInputRule(note="geometric from the recorded states: no spread declared")),
+    VariableRecord(
+        name="passes.disparity", spec_path=None, unit="m",
+        null_basis="no section.leaf spec field (cameras[i].stereo is a list element): the "
+                   "producer measures a zero baseline giving zero disparity (bounded, 0)",
+        u_input_rule=UInputRule(declared_spread=0.0,
+                                note="a stated baseline, rectified by construction: u_x 0")),
+    VariableRecord(
+        name="passes.points", spec_path=None, unit="point",
+        null_basis="no section.leaf spec field (cameras[i].passes is a list element): the "
+                   "producer measures the sky contributing no point (bounded, 0)",
+        u_input_rule=UInputRule(note="depth back-projection, no beam model: no spread")),
+    VariableRecord(
+        name="passes.amodal", spec_path=None, unit="1",
+        null_basis="no section.leaf spec field (cameras[i].passes is a list element): the "
+                   "producer measures the amodal / visible ratio equal to 1 / visible_fraction "
+                   "on a synthetic pair (bounded, 1e-12)",
+        u_input_rule=UInputRule(note="pixel counts of the alone pass: no spread")),
+    # -- S3: the IR proxy's two observers. The spec field is cameras[i].ir
+    #    ({band, thermal_table}), a list element the section.leaf address
+    #    cannot claim, so -- as S1's -- each returns its record through the
+    #    capture manifest's per-camera sensing.ir block, null tests measured
+    #    on a synthetic bundle by core/capture/thermal.py ir_records.
+    VariableRecord(
+        name="sensing.ir", spec_path=None, unit="K",
+        null_basis="no section.leaf spec field (cameras[i].ir is a list element): the producer "
+                   "measures eps = 1 on a unit-transmittance path returning the Planck map of "
+                   "the class temperatures (bounded, 0)",
+        u_input_rule=UInputRule(note="a declared proxy; T_skin from the recorded Mach and air "
+                                     "temperature: no spread")),
+    VariableRecord(
+        name="sensing.ir_transmittance", spec_path=None, unit="1",
+        null_basis="no section.leaf spec field: the producer measures tau = 1 against tau(R), "
+                   "the radiance difference growing with range (reached, half the analytic "
+                   "difference at the table's last range)",
+        u_input_rule=UInputRule(note="a user-provided table (the shipped one synthetic): no "
+                                     "spread is declared")),
+    # -- R2: the instruments block, one entry per field (each a {profile,
+    #    lever_arm_m} mapping; null = the ideal profile at the CG, the
+    #    recorded channel being the measurement). No JSBSim write: the
+    #    observer reads the FDM and writes nothing, so no readback tolerance
+    #    (the record's readback grades the recorder's latest-value sampling
+    #    from its own store). The effect channels are the meas_* columns the
+    #    instrument owns (core/telemetry/instruments.py INSTRUMENT_COLUMNS),
+    #    every one a recorder column (core/telemetry/recorder.py).
+    VariableRecord(
+        name="instruments.imu", spec_path="instruments.imu", unit="profile + m",
+        effect_channels=(EffectChannel("meas_n_z", "g"), EffectChannel("meas_p_dps", "deg/s"),
+                         EffectChannel("meas_q_dps", "deg/s"), EffectChannel("meas_r_dps", "deg/s")),
+        null_value=None,
+        null_basis="unstated: the ideal IMU at the CG (every error term 0, no lever arm): "
+                   "meas_n_z and the rates equal JSBSim's own channels to the bit",
+        u_input_rule=UInputRule(note="a profile name and a lever arm: no bin, no spread")),
+    VariableRecord(
+        name="instruments.gps", spec_path="instruments.gps", unit="profile + m",
+        effect_channels=(EffectChannel("meas_lat_deg", "deg"), EffectChannel("meas_lon_deg", "deg"),
+                         EffectChannel("meas_alt_m", "m")),
+        null_value=None,
+        null_basis="unstated: the ideal receiver at the CG, a fix every step, no noise: the "
+                   "position equals the truth",
+        u_input_rule=UInputRule(note="a profile name and an antenna arm: no bin, no spread")),
+    VariableRecord(
+        name="instruments.pitot_static", spec_path="instruments.pitot_static", unit="profile + m",
+        effect_channels=(EffectChannel("meas_cas_kt", "kt"),),
+        null_value=None,
+        null_basis="unstated: the ideal system, no lag, no position error, no noise: the CAS "
+                   "equals JSBSim's vc-kts",
+        u_input_rule=UInputRule(note="a profile name and an arm (carried): no bin, no spread")),
+    VariableRecord(
+        name="instruments.magnetometer", spec_path="instruments.magnetometer", unit="profile + m",
+        effect_channels=(EffectChannel("meas_heading_deg", "deg"),),
+        null_value=None,
+        null_basis="unstated: the ideal magnetometer, no hard iron, no noise: the reading is "
+                   "the dipole's magnetic heading (true heading minus the declination)",
+        u_input_rule=UInputRule(note="a profile name and an arm (carried): no bin, no spread")),
+    # -- R2: the record block, one entry per field. None writes a property
+    #    or moves a recorded column (each asks for extra flights beside the
+    #    recorded one); the effect channels are the SRQs the uncertainty
+    #    block reports, and a pair is measured silent (the same flight).
+    VariableRecord(
+        name="record.null_tests", spec_path="record.null_tests", unit="flag",
+        effect_channels=(EffectChannel("altitude_m", "m"), EffectChannel("tas_kt", "kt"),
+                         EffectChannel("heading_deg", "deg")),
+        null_value=False,
+        null_basis="false: no null pair flown (the --null-tests option still asks); moves "
+                   "no recorded column",
+        u_input_rule=UInputRule(note="a flag: no bin, no spread")),
+    VariableRecord(
+        name="record.convergence", spec_path="record.convergence", unit="Hz",
+        effect_channels=(EffectChannel("altitude_m", "m"), EffectChannel("tas_kt", "kt"),
+                         EffectChannel("heading_deg", "deg")),
+        null_value=None,
+        null_basis="unstated: no three-rate study; u_num assumes order 1 with Fs = 3; moves "
+                   "no recorded column",
+        u_input_rule=UInputRule(note="a list of rates: no bin, no spread")),
+    VariableRecord(
+        name="record.sensitivity_pairs", spec_path="record.sensitivity_pairs", unit="flag",
+        effect_channels=(EffectChannel("altitude_m", "m"), EffectChannel("tas_kt", "kt"),
+                         EffectChannel("heading_deg", "deg")),
+        null_value=False,
+        null_basis="false: no central pair flown (the --uncertainty option still asks); moves "
+                   "no recorded column",
+        u_input_rule=UInputRule(note="a flag: no bin, no spread")),
 ))

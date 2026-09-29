@@ -80,6 +80,15 @@ struct FFlightSimVisualSceneOptions
 	// ahead-right of it, inside the chase framing.
 	FRotator SunRotation = FRotator(-20.0, -45.0, 0.0);
 	bool bDynamicShadows = true;
+	// S4: the sun's illuminance in LUX (light_units 'physical'), from the
+	// card's look.sun_lux or -sun-lux= (the commandlet resolves and refuses
+	// it). 0 keeps the unitless SceneEngineSunUnitless sun every Gate 6
+	// clause was tuned on, byte-identical. A directional light's intensity
+	// IS lux in this engine; what the number MEANS at the surface once the
+	// sky atmosphere's transmittance is applied on top is the calibration
+	// frame's measurement, not this file's claim.
+	double SunLux = 0.0;
+	FString SunLuxSource;
 
 	// -- Phase 6B ---------------------------------------------------------
 	// Georeferenced single-instance placement at the raster's true position.
@@ -151,6 +160,11 @@ public:
 	// the camera of record in this pipeline. Bias is per-scene (Gate 6's
 	// low-sun value is the default) and constant over any one clip. The
 	// Phase 10 path, byte-identical when no camera exposure is on the card.
+	// S4: the bias values on record -- 9.5 (noon), 10.5 (dawn), 11.0 (the
+	// default, Gate 6's low sun) -- are the OLD scale, tuned against the
+	// unitless 8.0 sun. With the sun in lux they over-expose by
+	// log2(lux / 8) stops (render.json look_applied.sun.bias_overexposure_
+	// stops) until Gate 6's four exposure clauses are re-pinned on the box.
 	static void ApplyManualExposure(USceneCaptureComponent2D* Capture,
 	                                float Bias = 11.0f);
 

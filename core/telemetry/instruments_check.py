@@ -35,12 +35,38 @@ NOT RUN when the run has no ``telemetry_measured.json`` (the ideal profile,
 or none stated) and when a channel has fewer than :data:`MIN_SAMPLES`
 samples to take a statistic from.
 
+THE FDM-RATE CHECKS (R2). :func:`check_allan` reads ``instruments.npz``
+(the observer's truth_* and meas_* columns at the FDM rate) and the
+manifest's ``instruments`` block, and computes the OVERLAPPING Allan
+deviation of each IMU residual from the definition,
+
+    sigma^2(tau) = 1 / (2 tau^2 (N - 2m)) sum_k (theta_{k+2m} - 2 theta_{k+m} + theta_k)^2
+
+with theta the cumulative sum of the rate series times dt (the integrated
+angle / velocity), and grades ``|adev(tau) / (N / sqrt(tau)) - 1| <
+ALLAN_TOL`` at the short taus against the profile's own random-walk
+density N -- a second estimator against the producer's non-overlapping
+one, so the two agree by arithmetic, not by copy. B and K are NOT RUN
+when the run spans less than ALLAN_BK_RUN_MULTIPLE correlation times.
+:func:`check_lever_arm` recovers the GPS antenna arm from the position
+residuals at the fix samples (measured minus truth in NED, each fix's
+attitude rotated by the checker's own axis-by-axis rotation; the arm is
+the least-squares solution r = mean(R_i^T d_i), R orthonormal) and the
+IMU arm from the specific-force difference (sensor minus CG) against the
+matrix ``[omega_dot]x + [omega]x [omega]x`` built from the LOGGED rates
+with omega_dot by central finite differences of those rates -- not
+JSBSim's own angular accelerations -- and compares each to the declared
+arm. Both are NOT RUN without the file, for an unstated instrument (the
+ideal at the CG grades nothing) or below the sample minimum; each FAIL
+carries its name (``check.instrument_allan``, ``instrument.lever_arm``).
+
 NOT CLAIMED: that the profile's numbers describe any real instrument (the
 check grades the file against the profile it carries, not the profile
 against the world); that the drawn biases were drawn from the stated seed
 (the check reads the draws the file recorded and bounds them; the seed
 derivation is graded by tests/test_instruments.py); any distribution shape
-beyond the second moment (no chi-square, no normality test).
+beyond the second moment (no chi-square, no normality test); B and K on a
+run shorter than 100 correlation times (NOT RUN, said so).
 """
 
 from __future__ import annotations
@@ -73,6 +99,20 @@ MEAN_SIGMAS = 5.0
 G0 = 9.80665
 WGS84_A = 6378137.0
 WGS84_E2 = 6.69437999014e-3
+
+
+#: R2: the FDM-rate file, its version, the Allan agreement bound, the
+#: B / K rule, the short taus (as multiples of dt), the sample minimum and
+#: the lever-arm recovery tolerance (metres, beyond the sampling term).
+INSTRUMENTS_FILE = "instruments.npz"
+INSTRUMENTS_READS_VERSION = 1
+ALLAN_TOL = 0.25
+ALLAN_BK_RUN_MULTIPLE = 100.0
+ALLAN_SHORT_M = (1, 2, 4)
+ALLAN_MIN_SAMPLES = 30
+LEVER_ARM_TOL_M = 0.05
+FAIL_ALLAN = "check.instrument_allan"
+FAIL_LEVER_ARM = "instrument.lever_arm"
 
 
 class CheckResult(NamedTuple):
@@ -364,3 +404,242 @@ def check_instruments(run_dir) -> CheckResult:
                              f"within {1 / SIGMA_FACTOR:.2f}..{SIGMA_FACTOR:.2f} x the "
                              f"stated sigma on every channel (worst {worst[0]} at "
                              f"{worst[1]:.2f} x); biases within bounds; GPS hold exact")
+
+
+# -- R2: the FDM-rate checks ---------------------------------------------------------
+
+def overlapping_allan_deviation(rate: np.ndarray, dt: float, m: int) -> Tuple[float, int]:
+    """The OVERLAPPING Allan deviation of a rate series at tau = m dt,
+    from the definition over the integrated series theta = cumsum(rate) dt:
+    sigma^2 = 1 / (2 tau^2 (N - 2m)) sum_{k=0}^{N-2m-1} (theta_{k+2m} -
+    2 theta_{k+m} + theta_k)^2, N the length of theta (the series with a
+    leading 0). Returns (adev, N - 2m); NaN when fewer than one term."""
+    rate = np.asarray(rate, dtype=float)
+    theta = np.concatenate([[0.0], np.cumsum(rate) * dt])
+    n, m = len(theta), int(m)
+    terms = n - 2 * m
+    if terms < 1:
+        return math.nan, terms
+    tau = m * dt
+    second = theta[2 * m:] - 2.0 * theta[m:n - m] + theta[:n - 2 * m]
+    return float(math.sqrt(np.sum(second ** 2) / (2.0 * tau * tau * terms))), terms
+
+
+def _load_instruments(manifest: Optional[Mapping[str, Any]], run_dir):
+    """The manifest's instruments block and the file's arrays, or the
+    NOT RUN / FAIL that says why not. Reads the run's manifest.json (the
+    run manifest) when no manifest is given."""
+    if run_dir is None:
+        return None, None, CheckResult(NOT_RUN, "no run directory")
+    run_dir = Path(run_dir)
+    block = manifest.get("instruments") if isinstance(manifest, Mapping) else None
+    if block is None:
+        for name in ("manifest.json", "run.json"):
+            path = run_dir / name
+            if path.is_file():
+                try:
+                    block = json.loads(path.read_text(encoding="utf-8")).get("instruments")
+                except (OSError, ValueError):
+                    block = None
+                if block is not None:
+                    break
+    if not isinstance(block, dict):
+        return None, None, CheckResult(NOT_RUN, "the manifest carries no instruments block "
+                                                "(a run before the FDM-rate observer)")
+    if block.get("file") is None:
+        return block, None, CheckResult(NOT_RUN, "no instrument stated: the ideal set at the CG "
+                                                 f"writes no {INSTRUMENTS_FILE} and grades nothing")
+    if block.get("instruments_version") != INSTRUMENTS_READS_VERSION:
+        return block, None, CheckResult(FAIL, f"instruments block version "
+                                              f"{block.get('instruments_version')!r} (this build "
+                                              f"reads {INSTRUMENTS_READS_VERSION})",
+                                        failure="instruments.file")
+    path = run_dir / str(block["file"])
+    if not path.is_file():
+        return block, None, CheckResult(FAIL, f"{path} is absent although the manifest names it",
+                                        failure="instruments.file")
+    raw = path.read_bytes()
+    if block.get("sha256") != hashlib.sha256(raw).hexdigest():
+        return block, None, CheckResult(FAIL, f"{path.name} does not hash to the sha256 the "
+                                              f"manifest recorded", failure="instruments.file")
+    try:
+        import io
+
+        with np.load(io.BytesIO(raw)) as data:
+            arrays = {name: np.asarray(data[name], dtype=float) for name in data.files}
+    except (OSError, ValueError) as exc:
+        return block, None, CheckResult(FAIL, f"{path.name} is unreadable: {exc}",
+                                        failure="instruments.file")
+    missing = [c for c in block.get("columns", []) if c not in arrays]
+    if missing or "t" not in arrays:
+        return block, None, CheckResult(FAIL, f"{path.name} lacks columns {missing or ['t']}",
+                                        failure="instruments.file")
+    return block, arrays, None
+
+
+def check_allan(manifest: Optional[Mapping[str, Any]], run_dir) -> CheckResult:
+    """The IMU residuals' overlapping Allan deviation against the profile's
+    white density at the short taus (see the module docstring)."""
+    block, arrays, problem = _load_instruments(manifest, run_dir)
+    if problem is not None:
+        return problem
+    imu = (block.get("instruments") or {}).get("imu") or {}
+    if not imu.get("stated"):
+        return CheckResult(NOT_RUN, "the IMU is unstated (ideal at the CG): no noise declared, "
+                                    "nothing for an Allan deviation to recover")
+    profile = (block.get("profiles") or {}).get("imu") or {}
+    try:
+        n_acc = float(profile["imu"]["accelerometer"]["velocity_random_walk_mps_per_sqrt_h"]) / 60.0
+        n_gyr = float(profile["imu"]["gyro"]["angle_random_walk_deg_per_sqrt_h"]) / 60.0
+        tau_b = float(profile["imu"]["gyro"]["correlation_time_s"])
+    except (KeyError, TypeError, ValueError) as exc:
+        return CheckResult(FAIL, f"the IMU profile in the manifest lacks a term: {exc!r}",
+                           failure=FAIL_ALLAN)
+    t = arrays["t"]
+    if len(t) < 2:
+        return CheckResult(NOT_RUN, f"{len(t)} sample(s): no series")
+    dt = float(np.median(np.diff(t)))
+    rate_hz = float(block.get("rate_hz", 0.0))
+    if rate_hz > 0.0 and abs(dt * rate_hz - 1.0) > 1e-6:
+        return CheckResult(FAIL, f"the file's sample spacing {dt:.6g} s is not the manifest's "
+                                 f"rate {rate_hz:g} Hz", failure=FAIL_ALLAN)
+    series = {}
+    for axis in "xyz":
+        series[f"meas_f_{axis}_mps2"] = (arrays[f"meas_f_{axis}_mps2"] - arrays[f"truth_f_{axis}_mps2"], n_acc)
+    for name, truth in (("meas_p_dps", "truth_p_rad_s"), ("meas_q_dps", "truth_q_rad_s"),
+                        ("meas_r_dps", "truth_r_rad_s")):
+        series[name] = (arrays[name] - np.degrees(arrays[truth]), n_gyr)
+    graded = 0
+    worst = (0.0, "none", 0.0)
+    problems = []
+    for name, (residual, density) in series.items():
+        if density <= 0.0:
+            continue
+        for m in ALLAN_SHORT_M:
+            adev, terms = overlapping_allan_deviation(residual, dt, m)
+            if terms < ALLAN_MIN_SAMPLES:
+                continue
+            expected = density / math.sqrt(m * dt)
+            agreement = abs(adev / expected - 1.0)
+            graded += 1
+            if agreement > worst[0]:
+                worst = (agreement, name, m * dt)
+            if not agreement < ALLAN_TOL:
+                problems.append(f"{name} at tau {m * dt:.4g} s: adev {adev:.4g} against "
+                                f"N/sqrt(tau) {expected:.4g} ({agreement:.3f} off)")
+    if graded == 0:
+        return CheckResult(NOT_RUN, f"no residual with a declared density and at least "
+                                    f"{ALLAN_MIN_SAMPLES} terms ({len(t)} samples)")
+    span = float(t[-1] - t[0])
+    bk = (f"B and K NOT RUN: the run spans {span:.1f} s, under {ALLAN_BK_RUN_MULTIPLE:g} x the "
+          f"correlation time {tau_b:g} s"
+          if span < ALLAN_BK_RUN_MULTIPLE * tau_b else
+          f"B and K within reach ({span:.1f} s >= {ALLAN_BK_RUN_MULTIPLE:g} x {tau_b:g} s); "
+          f"estimated by the producer, not graded here")
+    if problems:
+        return CheckResult(FAIL, f"{len(problems)} Allan point(s) off the declared white "
+                                 f"density (tolerance {ALLAN_TOL}): " + "; ".join(problems[:3])
+                                 + f"; {bk}", failure=FAIL_ALLAN)
+    return CheckResult(PASS, f"{graded} overlapping Allan points on {len(series)} IMU residuals "
+                             f"over {len(t)} samples at {1.0 / dt:g} Hz agree with N/sqrt(tau) "
+                             f"within {ALLAN_TOL} (worst {worst[1]} at tau {worst[2]:.4g} s, "
+                             f"{worst[0]:.3f} off); {bk}")
+
+
+def _own_rotation(roll_deg, pitch_deg, yaw_deg) -> np.ndarray:
+    """R_body_to_NED as columns of the axis-by-axis rotation (the same
+    second derivation _rotate_body_to_ned uses), for the least squares."""
+    return np.array([_rotate_body_to_ned(e, roll_deg, pitch_deg, yaw_deg)
+                     for e in ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))]).T
+
+
+def _skew(v: np.ndarray) -> np.ndarray:
+    return np.array([[0.0, -v[2], v[1]], [v[2], 0.0, -v[0]], [-v[1], v[0], 0.0]])
+
+
+def check_lever_arm(manifest: Optional[Mapping[str, Any]], run_dir) -> CheckResult:
+    """The GPS antenna arm recovered from the fix residuals and the IMU arm
+    from the specific-force difference, each against the declared arm
+    (see the module docstring)."""
+    block, arrays, problem = _load_instruments(manifest, run_dir)
+    if problem is not None:
+        return problem
+    instruments = block.get("instruments") or {}
+    profiles = block.get("profiles") or {}
+    t = arrays["t"]
+    if len(t) < 3:
+        return CheckResult(NOT_RUN, f"{len(t)} sample(s): no track")
+    dt = float(np.median(np.diff(t)))
+    lines = []
+    problems = []
+    graded = 0
+    gps = instruments.get("gps") or {}
+    if gps.get("stated"):
+        at = np.flatnonzero(arrays["gps_fix"] > 0.5)
+        if at.size < ALLAN_MIN_SAMPLES:
+            lines.append(f"GPS arm NOT RUN: {at.size} fixes (needs {ALLAN_MIN_SAMPLES})")
+        else:
+            lat = arrays["truth_lat_deg"][at]
+            d = np.empty((at.size, 3))
+            for k, i in enumerate(at):
+                r_m, r_n = _radii(lat[k])
+                d[k, 0] = math.radians(arrays["meas_lat_deg"][i] - arrays["truth_lat_deg"][i]) * r_m
+                d[k, 1] = (math.radians(arrays["meas_lon_deg"][i] - arrays["truth_lon_deg"][i])
+                           * r_n * math.cos(math.radians(lat[k])))
+                d[k, 2] = arrays["truth_alt_m"][i] - arrays["meas_alt_m"][i]
+            recovered = np.zeros(3)
+            for k, i in enumerate(at):
+                recovered += _own_rotation(arrays["truth_roll_deg"][i], arrays["truth_pitch_deg"][i],
+                                           arrays["truth_heading_deg"][i]).T @ d[k]
+            recovered /= at.size
+            declared = np.asarray(gps.get("lever_arm_m", [0.0, 0.0, 0.0]), dtype=float)
+            g = (profiles.get("gps") or {}).get("gps") or {}
+            sigma = max(float(g.get("north_east_sigma_m", 0.0)), float(g.get("vertical_sigma_m", 0.0)))
+            tol = LEVER_ARM_TOL_M + 4.0 * sigma / math.sqrt(at.size)
+            error = float(np.linalg.norm(recovered - declared))
+            graded += 1
+            lines.append(f"GPS arm recovered {np.round(recovered, 3).tolist()} m from {at.size} "
+                         f"fixes against the declared {declared.tolist()} (|error| {error:.3f} m, "
+                         f"tolerance {tol:.3f} m)")
+            if error > tol:
+                problems.append(f"GPS arm {error:.3f} m off (tolerance {tol:.3f} m)")
+    imu = instruments.get("imu") or {}
+    if imu.get("stated"):
+        omega = np.stack([arrays["truth_p_rad_s"], arrays["truth_q_rad_s"], arrays["truth_r_rad_s"]], axis=1)
+        omega_dot = np.gradient(omega, dt, axis=0)               # central differences, the checker's own
+        diff = np.stack([arrays[f"truth_f_{a}_mps2"] - arrays[f"truth_f_cg_{a}_mps2"] for a in "xyz"], axis=1)
+        interior = slice(1, len(t) - 1)
+        ata = np.zeros((3, 3))
+        atb = np.zeros(3)
+        for i in range(1, len(t) - 1):
+            a_i = _skew(omega_dot[i]) + _skew(omega[i]) @ _skew(omega[i])
+            ata += a_i.T @ a_i
+            atb += a_i.T @ diff[i]
+        declared = np.asarray(imu.get("lever_arm_m", [0.0, 0.0, 0.0]), dtype=float)
+        excitation = float(np.sqrt(np.trace(ata) / max(1, len(t) - 2)))
+        if excitation < 1e-6:
+            lines.append("IMU arm NOT RUN: the track carries no rotation (the rotational terms "
+                         "vanish, so the arm is unobservable)")
+        else:
+            try:
+                recovered = np.linalg.solve(ata + 1e-12 * np.eye(3), atb)
+            except np.linalg.LinAlgError:
+                recovered = np.full(3, np.nan)
+            error = float(np.linalg.norm(recovered - declared))
+            residual = float(np.sqrt(np.mean(np.sum(diff[interior] ** 2, axis=1))))
+            # The finite-difference omega_dot differs from JSBSim's by the
+            # rate's own curvature over 2 dt; the tolerance carries the
+            # declared length times that share of the excitation.
+            tol = LEVER_ARM_TOL_M + 0.05 * float(np.linalg.norm(declared)) + 0.05
+            graded += 1
+            lines.append(f"IMU arm recovered {np.round(recovered, 3).tolist()} m from the "
+                         f"specific-force difference (rms {residual:.4g} m/s^2, excitation "
+                         f"{excitation:.3g} 1/s^2) against the declared {declared.tolist()} "
+                         f"(|error| {error:.3f} m, tolerance {tol:.3f} m)")
+            if not error <= tol:
+                problems.append(f"IMU arm {error:.3f} m off (tolerance {tol:.3f} m)")
+    if graded == 0:
+        return CheckResult(NOT_RUN, "; ".join(lines) or "neither the GPS nor the IMU is stated")
+    if problems:
+        return CheckResult(FAIL, "; ".join(problems) + " -- " + "; ".join(lines), failure=FAIL_LEVER_ARM)
+    return CheckResult(PASS, "; ".join(lines))

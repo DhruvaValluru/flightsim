@@ -23,3 +23,7 @@ ue/Plugins/JSBSimFlightDynamicsModel/Resources/JSBSim/** -text
 core/control/systems/** -text
 assets/nwp/** -text
 assets/dis_entity_types.yaml -text
+# S3: the IR proxy's cached emissivity rows and transmittance tables, whose
+# bytes their .sha256 sidecars and provenance records cover.
+assets/emissivity/** -text
+assets/thermal/** -text

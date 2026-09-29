@@ -546,3 +546,101 @@ def dynamic_location(lat: float, lon: float,
         snowline_m=max(500.0, 5200.0 - 60.0 * abs(lat)),
         summits=(),
     )
+
+
+# -- W2: the runway's flatten pad, a NEW bake with its own key and sha256 -----------
+
+def runway_pad_key(key: str, designator: str) -> str:
+    """The pad bake's key: ``<parent key>_runway_<designator>`` -- a new
+    stem beside the parent, never the parent's name."""
+    return f"{key}_runway_{designator}"
+
+
+def _pad_datum(parent_block: Optional[Dict], field: Heightfield) -> Optional[Dict]:
+    """The pad bake's datum block: the parent's, with the origin's
+    orthometric and ellipsoidal heights re-evaluated on the padded field
+    (the plane may pass under the origin); N, the grid and the crop are
+    the parent's own -- nothing about the geoid changed."""
+    if not isinstance(parent_block, dict):
+        return None
+    block = dict(parent_block)
+    lat, lon = block.get("origin_lat_deg"), block.get("origin_lon_deg")
+    n = block.get("undulation_m")
+    if lat is None or lon is None or not isinstance(n, (int, float)):
+        block["note"] = (str(block.get("note") or "") + " | runway pad: copied from the parent "
+                         "bake (no origin or undulation to re-evaluate)").strip(" |")
+        return block
+    from pyproj import Transformer
+
+    transformer = Transformer.from_crs("EPSG:4326", field.georeference.crs, always_xy=True)
+    x, y = transformer.transform(float(lon), float(lat))
+    orthometric = float(field.elevation_at(x, y))
+    before = block.get("orthometric_height_of_origin_m")
+    block["orthometric_height_of_origin_m"] = orthometric
+    block["ellipsoidal_height_of_origin_m"] = orthometric + float(n)
+    block["note"] = (str(block.get("note") or "")
+                     + f" | runway pad: the origin's heights re-evaluated on the padded field "
+                       f"(orthometric {before} -> {orthometric:.3f} m); N and the crop are the "
+                       f"parent bake's").strip(" |")
+    return block
+
+
+def bake_runway_pad(bake_stem, spec, out_dir=None, shoulder_m: Optional[float] = None,
+                    tolerance_m: Optional[float] = None) -> Tuple[Path, Dict]:
+    """Write the runway's flatten pad as a NEW bake beside ``bake_stem``
+    (``<key>_runway_<designator>.r16`` + ``.json``): the parent's raster
+    with the runway's least-squares plane over its footprint and a graded
+    shoulder (core.scene.runway.flatten_pad), the parent's provenance
+    copied and extended with ``runway_pad`` {parent, spec, statistics},
+    the datum block re-evaluated at the origin. The parent's files are not
+    touched (measured: its bytes and sha256 are unchanged, pinned). Refuses
+    ``runway.terrain_mismatch`` by name before writing anything. Returns
+    the ``.r16`` path and the pad statistics."""
+    from ..scene import runway as rw
+
+    bake_stem = Path(bake_stem).with_suffix("")
+    out_dir = Path(out_dir) if out_dir is not None else bake_stem.parent
+    parent = Heightfield.read(bake_stem)
+    key = runway_pad_key(parent.name, spec.designator)
+    shoulder = rw.DEFAULT_SHOULDER_M if shoulder_m is None else float(shoulder_m)
+    field, statistics = rw.flatten_pad(parent, spec, shoulder_m=shoulder,
+                                       tolerance_m=tolerance_m, name=key)
+    parent_sidecar = bake_stem.with_suffix(".json")
+    field.provenance = dict(parent.provenance)
+    field.provenance["runway_pad"] = {
+        "key": key,
+        "parent": {"stem": str(bake_stem), "name": parent.name, "sha256": parent.digest(),
+                   "sidecar_sha256": sha256_of(parent_sidecar) if parent_sidecar.is_file() else None},
+        "spec": spec.to_dict(),
+        "statistics": statistics,
+        "basis": "a new bake: the parent's raster with the runway plane over the footprint and "
+                 "a smoothstep shoulder; every other pixel the parent's own value re-quantised "
+                 "to the new scale (untouched_pixels_moved_m states by how much)",
+    }
+    field.provenance["datum"] = _pad_datum(parent.provenance.get("datum"), field)
+    raw = field.write(out_dir / key)
+    return raw, statistics
+
+
+def ensure_runway_pad(bake_stem, spec, out_dir=None, shoulder_m: Optional[float] = None) -> Path:
+    """The pad bake's stem for a parent and a runway: reused when one is
+    already written FROM THIS PARENT (its sidecar's ``runway_pad.parent
+    .sha256`` is the parent's digest and its spec is this one), else
+    baked. A stale pad (the parent re-baked, the runway moved) is
+    replaced, never flown."""
+    bake_stem = Path(bake_stem).with_suffix("")
+    out_dir = Path(out_dir) if out_dir is not None else bake_stem.parent
+    parent = Heightfield.read(bake_stem)
+    stem = out_dir / runway_pad_key(parent.name, spec.designator)
+    sidecar = stem.with_suffix(".json")
+    if sidecar.is_file() and stem.with_suffix(".r16").is_file():
+        try:
+            meta = json.loads(sidecar.read_text(encoding="utf-8"))
+            pad = (meta.get("provenance") or {}).get("runway_pad") or {}
+            if (pad.get("parent", {}).get("sha256") == parent.digest()
+                    and pad.get("spec") == spec.to_dict()):
+                return stem
+        except (OSError, ValueError):
+            pass
+    bake_runway_pad(bake_stem, spec, out_dir=out_dir, shoulder_m=shoulder_m)
+    return stem

@@ -54,6 +54,27 @@ without an engine, so the Windows build is where they are checked.
   flow_vs_motion check on the first rendered bundle -- not here. The
   commandlet refuses each pass by name (labels.pass_material) when its
   asset is absent.
+
+* /Game/FlightSim/M_WorldNormal, M_Velocity -- S4 (the sensing engine
+  side): the same post-process shape (replacing the tonemapper, one
+  SceneTexture node into emissive) with NO offset encoding, table
+  LINEAR_MATERIALS. M_WorldNormal is the fallback normal source of the
+  linear .f32 normal pass (-normal-source=material, when the box shows the
+  SCS_Normal capture in neither encoding). M_Velocity is the velocity
+  cross-check (-velocity-check): its capture keeps
+  bAlwaysPersistRenderingState true in the commandlet (the previous view
+  matrices live in the view state), and it is a READ-BACK beside the
+  Python flow, never the truth. Whether a negative emissive survives the
+  FinalColorHDR readback is exactly what its record's
+  negative_raw_values count measures on Windows.
+
+* /Game/FlightSim/M_GreyCard -- S4: the calibration frame's card (the
+  -calibration flag). Lit, fully rough (1.0), non-metallic, specular 0 --
+  a Lambertian -- with two scalar parameters the commandlet sets per quad
+  through a dynamic instance: "Reflectance" into base colour (default
+  0.18, the grey card) and "Luminance" into emissive, stated in cd/m^2
+  (default 0). The emissive grey quad is Reflectance 0 / Luminance L; the
+  white Lambertian quad Reflectance 0.9 / Luminance 0.
 """
 
 import unreal
@@ -73,6 +94,24 @@ PASS_MATERIALS = {
     "velocity": ("M_VelocityPass", "PPI_VELOCITY", True),
     "albedo": ("M_BaseColorPass", "PPI_BASE_COLOR", False),
 }
+
+#: S4: the two unencoded post-process materials, by what they serve:
+#: ("M_Name", "PPI_SCENE_TEXTURE"). Built by create_pass_material with no
+#: offset (the signed flag False: the texel goes straight to emissive).
+LINEAR_MATERIALS = {
+    "normal_fallback": ("M_WorldNormal", "PPI_WORLD_NORMAL"),
+    "velocity_check": ("M_Velocity", "PPI_VELOCITY"),
+}
+
+#: S4: the calibration card's parameters, by the names the commandlet sets
+#: (FlightSimRenderCommandlet.cpp RenderGreyCardLuminanceParameter /
+#: RenderGreyCardReflectanceParameter, pinned equal by test).
+GREY_CARD_LUMINANCE_PARAMETER = "Luminance"
+GREY_CARD_REFLECTANCE_PARAMETER = "Reflectance"
+GREY_CARD_REFLECTANCE_DEFAULT = 0.18
+GREY_CARD_ROUGHNESS = 1.0
+GREY_CARD_METALLIC = 0.0
+GREY_CARD_SPECULAR = 0.0
 
 #: The parameter ApplyWetness looks up by this exact name
 #: (FlightSimVisualScene.cpp FindScalarParameter(Material, TEXT("Wetness"))).
@@ -304,6 +343,60 @@ def create_base_colour_pass():
     create_pass_material(*PASS_MATERIALS["albedo"])
 
 
+def create_world_normal_fallback():
+    """S4: M_WorldNormal, SceneTexture:WorldNormal straight into emissive."""
+    name, scene_texture_id = LINEAR_MATERIALS["normal_fallback"]
+    create_pass_material(name, scene_texture_id, False)
+
+
+def create_velocity_check():
+    """S4: M_Velocity, SceneTexture:Velocity straight into emissive."""
+    name, scene_texture_id = LINEAR_MATERIALS["velocity_check"]
+    create_pass_material(name, scene_texture_id, False)
+
+
+def create_grey_card():
+    """S4: the calibration frame's card. Lit (the default shading model),
+    roughness 1, metallic 0, specular 0 -- a Lambertian with no specular
+    lobe -- with the "Reflectance" scalar into base colour and the
+    "Luminance" scalar (cd/m^2) into emissive. Not run without an engine:
+    the node and pin names are the UE Python API's, checked on Windows."""
+    full = f"{PATH}/M_GreyCard"
+    if unreal.EditorAssetLibrary.does_asset_exist(full):
+        print(f"MATERIAL-EXISTS: {full}")
+        return
+
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    material = tools.create_asset("M_GreyCard", PATH, unreal.Material,
+                                  unreal.MaterialFactoryNew())
+    if material is None:
+        raise SystemExit("could not create material asset")
+
+    lib = unreal.MaterialEditingLibrary
+    reflectance = lib.create_material_expression(
+        material, unreal.MaterialExpressionScalarParameter, -400, 0)
+    reflectance.set_editor_property("parameter_name", GREY_CARD_REFLECTANCE_PARAMETER)
+    reflectance.set_editor_property("default_value", GREY_CARD_REFLECTANCE_DEFAULT)
+    lib.connect_material_property(reflectance, "",
+                                  unreal.MaterialProperty.MP_BASE_COLOR)
+    luminance = lib.create_material_expression(
+        material, unreal.MaterialExpressionScalarParameter, -400, 200)
+    luminance.set_editor_property("parameter_name", GREY_CARD_LUMINANCE_PARAMETER)
+    luminance.set_editor_property("default_value", 0.0)
+    lib.connect_material_property(luminance, "",
+                                  unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    for value, prop, y in ((GREY_CARD_ROUGHNESS, unreal.MaterialProperty.MP_ROUGHNESS, 400),
+                           (GREY_CARD_METALLIC, unreal.MaterialProperty.MP_METALLIC, 500),
+                           (GREY_CARD_SPECULAR, unreal.MaterialProperty.MP_SPECULAR, 600)):
+        constant = lib.create_material_expression(
+            material, unreal.MaterialExpressionConstant, -400, y)
+        constant.set_editor_property("r", value)
+        lib.connect_material_property(constant, "", prop)
+    lib.recompile_material(material)
+    unreal.EditorAssetLibrary.save_asset(full)
+    print(f"MATERIAL-CREATED: {full}")
+
+
 create_vertex_colour()
 create_terrain_imagery()
 create_vertex_colour_unlit()
@@ -311,3 +404,6 @@ create_custom_stencil_id()
 create_world_normal_pass()
 create_velocity_pass()
 create_base_colour_pass()
+create_world_normal_fallback()
+create_velocity_check()
+create_grey_card()

@@ -54,6 +54,78 @@
 #include "DrawDebugHelpers.h"
 #include "GeoReferencingSystem.h"
 #include "Components/ActorComponent.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+
+// LOCAL PATCH 5 (VENDORED.json): FIPS 180-4 SHA-256 of the aircraft XML at
+// the door, as lowercase hex -- self-contained because the platform
+// SHA-256 asserts on Mac, and the hash must equal the one Python's hashlib
+// recorded for the derived airframe (core/control/derive.py derived_sha256).
+namespace JSBSimLocalPatch5
+{
+	static FString Sha256Hex(const uint8* Data, uint64 Length)
+	{
+		static const uint32 K[64] = {
+			0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+			0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+			0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+			0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+			0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+			0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+			0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+			0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2};
+		uint32 H[8] = {0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+		               0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+		const uint64 BitLength = Length * 8;
+		const uint64 Padded = ((Length + 8) / 64 + 1) * 64;
+		TArray<uint8> Buffer;
+		Buffer.SetNumZeroed(static_cast<int32>(Padded));
+		if (Length > 0)
+		{
+			FMemory::Memcpy(Buffer.GetData(), Data, Length);
+		}
+		Buffer[static_cast<int32>(Length)] = 0x80;
+		for (int32 Byte = 0; Byte < 8; ++Byte)
+		{
+			Buffer[static_cast<int32>(Padded) - 1 - Byte] = static_cast<uint8>(BitLength >> (8 * Byte));
+		}
+		auto Rotr = [](uint32 X, uint32 N) { return (X >> N) | (X << (32 - N)); };
+		for (uint64 Chunk = 0; Chunk < Padded; Chunk += 64)
+		{
+			uint32 W[64];
+			for (int32 Word = 0; Word < 16; ++Word)
+			{
+				const uint8* P = Buffer.GetData() + Chunk + Word * 4;
+				W[Word] = (uint32(P[0]) << 24) | (uint32(P[1]) << 16)
+				        | (uint32(P[2]) << 8) | uint32(P[3]);
+			}
+			for (int32 Word = 16; Word < 64; ++Word)
+			{
+				const uint32 S0 = Rotr(W[Word-15], 7) ^ Rotr(W[Word-15], 18) ^ (W[Word-15] >> 3);
+				const uint32 S1 = Rotr(W[Word-2], 17) ^ Rotr(W[Word-2], 19) ^ (W[Word-2] >> 10);
+				W[Word] = W[Word-16] + S0 + W[Word-7] + S1;
+			}
+			uint32 A=H[0],B=H[1],C=H[2],D=H[3],E=H[4],F=H[5],G=H[6],Hh=H[7];
+			for (int32 Round = 0; Round < 64; ++Round)
+			{
+				const uint32 S1 = Rotr(E,6) ^ Rotr(E,11) ^ Rotr(E,25);
+				const uint32 Ch = (E & F) ^ (~E & G);
+				const uint32 T1 = Hh + S1 + Ch + K[Round] + W[Round];
+				const uint32 S0 = Rotr(A,2) ^ Rotr(A,13) ^ Rotr(A,22);
+				const uint32 Maj = (A & B) ^ (A & C) ^ (B & C);
+				const uint32 T2 = S0 + Maj;
+				Hh=G; G=F; F=E; E=D+T1; D=C; C=B; B=A; A=T1+T2;
+			}
+			H[0]+=A; H[1]+=B; H[2]+=C; H[3]+=D; H[4]+=E; H[5]+=F; H[6]+=G; H[7]+=Hh;
+		}
+		FString Hex;
+		for (int32 Index = 0; Index < 8; ++Index)
+		{
+			Hex += FString::Printf(TEXT("%08x"), H[Index]);
+		}
+		return Hex;
+	}
+}
 
 
 // Utility class and static member to redirect cout to UE_LOG - see in UJSBSimMovementComponent::UJSBSimMovementComponent()
@@ -160,6 +232,45 @@ void UJSBSimMovementComponent::LoadAircraft(bool ResetToDefaultSettings)
 	// It seems like we can only load the model once after having been initialized - So we have to Reinit JSBSim when changing the model.
 	DeInitializeJSBSim();
 	InitializeJSBSim();
+
+	// LOCAL PATCH 5 (VENDORED.json): the derived airframe's XML is hashed AT
+	// THE DOOR -- before JSBSim reads a byte of it -- and the load refused
+	// when it is unreadable or is not the file the bridge was told to
+	// expect: the host counterpart of core/control/derive.py verify_hashes.
+	// A stock load (no AircraftRootOverride) is upstream's, unchanged.
+	LoadedAircraftXmlSha256.Empty();
+	bAircraftXmlRefused = false;
+	if (!AircraftRootOverride.IsEmpty())
+	{
+		// The same root InitializeJSBSim handed JSBSim, so the file hashed is
+		// the file JSBSim then reads.
+		FString DoorRoot = FPaths::ConvertRelativePathToFull(AircraftRootOverride);
+		FPaths::NormalizeDirectoryName(DoorRoot);
+		const FString XmlPath = FPaths::Combine(DoorRoot, AircraftModel,
+		                                        AircraftModel + TEXT(".xml"));
+		TArray<uint8> XmlBytes;
+		if (!FFileHelper::LoadFileToArray(XmlBytes, *XmlPath))
+		{
+			bAircraftXmlRefused = true;
+			AircraftLoaded = false;
+			UE_LOG(LogJSBSim, Error, TEXT("derived airframe XML '%s' cannot be read; not loaded"), *XmlPath);
+			return;
+		}
+		LoadedAircraftXmlSha256 = JSBSimLocalPatch5::Sha256Hex(XmlBytes.GetData(), XmlBytes.Num());
+		UE_LOG(LogJSBSim, Display, TEXT("aircraft XML '%s': sha256 %s at the door (expected %s)"),
+		       *XmlPath, *LoadedAircraftXmlSha256,
+		       ExpectedAircraftXmlSha256.IsEmpty() ? TEXT("none stated") : *ExpectedAircraftXmlSha256);
+		if (!ExpectedAircraftXmlSha256.IsEmpty() &&
+		    !LoadedAircraftXmlSha256.Equals(ExpectedAircraftXmlSha256, ESearchCase::IgnoreCase))
+		{
+			bAircraftXmlRefused = true;
+			AircraftLoaded = false;
+			UE_LOG(LogJSBSim, Error, TEXT("aircraft XML '%s' hashes to %s, not the expected %s; not loaded"),
+			       *XmlPath, *LoadedAircraftXmlSha256, *ExpectedAircraftXmlSha256);
+			return;
+		}
+	}
+
 	AircraftLoaded = Exec->LoadModel(std::string(TCHAR_TO_UTF8(*AircraftModel)));
 
 	if (!AircraftLoaded)
@@ -421,6 +532,19 @@ void UJSBSimMovementComponent::InitializeJSBSim()
 
 		Exec->SetRootDir(SGPath(TCHAR_TO_UTF8(*RootDir)));
 		Exec->SetAircraftPath(SGPath(TCHAR_TO_UTF8(*AircraftPath)));
+		// LOCAL PATCH 5 (VENDORED.json): upstream hard-codes the aircraft
+		// root above; a derived airframe lives outside the plugin (the
+		// repository's build/aircraft). An absolute path passes through
+		// FGFDMExec::GetFullPath unchanged; engines and systems still
+		// resolve from the plugin's staged data, as the headless host
+		// resolves a derived airframe's from the stock root.
+		if (!AircraftRootOverride.IsEmpty())
+		{
+			FString OverrideRoot = FPaths::ConvertRelativePathToFull(AircraftRootOverride);
+			FPaths::NormalizeDirectoryName(OverrideRoot);
+			Exec->SetAircraftPath(SGPath(TCHAR_TO_UTF8(*OverrideRoot)));
+			UE_LOG(LogJSBSim, Display, TEXT("aircraft root overridden: '%s'"), *OverrideRoot);
+		}
 		Exec->SetEnginePath(SGPath(TCHAR_TO_UTF8(*EnginePath)));
 		Exec->SetSystemsPath(SGPath(TCHAR_TO_UTF8(*SystemPath)));
 		// Prepare Initial Conditions
@@ -535,6 +659,53 @@ void UJSBSimMovementComponent::PrepareJSBSim()
             EngineCommands[i].Magnetos = EMagnetosMode::Both;
 			EngineCommands[i].Running = true;
 		}
+	}
+
+	// LOCAL PATCH 6 (VENDORED.json): the pre-trim batch, AFTER the RunIC
+	// above and BEFORE the trim below -- the only place in upstream's
+	// BeginPlay where the bridge's stated day, loading and icing neutral
+	// values can reach the trim solver. Each write is followed by a
+	// re-latch (RunIC: FGMassBalance and the atmosphere recompute at the ICs
+	// without advancing time) where PreTrimRelatchAfter says so, exactly as
+	// the headless providers re-latch; the read-back list is then sampled
+	// (inertia/cg-x-in before the trim is the loading's contract). A
+	// property the model does not declare is not written and is listed in
+	// PreTrimMissing for the bridge to refuse by name. Empty: a no-op.
+	PreTrimReadValues.Reset();
+	PreTrimMissing.Reset();
+	if (PreTrimProperties.Num() > 0)
+	{
+		for (int32 Write = 0; Write < PreTrimProperties.Num(); Write++)
+		{
+			SGPropertyNode* node = PropertyManager->GetNode(TCHAR_TO_UTF8(*PreTrimProperties[Write]), false);
+			if (node == NULL || !PreTrimValues.IsValidIndex(Write))
+			{
+				PreTrimMissing.Add(PreTrimProperties[Write]);
+				UE_LOG(LogJSBSim, Error, TEXT("pre-trim batch: '%s' is not declared by this model; not written"),
+				       *PreTrimProperties[Write]);
+				continue;
+			}
+			node->setStringValue(TCHAR_TO_UTF8(*PreTrimValues[Write]));
+			if (PreTrimRelatchAfter.IsValidIndex(Write) && PreTrimRelatchAfter[Write])
+			{
+				Exec->RunIC();
+			}
+		}
+		// The CG may have moved: keep the actor-frame CG the plugin places
+		// the aircraft by in step with FGMassBalance.
+		UpdateLocalTransforms();
+		for (const FString& ReadName : PreTrimReadProperties)
+		{
+			FString ReadValue;
+			SGPropertyNode* node = PropertyManager->GetNode(TCHAR_TO_UTF8(*ReadName), false);
+			if (node != NULL)
+			{
+				ReadValue = node->getStringValue();
+			}
+			PreTrimReadValues.Add(ReadValue);
+		}
+		UE_LOG(LogJSBSim, Display, TEXT("pre-trim batch: %d writes after RunIC, before the trim (%d missing)"),
+		       PreTrimProperties.Num(), PreTrimMissing.Num());
 	}
 
 	if (TrimNeeded)

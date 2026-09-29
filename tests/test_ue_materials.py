@@ -21,6 +21,9 @@ CREATED = re.compile(r'create_asset\("(M_[A-Za-z0-9_]+)"')
 #: I6: the pass materials are created from a table, one row per pass
 #: word: ("M_Name", "PPI_SCENE_TEXTURE", signed).
 PASS_ROW = re.compile(r'"(normal|velocity|albedo)": \("(M_[A-Za-z0-9_]+)", "(PPI_[A-Z_]+)", (True|False)\)')
+#: S4: the two unencoded post-process materials, one row per use:
+#: ("M_Name", "PPI_SCENE_TEXTURE").
+LINEAR_ROW = re.compile(r'"(normal_fallback|velocity_check)": \("(M_[A-Za-z0-9_]+)", "(PPI_[A-Z_]+)"\)')
 
 
 def loaded_in_cpp():
@@ -32,7 +35,8 @@ def loaded_in_cpp():
 
 def created_by_script():
     text = SCRIPT.read_text(encoding="utf-8")
-    return set(CREATED.findall(text)) | {name for _, name, _, _ in PASS_ROW.findall(text)}
+    return (set(CREATED.findall(text)) | {name for _, name, _, _ in PASS_ROW.findall(text)}
+            | {name for _, name, _ in LINEAR_ROW.findall(text)})
 
 
 def test_every_material_the_commandlet_loads_is_created_by_the_script():
@@ -148,3 +152,69 @@ def test_a_pass_material_replaces_the_tonemapper_and_offsets_a_signed_texture():
     for creator in ("create_world_normal_pass", "create_velocity_pass",
                     "create_base_colour_pass"):
         assert re.search(rf"^{creator}\(\)", text, re.M), creator
+
+
+# -- S4 (the sensing engine side): M_WorldNormal, M_Velocity, M_GreyCard -------
+
+#: Every /Game/FlightSim asset the script creates, by name: a material added
+#: or dropped without this list moving is a render that refuses (or an asset
+#: nothing loads) on a fresh machine.
+ALL_CREATED = {"M_VertexColor", "M_TerrainImagery", "M_VertexColorUnlit", "M_CustomStencilID",
+               "M_WorldNormalPass", "M_VelocityPass", "M_BaseColorPass",
+               "M_WorldNormal", "M_Velocity", "M_GreyCard"}
+COMMANDLET_CPP = BRIDGE / "Private" / "FlightSimRenderCommandlet.cpp"
+
+
+def test_every_game_path_the_script_creates_is_pinned_and_each_is_loaded():
+    created = created_by_script()
+    assert created == ALL_CREATED
+    loaded = loaded_in_cpp()
+    for name in ("M_WorldNormal", "M_Velocity", "M_GreyCard"):
+        assert name in loaded, f"the commandlet never loads {name}"
+
+
+def test_the_s4_post_process_materials_are_unencoded_scene_textures():
+    """M_WorldNormal (the fallback normal source) and M_Velocity (the
+    velocity cross-check) go through create_pass_material with the signed
+    flag OFF: the texel straight into emissive, no offset, so the commandlet
+    reads them as signed values. M_Velocity's capture keeps its view state
+    (bAlwaysPersistRenderingState, set in the commandlet)."""
+    text = SCRIPT.read_text(encoding="utf-8")
+    rows = {use: (name, ppi) for use, name, ppi in LINEAR_ROW.findall(text)}
+    assert rows == {"normal_fallback": ("M_WorldNormal", "PPI_WORLD_NORMAL"),
+                    "velocity_check": ("M_Velocity", "PPI_VELOCITY")}
+    for creator, use in (("create_world_normal_fallback", "normal_fallback"),
+                         ("create_velocity_check", "velocity_check")):
+        body = _body(text, creator)
+        assert f'LINEAR_MATERIALS["{use}"]' in body, creator
+        assert "create_pass_material(name, scene_texture_id, False)" in body, creator
+        assert re.search(rf"^{creator}\(\)", text, re.M), creator
+    cpp = COMMANDLET_CPP.read_text(encoding="utf-8")
+    assert "VelocityCheck->bAlwaysPersistRenderingState = true;" in cpp
+
+
+def test_the_grey_card_is_a_lambertian_with_the_two_parameters_the_commandlet_sets():
+    text = SCRIPT.read_text(encoding="utf-8")
+    body = _body(text, "create_grey_card")
+    assert 'create_asset("M_GreyCard", PATH, unreal.Material,' in body
+    assert "MaterialExpressionScalarParameter" in body
+    assert 'reflectance.set_editor_property("parameter_name", GREY_CARD_REFLECTANCE_PARAMETER)' in body
+    assert 'reflectance.set_editor_property("default_value", GREY_CARD_REFLECTANCE_DEFAULT)' in body
+    assert 'luminance.set_editor_property("parameter_name", GREY_CARD_LUMINANCE_PARAMETER)' in body
+    assert 'luminance.set_editor_property("default_value", 0.0)' in body
+    assert "lib.connect_material_property(reflectance, \"\",\n                                  unreal.MaterialProperty.MP_BASE_COLOR)" in body
+    assert "lib.connect_material_property(luminance, \"\",\n                                  unreal.MaterialProperty.MP_EMISSIVE_COLOR)" in body
+    for constant, prop in (("GREY_CARD_ROUGHNESS", "MP_ROUGHNESS"), ("GREY_CARD_METALLIC", "MP_METALLIC"),
+                           ("GREY_CARD_SPECULAR", "MP_SPECULAR")):
+        assert f"({constant}, unreal.MaterialProperty.{prop}," in body, prop
+    # Lit (no shading-model override) and not a post-process material.
+    assert "MSM_UNLIT" not in body and "MD_POST_PROCESS" not in body
+    assert "GREY_CARD_ROUGHNESS = 1.0\n" in text and "GREY_CARD_METALLIC = 0.0\n" in text
+    assert "GREY_CARD_SPECULAR = 0.0\n" in text and "GREY_CARD_REFLECTANCE_DEFAULT = 0.18\n" in text
+    # The parameter names are the ones the commandlet sets, read from its source.
+    cpp = COMMANDLET_CPP.read_text(encoding="utf-8")
+    for constant, cpp_name in (("GREY_CARD_LUMINANCE_PARAMETER", "RenderGreyCardLuminanceParameter"),
+                               ("GREY_CARD_REFLECTANCE_PARAMETER", "RenderGreyCardReflectanceParameter")):
+        value = re.search(rf'^{constant} = "(\w+)"$', text, re.M).group(1)
+        assert f'{cpp_name} = TEXT("{value}");' in cpp, constant
+    assert re.search(r"^create_grey_card\(\)", text, re.M)

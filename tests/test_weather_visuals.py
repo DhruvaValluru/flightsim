@@ -126,3 +126,65 @@ def test_the_phase10_flag_names_are_kept_for_the_look_lane():
                                "exposure_bias": "-exposure-bias",
                                "fog_density": "-fog-density"}
     assert wv.CARD_LOOK_KEY == "look"
+
+
+# -- W3: the drift from the wind at cloud base, the night and rain rows --------------
+
+LAYERED = [[0.0, 10.0, 270.0], [1000.0, 20.0, 270.0], [3000.0, 40.0, 300.0]]
+
+
+def test_cloud_drift_is_the_providers_wind_at_cloud_base_with_a_layered_fixture():
+    """Base 1500 m above a 500 m datum is 2000 m MSL, halfway between the
+    second and third layers: 30 kt from 285 deg (shorter arc), and the
+    drift equals the provider's own wind_at there component for component."""
+    from core.environment.base import Position
+    from core.environment.shear import LayeredWind
+
+    provider = LayeredWind(LAYERED)
+    drift = wv.cloud_drift_at_base([provider], 46.0, 7.7, 500.0, 1500.0)
+    wind = provider.wind_at(Position(46.0, 7.7, 2000.0, 1500.0, 500.0), 0.0)
+    assert drift["source"] == wv.CLOUD_DRIFT_SOURCE == "wind at cloud base"
+    assert drift["north_mps"] == wind.north and drift["east_mps"] == wind.east
+    assert drift["mps"] == pytest.approx(30.0 * 0.514444, abs=1e-3)
+    assert drift["from_deg"] == pytest.approx(285.0, abs=1e-3)
+    assert drift["altitude_m"] == 2000.0 and drift["base_m"] == 1500.0
+    # The spec's uniform wind at the surface is NOT the wind aloft here.
+    assert drift["mps"] != wv.cloud_drift_mps(10.0)
+    assert wv.cloud_drift_at_base([], 0.0, 0.0, 0.0, 1500.0)["mps"] == 0.0     # calm
+    assert wv.drift_offset_m(drift["mps"], 30.0) == pytest.approx(30.0 * drift["mps"])
+
+
+def test_the_spec_path_reads_the_runs_own_providers_at_the_base():
+    from core.environment.base import Position
+    from core.nl.compiler import compile_prompt
+    from core.scene.world_record import spec_cloud_drift, world_stated
+    from core.scenario.runner import environment_for
+
+    spec = compile_prompt("fly the c172p at 1500 m and 100 kt for 1 seconds")
+    assert not world_stated(spec)
+    spec.set("wind_speed", 10.0, frm="test")
+    spec.set("wind_direction", 270.0, frm="test")
+    spec.set("wind_profile.kind", "layered", frm="test")
+    spec.set("wind_profile.layers", LAYERED, frm="test")
+    assert world_stated(spec)
+    drift = spec_cloud_drift(spec)
+    base = wv.DEFAULT_CLOUD_BASE_M + float(spec.terrain_elevation.value)
+    total = [p.wind_at(Position(0.0, 0.0, base, wv.DEFAULT_CLOUD_BASE_M,
+                                float(spec.terrain_elevation.value)), 0.0)
+             for p in environment_for(spec).wind]
+    assert drift["north_mps"] == pytest.approx(sum(w.north for w in total), abs=1e-12)
+    assert drift["east_mps"] == pytest.approx(sum(w.east for w in total), abs=1e-12)
+    assert "layered_wind" in drift["providers"]
+
+
+def test_the_rain_rows_ride_only_with_a_rate_and_name_their_engine_parameters():
+    dry = wv.look_block({"visibility_km": 60.0, "precipitation": "rain"})
+    assert "precipitation_rate_mmh" not in dry and "rain_extinction_per_m" not in dry
+    wet = wv.look_block({"visibility_km": 60.0, "precipitation_rate_mmh": 4.0})
+    for key in wet:
+        if key not in ("visibility_km", "not_claimed"):
+            assert key in wv.ENGINE_PARAMETERS, key
+    assert wet["precipitation_rate_mmh"] == 4.0
+    for row in ("night", "precipitation", "cloud_drift"):
+        assert row in wv.WORLD_PARAMETERS
+    assert wv.CLOUD_DRIFT_KEYS == ("mps", "from_deg", "base_m", "source")

@@ -584,3 +584,39 @@ def test_verify_run_lists_the_three_checks_as_not_run_on_a_bare_manifest(tmp_pat
     by_name = {c.name: c for c in report.checks}
     for name in ("normals_vs_depth", "flow_vs_motion", "albedo_range"):
         assert by_name[name].status == verify.NOT_RUN, by_name[name]
+    # S2: the five derived-pass checks ride the same report, NOT RUN on absence.
+    for name in ("flow_vs_keypoints", "flow_static_null", "disparity_vs_right_depth",
+                 "points_vs_depth", "amodal_contains_visible"):
+        assert by_name[name].status == verify.NOT_RUN, by_name[name]
+
+
+# -- S2: the derived passes beside I6's engine passes ------------------------------
+
+def test_an_i6_bundle_gains_no_s2_key_when_no_camera_asks(tmp_path):
+    """Absent-canonical: attach on an I6 flow bundle whose manifest frames
+    carry no passes block writes no passes.json, no passes key, no amodal
+    keys and no passes.* record -- exactly the I6 result."""
+    run_dir = flow_run(tmp_path)
+    summary = producer.attach_engine_labels(run_dir)
+    assert "derived_passes" not in summary and "amodal" not in summary
+    manifest = json.loads((run_dir / "capture_manifest.json").read_text(encoding="utf-8"))
+    assert all("passes" not in frame for frame in manifest["frames"])
+    for frame in manifest["frames"]:
+        for entry in frame["labels"]["objects"]:
+            assert not any(key.startswith("amodal") for key in entry)
+    assert not (run_dir / "frames" / CAMERA / "passes.json").exists()
+    assert [r["name"] for r in manifest["applied_variables"]["applied_variables"]] == ["render.passes"]
+
+
+def test_the_s2_flow_reader_reads_the_i6_layout_bit_for_bit(tmp_path):
+    """The derived flow files keep I6's layout (float32 (dx, dy) pairs,
+    row-major), so one reader reads both; a wrong size refuses by name."""
+    from core.capture import passes
+
+    field = np.arange(2 * 3 * 4, dtype=np.float32).reshape(3, 4, 2) / 7.0
+    field.astype("<f4").tofile(tmp_path / "f.f32")
+    assert np.array_equal(passes.read_flow_file(tmp_path / "f.f32", 4, 3),
+                          producer.read_flow_f32(tmp_path / "f.f32", 4, 3))
+    with pytest.raises(passes.PassError) as err:
+        passes.read_flow_file(tmp_path / "f.f32", 5, 3)
+    assert err.value.constraint == "annotation.flow"

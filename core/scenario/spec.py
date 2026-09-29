@@ -24,10 +24,11 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from .blocks import (
-    AtmosphereSpec, DatumSpec, DisSpec, FailuresSpec, IcingSpec, LoadingSpec, SceneSpec,
-    TaxonomySpec,
+    AtmosphereSpec, DatumSpec, DisSpec, FailuresSpec, IcingSpec, InstrumentsSpec, LoadingSpec,
+    RecordSpec, SceneSpec, TaxonomySpec,
     TrafficSpec, TurbulenceModelSpec, WakeSpec, WindProfileSpec,
 )
+from .blocks import RunwayBlockSpec
 from .camera import CameraSpec
 from .randomization import RandomizationSpec
 from .fields import Quantity, Source
@@ -70,6 +71,13 @@ from .fields import Quantity, Source
 # Version-7 dicts refuse by name; completed runs recover from
 # provenance.json, never by re-parsing.
 SPEC_VERSION = 8
+
+
+def _default_precipitation_rate() -> Quantity:
+    """W3: ``environment.precipitation_rate_mmh`` unstated -- no rain rate
+    (the precipitation word, if any, keeps its visibility floor)."""
+    return Quantity.default(None, "mm/h", frm="no rain rate stated: no drop-size "
+                                              "distribution, no streaks")
 
 
 @dataclass
@@ -191,6 +199,25 @@ class ScenarioSpec:
     #: no wake is the default and is omitted, so every committed spec-8
     #: example keeps its digest.
     wake: "WakeSpec" = dc_field(default_factory=WakeSpec.defaulted)
+    #: R2 (still spec 8; the integrator bumps once): the instrument models
+    #: at the FDM rate -- imu, gps, pitot_static, magnetometer, each a
+    #: profile with a lever arm -- and the record block -- null_tests,
+    #: convergence, sensitivity_pairs -- both absent-canonical: the ideal
+    #: instruments at the CG and no extra flights are the defaults and are
+    #: omitted, so every committed spec-8 example keeps its digest.
+    instruments: "InstrumentsSpec" = dc_field(default_factory=InstrumentsSpec.defaulted)
+    record: "RecordSpec" = dc_field(default_factory=RecordSpec.defaulted)
+    #: W3 (still spec 8; the integrator bumps once): the rain rate in mm/h
+    #: under ``environment`` -- the fitted drop-size distribution, the
+    #: streaks and the reconciled extinction (core/scene/precipitation.py)
+    #: -- absent-canonical: unstated is omitted from the environment
+    #: section, so every committed spec-8 example keeps its digest.
+    precipitation_rate_mmh: Quantity = dc_field(default_factory=_default_precipitation_rate)
+    #: W2 (still spec 8; the integrator bumps once): one runway --
+    #: designator, threshold, heading, length, width, surface, markings --
+    #: absent-canonical: no runway is the default and is omitted, so
+    #: every committed spec-8 example keeps its digest.
+    runway: "RunwayBlockSpec" = dc_field(default_factory=RunwayBlockSpec.defaulted)
 
     #: Field order for both serialisation and the rendered table.
     FIELD_ORDER = (
@@ -254,7 +281,7 @@ class ScenarioSpec:
         carry the spec's own set()/plan() doctrine."""
         import re
 
-        match = re.fullmatch(r"(scene|taxonomy|atmosphere|datum|turbulence_model|wind_profile|loading|failures|icing|dis|wake)\.(\w+)", name)
+        match = re.fullmatch(r"(scene|taxonomy|atmosphere|datum|turbulence_model|wind_profile|loading|failures|icing|dis|wake|instruments|record|runway)\.(\w+)", name)
         if match is not None:
             block = getattr(self, match.group(1))
             return block, match.group(2)
@@ -372,6 +399,9 @@ class ScenarioSpec:
             out["prompt"] = self.prompt
         for section, name, q in self.quantities():
             out.setdefault(section, {})[name] = q.to_dict()
+        # W3: the rain rate rides under environment only when stated.
+        if self.precipitation_rate_mmh.to_dict() != _default_precipitation_rate().to_dict():
+            out["environment"]["precipitation_rate_mmh"] = self.precipitation_rate_mmh.to_dict()
         # Always present: the canonical form has exactly one spelling of
         # "no cameras" (the empty list), so the digest cannot fork on an
         # absent-vs-empty distinction.
@@ -422,6 +452,14 @@ class ScenarioSpec:
         # P7: the wake block, absent-canonical like the others.
         if not self.wake.is_default():
             out["wake"] = self.wake.to_dict()
+        # R2: the instruments and record blocks, absent-canonical like the others.
+        if not self.instruments.is_default():
+            out["instruments"] = self.instruments.to_dict()
+        if not self.record.is_default():
+            out["record"] = self.record.to_dict()
+        # W2: the runway block, absent-canonical like the others.
+        if not self.runway.is_default():
+            out["runway"] = self.runway.to_dict()
         if self.notes:
             out["notes"] = list(self.notes)
         return out
@@ -442,6 +480,10 @@ class ScenarioSpec:
                 raise ValueError(
                     f"spec is missing required field {section}.{name}"
                 ) from exc
+        # W3: the optional environment field (absent = no rain rate).
+        rate_data = (data.get("environment") or {}).get("precipitation_rate_mmh")
+        kwargs["precipitation_rate_mmh"] = (_default_precipitation_rate() if rate_data is None
+                                            else Quantity.from_dict(rate_data))
         cameras_data = data.get("cameras", [])
         if not isinstance(cameras_data, list):
             raise ValueError("spec 'cameras' must be a list of camera "
@@ -501,6 +543,15 @@ class ScenarioSpec:
         wake_data = data.get("wake")
         wake = (WakeSpec.defaulted() if wake_data is None
                 else WakeSpec.from_dict(wake_data))
+        instruments_data = data.get("instruments")
+        instruments = (InstrumentsSpec.defaulted() if instruments_data is None
+                       else InstrumentsSpec.from_dict(instruments_data))
+        record_data = data.get("record")
+        record = (RecordSpec.defaulted() if record_data is None
+                  else RecordSpec.from_dict(record_data))
+        runway_data = data.get("runway")
+        runway = (RunwayBlockSpec.defaulted() if runway_data is None
+                  else RunwayBlockSpec.from_dict(runway_data))
         return cls(
             name=data.get("name", "scenario"),
             prompt=data.get("prompt"),
@@ -520,6 +571,9 @@ class ScenarioSpec:
             icing=icing,
             dis=dis,
             wake=wake,
+            instruments=instruments,
+            record=record,
+            runway=runway,
             **kwargs,
         )
 
@@ -563,6 +617,12 @@ class ScenarioSpec:
         for section, name, q in self.quantities():
             rows.append((section, name.replace("_", " "), q.render(),
                          str(q.source), q.note()))
+        # W3: a stated rain rate renders with the environment rows.
+        if self.precipitation_rate_mmh.value is not None:
+            q = self.precipitation_rate_mmh
+            at = max(i for i, row in enumerate(rows) if row[0] == "environment") + 1
+            rows.insert(at, ("environment", "precipitation rate mmh", q.render(),
+                             str(q.source), q.note()))
         # Each camera renders as its own labeled block, per-field sources
         # exactly like every scalar row. No cameras = no block: the table
         # states defaults through default_cameras at the render flow, not
@@ -607,7 +667,10 @@ class ScenarioSpec:
                                   ("failures", self.failures),
                                   ("icing", self.icing),
                                   ("dis", self.dis),
-                                  ("wake", self.wake)):
+                                  ("wake", self.wake),
+                                  ("instruments", self.instruments),
+                                  ("record", self.record),
+                                  ("runway", self.runway)):
             if not block.is_default():
                 for name, q in block.quantities():
                     rows.append((block_name, name.replace("_", " "),

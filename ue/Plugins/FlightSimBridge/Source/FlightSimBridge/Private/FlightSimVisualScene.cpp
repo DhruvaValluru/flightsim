@@ -35,6 +35,14 @@ namespace
 	// translation unit, where same-named definitions collide.
 	constexpr double SceneCmPerMetre = 100.0;
 
+	// S4: the sun. Every Gate 6 clause was tuned on a sun of 8.0 with no
+	// unit anyone chose (light_units "unitless"); a sun in lux is recorded
+	// as light_units "physical" -- the word core/capture/radiometry.py
+	// PHYSICAL_LIGHT_UNITS reads back before its chain means anything.
+	constexpr double SceneEngineSunUnitless = 8.0;
+	const TCHAR* const ScenePhysicalLightUnits = TEXT("physical");
+	const TCHAR* const SceneUnitlessLightUnits = TEXT("unitless");
+
 	// Triangle budget for the Gate 6 offset instances: the raster is
 	// decimated to at most this many vertices per side. 257^2 verts is ~130k
 	// triangles per instance -- and Gate 6's measurements passed on exactly
@@ -161,7 +169,11 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 	Sun->SetActorRotation(Options.SunRotation);
 	UDirectionalLightComponent* SunLight =
 		Cast<UDirectionalLightComponent>(Sun->GetLightComponent());
-	SunLight->SetIntensity(8.0f);
+	// S4: the sun in lux when the card (or -sun-lux=) states one; else the
+	// unitless 8.0 of every Gate 6 measurement, byte-identical.
+	const bool bPhysicalSun = Options.SunLux > 0.0;
+	const double SunIntensity = bPhysicalSun ? Options.SunLux : SceneEngineSunUnitless;
+	SunLight->SetIntensity(static_cast<float>(SunIntensity));
 	SunLight->SetAtmosphereSunLight(true);
 	SunLight->SetCastShadows(Options.bDynamicShadows);
 	// The procedural terrain is a Movable non-Nanite mesh, so the cascade
@@ -178,6 +190,29 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 		SunRecord->SetNumberField(TEXT("engine_sun_yaw_deg"), Options.SunRotation.Yaw);
 		SunRecord->SetStringField(TEXT("component"), TEXT("ADirectionalLight (existing sun)"));
 		SunRecord->SetBoolField(TEXT("cast_shadows"), Options.bDynamicShadows);
+		// S4: what the light was set to, and in which unit.
+		SunRecord->SetNumberField(TEXT("intensity"), SunIntensity);
+		SunRecord->SetStringField(TEXT("light_units"),
+		                          bPhysicalSun ? ScenePhysicalLightUnits : SceneUnitlessLightUnits);
+		if (bPhysicalSun)
+		{
+			SunRecord->SetNumberField(TEXT("lux"), Options.SunLux);
+			SunRecord->SetStringField(TEXT("lux_source"), Options.SunLuxSource);
+			SunRecord->SetStringField(TEXT("set_by"),
+				TEXT("UDirectionalLightComponent::SetIntensity(lux): a directional light's intensity is lux"));
+			SunRecord->SetStringField(TEXT("old_exposure_bias_scale"),
+				TEXT("-exposure-bias 9.5 / 10.5 / 11.0 were tuned on the unitless 8.0 sun: the OLD scale, ")
+				TEXT("re-pinned on the box with Gate 6's four exposure clauses"));
+			SunRecord->SetStringField(TEXT("not_claimed"),
+				TEXT("the illuminance at the surface after the sky atmosphere's transmittance (applied on ")
+				TEXT("top of the stated lux by an atmosphere sun light): the calibration frame measures the ")
+				TEXT("chain with it off"));
+		}
+		else
+		{
+			SunRecord->SetStringField(TEXT("note"),
+				TEXT("the unitless 8.0 sun every Gate 6 clause was tuned on; no luminance chain describes it"));
+		}
 		LookApplied->SetObjectField(TEXT("sun"), SunRecord);
 	}
 

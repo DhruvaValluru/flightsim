@@ -218,6 +218,31 @@ def _as_version_5(run_dir):
     bind_verification(run_dir)      # the fixture's verdict is for the manifest it fabricates
 
 
+def _assert_shard_equal_but_export_applied(old: Path, new: Path, run_dir: Path) -> None:
+    """Two WebDataset shards member for member: the same names in the same
+    order, every non-JSON member byte-identical, every JSON sidecar equal
+    once the new one's ``export.applied`` is removed -- and that key equal
+    to the run manifest's applied-variable records (name, value, unit,
+    source), read here with json."""
+    manifest = json.loads((run_dir / "capture_manifest.json").read_text(encoding="utf-8"))
+    records = (manifest.get("applied_variables") or {}).get("applied_variables") or []
+    expected = {r["name"]: (r["value"], r["unit"], r["source"]) for r in records}
+    with tarfile.open(old) as a, tarfile.open(new) as b:
+        old_members, new_members = a.getmembers(), b.getmembers()
+        assert [m.name for m in old_members] == [m.name for m in new_members]
+        for m_old, m_new in zip(old_members, new_members):
+            before = a.extractfile(m_old).read()
+            after = b.extractfile(m_new).read()
+            if not m_old.name.endswith(".json"):
+                assert before == after, m_old.name
+                continue
+            sidecar = json.loads(after)
+            applied = sidecar["export"].pop("applied")
+            assert json.dumps(sidecar, sort_keys=True).encode("utf-8") == before, m_old.name
+            assert {k: (v["value"], v["unit"], v["source"]) for k, v in applied.items()} \
+                == expected, m_old.name
+
+
 def test_phase10_outputs_are_byte_identical_to_the_frozen_writer(batch_dir, tmp_path):
     """COCO, KITTI and labels-only WebDataset for a VERSION-5 run (no
     objects[], no taxonomy): the frozen pre-package-E module and the
@@ -247,6 +272,14 @@ def test_phase10_outputs_are_byte_identical_to_the_frozen_writer(batch_dir, tmp_
         for rel in old_files:
             if rel.name in ("dataset.json", "DATASET_CARD.md"):
                 continue                     # the card GAINS keys; that is the point
+            if rel.suffix == ".tar":
+                # R3: each sample's sidecar GAINS export.applied (the run's
+                # applied variables); every other byte of every member is
+                # the frozen writer's, and the one key is the manifest's own.
+                _assert_shard_equal_but_export_applied(
+                    tmp_path / "old" / fmt / rel, tmp_path / "new" / fmt / rel, source)
+                compared += 1
+                continue
             assert (tmp_path / "old" / fmt / rel).read_bytes() == \
                 (tmp_path / "new" / fmt / rel).read_bytes(), f"{fmt}: {rel}"
             compared += 1
@@ -941,3 +974,27 @@ def test_the_verify_command_binds_its_verdict_to_the_manifest(batch_dir, tmp_pat
     with pytest.raises(ExportError) as info:
         load_run(run)
     assert info.value.constraint == "export.verification_stale"
+
+
+def test_the_pass_files_ride_beside_the_label_files_each_gated_by_its_checks():
+    """S2: the derived pass files (and the engine's normal image) join the
+    label files a format ships, each behind the verifier checks that grade
+    it; the Phase 10 label files, their checks and the mask-shipping
+    formats are unchanged (the round trips themselves are
+    tests/test_passes_export.py's, through independent readers)."""
+    from core.dataset import export as module
+
+    suffixes = [s for s, _ in module.LABEL_FILES]
+    assert suffixes[:3] == ["_mask.png", "_class.png", "_depth.f32"]
+    assert module.LABEL_FILE_CHECKS["_mask.png"] == module.MASK_CHECKS
+    assert module.LABEL_FILE_CHECKS["_depth.f32"] == module.DEPTH_CHECKS
+    assert module.MASK_SHIPPING_FORMATS == ("coco", "webdataset")
+    assert module.SHIPPED_LABEL_FILES["coco"] == ("_mask.png",)
+    for suffix, member in module.PASS_FILES:
+        assert suffix in suffixes and member == suffix[1:]
+        assert module.LABEL_FILE_CHECKS[suffix]
+        assert suffix in module.SHIPPED_LABEL_FILES["kitti"]
+        assert suffix in module.SHIPPED_LABEL_FILES["webdataset"]
+    assert module.LABEL_FILE_CHECKS["_flow_fw.f32"] == ("flow_vs_keypoints", "flow_static_null")
+    assert module.LABEL_FILE_CHECKS["_points_id.u8"] == ("points_vs_depth",)
+    assert module.LABEL_FILE_CHECKS["_disparity.f32"] == ("disparity_vs_right_depth",)

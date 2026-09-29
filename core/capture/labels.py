@@ -658,6 +658,11 @@ def object_label_record(obj, record: Dict, state: Optional[Dict],
         basis["bbox_2d_hull"] = "a scene object has no airframe hull"
         basis["atmospheric_transmittance"] = ("not computed for a scene "
                                               "object (no single range)")
+        # W4: an aggregate (building:all, vegetation:all) says what it
+        # gathers and where its mask comes from; absent on every other object.
+        aggregate = AGGREGATE_RECORDS.get(str(obj.id))
+        if aggregate is not None:
+            entry["aggregate"] = dict(aggregate)
     for key in ENGINE_LABEL_KEYS:
         entry[key] = [] if key == "occluded_by" else None
     basis["engine"] = NO_BUNDLE_BASIS
@@ -950,6 +955,64 @@ def measure_object(mask, depth, int_id: int, alone=None) -> Dict:
     return out
 
 
+# -- S2: the amodal box and mask, from the alone pass ------------------------------
+#
+# An aircraft object's AMODAL extent is its silhouette with nothing in
+# front of it: exactly the engine's alone pass (the object drawn by
+# itself from the frame's pose, AA-free). Per aircraft object of a frame
+# whose camera asks for ``amodal`` (cameras[i].passes):
+#
+#   amodal_bbox_2d   the TIGHT box of the alone-pass pixels, [u0, v0, u1,
+#                    v1] in the bbox_2d_tight convention (far edges one
+#                    past the last pixel); null when the alone pass holds
+#                    none of the object (wholly out of frame)
+#   amodal_mask      {file, int_id, pixels, encoding}: the alone pass is
+#                    the mask, its pixels equal to int_id
+#   amodal_ratio     amodal pixels / visible pixels (= 1 / visible_fraction);
+#                    null when nothing of it is visible
+#   basis.amodal     "alone pass", the files, and what is not claimed
+#
+# A frame asking for amodal whose bundle has no alone pass for an
+# aircraft object records the refusal ``annotation.amodal`` by name in
+# that object's basis (the three keys null); nothing is inferred from the
+# visible mask. Absent-canonical: a frame that does not ask carries none
+# of the keys. Amodal masks are for aircraft only (the terrain has no
+# alone pass); the verifier's amodal_contains_visible grades them.
+
+AMODAL_BASIS = "alone pass"
+
+
+def amodal_labels(alone, mask, int_id: int, alone_file: Optional[str]) -> Dict:
+    """The amodal keys of one aircraft object from its alone pass;
+    refuses ``annotation.amodal`` (:class:`core.capture.passes.PassError`)
+    when there is no alone pass to take them from."""
+    import numpy as np
+
+    from .passes import PassError
+
+    if alone is None or not alone_file:
+        raise PassError("annotation.amodal",
+                        f"object {int_id} has no alone pass in the bundle; its amodal box "
+                        f"and mask are the alone pass and are not inferred from the "
+                        f"visible pixels")
+    footprint = alone == int_id
+    pixels_alone = int(np.count_nonzero(footprint))
+    pixels = int(np.count_nonzero(mask == int_id))
+    box = None
+    if pixels_alone:
+        ys, xs = np.nonzero(footprint)
+        box = [float(xs.min()), float(ys.min()), float(xs.max()) + 1.0, float(ys.max()) + 1.0]
+    return {
+        "amodal_bbox_2d": box,
+        "amodal_mask": {"file": str(alone_file), "int_id": int(int_id), "pixels": pixels_alone,
+                        "encoding": "the alone pass: pixels equal to int_id"},
+        "amodal_ratio": (pixels_alone / pixels) if pixels else None,
+        "basis": {"basis": AMODAL_BASIS, "files": {"alone": str(alone_file)},
+                  "visible_pixels": pixels, "amodal_pixels": pixels_alone,
+                  "not_claimed": "amodal extents of non-aircraft objects (no alone pass)"},
+    }
+
+
 def _bundle_records(camera_dir: Path) -> Dict[str, Dict]:
     """``{frame name: render.json record}`` for the records that declare
     label outputs, or {} when this camera has no render.json."""
@@ -1026,6 +1089,11 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
     bundles: Dict[str, Dict[str, Dict]] = {}
     pass_files_per_frame: List[int] = []
     pass_words_seen: set = set()
+    # S2: the aircraft objects an amodal extent is taken for, and what was taken.
+    aircraft_ids = {int(o["int_id"]) for o in objects
+                    if isinstance(o, dict) and o.get("class") == "aircraft"}
+    amodal_ratios: List[Optional[float]] = []
+    amodal_refused = 0
     for frame in manifest.get("frames", []):
         summary["frames"] += 1
         camera = str(frame["camera_id"])
@@ -1080,6 +1148,23 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
                            "and the depth under the mask; the verifier "
                            "re-derives these from the same files"),
             }
+            # S2: the amodal box and mask, when this frame's camera asks.
+            wants_amodal = "amodal" in ((frame.get("passes") or {}).get("requested") or [])
+            if wants_amodal and int_id in aircraft_ids:
+                from .passes import PassError
+
+                try:
+                    amodal = amodal_labels(alone, mask, int_id, alone_by_id.get(int_id))
+                except PassError as exc:
+                    entry["amodal_bbox_2d"] = entry["amodal_mask"] = entry["amodal_ratio"] = None
+                    basis["amodal"] = {"refused": exc.constraint, "reason": exc.message}
+                    amodal_refused += 1
+                else:
+                    entry["amodal_bbox_2d"] = amodal["amodal_bbox_2d"]
+                    entry["amodal_mask"] = amodal["amodal_mask"]
+                    entry["amodal_ratio"] = amodal["amodal_ratio"]
+                    basis["amodal"] = amodal["basis"]
+                    amodal_ratios.append(amodal["amodal_ratio"])
             summary["objects"] += 1
         # I6: which ground-truth passes this frame's record declares, by
         # name (the files are not opened here; the verifier reads them).
@@ -1095,6 +1180,18 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
                                [w for w in PASS_RECORD_KEYS if w in pass_words_seen])
         _attach_record(manifest, record)
         summary["passes"] = sorted(pass_words_seen)
+    # S2: the amodal record, and the derived passes (flow, disparity,
+    # points) with each camera's passes.json -- only for frames whose
+    # camera asks (the manifest frame's ``passes`` block).
+    if amodal_ratios or amodal_refused:
+        from .passes import amodal_record
+
+        _attach_record(manifest, amodal_record(amodal_ratios, amodal_refused))
+        summary["amodal"] = {"objects": len(amodal_ratios), "refused": amodal_refused}
+    if any(isinstance(f.get("passes"), dict) for f in manifest.get("frames", [])):
+        from .passes import attach_passes
+
+        summary["derived_passes"] = attach_passes(run_dir, manifest=manifest, write=False)
     if write and summary["attached"]:
         write_capture_manifest(manifest, run_dir)
         write_frame_sidecars(manifest, run_dir)

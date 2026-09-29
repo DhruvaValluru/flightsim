@@ -169,6 +169,16 @@ def exposure_violations(camera: CameraSpec,
             load_bands(str(band))
         except RadiometryError as exc:
             out.append(Violation(exc.constraint, f"{who}: {exc.message}"))
+    # S3: a stated IR request must name LWIR or MWIR and a thermal table
+    # whose rows and transmittance table load (sensing.ir_table /
+    # sensing.ir_transmittance by name).
+    ir = getattr(getattr(camera, "ir", None), "value", None)
+    if ir is not None:
+        from .thermal import ir_request_problem
+
+        problem = ir_request_problem(ir)
+        if problem is not None:
+            out.append(Violation(problem.constraint, f"{who}: {problem.message}"))
     return out
 
 
@@ -378,6 +388,13 @@ def validate_cameras(spec) -> List[Violation]:
         out.extend(exposure_violations(camera, index))
         out.extend(schedule_violations(camera, index))
         out.extend(moves_violations(camera, index))
+        # S2: the stereo rig (sensing.stereo) and the passes (sensing.pass).
+        from .passes import pass_violations
+        from .stereo import stereo_violations
+
+        out.extend(stereo_violations(camera, index,
+                                     [str(c.camera_id.value) for c in spec.cameras]))
+        out.extend(pass_violations(camera, index))
         camera_id = str(camera.camera_id.value)
         if camera_id in seen:
             out.append(Violation(

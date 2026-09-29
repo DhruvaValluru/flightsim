@@ -49,6 +49,12 @@ SUBSYSTEMS = (
     "gps",
     "pitot_static",
     "magnetometer",
+    # R2: the instrument null test's own stream -- the synthetic white
+    # stream the Allan self-report's estimator check draws, at the run's
+    # own rate and length. It never touches a measured channel, so the
+    # self-check cannot move a measurement (and never reuses the declared,
+    # unused ``sensor_noise`` stream: a stream is named for its consumer).
+    "null_test",
 )
 
 DERIVATION = (

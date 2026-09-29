@@ -70,14 +70,36 @@ DIS = ("dis.site", "dis.application", "dis.entity", "dis.force_id", "dis.marking
 #: effect channels are the columns the scene's consumers read) and the
 #: four sensing observers (no section.leaf spec field: cameras[i].<field>
 #: is a list element; recorded through the manifest's sensing block).
-SCENE = ("scene.terrain_source", "scene.terrain", "scene.sun_lux")
-SENSING = ("sensing.radiometry", "sensing.bands", "sensing.optics", "sensing.motion_blur")
+SCENE = ("scene.terrain_source", "scene.terrain", "scene.sun_lux", "scene.buildings")
+#: W2: the runway block, one entry per field; none writes a property, the
+#: effect channel is agl_m (the flatten pad's heights), nulls the absent
+#: block's (no designator = no runway).
+RUNWAY = ("runway.designator", "runway.threshold_lat_deg", "runway.threshold_lon_deg",
+          "runway.heading_deg", "runway.length_m", "runway.width_m", "runway.surface",
+          "runway.markings")
+SENSING = ("sensing.radiometry", "sensing.bands", "sensing.optics", "sensing.motion_blur",
+           "sensing.ir", "sensing.ir_transmittance")
+#: S2: the four derived passes, observers (cameras[i].passes / .stereo are
+#: list elements; recorded through the manifest's applied_variables).
+PASSES = ("passes.flow", "passes.disparity", "passes.points", "passes.amodal")
 #: P7: the wake block, one entry per field (the generator and decay words
 #: included); every field drives the four gust / roll-property writes,
 #: read back exact; nulls are the block's defaults (no generator = no wake).
 WAKE = ("wake.generator", "wake.generator_speed_kt", "wake.lateral_offset_m",
         "wake.vertical_offset_m", "wake.separation_s", "wake.age_s", "wake.model",
         "wake.eps_star", "wake.n_star")
+#: R2: the instruments block, one entry per instrument (each a {profile,
+#: lever_arm_m} mapping, null = the ideal at the CG; no JSBSim write, the
+#: effect channels the meas_* recorder columns the instrument owns) and the
+#: record block, one entry per field (no write, no recorded column moved).
+INSTRUMENTS = ("instruments.imu", "instruments.gps", "instruments.pitot_static",
+               "instruments.magnetometer")
+RECORD = ("record.null_tests", "record.convergence", "record.sensitivity_pairs")
+#: W3: the night sky (a scene field) and the rain rate (an optional
+#: environment field outside ScenarioSpec.FIELD_ORDER), each a bounded
+#: invariance on recorded columns, and the world record (an observer: no
+#: spec field; its null tests are the render-side predictions).
+WORLD_LOOK = ("scene.night", "environment.precipitation_rate_mmh", "scene.world")
 
 
 def _entry(**overrides):
@@ -94,7 +116,27 @@ def test_every_batch_1_variable_and_every_physics_variable_is_registered():
                                      | set(INJECTED) | set(P6) | set(ENVIRONMENT)
                                      | set(LOADING) | set(FAILURES) | set(FAILURE_KINDS)
                                      | set(ICING) | set(ICING_FACTORS) | set(DIS) | set(WAKE)
-                                     | set(SCENE) | set(SENSING))
+                                     | set(SCENE) | set(SENSING) | set(PASSES) | set(RUNWAY)
+                                     | set(INSTRUMENTS) | set(RECORD) | set(WORLD_LOOK))
+    for name in INSTRUMENTS + RECORD:
+        entry = REGISTRY.get(name)
+        assert entry.spec_path == name and entry.null_value is not NO_NULL
+        assert not entry.jsbsim_writes and entry.readback_tolerance is None
+        assert entry.effect_channels and entry.null_basis
+    assert [c.name for c in REGISTRY.get("instruments.imu").effect_channels] == [
+        "meas_n_z", "meas_p_dps", "meas_q_dps", "meas_r_dps"]
+    assert REGISTRY.get("instruments.gps").null_value is None
+    assert REGISTRY.get("record.null_tests").null_value is False
+    assert REGISTRY.get("record.convergence").null_value is None
+    assert REGISTRY.get("record.sensitivity_pairs").null_value is False
+    for name in RUNWAY:
+        entry = REGISTRY.get(name)
+        assert entry.spec_path == name and entry.null_value is not NO_NULL
+        assert not entry.jsbsim_writes and entry.readback_tolerance is None
+        assert [c.name for c in entry.effect_channels] == ["agl_m"] and entry.null_basis
+    assert REGISTRY.get("runway.designator").null_value is None
+    assert REGISTRY.get("runway.surface").null_value == "asphalt"
+    assert REGISTRY.get("scene.buildings").null_value is None
     for name in SCENE:
         entry = REGISTRY.get(name)
         assert entry.spec_path == name and entry.null_value is not NO_NULL
@@ -102,7 +144,7 @@ def test_every_batch_1_variable_and_every_physics_variable_is_registered():
     assert REGISTRY.get("scene.terrain_source").null_value == "auto"
     assert REGISTRY.get("scene.terrain").null_value is None
     assert REGISTRY.get("scene.sun_lux").null_value is None and REGISTRY.get("scene.sun_lux").unit == "lx"
-    for name in SENSING:
+    for name in SENSING + PASSES:
         entry = REGISTRY.get(name)
         assert entry.spec_path is None and entry.null_value is NO_NULL and entry.null_basis
     for name in WAKE:
@@ -185,7 +227,8 @@ def test_every_batch_1_variable_and_every_physics_variable_is_registered():
         assert entry.effect_channels and entry.null_basis
     assert REGISTRY.get("loading.payload_kg").readback_tolerance.value == 0.1
     assert REGISTRY.sections() == ("atmosphere", "datum", "dis", "environment", "failures", "icing",
-                                   "loading", "scene", "turbulence_model", "wake", "wind_profile")
+                                   "instruments", "loading", "record", "runway", "scene",
+                                   "turbulence_model", "wake", "wind_profile")
     # Every spec field of the claimed blocks, and every environment quantity
     # of the spec, is claimed: the validator's record.unregistered check is
     # what a stated block meets first.
@@ -193,6 +236,8 @@ def test_every_batch_1_variable_and_every_physics_variable_is_registered():
         AtmosphereSpec, DatumSpec, DisSpec, FailuresSpec, IcingSpec, LoadingSpec, TurbulenceModelSpec,
         SceneSpec, WakeSpec, WindProfileSpec,
     )
+    from core.scenario.blocks import RunwayBlockSpec
+    from core.scenario.blocks import InstrumentsSpec, RecordSpec
     from core.scenario.spec import ScenarioSpec
     assert set(REGISTRY.spec_fields()) == (
         {f"atmosphere.{f}" for f in AtmosphereSpec.FIELD_ORDER}
@@ -205,7 +250,14 @@ def test_every_batch_1_variable_and_every_physics_variable_is_registered():
         | {f"dis.{f}" for f in DisSpec.FIELD_ORDER}
         | {f"wake.{f}" for f in WakeSpec.FIELD_ORDER}
         | {f"scene.{f}" for f in SceneSpec.FIELD_ORDER}
-        | {f"{sec}.{n}" for sec, n in ScenarioSpec.FIELD_ORDER if sec == "environment"})
+        | {f"runway.{f}" for f in RunwayBlockSpec.FIELD_ORDER}
+        | {f"instruments.{f}" for f in InstrumentsSpec.FIELD_ORDER}
+        | {f"record.{f}" for f in RecordSpec.FIELD_ORDER}
+        | {f"{sec}.{n}" for sec, n in ScenarioSpec.FIELD_ORDER if sec == "environment"}
+        | {"environment.precipitation_rate_mmh"})
+    # W3: scene.world is an observer (no spec field, no spec null).
+    assert REGISTRY.get("scene.world").spec_path is None
+    assert REGISTRY.get("scene.world").null_value is NO_NULL
 
 
 def test_the_physics_readback_tolerances_are_the_measured_ones():

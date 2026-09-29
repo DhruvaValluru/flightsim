@@ -29,6 +29,15 @@ it (the ``gust_rotation`` injection), recording ``property`` or ``absent``.
 So the stack does all three, does them differently, and the null tests check
 that each one actually arrived.
 
+**The observer hook (R2).** An observer registered with :meth:`add_observer`
+is called ``observer(fdm)`` on EVERY FDM step -- after this step's writes
+and the step itself, BEFORE the recorder samples -- by :meth:`run_for`
+and, through :meth:`observe`, by the runner's explicit loop, so both
+loops see the same count of FDM-rate observations (measured equal in
+tests/test_instruments.py). The hook reads the FDM and writes nothing to
+it: the instrument models (core/telemetry/instruments.py) are the first
+observer; the recorder then samples their LATEST value.
+
 NOT claimed: the physics of any provider (each states its own); that a gust
 written into a stock airframe rolls it (the roll term needs the derived
 airframe, and the record says ``absent``); the engine side.
@@ -136,8 +145,25 @@ class EnvironmentStack:
         self._gust_readback = _Readback(GUST_PROPERTIES + (P_EQUIVALENT_PROPERTY,))
         self._p_equivalent: Optional[bool] = None
         self._span_m: Optional[float] = None
+        #: R2: the per-step observers (``observer(fdm)`` after each step,
+        #: before the recorder samples), in registration order.
+        self.observers: List[Callable[[Any], Any]] = []
         for provider in providers or []:
             self.add(provider)
+
+    def add_observer(self, observer: Callable[[Any], Any]) -> "EnvironmentStack":
+        """Register a per-step observer: called with the FDM after every
+        step and before the recorder samples, in both step loops."""
+        if not callable(observer):
+            raise TypeError(f"an observer is callable, not {observer!r}")
+        self.observers.append(observer)
+        return self
+
+    def observe(self, fdm) -> None:
+        """Run every observer once (the runner's explicit loop calls this
+        where :meth:`run_for` does, after the step and before the sample)."""
+        for observer in self.observers:
+            observer(fdm)
 
     def add(self, provider: Provider) -> "EnvironmentStack":
         if isinstance(provider, GustProvider):
@@ -352,11 +378,13 @@ class EnvironmentStack:
         return wind
 
     def run_for(self, fdm, seconds: float, recorder=None) -> int:
-        """Step the FDM with the environment applied every step."""
+        """Step the FDM with the environment applied every step: the
+        writes, the step, the observers (R2), then the recorder's sample."""
         steps = int(round(seconds * fdm.rate_hz))
         for _ in range(steps):
             self.apply(fdm)
             fdm.step()
+            self.observe(fdm)
             if recorder is not None:
                 recorder.sample()
         return steps

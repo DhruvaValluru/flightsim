@@ -293,12 +293,24 @@ class SceneSpec(ProvenancedBlock):
     #: ``sensing.sun_lux`` outside (0, 133 100] lx (core/scenario/solar.py).
     sun_lux: Quantity
 
-    FIELD_ORDER = ("terrain_source", "terrain", "sun_lux")
+    #: W2: the cached footprint set's key (assets/buildings/<key>.jsonl
+    #: + <key>.provenance.json), or None = no buildings. Nothing is
+    #: fetched; core/scene/buildings.py refuses buildings.uncached,
+    #: .licence, .unverified and .ids where the capture loads it.
+    buildings: Quantity
+
+    #: W3: the night sky, a mapping {moon: on|off, stars: auto|catalogue|
+    #: procedural|off, utc: optional ISO moment}, or None = no night look.
+    #: core/scene/night.py computes it (look.moon, look.stars,
+    #: night.sun_units refused by name there and in the validator).
+    night: Quantity
+
+    FIELD_ORDER = ("terrain_source", "terrain", "sun_lux", "buildings", "night")
     #: The fields a scene block may LEAVE OUT: each is filled from the
     #: default when absent and omitted when at it, so a block written
     #: before the field existed keeps its canonical form and digest
     #: (examples/cameras_mountain_refusal.yaml states a scene block).
-    OPTIONAL_FIELDS = ("sun_lux",)
+    OPTIONAL_FIELDS = ("sun_lux", "buildings", "night")
     BLOCK = "scene"
 
     @classmethod
@@ -315,6 +327,11 @@ class SceneSpec(ProvenancedBlock):
                 None, "lx", frm="no sun stated: the engine's own sun stands; the "
                                 "capture manifest carries the clear-sky model's "
                                 "value (source model)"),
+            buildings=Quantity.default(
+                None, frm="no footprint set stated: no buildings composed, no "
+                          "building:all object"),
+            night=Quantity.default(
+                None, frm="no night sky stated: no moon light, no starfield"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -876,6 +893,213 @@ class WakeSpec(ProvenancedBlock):
                 None, "1", frm="unstated: no sarpkaya decay", std=WAKE_STANDARDS["eps_star"]),
             n_star=Quantity.default(
                 None, "1", frm="unstated: no stratification bound", std=WAKE_STANDARDS["n_star"]),
+        )
+
+
+#: R2: the instruments block's vocabulary. Each instrument names a profile
+#: (assets/instrument_profiles/<name>.json, the batch-1 shape) and a lever
+#: arm in metres in body axes (x forward, y right, z down) from the CG to
+#: the sensor. The IMU's arm enters the specific force through the
+#: rotational terms omega x (omega x r) + omega_dot x r; the GPS antenna's
+#: arm enters the position; the pitot-static and magnetometer arms are
+#: carried and recorded (no lever-arm physics is modelled for them, said
+#: in the record). An unstated instrument is the ideal profile at the CG:
+#: the recorded channel IS the measurement.
+INSTRUMENT_NAMES = ("imu", "gps", "pitot_static", "magnetometer")
+INSTRUMENT_STANDARDS: Dict[str, str] = {
+    "imu": "IEEE Std 952-2020 Annex C Allan-variance terms (N, B, K, b0) at the FDM rate; "
+           "specific force f = g0 (N_x, N_y, -N_z) + omega_dot x r + omega x (omega x r) in "
+           "body axes, FGAuxiliary's vPilotAccel form (JSBSim 1.2.4, read here) [standard "
+           "unverified here]",
+    "gps": "GPS SPS Performance Standard 5th ed. (2020) receiver-class white sigmas; Groves "
+           "(2013) ch. 14 antenna lever arm; fixes on the receiver's clock, held between "
+           "[unverified here]",
+    "pitot_static": "Gracey NASA RP-1046; 14 CFR 25.1323: first-order lags and a position-error "
+                    "table (default zero, stated) [unverified here]",
+    "magnetometer": "IGRF-13 degree-1 coefficients g10 -29404.8, g11 -1450.9, h11 4652.5 nT at "
+                    "2020.0 (verified here from the fetched IGRF13.shc): a tilted dipole, hard "
+                    "iron per Caruso 2000; not IGRF/WMM",
+}
+
+
+@dataclass
+class InstrumentsSpec(ProvenancedBlock):
+    """``instruments`` (R2): the instrument models run at the FDM rate,
+    one field per instrument -- ``imu``, ``gps``, ``pitot_static``,
+    ``magnetometer`` -- each a mapping ``{profile: <name>, lever_arm_m:
+    [x, y, z]}`` or null (the ideal profile at the CG: the recorded
+    channel is the measurement). Absent-canonical: every field null is
+    the default and is omitted, so every committed spec-8 example keeps
+    its digest. The validator refuses ``instrument.profile`` (a profile
+    not on file, or a field that is not such a mapping),
+    ``instrument.lever_arm`` (not three finite metres, or longer than
+    LEVER_ARM_MAX_M) and ``instrument.rate`` (a GPS update rate above the
+    FDM rate); the registry claims every field (``record.unregistered``
+    otherwise). The models, the meas_* columns, instruments.npz and the
+    records are core/telemetry/instruments.py's."""
+
+    imu: Quantity
+    gps: Quantity
+    pitot_static: Quantity
+    magnetometer: Quantity
+
+    FIELD_ORDER = INSTRUMENT_NAMES
+    BLOCK = "instruments"
+
+    @classmethod
+    def defaulted(cls) -> "InstrumentsSpec":
+        return cls(**{name: Quantity.default(
+            None, frm=f"unstated: the ideal {name} at the CG (the recorded channel is the "
+                      f"measurement)", std=INSTRUMENT_STANDARDS[name])
+            for name in INSTRUMENT_NAMES})
+
+
+#: R2: the record block's vocabulary -- the spec's own way to ask for the
+#: null pairs, the three-rate convergence study and the sensitivity pairs
+#: flightsim/capture.py opts into with --null-tests / --uncertainty.
+RECORD_STANDARDS: Dict[str, str] = {
+    "null_tests": "core/record_null.py: the identical run with each stated registered variable "
+                  "at its null value, the effect per channel against the V9 floors",
+    "convergence": "Roache 1994 (GCI); ASME V&V 20-2009 solution verification: three rates "
+                   "dt, dt/r, dt/r^2 with turbulence off, the observed order p per SRQ "
+                   "[unverified here]",
+    "sensitivity_pairs": "GUM JCGM 100:2008 eq. 10: u_input by central pairs x +- u_x per "
+                         "stated variable (core/uncertainty.py) [unverified here]",
+}
+
+
+@dataclass
+class RecordSpec(ProvenancedBlock):
+    """``record`` (R2): what the run measures about itself beyond the
+    flight -- ``null_tests`` (bool: fly the null pair of every stated
+    registered variable), ``convergence`` (``{rates: [r1, r2, r3]}`` Hz
+    for the three-rate study whose observed order feeds u_num, or null),
+    ``sensitivity_pairs`` (bool: the central +-u_x pairs for u_input).
+    Absent-canonical: false / null / false is the default and is omitted,
+    so every committed spec-8 example keeps its digest. The validator
+    refuses ``record.convergence`` (rates the FDM cannot run: not three
+    positive numbers, not strictly ascending, not a constant refinement
+    ratio, above RATE_MAX_HZ) and ``record.uncertainty_basis``
+    (sensitivity pairs asked for a stated inferred variable whose registry
+    entry declares no bin width, so no u_x rule exists); the runner
+    refuses ``record.readback`` when a registered write reads back outside
+    its tolerance. The CLI options stay; the block is read by the capture
+    beside them (either asks, both are honoured)."""
+
+    null_tests: Quantity
+    convergence: Quantity
+    sensitivity_pairs: Quantity
+
+    FIELD_ORDER = ("null_tests", "convergence", "sensitivity_pairs")
+    BLOCK = "record"
+
+    @classmethod
+    def defaulted(cls) -> "RecordSpec":
+        return cls(
+            null_tests=Quantity.default(
+                False, frm="unstated: no null pair flown (the --null-tests option still asks)",
+                std=RECORD_STANDARDS["null_tests"]),
+            convergence=Quantity.default(
+                None, frm="unstated: no three-rate study; u_num assumes order 1 with Fs = 3",
+                std=RECORD_STANDARDS["convergence"]),
+            sensitivity_pairs=Quantity.default(
+                False, frm="unstated: no central pair flown (the --uncertainty option still asks)",
+                std=RECORD_STANDARDS["sensitivity_pairs"]),
+        )
+
+    def asks(self, null_tests: bool = False, uncertainty: bool = False) -> Dict[str, Any]:
+        """What the capture runs beyond the recorded flight: the block's
+        asks OR-ed with the CLI's (``--null-tests`` / ``--uncertainty``),
+        and the three-rate study's first rate when ``convergence`` states
+        one (its observed order then feeds u_num). Either side asking is
+        honoured; the answer says which asked."""
+        rates = None
+        value = self.convergence.value
+        if isinstance(value, dict) and isinstance(value.get("rates"), list) and value["rates"]:
+            rates = [float(r) for r in value["rates"]]
+        return {
+            "null_tests": bool(self.null_tests.value) or bool(null_tests),
+            "uncertainty": bool(self.sensitivity_pairs.value) or bool(uncertainty) or rates is not None,
+            "convergence_rates_hz": rates,
+            "asked_by": {
+                "null_tests": ("spec" if self.null_tests.value else "") + ("+cli" if null_tests else ""),
+                "uncertainty": ("spec" if self.sensitivity_pairs.value else "")
+                               + ("+convergence" if rates is not None else "")
+                               + ("+cli" if uncertainty else ""),
+            },
+        }
+
+
+#: W2: what each ``runway`` field rests on, in the spec's ``std`` field.
+RUNWAY_STANDARDS: Dict[str, str] = {
+    "designator": "ICAO Annex 14 Vol I 5.2.2.4: the whole number nearest one tenth of the "
+                  "heading, NN or NN[LRC] (checked against the stated heading; no magnetic "
+                  "variation is modelled) [unverified here]",
+    "threshold": "the runway threshold, WGS 84 latitude and longitude (the centreline at "
+                 "the threshold)",
+    "heading_deg": "the runway's true heading from the threshold along the centreline, "
+                   "[0, 360) degrees; the grid heading is taken as this (no convergence)",
+    "dimensions": "length 300..5500 m and width 18..80 m: the range the marking raster "
+                  "and the flatten pad draw (a stated bound, not an Annex 14 table)",
+    "surface": "a word of core/scene/runway.py SURFACES; scene dressing and a record, no "
+               "friction model",
+    "markings": "ICAO Annex 14 Vol I 5.2 elements (threshold, designator, centreline, "
+                "aiming point, touchdown zone): standard = all five, none, or a list "
+                "[dimensions unverified here]",
+}
+
+
+@dataclass
+class RunwayBlockSpec(ProvenancedBlock):
+    """``runway`` (W2): one runway in the scene -- ``designator``, the
+    threshold's ``threshold_lat_deg`` / ``threshold_lon_deg``,
+    ``heading_deg``, ``length_m``, ``width_m``, ``surface`` and
+    ``markings``. Absent-canonical: no designator (no runway) is the
+    default and is omitted, so every committed spec-8 example keeps its
+    digest. The validator refuses ``runway.geometry`` (a designator that
+    is not NN[LRC] or does not name the heading, a threshold that is not a
+    coordinate pair, a length, width or heading out of range),
+    ``runway.taxonomy`` (a surface word outside the taxonomy) and
+    ``runway.markings`` (a marking set the raster cannot draw) through
+    core/scene/runway.py's one ``problems`` list; ``runway.terrain_mismatch``
+    is the pad bake's, where the runway meets the bake. The markings
+    raster, the light positions, the flatten pad and the ``scene.runway``
+    record are core/scene/runway.py's."""
+
+    designator: Quantity
+    threshold_lat_deg: Quantity
+    threshold_lon_deg: Quantity
+    heading_deg: Quantity
+    length_m: Quantity
+    width_m: Quantity
+    surface: Quantity
+    markings: Quantity
+
+    FIELD_ORDER = ("designator", "threshold_lat_deg", "threshold_lon_deg", "heading_deg",
+                   "length_m", "width_m", "surface", "markings")
+    BLOCK = "runway"
+
+    @classmethod
+    def defaulted(cls) -> "RunwayBlockSpec":
+        return cls(
+            designator=Quantity.default(
+                None, frm="unstated: no runway in the scene", std=RUNWAY_STANDARDS["designator"]),
+            threshold_lat_deg=Quantity.default(
+                None, "deg", frm="unstated: no runway", std=RUNWAY_STANDARDS["threshold"]),
+            threshold_lon_deg=Quantity.default(
+                None, "deg", frm="unstated: no runway", std=RUNWAY_STANDARDS["threshold"]),
+            heading_deg=Quantity.default(
+                None, "deg", frm="unstated: no runway", std=RUNWAY_STANDARDS["heading_deg"]),
+            length_m=Quantity.default(
+                None, "m", frm="unstated: no runway", std=RUNWAY_STANDARDS["dimensions"]),
+            width_m=Quantity.default(
+                None, "m", frm="unstated: no runway", std=RUNWAY_STANDARDS["dimensions"]),
+            surface=Quantity.default(
+                "asphalt", frm="the documented default surface word",
+                std=RUNWAY_STANDARDS["surface"]),
+            markings=Quantity.default(
+                "standard", frm="the documented default: the five Annex 14 elements",
+                std=RUNWAY_STANDARDS["markings"]),
         )
 
 

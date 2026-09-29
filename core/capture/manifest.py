@@ -34,7 +34,12 @@ Top level::
     aircraft           the airframe that flew
     scene              {key, terrain, terrain_sha256} -- terrain_sha256
                        is the SHA-256 of the raw .r16 samples
-                       (Heightfield.digest()), null for flat scenes
+                       (Heightfield.digest()), null for flat scenes;
+                       W2 (optional): ``buildings`` {key, file, sha256,
+                       licence, count, document, document_sha256,
+                       object_id} and ``runway`` {designator, pad,
+                       pad_sha256, parent_sha256, document,
+                       document_sha256, markings, markings_sha256}
     datum              P10 (optional; absent in manifests written before
                        it): the vertical datum of the scene's heights
                        (core/terrain/geoid.py datum_block): the datum
@@ -51,6 +56,12 @@ Top level::
                        block -- u_num per SRQ from the dt/2 twin, u_input
                        per registered variable, u_val per SRQ, and the
                        form "ASME V&V 20; u_D absent per run"
+    instruments        R2 (optional; present only when the spec stated
+                       an instrument): the FDM-rate observer's block --
+                       profiles, lever arms, seeds, rate_hz and
+                       rate_basis, instruments.npz beside the manifest
+                       with its sha256 and columns, the residuals and
+                       the Allan self-report, what is not claimed
     frame              SceneFrame.provenance(): the CRS every position
                        in this file is expressed in, and the projected
                        origin of the local north/east metres
@@ -487,6 +498,35 @@ def scene_datum(heightfield, terrain_elevation_m: float) -> Dict:
     return datum_for_heightfield(heightfield)
 
 
+def world_scene(scene: Optional[Dict]) -> tuple:
+    """W2: the manifest's ``scene.buildings`` / ``scene.runway`` sub-blocks
+    and their ``applied_variables`` records, read from the documents the
+    scene dict names (``buildings_document``: the ``<bake>_buildings.json``
+    core/scene/buildings.py wrote; ``runway_document``: the pad's
+    ``_record.json`` core/scene/runway.py wrote). Absent-canonical: a
+    scene that names neither yields ({}, []) and the manifest is
+    byte-identical to one built before the keys existed. Nothing is
+    recomputed: each block and record is the document's own."""
+    scene = scene or {}
+    buildings_document = scene.get("buildings_document")
+    runway_document = scene.get("runway_document")
+    if buildings_document is None and runway_document is None:
+        return {}, []
+    from core.scene import buildings as scene_buildings
+    from core.scene import runway as scene_runway
+
+    blocks: Dict = {}
+    block = scene_buildings.manifest_scene_block(buildings_document)
+    if block is not None:
+        blocks["buildings"] = block
+    block = scene_runway.manifest_scene_block(runway_document)
+    if block is not None:
+        blocks["runway"] = block
+    records = (scene_buildings.buildings_records(buildings_document)
+               + scene_runway.runway_records(runway_document))
+    return blocks, records
+
+
 def frame_filename(camera_id: str, index: int) -> str:
     """Relative image path, per-camera subdirectory. The renderer that
     produces pixels writes THIS path; headless manifests carry it as
@@ -512,7 +552,8 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                            traffic_tracks: Optional[Sequence[PoseTrack]] = None,
                            mesh_manifests: Optional[Dict[str, Dict]] = None,
                            uncertainty: Optional[Dict] = None,
-                           wake_generator=None) -> Dict:
+                           wake_generator=None,
+                           instruments: Optional[Dict] = None) -> Dict:
     """Assemble the manifest mapping (see the module docstring schema).
 
     ``uncertainty`` (R1, optional): the run's ASME V&V 20 block from
@@ -650,6 +691,18 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                 sensing["records"] = ("applied_variables carries the first sensing camera's "
                                       "records; this block is the same models at this "
                                       "camera's own parameters")
+        # S2 (optional, absent-canonical): the stereo rig a camera belongs
+        # to (left or the materialised right), and the per-frame passes
+        # block of a camera that asks for passes.
+        from .passes import frame_passes_block, object_states_at
+        from .stereo import manifest_stereo_block
+
+        rig = manifest_stereo_block(camera, flown)
+        if rig is not None:
+            camera_blocks[-1]["stereo"] = rig
+        states_at = object_states_at(
+            objects[0].int_id, aircraft,
+            [(o.int_id, t) for o, t in zip(traffic_objects, traffic_tracks)])
         fx = (track.width_px / track.sensor_width_mm)
         fy = (track.height_px / track.sensor_height_mm)
         for number, sample_index in enumerate(schedule.indices):
@@ -730,6 +783,13 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
             # grey card measures it), on a camera with a sensing block.
             if sensing is not None:
                 frames[-1]["radiometry"] = frame_radiometry_block(sensing)
+            # S2: the passes this camera asks for, with the neighbouring
+            # telemetry samples' camera and object states when flow is
+            # asked (core/capture/passes.py); no key otherwise.
+            passes_block = (frame_passes_block(camera, track, sample_index, states_at)
+                            if camera is not None else None)
+            if passes_block is not None:
+                frames[-1]["passes"] = passes_block
             # Version 6: every OTHER object mapped onto the same sensor,
             # so an exporter of the sensor image has a box for each (the
             # primary's mapping is the block above). A scene object with
@@ -743,7 +803,36 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                          omega))
                 for entry in frames[-1]["labels"]["objects"]
                 if entry["int_id"] != objects[0].int_id]
+        # S3: the IR proxy's per-camera block and per-frame ``ir`` keys, only
+        # on a camera stating cameras[i].ir (absent-canonical), evaluated at
+        # the camera's first frame; refused by name (sensing.ir_*).
+        if camera is not None and camera.ir_stated():
+            from .thermal import attach_frame_ir, camera_ir_block
 
+            own = [f for f in frames if f["camera_id"] == track.camera_id]
+            ir_block = camera_ir_block(camera, own, terrain_elevation_m)
+            attach_frame_ir(ir_block, own, terrain_elevation_m)
+            holder = camera_blocks[-1].setdefault("sensing", {"requested_by": []})
+            holder["requested_by"] = list(holder.get("requested_by") or []) + ["camera.ir"]
+            holder["ir"] = ir_block
+    # S3: the first IR camera's records join applied_variables beside S1's.
+    ir_blocks = [b["sensing"]["ir"] for b in camera_blocks if "ir" in (b.get("sensing") or {})]
+    if ir_blocks:
+        from .thermal import ir_records
+
+        sensing_variables = list(sensing_variables) + ir_records(ir_blocks[0])
+        for number, ir_block in enumerate(ir_blocks):
+            ir_block["records"] = ("applied_variables (this camera)" if number == 0 else
+                                   "applied_variables carries the first IR camera's records; this "
+                                   "block is the same model at this camera's own frames")
+
+    # W3 (absent-canonical): the world look (night, rain, cloud drift) and
+    # its scene.world record, only when the spec asks for one.
+    from ..scene.world_record import card_look, world_look, world_record
+
+    w3_look = world_look(spec)
+    if w3_look is not None:
+        sensing_variables = list(sensing_variables) + [world_record(spec, w3_look)]
     manifest = {
         "manifest_version": MANIFEST_VERSION,
         "spec_digest": spec.digest(),
@@ -761,6 +850,9 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
             "key": (scene or {}).get("key", "flat"),
             "terrain": (scene or {}).get("terrain"),
             "terrain_sha256": terrain_sha256,
+            # W2 (optional, absent-canonical): scene.buildings and
+            # scene.runway, present only when the scene names their documents.
+            **world_scene(scene)[0],
         },
         # P10 (optional, absent-canonical for older readers): the vertical
         # datum block, and the applied-variable records (core/records.py)
@@ -769,7 +861,8 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
         "applied_variables": records_block(
             [undulation_variable(datum)]
             + landcover_records((scene or {}).get("terrain"))
-            + list(sensing_variables)),
+            + list(sensing_variables)
+            + world_scene(scene)[1]),
         "frame": frame.provenance(),
         "software_revision": software_revision(),
         "landmarks": scene_landmarks(
@@ -814,6 +907,21 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
     # without it carries no key, so older readers and digests are unmoved.
     if uncertainty is not None:
         manifest["uncertainty"] = dict(uncertainty)
+    # W3: the card's look block, verbatim, plus the night's sky numbers the
+    # night_exposure check needs (the verifier re-derives the sky itself).
+    if w3_look is not None:
+        manifest["look"] = card_look(w3_look)
+        if w3_look["night"] is not None:
+            manifest["look"]["night_sky"] = {
+                key: w3_look["night"].to_dict()[key]
+                for key in ("moment_utc", "sun_elevation_deg", "night", "moon_requested",
+                            "phase_angle_deg", "star_count", "stars_source")}
+    # R2 (optional, absent-canonical): the FDM-rate instruments block --
+    # profiles, lever arms, seeds, the two rates, instruments.npz with its
+    # sha256 and columns, the Allan self-report -- rides only when the spec
+    # stated an instrument (the default ideal set writes no file and no key).
+    if instruments is not None:
+        manifest["instruments"] = dict(instruments)
     return manifest
 
 
@@ -869,6 +977,9 @@ SIDECAR_CONTEXT_KEYS = (
     # R1: the run's uncertainty block; None unless the capture ran the
     # dt/2 twin (--uncertainty).
     "uncertainty",
+    # R2: the FDM-rate instruments block; None unless the spec stated an
+    # instrument (core/telemetry/instruments.py InstrumentObserver).
+    "instruments",
 )
 
 

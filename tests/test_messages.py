@@ -104,15 +104,16 @@ NAMED_EXCEPTIONS: Dict[str, Tuple[str, str]] = {
 #: record and the ledger), H (the agent: the four authority.* names) and
 #: I (the page: progress.page.* and verdict.*), so the list is empty.
 ALLOWED_FUTURE: Dict[str, str] = {
-    # P6's host-side card refusals: emitted by the engine's ScenarioWorld (P9),
-    # which is uncompiled here; the catalogue carries the contract's sentence.
-    "card.gust_table": "P9 physics engine side (FlightSimScenarioWorld)",
-    "gust_table.length": "P9 physics engine side (FlightSimScenarioWorld)",
-    "card.layered_wind": "P9 physics engine side (FlightSimScenarioWorld)",
-    "card.loading_properties": "P9 physics engine side (FlightSimScenarioWorld)",
-    "card.failure_schedule": "P9 physics engine side (FlightSimScenarioWorld)",
-    "card.icing_schedule": "P9 physics engine side (FlightSimScenarioWorld)",
-    "card.wake": "P9 physics engine side (FlightSimScenarioWorld / FlightSimWake)",
+    # (P9 landed the host-side card refusals -- card.gust_table,
+    # gust_table.length, card.layered_wind, card.loading_properties,
+    # card.failure_schedule, card.icing_schedule, card.wake, and its own
+    # card.atmosphere_properties / card.derived_aircraft: each is now a
+    # "REFUSED -- <name>: <sentence>" emitter in FlightSimScenarioWorld.cpp
+    # that the C++ scan below reads, so none is claimed as future.)
+    # W3's host-side look refusals: emitted by the render host's world look
+    # (W5, FlightSimVisualScene), uncompiled here.
+    "look.precipitation_particles": "W5 world engine side (FlightSimVisualScene M_RainStreaks)",
+    "look.cloud_drift_parameter": "W5 world engine side (FlightSimVisualScene cloud offset)",
 }
 
 #: Catalogue sentences the guided page carries as static text rather

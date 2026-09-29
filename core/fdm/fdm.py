@@ -318,6 +318,7 @@ class FlightDynamics:
         self.props.refresh()
         self._verify_initial_conditions(ordered, tolerance)
         self._ic_applied = True
+        self._ic_requested = dict(ordered)
         self._trimmed = False
 
     def relatch_initial_conditions(self) -> None:
@@ -335,6 +336,15 @@ class FlightDynamics:
             raise SimulationError(
                 "relatch_initial_conditions() needs set_initial_conditions() first"
             )
+        # JSBSim keeps the initial speed as TRUE airspeed, converted from the
+        # requested CAS with the atmosphere of the moment. After a non-standard
+        # day is written the same TAS is a different CAS (measured by the null
+        # ladder: 100 kt CAS asked at +30 degC flew 95.83 kt), so the stated
+        # speed is re-stated in its own terms before the re-latch.
+        speed = {k: v for k, v in getattr(self, "_ic_requested", {}).items()
+                 if k in ("ic/vc-kts", "ic/mach", "ic/ve-kts")}
+        if speed:
+            self.props.set_many(speed)
         if not self._exec.run_ic():
             raise SimulationError(f"run_ic() failed on re-latch for {self.model.name!r}")
         self.props.refresh()

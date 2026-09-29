@@ -254,6 +254,12 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
     report.violations.extend(validate_dis(spec))
     report.violations.extend(validate_icing(spec))
     report.violations.extend(validate_wake(spec))
+    report.violations.extend(validate_instruments(spec))
+    report.violations.extend(validate_record(spec))
+    # W2: the cached footprint set and the runway block, refused by name.
+    report.violations.extend(validate_world(spec))
+    # W3: the night sky and the rain rate, refused by name.
+    report.violations.extend(validate_world_look(spec))
 
     # -- the definitive check: can this actually be trimmed? -----------
     # Skipped when geometry is already impossible, since trimming below ground
@@ -951,3 +957,224 @@ def validate_icing(spec) -> List[Violation]:
                                     block.onset_s.value, block.ramp_s.value,
                                     block.alpha_shift_deg.value, block.envelope.value,
                                     str(spec.aircraft.value))]
+
+
+# -- the instruments block (R2) -------------------------------------------------------
+
+def validate_instruments(spec) -> List[Violation]:
+    """The ``instruments`` block's own constraints, refused by name through
+    the observer's own list (core.telemetry.instruments.instrument_problems,
+    so what validation refuses is what the runner refuses):
+    ``instrument.profile`` (a field that is not a {profile, lever_arm_m}
+    mapping, an unknown key, a profile not on file or malformed),
+    ``instrument.lever_arm`` (not three finite metres, or longer than
+    LEVER_ARM_MAX_M), ``instrument.rate`` (a GPS update rate above the FDM
+    rate). The default block (every instrument unstated) yields nothing."""
+    from ..telemetry.instruments import instrument_problems
+
+    block = getattr(spec, "instruments", None)
+    if block is None or block.is_default():
+        return []
+    out: List[Violation] = []
+    for name, quantity in block.quantities():
+        for constraint, message in instrument_problems(name, quantity.value,
+                                                       float(spec.rate.value)):
+            out.append(Violation(constraint, message))
+    return out
+
+
+# -- the record block (R2) ------------------------------------------------------------
+
+#: The three-rate study's ceiling: above this the FDM steps below JSBSim's
+#: own 1/1200 s (a rate the c172p at 60 s takes over a minute of physics
+#: here) -- a stated bound, not a measured JSBSim limit.
+RATE_MAX_HZ = 1200.0
+
+
+def convergence_problems(value) -> List[str]:
+    """Why a ``record.convergence`` value cannot be run: not a
+    ``{rates: [r1, r2, r3]}`` mapping, not three finite positive numbers,
+    not strictly ascending, not the study's own refinement ratio twice
+    (core/uncertainty.py runs dt, dt/2, dt/4 from the first rate), or a
+    rate above RATE_MAX_HZ. Empty when it can."""
+    if value is None:
+        return []
+    if not isinstance(value, dict) or set(value) != {"rates"}:
+        return [f"record.convergence must be {{rates: [r1, r2, r3]}} Hz or null, not {value!r}"]
+    import math
+
+    rates = value["rates"]
+    if not isinstance(rates, list) or len(rates) != 3 or not all(
+            isinstance(r, (int, float)) and not isinstance(r, bool) and math.isfinite(r) and r > 0.0
+            for r in rates):
+        return [f"record.convergence.rates must be three finite positive rates in Hz, "
+                f"not {rates!r}"]
+    from ..uncertainty import REFINEMENT_RATIO
+
+    out: List[str] = []
+    if not (rates[0] < rates[1] < rates[2]):
+        out.append(f"record.convergence.rates {rates!r} are not strictly ascending")
+    else:
+        ratio_a, ratio_b = rates[1] / rates[0], rates[2] / rates[1]
+        if abs(ratio_a - REFINEMENT_RATIO) > 1e-9 or abs(ratio_b - REFINEMENT_RATIO) > 1e-9:
+            out.append(f"record.convergence.rates {rates!r} do not refine by the study's ratio "
+                       f"{REFINEMENT_RATIO:g} twice ({ratio_a:g} then {ratio_b:g}); the three-rate "
+                       f"study runs dt, dt/{REFINEMENT_RATIO:g}, dt/{REFINEMENT_RATIO ** 2:g} "
+                       f"from the first rate")
+    if max(rates) > RATE_MAX_HZ:
+        out.append(f"record.convergence.rates {rates!r}: a rate above {RATE_MAX_HZ:g} Hz is "
+                   f"one this build does not run")
+    return out
+
+
+def validate_record(spec) -> List[Violation]:
+    """The ``record`` block's own constraints, refused by name:
+    ``record.convergence`` (rates the three-rate study cannot run, see
+    :func:`convergence_problems`; a non-boolean flag is named the same way),
+    ``record.uncertainty_basis`` (sensitivity pairs asked for while a
+    stated variable's provenance is ``inferred`` and its registry entry
+    declares no vocabulary bin width, so no u_x rule exists for it -- the
+    rule core/uncertainty.py would refuse to guess at). The default block
+    yields nothing."""
+    block = getattr(spec, "record", None)
+    if block is None or block.is_default():
+        return []
+    out: List[Violation] = []
+    for name in ("null_tests", "sensitivity_pairs"):
+        value = getattr(block, name).value
+        if not isinstance(value, bool):
+            out.append(Violation("record.convergence",
+                                 f"record.{name} must be true or false, not {value!r}"))
+    problems = convergence_problems(block.convergence.value)
+    for message in problems:
+        out.append(Violation("record.convergence", message))
+    # The uncertainty block (u_input for every stated variable) is what
+    # the sensitivity pairs ask for, and what the convergence study
+    # feeds: either one asks for a u_x rule per stated variable.
+    if block.sensitivity_pairs.value is True or (block.convergence.value is not None
+                                                 and not problems):
+        out.extend(uncertainty_basis_violations(spec))
+    return out
+
+
+def uncertainty_basis_violations(spec) -> List[Violation]:
+    """``record.uncertainty_basis`` for every stated registered variable
+    whose provenance is ``inferred`` while its registry entry declares no
+    vocabulary bin width -- no u_x rule exists for it (core/uncertainty.py
+    u_x would refuse to guess). Called by :func:`validate_record` when the
+    block asks for the uncertainty block, and by the capture when the
+    ``--uncertainty`` option asks without the block."""
+    from ..registry import REGISTRY
+
+    out: List[Violation] = []
+    for name, stated in REGISTRY.stated_variables(spec.to_dict()).items():
+        if stated.get("value") is None or str(stated.get("source")) != "inferred":
+            continue
+        entry = REGISTRY.get(name)
+        if entry.u_input_rule.bin_width is None:
+            out.append(Violation(
+                "record.uncertainty_basis",
+                f"{name} is inferred and the uncertainty block asks for its u_input, "
+                f"but the registry declares no vocabulary bin width for it, so no u_x "
+                f"rule exists ({entry.u_input_rule.note or 'no note'})"))
+    return out
+
+
+def validate_world_look(spec) -> List[Violation]:
+    """W3: ``scene.night`` and ``environment.precipitation_rate_mmh``,
+    refused by name before any run (core/scene/night.py, precipitation.py):
+    ``look.moon`` (the block's shape, the moon word, a moment that does
+    not parse, or no moment at all -- no utc and no randomisation block to
+    draw one), ``look.stars`` (the mode, or a catalogue the mode reads
+    that is absent or whose sha256 differs), ``night.sun_units`` (the
+    moon's lux on the bias path or beside a unitless sun, the rule in
+    night.py) and ``look.precipitation_rate`` (not a positive number of
+    mm/h within the MIL-HDBK-310 extreme). Unstated fields yield nothing."""
+    out: List[Violation] = []
+    night_q = getattr(getattr(spec, "scene", None), "night", None)
+    value = None if night_q is None else night_q.value
+    if value is not None:
+        from ..scene.night import (
+            NightError, load_catalogue, night_problems, spec_exposure_path, spec_sun_units,
+            sun_units_problem,
+        )
+
+        problems = night_problems(value)
+        for constraint, message in problems:
+            out.append(Violation(constraint, message))
+        if not problems:
+            if (value.get("utc") is None and not spec.randomization.is_enabled()
+                    and spec.randomization_policy is None):
+                out.append(Violation("look.moon",
+                                     "the moon cannot be placed: scene.night states no utc "
+                                     "moment and no randomisation block draws one"))
+            problem = sun_units_problem(value.get("moon", "on") == "on", spec_sun_units(spec),
+                                        spec_exposure_path(spec))
+            if problem:
+                out.append(Violation("night.sun_units", problem))
+            stars = value.get("stars", "auto")
+            if stars in ("catalogue", "auto"):
+                try:
+                    if load_catalogue() is None and stars == "catalogue":
+                        out.append(Violation("look.stars",
+                                             "scene.night.stars is catalogue but the star "
+                                             "catalogue is not cached (assets/stars/README.md)"))
+                except NightError as exc:
+                    out.append(Violation(exc.constraint, exc.message))
+    rate_q = getattr(spec, "precipitation_rate_mmh", None)
+    if rate_q is not None and rate_q.value is not None:
+        from ..scene.precipitation import RAIN_RATE_MAX_MMH, rate_problem
+
+        problem = rate_problem(rate_q.value)
+        if problem:
+            out.append(Violation("look.precipitation_rate", problem, actual=rate_q.value,
+                                 limit=RAIN_RATE_MAX_MMH, unit="mm/h"))
+    return out
+
+
+def validate_world(spec) -> List[Violation]:
+    """W2: ``scene.buildings`` and the ``runway`` block, refused by name.
+
+    A stated footprint key is loaded from the cache here, before any run
+    (core/scene/buildings.py load_footprints): ``buildings.uncached`` (no
+    data file or sidecar, or a key that is not a plain file stem),
+    ``buildings.licence``, ``buildings.unverified``, ``buildings.ids``.
+    A stated runway is checked by core/scene/runway.py's one ``problems``
+    list: ``runway.geometry``, ``runway.taxonomy``, ``runway.markings``
+    (``runway.terrain_mismatch`` is the pad bake's, where the runway meets
+    the bake). The default scene and runway yield nothing, and so does a
+    runway block with no designator (no runway: its fields are unread)."""
+    out: List[Violation] = []
+    key = getattr(getattr(spec, "scene", None), "buildings", None)
+    key = None if key is None else key.value
+    if key is not None:
+        from ..scene.buildings import BuildingsError, load_footprints
+
+        if (not isinstance(key, str) or not key.strip() or "/" in key or "\\" in key
+                or key.startswith(".")):
+            out.append(Violation("buildings.uncached",
+                                 f"scene.buildings must name a cached set's key (a file stem "
+                                 f"under assets/buildings), not {key!r}"))
+        else:
+            try:
+                load_footprints(key)
+            except BuildingsError as exc:
+                out.append(Violation(exc.constraint, exc.message))
+    block = getattr(spec, "runway", None)
+    if block is None or block.is_default():
+        return out
+    from ..scene.runway import problems
+
+    values = {name: q.value for name, q in block.quantities()}
+    if values["designator"] is None:
+        # No designator is no runway (the registry's null for
+        # runway.designator, so the null pair's spec must validate): the
+        # block's other fields are carried and unread, as the wake block's
+        # are without a generator.
+        return out
+    for problem in problems(values["designator"], values["threshold_lat_deg"],
+                            values["threshold_lon_deg"], values["heading_deg"],
+                            values["length_m"], values["width_m"], values["surface"],
+                            values["markings"]):
+        out.append(Violation(problem.constraint, problem.message))
+    return out

@@ -886,3 +886,14 @@ def test_a_grey_card_off_by_more_than_two_percent_or_a_stale_status_fails_annota
     refused["cameras"][0]["sensing"]["radiometry"]["calibration_basis"] = "refused sensing.exposure_units: the sun is 8.0"
     check = card_check(refused, tmp_path)
     assert check.status == "NOT RUN" and "sensing.exposure_units" in check.detail
+
+
+def test_a_camera_whose_sensing_block_carries_only_the_ir_proxy_is_left_to_it(tmp_path):
+    """S3: a camera asking only for the IR proxy has a sensing block with no
+    chain; the post-render radiometry passes it by, untouched."""
+    manifest = {"cameras": [{"camera_id": "c0", "sensing": {"requested_by": ["camera.ir"],
+                                                             "ir": {"proxy": True}}}],
+                "frames": [{"camera_id": "c0"}]}
+    before = copy.deepcopy(manifest)
+    summary = R.attach_render_radiometry(tmp_path, manifest)
+    assert summary == {"cameras": 0, "refused": [], "measured": []} and manifest == before

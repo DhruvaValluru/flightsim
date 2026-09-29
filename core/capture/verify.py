@@ -543,7 +543,9 @@ def verify_pose_matches_spec(manifest: Dict) -> Check:
     for record in frames:
         camera_id = record["camera_id"]
         spec = specs.get(camera_id)
-        if not spec:
+        # S2: a materialised stereo right camera is placed by its rig, not
+        # by its preset: disparity_vs_right_depth grades it against the left.
+        if not spec or _spec_value(spec, "position_mode") == "stereo_right":
             if camera_id not in ungraded:
                 ungraded.append(camera_id)
             continue
@@ -5077,6 +5079,505 @@ def verify_radiometry_grey_card(manifest: Dict, run_dir=None) -> Check:
     return Check("radiometry_grey_card", PASS, "; ".join(details))
 
 
+# -- S4: the sensing engine side, graded only where render.json carries it ---------
+# The commandlet (FlightSimRenderCommandlet.cpp, uncompiled here) writes: the
+# linear passes (labels.normal / labels.basecolor with labels.normal_axes and
+# labels.normal_encoding), the velocity cross-check (labels.velocity), the
+# read-backs (render_settings.console, render_settings.working_colour_space,
+# look_applied.sun.lux), the calibration frame (root calibration{} and the
+# calibration.json beside it) and the accumulation (frame_records[].accumulation).
+# Each check grades a key only when it is present; a check with nothing to grade
+# is NOT RUN, never a pass on absence. The readers are the checker's own
+# (numpy.fromfile '<f4'); nothing is imported from the producer.
+
+#: The linear .f32 layout the commandlet states (little-endian float32, no
+#: header, row-major, channels interleaved): 3 a pixel for the normal and the
+#: base colour, 2 for the velocity read-back.
+S4_NORMAL_AXES = "north,east,up"
+S4_NORMAL_ENCODINGS = ("signed", "offset_half")
+#: A written (non-sky) normal is unit length within this, on at least this
+#: fraction of the written pixels.
+S4_NORMAL_UNIT_TOL = 0.05
+S4_NORMAL_UNIT_FRACTION = 0.99
+#: The recorded 95th-percentile speed against the file's own, in pixels (the
+#: float32 the file holds).
+S4_VELOCITY_P95_TOL_PX = 1e-3
+#: The console read-backs S4 adds (r.Substrate predates it and is read too).
+S4_READBACK_CVARS = ("r.EyeAdaptation.LensAttenuation", "r.UsePreExposure",
+                     "r.VelocityOutputPass", "r.Substrate")
+S4_LENS_ATTENUATION_CVAR = "r.EyeAdaptation.LensAttenuation"
+#: core/scenario/solar.py's bound, restated: nothing above the atmosphere is
+#: brighter.
+S4_SUN_LUX_MAX = 133100.0
+#: The chain's constant and the grey card, restated (ISO 2720 / ISO 12232).
+S4_CALIBRATION_CONSTANT = 1.2
+S4_GREY_CARD_REFLECTANCE = 0.18
+#: The accumulation's bounds and the 0.25 px rule, restated.
+S4_ACCUMULATE_MAX = 64
+S4_SUB_PIXEL_BLUR_PX = 0.25
+FAIL_READBACK = "annotation.readback"
+FAIL_ACCUMULATION = "annotation.accumulation"
+
+
+def _s4_renders(run_dir):
+    """(camera, folder, payload) for every frames/<camera>/render.json that parses."""
+    if run_dir is None or not (Path(run_dir) / "frames").is_dir():
+        return []
+    out = []
+    for folder in sorted(p for p in (Path(run_dir) / "frames").iterdir() if p.is_dir()):
+        payload = _sensing_json(folder / "render.json")
+        if isinstance(payload, dict):
+            out.append((folder.name, folder, payload))
+    return out
+
+
+def _s4_size(payload, record):
+    return (int(record.get("applied_width_px", payload.get("width", 0)) or 0),
+            int(record.get("applied_height_px", payload.get("height", 0)) or 0))
+
+
+def _s4_read_f32(path, width: int, height: int, channels: int):
+    """A declared linear file as (h, w, channels) float64; a string when its
+    size is not the stated layout; BundleFileError when it is missing."""
+    import numpy as np
+
+    path = Path(path)
+    try:
+        raw = np.fromfile(path, dtype="<f4")
+    except OSError as exc:
+        raise BundleFileError(_unreadable(path, exc)) from exc
+    if raw.size != width * height * channels:
+        return (f"{path.name}: {raw.size} float32 values for a {width}x{height} file of "
+                f"{channels} a pixel ({width * height * channels} expected)")
+    return raw.reshape(height, width, channels).astype("float64")
+
+
+def _s4_close(a, b, rel=1e-6) -> bool:
+    return abs(float(a) - float(b)) <= rel * max(1.0, abs(float(a)), abs(float(b)))
+
+
+@_reads_the_bundle
+def verify_engine_linear_passes(manifest: Dict, run_dir=None) -> Check:
+    """The linear normal and base colour files (S4) against their stated
+    layout: 3 float32 a pixel; the normal in the scene axes north,east,up,
+    its encoding word one the commandlet measures (signed or offset_half),
+    every written (non-zero) normal unit length; the base colour finite with
+    its out-of-range count the file's own; the frame-level name the labels'.
+    FAIL annotation.normals / annotation.albedo; NOT RUN without either key."""
+    import numpy as np
+
+    graded, notes = 0, []
+    for camera, folder, payload in _s4_renders(run_dir):
+        for record in _render_frame_records(payload):
+            labels = record.get("labels")
+            if not isinstance(labels, dict):
+                continue
+            where = f"{camera}/{record.get('frame')}"
+            width, height = _s4_size(payload, record)
+            if labels.get("normal"):
+                if labels.get("normal_axes") != S4_NORMAL_AXES:
+                    return Check("engine_linear_passes", FAIL,
+                                 f"{where}: the normal file's axes are {labels.get('normal_axes')!r}, "
+                                 f"not {S4_NORMAL_AXES!r}", failure=FAIL_NORMALS)
+                if labels.get("normal_encoding") not in S4_NORMAL_ENCODINGS:
+                    return Check("engine_linear_passes", FAIL,
+                                 f"{where}: the normal encoding {labels.get('normal_encoding')!r} is not "
+                                 f"one the commandlet measures {S4_NORMAL_ENCODINGS}", failure=FAIL_NORMALS)
+                if record.get("normal_f32") != labels["normal"]:
+                    return Check("engine_linear_passes", FAIL,
+                                 f"{where}: the record names {record.get('normal_f32')!r} and its labels "
+                                 f"{labels['normal']!r} for one normal file", failure=FAIL_NORMALS)
+                normal = _s4_read_f32(folder / str(labels["normal"]), width, height, 3)
+                if isinstance(normal, str) or not np.all(np.isfinite(normal)):
+                    return Check("engine_linear_passes", FAIL,
+                                 f"{where}: {normal if isinstance(normal, str) else 'a non-finite normal'}",
+                                 failure=FAIL_NORMALS)
+                length = np.linalg.norm(normal, axis=2)
+                written = length > 0.0
+                if written.any():
+                    unit = float(np.mean(np.abs(length[written] - 1.0) <= S4_NORMAL_UNIT_TOL))
+                    if unit < S4_NORMAL_UNIT_FRACTION:
+                        return Check("engine_linear_passes", FAIL,
+                                     f"{where}: {unit * 100:.1f} % of the written normals are unit length "
+                                     f"(at least {S4_NORMAL_UNIT_FRACTION * 100:.0f} % must be)",
+                                     failure=FAIL_NORMALS)
+                graded += 1
+            if labels.get("basecolor"):
+                if record.get("basecolor_f32") != labels["basecolor"]:
+                    return Check("engine_linear_passes", FAIL,
+                                 f"{where}: the record names {record.get('basecolor_f32')!r} and its labels "
+                                 f"{labels['basecolor']!r} for one base colour file", failure=FAIL_ALBEDO)
+                colour = _s4_read_f32(folder / str(labels["basecolor"]), width, height, 3)
+                if isinstance(colour, str) or not np.all(np.isfinite(colour)):
+                    return Check("engine_linear_passes", FAIL,
+                                 f"{where}: {colour if isinstance(colour, str) else 'a non-finite base colour'}",
+                                 failure=FAIL_ALBEDO)
+                outside = int(np.count_nonzero(np.any((colour < 0.0) | (colour > 1.0), axis=2)))
+                declared = labels.get("basecolor_out_of_range_pixels")
+                if isinstance(declared, (int, float)) and int(declared) != outside:
+                    return Check("engine_linear_passes", FAIL,
+                                 f"{where}: the record declares {int(declared)} out-of-range base colour "
+                                 f"pixels and the file holds {outside}", failure=FAIL_ALBEDO)
+                if outside:
+                    notes.append(f"{where}: {outside} base colour pixel(s) outside [0, 1], counted")
+                graded += 1
+    if graded == 0:
+        return Check("engine_linear_passes", NOT_RUN,
+                     "no render.json frame record declares labels.normal or labels.basecolor (render on "
+                     "Windows with -labels -passes=normal,albedo to exercise this)")
+    return Check("engine_linear_passes", PASS,
+                 f"{graded} linear pass file(s): the stated layout, axes and encoding word, unit normals, "
+                 f"the base colour's own counts" + ("; " + "; ".join(notes[:3]) if notes else ""))
+
+
+@_reads_the_bundle
+def verify_velocity_readback(manifest: Dict, run_dir=None) -> Check:
+    """The engine's velocity cross-check (S4, -velocity-check) against its own
+    record: 2 float32 a pixel, finite, all zeros on the first frame, and the
+    recorded 95th-percentile speed over the non-sky pixels (the nearest rank
+    below, as the commandlet takes it) the file's own within
+    S4_VELOCITY_P95_TOL_PX. A read-back, never the truth: its agreement with
+    the Python flow is the Windows step. FAIL annotation.flow; NOT RUN
+    without labels.velocity."""
+    import numpy as np
+
+    graded = 0
+    for camera, folder, payload in _s4_renders(run_dir):
+        for record in _render_frame_records(payload):
+            labels = record.get("labels")
+            velocity = labels.get("velocity") if isinstance(labels, dict) else None
+            if not isinstance(velocity, dict):
+                continue
+            where = f"{camera}/{record.get('frame')}"
+            width, height = _s4_size(payload, record)
+            if not velocity.get("file") or record.get("velocity_f32") != velocity.get("file"):
+                return Check("velocity_readback", FAIL,
+                             f"{where}: the record names {record.get('velocity_f32')!r} and its labels "
+                             f"{velocity.get('file')!r} for one velocity file", failure=FAIL_FLOW)
+            flow = _s4_read_f32(folder / str(velocity["file"]), width, height, 2)
+            if isinstance(flow, str) or not np.all(np.isfinite(flow)):
+                return Check("velocity_readback", FAIL,
+                             f"{where}: {flow if isinstance(flow, str) else 'a non-finite velocity'}",
+                             failure=FAIL_FLOW)
+            if velocity.get("first_frame") is True and np.any(flow != 0.0):
+                return Check("velocity_readback", FAIL,
+                             f"{where}: the first frame's velocity is not all zeros", failure=FAIL_FLOW)
+            geometry = np.ones((height, width), dtype=bool)
+            if labels.get("depth_f32"):
+                depth = _s4_read_f32(folder / str(labels["depth_f32"]), width, height, 1)
+                if not isinstance(depth, str):
+                    geometry = np.isfinite(depth[..., 0])
+            speeds = np.sort(np.hypot(flow[..., 0], flow[..., 1])[geometry].astype(np.float32))
+            own = 0.0 if velocity.get("first_frame") is True or speeds.size == 0 \
+                else float(speeds[min(max(int(0.95 * (speeds.size - 1)), 0), speeds.size - 1)])
+            recorded = velocity.get("p95_px")
+            if not isinstance(recorded, (int, float)) or abs(float(recorded) - own) > S4_VELOCITY_P95_TOL_PX:
+                return Check("velocity_readback", FAIL,
+                             f"{where}: the record's 95th-percentile speed {recorded!r} px is not the "
+                             f"file's own {own:.4f} px", failure=FAIL_FLOW)
+            graded += 1
+    if graded == 0:
+        return Check("velocity_readback", NOT_RUN,
+                     "no render.json frame record declares labels.velocity (render on Windows with "
+                     "-labels -velocity-check to exercise this)")
+    return Check("velocity_readback", PASS,
+                 f"{graded} velocity read-back file(s) agree with their own records; the comparison "
+                 f"with the Python flow is the Windows step")
+
+
+def verify_engine_readbacks(manifest: Dict, run_dir=None) -> Check:
+    """What the engine reported, graded where render.json carries it: the
+    console read-backs S4 names (a number or 'absent'; the lens attenuation
+    a fraction in (0, 1]), the working colour space (a linear space named),
+    and look_applied.sun: a sun with a lux must say light_units 'physical',
+    its intensity must be that lux, and the lux must lie in (0, 133100];
+    a sun that says 'physical' must carry its lux. FAIL annotation.readback;
+    NOT RUN with none of them."""
+    graded = 0
+    for camera, _folder, payload in _s4_renders(run_dir):
+        settings = payload.get("render_settings") if isinstance(payload.get("render_settings"), dict) else {}
+        console = settings.get("console") if isinstance(settings.get("console"), dict) else {}
+        for name in S4_READBACK_CVARS:
+            if name not in console:
+                continue
+            value = str(console[name]).strip()
+            graded += 1
+            if value == "absent":
+                continue
+            try:
+                number = float(value) if value.lower() not in ("true", "false") else float(value.lower() == "true")
+            except ValueError:
+                return Check("engine_readbacks", FAIL,
+                             f"{camera}: the console read-back {name} is {value!r}, neither a number nor "
+                             f"'absent'", failure=FAIL_READBACK)
+            if name == S4_LENS_ATTENUATION_CVAR and not (0.0 < number <= 1.0):
+                return Check("engine_readbacks", FAIL,
+                             f"{camera}: the lens attenuation read back as {number:g}, not a fraction of the "
+                             f"light passed", failure=FAIL_READBACK)
+        if "working_colour_space" in settings:
+            space = settings["working_colour_space"]
+            if not isinstance(space, str) or "linear" not in space:
+                return Check("engine_readbacks", FAIL,
+                             f"{camera}: the working colour space read back as {space!r}, not a linear "
+                             f"space named", failure=FAIL_READBACK)
+            graded += 1
+        look = payload.get("look_applied") if isinstance(payload.get("look_applied"), dict) else {}
+        sun = look.get("sun") if isinstance(look.get("sun"), dict) else None
+        if sun is None:
+            continue
+        if "lux" in sun:
+            lux = sun.get("lux")
+            if not isinstance(lux, (int, float)) or not math.isfinite(float(lux)) \
+                    or not (0.0 < float(lux) <= S4_SUN_LUX_MAX):
+                return Check("engine_readbacks", FAIL,
+                             f"{camera}: the sun's lux {lux!r} is not in (0, {S4_SUN_LUX_MAX:g}]",
+                             failure=FAIL_READBACK)
+            if sun.get("light_units") != "physical":
+                return Check("engine_readbacks", FAIL,
+                             f"{camera}: the sun carries {float(lux):g} lux in light units "
+                             f"{sun.get('light_units')!r}, not 'physical'", failure=FAIL_READBACK)
+            intensity = sun.get("intensity")
+            if not isinstance(intensity, (int, float)) or not _s4_close(intensity, lux):
+                return Check("engine_readbacks", FAIL,
+                             f"{camera}: the sun was set to {intensity!r} while it records {float(lux):g} "
+                             f"lux", failure=FAIL_READBACK)
+            graded += 1
+        elif sun.get("light_units") == "physical":
+            return Check("engine_readbacks", FAIL,
+                         f"{camera}: the sun says light units 'physical' and carries no lux",
+                         failure=FAIL_READBACK)
+    if graded == 0:
+        return Check("engine_readbacks", NOT_RUN,
+                     "no render.json carries the S4 read-backs (a render from before S4, or none)")
+    return Check("engine_readbacks", PASS,
+                 f"{graded} read-back(s): the console values parse, the lens attenuation is a fraction, "
+                 f"the colour space is linear, a sun in lux says so and was set to it")
+
+
+@_reads_the_bundle
+def verify_calibration_frame(manifest: Dict, run_dir=None) -> Check:
+    """The calibration frame's record (render.json root calibration{}, S4)
+    re-derived by the checker: the luminance per unit 1.2 x A x 2^(EV100 -
+    EC) from the recorded EV100, EC and A; the emissive quad's prediction
+    nits / per unit, the Lambertian quad's rho E / pi / per unit, the root's
+    the 18 % card's; every ratio its own measured / predicted and within
+    GREY_CARD_TOL of one; the root measured the white quad's scaled by
+    0.18 / rho; the MTF50 null or a positive number; the slanted-edge frame
+    on disk with a four-corner quad; calibration.json, when beside it,
+    carrying the same numbers. FAIL annotation.radiometry (annotation.files
+    for a missing frame); NOT RUN without calibration{}."""
+    graded, details = 0, []
+    for camera, folder, payload in _s4_renders(run_dir):
+        calibration = payload.get("calibration")
+        if not isinstance(calibration, dict):
+            continue
+
+        def fail(text: str) -> Check:
+            return Check("calibration_frame", FAIL, f"{camera}: {text}", failure=FAIL_RADIOMETRY)
+
+        emissive = calibration.get("emissive") if isinstance(calibration.get("emissive"), dict) else {}
+        white = calibration.get("lambertian") if isinstance(calibration.get("lambertian"), dict) else {}
+        try:
+            ev = float(calibration["ev100"])
+            ec = float(calibration["exposure_compensation_ev"])
+            a = float(calibration["lens_attenuation"])
+            per_unit = float(calibration["luminance_cd_m2_per_unit"])
+            sun = float(calibration["sun_lux"])
+            nits = float(calibration["grey_card_nits"])
+            rho = float(white["reflectance"])
+            root = {k: float(calibration[k]) for k in ("predicted", "measured", "ratio")}
+            quads = {"emissive": {k: float(emissive[k]) for k in ("predicted", "measured", "ratio")},
+                     "white": {k: float(white[k]) for k in ("predicted", "measured", "ratio")}}
+        except (KeyError, TypeError, ValueError):
+            return fail("the calibration record lacks one of ev100, exposure_compensation_ev, "
+                        "lens_attenuation, luminance_cd_m2_per_unit, sun_lux, grey_card_nits, or a "
+                        "quad's predicted / measured / ratio / reflectance")
+        own_per_unit = S4_CALIBRATION_CONSTANT * a * 2.0 ** (ev - ec)
+        if not _s4_close(per_unit, own_per_unit):
+            return fail(f"the record's {per_unit:g} cd/m^2 per unit is not 1.2 x {a:g} x 2^({ev:g} - "
+                        f"{ec:g}) = {own_per_unit:g}")
+        expected = {"emissive": nits / own_per_unit,
+                    "white": rho * sun / math.pi / own_per_unit}
+        for label, quad in quads.items():
+            if not _s4_close(quad["predicted"], expected[label]):
+                return fail(f"the {label} quad's prediction {quad['predicted']:g} is not the chain's "
+                            f"{expected[label]:g}")
+            if quad["predicted"] <= 0.0 or not _s4_close(quad["ratio"], quad["measured"] / quad["predicted"]):
+                return fail(f"the {label} quad's ratio {quad['ratio']:g} is not its own measured / predicted")
+            if abs(quad["ratio"] - 1.0) > GREY_CARD_TOL:
+                return fail(f"the {label} quad measured {quad['ratio']:.4f} of its prediction "
+                            f"(tolerance {GREY_CARD_TOL * 100:.0f} %)")
+        grey = S4_GREY_CARD_REFLECTANCE * sun / math.pi / own_per_unit
+        if not _s4_close(root["predicted"], grey) \
+                or not _s4_close(root["measured"], quads["white"]["measured"] * S4_GREY_CARD_REFLECTANCE / rho) \
+                or not _s4_close(root["ratio"], root["measured"] / root["predicted"]):
+            return fail("the root predicted / measured / ratio are not the 18 % card's from the white quad")
+        mtf50 = calibration.get("mtf50_measured")
+        if mtf50 is not None and (not isinstance(mtf50, (int, float)) or not math.isfinite(float(mtf50))
+                                  or float(mtf50) <= 0.0):
+            return fail(f"the engine's MTF50 {mtf50!r} is neither null nor a positive number")
+        edge = calibration.get("slanted_edge") if isinstance(calibration.get("slanted_edge"), dict) else {}
+        corners = edge.get("quad_px")
+        if not edge.get("frame") or not isinstance(corners, list) or len(corners) != 4:
+            return fail("the slanted edge names no frame or no four-corner quad")
+        if not (folder / str(edge["frame"])).is_file():
+            raise BundleFileError(_unreadable(folder / str(edge["frame"]),
+                                              FileNotFoundError(str(edge["frame"]))))
+        beside = _sensing_json(folder / "calibration.json")
+        if isinstance(beside, dict):
+            for key in ("predicted", "measured", "ratio"):
+                if not isinstance(beside.get(key), (int, float)) or not _s4_close(beside[key], root[key], 1e-9):
+                    return fail(f"calibration.json's {key} {beside.get(key)!r} is not render.json's "
+                                f"{root[key]!r}")
+        graded += 1
+        details.append(f"{camera}: grey card {root['ratio']:.4f}, emissive {quads['emissive']['ratio']:.4f}"
+                       + (f", engine MTF50 {float(mtf50):.4f} cycles/px" if mtf50 is not None else ""))
+    if graded == 0:
+        return Check("calibration_frame", NOT_RUN,
+                     "no render.json carries a calibration record (render on Windows with -calibration "
+                     "-sun-lux= to exercise this)")
+    return Check("calibration_frame", PASS, "; ".join(details))
+
+
+@_reads_the_bundle
+def verify_engine_accumulation(manifest: Dict, run_dir=None) -> Check:
+    """Each frame's accumulation record (S4, -accumulate=K) against itself:
+    k a whole number from 1 to 64; t0_s <= t <= t1_s; t1_s - t0_s the
+    exposure; the sub-exposure instants k of them, at the midpoints of k
+    equal slices of the window; k = 1 exactly when the predicted blur is
+    under 0.25 px, else the k asked for; the accumulated file the record's
+    linear file and on disk. FAIL annotation.accumulation (annotation.files
+    for a missing file); NOT RUN without an accumulation record."""
+    graded, single = 0, 0
+    for camera, folder, payload in _s4_renders(run_dir):
+        for record in _render_frame_records(payload):
+            block = record.get("accumulation")
+            if not isinstance(block, dict):
+                continue
+            where = f"{camera}/{record.get('frame')}"
+
+            def fail(text: str) -> Check:
+                return Check("engine_accumulation", FAIL, f"{where}: {text}", failure=FAIL_ACCUMULATION)
+
+            k = block.get("k")
+            if isinstance(k, bool) or not isinstance(k, (int, float)) or int(k) != k \
+                    or not (1 <= int(k) <= S4_ACCUMULATE_MAX):
+                return fail(f"k = {k!r} is not a whole number of sub-exposures from 1 to {S4_ACCUMULATE_MAX}")
+            k = int(k)
+            try:
+                t0, t1, t = float(block["t0_s"]), float(block["t1_s"]), float(record["t"])
+            except (KeyError, TypeError, ValueError):
+                return fail("the record lacks t, t0_s or t1_s")
+            if not (t0 - 1e-9 <= t <= t1 + 1e-9):
+                return fail(f"the capture instant {t:g} s is outside the window [{t0:g}, {t1:g}] s")
+            exposure = block.get("exposure_s")
+            if isinstance(exposure, (int, float)) and abs((t1 - t0) - float(exposure)) > 1e-9 * max(1.0, t1):
+                return fail(f"the window is {t1 - t0:g} s long, not the {float(exposure):g} s exposure")
+            times = block.get("sub_frame_times_s")
+            if times is not None:
+                if not isinstance(times, list) or len(times) != k:
+                    return fail(f"{len(times) if isinstance(times, list) else times!r} sub-exposure "
+                                f"instant(s) recorded for k = {k}")
+                for j, value in enumerate(times):
+                    midpoint = t0 + (j + 0.5) * (t1 - t0) / k
+                    if not isinstance(value, (int, float)) or abs(float(value) - midpoint) > 1e-9 * max(1.0, t1):
+                        return fail(f"sub-exposure {j} at {value!r} s is not the midpoint {midpoint:g} s of "
+                                    f"its slice")
+            predicted, requested = block.get("predicted_blur_px"), block.get("requested_k")
+            if isinstance(predicted, (int, float)) and isinstance(requested, (int, float)):
+                wanted = 1 if float(predicted) < S4_SUB_PIXEL_BLUR_PX else int(requested)
+                if k != wanted:
+                    return fail(f"k = {k} with {float(predicted):.3f} px of predicted blur and {int(requested)} "
+                                f"asked for: the 0.25 px rule gives {wanted}")
+            if block.get("file"):
+                if record.get("linear") != block["file"]:
+                    return fail(f"the accumulation {block['file']!r} is not the record's linear file "
+                                f"{record.get('linear')!r}")
+                if not (folder / str(block["file"])).is_file():
+                    raise BundleFileError(_unreadable(folder / str(block["file"]),
+                                                      FileNotFoundError(str(block["file"]))))
+            graded += 1
+            single += int(k == 1)
+    if graded == 0:
+        return Check("engine_accumulation", NOT_RUN,
+                     "no render.json frame record carries an accumulation (render on Windows with "
+                     "-accumulate=K to exercise this)")
+    return Check("engine_accumulation", PASS,
+                 f"{graded} accumulated frame(s), {single} at k = 1 under the 0.25 px rule: windows, "
+                 f"instants and counts consistent")
+
+
+# -- S3: the IR proxy declares itself ---------------------------------------------
+
+FAIL_IR_PROXY = "annotation.ir_proxy"
+
+
+def verify_ir_proxy_declared(manifest: Dict, run_dir=None) -> Check:
+    """Every IR frame (``frames/<camera>/frame_NNNN_ir.f32``) carries its
+    declaration ``frame_NNNN_ir.json`` with ``proxy`` true, the manifest's
+    band, the manifest's ``sensing.ir.tables_sha256`` table for table,
+    and the sha256 and size of the image it sits beside -- read here with
+    hashlib and json, nothing from the producer. NOT RUN without a run
+    directory or an IR frame; FAIL annotation.ir_proxy otherwise."""
+    blocks = {}
+    for block in manifest.get("cameras", []) or []:
+        sensing = block.get("sensing") if isinstance(block, dict) else None
+        if isinstance(sensing, dict) and isinstance(sensing.get("ir"), dict):
+            blocks[str(block.get("camera_id"))] = sensing["ir"]
+    if run_dir is None:
+        return Check("ir_proxy_declared", NOT_RUN, "no run directory: no IR frame is here")
+    images = sorted((Path(run_dir) / "frames").glob("*/frame_*_ir.f32"))
+    if not images:
+        return Check("ir_proxy_declared", NOT_RUN,
+                     f"no IR frame under frames/ ({len(blocks)} camera(s) declare sensing.ir; the "
+                     f"proxy is written after a render's ID image and depth exist)")
+    for image in images:
+        camera = image.parent.name
+        where = f"{camera}/{image.name}"
+        block = blocks.get(camera)
+        if block is None:
+            return Check("ir_proxy_declared", FAIL,
+                         f"{where}: an IR frame for a camera whose manifest declares no sensing.ir block",
+                         failure=FAIL_IR_PROXY)
+        declaration_path = image.with_suffix(".json")
+        try:
+            declaration = json.loads(declaration_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return Check("ir_proxy_declared", FAIL,
+                         f"{where}: no readable proxy declaration {declaration_path.name} beside it",
+                         failure=FAIL_IR_PROXY)
+        if not isinstance(declaration, dict) or declaration.get("proxy") is not True \
+                or block.get("proxy") is not True:
+            return Check("ir_proxy_declared", FAIL,
+                         f"{where}: the frame or its camera block does not declare proxy: true",
+                         failure=FAIL_IR_PROXY)
+        if declaration.get("band") != block.get("band"):
+            return Check("ir_proxy_declared", FAIL,
+                         f"{where}: declared band {declaration.get('band')!r}, the manifest's is "
+                         f"{block.get('band')!r}", failure=FAIL_IR_PROXY)
+        declared = declaration.get("tables_sha256")
+        expected = block.get("tables_sha256")
+        if not isinstance(declared, dict) or not isinstance(expected, dict) or declared != expected:
+            roles = sorted(set(declared or {}) | set(expected or {}))
+            differ = [r for r in roles if (declared or {}).get(r) != (expected or {}).get(r)]
+            return Check("ir_proxy_declared", FAIL,
+                         f"{where}: the tables' sha256s differ from the manifest's "
+                         f"({', '.join(differ) or 'no tables declared'})", failure=FAIL_IR_PROXY)
+        data = image.read_bytes()
+        try:
+            size = int(declaration["width_px"]) * int(declaration["height_px"]) * 4
+        except (KeyError, TypeError, ValueError):
+            size = -1
+        if hashlib.sha256(data).hexdigest() != declaration.get("sha256") or len(data) != size:
+            return Check("ir_proxy_declared", FAIL,
+                         f"{where}: the image's sha256 or size is not the one its declaration records",
+                         failure=FAIL_IR_PROXY)
+    return Check("ir_proxy_declared", PASS,
+                 f"{len(images)} IR frame(s) declare proxy: true, the manifest's band and every "
+                 f"table's sha256 ({len(next(iter(blocks.values())).get('tables_sha256') or {})} "
+                 f"tables), and their own digest")
+
+
 # -- P7: the wake-vortex pair's selftest vectors -------------------------------
 
 #: How far the checker's own evaluation of the card's field may sit from
@@ -5209,6 +5710,1914 @@ def verify_wake_selftest(manifest: Dict, run_dir=None) -> Check:
                     f"PASS over {host_files} render.json, worst {host_worst:.3e}"))
 
 
+# -- P9: the physics blocks as the render host reports them ----------------------
+
+FAIL_HOST_PHYSICS = "check.host_physics"
+#: The render.json ``environment`` keys the engine side adds (P9), each
+#: graded against the run's card.json ONLY when a render.json carries it
+#: (``wake_selftest`` is check.wake_selftest's).
+HOST_PHYSICS_KEYS = ("atmosphere_delivery", "loading_applied", "loading_readback_cg_in",
+                     "failure_schedule_applied", "gust_delivery", "gust_rows_applied",
+                     "derived_aircraft_sha256", "layered_wind", "icing_applied")
+#: Slack on the failure timing's one-step window: the host's run clock is
+#: read back through JSBSim's property text, so a write landing exactly on
+#: a step boundary may read a hair either side of it.
+HOST_FAILURE_SLACK_S = 1e-9
+
+
+def _host_number(value) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(float(value)) else None
+
+
+def verify_host_physics(manifest: Dict, run_dir=None) -> Check:
+    """What the render host says it applied from the card's physics blocks
+    (FlightSimScenarioWorld::AppendEnvironmentReport), graded against the
+    run's own card.json key by key, each ONLY when a render.json carries it:
+    ``atmosphere_delivery`` needs the card's atmosphere block;
+    ``loading_applied`` must be true and ``loading_readback_cg_in`` within
+    the card's ``tolerance_in`` of ``expected_cg_in``; every
+    ``failure_schedule_applied[]`` entry names the card's event in order and
+    landed at the first step at or past ``at_s`` (0 <= t_applied - at_s <
+    one step; null only for an event past the card's duration);
+    ``gust_delivery`` is 'wake_port' when the card carries a wake, 'table'
+    when it carries a gust table alone, with ``gust_rows_applied`` between 1
+    and the table's rows (0 without a table); ``derived_aircraft_sha256``
+    equals the card's xml_sha256 and, where the manifest records a
+    derivation, its derived_sha256; ``layered_wind`` names the card's
+    profile kind; ``icing_applied`` is true with an icing block on the card.
+    NOT RUN without a run directory, a card.json, or any render.json
+    carrying one of the keys (the engine side is a Windows step) -- never a
+    pass on absence. FAIL (check.host_physics) on the first disagreement.
+    What is NOT checked: that the values reached the FDM (the host's own
+    read-back and telemetry are), and the wake vectors (check.wake_selftest)."""
+    if run_dir is None:
+        return Check("host_physics", NOT_RUN, "no run directory: no card to read")
+    card_path = Path(run_dir) / "card.json"
+    if not card_path.is_file():
+        return Check("host_physics", NOT_RUN, "no card.json in the run directory")
+    try:
+        card = json.loads(card_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return Check("host_physics", FAIL, f"card.json could not be read: {exc}",
+                     FAIL_HOST_PHYSICS)
+    if not isinstance(card, dict):
+        return Check("host_physics", FAIL, "card.json does not hold a card object",
+                     FAIL_HOST_PHYSICS)
+    reports = []
+    for path in sorted(Path(run_dir).rglob("render.json")):
+        try:
+            render = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        env = render.get("environment") if isinstance(render, dict) else None
+        if isinstance(env, dict) and any(key in env for key in HOST_PHYSICS_KEYS):
+            reports.append((path, env))
+    if not reports:
+        return Check("host_physics", NOT_RUN,
+                     "no render.json carries the engine's physics keys: the engine side "
+                     "is a Windows step")
+    rate = _host_number(card.get("rate_hz"))
+    step = 1.0 / rate if rate and rate > 0.0 else None
+    duration = _host_number(card.get("duration_s"))
+    derivation = ((manifest.get("fdm") or {}).get("derivation") or {}) if isinstance(
+        manifest, dict) else {}
+    graded = 0
+
+    def fail(where: str, why: str) -> Check:
+        return Check("host_physics", FAIL, f"{where}: {why}", FAIL_HOST_PHYSICS)
+
+    for path, env in reports:
+        where = path.relative_to(Path(run_dir)).as_posix()
+        if "atmosphere_delivery" in env:
+            graded += 1
+            if not isinstance(card.get("atmosphere_properties"), dict):
+                return fail(where, "the host reports a stated day the card does not carry")
+            if not isinstance(env["atmosphere_delivery"], str) or not env["atmosphere_delivery"]:
+                return fail(where, "atmosphere_delivery is not a sentence")
+        if "loading_applied" in env or "loading_readback_cg_in" in env:
+            graded += 1
+            block = card.get("loading_properties")
+            if not isinstance(block, dict):
+                return fail(where, "the host reports a loading the card does not carry")
+            expected = _host_number(block.get("expected_cg_in"))
+            tolerance = _host_number(block.get("tolerance_in"))
+            read = _host_number(env.get("loading_readback_cg_in"))
+            if env.get("loading_applied") is not True:
+                return fail(where, "the host did not apply the card's loading")
+            if expected is None or tolerance is None or read is None:
+                return fail(where, "the loading's read-back or the card's expected centre of "
+                                   "gravity is not a number")
+            if abs(read - expected) > tolerance:
+                return fail(where, f"the host's centre of gravity {read:.4f} in is "
+                                   f"{abs(read - expected):.4f} in from the card's "
+                                   f"{expected:.4f} in (tolerance {tolerance:g} in)")
+        if "failure_schedule_applied" in env:
+            graded += 1
+            block = card.get("failure_schedule")
+            events = block.get("events") if isinstance(block, dict) else None
+            applied = env["failure_schedule_applied"]
+            if not isinstance(events, list) or not isinstance(applied, list):
+                return fail(where, "failure_schedule_applied has no card schedule to answer")
+            if len(applied) != len(events):
+                return fail(where, f"{len(applied)} applied entries for the card's "
+                                   f"{len(events)} events")
+            for index, (event, entry) in enumerate(zip(events, applied)):
+                if not isinstance(entry, dict) or not isinstance(event, dict):
+                    return fail(where, f"failure entry {index} is not an object")
+                if (entry.get("kind") != event.get("kind")
+                        or str(entry.get("target")) != str(event.get("target"))
+                        or _host_number(entry.get("at_s")) != _host_number(event.get("at_s"))):
+                    return fail(where, f"failure entry {index} is not the card's event {index}")
+                at_s = _host_number(event.get("at_s"))
+                t_applied = _host_number(entry.get("t_applied_s"))
+                if t_applied is None:
+                    if entry.get("t_applied_s") is None and duration is not None \
+                            and at_s is not None and at_s >= duration:
+                        continue
+                    return fail(where, f"failure entry {index} was never applied inside the run")
+                if step is None or at_s is None:
+                    return fail(where, "the card states no rate or no event time to judge "
+                                       "the timing by")
+                late = t_applied - at_s
+                if late < -HOST_FAILURE_SLACK_S or late >= step - HOST_FAILURE_SLACK_S:
+                    return fail(where, f"failure entry {index} landed at {t_applied:.6f} s for "
+                                       f"at_s {at_s:g} s, not within the first step at or past it")
+        if "gust_delivery" in env or "gust_rows_applied" in env:
+            graded += 1
+            expected_delivery = ("wake_port" if isinstance(card.get("wake"), dict) else
+                                 "table" if isinstance(card.get("gust_table"), dict) else None)
+            if env.get("gust_delivery") != expected_delivery:
+                return fail(where, f"gust_delivery {env.get('gust_delivery')!r}, the card "
+                                   f"asks for {expected_delivery!r}")
+            rows_applied = env.get("gust_rows_applied")
+            table = card.get("gust_table")
+            rows = table.get("rows") if isinstance(table, dict) else None
+            if isinstance(rows_applied, bool) or not isinstance(rows_applied, int):
+                return fail(where, "gust_rows_applied is not a whole number")
+            if isinstance(rows, list):
+                if not 1 <= rows_applied <= len(rows):
+                    return fail(where, f"{rows_applied} gust rows applied from a "
+                                       f"{len(rows)}-row table")
+            elif rows_applied != 0:
+                return fail(where, f"{rows_applied} gust rows applied with no table on the card")
+        if "derived_aircraft_sha256" in env:
+            graded += 1
+            block = card.get("derived_aircraft")
+            if not isinstance(block, dict):
+                return fail(where, "the host reports a derived airframe the card does not name")
+            logged = env["derived_aircraft_sha256"]
+            if logged != block.get("xml_sha256"):
+                return fail(where, f"the host's XML hash {str(logged)[:16]} is not the card's "
+                                   f"{str(block.get('xml_sha256'))[:16]}")
+            recorded = derivation.get("derived_sha256") if isinstance(derivation, dict) else None
+            if recorded is not None and recorded != logged:
+                return fail(where, f"the host's XML hash {str(logged)[:16]} is not the "
+                                   f"manifest's derived_sha256 {str(recorded)[:16]}")
+        if "layered_wind" in env:
+            graded += 1
+            block = card.get("layered_wind")
+            if not isinstance(block, dict) or env["layered_wind"] != block.get("kind"):
+                return fail(where, f"layered_wind {env['layered_wind']!r} is not the card's "
+                                   f"profile kind")
+        if "icing_applied" in env:
+            graded += 1
+            if not isinstance(card.get("icing_schedule"), dict):
+                return fail(where, "the host reports icing the card does not carry")
+            if env["icing_applied"] is not True:
+                return fail(where, "the host did not apply the card's icing schedule")
+    return Check("host_physics", PASS,
+                 f"{graded} engine report(s) over {len(reports)} render.json agree with the "
+                 f"card; the engine's own read-backs are the Windows steps")
+
+
+# -- R2: the record's own checks and the FDM-rate instruments --------------------
+
+FAIL_READBACK = "record.readback"
+FAIL_NULL_EFFECT = "annotation.null_effect"
+FAIL_UNCERTAINTY = "check.uncertainty_present"
+#: The re-computed root sum square must equal the stated u_val to this
+#: relative tolerance (the block lists every term).
+UNCERTAINTY_RSS_TOL = 1e-9
+
+
+def _applied_records(manifest: Dict):
+    """The record-1 applied_variables list, or None."""
+    block = manifest.get("applied_variables")
+    if not isinstance(block, dict) or block.get("record_version") != 1:
+        return None
+    records = block.get("applied_variables")
+    return records if isinstance(records, list) else None
+
+
+def verify_applied_readback(manifest: Dict) -> Check:
+    """Every applied-variable record that carries a readback agrees with
+    the value it wrote, re-graded here from the record's own numbers
+    (|value - written| against the tolerance, absolute or relative to
+    |written|) and never from its ``agrees`` flag alone; a record whose
+    flag contradicts the arithmetic fails too. NOT RUN without a
+    record-1 block or when no record carries a readback."""
+    records = _applied_records(manifest)
+    if records is None:
+        return Check("applied_readback", NOT_RUN,
+                     "no applied_variables block (record_version 1) in the manifest")
+    checked, problems = 0, []
+    for record in records:
+        readback = record.get("readback") if isinstance(record, dict) else None
+        if not isinstance(readback, dict):
+            continue
+        checked += 1
+        name = record.get("name")
+        try:
+            value = float(readback["value"])
+            written = float(readback["written"])
+            tolerance = float(readback["tolerance"])
+        except (KeyError, TypeError, ValueError):
+            problems.append(f"{name}: a readback without value, written and tolerance")
+            continue
+        allowed = tolerance * abs(written) if readback.get("tolerance_kind") == "relative" else tolerance
+        if not (math.isfinite(value) and math.isfinite(written)) or abs(value - written) > allowed:
+            problems.append(f"{name}: {readback.get('property')} wrote {written!r} and read "
+                            f"{value!r} (tolerance {tolerance!r} {readback.get('tolerance_kind')})")
+        elif readback.get("agrees") is not True:
+            problems.append(f"{name}: the readback agrees by arithmetic but the record says it "
+                            f"does not")
+    if checked == 0:
+        return Check("applied_readback", NOT_RUN,
+                     f"{len(records)} record(s), none carrying a readback")
+    if problems:
+        return Check("applied_readback", FAIL,
+                     f"{len(problems)} of {checked} readback(s) disagree: " + "; ".join(problems[:3]),
+                     failure=FAIL_READBACK)
+    return Check("applied_readback", PASS,
+                 f"{checked} readback(s) re-graded from their own numbers, every one within "
+                 f"its stated tolerance")
+
+
+def verify_null_effect(manifest: Dict) -> Check:
+    """Every applied-variable record with a null test carries a verdict
+    the checker can re-grade: ``ok`` must equal the arithmetic of its
+    kind (reached: |with - without| >= threshold; bounded: <= threshold),
+    and a null PAIR's verdict (reached / silent / ungraded) must agree
+    with that ``ok``. The rule for silence: a ``silent`` verdict is an
+    honest measurement and passes; it FAILS by name only when the record
+    CLAIMS OTHERWISE -- ``ok`` true, or a ``reached`` verdict, beside a
+    difference below the threshold. NOT RUN without a record-1 block or
+    a null test."""
+    records = _applied_records(manifest)
+    if records is None:
+        return Check("null_effect", NOT_RUN,
+                     "no applied_variables block (record_version 1) in the manifest")
+    checked, silent, problems = 0, [], []
+    for record in records:
+        null = record.get("null_test") if isinstance(record, dict) else None
+        if not isinstance(null, dict):
+            continue
+        checked += 1
+        name = record.get("name")
+        try:
+            difference = abs(float(null["with"]) - float(null["without"]))
+            threshold = float(null["threshold"])
+        except (KeyError, TypeError, ValueError):
+            problems.append(f"{name}: a null test without with, without and threshold")
+            continue
+        kind = null.get("kind", "reached")
+        if kind not in ("reached", "bounded"):
+            problems.append(f"{name}: null test kind {kind!r} is not reached or bounded")
+            continue
+        arithmetic = difference <= threshold if kind == "bounded" else difference >= threshold
+        if null.get("ok") is not arithmetic:
+            problems.append(f"{name}: ok {null.get('ok')!r} contradicts |{null.get('with')!r} - "
+                            f"{null.get('without')!r}| against {threshold!r} ({kind})")
+            continue
+        verdict = null.get("verdict")
+        if verdict is None:
+            continue
+        if verdict not in ("reached", "silent", "ungraded"):
+            problems.append(f"{name}: verdict {verdict!r} is not reached, silent or ungraded")
+        elif verdict == "silent":
+            silent.append(str(name))
+            if arithmetic and kind == "reached":
+                problems.append(f"{name}: the pair reads silent yet the record claims the "
+                                f"threshold was reached")
+        elif verdict == "reached" and not arithmetic and kind == "reached":
+            problems.append(f"{name}: the pair reads reached yet the record's difference "
+                            f"{difference!r} is below its threshold {threshold!r}")
+    if checked == 0:
+        return Check("null_effect", NOT_RUN, f"{len(records)} record(s), none carrying a null test")
+    if problems:
+        return Check("null_effect", FAIL,
+                     f"{len(problems)} of {checked} null test(s) contradict their own numbers: "
+                     + "; ".join(problems[:3]), failure=FAIL_NULL_EFFECT)
+    return Check("null_effect", PASS,
+                 f"{checked} null test(s) re-graded from their own numbers; every verdict "
+                 f"agrees" + (f"; {len(silent)} honest silence(s): {', '.join(silent[:5])}" if silent else ""))
+
+
+def verify_instrument_allan(manifest: Dict, run_dir=None) -> Check:
+    """instruments.npz's IMU residuals against the profile's white density
+    by the checker's own OVERLAPPING Allan deviation (core/telemetry/
+    instruments_check.py, which imports nothing from the producer). NOT
+    RUN without the file (the default ideal set) or a stated IMU."""
+    from ..telemetry.instruments_check import check_allan
+
+    result = check_allan(manifest, run_dir)
+    return Check("instrument_allan", result.status, result.detail, result.failure)
+
+
+def verify_instrument_lever_arm(manifest: Dict, run_dir=None) -> Check:
+    """The GPS antenna arm recovered from the fix residuals and the IMU arm
+    from the specific-force difference against the manifest's declared
+    arms (core/telemetry/instruments_check.py). NOT RUN without the file,
+    a stated instrument or a rotating track."""
+    from ..telemetry.instruments_check import check_lever_arm
+
+    result = check_lever_arm(manifest, run_dir)
+    return Check("instrument_lever_arm", result.status, result.detail, result.failure)
+
+
+def verify_uncertainty_present(manifest: Dict) -> Check:
+    """The optional ``uncertainty`` block (R1, core/uncertainty.py): its
+    form is stated, u_num carries a finite value or a stated NOT RUN
+    basis per SRQ, and every u_val is the root sum square of the terms
+    it lists (re-computed here). NOT RUN without the block -- absence is
+    never a pass."""
+    block = manifest.get("uncertainty")
+    if block is None:
+        return Check("uncertainty_present", NOT_RUN,
+                     "no uncertainty block: the capture did not run the dt/2 twin "
+                     "(--uncertainty or record.sensitivity_pairs)")
+    if not isinstance(block, dict) or not block.get("form"):
+        return Check("uncertainty_present", FAIL, "the uncertainty block states no form",
+                     failure=FAIL_UNCERTAINTY)
+    u_num = (block.get("u_num") or {}).get("srq")
+    u_val = block.get("u_val")
+    if not isinstance(u_num, dict) or not isinstance(u_val, dict):
+        return Check("uncertainty_present", FAIL, "the uncertainty block lacks u_num.srq or u_val",
+                     failure=FAIL_UNCERTAINTY)
+    problems, graded = [], 0
+    for srq, part in u_num.items():
+        value = part.get("value") if isinstance(part, dict) else None
+        if value is None:
+            if not str((part or {}).get("basis", "")).startswith("NOT RUN"):
+                problems.append(f"u_num {srq}: no value and no NOT RUN basis")
+            continue
+        if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0.0:
+            problems.append(f"u_num {srq}: {value!r} is not a finite non-negative number")
+    for srq, part in u_val.items():
+        if not isinstance(part, dict):
+            problems.append(f"u_val {srq}: not a block")
+            continue
+        stated = part.get("value")
+        num = part.get("u_num")
+        terms = part.get("u_input_terms") or {}
+        if stated is None:
+            continue
+        if num is None or any(v is None for v in terms.values()):
+            problems.append(f"u_val {srq}: a value with a missing term")
+            continue
+        rss = math.sqrt(float(num) ** 2 + sum(float(v) ** 2 for v in terms.values()))
+        graded += 1
+        if abs(rss - float(stated)) > UNCERTAINTY_RSS_TOL * max(1.0, abs(rss)):
+            problems.append(f"u_val {srq}: stated {stated!r}, the root sum square of its terms is {rss!r}")
+    if problems:
+        return Check("uncertainty_present", FAIL, "; ".join(problems[:3]), failure=FAIL_UNCERTAINTY)
+    return Check("uncertainty_present", PASS,
+                 f"form {block.get('form')!r}; {len(u_num)} u_num SRQ(s) finite or stated NOT RUN; "
+                 f"{graded} u_val(s) equal the root sum square of their listed terms")
+
+
+# -- W2: the buildings against their footprints, the runway raster against its plane ----
+#
+# Both checks read the world documents the manifest's scene block names
+# (scene.buildings -> the <bake>_buildings.json; scene.runway -> the pad's
+# _record.json and its markings PNG), hold each file to the sha256 the
+# manifest recorded, and grade it with THIS module's own geometry: nothing
+# from core/scene runs here. Grid metres are read flat (a manifest position
+# is an offset in the scene's projected CRS about the frame's origin; the
+# host's round-planet ENU differs from it by the grid scale factor -- 0.1 %
+# of range at the example origin, see scene_to_enu -- which the
+# depth-proportional tolerance below absorbs: stated, not measured on an
+# engine frame). Each reports NOT RUN without its evidence and never passes
+# on absence.
+
+#: building_vs_footprint: a building pixel carried back into the scene
+#: through its depth may sit this far outside its footprint prism
+#: (horizontally, or below the seat / above the roof), plus
+#: BUILDING_TOL_DEPTH_FRACTION of its depth (the depth's own quantisation
+#: and the flat grid reading grow with range) ...
+BUILDING_TOL_M = 1.0
+BUILDING_TOL_DEPTH_FRACTION = 0.01
+#: ... and this fraction of a frame's building pixels may miss every prism
+#: (silhouette edge pixels; the 3 % visibility_vs_scene tolerates).
+BUILDING_OUTSIDE_TOL_FRACTION = 0.03
+#: At most this many building pixels are carried back per frame (a
+#: deterministic stride over the rest, stated in the detail).
+BUILDING_MAX_PIXELS = 20000
+BUILDING_ALL_ID = "building:all"
+FAIL_BUILDING = "check.building_vs_footprint"
+
+#: runway_vs_geometry: the raster's threshold, placed on the runway plane,
+#: may project this many pixels from the runway's own threshold (the
+#: blueprint's Windows step 8 bound on the runway mask residual).
+RUNWAY_RESIDUAL_TOL_PX = 2.0
+#: The checker's own copy of the Annex 14 5.2.4 threshold stripes (from
+#: memory, unverified here, as the producer's): they start 6 m past the
+#: threshold and run 30 m; the count is the largest width row not above
+#: the runway's width.
+RUNWAY_STRIPE_START_M = 6.0
+RUNWAY_STRIPE_LENGTH_M = 30.0
+RUNWAY_STRIPES_BY_WIDTH = ((18.0, 4), (23.0, 6), (30.0, 8), (45.0, 12), (60.0, 16))
+#: The raster's resolution, metres per pixel.
+RUNWAY_PX_M = 0.1
+#: The threshold re-projected here from the spec's latitude and longitude
+#: may sit this far from the document's geometry (a representation bound).
+RUNWAY_GEOMETRY_TOL_M = 0.01
+FAIL_RUNWAY = "check.runway_vs_geometry"
+
+
+def _world_file(where, run_dir) -> Optional[Path]:
+    """A file a world block names: the recorded path, else the same name
+    inside the run directory; None when neither is on this machine."""
+    if not where:
+        return None
+    path = Path(str(where))
+    if path.is_file():
+        return path
+    if run_dir is not None and (Path(run_dir) / path.name).is_file():
+        return Path(run_dir) / path.name
+    return None
+
+
+def _world_sha256(path: Path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _frame_grid_origin(manifest: Dict):
+    """(crs, origin_x_m, origin_y_m) of the manifest's frame, or None."""
+    frame = manifest.get("frame")
+    if not isinstance(frame, dict):
+        return None
+    try:
+        return str(frame["crs"]), float(frame["origin_x_m"]), float(frame["origin_y_m"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _ring_distance(xs, ys, ring):
+    """Horizontal distance from each point to a footprint ring: 0 inside
+    (even-odd rule), else to the nearest edge. Vectorised, written here."""
+    import numpy as np
+
+    inside = np.zeros(xs.shape, dtype=bool)
+    best = np.full(xs.shape, np.inf)
+    n = len(ring)
+    for i in range(n):
+        x0, y0 = ring[i]
+        x1, y1 = ring[(i + 1) % n]
+        crosses = (y0 > ys) != (y1 > ys)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            x_cross = x0 + (ys - y0) * (x1 - x0) / (y1 - y0)
+        inside ^= crosses & (xs < x_cross)
+        dx, dy = x1 - x0, y1 - y0
+        length2 = dx * dx + dy * dy
+        t = (np.zeros(xs.shape) if length2 <= 0.0
+             else np.clip(((xs - x0) * dx + (ys - y0) * dy) / length2, 0.0, 1.0))
+        best = np.minimum(best, np.hypot(xs - (x0 + t * dx), ys - (y0 + t * dy)))
+    return np.where(inside, 0.0, best)
+
+
+@_reads_the_bundle
+def verify_building_vs_footprint(manifest: Dict, run_dir=None) -> Check:
+    """The building pixels of the ID image against the cached footprints.
+
+    The manifest's ``scene.buildings`` block names the buildings document
+    (its sha256 held to the manifest's) and ``objects[]`` the one
+    ``building:all`` id. Per labelled frame, two clauses by this module's
+    own unprojection: (1) every building pixel, carried back into the
+    scene through its depth along its own ray, lies inside some footprint
+    prism -- the ring, from the block's seat to its roof -- within
+    BUILDING_TOL_M + BUILDING_TOL_DEPTH_FRACTION x depth, all but
+    BUILDING_OUTSIDE_TOL_FRACTION of them; (2) every roof centre that
+    projects into the frame with the depth there agreeing with it (visible,
+    not occluded) carries the building id within one pixel, and no roof
+    centre the depth sees past (a block the footprints put there and the
+    render did not draw). FAIL (check.building_vs_footprint) on a document
+    that changed, a frame or CRS mismatch, a stated set with no
+    building:all object, either clause. NOT RUN without a footprint set
+    (no scene.buildings, or its document not on this machine), without an
+    ID image and depth, or with no building in view. What is NOT checked:
+    per-building identity (the 8-bit stencil carries one aggregate id), a
+    roof shape beyond LoD1, the pad seat against a surveyed DTM."""
+    name = "building_vs_footprint"
+    block = (manifest.get("scene") or {}).get("buildings")
+    if not isinstance(block, dict):
+        return Check(name, NOT_RUN, "the manifest names no footprint set (no scene.buildings): "
+                                    "nothing to carry the ID image back against")
+    path = _world_file(block.get("document"), run_dir)
+    if path is None:
+        return Check(name, NOT_RUN, f"the buildings document {block.get('document')!r} is not on "
+                                    f"this machine: no footprint set to grade against")
+    digest = _world_sha256(path)
+    if digest != block.get("document_sha256"):
+        return Check(name, FAIL, f"{path.name}: sha256 {digest[:16]}... is not the manifest's "
+                                 f"{str(block.get('document_sha256'))[:16]}...: the footprints "
+                                 f"changed after the capture", failure=FAIL_BUILDING)
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        crs = str(document["bake"]["crs"])
+        prisms = [([(float(p[0]), float(p[1])) for p in b["polygon_xy"]],
+                   float(b["pad_seat_m"]), float(b["top_z_m"]),
+                   (float(b["centroid_xy"][0]), float(b["centroid_xy"][1])), str(b["id"]))
+                  for b in document["buildings"]]
+    except (OSError, ValueError, KeyError, TypeError, IndexError) as exc:
+        return Check(name, FAIL, f"{path.name} lacks what the unprojection needs ({exc!r})",
+                     failure=FAIL_BUILDING)
+    if document.get("sha256") != block.get("sha256"):
+        return Check(name, FAIL, f"{path.name} extrudes the footprint file "
+                                 f"{str(document.get('sha256'))[:16]}..., the manifest names "
+                                 f"{str(block.get('sha256'))[:16]}...", failure=FAIL_BUILDING)
+    origin = _frame_grid_origin(manifest)
+    if origin is None:
+        return Check(name, NOT_RUN, "the manifest declares no projected frame, so the footprints "
+                                    "cannot be placed in the scene")
+    if origin[0] != crs:
+        return Check(name, FAIL, f"the footprints are in {crs}, the manifest's frame in "
+                                 f"{origin[0]}", failure=FAIL_BUILDING)
+    entries = [o for o in _declared_objects(manifest) if o.get("id") == BUILDING_ALL_ID]
+    if not entries:
+        return Check(name, FAIL, "the manifest names a footprint set but objects[] declares no "
+                                 "building:all object, so the ID image cannot carry it",
+                     failure=FAIL_BUILDING)
+    int_id = int(entries[0]["int_id"])
+    if not _engine_label_records(run_dir):
+        return Check(name, NOT_RUN, _no_bundle_reason())
+    if not prisms:
+        return Check(name, NOT_RUN, f"{path.name} extrudes no building on the bake")
+    import numpy as np
+
+    _, ox, oy = origin
+    frames = pixels = roofs = 0
+    worst = 0.0
+    strided = False
+    for record, camera, fname, engine, folder in _bundle_frames(manifest, run_dir):
+        labels = engine["labels"]
+        if not labels.get("mask"):
+            continue
+        mask = _read_gray_png(folder / labels["mask"])
+        if mask is None:
+            return Check(name, NOT_RUN, "Pillow unavailable")
+        height, width = mask.shape[:2]
+        depth = _read_depth_metres(folder, labels, width, height)
+        if isinstance(depth, str):
+            continue
+        frames += 1
+        forward, right, up = axes_from_quat(record["quaternion_wxyz"])
+        cx, cy = record["principal_point_px"]
+        fx, fy = float(record["fx_px"]), float(record["fy_px"])
+        pn, pe, pa = (float(record["position_north_m"]), float(record["position_east_m"]),
+                      float(record["position_alt_m"]))
+        rows, cols = np.nonzero(mask == int_id)
+        if rows.size:
+            stride = max(1, int(math.ceil(rows.size / BUILDING_MAX_PIXELS)))
+            strided = strided or stride > 1
+            rows, cols = rows[::stride], cols[::stride]
+            z = depth[rows, cols]
+            finite = np.isfinite(z) & (z > 0.0)
+            z = np.where(finite, z, 0.0)
+            d = (cols + 0.5 - cx) / fx
+            e = (rows + 0.5 - cy) / fy
+            north = pn + z * (forward[0] + d * right[0] - e * up[0])
+            east = pe + z * (forward[1] + d * right[1] - e * up[1])
+            alt = pa + z * (forward[2] + d * right[2] - e * up[2])
+            xs, ys = ox + east, oy + north
+            residual = np.full(z.shape, np.inf)
+            for ring, seat, top, _, _ in prisms:
+                horizontal = _ring_distance(xs, ys, ring)
+                vertical = np.maximum(0.0, np.maximum(seat - alt, alt - top))
+                residual = np.minimum(residual, np.maximum(horizontal, vertical))
+            residual = np.where(finite, residual, np.inf)
+            tol = BUILDING_TOL_M + BUILDING_TOL_DEPTH_FRACTION * z
+            miss = residual > tol
+            fraction = float(np.count_nonzero(miss)) / float(rows.size)
+            graded = residual[np.isfinite(residual)]
+            if graded.size:
+                worst = max(worst, float(graded.max()))
+            pixels += int(rows.size)
+            if fraction > BUILDING_OUTSIDE_TOL_FRACTION:
+                far = residual[miss]
+                far = far[np.isfinite(far)]
+                return Check(name, FAIL,
+                             f"{camera}/{fname}: {np.count_nonzero(miss)} of {rows.size} building "
+                             f"pixels ({fraction:.1%}) land outside every footprint prism "
+                             f"(bound {BUILDING_OUTSIDE_TOL_FRACTION:.0%}; "
+                             + (f"median miss {float(np.median(far)):.2f} m" if far.size else
+                                "no finite depth under them") + ")", failure=FAIL_BUILDING)
+        for ring, seat, top, centroid, ident in prisms:
+            u, v, zc = project_point(record, (centroid[1] - oy, centroid[0] - ox, top),
+                                     (forward, right, up))
+            if zc <= 0.0 or not (0.0 <= u < width and 0.0 <= v < height):
+                continue
+            px, py = int(math.floor(u)), int(math.floor(v))
+            seen = float(depth[py, px])
+            tol = BUILDING_TOL_M + BUILDING_TOL_DEPTH_FRACTION * zc
+            if math.isfinite(seen) and seen < zc - tol:
+                continue                            # something nearer hides the roof
+            roofs += 1
+            if not math.isfinite(seen) or seen > zc + tol:
+                return Check(name, FAIL,
+                             f"{camera}/{fname}: the roof of {ident} projects to ({u:.1f}, {v:.1f}) "
+                             f"at {zc:.1f} m but the depth there sees past it "
+                             f"({seen:.1f} m): a block the footprints place is not drawn",
+                             failure=FAIL_BUILDING)
+            window = mask[max(0, py - 1):py + 2, max(0, px - 1):px + 2]
+            if not np.any(window == int_id):
+                return Check(name, FAIL,
+                             f"{camera}/{fname}: the roof of {ident} is visible at ({u:.1f}, "
+                             f"{v:.1f}) but the ID image does not carry building:all "
+                             f"({int_id}) there", failure=FAIL_BUILDING)
+    if frames == 0:
+        return Check(name, NOT_RUN, "no labelled frame declares both an ID image and a depth")
+    if pixels == 0 and roofs == 0:
+        return Check(name, NOT_RUN, f"no building is in view in {frames} labelled frame(s)")
+    return Check(name, PASS,
+                 f"{pixels} building pixels over {frames} frame(s) carried back through their "
+                 f"depth land in the {len(prisms)} footprint prisms (worst {worst:.2f} m; bound "
+                 f"{BUILDING_TOL_M:g} m + {BUILDING_TOL_DEPTH_FRACTION:.0%} of depth, "
+                 f"{BUILDING_OUTSIDE_TOL_FRACTION:.0%} of pixels"
+                 + ("; a stride over the pixels" if strided else "") + f"); {roofs} visible "
+                 f"roof centre(s) carry building:all")
+
+
+def verify_runway_vs_geometry(manifest: Dict, run_dir=None) -> Check:
+    """The runway's marking raster against the runway's own plane.
+
+    The manifest's ``scene.runway`` block names the runway document and
+    the markings PNG (each held to the manifest's sha256). The checker
+    reads the raster itself: the threshold stripes' first painted row,
+    less the stripes' 6 m start, is the raster's threshold offset along
+    the runway; the stripe runs across their middle row are counted
+    against the checker's own width table; the stripes' painted extent
+    gives the raster's offset across. The runway's own threshold is
+    re-projected here from the spec's latitude and longitude (held to the
+    document's geometry within RUNWAY_GEOMETRY_TOL_M) and oriented by the
+    stated heading; both thresholds are placed on the pad's plane and
+    projected into every frame that sees them, and the residual in pixels
+    is held to RUNWAY_RESIDUAL_TOL_PX. FAIL (check.runway_vs_geometry) on a
+    changed document or raster, a raster of the wrong size or resolution,
+    a stripe count that is not the width's, a geometry that is not the
+    spec's threshold, a residual over the bound. NOT RUN without a runway
+    (no scene.runway, or its files not on this machine), without threshold
+    stripes to find, or with no frame that sees the threshold. The engine
+    half (the drape in a rendered frame) is reported NOT RUN inside the
+    detail until a render.json carries a runway mask (a Windows step)."""
+    name = "runway_vs_geometry"
+    block = (manifest.get("scene") or {}).get("runway")
+    if not isinstance(block, dict):
+        return Check(name, NOT_RUN, "the manifest names no runway (no scene.runway): nothing to "
+                                    "grade")
+    path = _world_file(block.get("document"), run_dir)
+    raster_path = _world_file(block.get("markings"), run_dir)
+    if path is None or raster_path is None:
+        return Check(name, NOT_RUN, "the runway document or its markings raster is not on this "
+                                    "machine")
+    for where, key in ((path, "document_sha256"), (raster_path, "markings_sha256")):
+        digest = _world_sha256(where)
+        if digest != block.get(key):
+            return Check(name, FAIL, f"{where.name}: sha256 {digest[:16]}... is not the "
+                                     f"manifest's {str(block.get(key))[:16]}...: the runway "
+                                     f"changed after the capture", failure=FAIL_RUNWAY)
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        spec = document["spec"]
+        geometry = document["geometry"]
+        plane = document["pad"]["statistics"]["plane"]
+        a, b, c = float(plane["a_m"]), float(plane["b_per_m"]), float(plane["c_per_m"])
+        length_m, width_m = float(spec["length_m"]), float(spec["width_m"])
+        lat, lon = float(spec["threshold_lat_deg"]), float(spec["threshold_lon_deg"])
+        heading = math.radians(float(spec["heading_deg"]))
+        crs = str(geometry["crs"])
+        doc_x0, doc_y0 = (float(v) for v in geometry["threshold_xy"])
+        px_m = float(document["markings"]["measurement"]["px_m"])
+        elements = list(spec.get("markings") or [])
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return Check(name, FAIL, f"{path.name} lacks what the check needs ({exc!r})",
+                     failure=FAIL_RUNWAY)
+    if "threshold" not in elements:
+        return Check(name, NOT_RUN, "the runway states no threshold stripes: the raster carries "
+                                    "no threshold for the checker to find")
+    if abs(px_m - RUNWAY_PX_M) > 1e-12:
+        return Check(name, FAIL, f"the raster declares {px_m:g} m per pixel, not "
+                                 f"{RUNWAY_PX_M:g}", failure=FAIL_RUNWAY)
+    import numpy as np
+
+    array = _read_gray_png(raster_path)
+    if array is None:
+        return Check(name, NOT_RUN, "Pillow unavailable")
+    painted = np.asarray(array) > 127
+    expected_shape = (int(round(length_m / RUNWAY_PX_M)), int(round(width_m / RUNWAY_PX_M)))
+    if painted.ndim != 2 or painted.shape != expected_shape:
+        return Check(name, FAIL, f"{raster_path.name} is {list(painted.shape)} pixels; a "
+                                 f"{length_m:g} x {width_m:g} m runway at {RUNWAY_PX_M:g} m is "
+                                 f"{list(expected_shape)}", failure=FAIL_RUNWAY)
+    rows = np.nonzero(painted.any(axis=1))[0]
+    if rows.size == 0:
+        return Check(name, FAIL, f"{raster_path.name} holds no paint although threshold stripes "
+                                 f"are stated", failure=FAIL_RUNWAY)
+    first = int(rows[0])
+    delta_s = first * RUNWAY_PX_M - RUNWAY_STRIPE_START_M
+    middle = painted[min(painted.shape[0] - 1,
+                         first + int(round(RUNWAY_STRIPE_LENGTH_M / 2.0 / RUNWAY_PX_M)))]
+    starts = middle & ~np.concatenate(([False], middle[:-1]))
+    runs = int(np.count_nonzero(starts))
+    expected = None
+    for row_width, count in RUNWAY_STRIPES_BY_WIDTH:
+        if width_m >= row_width:
+            expected = count
+    if runs != expected:
+        return Check(name, FAIL, f"{raster_path.name}: {runs} threshold stripes read across the "
+                                 f"stripes' middle row; a {width_m:g} m runway has {expected}",
+                     failure=FAIL_RUNWAY)
+    columns = np.nonzero(middle)[0]
+    delta_t = (float(columns[0] + columns[-1] + 1) / 2.0) * RUNWAY_PX_M - width_m / 2.0
+    origin = _frame_grid_origin(manifest)
+    if origin is None:
+        return Check(name, NOT_RUN, "the manifest declares no projected frame, so the runway "
+                                    "cannot be placed in the scene")
+    if origin[0] != crs:
+        return Check(name, FAIL, f"the runway is placed in {crs}, the manifest's frame is "
+                                 f"{origin[0]}", failure=FAIL_RUNWAY)
+    try:
+        from pyproj import Transformer
+    except ImportError:                     # pragma: no cover
+        return Check(name, NOT_RUN, "pyproj unavailable: the threshold cannot be re-projected")
+    x0, y0 = Transformer.from_crs("EPSG:4326", crs, always_xy=True).transform(lon, lat)
+    if math.hypot(x0 - doc_x0, y0 - doc_y0) > RUNWAY_GEOMETRY_TOL_M:
+        return Check(name, FAIL, f"the document places the threshold "
+                                 f"{math.hypot(x0 - doc_x0, y0 - doc_y0):.2f} m from where the "
+                                 f"spec's latitude and longitude project", failure=FAIL_RUNWAY)
+    along = (math.sin(heading), math.cos(heading))
+    across = (math.cos(heading), -math.sin(heading))
+    _, ox, oy = origin
+
+    def place(s, t):
+        x = x0 + s * along[0] + t * across[0]
+        y = y0 + s * along[1] + t * across[1]
+        return (y - oy, x - ox, a + b * s + c * t)
+
+    half = width_m / 2.0
+    own = [place(0.0, -half), place(0.0, half)]
+    drawn = [place(delta_s, -half + delta_t), place(delta_s, half + delta_t)]
+    frames = 0
+    worst = 0.0
+    for record in manifest.get("frames", []):
+        if not isinstance(record, dict):
+            continue
+        try:
+            axes = axes_from_quat(record["quaternion_wxyz"])
+            width_px = float(record.get("width_px") or 2.0 * record["principal_point_px"][0])
+            height_px = float(record.get("height_px") or 2.0 * record["principal_point_px"][1])
+            points = [project_point(record, p, axes) for p in own + drawn]
+        except (KeyError, TypeError, ValueError, IndexError):
+            continue
+        if any(p[2] <= 0.0 for p in points):
+            continue
+        if not any(0.0 <= p[0] < width_px and 0.0 <= p[1] < height_px for p in points[:2]):
+            continue
+        frames += 1
+        for mine, theirs in zip(points[:2], points[2:]):
+            worst = max(worst, math.hypot(mine[0] - theirs[0], mine[1] - theirs[1]))
+    if frames == 0:
+        return Check(name, NOT_RUN, "no frame sees the runway threshold in front of its camera")
+    detail = (f"the raster's threshold (first painted row {first}, offset {delta_s:+.2f} m along, "
+              f"{delta_t:+.2f} m across; {runs} stripes for {width_m:g} m) on the pad plane "
+              f"projects within {worst:.2f} px of the runway's own threshold over {frames} "
+              f"frame(s) (bound {RUNWAY_RESIDUAL_TOL_PX:g} px)")
+    if worst > RUNWAY_RESIDUAL_TOL_PX:
+        return Check(name, FAIL, detail.replace("projects within", "projects"), failure=FAIL_RUNWAY)
+    return Check(name, PASS, detail + "; engine half NOT RUN (no render.json carries a runway "
+                                      "mask: the drape is a Windows step)")
+
+
+# -- S2: the passes as data -- flow, disparity, points, amodal ------------------
+#
+# The derived passes (core/capture/passes.py; the amodal keys by
+# core/capture/labels.py) are graded here from the same files with this
+# module's OWN readers, rotation, pinhole and z-test; nothing from the
+# producers runs. Each camera's passes.json names every file with its
+# sha256, and a file whose bytes are not the ones named fails by the
+# pass's name. The neighbouring telemetry samples the flow was computed
+# against are the manifest frame's ``passes.neighbours``, cross-checked
+# here against the manifest's own frames at those samples and against the
+# run card's solved track where the run carries one.
+
+#: flow_vs_keypoints: the flow at a keypoint's pixel against the checker's
+#: own prediction for the surface that pixel shows, moved rigidly with the
+#: keypoint's aircraft between the two telemetry samples (px).
+FLOW_KEYPOINT_TOL_PX = 0.25
+#: flow_vs_keypoints: validity bits that may disagree with the checker's
+#: own z-test, as a fraction of the surface pixels (float ties at the
+#: tolerance and at pixel edges), never fewer than the floor in pixels.
+FLOW_BITS_MISMATCH_FRACTION = 0.001
+FLOW_BITS_MISMATCH_MIN_PX = 2
+#: flow_static_null: the static world under a camera that did not move
+#: carries no flow beyond this (an exact zero is exact in float32).
+STATIC_NULL_TOL_PX = 1e-3
+#: flow_static_null: the static world under a moving camera against the
+#: checker's own camera-only flow (px).
+STATIC_FLOW_TOL_PX = 0.25
+#: Pose differences under which a camera counts as still, and neighbour
+#: records agree with the manifest's own (m and quaternion components).
+STILL_CAMERA_TOL = 1e-9
+NEIGHBOUR_TOL = 1e-9
+#: disparity_vs_right_depth: the right camera's centre against the left's
+#: plus B along the left's right axis (m; a representation tolerance).
+STEREO_RIG_TOL_M = 1e-6
+#: disparity_vs_right_depth: the stored disparity against the checker's
+#: own f_x B / Z (px; float32 storage).
+DISPARITY_FORMULA_TOL_PX = 1e-3
+#: disparity_vs_right_depth: the fraction of the left surface pixels whose
+#: disparity-shifted right pixel shows the same depth (within the depth
+#: tolerance); the rest are occlusions and the image edge.
+DISPARITY_RIGHT_AGREE_MIN = 0.9
+#: points_vs_depth: a point's reprojection against its pixel centre (px),
+#: its z against the depth there (m, plus float32's relative step).
+POINTS_REPROJECTION_TOL_PX = 1e-3
+POINTS_DEPTH_TOL_M = 1e-3
+POINTS_DEPTH_TOL_FRACTION = 1e-6
+#: amodal_contains_visible: how far the amodal box may reach outside the
+#: projected extents box (bbox_2d_unclipped), px.
+AMODAL_BOX_SLACK_PX = 2.0
+#: amodal_contains_visible: the record's ratio against the checker's count.
+AMODAL_RATIO_TOL = 1e-9
+
+FAIL_DISPARITY = "annotation.disparity"
+FAIL_POINTS = "annotation.points"
+FAIL_AMODAL = "annotation.amodal"
+PASSES_DOCUMENT = "passes.json"
+FLOW_BIT_VALID, FLOW_BIT_OCCLUDED, FLOW_BIT_OUT_OF_FRAME = 1, 2, 4
+
+
+def _no_passes_reason(word: str) -> str:
+    return (f"no passes.json names a {word} pass (no camera asks for it in "
+            f"cameras[i].passes, or no render): render on Windows with the pass "
+            f"asked for to exercise this")
+
+
+def _passes_documents(run_dir) -> Dict[str, Dict[str, Dict]]:
+    """{camera: {frame name: passes.json entry}}, own JSON reader."""
+    out: Dict[str, Dict[str, Dict]] = {}
+    if run_dir is None:
+        return out
+    frames_dir = Path(run_dir) / "frames"
+    if not frames_dir.is_dir():
+        return out
+    for camera_dir in sorted(p for p in frames_dir.iterdir() if p.is_dir()):
+        path = camera_dir / PASSES_DOCUMENT
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise BundleFileError(_unreadable(path, OSError(str(exc)))) from exc
+        if isinstance(payload, dict) and isinstance(payload.get("frames"), list):
+            out[camera_dir.name] = {str(e.get("frame")): e for e in payload["frames"]
+                                    if isinstance(e, dict)}
+    return out
+
+
+def _passes_frames(manifest: Dict, run_dir, key: str):
+    """Yield (record, camera, name, entry, folder) for every manifest frame
+    whose passes.json entry carries ``key``."""
+    documents = _passes_documents(run_dir)
+    for record in manifest.get("frames", []):
+        camera = str(record.get("camera_id"))
+        name = Path(str(record.get("file"))).name
+        entry = documents.get(camera, {}).get(name)
+        if isinstance(entry, dict) and key in entry:
+            yield record, camera, name, entry, Path(run_dir) / "frames" / camera
+
+
+def _passes_file(folder: Path, entry: Dict, key: str):
+    """(path, None) for a passes.json-named file whose bytes hash to the
+    recorded sha256, else (None, the reason)."""
+    item = (entry.get("files") or {}).get(key)
+    if not isinstance(item, dict) or not item.get("file"):
+        return None, f"passes.json names no {key} file"
+    path = folder / str(item["file"])
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise BundleFileError(_unreadable(path, exc)) from exc
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != item.get("sha256"):
+        return None, (f"{path.name} is not the file passes.json names (sha256 "
+                      f"{digest[:16]}.. against {str(item.get('sha256'))[:16]}..)")
+    return path, None
+
+
+def _own_values(path: Path, dtype: str, count: Optional[int]):
+    """The file as a flat numpy array of ``dtype``, or None when it does
+    not hold ``count`` values."""
+    import numpy as np
+
+    raw = np.fromfile(path, dtype=dtype)
+    if count is not None and raw.size != count:
+        return None
+    return raw
+
+
+def _own_rows(record: Dict):
+    """The camera's rows (right, -up, forward) in (north, east, up), from
+    this module's own quaternion expansion."""
+    import numpy as np
+
+    forward, right, up = axes_from_quat(record["quaternion_wxyz"])
+    return np.array([right, [-c for c in up], forward], dtype="float64")
+
+
+def _own_centre(record: Dict):
+    import numpy as np
+
+    return np.array([float(record["position_north_m"]), float(record["position_east_m"]),
+                     float(record["position_alt_m"])], dtype="float64")
+
+
+def _own_body_columns(state: Dict):
+    """3 x 3 with the body axes forward, right, down as columns in (north,
+    east, up), from this module's own Euler expansion."""
+    import numpy as np
+
+    forward, right, up = _aircraft_axes_enu(state)
+    return np.array([forward, right, [-c for c in up]], dtype="float64").T
+
+
+def _own_cg(state: Dict):
+    import numpy as np
+
+    return np.array([float(state["north_m"]), float(state["east_m"]),
+                     float(state["alt_m"])], dtype="float64")
+
+
+def _own_scene_points(record: Dict, depth):
+    """Every pixel centre at its depth, in the scene, and the finite mask."""
+    import numpy as np
+
+    height, width = depth.shape
+    fx, fy = float(record["fx_px"]), float(record["fy_px"])
+    cx, cy = (float(c) for c in record["principal_point_px"])
+    finite = np.isfinite(depth) & (depth > 0.0)
+    z = np.where(finite, depth, 0.0)
+    x = ((np.arange(width, dtype="float64") + 0.5)[None, :] - cx) / fx * z
+    y = ((np.arange(height, dtype="float64") + 0.5)[:, None] - cy) / fy * z
+    camera = np.stack([x, y, z], axis=2)
+    return _own_centre(record) + camera @ _own_rows(record), finite
+
+
+def _own_project(record: Dict, points):
+    import numpy as np
+
+    camera = (points - _own_centre(record)) @ _own_rows(record).T
+    fx, fy = float(record["fx_px"]), float(record["fy_px"])
+    cx, cy = (float(c) for c in record["principal_point_px"])
+    z = camera[..., 2]
+    safe = np.where(z > 0.0, z, 1.0)
+    return cx + fx * camera[..., 0] / safe, cy + fy * camera[..., 1] / safe, z
+
+
+def _own_flow(record: Dict, depth, mask, now: Dict, neighbour: Dict):
+    """The checker's own flow and validity bits for one direction: each
+    pixel's surface moved rigidly with its aircraft (static world
+    otherwise) and projected through the neighbour camera; out of frame
+    behind it or outside the image; occluded when the nearest splatted
+    surface at its pixel is another object's and nearer by more than
+    DEPTH_TOL_FRACTION z + DEPTH_TOL_M (the four pixel centres around each
+    warped point receive it). Returns (flow (h, w, 2), bits (h, w), finite)."""
+    import numpy as np
+
+    points, finite = _own_scene_points(record, depth)
+    then = {str(k): v for k, v in (neighbour.get("objects") or {}).items()}
+    moved = points.copy()
+    for key, state in now.items():
+        other = then.get(str(key))
+        if other is None:
+            continue
+        chosen = finite & (mask == int(key))
+        if not np.any(chosen):
+            continue
+        body = (points[chosen] - _own_cg(state)) @ _own_body_columns(state)
+        moved[chosen] = _own_cg(other) + body @ _own_body_columns(other).T
+    target = neighbour["camera"]
+    u2, v2, z2 = _own_project(target, moved)
+    height, width = depth.shape
+    ahead = finite & (z2 > 0.0)
+    flow = np.zeros((height, width, 2), dtype="float64")
+    flow[..., 0] = np.where(ahead, u2 - (np.arange(width) + 0.5)[None, :], 0.0)
+    flow[..., 1] = np.where(ahead, v2 - (np.arange(height) + 0.5)[:, None], 0.0)
+    w2, h2 = int(target["width_px"]), int(target["height_px"])
+    inside = ahead & (u2 >= 0.0) & (u2 < w2) & (v2 >= 0.0) & (v2 < h2)
+    bits = np.zeros((height, width), dtype=np.uint8)
+    us, vs, zs = u2[inside], v2[inside], z2[inside]
+    owners = mask[inside].astype(int)
+    nearest = np.full((h2, w2), np.inf)
+    nearest_owner = np.full((h2, w2), -1, dtype=int)
+    left, top = np.floor(us - 0.5).astype(int), np.floor(vs - 0.5).astype(int)
+    placed = []
+    for du in (0, 1):
+        for dv in (0, 1):
+            cols, rows = left + du, top + dv
+            keep = (cols >= 0) & (cols < w2) & (rows >= 0) & (rows < h2)
+            np.minimum.at(nearest, (rows[keep], cols[keep]), zs[keep])
+            placed.append((rows[keep], cols[keep], zs[keep], owners[keep]))
+    for rows, cols, depths, who in placed:
+        won = depths == nearest[rows, cols]
+        nearest_owner[rows[won], cols[won]] = who[won]
+    at_rows, at_cols = np.floor(vs).astype(int), np.floor(us).astype(int)
+    front = nearest[at_rows, at_cols]
+    hidden = (nearest_owner[at_rows, at_cols] != owners) & (
+        zs > front + DEPTH_TOL_FRACTION * front + DEPTH_TOL_M)
+    bits[inside] = np.where(hidden, FLOW_BIT_OCCLUDED, FLOW_BIT_VALID)
+    bits[finite & ~inside] = FLOW_BIT_OUT_OF_FRAME
+    return flow, bits, finite
+
+
+def _primary_int_id(manifest: Dict) -> int:
+    for entry in _declared_objects(manifest):
+        if entry.get("role") == "primary":
+            return int(entry["int_id"])
+    return AIRCRAFT_INSTANCE_ID
+
+
+def _aircraft_ids(manifest: Dict) -> List[int]:
+    ids = {int(e["int_id"]) for e in _aircraft_entries(_declared_objects(manifest))
+           if "int_id" in e}
+    ids.add(_primary_int_id(manifest))
+    return sorted(ids)
+
+
+def _state_keys_differ(a: Dict, b: Dict) -> Optional[str]:
+    for key in ("north_m", "east_m", "alt_m", "roll_deg", "pitch_deg", "heading_deg"):
+        try:
+            if abs(float(a[key]) - float(b[key])) > NEIGHBOUR_TOL:
+                return key
+        except (KeyError, TypeError, ValueError):
+            return key
+    return None
+
+
+def _camera_keys_differ(a: Dict, b: Dict) -> Optional[str]:
+    for key in ("position_north_m", "position_east_m", "position_alt_m", "fx_px", "fy_px"):
+        try:
+            if abs(float(a[key]) - float(b[key])) > NEIGHBOUR_TOL:
+                return key
+        except (KeyError, TypeError, ValueError):
+            return key
+    try:
+        if any(abs(float(p) - float(q)) > NEIGHBOUR_TOL
+               for p, q in zip(a["quaternion_wxyz"], b["quaternion_wxyz"])):
+            return "quaternion_wxyz"
+    except (KeyError, TypeError, ValueError):
+        return "quaternion_wxyz"
+    return None
+
+
+def _card_cameras(run_dir) -> Dict[str, Dict]:
+    """{camera_id: poses} from the run card, or {} without one."""
+    path = Path(run_dir) / "card.json" if run_dir is not None else None
+    if path is None or not path.is_file():
+        return {}
+    try:
+        card = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {str(c.get("camera_id")): c.get("poses") or {}
+            for c in (card.get("cameras") or []) if isinstance(c, dict)}
+
+
+def _own_neighbour_problem(manifest: Dict, record: Dict, neighbours: Dict,
+                           primary_id: int, card: Dict[str, Dict]) -> Tuple[Optional[str], int]:
+    """(the first disagreement, the number of cross-checks made) between a
+    frame's neighbour block and the manifest's own frames at those samples
+    (the same camera's pose; any frame's primary state) and the run card's
+    solved track (the pose at that sample, axes compared through this
+    module's own Euler and quaternion expansions)."""
+    checked = 0
+    camera = str(record["camera_id"])
+    own_sample = int(record.get("sample_index", -1))
+    current = (neighbours.get("current") or {}).get("objects") or {}
+    mine = current.get(str(primary_id))
+    if mine is None or _state_keys_differ(mine, record.get("aircraft") or {}):
+        return (f"the neighbour block's own-sample primary state is not the frame's "
+                f"aircraft state"), checked
+    for direction, step in (("forward", 1), ("backward", -1)):
+        block = neighbours.get(direction)
+        if block is None:
+            continue
+        target = block.get("camera") or {}
+        try:
+            sample = int(target["sample_index"])
+        except (KeyError, TypeError, ValueError):
+            return f"the {direction} neighbour names no sample", checked
+        if sample != own_sample + step:
+            return (f"the {direction} neighbour is sample {sample}, not the neighbouring "
+                    f"sample {own_sample + step}"), checked
+        for other in manifest.get("frames", []):
+            if int(other.get("sample_index", -2)) != sample:
+                continue
+            key = _state_keys_differ((block.get("objects") or {}).get(str(primary_id)) or {},
+                                     other.get("aircraft") or {})
+            if key:
+                return (f"the {direction} neighbour's primary {key} differs from the "
+                        f"manifest's own frame at sample {sample}"), checked
+            checked += 1
+            if str(other.get("camera_id")) == camera:
+                key = _camera_keys_differ(target, other)
+                if key:
+                    return (f"the {direction} neighbour camera's {key} differs from the "
+                            f"manifest's own frame at sample {sample}"), checked
+                checked += 1
+        poses = card.get(camera)
+        if poses and len(poses.get("t_s") or []) > sample:
+            try:
+                where = (float(poses["north_m"][sample]), float(poses["east_m"][sample]),
+                         float(poses["alt_m"][sample]))
+                axes_card = axes_from_euler(float(poses["roll_deg"][sample]),
+                                            float(poses["pitch_deg"][sample]),
+                                            float(poses["yaw_deg"][sample]))
+            except (KeyError, IndexError, TypeError, ValueError):
+                return f"the run card's track for {camera} cannot be read at sample {sample}", checked
+            gap = math.dist(where, (float(target["position_north_m"]),
+                                    float(target["position_east_m"]),
+                                    float(target["position_alt_m"])))
+            axes_block = axes_from_quat(target["quaternion_wxyz"])
+            turn = max(abs(a - b) for u, w in zip(axes_card, axes_block) for a, b in zip(u, w))
+            if gap > STEREO_RIG_TOL_M or turn > 1e-9:
+                return (f"the {direction} neighbour camera sits {gap:.3g} m and {turn:.3g} "
+                        f"(axis components) from the run card's track at sample {sample}"), checked
+            checked += 1
+    return None, checked
+
+
+def _own_now(record: Dict, neighbours: Dict, primary_id: int) -> Dict[str, Dict]:
+    """The objects' states at the frame's own sample: the primary from the
+    frame's own aircraft block, the others from the neighbour block."""
+    now = {str(k): v for k, v in ((neighbours.get("current") or {}).get("objects") or {}).items()}
+    now[str(primary_id)] = dict(record["aircraft"])
+    return now
+
+
+def _flow_pair(folder: Path, entry: Dict, tag: str, width: int, height: int):
+    """(flow (h, w, 2) float64, bits (h, w) uint8, None) or (None, None, reason)."""
+    path, bad = _passes_file(folder, entry, f"flow_{tag}")
+    if bad:
+        return None, None, bad
+    valid_path, bad = _passes_file(folder, entry, f"flow_{tag}_valid")
+    if bad:
+        return None, None, bad
+    flow = _own_values(path, "<f4", width * height * 2)
+    bits = _own_values(valid_path, "u1", width * height)
+    if flow is None or bits is None:
+        return None, None, (f"{path.name} / {valid_path.name} are not {width} x {height} "
+                            f"flow pairs and bytes")
+    return flow.reshape(height, width, 2).astype("float64"), bits.reshape(height, width), None
+
+
+def _pass_bundle(declared: Dict, camera: str, name: str, folder: Path, record: Dict):
+    """(depth, mask, None) for the frame's render bundle, or (None, None, reason)."""
+    engine = declared.get(camera, {}).get(name)
+    if engine is None:
+        return None, None, "passes.json names a frame the render did not label"
+    labels = engine["labels"]
+    width, height = int(record["width_px"]), int(record["height_px"])
+    depth = _read_depth_metres(folder, labels, width, height)
+    if isinstance(depth, str):
+        return None, None, depth
+    if not labels.get("mask"):
+        return None, None, "the bundle declares no ID image"
+    mask = _read_gray_png(folder / str(labels["mask"]))
+    if mask is None or mask.shape != (height, width):
+        return None, None, f"{labels['mask']} is not an ID image of {width}x{height}"
+    return depth, mask, None
+
+
+@_reads_the_bundle
+def verify_flow_vs_keypoints(manifest: Dict, run_dir=None) -> Check:
+    """The derived flow at the aircraft keypoints, and its validity bits,
+    against the checker's own projection and z-test.
+
+    Per frame and direction with a flow pass: the neighbour block is
+    cross-checked (the manifest's own frames at the neighbouring sample,
+    the run card's track); the checker computes its own flow and bits for
+    the whole frame (:func:`_own_flow`); every aircraft keypoint (the
+    primary's from the airframe block and the frame's own aircraft state,
+    each traffic aircraft's from its block) projected through the frame
+    whose pixel shows that aircraft at the keypoint's depth (the depth
+    tolerance) is a sample: the file's flow there against the checker's
+    within FLOW_KEYPOINT_TOL_PX. The file's validity bits must agree with
+    the checker's over the frame but for FLOW_BITS_MISMATCH_FRACTION of
+    the surface pixels: a dropped z-test (every warped pixel valid) or a
+    wrong bit fails by name (annotation.flow). NOT RUN without a flow
+    pass or with fewer than FLOW_MIN_KEYPOINTS samples. NOT claimed:
+    flow on non-rigid parts, occluders the source frame does not see."""
+    frames = list(_passes_frames(manifest, run_dir, "flow"))
+    if not frames:
+        return Check("flow_vs_keypoints", NOT_RUN, _no_passes_reason("flow"))
+    import numpy as np
+
+    declared = _engine_label_records(run_dir)
+    card = _card_cameras(run_dir)
+    primary_id = _primary_int_id(manifest)
+    keypoints: Dict[int, List] = {}
+    for owner, block in [(primary_id, manifest.get("airframe"))] + [
+            (t.get("int_id"), t.get("airframe")) for t in (manifest.get("traffic") or [])
+            if isinstance(t, dict)]:
+        kps = [(str(k["name"]), tuple(float(c) for c in k["body_m"]))
+               for k in ((block or {}).get("keypoints") or [])
+               if isinstance(k, dict) and k.get("name") and k.get("body_m")]
+        if kps and owner is not None:
+            keypoints[int(owner)] = kps
+    samples: List[Tuple[float, str]] = []
+    own_offsets: List[float] = []
+    occluded_samples = 0
+    crosschecks = 0
+    worst_bits = (-1, 0, "")
+    for record, camera, name, entry, folder in frames:
+        where = f"{camera}/{name}"
+        width, height = int(record["width_px"]), int(record["height_px"])
+        depth, mask, bad = _pass_bundle(declared, camera, name, folder, record)
+        if bad:
+            return Check("flow_vs_keypoints", FAIL, f"{where}: {bad}", failure=FAIL_FLOW)
+        neighbours = (record.get("passes") or {}).get("neighbours")
+        if not isinstance(neighbours, dict):
+            return Check("flow_vs_keypoints", FAIL,
+                         f"{where}: the manifest frame carries no neighbour samples for the "
+                         f"flow passes.json names", failure=FAIL_FLOW)
+        problem, checked = _own_neighbour_problem(manifest, record, neighbours, primary_id, card)
+        if problem:
+            return Check("flow_vs_keypoints", FAIL, f"{where}: {problem}", failure=FAIL_FLOW)
+        crosschecks += checked
+        now = _own_now(record, neighbours, primary_id)
+        for direction, tag in (("forward", "fw"), ("backward", "bw")):
+            flow, bits, bad = _flow_pair(folder, entry, tag, width, height)
+            if bad:
+                return Check("flow_vs_keypoints", FAIL, f"{where}: {bad}", failure=FAIL_FLOW)
+            neighbour = neighbours.get(direction)
+            if neighbour is None:
+                continue                    # the end-of-recording null: flow_static_null's
+            predicted, own_bits, finite = _own_flow(record, depth, mask, now, neighbour)
+            disagree = bits != own_bits
+            count = int(np.count_nonzero(disagree))
+            surface = int(np.count_nonzero(finite))
+            if count > worst_bits[0]:
+                worst_bits = (count, surface, f"{where} {direction}")
+            if count > max(FLOW_BITS_MISMATCH_MIN_PX, FLOW_BITS_MISMATCH_FRACTION * surface):
+                hidden_marked_valid = int(np.count_nonzero(
+                    disagree & (own_bits == FLOW_BIT_OCCLUDED) & (bits == FLOW_BIT_VALID)))
+                return Check("flow_vs_keypoints", FAIL,
+                             f"{where} {direction}: the validity bits disagree with the "
+                             f"checker's own z-test on {count} of {surface} surface pixels "
+                             f"({hidden_marked_valid} it finds occluded are marked valid) -- a "
+                             f"dropped or altered z-test or validity bit", failure=FAIL_FLOW)
+            axes = axes_from_quat(record["quaternion_wxyz"])
+            then = {str(k): v for k, v in (neighbour.get("objects") or {}).items()}
+            for int_id, kps in keypoints.items():
+                state, later = now.get(str(int_id)), then.get(str(int_id))
+                if state is None or later is None:
+                    continue
+                for kp_name, body in kps:
+                    u, v, z = project_point(record, _body_point_enu(body, state), axes)
+                    if not math.isfinite(u):
+                        continue
+                    px, py = int(math.floor(u)), int(math.floor(v))
+                    if not (0 <= px < width and 0 <= py < height):
+                        continue
+                    if int(mask[py, px]) != int_id:
+                        continue
+                    seen = float(depth[py, px])
+                    if not math.isfinite(seen) or abs(seen - z) > DEPTH_TOL_FRACTION * z + DEPTH_TOL_M:
+                        continue            # the pixel shows a nearer part, not the keypoint
+                    du, dv = float(flow[py, px, 0]), float(flow[py, px, 1])
+                    pu, pv = float(predicted[py, px, 0]), float(predicted[py, px, 1])
+                    samples.append((math.hypot(du - pu, dv - pv),
+                                    f"{where} {direction} {int_id}:{kp_name} (flow {du:+.3f},"
+                                    f"{dv:+.3f} px, checker {pu:+.3f},{pv:+.3f} px)"))
+                    if own_bits[py, px] == FLOW_BIT_OCCLUDED:
+                        occluded_samples += 1
+                    u2, v2, _ = project_point(neighbour["camera"], _body_point_enu(body, later))
+                    if math.isfinite(u2):
+                        own_offsets.append(math.hypot((u2 - u) - du, (v2 - v) - dv))
+    if len(samples) < FLOW_MIN_KEYPOINTS:
+        return Check("flow_vs_keypoints", NOT_RUN,
+                     f"only {len(samples)} keypoint sample(s) show their own aircraft at their "
+                     f"own depth over {len(frames)} flow frame(s) (minimum {FLOW_MIN_KEYPOINTS}); "
+                     f"validity bits agreed with the checker's z-test to {max(0, worst_bits[0])} "
+                     f"pixel(s)")
+    worst = max(samples, key=lambda s: s[0])
+    if worst[0] > FLOW_KEYPOINT_TOL_PX:
+        return Check("flow_vs_keypoints", FAIL,
+                     f"the flow at the aircraft keypoints is up to {worst[0]:.3f} px from the "
+                     f"checker's own projection (tolerance {FLOW_KEYPOINT_TOL_PX:g} px) at "
+                     f"{worst[1]} -- a scaled, negated, mis-based or mis-assigned motion",
+                     failure=FAIL_FLOW)
+    return Check("flow_vs_keypoints", PASS,
+                 f"{len(samples)} keypoint samples over {len(frames)} frame(s): the flow within "
+                 f"{worst[0]:.2e} px of the checker's own projection (tolerance "
+                 f"{FLOW_KEYPOINT_TOL_PX:g} px), {occluded_samples} of them occluded at the "
+                 f"neighbour sample; validity bits disagree with the checker's z-test on at "
+                 f"most {max(0, worst_bits[0])} of {worst_bits[1]} surface pixels "
+                 f"({worst_bits[2] or 'no direction with a neighbour'}); "
+                 f"{crosschecks} neighbour cross-check(s) against the manifest and the card; "
+                 f"the keypoints' own displacement differs from their pixel's flow by at most "
+                 f"{max(own_offsets) if own_offsets else 0.0:.3f} px (sub-pixel position, "
+                 f"reported, not graded)")
+
+
+@_reads_the_bundle
+def verify_flow_static_null(manifest: Dict, run_dir=None) -> Check:
+    """The static world's flow is the camera's own motion and nothing else.
+
+    Per frame and direction with a flow pass, over the pixels that show no
+    aircraft (finite depth, an ID that is not an aircraft object's): when
+    the neighbour camera is where the frame's camera was (position and
+    quaternion within STILL_CAMERA_TOL), every such pixel's flow must be
+    zero within STATIC_NULL_TOL_PX -- a static scene gives zero flow;
+    otherwise within STATIC_FLOW_TOL_PX of the checker's own camera-only
+    flow. A direction with no neighbour sample (the end of the recording)
+    must be all zeros with every bit 0, as declared. FAIL annotation.flow;
+    NOT RUN without a flow pass."""
+    frames = list(_passes_frames(manifest, run_dir, "flow"))
+    if not frames:
+        return Check("flow_static_null", NOT_RUN, _no_passes_reason("flow"))
+    import numpy as np
+
+    declared = _engine_label_records(run_dir)
+    aircraft = _aircraft_ids(manifest)
+    still = moving = ends = 0
+    worst_still = worst_moving = 0.0
+    for record, camera, name, entry, folder in frames:
+        where = f"{camera}/{name}"
+        width, height = int(record["width_px"]), int(record["height_px"])
+        depth, mask, bad = _pass_bundle(declared, camera, name, folder, record)
+        if bad:
+            return Check("flow_static_null", FAIL, f"{where}: {bad}", failure=FAIL_FLOW)
+        neighbours = (record.get("passes") or {}).get("neighbours") or {}
+        for direction, tag in (("forward", "fw"), ("backward", "bw")):
+            flow, bits, bad = _flow_pair(folder, entry, tag, width, height)
+            if bad:
+                return Check("flow_static_null", FAIL, f"{where}: {bad}", failure=FAIL_FLOW)
+            neighbour = neighbours.get(direction)
+            if neighbour is None:
+                if np.any(flow != 0.0) or np.any(bits != 0):
+                    return Check("flow_static_null", FAIL,
+                                 f"{where} {direction}: no neighbouring sample, so the flow is "
+                                 f"declared null, but the file holds "
+                                 f"{int(np.count_nonzero(flow.any(axis=2)))} moving pixels and "
+                                 f"{int(np.count_nonzero(bits))} set bits", failure=FAIL_FLOW)
+                ends += 1
+                continue
+            finite = np.isfinite(depth) & (depth > 0.0)
+            static = finite & ~np.isin(mask, aircraft)
+            if not np.any(static):
+                continue
+            target = neighbour["camera"]
+            if _camera_keys_differ(target, record) is None and all(
+                    abs(float(p) - float(q)) <= STILL_CAMERA_TOL
+                    for p, q in zip(target["quaternion_wxyz"], record["quaternion_wxyz"])):
+                largest = float(np.hypot(flow[..., 0], flow[..., 1])[static].max())
+                worst_still = max(worst_still, largest)
+                if largest > STATIC_NULL_TOL_PX:
+                    return Check("flow_static_null", FAIL,
+                                 f"{where} {direction}: the camera did not move, yet the static "
+                                 f"world flows by up to {largest:.4f} px (tolerance "
+                                 f"{STATIC_NULL_TOL_PX:g} px) -- a static scene gives zero flow",
+                                 failure=FAIL_FLOW)
+                still += 1
+                continue
+            points, _ = _own_scene_points(record, depth)
+            u2, v2, z2 = _own_project(target, points)
+            ahead = static & (z2 > 0.0)
+            if not np.any(ahead):
+                continue
+            error = np.hypot(flow[..., 0] - (u2 - (np.arange(width) + 0.5)[None, :]),
+                             flow[..., 1] - (v2 - (np.arange(height) + 0.5)[:, None]))[ahead]
+            largest = float(error.max())
+            worst_moving = max(worst_moving, largest)
+            if largest > STATIC_FLOW_TOL_PX:
+                return Check("flow_static_null", FAIL,
+                             f"{where} {direction}: the static world's flow is up to "
+                             f"{largest:.3f} px from the camera's own motion as the checker "
+                             f"projects it (tolerance {STATIC_FLOW_TOL_PX:g} px)",
+                             failure=FAIL_FLOW)
+            moving += 1
+    if still + moving + ends == 0:
+        return Check("flow_static_null", NOT_RUN,
+                     f"{len(frames)} flow frame(s), none with a static pixel to grade")
+    return Check("flow_static_null", PASS,
+                 f"{still} still-camera direction(s) with the static world at most "
+                 f"{worst_still:.2e} px (the null), {moving} moving-camera direction(s) within "
+                 f"{worst_moving:.2e} px of the camera's own motion, {ends} end-of-recording "
+                 f"direction(s) all zeros as declared")
+
+
+@_reads_the_bundle
+def verify_disparity_vs_right_depth(manifest: Dict, run_dir=None) -> Check:
+    """The stereo rig and its disparity.
+
+    The rig clause (no pixels needed): every left frame of a rig the
+    manifest declares (a camera block's ``stereo`` with role left) has
+    its right frame at the same index, time and sample, with the same
+    quaternion and intrinsics and the centre STEREO_RIG_TOL_M from the
+    left centre plus baseline_m along the left camera's right axis (this
+    module's own axes). The disparity clause, per left frame with a
+    disparity pass: the stored d against the checker's own f_x B / Z of
+    the left depth (DISPARITY_FORMULA_TOL_PX; 0 for sky), and against
+    the RIGHT camera's depth: the right pixel d to the left on the same
+    row shows the same depth (rectified: Z is the same in both cameras)
+    on at least DISPARITY_RIGHT_AGREE_MIN of the left surface pixels that
+    land inside the right image. FAIL annotation.disparity. NOT RUN
+    without a rig, or with no disparity to grade against a right depth."""
+    rigs = {str(b.get("camera_id")): b["stereo"] for b in manifest.get("cameras", []) or []
+            if isinstance(b, dict) and isinstance(b.get("stereo"), dict)
+            and b["stereo"].get("role") == "left"}
+    if not rigs:
+        return Check("disparity_vs_right_depth", NOT_RUN,
+                     "no camera block declares a stereo rig (cameras[i].stereo)")
+    import numpy as np
+
+    by_index = {(str(f.get("camera_id")), int(f.get("index", -1))): f
+                for f in manifest.get("frames", [])}
+    pairs = 0
+    for left_id, rig in rigs.items():
+        right_id = str(rig.get("right_camera_id"))
+        baseline = float(rig.get("baseline_m", 0.0))
+        for record in manifest.get("frames", []):
+            if str(record.get("camera_id")) != left_id:
+                continue
+            other = by_index.get((right_id, int(record["index"])))
+            where = f"{left_id}/{record['index']}"
+            if other is None:
+                return Check("disparity_vs_right_depth", FAIL,
+                             f"{where}: the rig's right camera {right_id!r} has no frame at "
+                             f"this index", failure=FAIL_DISPARITY)
+            for key in ("t_s", "sample_index", "fx_px", "fy_px", "width_px", "height_px"):
+                if other.get(key) != record.get(key):
+                    return Check("disparity_vs_right_depth", FAIL,
+                                 f"{where}: the right frame's {key} is {other.get(key)!r} where "
+                                 f"the left's is {record.get(key)!r} -- not one rectified rig",
+                                 failure=FAIL_DISPARITY)
+            if list(other.get("principal_point_px") or []) != list(record.get("principal_point_px") or []) \
+                    or any(abs(float(p) - float(q)) > 1e-12 for p, q in
+                           zip(other["quaternion_wxyz"], record["quaternion_wxyz"])):
+                return Check("disparity_vs_right_depth", FAIL,
+                             f"{where}: the right camera is not oriented and centred as the "
+                             f"left (principal point or quaternion differ)", failure=FAIL_DISPARITY)
+            _, right_axis, _ = axes_from_quat(record["quaternion_wxyz"])
+            expected = tuple(float(record[k]) + baseline * r for k, r in zip(
+                ("position_north_m", "position_east_m", "position_alt_m"), right_axis))
+            gap = math.dist(expected, (float(other["position_north_m"]),
+                                       float(other["position_east_m"]),
+                                       float(other["position_alt_m"])))
+            if gap > STEREO_RIG_TOL_M:
+                return Check("disparity_vs_right_depth", FAIL,
+                             f"{where}: the right camera sits {gap:.3g} m from the left centre "
+                             f"plus {baseline:g} m along the left's right axis (tolerance "
+                             f"{STEREO_RIG_TOL_M:g} m)", failure=FAIL_DISPARITY)
+            pairs += 1
+    declared = _engine_label_records(run_dir)
+    graded, notes, worst_formula, least_agree = 0, [], 0.0, 1.0
+    for record, camera, name, entry, folder in _passes_frames(manifest, run_dir, "disparity"):
+        where = f"{camera}/{name}"
+        rig = rigs.get(camera)
+        if rig is None:
+            return Check("disparity_vs_right_depth", FAIL,
+                         f"{where}: a disparity pass on a camera that is no rig's left",
+                         failure=FAIL_DISPARITY)
+        width, height = int(record["width_px"]), int(record["height_px"])
+        path, bad = _passes_file(folder, entry, "disparity")
+        if bad:
+            return Check("disparity_vs_right_depth", FAIL, f"{where}: {bad}", failure=FAIL_DISPARITY)
+        stored = _own_values(path, "<f4", width * height)
+        if stored is None:
+            return Check("disparity_vs_right_depth", FAIL,
+                         f"{where}: {path.name} is not {width} x {height} float32 values",
+                         failure=FAIL_DISPARITY)
+        stored = stored.reshape(height, width).astype("float64")
+        engine = declared.get(camera, {}).get(name)
+        if engine is None:
+            return Check("disparity_vs_right_depth", FAIL,
+                         f"{where}: passes.json names a frame the render did not label",
+                         failure=FAIL_DISPARITY)
+        depth = _read_depth_metres(folder, engine["labels"], width, height)
+        if isinstance(depth, str):
+            return Check("disparity_vs_right_depth", FAIL, f"{where}: {depth}",
+                         failure=FAIL_DISPARITY)
+        finite = np.isfinite(depth) & (depth > 0.0)
+        baseline = float(rig["baseline_m"])
+        own = np.where(finite, float(record["fx_px"]) * baseline / np.where(finite, depth, 1.0), 0.0)
+        formula = float(np.abs(stored - own).max())
+        worst_formula = max(worst_formula, formula)
+        if formula > DISPARITY_FORMULA_TOL_PX:
+            return Check("disparity_vs_right_depth", FAIL,
+                         f"{where}: the disparity is up to {formula:.4f} px from the checker's "
+                         f"f_x B / Z at the rig's {baseline:g} m (tolerance "
+                         f"{DISPARITY_FORMULA_TOL_PX:g} px)", failure=FAIL_DISPARITY)
+        right_id = str(rig["right_camera_id"])
+        right_record = by_index.get((right_id, int(record["index"])))
+        right_engine = declared.get(right_id, {}).get(
+            Path(str((right_record or {}).get("file"))).name)
+        if right_engine is None:
+            notes.append(f"{where}: the right camera {right_id} has no depth to compare against")
+            continue
+        right_depth = _read_depth_metres(Path(run_dir) / "frames" / right_id,
+                                         right_engine["labels"], width, height)
+        if isinstance(right_depth, str):
+            return Check("disparity_vs_right_depth", FAIL, f"{right_id}: {right_depth}",
+                         failure=FAIL_DISPARITY)
+        rows, cols = np.nonzero(finite)
+        columns = np.floor(cols + 0.5 - stored[rows, cols]).astype(int)
+        inside = (columns >= 0) & (columns < width)
+        if not np.any(inside):
+            notes.append(f"{where}: no left surface pixel lands inside the right image")
+            continue
+        z_left = depth[rows[inside], cols[inside]]
+        z_right = right_depth[rows[inside], columns[inside]]
+        agree = np.isfinite(z_right) & (np.abs(z_right - z_left)
+                                        <= DEPTH_TOL_FRACTION * z_left + DEPTH_TOL_M)
+        fraction = float(np.count_nonzero(agree)) / float(agree.size)
+        least_agree = min(least_agree, fraction)
+        if fraction < DISPARITY_RIGHT_AGREE_MIN:
+            return Check("disparity_vs_right_depth", FAIL,
+                         f"{where}: only {fraction * 100:.1f} % of the left surface pixels find "
+                         f"their own depth in the right image {right_id} at the stored "
+                         f"disparity (minimum {DISPARITY_RIGHT_AGREE_MIN * 100:g} %) -- the "
+                         f"disparity or the right camera is not the rig", failure=FAIL_DISPARITY)
+        graded += 1
+    rig_note = f"the rig: {pairs} left/right pair(s) rectified by construction as declared"
+    if graded == 0:
+        return Check("disparity_vs_right_depth", NOT_RUN,
+                     f"{rig_note}; no disparity pass with a right depth to grade"
+                     + (f" ({'; '.join(notes[:2])})" if notes else ""))
+    return Check("disparity_vs_right_depth", PASS,
+                 f"{rig_note}; {graded} disparity frame(s) within {worst_formula:.2e} px of "
+                 f"f_x B / Z, at least {least_agree * 100:.1f} % of left surface pixels matching "
+                 f"the right camera's depth (minimum {DISPARITY_RIGHT_AGREE_MIN * 100:g} %)"
+                 + (f"; {'; '.join(notes[:2])}" if notes else ""))
+
+
+@_reads_the_bundle
+def verify_points_vs_depth(manifest: Dict, run_dir=None) -> Check:
+    """The point cloud against the depth it was back-projected from.
+
+    Per frame with a points pass: N x 4 float32 and N id bytes; the
+    reflectance column 0; every point re-projected through the record's
+    pinhole lands on a pixel centre (POINTS_REPROJECTION_TOL_PX) of a
+    finite-depth pixel, at that pixel's depth (POINTS_DEPTH_TOL_M +
+    POINTS_DEPTH_TOL_FRACTION z), with that pixel's ID; every finite
+    pixel exactly once (the sky contributes none); the per-object counts
+    passes.json states are the checker's own. FAIL annotation.points;
+    NOT RUN without a points pass."""
+    frames = list(_passes_frames(manifest, run_dir, "points"))
+    if not frames:
+        return Check("points_vs_depth", NOT_RUN, _no_passes_reason("points"))
+    import numpy as np
+
+    declared = _engine_label_records(run_dir)
+    total = 0
+    worst_px = worst_m = 0.0
+    for record, camera, name, entry, folder in frames:
+        where = f"{camera}/{name}"
+        width, height = int(record["width_px"]), int(record["height_px"])
+        depth, mask, bad = _pass_bundle(declared, camera, name, folder, record)
+        if bad:
+            return Check("points_vs_depth", FAIL, f"{where}: {bad}", failure=FAIL_POINTS)
+        path, bad = _passes_file(folder, entry, "points")
+        if bad:
+            return Check("points_vs_depth", FAIL, f"{where}: {bad}", failure=FAIL_POINTS)
+        id_path, bad = _passes_file(folder, entry, "points_id")
+        if bad:
+            return Check("points_vs_depth", FAIL, f"{where}: {bad}", failure=FAIL_POINTS)
+        raw = _own_values(path, "<f4", None)
+        ids = _own_values(id_path, "u1", None)
+        if raw.size % 4 or ids.size != raw.size // 4:
+            return Check("points_vs_depth", FAIL,
+                         f"{where}: {raw.size} float32 values and {ids.size} ids are not N x 4 "
+                         f"points with N ids", failure=FAIL_POINTS)
+        points = raw.reshape(-1, 4).astype("float64")
+        finite = np.isfinite(depth) & (depth > 0.0)
+        if points.shape[0] != int(np.count_nonzero(finite)):
+            return Check("points_vs_depth", FAIL,
+                         f"{where}: {points.shape[0]} points for {int(np.count_nonzero(finite))} "
+                         f"finite-depth pixels ({int(np.count_nonzero(~finite))} sky pixels "
+                         f"contribute none)", failure=FAIL_POINTS)
+        if points.shape[0] and np.any(points[:, 3] != 0.0):
+            return Check("points_vs_depth", FAIL,
+                         f"{where}: the reflectance column is not 0 as declared", failure=FAIL_POINTS)
+        fx, fy = float(record["fx_px"]), float(record["fy_px"])
+        cx, cy = (float(c) for c in record["principal_point_px"])
+        z = points[:, 2]
+        if points.shape[0] and np.any(z <= 0.0):
+            return Check("points_vs_depth", FAIL, f"{where}: a point behind the camera",
+                         failure=FAIL_POINTS)
+        u = cx + fx * points[:, 0] / np.where(z > 0, z, 1.0)
+        v = cy + fy * points[:, 1] / np.where(z > 0, z, 1.0)
+        px, py = np.floor(u).astype(int), np.floor(v).astype(int)
+        off = np.hypot(u - (px + 0.5), v - (py + 0.5)) if points.shape[0] else np.zeros(0)
+        inside = (px >= 0) & (px < width) & (py >= 0) & (py < height)
+        if not np.all(inside) or (off.size and float(off.max()) > POINTS_REPROJECTION_TOL_PX):
+            return Check("points_vs_depth", FAIL,
+                         f"{where}: points re-project up to "
+                         f"{float(off.max()) if off.size else 0.0:.4f} px from a pixel centre, or "
+                         f"outside the image", failure=FAIL_POINTS)
+        linear = py * width + px
+        if np.unique(linear).size != linear.size or not np.all(finite.ravel()[linear]):
+            return Check("points_vs_depth", FAIL,
+                         f"{where}: the points do not cover each finite-depth pixel exactly once",
+                         failure=FAIL_POINTS)
+        gap = np.abs(z - depth.ravel()[linear])
+        allowed = POINTS_DEPTH_TOL_M + POINTS_DEPTH_TOL_FRACTION * z
+        if gap.size and np.any(gap > allowed):
+            return Check("points_vs_depth", FAIL,
+                         f"{where}: a point sits up to {float(gap.max()):.4f} m from the depth of "
+                         f"its pixel", failure=FAIL_POINTS)
+        if np.any(ids != mask.ravel()[linear]):
+            return Check("points_vs_depth", FAIL,
+                         f"{where}: {int(np.count_nonzero(ids != mask.ravel()[linear]))} point ids "
+                         f"are not the ID image's at their pixel", failure=FAIL_POINTS)
+        values, counts = np.unique(ids, return_counts=True)
+        own = {str(int(a)): int(b) for a, b in zip(values, counts)}
+        stated = {str(k): int(v) for k, v in ((entry.get("points") or {}).get("per_object") or {}).items()}
+        if own != stated or int((entry.get("points") or {}).get("total", -1)) != points.shape[0]:
+            return Check("points_vs_depth", FAIL,
+                         f"{where}: passes.json states {stated} points per object, the checker "
+                         f"counts {own}", failure=FAIL_POINTS)
+        total += points.shape[0]
+        worst_px = max(worst_px, float(off.max()) if off.size else 0.0)
+        worst_m = max(worst_m, float(gap.max()) if gap.size else 0.0)
+    return Check("points_vs_depth", PASS,
+                 f"{len(frames)} frame(s), {total} points: each on its pixel centre within "
+                 f"{worst_px:.1e} px at its depth within {worst_m:.1e} m with its pixel's ID; "
+                 f"every finite pixel once, the sky contributing none; per-object counts as "
+                 f"stated")
+
+
+@_reads_the_bundle
+def verify_amodal_contains_visible(manifest: Dict, run_dir=None) -> Check:
+    """The amodal box and mask of each aircraft object against its visible
+    pixels, from the checker's own reading of the ID image and the alone
+    pass: the visible pixels lie in the alone footprint (all but
+    VISIBILITY_TOL_FRACTION of them); the record's amodal_bbox_2d is the
+    tight box of the footprint, contains the visible tight box and sits
+    within bbox_2d_unclipped +- AMODAL_BOX_SLACK_PX; amodal_mask names the
+    alone pass with its pixel count; amodal_ratio is the checker's
+    footprint / visible count and 1 / visible_fraction. FAIL
+    annotation.amodal; a record that refused annotation.amodal while its
+    alone pass exists fails too. NOT RUN when no record carries the keys."""
+    if not _engine_label_records(run_dir):
+        return Check("amodal_contains_visible", NOT_RUN, _no_bundle_reason())
+    import numpy as np
+
+    graded = refused = 0
+    least = 1.0
+    for record, camera, name, engine, folder in _bundle_frames(manifest, run_dir):
+        labels = engine["labels"]
+        alone_files = _alone_files(labels)
+        entries = [e for e in (record.get("labels") or {}).get("objects") or []
+                   if isinstance(e, dict) and "amodal_bbox_2d" in e]
+        if not entries:
+            continue
+        mask = _read_gray_png(folder / str(labels["mask"])) if labels.get("mask") else None
+        for entry in entries:
+            int_id = int(entry["int_id"])
+            where = f"{camera}/{name} object {entry.get('id', int_id)}"
+            basis = (entry.get("basis") or {}).get("amodal")
+            if isinstance(basis, dict) and basis.get("refused"):
+                if int_id in alone_files:
+                    return Check("amodal_contains_visible", FAIL,
+                                 f"{where}: the record refused {basis['refused']} though the "
+                                 f"bundle declares its alone pass {alone_files[int_id]}",
+                                 failure=FAIL_AMODAL)
+                refused += 1
+                continue
+            alone_file = alone_files.get(int_id)
+            declared_mask = entry.get("amodal_mask") or {}
+            if alone_file is None or declared_mask.get("file") != alone_file:
+                return Check("amodal_contains_visible", FAIL,
+                             f"{where}: the amodal mask names {declared_mask.get('file')!r}, the "
+                             f"bundle's alone pass is {alone_file!r} (basis 'alone pass')",
+                             failure=FAIL_AMODAL)
+            alone = _read_gray_png(folder / alone_file)
+            if mask is None or alone is None or alone.shape != mask.shape:
+                return Check("amodal_contains_visible", FAIL,
+                             f"{where}: the ID image and the alone pass are not one frame's size",
+                             failure=FAIL_AMODAL)
+            visible = mask == int_id
+            footprint = alone == int_id
+            seen, whole = int(np.count_nonzero(visible)), int(np.count_nonzero(footprint))
+            outside = int(np.count_nonzero(visible & ~footprint))
+            if seen and outside > VISIBILITY_TOL_FRACTION * seen:
+                return Check("amodal_contains_visible", FAIL,
+                             f"{where}: {outside} of its {seen} visible pixels lie outside its "
+                             f"amodal mask (tolerance {VISIBILITY_TOL_FRACTION * 100:g} %)",
+                             failure=FAIL_AMODAL)
+            if seen:
+                least = min(least, 1.0 - outside / seen)
+            own_box = None
+            if whole:
+                ys, xs = np.nonzero(footprint)
+                own_box = [float(xs.min()), float(ys.min()), float(xs.max()) + 1.0,
+                           float(ys.max()) + 1.0]
+            box = entry.get("amodal_bbox_2d")
+            if (own_box is None) != (box is None) or (own_box is not None and any(
+                    abs(float(a) - b) > 1e-9 for a, b in zip(box, own_box))):
+                return Check("amodal_contains_visible", FAIL,
+                             f"{where}: amodal_bbox_2d {box} is not the tight box of the alone "
+                             f"pass {own_box}", failure=FAIL_AMODAL)
+            tight = entry.get("bbox_2d_tight")
+            if own_box is not None and tight and not (
+                    own_box[0] <= tight[0] and own_box[1] <= tight[1]
+                    and own_box[2] >= tight[2] and own_box[3] >= tight[3]):
+                return Check("amodal_contains_visible", FAIL,
+                             f"{where}: the amodal box {own_box} does not contain the visible "
+                             f"box {tight}", failure=FAIL_AMODAL)
+            hull = entry.get("bbox_2d_unclipped")
+            slack = AMODAL_BOX_SLACK_PX
+            if own_box is not None and hull and not (
+                    own_box[0] >= hull[0] - slack and own_box[1] >= hull[1] - slack
+                    and own_box[2] <= hull[2] + slack and own_box[3] <= hull[3] + slack):
+                return Check("amodal_contains_visible", FAIL,
+                             f"{where}: the amodal box {own_box} leaves the projected extents box "
+                             f"{[round(float(c), 2) for c in hull]} by more than {slack:g} px",
+                             failure=FAIL_AMODAL)
+            if int(declared_mask.get("pixels", -1)) != whole:
+                return Check("amodal_contains_visible", FAIL,
+                             f"{where}: the amodal mask states {declared_mask.get('pixels')} "
+                             f"pixels, the alone pass holds {whole}", failure=FAIL_AMODAL)
+            ratio = entry.get("amodal_ratio")
+            own_ratio = (whole / seen) if seen else None
+            if (ratio is None) != (own_ratio is None) or (own_ratio is not None and abs(
+                    float(ratio) - own_ratio) > AMODAL_RATIO_TOL * own_ratio):
+                return Check("amodal_contains_visible", FAIL,
+                             f"{where}: amodal_ratio {ratio} is not the checker's {own_ratio}",
+                             failure=FAIL_AMODAL)
+            fraction = entry.get("visible_fraction")
+            if own_ratio is not None and isinstance(fraction, (int, float)) and fraction > 0 \
+                    and abs(own_ratio - 1.0 / float(fraction)) > 1e-6 * own_ratio:
+                return Check("amodal_contains_visible", FAIL,
+                             f"{where}: amodal_ratio {own_ratio:.6f} is not 1 / visible_fraction "
+                             f"{1.0 / float(fraction):.6f}", failure=FAIL_AMODAL)
+            graded += 1
+    if graded == 0:
+        return Check("amodal_contains_visible", NOT_RUN,
+                     f"no object record carries an amodal box (no camera asks for amodal)"
+                     + (f"; {refused} refused annotation.amodal without an alone pass"
+                        if refused else ""))
+    return Check("amodal_contains_visible", PASS,
+                 f"{graded} aircraft object record(s): the visible pixels inside the amodal mask "
+                 f"(at least {least * 100:.1f} %), each amodal box the alone pass's tight box, "
+                 f"containing the visible box, within the extents box +- "
+                 f"{AMODAL_BOX_SLACK_PX:g} px, ratio = 1 / visible_fraction"
+                 + (f"; {refused} refused annotation.amodal without an alone pass"
+                    if refused else ""))
+
+
+# -- W3: the night frame's sky against the K&S sky through the EV100 of record --
+
+#: How far (stops) a night frame's sky band may sit from the checker's own
+#: K&S sky luminance through the camera's EV100 of record: above it by more
+#: than this is a night that did not hold (a day-exposed sky); below it, when
+#: the moonlit prediction is above one 8-bit code, a moon that did not light.
+NIGHT_EXPOSURE_TOL_STOPS = 2.0
+#: The sky band graded: this far above the horizon along the camera's own
+#: azimuth, or the camera's elevation when it looks higher.
+NIGHT_SKY_BAND_ELEVATION_DEG = 10.0
+#: A frame needs this many sky pixels (class 0) to be graded.
+NIGHT_SKY_MIN_PIXELS = 64
+#: The smallest non-zero 8-bit sRGB code, in linear units (1/255/12.92).
+NIGHT_ONE_CODE_LINEAR = 1.0 / 255.0 / 12.92
+#: The night the check grades: the recorded sun at or below this elevation.
+NIGHT_SUN_ELEVATION_MAX_DEG = -6.0
+FAIL_NIGHT_EXPOSURE = "check.night_exposure"
+
+
+def _night_air_mass(zenith_deg):
+    s = math.sin(math.radians(min(90.0, max(0.0, zenith_deg))))
+    return 1.0 / math.sqrt(1.0 - 0.96 * s * s)
+
+
+def _night_sky_cd_m2(phase_angle_deg, moon_az, moon_el, sky_az, sky_el, moon_lit):
+    """The checker's own reading of Krisciunas & Schaefer 1991 (written apart
+    from core/scene/night.py): the dark sky 79.0 nL x X 10^(-0.4 k (X - 1))
+    plus, with the moon lit, f(rho) I* 10^(-0.4 k X(Zm)) (1 - 10^(-0.4 k X(Z)))
+    with I* = 10^(-0.4 (m + 16.57)) fc and m = -12.73 + 0.026 a + 4e-9 a^4;
+    k = 0.172; 1 nL = 1e-5 / pi cd/m^2."""
+    k = 0.172
+    to_cd = 1e-5 / math.pi
+    zenith = 90.0 - sky_el
+    x = _night_air_mass(zenith)
+    dark = 79.0 * x * 10.0 ** (-0.4 * k * (x - 1.0))
+    lit = 0.0
+    if moon_lit and moon_el > 0.0:
+        a1, e1, a2, e2 = (math.radians(v) for v in (moon_az, moon_el, sky_az, sky_el))
+        cos_rho = math.sin(e1) * math.sin(e2) + math.cos(e1) * math.cos(e2) * math.cos(a1 - a2)
+        rho = max(10.0, math.degrees(math.acos(max(-1.0, min(1.0, cos_rho)))))
+        f_rho = (10.0 ** 5.36 * (1.06 + math.cos(math.radians(rho)) ** 2)
+                 + 10.0 ** (6.15 - rho / 40.0))
+        alpha = abs(phase_angle_deg)
+        i_star = 10.0 ** (-0.4 * (-12.73 + 0.026 * alpha + 4e-9 * alpha ** 4 + 16.57))
+        lit = (f_rho * i_star * 10.0 ** (-0.4 * k * _night_air_mass(90.0 - moon_el))
+               * (1.0 - 10.0 ** (-0.4 * k * x)))
+    return dark * to_cd, lit * to_cd
+
+
+def verify_night_exposure(manifest: Dict, run_dir=None) -> Check:
+    """A night frame's sky band against the checker's own K&S sky luminance
+    through the camera's EV100 of record (cameras[i].sensing.radiometry
+    luminance_cd_m2_per_unit): the band mean (linear, the class image's
+    sky pixels) must not exceed prediction x 2^NIGHT_EXPOSURE_TOL_STOPS, and
+    with the moon lit and the prediction above one 8-bit code it must not
+    fall below prediction x 2^-NIGHT_EXPOSURE_TOL_STOPS. The phase angle is
+    re-derived from the card's illuminated fraction (i = acos(2k - 1)).
+    NOT RUN without a look.night block, when the recorded sun is above -6
+    deg (no night frame), without an EV100 chain of record, a run
+    directory, or a night frame with a class image. FAIL check.night_exposure."""
+    look = manifest.get("look") if isinstance(manifest.get("look"), dict) else {}
+    night, sky = look.get("night"), look.get("night_sky")
+    if not isinstance(night, dict) or not isinstance(sky, dict):
+        return Check("night_exposure", NOT_RUN, "the manifest carries no look.night block: no "
+                                                "night was asked for")
+    try:
+        sun = float(sky["sun_elevation_deg"])
+        k_phase = float(night["phase"])
+        moon_el = float(night["moon_elevation_deg"])
+        moon_az = float(night["moon_azimuth_deg"])
+        lux = float(night["illuminance_lux"])
+    except (KeyError, TypeError, ValueError):
+        return Check("night_exposure", FAIL, "look.night / look.night_sky lack the sun "
+                                             "elevation, the phase or the moon's position",
+                     failure=FAIL_NIGHT_EXPOSURE)
+    if sun > NIGHT_SUN_ELEVATION_MAX_DEG:
+        return Check("night_exposure", NOT_RUN, f"the recorded sun is at {sun:.2f} deg, above "
+                                                f"{NIGHT_SUN_ELEVATION_MAX_DEG:g}: no night frame")
+    cameras = _sensing_cameras(manifest, "radiometry")
+    if not cameras:
+        return Check("night_exposure", NOT_RUN, "no camera carries an EV100 chain of record "
+                                                "(sensing.radiometry): nothing to expose against")
+    if run_dir is None:
+        return Check("night_exposure", NOT_RUN, "no run directory: no night frame is here")
+    import numpy as np
+
+    phase_angle = math.degrees(math.acos(max(-1.0, min(1.0, 2.0 * k_phase - 1.0))))
+    moon_lit = lux > 0.0
+    graded, details = 0, []
+    for record, camera, name, engine, folder in _bundle_frames(manifest, run_dir):
+        if camera not in cameras:
+            continue
+        class_file = (engine.get("labels") or {}).get("class_mask")
+        if not class_file:
+            details.append(f"{camera}/{name}: no class image, no sky band")
+            continue
+        beauty = _sensing_read_linear_gray(folder / name)
+        classes = _read_gray_png(folder / class_file)
+        if beauty is None or classes is None or beauty.shape != classes.shape:
+            details.append(f"{camera}/{name}: the frame or its class image is unreadable")
+            continue
+        band = classes == 0
+        if int(np.count_nonzero(band)) < NIGHT_SKY_MIN_PIXELS:
+            details.append(f"{camera}/{name}: under {NIGHT_SKY_MIN_PIXELS} sky pixels")
+            continue
+        per_unit = float(cameras[camera]["radiometry"]["luminance_cd_m2_per_unit"])
+        forward, _right, _up = axes_from_quat(record["quaternion_wxyz"])
+        azimuth = math.degrees(math.atan2(forward[1], forward[0])) % 360.0
+        elevation = max(NIGHT_SKY_BAND_ELEVATION_DEG,
+                        math.degrees(math.asin(max(-1.0, min(1.0, forward[2])))))
+        dark, lit = _night_sky_cd_m2(phase_angle, moon_az, moon_el, azimuth, elevation, moon_lit)
+        predicted = (dark + lit) / per_unit
+        measured = float(beauty[band].mean())
+        ceiling = predicted * 2.0 ** NIGHT_EXPOSURE_TOL_STOPS
+        if measured > ceiling:
+            return Check("night_exposure", FAIL,
+                         f"{camera}/{name}: the sky band reads {measured:.3e} of full scale where "
+                         f"the K&S sky ({(dark + lit):.3e} cd/m^2) through the EV100 of record "
+                         f"predicts {predicted:.3e}; above the {ceiling:.3e} ceiling, the night "
+                         f"did not hold", failure=FAIL_NIGHT_EXPOSURE)
+        if moon_lit and predicted >= NIGHT_ONE_CODE_LINEAR:
+            floor = predicted * 2.0 ** -NIGHT_EXPOSURE_TOL_STOPS
+            if measured < floor:
+                return Check("night_exposure", FAIL,
+                             f"{camera}/{name}: the moonlit sky band reads {measured:.3e} where "
+                             f"{predicted:.3e} is predicted; below the {floor:.3e} floor, the "
+                             f"moon did not light the sky", failure=FAIL_NIGHT_EXPOSURE)
+        graded += 1
+        details.append(f"{camera}/{name}: sky {measured:.3e} against {predicted:.3e}")
+    if graded == 0:
+        return Check("night_exposure", NOT_RUN,
+                     "; ".join(details) or "no night frame with an engine label record is here")
+    return Check("night_exposure", PASS, f"{graded} night frame(s) within "
+                                         f"{NIGHT_EXPOSURE_TOL_STOPS:g} stops: "
+                                         + "; ".join(details[:4]))
+
+
 def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     """The pass/fail summary over a run directory (CLI: flightsim.verify).
 
@@ -5322,6 +7731,14 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     # Burnham-Hallock pair and strip-theory quadrature; the host's vectors
     # against the card's where a render.json carries them.
     run("wake_selftest", verify_wake_selftest, manifest, run_dir)
+    # P9: what the render host reports it applied from the card's physics
+    # blocks, each key graded only where a render.json carries it.
+    run("host_physics", verify_host_physics, manifest, run_dir)
+    # W2: the ID image's building pixels against the cached footprints, and
+    # the runway raster's threshold against the runway plane -- NOT RUN
+    # without their evidence, never a pass on absence.
+    run("building_vs_footprint", verify_building_vs_footprint, manifest, run_dir)
+    run("runway_vs_geometry", verify_runway_vs_geometry, manifest, run_dir)
     # I6 (gap S3): the ground-truth passes -- NOT RUN without their files,
     # never a pass on absence.
     run("normals_vs_depth", verify_normals_vs_depth, manifest, run_dir)
@@ -5333,6 +7750,38 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     run("psf_slanted_edge", verify_psf_slanted_edge, manifest, run_dir)
     run("blur_vs_flow", verify_blur_vs_flow, manifest, run_dir)
     run("radiometry_grey_card", verify_radiometry_grey_card, manifest, run_dir)
+    # S4: the sensing engine side's render.json keys (the linear passes, the
+    # velocity read-back, the read-backs, the calibration frame, the
+    # accumulation), each graded only when present -- NOT RUN otherwise.
+    run("engine_linear_passes", verify_engine_linear_passes, manifest, run_dir)
+    run("velocity_readback", verify_velocity_readback, manifest, run_dir)
+    run("engine_readbacks", verify_engine_readbacks, manifest, run_dir)
+    run("calibration_frame", verify_calibration_frame, manifest, run_dir)
+    run("engine_accumulation", verify_engine_accumulation, manifest, run_dir)
+    # W3: a night frame's sky against the checker's own K&S sky through the
+    # EV100 of record -- NOT RUN without a night frame, never a pass on absence.
+    run("night_exposure", verify_night_exposure, manifest, run_dir)
+    # S2: the passes as data -- flow against the checker's own projection
+    # and z-test, the static null, disparity against the right camera's
+    # depth, the points against the depth, the amodal masks against the
+    # visible ones; each NOT RUN without its files, never a pass on absence.
+    run("flow_vs_keypoints", verify_flow_vs_keypoints, manifest, run_dir)
+    run("flow_static_null", verify_flow_static_null, manifest, run_dir)
+    run("disparity_vs_right_depth", verify_disparity_vs_right_depth, manifest, run_dir)
+    run("points_vs_depth", verify_points_vs_depth, manifest, run_dir)
+    run("amodal_contains_visible", verify_amodal_contains_visible, manifest, run_dir)
+    # S3: every IR frame declares itself a proxy with the manifest's tables;
+    # NOT RUN without an IR frame.
+    run("ir_proxy_declared", verify_ir_proxy_declared, manifest, run_dir)
+    # R2: the record's own checks -- every readback re-graded, every null
+    # test's verdict against its numbers, the uncertainty block's sums --
+    # and the FDM-rate instruments' Allan deviation and lever arms by the
+    # checker's own estimators; each NOT RUN on absence, never a pass.
+    run("applied_readback", verify_applied_readback, manifest)
+    run("null_effect", verify_null_effect, manifest)
+    run("instrument_allan", verify_instrument_allan, manifest, run_dir)
+    run("instrument_lever_arm", verify_instrument_lever_arm, manifest, run_dir)
+    run("uncertainty_present", verify_uncertainty_present, manifest)
 
     if other is not None:
         run("temporal_alignment", verify_alignment, manifest, other)

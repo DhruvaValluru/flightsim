@@ -282,6 +282,75 @@ def wake_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
     return block
 
 
+def world_look_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
+    """The top-level ``look`` block for a spec (W3), or None when the spec
+    states no night, no rain rate and a uniform wind (no block: the host
+    draws the look it always drew). Sub-blocks in the fixed order
+    ``core.scene.world_record.LOOK_KEYS``, each in its module's fixed key
+    order (``core.scene.night.CARD_KEYS``, ``core.scene.precipitation
+    .CARD_KEYS``, ``core.scene.weather_visuals.CLOUD_DRIFT_KEYS``). Refuses
+    by name through the modules (look.moon, look.stars, night.sun_units,
+    look.precipitation_rate)."""
+    from core.scene import night, precipitation, weather_visuals
+    from core.scene.world_record import LOOK_KEYS, card_look, world_look
+
+    block = card_look(world_look(spec))
+    if block is None:
+        return None
+    if tuple(block) != tuple(k for k in LOOK_KEYS if k in block):
+        raise RuntimeError(f"look card keys {list(block)} are not in the fixed order "
+                           f"{list(LOOK_KEYS)}")
+    for key, keys in (("night", night.CARD_KEYS), ("precipitation", precipitation.CARD_KEYS),
+                      ("cloud_drift", weather_visuals.CLOUD_DRIFT_KEYS)):
+        if key in block and tuple(block[key]) != keys:
+            raise RuntimeError(f"look.{key} card keys {list(block[key])} are not the fixed "
+                               f"order {list(keys)}")
+    return block
+
+
+#: The ``derived_aircraft`` block's keys, in the fixed order the UE host
+#: reads them (P9; FlightSimScenarioWorld refuses ``card.derived_aircraft``
+#: otherwise).
+DERIVED_AIRCRAFT_CARD_KEYS = ("name", "base", "injections", "aircraft_root", "xml_sha256")
+
+
+def derived_aircraft_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object]]:
+    """The ``derived_aircraft`` block for a spec (P9), or None when the
+    spec flies the stock airframe (no block: the host loads the plugin's
+    staged aircraft exactly as before). The airframe is derived exactly as
+    the headless run derives it (``fdm_at_initial_conditions``: the
+    failures, icing and gust_rotation injections the spec's blocks select;
+    derive.py applies them in its fixed order) less TECS, which the host
+    never runs (it refuses ``hold_state``) -- so the two derivations differ
+    only by the TECS system. ``aircraft_root`` is the directory holding
+    ``<name>/<name>.xml`` (the plugin's patched aircraft path) and
+    ``xml_sha256`` the derivation's own hash, which the plugin checks at
+    the door before JSBSim reads the file."""
+    from core.control.derive import derive
+    from core.environment.icing import icing_injections_for
+    from core.environment.wake import wake_injections_for
+    from core.telemetry.failures import failure_injections_for
+
+    injections = tuple(dict.fromkeys(
+        tuple(failure_injections_for(spec)) + tuple(icing_injections_for(spec))
+        + tuple(wake_injections_for(spec))))
+    injections = tuple(name for name in injections if name != "tecs")
+    if not injections:
+        return None
+    derived = derive(str(spec.aircraft.value), injections=injections)
+    block = {
+        "name": derived.name,
+        "base": derived.base_name,
+        "injections": list(derived.injection_names),
+        "aircraft_root": str(derived.aircraft_path),
+        "xml_sha256": derived.derived_sha256,
+    }
+    if tuple(block) != DERIVED_AIRCRAFT_CARD_KEYS:
+        raise RuntimeError(f"derived_aircraft card keys {list(block)} are not the fixed order "
+                           f"{list(DERIVED_AIRCRAFT_CARD_KEYS)}")
+    return block
+
+
 def write_run_card(spec: ScenarioSpec, path: Path,
                    control_inputs: Sequence[Dict[str, float]] = (),
                    duration_s: Optional[float] = None,
@@ -305,6 +374,7 @@ def write_run_card(spec: ScenarioSpec, path: Path,
                    taxonomy: Optional[Sequence[str]] = None,
                    traffic: Optional[Sequence[Dict[str, object]]] = None,
                    datum: Optional[Dict[str, object]] = None,
+                   world: Optional[Dict[str, object]] = None,
                    ) -> Path:
     """Write the spec in the form the UE commandlet reads.
 
@@ -438,6 +508,22 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # the same field, checks the vectors to 1e-9 and refuses
         # card.wake otherwise (P9's Windows step).
         card["wake"] = wake
+    derived_aircraft = derived_aircraft_card_block(spec)
+    if derived_aircraft is not None:
+        # P9: the airframe the failure, icing and roll-gust writes go into;
+        # the host loads it through the plugin's patched aircraft path and
+        # checks its XML sha256 at the door (card.derived_aircraft).
+        card["derived_aircraft"] = derived_aircraft
+    look = world_look_card_block(spec)
+    if look is not None:
+        # W3 (absent-canonical): the world look -- look.night (the moon's
+        # elevation, azimuth, phase and lux, the star mode, the sun units),
+        # look.precipitation (the fitted distribution and the streaks) and
+        # look.cloud_drift (the providers' wind at the cloud base), each in
+        # its fixed key order; the host (W5) refuses look.moon, look.stars,
+        # look.precipitation_particles or look.cloud_drift_parameter by
+        # name when it cannot draw one exactly.
+        card["look"] = look
     if reference_speeds:
         # Display-only (the HUD/panel stall-margin marks): the MODEL's own
         # measured Vs and CLmax with their basis string (§2.4), so the marks
@@ -529,6 +615,13 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # moves a static-mesh actor along the track with linear
         # interpolation and refuses a track it cannot draw.
         card["traffic"] = [dict(entry) for entry in traffic]
+    if world:
+        # W2 (absent-canonical): the world the host draws -- the terrain
+        # and its sha256, the buildings document and the runway document
+        # with their sha256s (core/scene/runway.py world_card_block); a
+        # member is null when the scene states none. The host derives
+        # nothing and refuses a file whose digest is not the card's.
+        card["world"] = dict(world)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(card, indent=1), encoding="utf-8")
     return path

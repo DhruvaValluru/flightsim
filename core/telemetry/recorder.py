@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -106,6 +107,21 @@ DEFAULT_CHANNELS = (
     # set is unchanged.
     "cg_x_m",
     "iyy_kgm2",
+    # -- the measured channels (R2): what the instrument models at the FDM
+    # rate LAST measured when the sample was taken (the latest value, held
+    # between the 10 Hz samples' steps and, for the GPS, between fixes) --
+    # NaN when the recorder has no observer or the observer has not yet
+    # observed. Not JSBSim's: handed over by Recorder(measured=...).
+    # Recorded, NOT graded: the Gate 5 comparison set is unchanged.
+    "meas_n_z",
+    "meas_p_dps",
+    "meas_q_dps",
+    "meas_r_dps",
+    "meas_lat_deg",
+    "meas_lon_deg",
+    "meas_alt_m",
+    "meas_cas_kt",
+    "meas_heading_deg",
 )
 
 
@@ -125,6 +141,13 @@ class Recorder:
         Additional named callables taking the FDM and returning a float, for
         quantities that are not on the state snapshot -- control-surface
         positions, for example.
+    measured:
+        R2: an object with ``latest() -> {meas_* channel: value}`` (the
+        instrument observer, core/telemetry/instruments.py). Every sample
+        carries the LATEST measured value -- the observer runs at the FDM
+        rate, the recorder at 10 Hz, so the sample takes what the last
+        step measured (the held GPS fix included). Without one the meas_*
+        columns are NaN: absent, never a copy of the truth.
     """
 
     def __init__(
@@ -133,11 +156,13 @@ class Recorder:
         interval_s: float = 0.1,
         channels=DEFAULT_CHANNELS,
         extra: Optional[Dict[str, Callable[[Any], float]]] = None,
+        measured=None,
     ) -> None:
         self._fdm = fdm
         self.interval_s = float(interval_s)
         self.channels = tuple(channels)
         self._extra = dict(extra or {})
+        self._measured = measured
         self.columns: Dict[str, List[float]] = {
             name: [] for name in (*self.channels, *self._extra)
         }
@@ -158,6 +183,10 @@ class Recorder:
         if not force and t < self._next_sample:
             return False
         state = self._fdm.state()
+        if self._measured is not None:
+            # The latest measured values ride on the snapshot (NaN for a
+            # channel the observer has not measured yet).
+            state = replace(state, **self._measured.latest())
         for name in self.channels:
             self.columns[name].append(_read(state, name))
         for name, fn in self._extra.items():

@@ -21,6 +21,8 @@
 #include "Engine/SkyLight.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "ColorManagement/ColorSpace.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
 #include "ImageUtils.h"
@@ -152,6 +154,122 @@ namespace
 	// The raw depth file is little-endian float32; every UE target is.
 	// The flow file (frame_NNNN_flow.f32, I6) is declared the same way.
 	static_assert(PLATFORM_LITTLE_ENDIAN, "frame_NNNN_depth.f32 is declared little-endian");
+
+	// -- S4 (the sensing engine side) -----------------------------------
+	// The linear passes (-passes=normal / -passes=albedo): SCS_Normal and
+	// SCS_BaseColor captures into RTF_RGBA16f, written by WriteLinearF32
+	// (the byte layout is stated in FlightSimRenderCommandlet.h) with
+	// RenderLinearChannels values a pixel: the normal file holds the unit
+	// normal in the SCENE frame RenderNormalAxes, the base colour file
+	// linear R, G, B as the GBuffer holds it (no clamp). Sky pixels (+inf
+	// in _depth.f32) are 0, 0, 0 in both.
+	constexpr int32 RenderLinearChannels = 3;
+	constexpr const TCHAR* RenderNormalAxes = TEXT("north,east,up");
+	// What an SCS_Normal texel is, measured per frame on the geometry
+	// pixels rather than assumed: "offset_half" (n * 0.5 + 0.5, as the I6
+	// material pass writes) or "signed" (n itself). The encoding whose
+	// decoded vectors are unit length (within RenderNormalUnitTolerance) on
+	// at least RenderNormalUnitFraction of the geometry pixels wins; neither
+	// refuses labels.normal_encoding by name.
+	constexpr double RenderNormalUnitTolerance = 0.05;
+	constexpr double RenderNormalUnitFraction = 0.5;
+	// The fallback normal material (-normal-source=material): one
+	// SceneTexture:WorldNormal node into emissive, NOT offset-encoded
+	// (scripts/ue_create_materials.py M_WorldNormal).
+	constexpr const TCHAR* RenderWorldNormalFallbackMaterialPath =
+		TEXT("/Game/FlightSim/M_WorldNormal.M_WorldNormal");
+	// The velocity cross-check (-velocity-check): SceneTexture:Velocity into
+	// emissive, signed and unencoded, read back from RTF_RGBA32f. A
+	// read-back beside the Python flow, never the truth.
+	constexpr const TCHAR* RenderVelocityCheckMaterialPath =
+		TEXT("/Game/FlightSim/M_Velocity.M_Velocity");
+	// The calibration frame (-calibration): M_GreyCard is lit, fully rough,
+	// non-metallic, specular 0 (a Lambertian), with two scalar parameters
+	// (scripts/ue_create_materials.py GREY_CARD_*): Luminance -> emissive,
+	// stated in cd/m^2 (one emissive unit = 1 cd/m^2 is the assumption the
+	// emissive quad MEASURES), and Reflectance -> base colour.
+	constexpr const TCHAR* RenderGreyCardMaterialPath =
+		TEXT("/Game/FlightSim/M_GreyCard.M_GreyCard");
+	constexpr const TCHAR* RenderGreyCardLuminanceParameter = TEXT("Luminance");
+	constexpr const TCHAR* RenderGreyCardReflectanceParameter = TEXT("Reflectance");
+	constexpr const TCHAR* RenderCalibrationPlanePath = TEXT("/Engine/BasicShapes/Plane.Plane");
+	// core/capture/radiometry.py CALIBRATION_CONSTANT, LENS_ATTENUATION_DEFAULT
+	// (used only when the console variable is absent, and said so),
+	// GREY_CARD_REFLECTANCE; GREY_CARD_TOL is the verifier's 2 %.
+	constexpr double RenderCalibrationConstant = 1.2;
+	constexpr double RenderLensAttenuationDefault = 0.78;
+	constexpr double RenderGreyCardReflectance = 0.18;
+	constexpr double RenderCalibrationTolerance = 0.02;
+	// The white Lambertian quad's reflectance (a stated white: 0.9, below
+	// the 1.0 edge of the base-colour range).
+	constexpr double RenderWhiteQuadReflectance = 0.9;
+	// The quads sit this far along the calibration camera's axis, each
+	// RenderCalibrationQuadFraction of the image height tall, centred at
+	// -RenderCalibrationQuadOffset (emissive grey), 0 (slanted edge) and
+	// +RenderCalibrationQuadOffset (white Lambertian) of the half-width.
+	constexpr double RenderCalibrationDistanceM = 20.0;
+	constexpr double RenderCalibrationQuadFraction = 0.25;
+	constexpr double RenderCalibrationQuadOffset = 0.55;
+	// ISO 12233's slant (core/capture/optics.py slanted_edge_image's 5 deg).
+	constexpr double RenderSlantedEdgeAngleDeg = 5.0;
+	// A quad's luminance is the mean over the inner half of its projected
+	// box (each side inset by this fraction), away from its edges.
+	constexpr double RenderCalibrationInset = 0.25;
+	// core/scenario/solar.py SUN_LUX_MAX: nothing above the atmosphere is
+	// brighter. And the unitless sun every Gate 6 clause was tuned on.
+	constexpr double RenderSunLuxMax = 133100.0;
+	constexpr double RenderEngineSunUnitless = 8.0;
+	// -accumulate=K: at most this many sub-exposures a frame.
+	constexpr int32 RenderAccumulateMax = 64;
+	constexpr double RenderSubPixelBlurPx = 0.25;
+	// The e-SFR's edge-spread oversampling (a quarter pixel).
+	constexpr int32 RenderEsfrOversample = 4;
+	static_assert(sizeof(float) == 4, "the linear .f32 files are declared float32");
+
+	// A pixel of a world point through a capture's transform and FOV, and
+	// whether the point is in front of it (ProjectToPixel's arithmetic,
+	// which says only whether the pixel is inside the frame).
+	bool RenderPixelInFront(const USceneCaptureComponent2D* Capture, int32 Width,
+	                        int32 Height, const FVector& WorldCm, FVector2D& OutPixel)
+	{
+		const FVector Local =
+			Capture->GetComponentTransform().InverseTransformPosition(WorldCm);
+		if (Local.X <= 1.0)
+		{
+			OutPixel = FVector2D(-1.0, -1.0);
+			return false;
+		}
+		const double HalfWidthTan = FMath::Tan(FMath::DegreesToRadians(Capture->FOVAngle * 0.5));
+		const double HalfHeightTan = HalfWidthTan * Height / double(Width);
+		OutPixel.X = Width * 0.5 * (1.0 + (Local.Y / Local.X) / HalfWidthTan);
+		OutPixel.Y = Height * 0.5 * (1.0 - (Local.Z / Local.X) / HalfHeightTan);
+		return true;
+	}
+
+	// Rec. 709 luminance of a linear working-colour-space pixel.
+	double RenderLuminance709(const FLinearColor& C)
+	{
+		return 0.2126 * C.R + 0.7152 * C.G + 0.0722 * C.B;
+	}
+
+	// IEC 61966-2-1 sRGB encoding of a linear value in [0, 1], 8-bit.
+	uint8 RenderSrgb8(double Linear)
+	{
+		const double C = FMath::Clamp(Linear, 0.0, 1.0);
+		const double Encoded = C <= 0.0031308 ? 12.92 * C : 1.055 * FMath::Pow(C, 1.0 / 2.4) - 0.055;
+		return static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(Encoded * 255.0), 0, 255));
+	}
+
+	// The 95th percentile (nearest rank below) of a list, 0 for none.
+	double RenderPercentile95(TArray<float>& Values)
+	{
+		if (Values.Num() == 0)
+		{
+			return 0.0;
+		}
+		Values.Sort();
+		return Values[FMath::Clamp(static_cast<int32>(0.95 * (Values.Num() - 1)), 0, Values.Num() - 1)];
+	}
 
 	// One labelled object as the -labels pass sees it: the card's ids, the
 	// actor whose mesh components carry the stencil (null for a scene
@@ -640,6 +758,230 @@ UFlightSimRenderCommandlet::UFlightSimRenderCommandlet()
 	ShowErrorCount = true;
 }
 
+// -- S4: the calibration chain, the 0.25 px rule, the linear writer, the e-SFR --
+
+double UFlightSimRenderCommandlet::LuminancePerUnit(double Ev100, double ExposureCompensationEv,
+                                                    double LensAttenuation)
+{
+	// core/capture/radiometry.py luminance_per_unit, re-implemented, not
+	// imported (tests/test_ue_passes_source.py pins this expression).
+	return RenderCalibrationConstant * LensAttenuation * FMath::Pow(2.0, Ev100 - ExposureCompensationEv);
+}
+
+double UFlightSimRenderCommandlet::LambertianLuminance(double IlluminanceLux, double Reflectance)
+{
+	return Reflectance * IlluminanceLux / UE_DOUBLE_PI;
+}
+
+int32 UFlightSimRenderCommandlet::AccumulationCount(double PredictedBlurPx, int32 RequestedK)
+{
+	return PredictedBlurPx < RenderSubPixelBlurPx ? 1 : FMath::Max(1, RequestedK);
+}
+
+bool UFlightSimRenderCommandlet::WriteLinearF32(const FString& Path, const TArray<float>& Values,
+                                                int32 Width, int32 Height, int32 Channels)
+{
+	// The layout is the header's: little-endian float32 (static_assert
+	// above), no header, row-major from the top-left, Channels interleaved.
+	const int64 Expected = static_cast<int64>(Width) * Height * Channels;
+	if (Width <= 0 || Height <= 0 || Channels <= 0 || Values.Num() != Expected)
+	{
+		return false;
+	}
+	TArray64<uint8> Bytes;
+	Bytes.SetNumUninitialized(Expected * static_cast<int64>(sizeof(float)));
+	FMemory::Memcpy(Bytes.GetData(), Values.GetData(), Bytes.Num());
+	return FFileHelper::SaveArrayToFile(Bytes, *Path);
+}
+
+double UFlightSimRenderCommandlet::EsfrMtf50(const TArray<float>& Luminance, int32 Width, int32 Height,
+                                             int32 U0, int32 V0, int32 U1, int32 V1)
+{
+	U0 = FMath::Clamp(U0, 0, Width);
+	U1 = FMath::Clamp(U1, 0, Width);
+	V0 = FMath::Clamp(V0, 0, Height);
+	V1 = FMath::Clamp(V1, 0, Height);
+	const int32 CropWidth = U1 - U0;
+	const int32 CropHeight = V1 - V0;
+	if (Luminance.Num() != Width * Height || CropWidth < 8 || CropHeight < 8)
+	{
+		return -1.0;
+	}
+	// 1. Each row's edge: the half level between the row's 10th and 90th
+	// percentile levels, the first crossing linearly interpolated between
+	// pixel centres (x + 0.5).
+	TArray<double> EdgeX, EdgeY;
+	TArray<float> Row, Sorted;
+	for (int32 V = V0; V < V1; ++V)
+	{
+		Row.Reset();
+		for (int32 U = U0; U < U1; ++U)
+		{
+			Row.Add(Luminance[V * Width + U]);
+		}
+		Sorted = Row;
+		Sorted.Sort();
+		const double Low = Sorted[CropWidth / 10];
+		const double High = Sorted[(CropWidth * 9) / 10];
+		if (!(High - Low > 1.0e-6))
+		{
+			continue;
+		}
+		const double Half = 0.5 * (Low + High);
+		for (int32 i = 1; i < CropWidth; ++i)
+		{
+			const double A = Row[i - 1] - Half;
+			const double B = Row[i] - Half;
+			if ((A < 0.0) != (B < 0.0))
+			{
+				EdgeX.Add(U0 + (i - 1) + 0.5 + A / (A - B));
+				EdgeY.Add(V + 0.5);
+				break;
+			}
+		}
+	}
+	const int32 Rows = EdgeX.Num();
+	if (Rows < 3)
+	{
+		return -1.0;
+	}
+	// 2. The edge line x = Intercept + Slope * y by least squares.
+	double Sy = 0.0, Sx = 0.0, Syy = 0.0, Sxy = 0.0;
+	for (int32 i = 0; i < Rows; ++i)
+	{
+		Sy += EdgeY[i];
+		Sx += EdgeX[i];
+		Syy += EdgeY[i] * EdgeY[i];
+		Sxy += EdgeX[i] * EdgeY[i];
+	}
+	const double Denominator = Rows * Syy - Sy * Sy;
+	if (FMath::Abs(Denominator) < 1.0e-12)
+	{
+		return -1.0;
+	}
+	const double Slope = (Rows * Sxy - Sy * Sx) / Denominator;
+	const double Intercept = (Sx - Slope * Sy) / Rows;
+	const double NormalLength = FMath::Sqrt(1.0 + Slope * Slope);
+	// 3. The edge spread function: every crop pixel's signed distance from
+	// the line along its normal, binned at 1 / RenderEsfrOversample px.
+	double MinDistance = TNumericLimits<double>::Max();
+	double MaxDistance = -TNumericLimits<double>::Max();
+	TArray<double> Distances;
+	Distances.SetNumUninitialized(CropWidth * CropHeight);
+	for (int32 V = V0; V < V1; ++V)
+	{
+		for (int32 U = U0; U < U1; ++U)
+		{
+			const double D = ((U + 0.5) - (Intercept + Slope * (V + 0.5))) / NormalLength;
+			Distances[(V - V0) * CropWidth + (U - U0)] = D;
+			MinDistance = FMath::Min(MinDistance, D);
+			MaxDistance = FMath::Max(MaxDistance, D);
+		}
+	}
+	const int32 Bins = FMath::FloorToInt((MaxDistance - MinDistance) * RenderEsfrOversample) + 1;
+	if (Bins < 8)
+	{
+		return -1.0;
+	}
+	TArray<double> Sum, Esf;
+	TArray<int32> Count;
+	Sum.SetNumZeroed(Bins);
+	Count.SetNumZeroed(Bins);
+	for (int32 V = V0; V < V1; ++V)
+	{
+		for (int32 U = U0; U < U1; ++U)
+		{
+			const int32 Bin = FMath::Clamp(FMath::FloorToInt(
+				(Distances[(V - V0) * CropWidth + (U - U0)] - MinDistance) * RenderEsfrOversample), 0, Bins - 1);
+			Sum[Bin] += Luminance[V * Width + U];
+			++Count[Bin];
+		}
+	}
+	Esf.SetNumZeroed(Bins);
+	int32 LastFilled = -1;
+	for (int32 i = 0; i < Bins; ++i)
+	{
+		if (Count[i] > 0)
+		{
+			Esf[i] = Sum[i] / Count[i];
+			// An empty run between two filled bins is filled linearly.
+			for (int32 j = LastFilled + 1; LastFilled >= 0 && j < i; ++j)
+			{
+				Esf[j] = Esf[LastFilled] + (Esf[i] - Esf[LastFilled]) * (j - LastFilled) / double(i - LastFilled);
+			}
+			if (LastFilled < 0)
+			{
+				for (int32 j = 0; j < i; ++j)
+				{
+					Esf[j] = Esf[i];
+				}
+			}
+			LastFilled = i;
+		}
+	}
+	for (int32 j = LastFilled + 1; LastFilled >= 0 && j < Bins; ++j)
+	{
+		Esf[j] = Esf[LastFilled];
+	}
+	// 4. The line spread function (finite difference; the edge's rise is
+	// taken as positive) under a Hamming window centred on its centroid.
+	const int32 Lsfs = Bins - 1;
+	TArray<double> Lsf;
+	Lsf.SetNumZeroed(Lsfs);
+	double Total = 0.0, Moment = 0.0;
+	for (int32 i = 0; i < Lsfs; ++i)
+	{
+		Lsf[i] = Esf[i + 1] - Esf[i];
+		Total += Lsf[i];
+	}
+	if (FMath::Abs(Total) < 1.0e-12)
+	{
+		return -1.0;
+	}
+	for (int32 i = 0; i < Lsfs; ++i)
+	{
+		Lsf[i] /= Total;
+		Moment += i * Lsf[i];
+	}
+	const double Centre = Moment;
+	const double HalfWindow = FMath::Max(Centre, Lsfs - 1 - Centre) + 1.0;
+	for (int32 i = 0; i < Lsfs; ++i)
+	{
+		Lsf[i] *= 0.54 + 0.46 * FMath::Cos(UE_DOUBLE_PI * (i - Centre) / HalfWindow);
+	}
+	// 5. The MTF by a DFT, normalised at zero frequency; MTF50 at the first
+	// fall through one half, linearly interpolated. Bin k is k *
+	// RenderEsfrOversample / Lsfs cycles per pixel.
+	auto Magnitude = [&](int32 K) -> double
+	{
+		double Re = 0.0, Im = 0.0;
+		for (int32 i = 0; i < Lsfs; ++i)
+		{
+			const double Phase = -2.0 * UE_DOUBLE_PI * K * i / Lsfs;
+			Re += Lsf[i] * FMath::Cos(Phase);
+			Im += Lsf[i] * FMath::Sin(Phase);
+		}
+		return FMath::Sqrt(Re * Re + Im * Im);
+	};
+	const double Dc = Magnitude(0);
+	if (!(Dc > 0.0))
+	{
+		return -1.0;
+	}
+	double Previous = 1.0;
+	for (int32 K = 1; K <= Lsfs / 2; ++K)
+	{
+		const double Mtf = Magnitude(K) / Dc;
+		if (Mtf < 0.5)
+		{
+			const double Fraction = (Previous - 0.5) / (Previous - Mtf);
+			return (K - 1 + Fraction) * RenderEsfrOversample / double(Lsfs);
+		}
+		Previous = Mtf;
+	}
+	return (Lsfs / 2) * RenderEsfrOversample / double(Lsfs);
+}
+
 int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 {
 	FString ScenarioPath;
@@ -650,7 +992,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		UE_LOG(LogFlightSimRender, Error,
 		       TEXT("usage: -run=FlightSimBridge.FlightSimRender ")
 		       TEXT("-scenario=<run-card.json> -frames=<out-dir> [-fps=5] [-labels] [-linear] [-deterministic] "
-		            "[-passes=normal,velocity,albedo] [-width=960] [-height=540]"));
+		            "[-passes=normal,velocity,albedo] [-width=960] [-height=540] "
+		            "[-calibration] [-sun-lux=<lux>] [-accumulate=<K>] [-velocity-check] "
+		            "[-normal-source=scs|material]"));
 		return 1;
 	}
 	double FramesPerSecond = 5.0;
@@ -710,6 +1054,19 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 	}
 	const bool bPasses = bPassNormal || bPassVelocity || bPassAlbedo;
+	// S4 (the sensing engine side): the opt-ins core/render/flags.py
+	// sensing_flags builds (-calibration, -sun-lux=, -accumulate=) and two
+	// switches of this commandlet's own (-velocity-check, -normal-source=).
+	// Each is absent by default, so a run without them is byte-for-byte the
+	// previous one; each is refused by name below once Fail exists.
+	const bool bCalibration = FParse::Param(*Params, TEXT("calibration"));
+	double SunLuxFlag = 0.0;
+	const bool bSunLuxFlag = FParse::Value(*Params, TEXT("sun-lux="), SunLuxFlag);
+	int32 AccumulateRequested = 0;
+	const bool bAccumulate = FParse::Value(*Params, TEXT("accumulate="), AccumulateRequested);
+	const bool bVelocityCheck = FParse::Param(*Params, TEXT("velocity-check"));
+	FString NormalSource = TEXT("scs");
+	FParse::Value(*Params, TEXT("normal-source="), NormalSource);
 	// Phase 10, P10-4: pin what the renderer would otherwise decide by
 	// timing. Texture streaming brings mips in over wall time; LOD
 	// selection is deterministic in screen size but a forced LOD takes
@@ -919,6 +1276,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 	}
 	TArray<FString> LookProbeOverrides;
+	// S4: the sun in lux (0 = the unitless 8.0 sun every Gate 6 clause was
+	// tuned on) and where the number came from.
+	double AppliedSunLux = 0.0;
+	FString SunLuxSource;
 	if (bVisual)
 	{
 		FFlightSimVisualSceneOptions SceneOptions;
@@ -1012,6 +1373,33 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			SceneOptions.Precipitation = PrecipFlag;
 			LookProbeOverrides.Add(TEXT("precip"));
 		}
+		// S4: the sun's intensity in lux -- the card's look.sun_lux when the
+		// card states one, -sun-lux= (core/render/flags.py, handed the
+		// spec's scene.sun_lux or the clear-sky model) over it. Refused by
+		// name outside (0, 133100] lx, as the Python side refuses it.
+		if (CardLook.IsValid())
+		{
+			double CardSunLux = 0.0;
+			if (CardLook->TryGetNumberField(TEXT("sun_lux"), CardSunLux))
+			{
+				AppliedSunLux = CardSunLux;
+				SunLuxSource = LookSource + TEXT(".sun_lux");
+			}
+		}
+		if (bSunLuxFlag)
+		{
+			AppliedSunLux = SunLuxFlag;
+			SunLuxSource = FString::Printf(TEXT("-sun-lux=%g"), SunLuxFlag);
+		}
+		if (!SunLuxSource.IsEmpty() && !(AppliedSunLux > 0.0 && AppliedSunLux <= RenderSunLuxMax))
+		{
+			return Fail(FString::Printf(
+				TEXT("sensing.sun_lux: a sun of %g lux (%s) cannot be lit; it must be a positive ")
+				TEXT("number no brighter than the %.0f lux of the sun above the atmosphere"),
+				AppliedSunLux, *SunLuxSource, RenderSunLuxMax));
+		}
+		SceneOptions.SunLux = AppliedSunLux;
+		SceneOptions.SunLuxSource = SunLuxSource;
 		SceneOptions.bStarsRequested = bStarsFlag;
 		SceneOptions.bMoonRequested = bMoonFlag;
 		if (bStarsFlag) { LookProbeOverrides.Add(TEXT("stars")); }
@@ -1062,6 +1450,15 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Sun->GetLightComponent()->SetMobility(EComponentMobility::Movable);
 		Sun->SetActorRotation(FRotator(-35.0, 140.0, 0.0));
 		Sun->GetLightComponent()->SetIntensity(8.0f);
+		if (bSunLuxFlag)
+		{
+			// S4: Gate 5's void keeps its studio key light (the silhouette
+			// measurements depend on it); the lux is recorded as not applied
+			// (render.json scene.sun_lux_applied false), never silently.
+			UE_LOG(LogFlightSimRender, Warning,
+			       TEXT("-sun-lux=%g is not applied: the void tier (no -Visual) keeps Gate 5's key light"),
+			       SunLuxFlag);
+		}
 
 		ASkyLight* Sky = World->SpawnActor<ASkyLight>();
 		Sky->GetLightComponent()->SetMobility(EComponentMobility::Movable);
@@ -1537,6 +1934,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	FString ExposureSource = TEXT("engine default metering");
 	double AppliedEv100 = 0.0;
 	bool bAppliedEv100 = false;
+	// S4: the card's shutter, when the card states the triple: the window
+	// -accumulate= spreads its sub-exposures over (0 = none stated).
+	double ExposureShutterSeconds = 0.0;
 	{
 		double CardApertureF = 0.0, CardShutterS = 0.0, CardIso = 0.0;
 		bool bCardExposure = false;
@@ -1592,6 +1992,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				AppliedEv100 = FFlightSimVisualScene::ApplyPhysicalExposure(
 					Capture, CardApertureF, CardShutterS, CardIso);
 				bAppliedEv100 = true;
+				ExposureShutterSeconds = CardShutterS;
 				ExposureMode = TEXT("manual_ev100");
 				// Numbers only (gotcha 13): the camera id string stays in the
 				// Python-written capture manifest.
@@ -1690,6 +2091,92 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		            TEXT("(the AA-free captures, the depth the normals are checked ")
 		            TEXT("against, the ID image the flow is sampled under); pass ")
 		            TEXT("-labels too"));
+	}
+	// -- S4: the linear passes, the velocity cross-check, the accumulation
+	// and the calibration frame -- each refused by name before anything
+	// flies, never degraded to a frame that says less than it was asked.
+	UTextureRenderTarget2D* LinearNormalTarget = nullptr;
+	UTextureRenderTarget2D* LinearBaseColorTarget = nullptr;
+	UTextureRenderTarget2D* VelocityCheckTarget = nullptr;
+	USceneCaptureComponent2D* LinearNormal = nullptr;
+	USceneCaptureComponent2D* LinearBaseColor = nullptr;
+	USceneCaptureComponent2D* VelocityCheck = nullptr;
+	FString LinearNormalSource;
+	if (NormalSource != TEXT("scs") && NormalSource != TEXT("material"))
+	{
+		return Fail(FString::Printf(
+			TEXT("labels.normal_encoding: -normal-source='%s' is neither scs (the SCS_Normal ")
+			TEXT("capture) nor material (the M_WorldNormal fallback)"), *NormalSource));
+	}
+	if (bVelocityCheck && !bLabels)
+	{
+		return Fail(TEXT("labels.velocity_check: -velocity-check rides the label-pass route (the ")
+		            TEXT("AA-free captures, the depth its statistics are taken over); pass -labels too"));
+	}
+	if (bVelocityCheck && bPassVelocity)
+	{
+		return Fail(TEXT("labels.velocity_check: -velocity-check and -passes=velocity each need the ")
+		            TEXT("first scene render after the step (the engine keeps a primitive's previous ")
+		            TEXT("transform for one render only); ask for one of them"));
+	}
+	if (bAccumulate)
+	{
+		if (AccumulateRequested < 1 || AccumulateRequested > RenderAccumulateMax)
+		{
+			return Fail(FString::Printf(
+				TEXT("sensing.accumulate: -accumulate=%d is not a whole number of sub-exposures ")
+				TEXT("from 1 to %d"), AccumulateRequested, RenderAccumulateMax));
+		}
+		if (!(ExposureShutterSeconds > 0.0))
+		{
+			return Fail(TEXT("sensing.accumulate: -accumulate spreads its sub-exposures over the ")
+			            TEXT("shutter, and this camera states none (the card's cameras[N].exposure ")
+			            TEXT("triple, on -Visual without -AutoExposure); the window is never assumed"));
+		}
+		if (bPassVelocity || bVelocityCheck)
+		{
+			return Fail(TEXT("sensing.accumulate: the sub-exposures move the actors between scene ")
+			            TEXT("renders and a velocity pass reads motion from the last one; ask for the ")
+			            TEXT("accumulation or a velocity pass, not both"));
+		}
+	}
+	UMaterialInterface* CalibrationGreyCard = nullptr;
+	UStaticMesh* CalibrationPlane = nullptr;
+	if (bCalibration)
+	{
+		if (!bVisual)
+		{
+			return Fail(TEXT("sensing.calibration: -calibration needs -Visual; the calibration ")
+			            TEXT("frame's white quad is lit by the scene's sun"));
+		}
+		if (!bAppliedEv100)
+		{
+			return Fail(FString::Printf(
+				TEXT("sensing.calibration: -calibration needs the manual EV100 exposure (the card's ")
+				TEXT("cameras[N].exposure or look.ev100); this pass's exposure is %s, which no ")
+				TEXT("luminance chain describes"), *ExposureMode));
+		}
+		if (!(AppliedSunLux > 0.0))
+		{
+			return Fail(TEXT("sensing.calibration: -calibration needs the sun in lux (-sun-lux=); ")
+			            TEXT("the unitless 8.0 sun has no luminance to predict"));
+		}
+		CalibrationGreyCard = LoadObject<UMaterialInterface>(nullptr, RenderGreyCardMaterialPath);
+		if (CalibrationGreyCard == nullptr)
+		{
+			return Fail(FString::Printf(
+				TEXT("sensing.calibration: -calibration needs the material %s (lit, fully rough, ")
+				TEXT("specular 0, the Luminance and Reflectance parameters), which ")
+				TEXT("scripts/ue_create_materials.py builds"), RenderGreyCardMaterialPath));
+		}
+		CalibrationPlane = LoadObject<UStaticMesh>(nullptr, RenderCalibrationPlanePath);
+		if (CalibrationPlane == nullptr || VisualScene.Sun == nullptr)
+		{
+			return Fail(FString::Printf(
+				TEXT("sensing.calibration: the calibration quads need %s and the scene's sun; %s"),
+				RenderCalibrationPlanePath,
+				CalibrationPlane == nullptr ? TEXT("the plane did not load") : TEXT("the scene has no sun")));
+		}
 	}
 	if (bLabels)
 	{
@@ -2013,6 +2500,118 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			       bPassNormal ? TEXT("on") : TEXT("off"), bPassVelocity ? TEXT("on") : TEXT("off"),
 			       bPassAlbedo ? TEXT("on") : TEXT("off"));
 		}
+
+		// -- S4: the linear passes and the velocity cross-check -------------
+		// Each is one more AA-free capture through ConfigureLabelCapture.
+		// SCS_Normal / SCS_BaseColor are the engine's own GBuffer capture
+		// sources (deferred renderer): no post-process material stands
+		// between the GBuffer and the RTF_RGBA16f target, so the .f32 files
+		// and the I6 PNGs (kept) are two routes to one quantity. A half
+		// float resolves a unit normal to 5e-4 (0.03 deg), far inside the
+		// verifier's 10 deg.
+		auto MakeLinearPassTarget = [&](ETextureRenderTargetFormat Format) -> UTextureRenderTarget2D*
+		{
+			UTextureRenderTarget2D* Target = NewObject<UTextureRenderTarget2D>();
+			Target->RenderTargetFormat = Format;
+			Target->ClearColor = FLinearColor::Black;
+			Target->bAutoGenerateMips = false;
+			Target->InitAutoFormat(Width, Height);
+			Target->UpdateResourceImmediate(true);
+			return Target;
+		};
+		auto MakeNormalCapture = [&](const TCHAR* Name, UTextureRenderTarget2D* Target) -> USceneCaptureComponent2D*
+		{
+			USceneCaptureComponent2D* Normal = NewObject<USceneCaptureComponent2D>(Director, Name);
+			Normal->TextureTarget = Target;
+			Normal->CaptureSource = ESceneCaptureSource::SCS_Normal;
+			ConfigureLabelCapture(Normal);
+			Normal->RegisterComponent();
+			return Normal;
+		};
+		auto MakeBaseColorCapture = [&](const TCHAR* Name, UTextureRenderTarget2D* Target) -> USceneCaptureComponent2D*
+		{
+			USceneCaptureComponent2D* BaseColor = NewObject<USceneCaptureComponent2D>(Director, Name);
+			BaseColor->TextureTarget = Target;
+			BaseColor->CaptureSource = ESceneCaptureSource::SCS_BaseColor;
+			ConfigureLabelCapture(BaseColor);
+			BaseColor->RegisterComponent();
+			return BaseColor;
+		};
+		auto MakeMaterialCapture = [&](const TCHAR* Name, UTextureRenderTarget2D* Target,
+		                               UMaterialInterface* Material) -> USceneCaptureComponent2D*
+		{
+			USceneCaptureComponent2D* Pass = NewObject<USceneCaptureComponent2D>(Director, Name);
+			Pass->TextureTarget = Target;
+			Pass->CaptureSource = ESceneCaptureSource::SCS_FinalColorHDR;
+			ConfigureLabelCapture(Pass);
+			Pass->ShowFlags.SetPostProcessing(true);
+			Pass->PostProcessSettings.WeightedBlendables.Array.Add(FWeightedBlendable(1.0f, Material));
+			Pass->PostProcessBlendWeight = 1.0f;
+			Pass->RegisterComponent();
+			return Pass;
+		};
+		if (bPassNormal)
+		{
+			LinearNormalTarget = MakeLinearPassTarget(RTF_RGBA16f);
+			if (NormalSource == TEXT("material"))
+			{
+				UMaterialInterface* Fallback =
+					LoadObject<UMaterialInterface>(nullptr, RenderWorldNormalFallbackMaterialPath);
+				if (Fallback == nullptr)
+				{
+					return Fail(FString::Printf(
+						TEXT("labels.pass_material: -normal-source=material needs the post-process ")
+						TEXT("material %s (SceneTexture:WorldNormal into emissive, unencoded), which ")
+						TEXT("scripts/ue_create_materials.py builds"), RenderWorldNormalFallbackMaterialPath));
+				}
+				LinearNormal = MakeMaterialCapture(TEXT("LinearNormalMaterial"), LinearNormalTarget, Fallback);
+				LinearNormalSource = RenderWorldNormalFallbackMaterialPath;
+			}
+			else
+			{
+				LinearNormal = MakeNormalCapture(TEXT("LinearNormal"), LinearNormalTarget);
+				LinearNormalSource = TEXT("SCS_Normal");
+			}
+		}
+		if (bPassAlbedo)
+		{
+			LinearBaseColorTarget = MakeLinearPassTarget(RTF_RGBA16f);
+			LinearBaseColor = MakeBaseColorCapture(TEXT("LinearBaseColor"), LinearBaseColorTarget);
+		}
+		if (bVelocityCheck)
+		{
+			UMaterialInterface* VelocityMaterial =
+				LoadObject<UMaterialInterface>(nullptr, RenderVelocityCheckMaterialPath);
+			if (VelocityMaterial == nullptr)
+			{
+				return Fail(FString::Printf(
+					TEXT("labels.pass_material: -velocity-check needs the post-process material %s ")
+					TEXT("(SceneTexture:Velocity into emissive, signed, unencoded), which ")
+					TEXT("scripts/ue_create_materials.py builds"), RenderVelocityCheckMaterialPath));
+			}
+			// RGBA32f like the I6 velocity target, so the two routes differ
+			// in the encoding only (this one signed and unencoded: whether a
+			// negative emissive survives the FinalColorHDR readback is what
+			// its negative_raw_values count measures on the box).
+			VelocityCheckTarget = MakeLinearPassTarget(RTF_RGBA32f);
+			VelocityCheck = MakeMaterialCapture(TEXT("VelocityCheck"), VelocityCheckTarget, VelocityMaterial);
+			// The velocity is a DIFFERENCE against the previous frame: this
+			// capture keeps its view state (the previous view matrices).
+			VelocityCheck->bAlwaysPersistRenderingState = true;
+			if (IConsoleVariable* Force = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Velocity.ForceOutput")))
+			{
+				Force->Set(1, ECVF_SetByCode);
+			}
+		}
+		if (LinearNormal != nullptr || LinearBaseColor != nullptr || VelocityCheck != nullptr)
+		{
+			UE_LOG(LogFlightSimRender, Display,
+			       TEXT("linear passes: normal %s, base colour %s, velocity check %s -- AA-free; ")
+			       TEXT("frame_NNNN_normal.f32, _basecolor.f32, _velocity.f32"),
+			       LinearNormal != nullptr ? *LinearNormalSource : TEXT("off"),
+			       LinearBaseColor != nullptr ? TEXT("SCS_BaseColor") : TEXT("off"),
+			       VelocityCheck != nullptr ? TEXT("M_Velocity") : TEXT("off"));
+		}
 	}
 
 	// -- Phase 10 sensor model: the linear capture ------------------------
@@ -2042,6 +2641,67 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		LinearCapture->RegisterComponent();
 		UE_LOG(LogFlightSimRender, Display,
 		       TEXT("linear: FinalColorHDR written as frame_NNNN_linear.exr beside each frame"));
+	}
+
+	// -- S4: the accumulation capture (-accumulate=K) ----------------------
+	// A dedicated capture with the beauty's exposure and show flags but NO
+	// anti-aliasing, no temporal AA and no motion blur: the K sub-exposures
+	// ARE the motion blur (Haeberli & Akeley 1990, a box filter over the
+	// shutter), and a temporal filter would blend them a second time. It
+	// keeps its rendering state (Lumen's and the exposure's histories; no
+	// pixel history, AA being off). The mean of the K linear sub-exposures
+	// is written as frame_NNNN_linear.exr -- the file the Python sensor
+	// post-pass reads -- and the record's accumulation{} says so, so
+	// core/capture/blur.py records the engine's accumulation instead of
+	// blurring a second time.
+	UTextureRenderTarget2D* AccumulateTarget = nullptr;
+	USceneCaptureComponent2D* AccumulateCapture = nullptr;
+	TArray<AActor*> AccumulateMovers;
+	TArray<FTransform> AccumulatePrevious;
+	if (bAccumulate)
+	{
+		AccumulateTarget = NewObject<UTextureRenderTarget2D>();
+		AccumulateTarget->RenderTargetFormat = RTF_RGBA32f;
+		AccumulateTarget->ClearColor = FLinearColor::Black;
+		AccumulateTarget->bAutoGenerateMips = false;
+		AccumulateTarget->InitAutoFormat(Width, Height);
+		AccumulateTarget->UpdateResourceImmediate(true);
+		AccumulateCapture = NewObject<USceneCaptureComponent2D>(Director, TEXT("AccumulateCapture"));
+		AccumulateCapture->SetupAttachment(Director->Camera);
+		AccumulateCapture->SetMobility(EComponentMobility::Movable);
+		AccumulateCapture->TextureTarget = AccumulateTarget;
+		AccumulateCapture->CaptureSource = ESceneCaptureSource::SCS_FinalColorHDR;
+		AccumulateCapture->bCaptureEveryFrame = false;
+		AccumulateCapture->bCaptureOnMovement = false;
+		AccumulateCapture->bAlwaysPersistRenderingState = true;
+		AccumulateCapture->FOVAngle = Capture->FOVAngle;
+		AccumulateCapture->ShowFlags = Capture->ShowFlags;
+		AccumulateCapture->ShowFlags.SetAntiAliasing(false);
+		AccumulateCapture->ShowFlags.SetTemporalAA(false);
+		AccumulateCapture->ShowFlags.SetMotionBlur(false);
+		AccumulateCapture->PostProcessSettings = Capture->PostProcessSettings;
+		AccumulateCapture->PostProcessBlendWeight = Capture->PostProcessBlendWeight;
+		AccumulateCapture->HiddenActors = Capture->HiddenActors;
+		AccumulateCapture->RegisterComponent();
+		// What moves within a window: every aircraft, and a preset camera
+		// (which the world tick moves every step). A consume-poses camera
+		// is placed by its solved track at each sub-exposure's instant.
+		AccumulateMovers.Add(Scenario.Aircraft);
+		for (AActor* Traffic : Scenario.TrafficActors)
+		{
+			if (Traffic != nullptr)
+			{
+				AccumulateMovers.Add(Traffic);
+			}
+		}
+		if (!bConsumePoses)
+		{
+			AccumulateMovers.Add(Director);
+		}
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("accumulate: up to %d AA-off sub-exposures over the %.6f s shutter per frame ")
+		       TEXT("(k = 1 below %.2f px of predicted blur); frame_NNNN_linear.exr is their mean"),
+		       AccumulateRequested, ExposureShutterSeconds, RenderSubPixelBlurPx);
 	}
 
 	if (!Scenario.BeginPlay(Error)) { return Fail(Error); }
@@ -2390,9 +3050,23 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// pass; the first one has no previous and writes zeros, saying so.
 	bool bFlowHasPrevious = false;
 
+	// S4: the velocity cross-check's first captured frame has no previous
+	// one and writes zeros, saying so (the I6 flow's rule).
+	bool bVelocityCheckHasPrevious = false;
 	for (int32 Step = 0; Step < Steps; ++Step)
 	{
 		const double Time = Step * DeltaSeconds;
+		// S4: -accumulate extrapolates each moving actor over the exposure
+		// window from its motion across the last FDM step, so the pose
+		// before this step is kept.
+		if (AccumulateCapture != nullptr)
+		{
+			AccumulatePrevious.Reset();
+			for (AActor* Mover : AccumulateMovers)
+			{
+				AccumulatePrevious.Add(Mover->GetActorTransform());
+			}
+		}
 		if (!Scenario.Step(Card, Time, DeltaSeconds, Error))
 		{
 			return Fail(Error + TEXT("; frames written so far are not a complete run"));
@@ -2491,6 +3165,25 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				return Fail(TEXT("passes: could not read the velocity pass back"));
 			}
 		}
+		// S4: the velocity cross-check renders here for the same reason (the
+		// first scene render after the step); it and -passes=velocity are
+		// exclusive (refused labels.velocity_check above).
+		TArray<FLinearColor> VelocityCheckRaw;
+		if (VelocityCheck != nullptr)
+		{
+			VelocityCheck->FOVAngle = Capture->FOVAngle;
+			VelocityCheck->CaptureScene();
+			FlushRenderingCommands();
+			FTextureRenderTargetResource* CheckResource =
+				VelocityCheckTarget->GameThread_GetRenderTargetResource();
+			if (CheckResource == nullptr
+			    || !CheckResource->ReadLinearColorPixels(
+			           VelocityCheckRaw, FReadSurfaceDataFlags(RCM_MinMax, CubeFace_MAX))
+			    || VelocityCheckRaw.Num() != Width * Height)
+			{
+				return Fail(TEXT("linear passes: could not read the velocity cross-check back"));
+			}
+		}
 		Capture->CaptureScene();
 		FlushRenderingCommands();
 
@@ -2548,6 +3241,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		                       Scenario.ReadProperty(TEXT("attitude/theta-rad")) * RenderRadiansToDegrees);
 		Record->SetNumberField(TEXT("aileron_cmd"), Scenario.Movement->Commands.Aileron);
 		Record->SetNumberField(TEXT("camera_roll_deg"), Director->GetCameraRollDegrees());
+		// S4: this frame's metric depth (+inf for sky), handed from the label
+		// bundle to the linear passes, which write 0, 0, 0 where it is sky.
+		TArray<float> LabelDepthThisFrame;
 		if (bLabels)
 		{
 			// Every label capture sees what the colour capture saw: the same
@@ -2806,8 +3502,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Labels->SetNumberField(TEXT("non_integer_id_pixels"), NonIntegerIds);
 			Labels->SetArrayField(TEXT("objects"), ObjectRecords);
 			Record->SetObjectField(TEXT("labels"), Labels);
+			LabelDepthThisFrame = MoveTemp(DepthMetres);
 		}
-		if (bLinear)
+		// S4: under -accumulate the frame's linear file is the accumulation
+		// (written below), so the instantaneous one is not written over it.
+		if (bLinear && AccumulateCapture == nullptr)
 		{
 			LinearCapture->FOVAngle = Capture->FOVAngle;
 			LinearCapture->CaptureScene();
@@ -3001,6 +3700,410 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			{
 				Record->SetField(TEXT("albedo_png"), MakeShared<FJsonValueNull>());
 			}
+		}
+		// -- S4: the linear passes and the velocity cross-check, per frame --
+		// Named twice on the record: the frame-level normal_f32 /
+		// basecolor_f32 / velocity_f32 (the keys core/capture/passes.py
+		// reads) and labels.normal / labels.basecolor / labels.velocity with
+		// the axes and the MEASURED encoding (the keys core/capture/verify.py
+		// grades when present).
+		if (LinearNormal != nullptr || LinearBaseColor != nullptr || VelocityCheck != nullptr)
+		{
+			const int32 PixelCount = Width * Height;
+			const FString LinearStem = FrameName.LeftChop(4);
+			const TSharedPtr<FJsonObject>* LabelsField = nullptr;
+			if (!Record->TryGetObjectField(TEXT("labels"), LabelsField) || LabelsField == nullptr
+			    || !LabelsField->IsValid())
+			{
+				return Fail(TEXT("linear passes: the frame record carries no labels block to name them in"));
+			}
+			const TSharedPtr<FJsonObject> FrameLabels = *LabelsField;
+			// Sky is where the label bundle's float depth is +inf.
+			auto IsSky = [&](int32 i) -> bool
+			{
+				return LabelDepthThisFrame.Num() == PixelCount && !FMath::IsFinite(LabelDepthThisFrame[i]);
+			};
+			auto ReadLinearPass = [&](USceneCaptureComponent2D* Pass, UTextureRenderTarget2D* Target,
+			                          const TCHAR* Word, TArray<FLinearColor>& Out) -> bool
+			{
+				Pass->FOVAngle = Capture->FOVAngle;
+				Pass->CaptureScene();
+				FlushRenderingCommands();
+				FTextureRenderTargetResource* PassResource = Target->GameThread_GetRenderTargetResource();
+				if (PassResource == nullptr
+				    || !PassResource->ReadLinearColorPixels(
+				           Out, FReadSurfaceDataFlags(RCM_MinMax, CubeFace_MAX))
+				    || Out.Num() != PixelCount)
+				{
+					Error = FString::Printf(TEXT("linear passes: could not read the %s capture back"), Word);
+					return false;
+				}
+				return true;
+			};
+
+			if (LinearNormal != nullptr)
+			{
+				TArray<FLinearColor> Raw;
+				if (!ReadLinearPass(LinearNormal, LinearNormalTarget, TEXT("normal"), Raw))
+				{
+					return Fail(Error);
+				}
+				// The encoding, measured on the geometry pixels: which decode
+				// gives unit vectors -- the texel itself ("signed") or
+				// (texel - 0.5) / 0.5 ("offset_half")?
+				int32 GeometryPixels = 0, UnitSigned = 0, UnitOffset = 0;
+				for (int32 i = 0; i < PixelCount; ++i)
+				{
+					if (IsSky(i))
+					{
+						continue;
+					}
+					++GeometryPixels;
+					const FVector Texel(Raw[i].R, Raw[i].G, Raw[i].B);
+					const FVector Offset = (Texel - FVector(RenderPassSignedOffset)) / RenderPassSignedScale;
+					if (FMath::Abs(Texel.Size() - 1.0) < RenderNormalUnitTolerance)
+					{
+						++UnitSigned;
+					}
+					if (FMath::Abs(Offset.Size() - 1.0) < RenderNormalUnitTolerance)
+					{
+						++UnitOffset;
+					}
+				}
+				const double FractionSigned = GeometryPixels > 0 ? double(UnitSigned) / GeometryPixels : 0.0;
+				const double FractionOffset = GeometryPixels > 0 ? double(UnitOffset) / GeometryPixels : 0.0;
+				FString Encoding = TEXT("undetermined (no geometry pixels)");
+				if (GeometryPixels > 0)
+				{
+					if (FractionSigned >= RenderNormalUnitFraction && FractionSigned >= FractionOffset)
+					{
+						Encoding = TEXT("signed");
+					}
+					else if (FractionOffset >= RenderNormalUnitFraction)
+					{
+						Encoding = TEXT("offset_half");
+					}
+					else
+					{
+						return Fail(FString::Printf(
+							TEXT("labels.normal_encoding: the %s normals of %s decode to unit length on ")
+							TEXT("%.1f %% of %d geometry pixels read as signed and %.1f %% read as ")
+							TEXT("n * 0.5 + 0.5; neither is the encoding (render with ")
+							TEXT("-normal-source=material, the M_WorldNormal fallback)"),
+							*LinearNormalSource, *FrameName, 100.0 * FractionSigned, GeometryPixels,
+							100.0 * FractionOffset));
+					}
+				}
+				// Engine world axes -> the scene frame (north, east, up), by the
+				// ENU vectors at the camera (the I6 normal PNG's rotation).
+				FVector EastAxis, NorthAxis, UpAxis;
+				Scenario.GeoReferencing->GetENUVectorsAtEngineLocation(
+					Director->GetActorLocation(), EastAxis, NorthAxis, UpAxis);
+				const bool bOffsetEncoded = Encoding == TEXT("offset_half");
+				TArray<float> Normal;
+				Normal.SetNumZeroed(PixelCount * RenderLinearChannels);
+				int32 UnitPixels = 0;
+				for (int32 i = 0; i < PixelCount && GeometryPixels > 0; ++i)
+				{
+					if (IsSky(i))
+					{
+						continue;   // 0, 0, 0: the depth file says where the sky is
+					}
+					FVector Engine(Raw[i].R, Raw[i].G, Raw[i].B);
+					if (bOffsetEncoded)
+					{
+						Engine = (Engine - FVector(RenderPassSignedOffset)) / RenderPassSignedScale;
+					}
+					const FVector Scene(FVector::DotProduct(Engine, NorthAxis),
+					                    FVector::DotProduct(Engine, EastAxis),
+					                    FVector::DotProduct(Engine, UpAxis));
+					const double Length = Scene.Size();
+					if (FMath::Abs(Length - 1.0) < RenderNormalUnitTolerance)
+					{
+						++UnitPixels;
+					}
+					const FVector N = Length > 1.0e-6 ? Scene / Length : FVector::ZeroVector;
+					Normal[RenderLinearChannels * i + 0] = static_cast<float>(N.X);
+					Normal[RenderLinearChannels * i + 1] = static_cast<float>(N.Y);
+					Normal[RenderLinearChannels * i + 2] = static_cast<float>(N.Z);
+				}
+				const FString NormalName = LinearStem + TEXT("_normal.f32");
+				if (!WriteLinearF32(FPaths::Combine(OutputDirectory, NormalName), Normal, Width, Height,
+				                    RenderLinearChannels))
+				{
+					return Fail(FString::Printf(TEXT("linear passes: could not write %s"), *NormalName));
+				}
+				Record->SetStringField(TEXT("normal_f32"), NormalName);
+				FrameLabels->SetStringField(TEXT("normal"), NormalName);
+				FrameLabels->SetStringField(TEXT("normal_axes"), RenderNormalAxes);
+				FrameLabels->SetStringField(TEXT("normal_encoding"), Encoding);
+				TSharedPtr<FJsonObject> Evidence = MakeShared<FJsonObject>();
+				Evidence->SetStringField(TEXT("source"), LinearNormalSource);
+				Evidence->SetNumberField(TEXT("geometry_pixels"), GeometryPixels);
+				Evidence->SetNumberField(TEXT("unit_fraction_signed"), FractionSigned);
+				Evidence->SetNumberField(TEXT("unit_fraction_offset_half"), FractionOffset);
+				Evidence->SetNumberField(TEXT("unit_pixels"), UnitPixels);
+				FrameLabels->SetObjectField(TEXT("normal_encoding_evidence"), Evidence);
+			}
+
+			if (LinearBaseColor != nullptr)
+			{
+				TArray<FLinearColor> Raw;
+				if (!ReadLinearPass(LinearBaseColor, LinearBaseColorTarget, TEXT("base colour"), Raw))
+				{
+					return Fail(Error);
+				}
+				TArray<float> BaseColor;
+				BaseColor.SetNumZeroed(PixelCount * RenderLinearChannels);
+				int32 OutOfRange = 0;
+				for (int32 i = 0; i < PixelCount; ++i)
+				{
+					if (IsSky(i))
+					{
+						continue;
+					}
+					const FLinearColor& C = Raw[i];
+					if (C.R < 0.0f || C.R > 1.0f || C.G < 0.0f || C.G > 1.0f || C.B < 0.0f || C.B > 1.0f)
+					{
+						++OutOfRange;   // counted, never clamped: the file is what the GBuffer held
+					}
+					BaseColor[RenderLinearChannels * i + 0] = C.R;
+					BaseColor[RenderLinearChannels * i + 1] = C.G;
+					BaseColor[RenderLinearChannels * i + 2] = C.B;
+				}
+				const FString BaseColorName = LinearStem + TEXT("_basecolor.f32");
+				if (!WriteLinearF32(FPaths::Combine(OutputDirectory, BaseColorName), BaseColor, Width, Height,
+				                    RenderLinearChannels))
+				{
+					return Fail(FString::Printf(TEXT("linear passes: could not write %s"), *BaseColorName));
+				}
+				Record->SetStringField(TEXT("basecolor_f32"), BaseColorName);
+				FrameLabels->SetStringField(TEXT("basecolor"), BaseColorName);
+				FrameLabels->SetNumberField(TEXT("basecolor_out_of_range_pixels"), OutOfRange);
+			}
+
+			if (VelocityCheck != nullptr)
+			{
+				// Signed clip-space delta (x right, y UP) -> pixels, screen +y
+				// down: the I6 flow's decode without its offset. A read-back
+				// beside the Python flow (S2), never the truth.
+				TArray<float> Velocity;
+				Velocity.SetNumZeroed(PixelCount * 2);
+				TArray<float> Speeds;
+				int32 MovingPixels = 0, NegativeRaw = 0;
+				for (int32 i = 0; i < PixelCount; ++i)
+				{
+					if (VelocityCheckRaw[i].R < 0.0f || VelocityCheckRaw[i].G < 0.0f)
+					{
+						++NegativeRaw;
+					}
+				}
+				if (bVelocityCheckHasPrevious)
+				{
+					for (int32 i = 0; i < PixelCount; ++i)
+					{
+						const float DxPx = VelocityCheckRaw[i].R * 0.5f * Width;
+						const float DyPx = -VelocityCheckRaw[i].G * 0.5f * Height;
+						Velocity[2 * i + 0] = DxPx;
+						Velocity[2 * i + 1] = DyPx;
+						if (IsSky(i))
+						{
+							continue;
+						}
+						const float Speed = FMath::Sqrt(DxPx * DxPx + DyPx * DyPx);
+						Speeds.Add(Speed);
+						if (Speed > 0.01f)
+						{
+							++MovingPixels;
+						}
+					}
+				}
+				const double P95 = RenderPercentile95(Speeds);
+				const FString VelocityName = LinearStem + TEXT("_velocity.f32");
+				if (!WriteLinearF32(FPaths::Combine(OutputDirectory, VelocityName), Velocity, Width, Height, 2))
+				{
+					return Fail(FString::Printf(TEXT("linear passes: could not write %s"), *VelocityName));
+				}
+				Record->SetStringField(TEXT("velocity_f32"), VelocityName);
+				TSharedPtr<FJsonObject> VelocityRecord = MakeShared<FJsonObject>();
+				VelocityRecord->SetStringField(TEXT("file"), VelocityName);
+				VelocityRecord->SetBoolField(TEXT("first_frame"), !bVelocityCheckHasPrevious);
+				VelocityRecord->SetNumberField(TEXT("p95_px"), P95);
+				VelocityRecord->SetNumberField(TEXT("moving_pixels"), MovingPixels);
+				VelocityRecord->SetNumberField(TEXT("negative_raw_values"), NegativeRaw);
+				VelocityRecord->SetStringField(TEXT("role"),
+					TEXT("read-back: the engine's velocity beside the Python flow (S2), never the truth"));
+				FrameLabels->SetObjectField(TEXT("velocity"), VelocityRecord);
+				bVelocityCheckHasPrevious = true;
+			}
+		}
+		// -- S4: the accumulation (-accumulate=K) ---------------------------
+		// The window is the card's shutter CENTRED on the capture instant
+		// (core/capture/blur.py's symmetric window): [t - t_exp / 2,
+		// t + t_exp / 2]. Every mover is placed at a sub-exposure's instant
+		// by LINEAR extrapolation of its motion over the last FDM step
+		// (translation, and rotation at that step's constant angular rate --
+		// blur.py's linear-motion model); a consume-poses camera by its
+		// solved track. The predicted blur (the primary's origin and a static
+		// point 1 km down the axis, between the window's two ends) sets k:
+		// 1 under 0.25 px, else the K asked for. Everything is put back
+		// before the rest of the frame is recorded.
+		if (AccumulateCapture != nullptr)
+		{
+			const double Now = Scenario.ReadProperty(TEXT("simulation/sim-time-sec"));
+			const double Shutter = ExposureShutterSeconds;
+			const double WindowStart = Now - 0.5 * Shutter;
+			const double WindowEnd = Now + 0.5 * Shutter;
+			TArray<FTransform> AtCapture;
+			for (AActor* Mover : AccumulateMovers)
+			{
+				AtCapture.Add(Mover->GetActorTransform());
+			}
+			const bool bHavePrevious = AccumulatePrevious.Num() == AccumulateMovers.Num();
+			int32 CameraHeld = 0;
+			auto PlaceAt = [&](double Offset)
+			{
+				const double Fraction = Offset / DeltaSeconds;
+				for (int32 m = 0; m < AccumulateMovers.Num(); ++m)
+				{
+					FTransform Placed = AtCapture[m];
+					if (bHavePrevious)
+					{
+						const FTransform& Before = AccumulatePrevious[m];
+						Placed.SetLocation(AtCapture[m].GetLocation()
+						                   + (AtCapture[m].GetLocation() - Before.GetLocation()) * Fraction);
+						const FQuat Delta = AtCapture[m].GetRotation() * Before.GetRotation().Inverse();
+						FVector Axis;
+						double Angle = 0.0;
+						Delta.ToAxisAndAngle(Axis, Angle);
+						Angle = FMath::UnwindRadians(Angle);
+						Placed.SetRotation((FQuat(Axis, Angle * Fraction) * AtCapture[m].GetRotation()).GetNormalized());
+					}
+					AccumulateMovers[m]->SetActorTransform(Placed, false, nullptr, ETeleportType::TeleportPhysics);
+				}
+				AccumulateCapture->FOVAngle = Capture->FOVAngle;
+				if (bConsumePoses)
+				{
+					FString PoseError;
+					if (!Director->ApplyPoseAtTime(Now + Offset, PoseError))
+					{
+						// Outside the solved track (its ends): held at the
+						// frame's own pose, and counted.
+						Director->ApplyPoseAtTime(Now, PoseError);
+						++CameraHeld;
+					}
+					AccumulateCapture->FOVAngle = static_cast<float>(FMath::RadiansToDegrees(
+						2.0 * FMath::Atan(CameraSensorWidthMm / (2.0 * Director->GetAppliedFocalLengthMm()))));
+				}
+			};
+			// The predicted blur between the window's ends.
+			const FVector StaticProbe = AccumulateCapture->GetComponentLocation()
+			                            + AccumulateCapture->GetForwardVector() * (1000.0 * RenderCmPerMetre);
+			FVector2D AircraftStart, AircraftEnd, StaticStart, StaticEnd;
+			PlaceAt(-0.5 * Shutter);
+			const bool bAircraftStart = RenderPixelInFront(AccumulateCapture, Width, Height,
+			                                               Scenario.Aircraft->GetActorLocation(), AircraftStart);
+			const bool bStaticStart = RenderPixelInFront(AccumulateCapture, Width, Height, StaticProbe, StaticStart);
+			PlaceAt(+0.5 * Shutter);
+			const bool bAircraftEnd = RenderPixelInFront(AccumulateCapture, Width, Height,
+			                                             Scenario.Aircraft->GetActorLocation(), AircraftEnd);
+			const bool bStaticEnd = RenderPixelInFront(AccumulateCapture, Width, Height, StaticProbe, StaticEnd);
+			double PredictedBlurPx = 0.0;
+			if (bAircraftStart && bAircraftEnd)
+			{
+				PredictedBlurPx = FMath::Max(PredictedBlurPx, FVector2D::Distance(AircraftStart, AircraftEnd));
+			}
+			if (bStaticStart && bStaticEnd)
+			{
+				PredictedBlurPx = FMath::Max(PredictedBlurPx, FVector2D::Distance(StaticStart, StaticEnd));
+			}
+			const int32 SubExposures = AccumulationCount(PredictedBlurPx, AccumulateRequested);
+			// K sub-exposures at the midpoints of K equal slices of the window
+			// (a box filter); k = 1 is the capture instant itself.
+			TArray<FLinearColor> Mean;
+			Mean.SetNumZeroed(Width * Height);
+			TArray<FLinearColor> Sub;
+			TArray<TSharedPtr<FJsonValue>> SubTimes;
+			for (int32 k = 0; k < SubExposures; ++k)
+			{
+				const double Offset = Shutter * ((k + 0.5) / SubExposures - 0.5);
+				PlaceAt(Offset);
+				World->SendAllEndOfFrameUpdates();
+				FlushRenderingCommands();
+				AccumulateCapture->CaptureScene();
+				FlushRenderingCommands();
+				FTextureRenderTargetResource* AccumulateResource =
+					AccumulateTarget->GameThread_GetRenderTargetResource();
+				if (AccumulateResource == nullptr
+				    || !AccumulateResource->ReadLinearColorPixels(
+				           Sub, FReadSurfaceDataFlags(RCM_MinMax, CubeFace_MAX))
+				    || Sub.Num() != Width * Height)
+				{
+					return Fail(FString::Printf(TEXT("accumulate: could not read sub-exposure %d of %s back"),
+					                            k, *FrameName));
+				}
+				for (int32 i = 0; i < Sub.Num(); ++i)
+				{
+					Mean[i] += Sub[i];
+				}
+				SubTimes.Add(MakeShared<FJsonValueNumber>(Now + Offset));
+			}
+			for (FLinearColor& Pixel : Mean)
+			{
+				Pixel /= static_cast<float>(SubExposures);
+			}
+			// Put everything back as it was at the capture instant.
+			for (int32 m = 0; m < AccumulateMovers.Num(); ++m)
+			{
+				AccumulateMovers[m]->SetActorTransform(AtCapture[m], false, nullptr, ETeleportType::TeleportPhysics);
+			}
+			if (bConsumePoses && !Director->ApplyPoseAtTime(Now, Error))
+			{
+				return Fail(Error);
+			}
+			World->SendAllEndOfFrameUpdates();
+			FlushRenderingCommands();
+			IImageWrapperModule& AccumulateWrappers =
+				FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+			TSharedPtr<IImageWrapper> AccumulateExr = AccumulateWrappers.CreateImageWrapper(EImageFormat::EXR);
+			const FString AccumulateName = FrameName.LeftChop(4) + TEXT("_linear.exr");
+			if (!AccumulateExr.IsValid()
+			    || !AccumulateExr->SetRaw(Mean.GetData(), static_cast<int64>(Mean.Num()) * sizeof(FLinearColor),
+			                              Width, Height, ERGBFormat::RGBAF, 32))
+			{
+				return Fail(TEXT("accumulate: could not encode the EXR"));
+			}
+			const TArray64<uint8> AccumulateBytes = AccumulateExr->GetCompressed();
+			if (AccumulateBytes.Num() == 0
+			    || !FFileHelper::SaveArrayToFile(AccumulateBytes, *FPaths::Combine(OutputDirectory, AccumulateName)))
+			{
+				return Fail(FString::Printf(TEXT("accumulate: could not write %s"), *AccumulateName));
+			}
+			Record->SetStringField(TEXT("linear"), AccumulateName);
+			TSharedPtr<FJsonObject> Accumulation = MakeShared<FJsonObject>();
+			Accumulation->SetNumberField(TEXT("k"), SubExposures);
+			Accumulation->SetNumberField(TEXT("requested_k"), AccumulateRequested);
+			Accumulation->SetNumberField(TEXT("t0_s"), WindowStart);
+			Accumulation->SetNumberField(TEXT("t1_s"), WindowEnd);
+			Accumulation->SetNumberField(TEXT("exposure_s"), Shutter);
+			Accumulation->SetArrayField(TEXT("sub_frame_times_s"), SubTimes);
+			Accumulation->SetNumberField(TEXT("predicted_blur_px"), PredictedBlurPx);
+			Accumulation->SetStringField(TEXT("rule"),
+				TEXT("k = 1 when the predicted blur is under 0.25 px (core/capture/blur.py ")
+				TEXT("SUB_PIXEL_BLUR_PX), else the K asked for"));
+			Accumulation->SetStringField(TEXT("file"), AccumulateName);
+			Accumulation->SetStringField(TEXT("filter"),
+				TEXT("box: the mean of k linear sub-exposures at the midpoints of k equal slices of ")
+				TEXT("[t0_s, t1_s], each AA-free with the beauty's exposure"));
+			Accumulation->SetStringField(TEXT("motion_model"),
+				TEXT("each aircraft (and a preset camera) extrapolated linearly from its motion over ")
+				TEXT("the last FDM step; a consume-poses camera placed by its solved track"));
+			Accumulation->SetNumberField(TEXT("camera_held_sub_frames"), CameraHeld);
+			Accumulation->SetStringField(TEXT("anti_aliasing"), TEXT("none"));
+			Accumulation->SetStringField(TEXT("not_claimed"),
+				TEXT("control-surface motion within the window, a rolling shutter, and that the beauty ")
+				TEXT("PNG (instantaneous, TSR) shows this blur: the sensor post-pass reads the accumulation"));
+			Record->SetObjectField(TEXT("accumulation"), Accumulation);
 		}
 		if (bConsumePoses)
 		{
@@ -3199,6 +4302,404 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			TEXT("%d of %d frames contain nothing above the background. A file "
 			     "that exists is not a frame that shows something."),
 			BlankFrames, Captured));
+	}
+
+	// -- S4: the calibration frame (-calibration) ---------------------------
+	// Rendered AFTER every delivered frame, so none of them changes. One
+	// frame of three quads RenderCalibrationDistanceM down a camera that
+	// looks WITH the light (the sun behind it: a quad facing the camera
+	// faces the sun, N.L = 1), at the beauty camera's last position:
+	//  * left, the emissive grey quad (M_GreyCard, Reflectance 0,
+	//    Luminance = the stated grey_card_nits): measures one emissive unit
+	//    = 1 cd/m^2 through the exposure;
+	//  * right, the white Lambertian quad (Reflectance 0.9, Luminance 0) lit
+	//    by the sun ALONE: sky light, GI, AO, reflections and fog off (show
+	//    flags), the sun's atmosphere transmittance, cloud shadows and
+	//    shadows off, so the stated lux reaches it;
+	//  * centre, the slanted-edge quad: the emissive grey quad turned 5 deg
+	//    about the view axis, against the black of nothing (only the quads
+	//    render: PRM_UseShowOnlyList, atmosphere off).
+	// Captured AA-free as FinalColorHDR into RTF_RGBA32f with the beauty's
+	// exposure. PREDICTED from core/capture/radiometry.py's chain (this
+	// file's LuminancePerUnit / LambertianLuminance, A read back), MEASURED
+	// as the mean Rec. 709 luminance over each quad's inner half. The root
+	// predicted / measured / ratio are the 18 % grey card's the chain
+	// predicts: the white quad's measurement scaled by 0.18 / 0.9 (the
+	// ratio is the white quad's own). Written: calibration_0000.png (the
+	// linear frame sRGB-encoded, 8-bit, for the sensor post-pass),
+	// calibration_0000_linear.f32 (WriteLinearF32, 3 channels), and
+	// render.json calibration{} -- the same object as calibration.json.
+	TSharedPtr<FJsonObject> Calibration;
+	if (bCalibration)
+	{
+		UDirectionalLightComponent* CalibrationSun =
+			Cast<UDirectionalLightComponent>(VisualScene.Sun->GetLightComponent());
+		const FVector LightDirection = VisualScene.Sun->GetActorForwardVector();
+		AActor* Rig = World->SpawnActor<AActor>();
+		USceneComponent* RigRoot = NewObject<USceneComponent>(Rig, TEXT("CalibrationRoot"));
+		Rig->SetRootComponent(RigRoot);
+		RigRoot->SetMobility(EComponentMobility::Movable);
+		RigRoot->RegisterComponent();
+		Rig->SetActorLocationAndRotation(Director->Camera->GetComponentLocation(),
+		                                 FRotator(LightDirection.Rotation().Pitch,
+		                                          LightDirection.Rotation().Yaw, 0.0));
+
+		UTextureRenderTarget2D* CalibrationTarget = NewObject<UTextureRenderTarget2D>();
+		CalibrationTarget->RenderTargetFormat = RTF_RGBA32f;
+		CalibrationTarget->ClearColor = FLinearColor::Black;
+		CalibrationTarget->bAutoGenerateMips = false;
+		CalibrationTarget->InitAutoFormat(Width, Height);
+		CalibrationTarget->UpdateResourceImmediate(true);
+		USceneCaptureComponent2D* CalibrationCapture =
+			NewObject<USceneCaptureComponent2D>(Rig, TEXT("CalibrationCapture"));
+		CalibrationCapture->SetupAttachment(RigRoot);
+		CalibrationCapture->SetMobility(EComponentMobility::Movable);
+		CalibrationCapture->TextureTarget = CalibrationTarget;
+		CalibrationCapture->CaptureSource = ESceneCaptureSource::SCS_FinalColorHDR;
+		CalibrationCapture->bCaptureEveryFrame = false;
+		CalibrationCapture->bCaptureOnMovement = false;
+		CalibrationCapture->bAlwaysPersistRenderingState = true;
+		CalibrationCapture->FOVAngle = Capture->FOVAngle;
+		CalibrationCapture->PostProcessSettings = Capture->PostProcessSettings;
+		CalibrationCapture->PostProcessBlendWeight = Capture->PostProcessBlendWeight;
+		CalibrationCapture->ShowFlags = Capture->ShowFlags;
+		CalibrationCapture->ShowFlags.SetAntiAliasing(false);
+		CalibrationCapture->ShowFlags.SetTemporalAA(false);
+		CalibrationCapture->ShowFlags.SetFog(false);
+		CalibrationCapture->ShowFlags.SetVolumetricFog(false);
+		CalibrationCapture->ShowFlags.SetAtmosphere(false);
+		CalibrationCapture->ShowFlags.SetCloud(false);
+		CalibrationCapture->ShowFlags.SetBloom(false);
+		CalibrationCapture->ShowFlags.SetMotionBlur(false);
+		CalibrationCapture->ShowFlags.SetDepthOfField(false);
+		CalibrationCapture->ShowFlags.SetLensFlares(false);
+		CalibrationCapture->ShowFlags.SetTranslucency(false);
+		CalibrationCapture->ShowFlags.SetVignette(false);
+		CalibrationCapture->ShowFlags.SetSkyLighting(false);
+		CalibrationCapture->ShowFlags.SetGlobalIllumination(false);
+		CalibrationCapture->ShowFlags.SetLumenGlobalIllumination(false);
+		CalibrationCapture->ShowFlags.SetLumenReflections(false);
+		CalibrationCapture->ShowFlags.SetAmbientOcclusion(false);
+		CalibrationCapture->ShowFlags.SetReflectionEnvironment(false);
+		CalibrationCapture->ShowFlags.SetScreenSpaceReflections(false);
+		CalibrationCapture->ShowFlags.SetDynamicShadows(false);
+		CalibrationCapture->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
+		CalibrationCapture->ShowOnlyActors.Add(Rig);
+		CalibrationCapture->RegisterComponent();
+
+		// The quads: /Engine/BasicShapes/Plane (100 cm a side, normal +Z),
+		// turned to face the camera (local Z -> the rig's -X, local X -> up,
+		// so local Y runs across the image), then rolled about the view axis.
+		const double DistanceCm = RenderCalibrationDistanceM * RenderCmPerMetre;
+		const double HalfWidthCm = DistanceCm * FMath::Tan(FMath::DegreesToRadians(CalibrationCapture->FOVAngle * 0.5));
+		const double HalfHeightCm = HalfWidthCm * Height / double(Width);
+		const double QuadCm = RenderCalibrationQuadFraction * 2.0 * HalfHeightCm;
+		const double GreyCardNits = LambertianLuminance(AppliedSunLux, RenderGreyCardReflectance);
+		struct FCalibrationQuad
+		{
+			const TCHAR* Name;
+			double OffsetFraction;
+			double RollDeg;
+			double Luminance;
+			double Reflectance;
+			UStaticMeshComponent* Mesh;
+		};
+		FCalibrationQuad Quads[3] = {
+			{TEXT("CalibrationEmissive"), -RenderCalibrationQuadOffset, 0.0, GreyCardNits, 0.0, nullptr},
+			{TEXT("CalibrationSlantedEdge"), 0.0, RenderSlantedEdgeAngleDeg, GreyCardNits, 0.0, nullptr},
+			{TEXT("CalibrationWhite"), RenderCalibrationQuadOffset, 0.0, 0.0, RenderWhiteQuadReflectance, nullptr},
+		};
+		const FQuat Facing = FRotationMatrix::MakeFromZX(FVector(-1.0, 0.0, 0.0), FVector(0.0, 0.0, 1.0)).ToQuat();
+		for (FCalibrationQuad& Quad : Quads)
+		{
+			UStaticMeshComponent* Mesh = NewObject<UStaticMeshComponent>(Rig, Quad.Name);
+			Mesh->SetupAttachment(RigRoot);
+			Mesh->SetMobility(EComponentMobility::Movable);
+			Mesh->SetStaticMesh(CalibrationPlane);
+			Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Mesh->SetCastShadow(false);
+			UMaterialInstanceDynamic* Instance = UMaterialInstanceDynamic::Create(CalibrationGreyCard, Rig);
+			Instance->SetScalarParameterValue(FName(RenderGreyCardLuminanceParameter),
+			                                  static_cast<float>(Quad.Luminance));
+			Instance->SetScalarParameterValue(FName(RenderGreyCardReflectanceParameter),
+			                                  static_cast<float>(Quad.Reflectance));
+			Mesh->SetMaterial(0, Instance);
+			Mesh->RegisterComponent();
+			const FQuat Roll(FVector(1.0, 0.0, 0.0), FMath::DegreesToRadians(Quad.RollDeg));
+			Mesh->SetRelativeLocationAndRotation(
+				FVector(DistanceCm, Quad.OffsetFraction * HalfWidthCm, 0.0), Roll * Facing);
+			Mesh->SetRelativeScale3D(FVector(QuadCm / 100.0, QuadCm / 100.0, 1.0));
+			Quad.Mesh = Mesh;
+		}
+		// The sun alone, as stated: no atmosphere transmittance on it, no
+		// cloud shadow, no shadow at all (the frame is the last render).
+		CalibrationSun->SetAtmosphereSunLight(false);
+		CalibrationSun->SetCastCloudShadows(false);
+		CalibrationSun->SetCastShadows(false);
+		World->SendAllEndOfFrameUpdates();
+		FlushRenderingCommands();
+		if (GShaderCompilingManager != nullptr)
+		{
+			GShaderCompilingManager->FinishAllCompilation();
+		}
+		FAssetCompilingManager::Get().FinishAllCompilation();
+		// Two discarded captures (the main warm-up's measured rule: a new
+		// capture resolves nothing for two calls), then the one read.
+		for (int32 i = 0; i < 3; ++i)
+		{
+			CalibrationCapture->CaptureScene();
+			FlushRenderingCommands();
+		}
+		TArray<FLinearColor> CalibrationLinear;
+		FTextureRenderTargetResource* CalibrationResource = CalibrationTarget->GameThread_GetRenderTargetResource();
+		if (CalibrationResource == nullptr
+		    || !CalibrationResource->ReadLinearColorPixels(
+		           CalibrationLinear, FReadSurfaceDataFlags(RCM_MinMax, CubeFace_MAX))
+		    || CalibrationLinear.Num() != Width * Height)
+		{
+			return Fail(TEXT("calibration: could not read the calibration frame back"));
+		}
+		TArray<float> CalibrationLuminance;
+		CalibrationLuminance.SetNumUninitialized(Width * Height);
+		for (int32 i = 0; i < CalibrationLinear.Num(); ++i)
+		{
+			CalibrationLuminance[i] = static_cast<float>(RenderLuminance709(CalibrationLinear[i]));
+		}
+
+		// Each quad's projected box (its four corners), and the mean over the
+		// box's inner half.
+		auto QuadPoint = [&](const FCalibrationQuad& Quad, double LocalX, double LocalY, FVector2D& Pixel) -> bool
+		{
+			return RenderPixelInFront(CalibrationCapture, Width, Height,
+			                          Quad.Mesh->GetComponentTransform().TransformPosition(FVector(LocalX, LocalY, 0.0)),
+			                          Pixel);
+		};
+		auto QuadBox = [&](const FCalibrationQuad& Quad, FVector2D& Min, FVector2D& Max) -> bool
+		{
+			Min = FVector2D(TNumericLimits<double>::Max(), TNumericLimits<double>::Max());
+			Max = -Min;
+			for (const FVector2D Corner : {FVector2D(-50.0, -50.0), FVector2D(50.0, -50.0),
+			                               FVector2D(50.0, 50.0), FVector2D(-50.0, 50.0)})
+			{
+				FVector2D Pixel;
+				if (!QuadPoint(Quad, Corner.X, Corner.Y, Pixel))
+				{
+					return false;
+				}
+				Min = FVector2D(FMath::Min(Min.X, Pixel.X), FMath::Min(Min.Y, Pixel.Y));
+				Max = FVector2D(FMath::Max(Max.X, Pixel.X), FMath::Max(Max.Y, Pixel.Y));
+			}
+			return Min.X >= 0.0 && Min.Y >= 0.0 && Max.X <= Width && Max.Y <= Height;
+		};
+		auto QuadArray = [](int32 U0, int32 V0, int32 U1, int32 V1)
+		{
+			TArray<TSharedPtr<FJsonValue>> Corners;
+			for (const FIntPoint Corner : {FIntPoint(U0, V0), FIntPoint(U1, V0), FIntPoint(U1, V1), FIntPoint(U0, V1)})
+			{
+				TArray<TSharedPtr<FJsonValue>> Pair;
+				Pair.Add(MakeShared<FJsonValueNumber>(Corner.X));
+				Pair.Add(MakeShared<FJsonValueNumber>(Corner.Y));
+				Corners.Add(MakeShared<FJsonValueArray>(Pair));
+			}
+			return Corners;
+		};
+		auto MeasureQuad = [&](const FCalibrationQuad& Quad, double Predicted, TSharedPtr<FJsonObject>& Out) -> double
+		{
+			FVector2D Min, Max;
+			if (!QuadBox(Quad, Min, Max))
+			{
+				return -1.0;
+			}
+			const double InsetU = (Max.X - Min.X) * RenderCalibrationInset;
+			const double InsetV = (Max.Y - Min.Y) * RenderCalibrationInset;
+			const int32 U0 = FMath::Clamp(FMath::CeilToInt(Min.X + InsetU), 0, Width);
+			const int32 U1 = FMath::Clamp(FMath::FloorToInt(Max.X - InsetU), 0, Width);
+			const int32 V0 = FMath::Clamp(FMath::CeilToInt(Min.Y + InsetV), 0, Height);
+			const int32 V1 = FMath::Clamp(FMath::FloorToInt(Max.Y - InsetV), 0, Height);
+			double Sum = 0.0, SumR = 0.0, SumG = 0.0, SumB = 0.0;
+			int32 Pixels = 0;
+			for (int32 V = V0; V < V1; ++V)
+			{
+				for (int32 U = U0; U < U1; ++U)
+				{
+					const FLinearColor& C = CalibrationLinear[V * Width + U];
+					Sum += CalibrationLuminance[V * Width + U];
+					SumR += C.R;
+					SumG += C.G;
+					SumB += C.B;
+					++Pixels;
+				}
+			}
+			if (Pixels == 0)
+			{
+				return -1.0;
+			}
+			const double Measured = Sum / Pixels;
+			Out = MakeShared<FJsonObject>();
+			Out->SetNumberField(TEXT("predicted"), Predicted);
+			Out->SetNumberField(TEXT("measured"), Measured);
+			Out->SetNumberField(TEXT("ratio"), Measured / Predicted);
+			Out->SetNumberField(TEXT("pixels"), Pixels);
+			Out->SetArrayField(TEXT("quad_px"), QuadArray(U0, V0, U1, V1));
+			TArray<TSharedPtr<FJsonValue>> MeanRgb;
+			MeanRgb.Add(MakeShared<FJsonValueNumber>(SumR / Pixels));
+			MeanRgb.Add(MakeShared<FJsonValueNumber>(SumG / Pixels));
+			MeanRgb.Add(MakeShared<FJsonValueNumber>(SumB / Pixels));
+			Out->SetArrayField(TEXT("mean_rgb"), MeanRgb);
+			return Measured;
+		};
+
+		// The chain, as core/capture/radiometry.py states it, with A read
+		// back from the engine and EC the bias the exposure path pinned.
+		double LensAttenuation = RenderLensAttenuationDefault;
+		FString LensAttenuationBasis =
+			TEXT("the documented default 0.78 [unverified here]: r.EyeAdaptation.LensAttenuation not found");
+		if (IConsoleVariable* Attenuation = IConsoleManager::Get().FindConsoleVariable(TEXT("r.EyeAdaptation.LensAttenuation")))
+		{
+			LensAttenuation = Attenuation->GetFloat();
+			LensAttenuationBasis = TEXT("read back from r.EyeAdaptation.LensAttenuation");
+		}
+		const double ExposureCompensation = Capture->PostProcessSettings.bOverride_AutoExposureBias
+			? static_cast<double>(Capture->PostProcessSettings.AutoExposureBias) : 0.0;
+		const double PerUnit = LuminancePerUnit(AppliedEv100, ExposureCompensation, LensAttenuation);
+		const double EmissivePredicted = GreyCardNits / PerUnit;
+		const double WhitePredicted = LambertianLuminance(AppliedSunLux, RenderWhiteQuadReflectance) / PerUnit;
+		const double GreyPredicted = LambertianLuminance(AppliedSunLux, RenderGreyCardReflectance) / PerUnit;
+		TSharedPtr<FJsonObject> EmissiveRecord, WhiteRecord;
+		const double EmissiveMeasured = MeasureQuad(Quads[0], EmissivePredicted, EmissiveRecord);
+		const double WhiteMeasured = MeasureQuad(Quads[2], WhitePredicted, WhiteRecord);
+		if (EmissiveMeasured < 0.0 || WhiteMeasured < 0.0)
+		{
+			return Fail(TEXT("sensing.calibration: a calibration quad is not wholly inside the ")
+			            TEXT("calibration frame, so its luminance cannot be measured"));
+		}
+		EmissiveRecord->SetNumberField(TEXT("nits"), GreyCardNits);
+		WhiteRecord->SetNumberField(TEXT("reflectance"), RenderWhiteQuadReflectance);
+		WhiteRecord->SetNumberField(TEXT("illuminance_lux"), AppliedSunLux);
+		const double GreyMeasured = WhiteMeasured * (RenderGreyCardReflectance / RenderWhiteQuadReflectance);
+
+		// The slanted edge: the centre quad's left edge (local Y = -50),
+		// cropped to the middle 60 % of the quad's side about the edge's
+		// midpoint, so the crop holds that one edge and nothing else.
+		FVector2D EdgeMid, EdgeFar;
+		if (!QuadPoint(Quads[1], 0.0, -50.0, EdgeMid) || !QuadPoint(Quads[1], 0.0, 50.0, EdgeFar))
+		{
+			return Fail(TEXT("sensing.calibration: the slanted-edge quad is behind the calibration camera"));
+		}
+		const double SidePx = FVector2D::Distance(EdgeMid, EdgeFar);
+		const int32 EdgeU0 = FMath::Clamp(FMath::FloorToInt(EdgeMid.X - 0.3 * SidePx), 0, Width);
+		const int32 EdgeU1 = FMath::Clamp(FMath::CeilToInt(EdgeMid.X + 0.3 * SidePx), 0, Width);
+		const int32 EdgeV0 = FMath::Clamp(FMath::FloorToInt(EdgeMid.Y - 0.3 * SidePx), 0, Height);
+		const int32 EdgeV1 = FMath::Clamp(FMath::CeilToInt(EdgeMid.Y + 0.3 * SidePx), 0, Height);
+		const double Mtf50 = EsfrMtf50(CalibrationLuminance, Width, Height, EdgeU0, EdgeV0, EdgeU1, EdgeV1);
+
+		// The files: the frame sRGB-encoded for the sensor post-pass, and the
+		// linear values themselves.
+		const FString CalibrationFrameName = TEXT("calibration_0000.png");
+		const FString CalibrationLinearName = TEXT("calibration_0000_linear.f32");
+		TArray<FColor> CalibrationPixels;
+		CalibrationPixels.SetNumUninitialized(Width * Height);
+		TArray<float> CalibrationRgb;
+		CalibrationRgb.SetNumUninitialized(Width * Height * RenderLinearChannels);
+		for (int32 i = 0; i < CalibrationLinear.Num(); ++i)
+		{
+			const FLinearColor& C = CalibrationLinear[i];
+			CalibrationPixels[i] = FColor(RenderSrgb8(C.R), RenderSrgb8(C.G), RenderSrgb8(C.B), 255);
+			CalibrationRgb[RenderLinearChannels * i + 0] = C.R;
+			CalibrationRgb[RenderLinearChannels * i + 1] = C.G;
+			CalibrationRgb[RenderLinearChannels * i + 2] = C.B;
+		}
+		TArray64<uint8> CalibrationPng;
+		FImageUtils::PNGCompressImageArray(Width, Height, CalibrationPixels, CalibrationPng);
+		if (!FFileHelper::SaveArrayToFile(CalibrationPng, *FPaths::Combine(OutputDirectory, CalibrationFrameName))
+		    || !WriteLinearF32(FPaths::Combine(OutputDirectory, CalibrationLinearName), CalibrationRgb,
+		                       Width, Height, RenderLinearChannels))
+		{
+			return Fail(TEXT("calibration: could not write the calibration frame"));
+		}
+
+		Calibration = MakeShared<FJsonObject>();
+		Calibration->SetStringField(TEXT("frame"), CalibrationFrameName);
+		Calibration->SetStringField(TEXT("sha256"), RenderSha256Hex(CalibrationPng.GetData(), CalibrationPng.Num()));
+		Calibration->SetStringField(TEXT("frame_encoding"),
+			TEXT("8-bit PNG: the linear frame sRGB-encoded (IEC 61966-2-1), clamped to [0, 1]; no tonemapper"));
+		Calibration->SetStringField(TEXT("linear_f32"), CalibrationLinearName);
+		Calibration->SetStringField(TEXT("linear_f32_layout"),
+			TEXT("little-endian float32, no header, row-major from the top-left pixel, R G B per pixel ")
+			TEXT("(width * height * 3 values)"));
+		Calibration->SetNumberField(TEXT("ev100"), AppliedEv100);
+		Calibration->SetNumberField(TEXT("exposure_compensation_ev"), ExposureCompensation);
+		Calibration->SetNumberField(TEXT("lens_attenuation"), LensAttenuation);
+		Calibration->SetStringField(TEXT("lens_attenuation_basis"), LensAttenuationBasis);
+		Calibration->SetNumberField(TEXT("calibration_constant"), RenderCalibrationConstant);
+		Calibration->SetNumberField(TEXT("luminance_cd_m2_per_unit"), PerUnit);
+		Calibration->SetNumberField(TEXT("sun_lux"), AppliedSunLux);
+		Calibration->SetStringField(TEXT("sun_lux_source"), SunLuxSource);
+		Calibration->SetNumberField(TEXT("grey_card_nits"), GreyCardNits);
+		Calibration->SetStringField(TEXT("grey_card_nits_basis"),
+			TEXT("stated: the 18 % grey card's rho E / pi under the sun, so the emissive quad and the ")
+			TEXT("lit card are predicted to read alike"));
+		Calibration->SetNumberField(TEXT("grey_card_reflectance"), RenderGreyCardReflectance);
+		Calibration->SetNumberField(TEXT("predicted"), GreyPredicted);
+		Calibration->SetNumberField(TEXT("measured"), GreyMeasured);
+		Calibration->SetNumberField(TEXT("ratio"), GreyMeasured / GreyPredicted);
+		Calibration->SetNumberField(TEXT("tolerance"), RenderCalibrationTolerance);
+		Calibration->SetStringField(TEXT("basis"),
+			TEXT("predicted, measured and ratio are the 18 % grey card's: the white Lambertian quad's ")
+			TEXT("measurement scaled by 0.18 / 0.9 (the ratio is the white quad's own)"));
+		Calibration->SetObjectField(TEXT("emissive"), EmissiveRecord);
+		Calibration->SetObjectField(TEXT("lambertian"), WhiteRecord);
+		TSharedPtr<FJsonObject> Edge = MakeShared<FJsonObject>();
+		Edge->SetStringField(TEXT("frame"), CalibrationFrameName);
+		Edge->SetArrayField(TEXT("quad_px"), QuadArray(EdgeU0, EdgeV0, EdgeU1, EdgeV1));
+		Edge->SetNumberField(TEXT("angle_deg"), RenderSlantedEdgeAngleDeg);
+		Edge->SetNumberField(TEXT("nits"), GreyCardNits);
+		Calibration->SetObjectField(TEXT("slanted_edge"), Edge);
+		if (Mtf50 > 0.0)
+		{
+			Calibration->SetNumberField(TEXT("mtf50_measured"), Mtf50);
+		}
+		else
+		{
+			Calibration->SetField(TEXT("mtf50_measured"), MakeShared<FJsonValueNull>());
+		}
+		Calibration->SetStringField(TEXT("mtf50_basis"),
+			TEXT("the engine's own frame before any sensor stage: this commandlet's e-SFR (EsfrMtf50) ")
+			TEXT("on the slanted-edge crop of the linear calibration frame, cycles per pixel, no ")
+			TEXT("finite-difference correction; the verifier measures the sensor frame itself"));
+		TSharedPtr<FJsonObject> CaptureRecord = MakeShared<FJsonObject>();
+		CaptureRecord->SetStringField(TEXT("source"), TEXT("SCS_FinalColorHDR into RTF_RGBA32f, the beauty's exposure"));
+		CaptureRecord->SetStringField(TEXT("show_only"), TEXT("the three quads (PRM_UseShowOnlyList)"));
+		CaptureRecord->SetStringField(TEXT("off"),
+			TEXT("anti-aliasing, temporal AA, fog, volumetric fog, atmosphere, cloud, bloom, motion blur, ")
+			TEXT("depth of field, lens flares, translucency, vignette, sky lighting, global illumination, ")
+			TEXT("Lumen GI and reflections, ambient occlusion, reflection environment, screen-space ")
+			TEXT("reflections, dynamic shadows"));
+		CaptureRecord->SetStringField(TEXT("sun"),
+			TEXT("atmosphere sun light off (no transmittance on the stated lux), cast shadows off, ")
+			TEXT("cloud shadows off, for this frame only (the last render)"));
+		CaptureRecord->SetNumberField(TEXT("distance_m"), RenderCalibrationDistanceM);
+		Calibration->SetObjectField(TEXT("capture"), CaptureRecord);
+		TArray<TSharedPtr<FJsonValue>> CalibrationNotClaimed;
+		for (const TCHAR* Line : {
+			     TEXT("that one emissive unit is 1 cd/m^2: the emissive quad measures it"),
+			     TEXT("the beauty frames' sun after the atmosphere's transmittance: this frame turns it off"),
+			     TEXT("a traceable reference luminance: the chain is ISO 2720 / ISO 12232 arithmetic")})
+		{
+			CalibrationNotClaimed.Add(MakeShared<FJsonValueString>(Line));
+		}
+		Calibration->SetArrayField(TEXT("not_claimed"), CalibrationNotClaimed);
+		FString CalibrationText;
+		const TSharedRef<TJsonWriter<>> CalibrationWriter = TJsonWriterFactory<>::Create(&CalibrationText);
+		FJsonSerializer::Serialize(Calibration.ToSharedRef(), CalibrationWriter);
+		if (!FFileHelper::SaveStringToFile(CalibrationText, *FPaths::Combine(OutputDirectory, TEXT("calibration.json"))))
+		{
+			return Fail(TEXT("calibration: could not write calibration.json"));
+		}
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("calibration: grey card measured / predicted %.4f (white quad), emissive %.4f, ")
+		       TEXT("MTF50 %.4f cycles/px on the slanted edge"),
+		       GreyMeasured / GreyPredicted, EmissiveMeasured / EmissivePredicted, Mtf50);
 	}
 
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
@@ -3414,6 +4915,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			// I6: set to 1 by -passes=velocity so static geometry writes a
 			// motion vector; read back like the rest.
 			TEXT("r.Velocity.ForceOutput"),
+			// S4: the calibration chain's lens attenuation A (core/capture/
+			// radiometry.py reads it back from here), pre-exposure (the
+			// scene colour's storage scale), and where the velocity is
+			// written (the velocity passes read that buffer). r.Substrate is
+			// above: the SCS_BaseColor capture reads the legacy GBuffer.
+			TEXT("r.EyeAdaptation.LensAttenuation"),
+			TEXT("r.UsePreExposure"),
+			TEXT("r.VelocityOutputPass"),
 		};
 		for (const TCHAR* Name : ConsoleNames)
 		{
@@ -3460,6 +4969,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 					? TEXT("DEFECT: label capture anti-aliasing show flag is on")
 					: TEXT("none"));
 		}
+		if (AccumulateCapture != nullptr)
+		{
+			// S4: the accumulation capture's own flag, measured like the rest.
+			AntiAliasing->SetStringField(TEXT("accumulate"),
+				AntiAliasingName(AccumulateCapture->ShowFlags.AntiAliasing != 0));
+		}
 		RenderSettings->SetObjectField(TEXT("anti_aliasing"), AntiAliasing);
 
 		TSharedPtr<FJsonObject> BeautyFlags = MakeShared<FJsonObject>();
@@ -3501,6 +5016,27 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		RenderSettings->SetStringField(TEXT("rhi"), GDynamicRHI->GetName());
 		RenderSettings->SetStringField(TEXT("shader_platform"),
 			LexToString(GMaxRHIShaderPlatform));
+		// S4: the working colour space the linear frames are in, READ BACK
+		// from the engine (core/capture/radiometry.py reads this key; its
+		// WORKING_COLOUR_SPACE_DEFAULT is this exact sentence for sRGB).
+		{
+			const UE::Color::FColorSpace& Working = UE::Color::FColorSpace::GetWorking();
+			if (Working.IsSRGB())
+			{
+				RenderSettings->SetStringField(TEXT("working_colour_space"),
+				                               TEXT("sRGB / Rec.709 primaries, linear"));
+			}
+			else
+			{
+				RenderSettings->SetStringField(TEXT("working_colour_space"), FString::Printf(
+					TEXT("non-sRGB primaries, linear: red (%.4f, %.4f), green (%.4f, %.4f), ")
+					TEXT("blue (%.4f, %.4f), white (%.4f, %.4f)"),
+					Working.GetRedChromaticity().X, Working.GetRedChromaticity().Y,
+					Working.GetGreenChromaticity().X, Working.GetGreenChromaticity().Y,
+					Working.GetBlueChromaticity().X, Working.GetBlueChromaticity().Y,
+					Working.GetWhiteChromaticity().X, Working.GetWhiteChromaticity().Y));
+			}
+		}
 		RenderSettings->SetBoolField(TEXT("deterministic_pins"), bDeterministic);
 
 		auto OffsetArray = [](const FVector& Offset)
@@ -3551,7 +5087,90 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			ExposureRecord->SetField(TEXT("ev100"), MakeShared<FJsonValueNull>());
 		}
 		Look->SetObjectField(TEXT("exposure"), ExposureRecord);
+		// S4: a sun in lux under the Phase 10 bias path. The -exposure-bias
+		// values on record (9.5 / 10.5 / 11.0) are the OLD scale, tuned on
+		// the unitless 8.0 sun; under a sun in lux they over-expose by
+		// log2(lux / 8) stops until Gate 6's four exposure clauses are
+		// re-pinned on the box. Recorded with the number, never corrected.
+		const TSharedPtr<FJsonObject>* LookSun = nullptr;
+		if (AppliedSunLux > 0.0 && Look->TryGetObjectField(TEXT("sun"), LookSun) && LookSun != nullptr
+		    && LookSun->IsValid())
+		{
+			(*LookSun)->SetStringField(TEXT("exposure_mode"), ExposureMode);
+			if (ExposureMode == TEXT("manual_bias"))
+			{
+				(*LookSun)->SetNumberField(TEXT("bias_overexposure_stops"),
+				                           FMath::Log2(AppliedSunLux / RenderEngineSunUnitless));
+			}
+		}
 		Root->SetObjectField(TEXT("look_applied"), Look);
+	}
+	// S4: the calibration frame's record (the same object as calibration.json).
+	if (Calibration.IsValid())
+	{
+		Root->SetObjectField(TEXT("calibration"), Calibration);
+	}
+	// S4: how every linear file this pass wrote is laid out, so a reader of
+	// render.json alone decodes it (ASCII only -- gotcha 13). Absent when
+	// none ran.
+	if (LinearNormal != nullptr || LinearBaseColor != nullptr || VelocityCheck != nullptr
+	    || AccumulateCapture != nullptr)
+	{
+		TSharedPtr<FJsonObject> LinearPasses = MakeShared<FJsonObject>();
+		LinearPasses->SetStringField(TEXT("layout"),
+			TEXT("raw little-endian IEEE-754 float32, no header, row-major from the top-left pixel, ")
+			TEXT("the channels of a pixel interleaved: width * height * channels values"));
+		if (LinearNormal != nullptr)
+		{
+			TSharedPtr<FJsonObject> Normal = MakeShared<FJsonObject>();
+			Normal->SetStringField(TEXT("file"), TEXT("frame_NNNN_normal.f32"));
+			Normal->SetNumberField(TEXT("channels"), RenderLinearChannels);
+			Normal->SetStringField(TEXT("axes"), RenderNormalAxes);
+			Normal->SetStringField(TEXT("values"), TEXT("the unit normal in the scene frame; 0, 0, 0 for sky"));
+			Normal->SetStringField(TEXT("source"), LinearNormalSource);
+			Normal->SetStringField(TEXT("encoding"),
+				TEXT("measured per frame on the geometry pixels (labels.normal_encoding: signed or ")
+				TEXT("offset_half) and decoded before writing"));
+			Normal->SetStringField(TEXT("target"), TEXT("RTF_RGBA16f"));
+			LinearPasses->SetObjectField(TEXT("normal"), Normal);
+		}
+		if (LinearBaseColor != nullptr)
+		{
+			TSharedPtr<FJsonObject> BaseColor = MakeShared<FJsonObject>();
+			BaseColor->SetStringField(TEXT("file"), TEXT("frame_NNNN_basecolor.f32"));
+			BaseColor->SetNumberField(TEXT("channels"), RenderLinearChannels);
+			BaseColor->SetStringField(TEXT("values"),
+				TEXT("linear R, G, B base colour as the GBuffer holds it, unclamped; 0, 0, 0 for sky"));
+			BaseColor->SetStringField(TEXT("source"), TEXT("SCS_BaseColor"));
+			BaseColor->SetStringField(TEXT("target"), TEXT("RTF_RGBA16f"));
+			BaseColor->SetStringField(TEXT("not_claimed"),
+				TEXT("sun invariance: the two-suns albedo clause is measured on Windows"));
+			LinearPasses->SetObjectField(TEXT("basecolor"), BaseColor);
+		}
+		if (VelocityCheck != nullptr)
+		{
+			TSharedPtr<FJsonObject> Velocity = MakeShared<FJsonObject>();
+			Velocity->SetStringField(TEXT("file"), TEXT("frame_NNNN_velocity.f32"));
+			Velocity->SetNumberField(TEXT("channels"), 2);
+			Velocity->SetStringField(TEXT("values"),
+				TEXT("(dx, dy) pixels, screen +x right, +y down, since the previous captured frame; ")
+				TEXT("all zeros on the first"));
+			Velocity->SetStringField(TEXT("material"), RenderVelocityCheckMaterialPath);
+			Velocity->SetStringField(TEXT("role"),
+				TEXT("a read-back cross-check beside the Python flow (core/capture/passes.py), never the truth"));
+			LinearPasses->SetObjectField(TEXT("velocity"), Velocity);
+		}
+		if (AccumulateCapture != nullptr)
+		{
+			TSharedPtr<FJsonObject> Accumulate = MakeShared<FJsonObject>();
+			Accumulate->SetStringField(TEXT("file"), TEXT("frame_NNNN_linear.exr"));
+			Accumulate->SetNumberField(TEXT("requested_k"), AccumulateRequested);
+			Accumulate->SetNumberField(TEXT("exposure_s"), ExposureShutterSeconds);
+			Accumulate->SetStringField(TEXT("values"),
+				TEXT("the mean of k AA-free linear sub-exposures over [t0_s, t1_s] (frame_records[].accumulation)"));
+			LinearPasses->SetObjectField(TEXT("accumulate"), Accumulate);
+		}
+		Root->SetObjectField(TEXT("linear_passes"), LinearPasses);
 	}
 	TSharedPtr<FJsonObject> Scene = MakeShared<FJsonObject>();
 	Scene->SetBoolField(TEXT("visual"), bVisual);
@@ -3625,6 +5244,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	Scene->SetStringField(TEXT("camera_preset"), CameraPreset);
 	Scene->SetBoolField(TEXT("camera_inherits_roll"),
 	                    !Director->PresetKeepsHorizonLevel());
+	if (bSunLuxFlag || AppliedSunLux > 0.0)
+	{
+		// S4: whether a sun in lux reached a light (the void tier has none;
+		// look_applied.sun carries the lux when it did).
+		Scene->SetBoolField(TEXT("sun_lux_applied"), bVisual && AppliedSunLux > 0.0);
+	}
 	Root->SetObjectField(TEXT("scene"), Scene);
 
 	// Environmental couplings, stated per run rather than assumed.

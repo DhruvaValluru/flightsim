@@ -1517,6 +1517,10 @@ def render_look(spec) -> Optional[Dict[str, Any]]:
         values["visibility_km"] = float(sampled["visibility_km"])
     if "cloud_base_m" in sampled:
         values["cloud_base_m"] = float(sampled["cloud_base_m"])
+    # W3: a stated rain rate reconciles the fog row (core/scene/precipitation.py).
+    rate = getattr(spec, "precipitation_rate_mmh", None)
+    if rate is not None and rate.value is not None:
+        values["precipitation_rate_mmh"] = float(rate.value)
     look.update(weather_visuals.look_block(values))
     look["sun_elevation_deg"] = look["sun_elev"]
     look["sun_azimuth_deg"] = float(block.sun_azimuth_deg.value)

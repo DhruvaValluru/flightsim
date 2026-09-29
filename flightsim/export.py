@@ -54,6 +54,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                              "absent (a headless capture), recorded in the card")
     parser.add_argument("--shard-size", type=int, default=1000,
                         help="webdataset samples per tar")
+    parser.add_argument("--tabular", action="store_true",
+                        help="also write --out/tabular/: frames.npz, frames.csv (with a "
+                             "units row) and columns.json -- one row per frame, the "
+                             "applied variables, their sources and null verdicts, u_num, "
+                             "the recorded state and the labels")
     args = parser.parse_args(argv)
 
     from core.dataset.export import ExportError, export
@@ -62,7 +67,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         fractions = tuple(float(f) for f in args.split.split(","))
         card = export(args.runs, args.out, args.format, fractions=fractions,
                       seed=args.split_seed, image=args.image,
-                      labels_only=args.labels_only, shard_size=args.shard_size)
+                      labels_only=args.labels_only, shard_size=args.shard_size,
+                      tabular=args.tabular)
     except ExportError as exc:
         print(f"REFUSED -- {exc.constraint}: {exc.message}")
         return 2
@@ -76,6 +82,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print("  splits: " + ", ".join(f"{s} {n}" for s, n in card["frames_per_split"].items())
           + f" (by simulation digest, seed {card['split']['seed']})")
     print(f"  card:   {Path(args.out) / 'DATASET_CARD.md'}")
+    if card.get("tabular"):
+        print(f"  table:  {Path(args.out) / 'tabular'} ({card['tabular']['rows']} row(s), "
+              f"{card['tabular']['columns']} column(s))")
     return 0
 
 

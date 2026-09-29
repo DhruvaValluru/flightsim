@@ -124,6 +124,13 @@ ICING_FACTOR_PROPERTIES = tuple(f"icing/{axis}-factor" for axis in
                                 ("lift", "drag", "pitch", "roll", "yaw", "side"))
 ICING_SHIFT_PROPERTY = "icing/alpha-shift-rad"
 
+#: R2: the measured channels, in the recorder's order. Each is a field of
+#: :class:`AircraftState` defaulting to NaN (absent) and filled from the
+#: instrument observer's latest values, never from a JSBSim property.
+MEASURED_CHANNELS = ("meas_n_z", "meas_p_dps", "meas_q_dps", "meas_r_dps",
+                     "meas_lat_deg", "meas_lon_deg", "meas_alt_m", "meas_cas_kt",
+                     "meas_heading_deg")
+
 #: P4: slug ft^2 -> kg m^2, from the density factor the units module states
 #: (1 slug = KGM3_PER_SLUGFT3 kg/m^3 x 1 ft^3; times ft^2): 1.35581795 kg m^2.
 KGM2_PER_SLUGFT2 = u.KGM3_PER_SLUGFT3 * u.M_PER_FT ** 5
@@ -271,6 +278,25 @@ class AircraftState:
     icing_side_factor: float
     icing_alpha_shift_deg: float
 
+    # -- the measured channels (R2, core/telemetry/instruments.py): what the
+    #    instrument models at the FDM rate LAST measured -- the IMU's normal
+    #    load factor and body rates, the GPS position held between fixes,
+    #    the pitot-static CAS, the magnetometer's magnetic heading. They are
+    #    NOT read from JSBSim: the observer hands the recorder its latest
+    #    values (Recorder(measured=...)). A snapshot taken with no observer,
+    #    or before its first observation, carries NaN -- the recorder's
+    #    discipline for an absent value: never a copy of the truth, never
+    #    an invented number.
+    meas_n_z: float = math.nan
+    meas_p_dps: float = math.nan
+    meas_q_dps: float = math.nan
+    meas_r_dps: float = math.nan
+    meas_lat_deg: float = math.nan
+    meas_lon_deg: float = math.nan
+    meas_alt_m: float = math.nan
+    meas_cas_kt: float = math.nan
+    meas_heading_deg: float = math.nan
+
     # -- control surface positions, for articulation and burn-in
     surfaces: Dict[str, float] = field(default_factory=dict)
 
@@ -327,13 +353,23 @@ class AircraftState:
         )
 
     @classmethod
-    def from_properties(cls, props, surface_names=()) -> "AircraftState":
+    def from_properties(cls, props, surface_names=(), measured=None) -> "AircraftState":
         """Read one snapshot through a :class:`PropertyAccess`.
 
         ``surface_names`` is the pre-resolved subset of :data:`SURFACE_PROPERTIES`
         the loaded model actually defines; resolving it once at observer
         construction avoids a catalog lookup per surface per frame.
+        ``measured`` (R2) is the instrument observer's latest values by
+        channel name (:data:`MEASURED_CHANNELS`); a name it does not give
+        stays NaN, and a name outside the set is a ValueError (a measured
+        channel is never a new column by accident).
         """
+        extra = {}
+        if measured:
+            unknown = sorted(set(measured) - set(MEASURED_CHANNELS))
+            if unknown:
+                raise ValueError(f"not measured channels: {unknown}")
+            extra = {name: float(value) for name, value in measured.items()}
         g = props.get
         has = getattr(props, "has", None)
         p_equivalent = (g(P_EQUIVALENT_PROPERTY)
@@ -405,4 +441,5 @@ class AircraftState:
             icing_yaw_factor=factors[4], icing_side_factor=factors[5],
             icing_alpha_shift_deg=shift_deg,
             surfaces={n.split("/")[-1]: g(n) for n in surface_names},
+            **extra,
         )

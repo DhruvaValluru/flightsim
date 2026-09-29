@@ -1,0 +1,295 @@
+# The requirements of the advancement additions (ADVANCEMENTS_BLUEPRINT
+# section 2, work item R3): one requirement per landed addition item --
+# batch 1 (I1-I8), waves 1-6 (P1, P2, D1, W1, P6, P4, P3, P5, D2, P7, S1)
+# and the items built in the current wave (R2, W2, S2, S3, W3, R3) -- each
+# citing the document section it comes from and mapped to the tests that
+# exist for it.
+#
+# Ids are R-<AREA>-<nn>, AREA one of PHY (physics layers), REC (the record
+# every variable returns), SEN (sensing), WLD (the world), INT
+# (interoperability and datums). A test cites a requirement by writing its
+# id in the test function's docstring (or @pytest.mark.requirement, once
+# registered). A guard reaches a requirement when a test it names lies in a
+# test file the requirement lists; a requirement no guard reaches states
+# its reason in guard_reason ('lean build: none' for an item built without
+# mutation guards).
+#
+# docs/TRACEABILITY.md is generated from this file by
+# `python scripts/traceability.py`; tests/test_traceability.py asserts the
+# committed table equals a fresh generation. Edit this file, then
+# regenerate.
+#
+# reviewed_by: nobody independent has reviewed this matrix; 'none' is the
+# honest value until someone does.
+
+requirements_version: 1
+reviewed_by: none
+not_claimed:
+  - "a requirement listed with a test says the test exists and exercises the item, not that the test is sufficient"
+  - "no independent V&V agent has reviewed the matrix (reviewed_by none)"
+  - "the bidirectional form follows DO-178C 5.5 / 6.3 and ISO/IEC/IEEE 29148 [unverified here]; it is not a certification"
+  - "the items of the current wave cite the blueprint section they are built against; their contracts sections are appended when they are integrated"
+
+requirements:
+
+  # -- batch 1 -------------------------------------------------------------
+
+  - id: R-INT-01
+    item: I1
+    title: The vertical datum
+    statement: >-
+      Every run states its vertical datum: the geoid undulation between the
+      orthometric terrain heights and JSBSim's ellipsoidal heights is
+      evaluated from the committed geoid grid and recorded with the run.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "I1 -- the vertical datum"}
+    tests: [tests/test_geoid.py]
+
+  - id: R-PHY-01
+    item: I2
+    title: Operational and structural limit monitoring
+    statement: >-
+      The airframe's stated operational and structural limits are monitored
+      over the recorded flight, each exceedance flagged per sample and
+      summarised per limit in the run manifest.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "I2 -- operational and structural limit monitoring"}
+    tests: [tests/test_limits.py]
+
+  - id: R-REC-01
+    item: I3
+    title: Instrument models beside truth
+    statement: >-
+      Stated instrument profiles (IMU, GPS, pitot-static, magnetometer)
+      produce measured channels beside the truth, deterministically from
+      the run seed, checked by a module that imports nothing from the
+      producer.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "I3. Instrument models"}
+    tests: [tests/test_instruments.py]
+
+  - id: R-PHY-02
+    item: I4
+    title: Linearised modal analysis
+    statement: >-
+      The trimmed state is linearised through JSBSim's own linearisation,
+      checked independently, and its modes are named and graded against
+      the handling-qualities bands of the airframe's class.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "I4. Linearised modal analysis"}
+    tests: [tests/test_modes.py]
+
+  - id: R-INT-02
+    item: I5
+    title: The DIS entity-state feed
+    statement: >-
+      The recorded flight is expressible as IEEE 1278.1 Entity State PDUs
+      with the orientation convention, the datum and the entity type
+      stated.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "I5. The DIS entity-state feed"}
+    tests: [tests/test_dis.py]
+
+  - id: R-SEN-01
+    item: I6
+    title: Normal, motion-vector and albedo passes
+    statement: >-
+      The engine can write world-normal, velocity and base-colour
+      ground-truth passes beside each frame, decoded and checked against
+      the geometry by the verifier.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "I6. Normals, motion-vector and albedo"}
+    tests: [tests/test_annotation_passes.py]
+
+  - id: R-WLD-01
+    item: I7
+    title: Land cover from ESA WorldCover
+    statement: >-
+      A terrain bake can carry land-cover class maps from the cached ESA
+      WorldCover tiles, with their provenance and licence recorded.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "I7 -- land cover from ESA WorldCover"}
+    tests: [tests/test_landcover.py]
+
+  - id: R-REC-02
+    item: I8 (R1)
+    title: The record every variable returns, made checkable
+    statement: >-
+      Every introduced variable returns a record-2 applied-variable record
+      (value, source, readback, model, null test, uncertainty), is held in
+      the registry, can be null-tested by a with/without pair and carries
+      u_num from a dt/2 twin and u_input by GUM propagation.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "I8 -- the record every variable returns"}
+    tests: [tests/test_records.py, tests/test_registry.py, tests/test_record_null.py, tests/test_uncertainty.py]
+
+  # -- waves 1-6 -----------------------------------------------------------
+
+  - id: R-PHY-03
+    item: P1
+    title: The non-standard atmosphere and humidity
+    statement: >-
+      A stated temperature deviation, sea-level pressure and humidity are
+      written to JSBSim before trim, read back to their stated tolerances
+      and recorded with their null tests.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "P1 -- the non-standard atmosphere"}
+    tests: [tests/test_atmosphere.py]
+
+  - id: R-PHY-04
+    item: P2
+    title: The XML-injection pipeline
+    statement: >-
+      Failures, icing factors, the stall-onset shift and the rotational gust
+      reach stock JSBSim models by rewriting a derived copy of the aircraft
+      XML in a fixed order, never the vendored data, with the derivation's
+      provenance recorded.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "P2 -- the XML-injection pipeline"}
+    tests: [tests/test_derive_injections.py]
+
+  - id: R-INT-03
+    item: D1
+    title: The EGM2008 datum extension and the datum blocks
+    statement: >-
+      The datum extends to EGM2008 and is declared by the spec's datum
+      block, checked against the bake's recorded datum and refused by name
+      on a mismatch.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "D1 -- the EGM2008 datum extension"}
+    tests: [tests/test_datum_block.py]
+
+  - id: R-WLD-02
+    item: W1
+    title: Land-cover weight layers and the roughness inference
+    statement: >-
+      Land-cover classes become weight layers at the Landscape's
+      resolution with the datum in the import manifest, and the surface
+      roughness is inferred from the land cover under the aircraft.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "W1 -- land-cover weight layers"}
+    tests: [tests/test_weightmaps.py, tests/test_surface_inference.py]
+
+  - id: R-PHY-05
+    item: P6
+    title: The gust provider, von Karman turbulence and layered shear
+    statement: >-
+      Discrete gusts, von Karman turbulence and a layered wind profile are
+      delivered through one gust provider, written every step and read
+      back.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "P6 -- the gust provider"}
+    tests: [tests/test_gust_provider.py, tests/test_von_karman.py, tests/test_shear.py]
+
+  - id: R-PHY-06
+    item: P4
+    title: Loading and the centre of gravity
+    statement: >-
+      Payload stations and fuel are loaded before trim and the centre of
+      gravity is read back against the hand calculation.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "P4 -- loading"}
+    tests: [tests/test_loading.py]
+
+  - id: R-PHY-07
+    item: P3
+    title: The failure schedule
+    statement: >-
+      Engine-out, control jam, hardover, float and authority-loss failures
+      are applied at the first step past their stated time and read back.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "P3 -- the failure schedule"}
+    tests: [tests/test_failures.py, tests/test_failures_block.py]
+
+  - id: R-PHY-08
+    item: P5
+    title: The icing provider
+    statement: >-
+      An icing severity ramp drives the six injected axis factors and the
+      stall-onset cue, written every step and read back before the next
+      write.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "P5 -- the icing provider"}
+    tests: [tests/test_icing.py]
+
+  - id: R-INT-04
+    item: D2
+    title: The DIS entity-state stream
+    statement: >-
+      The full-rate Entity State PDU log, its entity-type table and the dis
+      block are written beside the run and round-tripped by the verifier.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "D2 -- the DIS entity-state stream"}
+    tests: [tests/test_dis_stream.py, tests/test_dis_block.py]
+
+  - id: R-PHY-09
+    item: P7
+    title: The wake-vortex pair
+    statement: >-
+      A Burnham-Hallock vortex pair behind a generating aircraft is
+      delivered through the gust channel and the rotational-gust injection,
+      with the equivalent roll rate read back and measured.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "P7 -- the wake-vortex pair"}
+    tests: [tests/test_wake.py]
+
+  - id: R-SEN-02
+    item: S1
+    title: Radiometry, optics and motion blur
+    statement: >-
+      The sun is stated in lux, the exposure chain in radiometric terms,
+      and the optics point-spread function and motion blur are applied by
+      stated models from the profile blocks.
+    source: {document: docs/ADVANCEMENTS_CONTRACTS.md, section: "S1 -- radiometry, the sun in lux"}
+    tests: [tests/test_radiometry.py, tests/test_optics.py, tests/test_blur.py, tests/test_exposure.py]
+
+  # -- the current wave ----------------------------------------------------
+
+  - id: R-REC-03
+    item: R2
+    title: Instruments at the FDM rate
+    statement: >-
+      The instrument models run inside the step loop at the FDM rate with
+      the corrected specific force and lever arms, write instruments.npz
+      beside the run and self-report their Allan deviation, checked by the
+      independent overlapping estimator.
+    source: {document: docs/ADVANCEMENTS_BLUEPRINT.md, section: "2. The record every variable returns"}
+    tests: [tests/test_instruments.py, tests/test_instruments_check.py, tests/test_record_block.py]
+    guard_reason: "lean build: none"
+
+  - id: R-WLD-03
+    item: W2
+    title: Buildings and the runway
+    statement: >-
+      Building footprints from a cached, licence-checked set and a runway
+      with its markings are placed on the terrain with stable identifiers
+      and their records.
+    source: {document: docs/ADVANCEMENTS_BLUEPRINT.md, section: "4. World"}
+    tests: [tests/test_buildings.py, tests/test_runway.py]
+    guard_reason: "lean build: none"
+
+  - id: R-SEN-03
+    item: S2
+    title: The passes as data
+    statement: >-
+      Flow, disparity and the stereo rig, points and amodal masks are
+      written as data with passes.json and exported beside the frames.
+    source: {document: docs/ADVANCEMENTS_BLUEPRINT.md, section: "3. Sensing"}
+    tests: [tests/test_annotation_passes.py]
+    guard_reason: "lean build: none"
+
+  - id: R-SEN-04
+    item: S3
+    title: The IR proxy
+    statement: >-
+      An infrared band proxy is derived from the radiometry and the
+      atmosphere along the flight, stated as a proxy.
+    source: {document: docs/ADVANCEMENTS_BLUEPRINT.md, section: "3. Sensing"}
+    tests: [tests/test_thermal.py]
+    guard_reason: "lean build: none"
+
+  - id: R-WLD-04
+    item: W3
+    title: Night, precipitation and cloud drift
+    statement: >-
+      Night lighting, precipitation and cloud drift with the wind at cloud
+      base are coupled to the look and recorded in the world record.
+    source: {document: docs/ADVANCEMENTS_BLUEPRINT.md, section: "4. World"}
+    tests: [tests/test_weather_visuals.py]
+    guard_reason: "lean build: none"
+
+  - id: R-REC-04
+    item: R3
+    title: The report and card at record 2, the tabular export, the datasheet and traceability
+    statement: >-
+      The campaign report and the dataset card state record_version 2 and
+      carry the variables, uncertainty and instruments blocks; the tabular
+      export writes frames.npz and frames.csv with a units row that an
+      independent reader round-trips; the datasheet fills Gebru's seven
+      sections and the ISO/IEC 5259-2 measures from the records; and this
+      matrix is generated, committed and checked.
+    source: {document: docs/ADVANCEMENTS_BLUEPRINT.md, section: "2. The record every variable returns"}
+    tests: [tests/test_campaign_report.py, tests/test_tabular.py, tests/test_datasheet.py, tests/test_traceability.py]
+    guard_reason: "lean build: none"

@@ -285,6 +285,21 @@ export.taxonomy:
   hint: "Export runs with different class lists separately."
 export.arguments:
   sentence: "The export command's arguments could not be understood."
+export.tabular_units:
+  sentence: "The table cannot be written because one of its columns has no unit anyone could read, or the runs state two different units for it."
+  hint: "Give the recorded channel a name that carries its unit, or register its unit, then export the table again."
+
+# -- the datasheet and the traceability matrix (R3) ------------------------
+
+datasheet.incomplete:
+  sentence: "The dataset's datasheet cannot be filled in: a section it needs has no supporting record in the runs, such as an asset whose licence was never read."
+  hint: "Export runs whose records name their software revision, their checks and every asset's licence."
+traceability.orphan:
+  sentence: "A test names a requirement that the requirements list does not define."
+  hint: "Add the requirement to the list, or correct the test's citation, then regenerate the traceability table."
+traceability.uncovered:
+  sentence: "A requirement is not traced: it has no existing test, cites a section its document does not have, or has no mutation guard and no stated reason for having none."
+  hint: "List a test that exists for it, correct its source, or state why no guard reaches it, then regenerate the traceability table."
 
 # -- the checker's per-run findings (contracts §4, package D) ----------------
 
@@ -313,6 +328,16 @@ instruments.record:
   sentence: "The measured-telemetry file carries no record of the instrument profile it applied, or a record whose null test measured no difference."
 instruments.residual:
   sentence: "A measured channel's errors are not the size the instrument profile states, or the receiver did not hold its last fix between fixes."
+# R2: the instruments block's refusals (the instrument models at the flight model's step rate).
+instrument.profile:
+  sentence: "An instrument in the scenario is not stated as a profile with a lever arm, or names a profile the system does not have on file."
+  hint: "State each instrument as a profile on file (ideal, tactical or consumer MEMS) with its lever arm in metres, or leave it out for the ideal instrument at the centre of gravity."
+instrument.lever_arm:
+  sentence: "An instrument's lever arm is not three finite distances in metres within 80 m of the centre of gravity, or the arm recovered from the recorded measurements disagrees with the arm the scenario declared."
+  hint: "State the sensor's position from the centre of gravity as forward, right and down distances in metres."
+instrument.rate:
+  sentence: "The receiver's profile fixes its position more often than the simulation steps, which no receiver in the model can do."
+  hint: "Raise the simulation rate, or choose a profile that fixes less often."
 
 # -- campaigns and storage (contracts §6, package G) ------------------------
 
@@ -521,6 +546,19 @@ check.datum:
   sentence: "The scene's vertical datum block names its geoid grid and states the sea-level offset the checker re-measures from it."
 check.instruments:
   sentence: "Every measured channel's errors match the instrument profile it claims, with this run's own recording beside it."
+# R2: the record's own checks and the instruments at the flight model's step rate.
+check.applied_readback:
+  sentence: "Every setting written into the flight model read back within its stated tolerance, re-graded from the record's own numbers."
+check.null_effect:
+  sentence: "Every with-and-without test carries a verdict that agrees with its own numbers; an honest finding of no effect passes."
+annotation.null_effect:
+  sentence: "A with-and-without test's verdict contradicts its own numbers: it claims an effect its difference does not reach, or finds none where its difference does."
+check.instrument_allan:
+  sentence: "The inertial sensor's noise, measured by the checker's own overlapping Allan deviation, matches the white noise its profile declares to within a quarter."
+check.instrument_lever_arm:
+  sentence: "The sensor positions recovered from the recorded measurements agree with the lever arms the scenario declared."
+check.uncertainty_present:
+  sentence: "The run's uncertainty block states its form, and every combined uncertainty equals the root sum square of the terms it lists."
 labels.pass_material:
   sentence: "The material a ground-truth pass renders through is not in the project, so that pass cannot be written."
   hint: "Run the material script in the editor once to create it."
@@ -562,6 +600,16 @@ record.effect_channel:
 record.effect_channel_unit:
   sentence: "A channel this variable moves has no unit, or a unit that contradicts its name, so its effect could not be stated."
   hint: "Give the channel the unit its name says."
+# R2: the record block's refusals and the runner's readback refusal.
+record.readback:
+  sentence: "A setting written into the flight model read back as a different value than was written, beyond its stated tolerance, so the run is refused rather than recorded with a wrong value."
+  hint: "Check that the flight model accepts the setting as written, or state the tolerance its round trip actually has."
+record.convergence:
+  sentence: "The convergence study asks for step rates the simulation cannot run, or a yes-or-no setting of the record is not yes or no: the study needs three rising rates, each twice the one before, none above 1200 steps per second."
+  hint: "State three rates such as 60, 120 and 240 steps per second, or leave the study out."
+record.uncertainty_basis:
+  sentence: "An input uncertainty was asked for a setting the system inferred from words, but no rule says how wide that word's range is, so its uncertainty cannot be stated."
+  hint: "State the setting's value yourself, or leave out the sensitivity pairs."
 
 # -- the non-standard atmosphere (core/environment/atmosphere.py) -------------
 
@@ -766,6 +814,15 @@ card.wake:
   hint: "Regenerate the card from the scenario; the block is written by the scenario tools, never by hand."
 check.wake_selftest:
   sentence: "The run card's wake selftest vectors are re-evaluated by the checker's own reading of the vortex-pair profile and the strip-theory integral, and, where a render host wrote its own, those against the card's."
+# P9, the physics engine side: the two host refusals the earlier items left unnamed, and the verifier's grading of what the engine reports it applied.
+card.atmosphere_properties:
+  sentence: "The run card's atmosphere block is malformed: a key is missing or out of order, or a value is neither a number nor empty, so the host applies no stated day."
+  hint: "Regenerate the card from the scenario; the block is written by the scenario tools, never by hand."
+card.derived_aircraft:
+  sentence: "The run card's derived airframe cannot be flown: its block is malformed, it is not a derivation of the card's aircraft, or its model file does not hash to the digest the card records, so nothing was loaded."
+  hint: "Regenerate the derived airframe and the card from the scenario; never edit the built copy by hand."
+check.host_physics:
+  sentence: "What the render host reports it applied from the run card's physics blocks agrees with the card: the stated day, the loading's centre of gravity within its tolerance, each failure within one step of its time, the gust delivery and its rows, the derived airframe's digest, the wind profile and the icing, each graded only where the host reported it."
 
 # Placement: the four wake.* names beside the icing.* entries under the advancement additions (after card.icing_schedule's hint); card.wake beside card.icing_schedule (ALLOWED_FUTURE until P9, patch below); check.wake_selftest beside check.dis_roundtrip (live once the verify.py patch lands: FAIL_WAKE = "check.wake_selftest" is the emitter, so the catalogue entry and the verifier patch land in one commit). Measured on the patched copy with these six appended: tests/test_messages.py's uncovered set is exactly S1's six sensing.* names; every sentence passes the identifier regex and ends as a sentence.
 sensing.radiometry:
@@ -786,6 +843,27 @@ sensing.sun_lux:
 sensing.exposure_units:
   sentence: "The engine's sun is not set in lux while the exposure is a manual value that expects lux, so the picture's luminance means nothing: an eighteen percent grey card would render black."
   hint: "Render with the sun in physical units before reading luminance off the frames."
+# -- W3: night, rain and cloud drift (the world look) ------------------------
+look.moon:
+  sentence: "The moon cannot be placed: the night sky is not a mapping of the moon, the stars and an optional moment, the moon is neither on nor off, the moment is not a date and time, or no moment is stated or drawn; a renderer that cannot draw the moon light exactly refuses it too."
+  hint: "State the night as the moon on or off, the stars, and a moment in universal time, or let the randomisation draw the moment."
+look.stars:
+  sentence: "The stars cannot be drawn: the star mode is not automatic, catalogue, procedural or off, the cached star catalogue is missing when the catalogue is asked for, or its checksum is not the one the code checks; a renderer that cannot draw the star field refuses it too."
+  hint: "Fetch the catalogue as the stars folder's readme describes, or ask for procedural stars."
+night.sun_units:
+  sentence: "The moon's light is given in lux, but the render's sun would not be in lux or the camera would keep the calibrated bias exposure, so the moonlight would be meaningless beside it."
+  hint: "State the sun in lux and every camera's exposure, or turn the moon off."
+look.precipitation_rate:
+  sentence: "A rain rate of {actual} millimetres an hour cannot be drawn: it must be a positive number no larger than the {limit} millimetres an hour one-minute extreme the military handbook cites."
+  hint: "State a positive rain rate, or leave it unstated for no rain."
+look.precipitation_particles:
+  sentence: "The renderer could not draw the rain streaks exactly: its streak material is missing or cannot be applied to the picture capture alone."
+  hint: "Create the rain streak material with the scene script before rendering rain."
+look.cloud_drift_parameter:
+  sentence: "The renderer could not move the clouds with the wind: its cloud material exposes no offset to drive."
+  hint: "Use a cloud material that exposes a wind offset, or render without cloud drift."
+check.night_exposure:
+  sentence: "The sky in each night frame, read through the camera's recorded exposure, sits within two stops of the moonlit and dark sky the checker computes itself: no brighter, and where the moon lights it, no darker."
 annotation.psf:
   sentence: "The point spread measured on the calibration edge disagrees with the kernel the manifest says was applied."
 annotation.blur:
@@ -798,3 +876,99 @@ check.blur_vs_flow:
   sentence: "The motion streak recorded for each frame agrees with the streak the flow pass predicts over the exposure."
 check.radiometry_grey_card:
   sentence: "The grey card the engine rendered agrees with the luminance the calibration chain predicted."
+# -- S4: the sensing engine side (the render host's refusals and the checks) ------
+sensing.calibration:
+  sentence: "The calibration frame cannot be rendered: it needs the lit visual scene, a manual exposure value, the sun set in lux, its card material and its quads, all in the frame."
+  hint: "Render the visual scene with each camera's exposure and the sun in lux, after running the material script once."
+sensing.accumulate:
+  sentence: "The exposure cannot be accumulated from sub-exposures: the count is not a whole number from one to sixty-four, the camera states no shutter time to spread them over, or a velocity pass was asked for in the same render."
+  hint: "Ask for between one and sixty-four sub-exposures on a camera that states its exposure, and render the velocity pass separately."
+labels.velocity_check:
+  sentence: "The engine's velocity cross-check cannot run: it rides the label passes and cannot share a frame with the velocity pass."
+  hint: "Ask for the labels too, and for either the cross-check or the velocity pass."
+labels.normal_encoding:
+  sentence: "The engine's surface normals cannot be read: the normal source is not one this build knows, or the captured normals are unit length under neither encoding it measures."
+  hint: "Render the normals through the fallback normal material instead."
+annotation.readback:
+  sentence: "A setting the engine read back is malformed, or the sun says it is in lux while it was set to another number."
+annotation.accumulation:
+  sentence: "The engine's exposure accumulation contradicts its own record: its count, its window, its instants or its file."
+check.engine_linear_passes:
+  sentence: "The engine's linear normal and base colour files have the stated layout, axes and encoding, with unit normals and their own counts."
+check.velocity_readback:
+  sentence: "The engine's velocity cross-check file agrees with its own record."
+check.engine_readbacks:
+  sentence: "The settings the engine read back parse, the colour space is linear, and a sun in lux says so and was set to it."
+check.calibration_frame:
+  sentence: "The calibration frame's predictions are the checker's own from the recorded exposure and sun, and every quad measured within two percent of its prediction."
+check.engine_accumulation:
+  sentence: "Every accumulated frame's count, window and sub-exposure instants agree with its record and the quarter-pixel rule."
+# -- S3: the infrared proxy --------------------------------------------------
+sensing.ir_table:
+  sentence: "The infrared proxy cannot be formed: the band is neither the long-wave nor the mid-wave window, or the thermal table is absent, does not declare itself a proxy, cites no source, or names an emissivity sample that is not cached with its recorded checksum."
+  hint: "Ask for the long-wave or mid-wave band and a thermal table under the thermal folder whose emissivity samples are cached, as that folder's readme describes."
+sensing.ir_transmittance:
+  sentence: "The infrared proxy has no atmospheric transmittance it can use: the table is absent, altered, carries no provenance, or does not start at full transmittance at zero range; nothing is invented in its place."
+  hint: "Place a transmittance table computed for a stated atmosphere, with its checksum and provenance, in the thermal folder, as that folder's readme describes."
+sensing.ir_state:
+  sentence: "The infrared proxy needs the recorded air temperature, Mach number and vapour pressure at the frame; one is missing or not a usable number, or the sky model is outside its range there."
+  hint: "Capture from a flight record that carries the atmosphere channels, with a positive air temperature."
+annotation.ir_proxy:
+  sentence: "An infrared frame does not declare itself a proxy, or the tables it declares are not the ones the manifest records, or the image is not the one its declaration describes."
+check.ir_proxy_declared:
+  sentence: "Every infrared frame declares itself a proxy, in the manifest's band, made with exactly the tables whose checksums the manifest records."
+
+# -- W2: buildings and the runway ------------------------------------------
+buildings.uncached:
+  sentence: "The building footprint set is not in the local cache, or its provenance record is missing or unreadable; nothing is downloaded during a run."
+  hint: "Place the footprint file and its provenance record in the buildings folder on a networked machine, as that folder's readme describes, or leave buildings out."
+buildings.licence:
+  sentence: "The building footprint set is under a licence that is not on the allow-list, or states none, so it cannot be used in a distributed dataset."
+  hint: "Use a footprint set under one of the allowed licences, or leave buildings out."
+buildings.unverified:
+  sentence: "The building footprint file's checksum is not the one its provenance record states, so the file changed after it was cached."
+  hint: "Re-cache the footprint set and write its checksum into the provenance record again."
+buildings.ids:
+  sentence: "A building in the footprint set has no stable identifier, repeats another's, or states a malformed outline or height."
+  hint: "Take every identifier from the source, once each, and give each outline at least three corners."
+runway.geometry:
+  sentence: "The runway cannot be placed: its designator, threshold, heading, length or width is missing, out of range, or disagrees with the heading."
+  hint: "State a designator that names the heading, a threshold latitude and longitude, a heading below 360 degrees, a length of 300 to 5500 metres and a width of 18 to 80 metres."
+runway.taxonomy:
+  sentence: "The runway's surface word is not one of the surfaces this build knows."
+  hint: "Choose asphalt, concrete, grass, gravel or dirt."
+runway.terrain_mismatch:
+  sentence: "The terrain under the runway cannot take a flat runway: its two ends differ in height by more than the pad allows, or the runway does not lie on the terrain."
+  hint: "Move the runway onto flatter ground inside the terrain, or shorten it."
+runway.markings:
+  sentence: "The runway's marking set cannot be drawn: an element is not one the markings raster knows, or it does not fit a runway of that length and width."
+  hint: "State the standard set, none, or a list of the known elements that fits the runway."
+check.building_vs_footprint:
+  sentence: "The building pixels in the identity image, carried back into the scene by the checker's own reading of their depth, land inside the cached footprints between each block's seat and its roof."
+check.runway_vs_geometry:
+  sentence: "The threshold the checker finds in the runway's marking raster, projected into each frame on the runway's plane, sits on the runway's own threshold within the stated pixel residual."
+
+# -- S2: the passes as data -- flow, disparity, points, amodal ----------------
+sensing.stereo:
+  sentence: "The stereo rig cannot be built: its baseline is not a positive number within the bound a rig may state, it names a side other than the right, or the right camera's name would be too long or already taken."
+  hint: "State a positive baseline in metres, no wider than the stated bound, on the right side, on a camera whose name leaves room for the right camera's."
+sensing.pass:
+  sentence: "A requested ground-truth pass is not one this build writes, is repeated, or needs a stereo rig the camera does not state."
+  hint: "Ask for normal, velocity, albedo, flow, disparity, points or amodal, each once, and state a stereo rig before asking for disparity."
+annotation.disparity:
+  sentence: "The disparity image disagrees with the depth and the rig's baseline, or the right camera does not see the same surfaces where the disparity says it should."
+annotation.points:
+  sentence: "The point cloud disagrees with the depth it was taken from: a point off its pixel, at the wrong distance, with the wrong identity, from the sky, or missing."
+annotation.amodal:
+  sentence: "An aircraft's whole-silhouette box or mask is missing its unoccluded pass, does not contain what is visible of it, or disagrees with the pass it was taken from."
+  hint: "Render with the labels, which draw each aircraft alone, before asking for its whole silhouette."
+check.flow_vs_keypoints:
+  sentence: "The motion vectors at the aircraft's key points, and which pixels are marked hidden or out of frame at the neighbouring instant, agree with the checker's own projection and depth test."
+check.flow_static_null:
+  sentence: "The motionless world moves only as the camera does: not at all under a still camera, and exactly as the camera's own motion projects it otherwise."
+check.disparity_vs_right_depth:
+  sentence: "The stereo pair is one rectified rig, and the disparity agrees with the depth, the baseline and the surfaces the right camera sees."
+check.points_vs_depth:
+  sentence: "Every point of the cloud sits on its own pixel at that pixel's distance with that pixel's identity, once per visible surface pixel and never from the sky."
+check.amodal_contains_visible:
+  sentence: "Each aircraft's whole-silhouette box and mask come from its unoccluded pass, contain what is visible of it, and give the visible fraction back."

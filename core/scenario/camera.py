@@ -157,6 +157,38 @@ def default_sensing_fields() -> Dict[str, Quantity]:
     }
 
 
+#: S2 (still spec 8): the stereo rig and the ground-truth passes a camera
+#: asks for, each a provenanced Quantity NOT in FIELD_ORDER and
+#: absent-canonical like the S1 fields: ``stereo`` ({baseline_m, side}, or
+#: None -- core/capture/stereo.py derives the right camera) and ``passes``
+#: (a list of pass words, or None -- core/capture/passes.py). Addressed as
+#: ``cameras[i].stereo`` / ``cameras[i].passes``; every committed example
+#: states neither and keeps its digest (pinned by tests/test_stereo.py).
+PASS_FIELDS = ("stereo", "passes")
+
+
+def default_pass_fields() -> Dict[str, Quantity]:
+    """The two S2 camera fields at their documented defaults."""
+    return {
+        "stereo": Quantity.default(None, frm="no stereo rig stated: one camera"),
+        "passes": Quantity.default(None, frm="no ground-truth pass asked for"),
+    }
+
+
+#: S3 (still spec 8): the IR proxy a camera asks for, ``cameras[i].ir`` =
+#: {band, thermal_table} (core/capture/thermal.py: band LWIR or MWIR, the
+#: table under assets/thermal/), or None -- a provenanced Quantity NOT in
+#: FIELD_ORDER, absent-canonical like the S1 / S2 fields, so every committed
+#: example keeps its digest (pinned by tests/test_thermal.py). Recorded
+#: through the manifest's per-camera ``sensing.ir`` block.
+IR_FIELD = "ir"
+
+
+def default_ir_field() -> Quantity:
+    """The S3 camera field at its documented default: no IR proxy."""
+    return Quantity.default(None, frm="no IR proxy asked for: the visible frame only")
+
+
 @dataclass
 class ExposureSpec:
     """``cameras[].exposure``: aperture, shutter and ISO, each a
@@ -312,6 +344,11 @@ class CameraSpec:
     exposure_compensation_ev: Quantity = dc_field(
         default_factory=lambda: default_sensing_fields()["exposure_compensation_ev"])
     bands: Quantity = dc_field(default_factory=lambda: default_sensing_fields()["bands"])
+    #: S2: the stereo rig and the passes (see PASS_FIELDS), absent-canonical.
+    stereo: Quantity = dc_field(default_factory=lambda: default_pass_fields()["stereo"])
+    passes: Quantity = dc_field(default_factory=lambda: default_pass_fields()["passes"])
+    #: S3: the IR proxy request (see IR_FIELD), absent-canonical.
+    ir: Quantity = dc_field(default_factory=default_ir_field)
 
     #: Canonical field order for serialisation and the rendered table.
     FIELD_ORDER = (
@@ -388,7 +425,20 @@ class CameraSpec:
             q = getattr(self, name)
             if q.to_dict() != defaults[name].to_dict():
                 out[name] = q.to_dict()
+        # S2: the stereo rig and the passes, the same absent-canonical rule.
+        pass_defaults = default_pass_fields()
+        for name in PASS_FIELDS:
+            q = getattr(self, name)
+            if q.to_dict() != pass_defaults[name].to_dict():
+                out[name] = q.to_dict()
+        # S3: the IR request, the same absent-canonical rule.
+        if self.ir_stated():
+            out[IR_FIELD] = self.ir.to_dict()
         return out
+
+    def ir_stated(self) -> bool:
+        """Whether the S3 IR field differs from its default (no IR)."""
+        return self.ir.to_dict() != default_ir_field().to_dict()
 
     def sensing_stated(self) -> bool:
         """Whether either S1 field differs from its default."""
@@ -410,7 +460,17 @@ class CameraSpec:
             if data.get(name) is not None:
                 sensing[name] = Quantity.from_dict(data[name])
         kwargs.update(sensing)
-        unknown = set(data) - set(cls.FIELD_ORDER) - {"moves", "exposure"} - set(SENSING_FIELDS)
+        # S2: the stereo rig and the passes, absent = the default.
+        pass_fields = default_pass_fields()
+        for name in PASS_FIELDS:
+            if data.get(name) is not None:
+                pass_fields[name] = Quantity.from_dict(data[name])
+        kwargs.update(pass_fields)
+        # S3: the IR request, absent = no IR.
+        kwargs[IR_FIELD] = (Quantity.from_dict(data[IR_FIELD]) if data.get(IR_FIELD) is not None
+                            else default_ir_field())
+        unknown = (set(data) - set(cls.FIELD_ORDER) - {"moves", "exposure"} - set(SENSING_FIELDS)
+                   - set(PASS_FIELDS) - {IR_FIELD})
         if unknown:
             raise ValueError(
                 f"camera carries unknown fields {sorted(unknown)}; "

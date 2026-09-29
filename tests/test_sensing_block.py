@@ -52,8 +52,9 @@ def spec_for(seconds: int = 1, sun_lux=None) -> ScenarioSpec:
 # -- the spec block ------------------------------------------------------------------------
 
 def test_sun_lux_is_absent_canonical_inside_the_scene_block_and_every_example_keeps_its_digest():
-    assert SceneSpec.FIELD_ORDER == ("terrain_source", "terrain", "sun_lux")
-    assert SceneSpec.OPTIONAL_FIELDS == ("sun_lux",)
+    # W2 appended scene.buildings, W3 scene.night, optional the same way.
+    assert SceneSpec.FIELD_ORDER == ("terrain_source", "terrain", "sun_lux", "buildings", "night")
+    assert SceneSpec.OPTIONAL_FIELDS == ("sun_lux", "buildings", "night")
     assert SceneSpec.defaulted().sun_lux.value is None and SceneSpec.defaulted().sun_lux.unit == "lx"
     spec = spec_for()
     assert spec.scene.is_default() and "scene" not in spec.to_dict()

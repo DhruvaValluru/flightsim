@@ -58,6 +58,32 @@ be:
 
 Not claimed anywhere in this module: moon, stars, precipitation
 particles, sea state, foliage sway (``NOT_CLAIMED``).
+
+W3 adds three rows (docs/ADVANCEMENTS_BLUEPRINT.md section 4), each a
+pure function beside the others:
+
+* ``cloud drift from the wind at cloud base`` -- :func:`cloud_drift_at_base`
+  evaluates the run's OWN wind providers (``core.environment.stack``'s
+  ``WindProvider.wind_at``: the steady wind, the layered / milspec / NWP
+  profile, the log law) at the cloud layer's base, height above the
+  scene datum (the engine's planet top sits at the spec's terrain
+  elevation, FlightSimVisualScene.cpp), and returns the horizontal wind
+  there as the drift with source ``wind at cloud base``. The phase-2 row
+  above (``cloud_drift_mps`` from the spec's uniform wind) is what the
+  randomisation look still carries; the two agree for a uniform wind and
+  differ exactly where a profile says the wind aloft is not the wind
+  below (measured with a layered fixture, tests/test_weather_visuals.py).
+  Only frozen at the stated time (0 s): no evolution of the wind aloft;
+* ``precipitation_rate_mmh`` / ``rain_extinction_per_m`` -- a stated rain
+  rate (``core.scene.precipitation``) REPLACES the word's visibility
+  floor with the rain's own Atlas 1953 extinction and reconciles it with
+  the Koschmieder row: fog_extinction_per_m = max(3.912 / V, sigma_rain),
+  the visibility being the total (rain included), so the rain is counted
+  once; the streaks add no extinction. Both keys ride only when a rate
+  is given, so every look block without one is unchanged;
+* ``night`` -- the card's ``look.night`` (``core.scene.night``) is the
+  moon light and the starfield the engine is handed (W5); listed in
+  :data:`WORLD_PARAMETERS` with the other card-level world rows.
 """
 
 from __future__ import annotations
@@ -106,7 +132,31 @@ ENGINE_PARAMETERS: Dict[str, str] = {
     "sun_elevation_deg": "SunLight rotation pitch (-elevation)",
     "sun_azimuth_deg": "compass azimuth, recorded",
     "engine_sun_azimuth_deg": "SunLight rotation yaw (+180)",
+    # W3: present only when a rain rate is given (core/scene/precipitation.py).
+    "precipitation_rate_mmh": "M_RainStreaks density and streak length on the beauty "
+                              "capture only (W5); the fog row carries the rain's extinction",
+    "rain_extinction_per_m": "counted once, inside fog_extinction_per_m (Atlas 1953 "
+                             "floor of the Koschmieder row); recorded, not applied twice",
 }
+#: W3: the card's top-level ``look`` block (core/scenario/card.py) -- the
+#: world rows the render host is handed, and the engine parameter each drives
+#: (W5, uncompiled here; each host refusal is catalogued by name).
+WORLD_PARAMETERS: Dict[str, str] = {
+    "night": "a second directional light at the moon's elevation and azimuth, "
+             "AtmosphereSunLightIndex 1, intensity illuminance_lux in physical units "
+             "(refused look.moon); the starfield sphere M_Starfield from stars_mode "
+             "(refused look.stars)",
+    "precipitation": "M_RainStreaks blendable on the beauty capture only: streak length and "
+                     "density from the fitted distribution (refused "
+                     "look.precipitation_particles)",
+    "cloud_drift": "the cloud material's wind offset advanced by mps along the downwind "
+                   "bearing every tick (refused look.cloud_drift_parameter when the material "
+                   "exposes no offset)",
+}
+#: The drift's source word, recorded with every drift computed from providers.
+CLOUD_DRIFT_SOURCE = "wind at cloud base"
+#: The card's ``look.cloud_drift`` keys, in their fixed order.
+CLOUD_DRIFT_KEYS = ("mps", "from_deg", "base_m", "source")
 #: The Phase 10 flags, kept: look key -> commandlet flag. ``card.look``
 #: overrides them when present.
 RENDER_FLAGS: Dict[str, str] = {
@@ -180,6 +230,38 @@ def cloud_drift_mps(wind_speed_kt: float) -> float:
     return round(float(wind_speed_kt) * KT_TO_MPS, 4)
 
 
+def cloud_drift_at_base(providers, latitude_deg: float, longitude_deg: float,
+                        terrain_m: float, base_m: float,
+                        time_s: float = 0.0) -> Dict[str, Any]:
+    """W3: the drift from the providers' wind AT the cloud base: the sum of
+    ``provider.wind_at(position, time_s)`` over ``providers`` (the stack's
+    wind providers) at altitude terrain_m + base_m MSL (AGL base_m), its
+    horizontal speed and meteorological from-bearing, source
+    :data:`CLOUD_DRIFT_SOURCE`. A calm base drifts 0 m/s from 0 deg."""
+    from core.environment.base import Position
+
+    base = float(base_m)
+    terrain = float(terrain_m)
+    position = Position(latitude_deg=float(latitude_deg), longitude_deg=float(longitude_deg),
+                        altitude_m=terrain + base, agl_m=base, terrain_elevation_m=terrain)
+    north = east = 0.0
+    for provider in providers:
+        wind = provider.wind_at(position, float(time_s))
+        north += float(wind.north)
+        east += float(wind.east)
+    speed = math.hypot(north, east)
+    from_deg = math.degrees(math.atan2(-east, -north)) % 360.0 if speed > 0.0 else 0.0
+    return {"mps": round(speed, 4), "from_deg": round(from_deg, 4), "base_m": round(base, 1),
+            "source": CLOUD_DRIFT_SOURCE, "altitude_m": round(terrain + base, 1),
+            "north_mps": north, "east_mps": east, "time_s": float(time_s),
+            "providers": [getattr(p, "name", type(p).__name__) for p in providers]}
+
+
+def drift_offset_m(drift_mps: float, seconds: float) -> float:
+    """The cloud layer's offset after ``seconds`` of a steady drift."""
+    return float(drift_mps) * float(seconds)
+
+
 def ev100(aperture_f: float, shutter_s: float, iso: float) -> float:
     """EV100 = log2(N^2 / t) - log2(ISO / 100)."""
     n, t, s = float(aperture_f), float(shutter_s), float(iso)
@@ -195,17 +277,29 @@ def look_block(values: Dict[str, Any]) -> Dict[str, Any]:
     ``precipitation``, ``wind_speed_kt``, ``wind_direction_deg``,
     ``exposures`` ({camera_id: (aperture_f, shutter_s, iso)}). Absent
     keys take the documented defaults (clear sky, no precipitation,
-    calm)."""
+    calm). W3: ``precipitation_rate_mmh`` (a stated rain rate) replaces
+    the word's visibility floor with the rain's reconciled extinction
+    and makes a ``none`` word ``rain``."""
     precipitation = str(values.get("precipitation", "none"))
+    rate = values.get("precipitation_rate_mmh")
     visibility = values.get("visibility_km")
     if visibility is None:
         density = values.get("fog_density")
         visibility = (visibility_km_for_extinction(density)
                       if density is not None and float(density) > 0.0
                       else visibility_km_for_extinction(ENGINE_FOG_DENSITY_DEFAULT))
-    visibility = visibility_floor_km(visibility, precipitation)
+    rain_row = None
+    if rate is not None:
+        from .precipitation import extinction_per_m, fitted_lambda, reconcile_extinction
+
+        precipitation = "rain" if precipitation == "none" else precipitation
+        visibility_floor_km(visibility, precipitation)          # the word must be known
+        rain_row = reconcile_extinction(visibility, extinction_per_m(fitted_lambda(rate)))
+        visibility = rain_row["visibility_km"]
+    else:
+        visibility = visibility_floor_km(visibility, precipitation)
     beta = fog_extinction_per_m(visibility)
-    return {
+    out = {
         "visibility_km": round(float(visibility), 4),
         "fog_extinction_per_m": float(f"{beta:.6g}"),
         "aerosol": round(aerosol_scale(visibility), 4),
@@ -221,3 +315,8 @@ def look_block(values: Dict[str, Any]) -> Dict[str, Any]:
                   dict(values.get("exposures") or {}).items()},
         "not_claimed": list(NOT_CLAIMED),
     }
+    if rain_row is not None:
+        # W3: absent-canonical -- the two keys ride only with a stated rate.
+        out["precipitation_rate_mmh"] = round(float(rate), 4)
+        out["rain_extinction_per_m"] = float(f"{rain_row['rain_extinction_per_m']:.6g}")
+    return out

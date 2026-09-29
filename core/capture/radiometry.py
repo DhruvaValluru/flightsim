@@ -848,7 +848,8 @@ def attach_render_radiometry(run_dir, manifest: Dict[str, Any]) -> Dict[str, Any
     summary = {"cameras": 0, "refused": [], "measured": []}
     for block in manifest.get("cameras", []):
         sensing = block.get("sensing")
-        if not isinstance(sensing, Mapping):
+        # S3: a camera may carry only an IR block (sensing.ir) and no chain.
+        if not isinstance(sensing, Mapping) or not isinstance(sensing.get("radiometry"), Mapping):
             continue
         camera = str(block["camera_id"])
         folder = run_dir / "frames" / camera

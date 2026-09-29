@@ -62,7 +62,59 @@ DETERMINISM: every draw comes from the run seed through the named streams
 (:mod:`core.experiments.seeds`), in a fixed order, so the same seed and
 profile give a byte-identical file (tested).
 
-NOT CLAIMED: scale-factor and misalignment errors; g-sensitivity;
+THE FDM-RATE PATH (R2, blueprint section 2). :class:`InstrumentObserver`
+is the same four models run INSIDE the step loop, once per FDM step
+(``rate_basis`` 'fdm loop'), built from the spec's ``instruments`` block
+(one profile and one lever arm per instrument; an unstated instrument is
+the ideal profile at the CG). Per step it reads JSBSim's own
+accelerometer (``accelerations/Nx, Ny, Nz``), body rates and angular
+accelerations, position, attitude, CAS and heading, and writes nothing
+back. The IMU's truth is the SPECIFIC FORCE at the sensor, in body axes
+(x forward, y right, z down):
+
+    f = g0 (N_x, N_y, -N_z) + omega_dot x r + omega x (omega x r)
+
+with NO gravity term (JSBSim's N is the total body force over the weight;
+FGAuxiliary's vPilotAccel has the same form, read here) and the N_z SIGN
+FLIP stated: JSBSim's Nz is positive UP (0.997 g in level flight) while
+the sensor's z axis points down, so f_z = -g0 N_z; the measured load
+factor is meas_n_z = -f_z_meas / g0. Measured (tests): at r = 0 the
+specific force equals g0 (N_x, N_y, -N_z) exactly, and at r = the
+eyepoint offset it equals g0 times JSBSim's own ``n-pilot-*-norm`` (which
+carries JSBSim's rotational terms) within the numerical tolerance stated
+there, while a finite difference of the recorded rates reproduces the
+omega_dot x r term. GPS fixes on the receiver's clock at the profile's
+rate, HELD between fixes, at the antenna (CG + R_body_to_NED r_gps);
+pitot-static CAS through the first-order lag plus a position-error table
+in knots (default empty = zero, stated); the magnetometer as a TILTED
+DIPOLE from the IGRF-13 degree-1 coefficients (g10 -29404.8, g11 -1450.9,
+h11 4652.5 nT at 2020.0, verified here from the fetched IGRF13.shc),
+rotated into the body, hard-iron offsets added, levelled with the truth
+attitude: the sensor reads MAGNETIC heading (true minus the dipole's
+declination), so ``meas_heading_deg`` differs from the true heading by
+the declination the record states. Every draw comes from the five named
+streams ``imu``, ``gps``, ``pitot_static``, ``magnetometer``,
+``null_test`` (never the declared-but-unused ``sensor_noise``). The 10 Hz
+recorder samples the LATEST measured value (Recorder(measured=observer)),
+so frames carry meas_* beside truth; ``instruments.npz`` beside the run
+holds every truth_* and meas_* column at the FDM rate, byte-deterministic.
+The Allan self-report (the NON-overlapping deviation, :func:`allan_deviation`)
+grades the white term N against the stated density within
+:data:`ALLAN_TOL`; B and K are NOT RUN when the run is shorter than 100
+correlation times (:data:`ALLAN_BK_RUN_MULTIPLE`), and the check module
+(core/telemetry/instruments_check.py) uses the OVERLAPPING form so the
+two agree by arithmetic, not by copy.
+
+NOT CLAIMED (both paths): stated class models -- no device is calibrated
+and every profile number is 'unverified here'; the Allan check measures
+that the model produced the noise it declares, not that a real sensor
+has it; B and K on a 60 s run; the magnetometer is a tilted dipole with
+a few degrees of declination error against IGRF/WMM (geodetic latitude
+taken as geocentric, no secular variation, no soft iron); the pitot-static
+and magnetometer lever arms are carried, not applied; GPS multipath,
+ionosphere, clock and geometry; host-flight instruments are post-hoc at
+the recorded rate (the engine side is P9's). Also, for the recorded-rate
+path: scale-factor and misalignment errors; g-sensitivity;
 quantisation; temperature effects; the rate random walk (the third
 IEEE 952 term); GPS multipath, ionospheric or clock errors (only a white
 per-axis sigma); any satellite geometry; the velocity lever-arm term;
@@ -85,7 +137,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 
 from ..experiments.seeds import DERIVATION, derive, generator
-from ..records import AppliedVariable, Model, NullTest, records_block
+from ..records import AppliedVariable, Model, NullTest, Readback, records_block
 
 REPO = Path(__file__).resolve().parents[2]
 PROFILE_DIR = REPO / "assets" / "instrument_profiles"
@@ -102,6 +154,41 @@ WGS84_A = 6378137.0
 WGS84_E2 = 6.69437999014e-3
 #: The seed streams the models draw from, in the order they are drawn.
 STREAMS = ("imu", "gps", "pitot_static", "magnetometer")
+#: R2: the FDM-rate observer's streams -- the four above and the null
+#: test's own (the estimator self-check's synthetic stream).
+OBSERVER_STREAMS = ("imu", "gps", "pitot_static", "magnetometer", "null_test")
+#: The two rates an instrument model can run at, named in every record.
+FDM_RATE_BASIS = "fdm loop"
+RECORDED_RATE_BASIS = "recorded telemetry, 10 Hz"
+#: The FDM-rate file beside the run, and its version (refused by name when unknown).
+INSTRUMENTS_FILE = "instruments.npz"
+INSTRUMENTS_VERSION = 1
+#: A lever arm longer than this is not a sensor on the airframe (the
+#: B747's half-span is 32 m and its length 70 m): refused instrument.lever_arm.
+LEVER_ARM_MAX_M = 80.0
+#: The Allan self-report's agreement bound on the white term: |adev(tau) /
+#: (N / sqrt(tau)) - 1| < 0.25 at short tau (the blueprint's clause).
+ALLAN_TOL = 0.25
+#: B and K are NOT RUN unless the run spans at least this many
+#: correlation times (a bias instability shows as the flat floor of the
+#: Allan curve near tau_B, which a shorter run never reaches).
+ALLAN_BK_RUN_MULTIPLE = 100.0
+#: The cluster counts (tau = m dt) the short-tau agreement is taken at.
+ALLAN_SHORT_M = (1, 2, 4)
+#: Fewer clusters than this make no Allan statistic (NOT RUN).
+ALLAN_MIN_CLUSTERS = 30
+#: The IGRF-13 degree-1 (dipole) coefficients at 2020.0, nT, verified here
+#: from the fetched IGRF13.shc (docs/ADVANCEMENTS_BLUEPRINT.md section 2),
+#: and the IGRF reference radius.
+IGRF13_G10_NT = -29404.8
+IGRF13_G11_NT = -1450.9
+IGRF13_H11_NT = 4652.5
+IGRF_REFERENCE_RADIUS_M = 6371200.0
+#: The null test's threshold on the residual std in units of the stated
+#: sigma: a stated instrument reaches when the ratio is at least 0.75 (the
+#: within-25 % agreement itself is recorded per channel and pinned by the
+#: tests); the ideal instrument measures 0 and is honestly not ok.
+NULL_RATIO_THRESHOLD = 0.75
 #: The null test's threshold on the normalised residual RMS (dimensionless:
 #: every channel's residual divided by its stated sigma). An ideal profile
 #: measures 0 by construction; any profile with noise measures about 1.
@@ -172,12 +259,16 @@ class InstrumentProfile:
     @property
     def is_ideal(self) -> bool:
         """Every error term zero: the truth is the measurement."""
-        blocks = (self.accelerometer, self.gyro, self.pitot_static, self.magnetometer,
+        blocks = (self.accelerometer, self.gyro,
+                  {k: v for k, v in self.pitot_static.items()
+                   if k != "position_error_table_kt"},
+                  self.magnetometer,
                   {k: v for k, v in self.gps.items()
                    if k not in ("update_rate_hz", "antenna_offset_body_m")})
         terms = [v for block in blocks for k, v in block.items()
                  if k != "correlation_time_s"]
         terms += list(self.gps["antenna_offset_body_m"])
+        terms += [d for _, d in self.pitot_static.get("position_error_table_kt", [])]
         return all(float(v) == 0.0 for v in terms)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -186,7 +277,9 @@ class InstrumentProfile:
             "references": list(self.references),
             "imu": {"accelerometer": dict(self.accelerometer), "gyro": dict(self.gyro)},
             "gps": {**self.gps, "antenna_offset_body_m": list(self.gps["antenna_offset_body_m"])},
-            "pitot_static": dict(self.pitot_static),
+            "pitot_static": {**self.pitot_static,
+                             "position_error_table_kt": [list(r) for r in self.pitot_static.get(
+                                 "position_error_table_kt", [])]},
             "magnetometer": dict(self.magnetometer),
             "sha256": self.sha256, "path": self.path,
         }
@@ -229,7 +322,8 @@ def profile_from_dict(data: Mapping[str, Any], name: str = "", sha256: str = "",
                     f"profile {stated!r}: {dotted}.{key} must be a finite number >= 0, "
                     f"got {value!r}")
             numbers[key] = float(value)
-        unknown = sorted(set(block) - set(keys) - {"antenna_offset_body_m"})
+        unknown = sorted(set(block) - set(keys) - {"antenna_offset_body_m",
+                                                   "position_error_table_kt"})
         if unknown:
             raise InstrumentProfileError(
                 f"profile {stated!r}: {dotted} has keys this build does not model: "
@@ -250,11 +344,25 @@ def profile_from_dict(data: Mapping[str, Any], name: str = "", sha256: str = "",
             f"in body axes (x forward, y right, z down)")
     gps = dict(blocks["gps"])
     gps["antenna_offset_body_m"] = [float(v) for v in arm]
+    # R2: the optional position-error table, [[cas_kt, delta_kt], ...] in
+    # ascending CAS (delta is ADDED to the lagged CAS; linear between rows,
+    # held beyond the ends); absent = an empty table = zero, stated.
+    table = data["pitot_static"].get("position_error_table_kt", [])
+    if not isinstance(table, list) or not all(
+            isinstance(row, list) and len(row) == 2 and all(
+                isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+                for v in row) for row in table) or any(
+            table[i][0] >= table[i + 1][0] for i in range(len(table) - 1)):
+        raise InstrumentProfileError(
+            f"profile {stated!r}: pitot_static.position_error_table_kt must be "
+            f"[[cas_kt, delta_kt], ...] with ascending CAS")
+    pitot = dict(blocks["pitot_static"])
+    pitot["position_error_table_kt"] = [[float(c), float(d)] for c, d in table]
     return InstrumentProfile(
         name=stated, basis=str(data.get("basis", "synthetic")),
         source=str(data["source"]), references=tuple(references),
         accelerometer=blocks["imu.accelerometer"], gyro=blocks["imu.gyro"], gps=gps,
-        pitot_static=blocks["pitot_static"], magnetometer=blocks["magnetometer"],
+        pitot_static=pitot, magnetometer=blocks["magnetometer"],
         sha256=sha256, path=path)
 
 
@@ -399,7 +507,9 @@ def _sigmas(profile: InstrumentProfile, dt: float) -> Dict[str, Dict[str, float]
         "gps.position": {"sigma_north_east_m": gps["north_east_sigma_m"],
                          "sigma_down_m": gps["vertical_sigma_m"]},
         "gps.velocity": {"sigma_white": gps["velocity_sigma_mps"]},
-        "pitot_static.airspeed": {"sigma_white": ps["cas_sigma_kt"], "lag_s": ps["cas_lag_s"]},
+        "pitot_static.airspeed": {"sigma_white": ps["cas_sigma_kt"], "lag_s": ps["cas_lag_s"],
+                                  "position_error_table_kt": [
+                                      list(r) for r in ps.get("position_error_table_kt", [])]},
         "pitot_static.altitude": {"sigma_white": ps["pressure_altitude_sigma_m"],
                                   "lag_s": ps["pressure_altitude_lag_s"]},
         "magnetometer.heading": {"sigma_white": mag["heading_sigma_deg"],
@@ -587,6 +697,8 @@ def measure(telemetry: Mapping[str, Any], profile: InstrumentProfile, seed: int,
             continue
         truth = np.asarray(columns[source_column], dtype=float)
         lagged = first_order_lag(truth, terms["lag_s"], dt)
+        if inst == "pitot_static.airspeed":
+            lagged = lagged + position_error_kt(lagged, terms["position_error_table_kt"])
         add(source_column, measured_name, inst, axis, unit, truth, lagged + white,
             terms["sigma_white"],
             {**terms, "discretisation": "backward Euler: y[i] = y[i-1] + dt/(tau+dt) * "
@@ -610,8 +722,22 @@ def measure(telemetry: Mapping[str, Any], profile: InstrumentProfile, seed: int,
 
     normalised_rms = float(math.sqrt(sum(v * v for v in normalised) / len(normalised))) \
         if normalised else 0.0
+    # R2: the Allan self-report of the recorded-rate gyro and accelerometer
+    # residuals (non-overlapping form), graded against the profile's N.
+    allan = {}
+    for truth_name, measured_name, inst, axis, unit in CHANNELS:
+        if inst not in ("imu.accelerometer", "imu.gyro") or measured_name not in out:
+            continue
+        residual = np.asarray(out[measured_name]) - np.asarray(out[truth_name])
+        density = (profile.accelerometer["velocity_random_walk_mps_per_sqrt_h"] if inst == "imu.accelerometer"
+                   else profile.gyro["angle_random_walk_deg_per_sqrt_h"])
+        allan[measured_name] = allan_self_report(
+            residual * (G0 if inst == "imu.accelerometer" else 1.0), dt, density / 60.0,
+            sigmas[inst]["sigma_bias_instability"] * (G0 if inst == "imu.accelerometer" else 1.0),
+            sigmas[inst]["correlation_time_s"],
+            unit="m/s^2" if inst == "imu.accelerometer" else "deg/s")
     record = _record(profile, source, seeds, [e["measured"] for e in entries],
-                     absent, normalised_rms)
+                     absent, normalised_rms, dt=dt, allan=allan)
     data = {
         "measured_version": MEASURED_VERSION,
         "profile": profile.to_dict(),
@@ -637,8 +763,11 @@ def measure(telemetry: Mapping[str, Any], profile: InstrumentProfile, seed: int,
 
 
 def _record(profile: InstrumentProfile, source: str, seeds, measured: Sequence[str],
-            absent: Mapping[str, str], normalised_rms: float) -> AppliedVariable:
-    """The ``instruments.profile`` record for one run."""
+            absent: Mapping[str, str], normalised_rms: float, dt: float = 0.1,
+            allan: Optional[Mapping[str, Any]] = None) -> AppliedVariable:
+    """The ``instruments.profile`` record for one run (the recorded-rate
+    path; R2 extends it with the rate, the seed streams, the Allan
+    self-report and the lever arms)."""
     return AppliedVariable(
         name=RECORD_NAME,
         value=profile.name,
@@ -652,6 +781,14 @@ def _record(profile: InstrumentProfile, source: str, seeds, measured: Sequence[s
             "replicate": seeds.replicate,
             "file": None if profile.is_ideal else MEASURED_FILE,
             "absent_truth_columns": dict(absent),
+            # R2: the rate this path runs at, the Allan self-report and the
+            # lever arms (the GPS antenna's; the IMU is at the CG here).
+            "rate_hz": 1.0 / dt,
+            "rate_basis": RECORDED_RATE_BASIS,
+            "allan_self_report": dict(allan or {}),
+            "lever_arms_m": {"imu": [0.0, 0.0, 0.0],
+                             "gps": [float(v) for v in profile.gps["antenna_offset_body_m"]],
+                             "pitot_static": [0.0, 0.0, 0.0], "magnetometer": [0.0, 0.0, 0.0]},
         },
         references=tuple(profile.references),
         properties_written=(),
@@ -672,7 +809,8 @@ def _record(profile: InstrumentProfile, source: str, seeds, measured: Sequence[s
         model_block=Model(
             name=MODEL, standard="IEEE Std 952-2020 terms; GPS SPS PS; Caruso 2000",
             version=f"profile {profile.name} (sha256 {profile.sha256})",
-            parameters={"basis": profile.basis, "rate_basis": "recorded telemetry, 10 Hz",
+            parameters={"basis": profile.basis, "rate_basis": RECORDED_RATE_BASIS,
+                        "rate_hz": 1.0 / dt,
                         "file": None if profile.is_ideal else MEASURED_FILE},
             references=tuple(profile.references)),
         frm=(f"--instruments {profile.name}" if source == "user"
@@ -731,3 +869,794 @@ def describe(result: MeasuredResult) -> str:
             f"({result.summary['channels']} measured channels beside truth, "
             f"{result.summary['absent']} truth columns absent from the recording, "
             f"normalised residual RMS {result.summary['normalised_rms']:.3f})")
+
+
+# -- R2: the FDM-rate observer ---------------------------------------------------
+
+class InstrumentError(Exception):
+    """A refusal of the ``instruments`` block, by name (``.constraint``:
+    ``instrument.profile``, ``instrument.lever_arm``, ``instrument.rate``)."""
+
+    def __init__(self, constraint: str, message: str) -> None:
+        self.constraint = constraint
+        self.message = message
+        super().__init__(f"{constraint}: {message}")
+
+
+@dataclass(frozen=True)
+class InstrumentSpec:
+    """One instrument as the spec states it: its profile, its lever arm
+    from the CG in body metres (x forward, y right, z down), whether the
+    spec stated it (else the ideal profile at the CG), and the provenance."""
+
+    name: str
+    profile: InstrumentProfile
+    lever_arm_m: Tuple[float, float, float]
+    stated: bool
+    source: str = "default"
+    frm: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"name": self.name, "profile": self.profile.name,
+                "profile_sha256": self.profile.sha256, "profile_path": self.profile.path,
+                "lever_arm_m": list(self.lever_arm_m), "stated": self.stated,
+                "source": self.source, "from": self.frm}
+
+
+def instrument_problems(name: str, value: Any, rate_hz: Optional[float] = None,
+                        profile_dir: Optional[Path] = None) -> List[Tuple[str, str]]:
+    """Every refusal one ``instruments.<name>`` field earns, as (constraint,
+    message): ``instrument.profile`` (not a {profile, lever_arm_m} mapping,
+    an unknown key, a profile not on file or malformed), ``instrument.lever_arm``
+    (not three finite numbers, or longer than LEVER_ARM_MAX_M),
+    ``instrument.rate`` (a GPS update rate above the FDM rate: a receiver
+    cannot fix more often than the model steps). None (unstated) earns
+    none. The same list serves the validator and the runner."""
+    if value is None:
+        return []
+    out: List[Tuple[str, str]] = []
+    if not isinstance(value, Mapping):
+        return [_problem(constraint="instrument.profile",
+                         message=f"instruments.{name} must be a mapping {{profile: <name>, "
+                                 f"lever_arm_m: [x, y, z]}} or null, not {value!r}")]
+    unknown = sorted(set(value) - {"profile", "lever_arm_m"})
+    if unknown:
+        out.append(_problem(constraint="instrument.profile",
+                            message=f"instruments.{name} carries keys this build does not "
+                                    f"read: {unknown}"))
+    profile_name = value.get("profile")
+    profile = None
+    if not isinstance(profile_name, str) or not profile_name.strip():
+        out.append(_problem(constraint="instrument.profile",
+                            message=f"instruments.{name} names no profile"))
+    else:
+        try:
+            profile = load_profile(profile_name, profile_dir)
+        except InstrumentProfileError as exc:
+            out.append(_problem(constraint="instrument.profile",
+                                message=f"instruments.{name}: {exc.message}"))
+    arm = value.get("lever_arm_m", [0.0, 0.0, 0.0])
+    if not isinstance(arm, (list, tuple)) or len(arm) != 3 or not all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+            for v in arm):
+        out.append(_problem(constraint="instrument.lever_arm",
+                            message=f"instruments.{name}.lever_arm_m must be [x, y, z] finite "
+                                    f"metres in body axes (x forward, y right, z down), not "
+                                    f"{arm!r}"))
+    elif math.sqrt(sum(float(v) ** 2 for v in arm)) > LEVER_ARM_MAX_M:
+        out.append(_problem(constraint="instrument.lever_arm",
+                            message=f"instruments.{name}.lever_arm_m is "
+                                    f"{math.sqrt(sum(float(v) ** 2 for v in arm)):.1f} m long; "
+                                    f"a sensor on the airframe sits within "
+                                    f"{LEVER_ARM_MAX_M:g} m of the CG"))
+    if name == "gps" and profile is not None and rate_hz is not None \
+            and float(profile.gps["update_rate_hz"]) > float(rate_hz) + 1e-9:
+        out.append(_problem(constraint="instrument.rate",
+                            message=f"instruments.gps profile {profile.name!r} fixes at "
+                                    f"{profile.gps['update_rate_hz']:g} Hz, above the FDM rate "
+                                    f"{float(rate_hz):g} Hz; a receiver cannot fix more often "
+                                    f"than the model steps"))
+    return out
+
+
+def _problem(constraint: str, message: str) -> Tuple[str, str]:
+    """One (constraint, message) refusal of :func:`instrument_problems`,
+    the name spelled as a keyword so the catalogue's scanner reads it."""
+    return constraint, message
+
+
+def instruments_from_spec(spec, profile_dir: Optional[Path] = None) -> Dict[str, InstrumentSpec]:
+    """The four instruments a spec states (core/scenario/blocks.py
+    InstrumentsSpec), the ideal profile at the CG for each unstated one;
+    refuses by name what :func:`instrument_problems` refuses."""
+    from ..scenario.blocks import INSTRUMENT_NAMES
+
+    block = getattr(spec, "instruments", None)
+    rate = float(spec.rate.value)
+    out: Dict[str, InstrumentSpec] = {}
+    ideal = load_profile(DEFAULT_PROFILE, profile_dir)
+    for name in INSTRUMENT_NAMES:
+        quantity = getattr(block, name) if block is not None else None
+        value = None if quantity is None else quantity.value
+        problems = instrument_problems(name, value, rate, profile_dir)
+        if problems:
+            raise InstrumentError(problems[0][0], problems[0][1])
+        if value is None:
+            out[name] = InstrumentSpec(name, ideal, (0.0, 0.0, 0.0), False, "default",
+                                       "unstated: the ideal profile at the CG")
+            continue
+        arm = value.get("lever_arm_m", [0.0, 0.0, 0.0])
+        out[name] = InstrumentSpec(
+            name, load_profile(str(value["profile"]), profile_dir),
+            (float(arm[0]), float(arm[1]), float(arm[2])), True,
+            str(quantity.source), str(quantity.frm or ""))
+    return out
+
+
+# -- the physics -----------------------------------------------------------------
+
+def rotational_terms(omega: np.ndarray, omega_dot: np.ndarray, r: np.ndarray) -> np.ndarray:
+    """``omega_dot x r + omega x (omega x r)``: the specific force a sensor
+    at ``r`` (body metres from the CG) sees beyond the CG's, from the
+    body rates (rad/s) and angular accelerations (rad/s^2)."""
+    return np.cross(omega_dot, r) + np.cross(omega, np.cross(omega, r))
+
+
+def specific_force_body(n_x: float, n_y: float, n_z: float, omega: np.ndarray,
+                        omega_dot: np.ndarray, r: np.ndarray) -> np.ndarray:
+    """The specific force (m/s^2, body axes x forward, y right, z down) at
+    a sensor ``r`` metres from the CG: ``g0 (N_x, N_y, -N_z)`` plus the
+    rotational terms. NO gravity term: JSBSim's N is the total body force
+    over the weight (FGAuxiliary: vBodyAccel = Force / Mass), which IS the
+    specific force; the N_z sign flips because JSBSim's Nz is positive up
+    and the sensor's z is down."""
+    f_cg = G0 * np.array([float(n_x), float(n_y), -float(n_z)])
+    return f_cg + rotational_terms(omega, omega_dot, r)
+
+
+def dipole_field_ned(lat_deg: float, lon_deg: float, alt_m: float) -> Tuple[float, float, float]:
+    """The IGRF-13 degree-1 (tilted dipole) field in nT, NED, from the
+    spherical-harmonic potential ``V = a (a/r)^2 [g10 cos(theta) + (g11 cos(phi)
+    + h11 sin(phi)) sin(theta)]`` differentiated in spherical coordinates
+    (X = -B_theta, Y = B_phi, Z = -B_r). The geodetic latitude is taken as
+    the geocentric colatitude's complement and the radius as a + h: a
+    stated approximation worth a few tenths of a degree of declination,
+    beside the dipole's own few degrees against IGRF/WMM."""
+    theta = math.radians(90.0 - float(lat_deg))
+    phi = math.radians(float(lon_deg))
+    ratio = (IGRF_REFERENCE_RADIUS_M / (IGRF_REFERENCE_RADIUS_M + float(alt_m))) ** 3
+    st, ct = math.sin(theta), math.cos(theta)
+    sp, cp = math.sin(phi), math.cos(phi)
+    b_r = 2.0 * ratio * (IGRF13_G10_NT * ct + (IGRF13_G11_NT * cp + IGRF13_H11_NT * sp) * st)
+    b_theta = -ratio * (-IGRF13_G10_NT * st + (IGRF13_G11_NT * cp + IGRF13_H11_NT * sp) * ct)
+    b_phi = -ratio * (-IGRF13_G11_NT * sp + IGRF13_H11_NT * cp)
+    return -b_theta, b_phi, -b_r
+
+
+def dipole_declination_deg(lat_deg: float, lon_deg: float, alt_m: float) -> float:
+    """The dipole's declination (east positive) at a point, degrees."""
+    x, y, _ = dipole_field_ned(lat_deg, lon_deg, alt_m)
+    return math.degrees(math.atan2(y, x))
+
+
+def magnetic_heading_deg(field_ned: Sequence[float], roll_deg: float, pitch_deg: float,
+                         heading_deg: float, hard_iron: Sequence[float]) -> float:
+    """What a three-axis magnetometer at this attitude reads as heading,
+    degrees [0, 360): the NED field rotated into the body, hard-iron
+    offsets added (a stated fraction of the horizontal field per body
+    component, Caruso 2000), the body field levelled with the TRUE roll
+    and pitch, and ``atan2(-B_y, B_x)`` -- the magnetic heading, true
+    heading minus the local declination when the offsets are zero."""
+    b_ned = np.asarray(field_ned, dtype=float)
+    r_b2n = body_to_ned(roll_deg, pitch_deg, heading_deg)
+    b_body = r_b2n.T @ b_ned
+    horizontal = math.hypot(b_ned[0], b_ned[1])
+    b_body = b_body + np.array([float(hard_iron[0]) * horizontal,
+                                float(hard_iron[1]) * horizontal, 0.0])
+    level = body_to_ned(roll_deg, pitch_deg, 0.0) @ b_body      # yaw-less: the level frame
+    return math.degrees(math.atan2(-level[1], level[0])) % 360.0
+
+
+def position_error_kt(cas_kt, table: Sequence[Sequence[float]]):
+    """The position-error correction (kt) at a CAS from a [[cas, delta], ...]
+    table: linear between rows, held beyond the ends, ZERO for an empty
+    table (the stated default). Works on a scalar or an array."""
+    if not table:
+        return np.zeros_like(np.asarray(cas_kt, dtype=float)) if np.ndim(cas_kt) else 0.0
+    xs = np.array([row[0] for row in table], dtype=float)
+    ys = np.array([row[1] for row in table], dtype=float)
+    out = np.interp(np.asarray(cas_kt, dtype=float), xs, ys)
+    return float(out) if np.ndim(cas_kt) == 0 else out
+
+
+# -- the Allan self-report (the NON-overlapping form) --------------------------------
+
+def allan_deviation(x: np.ndarray, dt: float, m: int) -> Tuple[float, int]:
+    """The NON-overlapping Allan deviation of a rate series at tau = m dt:
+    the series cut into M = floor(N / m) clusters, each averaged, sigma^2 =
+    1 / (2 (M - 1)) sum (ybar_{k+1} - ybar_k)^2 (IEEE Std 952-2020 Annex C
+    as remembered; the check module uses the overlapping form). Returns
+    (adev, M); NaN with M < 2 clusters."""
+    x = np.asarray(x, dtype=float)
+    clusters = len(x) // int(m)
+    if clusters < 2:
+        return math.nan, clusters
+    means = x[:clusters * m].reshape(clusters, m).mean(axis=1)
+    return float(math.sqrt(0.5 * np.mean(np.diff(means) ** 2))), clusters
+
+
+def allan_self_report(residual: np.ndarray, dt: float, density: float, sigma_b: float,
+                      tau_b_s: float, unit: str) -> Dict[str, Any]:
+    """The producer's own Allan report of one residual series (measured
+    minus truth, in the channel's unit per second): the deviation at the
+    short taus, the agreement ``|adev / (N / sqrt(tau)) - 1|`` against
+    the declared white density ``density`` (unit / sqrt(s)) within
+    :data:`ALLAN_TOL`, and B and K NOT RUN unless the span is at least
+    ALLAN_BK_RUN_MULTIPLE correlation times (then B is read at the
+    curve's minimum over 0.664, K from the longest tau, both as estimates,
+    not graded). A zero density grades nothing (NOT RUN: the ideal)."""
+    residual = np.asarray(residual, dtype=float)
+    span = (len(residual) - 1) * dt
+    points = []
+    for m in ALLAN_SHORT_M:
+        adev, clusters = allan_deviation(residual, dt, m)
+        tau = m * dt
+        expected = density / math.sqrt(tau) if density > 0.0 else 0.0
+        entry = {"tau_s": tau, "clusters": clusters, "adev": adev, "expected_white": expected,
+                 "agreement": (abs(adev / expected - 1.0)
+                               if expected > 0.0 and math.isfinite(adev) else None)}
+        points.append(entry)
+    graded = [p for p in points if p["agreement"] is not None and p["clusters"] >= ALLAN_MIN_CLUSTERS]
+    if density <= 0.0:
+        verdict = "NOT RUN: the declared white density is 0 (an ideal channel)"
+    elif not graded:
+        verdict = (f"NOT RUN: fewer than {ALLAN_MIN_CLUSTERS} clusters at every short tau "
+                   f"({len(residual)} samples)")
+    else:
+        worst = max(p["agreement"] for p in graded)
+        verdict = "PASS" if worst < ALLAN_TOL else f"FAIL: worst agreement {worst:.3f} >= {ALLAN_TOL}"
+    needed = ALLAN_BK_RUN_MULTIPLE * tau_b_s
+    if span < needed:
+        bk = {"status": "NOT RUN",
+              "reason": f"the run spans {span:.1f} s, under {ALLAN_BK_RUN_MULTIPLE:g} x the "
+                        f"correlation time {tau_b_s:g} s = {needed:.0f} s; a bias instability "
+                        f"and a rate random walk show only past tau_B",
+              "B_estimate": None, "K_estimate": None}
+    else:
+        taus, adevs = [], []
+        m = 1
+        while (len(residual) // m) >= ALLAN_MIN_CLUSTERS:
+            adev, _ = allan_deviation(residual, dt, m)
+            taus.append(m * dt)
+            adevs.append(adev)
+            m *= 2
+        k = int(np.argmin(adevs))
+        bk = {"status": "estimated, not graded",
+              "B_estimate": adevs[k] / 0.664, "B_tau_s": taus[k],
+              "K_estimate": adevs[-1] * math.sqrt(3.0 / taus[-1]), "K_tau_s": taus[-1],
+              "declared_B": sigma_b, "declared_tau_B_s": tau_b_s}
+    return {"form": "non-overlapping Allan deviation over clusters of m samples "
+                    "(the check uses the overlapping form)",
+            "unit": unit, "dt_s": dt, "samples": int(len(residual)), "span_s": span,
+            "declared_white_density": density, "density_unit": f"{unit} sqrt(s)",
+            "short_tau": points, "tolerance": ALLAN_TOL, "white_term": verdict,
+            "bias_instability_and_rate_random_walk": bk}
+
+
+def _deterministic_npz(arrays: Mapping[str, np.ndarray]) -> bytes:
+    """An ``.npz`` (a zip of ``.npy`` members, sorted by name) with fixed
+    timestamps and no compression, so the same arrays give the same bytes
+    -- ``numpy.savez`` stamps the wall clock into each member."""
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as zf:
+        for name in sorted(arrays):
+            member = io.BytesIO()
+            np.lib.format.write_array(member, np.ascontiguousarray(arrays[name]),
+                                      allow_pickle=False)
+            info = zipfile.ZipInfo(f"{name}.npy", date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_STORED
+            zf.writestr(info, member.getvalue())
+    return buffer.getvalue()
+
+
+#: The observer's log columns, in the file's order: the time, the truths
+#: it read, the specific force at the CG and at the sensor, the nine
+#: measured channels plus the measured specific force and the fix flag.
+OBSERVER_TRUTH_COLUMNS = (
+    "t", "truth_n_x", "truth_n_y", "truth_n_z", "truth_p_rad_s", "truth_q_rad_s",
+    "truth_r_rad_s", "truth_pdot_rad_s2", "truth_qdot_rad_s2", "truth_rdot_rad_s2",
+    "truth_roll_deg", "truth_pitch_deg", "truth_heading_deg", "truth_lat_deg", "truth_lon_deg",
+    "truth_alt_m", "truth_cas_kt", "truth_f_cg_x_mps2", "truth_f_cg_y_mps2", "truth_f_cg_z_mps2",
+    "truth_f_x_mps2", "truth_f_y_mps2", "truth_f_z_mps2", "truth_magnetic_heading_deg",
+    "truth_declination_deg",
+)
+OBSERVER_MEAS_COLUMNS = (
+    "meas_f_x_mps2", "meas_f_y_mps2", "meas_f_z_mps2", "meas_n_z", "meas_p_dps", "meas_q_dps",
+    "meas_r_dps", "meas_lat_deg", "meas_lon_deg", "meas_alt_m", "meas_cas_kt",
+    "meas_heading_deg", "gps_fix",
+)
+#: The measured channels each instrument owns (the recorder's columns).
+INSTRUMENT_COLUMNS: Dict[str, Tuple[str, ...]] = {
+    "imu": ("meas_n_z", "meas_p_dps", "meas_q_dps", "meas_r_dps"),
+    "gps": ("meas_lat_deg", "meas_lon_deg", "meas_alt_m"),
+    "pitot_static": ("meas_cas_kt",),
+    "magnetometer": ("meas_heading_deg",),
+}
+#: The JSBSim angular accelerations the IMU's rotational terms read.
+ANGULAR_ACCELERATION_PROPERTIES = ("accelerations/pdot-rad_sec2", "accelerations/qdot-rad_sec2",
+                                   "accelerations/rdot-rad_sec2")
+
+
+class InstrumentObserver:
+    """The four instrument models run once per FDM step (the stack's
+    observer hook, core/environment/stack.py), writing nothing to JSBSim.
+
+    Construct from :func:`instruments_from_spec`, the run seed and the
+    FDM rate; call :meth:`observe` after every step (and once at the
+    initial state, so the first recorder sample is not NaN); read
+    :meth:`latest` from the recorder; after the run, :meth:`arrays`,
+    :meth:`npz_bytes`, :meth:`manifest_block` and
+    :meth:`applied_variables`. Every draw comes from the five named
+    streams in a fixed order, so the same seed and block give the same
+    bytes (tested).
+    """
+
+    def __init__(self, instruments: Mapping[str, InstrumentSpec], seed: int, rate_hz: float,
+                 replicate: int = 0) -> None:
+        if not rate_hz > 0.0:
+            raise ValueError(f"rate_hz {rate_hz!r} is not a positive rate")
+        self.instruments = dict(instruments)
+        self.seed, self.replicate = int(seed), int(replicate)
+        self.rate_hz = float(rate_hz)
+        self.dt = 1.0 / self.rate_hz
+        self.seeds = derive(self.seed, self.replicate)
+        self._rng = {s: generator(self.seed, s, self.replicate) for s in OBSERVER_STREAMS}
+        imu, gps = self.instruments["imu"], self.instruments["gps"]
+        self._terms = {name: _sigmas(spec.profile, self.dt) for name, spec in self.instruments.items()}
+        acc, gyr = self._terms["imu"]["imu.accelerometer"], self._terms["imu"]["imu.gyro"]
+        rng = self._rng["imu"]
+        # The IMU's per-run draws, in a fixed order: accelerometer bias
+        # (3, in g), gyro bias (3, deg/s), then the stationary Gauss-Markov
+        # starts (3 + 3).
+        self.acc_bias_g = rng.standard_normal(3) * acc["sigma_bias_repeatability"]
+        self.gyro_bias_dps = rng.standard_normal(3) * gyr["sigma_bias_repeatability"]
+        self._acc_gm = rng.standard_normal(3) * acc["sigma_bias_instability"]
+        self._gyro_gm = rng.standard_normal(3) * gyr["sigma_bias_instability"]
+        self._acc_a = math.exp(-self.dt / acc["correlation_time_s"])
+        self._gyro_a = math.exp(-self.dt / gyr["correlation_time_s"])
+        mag = self._terms["magnetometer"]["magnetometer.heading"]
+        self.hard_iron = self._rng["magnetometer"].standard_normal(2) * mag["sigma_hard_iron_fraction"]
+        self.r_imu = np.asarray(imu.lever_arm_m, dtype=float)
+        self.r_gps = np.asarray(gps.lever_arm_m, dtype=float)
+        # An UNSTATED receiver is the ideal at the FDM rate: a fix every
+        # step, so the recorded position IS the measurement. A stated
+        # profile fixes at its own rate, ideal included (the ideal file
+        # states 10 Hz), and holds between fixes.
+        self._gps_period = (self.dt if not gps.stated
+                            else 1.0 / float(gps.profile.gps["update_rate_hz"]))
+        self._next_fix: Optional[float] = None
+        self._gps_last: Optional[Tuple[float, float, float]] = None
+        self._cas_lag: Optional[float] = None
+        self._angular_acceleration_available: Optional[bool] = None
+        #: JSBSim's N is computed by FGAuxiliary from the PREVIOUS
+        #: FGAccelerations run, and so is its own pilot accelerometer's
+        #: omega_dot (measured: g0 n-pilot agrees with the model to 1.5e-6
+        #: m/s^2 with the previous step's pdot, 3.8e-3 with the current
+        #: step's); the observer therefore pairs N with the angular
+        #: acceleration read at the previous observation -- the same
+        #: evaluation -- and states so. The first observation has no
+        #: previous read and takes the current one.
+        self._omega_dot_prev: Optional[np.ndarray] = None
+        self.steps = 0
+        self.fixes = 0
+        self._latest: Dict[str, float] = {name: math.nan for name in MEASURED_CHANNEL_NAMES}
+        self._log: Dict[str, List[float]] = {n: [] for n in OBSERVER_TRUTH_COLUMNS + OBSERVER_MEAS_COLUMNS}
+
+    # -- per step ---------------------------------------------------------
+
+    def observe(self, fdm) -> Dict[str, float]:
+        """Read the FDM's state, run the four models one step, log the
+        truths and the measurements, and return the latest values."""
+        state = fdm.state()
+        t = float(state.t)
+        omega = np.radians([state.roll_rate_dps, state.pitch_rate_dps, state.yaw_rate_dps])
+        if self._angular_acceleration_available is None:
+            self._angular_acceleration_available = all(
+                fdm.props.has(p) for p in ANGULAR_ACCELERATION_PROPERTIES)
+        omega_dot_now = (np.array([fdm.props.get(p) for p in ANGULAR_ACCELERATION_PROPERTIES])
+                         if self._angular_acceleration_available else np.zeros(3))
+        omega_dot = omega_dot_now if self._omega_dot_prev is None else self._omega_dot_prev
+        self._omega_dot_prev = omega_dot_now
+
+        # -- IMU: the specific force at the sensor, then the error terms.
+        f_cg = specific_force_body(state.n_x, state.n_y, state.n_z, omega, omega_dot, np.zeros(3))
+        f_sensor = specific_force_body(state.n_x, state.n_y, state.n_z, omega, omega_dot, self.r_imu)
+        acc, gyr = self._terms["imu"]["imu.accelerometer"], self._terms["imu"]["imu.gyro"]
+        rng = self._rng["imu"]
+        w = rng.standard_normal(12)
+        self._acc_gm = self._acc_a * self._acc_gm + math.sqrt(max(0.0, 1.0 - self._acc_a ** 2)) \
+            * acc["sigma_bias_instability"] * w[0:3]
+        self._gyro_gm = self._gyro_a * self._gyro_gm + math.sqrt(max(0.0, 1.0 - self._gyro_a ** 2)) \
+            * gyr["sigma_bias_instability"] * w[3:6]
+        f_meas = f_sensor + G0 * (self.acc_bias_g + self._acc_gm + acc["sigma_white"] * w[6:9])
+        rates_dps = np.degrees(omega) + self.gyro_bias_dps + self._gyro_gm + gyr["sigma_white"] * w[9:12]
+        meas_n_z = -f_meas[2] / G0                       # the sign flip, back onto JSBSim's channel
+
+        # -- GPS: a fix on the receiver's clock, held between.
+        fix = 0
+        if self._next_fix is None or t >= self._next_fix - 1e-9:
+            fix = 1
+            self._next_fix = (t if self._next_fix is None else self._next_fix) + self._gps_period
+            while self._next_fix <= t + 1e-9:
+                self._next_fix += self._gps_period
+            gps = self.instruments["gps"].profile.gps
+            noise = self._rng["gps"].standard_normal(3)
+            offset = body_to_ned(state.roll_deg, state.pitch_deg, state.heading_deg) @ self.r_gps
+            r_m, r_n = radii_of_curvature(state.lat_deg)
+            north_m = offset[0] + gps["north_east_sigma_m"] * noise[0]
+            east_m = offset[1] + gps["north_east_sigma_m"] * noise[1]
+            down_m = offset[2] + gps["vertical_sigma_m"] * noise[2]
+            self._gps_last = (
+                state.lat_deg + math.degrees(north_m / r_m),
+                state.lon_deg + math.degrees(east_m / (r_n * math.cos(math.radians(state.lat_deg)))),
+                state.altitude_m - down_m)
+            self.fixes += 1
+        lat_m, lon_m, alt_m = self._gps_last
+
+        # -- pitot-static: the lag, the position error, the noise.
+        ps = self._terms["pitot_static"]["pitot_static.airspeed"]
+        if self._cas_lag is None or ps["lag_s"] <= 0.0:
+            self._cas_lag = float(state.cas_kt)
+        else:
+            alpha = self.dt / (ps["lag_s"] + self.dt)
+            self._cas_lag = self._cas_lag + alpha * (float(state.cas_kt) - self._cas_lag)
+        cas_m = (self._cas_lag + position_error_kt(self._cas_lag, ps["position_error_table_kt"])
+                 + ps["sigma_white"] * self._rng["pitot_static"].standard_normal())
+
+        # -- magnetometer: the dipole in the body, hard iron, levelled.
+        field = dipole_field_ned(state.lat_deg, state.lon_deg, state.altitude_m)
+        declination = math.degrees(math.atan2(field[1], field[0]))
+        mag = self._terms["magnetometer"]["magnetometer.heading"]
+        psi_m = magnetic_heading_deg(field, state.roll_deg, state.pitch_deg, state.heading_deg,
+                                     self.hard_iron)
+        heading_m = (psi_m + mag["sigma_white"] * self._rng["magnetometer"].standard_normal()) % 360.0
+
+        self._latest = {
+            "meas_n_z": float(meas_n_z), "meas_p_dps": float(rates_dps[0]),
+            "meas_q_dps": float(rates_dps[1]), "meas_r_dps": float(rates_dps[2]),
+            "meas_lat_deg": float(lat_m), "meas_lon_deg": float(lon_m), "meas_alt_m": float(alt_m),
+            "meas_cas_kt": float(cas_m), "meas_heading_deg": float(heading_m),
+        }
+        row = {
+            "t": t, "truth_n_x": state.n_x, "truth_n_y": state.n_y, "truth_n_z": state.n_z,
+            "truth_p_rad_s": omega[0], "truth_q_rad_s": omega[1], "truth_r_rad_s": omega[2],
+            "truth_pdot_rad_s2": omega_dot[0], "truth_qdot_rad_s2": omega_dot[1],
+            "truth_rdot_rad_s2": omega_dot[2],
+            "truth_roll_deg": state.roll_deg, "truth_pitch_deg": state.pitch_deg,
+            "truth_heading_deg": state.heading_deg, "truth_lat_deg": state.lat_deg,
+            "truth_lon_deg": state.lon_deg, "truth_alt_m": state.altitude_m,
+            "truth_cas_kt": state.cas_kt,
+            "truth_f_cg_x_mps2": f_cg[0], "truth_f_cg_y_mps2": f_cg[1], "truth_f_cg_z_mps2": f_cg[2],
+            "truth_f_x_mps2": f_sensor[0], "truth_f_y_mps2": f_sensor[1], "truth_f_z_mps2": f_sensor[2],
+            "truth_magnetic_heading_deg": (state.heading_deg - declination) % 360.0,
+            "truth_declination_deg": declination,
+            "meas_f_x_mps2": f_meas[0], "meas_f_y_mps2": f_meas[1], "meas_f_z_mps2": f_meas[2],
+            **self._latest, "gps_fix": float(fix),
+        }
+        for name, value in row.items():
+            self._log[name].append(float(value))
+        self.steps += 1
+        return dict(self._latest)
+
+    def latest(self) -> Dict[str, float]:
+        """The nine recorder channels as last measured (NaN before the
+        first observation: absent, never invented)."""
+        return dict(self._latest)
+
+    # -- after the run ------------------------------------------------------
+
+    def arrays(self) -> Dict[str, np.ndarray]:
+        return {name: np.asarray(values, dtype=np.float64) for name, values in self._log.items()}
+
+    def npz_bytes(self) -> bytes:
+        return _deterministic_npz(self.arrays())
+
+    def sha256(self) -> str:
+        return hashlib.sha256(self.npz_bytes()).hexdigest()
+
+    @property
+    def stated(self) -> bool:
+        """Whether the spec stated any instrument (the file is written
+        only then; the default ideal set records the columns and no file)."""
+        return any(spec.stated for spec in self.instruments.values())
+
+    def write(self, run_dir) -> Optional[Path]:
+        """``instruments.npz`` beside the run when an instrument is stated;
+        None (nothing written) for the default ideal set."""
+        if not self.stated:
+            return None
+        path = Path(run_dir) / INSTRUMENTS_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(self.npz_bytes())
+        return path
+
+    def residuals(self) -> Dict[str, Dict[str, Any]]:
+        """Per measured channel: the residual (measured minus the model's
+        own truth) std against the sigma the profile states at this rate,
+        the ratio, and whether it lies within 25 % -- the null measurement
+        of each stated instrument against the ideal (0 by construction)."""
+        a = self.arrays()
+        n = len(a["t"])
+        out: Dict[str, Dict[str, Any]] = {}
+        if n < 2:
+            return out
+        acc, gyr = self._terms["imu"]["imu.accelerometer"], self._terms["imu"]["imu.gyro"]
+        pairs = [
+            ("meas_n_z", a["meas_n_z"] - (-a["truth_f_z_mps2"] / G0),
+             math.hypot(acc["sigma_white"], acc["sigma_bias_instability"]), "g"),
+            ("meas_p_dps", a["meas_p_dps"] - np.degrees(a["truth_p_rad_s"]),
+             math.hypot(gyr["sigma_white"], gyr["sigma_bias_instability"]), "deg/s"),
+            ("meas_q_dps", a["meas_q_dps"] - np.degrees(a["truth_q_rad_s"]),
+             math.hypot(gyr["sigma_white"], gyr["sigma_bias_instability"]), "deg/s"),
+            ("meas_r_dps", a["meas_r_dps"] - np.degrees(a["truth_r_rad_s"]),
+             math.hypot(gyr["sigma_white"], gyr["sigma_bias_instability"]), "deg/s"),
+        ]
+        gps = self.instruments["gps"].profile.gps
+        at = np.flatnonzero(a["gps_fix"] > 0.5)
+        if at.size:
+            lat = a["truth_lat_deg"][at]
+            r_m = np.array([radii_of_curvature(v)[0] for v in lat])
+            r_n = np.array([radii_of_curvature(v)[1] for v in lat])
+            lever = np.array([body_to_ned(a["truth_roll_deg"][i], a["truth_pitch_deg"][i],
+                                          a["truth_heading_deg"][i]) @ self.r_gps for i in at])
+            pairs += [
+                ("meas_lat_deg", np.radians(a["meas_lat_deg"][at] - lat) * r_m - lever[:, 0],
+                 gps["north_east_sigma_m"], "m"),
+                ("meas_lon_deg", np.radians(a["meas_lon_deg"][at] - a["truth_lon_deg"][at]) * r_n
+                 * np.cos(np.radians(lat)) - lever[:, 1], gps["north_east_sigma_m"], "m"),
+                ("meas_alt_m", (a["truth_alt_m"][at] - a["meas_alt_m"][at]) - lever[:, 2],
+                 gps["vertical_sigma_m"], "m"),
+            ]
+        ps = self._terms["pitot_static"]["pitot_static.airspeed"]
+        lagged = first_order_lag(a["truth_cas_kt"], ps["lag_s"], self.dt)
+        lagged = lagged + position_error_kt(lagged, ps["position_error_table_kt"])
+        pairs.append(("meas_cas_kt", a["meas_cas_kt"] - lagged, ps["sigma_white"], "kt"))
+        mag = self._terms["magnetometer"]["magnetometer.heading"]
+        biased = np.array([magnetic_heading_deg(
+            dipole_field_ned(a["truth_lat_deg"][i], a["truth_lon_deg"][i], a["truth_alt_m"][i]),
+            a["truth_roll_deg"][i], a["truth_pitch_deg"][i], a["truth_heading_deg"][i],
+            self.hard_iron) for i in range(n)])
+        pairs.append(("meas_heading_deg", (a["meas_heading_deg"] - biased + 180.0) % 360.0 - 180.0,
+                      mag["sigma_white"], "deg"))
+        for name, residual, sigma, unit in pairs:
+            std = float(np.std(residual)) if len(residual) > 1 else 0.0
+            ratio = (std / sigma) if sigma > 0.0 else None
+            out[name] = {"residual_std": std, "sigma_expected": float(sigma), "unit": unit,
+                         "ratio": ratio, "samples": int(len(residual)),
+                         "within_25pct": (None if ratio is None else abs(ratio - 1.0) <= 0.25),
+                         "basis": ("residual = measured minus the model's own truth at this "
+                                   "channel (the lever arm removed for the GPS at the fix "
+                                   "samples, the lag re-applied for the CAS, the dipole and "
+                                   "hard iron re-applied for the heading)")}
+        return out
+
+    def allan_report(self) -> Dict[str, Any]:
+        """The Allan self-report of the six IMU residuals (accelerometer in
+        m/s^2, gyro in deg/s) plus the estimator's own check on a
+        synthetic white stream from the null_test seed stream."""
+        a = self.arrays()
+        if len(a["t"]) < 2:
+            return {}
+        acc, gyr = self._terms["imu"]["imu.accelerometer"], self._terms["imu"]["imu.gyro"]
+        profile = self.instruments["imu"].profile
+        n_acc = profile.accelerometer["velocity_random_walk_mps_per_sqrt_h"] / 60.0
+        n_gyr = profile.gyro["angle_random_walk_deg_per_sqrt_h"] / 60.0
+        out: Dict[str, Any] = {}
+        for axis, k in zip("xyz", range(3)):
+            residual = a[f"meas_f_{axis}_mps2"] - a[f"truth_f_{axis}_mps2"]
+            out[f"meas_f_{axis}_mps2"] = allan_self_report(
+                residual, self.dt, n_acc, acc["sigma_bias_instability"] * G0,
+                acc["correlation_time_s"], "m/s^2")
+        for name, truth in (("meas_p_dps", "truth_p_rad_s"), ("meas_q_dps", "truth_q_rad_s"),
+                            ("meas_r_dps", "truth_r_rad_s")):
+            residual = a[name] - np.degrees(a[truth])
+            out[name] = allan_self_report(residual, self.dt, n_gyr, gyr["sigma_bias_instability"],
+                                          gyr["correlation_time_s"], "deg/s")
+        # The estimator on a pure white stream of the run's own length at
+        # the gyro's declared density, from the null_test stream: what the
+        # non-overlapping estimator returns when the answer is known.
+        n = len(a["t"])
+        synthetic = self._rng["null_test"].standard_normal(n) * (n_gyr / math.sqrt(self.dt)
+                                                                  if n_gyr > 0 else 1.0)
+        density = n_gyr if n_gyr > 0 else 1.0 * math.sqrt(self.dt)
+        out["estimator_check"] = {
+            "stream": "null_test", "samples": n,
+            "declared_density": density,
+            "report": allan_self_report(synthetic, self.dt, density, 0.0, 1.0, "synthetic"),
+        }
+        return out
+
+    def rotational_term_peak(self) -> float:
+        """The largest |f_sensor - f_cg| over the run (m/s^2): what the IMU
+        lever arm added, 0 at the CG."""
+        a = self.arrays()
+        if not len(a["t"]):
+            return 0.0
+        d = np.stack([a[f"truth_f_{ax}_mps2"] - a[f"truth_f_cg_{ax}_mps2"] for ax in "xyz"])
+        return float(np.max(np.linalg.norm(d, axis=0)))
+
+    def manifest_block(self, file_written: bool = None) -> Dict[str, Any]:
+        """The run manifest's ``instruments`` block (and the capture
+        manifest's top-level one): profiles, seeds, the two rates, the
+        file with its sha256 and columns, the residuals, the Allan
+        self-report, what is not claimed."""
+        written = self.stated if file_written is None else bool(file_written)
+        return {
+            "instruments_version": INSTRUMENTS_VERSION,
+            "rate_hz": self.rate_hz, "rate_basis": FDM_RATE_BASIS,
+            "recorded_rate_basis": RECORDED_RATE_BASIS,
+            "steps": self.steps, "fixes": self.fixes,
+            "seeds": {"experiment_seed": self.seeds.experiment_seed,
+                      "replicate": self.seeds.replicate, "derivation": DERIVATION,
+                      "generator": "PCG64",
+                      "streams": {s: self.seeds.for_subsystem(s) for s in OBSERVER_STREAMS}},
+            "instruments": {name: spec.to_dict() for name, spec in self.instruments.items()},
+            "profiles": {name: spec.profile.to_dict() for name, spec in self.instruments.items()},
+            "draws": {"accelerometer_bias_g": [float(v) for v in self.acc_bias_g],
+                      "gyro_bias_dps": [float(v) for v in self.gyro_bias_dps],
+                      "hard_iron_fraction": [float(v) for v in self.hard_iron]},
+            "file": INSTRUMENTS_FILE if written else None,
+            "sha256": self.sha256() if written else None,
+            "columns": list(OBSERVER_TRUTH_COLUMNS + OBSERVER_MEAS_COLUMNS),
+            "recorder_columns": list(MEASURED_CHANNEL_NAMES),
+            "specific_force": "f = g0 (N_x, N_y, -N_z) + omega_dot x r + omega x (omega x r), "
+                              "body axes; no gravity term; meas_n_z = -f_z / g0",
+            "rotational_term_peak_mps2": self.rotational_term_peak(),
+            "residuals": self.residuals(),
+            "allan_self_report": self.allan_report(),
+            "not_claimed": list(OBSERVER_NOT_CLAIMED),
+        }
+
+    def readback(self, recorder) -> Readback:
+        """The recorder's LAST meas_n_z sample against the observer's value
+        at that sample's time: the latest-value sampling, read back from
+        the recorder's own store (nothing is written to JSBSim)."""
+        a = self.arrays()
+        ts = list(recorder.columns["t"])
+        sampled = list(recorder.columns["meas_n_z"])
+        k = len(ts) - 1
+        index = int(np.searchsorted(a["t"], ts[k], side="right")) - 1
+        written = float(a["meas_n_z"][index]) if index >= 0 else math.nan
+        return Readback(
+            property=f"telemetry.meas_n_z[{k}]", value=float(sampled[k]), written=written,
+            tolerance=0.0, tolerance_kind="absolute",
+            basis="the recorder samples the observer's latest value at the sample's step "
+                  "(Recorder(measured=observer)); read back from recorder.columns after the run "
+                  "against the observer's own log at that time; this grades the recorder's "
+                  "store, not JSBSim's, to which nothing is written")
+
+    def applied_variables(self, recorder=None) -> List[AppliedVariable]:
+        """One record per STATED instrument (the default ideal set records
+        nothing: nothing applied), each with the profile, the lever arm,
+        the rate, the seeds, the residual measurement per channel and a
+        null test against the ideal (0 by construction)."""
+        residuals = self.residuals()
+        allan = self.allan_report()
+        out: List[AppliedVariable] = []
+        for name, spec in self.instruments.items():
+            if not spec.stated:
+                continue
+            columns = INSTRUMENT_COLUMNS[name]
+            own = {c: residuals[c] for c in columns if c in residuals}
+            graded = [(c, r) for c, r in own.items() if r["ratio"] is not None]
+            if graded:
+                best_name, best = max(graded, key=lambda cr: cr[1]["ratio"])
+                null = NullTest(
+                    quantity=f"residual std of {best_name} in units of the profile's stated "
+                             f"sigma ({best['sigma_expected']:.4g} {best['unit']})",
+                    unit="sigma", with_value=float(best["ratio"]), without_value=0.0,
+                    threshold=NULL_RATIO_THRESHOLD, kind="reached",
+                    note=("'without' is the ideal profile at the CG, whose measurement equals "
+                          "the truth by construction (0 exactly); reached when the ratio is at "
+                          "least 0.75; the within-25 % agreement per channel is in parameters."
+                          f"residuals ({sum(1 for r in own.values() if r['within_25pct']) } of "
+                          f"{len(graded)} channels within 25 %)"))
+            else:
+                null = NullTest(
+                    quantity=f"residual std over {', '.join(columns)}", unit="sigma",
+                    with_value=0.0, without_value=0.0, threshold=NULL_RATIO_THRESHOLD,
+                    kind="reached",
+                    note="a stated profile with every error term 0 measures no difference "
+                         "from the ideal and is honestly not ok")
+            parameters: Dict[str, Any] = {
+                "profile": spec.profile.to_dict(), "lever_arm_m": list(spec.lever_arm_m),
+                "rate_hz": self.rate_hz, "rate_basis": FDM_RATE_BASIS,
+                "seed_streams": {s: self.seeds.for_subsystem(s) for s in OBSERVER_STREAMS},
+                "experiment_seed": self.seeds.experiment_seed, "replicate": self.seeds.replicate,
+                "file": INSTRUMENTS_FILE if self.stated else None,
+                "residuals": own, "steps": self.steps,
+            }
+            if name == "imu":
+                parameters.update({
+                    "specific_force": "f = g0 (N_x, N_y, -N_z) + omega_dot x r + omega x (omega x r)",
+                    "rotational_term_peak_mps2": self.rotational_term_peak(),
+                    "draws": {"accelerometer_bias_g": [float(v) for v in self.acc_bias_g],
+                              "gyro_bias_dps": [float(v) for v in self.gyro_bias_dps]},
+                    "allan_self_report": allan,
+                    "angular_acceleration": ("JSBSim accelerations/pdot,qdot,rdot-rad_sec2 of the "
+                                             "previous step: the evaluation N comes from (FGAuxiliary "
+                                             "runs before FGAccelerations; measured against "
+                                             "n-pilot-*-norm)"
+                                             if self._angular_acceleration_available
+                                             else "absent on this model: omega_dot taken as 0"),
+                })
+            elif name == "gps":
+                parameters.update({"fixes": self.fixes,
+                                   "update_rate_hz": spec.profile.gps["update_rate_hz"],
+                                   "hold": "zero-order between fixes, on the receiver's clock",
+                                   "lever_arm": "measured = CG + R_body_to_NED(roll, pitch, heading) "
+                                                "r; the velocity term omega x r is not applied"})
+            elif name == "pitot_static":
+                parameters.update({"lag_s": spec.profile.pitot_static["cas_lag_s"],
+                                   "position_error_table_kt": spec.profile.pitot_static.get(
+                                       "position_error_table_kt", []),
+                                   "position_error": "linear in the table, zero for an empty one "
+                                                     "(the stated default); the lever arm is "
+                                                     "carried, not applied"})
+            elif name == "magnetometer":
+                a = self.arrays()
+                parameters.update({
+                    "field_model": "IGRF-13 degree-1 tilted dipole (g10, g11, h11 at 2020.0)",
+                    "declination_deg_at_start": float(a["truth_declination_deg"][0]) if len(a["t"]) else None,
+                    "reading": "magnetic heading = true heading - declination, hard iron and "
+                               "noise added; the lever arm is carried, not applied",
+                    "draws": {"hard_iron_fraction": [float(v) for v in self.hard_iron]},
+                })
+            out.append(AppliedVariable(
+                name=f"instruments.{name}",
+                value={"profile": spec.profile.name, "lever_arm_m": list(spec.lever_arm_m)},
+                unit="profile + m", source=spec.source,
+                model=f"{MODEL} at the FDM rate ({name})",
+                parameters=parameters, references=tuple(spec.profile.references),
+                properties_written=(), telemetry_columns=tuple(columns),
+                frame_keys=tuple(f"state.{c}" for c in columns),
+                null_test=null,
+                model_block=Model(
+                    name=f"{MODEL} at the FDM rate", standard=_instrument_standard(name),
+                    version=f"profile {spec.profile.name} (sha256 {spec.profile.sha256})",
+                    parameters={"rate_basis": FDM_RATE_BASIS, "rate_hz": self.rate_hz,
+                                "lever_arm_m": list(spec.lever_arm_m),
+                                "file": INSTRUMENTS_FILE if self.stated else None},
+                    references=tuple(spec.profile.references)),
+                readback=self.readback(recorder) if recorder is not None else None,
+                frm=spec.frm or f"instruments.{name} stated in the spec", std=spec.profile.source,
+                not_claimed=OBSERVER_NOT_CLAIMED))
+        return out
+
+
+def _instrument_standard(name: str) -> str:
+    from ..scenario.blocks import INSTRUMENT_STANDARDS
+
+    return INSTRUMENT_STANDARDS[name]
+
+
+#: The recorder's nine measured channels (core/fdm/state.py MEASURED_CHANNELS).
+MEASURED_CHANNEL_NAMES = ("meas_n_z", "meas_p_dps", "meas_q_dps", "meas_r_dps", "meas_lat_deg",
+                          "meas_lon_deg", "meas_alt_m", "meas_cas_kt", "meas_heading_deg")
+
+OBSERVER_NOT_CLAIMED = (
+    "stated class models: no device is calibrated; every profile number is unverified here",
+    "the Allan check measures that the model produced the noise it declares, not that a "
+    "real sensor has it",
+    "B and K are NOT RUN on a run shorter than 100 correlation times (every 60 s run)",
+    "the magnetometer is a tilted dipole: a few degrees of declination error against "
+    "IGRF/WMM, geodetic latitude taken as geocentric, no secular variation, no soft iron",
+    "the pitot-static and magnetometer lever arms are carried, not applied; the GPS "
+    "velocity term omega x r is not applied",
+    "GPS multipath, ionosphere, clock and geometry; a correlated GPS error",
+    "scale-factor, misalignment, g-sensitivity, quantisation and temperature errors",
+    "host-flight instruments are post-hoc at the recorded rate (the engine side is P9's)",
+)

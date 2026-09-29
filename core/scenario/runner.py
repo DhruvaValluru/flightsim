@@ -22,7 +22,7 @@ import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from ..control.autopilot import Autopilot, ClosureReport, ClosureTolerance
 from ..environment.icing import icing_injections_for
@@ -33,6 +33,10 @@ from ..environment.wind import SteadyWind
 from ..fdm import FlightDynamics, TrimMode, mode_for
 from ..fdm import units as u
 from ..records import AppliedVariable, Readback, records_block
+from ..registry import RecordError
+from ..telemetry.instruments import (
+    INSTRUMENTS_FILE, InstrumentError, InstrumentObserver, instruments_from_spec,
+)
 from ..fdm.modes import modes_block
 from ..telemetry.failures import FailureSchedule, failure_injections_for
 from ..telemetry.limits import monitor_run
@@ -380,12 +384,17 @@ class RunResult:
     validation: ValidationReport
     manifest: Dict[str, Any]
     closure: Optional[ClosureReport] = None
+    #: R2: the instrument observer that ran at the FDM rate (its arrays
+    #: are the instruments.npz beside the run when an instrument is stated).
+    instruments: Optional[InstrumentObserver] = None
 
     def write(self, directory) -> Path:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         self.telemetry.write_json(directory / "telemetry.json")
         (directory / "manifest.json").write_text(json.dumps(self.manifest, indent=1), encoding="utf-8")
+        if self.instruments is not None:
+            self.instruments.write(directory)
         return directory
 
 
@@ -587,6 +596,17 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         autopilot = Autopilot(fdm)
         autopilot.engage()
 
+    # R2: the instrument models at the FDM rate -- an observer the stack
+    # calls after every step and before the recorder samples, in BOTH
+    # loops below; it reads the FDM and writes nothing. The block's
+    # refusals (instrument.profile / lever_arm / rate) are raised by name
+    # here as well as by the validator. Observed once at the trimmed
+    # initial state so the recorder's first (forced) sample carries a
+    # measurement rather than the NaN an unobserved snapshot keeps.
+    observer = instruments_for(spec, fdm)
+    environment.add_observer(observer.observe)
+    observer.observe(fdm)
+
     # P6: the stack's own columns (the wind profile's layer index and
     # dV/dz) ride beside the surfaces; every other channel is JSBSim's.
     # P3: the schedule's failure_state_flag and the engine channels of
@@ -595,7 +615,8 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
     # not JSBSim's: the gust channel holds the stack's SUM), 0 on a run
     # without a wake.
     recorder = Recorder(fdm, interval_s=0.1, extra={**SURFACES, **environment.recorder_extras()}
-                        | schedule.recorder_extras() | wake_recorder_extras(environment))
+                        | schedule.recorder_extras() | wake_recorder_extras(environment),
+                        measured=observer)
     recorder.sample(force=True)
     recorder.mark("trimmed" if autopilot is None else "trimmed, autopilot engaged")
     if autopilot is None and terrain_ground is None:
@@ -617,6 +638,9 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
                     raise TerrainImpactError(impact)
             if autopilot is not None and i % every == 0:
                 autopilot.update()
+            # R2: the observers, after the step and before the sample --
+            # the same seam run_for gives them.
+            environment.observe(fdm)
             recorder.sample()
 
     # The closure assertion (§2.8). A run that did not reach what it was
@@ -678,6 +702,10 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
         # P7: the wake as delivered -- Gamma_0, the geometry, the decay,
         # the per-step peaks and the card; null for the default block.
         "wake": wake_block(environment),
+        # R2: the instrument models as run at the FDM rate -- profiles,
+        # lever arms, seeds, the two rates, the residuals per channel, the
+        # Allan self-report, the file (null for the default ideal set).
+        "instruments": observer.manifest_block(),
         # Modal analysis (gap M2, row A5): a RESULT about the trim, computed
         # on its own FDM so the recorded flight is untouched (measured:
         # linearising an executive disturbs it; the digest above is unchanged
@@ -718,8 +746,48 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
     # Gap P10 (D1): the datum record, with the appended channels' readback
     # and the measured invariance.
     attach_record(manifest, datum_record)
+    # R2: one record per stated instrument, with the recorder's latest-value
+    # sampling read back from its own store.
+    for record in observer.applied_variables(recorder):
+        attach_record(manifest, record)
+    # R2: a registered write that read back outside its tolerance is a
+    # refusal of the run by name (record.readback), not a note in a record.
+    refuse_failed_readbacks(manifest)
     return RunResult(spec.digest(), output_digest, recorder, report, manifest,
-                     closure)
+                     closure, instruments=observer)
+
+
+def instruments_for(spec: ScenarioSpec, fdm) -> InstrumentObserver:
+    """The FDM-rate instrument observer a spec asks for (R2): the stated
+    profiles and lever arms, the ideal profile at the CG for each unstated
+    instrument, seeded from the run seed at the FDM's rate. Refuses by
+    name what the validator refuses."""
+    return InstrumentObserver(instruments_from_spec(spec), int(spec.seed.value), fdm.rate_hz)
+
+
+def refuse_failed_readbacks(manifest: Dict[str, Any]) -> List[str]:
+    """R2: every ``readback`` an applied-variable record carries must
+    agree with the value written to its tolerance (the check P1's records
+    measure, made a refusal at the runner): ``record.readback`` by name,
+    listing every disagreeing property. Returns the properties checked."""
+    block = manifest.get("applied_variables") or {}
+    checked: List[str] = []
+    failed: List[str] = []
+    for record in block.get("applied_variables", ()):
+        readback = record.get("readback")
+        if not isinstance(readback, dict):
+            continue
+        checked.append(str(readback.get("property")))
+        if readback.get("agrees") is not True:
+            failed.append(f"{record.get('name')}: {readback.get('property')} wrote "
+                          f"{readback.get('written')!r} and read {readback.get('value')!r} "
+                          f"(tolerance {readback.get('tolerance')!r} {readback.get('tolerance_kind')})")
+    if failed:
+        raise RecordError("record.readback",
+                          f"{len(failed)} registered write(s) read back outside the stated "
+                          f"tolerance; the run is refused rather than recorded with a wrong "
+                          f"value: " + "; ".join(failed))
+    return checked
 
 
 def loading_block(environment: EnvironmentStack) -> Optional[Dict[str, Any]]:

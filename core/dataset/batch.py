@@ -55,7 +55,11 @@ CAPTURE_OPTIONS = {"card": bool, "render": bool, "void": bool,
                    "no_host_flight": bool, "max_previews": int,
                    # Phase 2 (contracts §6.1): a mountain case can run at
                    # all -- the CLI's own --terrain <stem> / --synth-terrain.
-                   "terrain": str, "synth_terrain": bool}
+                   "terrain": str, "synth_terrain": bool,
+                   # R3: the case flies its null pairs and its dt/2 twin
+                   # (the CLI's --null-tests / --uncertainty), so the
+                   # campaign report's uncertainty block has numbers.
+                   "null_tests": bool, "uncertainty": bool}
 LEDGER = "ledger.jsonl"
 BATCH_RECORD = "batch.json"
 
@@ -245,6 +249,10 @@ def capture_command(spec_path: Path, run_dir: Path,
         command += ["--terrain", str(capture["terrain"])]
     if capture.get("synth_terrain"):
         command.append("--synth-terrain")
+    if capture.get("null_tests"):
+        command.append("--null-tests")
+    if capture.get("uncertainty"):
+        command.append("--uncertainty")
     return command
 
 

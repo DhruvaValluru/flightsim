@@ -1056,7 +1056,31 @@ under the manual EV100, a band proxy through cached CIE 1924 V(lambda) and
 ASTM G173-03 tables, the sun in lux from a clear-sky model) and records its
 status per frame as `predicted`, `measured` (only after S4's grey card) or
 `refused` (the engine's sun is not in lux); it is a stated proxy with a
-stated gap, not a calibration, and the IR proxy (S3) has not been built.
+stated gap, not a calibration.
+
+S3 adds an IR proxy (`cameras[i].ir {band, thermal_table}`,
+`core/capture/thermal.py`) and this section still stands: it is a declared
+**proxy**, `proxy: true` in the manifest's `sensing.ir` block, in both records
+and in every frame's declaration, which the verifier's `ir_proxy_declared`
+grades against the manifest's table digests. Per class it forms
+L = tau(R) [eps_c int B(T_c) + (1 - eps_c) L_down] + (1 - tau(R)) B_band(T_air)
+over LWIR 8-12 um or MWIR 3-5 um (the Planck band integral measured against
+Stefan-Boltzmann within 1 %). What it does NOT have: **no heat balance** (no
+solar loading, conduction, convection or thermal inertia -- surfaces sit at
+the near-surface air temperature, the skin at its recovery temperature
+T_inf (1 + 0.89 (gamma - 1)/2 M^2)); **no plume** and no engine; **no
+sub-object temperatures** (one temperature per class of the class image);
+**no validation** against any infrared image; and a **user-provided
+transmittance table** -- the only one shipped is synthetic (tau = exp(-kR)
+with invented k, marked synthetic in its provenance and in every record),
+a real MODTRAN / libRadtran table is a networked step, and without a
+provenanced table the proxy refuses `sensing.ir_transmittance` (never
+Koschmieder in the LWIR). The emissivities are nine cached ASTER library
+rows standing in for classes (a bare aluminium skin; no paint, no water);
+the sky is a broadband clear-sky model (Brutsaert 1975, Swinbank 1963 for
+dry air) applied grey across the band. There is no sensor model behind the
+proxy (no spectral response, noise or NETD). The one Windows step is a
+human clause: the IR preview of one real render inspected once.
 
 ---
 
@@ -1145,6 +1169,137 @@ difference is pinned under 1e-8 in every column); the engine side (the card
 block carries the exact writes in a fixed key order and no host applies them
 yet); a prompt that says "hot day" (the compiler has no atmosphere vocabulary;
 the block is stated in the spec).
+
+### 2.21 The XML injections (P2): three layers enter the stock model by rewriting it
+
+What IS claimed: the failure chain, the six icing factors, the stall-onset
+shift and the rotational gust are injected into a DERIVED copy of the stock
+airframe (the stock file and the vendored systems are never edited), each by
+an anchor test that refuses by name where the stock text does not carry the
+anchor (`derivation.anchor_missing`: the DHC6's shared FCS file, the f16's
+five lift tables, the p51d's lift in degrees); at neutral values every one of
+fifteen recorded properties is bit-identical to the stock airframe over 8 s
+of an elevator step on the c172p, per injection and all four together (V18);
+every injected property reads back exactly; the derivation is hashed and the
+hash checked before JSBSim reads it. What is NOT claimed: any physics. A
+factor scales a WHOLE axis (C_L0 and the control terms with C_Lalpha); the
+alpha shift moves the LIFT table only; the rotational gust reaches the roll
+damping term only (no yaw or pitch moment, no Clr coupling); the failure
+chain has no rate limit, lag or hydraulic topology. Bit-identity is measured
+on the c172p only; the A320 and B747 derive with all four and are not
+compared bit for bit. No engine has loaded a derived airframe.
+
+### 2.22 The failure schedule (P3): JSBSim's own controls, applied on the run clock
+
+What IS claimed: engine out, control jam, hardover, float and authority loss
+are written at the first step with t >= at_s on the RUN clock (seconds since
+the run's first step: JSBSim's own clock starts at the engine start's
+cranking time, 4.9 s on the c172p) and read back exactly on the next step;
+the turbine engine-out is JSBSim's cutoff (thrust 0.0 on every one of 600
+steps; the blueprint's `set-running = 0` relights on the next step and is
+not used), the piston's the magneto cut (the thrust dies on the propeller's
+inertia over 1.68 s); a jam holds the surface within 1e-6 rad over 100 steps
+(measured 0.0); the ladder's A320 engine-out and jam pairs reach (section
+2.27). What is NOT claimed: a fire, a hydraulic topology, a sensor failure,
+a partial failure, a restart or any compensation (TECS holds energy; nothing
+holds the yaw); the semantics beyond the c172p and the A320 where they were
+measured; a jam that diverges a c172p flight (open loop, the command never
+moves, so the pair is silent by construction, and the c172p cannot hold its
+state here); engines 2 and 3 of a four-engine type are not recorded.
+
+### 2.23 Loading (P4): the centre of gravity, read back against the hand calculation
+
+What IS claimed: payload stations and fuel are written once before the trim
+and JSBSim's `cg-x-in` equals the hand calculation over the XML's own arms
+on all five configured airframes (worst 6.8e-13 in against the 0.1 in
+tolerance, V13); the trim is of the LOADED aircraft (a write after the trim
+was measured to leave the trim solved for the unloaded one); 136 kg at the
+c172p's aft-most seat moves the CG 0.097 m, the trim elevator 0.22 deg and
+the pitch 0.55 deg in 3 s (section 2.27). What is NOT claimed: any handbook
+number (arms, seat and baggage maxima, the envelope polygon and every maximum
+takeoff weight are from memory, unverified here); the envelope check on any
+airframe whose XML datum is not the handbook's (refused
+`loading.datum_unverified` when asked; on the c172p the XML datum is TAKEN
+AS the handbook datum with a 3 in uncertainty); the lateral and vertical CG;
+the fuel burned in the crank; a fuel schedule; the p51d's weapon stations
+(system outputs, unloadable).
+
+### 2.24 Icing (P5): Bragg's factor form on a stated ramp, not an ice model
+
+What IS claimed: eta(t) and the six factors 1 + eta k are written to the
+derived airframe at the top of every step and read back exactly (0.0 on
+every checked step); at fixed alpha the lift falls by the factor (0.98223
+measured for 0.982 at eta 0.2, 0.023 %, section 2.27); the stall-onset cue
+moves the static lift peak by the stated shift (-2.0 deg for 2 deg). What is
+NOT claimed: any airframe's icing response. The DHC6 k-table is a
+transcription from memory of the published Twin Otter set (unverified here)
+and the c172p flies it as a named PROXY; the factor scales whole axes, not
+Bragg's single coefficient; no accretion, liquid water content, drop size or
+temperature dependence; the severity words are a stated mapping, not AIM
+7-1-19's pilot reports; the trim is of the un-iced aircraft.
+
+### 2.25 Gusts, von Karman turbulence and layered shear (P6)
+
+What IS claimed: a gust provider's sum is written to JSBSim's persisting
+gust channel every step, zero included, and read back exactly (V20); the von
+Karman table realises the commanded sigma within 0.5 % on the table and the
+MIL-F-8785C slope -5/3 within 0.1 on a 60 s table; delivered through JSBSim
+over a 3 s flight its sigma_w is 2.174 m/s against the ladder's 2.189 (0.7 %,
+A9); a layered profile delivers the linear interpolation at the aircraft's
+altitude (7.2e-5 m/s off on the ladder's flight, V17). What is NOT claimed:
+q_g and r_g (not delivered); MIL-F-8785C's own p_g spectrum (Yeager's
+first-order form is realised); a field that evolves or follows the aircraft
+(frozen, convected at the trim TAS); that JSBSim's Dryden channel delivers
+its ladder sigma (measured: 1.86 x on w over 60 s on Linux, 2.13 on
+Windows, 2.60 on macOS -- "the same sigma" holds at the commanded ladder
+only); the specification's numbers beyond FGWinds' transcription; a trim in
+the wind (JSBSim's trim resets it; the first per-step write restores it); a
+real forecast (the NWP fixture is synthetic and says so).
+
+### 2.26 The wake-vortex pair (P7): a stated model, delivered and read back
+
+What IS claimed: the Burnham-Hallock pair's closed forms (V16: the core
+speed, the dipole far field, a divergence-free field, strip-theory p_eq to
+1e-12 on its checks and 1e-7 against a fine quadrature), delivery through
+the gust channel and the rotational-gust injection read back exactly, an
+encounter at the stated geometry that rolls the c172p 31 deg more than the
+same flight without it in 3 s, and a far-offset control 300 m to the side
+that stays silent. What is NOT claimed: any comparison with a measured
+encounter; the core radius (a stated 0.035 b convention decides the peak
+swirl); Crow instability, linking, ground effect or stratification beyond a
+declared N* bound; the Sarpkaya constants (from memory, unverified here);
+a wake that is followed in time (frozen, straight, one descent rate); any
+moment but strip theory's roll; the RCR where the XML's aileron term is a
+table (the B747's, recorded absent).
+
+### 2.27 The null ladder itself (Gate 3b): connectivity, stated criteria, three referents
+
+What IS claimed: every physics layer above reaches the equations of motion
+through the one mechanism each record names -- `core.record_null.run_null_pair`,
+the identical spec with the one field at its null, both digests -- and meets
+the criterion stated for it in docs/vva/VV_PLAN.md section 3b
+(`experiments/gate3b_layers.py`; eleven pairs and A8, all PASS on this
+branch, the numbers in VV_REPORT.md section 1b). Three rows compare with a
+referent in the ASME V&V 20 form: A7 (the moist-air density ratio against
+1 - 0.378 e / p, E 2.9e-8 inside u_D 4.0e-6 from A&E 1996's e_s
+difference), A8 (JSBSim's standard day against the 1976 table, within
+1.2e-5 at 0 / 3000 / 11000 m, two cells of nine outside the table's
+half-digit), A9 (von Karman sigma_w against the ladder, 0.7 %). u_num now
+reads the committed three-rate study (`experiments/gate3b_convergence.py`,
+`data/convergence/gate3b_convergence.json`) for the c172p example's case,
+the observed order capped at the integrators' formal order 1. What is NOT
+claimed: correctness. A pair says a layer reached the flight and by how
+much; A7 compares JSBSim with the same ideal-gas identity it implements
+(a verification of the arithmetic, not of the ideal-gas assumption); A8's
+table and A9's ladder are transcriptions (unverified here); the observed
+orders describe one flight of one airframe (lateral SRQs converge slowly,
+roll not at all over 10 s). The ladder found one thing the layers' own tests
+did not: a stated day keeps the initial TRUE airspeed (the pre-trim re-latch
+keeps the IC's TAS), so the c172p asked for 100 kt CAS at +30 degC flies
+95.8 kt CAS -- an open defect of the stated airspeed on a non-standard day
+(docs/JSBSIM_CORRECTIONS.md section 27). No layer adds a referent for the
+aircraft; the credibility scorecard's ceiling stays 2 and nothing here
+raises it.
 
 ---
 

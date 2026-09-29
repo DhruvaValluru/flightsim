@@ -156,17 +156,33 @@ DEPTH_CHECKS = ("depth_range", "depth_vs_geometry")
 #: (contracts §1): suffix -> WebDataset member extension.
 LABEL_FILES = (("_mask.png", "mask.png"), ("_class.png", "class.png"),
                ("_depth.f32", "depth.f32"))
+#: S2: the ground-truth pass files beside a frame (core/capture/passes.py,
+#: and the engine's normal image, I6): suffix -> WebDataset member
+#: extension, and the verifier checks each must PASS before it ships.
+FLOW_CHECKS = ("flow_vs_keypoints", "flow_static_null")
+PASS_FILES = (("_flow_fw.f32", "flow_fw.f32"), ("_flow_fw_valid.u8", "flow_fw_valid.u8"),
+              ("_flow_bw.f32", "flow_bw.f32"), ("_flow_bw_valid.u8", "flow_bw_valid.u8"),
+              ("_disparity.f32", "disparity.f32"), ("_points.f32", "points.f32"),
+              ("_points_id.u8", "points_id.u8"), ("_normal.png", "normal.png"))
+PASS_FILE_CHECKS = {"_flow_fw.f32": FLOW_CHECKS, "_flow_fw_valid.u8": FLOW_CHECKS,
+                    "_flow_bw.f32": FLOW_CHECKS, "_flow_bw_valid.u8": FLOW_CHECKS,
+                    "_disparity.f32": ("disparity_vs_right_depth",),
+                    "_points.f32": ("points_vs_depth",), "_points_id.u8": ("points_vs_depth",),
+                    "_normal.png": ("normals_vs_depth",)}
+LABEL_FILES = LABEL_FILES + PASS_FILES
 #: The checks that must PASS before a label file ships, per suffix.
 LABEL_FILE_CHECKS = {"_mask.png": MASK_CHECKS, "_class.png": MASK_CHECKS,
-                     "_depth.f32": DEPTH_CHECKS}
+                     "_depth.f32": DEPTH_CHECKS, **PASS_FILE_CHECKS}
 #: The label files each format ships: COCO carries the ID mask as
 #: ``segmentation``, WebDataset every file found beside the frame. A
 #: run whose file the verifier never graded refuses
 #: ``export.unverified_labels`` for these when that file is on disk.
 SHIPPED_LABEL_FILES = {"coco": ("_mask.png",),
-                       "webdataset": tuple(s for s, _ in LABEL_FILES)}
+                       "webdataset": tuple(s for s, _ in LABEL_FILES),
+                       # S2: KITTI re-encodes the pass files (passes_export.py).
+                       "kitti": tuple(s for s, _ in PASS_FILES)}
 #: Formats that ship the ID mask (Phase 10 API, kept).
-MASK_SHIPPING_FORMATS = tuple(SHIPPED_LABEL_FILES)
+MASK_SHIPPING_FORMATS = ("coco", "webdataset")
 #: The key a verdict carries to name the manifest it graded (the
 #: sha256 of ``capture_manifest.json`` as bytes); written by
 #: ``bind_verification``, compared by ``load_run``.
@@ -1022,6 +1038,16 @@ def kitti_label_lines(sample: Sample) -> List[str]:
     return lines
 
 
+def _passes_card(shipped: Dict[str, List[str]], formats: Sequence[str]) -> Dict[str, Any]:
+    """The card's ``passes`` block (core/dataset/passes_export.py): the
+    consumer of each pass, and the pass files each run shipped."""
+    from .passes_export import pass_card_block
+
+    pass_suffixes = {s for s, _ in PASS_FILES}
+    return pass_card_block({run: [dict(LABEL_FILES)[s] for s in files if s in pass_suffixes]
+                            for run, files in shipped.items()}, list(formats))
+
+
 def kitti_calib(record: Dict[str, Any]) -> str:
     fx, fy = float(record["fx_px"]), float(record["fy_px"])
     cx, cy = (float(v) for v in record["principal_point_px"])
@@ -1045,8 +1071,19 @@ def export_kitti(samples: Sequence[Sample], out: Path, splits: Dict[str, str]
         lines = kitti_label_lines(sample)
         (root / "label_2" / f"{sample.key}.txt").write_text(
             "".join(line + "\n" for line in lines), encoding="utf-8")
-        (root / "calib" / f"{sample.key}.txt").write_text(
-            kitti_calib(sample.record), encoding="utf-8")
+        calib = kitti_calib(sample.record)
+        # S2: the frame's passes in the KITTI layout (flow_occ / flow_noc,
+        # disp_occ_0, velodyne + velodyne_id, normals), only for a frame that
+        # carries them (verified before any file is written, export()); a
+        # frame whose points ship states the velodyne axes in its calib.
+        if any(label_file_path(sample.run, sample.record, s).is_file() for s, _ in PASS_FILES):
+            from .passes_export import kitti_calib_velodyne, write_kitti_passes
+
+            written = write_kitti_passes(sample.run.directory, sample.record, root, sample.key)
+            if "velodyne" in written:
+                calib = "\n".join(kitti_calib_velodyne() if line.startswith("Tr_velo_to_cam:")
+                                  else line for line in calib.splitlines()) + "\n"
+        (root / "calib" / f"{sample.key}.txt").write_text(calib, encoding="utf-8")
         counts[split] += 1
     return counts
 
@@ -1064,6 +1101,21 @@ def _tar_bytes(tar: tarfile.TarFile, name: str, payload: bytes) -> None:
     tar.addfile(info, io.BytesIO(payload))
 
 
+def applied_projection(manifest: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """{name: {value, unit, source, null_verdict}} for every applied-variable
+    record the manifest carries (the WebDataset sidecar's ``export.applied``,
+    R3): the record's own fields, nothing recomputed; the verdict word is
+    core/campaign/report.py's."""
+    from core.campaign.report import null_verdict
+
+    block = manifest.get("applied_variables")
+    records = block.get("applied_variables") if isinstance(block, dict) else None
+    return {str(r["name"]): {"value": r.get("value"), "unit": r.get("unit"),
+                             "source": r.get("source"), "null_verdict": null_verdict(r)}
+            for r in sorted((r for r in (records or []) if isinstance(r, dict) and r.get("name")),
+                            key=lambda r: str(r["name"]))}
+
+
 def export_webdataset(samples: Sequence[Sample], out: Path,
                       splits: Dict[str, str], shard_size: int = 1000
                       ) -> Dict[str, int]:
@@ -1073,6 +1125,7 @@ def export_webdataset(samples: Sequence[Sample], out: Path,
     for sample in sorted(samples, key=lambda s: s.key):
         by_split[sample_split(sample, splits)].append(sample)
     counts = {}
+    applied: Dict[str, Dict[str, Any]] = {}
     for split, members in by_split.items():
         counts[split] = len(members)
         if not members:
@@ -1093,6 +1146,11 @@ def export_webdataset(samples: Sequence[Sample], out: Path,
                     sidecar = frame_sidecar(sample.run.manifest, sample.record)
                     sidecar["export"] = {"labels": sample.labels,
                                          "split": split}
+                    # R3: the run's applied variables, one line each, so a
+                    # sample needs no manifest to say what was applied.
+                    if sample.run.name not in applied:
+                        applied[sample.run.name] = applied_projection(sample.run.manifest)
+                    sidecar["export"]["applied"] = applied[sample.run.name]
                     payload = json.dumps(sidecar, sort_keys=True).encode("utf-8")
                     _tar_bytes(tar, f"{sample.key}.json", payload)
     return counts
@@ -1427,7 +1485,8 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
                  fractions, seed: int, image: str, labels_only: bool,
                  formats: Optional[Sequence[str]] = None,
                  masks_shipped: Sequence[str] = (),
-                 labels_shipped: Optional[Dict[str, Sequence[str]]] = None
+                 labels_shipped: Optional[Dict[str, Sequence[str]]] = None,
+                 tabular: Optional[Dict[str, Any]] = None
                  ) -> Dict[str, Any]:
     formats = list(formats) if formats else [fmt]
     shipped: Dict[str, List[str]] = {name: list(s) for name, s in (labels_shipped or {}).items()}
@@ -1450,7 +1509,7 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
         conventions_by_version.setdefault(str(int(run.manifest["manifest_version"])),
                                           run.manifest.get("label_conventions"))
     labels_not_claimed = not_claimed_from_labels(samples)
-    return {
+    card = {
         "format": fmt,
         "formats": formats,
         "layout": ({f: "." for f in formats} if len(formats) == 1
@@ -1541,6 +1600,9 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
                           f"threshold (the record's {NOT_CLAIMED_EXTENT_KEY}, else "
                           f"{NOT_CLAIMED_EXTENT_PX} px)"),
         },
+        # S2: the consumer of each ground-truth pass, the KITTI directories
+        # the passes land in, and which runs shipped which pass files.
+        "passes": _passes_card(shipped, formats),
         "not_claimed_extent_px": NOT_CLAIMED_EXTENT_PX,
         "not_claimed_from_labels": labels_not_claimed,
         "not_claimed": [
@@ -1572,6 +1634,81 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
         "software_revision": software_revision(),
         "manifest_versions": sorted({int(r.manifest["manifest_version"]) for r in runs}),
     }
+    return record_blocks(card, runs, tabular)
+
+
+def record_blocks(card: Dict[str, Any], runs: Sequence[Run],
+                  tabular: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Record 2 on the card (R3): ``record_version`` 2 (the card's statement
+    of the blocks it carries; core.records.RECORD_VERSION stays 1 until the
+    INT-final bump), the ``variables``, ``uncertainty`` and ``instruments``
+    blocks over the exported runs' own records (the campaign report's
+    functions, core/campaign/report.py), the ``tabular`` declaration when
+    one was written, and the ``datasheet`` (core/dataset/datasheet.py) --
+    or, when a required section cannot be filled, its refusal by name: a
+    statement about the dataset never aborts the dataset."""
+    from core.campaign.report import (
+        REPORT_RECORD_VERSION, instruments_summary, uncertainty_summary, variables_block,
+    )
+
+    from .datasheet import DatasheetError, build_datasheet
+
+    directories = [r.directory for r in runs]
+    card["record_version"] = REPORT_RECORD_VERSION
+    card["variables"] = variables_block(directories)
+    card["uncertainty"] = uncertainty_summary(directories)
+    card["instruments"] = instruments_summary(directories)
+    card["tabular"] = None if tabular is None else {
+        "directory": "tabular/", "rows": tabular["rows"],
+        "columns": len(tabular["columns"]),
+        "files": {name: entry["sha256"] for name, entry in tabular["files"].items()},
+        "declaration": "tabular/columns.json"}
+    try:
+        card["datasheet"] = build_datasheet(runs, card)
+    except DatasheetError as exc:
+        card["datasheet"] = {"refused": exc.constraint, "message": exc.message}
+    return card
+
+
+def render_record_blocks(card: Dict[str, Any]) -> List[str]:
+    """The card's record-2 blocks in words (R3); nothing for a card without them."""
+    lines: List[str] = []
+    variables = card.get("variables")
+    if variables is None:
+        return lines
+    lines += ["", "## Applied variables", ""]
+    for name, v in variables.items():
+        spread = (f"{v['min']:.6g} to {v['max']:.6g} {v['unit']}" if v["kind"] == "numeric"
+                  else ", ".join(f"{k} x{n}" for k, n in v["hist"]["values"].items()))
+        lines.append(f"- {name}: {v['n']} run(s), {spread}; sources "
+                     + ", ".join(f"{s} x{n}" for s, n in v["sources"].items())
+                     + "; null " + ", ".join(f"{k} x{n}" for k, n in v["null_verdicts"].items()))
+    uncertainty = card.get("uncertainty") or {}
+    lines += ["", "## Uncertainty", "", f"- {uncertainty.get('status')}"]
+    instruments = card.get("instruments") or {}
+    lines += ["", "## Instruments", "",
+              "- rate basis: " + (", ".join(f"{k} x{n}" for k, n in
+                                            (instruments.get("rate_basis") or {}).items()) or "none")]
+    if card.get("tabular"):
+        t = card["tabular"]
+        lines += ["", "## Tabular", "",
+                  f"- {t['rows']} row(s) x {t['columns']} column(s) in {t['directory']} "
+                  f"(frames.npz, frames.csv with a units row; declared in {t['declaration']})"]
+    sheet = card.get("datasheet") or {}
+    lines += ["", "## Datasheet", ""]
+    if sheet.get("refused"):
+        lines.append(f"- REFUSED ({sheet['refused']}): {sheet.get('message')}")
+    else:
+        lines.append(f"- {sheet.get('form')}; sections: {', '.join(sheet.get('sections') or {})}; "
+                     f"reviewed by: {sheet.get('reviewed_by')}")
+        for name, m in (sheet.get("measures") or {}).items():
+            value = "NOT RUN" if m.get("value") is None else f"{m['value']:.4f}"
+            lines.append(f"- {name}: {value} ({m['formula']})")
+        restriction = ((sheet.get("sections") or {}).get("distribution") or {}).get(
+            "gpl_airframe_restriction")
+        if restriction:
+            lines.append(f"- distribution: {restriction}")
+    return lines
 
 
 def render_card(card: Dict[str, Any]) -> str:
@@ -1639,6 +1776,7 @@ def render_card(card: Dict[str, Any]) -> str:
     for key in ("coco_conventions", "kitti_conventions", "yolo_conventions", "voc_conventions"):
         for name, text in card[key].items():
             lines.append(f"- {key[:-len('_conventions')]} {name}: {text}")
+    lines += render_record_blocks(card)
     lines += ["", "## Not claimed", ""]
     lines += [f"- {item}" for item in card["not_claimed"]]
     return "\n".join(lines) + "\n"
@@ -1648,11 +1786,14 @@ def render_card(card: Dict[str, Any]) -> str:
 
 def export(paths: Sequence, out, fmt, fractions=DEFAULT_FRACTIONS,
            seed: int = 0, image: str = "ideal", labels_only: bool = False,
-           shard_size: int = 1000) -> Dict[str, Any]:
+           shard_size: int = 1000, tabular: bool = False) -> Dict[str, Any]:
     """Export ``paths`` (runs or batch directories) as ``fmt`` -- one
     format name, a comma list, or a sequence -- into ``out``. One format
     writes into ``out`` itself (the Phase 10 layout); several write
-    ``out/<format>/`` each. One card at ``out`` either way."""
+    ``out/<format>/`` each. One card at ``out`` either way. ``tabular``
+    also writes ``out/tabular/`` (frames.npz, frames.csv with its units
+    row, columns.json; core/dataset/tabular.py), refused by name
+    (``export.tabular_units``) before any format is written."""
     formats = parse_formats(fmt)
     out = Path(out)
     runs = [load_run(d) for d in discover_runs(paths)]
@@ -1661,7 +1802,16 @@ def export(paths: Sequence, out, fmt, fractions=DEFAULT_FRACTIONS,
     refuse_classes_outside_taxonomy(samples, names)  # ...and a stray class, before any file
     labels_shipped = refuse_unverified_labels(samples, formats)
     splits = assign_splits(samples, fractions, seed)
+    table = None
+    if tabular:
+        from .tabular import tabular_table
+
+        tabular_table(samples, splits)          # refuses a unitless column before any file
     out.mkdir(parents=True, exist_ok=True)
+    if tabular:
+        from .tabular import write_tabular
+
+        table = write_tabular(samples, out / "tabular", splits)
     counts: Dict[str, int] = {}
     for name in formats:
         target = out if len(formats) == 1 else out / name
@@ -1672,7 +1822,7 @@ def export(paths: Sequence, out, fmt, fractions=DEFAULT_FRACTIONS,
             counts = WRITERS[name](samples, target, splits)
     card = dataset_card(runs, samples, splits, counts, ",".join(formats), fractions,
                         seed, image, labels_only, formats=formats,
-                        labels_shipped=labels_shipped)
+                        labels_shipped=labels_shipped, tabular=table)
     (out / CARD_JSON).write_text(json.dumps(card, indent=1), encoding="utf-8")
     (out / CARD_MD).write_text(render_card(card), encoding="utf-8")
     return card
