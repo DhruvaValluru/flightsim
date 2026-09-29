@@ -6,12 +6,17 @@
     "A-4",
     "A-4 (JSBSim)"
   ],
-  "mesh_airframe": "McDonnell Douglas A-4E/F/G/H/K Skyhawk (the owner's FSX / P3D freeware package, converted locally; never committed)",
+  "mesh_airframe": "McDonnell Douglas A-4E/F/G/H/K Skyhawk (the owner's own FSX / P3D model, 2020; converted locally, never committed)",
   "source_dir": "../aircraft_src/A4",
   "license": {
-    "license_name": "pending",
-    "file": null,
-    "unavailable": "the owner's A-4E/F/G/H/K freeware package (FSX v1.02, P3D v4 v1.03, paint kit) lives on the owner's machine; its readme / licence text has not been read here, and its models are compiled FSX / P3D .mdl files the converter does not read yet. Section 3.3 forbids rendering unattributed geometry, so this airframe stays physics-only until the licence is on disk and an OBJ / FBX export of the model is converted."
+    "license_name": "All rights reserved; used with the author's permission",
+    "file": "NOTICE.txt",
+    "attribution": "A-4 Skyhawk (A-4E/F/G/H/K) 3D model and textures © 2020 Dhruva Valluru. All rights reserved. Used in this dataset with the author's permission.",
+    "author": "Dhruva Valluru (the project owner)",
+    "permission": "the owner, as the model's author and copyright holder, authorised converting the model, using rendered images of it in the public dataset, and using it in this project (2026-09-29); the downloaded package ships no licence text of its own",
+    "not_redistributed": "the model, its textures and the paint kit are never committed to this public repository (assets/aircraft_src/ and assets/generated/ are gitignored)",
+    "trademarks": "the paint kit's liveries carry real insignia (US Navy, Blue Angels, Top Gun, Israeli and Australian roundels); the Blue Angels name and emblem are US Navy trademarks -- research renders only, check before any commercial use",
+    "unavailable": "the licence is settled, but the geometry is not yet here: the package ships only as FSX / P3D Windows installers (no loose .mdl, no editable source), so nothing can be converted until the model is exported to OBJ / FBX (from the author's original source, or the installed .mdl via ModelConverterX on Windows) and placed with NOTICE.txt (the attribution line as its first line) in assets/aircraft_src/A4/. Physics-only until then."
   },
   "parts": [],
   "labels": {
@@ -22,20 +27,38 @@
     },
     "keypoints": {
       "nose": {
-        "structural_in": [0.0, 0.0, -12.51],
+        "structural_in": [
+          0.0,
+          0.0,
+          -12.51
+        ],
         "basis": "estimate",
         "source": "the FDM's structural origin taken as the nose tip (Aeromatic v0.9, which generated A4.xml, references its stations from the nose); z at the CG waterline"
       },
       "tail": {
-        "structural_in": [483.07, 0.0, -12.51],
+        "structural_in": [
+          483.07,
+          0.0,
+          -12.51
+        ],
         "basis": "estimate",
         "source": "nose tip + the type's overall length 12.27 m [unverified here] at the CG waterline"
       },
-      "left_wingtip": {"fdm_wingspan": "left"},
-      "right_wingtip": {"fdm_wingspan": "right"},
-      "nose_gear": {"fdm_contact": "NOSE"},
-      "left_main_gear": {"fdm_contact": "LEFT_MAIN"},
-      "right_main_gear": {"fdm_contact": "RIGHT_MAIN"}
+      "left_wingtip": {
+        "fdm_wingspan": "left"
+      },
+      "right_wingtip": {
+        "fdm_wingspan": "right"
+      },
+      "nose_gear": {
+        "fdm_contact": "NOSE"
+      },
+      "left_main_gear": {
+        "fdm_contact": "LEFT_MAIN"
+      },
+      "right_main_gear": {
+        "fdm_contact": "RIGHT_MAIN"
+      }
     }
   },
   "limits": {
