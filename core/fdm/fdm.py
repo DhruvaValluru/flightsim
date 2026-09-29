@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Callable, Dict, List, Optional
 
 import jsbsim
 
@@ -178,6 +178,10 @@ class FlightDynamics:
         self._ic_applied = False
         self._engines_started = False
         self._frozen_tanks: Optional[Dict[str, float]] = None
+        #: P3: callables run at the top of every :meth:`step`, in the
+        #: order registered (the failure schedule's ``apply``). Empty by
+        #: default, so a run that registers none steps exactly as before.
+        self._step_hooks: List[Callable[["FlightDynamics"], None]] = []
 
     @classmethod
     def with_tecs(
@@ -195,6 +199,44 @@ class FlightDynamics:
         from ..control.derive import derive
 
         spec = derive(base_aircraft, root_dir=root_dir)
+        return cls(
+            spec.name,
+            rate_hz=rate_hz,
+            root_dir=spec.aircraft_path.parent,
+            debug_level=debug_level,
+            engine_path=spec.engine_path,
+            systems_path=spec.systems_path,
+            derived=spec,
+        )
+
+    @classmethod
+    def with_injections(
+        cls,
+        base_aircraft: str,
+        injections: tuple,
+        rate_hz: float = DEFAULT_RATE_HZ,
+        root_dir: Optional[Path] = None,
+        build_dir: Optional[Path] = None,
+        debug_level: int = 0,
+        expected_derived_sha256: Optional[str] = None,
+    ) -> "FlightDynamics":
+        """Load ``base_aircraft`` with the selected XML injections attached
+        (``tecs``, ``failures``, ``icing``, ``icing_alpha``, ``gust_rotation``;
+        core/control/derive.py applies them in that fixed order).
+
+        The stock model is never modified. Before JSBSim reads anything the
+        built files are re-hashed against what the derivation recorded and,
+        when ``expected_derived_sha256`` is given (a manifest's), the
+        derivation's hash is checked against it: ``derivation.hash_mismatch``
+        otherwise, so an airframe is never flown under a hash it does not
+        have. :meth:`with_tecs` is unchanged and equals
+        ``with_injections(name, ("tecs",))``.
+        """
+        from ..control.derive import derive, verify_hashes
+
+        spec = derive(base_aircraft, build_dir=build_dir, root_dir=root_dir,
+                      injections=tuple(injections))
+        verify_hashes(spec, expected_derived_sha256)
         return cls(
             spec.name,
             rate_hz=rate_hz,
@@ -276,7 +318,36 @@ class FlightDynamics:
         self.props.refresh()
         self._verify_initial_conditions(ordered, tolerance)
         self._ic_applied = True
+        self._ic_requested = dict(ordered)
         self._trimmed = False
+
+    def relatch_initial_conditions(self) -> None:
+        """Re-run ``run_ic`` on the initial conditions already applied.
+
+        Recomputes the atmosphere (and every model's initial pass) at the
+        ICs without advancing time: measured, sim time stays 0.0 and a
+        written ``atmosphere/delta-T`` survives it. The non-standard
+        atmosphere's pre-trim measurement (core/environment/atmosphere.py)
+        calls this between its writes. Not bit-neutral: one more model
+        pass moves the trimmed state at the floating-point floor (measured
+        4e-10 N of lift), which is why the default (ISA) path never calls it.
+        """
+        if not self._ic_applied:
+            raise SimulationError(
+                "relatch_initial_conditions() needs set_initial_conditions() first"
+            )
+        # JSBSim keeps the initial speed as TRUE airspeed, converted from the
+        # requested CAS with the atmosphere of the moment. After a non-standard
+        # day is written the same TAS is a different CAS (measured by the null
+        # ladder: 100 kt CAS asked at +30 degC flew 95.83 kt), so the stated
+        # speed is re-stated in its own terms before the re-latch.
+        speed = {k: v for k, v in getattr(self, "_ic_requested", {}).items()
+                 if k in ("ic/vc-kts", "ic/mach", "ic/ve-kts")}
+        if speed:
+            self.props.set_many(speed)
+        if not self._exec.run_ic():
+            raise SimulationError(f"run_ic() failed on re-latch for {self.model.name!r}")
+        self.props.refresh()
 
     def _verify_initial_conditions(
         self, requested: Dict[str, float], tolerance: float
@@ -504,10 +575,28 @@ class FlightDynamics:
     def mass_held(self) -> bool:
         return self._frozen_tanks is not None
 
+    def register_step_hook(self, hook: Callable[["FlightDynamics"], None]) -> None:
+        """Run ``hook(fdm)`` at the top of every :meth:`step`, before the
+        integration (P3: the failure schedule's ``apply``). The one
+        per-step seam both of the runner's loops share, so a write that
+        must land at the first step past a stated time lands there in
+        either loop. Hooks run in registration order; a hook is never
+        run twice per step; nothing else about :meth:`step` changes.
+        """
+        if not callable(hook):
+            raise TypeError(f"a step hook is callable, not {hook!r}")
+        self._step_hooks.append(hook)
+
+    @property
+    def step_hooks(self) -> tuple:
+        return tuple(self._step_hooks)
+
     def step(self) -> None:
         """Advance exactly one fixed timestep."""
         if self._frozen_tanks is not None:
             self.props.set_many(self._frozen_tanks)
+        for hook in self._step_hooks:
+            hook(self)
         if not self._exec.run():
             raise SimulationError(
                 f"JSBSim run() returned false at t={self.sim_time:.3f}s"

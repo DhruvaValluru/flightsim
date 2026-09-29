@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<system name="icing_alpha"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:noNamespaceSchemaLocation="http://jsbsim.sourceforge.net/JSBSimSystem.xsd">
+
+<!-- ===================================================================
+     Icing stall-onset shift (ADVANCEMENTS_BLUEPRINT section 1, work
+     item P2; the stall-onset cue 14 CFR Part 60 FSTD Directive 2 asks
+     for, as a STATED shift, not an accretion model).
+
+     This file declares the one property. The sum
+
+         icing/alpha-effective-rad = aero/alpha-rad + icing/alpha-shift-rad
+
+     is NOT computed here: a <system> runs before FGAuxiliary in the
+     JSBSim 1.2.4 schedule, so a system reading aero/alpha-rad sees the
+     PREVIOUS step's alpha (measured: a system copy of alpha lags the
+     property by 5.3e-4 .. 1.5e-3 rad over six steps of an elevator
+     step, and the copy at neutral shift is therefore not bit-identical
+     to alpha). core/control/derive.py instead injects the sum as a
+     <function name="icing/alpha-effective-rad"> at the top of the
+     airframe's <aerodynamics>, which FGAerodynamics evaluates before
+     the axes with THIS step's alpha (measured: difference 0.0 at every
+     step), and substitutes icing/alpha-effective-rad for aero/alpha-rad
+     as the independent variable of the LIFT axis's alpha table.
+
+     NEUTRAL VALUE: 0.0 (alpha + 0.0 == alpha to the last bit).
+
+     NOT CLAIMED: only the LIFT table's alpha moves (drag, moment and
+     the other axes keep the true alpha: a stated cue, not a physical
+     model of an iced aerofoil); the shift is refused where the LIFT
+     axis has no alpha-in-radians table or more than one.
+     =================================================================== -->
+
+  <property value="0.0">icing/alpha-shift-rad</property>
+
+</system>

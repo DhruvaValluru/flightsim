@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>flightsim — generate a dataset</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0d1117; --panel: #151b23; --panel-2: #1b232d; --line: #263140;
+    --text: #dfe6ee; --dim: #8b98a5; --accent: #4f8fd6; --accent-2: #2f7d4f;
+    --warn: #e0b452; --bad: #e07a6f; --good: #7fd08f; --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.55 -apple-system, "Segoe UI", Inter, Roboto, sans-serif; }
+  header { padding: 1.2rem 1.4rem .6rem; border-bottom: 1px solid var(--line);
+           display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 1.05rem; letter-spacing: .14em; color: #9fb4c7;
+              text-transform: uppercase; }
+  header a { color: var(--dim); text-decoration: none; font-size: .9rem; }
+  header a:hover { color: var(--text); }
+  main { max-width: 960px; margin: 0 auto; padding: 1.2rem 1rem 6rem; }
+  nav.steps { display: flex; gap: .4rem; flex-wrap: wrap; margin: .2rem 0 1.4rem; }
+  nav.steps span { padding: .25rem .7rem; border-radius: 999px; border: 1px solid var(--line);
+                   color: var(--dim); font-size: .8rem; letter-spacing: .04em; }
+  nav.steps span.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  nav.steps span.done { color: var(--good); border-color: #2c5a3a; }
+  section.state { display: none; }
+  section.state.on { display: block; }
+  h2.headline { font-size: 1.35rem; font-weight: 600; margin: 0 0 1rem; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+          padding: 1.1rem 1.2rem; margin: .9rem 0; }
+  .card.warn { border-color: #5a4a22; }
+  .card.bad { border-color: #6a3a35; }
+  textarea { width: 100%; min-height: 5.2rem; background: var(--panel-2); color: var(--text);
+             border: 1px solid var(--line); border-radius: 8px; padding: .8rem; font: inherit;
+             resize: vertical; }
+  input[type=number], select, input[type=text] {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: .45rem .6rem; font: inherit; }
+  input[type=number] { width: 7rem; }
+  label.field { display: inline-flex; flex-direction: column; gap: .2rem; margin: .4rem 1.2rem .4rem 0;
+                color: var(--dim); font-size: .85rem; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+           padding: .6rem 1.2rem; font: inherit; font-weight: 600; cursor: pointer; }
+  button:disabled { background: #2c3947; color: var(--dim); cursor: default; }
+  button.go { background: var(--accent-2); }
+  button.quiet { background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+                 font-weight: 500; }
+  button.opt { background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+               margin: .2rem .35rem .2rem 0; font-weight: 500; }
+  button.opt.selected { background: var(--accent); border-color: var(--accent); }
+  .row { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
+  .examples button { font-size: .85rem; }
+  .dim { color: var(--dim); }
+  .small { font-size: .85rem; }
+  p.para { font-size: 1.05rem; line-height: 1.7; }
+  .refusal { border-left: 3px solid var(--bad); padding: .3rem .9rem; margin: .6rem 0; }
+  .refusal .hint { color: var(--dim); }
+  details { margin-top: .35rem; }
+  details summary { color: var(--dim); font-size: .82rem; cursor: pointer; }
+  details code { color: #b48ce0; font-size: .85rem; }
+  .est { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .8rem; }
+  .est .n { font-size: 1.35rem; font-weight: 600; }
+  .est .k { color: var(--dim); font-size: .8rem; }
+  img.preview { width: 100%; max-height: 480px; object-fit: contain; border-radius: 8px;
+                background: #000; border: 1px solid var(--line); }
+  .bar { height: 10px; background: var(--panel-2); border-radius: 999px; overflow: hidden;
+         border: 1px solid var(--line); }
+  .bar > i { display: block; height: 100%; background: var(--accent-2); width: 0; transition: width .4s; }
+  .hist { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: .8rem; }
+  .hist .h { background: var(--panel-2); border-radius: 8px; padding: .6rem .7rem; }
+  .hist .h b { display: block; font-weight: 600; font-size: .85rem; margin-bottom: .3rem; }
+  .hist .bars { display: flex; align-items: flex-end; gap: 3px; height: 54px; }
+  .hist .bars i { flex: 1; background: var(--accent); border-radius: 3px 3px 0 0; min-height: 2px; }
+  .hist .range { color: var(--dim); font-size: .75rem; display: flex; justify-content: space-between; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .8rem; }
+  .gallery figure { margin: 0; background: var(--panel-2); border-radius: 8px; overflow: hidden;
+                    border: 1px solid var(--line); }
+  .gallery img { width: 100%; aspect-ratio: 16/9; object-fit: cover; background: #000; display: block; }
+  .gallery figcaption { padding: .45rem .6rem; font-size: .78rem; color: var(--dim); }
+  .tick { color: var(--good); } .cross { color: var(--bad); } .na { color: var(--dim); }
+  ul.plain { margin: .3rem 0 .3rem 1.1rem; padding: 0; }
+  footer.expert { position: fixed; left: 0; right: 0; bottom: 0; background: #0a0e13;
+                  border-top: 1px solid var(--line); padding: .55rem 1.2rem; font-size: .78rem;
+                  color: var(--dim); font-family: "SF Mono", Menlo, monospace; white-space: nowrap;
+                  overflow-x: auto; }
+  footer.expert b { color: #9fb4c7; font-weight: 600; margin-right: .6rem; }
+  #toast { position: fixed; top: 1rem; right: 1rem; background: var(--panel); border: 1px solid var(--line);
+           border-radius: 8px; padding: .6rem .9rem; display: none; max-width: 420px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Flightsim — generate a dataset</h1>
+  <a href="/">expert page</a>
+  <a href="/frames.html" class="small">frame browser</a>
+  <span id="tier" class="dim small"></span>
+</header>
+<main>
+  <nav class="steps" id="steps">
+    <span data-s="ask">1 Ask</span><span data-s="clarify">2 Clarify</span>
+    <span data-s="preview">3 Preview</span><span data-s="generate">4 Generate</span>
+    <span data-s="review">5 Review</span><span data-s="download">6 Download</span>
+  </nav>
+
+  <!-- 1 ASK -->
+  <section class="state" id="s-ask">
+    <h2 class="headline" id="h-ask">Describe the pictures you want.</h2>
+    <div class="card">
+      <textarea id="prompt" placeholder="photos of an A320 over the Alps in varied weather at different times of day, from a chase view"></textarea>
+      <div class="row examples" style="margin-top:.5rem">
+        <span class="dim small">Try:</span>
+        <button class="opt" data-ex="photos of an A320 over the Alps in varied weather at different times of day">Alps, varied weather</button>
+        <button class="opt" data-ex="images of a 747 flying over mountains in a thunderstorm, from the tower">747, thunderstorm, tower</button>
+        <button class="opt" data-ex="pictures of a Cessna 172 over flat farmland in still air for 10 seconds, wingman view">C172, wingman</button>
+      </div>
+      <div class="row" style="margin-top:.8rem">
+        <label class="field">how many images <input type="number" id="images" value="100" min="1"></label>
+        <label class="field">format
+          <select id="format">
+            <option value="coco">COCO</option><option value="yolo">YOLO</option>
+            <option value="voc">Pascal VOC</option><option value="kitti">KITTI</option>
+            <option value="webdataset">WebDataset</option>
+          </select></label>
+        <label class="field">seed <input type="number" id="seed" placeholder="1" min="1"></label>
+        <label class="field">workers <input type="number" id="workers" value="1" min="1"></label>
+        <label class="field">compiler
+          <select id="tierSel"><option value="llm">language model</option><option value="regex">offline</option></select></label>
+      </div>
+      <div class="row" style="margin-top:.6rem">
+        <button id="plan">Show me what you would generate</button>
+        <span id="askNote" class="dim small"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 CLARIFY -->
+  <section class="state" id="s-clarify">
+    <h2 class="headline" id="h-clarify">A few questions before generating.</h2>
+    <div class="card" id="questions"></div>
+    <div class="row"><button id="answer">Continue</button><button class="quiet" id="backAsk">Back</button></div>
+  </section>
+
+  <!-- 3 PREVIEW -->
+  <section class="state" id="s-preview">
+    <h2 class="headline" id="h-preview">Here is what will be generated.</h2>
+    <div class="card"><p class="para" id="paragraph"></p>
+      <div id="refusals"></div>
+      <div class="est" id="estimate"></div>
+      <p class="dim small" id="estBasis"></p>
+    </div>
+    <div class="card" id="sampleCard">
+      <div class="row"><b>One real sample</b>
+        <button class="quiet" id="samplePreview">Fly one sample and show me</button>
+        <span class="dim small" id="sampleNote"></span></div>
+      <div id="sample"></div>
+    </div>
+    <div class="row">
+      <button class="go" id="start" disabled>Generate</button>
+      <button class="quiet" id="backAsk2">Change the request</button>
+      <span class="dim small" id="startNote"></span>
+    </div>
+  </section>
+
+  <!-- 4 GENERATE -->
+  <section class="state" id="s-generate">
+    <h2 class="headline" id="h-generate">Generating.</h2>
+    <div class="card">
+      <div class="row"><span id="progWords" style="flex:1"></span><span id="progCount" class="dim"></span></div>
+      <div class="bar" style="margin:.6rem 0"><i id="progBar"></i></div>
+      <div class="row small dim" id="progTiming"></div>
+      <div class="row" style="margin-top:.7rem">
+        <button class="quiet" id="pause">Pause</button>
+        <button class="quiet" id="resume">Resume</button>
+        <button class="quiet" id="cancel">Cancel</button>
+        <button id="toReview" style="display:none">Review the pictures</button>
+      </div>
+      <div id="progReason"></div>
+    </div>
+    <div class="card"><b>What is varying</b><div class="hist" id="varying" style="margin-top:.6rem"></div>
+      <p class="dim small" id="varyingNote"></p></div>
+    <div class="card"><b>Refused, and why</b><div id="progRefusals" class="small" style="margin-top:.4rem"></div>
+      <div id="progCases" class="dim small" style="margin-top:.5rem"></div></div>
+  </section>
+
+  <!-- 5 REVIEW -->
+  <section class="state" id="s-review">
+    <h2 class="headline" id="h-review">Review the pictures and the checks.</h2>
+    <div class="card"><p class="dim small" id="galleryWhat"></p><div class="gallery" id="gallery"></div></div>
+    <div class="card"><b>Checks</b><div id="checks" class="small" style="margin-top:.4rem"></div></div>
+    <div class="row"><button class="go" id="toDownload">Download</button><button class="quiet" id="backGenerate">Back to progress</button></div>
+  </section>
+
+  <!-- 6 DOWNLOAD -->
+  <section class="state" id="s-download">
+    <h2 class="headline" id="h-download">Choose a format and download.</h2>
+    <div class="card">
+      <div class="row">
+        <label class="field">format
+          <select id="dlFormat">
+            <option value="coco">COCO</option><option value="yolo">YOLO</option>
+            <option value="voc">Pascal VOC</option><option value="kitti">KITTI</option>
+            <option value="webdataset">WebDataset</option>
+          </select></label>
+        <button class="go" id="download">Download the dataset</button>
+        <span class="dim small" id="dlNote"></span>
+      </div>
+      <div id="dlRefusal"></div>
+      <p class="dim small">The zip holds the dataset in the chosen layout beside its card
+        (<code>dataset.json</code> and <code>DATASET_CARD.md</code>); the card records the format,
+        the class list, the splits and what was not verified.</p>
+    </div>
+    <div class="row"><button class="quiet" id="backReview">Back to the pictures</button>
+      <button class="quiet" id="again">Start another</button></div>
+  </section>
+</main>
+
+<footer class="expert"><b>expert path</b><span id="expert">python -m flightsim.campaign "&lt;prompt&gt;" --images N --out campaigns/&lt;name&gt; --plan</span></footer>
+<div id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const S = { state: 'ask', prompt: '', questions: [], answers: [], plan: null, preview: null,
+              campaign: null, progress: null, events: null };
+
+  // -- states ---------------------------------------------------------------
+  const ORDER = ['ask', 'clarify', 'preview', 'generate', 'review', 'download'];
+  function show(state, expert) {
+    S.state = state;
+    document.querySelectorAll('section.state').forEach((s) => s.classList.toggle('on', s.id === 's-' + state));
+    document.querySelectorAll('#steps span').forEach((s) => {
+      const i = ORDER.indexOf(s.dataset.s), j = ORDER.indexOf(state);
+      s.classList.toggle('on', i === j); s.classList.toggle('done', i < j);
+    });
+    if (expert && expert.length) $('expert').textContent = expert.join('   ·   ');
+    window.scrollTo(0, 0);
+  }
+  function toast(text) {
+    const t = $('toast'); t.textContent = text; t.style.display = 'block';
+    clearTimeout(t._h); t._h = setTimeout(() => { t.style.display = 'none'; }, 4000);
+  }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  // Every refusal is shown in the catalogue's words; the rule name is
+  // under a disclosure the user has to open (the default path never shows it).
+  function refusalHtml(r) {
+    const d = r.details || {};
+    let more = '';
+    if (d.rule || d.message) {
+      more = `<details><summary>why, in the system's own terms</summary>` +
+             (d.rule ? `<div>rule: <code>${esc(d.rule)}</code></div>` : '') +
+             (d.message ? `<div class="dim small">${esc(d.message)}</div>` : '') +
+             (d.log_tail ? `<pre class="dim small">${esc(d.log_tail.join('\n'))}</pre>` : '') +
+             `</details>`;
+    }
+    return `<div class="refusal"><div>${esc(r.sentence)}</div>` +
+           (r.hint ? `<div class="hint">${esc(r.hint)}</div>` : '') + more + `</div>`;
+  }
+  async function call(method, url, body) {
+    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' },
+                                   body: body === undefined ? undefined : JSON.stringify(body) });
+    let data = null;
+    try { data = await res.json(); } catch (e) { data = { error: 'the server sent no answer' }; }
+    return { ok: res.ok, status: res.status, data };
+  }
+  function fmtBytes(b) {
+    if (b == null) return '—';
+    const u = ['B', 'kB', 'MB', 'GB', 'TB']; let i = 0; let v = b;
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+    return v.toFixed(v >= 10 || i === 0 ? 0 : 1) + ' ' + u[i];
+  }
+  function fmtSeconds(s) {
+    if (s == null) return '—';
+    if (s < 90) return Math.round(s) + ' s';
+    if (s < 5400) return (s / 60).toFixed(0) + ' min';
+    return (s / 3600).toFixed(1) + ' h';
+  }
+  function args() {
+    return { images: Math.max(1, parseInt($('images').value || '100', 10)),
+             format: $('format').value, tier: $('tierSel').value,
+             seed: $('seed').value ? parseInt($('seed').value, 10) : null,
+             workers: Math.max(1, parseInt($('workers').value || '1', 10)) };
+  }
+
+  // -- 1 ask ----------------------------------------------------------------
+  document.querySelectorAll('.examples button').forEach((b) => b.onclick = () => { $('prompt').value = b.dataset.ex; });
+  $('plan').onclick = async () => {
+    S.prompt = $('prompt').value.trim();
+    if (!S.prompt) { toast('Describe the pictures first.'); return; }
+    S.answers = []; S.questions = [];
+    $('plan').disabled = true; $('askNote').textContent = 'reading your request…';
+    await doPlan();
+    $('plan').disabled = false; $('askNote').textContent = '';
+  };
+  async function doPlan() {
+    const a = args();
+    const body = { prompt: S.prompt, images: a.images, format: a.format, tier: a.tier, seed: a.seed };
+    if (S.answers.length) { body.questions = S.questions; body.answers = S.answers; }
+    const r = await call('POST', '/generate/plan', body);
+    if (!r.ok) {
+      if (r.data.sentence) { $('refusals').innerHTML = refusalHtml(r.data); show('preview', r.data.expert); }
+      else toast(r.data.error || 'the request was refused');
+      return;
+    }
+    S.plan = r.data;
+    $('tier').textContent = 'compiler: ' + (r.data.tier === 'llm' ? 'language model' + (r.data.model ? ' (' + r.data.model + ')' : '') : 'offline')
+                            + (r.data.note ? ' — ' + r.data.note : '');
+    if (r.data.state === 'clarify') { renderQuestions(r.data.questions); $('h-clarify').textContent = r.data.headline; show('clarify', r.data.expert); }
+    else renderPreview(r.data);
+  }
+
+  // -- 2 clarify --------------------------------------------------------------
+  function renderQuestions(questions) {
+    S.questions = questions; S.answers = questions.map((q) => ({ id: q.id, answer: '' }));
+    $('questions').innerHTML = questions.map((q, i) =>
+      `<div style="margin:.6rem 0 1rem"><div>${esc(q.question)}</div><div style="margin-top:.4rem">` +
+      (q.options || []).map((o) => `<button class="opt" data-q="${i}" data-o="${esc(o)}">${esc(o)}</button>`).join('') +
+      `<input type="text" placeholder="or type an answer" data-free="${i}" style="margin-left:.4rem;width:14rem"></div></div>`).join('');
+    $('questions').querySelectorAll('button.opt').forEach((b) => b.onclick = () => {
+      const i = +b.dataset.q; S.answers[i].answer = b.dataset.o;
+      $('questions').querySelectorAll(`button.opt[data-q="${i}"]`).forEach((x) => x.classList.toggle('selected', x === b));
+    });
+    $('questions').querySelectorAll('input[data-free]').forEach((inp) => inp.oninput = () => { S.answers[+inp.dataset.free].answer = inp.value; });
+  }
+  $('answer').onclick = async () => {
+    if (S.answers.some((a) => !a.answer)) { toast('Answer each question (a button or a few words).'); return; }
+    $('answer').disabled = true; await doPlan(); $('answer').disabled = false;
+  };
+  $('backAsk').onclick = () => show('ask');
+  $('backAsk2').onclick = () => show('ask');
+
+  // -- 3 preview ------------------------------------------------------------
+  function renderEstimate(est, measuredFrom) {
+    const cells = [
+      ['scenarios to fly', est.cases_needed == null ? '—' : est.cases_needed],
+      ['images per scenario', (est.frames_per_case.measured || est.frames_per_case.estimate) + (est.frames_per_case.measured ? '' : ' (est.)')],
+      ['disk', est.projected_bytes == null ? 'not measured yet' : fmtBytes(est.projected_bytes)],
+      ['time', est.projected_seconds == null ? 'not measured yet' : fmtSeconds(est.projected_seconds)],
+      ['free disk', fmtBytes(est.free_bytes)],
+    ];
+    $('estimate').innerHTML = cells.map(([k, v]) => `<div><div class="n">${esc(v)}</div><div class="k">${esc(k)}</div></div>`).join('');
+    $('estBasis').textContent = 'Basis: ' + est.basis + (measuredFrom ? ' — ' + measuredFrom : '') +
+      (est.within_free === false ? ' — this would NOT fit on the disk.' : '');
+  }
+  function renderPreview(p) {
+    $('h-preview').textContent = p.headline; $('paragraph').textContent = p.paragraph;
+    $('refusals').innerHTML = (p.refusals || []).map(refusalHtml).join('');
+    renderEstimate(p.estimate, null);
+    $('sample').innerHTML = ''; $('sampleNote').textContent = ''; S.preview = null;
+    $('start').disabled = !p.ok;
+    $('startNote').textContent = p.ok ? 'Generation runs one scenario after another and checks every image.' : 'Fix the request above, then try again.';
+    show('preview', p.expert);
+  }
+  $('samplePreview').onclick = async () => {
+    if (!S.plan || !S.plan.spec) return;
+    const a = args();
+    $('samplePreview').disabled = true; $('sampleNote').textContent = 'flying one scenario…';
+    const r = await call('POST', '/generate/preview', { spec: S.plan.spec, images: a.images, seed: a.seed || 1, workers: a.workers });
+    $('samplePreview').disabled = false; $('sampleNote').textContent = '';
+    if (!r.ok) { $('sample').innerHTML = (r.data.refusals || [r.data]).map(refusalHtml).join(''); $('start').disabled = true; if (r.data.expert) $('expert').textContent = r.data.expert.join(' '); return; }
+    S.preview = r.data;
+    const v = r.data.verification_words;
+    $('sample').innerHTML =
+      (r.data.picture ? `<img class="preview" src="${esc(r.data.picture.url)}" alt="sample"><p class="dim small">${esc(r.data.picture.what)}</p>` : '<p class="dim">No picture was produced.</p>') +
+      `<p class="small">${esc(r.data.status_words)}` + (v ? ` ${v.verdict} ${v.passed} checks passed, ${v.failed} failed, ${v.not_run} could not run without a render.` : '') + `</p>` +
+      `<p class="dim small">Measured: ${r.data.measured.frames} images, ${fmtBytes(r.data.measured.bytes)}, ${fmtSeconds(r.data.measured.wall_seconds)} for this scenario.` +
+      (Object.keys(r.data.sampled || {}).length ? ' Drawn: ' + esc(Object.entries(r.data.sampled).map(([k, v]) => k.replace(/_/g, ' ') + ' ' + (typeof v === 'number' ? +v.toFixed(2) : v)).join(', ')) + '.' : '') + `</p>`;
+    renderEstimate(r.data.estimate, 'one sample scenario, measured');
+    if (r.data.expert) $('expert').textContent = r.data.expert.join(' ');
+  };
+  $('start').onclick = async () => {
+    const a = args();
+    $('start').disabled = true; $('startNote').textContent = 'starting…';
+    const r = await call('POST', '/generate/start', { prompt: S.prompt, answers: S.answers.length ? S.answers : null,
+      images: a.images, format: a.format, seed: a.seed, workers: a.workers, tier: S.plan.tier, plan_digest: S.plan.spec_digest });
+    $('start').disabled = false; $('startNote').textContent = '';
+    if (!r.ok) { $('refusals').innerHTML += refusalHtml(r.data); return; }
+    S.campaign = r.data.id;
+    try { localStorage.setItem('flightsim.generate.lastCampaign', S.campaign); } catch (e) {}
+    if (r.data.recompiled) toast('The campaign compiled the prompt again and the result differs from the preview; the campaign record has the one that runs.');
+    $('h-generate').textContent = r.data.headline;
+    show('generate', r.data.expert);
+    listen();
+  };
+
+  // -- 4 generate -----------------------------------------------------------
+  function listen() {
+    if (S.events) { S.events.close(); S.events = null; }
+    if (!window.EventSource) { poll(); return; }
+    const es = new EventSource(`/generate/${S.campaign}/events`);
+    S.events = es;
+    es.addEventListener('progress', (e) => renderProgress(JSON.parse(e.data)));
+    es.addEventListener('end', () => { es.close(); S.events = null; refresh(); });
+    es.addEventListener('idle', () => { es.close(); S.events = null; });
+    es.onerror = () => { es.close(); S.events = null; setTimeout(poll, 1500); };
+  }
+  async function refresh() { const r = await call('GET', `/generate/${S.campaign}`); if (r.ok) renderProgress(r.data); return r; }
+  async function poll() {
+    const r = await refresh();
+    if (r.ok && r.data.state === 'running') setTimeout(poll, 2000);
+  }
+  function renderProgress(p) {
+    S.progress = p;
+    $('progWords').textContent = p.headline;
+    $('progCount').textContent = `${p.frames_verified} of ${p.images_target} images checked, from ${p.cases_verified} scenario${p.cases_verified === 1 ? '' : 's'} · ${p.frames_captured} captured`;
+    $('progBar').style.width = Math.round(100 * p.fraction) + '%';
+    const t = p.timing;
+    $('progTiming').textContent = t.seconds_remaining == null
+      ? 'Time left: ' + t.basis
+      : `About ${fmtSeconds(t.seconds_remaining)} left (${fmtSeconds(t.seconds_per_case)} per scenario measured over completed ones, ${t.workers} worker${t.workers > 1 ? 's' : ''}).`;
+    // Always words from the catalogue; an exception's own text (a broken
+    // worker pool) sits under the disclosure, never on the default path.
+    $('progReason').innerHTML = p.reason_words && p.state !== 'done' ? refusalHtml(p.reason_words) : (p.thread_error_words ? refusalHtml(p.thread_error_words) : '');
+    $('pause').disabled = p.state !== 'running'; $('resume').disabled = !(p.state === 'paused' || p.state === 'failed' || p.state === 'planned');
+    $('cancel').disabled = p.state === 'done' || p.state === 'cancelled';
+    $('toReview').style.display = (p.frames_captured > 0) ? '' : 'none';
+    // Histograms of what the draws realised, from the ledger.
+    const keys = Object.keys(p.varying || {});
+    $('varying').innerHTML = keys.map((k) => {
+      const h = p.varying[k]; const name = k.replace(/_/g, ' ');
+      if (h.kind === 'numeric') {
+        const m = Math.max(1, ...h.counts);
+        return `<div class="h"><b>${esc(name)}</b><div class="bars">${h.counts.map((c) => `<i style="height:${Math.round(100 * c / m)}%" title="${c}"></i>`).join('')}</div><div class="range"><span>${+h.min.toFixed(2)}</span><span>${h.n} drawn</span><span>${+h.max.toFixed(2)}</span></div></div>`;
+      }
+      const entries = Object.entries(h.counts); const m = Math.max(1, ...entries.map((e) => e[1]));
+      return `<div class="h"><b>${esc(name)}</b><div class="bars">${entries.map(([v, c]) => `<i style="height:${Math.round(100 * c / m)}%" title="${esc(v)}: ${c}"></i>`).join('')}</div><div class="range">${entries.map(([v]) => `<span>${esc(v)}</span>`).join('')}</div></div>`;
+    }).join('');
+    $('varyingNote').textContent = keys.length ? 'Realised values of every varied setting, one count per scenario the ledger recorded.' : 'Nothing has been drawn yet, or this request varies nothing.';
+    $('progRefusals').innerHTML = (p.refusals_words || []).length
+      ? p.refusals_words.map((r) => `<div class="refusal"><span class="dim">${r.count} ×</span> ${esc(r.sentence)}` + (r.details && r.details.rule ? `<details><summary>rule</summary><code>${esc(r.details.rule)}</code></details>` : '') + `</div>`).join('')
+      : '<span class="dim">Nothing has been refused.</span>';
+    const cw = p.cases_words || {};
+    // The count and the catalogue's sentence; the ledger's status word is a code name and stays out.
+    $('progCases').textContent = Object.keys(cw).filter((s) => cw[s].count).map((s) => `${cw[s].count} × ${cw[s].sentence}`).join('   ·   ');
+    if (p.state === 'done') { $('h-generate').textContent = p.headline; }
+  }
+  async function control(what) {
+    const r = await call('POST', `/generate/${S.campaign}/${what}`);
+    if (!r.ok) { toast(r.data.sentence || r.data.error || 'refused'); return; }
+    renderProgress(r.data);
+    if (r.data.expert) $('expert').textContent = r.data.expert.join(' ');
+    if (what === 'resume') listen();
+  }
+  $('pause').onclick = () => control('pause');
+  $('resume').onclick = () => control('resume');
+  $('cancel').onclick = () => { if (confirm('Cancel this generation? It cannot be resumed afterwards.')) control('cancel'); };
+  $('toReview').onclick = () => review();
+
+  // -- 5 review -------------------------------------------------------------
+  async function review() {
+    const r = await call('GET', `/generate/${S.campaign}/frames`);
+    if (!r.ok) { toast(r.data.sentence || r.data.error || 'refused'); return; }
+    $('h-review').textContent = r.data.headline; $('galleryWhat').textContent = r.data.what;
+    $('gallery').innerHTML = r.data.items.map((it) => {
+      const v = it.verification; const mark = it.verified ? '<span class="tick">✓ checked</span>' : (it.status === 'rendered' ? '<span class="cross">✗ a check failed</span>' : `<span class="na">${esc(it.status_words)}</span>`);
+      const drawn = Object.entries(it.sampled || {}).map(([k, v]) => k.replace(/_/g, ' ') + ' ' + (typeof v === 'number' ? +v.toFixed(2) : v)).join(', ');
+      return `<figure><img src="${esc(it.url)}" loading="lazy" alt="${esc(it.case_id)}"><figcaption>${mark} · ${esc(it.camera_words || it.camera_id)}` + (v ? ` · ${v.passed} passed, ${v.failed} failed, ${v.not_run} not run` : '') + (drawn ? `<br>${esc(drawn)}` : '') + `</figcaption></figure>`;
+    }).join('') || '<p class="dim">No pictures yet.</p>';
+    const p = S.progress || {};
+    const cw = p.cases_words || {};
+    $('checks').innerHTML = Object.keys(cw).filter((s) => cw[s].count).map((s) => `<div>${s === 'verified' ? '<span class="tick">✓</span>' : (s === 'failed' || s === 'refused' ? '<span class="cross">✗</span>' : '<span class="na">·</span>')} ${cw[s].count} × ${esc(cw[s].sentence)}</div>`).join('') || '<span class="dim">No checks recorded yet.</span>';
+    show('review', r.data.expert);
+  }
+  $('toDownload').onclick = () => { $('dlFormat').value = (S.progress && S.progress.format) || $('format').value; $('dlRefusal').innerHTML = ''; show('download', [`curl -o dataset.zip "/generate/${S.campaign}/download?format=${$('dlFormat').value}"`]); };
+  $('backGenerate').onclick = () => show('generate');
+
+  // -- 6 download -----------------------------------------------------------
+  $('dlFormat').onchange = () => { $('expert').textContent = `curl -o dataset.zip "/generate/${S.campaign}/download?format=${$('dlFormat').value}"`; };
+  $('download').onclick = async () => {
+    $('download').disabled = true; $('dlNote').textContent = 'exporting…'; $('dlRefusal').innerHTML = '';
+    const url = `/generate/${S.campaign}/download?format=${encodeURIComponent($('dlFormat').value)}`;
+    const res = await fetch(url);
+    $('download').disabled = false; $('dlNote').textContent = '';
+    if (!res.ok) { let d = {}; try { d = await res.json(); } catch (e) {} $('dlRefusal').innerHTML = refusalHtml(d.sentence ? d : { sentence: d.error || 'The download was refused.' }); return; }
+    const blob = await res.blob(); const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `${S.campaign}_${$('dlFormat').value}.zip`; a.click();
+    $('dlNote').textContent = `Downloaded (${fmtBytes(blob.size)}). The card inside records the format.`;
+  };
+  $('backReview').onclick = () => review();
+  $('again').onclick = () => { if (S.events) S.events.close(); S.campaign = null; show('ask', ['python -m flightsim.campaign "<prompt>" --images N --out campaigns/<name> --plan']); };
+
+  // -- boot -----------------------------------------------------------------
+  (async () => {
+    const r = await call('GET', '/status');
+    if (r.ok) {
+      $('tier').textContent = 'compiler: ' + (r.data.llm_available ? 'language model available' : 'offline (no language model here)') +
+        ' · pictures: ' + (r.data.render_available ? 'rendered frames' : 'geometry previews only on this ' + r.data.platform + ' machine');
+      if (!r.data.llm_available) $('tierSel').value = 'regex';
+    }
+    let last = null; try { last = localStorage.getItem('flightsim.generate.lastCampaign'); } catch (e) {}
+    if (last && location.hash === '#resume') { S.campaign = last; show('generate'); listen(); }
+    else show('ask');
+  })();
+})();
+</script>
+</body>
+</html>

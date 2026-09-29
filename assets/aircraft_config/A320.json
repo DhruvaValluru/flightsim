@@ -109,6 +109,11 @@
     ".*[Ll]ogo.*"
   ],
   "hinge_note": "hinge lines estimated from each surface's own leading-edge geometry plus the part offset (assets_pipeline/estimate_hinges.py); verified on screen by gate5_realmesh, not assumed",
+  "gear_geometry": {
+    "parts": [],
+    "objects": [],
+    "source": "this config lists NO landing-gear part: the A320family gear models live under Models/LandingGears/ and are not among the parts above, and the fuselage's Gear* objects (GearLDoor, GearNWell, ...) are doors and wells, not tyres. With no gear vertices the converter anchors z on the FDM VRP and says so in mesh_origin_basis; adding the gear parts (and their assembly-XML offsets) is what would make z measured. Measured 2026-09-25 from the pinned commit: the lowest drawn vertex is a nacelle at -3.27 m"
+  },
   "surfaces": {
     "aileron_l": {
       "bone": "aileron_l",
@@ -212,5 +217,110 @@
         ]
       ]
     }
+  },
+  "labels": {
+    "dimensions_m": {
+      "length": 37.57,
+      "height": 11.76,
+      "source": "Airbus A320 Aircraft Characteristics Airport and Maintenance Planning (ACAP), section 2-1-1 (overall length 37.57 m, height 11.76 m); span from the flown FDM's own <wingspan>"
+    },
+    "keypoints": {
+      "nose": {
+        "fdm_contact": "NOSE_TIP"
+      },
+      "tail": {
+        "fdm_contact": "TAIL_TIP"
+      },
+      "left_wingtip": {
+        "fdm_contact": "WING_TIP_1"
+      },
+      "right_wingtip": {
+        "fdm_contact": "WING_TIP_2"
+      },
+      "nose_gear": {
+        "fdm_contact": "NOSE_LG"
+      },
+      "left_main_gear": {
+        "fdm_contact": "LEFT_MLG"
+      },
+      "right_main_gear": {
+        "fdm_contact": "RIGHT_MLG"
+      }
+    }
+  },
+  "limits": {
+    "category": {
+      "value": "transport",
+      "regulation": "14 CFR 25.337 (transport category)",
+      "source": "EASA TCDS A.064 (A320 family), certification basis JAR/CS-25 -- unverified here: from memory of the TCDS; 14 CFR 25.337 states the same load factors"
+    },
+    "n_z_pos_g": {
+      "value": 2.5,
+      "source": "14 CFR 25.337(b): positive limit manoeuvring load factor n = 2.1 + 24000/(W+10000), not less than 2.5 and need not exceed 3.8; 2.5 at the A320's weights"
+    },
+    "n_z_neg_g": {
+      "value": -1.0,
+      "source": "14 CFR 25.337(c): negative limit manoeuvring load factor not less than -1.0 up to V_C"
+    },
+    "speed_limit_kt": {
+      "value": 350.0,
+      "kind": "V_MO",
+      "source": "unverified here: from memory of the A320 FCOM Limitations (V_MO 350 KIAS); compared here against JSBSim calibrated airspeed without a position-error correction"
+    },
+    "m_mo": {
+      "value": 0.82,
+      "source": "unverified here: from memory of the A320 FCOM Limitations (M_MO 0.82)"
+    },
+    "alpha_stall_deg": {
+      "value": null,
+      "reason": "the JSBSim A320 model states no alpha limit (no <alphalimits> element; grep of A320.xml, 2026-09-28); the type's alpha-protection thresholds are flight-control laws, not modelled here"
+    },
+    "note": "Measured 2026-09-28: the JSBSim A320 trims and flies at 370 kt CAS at 1500 m (V_MO + 20), so a run beyond the speed limit is reachable on this model and is the null test in tests/test_limits.py."
+  },
+  "loading": {
+    "source": "JSBSim 1.2.4 aircraft/A320/A320.xml <mass_balance> and <propulsion> as shipped in the .venv wheel (read 2026-09-28); the maximum weight from memory of the A320-200 type data [unverified here]",
+    "datum": {
+      "xml": "the A320.xml <location> x in inches, positive aft (the JSBSim structural frame); the XML names no reference point",
+      "poh": "the AFM/FCOM balance envelope is stated in percent MAC against a datum the XML does not name [unverified here]",
+      "arm_comparison": {
+        "status": "unverified",
+        "reason": "no handbook arm is transcribed and the envelope is in percent MAC of an unnamed datum: the XML CG cannot be placed on the handbook chart, so the envelope check is refused by name (loading.datum_unverified) and the loading is flown at the XML's own arms"
+      }
+    },
+    "empty_weight": {
+      "lb": 111000.0,
+      "arm_in": 672.0,
+      "source": "A320.xml <emptywt> 111000 LBS at <location name=\"CG\"> x 672 in"
+    },
+    "stations": [],
+    "tanks": [
+      {
+        "index": 0,
+        "arm_in": 600.0,
+        "poh_arm_in": null,
+        "capacity_lb": 23940.0,
+        "default_lb": 15000.0,
+        "source": "A320.xml tank 0: <capacity> 23940 LBS, <contents> 15000 LBS at x 600 in"
+      },
+      {
+        "index": 1,
+        "arm_in": 600.0,
+        "poh_arm_in": null,
+        "capacity_lb": 23940.0,
+        "default_lb": 15000.0,
+        "source": "A320.xml tank 1: <capacity> 23940 LBS, <contents> 15000 LBS at x 600 in"
+      }
+    ],
+    "max_takeoff_weight": {
+      "kg": 77000.0,
+      "lb": 169755.9,
+      "source": "from memory of the A320-200 basic maximum takeoff weight 77000 kg (EASA TCDS A.064 lists several) [unverified here]"
+    },
+    "cg_envelope": {
+      "polygon": null,
+      "reason": "the handbook envelope is in percent MAC against a datum this XML does not name; not transcribed"
+    },
+    "policy_station": null,
+    "policy_station_reason": "the JSBSim A320 declares no point-mass station: a payload draw has nowhere to go and refuses by name"
   }
 }

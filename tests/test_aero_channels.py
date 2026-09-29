@@ -115,6 +115,36 @@ def test_ue_recorder_and_headless_recorder_share_the_aero_schema():
     assert shared <= set(DEFAULT_CHANNELS)
 
 
+def test_ue_recorder_table_carries_every_registry_host_channel():
+    """P9: the UE table is extended to every REGISTRY.host_channels()
+    column, and every headless DEFAULT_CHANNELS column the registry names
+    as a host channel is one the UE table records under the same name --
+    a host channel the host cannot record would make its parity (Gate 5
+    extended, the W2 Windows step) a comparison against nothing."""
+    from core.registry import REGISTRY
+
+    table = _ue_channel_table()
+    host = REGISTRY.host_channels()
+    assert host, "the registry names no host channels"
+    missing = [c for c in host if c not in table]
+    assert not missing, f"UE recorder lacks host channels {missing}"
+    # The shared atmosphere, gust and loading columns read the same
+    # JSBSim properties as core/fdm/state.py (hazard 1: never re-guess).
+    same = {"density_altitude_m": "atmosphere/density-altitude",
+            "pressure_altitude_m": "atmosphere/pressure-altitude",
+            "temperature_k": "atmosphere/T-R", "rh_pct": "atmosphere/RH",
+            "vapour_pressure_pa": "atmosphere/vapor-pressure-psf",
+            "gust_north_mps": "atmosphere/gust-north-fps",
+            "gust_east_mps": "atmosphere/gust-east-fps",
+            "gust_down_mps": "atmosphere/gust-down-fps",
+            "cg_x_m": "inertia/cg-x-in", "iyy_kgm2": "inertia/iyy-slugs_ft2",
+            "roll_rate_dps": "velocities/p-rad_sec", "weight_kg": "inertia/weight-lbs"}
+    for column, prop in same.items():
+        assert table[column][0] == prop, column
+        assert prop in REQUIRED_PROPERTIES or f'"{prop}"' in Path(
+            REPO / "core/fdm/state.py").read_text(encoding="utf-8"), prop
+
+
 # -- hazard 1: the selftest is wired into every host ------------------------
 
 def test_ue_hosts_refuse_on_selftest_failure():

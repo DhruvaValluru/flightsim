@@ -1,0 +1,275 @@
+# The hazard case the phase asks for: a world-anchored camera placed
+# INSIDE THE TORNADO CORE.
+#
+# "through a tornado" aims the modelled vortex core AT the track: the
+# core sits 45% of the still-air run ahead along the heading (the same
+# placement the run card carries, so the check and the render cannot
+# model two different vortices). This tower camera is stated at that
+# centre, 40 m up -- inside the Rankine core (radius 150 m) and far
+# under its fade top (3000 m). Expected outcome, BY NAME, before
+# anything flies:
+#
+#   REFUSED [camera.hazard_intersection] -- the stated placement sits
+#   inside the modelled tornado core
+#
+# A user-stated camera field is never silently moved to pass; state
+# the tower somewhere outside the core (>150 m from the centre) and run
+# again.
+#
+#   .venv/bin/python -m flightsim.capture \
+#       examples/cameras_hazard_refusal.yaml --out runs/in_the_funnel
+spec_version: 7
+name: cameras_hazard_refusal
+prompt: tower view of the 747 flying through a tornado over the prairie for 60 seconds
+aircraft:
+  aircraft:
+    value: B747
+    source: user
+    from: '747'
+initial:
+  altitude:
+    value: 3000.0
+    unit: m
+    source: default
+    from: mid-altitude cruise
+  airspeed:
+    value: 250.0
+    unit: kt
+    source: default
+    from: typical cruise for the B747
+  airspeed_kind:
+    value: cas
+    source: default
+  heading:
+    value: 0.0
+    unit: deg
+    source: default
+    from: due north
+  latitude:
+    value: 0.0
+    unit: deg
+    source: default
+    from: equator; no geography requested
+  longitude:
+    value: 0.0
+    unit: deg
+    source: default
+    from: prime meridian
+  terrain_elevation:
+    value: 0.0
+    unit: m
+    source: default
+    from: flat terrain at sea level
+environment:
+  wind_speed:
+    value: 0.0
+    unit: kt
+    source: default
+    from: still air
+  wind_direction:
+    value: 0.0
+    unit: deg
+    source: default
+    from: still air
+  turbulence:
+    value: none
+    source: default
+    from: smooth air
+    std: MIL-F-8785C Fig.7 (W20, wind speed at 20 ft AGL)
+    W20_kt: 0.0
+  surface:
+    value: grassland
+    source: inferred
+    from: 'ground cover ''prairie'': roughness + thermal class (surface vocabulary)'
+  weather_date:
+    value: none
+    source: default
+    from: no date stated; spec wind as given
+  weather_event:
+    value: tornado
+    source: inferred
+    from: severe weather 'tornado', aim core (documented composition/model; see conditions
+      strip)
+    aim: core
+run:
+  duration:
+    value: 60.0
+    unit: s
+    source: user
+    from: for 60 seconds
+  rate:
+    value: 120.0
+    unit: Hz
+    source: default
+    from: matches the UE plugin substep rate
+  seed:
+    value: 0
+    unit: dimensionless
+    source: default
+    from: deterministic; no stochastic subsystem active yet
+  mass_held:
+    value: false
+    source: default
+    from: realistic fuel burn
+  hold_state:
+    value: true
+    source: default
+    from: hold the commanded state
+cameras:
+- camera_id:
+    value: tower_in_the_funnel
+    source: user
+    from: documented camera id
+  preset:
+    value: tower
+    source: inferred
+    from: tower view
+  position_mode:
+    value: scene
+    source: user
+    from: stated in scene metres
+  offset_forward_m:
+    value: 0.0
+    unit: m
+    source: default
+    from: camera language in the prompt; documented camera default
+  offset_right_m:
+    value: 0.0
+    unit: m
+    source: default
+    from: camera language in the prompt; documented camera default
+  offset_up_m:
+    value: 0.0
+    unit: m
+    source: default
+    from: camera language in the prompt; documented camera default
+  position_north_m:
+    value: 3472.5
+    unit: m
+    source: user
+    from: ON the modelled tornado core's centre
+  position_east_m:
+    value: 0.0
+    unit: m
+    source: user
+    from: ON the modelled tornado core's centre
+  position_lat_deg:
+    value: 0.0
+    unit: deg
+    source: default
+    from: camera language in the prompt; documented camera default
+  position_lon_deg:
+    value: 0.0
+    unit: deg
+    source: default
+    from: camera language in the prompt; documented camera default
+  position_alt_m:
+    value: 40.0
+    unit: m
+    source: user
+    from: '40 m above the datum: inside the funnel, well under fade_top'
+  aim_mode:
+    value: aircraft
+    source: default
+    from: camera language in the prompt; documented camera default
+  aim_north_m:
+    value: 0.0
+    unit: m
+    source: default
+    from: camera language in the prompt; documented camera default
+  aim_east_m:
+    value: 0.0
+    unit: m
+    source: default
+    from: camera language in the prompt; documented camera default
+  aim_alt_m:
+    value: 0.0
+    unit: m
+    source: default
+    from: camera language in the prompt; documented camera default
+  aim_bearing_deg:
+    value: 0.0
+    unit: deg
+    source: default
+    from: camera language in the prompt; documented camera default
+  aim_elevation_deg:
+    value: 0.0
+    unit: deg
+    source: default
+    from: camera language in the prompt; documented camera default
+  focal_length_mm:
+    value: 35.0
+    unit: mm
+    source: default
+    from: camera language in the prompt; documented camera default
+  sensor_width_mm:
+    value: 36.0
+    unit: mm
+    source: default
+    from: camera language in the prompt; documented camera default
+  sensor_height_mm:
+    value: 20.25
+    unit: mm
+    source: default
+    from: camera language in the prompt; documented camera default
+  width_px:
+    value: 1280
+    unit: px
+    source: default
+    from: camera language in the prompt; documented camera default
+  height_px:
+    value: 720
+    unit: px
+    source: default
+    from: camera language in the prompt; documented camera default
+  near_m:
+    value: 0.1
+    unit: m
+    source: default
+    from: camera language in the prompt; documented camera default
+  far_m:
+    value: 100000.0
+    unit: m
+    source: default
+    from: camera language in the prompt; documented camera default
+  trigger:
+    value: continuous
+    source: derived
+    from: a view named in the prompt with no count captures the whole clip
+  capture_count:
+    value: 10
+    unit: dimensionless
+    source: user
+    from: exactly 10 images
+  period_s:
+    value: 1.0
+    unit: s
+    source: default
+    from: camera language in the prompt; documented camera default
+  distance_m:
+    value: 500.0
+    unit: m
+    source: default
+    from: camera language in the prompt; documented camera default
+  event_channel:
+    value: roll_deg
+    source: default
+    from: camera language in the prompt; documented camera default
+  event_threshold:
+    value: 30.0
+    source: default
+    from: camera language in the prompt; documented camera default
+  event_direction:
+    value: above
+    source: default
+    from: camera language in the prompt; documented camera default
+  refractory_s:
+    value: 2.0
+    unit: s
+    source: default
+    from: one event is one capture
+  profile:
+    value: ideal_pinhole
+    source: default
+    from: the documented ideal pinhole; the engine's frames are the sensor frames
+  moves: []

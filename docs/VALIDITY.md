@@ -832,10 +832,16 @@ The dataset's own limits, which are not defects of the pipeline:
   source to within resampling tolerance). Finer detail than 30 m does not
   exist in the data, and the render mesh is built at stride 2 (60 m posting)
   with normals from the full 30 m raster.
-* Heights are EGM2008 orthometric treated as ellipsoidal by the scene's
-  georeferencing, so absolute ECEF placement is off by the local geoid
-  undulation (~+50 m Alps, ~−30 m Sierra). Relative geometry within a scene —
-  aircraft against ridgeline — is unaffected, which is what the frames show.
+* Heights are EGM2008 orthometric and JSBSim's sea level is the WGS 84
+  ellipsoid, so absolute ECEF placement is off by the local geoid undulation N
+  (measured from the committed EGM96 grid: +52.52 m Matterhorn, −25.94 m
+  Yosemite, +41.47 m Fuji, −29.84 m Everest, −23.40 m Grand Canyon, −30.54 m
+  Flint Hills). Since the advancement addition I1 every bake sidecar, run card
+  and capture manifest carries a `datum` block stating N, its source and bounds
+  and the ellipsoidal height of the origin (`core/terrain/geoid.py`); no height
+  is converted, and the verifier re-evaluates N with its own reader. Relative
+  geometry within a scene — aircraft against ridgeline — is unaffected, which
+  is what the frames show.
 * Terrain colouring on the **control ridge** (and as fallback) is a
   slope/altitude classification (rock, scrub, valley floor, snow above the
   location's approximate snowline) written into vertex colours. It is
@@ -981,11 +987,320 @@ headless host covers **still air and steady wind over flat terrain**
 realisation is per-host (measured, above); orographic wind in the host is the
 verified port of an unvalidated model (§2.8).
 
+### 2.15 Ground-truth labels (Phase 10): what a label is, and is not
+
+Every frame of a version-5 capture manifest carries labels computed from
+geometry alone (`core/capture/labels.py`): a 2-D box, a 3-D box in camera
+coordinates, seven airframe keypoints and the horizon line. What IS
+claimed: the labels are recoverable from the same pose, intrinsics and
+aircraft state the manifest records, through its documented projection;
+the verifier re-derives them independently to 0.05 px and is shown to
+fail when they are moved; every airframe number carries its source and a
+`basis` word (`fdm` for a point the flown JSBSim model states itself,
+`fdm-approximation` for half the FDM wingspan abeam the aero reference
+point, `estimate` for the B747's nose and tail placed by argument from a
+type document); the structural-to-body mapping is pinned by figures from
+outside the code (c172p and A320 tip stations, A320 nose-to-tail against
+the type's length).
+
+What is NOT claimed: the 2-D box is the airframe's OVERALL EXTENTS
+(nose-to-tail x span x cited height), not a silhouette -- a tight box
+needs the engine's instance mask, which is written only by a `-labels`
+render pass and graded against the extents box by containment, never
+equated with it. Keypoint `in_frame` is geometric ("inside the image
+with positive depth"), never "unoccluded". The horizon is the datum
+plane's tangent horizon on a spherical Earth without refraction or
+terrain -- the skyline is the mask's job. Semantic classes are three
+(sky / aircraft / terrain-or-other). Airframes without stated geometry
+refuse by name (`camera.labels`) rather than being labelled as a
+stand-in. Nothing here is a claim about the meshes' dimensional accuracy
+beyond §1.6b's.
+
+### 2.16 The sensor model (Phase 10): a stated model, applied reproducibly
+
+A camera profile applies lens distortion (Brown-Conrady), a rolling
+shutter, cos^4 vignetting, exposure gain and EMVA 1288 shot + read noise
+to the ideal render as a seeded Python post-pass. What IS claimed: the
+pass is deterministic from the run's seed (same bytes twice, tested);
+the labels are mapped through the same profile and the verifier
+recovers the pinhole labels by inverting the RECORDED parameters to
+0.05 px, failing when they are corrupted; every profile cites its source
+and carries a `basis` word, and the shipped `synthetic_cmos_wide` is
+declared illustrative in the manifest itself. What is NOT claimed: that
+any shipped profile describes a real camera (none does -- a calibrated
+one must cite its calibration), radiometric calibration of any kind
+(the linear input is the 8-bit sRGB render inverted, a stated
+approximation until a `-linear` EXR pass is verified on the engine),
+chromatic aberration, demosaicing or flare. S1 adds, each measured on
+synthetic frames and pinned (docs/SENSING.md): a diffraction x Gaussian PSF
+applied as one shift-invariant kernel (the e-SFR MTF50 within 1.3 % of the
+analytic one; sub-pixel kernels alias and say so), a velocity-line motion
+blur over the shutter (within 0.25 px of |f| t_exp / dt for streaks of 2 px
+and longer; wider below), and a STATED radiance path: one unit of the
+linear frame is 1.2 x A x 2^(EV100 - EC) cd/m^2, `predicted` until the
+engine's grey card (S4) measures it -- the constant has no traceable chain
+to a reference luminance, and until the sun is set in lux the chain is
+refused by name (`sensing.exposure_units`: an 18 % card under today's 8.0
+sun reads 1.5e-5 of full scale). The band model is a declared proxy over
+three sRGB / Rec.709 channels through cached CIE and ASTM tables, not a
+spectral rendering. §2.5 stands: none of this is EO/IR sensor fidelity,
+and nothing here is traceable as sensor imagery.
+
 ### 2.5 No EO/IR sensor fidelity exists
 
 None has been built. Unreal has no native EO/IR simulation and no MISB/KLV
 support. A post-process "thermal look" would be visually plausible and **not
 radiometrically calibrated**. Nothing here is traceable as sensor imagery.
+S1 states a photometric radiance path (luminance per unit of the linear frame
+under the manual EV100, a band proxy through cached CIE 1924 V(lambda) and
+ASTM G173-03 tables, the sun in lux from a clear-sky model) and records its
+status per frame as `predicted`, `measured` (only after S4's grey card) or
+`refused` (the engine's sun is not in lux); it is a stated proxy with a
+stated gap, not a calibration.
+
+S3 adds an IR proxy (`cameras[i].ir {band, thermal_table}`,
+`core/capture/thermal.py`) and this section still stands: it is a declared
+**proxy**, `proxy: true` in the manifest's `sensing.ir` block, in both records
+and in every frame's declaration, which the verifier's `ir_proxy_declared`
+grades against the manifest's table digests. Per class it forms
+L = tau(R) [eps_c int B(T_c) + (1 - eps_c) L_down] + (1 - tau(R)) B_band(T_air)
+over LWIR 8-12 um or MWIR 3-5 um (the Planck band integral measured against
+Stefan-Boltzmann within 1 %). What it does NOT have: **no heat balance** (no
+solar loading, conduction, convection or thermal inertia -- surfaces sit at
+the near-surface air temperature, the skin at its recovery temperature
+T_inf (1 + 0.89 (gamma - 1)/2 M^2)); **no plume** and no engine; **no
+sub-object temperatures** (one temperature per class of the class image);
+**no validation** against any infrared image; and a **user-provided
+transmittance table** -- the only one shipped is synthetic (tau = exp(-kR)
+with invented k, marked synthetic in its provenance and in every record),
+a real MODTRAN / libRadtran table is a networked step, and without a
+provenanced table the proxy refuses `sensing.ir_transmittance` (never
+Koschmieder in the LWIR). The emissivities are nine cached ASTER library
+rows standing in for classes (a bare aluminium skin; no paint, no water);
+the sky is a broadband clear-sky model (Brutsaert 1975, Swinbank 1963 for
+dry air) applied grey across the band. There is no sensor model behind the
+proxy (no spectral response, noise or NETD). The one Windows step is a
+human clause: the IR preview of one real render inspected once.
+
+---
+
+### 2.17 Domain randomisation (Phase 10): drawn once, recorded, never a palette
+
+The `randomization` block draws a time of day, a fog density, a camera
+jitter and a livery from its own seed and writes each drawn value back
+into the spec as a `derived` field beside the range it came from; the
+card, the manifest and every frame sidecar carry the same sampled dict.
+What IS claimed: the sun is where Meeus ch. 25 / NOAA put it for the
+spec's latitude, longitude, date and UTC hour (geometric, no
+refraction); the draws are reproducible from the block's seed (derived
+from the run seed when unstated); a stated field is never moved; the
+second planner pass lands on the same numbers; a window with no
+daylight refuses by name. What is NOT claimed: that a sampled look is
+photometrically right -- exposure is a straight line between the two
+probe-calibrated look points the harness already renders with, clamped
+beyond them, and fog is a range between its calibrated clear and hazy;
+no new visual value was calibrated for this block (gotcha 6). No
+clouds, no refraction, no auto-exposure. Livery variants exist as a
+card key and a refuse-by-name engine hook with NO shipped variant
+material, so every draw today is `"default"`. Distractor objects are
+scene content, cut with P10-8. Off (the documented default), the block
+is absent from the canonical spec, every pre-existing digest is
+unchanged, and the render command is byte-identical to before.
+
+---
+
+### 2.18 Batches and datasets (Phase 10): verified in, split by flight
+
+`flightsim.batch` runs a matrix of specs, each content-addressed by
+its digest and verified, with a ledger that records failures;
+`flightsim.export` turns runs into COCO / KITTI / WebDataset with a
+card. What IS claimed: an unverified run, or one with a failed check,
+refuses the export by name -- nothing is dropped silently; every frame
+of one simulation (cameras and randomisation excluded from the
+simulation digest) lands on one side of the split; the card states
+the conventions, the split seed and assignment, the verification
+counts including the checks that were NOT RUN, and what is not
+claimed. What is NOT claimed: that the exported labels are anything
+other than the recorded flight's geometry (section 2.15); that a
+KITTI `occluded` value is known without the engine's occlusion pass;
+that any rendered batch has been exported on this machine (no engine).
+
+---
+
+### 2.19 The manifest's contract (gap closure): schema, matrices, lag
+
+What IS claimed: every capture manifest validates against the published
+JSON Schema of its version (`docs/schemas/`), checked by the verifier;
+every frame's `projection_matrix` reproduces the recorded parameters'
+projection to 0.001 px (measured 2.5e-9); the lagged camera presets
+integrate their time constants exactly over each telemetry interval, so
+a change of sample rate moves a chase camera by the aircraft track's own
+interpolation residual (measured 0.3 mm on the reference track) and not
+by integrator error. What is NOT claimed: bit-identical lagged poses
+across sample rates -- the two rates sample a different goal signal, and
+the residual is pinned under a centimetre, not at zero; and the validator
+here enforces the subset of JSON Schema the file uses (it refuses a file
+that uses more), so a consumer with a full validator sees exactly the
+same contract, no more.
+
+### 2.20 The non-standard atmosphere (P1): a stated day, delivered and read back
+
+What IS claimed: a stated temperature deviation (-60..+45 degC), sea-level
+pressure (870..1085 hPa) and dew point or relative humidity are written to
+JSBSim's `delta-T`, `P-sl-psf` and `dew-point-R` BEFORE the trim and every step,
+read back on every step (delta-T and P-sl-psf exactly; the dew point within one
+step's pressure change, 1.5e-6 R measured), and recorded per variable with a
+null test measured on the same FDM (density before against after each write);
+the delivered density, temperature, pressure, density altitude, pressure
+altitude, humidity and vapour pressure agree with the closed form transcribed
+from the installed JSBSim's own source to 1e-13 relative (pinned at 0.5 %);
+the trim sees the day (the trimmed throttle moves, measured on the c172p and
+the A320); the day words are stated choices with their citation strings. What
+is NOT claimed: that JSBSim's standard day is the US Standard Atmosphere 1976
+(taken on the source's word); any MIL-HDBK-310 profile (`hot_day` is +30 degC,
+a stated choice inside the handbook's 1 % hot column as remembered, unverified
+here; the named profiles are refused `atmosphere.profile`); a temperature
+inversion, a changed lapse rate or a humidity profile with height (the dew
+point is held constant along the flight and limited to the modelled
+temperature and the vapour cap where the air would not admit it, the limited
+steps counted); bit-identity of a run that STATES the standard day with the
+default run (the pre-trim measurement re-latches the initial conditions; the
+difference is pinned under 1e-8 in every column); the engine side (the card
+block carries the exact writes in a fixed key order and no host applies them
+yet); a prompt that says "hot day" (the compiler has no atmosphere vocabulary;
+the block is stated in the spec).
+
+### 2.21 The XML injections (P2): three layers enter the stock model by rewriting it
+
+What IS claimed: the failure chain, the six icing factors, the stall-onset
+shift and the rotational gust are injected into a DERIVED copy of the stock
+airframe (the stock file and the vendored systems are never edited), each by
+an anchor test that refuses by name where the stock text does not carry the
+anchor (`derivation.anchor_missing`: the DHC6's shared FCS file, the f16's
+five lift tables, the p51d's lift in degrees); at neutral values every one of
+fifteen recorded properties is bit-identical to the stock airframe over 8 s
+of an elevator step on the c172p, per injection and all four together (V18);
+every injected property reads back exactly; the derivation is hashed and the
+hash checked before JSBSim reads it. What is NOT claimed: any physics. A
+factor scales a WHOLE axis (C_L0 and the control terms with C_Lalpha); the
+alpha shift moves the LIFT table only; the rotational gust reaches the roll
+damping term only (no yaw or pitch moment, no Clr coupling); the failure
+chain has no rate limit, lag or hydraulic topology. Bit-identity is measured
+on the c172p only; the A320 and B747 derive with all four and are not
+compared bit for bit. No engine has loaded a derived airframe.
+
+### 2.22 The failure schedule (P3): JSBSim's own controls, applied on the run clock
+
+What IS claimed: engine out, control jam, hardover, float and authority loss
+are written at the first step with t >= at_s on the RUN clock (seconds since
+the run's first step: JSBSim's own clock starts at the engine start's
+cranking time, 4.9 s on the c172p) and read back exactly on the next step;
+the turbine engine-out is JSBSim's cutoff (thrust 0.0 on every one of 600
+steps; the blueprint's `set-running = 0` relights on the next step and is
+not used), the piston's the magneto cut (the thrust dies on the propeller's
+inertia over 1.68 s); a jam holds the surface within 1e-6 rad over 100 steps
+(measured 0.0); the ladder's A320 engine-out and jam pairs reach (section
+2.27). What is NOT claimed: a fire, a hydraulic topology, a sensor failure,
+a partial failure, a restart or any compensation (TECS holds energy; nothing
+holds the yaw); the semantics beyond the c172p and the A320 where they were
+measured; a jam that diverges a c172p flight (open loop, the command never
+moves, so the pair is silent by construction, and the c172p cannot hold its
+state here); engines 2 and 3 of a four-engine type are not recorded.
+
+### 2.23 Loading (P4): the centre of gravity, read back against the hand calculation
+
+What IS claimed: payload stations and fuel are written once before the trim
+and JSBSim's `cg-x-in` equals the hand calculation over the XML's own arms
+on all five configured airframes (worst 6.8e-13 in against the 0.1 in
+tolerance, V13); the trim is of the LOADED aircraft (a write after the trim
+was measured to leave the trim solved for the unloaded one); 136 kg at the
+c172p's aft-most seat moves the CG 0.097 m, the trim elevator 0.22 deg and
+the pitch 0.55 deg in 3 s (section 2.27). What is NOT claimed: any handbook
+number (arms, seat and baggage maxima, the envelope polygon and every maximum
+takeoff weight are from memory, unverified here); the envelope check on any
+airframe whose XML datum is not the handbook's (refused
+`loading.datum_unverified` when asked; on the c172p the XML datum is TAKEN
+AS the handbook datum with a 3 in uncertainty); the lateral and vertical CG;
+the fuel burned in the crank; a fuel schedule; the p51d's weapon stations
+(system outputs, unloadable).
+
+### 2.24 Icing (P5): Bragg's factor form on a stated ramp, not an ice model
+
+What IS claimed: eta(t) and the six factors 1 + eta k are written to the
+derived airframe at the top of every step and read back exactly (0.0 on
+every checked step); at fixed alpha the lift falls by the factor (0.98223
+measured for 0.982 at eta 0.2, 0.023 %, section 2.27); the stall-onset cue
+moves the static lift peak by the stated shift (-2.0 deg for 2 deg). What is
+NOT claimed: any airframe's icing response. The DHC6 k-table is a
+transcription from memory of the published Twin Otter set (unverified here)
+and the c172p flies it as a named PROXY; the factor scales whole axes, not
+Bragg's single coefficient; no accretion, liquid water content, drop size or
+temperature dependence; the severity words are a stated mapping, not AIM
+7-1-19's pilot reports; the trim is of the un-iced aircraft.
+
+### 2.25 Gusts, von Karman turbulence and layered shear (P6)
+
+What IS claimed: a gust provider's sum is written to JSBSim's persisting
+gust channel every step, zero included, and read back exactly (V20); the von
+Karman table realises the commanded sigma within 0.5 % on the table and the
+MIL-F-8785C slope -5/3 within 0.1 on a 60 s table; delivered through JSBSim
+over a 3 s flight its sigma_w is 2.174 m/s against the ladder's 2.189 (0.7 %,
+A9); a layered profile delivers the linear interpolation at the aircraft's
+altitude (7.2e-5 m/s off on the ladder's flight, V17). What is NOT claimed:
+q_g and r_g (not delivered); MIL-F-8785C's own p_g spectrum (Yeager's
+first-order form is realised); a field that evolves or follows the aircraft
+(frozen, convected at the trim TAS); that JSBSim's Dryden channel delivers
+its ladder sigma (measured: 1.86 x on w over 60 s on Linux, 2.13 on
+Windows, 2.60 on macOS -- "the same sigma" holds at the commanded ladder
+only); the specification's numbers beyond FGWinds' transcription; a trim in
+the wind (JSBSim's trim resets it; the first per-step write restores it); a
+real forecast (the NWP fixture is synthetic and says so).
+
+### 2.26 The wake-vortex pair (P7): a stated model, delivered and read back
+
+What IS claimed: the Burnham-Hallock pair's closed forms (V16: the core
+speed, the dipole far field, a divergence-free field, strip-theory p_eq to
+1e-12 on its checks and 1e-7 against a fine quadrature), delivery through
+the gust channel and the rotational-gust injection read back exactly, an
+encounter at the stated geometry that rolls the c172p 31 deg more than the
+same flight without it in 3 s, and a far-offset control 300 m to the side
+that stays silent. What is NOT claimed: any comparison with a measured
+encounter; the core radius (a stated 0.035 b convention decides the peak
+swirl); Crow instability, linking, ground effect or stratification beyond a
+declared N* bound; the Sarpkaya constants (from memory, unverified here);
+a wake that is followed in time (frozen, straight, one descent rate); any
+moment but strip theory's roll; the RCR where the XML's aileron term is a
+table (the B747's, recorded absent).
+
+### 2.27 The null ladder itself (Gate 3b): connectivity, stated criteria, three referents
+
+What IS claimed: every physics layer above reaches the equations of motion
+through the one mechanism each record names -- `core.record_null.run_null_pair`,
+the identical spec with the one field at its null, both digests -- and meets
+the criterion stated for it in docs/vva/VV_PLAN.md section 3b
+(`experiments/gate3b_layers.py`; eleven pairs and A8, all PASS on this
+branch, the numbers in VV_REPORT.md section 1b). Three rows compare with a
+referent in the ASME V&V 20 form: A7 (the moist-air density ratio against
+1 - 0.378 e / p, E 2.9e-8 inside u_D 4.0e-6 from A&E 1996's e_s
+difference), A8 (JSBSim's standard day against the 1976 table, within
+1.2e-5 at 0 / 3000 / 11000 m, two cells of nine outside the table's
+half-digit), A9 (von Karman sigma_w against the ladder, 0.7 %). u_num now
+reads the committed three-rate study (`experiments/gate3b_convergence.py`,
+`data/convergence/gate3b_convergence.json`) for the c172p example's case,
+the observed order capped at the integrators' formal order 1. What is NOT
+claimed: correctness. A pair says a layer reached the flight and by how
+much; A7 compares JSBSim with the same ideal-gas identity it implements
+(a verification of the arithmetic, not of the ideal-gas assumption); A8's
+table and A9's ladder are transcriptions (unverified here); the observed
+orders describe one flight of one airframe (lateral SRQs converge slowly,
+roll not at all over 10 s). The ladder found one thing the layers' own tests
+did not: a stated day kept the initial TRUE airspeed (the pre-trim re-latch
+kept the IC's TAS), so the c172p asked for 100 kt CAS at +30 degC flew
+95.8 kt CAS (docs/JSBSIM_CORRECTIONS.md section 27). Fixed: the requested
+airspeed is re-stated before the re-latch (core/fdm/fdm.py and the engine
+plugin); the delta-T row now measures 100.0 kt CAS on both sides. No layer adds a referent for the
+aircraft; the credibility scorecard's ceiling stays 2 and nothing here
+raises it.
 
 ---
 
@@ -997,9 +1312,25 @@ place: fixed timestep set at construction and never varied; step counts derived
 from the fixed rate rather than accumulated from wall time; no RNG anywhere in
 the core; aircraft XML fingerprinted by SHA-256.
 
-**Rendering** will not be bit-deterministic. Movie Render Queue is not
-bit-deterministic and Epic documents no fix. When Phase 6 exists it will be
-described as reproducible-within-tolerance, never as bit-identical.
+**Rendering** is a measurement, not a claim, and as of Phase 10 no
+measurement exists. The earlier text here ("will not be bit-deterministic")
+was written about Movie Render Queue, which this system does not use: the
+frames come from an offscreen SceneCapture in a commandlet with every input
+fixed on every run (stated warm-up count, manual exposure, async shader
+compilation finished before the first frame). Phase 10 built the instrument
+and not yet the result: the commandlet records the SHA-256 of every frame it
+writes, `-deterministic` pins texture streaming and LOD, `core/capture/
+repro.py` compares two renders of one card frame by frame, and Gate 10-R
+(`experiments/gate10_render_repro.py`) renders twice and reports one of
+three words with its numbers -- `bit-identical`, `bounded` (maximum per-pixel
+difference, fraction of pixels differing), or `incomplete`. Gate 10-R has not
+been run on an engine (none here). Until it is, the status is: **render
+reproducibility not established in either direction**. NOT RUN is not a
+verdict. The first Windows run of `--card` produces the first verdict, and
+this paragraph is to be replaced by its numbers. The verifier's
+`frame_integrity` check is independent of that verdict: a frame on disk
+that does not hash to the engine's own record fails by frame, so a replaced
+or re-encoded frame cannot pass as rendered.
 
 Not yet done: floating-point flags on the physics core are unaudited
 (`-ffast-math` must be off), and no run manifest is emitted yet (Phase 7).

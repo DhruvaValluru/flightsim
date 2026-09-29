@@ -6,6 +6,7 @@ independent variable without also changing the code path.
 """
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -250,6 +251,88 @@ def test_non_square_raster_keeps_its_aspect_ratio(reference_dem, tmp_path):
     assert spec.scale_x != pytest.approx(spec.scale_y)
     source_aspect = (field.width - 1) / (field.height - 1)
     assert spec.scale_x / spec.scale_y == pytest.approx(source_aspect, rel=1e-9)
+
+
+def _hand_layers(directory, spec, split=(200, 55)):
+    """Two hand-written layers at the heightmap's layout that sum to 255
+    everywhere, as the weightmaps sidecar records them (code, class, key,
+    file, sha256, layout, resolution)."""
+    import hashlib
+
+    entries = []
+    for code, key, word, value in ((10, "tree_cover", "vegetation", split[0]),
+                                   (30, "grassland", "terrain", split[1])):
+        path = Path(directory) / f"ls_landcover_{code}.u8"
+        np.full((spec.resolution, spec.resolution), value, dtype=np.uint8).tofile(path)
+        entries.append({"code": code, "key": key, "class": word, "file": path.name,
+                        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                        "layout": {"quads_per_section": spec.layout.quads_per_section,
+                                   "sections_per_component": spec.layout.sections_per_component,
+                                   "components": spec.layout.components},
+                        "resolution": spec.resolution})
+    return entries
+
+
+def test_import_manifest_copies_the_bake_datum_verbatim_and_verifies_the_layers(procedural, tmp_path):
+    """W1: the Landscape import manifest gains weight_layers, the bake
+    sidecar's own datum block (copied, never re-evaluated) and the bake's
+    sha256; verify_round_trip grades the layers beside the heights."""
+    from core.terrain.geoid import datum_for_heightfield
+    from core.terrain.heightfield import Heightfield
+
+    field = Heightfield(procedural.samples, procedural.georeference, procedural.scale_m,
+                        procedural.offset_m, name="ridge",
+                        provenance={"synthetic": True,
+                                    "datum": datum_for_heightfield(procedural)})
+    spec = landscape.export(field, tmp_path / "ls")
+    layers = _hand_layers(tmp_path, spec)
+    manifest = landscape.import_manifest(field, spec, layers)
+    assert manifest["datum"] == field.provenance["datum"]
+    assert manifest["datum"]["undulation_m"] is None            # synthesised: null, never 0
+    assert manifest["bake"]["sha256"] == field.digest()
+    assert [entry["code"] for entry in manifest["weight_layers"]] == [10, 30]
+    result = landscape.verify_round_trip(field, spec, manifest)
+    assert result["layers"] == {"layers": 2, "codes": [10, 30], "sum_min": 255, "sum_max": 255,
+                                "sum_ok": True, "datum_copied": True,
+                                "bake_sha256": field.digest()}
+    assert result["max_error_m"] < 4.0 * result["quantisation_m"]   # Gate 4 still holds
+    # A pair of layers that does not sum to 255 is reported, not hidden.
+    short = _hand_layers(tmp_path, spec, split=(200, 54))
+    result = landscape.verify_round_trip(field, spec, landscape.import_manifest(field, spec, short))
+    assert result["layers"]["sum_ok"] is False and result["layers"]["sum_max"] == 254
+
+
+def test_import_manifest_refuses_by_name_without_a_datum_and_on_a_stale_or_foreign_layer(procedural, tmp_path):
+    from core.messages import name_of
+
+    spec = landscape.export(procedural, tmp_path / "ls")
+    layers = _hand_layers(tmp_path, spec)
+    with pytest.raises(landscape.LandscapeManifestError) as err:
+        landscape.import_manifest(procedural, spec, layers)          # no provenance.datum
+    assert name_of(err.value) == "terrain.landscape_missing"
+    from core.terrain.geoid import datum_for_heightfield
+    from core.terrain.heightfield import Heightfield
+
+    field = Heightfield(procedural.samples, procedural.georeference, procedural.scale_m,
+                        procedural.offset_m, name="ridge",
+                        provenance={"datum": datum_for_heightfield(procedural)})
+    foreign = [dict(layers[0]), dict(layers[1])]
+    foreign[1]["layout"] = {"quads_per_section": 63, "sections_per_component": 1, "components": 2}
+    with pytest.raises(landscape.LandscapeManifestError) as err:
+        landscape.import_manifest(field, spec, foreign)
+    assert name_of(err.value) == "terrain.landscape_layout"
+    stale = [dict(layers[0]), dict(layers[1])]
+    stale[0]["sha256"] = "0" * 64
+    with pytest.raises(landscape.LandscapeManifestError) as err:
+        landscape.import_manifest(field, spec, stale)
+    assert name_of(err.value) == "terrain.landscape_stale"
+    manifest = landscape.import_manifest(field, spec, layers)
+    other = Heightfield(procedural.samples ^ np.uint16(1), procedural.georeference,
+                        procedural.scale_m, procedural.offset_m, name="ridge",
+                        provenance=field.provenance)
+    with pytest.raises(landscape.LandscapeManifestError) as err:
+        landscape.verify_round_trip(other, spec, manifest)
+    assert name_of(err.value) == "terrain.landscape_stale"
 
 
 # -- ground callback and orographic coupling -----------------------------

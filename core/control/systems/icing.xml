@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<system name="icing"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:noNamespaceSchemaLocation="http://jsbsim.sourceforge.net/JSBSimSystem.xsd">
+
+<!-- ===================================================================
+     Icing factors (ADVANCEMENTS_BLUEPRINT section 1, work item P2).
+
+     Six multipliers, one per aerodynamic axis, and the severity eta.
+     core/control/derive.py wraps EVERY <function> of the airframe's
+     six <axis> blocks (LIFT, DRAG, SIDE, ROLL, PITCH, YAW) in a
+     <product> with the axis's factor, so the whole force or moment on
+     that axis scales by it: the Bragg et al. (AIAA 2000-0360) form
+     C_A,iced = (1 + eta k_A) C_A, with the factor (1 + eta k_A) held
+     here and the k-table mapping done by the icing provider (a later
+     item, P5). Nothing in this file maps eta to the factors: eta is
+     declared so the provider has one property to write and the record
+     has one value to read back; the factors are what the aerodynamics
+     read.
+
+     NEUTRAL VALUES: every factor 1.0 (x * 1.0 == x to the last bit in
+     IEEE 754, so the derived airframe is bit-identical to the stock
+     one; measured in tests/test_derive_injections.py), eta 0.
+
+     NOT CLAIMED: no accretion, no LWC / MVD / temperature dependence,
+     no change to the shape of any table (a factor scales a whole axis,
+     which is why the stall-onset shift is a separate injection,
+     icing_alpha); no airframe's icing response is validated.
+     =================================================================== -->
+
+  <property value="1.0">icing/lift-factor</property>
+  <property value="1.0">icing/drag-factor</property>
+  <property value="1.0">icing/side-factor</property>
+  <property value="1.0">icing/roll-factor</property>
+  <property value="1.0">icing/pitch-factor</property>
+  <property value="1.0">icing/yaw-factor</property>
+  <property value="0.0">icing/eta</property>
+
+</system>

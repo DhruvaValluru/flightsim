@@ -161,6 +161,58 @@ public:
 	double InitialMixture = 1.0;
 
 	/**
+	 * LOCAL PATCH 5 (see VENDORED.json): the directory JSBSim reads the
+	 * aircraft from, when set -- an absolute path holding
+	 * <AircraftModel>/<AircraftModel>.xml (a derived airframe built by
+	 * core/control/derive.py). Upstream hard-codes the root to the plugin's
+	 * Resources/JSBSim/aircraft (InitializeJSBSim), so a derived airframe
+	 * could never be loaded. Empty keeps upstream's root.
+	 */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Model")
+	FString AircraftRootOverride;
+
+	/**
+	 * LOCAL PATCH 5: the lowercase hex SHA-256 the aircraft XML under
+	 * AircraftRootOverride must hash to. Checked AT THE DOOR -- before JSBSim
+	 * reads the file -- and the load refused (AircraftLoaded false,
+	 * bAircraftXmlRefused true) on a mismatch. Empty skips the check.
+	 */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Model")
+	FString ExpectedAircraftXmlSha256;
+
+	/** LOCAL PATCH 5: the SHA-256 computed at the door (empty for a stock load). */
+	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category = "Model")
+	FString LoadedAircraftXmlSha256;
+
+	/** LOCAL PATCH 5: true when the door refused the XML (unreadable or a hash mismatch). */
+	UPROPERTY(BlueprintReadOnly, VisibleAnywhere, Category = "Model")
+	bool bAircraftXmlRefused = false;
+
+	/**
+	 * LOCAL PATCH 6 (see VENDORED.json): the pre-trim batch. Written by
+	 * PrepareJSBSim AFTER its RunIC and BEFORE its trim -- where the headless
+	 * host's EnvironmentStack.prepare writes the stated day, the loading and
+	 * the icing's neutral values -- each followed by a re-latch (RunIC) where
+	 * PreTrimRelatchAfter says so, so the trim solves the loaded aircraft in
+	 * the stated air. Upstream offers no hook between the two: BeginPlay
+	 * re-creates JSBSim and trims in one call. Empty is a no-op.
+	 */
+	UPROPERTY(Transient, BlueprintReadWrite, Category = "Initial Conditions")
+	TArray<FString> PreTrimProperties;
+	UPROPERTY(Transient, BlueprintReadWrite, Category = "Initial Conditions")
+	TArray<FString> PreTrimValues;
+	UPROPERTY(Transient, BlueprintReadWrite, Category = "Initial Conditions")
+	TArray<bool> PreTrimRelatchAfter;
+	/** LOCAL PATCH 6: read back after the batch and its re-latches, before the trim. */
+	UPROPERTY(Transient, BlueprintReadWrite, Category = "Initial Conditions")
+	TArray<FString> PreTrimReadProperties;
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Initial Conditions")
+	TArray<FString> PreTrimReadValues;
+	/** LOCAL PATCH 6: batch properties the loaded model does not declare (not written). */
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Initial Conditions")
+	TArray<FString> PreTrimMissing;
+
+	/**
 	 * If false, the atmosphere model will be the one from JSBSim.
 	 * If true, you can define it with custom properties
 	*/

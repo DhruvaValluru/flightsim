@@ -140,6 +140,12 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _sha256_lf(path: Path) -> str:
+    """The file's sha256 with CRLF read as LF (the parity comparison's
+    normalisation; see model_files_match)."""
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
 def model_files_match(aircraft: str, wheel_root: Optional[Path] = None,
                       staged_root: Optional[Path] = None) -> Tuple[bool, str]:
     """Do the two hosts load byte-identical model XML for this airframe?
@@ -153,6 +159,13 @@ def model_files_match(aircraft: str, wheel_root: Optional[Path] = None,
     The roots are overridable so that the mismatch path can be exercised. On
     this machine the real files agree, so a test that only ever ran against
     them would pass with the comparison deleted.
+
+    "Byte-identical" is up to line endings: the jsbsim wheel for Windows
+    ships its aircraft XML with CRLF while the plugin's staged copies are
+    kept LF on every platform (their bytes are under a hash contract, the
+    derived airframe's), and JSBSim's parser reads either. Two files that
+    differ only in line endings are the same aircraft; anything else is
+    not (measured: CI run 36509604836, Windows).
     """
     import jsbsim
 
@@ -174,7 +187,7 @@ def model_files_match(aircraft: str, wheel_root: Optional[Path] = None,
         target = staged / source.name
         if not target.is_file():
             differing.append(f"{source.name} missing from the plugin")
-        elif _sha256(source) != _sha256(target):
+        elif _sha256_lf(source) != _sha256_lf(target):
             differing.append(f"{source.name} differs")
     if differing:
         return False, "; ".join(differing)

@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Build the Unreal host with a toolchain UE 5.5 accepts.
+# Build the Unreal host with a toolchain UE 5.7 accepts (the Xcode range
+# below was measured on 5.5; 5.7's has not been checked on a Mac).
 #
 # DEVELOPER_DIR rather than `sudo xcode-select`: the override is per process, so
 # the machine's default Xcode is untouched and no admin password is needed.
 
-# The UE half is macOS-only for now: every render gotcha was measured on
-# Metal/macOS. Off-mac, refuse BY NAME with a pointer to the headless path.
+# This is the macOS/Linux shell wrapper. The maintained render platform is
+# WINDOWS (the .ps1 twin of this script); a Mac builds the same sources but
+# is not the tested path, and Linux has no engine half at all -- so off a
+# Mac this refuses BY NAME with a pointer to the headless path.
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "REFUSED ue.platform: rendered clips currently require macOS."
   echo "The compiler, headless physics, telemetry and the webapp run on"
@@ -16,7 +19,7 @@ fi
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.5}"
+UE_ROOT="${UE_ROOT:-/Users/Shared/Epic Games/UE_5.7}"
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode_16.app/Contents/Developer}"
 TARGET="${1:-FlightSimEditor}"
 

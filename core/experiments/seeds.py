@@ -41,6 +41,20 @@ SUBSYSTEMS = (
     "terrain",
     "sensor_noise",
     "dispersion",
+    # The instrument models (core/telemetry/instruments.py), one stream
+    # each so a profile change in one instrument never re-rolls another's
+    # errors: an IMU that shares a stream with the GPS would change its
+    # bias when the GPS update rate changed.
+    "imu",
+    "gps",
+    "pitot_static",
+    "magnetometer",
+    # R2: the instrument null test's own stream -- the synthetic white
+    # stream the Allan self-report's estimator check draws, at the run's
+    # own rate and length. It never touches a measured channel, so the
+    # self-check cannot move a measurement (and never reuses the declared,
+    # unused ``sensor_noise`` stream: a stream is named for its consumer).
+    "null_test",
 )
 
 DERIVATION = (

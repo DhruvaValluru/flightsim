@@ -8,7 +8,8 @@
 	"CreatedBy": "flightsim",
 	"CanContainContent": false,
 	"Modules": [
-		{ "Name": "FlightSimBridge", "Type": "Runtime", "LoadingPhase": "Default" }
+		{ "Name": "FlightSimBridge", "Type": "Runtime", "LoadingPhase": "Default" },
+		{ "Name": "FlightSimBridgeEditor", "Type": "Editor", "LoadingPhase": "PostEngineInit" }
 	],
 	"Plugins": [
 		{ "Name": "JSBSimFlightDynamicsModel", "Enabled": true },

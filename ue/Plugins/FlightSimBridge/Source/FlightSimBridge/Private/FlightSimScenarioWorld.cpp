@@ -20,6 +20,8 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
+#include <cmath>
+
 DEFINE_LOG_CATEGORY(LogFlightSimScenario);
 
 namespace
@@ -70,6 +72,220 @@ namespace
 		if (Difference < -180.0) { Difference += 360.0; }
 		return FMath::Abs(Difference);
 	}
+
+	// -- P9: the physics card blocks ------------------------------------------
+
+	// Python's own conversion factors, as the headless stack spells them
+	// (core/fdm/units.py): mps_to_fps multiplies by 1 / 0.3048, radians()
+	// multiplies by pi / 180, kt_to_mps by 1852 / 3600.
+	constexpr double PhysicsFtPerMetre = 1.0 / 0.3048;
+	constexpr double PhysicsDegToRad = 3.141592653589793 / 180.0;
+	constexpr double PhysicsRadToDeg = 180.0 / 3.141592653589793;   // math.degrees
+	constexpr double PhysicsMpsPerKnot = 1852.0 / 3600.0;
+
+	FString PhysicsNumber(double Value)
+	{
+		return FString::Printf(TEXT("%.17g"), Value);
+	}
+
+	// Python's int(round(x)): half to EVEN (von_karman.py n_rows and
+	// row_at), where FMath::RoundToInt rounds half up -- a 2.5 would count
+	// 3 rows here and 2 there.
+	int32 PhysicsPythonRound(double X)
+	{
+		const double Floor = std::floor(X);
+		const double Fraction = X - Floor;
+		const int64 Lower = static_cast<int64>(Floor);
+		if (Fraction > 0.5)
+		{
+			return static_cast<int32>(Lower + 1);
+		}
+		if (Fraction < 0.5)
+		{
+			return static_cast<int32>(Lower);
+		}
+		return static_cast<int32>(Lower % 2 == 0 ? Lower : Lower + 1);
+	}
+
+	// A fixed table's length as int32 (UE_ARRAY_COUNT is a size_t, and a
+	// signed/unsigned comparison is an error under the Windows warning set).
+	template <typename T, SIZE_T N>
+	constexpr int32 PhysicsCount(T (&)[N])
+	{
+		return static_cast<int32>(N);
+	}
+
+	// The one refusal path for every physics block: the rule name leads the
+	// sentence, so the log line reads "REFUSED -- <name>: <sentence>" (the
+	// form tests/test_messages.py scans for) and the commandlet's own Error
+	// line carries the same name.
+	bool RefuseCard(FString& Error, const FString& NamedSentence)
+	{
+		Error = NamedSentence;
+		UE_LOG(LogFlightSimScenario, Error, TEXT("REFUSED -- %s"), *NamedSentence);
+		return false;
+	}
+
+	// The turbulence_properties discipline for a whole block: exactly the
+	// fixed keys, in exactly the order the Python writer emits them (each
+	// block's CARD_KEYS), read by name afterwards -- never by iterating the
+	// map for the values. The JSON reader adds an object's fields to
+	// FJsonObject::Values in document order and nothing here removes one,
+	// so the map's iteration order is the card's text order; the first
+	// Windows build reads a real card through this and is its verification.
+	bool BlockKeysInOrder(const TSharedPtr<FJsonObject>& Block,
+	                      const TCHAR* const* Keys, int32 Count, FString& Why)
+	{
+		if (Block->Values.Num() != Count)
+		{
+			Why = FString::Printf(
+				TEXT("the block carries %d keys, not the %d this host reads; an ")
+				TEXT("extra or missing key would be silently un-applied"),
+				Block->Values.Num(), Count);
+			return false;
+		}
+		int32 Position = 0;
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : Block->Values)
+		{
+			if (Field.Key != Keys[Position])
+			{
+				Why = FString::Printf(
+					TEXT("key %d is '%s' where the fixed order has '%s'"),
+					Position, *Field.Key, Keys[Position]);
+				return false;
+			}
+			++Position;
+		}
+		return true;
+	}
+
+	// A finite JSON number, or false.
+	bool FiniteNumber(const TSharedPtr<FJsonValue>& Value, double& Out)
+	{
+		return Value.IsValid() && Value->TryGetNumber(Out) && FMath::IsFinite(Out);
+	}
+
+	// FIPS 180-4 SHA-256 over bytes, as lowercase hex: the gust table's row
+	// digest (von_karman.py rows_sha256) is recomputed at the door. Self-
+	// contained for the reason FlightSimHeightfield.cpp gives (the platform
+	// SHA-256 asserts on Mac).
+	FString PhysicsSha256Hex(const uint8* Data, uint64 Length)
+	{
+		static const uint32 K[64] = {
+			0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+			0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+			0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+			0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+			0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+			0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+			0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+			0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2};
+		uint32 H[8] = {0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+		               0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+		const uint64 BitLength = Length * 8;
+		const uint64 Padded = ((Length + 8) / 64 + 1) * 64;
+		TArray<uint8> Buffer;
+		Buffer.SetNumZeroed(static_cast<int32>(Padded));
+		if (Length > 0)
+		{
+			FMemory::Memcpy(Buffer.GetData(), Data, Length);
+		}
+		Buffer[static_cast<int32>(Length)] = 0x80;
+		for (int32 Byte = 0; Byte < 8; ++Byte)
+		{
+			Buffer[static_cast<int32>(Padded) - 1 - Byte] = static_cast<uint8>(BitLength >> (8 * Byte));
+		}
+		auto Rotr = [](uint32 X, uint32 N) { return (X >> N) | (X << (32 - N)); };
+		for (uint64 Chunk = 0; Chunk < Padded; Chunk += 64)
+		{
+			uint32 W[64];
+			for (int32 Word = 0; Word < 16; ++Word)
+			{
+				const uint8* P = Buffer.GetData() + Chunk + Word * 4;
+				W[Word] = (uint32(P[0]) << 24) | (uint32(P[1]) << 16)
+				        | (uint32(P[2]) << 8) | uint32(P[3]);
+			}
+			for (int32 Word = 16; Word < 64; ++Word)
+			{
+				const uint32 S0 = Rotr(W[Word-15], 7) ^ Rotr(W[Word-15], 18) ^ (W[Word-15] >> 3);
+				const uint32 S1 = Rotr(W[Word-2], 17) ^ Rotr(W[Word-2], 19) ^ (W[Word-2] >> 10);
+				W[Word] = W[Word-16] + S0 + W[Word-7] + S1;
+			}
+			uint32 A=H[0],B=H[1],C=H[2],D=H[3],E=H[4],F=H[5],G=H[6],Hh=H[7];
+			for (int32 Round = 0; Round < 64; ++Round)
+			{
+				const uint32 S1 = Rotr(E,6) ^ Rotr(E,11) ^ Rotr(E,25);
+				const uint32 Ch = (E & F) ^ (~E & G);
+				const uint32 T1 = Hh + S1 + Ch + K[Round] + W[Round];
+				const uint32 S0 = Rotr(A,2) ^ Rotr(A,13) ^ Rotr(A,22);
+				const uint32 Maj = (A & B) ^ (A & C) ^ (B & C);
+				const uint32 T2 = S0 + Maj;
+				Hh=G; G=F; F=E; E=D+T1; D=C; C=B; B=A; A=T1+T2;
+			}
+			H[0]+=A; H[1]+=B; H[2]+=C; H[3]+=D; H[4]+=E; H[5]+=F; H[6]+=G; H[7]+=Hh;
+		}
+		FString Hex;
+		for (int32 Index = 0; Index < 8; ++Index)
+		{
+			Hex += FString::Printf(TEXT("%08x"), H[Index]);
+		}
+		return Hex;
+	}
+
+	// The worlds that serve the recorder's "host:" rows, by the movement
+	// component the recorder observes (registered in Populate, removed in
+	// Teardown): the recorder stays observer-tier and never holds a world.
+	TMap<const UJSBSimMovementComponent*, const FFlightSimScenarioWorld*>& HostChannelWorlds()
+	{
+		static TMap<const UJSBSimMovementComponent*, const FFlightSimScenarioWorld*> Worlds;
+		return Worlds;
+	}
+
+	// The fixed key orders the Python writers emit (and pins by test).
+	const TCHAR* const AtmosphereCardKeys[] = {
+		TEXT("atmosphere/delta-T"), TEXT("atmosphere/P-sl-psf"),
+		TEXT("atmosphere/dew-point-R"), TEXT("applied"), TEXT("dew_point_rule"),
+		TEXT("stated")};
+	const TCHAR* const LoadingCardKeys[] = {
+		TEXT("stations"), TEXT("tanks"), TEXT("expected_cg_in"),
+		TEXT("tolerance_in"), TEXT("datum")};
+	const TCHAR* const LoadingStationKeys[] = {TEXT("name"), TEXT("property"), TEXT("lbs")};
+	const TCHAR* const LoadingTankKeys[] = {TEXT("index"), TEXT("property"), TEXT("lbs")};
+	const TCHAR* const FailureCardKeys[] = {TEXT("events"), TEXT("count")};
+	const TCHAR* const FailureEventKeys[] = {
+		TEXT("kind"), TEXT("target"), TEXT("at_s"), TEXT("property"), TEXT("value")};
+	const TCHAR* const IcingCardKeys[] = {
+		TEXT("eta_max"), TEXT("onset_s"), TEXT("ramp_s"), TEXT("alpha_shift_deg"),
+		TEXT("k_table"), TEXT("source")};
+	const TCHAR* const IcingKKeys[] = {
+		TEXT("k_lift"), TEXT("k_drag"), TEXT("k_pitch"), TEXT("k_roll"),
+		TEXT("k_yaw"), TEXT("k_side")};
+	// The icing properties, in the provider's write order (icing.py
+	// PROPERTIES): eta, the six factors in AXES order, the alpha shift.
+	const TCHAR* const IcingProperties[] = {
+		TEXT("icing/eta"), TEXT("icing/lift-factor"), TEXT("icing/drag-factor"),
+		TEXT("icing/pitch-factor"), TEXT("icing/roll-factor"),
+		TEXT("icing/yaw-factor"), TEXT("icing/side-factor"),
+		TEXT("icing/alpha-shift-rad")};
+	const TCHAR* const GustTableCardKeys[] = {
+		TEXT("model"), TEXT("seed"), TEXT("sigma"), TEXT("L"), TEXT("tas_mps"),
+		TEXT("dt_s"), TEXT("rows"), TEXT("sha256")};
+	const TCHAR* const LayeredWindCardKeys[] = {
+		TEXT("kind"), TEXT("layers"), TEXT("z0_ft"), TEXT("source")};
+	const TCHAR* const WakeCardKeys[] = {
+		TEXT("generator"), TEXT("gamma_0"), TEXT("b_0"), TEXT("r_c"),
+		TEXT("decay"), TEXT("geometry"), TEXT("selftest")};
+	const TCHAR* const WakeSelftestKeys[] = {
+		TEXT("y_m"), TEXT("z_m"), TEXT("age_s"), TEXT("u_mps"), TEXT("v_mps"),
+		TEXT("w_mps"), TEXT("p_eq_rad_s")};
+	const TCHAR* const DerivedAircraftCardKeys[] = {
+		TEXT("name"), TEXT("base"), TEXT("injections"), TEXT("aircraft_root"),
+		TEXT("xml_sha256")};
+	// The gust channel (stack.py GUST_PROPERTIES) and the roll gust.
+	const TCHAR* const GustProperties[] = {
+		TEXT("atmosphere/gust-north-fps"), TEXT("atmosphere/gust-east-fps"),
+		TEXT("atmosphere/gust-down-fps")};
+	const TCHAR* const GustPEquivalentProperty = TEXT("gust/p-equivalent-rad_sec");
 }
 
 double FFlightSimScenarioWorld::ReadProperty(const TCHAR* Name) const
@@ -81,6 +297,528 @@ double FFlightSimScenarioWorld::ReadProperty(const TCHAR* Name) const
 	FString Value;
 	Movement->CommandConsole(Name, FString(), Value);
 	return Value.IsEmpty() ? 0.0 : FCString::Atod(*Value);
+}
+
+namespace
+{
+	// P9: every physics card block, in the fixed order the item names them
+	// (atmosphere_properties, loading_properties, failure_schedule,
+	// icing_schedule, gust_table, layered_wind, wake, derived_aircraft).
+	// Each is optional; a present one is read whole or the run is refused
+	// by the block's name before any world exists.
+	bool ReadPhysicsBlocks(const TSharedPtr<FJsonObject>& Root,
+	                       FFlightSimScenarioCard& Out, FString& Error)
+	{
+		FString Why;
+
+		// -- atmosphere_properties (core/environment/atmosphere.py) ---------
+		if (Root->HasField(TEXT("atmosphere_properties")))
+		{
+			const TSharedPtr<FJsonObject>* Block = nullptr;
+			if (!Root->TryGetObjectField(TEXT("atmosphere_properties"), Block) || Block == nullptr)
+			{
+				return RefuseCard(Error, TEXT("card.atmosphere_properties: the block is not an object"));
+			}
+			if (!BlockKeysInOrder(*Block, AtmosphereCardKeys, PhysicsCount(AtmosphereCardKeys), Why))
+			{
+				return RefuseCard(Error, TEXT("card.atmosphere_properties: ") + Why);
+			}
+			// The three property writes, in card order; a null is not written
+			// (the provider's "only the stated ones").
+			for (int32 Key = 0; Key < 3; ++Key)
+			{
+				const TSharedPtr<FJsonValue> Entry = (*Block)->Values.FindRef(AtmosphereCardKeys[Key]);
+				if (Entry.IsValid() && Entry->IsNull())
+				{
+					continue;
+				}
+				double Number = 0.0;
+				if (!FiniteNumber(Entry, Number))
+				{
+					return RefuseCard(Error, FString::Printf(
+						TEXT("card.atmosphere_properties: '%s' is neither a finite number nor null"),
+						AtmosphereCardKeys[Key]));
+				}
+				Out.AtmosphereProperties.Add(AtmosphereCardKeys[Key]);
+				Out.AtmosphereValues.Add(PhysicsNumber(Number));
+			}
+			Out.bAtmosphere = true;
+		}
+
+		// -- loading_properties (core/scenario/loading.py) ------------------
+		if (Root->HasField(TEXT("loading_properties")))
+		{
+			const TSharedPtr<FJsonObject>* Block = nullptr;
+			if (!Root->TryGetObjectField(TEXT("loading_properties"), Block) || Block == nullptr)
+			{
+				return RefuseCard(Error, TEXT("card.loading_properties: the block is not an object"));
+			}
+			if (!BlockKeysInOrder(*Block, LoadingCardKeys, PhysicsCount(LoadingCardKeys), Why))
+			{
+				return RefuseCard(Error, TEXT("card.loading_properties: ") + Why);
+			}
+			// Stations first, a re-latch after each (LoadingProvider.prepare),
+			// then the tanks with one re-latch after the last.
+			for (int32 Part = 0; Part < 2; ++Part)
+			{
+				const TCHAR* ListKey = Part == 0 ? TEXT("stations") : TEXT("tanks");
+				const TCHAR* const* EntryKeys = Part == 0 ? LoadingStationKeys : LoadingTankKeys;
+				const TArray<TSharedPtr<FJsonValue>>* List = nullptr;
+				if (!(*Block)->TryGetArrayField(ListKey, List) || List == nullptr)
+				{
+					return RefuseCard(Error, FString::Printf(
+						TEXT("card.loading_properties: '%s' is not a list"), ListKey));
+				}
+				for (int32 Item = 0; Item < List->Num(); ++Item)
+				{
+					const TSharedPtr<FJsonObject>* EntryObject = nullptr;
+					if (!(*List)[Item]->TryGetObject(EntryObject) || EntryObject == nullptr ||
+					    !BlockKeysInOrder(*EntryObject, EntryKeys, 3, Why))
+					{
+						return RefuseCard(Error, FString::Printf(
+							TEXT("card.loading_properties: %s entry %d is not (%s, property, lbs) in order"),
+							ListKey, Item, EntryKeys[0]));
+					}
+					FString Property;
+					double Pounds = 0.0;
+					if (!(*EntryObject)->TryGetStringField(TEXT("property"), Property) ||
+					    Property.IsEmpty() ||
+					    !FiniteNumber((*EntryObject)->Values.FindRef(TEXT("lbs")), Pounds) ||
+					    Pounds < 0.0)
+					{
+						return RefuseCard(Error, FString::Printf(
+							TEXT("card.loading_properties: %s entry %d carries no property or ")
+							TEXT("no non-negative weight in lbs"), ListKey, Item));
+					}
+					Out.LoadingProperties.Add(Property);
+					Out.LoadingValues.Add(PhysicsNumber(Pounds));
+					Out.LoadingRelatchAfter.Add(Part == 0 || Item == List->Num() - 1);
+				}
+				(Part == 0 ? Out.LoadingStations : Out.LoadingTanks) = List->Num();
+			}
+			const TSharedPtr<FJsonObject>* Datum = nullptr;
+			if (!FiniteNumber((*Block)->Values.FindRef(TEXT("expected_cg_in")), Out.LoadingExpectedCgIn) ||
+			    !FiniteNumber((*Block)->Values.FindRef(TEXT("tolerance_in")), Out.LoadingToleranceIn) ||
+			    Out.LoadingToleranceIn <= 0.0 ||
+			    !(*Block)->TryGetObjectField(TEXT("datum"), Datum) || Datum == nullptr)
+			{
+				return RefuseCard(Error, TEXT("card.loading_properties: the expected centre of ")
+				                         TEXT("gravity, its positive tolerance or the datum is missing"));
+			}
+			(*Datum)->TryGetStringField(TEXT("frame"), Out.LoadingDatumFrame);
+			Out.bLoading = true;
+		}
+
+		// -- failure_schedule (core/telemetry/failures.py) -------------------
+		if (Root->HasField(TEXT("failure_schedule")))
+		{
+			const TSharedPtr<FJsonObject>* Block = nullptr;
+			if (!Root->TryGetObjectField(TEXT("failure_schedule"), Block) || Block == nullptr)
+			{
+				return RefuseCard(Error, TEXT("card.failure_schedule: the block is not an object"));
+			}
+			if (!BlockKeysInOrder(*Block, FailureCardKeys, PhysicsCount(FailureCardKeys), Why))
+			{
+				return RefuseCard(Error, TEXT("card.failure_schedule: ") + Why);
+			}
+			const TArray<TSharedPtr<FJsonValue>>* Events = nullptr;
+			double Count = -1.0;
+			if (!(*Block)->TryGetArrayField(TEXT("events"), Events) || Events == nullptr ||
+			    !FiniteNumber((*Block)->Values.FindRef(TEXT("count")), Count) ||
+			    Count != static_cast<double>(Events->Num()))
+			{
+				return RefuseCard(Error, TEXT("card.failure_schedule: the count does not match ")
+				                         TEXT("the events listed"));
+			}
+			for (int32 Item = 0; Item < Events->Num(); ++Item)
+			{
+				const TSharedPtr<FJsonObject>* EventObject = nullptr;
+				if (!(*Events)[Item]->TryGetObject(EventObject) || EventObject == nullptr ||
+				    !BlockKeysInOrder(*EventObject, FailureEventKeys,
+				                      PhysicsCount(FailureEventKeys), Why))
+				{
+					return RefuseCard(Error, FString::Printf(
+						TEXT("card.failure_schedule: event %d is not (kind, target, at_s, ")
+						TEXT("property, value) in order"), Item));
+				}
+				FFlightSimFailureEvent Event;
+				const TSharedPtr<FJsonValue> TargetValue = (*EventObject)->Values.FindRef(TEXT("target"));
+				double TargetNumber = 0.0;
+				const bool bKnownKind = (*EventObject)->TryGetStringField(TEXT("kind"), Event.Kind) &&
+					(Event.Kind == TEXT("engine_out") || Event.Kind == TEXT("control_jam") ||
+					 Event.Kind == TEXT("hardover") || Event.Kind == TEXT("float") ||
+					 Event.Kind == TEXT("authority_loss"));
+				if (!bKnownKind ||
+				    !FiniteNumber((*EventObject)->Values.FindRef(TEXT("at_s")), Event.AtSeconds) ||
+				    Event.AtSeconds < 0.0 ||
+				    !(*EventObject)->TryGetStringField(TEXT("property"), Event.Property) ||
+				    Event.Property.IsEmpty() ||
+				    !FiniteNumber((*EventObject)->Values.FindRef(TEXT("value")), Event.Value))
+				{
+					return RefuseCard(Error, FString::Printf(
+						TEXT("card.failure_schedule: event %d is not a known kind with a ")
+						TEXT("non-negative time, a property and a numeric value"), Item));
+				}
+				if (Event.Kind == TEXT("engine_out"))
+				{
+					// The engine is bracketed with propulsion/active_engine, so
+					// the target must be a whole engine index.
+					if (!FiniteNumber(TargetValue, TargetNumber) || TargetNumber < 0.0 ||
+					    TargetNumber != FMath::RoundToDouble(TargetNumber))
+					{
+						return RefuseCard(Error, FString::Printf(
+							TEXT("card.failure_schedule: engine event %d names no whole engine index"),
+							Item));
+					}
+					Event.EngineIndex = static_cast<int32>(TargetNumber);
+					Event.Target = FString::Printf(TEXT("%d"), Event.EngineIndex);
+				}
+				else if (!TargetValue.IsValid() || !TargetValue->TryGetString(Event.Target) ||
+				         !(Event.Target == TEXT("elevator") || Event.Target == TEXT("aileron") ||
+				           Event.Target == TEXT("rudder")))
+				{
+					return RefuseCard(Error, FString::Printf(
+						TEXT("card.failure_schedule: surface event %d names no elevator, aileron ")
+						TEXT("or rudder"), Item));
+				}
+				Out.FailureEvents.Add(Event);
+			}
+		}
+
+		// -- icing_schedule (core/environment/icing.py) ---------------------
+		if (Root->HasField(TEXT("icing_schedule")))
+		{
+			const TSharedPtr<FJsonObject>* Block = nullptr;
+			if (!Root->TryGetObjectField(TEXT("icing_schedule"), Block) || Block == nullptr)
+			{
+				return RefuseCard(Error, TEXT("card.icing_schedule: the block is not an object"));
+			}
+			if (!BlockKeysInOrder(*Block, IcingCardKeys, PhysicsCount(IcingCardKeys), Why))
+			{
+				return RefuseCard(Error, TEXT("card.icing_schedule: ") + Why);
+			}
+			const TSharedPtr<FJsonObject>* KTable = nullptr;
+			if (!FiniteNumber((*Block)->Values.FindRef(TEXT("eta_max")), Out.IcingEtaMax) ||
+			    Out.IcingEtaMax < 0.0 || Out.IcingEtaMax > 1.0 ||
+			    !FiniteNumber((*Block)->Values.FindRef(TEXT("onset_s")), Out.IcingOnsetSeconds) ||
+			    Out.IcingOnsetSeconds < 0.0 ||
+			    !FiniteNumber((*Block)->Values.FindRef(TEXT("ramp_s")), Out.IcingRampSeconds) ||
+			    Out.IcingRampSeconds < 0.0 ||
+			    !FiniteNumber((*Block)->Values.FindRef(TEXT("alpha_shift_deg")), Out.IcingAlphaShiftDeg) ||
+			    !(*Block)->TryGetObjectField(TEXT("k_table"), KTable) || KTable == nullptr)
+			{
+				return RefuseCard(Error, TEXT("card.icing_schedule: the ramp's numbers are missing ")
+				                         TEXT("or outside their ranges"));
+			}
+			if (!BlockKeysInOrder(*KTable, IcingKKeys, PhysicsCount(IcingKKeys), Why))
+			{
+				return RefuseCard(Error, TEXT("card.icing_schedule: the k_table: ") + Why);
+			}
+			for (int32 Axis = 0; Axis < 6; ++Axis)
+			{
+				if (!FiniteNumber((*KTable)->Values.FindRef(IcingKKeys[Axis]), Out.IcingK[Axis]))
+				{
+					return RefuseCard(Error, FString::Printf(
+						TEXT("card.icing_schedule: '%s' is not a number"), IcingKKeys[Axis]));
+				}
+			}
+			(*Block)->TryGetStringField(TEXT("source"), Out.IcingSource);
+			Out.bIcing = true;
+		}
+
+		// -- gust_table (core/environment/von_karman.py) ---------------------
+		if (Root->HasField(TEXT("gust_table")))
+		{
+			const TSharedPtr<FJsonObject>* Block = nullptr;
+			if (!Root->TryGetObjectField(TEXT("gust_table"), Block) || Block == nullptr)
+			{
+				return RefuseCard(Error, TEXT("card.gust_table: the block is not an object"));
+			}
+			if (!BlockKeysInOrder(*Block, GustTableCardKeys, PhysicsCount(GustTableCardKeys), Why))
+			{
+				return RefuseCard(Error, TEXT("card.gust_table: ") + Why);
+			}
+			const TArray<TSharedPtr<FJsonValue>>* Rows = nullptr;
+			if (!(*Block)->TryGetArrayField(TEXT("rows"), Rows) || Rows == nullptr ||
+			    !(*Block)->TryGetStringField(TEXT("sha256"), Out.GustTableSha256) ||
+			    !FiniteNumber((*Block)->Values.FindRef(TEXT("dt_s")), Out.GustTableDtSeconds) ||
+			    Out.GustTableDtSeconds <= 0.0)
+			{
+				return RefuseCard(Error, TEXT("card.gust_table: the rows, their digest or the step ")
+				                         TEXT("is missing"));
+			}
+			(*Block)->TryGetStringField(TEXT("model"), Out.GustTableModel);
+			// Row i is the field at step i: one row per step of the flight
+			// the card is for, the first included (von_karman.py n_rows).
+			const int32 ExpectedRows = PhysicsPythonRound(Out.DurationSeconds * Out.RateHz) + 1;
+			if (Rows->Num() != ExpectedRows)
+			{
+				return RefuseCard(Error, FString::Printf(
+					TEXT("gust_table.length: the table has %d rows for the %d steps (and the ")
+					TEXT("first) of a %.3f s flight at %.0f Hz"),
+					Rows->Num(), ExpectedRows, Out.DurationSeconds, Out.RateHz));
+			}
+			// Each row is five %.17g strings [t_s, u, v, w, p]; the digest is
+			// over their TEXT (fields joined by one space, rows by one
+			// newline, ASCII), so the host re-hashes exactly what it parses.
+			FString RowsText;
+			for (int32 Item = 0; Item < Rows->Num(); ++Item)
+			{
+				const TArray<TSharedPtr<FJsonValue>>* Fields = nullptr;
+				if (!(*Rows)[Item]->TryGetArray(Fields) || Fields == nullptr || Fields->Num() != 5)
+				{
+					return RefuseCard(Error, FString::Printf(
+						TEXT("card.gust_table: row %d is not five numbers"), Item));
+				}
+				double Parsed[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+				for (int32 Column = 0; Column < 5; ++Column)
+				{
+					// strtod to the end of the text: %.17g writes exponents
+					// ("1.2e-05"), which FCString::IsNumeric would refuse.
+					FString Text;
+					TCHAR* End = nullptr;
+					const bool bText = (*Fields)[Column]->TryGetString(Text) && !Text.IsEmpty();
+					Parsed[Column] = bText ? FCString::Strtod(*Text, &End) : 0.0;
+					if (!bText || End == nullptr || *End != TEXT('\0') || !FMath::IsFinite(Parsed[Column]))
+					{
+						return RefuseCard(Error, FString::Printf(
+							TEXT("card.gust_table: row %d field %d is not a number written as text"),
+							Item, Column));
+					}
+					if (Column > 0)
+					{
+						RowsText += TEXT(" ");
+					}
+					RowsText += Text;
+				}
+				if (Item + 1 < Rows->Num())
+				{
+					RowsText += TEXT("\n");
+				}
+				Out.GustRowTime.Add(Parsed[0]);
+				Out.GustRowU.Add(Parsed[1]);
+				Out.GustRowV.Add(Parsed[2]);
+				Out.GustRowW.Add(Parsed[3]);
+				Out.GustRowP.Add(Parsed[4]);
+			}
+			const FTCHARToUTF8 RowsBytes(*RowsText);
+			const FString Computed = PhysicsSha256Hex(
+				reinterpret_cast<const uint8*>(RowsBytes.Get()), RowsBytes.Length());
+			if (!Computed.Equals(Out.GustTableSha256, ESearchCase::IgnoreCase))
+			{
+				return RefuseCard(Error, FString::Printf(
+					TEXT("card.gust_table: the rows hash to %s, not the card's %s"),
+					*Computed.Left(16), *Out.GustTableSha256.Left(16)));
+			}
+			Out.bGustTable = true;
+		}
+
+		// -- layered_wind (core/environment/shear.py) ------------------------
+		if (Root->HasField(TEXT("layered_wind")))
+		{
+			const TSharedPtr<FJsonObject>* Block = nullptr;
+			if (!Root->TryGetObjectField(TEXT("layered_wind"), Block) || Block == nullptr)
+			{
+				return RefuseCard(Error, TEXT("card.layered_wind: the block is not an object"));
+			}
+			if (!BlockKeysInOrder(*Block, LayeredWindCardKeys, PhysicsCount(LayeredWindCardKeys), Why))
+			{
+				return RefuseCard(Error, TEXT("card.layered_wind: ") + Why);
+			}
+			const TArray<TSharedPtr<FJsonValue>>* Layers = nullptr;
+			if (!(*Block)->TryGetStringField(TEXT("kind"), Out.LayeredWindKind) ||
+			    !(Out.LayeredWindKind == TEXT("layered") || Out.LayeredWindKind == TEXT("milspec") ||
+			      Out.LayeredWindKind == TEXT("nwp")) ||
+			    !(*Block)->TryGetArrayField(TEXT("layers"), Layers) || Layers == nullptr ||
+			    Layers->Num() == 0)
+			{
+				return RefuseCard(Error, TEXT("card.layered_wind: the kind is not layered, milspec ")
+				                         TEXT("or nwp, or there are no layers"));
+			}
+			for (int32 Item = 0; Item < Layers->Num(); ++Item)
+			{
+				const TArray<TSharedPtr<FJsonValue>>* Layer = nullptr;
+				double Height = 0.0;
+				double Speed = 0.0;
+				double From = 0.0;
+				if (!(*Layers)[Item]->TryGetArray(Layer) || Layer == nullptr || Layer->Num() != 3 ||
+				    !FiniteNumber((*Layer)[0], Height) || !FiniteNumber((*Layer)[1], Speed) ||
+				    !FiniteNumber((*Layer)[2], From) || Speed < 0.0 ||
+				    (Item > 0 && Height <= Out.LayerHeightMetres.Last()))
+				{
+					return RefuseCard(Error, FString::Printf(
+						TEXT("card.layered_wind: layer %d is not a rising height, a speed ")
+						TEXT("and a direction"), Item));
+				}
+				Out.LayerHeightMetres.Add(Height);
+				Out.LayerSpeedKnots.Add(Speed);
+				Out.LayerFromDegrees.Add(From);
+			}
+			(*Block)->TryGetStringField(TEXT("source"), Out.LayeredWindSource);
+			Out.bLayeredWind = true;
+		}
+
+		// -- wake (core/environment/wake.py) ---------------------------------
+		if (Root->HasField(TEXT("wake")))
+		{
+			const TSharedPtr<FJsonObject>* Block = nullptr;
+			if (!Root->TryGetObjectField(TEXT("wake"), Block) || Block == nullptr)
+			{
+				return RefuseCard(Error, TEXT("card.wake: the block is not an object"));
+			}
+			if (!BlockKeysInOrder(*Block, WakeCardKeys, PhysicsCount(WakeCardKeys), Why))
+			{
+				return RefuseCard(Error, TEXT("card.wake: ") + Why);
+			}
+			FFlightSimWakeCard& Pair = Out.Wake;
+			const TSharedPtr<FJsonObject>* Generator = nullptr;
+			const TSharedPtr<FJsonObject>* Decay = nullptr;
+			const TSharedPtr<FJsonObject>* Geometry = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Vectors = nullptr;
+			if (!(*Block)->TryGetObjectField(TEXT("generator"), Generator) || Generator == nullptr ||
+			    !(*Block)->TryGetObjectField(TEXT("decay"), Decay) || Decay == nullptr ||
+			    !(*Block)->TryGetObjectField(TEXT("geometry"), Geometry) || Geometry == nullptr ||
+			    !(*Block)->TryGetArrayField(TEXT("selftest"), Vectors) || Vectors == nullptr ||
+			    !FiniteNumber((*Block)->Values.FindRef(TEXT("gamma_0")), Pair.Gamma0) ||
+			    !FiniteNumber((*Block)->Values.FindRef(TEXT("b_0")), Pair.B0Metres) ||
+			    !FiniteNumber((*Block)->Values.FindRef(TEXT("r_c")), Pair.RcMetres) ||
+			    Pair.Gamma0 <= 0.0 || Pair.B0Metres <= 0.0 || Pair.RcMetres <= 0.0)
+			{
+				return RefuseCard(Error, TEXT("card.wake: the circulation, spacing, core radius or ")
+				                         TEXT("a sub-block is missing"));
+			}
+			const TSharedPtr<FJsonValue> EpsValue = (*Decay)->Values.FindRef(TEXT("eps_star"));
+			const TSharedPtr<FJsonValue> NValue = (*Decay)->Values.FindRef(TEXT("n_star"));
+			Pair.bEpsStar = FiniteNumber(EpsValue, Pair.EpsStar);
+			Pair.bNStar = FiniteNumber(NValue, Pair.NStar);
+			if (!(*Decay)->TryGetStringField(TEXT("model"), Pair.DecayModel) ||
+			    !(Pair.DecayModel == TEXT("none") || Pair.DecayModel == TEXT("sarpkaya")) ||
+			    (Pair.DecayModel == TEXT("sarpkaya") && !(Pair.bEpsStar && Pair.EpsStar > 0.0)))
+			{
+				return RefuseCard(Error, TEXT("card.wake: the decay model is not none or sarpkaya ")
+				                         TEXT("with a positive dissipation rate"));
+			}
+			const TSharedPtr<FJsonValue> AgeValue = (*Geometry)->Values.FindRef(TEXT("age_s"));
+			const TSharedPtr<FJsonValue> SeparationValue = (*Geometry)->Values.FindRef(TEXT("separation_s"));
+			Pair.bAgeHeld = FiniteNumber(AgeValue, Pair.AgeHeldSeconds);
+			const bool bSeparation = FiniteNumber(SeparationValue, Pair.SeparationSeconds);
+			if (Pair.bAgeHeld == bSeparation ||
+			    !FiniteNumber((*Geometry)->Values.FindRef(TEXT("lateral_offset_m")), Pair.LateralOffsetMetres) ||
+			    !FiniteNumber((*Geometry)->Values.FindRef(TEXT("vertical_offset_m")), Pair.VerticalOffsetMetres) ||
+			    !FiniteNumber((*Geometry)->Values.FindRef(TEXT("age_0_s")), Pair.Age0Seconds) ||
+			    !FiniteNumber((*Geometry)->Values.FindRef(TEXT("own_span_m")), Pair.OwnSpanMetres) ||
+			    !FiniteNumber((*Geometry)->Values.FindRef(TEXT("heading_deg")), Pair.HeadingDegrees) ||
+			    !FiniteNumber((*Geometry)->Values.FindRef(TEXT("w_0_mps")), Pair.W0Mps) ||
+			    !FiniteNumber((*Generator)->Values.FindRef(TEXT("speed_mps")), Pair.GeneratorSpeedMps) ||
+			    Pair.OwnSpanMetres <= 0.0 || Pair.GeneratorSpeedMps <= 0.0)
+			{
+				return RefuseCard(Error, TEXT("card.wake: the geometry does not state one age, the ")
+				                         TEXT("offsets, the own span, the heading and the speeds"));
+			}
+			if (Vectors->Num() != 5)
+			{
+				return RefuseCard(Error, FString::Printf(
+					TEXT("card.wake: the selftest carries %d vectors, not five"), Vectors->Num()));
+			}
+			for (int32 Item = 0; Item < Vectors->Num(); ++Item)
+			{
+				const TSharedPtr<FJsonObject>* VectorObject = nullptr;
+				FFlightSimWakeVector Probe;
+				if (!(*Vectors)[Item]->TryGetObject(VectorObject) || VectorObject == nullptr ||
+				    !BlockKeysInOrder(*VectorObject, WakeSelftestKeys,
+				                      PhysicsCount(WakeSelftestKeys), Why) ||
+				    !FiniteNumber((*VectorObject)->Values.FindRef(TEXT("y_m")), Probe.YMetres) ||
+				    !FiniteNumber((*VectorObject)->Values.FindRef(TEXT("z_m")), Probe.ZMetres) ||
+				    !FiniteNumber((*VectorObject)->Values.FindRef(TEXT("age_s")), Probe.AgeSeconds) ||
+				    !FiniteNumber((*VectorObject)->Values.FindRef(TEXT("u_mps")), Probe.UMps) ||
+				    !FiniteNumber((*VectorObject)->Values.FindRef(TEXT("v_mps")), Probe.VMps) ||
+				    !FiniteNumber((*VectorObject)->Values.FindRef(TEXT("w_mps")), Probe.WMps) ||
+				    !FiniteNumber((*VectorObject)->Values.FindRef(TEXT("p_eq_rad_s")), Probe.PEqRadPerSec))
+				{
+					return RefuseCard(Error, FString::Printf(
+						TEXT("card.wake: selftest vector %d is not seven numbers in the fixed order"),
+						Item));
+				}
+				Pair.Selftest.Add(Probe);
+			}
+			// The selftest, at startup, before any world: the port must
+			// reproduce the Python provider's five vectors to 1e-9.
+			FFlightSimWake Port;
+			Port.Init(Pair);
+			if (!Port.Selftest(Out.WakeHostSelftest, Out.WakeSelftestWorst, Why))
+			{
+				return RefuseCard(Error, TEXT("card.wake: ") + Why);
+			}
+			UE_LOG(LogFlightSimScenario, Display,
+			       TEXT("wake pair: Gamma_0 %.3f m^2/s, b_0 %.3f m, r_c %.3f m, decay %s; ")
+			       TEXT("selftest 5 vectors, worst %.3e (bound %.0e)"),
+			       Pair.Gamma0, Pair.B0Metres, Pair.RcMetres, *Pair.DecayModel,
+			       Out.WakeSelftestWorst, FFlightSimWake::SelftestTolerance);
+			Out.bWake = true;
+		}
+
+		// -- derived_aircraft (core/scenario/card.py) ------------------------
+		if (Root->HasField(TEXT("derived_aircraft")))
+		{
+			const TSharedPtr<FJsonObject>* Block = nullptr;
+			if (!Root->TryGetObjectField(TEXT("derived_aircraft"), Block) || Block == nullptr)
+			{
+				return RefuseCard(Error, TEXT("card.derived_aircraft: the block is not an object"));
+			}
+			if (!BlockKeysInOrder(*Block, DerivedAircraftCardKeys,
+			                      PhysicsCount(DerivedAircraftCardKeys), Why))
+			{
+				return RefuseCard(Error, TEXT("card.derived_aircraft: ") + Why);
+			}
+			const TArray<TSharedPtr<FJsonValue>>* Injections = nullptr;
+			if (!(*Block)->TryGetStringField(TEXT("name"), Out.DerivedAircraftName) ||
+			    Out.DerivedAircraftName.IsEmpty() ||
+			    !(*Block)->TryGetStringField(TEXT("base"), Out.DerivedAircraftBase) ||
+			    !(*Block)->TryGetArrayField(TEXT("injections"), Injections) || Injections == nullptr ||
+			    Injections->Num() == 0 ||
+			    !(*Block)->TryGetStringField(TEXT("aircraft_root"), Out.DerivedAircraftRoot) ||
+			    Out.DerivedAircraftRoot.IsEmpty() ||
+			    !(*Block)->TryGetStringField(TEXT("xml_sha256"), Out.DerivedAircraftSha256) ||
+			    Out.DerivedAircraftSha256.Len() != 64)
+			{
+				return RefuseCard(Error, TEXT("card.derived_aircraft: the name, base, injections, ")
+				                         TEXT("aircraft root or 64-digit XML digest is missing"));
+			}
+			if (Out.DerivedAircraftBase != Out.Aircraft ||
+			    !Out.DerivedAircraftName.StartsWith(Out.DerivedAircraftBase + TEXT("-")))
+			{
+				return RefuseCard(Error, FString::Printf(
+					TEXT("card.derived_aircraft: '%s' is not a derivation of the card's '%s'"),
+					*Out.DerivedAircraftName, *Out.Aircraft));
+			}
+			for (const TSharedPtr<FJsonValue>& Injection : *Injections)
+			{
+				FString InjectionName;
+				if (!Injection->TryGetString(InjectionName) || InjectionName == TEXT("tecs"))
+				{
+					// The host flies open loop (hold_state is refused above);
+					// a TECS derivation is the headless held-state airframe.
+					return RefuseCard(Error, TEXT("card.derived_aircraft: an injection is not a name, ")
+					                         TEXT("or is the autopilot this host does not run"));
+				}
+				Out.DerivedAircraftInjections.Add(InjectionName);
+			}
+			Out.bDerivedAircraft = true;
+		}
+
+		// The vertical datum's undulation at the origin (P10), for the
+		// undulation_m / hae_m channels: 0 where none applies (null).
+		const TSharedPtr<FJsonObject>* DatumBlock = nullptr;
+		if (Root->TryGetObjectField(TEXT("datum"), DatumBlock) && DatumBlock != nullptr)
+		{
+			double Undulation = 0.0;
+			if (FiniteNumber((*DatumBlock)->Values.FindRef(TEXT("undulation_m")), Undulation))
+			{
+				Out.DatumUndulationMetres = Undulation;
+			}
+		}
+		return true;
+	}
 }
 
 bool FFlightSimScenarioWorld::ReadCard(const FString& Path,
@@ -472,6 +1210,168 @@ bool FFlightSimScenarioWorld::ReadCard(const FString& Path,
 	// Optional real heightfield collision (Phase 7 1.2).
 	Root->TryGetStringField(TEXT("collision_terrain"), Out.CollisionTerrainPath);
 	Root->TryGetStringField(TEXT("scene_crs"), Out.SceneCrs);
+	// Phase 10 (package 7): the sampled livery, verbatim from the block
+	// Python wrote; the host chooses nothing.
+	const TSharedPtr<FJsonObject>* RandomizationJson = nullptr;
+	if (Root->TryGetObjectField(TEXT("randomization"), RandomizationJson) &&
+	    RandomizationJson != nullptr)
+	{
+		FString Livery;
+		if ((*RandomizationJson)->TryGetStringField(TEXT("livery"), Livery) &&
+		    !Livery.IsEmpty())
+		{
+			Out.Livery = Livery;
+		}
+	}
+
+	// Phase 2 (package B, contracts §2.3): the scene's labelled objects,
+	// verbatim. Every int_id must fit the 8-bit stencil and name one object:
+	// an id that means two objects is exactly the ID image a consumer cannot
+	// trust, refused here by name (annotation.identity) before any frame.
+	const TArray<TSharedPtr<FJsonValue>>* ObjectsJson = nullptr;
+	if (Root->TryGetArrayField(TEXT("objects"), ObjectsJson) && ObjectsJson != nullptr)
+	{
+		TSet<int32> SeenIds;
+		for (const TSharedPtr<FJsonValue>& Value : *ObjectsJson)
+		{
+			const TSharedPtr<FJsonObject>* Entry = nullptr;
+			if (!Value->TryGetObject(Entry) || Entry == nullptr)
+			{
+				Error = TEXT("objects must be a list of objects");
+				return false;
+			}
+			FFlightSimSceneObject Object;
+			double IntId = 0.0, ClassId = 0.0;
+			if (!ReadString(*Entry, TEXT("id"), Object.Id, Error)) { return false; }
+			if (!ReadNumber(*Entry, TEXT("int_id"), IntId, Error)) { return false; }
+			if (!ReadNumber(*Entry, TEXT("class_id"), ClassId, Error)) { return false; }
+			(*Entry)->TryGetStringField(TEXT("class"), Object.Class);
+			(*Entry)->TryGetStringField(TEXT("role"), Object.Role);
+			Object.IntId = static_cast<int32>(IntId);
+			Object.ClassId = static_cast<int32>(ClassId);
+			if (Object.IntId < 1 || Object.IntId > 255)
+			{
+				Error = FString::Printf(
+					TEXT("annotation.identity: object '%s' has int_id %d, outside the ")
+					TEXT("8-bit stencil's 1..255"), *Object.Id, Object.IntId);
+				return false;
+			}
+			if (SeenIds.Contains(Object.IntId))
+			{
+				Error = FString::Printf(
+					TEXT("annotation.identity: int_id %d names two objects on the card"),
+					Object.IntId);
+				return false;
+			}
+			SeenIds.Add(Object.IntId);
+			Out.Objects.Add(Object);
+		}
+	}
+	const TArray<TSharedPtr<FJsonValue>>* TaxonomyJson = nullptr;
+	if (Root->TryGetArrayField(TEXT("taxonomy"), TaxonomyJson) && TaxonomyJson != nullptr)
+	{
+		for (const TSharedPtr<FJsonValue>& Value : *TaxonomyJson)
+		{
+			FString Name;
+			if (Value->TryGetString(Name))
+			{
+				Out.TaxonomyClasses.Add(Name);
+			}
+		}
+	}
+
+	// Phase 2 (packages B + C, contracts §2.2): the scripted traffic, each
+	// with its Python-solved keyframes. Refused by name when a track is
+	// misaligned or empty: the host interpolates, never invents.
+	const TArray<TSharedPtr<FJsonValue>>* TrafficJson = nullptr;
+	if (Root->TryGetArrayField(TEXT("traffic"), TrafficJson) && TrafficJson != nullptr)
+	{
+		for (const TSharedPtr<FJsonValue>& Value : *TrafficJson)
+		{
+			const TSharedPtr<FJsonObject>* Entry = nullptr;
+			if (!Value->TryGetObject(Entry) || Entry == nullptr)
+			{
+				Error = TEXT("traffic must be a list of objects");
+				return false;
+			}
+			FFlightSimTrafficTrack Track;
+			double IntId = 0.0;
+			if (!ReadString(*Entry, TEXT("id"), Track.Id, Error)) { return false; }
+			if (!ReadNumber(*Entry, TEXT("int_id"), IntId, Error)) { return false; }
+			if (!ReadString(*Entry, TEXT("aircraft"), Track.Aircraft, Error)) { return false; }
+			if (!ReadString(*Entry, TEXT("track"), Track.Track, Error)) { return false; }
+			if (!ReadNumber(*Entry, TEXT("range_m"), Track.RangeMetres, Error)) { return false; }
+			if (!ReadNumber(*Entry, TEXT("origin_x_m"), Track.OriginXMetres, Error)) { return false; }
+			if (!ReadNumber(*Entry, TEXT("origin_y_m"), Track.OriginYMetres, Error)) { return false; }
+			Track.IntId = static_cast<int32>(IntId);
+			FString Livery;
+			if ((*Entry)->TryGetStringField(TEXT("livery"), Livery) && !Livery.IsEmpty())
+			{
+				Track.Livery = Livery;
+			}
+			// null when Python found no imported mesh; the render commandlet
+			// refuses aircraft.mesh by name rather than drawing boxes.
+			(*Entry)->TryGetStringField(TEXT("mesh_manifest"), Track.MeshManifestPath);
+			const TArray<TSharedPtr<FJsonValue>>* Cg = nullptr;
+			if (!(*Entry)->TryGetArrayField(TEXT("cg_actor_cm"), Cg) || Cg == nullptr || Cg->Num() != 3)
+			{
+				Error = FString::Printf(TEXT("traffic '%s' carries no cg_actor_cm[3]"), *Track.Id);
+				return false;
+			}
+			Track.CgActorCm = FVector((*Cg)[0]->AsNumber(), (*Cg)[1]->AsNumber(), (*Cg)[2]->AsNumber());
+			const TSharedPtr<FJsonObject>* Poses = nullptr;
+			if (!(*Entry)->TryGetObjectField(TEXT("poses"), Poses) || Poses == nullptr)
+			{
+				Error = FString::Printf(TEXT("traffic '%s' carries no poses block"), *Track.Id);
+				return false;
+			}
+			auto ReadSeries = [&](const TCHAR* Key, TArray<double>& Series) -> bool
+			{
+				const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+				if (!(*Poses)->TryGetArrayField(Key, Values) || Values == nullptr)
+				{
+					Error = FString::Printf(TEXT("traffic '%s' poses block is missing %s"),
+					                        *Track.Id, Key);
+					return false;
+				}
+				for (const TSharedPtr<FJsonValue>& Sample : *Values)
+				{
+					Series.Add(Sample->AsNumber());
+				}
+				return true;
+			};
+			if (!ReadSeries(TEXT("t_s"), Track.Times) ||
+			    !ReadSeries(TEXT("north_m"), Track.NorthMetres) ||
+			    !ReadSeries(TEXT("east_m"), Track.EastMetres) ||
+			    !ReadSeries(TEXT("alt_m"), Track.AltMetres) ||
+			    !ReadSeries(TEXT("yaw_deg"), Track.YawDegrees) ||
+			    !ReadSeries(TEXT("pitch_deg"), Track.PitchDegrees) ||
+			    !ReadSeries(TEXT("roll_deg"), Track.RollDegrees))
+			{
+				return false;
+			}
+			const int32 N = Track.Times.Num();
+			if (N < 2 || Track.NorthMetres.Num() != N || Track.EastMetres.Num() != N ||
+			    Track.AltMetres.Num() != N || Track.YawDegrees.Num() != N ||
+			    Track.PitchDegrees.Num() != N || Track.RollDegrees.Num() != N)
+			{
+				Error = FString::Printf(
+					TEXT("traffic '%s' pose arrays disagree about their length (t_s has %d)"),
+					*Track.Id, N);
+				return false;
+			}
+			for (int32 i = 1; i < N; ++i)
+			{
+				if (Track.Times[i] <= Track.Times[i - 1])
+				{
+					Error = FString::Printf(TEXT("traffic '%s' t_s is not strictly increasing"),
+					                        *Track.Id);
+					return false;
+				}
+			}
+			Out.Traffic.Add(Track);
+		}
+	}
 
 	bool bHoldState = false;
 	if (!Root->TryGetBoolField(TEXT("hold_state"), bHoldState))
@@ -527,7 +1427,10 @@ bool FFlightSimScenarioWorld::ReadCard(const FString& Path,
 		Error = TEXT("duration, rate and sample interval must all be positive");
 		return false;
 	}
-	return true;
+
+	// P9: the physics card blocks, each refused by name when malformed
+	// (after the duration and rate, which gust_table.length is judged by).
+	return ReadPhysicsBlocks(Root, Out, Error);
 }
 
 bool FFlightSimScenarioWorld::Build(const FFlightSimScenarioCard& Card, FString& Error)
@@ -955,6 +1858,73 @@ bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
 	Movement->ControlFDMAtmosphere = false;   // JSBSim's own standard atmosphere,
 	                                          // which is what the headless host uses
 	Movement->FuelFreeze = Card.bMassHeld;
+
+	// P9 -- the derived airframe (the plugin's LOCAL PATCH 5, VENDORED.json):
+	// JSBSim reads the aircraft from the card's aircraft_root instead of the
+	// plugin's staged Resources/JSBSim/aircraft, and the plugin hashes the
+	// XML at the door against the card's xml_sha256 before JSBSim reads a
+	// byte of it (core/control/derive.py verify_hashes' host counterpart).
+	if (Card.bDerivedAircraft)
+	{
+		Movement->AircraftModel = Card.DerivedAircraftName;
+		Movement->AircraftRootOverride = Card.DerivedAircraftRoot;
+		Movement->ExpectedAircraftXmlSha256 = Card.DerivedAircraftSha256;
+	}
+
+	// P9 -- the pre-trim batch (the plugin's LOCAL PATCH 6): written by the
+	// plugin inside BeginPlay AFTER its RunIC and BEFORE its trim, where the
+	// headless EnvironmentStack.prepare writes the same properties: the
+	// stated day first (a re-latch after each write, as
+	// NonStandardAtmosphere.prepare), then the loading (after each station,
+	// once after the tanks, as LoadingProvider.prepare), then the icing's
+	// neutral values (IcingProvider.prepare: the trim is of the UN-iced
+	// aircraft). The plugin re-states the card's CAS before every re-latch
+	// (the headless relatch_initial_conditions does the same: JSBSim holds
+	// the IC speed as TAS). The CG and the CAS the re-latched ICs give are
+	// read back for BindPhysicsBlocks. Empty for every card without these blocks, so
+	// the plugin's sequence is then exactly upstream's.
+	{
+		TArray<FString> BatchProperties;
+		TArray<FString> BatchValues;
+		TArray<bool> BatchRelatch;
+		for (int32 Index = 0; Index < Card.AtmosphereProperties.Num(); ++Index)
+		{
+			BatchProperties.Add(Card.AtmosphereProperties[Index]);
+			BatchValues.Add(Card.AtmosphereValues[Index]);
+			BatchRelatch.Add(true);
+		}
+		BatchProperties.Append(Card.LoadingProperties);
+		BatchValues.Append(Card.LoadingValues);
+		BatchRelatch.Append(Card.LoadingRelatchAfter);
+		if (Card.bIcing)
+		{
+			for (int32 Index = 0; Index < PhysicsCount(IcingProperties); ++Index)
+			{
+				// eta 0, the six factors 1, the shift 0: the neutral values.
+				const bool bFactor = Index > 0 && Index < 7;
+				BatchProperties.Add(IcingProperties[Index]);
+				BatchValues.Add(bFactor ? TEXT("1") : TEXT("0"));
+				BatchRelatch.Add(Index == PhysicsCount(IcingProperties) - 1);
+			}
+		}
+		Movement->PreTrimProperties = BatchProperties;
+		Movement->PreTrimValues = BatchValues;
+		Movement->PreTrimRelatchAfter = BatchRelatch;
+		Movement->PreTrimReadProperties.Reset();
+		if (BatchProperties.Num() > 0)
+		{
+			Movement->PreTrimReadProperties.Add(TEXT("inertia/cg-x-in"));
+			Movement->PreTrimReadProperties.Add(TEXT("velocities/vc-kts"));
+			Movement->PreTrimReadProperties.Append(Card.LoadingProperties);
+			UE_LOG(LogFlightSimScenario, Display,
+			       TEXT("pre-trim batch: %d atmosphere, %d loading (%d stations, %d tanks), ")
+			       TEXT("%d icing writes between the plugin's RunIC and its trim"),
+			       Card.AtmosphereProperties.Num(), Card.LoadingProperties.Num(),
+			       Card.LoadingStations, Card.LoadingTanks,
+			       Card.bIcing ? PhysicsCount(IcingProperties) : 0);
+		}
+	}
+
 	Movement->RegisterComponent();
 
 	// The plugin derives the initial condition from where the aircraft's centre
@@ -963,6 +1933,30 @@ bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
 	// loads again for real, and PrepareJSBSim then reads exactly this value, so
 	// the placement below and the plugin's reading of it cannot disagree.
 	Movement->LoadAircraft(true);
+	if (Card.bDerivedAircraft)
+	{
+		// The door: the XML's sha256 computed by the plugin before JSBSim
+		// read it, logged beside the card's (the manifest's derived_sha256),
+		// and the run refused by name when they differ -- an airframe is
+		// never flown under a hash it does not have.
+		DerivedSha256AtDoor = Movement->LoadedAircraftXmlSha256;
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("derived airframe '%s' (%s, injections %s) from '%s': XML sha256 %s ")
+		       TEXT("at the door, card/manifest %s"),
+		       *Card.DerivedAircraftName, *Card.DerivedAircraftBase,
+		       *FString::Join(Card.DerivedAircraftInjections, TEXT("+")),
+		       *Card.DerivedAircraftRoot, *DerivedSha256AtDoor, *Card.DerivedAircraftSha256);
+		if (Movement->bAircraftXmlRefused ||
+		    !DerivedSha256AtDoor.Equals(Card.DerivedAircraftSha256, ESearchCase::IgnoreCase))
+		{
+			return RefuseCard(Error, FString::Printf(
+				TEXT("card.derived_aircraft: the airframe XML under '%s' hashes to '%s', not ")
+				TEXT("the card's %s; it is not the airframe the run was derived for, so ")
+				TEXT("nothing was loaded"),
+				*Card.DerivedAircraftRoot, *DerivedSha256AtDoor.Left(16),
+				*Card.DerivedAircraftSha256.Left(16)));
+		}
+	}
 	const FString ScreenName = Movement->GetAircraftScreenName();
 	if (ScreenName.IsEmpty())
 	{
@@ -1030,7 +2024,119 @@ bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
 		       TEXT("steady wind %.1f kt from %.0f deg -> NED fps (%.6f, %.6f, 0)"),
 		       Card.WindSpeedKnots, Card.WindFromDegrees, NorthFps, EastFps);
 	}
+
+	// -- scripted traffic (Phase 2, packages B + C) -------------------------
+	// One bare Movable actor per card entry; the render commandlet hangs the
+	// imported mesh under it (BuildMeshAirframe, at ITS mesh origin) and sets
+	// its stencil. Placed on its track's first sample now so nothing draws
+	// at the world origin before the first Step.
+	TrafficTracks = Card.Traffic;
+	TrafficActors.Empty();
+	for (const FFlightSimTrafficTrack& Track : TrafficTracks)
+	{
+		AActor* Actor = World->SpawnActor<AActor>();
+		USceneComponent* TrafficRoot = NewObject<USceneComponent>(Actor, TEXT("Root"));
+		Actor->SetRootComponent(TrafficRoot);
+		TrafficRoot->SetMobility(EComponentMobility::Movable);
+		TrafficRoot->RegisterComponent();
+		TrafficActors.Add(Actor);
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("traffic '%s' (int_id %d, %s, %s track at %.0f m): %d keyframes over ")
+		       TEXT("%.1f..%.1f s; cg (%.1f, %.1f, %.1f) cm in its actor frame"),
+		       *Track.Id, Track.IntId, *Track.Aircraft, *Track.Track, Track.RangeMetres,
+		       Track.Times.Num(), Track.Times[0], Track.Times.Last(),
+		       Track.CgActorCm.X, Track.CgActorCm.Y, Track.CgActorCm.Z);
+	}
+	if (TrafficTracks.Num() > 0)
+	{
+		ApplyTrafficPoses(TrafficTracks[0].Times[0]);
+	}
+
+	// -- P9: the physics blocks' per-run state --------------------------------
+	bRunClockLatched = false;
+	RunClockSeconds = 0.0;
+	PhysicsSteps = 0;
+	FailureDone.Init(false, Card.FailureEvents.Num());
+	FailureAppliedSeconds.Init(-1.0, Card.FailureEvents.Num());
+	FailureAppliedStep.Init(-1, Card.FailureEvents.Num());
+	bFailureState = false;
+	bLayeredWindReady = Card.bLayeredWind;
+	bWakeReady = false;
+	if (Card.bWake)
+	{
+		WakePort.Init(Card.Wake);
+		bWakeReady = true;
+	}
+	UndulationMetres = Card.DatumUndulationMetres;
+	// The recorder's "host:" rows find this world through the movement
+	// component they observe.
+	HostChannelWorlds().Add(Movement, this);
 	return true;
+}
+
+void FFlightSimScenarioWorld::ApplyTrafficPoses(double TimeSeconds)
+{
+	for (int32 Index = 0; Index < TrafficTracks.Num() && Index < TrafficActors.Num(); ++Index)
+	{
+		const FFlightSimTrafficTrack& Track = TrafficTracks[Index];
+		AActor* Actor = TrafficActors[Index];
+		if (Actor == nullptr || Track.Times.Num() < 2 || GeoReferencing == nullptr)
+		{
+			continue;
+		}
+		const int32 Last = Track.Times.Num() - 1;
+		double T = TimeSeconds;
+		if (T < Track.Times[0] || T > Track.Times[Last])
+		{
+			if (!bTrafficClampWarned)
+			{
+				UE_LOG(LogFlightSimScenario, Display,
+				       TEXT("traffic '%s': sim time %.3f s is outside its track ")
+				       TEXT("%.3f..%.3f s; held at the nearest keyframe (the FDM ticks ")
+				       TEXT("from 0 while the recorded track starts one sample in; no ")
+				       TEXT("frame is captured outside the track)"),
+				       *Track.Id, T, Track.Times[0], Track.Times[Last]);
+				bTrafficClampWarned = true;
+			}
+			T = FMath::Clamp(T, Track.Times[0], Track.Times[Last]);
+		}
+		// The segment containing T: linear in position, linear in each
+		// Euler angle (the tracks are wings-level or copy the primary's
+		// 0.1 s samples, so a slerp would differ by nothing measurable and
+		// a linear yaw is what the Python solver's interpolation documents).
+		int32 Hi = 1;
+		while (Hi < Last && Track.Times[Hi] < T) { ++Hi; }
+		const int32 Lo = Hi - 1;
+		const double Span = Track.Times[Hi] - Track.Times[Lo];
+		const double Alpha = Span > 0.0 ? FMath::Clamp((T - Track.Times[Lo]) / Span, 0.0, 1.0) : 0.0;
+		auto Lerp = [&](const TArray<double>& Series) -> double
+		{
+			return Series[Lo] + Alpha * (Series[Hi] - Series[Lo]);
+		};
+		auto LerpAngle = [&](const TArray<double>& Series) -> double
+		{
+			double Delta = FMath::Fmod(Series[Hi] - Series[Lo], 360.0);
+			if (Delta > 180.0) { Delta -= 360.0; }
+			if (Delta < -180.0) { Delta += 360.0; }
+			return Series[Lo] + Alpha * Delta;
+		};
+		// The SAME mapping the camera track uses (FlightSimRenderCommandlet
+		// consume-poses): projected = (origin_x + east, origin_y + north,
+		// alt) through ProjectedToEngine; rotator = (pitch, yaw - 90, roll).
+		FVector CentreOfGravity;
+		GeoReferencing->ProjectedToEngine(
+			FVector(Track.OriginXMetres + Lerp(Track.EastMetres),
+			        Track.OriginYMetres + Lerp(Track.NorthMetres),
+			        Lerp(Track.AltMetres)),
+			CentreOfGravity);
+		const FRotator Attitude(Lerp(Track.PitchDegrees), LerpAngle(Track.YawDegrees) - 90.0,
+		                        Lerp(Track.RollDegrees));
+		// The actor origin that puts the airframe's CG on the track point --
+		// exactly how the FDM actor is placed in Populate.
+		const FVector Origin = CentreOfGravity - Attitude.RotateVector(Track.CgActorCm);
+		Actor->SetActorLocationAndRotation(Origin, Attitude.Quaternion(), false, nullptr,
+		                                   ETeleportType::TeleportPhysics);
+	}
 }
 
 void FFlightSimScenarioWorld::ConfigureTurbulence(const FFlightSimScenarioCard& Card)
@@ -1073,6 +2179,16 @@ bool FFlightSimScenarioWorld::BeginPlay(FString& Error)
 bool FFlightSimScenarioWorld::TrimInWind(const FFlightSimScenarioCard& Card,
                                          FString& Error)
 {
+	// P9: the physics blocks bound to the airframe BeginPlay just loaded and
+	// trimmed (the pre-trim batch ran inside it, between its RunIC and its
+	// trim): the loading's CG read back, every per-step property proven
+	// present. Every host calls this right after the load, so the binding
+	// cannot be skipped by one of them.
+	if (!BindPhysicsBlocks(Card, Error))
+	{
+		return false;
+	}
+
 	if (WindProperties.Num() == 0)
 	{
 		return true;   // still air: the trim BeginPlay produced stands
@@ -1082,8 +2198,25 @@ bool FFlightSimScenarioWorld::TrimInWind(const FFlightSimScenarioCard& Card,
 	// written to FGWinds directly, then a FULL trim in the wind. FULL rather
 	// than longitudinal for the same reason mode_for(crosswind=True) chooses
 	// it -- a crosswind start needs the lateral axes solved too.
+	TArray<FString> TrimWindValues = WindValues;
+	if (bLayeredWindReady)
+	{
+		// runner.trim_wind_fps: a stated profile carries the whole wind, so
+		// its wind at the initial position is the one written before the
+		// trim (JSBSim's trim resets the wind either way; the first per-step
+		// write restores it -- JSBSIM_CORRECTIONS 18).
+		double ProfileNorthFps = 0.0;
+		double ProfileEastFps = 0.0;
+		double ProfileLayer = 0.0;
+		double ProfileDvDz = 0.0;
+		LayeredWindAt(Card, ReadProperty(TEXT("position/h-sl-meters")),
+		              ReadProperty(TEXT("position/h-agl-ft")) * FeetToMetres,
+		              ProfileNorthFps, ProfileEastFps, ProfileLayer, ProfileDvDz);
+		TrimWindValues = {PhysicsNumber(ProfileNorthFps), PhysicsNumber(ProfileEastFps),
+		                  TEXT("0")};
+	}
 	TArray<FString> Unused;
-	Movement->CommandConsoleBatch(WindProperties, WindValues, Unused);
+	Movement->CommandConsoleBatch(WindProperties, TrimWindValues, Unused);
 	FString Out;
 	Movement->CommandConsole(TEXT("atmosphere/turb-type"), TEXT("0"), Out);
 
@@ -1141,10 +2274,22 @@ bool FFlightSimScenarioWorld::VerifyTrimmedCondition(const FFlightSimScenarioCar
 		Wrong.Add(FString::Printf(TEXT("altitude %.3f m, commanded %.3f m"),
 		                          AchievedAltitude, Card.AltitudeMetres));
 	}
-	if (FMath::Abs(AchievedAirspeed - Card.AirspeedKnots) > AirspeedCheckKnots)
+	// P9: the plugin's pre-trim batch re-states the card's CAS before each
+	// re-latch (LOCAL PATCH 6, as core/fdm/fdm.py relatch_initial_conditions
+	// re-states ic/vc-kts), so on a stated day the trim is still at the
+	// card's airspeed; the re-latched ICs' CAS is logged beside it as the
+	// witness that the re-statement reached JSBSim.
+	const double ExpectedAirspeed = Card.AirspeedKnots;
+	if (bPreTrimCasRead)
+	{
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("  CAS of the re-latched ICs after the pre-trim batch: %.3f kt ")
+		       TEXT("(card %.3f kt)"), PreTrimCasKnots, Card.AirspeedKnots);
+	}
+	if (FMath::Abs(AchievedAirspeed - ExpectedAirspeed) > AirspeedCheckKnots)
 	{
 		Wrong.Add(FString::Printf(TEXT("CAS %.3f kt, commanded %.3f kt"),
-		                          AchievedAirspeed, Card.AirspeedKnots));
+		                          AchievedAirspeed, ExpectedAirspeed));
 	}
 	if (AngleDifference(AchievedHeading, Card.HeadingDegrees) > AngleCheckDegrees)
 	{
@@ -1433,6 +2578,21 @@ double FFlightSimScenarioWorld::ThermalWMps(double NorthMetres,
 void FFlightSimScenarioWorld::ApplyStepWrites(
 	const FFlightSimScenarioCard& Card, double TimeSeconds)
 {
+	// P9: the run clock -- seconds since the run's first step on JSBSim's
+	// own clock (simulation/sim-time-sec less its value at the first call),
+	// the clock every physics block is timed on: the failure schedule's
+	// at_s, the icing ramp, the gust table's row and the wake's age, each
+	// exactly as the headless providers latch it at their first call.
+	{
+		const double SimSeconds = ReadProperty(TEXT("simulation/sim-time-sec"));
+		if (!bRunClockLatched)
+		{
+			bRunClockLatched = true;
+			RunClockZeroSeconds = SimSeconds;
+		}
+		RunClockSeconds = SimSeconds - RunClockZeroSeconds;
+	}
+
 	// The funnel marker spins at the vortex core's own rate, as a function
 	// of SIM time -- deterministic, replay-identical, and honest about
 	// what it is (the modelled core's rotation made visible).
@@ -1476,7 +2636,7 @@ void FFlightSimScenarioWorld::ApplyStepWrites(
 	const bool bComposedWind =
 		Card.WindScheduleTimes.Num() > 0 || bOrographicReady
 		|| bDownburstReady || bLogProfileReady || bThermalsReady
-		|| Card.bTornado;
+		|| Card.bTornado || bLayeredWindReady;
 	if (bComposedWind)
 	{
 		// Base horizontal wind: the schedule entry current at this time
@@ -1496,6 +2656,17 @@ void FFlightSimScenarioWorld::ApplyStepWrites(
 			NorthFps = Card.WindScheduleNorthFps[WindEntry];
 			EastFps = Card.WindScheduleEastFps[WindEntry];
 			DownFps = Card.WindScheduleDownFps[WindEntry];
+		}
+
+		// P9 layered wind: the profile CARRIES the whole horizontal wind
+		// (shear.py carries_base_wind), so it REPLACES the base before any
+		// additive field, for the same ordering reason as the log profile
+		// below.
+		if (bLayeredWindReady)
+		{
+			LayeredWindAt(Card, ReadProperty(TEXT("position/h-sl-meters")),
+			              ReadProperty(TEXT("position/h-agl-ft")) * FeetToMetres,
+			              NorthFps, EastFps, LayerIndexLast, LayerDvDzLast);
 		}
 
 		// Log-profile shear (Phase 7 2.1) comes FIRST among the field
@@ -1648,6 +2819,541 @@ void FFlightSimScenarioWorld::ApplyStepWrites(
 		}
 	}
 
+	// P9: the physics blocks' per-step writes beside the wind batch -- the
+	// atmosphere batch, the icing writes, the gust batch (every step, zero
+	// included) and the failure schedule.
+	ApplyPhysicsStepWrites(Card);
+}
+
+void FFlightSimScenarioWorld::LayeredWindAt(const FFlightSimScenarioCard& Card,
+                                            double MslMetres, double AglMetres,
+                                            double& OutNorthFps, double& OutEastFps,
+                                            double& OutLayerIndex,
+                                            double& OutDvDzPerSecond) const
+{
+	// LayeredWind.profile_at, line for line: held at the first layer at or
+	// below it, linear in speed and (shorter-arc) direction between two,
+	// held at the last above it. The milspec kind's layers are the log law
+	// sampled at heights ABOVE GROUND (MilSpecShear.card_block); the
+	// layered and nwp kinds' are MSL, the spec's altitude datum.
+	const double Z = Card.LayeredWindKind == TEXT("milspec") ? AglMetres : MslMetres;
+	const TArray<double>& Heights = Card.LayerHeightMetres;
+	const TArray<double>& Speeds = Card.LayerSpeedKnots;
+	const TArray<double>& Froms = Card.LayerFromDegrees;
+	const int32 Last = Heights.Num() - 1;
+	double SpeedMps = Speeds[0] * PhysicsMpsPerKnot;
+	double FromDegrees = Froms[0];
+	OutLayerIndex = 0.0;
+	OutDvDzPerSecond = 0.0;
+	if (Z > Heights[0])
+	{
+		SpeedMps = Speeds[Last] * PhysicsMpsPerKnot;
+		FromDegrees = Froms[Last];
+		OutLayerIndex = static_cast<double>(Last);
+		for (int32 Lower = 0; Lower < Last; ++Lower)
+		{
+			if (Z <= Heights[Lower + 1])
+			{
+				const double Fraction = (Z - Heights[Lower]) / (Heights[Lower + 1] - Heights[Lower]);
+				SpeedMps = (Speeds[Lower] + Fraction * (Speeds[Lower + 1] - Speeds[Lower]))
+				           * PhysicsMpsPerKnot;
+				OutDvDzPerSecond = ((Speeds[Lower + 1] - Speeds[Lower]) * PhysicsMpsPerKnot)
+				                   / (Heights[Lower + 1] - Heights[Lower]);
+				// _shorter_arc: (a + f ((b - a + 180) % 360 - 180)) % 360, with
+				// Python's float %: fmod, shifted by the divisor when the
+				// remainder's sign differs from it (CPython float_rem).
+				auto PythonMod360 = [](double X) -> double
+				{
+					double Remainder = std::fmod(X, 360.0);
+					if (Remainder != 0.0 && Remainder < 0.0)
+					{
+						Remainder += 360.0;
+					}
+					return Remainder;
+				};
+				const double Delta = PythonMod360(Froms[Lower + 1] - Froms[Lower] + 180.0) - 180.0;
+				FromDegrees = PythonMod360(Froms[Lower] + Fraction * Delta);
+				OutLayerIndex = static_cast<double>(Lower);
+				break;
+			}
+		}
+	}
+	// WindNED.from_meteorological, then mps_to_fps.
+	const double Radians = FromDegrees * PhysicsDegToRad;
+	OutNorthFps = (-SpeedMps * FMath::Cos(Radians)) * PhysicsFtPerMetre;
+	OutEastFps = (-SpeedMps * FMath::Sin(Radians)) * PhysicsFtPerMetre;
+}
+
+bool FFlightSimScenarioWorld::BindPhysicsBlocks(const FFlightSimScenarioCard& Card,
+                                                FString& Error)
+{
+	auto Declared = [this](const FString& Property) -> bool
+	{
+		// An absent property reads as empty through the console (hazard 1).
+		FString Value;
+		Movement->CommandConsole(Property, FString(), Value);
+		return !Value.IsEmpty();
+	};
+
+	// The derived airframe, re-checked: BeginPlay loaded it again through
+	// the same door.
+	if (Card.bDerivedAircraft && Movement->bAircraftXmlRefused)
+	{
+		return RefuseCard(Error, FString::Printf(
+			TEXT("card.derived_aircraft: the airframe XML changed between the build and ")
+			TEXT("the load (now %s, card %s)"),
+			*Movement->LoadedAircraftXmlSha256.Left(16), *Card.DerivedAircraftSha256.Left(16)));
+	}
+
+	// The pre-trim batch: nothing it was told to write may be missing.
+	if (Movement->PreTrimMissing.Num() > 0)
+	{
+		const FString Missing = FString::Join(Movement->PreTrimMissing, TEXT(", "));
+		for (const FString& Property : Movement->PreTrimMissing)
+		{
+			if (Card.LoadingProperties.Contains(Property))
+			{
+				return RefuseCard(Error, FString::Printf(
+					TEXT("card.loading_properties: the loaded airframe has no %s, so the ")
+					TEXT("loading was not applied"), *Missing));
+			}
+			if (Card.AtmosphereProperties.Contains(Property))
+			{
+				return RefuseCard(Error, FString::Printf(
+					TEXT("card.atmosphere_properties: the loaded model has no %s"), *Missing));
+			}
+		}
+		return RefuseCard(Error, FString::Printf(
+			TEXT("card.icing_schedule: the loaded airframe declares no %s -- the icing ")
+			TEXT("writes need the derived airframe"), *Missing));
+	}
+	const TArray<FString>& ReadBack = Movement->PreTrimReadValues;
+	if (ReadBack.Num() >= 2)
+	{
+		PreTrimCasKnots = FCString::Atod(*ReadBack[1]);
+		bPreTrimCasRead = !ReadBack[1].IsEmpty() && FMath::IsFinite(PreTrimCasKnots);
+	}
+	bAtmosphereWritten = Card.bAtmosphere && Card.AtmosphereProperties.Num() > 0;
+
+	// The loading: JSBSim's CG after the writes and the re-latches, read
+	// BEFORE the trim, against the card's hand calculation.
+	if (Card.bLoading)
+	{
+		const double CgIn = ReadBack.Num() >= 1 && !ReadBack[0].IsEmpty()
+			? FCString::Atod(*ReadBack[0]) : NAN;
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("loading: %d station and %d tank writes before the trim; ")
+		       TEXT("inertia/cg-x-in read back %.4f in, card expects %.4f in (tolerance ")
+		       TEXT("%.3f in, datum %s)"),
+		       Card.LoadingStations, Card.LoadingTanks, CgIn, Card.LoadingExpectedCgIn,
+		       Card.LoadingToleranceIn, *Card.LoadingDatumFrame);
+		for (int32 Index = 0; Index < Card.LoadingProperties.Num(); ++Index)
+		{
+			const int32 Slot = 2 + Index;
+			UE_LOG(LogFlightSimScenario, Display, TEXT("  %s written %s, read back %s"),
+			       *Card.LoadingProperties[Index], *Card.LoadingValues[Index],
+			       ReadBack.IsValidIndex(Slot) ? *ReadBack[Slot] : TEXT("(nothing)"));
+		}
+		if (!FMath::IsFinite(CgIn) ||
+		    FMath::Abs(CgIn - Card.LoadingExpectedCgIn) > Card.LoadingToleranceIn)
+		{
+			return RefuseCard(Error, FString::Printf(
+				TEXT("card.loading_properties: the centre of gravity read back before the ")
+				TEXT("trim is %.4f in, not the card's %.4f in within %.3f in"),
+				CgIn, Card.LoadingExpectedCgIn, Card.LoadingToleranceIn));
+		}
+		bLoadingApplied = true;
+		LoadingReadbackCgIn = CgIn;
+	}
+
+	// The icing writes go into the derived airframe's eight properties.
+	bIcingReady = false;
+	if (Card.bIcing)
+	{
+		for (const TCHAR* Property : IcingProperties)
+		{
+			if (!Declared(Property))
+			{
+				return RefuseCard(Error, FString::Printf(
+					TEXT("card.icing_schedule: the loaded airframe declares no %s -- the ")
+					TEXT("icing writes need the derived airframe"), Property));
+			}
+		}
+		bIcingReady = true;
+	}
+
+	// The failure schedule: every event's property must exist (a surface
+	// event's switch is on the derived airframe's failure chain), and an
+	// engine event's engine must exist for its command to be held.
+	for (const FFlightSimFailureEvent& Event : Card.FailureEvents)
+	{
+		const bool bEngine = Event.Kind == TEXT("engine_out");
+		if (bEngine ? !Movement->EngineCommands.IsValidIndex(Event.EngineIndex)
+		            : !Declared(Event.Property))
+		{
+			return RefuseCard(Error, FString::Printf(
+				TEXT("card.failure_schedule: the loaded airframe cannot take the %s on %s ")
+				TEXT("(%s); nothing was scheduled"),
+				*Event.Kind, *Event.Target, *Event.Property));
+		}
+	}
+
+	// The roll gust goes where the airframe declares it (the gust_rotation
+	// injection) and is recorded absent where it does not, as the headless
+	// stack does; the translational gust always goes.
+	bGustPEquivalentDeclared = Declared(GustPEquivalentProperty);
+	if (Card.bWake && !bGustPEquivalentDeclared)
+	{
+		UE_LOG(LogFlightSimScenario, Warning,
+		       TEXT("wake: the loaded airframe declares no %s; the roll gust is recorded ")
+		       TEXT("absent and only the translational gust is delivered"),
+		       GustPEquivalentProperty);
+	}
+	return true;
+}
+
+void FFlightSimScenarioWorld::ApplyPhysicsStepWrites(const FFlightSimScenarioCard& Card)
+{
+	TArray<FString> Properties;
+	TArray<FString> Values;
+
+	// The stated day, every step (NonStandardAtmosphere.properties): the
+	// card's numbers verbatim.
+	if (bAtmosphereWritten)
+	{
+		Properties.Append(Card.AtmosphereProperties);
+		Values.Append(Card.AtmosphereValues);
+		++AtmosphereStepWrites;
+	}
+
+	// The icing ramp at the top of every step (IcingProvider.properties):
+	// eta(t) = eta_max clamp((t - onset) / ramp, 0, 1) -- a ramp of 0 is a
+	// step at onset --, the six factors 1 + eta k, the shift at full eta.
+	if (bIcingReady)
+	{
+		double Fraction = 0.0;
+		if (Card.IcingRampSeconds <= 0.0)
+		{
+			Fraction = RunClockSeconds >= Card.IcingOnsetSeconds ? 1.0 : 0.0;
+		}
+		else
+		{
+			Fraction = FMath::Min(1.0, FMath::Max(0.0,
+				(RunClockSeconds - Card.IcingOnsetSeconds) / Card.IcingRampSeconds));
+		}
+		const double Eta = Card.IcingEtaMax * Fraction;
+		Properties.Add(IcingProperties[0]);
+		Values.Add(PhysicsNumber(Eta));
+		for (int32 Axis = 0; Axis < 6; ++Axis)
+		{
+			Properties.Add(IcingProperties[1 + Axis]);
+			Values.Add(PhysicsNumber(1.0 + Eta * Card.IcingK[Axis]));
+		}
+		const double Shift = Card.IcingEtaMax <= 0.0 ? 0.0
+			: (Card.IcingAlphaShiftDeg * PhysicsDegToRad) * (Eta / Card.IcingEtaMax);
+		Properties.Add(IcingProperties[7]);
+		Values.Add(PhysicsNumber(Shift));
+		++IcingStepsWritten;
+	}
+
+	// The gust batch beside the wind batch, EVERY step, zero included:
+	// JSBSim never resets atmosphere/gust-*-fps (FGWinds.cpp L145-L157), so
+	// a gust written once and never again would keep blowing -- the
+	// persistence fact (JSBSIM_CORRECTIONS 17). The table's row for this
+	// step (u along the heading, v to its right, rotated into NED), plus the
+	// wake pair at the own ship, summed as the stack sums its providers.
+	double GustNorthMps = 0.0;
+	double GustEastMps = 0.0;
+	double GustDownMps = 0.0;
+	double GustPEq = 0.0;
+	if (Card.bGustTable)
+	{
+		// VonKarmanTurbulence.row_at: round((t - t_first) * rate).
+		const int32 Row = PhysicsPythonRound(RunClockSeconds * Card.RateHz);
+		if (Row >= 0 && Row < Card.GustRowU.Num())
+		{
+			const double Psi = Card.HeadingDegrees * PhysicsDegToRad;
+			const double Along = Card.GustRowU[Row];
+			const double Right = Card.GustRowV[Row];
+			GustNorthMps += Along * FMath::Cos(Psi) - Right * FMath::Sin(Psi);
+			GustEastMps += Along * FMath::Sin(Psi) + Right * FMath::Cos(Psi);
+			GustDownMps += Card.GustRowW[Row];
+			GustPEq += Card.GustRowP[Row];
+			++GustRowsApplied;
+		}
+		else
+		{
+			++GustStepsBeyondTable;   // past the table: zero, and counted
+		}
+	}
+	if (bWakeReady)
+	{
+		WakePort.Evaluate(ReadProperty(TEXT("position/lat-geod-deg")),
+		                  ReadProperty(TEXT("position/long-gc-deg")),
+		                  ReadProperty(TEXT("position/h-sl-meters")),
+		                  RunClockSeconds, WakeLast);
+		GustNorthMps += WakeLast.GustNorthMps;
+		GustEastMps += WakeLast.GustEastMps;
+		GustDownMps += WakeLast.GustDownMps;
+		GustPEq += WakeLast.PEqRadPerSec;
+	}
+	Properties.Add(GustProperties[0]);
+	Values.Add(PhysicsNumber(GustNorthMps * PhysicsFtPerMetre));
+	Properties.Add(GustProperties[1]);
+	Values.Add(PhysicsNumber(GustEastMps * PhysicsFtPerMetre));
+	Properties.Add(GustProperties[2]);
+	Values.Add(PhysicsNumber(GustDownMps * PhysicsFtPerMetre));
+	if (bGustPEquivalentDeclared)
+	{
+		Properties.Add(GustPEquivalentProperty);
+		Values.Add(PhysicsNumber(GustPEq));
+	}
+	++GustStepsWritten;
+
+	TArray<FString> Unused;
+	Movement->CommandConsoleBatch(Properties, Values, Unused);
+
+	// The failure schedule: each event ONCE, at the first step whose run
+	// clock is at or past at_s (FailureSchedule.apply: t >= at_s), before
+	// that step's integration.
+	for (int32 Index = 0; Index < Card.FailureEvents.Num(); ++Index)
+	{
+		const FFlightSimFailureEvent& Event = Card.FailureEvents[Index];
+		if (FailureDone[Index] || !(RunClockSeconds >= Event.AtSeconds))
+		{
+			continue;
+		}
+		FString Out;
+		if (Event.Kind == TEXT("engine_out"))
+		{
+			// The card's write, bracketed by propulsion/active_engine exactly
+			// as the headless schedule writes it ...
+			Movement->CommandConsole(TEXT("propulsion/active_engine"),
+			                         FString::Printf(TEXT("%d"), Event.EngineIndex), Out);
+			Movement->CommandConsole(Event.Property, PhysicsNumber(Event.Value), Out);
+			Movement->CommandConsole(TEXT("propulsion/active_engine"), TEXT("-1"), Out);
+			// ... and held: the plugin re-sends its engine command struct to
+			// JSBSim on every tick (ApplyEnginesCommands: SetCutoff,
+			// SetMagnetos), which would relight the engine on the next tick.
+			FEngineCommand& Command = Movement->EngineCommands[Event.EngineIndex];
+			if (Event.Property == TEXT("propulsion/cutoff_cmd"))
+			{
+				Command.CutOff = Event.Value != 0.0;
+			}
+			else if (Event.Property == TEXT("propulsion/magneto_cmd"))
+			{
+				Command.Magnetos = static_cast<EMagnetosMode>(FMath::Clamp(
+					FMath::RoundToInt(Event.Value), 0, 3));
+			}
+		}
+		else
+		{
+			Movement->CommandConsole(Event.Property, PhysicsNumber(Event.Value), Out);
+		}
+		FailureDone[Index] = true;
+		FailureAppliedSeconds[Index] = RunClockSeconds;
+		FailureAppliedStep[Index] = PhysicsSteps;
+		bFailureState = true;
+		UE_LOG(LogFlightSimScenario, Display,
+		       TEXT("failure %s on %s applied at run clock %.6f s (at_s %.6f s, step %d): ")
+		       TEXT("%s = %s"),
+		       *Event.Kind, *Event.Target, RunClockSeconds, Event.AtSeconds,
+		       PhysicsSteps, *Event.Property, *PhysicsNumber(Event.Value));
+	}
+	++PhysicsSteps;
+}
+
+double FFlightSimScenarioWorld::HostChannel(const FString& Name) const
+{
+	// Mirrors core/fdm/state.py from_properties and the runner's Recorder
+	// extras channel for channel; read at the recorder's sample, i.e. after
+	// the step the per-step values were written for.
+	auto Read = [this](const TCHAR* Property) -> double
+	{
+		if (Movement == nullptr)
+		{
+			return NAN;
+		}
+		FString Value;
+		Movement->CommandConsole(Property, FString(), Value);
+		return Value.IsEmpty() ? NAN : FCString::Atod(*Value);
+	};
+	// A property the stock airframe does not declare records its neutral
+	// value there (state.py: 0 / 1.0 / 0, never NaN).
+	auto ReadOr = [&Read](const TCHAR* Property, double Neutral) -> double
+	{
+		const double Value = Read(Property);
+		return FMath::IsFinite(Value) ? Value : Neutral;
+	};
+	if (Name == TEXT("icing_eta")) { return ReadOr(TEXT("icing/eta"), 0.0); }
+	if (Name == TEXT("icing_lift_factor")) { return ReadOr(TEXT("icing/lift-factor"), 1.0); }
+	if (Name == TEXT("icing_drag_factor")) { return ReadOr(TEXT("icing/drag-factor"), 1.0); }
+	if (Name == TEXT("icing_pitch_factor")) { return ReadOr(TEXT("icing/pitch-factor"), 1.0); }
+	if (Name == TEXT("icing_roll_factor")) { return ReadOr(TEXT("icing/roll-factor"), 1.0); }
+	if (Name == TEXT("icing_yaw_factor")) { return ReadOr(TEXT("icing/yaw-factor"), 1.0); }
+	if (Name == TEXT("icing_side_factor")) { return ReadOr(TEXT("icing/side-factor"), 1.0); }
+	if (Name == TEXT("icing_alpha_shift_deg"))
+	{
+		return ReadOr(TEXT("icing/alpha-shift-rad"), 0.0) * PhysicsRadToDeg;
+	}
+	if (Name == TEXT("gust_p_equivalent_rad_s"))
+	{
+		return ReadOr(TEXT("gust/p-equivalent-rad_sec"), 0.0);
+	}
+	if (Name == TEXT("wind_profile_speed_mps"))
+	{
+		// The base wind JSBSim holds: hypot(wind-north, wind-east), m/s.
+		return std::hypot(Read(TEXT("atmosphere/wind-north-fps")),
+		                  Read(TEXT("atmosphere/wind-east-fps"))) * FeetToMetres;
+	}
+	if (Name == TEXT("wind_speed_mps"))
+	{
+		// AircraftState.wind_speed_mps: the TOTAL wind's horizontal speed.
+		return std::hypot(Read(TEXT("atmosphere/total-wind-north-fps")) * FeetToMetres,
+		                  Read(TEXT("atmosphere/total-wind-east-fps")) * FeetToMetres);
+	}
+	if (Name == TEXT("wind_layer_index")) { return bLayeredWindReady ? LayerIndexLast : 0.0; }
+	if (Name == TEXT("shear_dv_dz_per_s")) { return bLayeredWindReady ? LayerDvDzLast : 0.0; }
+	if (Name == TEXT("undulation_m")) { return UndulationMetres; }
+	if (Name == TEXT("hae_m")) { return Read(TEXT("position/h-sl-meters")) + UndulationMetres; }
+	if (Name == TEXT("failure_state_flag")) { return bFailureState ? 1.0 : 0.0; }
+	// The wake columns: the port's last evaluation, 0 without a wake
+	// (runner.wake_recorder_extras). The RCR needs the own airframe's
+	// aileron term, which the card does not carry: null where a wake is
+	// flown, rather than a number about nothing.
+	if (Name == TEXT("wake_v_mps")) { return bWakeReady ? WakeLast.VMps : 0.0; }
+	if (Name == TEXT("wake_w_mps")) { return bWakeReady ? WakeLast.WMps : 0.0; }
+	if (Name == TEXT("wake_p_eq_rad_s")) { return bWakeReady ? WakeLast.PEqRadPerSec : 0.0; }
+	if (Name == TEXT("wake_gamma_m2_s")) { return bWakeReady ? WakeLast.GammaM2PerSec : 0.0; }
+	if (Name == TEXT("wake_age_s")) { return bWakeReady ? WakeLast.AgeSeconds : 0.0; }
+	if (Name == TEXT("wake_lateral_m")) { return bWakeReady ? WakeLast.LateralMetres : 0.0; }
+	if (Name == TEXT("wake_vertical_m")) { return bWakeReady ? WakeLast.VerticalMetres : 0.0; }
+	if (Name == TEXT("wake_rcr")) { return bWakeReady ? NAN : 0.0; }
+	// The exceedance flags are post-run annotations on both hosts
+	// (core/telemetry/limits.py monitor over n_z, cas_kt, mach, alpha_deg).
+	return NAN;
+}
+
+FFlightSimScenarioWorld::~FFlightSimScenarioWorld()
+{
+	UnregisterHostChannels();
+}
+
+void FFlightSimScenarioWorld::UnregisterHostChannels()
+{
+	// By value, not by key: the movement component may already be gone.
+	for (auto It = HostChannelWorlds().CreateIterator(); It; ++It)
+	{
+		if (It.Value() == this)
+		{
+			It.RemoveCurrent();
+		}
+	}
+}
+
+bool FFlightSimScenarioWorld::ReadHostChannel(const UJSBSimMovementComponent* InMovement,
+                                              const FString& Name, double& Out)
+{
+	const FFlightSimScenarioWorld* const* Found = HostChannelWorlds().Find(InMovement);
+	if (Found == nullptr || *Found == nullptr)
+	{
+		Out = NAN;
+		return false;
+	}
+	Out = (*Found)->HostChannel(Name);
+	return FMath::IsFinite(Out);
+}
+
+void FFlightSimScenarioWorld::AppendEnvironmentReport(
+	const FFlightSimScenarioCard& Card, const TSharedPtr<FJsonObject>& Environment) const
+{
+	if (!Environment.IsValid())
+	{
+		return;
+	}
+	if (Card.bAtmosphere)
+	{
+		Environment->SetStringField(TEXT("atmosphere_delivery"), FString::Printf(
+			TEXT("pre-trim batch (after RunIC, before the trim, re-latched after each ")
+			TEXT("write) and every step: %d properties (%s), %d step writes"),
+			Card.AtmosphereProperties.Num(),
+			*FString::Join(Card.AtmosphereProperties, TEXT(", ")), AtmosphereStepWrites));
+	}
+	if (Card.bLoading)
+	{
+		Environment->SetBoolField(TEXT("loading_applied"), bLoadingApplied);
+		Environment->SetNumberField(TEXT("loading_readback_cg_in"), LoadingReadbackCgIn);
+		Environment->SetNumberField(TEXT("loading_expected_cg_in"), Card.LoadingExpectedCgIn);
+		Environment->SetNumberField(TEXT("loading_tolerance_in"), Card.LoadingToleranceIn);
+	}
+	if (Card.FailureEvents.Num() > 0)
+	{
+		TArray<TSharedPtr<FJsonValue>> Applied;
+		for (int32 Index = 0; Index < Card.FailureEvents.Num(); ++Index)
+		{
+			const FFlightSimFailureEvent& Event = Card.FailureEvents[Index];
+			TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+			Entry->SetStringField(TEXT("kind"), Event.Kind);
+			Entry->SetStringField(TEXT("target"), Event.Target);
+			Entry->SetNumberField(TEXT("at_s"), Event.AtSeconds);
+			if (FailureDone.IsValidIndex(Index) && FailureDone[Index])
+			{
+				Entry->SetNumberField(TEXT("t_applied_s"), FailureAppliedSeconds[Index]);
+				Entry->SetNumberField(TEXT("step_applied"), FailureAppliedStep[Index]);
+			}
+			else
+			{
+				Entry->SetField(TEXT("t_applied_s"), MakeShared<FJsonValueNull>());
+				Entry->SetField(TEXT("step_applied"), MakeShared<FJsonValueNull>());
+			}
+			Entry->SetStringField(TEXT("property"), Event.Property);
+			Entry->SetNumberField(TEXT("value"), Event.Value);
+			Applied.Add(MakeShared<FJsonValueObject>(Entry));
+		}
+		Environment->SetArrayField(TEXT("failure_schedule_applied"), Applied);
+	}
+	if (Card.bGustTable || Card.bWake)
+	{
+		// 'wake_port' when the wake pair is flown (with any table's rows
+		// summed into the same channel), 'table' when the table alone is.
+		Environment->SetStringField(TEXT("gust_delivery"),
+		                            Card.bWake ? TEXT("wake_port") : TEXT("table"));
+		Environment->SetNumberField(TEXT("gust_rows_applied"), GustRowsApplied);
+		Environment->SetNumberField(TEXT("gust_steps_beyond_table"), GustStepsBeyondTable);
+		Environment->SetNumberField(TEXT("gust_steps_written"), GustStepsWritten);
+		Environment->SetStringField(TEXT("gust_p_equivalent"),
+		                            bGustPEquivalentDeclared ? TEXT("property") : TEXT("absent"));
+	}
+	if (Card.bWake)
+	{
+		TArray<TSharedPtr<FJsonValue>> Vectors;
+		for (const FFlightSimWakeVector& Vector : Card.WakeHostSelftest)
+		{
+			TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+			Entry->SetNumberField(TEXT("y_m"), Vector.YMetres);
+			Entry->SetNumberField(TEXT("z_m"), Vector.ZMetres);
+			Entry->SetNumberField(TEXT("age_s"), Vector.AgeSeconds);
+			Entry->SetNumberField(TEXT("u_mps"), Vector.UMps);
+			Entry->SetNumberField(TEXT("v_mps"), Vector.VMps);
+			Entry->SetNumberField(TEXT("w_mps"), Vector.WMps);
+			Entry->SetNumberField(TEXT("p_eq_rad_s"), Vector.PEqRadPerSec);
+			Vectors.Add(MakeShared<FJsonValueObject>(Entry));
+		}
+		Environment->SetArrayField(TEXT("wake_selftest"), Vectors);
+	}
+	if (Card.bDerivedAircraft)
+	{
+		Environment->SetStringField(TEXT("derived_aircraft_sha256"), DerivedSha256AtDoor);
+	}
+	if (Card.bLayeredWind)
+	{
+		Environment->SetStringField(TEXT("layered_wind"), Card.LayeredWindKind);
+	}
+	if (Card.bIcing)
+	{
+		Environment->SetBoolField(TEXT("icing_applied"), bIcingReady && IcingStepsWritten > 0);
+		Environment->SetNumberField(TEXT("icing_steps_written"), IcingStepsWritten);
+	}
 }
 
 void FFlightSimScenarioWorld::TornadoWindMps(
@@ -1791,6 +3497,15 @@ bool FFlightSimScenarioWorld::Step(const FFlightSimScenarioCard& Card,
 	FThreadManager::Get().Tick();
 	FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
 
+	// Phase 2: the scripted traffic at the instant the FDM has just reached,
+	// so a capture taken after this Step sees the primary (moved by the tick),
+	// the traffic (moved here) and the camera (applied by the caller at the
+	// same sim time) at one instant.
+	if (TrafficActors.Num() > 0)
+	{
+		ApplyTrafficPoses(ReadProperty(TEXT("simulation/sim-time-sec")));
+	}
+
 	return !Crashed(TimeSeconds, Error) && !AirframeImpact(TimeSeconds, Error);
 }
 
@@ -1800,6 +3515,7 @@ void FFlightSimScenarioWorld::Teardown()
 	{
 		return;
 	}
+	UnregisterHostChannels();
 	if (bExternalWorld)
 	{
 		// The engine owns a live world; tearing it down here would pull the
@@ -1808,6 +3524,8 @@ void FFlightSimScenarioWorld::Teardown()
 		Aircraft = nullptr;
 		Movement = nullptr;
 		GeoReferencing = nullptr;
+		TrafficActors.Empty();
+		TrafficTracks.Empty();
 		return;
 	}
 	World->BeginTearingDown();
@@ -1823,4 +3541,6 @@ void FFlightSimScenarioWorld::Teardown()
 	Aircraft = nullptr;
 	Movement = nullptr;
 	GeoReferencing = nullptr;
+	TrafficActors.Empty();
+	TrafficTracks.Empty();
 }

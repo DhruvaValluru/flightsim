@@ -46,7 +46,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field as dc_field
 from typing import Any, Dict, List, Optional
 
-from .fields import Quantity, Source
+from .fields import PLANNABLE_SOURCES, Quantity, Source
 
 #: The presets a camera may name. Five ported from the UE director
 #: (chase/ground/wingman/tower/cockpit) plus "explicit": a stated
@@ -56,7 +56,21 @@ CAMERA_PRESETS = ("chase", "ground", "wingman", "tower", "cockpit",
 
 POSITION_MODES = ("offset", "scene", "geographic")
 AIM_MODES = ("aircraft", "point", "bearing")
-TRIGGER_KINDS = ("interval", "distance", "event")
+#: Capture triggers a specification may name. "distance" and
+#: "proximity" are the two halves of the phase's waypoint trigger --
+#: by distance along the flown track, and by proximity to a stated
+#: coordinate. (``proximity`` was implemented and tested in the
+#: scheduler from the start but left out of this tuple, which made every
+#: specification naming it refuse as an unknown trigger: the scheduler
+#: half was unreachable from a spec, and its tests exercised a code path
+#: no run could take.)
+#: "continuous" captures EVERY recorded sample: the whole flight as a
+#: sequence rather than a handful of stills, which is what "a
+#: simulation from this angle" means. It is what a camera added from
+#: the web page takes, so selecting a view and a clip length gives
+#: that many seconds of that view.
+TRIGGER_KINDS = ("continuous", "interval", "distance", "proximity",
+                 "event")
 EVENT_DIRECTIONS = ("above", "below", "rising", "falling")
 
 #: Per-airframe chase offsets, forward:right:up metres in the heading
@@ -103,6 +117,166 @@ DEFAULT_FAR_M = 100_000.0
 #: capture, not a burst of ten at the telemetry rate.
 DEFAULT_REFRACTORY_S = 2.0
 
+#: Spec 8 (contracts §10, §12): the physical exposure triple per preset
+#: -- (aperture f-number, shutter seconds, ISO). One daylight triple
+#: (f/8, 1/500 s, ISO 100) is what the contracts state for every preset
+#: today; the table is keyed per preset so the Look lane can
+#: differentiate them without changing the field's shape. This package
+#: carries and validates the triple; the EV100 mapping
+#: (log2(N^2/t * 100/ISO)) and the engine's exposure are the Look lane's
+#: and are NOT implemented here.
+EXPOSURE_FIELDS = ("aperture_f", "shutter_s", "iso")
+DEFAULT_EXPOSURE = (8.0, 1.0 / 500.0, 100.0)
+EXPOSURE_DEFAULTS: Dict[str, tuple] = {preset: DEFAULT_EXPOSURE
+                                       for preset in CAMERA_PRESETS}
+
+#: S1 (spec 9: INT-final's bump): two per-camera sensing
+#: fields, each a provenanced Quantity NOT in FIELD_ORDER and
+#: absent-canonical like ``exposure``: ``exposure_compensation_ev`` (EC,
+#: stops; +1 halves the luminance a unit of the linear frame stands
+#: for, core/capture/radiometry.py) and ``bands`` (the band file the
+#: radiance stage mixes by, assets/sensor_bands/<name>.json, or None).
+#: The defaults are omitted from the canonical camera, so every
+#: committed example keeps its digest (pinned by test); the registry
+#: cannot claim a list element (its sections are mappings), so both are
+#: recorded through the capture manifest's per-camera ``sensing`` block
+#: with their own null tests (docs/SENSING.md).
+SENSING_FIELDS = ("exposure_compensation_ev", "bands")
+DEFAULT_EXPOSURE_COMPENSATION_EV = 0.0
+DEFAULT_BANDS = None
+
+
+def default_sensing_fields() -> Dict[str, Quantity]:
+    """The two S1 camera fields at their documented defaults."""
+    return {
+        "exposure_compensation_ev": Quantity.default(
+            DEFAULT_EXPOSURE_COMPENSATION_EV, "EV",
+            frm="no exposure compensation: the manual EV100 as computed"),
+        "bands": Quantity.default(
+            DEFAULT_BANDS, frm="no band file stated: the three rendered channels as they are"),
+    }
+
+
+#: S2 (spec 9): the stereo rig and the ground-truth passes a camera
+#: asks for, each a provenanced Quantity NOT in FIELD_ORDER and
+#: absent-canonical like the S1 fields: ``stereo`` ({baseline_m, side}, or
+#: None -- core/capture/stereo.py derives the right camera) and ``passes``
+#: (a list of pass words, or None -- core/capture/passes.py). Addressed as
+#: ``cameras[i].stereo`` / ``cameras[i].passes``; every committed example
+#: states neither and keeps its digest (pinned by tests/test_stereo.py).
+PASS_FIELDS = ("stereo", "passes")
+
+
+def default_pass_fields() -> Dict[str, Quantity]:
+    """The two S2 camera fields at their documented defaults."""
+    return {
+        "stereo": Quantity.default(None, frm="no stereo rig stated: one camera"),
+        "passes": Quantity.default(None, frm="no ground-truth pass asked for"),
+    }
+
+
+#: S3 (spec 9): the IR proxy a camera asks for, ``cameras[i].ir`` =
+#: {band, thermal_table} (core/capture/thermal.py: band LWIR or MWIR, the
+#: table under assets/thermal/), or None -- a provenanced Quantity NOT in
+#: FIELD_ORDER, absent-canonical like the S1 / S2 fields, so every committed
+#: example keeps its digest (pinned by tests/test_thermal.py). Recorded
+#: through the manifest's per-camera ``sensing.ir`` block.
+IR_FIELD = "ir"
+
+
+def default_ir_field() -> Quantity:
+    """The S3 camera field at its documented default: no IR proxy."""
+    return Quantity.default(None, frm="no IR proxy asked for: the visible frame only")
+
+
+@dataclass
+class ExposureSpec:
+    """``cameras[].exposure``: aperture, shutter and ISO, each a
+    provenanced :class:`Quantity`, addressable as
+    ``cameras[0].exposure.aperture_f`` through the spec front door.
+
+    Serialised like the randomisation block, not like the camera's
+    other fields: an all-default exposure is OMITTED from the camera's
+    canonical form, so a spec that states no exposure keeps the digest
+    it had at spec 7 (the bump's one-spelling rule: absent IS the
+    documented default).
+    """
+
+    aperture_f: Quantity
+    shutter_s: Quantity
+    iso: Quantity
+
+    FIELD_ORDER = EXPOSURE_FIELDS
+
+    def quantities(self):
+        for name in self.FIELD_ORDER:
+            yield name, getattr(self, name)
+
+    def set(self, name: str, value: Any, frm: str = "edited by hand") -> None:
+        current = self._field(name)
+        setattr(self, name, Quantity(value=value, unit=current.unit,
+                                     source=Source.USER, frm=frm,
+                                     std=current.std,
+                                     detail=dict(current.detail)))
+
+    def plan(self, name: str, value: Any, frm: str) -> None:
+        """Same doctrine as the camera's: a stated exposure field is
+        never silently moved."""
+        current = self._field(name)
+        if current.source not in PLANNABLE_SOURCES:
+            raise ValueError(
+                f"plan() only moves defaulted/derived/model fields; camera "
+                f"exposure.{name} is {current.source.value!r} -- a stated "
+                f"value is never silently moved")
+        setattr(self, name, Quantity(value=value, unit=current.unit,
+                                     source=Source.DERIVED, frm=frm,
+                                     std=current.std,
+                                     detail=dict(current.detail)))
+
+    def _field(self, name: str) -> Quantity:
+        if name not in self.FIELD_ORDER:
+            raise ValueError(f"{name!r} is not an exposure field")
+        return getattr(self, name)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {name: q.to_dict() for name, q in self.quantities()}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ExposureSpec":
+        if not isinstance(data, dict):
+            raise ValueError("camera 'exposure' must be a mapping of "
+                             "provenanced fields")
+        kwargs = {}
+        for name in cls.FIELD_ORDER:
+            try:
+                kwargs[name] = Quantity.from_dict(data[name])
+            except KeyError as exc:
+                raise ValueError(
+                    f"camera exposure is missing required field "
+                    f"{name}") from exc
+        unknown = set(data) - set(cls.FIELD_ORDER)
+        if unknown:
+            raise ValueError(
+                f"camera exposure carries unknown fields {sorted(unknown)}; "
+                f"refusing to guess at their meaning")
+        return cls(**kwargs)
+
+    def is_default(self, preset: str = "chase") -> bool:
+        """Field for field, source for source, the preset's documented
+        default -- the spelling the canonical camera omits."""
+        return self.to_dict() == self.defaulted(preset).to_dict()
+
+    @classmethod
+    def defaulted(cls, preset: str = "chase",
+                  frm: str = "documented exposure default: daylight "
+                             "f/8, 1/500 s, ISO 100") -> "ExposureSpec":
+        aperture, shutter, iso = EXPOSURE_DEFAULTS.get(preset,
+                                                       DEFAULT_EXPOSURE)
+        d = Quantity.default
+        return cls(aperture_f=d(float(aperture), "f-number", frm=frm),
+                   shutter_s=d(float(shutter), "s", frm=frm),
+                   iso=d(float(iso), "ISO", frm=frm))
+
 
 @dataclass
 class CameraSpec:
@@ -147,12 +321,34 @@ class CameraSpec:
     event_threshold: Quantity
     event_direction: Quantity
     refractory_s: Quantity
+    #: Sensor-model profile name (core.capture.profile); the ideal
+    #: pinhole by default, so a spec that names none is unchanged.
+    profile: Quantity
 
     #: Keyframed moves: list of dicts, each {"t_s": float} plus any of
     #: the mode's position keys, aim keys, or "focal_length_mm". Data,
     #: not Quantitys: the WHOLE list is one recorded decision, carried
     #: verbatim and digest-relevant.
     moves: List[Dict[str, Any]] = dc_field(default_factory=list)
+
+    #: Spec 8: the physical exposure triple (aperture_f, shutter_s,
+    #: iso), a provenanced block. The preset's documented default is
+    #: omitted from to_dict, so a camera that states none serialises
+    #: exactly as it did at spec 7. NOT in FIELD_ORDER: it is a nested
+    #: block, addressed as ``cameras[i].exposure.<field>``.
+    exposure: "ExposureSpec" = dc_field(default_factory=ExposureSpec.defaulted)
+
+    #: S1: exposure compensation (stops) and the band file, each a
+    #: Quantity, absent-canonical (see SENSING_FIELDS); addressed as
+    #: ``cameras[i].exposure_compensation_ev`` / ``cameras[i].bands``.
+    exposure_compensation_ev: Quantity = dc_field(
+        default_factory=lambda: default_sensing_fields()["exposure_compensation_ev"])
+    bands: Quantity = dc_field(default_factory=lambda: default_sensing_fields()["bands"])
+    #: S2: the stereo rig and the passes (see PASS_FIELDS), absent-canonical.
+    stereo: Quantity = dc_field(default_factory=lambda: default_pass_fields()["stereo"])
+    passes: Quantity = dc_field(default_factory=lambda: default_pass_fields()["passes"])
+    #: S3: the IR proxy request (see IR_FIELD), absent-canonical.
+    ir: Quantity = dc_field(default_factory=default_ir_field)
 
     #: Canonical field order for serialisation and the rendered table.
     FIELD_ORDER = (
@@ -167,6 +363,10 @@ class CameraSpec:
         "trigger", "capture_count", "period_s", "distance_m",
         "event_channel", "event_threshold", "event_direction",
         "refractory_s",
+        # Phase 10: the sensor model applied to this camera's frames
+        # (assets/camera_profiles/<name>.json). "ideal_pinhole" is the
+        # documented default and exactly the previous behaviour.
+        "profile",
     )
 
     # -- access ---------------------------------------------------------
@@ -213,7 +413,38 @@ class CameraSpec:
         # "no moves" (the empty-list discipline the cameras list itself
         # follows on the spec).
         out["moves"] = [dict(m) for m in self.moves]
+        # Spec 8: the exposure block appears only when it differs from
+        # the preset's documented default -- absent IS the default, one
+        # spelling, and every spec-7 camera keeps its digest.
+        if not self.exposure.is_default(str(self.preset.value)):
+            out["exposure"] = self.exposure.to_dict()
+        # S1: the two sensing fields ride only when they differ from the
+        # documented default -- absent IS the default, one spelling.
+        defaults = default_sensing_fields()
+        for name in SENSING_FIELDS:
+            q = getattr(self, name)
+            if q.to_dict() != defaults[name].to_dict():
+                out[name] = q.to_dict()
+        # S2: the stereo rig and the passes, the same absent-canonical rule.
+        pass_defaults = default_pass_fields()
+        for name in PASS_FIELDS:
+            q = getattr(self, name)
+            if q.to_dict() != pass_defaults[name].to_dict():
+                out[name] = q.to_dict()
+        # S3: the IR request, the same absent-canonical rule.
+        if self.ir_stated():
+            out[IR_FIELD] = self.ir.to_dict()
         return out
+
+    def ir_stated(self) -> bool:
+        """Whether the S3 IR field differs from its default (no IR)."""
+        return self.ir.to_dict() != default_ir_field().to_dict()
+
+    def sensing_stated(self) -> bool:
+        """Whether either S1 field differs from its default."""
+        defaults = default_sensing_fields()
+        return any(getattr(self, name).to_dict() != defaults[name].to_dict()
+                   for name in SENSING_FIELDS)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "CameraSpec":
@@ -224,7 +455,22 @@ class CameraSpec:
             except KeyError as exc:
                 raise ValueError(
                     f"camera is missing required field {name}") from exc
-        unknown = set(data) - set(cls.FIELD_ORDER) - {"moves"}
+        sensing = default_sensing_fields()
+        for name in SENSING_FIELDS:
+            if data.get(name) is not None:
+                sensing[name] = Quantity.from_dict(data[name])
+        kwargs.update(sensing)
+        # S2: the stereo rig and the passes, absent = the default.
+        pass_fields = default_pass_fields()
+        for name in PASS_FIELDS:
+            if data.get(name) is not None:
+                pass_fields[name] = Quantity.from_dict(data[name])
+        kwargs.update(pass_fields)
+        # S3: the IR request, absent = no IR.
+        kwargs[IR_FIELD] = (Quantity.from_dict(data[IR_FIELD]) if data.get(IR_FIELD) is not None
+                            else default_ir_field())
+        unknown = (set(data) - set(cls.FIELD_ORDER) - {"moves", "exposure"} - set(SENSING_FIELDS)
+                   - set(PASS_FIELDS) - {IR_FIELD})
         if unknown:
             raise ValueError(
                 f"camera carries unknown fields {sorted(unknown)}; "
@@ -234,7 +480,12 @@ class CameraSpec:
                 isinstance(m, dict) for m in moves):
             raise ValueError("camera 'moves' must be a list of keyframe "
                              "mappings")
-        return cls(moves=[dict(m) for m in moves], **kwargs)
+        exposure_data = data.get("exposure")
+        exposure = (ExposureSpec.defaulted(str(kwargs["preset"].value))
+                    if exposure_data is None
+                    else ExposureSpec.from_dict(exposure_data))
+        return cls(moves=[dict(m) for m in moves], exposure=exposure,
+                   **kwargs)
 
     # -- construction ---------------------------------------------------
 
@@ -299,6 +550,10 @@ class CameraSpec:
             event_direction=d("above", frm=frm),
             refractory_s=d(DEFAULT_REFRACTORY_S, "s",
                            frm="one event is one capture"),
+            profile=d("ideal_pinhole",
+                      frm="the documented ideal pinhole; the engine's "
+                          "frames are the sensor frames"),
+            exposure=ExposureSpec.defaulted(preset),
         )
 
     # -- presentation ---------------------------------------------------
@@ -306,6 +561,47 @@ class CameraSpec:
     def label(self) -> str:
         return (f"camera {self.camera_id.value} "
                 f"({self.preset.value})")
+
+
+def plan_full_capture(camera: "CameraSpec", frm: str) -> bool:
+    """Plan CONTINUOUS capture for a camera that asked for no count.
+
+    A camera nobody gave a count or a trigger to used to take the
+    ``interval`` default: one frame per second. On a short clip that is
+    three or four stills -- which is not a view of a flight, it is a
+    contact sheet. Every path that builds a camera from a request that
+    did not name a number should reach the same place the web page's
+    picker does: every recorded sample, for as long as the clip lasts,
+    ten frames per second of flight.
+
+    Three things are left alone, and each of them matters:
+
+    * a STATED count ("50 images") is a contract the ``continuous``
+      trigger cannot honour -- it emits as many frames as there are
+      samples -- so a camera carrying one keeps its interval trigger
+      and this returns False rather than turning a count into a
+      refusal at schedule time;
+    * a MOVED ``period_s`` ("one every two seconds") is somebody asking
+      for an interval capture by its rate instead of its count.
+      ``continuous`` ignores the period entirely, so planning it over a
+      stated one would drop a request silently -- the one outcome this
+      repo does not allow. Only the untouched default period is
+      overridden;
+    * a stated TRIGGER is a stated field, so ``plan()`` refuses to move
+      it. Only a defaulted/derived/model trigger is planned, which is
+      why an edit in the review table still wins.
+
+    Returns True when the trigger was moved.
+    """
+    if int(camera.capture_count.value or 0) > 0:
+        return False
+    if camera.period_s.source is not Source.DEFAULT:
+        return False
+    if camera.trigger.source not in (Source.DEFAULT, Source.DERIVED,
+                                     Source.MODEL):
+        return False
+    camera.plan("trigger", "continuous", frm=frm)
+    return True
 
 
 def default_cameras(spec) -> List["CameraSpec"]:

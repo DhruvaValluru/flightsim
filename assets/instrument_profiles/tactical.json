@@ -1,0 +1,46 @@
+{
+  "name": "tactical",
+  "basis": "synthetic",
+  "source": "ILLUSTRATIVE VALUES OF A TACTICAL-GRADE SUITE, NOT A CALIBRATED INSTRUMENT. IMU terms are the IEEE Std 952-2020 Allan-variance terms (angle/velocity random walk, bias instability, bias repeatability) at the magnitudes the surveys cited below give for the tactical grade; the GPS, pitot-static and magnetometer numbers are hand-chosen within the ranges the cited documents describe as typical. Every number is 'unverified here': no instrument was measured in this repository, and a calibrated profile for a real suite replaces these with measured ones and cites the calibration.",
+  "references": [
+    "IEEE Std 952-2020, IEEE Standard for Specifying and Testing Single-Axis Interferometric Fiber Optic Gyros (Allan-variance terms: angle random walk, bias instability, rate random walk; the same terms applied to accelerometers as velocity random walk) -- unverified here",
+    "Groves, P. D. (2013), Principles of GNSS, Inertial, and Multisensor Integrated Navigation Systems, 2nd ed., Artech House, Table 4.1 (IMU grades: consumer, tactical, navigation; tactical gyro bias ~1-10 deg/h, accelerometer bias ~1 mg) -- unverified here",
+    "El-Sheimy, N., Hou, H., Niu, X. (2008), Analysis and Modeling of Inertial Sensors Using Allan Variance, IEEE Trans. Instrumentation and Measurement 57(1) (first-order Gauss-Markov model of the bias instability with a correlation time) -- unverified here",
+    "Woodman, O. J. (2007), An introduction to inertial navigation, University of Cambridge Computer Laboratory technical report UCAM-CL-TR-696 (random walk density to sampled-noise sigma: sigma = density / sqrt(dt)) -- unverified here",
+    "Honeywell HG1700 IMU datasheet (tactical grade: gyro bias 1 deg/h, ARW 0.125 deg/sqrt(h), accelerometer bias 1 mg) -- public datasheet, unverified here",
+    "GPS Standard Positioning Service Performance Standard, 5th ed. (2020), US DoD (position and velocity accuracy commitments) -- unverified here; the per-axis sigmas here are receiver-class numbers, not the standard's global averages",
+    "Titterton, D. H., Weston, J. L. (2004), Strapdown Inertial Navigation Technology, 2nd ed., IET, ch. 3 and 13 (lever arm: antenna position = reference position + C_b^n r_b) -- unverified here",
+    "Caruso, M. J. (2000), Applications of Magnetic Sensors for Low Cost Compass Systems, IEEE PLANS (hard-iron offsets as constant additions to the level field components) -- unverified here"
+  ],
+  "imu": {
+    "accelerometer": {
+      "bias_repeatability_mg": 1.0,
+      "velocity_random_walk_mps_per_sqrt_h": 0.06,
+      "bias_instability_mg": 0.05,
+      "correlation_time_s": 100.0
+    },
+    "gyro": {
+      "bias_repeatability_deg_per_h": 1.0,
+      "angle_random_walk_deg_per_sqrt_h": 0.125,
+      "bias_instability_deg_per_h": 0.3,
+      "correlation_time_s": 100.0
+    }
+  },
+  "gps": {
+    "north_east_sigma_m": 1.5,
+    "vertical_sigma_m": 3.0,
+    "velocity_sigma_mps": 0.05,
+    "update_rate_hz": 5.0,
+    "antenna_offset_body_m": [-1.0, 0.0, -0.8]
+  },
+  "pitot_static": {
+    "cas_sigma_kt": 0.5,
+    "cas_lag_s": 0.2,
+    "pressure_altitude_sigma_m": 3.0,
+    "pressure_altitude_lag_s": 0.3
+  },
+  "magnetometer": {
+    "hard_iron_sigma_fraction": 0.02,
+    "heading_sigma_deg": 0.5
+  }
+}

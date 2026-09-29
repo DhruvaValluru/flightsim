@@ -27,15 +27,21 @@ from typing import Any, Dict, Optional
 
 class Source(str, Enum):
     """Where a value came from. Ordered by how much it can be trusted:
-    user > inferred > model > derived > default. ``inferred`` is the
-    documented vocabulary mapping the user's own phrase (deterministic,
-    table-controlled); ``model`` is the language model's OWN declared
-    interpretation of the prompt -- always carrying the quoted phrase it
-    interpreted, and plannable exactly like a default (the planners may
-    move it; a user-stated value never moves)."""
+    user > inferred > sampled > model > derived > default. ``inferred``
+    is the documented vocabulary mapping the user's own phrase
+    (deterministic, table-controlled); ``sampled`` is a value the
+    randomisation POLICY drew (spec 8, contracts §5.1) -- it carries
+    ``{policy, distribution, seed, draw_index}`` in its detail and,
+    once drawn, is as fixed as a user field: no planner moves it (it is
+    absent from every plannable rule); ``model`` is the language
+    model's OWN declared interpretation of the prompt -- always carrying
+    the quoted phrase it interpreted, and plannable exactly like a
+    default (the planners may move it; a user-stated value never
+    moves)."""
 
     USER = "user"          #: stated explicitly in the prompt
     INFERRED = "inferred"  #: a vague phrase mapped by the documented table
+    SAMPLED = "sampled"    #: drawn by the randomisation policy (recorded)
     MODEL = "model"        #: the model's declared interpretation (quoted)
     DERIVED = "derived"    #: computed from the flight model / a planner
     DEFAULT = "default"    #: nobody mentioned it
@@ -138,3 +144,15 @@ class Quantity:
         for key in sorted(self.detail):
             bits.append(f"{key}={self.detail[key]}")
         return "; ".join(bits)
+
+
+#: The one statement of which sources a planner may move. A field the
+#: system chose (defaulted, derived, or the model's declared guess) may be
+#: re-planned; a user-stated or vocabulary-inferred value is never
+#: silently moved (§2.6). ``spec.py``, ``camera.py``,
+#: ``randomization.py`` and ``webapp/runs.py`` carry their own earlier
+#: spellings of this rule (each pinned by a mutation guard); the spec-8
+#: blocks (``blocks.py``, the camera's exposure block) read this one.
+#: ``Source.SAMPLED`` (package F) is deliberately absent: a drawn value
+#: is as fixed as a stated one.
+PLANNABLE_SOURCES = (Source.DEFAULT, Source.DERIVED, Source.MODEL)

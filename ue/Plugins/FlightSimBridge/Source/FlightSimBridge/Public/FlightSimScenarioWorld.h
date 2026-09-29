@@ -17,9 +17,11 @@
 #include "FlightSimDownburst.h"
 #include "FlightSimHeightfield.h"
 #include "FlightSimOrographic.h"
+#include "FlightSimWake.h"
 
 class AActor;
 class AGeoReferencingSystem;
+class FJsonObject;
 class UJSBSimMovementComponent;
 class UWorld;
 
@@ -34,6 +36,63 @@ struct FFlightSimControlInput
 	double Aileron = 0.0;
 	double Elevator = 0.0;
 	double Rudder = 0.0;
+};
+
+// Phase 2 (package B, contracts §2.3): one labelled object of the scene, as
+// composed in Python (core/capture/objects.py) and carried on the card's
+// objects[] list. The render host sets every labelled component's Custom
+// Depth Stencil to IntId and never invents an id of its own; the ID image
+// it writes holds exactly these integers.
+struct FFlightSimSceneObject
+{
+	FString Id;                 // "aircraft:B747:0", "terrain", ...
+	int32 IntId = 0;            // 1..255 (the primary airframe is always 1)
+	FString Class;              // taxonomy class name
+	int32 ClassId = 0;          // taxonomy position + 1 (0 is sky / nothing)
+	FString Role;               // primary | traffic | scene
+};
+
+// Phase 2 (packages B + C, contracts §2.2): a scripted traffic aircraft. Not
+// a second FDM: a static-mesh actor moved along a track SOLVED IN PYTHON
+// (core/capture/poses.py solve_traffic_track) and carried here as position
+// + attitude keyframes on the card's own sample clock, in the same block
+// shape as cameras[].poses. The host interpolates linearly and derives
+// nothing; the CG offset says where the airframe's CG sits in the actor
+// frame so the mesh actor is placed exactly as the FDM actor is (origin =
+// CG - R * cg).
+struct FFlightSimTrafficTrack
+{
+	FString Id;
+	int32 IntId = 0;
+	FString Aircraft;
+	FString Track;              // formation | crossing | overtaking
+	double RangeMetres = 0.0;
+	FString Livery = TEXT("default");
+	FString MeshManifestPath;   // empty when Python found no imported mesh
+	FVector CgActorCm = FVector::ZeroVector;
+	double OriginXMetres = 0.0;
+	double OriginYMetres = 0.0;
+	TArray<double> Times;
+	TArray<double> NorthMetres;
+	TArray<double> EastMetres;
+	TArray<double> AltMetres;
+	TArray<double> YawDegrees;  // true heading
+	TArray<double> PitchDegrees;
+	TArray<double> RollDegrees;
+};
+
+// P9: one event of the card's failure_schedule block, verbatim
+// (core/telemetry/failures.py CARD_EVENT_KEYS: kind, target, at_s,
+// property, value). An engine_out's property is written with
+// propulsion/active_engine set to the target and restored to -1.
+struct FFlightSimFailureEvent
+{
+	FString Kind;                // engine_out | control_jam | hardover | float | authority_loss
+	FString Target;              // a surface name, or the engine index as text
+	int32 EngineIndex = -1;      // the target as an index, engine_out only
+	double AtSeconds = 0.0;      // on the host's run clock
+	FString Property;
+	double Value = 0.0;
 };
 
 // One scenario, as much of a core.scenario.spec.ScenarioSpec as this host can
@@ -205,6 +264,111 @@ struct FFlightSimScenarioCard
 	// Phase 9: projected CRS for flat-scene position-coupled blocks
 	// (thermals / downburst / tornado); empty when terrain declares one.
 	FString SceneCrs;
+	// Phase 10 (package 7): the livery the randomisation block sampled,
+	// from card.randomization.livery. "default" (or absent) keeps the
+	// mesh's own materials; any other name must load as a material at
+	// <asset_path_root>/Liveries/<name> or the render refuses by name.
+	FString Livery = TEXT("default");
+	// Phase 2 (package B): the scene's labelled objects and class list,
+	// verbatim from the card (empty on a card written before objects[]
+	// existed; the render commandlet then labels with the Phase 10 ids and
+	// says so in render.json).
+	TArray<FFlightSimSceneObject> Objects;
+	TArray<FString> TaxonomyClasses;
+	// Phase 2 (packages B + C): the scripted traffic aircraft, in card order.
+	TArray<FFlightSimTrafficTrack> Traffic;
+
+	// -- P9: the physics card blocks ---------------------------------------
+	// Each is optional and absent-canonical (no block: the host writes
+	// nothing new and flies exactly as before). ReadCard reads each with the
+	// turbulence_properties discipline -- the block's keys in the fixed
+	// order the Python writer emits, exactly that many, read by name --
+	// and refuses a malformed one by name (card.<block>).
+
+	// atmosphere_properties (core/environment/atmosphere.py CARD_KEYS): the
+	// non-null writes of delta-T (R), P-sl (psf) and dew point (R), in card
+	// order, as %.17g text. Written in the plugin's pre-trim batch (after
+	// RunIC, before the trim, re-latched after each) and every step.
+	bool bAtmosphere = false;
+	TArray<FString> AtmosphereProperties;
+	TArray<FString> AtmosphereValues;
+
+	// loading_properties (core/scenario/loading.py CARD_KEYS): the station
+	// point masses (a re-latch after each, as LoadingProvider.prepare) and
+	// the tank contents (one re-latch after all), then inertia/cg-x-in read
+	// back against expected_cg_in within tolerance_in BEFORE the trim.
+	bool bLoading = false;
+	TArray<FString> LoadingProperties;
+	TArray<FString> LoadingValues;
+	TArray<bool> LoadingRelatchAfter;
+	int32 LoadingStations = 0;
+	int32 LoadingTanks = 0;
+	double LoadingExpectedCgIn = 0.0;
+	double LoadingToleranceIn = 0.0;
+	FString LoadingDatumFrame;
+
+	// failure_schedule (core/telemetry/failures.py CARD_KEYS): applied once
+	// each, at the first step whose run-clock time is >= at_s.
+	TArray<FFlightSimFailureEvent> FailureEvents;
+
+	// icing_schedule (core/environment/icing.py CARD_KEYS): eta(t), the six
+	// factors 1 + eta k (lift, drag, pitch, roll, yaw, side) and the alpha
+	// shift, written at the top of every step into the derived airframe.
+	bool bIcing = false;
+	double IcingEtaMax = 0.0;
+	double IcingOnsetSeconds = 0.0;
+	double IcingRampSeconds = 0.0;
+	double IcingAlphaShiftDeg = 0.0;
+	double IcingK[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+	FString IcingSource;
+
+	// gust_table (core/environment/von_karman.py CARD_KEYS): row i applied
+	// at step i into atmosphere/gust-*-fps (u, v rotated by heading_deg) and
+	// gust/p-equivalent-rad_sec where the airframe declares it; zero past
+	// the table. The rows' sha256 is re-computed at the door.
+	bool bGustTable = false;
+	FString GustTableModel;
+	double GustTableDtSeconds = 0.0;
+	FString GustTableSha256;
+	TArray<double> GustRowTime;
+	TArray<double> GustRowU;
+	TArray<double> GustRowV;
+	TArray<double> GustRowW;
+	TArray<double> GustRowP;
+
+	// layered_wind (core/environment/shear.py CARD_KEYS): layers of
+	// [height m, speed kt, from deg] interpolated linearly (direction on
+	// the shorter arc), held beyond the ends; heights are MSL for the
+	// layered and nwp kinds and AGL for milspec. REPLACES the uniform wind.
+	bool bLayeredWind = false;
+	FString LayeredWindKind;
+	FString LayeredWindSource;
+	TArray<double> LayerHeightMetres;
+	TArray<double> LayerSpeedKnots;
+	TArray<double> LayerFromDegrees;
+
+	// wake (core/environment/wake.py CARD_KEYS): the pair the host port
+	// evaluates per step; the selftest ran in ReadCard and its host vectors
+	// are kept for render.json.
+	bool bWake = false;
+	FFlightSimWakeCard Wake;
+	TArray<FFlightSimWakeVector> WakeHostSelftest;
+	double WakeSelftestWorst = 0.0;
+
+	// derived_aircraft (core/scenario/card.py DERIVED_AIRCRAFT_CARD_KEYS):
+	// the airframe core/control/derive.py built, loaded through the
+	// plugin's fifth local patch (the aircraft root) with the XML's sha256
+	// checked at the door against xml_sha256.
+	bool bDerivedAircraft = false;
+	FString DerivedAircraftName;
+	FString DerivedAircraftBase;
+	TArray<FString> DerivedAircraftInjections;
+	FString DerivedAircraftRoot;
+	FString DerivedAircraftSha256;
+
+	// The vertical datum block's geoid undulation at the origin (P10), for
+	// the host's undulation_m / hae_m channels; 0 where none applies.
+	double DatumUndulationMetres = 0.0;
 };
 
 class FLIGHTSIMBRIDGE_API FFlightSimScenarioWorld
@@ -338,8 +502,50 @@ public:
 	AGeoReferencingSystem* GeoReferencing = nullptr;
 	AActor* Aircraft = nullptr;
 	UJSBSimMovementComponent* Movement = nullptr;
+	// Phase 2 (packages B + C): one bare actor per card traffic entry, in
+	// card order, placed on its track at every Step() (after the world
+	// tick, at the FDM's own sim time, so a frame captured after Step sees
+	// the primary, the traffic and the camera at one instant). The render
+	// commandlet hangs the mesh under it and sets its stencil; this class
+	// only moves it. Empty when the card carries no traffic.
+	TArray<AActor*> TrafficActors;
+
+	// Where each traffic actor's CG is at TimeSeconds, linearly interpolated
+	// between its keyframes (clamped to the track's ends outside them, logged
+	// once: the FDM ticks from t = 0 while the recorded track starts one
+	// sample in). Public so the commandlet can place the actors before the
+	// first capture.
+	void ApplyTrafficPoses(double TimeSeconds);
+
+	// -- P9: what the physics blocks did, for render.json -------------------
+	// Adds the environment keys core/capture/verify.py grades when present
+	// (check.host_physics, check.wake_selftest): atmosphere_delivery,
+	// loading_applied, loading_readback_cg_in, failure_schedule_applied[],
+	// gust_delivery ('table' | 'wake_port'), gust_rows_applied,
+	// wake_selftest[], derived_aircraft_sha256, layered_wind, icing_applied.
+	// A key is added only for a block the card carries. The render
+	// commandlet calls this beside its own environment keys.
+	void AppendEnvironmentReport(const FFlightSimScenarioCard& Card,
+	                             const TSharedPtr<FJsonObject>& Environment) const;
+
+	// The host-computed telemetry channels -- the recorder's "host:" rows
+	// (FlightSimTelemetryRecorder.cpp): values the headless recorder takes
+	// from its providers through Recorder extra (the wake columns, the
+	// wind layer, the failure flag), from a property with a stock-airframe
+	// default (the icing factors, p_eq), or as a combination of properties
+	// (the wind speeds, hae_m). NaN for a name this world does not serve
+	// (the exceedance flags: annotated after the run by
+	// core/telemetry/limits.py over the recorded columns, on both hosts).
+	double HostChannel(const FString& Name) const;
+	static bool ReadHostChannel(const UJSBSimMovementComponent* InMovement,
+	                            const FString& Name, double& Out);
+
+	// Leaves the host-channel registry (Teardown does too).
+	~FFlightSimScenarioWorld();
 
 private:
+	void UnregisterHostChannels();
+
 	// Everything after world creation: georeferencing, ground, aircraft,
 	// wind precompute. Shared verbatim by Build (own world) and BuildInto
 	// (live world); bLiveWorld selects the deferred aircraft spawn.
@@ -430,4 +636,68 @@ private:
 	// is deterministic and replay-identical.
 	AActor* TornadoFunnel = nullptr;
 	double TornadoOmegaDegPerSec = 0.0;
+
+	// Phase 2: the traffic tracks, copied from the card at Populate so
+	// Step() needs no card reference for them; parallel to TrafficActors.
+	TArray<FFlightSimTrafficTrack> TrafficTracks;
+	bool bTrafficClampWarned = false;
+
+	// -- P9: the physics blocks' host state ----------------------------------
+	// After the plugin's BeginPlay (RunIC, the pre-trim batch, the trim):
+	// the loading's CG read back against the card, every property the
+	// per-step writes need proven present, the gust roll channel probed.
+	// Called from TrimInWind, which every host calls right after the
+	// aircraft is loaded and trimmed.
+	bool BindPhysicsBlocks(const FFlightSimScenarioCard& Card, FString& Error);
+
+	// The physics blocks' per-step writes, called by ApplyStepWrites beside
+	// the wind batch: the atmosphere batch, the failure schedule, the icing
+	// writes and the gust batch (every step, zero included).
+	void ApplyPhysicsStepWrites(const FFlightSimScenarioCard& Card);
+
+	// The layered wind's horizontal wind (fps, NED) at a height, with the
+	// layer index and dV/dz (1/s) the headless profile reports.
+	void LayeredWindAt(const FFlightSimScenarioCard& Card, double MslMetres,
+	                   double AglMetres, double& OutNorthFps,
+	                   double& OutEastFps, double& OutLayerIndex,
+	                   double& OutDvDzPerSecond) const;
+
+	// The run clock: seconds since the run's first step, from JSBSim's own
+	// simulation/sim-time-sec (the headless definition: the crank has
+	// already moved JSBSim's clock by then, 4.875 s on the c172p).
+	bool bRunClockLatched = false;
+	double RunClockZeroSeconds = 0.0;
+	double RunClockSeconds = 0.0;
+	int32 PhysicsSteps = 0;
+
+	bool bAtmosphereWritten = false;
+	int32 AtmosphereStepWrites = 0;
+	bool bLoadingApplied = false;
+	double LoadingReadbackCgIn = 0.0;
+	double PreTrimCasKnots = 0.0;
+	bool bPreTrimCasRead = false;
+
+	TArray<bool> FailureDone;
+	TArray<double> FailureAppliedSeconds;
+	TArray<int32> FailureAppliedStep;
+	bool bFailureState = false;
+
+	bool bIcingReady = false;
+	int32 IcingStepsWritten = 0;
+
+	bool bGustPEquivalentDeclared = false;
+	int32 GustRowsApplied = 0;
+	int32 GustStepsBeyondTable = 0;
+	int32 GustStepsWritten = 0;
+
+	bool bLayeredWindReady = false;
+	double LayerIndexLast = 0.0;
+	double LayerDvDzLast = 0.0;
+
+	FFlightSimWake WakePort;
+	bool bWakeReady = false;
+	FFlightSimWakeSample WakeLast;
+
+	double UndulationMetres = 0.0;
+	FString DerivedSha256AtDoor;
 };

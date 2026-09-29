@@ -24,6 +24,7 @@ prompt cannot queue an hour of editor time; the cap is recorded in the run.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import threading
 import time
@@ -33,6 +34,30 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 REPO = Path(__file__).resolve().parents[1]
+
+#: Where baked terrain lives. ONE name for it, so a test can point the
+#: scene picker at a synthetic bake without moving the repo root out from
+#: under the asset and engine paths. Until this existed the four
+#: terrain-coupled planner tests skipped on any clone without a real
+#: bake, and their mutation guards reported WEAK there -- an artifact of
+#: measurement, not a regression (NEXT.md), but one that made four
+#: safeguards unverifiable on CI and on every fresh machine.
+TERRAIN_DIR = REPO / "runs" / "terrain"
+
+
+def baked(stem: Path) -> bool:
+    """True when a bake is WHOLE: the .r16 samples AND the .json sidecar
+    that Heightfield.read needs to interpret them.
+
+    The scene picker used to test the .r16 alone, so a half-written bake
+    -- a crash between the two writes, or a stub left by a test whose
+    redirect had stopped applying (measured, 2026-09-11) -- selected the
+    scene and then crashed every terrain spec in place_on_scene with an
+    unnamed FileNotFoundError. A half-bake is not a bake: it is skipped
+    here, and the fail-safe re-synthesises over it.
+    """
+    stem = Path(stem).with_suffix("")
+    return stem.with_suffix(".r16").is_file() and stem.with_suffix(".json").is_file()
 import sys
 
 sys.path.insert(0, str(REPO))
@@ -41,6 +66,10 @@ from core.scenario.camera import (  # noqa: E402
     CHASE_OFFSETS, CameraSpec, default_cameras,
 )
 from core.scenario.card import write_run_card  # noqa: E402
+from core.scenario.randomization import (  # noqa: E402
+    RandomizationError, card_block as randomization_card_block,
+    render_look as randomization_look, sample_randomization,
+)
 from core.scenario.spec import ScenarioSpec  # noqa: E402
 from core.scenario.validate import MIN_CLEARANCE_M  # noqa: E402
 from core.terrain.glo30 import (  # noqa: E402
@@ -52,12 +81,22 @@ from experiments.showcase_matrix import (  # noqa: E402
     FPS,
     HEIGHT,
     SHOWCASE_DOUBLET,
-    TIME_OF_DAY,
-    VISIBILITY,
     WIDTH,
     encode_clip,
 )
 from experiments.showcase_panel import build_panel_clip  # noqa: E402
+from webapp.capture import (  # noqa: E402
+    CaptureError,
+    card_blocks as capture_card_blocks,
+    finish as capture_finish,
+    landmarks as capture_landmark_set,
+    render_passes as capture_render_passes,
+    resolve_over_host as capture_resolve_over_host,
+    solve as capture_solve,
+    wants_capture,
+    write_manifest as capture_write_manifest,
+    apply_sensor as capture_apply_sensor,
+)
 
 #: Render length cap, seconds. The showcase's own clip length; a spec asking
 #: for more still records the full duration in its spec -- only the clip is
@@ -84,6 +123,13 @@ class RunState:
     # seed + visual-only label, wind, physics ground).
     reference: Optional[Dict] = None
     conditions: Dict = field(default_factory=dict)
+    #: Camera Phase 2: the verification summary for a captured run
+    #: (None for a camera-less run, which takes the legacy clip path).
+    capture: Optional[Dict] = None
+    #: The cameras that got their own mp4 -- one clip per view, so a
+    #: selected angle and a selected clip length give that many seconds
+    #: of that angle.
+    camera_clips: List[str] = field(default_factory=list)
 
     def push(self, status: str, detail: str = "") -> None:
         self.status = status
@@ -96,7 +142,8 @@ class RunState:
                 "detail": self.detail, "spec_digest": self.spec_digest,
                 "scene": self.scene, "clip": self.clip,
                 "started": self.started, "events": self.events[-20:],
-                "reference": self.reference, "conditions": self.conditions}
+                "reference": self.reference, "conditions": self.conditions,
+                "capture": self.capture}
 
 
 def editor_running() -> bool:
@@ -136,7 +183,7 @@ def _dynamic_scenes(dynamic_dir: Path) -> List[Dict]:
     for sidecar in sorted(Path(dynamic_dir).glob("*.scene.json")):
         entry = json.loads(sidecar.read_text(encoding="utf-8"))
         raster = Path(dynamic_dir) / f"{entry['key']}.r16"
-        if raster.is_file():
+        if baked(raster):
             entry["terrain"] = str(raster.with_suffix(""))
             scenes.append(entry)
     return scenes
@@ -149,14 +196,32 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
     Stated coordinates mean "fly at that real place": defaulted and
     placed-on-scene coordinates never trigger (this runs BEFORE
     place_on_scene), and coordinates already on a curated or dynamic bake
-    pass through. The /bake endpoint clears the refusal; nothing here
+    pass through. A place SCENE-SETTING staged is not held to this rule
+    either -- a placeless prompt on a machine without bakes still runs,
+    on the flat slab at the staged datum (pick_scene says so in its
+    label), never on a substituted ridge. The /bake endpoint clears the refusal; nothing here
     downloads anything -- an HTTP /run stays fast and its digest stays the
     digest of what actually runs.
+
+    Spec 8: ``scene.terrain_source: baked`` with no whole bake (stated
+    or earned) refuses here too, whatever the coordinates' source -- the
+    spec asked for a bake by name, and neither a ridge nor a slab may
+    stand in for it.
     """
+    scene = pick_scene(spec)
+    if scene.get("refused") == "terrain.unbaked":
+        return {
+            "constraint": "terrain.unbaked",
+            "message": f"{scene['label']}; POST /bake with the coordinates "
+                       f"to fetch and verify GLO-30 there, or state "
+                       f"scene.terrain as a bake on this machine, then run "
+                       f"again",
+            "latitude": float(spec.latitude.value),
+            "longitude": float(spec.longitude.value),
+        }
     if (str(spec.latitude.source) != "user"
             or str(spec.longitude.source) != "user"):
         return None
-    scene = pick_scene(spec)
     # The synthesised control ridge is NOT a place (the ERA5 doctrine):
     # stated coordinates that fall on no real bake refuse here even when
     # a leftover terrain_elevation would otherwise select the control
@@ -181,7 +246,7 @@ def bake_on_demand(lat: float, lon: float) -> Dict:
     the scene. Raises (DEMError / URLError by name) rather than writing an
     unverified or empty bake -- open ocean has no tiles and says so."""
     location = dynamic_location(lat, lon)
-    dynamic_dir = REPO / "runs" / "terrain" / "dynamic"
+    dynamic_dir = TERRAIN_DIR / "dynamic"
     raster = dynamic_dir / f"{location.key}.r16"
     if not raster.is_file():
         bake(location, REPO / "data" / "glo30", dynamic_dir)
@@ -211,11 +276,11 @@ def ensure_control_ridge() -> None:
     no network. Real bakes still win wherever they exist, and a USER-
     stated flat place stays honestly flat: this floor only catches
     system-chosen scenes."""
-    terrain_dir = REPO / "runs" / "terrain"
-    if (terrain_dir / "control_ridge.r16").is_file():
+    terrain_dir = TERRAIN_DIR
+    if baked(terrain_dir / "control_ridge"):
         return
     with _CONTROL_RIDGE_LOCK:
-        if (terrain_dir / "control_ridge.r16").is_file():
+        if baked(terrain_dir / "control_ridge"):
             return
         from core.terrain.synthesis import TerrainStatistics, generate
 
@@ -227,15 +292,108 @@ def ensure_control_ridge() -> None:
         field.write(terrain_dir / "control_ridge")
 
 
+def scene_set(spec: ScenarioSpec) -> bool:
+    """True when the spec's place was chosen by scene-setting (the
+    planner's own provenance string on all three planned fields), as
+    opposed to stated, inferred, or left default."""
+    return (str(spec.latitude.source) == "derived"
+            and str(spec.terrain_elevation.source) == "derived"
+            and str(spec.latitude.frm or "").startswith("scene-setting")
+            and str(spec.terrain_elevation.frm or "").startswith(
+                "scene-setting"))
+
+
+def _stated_terrain_scene(spec: ScenarioSpec) -> Optional[Dict]:
+    """Spec 8: the scene ``scene.terrain_source`` states, or None for
+    ``auto`` (today's selection, below, byte for byte).
+
+    ``flat`` is the datum slab whatever the geography; ``synthesised``
+    is the deterministic ridge centred on the spec's own origin, written
+    under TERRAIN_DIR exactly as the CLI's --synth-terrain writes it
+    (same name, same cache key, so the two share one raster);
+    ``baked`` honours a stated ``scene.terrain`` stem, else the bake the
+    geography earns, and otherwise carries a named refusal
+    (``terrain.unbaked``) that needs_dynamic_bake surfaces -- never a
+    ridge and never a slab standing in for a bake the spec asked for.
+    An unknown value is validation's refusal (scene.terrain_source) and
+    falls through to ``auto`` here so the picker never raises.
+    """
+    source = str(spec.scene.terrain_source.value)
+    datum = float(spec.terrain_elevation.value)
+    if source == "flat":
+        return {"key": "flat", "kind": "flat", "terrain": None,
+                "imagery": None,
+                "label": f"scene.terrain_source: flat -- flat slab at the "
+                         f"spec's {datum:g} m datum, as stated"}
+    if source == "synthesised":
+        from core.terrain.synthesis import ensure_ridge_for_origin
+
+        stem = ensure_ridge_for_origin(
+            TERRAIN_DIR, float(spec.latitude.value),
+            float(spec.longitude.value),
+            name=f"synth_{spec.name or 'scene'}")
+        return {"key": "synthesised", "kind": "synthesised ridge at the "
+                                              "spec origin",
+                "terrain": str(stem), "imagery": None,
+                "label": "scene.terrain_source: synthesised -- a ridge of "
+                         "prescribed statistics (not a place) centred on "
+                         "the spec's own origin, deterministic from its "
+                         "seed; physics ground is the heightfield raster; "
+                         "track pre-flown for clearance"}
+    if source == "baked":
+        stated = spec.scene.terrain.value
+        if stated:
+            stem = Path(str(stated))
+            if not stem.is_absolute() and not baked(stem):
+                stem = TERRAIN_DIR / stem
+            if baked(stem):
+                stem = stem.with_suffix("")
+                return {"key": stem.name, "kind": "baked (stated)",
+                        "terrain": str(stem), "imagery": None,
+                        "label": f"scene.terrain: {stated} -- the stated "
+                                 f"bake; physics ground is the heightfield "
+                                 f"raster; track pre-flown for clearance"}
+            return {"key": "flat", "kind": "flat", "terrain": None,
+                    "imagery": None, "refused": "terrain.unbaked",
+                    "label": f"scene.terrain_source: baked, but "
+                             f"scene.terrain {stated!r} is not a whole "
+                             f"bake on this machine (<stem>.r16 + .json)"}
+        earned = _earned_scene(spec)
+        if earned is not None:
+            return earned
+        return {"key": "flat", "kind": "flat", "terrain": None,
+                "imagery": None, "refused": "terrain.unbaked",
+                "label": "scene.terrain_source: baked, but no bake covers "
+                         "the spec's coordinates and none is stated "
+                         "(scene.terrain)"}
+    return None
+
+
 def pick_scene(spec: ScenarioSpec) -> Dict:
-    """Choose the scene the spec's geography earns -- never silently."""
+    """Choose the scene the spec's geography earns -- never silently.
+
+    Spec 8: a stated ``scene.terrain_source`` other than ``auto`` decides
+    first (:func:`_stated_terrain_scene`); ``auto`` is the selection
+    below, unchanged.
+    """
+    stated = _stated_terrain_scene(spec)
+    if stated is not None:
+        return stated
+    return _auto_scene(spec)
+
+
+def _earned_scene(spec: ScenarioSpec) -> Optional[Dict]:
+    """The REAL bake the spec's coordinates sit on (curated or dynamic),
+    or None. The first half of the auto selection, shared with
+    ``baked``."""
     lat = float(spec.latitude.value)
     lon = float(spec.longitude.value)
-    terrain_dir = REPO / "runs" / "terrain"
+    terrain_dir = TERRAIN_DIR
     for key, location in LOCATIONS.items():
         if (abs(lat - location.origin_lat) <= LOCATION_TOLERANCE_DEG
-                and abs(lon - location.origin_lon) <= LOCATION_TOLERANCE_DEG
-                and (terrain_dir / f"{key}.r16").is_file()):
+                and abs(lon - location.origin_lon) <= LOCATION_TOLERANCE_DEG):
+            if not baked(terrain_dir / key):
+                continue
             imagery = terrain_dir / f"{key}_imagery.json"
             return {
                 "key": key, "kind": "real (Copernicus GLO-30)",
@@ -259,8 +417,54 @@ def pick_scene(spec: ScenarioSpec) -> Dict:
                          f"physics ground is the heightfield raster (AGL "
                          f"parity measured); track pre-flown for clearance",
             }
-    if float(spec.terrain_elevation.value) > 0.0:
-        if (terrain_dir / "control_ridge.r16").is_file():
+    return None
+
+
+def _auto_scene(spec: ScenarioSpec) -> Dict:
+    """``terrain_source: auto`` -- the scene the spec's geography earns,
+    exactly as before spec 8."""
+    lat = float(spec.latitude.value)
+    lon = float(spec.longitude.value)
+    terrain_dir = TERRAIN_DIR
+    staged_absent = None
+    for key, location in LOCATIONS.items():
+        if (abs(lat - location.origin_lat) <= LOCATION_TOLERANCE_DEG
+                and abs(lon - location.origin_lon) <= LOCATION_TOLERANCE_DEG):
+            if not baked(terrain_dir / key):
+                staged_absent = key
+                continue
+            imagery = terrain_dir / f"{key}_imagery.json"
+            return {
+                "key": key, "kind": "real (Copernicus GLO-30)",
+                "terrain": str(terrain_dir / key),
+                "imagery": str(imagery) if imagery.is_file() else None,
+                "label": f"georeferenced {key} raster at true position; "
+                         f"physics ground is the heightfield raster "
+                         f"(AGL parity measured); track pre-flown for "
+                         f"clearance",
+            }
+    for scene in _dynamic_scenes(terrain_dir / "dynamic"):
+        if (abs(lat - scene["origin_lat"]) <= LOCATION_TOLERANCE_DEG
+                and abs(lon - scene["origin_lon"]) <= LOCATION_TOLERANCE_DEG):
+            return {
+                "key": scene["key"], "kind": "real (Copernicus GLO-30, "
+                                             "on-demand bake)",
+                "terrain": scene["terrain"], "imagery": None,
+                "label": f"GLO-30 bake near {scene['origin_lat']:.3f}, "
+                         f"{scene['origin_lon']:.3f}; identity "
+                         f"source-verified only (no named summits); "
+                         f"physics ground is the heightfield raster (AGL "
+                         f"parity measured); track pre-flown for clearance",
+            }
+    if float(spec.terrain_elevation.value) > 0.0 and not scene_set(spec):
+        # The ridge stands in for UNNAMED mountains only. A datum that
+        # scene-setting planned for a curated place (413 m for the
+        # Flint Hills) belongs to that place: with its bake absent the
+        # scene is honestly flat at that datum, labelled below -- never
+        # 3299 m peaks under a "413 m" scene (measured: a 3000 m flight
+        # refused terrain.clearance at -89.5 m AGL over "413 m staged
+        # terrain" because the ridge had been substituted).
+        if baked(terrain_dir / "control_ridge"):
             return {
                 "key": "control", "kind": "synthesised control ridge",
                 "terrain": str(terrain_dir / "control_ridge"),
@@ -270,6 +474,15 @@ def pick_scene(spec: ScenarioSpec) -> Dict:
                          "(AGL parity measured); track pre-flown for "
                          "clearance",
             }
+    if staged_absent is not None and scene_set(spec):
+        return {"key": "flat", "kind": "flat", "terrain": None,
+                "imagery": None,
+                "label": f"the {staged_absent} bake is not on this machine "
+                         f"(scripts/bake_terrain.py {staged_absent} fetches "
+                         f"it); flat slab at its "
+                         f"{float(spec.terrain_elevation.value):g} m datum "
+                         f"until then -- the synthesised ridge is never "
+                         f"substituted for a staged place"}
     return {"key": "flat", "kind": "flat", "terrain": None, "imagery": None,
             "label": "no terrain requested; flat slab at the spec's "
                      "elevation"}
@@ -341,6 +554,17 @@ def camera_render_flags(spec: ScenarioSpec):
     and a wingman camera carries its abeam distance.
     """
     cameras = spec.cameras or default_cameras(spec)
+    if len(cameras) > 1:
+        # Reachable only if something routes a multi-camera spec down the
+        # LEGACY path, which renders one pass through the preset
+        # machinery: it would render cameras[0] and silently drop the
+        # rest. A spec that states cameras goes through the capture stage
+        # instead (webapp.capture), which renders one pass per camera.
+        raise ValueError(
+            f"camera.multi_render: {len(cameras)} cameras reached the "
+            f"legacy single-pass render path, which can only produce "
+            f"{str(cameras[0].camera_id.value)!r}; a camera-carrying spec "
+            f"belongs in the capture stage")
     camera = cameras[0]
     preset = str(camera.preset.value)
     word = COMMANDLET_CAMERA_WORDS.get(preset)
@@ -370,6 +594,11 @@ def camera_render_flags(spec: ScenarioSpec):
 #: the user's words, and a value they command that cannot fly is refused
 #: by name, not silently moved. This line is load-bearing.
 PLANNABLE_SOURCES = ("default", "model", "derived")
+#: Scene keys that are NOT a place: the control ridge the geography
+#: earns and the ridge ``scene.terrain_source: synthesised`` states are
+#: both prescribed statistics at arbitrary coordinates, so nothing that
+#: needs a real place (historical weather) may key on their origin.
+SYNTHESISED_SCENE_KEYS = ("control", "synthesised")
 
 
 def _fly_clearance_track(spec: ScenarioSpec, ground, script,
@@ -1025,6 +1254,19 @@ def project_for_ue_host(spec: ScenarioSpec) -> None:
                       "airspeed' refuses instead)")
 
 
+def sample_randomization_or_refuse(spec: ScenarioSpec) -> Optional[Dict]:
+    """The randomisation planner for the endpoints: a no-op for a
+    default block; a named refusal dict (the verdict's violation shape)
+    when the stated window has no daylight, instead of an exception
+    the page cannot show."""
+    try:
+        sample_randomization(spec)
+    except RandomizationError as exc:
+        return {"constraint": exc.constraint, "message": exc.message,
+                "actual": None, "limit": None, "unit": None}
+    return None
+
+
 def derive_seed(spec: ScenarioSpec, terrain_coupled: bool = False) -> None:
     """A stochastic spec with the default seed gets one from its digest.
 
@@ -1043,6 +1285,21 @@ def derive_seed(spec: ScenarioSpec, terrain_coupled: bool = False) -> None:
 #: labeled so; the storm's physics arrive as card blocks.
 STORM_LOOK = {"sun_elev": 10.0, "sun_azim": 180.0, "exposure_bias": 9.6,
               "fog_density": 0.007}
+
+
+def render_look_for(spec: ScenarioSpec, event_note) -> Optional[Dict]:
+    """Which look the commandlet is given: the SAMPLED one when the
+    randomisation block is on (its sun, exposure and fog are the
+    record), the storm look when a severe-weather event composed the
+    scene, the harness's noon default otherwise (None -> byte-identical
+    to the pre-camera build, pinned by test). Randomisation wins over
+    the storm look on purpose: the storm's PHYSICS still arrive as card
+    blocks, and a dataset that asked for a sampled sun gets the sun it
+    recorded, not a fixed dim one."""
+    sampled = randomization_look(spec)
+    if sampled is not None:
+        return sampled
+    return STORM_LOOK if event_note else None
 
 
 def _projected_origin(spec: ScenarioSpec, scene: Dict):
@@ -1109,25 +1366,32 @@ def apply_historical_weather(spec: ScenarioSpec) -> Optional[Dict]:
     """ERA5 reanalysis wind for a dated spec, as recorded pre-digest edits.
 
     None (applied, or nothing to do) or a named refusal dict. Rules, in
-    order: no date -> nothing; a USER-stated wind is never moved (the date
-    goes to notes instead); the synthesised control ridge is NOT A PLACE,
-    so a dated spec there refuses by name; an unreachable archive refuses
-    by name rather than guessing a wind.
+    order: no date -> nothing; a wind that is not plannable -- stated by
+    the user, inferred from their phrase, or SAMPLED by the policy (a
+    drawn value is as fixed as a stated one, contracts §5.1) -- is never
+    moved (the date goes to notes instead); a synthesised ridge is NOT A
+    PLACE, whether it is the control ridge the geography earned or the
+    one ``scene.terrain_source: synthesised`` states, so a dated spec
+    there refuses by name; an unreachable archive refuses by name rather
+    than guessing a wind.
     """
     date = str(spec.weather_date.value)
     if date == "none":
         return None
-    if (str(spec.wind_speed.source) == "user"
-            or str(spec.wind_direction.source) == "user"):
+    if (str(spec.wind_speed.source) not in PLANNABLE_SOURCES
+            or str(spec.wind_direction.source) not in PLANNABLE_SOURCES):
+        how = ("drawn" if "sampled" in (str(spec.wind_speed.source),
+                                        str(spec.wind_direction.source))
+               else "stated")
         spec.notes.append(
-            f"weather_date {date}: the stated wind wins; ERA5 not applied "
-            f"(a stated value is never silently moved)")
+            f"weather_date {date}: the {how} wind wins; ERA5 not applied "
+            f"(a {how} value is never silently moved)")
         return None
-    if pick_scene(spec)["key"] == "control":
+    if pick_scene(spec)["key"] in SYNTHESISED_SCENE_KEYS:
         return {
             "constraint": "weather.not_a_place",
-            "message": "historical weather needs a real place; the "
-                       "synthesised control ridge is not one. Name a real "
+            "message": "historical weather needs a real place; a "
+                       "synthesised ridge is not one. Name a real "
                        "location or state coordinates.",
         }
     from core.environment.era5 import (
@@ -1393,14 +1657,14 @@ class RunManager:
 
     def start(self, spec: ScenarioSpec, provenance: Dict) -> Dict:
         """Refuses (with the reason) or starts a run and returns its id."""
-        from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
+        from core.util.platform import ue_available, ue_platform_refusal
 
         if not ue_available():
-            # The named platform refusal, not a 500: every render gotcha
-            # was measured on Metal/macOS only. The headless half (spec,
+            # The named platform refusal, not a 500: rendering needs the
+            # Windows host (engine + built bridge). The headless half (spec,
             # provenance, validation, telemetry via run_spec) already
             # happened or remains available on this OS.
-            return {"refused": UE_PLATFORM_REFUSAL,
+            return {"refused": ue_platform_refusal(),
                     "constraint": "ue.platform"}
         with self._lock:
             active = self.runs.get(self._active) if self._active else None
@@ -1427,7 +1691,7 @@ class RunManager:
     def _render(card: Path, frames: Path, scene: Dict, mesh: Path,
                 aircraft: str, telemetry: Optional[Path] = None,
                 look: Optional[Dict] = None,
-                camera_flags=None) -> bool:
+                camera_flags=None, extra=None) -> bool:
         """The showcase render command, with terrain/imagery conditional.
 
         Same flags render_cell passes (gotcha 1: absolute paths, -stdout,
@@ -1438,43 +1702,253 @@ class RunManager:
         camera_render_flags (default cameras when none stated -- pinned
         byte-identical to the old hardcoded selection).
         """
+        from core.render.flags import render_flags
+
         project = REPO / "ue" / "FlightSim.uproject"
         frames.mkdir(parents=True, exist_ok=True)
         (frames / "render.json").unlink(missing_ok=True)
-        tod = look or TIME_OF_DAY["noon"]
-        inline, trailing = camera_flags or (
-            [f"-chase={WEBAPP_CHASE.get(aircraft, '-110:0:12')}",
-             "-camera=chase"], [])
+        extra = list(extra or ())
+        # Phase 2 (package A, contracts §9): the flag list comes from the
+        # ONE builder the CLI also uses. Which passes get which flags:
+        #   * a per-camera pass (the capture stage's loop hands in
+        #     -camera-index=N and -labels through ``extra``) is the pass
+        #     whose pixels are the dataset. It gets -deterministic --
+        #     the pins Gate 10-R proves the frame digests need, which no
+        #     web render ever passed before -- and NO preset camera
+        #     flags: under consume-poses the commandlet places the
+        #     camera from the card's own track ("replacing the chase
+        #     settle-in placement", FlightSimRenderCommandlet.cpp) and
+        #     its default preset word is already "chase", so the
+        #     -chase=/-camera=chase this method used to add were inert
+        #     by reading of that code (not measured on Windows). The
+        #     CLI states none, and the one-builder test (tests/
+        #     test_render_flags.py) is what caught the difference.
+        #   * the legacy single-pass preset path and the throw-away
+        #     solve pass (_fly_host, a card without cameras) keep the
+        #     preset flags -- there they place the camera -- and stay
+        #     byte-identical: no -labels, no -deterministic (the
+        #     camera-less list is pinned by test).
+        # -labels is never added here: the loop states it, and the
+        # builder does not emit a switch twice.
+        per_camera = any(token.startswith("-camera-index=")
+                         for token in extra)
+        if camera_flags is None and not per_camera:
+            camera_flags = (
+                [f"-chase={WEBAPP_CHASE.get(aircraft, '-110:0:12')}",
+                 "-camera=chase"], [])
+        inline, trailing = camera_flags or ((), ())
         command = [
             str(EDITOR), str(project), "-run=FlightSimBridge.FlightSimRender",
-            f"-scenario={card}", f"-frames={frames}",
-            "-Visual", "-shot=showcase",
-            *inline,
-            f"-fps={FPS}", f"-width={WIDTH}", f"-height={HEIGHT}",
-            f"-sun-elev={tod['sun_elev']}", f"-sun-azim={tod['sun_azim']}",
-            f"-exposure-bias={tod['exposure_bias']}",
-            f"-fog-density={(look or {}).get('fog_density', VISIBILITY['clear'])}",
-            "-unattended", "-nopause", "-nosplash",
-            "-stdout", "-FullStdOutLogOutput",
-            "-RenderOffScreen", "-AllowCommandletRendering",
-        ]
-        command += list(trailing)
-        if scene.get("terrain"):
-            command += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
-        if scene.get("imagery"):
-            command += [f"-imagery={scene['imagery']}"]
-        if mesh.is_file():
-            command += [f"-mesh={mesh}"]
-        if telemetry is not None:
-            # The SHARED recorder's own file (same component all three hosts
-            # use), stamping the FDM's clock -- the aero panel reads it
-            # verbatim, no resampling.
-            command += [f"-telemetry={telemetry}"]
+        ] + render_flags(
+            card, frames, scene=scene,
+            # The model the run provisioned; absent -> the placeholder
+            # boxes, exactly as before (the solve pass passes Path("")).
+            mesh=mesh if mesh.is_file() else None,
+            look=look, camera_flags=(inline, trailing),
+            labels=False, deterministic=per_camera,
+            width=WIDTH, height=HEIGHT, fps=FPS,
+            # The SHARED recorder's own file (same component all three
+            # hosts use), stamping the FDM's clock -- the aero panel
+            # reads it verbatim, no resampling.
+            telemetry=telemetry, extra=extra)
         log = frames.parent / "render.log"
         with log.open("w") as sink:
             subprocess.run(command, stdout=sink, stderr=subprocess.STDOUT,
                            stdin=subprocess.DEVNULL)
         return (frames / "render.json").is_file()
+
+    @staticmethod
+    def _capture_fps(manifest_path: Path, camera_id: str) -> float:
+        """The rate this camera's frames were actually taken at.
+
+        A continuous capture runs at the recorded telemetry rate, not at
+        the render's 30 fps, so encoding at 30 would play the flight
+        three times too fast. Read the frame times back and use the
+        median spacing -- median, not mean, so one dropped instant does
+        not skew the whole clip.
+        """
+        from statistics import median
+
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return float(FPS)
+        times = sorted(float(f["t_s"]) for f in payload.get("frames", ())
+                       if str(f.get("camera_id")) == camera_id)
+        gaps = [b - a for a, b in zip(times, times[1:]) if b > a]
+        if not gaps:
+            return float(FPS)
+        return max(1.0, min(float(FPS), 1.0 / median(gaps)))
+
+    def _encode_camera_clips(self, out: Path, frames: Path,
+                             camera_ids: List[str]) -> List[str]:
+        """One mp4 per camera: that many seconds of THAT view.
+
+        The gallery used to show one clip for the whole run, from
+        whichever camera happened to be first. But a view is what the
+        user picked, so each one gets its own video of the flight --
+        every frame that camera took, at the rate it took them.
+        """
+        from experiments.showcase_matrix import FFMPEG
+
+        clips = out / "clips"
+        clips.mkdir(parents=True, exist_ok=True)
+        manifest_path = out / "capture_manifest.json"
+        made = []
+        for camera_id in camera_ids:
+            directory = frames / camera_id
+            if len(sorted(directory.glob("frame_*.png"))) < 2:
+                continue          # a still is not a clip
+            target = clips / f"{camera_id}.mp4"
+            done = subprocess.run([
+                str(FFMPEG), "-y",
+                "-framerate", f"{self._capture_fps(manifest_path, camera_id):g}",
+                "-i", str(directory / "frame_%04d.png"),
+                "-c:v", "libx264", "-preset", "medium", "-crf", "19",
+                "-pix_fmt", "yuv420p", str(target),
+            ], capture_output=True)
+            if done.returncode == 0 and target.is_file():
+                made.append(camera_id)
+        return made
+
+    @staticmethod
+    def _encode_capture_clip(frames: Path, clip: Path,
+                             camera_ids: List[str]) -> Optional[str]:
+        """An mp4 of ONE camera's frames, leaving every frame on disk.
+
+        Deliberately not ``encode_clip``: that one reads a flat
+        ``frames/frame_%04d.png`` (a capture run has
+        ``frames/<camera_id>/``) and, on success, deletes every frame
+        but the middle one. Right for the showcase, where the mp4 is the
+        deliverable; here the FRAMES are the deliverable and the
+        manifest names every one of them by path.
+
+        Returns the camera the clip was made from, because the telemetry
+        panel is composited onto that clip and has to read the SAME
+        camera's render.json. Returning a bare bool left the panel to
+        guess, and it guessed a flat frames/render.json that a capture
+        run does not have.
+        """
+        from experiments.showcase_matrix import FFMPEG, FPS
+
+        for camera_id in camera_ids:
+            directory = frames / camera_id
+            if not sorted(directory.glob("frame_*.png")):
+                continue
+            clip.parent.mkdir(parents=True, exist_ok=True)
+            done = subprocess.run([
+                str(FFMPEG), "-y", "-framerate", str(FPS),
+                "-i", str(directory / "frame_%04d.png"),
+                "-c:v", "libx264", "-preset", "medium", "-crf", "19",
+                "-pix_fmt", "yuv420p", str(clip),
+            ], capture_output=True)
+            if done.returncode == 0 and clip.is_file():
+                return camera_id
+        return None
+
+    @staticmethod
+    def card_has_control_inputs(card: Path) -> bool:
+        """True when the card scripts control inputs.
+
+        Which decides WHICH commandlet can fly the solve pass. The
+        scenario commandlet refuses a card carrying them, and it is
+        right to: it exists as the Gate 5 parity reference against the
+        headless run, which is hands off from trim, so scripted inputs
+        would attribute a control input to the integration. That
+        reasoning does not cover this pass -- nothing compares it to the
+        headless run; it is compared to the host's OWN render passes --
+        but the commandlet cannot tell the two uses apart, and the
+        protection is load-bearing where it does apply. So the refusal
+        stands untouched and the caller picks the tool that can do the
+        job, which is what its own error message says to do.
+        """
+        try:
+            payload = json.loads(card.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return bool(payload.get("control_inputs"))
+
+    def _fly_host(self, card: Path, telemetry: Path, scene: Dict,
+                  mesh: Optional[Path] = None,
+                  aircraft: str = "") -> bool:
+        """Fly the card in the host and record the flight it flew.
+
+        The solve pass of "one flight, not two". Physics-affecting flags
+        only -- the terrain the ground callback reads has to match what
+        the render passes fly over -- and NOT -Visual, which builds the
+        render scene. That choice is not assumed: verify_host_determinism
+        compares this flight against every render pass, and on the CLI's
+        first host-solved run all three came back byte-identical over
+        900 samples.
+
+        Two tools, because one card in three cannot use the cheap one.
+        A card with no scripted inputs goes to the SCENARIO commandlet
+        under -nullrhi: no renderer, seconds rather than minutes. A card
+        that scripts inputs -- which every showcase web run does, the
+        doublet is what puts visible roll in the clip -- is refused by
+        that commandlet by design, so it goes to the RENDER commandlet
+        instead, exactly as that refusal instructs. Its frames are
+        thrown away; only the telemetry is wanted.
+        """
+        telemetry.parent.mkdir(parents=True, exist_ok=True)
+        telemetry.unlink(missing_ok=True)
+
+        if self.card_has_control_inputs(card):
+            # Into its own directory, and deleted afterwards. A render.json
+            # left inside the run would be found by the verifier's rglob
+            # and graded as though its frames were part of the capture --
+            # they are one camera's, from the PRE-RUN poses, and naming a
+            # landmark set the manifest does not carry is a FAIL by
+            # design (eaa8bff). The telemetry and the log live outside it.
+            scratch = telemetry.parent / "solve_frames"
+            try:
+                self._render(card, scratch, scene, mesh or Path(""),
+                             aircraft, telemetry=telemetry)
+            finally:
+                shutil.rmtree(scratch, ignore_errors=True)
+            return telemetry.is_file()
+
+        command = [
+            str(EDITOR), str(REPO / "ue" / "FlightSim.uproject"),
+            "-run=FlightSimBridge.FlightSimScenario",
+            f"-scenario={card}", f"-telemetry={telemetry}",
+            "-unattended", "-nopause", "-nosplash", "-nullrhi",
+            "-stdout", "-FullStdOutLogOutput",
+        ]
+        if scene.get("terrain"):
+            command += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
+        log = telemetry.with_suffix(".log")
+        with log.open("w") as sink:
+            subprocess.run(command, stdout=sink, stderr=subprocess.STDOUT,
+                           stdin=subprocess.DEVNULL)
+        return telemetry.is_file()
+
+    @staticmethod
+    def commandlet_last_words(log: Path, keep: int = 12) -> str:
+        """Why an engine pass produced nothing, out of its own log.
+
+        The refusals this project cares about are NAMED, and the
+        commandlet prints its reason into a log that also carries
+        twenty megabytes of UE start-up. Handing a path to whoever is
+        looking at a web page is the same as not answering: they cannot
+        grep a file they have to go and find. Both PowerShell wrappers
+        have printed the commandlet's last words since 7cef57d for this
+        reason; this is that, for the page.
+
+        Prefers the named lines and falls back to the tail, so an
+        unrecognised failure still says something.
+        """
+        try:
+            lines = log.read_text(encoding="utf-8",
+                                  errors="replace").splitlines()
+        except OSError:
+            return ""
+        wanted = ("LogFlightSim", "Error:", "Fatal", "commandlet",
+                  "refus", "-scenario=", "-telemetry=")
+        named = [line.strip() for line in lines
+                 if any(word in line for word in wanted)]
+        chosen = (named or [line.strip() for line in lines])[-keep:]
+        return "\n".join(line for line in chosen if line)
 
     def _execute(self, run: RunState, spec: ScenarioSpec,
                  provenance: Dict) -> None:
@@ -1492,7 +1966,7 @@ class RunManager:
         # with a status line, never silently -- rather than landing on
         # the slab. Render path ONLY: tests and CI never synthesise, so
         # a checkout's scene selection stays deterministic.
-        if not (REPO / "runs" / "terrain" / "control_ridge.r16").is_file():
+        if not baked(TERRAIN_DIR / "control_ridge"):
             run.push("terrain", "synthesising the control-ridge terrain "
                                 "fail-safe (one-time, local)")
             ensure_control_ridge()
@@ -1674,8 +2148,50 @@ class RunManager:
             **({"surface": surface_note} if surface_note else {}),
             **({"weather": event_note} if event_note else {}),
         }
-        card = write_run_card(
-            spec, out / "card.json",
+        # The scene's raster, for the headless pre-run's ground model and
+        # for the terrain-coupled camera checks. Same construction the
+        # effect report uses.
+        capture_heightfield = None
+        capture_ground = None
+        if scene.get("terrain"):
+            from core.terrain.ground import TerrainGround
+            from core.terrain.heightfield import Heightfield
+
+            capture_heightfield = Heightfield.read(Path(scene["terrain"]))
+            capture_ground = TerrainGround(capture_heightfield)
+
+        # -- Camera Phase 2: the capture stage -------------------------
+        # A spec that STATES cameras is captured, not clipped: every
+        # camera's pose track and capture schedule are solved here, in
+        # Python, and consumed verbatim by one commandlet pass per
+        # camera. The legacy preset flags stay for a camera-less spec,
+        # whose commandlet arguments are pinned byte-identical by test.
+        capture_solved = None
+        capture_cameras = None
+        capture_landmarks = None
+        if wants_capture(spec):
+            run.push("cameras", f"solving {len(spec.cameras)} camera "
+                                f"pose track(s) and capture schedule(s)")
+            try:
+                capture_solved = capture_solve(
+                    spec, scene, heightfield=capture_heightfield,
+                    terrain_ground=capture_ground, tornado=tornado_block,
+                    # The window the HOST flies, not the spec's own: a
+                    # schedule laid out past the clip's end names frames
+                    # that can never exist.
+                    duration_s=min(float(spec.duration.value),
+                                   CLIP_SECONDS))
+            except CaptureError as exc:
+                run.push("failed", f"[{exc.constraint}] {exc.message}")
+                return
+            capture_cameras = capture_card_blocks(spec, capture_solved)
+            capture_landmarks = capture_landmark_set(
+                spec, capture_solved, heightfield=capture_heightfield)
+
+        # Named once: after the host flies its own solve flight the card
+        # is rewritten with the RE-SOLVED tracks, and every other field
+        # has to be identical or the two passes are not over one scene.
+        card_arguments = dict(
             control_inputs=SHOWCASE_DOUBLET if scripted else (),
             duration_s=min(float(spec.duration.value), CLIP_SECONDS),
             orographic=orographic,
@@ -1689,7 +2205,13 @@ class RunManager:
             scene_crs=scene_crs,
             collision_terrain=str(collision) if collision else None,
             reference_speeds=reference,
+            cameras=capture_cameras,
+            landmarks=capture_landmarks,
+            # Phase 10: the sampled sun/fog/exposure/livery and every
+            # camera field the jitter moved -- what the render was given.
+            randomization=randomization_card_block(spec),
         )
+        card = write_run_card(spec, out / "card.json", **card_arguments)
         # Prompt/model provenance in a Python-written UTF-8 sidecar; the
         # UE-written manifest stays ASCII (gotcha 13).
         (out / "provenance.json").write_text(json.dumps({
@@ -1700,6 +2222,101 @@ class RunManager:
             "conditions": run.conditions,
         }, indent=1), encoding="utf-8")
 
+        # ONE FLIGHT, NOT TWO -- the web half of 129f140.
+        #
+        # Everything above solved the poses over the HEADLESS pre-run.
+        # The host then flies the same card through UE's own JSBSim, and
+        # two builds stepping one scenario land 1.38 m apart, so the
+        # aircraft states in every frame record described a flight these
+        # pixels do not show. The CLI closed that by flying the host
+        # first; this is the same move here, because the web app is
+        # where the images are actually looked at.
+        #
+        # The pre-run above stays the cheap pre-flight gate: a camera
+        # inside a mountain still refuses before an engine pass is spent.
+        # It just stops being the source of the labels.
+        from core.util.platform import ue_available
+
+        if capture_solved is not None and ue_available():
+            run.push("host flight", "flying the scenario in the host first, "
+                                    "so the labels describe the flight the "
+                                    "pixels show")
+            host_telemetry = out / "host_flight" / "host_telemetry.json"
+            # The card the SOLVE pass flies carries NO cameras block.
+            # With one, the render commandlet enters consume-poses mode
+            # and holds the pass to the capture schedule -- which this
+            # pass is not producing images for and whose frames are
+            # discarded. It refused on exactly that, after flying:
+            # "emitted 3 of the 4 scheduled images". The pass exists to
+            # record a flight; the flight is what the card describes,
+            # and the cameras are not part of it.
+            solve_card = write_run_card(
+                spec, out / "host_flight" / "card.json",
+                **{**card_arguments, "cameras": None, "landmarks": None})
+            if not self._fly_host(solve_card, host_telemetry, scene,
+                                  mesh=mesh, aircraft=aircraft):
+                # Whichever tool flew it wrote a log: the scenario
+                # commandlet's beside the telemetry, the renderer's as
+                # render.log in the same directory.
+                logs = [host_telemetry.with_suffix(".log"),
+                        host_telemetry.parent / "render.log"]
+                words = "\n".join(
+                    w for w in (self.commandlet_last_words(log)
+                                for log in logs if log.is_file()) if w)
+                run.push("failed",
+                         "[capture.host_flight] the scenario commandlet "
+                         "recorded no flight; nothing was rendered. Its "
+                         "last words:\n"
+                         + (words or "(it wrote no log at all)")
+                         + f"\n-- full log: "
+                           f"{host_telemetry.with_suffix('.log')}")
+                return
+            try:
+                capture_solved = capture_resolve_over_host(
+                    spec, capture_solved, host_telemetry,
+                    heightfield=capture_heightfield, tornado=tornado_block,
+                    duration_s=min(float(spec.duration.value),
+                                   CLIP_SECONDS))
+            except CaptureError as exc:
+                # A camera that cleared the ridge on the pre-run and does
+                # not on the host's own track must refuse: that is the
+                # flight the frames would be taken on.
+                run.push("failed", f"[{exc.constraint}] {exc.message}")
+                return
+            # The card the render passes consume carries the RE-SOLVED
+            # tracks AND the re-solved landmarks, so the pixels and the
+            # manifest come out of one flight.
+            #
+            # The landmarks are the half that was missed, and the checks
+            # caught it on the first web run that got this far:
+            # landmark_reprojection and cross_view_consistency both
+            # FAILED. core.capture.landmarks anchors its marks around
+            # the FLOWN TRACK, so the same names sit at different
+            # coordinates on a different flight -- the engine projected
+            # the pre-run's set while the manifest declared the host's,
+            # and the two checks measured exactly that disagreement.
+            # That is the class of defect this whole phase is about, and
+            # the guards found it rather than a person.
+            capture_landmarks = capture_landmark_set(
+                spec, capture_solved, heightfield=capture_heightfield)
+            card = write_run_card(
+                spec, out / "card.json",
+                **{**card_arguments,
+                   "cameras": capture_card_blocks(spec, capture_solved),
+                   "landmarks": capture_landmarks})
+            # The run's telemetry.json is the flight the aero panel and
+            # the effect report read. It used to be written by the render
+            # pass (-telemetry=<run>/telemetry.json); giving each camera
+            # pass its own recording left nothing there, so both went
+            # quiet -- "no recorded telemetry for this run" under a run
+            # that had just flown. The host's SOLVE flight is the right
+            # one to publish: it is the flight the pixels show, and
+            # host_determinism asserts every render pass matched it.
+            shutil.copyfile(host_telemetry, out / "telemetry.json")
+            run.push("host flight",
+                     f"{len(capture_solved['columns']['t'])} samples; every "
+                     f"camera re-solved over the host's own flight")
+
         run.push("rendering", "editor is rendering frames (a few minutes)")
         frames = out / "frames"
         # The camera comes from the SPEC now (Camera Phase 1): stated
@@ -1708,28 +2325,128 @@ class RunManager:
         # the aircraft into the vortex; the chase camera sat INSIDE the
         # funnel mesh and the blank-frame floor refused, run
         # c33db2c326e0 -- the floor stands, never weakened).
-        camera_flags = camera_render_flags(spec)
+        # The legacy preset flags are for the legacy path only. Under
+        # consume-poses the commandlet takes its pose, its lens and its
+        # output size from the card, so these are inert -- and
+        # camera_render_flags refuses a multi-camera spec, which the
+        # capture path handles by rendering one pass per camera.
+        camera_flags = None if capture_solved is not None \
+            else camera_render_flags(spec)
         flown = spec.cameras or default_cameras(spec)
         if str(flown[0].preset.value) == "wingman":
             run.conditions["camera"] = ("wingman (follows the aircraft "
                                         "through the core; chase would "
                                         "sit inside the funnel)")
-        if not self._render(card, frames, scene, mesh, aircraft,
-                            telemetry=out / "telemetry.json",
-                            look=STORM_LOOK if event_note else None,
-                            camera_flags=camera_flags):
+        if capture_solved is not None:
+            # One pass per camera into frames/<camera_id>/ -- the layout
+            # capture_manifest.json names in every frame record.
+            camera_ids = [str(c.camera_id.value) for c in spec.cameras]
+            run.push("rendering",
+                     f"rendering {len(camera_ids)} camera pass(es): "
+                     f"{', '.join(camera_ids)}")
+            try:
+                capture_render_passes(
+                    card, frames, camera_ids,
+                    lambda card, frames, extra, telemetry: self._render(
+                        card, frames, scene, mesh, aircraft,
+                        # The HOST's own recording, per camera, into the
+                        # camera's directory -- what flight_agreement
+                        # grades each frame against. This used to be one
+                        # shared path (the pre-run's telemetry.json), so
+                        # no per-camera host flight existed and the check
+                        # reported NOT RUN on every web run.
+                        telemetry=telemetry,
+                        look=render_look_for(spec, event_note),
+                        camera_flags=camera_flags, extra=extra))
+            except CaptureError as exc:
+                # The render log for the pass that failed sits beside its
+                # frames. Say what it HOLDS, not where it is: whoever is
+                # looking at a web page cannot grep a file they have to
+                # go and find.
+                words = "\n".join(
+                    w for w in (self.commandlet_last_words(log)
+                                for log in sorted(frames.rglob("render.log")))
+                    if w)
+                run.push("failed", f"[{exc.constraint}] {exc.message}"
+                                   + (f"\nlast words:\n{words}"
+                                      if words else ""))
+                return
+        elif not self._render(card, frames, scene, mesh, aircraft,
+                              telemetry=out / "telemetry.json",
+                              look=render_look_for(spec, event_note),
+                              camera_flags=camera_flags):
             run.push("failed", "the render commandlet wrote no manifest; "
-                               f"see {out / 'render.log'}")
+                               "its last words:\n"
+                               + (self.commandlet_last_words(
+                                   out / "render.log")
+                                  or "(it wrote no log at all)")
+                               + f"\n-- full log: {out / 'render.log'}")
             return
+
+        if capture_solved is not None:
+            run.push("manifest", "writing the capture manifest, the "
+                                 "overlays and the verification summary")
+            capture_write_manifest(spec, capture_solved, out, scene,
+                                   heightfield=capture_heightfield)
+            # Phase 10: the sensor model, as a seeded post-pass over the
+            # rendered frames of every camera whose profile is not the
+            # ideal pinhole. Reproducible from the spec's own seed.
+            sensor_written = capture_apply_sensor(out, int(spec.seed.value))
+            if sensor_written:
+                run.push("sensor", "sensor model applied: " + ", ".join(
+                    f"{cam} x{n}" for cam, n in sorted(sensor_written.items())))
+            run.capture = capture_finish(out)
+            if not run.capture["ok"]:
+                failed = [c["name"] for c in run.capture["checks"]
+                          if c["status"] == "FAIL"]
+                run.push("verified", "images captured, but verification "
+                                     f"FAILED: {', '.join(failed)}")
+            else:
+                run.push("verified", "images captured and verified")
+            made = self._encode_camera_clips(out, frames, camera_ids)
+            run.camera_clips = made
+            if made:
+                run.push("clips", f"a clip per view: {', '.join(made)}")
 
         run.push("encoding", "encoding frames to mp4")
         raw_clip = out / "raw.mp4"
-        if not encode_clip(frames, raw_clip):
-            run.push("failed", "ffmpeg could not encode the frames")
-            return
+        # A CAPTURE run keeps its frames in frames/<camera_id>/, and the
+        # encoder reads a flat frames/frame_%04d.png -- so it found
+        # nothing and failed the whole run at the very end, after the
+        # images, the manifest, the overlays and the verification had all
+        # been written. Encode one camera's frames instead.
+        #
+        # And never through encode_clip, which DELETES every frame but the
+        # middle one on success. That is right for the showcase, whose
+        # deliverable is the mp4; it is destructive here, where the frames
+        # ARE the deliverable and the manifest names every one of them.
+        clip_camera = None
+        if capture_solved is not None:
+            clip_camera = self._encode_capture_clip(frames, raw_clip,
+                                                    camera_ids)
+            clip_ok = clip_camera is not None
+        else:
+            clip_ok = encode_clip(frames, raw_clip)
+        if not clip_ok:
+            if capture_solved is None:
+                run.push("failed", "ffmpeg could not encode the frames")
+                return
+            # The images and their labels are the product of a capture
+            # run; the clip is a convenience. Losing it does not lose
+            # the run, and saying "failed" over it threw away everything
+            # that had already succeeded.
+            run.push("clip", "no mp4 (ffmpeg could not encode, or is not "
+                             "installed) -- the frames, the manifest and "
+                             "the verification stand")
 
         run.push("panel", "compositing the telemetry panel")
-        manifest = frames / "render.json"
+        # The render.json of the camera the CLIP was made from. A capture
+        # run writes frames/<camera_id>/render.json, so the flat path
+        # this used to read did not exist and the run died with a
+        # FileNotFoundError -- after the images, the manifest and a
+        # PASSING verification were already on disk.
+        manifest = ((frames / clip_camera / "render.json") if clip_camera
+                    else (frames / "render.json"))
         seed = int(spec.seed.value)
         turbulent = (str(spec.turbulence.value) != "none"
                      or rotor_provider is not None)
@@ -1742,9 +2459,19 @@ class RunManager:
         clip = out / "clip.mp4"
         if not build_panel_clip(card, manifest, conditions, raw_clip, clip,
                                 fps=FPS):
-            run.push("failed", "panel composition failed")
-            return
-        raw_clip.unlink(missing_ok=True)
+            if capture_solved is None:
+                run.push("failed", "panel composition failed")
+                return
+            # Same rule as the clip itself: on a capture run the images
+            # and their labels are the product. Keep the unpanelled clip
+            # rather than losing a verified capture over a composite.
+            if raw_clip.is_file():
+                raw_clip.replace(clip)
+            run.push("panel", "no telemetry panel (composition failed) -- "
+                              "the clip, the frames, the manifest and the "
+                              "verification stand")
+        else:
+            raw_clip.unlink(missing_ok=True)
         if (rotor_provider is not None or log_profile is not None
                 or thermals_block is not None or tornado_block is not None
                 or downburst_block is not None):

@@ -1,7 +1,27 @@
-# Fly one scenario in the Unreal host with the renderer up, and write
-# frames -- the render_ue_scenario.sh twin.
+# Fly one scenario in the Unreal host with the renderer up, and write frames
+# -- ONE COMMANDLET PASS PER CAMERA.
 #
 #     .\scripts\render_ue_scenario.ps1 <run-card.json> <frames-out-dir>
+#
+# Camera Phase 2. A card carrying a `cameras` block is rendered once per
+# camera (`-camera-index=N`), each pass writing into its own
+# <frames-out-dir>\<camera_id>\ directory, which is exactly the layout
+# capture_manifest.json names in every frame record's `file` field. Before
+# this the wrapper ran a single pass and globbed a flat frame_*.png
+# directory, so a two-camera manifest pointed at files that were never
+# written and only the first camera was ever rendered.
+#
+# A card with no cameras block renders exactly as it always did: one pass,
+# flat directory, byte-identical arguments.
+#
+# The output frame size and the field of view come from the card's own
+# solved camera (the commandlet reads width_px / height_px /
+# sensor_width_mm and the per-sample focal_length_mm). The callers
+# (core/render/flags.py, for the CLI and the web app alike) still pass
+# -width= -height= -fps= through this wrapper, but on the camera path the
+# commandlet takes the size from the card and those three flags are
+# inert: the manifest's intrinsics and the rendered pixels are the same
+# numbers or the commandlet refuses.
 #
 # The two flags that matter (same as the .sh, same reasons):
 #   -AllowCommandletRendering   commandlets default to a null RHI; without
@@ -13,32 +33,113 @@
 $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
-if ($args.Count -ne 2) {
-    Write-Error "usage: render_ue_scenario.ps1 <run-card.json> <frames-out-dir>"
+if ($args.Count -lt 2) {
+    Write-Error "usage: render_ue_scenario.ps1 <run-card.json> <frames-out-dir> [commandlet flags...]"
     exit 2
 }
 $card = (Resolve-Path $args[0]).Path
 New-Item -ItemType Directory -Force -Path $args[1] | Out-Null
 $frames = (Resolve-Path $args[1]).Path
+# Anything after the two positional arguments goes to EVERY camera pass
+# -- -Visual, -terrain=, -GeorefTerrain. Per pass rather than once,
+# because each camera is its own commandlet invocation and a scene flag
+# that reached only the first would render two cameras of one flight in
+# two different worlds.
+$sceneArgs = @($args[2..($args.Count - 1)]) | Where-Object { $_ -ne $null }
+if ($args.Count -eq 2) { $sceneArgs = @() }
 
-$editor = & (Join-Path $repo ".venv\Scripts\python.exe") -c "from core.util.platform import ue_editor_path; print(ue_editor_path())"
+$python = Join-Path $repo ".venv\Scripts\python.exe"
+$editor = & $python -c "from core.util.platform import ue_editor_path; print(ue_editor_path())"
 if (-not (Test-Path $editor)) { Write-Error "no editor at $editor (set UE_ROOT)"; exit 1 }
 $bridge = Join-Path $repo "ue\Plugins\FlightSimBridge\Binaries\Win64\UnrealEditor-FlightSimBridge.dll"
 if (-not (Test-Path $bridge)) { Write-Error "the bridge is not built -- run scripts\build_ue.ps1"; exit 1 }
 
-# Frames from an earlier run would be indistinguishable from this one's if
-# the commandlet failed part way through.
-Remove-Item (Join-Path $frames "frame_*.png") -ErrorAction SilentlyContinue
-Remove-Item (Join-Path $frames "render.json") -ErrorAction SilentlyContinue
+# The camera ids on the card, in the order the commandlet indexes them.
+# An empty result means a card with no cameras block: the legacy single
+# pass, unchanged.
+$cameraJson = & $python -c @"
+import json, sys
+card = json.load(open(sys.argv[1], encoding='utf-8'))
+print('\n'.join(str(c['camera_id']) for c in card.get('cameras', [])))
+"@ $card
+$cameraIds = @($cameraJson -split "`r?`n" | Where-Object { $_ -ne "" })
 
-& $editor (Join-Path $repo "ue\FlightSim.uproject") `
-    -run=FlightSimBridge.FlightSimRender `
-    "-scenario=$card" "-frames=$frames" `
-    -unattended -nopause -nosplash -stdout -FullStdOutLogOutput `
-    -RenderOffScreen -AllowCommandletRendering
-if ($LASTEXITCODE -ne 0) { Write-Error "commandlet exited $LASTEXITCODE -- no frames"; exit $LASTEXITCODE }
-if (-not (Test-Path (Join-Path $frames "render.json"))) {
-    Write-Error "commandlet reported success but wrote no render.json"; exit 1
+if ($sceneArgs.Count -gt 0) {
+    Write-Host "scene flags for every pass: $($sceneArgs -join ' ')"
 }
-$count = (Get-ChildItem $frames -Filter "frame_*.png").Count
-Write-Host "wrote $count frames and $frames\render.json"
+
+function Invoke-RenderPass {
+    param([string]$OutDir, [string[]]$ExtraArgs)
+
+    New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+    # Frames from an earlier run would be indistinguishable from this one's
+    # if the commandlet failed part way through.
+    Remove-Item (Join-Path $OutDir "frame_*.png") -ErrorAction SilentlyContinue
+    Remove-Item (Join-Path $OutDir "render.json") -ErrorAction SilentlyContinue
+    # Same reasoning, and it matters more: a stale host telemetry would be
+    # graded as if this pass had produced it.
+    Remove-Item (Join-Path $OutDir "host_telemetry.json") -ErrorAction SilentlyContinue
+
+    $arguments = @(
+        (Join-Path $repo "ue\FlightSim.uproject"),
+        "-run=FlightSimBridge.FlightSimRender",
+        "-scenario=$card", "-frames=$OutDir"
+    ) + $ExtraArgs + @(
+        "-unattended", "-nopause", "-nosplash", "-stdout",
+        "-FullStdOutLogOutput", "-RenderOffScreen",
+        "-AllowCommandletRendering"
+    )
+    # Keep the engine's own output. Without this the commandlet's named
+    # refusal -- the one thing that says WHY a pass produced no frames --
+    # scrolled past with the rest of UE's log and was gone.
+    $log = Join-Path $OutDir "render.log"
+    & $editor @arguments 2>&1 | Tee-Object -FilePath $log | Out-Null
+
+    if ($LASTEXITCODE -ne 0 -or
+        -not (Test-Path (Join-Path $OutDir "render.json"))) {
+        Write-Host ""
+        Write-Host "---- the commandlet's last words ($log) ----"
+        # The named refusals and any error/warning, then the tail, so the
+        # reason is on screen rather than buried in a 20 MB engine log.
+        $named = Select-String -Path $log -Pattern `
+            "LogFlightSimRender|consume-poses|cameras block|camera pose track|Error:|Fatal" |
+            Select-Object -Last 25
+        if ($named) { $named | ForEach-Object { Write-Host $_.Line } }
+        else { Get-Content $log -Tail 25 | ForEach-Object { Write-Host $_ } }
+        Write-Host "-------------------------------------------"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "commandlet exited $LASTEXITCODE -- no frames in $OutDir"
+            exit $LASTEXITCODE
+        }
+        Write-Error "commandlet reported success but wrote no render.json in $OutDir"
+        exit 1
+    }
+    return (Get-ChildItem $OutDir -Filter "frame_*.png").Count
+}
+
+if ($cameraIds.Count -eq 0) {
+    $count = Invoke-RenderPass -OutDir $frames -ExtraArgs $sceneArgs
+    Write-Host "wrote $count frames and $frames\render.json"
+} else {
+    $total = 0
+    for ($i = 0; $i -lt $cameraIds.Count; $i++) {
+        $id = $cameraIds[$i]
+        $outDir = Join-Path $frames $id
+        Write-Host "camera $($i + 1)/$($cameraIds.Count): $id -> $outDir"
+        # -telemetry= makes the host record the flight it ACTUALLY flew.
+        # Without it the host records nothing, and flight_agreement --
+        # the one check standing between the manifest and "one flight,
+        # not two" -- had no host flight to read. It read the headless
+        # pre-run's telemetry.json instead, which is the very file the
+        # manifest's aircraft track was solved from, and reported 0.00 m
+        # every time. Only the camera path passes this: the camera-less
+        # path's arguments are pinned byte-identical by test.
+        $passArgs = @(
+            "-camera-index=$i",
+            "-telemetry=$(Join-Path $outDir 'host_telemetry.json')") + $sceneArgs
+        $count = Invoke-RenderPass -OutDir $outDir -ExtraArgs $passArgs
+        Write-Host "  wrote $count frames"
+        $total += $count
+    }
+    Write-Host "wrote $total frames across $($cameraIds.Count) camera(s) under $frames"
+}

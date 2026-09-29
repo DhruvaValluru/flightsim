@@ -1,0 +1,17 @@
+{
+ "table": "CIE 1924 photopic luminous efficiency function V(lambda), 1 nm, 360-830 nm",
+ "primary_source": "http://www.cvrl.org/database/data/lum/vl1924e_1.csv",
+ "primary_description": "CIE 018:2019 table 1 / CVRL vl1924e_1.csv (CIE 1924 photopic V(lambda), 1 nm)",
+ "fetched_from": "https://raw.githubusercontent.com/colour-science/colour/develop/colour/colorimetry/datasets/lefs.py",
+ "fetched_kind": "mirror",
+ "fetched_description": "colour-science/colour lefs.py, mapping 'CIE 1924 Photopic Standard Observer' (BSD-3-Clause; CVRL's 1 nm table transcribed)",
+ "fetched_at_utc": "2026-09-29T02:02:15+00:00",
+ "fetched_bytes_sha256": "687fa2096d01fc56d4e893f531f3a2a8c6f34258f9dd31969ac3d319ec6ded25",
+ "primary_verified": false,
+ "transform": "the mapping's <nm>: <value> rows written as wavelength_nm,v_lambda; values unchanged",
+ "licence": "CIE data as distributed by CVRL; mirror packaging BSD-3-Clause (colour-science)",
+ "unit": "dimensionless, V(555 nm) = 1",
+ "file": "vlambda_1nm.csv",
+ "sha256": "642040f67876374ba9c62cee78b9dd88989ce422f88c2d7664c92555ba9faddb",
+ "bytes": 6850
+}

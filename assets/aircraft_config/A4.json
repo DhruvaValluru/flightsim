@@ -1,0 +1,82 @@
+{
+  "name": "A4",
+  "fdm": "A4",
+  "fdm_match": [
+    "A4",
+    "A-4",
+    "A-4 (JSBSim)"
+  ],
+  "mesh_airframe": "none: the A-4 is physics-only (no licensed model)",
+  "source_dir": "../aircraft_src/A4",
+  "license": {
+    "license_name": "none usable",
+    "file": null,
+    "unavailable": "no licensed A-4 model. The FSX / P3D A-4E/F/G/H/K package the owner downloaded is by Dino Cattaneo / IndiaFoxtEcho Visual Simulations (c) 2019 (its flight manual's credits; every aircraft.cfg says ui_createdby=\"IndiaFoxtEcho Visual Simulations\"), its visual model is partly based on MeshFactory meshes bought through TurboSquid, and its terms read: 'Other than for personal uses of the purchaser, copying, modifying or redistributing this software is illegal.' Converting it and rendering it into a public dataset is neither, so it is not used; an earlier commit that credited the owner as its author was wrong and is corrected here. Physics-only until a model whose licence allows it exists (written permission from IndiaFoxtEcho, or an openly licensed A-4 model)."
+  },
+  "parts": [],
+  "labels": {
+    "dimensions_m": {
+      "length": 12.27,
+      "height": 4.57,
+      "source": "[unverified here] published A-4F overall length 40 ft 3 in (12.27 m) and height 15 ft (4.57 m), from memory of the type's standard characteristics; span is taken from the flown FDM's own <wingspan>"
+    },
+    "keypoints": {
+      "nose": {
+        "structural_in": [
+          0.0,
+          0.0,
+          -12.51
+        ],
+        "basis": "estimate",
+        "source": "the FDM's structural origin taken as the nose tip (Aeromatic v0.9, which generated A4.xml, references its stations from the nose); z at the CG waterline"
+      },
+      "tail": {
+        "structural_in": [
+          483.07,
+          0.0,
+          -12.51
+        ],
+        "basis": "estimate",
+        "source": "nose tip + the type's overall length 12.27 m [unverified here] at the CG waterline"
+      },
+      "left_wingtip": {
+        "fdm_wingspan": "left"
+      },
+      "right_wingtip": {
+        "fdm_wingspan": "right"
+      },
+      "nose_gear": {
+        "fdm_contact": "NOSE"
+      },
+      "left_main_gear": {
+        "fdm_contact": "LEFT_MAIN"
+      },
+      "right_main_gear": {
+        "fdm_contact": "RIGHT_MAIN"
+      }
+    }
+  },
+  "limits": {
+    "n_z_pos_g": {
+      "value": null,
+      "reason": "not transcribed: no A-4 NATOPS flight manual limitations page is on hand here"
+    },
+    "n_z_neg_g": {
+      "value": null,
+      "reason": "not transcribed: no A-4 NATOPS flight manual limitations page is on hand here"
+    },
+    "speed_limit_kt": {
+      "value": null,
+      "reason": "not transcribed: no A-4 NATOPS flight manual limitations page is on hand here"
+    },
+    "m_mo": {
+      "value": null,
+      "reason": "not transcribed: no A-4 NATOPS flight manual limitations page is on hand here"
+    },
+    "alpha_stall_deg": {
+      "value": null,
+      "reason": "the JSBSim A4 model (Aeromatic v0.9) states no alpha limit"
+    },
+    "note": "A4.xml is an Aeromatic v0.9 model 'created using publicly available data, publicly available technical reports, textbooks, and guesses' (its own file header): unvalidated, so every limit monitored against it would be graded on a guessed airframe."
+  }
+}

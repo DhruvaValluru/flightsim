@@ -21,7 +21,13 @@ The steps, per aircraft, each skipped when already done:
    assets/aircraft_src/ (the license file is verified on disk by the
    converter, per VALIDITY 3.3 -- nothing renders unattributed);
 2. convert -- per-part OBJs + mesh_manifest.json under assets/generated/,
-   refusing any mesh/FDM mismatch (VALIDITY 1.4);
+   refusing any mesh/FDM mismatch (VALIDITY 1.4); a manifest older than
+   version 3 (version 1: no ``mesh_origin_actor_cm``, the mesh would be
+   attached at the structural datum, 25-30 m off its label; version 2:
+   an origin ASSUMED from the staged FDM's VRP, 3.9 m off on the B747
+   and 19.3 m on the A320, where version 3 MEASURES it from the
+   vertices) is NOT converted and is re-converted here, geometry
+   unchanged, no editor time;
 3. import the manifest into the Unreal project inside UnrealEditor-Cmd
    (scripts/ue_import_aircraft.py), which re-verifies each imported
    mesh's bounds.
@@ -105,15 +111,74 @@ def missing_assets(manifest_path: Path) -> List[str]:
             if not (content / root / f"{part}.uasset").is_file()]
 
 
+#: The manifest version the render commandlet needs to place the mesh
+#: where the label is. Version 1 carried no ``mesh_origin_actor_cm``, so
+#: the commandlet attached the body at the actor root -- the JSBSim
+#: structural datum -- and drew the B747 33.7 m forward of its label
+#: (the Camera Phase 1 initial run report measured 25-30 m along the
+#: airframe's own axis). Version 2 (eb5c71d) carried an origin ASSUMED
+#: to be the staged FDM's VRP, which put the B747 mesh 3.9 m aft of its
+#: label and the A320 19.3 m aft (measured from the pinned vertices:
+#: each FlightGear mesh was modelled against its own repository's FDM,
+#: not the staged one). Version 3 MEASURES the origin from the mesh's
+#: nose extreme and lowest gear vertex. Kept as a number here, not
+#: imported from the converter, so a machine that only IMPORTS can still
+#: tell a stale manifest from a current one.
+MESH_MANIFEST_VERSION = 3
+
+
+def stale_manifest_reason(manifest_path: Path) -> Optional[str]:
+    """Why an existing manifest must be re-converted, or None when it is
+    current. A manifest without ``version`` 3 or without
+    ``mesh_origin_actor_cm`` was written by a converter that either said
+    nothing about where the model origin sits in the actor (version 1:
+    the commandlet would attach its mesh at the structural datum and
+    every mask would be offset by the whole origin-to-CG distance) or
+    assumed it from the staged FDM's VRP (version 2: the mesh drawn
+    3.9 m aft of its label on the B747, 19.3 m on the A320). Version 3
+    measures it from the vertices."""
+    try:
+        manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return f"unreadable ({exc})"
+    version = manifest.get("version")
+    if not isinstance(version, int) or version < MESH_MANIFEST_VERSION:
+        if isinstance(version, int) and version >= 2:
+            return (f"manifest version {version!r} predates {MESH_MANIFEST_VERSION}: "
+                    f"its mesh origin was assumed from the staged FDM's VRP, "
+                    f"not measured from the vertices (3.9 m off on the B747, "
+                    f"19.3 m on the A320), so the mesh would be drawn off its "
+                    f"label")
+        return (f"manifest version {version!r} predates {MESH_MANIFEST_VERSION}: "
+                f"it records no mesh origin, so the mesh would be attached "
+                f"at the structural datum instead of where the vertices "
+                f"say the model origin sits")
+    origin = manifest.get("mesh_origin_actor_cm")
+    if (not isinstance(origin, list) or len(origin) != 3
+            or not all(isinstance(v, (int, float)) for v in origin)):
+        return (f"manifest version {version} carries no mesh_origin_actor_cm "
+                f"(got {origin!r}); the mesh would be attached at the "
+                f"structural datum")
+    return None
+
+
 def is_converted(name: str) -> bool:
-    return mesh_manifest_path(name).is_file()
+    """A CURRENT manifest is on disk. A version-1 manifest is not
+    converted: ensure_model re-converts it (the source is already fetched
+    at the pinned commit, so this costs one converter run and no
+    network, no editor -- the OBJ geometry is unchanged, only the
+    manifest gains the origin)."""
+    manifest = mesh_manifest_path(name)
+    return manifest.is_file() and stale_manifest_reason(manifest) is None
 
 
 def is_imported(name: str) -> bool:
-    """Converted AND present in the Unreal project. Both halves matter:
-    a manifest with no .uasset behind it renders nothing real."""
+    """Converted (current) AND present in the Unreal project. Both halves
+    matter: a manifest with no .uasset behind it renders nothing real,
+    and a stale manifest renders the real mesh in the wrong place."""
     manifest = mesh_manifest_path(name)
-    return manifest.is_file() and not missing_assets(manifest)
+    return (manifest.is_file() and stale_manifest_reason(manifest) is None
+            and not missing_assets(manifest))
 
 
 def fetch_source(config: Dict, config_path: Path,
@@ -233,7 +298,13 @@ def ensure_model(name: str, report: Report = print) -> Path:
             f"no model config for the {name} -- configured: "
             f"{', '.join(sorted(configured_aircraft()))}")
     manifest = mesh_manifest_path(name)
-    if not manifest.is_file():
+    stale = stale_manifest_reason(manifest) if manifest.is_file() else None
+    if stale:
+        # Re-convert in place: the OBJs and the imported .uassets are the
+        # same geometry, so only the converter runs (no editor time).
+        report(f"the {name} mesh manifest is stale ({stale}); re-converting "
+               f"so the mesh is drawn where its label is")
+    if not manifest.is_file() or stale:
         config = json.loads(config_path.read_text(encoding="utf-8"))
         try:
             fetch_source(config, config_path, report)

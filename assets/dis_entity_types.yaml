@@ -1,0 +1,62 @@
+# The DIS entity-type table (IEEE 1278.1-2012 Entity State PDU, field
+# "entity type": kind, domain, country, category, subcategory, specific,
+# extra), one row per configured airframe (assets/aircraft_config).
+#
+# This table SHIPS EMPTY OF SEPTUPLETS. Every row names the SISO-REF-010
+# edition, the enumeration UIDs and the table the seven numbers are to be
+# copied from, and carries entity_type: null with the reason below, so the
+# stream refuses dis.entity_type_unknown by name for that airframe until
+# someone with the standard fills the row in. A number is entered from the
+# standard or not at all; nothing here is written from memory. (The
+# remembered values of batch 1 live in core/interop/dis.py ENTITY_TYPES as
+# the documented FALLBACK, per field 'unverified here', and are reached only
+# when the fallback policy is asked for.)
+#
+# To fill a row: open the cited edition of SISO-REF-010, find the airframe
+# in the Platform-Air tables, write the seven integers under entity_type in
+# the order kind, domain, country, category, subcategory, specific, extra,
+# and replace the row's reason with the page or table the numbers came from.
+# The UIDs cited are as remembered and marked so; the person filling the row
+# corrects them from the document.
+#
+# ASCII only: this file is read by the exporter and may be read by an engine.
+
+table_version: 1
+standard:
+  name: "SISO-REF-010, Reference for Enumerations for Simulation Interoperability"
+  edition: "to be entered from the document by the person filling a row; the edition in force could not be fetched here [unverified here]"
+  uids:
+    entity_kind: "UID 7 (Entity Kind) [from memory, unverified here]"
+    domain: "UID 8 (Domain) [from memory, unverified here]"
+    country: "UID 29 (Country) [from memory, unverified here]"
+    platform_air_category: "UID 10 (Platform - Air, Category) [from memory, unverified here]"
+    subcategory: "the per-category subcategory table of the Platform - Air section [from memory, unverified here]"
+  table: "Platform - Air (kind 1, domain 2) [from memory, unverified here]"
+  note: "The document could not be fetched in the container this table was written in; nothing below is asserted from it."
+reason: "entered from the standard, never guessed"
+airframes:
+  A320:
+    title: "Airbus A320 (JSBSim stock model A320)"
+    siso_reference: "SISO-REF-010, Platform - Air, Civilian Fixed Wing Aircraft (Airbus), the row for the A320 family"
+    entity_type: null
+    reason: "entered from the standard, never guessed"
+  B747:
+    title: "Boeing 747 (JSBSim stock model B747)"
+    siso_reference: "SISO-REF-010, Platform - Air, Civilian Fixed Wing Aircraft (Boeing), the row for the 747 family"
+    entity_type: null
+    reason: "entered from the standard, never guessed"
+  DHC6:
+    title: "de Havilland Canada DHC-6 Twin Otter (JSBSim stock model DHC6)"
+    siso_reference: "SISO-REF-010, Platform - Air, Civilian Fixed Wing Aircraft (de Havilland Canada), the row for the DHC-6"
+    entity_type: null
+    reason: "entered from the standard, never guessed"
+  c172p:
+    title: "Cessna 172P Skyhawk (JSBSim stock model c172p)"
+    siso_reference: "SISO-REF-010, Platform - Air, Civilian Fixed Wing Aircraft (Cessna), the row for the 172"
+    entity_type: null
+    reason: "entered from the standard, never guessed"
+  p51d:
+    title: "North American P-51D Mustang (JSBSim stock model p51d)"
+    siso_reference: "SISO-REF-010, Platform - Air, Fighter/Air Defense (United States), the row for the P-51"
+    entity_type: null
+    reason: "entered from the standard, never guessed"
