@@ -1838,8 +1838,30 @@ bool FFlightSimScenarioWorld::Populate(const FFlightSimScenarioCard& Card,
 	Movement->AircraftModel = Card.Aircraft;
 	Movement->DrawDebug = false;
 	Movement->StartOnGround = false;
-	Movement->bStartWithGearDown = true;   // matches the headless host, which
-	                                       // leaves JSBSim's gear default alone
+	// Gear: the headless host leaves JSBSim's gear default (down) alone for
+	// stock aircraft, and starts an AIRBORNE repo-owned airframe gear-up
+	// (core.fdm.FlightDynamics._retract_gear_if_airborne). Mirror both. The
+	// list is the airframes under assets/fdm_root/aircraft; a Python test
+	// (test_a4.py) fails if the two lists drift apart.
+	static const TCHAR* const RepoOwnedAirframes[] = { TEXT("A4") };
+	bool bRepoOwnedAirframe = false;
+	for (const TCHAR* Name : RepoOwnedAirframes)
+	{
+		if (Card.Aircraft.Equals(Name, ESearchCase::CaseSensitive))
+		{
+			bRepoOwnedAirframe = true;
+		}
+	}
+	const double AglFeet =
+		(Card.AltitudeMetres - Card.TerrainElevationMetres) / 0.3048;
+	const bool bStartGearUp = bRepoOwnedAirframe && AglFeet > 100.0;
+	Movement->bStartWithGearDown = !bStartGearUp;
+	if (bStartGearUp)
+	{
+		// The component pushes Commands.GearDown (default 1) into the FCS on
+		// every step, which would otherwise re-extend the gear during trim.
+		Movement->Commands.GearDown = 0.0;
+	}
 	Movement->bStartWithEngineRunning = true;
 	// The card's verified mixture: full rich kills a force-started piston at
 	// altitude (VENDORED.json local patch 4; measured on c172p at 3600 m).

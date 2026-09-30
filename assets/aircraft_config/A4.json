@@ -2,18 +2,21 @@
   "name": "A4",
   "fdm": "A4",
   "fdm_match": [
-    "A4",
     "A-4",
+    "A4",
     "A-4 (JSBSim)"
   ],
-  "mesh_airframe": "none: the A-4 is physics-only (no licensed model)",
-  "source_dir": "../aircraft_src/A4",
+  "mesh_airframe": "Douglas A-4E Skyhawk, VA-12 livery (P3D exterior model, one rigid body, gear stowed)",
+  "converter": "mdl",
+  "source_dir": "../aircraft_models/A4",
   "license": {
-    "license_name": "none usable",
-    "file": null,
-    "unavailable": "no licensed A-4 model. The FSX / P3D A-4E/F/G/H/K package the owner downloaded is by Dino Cattaneo / IndiaFoxtEcho Visual Simulations (c) 2019 (its flight manual's credits; every aircraft.cfg says ui_createdby=\"IndiaFoxtEcho Visual Simulations\"), its visual model is partly based on MeshFactory meshes bought through TurboSquid, and its terms read: 'Other than for personal uses of the purchaser, copying, modifying or redistributing this software is illegal.' Converting it and rendering it into a public dataset is neither, so it is not used; an earlier commit that credited the owner as its author was wrong and is corrected here. Physics-only until a model whose licence allows it exists (written permission from IndiaFoxtEcho, or an openly licensed A-4 model)."
+    "license_name": "All rights reserved; model author-owned, used with permission",
+    "file": "NOTICE.txt",
+    "repo": "https://github.com/dhruvavalluru/flightsim-a4-model",
+    "commit": "4611813a1ae1047896029e2ceca793b034409418"
   },
-  "parts": [],
+  "surfaces": {},
+  "note": "Local model: assets_pipeline/a4_mdl_convert.py, not a fetched FlightGear tree. Not articulated: control surfaces, gear and speed brakes do not move.",
   "labels": {
     "dimensions_m": {
       "length": 12.27,

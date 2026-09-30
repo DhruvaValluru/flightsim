@@ -11,6 +11,11 @@ gitignored), and every render manifest carries its source and licence.
   each upstream repository ships, pinned by commit in
   `assets/aircraft_config/<name>.json` (an airframe whose upstream ships no
   licence file stays physics-only).
+- **A-4 Skyhawk (A-4E/F/G/H/K)**: the visual model and textures under
+  `assets/aircraft_models/A4/` are committed at the owner's direction; their
+  licence statement is `assets/aircraft_models/A4/NOTICE.txt` and the
+  source record is `assets/aircraft_config/A4.json`. Its licence is not on
+  the dataset allow-list, so the export gate refuses to ship it.
 
 ## Terrain and imagery
 

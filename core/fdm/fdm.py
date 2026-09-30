@@ -317,6 +317,7 @@ class FlightDynamics:
         # legitimate reads would be rejected as unknown.
         self.props.refresh()
         self._verify_initial_conditions(ordered, tolerance)
+        self._retract_gear_if_airborne()
         self._ic_applied = True
         self._ic_requested = dict(ordered)
         self._trimmed = False
@@ -348,6 +349,27 @@ class FlightDynamics:
         if not self._exec.run_ic():
             raise SimulationError(f"run_ic() failed on re-latch for {self.model.name!r}")
         self.props.refresh()
+
+    #: Height above which a repo-owned airframe starts with its gear up.
+    _GEAR_UP_AGL_FT = 100.0
+
+    def _retract_gear_if_airborne(self) -> None:
+        """Start an airborne repo-owned airframe clean, not gear-down.
+
+        JSBSim's default is gear extended, which for the A4 means flying
+        350 kt with the gear down against the model's own 220 kt gear limit
+        and roughly doubling drag. Scoped to airframes this repository owns
+        (``ac.REPO_ROOT_DIR``): stock aircraft keep JSBSim's default so
+        their recorded behaviour does not move.
+        """
+        if self.model.root_dir != ac.REPO_ROOT_DIR:
+            return
+        if not (self.props.has("gear/gear-cmd-norm")
+                and self.props.has("gear/gear-pos-norm")):
+            return
+        if self.props.get("position/h-agl-ft") > self._GEAR_UP_AGL_FT:
+            self.props.set("gear/gear-cmd-norm", 0.0)
+            self.props.set("gear/gear-pos-norm", 0.0)
 
     def _verify_initial_conditions(
         self, requested: Dict[str, float], tolerance: float
