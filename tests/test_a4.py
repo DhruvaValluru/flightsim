@@ -1,10 +1,12 @@
-"""The A4 airframe is reachable by name and feels the wind stack.
+"""The A4 airframe: reachable by name, generated from its visual model's cfg,
+and subject to the same wind stack as every other airframe.
 
-The visual model (assets/aircraft_models/A4) is a P3D .mdl that is not yet
-rendered; the physics is the JSBSim A4 and must respond to wind exactly as
-every other airframe does -- the environment stack is airframe-agnostic and
-this pins that for the A4.
+The physics is generated from the A-4E model's aircraft.cfg
+(assets_pipeline/a4_sync.py) and checked against the decoded mesh
+(test_a4_mesh.py); see docs/A4_SYNC.md.
 """
+
+import pytest
 
 from core.fdm import FlightDynamics
 from core.nl.compiler import compile_prompt
@@ -75,7 +77,9 @@ def test_a4_geometry_and_mass_come_from_the_model_cfg():
     internal_fuel = sum(cfg["tanks"][k][3] for k in ("Center1", "Center2")) \
         * a4_sync.JET_A_LB_PER_GAL
     assert abs(g("inertia/empty-weight-lbs") - cfg["empty_lb"]) < 1.0
-    assert abs(g("inertia/weight-lbs") - cfg["empty_lb"] - internal_fuel) < 2.0
+    pilot = cfg["stations"][0][0]
+    assert abs(g("inertia/weight-lbs") - cfg["empty_lb"] - internal_fuel
+               - pilot) < 2.0
 
 
 def test_a4_rests_on_its_gear_at_the_models_static_attitude():
@@ -159,3 +163,66 @@ def test_a4_reaches_its_published_maximum_speed():
     except Exception:
         return
     raise AssertionError("A4 trims at 620 kt CAS: faster than published")
+
+
+# -- flaps, hook, stores ----------------------------------------------------
+
+def test_flaps_travel_to_the_cfgs_fifty_degrees():
+    fdm = FlightDynamics("A4")
+    fdm.set_initial_conditions({"h-sl-ft": 10000.0, "vc-kts": 250.0})
+    fdm.start_engines()
+    reached = {}
+    for cmd in (0.5, 1.0, 0.0):
+        fdm.props.set("fcs/flap-cmd-norm", cmd)
+        fdm.run_for(4.0)
+        reached[cmd] = fdm.props.get("fcs/flap-pos-deg")
+    assert reached == {0.5: 25.0, 1.0: 50.0, 0.0: 0.0}
+
+
+def test_tail_hook_arrests_only_when_down_engaged_and_on_the_deck():
+    def roll_out(hook_down, wire):
+        fdm = FlightDynamics("A4")
+        fdm.set_initial_conditions({"h-agl-ft": 7.0, "vc-kts": 120,
+                                    "terrain-elevation-ft": 0})
+        fdm.props.set("systems/hook/tailhook-cmd-norm",
+                      1.0 if hook_down else 0.0)
+        fdm.run_for(2.0)
+        fdm.props.set("systems/hook/wire-engaged", 1.0 if wire else 0.0)
+        fdm.run_for(3.0)
+        return fdm.props.get("velocities/vc-kts")
+
+    free = roll_out(False, False)
+    assert roll_out(True, False) == pytest.approx(free, abs=0.5)   # no wire
+    assert roll_out(False, True) == pytest.approx(free, abs=0.5)   # hook up
+    assert roll_out(True, True) < 0.25 * free                      # arrested
+
+
+def test_pylon_stores_add_weight_and_drag_and_the_clean_airframe_has_none():
+    fdm = FlightDynamics("A4")
+    fdm.set_initial_conditions({"h-sl-ft": 10000.0, "vc-kts": 350.0})
+    from assets_pipeline import a4_sync
+
+    g = fdm.props.get
+    clean = g("inertia/weight-lbs")
+    fdm.start_engines()
+    fdm.run_for(0.1)
+    assert g("stores/drag-area-ft2") == 0.0
+    fdm.props.set("inertia/pointmass-weight-lbs[3]", 2000.0)
+    fdm.run_for(0.1)
+    assert g("inertia/weight-lbs") == pytest.approx(clean + 2000.0, abs=1.0)
+    assert g("stores/drag-area-ft2") == pytest.approx(
+        2000.0 * a4_sync.STORES_DRAG_FT2_PER_LB, rel=1e-3)
+
+
+def test_a4_climb_and_ceiling_match_the_published_figures(monkeypatch):
+    """cfg text: 8,440 ft/min and a 42,250 ft service ceiling at the 18,300 lb
+    loaded weight. Fitted (assets_pipeline/a4_calibrate.py) with a stores drag
+    constant and the Oswald efficiency; this pins the result. The ceiling is
+    bracketed rather than solved for, to keep the test quick."""
+    from assets_pipeline import a4_performance as perf
+
+    speed, roc = perf.best_rate_of_climb(500.0)
+    assert abs(roc - 8440.0) / 8440.0 < 0.05
+    monkeypatch.setattr(perf, "SPEEDS_KT", (170, 200, 250))
+    assert perf._roc_at(40500.0, perf.REFERENCE_GROSS_LB) > 100.0
+    assert perf._roc_at(44000.0, perf.REFERENCE_GROSS_LB) < 100.0

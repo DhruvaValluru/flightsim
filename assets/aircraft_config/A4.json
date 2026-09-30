@@ -1,0 +1,18 @@
+{
+  "name": "A4",
+  "fdm": "A4",
+  "fdm_match": [
+    "A-4"
+  ],
+  "mesh_airframe": "Douglas A-4E Skyhawk, VA-12 livery (P3D exterior model, one rigid body, gear stowed)",
+  "converter": "mdl",
+  "source_dir": "../aircraft_models/A4",
+  "license": {
+    "license_name": "All rights reserved; model author-owned, used with permission",
+    "file": "NOTICE.txt",
+    "repo": "https://github.com/dhruvavalluru/flightsim-a4-model",
+    "commit": "4611813a1ae1047896029e2ceca793b034409418"
+  },
+  "surfaces": {},
+  "note": "Local model: assets_pipeline/a4_mdl_convert.py, not a fetched FlightGear tree. Not articulated: control surfaces, gear and speed brakes do not move."
+}

@@ -42,6 +42,15 @@ JET_A_LB_PER_GAL = 6.7
 LOADED_WEIGHT_LB = 18300.0  # the cfg's own performance text
 GEAR_DAMPING_RATIO = 0.8    # the cfg's value for both gear classes
 G = 32.174
+# External-store drag: drag area (ft2) per lb carried on STA1-5. One fitted
+# constant, set so the model climbs at the cfg's published 8,440 ft/min at
+# its published 18,300 lb loaded weight (assets_pipeline/a4_performance.py).
+# The clean airframe (no stores) is untouched and keeps the published 585 kn.
+STORES_DRAG_FT2_PER_LB = 0.001756
+# Induced drag K = 1 / (pi * AR * e). The stock Aeromatic K of 0.09 is
+# optimistic for an aspect-ratio-2.7 wing; e is the one fitted parameter,
+# chosen so the service ceiling at the loaded weight is the cfg's 42,250 ft.
+OSWALD_E = 0.918
 
 
 def _cfg_lines() -> list:
@@ -72,7 +81,13 @@ def read_cfg() -> dict:
         m = re.match(r"^(Center\d|External\d)\s*=\s*(.*)$", ln, re.I)
         if m:
             tanks[m.group(1)] = _floats(m.group(2))
+    stations = {}
+    for ln in lines:
+        m = re.match(r"^station_load\.(\d+)\s*=\s*(.*)$", ln)
+        if m:
+            stations[int(m.group(1))] = _floats(m.group(2))
     return {
+        "stations": stations,
         "span_ft": float(value("wing_span").split()[0]),
         "area_ft2": float(value("wing_area").split()[0]),
         "empty_lb": float(value("empty_weight").split()[0]),
@@ -147,21 +162,48 @@ def _gear(cfg: dict) -> str:
     return out + " </ground_reactions>\n"
 
 
+STATION_NAMES = {0: "PILOT", 2: "STA1", 3: "STA2", 4: "STA3", 5: "STA4",
+                 6: "STA5"}
+
+
+def _pointmasses(cfg: dict) -> str:
+    """Pilot (loaded) and the five pylon stations (empty until stores are set).
+
+    Positions and the pilot weight are the cfg's ``station_load`` entries.
+    Set a store with ``inertia/pointmass-weight-lbs[n]``; n follows this
+    order (0 = pilot, 1..5 = STA1..STA5).
+    """
+    out = ""
+    for idx, name in STATION_NAMES.items():
+        weight, lon, lat, vert = cfg["stations"][idx][:4]
+        weight = weight if idx == 0 else 0.0
+        out += (f'\n   <pointmass name="{name}">\n'
+                f'    <weight unit="LBS"> {weight:.2f} </weight>\n'
+                + _loc("", (lon, lat, vert), "    ")
+                + "   </pointmass>\n")
+    return out
+
+
 def _propulsion(cfg: dict, engine_name: str) -> str:
-    fuselage, wing = cfg["tanks"]["Center1"], cfg["tanks"]["Center2"]
+    tanks = [cfg["tanks"][k] for k in
+             ("Center1", "Center2", "External1", "External2", "Center3")]
     out = ("\n <propulsion>\n\n"
-           f'   <engine file="{engine_name}">\n    <feed>0</feed>\n    <feed>1</feed>\n'
-           "    <thruster file=\"direct\">\n"
+           f'   <engine file="{engine_name}">\n'
+           + "".join(f"    <feed>{i}</feed>\n" for i in range(5))
+           + "    <thruster file=\"direct\">\n"
            + _loc("", cfg["engine_pos"], "     ")
            + '     <orient unit="DEG">\n       <pitch> 0.00 </pitch>\n'
              "       <roll>   0.00 </roll>\n       <yaw>   0.00 </yaw>\n"
              "     </orient>\n    </thruster>\n  </engine>\n\n")
-    for n, t in enumerate((fuselage, wing)):
+    for n, t in enumerate(tanks):
         lb = t[3] * JET_A_LB_PER_GAL
+        # tanks 0-1 are internal and full; 2-4 are drop tanks, empty until
+        # loaded (fuel/tank[n]/contents-lbs)
+        fill = lb if n < 2 else 0.0
         out += (f'  <tank type="FUEL" number="{n}">\n'
                 + _loc("", (t[0], t[1], t[2]), "   ")
                 + f'   <capacity unit="LBS"> {lb:.2f} </capacity>\n'
-                  f'   <contents unit="LBS"> {lb:.2f} </contents>\n'
+                  f'   <contents unit="LBS"> {fill:.2f} </contents>\n'
                   "  </tank>\n\n")
     return out + " </propulsion>\n"
 
@@ -172,6 +214,161 @@ def _sub(text: str, tag: str, new: str) -> str:
     if n != 1:
         raise RuntimeError(f"template has no <{tag}> block")
     return out
+
+
+def _add_stores_drag(xml: str) -> str:
+    """Drag area from pylon weight: a stores channel plus a CDstores term."""
+    stations = "".join(f"<property>inertia/pointmass-weight-lbs[{i}]</property>"
+                       for i in range(1, 6))
+    channel = (
+        '\n  <channel name="Stores">\n'
+        '   <fcs_function name="Stores Drag Area">\n'
+        f"    <function><product><value> {STORES_DRAG_FT2_PER_LB} </value>"
+        f"<sum>{stations}</sum></product></function>\n"
+        "    <output>stores/drag-area-ft2</output>\n"
+        "   </fcs_function>\n  </channel>\n")
+    term = (
+        '    <function name="aero/coefficient/CDstores">\n'
+        "       <description>Drag_due_to_external_stores</description>\n"
+        "       <product>\n"
+        "          <property>aero/qbar-psf</property>\n"
+        "          <property>stores/drag-area-ft2</property>\n"
+        "       </product>\n    </function>\n\n")
+    if xml.count(" </flight_control>") != 1 or \
+            xml.count('    <function name="aero/coefficient/CDi">') != 1:
+        raise RuntimeError("template layout changed; cannot place stores drag")
+    xml = xml.replace(" </flight_control>", channel + "\n </flight_control>", 1)
+    return xml.replace('    <function name="aero/coefficient/CDi">',
+                       term + '    <function name="aero/coefficient/CDi">', 1)
+
+
+def _set_induced_drag(xml: str, cfg: dict) -> str:
+    aspect = cfg["span_ft"] ** 2 / cfg["area_ft2"]
+    k = 1.0 / (math.pi * aspect * OSWALD_E)
+    out, n = re.subn(
+        r'(<function name="aero/coefficient/CDi">.*?<value>)0\.09(</value>)',
+        rf"\g<1>{k:.4f}\g<2>", xml, count=1, flags=re.S)
+    if n != 1:
+        raise RuntimeError("template has no CDi coefficient to replace")
+    return out
+
+
+# The stock Aeromatic file assumes this horizontal tail; its pitch-moment
+# terms were sized for it. The mesh-measured tail scales them (see
+# _scale_pitch_terms).
+STOCK_HTAIL_AREA_FT2 = 52.0
+STOCK_HTAIL_ARM_FT = 16.68
+
+
+def _scale_function(xml: str, name: str, factor: float) -> str:
+    """Multiply one aero function's constants by ``factor``: its <value>
+    and the second column of its table rows."""
+    m = re.search(rf'<function name="{re.escape(name)}">.*?</function>', xml,
+                  flags=re.S)
+    if m is None:
+        raise RuntimeError(f"template has no {name}")
+    block = m.group(0)
+    scaled = re.sub(
+        r"(<value>\s*)(-?\d+\.?\d*)(\s*</value>)",
+        lambda g: f"{g.group(1)}{float(g.group(2)) * factor:.4f}{g.group(3)}",
+        block)
+    scaled = re.sub(
+        r"^(\s*\d+\.?\d*\s+)(-?\d+\.?\d*)(\s*)$",
+        lambda g: f"{g.group(1)}{float(g.group(2)) * factor:.4f}{g.group(3)}",
+        scaled, flags=re.M)
+    if scaled == block:
+        raise RuntimeError(f"nothing to scale in {name}")
+    return xml.replace(block, scaled, 1)
+
+
+def _scale_pitch_terms(xml: str, tail: dict) -> str:
+    """Elevator power scales with tail area x arm; pitch damping with
+    area x arm^2. Static stability (Cmalpha) is wing-body plus tail and is
+    left alone."""
+    volume = (tail["area_ft2"] * tail["arm_ft"]) / (
+        STOCK_HTAIL_AREA_FT2 * STOCK_HTAIL_ARM_FT)
+    damping = (tail["area_ft2"] * tail["arm_ft"] ** 2) / (
+        STOCK_HTAIL_AREA_FT2 * STOCK_HTAIL_ARM_FT ** 2)
+    xml = _scale_function(xml, "aero/coefficient/Cmde", volume)
+    xml = _scale_function(xml, "aero/coefficient/Cmq", damping)
+    return _scale_function(xml, "aero/coefficient/Cmadot", damping)
+
+
+FLAP_MAX_DEG = 50.0      # cfg [Flaps.0] flaps-position.4
+FLAP_TIME_S = 3.0        # cfg extending-time
+HOOK_DECEL_G = 2.2       # the stock JSBSim hook system's arrestment decel
+
+
+def _extend_flaps(xml: str) -> str:
+    """Flap travel 0 -> 50 deg in the cfg's 3 s.
+
+    The lift and drag coefficients are linear in flap angle, so past the
+    stock 30 deg they are an extrapolation of that line, not data.
+    """
+    old = re.search(r'(<kinematic name="Flaps Control">.*?</kinematic>)', xml,
+                    flags=re.S)
+    if old is None:
+        raise RuntimeError("template has no flap kinematic")
+    half = FLAP_MAX_DEG / 2
+    new = (
+        '<kinematic name="Flaps Control">\n'
+        "     <input>fcs/flap-cmd-norm</input>\n     <traverse>\n"
+        "       <setting>\n          <position>  0 </position>\n"
+        "          <time>      0 </time>\n       </setting>\n"
+        f"       <setting>\n          <position> {half:g} </position>\n"
+        f"          <time>      {FLAP_TIME_S / 2:g} </time>\n       </setting>\n"
+        f"       <setting>\n          <position> {FLAP_MAX_DEG:g} </position>\n"
+        f"          <time>      {FLAP_TIME_S / 2:g} </time>\n       </setting>\n"
+        "     </traverse>\n     <output>fcs/flap-pos-deg</output>\n"
+        "   </kinematic>")
+    return xml.replace(old.group(1), new, 1)
+
+
+def _add_tailhook(xml: str, cfg: dict) -> str:
+    """Tail hook at the cfg position: a stow/deploy state and, when the hook
+    is down, the wire is engaged and the wheels are on the deck, the stock
+    2.2 g arrestment force along the airplane's axis.
+
+    The cable itself is not modelled: something outside the FDM sets
+    ``systems/hook/wire-engaged`` when the hook catches a wire. The cfg's
+    ``cable_force_adjust`` is an MSFS tuning scalar and is not applied.
+    """
+    declare = ("\n  <property>systems/hook/tailhook-cmd-norm</property>\n"
+               "  <property>systems/hook/wire-engaged</property>\n")
+    channel = (
+        '\n  <channel name="Tailhook">\n'
+        '   <kinematic name="Tailhook Control">\n'
+        "    <input>systems/hook/tailhook-cmd-norm</input>\n    <traverse>\n"
+        "     <setting><position> 0 </position><time> 0 </time></setting>\n"
+        "     <setting><position> 1 </position><time> 1.5 </time></setting>\n"
+        "    </traverse>\n    <output>systems/hook/tailhook-pos-norm</output>\n"
+        "   </kinematic>\n"
+        '   <switch name="Hook Arrestment">\n'
+        '    <default value="0"/>\n'
+        f'    <test logic="AND" value="{HOOK_DECEL_G}">\n'
+        "     systems/hook/tailhook-pos-norm gt 0.99\n"
+        "     systems/hook/wire-engaged eq 1\n"
+        "     gear/unit[1]/WOW eq 1\n    </test>\n"
+        "    <output>systems/hook/arrest-decel-g</output>\n   </switch>\n"
+        '   <pure_gain name="Hook Force">\n'
+        "    <input>systems/hook/arrest-decel-g</input>\n"
+        "    <gain>inertia/weight-lbs</gain>\n"
+        "    <output>external_reactions/hook/magnitude</output>\n"
+        "   </pure_gain>\n  </channel>\n")
+    x, y, z = to_struct_in(*cfg["hook"])
+    reactions = (
+        "\n <external_reactions>\n"
+        '  <force name="hook" frame="BODY">\n'
+        + _loc("", cfg["hook"], "   ")
+        + "   <direction><x> -1 </x><y> 0 </y><z> 0 </z></direction>\n"
+          "  </force>\n </external_reactions>\n")
+    if xml.count(" </flight_control>") != 1 or xml.count(" <propulsion>") != 1 \
+            or xml.count('<flight_control name="FCS: A-4">') != 1:
+        raise RuntimeError("template layout changed; cannot place the tail hook")
+    xml = xml.replace('<flight_control name="FCS: A-4">',
+                      '<flight_control name="FCS: A-4">' + declare, 1)
+    xml = xml.replace(" </flight_control>", channel + "\n </flight_control>", 1)
+    return xml.replace(" <propulsion>", reactions.lstrip("\n") + "\n <propulsion>", 1)
 
 
 def build() -> dict:
@@ -186,6 +383,9 @@ def build() -> dict:
                  "model's aircraft.cfg. </description>", xml, count=1,
                  flags=re.S)
 
+    from .a4_mesh_check import horizontal_tail
+
+    tail = horizontal_tail()
     chord = cfg["area_ft2"] / cfg["span_ft"]
     metrics = (
         "\n <metrics>\n"
@@ -193,8 +393,8 @@ def build() -> dict:
         f'   <wingspan  unit="FT" >  {cfg["span_ft"]:.2f} </wingspan>\n'
         "   <wing_incidence>          0.00 </wing_incidence>\n"
         f'   <chord     unit="FT" >    {chord:.2f} </chord>\n'
-        '   <htailarea unit="FT2">   52.00 </htailarea>\n'
-        '   <htailarm  unit="FT" >   16.68 </htailarm>\n'
+        f'   <htailarea unit="FT2">   {tail["area_ft2"]:.2f} </htailarea>\n'
+        f'   <htailarm  unit="FT" >   {tail["arm_ft"]:.2f} </htailarm>\n'
         '   <vtailarea unit="FT2">   31.20 </vtailarea>\n'
         '   <vtailarm  unit="FT" >   16.68 </vtailarm>\n'
         + _loc(' name="AERORP"', (0.0, 0.0, 0.0), "   ")
@@ -213,10 +413,16 @@ def build() -> dict:
         '   <iyz unit="SLUG*FT2">         0 </iyz>\n'
         f'   <emptywt unit="LBS" >  {cfg["empty_lb"]:.2f} </emptywt>\n'
         + _loc(' name="CG"', (0.0, 0.0, 0.0), "   ")
+        + _pointmasses(cfg)
         + " </mass_balance>\n")
     xml = _sub(xml, "mass_balance", mass)
+    xml = _add_stores_drag(xml)
+    xml = _set_induced_drag(xml, cfg)
+    xml = _scale_pitch_terms(xml, tail)
+    xml = _extend_flaps(xml)
     xml = _sub(xml, "ground_reactions", _gear(cfg))
     xml = _sub(xml, "propulsion", _propulsion(cfg, "J52P8A"))
+    xml = _add_tailhook(xml, cfg)
 
     eng = ENGINE_TEMPLATE.read_text(encoding="utf-8")
     eng = re.sub(r"<milthrust>.*?</milthrust>",

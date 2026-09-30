@@ -106,6 +106,34 @@ def wing_planform(path: Path, wing_index: int) -> dict:
             "quarter_mac_long_ft": float((le_at_mac - 0.25 * mac) / FT)}
 
 
+def horizontal_tail(path: Path = MDL) -> dict:
+    """Horizontal tail from the composed scene: stabilizer plus elevator.
+
+    Found by geometry, not part number: parts wholly aft of z = -4.0 m, above
+    the fuselage line and wider than 1 m. Area is the hull of their top-view
+    projection; the arm runs from the datum (the CG) to the quarter chord of
+    the mean chord.
+    """
+    from .mdl_scene import MdlScene
+
+    tail = [p for p in MdlScene(path).parts()
+            if p.positions[:, 2].max() < -4.0 and p.positions[:, 1].min() > 0.3
+            and np.ptp(p.positions[:, 0]) > 1.0]
+    if not tail:
+        raise ValueError("no horizontal tail found in the model")
+    top = np.vstack([np.c_[p.positions[:, 0], p.positions[:, 2]] for p in tail])
+    hull = _hull(np.unique(np.round(top, 3), axis=0))
+    x, z = hull[:, 0], hull[:, 1]
+    area = abs(0.5 * np.sum(x * np.roll(z, -1) - np.roll(x, -1) * z))
+    span = float(np.ptp(top[:, 0]))
+    mac = area / span
+    leading = float(np.mean([p.positions[:, 2].max() for p in tail
+                             if p.positions[:, 2].max() > -5.0]))
+    return {"parts": len(tail), "area_ft2": float(area / FT ** 2),
+            "span_ft": span / FT,
+            "arm_ft": float(-(leading - 0.25 * mac) / FT)}
+
+
 def static_parts(path: Path = MDL, min_vertices: int = 500) -> list:
     """(index, vertex_count, lo_xyz_m, hi_xyz_m) for each measured part."""
     d = Path(path).read_bytes()
