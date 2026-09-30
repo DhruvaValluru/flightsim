@@ -11,3 +11,6 @@
 *.tif binary
 *.ttc binary
 *.ttf binary
+# A-4 visual model (MSFS/P3D) -- must never be text-normalised
+*.mdl binary
+*.dds binary
