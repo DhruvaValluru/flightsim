@@ -565,6 +565,66 @@ pre-flight does not include event winds (stated here). Measured: the
 vortex defeats the held-state autopilot's closure assertion -- that
 refusal is correct behaviour, not a defect.
 
+### 2.10d The physical sky is computed exactly and rendered unmeasured
+
+`environment.time_of_day` (SPEC_VERSION 7) and `-sky=` (core/sky,
+FlightSimSky.cpp). **Visual only**: no field reaches the flight dynamics.
+
+What can be claimed:
+
+* **Sun, moon and star positions for the instant** (NOAA/Meeus series).
+  They agree with astropy to about 0.03° for the sun and 0.06° for the moon,
+  pinned in tests/test_sky.py. That is well inside a rendered pixel of what
+  matters. Stars come from the Hipparcos naked-eye catalogue (V ≤ 6.5),
+  precessed to date. Phase and illuminated fraction are pinned against
+  known new and full moons.
+* **Star brightness conserves illuminance.** Each star is drawn as a disc
+  about one pixel across, at the luminance that makes its illuminance equal
+  the star's magnitude. Colour from B−V is approximate and labelled so.
+* **Exposure is a stated rule, not a meter.** EV100 follows the incident
+  light-meter equation in daylight. Below about 400 lx it deliberately drops
+  at half the meter's rate, so night looks dark. It is realised as UE's
+  physical camera (f/4, 1/60 s, ISO 100) plus compensation, constant over
+  a clip.
+
+What must not be claimed until measured on the rendering machine
+(`experiments/sky_check.py`):
+
+* **Nothing in the physical sky has been rendered.** It was written on a
+  machine with no engine. Its engine-API assumptions are checked by
+  `scripts/check_bridge_api.sh`, not by a compiler. That is why only a
+  STATED time of day selects it. Default specs keep the calibrated noon
+  look (gotcha 7) byte-identical until a machine's sky check passes and
+  `FLIGHTSIM_SKY=physical` is set.
+* **Lumen and Virtual Shadow Maps are requested, not verified.** The
+  terrain is a procedural mesh with no Nanite and no distance field. Lumen
+  can therefore only use screen traces and the sky light for it, and VSM
+  shadows it as non-Nanite geometry. Whether Lumen runs in a
+  SceneCaptureComponent2D on this engine build is part of what the sky
+  check measures.
+* **Twilight and daytime-ground lighting.** §6.6's +90° transmittance
+  floor is kept while the sun is up and switched to the engine default
+  (planet shadow) once it sets, with per-pixel transmittance on. That
+  switch is a reasoned choice, not a measured one.
+* **Clouds are not weather.** They are UE's stock volumetric layer, with
+  the base placed at least 1 km above the flight so the camera stays
+  clear. They do not come from ERA5, METAR or any data.
+* **Night lights are a presentation mapping.** They come from NASA's 2016
+  Black Marble composite (VIIRS DNB, 500 m, annual and tone-mapped), via a
+  luminance floor and a fixed scale. That is not radiometric, and it is a
+  decade old. They appear only on curated places that have an imagery
+  drape.
+* **Clock times are local MEAN SOLAR time** (UTC + longitude/15 h). No
+  time-zone database is used, so "6 pm" in Madrid is solar 6 pm, not
+  CEST. `HH:MMZ` means UTC.
+* **A moonless shot with no sky in frame can refuse** under the
+  blank-frame floor. That is correct: nothing above 24/255 is visible. The
+  floor stands.
+* The legacy `-sun-azim` flag sets yaw = azimuth + 180. In the engine frame
+  (+Y south; actor yaw = heading − 90) that is 90° from compass-true. The
+  physical sky uses the true mapping. The legacy flag is left alone because
+  every calibrated render was measured with it.
+
 ### 2.11 Validation is mostly inconclusive, and that is the finding
 
 Of six validation targets, one is validated at u_val (B747 stall speed, against
@@ -1372,3 +1432,8 @@ Python) and the probability-of-exceedence 0-7 severity mapping
   is $149-524/mo. This is a real cost and applies to funded research.
 * **DTED Levels 1 and 2** are presumptively restricted distribution. The
   pipeline will target SRTM, Copernicus DEM GLO-30, and USGS 3DEP.
+* **Star catalogue** (`assets/sky/hipparcos_bright.csv`): derived from the
+  HYG database v4.1, CC BY-SA 4.0. The derived file carries the same
+  license (assets/sky/README.md).
+* **Night lights**: NASA Black Marble 2016 via GIBS, public domain (NASA
+  imagery). Attribution is carried in each sidecar and manifest.

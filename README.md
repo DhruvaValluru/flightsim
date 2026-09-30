@@ -178,6 +178,21 @@ for priming a machine ahead of time rather than prerequisites.
   starts and fails fails the run by name (`aircraft.mesh_import`); it
   never falls through to blocks.
 
+**Physical sky (time of day).** Say *when* ("at sunset", "at night",
+"at 6:30 pm", "at 21:15Z") and the render uses a physical sky:
+
+* the true sun, moon (with its phase) and Hipparcos stars for that place
+  and instant;
+* EV100 physical-camera exposure;
+* Lumen GI and reflections, and virtual shadow maps;
+* a volumetric cloud layer (visual only);
+* per-camera lens character;
+* at night on curated places, VIIRS night lights.
+
+Without a stated time, the calibrated noon look renders unchanged. The
+physical sky has not yet been measured on a rendering machine. Run
+`experiments/sky_check.py` after building. See docs/VALIDITY.md §2.10d.
+
 Materials come from `scripts/ue_create_materials.py` (run inside
 UnrealEditor-Cmd; `ue_preflight` names the exact invocation when they
 are missing). Read `NEXT.md` for operational state and the 26 recorded

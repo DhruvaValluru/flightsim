@@ -68,6 +68,7 @@
 #include "CoreMinimal.h"
 #include "Dom/JsonObject.h"
 #include "FlightSimHeightfield.h"
+#include "FlightSimSky.h"
 
 class AActor;
 class ADirectionalLight;
@@ -231,6 +232,13 @@ struct FFlightSimVisualSceneOptions
 	// Where the cached star catalogue lives (assets/stars/bsc5-short.json);
 	// only read for stars_mode catalogue.
 	FString StarCataloguePath;
+	// -- physical sky (-sky=, core/sky/plan.py) ---------------------------
+	// Null renders the calibrated legacy scene exactly as before. Non-null
+	// replaces the sun's direction and intensity, the fog's light source
+	// and adds moon, stars and clouds (FFlightSimSky); SunRotation is then
+	// ignored. On an imagery drape its verified night-lights sidecar, if
+	// the plan names one, is added as emission.
+	const FFlightSimSkyPlan* SkyPlan = nullptr;
 };
 
 class FLIGHTSIMBRIDGE_API FFlightSimVisualScene
@@ -294,6 +302,12 @@ public:
 	FString ImageryLicense;
 	FString ImageryAttribution;
 	FString ImageryDataset;
+	// The physical sky's objects and what it managed to draw.
+	FFlightSimSky PhysicalSky;
+	// Night-lights drape provenance, or why none was drawn.
+	FString NightLightsSha256;
+	FString NightLightsAttribution;
+	FString NightLightsNote;
 	// World positions (cm) of the raster's peak sample in each instance --
 	// the landmarks the harness samples for the extinction measurement. In
 	// georeferenced mode only the near (single) instance exists.
@@ -408,6 +422,11 @@ private:
 	// dynamic instance when a scalar was set).
 	UMaterialInterface* ApplyWetness(UWorld* World, UMaterialInterface* Material,
 	                                 const FFlightSimVisualSceneOptions& Options);
+
+	// Night-lights texture + its luminance scale from a verified sidecar;
+	// null (with NightLightsNote set) when it cannot be used.
+	class UTexture2D* LoadNightLights(const FString& SidecarPath,
+	                                  double& LuminanceNits);
 
 	// Parsed once, shared by both placements.
 	FFlightSimHeightfield Terrain;

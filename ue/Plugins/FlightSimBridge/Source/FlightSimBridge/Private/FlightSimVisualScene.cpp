@@ -494,6 +494,15 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 		LookApplied->SetObjectField(TEXT("fog"), FogRecord);
 	}
 
+	// -- physical sky ------------------------------------------------------
+	// Everything above stays as §6.6 built it; the plan only re-aims and
+	// re-lights it and adds the night sky. Legacy renders never get here.
+	if (Options.SkyPlan != nullptr &&
+	    !PhysicalSky.Build(World, *Options.SkyPlan, Sun, Atmosphere, FogComponent, Error))
+	{
+		return false;
+	}
+
 	// -- sky light ---------------------------------------------------------
 	ASkyLight* Sky = World->SpawnActor<ASkyLight>();
 	USkyLightComponent* SkyComponent = Sky->GetLightComponent();
@@ -1105,9 +1114,54 @@ bool FFlightSimVisualScene::BuildGeoreferencedTerrain(
 				"scripts/ue_create_materials.py (build-time asset step).");
 			return false;
 		}
+		// Night lights (physical sky only): the same drape material plus
+		// an emissive VIIRS layer on the same UV grid. An unrequested
+		// embellishment, so a missing piece is recorded and the plain drape
+		// renders -- never a silent swap of what the surface IS.
+		UTexture2D* NightTexture = nullptr;
+		double NightLuminance = 0.0;
+		if (Options.SkyPlan != nullptr)
+		{
+			const FString& NightSidecar = Options.SkyPlan->NightLightsSidecarPath;
+			if (NightSidecar.IsEmpty())
+			{
+				NightLightsNote = TEXT("none in the sky plan");
+			}
+			else
+			{
+				NightTexture = LoadNightLights(NightSidecar, NightLuminance);
+				if (NightTexture != nullptr)
+				{
+					UMaterialInterface* NightBase = LoadObject<UMaterialInterface>(nullptr,
+						TEXT("/Game/FlightSim/M_TerrainImageryNight.M_TerrainImageryNight"));
+					if (NightBase == nullptr)
+					{
+						NightLightsNote = TEXT("/Game/FlightSim/M_TerrainImageryNight "
+						                       "missing (re-run scripts/ue_create_materials.py); "
+						                       "drape rendered without lights");
+						NightTexture = nullptr;
+					}
+					else
+					{
+						ImageryBase = NightBase;
+					}
+				}
+			}
+			if (!NightLightsNote.IsEmpty())
+			{
+				UE_LOG(LogFlightSimRender, Warning, TEXT("night lights: %s"),
+				       *NightLightsNote);
+			}
+		}
 		UMaterialInstanceDynamic* Instance =
 			UMaterialInstanceDynamic::Create(ImageryBase, World);
 		Instance->SetTextureParameterValue(TEXT("Imagery"), Texture);
+		if (NightTexture != nullptr)
+		{
+			Instance->SetTextureParameterValue(TEXT("NightLights"), NightTexture);
+			Instance->SetScalarParameterValue(TEXT("NightLuminance"),
+			                                  static_cast<float>(NightLuminance));
+		}
 		Material = Instance;
 	}
 	else if (Options.bClassifiedMaterial)
@@ -1278,6 +1332,38 @@ bool FFlightSimVisualScene::BuildGeoreferencedTerrain(
 	       Budget, *Terrain.Crs, Terrain.SnowlineMetres,
 	       Options.bClassifiedMaterial ? TEXT("yes") : TEXT("no"));
 	return true;
+}
+
+UTexture2D* FFlightSimVisualScene::LoadNightLights(const FString& SidecarPath,
+                                                   double& LuminanceNits)
+{
+	FString Text;
+	TSharedPtr<FJsonObject> Sidecar;
+	const TSharedPtr<FJsonObject>* TextureInfo = nullptr;
+	FString File;
+	if (!FFileHelper::LoadFileToString(Text, *SidecarPath) ||
+	    !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Sidecar) ||
+	    !Sidecar.IsValid() ||
+	    !Sidecar->TryGetObjectField(TEXT("texture"), TextureInfo) ||
+	    !(*TextureInfo)->TryGetStringField(TEXT("file"), File) ||
+	    !Sidecar->TryGetNumberField(TEXT("full_texel_luminance_nits"), LuminanceNits))
+	{
+		NightLightsNote = FString::Printf(
+			TEXT("sidecar '%s' unreadable or incomplete; no lights drawn"),
+			*SidecarPath);
+		return nullptr;
+	}
+	(*TextureInfo)->TryGetStringField(TEXT("sha256"), NightLightsSha256);
+	Sidecar->TryGetStringField(TEXT("attribution"), NightLightsAttribution);
+	const FString PngPath = FPaths::Combine(FPaths::GetPath(SidecarPath), File);
+	UTexture2D* Texture = FImageUtils::ImportFileAsTexture2D(PngPath);
+	if (Texture == nullptr)
+	{
+		NightLightsNote = FString::Printf(
+			TEXT("texture '%s' failed to load; no lights drawn"), *PngPath);
+		NightLightsSha256.Empty();
+	}
+	return Texture;
 }
 
 void FFlightSimVisualScene::ApplyManualExposure(USceneCaptureComponent2D* Capture,

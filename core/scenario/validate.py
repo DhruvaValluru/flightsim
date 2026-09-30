@@ -235,6 +235,21 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
                       f"turbulence composition), tornado (Rankine vortex)")
         )
 
+    # A time of day that cannot happen here (a sunset in polar day) or
+    # cannot be read refuses by name rather than rendering some other sky.
+    # "none" (unstated) is the default look and has no instant to check.
+    from ..sky.plan import SkyError, resolve_instant
+
+    try:
+        if str(spec.time_of_day.value) != "none":
+            resolve_instant(str(spec.time_of_day.value),
+                            str(spec.weather_date.value),
+                            float(spec.latitude.value),
+                            float(spec.longitude.value))
+    except (SkyError, ValueError) as exc:
+        report.violations.append(
+            Violation("environment.time_of_day", str(exc)))
+
     # -- cameras: the scene-free half (Camera Phase 1) -----------------
     # Imported here: core.capture.validate produces THIS module's
     # Violation type, so a module-scope import would be a cycle.

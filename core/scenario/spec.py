@@ -167,6 +167,10 @@ class ScenarioSpec:
     #: existing microburst + gust front + severe turbulence), or "tornado"
     #: (core.environment.tornado, a kinematic Rankine vortex).
     weather_event: Quantity
+    #: Time of day for the render's sky (core.sky.plan): a word ("dawn",
+    #: "sunset", "night", ...), "HH:MM" local mean solar time, or "HH:MMZ"
+    #: UTC, optionally ISO-date prefixed. Visual only.
+    time_of_day: Quantity
 
     name: str = "scenario"
     #: Retained for provenance only. Never re-parsed to reproduce a run.
@@ -294,6 +298,7 @@ class ScenarioSpec:
         ("environment", "surface"),
         ("environment", "weather_date"),
         ("environment", "weather_event"),
+        ("environment", "time_of_day"),
         ("run", "duration"),
         ("run", "rate"),
         ("run", "seed"),

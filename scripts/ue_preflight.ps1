@@ -193,6 +193,19 @@ if ($haveMaterials.Count -eq 2) {
                 (Join-Path $repo "scripts\ue_create_materials.py") +
                 "' -unattended -nopause -nosplash -stdout")
 }
+# Physical-sky materials (-sky=, a stated time of day): the moon, the star
+# discs and the night-lights drape. Physical-sky renders refuse without
+# the first two (a missing night-lights material only drops the lights,
+# recorded), and legacy renders need none, so their absence is reported,
+# not failed; the step above creates them (it skips existing assets).
+$skyMaterials = @("M_Moon", "M_StarEmissive", "M_TerrainImageryNight") |
+    Where-Object { -not (Test-Path (Join-Path $materials "$_.uasset")) }
+if ($skyMaterials.Count -eq 0) {
+    Say "physical-sky materials" "M_Moon + M_StarEmissive + M_TerrainImageryNight present"
+} else {
+    Say "physical-sky materials" ("missing " + ($skyMaterials -join ", ") +
+        " -- stated-time renders need them; re-run the step above")
+}
 
 # -- ffmpeg (clips only; a named refusal elsewhere, stated here early) ----
 $ffmpeg = Get-Command ffmpeg -ErrorAction SilentlyContinue

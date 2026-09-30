@@ -182,7 +182,7 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
                  telemetry=None, extra: Iterable[str] = (),
                  passes: Iterable[str] = (), calibration: bool = False,
                  sun_lux=None, accumulate=None, scene_document=None,
-                 quality: Optional[str] = None) -> List[str]:
+                 quality: Optional[str] = None, sky=None) -> List[str]:
     """The ORDERED argument list for the FlightSimRender commandlet,
     after the ``<editor> <project> -run=FlightSimBridge.FlightSimRender``
     tokens.
@@ -250,6 +250,11 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
     captures in the commandlet) after the sensing opt-ins; None or
     ``"measure"`` emits nothing, so every pinned list stands.
 
+    ``sky``: a physical-sky sidecar (``sky.json``, core/sky/plan.py). It
+    replaces ``-sun-elev= -sun-azim= -exposure-bias=`` with ``-sky=`` in
+    the same place (the commandlet's FlightSimSky reads sun, moon, stars
+    and EV100 from it); None leaves the list unchanged.
+
     Returns a new list every call. Behaviour byte-identical to the web
     app's pre-builder command for every flag it passed (pinned by
     ``tests/test_camera_spec.py`` and ``tests/test_render_flags.py``).
@@ -266,7 +271,9 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
         flags += ["-Visual", "-shot=showcase"]
     flags += [str(token) for token in inline]
     flags += [f"-fps={fps}", f"-width={width}", f"-height={height}"]
-    if not void:
+    if not void and sky is not None:
+        flags += [f"-sky={sky}", f"-fog-density={tod['fog_density']}"]
+    elif not void:
         flags += [f"-sun-elev={tod['sun_elev']}",
                   f"-sun-azim={tod['sun_azim']}",
                   f"-exposure-bias={tod['exposure_bias']}",
