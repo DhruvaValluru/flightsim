@@ -2,6 +2,7 @@
 
 #include "FlightSimCameraDirector.h"
 #include "FlightSimOrographic.h"
+#include "FlightSimSky.h"
 #include "FlightSimVisualScene.h"
 #include "FlightSimScenarioWorld.h"
 #include "FlightSimTelemetryRecorder.h"
@@ -418,6 +419,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	FParse::Value(*Params, TEXT("imagery="), ImagerySidecar);
 	double ExposureBias = 11.0;
 	FParse::Value(*Params, TEXT("exposure-bias="), ExposureBias);
+	// The physical sky (core/sky/plan.py): sun, moon, stars, clouds, EV100
+	// camera, Lumen + VSM, per-preset lens. Replaces -sun-*/-exposure-bias;
+	// absent, the calibrated legacy scene renders unchanged.
+	FString SkyPlanPath;
+	FParse::Value(*Params, TEXT("sky="), SkyPlanPath);
 	// Chase offset override, metres: a 747 framed at -170 m puts a Cessna
 	// eleven pixels wide; the harness knows the airframe, so it chooses.
 	FString ChaseSpec;
@@ -435,6 +441,26 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		return 1;
 	}
 	UE_LOG(LogFlightSimRender, Display, TEXT("RHI: %s"), GDynamicRHI->GetName());
+
+	FFlightSimSkyPlan SkyPlan;
+	const bool bPhysicalSky = !SkyPlanPath.IsEmpty();
+	if (bPhysicalSky)
+	{
+		FString SkyError;
+		if (!bVisual || bSunOverride || bAutoExposure)
+		{
+			UE_LOG(LogFlightSimRender, Error,
+			       TEXT("-sky needs -Visual and replaces -sun-elev/-sun-azim and "
+			            "-AutoExposure; refusing an ambiguous sky"));
+			return 1;
+		}
+		if (!FFlightSimSkyPlan::Load(SkyPlanPath, SkyPlan, SkyError))
+		{
+			UE_LOG(LogFlightSimRender, Error, TEXT("%s"), *SkyError);
+			return 1;
+		}
+		FFlightSimSky::EnableRendererFeatures();
+	}
 
 	FFlightSimScenarioCard Card;
 	FString Error;
@@ -516,6 +542,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			// in the manifest as the approximation they are.
 			SceneOptions.SunRotation =
 				FRotator(-SunElevationDeg, SunAzimuthDeg + 180.0, 0.0);
+		}
+		if (bPhysicalSky)
+		{
+			SceneOptions.SkyPlan = &SkyPlan;
 		}
 		if (!VisualScene.Build(World, SceneOptions, Error)) { return Fail(Error); }
 	}
@@ -795,7 +825,12 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// terrain and sky in shot, and §6.6's manual exposure so the image does
 	// not re-meter as the bright-ground fraction changes with bank.
 	Capture->FOVAngle = bVisual ? 55.0f : 24.0f;
-	if (bVisual && !bAutoExposure)
+	if (bPhysicalSky)
+	{
+		FFlightSimSky::ApplyPostProcess(Capture->PostProcessSettings, SkyPlan);
+		FFlightSimSky::ApplyShowFlags(Capture->ShowFlags);
+	}
+	else if (bVisual && !bAutoExposure)
 	{
 		FFlightSimVisualScene::ApplyManualExposure(Capture,
 			static_cast<float>(ExposureBias));
@@ -955,7 +990,11 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// Keeping them would put black rectangles at t=0 of every run. They are
 	// discarded rather than tolerated: a blank frame in the output is a failure
 	// below, and it has to stay one.
-	for (int32 i = 0; i < 2; ++i)
+	// The physical sky takes more: Lumen's radiance cache, the temporal AA
+	// history and the virtual shadow map pages all converge over frames,
+	// and a first kept frame mid-convergence would flicker into the clip.
+	const int32 WarmupCaptures = bPhysicalSky ? 16 : 2;
+	for (int32 i = 0; i < WarmupCaptures; ++i)
 	{
 		World->SendAllEndOfFrameUpdates();
 		FlushRenderingCommands();
@@ -1423,9 +1462,48 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	Scene->SetStringField(TEXT("shot"), Shot);
 	Scene->SetBoolField(TEXT("dynamic_shadows"), !bNoShadows);
 	Scene->SetBoolField(TEXT("aircraft_hidden"), bHideAircraft);
-	Scene->SetStringField(TEXT("exposure"), (bVisual && !bAutoExposure)
+	Scene->SetStringField(TEXT("exposure"), bPhysicalSky
+		? *FString::Printf(TEXT("manual physical camera, EV100 %.2f (f/%.1f, "
+		                        "1/%.0f s, ISO %.0f, bias %.2f)"),
+		                   SkyPlan.Ev100, SkyPlan.CameraFstop,
+		                   SkyPlan.CameraShutterPerSecond, SkyPlan.CameraIso,
+		                   SkyPlan.ExposureBias)
+		: (bVisual && !bAutoExposure)
 		? *FString::Printf(TEXT("manual, AutoExposureBias %.1f"), ExposureBias)
 		: TEXT("auto (default metering)"));
+	Scene->SetBoolField(TEXT("physical_sky"), bPhysicalSky);
+	if (bPhysicalSky)
+	{
+		// The plan itself (sky.json) is the full record; these are what the
+		// host actually built from it.
+		TSharedPtr<FJsonObject> SkyJson = MakeShared<FJsonObject>();
+		SkyJson->SetStringField(TEXT("plan"), SkyPlan.SourcePath);
+		SkyJson->SetStringField(TEXT("instant_utc"), SkyPlan.InstantUtc);
+		SkyJson->SetNumberField(TEXT("sun_azimuth_deg"), SkyPlan.SunAzimuthDeg);
+		SkyJson->SetNumberField(TEXT("sun_elevation_deg"), SkyPlan.SunElevationDeg);
+		SkyJson->SetNumberField(TEXT("sun_illuminance_lux"), SkyPlan.SunIlluminanceLux);
+		SkyJson->SetNumberField(TEXT("moon_azimuth_deg"), SkyPlan.MoonAzimuthDeg);
+		SkyJson->SetNumberField(TEXT("moon_elevation_deg"), SkyPlan.MoonElevationDeg);
+		SkyJson->SetNumberField(TEXT("moon_illuminated_fraction"),
+		                        SkyPlan.MoonIlluminatedFraction);
+		SkyJson->SetBoolField(TEXT("moon_above_horizon"), VisualScene.PhysicalSky.bMoonDrawn);
+		SkyJson->SetNumberField(TEXT("stars_drawn"), VisualScene.PhysicalSky.StarsDrawn);
+		SkyJson->SetBoolField(TEXT("clouds_drawn"), VisualScene.PhysicalSky.bCloudsDrawn);
+		SkyJson->SetStringField(TEXT("clouds_note"), VisualScene.PhysicalSky.CloudsNote);
+		SkyJson->SetNumberField(TEXT("ev100"), SkyPlan.Ev100);
+		SkyJson->SetStringField(TEXT("global_illumination"), TEXT("lumen"));
+		SkyJson->SetStringField(TEXT("reflections"), TEXT("lumen"));
+		SkyJson->SetStringField(TEXT("shadows"), TEXT("virtual shadow maps"));
+		SkyJson->SetStringField(TEXT("post_process"), SkyPlan.PostKind);
+		SkyJson->SetNumberField(TEXT("warmup_captures"), WarmupCaptures);
+		SkyJson->SetStringField(TEXT("night_lights_sha256"),
+		                        VisualScene.NightLightsSha256);
+		SkyJson->SetStringField(TEXT("night_lights_attribution"),
+		                        VisualScene.NightLightsAttribution);
+		SkyJson->SetStringField(TEXT("night_lights_note"),
+		                        VisualScene.NightLightsNote);
+		Scene->SetObjectField(TEXT("sky"), SkyJson);
+	}
 	if (bVisual && !TerrainPath.IsEmpty())
 	{
 		Scene->SetStringField(TEXT("terrain_sha256"), VisualScene.TerrainSha256);

@@ -276,6 +276,43 @@ def _weather_date(text: str) -> Quantity:
     return Quantity.default("none", frm="no date stated; spec wind as given")
 
 
+#: Time-of-day words -> the core.sky.plan word they mean, longest first
+#: so "afternoon" is not read as "noon" and "midnight" not as "night".
+TIME_OF_DAY_WORDS = (
+    ("golden hour", "golden hour"), ("afternoon", "afternoon"),
+    ("midnight", "midnight"), ("twilight", "twilight"),
+    ("sunrise", "sunrise"), ("daybreak", "dawn"), ("dawn", "dawn"),
+    ("sunset", "sunset"), ("evening", "golden hour"), ("dusk", "dusk"),
+    ("morning", "morning"), ("midday", "midday"), ("noon", "noon"),
+    ("night", "night"),
+)
+
+
+def _time_of_day(text: str) -> Quantity:
+    """Sun and sky for the render. A clock needs a colon or am/pm, so
+    "at 3000 m" stays an altitude; "Z"/"UTC" marks UTC, otherwise the
+    time is local mean solar time (no time-zone database, stated)."""
+    m = _search(r"\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", text)
+    if m:
+        hour = int(m.group(1)) % 12 + (12 if m.group(3) == "pm" else 0)
+        value = f"{hour:02d}:{int(m.group(2) or 0):02d}"
+        return Quantity.user(value, frm=f"{m.group(0).strip()} (local "
+                                        f"mean solar time)")
+    m = _search(r"\bat\s+(\d{1,2}):(\d{2})\s*(z|utc)?\b", text)
+    if m and int(m.group(1)) < 24 and int(m.group(2)) < 60:
+        suffix = "Z" if m.group(3) else ""
+        value = f"{int(m.group(1)):02d}:{m.group(2)}{suffix}"
+        return Quantity.user(value, frm=m.group(0).strip() + (
+            "" if suffix else " (local mean solar time)"))
+    for word, meaning in TIME_OF_DAY_WORDS:
+        if _search(rf"\b{word}\b", text):
+            return Quantity.inferred(
+                meaning, frm=f"{word!r}: sun, moon and stars for that "
+                             f"moment (visual only)")
+    return Quantity.default(
+        "noon", frm="no time stated; the calibrated noon look renders")
+
+
 def _turbulence(text: str) -> Quantity:
     for word, w20 in TURBULENCE_WORDS.items():
         if _search(rf"{word}\s+(?:turbulence|chop|air)", text) or (
@@ -435,6 +472,7 @@ def compile_prompt(prompt: str, name: Optional[str] = None) -> ScenarioSpec:
         surface=_surface(text),
         weather_date=_weather_date(text),
         weather_event=_weather_event(text),
+        time_of_day=_time_of_day(text),
     )
 
     camera = _camera(text, str(spec.aircraft.value),

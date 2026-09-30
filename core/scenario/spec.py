@@ -45,7 +45,12 @@ from .fields import Quantity, Source
 # The list is digest-relevant, so the version bump changes every digest
 # by design: version-5 dicts refuse by name; completed runs recover
 # from provenance.json, never by re-parsing.
-SPEC_VERSION = 6
+# 7 (2026-09-30): environment.time_of_day added (physical sky: sun, moon
+# and stars for the instant, EV100 exposure -- core.sky). VISUAL ONLY: it
+# never reaches the flight dynamics. A defaulted "noon" keeps the
+# calibrated noon look byte-identical; a stated time selects the physical
+# sky. Version-6 dicts refuse by name, as every bump before.
+SPEC_VERSION = 7
 
 
 @dataclass
@@ -84,6 +89,10 @@ class ScenarioSpec:
     #: existing microburst + gust front + severe turbulence), or "tornado"
     #: (core.environment.tornado, a kinematic Rankine vortex).
     weather_event: Quantity
+    #: Time of day for the render's sky (core.sky.plan): a word ("dawn",
+    #: "sunset", "night", ...), "HH:MM" local mean solar time, or "HH:MMZ"
+    #: UTC, optionally ISO-date prefixed. Visual only.
+    time_of_day: Quantity
 
     name: str = "scenario"
     #: Retained for provenance only. Never re-parsed to reproduce a run.
@@ -110,6 +119,7 @@ class ScenarioSpec:
         ("environment", "surface"),
         ("environment", "weather_date"),
         ("environment", "weather_event"),
+        ("environment", "time_of_day"),
         ("run", "duration"),
         ("run", "rate"),
         ("run", "seed"),
