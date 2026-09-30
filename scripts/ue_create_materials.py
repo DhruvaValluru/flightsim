@@ -865,7 +865,7 @@ def create_runway():
 
 # -- physical sky (-sky=, FLIGHTSIM_SKY=physical; core/sky/plan.py) --------
 
-def _new_material(name):
+def _sky_material(name):
     full = f"{PATH}/{name}"
     if unreal.EditorAssetLibrary.does_asset_exist(full):
         print(f"MATERIAL-EXISTS: {full}")
@@ -888,7 +888,7 @@ def create_moon():
     """Physical sky: the moon sphere. LIT, grey, fully rough -- the sun
     light shading it IS the phase, so it must not be unlit. "Albedo" is
     the plan's 0.12 (the moon's mean visual albedo)."""
-    material, full = _new_material("M_Moon")
+    material, full = _sky_material("M_Moon")
     if material is None:
         return
     lib = unreal.MaterialEditingLibrary
@@ -916,7 +916,7 @@ def create_star_emissive():
     times "Luminance" (cd/m^2, computed per magnitude bin by
     core/sky/plan.py) into emissive. Opaque so clouds and the
     atmosphere's aerial perspective apply to stars like to any surface."""
-    material, full = _new_material("M_StarEmissive")
+    material, full = _sky_material("M_StarEmissive")
     if material is None:
         return
     material.set_editor_property("shading_model",
@@ -945,7 +945,7 @@ def create_terrain_imagery_night():
     verified VIIRS drape (core/terrain/nightlights.py) on the SAME UV
     grid as "Imagery"; "NightLuminance" scales it to cd/m^2. A separate
     asset so the calibrated M_TerrainImagery renders stay untouched."""
-    material, full = _new_material("M_TerrainImageryNight")
+    material, full = _sky_material("M_TerrainImageryNight")
     if material is None:
         return
     lib = unreal.MaterialEditingLibrary

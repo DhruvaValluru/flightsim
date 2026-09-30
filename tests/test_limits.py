@@ -244,8 +244,24 @@ EXPECTED = {
 }
 
 
+#: Airframes whose table is present but not transcribed: every limit is
+#: null WITH its reason (no NATOPS limitations page on hand for the A-4),
+#: so it flies unmonitored and says why rather than on a guessed number.
+UNTRANSCRIBED = ("A4",)
+
+
+def test_an_untranscribed_table_states_each_absence_with_a_reason():
+    for aircraft in UNTRANSCRIBED:
+        t = load_limits(aircraft)
+        assert t is not None, aircraft
+        for key in LIMIT_KEYS:
+            limit = t.limit(key)
+            assert limit.value is None and limit.reason, (aircraft, key)
+            assert not limit.monitored, (aircraft, key)
+
+
 def test_every_configured_airframe_states_a_sourced_table():
-    assert sorted(EXPECTED) == configured_airframes()
+    assert sorted(set(EXPECTED) | set(UNTRANSCRIBED)) == configured_airframes()
     for aircraft, (category, nz_pos, nz_neg, speed, kind, m_mo) in EXPECTED.items():
         t = load_limits(aircraft)
         assert t is not None, aircraft

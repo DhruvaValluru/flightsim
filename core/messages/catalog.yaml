@@ -228,6 +228,18 @@ look.clouds:
 look.precipitation:
   sentence: "The precipitation named is not one the renderer draws; it draws none, rain or snow."
   hint: "Ask for none, rain or snow."
+environment.time_of_day:
+  sentence: "That time of day cannot be read, or does not happen at this place on this date (a sunset during the polar day, for example)."
+  hint: "Name another time, a clock time such as 18:30, or another date."
+sun.event_absent:
+  sentence: "The sun never reaches that point in the sky here on this date, so that time of day does not happen."
+  hint: "Choose another time of day or another date."
+sun.below_render_floor:
+  sentence: "At that time the sun is below the lowest sun the calibrated look can show, so the picture would be night."
+  hint: "Choose a daylight time, or turn on the physical sky (FLIGHTSIM_SKY=physical) for night."
+render.quality:
+  sentence: "The render quality asked for is not one the renderer knows; it knows measure and beauty."
+  hint: "Set FLIGHTSIM_RENDER_QUALITY to measure or beauty, or leave it unset."
 
 # -- the batch runner (core/dataset/batch.py) --------------------------------
 

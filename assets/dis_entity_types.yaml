@@ -40,6 +40,11 @@ airframes:
     siso_reference: "SISO-REF-010, Platform - Air, Civilian Fixed Wing Aircraft (Airbus), the row for the A320 family"
     entity_type: null
     reason: "entered from the standard, never guessed"
+  A4:
+    title: "Douglas A-4 Skyhawk (repository model A4, assets/fdm_root)"
+    siso_reference: "SISO-REF-010, Platform - Air, Attack/Strike (United States), the row for the A-4"
+    entity_type: null
+    reason: "entered from the standard, never guessed"
   B747:
     title: "Boeing 747 (JSBSim stock model B747)"
     siso_reference: "SISO-REF-010, Platform - Air, Civilian Fixed Wing Aircraft (Boeing), the row for the 747 family"

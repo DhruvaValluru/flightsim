@@ -103,11 +103,12 @@ def test_the_version_9_keys_are_the_ones_the_classes_carry():
     invented."""
     assert SPEC9_SCENE_FIELDS == SceneSpec.OPTIONAL_FIELDS
     assert SPEC9_CAMERA_FIELDS == tuple(SENSING_FIELDS) + tuple(PASS_FIELDS) + (IR_FIELD,)
-    assert SPEC9_ENVIRONMENT_FIELDS == ("precipitation_rate_mmh",)
+    assert SPEC9_ENVIRONMENT_FIELDS == ("precipitation_rate_mmh", "time_of_day")
     fields = ScenarioSpec.__dataclass_fields__
     for name in SPEC9_BLOCKS:
         assert name in fields, name
     assert "precipitation_rate_mmh" in fields
+    assert "time_of_day" in fields
 
 
 @pytest.mark.parametrize("name", sorted(SPEC8_DIGESTS))
