@@ -1045,6 +1045,63 @@ STORM_LOOK = {"sun_elev": 10.0, "sun_azim": 180.0, "exposure_bias": 9.6,
               "fog_density": 0.007}
 
 
+def exposure_bias_for(elevation_deg: float):
+    """(manual exposure bias, basis) for a sun at elevation_deg.
+
+    Linear between the two probe-calibrated looks (TIME_OF_DAY dawn at
+    its elevation, noon at its) and HELD at the nearer one outside that
+    span -- never extrapolated, and the basis says which. A calibrated
+    point is only a point: the in-between values are an interpolation
+    until a probe render at that elevation says otherwise (gotcha 7).
+    """
+    low, high = TIME_OF_DAY["dawn"], TIME_OF_DAY["noon"]
+    e0, b0 = low["sun_elev"], low["exposure_bias"]
+    e1, b1 = high["sun_elev"], high["exposure_bias"]
+    if elevation_deg <= e0:
+        return b0, (f"held at the dawn calibration ({b0:g} at {e0:g} deg); "
+                    f"below the probe-calibrated {e0:g}-{e1:g} deg span")
+    if elevation_deg >= e1:
+        return b1, (f"held at the noon calibration ({b1:g} at {e1:g} deg); "
+                    f"above the probe-calibrated {e0:g}-{e1:g} deg span")
+    fraction = (elevation_deg - e0) / (e1 - e0)
+    bias = round(b0 + fraction * (b1 - b0), 2)
+    return bias, (f"interpolated between the dawn ({b0:g} at {e0:g} deg) "
+                  f"and noon ({b1:g} at {e1:g} deg) calibrations")
+
+
+def sun_look(spec: ScenarioSpec) -> Optional[Dict]:
+    """The render look for the spec's stated time of day, or None.
+
+    None when no time of day is stated: the render command then stays
+    byte-identical to the documented default look (pinned by test).
+    Raises core.environment.sun.SunError -- by name -- when the event
+    does not happen there that day, or the sun would be below the
+    render floor. VISUAL ONLY: physics never reads any of this.
+    """
+    from datetime import date as date_
+
+    from core.environment.sun import require_renderable, resolve
+
+    time_of_day = str(spec.time_of_day.value)
+    if time_of_day == "none":
+        return None
+    stated_date = str(spec.weather_date.value)
+    day = None if stated_date == "none" else date_.fromisoformat(stated_date)
+    sun = resolve(time_of_day, float(spec.latitude.value),
+                  float(spec.longitude.value), day)
+    require_renderable(sun)
+    bias, bias_basis = exposure_bias_for(sun.elevation_deg)
+    return {
+        "sun_elev": round(sun.elevation_deg, 2),
+        "sun_azim": round(sun.azimuth_deg, 2),
+        "exposure_bias": bias,
+        "note": (f"sun {sun.elevation_deg:.1f} deg up at azimuth "
+                 f"{sun.azimuth_deg:.1f} deg ({sun.basis}; "
+                 f"{sun.when_utc.strftime('%H:%M')} UTC; NOAA solar "
+                 f"position); exposure bias {bias:g}, {bias_basis} (VISUAL)"),
+    }
+
+
 def _projected_origin(spec: ScenarioSpec, scene: Dict):
     """(origin_x, origin_y, scene_crs_for_card): the projected anchor of
     the local north/east frame every position-coupled block uses. Terrain
@@ -1395,6 +1452,16 @@ class RunManager:
         """Refuses (with the reason) or starts a run and returns its id."""
         from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
 
+        # The stated sun first: a dawn that never happens there that day,
+        # or a night the scene cannot show, is the SPEC's problem on any
+        # machine, so it refuses by name before the platform question.
+        from core.environment.sun import SunError
+
+        try:
+            sun_look(spec)
+        except SunError as exc:
+            return {"refused": str(exc), "constraint": exc.constraint}
+
         if not ue_available():
             # The named platform refusal, not a 500: every render gotcha
             # was measured on Metal/macOS only. The headless half (spec,
@@ -1509,6 +1576,11 @@ class RunManager:
             return
         scene = pick_scene(spec)
         run.scene = scene
+        # The render sun (visual plan V1). start() already refused a sun
+        # the scene cannot show, so this resolves; it is recomputed here
+        # rather than carried because it is a pure function of the spec.
+        sun = sun_look(spec)
+        sun_note = sun["note"] if sun else None
 
         derive_seed(spec, terrain_coupled=coupling_needs_seed(spec))
         project_for_ue_host(spec)
@@ -1673,6 +1745,11 @@ class RunManager:
             "physics_ground": scene["label"],
             **({"surface": surface_note} if surface_note else {}),
             **({"weather": event_note} if event_note else {}),
+            **({"sun": (f"time of day {spec.time_of_day.value!r} NOT "
+                        f"applied: the storm look is probe-calibrated as "
+                        f"a whole (sun, fog and exposure together)"
+                        if event_note else sun_note)}
+               if sun_note else {}),
         }
         card = write_run_card(
             spec, out / "card.json",
@@ -1716,7 +1793,7 @@ class RunManager:
                                         "sit inside the funnel)")
         if not self._render(card, frames, scene, mesh, aircraft,
                             telemetry=out / "telemetry.json",
-                            look=STORM_LOOK if event_note else None,
+                            look=STORM_LOOK if event_note else sun,
                             camera_flags=camera_flags):
             run.push("failed", "the render commandlet wrote no manifest; "
                                f"see {out / 'render.log'}")

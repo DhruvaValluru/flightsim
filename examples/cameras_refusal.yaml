@@ -4,7 +4,7 @@
 #   inside or on the scene's terrain.
 # A user-stated camera field is never silently moved to pass; edit the
 # spec (position_alt_m) and run again.
-spec_version: 6
+spec_version: 7
 name: cameras_refusal
 aircraft:
   aircraft:
@@ -75,6 +75,10 @@ environment:
     value: none
     source: default
     from: no severe weather requested
+  time_of_day:
+    value: none
+    source: default
+    from: no time of day stated; default render look
 run:
   duration:
     value: 12.0

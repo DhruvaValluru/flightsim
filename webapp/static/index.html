@@ -701,6 +701,11 @@ async function initAeroPanel(runId, run) {
       context.fillText(String(conditions.surface).slice(0, 58), 10, y);
       y += 14;
     }
+    if (conditions.sun) {
+      // Visual plan V1: the render sun from place + date + time, stated.
+      context.fillText(String(conditions.sun).slice(0, 58), 10, y);
+      y += 14;
+    }
     y += 6;
 
     // -- alpha / beta dials ----------------------------------------------
