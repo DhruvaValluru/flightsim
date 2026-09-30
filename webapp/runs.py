@@ -24,6 +24,8 @@ prompt cannot queue an hour of editor time; the cap is recorded in the run.
 from __future__ import annotations
 
 import json
+import math
+import os
 import subprocess
 import threading
 import time
@@ -1045,6 +1047,85 @@ STORM_LOOK = {"sun_elev": 10.0, "sun_azim": 180.0, "exposure_bias": 9.6,
               "fog_density": 0.007}
 
 
+def physical_sky_enabled(spec: ScenarioSpec) -> bool:
+    """Whether this render uses the physical sky (core.sky.plan).
+
+    A STATED time of day earns it; a defaulted "noon" keeps the calibrated
+    noon look byte-identical (gotcha 7's measured biases, the pinned
+    commandlet arguments). ``FLIGHTSIM_SKY=physical`` opts every render
+    in once a machine has measured it (experiments/sky_check.py);
+    ``FLIGHTSIM_SKY=legacy`` opts every render out.
+    """
+    override = os.environ.get("FLIGHTSIM_SKY", "").strip().lower()
+    if override == "legacy":
+        return False
+    if override == "physical":
+        return True
+    return str(spec.time_of_day.source) != "default"
+
+
+def night_lights_for(scene: Dict) -> Optional[Path]:
+    """The verified night-lights sidecar beside a curated scene's imagery
+    drape, fetching it once if missing. None (never an error) when the
+    scene has no drape to carry it or the fetch fails: the lights are an
+    unrequested embellishment, and the sky plan records their absence."""
+    if not scene.get("imagery") or scene.get("key") not in LOCATIONS:
+        return None
+    terrain_dir = Path(scene["terrain"]).parent
+    sidecar = terrain_dir / f"{scene['key']}_nightlights.json"
+    if sidecar.is_file():
+        return sidecar
+    try:
+        from core.terrain.nightlights import drape
+
+        return drape(LOCATIONS[scene["key"]], scene["terrain"],
+                     terrain_dir / "cache", terrain_dir)
+    except Exception:   # recorded as absent by the caller, never fatal
+        return None
+
+
+def write_sky_plan(spec: ScenarioSpec, scene: Dict, camera, out: Path,
+                   push=None) -> Path:
+    """Compute and write the run's sky.json (the -sky= sidecar)."""
+    from core.sky.plan import (
+        STARS_BELOW_SUN_ELEVATION_DEG, plan_sky, resolve_instant,
+    )
+    from core.sky import astro
+
+    try:
+        focal = float(camera.focal_length_mm.value)
+        sensor = float(camera.sensor_width_mm.value)
+        fov = math.degrees(2.0 * math.atan(sensor / (2.0 * focal)))
+        width = int(camera.width_px.value)
+        preset = str(camera.preset.value)
+    except (AttributeError, TypeError, ValueError, ZeroDivisionError):
+        fov, width, preset = 55.0, WIDTH, "chase"
+    lat, lon = float(spec.latitude.value), float(spec.longitude.value)
+    time_value = str(spec.time_of_day.value)
+    weather_date = str(spec.weather_date.value)
+
+    night = None
+    instant = resolve_instant(time_value, weather_date, lat, lon)
+    sun = astro.sun_position(instant.utc, lat, lon)
+    if sun.elevation_deg < STARS_BELOW_SUN_ELEVATION_DEG:
+        if push is not None and scene.get("imagery"):
+            push("sky", "night scene: preparing VIIRS night lights")
+        path = night_lights_for(scene)
+        night = ({"sidecar": str(path)} if path is not None else
+                 {"sidecar": None,
+                  "note": "no night lights: the scene has no imagery drape "
+                          "to carry them, or the NASA GIBS fetch failed"})
+    plan = plan_sky(time_value, weather_date, lat, lon,
+                    float(spec.altitude.value),
+                    float(spec.terrain_elevation.value),
+                    camera_preset=preset,
+                    weather_event=str(spec.weather_event.value),
+                    fov_deg=fov, width_px=width, night_lights=night)
+    path = out / "sky.json"
+    path.write_text(json.dumps(plan, indent=1), encoding="ascii")
+    return path
+
+
 def _projected_origin(spec: ScenarioSpec, scene: Dict):
     """(origin_x, origin_y, scene_crs_for_card): the projected anchor of
     the local north/east frame every position-coupled block uses. Terrain
@@ -1427,7 +1508,7 @@ class RunManager:
     def _render(card: Path, frames: Path, scene: Dict, mesh: Path,
                 aircraft: str, telemetry: Optional[Path] = None,
                 look: Optional[Dict] = None,
-                camera_flags=None) -> bool:
+                camera_flags=None, sky: Optional[Path] = None) -> bool:
         """The showcase render command, with terrain/imagery conditional.
 
         Same flags render_cell passes (gotcha 1: absolute paths, -stdout,
@@ -1437,6 +1518,8 @@ class RunManager:
         The camera flags come from the SPEC's cameras via
         camera_render_flags (default cameras when none stated -- pinned
         byte-identical to the old hardcoded selection).
+        ``sky``: a physical-sky sidecar (write_sky_plan). It replaces the
+        calibrated sun/exposure flags; absent, the command is unchanged.
         """
         project = REPO / "ue" / "FlightSim.uproject"
         frames.mkdir(parents=True, exist_ok=True)
@@ -1451,8 +1534,10 @@ class RunManager:
             "-Visual", "-shot=showcase",
             *inline,
             f"-fps={FPS}", f"-width={WIDTH}", f"-height={HEIGHT}",
-            f"-sun-elev={tod['sun_elev']}", f"-sun-azim={tod['sun_azim']}",
-            f"-exposure-bias={tod['exposure_bias']}",
+            *([f"-sky={sky}"] if sky is not None else [
+                f"-sun-elev={tod['sun_elev']}",
+                f"-sun-azim={tod['sun_azim']}",
+                f"-exposure-bias={tod['exposure_bias']}"]),
             f"-fog-density={(look or {}).get('fog_density', VISIBILITY['clear'])}",
             "-unattended", "-nopause", "-nosplash",
             "-stdout", "-FullStdOutLogOutput",
@@ -1690,6 +1775,20 @@ class RunManager:
             collision_terrain=str(collision) if collision else None,
             reference_speeds=reference,
         )
+        # The physical sky (stated time of day, or FLIGHTSIM_SKY): planned
+        # before provenance so its summary rides in the conditions.
+        sky = None
+        if physical_sky_enabled(spec):
+            sky = write_sky_plan(spec, scene,
+                                 (spec.cameras or default_cameras(spec))[0],
+                                 out, push=run.push)
+            plan = json.loads(sky.read_text(encoding="ascii"))
+            run.conditions["sky"] = (
+                f"physical sky at {plan['instant_utc']} "
+                f"({plan['time_basis']}): sun "
+                f"{plan['sun']['elevation_deg']:+.1f} deg, moon "
+                f"{plan['moon']['illuminated_fraction']:.0%} lit, EV100 "
+                f"{plan['exposure']['ev100']:+.1f}; clouds VISUAL ONLY")
         # Prompt/model provenance in a Python-written UTF-8 sidecar; the
         # UE-written manifest stays ASCII (gotcha 13).
         (out / "provenance.json").write_text(json.dumps({
@@ -1717,7 +1816,7 @@ class RunManager:
         if not self._render(card, frames, scene, mesh, aircraft,
                             telemetry=out / "telemetry.json",
                             look=STORM_LOOK if event_note else None,
-                            camera_flags=camera_flags):
+                            camera_flags=camera_flags, sky=sky):
             run.push("failed", "the render commandlet wrote no manifest; "
                                f"see {out / 'render.log'}")
             return

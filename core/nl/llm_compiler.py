@@ -243,6 +243,13 @@ FIELD_VALUE_SCHEMAS: Dict[str, Dict[str, Any]] = {
                        "date; that day's ERA5 reanalysis wind applies. "
                        "Never invent a date.",
     },
+    "time_of_day": {
+        "type": "string",
+        "description": "ONLY when the prompt states a time: one of dawn, "
+                       "sunrise, morning, noon, afternoon, golden hour, "
+                       "sunset, dusk, twilight, night, midnight; or HH:MM "
+                       "(local solar time) / HH:MMZ (UTC). Visual only.",
+    },
 }
 
 # The schema is generated FROM the spec's field list; a field added to one

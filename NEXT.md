@@ -506,3 +506,18 @@ the parity discipline, and the do-not-regress list)
     wall-cloud disc was removed (a 700 m disc at chase distance reads
     as a screen-filling artifact); funnel spin runs at the model's own
     core rate omega = v_max/r_core from SIM time (replay-identical).
+
+27. **The physical sky has never been rendered.** It was written
+    2026-09-30 on a Linux container with no engine: core/sky
+    (astropy-checked positions, pinned tests), the `-sky=` sidecar,
+    FlightSimSky.cpp, and M_Moon / M_StarEmissive / M_TerrainImageryNight.
+    On a render machine, in this order: `scripts/check_bridge_api.sh`
+    (its "engine surface the physical sky assumes" block lists every
+    engine symbol written from memory), then build, then re-run
+    `scripts/ue_create_materials.py` (it skips existing assets), then
+    `experiments/sky_check.py`. Only a STATED time of day selects it, so
+    default renders stay byte-identical. Flip `FLIGHTSIM_SKY=physical`
+    per machine once the sky check passes. Expect to calibrate these: the
+    night half-rate exposure rule, star disc size under TSR, and the
+    per-preset lens values. Change them in core/sky/plan.py by probe
+    render, not theory (gotcha 6).
