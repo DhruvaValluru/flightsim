@@ -44,6 +44,7 @@ AIRCRAFT_WORDS: Tuple[Tuple[str, str], ...] = (
     ("a320", "A320"), ("airbus", "A320"),
     ("f-16", "f16"), ("f16", "f16"),
     ("f-15", "f15"), ("f15", "f15"),
+    ("a-4", "A4"), ("a4", "A4"), ("skyhawk", "A4"),
 )
 
 #: Turbulence words -> MIL-F-8785C severity. The standard defines intensity by
@@ -160,7 +161,7 @@ def _airspeed(text: str) -> Tuple[Quantity, Quantity]:
 #: mattered. Values sit mid-envelope for each model.
 CRUISE_DEFAULT_KT: Dict[str, float] = {
     "B747": 250.0, "737": 250.0, "A320": 250.0, "global5000": 250.0,
-    "c172p": 100.0, "f16": 350.0, "f15": 350.0,
+    "c172p": 100.0, "f16": 350.0, "f15": 350.0, "A4": 350.0,
 }
 
 
