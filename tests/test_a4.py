@@ -90,3 +90,72 @@ def test_a4_rests_on_its_gear_at_the_models_static_attitude():
     assert abs(g("attitude/theta-deg") - 5.0) < 1.0
     assert abs(g("position/h-agl-ft") - 7.0) < 1.0
     assert all(g(f"gear/unit[{i}]/WOW") == 1.0 for i in range(3))
+
+
+# -- mesh <-> physics ------------------------------------------------------
+
+def test_mesh_extents_match_the_flight_models_contact_points():
+    """The decoded .mdl geometry against the FDM's own contact points.
+
+    Wingtip, tail top, tail end and main-gear bottom agree to about an inch;
+    the nose differs by the fixed refuelling probe, which the cfg's nose
+    scrape point leaves out."""
+    from assets_pipeline import a4_mesh_check as mc
+
+    m, r = mc.measure(), mc.fdm_reference()
+    for key in ("half_span_ft", "top_ft", "tail_end_ft", "bottom_ft"):
+        assert abs(m[key] - r[key]) < 0.2, (key, m[key], r[key])
+    assert 0.0 < m["nose_ft"] - r["nose_ft"] < 3.5   # the probe
+
+
+def test_mesh_wing_agrees_with_the_flight_models_reference_geometry():
+    from assets_pipeline import a4_mesh_check as mc
+
+    m = mc.measure()
+    fdm = FlightDynamics("A4")
+    area = fdm.props.get("metrics/Sw-sqft")
+    # planform from the wing surface hull (includes the root fairing)
+    assert abs(m["wing_area_ft2"] - area) / area < 0.05
+    # the aerodynamic reference point (AERORP) sits at the datum/CG; the
+    # mesh quarter-MAC must be within a foot of it
+    assert abs(m["wing_ac_long_ft"]) < 1.0
+
+
+# -- configuration and performance -----------------------------------------
+
+def test_a4_starts_airborne_with_gear_up_but_stock_aircraft_are_untouched():
+    a4 = FlightDynamics("A4")
+    a4.set_initial_conditions({"h-sl-ft": 10000.0, "vc-kts": 350.0})
+    assert a4.props.get("gear/gear-pos-norm") == 0.0
+    assert a4.props.get("gear/gear-cmd-norm") == 0.0
+
+    stock = FlightDynamics("f16")
+    stock.set_initial_conditions({"h-sl-ft": 10000.0, "vc-kts": 350.0})
+    assert stock.props.get("gear/gear-pos-norm") == 1.0   # JSBSim default
+
+    ground = FlightDynamics("A4")
+    ground.set_initial_conditions({"h-agl-ft": 7.0, "vc-kts": 0,
+                                   "terrain-elevation-ft": 0})
+    assert ground.props.get("gear/gear-pos-norm") == 1.0
+
+
+def test_a4_reaches_its_published_maximum_speed():
+    """aircraft.cfg quotes 585 kn. Clean and level at 1000 ft the model
+    trims at 550 kt CAS below full throttle and runs out of thrust before
+    620 kt, so its top speed is the published one to within a few percent.
+    (Measured 2026-09-30: 585 kt trims at 0.96 throttle; 620 does not.)"""
+
+    def trimmed_throttle(kt):
+        fdm = FlightDynamics("A4")
+        fdm.set_initial_conditions({"h-sl-ft": 1000.0, "vc-kts": kt,
+                                    "gamma-deg": 0.0})
+        fdm.start_engines()
+        fdm.trim()
+        return fdm.props.get("fcs/throttle-cmd-norm")
+
+    assert trimmed_throttle(550.0) < 0.95
+    try:
+        trimmed_throttle(620.0)
+    except Exception:
+        return
+    raise AssertionError("A4 trims at 620 kt CAS: faster than published")

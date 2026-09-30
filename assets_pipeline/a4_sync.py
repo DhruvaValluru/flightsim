@@ -13,7 +13,7 @@ capacity. What is NOT: the aerodynamic coefficients, which stay the stock
 Aeromatic set (the cfg has none). The .mdl vertex data was not used: its
 PV44 vertex layout is not decoded here, so the cfg is the link to the mesh.
 
-    python -m assets_pipeline.a4_sync          # regenerate assets/fdm_root
+    python -m assets_pipeline.a4_sync          # regenerate fdm_root + UE copy
     python -m assets_pipeline.a4_sync --check  # fail if committed files drift
 """
 
@@ -27,12 +27,15 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 CFG = REPO / "assets/aircraft_models/A4/SimObjects/Airplanes/A-4E/aircraft.cfg"
-TEMPLATE = (REPO / "ue/Plugins/JSBSimFlightDynamicsModel/Resources/JSBSim/"
-            "aircraft/A4/A4.xml")
-ENGINE_TEMPLATE = (REPO / "ue/Plugins/JSBSimFlightDynamicsModel/Resources/"
-                   "JSBSim/engine/J52.xml")
-THRUSTER_TEMPLATE = ENGINE_TEMPLATE.with_name("direct.xml")
+# Pristine stock inputs (the Aeromatic A4, its J52 and the direct thruster).
+TEMPLATES = REPO / "assets_pipeline" / "a4_templates"
+TEMPLATE = TEMPLATES / "A4_aeromatic.xml"
+ENGINE_TEMPLATE = TEMPLATES / "J52_aeromatic.xml"
+THRUSTER_TEMPLATE = TEMPLATES / "direct.xml"
+# The headless host reads OUT; the Unreal plugin carries its own JSBSim data
+# tree, so the same files are written there and the two hosts fly one airframe.
 OUT = REPO / "assets/fdm_root"
+UE_ROOT = REPO / "ue/Plugins/JSBSimFlightDynamicsModel/Resources/JSBSim"
 
 FT_IN = 12.0
 JET_A_LB_PER_GAL = 6.7
@@ -224,11 +227,14 @@ def build() -> dict:
     eng = eng.replace("Author:   Aero-Matic v 0.8",
                       "Author:   Aero-Matic v 0.8; thrust and TSFC from the "
                       "A-4E model's aircraft.cfg (J52-P-8A)")
-    return {OUT / "aircraft/A4/A4.xml": xml,
-            OUT / "engine/J52P8A.xml": eng,
-            OUT / "engine/direct.xml":
-                THRUSTER_TEMPLATE.read_text(encoding="utf-8"),
-            OUT / "systems/.gitkeep": ""}
+    thruster = THRUSTER_TEMPLATE.read_text(encoding="utf-8")
+    files = {OUT / "aircraft/A4/A4.xml": xml,
+             OUT / "engine/J52P8A.xml": eng,
+             OUT / "engine/direct.xml": thruster,
+             OUT / "systems/.gitkeep": "",
+             UE_ROOT / "aircraft/A4/A4.xml": xml,
+             UE_ROOT / "engine/J52P8A.xml": eng}
+    return files
 
 
 def main(argv=None) -> int:
