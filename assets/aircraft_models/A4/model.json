@@ -7,10 +7,10 @@
     "A-4E"
   ],
   "mesh_airframe": "Douglas A-4E Skyhawk (P3D v4.4 v1.03 exterior model)",
-  "visual_model_dir": "aircraft_models/A4/SimObjects/Airplanes/A-4E",
+  "visual_model_dir": "SimObjects/Airplanes/A-4E",
   "visual_model_format": "P3D/MSFS .mdl (RIFF PV44); not yet converted to a UE mesh",
   "license": {
-    "file": "aircraft_models/A4/NOTICE.txt",
+    "file": "NOTICE.txt",
     "repo": "https://github.com/dhruvavalluru/flightsim-a4-model",
     "commit": "4611813a1ae1047896029e2ceca793b034409418"
   },
