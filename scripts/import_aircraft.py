@@ -79,7 +79,9 @@ def main(argv=None) -> int:
         # One aircraft's failure must not cost the others their fetch and
         # convert: report it at the end, by name, and keep going.
         try:
-            fetch_source(load_config(name), configs[name], report)
+            config = load_config(name)
+            if config.get("converter") != "mdl":   # local models need no fetch
+                fetch_source(config, configs[name], report)
             manifests.append(convert(configs[name], report))
         except Exception as exc:
             print(f"    FAILED for {name} ({exc}) -- continuing with the rest")

@@ -153,8 +153,13 @@ def convert(config_path: Path, report: Report = print) -> Path:
     """Source tree -> per-part OBJs + manifest. Raises if nothing lands."""
     name = config_path.stem
     report("converting (license-verified, FDM-matched)")
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    # A model that lives in this repository (P3D .mdl) has its own converter;
+    # everything else is a FlightGear tree.
+    script = ("a4_mdl_convert.py" if config.get("converter") == "mdl"
+              else "convert.py")
     converted = subprocess.run(
-        [sys.executable, str(REPO / "assets_pipeline" / "convert.py"),
+        [sys.executable, str(REPO / "assets_pipeline" / script),
          str(config_path)], cwd=REPO)
     manifest = mesh_manifest_path(name)
     if converted.returncode != 0 or not manifest.is_file():
@@ -236,7 +241,8 @@ def ensure_model(name: str, report: Report = print) -> Path:
     if not manifest.is_file():
         config = json.loads(config_path.read_text(encoding="utf-8"))
         try:
-            fetch_source(config, config_path, report)
+            if config.get("converter") != "mdl":   # local models need no fetch
+                fetch_source(config, config_path, report)
         except subprocess.CalledProcessError as exc:
             raise AircraftAssetError(
                 "aircraft.mesh_import",
