@@ -103,7 +103,7 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 	Sun->SetActorRotation(Options.SunRotation);
 	UDirectionalLightComponent* SunLight =
 		Cast<UDirectionalLightComponent>(Sun->GetLightComponent());
-	SunLight->SetIntensity(8.0f);
+	SunLight->SetIntensity(Options.SunIntensity);
 	SunLight->SetAtmosphereSunLight(true);
 	SunLight->SetCastShadows(Options.bDynamicShadows);
 	// No Nanite in a procedural-mesh scene, so per §6.6's own fallback this
@@ -581,4 +581,13 @@ void FFlightSimVisualScene::ApplyManualExposure(USceneCaptureComponent2D* Captur
 	Settings.AutoExposureMethod = EAutoExposureMethod::AEM_Manual;
 	Settings.bOverride_AutoExposureBias = true;
 	Settings.AutoExposureBias = Bias;
+}
+
+void FFlightSimVisualScene::ApplyBeautyPostProcess(USceneCaptureComponent2D* Capture)
+{
+	FPostProcessSettings& Settings = Capture->PostProcessSettings;
+	Settings.bOverride_DynamicGlobalIlluminationMethod = true;
+	Settings.DynamicGlobalIlluminationMethod = EDynamicGlobalIlluminationMethod::Lumen;
+	Settings.bOverride_ReflectionMethod = true;
+	Settings.ReflectionMethod = EReflectionMethod::Lumen;
 }

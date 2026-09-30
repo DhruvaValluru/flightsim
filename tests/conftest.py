@@ -21,3 +21,11 @@ def pytest_runtest_setup(item):
     # deleted, never loosened, never ad-hoc ifs.
     if item.get_closest_marker("mac_ue") and not is_mac():
         pytest.skip("requires macOS UE host (README 'Platform support')")
+
+
+@pytest.fixture(autouse=True)
+def _measured_render_quality(monkeypatch):
+    # The render-command pins (camera, quality) describe the MEASURED
+    # configuration; a developer's own FLIGHTSIM_RENDER_QUALITY=beauty
+    # must not turn them red. Tests that want beauty set it themselves.
+    monkeypatch.delenv("FLIGHTSIM_RENDER_QUALITY", raising=False)

@@ -20,6 +20,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/World.h"
+#include "HAL/IConsoleManager.h"
 #include "ImageUtils.h"
 #include "GeoReferencingSystem.h"
 #include "Misc/FileHelper.h"
@@ -348,15 +349,45 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		UE_LOG(LogFlightSimRender, Error,
 		       TEXT("usage: -run=FlightSimBridge.FlightSimRender ")
 		       TEXT("-scenario=<run-card.json> -frames=<out-dir> [-fps=5] "
-		            "[-width=960] [-height=540]"));
+		            "[-width=960] [-height=540] [-quality=measure|beauty] "
+		            "[-warmup=N] [-sun-lux=I]"));
 		return 1;
 	}
+	// Visual plan V0. "measure" is every render this project has
+	// measured, unchanged: same resolution default, same two warm-up
+	// captures, engine-default GI/reflections/AA/shadows. "beauty" turns
+	// on the modern renderer per capture (Lumen GI + reflections as
+	// post-process overrides, TSR, virtual shadow maps), a 1080p default
+	// and a longer warm-up so temporal history converges before frame 0.
+	// Beauty is NOT a measured configuration until Gate 6 passes under it
+	// on the rendering machine (experiments/gate6_visual.py --quality
+	// beauty); the manifest says which one produced the frames.
+	FString Quality = TEXT("measure");
+	FParse::Value(*Params, TEXT("quality="), Quality);
+	if (Quality != TEXT("measure") && Quality != TEXT("beauty"))
+	{
+		UE_LOG(LogFlightSimRender, Error,
+		       TEXT("-quality=%s is not one of measure, beauty"), *Quality);
+		return 1;
+	}
+	const bool bBeauty = Quality == TEXT("beauty");
 	double FramesPerSecond = 5.0;
-	int32 Width = 960;
-	int32 Height = 540;
+	int32 Width = bBeauty ? 1920 : 960;
+	int32 Height = bBeauty ? 1080 : 540;
 	FParse::Value(*Params, TEXT("fps="), FramesPerSecond);
 	FParse::Value(*Params, TEXT("width="), Width);
 	FParse::Value(*Params, TEXT("height="), Height);
+	// Discarded warm-up captures (see the loop before the first frame).
+	// Two is the measured minimum for a non-blank frame and is a floor:
+	// fewer would put black frames into the run. Beauty wants more, so
+	// TSR and Lumen have history before anything is kept.
+	int32 WarmupCaptures = bBeauty ? 16 : 2;
+	FParse::Value(*Params, TEXT("warmup="), WarmupCaptures);
+	WarmupCaptures = FMath::Max(WarmupCaptures, 2);
+	// Sun intensity override (engine units; see FFlightSimVisualSceneOptions).
+	double SunIntensity = 8.0;
+	const bool bSunIntensityOverride =
+		FParse::Value(*Params, TEXT("sun-lux="), SunIntensity);
 
 	// Gate 6 controls. -Visual builds the §6.6 scene; the A/B switches exist
 	// so the harness can null-test shadows and the aircraft's presence, and
@@ -479,6 +510,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		SceneOptions.TerrainPath = TerrainPath;
 		SceneOptions.bDynamicShadows = !bNoShadows;
 		SceneOptions.FogDensity = static_cast<float>(FogDensity);
+		SceneOptions.SunIntensity = static_cast<float>(SunIntensity);
 		if (bGeorefTerrain)
 		{
 			SceneOptions.bGeoreferenced = true;
@@ -804,6 +836,41 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		Capture->ShowFlags.SetDynamicShadows(false);
 	}
+	// Beauty's renderer switches. GI and reflections are per-view
+	// overrides on this capture; AA and the shadow method are renderer
+	// cvars, set by code for this process only (a commandlet run is one
+	// render) and read BACK for the manifest, so the record states what
+	// the renderer was actually set to rather than what was asked for.
+	int32 AntiAliasingMethod = -1;
+	int32 VirtualShadowMaps = -1;
+	auto ReadCvar = [](const TCHAR* Name) -> int32
+	{
+		IConsoleVariable* Variable =
+			IConsoleManager::Get().FindConsoleVariable(Name);
+		return Variable != nullptr ? Variable->GetInt() : -1;
+	};
+	if (bVisual && bBeauty)
+	{
+		FFlightSimVisualScene::ApplyBeautyPostProcess(Capture);
+		auto SetCvar = [](const TCHAR* Name, int32 Value)
+		{
+			if (IConsoleVariable* Variable =
+				IConsoleManager::Get().FindConsoleVariable(Name))
+			{
+				Variable->Set(Value, ECVF_SetByCode);
+			}
+			else
+			{
+				UE_LOG(LogFlightSimRender, Warning,
+				       TEXT("renderer cvar %s not found on this build; the "
+				            "manifest records -1 for it"), Name);
+			}
+		};
+		SetCvar(TEXT("r.AntiAliasingMethod"), 4);       // TSR
+		SetCvar(TEXT("r.Shadow.Virtual.Enable"), 1);    // VSM
+	}
+	AntiAliasingMethod = ReadCvar(TEXT("r.AntiAliasingMethod"));
+	VirtualShadowMaps = ReadCvar(TEXT("r.Shadow.Virtual.Enable"));
 	if (bHideAircraft)
 	{
 		Capture->HiddenActors.Add(Scenario.Aircraft);
@@ -955,7 +1022,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// Keeping them would put black rectangles at t=0 of every run. They are
 	// discarded rather than tolerated: a blank frame in the output is a failure
 	// below, and it has to stay one.
-	for (int32 i = 0; i < 2; ++i)
+	for (int32 i = 0; i < WarmupCaptures; ++i)
 	{
 		World->SendAllEndOfFrameUpdates();
 		FlushRenderingCommands();
@@ -1423,6 +1490,15 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	Scene->SetStringField(TEXT("shot"), Shot);
 	Scene->SetBoolField(TEXT("dynamic_shadows"), !bNoShadows);
 	Scene->SetBoolField(TEXT("aircraft_hidden"), bHideAircraft);
+	// Visual plan V0: which renderer configuration produced these frames.
+	// Numbers and ASCII only (gotcha 13).
+	Scene->SetStringField(TEXT("render_quality"), Quality);
+	Scene->SetNumberField(TEXT("warmup_captures"), WarmupCaptures);
+	Scene->SetNumberField(TEXT("cvar_anti_aliasing_method"), AntiAliasingMethod);
+	Scene->SetNumberField(TEXT("cvar_virtual_shadow_maps"), VirtualShadowMaps);
+	Scene->SetStringField(TEXT("gi_reflections"), (bVisual && bBeauty)
+		? TEXT("Lumen GI + Lumen reflections (capture post-process override)")
+		: TEXT("engine default (no override)"));
 	Scene->SetStringField(TEXT("exposure"), (bVisual && !bAutoExposure)
 		? *FString::Printf(TEXT("manual, AutoExposureBias %.1f"), ExposureBias)
 		: TEXT("auto (default metering)"));
@@ -1463,6 +1539,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	if (bVisual)
 	{
 		Scene->SetNumberField(TEXT("fog_density"), FogDensity);
+		Scene->SetNumberField(TEXT("sun_intensity"), SunIntensity);
+		Scene->SetBoolField(TEXT("sun_intensity_override"), bSunIntensityOverride);
 		if (bSunOverride)
 		{
 			Scene->SetNumberField(TEXT("sun_elevation_deg"), SunElevationDeg);
