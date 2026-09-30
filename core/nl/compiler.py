@@ -484,13 +484,7 @@ def _time_of_day(text: str) -> Quantity:
     MEANS -- solar vs UTC, which elevation "dawn" is -- is fixed in
     core.environment.sun and recorded with the run.
     """
-    match = _search(r"\b(?:at\s+)?([01]?\d|2[0-3]):([0-5]\d)\s*(z|utc)?\b",
-                    text)
-    if match:
-        hour, minute, zone = match.groups()
-        value = sun_model.canonical_time_of_day(
-            f"{hour}:{minute}" + (" utc" if zone else ""))
-        return Quantity.user(value, frm=match.group(0).strip())
+    # am/pm first: the 24-hour pattern would read "6:30 pm" as 06:30.
     match = _search(r"\b(?:at\s+)?(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*(am|pm)\b",
                     text)
     if match:
@@ -498,6 +492,13 @@ def _time_of_day(text: str) -> Quantity:
         hour = int(hour) % 12 + (12 if half.lower() == "pm" else 0)
         value = sun_model.canonical_time_of_day(
             f"{hour}:{minute or '00'}")
+        return Quantity.user(value, frm=match.group(0).strip())
+    match = _search(r"\b(?:at\s+)?([01]?\d|2[0-3]):([0-5]\d)\s*(z|utc)?\b",
+                    text)
+    if match:
+        hour, minute, zone = match.groups()
+        value = sun_model.canonical_time_of_day(
+            f"{hour}:{minute}" + (" utc" if zone else ""))
         return Quantity.user(value, frm=match.group(0).strip())
     for phrase in TIME_OF_DAY_WORDS:
         match = _search(rf"\b{phrase}\b", text)

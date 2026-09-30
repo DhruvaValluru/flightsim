@@ -41,6 +41,38 @@ sits beside v6. The engine side is C++ written and pinned by source tests
 but not compiled here; what is measured and what waits for Windows is in
 [docs/ADVANCEMENTS_REPORT.md](docs/ADVANCEMENTS_REPORT.md).
 
+**`phase-2-testing` (2026-09-30): every Phase 2 branch in one.** This
+branch is `phase2` (the pipeline and the advancement addition above) with
+three later branches merged in:
+
+* **The A-4 Skyhawk**: a JSBSim flight model generated from, and calibrated
+  against, the visual model's `aircraft.cfg`. It adds flaps, hook and
+  stores, starts with the gear up when airborne, and renders the decoded
+  P3D `.mdl` (`assets/aircraft_models/A4/`, `docs/A4_SYNC.md`).
+* **Time of day** (`environment.time_of_day`, spec 9, optional): say
+  "at sunset", "golden hour", "at 6:30 pm" or "at 21:15Z". The render's
+  sun is placed for that place and date (NOAA solar position), and
+  exposure is interpolated between the calibrated dawn and noon looks.
+* **Opt-in render upgrades**, both written without a UE build and so
+  unmeasured until `experiments/gate6_visual.py --quality beauty` /
+  `experiments/sky_check.py` pass on your Windows machine:
+  `FLIGHTSIM_RENDER_QUALITY=beauty` (Lumen GI + reflections, TSR, virtual
+  shadow maps, 1080p) and `FLIGHTSIM_SKY=physical` (the physical sky
+  below).
+
+Run it on Windows (PowerShell, no clone needed):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/DhruvaValluru/flightsim/phase-2-testing/scripts/deploy_windows.ps1))) -Branch phase-2-testing
+```
+
+Or, from a clone: `git checkout phase-2-testing`, `.\scripts\setup.ps1`,
+then `.\.venv\Scripts\python.exe -m uvicorn webapp.server:app --port 8008`.
+For rendered frames, follow "Rendering video clips" below. After pulling
+this branch, rebuild the UE host (`.\scripts\build_ue.ps1`) and re-run
+`scripts/ue_create_materials.py`, because the merge added C++ and
+materials.
+
 ## Quick start (any machine, ~2 minutes)
 
 ```bash
@@ -178,8 +210,9 @@ for priming a machine ahead of time rather than prerequisites.
   starts and fails fails the run by name (`aircraft.mesh_import`); it
   never falls through to blocks.
 
-**Physical sky (time of day).** Say *when* ("at sunset", "at night",
-"at 6:30 pm", "at 21:15Z") and the render uses a physical sky:
+**Physical sky (opt-in: `FLIGHTSIM_SKY=physical`).** With the variable
+set for the server process, a render uses the physical sky for the
+spec's time of day (noon when none is stated):
 
 * the true sun, moon (with its phase) and Hipparcos stars for that place
   and instant;
@@ -189,8 +222,10 @@ for priming a machine ahead of time rather than prerequisites.
 * per-camera lens character;
 * at night on curated places, VIIRS night lights.
 
-Without a stated time, the calibrated noon look renders unchanged. The
-physical sky has not yet been measured on a rendering machine. Run
+Without the variable, a stated time of day moves the calibrated look's
+sun (a night refuses by name as `sun.below_render_floor`), and no stated
+time renders the calibrated noon look unchanged. The physical sky has
+not yet been measured on a rendering machine. Run
 `experiments/sky_check.py` after building. See docs/VALIDITY.md §2.10d.
 
 Materials come from `scripts/ue_create_materials.py` (run inside

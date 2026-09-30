@@ -196,7 +196,7 @@ def test_post_processing_is_per_camera_kind():
     ("fly the c172p in the evening", "golden hour", "inferred"),
     ("fly the c172p at 6:30 pm", "18:30", "user"),
     ("fly the c172p at 21:15z", "21:15Z", "user"),
-    ("fly the c172p at 3000 m", "noon", "default"),
+    ("fly the c172p at 3000 m", "none", "default"),
 ])
 def test_the_parser_reads_time_of_day(prompt, value, source):
     spec = compile_prompt(prompt)
@@ -218,12 +218,16 @@ def test_an_impossible_time_is_a_validation_violation():
 # -- the web app's wiring ---------------------------------------------------
 
 
-def test_only_a_stated_time_or_the_env_selects_the_physical_sky(monkeypatch):
+def test_only_the_env_selects_the_physical_sky(monkeypatch):
+    # Opt-in until FlightSimSky is built and measured: a stated time
+    # alone drives the calibrated look's sun (webapp.runs.sun_look).
     from webapp.runs import physical_sky_enabled
 
     monkeypatch.delenv("FLIGHTSIM_SKY", raising=False)
     assert not physical_sky_enabled(compile_prompt("fly the c172p"))
     stated = compile_prompt("fly the c172p at dusk")
+    assert not physical_sky_enabled(stated)
+    monkeypatch.setenv("FLIGHTSIM_SKY", "physical")
     assert physical_sky_enabled(stated)
     monkeypatch.setenv("FLIGHTSIM_SKY", "legacy")
     assert not physical_sky_enabled(stated)

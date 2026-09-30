@@ -1300,6 +1300,22 @@ REGISTRY = Registry((
                    "invariance on lat_deg and lon_deg); its render-side effect is "
                    "scene.world's moon and stars predictions with their Windows clauses",
         u_input_rule=UInputRule(note="words and a moment: no bin, no spread")),
+    # -- visual plan V1 / the physical sky: the render's time of day. A
+    #    look variable like scene.night: it never reaches an equation of
+    #    motion, so its pair is a bounded invariance on the columns its
+    #    producer reads (the origin), and its effect is the render's sun.
+    VariableRecord(
+        name="environment.time_of_day", spec_path="environment.time_of_day",
+        unit="word or HH:MM[Z]",
+        effect_channels=(EffectChannel("lat_deg", "deg"), EffectChannel("lon_deg", "deg")),
+        null_value="none",
+        null_basis="'none': the harness's calibrated noon look (core/render/flags.py "
+                   "DEFAULT_LOOK); a stated time reads the origin and date and moves no "
+                   "recorded column (a bounded invariance on lat_deg and lon_deg); its "
+                   "render-side effect is the sun's elevation and azimuth "
+                   "(core/environment/sun.py, or core/sky/plan.py under "
+                   "FLIGHTSIM_SKY=physical)",
+        u_input_rule=UInputRule(note="a word or a clock time: no bin, no spread")),
     VariableRecord(
         name="environment.precipitation_rate_mmh",
         spec_path="environment.precipitation_rate_mmh", unit="mm/h",

@@ -100,6 +100,9 @@ RECORD = ("record.null_tests", "record.convergence", "record.sensitivity_pairs")
 #: invariance on recorded columns, and the world record (an observer: no
 #: spec field; its null tests are the render-side predictions).
 WORLD_LOOK = ("scene.night", "environment.precipitation_rate_mmh", "scene.world")
+#: The render's time of day (visual plan V1 / the physical sky): an
+#: optional environment field outside FIELD_ORDER, a bounded invariance.
+TIME_OF_DAY = ("environment.time_of_day",)
 
 
 def _entry(**overrides):
@@ -117,7 +120,9 @@ def test_every_batch_1_variable_and_every_physics_variable_is_registered():
                                      | set(LOADING) | set(FAILURES) | set(FAILURE_KINDS)
                                      | set(ICING) | set(ICING_FACTORS) | set(DIS) | set(WAKE)
                                      | set(SCENE) | set(SENSING) | set(PASSES) | set(RUNWAY)
-                                     | set(INSTRUMENTS) | set(RECORD) | set(WORLD_LOOK))
+                                     | set(INSTRUMENTS) | set(RECORD) | set(WORLD_LOOK)
+                                     | set(TIME_OF_DAY))
+    assert REGISTRY.get("environment.time_of_day").null_value == "none"
     for name in INSTRUMENTS + RECORD:
         entry = REGISTRY.get(name)
         assert entry.spec_path == name and entry.null_value is not NO_NULL
@@ -254,7 +259,7 @@ def test_every_batch_1_variable_and_every_physics_variable_is_registered():
         | {f"instruments.{f}" for f in InstrumentsSpec.FIELD_ORDER}
         | {f"record.{f}" for f in RecordSpec.FIELD_ORDER}
         | {f"{sec}.{n}" for sec, n in ScenarioSpec.FIELD_ORDER if sec == "environment"}
-        | {"environment.precipitation_rate_mmh"})
+        | {"environment.precipitation_rate_mmh", "environment.time_of_day"})
     # W3: scene.world is an observer (no spec field, no spec null).
     assert REGISTRY.get("scene.world").spec_path is None
     assert REGISTRY.get("scene.world").null_value is NO_NULL
