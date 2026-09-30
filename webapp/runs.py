@@ -24,6 +24,7 @@ prompt cannot queue an hour of editor time; the cap is recorded in the run.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import threading
 import time
@@ -1045,6 +1046,28 @@ STORM_LOOK = {"sun_elev": 10.0, "sun_azim": 180.0, "exposure_bias": 9.6,
               "fog_density": 0.007}
 
 
+#: Render quality presets (visual plan V0). "measure" is the configuration
+#: every gate and showcase calibration was measured under; "beauty" turns
+#: on Lumen/TSR/VSM in the commandlet at 1080p and is opt-in via
+#: FLIGHTSIM_RENDER_QUALITY=beauty until Gate 6 passes under it on the
+#: rendering machine (experiments/gate6_visual.py --quality beauty).
+RENDER_QUALITIES = {
+    "measure": None,
+    "beauty": {"width": 1920, "height": 1080},
+}
+
+
+def render_quality() -> str:
+    """The configured render quality; ValueError names an unknown one."""
+    quality = os.environ.get("FLIGHTSIM_RENDER_QUALITY", "measure").strip() \
+        or "measure"
+    if quality not in RENDER_QUALITIES:
+        raise ValueError(
+            f"FLIGHTSIM_RENDER_QUALITY={quality!r} is not one of "
+            f"{sorted(RENDER_QUALITIES)}")
+    return quality
+
+
 def exposure_bias_for(elevation_deg: float):
     """(manual exposure bias, basis) for a sun at elevation_deg.
 
@@ -1452,6 +1475,10 @@ class RunManager:
         """Refuses (with the reason) or starts a run and returns its id."""
         from core.util.platform import UE_PLATFORM_REFUSAL, ue_available
 
+        try:
+            render_quality()
+        except ValueError as exc:
+            return {"refused": str(exc), "constraint": "render.quality"}
         # The stated sun first: a dawn that never happens there that day,
         # or a night the scene cannot show, is the SPEC's problem on any
         # machine, so it refuses by name before the platform question.
@@ -1509,6 +1536,10 @@ class RunManager:
         frames.mkdir(parents=True, exist_ok=True)
         (frames / "render.json").unlink(missing_ok=True)
         tod = look or TIME_OF_DAY["noon"]
+        quality = render_quality()
+        preset = RENDER_QUALITIES[quality]
+        width, height = ((preset["width"], preset["height"]) if preset
+                         else (WIDTH, HEIGHT))
         inline, trailing = camera_flags or (
             [f"-chase={WEBAPP_CHASE.get(aircraft, '-110:0:12')}",
              "-camera=chase"], [])
@@ -1517,7 +1548,7 @@ class RunManager:
             f"-scenario={card}", f"-frames={frames}",
             "-Visual", "-shot=showcase",
             *inline,
-            f"-fps={FPS}", f"-width={WIDTH}", f"-height={HEIGHT}",
+            f"-fps={FPS}", f"-width={width}", f"-height={height}",
             f"-sun-elev={tod['sun_elev']}", f"-sun-azim={tod['sun_azim']}",
             f"-exposure-bias={tod['exposure_bias']}",
             f"-fog-density={(look or {}).get('fog_density', VISIBILITY['clear'])}",
@@ -1526,6 +1557,10 @@ class RunManager:
             "-RenderOffScreen", "-AllowCommandletRendering",
         ]
         command += list(trailing)
+        if preset:
+            # Only when opted in: the measure command stays byte-identical
+            # to the pre-V0 build (pinned by test).
+            command += [f"-quality={quality}"]
         if scene.get("terrain"):
             command += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
         if scene.get("imagery"):

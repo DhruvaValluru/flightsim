@@ -3,6 +3,28 @@
 **Fresh session? Read docs/CONTEXT_SCENE_DIRECTOR_SESSION.md and
 docs/CONTEXT_PHASE8B_SESSION.md first**, then this file's gotchas 1-26.
 
+**Visual fidelity V0 + V1 (2026-09-30 -- docs/VISUAL_FIDELITY_PLAN.md
+is the plan, section 8 the status).** V1: the render sun is now
+geometry, not a table -- core/environment/sun.py (NOAA equations, pinned
+to pvlib's NREL SPA within 0.02 deg), new spec field
+environment.time_of_day (SPEC_VERSION 7; named times, HH:MM local SOLAR
+time, HH:MMZ UTC), both compilers read it, the webapp turns it into
+-sun-elev/-sun-azim + an exposure bias interpolated between the dawn and
+noon probe calibrations (held, never extrapolated, outside them) and
+refuses sun.event_absent / sun.below_render_floor by name. No time
+stated = the default look byte-identical. V0: -quality=measure|beauty
+on the render commandlet (measure = unchanged; beauty = Lumen GI +
+reflections as capture post-process overrides, TSR and VSM cvars,
+1080p, 16 warm-up captures, all read back into render.json), -warmup=N,
+-sun-lux=; FLIGHTSIM_RENDER_QUALITY=beauty opts the webapp in;
+gate6_visual.py --quality beauty re-measures Gate 6 at 960x540 under
+beauty. MUST-VERIFY ON THE RENDER MACHINE: none of the V0 C++ has been
+compiled or rendered (written on a Linux container without UE). Build,
+run gate6_visual.py (measure: must still pass unchanged) and
+gate6_visual.py --quality beauty; read render.json's
+cvar_anti_aliasing_method / cvar_virtual_shadow_maps and LOOK at the
+frames to see whether Lumen actually runs inside the scene capture.
+
 **Camera Phase 1 (2026-08-31 -- docs/CAMERA_PHASE1_REPORT.md is the
 full report).** The camera is a spec element now: SPEC_VERSION 6,
 cameras as provenanced CameraSpec blocks (core/scenario/camera.py),

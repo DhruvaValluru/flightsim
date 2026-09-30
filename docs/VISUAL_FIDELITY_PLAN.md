@@ -482,3 +482,31 @@ reference photo under matched sun, labeled as reader's judgment."
 tonemap/bloom/motion-blur settings recorded per shot, optional MRQ beauty
 path with temporal samples, scalability presets, and `fps_probe.py`
 budgets per preset. Interactive host uses the same scene builder."
+
+---
+
+## 8. Status
+
+| Phase | State | What exists | Verified how |
+|---|---|---|---|
+| V0 | **Code written, not yet built or rendered** | `-quality=measure\|beauty`, `-warmup=N`, `-sun-lux=` on the render commandlet; Lumen GI/reflections as capture post-process overrides plus TSR/VSM cvars, read back into `render.json`; `FLIGHTSIM_RENDER_QUALITY=beauty` for the web app; `gate6_visual.py --quality beauty` | Python side: `tests/test_render_quality.py`. C++: **needs a build and a Gate 6 run on the render machine** |
+| V1 | **Python side done; the renderer consumes it through existing flags** | `core/environment/sun.py`, `environment.time_of_day` (SPEC_VERSION 7), both compilers, webapp sun look plus exposure interpolation, named refusals | `tests/test_sun.py`: pinned to NREL SPA (pvlib) within 0.02°, events, polar refusal, night refusal, compilers, command flags |
+| V1 remainder | Not started | Physical-lux sun with EV100 recalibration (the `-sun-lux` hook exists), moon and stars, weather-driven aerosols, pole-shadow azimuth clause | — |
+| V2 to V9 | Not started | — | — |
+
+**Deviation from §4 V0, on purpose:** the renderer settings are applied
+**per capture at runtime** when `-quality=beauty`, not in
+`DefaultEngine.ini`. A project-wide ini change would alter every
+`measure` render that Gate 6 passed on. Nanite and mesh distance fields
+are startup-only project settings, so they arrive with V2, the first
+phase that has Nanite meshes to use them.
+
+**Next step on the render machine:**
+1. `./scripts/build_ue.sh` (or `.\scripts\build_ue.ps1`).
+2. `python experiments/gate6_visual.py`. It must still pass unchanged,
+   which proves `measure` is untouched.
+3. `python experiments/gate6_visual.py --quality beauty`. Read
+   `runs/gate6_beauty/full/render.json` (`cvar_*`, `gi_reflections`)
+   and look at the frames.
+4. Try `FLIGHTSIM_RENDER_QUALITY=beauty` with a prompt like "fly the
+   c172 over yosemite at golden hour".

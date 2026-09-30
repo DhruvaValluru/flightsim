@@ -71,6 +71,12 @@ struct FFlightSimVisualSceneOptions
 	// Exponential height fog density: 0.0025 is Gate 6's clear day; the
 	// showcase's "hazy" raises it. Recorded in the manifest.
 	float FogDensity = 0.0025f;
+	// Directional-light intensity. 8.0 is the value every Gate 6 and
+	// showcase calibration was measured under (engine units, not physical
+	// lux). Visual plan V1 moves toward physical sunlight (~1e5 lux) only
+	// together with a probe-recalibrated exposure, so it is a parameter
+	// here -- recorded in the manifest -- and never a silent default.
+	float SunIntensity = 8.0f;
 };
 
 class FLIGHTSIMBRIDGE_API FFlightSimVisualScene
@@ -87,6 +93,14 @@ public:
 	// low-sun value is the default) and constant over any one clip.
 	static void ApplyManualExposure(USceneCaptureComponent2D* Capture,
 	                                float Bias = 11.0f);
+
+	// Visual plan V0, "beauty" quality: Lumen global illumination and
+	// Lumen reflections as per-view post-process overrides on the capture
+	// (the camera of record), so the project-wide defaults -- and every
+	// "measure" render Gate 6 passed on -- stay exactly as they were.
+	// Whether Lumen actually runs inside a scene capture on this engine
+	// build is a probe-render question, not a claim this call makes.
+	static void ApplyBeautyPostProcess(USceneCaptureComponent2D* Capture);
 
 	ADirectionalLight* Sun = nullptr;
 	double TerrainPeakMetres = 0.0;   // highest elevation of the placed raster
