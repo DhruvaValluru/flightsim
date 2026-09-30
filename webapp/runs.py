@@ -24,6 +24,7 @@ prompt cannot queue an hour of editor time; the cap is recorded in the run.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -1291,7 +1292,8 @@ def render_look_for(spec: ScenarioSpec, event_note) -> Optional[Dict]:
     """Which look the commandlet is given: the SAMPLED one when the
     randomisation block is on (its sun, exposure and fog are the
     record), the storm look when a severe-weather event composed the
-    scene, the harness's noon default otherwise (None -> byte-identical
+    scene, the stated time of day's sun when there is one, the
+    harness's noon default otherwise (None -> byte-identical
     to the pre-camera build, pinned by test). Randomisation wins over
     the storm look on purpose: the storm's PHYSICS still arrive as card
     blocks, and a dataset that asked for a sampled sun gets the sun it
@@ -1299,7 +1301,90 @@ def render_look_for(spec: ScenarioSpec, event_note) -> Optional[Dict]:
     sampled = randomization_look(spec)
     if sampled is not None:
         return sampled
-    return STORM_LOOK if event_note else None
+    if event_note:
+        return STORM_LOOK
+    # A stated time of day (visual plan V1): its sun and exposure; None
+    # when unstated keeps the default look byte-identical.
+    return sun_look(spec)
+
+
+#: Render quality presets (visual plan V0). "measure" is the configuration
+#: every gate and showcase calibration was measured under; "beauty" turns
+#: on Lumen/TSR/VSM in the commandlet at 1080p and is opt-in via
+#: FLIGHTSIM_RENDER_QUALITY=beauty until Gate 6 passes under it on the
+#: rendering machine (experiments/gate6_visual.py --quality beauty).
+RENDER_QUALITIES = {
+    "measure": None,
+    "beauty": {"width": 1920, "height": 1080},
+}
+
+
+def render_quality() -> str:
+    """The configured render quality; ValueError names an unknown one."""
+    quality = os.environ.get("FLIGHTSIM_RENDER_QUALITY", "measure").strip() \
+        or "measure"
+    if quality not in RENDER_QUALITIES:
+        raise ValueError(
+            f"FLIGHTSIM_RENDER_QUALITY={quality!r} is not one of "
+            f"{sorted(RENDER_QUALITIES)}")
+    return quality
+
+
+def exposure_bias_for(elevation_deg: float):
+    """(manual exposure bias, basis) for a sun at elevation_deg.
+
+    Linear between the two probe-calibrated looks (TIME_OF_DAY dawn at
+    its elevation, noon at its) and HELD at the nearer one outside that
+    span -- never extrapolated, and the basis says which. A calibrated
+    point is only a point: the in-between values are an interpolation
+    until a probe render at that elevation says otherwise (gotcha 7).
+    """
+    low, high = TIME_OF_DAY["dawn"], TIME_OF_DAY["noon"]
+    e0, b0 = low["sun_elev"], low["exposure_bias"]
+    e1, b1 = high["sun_elev"], high["exposure_bias"]
+    if elevation_deg <= e0:
+        return b0, (f"held at the dawn calibration ({b0:g} at {e0:g} deg); "
+                    f"below the probe-calibrated {e0:g}-{e1:g} deg span")
+    if elevation_deg >= e1:
+        return b1, (f"held at the noon calibration ({b1:g} at {e1:g} deg); "
+                    f"above the probe-calibrated {e0:g}-{e1:g} deg span")
+    fraction = (elevation_deg - e0) / (e1 - e0)
+    bias = round(b0 + fraction * (b1 - b0), 2)
+    return bias, (f"interpolated between the dawn ({b0:g} at {e0:g} deg) "
+                  f"and noon ({b1:g} at {e1:g} deg) calibrations")
+
+
+def sun_look(spec: ScenarioSpec) -> Optional[Dict]:
+    """The render look for the spec's stated time of day, or None.
+
+    None when no time of day is stated: the render command then stays
+    byte-identical to the documented default look (pinned by test).
+    Raises core.environment.sun.SunError -- by name -- when the event
+    does not happen there that day, or the sun would be below the
+    render floor. VISUAL ONLY: physics never reads any of this.
+    """
+    from datetime import date as date_
+
+    from core.environment.sun import require_renderable, resolve
+
+    time_of_day = str(spec.time_of_day.value)
+    if time_of_day == "none":
+        return None
+    stated_date = str(spec.weather_date.value)
+    day = None if stated_date == "none" else date_.fromisoformat(stated_date)
+    sun = resolve(time_of_day, float(spec.latitude.value),
+                  float(spec.longitude.value), day)
+    require_renderable(sun)
+    bias, bias_basis = exposure_bias_for(sun.elevation_deg)
+    return {
+        "sun_elev": round(sun.elevation_deg, 2),
+        "sun_azim": round(sun.azimuth_deg, 2),
+        "exposure_bias": bias,
+        "note": (f"sun {sun.elevation_deg:.1f} deg up at azimuth "
+                 f"{sun.azimuth_deg:.1f} deg ({sun.basis}; "
+                 f"{sun.when_utc.strftime('%H:%M')} UTC; NOAA solar "
+                 f"position); exposure bias {bias:g}, {bias_basis} (VISUAL)"),
+    }
 
 
 def _projected_origin(spec: ScenarioSpec, scene: Dict):
@@ -1659,6 +1744,20 @@ class RunManager:
         """Refuses (with the reason) or starts a run and returns its id."""
         from core.util.platform import ue_available, ue_platform_refusal
 
+        try:
+            render_quality()
+        except ValueError as exc:
+            return {"refused": str(exc), "constraint": "render.quality"}
+        # The stated sun first: a dawn that never happens there that day,
+        # or a night the scene cannot show, is the SPEC's problem on any
+        # machine, so it refuses by name before the platform question.
+        from core.environment.sun import SunError
+
+        try:
+            sun_look(spec)
+        except SunError as exc:
+            return {"refused": str(exc), "constraint": exc.constraint}
+
         if not ue_available():
             # The named platform refusal, not a 500: rendering needs the
             # Windows host (engine + built bridge). The headless half (spec,
@@ -1737,6 +1836,12 @@ class RunManager:
                 [f"-chase={WEBAPP_CHASE.get(aircraft, '-110:0:12')}",
                  "-camera=chase"], [])
         inline, trailing = camera_flags or ((), ())
+        # Visual plan V0: FLIGHTSIM_RENDER_QUALITY=beauty opts in (1080p,
+        # Lumen/TSR/VSM); "measure" keeps the pinned command byte-identical.
+        quality = render_quality()
+        preset = RENDER_QUALITIES[quality]
+        width, height = ((preset["width"], preset["height"]) if preset
+                         else (WIDTH, HEIGHT))
         command = [
             str(EDITOR), str(project), "-run=FlightSimBridge.FlightSimRender",
         ] + render_flags(
@@ -1746,7 +1851,7 @@ class RunManager:
             mesh=mesh if mesh.is_file() else None,
             look=look, camera_flags=(inline, trailing),
             labels=False, deterministic=per_camera,
-            width=WIDTH, height=HEIGHT, fps=FPS,
+            width=width, height=height, fps=FPS, quality=quality,
             # The SHARED recorder's own file (same component all three
             # hosts use), stamping the FDM's clock -- the aero panel
             # reads it verbatim, no resampling.
@@ -1983,6 +2088,11 @@ class RunManager:
             return
         scene = pick_scene(spec)
         run.scene = scene
+        # The render sun (visual plan V1). start() already refused a sun
+        # the scene cannot show, so this resolves; it is recomputed here
+        # rather than carried because it is a pure function of the spec.
+        sun = sun_look(spec)
+        sun_note = sun["note"] if sun else None
 
         derive_seed(spec, terrain_coupled=coupling_needs_seed(spec))
         project_for_ue_host(spec)
@@ -2147,6 +2257,15 @@ class RunManager:
             "physics_ground": scene["label"],
             **({"surface": surface_note} if surface_note else {}),
             **({"weather": event_note} if event_note else {}),
+            **({"sun": (f"time of day {spec.time_of_day.value!r} NOT "
+                        f"applied: the randomisation block's sampled look "
+                        f"is the record"
+                        if randomization_look(spec) is not None else
+                        f"time of day {spec.time_of_day.value!r} NOT "
+                        f"applied: the storm look is probe-calibrated as "
+                        f"a whole (sun, fog and exposure together)"
+                        if event_note else sun_note)}
+               if sun_note else {}),
         }
         # The scene's raster, for the headless pre-run's ground model and
         # for the terrain-coupled camera checks. Same construction the

@@ -2347,3 +2347,12 @@ bool FFlightSimVisualScene::LoadSceneLevel(UWorld* World,
 	       Landcover.bReady ? TEXT("loaded") : TEXT("absent"));
 	return true;
 }
+
+void FFlightSimVisualScene::ApplyBeautyPostProcess(USceneCaptureComponent2D* Capture)
+{
+	FPostProcessSettings& Settings = Capture->PostProcessSettings;
+	Settings.bOverride_DynamicGlobalIlluminationMethod = true;
+	Settings.DynamicGlobalIlluminationMethod = EDynamicGlobalIlluminationMethod::Lumen;
+	Settings.bOverride_ReflectionMethod = true;
+	Settings.ReflectionMethod = EReflectionMethod::Lumen;
+}

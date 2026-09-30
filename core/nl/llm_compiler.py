@@ -54,6 +54,8 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from ..environment.sun import NAMED_TIMES as SUN_NAMED_TIMES
+from ..environment.sun import canonical_time_of_day
 from ..environment.surface import SURFACE_CLASSES
 from ..scenario.blocks import MAX_TRAFFIC, TRAFFIC_TRACKS, TrafficSpec
 from ..scenario.camera import (CAMERA_PRESETS, CameraSpec,
@@ -270,11 +272,21 @@ FIELD_VALUE_SCHEMAS: Dict[str, Dict[str, Any]] = {
                        "date; that day's ERA5 reanalysis wind applies. "
                        "Never invent a date.",
     },
+    "time_of_day": {
+        "type": "string",
+        "description": "Render sun ONLY (never physics): one of "
+                       + ", ".join(sorted(SUN_NAMED_TIMES))
+                       + ", or a clock time HH:MM (local SOLAR time) / "
+                       "HH:MMZ (UTC), when the prompt states or clearly "
+                       "evokes a time of day.",
+    },
 }
 
 # The schema is generated FROM the spec's field list; a field added to one
 # and not the other fails at import, not at 2 a.m. in a run manifest.
-_SPEC_FIELDS = {name for _, name in ScenarioSpec.FIELD_ORDER}
+# time_of_day is spec 9's optional, absent-canonical environment field
+# (not in FIELD_ORDER, so a spec that omits it keeps its canonical form).
+_SPEC_FIELDS = {name for _, name in ScenarioSpec.FIELD_ORDER} | {"time_of_day"}
 _unknown = set(FIELD_VALUE_SCHEMAS) - _SPEC_FIELDS
 assert not _unknown, f"llm_compiler schema names non-spec fields: {_unknown}"
 
@@ -610,8 +622,8 @@ SYSTEM_PROMPT = """\
 You are the scene DIRECTOR for a flight-simulation compiler. Turn the
 prompt into a COHERENT scene: fill every field the prompt justifies --
 aircraft, place, altitude, airspeed, heading, wind speed AND direction,
-turbulence, surface, weather event, date -- so that the fields agree with
-each other and with what the prompt evokes. Every value you write
+turbulence, surface, weather event, date, time of day -- so that the
+fields agree with each other and with what the prompt evokes. Every value you write
 declares how it was chosen; a guess you do not declare is the one
 failure this protocol cannot forgive.
 
@@ -964,6 +976,15 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
         elif "enum" in value_schema and value not in value_schema["enum"]:
             raise _fail(f"field {name!r} value {value!r} is outside the "
                         f"vocabulary {value_schema['enum']}")
+        elif name == "time_of_day":
+            # Not an enum (clock times are open), but not free text
+            # either: the same parser the deterministic compiler and the
+            # render flow use decides, and its canonical spelling is what
+            # the spec stores.
+            try:
+                entry["value"] = canonical_time_of_day(value)
+            except ValueError as exc:
+                raise _fail(f"field 'time_of_day': {exc}") from None
 
     # Cameras (Camera Phase 1): a bounded repeated block, every entry
     # facing the same rails the scalar fields face -- unknown camera

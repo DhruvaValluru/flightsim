@@ -97,7 +97,7 @@ SPEC9_BLOCKS = ("atmosphere", "datum", "turbulence_model", "wind_profile", "load
                 "failures", "icing", "dis", "wake", "instruments", "record", "runway")
 #: Version 9's optional fields inside version-8 sections.
 SPEC9_SCENE_FIELDS = ("sun_lux", "buildings", "night")
-SPEC9_ENVIRONMENT_FIELDS = ("precipitation_rate_mmh",)
+SPEC9_ENVIRONMENT_FIELDS = ("precipitation_rate_mmh", "time_of_day")
 SPEC9_CAMERA_FIELDS = ("exposure_compensation_ev", "bands", "stereo", "passes", "ir")
 
 
@@ -116,6 +116,12 @@ def spec9_keys_in(data: Dict[str, Any]) -> List[str]:
             found += [f"cameras[{index}].{name}" for name in SPEC9_CAMERA_FIELDS
                       if camera.get(name) is not None]
     return found
+
+
+def _default_time_of_day() -> Quantity:
+    """``environment.time_of_day`` unstated -- the documented default look
+    (the harness's calibrated sun; core.render.flags DEFAULT_LOOK)."""
+    return Quantity.default("none", frm="no time of day stated; default render look")
 
 
 def _default_precipitation_rate() -> Quantity:
@@ -263,6 +269,14 @@ class ScenarioSpec:
     #: absent-canonical: no runway is the default and is omitted, so
     #: every committed spec-8 example keeps its digest.
     runway: "RunwayBlockSpec" = dc_field(default_factory=RunwayBlockSpec.defaulted)
+    #: Render sun (core.environment.sun, visual-fidelity plan V1; the
+    #: physical sky of core.sky reads it too): a named time ("dawn",
+    #: "noon", "golden hour", ...), "HH:MM" local apparent solar time,
+    #: "HH:MMZ" UTC, or "none" for the documented default look. VISUAL
+    #: ONLY -- physics never reads it. Spec 9, absent-canonical: unstated
+    #: is omitted from the environment section, so every committed spec-8
+    #: example keeps its canonical form.
+    time_of_day: Quantity = dc_field(default_factory=_default_time_of_day)
 
     #: Field order for both serialisation and the rendered table.
     FIELD_ORDER = (
@@ -447,6 +461,9 @@ class ScenarioSpec:
         # W3: the rain rate rides under environment only when stated.
         if self.precipitation_rate_mmh.to_dict() != _default_precipitation_rate().to_dict():
             out["environment"]["precipitation_rate_mmh"] = self.precipitation_rate_mmh.to_dict()
+        # The render sun rides under environment only when stated.
+        if self.time_of_day.to_dict() != _default_time_of_day().to_dict():
+            out["environment"]["time_of_day"] = self.time_of_day.to_dict()
         # Always present: the canonical form has exactly one spelling of
         # "no cameras" (the empty list), so the digest cannot fork on an
         # absent-vs-empty distinction.
@@ -541,6 +558,10 @@ class ScenarioSpec:
         rate_data = (data.get("environment") or {}).get("precipitation_rate_mmh")
         kwargs["precipitation_rate_mmh"] = (_default_precipitation_rate() if rate_data is None
                                             else Quantity.from_dict(rate_data))
+        # The optional render sun (absent = the default look).
+        time_data = (data.get("environment") or {}).get("time_of_day")
+        kwargs["time_of_day"] = (_default_time_of_day() if time_data is None
+                                 else Quantity.from_dict(time_data))
         cameras_data = data.get("cameras", [])
         if not isinstance(cameras_data, list):
             raise ValueError("spec 'cameras' must be a list of camera "
@@ -679,6 +700,12 @@ class ScenarioSpec:
             q = self.precipitation_rate_mmh
             at = max(i for i, row in enumerate(rows) if row[0] == "environment") + 1
             rows.insert(at, ("environment", "precipitation rate mmh", q.render(),
+                             str(q.source), q.note()))
+        # A stated time of day renders with the environment rows.
+        if self.time_of_day.to_dict() != _default_time_of_day().to_dict():
+            q = self.time_of_day
+            at = max(i for i, row in enumerate(rows) if row[0] == "environment") + 1
+            rows.insert(at, ("environment", "time of day", q.render(),
                              str(q.source), q.note()))
         # Each camera renders as its own labeled block, per-field sources
         # exactly like every scalar row. No cameras = no block: the table

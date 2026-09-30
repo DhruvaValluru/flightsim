@@ -793,7 +793,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--look", action="store_true",
                     help="also render the Phase 2 look controls (LOOK_RUNS); "
                          "without them the look clauses report NOT RUN")
+    ap.add_argument("--quality", choices=("measure", "beauty"),
+                    default="measure",
+                    help="renderer configuration (visual plan V0). beauty "
+                         "re-measures the same four clauses with Lumen/TSR/"
+                         "VSM on, at the SAME 960x540 the thresholds were "
+                         "set at, so a pass means the clauses survive the "
+                         "renderer change -- not a new resolution's luck")
     args = ap.parse_args(argv)
+    if args.quality == "beauty" and args.out == "runs/gate6":
+        args.out = "runs/gate6_beauty"
+    quality_flags = ([] if args.quality == "measure" else
+                     [f"-quality={args.quality}", "-width=960", "-height=540"])
     # Absolute, because these paths are handed to the editor, whose working
     # directory is its own binary's -- a relative card path resolves to
     # nothing there and the render dies before its first frame.
@@ -834,7 +845,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if not editor.is_file():
             print(f"  no editor at {editor}\n\n  GATE 6: BLOCKED")
             return 2
-        ok = render(editor, project, card, frames, terrain, shot, extra)
+        ok = render(editor, project, card, frames, terrain, shot,
+                    [*extra, *quality_flags])
         print(f"  [{'ok  ' if ok else 'FAIL'}] {name} ({shot} shot"
               f"{' ' + ' '.join(extra) if extra else ''})")
         if not ok:

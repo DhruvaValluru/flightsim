@@ -181,7 +181,8 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
                  width: int, height: int, fps: float,
                  telemetry=None, extra: Iterable[str] = (),
                  passes: Iterable[str] = (), calibration: bool = False,
-                 sun_lux=None, accumulate=None, scene_document=None) -> List[str]:
+                 sun_lux=None, accumulate=None, scene_document=None,
+                 quality: Optional[str] = None) -> List[str]:
     """The ORDERED argument list for the FlightSimRender commandlet,
     after the ``<editor> <project> -run=FlightSimBridge.FlightSimRender``
     tokens.
@@ -244,6 +245,11 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
     emits nothing, and the void tier never gets it. Forwarded verbatim;
     the commandlet checks it (and refuses without ``-GeorefTerrain``).
 
+    ``quality`` (visual plan V0): ``"beauty"`` adds ``-quality=beauty``
+    (Lumen GI/reflections, TSR, virtual shadow maps and 16 warm-up
+    captures in the commandlet) after the sensing opt-ins; None or
+    ``"measure"`` emits nothing, so every pinned list stands.
+
     Returns a new list every call. Behaviour byte-identical to the web
     app's pre-builder command for every flag it passed (pinned by
     ``tests/test_camera_spec.py`` and ``tests/test_render_flags.py``).
@@ -284,6 +290,10 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
         flags.append(pass_token)
     # S1: the sensing opt-ins, only when asked, after the passes flag.
     for token in sensing_flags(calibration, sun_lux, accumulate):
+        if token not in flags:
+            flags.append(token)
+    if quality not in (None, "measure"):
+        token = f"-quality={quality}"
         if token not in flags:
             flags.append(token)
     if not void and scene.get("terrain"):

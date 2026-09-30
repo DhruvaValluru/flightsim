@@ -81,7 +81,7 @@ def test_spec_version_9_and_the_model_source(spec):
         spec.plan("airspeed", 300.0, frm="airspeed is user-stated here")
 
     old = spec.to_dict()
-    old["spec_version"] = 5
+    old["spec_version"] = 6
     with pytest.raises(ValueError, match="not supported"):
         ScenarioSpec.from_dict(old)
     old["spec_version"] = 7

@@ -35,6 +35,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..environment import sun as sun_model
 from ..fdm import units as u
 from ..scenario.fields import Quantity
 from ..scenario.spec import ScenarioSpec
@@ -465,6 +466,48 @@ def _weather_date(text: str) -> Quantity:
             match.group(1), frm=f"historical weather date {match.group(1)} "
                                 f"(ERA5 reanalysis applies at /run)")
     return Quantity.default("none", frm="no date stated; spec wind as given")
+
+
+#: Time-of-day phrases, longest first so "golden hour" wins over "hour"
+#: and "late afternoon" over "afternoon". Each maps onto a canonical
+#: core.environment.sun name (the aliases live there, not here).
+TIME_OF_DAY_WORDS = sorted(
+    set(sun_model.NAMED_TIMES) | set(sun_model.ALIASES),
+    key=len, reverse=True)
+
+
+def _time_of_day(text: str) -> Quantity:
+    """The render sun. VISUAL ONLY -- physics never reads this field.
+
+    A clock time is the user's own number (source user); a named time is
+    the documented vocabulary mapping (source inferred). What either one
+    MEANS -- solar vs UTC, which elevation "dawn" is -- is fixed in
+    core.environment.sun and recorded with the run.
+    """
+    match = _search(r"\b(?:at\s+)?([01]?\d|2[0-3]):([0-5]\d)\s*(z|utc)?\b",
+                    text)
+    if match:
+        hour, minute, zone = match.groups()
+        value = sun_model.canonical_time_of_day(
+            f"{hour}:{minute}" + (" utc" if zone else ""))
+        return Quantity.user(value, frm=match.group(0).strip())
+    match = _search(r"\b(?:at\s+)?(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*(am|pm)\b",
+                    text)
+    if match:
+        hour, minute, half = match.groups()
+        hour = int(hour) % 12 + (12 if half.lower() == "pm" else 0)
+        value = sun_model.canonical_time_of_day(
+            f"{hour}:{minute or '00'}")
+        return Quantity.user(value, frm=match.group(0).strip())
+    for phrase in TIME_OF_DAY_WORDS:
+        match = _search(rf"\b{phrase}\b", text)
+        if match:
+            value = sun_model.canonical_time_of_day(phrase)
+            return Quantity.inferred(
+                value, frm=f"time of day {phrase!r} (render sun only; "
+                           f"see core.environment.sun)")
+    return Quantity.default("none", frm="no time of day stated; default "
+                                        "render look")
 
 
 def _turbulence(text: str) -> Quantity:
@@ -1110,6 +1153,7 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
         surface=_surface(text),
         weather_date=_weather_date(text),
         weather_event=_weather_event(text),
+        time_of_day=_time_of_day(text),
     )
 
     if traffic:

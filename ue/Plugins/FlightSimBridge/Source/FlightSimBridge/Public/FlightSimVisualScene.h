@@ -273,6 +273,14 @@ public:
 	static double ExposureValue100(double ApertureF, double ShutterSeconds,
 	                               double Iso);
 
+	// Visual plan V0, "beauty" quality: Lumen global illumination and
+	// Lumen reflections as per-view post-process overrides on the capture
+	// (the camera of record), so the project-wide defaults -- and every
+	// "measure" render Gate 6 passed on -- stay exactly as they were.
+	// Whether Lumen actually runs inside a scene capture on this engine
+	// build is a probe-render question, not a claim this call makes.
+	static void ApplyBeautyPostProcess(USceneCaptureComponent2D* Capture);
+
 	ADirectionalLight* Sun = nullptr;
 	USkyAtmosphereComponent* Atmosphere = nullptr;
 	UVolumetricCloudComponent* Clouds = nullptr;
