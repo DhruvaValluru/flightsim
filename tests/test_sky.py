@@ -218,15 +218,13 @@ def test_an_impossible_time_is_a_validation_violation():
 # -- the web app's wiring ---------------------------------------------------
 
 
-def test_only_the_env_selects_the_physical_sky(monkeypatch):
-    # Opt-in until FlightSimSky is built and measured: a stated time
-    # alone drives the calibrated look's sun (webapp.runs.sun_look).
+def test_the_physical_sky_is_the_default_and_legacy_opts_out(monkeypatch):
     from webapp.runs import physical_sky_enabled
 
     monkeypatch.delenv("FLIGHTSIM_SKY", raising=False)
-    assert not physical_sky_enabled(compile_prompt("fly the c172p"))
+    assert physical_sky_enabled(compile_prompt("fly the c172p"))
     stated = compile_prompt("fly the c172p at dusk")
-    assert not physical_sky_enabled(stated)
+    assert physical_sky_enabled(stated)
     monkeypatch.setenv("FLIGHTSIM_SKY", "physical")
     assert physical_sky_enabled(stated)
     monkeypatch.setenv("FLIGHTSIM_SKY", "legacy")

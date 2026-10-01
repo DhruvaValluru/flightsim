@@ -672,9 +672,11 @@ Extraction rules:
 - airspeed_kind: set ONLY when the prompt says "true airspeed"/"TAS".
   Never guess it -- calibrated is the default and the render host can
   honour nothing else.
-- Aircraft with real licensed 3-D models: B747, A320, c172p -- prefer
+- Aircraft with real 3-D models: B747, A320, c172p and A4 -- prefer
   these for GUESSES ("small plane" -> c172p, "airliner/jet" -> A320 or
-  B747). 737, global5000, f15 and f16 have real flight physics but no
+  B747). A4 is the Douglas A-4 Skyhawk (a single-seat carrier attack
+  jet): "a4", "A-4", "Skyhawk" or "A-4E/F/G" ALWAYS mean A4, never f15
+  or f16. 737, global5000, f15 and f16 have real flight physics but no
   3-D model: use them ONLY when the prompt names them (the render will
   refuse them with the reason; placeholder airframes never render).
 - Vague wind strength maps as: light/gentle 8 kt, breezy 12 kt,
@@ -803,6 +805,24 @@ def _fail(reason: str) -> "LLMCompileError":
     return LLMCompileError(
         f"the language model's response was rejected: {reason}. The spec was "
         f"not built; re-run, rephrase, or use the offline compiler.")
+
+
+def _named_aircraft(prompt: str):
+    """Every aircraft the prompt states by an AIRCRAFT_WORDS phrase (a
+    variant suffix like A-4E or c172p allowed), as (phrase, model) in the
+    order they appear; [] when none."""
+    import re
+
+    from .compiler import AIRCRAFT_WORDS
+
+    text = prompt.lower()
+    found = {}
+    for phrase, model in AIRCRAFT_WORDS:
+        match = re.search(rf"(?<![a-z0-9]){re.escape(phrase)}(?![0-9])", text)
+        if match and (model not in found or match.start() < found[model][0]):
+            found[model] = (match.start(), phrase)
+    return [(phrase, model) for model, (_, phrase) in
+            sorted(found.items(), key=lambda item: item[1][0])]
 
 
 def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]:
@@ -1291,6 +1311,17 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
 
     for field_name, entry in payload["fields"].items():
         _overlay(spec, field_name, entry)
+
+    # An aircraft the prompt NAMES (the deterministic vocabulary's phrases,
+    # whole words) is the user's, not the model's to reinterpret: a model
+    # that read "a4" as an F-15 is overruled, and the note says so.
+    named = _named_aircraft(prompt)
+    if named and str(spec.aircraft.value) not in {model for _, model in named}:
+        phrase, model = named[0]
+        spec.notes.append(f"the language model chose {spec.aircraft.value!r} but the "
+                          f"prompt names {phrase!r}, which is {model}; the named "
+                          f"aircraft is used")
+        spec.aircraft = Quantity.user(model, frm=phrase)
 
     # Cameras overlay AFTER the fields: the default offsets and the
     # world-anchored placements depend on the (possibly model-chosen)

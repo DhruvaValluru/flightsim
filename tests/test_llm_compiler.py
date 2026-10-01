@@ -79,6 +79,23 @@ def test_stated_and_inferred_fields_overlay_with_provenance():
     assert json.loads(result.raw_response)["fields"]["aircraft"]["value"] == "c172p"
 
 
+def test_an_aircraft_the_prompt_names_overrules_the_models_guess():
+    """Measured 2026-10-01 on the owner's machine: "a4" compiled to the
+    F-15. A named aircraft is the user's; the model's other pick is
+    overruled and the note says so. A pick the prompt also names (a
+    second aircraft as traffic) is left alone."""
+    client = fake_client({"fields": {"aircraft": entry("f15", "inferred", "a4")},
+                          "notes": [], "questions": []})
+    spec = compile_prompt_llm("fly the a4 over the matterhorn at sunset",
+                              client=client).spec
+    assert spec.aircraft.value == "A4" and str(spec.aircraft.source) == "user"
+    assert any("names 'a4'" in note for note in spec.notes)
+    client = fake_client({"fields": {"aircraft": entry("B747", "user", "747")},
+                          "notes": [], "questions": []})
+    spec = compile_prompt_llm("a c172 chasing a 747", client=client).spec
+    assert spec.aircraft.value == "B747"
+
+
 def test_untouched_fields_are_bit_identical_to_regex_defaults():
     """An empty overlay must produce the regex compiler's exact defaults.
 

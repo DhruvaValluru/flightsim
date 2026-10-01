@@ -23,23 +23,23 @@ def _command(tmp_path, monkeypatch):
     return captured["command"]
 
 
-def test_measure_is_the_default_and_adds_no_flag(tmp_path, monkeypatch):
+def test_measure_adds_no_flag(tmp_path, monkeypatch):
     from experiments.showcase_matrix import HEIGHT, WIDTH
 
-    monkeypatch.delenv("FLIGHTSIM_RENDER_QUALITY", raising=False)
+    monkeypatch.setenv("FLIGHTSIM_RENDER_QUALITY", "measure")
     command = _command(tmp_path, monkeypatch)
     assert not any(arg.startswith("-quality=") for arg in command)
     assert f"-width={WIDTH}" in command and f"-height={HEIGHT}" in command
 
 
-def test_explicit_measure_equals_the_default(tmp_path, monkeypatch):
+def test_beauty_is_the_default(tmp_path, monkeypatch):
     monkeypatch.delenv("FLIGHTSIM_RENDER_QUALITY", raising=False)
     default = _command(tmp_path, monkeypatch)
-    monkeypatch.setenv("FLIGHTSIM_RENDER_QUALITY", "measure")
+    monkeypatch.setenv("FLIGHTSIM_RENDER_QUALITY", "beauty")
     assert _command(tmp_path, monkeypatch) == default
 
 
-def test_beauty_is_opt_in_and_1080p(tmp_path, monkeypatch):
+def test_beauty_is_1080p(tmp_path, monkeypatch):
     monkeypatch.setenv("FLIGHTSIM_RENDER_QUALITY", "beauty")
     command = _command(tmp_path, monkeypatch)
     assert "-quality=beauty" in command

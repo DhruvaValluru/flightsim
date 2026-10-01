@@ -53,12 +53,16 @@ three later branches merged in:
   "at sunset", "golden hour", "at 6:30 pm" or "at 21:15Z". The render's
   sun is placed for that place and date (NOAA solar position), and
   exposure is interpolated between the calibrated dawn and noon looks.
-* **Opt-in render upgrades**, both written without a UE build and so
-  unmeasured until `experiments/gate6_visual.py --quality beauty` /
-  `experiments/sky_check.py` pass on your Windows machine:
-  `FLIGHTSIM_RENDER_QUALITY=beauty` (Lumen GI + reflections, TSR, virtual
-  shadow maps, 1080p) and `FLIGHTSIM_SKY=physical` (the physical sky
-  below).
+* **The best look by default** (since 2026-10-01): beauty quality (Lumen GI
+  and reflections, TSR, virtual shadow maps, 1080p) and the physical sky
+  (below) are ON for every web-app render. `FLIGHTSIM_RENDER_QUALITY=measure`
+  and `FLIGHTSIM_SKY=legacy` return to the measured configuration that
+  Gate 6 was graded under. Both upgrades were written without a UE build:
+  `experiments/gate6_visual.py --quality beauty` and
+  `experiments/sky_check.py` measure them on your Windows machine.
+* **Aircraft named in the prompt are kept**: "a4", "A-4E" or "Skyhawk"
+  always fly the A-4, even when a language model guesses otherwise (the
+  spec's notes say when it was overruled).
 
 Run it on Windows (PowerShell, no clone needed):
 
@@ -210,9 +214,9 @@ for priming a machine ahead of time rather than prerequisites.
   starts and fails fails the run by name (`aircraft.mesh_import`); it
   never falls through to blocks.
 
-**Physical sky (opt-in: `FLIGHTSIM_SKY=physical`).** With the variable
-set for the server process, a render uses the physical sky for the
-spec's time of day (noon when none is stated):
+**Physical sky (on by default; `FLIGHTSIM_SKY=legacy` turns it off).**
+Every web-app render uses the physical sky for the spec's time of day
+(noon when none is stated):
 
 * the true sun, moon (with its phase) and Hipparcos stars for that place
   and instant;
@@ -222,10 +226,9 @@ spec's time of day (noon when none is stated):
 * per-camera lens character;
 * at night on curated places, VIIRS night lights.
 
-Without the variable, a stated time of day moves the calibrated look's
-sun (a night refuses by name as `sun.below_render_floor`), and no stated
-time renders the calibrated noon look unchanged. The physical sky has
-not yet been measured on a rendering machine. Run
+With `FLIGHTSIM_SKY=legacy`, a stated time of day moves the calibrated
+look's sun (a night refuses by name as `sun.below_render_floor`), and no
+stated time renders the calibrated noon look unchanged. Run
 `experiments/sky_check.py` after building. See docs/VALIDITY.md §2.10d.
 
 Materials come from `scripts/ue_create_materials.py` (run inside

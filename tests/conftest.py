@@ -25,7 +25,10 @@ def pytest_runtest_setup(item):
 
 @pytest.fixture(autouse=True)
 def _measured_render_quality(monkeypatch):
-    # The render-command pins (camera, quality) describe the MEASURED
-    # configuration; a developer's own FLIGHTSIM_RENDER_QUALITY=beauty
-    # must not turn them red. Tests that want beauty set it themselves.
-    monkeypatch.delenv("FLIGHTSIM_RENDER_QUALITY", raising=False)
+    # The render-command pins (camera, quality, sun flags) describe the
+    # MEASURED configuration, so the suite runs under it: measure quality
+    # and the legacy sky, whatever the app's defaults (beauty, physical)
+    # or a developer's own environment say. Tests that want the defaults
+    # delete these themselves.
+    monkeypatch.setenv("FLIGHTSIM_RENDER_QUALITY", "measure")
+    monkeypatch.setenv("FLIGHTSIM_SKY", "legacy")
