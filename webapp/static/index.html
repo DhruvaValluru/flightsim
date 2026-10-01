@@ -71,6 +71,7 @@ visual-only per host (measured).</p>
   <label class="dim" title="The clip is min(duration, 22 s); a shorter clip renders proportionally fewer frames. Overrides a duration stated in the prompt, shown as a user edit in the table.">
     clip <select id="clipSeconds">
       <option value="">prompt</option>
+      <option value="still">1 frame (preview)</option>
       <option value="3">3 s</option>
       <option value="6">6 s</option>
       <option value="10">10 s</option>
@@ -473,11 +474,18 @@ async function doCompile(body) {
 // "" = no override: the prompt (or the documented default) decides.
 function clipSeconds() {
   const v = $("clipSeconds").value;
-  return v === "" ? null : parseFloat(v);
+  return v === "" || v === "still" ? null : parseFloat(v);
+}
+
+// "1 frame (preview)": every camera captures exactly one image, so a look
+// can be judged without rendering a whole clip.
+function stillPreview() {
+  return $("clipSeconds").value === "still";
 }
 
 $("compile").addEventListener("click", () =>
-  doCompile({prompt: $("prompt").value, clip_seconds: clipSeconds()}));
+  doCompile({prompt: $("prompt").value, clip_seconds: clipSeconds(),
+             still: stillPreview()}));
 
 $("answer").addEventListener("click", () => {
   // One round: the original prompt plus the model's questions (echoed back)
@@ -489,6 +497,7 @@ $("answer").addEventListener("click", () => {
              questions: pendingQuestions,
              answers: collectAnswers(),
              clip_seconds: clipSeconds(),
+             still: stillPreview(),
              prior_spec: compiled ? compiled.spec.dict : null});
 });
 

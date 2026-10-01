@@ -85,6 +85,9 @@ class CompileRequest(BaseModel):
     #: Clip length selector: an explicit UI choice, applied as a USER edit
     #: of the run duration. None = whatever the prompt/default says.
     clip_seconds: Optional[float] = None
+    #: "1 frame (preview)": every camera captures exactly one image (a
+    #: counted interval capture of 1, a USER edit shown in the table).
+    still: bool = False
 
 
 class RunRequest(BaseModel):
@@ -279,6 +282,20 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         # the old duration end at the new one (stated keyframe times
         # elsewhere are left alone).
         rescale_moves(spec, previous, seconds)
+    if request.still:
+        # One image per camera: the shortest clip, and a counted capture
+        # of 1 (interval trigger; count_exactness grades it). Cameras the
+        # prompt did not name get the default view first.
+        previous = float(spec.duration.value)
+        spec.set("duration", 3.0, frm="1-frame preview (web UI)")
+        rescale_moves(spec, previous, 3.0)
+        if not spec.cameras:
+            from core.scenario.camera import default_cameras
+
+            spec.cameras = list(default_cameras(spec))
+        for camera in spec.cameras:
+            camera.set("trigger", "interval", frm="1-frame preview (web UI)")
+            camera.set("capture_count", 1, frm="1-frame preview (web UI)")
 
     # Planning happens BEFORE the table and verdict are built, so what the
     # user reviews is what will run: the weather event's documented
