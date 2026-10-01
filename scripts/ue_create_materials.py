@@ -839,11 +839,28 @@ def create_airframe_paint():
     paint, roughness, metallic, coat, coat_roughness = AIRFRAME_PAINT_PARAMETERS
     colour = vector(material, lib, paint, (0.8, 0.8, 0.8, 1.0), -400, 0)
     lib.connect_material_property(colour, "", unreal.MaterialProperty.MP_BASE_COLOR)
-    for index, (name, prop) in enumerate(((roughness, unreal.MaterialProperty.MP_ROUGHNESS),
-                                          (metallic, unreal.MaterialProperty.MP_METALLIC),
-                                          (coat, unreal.MaterialProperty.MP_CUSTOM_DATA0),
-                                          (coat_roughness, unreal.MaterialProperty.MP_CUSTOM_DATA1))):
+    # The clear-coat inputs: MP_CUSTOM_DATA0/1 on older engines; UE 5.7's
+    # Python no longer exposes those names (measured on the owner's
+    # machine), so the clear-coat names are tried too. A pin no name
+    # reaches keeps its parameter node unconnected and the engine's default
+    # coat (said so below), rather than failing the whole material.
+    def material_property(*names):
+        for candidate in names:
+            value = getattr(unreal.MaterialProperty, candidate, None)
+            if value is not None:
+                return value
+        return None
+
+    pins = ((roughness, unreal.MaterialProperty.MP_ROUGHNESS),
+            (metallic, unreal.MaterialProperty.MP_METALLIC),
+            (coat, material_property("MP_CUSTOM_DATA0", "MP_CLEAR_COAT")),
+            (coat_roughness, material_property("MP_CUSTOM_DATA1", "MP_CLEAR_COAT_ROUGHNESS")))
+    for index, (name, prop) in enumerate(pins):
         node = scalar(material, lib, name, AIRFRAME_PAINT_DEFAULTS[name], -400, 150 + 100 * index)
+        if prop is None:
+            print(f"MATERIAL-NOTE: M_AirframePaint {name} has no material pin this engine's "
+                  f"Python exposes; left unconnected (the engine's default coat)")
+            continue
         lib.connect_material_property(node, "", prop)
     finish(material, "M_AirframePaint")
 

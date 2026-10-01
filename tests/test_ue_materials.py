@@ -306,6 +306,7 @@ def test_the_world_parameters_the_cpp_sets_are_the_ones_the_script_exposes():
     # M_AirframePaint: the clear-coat model and its five parameters.
     paint = _body(text, "create_airframe_paint")
     assert "MSM_CLEAR_COAT" in paint and "MP_CUSTOM_DATA0" in paint and "MP_CUSTOM_DATA1" in paint
+    assert '"MP_CLEAR_COAT"' in paint and '"MP_CLEAR_COAT_ROUGHNESS"' in paint
     assert _tuple(text, "AIRFRAME_PAINT_PARAMETERS") == (
         "PaintColour", "Roughness", "Metallic", "ClearCoat", "ClearCoatRoughness")
     # M_Runway: the markings raster lerps the surface to the paint, then wetness.
