@@ -82,6 +82,13 @@ Write-Host "==> MSBuild: $msbuild"
 
 # --- upstream checkout, pinned to the SAME tag the headless core runs ---
 # §2.9: both hosts must run the same JSBSim or parity is untestable.
+# A folder left by an interrupted or failed earlier run is not a checkout
+# (measured on the owner's machine: "fatal: not a git repository", then a
+# tag-drift refusal against an empty commit). Throw it away and re-fetch.
+if ((Test-Path $src) -and -not (Test-Path (Join-Path $src ".git"))) {
+    Write-Host "==> $src is not a git checkout (an earlier run was interrupted); re-fetching"
+    Remove-Item -Recurse -Force $src
+}
 if (-not (Test-Path $src)) {
     Write-Host "==> fetching JSBSim $jsbsimTag"
     New-Item -ItemType Directory -Force -Path $work | Out-Null
