@@ -747,8 +747,13 @@ def create_rain_streaks():
     if material is None:
         return
     material.set_editor_property("material_domain", unreal.MaterialDomain.MD_POST_PROCESS)
-    material.set_editor_property("blendable_location",
-                                 unreal.BlendableLocation.BL_BEFORE_TONEMAPPING)
+    # Before tonemapping. UE 5.x renamed BL_BEFORE_TONEMAPPING to
+    # BL_SCENE_COLOR_AFTER_DOF (measured on 5.7: AttributeError); the old
+    # name is kept as the fallback for an engine that still has it.
+    material.set_editor_property(
+        "blendable_location",
+        getattr(unreal.BlendableLocation, "BL_SCENE_COLOR_AFTER_DOF", None)
+        or getattr(unreal.BlendableLocation, "BL_BEFORE_TONEMAPPING"))
     lib = unreal.MaterialEditingLibrary
     length, direction, density, phase = RAIN_PARAMETERS
     screen = lib.create_material_expression(material, unreal.MaterialExpressionScreenPosition, -1600, 0)
@@ -975,6 +980,34 @@ def create_terrain_imagery_night():
     _save(material, full)
 
 
+# One material that fails (an engine API rename, measured on 5.7) must not
+# stop the ones after it: every creator runs, each failure is printed with
+# its traceback, and the script exits non-zero at the end if any failed.
+_FAILED = []
+
+
+def _guard(creator):
+    def run():
+        try:
+            creator()
+        except Exception:   # reported below, never swallowed
+            import traceback
+            traceback.print_exc()
+            print(f"MATERIAL-FAILED: {creator.__name__}")
+            _FAILED.append(creator.__name__)
+    return run
+
+
+import inspect  # noqa: E402
+
+# Only the top-level creators (no parameters); helpers such as
+# create_pass_material(name, ...) are called by them and stay unwrapped.
+for _name in [n for n in list(globals()) if n.startswith("create_")
+              and callable(globals()[n])
+              and not inspect.signature(globals()[n]).parameters]:
+    globals()[_name] = _guard(globals()[_name])
+
+
 create_vertex_colour()
 create_terrain_imagery()
 create_vertex_colour_unlit()
@@ -994,3 +1027,5 @@ create_runway()
 create_moon()
 create_star_emissive()
 create_terrain_imagery_night()
+if _FAILED:
+    raise SystemExit(f"materials not created: {', '.join(_FAILED)}")

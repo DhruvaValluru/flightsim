@@ -286,7 +286,7 @@ def test_the_world_parameters_the_cpp_sets_are_the_ones_the_script_exposes():
                                  "SceneRainDensityParameter", "SceneRainPhaseParameter")):
         assert f'{cpp} = TEXT("{value}");' in SCENE_CPP_TEXT, cpp
     streaks = _body(text, "create_rain_streaks")
-    assert "BL_BEFORE_TONEMAPPING" in streaks and "PPI_POST_PROCESS_INPUT0" in streaks
+    assert "BL_SCENE_COLOR_AFTER_DOF" in streaks and "PPI_POST_PROCESS_INPUT0" in streaks
     assert "length, direction, density, phase = RAIN_PARAMETERS" in streaks
     stars = _body(text, "create_starfield")
     assert "MSM_UNLIT" in stars and "BLEND_ADDITIVE" in stars and '"two_sided", True' in stars
