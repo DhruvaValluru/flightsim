@@ -326,34 +326,14 @@ ALandscape* UFlightSimLandscapeImporter::ImportLandscape(UWorld* World, const FS
 	// ALandscape::Import(guid, min x, min y, max x, max y, sections per
 	// component, quads per section, heights, heightmap file name, layer
 	// weights, alpha-map type): weight-blended (the layers sum to 255).
-	// UE 5.7 dropped the heightmap-file-name parameter (measured on the
-	// owner's machine: "function does not take 11 arguments"); 5.5 has it.
-	// The generic lambda makes the call dependent, so only the overload
-	// this engine declares is compiled.
-	const FGuid ImportGuid = FGuid::NewGuid();
-	auto ImportLandscape = [&](auto* Proxy)
-	{
-		if constexpr (requires {
-			Proxy->Import(ImportGuid, 0, 0, Resolution - 1, Resolution - 1,
-			              static_cast<int32>(Sections), static_cast<int32>(Quads),
-			              HeightDataPerLayer, MaterialLayerDataPerLayer,
-			              ELandscapeImportAlphamapType::Additive);
-		})
-		{
-			Proxy->Import(ImportGuid, 0, 0, Resolution - 1, Resolution - 1,
-			              static_cast<int32>(Sections), static_cast<int32>(Quads),
-			              HeightDataPerLayer, MaterialLayerDataPerLayer,
-			              ELandscapeImportAlphamapType::Additive);
-		}
-		else
-		{
-			Proxy->Import(ImportGuid, 0, 0, Resolution - 1, Resolution - 1,
-			              static_cast<int32>(Sections), static_cast<int32>(Quads),
-			              HeightDataPerLayer, nullptr, MaterialLayerDataPerLayer,
-			              ELandscapeImportAlphamapType::Additive);
-		}
-	};
-	ImportLandscape(Landscape);
+	// UE 5.7 declares the trailing edit-layer list with no default
+	// (LandscapeProxy.h, read on the owner's machine): passed empty, the
+	// import writes the base layer as 5.5's defaulted call did.
+	Landscape->Import(FGuid::NewGuid(), 0, 0, Resolution - 1, Resolution - 1,
+	                  static_cast<int32>(Sections), static_cast<int32>(Quads),
+	                  HeightDataPerLayer, nullptr, MaterialLayerDataPerLayer,
+	                  ELandscapeImportAlphamapType::Additive,
+	                  TArrayView<const FLandscapeLayer>());
 	if (ULandscapeInfo* Info = Landscape->GetLandscapeInfo())
 	{
 		Info->UpdateLayerInfoMap(Landscape);
