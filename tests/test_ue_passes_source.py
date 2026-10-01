@@ -208,7 +208,7 @@ def test_the_calibration_frame_is_the_sun_alone_on_three_quads():
         assert f"CalibrationCapture->ShowFlags.Set{flag}(false);" in block, flag
     assert "CalibrationSun->SetAtmosphereSunLight(false);" in block
     assert "CalibrationSun->SetCastShadows(false);" in block
-    assert "CalibrationSun->SetCastCloudShadows(false);" in block
+    assert "CalibrationSun->bCastCloudShadows = false;" in block
     assert "PRM_UseShowOnlyList" in block and "ShowOnlyActors.Add(Rig);" in block
     assert "CaptureSource = ESceneCaptureSource::SCS_FinalColorHDR;" in block
     assert "CalibrationTarget->RenderTargetFormat = RTF_RGBA32f;" in block

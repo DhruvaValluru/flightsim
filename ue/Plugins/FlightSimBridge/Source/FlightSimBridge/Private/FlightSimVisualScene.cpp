@@ -793,7 +793,8 @@ bool FFlightSimVisualScene::BuildClouds(UWorld* World,
 	// loads it; a build where it did not is refused by name, because a
 	// cloud component with no material draws nothing while "clouds: on"
 	// would be recorded.
-	UMaterialInterface* CloudMaterial = Clouds->Material;
+	// A soft reference on UE 5.7: resolved (loaded if need be) here.
+	UMaterialInterface* CloudMaterial = Clouds->Material.LoadSynchronous();
 	if (CloudMaterial == nullptr)
 	{
 		CloudMaterial = LoadObject<UMaterialInterface>(nullptr, SceneDefaultCloudMaterialPath);
@@ -860,8 +861,11 @@ bool FFlightSimVisualScene::BuildClouds(UWorld* World,
 		Sun != nullptr ? Cast<UDirectionalLightComponent>(Sun->GetLightComponent()) : nullptr;
 	if (SunLight != nullptr)
 	{
-		SunLight->SetCastCloudShadows(true);
-		SunLight->SetCloudShadowStrength(1.0f);
+		// UE 5.7 has no setters for these: the properties, then a render
+		// state refresh so the change reaches the proxy.
+		SunLight->bCastCloudShadows = true;
+		SunLight->CloudShadowStrength = 1.0f;
+		SunLight->MarkRenderStateDirty();
 	}
 
 	CloudRecord->SetBoolField(TEXT("drawn"), true);

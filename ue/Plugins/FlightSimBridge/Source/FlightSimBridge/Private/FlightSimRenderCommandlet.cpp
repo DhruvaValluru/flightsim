@@ -4785,7 +4785,8 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// The sun alone, as stated: no atmosphere transmittance on it, no
 		// cloud shadow, no shadow at all (the frame is the last render).
 		CalibrationSun->SetAtmosphereSunLight(false);
-		CalibrationSun->SetCastCloudShadows(false);
+		CalibrationSun->bCastCloudShadows = false;   // no setter on UE 5.7
+		CalibrationSun->MarkRenderStateDirty();
 		CalibrationSun->SetCastShadows(false);
 		World->SendAllEndOfFrameUpdates();
 		FlushRenderingCommands();

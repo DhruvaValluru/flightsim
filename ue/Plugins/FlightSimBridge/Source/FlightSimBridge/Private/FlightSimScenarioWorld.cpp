@@ -5,6 +5,7 @@
 #include "Async/TaskGraphInterfaces.h"
 #include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
+#include "Containers/StringConv.h"
 #include "Containers/Ticker.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Engine.h"
@@ -21,6 +22,7 @@
 #include "Serialization/JsonSerializer.h"
 
 #include <cmath>
+#include <cstdlib>
 
 DEFINE_LOG_CATEGORY(LogFlightSimScenario);
 
@@ -575,11 +577,14 @@ namespace
 				{
 					// strtod to the end of the text: %.17g writes exponents
 					// ("1.2e-05"), which FCString::IsNumeric would refuse.
+					// (UE 5.7's FCString has no Strtod: the C library's strtod on
+					// the UTF-8 text, which is ASCII digits for any number.)
 					FString Text;
-					TCHAR* End = nullptr;
 					const bool bText = (*Fields)[Column]->TryGetString(Text) && !Text.IsEmpty();
-					Parsed[Column] = bText ? FCString::Strtod(*Text, &End) : 0.0;
-					if (!bText || End == nullptr || *End != TEXT('\0') || !FMath::IsFinite(Parsed[Column]))
+					const FTCHARToUTF8 TextUtf8(*Text);
+					char* End = nullptr;
+					Parsed[Column] = bText ? std::strtod(TextUtf8.Get(), &End) : 0.0;
+					if (!bText || End == nullptr || *End != '\0' || !FMath::IsFinite(Parsed[Column]))
 					{
 						return RefuseCard(Error, FString::Printf(
 							TEXT("card.gust_table: row %d field %d is not a number written as text"),
