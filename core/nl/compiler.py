@@ -539,11 +539,57 @@ def _duration(text: str) -> Quantity:
     return Quantity.default(120.0, "s", frm="long enough to settle and observe")
 
 
+#: Compass words -> degrees true, longest first ("north-east" before "north").
+COMPASS_WORDS: Tuple[Tuple[str, float], ...] = (
+    ("north-east", 45.0), ("northeast", 45.0), ("south-east", 135.0),
+    ("southeast", 135.0), ("south-west", 225.0), ("southwest", 225.0),
+    ("north-west", 315.0), ("northwest", 315.0),
+    ("north", 0.0), ("east", 90.0), ("south", 180.0), ("west", 270.0),
+)
+
+
 def _heading(text: str) -> Quantity:
     m = _search(r"heading\s*(\d{1,3})", text)
     if m:
         return Quantity.user(float(m.group(1)) % 360.0, "deg", frm=m.group(0).strip())
+    for word, degrees in COMPASS_WORDS:
+        m = _search(rf"\b(?:heading|headed|flying|fly|going|towards?)\s+(?:due\s+)?{word}(?:ward|wards)?\b",
+                    text)
+        if m:
+            return Quantity.user(degrees, "deg", frm=m.group(0).strip())
     return Quantity.default(0.0, "deg", frm="due north")
+
+
+#: Place words -> the curated location (core.terrain.glo30.LOCATIONS) whose
+#: bake stages the scene. Longest first; a place outside this list still
+#: needs the language model (or coordinates).
+PLACE_WORDS: Tuple[Tuple[str, str], ...] = (
+    ("grand canyon", "grand_canyon"), ("flint hills", "flint_hills"),
+    ("mount everest", "everest"), ("mt everest", "everest"),
+    ("mount fuji", "fuji"), ("mt fuji", "fuji"),
+    ("matterhorn", "matterhorn"), ("zermatt", "matterhorn"),
+    ("yosemite", "yosemite"), ("fuji", "fuji"), ("everest", "everest"),
+    ("kansas", "flint_hills"),
+)
+
+
+def _place(text: str):
+    """(latitude, longitude, terrain elevation) Quantities for a curated
+    place the prompt names, or None. The coordinates are the bake's own
+    origin and the elevation its measured datum, so the scene planner
+    stages that bake (inferred: the documented vocabulary mapping)."""
+    from ..terrain.glo30 import LOCATIONS
+    from .llm_compiler import LOCATION_TERRAIN_ELEVATION_M
+
+    for phrase, key in PLACE_WORDS:
+        if _search(rf"\b{re.escape(phrase)}\b", text):
+            location = LOCATIONS[key]
+            frm = f"{phrase!r}: the {key} bake's origin ({location.title})"
+            return (Quantity.inferred(location.origin_lat, "deg", frm=frm),
+                    Quantity.inferred(location.origin_lon, "deg", frm=frm),
+                    Quantity.inferred(LOCATION_TERRAIN_ELEVATION_M[key], "m",
+                                      frm=f"{phrase!r}: the {key} bake's datum"))
+    return None
 
 
 # -- cameras (Camera Phase 1; vocabulary completed in the gap closure) --
@@ -1127,6 +1173,7 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
             frm=f"typical cruise for the {model}")
         airspeed_kind = Quantity.default("cas")
     wind_speed, wind_direction = _wind(text, float(heading.value))
+    place = _place(text)
 
     spec = ScenarioSpec(
         name=name or _name_from(text),
@@ -1136,9 +1183,10 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
         airspeed=airspeed,
         airspeed_kind=airspeed_kind,
         heading=heading,
-        latitude=Quantity.default(0.0, "deg", frm="equator; no geography requested"),
-        longitude=Quantity.default(0.0, "deg", frm="prime meridian"),
-        terrain_elevation=_terrain(text),
+        latitude=place[0] if place else Quantity.default(
+            0.0, "deg", frm="equator; no geography requested"),
+        longitude=place[1] if place else Quantity.default(0.0, "deg", frm="prime meridian"),
+        terrain_elevation=place[2] if place else _terrain(text),
         duration=_duration(text),
         rate=Quantity.default(120.0, "Hz", frm="matches the UE plugin substep rate"),
         seed=Quantity.default(0, "dimensionless",

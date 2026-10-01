@@ -2109,6 +2109,12 @@ class RunManager:
             f"-scenario={card}", f"-telemetry={telemetry}",
             "-unattended", "-nopause", "-nosplash", "-nullrhi",
             "-stdout", "-FullStdOutLogOutput",
+            # This flight is not a parity sample: its recording IS the
+            # reference the labels are graded against, so turbulence, a
+            # gust schedule or orographic coupling are flown, not refused
+            # (measured on the owner's machine: a 'light turbulence' web
+            # run died here with capture.host_flight).
+            "-AllowNonParityEnvironment",
         ]
         if scene.get("terrain"):
             command += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]

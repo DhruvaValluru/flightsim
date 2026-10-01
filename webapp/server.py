@@ -117,6 +117,15 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
             "source": str(quantity.source), "from": quantity.frm,
             "std": quantity.std, "detail": quantity.detail,
         })
+    # The render's time of day (spec 9, optional, absent-canonical): always
+    # a row, so a stated one is visible and an unstated one can be typed.
+    environment_at = max(i for i, f in enumerate(fields) if f["section"] == "environment") + 1
+    fields.insert(environment_at, {
+        "section": "environment", "name": "time_of_day",
+        "value": spec.time_of_day.value, "unit": spec.time_of_day.unit,
+        "source": str(spec.time_of_day.source), "from": spec.time_of_day.frm,
+        "std": spec.time_of_day.std, "detail": spec.time_of_day.detail,
+    })
     # Cameras render as their own labeled blocks with per-field sources,
     # editable exactly like the scalar rows (the page writes edits into
     # dict.cameras[i] and /run re-parses the whole spec).
@@ -163,6 +172,10 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
     if "policy" in canonical_section:
         randomization_section["policy"] = canonical_section["policy"]
     spec_dict["randomization"] = randomization_section
+    # The time-of-day row's entry (omitted from the canonical form while
+    # unstated; read back unstated, so the digest is unmoved).
+    spec_dict.setdefault("environment", {}).setdefault(
+        "time_of_day", spec.time_of_day.to_dict())
     return {"digest": spec.digest(), "name": spec.name,
             "prompt": spec.prompt, "notes": spec.notes,
             "fields": fields, "cameras": cameras,
