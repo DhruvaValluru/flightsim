@@ -450,6 +450,10 @@ namespace
 		int32 ManifestVersion = 0;
 		FString OriginBasis;
 		double Triangles = 0.0;
+		// How many control surfaces the manifest declares. Zero is a model
+		// converted as one rigid body (the A-4's .mdl: "articulated":
+		// false), not a binding that failed.
+		int32 DeclaredSurfaces = 0;
 	};
 
 	bool BuildMeshAirframe(AActor* Aircraft, UFlightSimSurfaceAnimator* Animator,
@@ -606,6 +610,7 @@ namespace
 			Error = FString::Printf(TEXT("'%s' has no surfaces"), *ManifestPath);
 			return false;
 		}
+		Out.DeclaredSurfaces = Surfaces->Num();
 		for (const TSharedPtr<FJsonValue>& Value : *Surfaces)
 		{
 			const TSharedPtr<FJsonObject>* Entry = nullptr;
@@ -1619,7 +1624,16 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Animator->BindSurfaceComponent(TEXT("aileron_r"), Frame.RightAileronHinge);
 		Animator->BindSurfaceComponent(TEXT("rudder"), Frame.RudderHinge);
 	}
-	if (Animator->GetBoundSurfaceCount() == 0)
+	if (MeshAirframe.bLoaded && MeshAirframe.DeclaredSurfaces == 0)
+	{
+		// A rigid mesh declares no surfaces, so nothing is bound and nothing
+		// is claimed to move (measured on the owner's machine: the A-4 was
+		// refused here). render.json's surfaces block stays empty.
+		UE_LOG(LogFlightSimRender, Display,
+		       TEXT("mesh airframe '%s' is one rigid body: no control surfaces "
+		            "declared, none animated"), *MeshAirframe.Name);
+	}
+	else if (Animator->GetBoundSurfaceCount() == 0)
 	{
 		return Fail(TEXT("no surface binding is attached to anything; the animator "
 		                 "would compute deflections and move nothing"));
