@@ -96,6 +96,22 @@ def test_an_aircraft_the_prompt_names_overrules_the_models_guess():
     assert spec.aircraft.value == "B747"
 
 
+def test_a_heading_the_prompt_states_is_the_users():
+    """Measured 2026-10-01: "heading east" came back as a model guess and
+    the terrain planner re-aimed it to 19 deg. A stated heading is the
+    user's, whatever source the model claimed."""
+    client = fake_client({"fields": {"heading": entry(90.0, "model", "east")},
+                          "notes": [], "questions": []})
+    spec = compile_prompt_llm("fly the a4 past the matterhorn heading east",
+                              client=client).spec
+    assert float(spec.heading.value) == 90.0
+    assert str(spec.heading.source) == "user"
+    client = fake_client({"fields": {}, "notes": [], "questions": []})
+    spec = compile_prompt_llm("fly the a4 past the matterhorn",
+                              client=client).spec
+    assert str(spec.heading.source) == "default"
+
+
 def test_untouched_fields_are_bit_identical_to_regex_defaults():
     """An empty overlay must produce the regex compiler's exact defaults.
 

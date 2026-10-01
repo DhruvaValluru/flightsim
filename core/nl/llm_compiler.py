@@ -1346,6 +1346,20 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
                           f"aircraft is used")
         spec.aircraft = Quantity.user(model, frm=phrase)
 
+    # A heading the prompt STATES ("heading east", "heading 090") is the
+    # user's: claimed as a model guess, the terrain planner would re-aim it
+    # along the ridge (measured: "heading east" flew 19 deg).
+    from .compiler import _heading
+    stated = _heading(prompt.lower())
+    if str(stated.source) == "user" and (
+            str(spec.heading.source) != "user"
+            or float(spec.heading.value) != float(stated.value)):
+        if float(spec.heading.value) != float(stated.value):
+            spec.notes.append(f"the language model chose heading "
+                              f"{spec.heading.value} but the prompt says "
+                              f"{stated.frm!r}; the stated heading is used")
+        spec.heading = stated
+
     # Cameras overlay AFTER the fields: the default offsets and the
     # world-anchored placements depend on the (possibly model-chosen)
     # aircraft and terrain datum.
