@@ -159,9 +159,17 @@ def _sha256(path: Path) -> str:
 
 
 def fdm_xml_path(fdm: str) -> Path:
-    import jsbsim
+    """The XML the flight model actually flies: the repository-owned
+    airframe (assets/fdm_root, e.g. the regenerated A4) when there is one,
+    the stock JSBSim aircraft otherwise -- the same choice
+    core.fdm.aircraft.resolve makes, so labels and mesh placement read the
+    model that flew, not a stock file of the same name."""
+    from core.fdm.aircraft import REPO_ROOT_DIR, default_root_dir
 
-    return Path(jsbsim.get_default_root_dir()) / "aircraft" / fdm / f"{fdm}.xml"
+    owned = REPO_ROOT_DIR / "aircraft" / fdm / f"{fdm}.xml"
+    if owned.is_file():
+        return owned
+    return default_root_dir() / "aircraft" / fdm / f"{fdm}.xml"
 
 
 def _location_in(element) -> Tuple[float, float, float]:
