@@ -461,12 +461,15 @@ def render_cell(card: Path, frames: Path, terrain_path: Path, mesh: Path,
 
 def encode_clip(frames: Path, clip: Path) -> bool:
     clip.parent.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.run([
-        str(FFMPEG), "-y", "-framerate", str(FPS),
-        "-i", str(frames / "frame_%04d.png"),
-        "-c:v", "libx264", "-preset", "medium", "-crf", "19",
-        "-pix_fmt", "yuv420p", str(clip),
-    ], capture_output=True)
+    try:
+        proc = subprocess.run([
+            str(FFMPEG), "-y", "-framerate", str(FPS),
+            "-i", str(frames / "frame_%04d.png"),
+            "-c:v", "libx264", "-preset", "medium", "-crf", "19",
+            "-pix_fmt", "yuv420p", str(clip),
+        ], capture_output=True)
+    except OSError:                 # no ffmpeg on this machine: no clip
+        return False
     ok = proc.returncode == 0 and clip.is_file()
     if ok:
         # The mp4 is the deliverable; ~600 MB of PNGs per cell is not. Keep

@@ -1448,7 +1448,11 @@ def verify_host_determinism(run_dir=None) -> Check:
         for key in sorted(columns):
             digest.update(key.encode("utf-8"))
             for value in columns[key]:
-                digest.update(repr(float(value)).encode("utf-8"))
+                # A column the airframe lacks (the A-4's second engine) is
+                # recorded NaN and serialised null: hashed as NaN, so it
+                # still has to agree across the flights.
+                digest.update(repr(float("nan") if value is None
+                                   else float(value)).encode("utf-8"))
         digests[path.parent.name] = digest.hexdigest()
     unique = sorted(set(digests.values()))
     if len(unique) > 1:

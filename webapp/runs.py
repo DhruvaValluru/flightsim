@@ -1290,6 +1290,19 @@ STORM_LOOK = {"sun_elev": 10.0, "sun_azim": 180.0, "exposure_bias": 9.6,
               "fog_density": 0.007}
 
 
+def _ffmpeg(command: List[str]):
+    """Run ffmpeg; None when the binary is not on this machine.
+
+    An absent ffmpeg raised FileNotFoundError out of the clip step and
+    failed a capture run AFTER its frames, manifest and verification were
+    written (measured on the owner's Windows machine, no ffmpeg
+    installed): the images are the product, the mp4 a convenience."""
+    try:
+        return subprocess.run(command, capture_output=True)
+    except OSError:
+        return None
+
+
 def render_look_for(spec: ScenarioSpec, event_note) -> Optional[Dict]:
     """Which look the commandlet is given: the SAMPLED one when the
     randomisation block is on (its sun, exposure and fog are the
@@ -1995,14 +2008,14 @@ class RunManager:
             if len(sorted(directory.glob("frame_*.png"))) < 2:
                 continue          # a still is not a clip
             target = clips / f"{camera_id}.mp4"
-            done = subprocess.run([
+            done = _ffmpeg([
                 str(FFMPEG), "-y",
                 "-framerate", f"{self._capture_fps(manifest_path, camera_id):g}",
                 "-i", str(directory / "frame_%04d.png"),
                 "-c:v", "libx264", "-preset", "medium", "-crf", "19",
                 "-pix_fmt", "yuv420p", str(target),
-            ], capture_output=True)
-            if done.returncode == 0 and target.is_file():
+            ])
+            if done is not None and done.returncode == 0 and target.is_file():
                 made.append(camera_id)
         return made
 
@@ -2031,13 +2044,13 @@ class RunManager:
             if not sorted(directory.glob("frame_*.png")):
                 continue
             clip.parent.mkdir(parents=True, exist_ok=True)
-            done = subprocess.run([
+            done = _ffmpeg([
                 str(FFMPEG), "-y", "-framerate", str(FPS),
                 "-i", str(directory / "frame_%04d.png"),
                 "-c:v", "libx264", "-preset", "medium", "-crf", "19",
                 "-pix_fmt", "yuv420p", str(clip),
-            ], capture_output=True)
-            if done.returncode == 0 and clip.is_file():
+            ])
+            if done is not None and done.returncode == 0 and clip.is_file():
                 return camera_id
         return None
 
@@ -2687,8 +2700,18 @@ class RunManager:
             "turbulence_seed": seed if turbulent else None,
         }
         clip = out / "clip.mp4"
-        if not build_panel_clip(card, manifest, conditions, raw_clip, clip,
-                                fps=FPS):
+        try:
+            panel_ok = build_panel_clip(card, manifest, conditions, raw_clip,
+                                        clip, fps=FPS)
+        except Exception as exc:
+            # No ffmpeg (ffmpeg.missing) or no raw clip to stack onto: on a
+            # capture run that is "no panel", not a lost run.
+            if capture_solved is None:
+                raise
+            panel_ok = False
+            run.push("panel", f"no telemetry panel ({type(exc).__name__}: "
+                              f"{exc})")
+        if not panel_ok:
             if capture_solved is None:
                 run.push("failed", "panel composition failed")
                 return
@@ -2719,5 +2742,11 @@ class RunManager:
                 run.push("report", f"effect report unavailable "
                                    f"({type(exc).__name__}: {exc}); the "
                                    f"clip stands on its own")
-        run.clip = str(clip)
-        run.push("done", "clip ready")
+        if clip.is_file():
+            run.clip = str(clip)
+            run.push("done", "clip ready")
+        else:
+            # A capture run without ffmpeg: the images, labels, manifest and
+            # verification are the product and the page shows them.
+            run.push("done", "images ready (no mp4: install ffmpeg for "
+                             "clips -- winget install ffmpeg)")
