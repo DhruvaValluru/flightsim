@@ -32,10 +32,10 @@ def test_measure_adds_no_flag(tmp_path, monkeypatch):
     assert f"-width={WIDTH}" in command and f"-height={HEIGHT}" in command
 
 
-def test_beauty_is_the_default(tmp_path, monkeypatch):
+def test_measure_is_the_default(tmp_path, monkeypatch):
     monkeypatch.delenv("FLIGHTSIM_RENDER_QUALITY", raising=False)
     default = _command(tmp_path, monkeypatch)
-    monkeypatch.setenv("FLIGHTSIM_RENDER_QUALITY", "beauty")
+    monkeypatch.setenv("FLIGHTSIM_RENDER_QUALITY", "measure")
     assert _command(tmp_path, monkeypatch) == default
 
 

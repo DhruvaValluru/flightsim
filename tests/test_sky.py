@@ -218,13 +218,13 @@ def test_an_impossible_time_is_a_validation_violation():
 # -- the web app's wiring ---------------------------------------------------
 
 
-def test_the_physical_sky_is_the_default_and_legacy_opts_out(monkeypatch):
+def test_the_physical_sky_is_opt_in(monkeypatch):
     from webapp.runs import physical_sky_enabled
 
     monkeypatch.delenv("FLIGHTSIM_SKY", raising=False)
-    assert physical_sky_enabled(compile_prompt("fly the c172p"))
+    assert not physical_sky_enabled(compile_prompt("fly the c172p"))
     stated = compile_prompt("fly the c172p at dusk")
-    assert physical_sky_enabled(stated)
+    assert not physical_sky_enabled(stated)
     monkeypatch.setenv("FLIGHTSIM_SKY", "physical")
     assert physical_sky_enabled(stated)
     monkeypatch.setenv("FLIGHTSIM_SKY", "legacy")

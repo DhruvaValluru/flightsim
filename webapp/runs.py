@@ -1326,10 +1326,11 @@ def render_look_for(spec: ScenarioSpec, event_note) -> Optional[Dict]:
 
 #: Render quality presets (visual plan V0). "measure" is the configuration
 #: every gate and showcase calibration was measured under; "beauty" turns
-#: on Lumen/TSR/VSM in the commandlet at 1080p. Beauty is the DEFAULT
-#: (owner's request, 2026-10-01: the web app shows the best look);
-#: FLIGHTSIM_RENDER_QUALITY=measure returns to the measured configuration,
-#: which is what experiments/gate6_visual.py grades.
+#: on Lumen/TSR/VSM in the commandlet at 1080p and is OPT-IN via
+#: FLIGHTSIM_RENDER_QUALITY=beauty. Measure is the default again
+#: (2026-10-01): with beauty on by default, the owner's first A-4 capture
+#: failed mask_vs_geometry and mask_integers_only, and Phase 2's
+#: annotation gates were measured in the measure configuration.
 RENDER_QUALITIES = {
     "measure": None,
     "beauty": {"width": 1920, "height": 1080},
@@ -1338,8 +1339,8 @@ RENDER_QUALITIES = {
 
 def render_quality() -> str:
     """The configured render quality; ValueError names an unknown one."""
-    quality = os.environ.get("FLIGHTSIM_RENDER_QUALITY", "beauty").strip() \
-        or "beauty"
+    quality = os.environ.get("FLIGHTSIM_RENDER_QUALITY", "measure").strip() \
+        or "measure"
     if quality not in RENDER_QUALITIES:
         raise ValueError(
             f"FLIGHTSIM_RENDER_QUALITY={quality!r} is not one of "
@@ -1407,15 +1408,15 @@ def sun_look(spec: ScenarioSpec) -> Optional[Dict]:
 def physical_sky_enabled(spec: ScenarioSpec) -> bool:
     """Whether this render uses the physical sky (core.sky.plan).
 
-    On by default (owner's request, 2026-10-01): every render gets the
-    physical sky for the spec's time of day (noon when unstated).
-    ``FLIGHTSIM_SKY=legacy`` opts out: a stated time of day then drives
+    Opt-in with ``FLIGHTSIM_SKY=physical`` (it is unmeasured against the
+    annotation gates; the default stays the calibrated path). Otherwise
+    (unset or ``legacy``) a stated time of day drives
     the calibrated look's sun and exposure (:func:`sun_look`), whose
     commandlet flags are the measured ones, and an unstated one keeps the
     noon look byte-identical. experiments/sky_check.py measures it.
     """
     override = os.environ.get("FLIGHTSIM_SKY", "").strip().lower()
-    return override != "legacy"
+    return override == "physical"
 
 
 def night_lights_for(scene: Dict) -> Optional[Path]:
