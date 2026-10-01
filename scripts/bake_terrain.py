@@ -30,6 +30,17 @@ from core.terrain.synthesis import TerrainStatistics, generate  # noqa: E402
 DEFAULT_KEYS = ("matterhorn", "yosemite", "control")
 
 
+def has_datum(raw: Path) -> bool:
+    """Whether the bake's sidecar carries the vertical-datum block."""
+    from core.terrain.heightfield import Heightfield
+
+    try:
+        datum = Heightfield.read(raw).provenance.get("datum") or {}
+    except Exception:
+        return False
+    return isinstance(datum.get("undulation_m"), (int, float))
+
+
 def datum_line(key: str, raw: Path) -> str:
     """The vertical-datum line for a bake (P10), read back from ITS
     sidecar: the geoid undulation at the origin, the interpolation
@@ -59,6 +70,8 @@ def main(argv=None) -> int:
                          f"curated: {', '.join(LOCATIONS)}, plus 'control'")
     ap.add_argument("--all", action="store_true",
                     help="bake every curated location and the control ridge")
+    ap.add_argument("--force", action="store_true",
+                    help="re-bake locations that are already baked")
     args = ap.parse_args(argv)
 
     keys = list(args.keys) or list(DEFAULT_KEYS)
@@ -86,11 +99,18 @@ def main(argv=None) -> int:
             field.write(terrain_dir / "control_ridge")
             continue
         raw = terrain_dir / f"{key}.r16"
-        if raw.is_file():
+        if raw.is_file() and not args.force and has_datum(raw):
             print(f"  {key:<18} already baked ({raw})")
             print(datum_line(key, raw))
             continue
-        print(f"  {key:<18} baking from GLO-30 (fetch + ingest + verify)")
+        if raw.is_file():
+            # A bake from before the datum block is refused by every
+            # georeferenced run (datum.sidecar_without_datum, measured on
+            # the owner's machine), so it is re-baked, not skipped. The
+            # downloaded tiles are cached, so this is ingest + verify only.
+            print(f"  {key:<18} re-baking ({'--force' if args.force else 'no datum block in its sidecar'})")
+        else:
+            print(f"  {key:<18} baking from GLO-30 (fetch + ingest + verify)")
         bake(LOCATIONS[key], REPO / "data" / "glo30", terrain_dir)
         print(f"  {key:<18} done")
         print(datum_line(key, raw))
