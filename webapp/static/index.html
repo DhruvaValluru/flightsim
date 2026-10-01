@@ -426,7 +426,10 @@ function editedSpecDict() {
     // A row with no entry in the dict is skipped, never a crash: the
     // edit has nowhere to land, and the server re-validates anyway.
     if (!entry) return;
-    const parsed = parseFloat(input.value);
+    // Whole-string numbers only: parseFloat("17:30") is 17, which turned
+    // a clock time into a bare hour the sky planner refuses.
+    const text = input.value.trim();
+    const parsed = text === "" ? NaN : Number(text);
     // "true"/"false" typed into a switch row stay booleans: the
     // validator refuses a string there (a string "false" is truthy).
     const value = input.value === "true" ? true
