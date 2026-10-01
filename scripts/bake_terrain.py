@@ -30,6 +30,30 @@ from core.terrain.synthesis import TerrainStatistics, generate  # noqa: E402
 DEFAULT_KEYS = ("matterhorn", "yosemite", "control")
 
 
+def ensure_imagery(key: str, terrain_dir: Path, args) -> None:
+    """The Sentinel-2 cloudless drape (core/terrain/imagery.py) beside the
+    bake. Without it the renderer colours the terrain by elevation class
+    alone (measured on the owner's machine: a Matterhorn render with
+    "imagery": null looked untextured). Fetched once, verified, cached."""
+    sidecar = terrain_dir / f"{key}_imagery.json"
+    if args.no_imagery:
+        return
+    if sidecar.is_file() and not args.force:
+        print(f"  {'':<18} imagery: drape present ({sidecar.name})")
+        return
+    from core.terrain.imagery import drape
+
+    print(f"  {'':<18} imagery: fetching Sentinel-2 cloudless tiles and draping them")
+    try:
+        texture, verification = drape(LOCATIONS[key], terrain_dir / key,
+                                      REPO / "data" / "imagery_cache", terrain_dir)
+    except Exception as exc:          # the bake stands; the drape is said missing
+        print(f"  {'':<18} imagery: FAILED ({type(exc).__name__}: {exc}); "
+              f"the terrain renders untextured until this succeeds")
+        return
+    print(f"  {'':<18} imagery: {texture.name} (verified)")
+
+
 def has_datum(raw: Path) -> bool:
     """Whether the bake's sidecar carries the vertical-datum block."""
     from core.terrain.heightfield import Heightfield
@@ -72,6 +96,8 @@ def main(argv=None) -> int:
                     help="bake every curated location and the control ridge")
     ap.add_argument("--force", action="store_true",
                     help="re-bake locations that are already baked")
+    ap.add_argument("--no-imagery", action="store_true",
+                    help="skip the Sentinel-2 imagery drape")
     args = ap.parse_args(argv)
 
     keys = list(args.keys) or list(DEFAULT_KEYS)
@@ -102,6 +128,7 @@ def main(argv=None) -> int:
         if raw.is_file() and not args.force and has_datum(raw):
             print(f"  {key:<18} already baked ({raw})")
             print(datum_line(key, raw))
+            ensure_imagery(key, terrain_dir, args)
             continue
         if raw.is_file():
             # A bake from before the datum block is refused by every
@@ -114,6 +141,7 @@ def main(argv=None) -> int:
         bake(LOCATIONS[key], REPO / "data" / "glo30", terrain_dir)
         print(f"  {key:<18} done")
         print(datum_line(key, raw))
+        ensure_imagery(key, terrain_dir, args)
 
     print()
     print("Baked. The web app picks these up immediately (no restart needed):")

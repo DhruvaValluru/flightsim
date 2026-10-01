@@ -81,6 +81,10 @@ CHASE_OFFSETS: Dict[str, tuple] = {
     "B747": (-110.0, 0.0, 12.0),
     "A320": (-95.0, 0.0, 10.0),
     "c172p": (-28.0, 0.0, 4.0),
+    # The A-4 (12.2 m) used the B747 fallback, 110 m back, and rendered a
+    # few pixels wide (the owner's first Matterhorn frame); scaled from the
+    # c172p's framing by length.
+    "A4": (-42.0, 0.0, 6.0),
 }
 FALLBACK_CHASE_OFFSET = (-110.0, 0.0, 12.0)
 
