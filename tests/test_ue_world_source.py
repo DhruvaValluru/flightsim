@@ -93,12 +93,13 @@ def test_import_landscape_reads_the_manifest_and_refuses_by_name():
     assert "BakeSha.Equals(ExpectedBakeSha256, ESearchCase::IgnoreCase)" in body
     assert 'FPaths::ChangeExtension(ManifestPath, TEXT("r16"))' in body
     assert "EditorSha256Hex(Bytes.GetData(), Bytes.Num())" in body
-    # The Import call site (a consistency pin of the 5.5-5.7 signature) and
-    # the weight blend.
-    assert ("Landscape->Import(FGuid::NewGuid(), 0, 0, Resolution - 1, Resolution - 1,\n"
-            "\t                  static_cast<int32>(Sections), static_cast<int32>(Quads),\n"
-            "\t                  HeightDataPerLayer, nullptr, MaterialLayerDataPerLayer,\n"
-            "\t                  ELandscapeImportAlphamapType::Additive);") in body
+    # The Import call site: 5.7's signature (no heightmap file name) when the
+    # engine declares it, 5.5's otherwise, and the weight blend in both.
+    assert "if constexpr (requires {" in body and "ImportLandscape(Landscape);" in body
+    assert ("HeightDataPerLayer, MaterialLayerDataPerLayer,\n"
+            "\t\t\t              ELandscapeImportAlphamapType::Additive);") in body
+    assert ("HeightDataPerLayer, nullptr, MaterialLayerDataPerLayer,\n"
+            "\t\t\t              ELandscapeImportAlphamapType::Additive);") in body
     # The height encoding: the actor sits at the height sample 32768 encodes.
     assert "MinElevation + Relief * 32768.0 / 65535.0" in body
     # The rows: north-up (+Y) writes the .r16's row 0 (north) last.
