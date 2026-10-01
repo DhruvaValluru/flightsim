@@ -422,6 +422,9 @@ function editedSpecDict() {
       : input.dataset.block !== undefined
         ? dict[input.dataset.block][input.dataset.field]
         : dict[sections[name]][name];
+    // A row with no entry in the dict is skipped, never a crash: the
+    // edit has nowhere to land, and the server re-validates anyway.
+    if (!entry) return;
     const parsed = parseFloat(input.value);
     // "true"/"false" typed into a switch row stay booleans: the
     // validator refuses a string there (a string "false" is truthy).

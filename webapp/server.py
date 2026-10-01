@@ -152,6 +152,13 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
     # replacing the section wholesale dropped it and the page's digest
     # (of this dict, re-read by /run) forked from the one shown here.
     randomization_section = spec.randomization.to_dict()
+    # Every row the page shows needs an entry to edit: the spec-8 policy
+    # leaves are absent from to_dict() at their placeholders, so the page
+    # read entry.value of undefined and every camera button failed with
+    # "could not reach the server" (measured on the owner's machine).
+    # A placeholder read back is the placeholder, so the digest is unmoved.
+    for name, quantity in spec.randomization.quantities():
+        randomization_section.setdefault(name, quantity.to_dict())
     canonical_section = spec_dict.get("randomization") or {}
     if "policy" in canonical_section:
         randomization_section["policy"] = canonical_section["policy"]
