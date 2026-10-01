@@ -48,12 +48,24 @@ def compile_with(tier: str, prompt: str) -> None:
     from core.nl.llm_compiler import compile_prompt_llm
 
     os.environ["FLIGHTSIM_LLM"] = tier
+    client, model = resolve_client()
+    replies = []
+
+    def create(**kwargs):
+        reply = client.messages.create(**kwargs)
+        replies.append(reply.content[0].text)
+        return reply
+
+    from types import SimpleNamespace
+    recorder = SimpleNamespace(messages=SimpleNamespace(create=create))
     try:
-        spec = compile_prompt_llm(prompt).spec
+        spec = compile_prompt_llm(prompt, client=recorder, model=model).spec
     except Exception as exc:
         cause = exc.__cause__ or exc.__context__
         print(f"[{tier}] compile FAILED: {exc}"
               + (f"\n    cause: {type(cause).__name__}: {cause}" if cause else ""))
+        for text in replies:
+            print(f"    the model's raw reply:\n{text[:3000]}")
         return
     print(f"[{tier}] compiled: aircraft {spec.aircraft.value}, lat "
           f"{spec.latitude.value}, lon {spec.longitude.value}, heading "

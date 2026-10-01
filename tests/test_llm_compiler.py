@@ -972,6 +972,22 @@ def test_a_camera_list_nested_under_fields_is_lifted_not_refused():
     })
     with pytest.raises(LLMCompileError, match="unknown field 'cameras'"):
         compile_prompt_llm("chase the 747", client=not_a_list)
+    # Measured on the relay (gpt-4.1-mini, 2026-10-01): one camera mapping
+    # without its list, and the section stated in both places.
+    single = fake_client({
+        "fields": {"cameras": {"preset": entry("chase", "inferred", "chase")}},
+        "notes": [], "questions": [],
+    })
+    assert [str(c.preset.value) for c in
+            compile_prompt_llm("chase the 747", client=single).spec.cameras] == ["chase"]
+    both = fake_client({
+        "fields": {"cameras": [{"preset": entry("tower", "inferred", "tower")}]},
+        "cameras": [{"preset": entry("chase", "inferred", "chase")}],
+        "notes": [], "questions": [],
+    })
+    spec = compile_prompt_llm("chase the 747", client=both).spec
+    assert [str(c.preset.value) for c in spec.cameras] == ["chase"]
+    assert any("both under 'fields' and at the top level" in n for n in spec.notes)
 
 
 def test_the_prompt_s_shape_sentence_is_generated_from_the_schema():

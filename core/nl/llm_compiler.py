@@ -875,14 +875,37 @@ def _parse_payload(text: str, *, allow_questions: bool = True) -> Dict[str, Any]
     # recorded in the notes; anything else under that name still
     # refuses as the unknown field it is, and every per-camera rail
     # below stays as strict as before.
-    nested = fields.get("cameras")
-    if isinstance(nested, dict) and isinstance(nested.get("value"), list):
-        nested = nested["value"]
-    if isinstance(nested, list) and not payload["cameras"]:
-        fields.pop("cameras")
-        payload["cameras"] = nested
-        notes.append("the model nested 'cameras' under 'fields'; lifted to "
-                     "the top-level camera list (schema position)")
+    # The same holds for traffic (a list) and randomization (a mapping),
+    # and for the shapes gpt-4.1-mini was measured to send on the relay
+    # (2026-10-01, the owner's machine: "unknown field 'cameras'" with the
+    # lift above in place): the section wrapped as {"value": ...}, a single
+    # camera mapping instead of a list, or the section stated BOTH under
+    # fields and at the top level. The top-level statement wins; a nested
+    # copy is lifted only into an empty slot, otherwise dropped -- either
+    # way recorded in the notes. Nothing is guessed: the lifted entries
+    # face every per-entry rail below exactly as top-level ones do.
+    for section, kind in (("cameras", list), ("traffic", list),
+                          ("randomization", dict)):
+        if section not in fields:
+            continue
+        nested = fields.pop(section)
+        if isinstance(nested, dict) and "value" in nested \
+                and isinstance(nested["value"], kind):
+            nested = nested["value"]
+        if (kind is list and isinstance(nested, dict)
+                and not {"value", "source", "from"} & set(nested)):
+            nested = [nested]           # one entry stated without its list
+        if not isinstance(nested, kind):
+            # A provenanced scalar ({"value": "chase", ...}) is not a
+            # camera list: the unknown field it is, by name, as before.
+            raise _fail(f"unknown field {section!r}")
+        if not payload[section]:
+            payload[section] = nested
+            notes.append(f"the model nested {section!r} under 'fields'; lifted "
+                         f"to the top-level {section} (schema position)")
+        else:
+            notes.append(f"the model stated {section!r} both under 'fields' and "
+                         f"at the top level; the top-level one is used")
 
     questions = payload["questions"]
     if not isinstance(questions, list):
