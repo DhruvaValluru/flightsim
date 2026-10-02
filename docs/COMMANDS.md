@@ -138,6 +138,20 @@ Write and return the campaign's report.json: yield against the target, coverage 
 * **CLI:** `python -m flightsim.campaign --out DIR --report`
 * **UI:** GET /generate/{id}; the review state
 
+## `bake`
+
+Prepare the terrain a spec over a real place needs: a curated location by name (or 'control', the synthesised control ridge) or any coordinates (an on-demand GLO-30 bake), fetched, ingested and verified through the one bake pipeline. A whole bake already on disk is reused unless force; a failed bake is refused by name and never written unverified.
+
+| parameter | type | required | default |
+|---|---|---|---|
+| `location` | string | no | "" |
+| `latitude` | number or null | no | null |
+| `longitude` | number or null | no | null |
+| `force` | boolean | no | false |
+
+* **CLI:** `python scripts/bake_terrain.py <location>  (a curated location, or control)`
+* **UI:** POST /bake {latitude, longitude}; the page's answer to terrain.unbaked
+
 ## The schema, verbatim
 
 ```json
@@ -377,6 +391,39 @@ Write and return the campaign's report.json: yield against the target, coverage 
    "required": [
     "campaign_id"
    ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "bake",
+  "description": "Prepare the terrain a spec over a real place needs: a curated location by name (or 'control', the synthesised control ridge) or any coordinates (an on-demand GLO-30 bake), fetched, ingested and verified through the one bake pipeline. A whole bake already on disk is reused unless force; a failed bake is refused by name and never written unverified.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "location": {
+     "type": "string",
+     "default": ""
+    },
+    "latitude": {
+     "type": [
+      "number",
+      "null"
+     ],
+     "default": null
+    },
+    "longitude": {
+     "type": [
+      "number",
+      "null"
+     ],
+     "default": null
+    },
+    "force": {
+     "type": "boolean",
+     "default": false
+    }
+   },
+   "required": [],
    "additionalProperties": false
   }
  }

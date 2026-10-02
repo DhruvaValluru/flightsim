@@ -1,7 +1,7 @@
 """Phase 2, package H: the agentic controller with stated authority
 (contracts §7; brainstorm §7).
 
-The tool layer is ten typed functions over the library that exists;
+The tool layer is eleven typed functions over the library that exists;
 the policy denies BY NAME (``authority.stated_field``,
 ``authority.validation_token``, ``authority.refusal_is_not_a_run``,
 ``authority.budget``) and every call is a line of ``trace.jsonl``. A
@@ -61,10 +61,10 @@ def _trace(path):
 
 # -- the tool layer: schemas, the doc, the equivalents -------------------------------
 
-def test_the_ten_tool_schemas_are_drawn_from_the_signatures_and_the_doc_is_current():
+def test_the_eleven_tool_schemas_are_drawn_from_the_signatures_and_the_doc_is_current():
     listed = schemas()
     assert [s["name"] for s in listed] == list(TOOL_NAMES)
-    assert len(listed) == 10 and set(EQUIVALENTS) == set(TOOL_NAMES)
+    assert len(listed) == 11 and set(EQUIVALENTS) == set(TOOL_NAMES)
     by_name = {s["name"]: s for s in listed}
     assert by_name["compile"]["parameters"]["required"] == ["prompt"]
     assert by_name["run"]["parameters"]["required"] == ["case_id", "validation_token"]
@@ -293,6 +293,100 @@ def test_rogue_agent_exceeds_the_budgets(tmp_path):
     with pytest.raises(Denial) as caught:
         Policy(Budget(max_calls=0)).check("compile", {})
     assert caught.value.explain()["rule"] == "authority.budget"
+
+
+# -- the bake tool: the terrain a real place needs, no network in the suite -----------------
+
+@pytest.fixture
+def fake_bakes(tmp_path, monkeypatch):
+    """The one bake pipeline (core.terrain.glo30.bake) replaced by a stub
+    that writes a whole bake (samples + sidecar) and counts its calls;
+    the tool's and the web app's terrain directories point at tmp_path."""
+    import core.agent.tools as tools_module
+    import core.terrain.glo30 as glo30
+    import webapp.runs as runs
+
+    calls = []
+
+    def bake(location, cache_dir, out_dir, **kwargs):
+        calls.append((location.key, Path(cache_dir), Path(out_dir)))
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / f"{location.key}.r16").write_bytes(b"\0\0")
+        (out_dir / f"{location.key}.json").write_text("{}", encoding="utf-8")
+        return out_dir / f"{location.key}.r16", {"ok": True}
+
+    terrain = tmp_path / "terrain"
+    monkeypatch.setattr(glo30, "bake", bake)
+    monkeypatch.setattr(runs, "bake", bake)
+    monkeypatch.setattr(tools_module, "TERRAIN_DIR", terrain)
+    monkeypatch.setattr(runs, "TERRAIN_DIR", terrain / "web")
+    return calls, terrain
+
+
+def test_the_bake_tool_prepares_terrain_through_the_one_pipeline(tmp_path, fake_bakes):
+    """A curated location as scripts/bake_terrain.py bakes it, any
+    coordinates as the page's POST /bake does (same directory, same scene
+    sidecar), a whole bake reused rather than fetched again -- every call
+    on the trace, every failure refused BY NAME (terrain.unbaked)."""
+    import webapp.runs as runs
+
+    calls, terrain = fake_bakes
+    tools = _tools(tmp_path / "t", policy=Policy(Budget(max_bakes=10)))
+    curated = tools.call("bake", location="Matterhorn", reason="the prompt names it")
+    assert curated["baked"] and not curated["reused"] and curated["network"]
+    assert curated["terrain"] == str(terrain / "matterhorn")
+    assert calls[-1][0] == "matterhorn" and calls[-1][2] == terrain
+    again = tools.call("bake", location="matterhorn", reason="already there")
+    assert again["reused"] and not again["baked"] and len(calls) == 1
+
+    # Coordinates: the web app's bake_on_demand, entry for entry.
+    dynamic = tools.call("bake", latitude=46.5, longitude=8.0, reason="a place off the list")
+    web = runs.bake_on_demand(46.5, 8.0)
+    sidecar = json.loads((terrain / "dynamic" / f"{dynamic['key']}.scene.json")
+                         .read_text(encoding="utf-8"))
+    web_sidecar = json.loads((terrain / "web" / "dynamic" / f"{web['key']}.scene.json")
+                             .read_text(encoding="utf-8"))
+    assert sidecar == web_sidecar and dynamic["key"] == web["key"]
+    assert {k: dynamic[k] for k in sidecar} == sidecar
+
+    # Refusals by name, the catalogue's sentence: unknown, ambiguous, failed.
+    for kwargs in ({"location": "atlantis"}, {"location": "fuji", "latitude": 1.0},
+                   {}, {"latitude": 95.0, "longitude": 0.0}):
+        refused = tools.call("bake", reason="bad arguments", **kwargs)
+        assert refused["refused"] == "terrain.unbaked", kwargs
+        assert refused["sentence"] == render("terrain.unbaked")
+    from core.terrain.dem import DEMError
+    import core.terrain.glo30 as glo30
+
+    def ocean(location, cache_dir, out_dir, **kwargs):
+        raise DEMError("no GLO-30 tile covers open ocean")
+
+    glo30.bake = ocean        # the fixture's monkeypatch restores it
+    refused = tools.call("bake", location="everest", force=True, reason="no tiles")
+    assert refused["refused"] == "terrain.unbaked"
+    assert "open ocean" in refused["detail"]["error"]
+    assert not (terrain / "everest.r16").exists()     # nothing unverified written
+    rows = [r for r in _trace(tools.trace.path) if r["tool"] == "bake"]
+    assert len(rows) == 8 and rows[0]["input"]["location"] == "Matterhorn"
+
+
+def test_the_bake_tool_has_its_own_allowance(tmp_path, fake_bakes):
+    """The one network tool is counted against Budget.max_bakes beside
+    the call budget: the third bake of a session is denied by name."""
+    tools = _tools(tmp_path / "t", policy=Policy(Budget(max_bakes=2)))
+    assert "refused" not in tools.call("bake", location="fuji", reason="1")
+    assert "refused" not in tools.call("bake", location="yosemite", reason="2")
+    denied = tools.call("bake", location="everest", reason="3")
+    assert denied["refused"] == "authority.budget"
+    assert "3 terrain bakes" in denied["message"] and "allowance is 2" in denied["message"]
+    assert [r["policy"].get("rule") for r in _trace(tools.trace.path)] == [
+        None, None, "authority.budget"]
+    # The policy names the tool: it carries no spec and needs no token.
+    from core.agent.policy import NETWORK_TOOLS, SPEC_TOOLS, TOKEN_TOOLS
+
+    assert NETWORK_TOOLS == ("bake",)
+    assert "bake" not in SPEC_TOOLS and "bake" not in TOKEN_TOOLS
 
 
 # -- the cooperative agent ------------------------------------------------------------------

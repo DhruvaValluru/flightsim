@@ -6,7 +6,7 @@
 | a field whose source is ``user``, ``inferred`` or ``sampled`` is never written; a system-chosen field moves only through a recorded edit | ``authority.stated_field`` |
 | ``run``, ``render`` and ``export`` need the token ``validate()`` minted for that exact spec digest | ``authority.validation_token`` |
 | a spec carrying a refusal is not run | ``authority.refusal_is_not_a_run`` |
-| max tool calls, max re-samples per slot, max wall time | ``authority.budget`` |
+| max tool calls, max re-samples per slot, max terrain bakes, max wall time | ``authority.budget`` |
 
 The checks are one function, :meth:`Policy.check`, that the tool layer
 calls BEFORE every tool with the tool's name and its keyword arguments
@@ -32,6 +32,11 @@ tool layer mints (``sha256(spec_digest + "validated")``): the thing that
 produces the token is not the thing that verifies it. A token is
 minted only by ``validate()`` and only for a spec with no refusal, so
 "has a token" means "validated exactly as it is now".
+
+``bake`` is the one tool that reaches the network (GLO-30 tiles, tens
+of MB and minutes per place): it carries no spec and no token, and is
+counted against its own allowance (``Budget.max_bakes``) beside the
+call budget, so a loop that bakes place after place is stopped by name.
 
 Not claimed: a cryptographic secret -- the token is HMAC-free by
 contract and stops an assistant from skipping validation, not an
@@ -67,6 +72,8 @@ EDIT_SOURCES = ("derived", "model")
 SPEC_TOOLS = ("validate", "plan_campaign")
 #: Tools that need the validation token.
 TOKEN_TOOLS = ("run", "render", "export")
+#: Tools that reach the network (counted against ``Budget.max_bakes``).
+NETWORK_TOOLS = ("bake",)
 #: The one rule name the token binds to.
 TOKEN_SALT = "validated"
 
@@ -103,6 +110,9 @@ class Budget:
     max_calls: int = 60
     max_resamples_per_slot: int = 3
     max_wall_seconds: float = 1800.0
+    #: Terrain bakes (the network tool) per session: a campaign needs
+    #: the ground of the place it names, rarely more than one.
+    max_bakes: int = 2
 
 
 # -- provenance, flattened ------------------------------------------------------
@@ -188,6 +198,7 @@ class Policy:
     calls: int = 0
     started: Optional[float] = None
     resamples: Dict[str, int] = field(default_factory=dict)
+    bakes: int = 0
 
     # -- what the tools tell the policy ----------------------------------------------
 
@@ -240,7 +251,21 @@ class Policy:
             self._check_token(kwargs.get("validation_token"), spec_digest)
         if tool == "sample":
             self._check_resamples(kwargs)
+        if tool in NETWORK_TOOLS:
+            self._check_bakes(kwargs)
         return {"ok": True}
+
+    def _check_bakes(self, kwargs: Dict[str, Any]) -> None:
+        """Every attempted bake counts (a reused bake too: whether it is
+        on disk is the tool's answer, not the policy's)."""
+        self.bakes += 1
+        if self.bakes > int(self.budget.max_bakes):
+            where = kwargs.get("location") or (kwargs.get("latitude"), kwargs.get("longitude"))
+            raise Denial(constraint="authority.budget",
+                         message=f"{self.bakes} terrain bakes (this one {where!r}); the "
+                         f"allowance is {self.budget.max_bakes} -- each fetches GLO-30 "
+                         f"tiles from the network",
+                         detail={"bakes": self.bakes, "max_bakes": self.budget.max_bakes})
 
     def _check_budget(self) -> None:
         if self.calls > int(self.budget.max_calls):
@@ -318,4 +343,5 @@ class Policy:
 
 __all__ = ["RULES", "RULE_STATED_FIELD", "RULE_TOKEN", "RULE_REFUSAL", "RULE_BUDGET",
            "STATED_SOURCES", "SYSTEM_SOURCES", "EDIT_SOURCES", "SPEC_TOOLS", "TOKEN_TOOLS",
+           "NETWORK_TOOLS",
            "Denial", "Budget", "Policy", "flatten", "stated_moves", "expected_token"]

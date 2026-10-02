@@ -1,7 +1,8 @@
-"""The typed tools (contracts §7; brainstorm §7.1): ten functions with
-JSON schemas drawn from their own signatures, each a thin call into
-the library that already exists, guarded by :class:`core.agent.policy.
-Policy` on every call and written to ``trace.jsonl`` on every call.
+"""The typed tools (contracts §7; brainstorm §7.1): eleven functions
+with JSON schemas drawn from their own signatures, each a thin call
+into the library that already exists, guarded by :class:`core.agent.
+policy.Policy` on every call and written to ``trace.jsonl`` on every
+call.
 
     compile(prompt, answers?)            -> {spec, spec_digest, questions, refusals, tier}
     validate(spec)                       -> {ok, spec_digest, violations, validation_token}
@@ -13,6 +14,7 @@ Policy` on every call and written to ``trace.jsonl`` on every call.
     export(campaign_id, format, token)   -> {dataset_path, card}
     inspect(run_id, frame?)              -> {overlay_png, records}
     report(campaign_id)                  -> {yield, coverage, refusals}
+    bake(location? | latitude, longitude) -> {key, terrain, baked, reused}
 
 ``validate`` is the tenth: the contract's nine plus the one that
 MINTS the ``validation_token`` (``sha256(spec digest + "validated")``,
@@ -27,7 +29,14 @@ written). ``render`` reports the frames of a run and whether pixels
 exist; with no engine on the host nothing draws and the tool says so
 rather than pretending. ``verify`` re-runs the verifier read-only;
 it never writes ``verification.json`` (only ``write_verification``
-does, inside the run stage).
+does, inside the run stage). ``bake`` is the eleventh: the terrain a
+spec over a real place needs (``terrain.unbaked``), prepared through
+the one verified bake pipeline (``core.terrain.glo30.bake``) exactly as
+``scripts/bake_terrain.py`` (a curated location, or the synthesised
+control ridge) and the page's ``POST /bake`` (any coordinates;
+``webapp.runs.bake_on_demand``'s directory and scene sidecar) do. It
+is the only tool that reaches the network, so the policy counts it
+against its own allowance (``Budget.max_bakes``).
 
 Every call goes through :meth:`Tools.call`: the policy check first
 (a denial is returned as ``{"refused": name, "sentence", "hint"}``
@@ -61,8 +70,26 @@ from .policy import (
 from .trace import TRACE, Trace
 
 TOOL_NAMES = ("compile", "validate", "plan_campaign", "sample", "run", "render",
-              "verify", "export", "inspect", "report")
+              "verify", "export", "inspect", "report", "bake")
 TOKEN_SALT = "validated"
+REPO = Path(__file__).resolve().parents[2]
+#: Where bakes live: the directory the web app's scene picker and the
+#: capture CLI read (webapp.runs.TERRAIN_DIR, scripts/bake_terrain.py).
+TERRAIN_DIR = REPO / "runs" / "terrain"
+#: The GLO-30 tile cache every bake path shares.
+GLO30_CACHE = REPO / "data" / "glo30"
+
+
+class BakeRefused(Exception):
+    """A bake that could not be made, by name (``terrain.unbaked``: the
+    terrain asked for is still not prepared); the cause rides in
+    ``detail``."""
+
+    def __init__(self, message: str, detail: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message)
+        self.constraint = "terrain.unbaked"
+        self.message = message
+        self.detail = dict(detail or {})
 
 
 def mint_token(spec_digest: str) -> str:
@@ -141,6 +168,8 @@ EQUIVALENTS: Dict[str, Dict[str, str]] = {
                 "ui": "the overlays under the frames page"},
     "report": {"cli": "python -m flightsim.campaign --out DIR --report",
                "ui": "GET /generate/{id}; the review state"},
+    "bake": {"cli": "python scripts/bake_terrain.py <location>  (a curated location, or control)",
+             "ui": "POST /bake {latitude, longitude}; the page's answer to terrain.unbaked"},
 }
 
 
@@ -649,9 +678,106 @@ class Tools:
                 "report_path": str(campaign.dir / "report.json"),
                 "not_claimed": payload.get("not_claimed")}
 
+    # -- 11. bake ------------------------------------------------------------------------------
+
+    def bake(self, location: str = "", latitude: Optional[float] = None,
+             longitude: Optional[float] = None, force: bool = False) -> Dict[str, Any]:
+        """Prepare the terrain a spec over a real place needs: a curated
+        location by name (or 'control', the synthesised control ridge) or
+        any coordinates (an on-demand GLO-30 bake), fetched, ingested and
+        verified through the one bake pipeline. A whole bake already on
+        disk is reused unless force; a failed bake is refused by name and
+        never written unverified."""
+        from core.terrain.dem import DEMError
+        from core.terrain.glo30 import LOCATIONS
+
+        name = str(location or "").strip().lower()
+        coordinates = latitude is not None or longitude is not None
+        if name and coordinates:
+            raise BakeRefused("name a location OR give coordinates, not both",
+                              {"location": location, "latitude": latitude,
+                               "longitude": longitude})
+        if not name and (latitude is None or longitude is None):
+            raise BakeRefused("name a curated location (or 'control') or give both "
+                              "latitude and longitude",
+                              {"curated": sorted(LOCATIONS) + ["control"]})
+        try:
+            if name == "control":
+                return self._bake_control(bool(force))
+            if name:
+                if name not in LOCATIONS:
+                    raise BakeRefused(f"{location!r} is not a curated location "
+                                      f"({', '.join(sorted(LOCATIONS))}, or control); give "
+                                      f"its coordinates for an on-demand bake",
+                                      {"curated": sorted(LOCATIONS) + ["control"]})
+                return self._bake_curated(name, bool(force))
+            return self._bake_coordinates(float(latitude), float(longitude), bool(force))
+        except (DEMError, OSError, ValueError) as exc:
+            # The fetch, the ingest or the verification said no (open
+            # ocean has no tiles; a network that refuses): the terrain is
+            # still not prepared, and nothing unverified was written.
+            raise BakeRefused(f"the bake failed: {type(exc).__name__}: {exc}",
+                              {"error": f"{type(exc).__name__}: {exc}"}) from exc
+
+    @staticmethod
+    def _whole(stem: Path) -> bool:
+        """A bake is the samples AND the sidecar (webapp.runs.baked)."""
+        return stem.with_suffix(".r16").is_file() and stem.with_suffix(".json").is_file()
+
+    def _bake_control(self, force: bool) -> Dict[str, Any]:
+        """The web app's terrain fail-safe ridge, with the parameters
+        scripts/bake_terrain.py and the showcase matrix use."""
+        from core.terrain.synthesis import DEMO_RIDGE, TerrainStatistics, generate
+
+        stem = TERRAIN_DIR / "control_ridge"
+        reused = self._whole(stem) and not force
+        if not reused:
+            TERRAIN_DIR.mkdir(parents=True, exist_ok=True)
+            generate(size=DEMO_RIDGE["size"], pixel_size_m=DEMO_RIDGE["pixel_size_m"],
+                     statistics=TerrainStatistics(rms_slope_deg=DEMO_RIDGE["rms_slope_deg"]),
+                     seed=DEMO_RIDGE["seed"], base_elevation_m=DEMO_RIDGE["base_elevation_m"],
+                     name="control_ridge").write(stem)
+        return {"key": "control", "kind": "synthesised control ridge (not a place)",
+                "terrain": str(stem), "baked": not reused, "reused": reused,
+                "network": False}
+
+    def _bake_curated(self, key: str, force: bool) -> Dict[str, Any]:
+        """One curated location, as scripts/bake_terrain.py bakes it."""
+        from core.terrain.glo30 import LOCATIONS, bake
+
+        stem = TERRAIN_DIR / key
+        reused = self._whole(stem) and not force
+        if not reused:
+            bake(LOCATIONS[key], GLO30_CACHE, TERRAIN_DIR)
+        return {"key": key, "kind": "real (Copernicus GLO-30)",
+                "title": LOCATIONS[key].title, "terrain": str(stem),
+                "baked": not reused, "reused": reused, "network": not reused}
+
+    def _bake_coordinates(self, lat: float, lon: float, force: bool) -> Dict[str, Any]:
+        """Any coordinates, as the page's POST /bake bakes them
+        (webapp.runs.bake_on_demand): the dynamic directory, and the
+        scene sidecar that registers the bake with the scene picker."""
+        from core.terrain.glo30 import bake, dynamic_location
+
+        place = dynamic_location(lat, lon)
+        dynamic_dir = TERRAIN_DIR / "dynamic"
+        stem = dynamic_dir / place.key
+        reused = stem.with_suffix(".r16").is_file() and not force
+        if not reused:
+            bake(place, GLO30_CACHE, dynamic_dir)
+        entry = {"key": place.key, "title": place.title,
+                 "origin_lat": place.origin_lat, "origin_lon": place.origin_lon,
+                 "crs": place.crs, "identity": "source-verified only (no named summits)"}
+        dynamic_dir.mkdir(parents=True, exist_ok=True)
+        (dynamic_dir / f"{place.key}.scene.json").write_text(
+            json.dumps(entry, indent=1), encoding="utf-8")
+        return {**entry, "kind": "real (Copernicus GLO-30, on-demand bake)",
+                "terrain": str(stem), "baked": not reused, "reused": reused,
+                "network": not reused}
+
 
 def schemas() -> List[Dict[str, Any]]:
-    """The ten tool schemas, drawn from :class:`Tools`' signatures."""
+    """The eleven tool schemas, drawn from :class:`Tools`' signatures."""
     return [tool_schema(getattr(Tools, name), name) for name in TOOL_NAMES]
 
 

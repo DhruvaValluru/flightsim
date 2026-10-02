@@ -5,13 +5,15 @@ Three layers, each usable without a model:
 
 * :mod:`core.agent.tools` -- the typed tools (``compile``, ``validate``,
   ``plan_campaign``, ``sample``, ``run``, ``render``, ``verify``,
-  ``export``, ``inspect``, ``report``) with JSON schemas drawn from
-  their signatures; each a thin call into the library that already
-  exists (the compilers, the campaign, the verifier, the overlay).
+  ``export``, ``inspect``, ``report``, ``bake``) with JSON schemas
+  drawn from their signatures; each a thin call into the library that
+  already exists (the compilers, the campaign, the verifier, the
+  overlay, the terrain bake).
 * :mod:`core.agent.policy` -- the deterministic authority checks:
   stated fields are immutable, ``run``/``render``/``export`` need the
   validation token ``validate()`` minted for that spec digest, a spec
-  carrying a refusal is not run, and budgets end the loop. Every
+  carrying a refusal is not run, and budgets (calls, re-samples,
+  terrain bakes, wall time) end the loop. Every
   denial is BY NAME (``authority.*`` in the catalogue).
 * :mod:`core.agent.controller` -- the loop: plan from the request,
   call tools, read results, re-sample only system-chosen fields,
