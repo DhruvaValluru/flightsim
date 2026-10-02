@@ -2169,6 +2169,35 @@ mutate core/dataset/export.py \
     "the card names every airframe in the dataset" \
     tests/test_dataset_formats.py || failures=$((failures+1))
 
+mutate core/dataset/export.py \
+    '        if image == "ideal" and tight is not None:' \
+    '        if False:  # MUTATED: the projected box always' \
+    "the 2-D box is the mask's wherever the record carries one" \
+    tests/test_dataset_boxes.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '        if not_run:
+            raise ExportError(
+                "export.annotation_not_run",' \
+    '        if False:  # MUTATED: NOT RUN gates count as checked
+            raise ExportError(
+                "export.annotation_not_run",' \
+    "engine labels whose annotation gates did not run refuse export" \
+    tests/test_dataset_boxes.py || failures=$((failures+1))
+
+mutate core/dataset/export.py \
+    '                      and str(c.get("detail", "")).startswith(SUPERSEDED_MARK))}' \
+    '                      and False)}  # MUTATED: a superseded check never counts' \
+    "a superseded depth_range does not block a manifest-6 run's depth" \
+    tests/test_dataset_boxes.py || failures=$((failures+1))
+
+mutate core/capture/labels.py \
+    '            "fraction_in_frame": fraction_in_frame(labels["bbox_2d"],
+                                                   labels["bbox_2d_unclipped"]),' \
+    '            "fraction_in_frame": None,  # MUTATED: no producer' \
+    "every aircraft object record carries fraction_in_frame" \
+    tests/test_dataset_boxes.py || failures=$((failures+1))
+
 mutate core/dataset/batch.py \
     '    bind_verification(run_dir)      # the verdict names the manifest it graded' \
     '    pass  # MUTATED: the batch verdict is not bound' \

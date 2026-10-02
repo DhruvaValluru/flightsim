@@ -176,11 +176,25 @@ def _with_normals(run_dir: Path) -> None:
         path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _gates_stated_pass() -> list:
+    """The annotation gates as PASS, FABRICATED and said so: the rig's
+    records carry engine labels (attach), so the export refuses
+    ``export.annotation_not_run`` unless every gate ran; the rig's box
+    airframe is not one the gates can grade (no ``box_body_m``), and the
+    gates are tests/test_annotation_gates.py's subject, not this file's."""
+    from core.dataset.export import ANNOTATION_GATES
+
+    return [{"name": name, "status": verify.PASS,
+             "detail": "stated PASS by tests/test_passes_export.py (not graded here)"}
+            for name in ANNOTATION_GATES]
+
+
 def _verdict(run_dir: Path, drop=()) -> None:
     """verification.json from the verifier's own S2 checks (each must PASS
-    here); ``drop`` leaves a check out, as a verifier without it would."""
+    here) plus the annotation gates stated PASS (``_gates_stated_pass``);
+    ``drop`` leaves a check out, as a verifier without it would."""
     manifest = load(run_dir)
-    checks = []
+    checks = _gates_stated_pass()
     for name in S2_CHECKS:
         if name in drop:
             continue
@@ -303,13 +317,15 @@ def test_a_pass_file_the_verifier_did_not_grade_refuses_the_export_by_name(tmp_p
     check = verify.verify_points_vs_depth(manifest, run_dir)
     assert check.status == verify.PASS
     (run_dir / verify.VERIFICATION_FILE).write_text(json.dumps(
-        {"ok": True, "passed": 0, "failed": 0, "not_run": 0, "checks": []}), encoding="utf-8")
+        {"ok": True, "passed": 0, "failed": 0, "not_run": 0, "checks": _gates_stated_pass()}),
+        encoding="utf-8")
     with pytest.raises(ExportError) as err:
         export([run_dir], tmp_path / "out", "kitti", labels_only=True, fractions=(1.0, 0.0, 0.0))
     assert err.value.constraint == "export.unverified_labels"
     assert "points_vs_depth" in err.value.message
     (run_dir / verify.VERIFICATION_FILE).write_text(json.dumps(
-        {"ok": True, "passed": 1, "failed": 0, "not_run": 0, "checks": [check.to_dict()]}),
+        {"ok": True, "passed": 1, "failed": 0, "not_run": 0,
+         "checks": _gates_stated_pass() + [check.to_dict()]}),
         encoding="utf-8")
     card = export([run_dir], tmp_path / "out2", "kitti", labels_only=True, fractions=(1.0, 0.0, 0.0))
     assert (tmp_path / "out2" / "train" / "velodyne").is_dir()

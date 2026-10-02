@@ -18,8 +18,9 @@ each, with ONE card at ``<out>``):
   ``annotations/instances_<split>.json`` (categories from the taxonomy
   when the manifests carry one, else one per airframe; the seven
   keypoints in KEYPOINT_NAMES order with COCO visibility 2 = in frame /
-  0 = not, bbox as ``[x, y, w, h]`` from the CLIPPED box,
-  ``truncation``, the 3-D box and horizon carried as extra keys, and
+  0 = not, bbox as ``[x, y, w, h]`` from the box of record (below),
+  ``truncation``, the 3-D box and horizon carried as extra keys
+  (``bbox_source`` / ``bbox_projected`` on a mask-derived box), and
   ``segmentation`` as uncompressed RLE from the ID mask where a mask
   exists beside the frame).
 * ``kitti``       -- ``<split>/image_2``, ``label_2`` (15-field lines:
@@ -67,6 +68,19 @@ object is exported with its class resolved through the manifest's
 existing ``labels`` keys is the one object and its class is the
 airframe name. The reader keys on the PRESENCE of ``objects[]``, not on
 the manifest version, so both shapes read on either build.
+
+The 2-D box every format writes is the box of record: the engine ID
+mask's tight box (the object record's ``bbox_2d_tight``, filled by
+``attach_engine_labels``) wherever the record carries one on the ideal
+image, with the projected box retained beside it for cross-checking
+(COCO ``bbox_projected``, WebDataset ``export.objects[]``); otherwise
+the projected box clipped to the image (every headless run -- the
+Phase 10 bytes), or an aggregate's land-cover box. The card's
+``box_source`` counts each. A run whose manifest carries engine labels,
+or whose render.json declares a label bundle, refuses
+``export.annotation_not_run`` by name unless every one of the
+``ANNOTATION_GATES`` PASSed: the verifier counts NOT RUN as no failure,
+and a mask box nobody graded is not a label.
 
 The split is by **simulation digest**: every frame of one flight
 (every camera, every randomisation of it) lands on one side of a
@@ -135,7 +149,7 @@ from core.capture.airframe import KEYPOINT_NAMES
 from core.capture.manifest import (
     frame_sidecar, read_capture_manifest, software_revision,
 )
-from core.capture.verify import VERIFICATION_FILE
+from core.capture.verify import SUPERSEDED_MARK, VERIFICATION_FILE
 
 FORMATS = ("coco", "kitti", "webdataset", "yolo", "voc")
 SPLITS = ("train", "val", "test")
@@ -217,6 +231,24 @@ RENDER_PROVENANCE_KEYS = ("drawn", "render_settings", "look_applied")
 #: DEFAULT_CLASSES[0]); COCO's airframe keypoints are declared on it
 #: and on the airframe-name classes of a run without a taxonomy.
 AIRCRAFT_CLASS = "aircraft"
+#: Where an exported 2-D box came from (each object's ``bbox_source``, the
+#: card's ``box_source``): the engine ID image's visible pixels (the
+#: record's ``bbox_2d_tight``), the airframe's projected overall-extents
+#: box clipped to the image, or an aggregate's land-cover pixels.
+BOX_MASK = "mask"
+BOX_PROJECTED = "projected"
+BOX_LANDCOVER = "landcover"
+BOX_SOURCES = (BOX_MASK, BOX_PROJECTED, BOX_LANDCOVER)
+#: The annotation gates (contracts §4) that grade the engine-derived keys
+#: of an object record. A run whose manifest carries engine labels (an
+#: object record completed by attach_engine_labels) or whose render.json
+#: declares a label bundle must have every one of them run -- PASS, since
+#: a FAIL already refuses -- or the export refuses
+#: ``export.annotation_not_run`` by name: its mask-derived boxes would ship
+#: on the strength of checks that never looked at them.
+ANNOTATION_GATES = ("mask_integers_only", "mask_vs_geometry", "box_vs_mask",
+                    "depth_vs_geometry", "visibility_vs_scene",
+                    "identity_stable", "applied_intrinsics")
 
 
 class ExportError(ValueError):
@@ -354,10 +386,44 @@ def render_provenance(directory) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def engine_label_evidence(directory, manifest: Dict[str, Any]) -> Optional[str]:
+    """Where a run shows an engine label bundle, in words, or None for a
+    run without one (every headless run): an object record completed by
+    ``attach_engine_labels`` (its ``basis.engine`` is the record of the
+    files it read, not the no-bundle sentence), or a camera's
+    ``render.json`` whose frame records declare label files (the
+    commandlet's ``labels.mask``)."""
+    for record in manifest.get("frames") or []:
+        for entry in (record.get("labels") or {}).get("objects") or []:
+            if isinstance(entry, dict) and isinstance((entry.get("basis") or {}).get("engine"), dict):
+                return (f"frame {record.get('file')}: object {entry.get('id')!r} carries "
+                        f"engine-derived labels")
+    frames = Path(directory) / "frames"
+    if frames.is_dir():
+        for camera in sorted(p for p in frames.iterdir() if p.is_dir()):
+            try:
+                payload = json.loads((camera / RENDER_JSON).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            records = payload.get("frame_records") if isinstance(payload, dict) else None
+            for entry in records or []:
+                if isinstance(entry, dict) and isinstance(entry.get("labels"), dict) \
+                        and entry["labels"].get("mask"):
+                    return f"frames/{camera.name}/{RENDER_JSON} declares label files"
+    return None
+
+
 def load_run(directory) -> Run:
     """A run and its verdict. Refuses by name a run with no
-    verification.json (``export.unverified``), or one whose
-    verification failed (``export.verification_failed``)."""
+    verification.json (``export.unverified``), one whose verification
+    failed (``export.verification_failed``), one whose verdict graded
+    another manifest (``export.verification_stale``), and one that
+    carries an engine label bundle (:func:`engine_label_evidence`) while
+    any of the ``ANNOTATION_GATES`` is NOT RUN or absent from its verdict
+    (``export.annotation_not_run``): the verifier counts NOT RUN as no
+    failure, so an unrendered run exports, but a run WITH engine labels
+    whose gates never ran would ship labels nobody checked. A run without
+    a bundle is not affected."""
     directory = Path(directory)
     manifest = read_capture_manifest(directory / "capture_manifest.json")
     record = directory / VERIFICATION_FILE
@@ -384,6 +450,19 @@ def load_run(directory) -> Run:
             f"(capture_manifest.json is not the file the verdict graded: "
             f"{digest[:12]} now, {str(bound)[:12]} then); run "
             f"`python -m flightsim.verify {directory}` again before exporting")
+    evidence = engine_label_evidence(directory, manifest)
+    if evidence is not None:
+        statuses = {c.get("name"): c.get("status") for c in verification.get("checks", [])}
+        not_run = [f"{name} {statuses.get(name) or 'absent'}" for name in ANNOTATION_GATES
+                   if statuses.get(name) != "PASS"]
+        if not_run:
+            raise ExportError(
+                "export.annotation_not_run",
+                f"{directory} carries an engine label bundle ({evidence}) but its "
+                f"annotation gates did not run ({', '.join(not_run)}); "
+                f"the masks, tight boxes and visibilities it would export were never "
+                f"checked against the geometry -- put the bundle's files beside the "
+                f"frames and run `python -m flightsim.verify {directory}` again")
     return Run(directory=directory, manifest=manifest, verification=verification,
                manifest_sha256=digest, render=render_provenance(directory))
 
@@ -591,8 +670,14 @@ def object_labels(run: Run, record: Dict[str, Any], labels: Dict[str, Any],
                   image: str) -> List[Dict[str, Any]]:
     """The labelled objects of one frame, primary first, each as
     ``{id, int_id, role, class_name, class_id, bbox_2d, bbox_2d_unclipped,
-    truncation, fraction_in_frame, in_frame, visible_fraction,
-    occluded_by, keypoints, bbox_3d_camera, horizon, not_claimed}``.
+    bbox_2d_projected, bbox_source, truncation, fraction_in_frame,
+    in_frame, visible_fraction, occluded_by, keypoints, bbox_3d_camera,
+    horizon, not_claimed}``. ``bbox_2d`` is the box of record: the
+    entry's ``bbox_2d_tight`` (``bbox_source`` ``mask``) on the ideal
+    image when the record carries one, else the projected box
+    (``projected``) or an aggregate's ``landcover_bbox_2d``
+    (``landcover``); ``bbox_2d_projected`` is the projected box either
+    way (None for a land-cover box).
 
     Without ``labels.objects[]`` the one object is the primary airframe
     from ``labels`` (class = the airframe name, no visibility, no
@@ -614,6 +699,8 @@ def object_labels(run: Run, record: Dict[str, Any], labels: Dict[str, Any],
             "int_id": PRIMARY_INT_ID, "role": "primary",
             "class_name": str(run.manifest["aircraft"]), "class_id": None,
             "bbox_2d": labels.get("bbox_2d"),
+            "bbox_2d_projected": labels.get("bbox_2d"),
+            "bbox_source": BOX_PROJECTED if labels.get("bbox_2d") else None,
             "bbox_2d_unclipped": labels.get("bbox_2d_unclipped"),
             "truncation": labels.get("truncation"),
             "fraction_in_frame": None,
@@ -657,6 +744,7 @@ def object_labels(run: Run, record: Dict[str, Any], labels: Dict[str, Any],
                                   f"the manifest names no class for it")
         role = top.get("role") or ("primary" if (int_id == PRIMARY_INT_ID or position == 0) else "object")
         primary = role == "primary"
+        source = BOX_PROJECTED
         if primary:
             box, unclipped, truncation = (labels.get("bbox_2d"), labels.get("bbox_2d_unclipped"),
                                           labels.get("truncation"))
@@ -676,15 +764,24 @@ def object_labels(run: Run, record: Dict[str, Any], labels: Dict[str, Any],
             in_frame = box is not None
         else:
             box = entry.get("bbox_2d")
-            if box is None:
-                box = entry.get("bbox_2d_tight")
-            if box is None:
+            if box is None and entry.get("landcover_bbox_2d") is not None:
                 # W4: an aggregate (building:all, vegetation:all) whose
                 # members no engine stencil drew takes the land-cover box.
-                box = entry.get("landcover_bbox_2d")
+                box, source = entry["landcover_bbox_2d"], BOX_LANDCOVER
             unclipped, truncation = entry.get("bbox_2d_unclipped"), entry.get("truncation")
             keypoints = entry.get("keypoints", {}) or {}
             in_frame = entry.get("in_frame", box is not None)
+        # The 2-D box of record is the MASK's wherever the object record
+        # carries one (``bbox_2d_tight``: the engine ID image's visible
+        # pixels, attach_engine_labels), with the projected box kept
+        # beside it (``bbox_2d_projected``) for cross-checking; a record
+        # without one (a headless run) keeps the projected box. Ideal
+        # image only: the ID image is drawn through the ideal pinhole, so
+        # its box is no label for the sensor image.
+        projected = box if source == BOX_PROJECTED else None
+        tight = entry.get("bbox_2d_tight")
+        if image == "ideal" and tight is not None:
+            box, source, in_frame = [float(v) for v in tight], BOX_MASK, True
         out.append({
             "id": str(object_id) if object_id is not None else f"int_id:{int_id}",
             "int_id": int(int_id) if int_id is not None else None,
@@ -692,8 +789,12 @@ def object_labels(run: Run, record: Dict[str, Any], labels: Dict[str, Any],
             "class_name": str(class_name),
             "class_id": int(class_id) if class_id is not None else None,
             "bbox_2d": box, "bbox_2d_unclipped": unclipped,
+            "bbox_2d_projected": projected,
+            "bbox_source": source if box is not None else None,
             "truncation": truncation,
-            "fraction_in_frame": entry.get("fraction_in_frame"),
+            # The record's share in frame is the IDEAL box's; under the
+            # sensor image the mapped truncation above stands alone.
+            "fraction_in_frame": entry.get("fraction_in_frame") if image == "ideal" else None,
             "in_frame": in_frame,
             "visible_fraction": entry.get("visible_fraction"),
             "occluded_by": list(entry.get("occluded_by") or []),
@@ -749,8 +850,13 @@ def refuse_unverified_labels(samples: Sequence[Sample], formats: Sequence[str]
     ``LABEL_FILE_CHECKS`` for it must be PASS in the run's verdict, or
     the export refuses ``export.unverified_labels`` by name. A run with
     none of those files on disk ships none and is not affected (every
-    Phase 10 run). Returns {run name: the suffixes shipped}, for the
-    card."""
+    Phase 10 run). A version-5 check the verifier reports NOT RUN as
+    SUPERSEDED on a manifest with ``objects[]`` (``depth_range`` by
+    ``depth_vs_geometry``, whose own PASS is required beside it) counts
+    as graded: measured before the fix, a manifest-6 run with every
+    annotation gate PASS could never ship its depth in WebDataset,
+    because ``depth_range`` cannot run on it by design. Returns {run
+    name: the suffixes shipped}, for the card."""
     suffixes: List[str] = []
     for fmt in formats:
         for suffix in SHIPPED_LABEL_FILES.get(fmt, ()):
@@ -761,7 +867,9 @@ def refuse_unverified_labels(samples: Sequence[Sample], formats: Sequence[str]
         return shipped
     for run in {s.run.name: s.run for s in samples}.values():
         passed = {c.get("name") for c in run.verification.get("checks", [])
-                  if c.get("status") == "PASS"}
+                  if c.get("status") == "PASS"
+                  or (c.get("status") == "NOT RUN"
+                      and str(c.get("detail", "")).startswith(SUPERSEDED_MARK))}
         for suffix in suffixes:
             on_disk = any(label_file_path(run, s.record, suffix).is_file()
                           for s in samples if s.run is run)
@@ -932,6 +1040,21 @@ def coco_licenses(runs: Sequence[Run]) -> List[Dict[str, Any]]:
     return out
 
 
+def _coco_box(box: Optional[Sequence[float]]) -> Optional[List[float]]:
+    """``[u0, v0, u1, v1]`` -> COCO ``[x, y, w, h]``; None stays None."""
+    if not box:
+        return None
+    return [box[0], box[1], box[2] - box[0], box[3] - box[1]]
+
+
+def box_record(obj: Dict[str, Any]) -> Dict[str, Any]:
+    """One object's box of record and its cross-check, as the WebDataset
+    sidecar's ``export.objects[]`` carries it."""
+    return {"id": obj["id"], "int_id": obj.get("int_id"), "class": obj["class_name"],
+            "bbox_2d": obj.get("bbox_2d"), "bbox_2d_projected": obj.get("bbox_2d_projected"),
+            "bbox_source": obj.get("bbox_source")}
+
+
 def export_coco(samples: Sequence[Sample], out: Path, splits: Dict[str, str]
                 ) -> Dict[str, int]:
     names, _ = dataset_taxonomy(samples)
@@ -973,6 +1096,13 @@ def export_coco(samples: Sequence[Sample], out: Path, splits: Dict[str, str]
                 "bbox_3d_camera": obj.get("bbox_3d_camera"),
                 "horizon": obj.get("horizon"),
             }
+            if obj.get("bbox_source") == BOX_MASK:
+                # The box is the mask's; the projected one rides beside it
+                # (COCO [x, y, w, h], null when nothing of it was in frame)
+                # for cross-checking. Absent keys = the projected box, so a
+                # run without engine labels writes the Phase 10 bytes.
+                annotation["bbox_source"] = BOX_MASK
+                annotation["bbox_projected"] = _coco_box(obj.get("bbox_2d_projected"))
             if obj.get("visible_fraction") is not None:
                 annotation["visible_fraction"] = obj["visible_fraction"]
                 annotation["occluded_by"] = obj["occluded_by"]
@@ -1171,6 +1301,20 @@ def export_webdataset(samples: Sequence[Sample], out: Path,
                     sidecar = frame_sidecar(sample.run.manifest, sample.record)
                     sidecar["export"] = {"labels": sample.labels,
                                          "split": split}
+                    if any(o.get("bbox_source") == BOX_MASK for o in sample.objects):
+                        # The boxes of record are the mask's: the primary's
+                        # replaces export.labels.bbox_2d (the projected one
+                        # kept beside it), and every object's box with its
+                        # source rides in export.objects[]. A frame without
+                        # a mask box keeps the sidecar as it was.
+                        primary = next((o for o in sample.objects if o.get("role") == "primary"),
+                                       None)
+                        if primary is not None and primary.get("bbox_source") == BOX_MASK:
+                            sidecar["export"]["labels"] = dict(
+                                sample.labels, bbox_2d=primary["bbox_2d"],
+                                bbox_2d_projected=primary.get("bbox_2d_projected"),
+                                bbox_source=BOX_MASK)
+                        sidecar["export"]["objects"] = [box_record(o) for o in sample.objects]
                     # R3: the run's applied variables, one line each, so a
                     # sample needs no manifest to say what was applied.
                     if sample.run.name not in applied:
@@ -1183,8 +1327,9 @@ def export_webdataset(samples: Sequence[Sample], out: Path,
 
 def yolo_line(obj: Dict[str, Any], class_idx: int, width: int, height: int
               ) -> Optional[str]:
-    """``class cx cy w h`` normalised to the image from the CLIPPED box;
-    None for an object without a box."""
+    """``class cx cy w h`` normalised to the image from the box of
+    record (``bbox_2d``: the mask's tight box, else the CLIPPED projected
+    box); None for an object without a box."""
     box = obj.get("bbox_2d")
     if not box:
         return None
@@ -1226,7 +1371,10 @@ def export_yolo(samples: Sequence[Sample], out: Path, splits: Dict[str, str]
     data = {"train": "images/train", "val": "images/val", "test": "images/test",
             "names": {i: name for i, name in enumerate(names)},
             "flightsim": {"class_order": source,
-                          "box": "clipped bbox_2d, normalised cx cy w h",
+                          "box": ("the box of record (the ID mask's tight box where the "
+                                  "run carries engine labels, else the projected box "
+                                  "clipped to the image; DATASET_CARD.md box_source), "
+                                  "normalised cx cy w h"),
                           "path": "no path key: the split directories are beside this file",
                           "card": "../DATASET_CARD.md or DATASET_CARD.md"}}
     (out / "data.yaml").write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
@@ -1603,6 +1751,36 @@ def not_claimed_from_labels(samples: Sequence[Sample]) -> Dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def box_source_summary(samples: Sequence[Sample], image: str) -> Dict[str, Any]:
+    """The card's ``box_source``: where every exported 2-D box came from
+    (``BOX_SOURCES``), counted over the boxes written, overall and per
+    run, with the rule and the runs any projected box came from."""
+    counts = {s: 0 for s in BOX_SOURCES}
+    per_run: Dict[str, Dict[str, int]] = {}
+    for sample in samples:
+        own = per_run.setdefault(sample.run.name, {s: 0 for s in BOX_SOURCES})
+        for obj in sample.objects:
+            source = obj.get("bbox_source")
+            if obj.get("bbox_2d") and source in counts:
+                counts[source] += 1
+                own[source] += 1
+    return {
+        "rule": ("the 2-D box is derived from the engine ID mask (the object "
+                 "record's bbox_2d_tight: the box of its visible pixels) wherever "
+                 "the record carries one, and the projected box is retained for "
+                 "cross-checking (COCO bbox_projected, WebDataset "
+                 "export.objects[].bbox_2d_projected); a record without one -- a "
+                 "headless run, an object with no visible pixels, the sensor "
+                 "image -- keeps the projected box clipped to the image; an "
+                 "aggregate no stencil drew takes its land-cover box"),
+        "image": image,
+        "counts": counts,
+        "per_run": per_run,
+        "projected_runs": sorted(name for name, c in per_run.items() if c[BOX_PROJECTED]),
+        "mask_runs": sorted(name for name, c in per_run.items() if c[BOX_MASK]),
+    }
+
+
 def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
                  splits: Dict[str, str], counts: Dict[str, int], fmt: str,
                  fractions, seed: int, image: str, labels_only: bool,
@@ -1633,6 +1811,7 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
         conventions_by_version.setdefault(str(int(run.manifest["manifest_version"])),
                                           run.manifest.get("label_conventions"))
     labels_not_claimed = not_claimed_from_labels(samples)
+    box_source = box_source_summary(samples, image)
     card = {
         "format": fmt,
         "formats": formats,
@@ -1700,8 +1879,14 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
                          f"{KITTI_VISIBLE_PARTLY}, else 2; 3 (unknown) when no visibility "
                          f"was recorded"),
         },
+        "box_source": box_source,
         "coco_conventions": {
-            "bbox": "[x, y, w, h] from the CLIPPED 2-D box; truncation carried",
+            "bbox": ("[x, y, w, h] from the box of record (box_source: the ID mask's "
+                     "tight box where the record carries one, else the CLIPPED "
+                     "projected 2-D box); truncation carried; a mask-derived box "
+                     "carries bbox_source \"mask\" and bbox_projected ([x, y, w, h] "
+                     "of the projected box, null when none was in frame), and an "
+                     "annotation without bbox_source is the projected box"),
             "keypoints": list(KEYPOINT_NAMES),
             "visibility": "2 = inside the image with positive depth, 0 otherwise",
             "segmentation": ("uncompressed RLE (column-major) of the ID mask's pixels "
@@ -1714,7 +1899,8 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
             "path": ("data.yaml names no path key: Ultralytics then resolves train/val/test "
                      "beside the yaml, where they are (a relative path would be resolved "
                      "against its datasets directory or the working directory instead)"),
-            "line": "class cx cy w h normalised to the image from the CLIPPED bbox_2d",
+            "line": ("class cx cy w h normalised to the image from the box of record "
+                     "(box_source: the mask's tight box, else the CLIPPED projected bbox_2d)"),
             "class": f"0-based index in taxonomy order ({taxonomy_source})",
         },
         "voc_conventions": {
@@ -1722,7 +1908,7 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
             "bndbox": "1-based inclusive integers covering the float box: floor(x0)+1 .. ceil(x1)",
             "truncated": "1 when the object leaves the frame (fraction_in_frame < 1, else truncation > 0)",
             "occluded": f"1 when visible_fraction < {VOC_OCCLUDED_BELOW}; 0 when no visibility was recorded",
-            "difficult": (f"1 when the clipped box's longer side is under the not-claimed "
+            "difficult": (f"1 when the box of record's longer side is under the not-claimed "
                           f"threshold (the record's {NOT_CLAIMED_EXTENT_KEY}, else "
                           f"{NOT_CLAIMED_EXTENT_PX} px)"),
         },
@@ -1734,12 +1920,14 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
         "not_claimed": [
             "render reproducibility: not established in either direction "
             "until Gate 10-R runs on an engine (VALIDITY section 3)",
-            "labels are the headless geometry of the recorded flight; an "
-            "engine ID mask, class image or depth ships only in a format that "
-            "carries it (COCO: the ID mask; WebDataset: all three) and only "
-            "from a run whose verdict has every check for that file PASS "
-            "(refused by name otherwise); it is never substituted for the "
-            "geometry",
+            "labels are the headless geometry of the recorded flight except the "
+            "2-D box, which is the engine ID mask's tight box wherever the "
+            "object record carries one (box_source; the projected box kept "
+            "beside it, and the run's annotation gates all PASS, refused by "
+            "name otherwise); an engine ID mask, class image or depth ships "
+            "only in a format that carries it (COCO: the ID mask; WebDataset: "
+            "all three) and only from a run whose verdict has every check for "
+            "that file PASS (refused by name otherwise)",
             "the 3-D box and the horizon are pinhole quantities even when "
             "the sensor image is exported",
             "no photometric calibration: sun, fog and exposure are the "
@@ -1756,7 +1944,12 @@ def dataset_card(runs: Sequence[Run], samples: Sequence[Sample],
               f"apart from the verified ones"] if unbound else [])
           + ([f"run(s) {', '.join(headless)}: no {RENDER_JSON} -- nothing was "
               f"drawn by an engine and no rendering switch or applied look is "
-              f"recorded"] if headless else []),
+              f"recorded"] if headless else [])
+          + ([f"run(s) {', '.join(box_source['projected_runs'])}: "
+              f"{box_source['counts'][BOX_PROJECTED]} 2-D box(es) are the "
+              f"projected geometry (the airframe's overall-extents box clipped "
+              f"to the image), not the pixels -- no engine mask box was "
+              f"recorded for them"] if box_source["projected_runs"] else []),
         "software_revision": software_revision(),
         "manifest_versions": sorted({int(r.manifest["manifest_version"]) for r in runs}),
     }
@@ -1878,6 +2071,16 @@ def render_card(card: Dict[str, Any]) -> str:
         f"Aircraft: {', '.join(card['aircraft'])} (primary: "
         f"{', '.join(card.get('primary_aircraft', card['aircraft']))})",
         f"Sensor profiles: {', '.join(card['sensor_profiles'])}",
+    ]
+    boxes = card.get("box_source")
+    if boxes:
+        words = {BOX_MASK: "the ID mask", BOX_PROJECTED: "the projected geometry",
+                 BOX_LANDCOVER: "the land cover"}
+        lines.append("2-D boxes: " + (", ".join(
+            f"{n} from {words[s]}" for s, n in boxes["counts"].items() if n) or "none") + (
+            " (the projected box retained beside each mask box)" if boxes["counts"][BOX_MASK]
+            else " -- no engine mask box in any record"))
+    lines += [
         f"Split by simulation digest, fractions {card['split']['fractions']}, "
         f"seed {card['split']['seed']}: {len(card['split']['assignment'])} "
         f"simulation(s)",

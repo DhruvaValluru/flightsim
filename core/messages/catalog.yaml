@@ -278,6 +278,9 @@ export.verification_failed:
   sentence: "A run failed its checks, so it cannot be exported."
 export.unverified_labels:
   sentence: "A run's mask, class image or depth was never checked against the geometry, so a format that ships it cannot take it."
+export.annotation_not_run:
+  sentence: "A run has engine labels, but the checks that compare them with the geometry did not run, so it cannot be exported."
+  hint: "Keep the render's label files beside the frames and run the checker on it again."
 export.image:
   sentence: "The export asks for a kind of picture the runs do not have; each frame comes as the ideal or the sensor image."
 export.sensor_labels:

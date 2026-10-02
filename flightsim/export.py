@@ -10,7 +10,11 @@ directories of them. Every run must carry a verification.json with no
 failed check (``python -m flightsim.verify <run>`` writes it; the
 batch runner writes it too) -- an unverified run refuses the export by
 name, and so does a run whose manifest changed after the batch runner's
-verdict was written (re-run the verifier). Two different runs with one
+verdict was written (re-run the verifier), and so does a run carrying
+engine labels whose annotation gates did not run
+(``export.annotation_not_run``). The 2-D boxes are the engine ID
+mask's tight boxes wherever the records carry them, the projected
+boxes otherwise (a headless run); the card counts each. Two different runs with one
 directory name refuse too: every exported frame is named after its
 run. Frames are split by simulation digest (one flight, one side).
 ``--format`` takes one of coco, kitti, webdataset, yolo, voc or a comma
@@ -81,6 +85,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("  layout: " + ", ".join(f"{f} -> {Path(args.out) / f}" for f in card["formats"]))
     print("  splits: " + ", ".join(f"{s} {n}" for s, n in card["frames_per_split"].items())
           + f" (by simulation digest, seed {card['split']['seed']})")
+    boxes = (card.get("box_source") or {}).get("counts") or {}
+    print("  boxes:  " + (", ".join(f"{n} {s}" for s, n in boxes.items() if n) or "none")
+          + " (2-D box source: mask = the engine ID mask's tight box, projected = "
+            "the projected geometry)")
     print(f"  card:   {Path(args.out) / 'DATASET_CARD.md'}")
     if card.get("tabular"):
         print(f"  table:  {Path(args.out) / 'tabular'} ({card['tabular']['rows']} row(s), "
