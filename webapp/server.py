@@ -226,17 +226,19 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         except LLMCompileError as exc:
             # The offline compiler is the documented fallback; the UI states
             # the switch and why, never silently. It compiles the ORIGINAL
-            # prompt plus whatever the answer round said to its one
-            # question (camera_view), even when the LLM died between the
-            # question and answer rounds.
+            # prompt plus whatever the answer round said to its questions
+            # (the aircraft, the camera view), even when the LLM died
+            # between the question and answer rounds.
             spec = compile_prompt(prompt, answers=request.answers)
             compiler_used = "regex (llm unavailable)"
             llm_note = str(exc)
             questions = [] if request.answers else camera_questions(prompt)
     else:
-        # The regex path has exactly one clarifying question: which view,
-        # when the prompt speaks of imagery and names none. Asked once;
-        # the answer round compiles with the answer and asks nothing.
+        # The regex path asks at most two clarifying questions
+        # (camera_questions): which aircraft, when the prompt names a kind
+        # of aircraft or one the vocabulary lacks; which view, when it
+        # speaks of imagery and names none. Asked once; the answer round
+        # compiles with the answers and asks nothing.
         spec = compile_prompt(prompt, answers=request.answers)
         compiler_used = "regex"
         questions = [] if request.answers else camera_questions(prompt)
@@ -894,7 +896,10 @@ class GeneratePlanRequest(BaseModel):
     #: echoes the questions with the answers; the server keeps no state.
     questions: Optional[List[Dict[str, Any]]] = None
     answers: Optional[List[Dict[str, str]]] = None
-    images: int = generate_module.DEFAULT_IMAGES
+    #: None (the page's count left blank): the prompt's stated count,
+    #: every view's added, else DEFAULT_IMAGES; both stated and
+    #: disagreeing is refused campaign.image_count.
+    images: Optional[int] = None
     format: str = generate_module.DEFAULT_FORMAT
     tier: str = "llm"
     seed: Optional[int] = None
@@ -903,7 +908,7 @@ class GeneratePlanRequest(BaseModel):
 class GeneratePreviewRequest(BaseModel):
     #: The plan's compiled spec (payload ``spec``), unchanged.
     spec: Dict[str, Any]
-    images: int = generate_module.DEFAULT_IMAGES
+    images: Optional[int] = None
     seed: int = 1
     workers: int = 1
 
@@ -911,7 +916,7 @@ class GeneratePreviewRequest(BaseModel):
 class GenerateStartRequest(BaseModel):
     prompt: str
     answers: Optional[List[Dict[str, str]]] = None
-    images: int = generate_module.DEFAULT_IMAGES
+    images: Optional[int] = None
     format: str = generate_module.DEFAULT_FORMAT
     seed: Optional[int] = None
     workers: int = 1
@@ -1034,9 +1039,20 @@ def generate_frame_image(campaign_id: str, case_id: str, kind: str, camera_id: s
     return FileResponse(path, media_type="image/png")
 
 
+@app.get("/generate/{campaign_id}/card")
+def generate_card(campaign_id: str, format: Optional[str] = None) -> JSONResponse:
+    """The dataset's card in plain words for the Download screen
+    (images, labelled objects, class balance, conditions drawn, checks,
+    what it does not claim, format); rule and check names only under
+    ``details``. The export's own refusals stand, in words, as a 409."""
+    return _generate_call(generator.card, campaign_id, format)
+
+
 @app.get("/generate/{campaign_id}/download")
 def generate_download(campaign_id: str, format: Optional[str] = None):
     """A zip of the export plus its card (the card records the format).
+    ``X-Dataset-Labels-Only: 1`` when the zip holds no picture (a
+    headless campaign), so the page can say so after the download.
     The export's own refusals stand, in words, as a 409."""
     try:
         result = generator.download(campaign_id, format)
@@ -1045,4 +1061,5 @@ def generate_download(campaign_id: str, format: Optional[str] = None):
     return FileResponse(result["archive"], media_type="application/zip",
                         filename=result["filename"],
                         headers={"X-Dataset-Format": result["format"],
-                                 "X-Dataset-Runs": str(result["runs"])})
+                                 "X-Dataset-Runs": str(result["runs"]),
+                                 "X-Dataset-Labels-Only": "1" if result["labels_only"] else "0"})

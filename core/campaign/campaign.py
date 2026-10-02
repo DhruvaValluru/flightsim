@@ -80,6 +80,8 @@ TRANSITIONS: Dict[str, frozenset] = {
 CONTROL_REQUESTS = ("pause", "resume", "cancel")
 
 DEFAULT_SEED = 1
+#: The target when neither ``images`` nor the prompt states one.
+DEFAULT_IMAGES = 100
 DEFAULT_FORMAT = "coco"
 #: The recorder samples every 0.1 s (core/scenario/runner.py L260); a
 #: continuous camera captures every sample. Only an ESTIMATE for the
@@ -140,6 +142,58 @@ def estimate_frames(spec: ScenarioSpec) -> int:
     return max(total, 1)
 
 
+def stated_images(spec: ScenarioSpec) -> Optional[Dict[str, Any]]:
+    """The image count the prompt STATES, counted across every camera,
+    or None when it states none. The compiler puts a prompt's "500
+    images" on every camera it names as a user-stated per-case
+    ``capture_count`` (the camera contract: a count is per view), so
+    "500 images from the chase and tower views" asks for 500 from each
+    -- 1000 in all, which is what a campaign target counts (the ledger's
+    frames are every camera's). Only a count stated on EVERY camera is
+    a total; a camera left to capture its whole clip has no stated
+    number, so nothing is claimed then. ``{"total", "per_view",
+    "views", "phrase"}``; ``per_view`` is None when the views state
+    different counts (an edit, never the compiler)."""
+    cameras = list(spec.cameras or [])
+    if not cameras:
+        return None
+    counts = []
+    for camera in cameras:
+        quantity = camera.capture_count
+        if str(quantity.source) != "user" or int(quantity.value or 0) < 1:
+            return None
+        counts.append(int(quantity.value))
+    return {"total": sum(counts),
+            "per_view": counts[0] if len(set(counts)) == 1 else None,
+            "views": len(counts),
+            "phrase": str(cameras[0].capture_count.frm)}
+
+
+def reconcile_images(spec: ScenarioSpec, images: Optional[int],
+                     default: int = 100) -> int:
+    """The campaign target from the prompt's stated count and the
+    explicit ``images`` (``--images`` / the page's count): either alone
+    decides it (the stated count is the total across every camera,
+    :func:`stated_images`); both stated and disagreeing is refused
+    ``campaign.image_count`` -- a stated value is never moved, and
+    neither number is the other's correction. Neither -> ``default``."""
+    stated = stated_images(spec)
+    if images is None:
+        return int(stated["total"]) if stated else int(default)
+    if stated is not None and int(images) != int(stated["total"]):
+        per = (f"{stated['per_view']} per view over {stated['views']} views, "
+               f"{stated['total']} in all" if stated["views"] > 1 and stated["per_view"]
+               else f"{stated['total']} in all")
+        raise CampaignError(
+            "campaign.image_count",
+            f"the prompt states {stated['phrase']!r} ({per}) and --images says "
+            f"{int(images)}; the target counts the images of every camera, and a "
+            f"stated count is never moved -- drop one, or make them agree",
+            detail={"stated": stated["total"], "images": int(images),
+                    "views": stated["views"], "per_view": stated["per_view"]})
+    return int(images)
+
+
 def _compile(prompt: str, answers, tier: str):
     """The compiled spec and the tier that compiled it. The LLM tier
     falls back to the regex compiler exactly as the web app does, and
@@ -173,7 +227,7 @@ class Campaign:
     # -- construction --------------------------------------------------------
 
     @classmethod
-    def create(cls, prompt: str, answers=None, images: int = 100,
+    def create(cls, prompt: str, answers=None, images: Optional[int] = None,
                seed: Optional[int] = None, policy: Optional[Dict[str, Any]] = None,
                out=None, format: str = DEFAULT_FORMAT, workers: int = 1,
                disk_budget_bytes: Optional[int] = None, tier: str = "regex",
@@ -182,7 +236,13 @@ class Campaign:
                max_refused_slots: int = MAX_REFUSED_SLOTS) -> "Campaign":
         """Compile the prompt (plus the answer round), apply an explicit
         policy as a user edit, and write ``campaign.json`` in state
-        ``planned``. Refuses by name before anything is drawn or run."""
+        ``planned``. Refuses by name before anything is drawn or run.
+
+        ``images`` is the target in images across EVERY camera; None
+        takes the count the prompt states (:func:`stated_images`), else
+        ``DEFAULT_IMAGES``. A stated count and an ``images`` that
+        disagree are refused ``campaign.image_count``
+        (:func:`reconcile_images`)."""
         from core.dataset.export import FORMATS
 
         if out is None:
@@ -193,7 +253,8 @@ class Campaign:
                 "campaign.arguments",
                 f"{out} already holds a campaign; open it (Campaign.open / "
                 f"--resume) or choose another directory")
-        if not isinstance(images, int) or isinstance(images, bool) or images < 1:
+        if images is not None and (
+                not isinstance(images, int) or isinstance(images, bool) or images < 1):
             raise CampaignError("campaign.arguments",
                                 f"--images must be an integer >= 1, got {images!r}")
         if not isinstance(workers, int) or isinstance(workers, bool) or workers < 1:
@@ -220,6 +281,7 @@ class Campaign:
         spec, tier_used = _compile(str(prompt), answers, tier)
         if policy is not None:
             spec.set("randomization.policy", policy, frm="campaign policy (given)")
+        images = reconcile_images(spec, images, DEFAULT_IMAGES)
 
         # The campaign seed IS the block's seed (contracts §5.6): a seed
         # the prompt states is kept; an argument that disagrees with it

@@ -428,3 +428,27 @@ def test_a_year_of_1800_renders_its_refusal(spec):
     spec.set("randomization.sun_elevation_min_deg", 95)
     text = validate(spec, check_feasibility=False).render()
     assert "limit 1-366 day" in text and "limit -90..90 deg" in text
+
+
+def test_a_gate_the_sampler_cannot_judge_is_refused_by_validate(spec):
+    """validate_policy calls the sampler's own gate check after the
+    shape check, so validate() (the page's /compile verdict) refuses a
+    number-to-word gate by name before plan() would -- in the same
+    words the sampler refuses with, the gate quoted; a sound gate
+    passes."""
+    from core.scenario.randomization import RandomizationError, sample_randomization
+
+    bad = {"cloud_cover": {"beta": [2, 2]},
+           "precipitation": {"choice": ["none", "rain"],
+                             "gated_by": "cloud_cover > heavy"}}
+    spec.set("randomization.policy", bad)
+    violations = validate_policy(spec)
+    assert names(violations) == ["randomization.policy"]
+    assert "cloud_cover > heavy" in violations[0].message
+    assert "randomization.policy" in names(validate(spec, check_feasibility=False).violations)
+    with pytest.raises(RandomizationError) as caught:
+        sample_randomization(spec, draw_index=0)
+    assert caught.value.message == violations[0].message
+    spec.set("randomization.policy", {**bad, "precipitation": {
+        "choice": ["none", "rain"], "gated_by": "cloud_cover > 0.6"}})
+    assert validate_policy(spec) == []

@@ -378,6 +378,46 @@ def test_the_same_campaign_at_one_and_two_workers_is_identical(campaigns):
     assert one.state == two.state == DONE
 
 
+#: Two-second flights (~21 frames a case): 90 images is five cases, so a
+#: four-worker pool has a full window in flight and one case queued
+#: behind it -- completion order is free to differ from index order.
+TINY_PROMPT = ("fly the a320 at 3000 m for 2 seconds in varied weather at "
+               "different times of day, chase view")
+TINY_IMAGES = 90
+
+
+def test_the_same_campaign_at_one_and_four_workers_is_identical(tmp_path):
+    """The exit criterion again with four spawned workers over a tiny
+    headless campaign (more cases than workers): the same slots, case
+    ids, seeds, draws and manifest digests as one worker, and the same
+    ledger apart from timing and machine paths."""
+    runs = {}
+    for workers in (1, 4):
+        c = Campaign.create(TINY_PROMPT, images=TINY_IMAGES, seed=11,
+                            out=tmp_path / f"w{workers}", workers=workers,
+                            stall_seconds=120)
+        status = c.run(workers=workers, progress=lambda line: None)
+        assert status["state"] == DONE, status
+        assert c.record["workers"] == workers
+        runs[workers] = c
+    one, four = runs[1], runs[4]
+    a, b = one.ledger.latest(), four.ledger.latest()
+    assert sorted(a) == sorted(b) and len(a) > 4             # more cases than workers
+    for key in ("case_id", "seed", "sampled", "spec_digest", "simulation_digest",
+                "output_digest", "frames", "yield"):
+        assert [a[i].get(key) for i in sorted(a)] == [b[i].get(key) for i in sorted(b)], key
+    assert len({a[i]["case_id"] for i in a}) == len(a)       # distinct specs
+    for i in a:
+        ma = json.loads(Path(a[i]["run_dir"], "capture_manifest.json").read_text(encoding="utf-8"))
+        mb = json.loads(Path(b[i]["run_dir"], "capture_manifest.json").read_text(encoding="utf-8"))
+        assert ma["simulation_digest"] == mb["simulation_digest"]
+        assert ma["output_digest"] == mb["output_digest"]
+        assert ma["randomization"] == mb["randomization"]
+        assert ma["randomization"]["policy_draws"]["draw_index"] == i
+    assert comparable(one.ledger.rows()) == comparable(four.ledger.rows())
+    assert one.status()["frames_verified"] == four.status()["frames_verified"] >= TINY_IMAGES
+
+
 def test_the_report_and_the_export_read_the_verified_cases(campaigns):
     c = campaigns[1]
     report = c.report()
@@ -398,6 +438,65 @@ def test_the_report_and_the_export_read_the_verified_cases(campaigns):
     assert Path(result["dataset_path"], "annotations", "instances_train.json").is_file()
     assert len(result["card"]["runs"]) == 3 and result["card"]["frames"] >= IMAGES
     assert all(r["verification"]["status"] == "passed" for r in result["card"]["runs"])
+
+
+def test_the_prompt_s_image_count_is_the_target_across_every_camera(tmp_path):
+    """"500 images" is a per-view capture count by the camera contract;
+    the campaign target counts the images of EVERY camera (the ledger's
+    frames are every camera's), so two views stating 500 each are a
+    1000-image target when --images is left out -- the same unit the
+    per-case estimate counts in. One view: the stated count itself."""
+    from core.campaign.campaign import stated_images
+
+    two = Campaign.create("500 images of the a320 for 10 seconds from the chase "
+                          "and tower views", out=tmp_path / "two")
+    spec = ScenarioSpec.from_dict(two.record["spec"])
+    assert [str(c.preset.value) for c in spec.cameras] == ["chase", "tower"]
+    assert stated_images(spec) == {"total": 1000, "per_view": 500, "views": 2,
+                                   "phrase": "500 images"}
+    assert two.target == 1000 and estimate_frames(spec) == 1000
+    one = Campaign.create("300 images of the a320 for 10 seconds, chase view",
+                          out=tmp_path / "one")
+    assert one.target == 300
+    agrees = Campaign.create("300 images of the a320 for 10 seconds, chase view",
+                             images=300, out=tmp_path / "agrees")
+    assert agrees.target == 300
+    # No count stated: --images decides, and with neither the default.
+    assert Campaign.create(PROMPT, out=tmp_path / "none").target == 100
+    assert Campaign.create(PROMPT, images=40, out=tmp_path / "forty").target == 40
+
+
+def test_a_stated_count_and_images_that_disagree_refuse_by_name(tmp_path, capsys):
+    """Both numbers stated and different: refused campaign.image_count
+    before anything is written -- neither is the other's correction --
+    and the catalogue's sentence carries both totals. The per-view
+    count is not the target: --images 500 against "500 images" from two
+    views is a disagreement (1000 in all)."""
+    from core.messages import explain
+    from flightsim.campaign import main
+
+    prompt = "500 images of the a320 for 10 seconds from the chase and tower views"
+    for images, out in ((500, "a"), (999, "b")):
+        with pytest.raises(CampaignError) as err:
+            Campaign.create(prompt, images=images, out=tmp_path / out)
+        assert err.value.constraint == "campaign.image_count"
+        assert err.value.detail == {"stated": 1000, "images": images, "views": 2,
+                                    "per_view": 500}
+        assert not (tmp_path / out).exists()
+    sentence = explain(err.value)["sentence"]
+    assert "(1000 in all, the number stated for each view added together)" in sentence
+    assert "(999)" in sentence and "campaign" not in sentence
+    with pytest.raises(CampaignError) as err:
+        Campaign.create("300 images of the a320 for 10 seconds, chase view",
+                        images=100, out=tmp_path / "c")
+    assert err.value.constraint == "campaign.image_count"
+    assert explain(err.value)["sentence"] == (
+        "The number of images in your request (300 in all) and the number asked "
+        "for separately (100) disagree.")
+    # The command line refuses it by name with exit 2.
+    assert main([prompt, "--images", "500", "--out", str(tmp_path / "cli"), "--plan"]) == 2
+    assert capsys.readouterr().out.startswith("REFUSED -- campaign.image_count:")
+    assert not (tmp_path / "cli").exists()
 
 
 def test_a_prompt_with_nothing_to_vary_refuses_duplicate_slots_by_name(tmp_path):

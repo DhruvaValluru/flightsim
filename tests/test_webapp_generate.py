@@ -142,6 +142,15 @@ def test_llm_death_falls_back_to_the_offline_compiler_and_says_so(client, monkey
                                                   "images": IMAGES}).json()
     assert payload["tier"] == "regex" and "offline compiler" in payload["note"]
     assert payload["state"] == "clarify"           # the regex path's question still asked
+    # The note is the catalogue's sentence alone (it already names the
+    # offline compiler: said once), the producer's text beside it; the
+    # plan says the model did NOT compile it, whatever is configured.
+    assert payload["note"] == ("No language model is set up on this server; the offline "
+                               "compiler is still available.")
+    assert payload["note"].count("offline compiler") == 1
+    assert payload["note_details"]["rule"] == "compile.unavailable"
+    assert payload["note_details"]["message"] == "the LLM compiler is unavailable: no SDK"
+    assert payload["llm_used"] is False and "llm_available" not in payload
 
 
 # -- the catalogue-only rule ---------------------------------------------------
@@ -240,6 +249,10 @@ def test_the_preview_flies_one_case_and_measures_it(client):
     assert est["within_free"] is True and "measured" in est["basis"]
     assert payload["verification_words"]["verdict"] == "Passed."
     assert "--max-previews 1" in payload["expert"][0]
+    # A geometry preview carries no mask or box, and the page is told so.
+    assert payload["masks_note"] == generate_module.MASKS_ONLY_WITH_ENGINE
+    assert picture["masks_note"] == generate_module.MASKS_ONLY_WITH_ENGINE
+    assert "engine" in payload["masks_note"] and "no mask or box" in payload["masks_note"]
     # The image route does not climb out of the preview.
     escape = client.get(f"/generate/preview/{payload['preview_id']}/previews/../../etc/passwd")
     assert escape.status_code == 404
@@ -640,3 +653,220 @@ def test_the_page_renders_only_with_an_engine_and_the_model(client, monkeypatch)
     assert payload["engine"] is False and payload["drawn"] is False
     assert "not imported" in payload["render_note"]
     assert payload["picture"]["kind"] == "previews"
+
+
+# -- the card on the page, the labels-only notice, the preview's masks -----------
+
+#: A code identifier or a rule name: what no default line of the card may carry.
+IDENTIFIER_RE = r"\b[a-z0-9]+_[a-z0-9_]+\b|\b[a-z_]+\.[a-z_]+(?:\.[a-z_]+)*\b"
+
+
+def overlay_capture(command, log, run_dir, stall_seconds):
+    """The real headless capture, then the one file an engine would add:
+    an overlay (here the preview's own PNG under ``overlays/``), so the
+    preview step can be shown to prefer it with no engine present."""
+    import shutil
+
+    from core.campaign.workers import run_with_watchdog
+
+    code, stalled = run_with_watchdog(command, log, run_dir, stall_seconds)
+    for camera_dir in sorted(p for p in (Path(run_dir) / "previews").iterdir() if p.is_dir()):
+        target = Path(run_dir) / "overlays" / camera_dir.name
+        target.mkdir(parents=True, exist_ok=True)
+        shutil.copy(camera_dir / "preview_0000.png", target / "overlay_0000.png")
+    return code, stalled
+
+
+def test_the_preview_shows_the_overlay_when_one_exists(client, monkeypatch):
+    """With an overlay on disk (an engine drew the mask and box), the
+    preview's picture is the overlay, said in words, and no masks note
+    stands beside it; the page renders the note only when one is sent."""
+    monkeypatch.setattr(generate_module, "CAPTURE_RUNNER",
+                        "tests.test_webapp_generate:overlay_capture")
+    plan = client.post("/generate/plan", json={"prompt": ASKS_VIEW, "tier": "regex",
+                                               "images": IMAGES, "answers": ANSWER}).json()
+    response = client.post("/generate/preview", json={"spec": plan["spec"],
+                                                      "images": plan["images"]})
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    picture = payload["picture"]
+    assert picture["kind"] == "overlays" and picture["name"] == "overlay_0000.png"
+    assert "mask and box drawn" in picture["what"]
+    assert payload["masks_note"] is None and picture["masks_note"] is None
+    image = client.get(picture["url"])
+    assert image.status_code == 200 and image.content[:4] == b"\x89PNG"
+    html = (generate_module.REPO / "webapp" / "static" / "generate.html").read_text(encoding="utf-8")
+    assert "r.data.masks_note ?" in html and "esc(r.data.picture.url)" in html
+
+
+def test_the_card_is_shown_in_plain_words_before_the_download(done_client, done_campaign):
+    """The finished dataset's card, read for a person: images, labelled
+    objects, class balance, the conditions the scenarios drew, the
+    checks, what it does not claim and the format -- the same numbers
+    the zip's dataset.json holds; no rule, check or field name in any
+    default line, every one of those under ``details``."""
+    import re
+
+    campaign_id = done_campaign["id"]
+    response = done_client.get(f"/generate/{campaign_id}/card?format=coco")
+    assert response.status_code == 200, response.json()
+    card = response.json()
+    archive = zipfile.ZipFile(io.BytesIO(
+        done_client.get(f"/generate/{campaign_id}/download?format=coco").content))
+    data = json.loads(archive.read("coco/dataset.json"))
+    assert card["images"] == data["images"] >= IMAGES
+    assert card["instances"] == data["instances"]
+    assert card["scenarios"] == len(data["runs"]) >= 2
+    assert card["contents"][0] == (f"{data['images']} images with {data['instances']} labelled "
+                                   f"objects, from {len(data['runs'])} scenarios flown.")
+    assert any(line.startswith("Split for training") for line in card["contents"])
+    aircraft = data["class_balance"]["aircraft"]
+    assert (f"aircraft: {aircraft['instances']} labelled objects in {aircraft['images']} images."
+            in card["classes"])
+    assert any(line.startswith("Cloud cover (share of the sky): from ")
+               for line in card["conditions"])
+    assert any(line.startswith("Time of day: from ") for line in card["conditions"])
+    assert card["checks"][0] == f"All {len(data['runs'])} scenarios passed every check that ran."
+    assert card["verified"] is True
+    assert card["labels_only"] is True
+    assert card["labels_only_words"] == generate_module.LABELS_ONLY_WORDS
+    assert card["not_claimed"][0] == generate_module.LABELS_ONLY_WORDS
+    assert card["format"] == "coco" and card["format_words"].startswith("COCO: ")
+    defaults = (card["contents"] + card["classes"] + card["conditions"] + card["checks"]
+                + card["not_claimed"] + [card["format_words"], card["files"]])
+    for line in defaults:
+        assert not re.search(IDENTIFIER_RE, line), line
+    # The technical record is all there, under the disclosure.
+    details = card["details"]
+    assert details["not_claimed"] == data["not_claimed"]
+    assert details["checks_not_run"] and all("_" in n or n.isalpha()
+                                             for n in details["checks_not_run"])
+    assert "dataset.json" in details["card_files"]
+    # Another format is another export, refused in words when unknown.
+    assert done_client.get(f"/generate/{campaign_id}/card?format=yolo").json()["format"] == "yolo"
+    refused = done_client.get(f"/generate/{campaign_id}/card?format=parquet")
+    assert refused.status_code == 409 and not _rule_named(refused.json())
+    # The page asks for it on the Download screen and keeps names in <details>.
+    html = (generate_module.REPO / "webapp" / "static" / "generate.html").read_text(encoding="utf-8")
+    assert "/card?format=" in html and "cardHtml(r.data)" in html
+    assert "<details><summary>the card in the system's own terms</summary>" in html
+
+
+def test_card_words_reads_a_card_with_pictures_and_a_failed_check():
+    """card_words is pure: a drawn dataset with one failed scenario says
+    so, names no labels-only notice, and puts the unbound verdict in words."""
+    card = {"format": "yolo", "images": 10, "instances": 12, "labels_only": False,
+            "frames_per_split": {"train": 8, "val": 1, "test": 1},
+            "class_balance": {"aircraft": {"instances": 10, "images": 10},
+                              "building": {"instances": 2, "images": 1},
+                              "cloud": {"instances": 0, "images": 0}},
+            "conditions": {"sampled": {"seed": {"n": 2, "min": 1, "max": 2},
+                                       "precipitation": {"rain": 1, "none": 1},
+                                       "engine_sun_azimuth_deg": {"n": 2, "min": 3, "max": 4}}},
+            "runs": [{"verification": {"ok": True, "passed": 20, "failed": 0, "not_run": 1},
+                      "render": {"engine": "x"}, "not_run": ["host_determinism"]},
+                     {"verification": {"ok": False, "passed": 19, "failed": 1, "not_run": 1},
+                      "render": {"engine": "x"}, "verification_bound_to_manifest": False,
+                      "not_run": ["host_determinism"]}],
+            "not_claimed": ["render reproducibility: not established"],
+            "not_claimed_extent_px": 16}
+    said = generate_module.card_words(card)
+    assert said["labels_only"] is False and said["labels_only_words"] is None
+    assert generate_module.LABELS_ONLY_WORDS not in said["not_claimed"]
+    assert said["checks"][0] == ("1 of 2 scenarios passed every check that ran; the others "
+                                 "had a failed check.")
+    assert said["checks"][1] == "39 checks passed and 1 failed in all."
+    assert any("does not say which recording" in line for line in said["checks"])
+    assert "aircraft: 10 labelled objects in 10 images (83% of all objects)." in said["classes"]
+    assert "In the class list but not in any image: cloud." in said["classes"]
+    assert said["conditions"] == [                                # bookkeeping kept out
+        "Precipitation: rain in 1 scenario, none in 1 scenario."]
+    assert any("16 pixels" in line for line in said["not_claimed"])
+    assert said["details"]["checks_not_run"] == ["host_determinism"]
+    assert said["verified"] is False and said["format_words"].startswith("YOLO: ")
+
+
+def test_a_labels_only_download_says_so_in_the_header_and_on_the_page(
+        done_client, done_campaign, monkeypatch):
+    """A headless campaign's zip holds no picture: the response carries
+    ``X-Dataset-Labels-Only: 1`` and the page says the plain sentence
+    before the download (from the card) and after it (from the header);
+    a zip with pictures in it carries ``0``."""
+    campaign_id = done_campaign["id"]
+    response = done_client.get(f"/generate/{campaign_id}/download?format=coco")
+    assert response.status_code == 200
+    assert response.headers["x-dataset-labels-only"] == "1"
+    names = zipfile.ZipFile(io.BytesIO(response.content)).namelist()
+    assert not any(n.lower().endswith((".png", ".jpg", ".jpeg")) for n in names)
+    service = done_campaign["service"]
+    result = service.download(campaign_id, "coco")
+    assert result["labels_only"] is True and result["pictures"] == 0
+    assert result["labels_only_words"] == "Labels only: no picture was drawn on this machine."
+    # Pictures in the export (an engine's, stood in for): the header says 0.
+    original = Campaign.export
+
+    def drawn_export(self, format=None, **kw):
+        out = original(self, format=format, **kw)
+        picture = Path(out["dataset_path"]) / "image_2" / "000000.png"
+        picture.parent.mkdir(parents=True, exist_ok=True)
+        picture.write_bytes(b"\x89PNG\r\n\x1a\n")
+        return {**out, "labels_only": False}
+
+    monkeypatch.setattr(Campaign, "export", drawn_export)
+    drawn = done_client.get(f"/generate/{campaign_id}/download?format=kitti")
+    assert drawn.status_code == 200 and drawn.headers["x-dataset-labels-only"] == "0"
+    assert done_client.get(f"/generate/{campaign_id}/card?format=kitti").json()["labels_only_words"] is None
+    html = (generate_module.REPO / "webapp" / "static" / "generate.html").read_text(encoding="utf-8")
+    assert f"const LABELS_ONLY = '{generate_module.LABELS_ONLY_WORDS}';" in html
+    assert "res.headers.get('X-Dataset-Labels-Only') === '1'" in html
+    assert "labelsOnly(r.data.labels_only_words)" in html     # before, from the card
+    assert "labelsOnly(noPictures ? LABELS_ONLY : null)" in html  # after, from the header
+
+
+def test_the_page_s_count_and_the_prompt_s_count_are_one_target(client):
+    """A count the prompt states is the target when the page's is left
+    blank (every view's added); a page count that disagrees is refused
+    in the plan preview and at start by name, in the catalogue's words."""
+    prompt = "300 images of the a320 for 2 seconds, chase view"
+    plan = client.post("/generate/plan", json={"prompt": prompt, "tier": "regex"}).json()
+    assert plan["state"] == "preview" and plan["ok"] is True
+    assert plan["images"] == plan["images_stated"] == 300 and plan["images_given"] is None
+    assert plan["paragraph"].startswith("300 images of the A320")
+    assert "--images" not in plan["expert"][0]
+    two = client.post("/generate/plan", json={
+        "prompt": "50 images of the a320 for 2 seconds from the chase and tower views",
+        "tier": "regex"}).json()
+    assert two["images"] == 100 and "(50 images from each of the 2 views, added together)" \
+        in two["paragraph"]
+    refused = client.post("/generate/plan", json={"prompt": prompt, "tier": "regex",
+                                                  "images": 100}).json()
+    assert refused["ok"] is False
+    said = refused["refusals"][-1]
+    assert said["details"]["rule"] == "campaign.image_count" and said["details"]["catalogued"]
+    assert said["sentence"] == ("The number of images in your request (300 in all) and the "
+                                "number asked for separately (100) disagree.")
+    assert not _rule_named(said)
+    started = client.post("/generate/start", json={"prompt": prompt, "tier": "regex",
+                                                   "images": 100})
+    assert started.status_code == 409
+    assert started.json()["details"]["rule"] == "campaign.image_count"
+    preview = client.post("/generate/preview", json={"spec": plan["spec"], "images": 100})
+    assert preview.status_code == 409
+    assert preview.json()["details"]["rule"] == "campaign.image_count"
+    html = (generate_module.REPO / "webapp" / "static" / "generate.html").read_text(encoding="utf-8")
+    assert "images: S.plan.images" in html and 'id="images" value="100"' not in html
+
+
+def test_a_bad_gate_is_refused_once_in_the_plan():
+    """validate() now refuses a gate the sampler cannot judge; the
+    sampler's probe refuses it too -- the preview lists it once."""
+    from core.nl.compiler import compile_prompt
+
+    spec = compile_prompt("fly the a320 for 2 seconds")
+    spec.set("randomization.policy", {
+        "cloud_cover": {"beta": [2, 2]},
+        "precipitation": {"choice": ["none", "rain"], "gated_by": "cloud_cover > heavy"}})
+    refusals = generate_module.plan_refusals(spec)
+    rules = [r["details"]["rule"] for r in refusals]
+    assert rules.count("randomization.policy") == 1
+    assert "cloud_cover > heavy" in refusals[rules.index("randomization.policy")]["details"]["message"]

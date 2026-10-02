@@ -371,6 +371,9 @@ campaign.state:
 campaign.duplicate_case:
   sentence: "Two scenarios came out identical because the request leaves nothing to vary between them, so the second was not flown."
   hint: "Ask for something to vary, or for fewer images."
+campaign.image_count:
+  sentence: "The number of images in your request ({stated} in all{views:|, the number stated for each view added together}) and the number asked for separately ({images}) disagree."
+  hint: "The number in the request counts every view's pictures together; remove one of the two numbers, or make them agree."
 
 # -- the assistant's authority (contracts §7, package H) --------------------
 

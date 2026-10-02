@@ -117,7 +117,7 @@
         <button class="opt" data-ex="pictures of a Cessna 172 over flat farmland in still air for 10 seconds, wingman view">C172, wingman</button>
       </div>
       <div class="row" style="margin-top:.8rem">
-        <label class="field">how many images <input type="number" id="images" value="100" min="1"></label>
+        <label class="field">how many images <input type="number" id="images" placeholder="as asked, else 100" min="1"></label>
         <label class="field">format
           <select id="format">
             <option value="coco">COCO</option><option value="yolo">YOLO</option>
@@ -208,9 +208,11 @@
         <span class="dim small" id="dlNote"></span>
       </div>
       <div id="dlRefusal"></div>
-      <p class="dim small">The zip holds the dataset in the chosen layout beside its card
-        (<code>dataset.json</code> and <code>DATASET_CARD.md</code>); the card records the format,
-        the class list, the splits and what was not verified.</p>
+      <div id="labelsOnly" class="refusal" style="display:none"></div>
+    </div>
+    <div class="card" id="cardCard">
+      <b>What you are getting</b> <span class="dim small" id="cardNote"></span>
+      <div id="cardWords" class="small" style="margin-top:.5rem"></div>
     </div>
     <div class="row"><button class="quiet" id="backReview">Back to the pictures</button>
       <button class="quiet" id="again">Start another</button></div>
@@ -279,8 +281,11 @@
     if (s < 5400) return (s / 60).toFixed(0) + ' min';
     return (s / 3600).toFixed(1) + ' h';
   }
+  // A blank count is sent as null: the number the request states (every
+  // view's added) is then the target, else 100. A typed count that
+  // disagrees with the request's is refused in words, never overridden.
   function args() {
-    return { images: Math.max(1, parseInt($('images').value || '100', 10)),
+    return { images: $('images').value ? Math.max(1, parseInt($('images').value, 10)) : null,
              format: $('format').value, tier: $('tierSel').value,
              seed: $('seed').value ? parseInt($('seed').value, 10) : null,
              workers: Math.max(1, parseInt($('workers').value || '1', 10)) };
@@ -359,13 +364,17 @@
     if (!S.plan || !S.plan.spec) return;
     const a = args();
     $('samplePreview').disabled = true; $('sampleNote').textContent = 'flying one scenario…';
-    const r = await call('POST', '/generate/preview', { spec: S.plan.spec, images: a.images, seed: a.seed || 1, workers: a.workers });
+    const r = await call('POST', '/generate/preview', { spec: S.plan.spec, images: S.plan.images, seed: a.seed || 1, workers: a.workers });
     $('samplePreview').disabled = false; $('sampleNote').textContent = '';
     if (!r.ok) { $('sample').innerHTML = (r.data.refusals || [r.data]).map(refusalHtml).join(''); $('start').disabled = true; if (r.data.expert) $('expert').textContent = r.data.expert.join(' '); return; }
     S.preview = r.data;
     const v = r.data.verification_words;
+    // The overlay (mask and box drawn on an engine's pixels) when one was
+    // written; else the geometry preview, with the plain sentence that
+    // masks and boxes appear only with an engine (masks_note).
     $('sample').innerHTML =
-      (r.data.picture ? `<img class="preview" src="${esc(r.data.picture.url)}" alt="sample"><p class="dim small">${esc(r.data.picture.what)}</p>` : '<p class="dim">No picture was produced.</p>') +
+      (r.data.picture ? `<img class="preview" src="${esc(r.data.picture.url)}" alt="sample"><p class="dim small">This picture is ${esc(r.data.picture.what)}.</p>` : '<p class="dim">No picture was produced.</p>') +
+      (r.data.masks_note ? `<p class="small" id="masksNote">${esc(r.data.masks_note)}</p>` : '') +
       `<p class="small">${esc(r.data.status_words)}` + (v ? ` ${v.verdict} ${v.passed} checks passed, ${v.failed} failed, ${v.not_run} could not run without a render.` : '') + `</p>` +
       `<p class="dim small">Measured: ${r.data.measured.frames} images, ${fmtBytes(r.data.measured.bytes)}, ${fmtSeconds(r.data.measured.wall_seconds)} for this scenario.` +
       (Object.keys(r.data.sampled || {}).length ? ' Drawn: ' + esc(Object.entries(r.data.sampled).map(([k, v]) => k.replace(/_/g, ' ') + ' ' + (typeof v === 'number' ? +v.toFixed(2) : v)).join(', ')) + '.' : '') + `</p>`;
@@ -465,11 +474,38 @@
     $('checks').innerHTML = Object.keys(cw).filter((s) => cw[s].count).map((s) => `<div>${s === 'verified' ? '<span class="tick">✓</span>' : (s === 'failed' || s === 'refused' ? '<span class="cross">✗</span>' : '<span class="na">·</span>')} ${cw[s].count} × ${esc(cw[s].sentence)}</div>`).join('') || '<span class="dim">No checks recorded yet.</span>';
     show('review', r.data.expert);
   }
-  $('toDownload').onclick = () => { $('dlFormat').value = (S.progress && S.progress.format) || $('format').value; $('dlRefusal').innerHTML = ''; show('download', [`curl -o dataset.zip "/generate/${S.campaign}/download?format=${$('dlFormat').value}"`]); };
+  $('toDownload').onclick = () => { $('dlFormat').value = (S.progress && S.progress.format) || $('format').value; $('dlRefusal').innerHTML = ''; show('download', [`curl -o dataset.zip "/generate/${S.campaign}/download?format=${$('dlFormat').value}"`]); loadCard(); };
   $('backGenerate').onclick = () => show('generate');
 
   // -- 6 download -----------------------------------------------------------
-  $('dlFormat').onchange = () => { $('expert').textContent = `curl -o dataset.zip "/generate/${S.campaign}/download?format=${$('dlFormat').value}"`; };
+  // The card, before the download: the same export the zip holds, in
+  // plain sentences; check and rule names only under the disclosure.
+  const LABELS_ONLY = 'Labels only: no picture was drawn on this machine.';
+  function labelsOnly(text) {
+    $('labelsOnly').style.display = text ? '' : 'none';
+    $('labelsOnly').textContent = text || '';
+  }
+  function cardHtml(c) {
+    const list = (title, lines) => lines && lines.length ? `<div style="margin:.5rem 0"><div class="dim">${esc(title)}</div><ul class="plain">${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></div>` : '';
+    const d = c.details || {};
+    return list('In it', c.contents) + list('What is labelled', c.classes) +
+      list('Conditions the scenarios drew', c.conditions) +
+      list('Checks', c.checks) + list('What this dataset does not claim', c.not_claimed) +
+      `<p>Format: ${esc(c.format_words)}. ${esc(c.files)}</p>` +
+      `<details><summary>the card in the system's own terms</summary>` +
+      (d.checks_not_run && d.checks_not_run.length ? `<div>checks that did not run: <code>${esc(d.checks_not_run.join(', '))}</code></div>` : '') +
+      (d.not_claimed || []).map((l) => `<div class="dim small">${esc(l)}</div>`).join('') +
+      `<div class="dim small">files: <code>${esc((d.card_files || []).join(', '))}</code></div></details>`;
+  }
+  async function loadCard() {
+    $('cardWords').innerHTML = ''; $('cardNote').textContent = 'reading the card…'; labelsOnly(null);
+    const r = await call('GET', `/generate/${S.campaign}/card?format=${encodeURIComponent($('dlFormat').value)}`);
+    $('cardNote').textContent = '';
+    if (!r.ok) { $('cardWords').innerHTML = refusalHtml(r.data.sentence ? r.data : { sentence: r.data.error || 'The card could not be read.' }); return; }
+    $('cardWords').innerHTML = cardHtml(r.data);
+    labelsOnly(r.data.labels_only_words);
+  }
+  $('dlFormat').onchange = () => { $('expert').textContent = `curl -o dataset.zip "/generate/${S.campaign}/download?format=${$('dlFormat').value}"`; loadCard(); };
   $('download').onclick = async () => {
     $('download').disabled = true; $('dlNote').textContent = 'exporting…'; $('dlRefusal').innerHTML = '';
     const url = `/generate/${S.campaign}/download?format=${encodeURIComponent($('dlFormat').value)}`;
@@ -478,7 +514,10 @@
     if (!res.ok) { let d = {}; try { d = await res.json(); } catch (e) {} $('dlRefusal').innerHTML = refusalHtml(d.sentence ? d : { sentence: d.error || 'The download was refused.' }); return; }
     const blob = await res.blob(); const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = `${S.campaign}_${$('dlFormat').value}.zip`; a.click();
-    $('dlNote').textContent = `Downloaded (${fmtBytes(blob.size)}). The card inside records the format.`;
+    // After the download too: the response says whether it holds a picture.
+    const noPictures = res.headers.get('X-Dataset-Labels-Only') === '1';
+    $('dlNote').textContent = `Downloaded (${fmtBytes(blob.size)}).` + (noPictures ? ' ' + LABELS_ONLY : ' The pictures are in it.');
+    labelsOnly(noPictures ? LABELS_ONLY : null);
   };
   $('backReview').onclick = () => review();
   $('again').onclick = () => { if (S.events) S.events.close(); S.campaign = null; show('ask', ['python -m flightsim.campaign "<prompt>" --images N --out campaigns/<name> --plan']); };
