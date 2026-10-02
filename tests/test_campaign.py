@@ -441,20 +441,25 @@ def test_the_report_and_the_export_read_the_verified_cases(campaigns):
 
 
 def test_the_prompt_s_image_count_is_the_target_across_every_camera(tmp_path):
-    """"500 images" is a per-view capture count by the camera contract;
-    the campaign target counts the images of EVERY camera (the ledger's
-    frames are every camera's), so two views stating 500 each are a
-    1000-image target when --images is left out -- the same unit the
-    per-case estimate counts in. One view: the stated count itself."""
+    """"500 images" in a campaign is the DATASET's size: one phrase the
+    compiler copies onto every view is that number, the target counts
+    every camera's frames, and each view's per-case count is released to
+    its default so the 500 come from many varied scenarios, not one --
+    attributed, with a note saying where the number went."""
     from core.campaign.campaign import stated_images
+    from core.nl.compiler import compile_prompt
 
-    two = Campaign.create("500 images of the a320 for 10 seconds from the chase "
-                          "and tower views", out=tmp_path / "two")
+    prompt = "500 images of the a320 for 10 seconds from the chase and tower views"
+    compiled = compile_prompt(prompt)
+    assert stated_images(compiled) == {"total": 500, "per_view": 500, "views": 2,
+                                       "phrase": "500 images"}
+    two = Campaign.create(prompt, out=tmp_path / "two")
     spec = ScenarioSpec.from_dict(two.record["spec"])
     assert [str(c.preset.value) for c in spec.cameras] == ["chase", "tower"]
-    assert stated_images(spec) == {"total": 1000, "per_view": 500, "views": 2,
-                                   "phrase": "500 images"}
-    assert two.target == 1000 and estimate_frames(spec) == 1000
+    assert two.target == 500
+    assert all(str(c.capture_count.source) == "default" for c in spec.cameras)
+    assert estimate_frames(spec) < 500          # many scenarios, not one
+    assert any("dataset size (500 images)" in note for note in spec.notes)
     one = Campaign.create("300 images of the a320 for 10 seconds, chase view",
                           out=tmp_path / "one")
     assert one.target == 300
@@ -469,32 +474,31 @@ def test_the_prompt_s_image_count_is_the_target_across_every_camera(tmp_path):
 def test_a_stated_count_and_images_that_disagree_refuse_by_name(tmp_path, capsys):
     """Both numbers stated and different: refused campaign.image_count
     before anything is written -- neither is the other's correction --
-    and the catalogue's sentence carries both totals. The per-view
-    count is not the target: --images 500 against "500 images" from two
-    views is a disagreement (1000 in all)."""
+    and the catalogue's sentence carries both numbers. "500 images" from
+    two views is 500 in all, so --images 500 agrees and 1000 does not."""
     from core.messages import explain
     from flightsim.campaign import main
 
     prompt = "500 images of the a320 for 10 seconds from the chase and tower views"
-    for images, out in ((500, "a"), (999, "b")):
+    assert Campaign.create(prompt, images=500, out=tmp_path / "ok").target == 500
+    for images, out in ((1000, "a"), (999, "b")):
         with pytest.raises(CampaignError) as err:
             Campaign.create(prompt, images=images, out=tmp_path / out)
         assert err.value.constraint == "campaign.image_count"
-        assert err.value.detail == {"stated": 1000, "images": images, "views": 2,
+        assert err.value.detail == {"stated": 500, "images": images, "views": 2,
                                     "per_view": 500}
         assert not (tmp_path / out).exists()
     sentence = explain(err.value)["sentence"]
-    assert "(1000 in all, the number stated for each view added together)" in sentence
-    assert "(999)" in sentence and "campaign" not in sentence
+    assert "(500)" in sentence and "(999)" in sentence and "campaign" not in sentence
     with pytest.raises(CampaignError) as err:
         Campaign.create("300 images of the a320 for 10 seconds, chase view",
                         images=100, out=tmp_path / "c")
     assert err.value.constraint == "campaign.image_count"
     assert explain(err.value)["sentence"] == (
-        "The number of images in your request (300 in all) and the number asked "
+        "The number of images in your request (300) and the number asked "
         "for separately (100) disagree.")
     # The command line refuses it by name with exit 2.
-    assert main([prompt, "--images", "500", "--out", str(tmp_path / "cli"), "--plan"]) == 2
+    assert main([prompt, "--images", "1000", "--out", str(tmp_path / "cli"), "--plan"]) == 2
     assert capsys.readouterr().out.startswith("REFUSED -- campaign.image_count:")
     assert not (tmp_path / "cli").exists()
 

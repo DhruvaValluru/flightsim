@@ -825,7 +825,7 @@ def test_a_labels_only_download_says_so_in_the_header_and_on_the_page(
 
 def test_the_page_s_count_and_the_prompt_s_count_are_one_target(client):
     """A count the prompt states is the target when the page's is left
-    blank (every view's added); a page count that disagrees is refused
+    blank (the whole dataset, every view's pictures together); a page count that disagrees is refused
     in the plan preview and at start by name, in the catalogue's words."""
     prompt = "300 images of the a320 for 2 seconds, chase view"
     plan = client.post("/generate/plan", json={"prompt": prompt, "tier": "regex"}).json()
@@ -836,14 +836,13 @@ def test_the_page_s_count_and_the_prompt_s_count_are_one_target(client):
     two = client.post("/generate/plan", json={
         "prompt": "50 images of the a320 for 2 seconds from the chase and tower views",
         "tier": "regex"}).json()
-    assert two["images"] == 100 and "(50 images from each of the 2 views, added together)" \
-        in two["paragraph"]
+    assert two["images"] == 50 and two["paragraph"].startswith("50 images")
     refused = client.post("/generate/plan", json={"prompt": prompt, "tier": "regex",
                                                   "images": 100}).json()
     assert refused["ok"] is False
     said = refused["refusals"][-1]
     assert said["details"]["rule"] == "campaign.image_count" and said["details"]["catalogued"]
-    assert said["sentence"] == ("The number of images in your request (300 in all) and the "
+    assert said["sentence"] == ("The number of images in your request (300) and the "
                                 "number asked for separately (100) disagree.")
     assert not _rule_named(said)
     started = client.post("/generate/start", json={"prompt": prompt, "tier": "regex",

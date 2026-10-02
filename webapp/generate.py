@@ -65,7 +65,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from core.campaign import Campaign, CampaignError
 from core.campaign.campaign import (
     CANCELLED, DONE, FAILED, PAUSED, PLANNED, RUNNING, estimate_frames,
-    reconcile_images, stated_images,
+    reconcile_images, release_stated_counts, stated_images,
 )
 from core.campaign.ledger import STATUS_REFUSED, STATUSES, latest_by_index, summarise
 from core.campaign.workers import RUNS_DIR, run_index, utc_now
@@ -332,13 +332,6 @@ def paragraph(spec: ScenarioSpec, images: int, fmt: str) -> str:
     else:
         views = "a chase view (the default when none is named)"
     duration = float(spec.duration.value)
-    # A count the prompt states is per view (the camera contract); the
-    # target counts every view's, so two views stating 500 are 1000 --
-    # said here, so the number on the page is not a surprise.
-    stated = stated_images(spec)
-    if stated and stated["views"] > 1 and stated["per_view"] and stated["total"] == images:
-        views += (f" ({stated['per_view']} {'image' if stated['per_view'] == 1 else 'images'} "
-                  f"from each of the {stated['views']} views, added together)")
     return (f"{images} {'image' if images == 1 else 'images'} of the {aircraft}, "
             f"{places}; conditions: {', '.join(conditions)}; "
             f"{views}; each scenario flies for {duration:g} s; "
@@ -496,7 +489,12 @@ class GenerateService:
         except CampaignError as exc:
             refusals.append(words(exc))
             images = int(explicit)
-        est = estimate(spec, images, None, directory=self.root)
+        # The estimate counts what the campaign will fly: a stated count is
+        # the dataset's size, so each case captures at its default cadence.
+        flown = ScenarioSpec.from_dict(spec.to_dict())
+        if stated is not None:
+            release_stated_counts(flown, stated)
+        est = estimate(flown, images, None, directory=self.root)
         return {**base, "state": "preview",
                 "headline": state_words("progress.page.preview"),
                 "images": images,
@@ -536,6 +534,9 @@ class GenerateService:
             refusals.append(words(exc))
         if refusals:
             raise GenerateRefusal({**refusals[0], "refusals": refusals})
+        stated = stated_images(spec)
+        if stated is not None:      # the sample is one case of the campaign
+            release_stated_counts(spec, stated)
         engine, render_note = render_here(spec)
         record = {"spec": spec.to_dict(), "seed": int(seed),
                   "capture": {"max_previews": 1, "card": True, **({"render": True} if engine else {})}}

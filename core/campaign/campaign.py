@@ -146,10 +146,12 @@ def stated_images(spec: ScenarioSpec) -> Optional[Dict[str, Any]]:
     """The image count the prompt STATES, counted across every camera,
     or None when it states none. The compiler puts a prompt's "500
     images" on every camera it names as a user-stated per-case
-    ``capture_count`` (the camera contract: a count is per view), so
-    "500 images from the chase and tower views" asks for 500 from each
-    -- 1000 in all, which is what a campaign target counts (the ledger's
-    frames are every camera's). Only a count stated on EVERY camera is
+    ``capture_count`` (the camera contract: a count is per view), but a
+    person who asks for "500 images from the chase and tower views"
+    means 500 pictures, so ONE phrase copied onto every view is that
+    phrase's number -- the target the campaign stops at, every camera's
+    frames counted (the ledger's unit). Counts the views state apart
+    (an edit, never the compiler) add up. Only a count stated on EVERY camera is
     a total; a camera left to capture its whole clip has no stated
     number, so nothing is claimed then. ``{"total", "per_view",
     "views", "phrase"}``; ``per_view`` is None when the views state
@@ -163,7 +165,9 @@ def stated_images(spec: ScenarioSpec) -> Optional[Dict[str, Any]]:
         if str(quantity.source) != "user" or int(quantity.value or 0) < 1:
             return None
         counts.append(int(quantity.value))
-    return {"total": sum(counts),
+    phrases = {str(camera.capture_count.frm) for camera in cameras}
+    one_phrase = len(set(counts)) == 1 and len(phrases) == 1
+    return {"total": counts[0] if one_phrase else sum(counts),
             "per_view": counts[0] if len(set(counts)) == 1 else None,
             "views": len(counts),
             "phrase": str(cameras[0].capture_count.frm)}
@@ -174,7 +178,8 @@ def reconcile_images(spec: ScenarioSpec, images: Optional[int],
     """The campaign target from the prompt's stated count and the
     explicit ``images`` (``--images`` / the page's count): either alone
     decides it (the stated count is the total across every camera,
-    :func:`stated_images`); both stated and disagreeing is refused
+    :func:`stated_images`; the campaign then releases the per-case
+    counts, :func:`release_stated_counts`); both stated and disagreeing is refused
     ``campaign.image_count`` -- a stated value is never moved, and
     neither number is the other's correction. Neither -> ``default``."""
     stated = stated_images(spec)
@@ -192,6 +197,28 @@ def reconcile_images(spec: ScenarioSpec, images: Optional[int],
             detail={"stated": stated["total"], "images": int(images),
                     "views": stated["views"], "per_view": stated["per_view"]})
     return int(images)
+
+
+def release_stated_counts(spec: ScenarioSpec, stated: Dict[str, Any]) -> None:
+    """In a campaign, "500 images" is the DATASET's size -- the target the
+    campaign stops at -- not 500 pictures of one scenario: left on every
+    camera it would fill the target from the first case and vary nothing.
+    Once it is the target, each camera's per-case count goes back to the
+    documented default (the scenario's own clip cadence), attributed, and
+    the spec's notes say where the number went: moved to where it means
+    what was asked, never dropped."""
+    from core.scenario.fields import Quantity
+
+    for camera in spec.cameras or []:
+        if str(camera.capture_count.source) == "user":
+            camera.capture_count = Quantity.default(
+                0, "dimensionless",
+                frm=f"{stated['phrase']!r} is the campaign's target "
+                    f"({stated['total']} images over many scenarios); each "
+                    f"scenario captures at its default cadence")
+    spec.notes = list(spec.notes or []) + [
+        f"{stated['phrase']!r} sets the dataset size ({stated['total']} images); "
+        f"the campaign spreads them over many varied scenarios"]
 
 
 def _compile(prompt: str, answers, tier: str):
@@ -282,6 +309,9 @@ class Campaign:
         if policy is not None:
             spec.set("randomization.policy", policy, frm="campaign policy (given)")
         images = reconcile_images(spec, images, DEFAULT_IMAGES)
+        stated = stated_images(spec)
+        if stated is not None:
+            release_stated_counts(spec, stated)
 
         # The campaign seed IS the block's seed (contracts §5.6): a seed
         # the prompt states is kept; an argument that disagrees with it

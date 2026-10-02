@@ -2415,6 +2415,12 @@ mutate core/nl/llm_compiler.py \
     "a camera list nested under fields is lifted, not refused" \
     tests/test_llm_compiler.py || failures=$((failures+1))
 
+mutate core/campaign/campaign.py \
+    '            release_stated_counts(spec, stated)' \
+    '            pass  # MUTATED: "500 images" fills the target from one scenario' \
+    "a stated image count is the dataset size, spread over many scenarios" \
+    tests/test_campaign.py || failures=$((failures+1))
+
 # -- the expert page, Phase 2 review round (webapp area) ----------------
 # A sampled wind is as fixed as a stated one and the stated synthesised
 # ridge is never re-planned as a place; the depth .f32 the bundle
