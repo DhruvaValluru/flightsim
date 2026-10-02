@@ -5452,6 +5452,109 @@ mutate core/capture/poses.py \
     || failures=$((failures+1))
 
 
+# -- Phase 2 fixes: every draw sampled, traffic flies, mountains and -----
+# aircraft on both compiler tiers, the agent's bake tool ------------------
+
+mutate core/scenario/randomization.py \
+    '                          source: Source = Source.SAMPLED) -> None:' \
+    '                          source: Source = Source.DERIVED) -> None:  # MUTATED' \
+    "Phase 2 fixes: a Phase 10 draw is recorded sampled, not derived" \
+    tests/test_randomization.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '        if q.source == Source.SAMPLED:
+            continue        # drawn already (this stream, or a policy leaf)' \
+    '        if False:  # MUTATED: a drawn camera field is noted as stated
+            continue        # drawn already (this stream, or a policy leaf)' \
+    "Phase 2 fixes: the jitter skips a drawn camera field without a stated note" \
+    tests/test_randomization_policy.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '        _instantiate_traffic(spec, path, leaf, int(value), seed_base,
+                             draw_index, attempt)' \
+    '        pass  # MUTATED: a drawn traffic_count flies nothing' \
+    "Phase 2 fixes: a drawn traffic_count instantiates that many traffic entries" \
+    tests/test_randomization_policy.py || failures=$((failures+1))
+
+mutate core/scenario/randomization.py \
+    '        if not (config.get("license") or {}).get("unavailable"):' \
+    '        if True:  # MUTATED: an unrenderable airframe may be drawn as traffic' \
+    "Phase 2 fixes: a drawn traffic airframe is never one that cannot render" \
+    tests/test_randomization_policy.py || failures=$((failures+1))
+
+mutate core/scenario/validate.py \
+    '        elif aircraft not in labelled:' \
+    '        elif False:  # MUTATED: an unlabelled traffic airframe passes validation' \
+    "Phase 2 fixes: a traffic airframe with no labels block refuses traffic.aircraft" \
+    tests/test_camera_cli.py || failures=$((failures+1))
+
+mutate core/campaign/workers.py \
+    '    out = {address: q.value for address, q in sampled_fields(spec).items()}' \
+    '    out = {address: q.value for address, q in sampled_fields(spec).items()
+           if str(q.detail.get("policy", "")).startswith("randomization.policy")}  # MUTATED' \
+    "Phase 2 fixes: a ledger row records the Phase 10 draws beside the policy's" \
+    tests/test_randomization_policy.py || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '    apply_mountain_scene(spec, prompt)' \
+    '    pass  # MUTATED: mountain words leave the scene auto' \
+    "Phase 2 fixes: unnamed mountains infer the synthesised scene (regex tier)" \
+    tests/test_nl_compiler.py || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '    if spec.terrain_elevation.source != Source.INFERRED:' \
+    '    if False:  # MUTATED: a stated datum becomes a synthesised ridge' \
+    "Phase 2 fixes: a stated ground height keeps the scene auto" \
+    tests/test_nl_compiler.py || failures=$((failures+1))
+
+mutate core/nl/compiler.py \
+    '    if spec.altitude.source == Source.DEFAULT and float(spec.altitude.value) < floor:' \
+    '    if False:  # MUTATED: a defaulted altitude flies into the ridge' \
+    "Phase 2 fixes: a defaulted altitude is planned over the synthesised ridge" \
+    tests/test_nl_compiler.py || failures=$((failures+1))
+
+mutate core/nl/llm_compiler.py \
+    '                payload["questions"].append(asked)' \
+    '                pass  # MUTATED: an unknown aircraft stays a note' \
+    "Phase 2 fixes: the LLM tier asks about an aircraft the vocabulary lacks" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
+mutate core/nl/llm_compiler.py \
+    '            spec.aircraft = Quantity.user(subject[0], frm=subject[0])' \
+    '            pass  # MUTATED: the default B747 flies for an unknown name' \
+    "Phase 2 fixes: the LLM tier carries an unknown aircraft name as stated" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
+mutate core/nl/llm_compiler.py \
+    '    apply_mountain_scene(spec, prompt)' \
+    '    pass  # MUTATED: the LLM tier leaves mountains auto' \
+    "Phase 2 fixes: unnamed mountains infer the synthesised scene (LLM tier)" \
+    tests/test_llm_compiler.py || failures=$((failures+1))
+
+mutate core/agent/policy.py \
+    '        if tool in NETWORK_TOOLS:
+            self._check_bakes(kwargs)' \
+    '        if False:  # MUTATED: bakes are not counted
+            self._check_bakes(kwargs)' \
+    "Phase 2 fixes: the bake tool is counted against its own allowance" \
+    tests/test_agent.py || failures=$((failures+1))
+
+mutate core/agent/tools.py \
+    '        reused = self._whole(stem) and not force
+        if not reused:
+            bake(LOCATIONS[key], GLO30_CACHE, TERRAIN_DIR)' \
+    '        reused = False  # MUTATED: every bake fetches again
+        if not reused:
+            bake(LOCATIONS[key], GLO30_CACHE, TERRAIN_DIR)' \
+    "Phase 2 fixes: a whole curated bake is reused, not fetched again" \
+    tests/test_agent.py || failures=$((failures+1))
+
+mutate core/agent/tools.py \
+    '        except (DEMError, OSError, ValueError) as exc:' \
+    '        except KeyError as exc:  # MUTATED: a failed bake is a traceback' \
+    "Phase 2 fixes: a failed bake is refused by name, terrain.unbaked" \
+    tests/test_agent.py || failures=$((failures+1))
+
 if [ "$guard_n" -ne "$total" ]; then
     echo "INTERNAL: $guard_n mutate calls ran but $total are written; the count is off" >&2
     exit 1

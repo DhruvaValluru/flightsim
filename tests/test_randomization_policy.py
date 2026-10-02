@@ -611,8 +611,26 @@ def test_a_drawn_traffic_count_flies_that_many_scripted_aircraft():
         sample_randomization(reread, check_feasibility=False)
         assert reread.to_dict() == spec.to_dict()
     assert set(counts.values()) == {0, 1, 2}
-    # The p51d declares itself unrenderable (no upstream licence): never drawn.
-    assert "p51d" not in traffic_airframes() and "A320" in traffic_airframes()
+    # Labelled and renderable only: the DHC6 states no labels, the p51d
+    # neither (and no upstream licence).
+    assert "p51d" not in traffic_airframes() and "DHC6" not in traffic_airframes()
+    assert "A320" in traffic_airframes()
+
+
+def test_an_airframe_that_declares_itself_unrenderable_is_never_drawn_as_traffic(
+        tmp_path, monkeypatch):
+    """VALIDITY 3.3: a config whose licence says 'unavailable' never
+    renders, so a draw never puts it in a frame -- labels or not."""
+    import core.scenario.blocks as blocks
+    from core.scenario.randomization import traffic_airframes
+
+    labels = {"dimensions_m": {"length": 1.0, "height": 1.0, "source": "test"}}
+    for name, licence in (("open", {}), ("closed", {"unavailable": "no licence"})):
+        (tmp_path / f"{name}.json").write_text(
+            json.dumps({"labels": labels, "license": licence}), encoding="utf-8")
+    monkeypatch.setattr(blocks, "CONFIG_DIR", tmp_path)
+    assert blocks.labelled_airframes() == ["closed", "open"]
+    assert traffic_airframes() == ["open"]
 
 
 def test_a_stated_traffic_entry_stays_and_too_many_aircraft_is_a_refused_draw():
