@@ -2589,6 +2589,19 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Label->ShowFlags.SetDepthOfField(false);
 			Label->ShowFlags.SetLensFlares(false);
 			Label->ShowFlags.SetTranslucency(false);
+			// No exposure of any kind on a label capture. The ID pass replaces
+			// the tonemapper, but eye adaptation, the physical-camera EV100
+			// and pre-exposure still run in the chain; a scale on the stencil
+			// float turns int_id 1 into a stray integer (measured on the
+			// owner's machine, 5.7 D3D11 with the physical sky: ids 44-49 no
+			// object owns). Pinned to unit exposure here.
+			Label->ShowFlags.SetEyeAdaptation(false);
+			Label->PostProcessSettings.bOverride_AutoExposureMethod = true;
+			Label->PostProcessSettings.AutoExposureMethod = EAutoExposureMethod::AEM_Manual;
+			Label->PostProcessSettings.bOverride_AutoExposureBias = true;
+			Label->PostProcessSettings.AutoExposureBias = 0.0f;
+			Label->PostProcessSettings.bOverride_AutoExposureApplyPhysicalCameraExposure = true;
+			Label->PostProcessSettings.AutoExposureApplyPhysicalCameraExposure = false;
 			// W5: the world look is the beauty's alone -- the starfield
 			// sphere is hidden here, and no look blendable (the rain) is
 			// ever added to a label capture -- so mask, class and depth are
@@ -3639,6 +3652,48 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			}
 			const FString Stem = FrameName.LeftChop(4);
 
+			// Diagnostic (the owner's first 5.7 label run: stray ids 44-49
+			// and an empty alone pass, from a log that said neither where nor
+			// how): every id value the pass wrote that no object owns, with
+			// its pixel count, the raw float range and one pixel location.
+			// Logged for the first frames that carry any, never silenced.
+			{
+				TMap<int32, int32> Stray;
+				TMap<int32, int32> StrayFirstPixel;
+				float RawMin = TNumericLimits<float>::Max();
+				float RawMax = TNumericLimits<float>::Lowest();
+				for (int32 i = 0; i < Count; ++i)
+				{
+					RawMin = FMath::Min(RawMin, IdAll[i].R);
+					RawMax = FMath::Max(RawMax, IdAll[i].R);
+					const int32 Value = static_cast<int32>(Mask[i]);
+					if (Value != 0 && !ClassOfIntId.Contains(Value))
+					{
+						Stray.FindOrAdd(Value)++;
+						if (!StrayFirstPixel.Contains(Value))
+						{
+							StrayFirstPixel.Add(Value, i);
+						}
+					}
+				}
+				static int32 StrayFramesLogged = 0;
+				if ((Stray.Num() > 0 || NonIntegerIds > 0) && StrayFramesLogged < 5)
+				{
+					++StrayFramesLogged;
+					FString Listing;
+					for (const TPair<int32, int32>& Pair : Stray)
+					{
+						const int32 At = StrayFirstPixel[Pair.Key];
+						Listing += FString::Printf(TEXT(" id %d x%d (first at %d,%d);"),
+						                           Pair.Key, Pair.Value, At % Width, At / Width);
+					}
+					UE_LOG(LogFlightSimRender, Warning,
+					       TEXT("labels.diagnostic %s: raw ID float range %.4f..%.4f, %d non-integer ")
+					       TEXT("pixel(s), %d id value(s) no object owns:%s"),
+					       *FrameName, RawMin, RawMax, NonIntegerIds, Stray.Num(), *Listing);
+				}
+			}
+
 			// Per object: pixels in the ID pass, the alone pass (aircraft
 			// only), visible fraction, who occludes it, depth under its mask.
 			TArray<TSharedPtr<FJsonValue>> ObjectRecords;
@@ -3692,6 +3747,27 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 								Occluders.Add(static_cast<int32>(Mask[i]));
 							}
 						}
+					}
+					if (PixelsAlone == 0 && ObjectPixels > 0)
+					{
+						// Diagnostic: an alone pass that lost the object the
+						// full pass sees. Nothing drawn reads as all zeros; a
+						// scaled stencil reads as some other non-zero value.
+						int32 NonZero = 0;
+						float AloneMax = 0.0f;
+						for (int32 i = 0; i < Count; ++i)
+						{
+							if (IdAlone[i].R != 0.0f)
+							{
+								++NonZero;
+								AloneMax = FMath::Max(AloneMax, IdAlone[i].R);
+							}
+						}
+						UE_LOG(LogFlightSimRender, Warning,
+						       TEXT("labels.diagnostic %s: the alone pass of '%s' holds no int_id %d ")
+						       TEXT("pixel while the full pass holds %d; %d non-zero alone pixel(s), ")
+						       TEXT("max raw value %.4f"),
+						       *FrameName, *Entry.Id, Entry.IntId, ObjectPixels, NonZero, AloneMax);
 					}
 					const FString AloneName = Stem + FString::Printf(TEXT("_alone_%d.png"), Entry.IntId);
 					if (!RenderWriteGrayPng(FPaths::Combine(OutputDirectory, AloneName),

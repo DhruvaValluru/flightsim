@@ -2379,8 +2379,10 @@ mutate core/capture/verify.py \
     tests/test_camera_verify_corruption.py || failures=$((failures+1))
 
 mutate core/nl/llm_compiler.py \
-    '    if isinstance(nested, list) and not payload["cameras"]:' \
-    '    if False:  # MUTATED: a nested camera list refuses the whole response' \
+    '        if not payload[section]:
+            payload[section] = nested' \
+    '        if False:  # MUTATED: a nested camera list is dropped, never lifted
+            payload[section] = nested' \
     "a camera list nested under fields is lifted, not refused" \
     tests/test_llm_compiler.py || failures=$((failures+1))
 
