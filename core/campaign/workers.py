@@ -33,10 +33,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from core.dataset.batch import REPO, capture_command, case_row
-from core.scenario.fields import Source
 from core.scenario.randomization import (
-    MAX_SEED, PLANNABLE, RandomizationError, RandomizationSpec,
-    sample_randomization,
+    MAX_SEED, PLANNABLE, RandomizationError, sample_randomization,
+    sampled_fields, sampled_trace,
 )
 from core.scenario.spec import ScenarioSpec
 
@@ -91,16 +90,14 @@ def build_case(index: int, record: Dict[str, Any]) -> Tuple[ScenarioSpec, int]:
 
 
 def sampled_values(spec: ScenarioSpec) -> Dict[str, Any]:
-    """{leaf: value} for every block leaf the policy drew (``sampled``
-    provenance), plus the block seed. What a row records of the draw."""
-    block = spec.randomization
-    out: Dict[str, Any] = {}
-    for name in RandomizationSpec.POLICY_FIELDS:
-        if name == "policy_draws":
-            continue
-        q = getattr(block, name)
-        if q.source == Source.SAMPLED:
-            out[name] = q.value
+    """{address: value} for EVERY ``sampled`` field of the case
+    (``randomization.sampled_fields``): the policy's leaves, the Phase 10
+    leaves (day, hour, sun, exposure, fog, livery), the camera jitter and
+    the cameras-group draws (``cameras[<i>].<field>``), the spec fields a
+    leaf moved and the drawn traffic (``traffic[<i>].<field>``). What a
+    row records of the draw, so any one image traces back to its draws
+    (``sampled_trace`` beside it says which stream drew each)."""
+    out = {address: q.value for address, q in sampled_fields(spec).items()}
     return json.loads(json.dumps(out, default=str))
 
 
@@ -254,6 +251,7 @@ def run_index(index: int, record: Dict[str, Any], out_dir: str,
         return {**base, "status": STATUS_REFUSED, "ok": False, "verified": False,
                 "case_id": case_id, "run_id": case_id, "spec_digest": spec.digest(),
                 "seed": int(seed), "sampled": sampled_values(spec),
+                "sampled_trace": sampled_trace(spec),
                 "refusals": ["campaign.duplicate_case"],
                 "reason": (f"slot {index} drew the spec slot {other} already "
                            f"produced ({case_id}); the prompt leaves nothing to "
@@ -274,6 +272,7 @@ def run_index(index: int, record: Dict[str, Any], out_dir: str,
         "spec_digest": spec.digest(), "seed": int(seed),
         "seed_derivation": CASE_SEED_DERIVATION,
         "sampled": sampled_values(spec),
+        "sampled_trace": sampled_trace(spec),
         "policy_attempts": int(draws.get("attempts", 0)) if draws else 0,
         "refusals": sorted({str(r.get("refusal_name"))
                             for r in draws.get("refused", [])}) if draws else [],

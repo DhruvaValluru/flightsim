@@ -159,7 +159,13 @@ def test_sampling_is_value_idempotent_across_planner_passes():
     assert spec.to_dict() == first
     camera = spec.cameras[0]
     assert camera.offset_forward_m.detail[JITTER_BASE_KEY] == -110.0
-    assert str(camera.offset_forward_m.source) == "derived"
+    # A draw is recorded as a draw (contracts §5.1), with the policy
+    # leaves' detail: which stream, which seed, which case.
+    assert str(camera.offset_forward_m.source) == "sampled"
+    camera_id = str(camera.camera_id.value)
+    assert camera.offset_forward_m.detail["policy"] == f"randomization.phase10.camera:{camera_id}"
+    assert camera.offset_forward_m.detail["draw_index"] == 0
+    assert camera.offset_forward_m.detail["seed"] == int(spec.randomization.seed.value)
     assert camera.offset_forward_m.value != -110.0
     # Round trip through YAML and a third pass: still the same.
     reread = ScenarioSpec.from_dict(json.loads(json.dumps(first)))
@@ -193,7 +199,13 @@ def test_the_sun_is_where_the_algorithm_puts_it_and_the_look_follows():
     spec = _enabled()
     sample_randomization(spec)
     block = spec.randomization
-    assert str(block.day_of_year.source) == "derived"
+    for name in ("day_of_year", "hour_utc", "sun_elevation_deg", "sun_azimuth_deg",
+                 "exposure_bias", "fog_density", "livery"):
+        q = getattr(block, name)
+        assert str(q.source) == "sampled", name
+        assert {"policy", "distribution", "seed", "draw_index"} <= set(q.detail), name
+        assert q.detail["policy"].startswith("randomization.phase10."), name
+    assert block.fog_density.detail["distribution"] == {"loguniform": [FOG_CLEAR, FOG_HAZY]}
     position = solar_position(float(spec.latitude.value),
                               float(spec.longitude.value),
                               int(block.year.value), int(block.day_of_year.value),
@@ -413,7 +425,7 @@ def test_the_capture_command_samples_records_and_prints_the_block(tmp_path, caps
     assert sidecar["context"]["randomization"] == manifest["randomization"]
     # The example's own spec, re-read from the run, still says so.
     written = yaml.safe_load((out / "scenario.yaml").read_text(encoding="utf-8"))
-    assert written["randomization"]["sun_elevation_deg"]["source"] == "derived"
+    assert written["randomization"]["sun_elevation_deg"]["source"] == "sampled"
 
 
 # -- Phase 2 fixes: a campaign case, a typed gate, a gated range, the
@@ -453,7 +465,8 @@ def test_a_campaign_case_index_moves_every_phase10_leaf_and_draw_0_is_the_single
     sample_randomization(plain)
     sample_randomization(zero, draw_index=0)
     assert zero.to_dict() == plain.to_dict()
-    assert "draw_index" not in plain.randomization.fog_density.detail
+    assert plain.randomization.fog_density.detail["draw_index"] == 0
+    assert plain.randomization.fog_density.detail["stream"] == "fog"     # the bare label
     by_index = {}
     for index in range(4):
         case = _enabled(seed=7)

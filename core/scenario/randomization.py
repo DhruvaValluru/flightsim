@@ -7,8 +7,9 @@ every one of those choices RECORDED so the frame can be reproduced and
 the label can say what it labels. This block is how the spec carries
 that: a provenanced ``randomization`` section (optional; absent is the
 documented default, "off") with its own seed, the ranges the sampler
-draws from, and the drawn values written back as ``derived``
-Quantities beside the ranges. The sampler is a planner like every
+draws from, and the drawn values written back as ``sampled``
+Quantities beside the ranges (with the policy leaves' detail: which
+stream, which distribution, which seed, which draw). The sampler is a planner like every
 other: it runs before the digest is answered, it moves only fields
 the user did not state, it is value-idempotent (the same seed draws
 the same numbers on every pass), and it refuses by name when a draw
@@ -70,11 +71,22 @@ up to ``MAX_POLICY_ATTEMPTS`` (20), after which the slot is refused by
 name (``randomization.infeasible``) with every refusal in the error's
 detail. The Phase 10 leaves keep their own sha256 streams so
 ``examples/randomized.yaml`` samples exactly as before; the policy adds
-to them and never re-draws what they drew.
+to them and never re-draws what they drew. Since Phase 2 the Phase 10
+leaves are ``Source.SAMPLED`` too, with the same detail keys
+(``policy = randomization.phase10.<stream>``, ``distribution``,
+``seed`` = the block seed, ``draw_index``, plus the hashed ``stream``
+label): a draw is a draw whichever stage made it, and no later planner
+can move it. The one exception is the sun of a STATED day and hour --
+nothing was drawn, so it stays ``derived``.
 
-What is NOT claimed: no leaf instantiates ``traffic[]`` entries (the
-count is recorded; an entry needs an airframe choice, package B's
-shape); the ``location`` leaf moves latitude/longitude/terrain elevation
+A drawn ``traffic_count`` instantiates that many scripted ``traffic[]``
+entries (after any stated ones), each entry's airframe and track drawn
+from its own policy stream (``<leaf path>[<i>]``) among the configured
+airframes and ``blocks.TRAFFIC_TRACKS``; ``validate()`` judges them like
+any stated entry, so a draw the contract cannot hold (three aircraft)
+is a refused draw, recorded and re-drawn.
+
+What is NOT claimed: the ``location`` leaf moves latitude/longitude/terrain elevation
 but not the cameras' per-airframe offsets that were defaulted at
 compile time (stated in the report); no distribution outside the nine
 documented forms exists.
@@ -147,7 +159,7 @@ def _d(value, unit=None, frm="documented randomisation default", **detail):
 
 @dataclass
 class RandomizationSpec:
-    """The block. Ranges first, then the sampled values (``derived``
+    """The block. Ranges first, then the sampled values (``sampled``
     once the sampler has run; ``default`` placeholders before)."""
 
     enabled: Quantity
@@ -428,16 +440,40 @@ def declared_liveries(aircraft: str, config_dir: Optional[Path] = None
 
 # -- the sampler (a planner) --------------------------------------------
 
-def _plan_unless_stated(block: RandomizationSpec, name: str, value: Any,
-                        frm: str, draw_index: int = 0) -> None:
-    if getattr(block, name).source in PLANNABLE:
-        block.plan(name, value, frm=frm)
-        if int(draw_index):
-            # A campaign case records its index beside the value, so a
-            # second pass (the capture command) draws the same case.
-            q = getattr(block, name)
-            setattr(block, name, replace(
-                q, detail={**q.detail, "draw_index": int(draw_index)}))
+#: How a Phase 10 stream is seeded; recorded on every Phase 10 draw.
+PHASE10_STREAM_DERIVATION = ("numpy default_rng(first 8 bytes of "
+                             "sha256('<seed>:randomization:<stream>'), big-endian)")
+
+
+def _phase10_detail(stream_label: str, distribution: Dict[str, Any], seed: int,
+                    draw_index: int, **extra) -> Dict[str, Any]:
+    """The policy leaves' detail for a Phase 10 draw: ``policy`` names
+    the stream (``randomization.phase10.<stream>``), ``distribution``
+    the documented range it drew from, ``seed`` the block seed,
+    ``draw_index`` the campaign case (0 for the single run), ``stream``
+    the hashed label itself -- so one image traces back to its draws."""
+    return {"policy": f"randomization.phase10.{stream_label}",
+            "distribution": _distribution_of(distribution),
+            "seed": int(seed), "draw_index": int(draw_index),
+            "stream": _phase10_label(stream_label, draw_index),
+            "stream_derivation": PHASE10_STREAM_DERIVATION, **extra}
+
+
+def _sample_unless_stated(block: RandomizationSpec, name: str, value: Any,
+                          frm: str, detail: Dict[str, Any],
+                          source: Source = Source.SAMPLED) -> None:
+    """Write a Phase 10 draw as ``sampled`` (contracts §5.1: a drawn value
+    is as fixed as a stated one), with the policy leaves' detail. A
+    stated field, or one a policy leaf already drew, is left alone --
+    which is also what makes a second pass land on the same numbers.
+    ``source`` is DERIVED only for a value computed from inputs nothing
+    drew (the sun of a stated day and hour)."""
+    current = getattr(block, name)
+    if current.source not in PLANNABLE:
+        return
+    setattr(block, name, Quantity(value=value, unit=current.unit, source=source,
+                                  frm=frm, std=current.std,
+                                  detail={**current.detail, **detail}))
 
 
 def _sample_time_of_day(spec, block: RandomizationSpec, seed: int,
@@ -469,31 +505,51 @@ def _sample_time_of_day(spec, block: RandomizationSpec, seed: int,
     frm = (f"drawn from the time-of-day stream of seed {seed}"
            f"{_draw_phrase(draw_index)} (attempt {attempt + 1}), sun above "
            f"{floor:g} deg")
-    _plan_unless_stated(block, "day_of_year", doy, frm, draw_index)
-    _plan_unless_stated(block, "hour_utc", round(hour, 4), frm, draw_index)
+    reject = {"reject_below_sun_elevation_deg": floor}
+    _sample_unless_stated(block, "day_of_year", doy, frm, _phase10_detail(
+        "time_of_day", {"uniform_integers": [lo_d, hi_d], **reject}, seed,
+        draw_index, attempt=attempt))
+    _sample_unless_stated(block, "hour_utc", round(hour, 4), frm, _phase10_detail(
+        "time_of_day", {"uniform": [lo_h, hi_h], **reject}, seed, draw_index,
+        attempt=attempt))
+    # The sun and the exposure are functions of the day and hour: sampled
+    # when either was drawn (here or by a policy leaf), derived when both
+    # were stated -- nothing was drawn then.
+    drawn = any(getattr(block, n).source == Source.SAMPLED
+                for n in ("day_of_year", "hour_utc"))
+    source = Source.SAMPLED if drawn else Source.DERIVED
+    solar = _phase10_detail(
+        "time_of_day", {"function_of": ["day_of_year", "hour_utc",
+                                        "latitude", "longitude"]},
+        seed, draw_index) if drawn else {}
     solar_frm = (f"solar position at ({lat:.3f}, {lon:.3f}), {year} day "
                  f"{doy} {hour:.2f} h UTC -- {SOLAR_SOURCE}")
-    _plan_unless_stated(block, "sun_elevation_deg",
-                        round(position.elevation_deg, 3), solar_frm)
-    _plan_unless_stated(block, "sun_azimuth_deg",
-                        round(position.azimuth_deg, 3),
-                        solar_frm + "; compass, clockwise from north")
-    _plan_unless_stated(
+    _sample_unless_stated(block, "sun_elevation_deg",
+                          round(position.elevation_deg, 3), solar_frm, solar,
+                          source)
+    _sample_unless_stated(block, "sun_azimuth_deg",
+                          round(position.azimuth_deg, 3),
+                          solar_frm + "; compass, clockwise from north", solar,
+                          source)
+    _sample_unless_stated(
         block, "exposure_bias",
         round(exposure_for_elevation(float(block.sun_elevation_deg.value)), 3),
         f"interpolated between the calibrated look points "
         f"{EXPOSURE_CALIBRATION} at the sampled sun elevation (gotcha 7); "
-        f"clamped beyond them")
+        f"clamped beyond them",
+        {**solar, "distribution": {"function_of": ["sun_elevation_deg"]}}
+        if drawn else {}, source)
 
 
 def _sample_fog(block: RandomizationSpec, seed: int, draw_index: int = 0) -> None:
     rng = stream(seed, "fog", draw_index)
     lo, hi = float(block.fog_density_min.value), float(block.fog_density_max.value)
     density = math.exp(rng.uniform(math.log(lo), math.log(hi)))
-    _plan_unless_stated(block, "fog_density", float(f"{density:.6g}"),
-                        f"log-uniform in [{lo:g}, {hi:g}] 1/m from the fog "
-                        f"stream of seed {seed}{_draw_phrase(draw_index)}",
-                        draw_index)
+    _sample_unless_stated(block, "fog_density", float(f"{density:.6g}"),
+                          f"log-uniform in [{lo:g}, {hi:g}] 1/m from the fog "
+                          f"stream of seed {seed}{_draw_phrase(draw_index)}",
+                          _phase10_detail("fog", {"loguniform": [lo, hi]}, seed,
+                                          draw_index))
 
 
 def _sample_livery(spec, block: RandomizationSpec, seed: int,
@@ -501,16 +557,22 @@ def _sample_livery(spec, block: RandomizationSpec, seed: int,
     aircraft = str(spec.aircraft.value)
     variants = declared_liveries(aircraft, config_dir)
     if not variants:
-        _plan_unless_stated(block, "livery", DEFAULT_LIVERY,
-                            f"{aircraft} declares no livery variants "
-                            f"(assets/aircraft_config 'liveries'); the "
-                            f"mesh's own materials")
+        # A choice of one: recorded like any draw (no stream is consumed),
+        # so every case's livery is on the record the same way.
+        _sample_unless_stated(block, "livery", DEFAULT_LIVERY,
+                              f"{aircraft} declares no livery variants "
+                              f"(assets/aircraft_config 'liveries'); the "
+                              f"mesh's own materials",
+                              _phase10_detail("livery", {"choice": [DEFAULT_LIVERY]},
+                                              seed, draw_index))
         return
     rng = stream(seed, "livery", draw_index)
     choice = variants[int(rng.integers(0, len(variants)))]
-    _plan_unless_stated(block, "livery", choice,
-                        f"uniform over {variants} from the livery stream "
-                        f"of seed {seed}{_draw_phrase(draw_index)}", draw_index)
+    _sample_unless_stated(block, "livery", choice,
+                          f"uniform over {variants} from the livery stream "
+                          f"of seed {seed}{_draw_phrase(draw_index)}",
+                          _phase10_detail("livery", {"choice": variants}, seed,
+                                          draw_index))
 
 
 #: Which camera fields a jitter may move, by the camera's mode, and
@@ -549,6 +611,8 @@ def _jitter_camera(spec, camera, seed: int, block: RandomizationSpec,
     # stated field does not shift the draws of the others.
     for name, draw, kind in plan:
         q = getattr(camera, name)
+        if q.source == Source.SAMPLED:
+            continue        # drawn already (this stream, or a policy leaf)
         if q.source not in PLANNABLE:
             note = (f"randomization: camera {camera_id!r} field {name} is "
                     f"{q.source.value}-stated; not jittered")
@@ -561,16 +625,19 @@ def _jitter_camera(spec, camera, seed: int, block: RandomizationSpec,
             frm = (f"{base:g} x (1 {draw:+.4f}) from the camera stream of "
                    f"seed {seed}{_draw_phrase(draw_index)} (focal jitter "
                    f"+/-{jf:g})")
+            distribution = {"uniform_fraction": [-jf, jf]}
         else:
             value = base + draw
             frm = (f"{base:g} {draw:+.4f} from the camera stream of seed "
                    f"{seed}{_draw_phrase(draw_index)} (jitter +/-{jm:g} m / "
                    f"+/-{jd:g} deg)")
-        detail = {**q.detail, JITTER_BASE_KEY: base}
-        if int(draw_index):
-            detail["draw_index"] = int(draw_index)
+            span = jd if name.endswith("_deg") else jm
+            distribution = {"uniform_offset": [-span, span]}
+        detail = {**q.detail, **_phase10_detail(
+            f"camera:{camera_id}", distribution, seed, draw_index),
+            JITTER_BASE_KEY: base}
         setattr(camera, name, replace(
-            q, value=round(value, 4), source=Source.DERIVED, frm=frm,
+            q, value=round(value, 4), source=Source.SAMPLED, frm=frm,
             detail=detail))
 
 
@@ -943,11 +1010,78 @@ class _DrawRefused(RandomizationError):
     policy-level RandomizationError is final."""
 
 
+def traffic_airframes() -> List[str]:
+    """The airframes a drawn traffic entry chooses among: every
+    configured airframe (``blocks.configured_airframes``, what
+    validate() accepts) whose config does not declare it unavailable
+    for rendering (VALIDITY 3.3: the p51d's upstream ships no licence,
+    so a draw never puts it in a frame)."""
+    from .blocks import CONFIG_DIR as TRAFFIC_CONFIG_DIR, configured_airframes
+
+    out: List[str] = []
+    for name in configured_airframes():
+        config = json.loads((TRAFFIC_CONFIG_DIR / f"{name}.json")
+                            .read_text(encoding="utf-8"))
+        if not (config.get("license") or {}).get("unavailable"):
+            out.append(name)
+    return out
+
+
+def _instantiate_traffic(spec, path: str, leaf: Dict[str, Any], count: int,
+                         seed_base: int, draw_index: int, attempt: int) -> None:
+    """A drawn ``traffic_count`` becomes that many scripted traffic
+    entries, appended after any stated ones (a stated entry never
+    moves). Each entry has its own stream (``<path>[<i>]``): its
+    airframe uniform over :func:`traffic_airframes`, then its track
+    uniform over ``blocks.TRAFFIC_TRACKS``, both ``sampled`` with the
+    policy detail; range and livery are the documented defaults.
+    validate() then judges the entries like stated ones (too many
+    aircraft is ``traffic.count``: a refused draw, re-drawn)."""
+    from .blocks import (
+        DEFAULT_TRAFFIC_LIVERY, DEFAULT_TRAFFIC_RANGE_M, TRAFFIC_TRACKS,
+        TrafficSpec,
+    )
+
+    airframes = traffic_airframes()
+    if count and not airframes:
+        raise RandomizationError(
+            "randomization.policy",
+            f"{path}: no configured airframe may render as traffic "
+            f"(assets/aircraft_config); a drawn count has nothing to fly")
+    kept = [entry for entry in spec.traffic
+            if entry.aircraft.source != Source.SAMPLED]
+    drawn: List[Any] = []
+    for i in range(int(count)):
+        entry_path = f"{path}[{i}]"
+        rng, entry_seed = policy_stream(seed_base, draw_index, attempt, entry_path)
+        aircraft = airframes[int(rng.integers(0, len(airframes)))]
+        track = TRAFFIC_TRACKS[int(rng.integers(0, len(TRAFFIC_TRACKS)))]
+        frm = f"drawn by {entry_path} (traffic entry {i + 1} of {count}), draw {draw_index}"
+        detail = {"policy": entry_path, "seed": int(entry_seed),
+                  "draw_index": int(draw_index), "count_leaf": path,
+                  "count_distribution": _distribution_of(leaf)}
+        default = f"documented traffic default (entry drawn by {entry_path})"
+        drawn.append(TrafficSpec(
+            aircraft=Quantity(value=aircraft, unit=None, source=Source.SAMPLED,
+                              frm=f"{frm}: uniform over {airframes}",
+                              detail={**detail, "distribution": {"choice": airframes}}),
+            track=Quantity(value=track, unit=None, source=Source.SAMPLED,
+                           frm=f"{frm}: uniform over {list(TRAFFIC_TRACKS)}",
+                           detail={**detail,
+                                   "distribution": {"choice": list(TRAFFIC_TRACKS)}}),
+            range_m=Quantity.default(DEFAULT_TRAFFIC_RANGE_M, "m", frm=default),
+            livery=Quantity.default(DEFAULT_TRAFFIC_LIVERY, frm=default)))
+    spec.traffic = kept + drawn
+
+
 def _apply_leaf(spec, path: str, name: str, leaf: Dict[str, Any], value: Any,
                 seed: int, draw_index: int, config_dir: Optional[Path],
-                gated: Optional[str] = None) -> None:
+                gated: Optional[str] = None, seed_base: int = 0,
+                attempt: int = 0) -> None:
     """Write one drawn value to its field(s), Source.SAMPLED. ``gated``
-    is the shut gate that made this the leaf's first choice."""
+    is the shut gate that made this the leaf's first choice;
+    ``seed_base`` and ``attempt`` seed what one draw instantiates (the
+    traffic entries of a drawn ``traffic_count``)."""
     block = spec.randomization
     entry = POLICY_LEAVES[name]
     unit = entry["unit"]
@@ -1104,6 +1238,12 @@ def _apply_leaf(spec, path: str, name: str, leaf: Dict[str, Any], value: Any,
                                    draw_index, std=TURBULENCE_STD,
                                    W20_kt=TURBULENCE_LEVELS[value], **extra)
         return
+    if name == "traffic_count":
+        block.traffic_count = _sampled(value, unit, frm, path, leaf, seed,
+                                       draw_index, **extra)
+        _instantiate_traffic(spec, path, leaf, int(value), seed_base,
+                             draw_index, attempt)
+        return
     if name == "livery":
         variants = declared_liveries(str(spec.aircraft.value), config_dir)
         if value != DEFAULT_LIVERY and value not in variants:
@@ -1255,7 +1395,8 @@ def _policy_attempt(spec, policy: Dict[str, Any], seed_base: int,
                 _, seed = policy_stream(seed_base, draw_index, attempt, path)
                 drawn[name] = value
                 _apply_leaf(spec, path, name, leaf, value, seed, draw_index,
-                            config_dir, gated=str(leaf["gated_by"]))
+                            config_dir, gated=str(leaf["gated_by"]),
+                            seed_base=seed_base, attempt=attempt)
             continue
         if name == "location":
             keys = _location_choices(path, list(leaf["choice"]))
@@ -1275,7 +1416,8 @@ def _policy_attempt(spec, policy: Dict[str, Any], seed_base: int,
             rng, seed = policy_stream(seed_base, draw_index, attempt, path)
             value = _clip(_draw(rng, leaf), leaf)
         drawn[name] = value
-        _apply_leaf(spec, path, name, leaf, value, seed, draw_index, config_dir)
+        _apply_leaf(spec, path, name, leaf, value, seed, draw_index, config_dir,
+                    seed_base=seed_base, attempt=attempt)
     return drawn
 
 
@@ -1403,8 +1545,8 @@ def sample_randomization(spec, config_dir: Optional[Path] = None,
                          draw_index: Optional[int] = None,
                          check_feasibility: bool = True) -> None:
     """The planner. No-op when the block is off; otherwise every draw
-    is made from the block's seed and written back as ``derived``
-    (the Phase 10 leaves) or ``sampled`` (the policy's).
+    is made from the block's seed and written back as ``sampled``
+    (the Phase 10 leaves and the policy's alike).
     Value-idempotent: a second pass draws the same numbers.
 
     ``draw_index`` is the campaign's case index (0 for a single run;
@@ -1479,6 +1621,58 @@ def _sampled_policy_values(spec) -> Dict[str, Any]:
         if q.source == Source.SAMPLED:
             out[name] = q.value
     return out
+
+
+#: The detail keys a draw's trace carries in a ledger row (the
+#: distribution itself is the policy's, recorded once on the campaign).
+TRACE_KEYS = ("policy", "seed", "draw_index", "attempt", "stream")
+
+
+def sampled_fields(spec) -> Dict[str, Quantity]:
+    """{address: Quantity} for EVERY ``sampled`` field of the spec: the
+    block's leaves by their bare names (the Phase 10 leaves and the
+    policy's alike: ``fog_density``, ``visibility_km``), the spec's own
+    fields by name (``wind_speed``, ``latitude``), the version-9 blocks
+    as ``loading.fuel_fraction``, the cameras as
+    ``cameras[<i>].<field>`` and the drawn traffic as
+    ``traffic[<i>].<field>`` -- the spec's own set()/plan() addresses,
+    so one image's every draw can be looked up where it lives."""
+    from .spec import SPEC9_BLOCKS
+
+    out: Dict[str, Quantity] = {}
+    spec_names = set()
+    for _section, name, q in spec.quantities():
+        spec_names.add(name)
+        if q.source == Source.SAMPLED:
+            out[name] = q
+    block = spec.randomization
+    for name, q in block.quantities():
+        if name != "policy_draws" and q.source == Source.SAMPLED:
+            out[f"randomization.{name}" if name in spec_names else name] = q
+    for block_name in SPEC9_BLOCKS:
+        sub = getattr(spec, block_name, None)
+        if sub is None or not hasattr(sub, "quantities"):
+            continue
+        for name, q in sub.quantities():
+            if q.source == Source.SAMPLED:
+                out[f"{block_name}.{name}"] = q
+    for index, camera in enumerate(spec.cameras):
+        for name, q in camera.quantities():
+            if q.source == Source.SAMPLED:
+                out[f"cameras[{index}].{name}"] = q
+    for index, entry in enumerate(spec.traffic):
+        for name, q in entry.quantities():
+            if q.source == Source.SAMPLED:
+                out[f"traffic[{index}].{name}"] = q
+    return out
+
+
+def sampled_trace(spec) -> Dict[str, Dict[str, Any]]:
+    """{address: {policy, seed, draw_index[, attempt, stream]}} for every
+    field :func:`sampled_fields` lists: which leaf or stream drew it,
+    from which seed, at which case index."""
+    return {address: _plain({k: q.detail[k] for k in TRACE_KEYS if k in q.detail})
+            for address, q in sampled_fields(spec).items()}
 
 
 def render_look(spec) -> Optional[Dict[str, Any]]:

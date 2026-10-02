@@ -162,7 +162,13 @@ def test_cases_are_seeded_by_index_and_identical_in_any_process(tmp_path):
     assert a.digest() == b.digest() and seed_a == seed_b == case_seed(1, 7)
     assert a.digest() != other.digest()
     assert sampled_values(a) == sampled_values(b) and sampled_values(a) != sampled_values(other)
-    assert set(sampled_values(a)) == {"cloud_cover", "visibility_km", "precipitation", "hour_local"}
+    # Every draw is on the row: the policy's leaves, the spec field
+    # hour_utc they wrote, the Phase 10 leaves and the camera jitter.
+    recorded = set(sampled_values(a))
+    assert {"cloud_cover", "visibility_km", "precipitation", "hour_local"} <= recorded
+    assert {"day_of_year", "hour_utc", "sun_elevation_deg", "fog_density",
+            "exposure_bias", "livery"} <= recorded
+    assert any(k.startswith("cameras[0].") for k in recorded)
     assert str(a.seed.source) == "derived" and "SeedSequence" in a.seed.frm
     assert int(a.randomization.seed.value) == 7          # the block's seed IS the campaign seed
     draws = a.randomization.policy_draws.value

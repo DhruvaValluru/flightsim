@@ -1825,10 +1825,12 @@ mutate core/scenario/randomization.py \
     tests/test_randomization.py || failures=$((failures+1))
 
 mutate core/scenario/randomization.py \
-    '    if getattr(block, name).source in PLANNABLE:
-        block.plan(name, value, frm=frm)' \
-    '    if True:  # MUTATED: a stated block field is planned over
-        block.plan(name, value, frm=frm)' \
+    '    current = getattr(block, name)
+    if current.source not in PLANNABLE:
+        return' \
+    '    current = getattr(block, name)
+    if False:  # MUTATED: a stated block field is drawn over
+        return' \
     "a stated day or hour is used, not redrawn" \
     tests/test_randomization.py || failures=$((failures+1))
 

@@ -528,3 +528,127 @@ def test_realised_distribution_reads_the_sampler_s_own_card_blocks():
                                                                 "yosemite",
                                                                 "flint_hills"}
     assert 0.0 < realised["coverage"] <= 1.0
+
+
+# -- Phase 2 fixes: every draw is a draw on the record; traffic flies --------
+
+def test_every_draw_of_a_campaign_case_is_sampled_and_on_its_ledger_row(tmp_path):
+    """The Phase 10 leaves (day, hour, sun, exposure, fog, livery, the
+    camera jitter) are written ``sampled`` with the policy leaves'
+    detail, and the worker's row records EVERY sampled field -- the
+    Phase 10 leaves and the cameras-group draws beside the policy's --
+    each with the stream, seed and case index that drew it, so any one
+    image traces back to its draws."""
+    from core.campaign import Campaign
+    from core.campaign.workers import build_case, run_index
+
+    c = Campaign.create("fly the a320 at 3000 m for 10 seconds, chase view",
+                        images=10, seed=7, out=tmp_path / "c",
+                        policy={"wind_speed_kt": {"uniform": [5, 15]},
+                                "cameras": {"focal_length_mm": {"uniform": [40, 60]}}})
+    case, _ = build_case(3, c.record)
+    block = case.randomization
+    for name in ("day_of_year", "hour_utc", "sun_elevation_deg", "sun_azimuth_deg",
+                 "exposure_bias", "fog_density", "livery"):
+        q = getattr(block, name)
+        assert q.source is Source.SAMPLED, name
+        assert q.detail["draw_index"] == 3 and q.detail["seed"] == 7, name
+        assert q.detail["policy"].startswith("randomization.phase10."), name
+        assert "distribution" in q.detail, name
+    camera = case.cameras[0]
+    assert camera.offset_right_m.source is Source.SAMPLED
+    assert camera.offset_right_m.detail["policy"] == \
+        f"randomization.phase10.camera:{camera.camera_id.value}"
+    # The policy drew the focal length; the Phase 10 jitter leaves it alone
+    # (no "stated" note: a draw is not a statement).
+    assert camera.focal_length_mm.detail["policy"].startswith(
+        "randomization.policy.cameras.focal_length_mm")
+    assert not [n for n in case.notes if "focal_length_mm" in n]
+
+    row = run_index(3, c.record, str(tmp_path / "c"), stall_seconds=None,
+                    capture_runner="tests.test_campaign:failing_capture")
+    sampled, trace = row["sampled"], row["sampled_trace"]
+    assert set(sampled) == set(trace)
+    assert {"day_of_year", "hour_utc", "sun_elevation_deg", "fog_density", "livery",
+            "exposure_bias", "wind_speed", "cameras[0].focal_length_mm",
+            "cameras[0].offset_right_m"} <= set(sampled)
+    assert sampled["fog_density"] == float(block.fog_density.value)
+    assert sampled["cameras[0].focal_length_mm"] == float(camera.focal_length_mm.value)
+    assert trace["fog_density"] == {"policy": "randomization.phase10.fog", "seed": 7,
+                                    "draw_index": 3, "stream": "draw 3:fog"}
+    assert trace["wind_speed"]["policy"] == "randomization.policy.wind_speed_kt"
+    assert all(t["draw_index"] == 3 for t in trace.values())
+
+
+def test_a_drawn_traffic_count_flies_that_many_scripted_aircraft():
+    """traffic_count is instantiated: a drawn count of N is N traffic
+    entries, airframe and track drawn per entry from its own stream,
+    sampled, deterministic from the seed, validated like stated ones."""
+    from core.scenario.blocks import TRAFFIC_TRACKS
+    from core.scenario.randomization import traffic_airframes
+
+    counts = {}
+    for index in range(8):
+        spec = _spec({"traffic_count": {"choice": [0, 1, 2]}}, seed=5)
+        sample_randomization(spec, draw_index=index, check_feasibility=False)
+        count = int(spec.randomization.traffic_count.value)
+        counts[index] = count
+        assert len(spec.traffic) == count
+        for i, entry in enumerate(spec.traffic):
+            assert entry.aircraft.source is Source.SAMPLED
+            assert entry.track.source is Source.SAMPLED
+            assert str(entry.aircraft.value) in traffic_airframes()
+            assert str(entry.track.value) in TRAFFIC_TRACKS
+            assert entry.aircraft.detail["policy"] == \
+                f"randomization.policy.traffic_count[{i}]"
+            assert entry.aircraft.detail["draw_index"] == index
+        assert validate(spec, check_feasibility=False).ok
+        # Deterministic, and a second pass (the capture command) keeps it.
+        again = _spec({"traffic_count": {"choice": [0, 1, 2]}}, seed=5)
+        sample_randomization(again, draw_index=index, check_feasibility=False)
+        assert again.to_dict() == spec.to_dict()
+        reread = ScenarioSpec.from_dict(json.loads(json.dumps(spec.to_dict())))
+        sample_randomization(reread, check_feasibility=False)
+        assert reread.to_dict() == spec.to_dict()
+    assert set(counts.values()) == {0, 1, 2}
+    # The p51d declares itself unrenderable (no upstream licence): never drawn.
+    assert "p51d" not in traffic_airframes() and "A320" in traffic_airframes()
+
+
+def test_a_stated_traffic_entry_stays_and_too_many_aircraft_is_a_refused_draw():
+    """Drawn entries follow the stated ones; a draw that would put three
+    aircraft in the scene is refused by validate() (traffic.count),
+    recorded and re-drawn -- never truncated in silence."""
+    spec = _spec({"traffic_count": {"choice": [1, 2]}},
+                 prompt="fly the 747 at 10000 ft and 280 kt for 60 seconds "
+                        "with an a320 crossing", seed=5)
+    assert [str(t.aircraft.value) for t in spec.traffic] == ["A320"]
+    sample_randomization(spec, check_feasibility=False)
+    assert len(spec.traffic) == 2
+    assert spec.traffic[0].aircraft.source is Source.USER
+    assert spec.traffic[1].aircraft.source is Source.SAMPLED
+    assert int(spec.randomization.traffic_count.value) == 1
+    refused = spec.randomization.policy_draws.value["refused"]
+    assert refused          # seed 5's first attempt draws 2 (measured)
+    assert all(r["refusal_name"] == "traffic.count" for r in refused)
+    assert all(r["sampled_values"]["traffic_count"] == 2 for r in refused)
+
+
+def test_mixed_traffic_in_a_prompt_puts_a_second_aircraft_in_the_scene(tmp_path):
+    """The documented phrase end to end: "mixed traffic" compiles to the
+    traffic_count leaf, and the campaign's cases carry scripted traffic
+    that validates -- a second aircraft in the frame, not a number on a
+    card."""
+    from core.campaign import Campaign
+    from core.campaign.workers import build_case
+
+    c = Campaign.create("fly the a320 at 3000 m for 10 seconds with mixed traffic, "
+                        "chase view", images=10, seed=7, out=tmp_path / "c")
+    assert c.record["spec"]["randomization"]["policy"]["value"] == {
+        "traffic_count": {"poisson": 0.7, "max": 2}}
+    cases = [build_case(i, c.record)[0] for i in range(6)]
+    with_traffic = [s for s in cases if s.traffic]
+    assert with_traffic, "no case of six drew a second aircraft"
+    for spec in cases:
+        assert len(spec.traffic) == int(spec.randomization.traffic_count.value)
+        assert validate(spec, check_feasibility=False).ok
