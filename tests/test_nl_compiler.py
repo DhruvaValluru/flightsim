@@ -8,6 +8,7 @@ import pytest
 
 from core.nl.compiler import compile_prompt
 from core.scenario.fields import Source
+from core.scenario.validate import validate
 
 
 def test_same_prompt_always_produces_the_same_spec():
@@ -338,3 +339,74 @@ def test_a_kind_of_aircraft_earns_the_question_and_keeps_the_documented_default(
     assert camera_questions("fly at 6000 m") == []
     assert [q["id"] for q in camera_questions("film the sunrise over the alps")] == ["camera_view"]
     assert str(compile_prompt("fly at 6000 m").aircraft.source) == "default"
+
+
+# -- unnamed mountains are a synthesised scene (P2 report, open finding) -----
+
+def test_unnamed_mountains_infer_the_synthesised_scene_and_clear_its_peaks():
+    """The words raised terrain_elevation to 2000 m and left
+    scene.terrain_source at auto: the CLI and a campaign flew the flat
+    slab while the page drew a ridge. Now the scene is INFERRED
+    synthesised, quoting the word, and a DEFAULTED altitude is planned
+    over the ridge's highest sample (a recorded plan; a stated altitude
+    never moves)."""
+    from core.nl.compiler import MOUNTAIN_CLEARANCE_M
+    from core.terrain.synthesis import DEMO_RIDGE_TOP_M
+
+    spec = compile_prompt("fly the 747 over the mountains for 10 seconds, chase view")
+    scene = spec.scene.terrain_source
+    assert scene.value == "synthesised" and scene.source is Source.INFERRED
+    assert "'mountain'" in scene.frm and "not a place" in scene.frm
+    assert float(spec.terrain_elevation.value) == 2000.0
+    assert spec.altitude.source is Source.DERIVED
+    assert float(spec.altitude.value) > DEMO_RIDGE_TOP_M + MOUNTAIN_CLEARANCE_M - 1.0
+    assert validate(spec, check_feasibility=False).ok
+    # Round trip: the inferred source is on the record.
+    again = type(spec).from_yaml(spec.to_yaml())
+    assert again.scene.terrain_source.value == "synthesised"
+
+    stated = compile_prompt("fly the 747 at 5000 m over alpine peaks")
+    assert stated.scene.terrain_source.value == "synthesised"
+    assert float(stated.altitude.value) == 5000.0
+    assert stated.altitude.source is Source.USER
+
+
+@pytest.mark.parametrize("prompt", [
+    "fly the 747 at 4000 m over 2000 m mountains",       # a stated datum
+    "fly the 747 over the matterhorn mountains",           # a named place
+    "varied weather over the alps mountains",              # a drawn location
+    "fly the 747 at 3000 m over flat ground",              # no mountain word
+])
+def test_a_stated_datum_a_place_or_no_mountain_keeps_the_scene_auto(prompt):
+    spec = compile_prompt(prompt)
+    assert spec.scene.terrain_source.value == "auto"
+    assert spec.scene.terrain_source.source is Source.DEFAULT
+    assert spec.scene.is_default()
+
+
+def test_the_ridge_top_the_compiler_reads_is_the_synthesised_raster_s():
+    """DEMO_RIDGE_TOP_M is a measurement (a 1024 px synthesis takes ~4.5
+    min); re-measured here from the raster the mountain-refusal example's
+    capture caches, skipped where that raster was never synthesised."""
+    import numpy as np
+
+    from core.scenario.spec import ScenarioSpec
+    from core.terrain.heightfield import Heightfield
+    from core.terrain.synthesis import (
+        DEMO_RIDGE, DEMO_RIDGE_TOP_M, ensure_ridge_for_origin,
+    )
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[1]
+    example = ScenarioSpec.read(repo / "examples" / "cameras_mountain_refusal.yaml")
+    cached = sorted((repo / "runs" / "terrain").glob(
+        "synth_cameras_mountain_refusal_*.r16"))
+    if not cached:
+        pytest.skip("the full ridge is not synthesised on this machine yet")
+    stem = ensure_ridge_for_origin(repo / "runs" / "terrain",
+                                   float(example.latitude.value),
+                                   float(example.longitude.value),
+                                   name="synth_cameras_mountain_refusal")
+    assert DEMO_RIDGE["size"] == 1024
+    top = float(np.max(np.asarray(Heightfield.read(stem).elevations())))
+    assert top == pytest.approx(DEMO_RIDGE_TOP_M, abs=0.01)

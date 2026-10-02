@@ -68,7 +68,8 @@ from ..scenario.randomization import (
 from ..scenario.spec import ScenarioSpec
 from ..terrain.glo30 import LOCATIONS
 from .compiler import (RANDOMIZATION_FAMILIES, TURBULENCE_STD, TURBULENCE_WORDS,
-                       apply_randomization_phrases, compile_prompt, _name_from)
+                       apply_mountain_scene, apply_randomization_phrases,
+                       compile_prompt, _name_from)
 
 #: The model the compiler asks for. Recorded verbatim in the result so the
 #: manifest can say which model produced the spec.
@@ -1346,6 +1347,36 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
                           f"aircraft is used")
         spec.aircraft = Quantity.user(model, frm=phrase)
 
+    # An aircraft the vocabulary LACKS is asked about, as on the regex
+    # tier (P2 report, the open LLM-tier finding: the model put "the
+    # dragon" in notes and the default B747 flew without a word). When
+    # the model chose no aircraft and the prompt names a SPECIFIC
+    # subject the vocabulary cannot map, the regex tier's own rails
+    # apply: the name is carried as stated and refused by name
+    # (aircraft.exists), and the aircraft question is asked -- unless
+    # the model asked one, or its three are used. A KIND of aircraft
+    # ("an aircraft", "a small plane") stays the model's judgment, as
+    # the system prompt words it. The answer round reads the person's
+    # answer the regex tier's way when the model leaves it unset again.
+    if not named and str(spec.aircraft.source) == "default":
+        from .compiler import _answered_aircraft, _named_subject, aircraft_question
+
+        answered = _answered_aircraft(answers) if answering else None
+        subject = _named_subject(" ".join(prompt.lower().split()))
+        if answered is not None:
+            spec.aircraft = answered
+        elif subject is not None and not subject[1]:
+            spec.aircraft = Quantity.user(subject[0], frm=subject[0])
+            asked = aircraft_question(prompt)
+            already = any("aircraft" in f"{q['id']} {q['question']}".lower()
+                          for q in payload["questions"])
+            if (not answering and asked is not None and not already
+                    and len(payload["questions"]) < MAX_QUESTIONS):
+                payload["questions"].append(asked)
+                spec.notes.append(f"the prompt names {subject[0]!r}, which the "
+                                  f"aircraft vocabulary does not hold; asked "
+                                  f"which aircraft should fly")
+
     # A heading the prompt STATES ("heading east", "heading 090") is the
     # user's: claimed as a model guess, the terrain planner would re-aim it
     # along the ridge (measured: "heading east" flew 19 deg).
@@ -1439,6 +1470,9 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
             spec.cameras.append(camera)
     else:
         apply_randomization_phrases(spec, prompt)
+    # Unnamed mountains: the synthesised scene, as on the regex tier (a
+    # place the model set, or a drawn location, keeps it auto).
+    apply_mountain_scene(spec, prompt)
 
     # The event AIM rides in the quantity's detail (digest-relevant: it
     # decides whether the vortex axis sits ON the track or 2.5 core radii

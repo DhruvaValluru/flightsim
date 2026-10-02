@@ -488,22 +488,31 @@ def test_a_bare_catalogued_name_and_a_nameless_refused_line_are_read_by_name(tmp
 
 
 def test_the_paragraph_says_what_ground_a_mountain_prompt_really_flies_over():
-    """'over mountains' raises the flat datum to 2000 m (the compiler's
-    inferred terrain_elevation); no ridge is synthesised unless
-    scene.terrain_source says so. The plan must say that, not 'sea level'."""
+    """'over mountains' with no height and no place is the synthesised
+    ridge since the compiler infers scene.terrain_source from the word
+    (the P2 report's open finding: it used to raise a flat datum to
+    2000 m and leave the pictures without a hill). A STATED datum
+    ('over 2000 m mountains') stays the flat ground at that height, and
+    the plan says which -- never 'sea level'."""
     from core.nl.compiler import compile_prompt
 
     spec = compile_prompt("500 images of airliners over mountains in varied weather and "
                           "lighting, chase and tower views",
                           answers=[{"id": "aircraft", "answer": "B747"}])
     assert float(spec.terrain_elevation.value) == 2000.0
-    words = generate_module.paragraph(spec, 3, "coco")
+    assert spec.scene.terrain_source.value == "synthesised"
+    ridge = generate_module.paragraph(spec, 3, "coco")
+    assert ridge.startswith("3 images of the B747, over a synthesised ridge")
+    assert "not a real place" in ridge and "no place was named" in ridge
+    assert "sea level" not in ridge
+    stated = compile_prompt("500 images of airliners over 2000 m mountains in varied "
+                            "weather and lighting, chase and tower views",
+                            answers=[{"id": "aircraft", "answer": "B747"}])
+    assert stated.scene.terrain_source.value == "auto"
+    words = generate_module.paragraph(stated, 3, "coco")
     assert words.startswith("3 images of the B747, over flat ground raised to a 2000 m datum")
     assert "no hills or mountains are in the pictures" in words
-    assert "no place was named" in words and "sea level" not in words
-    spec.set("scene.terrain_source", "synthesised", frm="test")
-    ridge = generate_module.paragraph(spec, 3, "coco")
-    assert "over a synthesised ridge" in ridge and "not a real place" in ridge
+    assert "sea level" not in words
     flat = generate_module.paragraph(compile_prompt("fly the a320"), 1, "coco")
     assert "over flat ground at sea level (no place was named)" in flat
 

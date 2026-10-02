@@ -1242,3 +1242,91 @@ def test_the_traffic_schema_is_bounded_and_tied_to_the_block():
     assert set(schema["items"]["properties"]) == set(TRAFFIC_FIELD_VALUE_SCHEMAS)
     assert set(TRAFFIC_FIELD_VALUE_SCHEMAS) < set(TrafficSpec.FIELD_ORDER)
     assert "livery" not in TRAFFIC_FIELD_VALUE_SCHEMAS
+
+
+# -- an aircraft the vocabulary lacks is a question, as on the regex tier -----
+
+def test_an_unknown_aircraft_is_asked_about_not_left_in_notes():
+    """P2 report (open finding): the model put the unknown aircraft in
+    notes and the default B747 flew without a word. Now the regex
+    tier's rails apply: the name is carried as stated (refused by name,
+    aircraft.exists) and the aircraft question is asked."""
+    from core.nl.compiler import AIRCRAFT_OPTIONS, AIRCRAFT_QUESTION_ID
+
+    client = fake_client({"fields": {"altitude": entry(3000.0, "user", "3000 m")},
+                          "notes": ["unknown aircraft 'dragon' cannot be expressed"],
+                          "questions": []})
+    result = compile_prompt_llm("fly the dragon at 3000 m over the sea", client=client)
+    assert [q["id"] for q in result.questions] == [AIRCRAFT_QUESTION_ID]
+    assert result.questions[0]["options"] == list(AIRCRAFT_OPTIONS)
+    spec = result.spec
+    assert spec.aircraft.value == "dragon" and str(spec.aircraft.source) == "user"
+    assert "aircraft.exists" in [v.constraint for v in
+                                 validate(spec, check_feasibility=False).violations]
+    assert any("asked which aircraft" in n for n in spec.notes)
+    # The regex tier asks the same question of the same prompt.
+    regex = compile_prompt("fly the dragon at 3000 m over the sea")
+    assert regex.aircraft.value == spec.aircraft.value
+
+
+def test_a_kind_of_aircraft_stays_the_model_s_judgment():
+    """"A small plane" is a member of a kind, not an unknown name: the
+    documented default flies and whether to ask is the model's call (the
+    system prompt's rule), so nothing is appended."""
+    client = fake_client({"fields": {}, "notes": [], "questions": []})
+    result = compile_prompt_llm("fly a small plane at 3000 m", client=client)
+    assert result.questions == ()
+    assert result.spec.aircraft.value == "B747"
+    assert str(result.spec.aircraft.source) == "default"
+
+
+def test_the_aircraft_question_is_not_asked_twice_nor_over_a_known_type():
+    own = {"id": "which_aircraft", "question": "Which aircraft is the dragon?",
+           "options": ["Boeing 747", "Airbus A320"]}
+    client = fake_client({"fields": {}, "notes": [], "questions": [own]})
+    result = compile_prompt_llm("fly the dragon at 3000 m", client=client)
+    assert [q["id"] for q in result.questions] == ["which_aircraft"]
+    # A named type, or the model's own choice of one: nothing to ask.
+    for prompt, fields in (("fly the 747 at 3000 m", {}),
+                           ("fly the big jet at 3000 m",
+                            {"aircraft": entry("B747", "inferred", "big jet")})):
+        result = compile_prompt_llm(prompt, client=fake_client(
+            {"fields": fields, "notes": [], "questions": []}))
+        assert result.questions == ()
+
+
+def test_the_answer_to_the_appended_aircraft_question_flies():
+    """The answer round echoes the appended question back; a model that
+    leaves the aircraft unset again does not lose the person's answer."""
+    from core.nl.compiler import AIRCRAFT_QUESTION, AIRCRAFT_QUESTION_ID
+
+    question = {"id": AIRCRAFT_QUESTION_ID, "question": AIRCRAFT_QUESTION,
+                "options": ["Airbus A320"]}
+    client = fake_client({"fields": {}, "notes": [], "questions": []})
+    result = compile_prompt_llm(
+        "fly the dragon at 3000 m", client=client, questions=[question],
+        answers=[{"id": AIRCRAFT_QUESTION_ID, "answer": "Airbus A320"}])
+    assert result.questions == ()
+    assert result.spec.aircraft.value == "A320"
+    assert str(result.spec.aircraft.source) == "user"
+    assert AIRCRAFT_QUESTION in result.spec.aircraft.frm
+
+
+# -- unnamed mountains are the synthesised scene on this tier too ------------
+
+def test_unnamed_mountains_are_the_synthesised_scene_on_the_llm_tier():
+    client = fake_client({"fields": {
+        "terrain_elevation": entry(2000.0, "inferred", "mountains")},
+        "notes": [], "questions": []})
+    spec = compile_prompt_llm("fly the 747 over the mountains", client=client).spec
+    assert spec.scene.terrain_source.value == "synthesised"
+    assert str(spec.scene.terrain_source.source) == "inferred"
+    # A place the model set keeps the scene auto: the bake is the ground.
+    client = fake_client({"fields": {
+        "latitude": entry(45.9766, "inferred", "matterhorn"),
+        "longitude": entry(7.6585, "inferred", "matterhorn"),
+        "terrain_elevation": entry(1860.0, "inferred", "matterhorn")},
+        "notes": [], "questions": []})
+    spec = compile_prompt_llm("fly the 747 over the matterhorn mountains",
+                              client=client).spec
+    assert spec.scene.terrain_source.value == "auto"

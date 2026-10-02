@@ -32,12 +32,13 @@ capture command, a batch). ``RANDOMIZATION_WORDS`` is the table.
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..environment import sun as sun_model
 from ..fdm import units as u
-from ..scenario.fields import Quantity
+from ..scenario.fields import Quantity, Source
 from ..scenario.spec import ScenarioSpec
 
 # -- vocabulary ---------------------------------------------------------
@@ -356,6 +357,15 @@ CRUISE_DEFAULT_KT: Dict[str, float] = {
 }
 
 
+#: The unnamed-mountain words: they infer the generic-ridge datum
+#: (_terrain) and, with no place named, the synthesised scene
+#: (apply_mountain_scene) -- one regex, so the two cannot drift.
+MOUNTAIN_WORDS = r"mountain|ridge|alpine|peak"
+#: Clearance a defaulted altitude keeps over the synthesised ridge's
+#: highest sample (the web planner's PLANNED_CLEARANCE_M).
+MOUNTAIN_CLEARANCE_M = 300.0
+
+
 def _terrain(text: str) -> Quantity:
     m = _search(rf"(?:over|above|across)\s+{NUMBER}\s*(?:m|metre|meter)s?\s*"
                 r"(?:terrain|ridge|mountains?|peaks?|ground)?", text)
@@ -366,7 +376,7 @@ def _terrain(text: str) -> Quantity:
     if m:
         return Quantity.user(round(u.ft_to_m(float(m.group(1))), 1), "m",
                              frm=m.group(0).strip())
-    if _search(r"mountain|ridge|alpine|peak", text):
+    if _search(MOUNTAIN_WORDS, text):
         return Quantity.inferred(2000.0, "m", frm="mountainous terrain")
     return Quantity.default(0.0, "m", frm="flat terrain at sea level")
 
@@ -1224,6 +1234,9 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
     # Spec 8: the randomisation phrases, after the cameras exist (a
     # viewpoint policy varies the cameras the prompt named).
     apply_randomization_phrases(spec, prompt)
+    # Unnamed mountains: the synthesised scene, after the policy (a drawn
+    # location is a place, and keeps the scene auto).
+    apply_mountain_scene(spec, prompt)
 
     ignored = [w for w in CINEMATIC_WORDS if w in text]
     if ignored:
@@ -1232,6 +1245,58 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
             f"conditions, not shots. Nothing in the spec was set from them."
         )
     return spec
+
+
+def apply_mountain_scene(spec, prompt: str) -> None:
+    """Unnamed mountains are a synthesised scene, not a flat datum
+    (P2 report, the open compiler finding: the words raised
+    ``terrain_elevation`` to 2000 m and left ``scene.terrain_source`` at
+    ``auto``, so the CLI flew the flat slab while the page drew a ridge).
+    When the prompt carries a mountain word, states no ground height
+    (the datum is the INFERRED generic-ridge one) and names no place --
+    the coordinates are still the documented default and no
+    ``location`` policy leaf will draw one -- ``scene.terrain_source``
+    is INFERRED
+    ``synthesised``, quoting the word: the deterministic ridge centred
+    on the spec's own origin, on every surface that honours the field.
+    A stated source, a named place or a drawn location is never moved;
+    both tiers call this after their fields are set."""
+    match = re.search(MOUNTAIN_WORDS, prompt or "", re.IGNORECASE)
+    if match is None:
+        return
+    if spec.scene.terrain_source.source != Source.DEFAULT:
+        return
+    if spec.terrain_elevation.source != Source.INFERRED:
+        # A STATED datum ("over 2000 m mountains") is the user's ground:
+        # the scene stays auto, as before. Only the generic-ridge
+        # inference (the word alone, 2000 m) names no ground at all.
+        return
+    if (spec.latitude.source != Source.DEFAULT
+            or spec.longitude.source != Source.DEFAULT):
+        return
+    policy = spec.randomization_policy
+    if policy is not None and isinstance(policy.value, dict) \
+            and "location" in policy.value:
+        return
+    word = match.group(0).lower()
+    spec.scene.terrain_source = Quantity.inferred(
+        "synthesised",
+        frm=f"{word!r} with no place named: the synthesised ridge centred on "
+            f"the spec's origin (prescribed statistics, not a place); name a "
+            f"place for real terrain")
+    # The ridge's peaks are higher than the generic 2000 m datum: a
+    # DEFAULTED altitude is planned over the highest of them (recorded,
+    # re-plannable) so the headless capture and a campaign's cases fly
+    # rather than refuse terrain.impact over a height nobody stated. A
+    # stated altitude never moves; its clearance is judged by name.
+    from ..terrain.synthesis import DEMO_RIDGE_TOP_M
+
+    floor = math.ceil(DEMO_RIDGE_TOP_M + MOUNTAIN_CLEARANCE_M)
+    if spec.altitude.source == Source.DEFAULT and float(spec.altitude.value) < floor:
+        spec.plan("altitude", float(floor),
+                  frm=f"{MOUNTAIN_CLEARANCE_M:g} m over the synthesised ridge's "
+                      f"highest sample ({DEMO_RIDGE_TOP_M:g} m MSL); no "
+                      f"altitude stated")
 
 
 def _name_from(text: str) -> str:

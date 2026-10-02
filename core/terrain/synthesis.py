@@ -330,6 +330,14 @@ DEMO_RIDGE = {
     "size": 1024, "pixel_size_m": 30.0, "rms_slope_deg": 28.0,
     "seed": 6, "base_elevation_m": 600.0,
 }
+#: The highest sample of the DEMO_RIDGE raster, metres MSL. The heights
+#: depend on the parameters and the seed only -- the origin moves the
+#: georeference, never an elevation -- so this is one number. Measured
+#: 2026-10-02 from ridge_for_origin at (0, 0) and at (46.0, 7.7):
+#: 3298.81 m both (a synthesis takes ~4.5 min, so the compiler reads
+#: this rather than synthesising; a test re-measures it from a cached
+#: raster). The web app's "3299 m peaks" are these.
+DEMO_RIDGE_TOP_M = 3298.81
 
 
 def ridge_for_origin(lat_deg: float, lon_deg: float,
