@@ -198,6 +198,23 @@ def configured_airframes(config_dir: Optional[Path] = None) -> List[str]:
     return sorted(p.stem for p in directory.glob("*.json"))
 
 
+def labelled_airframes(config_dir: Optional[Path] = None) -> List[str]:
+    """The configured airframes whose config carries a ``labels`` block
+    (core.capture.airframe.load_airframe's requirement): the only ones
+    whose frames can be labelled, as a traffic aircraft's must be. A
+    traffic entry naming any other was measured to stop the headless
+    capture with a traceback (DHC6, 2026-10-02) instead of a refusal."""
+    import json
+
+    directory = Path(config_dir) if config_dir is not None else CONFIG_DIR
+    out: List[str] = []
+    for name in configured_airframes(directory):
+        config = json.loads((directory / f"{name}.json").read_text(encoding="utf-8"))
+        if isinstance(config.get("labels"), dict):
+            out.append(name)
+    return out
+
+
 class ProvenancedBlock:
     """A block of provenanced fields with the spec's own edit doctrine.
 

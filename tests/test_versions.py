@@ -140,7 +140,9 @@ def test_a_committed_version_8_example_reads_at_9_with_only_the_version_line_mov
 def test_every_committed_spec_example_is_at_9():
     specs = [p for p in sorted((REPO / "examples").glob("*.yaml"))
              if "spec_version" in (yaml.safe_load(p.read_text(encoding="utf-8")) or {})]
-    assert len(specs) == len(SPEC8_DIGESTS) == 8
+    # The eight frozen at spec 8, plus traffic.yaml (written at spec 9).
+    assert len(SPEC8_DIGESTS) == 8
+    assert sorted(p.name for p in specs) == sorted([*SPEC8_DIGESTS, "traffic.yaml"])
     for path in specs:
         assert yaml.safe_load(path.read_text(encoding="utf-8"))["spec_version"] == 9, path
 

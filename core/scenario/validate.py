@@ -405,6 +405,7 @@ def validate_blocks(spec) -> List[Violation]:
     """
     from .blocks import (
         MAX_TRAFFIC, TERRAIN_SOURCES, TRAFFIC_TRACKS, configured_airframes,
+        labelled_airframes,
     )
 
     out: List[Violation] = []
@@ -452,6 +453,7 @@ def validate_blocks(spec) -> List[Violation]:
             f"occlusion geometries are specified for two)",
             actual=len(spec.traffic), limit=MAX_TRAFFIC, unit="aircraft"))
     airframes = configured_airframes()
+    labelled = labelled_airframes() if spec.traffic else []
     for index, entry in enumerate(spec.traffic):
         who = f"traffic[{index}]"
         aircraft = str(entry.aircraft.value)
@@ -461,6 +463,12 @@ def validate_blocks(spec) -> List[Violation]:
                 f"{who}: {aircraft!r} is not a configured airframe (one "
                 f"of {airframes}; its mesh must be importable like the "
                 f"primary's)"))
+        elif aircraft not in labelled:
+            out.append(Violation(
+                "traffic.aircraft",
+                f"{who}: {aircraft!r} has no 'labels' block in its aircraft "
+                f"config, so its frames cannot be labelled (one of "
+                f"{labelled})"))
         track = str(entry.track.value)
         if track not in TRAFFIC_TRACKS:
             out.append(Violation(

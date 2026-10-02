@@ -406,6 +406,8 @@ EXAMPLE_DIGESTS = {
     "examples/cameras_terrain.yaml": "e57b408868065d75c99ca3711627601c199b43c3d50dd2675ac6e2b1c20b1325",
     "examples/cameras_waypoint.yaml": "aba90b44eae4644a139cf65d8f593cdadd9b78cc320c15f9642d79fb4fee2f00",
     "examples/randomized.yaml": "bc9982ba15a79c63a1c748eacb70efddc753c174532e80735019b48904309428",
+    # Phase 2: the first committed example with a traffic block (spec 9).
+    "examples/traffic.yaml": "9db4704441d8b82b8901bb0ea5ad1287aae1a1e6c229b956bae807a7fdd28fab",
 }
 
 

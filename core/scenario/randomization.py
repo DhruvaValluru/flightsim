@@ -1012,14 +1012,15 @@ class _DrawRefused(RandomizationError):
 
 def traffic_airframes() -> List[str]:
     """The airframes a drawn traffic entry chooses among: every
-    configured airframe (``blocks.configured_airframes``, what
-    validate() accepts) whose config does not declare it unavailable
-    for rendering (VALIDITY 3.3: the p51d's upstream ships no licence,
-    so a draw never puts it in a frame)."""
-    from .blocks import CONFIG_DIR as TRAFFIC_CONFIG_DIR, configured_airframes
+    configured airframe with a ``labels`` block
+    (``blocks.labelled_airframes``, what validate() accepts) whose
+    config does not declare it unavailable for rendering (VALIDITY 3.3:
+    the p51d's upstream ships no licence, so a draw never puts it in a
+    frame)."""
+    from .blocks import CONFIG_DIR as TRAFFIC_CONFIG_DIR, labelled_airframes
 
     out: List[str] = []
-    for name in configured_airframes():
+    for name in labelled_airframes():
         config = json.loads((TRAFFIC_CONFIG_DIR / f"{name}.json")
                             .read_text(encoding="utf-8"))
         if not (config.get("license") or {}).get("unavailable"):

@@ -663,3 +663,43 @@ def test_without_the_engine_an_unimported_mesh_is_not_a_refusal(tmp_path,
                          "--max-previews", "0", "--render", "--no-host-flight"])
     assert code == 0
     assert (out / "capture_manifest.json").is_file()
+
+
+# -- the traffic example ----------------------------------------------------
+#
+# No committed example carried a traffic block (P2-F's report): the
+# second aircraft was reachable from a prompt and from tests, never from
+# a spec an instructor can open. examples/traffic.yaml states two.
+
+def test_traffic_example_validates_and_labels_every_aircraft(tmp_path):
+    from core.capture.verify import verify_run
+    from core.scenario.validate import validate
+
+    spec = ScenarioSpec.read(EXAMPLES / "traffic.yaml")
+    assert [(str(t.aircraft.value), str(t.track.value)) for t in spec.traffic] == [
+        ("A320", "crossing"), ("c172p", "formation")]
+    report = validate(spec, check_feasibility=False)
+    assert report.ok, report.render()
+    # An airframe whose config states no labels cannot be traffic: refused
+    # by name before any flight (measured: the DHC6 stopped the headless
+    # capture with an AirframeLabelError traceback).
+    spec.set("traffic[1].aircraft", "DHC6", frm="test: no labels block")
+    names = [v.constraint for v in validate(spec, check_feasibility=False).violations]
+    assert names == ["traffic.aircraft"]
+
+    out = tmp_path / "traffic"
+    assert capture_main([str(EXAMPLES / "traffic.yaml"), "--out", str(out),
+                         "--max-previews", "0"]) == 0
+    manifest = json.loads((out / "capture_manifest.json").read_text(encoding="utf-8"))
+    aircraft_ids = [o["id"] for o in manifest["objects"] if o["id"].startswith("aircraft:")]
+    assert aircraft_ids == ["aircraft:B747:0", "aircraft:A320:1", "aircraft:c172p:2"]
+    assert [t["airframe"]["aircraft"] for t in manifest["traffic"]] == ["A320", "c172p"]
+    assert manifest["frames"]
+    for record in manifest["frames"]:
+        entries = record["labels"]["objects"]
+        # One object record per aircraft in every frame (plus the terrain).
+        assert [e["id"] for e in entries if e["id"].startswith("aircraft:")] == aircraft_ids
+        for entry in entries[1:3]:
+            assert entry["bbox_3d_camera"] is not None
+    report = verify_run(out)
+    assert report.ok, report.render()

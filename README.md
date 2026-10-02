@@ -350,6 +350,7 @@ Committed examples, all runnable with no network and no account:
 | `cameras_mountain_refusal.yaml` | a camera INSIDE a mountain, checked against the raster (`--synth-terrain`) | `REFUSED [camera.terrain_clearance]` |
 | `cameras_event_trigger.yaml` | an EVENT-driven capture: frames only while the recorded sink rate in a thunderstorm downburst is below -10 m/s | ~29 frames, all with `climb_rate_mps < -10` |
 | `cameras_hazard_refusal.yaml` | a tower camera stated INSIDE the modelled tornado core | `REFUSED [camera.hazard_intersection]` |
+| `traffic.yaml` | two scripted traffic aircraft (an A320 crossing, a c172p in formation) beside the primary | 24 frames, an object record per aircraft in each |
 
 `--synth-terrain` synthesises a deterministic raster centred on the
 spec's own origin (spectral construction plus thermal and hydraulic
