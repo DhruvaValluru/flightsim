@@ -25,6 +25,13 @@ under ``build/visual/`` (or ``--out``):
                               per frame of every camera, the cell coloured
                               by the integer that frame maps the id to,
                               and the engine's echo per camera
+    applied_intrinsics.png    per camera, the frame whose applied field of
+                              view is farthest from the record's: the
+                              record's picture (green) and the picture the
+                              engine's applied field of view and size
+                              cover at the record's focal length (yellow),
+                              the area where the two disagree in red, the
+                              gap against the tolerance stamped
 
 Each sheet carries the check's verdict and detail in its caption, and
 ``sheets.json`` beside them records, per sheet, the verdict, the
@@ -53,9 +60,10 @@ if str(REPO) not in sys.path:
 
 from core.capture.manifest import read_capture_manifest          # noqa: E402
 from core.capture.verify import (                                  # noqa: E402
-    FAIL, _aircraft_entries, _bundle_frames, _declared_objects, _labelled_ids,
-    _object_geometry, _pinhole, _projected_hull, _read_depth_metres,
-    _read_gray_png, _render_frame_records, axes_from_quat,
+    APPLIED_FOV_TOL_DEG, FAIL, _aircraft_entries, _bundle_frames,
+    _declared_objects, _labelled_ids, _object_geometry, _pinhole,
+    _projected_hull, _read_depth_metres, _read_gray_png,
+    _render_frame_records, axes_from_quat, verify_applied_intrinsics,
     verify_box_vs_mask, verify_depth_vs_geometry, verify_identity_stable,
     verify_mask_integers_only, verify_mask_vs_geometry,
     verify_visibility_vs_scene,
@@ -63,7 +71,8 @@ from core.capture.verify import (                                  # noqa: E402
 from tests.visual import draw                                      # noqa: E402
 
 SHEETS = ("mask_integers_only", "mask_vs_geometry", "box_vs_mask",
-          "depth_vs_geometry", "visibility_vs_scene", "identity_stable")
+          "depth_vs_geometry", "visibility_vs_scene", "identity_stable",
+          "applied_intrinsics")
 #: The per-sheet record written beside the PNGs: {check: {file, drawn,
 #: error, status, failure, verdict, detail}}.
 SHEETS_RECORD = "sheets.json"
@@ -317,6 +326,76 @@ def sheet_identity_stable(manifest, run_dir) -> Image.Image:
                                 f"from its row's is a changed id"], size=12)
 
 
+def _record_fov_deg(record: Dict) -> float:
+    """The horizontal field of view the record's lens implies, 2 atan(width
+    / 2 fx) -- the verifier's own reading of the record."""
+    return float(np.degrees(2.0 * np.arctan(float(record["width_px"])
+                                            / (2.0 * float(record["fx_px"])))))
+
+
+def _applied_rect(record: Dict, engine: Dict) -> Tuple[float, float, float, float]:
+    """The picture the engine's applied field of view and size cover, in
+    the record's pixels: the half-width the record's fx gives the applied
+    angle, the half-height by the applied aspect, about the record's
+    principal point."""
+    cx, cy = (float(v) for v in record["principal_point_px"])
+    half_w = float(record["fx_px"]) * float(np.tan(np.radians(float(engine["applied_fov_deg"]) / 2.0)))
+    aspect = (float(engine.get("applied_height_px", record["height_px"]))
+              / float(engine.get("applied_width_px", record["width_px"])))
+    half_h = half_w * aspect * float(record["fy_px"]) / float(record["fx_px"])
+    return (cx - half_w, cy - half_h, cx + half_w, cy + half_h)
+
+
+def sheet_applied_intrinsics(manifest, run_dir) -> Image.Image:
+    worst: Dict[str, Tuple[float, Tuple]] = {}
+    for item in _bundle_frames(manifest, run_dir):
+        record, camera, engine = item[0], item[1], item[3]
+        if "applied_fov_deg" not in engine:
+            continue
+        gap = abs(float(engine["applied_fov_deg"]) - _record_fov_deg(record))
+        if camera not in worst or gap > worst[camera][0]:
+            worst[camera] = (gap, item)
+    panels = []
+    for camera in sorted(worst, key=lambda c: -worst[c][0])[:PANELS]:
+        gap, (record, camera, name, engine, folder) = worst[camera]
+        w, h = int(record["width_px"]), int(record["height_px"])
+        applied = _applied_rect(record, engine)
+        # The canvas holds both pictures with a margin, the record's at
+        # (margin, margin); pixel (x, y) is inside a picture when its
+        # centre is.
+        margin = int(max(16.0, -applied[0], -applied[1], applied[2] - w,
+                         applied[3] - h) + 16)
+        canvas = np.full((h + 2 * margin, w + 2 * margin, 3), 16, dtype=np.uint8)
+        mask = _read_gray_png(folder / engine["labels"]["mask"])
+        if mask is not None and mask.shape == (h, w):
+            canvas[margin:margin + h, margin:margin + w] = draw.dim(draw.colourise(mask))
+        ys, xs = np.mgrid[0:canvas.shape[0], 0:canvas.shape[1]]
+        u, v = xs + 0.5 - margin, ys + 0.5 - margin
+        in_record = (u >= 0) & (u < w) & (v >= 0) & (v < h)
+        in_applied = ((u >= applied[0]) & (u < applied[2])
+                      & (v >= applied[1]) & (v < applied[3]))
+        canvas = draw.paint(canvas, in_record ^ in_applied, draw.RED)
+        image = draw.to_image(canvas)
+        pen = ImageDraw.Draw(image)
+        draw.box(pen, (margin, margin, margin + w, margin + h), draw.GREEN, width=3)
+        draw.box(pen, tuple(c + margin for c in applied), draw.YELLOW, width=1)
+        size = (f"{int(engine.get('applied_width_px', w))}x"
+                f"{int(engine.get('applied_height_px', h))}")
+        lens = (f"{float(engine.get('applied_focal_length_mm', record['focal_length_mm'])):.2f} mm"
+                f" on {float(engine.get('applied_sensor_width_mm', record['sensor_width_mm'])):.2f} mm")
+        lines = [f"{camera}/{name}: applied {float(engine['applied_fov_deg']):.3f} deg, the "
+                 f"record's lens implies {_record_fov_deg(record):.3f} deg; gap {gap:.4f} deg "
+                 f"(tol {APPLIED_FOV_TOL_DEG} deg)",
+                 f"applied {size} at {lens}; the record {w}x{h} at "
+                 f"{float(record['focal_length_mm']):.2f} mm on "
+                 f"{float(record['sensor_width_mm']):.2f} mm"]
+        panels.append(draw.caption(draw.shrink(image, PANEL_WIDTH), lines, size=12))
+    legend = draw.legend({"the record's picture": draw.GREEN,
+                          "the engine's applied picture": draw.YELLOW,
+                          "where they disagree": draw.RED})
+    return draw.stack([legend, draw.side_by_side(panels)])
+
+
 def write_sheets(run_dir, out_dir=DEFAULT_OUT) -> Dict[str, Path]:
     """Every sheet for a run directory; returns {check: path}, and writes
     ``SHEETS_RECORD`` beside them saying which sheets were drawn."""
@@ -331,6 +410,7 @@ def write_sheets(run_dir, out_dir=DEFAULT_OUT) -> Dict[str, Path]:
         "depth_vs_geometry": verify_depth_vs_geometry(manifest, run_dir),
         "visibility_vs_scene": verify_visibility_vs_scene(manifest, run_dir),
         "identity_stable": verify_identity_stable(manifest, run_dir),
+        "applied_intrinsics": verify_applied_intrinsics(manifest, run_dir),
     }
     painters = {
         "mask_integers_only": sheet_mask_integers_only,
@@ -339,6 +419,7 @@ def write_sheets(run_dir, out_dir=DEFAULT_OUT) -> Dict[str, Path]:
         "depth_vs_geometry": sheet_depth_vs_geometry,
         "visibility_vs_scene": sheet_visibility_vs_scene,
         "identity_stable": sheet_identity_stable,
+        "applied_intrinsics": sheet_applied_intrinsics,
     }
     written: Dict[str, Path] = {}
     record: Dict[str, Dict] = {}
