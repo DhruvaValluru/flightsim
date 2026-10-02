@@ -417,6 +417,10 @@ def conventions() -> Dict:
                    "tail x FDM wingspan x cited height from the gear "
                    "contacts up), not a tight hull",
         "truncation": "1 - clipped area / unclipped area",
+        "fraction_in_frame": "labels.objects[] only: clipped area / "
+                             "unclipped area of the projected box (the "
+                             "complement of truncation, computed as the "
+                             "ratio); null when truncation is",
         "keypoint_in_frame": "inside the image with positive depth; NOT "
                              "unoccluded",
         "corner_order": "for x in (aft, fwd), for y in (left, right), "
@@ -628,6 +632,23 @@ def atmospheric_transmittance(range_m: float, randomization: Optional[Dict]
     return math.exp(-beta * max(0.0, float(range_m))), basis
 
 
+def fraction_in_frame(clipped, unclipped) -> Optional[float]:
+    """The share of an object's projected box inside the image: clipped
+    area / unclipped area, the complement of ``truncation`` (1 = wholly
+    in frame, 0 = wholly out); null when the unclipped box is (a corner
+    behind the camera), exactly when ``truncation`` is. Computed as the
+    ratio itself from the two boxes, the same arithmetic as
+    ``_project_body_box``'s truncation, so ``fraction_in_frame < 1``
+    exactly when ``truncation > 0`` (the VOC ``truncated`` flag reads
+    either and must not disagree)."""
+    if unclipped is None:
+        return None
+    full = _area(unclipped)
+    if full <= 0.0:
+        return 0.0
+    return (_area(clipped) / full) if clipped else 0.0
+
+
 def not_claimed_for(obj_class: str, alone_pass: bool) -> List[str]:
     out = [f"subpixel_mask_accuracy_beyond_range_m: {NOT_CLAIMED_SUBPIXEL_RANGE_M:g}",
            f"objects_under_px: {NOT_CLAIMED_OBJECT_PX}"]
@@ -668,6 +689,8 @@ def object_label_record(obj, record: Dict, state: Optional[Dict],
             "bbox_2d": labels["bbox_2d"],
             "bbox_2d_unclipped": labels["bbox_2d_unclipped"],
             "truncation": labels["truncation"],
+            "fraction_in_frame": fraction_in_frame(labels["bbox_2d"],
+                                                   labels["bbox_2d_unclipped"]),
             "in_frame": labels["in_frame"],
         })
         hull, hull_basis = hull_box_body_m(mesh_manifest, airframe)
@@ -690,7 +713,7 @@ def object_label_record(obj, record: Dict, state: Optional[Dict],
     else:
         entry.update({
             "bbox_2d": None, "bbox_2d_unclipped": None, "truncation": None,
-            "in_frame": None, "bbox_2d_hull": None,
+            "fraction_in_frame": None, "in_frame": None, "bbox_2d_hull": None,
             "atmospheric_transmittance": None, "depth_projected_m": None,
             "bbox_3d_camera": None, "keypoints": {}, "horizon": None,
             "not_claimed": not_claimed_for(obj.class_name, alone_pass=False),

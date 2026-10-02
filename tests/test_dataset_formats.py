@@ -868,7 +868,10 @@ def test_class_and_depth_files_refuse_until_graded_then_ship_and_are_listed(batc
     with pytest.raises(ExportError) as caught:
         export([run], tmp_path / "refused", "webdataset", fractions=(1.0, 0.0, 0.0), shard_size=100)
     assert caught.value.constraint == "export.unverified_labels"
-    assert "_depth.f32" in caught.value.message and "depth_range" in caught.value.message
+    # The run is manifest 6: depth_range is NOT RUN as superseded there, so the
+    # check named is its successor, depth_vs_geometry (NOT RUN: no bundle graded).
+    assert "_depth.f32" in caught.value.message and "depth_vs_geometry" in caught.value.message
+    assert "depth_range" not in caught.value.message
     # COCO ships no depth: not affected. YOLO ships no label file at all.
     export([run], tmp_path / "coco", "coco", fractions=(1.0, 0.0, 0.0))
     export([run], tmp_path / "yolo", "yolo", fractions=(1.0, 0.0, 0.0))

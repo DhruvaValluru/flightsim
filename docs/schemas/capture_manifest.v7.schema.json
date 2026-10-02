@@ -1364,6 +1364,18 @@
       }
      ]
     },
+    "fraction_in_frame": {
+     "anyOf": [
+      {
+       "type": "null"
+      },
+      {
+       "type": "number",
+       "minimum": 0,
+       "maximum": 1
+      }
+     ]
+    },
     "in_frame": {
      "anyOf": [
       {
