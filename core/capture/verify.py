@@ -103,6 +103,15 @@ class Check:
 @dataclass
 class VerificationReport:
     checks: List[Check] = dc_field(default_factory=list)
+    #: sha256 of the ``capture_manifest.json`` bytes :func:`verify_run`
+    #: graded: the verdict's binding to its manifest, so an export tells
+    #: this verdict from one on labels edited since. None until a
+    #: manifest was read (``write_verification`` then digests the file).
+    manifest_sha256: Optional[str] = None
+    #: What the ENGINE says it drew (each camera's ``render.json``
+    #: ``drawn``), copied by :func:`verify_run` through
+    #: :func:`drawn_provenance`; None when no run directory was read.
+    drawn_airframe: Optional[Dict] = None
 
     @property
     def ok(self) -> bool:
@@ -129,6 +138,10 @@ class VerificationReport:
             "failed": sum(c.status == FAIL for c in self.checks),
             "not_run": sum(c.status == NOT_RUN for c in self.checks),
             "checks": [c.to_dict() for c in self.checks],
+            **({"manifest_sha256": self.manifest_sha256}
+               if self.manifest_sha256 is not None else {}),
+            **({"drawn_airframe": self.drawn_airframe}
+               if self.drawn_airframe is not None else {}),
         }
 
     def render(self) -> str:
@@ -379,6 +392,21 @@ def _presets(manifest: Dict) -> Dict[str, str]:
 def _aircraft_point(record: Dict):
     a = record["aircraft"]
     return (a["north_m"], a["east_m"], a["alt_m"])
+
+
+# The landmark records are read here, not through core.capture.landmarks:
+# the grader projects known world points through the recorded manifest,
+# and it imports none of the producer's code to do it (the import ban is
+# tests/test_annotation_gates.py's).
+
+def _landmark_point(landmark: Dict):
+    """(north, east, alt) of one recorded landmark."""
+    return (float(landmark["north_m"]), float(landmark["east_m"]),
+            float(landmark["alt_m"]))
+
+
+def _landmarks_by_name(landmarks) -> Dict[str, Dict]:
+    return {str(lm["name"]): lm for lm in (landmarks or [])}
 
 
 def _heading_only_components(d, heading_deg: float):
@@ -886,7 +914,6 @@ def _landmark_coverage(manifest: Dict) -> Tuple[int, float]:
     the optical centre proves very little: an intrinsic or distortion
     error grows with radius.
     """
-    from .landmarks import landmark_point
 
     landmarks = manifest.get("landmarks") or []
     in_frame = 0
@@ -895,7 +922,7 @@ def _landmark_coverage(manifest: Dict) -> Tuple[int, float]:
         cx, cy = record["principal_point_px"]
         half_diagonal = math.hypot(cx, cy) or 1.0
         for landmark in landmarks:
-            u, v, z = project_point(record, landmark_point(landmark))
+            u, v, z = project_point(record, _landmark_point(landmark))
             if z <= 0 or not math.isfinite(u):
                 continue
             if 0.0 <= u <= record["width_px"] and 0.0 <= v <= record["height_px"]:
@@ -909,7 +936,6 @@ def verify_landmark_reprojection(manifest: Dict, run_dir=None,
                                  tol_px: float = ENGINE_TOL_PX) -> Check:
     """This module's projection of each known landmark against the
     ENGINE's projection of the same landmark in the same frame."""
-    from .landmarks import by_name, landmark_point
 
     in_frame, worst_radius = _landmark_coverage(manifest)
     coverage = (f"{len(manifest.get('landmarks') or [])} landmarks, "
@@ -927,7 +953,7 @@ def verify_landmark_reprojection(manifest: Dict, run_dir=None,
     if not manifest.get("landmarks"):
         return Check("landmark_reprojection", NOT_RUN,
                      "the manifest records no landmarks to reproject")
-    known = by_name(manifest["landmarks"])
+    known = _landmarks_by_name(manifest["landmarks"])
     to_enu = scene_to_enu(manifest)
     compared = 0
     worst = 0.0
@@ -941,7 +967,7 @@ def verify_landmark_reprojection(manifest: Dict, run_dir=None,
             landmark = known.get(name)
             if landmark is None or not visible:
                 continue
-            point = landmark_point(landmark)
+            point = _landmark_point(landmark)
             if to_enu is not None:
                 point = to_enu(*point)
             u, v, z = project_point(placed, point)
@@ -1000,7 +1026,6 @@ def verify_triangulation(manifest: Dict, run_dir=None,
     construction, whatever the poses are -- that is the Phase 1 defect,
     and reporting NOT RUN is the honest alternative to repeating it.
     """
-    from .landmarks import by_name, landmark_point
 
     measured = _engine_landmark_pixels(run_dir)
     if not measured:
@@ -1011,7 +1036,7 @@ def verify_triangulation(manifest: Dict, run_dir=None,
             "back-projecting rays this module itself projected returns "
             "the input point whatever the pose is, so it is not run "
             "rather than passed. Render on Windows to exercise this.")
-    known = by_name(manifest.get("landmarks"))
+    known = _landmarks_by_name(manifest.get("landmarks"))
     if not known:
         return Check("cross_view_consistency", NOT_RUN,
                      "the manifest records no landmarks to triangulate")
@@ -1049,7 +1074,7 @@ def verify_triangulation(manifest: Dict, run_dir=None,
             *_ray_through_pixel(record_b, ub, vb))
         if recovered is None:
             continue                    # parallel rays carry no depth
-        truth = landmark_point(known[name])
+        truth = _landmark_point(known[name])
         if to_enu is not None:
             truth = to_enu(*truth)
         error = math.dist(recovered, truth)
@@ -1919,6 +1944,51 @@ def verify_drawn_airframe(manifest: Dict, run_dir=None) -> Check:
                      failure="aircraft.placeholder_drawn")
     return Check("drawn_airframe", PASS,
                  f"{len(recorded)} camera(s): " + "; ".join(notes[:4]))
+
+
+#: The keys of the engine's ``drawn`` record copied into the verdict
+#: (FlightSimRenderCommandlet.cpp writes them; a key it did not write is
+#: None).
+DRAWN_RECORD_KEYS = ("kind", "manifest_version", "origin_basis",
+                     "mesh_origin_actor_cm", "triangles")
+
+
+def drawn_provenance(manifest: Dict, run_dir=None) -> Dict:
+    """What the engine says it drew, per camera, for the verdict to keep.
+
+    The manifest's ``assets.mesh_manifest`` is what the PRODUCING machine
+    expected to be drawn; a render launched without ``-mesh=`` draws
+    placeholder boxes and the manifest still cites the mesh's sha256.
+    Read alone, that citation says a mesh was drawn that never was. So
+    each camera's record is the engine's ``drawn`` block as written, and
+    ``mesh_manifest_sha256`` is the cited digest only where the engine
+    says it drew a mesh -- None for placeholder boxes and for a record
+    that predates ``drawn``; a camera with no render.json has no entry,
+    so a run rendered nowhere records no camera at all. The manifest
+    (and every digest of the simulation) is left exactly as it is.
+    Grading it is :func:`verify_drawn_airframe`'s; this only records it.
+    """
+    mesh_asset = (manifest.get("assets") or {}).get("mesh_manifest") or {}
+    expected_sha = mesh_asset.get("sha256")
+    cameras: Dict[str, Dict] = {}
+    for camera, drawn in _engine_drawn(run_dir).items():
+        if drawn is None:
+            cameras[camera] = {**{k: None for k in DRAWN_RECORD_KEYS},
+                               "mesh_manifest_path": None,
+                               "mesh_manifest_sha256": None,
+                               "note": "render.json predates the 'drawn' record: "
+                                       "what was drawn is unknown"}
+            continue
+        entry = {k: drawn.get(k) for k in DRAWN_RECORD_KEYS}
+        mesh = drawn.get("kind") == "mesh"
+        entry["mesh_manifest_path"] = mesh_asset.get("path") if mesh else None
+        entry["mesh_manifest_sha256"] = expected_sha if mesh else None
+        cameras[camera] = entry
+    return {
+        "source": "frames/<camera>/render.json 'drawn', as the engine wrote it",
+        "expected_mesh_manifest_sha256": expected_sha,
+        "cameras": cameras,
+    }
 
 
 class BundleFileError(Exception):
@@ -3660,6 +3730,17 @@ def verify_frame_integrity(manifest: Dict, run_dir=None) -> Check:
 PROJECTION_MATRIX_TOL_PX = 1e-3
 
 
+def _through_matrix(P, point) -> Optional[Tuple[float, float]]:
+    """(u, v) of a scene (north, east, up) point through a recorded 3x4
+    projection matrix, or None behind the camera: ``(P p) / (P p)_z``
+    over the homogeneous point, as the manifest states it."""
+    h = [float(P[i][0]) * point[0] + float(P[i][1]) * point[1]
+         + float(P[i][2]) * point[2] + float(P[i][3]) for i in range(3)]
+    if h[2] <= 0.0:
+        return None
+    return (h[0] / h[2], h[1] / h[2])
+
+
 def verify_projection_matrix(manifest: Dict) -> Check:
     """Every frame's projection_matrix projects the aircraft (and every
     landmark in front of the camera) to the SAME pixel as the record's
@@ -3667,9 +3748,13 @@ def verify_projection_matrix(manifest: Dict) -> Check:
     of a pixel; the intrinsic_matrix carries the record's own fx, fy
     and principal point. A matrix that disagrees with the parameters it
     claims to summarise fails by frame. NOT RUN on a manifest with no
-    matrices (older than this check)."""
-    from .labels import camera_axes, project_with_matrix, to_camera, to_pixel
+    matrices (older than this check).
 
+    Both sides are this module's own: the parameters through
+    :func:`_camera_coords` / :func:`_pinhole`, the matrix through
+    :func:`_through_matrix` -- never core.capture.labels, which wrote
+    the matrix (a check that projects with the producer's code grades
+    the producer against itself)."""
     frames = manifest.get("frames", [])
     carried = [r for r in frames if "projection_matrix" in r]
     if not carried:
@@ -3692,12 +3777,12 @@ def verify_projection_matrix(manifest: Dict) -> Check:
                 or abs(K[0][2] - cx) > 1e-9 or abs(K[1][2] - cy) > 1e-9
                 or K[2] != [0.0, 0.0, 1.0] or K[0][1] != 0.0 or K[1][0] != 0.0):
             bad.append(f"{name}: intrinsic_matrix is not [[fx,0,cx],[0,fy,cy],[0,0,1]]")
-        axes = camera_axes(record["quaternion_wxyz"])
+        axes = axes_from_quat(record["quaternion_wxyz"])
         aircraft = record["aircraft"]
         points = [(aircraft["north_m"], aircraft["east_m"], aircraft["alt_m"])] + landmarks
         for point in points:
-            expected = to_pixel(record, to_camera(record, point, axes))
-            via_matrix = project_with_matrix(P, point)
+            expected = _pinhole(record, _camera_coords(record, point, axes))
+            via_matrix = _through_matrix(P, point)
             if (expected is None) != (via_matrix is None):
                 bad.append(f"{name}: matrix and parameters disagree on "
                            f"whether a point is in front of the camera")
@@ -8109,6 +8194,14 @@ def verify_world_record(manifest: Dict, run_dir=None) -> Check:
                              f"Windows clauses")
 
 
+#: A check that raised instead of returning its verdict: the run is not
+#: verified until the checker is fixed (the verdict names the check).
+FAIL_CHECKER_ERROR = "verify.checker_error"
+#: The ``--against`` run's manifest is missing or unreadable, so the two
+#: runs cannot be compared (this run's own labels are not what failed).
+FAIL_AGAINST_MANIFEST = "verify.against_manifest"
+
+
 def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     """The pass/fail summary over a run directory (CLI: flightsim.verify).
 
@@ -8137,28 +8230,39 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
                 f"the checker hit an error it did not expect while running this "
                 f"check ({exc.__class__.__name__}: {exc}); that is a defect in the "
                 f"checker or a run file it did not expect, and the run is not "
-                f"verified until it is fixed"))
+                f"verified until it is fixed",
+                failure=FAIL_CHECKER_ERROR))
 
     def read_manifest(where, label: str):
         """The manifest at ``where`` or None, with the FAIL check that
         says why (``<label>manifest_present`` / ``<label>manifest_version``)."""
         path = Path(where) / "capture_manifest.json"
+        # The second run's manifest is refused by its own name: it is
+        # not this run's labels that are missing, it is the comparison.
+        named = FAIL_AGAINST_MANIFEST if label else None
         if not path.is_file():
             report.add(f"{label}manifest_present", False,
                        f"{path} does not exist; nothing to verify"
                        if not label else
                        f"--against {Path(where)}: {path} does not exist, so the "
                        f"second run cannot be compared; cross-run identity and "
-                       f"temporal alignment are NOT RUN")
+                       f"temporal alignment are NOT RUN",
+                       failure=named)
             return None
         try:
+            # The digest of the bytes this verdict grades, taken before
+            # they are parsed (write_verification records it).
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
             manifest = read_capture_manifest(path)
             if not isinstance(manifest, dict):
                 raise ValueError(f"{path} does not hold a manifest object")
         except (OSError, ValueError, AttributeError) as exc:
             report.add(f"{label}manifest_version", False,
-                       (f"--against {Path(where)}: " if label else "") + str(exc))
+                       (f"--against {Path(where)}: " if label else "") + str(exc),
+                       failure=named)
             return None
+        if not label:
+            report.manifest_sha256 = digest
         report.add(f"{label}manifest_version", True,
                    (f"--against {Path(where)}: " if label else "")
                    + f"manifest_version {manifest.get('manifest_version')}, "
@@ -8168,6 +8272,9 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     manifest = read_manifest(run_dir, "")
     if manifest is None:
         return report
+    # What the engine drew, as it says it drew it: copied beside the
+    # verdict whatever drawn_airframe grades it.
+    report.drawn_airframe = drawn_provenance(manifest, run_dir)
 
     finite = True
     for record in manifest.get("frames", []):
@@ -8312,12 +8419,24 @@ def write_verification(report: VerificationReport, run_dir) -> Path:
     directory, then ``os.replace``. Campaign workers (package G) verify
     runs in parallel while the campaign process reads the verdicts; a
     reader must see the previous complete file or the new one, never
-    half of a JSON document (NEXT.md gotcha 30)."""
+    half of a JSON document (NEXT.md gotcha 30).
+
+    The verdict is bound to the manifest it graded: ``manifest_sha256``
+    is the digest :func:`verify_run` took of the bytes it read, or --
+    for a report built some other way -- of ``capture_manifest.json`` as
+    it is now. Every writer (the verify command, the batch and campaign
+    runners, the web page's ``webapp.capture.finish``) binds by writing,
+    so an export tells this verdict from one on labels edited since."""
     import json
     import os
 
     path = Path(run_dir) / VERIFICATION_FILE
+    payload = report.to_dict()
+    if "manifest_sha256" not in payload:
+        manifest = Path(run_dir) / "capture_manifest.json"
+        if manifest.is_file():
+            payload["manifest_sha256"] = hashlib.sha256(manifest.read_bytes()).hexdigest()
     staged = path.with_name(f".{VERIFICATION_FILE}.{os.getpid()}.tmp")
-    staged.write_text(json.dumps(report.to_dict(), indent=1), encoding="utf-8")
+    staged.write_text(json.dumps(payload, indent=1), encoding="utf-8")
     os.replace(staged, path)
     return path

@@ -662,6 +662,10 @@ def test_the_per_camera_route_refuses_an_unusable_name(labelled_run, camera):
     reply = TestClient(app).get(f"/runs/run_lbl/cameras/{camera}/manifest.json")
     assert reply.status_code == 404
     assert b"capture_manifest" not in reply.content
+    # The route's own name check answered, not a lookup: a lookup's 404
+    # lists the run's cameras (the 65-character name reaches the route,
+    # the router refuses the others first).
+    assert "chase0" not in reply.text
 
 
 def test_a_clip_only_run_says_why_it_has_no_camera_manifest(tmp_path,

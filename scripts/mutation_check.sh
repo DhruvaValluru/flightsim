@@ -1506,16 +1506,24 @@ mutate webapp/capture.py \
     "a camera's manifest carries that camera's frames and no others" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
-# No guard on the per-camera manifest route's name check (webapp/server.py
-# run_camera_manifest, _CAMERA_NAME): the one that stood here mutated the
-# check into a bodiless `if False:` -- a syntax error, so its "ok" was a
-# broken import, never a test -- and the honest mutation (the check
-# removed, the module importable) is WEAK: '..', '..%2f..' and 'a/b' are
-# refused by the router before the route, and a 65-character name falls
-# through to camera_view(), which 404s too. It returns when
-# tests/test_webapp_capture.py::test_the_per_camera_route_refuses_an_unusable_name
-# also asserts `"chase0" not in reply.text` (a lookup's 404 lists the
-# run's cameras; the check's 404 does not).
+# The per-camera manifest route's name check (webapp/server.py
+# run_camera_manifest, _CAMERA_NAME). The guard that first stood here
+# mutated the check into a bodiless `if False:` -- a syntax error, so its
+# "ok" was a broken import, never a test. This one removes the check and
+# leaves the module importable: '..', '..%2f..' and 'a/b' are refused by
+# the router before the route, and a 65-character name falls through to
+# camera_view(), whose 404 lists the run's cameras -- which
+# test_the_per_camera_route_refuses_an_unusable_name refuses
+# (`"chase0" not in reply.text`).
+mutate webapp/server.py \
+    '    if not _CAMERA_NAME.match(camera_id):
+        return JSONResponse({"error": "no such camera"}, status_code=404)
+    path = manager.out_root / run_id / "capture_manifest.json"' \
+    '    if False:  # MUTATED: any name reaches the lookup
+        return JSONResponse({"error": "no such camera"}, status_code=404)
+    path = manager.out_root / run_id / "capture_manifest.json"' \
+    "the per-camera manifest route validates the name it is given" \
+    tests/test_webapp_capture.py -k "test_the_per_camera_route_refuses_an_unusable_name" || failures=$((failures+1))
 
 mutate webapp/runs.py \
     '        chosen = (named or [line.strip() for line in lines])[-keep:]' \
@@ -3182,9 +3190,9 @@ mutate flightsim/verify.py \
     tests/test_annotation_gates.py || failures=$((failures+1))
 
 mutate core/capture/verify.py \
-    '    staged.write_text(json.dumps(report.to_dict(), indent=1), encoding="utf-8")
+    '    staged.write_text(json.dumps(payload, indent=1), encoding="utf-8")
     os.replace(staged, path)' \
-    '    path.write_text(json.dumps(report.to_dict(), indent=1), encoding="utf-8")  # MUTATED: written in place, not atomically' \
+    '    path.write_text(json.dumps(payload, indent=1), encoding="utf-8")  # MUTATED: written in place, not atomically' \
     "the verdict is written atomically (a crash mid-write leaves the previous verdict intact)" \
     tests/test_annotation_gates.py || failures=$((failures+1))
 
@@ -3283,6 +3291,50 @@ mutate tests/visual/annotation_sheets.py \
     '            pass  # MUTATED: the projected hull is never drawn' \
     "mask_vs_geometry.png shows the projected hull" \
     tests/test_annotation_gates.py || failures=$((failures+1))
+
+mutate tests/visual/annotation_sheets.py \
+    '        canvas = draw.paint(canvas, in_record ^ in_applied, draw.RED)' \
+    '        pass  # MUTATED: the applied picture and the record never disagree on the sheet' \
+    "applied_intrinsics.png shows where the engine's picture and the record's disagree" \
+    tests/test_annotation_gates.py -k "applied_intrinsics_sheet" || failures=$((failures+1))
+
+# The grader's independence: the projection-matrix check projects through
+# this module's own pinhole, never the producer's (core.capture.labels).
+mutate core/capture/verify.py \
+    '            via_matrix = _through_matrix(P, point)' \
+    '            from .labels import project_with_matrix  # MUTATED: the producer grades itself
+            via_matrix = project_with_matrix(P, point)' \
+    "the verifier imports none of the producer's code" \
+    tests/test_annotation_gates.py -k "producer" || failures=$((failures+1))
+
+# Every verdict is bound to the manifest it graded, whoever writes it
+# (the page's webapp.capture.finish among them); what the engine drew is
+# copied beside it, and a placeholder never carries the mesh's digest.
+mutate core/capture/verify.py \
+    '        if not label:
+            report.manifest_sha256 = digest' \
+    '        if False:  # MUTATED: the verdict names no digest of what it graded
+            report.manifest_sha256 = digest' \
+    "verify_run records the digest of the manifest bytes it graded" \
+    tests/test_annotation_gates.py -k "digest_of_the_manifest" || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '    if "manifest_sha256" not in payload:' \
+    '    if False:  # MUTATED: a verdict written without verify_run is unbound' \
+    "write_verification binds a report built without verify_run" \
+    tests/test_annotation_gates.py -k "digest_of_the_manifest" || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '        entry["mesh_manifest_sha256"] = expected_sha if mesh else None' \
+    '        entry["mesh_manifest_sha256"] = expected_sha  # MUTATED: the cited mesh is recorded as drawn' \
+    "a placeholder render never records the imported mesh's sha256 as drawn" \
+    tests/test_annotation_gates.py -k "placeholder_render" || failures=$((failures+1))
+
+mutate core/capture/verify.py \
+    '                failure=FAIL_CHECKER_ERROR))' \
+    '                failure=None))  # MUTATED: a broken checker fails unnamed' \
+    "a check that breaks is refused by name (verify.checker_error)" \
+    tests/test_annotation_gates.py -k "check_that_breaks" || failures=$((failures+1))
 
 # Phase 2 package G (contracts §6.1): the campaign. Four guards, each
 # the plan's own rubric line: never done below target; seeds derived

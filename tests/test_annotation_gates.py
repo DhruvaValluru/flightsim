@@ -1068,6 +1068,232 @@ def test_a_painter_that_throws_is_recorded_as_not_drawn(clean_run, tmp_path, mon
     assert sheets.main([str(clean_run), "--out", str(tmp_path / "cli")]) == 1
 
 
+def test_the_applied_intrinsics_sheet_shows_the_lens_the_engine_rendered_at(
+        clean_run, run, tmp_path):
+    """The seventh sheet: the record's picture (green) and the picture the
+    engine's applied field of view covers (yellow), the area where they
+    disagree in red. On the clean run the two coincide and nothing but
+    the legend's swatch is red; a render one degree wider puts a red band
+    round the wing camera's picture and the sheet carries the FAIL."""
+    from tests.visual import draw
+    from tests.visual.annotation_sheets import SHEETS, SHEETS_RECORD, write_sheets
+
+    assert "applied_intrinsics" in SHEETS
+    swatch = 14 * 14            # the legend's red swatch (13 px font, +1 inclusive)
+    clean = write_sheets(clean_run, tmp_path / "clean")["applied_intrinsics"]
+    record = json.loads((tmp_path / "clean" / SHEETS_RECORD).read_text(encoding="utf-8"))
+    assert record["applied_intrinsics"]["drawn"] is True
+    assert record["applied_intrinsics"]["verdict"] == "[PASS] applied_intrinsics"
+    pixels = _pixels(clean)
+    assert _count(pixels, draw.YELLOW) > 200 and _count(pixels, draw.GREEN) > 200
+    assert _count(pixels, draw.RED) <= swatch, "the clean run's pictures disagree"
+
+    def widen(payload):
+        payload["frame_records"][0]["applied_fov_deg"] += 1.0
+    _edit_render_json(run, "wing0", widen)
+    wide = write_sheets(run, tmp_path / "wide")["applied_intrinsics"]
+    record = json.loads((tmp_path / "wide" / SHEETS_RECORD).read_text(encoding="utf-8"))
+    assert record["applied_intrinsics"]["drawn"] is True
+    assert record["applied_intrinsics"]["verdict"] == (
+        "[FAIL] applied_intrinsics -- annotation.intrinsics")
+    assert _count(_pixels(wide), draw.RED) > swatch + 500, "no disagreement band drawn"
+
+
+# -- the grader imports none of the producer's code -----------------------------
+#
+# "The grader projects known world points through the recorded manifest
+# ... It must not import the producer's code." A check that projects with
+# core.capture.labels grades the producer against itself and cannot fail
+# on the producer's own bug (verify_projection_matrix did, until this pin).
+
+#: The modules that MAKE the labels, the poses, the schedule, the objects
+#: and the landmarks a verifier grades.
+PRODUCER_MODULES = tuple(f"core.capture.{name}" for name in (
+    "labels", "objects", "poses", "schedule", "landmarks", "airframe",
+    "aircraft_model", "aircraft_mesh", "hostflight", "passes", "stereo",
+    "overlay", "preview"))
+
+#: The checks that grade labels against geometry: every one runs on a
+#: manifest read as plain JSON with none of PRODUCER_MODULES loaded.
+GRADING_CHECKS = (
+    "verify_projection_matrix", "verify_labels", "verify_keypoints_in_box",
+    "verify_label_files", "verify_drawn_airframe", "verify_mask_integers_only",
+    "verify_mask_vs_geometry", "verify_box_vs_mask", "verify_depth_vs_geometry",
+    "verify_visibility_vs_scene", "verify_identity_stable",
+    "verify_applied_intrinsics", "verify_landmark_reprojection",
+    "verify_triangulation")
+
+
+def _imported_modules(path: Path, package: str):
+    """(line, dotted module) for every import statement in a file --
+    module level or inside a function, absolute or relative -- with
+    ``from X import y`` also yielding ``X.y`` (``from . import labels``)."""
+    import ast
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                yield node.lineno, alias.name
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                parts = package.split(".")
+                base = parts[:len(parts) - (node.level - 1)]
+                module = ".".join(base + ([node.module] if node.module else []))
+            else:
+                module = node.module or ""
+            yield node.lineno, module
+            for alias in node.names:
+                yield node.lineno, f"{module}.{alias.name}"
+
+
+def test_the_verifier_imports_none_of_the_producer_s_code():
+    from core.capture import verify as verify_module
+
+    path = Path(verify_module.__file__)
+    found = sorted((line, module) for line, module in _imported_modules(path, "core.capture")
+                   if any(module == banned or module.startswith(banned + ".")
+                          for banned in PRODUCER_MODULES))
+    assert not found, f"core/capture/verify.py imports the producer's code: {found}"
+
+
+def test_the_grading_checks_run_with_no_producer_module_loaded(clean_run):
+    """In a fresh interpreter: import the verifier, read the manifest as
+    plain JSON, run every grading check on the clean run -- each passes,
+    and not one producer module was ever imported."""
+    import subprocess
+    import sys
+
+    script = (
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "from core.capture import verify\n"
+        "run = Path(sys.argv[1])\n"
+        "manifest = json.loads((run / 'capture_manifest.json').read_text(encoding='utf-8'))\n"
+        "status = {}\n"
+        "for name in sys.argv[2].split(','):\n"
+        "    check = getattr(verify, name)\n"
+        "    try:\n"
+        "        result = check(manifest, run)\n"
+        "    except TypeError:\n"
+        "        result = check(manifest)\n"
+        "    status[name] = result.status\n"
+        "print(json.dumps({'status': status, 'modules': sorted(sys.modules)}))\n")
+    done = subprocess.run(
+        [sys.executable, "-c", script, str(clean_run), ",".join(GRADING_CHECKS)],
+        cwd=str(Path(__file__).resolve().parents[1]), capture_output=True,
+        text=True, timeout=600)
+    assert done.returncode == 0, done.stderr
+    result = json.loads(done.stdout.strip().splitlines()[-1])
+    loaded = sorted(m for m in result["modules"]
+                    if any(m == b or m.startswith(b + ".") for b in PRODUCER_MODULES))
+    assert not loaded, f"grading loaded the producer's code: {loaded}"
+    # NOT RUN where the evidence is the engine's landmark pixels (the
+    # fabricated render.json carries none); every other check grades.
+    expected_not_run = {"verify_landmark_reprojection", "verify_triangulation"}
+    for name, status in result["status"].items():
+        assert status == (NOT_RUN if name in expected_not_run else PASS), (name, status)
+
+
+# -- the verdict is bound to the manifest it graded ------------------------------
+
+def test_the_verdict_carries_the_digest_of_the_manifest_it_graded(run):
+    _, report = checks_of(run)
+    manifest = run / "capture_manifest.json"
+    digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    assert report.manifest_sha256 == digest
+    recorded = json.loads(write_verification(report, run).read_text(encoding="utf-8"))
+    assert recorded["manifest_sha256"] == digest
+    # A report built some other way is bound to the manifest on disk.
+    from core.capture.verify import VerificationReport
+
+    bare = json.loads(write_verification(VerificationReport(), run).read_text(encoding="utf-8"))
+    assert bare["manifest_sha256"] == digest
+
+
+def test_a_web_verdict_is_bound_and_a_manifest_edited_after_it_is_stale(run):
+    """webapp.capture.finish wrote an unbound verdict: the dataset card
+    said so for every web run, and a manifest edited after the page
+    verified it exported as verified. finish now binds through
+    write_verification itself, so the export refuses the edited run by
+    name like a CLI- or batch-verified one."""
+    from core.dataset.export import ExportError, load_run, manifest_digest
+    from webapp.capture import finish
+
+    summary = finish(run, max_overlays=1)
+    assert summary["ok"] is True
+    verdict = json.loads((run / "verification.json").read_text(encoding="utf-8"))
+    assert verdict["manifest_sha256"] == manifest_digest(run)
+    assert load_run(run).verification_bound is True
+    manifest = run / "capture_manifest.json"
+    manifest.write_text(manifest.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    with pytest.raises(ExportError) as info:
+        load_run(run)
+    assert info.value.constraint == "export.verification_stale"
+
+
+# -- what the engine drew, kept beside the verdict --------------------------------
+
+def _cite_mesh(run_dir, sha="ab" * 32, path="assets/generated/B747/mesh_manifest.json"):
+    manifest = read_capture_manifest(run_dir / "capture_manifest.json")
+    manifest.setdefault("assets", {})["mesh_manifest"] = {"path": path, "sha256": sha,
+                                                          "note": None}
+    write_capture_manifest(manifest, run_dir)
+    return manifest
+
+
+def test_a_placeholder_render_never_records_the_mesh_digest_as_drawn(run):
+    """The manifest cites the imported mesh's sha256 (the producing
+    machine had it); the engine drew placeholder boxes on one camera.
+    verification.json's drawn_airframe copies the engine's record per
+    camera, and the placeholder camera's mesh digest is null -- only the
+    camera that drew the mesh carries it. The manifest's bytes, and the
+    simulation's digests in it, are not touched."""
+    sha = "ab" * 32
+    manifest = _cite_mesh(run, sha)
+
+    def placeholder(payload):
+        payload["drawn"] = {"kind": "placeholder", "mesh_origin_actor_cm": None,
+                            "manifest_version": None,
+                            "origin_basis": "placeholder boxes (no -mesh=)"}
+    _edit_render_json(run, "wing0", placeholder)
+    before = (run / "capture_manifest.json").read_bytes()
+    _, report = checks_of(run)
+    recorded = json.loads(write_verification(report, run).read_text(encoding="utf-8"))
+    assert (run / "capture_manifest.json").read_bytes() == before
+    after = read_capture_manifest(run / "capture_manifest.json")
+    for key in ("spec_digest", "output_digest"):
+        assert after.get(key) == manifest.get(key)
+    drawn = recorded["drawn_airframe"]
+    assert drawn["expected_mesh_manifest_sha256"] == sha
+    wing = drawn["cameras"]["wing0"]
+    assert wing["kind"] == "placeholder" and wing["mesh_manifest_sha256"] is None
+    assert wing["mesh_manifest_path"] is None
+    assert wing["origin_basis"] == "placeholder boxes (no -mesh=)"
+    chase = drawn["cameras"]["chase0"]
+    assert chase["kind"] == "mesh" and chase["mesh_manifest_sha256"] == sha
+    assert chase["manifest_version"] == 3
+    assert chase["origin_basis"].startswith("measured from vertices")
+    # ...and the grade of it is drawn_airframe's, by name, as before.
+    failed = {c["name"]: c for c in recorded["checks"] if c["status"] == "FAIL"}
+    assert failed["drawn_airframe"]["failure"] == "aircraft.placeholder_drawn"
+
+
+def test_a_render_with_no_drawn_record_carries_no_mesh_digest(run):
+    _cite_mesh(run)
+
+    def older_build(payload):
+        payload.pop("drawn", None)
+    for camera in ("chase0", "wing0"):
+        _edit_render_json(run, camera, older_build)
+    _, report = checks_of(run)
+    cameras = report.to_dict()["drawn_airframe"]["cameras"]
+    assert sorted(cameras) == ["chase0", "wing0"]
+    for entry in cameras.values():
+        assert entry["kind"] is None and entry["mesh_manifest_sha256"] is None
+        assert "predates" in entry["note"]
+
+
 # -- a bundle file the record declares and the disk does not hold ---------------
 
 def test_a_declared_id_image_that_is_missing_fails_by_name_never_by_traceback(
@@ -1125,7 +1351,7 @@ def test_a_check_that_breaks_is_a_fail_in_a_sentence_and_the_verdict_is_written(
     monkeypatch.setattr(verify_module, "verify_applied_intrinsics", broken)
     by_name, report = checks_of(run)
     check = by_name["applied_intrinsics"]
-    assert check.status == FAIL and check.failure is None
+    assert check.status == FAIL and check.failure == "verify.checker_error"
     assert "could not" in check.detail or "did not expect" in check.detail
     assert "simulated defect in the checker" in check.detail
     assert by_name["mask_vs_geometry"].status == PASS
@@ -1154,6 +1380,7 @@ def test_against_without_a_manifest_is_a_named_fail_not_a_traceback(
 
     by_name, report = checks_of(run, other=tmp_path / "nonexistent")
     assert by_name["against_manifest_present"].status == FAIL
+    assert by_name["against_manifest_present"].failure == "verify.against_manifest"
     assert "nonexistent" in by_name["against_manifest_present"].detail
     assert by_name["temporal_alignment"].status == NOT_RUN
     assert "against" in by_name["temporal_alignment"].detail
@@ -1171,6 +1398,7 @@ def test_against_without_a_manifest_is_a_named_fail_not_a_traceback(
         json.dumps({"manifest_version": 99}), encoding="utf-8")
     by_name, report = checks_of(run, other=other)
     assert by_name["against_manifest_version"].status == FAIL
+    assert by_name["against_manifest_version"].failure == "verify.against_manifest"
     assert "99" in by_name["against_manifest_version"].detail
     assert by_name["temporal_alignment"].status == NOT_RUN and not report.ok
 

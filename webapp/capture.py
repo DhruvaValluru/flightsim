@@ -427,7 +427,11 @@ def finish(out: Path, max_overlays: Optional[int] = 24) -> Dict:
     report = verify_run(out)
     # The SAME verdict under the one name every other path uses
     # (flightsim.verify writes it; flightsim.export refuses a run
-    # without it), so a web run exports like a CLI run.
+    # without it), so a web run exports like a CLI run -- bound to the
+    # manifest it graded (manifest_sha256, written by write_verification
+    # itself), so a manifest edited after this verdict is refused
+    # export.verification_stale like any other, and carrying what the
+    # engine says it drew (drawn_airframe) beside the verdict.
     write_verification(report, out)
     summary = {
         "ok": report.ok,

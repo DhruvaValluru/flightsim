@@ -219,6 +219,11 @@ verify.camera_sets:
   sentence: "The two camera sets given to the checker do not describe the same cameras."
 verify.capture:
   sentence: "One of the two captures the checker needed did not complete, so the two cannot be compared."
+verify.against_manifest:
+  sentence: "The second run given for comparison has no readable manifest, so the two runs cannot be compared."
+  hint: "Give a run folder that holds a finished capture of the same flight."
+verify.checker_error:
+  sentence: "The checker itself failed on this run; the run is not verified until that is fixed."
 
 # -- the engine's look (FlightSimVisualScene.cpp, FlightSimRenderCommandlet.cpp) --
 
