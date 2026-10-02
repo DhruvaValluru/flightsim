@@ -74,6 +74,26 @@ class Outcome:
                 "dataset_path": self.dataset_path, "rule": self.rule}
 
 
+def _missing_curated_bake(spec: Dict[str, Any]) -> Optional[str]:
+    """The curated location a spec's ``scene.terrain_source: baked``
+    names whose bake is not on this machine, or None."""
+    from pathlib import Path
+
+    from core.terrain.glo30 import LOCATIONS
+
+    scene = spec.get("scene") or {}
+    source = (scene.get("terrain_source") or {}).get("value")
+    stem = (scene.get("terrain") or {}).get("value")
+    if source != "baked" or not stem:
+        return None
+    path = Path(str(stem))
+    if path.name not in LOCATIONS:
+        return None
+    if path.with_suffix(".r16").is_file() and path.with_suffix(".json").is_file():
+        return None
+    return path.name
+
+
 def _refused(result: Dict[str, Any]) -> bool:
     return isinstance(result, dict) and bool(result.get("refused"))
 
@@ -143,6 +163,19 @@ class Controller:
             return self._escalate(f"{first['sentence']} ({first['constraint']})",
                                   rule=first["constraint"])
         token = validated["validation_token"]
+
+        # A spec that asks for a bake by name over a curated place this
+        # machine has not fetched: the controller prepares it (the bake
+        # tool, under its network budget) rather than letting every case
+        # refuse terrain.unbaked. A coordinates-only or unknown place is
+        # not guessed at -- the capture refuses it by name as before.
+        missing = _missing_curated_bake(compiled["spec"])
+        if missing is not None:
+            baked = call("bake", location=missing,
+                         reason=f"The scenario names the {missing} bake and this "
+                                f"machine has none; fetch and verify it once.")
+            if _refused(baked):
+                return self._escalate(self._sentence(baked), rule=baked["refused"])
 
         planned = call("plan_campaign", spec=compiled["spec"], words=request.words,
                        images=images, seed=request.seed, format=request.format,

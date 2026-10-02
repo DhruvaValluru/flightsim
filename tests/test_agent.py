@@ -523,3 +523,46 @@ def test_the_agent_cli_runs_a_request_and_exits_by_outcome(tmp_path, capsys):
     outcome = json.loads(capsys.readouterr().out)
     assert outcome["state"] == "done" and outcome["yield_frames"] >= IMAGES
     assert Path(outcome["trace_path"]).is_file()
+
+
+def test_the_controller_bakes_a_named_curated_place_it_lacks(tmp_path):
+    """A spec that asks for a curated bake by name (scene.terrain_source:
+    baked) that this machine has not fetched gets ONE bake call before
+    anything is planned; a bake on disk, a coordinates-only scene or an
+    unnamed source gets none. A refused bake escalates by name."""
+    from types import SimpleNamespace
+
+    from core.agent.controller import _missing_curated_bake
+
+    stem = tmp_path / "matterhorn"
+
+    def spec(source="baked", terrain=str(stem)):
+        return {"scene": {"terrain_source": {"value": source},
+                          "terrain": {"value": terrain}}}
+
+    assert _missing_curated_bake(spec()) == "matterhorn"
+    assert _missing_curated_bake(spec(terrain=str(tmp_path / "atlantis"))) is None
+    assert _missing_curated_bake(spec(source="auto")) is None
+    assert _missing_curated_bake({}) is None
+    stem.with_suffix(".r16").write_bytes(b"\0\0")
+    stem.with_suffix(".json").write_text("{}", encoding="utf-8")
+    assert _missing_curated_bake(spec()) is None
+    stem.with_suffix(".r16").unlink()
+
+    calls = []
+
+    def call(tool, **kwargs):
+        calls.append(tool)
+        if tool == "compile":
+            return {"spec": spec(), "spec_digest": "d", "questions": [], "refusals": []}
+        if tool == "validate":
+            return {"ok": True, "validation_token": "t", "violations": []}
+        if tool == "bake":
+            return {"refused": "terrain.unbaked", "sentence": "The terrain is not ready."}
+        raise AssertionError(f"{tool} called after a refused bake")
+
+    trace = SimpleNamespace(path=tmp_path / "trace.jsonl", record=lambda *a, **k: None)
+    tools = SimpleNamespace(call=call, trace=trace)
+    outcome = Controller(tools).run(Request("fly over the matterhorn bake", images=5))
+    assert calls == ["compile", "validate", "bake"]
+    assert outcome.state == "escalated" and "terrain.unbaked" in outcome.sentence
