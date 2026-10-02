@@ -19,12 +19,11 @@ Three rules the page is graded on, and where each lives:
 * **The catalogue only.** :func:`words` is the ONE place a refusal is
   rendered for the page: ``sentence`` and ``hint`` come from the
   catalogue, and the rule name goes under ``details`` -- never into a
-  default field. A name the catalogue does not know (today
-  ``campaign.state``, ``campaign.arguments`` and
-  ``campaign.duplicate_case``, whose sentences are a finding for
-  ``core/messages/catalog.yaml``) renders the producer's own message
-  as the sentence, still with the rule under ``details``; no sentence
-  is invented here.
+  default field. A name the catalogue does not know renders the
+  producer's own message as the sentence, still with the rule under
+  ``details`` and ``catalogued: false`` so the gap shows; no sentence
+  is invented here. (Every name this module raises -- ``campaign.*``,
+  ``export.*``, ``compile.*`` -- has its entry today.)
 * **Progress from the ledger.** :func:`progress` reads
   ``ledger.jsonl`` through ``core.campaign.ledger`` every time it is
   asked; the service keeps no counter. A ledger written by hand (the
@@ -66,13 +65,14 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 from core.campaign import Campaign, CampaignError
 from core.campaign.campaign import (
     CANCELLED, DONE, FAILED, PAUSED, PLANNED, RUNNING, estimate_frames,
+    reconcile_images, stated_images,
 )
 from core.campaign.ledger import STATUS_REFUSED, STATUSES, latest_by_index, summarise
 from core.campaign.workers import RUNS_DIR, run_index, utc_now
 from core.dataset.export import CARD_JSON, FORMATS, ExportError
 from core.messages import explain, is_catalogued, name_of, technical
 from core.nl.compiler import camera_questions, compile_prompt
-from core.nl.llm_compiler import LLMCompileError, compile_prompt_llm, llm_available
+from core.nl.llm_compiler import LLMCompileError, compile_prompt_llm
 from core.scenario.randomization import RandomizationError, sample_randomization
 from core.scenario.spec import ScenarioSpec
 from core.scenario.validate import validate
@@ -96,6 +96,16 @@ TERMINAL = (DONE, FAILED, CANCELLED)
 MAX_GALLERY = 60
 #: Histogram bins for a numeric leaf's realised values.
 HISTOGRAM_BINS = 6
+#: The page's one sentence for a download with no pictures in it (a
+#: headless campaign: the export is labels only). The download says it
+#: as ``X-Dataset-Labels-Only: 1`` and the page says this, before the
+#: download (from the card) and after it (from the header).
+LABELS_ONLY_WORDS = "Labels only: no picture was drawn on this machine."
+#: The preview's plain sentence when the picture is the geometry
+#: preview: masks and boxes are drawn only on an engine's pixels.
+MASKS_ONLY_WITH_ENGINE = ("Masks and boxes appear only when an engine draws the picture; "
+                          "this one is the geometry preview, so it shows where the camera "
+                          "and the aircraft are, with no mask or box on it.")
 
 _ID_RE = re.compile(r"^[a-f0-9]{12}$")
 _CASE_RE = re.compile(r"^[a-f0-9]{16}$")
@@ -190,13 +200,18 @@ def compile_round(prompt: str, tier: str = "llm", questions=None, answers=None
     """The compilers' clarification protocol, exactly as ``/compile``
     runs it: the LLM tier when asked and available (falling back to
     the regex compiler with the reason recorded), else the regex
-    compiler whose one question is the camera view. Returns
-    ``{spec, questions, tier, model, note}``; ``questions`` is
-    non-empty when the round wants an answer first."""
+    compiler, whose questions are ``camera_questions``'s -- at most
+    two: the aircraft (a kind of aircraft, or a name the vocabulary
+    lacks) and the view (imagery with no view named). Returns
+    ``{spec, questions, tier, model, note, note_details}``;
+    ``questions`` is non-empty when the round wants an answer first.
+    ``note`` is the fallback's catalogue sentence (``compile.*``: it
+    already says the offline compiler was used), the producer's text
+    under ``note_details`` -- never the two run together."""
     if tier not in ("llm", "regex"):
         raise CampaignError("campaign.arguments",
                             f"tier {tier!r} is not one of 'regex', 'llm'")
-    model = note = None
+    model = note = note_details = None
     asked: List[Dict[str, Any]] = []
     tier_used = tier
     if tier == "llm":
@@ -207,13 +222,18 @@ def compile_round(prompt: str, tier: str = "llm", questions=None, answers=None
         except LLMCompileError as exc:
             spec = compile_prompt(prompt, answers=answers)
             tier_used = "regex"
-            note = f"the offline compiler compiled this ({exc})"
+            said = words(exc)
+            if not said["details"]["catalogued"]:
+                # A nameless failure is the model's answer refused: the
+                # catalogue's compile.rejected, the producer's text beside.
+                said = words({"constraint": "compile.rejected", "message": str(exc)})
+            note, note_details = said["sentence"], said["details"]
             asked = [] if answers else camera_questions(prompt)
     else:
         spec = compile_prompt(prompt, answers=answers)
         asked = [] if answers else camera_questions(prompt)
     return {"spec": spec, "questions": asked[:MAX_QUESTIONS], "tier": tier_used,
-            "model": model, "note": note}
+            "model": model, "note": note, "note_details": note_details}
 
 
 # -- the plan preview in words ----------------------------------------------------
@@ -312,6 +332,13 @@ def paragraph(spec: ScenarioSpec, images: int, fmt: str) -> str:
     else:
         views = "a chase view (the default when none is named)"
     duration = float(spec.duration.value)
+    # A count the prompt states is per view (the camera contract); the
+    # target counts every view's, so two views stating 500 are 1000 --
+    # said here, so the number on the page is not a surprise.
+    stated = stated_images(spec)
+    if stated and stated["views"] > 1 and stated["per_view"] and stated["total"] == images:
+        views += (f" ({stated['per_view']} {'image' if stated['per_view'] == 1 else 'images'} "
+                  f"from each of the {stated['views']} views, added together)")
     return (f"{images} {'image' if images == 1 else 'images'} of the {aircraft}, "
             f"{places}; conditions: {', '.join(conditions)}; "
             f"{views}; each scenario flies for {duration:g} s; "
@@ -423,44 +450,66 @@ class GenerateService:
 
     # -- ask / clarify / preview ------------------------------------------------
 
-    def plan(self, prompt: str, answers=None, questions=None, images: int = DEFAULT_IMAGES,
-             fmt: str = DEFAULT_FORMAT, tier: str = "llm", seed: Optional[int] = None
-             ) -> Dict[str, Any]:
+    def plan(self, prompt: str, answers=None, questions=None,
+             images: Optional[int] = None, fmt: str = DEFAULT_FORMAT, tier: str = "llm",
+             seed: Optional[int] = None) -> Dict[str, Any]:
         """Prompt -> questions (clarify) or the plan preview: the
         paragraph, the refusals in words, the estimate, the expert
-        commands. Nothing is written."""
+        commands. Nothing is written.
+
+        ``images`` None (the page's count left blank) takes the count
+        the prompt states, every view's added (``Campaign.create``'s own
+        rule, :func:`core.campaign.campaign.reconcile_images`), else
+        ``DEFAULT_IMAGES``; a stated count and an ``images`` that
+        disagree are a refusal in the preview (``campaign.image_count``),
+        exactly the one ``start`` would raise. ``images`` in the reply
+        is the target the campaign would run to; ``images_stated`` the
+        prompt's own count, or None.
+
+        ``llm_used`` says whether the language model compiled THIS plan
+        (the tier that answered), not whether one is configured -- a
+        configured but unreachable model is not available to anyone."""
         prompt = str(prompt or "").strip()
         if not prompt:
             raise GenerateRefusal({"error": "empty prompt"}, 400)
-        images = _positive_int(images, "images")
+        explicit = _images_arg(images)
         if fmt not in FORMATS:
             raise GenerateRefusal(words(ExportError(
                 "export.format", f"format {fmt!r} is not one of {list(FORMATS)}")))
         compiled = compile_round(prompt, tier=tier, questions=questions, answers=answers)
         base = {"prompt": prompt, "answers": [dict(a) for a in (answers or [])],
                 "tier": compiled["tier"], "model": compiled["model"],
-                "note": compiled["note"], "llm_available": llm_available(),
-                "images": images, "format": fmt}
+                "note": compiled["note"], "note_details": compiled["note_details"],
+                "llm_used": compiled["tier"] == "llm",
+                "images": explicit, "images_given": explicit, "format": fmt}
         if compiled["questions"]:
             return {**base, "state": "clarify",
                     "headline": state_words("progress.page.clarify"),
                     "questions": compiled["questions"],
-                    "expert": [expert_campaign(prompt, images, fmt, seed, answers=answers,
+                    "expert": [expert_campaign(prompt, explicit, fmt, seed, answers=answers,
                                                tier=compiled["tier"], plan=True)]}
         spec: ScenarioSpec = compiled["spec"]
         refusals = plan_refusals(spec)
+        stated = stated_images(spec)
+        try:
+            images = reconcile_images(spec, explicit, DEFAULT_IMAGES)
+        except CampaignError as exc:
+            refusals.append(words(exc))
+            images = int(explicit)
         est = estimate(spec, images, None, directory=self.root)
         return {**base, "state": "preview",
                 "headline": state_words("progress.page.preview"),
+                "images": images,
+                "images_stated": stated["total"] if stated else None,
                 "paragraph": paragraph(spec, images, fmt),
                 "refusals": refusals,
                 "ok": not refusals,
                 "estimate": est,
                 "spec": spec.to_dict(), "spec_digest": spec.digest(),
-                "expert": [expert_campaign(prompt, images, fmt, seed, answers=answers,
+                "expert": [expert_campaign(prompt, explicit, fmt, seed, answers=answers,
                                            tier=compiled["tier"], plan=True)]}
 
-    def preview(self, spec_dict: Dict[str, Any], images: int = DEFAULT_IMAGES,
+    def preview(self, spec_dict: Dict[str, Any], images: Optional[int] = None,
                 seed: int = 1, workers: int = 1) -> Dict[str, Any]:
         """ONE sample case (slot 0 of the campaign this spec would
         start) run headless through the campaign's own worker function
@@ -468,15 +517,23 @@ class GenerateService:
         present, in which case the overlay PNG (mask and box drawn on
         the pixels) is the picture; otherwise the geometry preview is,
         and the response says which. The case is measured (frames,
-        bytes, seconds) and the estimate is recomputed from it."""
+        bytes, seconds) and the estimate is recomputed from it.
+
+        Masks and boxes are drawn only on an engine's pixels: when the
+        picture is the geometry preview, ``masks_note`` says so in
+        plain words (and None when the overlay is the picture), so the
+        page never lets a shaded preview pass for a labelled frame."""
         try:
             spec = ScenarioSpec.from_dict(spec_dict)
         except (ValueError, KeyError) as exc:
             # By name where the catalogue knows the sentence (spec.version);
             # the producer's text under details otherwise, never a traceback.
             raise GenerateRefusal(words(exc), 400)
-        images = _positive_int(images, "images")
         refusals = plan_refusals(spec)
+        try:
+            images = reconcile_images(spec, _images_arg(images), DEFAULT_IMAGES)
+        except CampaignError as exc:
+            refusals.append(words(exc))
         if refusals:
             raise GenerateRefusal({**refusals[0], "refusals": refusals})
         engine, render_note = render_here(spec)
@@ -527,8 +584,12 @@ class GenerateService:
                          "what": ("the rendered frame with the mask and box drawn on it"
                                   if picture["kind"] == "overlays" else
                                   "the geometry preview: the camera's view of the recorded "
-                                  "flight, shaded from the spec (no engine on this machine)")}
+                                  "flight, shaded from the scenario"),
+                         "masks_note": (None if picture["kind"] == "overlays"
+                                        else MASKS_ONLY_WITH_ENGINE)}
                         if picture else None),
+            "masks_note": (None if picture and picture["kind"] == "overlays"
+                           else MASKS_ONLY_WITH_ENGINE),
             "measured": measured,
             "verification": verification,
             "verification_words": ({"passed": verification.get("passed"),
@@ -550,16 +611,19 @@ class GenerateService:
 
     # -- generate -----------------------------------------------------------------
 
-    def start(self, prompt: str, answers=None, images: int = DEFAULT_IMAGES,
+    def start(self, prompt: str, answers=None, images: Optional[int] = None,
               fmt: str = DEFAULT_FORMAT, seed: Optional[int] = None, workers: int = 1,
               tier: str = "regex", plan_digest: Optional[str] = None,
               disk_budget_bytes: Optional[int] = None) -> Dict[str, Any]:
         """Create the campaign (``Campaign.create``: compiles, refuses
-        by name) and run it in a thread. One running campaign per
-        server process."""
+        by name -- ``campaign.image_count`` among them, when the page's
+        count and the prompt's disagree) and run it in a thread. One
+        running campaign per server process. ``images`` None takes the
+        prompt's stated count, else ``DEFAULT_IMAGES``."""
         prompt = str(prompt or "").strip()
         if not prompt:
             raise GenerateRefusal({"error": "empty prompt"}, 400)
+        images = _images_arg(images)
         running = self._running_id()
         if running is not None:
             raise GenerateRefusal(words(CampaignError(
@@ -592,6 +656,7 @@ class GenerateService:
                 "recompiled": bool(plan_digest and plan_digest != digest),
                 "tier": campaign.record["tier"], "plan": plan,
                 "render": render, "render_note": render_note,
+                "images": campaign.target,
                 "directory": str(campaign.dir),
                 "expert": [expert_campaign(prompt, images, fmt, seed, answers=answers,
                                            tier=tier, out=campaign.dir, workers=workers)]}
@@ -720,6 +785,45 @@ class GenerateService:
         format when none is given) through ``Campaign.export`` and zip
         the dataset with its card (``dataset.json`` records the format).
         The export's refusals stand, in words."""
+        campaign, fmt, result, card = self._export(campaign_id, fmt)
+        dataset = Path(result["dataset_path"])
+        downloads = campaign.dir / "downloads"
+        downloads.mkdir(exist_ok=True)
+        archive = downloads / f"{campaign_id}_{fmt}.zip"
+        pictures_in = 0
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+            for path in sorted(p for p in dataset.rglob("*") if p.is_file()):
+                zf.write(path, arcname=str(Path(fmt) / path.relative_to(dataset)))
+                pictures_in += path.suffix.lower() in PICTURE_SUFFIXES
+        # Labels only when the export says so OR the zip holds no picture
+        # at all -- what the person receives, not only what was asked.
+        labels_only = bool(result["labels_only"]) or pictures_in == 0
+        return {"archive": archive, "format": fmt, "card": card,
+                "filename": f"{campaign_id}_{fmt}.zip", "runs": result["runs"],
+                "labels_only": labels_only, "pictures": pictures_in,
+                "labels_only_words": LABELS_ONLY_WORDS if labels_only else None,
+                "expert": [f"python -m flightsim.export {campaign.dir / RUNS_DIR}/* "
+                           f"--out {dataset} --format {fmt}"]}
+
+    def card(self, campaign_id: str, fmt: Optional[str] = None) -> Dict[str, Any]:
+        """The dataset's card, read for a person before the download:
+        the same export the download zips (``Campaign.export`` into
+        ``datasets/<fmt>``), its ``dataset.json`` put into plain words
+        by :func:`card_words`. The export's refusals stand, in words."""
+        campaign, fmt, result, card = self._export(campaign_id, fmt)
+        # The download's own rule: labels only when the export says so or
+        # no picture file is in what the zip would hold.
+        pictured = any(p.suffix.lower() in PICTURE_SUFFIXES
+                       for p in Path(result["dataset_path"]).rglob("*") if p.is_file())
+        said = card_words(card, labels_only=bool(result["labels_only"]) or not pictured)
+        return {"id": campaign_id, **said,
+                "expert": [f"python -m flightsim.campaign --out {campaign.dir} --export",
+                           f"cat {Path(result['dataset_path']) / CARD_JSON}"]}
+
+    def _export(self, campaign_id: str, fmt: Optional[str]
+                ) -> Tuple[Campaign, str, Dict[str, Any], Dict[str, Any]]:
+        """Export the verified cases as ``fmt`` (the campaign's own
+        format when none is given); the card read back off the file."""
         campaign = self.open(campaign_id)
         fmt = fmt or str(campaign.record.get("format") or DEFAULT_FORMAT)
         if fmt not in FORMATS:
@@ -729,32 +833,205 @@ class GenerateService:
             result = campaign.export(format=fmt)
         except (ExportError, CampaignError) as exc:
             raise GenerateRefusal(words(exc))
-        dataset = Path(result["dataset_path"])
-        card_path = dataset / CARD_JSON
+        card_path = Path(result["dataset_path"]) / CARD_JSON
         card = json.loads(card_path.read_text(encoding="utf-8")) if card_path.is_file() else {}
-        downloads = campaign.dir / "downloads"
-        downloads.mkdir(exist_ok=True)
-        archive = downloads / f"{campaign_id}_{fmt}.zip"
-        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
-            for path in sorted(p for p in dataset.rglob("*") if p.is_file()):
-                zf.write(path, arcname=str(Path(fmt) / path.relative_to(dataset)))
-        return {"archive": archive, "format": fmt, "card": card,
-                "filename": f"{campaign_id}_{fmt}.zip", "runs": result["runs"],
-                "labels_only": result["labels_only"],
-                "expert": [f"python -m flightsim.export {campaign.dir / RUNS_DIR}/* "
-                           f"--out {dataset} --format {fmt}"]}
+        return campaign, fmt, result, card
+
+
+# -- the card in words ----------------------------------------------------------------
+
+#: Picture files a dataset zip can hold (the export copies PNGs; VOC
+#: names the directory JPEGImages and keeps the PNGs as they are).
+PICTURE_SUFFIXES = (".png", ".jpg", ".jpeg")
+#: Each format in a person's words: what the files are, not the layout spec.
+FORMAT_WORDS = {
+    "coco": "COCO: one file of labels for each part of the dataset (training, "
+            "validation, testing), a box and an outline for each aircraft",
+    "yolo": "YOLO: one small text file of boxes beside each picture, ready for "
+            "Ultralytics",
+    "voc": "Pascal VOC: one file of boxes for each picture",
+    "kitti": "KITTI: one text file for each picture, with boxes in the picture and "
+             "in 3-D",
+    "webdataset": "WebDataset: the samples packed into archive shards for streaming",
+}
+SPLIT_WORDS = {"train": "training", "val": "validation", "test": "testing"}
+#: Conditions the card records that are bookkeeping, not a condition a
+#: person asked for (the seed, the solar algorithm's citation, the same
+#: hour in UTC, the engine's own copy of the sun): in the details only.
+CARD_BOOKKEEPING = ("seed", "solar_source", "hour_utc")
+CARD_BOOKKEEPING_PREFIXES = ("engine_",)
+#: Plain names for the conditions a campaign varies most; any other
+#: name is read as words with its unit (``_leaf_words``' rule).
+CONDITION_WORDS = {
+    "cloud_cover": ("cloud cover (share of the sky)", lambda v: f"{100 * v:.0f}%"),
+    "hour_local": ("time of day", lambda v: f"{int(v):02d}:{int(round((v % 1) * 60)) % 60:02d}"),
+    "day_of_year": ("day of the year", lambda v: f"{v:.0f}"),
+    "visibility_km": ("visibility", lambda v: f"{v:.0f} km"),
+    "sun_elevation_deg": ("the sun's height", lambda v: f"{v:.0f} degrees"),
+    "sun_azimuth_deg": ("the sun's direction", lambda v: f"{v:.0f} degrees"),
+    "wind_speed": ("wind", lambda v: f"{v:g} kt"),
+    "year": ("year", lambda v: f"{v:.0f}"),
+}
+
+
+def _condition_name(name: str) -> str:
+    pretty = name.replace("_", " ")
+    for unit in ("km", "m", "deg", "kt"):
+        if pretty.endswith(" " + unit):
+            pretty = pretty[:-len(unit) - 1] + f" ({unit})"
+    return pretty
+
+
+def card_words(card: Dict[str, Any], labels_only: Optional[bool] = None) -> Dict[str, Any]:
+    """A dataset card (``dataset.json``) in a person's words -- pure, so
+    a test can hand it any card. The default fields hold sentences
+    only: how many images and labelled objects, the balance of
+    classes, the conditions the scenarios actually drew, the checks
+    and their verdicts, what the dataset does NOT claim, and the format.
+    Every rule name, check name and the card's own technical lines go
+    under ``details`` (the page's disclosure), never into a sentence.
+
+    ``labels_only`` (the export's own flag; the card's when None) adds
+    :data:`LABELS_ONLY_WORDS` first under ``not_claimed`` and as
+    ``labels_only_words``."""
+    if labels_only is None:
+        labels_only = bool(card.get("labels_only"))
+    images = int(card.get("images") or card.get("frames") or 0)
+    instances = int(card.get("instances") or 0)
+    fmt = str(card.get("format") or "")
+    runs = [r for r in card.get("runs") or [] if isinstance(r, dict)]
+    scenarios = len(runs)
+    # Contents and the split.
+    contents = [f"{images} {'image' if images == 1 else 'images'} with {instances} "
+                f"labelled {'object' if instances == 1 else 'objects'}, from {scenarios} "
+                f"{'scenario' if scenarios == 1 else 'scenarios'} flown."]
+    splits = card.get("frames_per_split") or {}
+    if splits:
+        contents.append("Split for "
+                        + ", ".join(f"{SPLIT_WORDS.get(k, k)} {v}" for k, v in splits.items())
+                        + "; every image of one flight stays in the same part.")
+    # The balance of classes: the classes with something in them, and
+    # the ones the class list carries with nothing.
+    balance = card.get("class_balance") or {}
+    present = [(name, c) for name, c in balance.items()
+               if isinstance(c, dict) and int(c.get("instances") or 0) > 0]
+    empty = [name for name, c in balance.items()
+             if isinstance(c, dict) and not int(c.get("instances") or 0)]
+    classes = [f"{name}: {int(c['instances'])} labelled "
+               f"{'object' if int(c['instances']) == 1 else 'objects'} in "
+               f"{int(c.get('images') or 0)} {'image' if int(c.get('images') or 0) == 1 else 'images'}"
+               + (f" ({round(100 * int(c['instances']) / instances)}% of all objects)"
+                  if instances and len(present) > 1 else "") + "."
+               for name, c in present]
+    if empty:
+        classes.append(f"In the class list but not in any image: {', '.join(empty)}.")
+    aircraft = card.get("aircraft") or []
+    if aircraft:
+        classes.append(f"Aircraft models: {', '.join(str(a) for a in aircraft)}.")
+    # The conditions the scenarios drew (the card's ``conditions.sampled``).
+    sampled = ((card.get("conditions") or {}).get("sampled") or {})
+    conditions: List[str] = []
+    for name, summary in sampled.items():
+        if name in CARD_BOOKKEEPING or name.startswith(CARD_BOOKKEEPING_PREFIXES):
+            continue
+        label, fmt_value = CONDITION_WORDS.get(name, (_condition_name(name), None))
+        if isinstance(summary, dict) and "min" in summary and "max" in summary:
+            lo, hi = float(summary["min"]), float(summary["max"])
+            show = fmt_value or (lambda v: f"{v:.3g}")
+            n = int(summary.get("n") or 0)
+            if lo == hi:
+                conditions.append(f"{label.capitalize()}: {show(lo)} in every scenario.")
+            else:
+                conditions.append(f"{label.capitalize()}: from {show(lo)} to {show(hi)} "
+                                  f"across {n} {'scenario' if n == 1 else 'scenarios'}.")
+        elif isinstance(summary, dict) and summary:
+            counts = ", ".join(f"{value} in {count} {'scenario' if count == 1 else 'scenarios'}"
+                               for value, count in summary.items())
+            conditions.append(f"{label.capitalize()}: {counts}.")
+    if not conditions:
+        conditions.append("Nothing was varied between the scenarios.")
+    # The checks.
+    passed_runs = [r for r in runs if (r.get("verification") or {}).get("ok")]
+    checks: List[str] = []
+    if scenarios:
+        if len(passed_runs) == scenarios:
+            checks.append(f"{'The scenario' if scenarios == 1 else f'All {scenarios} scenarios'} "
+                          f"passed every check that ran.")
+        else:
+            checks.append(f"{len(passed_runs)} of {scenarios} scenarios passed every check "
+                          f"that ran; the others had a failed check.")
+        passed = sum(int((r.get("verification") or {}).get("passed") or 0) for r in runs)
+        failed = sum(int((r.get("verification") or {}).get("failed") or 0) for r in runs)
+        not_run = max((int((r.get("verification") or {}).get("not_run") or 0) for r in runs),
+                      default=0)
+        checks.append(f"{passed} {'check' if passed == 1 else 'checks'} passed and {failed} "
+                      f"failed in all.")
+        if not_run:
+            checks.append(f"Up to {not_run} {'check' if not_run == 1 else 'checks'} per scenario "
+                          f"could not run on this machine (most need an engine's pictures), "
+                          f"so what they would check is not claimed.")
+        unbound = [r for r in runs if r.get("verification_bound_to_manifest") is False]
+        if unbound:
+            checks.append(f"{len(unbound)} {'scenario' if len(unbound) == 1 else 'scenarios'} "
+                          f"carry a verdict that does not say which recording it checked.")
+    else:
+        checks.append("No checked scenario is in this dataset.")
+    # What it does not claim, in words; the card's own lines under details.
+    not_claimed: List[str] = []
+    if labels_only:
+        not_claimed.append(LABELS_ONLY_WORDS)
+        not_claimed.append("The labels say where each aircraft is in each view, worked out "
+                           "from the recorded flight, not read off a picture.")
+    if any(not r.get("render") for r in runs) and not labels_only:
+        not_claimed.append("Some scenarios were not drawn by an engine; their labels come "
+                           "from the recorded flight alone.")
+    not_claimed.append("Drawing the same scenario twice has not been shown to give the "
+                       "same picture.")
+    not_claimed.append("Sun, fog and exposure are not calibrated against a real camera.")
+    extent = card.get("not_claimed_extent_px")
+    if extent:
+        not_claimed.append(f"Objects smaller than {extent} pixels across are labelled, but "
+                           f"their labels are not claimed accurate.")
+    not_claimed.append("The label files have been read back by independent readers, not "
+                       "used to train a model.")
+    if card.get("licence_gate"):
+        not_claimed.append("The licences listed are the assets' own records, not legal advice.")
+    format_words = FORMAT_WORDS.get(fmt, fmt.upper() if fmt else "")
+    return {
+        "format": fmt, "format_words": format_words,
+        "images": images, "instances": instances, "scenarios": scenarios,
+        "labels_only": bool(labels_only),
+        "labels_only_words": LABELS_ONLY_WORDS if labels_only else None,
+        "verified": bool(scenarios) and len(passed_runs) == scenarios,
+        "contents": contents, "classes": classes, "conditions": conditions,
+        "checks": checks, "not_claimed": not_claimed,
+        "files": (f"The zip holds the dataset laid out as {format_words.split(':')[0]}, "
+                  f"beside its card: a page to read and the same facts as data."),
+        "details": {
+            "not_claimed": [str(line) for line in card.get("not_claimed") or []],
+            "checks_not_run": sorted({str(name) for r in runs for name in r.get("not_run") or []}),
+            "conditions": sampled,
+            "class_order": card.get("class_order"),
+            "card_files": [CARD_JSON, "DATASET_CARD.md"],
+        },
+    }
 
 
 # -- pure helpers ------------------------------------------------------------------
 
-def _positive_int(value: Any, what: str) -> int:
+def _images_arg(value: Any) -> Optional[int]:
+    """The page's image count: None when left blank (the prompt's
+    stated count, else the default, decides), else a whole number of at
+    least 1 -- anything else refused ``campaign.arguments`` in words."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
     try:
         number = int(value)
     except (TypeError, ValueError):
         number = 0
     if isinstance(value, bool) or number < 1:
         raise GenerateRefusal(words(CampaignError(
-            "campaign.arguments", f"{what} must be a whole number of at least 1, got {value!r}")))
+            "campaign.arguments", f"images must be a whole number of at least 1, got {value!r}")))
     return number
 
 
@@ -770,16 +1047,25 @@ def plan_refusals(spec: ScenarioSpec) -> List[Dict[str, Any]]:
     try:
         sample_randomization(probe, draw_index=0)
     except RandomizationError as exc:
-        if exc.constraint != "randomization.infeasible":
-            out.append(words(exc))
+        said = words(exc)
+        # The validator now runs the sampler's own policy checks (shape
+        # and gates), so the probe's refusal can be one already listed:
+        # said once, not twice.
+        if exc.constraint != "randomization.infeasible" and not any(
+                (r["details"].get("rule"), r["details"].get("message"))
+                == (said["details"]["rule"], said["details"]["message"]) for r in out):
+            out.append(said)
     return out
 
 
-def expert_campaign(prompt: str, images: int, fmt: str, seed: Optional[int], answers=None,
-                    tier: str = "regex", plan: bool = False, out: Any = None,
+def expert_campaign(prompt: str, images: Optional[int], fmt: str, seed: Optional[int],
+                    answers=None, tier: str = "regex", plan: bool = False, out: Any = None,
                     workers: int = 1) -> str:
     quoted = json.dumps(prompt)
-    parts = [f"python -m flightsim.campaign {quoted} --images {int(images)}",
+    # No --images when none was given: the CLI then takes the prompt's
+    # stated count (or its default), exactly as the page does.
+    parts = [f"python -m flightsim.campaign {quoted}"
+             + (f" --images {int(images)}" if images is not None else ""),
              f"--out {out if out else 'campaigns/<name>'}", f"--format {fmt}"]
     if seed is not None:
         parts.append(f"--seed {int(seed)}")
@@ -1066,5 +1352,6 @@ def _control_request(directory: Path) -> Optional[str]:
 
 __all__ = ["GenerateService", "GenerateRefusal", "words", "state_words", "compile_round",
            "paragraph", "estimate", "plan_refusals", "histograms", "progress_from",
+           "card_words", "LABELS_ONLY_WORDS", "MASKS_ONLY_WITH_ENGINE",
            "pictures", "camera_views", "expert_campaign", "capture_refusals",
            "CAPTURE_RUNNER", "DEFAULT_ROOT", "FORMATS"]

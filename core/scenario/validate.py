@@ -870,17 +870,30 @@ def policy_problems(policy, path: str = "randomization.policy",
 
 def validate_policy(spec) -> List[Violation]:
     """``randomization.policy``, refused by name when its SHAPE is not
-    one of the documented distribution forms. Its semantics (which
-    field each leaf samples) and the sampling are package F's."""
+    one of the documented distribution forms, or -- the shape sound --
+    when a ``gated_by`` is one the sampler could not judge (a number
+    compared to a word, words ordered, a word the leaf never draws, a
+    leaf not drawn before it: ``randomization.gate_problems``, the
+    sampler's own check, so ``validate()`` -- the page's ``/compile``
+    verdict -- refuses a bad gate before ``plan()`` does, in the
+    sampler's words). Its semantics (which field each leaf samples)
+    and the sampling are package F's."""
     policy = spec.randomization_policy
     if policy is None:
         return []
     problems = policy_problems(policy.value)
-    if not problems:
+    if problems:
+        return [Violation("randomization.policy",
+                          "randomization.policy is not of the documented form: "
+                          + "; ".join(problems))]
+    from .randomization import gate_problems
+
+    gates = gate_problems(policy.value)
+    if not gates:
         return []
     return [Violation("randomization.policy",
-                      "randomization.policy is not of the documented form: "
-                      + "; ".join(problems))]
+                      "randomization.policy has a condition the sampler cannot judge: "
+                      + "; ".join(gates))]
 
 
 def validate_failures(spec) -> List[Violation]:

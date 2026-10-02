@@ -45,7 +45,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         help="the scenario prompt (omit with --resume/--pause/"
                              "--cancel/--status/--report)")
     parser.add_argument("--images", type=int, default=None,
-                        help="the target number of verified frames")
+                        help="the target number of verified frames, counted across "
+                             "every camera (default: the count the prompt states, "
+                             "each view's added; else 100; both stated and "
+                             "disagreeing is refused campaign.image_count)")
     parser.add_argument("--out", required=True, help="campaign directory")
     parser.add_argument("--workers", type=int, default=None,
                         help="concurrent captures (spawned processes; default 1)")
@@ -121,9 +124,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 status = campaign.resume(workers=args.workers,
                                          progress=lambda line: print("  " + line))
         else:
-            if not args.prompt or args.images is None:
+            if not args.prompt:
+                # --images may be left out: the count the prompt states
+                # (every view's, added) is the target then, else 100;
+                # both stated and disagreeing is campaign.image_count.
                 print("REFUSED -- campaign.arguments: a new campaign needs a prompt "
-                      "and --images N (or --resume/--pause/--cancel/--status/"
+                      "(or --resume/--pause/--cancel/--status/"
                       "--report/--export on an existing --out)")
                 return 2
             try:
