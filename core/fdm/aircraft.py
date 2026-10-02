@@ -24,6 +24,17 @@ from typing import List, Optional
 from .errors import AircraftMismatchError, AircraftResolutionError
 
 
+#: Airframes this repository owns (assets_pipeline/a4_sync.py builds the A4
+#: here from its visual model's aircraft.cfg). A name found here shadows the
+#: same name in the wheel's stock tree, and the resolver records which root it
+#: came from, so a run can never claim the stock model it did not fly.
+REPO_ROOT_DIR = Path(__file__).resolve().parents[2] / "assets" / "fdm_root"
+
+
+def _repo_owns(name: str) -> bool:
+    return (REPO_ROOT_DIR / "aircraft" / name / f"{name}.xml").is_file()
+
+
 def default_root_dir() -> Path:
     """The aircraft/engine/systems root shipped with the installed jsbsim wheel."""
     import jsbsim
@@ -96,11 +107,14 @@ def available(root_dir: Optional[Path] = None) -> List[str]:
     """
     root = Path(root_dir) if root_dir is not None else default_root_dir()
     ac_dir = root / "aircraft"
-    if not ac_dir.is_dir():
-        return []
-    return sorted(
-        d.name for d in ac_dir.iterdir() if d.is_dir() and (d / f"{d.name}.xml").is_file()
-    )
+    names = set()
+    if ac_dir.is_dir():
+        names.update(d.name for d in ac_dir.iterdir()
+                     if d.is_dir() and (d / f"{d.name}.xml").is_file())
+    if root_dir is None and (REPO_ROOT_DIR / "aircraft").is_dir():
+        names.update(d.name for d in (REPO_ROOT_DIR / "aircraft").iterdir()
+                     if d.is_dir() and (d / f"{d.name}.xml").is_file())
+    return sorted(names)
 
 
 def resolve(name: str, root_dir: Optional[Path] = None) -> AircraftModel:
@@ -113,7 +127,10 @@ def resolve(name: str, root_dir: Optional[Path] = None) -> AircraftModel:
         XML. The message lists case-insensitive near-matches to make typos
         obvious, but the resolver will not silently accept any of them.
     """
-    root = Path(root_dir) if root_dir is not None else default_root_dir()
+    if root_dir is None and _repo_owns(name):
+        root = REPO_ROOT_DIR
+    else:
+        root = Path(root_dir) if root_dir is not None else default_root_dir()
     xml_path = root / "aircraft" / name / f"{name}.xml"
 
     if not xml_path.is_file():

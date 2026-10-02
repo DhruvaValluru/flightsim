@@ -1,0 +1,73 @@
+<?xml version="1.0"?>
+<system name="failures"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:noNamespaceSchemaLocation="http://jsbsim.sourceforge.net/JSBSimSystem.xsd">
+
+<!-- ===================================================================
+     Control-surface failure chain (ADVANCEMENTS_BLUEPRINT section 1,
+     correction 1; work item P2).
+
+     One chain per surface: the command the host (or the TECS system,
+     which runs before this one) writes to fcs/<surface>-cmd-norm is
+     scaled by failure/<surface>/authority, passed through a JSBSim
+     <actuator> that carries JSBSim's own malfunction switches
+     (failure/<surface>/actuator/malfunction/fail_stuck, fail_zero,
+     fail_hardover; FGActuator.cpp), clipped to -1..1 and written to
+     failure/<surface>/cmd-in. The airframe's <flight_control> input for
+     the surface is RE-ANCHORED by core/control/derive.py to read
+     failure/<surface>/cmd-in instead of fcs/<surface>-cmd-norm.
+
+     WHY THE CHAIN DOES NOT WRITE fcs/<surface>-cmd-norm BACK
+     =====================================================
+     A pass-through actuator reading and writing the same property
+     applies the authority gain CUMULATIVELY: authority 0.5 with a
+     command written once decays -0.15, -0.075, -0.0375 ... to zero in
+     about ten steps (measured; the skeptic's correction 1). The host
+     writes control inputs only at scheduled times, so any authority
+     below 1 would float to zero. Reading the host's property and
+     writing a NEW one leaves the command where the host put it.
+
+     NEUTRAL VALUES
+     ==============
+     authority 1.0 and no malfunction: the chain is x * 1.0, clipped to
+     the range the airframe's own trim summer clips to anyway, so the
+     derived airframe is bit-identical to the stock one over a trimmed
+     elevator-step run (measured in tests/test_derive_injections.py).
+
+     NOT CLAIMED: no rate limit, lag or hysteresis (the stock airframes
+     declare none and this chain adds none); no hydraulic topology; a
+     command beyond -1..1 is clipped here before the airframe's trim
+     summer sees it (the host never writes one).
+
+     The template is expanded by core/control/derive.py: @SURFACE@ is
+     stamped once per surface in the fixed order elevator, aileron,
+     rudder; the derivation refuses derivation.anchor_missing when the
+     airframe's <flight_control> does not read fcs/<surface>-cmd-norm
+     through an <input> for every one of them.
+     =================================================================== -->
+
+<!--PROPERTIES-->
+
+<!--CHANNELS-->
+
+</system>
+<!--SURFACE_PROPERTIES
+  <property value="1.0">failure/@SURFACE@/authority</property>
+  <property value="0.0">failure/@SURFACE@/cmd-in</property>
+SURFACE_PROPERTIES-->
+<!--SURFACE_CHANNEL
+  <channel name="failure @SURFACE@">
+    <pure_gain name="failure/@SURFACE@/scaled">
+      <input>fcs/@SURFACE@-cmd-norm</input>
+      <gain>failure/@SURFACE@/authority</gain>
+    </pure_gain>
+    <actuator name="failure/@SURFACE@/actuator">
+      <input>failure/@SURFACE@/scaled</input>
+      <clipto>
+        <min>-1</min>
+        <max>1</max>
+      </clipto>
+      <output>failure/@SURFACE@/cmd-in</output>
+    </actuator>
+  </channel>
+SURFACE_CHANNEL-->

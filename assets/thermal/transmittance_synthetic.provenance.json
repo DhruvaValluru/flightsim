@@ -1,0 +1,47 @@
+{
+ "table": "band transmittance against horizontal range, LWIR 8-12 um and MWIR 3-5 um",
+ "synthetic": true,
+ "source": "SYNTHETIC: written by this repository (S3) to exercise the IR proxy's plumbing; it is NOT an atmosphere, not a MODTRAN or libRadtran output, and no number read off an image made with it describes any real path",
+ "generator": {
+  "formula": "tau = exp(-k R), R in km",
+  "k_per_km": {
+   "LWIR": 0.1,
+   "MWIR": 0.2
+  },
+  "decimals": 6,
+  "ranges_m": [
+   0,
+   10,
+   20,
+   50,
+   100,
+   200,
+   500,
+   1000,
+   2000,
+   5000,
+   10000,
+   20000,
+   50000,
+   100000
+  ],
+  "note": "a Beer-Lambert shape with declared, invented extinction coefficients; not Koschmieder (no visibility enters), not fitted to anything"
+ },
+ "bands_um": {
+  "LWIR": [
+   8.0,
+   12.0
+  ],
+  "MWIR": [
+   3.0,
+   5.0
+  ]
+ },
+ "atmosphere": "none (synthetic)",
+ "path": "none (synthetic): the proxy applies it to every pixel's range as if horizontal and uniform",
+ "real_table_step": "run MODTRAN 6 (licensed) or libRadtran's uvspec with a stated model atmosphere, aerosol, altitude and path geometry, band-average the transmittance over 8-12 um and 3-5 um at these ranges, and write <name>.csv, <name>.csv.sha256 and <name>.provenance.json with synthetic false and the run's inputs as the source; nothing in this container can run either code",
+ "file": "transmittance_synthetic.csv",
+ "sha256": "2eb32bed23c635f004e2695791a27fcb0a8b9cb83982544ae584aeccb488372a",
+ "bytes": 333,
+ "written_at_utc": "2026-09-29T13:45:00+00:00"
+}

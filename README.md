@@ -10,6 +10,73 @@ pixels), Gate 6 on its four measurable clauses with a placeholder airframe. See
 [docs/VALIDITY.md](docs/VALIDITY.md) for exactly what that does and does not
 support — the scope statements are the point of this project.
 
+**Phase 2 (2026-09-26, branch `claude/relaxed-cori-gccjvx`): the
+annotated, randomised dataset pipeline.** A guided page at
+`/generate.html` takes one prompt to a campaign (at most three
+questions, a plan in words, one measured sample, progress from the
+ledger, a gallery, a download); the campaign CLI `python -m
+flightsim.campaign "<prompt>" --images N --out DIR [--workers W]
+[--render]` runs the same thing from a terminal; `python -m
+flightsim.export RUNS --out DIR --format coco,kitti,webdataset,yolo,voc`
+writes the dataset with its card and refuses unverified runs by name.
+Everything Python is measured on any machine; the rendered half (the
+`-labels` masks and depth on real pixels, the look clauses) waits for the
+Windows build on UE 5.7 -- [docs/PHASE2_REPORT.md](docs/PHASE2_REPORT.md)
+opens with the instructor's commands and the Windows verification order.
+
+**The advancement addition (2026-09-29, same branch; versions bumped once,
+INT-final after checkpoint `78d11df`): spec 9, capture manifest 7, record 2.**
+Physics layers a spec can state (a non-standard day and humidity,
+payload and fuel with the centre of gravity read back, a failure
+schedule, icing, a wake-vortex encounter, von Kármán turbulence, layered
+and log-law wind), each written into JSBSim and read back; one record per
+introduced variable (`model` block and `model_name`, readback, JSBSim
+writes, a with-and-without null test, ASME V&V 20 uncertainty); instruments
+at the FDM rate; sensing (radiometry, optics, blur, ground-truth passes,
+stereo, an IR proxy); world (land cover, buildings, a runway, night and
+rain); EGM2008 datums and a DIS entity-state log. Every block is
+optional: a spec 8 file still reads unless it states a spec 9 block
+(refused by name), and the schema `docs/schemas/capture_manifest.v7.schema.json`
+sits beside v6. The engine side is C++ written and pinned by source tests
+but not compiled here; what is measured and what waits for Windows is in
+[docs/ADVANCEMENTS_REPORT.md](docs/ADVANCEMENTS_REPORT.md).
+
+**`phase-2-testing` (2026-09-30): every Phase 2 branch in one.** This
+branch is `phase2` (the pipeline and the advancement addition above) with
+three later branches merged in:
+
+* **The A-4 Skyhawk**: a JSBSim flight model generated from, and calibrated
+  against, the visual model's `aircraft.cfg`. It adds flaps, hook and
+  stores, starts with the gear up when airborne, and renders the decoded
+  P3D `.mdl` (`assets/aircraft_models/A4/`, `docs/A4_SYNC.md`).
+* **Time of day** (`environment.time_of_day`, spec 9, optional): say
+  "at sunset", "golden hour", "at 6:30 pm" or "at 21:15Z". The render's
+  sun is placed for that place and date (NOAA solar position), and
+  exposure is interpolated between the calibrated dawn and noon looks.
+* **Opt-in render upgrades** (written without a UE build, unmeasured
+  against the annotation gates, so OFF by default -- Phase 2 is graded on
+  label correctness in the measured configuration):
+  `FLIGHTSIM_RENDER_QUALITY=beauty` (Lumen GI and reflections, TSR,
+  virtual shadow maps, 1080p) and `FLIGHTSIM_SKY=physical` (the physical
+  sky below). With beauty on, the owner's first A-4 capture failed
+  mask_vs_geometry and mask_integers_only.
+* **Aircraft named in the prompt are kept**: "a4", "A-4E" or "Skyhawk"
+  always fly the A-4, even when a language model guesses otherwise (the
+  spec's notes say when it was overruled).
+
+Run it on Windows (PowerShell, no clone needed):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/DhruvaValluru/flightsim/phase-2-testing/scripts/deploy_windows.ps1))) -Branch phase-2-testing
+```
+
+Or, from a clone: `git checkout phase-2-testing`, `.\scripts\setup.ps1`,
+then `.\.venv\Scripts\python.exe -m uvicorn webapp.server:app --port 8008`.
+For rendered frames, follow "Rendering video clips" below. After pulling
+this branch, rebuild the UE host (`.\scripts\build_ue.ps1`) and re-run
+`scripts/ue_create_materials.py`, because the merge added C++ and
+materials.
+
 ## Quick start (any machine, ~2 minutes)
 
 ```bash
@@ -58,24 +125,27 @@ The page states which tier is active next to the Interpret button.
 
 One codebase, platform dispatch inside it (`core/util/platform.py`):
 
-| | macOS | Linux | Windows |
+| | Windows | macOS | Linux |
 |---|---|---|---|
 | Prompt → LLM compile → spec → validate | ✓ | ✓ | ✓ |
-| Headless JSBSim physics + telemetry | ✓ | ✓ | ✓ |
-| Web app on localhost:8008, terrain baking, effect reports | ✓ | ✓ | ✓ |
-| Rendered video clips (Unreal Engine host) | ✓ | refused by name | ✓ after the build below |
+| Headless JSBSim physics + telemetry, capture manifests, labels, verification | ✓ | ✓ | ✓ |
+| Web app on localhost:8008, terrain baking, effect reports, batch + export | ✓ | ✓ | ✓ |
+| Rendered frames and clips (Unreal Engine host) | ✓ after the build below | builds from the same sources; not the tested path | refused by name |
 
-Everything in the first three rows is pure Python and is exercised by CI
-on all three OSes. The UE render half runs on macOS (where every render
-calibration was measured, on Metal) and on Windows once the build steps
-below have produced the bridge -- until then Windows refuses as
-`ue.platform` with the exact missing piece, and the web app still
-delivers the headless half (spec, provenance, validation, telemetry).
-The render calibrations were measured on Metal only, so on Windows run
-`experiments/gate6_visual.py` once after building: it re-measures the
+**Windows is the render platform.** Every rendered result since Camera
+Phase 2 (landmark reprojection 0.00 px, two-view triangulation 0.000 m,
+the `-labels` masks and depth, the sensor frames, Gate 10-R) is measured
+or is to be measured on Windows, and every capture-and-render
+instruction in the docs is a PowerShell command. Until the build steps
+below have produced the bridge, Windows refuses as `ue.platform` with
+the exact missing piece, and everything in the first three rows still
+completes. Everything in those rows is pure Python and is exercised by
+CI on all three OSes. macOS builds the same sources (the original
+calibrations were measured there, on Metal) but is not maintained as a
+render path this phase; Linux is headless-only. After building on
+Windows run `experiments/gate6_visual.py` once: it re-measures the
 visual clauses from the rendered pixels on YOUR machine, which is the
-project's standard of evidence -- a green Gate 6 there is the Windows
-render claim. Linux remains headless-only.
+project's standard of evidence.
 
 Per-OS setup notes:
 
@@ -106,7 +176,7 @@ Per-OS setup notes:
   ZERO setup on any OS: a fresh clone compiles a prompt before
   installing anything optional.
 
-**Rendering video clips** needs Unreal Engine 5.5 (free from the Epic
+**Rendering video clips** needs Unreal Engine 5.7 (free from the Epic
 Games Launcher) plus the platform toolchain:
 
 * **macOS** (Xcode 15.2-16.9):
@@ -143,6 +213,23 @@ for priming a machine ahead of time rather than prerequisites.
   p51d today, physics-only until upstream publishes one). A build that
   starts and fails fails the run by name (`aircraft.mesh_import`); it
   never falls through to blocks.
+
+**Physical sky (opt-in: `FLIGHTSIM_SKY=physical`).** With the variable
+set, a render uses the physical sky for the spec's time of day (noon
+when none is stated):
+
+* the true sun, moon (with its phase) and Hipparcos stars for that place
+  and instant;
+* EV100 physical-camera exposure;
+* Lumen GI and reflections, and virtual shadow maps;
+* a volumetric cloud layer (visual only);
+* per-camera lens character;
+* at night on curated places, VIIRS night lights.
+
+Without it, a stated time of day moves the calibrated
+look's sun (a night refuses by name as `sun.below_render_floor`), and no
+stated time renders the calibrated noon look unchanged. Run
+`experiments/sky_check.py` after building. See docs/VALIDITY.md §2.10d.
 
 Materials come from `scripts/ue_create_materials.py` (run inside
 UnrealEditor-Cmd; `ue_preflight` names the exact invocation when they
@@ -228,18 +315,47 @@ gate, the breadth behind Gate 5's single case:
 ## Capture camera geometry (Camera Phase 1, any platform)
 
 Cameras are spec elements (provenanced, validated, digest-relevant --
-see `docs/CAMERA_PHASE1_REPORT.md`). A run captures a DEFINED number of
-frames, each with full recoverable geometry, engine or no engine:
+see `docs/CAMERA_PHASE1_REPORT.md` and `docs/CAMERA_WINDOWS.md`, and
+`docs/CAMERA_PHASE1_GRADE.md` for what was measured wrong at the phase
+merge and what is still open). A run captures a DEFINED number of
+frames, each with full recoverable geometry, engine or no engine.
+
+**One command, every platform** -- captures a specification twice with
+different camera sets and reports alignment, geometry recovery and
+cross-view consistency in one pass/fail summary:
 
 ```bash
+./scripts/verify_phase1.sh          # Windows: .\scripts\verify_phase1.ps1
+```
+
+Or the pieces:
+
+```bash
+.venv/bin/python -m flightsim.demo
 .venv/bin/python -m flightsim.capture examples/cameras_multi.yaml --out runs/demo
 .venv/bin/python -m flightsim.verify runs/demo
 ```
 
-Off macOS the pixel render refuses by name (`ue.platform`) while the
-capture manifest, geometry previews and verification complete; the
-refusal example (`examples/cameras_refusal.yaml`) shows a camera placed
-inside terrain refused as `camera.terrain_clearance`.
+Without the engine the pixel render refuses by name (`ue.platform`)
+while the capture manifest, geometry previews and verification complete.
+
+Committed examples, all runnable with no network and no account:
+
+| example | what it shows | expected |
+|---|---|---|
+| `cameras_multi.yaml` | two cameras, one flight, 24 images each | 48 frames |
+| `cameras_waypoint.yaml` | waypoint capture along the flown track | frames each 400 m |
+| `cameras_terrain.yaml` | waypoint + counted capture over a REAL raster (`--synth-terrain`) | 30 frames |
+| `cameras_refusal.yaml` | a camera under the terrain datum | `REFUSED [camera.terrain_clearance]` |
+| `cameras_mountain_refusal.yaml` | a camera INSIDE a mountain, checked against the raster (`--synth-terrain`) | `REFUSED [camera.terrain_clearance]` |
+| `cameras_event_trigger.yaml` | an EVENT-driven capture: frames only while the recorded sink rate in a thunderstorm downburst is below -10 m/s | ~29 frames, all with `climb_rate_mps < -10` |
+| `cameras_hazard_refusal.yaml` | a tower camera stated INSIDE the modelled tornado core | `REFUSED [camera.hazard_intersection]` |
+| `traffic.yaml` | two scripted traffic aircraft (an A320 crossing, a c172p in formation) beside the primary | 24 frames, an object record per aircraft in each |
+
+`--synth-terrain` synthesises a deterministic raster centred on the
+spec's own origin (spectral construction plus thermal and hydraulic
+erosion), so the terrain examples run over real ground on a fresh clone.
+`--terrain <bake stem>` remains the path for real geography.
 
 ## Run the tests
 

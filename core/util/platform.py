@@ -2,11 +2,12 @@
 
 The truthful platform story (README "Platform support"): the compiler,
 headless physics, telemetry, terrain baking and the webapp run on
-macOS / Linux / Windows; the UE render half is macOS-only for now and
-REFUSES BY NAME everywhere else (every render gotcha was measured on
-Metal/macOS only -- claiming more would be claiming what was never
-measured). Everything that differs by OS routes through this module so
-tests can pin the dispatch and future code has one obvious place to
+macOS / Linux / Windows; the UE render half runs on WINDOWS (the
+supported, tested render platform since Camera Phase 2: an engine
+install plus the built bridge) and REFUSES BY NAME everywhere else --
+macOS builds the same sources but is not the maintained path, Linux is
+headless-only. Everything that differs by OS routes through this module
+so tests can pin the dispatch and future code has one obvious place to
 look.
 
 Tools are found, never assumed: ffmpeg by env override
@@ -132,19 +133,70 @@ def mono_fonts(sizes: Tuple[int, ...]) -> List:
     return [default for _ in sizes]
 
 
-UE_PLATFORM_REFUSAL = (
-    "REFUSED ue.platform: rendered clips require macOS, or Windows with\n"
-    "Unreal Engine 5.5 and the FlightSimBridge built -- run\n"
-    "scripts\\ue_preflight.ps1 for the exact missing piece. The compiler,\n"
-    "headless physics, telemetry and the webapp run on this OS either\n"
-    "way -- see README \"Platform support\".")
+#: The Unreal Engine major.minor the project pins (`ue/FlightSim.uproject`
+#: EngineAssociation). Phase 2 moved it from 5.5 to 5.7 (brainstorm 9.8,
+#: contracts section 10); the refusal texts and the default install roots
+#: below are built from it so the pin is stated in ONE place on the Python
+#: side. Gate 6 and every render measurement on record were taken on 5.5;
+#: nothing here claims a 5.7 build.
+UE_ENGINE_VERSION = "5.7"
+
+#: What is missing, and the remedy, IN THIS OS's OWN TERMS. One text for
+#: all three lied on two of them: it named a PowerShell preflight to
+#: Linux users, who have no UE half to preflight at all.
+_UE_REFUSAL = {
+    "windows": (
+        "REFUSED ue.platform: Windows is the supported render platform, "
+        "but this\n"
+        f"machine is missing Unreal Engine {UE_ENGINE_VERSION} or a built FlightSimBridge. "
+        "Run\n"
+        "    powershell -ExecutionPolicy Bypass -File scripts\\ue_preflight.ps1\n"
+        "for the exact missing piece, then scripts\\build_ue.ps1 to build "
+        "the bridge.\n"
+        "Capture, validation, the solved pose tracks, the manifest and "
+        "verification\n"
+        "all completed without it -- only the pixels are missing."),
+    "mac": (
+        f"REFUSED ue.platform: no Unreal Engine {UE_ENGINE_VERSION} or built FlightSimBridge "
+        "on this\n"
+        "Mac. Run scripts/ue_preflight.sh for the missing piece, then "
+        "scripts/build_ue.sh.\n"
+        "The render half is maintained against Windows this phase; macOS "
+        "still builds\n"
+        "from the same sources but is not the tested path. Capture, the "
+        "manifest and\n"
+        "verification all completed without it."),
+    "linux": (
+        "REFUSED ue.platform: there is no Unreal Engine half on Linux at "
+        "all -- not\n"
+        "missing, not unbuilt, not supported. Rendered frames need Windows "
+        "with\n"
+        f"Unreal Engine {UE_ENGINE_VERSION} and the FlightSimBridge built (scripts\\"
+        "ue_preflight.ps1\n"
+        "there names anything absent). Everything else in this run -- the "
+        "flight, the\n"
+        "solved pose tracks, the capture manifest and every verification "
+        "check that\n"
+        "does not need pixels -- completed here and is the Linux "
+        "deliverable."),
+}
+
+
+def ue_platform_refusal() -> str:
+    """The ue.platform refusal for THIS machine, naming a remedy that
+    exists on it."""
+    return _UE_REFUSAL[os_name()]
+
+
+#: Back-compat alias, resolved for the running OS at import.
+UE_PLATFORM_REFUSAL = _UE_REFUSAL[os_name()]
 
 #: Default engine install roots, checked AFTER the UE_ROOT env override.
-#: Windows scans for any UE_5.* so a 5.4/5.6 install is still found and
+#: Windows scans for any UE_5.* so a 5.5/5.6 install is still found and
 #: preflight can name the version mismatch instead of "not found".
 _UE_ROOT_DEFAULTS = {
-    "mac": ("/Users/Shared/Epic Games/UE_5.5",),
-    "windows": (r"C:\Program Files\Epic Games\UE_5.5",),
+    "mac": (f"/Users/Shared/Epic Games/UE_{UE_ENGINE_VERSION}",),
+    "windows": (rf"C:\Program Files\Epic Games\UE_{UE_ENGINE_VERSION}",),
     "linux": (),
 }
 
@@ -202,14 +254,15 @@ def ue_runner_command(repo: Path, script_stem: str) -> List[str]:
 
 
 def ue_available() -> bool:
-    """True where the UE render half can run: macOS (where every render
-    gotcha was measured), or Windows with an engine install AND a built
-    bridge -- the gate flips on only once scripts/build_ue.ps1 has
-    produced the binary, so a bare clone still refuses by name with the
-    build steps instead of failing mid-run. Windows render output is
-    validated per machine by experiments/gate6_visual.py (the render
-    calibrations were measured on Metal; Gate 6 measures them again from
-    the pixels wherever it runs)."""
+    """True where the UE render half can run: Windows with an engine
+    install AND a built bridge -- the gate flips on only once
+    scripts/build_ue.ps1 has produced the binary, so a bare clone still
+    refuses by name with the build steps instead of failing mid-run --
+    or a Mac, which builds the same sources (the original calibrations
+    were measured there) but is not the maintained render path.
+    Windows render output is validated per machine by
+    experiments/gate6_visual.py, which measures the visual clauses again
+    from the pixels wherever it runs."""
     if is_mac():
         return True
     if os_name() == "windows":

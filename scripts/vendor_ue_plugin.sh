@@ -22,8 +22,10 @@
 #   2. It did not notice that the plugin's Build.cs stages that data through a
 #      Windows path literal. See the patch below.
 
-# The UE half is macOS-only for now: every render gotcha was measured on
-# Metal/macOS. Off-mac, refuse BY NAME with a pointer to the headless path.
+# This is the macOS/Linux shell wrapper. The maintained render platform is
+# WINDOWS (the .ps1 twin of this script); a Mac builds the same sources but
+# is not the tested path, and Linux has no engine half at all -- so off a
+# Mac this refuses BY NAME with a pointer to the headless path.
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "REFUSED ue.platform: rendered clips currently require macOS."
   echo "The compiler, headless physics, telemetry and the webapp run on"
@@ -36,6 +38,10 @@ cd "$(dirname "$0")/.."
 REPO="$PWD"
 
 JSBSIM_VERSION="v1.2.4"
+# The engine this vendoring targets (Phase 2 pin, brainstorm 9.8); recorded
+# in VENDORED.json, not linked by the native library. The patches below were
+# measured on 5.5 and must be re-checked on 5.7 (NEXT.md gotcha 32).
+UE_ENGINE_TARGET="5.7"
 UPSTREAM="https://github.com/JSBSim-Team/jsbsim.git"
 WORK="${TMPDIR:-/tmp}/flightsim-vendor"
 DEST="$REPO/ue/Plugins/JSBSimFlightDynamicsModel"
@@ -205,6 +211,22 @@ PYEOF
     PATCHED_MIXTURE="yes"
 fi
 
+# LOCAL PATCHES 5 AND 6 (P9). 5: InitializeJSBSim hard-codes the aircraft root
+# to Resources/JSBSim/aircraft, so a derived airframe (core/control/derive.py,
+# build/aircraft) could never be loaded; the patch adds AircraftRootOverride
+# and hashes the aircraft XML AT THE DOOR against ExpectedAircraftXmlSha256
+# before JSBSim reads it. 6: BeginPlay runs RunIC and the trim in one call;
+# the patch adds the pre-trim batch the bridge's stated day, loading and
+# icing neutral values are written through, after RunIC and before the trim.
+# Both are kept as the diff of the committed plugin against patches 1-4
+# (scripts/jsbsim_plugin_patches_5_6.diff) and applied only when absent.
+PATCHED_PHYSICS="no"
+if ! grep -q 'LOCAL PATCH 5' "$MOVEMENT_CPP" 2>/dev/null; then
+    ( cd "$REPO" && patch -p1 --forward --ignore-whitespace \
+        < "$REPO/scripts/jsbsim_plugin_patches_5_6.diff" )
+    PATCHED_PHYSICS="yes"
+fi
+
 # The dylib records its own install name; without rewriting it a packaged build
 # looks for the library at the machine it was built on.
 if [ "$UE_PLATFORM" = "Mac" ]; then
@@ -223,6 +245,7 @@ cat > "$DEST/VENDORED.json" <<EOF
   "built_with": "upstream $BUILD_SCRIPT (not a reimplementation)",
   "jsbsim_matches_headless_core": true,
   "ue_platform": "$UE_PLATFORM",
+  "ue_engine_target": "$UE_ENGINE_TARGET",
   "library": "Source/ThirdParty/JSBSim/Lib/$UE_PLATFORM/libJSBSim.$LIB_EXT",
   "library_sha256": "$LIB_SHA",
   "header_count": $HEADERS,
@@ -251,6 +274,22 @@ cat > "$DEST/VENDORED.json" <<EOF
       "applied": "$PATCHED_MIXTURE",
       "reason": "bStartWithEngineRunning force-starts engines with mixture hardcoded full rich. A piston force-started full rich above ~3 km density altitude cannot sustain combustion: measured on c172p at 3600 m, the engine dies from 2799 rpm to 0 within seconds and every subsequent trim solves a glider (calm cells VERIFIED an untrimmed state; windy cells failed trim outright).",
       "change": "EngineCommands[i].Mixture = 1.0 -> = InitialMixture (new component property, default 1.0, set by the bridge from the scenario card's engine_mixture)"
+    },
+    {
+      "file": "Source/JSBSimFlightDynamicsModel/Private/JSBSimMovementComponent.cpp + Public/JSBSimMovementComponent.h",
+      "applied": "$PATCHED_PHYSICS",
+      "patch": 5,
+      "reason": "InitializeJSBSim hard-codes the aircraft root to the plugin's Resources/JSBSim/aircraft, so the host could never load a derived airframe (core/control/derive.py writes it to build/aircraft): the failure chain, the icing factors and the roll gust the physics cards write into would not exist. A derived airframe loaded without a hash check could also be a different file from the one the run was derived for.",
+      "change": "new component properties AircraftRootOverride (absolute directory; empty keeps upstream's root) and ExpectedAircraftXmlSha256; InitializeJSBSim sets the aircraft path to the override; LoadAircraft hashes <root>/<model>/<model>.xml (FIPS 180-4 SHA-256, self-contained) BEFORE Exec->LoadModel into LoadedAircraftXmlSha256 and refuses the load (AircraftLoaded false, bAircraftXmlRefused true) when it is unreadable or differs from the expected hash; the bridge sets both from the run card's derived_aircraft block and refuses card.derived_aircraft by name",
+      "verification": "uncompiled here (no engine in the container); source pinned by tests/test_ue_physics_source.py; the first Windows build is W1 (plugin build with the patched path, the logged hash equal to the manifest's)"
+    },
+    {
+      "file": "Source/JSBSimFlightDynamicsModel/Private/JSBSimMovementComponent.cpp + Public/JSBSimMovementComponent.h",
+      "applied": "$PATCHED_PHYSICS",
+      "patch": 6,
+      "reason": "BeginPlay re-creates JSBSim, runs RunIC and trims in one call, so nothing the bridge writes can reach the trim solver: a stated day or a loading written after it trims the aircraft in ISA air with the XML's loading and then flies it in other air with other mass (the headless host writes both between its ICs and its trim, gap P1).",
+      "change": "new transient component properties PreTrimProperties / PreTrimValues / PreTrimRelatchAfter / PreTrimReadProperties (in) and PreTrimReadValues / PreTrimMissing (out); PrepareJSBSim writes the batch after its RunIC and engine start and before DoTrim, re-latching (Exec->RunIC) after each write the bridge marks with the card's CAS re-stated first (IC->SetVcalibratedKtsIC(InitialCalibratedAirSpeedKts): JSBSim holds the IC speed as TAS, so a stated day would otherwise trim at another CAS -- the headless relatch_initial_conditions re-states ic/vc-kts the same way), then UpdateLocalTransforms and the read-back list; an undeclared property is listed, never written; an empty batch is a no-op (upstream's sequence unchanged)",
+      "verification": "uncompiled here; source pinned by tests/test_ue_physics_source.py (the batch sits after RunIC and before the trim); the first Windows build is W3 (the atmosphere batch before the host trim) and W4 (the host cg-x-in within 0.1 in of the card's expected CG)"
     }
   ]
 }
@@ -259,6 +298,7 @@ EOF
 echo
 echo "vendored             $DEST"
 echo "  tag                $JSBSIM_VERSION @ ${COMMIT:0:12}"
+echo "  engine target      UE $UE_ENGINE_TARGET (recorded; a 5.7 build is not measured by this script)"
 echo "  built with         upstream $BUILD_SCRIPT"
 echo "  library            libJSBSim.$LIB_EXT"
 [ "$UE_PLATFORM" = "Mac" ] && echo "  architectures      $(lipo -archs "$LIB" 2>/dev/null)"
@@ -267,3 +307,4 @@ echo "  aircraft staged    $((AIRCRAFT > 0 ? AIRCRAFT - 1 : 0))"
 echo "  Build.cs patched   $PATCHED (Windows path literal -> portable)"
 echo "  node type patched  $PATCHED_NODE (FGPropertyNode -> SGPropertyNode)"
 echo "  ground ray patched $PATCHED_AGL (metres -> centimetres; 3.19 km reach -> 319 km)"
+echo "  patches 5 and 6    $PATCHED_PHYSICS (derived-airframe root + XML sha256 at the door; pre-trim batch)"

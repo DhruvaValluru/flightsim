@@ -1,6 +1,6 @@
 {
 	"FileVersion": 3,
-	"EngineAssociation": "5.5",
+	"EngineAssociation": "5.7",
 	"Category": "",
 	"Description": "Research flight simulation: visualisation host for the core FDM.",
 	"Modules": [
@@ -14,6 +14,8 @@
 		{ "Name": "JSBSimFlightDynamicsModel", "Enabled": true },
 		{ "Name": "FlightSimBridge", "Enabled": true },
 		{ "Name": "GeoReferencing", "Enabled": true },
-		{ "Name": "PythonScriptPlugin", "Enabled": true }
+		{ "Name": "PythonScriptPlugin", "Enabled": true },
+		{ "Name": "PCG", "Enabled": true },
+		{ "Name": "GeometryScripting", "Enabled": true }
 	]
 }

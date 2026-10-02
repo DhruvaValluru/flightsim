@@ -30,6 +30,63 @@ from core.terrain.synthesis import TerrainStatistics, generate  # noqa: E402
 DEFAULT_KEYS = ("matterhorn", "yosemite", "control")
 
 
+def ensure_imagery(key: str, terrain_dir: Path, args) -> None:
+    """The Sentinel-2 cloudless drape (core/terrain/imagery.py) beside the
+    bake. Without it the renderer colours the terrain by elevation class
+    alone (measured on the owner's machine: a Matterhorn render with
+    "imagery": null looked untextured). Fetched once, verified, cached."""
+    sidecar = terrain_dir / f"{key}_imagery.json"
+    if args.no_imagery:
+        return
+    if sidecar.is_file() and not args.force:
+        print(f"  {'':<18} imagery: drape present ({sidecar.name})")
+        return
+    from core.terrain.imagery import drape
+
+    print(f"  {'':<18} imagery: fetching Sentinel-2 cloudless tiles and draping them")
+    try:
+        texture, verification = drape(LOCATIONS[key], terrain_dir / key,
+                                      REPO / "data" / "imagery_cache", terrain_dir)
+    except Exception as exc:          # the bake stands; the drape is said missing
+        print(f"  {'':<18} imagery: FAILED ({type(exc).__name__}: {exc}); "
+              f"the terrain renders untextured until this succeeds")
+        return
+    print(f"  {'':<18} imagery: {texture.name} (verified)")
+
+
+def has_datum(raw: Path) -> bool:
+    """Whether the bake's sidecar carries the vertical-datum block."""
+    from core.terrain.heightfield import Heightfield
+
+    try:
+        datum = Heightfield.read(raw).provenance.get("datum") or {}
+    except Exception:
+        return False
+    return isinstance(datum.get("undulation_m"), (int, float))
+
+
+def datum_line(key: str, raw: Path) -> str:
+    """The vertical-datum line for a bake (P10), read back from ITS
+    sidecar: the geoid undulation at the origin, the interpolation
+    bound, and the ellipsoidal height of the origin. A bake from before
+    the datum block says so rather than printing a number it lacks."""
+    from core.terrain.heightfield import Heightfield
+
+    datum = Heightfield.read(raw).provenance.get("datum") or {}
+    n = datum.get("undulation_m")
+    if not isinstance(n, (int, float)):
+        return (f"  {'':<18} datum: no datum block in the sidecar (baked "
+                f"before the geoid landed); re-bake to record it")
+    return (f"  {'':<18} datum: heights {datum.get('vertical_datum_of_heights')}; "
+            f"geoid N = {n:+.2f} m at the origin ({datum.get('geoid_model')}, "
+            f"{datum.get('interpolation', 'bilinear')} "
+            f"+-{datum.get('interpolation_error_bound_m', datum.get('bilinear_error_bound_m'))} m; "
+            f"EGM96-EGM2008 bound {datum.get('model_difference_bound_m')} m); "
+            f"origin {datum.get('orthometric_height_of_origin_m'):.1f} m "
+            f"orthometric = {datum.get('ellipsoidal_height_of_origin_m'):.1f} m "
+            f"ellipsoidal")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("keys", nargs="*",
@@ -37,6 +94,10 @@ def main(argv=None) -> int:
                          f"curated: {', '.join(LOCATIONS)}, plus 'control'")
     ap.add_argument("--all", action="store_true",
                     help="bake every curated location and the control ridge")
+    ap.add_argument("--force", action="store_true",
+                    help="re-bake locations that are already baked")
+    ap.add_argument("--no-imagery", action="store_true",
+                    help="skip the Sentinel-2 imagery drape")
     args = ap.parse_args(argv)
 
     keys = list(args.keys) or list(DEFAULT_KEYS)
@@ -64,12 +125,23 @@ def main(argv=None) -> int:
             field.write(terrain_dir / "control_ridge")
             continue
         raw = terrain_dir / f"{key}.r16"
-        if raw.is_file():
+        if raw.is_file() and not args.force and has_datum(raw):
             print(f"  {key:<18} already baked ({raw})")
+            print(datum_line(key, raw))
+            ensure_imagery(key, terrain_dir, args)
             continue
-        print(f"  {key:<18} baking from GLO-30 (fetch + ingest + verify)")
+        if raw.is_file():
+            # A bake from before the datum block is refused by every
+            # georeferenced run (datum.sidecar_without_datum, measured on
+            # the owner's machine), so it is re-baked, not skipped. The
+            # downloaded tiles are cached, so this is ingest + verify only.
+            print(f"  {key:<18} re-baking ({'--force' if args.force else 'no datum block in its sidecar'})")
+        else:
+            print(f"  {key:<18} baking from GLO-30 (fetch + ingest + verify)")
         bake(LOCATIONS[key], REPO / "data" / "glo30", terrain_dir)
         print(f"  {key:<18} done")
+        print(datum_line(key, raw))
+        ensure_imagery(key, terrain_dir, args)
 
     print()
     print("Baked. The web app picks these up immediately (no restart needed):")

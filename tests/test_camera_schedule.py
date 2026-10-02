@@ -193,3 +193,48 @@ def test_event_on_a_missing_channel_refuses():
 def test_unknown_trigger_refuses():
     with pytest.raises(ScheduleError, match="unknown trigger"):
         solve_schedule(make_columns(), camera(trigger="sometimes"))
+
+
+# -- the proximity trigger is reachable FROM A SPECIFICATION -------------
+#
+# The scheduler has implemented proximity from the start, and the tests
+# above exercise it -- but "proximity" was missing from the spec's
+# TRIGGER_KINDS, so every specification naming it refused as an unknown
+# trigger before the scheduler was ever called. Package C asks for the
+# waypoint trigger "by distance OR by proximity to a coordinate"; these
+# tests pin the second half being usable, not merely implemented.
+
+def test_proximity_is_a_spec_level_trigger():
+    from core.capture.validate import schedule_violations, validate_cameras
+    from core.nl.compiler import compile_prompt
+
+    cam = camera(trigger="proximity", distance_m=100.0)
+    assert schedule_violations(cam) == []
+
+    spec = compile_prompt("fly the 747 at 10000 ft and 280 kt")
+    spec.cameras = [cam]
+    assert [v.constraint for v in validate_cameras(spec)] == []
+
+
+def test_a_proximity_camera_survives_a_yaml_round_trip(tmp_path):
+    """A spec that names the trigger must still name it after being
+    written and read back -- the path a committed example takes."""
+    from core.scenario.spec import ScenarioSpec
+    from core.nl.compiler import compile_prompt
+
+    spec = compile_prompt("fly the 747 at 10000 ft and 280 kt")
+    cam = camera(trigger="proximity", distance_m=250.0)
+    cam.set("aim_north_m", 400.0, frm="test")
+    spec.cameras = [cam]
+    spec.write(tmp_path / "s.yaml")
+    back = ScenarioSpec.read(tmp_path / "s.yaml")
+    assert str(back.cameras[0].trigger.value) == "proximity"
+    assert float(back.cameras[0].distance_m.value) == 250.0
+
+
+def test_a_non_positive_proximity_radius_still_refuses():
+    from core.capture.validate import schedule_violations
+
+    violations = schedule_violations(camera(trigger="proximity",
+                                            distance_m=0.0))
+    assert [v.constraint for v in violations] == ["camera.schedule"]

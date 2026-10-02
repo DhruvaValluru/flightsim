@@ -129,6 +129,20 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 	FString TerrainPath = !Card.CollisionTerrainPath.IsEmpty()
 		? Card.CollisionTerrainPath : Card.OrographicTerrainPath;
 	FParse::Value(CommandLine, TEXT("terrain="), TerrainPath);
+	// The physical sky, same sidecar and meaning as the render commandlet's
+	// -sky=; replaces -sun-* and -exposure-bias when given.
+	FString SkyPlanPath;
+	FParse::Value(CommandLine, TEXT("sky="), SkyPlanPath);
+	FFlightSimSkyPlan SkyPlan;
+	const bool bPhysicalSky = !SkyPlanPath.IsEmpty();
+	if (bPhysicalSky)
+	{
+		if (!FFlightSimSkyPlan::Load(SkyPlanPath, SkyPlan, Error))
+		{
+			return false;
+		}
+		FFlightSimSky::EnableRendererFeatures();
+	}
 	if (!TerrainPath.IsEmpty())
 	{
 		FFlightSimVisualSceneOptions SceneOptions;
@@ -148,6 +162,10 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 		FParse::Value(CommandLine, TEXT("sun-azim="), SunAzimuthDeg);
 		SceneOptions.SunRotation =
 			FRotator(-SunElevationDeg, SunAzimuthDeg + 180.0, 0.0);
+		if (bPhysicalSky)
+		{
+			SceneOptions.SkyPlan = &SkyPlan;
+		}
 		if (!Visual.Build(GetWorld(), SceneOptions, Error))
 		{
 			return false;
@@ -201,7 +219,12 @@ bool AFlightSimInteractiveMode::SetupScenario(FString& Error)
 	// capture component -- the viewport camera is the camera of record here.
 	double ExposureBias = 9.5;
 	FParse::Value(CommandLine, TEXT("exposure-bias="), ExposureBias);
-	if (CameraDirector->Camera != nullptr)
+	if (CameraDirector->Camera != nullptr && bPhysicalSky)
+	{
+		FFlightSimSky::ApplyPostProcess(CameraDirector->Camera->PostProcessSettings,
+		                                SkyPlan);
+	}
+	else if (CameraDirector->Camera != nullptr)
 	{
 		FPostProcessSettings& Post = CameraDirector->Camera->PostProcessSettings;
 		Post.bOverride_AutoExposureMethod = true;

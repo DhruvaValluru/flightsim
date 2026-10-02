@@ -1,0 +1,101 @@
+{
+ "applies_to": {
+  "aircraft": "c172p",
+  "aircraft_sha256": "0af58c613f7bca7e1d85f4b2e178a4d7b0b14dda6d5f79b38c571d9911187aa4",
+  "jsbsim_version": "1.2.4 Feb  7 2026 11:12:49",
+  "rates_hz": [
+   60.0,
+   120.0,
+   240.0
+  ],
+  "rule": "a run of this aircraft file on this JSBSim at one of the first two rates: its dt/2 twin's pair then lies inside the studied range"
+ },
+ "digests": [
+  "decb01d0ec213cee74406138e8f4c9587b497515dc89fe69bf5ec6962f8e3dfb",
+  "4787b74093eb819ca9785ba0d0735eb7777dd0f5ff6805b695d1b133116884dc",
+  "c143a4898638fd600a53b76ba55734536d4a120d072becafb1064a5a796841c4"
+ ],
+ "experiment": "gate3b-convergence",
+ "formal_order": 1.0,
+ "kind": "three_rate_study",
+ "not_claimed": [
+  "the order of another airframe, condition or a turbulent run",
+  "the asymptotic range beyond three rates",
+  "the model's fidelity: this is the integrator against itself"
+ ],
+ "observed_p": {
+  "altitude_m": 1.1761338043440963,
+  "east_m": 0.6323438159950655,
+  "heading_deg": 0.5418251894691173,
+  "north_m": 0.40889778333401317,
+  "pitch_deg": 1.2145369497889618,
+  "tas_kt": 0.9036628968608243
+ },
+ "reference": "Roache 1994 (GCI, observed order); ASME V&V 20-2009 [unverified here]",
+ "scenario": {
+  "duration_s": 10.0,
+  "hold_state": false,
+  "spec": "examples/cameras_waypoint.yaml",
+  "spec_sha256": "76567342fea1c8fed81bbe5aba339a6794b6c016e03422992448d59c5d945137",
+  "turbulence": "none"
+ },
+ "srqs": {
+  "altitude_m": {
+   "basis": "observed p = 1.176, used as min(p, 1) with Fs = 1.25 (an observed order above the formal one is not trusted)",
+   "e_coarse_mid": 0.0019077096812907257,
+   "e_mid_fine": 0.0008442299003945664,
+   "p": 1.1761338043440963,
+   "unit": "m",
+   "used_by_u_num": 1.0
+  },
+  "east_m": {
+   "basis": "observed p = 0.6323, used as min(p, 1) with Fs = 1.25 (an observed order above the formal one is not trusted)",
+   "e_coarse_mid": 0.010603142187370906,
+   "e_mid_fine": 0.006840378434326055,
+   "p": 0.6323438159950655,
+   "unit": "m",
+   "used_by_u_num": 0.6323438159950655
+  },
+  "heading_deg": {
+   "basis": "observed p = 0.5418, used as min(p, 1) with Fs = 1.25 (an observed order above the formal one is not trusted)",
+   "e_coarse_mid": 0.003979080352932485,
+   "e_mid_fine": 0.002733235638789234,
+   "p": 0.5418251894691173,
+   "unit": "deg",
+   "used_by_u_num": 0.5418251894691173
+  },
+  "north_m": {
+   "basis": "observed p = 0.4089, used as min(p, 1) with Fs = 1.25 (an observed order above the formal one is not trusted)",
+   "e_coarse_mid": 0.0012118156903397903,
+   "e_mid_fine": 0.0009127378771154326,
+   "p": 0.40889778333401317,
+   "unit": "m",
+   "used_by_u_num": 0.40889778333401317
+  },
+  "pitch_deg": {
+   "basis": "observed p = 1.215, used as min(p, 1) with Fs = 1.25 (an observed order above the formal one is not trusted)",
+   "e_coarse_mid": 0.0007092383991695872,
+   "e_mid_fine": 0.00030561888585523,
+   "p": 1.2145369497889618,
+   "unit": "deg",
+   "used_by_u_num": 1.0
+  },
+  "roll_deg": {
+   "basis": "no order: the differences do not decrease with the step (outside the asymptotic range); u_num keeps the assumed p = 1 with Fs = 3",
+   "e_coarse_mid": 0.0035893815269351856,
+   "e_mid_fine": 0.003831573888348455,
+   "p": -0.09420184699420146,
+   "unit": "deg",
+   "used_by_u_num": null
+  },
+  "tas_kt": {
+   "basis": "observed p = 0.9037, used as min(p, 1) with Fs = 1.25 (an observed order above the formal one is not trusted)",
+   "e_coarse_mid": 0.00046059631861794514,
+   "e_mid_fine": 0.000246201573688154,
+   "p": 0.9036628968608243,
+   "unit": "kt",
+   "used_by_u_num": 0.9036628968608243
+  }
+ },
+ "study_version": 1
+}

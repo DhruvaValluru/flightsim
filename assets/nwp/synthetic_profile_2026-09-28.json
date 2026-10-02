@@ -1,0 +1,32 @@
+{
+ "name": "synthetic_profile_2026-09-28",
+ "format": "levels of [pressure_hpa, u_mps (eastward), v_mps (northward)]; a stand-in, not a forecast",
+ "synthetic": true,
+ "levels": [
+  [
+   1000.0,
+   3.0,
+   4.0
+  ],
+  [
+   925.0,
+   6.0,
+   8.0
+  ],
+  [
+   850.0,
+   8.0,
+   12.0
+  ],
+  [
+   700.0,
+   12.0,
+   16.0
+  ],
+  [
+   500.0,
+   18.0,
+   24.0
+  ]
+ ]
+}

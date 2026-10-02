@@ -8,6 +8,25 @@
 *.jpg binary
 *.mp4 binary
 *.r16 binary
+*.pgm binary
 *.tif binary
 *.ttc binary
 *.ttf binary
+
+# Files whose bytes a recorded sha256 or a hash contract covers stay exactly
+# as committed on every platform (a CRLF checkout under text=auto broke the
+# NWP fixture digests and the derivation hash pins on the Windows runner at
+# ec655e2, measured): the vendored JSBSim data and our injected templates
+# (the derived airframe's hash is checked at the host's door), the cached
+# weather fixtures with their provenance sidecars, and the entity table.
+ue/Plugins/JSBSimFlightDynamicsModel/Resources/JSBSim/** -text
+core/control/systems/** -text
+assets/nwp/** -text
+assets/dis_entity_types.yaml -text
+# S3: the IR proxy's cached emissivity rows and transmittance tables, whose
+# bytes their .sha256 sidecars and provenance records cover.
+assets/emissivity/** -text
+assets/thermal/** -text
+# A-4 visual model (MSFS/P3D) -- must never be text-normalised
+*.mdl binary
+*.dds binary
