@@ -895,6 +895,16 @@ mutate core/scenario/camera.py \
     "a stated camera field is never silently moved" \
     tests/test_camera_spec.py || failures=$((failures+1))
 
+mutate core/scenario/camera.py \
+    '    length_m = _measured_mesh_length_m(aircraft)
+    if length_m is None:
+        return FALLBACK_CHASE_OFFSET' \
+    '    length_m = _measured_mesh_length_m(aircraft)
+    if True:  # MUTATED: never derive from the measured mesh
+        return FALLBACK_CHASE_OFFSET' \
+    "an untabled airframe's chase offset is scaled from its own measured mesh, not the B747's" \
+    tests/test_camera_spec.py || failures=$((failures+1))
+
 mutate core/capture/poses.py \
     '            roll.append(0.0)                       # never inherit roll' \
     '            roll.append(air_roll[i])  # MUTATED: chase inherits roll' \

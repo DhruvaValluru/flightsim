@@ -65,7 +65,7 @@ import sys
 sys.path.insert(0, str(REPO))
 
 from core.scenario.camera import (  # noqa: E402
-    CHASE_OFFSETS, CameraSpec, default_cameras,
+    CHASE_OFFSETS, CameraSpec, default_cameras, derive_chase_offset,
 )
 from core.scenario.card import write_run_card  # noqa: E402
 from core.scenario.randomization import (  # noqa: E402
@@ -536,6 +536,19 @@ PLANNED_SPEED_MARGIN = 1.25
 #: drift apart; this is the same numbers in the flag's own spelling.
 WEBAPP_CHASE = {aircraft: f"{f:g}:{r:g}:{u:g}"
                 for aircraft, (f, r, u) in CHASE_OFFSETS.items()}
+
+
+def webapp_chase_flag(aircraft: str) -> str:
+    """The ``-chase=`` triple for ``aircraft``: its table entry, or --
+    for any airframe never added to the table -- its OWN measured mesh
+    length scaled the same way camera.derive_chase_offset() derives the
+    spec-side default, instead of the literal ``"-110:0:12"`` (the
+    B747's) this used to fall back to for every untabled airframe."""
+    flag = WEBAPP_CHASE.get(aircraft)
+    if flag is not None:
+        return flag
+    f, r, u = derive_chase_offset(aircraft)
+    return f"{f:g}:{r:g}:{u:g}"
 #: Spec camera preset -> the commandlet's -camera= word. "ground" and
 #: "explicit" have no render-preset pass in the current commandlet
 #: (package G consumes solved pose tracks); they refuse by name rather
@@ -582,7 +595,7 @@ def camera_render_flags(spec: ScenarioSpec):
                  f"{float(camera.offset_right_m.value):g}:"
                  f"{float(camera.offset_up_m.value):g}")
     else:
-        chase = WEBAPP_CHASE.get(aircraft, "-110:0:12")
+        chase = webapp_chase_flag(aircraft)
     inline = [f"-chase={chase}", f"-camera={word}"]
     trailing = []
     if word == "wingman":
@@ -1934,7 +1947,7 @@ class RunManager:
                          for token in extra)
         if camera_flags is None and not per_camera:
             camera_flags = (
-                [f"-chase={WEBAPP_CHASE.get(aircraft, '-110:0:12')}",
+                [f"-chase={webapp_chase_flag(aircraft)}",
                  "-camera=chase"], [])
         inline, trailing = camera_flags or ((), ())
         # Visual plan V0: FLIGHTSIM_RENDER_QUALITY=beauty opts in (1080p,

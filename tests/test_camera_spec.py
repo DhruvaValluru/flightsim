@@ -11,7 +11,8 @@ import pytest
 
 from core.nl.compiler import compile_prompt
 from core.scenario.camera import (
-    CHASE_OFFSETS, CameraSpec, default_cameras,
+    CHASE_OFFSETS, FALLBACK_CHASE_OFFSET, CameraSpec, default_cameras,
+    derive_chase_offset,
 )
 from core.scenario.fields import Source
 from core.scenario.spec import ScenarioSpec
@@ -141,6 +142,63 @@ def test_default_cameras_is_the_webapp_chase(spec):
     assert float(camera.offset_right_m.value) == right
     assert float(camera.offset_up_m.value) == up
     assert all(str(q.source) == "default" for _, q in camera.quantities())
+
+
+def test_an_untabled_airframe_with_no_mesh_yet_gets_the_named_fallback():
+    """Nothing measured for this airframe on this machine -> the stated
+    B747 fallback, not a guess. (This is the bug class that rendered
+    the A-4 "a few pixels wide" before it got a CHASE_OFFSETS entry --
+    reproduced here for an airframe that has never been imported.)"""
+    name = "a-plane-nobody-has-imported"
+    assert name not in CHASE_OFFSETS
+    assert derive_chase_offset(name) == FALLBACK_CHASE_OFFSET
+    spec = CameraSpec.defaulted(aircraft=name, preset="chase")
+    assert tuple(float(v) for v in (spec.offset_forward_m.value,
+                                     spec.offset_right_m.value,
+                                     spec.offset_up_m.value)) == FALLBACK_CHASE_OFFSET
+
+
+def test_an_untabled_airframe_with_a_measured_mesh_gets_a_scaled_offset(
+        tmp_path, monkeypatch):
+    """Once an airframe has been imported (a real mesh_manifest.json on
+    disk, the Phase 1 fix's own provenance record), the chase offset is
+    derived from ITS measured length instead of silently reusing the
+    B747's -110 m -- the same scaling a human applied by hand to frame
+    the A-4 before it had a table entry, now automatic for the NEXT
+    airframe that is added."""
+    import core.scenario.camera as camera_module
+    monkeypatch.setattr(camera_module, "_MESH_GENERATED_DIR", tmp_path)
+    name = "test-plane-twice-the-c172p"
+    (tmp_path / name).mkdir()
+    (tmp_path / name / "mesh_manifest.json").write_text(
+        '{"mesh_length_m": 16.56}')  # 2x the c172p calibration length
+
+    forward, right, up = derive_chase_offset(name)
+    c172_forward, c172_right, c172_up = CHASE_OFFSETS["c172p"]
+    assert forward == pytest.approx(2 * c172_forward)
+    assert right == 0.0
+    assert up == pytest.approx(2 * c172_up)
+
+    spec = CameraSpec.defaulted(aircraft=name, preset="chase")
+    assert float(spec.offset_forward_m.value) == pytest.approx(2 * c172_forward)
+    assert float(spec.offset_up_m.value) == pytest.approx(2 * c172_up)
+    assert "measured mesh length" in spec.offset_forward_m.frm
+
+
+def test_a_tabled_airframe_keeps_its_hand_calibrated_offset_even_with_a_mesh(
+        tmp_path, monkeypatch):
+    """CHASE_OFFSETS entries are measured against a real rendered frame;
+    a derived guess must never override one just because a mesh
+    manifest also happens to exist."""
+    import core.scenario.camera as camera_module
+    monkeypatch.setattr(camera_module, "_MESH_GENERATED_DIR", tmp_path)
+    (tmp_path / "A4").mkdir()
+    (tmp_path / "A4" / "mesh_manifest.json").write_text(
+        '{"mesh_length_m": 999.0}')
+    spec = CameraSpec.defaulted(aircraft="A4", preset="chase")
+    forward, right, up = CHASE_OFFSETS["A4"]
+    assert float(spec.offset_forward_m.value) == forward
+    assert float(spec.offset_up_m.value) == up
 
 
 def test_default_cameras_tornado_core_flies_wingman():

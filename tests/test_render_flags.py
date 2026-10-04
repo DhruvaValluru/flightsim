@@ -388,3 +388,34 @@ def test_the_web_app_never_asks_for_a_sensing_flag(tmp_path, monkeypatch):
                             tmp_path / "missing.json", str(spec.aircraft.value),
                             camera_flags=None, extra=["-camera-index=0", "-labels"])
     assert not [t for t in commands[0] if t.startswith(("-calibration", "-sun-lux", "-accumulate"))]
+
+
+def test_webapp_chase_flag_derives_from_mesh_for_an_untabled_airframe(
+        tmp_path, monkeypatch):
+    """webapp.runs.webapp_chase_flag is the ``-chase=`` triple the
+    commandlet gets for ANY preset's initial placement (wingman/tower/
+    cockpit settle in from the chase position too). A table entry
+    always wins; an airframe with neither a table entry nor a measured
+    mesh keeps the literal B747 fallback (unchanged behaviour); but one
+    with a measured mesh (assets/generated/<name>/mesh_manifest.json,
+    written once it has actually been imported) gets a triple scaled
+    from its OWN length instead of silently inheriting the B747's -110
+    m -- the bug this flag used to reproduce for every untabled
+    airframe before camera.derive_chase_offset existed."""
+    import core.scenario.camera as camera_module
+    import webapp.runs as runs
+
+    assert runs.webapp_chase_flag("B747") == runs.WEBAPP_CHASE["B747"]
+
+    monkeypatch.setattr(camera_module, "_MESH_GENERATED_DIR", tmp_path)
+    assert runs.webapp_chase_flag("never-imported") == "-110:0:12"
+
+    name = "freshly-imported-biplane"
+    (tmp_path / name).mkdir()
+    (tmp_path / name / "mesh_manifest.json").write_text(
+        '{"mesh_length_m": 4.14}')  # half the c172p calibration length
+    c172_forward, _, c172_up = camera_module.CHASE_OFFSETS["c172p"]
+    forward, right, up = (v for v in runs.webapp_chase_flag(name).split(":"))
+    assert float(forward) == pytest.approx(c172_forward / 2)
+    assert float(right) == 0.0
+    assert float(up) == pytest.approx(c172_up / 2)

@@ -43,10 +43,19 @@ Conventions, stated once
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field as dc_field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .fields import PLANNABLE_SOURCES, Quantity, Source
+
+#: Same repo-root convention as core.capture.objects.GENERATED_DIR (not
+#: imported from there: core.capture imports FROM core.scenario, so the
+#: reverse import would be circular). Kept to the same path so the two
+#: never drift.
+_REPO = Path(__file__).resolve().parents[2]
+_MESH_GENERATED_DIR = _REPO / "assets" / "generated"
 
 #: The presets a camera may name. Five ported from the UE director
 #: (chase/ground/wingman/tower/cockpit) plus "explicit": a stated
@@ -76,17 +85,70 @@ EVENT_DIRECTIONS = ("above", "below", "rising", "falling")
 #: Per-airframe chase offsets, forward:right:up metres in the heading
 #: frame. THE webapp table (user preference 2026-08-14: tighter than the
 #: showcase's), moved here verbatim; webapp.runs re-exports it as
-#: WEBAPP_CHASE. The fallback for unlisted airframes is the B747's.
+#: WEBAPP_CHASE. These four are HAND-CALIBRATED against a real rendered
+#: frame each (measured framing, not a formula) and always win when an
+#: airframe is listed here.
 CHASE_OFFSETS: Dict[str, tuple] = {
     "B747": (-110.0, 0.0, 12.0),
     "A320": (-95.0, 0.0, 10.0),
     "c172p": (-28.0, 0.0, 4.0),
     # The A-4 (12.2 m) used the B747 fallback, 110 m back, and rendered a
     # few pixels wide (the owner's first Matterhorn frame); scaled from the
-    # c172p's framing by length.
+    # c172p's framing by length -- which is exactly what
+    # derive_chase_offset() below now does automatically for any OTHER
+    # airframe, so this fix does not have to be hand-repeated per aircraft.
     "A4": (-42.0, 0.0, 6.0),
 }
 FALLBACK_CHASE_OFFSET = (-110.0, 0.0, 12.0)
+
+#: The c172p is the calibration anchor for derive_chase_offset(): the
+#: smallest airframe anyone framed by hand, so scaling its ratios up
+#: undershoots less than scaling the B747's ratios down would.
+_CHASE_CALIBRATION_AIRCRAFT = "c172p"
+_CHASE_CALIBRATION_LENGTH_M = 8.28  # Cessna 172 overall length, metres
+_CHASE_RATIO_BACK_PER_M = CHASE_OFFSETS[_CHASE_CALIBRATION_AIRCRAFT][0] / _CHASE_CALIBRATION_LENGTH_M
+_CHASE_RATIO_UP_PER_M = CHASE_OFFSETS[_CHASE_CALIBRATION_AIRCRAFT][2] / _CHASE_CALIBRATION_LENGTH_M
+
+
+def _measured_mesh_length_m(aircraft: str) -> Optional[float]:
+    """The airframe's OWN measured mesh length (metres), from the mesh
+    manifest the import pipeline writes (``assets_pipeline.convert.
+    MeshExtents.to_manifest``, mesh manifest v3+ -- the same fix that
+    corrected the Phase 1 aircraft-position offset). ``None`` when the
+    aircraft has never been imported on this machine (nothing measured
+    to derive a framing from, not a guess at zero) or the manifest
+    predates the length field."""
+    path = _MESH_GENERATED_DIR / str(aircraft) / "mesh_manifest.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    length = data.get("mesh_length_m")
+    return float(length) if isinstance(length, (int, float)) and length > 0 else None
+
+
+def derive_chase_offset(aircraft: str) -> tuple:
+    """Chase offset for an airframe with no hand-calibrated
+    :data:`CHASE_OFFSETS` entry.
+
+    Scales the c172p's measured framing by the airframe's OWN measured
+    mesh length, the same scaling a human did by hand for the A-4
+    before it got a table entry -- so a newly imported airframe is
+    framed close to right on its FIRST render instead of silently
+    inheriting the B747's -110 m chase distance (the bug that rendered
+    the A-4 "a few pixels wide" the one time this fallback was hit).
+    Falls back to :data:`FALLBACK_CHASE_OFFSET` only when the airframe
+    has no mesh manifest yet -- nothing measured, so nothing to scale.
+    """
+    length_m = _measured_mesh_length_m(aircraft)
+    if length_m is None:
+        return FALLBACK_CHASE_OFFSET
+    # _CHASE_RATIO_BACK_PER_M is already negative (c172p's forward offset
+    # is -28.0 m): no second negation here.
+    return (_CHASE_RATIO_BACK_PER_M * length_m, 0.0,
+            _CHASE_RATIO_UP_PER_M * length_m)
 
 #: The wingman formation slot the webapp measured: 180 m abeam clears
 #: the tornado core's 150 m radius (the default 25 m sat INSIDE the
@@ -506,8 +568,11 @@ class CameraSpec:
         ported UE placements above the spec's terrain datum.
         """
         d = Quantity.default
-        offset = {"chase": CHASE_OFFSETS.get(aircraft or "",
-                                             FALLBACK_CHASE_OFFSET),
+        chase_offset = CHASE_OFFSETS.get(aircraft or "")
+        chase_derived = chase_offset is None
+        if chase_derived:
+            chase_offset = derive_chase_offset(aircraft or "")
+        offset = {"chase": chase_offset,
                   "wingman": WINGMAN_OFFSET,
                   "cockpit": SHOULDER_OFFSET}.get(preset, (0.0, 0.0, 0.0))
         local = {"ground": GROUND_OBSERVER_LOCAL,
@@ -516,8 +581,13 @@ class CameraSpec:
         north = local["north_m"] if local else 0.0
         east = local["east_m"] if local else 0.0
         alt = (terrain_elevation_m + local["up_m"]) if local else 0.0
-        offset_frm = (f"per-airframe chase offset table"
-                      if preset == "chase" else frm)
+        if preset != "chase":
+            offset_frm = frm
+        elif chase_derived:
+            offset_frm = ("chase offset derived from this airframe's own "
+                           "measured mesh length (no calibrated table entry)")
+        else:
+            offset_frm = "per-airframe chase offset table"
         return cls(
             camera_id=d(camera_id, frm=frm),
             preset=d(preset, frm=frm),
