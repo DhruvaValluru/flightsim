@@ -79,15 +79,22 @@ public:
 	//  * WingmanOffsetMetres is LIVE: the render commandlet keeps it unless
 	//    -wingman-abeam= is given and the interactive host never sets it,
 	//    so a wingman preset flies Python's slot.
-	//  * ChaseOffsetMetres is a FALLBACK that no shipped host flies. The
-	//    render commandlet assigns its shot constant on every preset-mode
-	//    run (-170/0/16 m for the terrain shot, -400/0/200 m for the shadow
-	//    shot -- the framing Gate 6 was measured at) and then -chase=; the
-	//    interactive host assigns -170/0/16 m (FlightSimInteractiveMode.cpp).
-	//    Only a caller that spawns this actor and sets nothing gets this
-	//    value. Python's chase is per airframe (CHASE_OFFSETS; the fallback
-	//    is the B747's), so this literal is the B747's solved chase, not a
-	//    rule any rendered preset-mode chase frame obeys.
+	//  * ChaseOffsetMetres is a FALLBACK that no shipped host flies at this
+	//    literal for a NAMED airframe. The render commandlet assigns its
+	//    shot constant on every preset-mode run (-170/0/16 m for the
+	//    terrain shot, -400/0/200 m for the shadow shot -- the framing
+	//    Gate 6 was measured at) and then -chase=; the interactive host
+	//    (FlightSimInteractiveMode.cpp) assigns the same -170/0/16 m
+	//    default and ALSO reads -chase=, so a launcher that knows the
+	//    aircraft (core.scenario.camera.CHASE_OFFSETS / derive_chase_offset,
+	//    webapp.runs.webapp_chase_flag) can hand it the solved framing
+	//    instead of the universal default -- which, flown unscaled against
+	//    a 12 m airframe rather than the ~60-70 m one -170/0/16 reads as,
+	//    is most of a chase shot, not a near one. Only a caller that spawns
+	//    this actor, sets nothing, and passes no -chase= gets this literal.
+	//    Python's chase is per airframe (CHASE_OFFSETS; the fallback is the
+	//    B747's), so this literal is the B747's solved chase, not a rule
+	//    any rendered preset-mode chase frame obeys.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "FlightSim|Camera")
 	FVector ChaseOffsetMetres = FVector(-110.0f, 0.0f, 12.0f);
 
