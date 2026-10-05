@@ -1012,9 +1012,13 @@ def measure_object(mask, depth, int_id: int, alone=None) -> Dict:
         out["pixels_alone"] = pixels_alone
         if pixels_alone > 0:
             out["visible_fraction"] = pixels / pixels_alone
-            others = np.unique(mask[footprint])
+            others, counts = np.unique(mask[footprint], return_counts=True)
             out["occluded_by"] = [int(v) for v in others
                                   if int(v) not in (0, int_id)]
+            # How much of the plane each occluder hides: the alone pass's
+            # footprint pixels that the ID image gives to another id.
+            out["occluded_pixels"] = {int(v): int(c) for v, c in zip(others, counts)
+                                      if int(v) not in (0, int_id)}
     return out
 
 
@@ -1616,6 +1620,10 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
             entry["bbox_2d_tight"] = measured["bbox_2d_tight"]
             entry["visible_fraction"] = measured["visible_fraction"]
             entry["occluded_by"] = resolve_ids(measured["occluded_by"], objects)
+            hidden = measured.get("occluded_pixels") or {}
+            entry["occluded_pixels_by"] = dict(zip(resolve_ids(list(hidden), objects),
+                                                   hidden.values()))
+            entry["pixels_alone"] = measured["pixels_alone"]
             entry["depth_min_m"] = measured["depth_min_m"]
             entry["depth_median_m"] = measured["depth_median_m"]
             basis = entry.setdefault("basis", {})
