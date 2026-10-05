@@ -1283,6 +1283,7 @@ def occlusion_section(manifest: Dict, record: Dict, previous="auto") -> Dict:
 
 def frame_sidecar(manifest: Dict, record: Dict, previous="auto") -> Dict:
     from .box3d import box3d_section
+    from .limits import limits_section
 
     """One frame, self-describing: its record plus the run context and
     ITS camera's block. A PNG and this file together are a labelled
@@ -1310,6 +1311,9 @@ def frame_sidecar(manifest: Dict, record: Dict, previous="auto") -> Dict:
         # camera coordinates, with the proof it rebuilds from this record
         # alone (core/capture/box3d.py).
         "box_3d": box3d_section(manifest, record),
+        # Always present: what is NOT claimed, in sentences, each saying
+        # whether it applies to this frame (core/capture/limits.py).
+        "limits": limits_section(manifest, record),
         "frame": record,
     }
 

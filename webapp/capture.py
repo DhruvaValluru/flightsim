@@ -412,6 +412,10 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
         f"boxed3d/frame_NNNN_box3d.png\n"
         f"                 the frame with each plane's 3-D box drawn from that\n"
         f"                 rebuild (blue, red nose face) and a nose arrow\n"
+        f"                 'limits' says what is NOT claimed, in sentences,\n"
+        f"                 each with whether it applies to THIS frame and to\n"
+        f"                 which plane (e.g. masks are not exact past 8 km or\n"
+        f"                 under 16 px; cloud does not count as hiding a plane)\n"
         f"boxed/frame_NNNN_boxes.png\n"
         f"                 the same frame with its 2-D boxes drawn on: solid\n"
         f"                 green = the box from the engine's mask pixels\n"
@@ -525,6 +529,10 @@ def camera_view(manifest: Dict, camera_id: str,
         return None
     frames = [f for f in manifest.get("frames", [])
               if str(f.get("camera_id")) == camera_id]
+    from core.capture.limits import limits_section
+
+    # Each frame's "not claimed" list, the same section its data file has.
+    frames = [{**f, "limits": limits_section(manifest, f)} for f in frames]
     if checks:
         # Each frame's own box / depth verdict (core/capture/frame_checks.py),
         # added to the view only -- the manifest file is never rewritten.

@@ -45,6 +45,8 @@
   .pres-yes { color: #7fd18b; } .pres-no { color: #e09a6f; }
   .pres-not-known { color: #c9b45c; }
   .presence-run { margin: .6rem 0; }
+  ul.limits { margin: .3rem 0 .3rem 1.1rem; padding: 0; font-size: .9em; }
+  ul.limits li { margin: .15rem 0; color: #e6c98a; }
   .group > b { color: #b9c4cf; font-size: .85em; letter-spacing: .03em;
                text-transform: uppercase; }
   #state { padding: 1rem 1.2rem; }
@@ -384,6 +386,18 @@ function checksSummary(frames) {
         `(needs the Windows Unreal host)` : "") + `</div>`;
 }
 
+// What is NOT claimed for this frame (its data file's "limits" section,
+// computed by the server into the camera view): the limits that apply here.
+function frameLimits(limits) {
+  if (!limits || !Array.isArray(limits.limits)) return "";
+  const here = limits.limits.filter(l => l.applies === true || l.applies === "always");
+  if (!here.length) return "";
+  return `<div class="group"><b>NOT CLAIMED FOR THIS FRAME</b><ul class="limits">` +
+    here.map(l => `<li>${esc(l.limit)}` +
+      (l.objects && l.objects.length ? ` <span class="dim">(${esc(l.objects.join(", "))})</span>` : "") +
+      ` <span class="dim">— ${esc(l.why)}</span></li>`).join("") + `</ul></div>`;
+}
+
 function conditionsLine(conditions) {
   if (!conditions || typeof conditions !== "object") return "";
   const parts = [];
@@ -539,7 +553,7 @@ async function load() {
         `this, or the pass refused)</div>`}${labelLink}</div>` +
       `<div><h2>frame ${esc(record.index)} — t = ${num(record.t_s)} s</h2>` +
       recordTable(record) +
-      frameChecks(record.checks) +
+      frameChecks(record.checks) + frameLimits(record.limits) +
       framePresence((record.labels || {}).presence) + `</div>`;
     main.appendChild(block);
   }
