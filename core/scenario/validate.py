@@ -404,7 +404,8 @@ def validate_blocks(spec) -> List[Violation]:
     or renders anything: the fields' meaning is packages A/B's.
     """
     from .blocks import (
-        MAX_TRAFFIC, TERRAIN_SOURCES, TRAFFIC_TRACKS, configured_airframes,
+        MAX_TRAFFIC, PLACED_TRACKS, TERRAIN_SOURCES, TRAFFIC_TRACKS,
+        configured_airframes,
         labelled_airframes,
     )
 
@@ -470,11 +471,34 @@ def validate_blocks(spec) -> List[Violation]:
                 f"config, so its frames cannot be labelled (one of "
                 f"{labelled})"))
         track = str(entry.track.value)
-        if track not in TRAFFIC_TRACKS:
+        if track not in TRAFFIC_TRACKS and track not in PLACED_TRACKS:
             out.append(Violation(
                 "traffic.track",
-                f"{who}: track must be one of {list(TRAFFIC_TRACKS)}, not "
+                f"{who}: track must be one of "
+                f"{list(TRAFFIC_TRACKS) + list(PLACED_TRACKS)}, not "
                 f"{track!r}"))
+        if track in PLACED_TRACKS:
+            offsets = {}
+            for name in entry.PLACEMENT_FIELDS:
+                try:
+                    offsets[name] = float(getattr(entry, name).value)
+                except (TypeError, ValueError):
+                    out.append(Violation(
+                        "traffic.placement",
+                        f"{who}: {name} must be a number"))
+            if len(offsets) == len(entry.PLACEMENT_FIELDS):
+                gap = (offsets["ahead_m"] ** 2 + offsets["right_m"] ** 2
+                       + offsets["up_m"] ** 2) ** 0.5
+                if gap < 1.0:
+                    out.append(Violation(
+                        "traffic.placement",
+                        f"{who}: the second aircraft is placed {gap:.2f} m "
+                        f"from the primary; two aircraft cannot occupy one "
+                        f"point (state at least 1 m of ahead / right / up)",
+                        actual=gap, limit=1.0, unit="m"))
+            # a stated offset is the range: the unused default range_m is
+            # not judged for a placed track
+            continue
         try:
             range_m = float(entry.range_m.value)
         except (TypeError, ValueError):

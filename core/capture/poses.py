@@ -710,6 +710,8 @@ def aircraft_local_track(columns: Dict[str, Sequence[float]],
 #: The tracks this solver knows: the spec's three traffic tracks and the
 #: wake generator.
 TRAFFIC_TRACKS = ("formation", "crossing", "overtaking", "wake_generator")
+#: The stated-offset tracks (core/scenario/blocks.py PLACED_TRACKS).
+PLACED_TRACKS = ("offset", "stationary")
 #: The keys a wake_generator geometry mapping carries (core/environment/wake.py).
 WAKE_GEOMETRY_KEYS = ("heading_deg", "speed_mps", "ahead_m", "right_m", "above_m")
 
@@ -733,7 +735,8 @@ def _mean_ground_speed(track: Sequence[Dict]) -> float:
 
 def solve_traffic_track(columns: Dict[str, Sequence[float]], kind: str,
                         range_m: float, frame: SceneFrame,
-                        object_id: str, wake: Optional[Dict] = None) -> PoseTrack:
+                        object_id: str, wake: Optional[Dict] = None,
+                        placement: Optional[Dict[str, float]] = None) -> PoseTrack:
     """The traffic aircraft's per-sample track relative to the primary's
     recorded flight: a :class:`PoseTrack` (the camera container reused:
     ``camera_id`` holds the object's id, ``preset`` the track kind, the
@@ -741,12 +744,15 @@ def solve_traffic_track(columns: Dict[str, Sequence[float]], kind: str,
     same telemetry and entry give a bit-identical track (``digest``).
     The ``wake_generator`` kind takes its geometry mapping (P7;
     ``range_m`` is then the along-track lead and is read from it)."""
-    if kind not in TRAFFIC_TRACKS:
+    if kind not in TRAFFIC_TRACKS and kind not in PLACED_TRACKS:
         raise PoseSolveError(
             f"camera.poses: traffic track {kind!r} is not one of "
-            f"{TRAFFIC_TRACKS}; the solver invents no path")
+            f"{TRAFFIC_TRACKS + PLACED_TRACKS}; the solver invents no path")
     if kind == "wake_generator":
         return solve_wake_generator_track(columns, wake, frame, object_id)
+    if kind in PLACED_TRACKS:
+        return _solve_placed_track(columns, kind, placement or {}, frame,
+                                   object_id)
     range_m = float(range_m)
     if not range_m > 0.0:
         raise PoseSolveError(
@@ -800,6 +806,62 @@ def solve_traffic_track(columns: Dict[str, Sequence[float]], kind: str,
             yaw.append(p["heading_deg"] % 360.0)
             pitch.append(0.0)
             roll.append(0.0)
+    quats = tuple(euler_to_quat(r, p, y) for r, p, y in zip(roll, pitch, yaw))
+    return PoseTrack(
+        camera_id=str(object_id), preset=str(kind), horizon_stable=False,
+        t=tuple(float(t) for t in times),
+        north_m=tuple(north), east_m=tuple(east), alt_m=tuple(alt),
+        quat=quats, yaw_deg=tuple(yaw), pitch_deg=tuple(pitch),
+        roll_deg=tuple(roll),
+        focal_length_mm=tuple(0.0 for _ in times),
+        sensor_width_mm=0.0, sensor_height_mm=0.0, width_px=0, height_px=0,
+        near_m=0.0, far_m=0.0)
+
+
+def _solve_placed_track(columns: Dict[str, Sequence[float]], kind: str,
+                        placement: Dict[str, float], frame: SceneFrame,
+                        object_id: str) -> PoseTrack:
+    """The second aircraft put at a STATED offset from the primary.
+
+    ``offset``: the point ``ahead_m`` forward / ``right_m`` right /
+    ``up_m`` above the primary, in the primary's own heading frame at
+    each sample, drifting along that frame at ``speed_delta_kt`` (so +10
+    kt pulls ahead of the primary by 5.1 m every second and -10 kt falls
+    back) and carrying the primary's attitude. ``stationary``: the same
+    offset from the primary's FIRST sample, then held there with the
+    primary's initial heading and wings level -- an aircraft that just
+    sits, so it can be passed or blocked. Pure, like the other tracks.
+    """
+    ahead = float(placement.get("ahead_m", 0.0))
+    right_m = float(placement.get("right_m", 0.0))
+    up_m = float(placement.get("up_m", 0.0))
+    delta_mps = float(placement.get("speed_delta_kt", 0.0)) * 0.514444
+    primary = aircraft_local_track(columns, frame)
+    times = [p["t_s"] for p in primary]
+    t0 = float(times[0])
+    north: List[float] = []
+    east: List[float] = []
+    alt: List[float] = []
+    yaw: List[float] = []
+    pitch: List[float] = []
+    roll: List[float] = []
+    first = primary[0]
+    for p in primary:
+        if kind == "stationary":
+            base, along = first, ahead
+        else:
+            base, along = p, ahead + delta_mps * (float(p["t_s"]) - t0)
+        forward, right = _heading_axes(base["heading_deg"])
+        north.append(base["north_m"] + along * forward[0] + right_m * right[0])
+        east.append(base["east_m"] + along * forward[1] + right_m * right[1])
+        alt.append(base["alt_m"] + up_m)
+        yaw.append(base["heading_deg"] % 360.0)
+        if kind == "stationary":
+            pitch.append(0.0)
+            roll.append(0.0)
+        else:
+            pitch.append(p["pitch_deg"])
+            roll.append(p["roll_deg"])
     quats = tuple(euler_to_quat(r, p, y) for r, p, y in zip(roll, pitch, yaw))
     return PoseTrack(
         camera_id=str(object_id), preset=str(kind), horizon_stable=False,
@@ -933,6 +995,8 @@ def traffic_card_block(track: PoseTrack, entry, obj, frame: SceneFrame,
         "track": str(entry.track.value),
         "range_m": float(entry.range_m.value),
         "livery": str(entry.livery.value),
+        **({"placement": entry.placement()}
+           if str(entry.track.value) in PLACED_TRACKS else {}),
         "mesh_manifest": mesh_manifest,
         "cg_actor_cm": cg_actor_cm(cg_structural_in),
         "origin_x_m": frame.origin_x_m,

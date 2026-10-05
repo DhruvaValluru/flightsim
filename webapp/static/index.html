@@ -31,6 +31,9 @@
   .src-edited   { color: #6fb3e0; }
   .verdict-ok      { color: #7fd08f; }
   .verdict-refused { color: #e07a6f; }
+  .fleetBox { margin: .5rem 0; padding: .4rem .6rem; border-left: 3px solid #2b6c9a; }
+  .fleetRow label { display: inline-block; margin: .2rem .8rem .2rem 0; }
+  .fleetRow input[type=number] { width: 6.5rem; }
   .card { background: #151b22; border: 1px solid #232d38; border-radius: 8px;
           padding: 1rem; margin: 1rem 0; }
   .question { border: 1px solid #2c3947; border-radius: 6px; padding: .7rem;
@@ -65,6 +68,18 @@ name. Rendered clips carry the telemetry panel; turbulence realisations are
 visual-only per host (measured).</p>
 
 <div id="taxonomyLine" class="dim"></div>
+
+<div id="fleetCard" class="card">
+  <label><b>Aircraft in the scene</b>
+    <select id="aircraftCount">
+      <option value="1">1 (just the main aircraft)</option>
+      <option value="2">2 (a second aircraft that can block the first)</option>
+      <option value="3">3</option>
+    </select></label>
+  <span class="dim" id="fleetHint">The main aircraft is the one described in the prompt.</span>
+  <div id="fleetPanels"></div>
+  <div id="fleetState" class="dim"></div>
+</div>
 
 <textarea id="prompt"
   placeholder="simulate a plane in rough wind conditions over mountains"></textarea>
@@ -120,6 +135,7 @@ visual-only per host (measured).</p>
 
 <script>
 "use strict";
+let airframeChoices = [];       // /status: airframes with labels (may be traffic)
 let compiled = null;          // last /compile payload
 let pendingQuestions = null;  // question round's questions, echoed on answer
 let activeRun = null;
@@ -144,6 +160,8 @@ function provenanceNote(f) {
 (async () => {
   try {
     const status = await (await fetch("/status")).json();
+    airframeChoices = status.airframes || [];
+    buildFleetPanels();
     if (status.taxonomy) {
       $("taxonomyLine").textContent =
         "Class taxonomy (fixed ahead of time; a spec may state its own " +
@@ -170,6 +188,103 @@ function provenanceNote(f) {
          : "");
   } catch (error) { $("llmState").textContent = "compiler: server unreachable"; }
 })();
+
+// -- more than one aircraft -------------------------------------------
+// The dropdown picks how many aircraft the scene holds; each extra one gets
+// a position relative to the main aircraft (ahead / right / above, metres, in
+// the main aircraft's heading frame), a speed difference and a "sits still"
+// switch. The server (POST /aircraft) puts them in the spec, re-frames the
+// camera so every aircraft is in view and validates; nothing here invents a
+// position. Offsets pre-fill so two aircraft are side by side, not on top
+// of each other.
+const FLEET_DEFAULTS = [
+  {ahead_m: 0, right_m: 80, up_m: 0},
+  {ahead_m: -60, right_m: -80, up_m: 10},
+];
+
+function buildFleetPanels() {
+  const count = +$("aircraftCount").value;
+  const holder = $("fleetPanels");
+  const previous = collectFleet();
+  holder.innerHTML = "";
+  for (let i = 1; i < count; i++) {
+    const d = previous[i - 1] || FLEET_DEFAULTS[i - 1];
+    const options = ['<option value="">same as the main aircraft</option>']
+      .concat(airframeChoices.map(a =>
+        `<option value="${a}"${d.aircraft === a ? " selected" : ""}>${a}</option>`));
+    const box = document.createElement("div");
+    box.className = "fleetBox";
+    box.dataset.index = i;
+    box.innerHTML =
+      `<div><b>Aircraft ${i + 1}</b> &mdash; ` +
+      `<select data-f="aircraft">${options.join("")}</select></div>` +
+      `<div class="fleetRow">` +
+      `<label title="positive = ahead of the main aircraft, negative = behind">` +
+      `ahead (+) / behind (&minus;) m <input data-f="ahead_m" type="number" ` +
+      `value="${d.ahead_m}"></label> ` +
+      `<label title="positive = to its right, negative = to its left">` +
+      `right (+) / left (&minus;) m <input data-f="right_m" type="number" ` +
+      `value="${d.right_m}"></label> ` +
+      `<label title="positive = above, negative = below">` +
+      `above (+) / below (&minus;) m <input data-f="up_m" type="number" ` +
+      `value="${d.up_m}"></label> ` +
+      `<label title="positive = faster than the main aircraft, negative = slower">` +
+      `speed difference kt <input data-f="speed_delta_kt" type="number" ` +
+      `value="${d.speed_delta_kt || 0}"></label> ` +
+      `<label><input data-f="hold" type="checkbox"${d.hold ? " checked" : ""}> ` +
+      `just sits there (the main aircraft flies past)</label>` +
+      `</div>`;
+    holder.appendChild(box);
+  }
+  holder.querySelectorAll("input, select").forEach(el =>
+    el.addEventListener("change", () => { if (compiled) applyFleet(); }));
+  $("fleetHint").textContent = count > 1
+    ? "Offsets are measured from the main aircraft along its own heading; " +
+      "the camera pulls back so all aircraft are in view."
+    : "The main aircraft is the one described in the prompt.";
+}
+
+function collectFleet() {
+  const out = [];
+  document.querySelectorAll("#fleetPanels .fleetBox").forEach(box => {
+    const get = f => box.querySelector(`[data-f="${f}"]`);
+    out.push({
+      aircraft: get("aircraft").value || null,
+      ahead_m: +get("ahead_m").value || 0,
+      right_m: +get("right_m").value || 0,
+      up_m: +get("up_m").value || 0,
+      speed_delta_kt: +get("speed_delta_kt").value || 0,
+      hold: get("hold").checked,
+    });
+  });
+  return out;
+}
+
+async function applyFleet() {
+  if (!compiled) return;
+  $("fleetState").textContent = "placing aircraft and framing the camera...";
+  try {
+    const response = await fetch("/aircraft", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({spec: editedSpecDict(), others: collectFleet()}),
+    });
+    const payload = await response.json();
+    if (payload.error) {
+      $("fleetState").innerHTML = payload.refused
+        ? `<b>REFUSED [${payload.refused}]</b> ${payload.error}` : payload.error;
+      return;
+    }
+    $("fleetState").textContent = "";
+    renderSpec({...compiled, spec: payload});
+  } catch (error) {
+    $("fleetState").textContent = `could not reach the server: ${error}`;
+  }
+}
+
+$("aircraftCount").addEventListener("change", () => {
+  buildFleetPanels();
+  if (compiled) applyFleet();
+});
 
 function renderQuestions(payload) {
   pendingQuestions = payload.questions;
@@ -234,6 +349,18 @@ function renderSpec(payload) {
     ? `<div class="dim">notes:<ul>` +
       spec.notes.map(n => `<li>${n}</li>`).join("") + `</ul></div>`
     : "";
+
+  const traffic = (spec.dict && spec.dict.traffic) || [];
+  if (traffic.length) {
+    const val = (e, k) => e[k] ? e[k].value : 0;
+    $("notes").innerHTML += `<div class="dim">aircraft in the scene: the main ` +
+      `aircraft` + traffic.map((e, i) =>
+        `; aircraft ${i + 2} (${e.aircraft.value}, ` +
+        (e.track.value === "stationary" ? "sits still" :
+         `${val(e, "speed_delta_kt")} kt vs the main aircraft`) +
+        `) ${val(e, "ahead_m")} m ahead, ${val(e, "right_m")} m right, ` +
+        `${val(e, "up_m")} m above`).join("") + `</div>`;
+  }
 
   const body = $("specTable").querySelector("tbody");
   body.innerHTML = "";
@@ -473,6 +600,8 @@ async function doCompile(body) {
       $("questionArea").style.display = "none";
     }
     renderSpec(payload);
+    // A fresh compile starts from one aircraft; carry the page's choice onto it.
+    if (+$("aircraftCount").value > 1) await applyFleet();
   } catch (error) {
     // A dead fetch used to leave "compiling..." up forever -- which reads
     // as slowness when the real problem is that this page was opened as a

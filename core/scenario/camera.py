@@ -44,6 +44,7 @@ Conventions, stated once
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -676,6 +677,67 @@ def plan_full_capture(camera: "CameraSpec", frm: str) -> bool:
         return False
     camera.plan("trigger", "continuous", frm=frm)
     return True
+
+
+#: Framing both aircraft: the default lens sees +-27.2 deg across and
+#: +-15.5 deg up and down; the chase camera aims at the primary, so the
+#: second aircraft must sit inside 75 % of those half-angles, plus a
+#: margin for the airframes' own size.
+_FRAME_TAN_H = math.tan(math.radians(0.75 * 27.2))
+_FRAME_TAN_V = math.tan(math.radians(0.75 * 15.5))
+_FRAME_MARGIN_M = 30.0
+_FRAME_MAX_BACK_M = 3000.0
+
+
+def frame_both_offset(base: tuple, ahead_m: float, right_m: float,
+                      up_m: float) -> tuple:
+    """The chase offset (forward, right, up) that keeps a second aircraft
+    at (ahead, right, up) from the primary in view while the camera aims
+    at the primary. Pulls the camera back until the sideways and
+    vertical angles to the second aircraft fit inside the lens; never
+    closer than ``base``, the single-aircraft framing."""
+    back_h = (abs(right_m) + _FRAME_MARGIN_M) / _FRAME_TAN_H
+    back_v = (abs(up_m) + _FRAME_MARGIN_M / 2.0) / _FRAME_TAN_V
+    forward = min(base[0], ahead_m - max(back_h, back_v), -_FRAME_MARGIN_M)
+    forward = max(forward, -_FRAME_MAX_BACK_M)
+    up = base[2] + (abs(up_m) * 0.5 if up_m else 0.0) + 0.04 * (base[0] - forward)
+    return (forward, base[1], up)
+
+
+FRAMED_FOR_TRAFFIC = "framed to show both aircraft"
+
+
+def frame_traffic(spec) -> int:
+    """Re-plan every DEFAULT / DERIVED chase camera of a spec so the view
+    shows every placed aircraft, or puts the single-aircraft framing back
+    when none is left. A camera the user stated or edited keeps its
+    numbers (plan() refuses a stated field); returns how many cameras
+    moved."""
+    placed = [e for e in spec.traffic if e.placed()]
+    aircraft = str(spec.aircraft.value)
+    base = CHASE_OFFSETS.get(aircraft) or derive_chase_offset(aircraft)
+    moved = 0
+    for camera in spec.cameras:
+        if str(camera.preset.value) != "chase":
+            continue
+        fields = (camera.offset_forward_m, camera.offset_up_m)
+        if any(q.source not in PLANNABLE_SOURCES for q in fields):
+            continue
+        offset = base
+        for entry in placed:
+            p = entry.placement()
+            offset = frame_both_offset(offset, p["ahead_m"], p["right_m"],
+                                       p["up_m"])
+        if placed:
+            frm = FRAMED_FOR_TRAFFIC
+        elif any(q.frm == FRAMED_FOR_TRAFFIC for q in fields):
+            frm = "per-airframe chase offset table"
+        else:
+            continue
+        camera.plan("offset_forward_m", offset[0], frm=frm)
+        camera.plan("offset_up_m", offset[2], frm=frm)
+        moved += 1
+    return moved
 
 
 def default_cameras(spec) -> List["CameraSpec"]:

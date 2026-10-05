@@ -1051,7 +1051,8 @@ def _run(args: argparse.Namespace) -> int:
         that describe it come out of one flight. The wake generator's
         track (P7) rides last."""
         tracks = [solve_traffic_track(flight, str(entry.track.value),
-                                      float(entry.range_m.value), frame, obj.id)
+                                      float(entry.range_m.value), frame, obj.id,
+                                      placement=entry.placement())
                   for entry, obj in zip(spec.traffic, traffic_objects)]
         if wake_object is not None:
             tracks.append(solve_traffic_track(flight, "wake_generator", 0.0, frame,

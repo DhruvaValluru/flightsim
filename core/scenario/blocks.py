@@ -49,6 +49,18 @@ DEFAULT_CLASSES = ("aircraft", "terrain", "building", "vegetation",
 #: The three traffic tracks that produce object-object occlusion
 #: (brainstorm §3.4).
 TRAFFIC_TRACKS = ("formation", "crossing", "overtaking")
+#: The placed tracks: the second aircraft is put at a STATED offset from
+#: the primary (``ahead_m`` / ``right_m`` / ``up_m``, in the primary's
+#: heading frame) and either flies alongside it at a stated speed
+#: difference (``offset``) or just sits at that point (``stationary``).
+#: Kept apart from TRAFFIC_TRACKS on purpose: the randomisation block
+#: draws uniformly over TRAFFIC_TRACKS, so widening that tuple would move
+#: every randomised spec's draws and digests.
+PLACED_TRACKS = ("offset", "stationary")
+#: Documented placement defaults: unstated offsets are zero metres and
+#: the speed difference is none.
+DEFAULT_TRAFFIC_PLACEMENT = {"ahead_m": 0.0, "right_m": 0.0, "up_m": 0.0,
+                             "speed_delta_kt": 0.0}
 #: Documented traffic defaults (contracts §2.2).
 DEFAULT_TRAFFIC_RANGE_M = 400.0
 DEFAULT_TRAFFIC_TRACK = "crossing"
@@ -1122,15 +1134,74 @@ class RunwayBlockSpec(ProvenancedBlock):
 
 @dataclass
 class TrafficSpec(ProvenancedBlock):
-    """One scripted traffic aircraft (contracts §2.2)."""
+    """One scripted traffic aircraft (contracts §2.2).
+
+    The four placement fields (``ahead_m``, ``right_m``, ``up_m``,
+    ``speed_delta_kt``) belong to the placed tracks (:data:`PLACED_TRACKS`)
+    and are absent-canonical: a spec that states none of them serialises
+    exactly as before, so existing digests do not move.
+    """
 
     aircraft: Quantity
     track: Quantity
     range_m: Quantity
     livery: Quantity
+    ahead_m: Optional[Quantity] = None
+    right_m: Optional[Quantity] = None
+    up_m: Optional[Quantity] = None
+    speed_delta_kt: Optional[Quantity] = None
 
-    FIELD_ORDER = ("aircraft", "track", "range_m", "livery")
+    BASE_FIELDS = ("aircraft", "track", "range_m", "livery")
+    PLACEMENT_FIELDS = ("ahead_m", "right_m", "up_m", "speed_delta_kt")
+    FIELD_ORDER = BASE_FIELDS + PLACEMENT_FIELDS
     BLOCK = "traffic"
+
+    def __post_init__(self):
+        for name in self.PLACEMENT_FIELDS:
+            if getattr(self, name) is None:
+                unit = "kt" if name == "speed_delta_kt" else "m"
+                setattr(self, name, Quantity.default(
+                    DEFAULT_TRAFFIC_PLACEMENT[name], unit,
+                    frm="documented traffic placement default"))
+
+    def placed(self) -> bool:
+        return str(self.track.value) in PLACED_TRACKS
+
+    def quantities(self):
+        for name in self.FIELD_ORDER:
+            if name in self.PLACEMENT_FIELDS and not self.placed():
+                continue
+            yield name, getattr(self, name)
+
+    def to_dict(self) -> Dict[str, Any]:
+        out = {name: getattr(self, name).to_dict() for name in self.BASE_FIELDS}
+        for name in self.PLACEMENT_FIELDS:
+            q = getattr(self, name)
+            if self.placed() or q.source != Source.DEFAULT:
+                out[name] = q.to_dict()
+        return out
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        if not isinstance(data, dict):
+            raise ValueError(f"spec '{cls.BLOCK}' must be a mapping of "
+                             f"provenanced fields")
+        kwargs = {}
+        for name in cls.BASE_FIELDS:
+            try:
+                kwargs[name] = Quantity.from_dict(data[name])
+            except KeyError as exc:
+                raise ValueError(
+                    f"{cls.BLOCK} is missing required field {name}") from exc
+        for name in cls.PLACEMENT_FIELDS:
+            if name in data:
+                kwargs[name] = Quantity.from_dict(data[name])
+        unknown = set(data) - set(cls.FIELD_ORDER)
+        if unknown:
+            raise ValueError(
+                f"{cls.BLOCK} carries unknown fields {sorted(unknown)}; "
+                f"refusing to guess at their meaning")
+        return cls(**kwargs)
 
     @classmethod
     def defaulted(cls, aircraft: str, track: str = DEFAULT_TRAFFIC_TRACK,
@@ -1143,3 +1214,8 @@ class TrafficSpec(ProvenancedBlock):
             range_m=Quantity.default(DEFAULT_TRAFFIC_RANGE_M, "m", frm=frm),
             livery=Quantity.default(DEFAULT_TRAFFIC_LIVERY, frm=frm),
         )
+
+    def placement(self) -> Dict[str, float]:
+        """The four placement numbers, as floats (metres, knots)."""
+        return {name: float(getattr(self, name).value)
+                for name in self.PLACEMENT_FIELDS}

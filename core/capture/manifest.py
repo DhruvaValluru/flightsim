@@ -935,7 +935,7 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                 "track_digest": track.digest(),
                 "airframe": frame_.to_dict(),
                 "attitude_basis": ("copied from the primary sample for "
-                                   "sample" if str(entry.track.value) == "formation"
+                                   "sample" if str(entry.track.value) in ("formation", "offset")
                                    else "wings level (roll = pitch = 0): a "
                                         "scripted actor has no dynamics to bank"),
             }

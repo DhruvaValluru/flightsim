@@ -348,6 +348,78 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
     return JSONResponse(payload)
 
 
+class AircraftPlacement(BaseModel):
+    """One extra aircraft: where it is relative to the primary and how it
+    moves. Offsets are in the primary's heading frame (metres): ahead is
+    forward, right is to its right, up is above it."""
+
+    aircraft: Optional[str] = None
+    ahead_m: float = 0.0
+    right_m: float = 0.0
+    up_m: float = 0.0
+    #: How much faster (+) or slower (-) than the primary, in knots.
+    speed_delta_kt: float = 0.0
+    #: The aircraft just sits at its offset instead of flying with the
+    #: primary (so the primary can pass it, or it can block the view).
+    hold: bool = False
+
+
+class AircraftRequest(BaseModel):
+    """Set how many aircraft the scene holds on the spec the page is
+    holding: the primary plus ``others`` (at most two more)."""
+
+    spec: Dict[str, Any]
+    others: List[AircraftPlacement] = []
+
+
+@app.post("/aircraft")
+def aircraft_endpoint(request: AircraftRequest) -> JSONResponse:
+    """One aircraft, or two or three in one scene.
+
+    Replaces the spec's traffic list with the stated placements (each a
+    user-stated field, so a later edit in the review table still wins),
+    re-frames every default chase view so the camera shows all the
+    aircraft, and re-validates. Refusals are the validator's, by name; a
+    refused request leaves the page's spec untouched.
+    """
+    from core.scenario.blocks import MAX_TRAFFIC, TrafficSpec
+    from core.scenario.camera import frame_traffic
+    from core.scenario.validate import validate_blocks
+
+    try:
+        spec = ScenarioSpec.from_dict(request.spec)
+    except (ValueError, KeyError) as exc:
+        return JSONResponse({"error": f"spec did not parse: {exc}"},
+                            status_code=400)
+    if len(request.others) > MAX_TRAFFIC:
+        return JSONResponse(
+            {"refused": "traffic.count",
+             "error": f"at most {MAX_TRAFFIC + 1} aircraft in one scene "
+                      f"(the primary and {MAX_TRAFFIC} more)"},
+            status_code=409)
+
+    frm = "stated on the page: aircraft in the scene"
+    entries = []
+    for other in request.others:
+        entry = TrafficSpec.defaulted(
+            other.aircraft or str(spec.aircraft.value), frm=frm)
+        entry.set("track", "stationary" if other.hold else "offset", frm=frm)
+        for name in ("ahead_m", "right_m", "up_m", "speed_delta_kt"):
+            entry.set(name, float(getattr(other, name)), frm=frm)
+        entries.append(entry)
+    spec.traffic = entries
+    frame_traffic(spec)
+
+    violations = validate_blocks(spec)
+    if violations:
+        first = violations[0]
+        return JSONResponse(
+            {"refused": first.constraint,
+             "error": "; ".join(v.render() for v in violations)},
+            status_code=409)
+    return JSONResponse(_spec_payload(spec))
+
+
 @app.post("/cameras")
 def cameras_endpoint(request: CameraRequest) -> JSONResponse:
     """One more point of view, or one fewer.
@@ -367,7 +439,7 @@ def cameras_endpoint(request: CameraRequest) -> JSONResponse:
     and the manifest labels them by it.
     """
     from core.capture.validate import validate_cameras
-    from core.scenario.camera import CameraSpec, plan_full_capture
+    from core.scenario.camera import CameraSpec, frame_traffic, plan_full_capture
 
     try:
         spec = ScenarioSpec.from_dict(request.spec)
@@ -406,6 +478,9 @@ def cameras_endpoint(request: CameraRequest) -> JSONResponse:
         aircraft=str(spec.aircraft.value),
         terrain_elevation_m=float(spec.terrain_elevation.value),
         frm=f"added from the page as a {preset} view")
+    spec.cameras.append(camera)
+    frame_traffic(spec)
+    spec.cameras.pop()
     # A view added from the page captures CONTINUOUSLY: every recorded
     # sample, for as long as the clip lasts. Picking a viewpoint and a
     # clip length should give that many seconds of that view -- a
@@ -567,7 +642,7 @@ def status_endpoint() -> JSONResponse:
     # discovering a fallback after a spin. platform/render_available are
     # the same pattern for the UE half: without the Windows host the page says so up front
     # and a run refuses ue.platform by name instead of 500ing.
-    from core.scenario.blocks import DEFAULT_CLASSES
+    from core.scenario.blocks import DEFAULT_CLASSES, labelled_airframes
     from core.util.platform import os_name, ue_available
 
     # The class list is written down ahead of time (taxonomy.classes, the
@@ -580,7 +655,8 @@ def status_endpoint() -> JSONResponse:
     return JSONResponse({**manager.status(), "llm_available": llm_available(),
                          "platform": os_name(),
                          "render_available": ue_available(),
-                         "taxonomy": classes})
+                         "taxonomy": classes,
+                         "airframes": labelled_airframes()})
 
 
 @app.get("/runs/{run_id}")
