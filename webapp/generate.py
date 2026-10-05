@@ -60,7 +60,7 @@ from pathlib import Path
 
 from assets_pipeline.importer import is_imported
 from core.util.platform import ue_available
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from core.campaign import Campaign, CampaignError
 from core.campaign.campaign import (
@@ -407,6 +407,51 @@ class GenerateService:
         if not (directory / "campaign.json").is_file():
             raise GenerateRefusal({"error": "no such campaign"}, 404)
         return Campaign.open(directory)
+
+    def list_campaigns(self, limit: int = 100) -> Dict[str, Any]:
+        """Every campaign under the root, newest first: its prompt, state
+        (in words), target and images verified so far, format and times
+        -- read from each campaign's own record and ledger, so a campaign
+        started before a server restart (or from the command line into
+        the same root) is listed and can be reopened."""
+        rows = []
+        if self.root.is_dir():
+            for directory in self.root.iterdir():
+                if not (directory / "campaign.json").is_file():
+                    continue
+                try:
+                    campaign = Campaign.open(directory)
+                    status = campaign.status()
+                except Exception:          # one unreadable campaign hides no other
+                    continue
+                record = campaign.record
+                state = str(status["state"])
+                rows.append({
+                    "id": record["id"], "prompt": record.get("prompt"),
+                    "state": state,
+                    "state_words": state_words(f"progress.campaign.{state}",
+                                               done=status["frames_verified"],
+                                               total=status["images_target"],
+                                               drawn=False,
+                                               frames_verified=status["frames_verified"],
+                                               images_target=status["images_target"],
+                                               cases_verified=int(
+                                                   (status.get("cases") or {}).get(
+                                                       "verified", 0))),
+                    "images_target": status["images_target"],
+                    "frames_verified": status["frames_verified"],
+                    "fraction": status["fraction"],
+                    "format": record.get("format"), "seed": record.get("seed"),
+                    "created_utc": record.get("created_utc"),
+                    "updated_utc": record.get("updated_utc"),
+                    "running_here": self._running_id() == record["id"],
+                    "can": {"pause": state == "running",
+                            "resume": state in ("planned", "paused", "failed"),
+                            "cancel": state not in ("done", "cancelled"),
+                            "download": status["frames_verified"] > 0},
+                })
+        rows.sort(key=lambda r: str(r.get("updated_utc") or ""), reverse=True)
+        return {"campaigns": rows[:limit], "total": len(rows), "root": str(self.root)}
 
     def _running_id(self) -> Optional[str]:
         with self._lock:
@@ -1340,6 +1385,12 @@ def progress_from(record: Dict[str, Any], rows: List[Dict[str, Any]], directory:
         "indices": summary["indices"],
         "refusals": summary["refusals"], "refusals_words": refused_words,
         "varying": histograms(rows),
+        # The requested variety the verified cases have filled SO FAR,
+        # field by field (core/dataset/realised.py) -- the request is not
+        # the dataset, and the page says how far apart they are while
+        # it runs.
+        "coverage": live_coverage(directory, summary["verified_run_dirs"],
+                                  record.get("policy")),
         "timing": {"frames_per_case": frames_per_case,
                    "seconds_per_case": (round(seconds_per_case, 3)
                                         if seconds_per_case is not None else None),
@@ -1359,6 +1410,37 @@ def progress_from(record: Dict[str, Any], rows: List[Dict[str, Any]], directory:
         "expert": [f"python -m flightsim.campaign --out {directory} --status",
                    f"python -m flightsim.campaign --out {directory} --report"],
     }
+
+
+_COVERAGE_CACHE: Dict[str, Tuple[int, Dict[str, Any]]] = {}
+
+
+def live_coverage(directory: Path, run_dirs: Sequence, policy: Any) -> Optional[Dict[str, Any]]:
+    """The realised variety over the verified cases so far, in words:
+    ``{headline, coverage, fields: [{label, sentence, coverage, narrow}]}``.
+    Recomputed only when the number of verified cases changes (progress
+    is polled every second). None before the first verified case."""
+    from core.dataset.realised import realised_for_runs, realised_words
+
+    dirs = [str(d) for d in run_dirs or []]
+    if not dirs:
+        return None
+    key = str(directory)
+    cached = _COVERAGE_CACHE.get(key)
+    if cached is not None and cached[0] == len(dirs):
+        return cached[1]
+    try:
+        realised = realised_for_runs(dirs, policy)
+    except Exception:                      # a reader for the page, never a gate
+        return None
+    worded = realised_words(realised, frames_noun="checked")
+    payload = {"headline": worded["headline"], "coverage": realised.get("coverage"),
+               "narrow": worded["narrow"],
+               "fields": [{k: item[k] for k in ("label", "sentence", "coverage", "narrow",
+                                                "requested")}
+                          for item in worded["fields"]]}
+    _COVERAGE_CACHE[key] = (len(dirs), payload)
+    return payload
 
 
 def _control_request(directory: Path) -> Optional[str]:

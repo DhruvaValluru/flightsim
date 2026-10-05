@@ -82,6 +82,12 @@
   .gallery figcaption { padding: .45rem .6rem; font-size: .78rem; color: var(--dim); }
   .tick { color: var(--good); } .cross { color: var(--bad); } .na { color: var(--dim); }
   ul.plain { margin: .3rem 0 .3rem 1.1rem; padding: 0; }
+  table.camps { width: 100%; border-collapse: collapse; }
+  table.camps td, table.camps th { padding: .35rem .4rem; border-bottom: 1px solid var(--line);
+    text-align: left; vertical-align: top; }
+  table.camps button { padding: .2rem .55rem; font-size: .85em; margin: 0 .2rem .2rem 0; }
+  .camps-wrap { overflow-x: auto; }
+  li.narrow { color: #d9bf63; }
   footer.expert { position: fixed; left: 0; right: 0; bottom: 0; background: #0a0e13;
                   border-top: 1px solid var(--line); padding: .55rem 1.2rem; font-size: .78rem;
                   color: var(--dim); font-family: "SF Mono", Menlo, monospace; white-space: nowrap;
@@ -134,6 +140,11 @@
         <span id="askNote" class="dim small"></span>
       </div>
     </div>
+    <div class="card" id="campaignsCard">
+      <div class="row"><b style="flex:1">Your campaigns</b>
+        <button class="quiet" id="campaignsRefresh">Refresh</button></div>
+      <div id="campaigns" class="small" style="margin-top:.5rem"><span class="dim">Loading…</span></div>
+    </div>
   </section>
 
   <!-- 2 CLARIFY -->
@@ -181,6 +192,9 @@
     </div>
     <div class="card"><b>What is varying</b><div class="hist" id="varying" style="margin-top:.6rem"></div>
       <p class="dim small" id="varyingNote"></p></div>
+    <div class="card" id="coverageCard"><b>Variety filled so far</b>
+      <span class="dim small">— counted over the checked scenarios, against what was asked for</span>
+      <p id="covHead" style="margin:.5rem 0"></p><ul class="plain small" id="covLines"></ul></div>
     <div class="card"><b>Refused, and why</b><div id="progRefusals" class="small" style="margin-top:.4rem"></div>
       <div id="progCases" class="dim small" style="margin-top:.5rem"></div></div>
   </section>
@@ -438,6 +452,13 @@
       const entries = Object.entries(h.counts); const m = Math.max(1, ...entries.map((e) => e[1]));
       return `<div class="h"><b>${esc(name)}</b><div class="bars">${entries.map(([v, c]) => `<i style="height:${Math.round(100 * c / m)}%" title="${esc(v)}: ${c}"></i>`).join('')}</div><div class="range">${entries.map(([v]) => `<span>${esc(v)}</span>`).join('')}</div></div>`;
     }).join('');
+    // How much of the requested variety the checked scenarios hold so far.
+    const cov = p.coverage;
+    $('covHead').textContent = cov ? cov.headline
+      : 'No scenario has been checked yet, so nothing is counted.';
+    $('covHead').style.color = cov && cov.narrow && cov.narrow.length ? '#d9bf63' : '';
+    $('covLines').innerHTML = cov ? (cov.fields || []).filter((f) => f.requested)
+      .map((f) => `<li class="${f.narrow ? 'narrow' : ''}">${esc(f.sentence)}</li>`).join('') : '';
     $('varyingNote').textContent = keys.length ? 'Realised values of every varied setting, one count per scenario the ledger recorded.' : 'Nothing has been drawn yet, or this request varies nothing.';
     $('progRefusals').innerHTML = (p.refusals_words || []).length
       ? p.refusals_words.map((r) => `<div class="refusal"><span class="dim">${r.count} ×</span> ${esc(r.sentence)}` + (r.details && r.details.rule ? `<details><summary>rule</summary><code>${esc(r.details.rule)}</code></details>` : '') + `</div>`).join('')
@@ -458,6 +479,42 @@
   $('resume').onclick = () => control('resume');
   $('cancel').onclick = () => { if (confirm('Cancel this generation? It cannot be resumed afterwards.')) control('cancel'); };
   $('toReview').onclick = () => review();
+
+  // -- the campaign list ----------------------------------------------------
+  // Every campaign under this server's root, newest first: reopen one to
+  // watch it, pause / resume / cancel it, or go to its download.
+  async function loadCampaigns() {
+    const r = await call('GET', '/generate/campaigns');
+    if (!r.ok) { $('campaigns').innerHTML = `<span class="dim">${esc(r.data.error || 'could not list campaigns')}</span>`; return; }
+    const rows = r.data.campaigns || [];
+    if (!rows.length) { $('campaigns').innerHTML = '<span class="dim">No campaigns yet. Describe the pictures above and generate one.</span>'; return; }
+    $('campaigns').innerHTML = `<div class="camps-wrap"><table class="camps"><thead><tr><th>request</th><th>status</th><th>images</th><th>updated</th><th></th></tr></thead><tbody>` +
+      rows.map((c) => `<tr data-id="${esc(c.id)}"><td>${esc(c.prompt || c.id)}<div class="dim">${esc(c.id)} · ${esc(c.format || '')}</div></td>` +
+        `<td>${esc(c.state)}<div class="dim">${esc(c.state_words || '')}</div></td>` +
+        `<td>${c.frames_verified} of ${c.images_target}</td>` +
+        `<td class="dim">${esc((c.updated_utc || '').replace('T', ' ').slice(0, 16))}</td>` +
+        `<td><button data-act="open">Open</button>` +
+        (c.can.pause ? `<button class="quiet" data-act="pause">Pause</button>` : '') +
+        (c.can.resume ? `<button class="quiet" data-act="resume">Resume</button>` : '') +
+        (c.can.cancel ? `<button class="quiet" data-act="cancel">Cancel</button>` : '') +
+        (c.can.download ? `<button class="quiet" data-act="download">Download</button>` : '') +
+        `</td></tr>`).join('') + `</tbody></table></div>` +
+      (r.data.total > rows.length ? `<div class="dim">showing ${rows.length} of ${r.data.total}</div>` : '');
+  }
+  $('campaignsRefresh').onclick = () => loadCampaigns();
+  $('campaigns').onclick = async (e) => {
+    const button = e.target.closest('button[data-act]'); if (!button) return;
+    const id = button.closest('tr').dataset.id; const act = button.dataset.act;
+    S.campaign = id;
+    try { localStorage.setItem('flightsim.generate.lastCampaign', id); } catch (err) {}
+    if (act === 'open') { show('generate'); await refresh(); listen(); return; }
+    if (act === 'download') { await refresh(); $('toDownload').onclick(); return; }
+    if (act === 'cancel' && !confirm('Cancel this generation? It cannot be resumed afterwards.')) return;
+    const r = await call('POST', `/generate/${id}/${act}`);
+    if (!r.ok) { toast(r.data.sentence || r.data.error || 'refused'); }
+    if (act === 'resume' && r.ok) { show('generate'); renderProgress(r.data); listen(); return; }
+    loadCampaigns();
+  };
 
   // -- 5 review -------------------------------------------------------------
   async function review() {
@@ -529,7 +586,7 @@
     labelsOnly(noPictures ? LABELS_ONLY : null);
   };
   $('backReview').onclick = () => review();
-  $('again').onclick = () => { if (S.events) S.events.close(); S.campaign = null; show('ask', ['python -m flightsim.campaign "<prompt>" --images N --out campaigns/<name> --plan']); };
+  $('again').onclick = () => { if (S.events) S.events.close(); S.campaign = null; loadCampaigns(); show('ask', ['python -m flightsim.campaign "<prompt>" --images N --out campaigns/<name> --plan']); };
 
   // -- boot -----------------------------------------------------------------
   (async () => {
@@ -542,6 +599,7 @@
     let last = null; try { last = localStorage.getItem('flightsim.generate.lastCampaign'); } catch (e) {}
     if (last && location.hash === '#resume') { S.campaign = last; show('generate'); listen(); }
     else show('ask');
+    loadCampaigns();
   })();
 })();
 </script>

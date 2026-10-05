@@ -54,12 +54,25 @@ def realised_for_export(runs: Sequence, samples: Sequence) -> Dict[str, Any]:
         if not frames:
             continue
         records.append({**run.manifest, "frames": frames})
-    realised = realised_distribution(records)
-    for name, field in (realised.get("fields") or {}).items():
+    return annotate(realised_distribution(records))
+
+
+def annotate(realised: Dict[str, Any]) -> Dict[str, Any]:
+    """Add each field's empty and filled requested bins (in place)."""
+    for field in (realised.get("fields") or {}).values():
         hist = field.get("histogram") or {}
         field["empty_bins"] = [str(label) for label, n in hist.items() if not n]
         field["filled_bins"] = sum(1 for n in hist.values() if n)
     return realised
+
+
+def realised_for_runs(run_dirs: Sequence, policy: Any = None) -> Dict[str, Any]:
+    """The realised distribution over whole run directories (every frame
+    of each), against ``policy`` -- a campaign's verified cases so far."""
+    from core.scenario.randomization import realised_distribution
+
+    return annotate(realised_distribution([str(d) for d in run_dirs],
+                                          policy=policy if isinstance(policy, dict) else None))
 
 
 def _label(label: str) -> str:
@@ -94,7 +107,7 @@ def _requested_words(leaf: Any) -> str:
     return ", ".join(f"{k} {v}" for k, v in leaf.items())
 
 
-def realised_words(realised: Dict[str, Any]) -> Dict[str, Any]:
+def realised_words(realised: Dict[str, Any], frames_noun: str = "exported") -> Dict[str, Any]:
     """``{"headline", "fields": [{name, label, sentence, coverage, narrow}]}``."""
     fields = realised.get("fields") or {}
     if not fields:
@@ -135,7 +148,7 @@ def realised_words(realised: Dict[str, Any]) -> Dict[str, Any]:
                     "coverage": coverage, "narrow": is_narrow,
                     "histogram": hist, "frames": frames})
     overall = realised.get("coverage")
-    headline = (f"Realised over {realised.get('frames', 0)} exported frame(s) from "
+    headline = (f"Realised over {realised.get('frames', 0)} {frames_noun} frame(s) from "
                 f"{realised.get('runs', 0)} run(s)")
     if overall is not None:
         headline += f": {100.0 * float(overall):.0f} % of the requested variety was filled"
