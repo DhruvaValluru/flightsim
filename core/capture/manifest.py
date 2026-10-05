@@ -815,6 +815,14 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                 terrain_elevation_m, randomization, primary_mesh,
                 traffic_objects, traffic_airframes, traffic_tracks,
                 traffic_meshes, sample_index))
+            # Every other aircraft's own state at this instant (position
+            # and attitude), so the verifier can place it with its OWN
+            # rotation instead of trusting the label record's placement.
+            if traffic_objects:
+                frames[-1]["traffic_states"] = [
+                    {"id": obj.id, "int_id": obj.int_id,
+                     **traffic_state(track_, sample_index)}
+                    for obj, track_ in zip(traffic_objects, traffic_tracks)]
             # Scene vs labelled for this frame: per taxonomy class, was it
             # in the scene, is it labelled, which of its objects are in
             # this frame (core/capture/objects.py frame_presence).

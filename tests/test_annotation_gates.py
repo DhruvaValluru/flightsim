@@ -1111,7 +1111,7 @@ def test_the_applied_intrinsics_sheet_shows_the_lens_the_engine_rendered_at(
 PRODUCER_MODULES = tuple(f"core.capture.{name}" for name in (
     "labels", "objects", "poses", "schedule", "landmarks", "airframe",
     "aircraft_model", "aircraft_mesh", "hostflight", "passes", "stereo",
-    "overlay", "preview"))
+    "overlay", "preview", "profile", "box3d", "box_frames", "limits"))
 
 #: The checks that grade labels against geometry: every one runs on a
 #: manifest read as plain JSON with none of PRODUCER_MODULES loaded.
