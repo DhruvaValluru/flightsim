@@ -1073,6 +1073,82 @@ def frame_sidecar_name(file: str) -> str:
     return file[:-len(".png")] + ".json"
 
 
+def _cut_edges(full, width: float, height: float) -> List[str]:
+    edges = []
+    if full[0] < 0.0:
+        edges.append("left")
+    if full[2] > width:
+        edges.append("right")
+    if full[1] < 0.0:
+        edges.append("top")
+    if full[3] > height:
+        edges.append("bottom")
+    return edges
+
+
+def truncation_section(manifest: Dict, record: Dict) -> Dict:
+    """The frame's truncation, one entry per aircraft: the cut box (clipped
+    to the picture), the full box (may run past the edge), how much of the
+    plane is inside, which edges cut it, and a one-word status. Always
+    present in a frame's sidecar, read from the frame's own labels so it
+    can never disagree with them."""
+    width, height = float(record.get("width_px", 0)), float(record.get("height_px", 0))
+    labels = record.get("labels") or {}
+    class_of = {str(o.get("id")): str(o.get("class"))
+                for o in manifest.get("objects") or [] if isinstance(o, dict)}
+    entries = labels.get("objects")
+    if not isinstance(entries, list):
+        entries = [{"id": f"aircraft:{manifest.get('aircraft')}:0",
+                    "bbox_2d": labels.get("bbox_2d"),
+                    "bbox_2d_unclipped": labels.get("bbox_2d_unclipped"),
+                    "truncation": labels.get("truncation"),
+                    "in_frame": labels.get("in_frame")}]
+        class_of.setdefault(entries[0]["id"], "aircraft")
+    out = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        object_id = str(entry.get("id"))
+        if class_of.get(object_id, "aircraft") != "aircraft":
+            continue
+        cut, full = entry.get("bbox_2d"), entry.get("bbox_2d_unclipped")
+        truncation = entry.get("truncation")
+        inside = entry.get("fraction_in_frame")
+        if inside is None and truncation is not None:
+            inside = 1.0 - float(truncation)
+        if full is None:
+            status = "not known: part of the plane is behind the camera"
+        elif cut is None:
+            status = "out of frame"
+        elif truncation is not None and float(truncation) > 0.0:
+            status = "cut off by the picture edge"
+        else:
+            status = "fully in frame"
+        out.append({
+            "id": object_id,
+            "cut_box": cut,
+            "full_box": full,
+            "fraction_inside": inside,
+            "percent_inside": None if inside is None else round(100.0 * float(inside), 2),
+            "truncation": truncation,
+            "cut_off": bool(truncation is not None and float(truncation) > 0.0),
+            "cut_edges": _cut_edges(full, width, height) if full else [],
+            "in_frame": entry.get("in_frame"),
+            "status": status,
+        })
+    return {
+        "about": ("Per aircraft in this frame. cut_box = the box clipped to the "
+                  "picture [x0, y0, x1, y1] px; full_box = the whole box, which "
+                  "may run past the edge; fraction_inside = cut-box area / "
+                  "full-box area (1 = fully in frame); truncation = 1 - "
+                  "fraction_inside; cut_edges = the picture edges the plane "
+                  "crosses. Boxes are the projected 3-D bounding box of the "
+                  "airframe; null when part of it is behind the camera."),
+        "image_size_px": [int(width), int(height)],
+        "aircraft": out,
+    }
+
+
 def frame_sidecar(manifest: Dict, record: Dict) -> Dict:
     """One frame, self-describing: its record plus the run context and
     ITS camera's block. A PNG and this file together are a labelled
@@ -1090,6 +1166,9 @@ def frame_sidecar(manifest: Dict, record: Dict) -> Dict:
     return {
         "context": context,
         "camera": cameras.get(str(record.get("camera_id"))),
+        # Always present: the cut box, the full box and how much of each
+        # plane is inside the picture (truncation_section).
+        "truncation": truncation_section(manifest, record),
         "frame": record,
     }
 
