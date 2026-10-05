@@ -53,12 +53,15 @@ from ..terrain.imagery import TexelGrid
 from . import (DATA_DIR, RENDER_DIR, WaterMask, XPlaneDataError, _require,
                load_sky_tables)
 from .physical import (SNOW_COVER_ATTRIBUTION, SNOW_COVER_DATASET,
-                       SNOW_COVER_YEAR, SnowCover, WaterTiles)
+                       SNOW_COVER_YEAR, WATER_FALLBACK_NOTE, SnowCover,
+                       WaterTiles, season_for)
 
 #: Bump when the classification or compositing changes, so a cached drape
 #: from an older rule is rebuilt instead of reused. 2: MODIS snow cover
-#: modulates the snow class; the per-tile water colour.
-DRAPE_VERSION = 2
+#: modulates the snow class; the per-tile water colour. 3: the sidecar
+#: records the simulator-shaped season (index, blend, mask) and names
+#: the water fallback for what it is.
+DRAPE_VERSION = 3
 ROLES = ("valley", "scrub", "rock", "cliff", "snow")
 #: DEM rows composited per step (bounds memory on an 8192-texel drape).
 _CHUNK_ROWS = 256
@@ -178,8 +181,11 @@ def bake_centre_lat_lon(baked: Heightfield) -> Optional[tuple]:
 def water_colour_for(data_dir: Path, render_dir: Path,
                      centre: Optional[tuple]) -> tuple:
     """(rgb, source) for a bake: the committed per-tile water texture's
-    colour when the bake's tile has one, else the sky table's water
-    strip; (None, None) with neither."""
+    colour when the bake's tile has one (what the simulator's own water
+    shader binds for that degree, create_water_shader), else the sky
+    table's water strip standing in for the simulator's single global
+    fallback texture (:data:`WATER_FALLBACK_NOTE`); (None, None) with
+    neither."""
     if centre is not None:
         try:
             tiles = WaterTiles.load(render_dir)
@@ -191,7 +197,8 @@ def water_colour_for(data_dir: Path, render_dir: Path,
                 return colour, ("per-tile water texture "
                                 f"{tiles.path(*centre).relative_to(tiles.root)}")
     colour = water_colour(data_dir)
-    return colour, ("sky_colors_clean water strip" if colour else None)
+    return colour, (f"sky_colors_clean water strip ({WATER_FALLBACK_NOTE})"
+                    if colour else None)
 
 
 def drape_paths(baked_path) -> Dict[str, Path]:
@@ -234,6 +241,11 @@ def build_drape(baked_path, data_dir: Optional[Path] = None,
     snowline = float(baked.provenance.get("snowline_m_approx", 0.0) or 0.0)
     centre = bake_centre_lat_lon(baked)
 
+    # The simulator's season shape (four seasons, index + blend) for the
+    # record; the stand-in rule is the month's meteorological season, the
+    # visible seasonal effect is the satellite snow cover below.
+    season = (season_for(month, centre[0])
+              if month is not None and centre is not None else None)
     snow_cover = None
     snow_record: Dict[str, Any] = {"month": month, "source": None}
     if month is not None:
@@ -322,6 +334,10 @@ def build_drape(baked_path, data_dir: Optional[Path] = None,
         "bake_sha256": bake_sha,
         "centre_lat_lon": list(centre) if centre else None,
         "snowline_m_approx": snowline,
+        "season": ({"name": season.name, "index": season.index,
+                    "blend": round(season.blend, 4), "mask": season.mask,
+                    "value": round(season.value, 4), "basis": season.basis}
+                   if season else None),
         "snow_cover": snow_record,
         "class_fractions": fractions,
         "water_texels": water_texels,

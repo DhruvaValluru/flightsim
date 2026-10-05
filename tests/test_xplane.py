@@ -619,3 +619,122 @@ def test_drape_month_is_the_sky_plans_date():
     assert scene_date("2026-07-04T14:00", "none")[0] == date(2026, 7, 4)
     assert scene_date("none", "none") == (DEFAULT_DATE,
                                           "default (March 2026 equinox)")
+
+
+# -- rules read out of the decompiled simulator logic ---------------------
+
+def test_floor10_and_tile_name_are_the_simulators_own_formulas():
+    """return_latlon_str_dsf / create_water_shader: the 10 degree bucket
+    then the 1 degree tile, explicit sign, '+00' for zero, negatives
+    bucketed away from zero."""
+    from core.xplane.physical import floor10, tile_name
+
+    assert [floor10(v) for v in (37, 0, -3, -10, -11, 49, -1, 90)] == \
+        [30, 0, -10, -10, -20, 40, -10, 90]
+    assert tile_name(37.4, -122.1) == "+30-130/+37-123.dsf"
+    assert tile_name(-3.2, -60.5) == "-10-070/-04-061.dsf"
+    assert tile_name(0.5, 0.5) == "+00+000/+00+000.dsf"
+    assert tile_name(46.005, 7.72, ".png") == "+40+000/+46+007.png"
+
+
+def test_terrain_def_classification_follows_dsf_accept_terrain_def():
+    from core.xplane.physical import (
+        TERRAIN_DEF_FALLBACK, TERRAIN_DEF_FALLBACK_ROLE, classify_terrain_def,
+    )
+
+    assert classify_terrain_def("water") == ("water", "water")
+    assert classify_terrain_def("terrain_Water") == ("water", "terrain_Water")
+    for quadrant in ("00", "01", "10", "11"):
+        kind, _ = classify_terrain_def(f"terrain_VirtualOrtho{quadrant}")
+        assert kind == "virtual_ortho"
+    assert classify_terrain_def("lib/g10/terrain10/grass_cld_dry_fl.ter") == \
+        ("ter", "lib/g10/terrain10/grass_cld_dry_fl.ter")
+    # the loader's substitute for an unresolvable token is rock
+    assert classify_terrain_def("unknown token") == ("ter", TERRAIN_DEF_FALLBACK)
+    assert TERRAIN_DEF_FALLBACK_ROLE == "rock"
+    # exact and case-sensitive, like the strcmp chain
+    with pytest.raises(XPlaneDataError, match="not a legal terrain file"):
+        classify_terrain_def("terrain_water")
+    with pytest.raises(XPlaneDataError, match="not a legal terrain file"):
+        classify_terrain_def("grass.pol")
+
+
+def test_season_split_is_four_seasons_with_a_fractional_blend():
+    """build_placement<REN_beach_def>: idx = clamp(floor(s), 0, 3),
+    blend = s - floor(s), mask = 1 << idx."""
+    from core.xplane.physical import SEASONS, season_for, season_split
+
+    assert SEASONS == ("spring", "summer", "fall", "winter")
+    s = season_split(2.25)
+    assert (s.index, s.name, s.mask, round(s.blend, 2)) == (2, "fall", 4, 0.25)
+    assert season_split(-0.5).index == 0 and season_split(7.0).index == 3
+    with pytest.raises(XPlaneDataError, match="not finite"):
+        season_split(float("nan"))
+
+    # the stand-in month rule, hemisphere-flipped, and it says so
+    assert season_for(3, 46.0).name == "spring"
+    assert season_for(12, 46.0).name == "winter"
+    assert season_for(2, 46.0).index == 3 and round(season_for(2, 46.0).blend, 3) == 0.667
+    assert season_for(1, -33.0).name == "summer"
+    assert "this repository's rule" in season_for(7, 46.0).basis
+    with pytest.raises(XPlaneDataError, match="1..12"):
+        season_for(0, 46.0)
+
+
+def test_earth_orbit_tiles_decode_the_fitted_height_axis(tmp_path):
+    """-ele.png: value = 255 * (1 - (ele_ft + 1412) / 30000); sea level is
+    texel 243; row 0 is the tile's north edge."""
+    import numpy as np
+
+    from core.xplane.physical import (
+        EarthOrbitTiles, earth_orbit_tile_relpath, ele_png_to_metres,
+    )
+
+    assert earth_orbit_tile_relpath(46.0, 7.7) == "+40+000"
+    assert earth_orbit_tile_relpath(37.8, -119.5) == "+30-120"
+    assert round(ele_png_to_metres(243)) == 0
+    assert round(ele_png_to_metres(255) / 0.3048) == -1412
+
+    root = tmp_path / "Resources" / "bitmaps" / "Earth Orbit Textures"
+    root.mkdir(parents=True)
+    grid = np.full((64, 64), 243, dtype=np.uint8)
+    grid[:32, :] = 128                         # the northern half is high
+    Image.fromarray(grid).save(root / "+40+000-ele.png")
+    tiles = EarthOrbitTiles.load(tmp_path / "Resources")
+    assert tiles.tile_count() == 1
+    assert tiles.covers(45.0, 5.0) and not tiles.covers(35.0, 5.0)
+    assert round(tiles.elevation_m(42.0, 5.0)) == 0                    # south: sea
+    assert round(tiles.elevation_m(48.0, 5.0)) == round(ele_png_to_metres(128))
+    assert tiles.elevation_m(35.0, 5.0) is None
+    with pytest.raises(XPlaneDataError, match="physical render assets"):
+        EarthOrbitTiles.load(tmp_path / "nowhere")
+
+
+def test_linear_exposure_is_iso_over_k_times_two_to_the_ev():
+    from core.capture.exposure import ExposureError, linear_exposure, rec709_luma
+
+    assert linear_exposure(0.0) == pytest.approx(100.0 / 12.5)
+    assert linear_exposure(10.0, k=12.5, iso=100.0) == pytest.approx(8.0 / 1024.0)
+    assert linear_exposure(1.0, k=1.0, iso=1.0) == pytest.approx(0.5)
+    assert rec709_luma(1.0, 1.0, 1.0) == pytest.approx(1.0)
+    with pytest.raises(ExposureError):
+        linear_exposure(float("nan"))
+
+
+def test_drape_sidecar_records_the_season_and_names_the_water_fallback(data, tmp_path):
+    import json
+
+    import numpy as np
+
+    from core.xplane.drape import build_drape
+
+    stem = _bake(tmp_path, np.full((20, 20), 500.0), name="season")
+    # no render assets at this render_dir: the water colour falls back to
+    # the sky table and the sidecar says what that stands in for
+    sidecar = json.loads(build_drape(stem, data_dir=data, month=7,
+                                     render_dir=tmp_path / "none")
+                         .read_text(encoding="utf-8"))
+    assert sidecar["season"]["name"] == "summer"
+    assert sidecar["season"]["mask"] == 2
+    assert "REN_water_get_fallback_water_color" in sidecar["water_colour_source"]
+    assert "missing" in sidecar["snow_cover"]

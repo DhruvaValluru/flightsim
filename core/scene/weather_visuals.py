@@ -168,7 +168,14 @@ CARD_LOOK_KEY = "look"
 
 
 def fog_extinction_per_m(visibility_km: float) -> float:
-    """Koschmieder: beta = 3.912 / V, V in km -> beta in 1/m."""
+    """Koschmieder: beta = 3.912 / V, V in km -> beta in 1/m.
+
+    The same form the local simulator's fog model computes
+    (``atmo_params::set_fog_params``, assets/logic_reports/physics/
+    code.c 5227-5236: ``k = -ln(threshold) / visibility * scale``, then
+    split two ways between a base and a top height); its threshold and
+    scale are call-site arguments the decompilation does not show, so
+    the 0.02 contrast threshold here is the textbook one, not read."""
     v = float(visibility_km)
     if not v > 0.0:
         raise ValueError(f"visibility must be positive km, not {v!r}")

@@ -134,6 +134,38 @@ def shutter_for_ev100(value, aperture_f: float = 1.0, iso: float = 100.0) -> flo
     return (n * n * 100.0) / (s * math.pow(2.0, ev))
 
 
+#: ITU-R BT.709 luma weights for linear RGB, the three literals the
+#: simulator's exposure-fusion pass uploads (assets/logic_reports/
+#: render_quality/code.c 4062-4064); core.terrain.nightlights uses the
+#: same three numbers.
+REC709_LUMA = (0.2126, 0.7152, 0.0722)
+
+
+def rec709_luma(r: float, g: float, b: float) -> float:
+    """Y = 0.2126 R + 0.7152 G + 0.0722 B for linear RGB."""
+    return REC709_LUMA[0] * r + REC709_LUMA[1] * g + REC709_LUMA[2] * b
+
+
+def linear_exposure(value, k: float = 12.5, iso: float = 100.0) -> float:
+    """The linear multiplier a scene-referred frame is scaled by at an
+    EV100: ``ISO / (K * 2^EV100)``. The simulator's exposure-fusion pass
+    computes exactly ``C / (2^ev100 * K / ISO)`` (assets/logic_reports/
+    render_quality/code.c 4051-4052) with its K, ISO and the numerator
+    C as globals the decompilation does not show; K = 12.5 and ISO 100
+    are the conventional values (the engine's K in its extended
+    luminance range, see the module docstring), C taken as 1, so the
+    numbers are stated here, not read from the simulator."""
+    if isinstance(value, bool):
+        raise ExposureError(f"ev100 must be a finite number, not {value!r}")
+    try:
+        ev = float(value)
+    except (TypeError, ValueError):
+        raise ExposureError(f"ev100 must be a finite number, not {value!r}")
+    if not math.isfinite(ev):
+        raise ExposureError(f"ev100 must be a finite number, not {value!r}")
+    return _positive(iso, "iso") / (_positive(k, "k") * math.pow(2.0, ev))
+
+
 def describe(aperture_f, shutter_s, iso) -> str:
     """The manifest's human line for a triple: what the engine was set to."""
     value = ev100(aperture_f, shutter_s, iso)
