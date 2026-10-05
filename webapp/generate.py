@@ -821,6 +821,11 @@ class GenerateService:
                 "expert": [f"python -m flightsim.campaign --out {campaign.dir} --export",
                            f"cat {Path(result['dataset_path']) / CARD_JSON}"]}
 
+    def export_result(self, campaign_id: str, fmt: Optional[str] = None) -> Dict[str, Any]:
+        """The campaign exported in ``fmt`` (as the download does); its
+        result, for the card page."""
+        return self._export(campaign_id, fmt)[2]
+
     def _export(self, campaign_id: str, fmt: Optional[str]
                 ) -> Tuple[Campaign, str, Dict[str, Any], Dict[str, Any]]:
         """Export the verified cases as ``fmt`` (the campaign's own

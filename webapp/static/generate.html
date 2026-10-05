@@ -492,6 +492,10 @@
       list('Conditions the scenarios drew', c.conditions) +
       list('Checks', c.checks) + list('What this dataset does not claim', c.not_claimed) +
       `<p>Format: ${esc(c.format_words)}. ${esc(c.files)}</p>` +
+      `<p><a href="/generate/${encodeURIComponent(S.campaign)}/card.html?format=` +
+      `${encodeURIComponent($('dlFormat').value)}" target="_blank">Open the full ` +
+      `dataset card</a> — image counts, class balance, conditions, seeds, check ` +
+      `results and what the dataset does not promise.</p>` +
       `<details><summary>the card in the system's own terms</summary>` +
       (d.checks_not_run && d.checks_not_run.length ? `<div>checks that did not run: <code>${esc(d.checks_not_run.join(', '))}</code></div>` : '') +
       (d.not_claimed || []).map((l) => `<div class="dim small">${esc(l)}</div>`).join('') +
