@@ -2160,6 +2160,28 @@ def render_card(card: Dict[str, Any]) -> str:
             + (f"; airframes {', '.join(run['airframes'])}" if run.get("airframes") else "")
             + (f"; render: {', '.join(sorted(run['render']))}" if run.get("render")
                else f"; {run.get('render_note', 'no render record')}"))
+    summary = card.get("summary") or {}
+    if summary.get("checks"):
+        lines += ["", "## Check results", ""]
+        for name, c in sorted(summary["checks"].items()):
+            lines.append(f"- {name}: {c.get('PASS', 0)} passed, {c.get('FAIL', 0)} failed, "
+                         f"{c.get('NOT RUN', 0)} not run"
+                         + (f" -- {c['first_failure']}" if c.get("first_failure") else ""))
+        for name, c in (summary.get("frame_checks") or {}).items():
+            lines.append(f"- per frame, {name}: " + ", ".join(
+                f"{k} {v}" for k, v in sorted(c.items())))
+    if summary.get("limits"):
+        lines += ["", "## What this dataset does not promise", ""]
+        total = summary.get("frames_counted") or 0
+        for item in sorted(summary["limits"].values(), key=lambda i: -i["frames"]):
+            where = ("every frame" if item["always"] else f"{item['frames']} of {total} frames")
+            lines.append(f"- {item['limit']} ({where}; {item['why']})")
+    if summary.get("seeds"):
+        seeds = summary["seeds"]
+        lines += ["", "## Seeds", "",
+                  f"- split: {card['split']['seed']}"]
+        lines += [f"- run {k}: {v}" for k, v in (seeds.get("runs") or {}).items()]
+        lines += [f"- randomisation {k}: {v}" for k, v in (seeds.get("randomization") or {}).items()]
     lines += ["", "## Class balance", ""]
     for name, c in card["class_balance"].items():
         per_split = ", ".join(f"{s} {p['instances']}" for s, p in c["per_split"].items())
@@ -2314,6 +2336,12 @@ def export(paths: Sequence, out, fmt, fractions=DEFAULT_FRACTIONS,
         "shard_size": int(shard_size) if "webdataset" in formats else None,
         **dict(choices or {}),
     }
+    # The summary a reader looks for first (core/dataset/card_page.py):
+    # image counts per camera, seeds, check results across the runs and
+    # per frame, and every per-frame limit counted.
+    from .card_page import CARD_HTML, render_card_html, summary_blocks
+
+    card["summary"] = summary_blocks(runs, samples)
     (out / PRESENCE_JSON).write_text(
         json.dumps(presence_document(runs, samples), indent=1), encoding="utf-8")
     card["presence"] = {
@@ -2322,4 +2350,5 @@ def export(paths: Sequence, out, fmt, fractions=DEFAULT_FRACTIONS,
     }
     (out / CARD_JSON).write_text(json.dumps(card, indent=1), encoding="utf-8")
     (out / CARD_MD).write_text(render_card(card), encoding="utf-8")
+    (out / CARD_HTML).write_text(render_card_html(card), encoding="utf-8")
     return card

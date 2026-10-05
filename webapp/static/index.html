@@ -853,20 +853,36 @@ function esc(text) {
 // unverified run, a split that does not sum to 100, an unknown camera) is
 // shown in words; a good answer is saved as a file.
 async function downloadDataset(runId) {
+  const state = document.getElementById("dsState");
+  const query = datasetQuery();
+  if (!query) return;
+  const value = id => document.getElementById(id).value;
+  state.textContent = "exporting...";
+  return downloadWith(runId, query, state, value);
+}
+
+// The panel's choices as a query string (shared by the download and the
+// card page, so the card describes exactly the zip); null with a note when
+// no camera is picked.
+function datasetQuery() {
   const value = id => document.getElementById(id).value;
   const checked = id => document.getElementById(id).checked;
   const cams = [...document.querySelectorAll(".dsCam")].filter(c => c.checked)
     .map(c => c.value);
-  const state = document.getElementById("dsState");
-  if (!cams.length) { state.textContent = "pick at least one camera"; return; }
-  const query = new URLSearchParams({
+  if (!cams.length) {
+    document.getElementById("dsState").textContent = "pick at least one camera";
+    return null;
+  }
+  return new URLSearchParams({
     format: value("dsFormat"), image: value("dsImage"), cameras: cams.join(","),
     train: (+value("dsTrain") || 0) / 100, val: (+value("dsVal") || 0) / 100,
     test: (+value("dsTest") || 0) / 100, seed: +value("dsSeed") || 0,
     labels_only: checked("dsLabelsOnly"), tabular: checked("dsTabular"),
     box_pictures: checked("dsBox2d"), box3d_pictures: checked("dsBox3d"),
   });
-  state.textContent = "exporting...";
+}
+
+async function downloadWith(runId, query, state, value) {
   try {
     const response = await fetch(`/runs/${runId}/dataset.zip?${query}`);
     if (!response.ok) {
@@ -1523,6 +1539,7 @@ async function initGallery(runId, run) {
       `<label><input type="checkbox" id="dsBox2d"> 2-D box pictures</label> ` +
       `<label><input type="checkbox" id="dsBox3d"> 3-D box pictures</label></div>` +
       `<div class="dsRow"><button id="dsGo" class="opt">Download dataset (zip)</button> ` +
+      `<button id="dsCard" class="opt">View the dataset card</button> ` +
       `<span id="dsState" class="dim">` +
       (run.capture && run.capture.headless
         ? `this run has no engine-rendered pictures, so it exports labels only ` +
@@ -1591,6 +1608,11 @@ async function initGallery(runId, run) {
   area.innerHTML = html.join("");
   const datasetGo = document.getElementById("dsGo");
   if (datasetGo) datasetGo.addEventListener("click", () => downloadDataset(runId));
+  const datasetCard = document.getElementById("dsCard");
+  if (datasetCard) datasetCard.addEventListener("click", () => {
+    const query = datasetQuery();
+    if (query) window.open(`/runs/${runId}/dataset_card.html?${query}`, "_blank");
+  });
 }
 
 function renderVerify(capture) {

@@ -571,7 +571,7 @@ def _randomization_block() -> str:
     phrases = {"weather": "varied weather", "times_of_day": "different times "
                "of day", "dawn_dusk": "dawn and dusk only",
                "lighting": "varied lighting", "traffic": "mixed traffic",
-               "viewpoints": "random viewpoints"}
+               "viewpoints": "random viewpoints", "seasons": "different seasons"}
     for family, leaves in RANDOMIZATION_FAMILIES.items():
         lines.append(f'  "{phrases[family]}" -> {json.dumps(leaves)}')
     ranges = ", ".join(sorted(LOCATION_RANGES))

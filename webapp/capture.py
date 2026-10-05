@@ -658,7 +658,8 @@ def dataset_archive(out: Path, fmt: str, cameras: Optional[List[str]] = None,
     inputs = [p for p in (manifest_path, verdict) if p.is_file()]
     if archive.is_file() and inputs and archive.stat().st_mtime >= max(
             p.stat().st_mtime for p in inputs):
-        return {"archive": archive, "format": name, "labels_only": labels_only_used}
+        return {"archive": archive, "format": name, "labels_only": labels_only_used,
+                "dataset": out / "dataset" / f"{name}_{tag}"}
     target = out / "dataset" / f"{name}_{tag}"
     shutil.rmtree(target, ignore_errors=True)
     extras = [w for w, on in (("2-D box pictures", box_pictures),
@@ -698,7 +699,8 @@ def dataset_archive(out: Path, fmt: str, cameras: Optional[List[str]] = None,
                                                   f"{picture.name}",
                                  compress_type=zipfile.ZIP_STORED)
     partial.replace(archive)
-    return {"archive": archive, "format": name, "labels_only": labels_only_used}
+    return {"archive": archive, "format": name, "labels_only": labels_only_used,
+            "dataset": target}
 
 
 def camera_view(manifest: Dict, camera_id: str,

@@ -896,6 +896,11 @@ RANDOMIZATION_FAMILIES: Dict[str, Dict[str, Any]] = {
         "hour_local": {"uniform": [5.5, 20.0]},
         "weather_date": {"uniform_dates": ["2024-01-01", "2024-12-31"]},
     },
+    "seasons": {
+        # Any day of the year: the sun's track, the day length and the
+        # month-driven ground cover (snow class) follow the drawn date.
+        "weather_date": {"uniform_dates": ["2024-01-01", "2024-12-31"]},
+    },
     "traffic": {
         "traffic_count": {"poisson": 0.7, "max": 2},
     },
@@ -936,6 +941,11 @@ RANDOMIZATION_WORDS: Tuple[Tuple[str, str], ...] = (
     (r"throughout the day", "times_of_day"),
     (rf"{_VARY} (?:viewpoints?|views?|perspectives?|angles|"
      rf"camera (?:angles?|positions?|placements?|views?))", "viewpoints"),
+    (rf"{_VARY} seasons?", "seasons"),
+    (r"(?:in |across |through )?all (?:four |the )?seasons", "seasons"),
+    (r"(?:throughout|across|through) the (?:year|seasons)", "seasons"),
+    (r"(?:any|every) (?:time of (?:the )?year|season|month)", "seasons"),
+    (r"year[- ]round", "seasons"),
     (rf"{_VARY} traffic", "traffic"),
     (r"(?:other|background|some|with) traffic", "traffic"),
 )
@@ -946,7 +956,8 @@ RANDOMIZATION_WORDS: Tuple[Tuple[str, str], ...] = (
 _FAMILY_NOUN = (r"(?:weather(?: conditions)?|light(?:ing)?(?: conditions)?|"
                 r"times? of (?:the )?day|hours(?: of the day)?|"
                 r"viewpoints?|views?|perspectives?|angles|"
-                r"camera (?:angles?|positions?|placements?|views?)|traffic)")
+                r"camera (?:angles?|positions?|placements?|views?)|traffic|"
+                r"seasons?)")
 _CONJUNCTION = re.compile(
     rf"\b({_VARY})\s+({_FAMILY_NOUN})\s*(?:,|,?\s*and|,?\s*or)\s+"
     rf"(?={_FAMILY_NOUN}\b)", re.IGNORECASE)

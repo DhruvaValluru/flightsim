@@ -130,6 +130,18 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
         "source": str(spec.time_of_day.source), "from": spec.time_of_day.frm,
         "std": spec.time_of_day.std, "detail": spec.time_of_day.detail,
     })
+    # The rain / snow rate (spec 9, optional, absent-canonical): always a
+    # row too, so a prompt's "rain" the compiler did not set can be typed
+    # here (the prompt.not_set refusal points at this row).
+    fields.insert(environment_at + 1, {
+        "section": "environment", "name": "precipitation_rate_mmh",
+        "value": spec.precipitation_rate_mmh.value,
+        "unit": spec.precipitation_rate_mmh.unit,
+        "source": str(spec.precipitation_rate_mmh.source),
+        "from": spec.precipitation_rate_mmh.frm,
+        "std": spec.precipitation_rate_mmh.std,
+        "detail": spec.precipitation_rate_mmh.detail,
+    })
     # Cameras render as their own labeled blocks with per-field sources,
     # editable exactly like the scalar rows (the page writes edits into
     # dict.cameras[i] and /run re-parses the whole spec).
@@ -180,6 +192,8 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
     # unstated; read back unstated, so the digest is unmoved).
     spec_dict.setdefault("environment", {}).setdefault(
         "time_of_day", spec.time_of_day.to_dict())
+    spec_dict["environment"].setdefault(
+        "precipitation_rate_mmh", spec.precipitation_rate_mmh.to_dict())
     return {"digest": spec.digest(), "name": spec.name,
             "prompt": spec.prompt, "notes": spec.notes,
             "fields": fields, "cameras": cameras,
@@ -344,7 +358,10 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
     }
     if randomization_refusal is not None:
         payload["validation"]["ok"] = False
-        payload["validation"]["violations"].append(randomization_refusal)
+        # validate() already names an unmapped variation; do not say it twice.
+        named = {v.get("constraint") for v in payload["validation"]["violations"]}
+        if randomization_refusal.get("constraint") not in named:
+            payload["validation"]["violations"].append(randomization_refusal)
     return JSONResponse(payload)
 
 
@@ -870,13 +887,29 @@ def run_camera_manifest(run_id: str, camera_id: str):
     return JSONResponse({**view, "run_id": run_id})
 
 
+@app.get("/runs/{run_id}/dataset_card.html")
+def run_dataset_card(run_id: str, format: str = "coco",
+                     cameras: Optional[str] = None, image: str = "ideal",
+                     labels_only: bool = False, train: float = 0.8,
+                     val: float = 0.1, test: float = 0.1, seed: int = 0,
+                     tabular: bool = False, box_pictures: bool = False,
+                     box3d_pictures: bool = False):
+    """The dataset card's summary page for exactly the choices given (the
+    same export the zip holds): image counts, class balance, conditions,
+    seeds, check results and what the dataset does not promise."""
+    response = run_dataset_archive(run_id, format, cameras, image, labels_only,
+                                   train, val, test, seed, tabular, box_pictures,
+                                   box3d_pictures, _want_card=True)
+    return response
+
+
 @app.get("/runs/{run_id}/dataset.zip")
 def run_dataset_archive(run_id: str, format: str = "coco",
                         cameras: Optional[str] = None, image: str = "ideal",
                         labels_only: bool = False, train: float = 0.8,
                         val: float = 0.1, test: float = 0.1, seed: int = 0,
                         tabular: bool = False, box_pictures: bool = False,
-                        box3d_pictures: bool = False):
+                        box3d_pictures: bool = False, _want_card: bool = False):
     """The whole run exported as a dataset with the choices made on the
     page -- format (coco, kitti, webdataset, yolo, voc or all), cameras
     (comma list; all when absent), image (ideal | sensor), labels only,
@@ -905,6 +938,13 @@ def run_dataset_archive(run_id: str, format: str = "coco",
     except ExportError as exc:
         return JSONResponse({"refused": exc.constraint, "error": exc.message},
                             status_code=409)
+    if _want_card:
+        from core.dataset.card_page import CARD_HTML
+
+        page = Path(result["dataset"]) / CARD_HTML
+        if not page.is_file():
+            return JSONResponse({"error": "the export wrote no card page"}, status_code=404)
+        return HTMLResponse(page.read_text(encoding="utf-8"))
     response = FileResponse(result["archive"], media_type="application/zip",
                             filename=f"{run_id}_dataset_{result['format']}.zip")
     if result["labels_only"]:
@@ -1260,6 +1300,22 @@ def generate_card(campaign_id: str, format: Optional[str] = None) -> JSONRespons
     what it does not claim, format); rule and check names only under
     ``details``. The export's own refusals stand, in words, as a 409."""
     return _generate_call(generator.card, campaign_id, format)
+
+
+@app.get("/generate/{campaign_id}/card.html")
+def generate_card_page(campaign_id: str, format: Optional[str] = None):
+    """The dataset card's summary page for the campaign's export in the
+    chosen format (the same export the download zips)."""
+    from core.dataset.card_page import CARD_HTML
+
+    try:
+        result = generator.export_result(campaign_id, format)
+    except generate_module.GenerateRefusal as exc:
+        return JSONResponse(exc.payload, status_code=exc.status_code)
+    page = Path(result["dataset_path"]) / CARD_HTML
+    if not page.is_file():
+        return JSONResponse({"error": "the export wrote no card page"}, status_code=404)
+    return HTMLResponse(page.read_text(encoding="utf-8"))
 
 
 @app.get("/generate/{campaign_id}/download")

@@ -257,6 +257,7 @@ def validate(spec: ScenarioSpec, check_feasibility: bool = True) -> ValidationRe
 
     report.violations.extend(validate_cameras(spec))
     report.violations.extend(validate_randomization(spec))
+    report.violations.extend(validate_prompt_words(spec))
     report.violations.extend(validate_blocks(spec))
     report.violations.extend(validate_policy(spec))
     report.violations.extend(validate_registry(spec))
@@ -311,6 +312,32 @@ def validate_registry(spec) -> List[Violation]:
                       f"{path} is a spec field no registered variable returns the "
                       f"record for; register it in core/registry.py or drop it")
             for path in unregistered_fields(spec.to_dict())]
+
+
+def validate_prompt_words(spec) -> List[Violation]:
+    """Words in the spec's prompt that the spec does not honour, refused by
+    name (core/nl/unsupported.py): a thing the simulator does not model
+    (``prompt.unsupported``), or a condition it carries that the compiled
+    spec left at its default (``prompt.not_set``). A variation phrase the
+    vocabulary cannot express is refused here too
+    (``randomization.vocabulary``), at review time rather than only when
+    the sampler runs. A spec with no prompt (a YAML file) has nothing to
+    check."""
+    from ..nl.unsupported import unsupported_words
+
+    out = [Violation(constraint, sentence)
+           for constraint, sentence in unsupported_words(spec.prompt, spec)]
+    policy = spec.randomization_policy
+    unmapped = policy.detail.get("unmapped") if policy is not None else None
+    if unmapped:
+        out.append(Violation(
+            "randomization.vocabulary",
+            "the prompt asks for a variation the vocabulary cannot express: "
+            + "; ".join(f'"{s}"' for s in unmapped)
+            + " -- the documented phrases are varied weather, different times "
+              "of day, dawn and dusk only, varied lighting, different seasons, "
+              "across the <range>, mixed traffic, random viewpoints"))
+    return out
 
 
 def validate_randomization(spec) -> List[Violation]:
