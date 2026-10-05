@@ -466,7 +466,7 @@ class GenerateService:
         if not prompt:
             raise GenerateRefusal({"error": "empty prompt"}, 400)
         explicit = _images_arg(images)
-        if fmt not in FORMATS:
+        if fmt not in FORMATS and fmt != ALL_FORMATS:
             raise GenerateRefusal(words(ExportError(
                 "export.format", f"format {fmt!r} is not one of {list(FORMATS)}")))
         compiled = compile_round(prompt, tier=tier, questions=questions, answers=answers)
@@ -827,11 +827,15 @@ class GenerateService:
         format when none is given); the card read back off the file."""
         campaign = self.open(campaign_id)
         fmt = fmt or str(campaign.record.get("format") or DEFAULT_FORMAT)
-        if fmt not in FORMATS:
+        if fmt not in FORMATS and fmt != ALL_FORMATS:
             raise GenerateRefusal(words(ExportError(
                 "export.format", f"format {fmt!r} is not one of {list(FORMATS)}")))
         try:
-            result = campaign.export(format=fmt)
+            # The format the person picked on the page, recorded in the
+            # card's choices with where it was picked.
+            result = campaign.export(format=fmt, choices={
+                "chosen_on": "the web app's Generate a dataset page (download)",
+                "campaign_format": campaign.record.get("format")})
         except (ExportError, CampaignError) as exc:
             raise GenerateRefusal(words(exc))
         card_path = Path(result["dataset_path"]) / CARD_JSON
@@ -855,6 +859,11 @@ FORMAT_WORDS = {
              "in 3-D",
     "webdataset": "WebDataset: the samples packed into archive shards for streaming",
 }
+#: One download holding every format, each in its own folder.
+ALL_FORMATS = "all"
+FORMAT_WORDS[ALL_FORMATS] = ("All five formats: COCO, KITTI, WebDataset, YOLO and Pascal "
+                             "VOC, each in its own folder")
+FORMAT_WORDS[",".join(FORMATS)] = FORMAT_WORDS[ALL_FORMATS]
 SPLIT_WORDS = {"train": "training", "val": "validation", "test": "testing"}
 #: Conditions the card records that are bookkeeping, not a condition a
 #: person asked for (the seed, the solar algorithm's citation, the same

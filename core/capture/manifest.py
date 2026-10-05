@@ -815,6 +815,14 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                 terrain_elevation_m, randomization, primary_mesh,
                 traffic_objects, traffic_airframes, traffic_tracks,
                 traffic_meshes, sample_index))
+            # Every other aircraft's own state at this instant (position
+            # and attitude), so the verifier can place it with its OWN
+            # rotation instead of trusting the label record's placement.
+            if traffic_objects:
+                frames[-1]["traffic_states"] = [
+                    {"id": obj.id, "int_id": obj.int_id,
+                     **traffic_state(track_, sample_index)}
+                    for obj, track_ in zip(traffic_objects, traffic_tracks)]
             # Scene vs labelled for this frame: per taxonomy class, was it
             # in the scene, is it labelled, which of its objects are in
             # this frame (core/capture/objects.py frame_presence).
@@ -1073,7 +1081,218 @@ def frame_sidecar_name(file: str) -> str:
     return file[:-len(".png")] + ".json"
 
 
-def frame_sidecar(manifest: Dict, record: Dict) -> Dict:
+def _cut_edges(full, width: float, height: float) -> List[str]:
+    edges = []
+    if full[0] < 0.0:
+        edges.append("left")
+    if full[2] > width:
+        edges.append("right")
+    if full[1] < 0.0:
+        edges.append("top")
+    if full[3] > height:
+        edges.append("bottom")
+    return edges
+
+
+def truncation_section(manifest: Dict, record: Dict) -> Dict:
+    """The frame's truncation, one entry per aircraft: the cut box (clipped
+    to the picture), the full box (may run past the edge), how much of the
+    plane is inside, which edges cut it, and a one-word status. Always
+    present in a frame's sidecar, read from the frame's own labels so it
+    can never disagree with them."""
+    width, height = float(record.get("width_px", 0)), float(record.get("height_px", 0))
+    labels = record.get("labels") or {}
+    class_of = {str(o.get("id")): str(o.get("class"))
+                for o in manifest.get("objects") or [] if isinstance(o, dict)}
+    entries = labels.get("objects")
+    if not isinstance(entries, list):
+        entries = [{"id": f"aircraft:{manifest.get('aircraft')}:0",
+                    "bbox_2d": labels.get("bbox_2d"),
+                    "bbox_2d_unclipped": labels.get("bbox_2d_unclipped"),
+                    "truncation": labels.get("truncation"),
+                    "in_frame": labels.get("in_frame")}]
+        class_of.setdefault(entries[0]["id"], "aircraft")
+    out = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        object_id = str(entry.get("id"))
+        if class_of.get(object_id, "aircraft") != "aircraft":
+            continue
+        cut, full = entry.get("bbox_2d"), entry.get("bbox_2d_unclipped")
+        truncation = entry.get("truncation")
+        inside = entry.get("fraction_in_frame")
+        if inside is None and truncation is not None:
+            inside = 1.0 - float(truncation)
+        if full is None:
+            status = "not known: part of the plane is behind the camera"
+        elif cut is None:
+            status = "out of frame"
+        elif truncation is not None and float(truncation) > 0.0:
+            status = "cut off by the picture edge"
+        else:
+            status = "fully in frame"
+        out.append({
+            "id": object_id,
+            "cut_box": cut,
+            "full_box": full,
+            "fraction_inside": inside,
+            "percent_inside": None if inside is None else round(100.0 * float(inside), 2),
+            "truncation": truncation,
+            "cut_off": bool(truncation is not None and float(truncation) > 0.0),
+            "cut_edges": _cut_edges(full, width, height) if full else [],
+            "in_frame": entry.get("in_frame"),
+            "status": status,
+        })
+    return {
+        "about": ("Per aircraft in this frame. cut_box = the box clipped to the "
+                  "picture [x0, y0, x1, y1] px; full_box = the whole box, which "
+                  "may run past the edge; fraction_inside = cut-box area / "
+                  "full-box area (1 = fully in frame); truncation = 1 - "
+                  "fraction_inside; cut_edges = the picture edges the plane "
+                  "crosses. Boxes are the projected 3-D bounding box of the "
+                  "airframe; null when part of it is behind the camera."),
+        "image_size_px": [int(width), int(height)],
+        "aircraft": out,
+    }
+
+
+def _range_m(entry: Dict) -> Optional[float]:
+    cg = ((entry.get("bbox_3d_camera") or {}).get("cg_m"))
+    if isinstance(cg, (list, tuple)) and len(cg) == 3:
+        return math.sqrt(sum(float(c) * float(c) for c in cg))
+    return None
+
+
+def _occlusion_entry(entry: Dict, class_of: Dict[str, str]) -> Dict:
+    """One plane's occlusion in one frame, from its own label record."""
+    visible = entry.get("visible_fraction")
+    alone = entry.get("pixels_alone")
+    by_pixels = entry.get("occluded_pixels_by") or {}
+    hidden_by = []
+    for other in entry.get("occluded_by") or []:
+        count = by_pixels.get(other)
+        hidden_by.append({
+            "id": other, "class": class_of.get(str(other)),
+            "fraction_of_plane": (float(count) / float(alone)
+                                  if count is not None and alone else None)})
+    by_class: Dict[str, float] = {}
+    for item in hidden_by:
+        if item["fraction_of_plane"] is not None:
+            key = "terrain" if item["class"] == "terrain" else (
+                "other_aircraft" if item["class"] == "aircraft" else str(item["class"]))
+            by_class[key] = by_class.get(key, 0.0) + item["fraction_of_plane"]
+    measured = visible is not None
+    return {
+        "id": str(entry.get("id")),
+        "distance_m": _range_m(entry),
+        "visible_fraction": visible,
+        "hidden_fraction": round(1.0 - float(visible), 6) if measured else None,
+        "hidden_by": hidden_by,
+        "by_cause": {
+            "terrain": by_class.get("terrain", 0.0 if measured else None),
+            "other_aircraft": by_class.get("other_aircraft", 0.0 if measured else None),
+            **{k: v for k, v in by_class.items() if k not in ("terrain", "other_aircraft")},
+            "cloud": None,
+            "fog_transmittance": entry.get("atmospheric_transmittance"),
+        },
+        "measured": ("engine ID image vs the plane's alone pass" if measured else
+                     "not measured: no engine ID image / alone pass for this "
+                     "frame yet (visible_fraction is null, not 1)"),
+    }
+
+
+def _previous_record(manifest: Dict, record: Dict) -> Optional[Dict]:
+    """The same camera's frame just before this one (by index), or None."""
+    camera, index = record.get("camera_id"), record.get("index")
+    best = None
+    for other in manifest.get("frames", []):
+        if other.get("camera_id") != camera or other is record:
+            continue
+        i = other.get("index")
+        if isinstance(i, int) and isinstance(index, int) and i < index \
+                and (best is None or i > best.get("index")):
+            best = other
+    return best
+
+
+def _delta(now, before) -> Optional[float]:
+    if now is None or before is None:
+        return None
+    return round(float(now) - float(before), 6)
+
+
+def occlusion_section(manifest: Dict, record: Dict, previous="auto") -> Dict:
+    """Per plane: how much of it is visible in THIS frame (and what hides
+    it -- terrain, another aircraft -- by share of the plane, plus the fog
+    transmittance along its line of sight and its distance), and the
+    change from the same camera's previous frame."""
+    class_of = {str(o.get("id")): str(o.get("class"))
+                for o in manifest.get("objects") or [] if isinstance(o, dict)}
+
+    def planes(rec):
+        entries = ((rec or {}).get("labels") or {}).get("objects")
+        if not isinstance(entries, list):
+            return {}
+        return {str(e.get("id")): _occlusion_entry(e, class_of) for e in entries
+                if isinstance(e, dict) and class_of.get(str(e.get("id")), "aircraft") == "aircraft"}
+
+    now = planes(record)
+    if previous == "auto":
+        previous = _previous_record(manifest, record)
+    before = planes(previous) if previous is not None else {}
+    out = []
+    for object_id, item in now.items():
+        prior = before.get(object_id)
+        if previous is None:
+            change = None
+        elif prior is None:
+            change = {"previous_frame_index": previous.get("index"),
+                      "note": "the plane has no record in the previous frame"}
+        else:
+            ids_now = {h["id"] for h in item["hidden_by"]}
+            ids_before = {h["id"] for h in prior["hidden_by"]}
+            change = {
+                "previous_frame_index": previous.get("index"),
+                "previous_frame_file": previous.get("file"),
+                "dt_s": _delta(record.get("t_s"), previous.get("t_s")),
+                "visible_fraction_change": _delta(item["visible_fraction"],
+                                                  prior["visible_fraction"]),
+                "distance_change_m": _delta(item["distance_m"], prior["distance_m"]),
+                "fog_transmittance_change": _delta(
+                    item["by_cause"]["fog_transmittance"],
+                    prior["by_cause"]["fog_transmittance"]),
+                "terrain_hidden_change": _delta(item["by_cause"]["terrain"],
+                                                prior["by_cause"]["terrain"]),
+                "other_aircraft_hidden_change": _delta(
+                    item["by_cause"]["other_aircraft"], prior["by_cause"]["other_aircraft"]),
+                "newly_hidden_by": sorted(ids_now - ids_before),
+                "no_longer_hidden_by": sorted(ids_before - ids_now),
+                "previous": {k: prior[k] for k in ("visible_fraction", "hidden_fraction",
+                                                   "distance_m")},
+            }
+        out.append({**item, "change_from_previous": change})
+    return {
+        "about": ("Per aircraft in this frame. visible_fraction = the plane's "
+                  "pixels in the ID image / its pixels drawn alone (1 = nothing "
+                  "in front of it); hidden_fraction = 1 - visible_fraction; "
+                  "hidden_by = each object in front of it and the share of the "
+                  "plane it hides; by_cause sums those by terrain and other "
+                  "aircraft; fog_transmittance = the share of the plane's light "
+                  "that reaches the camera through the stated fog / visibility "
+                  "(it dims, it does not hide pixels); cloud is null: volumetric "
+                  "clouds write no id, so a plane behind cloud is not measured as "
+                  "hidden. distance_m = camera to the plane's CG. "
+                  "change_from_previous = this frame minus the same camera's "
+                  "previous frame (null on the first frame)."),
+        "aircraft": out,
+    }
+
+
+def frame_sidecar(manifest: Dict, record: Dict, previous="auto") -> Dict:
+    from .box3d import box3d_section
+    from .limits import limits_section
+
     """One frame, self-describing: its record plus the run context and
     ITS camera's block. A PNG and this file together are a labelled
     sample that needs nothing else."""
@@ -1090,6 +1309,19 @@ def frame_sidecar(manifest: Dict, record: Dict) -> Dict:
     return {
         "context": context,
         "camera": cameras.get(str(record.get("camera_id"))),
+        # Always present: the cut box, the full box and how much of each
+        # plane is inside the picture (truncation_section).
+        "truncation": truncation_section(manifest, record),
+        # Always present: how much of each plane is visible, what hides it,
+        # and the change from the previous frame (occlusion_section).
+        "occlusion": occlusion_section(manifest, record, previous),
+        # Always present: each plane's 3-D box and which way it faces, in
+        # camera coordinates, with the proof it rebuilds from this record
+        # alone (core/capture/box3d.py).
+        "box_3d": box3d_section(manifest, record),
+        # Always present: what is NOT claimed, in sentences, each saying
+        # whether it applies to this frame (core/capture/limits.py).
+        "limits": limits_section(manifest, record),
         "frame": record,
     }
 
@@ -1108,10 +1340,21 @@ def write_frame_sidecars(manifest: Dict, directory) -> List[Path]:
     directory = Path(directory)
     named = set()
     written: List[Path] = []
+    # Each camera's frames in index order, so each sidecar's occlusion
+    # section compares against the previous frame without a scan per frame.
+    previous_of: Dict[int, Optional[Dict]] = {}
+    by_camera: Dict[str, List[Dict]] = {}
+    for record in manifest.get("frames", []):
+        by_camera.setdefault(str(record.get("camera_id")), []).append(record)
+    for records in by_camera.values():
+        records = sorted(records, key=lambda r: r.get("index", 0))
+        for before, record in zip([None] + records[:-1], records):
+            previous_of[id(record)] = before
     for record in manifest.get("frames", []):
         path = directory / frame_sidecar_name(str(record["file"]))
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(frame_sidecar(manifest, record), indent=1),
+        path.write_text(json.dumps(frame_sidecar(
+            manifest, record, previous_of.get(id(record))), indent=1),
                         encoding="utf-8")
         named.add(path.resolve())
         written.append(path)

@@ -256,6 +256,49 @@ def render_passes(card: Path, frames_root: Path, camera_ids: List[str],
     return rendered
 
 
+def traffic_tracks(spec, solved: Dict) -> List:
+    """The spec's other aircraft, each solved over the same recorded flight
+    as the cameras (core/capture/poses.py solve_traffic_track), in spec
+    order -- what the manifest labels them from."""
+    if not spec.traffic:
+        return []
+    from core.capture.objects import compose_objects
+    from core.capture.poses import solve_traffic_track
+
+    objects = [o for o in compose_objects(spec) if o.role == "traffic"]
+    return [solve_traffic_track(solved["columns"], str(entry.track.value),
+                                float(entry.range_m.value), solved["frame"], obj.id,
+                                placement=entry.placement())
+            for entry, obj in zip(spec.traffic, objects)]
+
+
+def card_scene_objects(spec, solved: Dict) -> Dict:
+    """What the run card must carry for the render host to draw and label
+    the scene the manifest describes, exactly as ``flightsim.capture``'s
+    card does: the labelled objects (the host sets each one's stencil from
+    them), the class list, and one block per other aircraft with its solved
+    track (without it the host never draws the second plane the labels
+    describe)."""
+    from core.capture.airframe import load_airframe
+    from core.capture.objects import (
+        compose_objects, mesh_manifest_path, objects_block, taxonomy_classes,
+    )
+    from core.capture.poses import traffic_card_block
+
+    objects = compose_objects(spec)
+    traffic_objects = [o for o in objects if o.role == "traffic"]
+    blocks = []
+    for entry, obj, track in zip(spec.traffic, traffic_objects,
+                                 traffic_tracks(spec, solved)):
+        name = str(entry.aircraft.value)
+        mesh = mesh_manifest_path(name)
+        blocks.append(traffic_card_block(
+            track, entry, obj, solved["frame"], load_airframe(name).cg_structural_in,
+            str(mesh) if mesh.is_file() else None))
+    return {"objects": objects_block(objects), "taxonomy": taxonomy_classes(spec),
+            "traffic": blocks or None}
+
+
 def write_manifest(spec, solved: Dict, out: Path, scene: Dict,
                    heightfield=None) -> Path:
     from core.capture.manifest import (
@@ -266,6 +309,9 @@ def write_manifest(spec, solved: Dict, out: Path, scene: Dict,
     manifest = build_capture_manifest(
         spec, solved["columns"], solved["frame"], solved["tracks"],
         solved["schedules"],
+        # Every other aircraft's scripted track over the same flight: the
+        # manifest refuses a spec with traffic and no tracks.
+        traffic_tracks=traffic_tracks(spec, solved) or None,
         # Of the flight the labels were actually solved over: the
         # host's own when it flew first, the headless pre-run when the
         # engine was absent. The manifest says which either way.
@@ -299,7 +345,7 @@ def apply_sensor(out: Path, run_seed: int) -> Dict[str, int]:
 #: Everything a labelled set is, per view. The zip is rebuilt when any
 #: of these is newer than it, so a re-render or a re-verify refreshes
 #: the download and nothing else does.
-_ARCHIVE_PATTERNS = ("frame_*.png", "frame_*.json")
+_ARCHIVE_PATTERNS = ("frame_*.png", "frame_*.json", "frame_*.f32")
 
 
 def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
@@ -320,10 +366,33 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
         return None
     files = sorted(p for pattern in _ARCHIVE_PATTERNS
                    for p in source.glob(pattern))
+    # A headless run's pictures: the engine-free preview of each frame.
+    previews = sorted((out / "previews" / camera_id).glob("preview_*.png"))
     if not any(p.suffix == ".png" or p.suffix == ".json" for p in files):
         return None
     manifest_path = out / "capture_manifest.json"
-    inputs = files + ([manifest_path] if manifest_path.is_file() else [])
+    manifest: Dict = {}
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            manifest = {}
+    # The second version of every rendered frame: its 2-D boxes drawn on
+    # (core/capture/box_frames.py; reused while newer than the frame and
+    # the manifest, so only a changed frame or label is redrawn).
+    boxed: List[Path] = []
+    if manifest:
+        from core.capture.box_frames import draw_box_frames
+
+        try:
+            boxed = draw_box_frames(manifest, out, cameras=[camera_id])
+        except (OSError, ImportError):
+            boxed = []
+    from core.capture.frame_checks import FRAME_CHECKS_JSON, read_frame_checks
+
+    checks_path = out / FRAME_CHECKS_JSON
+    inputs = files + previews + boxed + [p for p in (manifest_path, checks_path)
+                                         if p.is_file()]
 
     archive = out / "downloads" / f"{camera_id}.zip"
     if archive.is_file():
@@ -332,18 +401,56 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
             return archive
     archive.parent.mkdir(parents=True, exist_ok=True)
 
-    camera_manifest = None
-    if manifest_path.is_file():
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            manifest = {}
-        camera_manifest = camera_view(manifest, camera_id)
+    camera_manifest = (camera_view(manifest, camera_id, read_frame_checks(out))
+                       if manifest else None)
 
     readme = (
         f"{camera_id}: one view of run {out.name}\n"
         f"\n"
-        f"frame_NNNN.png   the rendered frame\n"
+        f"frame_NNNN.png   the rendered frame, as rendered\n"
+        f"preview/preview_NNNN.png\n"
+        f"                 on a run with no Unreal host: the engine-free\n"
+        f"                 solid-shaded picture of frame NNNN (every aircraft,\n"
+        f"                 same pose and lens); the box pictures are drawn on it\n"
+        f"                 'truncation' (top of each .json) lists every plane:\n"
+        f"                 cut_box (clipped to the picture), full_box (may run\n"
+        f"                 past the edge), fraction_inside / percent_inside,\n"
+        f"                 truncation, cut_edges and a status word\n"
+        f"                 'occlusion' lists every plane: distance_m,\n"
+        f"                 visible_fraction / hidden_fraction, hidden_by (each\n"
+        f"                 object in front and the share it hides), by_cause\n"
+        f"                 (terrain, other aircraft, fog transmittance; cloud\n"
+        f"                 is not measured) and change_from_previous (this\n"
+        f"                 frame minus the same camera's previous frame)\n"
+        f"                 'checks' gives THIS frame's own verdict for\n"
+        f"                 box_vs_mask (mask box vs predicted box) and\n"
+        f"                 depth_vs_geometry (depth image vs predicted\n"
+        f"                 distance): PASS, FAIL with the reason, or NOT RUN\n"
+        f"                 (e.g. no engine render on this machine)\n"
+        f"frame_NNNN_depth.f32  when the engine wrote it: metric depth, raw\n"
+        f"                 little-endian float32, width x height\n"
+        f"                 'box_3d' lists every plane's 3-D box in camera\n"
+        f"                 coordinates (centre, length/width/height, body\n"
+        f"                 axes), which way it faces (yaw/pitch/roll from the\n"
+        f"                 camera, and a word), the recipe to rebuild the 8\n"
+        f"                 corners from those numbers and this frame's\n"
+        f"                 intrinsic_matrix alone, and rebuild_check: that\n"
+        f"                 rebuild done, with its largest error\n"
+        f"boxed3d/frame_NNNN_box3d.png\n"
+        f"                 the frame with each plane's 3-D box drawn from that\n"
+        f"                 rebuild (blue, red nose face) and a nose arrow\n"
+        f"                 'limits' says what is NOT claimed, in sentences,\n"
+        f"                 each with whether it applies to THIS frame and to\n"
+        f"                 which plane (e.g. masks are not exact past 8 km or\n"
+        f"                 under 16 px; cloud does not count as hiding a plane)\n"
+        f"boxed/frame_NNNN_boxes.png\n"
+        f"                 the same frame with its 2-D boxes drawn on: solid\n"
+        f"                 green = the box from the engine's mask pixels\n"
+        f"                 (bbox_2d_tight), dashed amber = the predicted box\n"
+        f"                 from the geometry (bbox_2d), tagged with the object\n"
+        f"                 id and, when both exist, their IoU. Drawn from the\n"
+        f"                 same numbers as the .json; a run with no engine\n"
+        f"                 mask shows the predicted box only\n"
         f"frame_NNNN.json  that frame's labels: where the camera was, which\n"
         f"                 way it pointed, the lens; under 'state' every\n"
         f"                 channel the flight recorder logged at that instant\n"
@@ -404,6 +511,12 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
             zf.writestr(f"{camera_id}/manifest.json",
                         json.dumps(camera_manifest, indent=1),
                         compress_type=zipfile.ZIP_DEFLATED)
+        for path in previews:
+            zf.write(path, arcname=f"{camera_id}/preview/{path.name}",
+                     compress_type=zipfile.ZIP_STORED)
+        for path in boxed:
+            zf.write(path, arcname=f"{camera_id}/{path.parent.parent.name}/{path.name}",
+                     compress_type=zipfile.ZIP_STORED)
         zf.writestr(f"{camera_id}/README.txt", readme,
                     compress_type=zipfile.ZIP_DEFLATED)
     partial.replace(archive)
@@ -432,7 +545,164 @@ CAMERA_VIEW_KEYS = (
 )
 
 
-def camera_view(manifest: Dict, camera_id: str) -> Optional[Dict]:
+def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
+    """A zip of ONE view's 3-D boxes: per frame the 3-D box picture and a
+    small JSON with just that frame's ``box_3d`` section (each plane's box
+    in camera coordinates, which way it faces, the rebuild recipe and its
+    check), plus a README. Built under ``downloads/<camera_id>_box3d.zip``
+    and reused while newer than what it packs; None when the view has no
+    frames."""
+    import zipfile
+
+    from core.capture.box3d import box3d_section
+    from core.capture.box_frames import box3d_name, draw_box_frames
+
+    manifest_path = out / "capture_manifest.json"
+    if not manifest_path.is_file():
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    records = [r for r in manifest.get("frames", [])
+               if str(r.get("camera_id")) == camera_id]
+    if not records:
+        return None
+    try:
+        draw_box_frames(manifest, out, cameras=[camera_id])
+    except (OSError, ImportError):
+        pass
+    pictures = sorted((out / "boxed3d" / camera_id).glob("*_box3d.png"))
+    archive = out / "downloads" / f"{camera_id}_box3d.zip"
+    inputs = pictures + [manifest_path]
+    if archive.is_file() and archive.stat().st_mtime >= max(
+            p.stat().st_mtime for p in inputs):
+        return archive
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    readme = (
+        f"{camera_id}: the 3-D boxes of run {out.name}\n"
+        f"\n"
+        f"frame_NNNN_box3d.png  the frame with each plane's 3-D box drawn\n"
+        f"                 (blue; red = nose face; yellow arrow = where the\n"
+        f"                 nose points), rebuilt from the JSON beside it\n"
+        f"frame_NNNN_box3d.json  that frame's box_3d: per plane centre_m,\n"
+        f"                 extents_m (length/width/height), body_axes_in_camera\n"
+        f"                 (forward/right/down), orientation (yaw/pitch/roll\n"
+        f"                 from the camera and a word), shape_box (measured\n"
+        f"                 from the mesh, when the machine had it), the recipe\n"
+        f"                 to rebuild the 8 corners from these numbers and the\n"
+        f"                 frame's intrinsic_matrix alone, and rebuild_check\n"
+        f"\n"
+        f"Camera coordinates: x right, y down, z forward along the view,\n"
+        f"metres. The full per-frame labels are in the frames zip.\n")
+    partial = archive.with_suffix(".zip.part")
+    with zipfile.ZipFile(partial, "w") as zf:
+        for record in records:
+            name = Path(str(record.get("file"))).name
+            stem = name[:-len(".png")] if name.endswith(".png") else name
+            picture = out / "boxed3d" / camera_id / box3d_name(name)
+            if picture.is_file():
+                zf.write(picture, arcname=f"{camera_id}_3d/{picture.name}",
+                         compress_type=zipfile.ZIP_STORED)
+            zf.writestr(f"{camera_id}_3d/{stem}_box3d.json",
+                        json.dumps({"camera_id": camera_id,
+                                    "frame_index": record.get("index"),
+                                    "t_s": record.get("t_s"),
+                                    "box_3d": box3d_section(manifest, record)},
+                                   indent=1),
+                        compress_type=zipfile.ZIP_DEFLATED)
+        zf.writestr(f"{camera_id}_3d/README.txt", readme,
+                    compress_type=zipfile.ZIP_DEFLATED)
+    partial.replace(archive)
+    return archive
+
+
+def dataset_archive(out: Path, fmt: str, cameras: Optional[List[str]] = None,
+                    image: str = "ideal", labels_only: Optional[bool] = None,
+                    fractions=(0.8, 0.1, 0.1), seed: int = 0, tabular: bool = False,
+                    box_pictures: bool = False, box3d_pictures: bool = False,
+                    chosen_on: str = "web page") -> Dict:
+    """ONE run exported as a dataset (core.dataset.export) with what the
+    person picked on the page: the format (coco, kitti, webdataset, yolo,
+    voc, or ``all``, one folder each), which cameras, the ideal or the
+    sensor-modelled image, labels only or with pictures, the
+    train / val / test split and its seed, the tabular flight table, and
+    whether the 2-D / 3-D box pictures ride along. Every choice is written
+    into the dataset card (``choices``), with where it was made.
+
+    A run with no engine-rendered frame exports its labels only whatever
+    was asked (the engine-free previews are not training pictures), and
+    the card records that too. The export's own refusals raise
+    ExportError, in its words. One archive per distinct set of choices,
+    reused while newer than the manifest and the verdict."""
+    import hashlib
+    import shutil
+    import zipfile
+
+    from core.dataset.export import export as export_dataset, parse_formats
+
+    formats = parse_formats(fmt)
+    name = "all" if len(formats) > 1 else formats[0]
+    rendered = any((out / "frames").glob("*/frame_[0-9][0-9][0-9][0-9].png"))
+    forced_labels_only = not rendered
+    labels_only_used = True if forced_labels_only else bool(labels_only)
+    picked = {"format": name, "cameras": sorted(cameras) if cameras else None,
+              "image": image, "labels_only": labels_only_used,
+              "fractions": [float(f) for f in fractions], "seed": int(seed),
+              "tabular": bool(tabular), "box_pictures": bool(box_pictures),
+              "box3d_pictures": bool(box3d_pictures)}
+    tag = hashlib.sha256(json.dumps(picked, sort_keys=True).encode()).hexdigest()[:10]
+    manifest_path = out / "capture_manifest.json"
+    verdict = out / "verification.json"
+    archive = out / "downloads" / f"dataset_{name}_{tag}.zip"
+    inputs = [p for p in (manifest_path, verdict) if p.is_file()]
+    if archive.is_file() and inputs and archive.stat().st_mtime >= max(
+            p.stat().st_mtime for p in inputs):
+        return {"archive": archive, "format": name, "labels_only": labels_only_used}
+    target = out / "dataset" / f"{name}_{tag}"
+    shutil.rmtree(target, ignore_errors=True)
+    extras = [w for w, on in (("2-D box pictures", box_pictures),
+                              ("3-D box pictures", box3d_pictures)) if on]
+    export_dataset([out], target, ",".join(formats), fractions=tuple(fractions),
+                   seed=int(seed), image=image, labels_only=labels_only_used,
+                   tabular=bool(tabular), cameras=cameras or None,
+                   choices={"chosen_on": chosen_on,
+                            "labels_only_requested": labels_only,
+                            "labels_only_forced": (
+                                "no engine-rendered frame in this run; the "
+                                "engine-free previews are not training pictures"
+                                if forced_labels_only else None),
+                            "extras": extras or None})
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    partial = archive.with_suffix(".zip.part")
+    with zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path in sorted(p for p in target.rglob("*") if p.is_file()):
+            zf.write(path, arcname=str(Path(name) / path.relative_to(target)))
+        if box_pictures or box3d_pictures:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            from core.capture.box_frames import draw_box_frames
+
+            wanted = cameras or sorted({str(r.get("camera_id"))
+                                        for r in manifest.get("frames", [])})
+            try:
+                draw_box_frames(manifest, out, cameras=wanted)
+            except (OSError, ImportError):
+                pass
+            for on, sub, label in ((box_pictures, "boxed", "2d_boxes"),
+                                   (box3d_pictures, "boxed3d", "3d_boxes")):
+                if not on:
+                    continue
+                for camera in wanted:
+                    for picture in sorted((out / sub / camera).glob("*.png")):
+                        zf.write(picture, arcname=f"{name}/pictures/{label}/{camera}/"
+                                                  f"{picture.name}",
+                                 compress_type=zipfile.ZIP_STORED)
+    partial.replace(archive)
+    return {"archive": archive, "format": name, "labels_only": labels_only_used}
+
+
+def camera_view(manifest: Dict, camera_id: str,
+                checks: Optional[Dict[str, Dict]] = None) -> Optional[Dict]:
     """ONE camera's labels out of the whole-run manifest, or None when
     the run has no such camera. Shared by the manifest route and the
     zip, so the two cannot disagree about what a view contains."""
@@ -442,8 +712,64 @@ def camera_view(manifest: Dict, camera_id: str) -> Optional[Dict]:
         return None
     frames = [f for f in manifest.get("frames", [])
               if str(f.get("camera_id")) == camera_id]
+    from core.capture.limits import limits_section
+
+    # Each frame's "not claimed" list, the same section its data file has.
+    frames = [{**f, "limits": limits_section(manifest, f)} for f in frames]
+    if checks:
+        # Each frame's own box / depth verdict (core/capture/frame_checks.py),
+        # added to the view only -- the manifest file is never rewritten.
+        frames = [{**f, "checks": checks[str(f.get("file"))]}
+                  if str(f.get("file")) in checks else f for f in frames]
     shared = {key: manifest.get(key) for key in CAMERA_VIEW_KEYS}
     return {**shared, "camera": blocks[0], "frames": frames}
+
+
+def headless_capture(spec, scene: Dict, out: Path, heightfield=None,
+                     terrain_ground=None, duration_s: Optional[float] = None,
+                     push: Optional[Callable[[str, str], None]] = None) -> Dict:
+    """A captured run with NO engine (Linux, macOS, or Windows without the
+    built Unreal host): everything a render run produces except the
+    photographic pixels.
+
+    Flies the scenario headlessly, solves every camera and every other
+    aircraft, writes the capture manifest and every frame's data file,
+    draws a solid-shaded engine-free picture of EVERY frame (all aircraft,
+    depth-sorted, at full resolution through the frame's own pose and
+    intrinsics), then the 2-D and 3-D box pictures over those, and the
+    verification and per-frame checks. The pictures say on their face
+    that they are previews, not renders.
+    """
+    from core.capture.manifest import read_capture_manifest
+    from core.capture.poses import traffic_state
+    from core.capture.preview import render_previews
+
+    say = push or (lambda status, detail: None)
+    say("cameras", f"solving {len(spec.cameras)} camera(s) and "
+                   f"{len(spec.traffic)} other aircraft over a headless flight")
+    solved = solve(spec, scene, heightfield=heightfield,
+                   terrain_ground=terrain_ground, duration_s=duration_s)
+    # The recorder's own file, as every other run writes it (the aero
+    # panel and the flight path read it).
+    solved["result"].telemetry.write_json(out / "telemetry.json")
+    say("manifest", "writing the capture manifest and every frame's data file")
+    write_manifest(spec, solved, out, scene, heightfield=heightfield)
+    manifest = read_capture_manifest(out / "capture_manifest.json")
+    tracks = traffic_tracks(spec, solved)
+    planes: Dict[int, List] = {}
+    if tracks:
+        for record in manifest.get("frames", []):
+            index = int(record["sample_index"])
+            planes[index] = [(str(entry.aircraft.value), traffic_state(track, index))
+                             for entry, track in zip(spec.traffic, tracks)]
+    say("previews", f"drawing an engine-free picture of each of "
+                    f"{len(manifest.get('frames', []))} frame(s)")
+    render_previews(manifest, out, heightfield=heightfield,
+                    scene_frame=solved["frame"],
+                    terrain_elevation_m=solved["terrain_elevation_m"],
+                    max_frames=None, traffic=planes)
+    say("checks", "drawing the 2-D / 3-D box pictures and verifying")
+    return finish(out)
 
 
 def finish(out: Path, max_overlays: Optional[int] = 24) -> Dict:
@@ -455,7 +781,18 @@ def finish(out: Path, max_overlays: Optional[int] = 24) -> Dict:
 
     manifest = read_capture_manifest(out / "capture_manifest.json")
     overlays = draw_overlays(manifest, out, max_frames=max_overlays)
+    # Every rendered frame again with its 2-D boxes drawn on (no cap: the
+    # page and the zip offer both versions of each frame).
+    from core.capture.box_frames import draw_box_frames
+
+    boxed = draw_box_frames(manifest, out)
     report = verify_run(out)
+    # The box and depth checks again, frame by frame: every frame's own
+    # verdict in frame_checks.json and in its frame_NNNN.json.
+    from core.capture.frame_checks import grade_frames, write_frame_checks
+
+    frame_checks = grade_frames(manifest, out)
+    write_frame_checks(out, frame_checks)
     # The SAME verdict under the one name every other path uses
     # (flightsim.verify writes it; flightsim.export refuses a run
     # without it), so a web run exports like a CLI run -- bound to the
@@ -469,6 +806,9 @@ def finish(out: Path, max_overlays: Optional[int] = 24) -> Dict:
         "checks": [{"name": c.name, "status": c.status, "detail": c.detail}
                    for c in report.checks],
         "overlays": len(overlays),
+        "boxed": len(boxed),
+        "frame_checks": {"counts": frame_checks["counts"],
+                         "failed_frames": frame_checks["failed_frames"]},
     }
     (out / "verify.json").write_text(json.dumps(summary, indent=1),
                                      encoding="utf-8")
@@ -520,6 +860,8 @@ def inventory(out: Path) -> Dict:
         "cameras": cameras,
         "frames": listing(out / "frames"),
         "overlays": listing(out / "overlays"),
+        "boxed": listing(out / "boxed"),
+        "boxed3d": listing(out / "boxed3d"),
         "previews": listing(out / "previews"),
         "clips": clips,
         "has_manifest": manifest_path.is_file(),

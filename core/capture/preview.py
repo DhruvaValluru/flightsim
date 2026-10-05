@@ -242,8 +242,14 @@ def _shadow_faces(record, faces, ground_alt: float):
 def render_previews(manifest: Dict, out_dir, heightfield=None,
                     scene_frame=None,
                     terrain_elevation_m: float = 0.0,
-                    max_frames: Optional[int] = None) -> List[Path]:
-    """Write one preview PNG per frame record; returns the paths."""
+                    max_frames: Optional[int] = None,
+                    traffic: Optional[Dict[int, List]] = None) -> List[Path]:
+    """Write one preview PNG per frame record; returns the paths.
+
+    ``traffic``: ``{sample_index: [(airframe, state), ...]}`` -- every
+    other aircraft's state at that sample (poses.traffic_state). Each is
+    drawn as its own solid airframe, depth-sorted together with the main
+    one, so one plane in front of another covers it as it would."""
     from PIL import Image, ImageDraw
 
     from .landmarks import landmark_point
@@ -277,6 +283,7 @@ def render_previews(manifest: Dict, out_dir, heightfield=None,
     ground_alt = float(terrain_elevation_m)
     # Once per run: parsing the 747's .ac parts is not per-frame work.
     airframe, airframe_source = airframe_geometry(aircraft)
+    other_faces: Dict[str, list] = {}
     written: List[Path] = []
     for record in frames:
         width = max(int(record["width_px"]) // PREVIEW_SCALE, 16)
@@ -341,16 +348,27 @@ def render_previews(manifest: Dict, out_dir, heightfield=None,
             draw.line([(x - 4, y), (x + 4, y)], fill=(255, 120, 120))
             draw.line([(x, y - 4), (x, y + 4)], fill=(255, 120, 120))
 
+        # Every aircraft in the frame: the main one and each other one at
+        # its own state, with its own airframe.
+        planes = [(record, airframe)]
+        for other, state in (traffic or {}).get(record.get("sample_index"), []):
+            if other not in other_faces:
+                other_faces[other] = airframe_geometry(str(other))[0]
+            planes.append(({"aircraft": state}, other_faces[other]))
+
         # The aircraft's shadow first: it lands on the ground, so the
         # solid is drawn over it, and the ground is already down.
-        for shadow in _shadow_faces(record, airframe, ground_alt):
-            pixels = [to_px(v) for v in shadow]
-            if any(p is None for p in pixels):
-                continue
-            draw.polygon(pixels, fill=(58, 66, 52))
+        for plane, faces in planes:
+            for shadow in _shadow_faces(plane, faces, ground_alt):
+                pixels = [to_px(v) for v in shadow]
+                if any(p is None for p in pixels):
+                    continue
+                draw.polygon(pixels, fill=(58, 66, 52))
 
-        for _, vertices, colour, lambert in _aircraft_faces(
-                record, airframe, camera):
+        solids = [face for plane, faces in planes
+                  for face in _aircraft_faces(plane, faces, camera)]
+        solids.sort(key=lambda item: -item[0])
+        for _, vertices, colour, lambert in solids:
             pixels = [to_px(v) for v in vertices]
             if any(p is None for p in pixels):
                 continue

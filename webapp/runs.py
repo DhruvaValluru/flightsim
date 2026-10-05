@@ -93,6 +93,7 @@ from webapp.capture import (  # noqa: E402
     card_blocks as capture_card_blocks,
     finish as capture_finish,
     landmarks as capture_landmark_set,
+    card_scene_objects as capture_card_scene_objects,
     render_passes as capture_render_passes,
     resolve_over_host as capture_resolve_over_host,
     solve as capture_solve,
@@ -2039,13 +2040,18 @@ class RunManager:
         except SunError as exc:
             return {"refused": str(exc), "constraint": exc.constraint}
 
-        if not ue_available():
+        headless = not ue_available()
+        if headless and not wants_capture(spec):
             # The named platform refusal, not a 500: rendering needs the
             # Windows host (engine + built bridge). The headless half (spec,
             # provenance, validation, telemetry via run_spec) already
             # happened or remains available on this OS.
             return {"refused": ue_platform_refusal(),
                     "constraint": "ue.platform"}
+        # A spec with cameras on a machine without the engine is CAPTURED
+        # headlessly instead of refused: the manifest, every frame's data,
+        # an engine-free picture of every frame with its 2-D / 3-D boxes,
+        # and the verification -- everything but photographic pixels.
         with self._lock:
             active = self.runs.get(self._active) if self._active else None
             if active is not None and active.status not in ("done", "failed"):
@@ -2061,7 +2067,8 @@ class RunManager:
             self.runs[run.run_id] = run
             self._active = run.run_id
         thread = threading.Thread(target=self._execute,
-                                  args=(run, spec, provenance), daemon=True)
+                                  args=(run, spec, provenance, headless),
+                                  daemon=True)
         thread.start()
         return {"run_id": run.run_id}
 
@@ -2354,11 +2361,53 @@ class RunManager:
         return "\n".join(line for line in chosen if line)
 
     def _execute(self, run: RunState, spec: ScenarioSpec,
-                 provenance: Dict) -> None:
+                 provenance: Dict, headless: bool = False) -> None:
         try:
-            self._render_flow(run, spec, provenance)
+            if headless:
+                self._headless_flow(run, spec)
+            else:
+                self._render_flow(run, spec, provenance)
         except Exception as exc:   # surfaced to the UI, never swallowed
             run.push("failed", f"{type(exc).__name__}: {exc}")
+
+    def _headless_flow(self, run: RunState, spec: ScenarioSpec) -> None:
+        """A captured run with no engine on this machine (see
+        webapp.capture.headless_capture): no clip, no photographic frames;
+        the manifest, every frame's data file, an engine-free picture of
+        every frame with its box pictures, and the verification."""
+        from webapp.capture import headless_capture
+
+        out = self.out_root / run.run_id
+        out.mkdir(parents=True, exist_ok=True)
+        run.push("headless", "no Unreal host on this machine: capturing "
+                             "headlessly (engine-free pictures, full labels)")
+        scene = pick_scene(spec)
+        run.scene = scene
+        derive_seed(spec, terrain_coupled=coupling_needs_seed(spec))
+        spec.write(out / "scenario.yaml")
+        heightfield = ground = None
+        if scene.get("terrain"):
+            from core.terrain.ground import TerrainGround
+            from core.terrain.heightfield import Heightfield
+
+            heightfield = Heightfield.read(Path(scene["terrain"]))
+            ground = TerrainGround(heightfield)
+        try:
+            summary = headless_capture(
+                spec, scene, out, heightfield=heightfield, terrain_ground=ground,
+                duration_s=min(float(spec.duration.value), CLIP_SECONDS),
+                push=run.push)
+        except CaptureError as exc:
+            run.push("failed", f"[{exc.constraint}] {exc.message}")
+            return
+        manifest = json.loads((out / "capture_manifest.json").read_text(encoding="utf-8"))
+        run.capture = {**summary, "manifest_version": manifest.get("manifest_version"),
+                       "headless": True}
+        failed = [c["name"] for c in summary["checks"] if c["status"] == "FAIL"]
+        run.push("done", "captured headlessly: engine-free pictures of every "
+                         "frame with their 2-D and 3-D boxes, and every frame's "
+                         "labels" + (f"; verification FAILED: {', '.join(failed)}"
+                                     if failed else ""))
 
     def _render_flow(self, run: RunState, spec: ScenarioSpec,
                      provenance: Dict) -> None:
@@ -2633,6 +2682,11 @@ class RunManager:
             # camera field the jitter moved -- what the render was given.
             randomization=randomization_card_block(spec),
         )
+        if capture_solved is not None:
+            # The objects, the class list and every other aircraft's track,
+            # as the CLI capture card carries them: the host stencils the
+            # labelled objects and draws the second plane from these.
+            card_arguments.update(capture_card_scene_objects(spec, capture_solved))
         card = write_run_card(spec, out / "card.json", **card_arguments)
         # The physical sky (stated time of day, or FLIGHTSIM_SKY): planned
         # before provenance so its summary rides in the conditions.
@@ -2688,7 +2742,8 @@ class RunManager:
             # and the cameras are not part of it.
             solve_card = write_run_card(
                 spec, out / "host_flight" / "card.json",
-                **{**card_arguments, "cameras": None, "landmarks": None})
+                **{**card_arguments, "cameras": None, "landmarks": None,
+                   "objects": None, "taxonomy": None, "traffic": None})
             if not self._fly_host(solve_card, host_telemetry, scene,
                                   mesh=mesh, aircraft=aircraft):
                 # Whichever tool flew it wrote a log: the scenario
@@ -2739,7 +2794,9 @@ class RunManager:
                 spec, out / "card.json",
                 **{**card_arguments,
                    "cameras": capture_card_blocks(spec, capture_solved),
-                   "landmarks": capture_landmarks})
+                   "landmarks": capture_landmarks,
+                   # the other aircraft re-solved over the host's own flight
+                   **capture_card_scene_objects(spec, capture_solved)})
             # The run's telemetry.json is the flight the aero panel and
             # the effect report read. It used to be written by the render
             # pass (-telemetry=<run>/telemetry.json); giving each camera

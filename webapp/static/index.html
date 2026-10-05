@@ -31,6 +31,8 @@
   .src-edited   { color: #6fb3e0; }
   .verdict-ok      { color: #7fd08f; }
   .verdict-refused { color: #e07a6f; }
+  .dsRow { margin: .35rem 0; }
+  .dsRow input[type=number] { width: 4.5rem; }
   .infoBtn { border-radius: 50%; width: 1.6rem; height: 1.6rem; padding: 0;
              font-style: italic; font-family: serif; }
   .infoBox { margin: .5rem 0; padding: .5rem .7rem; background: #101820;
@@ -818,8 +820,13 @@ async function poll() {
     $("clipArea").innerHTML =
       `<div class="clipRow"><div class="clipMain">` +
       `<div class="dim">scene: ${run.scene.label || run.scene.kind}</div>` +
-      `<video id="clipVideo" controls src="/runs/${activeRun}/clip.mp4">` +
-      `</video>` +
+      (run.capture && run.capture.headless
+        ? `<div class="dim">Captured headlessly (no Unreal host on this ` +
+          `machine): no video clip. Every frame has an engine-free picture ` +
+          `with its 2-D and 3-D boxes and its full labels — open the ` +
+          `frames below.</div>`
+        : `<video id="clipVideo" controls src="/runs/${activeRun}/clip.mp4">` +
+          `</video>`) +
       `<div class="dim"><a style="color:#6fb3e0" ` +
       `href="/runs/${activeRun}/provenance.json">provenance</a> · ` +
       `<a style="color:#6fb3e0" ` +
@@ -834,6 +841,51 @@ async function poll() {
     initEffectReport(activeRun);
   } else if (run.status !== "failed") {
     setTimeout(poll, 2000);
+  }
+}
+
+function esc(text) {
+  return String(text).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;",
+    ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c]);
+}
+
+// The run's dataset download, with what the person picked. A refusal (an
+// unverified run, a split that does not sum to 100, an unknown camera) is
+// shown in words; a good answer is saved as a file.
+async function downloadDataset(runId) {
+  const value = id => document.getElementById(id).value;
+  const checked = id => document.getElementById(id).checked;
+  const cams = [...document.querySelectorAll(".dsCam")].filter(c => c.checked)
+    .map(c => c.value);
+  const state = document.getElementById("dsState");
+  if (!cams.length) { state.textContent = "pick at least one camera"; return; }
+  const query = new URLSearchParams({
+    format: value("dsFormat"), image: value("dsImage"), cameras: cams.join(","),
+    train: (+value("dsTrain") || 0) / 100, val: (+value("dsVal") || 0) / 100,
+    test: (+value("dsTest") || 0) / 100, seed: +value("dsSeed") || 0,
+    labels_only: checked("dsLabelsOnly"), tabular: checked("dsTabular"),
+    box_pictures: checked("dsBox2d"), box3d_pictures: checked("dsBox3d"),
+  });
+  state.textContent = "exporting...";
+  try {
+    const response = await fetch(`/runs/${runId}/dataset.zip?${query}`);
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      state.textContent = payload.refused
+        ? `REFUSED [${payload.refused}] ${payload.error}`
+        : (payload.error || `export failed (${response.status})`);
+      return;
+    }
+    const blob = await response.blob();
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${runId}_dataset_${value("dsFormat")}.zip`;
+    link.click();
+    state.textContent = "downloaded" +
+      (response.headers.get("X-Dataset-Labels-Only") === "1" ? " (labels only)" : "") +
+      " — your choices are in dataset.json under \"choices\"";
+  } catch (error) {
+    state.textContent = `could not reach the server: ${error}`;
   }
 }
 
@@ -1016,7 +1068,9 @@ async function initAeroPanel(runId, run) {
     `coefficient tables), not validated aircraft performance (§2.1).</div>`;
 
   const canvas = $("aeroCanvas");
-  const video = $("clipVideo");
+  // A headless run has no clip: the panel then shows the first sample.
+  const video = $("clipVideo") ||
+    {currentTime: 0, paused: true, ended: true, addEventListener() {}};
 
   const sampleAt = t => {
     const interval = telemetry.interval_s || 0.1;
@@ -1443,6 +1497,37 @@ async function initGallery(runId, run) {
       schemaLink +
       `<a href="/runs/${runId}/card.json">run card</a> &middot; ` +
       `<a href="/runs/${runId}/provenance.json">provenance</a></div>`);
+    // The whole run as a training dataset: the person picks the format and
+    // what goes in; every choice is written into the dataset card.
+    const camOptions = cameras.map(c =>
+      `<label><input type="checkbox" class="dsCam" value="${esc(c.camera_id)}" checked> ` +
+      `${esc(c.camera_id)}</label>`).join(" ");
+    html.push(`<div class="card" id="datasetPanel" style="margin-top:8px">` +
+      `<b>Download this run as a dataset</b> <span class="dim">— every choice ` +
+      `below is written into the dataset card (dataset.json, DATASET_CARD.md)</span>` +
+      `<div class="dsRow">format <select id="dsFormat">` +
+      `<option value="coco">COCO</option><option value="kitti">KITTI</option>` +
+      `<option value="webdataset">WebDataset</option><option value="yolo">YOLO</option>` +
+      `<option value="voc">Pascal VOC</option><option value="all">all five formats</option>` +
+      `</select> &nbsp; image <select id="dsImage">` +
+      `<option value="ideal">ideal (as rendered)</option>` +
+      `<option value="sensor">sensor-modelled</option></select></div>` +
+      `<div class="dsRow">cameras: ${camOptions}</div>` +
+      `<div class="dsRow">split % train <input id="dsTrain" type="number" value="80" min="0" max="100"> ` +
+      `val <input id="dsVal" type="number" value="10" min="0" max="100"> ` +
+      `test <input id="dsTest" type="number" value="10" min="0" max="100"> ` +
+      `seed <input id="dsSeed" type="number" value="0"></div>` +
+      `<div class="dsRow">` +
+      `<label><input type="checkbox" id="dsLabelsOnly"> labels only (no pictures)</label> ` +
+      `<label><input type="checkbox" id="dsTabular"> flight table (CSV + NPZ)</label> ` +
+      `<label><input type="checkbox" id="dsBox2d"> 2-D box pictures</label> ` +
+      `<label><input type="checkbox" id="dsBox3d"> 3-D box pictures</label></div>` +
+      `<div class="dsRow"><button id="dsGo" class="opt">Download dataset (zip)</button> ` +
+      `<span id="dsState" class="dim">` +
+      (run.capture && run.capture.headless
+        ? `this run has no engine-rendered pictures, so it exports labels only ` +
+          `(the card says why)`
+        : ``) + `</span></div></div>`);
   }
 
   // Per camera: what it is, and the way in to ITS frames with ITS
@@ -1466,6 +1551,9 @@ async function initGallery(runId, run) {
       `this camera's manifest</a> <span class="dim">&middot;</span> ` +
       `<a href="/runs/${runId}/cameras/${id}/frames.zip">` +
       `download every frame with its labels (zip)</a>` +
+      ` <span class="dim">&middot;</span> ` +
+      `<a href="/runs/${runId}/cameras/${id}/box3d.zip">` +
+      `download the 3-D boxes (3D zip)</a>` +
       `</div>`);
     // The view's OWN clip: the flight from that angle, at the rate its
     // frames were taken. The page used to show one video for the whole
@@ -1501,6 +1589,8 @@ async function initGallery(runId, run) {
     }
   }
   area.innerHTML = html.join("");
+  const datasetGo = document.getElementById("dsGo");
+  if (datasetGo) datasetGo.addEventListener("click", () => downloadDataset(runId));
 }
 
 function renderVerify(capture) {

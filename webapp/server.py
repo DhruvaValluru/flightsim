@@ -797,7 +797,7 @@ def run_effect(run_id: str):
 #: build a path out of anything but a known directory plus a matched
 #: filename.
 _IMAGE_KINDS = {"frames": "frames", "overlays": "overlays",
-                "previews": "previews"}
+                "boxed": "boxed", "boxed3d": "boxed3d", "previews": "previews"}
 #: A frame image, a frame's own label sidecar beside it, or the metric
 #: depth the label bundle declares under ``labels.depth_f32`` (raw
 #: little-endian float32, contracts §8): the one bundle member that is
@@ -857,15 +857,79 @@ def run_camera_manifest(run_id: str, camera_id: str):
         return JSONResponse({"error": f"manifest unreadable: {exc}"},
                             status_code=500)
 
+    from core.capture.frame_checks import read_frame_checks
     from webapp.capture import camera_view
 
-    view = camera_view(manifest, camera_id)
+    view = camera_view(manifest, camera_id,
+                       read_frame_checks(manager.out_root / run_id))
     if view is None:
         return JSONResponse(
             {"error": f"this run has no camera {camera_id!r}; it states "
                       f"{[c.get('camera_id') for c in manifest.get('cameras', [])]}"},
             status_code=404)
     return JSONResponse({**view, "run_id": run_id})
+
+
+@app.get("/runs/{run_id}/dataset.zip")
+def run_dataset_archive(run_id: str, format: str = "coco",
+                        cameras: Optional[str] = None, image: str = "ideal",
+                        labels_only: bool = False, train: float = 0.8,
+                        val: float = 0.1, test: float = 0.1, seed: int = 0,
+                        tabular: bool = False, box_pictures: bool = False,
+                        box3d_pictures: bool = False):
+    """The whole run exported as a dataset with the choices made on the
+    page -- format (coco, kitti, webdataset, yolo, voc or all), cameras
+    (comma list; all when absent), image (ideal | sensor), labels only,
+    the train / val / test split and its seed, the tabular flight table,
+    and the 2-D / 3-D box pictures -- every one written into the dataset
+    card's ``choices``. The export's refusals stand, in words, as a 409;
+    ``X-Dataset-Labels-Only: 1`` when the zip holds labels only."""
+    from core.dataset.export import ExportError
+    from webapp.capture import dataset_archive
+
+    out = manager.out_root / run_id
+    if not (out / "capture_manifest.json").is_file():
+        return JSONResponse({"error": "this run has no capture manifest (no "
+                                      "cameras were stated), so there is "
+                                      "nothing to export"}, status_code=404)
+    picked = [c.strip() for c in (cameras or "").split(",") if c.strip()]
+    if any(not _CAMERA_NAME.match(c) for c in picked):
+        return JSONResponse({"error": "no such camera"}, status_code=404)
+    try:
+        result = dataset_archive(
+            out, format, cameras=picked or None, image=image,
+            labels_only=labels_only, fractions=(train, val, test), seed=seed,
+            tabular=tabular, box_pictures=box_pictures,
+            box3d_pictures=box3d_pictures,
+            chosen_on="the web app's run page (dataset download)")
+    except ExportError as exc:
+        return JSONResponse({"refused": exc.constraint, "error": exc.message},
+                            status_code=409)
+    response = FileResponse(result["archive"], media_type="application/zip",
+                            filename=f"{run_id}_dataset_{result['format']}.zip")
+    if result["labels_only"]:
+        response.headers["X-Dataset-Labels-Only"] = "1"
+    return response
+
+
+@app.get("/runs/{run_id}/cameras/{camera_id}/box3d.zip")
+def run_camera_box3d_archive(run_id: str, camera_id: str):
+    """ONE view's 3-D boxes as a download: per frame the 3-D box picture
+    and that frame's box_3d JSON. Declared before the generic image route
+    for the same reason the frames zip is."""
+    from webapp.capture import box3d_archive
+
+    if not _CAMERA_NAME.match(camera_id):
+        return JSONResponse({"error": "no such camera"}, status_code=404)
+    out = manager.out_root / run_id
+    if not out.is_dir():
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    archive = box3d_archive(out, camera_id)
+    if archive is None:
+        return JSONResponse({"error": f"camera {camera_id!r} has no frames in "
+                                      f"this run"}, status_code=404)
+    return FileResponse(archive, media_type="application/zip",
+                        filename=f"{run_id}_{camera_id}_3d_boxes.zip")
 
 
 @app.get("/runs/{run_id}/cameras/{camera_id}/frames.zip")

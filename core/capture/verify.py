@@ -2472,14 +2472,32 @@ def _object_geometry(manifest: Dict, record: Dict, entry: Dict, axes):
         box3 = (own or {}).get("bbox_3d_camera") if own else None
         if not isinstance(airframe, dict):
             return None, f"{entry.get('id')}: no traffic airframe block in the manifest"
-        if not isinstance(box3, dict) or not box3.get("cg_m") or not box3.get("body_axes_in_camera"):
+        state = None
+        for item in record.get("traffic_states") or []:
+            if isinstance(item, dict) and item.get("int_id") == int_id:
+                state = item
+        if state is not None:
+            # The frame records this aircraft's own state: place it with
+            # the verifier's own rotation, exactly as the primary is.
+            cg = _camera_coords(record, (float(state["north_m"]), float(state["east_m"]),
+                                         float(state["alt_m"])), axes)
+            body_axes = []
+            for unit in ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)):
+                tip = _camera_coords(record, _body_point_enu(unit, state), axes)
+                body_axes.append(tuple(t - c for t, c in zip(tip, cg)))
+            placement = ("the frame's traffic_states entry through the verifier's "
+                         "own rotation")
+        elif not isinstance(box3, dict) or not box3.get("cg_m") \
+                or not box3.get("body_axes_in_camera"):
             return None, (f"{entry.get('id')}: the record carries no bbox_3d_camera "
                           f"placement for it")
-        cg = tuple(float(v) for v in box3["cg_m"])
-        body_axes = [tuple(float(v) for v in row) for row in box3["body_axes_in_camera"]]
-        placement = ("the record's bbox_3d_camera placement (the manifest records no "
-                     "per-frame traffic state; the projection and the pixels are graded, "
-                     "the placement is not independently re-derived)")
+        else:
+            cg = tuple(float(v) for v in box3["cg_m"])
+            body_axes = [tuple(float(v) for v in row) for row in box3["body_axes_in_camera"]]
+            placement = ("the record's bbox_3d_camera placement (a manifest written "
+                         "before frames carried traffic_states; the projection and "
+                         "the pixels are graded, the placement is not independently "
+                         "re-derived)")
     box, basis = _hull_box_body(manifest, airframe, entry.get("role") == "primary"
                                 or int_id == AIRCRAFT_INSTANCE_ID)
     lo = (box["forward"][0], box["right"][0], box["down"][0])
@@ -2973,6 +2991,256 @@ def verify_box_vs_mask(manifest: Dict, run_dir=None) -> Check:
                  f"records' bbox_2d_tight re-counted from the ID image to a pixel"
                  + (f"; {not_claimed} under {BOX_IOU_MIN_PX:.0f} px not claimed"
                     if not_claimed else ""))
+
+
+#: label_geometry_3d tolerances: the record's numbers are floats through
+#: JSON, so an independent re-derivation agrees to rounding.
+BOX3D_TOL_M = 0.01
+AXIS_TOL = 1e-6
+TRUNCATION_TOL = 1e-4
+FACING_TOL_DEG = 0.01
+
+
+def _own_state(record: Dict, entry: Dict) -> Optional[Dict]:
+    """The aircraft state the verifier places an object from: the frame's
+    own ``aircraft`` block for the primary, its ``traffic_states`` entry
+    for any other aircraft; None when the frame records none."""
+    int_id = int(entry["int_id"])
+    if entry.get("role") == "primary" or int_id == AIRCRAFT_INSTANCE_ID:
+        return record.get("aircraft") if isinstance(record.get("aircraft"), dict) else None
+    for item in record.get("traffic_states") or []:
+        if isinstance(item, dict) and item.get("int_id") == int_id:
+            return item
+    return None
+
+
+def _stated_box(manifest: Dict, entry: Dict) -> Optional[Dict]:
+    int_id = int(entry["int_id"])
+    airframe = None
+    if entry.get("role") == "primary" or int_id == AIRCRAFT_INSTANCE_ID:
+        airframe = manifest.get("airframe")
+    else:
+        for traffic in manifest.get("traffic") or []:
+            if isinstance(traffic, dict) and traffic.get("int_id") == int_id:
+                airframe = traffic.get("airframe")
+    box = (airframe or {}).get("box_body_m") if isinstance(airframe, dict) else None
+    if not isinstance(box, dict):
+        return None
+    return {k: (float(box[k][0]), float(box[k][1])) for k in ("forward", "right", "down")}
+
+
+def _sidecar_sections(run_dir, record: Dict) -> Optional[Dict]:
+    if run_dir is None:
+        return None
+    file = str(record.get("file", ""))
+    if not file.endswith(".png"):
+        return None
+    path = Path(run_dir) / (file[:-len(".png")] + ".json")
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+@_reads_the_bundle
+def verify_label_geometry_3d(manifest: Dict, run_dir=None) -> Check:
+    """Every aircraft's 3-D box, its truncation and its hiding breakdown,
+    re-derived here from scratch and compared with the record.
+
+    Per labelled frame, per aircraft object whose state the frame records
+    (the primary's ``aircraft``, any other's ``traffic_states``): (1) the
+    verifier's own rotation places the stated box -- the CG, the body
+    axes, the centre and all eight corners must match ``bbox_3d_camera``
+    to BOX3D_TOL_M / AXIS_TOL; (2) the corners, projected with the
+    verifier's own pinhole, give the full box, the cut box and the share
+    inside -- they must match ``bbox_2d_unclipped`` / ``bbox_2d`` /
+    ``fraction_in_frame`` / ``truncation``; (3) where the frame's data file
+    exists, its ``truncation`` and ``box_3d`` sections (cut box, full box,
+    fraction inside, cut edges, yaw / pitch) must say the same as the
+    verifier's numbers; (4) where the engine's ID image and the object's
+    alone pass exist, ``occluded_pixels_by`` must be the verifier's own
+    count of the footprint pixels each other id covers. Nothing here comes
+    from the code that wrote the labels.
+    """
+    objects = _declared_objects(manifest)
+    if not objects:
+        return Check("label_geometry_3d", NOT_RUN, _no_objects_reason(manifest))
+    import numpy as np
+
+    aircraft = _aircraft_entries(objects)
+    id_of = {int(e["int_id"]): str(e.get("id")) for e in objects
+             if isinstance(e, dict) and e.get("int_id") is not None}
+    bundles = _engine_label_records(run_dir) if run_dir is not None else {}
+    graded = 0
+    placed_from_record = 0
+    sidecars = 0
+    occlusion_counted = 0
+    worst = 0.0
+    for record in _labelled_frames(manifest):
+        axes = axes_from_quat(record["quaternion_wxyz"])
+        width, height = float(record["width_px"]), float(record["height_px"])
+        cx, cy = record["principal_point_px"]
+        fx, fy = float(record["fx_px"]), float(record["fy_px"])
+        where_frame = f"{record.get('camera_id')}/{record.get('index')}"
+        sidecar = _sidecar_sections(run_dir, record)
+        for entry in aircraft:
+            int_id = int(entry["int_id"])
+            own_record = _record_object(record, int_id)
+            if own_record is None:
+                continue
+            where = f"{where_frame} {entry.get('id')}"
+            state = _own_state(record, entry)
+            box = _stated_box(manifest, entry)
+            recorded = own_record.get("bbox_3d_camera")
+            if state is None or box is None:
+                placed_from_record += 1
+                continue
+            cg = _camera_coords(record, (float(state["north_m"]), float(state["east_m"]),
+                                         float(state["alt_m"])), axes)
+            body = []
+            for unit in ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)):
+                tip = _camera_coords(record, _body_point_enu(unit, state), axes)
+                body.append(tuple(t - c for t, c in zip(tip, cg)))
+            corners = [_camera_coords(record, _body_point_enu((x, y, z), state), axes)
+                       for x in box["forward"] for y in box["right"] for z in box["down"]]
+            centre = _camera_coords(record, _body_point_enu(
+                tuple((lo + hi) / 2.0 for lo, hi in (box["forward"], box["right"],
+                                                     box["down"])), state), axes)
+            # (1) the 3-D box
+            if not isinstance(recorded, dict) or len(recorded.get("corners_m") or []) != 8:
+                return Check("label_geometry_3d", FAIL,
+                             f"{where}: the record carries no 3-D box while the frame "
+                             f"places the aircraft", failure=FAIL_BOX_MISMATCH)
+            for name, mine, theirs, tol in (
+                    ("cg_m", [cg], [recorded.get("cg_m")], BOX3D_TOL_M),
+                    ("centre_m", [centre], [recorded.get("centre_m")], BOX3D_TOL_M),
+                    ("corners_m", corners, recorded["corners_m"], BOX3D_TOL_M),
+                    ("body_axes_in_camera", body, recorded.get("body_axes_in_camera"),
+                     AXIS_TOL)):
+                if not theirs or any(t is None for t in theirs):
+                    return Check("label_geometry_3d", FAIL,
+                                 f"{where}: bbox_3d_camera.{name} is missing",
+                                 failure=FAIL_BOX_MISMATCH)
+                gap = max(abs(float(a) - float(b)) for m, t in zip(mine, theirs)
+                          for a, b in zip(m, t))
+                if name != "body_axes_in_camera":
+                    worst = max(worst, gap)
+                if gap > tol:
+                    return Check("label_geometry_3d", FAIL,
+                                 f"{where}: bbox_3d_camera.{name} is {gap:.4g} off the "
+                                 f"verifier's own placement (tolerance {tol:g})",
+                                 failure=FAIL_BOX_MISMATCH)
+            # (2) truncation from the verifier's own projection
+            full = cut = fraction = None
+            if all(c[2] > 0.0 for c in corners):
+                us = [cx + fx * c[0] / c[2] for c in corners]
+                vs = [cy + fy * c[1] / c[2] for c in corners]
+                full = (min(us), min(vs), max(us), max(vs))
+                clip = (max(full[0], 0.0), max(full[1], 0.0),
+                        min(full[2], width), min(full[3], height))
+                cut = clip if clip[2] > clip[0] and clip[3] > clip[1] else None
+                area = max(0.0, full[2] - full[0]) * max(0.0, full[3] - full[1])
+                inside = ((cut[2] - cut[0]) * (cut[3] - cut[1])) if cut else 0.0
+                fraction = inside / area if area > 0.0 else 0.0
+            rec_full = own_record.get("bbox_2d_unclipped")
+            rec_fraction = own_record.get("fraction_in_frame")
+            rec_trunc = own_record.get("truncation")
+            if (full is None) != (rec_full is None):
+                return Check("label_geometry_3d", FAIL,
+                             f"{where}: the record's full box is {rec_full!r} but the "
+                             f"verifier's is {full!r}", failure=FAIL_BOX_MISMATCH)
+            if full is not None:
+                gap = max(abs(float(a) - b) for a, b in zip(rec_full, full))
+                if gap > 0.01:
+                    return Check("label_geometry_3d", FAIL,
+                                 f"{where}: bbox_2d_unclipped is {gap:.3f} px off the "
+                                 f"verifier's own projection", failure=FAIL_BOX_MISMATCH)
+                for name, value, mine in (("fraction_in_frame", rec_fraction, fraction),
+                                          ("truncation", rec_trunc, 1.0 - fraction)):
+                    if value is None or abs(float(value) - mine) > TRUNCATION_TOL:
+                        return Check("label_geometry_3d", FAIL,
+                                     f"{where}: {name} is {value!r}, the verifier "
+                                     f"computes {mine:.6f} from its own projection",
+                                     failure=FAIL_BOX_MISMATCH)
+            # (3) the frame's data file says the same
+            if isinstance(sidecar, dict):
+                sections = {s.get("id"): s for s in
+                            ((sidecar.get("truncation") or {}).get("aircraft") or [])}
+                boxes = {s.get("id"): s for s in
+                         ((sidecar.get("box_3d") or {}).get("aircraft") or [])}
+                trunc = sections.get(str(entry.get("id")))
+                if trunc is not None and fraction is not None:
+                    if trunc.get("fraction_inside") is None or \
+                            abs(float(trunc["fraction_inside"]) - fraction) > TRUNCATION_TOL:
+                        return Check("label_geometry_3d", FAIL,
+                                     f"{where}: the data file's truncation says "
+                                     f"{trunc.get('fraction_inside')!r} inside, the "
+                                     f"verifier {fraction:.6f}",
+                                     failure=FAIL_BOX_MISMATCH)
+                    edges = [e for e, out_ in (("left", full[0] < 0.0),
+                                               ("right", full[2] > width),
+                                               ("top", full[1] < 0.0),
+                                               ("bottom", full[3] > height)) if out_]
+                    if sorted(trunc.get("cut_edges") or []) != sorted(edges):
+                        return Check("label_geometry_3d", FAIL,
+                                     f"{where}: the data file's cut_edges "
+                                     f"{trunc.get('cut_edges')} are not {edges}",
+                                     failure=FAIL_BOX_MISMATCH)
+                facing = (boxes.get(str(entry.get("id"))) or {}).get("orientation")
+                if isinstance(facing, dict):
+                    f = body[0]
+                    yaw = math.degrees(math.atan2(f[0], f[2]))
+                    pitch = math.degrees(math.asin(max(-1.0, min(1.0, -f[1]))))
+                    if abs(float(facing.get("yaw_deg", 1e9)) - yaw) > FACING_TOL_DEG or \
+                            abs(float(facing.get("pitch_deg", 1e9)) - pitch) > FACING_TOL_DEG:
+                        return Check("label_geometry_3d", FAIL,
+                                     f"{where}: the data file says yaw "
+                                     f"{facing.get('yaw_deg')} / pitch "
+                                     f"{facing.get('pitch_deg')}, the verifier "
+                                     f"{yaw:.3f} / {pitch:.3f}",
+                                     failure=FAIL_BOX_MISMATCH)
+                    sidecars += 1
+            # (4) the hiding breakdown, recounted from the images
+            engine = bundles.get(str(record.get("camera_id")), {}).get(
+                Path(str(record.get("file"))).name)
+            recorded_hidden = own_record.get("occluded_pixels_by")
+            if engine is not None and isinstance(recorded_hidden, dict):
+                labels = engine.get("labels") or {}
+                folder = Path(run_dir) / "frames" / str(record.get("camera_id"))
+                alone_name = _alone_files(labels).get(int_id)
+                if labels.get("mask") and alone_name:
+                    mask = _read_gray_png(folder / labels["mask"])
+                    alone = _read_gray_png(folder / alone_name)
+                    if mask is not None and alone is not None:
+                        footprint = alone == int_id
+                        values, counts = np.unique(mask[footprint], return_counts=True)
+                        mine = {id_of.get(int(v), f"int_id:{int(v)}"): int(c)
+                                for v, c in zip(values, counts)
+                                if int(v) not in (0, int_id)}
+                        theirs = {str(k): int(v) for k, v in recorded_hidden.items()}
+                        if mine != theirs:
+                            return Check("label_geometry_3d", FAIL,
+                                         f"{where}: occluded_pixels_by {theirs} is not "
+                                         f"the verifier's own count {mine}",
+                                         failure=FAIL_BOX_MISMATCH)
+                        occlusion_counted += 1
+            graded += 1
+    if graded == 0:
+        return Check("label_geometry_3d", NOT_RUN,
+                     "no aircraft object whose state this manifest records"
+                     + (f" ({placed_from_record} object-frames without one: a "
+                        f"manifest from before frames carried traffic_states)"
+                        if placed_from_record else ""))
+    return Check("label_geometry_3d", PASS,
+                 f"{graded} object-frames: 3-D box placed by the verifier's own "
+                 f"rotation (largest gap {worst:.2g} m), full box / cut box / "
+                 f"fraction inside from its own projection; {sidecars} data-file "
+                 f"truncation / facing sections agree; {occlusion_counted} hiding "
+                 f"breakdowns recounted from the ID image"
+                 + (f"; {placed_from_record} object-frames had no recorded state and "
+                    f"were not graded" if placed_from_record else ""))
 
 
 @_reads_the_bundle
@@ -3566,35 +3834,73 @@ def verify_applied_intrinsics(manifest: Dict, run_dir=None) -> Check:
 SENSOR_UNDISTORT_TOL_PX = 0.05
 
 
-def verify_sensor_undistortion(manifest: Dict) -> Check:
-    from .profile import (CameraProfile, CameraProfileError,
-                          pinhole_pixel_from_sensor)
+def _own_distort(c: Dict[str, float], x: float, y: float) -> Tuple[float, float]:
+    """Brown-Conrady forward, written here from the model's definition
+    (radial k1..k3, tangential p1, p2) -- not imported from the producer."""
+    r2 = x * x + y * y
+    radial = 1.0 + r2 * (c["k1"] + r2 * (c["k2"] + r2 * c["k3"]))
+    return (x * radial + 2.0 * c["p1"] * x * y + c["p2"] * (r2 + 2.0 * x * x),
+            y * radial + c["p1"] * (r2 + 2.0 * y * y) + 2.0 * c["p2"] * x * y)
 
-    profiles: Dict[str, CameraProfile] = {}
+
+def _own_undistort(c: Dict[str, float], xd: float, yd: float) -> Tuple[float, float]:
+    """The verifier's OWN inverse: the classic fixed-point iteration
+    x <- (xd - tangential(x)) / radial(x) (a different algorithm from the
+    producer's Newton solve), polished by a damped secant step until the
+    forward model returns the distorted point to 1e-13."""
+    x, y = xd, yd
+    for _ in range(500):
+        r2 = x * x + y * y
+        radial = 1.0 + r2 * (c["k1"] + r2 * (c["k2"] + r2 * c["k3"]))
+        if abs(radial) < 1e-12:
+            break
+        tx = 2.0 * c["p1"] * x * y + c["p2"] * (r2 + 2.0 * x * x)
+        ty = c["p1"] * (r2 + 2.0 * y * y) + 2.0 * c["p2"] * x * y
+        nx, ny = (xd - tx) / radial, (yd - ty) / radial
+        if abs(nx - x) < 1e-15 and abs(ny - y) < 1e-15:
+            x, y = nx, ny
+            break
+        x, y = nx, ny
+    for _ in range(50):
+        fx, fy = _own_distort(c, x, y)
+        ex, ey = xd - fx, yd - fy
+        if abs(ex) < 1e-13 and abs(ey) < 1e-13:
+            break
+        x, y = x + ex, y + ey
+    return x, y
+
+
+def _own_rotate(direction, axis_angle) -> Tuple[float, float, float]:
+    """Rotate a vector by the rotation vector ``axis_angle`` (rad), through
+    the rotation matrix I + sin(t) K + (1 - cos(t)) K^2."""
+    wx, wy, wz = axis_angle
+    t = math.sqrt(wx * wx + wy * wy + wz * wz)
+    if t < 1e-15:
+        return tuple(direction)
+    kx, ky, kz = wx / t, wy / t, wz / t
+    s, c1 = math.sin(t), 1.0 - math.cos(t)
+    R = [[1.0 - c1 * (ky * ky + kz * kz), -s * kz + c1 * kx * ky, s * ky + c1 * kx * kz],
+         [s * kz + c1 * kx * ky, 1.0 - c1 * (kx * kx + kz * kz), -s * kx + c1 * ky * kz],
+         [-s * ky + c1 * kx * kz, s * kx + c1 * ky * kz, 1.0 - c1 * (kx * kx + ky * ky)]]
+    return tuple(sum(R[i][j] * direction[j] for j in range(3)) for i in range(3))
+
+
+def verify_sensor_undistortion(manifest: Dict) -> Check:
+    """Every sensor keypoint, taken back to the ideal pinhole with the
+    VERIFIER'S OWN distortion inverse and rolling-shutter undo (nothing
+    imported from core/capture/profile.py), lands on the pinhole label."""
+    profiles: Dict[str, Dict] = {}
     for block in manifest.get("cameras", []):
         recorded = block.get("profile")
         if not isinstance(recorded, dict):
             continue
         try:
-            profiles[str(block["camera_id"])] = CameraProfile(
-                name=str(recorded["name"]), basis=str(recorded.get("basis", "")),
-                source=str(recorded.get("source", "")),
-                k1=float(recorded["distortion"]["k1"]),
-                k2=float(recorded["distortion"]["k2"]),
-                k3=float(recorded["distortion"]["k3"]),
-                p1=float(recorded["distortion"]["p1"]),
-                p2=float(recorded["distortion"]["p2"]),
-                readout_s=float(recorded["rolling_shutter"]["readout_s"]),
-                exposure_s=float(recorded["exposure"]["time_s"]),
-                reference_exposure_s=float(recorded["exposure"]["reference_time_s"]),
-                iso=float(recorded["exposure"]["iso"]),
-                base_iso=float(recorded["exposure"]["base_iso"]),
-                noise_model=str(recorded["noise"]["model"]),
-                full_well_e=float(recorded["noise"].get("full_well_e", 0.0)),
-                read_noise_e=float(recorded["noise"].get("read_noise_e", 0.0)),
-                vignetting_model=str(recorded["vignetting"]["model"]),
-                vignetting_strength=float(recorded["vignetting"].get("strength", 1.0)),
-                bit_depth=int(recorded.get("bit_depth", 8)))
+            d = recorded["distortion"]
+            profiles[str(block["camera_id"])] = {
+                "name": str(recorded["name"]),
+                "k1": float(d["k1"]), "k2": float(d["k2"]), "k3": float(d["k3"]),
+                "p1": float(d["p1"]), "p2": float(d["p2"]),
+                "readout_s": float(recorded["rolling_shutter"]["readout_s"])}
         except (KeyError, TypeError, ValueError) as exc:
             return Check("sensor_undistortion", FAIL,
                          f"camera {block.get('camera_id')!r}: recorded profile "
@@ -3616,18 +3922,29 @@ def verify_sensor_undistortion(manifest: Dict) -> Check:
                          f"{camera}: frames carry a sensor block but the "
                          f"camera block records no profile")
         sensor = record["sensor"]
-        if sensor.get("profile") != profile.name:
+        if sensor.get("profile") != profile["name"]:
             return Check("sensor_undistortion", FAIL,
                          f"{camera}/{record['index']}: frame names profile "
                          f"{sensor.get('profile')!r}, camera block "
-                         f"{profile.name!r}")
+                         f"{profile['name']!r}")
         omega = sensor.get("angular_rate_rad_s") or [0.0, 0.0, 0.0]
+        cx, cy = record["principal_point_px"]
+        fx, fy = float(record["fx_px"]), float(record["fy_px"])
+        height = float(record["height_px"])
         for name, kp in sensor.get("labels_sensor", {}).get("keypoints", {}).items():
             ideal = record["labels"]["keypoints"].get(name)
             if kp.get("u") is None or ideal is None or ideal.get("u") is None:
                 continue
-            u, v = pinhole_pixel_from_sensor(profile, record, kp["u"], kp["v"],
-                                             float(ideal["depth_m"]), omega)
+            x, y = _own_undistort(profile, (kp["u"] - cx) / fx, (kp["v"] - cy) / fy)
+            if profile["readout_s"] > 0.0:
+                t = profile["readout_s"] * (kp["v"] / height - 0.5)
+                depth = float(ideal["depth_m"])
+                # The scene turned by -omega*t during the row's delay; turn
+                # the direction back by +omega*t.
+                back = _own_rotate((x * depth, y * depth, depth),
+                                   tuple(float(w) * t for w in omega))
+                x, y = back[0] / back[2], back[1] / back[2]
+            u, v = cx + fx * x, cy + fy * y
             error = max(abs(u - ideal["u"]), abs(v - ideal["v"]))
             counted += 1
             if error > worst:
@@ -3637,9 +3954,9 @@ def verify_sensor_undistortion(manifest: Dict) -> Check:
                      "no sensor keypoint had a pinhole counterpart to compare")
     ok = worst <= SENSOR_UNDISTORT_TOL_PX
     return Check("sensor_undistortion", PASS if ok else FAIL,
-                 f"{counted} sensor keypoints undistorted with the recorded "
-                 f"profile; worst return error {worst:.4f} px at "
-                 f"{worst_where} (tolerance {SENSOR_UNDISTORT_TOL_PX})")
+                 f"{counted} sensor keypoints undistorted with the verifier's own "
+                 f"inverse of the recorded profile; worst return error "
+                 f"{worst:.4f} px at {worst_where} (tolerance {SENSOR_UNDISTORT_TOL_PX})")
 
 
 def verify_sensor_files(manifest: Dict, run_dir=None) -> Check:
@@ -8310,6 +8627,7 @@ def verify_run(run_dir, other_run_dir=None) -> VerificationReport:
     run("mask_integers_only", verify_mask_integers_only, manifest, run_dir)
     run("mask_vs_geometry", verify_mask_vs_geometry, manifest, run_dir)
     run("box_vs_mask", verify_box_vs_mask, manifest, run_dir)
+    run("label_geometry_3d", verify_label_geometry_3d, manifest, run_dir)
     run("depth_vs_geometry", verify_depth_vs_geometry, manifest, run_dir)
     run("visibility_vs_scene", verify_visibility_vs_scene, manifest, run_dir)
     run("identity_stable", verify_identity_stable, manifest, run_dir, other)
