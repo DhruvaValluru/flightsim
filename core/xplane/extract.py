@@ -1,0 +1,214 @@
+"""Extract water, terrain-type and sky-colour data from an X-Plane 12 install.
+
+One implementation; ``scripts/extract_xplane.py`` is a thin CLI over
+:func:`extract`. Output goes to ``data/xplane/`` (gitignored): X-Plane's
+files are Laminar Research's and are regenerated from the user's own
+install rather than redistributed, the same way ``data/glo30/`` is fetched
+rather than committed.
+
+What is read, and what each output does and does not claim:
+
+* ``Resources/map data/water/**/*.shp`` -> ``water/water_polygons.geojson``.
+  Polygon geometry only: the shapefiles ship without ``.dbf`` attributes, so
+  sea, lake and river are NOT distinguished. Coverage is whatever tiles the
+  install has; outside them the mask knows nothing.
+* ``Resources/default scenery/1000 world terrain/terrain*/**/*.ter`` ->
+  ``terrain/terrain_catalog.csv``. Name, folder and base texture of every
+  terrain definition. The ``category`` column is the name's first token, a
+  convenience and not an X-Plane classification.
+* ``Resources/bitmaps/skycolors/sky_colors_*.png`` -> copied to
+  ``lighting/`` plus ``lighting/sky_palettes.json``, the centre-column colour
+  of the left 128x512 gradient panel in 32 bands, top to bottom. The panel's
+  rows are sun-elevation bands by the image's own labels, but the exact
+  band-to-angle mapping has NOT been decoded here; the PNG is the source.
+
+The .shp reader is the ESRI polygon record layout read directly, so the
+extraction adds no dependency.
+"""
+
+from __future__ import annotations
+
+import csv
+import json
+import re
+import shutil
+import struct
+from pathlib import Path
+from typing import Dict, List, Sequence, Tuple
+
+from PIL import Image
+
+Ring = List[Tuple[float, float]]
+
+WATER_REL = Path("Resources") / "map data" / "water"
+TERRAIN_REL = Path("Resources") / "default scenery" / "1000 world terrain"
+SKY_REL = Path("Resources") / "bitmaps" / "skycolors"
+
+#: Polygon, PolygonZ, PolygonM share the bbox/parts/points prefix read here.
+_POLYGON_TYPES = (5, 15, 25)
+#: The gradient panel of a 256x640 sky_colors image; the rest is labels,
+#: per-channel strips and an unused fill.
+SKY_PANEL = (0, 0, 128, 512)
+SKY_SIZE = (256, 640)
+SKY_BANDS = 32
+
+_TILE = re.compile(r"^([+-]\d{2})([+-]\d{3})$")
+_BASE_TEX = re.compile(r"^\s*BASE_TEX\s+(\S+)", re.M)
+
+
+class XPlaneExtractError(Exception):
+    """The install does not contain what the extraction needs."""
+
+
+def read_shp_polygons(path: Path) -> List[List[Ring]]:
+    """Every polygon record of a .shp file as its list of rings (lon, lat)."""
+    data = path.read_bytes()
+    if len(data) < 100 or struct.unpack(">i", data[:4])[0] != 9994:
+        raise XPlaneExtractError(f"{path} is not an ESRI shapefile")
+    records = []
+    pos = 100
+    while pos + 8 <= len(data):
+        content_len = struct.unpack(">i", data[pos + 4:pos + 8])[0] * 2
+        body = data[pos + 8:pos + 8 + content_len]
+        pos += 8 + content_len
+        if len(body) < 44:
+            continue
+        if struct.unpack("<i", body[:4])[0] not in _POLYGON_TYPES:
+            continue
+        n_parts, n_points = struct.unpack("<ii", body[36:44])
+        parts = list(struct.unpack(f"<{n_parts}i", body[44:44 + 4 * n_parts]))
+        start = 44 + 4 * n_parts
+        flat = struct.unpack(f"<{2 * n_points}d",
+                             body[start:start + 16 * n_points])
+        points = list(zip(flat[0::2], flat[1::2]))
+        rings = [points[a:b] for a, b in zip(parts, parts[1:] + [n_points])]
+        rings = [r for r in rings if len(r) >= 4]
+        if rings:
+            records.append(rings)
+    return records
+
+
+def _signed_area(ring: Ring) -> float:
+    return 0.5 * sum(x0 * y1 - x1 * y0
+                     for (x0, y0), (x1, y1) in zip(ring, ring[1:]))
+
+
+def _point_in_ring(x: float, y: float, ring: Ring) -> bool:
+    inside = False
+    for (x0, y0), (x1, y1) in zip(ring, ring[1:]):
+        if (y0 > y) != (y1 > y) and x < x0 + (y - y0) * (x1 - x0) / (y1 - y0):
+            inside = not inside
+    return inside
+
+
+def rings_to_polygons(rings: Sequence[Ring]) -> List[List[Ring]]:
+    """Group a shapefile record's rings into GeoJSON polygons.
+
+    Shapefile outer rings are clockwise and holes counter-clockwise; a hole
+    belongs to the outer ring that contains it.
+    """
+    outers = [r for r in rings if _signed_area(r) <= 0]
+    holes = [r for r in rings if _signed_area(r) > 0]
+    if not outers:      # a writer that ignored winding: treat all as outers
+        outers, holes = list(rings), []
+    polygons = [[o] for o in outers]
+    for hole in holes:
+        x, y = hole[0]
+        for poly in polygons:
+            if _point_in_ring(x, y, poly[0]):
+                poly.append(hole)
+                break
+    return polygons
+
+
+def extract_water(xplane_root: Path, out_dir: Path) -> Dict[str, int]:
+    src = xplane_root / WATER_REL
+    shps = sorted(src.rglob("*.shp"))
+    if not shps:
+        raise XPlaneExtractError(f"no water shapefiles under {src}")
+    features = []
+    tiles = []
+    for shp in shps:
+        tile = shp.stem
+        if not _TILE.match(tile):
+            raise XPlaneExtractError(
+                f"{shp.name}: expected a +LL+LLL tile name")
+        tiles.append(tile)
+        for rings in read_shp_polygons(shp):
+            features.append({
+                "type": "Feature",
+                "properties": {"tile": tile},
+                "geometry": {"type": "MultiPolygon",
+                             "coordinates": rings_to_polygons(rings)},
+            })
+    out = out_dir / "water"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "water_polygons.geojson").write_text(
+        json.dumps({"type": "FeatureCollection", "tiles": tiles,
+                    "features": features}), encoding="utf-8")
+    return {"tiles": len(tiles), "polygons": len(features)}
+
+
+def extract_terrain_catalog(xplane_root: Path, out_dir: Path) -> Dict[str, int]:
+    src = xplane_root / TERRAIN_REL
+    rows = []
+    for folder in sorted(p for p in src.glob("terrain*") if p.is_dir()):
+        for ter in sorted(folder.rglob("*.ter")):
+            head = ter.read_bytes()[:4096].decode("utf-8", errors="ignore")
+            match = _BASE_TEX.search(head)
+            rows.append({"folder": folder.name, "name": ter.stem,
+                         "category": ter.stem.split("_")[0],
+                         "base_texture": match.group(1) if match else ""})
+    if not rows:
+        raise XPlaneExtractError(f"no .ter terrain definitions under {src}")
+    out = out_dir / "terrain"
+    out.mkdir(parents=True, exist_ok=True)
+    with open(out / "terrain_catalog.csv", "w", newline="",
+              encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    return {"definitions": len(rows)}
+
+
+def extract_sky(xplane_root: Path, out_dir: Path) -> Dict[str, int]:
+    src = xplane_root / SKY_REL
+    pngs = sorted(src.glob("sky_colors_*.png"))
+    if not pngs:
+        raise XPlaneExtractError(f"no sky_colors_*.png under {src}")
+    out = out_dir / "lighting"
+    out.mkdir(parents=True, exist_ok=True)
+    palettes = {}
+    for png in pngs:
+        condition = png.stem[len("sky_colors_"):]
+        with Image.open(png) as im:
+            if im.size != SKY_SIZE:
+                raise XPlaneExtractError(
+                    f"{png.name} is {im.size}, expected {SKY_SIZE}; the "
+                    f"panel crop was only checked against that layout")
+            panel = im.convert("RGB").crop(SKY_PANEL)
+        width, height = panel.size
+        bands = []
+        for i in range(SKY_BANDS):
+            r, g, b = panel.getpixel((width // 2,
+                                      int((i + 0.5) * height / SKY_BANDS)))
+            bands.append(f"#{r:02x}{g:02x}{b:02x}")
+        palettes[condition] = {"source": png.name, "panel": list(SKY_PANEL),
+                               "bands_top_to_bottom": bands}
+        shutil.copy(png, out / png.name)
+    (out / "sky_palettes.json").write_text(
+        json.dumps(palettes, indent=1), encoding="utf-8")
+    return {"conditions": len(palettes)}
+
+
+def extract(xplane_root: Path, out_dir: Path) -> Dict[str, Dict[str, int]]:
+    """Run all three extractions; returns the counts of what was written."""
+    xplane_root = Path(xplane_root)
+    if not (xplane_root / "Resources").is_dir():
+        raise XPlaneExtractError(
+            f"{xplane_root} has no Resources/ folder; pass the X-Plane 12 "
+            f"install root")
+    out_dir = Path(out_dir)
+    return {"water": extract_water(xplane_root, out_dir),
+            "terrain": extract_terrain_catalog(xplane_root, out_dir),
+            "sky": extract_sky(xplane_root, out_dir)}
