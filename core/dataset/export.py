@@ -2113,6 +2113,15 @@ def render_card(card: Dict[str, Any]) -> str:
         f"{', '.join(card.get('primary_aircraft', card['aircraft']))})",
         f"Sensor profiles: {', '.join(card['sensor_profiles'])}",
     ]
+    chosen = card.get("choices")
+    if chosen:
+        lines.append(
+            f"Chosen{(' on ' + str(chosen['chosen_on'])) if chosen.get('chosen_on') else ''}: "
+            f"format {chosen.get('format')}; cameras {chosen.get('cameras')}; "
+            f"image {chosen.get('image')}; labels only {chosen.get('labels_only')}; "
+            f"split {chosen.get('split_fractions')} (seed {chosen.get('split_seed')}); "
+            f"tabular {chosen.get('tabular')}"
+            + (f"; extras {chosen.get('extras')}" if chosen.get('extras') else ""))
     presence = card.get("presence")
     if presence:
         lines.append(f"Scene vs labelled: {presence['file']} (per class: in the "
@@ -2237,7 +2246,9 @@ def presence_document(runs: Sequence[Run], samples: Sequence["Sample"]) -> Dict[
 
 def export(paths: Sequence, out, fmt, fractions=DEFAULT_FRACTIONS,
            seed: int = 0, image: str = "ideal", labels_only: bool = False,
-           shard_size: int = 1000, tabular: bool = False) -> Dict[str, Any]:
+           shard_size: int = 1000, tabular: bool = False,
+           cameras: Optional[Sequence[str]] = None,
+           choices: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Export ``paths`` (runs or batch directories) as ``fmt`` -- one
     format name, a comma list, or a sequence -- into ``out``. One format
     writes into ``out`` itself (the Phase 10 layout); several write
@@ -2249,6 +2260,16 @@ def export(paths: Sequence, out, fmt, fractions=DEFAULT_FRACTIONS,
     out = Path(out)
     runs = [load_run(d) for d in discover_runs(paths)]
     samples = collect_samples(runs, image=image, labels_only=labels_only)
+    if cameras:
+        # Only the views the person picked; an id the runs do not have
+        # refuses by name rather than exporting nothing quietly.
+        wanted = [str(c) for c in cameras]
+        have = sorted({str(s_.record.get("camera_id")) for s_ in samples})
+        unknown = [c for c in wanted if c not in have]
+        if unknown:
+            raise ExportError("export.cameras",
+                              f"camera(s) {unknown} are not in these runs (they have {have})")
+        samples = [s_ for s_ in samples if str(s_.record.get("camera_id")) in wanted]
     names, _ = dataset_taxonomy(samples)            # refuses a mixed class list first
     refuse_classes_outside_taxonomy(samples, names)  # ...and a stray class, before any file
     labels_shipped = refuse_unverified_labels(samples, formats)
@@ -2278,6 +2299,21 @@ def export(paths: Sequence, out, fmt, fractions=DEFAULT_FRACTIONS,
                         seed, image, labels_only, formats=formats,
                         labels_shipped=labels_shipped, tabular=table,
                         licence_gate_result=gate_result)
+    # What the person chose, as they chose it, and where: the format and
+    # every option of this export (core.dataset.export's own parameters,
+    # recorded whether or not a page supplied them).
+    card["choices"] = {
+        "format": ",".join(formats),
+        "formats": formats,
+        "cameras": list(cameras) if cameras else "all",
+        "image": image,
+        "labels_only": bool(labels_only),
+        "split_fractions": {name: float(f) for name, f in zip(SPLITS, fractions)},
+        "split_seed": int(seed),
+        "tabular": bool(tabular),
+        "shard_size": int(shard_size) if "webdataset" in formats else None,
+        **dict(choices or {}),
+    }
     (out / PRESENCE_JSON).write_text(
         json.dumps(presence_document(runs, samples), indent=1), encoding="utf-8")
     card["presence"] = {

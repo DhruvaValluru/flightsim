@@ -617,15 +617,25 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
     return archive
 
 
-def dataset_archive(out: Path, fmt: str) -> Dict:
-    """ONE run exported as a dataset (core.dataset.export) in ``fmt`` --
-    coco, kitti, webdataset, yolo, voc, or ``all`` (each in its own
-    folder) -- and zipped with its card and presence.json. A run with no
-    engine-rendered frame exports its labels only (the engine-free
-    previews are not training pictures), and the card says so. The
-    export's own refusals (unverified, labels that changed since their
-    verdict, an unknown format) raise ExportError, in its words. Reused
-    while newer than the manifest and the verdict."""
+def dataset_archive(out: Path, fmt: str, cameras: Optional[List[str]] = None,
+                    image: str = "ideal", labels_only: Optional[bool] = None,
+                    fractions=(0.8, 0.1, 0.1), seed: int = 0, tabular: bool = False,
+                    box_pictures: bool = False, box3d_pictures: bool = False,
+                    chosen_on: str = "web page") -> Dict:
+    """ONE run exported as a dataset (core.dataset.export) with what the
+    person picked on the page: the format (coco, kitti, webdataset, yolo,
+    voc, or ``all``, one folder each), which cameras, the ideal or the
+    sensor-modelled image, labels only or with pictures, the
+    train / val / test split and its seed, the tabular flight table, and
+    whether the 2-D / 3-D box pictures ride along. Every choice is written
+    into the dataset card (``choices``), with where it was made.
+
+    A run with no engine-rendered frame exports its labels only whatever
+    was asked (the engine-free previews are not training pictures), and
+    the card records that too. The export's own refusals raise
+    ExportError, in its words. One archive per distinct set of choices,
+    reused while newer than the manifest and the verdict."""
+    import hashlib
     import shutil
     import zipfile
 
@@ -633,30 +643,62 @@ def dataset_archive(out: Path, fmt: str) -> Dict:
 
     formats = parse_formats(fmt)
     name = "all" if len(formats) > 1 else formats[0]
+    rendered = any((out / "frames").glob("*/frame_[0-9][0-9][0-9][0-9].png"))
+    forced_labels_only = not rendered
+    labels_only_used = True if forced_labels_only else bool(labels_only)
+    picked = {"format": name, "cameras": sorted(cameras) if cameras else None,
+              "image": image, "labels_only": labels_only_used,
+              "fractions": [float(f) for f in fractions], "seed": int(seed),
+              "tabular": bool(tabular), "box_pictures": bool(box_pictures),
+              "box3d_pictures": bool(box3d_pictures)}
+    tag = hashlib.sha256(json.dumps(picked, sort_keys=True).encode()).hexdigest()[:10]
     manifest_path = out / "capture_manifest.json"
     verdict = out / "verification.json"
-    archive = out / "downloads" / f"dataset_{name}.zip"
+    archive = out / "downloads" / f"dataset_{name}_{tag}.zip"
     inputs = [p for p in (manifest_path, verdict) if p.is_file()]
     if archive.is_file() and inputs and archive.stat().st_mtime >= max(
             p.stat().st_mtime for p in inputs):
-        return {"archive": archive, "format": name,
-                "labels_only": (out / "downloads" / f"dataset_{name}.labels_only").is_file()}
-    rendered = any((out / "frames").glob("*/frame_[0-9][0-9][0-9][0-9].png"))
-    target = out / "dataset" / name
+        return {"archive": archive, "format": name, "labels_only": labels_only_used}
+    target = out / "dataset" / f"{name}_{tag}"
     shutil.rmtree(target, ignore_errors=True)
-    export_dataset([out], target, ",".join(formats), labels_only=not rendered)
+    extras = [w for w, on in (("2-D box pictures", box_pictures),
+                              ("3-D box pictures", box3d_pictures)) if on]
+    export_dataset([out], target, ",".join(formats), fractions=tuple(fractions),
+                   seed=int(seed), image=image, labels_only=labels_only_used,
+                   tabular=bool(tabular), cameras=cameras or None,
+                   choices={"chosen_on": chosen_on,
+                            "labels_only_requested": labels_only,
+                            "labels_only_forced": (
+                                "no engine-rendered frame in this run; the "
+                                "engine-free previews are not training pictures"
+                                if forced_labels_only else None),
+                            "extras": extras or None})
     archive.parent.mkdir(parents=True, exist_ok=True)
     partial = archive.with_suffix(".zip.part")
     with zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED) as zf:
         for path in sorted(p for p in target.rglob("*") if p.is_file()):
             zf.write(path, arcname=str(Path(name) / path.relative_to(target)))
+        if box_pictures or box3d_pictures:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            from core.capture.box_frames import draw_box_frames
+
+            wanted = cameras or sorted({str(r.get("camera_id"))
+                                        for r in manifest.get("frames", [])})
+            try:
+                draw_box_frames(manifest, out, cameras=wanted)
+            except (OSError, ImportError):
+                pass
+            for on, sub, label in ((box_pictures, "boxed", "2d_boxes"),
+                                   (box3d_pictures, "boxed3d", "3d_boxes")):
+                if not on:
+                    continue
+                for camera in wanted:
+                    for picture in sorted((out / sub / camera).glob("*.png")):
+                        zf.write(picture, arcname=f"{name}/pictures/{label}/{camera}/"
+                                                  f"{picture.name}",
+                                 compress_type=zipfile.ZIP_STORED)
     partial.replace(archive)
-    marker = out / "downloads" / f"dataset_{name}.labels_only"
-    if rendered:
-        marker.unlink(missing_ok=True)
-    else:
-        marker.write_text("no engine-rendered frames: labels only\n", encoding="utf-8")
-    return {"archive": archive, "format": name, "labels_only": not rendered}
+    return {"archive": archive, "format": name, "labels_only": labels_only_used}
 
 
 def camera_view(manifest: Dict, camera_id: str,

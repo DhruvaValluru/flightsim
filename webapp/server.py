@@ -871,11 +871,19 @@ def run_camera_manifest(run_id: str, camera_id: str):
 
 
 @app.get("/runs/{run_id}/dataset.zip")
-def run_dataset_archive(run_id: str, format: str = "coco"):
-    """The whole run exported as a dataset: coco, kitti, webdataset, yolo,
-    voc, or all (one folder each), with the dataset card and presence.json.
-    The export's refusals stand, in words, as a 409; ``X-Dataset-Labels-Only:
-    1`` when the run has no engine-rendered picture."""
+def run_dataset_archive(run_id: str, format: str = "coco",
+                        cameras: Optional[str] = None, image: str = "ideal",
+                        labels_only: bool = False, train: float = 0.8,
+                        val: float = 0.1, test: float = 0.1, seed: int = 0,
+                        tabular: bool = False, box_pictures: bool = False,
+                        box3d_pictures: bool = False):
+    """The whole run exported as a dataset with the choices made on the
+    page -- format (coco, kitti, webdataset, yolo, voc or all), cameras
+    (comma list; all when absent), image (ideal | sensor), labels only,
+    the train / val / test split and its seed, the tabular flight table,
+    and the 2-D / 3-D box pictures -- every one written into the dataset
+    card's ``choices``. The export's refusals stand, in words, as a 409;
+    ``X-Dataset-Labels-Only: 1`` when the zip holds labels only."""
     from core.dataset.export import ExportError
     from webapp.capture import dataset_archive
 
@@ -884,8 +892,16 @@ def run_dataset_archive(run_id: str, format: str = "coco"):
         return JSONResponse({"error": "this run has no capture manifest (no "
                                       "cameras were stated), so there is "
                                       "nothing to export"}, status_code=404)
+    picked = [c.strip() for c in (cameras or "").split(",") if c.strip()]
+    if any(not _CAMERA_NAME.match(c) for c in picked):
+        return JSONResponse({"error": "no such camera"}, status_code=404)
     try:
-        result = dataset_archive(out, format)
+        result = dataset_archive(
+            out, format, cameras=picked or None, image=image,
+            labels_only=labels_only, fractions=(train, val, test), seed=seed,
+            tabular=tabular, box_pictures=box_pictures,
+            box3d_pictures=box3d_pictures,
+            chosen_on="the web app's run page (dataset download)")
     except ExportError as exc:
         return JSONResponse({"refused": exc.constraint, "error": exc.message},
                             status_code=409)

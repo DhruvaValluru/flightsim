@@ -831,7 +831,11 @@ class GenerateService:
             raise GenerateRefusal(words(ExportError(
                 "export.format", f"format {fmt!r} is not one of {list(FORMATS)}")))
         try:
-            result = campaign.export(format=fmt)
+            # The format the person picked on the page, recorded in the
+            # card's choices with where it was picked.
+            result = campaign.export(format=fmt, choices={
+                "chosen_on": "the web app's Generate a dataset page (download)",
+                "campaign_format": campaign.record.get("format")})
         except (ExportError, CampaignError) as exc:
             raise GenerateRefusal(words(exc))
         card_path = Path(result["dataset_path"]) / CARD_JSON
