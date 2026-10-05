@@ -1252,6 +1252,14 @@ def generate_cancel(campaign_id: str) -> JSONResponse:
     return _generate_call(generator.control, campaign_id, "cancel")
 
 
+@app.get("/generate/campaigns")
+def generate_campaigns() -> JSONResponse:
+    """Every campaign, newest first, for the page's campaign list. Declared
+    before /generate/{campaign_id}, which would otherwise take the word
+    'campaigns' as an id."""
+    return _generate_call(generator.list_campaigns)
+
+
 @app.get("/generate/{campaign_id}")
 def generate_status(campaign_id: str) -> JSONResponse:
     """Progress from the ledger in human terms (the polling fallback)."""

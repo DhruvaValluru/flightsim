@@ -1481,9 +1481,16 @@ def _ffmpeg(command: List[str]):
     failed a capture run AFTER its frames, manifest and verification were
     written (measured on the owner's Windows machine, no ffmpeg
     installed): the images are the product, the mp4 a convenience."""
+    from core.render.headless import popen_kwargs
+
+    # -nostdin and no stdin: ffmpeg never stops to ask anything; an hour is
+    # far past any clip this encodes, so a hung encoder cannot hold a run.
+    if command and "-nostdin" not in command:
+        command = [command[0], "-nostdin", *command[1:]]
     try:
-        return subprocess.run(command, capture_output=True)
-    except OSError:
+        return subprocess.run(command, capture_output=True, timeout=3600,
+                              **popen_kwargs())
+    except (OSError, subprocess.TimeoutExpired):
         return None
 
 
@@ -2156,9 +2163,14 @@ class RunManager:
             # reads it verbatim, no resampling.
             telemetry=telemetry, extra=extra)
         log = frames.parent / "render.log"
-        with log.open("w") as sink:
-            subprocess.run(command, stdout=sink, stderr=subprocess.STDOUT,
-                           stdin=subprocess.DEVNULL)
+        # Unattended and watched (core/render/headless.py): no window, no
+        # OS error box, no stdin; a pass that writes nothing for the stall
+        # window is killed with everything under it and named in its log.
+        from core.render.headless import HEADLESS_FLAGS, run_headless
+
+        result = run_headless(list(command) + list(HEADLESS_FLAGS), log, watch=[frames])
+        if result.refusal:
+            return False
         return (frames / "render.json").is_file()
 
     @staticmethod
@@ -2328,9 +2340,12 @@ class RunManager:
         if scene.get("terrain"):
             command += ["-GeorefTerrain", f"-terrain={scene['terrain']}"]
         log = telemetry.with_suffix(".log")
-        with log.open("w") as sink:
-            subprocess.run(command, stdout=sink, stderr=subprocess.STDOUT,
-                           stdin=subprocess.DEVNULL)
+        from core.render.headless import HEADLESS_FLAGS, run_headless
+
+        result = run_headless(list(command) + list(HEADLESS_FLAGS), log,
+                              watch=[telemetry.parent])
+        if result.refusal:
+            return False
         return telemetry.is_file()
 
     @staticmethod

@@ -136,8 +136,12 @@ def run_with_watchdog(command: List[str], log: Path, watch_dir: Path,
     log = Path(log)
     watch_dir = Path(watch_dir)
     with log.open("w", encoding="utf-8") as sink:
+        from core.render.headless import kill_tree, popen_kwargs
+
+        # Unattended (core/render/headless.py): no window, no OS error box,
+        # no stdin, its own process group so a stall kills the WHOLE tree.
         process = subprocess.Popen(command, stdout=sink, stderr=subprocess.STDOUT,
-                                   stdin=subprocess.DEVNULL, cwd=str(REPO))
+                                   cwd=str(REPO), **popen_kwargs())
         if not stall_seconds or stall_seconds <= 0:
             return process.wait(), False
         last_signal = _newest_write(watch_dir, log)
@@ -152,8 +156,10 @@ def run_with_watchdog(command: List[str], log: Path, watch_dir: Path,
             if signal != last_signal:
                 last_signal, last_activity = signal, now
             elif now - last_activity > float(stall_seconds):
-                process.kill()
-                process.wait()
+                # The capture's child (the engine under its wrapper) dies
+                # with it -- killing only the direct child left the editor
+                # running and holding its lock for the next case.
+                kill_tree(process)
                 return process.returncode if process.returncode is not None else -9, True
 
 

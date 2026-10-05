@@ -259,10 +259,15 @@ def capture_command(spec_path: Path, run_dir: Path,
 def run_capture(command: List[str], log: Path) -> int:
     """The capture subprocess, its stdout+stderr kept in ``log``; the
     exit code. The campaign's watchdog runner has the same signature."""
-    with Path(log).open("w", encoding="utf-8") as sink:
-        completed = subprocess.run(command, stdout=sink, stderr=subprocess.STDOUT,
-                                   stdin=subprocess.DEVNULL, cwd=str(REPO))
-    return completed.returncode
+    # Unattended and watched (core/render/headless.py): a case that writes
+    # nothing for the stall window is killed, tree and all, and the batch
+    # goes on to the next one.
+    from core.render.headless import run_headless
+
+    result = run_headless(command, Path(log), cwd=REPO)
+    if result.refusal:
+        return 124
+    return result.returncode if result.returncode is not None else 1
 
 
 def case_row(row: Dict[str, Any], run_dir: Path, returncode: int,

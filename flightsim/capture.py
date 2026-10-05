@@ -631,6 +631,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _run_unattended(command, log):
+    """An engine pass with no window, no OS error box and no stdin, under
+    the stall watchdog (core/render/headless.py), its output kept in
+    ``log`` and its last lines echoed. A stall or timeout kills the whole
+    process tree and is reported by name; the return carries a
+    ``returncode`` like subprocess.run's (124 when stopped)."""
+    from types import SimpleNamespace
+
+    from core.render.headless import HEADLESS_FLAGS, run_headless
+
+    print(f"  engine pass logging to {log} (unattended; stalls are stopped)")
+    result = run_headless(list(command) + list(HEADLESS_FLAGS), Path(log))
+    try:
+        tail = Path(log).read_text(encoding="utf-8", errors="replace").splitlines()[-12:]
+        print("\n".join("    " + line for line in tail))
+    except OSError:
+        pass
+    if result.refusal:
+        print(f"REFUSED -- {result.sentence()}")
+        return SimpleNamespace(returncode=124)
+    return SimpleNamespace(returncode=result.returncode if result.returncode is not None else 1)
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     # D2: the two interfaces this build does not speak are refused by name
@@ -1213,7 +1236,7 @@ def _run(args: argparse.Namespace) -> int:
             command.append("-GeorefTerrain")
         print("flying the card in the host first, so the labels "
               "describe the flight the pixels show ...")
-        completed = subprocess.run(command)
+        completed = _run_unattended(command, host_telemetry.parent / "host_flight_pass.log")
         if completed.returncode != 0:
             print(f"REFUSED -- capture.host_flight: the scenario "
                   f"commandlet exited {completed.returncode} and recorded "
@@ -1510,7 +1533,7 @@ def _run(args: argparse.Namespace) -> int:
         scene_document=str(args.scene) if getattr(args, "scene", None) else None))
     print(f"rendering {len(cameras)} camera pass(es) into {frames_dir} "
           f"{'in the black void (--void)' if args.void else 'in the visual scene'} ...")
-    completed = subprocess.run(command)
+    completed = _run_unattended(command, out / "render_pass.log")
     if completed.returncode != 0:
         # The renderer drew no pictures: the catalogue's camera.render.
         print(f"REFUSED -- camera.render: the render wrapper exited "
