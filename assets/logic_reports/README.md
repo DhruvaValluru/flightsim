@@ -40,10 +40,14 @@ each extracted rule was then handed to an adversarial second reader
 * **lighting (23,484 lines)** holds NO lighting logic: its three
   non-accessor bodies are the loading screen (`plot_init_lights_v11`,
   `MACIBM_push_v11_init_lights_screen` -- "init lights" is the loading
-  screen's name) and a `flight_spec` copy constructor. Every sky /
-  ambient / exposure / ground-light function (`scattering_state::*`,
-  `sky_stat::get_for_now`, `get_sun_position`, `OGL_build_sky_*`,
-  `tonemap_*`, `OBJ_lights_*`) is a name only.
+  screen's name) and a `flight_spec` copy constructor. The sky /
+  ambient / exposure / ground-light functions it lists
+  (`scattering_state::compute_sky_ambient`, `sky_stat::get_for_now`,
+  `get_sun_position`, `OGL_build_sky_*`, `tonemap_*`, `OBJ_lights_*`)
+  are names only; two relatives do have bodies in OTHER reports
+  (`scattering_state::render_atmosphere_sky` in physics -- it binds the
+  sky draw's inputs and shows no table lookup -- and the exposure-fusion
+  pass in render_quality).
 * **render_quality (21,284 lines)**: the HDR/tonemap constant block
   (`OGL_hdr_setup_shader`: bloom strength 2^s_bloom1, mip range), the
   exposure-fusion block (EV100 multiplier, Rec.709 luma, sigma^2), the
@@ -61,21 +65,50 @@ each extracted rule was then handed to an adversarial second reader
 
 The compiled shaders beside the reports (`assets/physical_renders/
 Resources/shaders/bin/spv/*.xsa`, 96 archives, 6,662 SPIR-V modules)
-kept their debug names, which is the only source for the GPU side: the
-terrain shader binds a base texture plus a SEASONAL variant per layer
-blended by a per-draw season ratio (`tex_seasonal_texture`,
-`u_imm_a_season`, `season_rat_scale`), whitens for snow by a luminance
-key and a mix scalar with a weather texture (`u_material_snow_luma_coef`
-/ `_mix`, `tex_weather_texture`, `u_weather_mode`), adds a night texture
-scaled by a night level (`tex_nite`, `NITE_MODE`), and reads cloud-shadow
-cascades with an ambient floor; `weather_apply` paints snow/ice g-buffer
-decals gated by slope against world up (`u_snow_slope`, `tex_snow_alb/
-nml/dcl`); `ocean_shading` takes the per-degree water PNG as its base
-colour (`u_water_color_tex`) with turbidity, deep-luminance ratio and
-foam; the sky is a Bruneton-type scattering precomputation -- no shader
-consumes a sun-elevation colour table, so the `sky_colors_*.png` rows
-are decoded on the CPU (`sky_stat`, a name only). The uniform VALUES are
-not in any module.
+kept their debug names and were DISASSEMBLED where it mattered (the
+verifiers decoded instruction streams, not just names), which is the
+only source for the GPU side:
+
+* the terrain shader mixes a seasonal texture per layer by the per-draw
+  `u_imm_a_season.x` (`rgb = mix(base, seasonal, s)`, 1,250 variants);
+* it writes a luminance snow KEY into a G-buffer channel
+  (`key = dot(u_material_snow_luma_coef mixed with the per-draw
+  coefficient, linear rgb + alpha)`, encoded `luma * 0.5 + 0.5`) and
+  colours nothing itself -- the earlier reading "the terrain shader
+  whitens by luminance" was REFUTED by the bytecode;
+* `weather_apply` then decodes `key = 2 z - 1`, forms `w0 = smoothstep(L
+  - a, L + a, key + j (2 noise - 1))` against the global snow level
+  `L = u_weather.z`, multiplies by a LINEAR ramp in cos(slope) between
+  `u_snow_slope.x/.y`, turns it into `cov = saturate(2 w - 1 + snow_ALB.a)`
+  and composites the dedicated `snow_ALB/NML/DCL` textures (ice the
+  same without the slope term; rain darkens/wets);
+* night is an additive `tex_nite * night_level.x * night_level.y`
+  gated on `x >= 0`, selected by `NITE_MODE` (the default 4 draws none);
+* terrain fog in the decoded variant is `mix(u_fog_rgb, lit, exp(-dist *
+  u_fog_scale))`: one extinction per metre, the shape the harness's
+  `fog_density` already has;
+* `ocean_meta_data` samples the per-degree water PNG as base colour and
+  turns its ALPHA into depth attenuation, `opacity = 1 - exp(-0.1 *
+  10^(2 alpha) * thickness)`; `u_turbidity` is a dead member;
+* exposure fusion weights by `exp(-0.5 * u_sigma2 * (L - 0.5)^2)` (an
+  inverse variance) over Rec.709 luma; the sky is a Bruneton-type
+  scattering precomputation and no shader consumes a sun-elevation
+  colour table, so the `sky_colors_*.png` rows are decoded on the CPU
+  (`sky_stat`, a name only).
+
+The uniform VALUES (`u_weather.z`, `u_snow_slope`, `u_snow_area`, the
+luma coefficients, scales) are in no module.
+
+**Verification.** Every rule the readers extracted (107) was handed to
+an adversarial reader with the same spans; 98 survived (61 of them
+unportable facts passed through unverified), 9 were refuted. The
+refutations that changed code: the terrain-shader whitening (above);
+"season is a cache key" (it is a constructor argument on a path-keyed
+cache); "water contact reads wave height in a separate step" (the
+readback handle is passed INTO the terrain query); the sky-lighting
+dataflow (names only). Corrections attached to survivors are folded
+into the docstrings they cite (B1, A1-A5, A7-A9, C1-C3, D1-D2, E1-E2,
+F1/F4/F10, RQ-01/02, I-03/04/05, K1/K3/K4/K7).
 
 ## Rules built into the code
 
@@ -83,13 +116,14 @@ Each cites its function and lines in `<report>/code.c`.
 
 | rule | source | where it lives now |
 | --- | --- | --- |
-| Per-degree water tile path `world/water/+LL+LLL/+ll+lll.png`, 10-degree folder floored the simulator's way; a missing/empty tile falls back to ONE global colour (`REN_water_get_fallback_water_color`, no body) | `create_water_shader` 19871-19959 | `core.xplane.physical.floor10`, `water_tile_relpath`, `WATER_FALLBACK_NOTE`; `drape.water_colour_for` |
+| Per-degree water tile path `world/water/+LL+LLL/+ll+lll.png`, 10-degree folder floored the simulator's way; a missing/empty tile falls back to ONE global texture (`REN_water_get_fallback_water_color`, no body; the committed `water/any.png` is its unverified candidate); the tile's alpha is the ocean pass's depth attenuation `k = 0.1 * 10^(2 alpha)` | `create_water_shader` 19871-19959; SPIR-V `ocean_meta_data` | `core.xplane.physical.floor10`, `water_tile_relpath`, `WaterTiles.fallback_colour` / `depth_attenuation`, `WATER_FALLBACK_NOTE`; `drape.water_colour_for` |
 | Tile naming `+30-130/+37-122.dsf` (bucket then tile, explicit sign, `+00`) | `return_latlon_str_dsf` 39482-39686 | `physical.tile_name` |
 | TERRAIN_DEF classification: `water` / `terrain_Water` = water shader, no texture file; `terrain_VirtualOrtho00..11` = photo-ortho; else `.ter`; `unknown token` -> `lib/terrain/rock_gray.ter` (the fallback ground is ROCK) | `DSF_AcceptTerrainDef` 18536-19013, 19187-19668 | `physical.classify_terrain_def`, `TERRAIN_DEF_FALLBACK_ROLE` |
 | The eleven DSF rasters: elevation, sea_level, soundscape, spr1/2, sum1/2, fal1/2, win1/2 | `DSF_AcceptRasterDef` 21989-22086 | `physical.DSF_RASTER_NAMES`, `SEASONS` |
 | Four seasons: `idx = clamp(floor(s), 0, 3)`, `blend = s - floor(s)`, mask `1 << idx`; season fixed at asset load | `build_placement<REN_beach_def>` 30893-30910; `UTL_art_asset_vram::load_sync` 16077-16163 | `physical.season_split`; `season_for` is the month stand-in for `total_season_for_location` (no body) and says so; the drape sidecar's `season` block |
 | Earth Orbit Textures: three 10-degree rasters per tile, lat then lon floored to 10; the `-ele.png` axis (sea level texel 243, ~117 ft/texel, a fit) | `Map::terrain_tile::terrain_tile` 7424-7565; `Map::terrain_layer_desktop::draw` 8716-8717 | `physical.EarthOrbitTiles`, `ele_png_to_metres` |
-| Weather snow is a luminance-keyed whitening of the ground gated by slope (shader names) | SPIR-V `terrain`, `weather_apply` | `drape.whiten`, `classify(...)["weather_snow"]` driven by the MODIS month |
+| Weather snow: the terrain shader's luminance key, thresholded against a snow level with noise jitter, a linear cos-slope ramp, `cov = saturate(2 coverage - 1 + snow_ALB.a)`, the dedicated snow albedo mixed in by `cov` | SPIR-V `terrain` (key), `weather_apply` (composite), disassembled | `drape.weather_snow_cov`, `classify(...)["snow_cover"/"snow_slope"]`, the committed `weather/snow_ALB.png` + `noise.png`; the satellite cover drives the level; band, jitter, slope values, scales and the key coefficients are this repository's (listed under `assumed` in the sidecar); decal modulation taken as 0 |
+| Season reaches the ground as `mix(base, seasonal texture, u_imm_a_season.x)` per layer | SPIR-V `terrain` 1,250 variants | not yet: one texture per role is extracted; `scripts/extract_xplane.py` must pull each `.ter`'s per-season texture on the owner's machine |
 | Fog extinction `k = -ln(threshold) / visibility * scale`, split two ways | `atmo_params::set_fog_params` 5227-5236 | already in `core.scene.weather_visuals.fog_extinction_per_m` (Koschmieder); cross-referenced |
 | Exposure-fusion multiplier `ISO / (K 2^EV100)`; Rec.709 luma literals | render_quality 4051-4064 | `core.capture.exposure.linear_exposure`, `REC709_LUMA` |
 

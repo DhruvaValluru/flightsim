@@ -498,6 +498,13 @@ def render_dir(tmp_path):
     tile = root / "bitmaps" / "world" / "water" / "+40+000" / "+46+007.png"
     tile.parent.mkdir(parents=True)
     Image.new("RGBA", (256, 256), (20, 50, 60, 191)).save(tile)
+    Image.new("RGBA", (64, 64), (13, 32, 51, 191)).save(tile.parent.parent / "any.png")
+    weather = root / "bitmaps" / "world" / "weather"
+    weather.mkdir(parents=True)
+    # the dedicated snow albedo (alpha = the per-texel cover threshold)
+    # and a flat mid-grey noise, so the jitter is nil
+    Image.new("RGBA", (16, 16), (240, 240, 245, 160)).save(weather / "snow_ALB.png")
+    Image.new("L", (16, 16), 128).save(weather / "noise.png")
     return root
 
 
@@ -538,6 +545,10 @@ def test_water_tiles_give_the_tiles_colour_and_none_elsewhere(render_dir):
     assert tiles.colour(46.005, 7.72) == (20, 50, 60)
     assert tiles.covers(46.5, 7.0)
     assert tiles.colour(37.8, -119.5) is None
+    assert tiles.fallback_colour() == (13, 32, 51)
+    # the tile alpha is the ocean pass's depth attenuation exponent
+    assert WaterTiles.depth_attenuation(191) == pytest.approx(3.15, abs=0.02)
+    assert WaterTiles.depth_attenuation(0) == pytest.approx(0.1)
     with pytest.raises(XPlaneDataError, match="physical render assets"):
         WaterTiles.load(render_dir / "nowhere")
 
@@ -592,17 +603,18 @@ def test_drape_snow_follows_the_months_satellite_cover(data, render_dir, tmp_pat
         return sidecar, tuple(int(c) for c in texture[20 * k, 20 * k])
 
     january, texel = drape(1)
-    # weather snow whitens the scrub underneath (the shader's shape): the
-    # texel is the scrub colour lifted toward white from its own luma,
-    # not the ice tile
-    r, g, b = ROLE_COLOURS["scrub"]
-    luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
-    expected = round(luma + (255.0 - luma) * 0.75)
+    # weather snow is the dedicated snow albedo composited by cov =
+    # saturate(2 coverage - 1 + alb.a) (weather_apply's shape): full
+    # cover on flat ground gives cov 1, so the texel IS the snow albedo,
+    # not the ice tile and not a whitened scrub
+    assert texel == (240, 240, 245)
     assert texel != ROLE_COLOURS["snow"]
-    assert all(abs(c - expected) <= 2 for c in texel), (texel, expected)
     assert january["snow_cover"]["month"] == 1
     assert january["snow_cover"]["mean_cover"] == 1.0
-    assert january["snow_cover"]["weather_snow"]["mean_amount"] == pytest.approx(1.0, abs=0.01)
+    weather = january["snow_cover"]["weather_snow"]
+    assert weather["applied"] and weather["mean_cov"] == pytest.approx(1.0, abs=0.02)
+    assert weather["decal_modulation"].startswith("taken as 0")
+    assert "band_half_width" in weather["assumed"]
     assert "MOD10C1" in january["attribution"]
     assert january["water_colour_source"].startswith("per-tile water texture")
     assert january["water_colour_srgb8"] == [20, 50, 60]
@@ -746,3 +758,29 @@ def test_drape_sidecar_records_the_season_and_names_the_water_fallback(data, tmp
     assert sidecar["season"]["mask"] == 2
     assert "REN_water_get_fallback_water_color" in sidecar["water_colour_source"]
     assert "missing" in sidecar["snow_cover"]
+    assert sidecar["season"]["evaluated_at"] == "bake centre"
+
+
+def test_weather_snow_cov_is_weather_applys_shape():
+    """key = 2 luma - 1; w0 = smoothstep(L - a, L + a, key + jitter);
+    coverage = w0 * slope ramp; cov = saturate(2 coverage - 1 + alb.a).
+    Zero cover gives no snow whatever the key; full cover on flat ground
+    gives cov 1; the slope ramp scales the coverage linearly."""
+    import numpy as np
+
+    from core.xplane.drape import weather_snow_cov
+
+    white = np.full((1, 3, 3), 255.0, dtype=np.float32)      # the brightest key
+    dark = np.full((1, 3, 3), 10.0, dtype=np.float32)
+    flat = np.ones((1, 3), dtype=np.float32)
+    noise = np.full((1, 3), 0.5, dtype=np.float32)
+    alpha = np.full((1, 3), 0.6, dtype=np.float32)
+    cover = np.array([[0.0, 0.5, 1.0]], dtype=np.float32)
+    cov_white = weather_snow_cov(white, cover, flat, noise, alpha)
+    cov_dark = weather_snow_cov(dark, cover, flat, noise, alpha)
+    assert cov_white[0, 0] == 0.0 and cov_dark[0, 0] == 0.0     # no cover: no snow
+    assert cov_white[0, 2] == 1.0 and cov_dark[0, 2] == 1.0     # full cover: snow
+    assert cov_white[0, 1] >= cov_dark[0, 1]                    # brighter keys first
+    # the slope ramp halves the coverage: cov = saturate(2 * 0.5 - 1 + 0.6)
+    half = np.full((1, 3), 0.5, dtype=np.float32)
+    assert weather_snow_cov(white, cover, half, noise, alpha)[0, 2] == pytest.approx(0.6)

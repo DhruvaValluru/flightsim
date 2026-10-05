@@ -21,21 +21,37 @@ tile naming), `classify_terrain_def` (water by name, ortho quadrants,
 stand-in for `total_season_for_location`, no body), `EarthOrbitTiles`
 (the 10-degree height/normal/albedo tiles the map layer loads, the
 `-ele.png` axis decoded and checked on Paris/Lyon/Zermatt),
-`WATER_FALLBACK_NOTE`; `core/xplane/drape.py` DRAPE_VERSION 4 -- the
-satellite-seen snow now WHITENS the ground underneath by luminance,
-gated by slope (the shader's shape; lift 0.75 is ours), the height
-rule's permanent snow keeps the ice texture, the sidecar records
-`season` and `snow_cover.weather_snow`; `core/capture/exposure.py`
-`linear_exposure` + `REC709_LUMA`; `core/scene/weather_visuals.py`
-cross-references the decompiled Koschmieder fog it already matched.
-Tests for all of it in `tests/test_xplane.py` -- UNRUN. OPEN: the
-seasonal second texture per role (`tex_seasonal_texture`) needs the
-extractor to pull each `.ter`'s per-season texture on the owner's
-machine (`scripts/extract_xplane.py`, no install here); a `beach` role
-(shoreline band along mapped water, seasonal) is missing; the -12/+10
-degree sky anchors stay unverifiable until `sky_stat::get_for_now` is
-decompiled. The adversarial verification run's verdicts and its
-critic's port plan land in the commit after this one.
+`WATER_FALLBACK_NOTE`, `WaterTiles.fallback_colour` (the committed
+`water/any.png`, the unverified candidate for the simulator's global
+fallback) and `depth_attenuation` (the tile alpha decoded: `k = 0.1 *
+10^(2 alpha)`); `core/xplane/drape.py` DRAPE_VERSION 5 -- weather snow
+composited the way the simulator's `weather_apply` pass does it, read
+from the DISASSEMBLED SPIR-V (the terrain shader writes a luminance
+KEY; the pass thresholds it against the snow level with noise jitter,
+ramps linearly in cos(slope), forms `cov = saturate(2 coverage - 1 +
+snow_ALB.a)` and mixes the committed `snow_ALB.png` in by `cov`); the
+satellite cover drives the level, the band / jitter / slope values /
+scales / key coefficients are ours and listed as `assumed` in the
+sidecar, the decal-modulation constants are taken as 0; the height
+rule's permanent snow keeps the ice texture, thinned by the cover; the
+sidecar records `season` (with `evaluated_at` and what the simulator
+does instead) and `snow_cover.weather_snow`. (DRAPE_VERSION 4, a
+luminance WHITENING, implemented a reading the adversarial pass refuted
+and is withdrawn.) `core/capture/exposure.py` `linear_exposure` +
+`REC709_LUMA`; `core/scene/weather_visuals.py` cross-references the
+decompiled Koschmieder fog it already matched. Verification: 107 rules,
+98 survive, 9 refuted (`assets/logic_reports/README.md`). Tests for all
+of it in `tests/test_xplane.py` -- UNRUN; the drape was exercised end to
+end on the real assets in a scratch directory (Zermatt bake: January
+floor = snow albedo, 45-degree ramp stays rock, July floor = scrub).
+OPEN: the seasonal second texture per role (`mix(base, seasonal,
+u_imm_a_season.x)`) needs the extractor to pull each `.ter`'s per-season
+texture on the owner's machine (`scripts/extract_xplane.py`, no install
+here); per-role detail decals (`DECAL_PARAMS` of the `.ter`) likewise; a
+`beach` role (shoreline band along mapped water, seasonal) is missing;
+the -12/+10 degree sky anchors stay unverifiable until
+`sky_stat::get_for_now` is decompiled (the ten targets for a second
+pass are listed in the logic-reports README).
 
 **Physical renders + logic reports merged (2026-10-05, `phase-2-testing`;
 NO tests run, owner's instruction).** LANDED: `origin/logic`

@@ -211,11 +211,14 @@ for priming a machine ahead of time rather than prerequisites.
     The snow class follows the spec's month: the committed MODIS monthly
     snow cover (`assets/physical_renders/`, read by
     `core/xplane/physical.py`) thins the height rule's permanent snow
-    where the satellite saw bare ground that month, and where it saw
-    snow on gentle ground the drape whitens the texture underneath --
-    the simulator's own shader shape (a luminance-keyed snow mix gated by
-    slope, read from its SPIR-V names) with this repository's lift; one
-    drape is cached per terrain and month, and the sidecar records the
+    where the satellite saw bare ground that month, and composites
+    weather snow the way the simulator's `weather_apply` pass does
+    (disassembled from its committed SPIR-V): a luminance key thresholded
+    against the cover with noise jitter, a linear cos-slope ramp, and the
+    simulator's own `snow_ALB.png` mixed in by `saturate(2 coverage - 1 +
+    alpha)`; the band, jitter, slope values and scales are this
+    repository's and the sidecar lists them as assumed. One drape is
+    cached per terrain and month, and the sidecar records the
     simulator-shaped season (four seasons, index + blend).
   * `assets/physical_renders/` (the simulator's render resources in its own
     layout) and `assets/logic_reports/` (the decompiled code that consumes

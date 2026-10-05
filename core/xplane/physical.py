@@ -22,12 +22,20 @@ consumes are read here:
   the colour, is read.
 * ``bitmaps/world/water/+LL+LLL/+ll+lll.png``: the per-1-degree water
   texture ``REN_degree::create_water_shader`` loads by exactly that path
-  (``assets/logic_reports/terrain_ocean/code.c``: a 10 degree folder,
-  floored, then the 1 degree tile). RGBA, 256 or 512 px: the RGB is the
-  location's water colour (a dark blue that varies by tile), the alpha
-  sits near 191 everywhere and is NOT a water mask. What the water
-  shader does with the alpha is not decoded here; only the colour is
-  used, and the sidecar says so.
+  (``assets/logic_reports/terrain_ocean/code.c`` 19894-19926: a 10
+  degree folder, floored, then the 1 degree tile) and binds as the
+  ocean pass's base colour (``u_color`` of ``ocean_meta_data``). RGBA,
+  256 or 512 px: the RGB is the location's water colour (a dark blue
+  that varies by tile); the alpha (~191 everywhere) is NOT a mask but
+  the depth attenuation exponent of that pass, disassembled from the
+  committed SPIR-V: ``k = 0.1 * 10 ** (2 * alpha)`` per linearised
+  depth unit and the water's opacity over the sea floor is ``1 -
+  exp(-k * thickness)`` (alpha 191/255 gives k = 3.15;
+  :meth:`WaterTiles.depth_attenuation`). Only the colour is used here.
+  The ``any.png`` beside the tiles (64 x 64, one colour, the same
+  alpha) is the candidate for the simulator's single global fallback
+  texture (``REN_water_get_fallback_water_color``, no body):
+  unverified, said so wherever it is used.
 
 * ``bitmaps/Earth Orbit Textures/<+LL+LLL>{.dds,-ele.png,-nrm.png}``: the
   three 10-degree rasters the simulator's map terrain layer loads per
@@ -45,11 +53,14 @@ its function and lines in ``assets/logic_reports/<report>/code.c``):
   (``return_latlon_str_dsf`` 39482-39686; ``create_water_shader``
   19871-19896), ``+30-130/+37-122``: bucket then tile, explicit sign.
 * :func:`classify_terrain_def`: a DSF TERRAIN_DEF is water by the exact
-  names ``water`` / ``terrain_Water`` (no texture file at all), a
-  photo-ortho quadrant by ``terrain_VirtualOrtho00..11``, otherwise a
-  ``.ter`` file; the token ``unknown token`` is replaced by
-  ``lib/terrain/rock_gray.ter`` -- the simulator's fallback ground is
-  ROCK (``DSF_AcceptTerrainDef`` 18536-19013 and its async twin).
+  names ``water`` / ``terrain_Water`` (no ``.ter`` file: the water
+  shader with the per-degree PNG and the ``lib/g10/decals/water.dcl``
+  decals; ``has_bathymetry`` = the DSF declared a ``sea_level``
+  raster), a photo-ortho quadrant by ``terrain_VirtualOrtho00..11``,
+  otherwise a ``.ter`` file resolved per season and region; the token
+  ``unknown token`` is replaced by ``lib/terrain/rock_gray.ter`` -- the
+  simulator's fallback ground is ROCK (``DSF_AcceptTerrainDef``
+  18536-19013 and its async twin).
 * :data:`DSF_RASTER_NAMES`: the eleven rasters a DSF may carry
   (``DSF_AcceptRasterDef`` 21989-22086): the elevation DEM, a sea-level
   DEM, a soundscape and two rasters per season, spring/summer/fall/
@@ -175,13 +186,18 @@ REPORTS: Dict[str, Report] = {
                        "OGL_hdr_init"),
         consumers=("core.xplane.sky_lighting", "core.xplane.drape.water_colour",
                    "webapp.runs.xplane_lighting_flags"),
-        caveat="NO lighting logic is decompiled: the three non-accessor "
-               "bodies are the loading screen (plot_init_lights_v11, "
-               "MACIBM_push_v11_init_lights_screen) and a flight_spec copy "
-               "constructor; every sky/ambient/exposure/ground-light "
-               "function (scattering_state::*, OGL_build_sky_*, tonemap_*, "
-               "OBJ_lights_*) is a name only. The sky_colors_*.png tables "
-               "and lights.txt this code reads are committed once, under "
+        caveat="NO lighting logic is decompiled in THIS report: its three "
+               "non-accessor bodies are the loading screen "
+               "(plot_init_lights_v11, MACIBM_push_v11_init_lights_screen) "
+               "and a flight_spec copy constructor; the sky/ambient/"
+               "exposure/ground-light functions it lists (compute_sky_"
+               "ambient, OGL_build_sky_*, sky_stat::get_for_now, "
+               "get_sun_position, tonemap_*, OBJ_lights_*) are names only. "
+               "Two relatives DO have bodies elsewhere: scattering_state::"
+               "render_atmosphere_sky in the physics report (binds the sky "
+               "draw's inputs, no table lookup) and the exposure-fusion "
+               "pass in render_quality. The sky_colors_*.png tables and "
+               "lights.txt this code reads are committed once, under "
                "assets/xplane/lighting/; the name filter also matched "
                "'flight' and libpng/OpenSSL header helpers"),
     "render_quality": Report(
@@ -204,10 +220,17 @@ REPORTS: Dict[str, Report] = {
                "exposure fusion (EV100 multiplier, Rec.709 luma), the FSR "
                "scale table and the rain shaders; OGL_terrain_shader_* and "
                "total_season_for_location are names only. The shaders "
-               "folder is the compiled set (SPIR-V archives keep their "
-               "uniform names: tex_seasonal_texture, u_imm_a_season, "
-               "u_material_snow_luma_*, tex_weather_texture); no shader "
-               "source is committed"),
+               "folder is the compiled set; its SPIR-V archives keep their "
+               "debug names and were disassembled for the GPU side: the "
+               "terrain shader mixes a seasonal texture per layer by "
+               "u_imm_a_season.x, writes a luminance snow KEY "
+               "(u_material_snow_luma_coef) into the G-buffer, and adds a "
+               "night texture by a night level; weather_apply thresholds "
+               "that key against the global snow level u_weather.z with "
+               "noise jitter, ramps it linearly in cos(slope) between "
+               "u_snow_slope.x/.y and composites snow_ALB/NML/DCL by "
+               "cov = saturate(2 coverage - 1 + alb.a). No shader source "
+               "is committed and no uniform VALUE is in any module"),
     "physics": Report(
         name="physics",
         governs="atmosphere and fog parameters, rain-on-surface forces, "
@@ -392,12 +415,16 @@ def tile_name(lat: float, lon: float, suffix: str = ".dsf") -> str:
 
 #: The simulator swaps a missing or empty water tile for ONE global
 #: fallback texture, ``REN_water_get_fallback_water_color()`` (create_
-#: water_shader 19931-19959), whose body and colour are not in the
-#: reports; the drape's fallback (the sky table's water strip) stands in
-#: for it and is recorded as an approximation.
+#: water_shader 19931-19959), whose body is not in the reports. The
+#: committed ``bitmaps/world/water/any.png`` is the candidate for it
+#: (:meth:`WaterTiles.fallback_colour`); without the render assets the
+#: drape falls back to the sky table's water strip, and either way the
+#: sidecar says what stood in.
 WATER_FALLBACK_NOTE = ("the simulator's no-tile fallback is a single global "
                        "texture, REN_water_get_fallback_water_color(), not "
-                       "decompiled; the sky table's water strip stands in")
+                       "decompiled; water/any.png is its unverified "
+                       "candidate, the sky table's water strip the last "
+                       "resort")
 
 
 def water_tile_relpath(lat: float, lon: float) -> Path:
@@ -408,10 +435,34 @@ def water_tile_relpath(lat: float, lon: float) -> Path:
 
 
 class WaterTiles:
-    """The committed ``bitmaps/world/water`` tree: per-tile water colour."""
+    """The committed ``bitmaps/world/water`` tree: per-tile water colour,
+    and the one-colour ``any.png`` beside the tiles."""
+
+    #: The 64 x 64 single-colour PNG beside the tiles: the candidate for
+    #: the simulator's global fallback texture (unverified: no report
+    #: names the file).
+    FALLBACK_TILE = "any.png"
 
     def __init__(self, root: Path):
         self.root = root
+
+    def fallback_colour(self) -> Optional[Tuple[int, int, int]]:
+        """The mean RGB of ``any.png`` as 8-bit sRGB, or None without it."""
+        path = self.root / self.FALLBACK_TILE
+        if not path.is_file():
+            return None
+        with Image.open(path) as im:
+            rgb = np.asarray(im.convert("RGB"), dtype=np.float64)
+        return tuple(int(round(v)) for v in rgb.reshape(-1, 3).mean(axis=0))
+
+    @staticmethod
+    def depth_attenuation(alpha_8bit: int) -> float:
+        """The ocean pass's depth attenuation from a tile's alpha:
+        ``k = 0.1 * 10 ** (2 * alpha)``, alpha as 0..1; the water's
+        opacity over the sea floor is ``1 - exp(-k * thickness)``
+        (``ocean_meta_data``, disassembled from the committed SPIR-V;
+        the thickness unit is the pass's linearised depth)."""
+        return 0.1 * 10.0 ** (2.0 * float(alpha_8bit) / 255.0)
 
     @classmethod
     def load(cls, render_dir: Optional[Path] = None) -> "WaterTiles":
