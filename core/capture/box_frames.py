@@ -1,4 +1,5 @@
-"""Every rendered frame twice: as rendered, and with its 2-D boxes drawn on.
+"""Every rendered frame three times: as rendered, with its 2-D boxes drawn
+on, and with its 3-D boxes drawn on (``boxed3d/``, core/capture/box3d.py).
 
 For each object the frame's ``labels.objects[]`` records (the main
 aircraft, every other aircraft, the scene aggregates when they have a
@@ -26,6 +27,8 @@ MASK_BOX = (64, 255, 128)
 PREDICTED_BOX = (255, 200, 40)
 TAG_BG = (10, 12, 18)
 OUT_SUBDIR = "boxed"
+#: The third version: the 3-D box rebuilt from the record (core/capture/box3d.py).
+OUT_SUBDIR_3D = "boxed3d"
 
 
 def boxed_name(frame_name: str) -> str:
@@ -83,6 +86,12 @@ def _object_boxes(record: Dict) -> List[Dict]:
     return out
 
 
+def box3d_name(frame_name: str) -> str:
+    """``frame_0042.png`` -> ``frame_0042_box3d.png``."""
+    stem = frame_name[:-len(".png")] if frame_name.endswith(".png") else frame_name
+    return f"{stem}_box3d.png"
+
+
 def draw_box_frame(record: Dict, source: Path, target: Path) -> Path:
     """Write ``target``: ``source`` with the record's 2-D boxes drawn."""
     from PIL import Image, ImageDraw
@@ -130,10 +139,15 @@ def draw_box_frames(manifest: Dict, run_dir, cameras: Optional[Iterable[str]] = 
         source = run_dir / str(record.get("file", ""))
         if not source.is_file():
             continue
-        target = run_dir / out_subdir / camera / boxed_name(source.name)
-        if (target.is_file() and target.stat().st_mtime >= source.stat().st_mtime
-                and target.stat().st_mtime >= manifest_mtime):
-            written.append(target)
-            continue
-        written.append(draw_box_frame(record, source, target))
+        from .box3d import draw_box3d_frame
+
+        for subdir, name, draw in ((out_subdir, boxed_name(source.name), draw_box_frame),
+                                   (OUT_SUBDIR_3D, box3d_name(source.name),
+                                    draw_box3d_frame)):
+            target = run_dir / subdir / camera / name
+            if (target.is_file() and target.stat().st_mtime >= source.stat().st_mtime
+                    and target.stat().st_mtime >= manifest_mtime):
+                written.append(target)
+                continue
+            written.append(Path(draw(record, source, target)))
     return written

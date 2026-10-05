@@ -1282,6 +1282,8 @@ def occlusion_section(manifest: Dict, record: Dict, previous="auto") -> Dict:
 
 
 def frame_sidecar(manifest: Dict, record: Dict, previous="auto") -> Dict:
+    from .box3d import box3d_section
+
     """One frame, self-describing: its record plus the run context and
     ITS camera's block. A PNG and this file together are a labelled
     sample that needs nothing else."""
@@ -1304,6 +1306,10 @@ def frame_sidecar(manifest: Dict, record: Dict, previous="auto") -> Dict:
         # Always present: how much of each plane is visible, what hides it,
         # and the change from the previous frame (occlusion_section).
         "occlusion": occlusion_section(manifest, record, previous),
+        # Always present: each plane's 3-D box and which way it faces, in
+        # camera coordinates, with the proof it rebuilds from this record
+        # alone (core/capture/box3d.py).
+        "box_3d": box3d_section(manifest, record),
         "frame": record,
     }
 

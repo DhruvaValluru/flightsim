@@ -376,6 +376,16 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
         f"                 (e.g. no engine render on this machine)\n"
         f"frame_NNNN_depth.f32  when the engine wrote it: metric depth, raw\n"
         f"                 little-endian float32, width x height\n"
+        f"                 'box_3d' lists every plane's 3-D box in camera\n"
+        f"                 coordinates (centre, length/width/height, body\n"
+        f"                 axes), which way it faces (yaw/pitch/roll from the\n"
+        f"                 camera, and a word), the recipe to rebuild the 8\n"
+        f"                 corners from those numbers and this frame's\n"
+        f"                 intrinsic_matrix alone, and rebuild_check: that\n"
+        f"                 rebuild done, with its largest error\n"
+        f"boxed3d/frame_NNNN_box3d.png\n"
+        f"                 the frame with each plane's 3-D box drawn from that\n"
+        f"                 rebuild (blue, red nose face) and a nose arrow\n"
         f"boxed/frame_NNNN_boxes.png\n"
         f"                 the same frame with its 2-D boxes drawn on: solid\n"
         f"                 green = the box from the engine's mask pixels\n"
@@ -445,7 +455,7 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
                         json.dumps(camera_manifest, indent=1),
                         compress_type=zipfile.ZIP_DEFLATED)
         for path in boxed:
-            zf.write(path, arcname=f"{camera_id}/boxed/{path.name}",
+            zf.write(path, arcname=f"{camera_id}/{path.parent.parent.name}/{path.name}",
                      compress_type=zipfile.ZIP_STORED)
         zf.writestr(f"{camera_id}/README.txt", readme,
                     compress_type=zipfile.ZIP_DEFLATED)
@@ -584,6 +594,7 @@ def inventory(out: Path) -> Dict:
         "frames": listing(out / "frames"),
         "overlays": listing(out / "overlays"),
         "boxed": listing(out / "boxed"),
+        "boxed3d": listing(out / "boxed3d"),
         "previews": listing(out / "previews"),
         "clips": clips,
         "has_manifest": manifest_path.is_file(),

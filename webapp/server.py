@@ -797,7 +797,7 @@ def run_effect(run_id: str):
 #: build a path out of anything but a known directory plus a matched
 #: filename.
 _IMAGE_KINDS = {"frames": "frames", "overlays": "overlays",
-                "boxed": "boxed", "previews": "previews"}
+                "boxed": "boxed", "boxed3d": "boxed3d", "previews": "previews"}
 #: A frame image, a frame's own label sidecar beside it, or the metric
 #: depth the label bundle declares under ``labels.depth_f32`` (raw
 #: little-endian float32, contracts §8): the one bundle member that is

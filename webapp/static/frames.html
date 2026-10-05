@@ -419,14 +419,15 @@ async function load() {
   // Which images exist is read off the DIRECTORIES, not the manifest: a
   // frame the manifest names but the renderer never wrote must not
   // appear here as a broken image.
-  let inventory = {frames: {}, overlays: {}, boxed: {}, previews: {}};
+  let inventory = {frames: {}, overlays: {}, boxed: {}, boxed3d: {}, previews: {}};
   try {
     inventory = await (await fetch(`${base}/images`)).json();
   } catch (error) { /* the manifest alone still renders */ }
   const have = kind => new Set(
     ((inventory[kind] || {})[cameraId]) || []);
   const present = {frames: have("frames"), overlays: have("overlays"),
-                   boxed: have("boxed"), previews: have("previews")};
+                   boxed: have("boxed"), boxed3d: have("boxed3d"),
+                   previews: have("previews")};
 
   const camera = payload.camera || {};
   UNITS = payload.state_units || {};
@@ -457,8 +458,8 @@ async function load() {
   document.getElementById("links").innerHTML =
     `<a href="${base}/cameras/${encodeURIComponent(cameraId)}/frames.zip">` +
     `<b>download every frame with its labels (zip)</b></a> ` +
-    `<span class="dim">(each frame twice: as rendered, and with its 2-D ` +
-    `boxes drawn on, in boxed/)</span> &middot; ` +
+    `<span class="dim">(each frame three times: as rendered, with its 2-D ` +
+    `boxes in boxed/, with its 3-D boxes in boxed3d/)</span> &middot; ` +
     `<a href="${url}" download="${esc(cameraId)}_manifest.json">` +
     `this camera's manifest</a> &middot; ` +
     `<a href="${base}/capture_manifest.json">the whole run's</a> &middot; ` +
@@ -485,6 +486,9 @@ async function load() {
                                  ["boxed:" + name.replace(/\.png$/, "_boxes.png"),
                                   "with 2-D boxes — solid green from the mask " +
                                   "pixels, dashed amber predicted"],
+                                 ["boxed3d:" + name.replace(/\.png$/, "_box3d.png"),
+                                  "with 3-D boxes — rebuilt from the record alone; " +
+                                  "arrow = where the nose points"],
                                  ...derived.map(([suffix, text]) =>
                                    ["frames:" + name.replace(/\.png$/, suffix), text]),
                                  ["previews", "engine-free preview"]]) {
