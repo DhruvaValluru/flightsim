@@ -30,8 +30,10 @@ from core.render.flags import (
     DEFAULT_FPS, DEFAULT_HEIGHT, DEFAULT_LOOK, DEFAULT_WIDTH, LAUNCHER_FLAGS,
     WRAPPER_OWNED_PREFIXES, for_wrapper, render_flags, switches_present,
 )
+from core.render.headless import HEADLESS_FLAGS
 from core.scenario.spec import ScenarioSpec
 from flightsim.capture import main as capture_main
+from tests.engine_launch import launch_through_run
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 SPEC = EXAMPLES / "cameras_multi.yaml"
@@ -165,6 +167,7 @@ def _cli_command(out, monkeypatch):
     commands = []
     monkeypatch.setattr(platform_module, "ue_available", lambda: True)
     monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
+    launch_through_run(monkeypatch)
     monkeypatch.setattr("subprocess.run", _fake_subprocess(
         commands, lambda c: any("render_ue_scenario" in str(p) for p in c)))
     code = capture_main([str(SPEC), "--out", str(out), "--max-previews", "0",
@@ -181,6 +184,7 @@ def _webapp_command(out, mesh, monkeypatch):
     import webapp.runs as runs
 
     commands = []
+    launch_through_run(monkeypatch)
     monkeypatch.setattr(runs.subprocess, "run", _fake_subprocess(
         commands, lambda c: "FlightSimRender" in " ".join(map(str, c))))
     spec = ScenarioSpec.read(SPEC)
@@ -254,6 +258,7 @@ def test_the_web_app_s_legacy_single_pass_is_byte_identical(tmp_path,
     )
 
     commands = []
+    launch_through_run(monkeypatch)
     monkeypatch.setattr(runs.subprocess, "run", _fake_subprocess(
         commands, lambda c: True))
     spec = compile_prompt("fly the 747 at 280 kt")
@@ -276,6 +281,9 @@ def test_the_web_app_s_legacy_single_pass_is_byte_identical(tmp_path,
         "-unattended", "-nopause", "-nosplash",
         "-stdout", "-FullStdOutLogOutput",
         "-RenderOffScreen", "-AllowCommandletRendering",
+        # Appended by the unattended launcher, not the builder
+        # (core/render/headless.py).
+        *HEADLESS_FLAGS,
     ]
 
 
@@ -288,6 +296,7 @@ def test_the_solve_pass_gains_nothing(tmp_path, monkeypatch):
     import webapp.runs as runs
 
     commands = []
+    launch_through_run(monkeypatch)
     monkeypatch.setattr(runs.subprocess, "run", _fake_subprocess(
         commands, lambda c: True))
     telemetry = tmp_path / "host_flight" / "host_telemetry.json"
@@ -309,6 +318,7 @@ def test_the_cli_void_tier_forwards_no_scene(imported_repo, tmp_path,
     commands = []
     monkeypatch.setattr(platform_module, "ue_available", lambda: True)
     monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
+    launch_through_run(monkeypatch)
     monkeypatch.setattr("subprocess.run", _fake_subprocess(
         commands, lambda c: any("render_ue_scenario" in str(p) for p in c)))
     code = capture_main([str(SPEC), "--out", str(tmp_path / "void"),
@@ -333,6 +343,7 @@ def test_the_cli_passes_argument_reaches_the_command_and_its_absence_adds_nothin
     commands = []
     monkeypatch.setattr(platform_module, "ue_available", lambda: True)
     monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
+    launch_through_run(monkeypatch)
     monkeypatch.setattr("subprocess.run", _fake_subprocess(
         commands, lambda c: any("render_ue_scenario" in str(p) for p in c)))
     code = capture_main([str(SPEC), "--out", str(tmp_path / "passes"),
@@ -381,6 +392,7 @@ def test_the_web_app_never_asks_for_a_sensing_flag(tmp_path, monkeypatch):
     import webapp.runs as runs
 
     commands = []
+    launch_through_run(monkeypatch)
     monkeypatch.setattr(runs.subprocess, "run", _fake_subprocess(commands, lambda c: True))
     spec = ScenarioSpec.read(SPEC)
     runs.RunManager._render(tmp_path / "card.json", tmp_path / "frames" / "chase0",
@@ -413,7 +425,7 @@ def test_webapp_chase_flag_derives_from_mesh_for_an_untabled_airframe(
     name = "freshly-imported-biplane"
     (tmp_path / name).mkdir()
     (tmp_path / name / "mesh_manifest.json").write_text(
-        '{"mesh_length_m": 4.14}')  # half the c172p calibration length
+        '{"mesh_length_m": 4.14}', encoding="utf-8")  # half the c172p calibration length
     c172_forward, _, c172_up = camera_module.CHASE_OFFSETS["c172p"]
     forward, right, up = (v for v in runs.webapp_chase_flag(name).split(":"))
     assert float(forward) == pytest.approx(c172_forward / 2)

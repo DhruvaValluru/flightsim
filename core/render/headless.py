@@ -162,6 +162,10 @@ class HeadlessResult:
     stalled: bool = False
     timed_out: bool = False
     seconds: float = 0.0
+    #: The stall window or run limit, seconds, that stopped the run (the
+    #: one actually applied, which an argument can set without the
+    #: environment knowing).
+    limit: Optional[float] = None
 
     @property
     def refusal(self) -> Optional[str]:
@@ -174,11 +178,13 @@ class HeadlessResult:
 
     def sentence(self) -> Optional[str]:
         if self.stalled:
-            return (f"render.stalled: the engine wrote nothing for {stall_seconds():g} s "
+            limit = self.limit if self.limit is not None else stall_seconds()
+            return (f"render.stalled: the engine wrote nothing for {limit or 0:g} s "
                     f"and was stopped (its whole process tree killed) so the run could "
                     f"go on; its log holds its last words")
         if self.timed_out:
-            return (f"render.timeout: the engine ran past {timeout_seconds():g} s and was "
+            limit = self.limit if self.limit is not None else timeout_seconds()
+            return (f"render.timeout: the engine ran past {limit or 0:g} s and was "
                     f"stopped (its whole process tree killed)")
         return None
 
@@ -219,10 +225,10 @@ def run_headless(command: Sequence[str], log: Path, watch: Sequence[Path] = (),
                 sink.write(f"\n[flightsim] render.stalled: nothing written for "
                            f"{stall:g} s; process tree killed\n")
                 return HeadlessResult(process.returncode, stalled=True,
-                                      seconds=now - started)
+                                      seconds=now - started, limit=float(stall))
             if timeout and now - started > float(timeout):
                 kill_tree(process)
                 sink.write(f"\n[flightsim] render.timeout: past {timeout:g} s; "
                            f"process tree killed\n")
                 return HeadlessResult(process.returncode, timed_out=True,
-                                      seconds=now - started)
+                                      seconds=now - started, limit=float(timeout))

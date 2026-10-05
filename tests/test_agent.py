@@ -111,6 +111,29 @@ def test_the_eleven_tool_schemas_are_drawn_from_the_signatures_and_the_doc_is_cu
         assert serve("/nonexistent") == 2 and "pip install mcp" in MCP_MISSING
 
 
+def test_every_route_the_ui_equivalents_name_is_served():
+    """docs/COMMANDS.md names a page route for each tool; each one is a
+    route the web app serves, with that method (the verify entry once
+    named /runs/{id}/verification.json, which is a file, not a route)."""
+    import re
+
+    from webapp.server import app
+
+    def shape(path):
+        return re.sub(r"\{[^}]*\}", "{}", path)
+
+    served = {(method, shape(route.path)) for route in app.routes
+              for method in getattr(route, "methods", None) or ()}
+    named = [(method, shape(path.split("?")[0]))
+             for entry in EQUIVALENTS.values()
+             for method, path in re.findall(r"\b(GET|POST) (/\S+?)(?=[;,)\s]|$)",
+                                            entry["ui"])]
+    assert named, "no route named"
+    missing = [f"{method} {path}" for method, path in named
+               if (method, path) not in served]
+    assert not missing, missing
+
+
 def test_an_unknown_tool_is_a_programming_error_not_a_refusal(tmp_path):
     with pytest.raises(ValueError):
         _tools(tmp_path / "t").call("launch", reason="no such tool")
@@ -522,9 +545,9 @@ def test_the_controller_does_not_call_a_narrow_yield_done(tmp_path):
     assert outcome.rule == "yield.variety"
     assert outcome.dataset_path and Path(outcome.dataset_path).is_dir()
     assert "requested variety" in outcome.sentence and "narrow:" in outcome.sentence
-    record = json.loads((tmp_path / "n" / "campaign.json").read_text())
+    record = json.loads((tmp_path / "n" / "campaign.json").read_text(encoding="utf-8"))
     assert int(record["images_target"]) == IMAGES                # the count was not raised
-    rows = [json.loads(line) for line in Path(outcome.trace_path).read_text().splitlines()]
+    rows = [json.loads(line) for line in Path(outcome.trace_path).read_text(encoding="utf-8").splitlines()]
     assert any((r.get("input") or {}).get("rule") == "yield.variety" for r in rows)
 
 

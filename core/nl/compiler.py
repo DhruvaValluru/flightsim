@@ -1011,8 +1011,10 @@ LOCATION_RANGE_WORDS: Tuple[Tuple[str, str], ...] = (
     ("himalayas", "himalayas"), ("himalaya", "himalayas"),
     ("colorado plateau", "colorado_plateau"),
     ("great plains", "great_plains"),
+    ("japanese alps", "japan"), ("japan", "japan"),
 )
-_RANGE_PHRASE = r"(?:across|over|above|through|around|along) (?:the )?({words})"
+#: Ends at a word boundary: "over japanese islands" is not "over japan".
+_RANGE_PHRASE = r"(?:across|over|above|through|around|along) (?:the )?({words})\b"
 
 #: What each family's leaves need to be UNSTATED for the family to
 #: apply: a leaf whose target the prompt already states is dropped with

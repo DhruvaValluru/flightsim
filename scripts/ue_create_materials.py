@@ -43,7 +43,10 @@ Build-time asset step, command-line only. Two assets:
   it. The detail, the normals and the snow tile in WORLD metres
   (AbsoluteWorldPosition / the *Metres scalars), not on the grid.
 
-* /Game/FlightSim/M_VertexColorUnlit -- the tornado funnel marker (below).
+* /Game/FlightSim/M_VertexColorUnlit -- made for the tornado funnel, which
+  does NOT use it: the funnel rendered black under it too, so it ships on
+  the engine's default material (FlightSimScenarioWorld.cpp). Kept for the
+  open question in NEXT.md gotcha 26; nothing loads it.
 
 M_VertexColor and the three terrain surfaces (M_TerrainImagery,
 M_TerrainImageryNight, M_Landscape) expose one scalar parameter,
@@ -580,11 +583,13 @@ def create_terrain_imagery():
 
 
 def create_vertex_colour_unlit():
-    """The tornado funnel's material: a MARKER must read from every side
+    """Made for the tornado funnel: a MARKER must read from every side
     under any sun, so it is UNLIT -- vertex colour straight into emissive.
     (Measured: the lit vertex-colour material rendered the funnel black
     whenever the camera faced its unlit side, i.e. most of every chase
-    shot in the storm look's low sun.)"""
+    shot in the storm look's low sun.) This one rendered it black as well
+    (NEXT.md gotcha 26), so the funnel ships on the engine's default
+    material and nothing loads this; it stays for that open question."""
     full = f"{PATH}/M_VertexColorUnlit"
     if unreal.EditorAssetLibrary.does_asset_exist(full):
         print(f"MATERIAL-EXISTS: {full}")

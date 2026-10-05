@@ -1116,7 +1116,9 @@ def _run(args: argparse.Namespace) -> int:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    from core.capture.manifest import SOLVE_HOST_FLIGHT, SOLVE_PRE_RUN
+    from core.capture.manifest import (
+        SOLVE_HOST_FLIGHT, SOLVE_PRE_RUN, georeference_card_block,
+    )
     from core.util.platform import (
         os_name, ue_available, ue_platform_refusal, ue_runner_command,
     )
@@ -1175,7 +1177,10 @@ def _run(args: argparse.Namespace) -> int:
                                  world_documents["runway_document"])
                 if (world_documents["buildings_document"]
                     or world_documents["runway_document"] or scene_members) else None,
-                scene_members))
+                scene_members),
+            # The frame and datum the manifest records, for the host to
+            # copy into render.json (check.georeference grades the copy).
+            georeference=georeference_card_block(frame, heightfield, terrain_datum))
 
     solve_source = SOLVE_PRE_RUN
     solve_digest = result.output_digest

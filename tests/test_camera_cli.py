@@ -15,6 +15,7 @@ from core.scenario.camera import CameraSpec
 from core.scenario.spec import ScenarioSpec
 from flightsim.capture import main as capture_main
 from flightsim.verify import main as verify_main
+from tests.engine_launch import launch_through_run
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
@@ -605,6 +606,7 @@ def test_render_passes_the_imported_mesh_to_the_wrapper(tmp_path, monkeypatch):
     commands = []
     monkeypatch.setattr(platform_module, "ue_available", lambda: True)
     monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
+    launch_through_run(monkeypatch)
     monkeypatch.setattr("subprocess.run", _fake_run(commands))
     out = tmp_path / "rendered"
     code = capture_main([str(EXAMPLES / "cameras_multi.yaml"), "--out", str(out),
@@ -635,6 +637,7 @@ def test_render_refuses_an_unimported_mesh_before_any_flight(tmp_path, capsys,
 
     monkeypatch.setattr(platform_module, "ue_available", lambda: True)
     monkeypatch.setattr(importer_module, "is_imported", lambda name: False)
+    launch_through_run(monkeypatch)
     monkeypatch.setattr("subprocess.run", never)
     out = tmp_path / "refused"
     code = capture_main([str(EXAMPLES / "cameras_multi.yaml"), "--out", str(out),

@@ -24,7 +24,9 @@ stand-in for `total_season_for_location`, no body), `EarthOrbitTiles`
 `WATER_FALLBACK_NOTE`, `WaterTiles.fallback_colour` (the committed
 `water/any.png`, the unverified candidate for the simulator's global
 fallback) and `depth_attenuation` (the tile alpha decoded: `k = 0.1 *
-10^(2 alpha)`); `core/xplane/drape.py` DRAPE_VERSION 5 -- weather snow
+10^(2 alpha)`); `core/xplane/drape.py` DRAPE_VERSION 5 (now 8: 6 the material maps and
+the sidecar's "material" block, 7 the base image the material's Imagery
+takes, 8 the derived normals of core/xplane/normals.py) -- weather snow
 composited the way the simulator's `weather_apply` pass does it, read
 from the DISASSEMBLED SPIR-V (the terrain shader writes a luminance
 KEY; the pass thresholds it against the snow level with noise jitter,
@@ -97,13 +99,12 @@ v7.schema.json` = v6 + every optional block, `building:all` /
 block, `model_name` = the string; record-1 dicts read renamed), the
 limits flags renamed `exceed_*` / `any_exceedance` -> `*_flag`, and the
 verifier's `georeference` check (render.json vs the manifest's frame
-and datum). `tests/test_versions.py` pins all of it. OPEN: the UE
-recorder's six limit rows (`ue/.../FlightSimTelemetryRecorder.cpp`)
-still say `exceed_*` -- rename them to the `*_flag` names
-(`core/telemetry/limits.py` `FLAG_RENAMES`) or
-`tests/test_ue_physics_source.py` stays red; the render host does not
-yet write render.json's `georeference` block (the check reports NOT RUN
-until it does). Every C++ change is UNCOMPILED here; the Windows order
+and datum). `tests/test_versions.py` pins all of it. The UE recorder's
+six limit rows carry the `*_flag` names. The render host writes
+render.json's `georeference` block, copied from the card's
+(`core/capture/manifest.py` `georeference_card_block`; pinned by
+`tests/test_ue_georeference.py`); check it on the first Windows render.
+Every C++ change is UNCOMPILED here; the Windows order
 is the blueprint's "Windows verification order". CLAUDE.md's owner rule
 STANDS: no scheduled check-ins, no PR monitoring, report once and stop.
 

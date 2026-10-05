@@ -533,6 +533,23 @@ def scene_datum(heightfield, terrain_elevation_m: float) -> Dict:
     return datum_for_heightfield(heightfield)
 
 
+def georeference_card_block(frame, heightfield, terrain_elevation_m: float) -> Dict:
+    """The run card's ``georeference`` block: the numbers the render host
+    copies into render.json's root ``georeference`` (beside its own
+    geographic CRS and vertical convention), from the SAME frame and
+    datum the manifest records -- the manifest frame's projected CRS and
+    origin, and the datum's undulation at the origin (null where none
+    applies). The host computes none of it; core/capture/verify.py
+    check.georeference grades the copy against the manifest."""
+    origin = frame.provenance()
+    return {
+        "projected_crs": origin["crs"],
+        "origin": {"lat_deg": origin["origin_lat_deg"], "lon_deg": origin["origin_lon_deg"],
+                   "x_m": origin["origin_x_m"], "y_m": origin["origin_y_m"]},
+        "undulation_origin_m": scene_datum(heightfield, terrain_elevation_m).get("undulation_m"),
+    }
+
+
 def world_scene(scene: Optional[Dict]) -> tuple:
     """W2: the manifest's ``scene.buildings`` / ``scene.runway`` sub-blocks
     and their ``applied_variables`` records, read from the documents the

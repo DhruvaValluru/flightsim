@@ -24,8 +24,14 @@ const UPSTREAM = "https://api.openai.com/v1/chat/completions";
 const PER_IP_LIMIT = 40;          // requests per window per IP
 const INSTANCE_LIMIT = 200;       // requests per window, whole instance
 const WINDOW_MS = 60 * 60 * 1000; // 1 hour sliding window
-const MAX_BODY_CHARS = 200_000;   // the compiler's system prompt is ~20k
-const MAX_COMPLETION_TOKENS = 4096; // the compiler's own max_tokens
+// A compile request is ~40k characters: the system prompt (~14k) plus the
+// response schema in response_format (~25k), plus the prompt itself.
+const MAX_BODY_CHARS = 200_000;
+// LOWER than the 16000 the compiler asks for (sized for the Anthropic
+// tier), on purpose: the relay pays per token. The reply is the spec's
+// field values, far under this; one cut short fails the client's strict
+// parse, and the client falls back to its deterministic parser.
+const MAX_COMPLETION_TOKENS = 4096;
 
 const hits = new Map(); // ip -> [timestamps]; per-instance memory only
 

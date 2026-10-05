@@ -91,6 +91,7 @@ from experiments.showcase_panel import build_panel_clip  # noqa: E402
 from webapp.capture import (  # noqa: E402
     CaptureError,
     card_blocks as capture_card_blocks,
+    georeference as capture_georeference,
     finish as capture_finish,
     landmarks as capture_landmark_set,
     card_scene_objects as capture_card_scene_objects,
@@ -2789,6 +2790,10 @@ class RunManager:
             # as the CLI capture card carries them: the host stencils the
             # labelled objects and draws the second plane from these.
             card_arguments.update(capture_card_scene_objects(spec, capture_solved))
+            # The frame and datum the manifest records, for the host to copy
+            # into render.json (check.georeference grades the copy).
+            card_arguments["georeference"] = capture_georeference(
+                capture_solved, capture_heightfield)
         card = write_run_card(spec, out / "card.json", **card_arguments)
         # The physical sky (stated time of day, or FLIGHTSIM_SKY): planned
         # before provenance so its summary rides in the conditions.

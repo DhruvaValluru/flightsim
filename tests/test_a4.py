@@ -226,3 +226,17 @@ def test_a4_climb_and_ceiling_match_the_published_figures(monkeypatch):
     monkeypatch.setattr(perf, "SPEEDS_KT", (170, 200, 250))
     assert perf._roc_at(40500.0, perf.REFERENCE_GROSS_LB) > 100.0
     assert perf._roc_at(44000.0, perf.REFERENCE_GROSS_LB) < 100.0
+
+
+def test_the_preview_model_s_span_is_the_flown_fdm_s():
+    """The geometry preview draws the A-4 at the span A4.json names as its
+    source: the flown FDM's <wingspan>, not a second number."""
+    import re
+    from pathlib import Path
+
+    from core.capture.aircraft_model import AIRFRAMES
+
+    xml = (Path(__file__).resolve().parents[1] / "assets" / "fdm_root" / "aircraft"
+           / "A4" / "A4.xml").read_text(encoding="utf-8")
+    feet = float(re.search(r'<wingspan\s+unit="FT"\s*>\s*([\d.]+)\s*</wingspan>', xml).group(1))
+    assert AIRFRAMES["A4"]["span_m"] == pytest.approx(feet * 0.3048, abs=0.005)

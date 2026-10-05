@@ -10,12 +10,14 @@ load-bearing one: it is a test here, not an intention.
 import pytest
 
 from core.nl.compiler import compile_prompt
+from core.render.headless import HEADLESS_FLAGS
 from core.scenario.camera import (
     CHASE_OFFSETS, FALLBACK_CHASE_OFFSET, CameraSpec, default_cameras,
     derive_chase_offset,
 )
 from core.scenario.fields import Source
 from core.scenario.spec import ScenarioSpec
+from tests.engine_launch import launch_through_run
 
 
 @pytest.fixture
@@ -171,7 +173,7 @@ def test_an_untabled_airframe_with_a_measured_mesh_gets_a_scaled_offset(
     name = "test-plane-twice-the-c172p"
     (tmp_path / name).mkdir()
     (tmp_path / name / "mesh_manifest.json").write_text(
-        '{"mesh_length_m": 16.56}')  # 2x the c172p calibration length
+        '{"mesh_length_m": 16.56}', encoding="utf-8")  # 2x the c172p calibration length
 
     forward, right, up = derive_chase_offset(name)
     c172_forward, c172_right, c172_up = CHASE_OFFSETS["c172p"]
@@ -194,7 +196,7 @@ def test_a_tabled_airframe_keeps_its_hand_calibrated_offset_even_with_a_mesh(
     monkeypatch.setattr(camera_module, "_MESH_GENERATED_DIR", tmp_path)
     (tmp_path / "A4").mkdir()
     (tmp_path / "A4" / "mesh_manifest.json").write_text(
-        '{"mesh_length_m": 999.0}')
+        '{"mesh_length_m": 999.0}', encoding="utf-8")
     spec = CameraSpec.defaulted(aircraft="A4", preset="chase")
     forward, right, up = CHASE_OFFSETS["A4"]
     assert float(spec.offset_forward_m.value) == forward
@@ -253,6 +255,7 @@ def test_cameraless_spec_builds_byte_identical_commandlet_args(
             returncode = 0
         return Result()
 
+    launch_through_run(monkeypatch)
     monkeypatch.setattr(runs.subprocess, "run", fake_run)
     card = tmp_path / "card.json"
     frames = tmp_path / "frames"
@@ -260,7 +263,10 @@ def test_cameraless_spec_builds_byte_identical_commandlet_args(
     runs.RunManager._render(card, frames, scene,
                             tmp_path / "missing_mesh.json", "B747",
                             camera_flags=runs.camera_render_flags(spec))
-    assert captured["command"] == _historic_command(card, frames, "B747")
+    # The unattended launcher (core/render/headless.py) appends its own
+    # flags after the builder's list; the list itself is unchanged.
+    assert captured["command"] == (_historic_command(card, frames, "B747")
+                                   + list(HEADLESS_FLAGS))
 
 
 def test_camera_flags_for_the_tornado_core_default(monkeypatch):

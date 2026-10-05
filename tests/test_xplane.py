@@ -168,6 +168,28 @@ def test_sky_palette_samples_the_panel_not_the_fill(data):
     assert "#00ff00" not in bands
 
 
+def test_the_committed_sky_palettes_are_what_the_extractor_writes(tmp_path):
+    """The committed sky_palettes.json, its reader and its writer agree:
+    re-extracting the committed sky_colors PNGs reproduces the file byte
+    for byte, and every condition loads 32 bands (the file's keys were
+    renamed once without the reader, which then raised KeyError)."""
+    import shutil
+
+    from core.xplane import DATA_DIR
+    from core.xplane.extract import SKY_REL, extract_sky
+
+    lighting = DATA_DIR / "lighting"
+    source = tmp_path / "xp" / SKY_REL
+    source.mkdir(parents=True)
+    for png in lighting.glob("sky_colors_*.png"):
+        shutil.copy(png, source / png.name)
+    extract_sky(tmp_path / "xp", tmp_path / "out")
+    written = tmp_path / "out" / "lighting" / "sky_palettes.json"
+    assert written.read_bytes() == (lighting / "sky_palettes.json").read_bytes()
+    palettes = load_sky_palettes()
+    assert palettes and all(len(bands) == 32 for bands in palettes.values())
+
+
 def test_terrain_catalog_reads_the_base_texture(data):
     rows = load_terrain_catalog(data / "terrain" / "terrain_catalog.csv")
     assert {"folder": "terrain10", "name": "rock_cld_dry_steep",
@@ -883,10 +905,12 @@ def test_lighting_flags_use_the_model_by_day_and_the_tables_otherwise(monkeypatc
     assert xplane_lighting_flags(STORM_LOOK, tables)[0] == "-xplane-condition=ocast"
     hazy = {"sun_elev": 40.0, "sun_azim": 95.0, "fog_density": 0.010}
     assert xplane_lighting_flags(hazy, tables)[0] == "-xplane-condition=hazy"
+    # Below the floor (3 deg) the sun is at 2 deg: exactly the "+2" anchor
+    # of the evening half (the sun is in the west), grey level 50 here.
     dusk = {"sun_elev": MODEL_SUN_ELEVATION_FLOOR_DEG - 1.0, "sun_azim": 270.0}
     assert xplane_lighting_flags(dusk, tables, compensate=False) == [
-        "-xplane-condition=clean", "-xplane-direct=200:200:200",
-        "-xplane-ambient=200:200:200", "-xplane-horizon=200:200:200"]
+        "-xplane-condition=clean", "-xplane-direct=50:50:50",
+        "-xplane-ambient=50:50:50", "-xplane-horizon=50:50:50"]
     monkeypatch.setenv(XPLANE_SKY_ENV, "tables")
     assert xplane_lighting_flags(None, tables)[0] == "-xplane-condition=clean"
     monkeypatch.setenv(XPLANE_SKY_ENV, "nonsense")

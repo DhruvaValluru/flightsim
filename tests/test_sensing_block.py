@@ -32,6 +32,7 @@ from core.scenario.camera import CameraSpec
 from core.scenario.fields import Source
 from core.scenario.spec import ScenarioSpec
 from core.scenario.validate import validate
+from tests.engine_launch import launch_through_run
 from tests.test_registry import EXAMPLE_DIGESTS
 
 REPO = Path(__file__).resolve().parents[1]
@@ -287,6 +288,7 @@ def _render_command(spec_path, out, monkeypatch, *extra):
     commands = []
     monkeypatch.setattr(platform_module, "ue_available", lambda: True)
     monkeypatch.setattr(importer_module, "is_imported", lambda name: True)
+    launch_through_run(monkeypatch)
     monkeypatch.setattr("subprocess.run", _fake_subprocess(
         commands, lambda c: any("render_ue_scenario" in str(p) for p in c)))
     code = capture_main([str(spec_path), "--out", str(out), "--max-previews", "0",

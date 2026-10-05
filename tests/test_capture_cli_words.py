@@ -244,12 +244,17 @@ NAMED_FORMS = (
 
 def test_every_refusal_the_capture_command_prints_carries_its_name():
     """Static, over the source: every `REFUSED --` line names its rule,
-    either as a literal or as the error's own `.constraint`; the one
-    other form, `{exc}` for a ScheduleError, is allowed because that
-    error's text begins with its name (asserted below, not assumed)."""
+    either as a literal or as the error's own `.constraint`; the two
+    other forms, `{exc}` for a ScheduleError and `{result.sentence()}`
+    for a stopped engine pass, are allowed because each text begins with
+    its name (asserted below, not assumed)."""
     from core.capture.schedule import ScheduleError
+    from core.render.headless import HeadlessResult
 
     assert str(ScheduleError("x")).startswith(f"{ScheduleError.constraint}: ")
+    for stopped in (HeadlessResult(None, stalled=True),
+                    HeadlessResult(None, timed_out=True)):
+        assert stopped.sentence().startswith(f"{stopped.refusal}: ")
     source = CAPTURE_SOURCE.read_text(encoding="utf-8").splitlines()
     unnamed = []
     for number, line in enumerate(source, 1):
@@ -257,6 +262,10 @@ def test_every_refusal_the_capture_command_prints_carries_its_name():
             continue
         if any(form.search(line) for form in NAMED_FORMS):
             continue
+        if "REFUSED -- {result.sentence()}" in line:
+            above = "\n".join(source[max(0, number - 3):number])
+            if "result.refusal" in above:
+                continue
         if "REFUSED -- {exc}" in line:
             above = "\n".join(source[max(0, number - 4):number])
             if "except ScheduleError" in above:

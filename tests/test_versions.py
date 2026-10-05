@@ -230,8 +230,9 @@ def test_v7_is_v6_plus_the_additions_and_v6_is_kept():
         assert v6["$defs"][name]["required"] == v7["$defs"][name]["required"]
         assert set(v6["$defs"][name]["properties"]) < set(v7["$defs"][name]["properties"])
     added = set(v7["properties"]) - set(v6["properties"])
+    # presence: scene vs labelled per taxonomy class (optional, like the rest).
     assert added == {"datum", "applied_variables", "uncertainty", "instruments", "null_tests",
-                     "look", "landcover", "licences", "interop"}
+                     "look", "landcover", "licences", "interop", "presence"}
     assert {"buildings", "runway", "land_cover"} <= set(v7["properties"]["scene"]["properties"])
     assert "vertical_datum" in v7["properties"]["frame"]["properties"]
     assert {"sensing", "stereo"} <= set(v7["$defs"]["camera_block"]["properties"])

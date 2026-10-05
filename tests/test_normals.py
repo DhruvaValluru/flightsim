@@ -44,7 +44,7 @@ def test_the_drape_falls_back_to_the_derived_normal(tmp_path):
 
     _tile(tmp_path / "rock.png", 2)
     (tmp_path / "drape_textures.json").write_text(json.dumps(
-        {"rock": {"file": "rock.png", "metres_x": 100.0, "metres_y": 100.0}}))
+        {"rock": {"file": "rock.png", "metres_x": 100.0, "metres_y": 100.0}}), encoding="utf-8")
     assert _role_normal(tmp_path, "rock", {"file": "rock.png"})["normal"] is None
     written = normals.derive_drape_normals(tmp_path)
     assert written["rock"]["file"] == "rock_nrm_derived.png"

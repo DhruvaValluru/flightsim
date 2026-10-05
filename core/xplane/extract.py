@@ -16,7 +16,9 @@ What is read, and what each output does and does not claim:
   convenience and not an official simulator classification.
 * ``Resources/bitmaps/skycolors/sky_colors_*.png`` -> copied to
   ``lighting/`` plus ``lighting/sky_palettes.json``, the centre-column colour
-  of the left 128x512 gradient panel in 32 bands, top to bottom. The panel's
+  of the left 128x512 gradient panel in 32 bands, top to bottom
+  (``bands_top_to_bottom_32``), beside the crop (``gradient_crop``) and its
+  mean colour (``mean_rgb``, each channel truncated). The panel's
   rows are sun-elevation bands by the image's own labels.
   ``lighting/sky_tables.json`` is the same images decoded by those labels:
   16 rows of 32 px (top to bottom: night, -8, -4, -2, set, +2, +4, aft,
@@ -73,7 +75,7 @@ import struct
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from PIL import Image
+from PIL import Image, ImageStat
 
 Ring = List[Tuple[float, float]]
 
@@ -317,8 +319,11 @@ def extract_sky(xplane_root: Path, out_dir: Path) -> Dict[str, int]:
             r, g, b = panel.getpixel((width // 2,
                                       int((i + 0.5) * height / SKY_BANDS)))
             bands.append(f"#{r:02x}{g:02x}{b:02x}")
-        palettes[condition] = {"source": png.name, "panel": list(SKY_PANEL),
-                               "bands_top_to_bottom": bands}
+        mean = ImageStat.Stat(panel).mean
+        palettes[condition] = {
+            "gradient_crop": list(SKY_PANEL),
+            "mean_rgb": "#{:02x}{:02x}{:02x}".format(*(int(c) for c in mean[:3])),
+            "bands_top_to_bottom_32": bands}
         tables[condition] = _sky_table(rgb)
         shutil.copy(png, out / png.name)
     (out / "sky_palettes.json").write_text(

@@ -1504,8 +1504,10 @@ mutate webapp/capture.py \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
 mutate webapp/server.py \
-    '    while camera_id in taken:' \
-    '    while False:  # MUTATED: two views may share a directory' \
+    '    suffix = 0
+    while camera_id in taken:' \
+    '    suffix = 0
+    while False:  # MUTATED: two views may share a directory' \
     "an added view gets an id no other camera has" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
@@ -1560,8 +1562,8 @@ mutate webapp/capture.py \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
 mutate webapp/runs.py \
-    '                   "landmarks": capture_landmarks})' \
-    '                   })  # MUTATED: the pre-run landmark set is kept' \
+    '                   "landmarks": capture_landmarks,' \
+    '                   # MUTATED: the pre-run landmark set is kept' \
     "the engine projects the landmarks the manifest names" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
@@ -2357,10 +2359,8 @@ mutate webapp/server.py \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
 mutate webapp/capture.py \
-    '    "airframe", "label_conventions", "assets", "randomization",
-)' \
-    '    "assets", "randomization",  # MUTATED: no airframe, no conventions
-)' \
+    '    "airframe", "label_conventions", "assets", "randomization",' \
+    '    "assets", "randomization",  # MUTATED: no airframe, no conventions' \
     "the per-camera view carries the airframe and the conventions" \
     tests/test_webapp_capture.py || failures=$((failures+1))
 
@@ -2794,10 +2794,11 @@ mutate core/capture/labels.py \
     tests/test_capture_objects.py || failures=$((failures+1))
 
 mutate core/capture/labels.py \
-    '            others = np.unique(mask[footprint])
+    '            others, counts = np.unique(mask[footprint], return_counts=True)
             out["occluded_by"] = [int(v) for v in others
                                   if int(v) not in (0, int_id)]' \
-    '            out["occluded_by"] = []  # MUTATED: nobody occludes anybody' \
+    '            others, counts = np.unique(mask[footprint], return_counts=True)
+            out["occluded_by"] = []  # MUTATED: nobody occludes anybody' \
     "occluded_by lists the ids found inside the alone-pass footprint" \
     tests/test_capture_objects.py || failures=$((failures+1))
 

@@ -18,6 +18,7 @@ from core.sky.plan import (
     CAMERA_EV100, DEFAULT_DATE, SkyError, ev100_for, plan_sky,
     resolve_instant, star_batches, sun_horizontal_lux,
 )
+from tests.engine_launch import launch_through_run
 
 
 def _utc(text):
@@ -252,6 +253,7 @@ def test_the_sky_sidecar_replaces_the_calibrated_sun_flags(tmp_path,
     def fake_run(command, **kwargs):
         captured["command"] = list(command)
 
+    launch_through_run(monkeypatch)
     monkeypatch.setattr(runs.subprocess, "run", fake_run)
     runs.RunManager._render(tmp_path / "card.json", tmp_path / "frames",
                             scene, tmp_path / "no_mesh.json", "c172p",

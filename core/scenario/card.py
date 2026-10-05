@@ -375,6 +375,7 @@ def write_run_card(spec: ScenarioSpec, path: Path,
                    traffic: Optional[Sequence[Dict[str, object]]] = None,
                    datum: Optional[Dict[str, object]] = None,
                    world: Optional[Dict[str, object]] = None,
+                   georeference: Optional[Dict[str, object]] = None,
                    ) -> Path:
     """Write the spec in the form the UE commandlet reads.
 
@@ -622,6 +623,13 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # member is null when the scene states none. The host derives
         # nothing and refuses a file whose digest is not the card's.
         card["world"] = dict(world)
+    if georeference:
+        # The capture's georeference (core/capture/manifest.py
+        # georeference_card_block): the manifest frame's projected CRS and
+        # origin and the datum's undulation at the origin. The host copies
+        # it into render.json beside its own vertical convention and derives
+        # nothing; check.georeference grades the copy against the manifest.
+        card["georeference"] = dict(georeference)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(card, indent=1), encoding="utf-8")
     return path

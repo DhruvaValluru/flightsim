@@ -51,6 +51,10 @@ CORPUS = [
      {"leaves": ["location"], "attribution": {"location": "over the alps"}}),
     ("fly the 747 through the himalayas",
      {"leaves": ["location"]}),          # a defaulted altitude follows the ground
+    ("fly the a320 over japan",
+     {"leaves": ["location"], "attribution": {"location": "over japan"}}),
+    ("fly the a320 over the japanese alps",
+     {"leaves": ["location"], "attribution": {"location": "over the japanese alps"}}),
     ("fly the 747 over the alps at 46 n 7.7 e",
      {"leaves": ["location"]}),           # coordinates are not a vocabulary word: sampled
     ("fly the 747 with mixed traffic",
@@ -178,6 +182,14 @@ def test_a_location_phrase_is_a_choice_of_that_range_only():
         sample_randomization(rockies)
     assert caught.value.constraint == "randomization.location"
     assert "rockies" in caught.value.message
+    # Japan (Fuji's bake) is reachable without a model, and the word is
+    # whole: "japanese islands" is not "japan".
+    japan = compile_prompt("fly the a320 over japan")
+    assert japan.randomization_policy.value["location"] == {"choice": ["japan"]}
+    sample_randomization(japan)
+    islands = compile_prompt("fly the a320 over japanese islands")
+    policy = islands.randomization_policy
+    assert policy is None or "location" not in (policy.value or {})
 
 
 def test_an_unmapped_variation_refuses_by_name_on_every_sampling_surface():

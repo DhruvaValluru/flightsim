@@ -110,7 +110,10 @@ fi
 for m in $(grep -oE '"[A-Za-z]+"' "$BRIDGE/Source/FlightSimBridge/FlightSimBridge.Build.cs" \
            | tr -d '"' | sort -u); do
     case "$m" in Core|CoreUObject|Engine) continue ;; esac
-    if find "$UE_ROOT/Engine" "$PLUGIN" -name "$m.Build.cs" 2>/dev/null | grep -q .; then
+    # The found path, not the pipe's status: under pipefail a missing
+    # $UE_ROOT/Engine (or grep -q closing the pipe early) failed a module
+    # whose Build.cs is right there in the plugin.
+    if [ -n "$(find "$UE_ROOT/Engine" "$PLUGIN" -name "$m.Build.cs" 2>/dev/null | head -n 1)" ]; then
         ok "module $m" "resolves"
     else
         bad "module $m" "no $m.Build.cs anywhere"

@@ -149,7 +149,7 @@ def tool_schema(fn: Callable[..., Any], name: Optional[str] = None) -> Dict[str,
 #: What each tool is in the CLI and on the page (docs/COMMANDS.md).
 EQUIVALENTS: Dict[str, Dict[str, str]] = {
     "compile": {"cli": 'python -m flightsim.campaign "<prompt>" --images N --out DIR --plan',
-                "ui": "POST /compile; the generate page's ask and clarify states"},
+                "ui": "POST /compile (the main page); POST /generate/plan (the generate page's ask and clarify states)"},
     "validate": {"cli": 'python -m flightsim.campaign "<prompt>" --images N --out DIR --plan  (the plan validates)',
                  "ui": "the validation verdict under the spec table (POST /compile)"},
     "plan_campaign": {"cli": 'python -m flightsim.campaign "<prompt>" --images N --out DIR --plan',
@@ -161,7 +161,7 @@ EQUIVALENTS: Dict[str, Dict[str, str]] = {
     "render": {"cli": "python -m flightsim.capture spec.yaml --out DIR --render",
                "ui": "the frames gallery (GET /generate/{id}/frames)"},
     "verify": {"cli": "python -m flightsim.verify runs/<case>",
-               "ui": "GET /runs/{id}/verification.json; the review state"},
+               "ui": "GET /runs/{id}/verify.json; the review state"},
     "export": {"cli": "python -m flightsim.export runs/* --out DIR --format FORMAT; python -m flightsim.campaign --out DIR --resume --export",
                "ui": "GET /generate/{id}/download?format="},
     "inspect": {"cli": "python -m flightsim.verify runs/<case> --render  (overlays)",

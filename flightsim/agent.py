@@ -63,7 +63,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         help="share of the requested variety the verified frames must "
                              "fill before the agent says done (default 0.5); below it "
                              "the dataset is exported and the outcome is 'narrow'")
-    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--workers", type=int, default=1,
+                        help="concurrent captures (spawned processes; default 1)")
     parser.add_argument("--preview", type=int, default=2,
                         help="slots run one at a time before the campaign runs to target")
     parser.add_argument("--max-calls", type=int, default=60, help="tool-call budget")

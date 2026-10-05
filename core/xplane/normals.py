@@ -76,7 +76,7 @@ def derive_drape_normals(drape_dir: Path) -> Dict[str, Dict[str, object]]:
     import json
 
     drape_dir = Path(drape_dir)
-    index = json.loads((drape_dir / "drape_textures.json").read_text())
+    index = json.loads((drape_dir / "drape_textures.json").read_text(encoding="utf-8"))
     written: Dict[str, Dict[str, object]] = {}
     for role, entry in index.items():
         if not isinstance(entry, dict) or "file" not in entry:

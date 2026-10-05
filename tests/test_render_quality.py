@@ -4,6 +4,7 @@ the measured configuration unchanged when not opted in."""
 import pytest
 
 from core.nl.compiler import compile_prompt
+from tests.engine_launch import launch_through_run
 
 
 def _command(tmp_path, monkeypatch):
@@ -14,6 +15,7 @@ def _command(tmp_path, monkeypatch):
     def fake_run(command, **kwargs):
         captured["command"] = list(command)
 
+    launch_through_run(monkeypatch)
     monkeypatch.setattr(runs.subprocess, "run", fake_run)
     spec = compile_prompt("fly the 747 at 280 kt")
     runs.RunManager._render(tmp_path / "card.json", tmp_path / "frames",

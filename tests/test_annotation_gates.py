@@ -17,15 +17,15 @@ pins the painted primary against the producer's own bbox_2d so the
 arithmetic is shown to agree before anything is graded against it.
 
 What is NOT the test's own, stated: the traffic aircraft's PLACEMENT.
-The manifest records no per-frame traffic state, so the verifier takes
-the record's ``bbox_3d_camera`` as the traffic placement (and says so
-in every detail), and this fixture places the traffic box from the
-same solved track (the producer's ``solve_traffic_track`` /
-``traffic_state``). A placement error in that solver therefore moves
-the painted pixels and the graded reference together and no gate here
-can see it; the traffic's projection, pixels and depth are what is
-graded independently. ``test_traffic_placement_is_producer_trusted``
-pins that this is stated, not hidden.
+Each frame records the traffic aircraft's own state
+(``traffic_states``), and the verifier places it from that state
+through its own rotation, as it does the primary. A manifest written
+before frames carried that state falls back to the record's
+``bbox_3d_camera`` -- the producer's solved track
+(``solve_traffic_track`` / ``traffic_state``) -- where a placement error
+would move the painted pixels and the graded reference together and no
+gate could see it; the verifier says so in every detail.
+``test_traffic_placement_says_whose_it_is`` pins both bases.
 
 The fixture is hermetic: the manifest cites no mesh manifest whatever
 this machine has imported under ``assets/generated`` (the producer
@@ -1563,19 +1563,27 @@ def test_the_hull_is_the_cited_mesh_extent_when_that_mesh_is_on_this_machine(
 
 # -- what is NOT claimed, pinned ----------------------------------------------------
 
-def test_traffic_placement_is_producer_trusted_and_says_so(clean_run):
-    """The traffic aircraft's placement is the record's bbox_3d_camera
-    (the producer's solved track) both in this fixture's paint and in
-    the verifier's reference, so a placement error moves both together
-    and no gate sees it. That is stated in the geometry's basis, on
+def test_traffic_placement_says_whose_it_is(clean_run):
+    """A frame that records the traffic aircraft's own state is placed
+    by the verifier from that state through its own rotation, as the
+    primary is. A manifest written before frames carried traffic_states
+    falls back to the record's bbox_3d_camera (the producer's solved
+    track), where a placement error moves the paint and the reference
+    together and no gate sees it -- stated in the geometry's basis on
     every traffic detail, rather than claimed away."""
     from core.capture.verify import _object_geometry, axes_from_quat
 
     manifest = manifest_of(clean_run)
     record = manifest["frames"][0]
     entry = next(o for o in manifest["objects"] if o["role"] == "traffic")
-    geometry, why = _object_geometry(manifest, record, entry,
-                                     axes_from_quat(record["quaternion_wxyz"]))
+    axes = axes_from_quat(record["quaternion_wxyz"])
+    assert record.get("traffic_states"), "the fixture records the traffic state"
+    geometry, why = _object_geometry(manifest, record, entry, axes)
+    assert geometry is not None, why
+    assert "the frame's traffic_states entry through the verifier's own rotation" \
+        in geometry["basis"]
+    older = {k: v for k, v in record.items() if k != "traffic_states"}
+    geometry, why = _object_geometry(manifest, older, entry, axes)
     assert geometry is not None, why
     assert "bbox_3d_camera" in geometry["basis"]
     assert "not independently re-derived" in geometry["basis"]

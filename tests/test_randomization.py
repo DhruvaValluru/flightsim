@@ -24,6 +24,7 @@ from core.scenario.randomization import (
 from core.scenario.solar import julian_day, solar_position
 from core.scenario.spec import ScenarioSpec
 from core.scenario.validate import validate
+from tests.engine_launch import launch_through_run
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
@@ -330,6 +331,7 @@ def test_the_render_command_carries_the_sampled_look(tmp_path, monkeypatch):
             returncode = 0
         return Result()
 
+    launch_through_run(monkeypatch)
     monkeypatch.setattr(runs.subprocess, "run", fake_run)
     spec = _enabled()
     sample_randomization(spec)

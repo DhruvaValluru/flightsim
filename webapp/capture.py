@@ -207,6 +207,16 @@ def card_blocks(spec, solved: Dict) -> List[Dict]:
             in zip(spec.cameras, solved["tracks"], solved["schedules"])]
 
 
+def georeference(solved: Dict, heightfield=None) -> Dict:
+    """The card's ``georeference`` block: the frame and datum the manifest
+    records (core/capture/manifest.py georeference_card_block), for the
+    host to copy into render.json."""
+    from core.capture.manifest import georeference_card_block
+
+    return georeference_card_block(solved["frame"], heightfield,
+                                   solved["terrain_elevation_m"])
+
+
 def landmarks(spec, solved: Dict, heightfield=None) -> List[Dict]:
     from core.capture.landmarks import scene_landmarks
     from core.capture.poses import aircraft_local_track

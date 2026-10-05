@@ -202,17 +202,18 @@ def read_webdataset(root: Path):
 
 def _as_version_5(run_dir):
     """Rewrite a run's manifest to the version-5 shape (no objects[],
-    taxonomy, traffic or per-object records): the input the Phase 10
+    taxonomy, traffic, presence or per-object records): the input the Phase 10
     writers were pinned on. Manifest 6 (Phase 2, packages B + C) names
     classes from the taxonomy, so on a 6 the two writers differ BY
     CONTRACT (contracts §2.1) and the pin is only meaningful on a 5."""
     path = run_dir / "capture_manifest.json"
     manifest = json.loads(path.read_text(encoding="utf-8"))
     manifest["manifest_version"] = 5
-    for key in ("objects", "taxonomy", "traffic"):
+    for key in ("objects", "taxonomy", "traffic", "presence"):
         manifest.pop(key, None)
     for record in manifest["frames"]:
         record["labels"].pop("objects", None)
+        record["labels"].pop("presence", None)
         record.get("sensor", {}).get("labels_sensor", {}).pop("objects", None)
     path.write_text(json.dumps(manifest, indent=1), encoding="utf-8")
     bind_verification(run_dir)      # the fixture's verdict is for the manifest it fabricates
@@ -243,10 +244,25 @@ def _assert_shard_equal_but_export_applied(old: Path, new: Path, run_dir: Path) 
                 == expected, m_old.name
 
 
+#: The keys a COCO annotation GAINED after the Phase 10 writer was frozen
+#: (truncation in full and the facing VOC's pose field reports), and
+#: nothing else: with them removed, every byte is the frozen writer's.
+COCO_GAINED = ("bbox_unclipped", "fraction_in_frame", "pose")
+
+
+def _assert_coco_equal_but_gained(old: Path, new: Path) -> None:
+    document = json.loads(new.read_text(encoding="utf-8"))
+    for annotation in document["annotations"]:
+        assert set(COCO_GAINED) & set(annotation), "the gained keys are written"
+        for key in COCO_GAINED:
+            annotation.pop(key, None)
+    assert json.dumps(document, indent=1).encode("utf-8") == old.read_bytes()
+
+
 def test_phase10_outputs_are_byte_identical_to_the_frozen_writer(batch_dir, tmp_path):
     """COCO, KITTI and labels-only WebDataset for a VERSION-5 run (no
     objects[], no taxonomy): the frozen pre-package-E module and the
-    live one write the same bytes. (A with-pixels WebDataset differs BY
+    live one write the same bytes, apart from the additions named below. (A with-pixels WebDataset differs BY
     DESIGN: the frozen writer leaked the source PNG's mtime, the live
     one fixes it at 0.)"""
     frozen = _frozen_module()
@@ -267,7 +283,12 @@ def test_phase10_outputs_are_byte_identical_to_the_frozen_writer(batch_dir, tmp_
                            for p in (tmp_path / "old" / fmt).rglob("*") if p.is_file())
         new_files = sorted(p.relative_to(tmp_path / "new" / fmt)
                            for p in (tmp_path / "new" / fmt).rglob("*") if p.is_file())
-        assert old_files == new_files, fmt
+        # The live writer ADDS two files the frozen one never wrote -- the
+        # card as a summary page and the scene-vs-labelled presence.json --
+        # and keeps every file the frozen one wrote, compared below.
+        assert set(new_files) - set(old_files) == {Path("DATASET_CARD.html"),
+                                                   Path("presence.json")}, fmt
+        assert set(old_files) <= set(new_files), fmt
         compared = 0
         for rel in old_files:
             if rel.name in ("dataset.json", "DATASET_CARD.md"):
@@ -278,6 +299,11 @@ def test_phase10_outputs_are_byte_identical_to_the_frozen_writer(batch_dir, tmp_
                 # the frozen writer's, and the one key is the manifest's own.
                 _assert_shard_equal_but_export_applied(
                     tmp_path / "old" / fmt / rel, tmp_path / "new" / fmt / rel, source)
+                compared += 1
+                continue
+            if fmt == "coco" and rel.parent.name == "annotations":
+                _assert_coco_equal_but_gained(tmp_path / "old" / fmt / rel,
+                                              tmp_path / "new" / fmt / rel)
                 compared += 1
                 continue
             assert (tmp_path / "old" / fmt / rel).read_bytes() == \

@@ -219,7 +219,7 @@ def load_sky_palettes(path: Optional[Path] = None) -> Dict[str, List[str]]:
     path = _require(Path(path) if path else
                     DATA_DIR / "lighting" / "sky_palettes.json")
     doc = json.loads(path.read_text(encoding="utf-8"))
-    return {name: entry["bands_top_to_bottom"] for name, entry in doc.items()}
+    return {name: entry["bands_top_to_bottom_32"] for name, entry in doc.items()}
 
 
 #: Sun elevation of each table anchor, degrees. The +/-2/4/8 anchors and

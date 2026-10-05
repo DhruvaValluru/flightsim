@@ -42,7 +42,7 @@ def test_crop_path_encodes_the_box_without_dots_or_signs(tmp_path):
 
 def test_gdal_env_carries_the_machines_proxy_and_ca_bundle(tmp_path, monkeypatch):
     ca = tmp_path / "ca.pem"
-    ca.write_text("x")
+    ca.write_text("x", encoding="utf-8")
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
     monkeypatch.setenv("GIT_SSL_CAINFO", str(ca))
     monkeypatch.delenv("GDAL_CURL_CA_BUNDLE", raising=False)

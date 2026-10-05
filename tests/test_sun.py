@@ -16,6 +16,7 @@ from core.environment.sun import (
 )
 from core.nl.compiler import compile_prompt
 from core.scenario.fields import Source
+from tests.engine_launch import launch_through_run
 
 MATTERHORN = (45.9763, 7.6586)
 YOSEMITE = (37.7456, -119.5936)
@@ -223,6 +224,7 @@ def test_a_stated_time_reaches_the_render_command(tmp_path, monkeypatch):
     def fake_run(command, **kwargs):
         captured["command"] = list(command)
 
+    launch_through_run(monkeypatch)
     monkeypatch.setattr(runs.subprocess, "run", fake_run)
     runs.RunManager._render(tmp_path / "card.json", tmp_path / "frames",
                             {"key": "flat", "terrain": None, "imagery": None},

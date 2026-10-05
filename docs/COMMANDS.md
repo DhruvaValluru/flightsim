@@ -23,7 +23,7 @@ Turn a prompt (plus an answer round) into a spec with provenance, the clarifying
 | `answers` | array or null | no | null |
 
 * **CLI:** `python -m flightsim.campaign "<prompt>" --images N --out DIR --plan`
-* **UI:** POST /compile; the generate page's ask and clarify states
+* **UI:** POST /compile (the main page); POST /generate/plan (the generate page's ask and clarify states)
 
 ## `validate`
 
@@ -100,7 +100,7 @@ Re-run the verifier over a run directory, read-only: every check with its status
 | `run_id` | string | yes |  |
 
 * **CLI:** `python -m flightsim.verify runs/<case>`
-* **UI:** GET /runs/{id}/verification.json; the review state
+* **UI:** GET /runs/{id}/verify.json; the review state
 
 ## `export`
 

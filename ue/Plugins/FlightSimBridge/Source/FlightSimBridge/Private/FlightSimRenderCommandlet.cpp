@@ -5632,6 +5632,42 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	{
 		Root->SetObjectField(TEXT("calibration"), Calibration);
 	}
+	// D2: the georeference the scene stands on. The projected CRS, the origin
+	// {lat_deg, lon_deg, x_m, y_m} and the undulation at the origin are the
+	// card's georeference block, copied (core/capture/manifest.py
+	// georeference_card_block: the manifest's own frame and datum); the
+	// geographic CRS and the vertical convention are this host's. Graded by
+	// core/capture/verify.py check.georeference. Absent when the card carries
+	// no block (a card written before it): the check is then NOT RUN.
+	const TSharedPtr<FJsonObject>* CardGeoreference = nullptr;
+	if (WorldCardRoot.IsValid() &&
+	    WorldCardRoot->TryGetObjectField(TEXT("georeference"), CardGeoreference) &&
+	    CardGeoreference != nullptr)
+	{
+		TSharedPtr<FJsonObject> Georeference = MakeShared<FJsonObject>();
+		Georeference->SetStringField(TEXT("geographic_crs"), TEXT("EPSG:4326"));
+		FString ProjectedCrs;
+		(*CardGeoreference)->TryGetStringField(TEXT("projected_crs"), ProjectedCrs);
+		Georeference->SetStringField(TEXT("projected_crs"), ProjectedCrs);
+		const TSharedPtr<FJsonObject>* Origin = nullptr;
+		if ((*CardGeoreference)->TryGetObjectField(TEXT("origin"), Origin) && Origin != nullptr)
+		{
+			Georeference->SetObjectField(TEXT("origin"), *Origin);
+		}
+		Georeference->SetStringField(
+			TEXT("vertical_convention"),
+			TEXT("orthometric heights passed to AGeoReferencingSystem as ellipsoidal; ")
+			TEXT("engine ECEF radially low by undulation_origin_m"));
+		// null stays null: a flat or synthesised scene has no undulation.
+		TSharedPtr<FJsonValue> Undulation =
+			(*CardGeoreference)->Values.FindRef(TEXT("undulation_origin_m"));
+		if (!Undulation.IsValid())
+		{
+			Undulation = MakeShared<FJsonValueNull>();
+		}
+		Georeference->SetField(TEXT("undulation_origin_m"), Undulation);
+		Root->SetObjectField(TEXT("georeference"), Georeference);
+	}
 	// W5: world_applied -- what the scene level and the world look drew, the
 	// ten keys (landscape, imagery, land_cover, vegetation, buildings, runway,
 	// night, precipitation, cloud_drift, materials), each row saying whether
