@@ -33,9 +33,31 @@ What is read, and what each output does and does not claim:
 * five ``.ter`` definitions and the textures they name ->
   ``terrain/drape/<role>.png`` + ``drape_textures.json``: the ground
   textures core.xplane.drape tiles over a bake (valley grass, hill scrub,
-  steep rock, cliff, snow/ice), each downsampled to at most 512 px with the
-  ground size X-Plane projects it at (the .ter's own PROJECTED /
-  AUTO_SLOPE_CLIFF metres).
+  steep rock, cliff, snow/ice), each downsampled to at most 2048 px (512
+  until 2026-10-05: the committed PNGs are that 512 px pull until the owner
+  re-runs the extraction on the machine with the install; what a re-pull
+  costs in git and moves in the material script is at
+  :data:`DRAPE_TEXTURE_MAX_PX`) with the ground size X-Plane projects it
+  at (the .ter's own PROJECTED / AUTO_SLOPE_CLIFF metres). Per role the
+  index also records, for the terrain material
+  (scripts/ue_create_materials.py M_TerrainImagery, via the drape sidecar):
+  ``directives``, every texture- or decal-naming line of the .ter (token,
+  arguments, the file as written, and the ``<role>_<kind>.png`` pulled when
+  that file is on disk and decodes -- the directive names vary by simulator
+  version, so the match is generic, see :data:`_TEXTURE_TOKEN`; a decal
+  library (.dcl) is RECORDED, not parsed: the material's detail is the
+  role's albedo, not the simulator's decals); ``normal``, the pulled normal
+  map when a NORMAL / _NRM directive resolved -- a name relative to
+  terrain/drape/, which the drape resolves to an absolute path before it
+  reaches the sidecar (null otherwise; the committed index predates this
+  and has none); and ``library_lines``, the lines of the terrain
+  library.txt files that name the .ter with the REGION selector in force,
+  the input the per-season resolution (the simulator mixes a seasonal
+  texture per layer, assets/logic_reports/README.md) will be built from
+  next -- no seasonal texture is extracted yet. The weather bitmaps
+  (snow_ALB/NML/DCL, ice_*, noise) are NOT pulled: core.xplane.physical
+  reads them from the committed assets/physical_renders tree alone, and
+  the drape records one that tree lacks as absent.
 
 The .shp reader is the ESRI polygon record layout read directly, so the
 extraction adds no dependency.
@@ -49,7 +71,7 @@ import re
 import shutil
 import struct
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from PIL import Image
 
@@ -85,13 +107,48 @@ DRAPE_TEXTURES = {
     "cliff": ("rock_cld_dry_steep", "AUTO_SLOPE_CLIFF"),
     "snow": ("ice_cld_dry_hill", "PROJECTED"),
 }
-DRAPE_TEXTURE_MAX_PX = 512
+#: The longer side of every pulled texture, albedo or map. 512 until
+#: 2026-10-05: the material tiles these at the simulator's projected sizes
+#: (700-2800 m), where 512 px is 1.4-5.5 m per texel, too coarse for the
+#: detail pass; the committed PNGs stay the 512 px pull until re-extracted.
+#: What a re-pull at 2048 px costs: sixteen times the texels, so the five
+#: albedos (and any map pulled beside them) go from under a megabyte to
+#: tens of MB of PNG that git keeps for good -- whether to commit that is
+#: the owner's call. What it moves: scripts/ue_create_materials.py pins
+#: TERRAIN_DETAIL_NEUTRAL (each tile's linear mean), TERRAIN_DEFAULT_TEXTURES
+#: (the flat fallback texels) and TERRAIN_DETAIL_ASPECT (width / height) to
+#: the committed PNGs, so a re-pull re-measures all three before the next
+#: asset build.
+DRAPE_TEXTURE_MAX_PX = 2048
 _PROJECTED = re.compile(r"^\s*PROJECTED\s+(\d+)\s+(\d+)", re.M)
 _CLIFF = re.compile(r"^\s*AUTO_SLOPE_CLIFF\s+(\d+)\s+(\d+)\s+\S+\s+\S+\s+(\S+)",
                     re.M)
 
 _TILE = re.compile(r"^([+-]\d{2})([+-]\d{3})$")
 _BASE_TEX = re.compile(r"^\s*BASE_TEX\s+(\S+)", re.M)
+
+#: A .ter / library.txt directive line: an upper-case token, then arguments.
+_DIRECTIVE = re.compile(r"^\s*([A-Z][A-Z0-9_]*)(?:\s+(.*?))?\s*$")
+#: The .ter tokens that name a texture or a decal, matched by NAME because
+#: the set varies by simulator version: ends in _TEX (BASE_TEX, BORDER_TEX,
+#: COMPOSITE_TEX, NORMAL_TEX; BASE_TEX_NOWRAP through its _TEX_ component),
+#: ends in _NRM, contains NORMAL (TEXTURE_NORMAL), starts with TEXTURE_ or
+#: DECAL_ (DECAL_LIB, DECAL_PARAMS). Those names are the public .ter format
+#: description's, not read from any file here; a line is recorded whichever
+#: version wrote it. A line of any other token whose arguments name an
+#: image file is recorded too (AUTO_SLOPE_CLIFF is one). A DECAL_LIB line's
+#: .dcl decal library is recorded, not parsed: the material's detail is the
+#: role's albedo, not the simulator's decals.
+_TEXTURE_TOKEN = re.compile(r"^(?:TEXTURE_|DECAL_)|_TEX(?:_|$)|_NRM$|NORMAL")
+#: The tokens that name a normal / bump map, the role's ``normal``.
+_NORMAL_TOKEN = re.compile(r"_NRM$|NORMAL")
+#: An argument that names a file: a path separator or a letter extension
+#: (a bare number such as DECAL_PARAMS' 1.5 is not one).
+_FILE_ARGUMENT = re.compile(r"[/\\]|\.[A-Za-z][A-Za-z0-9]*$")
+#: What PIL is asked to decode; anything else named by a directive (a .dcl
+#: decal library, say) is recorded and left where it is.
+IMAGE_SUFFIXES = frozenset(
+    {".dds", ".png", ".jpg", ".jpeg", ".bmp", ".tga", ".tif", ".tiff"})
 
 
 class XPlaneExtractError(Exception):
@@ -271,11 +328,166 @@ def extract_sky(xplane_root: Path, out_dir: Path) -> Dict[str, int]:
     return {"conditions": len(palettes)}
 
 
+def _save_texture(source: Path, out_path: Path, keep_alpha: bool) -> None:
+    """Decode a texture (PIL reads the simulator's .dds), fit its longer
+    side to :data:`DRAPE_TEXTURE_MAX_PX` (LANCZOS, the one resample for
+    albedo and map alike: a normal map is NOT renormalised after it) and
+    write it as PNG -- RGB, or RGBA when ``keep_alpha`` and PIL reports an
+    alpha mode for the source (every DXT-compressed .dds does, so a map
+    comes out RGBA whether or not its alpha holds anything; whether the
+    channel carries data is not decided here). A map's channels are kept
+    as shipped; which channel holds what (a .dds normal map's blue /
+    alpha) is not decoded here."""
+    with Image.open(source) as im:
+        has_alpha = keep_alpha and (im.mode in ("RGBA", "LA", "PA")
+                                    or "transparency" in im.info)
+        image = im.convert("RGBA" if has_alpha else "RGB")
+    scale = DRAPE_TEXTURE_MAX_PX / max(image.size)
+    if scale < 1.0:
+        image = image.resize((max(1, round(image.width * scale)),
+                              max(1, round(image.height * scale))),
+                             Image.LANCZOS)
+    image.save(out_path)
+
+
+def _directive_kind(token: str) -> str:
+    """The ``<kind>`` of a pulled ``<role>_<kind>.png``: "normal" for a
+    normal-map token, else the token lower-cased without its TEXTURE_ /
+    _TEX decoration (BORDER_TEX -> border, BASE_TEX_NOWRAP -> base_nowrap).
+    """
+    if _NORMAL_TOKEN.search(token):
+        return "normal"
+    kind = re.sub(r"^texture_", "", token.lower())
+    kind = re.sub(r"_tex(?=_|$)", "", kind)
+    return kind or "texture"
+
+
+def _file_argument(args: Sequence[str]) -> Optional[str]:
+    """The argument of a directive that names a file: the LAST one with a
+    path separator or a letter extension, since some versions put a number
+    before the file (TEXTURE_NORMAL's ratio) and DECAL_PARAMS has none."""
+    for arg in reversed(args):
+        if _FILE_ARGUMENT.search(arg):
+            return arg
+    return None
+
+
+def _extract_directives(role: str, ter: Path, text: str, out: Path,
+                        written: Dict[Path, str]
+                        ) -> Tuple[List[Dict[str, Any]], Optional[str], int]:
+    """The role's ``directives`` record, its ``normal`` and how many new
+    textures were pulled. ``written`` (resolved source -> file in ``out``)
+    is shared across roles, so a texture named twice -- the rock .ter's
+    BASE_TEX seen again from the cliff role, the same map by two lines --
+    is pulled once and the record points at the one file. A file PIL
+    cannot decode is recorded with its ``error`` and skipped: the five
+    albedos are required, these maps are not. The role's normal is the
+    first resolved NORMAL / _NRM directive; the rock .ter serves the rock
+    AND the cliff role, so a token with CLIFF in it is the cliff's and one
+    without is the rock's (whether the simulator ships a cliff normal
+    under any name is not known: none is claimed, the rule only keeps the
+    rock's map off the cliff).
+    """
+    is_cliff = DRAPE_TEXTURES[role][1] == "AUTO_SLOPE_CLIFF"
+    directives: List[Dict[str, Any]] = []
+    normal = None
+    pulled = 0
+    kinds: Dict[str, int] = {}
+    for raw in text.splitlines():
+        match = _DIRECTIVE.match(raw)
+        if not match:
+            continue
+        token = match.group(1)
+        args = (match.group(2) or "").split()
+        source = _file_argument(args)
+        is_image = (source is not None
+                    and Path(source).suffix.lower() in IMAGE_SUFFIXES)
+        if not (_TEXTURE_TOKEN.search(token) or is_image):
+            continue
+        entry: Dict[str, Any] = {"token": token, "args": args,
+                                 "source": source, "file": None}
+        if is_image:
+            path = (ter.parent / source).resolve()
+            if path in written:
+                entry["file"] = written[path]
+            elif path.is_file():
+                kind = _directive_kind(token)
+                kinds[kind] = kinds.get(kind, 0) + 1
+                suffix = str(kinds[kind]) if kinds[kind] > 1 else ""
+                name = f"{role}_{kind}{suffix}.png"
+                try:
+                    _save_texture(path, out / name, keep_alpha=True)
+                except (OSError, ValueError, NotImplementedError) as exc:
+                    # PIL: an unsupported .dds block format, a truncated
+                    # file; the record keeps the name, the pull is
+                    # skipped. The type alone: PIL's message names the
+                    # file by the install's absolute path, which the
+                    # committed index must not carry.
+                    entry["error"] = type(exc).__name__
+                else:
+                    written[path] = name
+                    entry["file"] = name
+                    pulled += 1
+        if (entry["file"] and normal is None and _NORMAL_TOKEN.search(token)
+                and ("CLIFF" in token) == is_cliff):
+            normal = entry["file"]
+        directives.append(entry)
+    return directives, normal, pulled
+
+
+def _library_lines(xplane_root: Path, ter: Path) -> List[Dict[str, Any]]:
+    """Every line of the terrain library.txt files that names the .ter,
+    with the REGION selector in force at it (``REGION <name>`` narrows the
+    EXPORTs that follow to a REGION_DEFINE'd region, ``REGION_ALL`` lifts
+    it; the library format's own block structure, read from the file and
+    not from any decompiled body). Libraries read: the world terrain
+    folder's library.txt and a library.txt beside the .ter. This is the
+    record the per-season resolution will be built from; it resolves
+    nothing itself.
+    """
+    name = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(ter.name)
+                      + r"(?![A-Za-z0-9_])")
+    libraries: List[Path] = []
+    for candidate in (xplane_root / TERRAIN_REL / "library.txt",
+                      ter.parent / "library.txt"):
+        if candidate.is_file() and candidate not in libraries:
+            libraries.append(candidate)
+    lines: List[Dict[str, Any]] = []
+    for library in libraries:
+        try:
+            where = library.relative_to(xplane_root).as_posix()
+        except ValueError:
+            where = str(library)
+        region = None
+        text = library.read_bytes().decode("utf-8", errors="ignore")
+        for number, raw in enumerate(text.splitlines(), 1):
+            line = raw.strip()
+            match = _DIRECTIVE.match(line)
+            token = match.group(1) if match else ""
+            if token == "REGION":
+                region = (match.group(2) or "").strip() or None
+            elif token == "REGION_ALL":
+                region = None
+            if name.search(line):
+                lines.append({"library": where, "line": number,
+                              "text": line, "region": region})
+    return lines
+
+
 def extract_drape_textures(xplane_root: Path, out_dir: Path) -> Dict[str, int]:
+    """The five role albedos and their index (the module docstring), then
+    per role the .ter's texture directives, normal map and library lines.
+    The counts carry ``textures`` always and ``maps`` (directive textures
+    pulled) only when one was written, so an install with nothing new
+    yields the same counts as before these were read.
+    """
     src = xplane_root / TERRAIN_REL / "terrain10"
     out = out_dir / "terrain" / "drape"
     out.mkdir(parents=True, exist_ok=True)
     index = {}
+    #: resolved source texture -> the file it was written to under out
+    written: Dict[Path, str] = {}
+    texts: Dict[str, Tuple[Path, str]] = {}
     for role, (ter_name, line) in DRAPE_TEXTURES.items():
         ter = src / f"{ter_name}.ter"
         if not ter.is_file():
@@ -299,20 +511,29 @@ def extract_drape_textures(xplane_root: Path, out_dir: Path) -> Dict[str, int]:
         if not texture.is_file():
             raise XPlaneExtractError(
                 f"{ter.name} names {texture_rel}, which this install lacks")
-        with Image.open(texture) as im:
-            rgb = im.convert("RGB")
-        scale = DRAPE_TEXTURE_MAX_PX / max(rgb.size)
-        if scale < 1.0:
-            rgb = rgb.resize((max(1, round(rgb.width * scale)),
-                              max(1, round(rgb.height * scale))),
-                             Image.LANCZOS)
-        rgb.save(out / f"{role}.png")
+        _save_texture(texture, out / f"{role}.png", keep_alpha=False)
+        written.setdefault(texture, f"{role}.png")
+        texts[role] = (ter, text)
         index[role] = {"file": f"{role}.png", "metres_x": metres[0],
                        "metres_y": metres[1], "source_ter": ter.name,
                        "source_texture": texture.name}
+    # The maps after every albedo, so a directive naming an albedo (the
+    # cliff role's BASE_TEX is the rock's) points at it instead of
+    # pulling a second copy, whatever the role order.
+    pulled = 0
+    for role, (ter, text) in texts.items():
+        directives, normal, count = _extract_directives(
+            role, ter, text, out, written)
+        pulled += count
+        index[role]["normal"] = normal
+        index[role]["directives"] = directives
+        index[role]["library_lines"] = _library_lines(xplane_root, ter)
     (out / "drape_textures.json").write_text(
         json.dumps(index, indent=1), encoding="utf-8")
-    return {"textures": len(index)}
+    counts = {"textures": len(index)}
+    if pulled:
+        counts["maps"] = pulled
+    return counts
 
 
 def extract(xplane_root: Path, out_dir: Path) -> Dict[str, Dict[str, int]]:

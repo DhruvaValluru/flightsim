@@ -45,6 +45,15 @@ consumes are read here:
   level = texel 243, ~117 ft per texel; the axis is a least-squares fit
   over flat sites of known height, confirmed here on Paris, Lyon and
   Zermatt; summits read low because a texel is ~540 m across).
+* ``bitmaps/world/weather/{snow,ice}_{ALB,NML,DCL}.png`` and ``noise.png``:
+  the dedicated weather textures the ``weather_apply`` pass composites
+  over the ground (disassembled from the committed SPIR-V; the README
+  of the logic reports): the albedo's alpha is the per-texel cover
+  threshold, the NML a tangent-space normal, the DCL a decal, the noise
+  the jitter the pass adds to the snow key. :func:`weather_bitmaps`
+  names them by role so the drape (its composite and its material
+  block) and anything else binding them read ONE index; a missing one
+  is None, never a stand-in.
 
 Rules read out of the decompiled bodies and reproduced here (each names
 its function and lines in ``assets/logic_reports/<report>/code.c``):
@@ -214,7 +223,9 @@ REPORTS: Dict[str, Report] = {
                        "OBJ_command_builder::set_texture_weather_decal",
                        "REN_degree_dem_table::total_season_for_location",
                        "REN_do_water_per_frame", "rain_effect_init_shaders"),
-        consumers=("core.xplane.drape (snow role)",
+        consumers=("core.xplane.drape (snow role; the material block's "
+                   "snow albedo / normal / noise paths)",
+                   "core.xplane.physical.weather_bitmaps",
                    "core.scene.precipitation", "core.scene.weather_visuals"),
         caveat="the decompiled bodies are the HDR/bloom constant block, "
                "exposure fusion (EV100 multiplier, Rec.709 luma), the FSR "
@@ -494,6 +505,40 @@ class WaterTiles:
 
     def tile_count(self) -> int:
         return sum(1 for _ in self.root.glob("*/*.png"))
+
+
+# -- weather bitmaps --------------------------------------------------------
+
+#: ``bitmaps/world/weather``: the textures ``weather_apply`` composites
+#: over the ground, by role. The file names are the committed tree's own
+#: (the pass binds them through OBJ_command_builder::set_texture_weather
+#: (_decal), a name only in render_quality, so WHICH uniform takes which
+#: file is read from the SPIR-V debug names, not from a body).
+WEATHER_BITMAP_DIR = Path("bitmaps") / "world" / "weather"
+WEATHER_BITMAPS: Dict[str, str] = {
+    "snow_albedo": "snow_ALB.png",     # RGBA: alpha = per-texel cover threshold
+    "snow_normal": "snow_NML.png",     # tangent-space normal
+    "snow_decal": "snow_DCL.png",
+    "ice_albedo": "ice_ALB.png",
+    "ice_normal": "ice_NML.png",
+    "ice_decal": "ice_DCL.png",
+    "noise": "noise.png",              # L: the snow key's jitter
+}
+
+
+def weather_bitmaps(render_dir: Optional[Path] = None
+                    ) -> Dict[str, Optional[Path]]:
+    """Each weather bitmap's absolute path under the render assets, by
+    the role names of :data:`WEATHER_BITMAPS`, None where the file is not
+    on this checkout. No refusal here: the drape composites without them
+    and records the absence, and the material binds what it finds."""
+    render_dir = Path(render_dir) if render_dir else RENDER_DIR
+    folder = render_dir / WEATHER_BITMAP_DIR
+    out: Dict[str, Optional[Path]] = {}
+    for role, name in WEATHER_BITMAPS.items():
+        candidate = folder / name
+        out[role] = candidate.resolve() if candidate.is_file() else None
+    return out
 
 
 # -- Earth Orbit Textures --------------------------------------------------

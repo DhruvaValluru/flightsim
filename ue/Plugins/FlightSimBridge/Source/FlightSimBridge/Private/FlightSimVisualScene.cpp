@@ -33,6 +33,9 @@
 #include "Engine/Level.h"
 #include "Engine/LevelStreamingDynamic.h"
 #include "Engine/Texture2D.h"
+// The drape maps' mip chain reads the platform data (FTexturePlatformData,
+// FTexture2DMipMap), declared here and not by Engine/Texture2D.h.
+#include "TextureResource.h"
 #include "HAL/IConsoleManager.h"
 #include "Landscape.h"
 #include "LandscapeInfo.h"
@@ -154,6 +157,34 @@ namespace
 		return NAME_None;
 	}
 
+	// The texture twin of FindScalarParameter: the first texture parameter
+	// whose name contains (or, when bExact, equals) Needle; NAME_None when
+	// the material exposes none, so a drape map is never set on a material
+	// that cannot read it and then recorded as applied.
+	FName FindTextureParameter(const UMaterialInterface* Material,
+	                           const TCHAR* Needle, bool bExact)
+	{
+		if (Material == nullptr)
+		{
+			return NAME_None;
+		}
+		TArray<FMaterialParameterInfo> Infos;
+		TArray<FGuid> Ids;
+		Material->GetAllTextureParameterInfo(Infos, Ids);
+		for (const FMaterialParameterInfo& Info : Infos)
+		{
+			const FString Name = Info.Name.ToString();
+			const bool bMatch = bExact
+				? Name.Equals(Needle, ESearchCase::IgnoreCase)
+				: Name.Contains(Needle, ESearchCase::IgnoreCase);
+			if (bMatch)
+			{
+				return Info.Name;
+			}
+		}
+		return NAME_None;
+	}
+
 	TSharedPtr<FJsonObject> NewRecord()
 	{
 		return MakeShared<FJsonObject>();
@@ -207,6 +238,195 @@ namespace
 	constexpr double SceneStarfieldRadiusMetres = 500000.0;
 	// No moon is brighter: K&S's full moon at the zenith is 0.267 lx.
 	constexpr double SceneMoonLuxMax = 1.0;
+
+	// -- the drape material ---------------------------------------------------
+	// The parameters of M_TerrainImagery / M_TerrainImageryNight the drape
+	// sidecar's "material" block drives (core/xplane/drape.py material_block
+	// writes it; scripts/ue_create_materials.py TERRAIN_TEXTURE_PARAMETERS /
+	// TERRAIN_SCALAR_PARAMETERS exposes them; the NAMES are the contract,
+	// pinned three ways -- these tables, the script, the drape -- by
+	// tests/test_ue_world_source.py, the script against the drape again by
+	// tests/test_ue_materials.py). The scene's
+	// own three -- "Wetness" (ApplyWetness), "NightLights" and
+	// "NightLuminance" (the night branch) -- are the material's too and
+	// deliberately not here: a drape never resets them. UNCOMPILED here (no
+	// engine in the build container); the first Windows build verifies.
+	//
+	// How a map's texels are read: an albedo stays sRGB colour; weights,
+	// levels, masks and noise are linear data; a normal is linear
+	// tangent-space data tagged for the material's Normal sampler.
+	enum class ESceneDrapeTexel : uint8 { Albedo, Data, Normal };
+	// One texture row: the parameter; where the sidecar names its file --
+	// material.textures[Key], or material.textures.detail[Role][Key] for a
+	// role's detail ("file") and its normal ("normal"); "Imagery" is the one
+	// row the caller has already set, from the composite (texture.file),
+	// before the block is read: its key names the block's BASE image, which
+	// replaces the composite on the parameter when it loads (the file
+	// comment) -- and whether the map tiles in world metres (then it wraps
+	// and gets a mip chain) or lies on the composite's UV grid (one mip, as
+	// the composite always had).
+	struct FSceneDrapeTexture
+	{
+		const TCHAR* Parameter;
+		const TCHAR* Key;
+		const TCHAR* Role;
+		ESceneDrapeTexel Texel;
+		bool bTiled;
+	};
+	// One row per line, the parameter first (the test reads each row's
+	// first literal; the later ones are the sidecar's keys).
+	constexpr FSceneDrapeTexture SceneTerrainTextureParameters[] = {
+		{TEXT("Imagery"), TEXT("imagery"), nullptr, ESceneDrapeTexel::Albedo, false},
+		{TEXT("Roles"), TEXT("roles"), nullptr, ESceneDrapeTexel::Data, false},
+		{TEXT("SnowCover"), TEXT("snow_cover"), nullptr, ESceneDrapeTexel::Data, false},
+		{TEXT("WaterMask"), TEXT("water_mask"), nullptr, ESceneDrapeTexel::Data, false},
+		{TEXT("DetailValley"), TEXT("file"), TEXT("valley"), ESceneDrapeTexel::Albedo, true},
+		{TEXT("DetailScrub"), TEXT("file"), TEXT("scrub"), ESceneDrapeTexel::Albedo, true},
+		{TEXT("DetailRock"), TEXT("file"), TEXT("rock"), ESceneDrapeTexel::Albedo, true},
+		{TEXT("DetailCliff"), TEXT("file"), TEXT("cliff"), ESceneDrapeTexel::Albedo, true},
+		{TEXT("DetailSnow"), TEXT("file"), TEXT("snow"), ESceneDrapeTexel::Albedo, true},
+		{TEXT("NormalValley"), TEXT("normal"), TEXT("valley"), ESceneDrapeTexel::Normal, true},
+		{TEXT("NormalScrub"), TEXT("normal"), TEXT("scrub"), ESceneDrapeTexel::Normal, true},
+		{TEXT("NormalRock"), TEXT("normal"), TEXT("rock"), ESceneDrapeTexel::Normal, true},
+		{TEXT("NormalCliff"), TEXT("normal"), TEXT("cliff"), ESceneDrapeTexel::Normal, true},
+		{TEXT("NormalSnow"), TEXT("normal"), TEXT("snow"), ESceneDrapeTexel::Normal, true},
+		{TEXT("SnowAlbedo"), TEXT("snow_albedo"), nullptr, ESceneDrapeTexel::Albedo, true},
+		{TEXT("SnowNormal"), TEXT("snow_normal"), nullptr, ESceneDrapeTexel::Normal, true},
+		{TEXT("Noise"), TEXT("noise"), nullptr, ESceneDrapeTexel::Data, true},
+	};
+	// The scalars, in the block's order (core/xplane/drape.py
+	// MATERIAL_SCALAR_NAMES): the detail sizes in metres per role, the snow
+	// albedo's and the noise's sizes, the detail strength and its distance
+	// fade, the weather snow's slope ramp and band, the per-role roughness.
+	// Every value is the sidecar's (its defaults are the drape writer's
+	// constants); none is restated here.
+	constexpr const TCHAR* SceneTerrainScalarParameters[] = {
+		TEXT("DetailMetresValley"), TEXT("DetailMetresScrub"), TEXT("DetailMetresRock"),
+		TEXT("DetailMetresCliff"), TEXT("DetailMetresSnow"),
+		TEXT("SnowMetres"), TEXT("NoiseMetres"), TEXT("DetailStrength"),
+		TEXT("DetailFadeStartM"), TEXT("DetailFadeEndM"),
+		TEXT("SnowSlopeLowCos"), TEXT("SnowSlopeHighCos"), TEXT("SnowBand"),
+		TEXT("RoughnessValley"), TEXT("RoughnessScrub"), TEXT("RoughnessRock"),
+		TEXT("RoughnessCliff"), TEXT("RoughnessSnow"), TEXT("RoughnessWater"),
+	};
+
+	// A box-filtered mip chain for a transient texture that tiles in world
+	// metres -- BGRA8 (4 bytes a texel: the albedos, the normals, an RGBA
+	// map) or G8 (1 byte: the 8-bit L maps, the noise among them, which the
+	// import keeps grey); any other format keeps the one mip it has.
+	// Without one a 512 px texture repeating every kilometre is sampled at
+	// one texel per 2 m by a camera whose pixel covers 5-20 m (the drape's
+	// usual 5-20 km) and shimmers. Appended to the one mip the import made,
+	// each level the 2x2 mean of the last on the STORED bytes: the value
+	// itself for the data maps; for an sRGB albedo the encoded value, a
+	// slightly dark mean (the editor's own build averages linear); for a
+	// normal a shortened mean the material's normalize restores. An odd
+	// size floors and drops its last column or row at that level. Returns
+	// the mip count. NOT claimed: that the resource uploads every in-memory
+	// mip of a non-streaming texture -- the first Windows build's check (a
+	// texture that comes up with one mip aliases at distance, which the
+	// detail fade bounds).
+	int32 SceneBuildMipChain(UTexture2D* Texture)
+	{
+		FTexturePlatformData* Platform = Texture != nullptr ? Texture->GetPlatformData() : nullptr;
+		const int32 BytesPerTexel = Platform == nullptr ? 0
+			: Platform->PixelFormat == PF_B8G8R8A8 ? 4
+			: Platform->PixelFormat == PF_G8 ? 1 : 0;
+		if (Platform == nullptr || Platform->Mips.Num() != 1 || BytesPerTexel == 0)
+		{
+			return Platform != nullptr ? Platform->Mips.Num() : 0;
+		}
+		int32 Width = Platform->Mips[0].SizeX;
+		int32 Height = Platform->Mips[0].SizeY;
+		TArray<uint8> Level;
+		{
+			FTexture2DMipMap& Base = Platform->Mips[0];
+			const int64 Bytes = static_cast<int64>(Width) * Height * BytesPerTexel;
+			if (Width < 1 || Height < 1 || Base.BulkData.GetBulkDataSize() < Bytes)
+			{
+				return 1;
+			}
+			const void* Data = Base.BulkData.Lock(LOCK_READ_ONLY);
+			Level.Append(static_cast<const uint8*>(Data), static_cast<int32>(Bytes));
+			Base.BulkData.Unlock();
+		}
+		while (Width > 1 || Height > 1)
+		{
+			const int32 NextWidth = FMath::Max(Width / 2, 1);
+			const int32 NextHeight = FMath::Max(Height / 2, 1);
+			TArray<uint8> Next;
+			Next.SetNumUninitialized(NextWidth * NextHeight * BytesPerTexel);
+			for (int32 Y = 0; Y < NextHeight; ++Y)
+			{
+				const int32 Y0 = FMath::Min(Y * 2, Height - 1);
+				const int32 Y1 = FMath::Min(Y * 2 + 1, Height - 1);
+				for (int32 X = 0; X < NextWidth; ++X)
+				{
+					const int32 X0 = FMath::Min(X * 2, Width - 1);
+					const int32 X1 = FMath::Min(X * 2 + 1, Width - 1);
+					for (int32 Channel = 0; Channel < BytesPerTexel; ++Channel)
+					{
+						const int32 Sum =
+							Level[(Y0 * Width + X0) * BytesPerTexel + Channel] +
+							Level[(Y0 * Width + X1) * BytesPerTexel + Channel] +
+							Level[(Y1 * Width + X0) * BytesPerTexel + Channel] +
+							Level[(Y1 * Width + X1) * BytesPerTexel + Channel];
+						Next[(Y * NextWidth + X) * BytesPerTexel + Channel] = static_cast<uint8>((Sum + 2) / 4);
+					}
+				}
+			}
+			FTexture2DMipMap* Mip = new FTexture2DMipMap();
+			Mip->SizeX = NextWidth;
+			Mip->SizeY = NextHeight;
+			Mip->SizeZ = 1;
+			Mip->BulkData.Lock(LOCK_READ_WRITE);
+			void* Data = Mip->BulkData.Realloc(Next.Num());
+			FMemory::Memcpy(Data, Next.GetData(), Next.Num());
+			Mip->BulkData.Unlock();
+			Platform->Mips.Add(Mip);
+			Level = MoveTemp(Next);
+			Width = NextWidth;
+			Height = NextHeight;
+		}
+		return Platform->Mips.Num();
+	}
+
+	// A drape map as the material reads it, or null when the file does not
+	// decode. FImageUtils::ImportFileAsTexture2D makes a TRANSIENT texture
+	// (the PNG's texels as 8-bit BGRA, no source, nothing re-encoded), sRGB
+	// by default: an albedo keeps that; data and normals are flagged linear
+	// so the sampler hands the material the stored values, and tagged with
+	// the compression class the material's sampler expects -- Normalmap for
+	// the Normal sampler, VectorDisplacementmap for the data maps, the
+	// class the script's SAMPLERTYPE_LINEAR_COLOR samplers default to
+	// (scripts/ue_create_materials.py linear_default_texture; a Masks tag
+	// is one those samplers reject, which ValidateTextureOverrides logs) --
+	// on a transient texture the tag changes no bytes, SRGB is what reaches
+	// the sampler. A map tiled in world metres wraps and gets the mip chain
+	// above; a map on the composite's grid clamps. One UpdateResource
+	// re-creates the RHI texture with all of it.
+	UTexture2D* SceneLoadDrapeTexture(const FString& Path, ESceneDrapeTexel Texel, bool bTiled,
+	                                  int32& Mips)
+	{
+		Mips = 0;
+		UTexture2D* Texture = FImageUtils::ImportFileAsTexture2D(Path);
+		if (Texture == nullptr)
+		{
+			return nullptr;
+		}
+		if (Texel != ESceneDrapeTexel::Albedo)
+		{
+			Texture->SRGB = false;
+			Texture->CompressionSettings =
+				Texel == ESceneDrapeTexel::Normal ? TC_Normalmap : TC_VectorDisplacementmap;
+		}
+		Texture->AddressX = bTiled ? TA_Wrap : TA_Clamp;
+		Texture->AddressY = bTiled ? TA_Wrap : TA_Clamp;
+		Mips = bTiled ? SceneBuildMipChain(Texture) : Texture->GetNumMips();
+		Texture->NeverStream = true;
+		Texture->UpdateResource();
+		return Texture;
+	}
 
 	// FIPS 180-4 SHA-256 as hex (the third per-file copy: unity builds merge
 	// anonymous namespaces, so the name is this file's own).
@@ -340,6 +560,9 @@ bool FFlightSimVisualScene::Build(UWorld* World,
                                   FString& Error)
 {
 	LookApplied = NewRecord();
+	// The drape material's record is the imagery route's alone: a build on
+	// another route must not hand the scene record a stale one.
+	ImageryMaterial.Reset();
 	// W5: every world row starts as "not asked" and is overwritten by what
 	// the scene and the world look actually drew.
 	WorldApplied = NewRecord();
@@ -1093,6 +1316,34 @@ bool FFlightSimVisualScene::BuildGeoreferencedTerrain(
 	TerrainStride = Stride;
 	TerrainPostingMetres = Stride * Terrain.PixelSizeMetres;
 
+	AGeoReferencingSystem* Geo = Options.GeoReferencing;
+	// A calm card never told the scenario world about this raster's CRS (only
+	// orographic cards do), so make the projected frame match the terrain
+	// here, before anything is measured through it. Placing UTM-32N
+	// coordinates through a default CRS would put the Matterhorn in the
+	// wrong country with no error message.
+	if (Geo->ProjectedCRS != Terrain.Crs)
+	{
+		Geo->ProjectedCRS = Terrain.Crs;
+		Geo->ApplySettings();
+	}
+	// Which way the engine's Y runs, MEASURED through that frame (the idiom
+	// LoadSceneLevel checks a scene level with): the raster origin and one
+	// bake pixel north of it, projected. FlightSimSky.h states +Y south and
+	// the Gate 6 instances place their raster with +Y north; neither is
+	// assumed here. The tangent basis below needs the sign: the engine's
+	// bitangent is cross(N, T), +Y for an east tangent on flat ground, and
+	// UV0's v grows with the row, SOUTH, so the bitangent is flipped exactly
+	// when north is +Y -- +V either way, by construction -- and both are
+	// recorded (terrain_material.north_axis_measured / flip_tangent_y) so
+	// the first Windows build's green-channel check reads a known basis.
+	FVector Origin, North;
+	Geo->ProjectedToEngine(FVector(Terrain.OriginXMetres, Terrain.OriginYMetres, 0.0), Origin);
+	Geo->ProjectedToEngine(
+		FVector(Terrain.OriginXMetres, Terrain.OriginYMetres + Terrain.PixelSizeMetres, 0.0), North);
+	const bool bNorthPlusY = North.Y > Origin.Y;
+	const bool bFlipTangentY = bNorthPlusY;
+
 	UMaterialInterface* Material =
 		UMaterial::GetDefaultMaterial(EMaterialDomain::MD_Surface);
 	const bool bImagery = !Options.ImagerySidecarPath.IsEmpty();
@@ -1196,6 +1447,12 @@ bool FFlightSimVisualScene::BuildGeoreferencedTerrain(
 			Instance->SetScalarParameterValue(TEXT("NightLuminance"),
 			                                  static_cast<float>(NightLuminance));
 		}
+		// The sidecar's "material" block (core/xplane/drape.py): the role,
+		// snow and water maps, the detail textures and every scalar, each
+		// looked up on the instance and recorded, and the base image that
+		// replaces the composite just set on "Imagery" when the block names
+		// one and it loads; nothing in it refuses.
+		ApplyDrapeMaterial(Instance, Sidecar, Options.ImagerySidecarPath, bNorthPlusY);
 		Material = Instance;
 	}
 	else if (Options.bClassifiedMaterial)
@@ -1219,23 +1476,15 @@ bool FFlightSimVisualScene::BuildGeoreferencedTerrain(
 
 	TArray<FVector> Vertices;
 	TArray<FVector> Normals;
+	TArray<FProcMeshTangent> Tangents;
 	TArray<FVector2D> UV0;
 	TArray<FLinearColor> Colours;
 	Vertices.Reserve(Rows * Columns);
 	Normals.Reserve(Rows * Columns);
+	Tangents.Reserve(Rows * Columns);
 	UV0.Reserve(Rows * Columns);
 	Colours.Reserve(Rows * Columns);
 
-	AGeoReferencingSystem* Geo = Options.GeoReferencing;
-	// A calm card never told the scenario world about this raster's CRS (only
-	// orographic cards do), so make the projected frame match the terrain
-	// here. Placing UTM-32N coordinates through a default CRS would put the
-	// Matterhorn in the wrong country with no error message.
-	if (Geo->ProjectedCRS != Terrain.Crs)
-	{
-		Geo->ProjectedCRS = Terrain.Crs;
-		Geo->ApplySettings();
-	}
 	for (int32 Row = 0; Row < Terrain.Height; Row += Stride)
 	{
 		for (int32 Column = 0; Column < Terrain.Width; Column += Stride)
@@ -1265,6 +1514,24 @@ bool FFlightSimVisualScene::BuildGeoreferencedTerrain(
 				(Terrain.SampleMetres(RowN, Column) - Terrain.SampleMetres(RowS, Column)) /
 				((RowS - RowN) * Terrain.PixelSizeMetres);
 			Normals.Add(FVector(-DzDx, -DzDy, 1.0).GetSafeNormal());
+			// The tangent basis the drape material's normal maps need (a
+			// tangent-space normal means nothing without one; the sections
+			// were created with none, i.e. the engine's +X at every vertex,
+			// skewed against the normal on every slope). Tangent X = dP/du:
+			// UV0's u grows with the column, east, so the raster's east
+			// direction lying IN the surface, (1, 0, dz/dx) normalised,
+			// orthogonal to the normal above by construction; the bitangent
+			// is +V, south, by construction: the engine's cross(N, T),
+			// flipped when and only when the measurement above found north
+			// along +Y (bFlipTangentY). NOT UKismetProceduralMeshLibrary
+			// ::CalculateTangentsForMesh: it recomputes the normals per tile
+			// from the decimated triangles, discarding the full-raster
+			// normals and re-opening the tile-edge seams ruled out below.
+			// Which way the extracted normals' green channel reads against
+			// +V is the first Windows build's measurement: a wrong sign is
+			// bumps lit from the wrong side, and the recorded flip is where
+			// it is corrected.
+			Tangents.Add(FProcMeshTangent(FVector(1.0, 0.0, DzDx).GetSafeNormal(), bFlipTangentY));
 
 			const double SlopeDegrees =
 				FMath::RadiansToDegrees(FMath::Atan(FMath::Sqrt(DzDx * DzDx + DzDy * DzDy)));
@@ -1308,10 +1575,12 @@ bool FFlightSimVisualScene::BuildGeoreferencedTerrain(
 
 			TArray<FVector> TileVertices;
 			TArray<FVector> TileNormals;
+			TArray<FProcMeshTangent> TileTangents;
 			TArray<FVector2D> TileUV0;
 			TArray<FLinearColor> TileColours;
 			TileVertices.Reserve(TileRowCount * TileColumnCount);
 			TileNormals.Reserve(TileRowCount * TileColumnCount);
+			TileTangents.Reserve(TileRowCount * TileColumnCount);
 			TileUV0.Reserve(TileRowCount * TileColumnCount);
 			TileColours.Reserve(TileRowCount * TileColumnCount);
 			for (int32 Row = Row0; Row <= Row1; ++Row)
@@ -1321,6 +1590,7 @@ bool FFlightSimVisualScene::BuildGeoreferencedTerrain(
 					const int32 Index = Row * Columns + Column;
 					TileVertices.Add(Vertices[Index]);
 					TileNormals.Add(Normals[Index]);
+					TileTangents.Add(Tangents[Index]);
 					TileUV0.Add(UV0[Index]);
 					TileColours.Add(Colours[Index]);
 				}
@@ -1346,8 +1616,12 @@ bool FFlightSimVisualScene::BuildGeoreferencedTerrain(
 				TerrainActor, *FString::Printf(TEXT("TerrainTile_r%d_c%d"), TileRow, TileColumn));
 			Mesh->SetupAttachment(Root);
 			Mesh->SetMobility(EComponentMobility::Movable);
+			// With the per-vertex tangents (the drape material's normal maps
+			// need the basis; the Gate 6 offset instances keep none, their
+			// default material reads no normal map and their geometry stays
+			// byte-identical).
 			Mesh->CreateMeshSection_LinearColor(0, TileVertices, TileTriangles, TileNormals,
-			                                    TileUV0, TileColours, {},
+			                                    TileUV0, TileColours, TileTangents,
 			                                    false /* no collision */);
 			Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 			Mesh->SetCastShadow(true);
@@ -1398,6 +1672,199 @@ UTexture2D* FFlightSimVisualScene::LoadNightLights(const FString& SidecarPath,
 		NightLightsSha256.Empty();
 	}
 	return Texture;
+}
+
+void FFlightSimVisualScene::ApplyDrapeMaterial(UMaterialInstanceDynamic* Instance,
+                                               const TSharedPtr<FJsonObject>& Sidecar,
+                                               const FString& SidecarPath, bool bNorthPlusY)
+{
+	// UNCOMPILED here (no engine in the build container); pinned by
+	// tests/test_ue_world_source.py and tests/test_ue_materials.py; the
+	// first Windows build verifies. Nothing in here refuses: the composite
+	// is already on the instance, and every row below either adds to it,
+	// replaces it with the block's base image, or records why it did not.
+	ImageryMaterial = NewRecord();
+	// The tangent basis every georeferenced tile carries, whatever the
+	// block (the caller measured the sign; the file comment).
+	ImageryMaterial->SetStringField(TEXT("tangents"),
+		TEXT("per vertex of every georeferenced tile: tangent X the raster's east direction in the ")
+		TEXT("surface (dP/du); bitangent +V (south, the row direction) by construction -- the engine's ")
+		TEXT("cross(N, T) is +Y, flipped exactly when the georeferencing puts north along +Y"));
+	ImageryMaterial->SetStringField(TEXT("north_axis_measured"), bNorthPlusY ? TEXT("+Y") : TEXT("-Y"));
+	ImageryMaterial->SetBoolField(TEXT("flip_tangent_y"), bNorthPlusY);
+	const TSharedPtr<FJsonObject>* Block = nullptr;
+	if (Instance == nullptr || !Sidecar.IsValid() ||
+	    !Sidecar->TryGetObjectField(TEXT("material"), Block) || Block == nullptr || !Block->IsValid())
+	{
+		// A drape from before the block (drape_version < 6) or another
+		// writer's: the composite alone, as every measured render so far.
+		ImageryMaterial->SetNumberField(TEXT("version"), 0);
+		ImageryMaterial->SetStringField(TEXT("imagery_source"), TEXT("texture.file"));
+		ImageryMaterial->SetStringField(TEXT("note"),
+			TEXT("the sidecar carries no material block: the composite alone draws, and the ")
+			TEXT("material's detail, snow and roughness parameters keep their defaults"));
+		LookApplied->SetObjectField(TEXT("terrain_material"), ImageryMaterial);
+		return;
+	}
+	double Version = 0.0;
+	(*Block)->TryGetNumberField(TEXT("version"), Version);
+	const TSharedPtr<FJsonObject>* TexturesJson = nullptr;
+	const TSharedPtr<FJsonObject>* DetailJson = nullptr;
+	const TSharedPtr<FJsonObject>* ScalarsJson = nullptr;
+	(*Block)->TryGetObjectField(TEXT("textures"), TexturesJson);
+	if (TexturesJson != nullptr)
+	{
+		(*TexturesJson)->TryGetObjectField(TEXT("detail"), DetailJson);
+	}
+	(*Block)->TryGetObjectField(TEXT("scalars"), ScalarsJson);
+	// Map files are relative to the sidecar (they sit beside it); the
+	// detail albedos and the weather bitmaps are absolute.
+	const FString SidecarDir = FPaths::GetPath(SidecarPath);
+
+	TArray<TSharedPtr<FJsonValue>> Applied, Absent, MissingFiles, NotInSidecar;
+	TSharedPtr<FJsonObject> Textures = NewRecord();
+	TSharedPtr<FJsonObject> Scalars = NewRecord();
+	auto Name = [](const TCHAR* Text) { return MakeShared<FJsonValueString>(Text); };
+	// What "Imagery" carries: the caller's composite (texture.file) until
+	// the block's base image replaces it below; recorded either way.
+	const TCHAR* ImagerySource = TEXT("texture.file");
+
+	for (const FSceneDrapeTexture& Row : SceneTerrainTextureParameters)
+	{
+		// Looked up FIRST: a map set on a material that exposes no such
+		// parameter drives nothing and is recorded absent, never applied.
+		const FName Parameter = FindTextureParameter(Instance, Row.Parameter, true);
+		// The composite row: already set from texture.file. Its key names
+		// the block's BASE image (material.textures.imagery: the role
+		// blend with each tile replaced by its mean colour, no weather
+		// snow), which takes the parameter over when it loads, so detail
+		// and weather snow are applied once, by the material. A block
+		// without it, or an image that is not here or does not decode,
+		// leaves the composite on: the fallback every render before the
+		// base image drew, never a refusal.
+		const bool bImagery = Row.Role == nullptr && FCString::Strcmp(Row.Parameter, TEXT("Imagery")) == 0;
+		FString File;
+		const TSharedPtr<FJsonObject>* Holder = TexturesJson;
+		if (Row.Role != nullptr)
+		{
+			Holder = nullptr;
+			if (DetailJson != nullptr)
+			{
+				(*DetailJson)->TryGetObjectField(Row.Role, Holder);
+			}
+		}
+		if (Holder == nullptr || !(*Holder)->TryGetStringField(Row.Key, File) || File.IsEmpty())
+		{
+			if (bImagery)
+			{
+				// A block from before the base image: the composite, as set.
+				(Parameter != NAME_None ? Applied : Absent).Add(Name(Row.Parameter));
+				continue;
+			}
+			// null or absent in the sidecar: the extractor pulls no normal
+			// for any ground texture, a weather bitmap may not be on the
+			// checkout; the material's default (flat, nothing) stands.
+			NotInSidecar.Add(Name(Row.Parameter));
+			continue;
+		}
+		const FString Path = FPaths::IsRelative(File) ? FPaths::Combine(SidecarDir, File) : File;
+		if (Parameter == NAME_None)
+		{
+			Absent.Add(Name(Row.Parameter));
+			continue;
+		}
+		int32 Mips = 0;
+		UTexture2D* Texture = FPaths::FileExists(Path)
+			? SceneLoadDrapeTexture(Path, Row.Texel, Row.bTiled, Mips)
+			: nullptr;
+		if (Texture == nullptr)
+		{
+			// An optional file: recorded by path, the parameter keeps its
+			// default (the composite, for "Imagery"), the render goes on.
+			MissingFiles.Add(MakeShared<FJsonValueString>(Path));
+			UE_LOG(LogFlightSimRender, Warning,
+			       TEXT("drape material: %s names '%s', which is %s; the parameter keeps %s"),
+			       Row.Parameter, *Path,
+			       FPaths::FileExists(Path) ? TEXT("not a texture this build decodes")
+			                                : TEXT("not on this machine"),
+			       bImagery ? TEXT("the composite") : TEXT("its default"));
+			if (bImagery)
+			{
+				Applied.Add(Name(Row.Parameter));   // the composite is on it
+			}
+			continue;
+		}
+		Instance->SetTextureParameterValue(Parameter, Texture);
+		Applied.Add(Name(Row.Parameter));
+		if (bImagery)
+		{
+			ImagerySource = TEXT("material.textures.imagery");
+		}
+		const TCHAR* Texel = TEXT("data (linear, TC_VectorDisplacementmap)");
+		if (Row.Texel == ESceneDrapeTexel::Albedo)
+		{
+			Texel = TEXT("albedo (sRGB)");
+		}
+		else if (Row.Texel == ESceneDrapeTexel::Normal)
+		{
+			Texel = TEXT("tangent-space normal (linear, TC_Normalmap)");
+		}
+		TSharedPtr<FJsonObject> Entry = NewRecord();
+		Entry->SetStringField(TEXT("file"), Path);
+		Entry->SetNumberField(TEXT("width"), Texture->GetSizeX());
+		Entry->SetNumberField(TEXT("height"), Texture->GetSizeY());
+		Entry->SetNumberField(TEXT("mips"), Mips);
+		Entry->SetBoolField(TEXT("srgb"), Texture->SRGB);
+		Entry->SetStringField(TEXT("texel"), Texel);
+		Entry->SetStringField(TEXT("uv"), Row.bTiled ? TEXT("world metres (wrap)")
+		                                            : TEXT("the composite's UV0 (clamp)"));
+		Textures->SetObjectField(Row.Parameter, Entry);
+	}
+	for (const TCHAR* ScalarName : SceneTerrainScalarParameters)
+	{
+		double Value = 0.0;
+		if (ScalarsJson == nullptr || !(*ScalarsJson)->TryGetNumberField(ScalarName, Value))
+		{
+			NotInSidecar.Add(Name(ScalarName));
+			continue;
+		}
+		const FName Parameter = FindScalarParameter(Instance, ScalarName, true);
+		if (Parameter == NAME_None)
+		{
+			Absent.Add(Name(ScalarName));
+			continue;
+		}
+		Instance->SetScalarParameterValue(Parameter, static_cast<float>(Value));
+		Applied.Add(Name(ScalarName));
+		Scalars->SetNumberField(ScalarName, Value);
+	}
+
+	ImageryMaterial->SetNumberField(TEXT("version"), Version);
+	ImageryMaterial->SetStringField(TEXT("material"),
+		Instance->Parent != nullptr ? Instance->Parent->GetPathName() : FString());
+	ImageryMaterial->SetStringField(TEXT("sidecar"), SidecarPath);
+	ImageryMaterial->SetArrayField(TEXT("applied"), Applied);
+	ImageryMaterial->SetArrayField(TEXT("absent"), Absent);
+	ImageryMaterial->SetArrayField(TEXT("missing_files"), MissingFiles);
+	ImageryMaterial->SetArrayField(TEXT("not_in_sidecar"), NotInSidecar);
+	ImageryMaterial->SetObjectField(TEXT("textures"), Textures);
+	ImageryMaterial->SetObjectField(TEXT("scalars"), Scalars);
+	// Which image "Imagery" ended up with: the block's base image, or the
+	// composite the caller set (texture.file) when the block names none or
+	// it did not load (then in missing_files).
+	ImageryMaterial->SetStringField(TEXT("imagery_source"), ImagerySource);
+	ImageryMaterial->SetStringField(TEXT("not_claimed"),
+		TEXT("the material's graph (the detail, snow, water and roughness rules) is scripts/")
+		TEXT("ue_create_materials.py's; that each map reads as intended, that every in-memory mip ")
+		TEXT("uploads, and the extracted normals' green convention against +V are the first Windows ")
+		TEXT("build's measurements; no normal is extracted for any ground texture yet"));
+	LookApplied->SetObjectField(TEXT("terrain_material"), ImageryMaterial);
+	UE_LOG(LogFlightSimRender, Display,
+	       TEXT("drape material v%d on %s: Imagery from %s, %d parameter(s) applied, %d absent from ")
+	       TEXT("the material, %d file(s) missing, %d not in the sidecar"),
+	       static_cast<int32>(Version),
+	       Instance->Parent != nullptr ? *Instance->Parent->GetPathName() : TEXT("(no parent)"),
+	       ImagerySource, Applied.Num(), Absent.Num(), MissingFiles.Num(), NotInSidecar.Num());
 }
 
 void FFlightSimVisualScene::ApplyManualExposure(USceneCaptureComponent2D* Capture,

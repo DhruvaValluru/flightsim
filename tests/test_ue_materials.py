@@ -9,8 +9,12 @@ script is a render that refuses on every fresh machine; this pins the
 two lists to each other without an engine.
 """
 
+import ast
+import json
 import re
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "ue_create_materials.py"
@@ -317,3 +321,298 @@ def test_the_world_parameters_the_cpp_sets_are_the_ones_the_script_exposes():
     # The linear samplers get a non-sRGB default of their own class.
     helper = _body(text, "texture_parameter")
     assert "SAMPLERTYPE_LINEAR_COLOR" in helper and "linear_default_texture()" in helper
+
+
+# -- the terrain surface: M_TerrainImagery, M_TerrainImageryNight, M_Landscape ------
+# (the script's terrain section; UNCOMPILED here, pinned by reading the
+# source. The sidecar side is core/xplane/drape.py, the C++ side
+# FlightSimVisualScene.cpp ApplyDrapeMaterial; tests/test_ue_world_source.py
+# pins both to the same two tables.)
+
+DRAPE_INDEX = REPO / "assets" / "xplane" / "terrain" / "drape" / "drape_textures.json"
+DRAPE_DIR = DRAPE_INDEX.parent
+WEATHER_DIR = REPO / "assets" / "physical_renders" / "Resources" / "bitmaps" / "world" / "weather"
+BUILD_SCENE = REPO / "scripts" / "ue_build_scene.py"
+#: The per-role parameters terrain_role_samples creates through f"...{title}".
+PER_ROLE = re.compile(r"^(DetailMetres|Detail|Normal|Roughness)(Valley|Scrub|Rock|Cliff|Snow)$")
+
+
+def _table(text: str, name: str) -> dict:
+    """A module-level literal dict NAME = {...}, its closing brace at column 0."""
+    match = re.search(rf"^{name} = (\{{.*?\n\}})\n", text, re.M | re.S)
+    assert match, name
+    return ast.literal_eval(match.group(1))
+
+
+def _camel(key: str) -> str:
+    return "".join(part.capitalize() for part in key.split("_"))
+
+
+def _linear_mean(png: Path):
+    """The per-channel linear mean of an sRGB PNG, and that mean sRGB-encoded
+    as a 0-255 texel."""
+    import numpy as np
+    from PIL import Image
+
+    srgb = np.asarray(Image.open(png).convert("RGB"), dtype=np.float64) / 255.0
+    linear = np.where(srgb <= 0.04045, srgb / 12.92, ((srgb + 0.055) / 1.055) ** 2.4)
+    mean = linear.reshape(-1, 3).mean(axis=0)
+    encoded = np.where(mean <= 0.0031308, mean * 12.92, 1.055 * mean ** (1 / 2.4) - 0.055)
+    return tuple(float(v) for v in mean), tuple(int(round(v * 255)) for v in encoded)
+
+
+def test_the_terrain_tables_are_the_contract_the_drape_sidecar_writes():
+    """The parameter NAMES are the contract between the material, the
+    sidecar's "material" block (core/xplane/drape.py) and the C++ that sets
+    them: the scalar table is the sidecar writer's, name for name, in its
+    order and with its values (the slope cosines to a milli: the table
+    carries them rounded); the texture table is every map, detail, normal
+    and weather bitmap the block names, each with its sampler."""
+    from core.xplane import drape
+
+    text = SCRIPT.read_text(encoding="utf-8")
+    scalars = _table(text, "TERRAIN_SCALAR_PARAMETERS")
+    assert tuple(scalars) == drape.MATERIAL_SCALAR_NAMES
+    written = drape.material_scalars(json.loads(DRAPE_INDEX.read_text(encoding="utf-8")))
+    for name, default in scalars.items():
+        assert default == pytest.approx(written[name], abs=1e-3), name
+    # The scene's two are the scene's: a drape never resets them.
+    assert set(drape.MATERIAL_SCENE_SCALARS) == {"Wetness", "NightLuminance"}
+    assert not set(drape.MATERIAL_SCENE_SCALARS) & set(scalars)
+    roles = _tuple(text, "TERRAIN_ROLES")
+    assert roles == drape.ROLES
+    textures = _table(text, "TERRAIN_TEXTURE_PARAMETERS")
+    expected = {"Imagery", "SnowAlbedo", "SnowNormal", "Noise"}
+    expected |= {_camel(name) for name in drape._MAP_TEXTURES.values()}    # Roles, SnowCover, WaterMask
+    expected |= {f"{kind}{role.capitalize()}" for kind in ("Detail", "Normal") for role in roles}
+    assert set(textures) == expected
+    assert tuple(textures)[:4] == ("Imagery", "Roles", "SnowCover", "WaterMask")
+    for role in roles:
+        assert textures[f"Detail{role.capitalize()}"] == "srgb", role
+        assert textures[f"Normal{role.capitalize()}"] == "normal", role
+    for name in ("Roles", "SnowCover", "WaterMask", "Noise"):
+        assert textures[name] == "linear", name
+    assert textures["Imagery"] == textures["SnowAlbedo"] == "srgb"
+    assert textures["SnowNormal"] == "normal"
+    # Every name of both tables is created under that name (the per-role
+    # ones through f"...{title}" in terrain_role_samples).
+    for name in list(scalars) + list(textures):
+        assert PER_ROLE.match(name) or f'"{name}"' in text, name
+
+
+def test_the_detail_neutrals_are_the_committed_textures_means():
+    """TERRAIN_DETAIL_NEUTRAL is each role's per-channel linear mean of
+    assets/xplane/terrain/drape/<role>.png: the texel at which the
+    modulation detail / neutral is 1. (The design's constant 2, neutral at
+    linear 0.5, would have multiplied the drape over valleys, whose texture
+    averages 0.065, by lerp(1, 0.13, 0.6) = 0.48.) The flat fallback texel
+    of each T_Detail<Role> is that mean sRGB-encoded, so a missing detail
+    reads exactly neutral."""
+    text = SCRIPT.read_text(encoding="utf-8")
+    neutral = _table(text, "TERRAIN_DETAIL_NEUTRAL")
+    defaults = _table(text, "TERRAIN_DEFAULT_TEXTURES")
+    roles = _tuple(text, "TERRAIN_ROLES")
+    assert tuple(neutral) == roles
+    for role in roles:
+        mean, texel = _linear_mean(DRAPE_DIR / f"{role}.png")
+        assert neutral[role] == pytest.approx(mean, abs=5e-4), role
+        committed, flat, is_srgb, is_normal = defaults[f"T_Detail{role.capitalize()}"]
+        assert committed == f"assets/xplane/terrain/drape/{role}.png" and is_srgb and not is_normal
+        assert flat == texel + (255,), role
+    assert neutral["valley"][0] < 0.1       # the measurement that moved the design's 2
+    surface = _body(text, "terrain_surface")
+    assert "binary(material, lib, divide, detail, neutral" in surface
+    assert "lerp(material, lib, constant(material, lib, 1.0" in surface
+
+
+def test_the_detail_aspects_are_the_committed_textures_shapes():
+    """TERRAIN_DETAIL_ASPECT is each role's width / height of
+    assets/xplane/terrain/drape/<role>.png (scrub 512 x 256, cliff
+    512 x 128), the ratio drape_textures.json's projected metres_x /
+    metres_y carries too; DetailMetres<Role> stays the one scalar (the
+    shorter axis) and the aspect widens the tile's U in detail_uv, so a
+    2:1 tile is no longer squeezed square."""
+    from PIL import Image
+
+    text = SCRIPT.read_text(encoding="utf-8")
+    aspect = _table(text, "TERRAIN_DETAIL_ASPECT")
+    roles = _tuple(text, "TERRAIN_ROLES")
+    assert tuple(aspect) == roles
+    index = json.loads(DRAPE_INDEX.read_text(encoding="utf-8"))
+    scalars = _table(text, "TERRAIN_SCALAR_PARAMETERS")
+    for role in roles:
+        width, height = Image.open(DRAPE_DIR / f"{role}.png").size
+        assert aspect[role] == width / height, role
+        assert aspect[role] == pytest.approx(index[role]["metres_x"] / index[role]["metres_y"]), role
+        assert scalars[f"DetailMetres{role.capitalize()}"] == min(index[role]["metres_x"],
+                                                                   index[role]["metres_y"]), role
+    assert aspect["scrub"] == 2.0 and aspect["cliff"] == 4.0     # the two that were squeezed
+    samples = _body(text, "terrain_role_samples")
+    assert "detail_uv(material, lib, world_xy, metres, TERRAIN_DETAIL_ASPECT[role]" in samples
+    assert "world_metres_uv(" not in samples
+    tiling = _body(text, "detail_uv")
+    assert "MaterialExpressionAppendVector" in tiling and tiling.count("MaterialExpressionDivide") == 2
+    assert "constant(material, lib, 100.0" in tiling and "constant(material, lib, aspect" in tiling
+    assert 'mask(material, lib, world_xy, "r"' in tiling and 'mask(material, lib, world_xy, "g"' in tiling
+    assert "tile squarely" not in text
+
+
+def test_every_terrain_sampler_the_cpp_may_leave_unset_defaults_to_a_known_texture():
+    """A texture parameter the C++ finds nothing for keeps its default, so
+    the default must be KNOWN: the committed bitmap itself when the
+    checkout has it, else one flat texel this script writes as a PNG and
+    imports -- Roles valley everywhere, SnowCover and WaterMask 0, Noise
+    0.5, every normal flat -- and of the sampler's own class, or the
+    material does not compile. "Imagery" has none in the tile materials
+    (the C++ always sets it) and the grey in M_Landscape."""
+    text = SCRIPT.read_text(encoding="utf-8")
+    textures = _table(text, "TERRAIN_TEXTURE_PARAMETERS")
+    defaults = _table(text, "TERRAIN_TEXTURE_DEFAULTS")
+    assets = _table(text, "TERRAIN_DEFAULT_TEXTURES")
+    assert set(defaults) == set(textures) - {"Imagery"}
+    for name, asset in defaults.items():
+        committed, texel, is_srgb, is_normal = assets[asset]
+        kind = textures[name]
+        assert is_srgb == (kind == "srgb") and is_normal == (kind == "normal"), name
+        assert len(texel) == 4 and all(0 <= v <= 255 for v in texel), name
+        if committed is not None:
+            assert (REPO / committed).is_file(), committed
+    assert assets[defaults["Roles"]][1] == (255, 0, 0, 0)
+    assert assets[defaults["SnowCover"]][1][0] == 0 and assets[defaults["WaterMask"]][1][0] == 0
+    assert assets[defaults["Noise"]][1][0] == 128
+    for role in _tuple(text, "TERRAIN_ROLES"):
+        assert assets[defaults[f"Normal{role.capitalize()}"]] == (None, (128, 128, 255, 255), False, True), role
+    assert assets["T_ImageryGrey"][2] is True
+    # The committed bitmaps the defaults import are the sidecar's own.
+    from core.xplane.drape import WEATHER_BITMAPS
+
+    for asset, key in (("T_SnowAlbedo", "snow_albedo"), ("T_SnowNormal", "snow_normal"),
+                       ("T_Noise", "noise")):
+        assert assets[asset][0] == (WEATHER_DIR / WEATHER_BITMAPS[key]).relative_to(REPO).as_posix()
+    # The flat PNG this script writes (standard library only, no engine)
+    # decodes to the texel it was given.
+    import numpy as np
+    from PIL import Image
+
+    namespace = {}
+    exec(text[text.index("def _flat_png"):text.index("def _repo_file")], namespace)
+    image = np.asarray(Image.open(namespace["_flat_png"]("probe", (79, 80, 54, 255))))
+    assert image.shape == (4, 4, 4) and (image == (79, 80, 54, 255)).all()
+    # The import: a normal map as TC_Normalmap, data uncompressed and non-sRGB,
+    # a flat texel without mips; a failure is a RuntimeError the guard reports.
+    helper = _body(text, "import_texture")
+    for setting in ("TC_NORMALMAP", "TC_VECTOR_DISPLACEMENTMAP", "TMGS_NO_MIPMAPS",
+                    '"srgb", bool(srgb)', "raise RuntimeError"):
+        assert setting in helper, setting
+    assert "SystemExit" not in helper
+    # The zero-alpha flat texel (Roles: cliff = A = 0) is imported through a
+    # TextureFactory with the engine's zero-alpha PNG fill off, or the
+    # script says it could not be; untouched texels are the first Windows check.
+    assert "unreal.TextureFactory()" in helper
+    assert 'factory.set_editor_property("fill_png_zero_alpha", False)' in helper
+    assert 'task.set_editor_property("factory", factory)' in helper and "MATERIAL-NOTE" in helper
+    chooser = _body(text, "default_texture")
+    assert "_repo_file(committed)" in chooser and "MATERIAL-NOTE" in chooser
+    assert "zero_alpha=flat and texel[3] == 0" in chooser
+    sampler = _body(text, "texture_parameter")
+    assert "SAMPLERTYPE_NORMAL" in sampler and 'node.set_editor_property("texture", default)' in sampler
+
+
+def test_the_terrain_graph_is_one_helper_under_both_drape_materials():
+    """terrain_imagery_graph (the Roles map's weights over
+    terrain_role_samples, then terrain_surface) is called by
+    create_terrain_imagery and create_terrain_imagery_night alike; the
+    night adds its emissive only. terrain_surface wires the normal and
+    nothing else: add_wetness owns base colour and roughness (fed the
+    surface's own roughness), specular stays the engine's."""
+    text = SCRIPT.read_text(encoding="utf-8")
+    graph = _body(text, "terrain_imagery_graph")
+    assert "terrain_role_samples(material, lib, world_xy" in graph
+    assert "return terrain_surface(" in graph
+    for name in ("Imagery", "Roles", "SnowCover", "WaterMask"):
+        assert f'terrain_texture(material, lib, "{name}"' in graph, name
+    assert 'zip(TERRAIN_ROLES[:4], "rgba")' in graph                     # R, G, B, A -> the four
+    # The Roles channels come off the sampler's RGBA pin: its default output
+    # is RGB, a float3 the "a" mask has no A in (the one sampler connection
+    # in the script that needs a named output).
+    assert re.search(r'mask\(material, lib, roles, channel,[^)]*source_out="RGBA"\)', graph)
+    assert "MaterialExpressionOneMinus" in graph and "MaterialExpressionSaturate" in graph  # 1 - sum
+    assert "MaterialExpressionWorldPosition" in graph
+    samples = _body(text, "terrain_role_samples")
+    for fragment in ('f"DetailMetres{title}"', 'f"Detail{title}"', 'f"Normal{title}"',
+                     'f"Roughness{title}"', "TERRAIN_DETAIL_NEUTRAL[role]", "detail_uv("):
+        assert fragment in samples, fragment
+    tiling = _body(text, "world_metres_uv")
+    assert "constant(material, lib, 100.0" in tiling and "MaterialExpressionDivide" in tiling
+    surface = _body(text, "terrain_surface")
+    assert surface.count("world_metres_uv(") == 2        # the noise and the snow, square bitmaps
+    for node in ("MaterialExpressionPixelDepth", "MaterialExpressionVertexNormalWS",
+                 "MaterialExpressionNormalize", "MP_NORMAL"):
+        assert node in surface, node
+    for name in ("DetailFadeStartM", "DetailFadeEndM", "DetailStrength", "SnowSlopeLowCos",
+                 "SnowSlopeHighCos", "NoiseMetres", "SnowBand", "SnowMetres", "RoughnessWater"):
+        assert f'terrain_scalar(material, lib, "{name}"' in surface, name
+    for name in ("Noise", "SnowAlbedo", "SnowNormal"):
+        assert f'terrain_texture(material, lib, "{name}"' in surface, name
+    assert 'samples["snow"]["roughness"]' in surface and 'b_out="A"' in surface   # SnowAlbedo.a
+    assert "MP_ROUGHNESS" not in surface and "MP_BASE_COLOR" not in surface
+    assert "MP_SPECULAR" not in surface
+    for creator in ("create_terrain_imagery", "create_terrain_imagery_night"):
+        body = _body(text, creator)
+        assert "colour, roughness = terrain_imagery_graph(material, lib)" in body, creator
+        assert 'add_wetness(material, lib, colour, "", 1200, dry_roughness=roughness)' in body, creator
+    night = _body(text, "create_terrain_imagery_night")
+    assert "NIGHT_LIGHTS_PARAMETER" in night and "NIGHT_LUMINANCE_PARAMETER" in night
+    assert "MP_EMISSIVE_COLOR" in night and 'a_out="RGB"' in night
+    assert 'NIGHT_LIGHTS_PARAMETER = "NightLights"' in text
+    assert 'NIGHT_LUMINANCE_PARAMETER = "NightLuminance"' in text
+    for name in ("Imagery", "NightLights", "NightLuminance"):
+        assert f'TEXT("{name}")' in SCENE_CPP_TEXT, name
+    wetness = _body(text, "add_wetness")
+    assert "dry_roughness=None" in wetness
+    assert 'lib.connect_material_expressions(dry_r, dry_output, rough, "A")' in wetness
+    assert 'dry_r.set_editor_property("r", ROUGHNESS_DRY)' in wetness   # the constant when none is passed
+
+
+def test_the_landscape_paints_each_layer_with_a_drape_roles_texture():
+    """M_Landscape: each paint layer -> a drape role's samples under its
+    tint (LANDSCAPE_LAYER_ROLES), five LandscapeLayerBlends, the
+    permanent_water layer as the water mask, ImageryWeight 0.0 by default
+    (no drape: the layers alone; the scene script sets 1.0 with a drape)
+    scaling the modulation too,
+    the drape's grey default where the scene has none; the legend tints
+    stay the ID pass's reference and are painted no more."""
+    text = SCRIPT.read_text(encoding="utf-8")
+    layer_roles = _table(text, "LANDSCAPE_LAYER_ROLES")
+    assert tuple(layer_roles) == _tuple(text, "LANDSCAPE_LAYERS")
+    roles = _tuple(text, "TERRAIN_ROLES")
+    tints = _table(text, "LANDSCAPE_TINT_DEFAULTS")
+    for key, (role, tint) in layer_roles.items():
+        assert role in roles + ("water", "imagery"), key
+        assert tint is None or tint in tints, key
+    assert layer_roles["permanent_water"] == ("water", None)
+    assert layer_roles["nodata"] == ("imagery", None)
+    assert layer_roles["snow_ice"] == ("snow", None)
+    assert layer_roles["tree_cover"] == ("scrub", "TintTreeCover")
+    assert layer_roles["mangroves"] == layer_roles["herbaceous_wetland"] == ("scrub", "TintWetland")
+    assert {tint for _, tint in layer_roles.values() if tint} == set(tints)
+    for name, rgb in tints.items():
+        assert len(rgb) == 3 and all(0.0 < v <= 1.5 for v in rgb), name
+    parameters = _tuple(text, "LANDSCAPE_PARAMETERS")
+    assert parameters[:5] == ("Imagery", "ImageryWeight", "LandscapeTexels", "ImageryFlipV", "Wetness")
+    assert set(parameters[5:]) == set(tints)
+    assert "LANDSCAPE_IMAGERY_WEIGHT = 0.0\n" in text
+    body = _body(text, "create_landscape")
+    assert 'scalar(material, lib, "ImageryWeight", LANDSCAPE_IMAGERY_WEIGHT' in body
+    assert "terrain_role_samples(material, lib, world_xy" in body
+    assert "colour, roughness = terrain_surface(" in body and "detail_scale=weight" in body
+    assert '("albedo", "detail", "neutral", "normal", "roughness")' in body
+    assert "MaterialExpressionLandscapeLayerSample" in body
+    assert 'water.set_editor_property("parameter_name", "permanent_water")' in body
+    assert 'terrain_texture(material, lib, "Imagery", -1200, 2600, default="T_ImageryGrey")' in body
+    assert 'terrain_texture(material, lib, "SnowCover"' in body
+    assert 'add_wetness(material, lib, colour, "", 2500, dry_roughness=roughness)' in body
+    assert "LANDSCAPE_TINTS[" not in body
+    assert "vector(material, lib, name, LANDSCAPE_TINT_DEFAULTS[name] + (1.0,)" in body
+    scene = BUILD_SCENE.read_text(encoding="utf-8")
+    assert 'set_material_instance_scalar_parameter_value(material, "ImageryWeight", 1.0)' in scene

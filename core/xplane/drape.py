@@ -38,6 +38,49 @@ no change to show them:
   sidecar says all of that. The 30 m shape still decides WHERE within
   a cell; the satellite decides whether that month had snow there.
 
+Beside the composite the drape writes the MAPS the engine's terrain
+material takes, so the GPU can do per pixel what the composite bakes at
+the drape's texel size (M_TerrainImagery, scripts/ue_create_materials.py;
+uncompiled here, Windows is the render platform):
+
+* ``<bake>_xplane_roles.png`` (RGBA 8-bit): the valley, scrub, rock and
+  cliff weights of the rule, upsampled from the DEM exactly as the
+  composite is; snow is the remainder, ``saturate(1 - R - G - B - A)``,
+  so the four channels never sum past 255;
+* ``<bake>_xplane_snow.png`` (8-bit L): the weather snow LEVEL, the
+  month's satellite cover and nothing else -- the material applies the
+  band, the jitter, the slope ramp and the snow albedo itself; all zero
+  without a month or a known cover;
+* ``<bake>_xplane_water.png`` (8-bit L): 255 on the mapped water the
+  composite paints, 0 elsewhere;
+* ``<bake>_xplane_base.png`` (RGB 8-bit): the image the material's
+  "Imagery" parameter should receive (``material.textures.imagery``):
+  the composite's own per-texel role blend, the permanent snow role
+  included, with each role's TILE replaced by its MEAN colour -- the
+  per-channel mean of the 8-bit sRGB texels of the committed
+  drape/<role>.png, taken from the tile at load (the same measurement
+  scripts/ue_create_materials.py pins as TERRAIN_DETAIL_NEUTRAL, there
+  in linear light; what is composited here is the sRGB mean, a few
+  counts darker than that neutral encoded) -- the mapped water painted
+  exactly as the composite paints it, and WITHOUT the weather-snow pass;
+
+and a ``material`` block in the sidecar (:func:`material_block`) naming
+those maps, the simulator's ground textures as the material's detail
+albedos with their projected sizes, the weather bitmaps when committed,
+and every scalar the material takes with its default. The two images
+divide the work: the COMPOSITE (``texture.file``) carries the role
+tiles and the luma-key weather snow and stays exactly what it was, the
+fallback for a host or material without the block; the BASE image
+carries neither, so a material fed it applies the detail and the
+weather snow ONCE, from Roles / SnowCover, instead of over a composite
+that already has them. Every scalar in that block but DetailMetres*
+(the simulator's PROJECTED sizes, drape_textures.json) is this
+repository's constant (the simulator's uniform values are in no
+module). A role's detail normal is the one the extraction recorded
+(``index[role]["normal"]``, relative to terrain/drape/, when its .ter
+names a normal map); the committed index records none, so the material
+keeps its flat default.
+
 What this is NOT: X-Plane's terrain. The SHAPE is the bake's (Copernicus
 GLO-30 or the synthesised ridge); the placement of each texture is this
 module's slope/height rule, not X-Plane's land-class data (its DSF tiles
@@ -67,8 +110,8 @@ from ..terrain.imagery import TexelGrid
 from . import (DATA_DIR, RENDER_DIR, WaterMask, XPlaneDataError, _require,
                load_sky_tables)
 from .physical import (SNOW_COVER_ATTRIBUTION, SNOW_COVER_DATASET,
-                       SNOW_COVER_YEAR, WATER_FALLBACK_NOTE, SnowCover,
-                       WaterTiles, season_for)
+                       SNOW_COVER_YEAR, WATER_FALLBACK_NOTE, WEATHER_BITMAPS,
+                       SnowCover, WaterTiles, season_for, weather_bitmaps)
 
 #: Bump when the classification or compositing changes, so a cached drape
 #: from an older rule is rebuilt instead of reused. 2: MODIS snow cover
@@ -77,9 +120,15 @@ from .physical import (SNOW_COVER_ATTRIBUTION, SNOW_COVER_DATASET,
 #: the water fallback for what it is. 4: satellite-seen snow whitened
 #: the ground (a misreading of the shader names, withdrawn). 5: weather
 #: snow composited the way weather_apply does it (key, band, linear
-#: cos-slope ramp, snow_ALB by cov); the water fallback is any.png.
-DRAPE_VERSION = 5
+#: cos-slope ramp, snow_ALB by cov); the water fallback is any.png. 6:
+#: the material maps (roles, snow level, water mask) written beside the
+#: composite and the sidecar's "material" block. 7: the base image (the
+#: role means, the water, no weather snow) the material's Imagery takes,
+#: listed as material.textures.imagery.
+DRAPE_VERSION = 7
 ROLES = ("valley", "scrub", "rock", "cliff", "snow")
+#: The roles map's channels, R G B A in this order; snow is the remainder.
+ROLE_CHANNELS = ROLES[:4]
 #: DEM rows composited per step (bounds memory on an 8192-texel drape).
 _CHUNK_ROWS = 256
 
@@ -111,10 +160,48 @@ WEATHER_SNOW_COS_RAMP = (math.cos(math.radians(38.0)),
 #: the jitter samples, each tiled at a ground size in metres. The
 #: simulator's u_snow_scale_alb and u_snow_area.x are unread; these are
 #: this repository's choices.
-SNOW_ALBEDO_FILE = "snow_ALB.png"
+SNOW_ALBEDO_FILE = WEATHER_BITMAPS["snow_albedo"]
 SNOW_ALBEDO_METRES = 64.0
-WEATHER_NOISE_FILE = "noise.png"
+WEATHER_NOISE_FILE = WEATHER_BITMAPS["noise"]
 WEATHER_NOISE_METRES = 512.0
+
+#: The sidecar's "material" block: the contract between this writer, the
+#: engine's FlightSimVisualScene (which sets every texture and scalar it
+#: finds on the drape's dynamic material instance and records each as
+#: applied or absent) and M_TerrainImagery (scripts/ue_create_materials.py).
+#: Parameter NAMES are the contract; bump the version when a name or a
+#: map's encoding changes, not for a new default value.
+MATERIAL_VERSION = 1
+#: The detail albedo's contribution to the macro colour, colour =
+#: Imagery * lerp(1, detail / neutral, DetailStrength * fade), neutral =
+#: the role texture's mean (TERRAIN_DETAIL_NEUTRAL in the script, the
+#: linear-light mean; the base image composites the sRGB mean), and the
+#: camera distances (metres) over which the detail fades out: the
+#: simulator's decals are keyed by distance (km_key in the terrain
+#: shader) with constants that are not readable, so both are this
+#: repository's.
+MATERIAL_DETAIL_STRENGTH = 0.6
+MATERIAL_DETAIL_FADE_M = (3000.0, 12000.0)
+#: Per-material roughness. The simulator's .ter files carry no roughness
+#: the extractor reads (the terrain shader's per-material roughness is a
+#: material-data uniform, OGL_terrain_shader_write_material_data, a name
+#: only); these are this repository's values: rougher for vegetation,
+#: smoother for rock, smoother again for snow, near-mirror for water.
+MATERIAL_ROUGHNESS = {"valley": 0.85, "scrub": 0.8, "rock": 0.75,
+                      "cliff": 0.7, "snow": 0.55, "water": 0.08}
+#: Every scalar the material takes from the sidecar, in the block's order
+#: (:func:`material_scalars`). "Wetness" and "NightLuminance" are the
+#: material's too but are the SCENE's (the weather coupling, the night
+#: plan) and deliberately not in the sidecar, so a drape never resets them.
+MATERIAL_SCALAR_NAMES = (
+    tuple(f"DetailMetres{role.capitalize()}" for role in ROLES)
+    + ("SnowMetres", "NoiseMetres", "DetailStrength", "DetailFadeStartM",
+       "DetailFadeEndM", "SnowSlopeLowCos", "SnowSlopeHighCos", "SnowBand")
+    + tuple(f"Roughness{role.capitalize()}" for role in ROLES + ("water",)))
+MATERIAL_SCENE_SCALARS = {
+    "Wetness": "the render's weather coupling (ApplyWetness)",
+    "NightLuminance": "the night-lights plan's level (M_TerrainImageryNight)",
+}
 
 
 def _smoothstep(low: float, high: float, value: np.ndarray) -> np.ndarray:
@@ -212,10 +299,9 @@ def _load_weather(render_dir: Path, texel_size_m: float) -> Optional[Dict[str, A
     """The snow albedo (RGB 0..255 and alpha 0..1) and the noise (0..1)
     tiled to the drape's texel size, or None when the committed weather
     bitmaps are not on this checkout."""
-    folder = Path(render_dir) / "bitmaps" / "world" / "weather"
-    albedo_path = folder / SNOW_ALBEDO_FILE
-    noise_path = folder / WEATHER_NOISE_FILE
-    if not (albedo_path.is_file() and noise_path.is_file()):
+    found = weather_bitmaps(render_dir)
+    albedo_path, noise_path = found["snow_albedo"], found["noise"]
+    if albedo_path is None or noise_path is None:
         return None
     with Image.open(albedo_path) as im:
         px = max(2, round(SNOW_ALBEDO_METRES / texel_size_m))
@@ -228,26 +314,33 @@ def _load_weather(render_dir: Path, texel_size_m: float) -> Optional[Dict[str, A
     return {"albedo_rgb": np.ascontiguousarray(rgba[:, :, :3]),
             "albedo_alpha": np.ascontiguousarray(rgba[:, :, 3] / 255.0),
             "noise": noise,
-            "files": [str(albedo_path.relative_to(render_dir)),
-                      str(noise_path.relative_to(render_dir))]}
+            "files": [str(albedo_path.relative_to(Path(render_dir).resolve())),
+                      str(noise_path.relative_to(Path(render_dir).resolve()))]}
 
 
 def _load_tiles(data_dir: Path, texel_size_m: float) -> Dict[str, Any]:
+    """Each role's tile resized to the drape's texel size ("tiles"), its
+    MEAN colour ("means": float32 RGB 0..255, the per-channel mean of the
+    committed PNG's 8-bit sRGB texels, taken from the whole tile before
+    the resize; what the base image composites) and the extraction's
+    index."""
     drape_dir = data_dir / "terrain" / "drape"
     index_path = _require(drape_dir / "drape_textures.json")
     index = json.loads(index_path.read_text(encoding="utf-8"))
-    tiles = {}
+    tiles, means = {}, {}
     for role in ROLES:
         if role not in index:
             raise XPlaneDataError(f"{index_path} has no {role!r} texture")
         entry = index[role]
         with Image.open(_require(drape_dir / entry["file"])) as im:
+            rgb = im.convert("RGB")
+            means[role] = np.asarray(rgb, dtype=np.float64).reshape(
+                -1, 3).mean(axis=0).astype(np.float32)
             size = (max(2, round(entry["metres_x"] / texel_size_m)),
                     max(2, round(entry["metres_y"] / texel_size_m)))
-            tiles[role] = np.asarray(
-                im.convert("RGB").resize(size, Image.LANCZOS),
-                dtype=np.float32)
-    return {"tiles": tiles, "index": index}
+            tiles[role] = np.asarray(rgb.resize(size, Image.LANCZOS),
+                                     dtype=np.float32)
+    return {"tiles": tiles, "means": means, "index": index}
 
 
 def _tiled(tile: np.ndarray, row0: int, rows: int, width: int) -> np.ndarray:
@@ -310,21 +403,157 @@ def water_colour_for(data_dir: Path, render_dir: Path,
 
 
 def drape_paths(baked_path) -> Dict[str, Path]:
+    """The composite ("png"), the sidecar, the base image the material's
+    Imagery takes ("base") and the three material maps ("roles", "snow",
+    "water"), all beside the bake. Every one of them must be present for
+    :func:`build_drape` to reuse a cached drape."""
     stem = Path(baked_path)
     return {"png": stem.with_name(stem.name + "_xplane_drape.png"),
-            "sidecar": stem.with_name(stem.name + "_xplane_drape.json")}
+            "sidecar": stem.with_name(stem.name + "_xplane_drape.json"),
+            "base": stem.with_name(stem.name + "_xplane_base.png"),
+            "roles": stem.with_name(stem.name + "_xplane_roles.png"),
+            "snow": stem.with_name(stem.name + "_xplane_snow.png"),
+            "water": stem.with_name(stem.name + "_xplane_water.png")}
+
+
+#: The maps' keys in drape_paths -> the material block's texture names
+#: ("imagery" is the base image, the material's Imagery), and each map's
+#: PIL mode as written (the sidecar's "maps" records it).
+_MAP_TEXTURES = {"base": "imagery", "roles": "roles", "snow": "snow_cover",
+                 "water": "water_mask"}
+_MAP_MODES = {"base": "RGB", "roles": "RGBA", "snow": "L", "water": "L"}
+
+
+def detail_metres(entry: Dict[str, Any]) -> float:
+    """The ground size the material tiles a role's detail albedo at: the
+    SHORTER of the simulator's PROJECTED pair (drape_textures.json). The
+    material tiles by this one scalar and restores the pair's aspect
+    itself (TERRAIN_DETAIL_ASPECT, scripts/ue_create_materials.py); the
+    shorter axis keeps the texel density the simulator gives that
+    texture (scrub and cliff are 2:1 and 4:1; the composite tiles them
+    at both sizes)."""
+    return float(min(entry["metres_x"], entry["metres_y"]))
+
+
+def material_scalars(index: Dict[str, Dict[str, Any]]) -> Dict[str, float]:
+    """Every scalar of the material contract with its default, in
+    :data:`MATERIAL_SCALAR_NAMES` order: the detail sizes from the
+    extraction's index, the weather-snow constants the composite itself
+    uses (so the two agree), the detail and roughness constants."""
+    cos_low, cos_high = WEATHER_SNOW_COS_RAMP
+    fade_start, fade_end = MATERIAL_DETAIL_FADE_M
+    out: Dict[str, float] = {}
+    for role in ROLES:
+        out[f"DetailMetres{role.capitalize()}"] = detail_metres(index[role])
+    out.update({
+        "SnowMetres": SNOW_ALBEDO_METRES,
+        "NoiseMetres": WEATHER_NOISE_METRES,
+        "DetailStrength": MATERIAL_DETAIL_STRENGTH,
+        "DetailFadeStartM": fade_start,
+        "DetailFadeEndM": fade_end,
+        "SnowSlopeLowCos": cos_low,
+        "SnowSlopeHighCos": cos_high,
+        "SnowBand": WEATHER_SNOW_BAND,
+    })
+    for role in ROLES + ("water",):
+        out[f"Roughness{role.capitalize()}"] = MATERIAL_ROUGHNESS[role]
+    assert tuple(out) == MATERIAL_SCALAR_NAMES
+    return out
+
+
+def material_block(paths: Dict[str, Path], drape_dir: Path,
+                   index: Dict[str, Dict[str, Any]],
+                   render_dir: Path,
+                   means: Dict[str, np.ndarray]) -> Dict[str, Any]:
+    """The sidecar's "material" object. Map files, the base image
+    ("imagery") among them, are relative to the sidecar (they sit beside
+    it); detail albedos, their normals and the weather bitmaps are
+    absolute, the weather ones None when not on this checkout (the
+    engine records them "absent" and renders without; never a failed
+    render). ``means`` is each role's mean colour (:func:`_load_tiles`),
+    recorded per role as the value the base image composited for it.
+    """
+    weather = weather_bitmaps(render_dir)
+    detail = {}
+    for role in ROLES:
+        entry = index[role]
+        detail[role] = {
+            "file": str((drape_dir / entry["file"]).resolve()),
+            "metres": detail_metres(entry),
+            "projected_m": [float(entry["metres_x"]), float(entry["metres_y"])],
+            # The mean of the tile's 8-bit sRGB texels: the base image's
+            # colour for this role where its weight is 1.
+            "mean_srgb": [round(float(v), 2) for v in means[role]],
+            # The role's normal map when the extraction recorded one
+            # (index[role]["normal"], relative to terrain/drape/, from a
+            # .ter that names a normal map); the committed index records
+            # none, and the material then keeps its flat default.
+            "normal": (str((drape_dir / entry["normal"]).resolve())
+                       if entry.get("normal") else None),
+        }
+    return {
+        "version": MATERIAL_VERSION,
+        "textures": {
+            **{_MAP_TEXTURES[key]: paths[key].name for key in _MAP_TEXTURES},
+            "detail": detail,
+            "snow_albedo": (str(weather["snow_albedo"])
+                            if weather["snow_albedo"] else None),
+            "snow_normal": (str(weather["snow_normal"])
+                            if weather["snow_normal"] else None),
+            "noise": str(weather["noise"]) if weather["noise"] else None,
+        },
+        "scalars": material_scalars(index),
+        "imagery_encoding": "RGB 8-bit sRGB on the composite's grid: the "
+                            "roles map's weights (snow the remainder) x "
+                            "each role's mean colour (detail[role]."
+                            "mean_srgb, the mean of the committed PNG's "
+                            "8-bit sRGB texels; the script's "
+                            "TERRAIN_DETAIL_NEUTRAL is the linear-light "
+                            "mean of the same PNGs), the mapped water "
+                            "painted as the composite paints it, no "
+                            "weather snow: the material applies detail "
+                            "and weather snow once, from Roles / SnowCover",
+        "roles_encoding": "RGBA 8-bit: R G B A = valley, scrub, rock, cliff "
+                          "weights x 255; snow = saturate(1 - R - G - B - "
+                          "A); the four channels sum to at most 255",
+        "snow_cover_encoding": "8-bit L: the month's MODIS cover x 255 (the "
+                               "weather snow LEVEL; the material applies "
+                               "band, jitter, slope ramp and snow albedo); "
+                               "0 without a month or a known cover",
+        "water_mask_encoding": "8-bit L: 255 on the mapped water the "
+                               "composite paints, 0 elsewhere",
+        "noise_encoding": "8-bit L (the committed noise.png): the jitter "
+                          "the material adds to the snow level, tiled at "
+                          "NoiseMetres",
+        "scene_scalars": dict(MATERIAL_SCENE_SCALARS),
+        "note": "every scalar but DetailMetres* (the simulator's PROJECTED "
+                "sizes, drape_textures.json) is this repository's constant "
+                "(the simulator's uniform values are in no module); the "
+                "maps are the drape's slope/height rule, not land-class "
+                "data; the composite (texture.file) carries the role tiles "
+                "and the luma-key weather snow and is the fallback for a "
+                "host or material without this block; the base image "
+                "(textures.imagery) carries neither, so the material "
+                "applies detail and weather snow once, from Roles / "
+                "SnowCover; a detail normal is the one the extraction "
+                "recorded (none in the committed index)",
+    }
 
 
 def build_drape(baked_path, data_dir: Optional[Path] = None,
                 water_mask: Optional[WaterMask] = None,
                 month: Optional[int] = None,
                 render_dir: Optional[Path] = None) -> Path:
-    """Write ``<bake>_xplane_drape.png`` + ``.json`` beside the bake and
-    return the sidecar path. A drape already built from this bake by this
+    """Write ``<bake>_xplane_drape.png`` + ``.json`` beside the bake,
+    with the base image the material's Imagery takes
+    (``_xplane_base.png``) and the three material maps
+    (``_xplane_roles/snow/water.png``, :func:`drape_paths`), and return
+    the sidecar path. A drape already built from this bake by this
     version of the rule, for this ``month`` (None = the height rule
-    alone), is reused. Raises XPlaneDataError when the extracted textures
-    are missing; a missing snow-cover or water-tile raster is recorded in
-    the sidecar and the drape falls back to the extraction's own data."""
+    alone), with all its files present, is reused. Raises
+    XPlaneDataError when the extracted textures are missing; a missing
+    snow-cover or water-tile raster is recorded in the sidecar and the
+    drape falls back to the extraction's own data."""
     data_dir = Path(data_dir) if data_dir else DATA_DIR
     render_dir = Path(render_dir) if render_dir else RENDER_DIR
     month = int(month) if month is not None else None
@@ -332,7 +561,7 @@ def build_drape(baked_path, data_dir: Optional[Path] = None,
     paths = drape_paths(baked_path)
     raster = baked_path.with_name(baked_path.name + ".r16")
     bake_sha = sha256_of(raster) if raster.is_file() else None
-    if paths["sidecar"].is_file() and paths["png"].is_file():
+    if all(path.is_file() for path in paths.values()):
         try:
             previous = json.loads(paths["sidecar"].read_text(encoding="utf-8"))
         except ValueError:
@@ -380,8 +609,9 @@ def build_drape(baked_path, data_dir: Optional[Path] = None,
                     round(float((snow_cover[known] >= SNOW_SEEN).mean()), 4)
                     if known.any() else None),
                 "rule": "permanent snow x (0.25 + 0.75 cover); weather snow "
-                        "= cover on gentle ground, whitening the texture "
-                        "underneath; unknown cells keep the height rule",
+                        "= the cover as weather_apply's level (weather_snow "
+                        "below; the material's snow map carries the cover "
+                        "itself); unknown cells keep the height rule",
             })
             if not known.any():
                 snow_cover = None
@@ -408,13 +638,43 @@ def build_drape(baked_path, data_dir: Optional[Path] = None,
             (row0 - lo) * k:(row0 - lo) * k + out_rows]
 
     texture = np.empty((grid.height, grid.width, 3), dtype=np.uint8)
+    # The base image: the same role blend as the composite, each role's
+    # tile replaced by its mean colour, no weather snow (the material
+    # applies detail and weather snow once, from Roles / SnowCover).
+    base = np.empty((grid.height, grid.width, 3), dtype=np.uint8)
+    # The material maps, on the composite's texel grid: the four role
+    # weights (snow is the remainder) and the weather snow level.
+    roles = np.empty((grid.height, grid.width, len(ROLE_CHANNELS)),
+                     dtype=np.uint8)
+    snow_level = np.zeros((grid.height, grid.width), dtype=np.uint8)
     for row0 in range(0, baked.height, _CHUNK_ROWS):
         rows = min(_CHUNK_ROWS, baked.height - row0)
         out_rows = rows * k
         block = np.zeros((out_rows, grid.width, 3), dtype=np.float32)
+        base_block = np.zeros((out_rows, grid.width, 3), dtype=np.float32)
+        stacked = np.zeros((out_rows, grid.width, len(ROLE_CHANNELS)),
+                           dtype=np.float32)
         for role in ROLES:
-            block += upsampled(role, row0, rows, out_rows)[:, :, None] * _tiled(
+            weight = upsampled(role, row0, rows, out_rows)
+            block += weight[:, :, None] * _tiled(
                 loaded["tiles"][role], row0 * k, out_rows, grid.width)
+            base_block += weight[:, :, None] * loaded["means"][role]
+            if role in ROLE_CHANNELS:
+                stacked[:, :, ROLE_CHANNELS.index(role)] = weight
+        base[row0 * k:row0 * k + out_rows] = np.clip(
+            base_block + 0.5, 0.0, 255.0).astype(np.uint8)
+        # Quantise the RUNNING sum, then difference it: each channel is
+        # non-negative (the weights are, and bilinear keeps them so) and
+        # the four sum to round(255 * total) <= 255 exactly, so the
+        # material's snow remainder never goes negative from rounding.
+        running = np.rint(np.clip(np.cumsum(stacked, axis=2), 0.0, 1.0)
+                          * 255.0).astype(np.int16)
+        roles[row0 * k:row0 * k + out_rows] = np.diff(
+            running, axis=2, prepend=0).astype(np.uint8)
+        if "snow_cover" in weights:
+            snow_level[row0 * k:row0 * k + out_rows] = np.rint(np.clip(
+                upsampled("snow_cover", row0, rows, out_rows), 0.0, 1.0)
+                * 255.0).astype(np.uint8)
         if weather is not None:
             alpha = _tiled(weather["albedo_alpha"], row0 * k, out_rows, grid.width)
             cov = weather_snow_cov(
@@ -428,6 +688,7 @@ def build_drape(baked_path, data_dir: Optional[Path] = None,
             block + 0.5, 0.0, 255.0).astype(np.uint8)
 
     water_texels = 0
+    water_map = np.zeros((grid.height, grid.width), dtype=np.uint8)
     colour, colour_source = water_colour_for(data_dir, render_dir, centre)
     if colour is not None:
         if water_mask is None:
@@ -442,13 +703,23 @@ def build_drape(baked_path, data_dir: Optional[Path] = None,
                 grid.texel_size_m, grid.width, grid.height)
             water_texels = int(wet.sum())
             texture[wet] = colour
+            base[wet] = colour                 # exactly as the composite
+            water_map[wet] = 255
 
     Image.fromarray(texture).save(paths["png"])
+    Image.fromarray(base).save(paths["base"])            # (h, w, 3) u8: RGB
+    Image.fromarray(roles).save(paths["roles"])          # (h, w, 4) u8: RGBA
+    Image.fromarray(snow_level).save(paths["snow"])      # (h, w) u8: L
+    Image.fromarray(water_map).save(paths["water"])
     fractions = {role: round(float(weights[role].mean()), 4)
                  for role in ROLES}
     if weather is not None:
         snow_record["weather_snow"] = {
             "applied": True,
+            "applied_to": "the composite (texture.file) only; the base "
+                          "image (material.textures.imagery) carries no "
+                          "weather snow, the material applies it from "
+                          "SnowCover",
             "mean_cov": round(cov_sum / float(grid.width * grid.height), 4),
             "mechanism": "weather_apply: key = 2 luma - 1; w0 = smoothstep("
                          "L - a, L + a, key + j (2 noise - 1)); coverage = "
@@ -477,7 +748,9 @@ def build_drape(baked_path, data_dir: Optional[Path] = None,
                    "slope/height classification (approximated)",
         "license": LICENSE,
         "attribution": (ATTRIBUTION + ("; " + SNOW_COVER_ATTRIBUTION
-                                       if snow_cover is not None else "")),
+                                       if snow_cover is not None
+                                       and float(np.max(snow_cover)) > 0.0
+                                       else "")),
         "source_note": (
             "terrain SHAPE is the bake's, not X-Plane's; texture placement "
             "is this repository's slope/height rule (core/xplane/drape.py), "
@@ -515,8 +788,21 @@ def build_drape(baked_path, data_dir: Optional[Path] = None,
             "aligned_to_bake": str(baked_path.resolve()),
             "texels_per_dem_pixel": k,
         },
+        # The material maps and the base image ("imagery"): the same grid
+        # as "texture", one entry each with its file and hash; what they
+        # encode is in "material".
+        "maps": {
+            name: {"file": paths[key].name, "sha256": None,
+                   "mode": _MAP_MODES[key]}
+            for key, name in _MAP_TEXTURES.items()
+        },
+        "material": material_block(paths, data_dir / "terrain" / "drape",
+                                   loaded["index"], render_dir,
+                                   loaded["means"]),
     }
     sidecar["texture"]["sha256"] = sha256_of(paths["png"])
+    for key, name in _MAP_TEXTURES.items():
+        sidecar["maps"][name]["sha256"] = sha256_of(paths[key])
     paths["sidecar"].write_text(json.dumps(sidecar, indent=2),
                                 encoding="utf-8")
     return paths["sidecar"]

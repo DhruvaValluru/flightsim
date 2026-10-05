@@ -58,6 +58,8 @@ class WaterMask:
     without distinction. The mask only knows the 1x1 degree tiles the
     install shipped: :meth:`covers` says whether a point is inside one, and
     :meth:`contains` returns ``None`` outside them instead of ``False``.
+    Features are Polygon (the committed file) or MultiPolygon (what the
+    extractor writes now); :meth:`load` reads both.
     """
 
     def __init__(self, tiles: Set[Tuple[int, int]],
@@ -88,7 +90,19 @@ class WaterMask:
         for feature in doc["features"]:
             tile = feature["properties"]["tile"]
             key = (int(tile[:3]), int(tile[3:]))
-            for rings in feature["geometry"]["coordinates"]:
+            geometry = feature["geometry"]
+            # The committed file holds Polygon features (one ring list
+            # each); the extractor now writes MultiPolygon (a list of
+            # them). Both are read; anything else refuses by name.
+            if geometry["type"] == "Polygon":
+                shapes = [geometry["coordinates"]]
+            elif geometry["type"] == "MultiPolygon":
+                shapes = geometry["coordinates"]
+            else:
+                raise XPlaneDataError(
+                    f"{path}: a feature of tile {tile} has geometry "
+                    f"{geometry['type']!r}, not Polygon or MultiPolygon")
+            for rings in shapes:
                 polygons.setdefault(key, []).append(
                     [np.asarray(r, dtype=float) for r in rings])
         return cls(tiles, polygons)

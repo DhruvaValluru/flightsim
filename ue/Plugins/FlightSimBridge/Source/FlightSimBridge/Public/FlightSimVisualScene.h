@@ -62,6 +62,29 @@
 //  * world_applied{landscape, imagery, land_cover, vegetation, buildings,
 //    runway, night, precipitation, cloud_drift, materials} for render.json,
 //    graded by core/capture/verify.py check.world_record where present.
+//
+// The drape material (core/xplane/drape.py material_block; UNCOMPILED here,
+// pinned by tests/test_ue_materials.py and tests/test_ue_world_source.py,
+// verified by the first Windows build): a drape sidecar with a "material"
+// block also drives M_TerrainImagery's role weights, weather snow level and
+// water mask (maps on the composite's own UV grid), the simulator's ground
+// textures as world-tiled detail albedos (and their normals, once the
+// extractor pulls any), the weather snow albedo and normal, the noise, and
+// every scalar the block carries; and it hands "Imagery" the block's BASE
+// image (material.textures.imagery: the role blend with each tile replaced
+// by its mean colour, the water as the composite paints it, no weather
+// snow) in place of the composite, so detail and weather snow are applied
+// once, by the material. Each parameter is looked up on the instance FIRST
+// and recorded applied / absent / not in the sidecar, a named file that is
+// not there recorded missing -- never a refused render: a sidecar without
+// the block, or a material without the parameters, draws the composite
+// alone, as every measured render before the block, and a block without
+// the base image, or whose image does not load, keeps the composite
+// (texture.file) on "Imagery"; the record says which (imagery_source;
+// look_applied.terrain_material, ImageryMaterial for the commandlet's
+// scene record). The georeferenced tiles carry tangents (the raster's east
+// direction lying in the surface; the bitangent +V, its flip MEASURED
+// through the georeferencing, not assumed) so the normal maps have a basis.
 
 #pragma once
 
@@ -179,6 +202,9 @@ struct FFlightSimVisualSceneOptions
 	// terrain; the sidecar's license, attribution and sha ride into the
 	// manifest. Refused if the file or its texture cannot be loaded --
 	// falling back to classification silently would mislabel the surface.
+	// Its optional "material" block (core/xplane/drape.py) drives the drape
+	// material's maps, detail textures and scalars; a missing piece there
+	// is recorded, never refused (the file comment).
 	FString ImagerySidecarPath;
 	// Exponential height fog density: 0.0025 is Gate 6's clear day; the
 	// showcase's "hazy" raises it. Recorded in the manifest. When the card
@@ -317,6 +343,14 @@ public:
 	FString ImageryLicense;
 	FString ImageryAttribution;
 	FString ImageryDataset;
+	// The drape material's record (the file comment): {"version",
+	// "imagery_source", "applied", "absent", "missing_files",
+	// "not_in_sidecar", "textures", "scalars", "north_axis_measured",
+	// "flip_tangent_y", ...}; {"version": 0} for a sidecar without the
+	// block. The same object as LookApplied.terrain_material, kept here for
+	// the commandlet's scene record beside the imagery_* fields. Valid after
+	// Build() on the imagery route (null otherwise).
+	TSharedPtr<FJsonObject> ImageryMaterial;
 	// The physical sky's objects and what it managed to draw.
 	FFlightSimSky PhysicalSky;
 	// Night-lights drape provenance, or why none was drawn.
@@ -442,6 +476,19 @@ private:
 	// null (with NightLightsNote set) when it cannot be used.
 	class UTexture2D* LoadNightLights(const FString& SidecarPath,
 	                                  double& LuminanceNits);
+
+	// The drape sidecar's "material" block onto the drape's dynamic
+	// instance: every texture and scalar it names that the material
+	// exposes, each looked up first (FindTextureParameter /
+	// FindScalarParameter) and recorded, the base image replacing the
+	// composite on "Imagery" when it loads; a missing optional file is
+	// recorded, never a failure. bNorthPlusY is the caller's measurement of
+	// the engine's north axis (the tiles' bitangent flip), recorded with
+	// the tangent basis. Writes ImageryMaterial and
+	// LookApplied.terrain_material. UNCOMPILED here.
+	void ApplyDrapeMaterial(UMaterialInstanceDynamic* Instance,
+	                        const TSharedPtr<FJsonObject>& Sidecar,
+	                        const FString& SidecarPath, bool bNorthPlusY);
 
 	// Parsed once, shared by both placements.
 	FFlightSimHeightfield Terrain;

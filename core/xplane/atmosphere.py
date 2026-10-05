@@ -155,7 +155,7 @@ def _path_length(atm: Atmosphere, r: float, mu: float) -> Tuple[float, bool]:
     """How far a ray travels inside the atmosphere before it hits the
     ground or leaves the top, and whether it hits the ground."""
     ground = _ray_sphere_entry(r, mu, atm.bottom_radius_m)
-    if ground > 0.0:
+    if ground > 0.0 or (r <= atm.bottom_radius_m and mu < 0.0):
         return ground, True
     return _ray_sphere_exit(r, mu, atm.top_radius_m), False
 

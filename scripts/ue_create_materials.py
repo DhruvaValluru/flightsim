@@ -10,23 +10,51 @@ Build-time asset step, command-line only. Two assets:
   and the commandlet refuses to render classified terrain without it rather
   than falling back to the default material silently.
 
-* /Game/FlightSim/M_TerrainImagery -- a texture parameter ("Imagery")
-  sampled by UV0 into base colour, same constant roughness. The terrain
-  mesh's UV0 is the raster grid normalised (col/width, row/height) and the
-  draped texture shares the bake's CRS/origin/extent by construction
-  (core/terrain/imagery.py), so this material has no registration
-  parameters to get wrong: the alignment lives in the data, and the
-  landmark-projection check on a rendered frame verifies it.
+* /Game/FlightSim/M_TerrainImagery -- the terrain surface: the drape
+  ("Imagery", sampled by UV0, the macro albedo) textured by the
+  simulator's own ground textures and snowed by its weather rule (the
+  terrain-surface section at the end of this comment; the parameter
+  names, TERRAIN_TEXTURE_PARAMETERS / TERRAIN_SCALAR_PARAMETERS, are the
+  contract core/xplane/drape.py writes into the drape sidecar's
+  "material" block and FlightSimVisualScene.cpp sets on the dynamic
+  instance). What "Imagery" carries: the drape's BASE image when the
+  host has it -- the sidecar's material.textures.imagery
+  (<bake>_xplane_base.png, written by core/xplane/drape.py beside the
+  composite: the per-texel role blend with every role's tile replaced
+  by its mean colour, the permanent snow role included, the mapped
+  water painted exactly as the composite paints it, and no weather-snow
+  pass; each role's mean is the mean of the committed drape/<role>.png's
+  8-bit sRGB texels, composited as the sRGB texel it is, while
+  TERRAIN_DETAIL_NEUTRAL below is the same tile's mean in LINEAR light,
+  the one the detail modulation divides by: one measurement in two
+  spaces, not one number) -- so the detail and the weather snow are
+  applied ONCE, by this material; the composite (the sidecar's
+  texture.file, the drape with the tiles and the weather snow already
+  in it) when the host or the sidecar has no base image, the fallback a
+  material without the block always had. FlightSimVisualScene.cpp
+  ApplyDrapeMaterial sets "Imagery" from material.textures.imagery when
+  it is present and loads, from the composite otherwise, and records
+  which ("imagery_source"). The terrain mesh's UV0 is the raster grid
+  normalised (col/width, row/height) and the draped texture and its
+  maps share the bake's CRS/origin/extent by construction
+  (core/terrain/imagery.py), so the drape-grid samplers have no
+  registration parameters to get wrong: the alignment lives in the
+  data, and the landmark-projection check on a rendered frame verifies
+  it. The detail, the normals and the snow tile in WORLD metres
+  (AbsoluteWorldPosition / the *Metres scalars), not on the grid.
 
 * /Game/FlightSim/M_VertexColorUnlit -- the tornado funnel marker (below).
 
-Both terrain materials expose one scalar parameter, "Wetness" (default 0),
-the name FlightSimVisualScene.cpp ApplyWetness sets from the card's
-precipitation: the only wet-surface coupling. It lerps roughness from
-0.92 (dry) toward 0.25 (wet) and darkens the base colour by up to 30 %;
-dry (0) is the constant-roughness look the materials had before it. The
-node and pin names below are the UE Python API's; nothing here is run
-without an engine, so the Windows build is where they are checked.
+M_VertexColor and the three terrain surfaces (M_TerrainImagery,
+M_TerrainImageryNight, M_Landscape) expose one scalar parameter,
+"Wetness" (default 0), the name FlightSimVisualScene.cpp ApplyWetness
+sets from the card's precipitation: the only wet-surface coupling. It
+lerps roughness from the surface's own dry value (0.92 for
+M_VertexColor, the per-role blend for the terrain surfaces) toward 0.25
+(wet) and darkens the base colour by up to 30 %; dry (0) is the look
+the materials have without it. The node and pin names below are the UE
+Python API's; nothing here is run without an engine, so the Windows
+build is where they are checked.
 
 * /Game/FlightSim/M_CustomStencilID -- Phase 2 (packages B + C): the
   post-process material the -labels ID pass renders through. It REPLACES
@@ -80,15 +108,31 @@ without an engine, so the Windows build is where they are checked.
   the C++ sets (pinned equal by tests/test_ue_world_source.py and
   tests/test_ue_materials.py):
 
-  - /Game/FlightSim/M_Landscape: the scene level's Landscape material. A
-    LandscapeLayerBlend over the land-cover layers (LANDSCAPE_LAYERS, the
-    weight keys of core/terrain/landcover.py, weight-blended: the layers
-    sum to 255 per texel), each a constant tint from the WorldCover legend
-    colour (scene dressing, not a measurement), lerped toward the imagery
-    drape ("Imagery" sampled across the whole Landscape by
-    "LandscapeTexels", flipped by "ImageryFlipV" when the rows were written
-    north-up, weighted by "ImageryWeight", 0 by default), then the
-    "Wetness" coupling every terrain material has.
+  - /Game/FlightSim/M_Landscape: the scene level's Landscape material:
+    the terrain surface (below) on the Landscape's paint layers.
+    LandscapeLayerBlends over the land-cover layers (LANDSCAPE_LAYERS,
+    the weight keys of core/terrain/landcover.py, weight-blended: the
+    layers sum to 255 per texel), each layer taking a drape role's
+    ground texture, normal and roughness (LANDSCAPE_LAYER_ROLES: tree
+    cover is scrub under "TintTreeCover", cropland valley under
+    "TintCropland", built-up rock under "TintBuiltUp", the wetlands and
+    mangroves scrub under "TintWetland", moss valley under
+    "TintMossLichen"; permanent water the drape's water colour at
+    RoughnessWater, nodata the drape alone; the tints scene dressing,
+    not a measurement). The blend is the land-cover albedo, lerped
+    toward the imagery drape ("Imagery" sampled across the whole
+    Landscape by "LandscapeTexels", flipped by "ImageryFlipV" when the
+    rows were written north-up, weighted by "ImageryWeight", 0.0 by
+    default -- no drape is the land-cover textures alone -- and 1.0
+    when scripts/ue_build_scene.py has a drape), the detail modulation
+    scaled by the same weight (where the drape is not the base the
+    blend IS the detail), then the weather snow ("SnowCover"
+    on the drape UV), the water (the permanent_water layer's weight)
+    and the "Wetness" coupling every terrain material has. Its instance
+    is built by scripts/ue_build_scene.py, which sets the drape and the
+    layers only: the detail, normal and snow samplers stay at this
+    script's defaults (the committed bitmaps, below) until that script
+    sets them -- not claimed here.
   - /Game/FlightSim/M_LandcoverID: the land-cover ID pass (post-process,
     replacing the tonemapper, the M_CustomStencilID shape). Each pixel's
     world position (reconstructed from depth) goes onto the bake grid by
@@ -116,9 +160,88 @@ without an engine, so the Windows build is where they are checked.
     raster of core/scene/runway.py, row 0 at the threshold) lerps
     "SurfaceColour" to "PaintColour", then the "Wetness" coupling.
 
-  /Game/FlightSim/T_LinearDefault is the one texture the script makes: the
-  non-sRGB default the three linear samplers are created with (a texture
-  parameter needs a default of its own sampler class to compile).
+  /Game/FlightSim/T_LinearDefault is the non-sRGB default the W5 linear
+  samplers are created with (a texture parameter needs a default of its
+  own sampler class to compile); what the engine's factory fills it with
+  is not read anywhere.
+
+The terrain surface (M_TerrainImagery, M_TerrainImageryNight and the
+Landscape route's M_Landscape share it: terrain_role_samples /
+terrain_surface below) is the simulator's own terrain shader structure,
+read from its compiled SPIR-V (assets/logic_reports/README.md): a base
+albedo, detail decals keyed by distance, a bump texture, per-material
+roughness, weather snow by a thresholded level times a linear ramp in
+cos(slope), night as an additive texture. Here:
+
+  roles     "Roles" (linear RGBA on UV0: R valley, G scrub, B rock,
+            A cliff; snow = saturate(1 - R - G - B - A)) weights the
+            five ground textures (assets/xplane/terrain/drape/<role>.png,
+            the simulator's, each tiled at its PROJECTED ground size:
+            "DetailMetres<Role>" from drape_textures.json, the shorter
+            axis, across the tile's height, and TERRAIN_DETAIL_ASPECT
+            times that -- the PNG's width / height, 2 for scrub, 4 for
+            cliff -- across its width, so a 512 x 256 tile is not
+            squeezed square) into a detail albedo "Detail<Role>", a
+            tangent normal "Normal<Role>" and a roughness
+            "Roughness<Role>". M_Landscape weights them by its paint
+            layers instead.
+  detail    colour = Imagery * lerp(1, detail / neutral, DetailStrength
+            * fade), fade = 1 - saturate((PixelDepth - DetailFadeStartM
+            * 100) / ((DetailFadeEndM - DetailFadeStartM) * 100)): the
+            decal distance key, in the engine's centimetres. "neutral"
+            is each role's MEASURED per-channel linear mean
+            (TERRAIN_DETAIL_NEUTRAL, from the committed PNGs on this
+            machine, not on Windows): the design's constant 2 (neutral
+            at linear 0.5) would halve the drape over valleys, whose
+            texture averages linear 0.065. The detail modulates; the
+            drape colours. Over a pure role of the base image, Imagery
+            is that role's sRGB-texel mean, so at full strength the
+            surface is the tile scaled by decode(sRGB mean) / linear
+            mean -- 0.77 .. 0.96 per channel on the committed tiles,
+            measured here -- near the tile, not the tile.
+  snow      "SnowCover" (linear R on UV0, the month's cover 0..1):
+            w0 = saturate((SnowCover - 0.5 + SnowBand * (Noise - 0.5))
+            / SnowBand + 0.5), coverage = w0 * saturate((VertexNormalWS.z
+            - SnowSlopeLowCos) / (SnowSlopeHighCos - SnowSlopeLowCos)),
+            cov = saturate(2 * coverage - 1 + SnowAlbedo.a); colour,
+            normal and roughness lerp to "SnowAlbedo" (snow_ALB.png,
+            RGBA: alpha the per-texel threshold), "SnowNormal"
+            (snow_NML.png) and "RoughnessSnow" by cov. SnowAlbedo and
+            SnowNormal tile at "SnowMetres", "Noise" (noise.png, R) at
+            "NoiseMetres", world metres both.
+  water     "WaterMask" (linear R on UV0): colour = Imagery (the drape
+            carries the water colour), roughness = RoughnessWater, the
+            normal flat. Specular stays the engine's default 0.5
+            everywhere; nothing is wired to it.
+  then      the "Wetness" coupling, and in M_TerrainImageryNight the
+            "NightLights" x "NightLuminance" emissive.
+
+Normal maps: the simulator's NML bitmaps pack x, y in R, G and keep
+metalness and gloss in B, A (snow_NML.png measured here: B one constant
+value, A varying, R and G centred on 128 and reconstructing to z ~ 1),
+so every normal sampler is the engine's Normal type, whose unpack
+derives z from R, G and ignores B, A. The C++ must import an NML as a
+normal map (TC_Normalmap, sRGB off) and the data maps (Roles, SnowCover,
+WaterMask, Noise) with sRGB OFF: the samplers decode nothing, the
+texture's own flag does, and an sRGB-flagged weight map arrives
+gamma-decoded (0.5 -> 0.21). Not checked here. The normals are
+tangent-space, so the tile mesh must carry tangents for a role normal
+to mean anything; no role normal is extracted yet (every "normal" in
+the sidecar's detail entries is null), so today only the snow normal is
+ever set.
+
+Defaults: every terrain sampler the C++ may leave unset defaults to a
+texture this script imports (TERRAIN_DEFAULT_TEXTURES, default_texture):
+the committed bitmap itself when the checkout has it (the five ground
+textures, snow_ALB / snow_NML / noise), else a 4 x 4 texture of ONE
+known texel written here as a PNG (no engine API writes texels from
+Python; an import does) -- Roles = valley everywhere, SnowCover and
+WaterMask = 0, Noise = 0.5, every role normal flat, a missing Detail<Role>
+its own neutral (the modulation is then exactly 1) -- so an absent map
+reads a KNOWN value rather than the engine's checker. A sidecar without
+a "material" block therefore renders as the drape textured by valley,
+and M_Landscape textures its layers from the committed bitmaps with no
+help from the scene script.
 """
 
 import unreal
@@ -164,6 +287,116 @@ ROUGHNESS_DRY = 0.92
 ROUGHNESS_WET = 0.25
 WET_DARKENING = 0.3
 
+# -- the terrain surface's parameters (the module comment) ----------------------
+
+#: The five drape roles, core/xplane/drape.py ROLES (pinned equal by
+#: tests/test_ue_materials.py), in the Roles map's channel order R, G, B,
+#: A, then the remainder.
+TERRAIN_ROLES = ("valley", "scrub", "rock", "cliff", "snow")
+#: Every texture parameter of the terrain surface -> its sampler: "srgb"
+#: (a colour), "linear" (data: the sampler decodes nothing) or "normal"
+#: (the engine's Normal sampler: x, y from R, G, z derived). The names are
+#: the contract with the drape sidecar's "material" block
+#: (core/xplane/drape.py material_block: "roles" -> Roles, "snow_cover" ->
+#: SnowCover, "water_mask" -> WaterMask, detail.<role>.file -> Detail<Role>,
+#: detail.<role>.normal -> Normal<Role>, "snow_albedo" -> SnowAlbedo,
+#: "snow_normal" -> SnowNormal, "noise" -> Noise) and with
+#: FlightSimVisualScene.cpp, which sets each one it finds and records it
+#: applied or absent.
+TERRAIN_TEXTURE_PARAMETERS = {
+    "Imagery": "srgb",         # the base image, else the composite, UV0 (M_Landscape: the drape UV)
+    "Roles": "linear",         # RGBA = valley, scrub, rock, cliff; snow = 1 - sum
+    "SnowCover": "linear",     # R = the month's snow cover 0..1
+    "WaterMask": "linear",     # R = 1 on mapped water
+    "DetailValley": "srgb", "DetailScrub": "srgb", "DetailRock": "srgb",
+    "DetailCliff": "srgb", "DetailSnow": "srgb",
+    "NormalValley": "normal", "NormalScrub": "normal", "NormalRock": "normal",
+    "NormalCliff": "normal", "NormalSnow": "normal",
+    "SnowAlbedo": "srgb",      # snow_ALB.png; alpha = the per-texel threshold
+    "SnowNormal": "normal",    # snow_NML.png
+    "Noise": "linear",         # noise.png, R
+}
+#: Every scalar parameter of the terrain surface -> its default, in the
+#: sidecar block's order (core/xplane/drape.py MATERIAL_SCALAR_NAMES, pinned
+#: equal, with these values, by test). The detail sizes are the simulator's
+#: PROJECTED ground sizes (drape_textures.json; the shorter axis, metres_y,
+#: one scalar per role: the longer axis is that times TERRAIN_DETAIL_ASPECT
+#: below, so scrub and cliff tile 2:1 and 4:1 here as they do there); the
+#: snow and noise sizes, the detail strength and fade, the slope ramp (cos
+#: 38 deg .. cos 30 deg), the band and every roughness are this
+#: repository's (the simulator's are uniforms no module carries). "Wetness"
+#: and "NightLuminance" are the scene's, deliberately not here.
+TERRAIN_SCALAR_PARAMETERS = {
+    "DetailMetresValley": 1277.0, "DetailMetresScrub": 1222.0, "DetailMetresRock": 1111.0,
+    "DetailMetresCliff": 708.0, "DetailMetresSnow": 2840.0,
+    "SnowMetres": 64.0, "NoiseMetres": 512.0,
+    "DetailStrength": 0.6, "DetailFadeStartM": 3000.0, "DetailFadeEndM": 12000.0,
+    "SnowSlopeLowCos": 0.788, "SnowSlopeHighCos": 0.866, "SnowBand": 0.25,
+    "RoughnessValley": 0.85, "RoughnessScrub": 0.8, "RoughnessRock": 0.75,
+    "RoughnessCliff": 0.7, "RoughnessSnow": 0.55, "RoughnessWater": 0.08,
+}
+#: Each role's detail ASPECT: the committed texture's width / height
+#: (assets/xplane/terrain/drape/<role>.png: 512 x 512, 512 x 256, 512 x 512,
+#: 512 x 128, 512 x 512, measured on this machine; pinned to the PNGs by
+#: test), which is also drape_textures.json's metres_x / metres_y. The
+#: tile's height spans DetailMetres<Role> on the ground, its width aspect
+#: times that (detail_uv); the contract stays the one scalar per role.
+TERRAIN_DETAIL_ASPECT = {
+    "valley": 1.0, "scrub": 2.0, "rock": 1.0, "cliff": 4.0, "snow": 1.0,
+}
+#: Each role's detail NEUTRAL: the per-channel linear mean of its committed
+#: texture (assets/xplane/terrain/drape/<role>.png, measured on this
+#: machine 2026-10-05, not on Windows; pinned to the PNGs by test), the
+#: texel at which the modulation detail / neutral is 1. A re-extracted
+#: texture moves it.
+TERRAIN_DETAIL_NEUTRAL = {
+    "valley": (0.0780, 0.0799, 0.0369), "scrub": (0.0917, 0.0903, 0.0557),
+    "rock": (0.1490, 0.1390, 0.1190), "cliff": (0.1794, 0.1663, 0.1355),
+    "snow": (0.5043, 0.5563, 0.5704),
+}
+#: The terrain samplers' default textures by asset name (default_texture):
+#: (the committed bitmap, repository-relative, imported when the checkout
+#: has it, or None; the 4 x 4 flat RGBA texel 0-255 used instead; sRGB;
+#: normal map). The flat detail texels are the neutrals sRGB-encoded.
+#: T_RolesValley is a ZERO-ALPHA PNG (cliff = A = 0): the engine's PNG
+#: import rewrites zero-alpha texels unless told not to, so that one goes
+#: through a TextureFactory with fill_png_zero_alpha off (import_texture);
+#: that the imported texture reads (255, 0, 0, 0) untouched is the first
+#: Windows check of these defaults.
+TERRAIN_DEFAULT_TEXTURES = {
+    "T_DetailValley": ("assets/xplane/terrain/drape/valley.png", (79, 80, 54, 255), True, False),
+    "T_DetailScrub": ("assets/xplane/terrain/drape/scrub.png", (85, 85, 67, 255), True, False),
+    "T_DetailRock": ("assets/xplane/terrain/drape/rock.png", (108, 104, 97, 255), True, False),
+    "T_DetailCliff": ("assets/xplane/terrain/drape/cliff.png", (117, 113, 103, 255), True, False),
+    "T_DetailSnow": ("assets/xplane/terrain/drape/snow.png", (188, 197, 199, 255), True, False),
+    "T_SnowAlbedo": ("assets/physical_renders/Resources/bitmaps/world/weather/snow_ALB.png",
+                     (233, 233, 233, 128), True, False),
+    "T_SnowNormal": ("assets/physical_renders/Resources/bitmaps/world/weather/snow_NML.png",
+                     (128, 128, 255, 255), False, True),
+    "T_Noise": ("assets/physical_renders/Resources/bitmaps/world/weather/noise.png",
+                (128, 128, 128, 255), False, False),
+    "T_FlatNormal": (None, (128, 128, 255, 255), False, True),
+    "T_RolesValley": (None, (255, 0, 0, 0), False, False),
+    "T_Black": (None, (0, 0, 0, 255), False, False),
+    "T_ImageryGrey": (None, (128, 128, 128, 255), True, False),
+}
+#: Which default each terrain sampler is created with. "Imagery" has none
+#: in the tile materials (the C++ always sets it; a failed drape is a
+#: refused render) and T_ImageryGrey in M_Landscape, where no drape is a
+#: real case (at ImageryWeight 0 the grey reaches only the water and
+#: nodata layers, whose albedo is the drape itself).
+TERRAIN_TEXTURE_DEFAULTS = {
+    "Roles": "T_RolesValley", "SnowCover": "T_Black", "WaterMask": "T_Black",
+    "DetailValley": "T_DetailValley", "DetailScrub": "T_DetailScrub",
+    "DetailRock": "T_DetailRock", "DetailCliff": "T_DetailCliff", "DetailSnow": "T_DetailSnow",
+    "NormalValley": "T_FlatNormal", "NormalScrub": "T_FlatNormal", "NormalRock": "T_FlatNormal",
+    "NormalCliff": "T_FlatNormal", "NormalSnow": "T_FlatNormal",
+    "SnowAlbedo": "T_SnowAlbedo", "SnowNormal": "T_SnowNormal", "Noise": "T_Noise",
+}
+#: M_TerrainImageryNight's two, by the names FlightSimVisualScene.cpp sets.
+NIGHT_LIGHTS_PARAMETER = "NightLights"
+NIGHT_LUMINANCE_PARAMETER = "NightLuminance"
+
 # -- W5: the world materials' names and parameters ----------------------------
 
 #: Every world material, by name (one /Game/FlightSim path each).
@@ -175,8 +408,10 @@ WORLD_MATERIALS = ("M_Landscape", "M_LandcoverID", "M_Starfield", "M_RainStreaks
 LANDSCAPE_LAYERS = ("tree_cover", "shrubland", "grassland", "cropland", "built_up",
                     "bare_sparse", "snow_ice", "permanent_water", "herbaceous_wetland",
                     "mangroves", "moss_lichen", "nodata")
-#: The legend colours (sRGB 0-255, core/terrain/landcover.py LEGEND), as the
-#: layers' tints: scene dressing, not an albedo measurement.
+#: The legend colours (sRGB 0-255, core/terrain/landcover.py LEGEND, pinned
+#: equal by test): the land-cover ID pass's legend, kept here as the
+#: reference the layer list is read against. M_Landscape no longer paints
+#: them: each layer takes a drape role's ground texture (next table).
 LANDSCAPE_TINTS = {
     "tree_cover": (0, 100, 0), "shrubland": (255, 187, 34), "grassland": (255, 255, 76),
     "cropland": (240, 150, 255), "built_up": (250, 0, 0), "bare_sparse": (180, 180, 180),
@@ -184,7 +419,38 @@ LANDSCAPE_TINTS = {
     "herbaceous_wetland": (0, 150, 160), "mangroves": (0, 207, 117),
     "moss_lichen": (250, 230, 160), "nodata": (0, 0, 0),
 }
-LANDSCAPE_PARAMETERS = ("Imagery", "ImageryWeight", "LandscapeTexels", "ImageryFlipV", "Wetness")
+#: Each paint layer -> (the drape role whose ground texture, normal and
+#: roughness it takes, the tint parameter multiplied over it or None).
+#: "water" is the drape's water colour at RoughnessWater and "imagery" the
+#: drape alone (a neutral detail, a flat normal, the valley roughness).
+LANDSCAPE_LAYER_ROLES = {
+    "tree_cover": ("scrub", "TintTreeCover"), "shrubland": ("scrub", None),
+    "grassland": ("valley", None), "cropland": ("valley", "TintCropland"),
+    "built_up": ("rock", "TintBuiltUp"), "bare_sparse": ("rock", None),
+    "snow_ice": ("snow", None), "permanent_water": ("water", None),
+    "herbaceous_wetland": ("scrub", "TintWetland"), "mangroves": ("scrub", "TintWetland"),
+    "moss_lichen": ("valley", "TintMossLichen"), "nodata": ("imagery", None),
+}
+#: The tints' defaults (linear RGB multipliers over the role's texture):
+#: scene dressing, not a measurement -- trees darker and greener than the
+#: scrub they stand on, crops warmer than grass, the built-up greyer than
+#: rock, the wetlands darker and bluer, moss yellower.
+LANDSCAPE_TINT_DEFAULTS = {
+    "TintTreeCover": (0.45, 0.55, 0.40), "TintCropland": (1.10, 1.00, 0.80),
+    "TintBuiltUp": (0.70, 0.70, 0.72), "TintWetland": (0.60, 0.75, 0.70),
+    "TintMossLichen": (1.00, 0.95, 0.75),
+}
+#: "ImageryWeight" where the scene script sets nothing: 0, the land-cover
+#: textures alone -- no drape is no drape, not half of a grey default --
+#: and the modulation, scaled by the same weight, off with it (the blend IS
+#: the detail there). scripts/ue_build_scene.py sets 1.0 when it has a drape.
+LANDSCAPE_IMAGERY_WEIGHT = 0.0
+#: M_Landscape's own parameters; it also exposes every terrain-surface
+#: parameter (TERRAIN_TEXTURE_PARAMETERS / TERRAIN_SCALAR_PARAMETERS) but
+#: "Roles" and "WaterMask", which its paint layers replace.
+LANDSCAPE_PARAMETERS = ("Imagery", "ImageryWeight", "LandscapeTexels", "ImageryFlipV", "Wetness",
+                        "TintTreeCover", "TintCropland", "TintBuiltUp", "TintWetland",
+                        "TintMossLichen")
 #: M_LandcoverID's parameters, by the names FlightSimRenderCommandlet.cpp sets.
 LANDCOVER_PARAMETERS = ("ClassMap", "OriginX", "OriginY", "CellX", "CellY", "GridWidth",
                         "GridHeight", "TerrainStencil")
@@ -217,25 +483,32 @@ RUNWAY_PARAMETERS = ("Markings", "SurfaceColour", "PaintColour", "Wetness")
 LINEAR_DEFAULT_TEXTURE = "T_LinearDefault"
 
 
-def add_wetness(material, lib, base_colour_node, base_output, x):
+def add_wetness(material, lib, base_colour_node, base_output, x,
+                dry_roughness=None, dry_output=""):
     """The one wet-surface coupling: a scalar parameter "Wetness" (default
     0, the name FlightSimVisualScene.cpp ApplyWetness sets) lerps roughness
-    from 0.92 (dry) toward 0.25 (wet) and darkens base colour by up to
+    from the dry value -- the constant 0.92, or the surface's own
+    roughness node when the caller passes one (the terrain surfaces' per-
+    role blend) -- toward 0.25 (wet) and darkens base colour by up to
     30 %. Wires MP_BASE_COLOR and MP_ROUGHNESS; the caller wires nothing
     else to those two."""
     wet = lib.create_material_expression(
         material, unreal.MaterialExpressionScalarParameter, x, 400)
     wet.set_editor_property("parameter_name", WETNESS_PARAMETER)
     wet.set_editor_property("default_value", 0.0)
-    dry_r = lib.create_material_expression(
-        material, unreal.MaterialExpressionConstant, x, 250)
-    dry_r.set_editor_property("r", ROUGHNESS_DRY)
+    if dry_roughness is None:
+        dry_r = lib.create_material_expression(
+            material, unreal.MaterialExpressionConstant, x, 250)
+        dry_r.set_editor_property("r", ROUGHNESS_DRY)
+        dry_output = ""
+    else:
+        dry_r = dry_roughness
     wet_r = lib.create_material_expression(
         material, unreal.MaterialExpressionConstant, x, 300)
     wet_r.set_editor_property("r", ROUGHNESS_WET)
     rough = lib.create_material_expression(
         material, unreal.MaterialExpressionLinearInterpolate, x + 200, 250)
-    lib.connect_material_expressions(dry_r, "", rough, "A")
+    lib.connect_material_expressions(dry_r, dry_output, rough, "A")
     lib.connect_material_expressions(wet_r, "", rough, "B")
     lib.connect_material_expressions(wet, "", rough, "Alpha")
     lib.connect_material_property(rough, "",
@@ -280,6 +553,11 @@ def create_vertex_colour():
 
 
 def create_terrain_imagery():
+    """The terrain surface (the module comment): the drape textured by the
+    roles' ground textures, snowed, watered, then the wetness coupling,
+    which owns the base colour and the roughness. Not run without an
+    engine: the node and pin names are the UE Python API's, checked on
+    Windows."""
     full = f"{PATH}/M_TerrainImagery"
     if unreal.EditorAssetLibrary.does_asset_exist(full):
         print(f"MATERIAL-EXISTS: {full}")
@@ -292,10 +570,8 @@ def create_terrain_imagery():
         raise SystemExit("could not create material asset")
 
     lib = unreal.MaterialEditingLibrary
-    texture = lib.create_material_expression(
-        material, unreal.MaterialExpressionTextureSampleParameter2D, -400, 0)
-    texture.set_editor_property("parameter_name", "Imagery")
-    add_wetness(material, lib, texture, "RGB", -400)
+    colour, roughness = terrain_imagery_graph(material, lib)
+    add_wetness(material, lib, colour, "", 1200, dry_roughness=roughness)
     lib.recompile_material(material)
     unreal.EditorAssetLibrary.save_asset(full)
     print(f"MATERIAL-CREATED: {full}")
@@ -544,15 +820,23 @@ def vector(material, lib, name, default, x, y):
     return node
 
 
-def texture_parameter(material, lib, name, linear, x, y):
+def texture_parameter(material, lib, name, linear, x, y, default=None, normal_map=False):
     """A TextureSampleParameter2D: sRGB colour, or linear colour with the
-    non-sRGB default (codes, markings and luminance are data, not colour)."""
+    non-sRGB default (codes, markings and luminance are data, not colour),
+    or a normal map (the engine's Normal sampler: x, y from R, G, z
+    derived). A default texture given replaces the sampler class's own
+    (a texture parameter compiles only with a default of its sampler's
+    class: the terrain defaults are made to match)."""
     node = lib.create_material_expression(material, unreal.MaterialExpressionTextureSampleParameter2D,
                                           x, y)
     node.set_editor_property("parameter_name", name)
-    if linear:
+    if normal_map:
+        node.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
+    elif linear:
         node.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR)
         node.set_editor_property("texture", linear_default_texture())
+    if default is not None:
+        node.set_editor_property("texture", default)
     return node
 
 
@@ -570,10 +854,32 @@ def constant(material, lib, value, x, y):
 
 
 def mask(material, lib, source, channel, x, y, source_out=""):
+    """A ComponentMask of one channel ("r") or several ("rg")."""
     node = lib.create_material_expression(material, unreal.MaterialExpressionComponentMask, x, y)
     for flag in ("r", "g", "b", "a"):
-        node.set_editor_property(flag, flag == channel)
+        node.set_editor_property(flag, flag in channel)
     lib.connect_material_expressions(source, source_out, node, "")
+    return node
+
+
+def unary(material, lib, kind, source, x, y, source_out=""):
+    """A one-input node (OneMinus, Saturate, Normalize) over source."""
+    node = lib.create_material_expression(material, kind, x, y)
+    lib.connect_material_expressions(source, source_out, node, "")
+    return node
+
+
+def lerp(material, lib, a, b, alpha, x, y, a_out="", b_out="", alpha_out=""):
+    node = lib.create_material_expression(material, unreal.MaterialExpressionLinearInterpolate, x, y)
+    lib.connect_material_expressions(a, a_out, node, "A")
+    lib.connect_material_expressions(b, b_out, node, "B")
+    lib.connect_material_expressions(alpha, alpha_out, node, "Alpha")
+    return node
+
+
+def constant3(material, lib, rgb, x, y):
+    node = lib.create_material_expression(material, unreal.MaterialExpressionConstant3Vector, x, y)
+    node.set_editor_property("constant", unreal.LinearColor(rgb[0], rgb[1], rgb[2], 1.0))
     return node
 
 
@@ -596,52 +902,428 @@ def in_unit_interval(material, lib, value, x, y):
     return binary(material, lib, unreal.MaterialExpressionMultiply, low, high, x + 200, y)
 
 
+# -- the terrain surface: M_TerrainImagery, M_TerrainImageryNight, M_Landscape --
+
+def _flat_png(name, texel):
+    """A 4 x 4 8-bit RGBA PNG of one texel, written with the standard
+    library (the engine's Python has no imaging library) into a scratch
+    directory; its path. The one way this script makes a texture whose
+    content it KNOWS."""
+    import struct
+    import tempfile
+    import zlib
+    from pathlib import Path
+    size = 4
+    raw = b"".join(b"\x00" + bytes(texel) * size for _ in range(size))
+
+    def chunk(kind, data):
+        body = kind + data
+        return (struct.pack(">I", len(data)) + body
+                + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF))
+
+    path = Path(tempfile.mkdtemp(prefix="flightsim_materials_")) / f"{name}.png"
+    path.write_bytes(b"\x89PNG\r\n\x1a\n"
+                     + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0))
+                     + chunk(b"IDAT", zlib.compress(raw))
+                     + chunk(b"IEND", b""))
+    return path
+
+
+def _repo_file(relative):
+    """A committed file by its repository-relative path: under this
+    script's parent directory (the checkout it runs from) or the working
+    directory; None when neither has it."""
+    from pathlib import Path
+    roots = []
+    try:
+        roots.append(Path(__file__).resolve().parents[1])
+    except NameError:   # the engine ran the text without a __file__
+        pass
+    roots.append(Path.cwd())
+    for root in roots:
+        candidate = root / relative
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def import_texture(source, name, srgb, normal_map, flat, zero_alpha=False):
+    """Import one PNG as /Game/FlightSim/<name> (scripts/ue_build_scene.py's
+    _import_texture idiom): an sRGB colour, a linear data map (no sRGB
+    curve, uncompressed 8 bits) or a normal map (TC_Normalmap, whose
+    Normal sampler unpacks x, y from R, G). A flat texel takes no mips;
+    a bitmap keeps the texture group's. A zero_alpha PNG (T_RolesValley,
+    (255, 0, 0, 0)) goes through its own TextureFactory with the
+    importer's zero-alpha fill off, so its texels arrive as written; an
+    engine whose Python has no such option is told so and imports it
+    through the default factory, and whether that leaves the texels
+    untouched is the first Windows check of these defaults. A failed
+    import is a RuntimeError the creator guard reports by name, not an
+    exit: the other materials still build."""
+    task = unreal.AssetImportTask()
+    task.set_editor_property("filename", str(source))
+    task.set_editor_property("destination_path", PATH)
+    task.set_editor_property("destination_name", name)
+    task.set_editor_property("automated", True)
+    task.set_editor_property("replace_existing", True)
+    task.set_editor_property("save", False)
+    if zero_alpha:
+        try:
+            factory = unreal.TextureFactory()
+            factory.set_editor_property("fill_png_zero_alpha", False)
+        except Exception:   # not this engine's name: said, not hidden
+            print(f"MATERIAL-NOTE: {name} is a zero-alpha PNG and this engine's Python has no "
+                  f"TextureFactory.fill_png_zero_alpha; whether the default import leaves its "
+                  f"texels untouched is the first Windows check")
+        else:
+            task.set_editor_property("factory", factory)
+    unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
+    full = f"{PATH}/{name}"
+    texture = unreal.load_asset(full)
+    if texture is None:
+        raise RuntimeError(f"{source} did not import as {full}")
+    texture.set_editor_property("srgb", bool(srgb))
+    if normal_map:
+        texture.set_editor_property("compression_settings",
+                                    unreal.TextureCompressionSettings.TC_NORMALMAP)
+    elif not srgb:
+        texture.set_editor_property("compression_settings",
+                                    unreal.TextureCompressionSettings.TC_VECTOR_DISPLACEMENTMAP)
+    if flat:
+        texture.set_editor_property("mip_gen_settings",
+                                    unreal.TextureMipGenSettings.TMGS_NO_MIPMAPS)
+    unreal.EditorAssetLibrary.save_asset(full)
+    return texture
+
+
+def default_texture(name):
+    """/Game/FlightSim/<name> once (TERRAIN_DEFAULT_TEXTURES): the committed
+    bitmap when the checkout has it, else the flat known texel, said so."""
+    full = f"{PATH}/{name}"
+    if unreal.EditorAssetLibrary.does_asset_exist(full):
+        return unreal.load_asset(full)
+    committed, texel, srgb, normal_map = TERRAIN_DEFAULT_TEXTURES[name]
+    source = _repo_file(committed) if committed else None
+    flat = source is None
+    if flat:
+        if committed:
+            print(f"MATERIAL-NOTE: {committed} is not on this checkout; {name} is the flat "
+                  f"texel {texel}")
+        source = _flat_png(name, texel)
+    return import_texture(source, name, srgb, normal_map, flat, zero_alpha=flat and texel[3] == 0)
+
+
+def terrain_texture(material, lib, name, x, y, default=None):
+    """One terrain sampler by its contract name: the sampler type from
+    TERRAIN_TEXTURE_PARAMETERS, the default from TERRAIN_TEXTURE_DEFAULTS
+    (or the asset name given)."""
+    kind = TERRAIN_TEXTURE_PARAMETERS[name]
+    default_name = default or TERRAIN_TEXTURE_DEFAULTS.get(name)
+    return texture_parameter(material, lib, name, kind == "linear", x, y,
+                             default=default_texture(default_name) if default_name else None,
+                             normal_map=kind == "normal")
+
+
+def terrain_scalar(material, lib, name, x, y):
+    return scalar(material, lib, name, TERRAIN_SCALAR_PARAMETERS[name], x, y)
+
+
+def world_metres_uv(material, lib, world_xy, metres, x, y):
+    """Square world-metre tiling: AbsoluteWorldPosition.xy / (metres * 100),
+    the engine's centimetres -- the snow and the noise (square bitmaps)
+    tile on the ground, not on the drape grid. The detail tiles through
+    detail_uv, which has an aspect."""
+    centimetres = binary(material, lib, unreal.MaterialExpressionMultiply, metres,
+                         constant(material, lib, 100.0, x, y + 60), x + 150, y)
+    return binary(material, lib, unreal.MaterialExpressionDivide, world_xy, centimetres, x + 300, y)
+
+
+def detail_uv(material, lib, world_xy, metres, aspect, x, y):
+    """A role's detail tiling, AppendVector(x / (metres * 100 * aspect),
+    y / (metres * 100)): the tile's height spans "DetailMetres<Role>" on
+    the ground (one scalar per role, the sidecar's contract) and its
+    width aspect times that (TERRAIN_DETAIL_ASPECT, the PNG's
+    width / height), so a 512 x 256 tile is not squeezed square."""
+    centimetres = binary(material, lib, unreal.MaterialExpressionMultiply, metres,
+                         constant(material, lib, 100.0, x, y + 60), x + 150, y)
+    wide = binary(material, lib, unreal.MaterialExpressionMultiply, centimetres,
+                  constant(material, lib, aspect, x + 150, y + 120), x + 300, y + 60)
+    u = binary(material, lib, unreal.MaterialExpressionDivide,
+               mask(material, lib, world_xy, "r", x + 300, y - 60), wide, x + 450, y)
+    v = binary(material, lib, unreal.MaterialExpressionDivide,
+               mask(material, lib, world_xy, "g", x + 300, y + 180), centimetres, x + 450, y + 120)
+    return binary(material, lib, unreal.MaterialExpressionAppendVector, u, v, x + 600, y + 60)
+
+
+def terrain_role_samples(material, lib, world_xy, x, y):
+    """Per role (TERRAIN_ROLES), at the role's world-metre tiling
+    "DetailMetres<Role>" by TERRAIN_DETAIL_ASPECT (detail_uv): the detail
+    albedo "Detail<Role>" (RGB), its neutral (TERRAIN_DETAIL_NEUTRAL, a
+    constant), the tangent normal "Normal<Role>" (RGB) and the roughness
+    "Roughness<Role>"."""
+    samples = {}
+    for index, role in enumerate(TERRAIN_ROLES):
+        title = role.capitalize()
+        row = y + index * 320
+        metres = terrain_scalar(material, lib, f"DetailMetres{title}", x, row)
+        uv = detail_uv(material, lib, world_xy, metres, TERRAIN_DETAIL_ASPECT[role], x + 150, row)
+        detail = terrain_texture(material, lib, f"Detail{title}", x + 950, row)
+        lib.connect_material_expressions(uv, "", detail, "UVs")
+        normal = terrain_texture(material, lib, f"Normal{title}", x + 950, row + 160)
+        lib.connect_material_expressions(uv, "", normal, "UVs")
+        samples[role] = {
+            "detail": detail,
+            "neutral": constant3(material, lib, TERRAIN_DETAIL_NEUTRAL[role], x + 1200, row),
+            "normal": normal,
+            "roughness": terrain_scalar(material, lib, f"Roughness{title}", x + 1200, row + 100),
+        }
+    return samples
+
+
+def weighted_sum(material, lib, terms, x, y):
+    """sum of weight * value over (weight, weight_out, value, value_out)."""
+    total = None
+    for index, (weight, weight_out, value, value_out) in enumerate(terms):
+        term = binary(material, lib, unreal.MaterialExpressionMultiply, weight, value,
+                      x, y + index * 80, a_out=weight_out, b_out=value_out)
+        total = term if total is None else binary(
+            material, lib, unreal.MaterialExpressionAdd, total, term, x + 150, y + index * 80)
+    return total
+
+
+def terrain_surface(material, lib, samples, base, base_out, imagery, imagery_out,
+                    detail, neutral, normal, roughness, water, water_out,
+                    snow_cover, snow_out, world_xy, x, y, detail_scale=None):
+    """The terrain graph after the role blend (the module comment): the
+    distance-faded detail modulation, the weather snow, the water
+    override, the normal into MP_NORMAL. Returns (colour, roughness) for
+    add_wetness, which owns the base colour and the roughness.
+
+    base / imagery: the macro albedo the detail modulates and the drape
+    the water takes (one node in the tile materials); detail, neutral,
+    normal, roughness: the role-weighted sums (RGB, RGB, RGB, scalar; the
+    default output); water, snow_cover: the masks 0..1; detail_scale: an
+    extra factor on the modulation (M_Landscape's ImageryWeight) or
+    None."""
+    multiply, add, subtract, divide = (unreal.MaterialExpressionMultiply, unreal.MaterialExpressionAdd,
+                                       unreal.MaterialExpressionSubtract, unreal.MaterialExpressionDivide)
+    # fade = 1 - saturate((PixelDepth - start * 100) / ((end - start) * 100)).
+    depth = lib.create_material_expression(material, unreal.MaterialExpressionPixelDepth, x, y)
+    start = terrain_scalar(material, lib, "DetailFadeStartM", x, y + 100)
+    end = terrain_scalar(material, lib, "DetailFadeEndM", x, y + 160)
+    hundred = constant(material, lib, 100.0, x, y + 220)
+    fade = unary(material, lib, unreal.MaterialExpressionOneMinus,
+                 unary(material, lib, unreal.MaterialExpressionSaturate,
+                       binary(material, lib, divide,
+                              binary(material, lib, subtract, depth,
+                                     binary(material, lib, multiply, start, hundred, x + 150, y + 100),
+                                     x + 300, y),
+                              binary(material, lib, multiply,
+                                     binary(material, lib, subtract, end, start, x + 150, y + 160),
+                                     hundred, x + 300, y + 160),
+                              x + 450, y),
+                       x + 600, y),
+                 x + 750, y)
+    strength = binary(material, lib, multiply,
+                      terrain_scalar(material, lib, "DetailStrength", x + 750, y + 100),
+                      fade, x + 900, y)
+    if detail_scale is not None:
+        strength = binary(material, lib, multiply, strength, detail_scale, x + 1050, y)
+    # colour = base * lerp(1, detail / neutral, strength).
+    modulation = lerp(material, lib, constant(material, lib, 1.0, x + 1050, y + 200),
+                      binary(material, lib, divide, detail, neutral, x + 1050, y + 260),
+                      strength, x + 1200, y + 200)
+    colour = binary(material, lib, multiply, base, modulation, x + 1350, y + 200, a_out=base_out)
+    # The weather snow: a thresholded level with noise jitter, times the
+    # linear ramp in cos(slope), through the albedo's own threshold.
+    sy = y + 500
+    up = mask(material, lib,
+              lib.create_material_expression(material, unreal.MaterialExpressionVertexNormalWS, x, sy),
+              "b", x + 150, sy)
+    low = terrain_scalar(material, lib, "SnowSlopeLowCos", x, sy + 100)
+    high = terrain_scalar(material, lib, "SnowSlopeHighCos", x, sy + 160)
+    ramp = unary(material, lib, unreal.MaterialExpressionSaturate,
+                 binary(material, lib, divide,
+                        binary(material, lib, subtract, up, low, x + 300, sy),
+                        binary(material, lib, subtract, high, low, x + 300, sy + 100),
+                        x + 450, sy),
+                 x + 600, sy)
+    noise = terrain_texture(material, lib, "Noise", x + 450, sy + 250)
+    lib.connect_material_expressions(
+        world_metres_uv(material, lib, world_xy,
+                        terrain_scalar(material, lib, "NoiseMetres", x, sy + 250), x + 100, sy + 250),
+        "", noise, "UVs")
+    band = terrain_scalar(material, lib, "SnowBand", x, sy + 400)
+    half = constant(material, lib, 0.5, x, sy + 460)
+    jitter = binary(material, lib, multiply, band,
+                    binary(material, lib, subtract, noise, half, x + 650, sy + 250, a_out="R"),
+                    x + 800, sy + 250)
+    w0 = unary(material, lib, unreal.MaterialExpressionSaturate,
+               binary(material, lib, add,
+                      binary(material, lib, divide,
+                             binary(material, lib, add,
+                                    binary(material, lib, subtract, snow_cover, half,
+                                           x + 650, sy + 400, a_out=snow_out),
+                                    jitter, x + 950, sy + 300),
+                             band, x + 1100, sy + 300),
+                      half, x + 1250, sy + 300),
+               x + 1400, sy + 300)
+    coverage = binary(material, lib, multiply, w0, ramp, x + 1550, sy)
+    snow_uv = world_metres_uv(material, lib, world_xy,
+                              terrain_scalar(material, lib, "SnowMetres", x, sy + 600), x + 100, sy + 600)
+    snow_albedo = terrain_texture(material, lib, "SnowAlbedo", x + 450, sy + 600)
+    lib.connect_material_expressions(snow_uv, "", snow_albedo, "UVs")
+    snow_normal = terrain_texture(material, lib, "SnowNormal", x + 450, sy + 800)
+    lib.connect_material_expressions(snow_uv, "", snow_normal, "UVs")
+    # cov = saturate(2 * coverage - 1 + SnowAlbedo.a).
+    cov = unary(material, lib, unreal.MaterialExpressionSaturate,
+                binary(material, lib, add,
+                       binary(material, lib, subtract,
+                              binary(material, lib, multiply, coverage,
+                                     constant(material, lib, 2.0, x + 1550, sy + 100), x + 1700, sy),
+                              constant(material, lib, 1.0, x + 1700, sy + 100), x + 1850, sy),
+                       snow_albedo, x + 2000, sy, b_out="A"),
+                x + 2150, sy)
+    colour = lerp(material, lib, colour, snow_albedo, cov, x + 2300, y + 200, b_out="RGB")
+    normal = lerp(material, lib, normal, snow_normal, cov, x + 2300, y + 400, b_out="RGB")
+    roughness = lerp(material, lib, roughness, samples["snow"]["roughness"], cov, x + 2300, y + 600)
+    # The water override: the drape's own colour, near-mirror, flat.
+    colour = lerp(material, lib, colour, imagery, water, x + 2500, y + 200,
+                  b_out=imagery_out, alpha_out=water_out)
+    roughness = lerp(material, lib, roughness,
+                     terrain_scalar(material, lib, "RoughnessWater", x + 2300, y + 700),
+                     water, x + 2500, y + 600, alpha_out=water_out)
+    normal = lerp(material, lib, normal, constant3(material, lib, (0.0, 0.0, 1.0), x + 2300, y + 500),
+                  water, x + 2500, y + 400, alpha_out=water_out)
+    lib.connect_material_property(
+        unary(material, lib, unreal.MaterialExpressionNormalize, normal, x + 2700, y + 400), "",
+        unreal.MaterialProperty.MP_NORMAL)
+    return colour, roughness
+
+
+def terrain_imagery_graph(material, lib):
+    """The graph M_TerrainImagery and M_TerrainImageryNight share (the
+    module comment): the drape on UV0, the Roles map's weights over the
+    role samples, the masks on UV0, then terrain_surface. Returns
+    (colour, roughness) for add_wetness."""
+    imagery = terrain_texture(material, lib, "Imagery", -2600, 0)
+    roles = terrain_texture(material, lib, "Roles", -2600, 300)
+    weights = {}
+    # The sampler's default output is RGB, a float3 with no A to mask: the
+    # four channels come off its RGBA pin.
+    for index, (role, channel) in enumerate(zip(TERRAIN_ROLES[:4], "rgba")):
+        weights[role] = mask(material, lib, roles, channel, -2400, 300 + index * 80,
+                             source_out="RGBA")
+    # snow = saturate(1 - R - G - B - A): the remainder.
+    used = binary(material, lib, unreal.MaterialExpressionAdd,
+                  binary(material, lib, unreal.MaterialExpressionAdd,
+                         weights["valley"], weights["scrub"], -2250, 300),
+                  binary(material, lib, unreal.MaterialExpressionAdd,
+                         weights["rock"], weights["cliff"], -2250, 460),
+                  -2100, 380)
+    weights["snow"] = unary(material, lib, unreal.MaterialExpressionSaturate,
+                            unary(material, lib, unreal.MaterialExpressionOneMinus, used, -1950, 380),
+                            -1800, 380)
+    world = lib.create_material_expression(material, unreal.MaterialExpressionWorldPosition, -2600, 700)
+    world_xy = mask(material, lib, world, "rg", -2450, 700)
+    samples = terrain_role_samples(material, lib, world_xy, -2300, 800)
+    blend = {}
+    for index, (quantity, out) in enumerate((("detail", "RGB"), ("neutral", ""),
+                                             ("normal", "RGB"), ("roughness", ""))):
+        blend[quantity] = weighted_sum(
+            material, lib, [(weights[role], "", samples[role][quantity], out) for role in TERRAIN_ROLES],
+            -1000, index * 450)
+    snow_cover = terrain_texture(material, lib, "SnowCover", -2600, 2600)
+    water = terrain_texture(material, lib, "WaterMask", -2600, 2850)
+    return terrain_surface(material, lib, samples, imagery, "RGB", imagery, "RGB",
+                           blend["detail"], blend["neutral"], blend["normal"], blend["roughness"],
+                           water, "R", snow_cover, "R", world_xy, -400, 0)
+
+
 def create_landscape():
-    """W5: M_Landscape -- the land-cover layers weight-blended, each a legend
-    tint, lerped toward the imagery drape, then the wetness coupling."""
+    """W5: M_Landscape -- the terrain surface on the Landscape's paint
+    layers (the module comment): five LandscapeLayerBlends (the land-
+    cover albedo, the detail and its neutral, the normal, the roughness),
+    each layer's inputs a drape role's samples under its tint
+    (LANDSCAPE_LAYER_ROLES); the albedo lerped toward the drape by
+    "ImageryWeight" (LANDSCAPE_IMAGERY_WEIGHT, 0: the layers alone until
+    the scene script sets 1.0 with a drape), the modulation scaled by
+    it; the permanent_water layer's weight as the water mask; then the
+    weather snow and the wetness coupling as the tile materials."""
     material = new_material("M_Landscape")
     if material is None:
         return
     lib = unreal.MaterialEditingLibrary
-    blend = lib.create_material_expression(material, unreal.MaterialExpressionLandscapeLayerBlend,
-                                           -900, 0)
-    inputs = []
-    for key in LANDSCAPE_LAYERS:
-        layer = unreal.LayerBlendInput()
-        layer.set_editor_property("layer_name", key)
-        layer.set_editor_property("blend_type", unreal.LandscapeLayerBlendType.LB_WEIGHT_BLEND)
-        inputs.append(layer)
-    blend.set_editor_property("layers", inputs)
-    for index, key in enumerate(LANDSCAPE_LAYERS):
-        tint = lib.create_material_expression(material, unreal.MaterialExpressionConstant3Vector,
-                                              -1200, index * 80)
-        r, g, b = (float(c) / 255.0 for c in LANDSCAPE_TINTS[key])
-        tint.set_editor_property("constant", unreal.LinearColor(r ** 2.2, g ** 2.2, b ** 2.2, 1.0))
-        lib.connect_material_expressions(tint, "", blend, f"Layer {key}")
+    world = lib.create_material_expression(material, unreal.MaterialExpressionWorldPosition, -3300, 0)
+    world_xy = mask(material, lib, world, "rg", -3150, 0)
+    samples = terrain_role_samples(material, lib, world_xy, -3000, 200)
+    tints = {name: vector(material, lib, name, LANDSCAPE_TINT_DEFAULTS[name] + (1.0,), -3000, 1900 + i * 100)
+             for i, name in enumerate(LANDSCAPE_TINT_DEFAULTS)}
+    blends = {}
+    for index, quantity in enumerate(("albedo", "detail", "neutral", "normal", "roughness")):
+        blend = lib.create_material_expression(material, unreal.MaterialExpressionLandscapeLayerBlend,
+                                               -1200, index * 300)
+        inputs = []
+        for key in LANDSCAPE_LAYERS:
+            layer = unreal.LayerBlendInput()
+            layer.set_editor_property("layer_name", key)
+            layer.set_editor_property("blend_type", unreal.LandscapeLayerBlendType.LB_WEIGHT_BLEND)
+            inputs.append(layer)
+        blend.set_editor_property("layers", inputs)
+        blends[quantity] = blend
+    # The drape across the whole Landscape: LandscapeLayerCoords / the
+    # texel count, the rows flipped when written north-up; the snow cover
+    # on the same UV.
     coords = lib.create_material_expression(material, unreal.MaterialExpressionLandscapeLayerCoords,
-                                            -1200, 1000)
-    texels = scalar(material, lib, "LandscapeTexels", 1.0, -1200, 1100)
-    uv = binary(material, lib, unreal.MaterialExpressionDivide, coords, texels, -1000, 1000)
-    u = mask(material, lib, uv, "r", -850, 1000)
-    v = mask(material, lib, uv, "g", -850, 1100)
-    flip = scalar(material, lib, "ImageryFlipV", 0.0, -850, 1200)
-    one_minus_v = lib.create_material_expression(material, unreal.MaterialExpressionOneMinus, -700, 1150)
-    lib.connect_material_expressions(v, "", one_minus_v, "")
-    v_used = lib.create_material_expression(material, unreal.MaterialExpressionLinearInterpolate,
-                                            -550, 1100)
-    lib.connect_material_expressions(v, "", v_used, "A")
-    lib.connect_material_expressions(one_minus_v, "", v_used, "B")
-    lib.connect_material_expressions(flip, "", v_used, "Alpha")
-    drape_uv = binary(material, lib, unreal.MaterialExpressionAppendVector, u, v_used, -400, 1050)
-    imagery = texture_parameter(material, lib, "Imagery", False, -250, 1000)
+                                            -2200, 2600)
+    texels = scalar(material, lib, "LandscapeTexels", 1.0, -2200, 2700)
+    uv = binary(material, lib, unreal.MaterialExpressionDivide, coords, texels, -2000, 2600)
+    u = mask(material, lib, uv, "r", -1850, 2600)
+    v = mask(material, lib, uv, "g", -1850, 2700)
+    flip = scalar(material, lib, "ImageryFlipV", 0.0, -1850, 2800)
+    v_used = lerp(material, lib, v, unary(material, lib, unreal.MaterialExpressionOneMinus, v, -1700, 2750),
+                  flip, -1550, 2700)
+    drape_uv = binary(material, lib, unreal.MaterialExpressionAppendVector, u, v_used, -1400, 2650)
+    imagery = terrain_texture(material, lib, "Imagery", -1200, 2600, default="T_ImageryGrey")
     lib.connect_material_expressions(drape_uv, "", imagery, "UVs")
-    weight = scalar(material, lib, "ImageryWeight", 0.0, -250, 1200)
-    colour = lib.create_material_expression(material, unreal.MaterialExpressionLinearInterpolate,
-                                            -100, 400)
-    lib.connect_material_expressions(blend, "", colour, "A")
-    lib.connect_material_expressions(imagery, "RGB", colour, "B")
-    lib.connect_material_expressions(weight, "", colour, "Alpha")
-    add_wetness(material, lib, colour, "", 50)
+    snow_cover = terrain_texture(material, lib, "SnowCover", -1200, 2850)
+    lib.connect_material_expressions(drape_uv, "", snow_cover, "UVs")
+    one = constant3(material, lib, (1.0, 1.0, 1.0), -1700, 0)
+    flat = constant3(material, lib, (0.0, 0.0, 1.0), -1700, 100)
+    for index, key in enumerate(LANDSCAPE_LAYERS):
+        role, tint_name = LANDSCAPE_LAYER_ROLES[key]
+        row = 200 + index * 120
+        if role in samples:
+            sample = samples[role]
+            albedo, albedo_out = sample["detail"], "RGB"
+            neutral = sample["neutral"]
+            if tint_name is not None:
+                albedo = binary(material, lib, unreal.MaterialExpressionMultiply, tints[tint_name],
+                                sample["detail"], -1550, row, b_out="RGB")
+                albedo_out = ""
+                neutral = binary(material, lib, unreal.MaterialExpressionMultiply, tints[tint_name],
+                                 sample["neutral"], -1550, row + 60)
+            inputs = (("albedo", albedo, albedo_out), ("detail", albedo, albedo_out),
+                      ("neutral", neutral, ""), ("normal", sample["normal"], "RGB"),
+                      ("roughness", sample["roughness"], ""))
+        else:
+            # Water and nodata: the drape itself as the albedo, a neutral
+            # detail (1 / 1), a flat normal, the valley roughness (the
+            # water override sets water's own).
+            inputs = (("albedo", imagery, "RGB"), ("detail", one, ""), ("neutral", one, ""),
+                      ("normal", flat, ""), ("roughness", samples["valley"]["roughness"], ""))
+        for quantity, node, out in inputs:
+            lib.connect_material_expressions(node, out, blends[quantity], f"Layer {key}")
+    water = lib.create_material_expression(material, unreal.MaterialExpressionLandscapeLayerSample,
+                                           -1200, 1600)
+    water.set_editor_property("parameter_name", "permanent_water")
+    weight = scalar(material, lib, "ImageryWeight", LANDSCAPE_IMAGERY_WEIGHT, -900, 2600)
+    base = lerp(material, lib, blends["albedo"], imagery, weight, -700, 2500, b_out="RGB")
+    colour, roughness = terrain_surface(material, lib, samples, base, "", imagery, "RGB",
+                                        blends["detail"], blends["neutral"], blends["normal"],
+                                        blends["roughness"], water, "", snow_cover, "R",
+                                        world_xy, -500, 0, detail_scale=weight)
+    add_wetness(material, lib, colour, "", 2500, dry_roughness=roughness)
     finish(material, "M_Landscape")
 
 
@@ -963,35 +1645,22 @@ def create_star_emissive():
 
 
 def create_terrain_imagery_night():
-    """Physical sky: M_TerrainImagery plus emission. "NightLights" is the
-    verified VIIRS drape (core/terrain/nightlights.py) on the SAME UV
-    grid as "Imagery"; "NightLuminance" scales it to cd/m^2. A separate
-    asset so the calibrated M_TerrainImagery renders stay untouched."""
+    """Physical sky: M_TerrainImagery's terrain surface (the same graph,
+    terrain_imagery_graph, the same wetness coupling) plus emission.
+    "NightLights" is the verified VIIRS drape (core/terrain/nightlights.py)
+    on the SAME UV grid as "Imagery"; "NightLuminance" scales it to
+    cd/m^2. A separate asset so the plain drape renders carry no
+    emissive path."""
     material, full = _sky_material("M_TerrainImageryNight")
     if material is None:
         return
     lib = unreal.MaterialEditingLibrary
-    texture = lib.create_material_expression(
-        material, unreal.MaterialExpressionTextureSampleParameter2D, -500, 0)
-    texture.set_editor_property("parameter_name", "Imagery")
-    lib.connect_material_property(texture, "RGB",
-                                  unreal.MaterialProperty.MP_BASE_COLOR)
-    rough = lib.create_material_expression(
-        material, unreal.MaterialExpressionConstant, -500, 250)
-    rough.set_editor_property("r", 0.92)
-    lib.connect_material_property(rough, "",
-                                  unreal.MaterialProperty.MP_ROUGHNESS)
-    lights = lib.create_material_expression(
-        material, unreal.MaterialExpressionTextureSampleParameter2D, -700, 400)
-    lights.set_editor_property("parameter_name", "NightLights")
-    scale = lib.create_material_expression(
-        material, unreal.MaterialExpressionScalarParameter, -700, 650)
-    scale.set_editor_property("parameter_name", "NightLuminance")
-    scale.set_editor_property("default_value", 0.0)
-    mul = lib.create_material_expression(
-        material, unreal.MaterialExpressionMultiply, -350, 500)
-    lib.connect_material_expressions(lights, "RGB", mul, "A")
-    lib.connect_material_expressions(scale, "", mul, "B")
+    colour, roughness = terrain_imagery_graph(material, lib)
+    add_wetness(material, lib, colour, "", 1200, dry_roughness=roughness)
+    lights = texture_parameter(material, lib, NIGHT_LIGHTS_PARAMETER, False, 1200, 700)
+    scale = scalar(material, lib, NIGHT_LUMINANCE_PARAMETER, 0.0, 1200, 950)
+    mul = binary(material, lib, unreal.MaterialExpressionMultiply, lights, scale, 1500, 800,
+                 a_out="RGB")
     lib.connect_material_property(mul, "",
                                   unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     _save(material, full)

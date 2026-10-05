@@ -138,6 +138,29 @@ def test_rasterize_matches_contains_north_up(data):
     assert not raster[:15].any()
 
 
+def test_committed_water_mask_reads_polygon_features():
+    """assets/xplane/water/water_polygons.geojson holds Polygon features
+    (an earlier extraction's; the extractor now writes MultiPolygon, the
+    fixture above) and no "tiles" list, so the loader reads each
+    feature's ring list as one polygon and the tiles from water_tiles.csv
+    beside it. One committed tile rasterised (+46+009: Lake Como's
+    northern basin and the Engadin lakes, 32 x 32 over its bbox) has
+    water texels and dry ones; contains() answers True on Lake Como,
+    False on the mountains of the same tile and None in a tile the
+    extraction did not have (+46+007, the Matterhorn's)."""
+    from core.xplane import DATA_DIR
+
+    mask = WaterMask.load(DATA_DIR / "water" / "water_polygons.geojson")
+    assert (46, 9) in mask.tiles and (46, 7) not in mask.tiles
+    assert mask.polygon_count > 0
+    raster = mask.rasterize(9.0, 46.0, 10.0, 47.0, 32, 32)
+    assert raster.shape == (32, 32) and raster.dtype == bool
+    assert 0 < int(raster.sum()) < raster.size
+    assert mask.contains(46.10, 9.30) is True     # Lake Como, north of Bellagio
+    assert mask.contains(46.5, 9.5) is False      # dry ground, same tile
+    assert mask.contains(46.0, 7.7) is None       # +46+007: not extracted
+
+
 def test_sky_palette_samples_the_panel_not_the_fill(data):
     bands = load_sky_palettes(data / "lighting" / "sky_palettes.json")["clean"]
     assert len(bands) == 32
@@ -863,3 +886,503 @@ def test_lighting_flags_use_the_model_by_day_and_the_tables_otherwise(monkeypatc
     monkeypatch.setenv(XPLANE_SKY_ENV, "nonsense")
     with pytest.raises(ValueError, match="FLIGHTSIM_XPLANE_SKY"):
         xplane_lighting_flags(None, tables)
+
+
+# -- the material maps the drape writes beside the composite ---------------
+
+#: The scalars the sidecar's "material" block must name: the contract
+#: core.xplane.drape shares with M_TerrainImagery (scripts/
+#: ue_create_materials.py) and FlightSimVisualScene, which sets each one
+#: it finds on the drape's dynamic instance. Neither engine side compiles
+#: or runs here (Windows is the render platform); this pins the names.
+MATERIAL_SCALARS = (
+    "DetailMetresValley", "DetailMetresScrub", "DetailMetresRock",
+    "DetailMetresCliff", "DetailMetresSnow",
+    "SnowMetres", "NoiseMetres", "DetailStrength",
+    "DetailFadeStartM", "DetailFadeEndM",
+    "SnowSlopeLowCos", "SnowSlopeHighCos", "SnowBand",
+    "RoughnessValley", "RoughnessScrub", "RoughnessRock", "RoughnessCliff",
+    "RoughnessSnow", "RoughnessWater",
+)
+
+
+def _material_maps(sidecar_path, sidecar):
+    """The three maps and the base image ("imagery") the material block
+    names, as arrays, by their block names (relative to the sidecar, as
+    the contract says)."""
+    import numpy as np
+
+    textures = sidecar["material"]["textures"]
+    out = {}
+    for name in ("roles", "snow_cover", "water_mask", "imagery"):
+        with Image.open(sidecar_path.with_name(textures[name])) as im:
+            out[name] = (im.mode, np.asarray(im).copy())
+    return out
+
+
+def test_drape_writes_the_material_maps_beside_the_composite(data, tmp_path):
+    """The ridge of test_drape_classifies_flat_steep_and_snow again, no
+    month: the roles map carries the rule's weights at texel resolution
+    (valley on the floor, rock on the 45 degree face, snow as the
+    remainder on the plateau) and never sums past 255; the snow level
+    is zero without a month; the sidecar hashes every map and the base
+    image, and its material block names every scalar of the contract
+    with its default."""
+    import json
+    import math
+    from pathlib import Path
+
+    import numpy as np
+
+    from core.xplane.drape import DRAPE_VERSION, build_drape, drape_paths
+
+    elevation = np.full((60, 90), 500.0)
+    elevation[:, 30:60] = 500.0 + 30.0 * np.arange(1, 31)
+    elevation[:, 60:] = 4000.0
+    stem = _bake(tmp_path, elevation, snowline=3000.0, name="maps")
+    sidecar_path = build_drape(stem, data_dir=data)
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    paths = drape_paths(stem)
+    assert sidecar["drape_version"] == DRAPE_VERSION == 7
+    for key in ("png", "base", "roles", "snow", "water"):
+        assert paths[key].is_file(), key
+    assert paths["base"].name == "maps_xplane_base.png"
+    assert paths["roles"].name == "maps_xplane_roles.png"
+    assert paths["snow"].name == "maps_xplane_snow.png"
+    assert paths["water"].name == "maps_xplane_water.png"
+
+    maps = _material_maps(sidecar_path, sidecar)
+    k = sidecar["texture"]["texels_per_dem_pixel"]
+    mode, roles = maps["roles"]
+    assert mode == "RGBA" and roles.shape == (60 * k, 90 * k, 4)
+    sums = roles.astype(int).sum(axis=2)
+    assert sums.max() <= 255                      # snow = 1 - R - G - B - A >= 0
+    assert tuple(roles[30 * k, 10 * k]) == (255, 0, 0, 0)      # valley floor
+    assert tuple(roles[30 * k, 45 * k]) == (0, 0, 255, 0)      # the rock face
+    assert sums[30 * k, 80 * k] == 0                           # plateau: all snow
+    # the bilinear valley-to-rock transition is a mix of the two channels
+    # whose sum stays exactly 255: rounding never leaks a false snow
+    # remainder into a texel that has none
+    edge = roles[30 * k, 28 * k:32 * k].astype(int)
+    mixed = edge[(edge[:, 0] > 0) & (edge[:, 2] > 0)]
+    assert len(mixed) > 0 and (mixed.sum(axis=1) == 255).all()
+    mode, snow = maps["snow_cover"]
+    assert mode == "L" and snow.shape == (60 * k, 90 * k) and snow.max() == 0
+    mode, water = maps["water_mask"]
+    assert mode == "L" and water.shape == (60 * k, 90 * k) and water.max() == 0
+
+    # every map and the base image are hashed in the sidecar, beside the
+    # composite's record
+    from core.terrain.glo30 import sha256_of
+
+    assert set(sidecar["maps"]) == {"imagery", "roles", "snow_cover",
+                                    "water_mask"}
+    for key, name in (("base", "imagery"), ("roles", "roles"),
+                      ("snow", "snow_cover"), ("water", "water_mask")):
+        assert sidecar["maps"][name]["file"] == paths[key].name
+        assert sidecar["maps"][name]["sha256"] == sha256_of(paths[key])
+    assert sidecar["maps"]["imagery"]["mode"] == "RGB"
+    assert sidecar["texture"]["sha256"] == sha256_of(paths["png"])
+
+    material = sidecar["material"]
+    assert material["version"] == 1
+    assert tuple(material["scalars"]) == MATERIAL_SCALARS
+    scalars = material["scalars"]
+    assert scalars["DetailStrength"] == 0.6
+    assert (scalars["DetailFadeStartM"], scalars["DetailFadeEndM"]) == (3000.0, 12000.0)
+    assert scalars["SnowBand"] == 0.25
+    assert scalars["SnowSlopeLowCos"] == pytest.approx(math.cos(math.radians(38.0)))
+    assert scalars["SnowSlopeHighCos"] == pytest.approx(math.cos(math.radians(30.0)))
+    assert (scalars["SnowMetres"], scalars["NoiseMetres"]) == (64.0, 512.0)
+    assert scalars["RoughnessWater"] == 0.08 and scalars["RoughnessSnow"] == 0.55
+    # the detail sizes are the extraction's PROJECTED sizes, the shorter
+    # axis when the pair is not square (the fixture's cliff is 2000 x 500)
+    assert scalars["DetailMetresValley"] == 1000.0
+    assert scalars["DetailMetresCliff"] == 500.0
+    # the scene's own scalars are not the drape's to set
+    assert "Wetness" not in scalars and "NightLuminance" not in scalars
+    assert set(material["scene_scalars"]) == {"Wetness", "NightLuminance"}
+
+    textures = material["textures"]
+    assert textures["imagery"] == paths["base"].name    # the base image, beside the sidecar
+    assert set(textures["detail"]) == set(ROLE_COLOURS)
+    for role, entry in textures["detail"].items():
+        assert Path(entry["file"]).is_absolute() and Path(entry["file"]).is_file()
+        assert entry["metres"] == scalars[f"DetailMetres{role.capitalize()}"]
+        assert entry["normal"] is None     # the fixture's .ter files name none
+    assert "not land-class data" in material["note"]
+    assert "but DetailMetres*" in material["note"]
+    for name in ("snow_cover_encoding", "water_mask_encoding", "noise_encoding"):
+        assert material[name].startswith("8-bit L"), name
+
+    # a map that goes missing rebuilds the drape (the rewritten sidecar
+    # hashes the new file); a whole one is reused
+    stamp = sidecar_path.stat().st_mtime_ns
+    assert build_drape(stem, data_dir=data) == sidecar_path
+    assert sidecar_path.stat().st_mtime_ns == stamp
+    paths["roles"].unlink()
+    build_drape(stem, data_dir=data)
+    assert paths["roles"].is_file()
+    rewritten = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    assert rewritten["maps"]["roles"]["sha256"] == sha256_of(paths["roles"])
+
+
+def test_drape_snow_map_is_the_months_cover_and_names_the_weather_bitmaps(
+        data, render_dir, tmp_path):
+    """The snow map is the weather snow LEVEL, the satellite cover and
+    nothing else: 255 everywhere in the fixture's January (full cover),
+    0 in July (bare), 0 again without a month. The material block names
+    the committed weather bitmaps by absolute path and says null for the
+    one the fixture lacks (snow_NML.png) rather than inventing a file."""
+    import json
+    from pathlib import Path
+
+    import numpy as np
+
+    from core.terrain.heightfield import Georeference, Heightfield
+    from core.xplane.drape import build_drape
+
+    field = Heightfield.from_elevations(
+        np.full((40, 40), 2500.0),
+        Georeference(crs="EPSG:32632", origin_x_m=400000.0,
+                     origin_y_m=5100000.0, pixel_size_m=30.0),
+        name="alps_maps", provenance={"snowline_m_approx": 3000.0})
+    stem = tmp_path / "terrain" / "alps_maps"
+    stem.parent.mkdir(parents=True, exist_ok=True)
+    field.write(stem)
+
+    def snow_map(month, where=render_dir):
+        sidecar_path = build_drape(stem, data_dir=data, month=month,
+                                   render_dir=where)
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        mode, snow = _material_maps(sidecar_path, sidecar)["snow_cover"]
+        assert mode == "L"
+        return sidecar, snow
+
+    january, snow = snow_map(1)
+    assert snow.min() == 255                       # full cover, every texel
+    assert january["snow_cover"]["mean_cover"] == 1.0
+    assert "band, jitter, slope ramp" in january["material"]["snow_cover_encoding"]
+    textures = january["material"]["textures"]
+    assert textures["snow_albedo"] == str((render_dir / "bitmaps" / "world"
+                                           / "weather" / "snow_ALB.png").resolve())
+    assert Path(textures["snow_albedo"]).is_absolute()
+    assert textures["noise"].endswith("noise.png")
+    assert textures["snow_normal"] is None         # the fixture has no snow_NML.png
+
+    july, snow = snow_map(7)
+    assert snow.max() == 0
+    assert july["snow_cover"]["month"] == 7
+
+    none, snow = snow_map(None)
+    assert snow.max() == 0
+    assert none["snow_cover"] == {"month": None, "source": None}
+
+    # no render assets at all: the maps still come, the weather entries
+    # are null, the composite's own record says what is missing
+    missing, snow = snow_map(1, where=tmp_path / "none")
+    assert snow.max() == 0
+    assert "missing" in missing["snow_cover"]
+    assert all(missing["material"]["textures"][name] is None
+               for name in ("snow_albedo", "snow_normal", "noise"))
+    assert all(Path(entry["file"]).is_file()
+               for entry in missing["material"]["textures"]["detail"].values())
+
+
+def test_drape_water_map_is_the_water_the_composite_paints(data, tmp_path):
+    """A bake straddling the west shore of the fixture lake's island (lon
+    20.4, lat 10.5, UTM 34N): the water map is 255 exactly where the
+    composite painted the water colour, 0 on the island, the sidecar's
+    water_texels counts the same texels, and the base image paints the
+    same texels the same colour."""
+    import json
+
+    import numpy as np
+    from pyproj import Transformer
+
+    from core.terrain.heightfield import Georeference, Heightfield
+    from core.xplane.drape import build_drape
+
+    cx, cy = Transformer.from_crs("EPSG:4326", "EPSG:32634",
+                                  always_xy=True).transform(20.4, 10.5)
+    field = Heightfield.from_elevations(
+        np.full((40, 40), 300.0),
+        Georeference(crs="EPSG:32634", origin_x_m=cx - 600.0,
+                     origin_y_m=cy + 600.0, pixel_size_m=30.0),
+        name="shore", provenance={})
+    stem = tmp_path / "terrain" / "shore"
+    stem.parent.mkdir(parents=True, exist_ok=True)
+    field.write(stem)
+    mask = WaterMask.load(data / "water" / "water_polygons.geojson")
+    sidecar_path = build_drape(stem, data_dir=data, water_mask=mask,
+                               render_dir=tmp_path / "none")
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    mode, water = _material_maps(sidecar_path, sidecar)["water_mask"]
+    texture = np.asarray(Image.open(
+        sidecar_path.with_name(sidecar["texture"]["file"])).convert("RGB"))
+    wet = water == 255
+    assert mode == "L" and set(np.unique(water).tolist()) == {0, 255}
+    assert 0 < int(wet.sum()) < water.size
+    assert int(wet.sum()) == sidecar["water_texels"]
+    colour = np.array(sidecar["water_colour_srgb8"], dtype=np.uint8)
+    assert (texture[wet] == colour).all()
+    assert not (texture[~wet] == colour).all(axis=1).any()
+    k = sidecar["texture"]["texels_per_dem_pixel"]
+    assert water[20 * k, 1] == 255 and water[20 * k, -2] == 0   # lake west, island east
+    assert "composite paints" in sidecar["material"]["water_mask_encoding"]
+    # the base image: the water exactly where the composite has it
+    mode, base = _material_maps(sidecar_path, sidecar)["imagery"]
+    assert mode == "RGB" and base.shape == texture.shape
+    assert (base[wet] == colour).all()
+    assert not (base[~wet] == colour).all(axis=1).any()
+
+
+def test_drape_base_image_is_the_role_means_without_tiles_or_weather_snow(
+        data, render_dir, tmp_path):
+    """``<bake>_xplane_base.png``, the image the material's Imagery takes
+    (material.textures.imagery): the composite's role blend with each
+    role's tile replaced by its mean colour, the water as the composite
+    paints it, no weather snow. The fixture's tiles are flat, so where
+    one role is 1.0 the base texel IS that role's colour, as the
+    composite's is (the ridge: valley floor, rock face, snow plateau);
+    the January alps bake wears the snow albedo in the composite and
+    the scrub mean in the base image (the weather snow is the
+    material's, from SnowCover, and the record says so); the sidecar
+    lists the image under maps with its hash and mode and the material
+    block names it relative to the sidecar with each role's mean."""
+    import json
+
+    import numpy as np
+
+    from core.terrain.glo30 import sha256_of
+    from core.terrain.heightfield import Georeference, Heightfield
+    from core.xplane.drape import build_drape, drape_paths
+
+    def images(sidecar_path):
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        composite = np.asarray(Image.open(
+            sidecar_path.with_name(sidecar["texture"]["file"])).convert("RGB"))
+        mode, base = _material_maps(sidecar_path, sidecar)["imagery"]
+        assert mode == "RGB" and base.shape == composite.shape
+        return sidecar, composite, base
+
+    elevation = np.full((60, 90), 500.0)
+    elevation[:, 30:60] = 500.0 + 30.0 * np.arange(1, 31)
+    elevation[:, 60:] = 4000.0
+    stem = _bake(tmp_path, elevation, snowline=3000.0, name="base")
+    sidecar_path = build_drape(stem, data_dir=data)
+    sidecar, composite, base = images(sidecar_path)
+    paths = drape_paths(stem)
+    assert paths["base"].is_file() and paths["base"].name == "base_xplane_base.png"
+    k = sidecar["texture"]["texels_per_dem_pixel"]
+    for column, role in ((10, "valley"), (45, "rock"), (80, "snow")):
+        assert tuple(int(c) for c in base[30 * k, column * k]) == ROLE_COLOURS[role]
+        assert tuple(int(c) for c in composite[30 * k, column * k]) == ROLE_COLOURS[role]
+    material = sidecar["material"]
+    assert material["textures"]["imagery"] == paths["base"].name
+    assert sidecar["maps"]["imagery"] == {
+        "file": paths["base"].name, "sha256": sha256_of(paths["base"]),
+        "mode": "RGB"}
+    for role, colour in ROLE_COLOURS.items():
+        assert material["textures"]["detail"][role]["mean_srgb"] == \
+            [float(c) for c in colour]
+    assert material["imagery_encoding"].startswith("RGB 8-bit sRGB")
+    assert "mean" in material["imagery_encoding"]
+    assert "no weather snow" in material["imagery_encoding"]
+    assert "the base image (textures.imagery) carries neither" in material["note"]
+
+    # January in the Alps: full satellite cover on gentle ground below
+    # the snowline. The composite's texel is the snow albedo (the test
+    # above); the base image's is the scrub mean, the weather snow
+    # being the material's to apply.
+    field = Heightfield.from_elevations(
+        np.full((40, 40), 2500.0),
+        Georeference(crs="EPSG:32632", origin_x_m=400000.0,
+                     origin_y_m=5100000.0, pixel_size_m=30.0),
+        name="alps_base", provenance={"snowline_m_approx": 3000.0})
+    alps = tmp_path / "terrain" / "alps_base"
+    field.write(alps)
+    january, composite, base = images(build_drape(
+        alps, data_dir=data, month=1, render_dir=render_dir))
+    k = january["texture"]["texels_per_dem_pixel"]
+    assert tuple(int(c) for c in composite[20 * k, 20 * k]) == (240, 240, 245)
+    assert tuple(int(c) for c in base[20 * k, 20 * k]) == ROLE_COLOURS["scrub"]
+    albedo = np.array([240, 240, 245], dtype=np.uint8)
+    assert not (base == albedo).all(axis=2).any()
+    weather = january["snow_cover"]["weather_snow"]
+    assert weather["applied"] and weather["applied_to"].startswith("the composite")
+
+
+def test_drape_base_image_composites_the_tiles_mean_not_its_texels(data, tmp_path):
+    """A valley tile half black, half white: the composite tiles it (a
+    valley-floor texel is black or white), the base image composites
+    its mean, 127.5 -> 128 in every channel, and the material block
+    records that mean for the role."""
+    import json
+
+    import numpy as np
+
+    from core.xplane.drape import build_drape
+
+    halves = Image.new("RGB", (64, 64), (0, 0, 0))
+    halves.paste((255, 255, 255), (32, 0, 64, 64))
+    halves.save(data / "terrain" / "drape" / "valley.png")
+    stem = _bake(tmp_path, np.full((20, 20), 500.0), name="halves")
+    sidecar_path = build_drape(stem, data_dir=data)
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    k = sidecar["texture"]["texels_per_dem_pixel"]
+    composite = np.asarray(Image.open(
+        sidecar_path.with_name(sidecar["texture"]["file"])).convert("RGB"))
+    _, base = _material_maps(sidecar_path, sidecar)["imagery"]
+    assert tuple(int(c) for c in base[10 * k, 10 * k]) == (128, 128, 128)
+    texel = tuple(int(c) for c in composite[10 * k, 10 * k])
+    assert max(texel) < 16 or min(texel) > 239       # a tiled texel, not the mean
+    assert sidecar["material"]["textures"]["detail"]["valley"]["mean_srgb"] == \
+        [127.5, 127.5, 127.5]
+
+
+# -- the extractor's material pull: directives, normal maps, library lines --
+
+
+def _drape_index(out):
+    import json
+
+    return json.loads((out / "terrain" / "drape" / "drape_textures.json")
+                      .read_text(encoding="utf-8"))
+
+
+def test_drape_index_on_an_install_with_nothing_new_keeps_its_old_keys(data):
+    """The fixture's .ter files name a base texture and nothing else: every
+    role keeps the keys the committed index has, with the same values,
+    gains ``normal`` null, a ``directives`` record of the one texture line
+    (two for the rock .ter, whose AUTO_SLOPE_CLIFF names an image) that
+    points at the albedo already pulled -- never a second copy on disk --
+    and an empty ``library_lines`` (the fixture has no library.txt)."""
+    index = _drape_index(data)
+    drape = data / "terrain" / "drape"
+    assert sorted(p.name for p in drape.iterdir()) == \
+        sorted([f"{role}.png" for role in ROLE_COLOURS] + ["drape_textures.json"])
+    for role, entry in index.items():
+        assert list(entry) == ["file", "metres_x", "metres_y", "source_ter",
+                               "source_texture", "normal", "directives",
+                               "library_lines"]
+        assert entry["file"] == f"{role}.png"
+        assert entry["normal"] is None
+        assert entry["library_lines"] == []
+        for directive in entry["directives"]:
+            assert "error" not in directive
+    assert [d["token"] for d in index["valley"]["directives"]] == ["BASE_TEX"]
+    assert index["valley"]["directives"][0] == {
+        "token": "BASE_TEX", "args": ["../textures10/soil/valley.dds"],
+        "source": "../textures10/soil/valley.dds", "file": "valley.png"}
+    # the rock .ter serves two roles: both records name the two albedos
+    for role in ("rock", "cliff"):
+        assert [(d["token"], d["file"]) for d in index[role]["directives"]] == \
+            [("BASE_TEX", "rock.png"), ("AUTO_SLOPE_CLIFF", "cliff.png")]
+    assert index["cliff"]["directives"][1]["args"] == \
+        ["2000", "500", "57", "62", "../textures10/soil/cliff.dds"]
+
+
+def test_drape_extraction_pulls_a_ters_normal_map_and_library_lines(
+        install, tmp_path):
+    """The valley .ter gains a TEXTURE_NORMAL line (a ratio before the file,
+    as some versions write it), a decal library, decal parameters, a
+    border texture the install lacks and a composite texture that is on
+    disk but is no image; the world terrain library.txt exports the
+    valley .ter under a REGION and the rock .ter after REGION_ALL. The
+    normal map is pulled as valley_normal.png with its alpha kept and
+    becomes the role's ``normal``; every line is recorded, the ones that
+    name nothing on disk with ``file`` null, the one PIL cannot decode
+    with its ``error`` as the exception's type alone (PIL's message names
+    the file by the install's absolute path, which a committed index must
+    not carry); the library lines carry the region in force; the other
+    roles are untouched."""
+    from core.xplane.extract import extract_drape_textures
+
+    terrain = install / "Resources" / "default scenery" / "1000 world terrain"
+    soil = terrain / "textures10" / "soil"
+    Image.new("RGBA", (64, 64), (128, 128, 255, 200)).save(
+        soil / "valley_nrm.dds", format="PNG")
+    (soil / "bad.dds").write_bytes(b"not an image at all")
+    ter = terrain / "terrain10" / "grass_cld_dry_fl.ter"
+    ter.write_text(ter.read_text(encoding="utf-8")
+                   + "TEXTURE_NORMAL 8 ../textures10/soil/valley_nrm.dds\n"
+                   "DECAL_LIB lib/g10/decals/grass.dcl\n"
+                   "DECAL_PARAMS 1 2.5 3\n"
+                   "BORDER_TEX ../textures10/soil/missing.dds\n"
+                   "COMPOSITE_TEX ../textures10/soil/bad.dds\n",
+                   encoding="utf-8")
+    (terrain / "library.txt").write_text(
+        "A\n800\nLIBRARY\n\nREGION_DEFINE eu\nREGION eu\n"
+        "EXPORT lib/g10/terrain10/grass_cld_dry_fl.ter "
+        "terrain10/grass_cld_dry_fl.ter\n"
+        "REGION_ALL\n"
+        "EXPORT lib/g10/terrain10/rock_cld_dry_steep.ter "
+        "terrain10/rock_cld_dry_steep.ter\n", encoding="utf-8")
+
+    out = tmp_path / "out"
+    counts = extract_drape_textures(install, out)
+    assert counts == {"textures": 5, "maps": 1}
+    index = _drape_index(out)
+    assert set(index) == set(ROLE_COLOURS)
+    valley = index["valley"]
+    assert valley["normal"] == "valley_normal.png"
+    with Image.open(out / "terrain" / "drape" / "valley_normal.png") as im:
+        assert im.mode == "RGBA" and im.size == (64, 64)
+        assert im.getpixel((0, 0)) == (128, 128, 255, 200)
+    assert [d["token"] for d in valley["directives"]] == [
+        "BASE_TEX", "TEXTURE_NORMAL", "DECAL_LIB", "DECAL_PARAMS", "BORDER_TEX",
+        "COMPOSITE_TEX"]
+    base, normal, decal_lib, decal_params, border, bad = valley["directives"]
+    assert base["file"] == "valley.png"                # the albedo, once
+    assert normal["args"] == ["8", "../textures10/soil/valley_nrm.dds"]
+    assert normal["source"] == "../textures10/soil/valley_nrm.dds"
+    assert normal["file"] == "valley_normal.png"
+    assert decal_lib["source"] == "lib/g10/decals/grass.dcl"
+    assert decal_lib["file"] is None                   # a .dcl is no texture
+    assert decal_params["source"] is None and decal_params["args"] == ["1", "2.5", "3"]
+    assert border["file"] is None and "error" not in border    # not on disk
+    assert bad["source"] == "../textures10/soil/bad.dds" and bad["file"] is None
+    assert bad["error"] == "UnidentifiedImageError"    # the type: no path, no message
+    assert str(install) not in (out / "terrain" / "drape" / "drape_textures.json"
+                                ).read_text(encoding="utf-8")
+    assert not (out / "terrain" / "drape" / "valley_composite.png").exists()
+    assert valley["library_lines"] == [{
+        "library": "Resources/default scenery/1000 world terrain/library.txt",
+        "line": 7,
+        "text": "EXPORT lib/g10/terrain10/grass_cld_dry_fl.ter "
+                "terrain10/grass_cld_dry_fl.ter",
+        "region": "eu"}]
+    assert index["rock"]["library_lines"] == [{
+        "library": "Resources/default scenery/1000 world terrain/library.txt",
+        "line": 9,
+        "text": "EXPORT lib/g10/terrain10/rock_cld_dry_steep.ter "
+                "terrain10/rock_cld_dry_steep.ter",
+        "region": None}]
+    for role in ("scrub", "rock", "cliff", "snow"):
+        assert index[role]["normal"] is None, role
+    assert index["snow"]["library_lines"] == []
+    # the existing keys read exactly what the committed index reads
+    for role, entry in index.items():
+        assert (entry["file"], entry["metres_x"], entry["metres_y"]) == \
+            (f"{role}.png", *((2000.0, 500.0) if role == "cliff"
+                              else (1000.0, 1000.0)))
+
+
+def test_drape_textures_are_capped_at_2048_px(install, tmp_path):
+    """The cap was 512 until 2026-10-05: a 2500 x 1250 valley texture comes
+    out 2048 x 1024, the longer side at the cap."""
+    from core.xplane.extract import DRAPE_TEXTURE_MAX_PX, extract_drape_textures
+
+    assert DRAPE_TEXTURE_MAX_PX == 2048
+    soil = (install / "Resources" / "default scenery" / "1000 world terrain"
+            / "textures10" / "soil")
+    Image.new("RGB", (2500, 1250), ROLE_COLOURS["valley"]).save(
+        soil / "valley.dds", format="PNG")
+    out = tmp_path / "out"
+    assert extract_drape_textures(install, out) == {"textures": 5}
+    with Image.open(out / "terrain" / "drape" / "valley.png") as im:
+        assert im.size == (2048, 1024)
+        assert im.getpixel((0, 0)) == ROLE_COLOURS["valley"]
+    with Image.open(out / "terrain" / "drape" / "rock.png") as im:
+        assert im.size == (64, 64)                     # under the cap: as is

@@ -498,6 +498,189 @@ def test_world_applied_carries_the_ten_keys_the_verifier_grades():
     assert "if (bVisual && bWorldAsked && VisualScene.WorldApplied.IsValid())" in COMMANDLET
 
 
+# -- the drape material: M_TerrainImagery's parameters, one contract three ways ----------
+# (the drape sidecar's "material" block, written by core/xplane/drape.py,
+# read by FlightSimVisualScene.cpp ApplyDrapeMaterial, exposed by
+# scripts/ue_create_materials.py; UNCOMPILED here, pinned by reading the
+# source as everything above, the first Windows build verifies).
+
+MATERIALS_SCRIPT = (REPO / "scripts" / "ue_create_materials.py").read_text(encoding="utf-8")
+#: The texture parameters the C++ sets from the sidecar, in the C++ table's
+#: order (the script's TERRAIN_TEXTURE_PARAMETERS order; the composite first).
+TERRAIN_TEXTURES = ("Imagery", "Roles", "SnowCover", "WaterMask",
+                    "DetailValley", "DetailScrub", "DetailRock", "DetailCliff", "DetailSnow",
+                    "NormalValley", "NormalScrub", "NormalRock", "NormalCliff", "NormalSnow",
+                    "SnowAlbedo", "SnowNormal", "Noise")
+#: How each C++ row reads its texels -> the script's word for the sampler.
+TERRAIN_TEXEL_KINDS = {"Albedo": "srgb", "Data": "linear", "Normal": "normal"}
+#: The material's parameters that are the SCENE's, not the sidecar's: the
+#: weather coupling (ApplyWetness) and the night plan (the night branch);
+#: the script may list them, the C++ tables never do.
+TERRAIN_SCENE_PARAMETERS = {"Wetness", "NightLights", "NightLuminance"}
+
+
+def _script_keys(name: str):
+    """The keys of one top-level dict (or the words of one tuple)
+    NAME = {...} / (...) in scripts/ue_create_materials.py, in order --
+    a dict's values ("srgb", 1277.0) are not names."""
+    match = re.search(rf"^{name} = ([\(\{{])", MATERIALS_SCRIPT, re.M)
+    assert match, f"{name} is not defined in scripts/ue_create_materials.py"
+    opening = match.group(1)
+    closing = ")" if opening == "(" else "}"
+    start = match.end() - 1
+    depth = 0
+    for index in range(start, len(MATERIALS_SCRIPT)):
+        if MATERIALS_SCRIPT[index] == opening:
+            depth += 1
+        elif MATERIALS_SCRIPT[index] == closing:
+            depth -= 1
+            if depth == 0:
+                block = MATERIALS_SCRIPT[start:index]
+                pattern = r'"(\w+)":' if opening == "{" else r'"(\w+)"'
+                return tuple(re.findall(pattern, block))
+    raise AssertionError(name)
+
+
+def _cpp_table(name: str, first_per_row: bool = False):
+    """The TEXT("...") names of one constexpr table of FlightSimVisualScene.cpp;
+    first_per_row keeps each row's first literal (a texture row's later
+    literals are the sidecar's keys)."""
+    start = SCENE_CPP.index(f"{name}[] = {{")
+    block = SCENE_CPP[start:SCENE_CPP.index("};", start)]
+    if first_per_row:
+        return tuple(re.findall(r'^\s*\{TEXT\("(\w+)"\)', block, re.M))
+    return tuple(re.findall(r'TEXT\("(\w+)"\)', block))
+
+
+def test_the_drape_material_parameters_are_one_contract_in_the_cpp_the_script_and_the_drape():
+    """The names the render SETS from the sidecar (SceneTerrainTextureParameters /
+    SceneTerrainScalarParameters) are the names the material EXPOSES
+    (TERRAIN_TEXTURE_PARAMETERS / TERRAIN_SCALAR_PARAMETERS) and, for the
+    scalars, the names the sidecar WRITES (core.xplane.drape
+    MATERIAL_SCALAR_NAMES), in one order; each texture row reads its texels
+    the way the script samples them (sRGB albedo, linear data, normal)."""
+    from core.xplane.drape import MATERIAL_SCALAR_NAMES, ROLES
+
+    cpp_textures = _cpp_table("SceneTerrainTextureParameters", first_per_row=True)
+    cpp_scalars = _cpp_table("SceneTerrainScalarParameters")
+    assert cpp_textures == TERRAIN_TEXTURES
+    assert cpp_scalars == MATERIAL_SCALAR_NAMES
+    assert cpp_scalars[:5] == tuple(f"DetailMetres{role.capitalize()}" for role in ROLES)
+    assert not (set(cpp_textures) | set(cpp_scalars)) & TERRAIN_SCENE_PARAMETERS
+    script_textures = _script_keys("TERRAIN_TEXTURE_PARAMETERS")
+    script_scalars = _script_keys("TERRAIN_SCALAR_PARAMETERS")
+    assert tuple(n for n in script_textures if n not in TERRAIN_SCENE_PARAMETERS) == cpp_textures
+    assert tuple(n for n in script_scalars if n not in TERRAIN_SCENE_PARAMETERS) == cpp_scalars
+    # The texel kinds: the C++ row's ESceneDrapeTexel against the script's word.
+    start = SCENE_CPP.index("SceneTerrainTextureParameters[] = {")
+    block = SCENE_CPP[start:SCENE_CPP.index("};", start)]
+    cpp_kinds = dict(re.findall(r'^\s*\{TEXT\("(\w+)"\),.*ESceneDrapeTexel::(\w+)', block, re.M))
+    assert set(cpp_kinds) == set(TERRAIN_TEXTURES)
+    script_kinds = dict(re.findall(r'"(\w+)": "(srgb|linear|normal)"', MATERIALS_SCRIPT))
+    for name, kind in cpp_kinds.items():
+        assert script_kinds.get(name) == TERRAIN_TEXEL_KINDS[kind], (name, kind, script_kinds.get(name))
+    # The role detail and normal rows read material.textures.detail[role].file / .normal,
+    # the maps and the weather bitmaps material.textures[key] -- the sidecar's own keys.
+    for role in ROLES:
+        assert f'{{TEXT("Detail{role.capitalize()}"), TEXT("file"), TEXT("{role}"), ' in block, role
+        assert f'{{TEXT("Normal{role.capitalize()}"), TEXT("normal"), TEXT("{role}"), ' in block, role
+    for parameter, key in (("Roles", "roles"), ("SnowCover", "snow_cover"), ("WaterMask", "water_mask"),
+                           ("SnowAlbedo", "snow_albedo"), ("SnowNormal", "snow_normal"), ("Noise", "noise")):
+        assert f'{{TEXT("{parameter}"), TEXT("{key}"), nullptr, ' in block, parameter
+    # "Imagery": set from the composite (texture.file) before the block is read,
+    # replaced by the block's base image (material.textures.imagery) when it loads.
+    assert '{TEXT("Imagery"), TEXT("imagery"), nullptr, ' in block
+
+
+def test_the_drape_material_is_looked_up_set_and_recorded_never_refused():
+    """ApplyDrapeMaterial: every parameter looked up FIRST (the
+    FindScalarParameter pattern and its texture twin), set on the instance
+    the wetness coupling then reuses, recorded applied / absent /
+    missing_files / not_in_sidecar; a sidecar without the block records
+    version 0; nothing in it returns a failure. The loader flags data and
+    normals linear and tags them, keeps albedos sRGB, resolves relative
+    files against the sidecar; the tiles carry tangents for the normal maps
+    and keep the full-raster normals (no CalculateTangentsForMesh, which
+    recomputes them per tile); the Gate 6 offset instances are untouched."""
+    apply = _function(SCENE_CPP, "void FFlightSimVisualScene::ApplyDrapeMaterial(")
+    for key in ("version", "imagery_source", "applied", "absent", "missing_files",
+                "not_in_sidecar", "textures", "scalars", "material", "tangents",
+                "north_axis_measured", "flip_tangent_y", "not_claimed"):
+        assert f'TEXT("{key}")' in apply, key
+    assert 'ImageryMaterial->SetNumberField(TEXT("version"), 0);' in apply
+    # Which image "Imagery" carries: the base image when the block names one and
+    # it loads, else the composite the caller set; said in the record either way.
+    assert 'ImageryMaterial->SetStringField(TEXT("imagery_source"), TEXT("texture.file"));' in apply
+    assert 'ImagerySource = TEXT("material.textures.imagery");' in apply
+    assert 'ImageryMaterial->SetStringField(TEXT("imagery_source"), ImagerySource);' in apply
+    assert 'ImageryMaterial->SetBoolField(TEXT("flip_tangent_y"), bNorthPlusY);' in apply
+    assert apply.count('LookApplied->SetObjectField(TEXT("terrain_material"), ImageryMaterial);') == 2
+    assert "FindTextureParameter(Instance, Row.Parameter, true)" in apply
+    assert "FindScalarParameter(Instance, ScalarName, true)" in apply
+    assert "Instance->SetTextureParameterValue(Parameter, Texture);" in apply
+    assert "Instance->SetScalarParameterValue(Parameter, static_cast<float>(Value));" in apply
+    assert "FPaths::IsRelative(File) ? FPaths::Combine(SidecarDir, File) : File" in apply
+    assert "MissingFiles.Add(MakeShared<FJsonValueString>(Path));" in apply
+    assert "return false" not in apply and "Error" not in apply
+    assert "UE_LOG(LogFlightSimRender, Warning" in apply
+    # The texture twin walks the texture parameters as the scalar one walks the scalars.
+    twin = SCENE_CPP[SCENE_CPP.index("FName FindTextureParameter("):]
+    twin = twin[:twin.index("\n\t}\n")]
+    assert "Material->GetAllTextureParameterInfo(Infos, Ids);" in twin
+    assert "Name.Equals(Needle, ESearchCase::IgnoreCase)" in twin
+    # The loader: linear data and normals, tagged; albedos stay sRGB; one UpdateResource.
+    loader = SCENE_CPP[SCENE_CPP.index("UTexture2D* SceneLoadDrapeTexture("):]
+    loader = loader[:loader.index("\n\t}\n")]
+    assert "FImageUtils::ImportFileAsTexture2D(Path)" in loader
+    assert "if (Texel != ESceneDrapeTexel::Albedo)" in loader
+    assert "Texture->SRGB = false;" in loader
+    # The data maps carry the class the script's linear samplers default to.
+    assert "Texel == ESceneDrapeTexel::Normal ? TC_Normalmap : TC_VectorDisplacementmap" in loader
+    assert "TC_Masks" not in SCENE_CPP
+    # The mip chain serves the 8-bit L maps (G8) as well as BGRA8.
+    mips = SCENE_CPP[SCENE_CPP.index("int32 SceneBuildMipChain(UTexture2D* Texture)"):]
+    mips = mips[:mips.index("\n\t}\n")]
+    assert "Platform->PixelFormat == PF_G8 ? 1 : 0;" in mips
+    assert "* 4" not in mips and "< 4" not in mips
+    assert '#include "TextureResource.h"' in SCENE_CPP
+    assert "Texture->AddressX = bTiled ? TA_Wrap : TA_Clamp;" in loader
+    assert "Mips = bTiled ? SceneBuildMipChain(Texture) : Texture->GetNumMips();" in loader
+    assert loader.count("Texture->UpdateResource();") == 1
+    # Called from the imagery branch after the composite, before the wetness coupling
+    # reuses the same instance (a second Create would drop every parameter set here).
+    build = _function(SCENE_CPP, "bool FFlightSimVisualScene::BuildGeoreferencedTerrain(")
+    composite = build.index('Instance->SetTextureParameterValue(TEXT("Imagery"), Texture);')
+    applied = build.index("ApplyDrapeMaterial(Instance, Sidecar, Options.ImagerySidecarPath, bNorthPlusY);")
+    wetness = build.index("Material = ApplyWetness(World, Material, Options);")
+    assert composite < applied < wetness
+    assert "UMaterialInstanceDynamic* Instance = Cast<UMaterialInstanceDynamic>(Material);" in SCENE_CPP
+    # Tangents: dP/du (east in the surface), bitangent +V (south) by construction: the
+    # engine's cross(N, T) flipped exactly when the MEASURED north axis is +Y -- the
+    # LoadSceneLevel idiom, through the georeferencing once it is aligned to the
+    # bake's CRS and before the material is built, never an assumed sign.
+    measured = "const bool bNorthPlusY = North.Y > Origin.Y;"
+    assert measured in build
+    assert build.index("Geo->ApplySettings();") < build.index(measured) < composite
+    assert "const bool bFlipTangentY = bNorthPlusY;" in build
+    assert "Tangents.Add(FProcMeshTangent(FVector(1.0, 0.0, DzDx).GetSafeNormal(), bFlipTangentY));" in build
+    assert "FProcMeshTangent(FVector(1.0, 0.0, DzDx).GetSafeNormal(), true)" not in build
+    # The record is written on the imagery route alone; another route never carries a stale one.
+    assert "ImageryMaterial.Reset();" in _function(SCENE_CPP, "bool FFlightSimVisualScene::Build(")
+    assert "TileTangents.Add(Tangents[Index]);" in build
+    assert "TileUV0, TileColours, TileTangents," in build
+    assert "CalculateTangentsForMesh" not in build.replace("::CalculateTangentsForMesh:", "")
+    assert "KismetProceduralMeshLibrary.h" not in SCENE_CPP
+    gate6 = _function(SCENE_CPP, "bool FFlightSimVisualScene::BuildTerrainInstance(")
+    assert "Tangent" not in gate6
+    assert "{}, {}, false /* no collision */);" in gate6
+    # The record is the scene's for the commandlet, beside the imagery_* provenance.
+    assert "TSharedPtr<FJsonObject> ImageryMaterial;" in SCENE_H
+    assert "void ApplyDrapeMaterial(UMaterialInstanceDynamic* Instance," in SCENE_H
+    # ProceduralMeshComponent (FProcMeshTangent) is already a dependency of the module.
+    runtime = (BRIDGE / "FlightSimBridge.Build.cs").read_text(encoding="utf-8")
+    assert '"ProceduralMeshComponent",' in runtime
+
+
 # -- the flag, the verifier, the catalogue ---------------------------------------------
 
 def test_scene_is_emitted_only_when_asked_right_after_imagery():
@@ -605,3 +788,45 @@ def test_the_windows_order_carries_the_world_steps():
                      "< 2 px", "-12 deg", "-18 deg", "streaks on / off", "drift doublet",
                      "Substrate on / off", "1- and 2-worker campaign"):
         assert fragment in step, fragment
+
+
+# -- M_Landscape: the drape material's terrain surface on the paint layers ------------
+
+def test_the_landscape_material_takes_its_paint_layers_to_the_drape_roles():
+    """W5's M_Landscape is the drape material's terrain surface on the layers
+    ImportLandscape paints (the manifest's weight_layers, W1's WEIGHT_KEYS):
+    each layer a drape role's ground texture (core/xplane/drape.py ROLES)
+    under a tint, permanent water the drape's colour, nodata the drape
+    alone. The scene script sets the drape, the texel count, the flip and
+    ImageryWeight 1.0 and nothing else, so every other parameter -- the
+    detail, normal and snow samplers among them -- is the material's own
+    default (the script's committed-bitmap defaults): said in the script,
+    pinned here."""
+    import ast
+
+    from core.terrain.landcover import WEIGHT_KEYS
+    from core.xplane.drape import ROLES
+
+    table = re.search(r"^LANDSCAPE_LAYER_ROLES = (\{.*?\n\})\n", MATERIALS_SCRIPT, re.M | re.S)
+    assert table, "LANDSCAPE_LAYER_ROLES is gone from scripts/ue_create_materials.py"
+    layer_roles = ast.literal_eval(table.group(1))
+    assert tuple(layer_roles) == WEIGHT_KEYS
+    assert {role for role, _ in layer_roles.values()} <= set(ROLES) | {"water", "imagery"}
+    assert layer_roles["permanent_water"][0] == "water" and layer_roles["nodata"][0] == "imagery"
+    scene = BUILD_SCENE.read_text(encoding="utf-8")
+    set_by_scene = set(re.findall(
+        r'set_material_instance_(?:scalar|texture)_parameter_value\(material, "(\w+)"', scene))
+    assert {"LandscapeTexels", "ImageryFlipV", "Imagery", "ImageryWeight"} <= set_by_scene
+    exposed = (set(_script_keys("LANDSCAPE_PARAMETERS")) | set(_script_keys("TERRAIN_TEXTURE_PARAMETERS"))
+               | set(_script_keys("TERRAIN_SCALAR_PARAMETERS"))) - {"Roles", "WaterMask"}
+    assert set_by_scene <= exposed, set_by_scene - exposed
+    assert 'set_material_instance_scalar_parameter_value(material, "ImageryWeight", 1.0)' in scene
+    assert "LANDSCAPE_IMAGERY_WEIGHT = 0.0\n" in MATERIALS_SCRIPT
+    # The tints are parameters under their own names; the water layer's
+    # weight is the mask (no Roles or WaterMask texture in the Landscape route).
+    body = MATERIALS_SCRIPT[MATERIALS_SCRIPT.index("def create_landscape("):]
+    body = body[:body.index("\n\n\n")]
+    for tint in {tint for _, tint in layer_roles.values() if tint}:
+        assert tint in _script_keys("LANDSCAPE_PARAMETERS"), tint
+    assert "MaterialExpressionLandscapeLayerSample" in body and '"permanent_water"' in body
+    assert '"WaterMask"' not in body and '"Roles"' not in body
