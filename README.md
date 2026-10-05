@@ -199,6 +199,13 @@ for priming a machine ahead of time rather than prerequisites.
   carry a fail-safe: a scene the SYSTEM chose never falls back to the
   featureless slab -- the control ridge is synthesised on first need --
   while a user-stated flat place stays honestly flat.
+* **X-Plane data (optional)**: `python scripts/extract_xplane.py
+  --xplane-root "<your X-Plane 12 folder>"` reads water polygons, the
+  terrain-type catalog and the sky-colour lookups out of your own install
+  into `data/xplane/` (gitignored: Laminar Research's files are not
+  redistributed). `core.xplane` loads them (`WaterMask`,
+  `load_sky_palettes`, `load_terrain_catalog`). Not yet used by the
+  scenario or render flow.
 * **Real aircraft**: `python scripts/import_aircraft.py` fetches each
   configured model at its pinned commit (license verified on disk),
   converts it, and imports it into the Unreal project. Renders carry
@@ -382,6 +389,7 @@ core/            zero Unreal dependency (§2.9)
   capture/       camera pose solver, capture scheduler, manifest, verifier
   telemetry/     read-only observers
   terrain/       DEM ingestion, spectral synthesis, heightfield query, Landscape export
+  xplane/        extractor + readers for data from a local X-Plane 12 install
 experiments/     gates, sweeps, analysis, validation
 docs/vva/        V&V plan, report, accreditation statement
 ue/              Unreal project                    (Phase 5)
