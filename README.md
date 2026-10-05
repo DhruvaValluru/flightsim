@@ -210,13 +210,21 @@ for priming a machine ahead of time rather than prerequisites.
     the scene's own texture). The terrain SHAPE is still the GLO-30 bake.
     The snow class follows the spec's month: the committed MODIS monthly
     snow cover (`assets/physical_renders/`, read by
-    `core/xplane/physical.py`) thins snow where the satellite saw bare
-    ground that month and whitens the gentle ground below the snowline
-    where it saw snow; one drape is cached per terrain and month.
+    `core/xplane/physical.py`) thins the height rule's permanent snow
+    where the satellite saw bare ground that month, and where it saw
+    snow on gentle ground the drape whitens the texture underneath --
+    the simulator's own shader shape (a luminance-keyed snow mix gated by
+    slope, read from its SPIR-V names) with this repository's lift; one
+    drape is cached per terrain and month, and the sidecar records the
+    simulator-shaped season (four seasons, index + blend).
   * `assets/physical_renders/` (the simulator's render resources in its own
     layout) and `assets/logic_reports/` (the decompiled code that consumes
     them) are committed; `core.xplane.physical.REPORTS` indexes which report
-    governs which assets and drape roles.
+    governs which assets and drape roles, and `assets/logic_reports/
+    README.md` says what the decompiled bodies actually contain, which
+    rules were built into the code from them (tile naming, terrain-def
+    classification, seasons, Earth-orbit heights, the fog and exposure
+    forms) and which functions a second decompilation pass must target.
   * a place over mapped water with no stated ground cover gets the water
     surface class (`plan_water_surface`).
   * the legacy-look render takes its sun, sky-light and fog colours from

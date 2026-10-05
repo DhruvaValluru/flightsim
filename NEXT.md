@@ -1,5 +1,42 @@
 # Resume here
 
+**The logic reports READ and BUILT FROM (2026-10-05, later the same day,
+`phase-2-testing`; NO tests run, owner's instruction).** The owner's
+point: the logic branch held the instructions on how the simulator
+builds its environment and the first pass only catalogued them. So:
+every one of the 400 decompiled bodies per report that carries terrain /
+water / season / sky / fog / contact logic was read by a reader agent
+(ten groups, exact line spans), each extracted rule handed to an
+adversarial second reader, and the SPIR-V archives' debug names parsed
+for the GPU side. `assets/logic_reports/README.md` is the record: what
+each report's bodies actually contain (the lighting report holds the
+loading screen and nothing else; the terrain shader, sky, exposure and
+surface-friction functions are names without bodies), the rules built
+into the code with their function and line citations, and the ten
+functions a second decompilation pass must target. LANDED in code:
+`core/xplane/physical.py` -- `floor10` / `tile_name` (the simulator's
+tile naming), `classify_terrain_def` (water by name, ortho quadrants,
+`.ter`, the ROCK fallback), `DSF_RASTER_NAMES`, `season_split` /
+`season_for` (four seasons, index + blend + mask; the month rule is the
+stand-in for `total_season_for_location`, no body), `EarthOrbitTiles`
+(the 10-degree height/normal/albedo tiles the map layer loads, the
+`-ele.png` axis decoded and checked on Paris/Lyon/Zermatt),
+`WATER_FALLBACK_NOTE`; `core/xplane/drape.py` DRAPE_VERSION 4 -- the
+satellite-seen snow now WHITENS the ground underneath by luminance,
+gated by slope (the shader's shape; lift 0.75 is ours), the height
+rule's permanent snow keeps the ice texture, the sidecar records
+`season` and `snow_cover.weather_snow`; `core/capture/exposure.py`
+`linear_exposure` + `REC709_LUMA`; `core/scene/weather_visuals.py`
+cross-references the decompiled Koschmieder fog it already matched.
+Tests for all of it in `tests/test_xplane.py` -- UNRUN. OPEN: the
+seasonal second texture per role (`tex_seasonal_texture`) needs the
+extractor to pull each `.ter`'s per-season texture on the owner's
+machine (`scripts/extract_xplane.py`, no install here); a `beach` role
+(shoreline band along mapped water, seasonal) is missing; the -12/+10
+degree sky anchors stay unverifiable until `sky_stat::get_for_now` is
+decompiled. The adversarial verification run's verdicts and its
+critic's port plan land in the commit after this one.
+
 **Physical renders + logic reports merged (2026-10-05, `phase-2-testing`;
 NO tests run, owner's instruction).** LANDED: `origin/logic`
 (`assets/logic_reports/`: decompiled functions.txt + code.c per

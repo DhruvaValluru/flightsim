@@ -20,11 +20,18 @@ no change to show them:
   color" strip of sky_colors_clean;
 * when the scene's calendar month is known, the MODIS monthly snow cover
   of the committed render assets (core.xplane.physical.SnowCover, 10 km
-  cells) MODULATES the snow class: ground the rule already whitens thins
-  where the satellite saw bare ground that month, and the gentle high
-  ground just below the snowline whitens where it saw snow. The 30 m
-  shape still decides WHERE within a cell; the satellite decides whether
-  that month had snow there at all.
+  cells) seasons the ground the way the simulator's shaders do: its
+  permanent snow (the height rule's ice texture) thins where the
+  satellite saw bare ground that month, and WEATHER snow -- the cover
+  the satellite saw on gentle ground -- is a luminance-keyed whitening
+  of whatever texture lies underneath, gated by slope. That shape is
+  the terrain shader's own (u_material_snow_luma_coef / _mix with a
+  weather texture; weather_apply's snow decal gated by u_snow_slope,
+  read from the SPIR-V names in assets/physical_renders), its
+  coefficients are not readable, so the lift here is this repository's
+  constant and the sidecar says so. The 30 m shape still decides WHERE
+  within a cell; the satellite decides whether that month had snow
+  there at all.
 
 What this is NOT: X-Plane's terrain. The SHAPE is the bake's (Copernicus
 GLO-30 or the synthesised ridge); the placement of each texture is this
@@ -60,8 +67,10 @@ from .physical import (SNOW_COVER_ATTRIBUTION, SNOW_COVER_DATASET,
 #: from an older rule is rebuilt instead of reused. 2: MODIS snow cover
 #: modulates the snow class; the per-tile water colour. 3: the sidecar
 #: records the simulator-shaped season (index, blend, mask) and names
-#: the water fallback for what it is.
-DRAPE_VERSION = 3
+#: the water fallback for what it is. 4: satellite-seen snow whitens
+#: the underlying ground (the shader's shape) instead of painting the
+#: ice texture.
+DRAPE_VERSION = 4
 ROLES = ("valley", "scrub", "rock", "cliff", "snow")
 #: DEM rows composited per step (bounds memory on an 8192-texel drape).
 _CHUNK_ROWS = 256
@@ -71,6 +80,19 @@ ATTRIBUTION = "Ground textures and water colour: local simulator-derived data"
 #: Snow-cover fraction at or above which a cell counts as "saw snow" for
 #: the sidecar's summary (the blend itself is continuous).
 SNOW_SEEN = 0.5
+#: Weather snow whitens a texel toward white from its own luminance:
+#: target = luma + (255 - luma) * LIFT. The simulator keys its snow on
+#: luminance too (u_material_snow_luma_coef, a Rec.709-style dot) and
+#: mixes by a scalar (u_material_snow_luma_mix); both values are in
+#: its globals, unread, so this lift is THIS repository's constant.
+SNOW_WHITEN_LIFT = 0.75
+#: ITU-R BT.709 luma weights (core.capture.exposure.REC709_LUMA, the
+#: three literals the simulator's exposure pass uploads).
+_REC709 = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+#: The whitening is gated by slope like weather_apply's u_snow_slope
+#: window: full on gentle ground, gone on the rock band (30-38 degrees,
+#: the drape's own steep transition).
+WEATHER_SNOW_SLOPE_DEG = (30.0, 38.0)
 
 
 def _smoothstep(low: float, high: float, value: np.ndarray) -> np.ndarray:
@@ -86,9 +108,13 @@ def classify(elevation_m: np.ndarray, pixel_size_m: float,
     ``snow_cover`` (same shape, fraction 0..1, NaN = unknown) is the
     month's satellite snow cover: where it is known, the rule's snow is
     scaled by ``0.25 + 0.75 * cover`` (bare ground seen from orbit thins
-    the snow but a north face above the line keeps a quarter), and the
-    gentle ground in the scrub band below the snowline gains ``cover``
-    worth of snow. Unknown cells keep the height rule alone.
+    the permanent snow but a north face above the line keeps a quarter).
+    The returned dict then carries one extra map, ``"weather_snow"``:
+    ``cover`` on the gentle ground the rule did not already whiten,
+    gated by the rock slope window -- NOT a role weight (the roles still
+    sum to 1) but the amount by which :func:`build_drape` whitens the
+    composite there. Unknown cells keep the height rule alone and get
+    no weather snow.
     """
     dz_dy, dz_dx = np.gradient(elevation_m, pixel_size_m)
     slope = np.degrees(np.arctan(np.hypot(dz_dx, dz_dy)))
@@ -108,6 +134,7 @@ def classify(elevation_m: np.ndarray, pixel_size_m: float,
         high = _smoothstep(12.0, 25.0, slope)
         snow = np.zeros_like(slope)
     gentle = 1.0 - steep
+    weather_snow = None
     if snow_cover is not None:
         if snow_cover.shape != elevation_m.shape:
             raise ValueError(
@@ -115,9 +142,10 @@ def classify(elevation_m: np.ndarray, pixel_size_m: float,
                 f"{elevation_m.shape}")
         known = np.isfinite(snow_cover)
         cover = np.where(known, snow_cover, 0.0)
-        scrub_band = gentle * high * (1.0 - cliff)
-        seen = np.maximum(snow * (0.25 + 0.75 * cover), cover * scrub_band)
-        snow = np.where(known, seen, snow)
+        snow = np.where(known, snow * (0.25 + 0.75 * cover), snow)
+        window = 1.0 - _smoothstep(*WEATHER_SNOW_SLOPE_DEG, slope)
+        weather_snow = (cover * window * (1.0 - cliff) * (1.0 - snow)
+                        ).astype(np.float32)
     weights = {
         "cliff": cliff,
         "rock": steep * (1.0 - cliff),
@@ -126,7 +154,20 @@ def classify(elevation_m: np.ndarray, pixel_size_m: float,
     }
     weights = {name: w * (1.0 - snow) for name, w in weights.items()}
     weights["snow"] = snow
-    return {name: w.astype(np.float32) for name, w in weights.items()}
+    out = {name: w.astype(np.float32) for name, w in weights.items()}
+    if weather_snow is not None:
+        out["weather_snow"] = weather_snow
+    return out
+
+
+def whiten(rgb: np.ndarray, amount: np.ndarray) -> np.ndarray:
+    """Weather snow on a float RGB block: each texel moves from its own
+    colour toward ``luma + (255 - luma) * SNOW_WHITEN_LIFT`` by
+    ``amount`` (0..1) -- the luminance-keyed whitening the simulator's
+    terrain shader applies, with this repository's lift."""
+    luma = rgb @ _REC709
+    target = luma + (255.0 - luma) * SNOW_WHITEN_LIFT
+    return rgb + (target[:, :, None] - rgb) * amount[:, :, None]
 
 
 def _load_tiles(data_dir: Path, texel_size_m: float) -> Dict[str, Any]:
@@ -270,13 +311,25 @@ def build_drape(baked_path, data_dir: Optional[Path] = None,
                 "seen_snow_fraction": (
                     round(float((snow_cover[known] >= SNOW_SEEN).mean()), 4)
                     if known.any() else None),
-                "rule": "rule snow x (0.25 + 0.75 cover); scrub band gains "
-                        "cover; unknown cells keep the height rule",
+                "rule": "permanent snow x (0.25 + 0.75 cover); weather snow "
+                        "= cover on gentle ground, whitening the texture "
+                        "underneath; unknown cells keep the height rule",
             })
             if not known.any():
                 snow_cover = None
     weights = classify(baked.elevations(), baked.georeference.pixel_size_m,
                        snowline, snow_cover)
+    weather_snow = weights.get("weather_snow")
+
+    def upsampled(name: str, row0: int, rows: int, out_rows: int) -> np.ndarray:
+        # One row of context each side so the bilinear upsample does
+        # not seam at chunk boundaries.
+        lo = max(row0 - 1, 0)
+        hi = min(row0 + rows + 1, baked.height)
+        piece = Image.fromarray(weights[name][lo:hi], mode="F").resize(
+            (grid.width, (hi - lo) * k), Image.BILINEAR)
+        return np.asarray(piece, dtype=np.float32)[
+            (row0 - lo) * k:(row0 - lo) * k + out_rows]
 
     texture = np.empty((grid.height, grid.width, 3), dtype=np.uint8)
     for row0 in range(0, baked.height, _CHUNK_ROWS):
@@ -284,16 +337,10 @@ def build_drape(baked_path, data_dir: Optional[Path] = None,
         out_rows = rows * k
         block = np.zeros((out_rows, grid.width, 3), dtype=np.float32)
         for role in ROLES:
-            # One row of context each side so the bilinear upsample does
-            # not seam at chunk boundaries.
-            lo = max(row0 - 1, 0)
-            hi = min(row0 + rows + 1, baked.height)
-            piece = Image.fromarray(weights[role][lo:hi], mode="F").resize(
-                (grid.width, (hi - lo) * k), Image.BILINEAR)
-            weight = np.asarray(piece, dtype=np.float32)[
-                (row0 - lo) * k:(row0 - lo) * k + out_rows]
-            block += weight[:, :, None] * _tiled(
+            block += upsampled(role, row0, rows, out_rows)[:, :, None] * _tiled(
                 loaded["tiles"][role], row0 * k, out_rows, grid.width)
+        if weather_snow is not None:
+            block = whiten(block, upsampled("weather_snow", row0, rows, out_rows))
         texture[row0 * k:row0 * k + out_rows] = np.clip(
             block + 0.5, 0.0, 255.0).astype(np.uint8)
 
@@ -316,6 +363,19 @@ def build_drape(baked_path, data_dir: Optional[Path] = None,
     Image.fromarray(texture).save(paths["png"])
     fractions = {role: round(float(weights[role].mean()), 4)
                  for role in ROLES}
+    if weather_snow is not None:
+        snow_record["weather_snow"] = {
+            "mean_amount": round(float(weather_snow.mean()), 4),
+            "shape": "luminance-keyed whitening of the ground texture, "
+                     "gated by slope (the terrain shader's "
+                     "u_material_snow_luma_coef/_mix with a weather "
+                     "texture; weather_apply's u_snow_slope window)",
+            "lift": SNOW_WHITEN_LIFT,
+            "slope_window_deg": list(WEATHER_SNOW_SLOPE_DEG),
+            "note": "the lift and the window are this repository's "
+                    "constants; the simulator's are globals the "
+                    "decompilation does not show",
+        }
     sidecar = {
         "dataset": "Local simulator-derived ground textures, tiled by a "
                    "slope/height classification (approximated)",

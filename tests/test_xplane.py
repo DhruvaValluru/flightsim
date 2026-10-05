@@ -592,9 +592,17 @@ def test_drape_snow_follows_the_months_satellite_cover(data, render_dir, tmp_pat
         return sidecar, tuple(int(c) for c in texture[20 * k, 20 * k])
 
     january, texel = drape(1)
-    assert texel == ROLE_COLOURS["snow"]
+    # weather snow whitens the scrub underneath (the shader's shape): the
+    # texel is the scrub colour lifted toward white from its own luma,
+    # not the ice tile
+    r, g, b = ROLE_COLOURS["scrub"]
+    luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    expected = round(luma + (255.0 - luma) * 0.75)
+    assert texel != ROLE_COLOURS["snow"]
+    assert all(abs(c - expected) <= 2 for c in texel), (texel, expected)
     assert january["snow_cover"]["month"] == 1
     assert january["snow_cover"]["mean_cover"] == 1.0
+    assert january["snow_cover"]["weather_snow"]["mean_amount"] == pytest.approx(1.0, abs=0.01)
     assert "MOD10C1" in january["attribution"]
     assert january["water_colour_source"].startswith("per-tile water texture")
     assert january["water_colour_srgb8"] == [20, 50, 60]
