@@ -420,6 +420,65 @@ def aircraft_endpoint(request: AircraftRequest) -> JSONResponse:
     return JSONResponse(_spec_payload(spec))
 
 
+class CameraPromptRequest(BaseModel):
+    """A sentence describing where the camera should be, on the spec the
+    page is holding."""
+
+    spec: Dict[str, Any]
+    prompt: str
+
+
+@app.post("/cameras/prompt")
+def camera_prompt_endpoint(request: CameraPromptRequest) -> JSONResponse:
+    """Place a camera from a sentence ("behind and above both planes,
+    about 300 m back").
+
+    A language model (the rule parser when none is reachable) reads the
+    sentence into an offset; the spec's own geometry then widens the lens
+    and pulls the camera back until every aircraft is in frame, and says
+    so. The camera is added like any picked view, with the user's words
+    as the provenance of every number, and refused by the validator's
+    names if it is unusable.
+    """
+    from core.capture.validate import validate_cameras
+    from core.nl.camera_prompt import CameraPromptError, build_camera, read_intent
+
+    try:
+        spec = ScenarioSpec.from_dict(request.spec)
+    except (ValueError, KeyError) as exc:
+        return JSONResponse({"error": f"spec did not parse: {exc}"},
+                            status_code=400)
+    sentence = request.prompt.strip()
+    if not sentence or len(sentence) > 500:
+        return JSONResponse(
+            {"error": "describe the camera in 1 to 500 characters"},
+            status_code=400)
+    try:
+        intent, skipped = read_intent(sentence, spec)
+    except CameraPromptError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+    taken = {str(c.camera_id.value) for c in spec.cameras}
+    camera_id, suffix = "prompt", 0
+    while camera_id in taken:
+        suffix += 1
+        camera_id = f"prompt{suffix}"
+    camera, notes = build_camera(spec, intent, camera_id)
+    spec.cameras.append(camera)
+    violations = validate_cameras(spec)
+    if violations:
+        first = violations[0]
+        return JSONResponse(
+            {"refused": first.constraint,
+             "error": "; ".join(v.render() for v in violations)},
+            status_code=409)
+    payload = _spec_payload(spec)
+    payload["camera_prompt"] = {
+        "camera_id": camera_id, "intent": intent.to_dict(), "notes": notes,
+        "model_skipped": skipped}
+    return JSONResponse(payload)
+
+
 @app.post("/cameras")
 def cameras_endpoint(request: CameraRequest) -> JSONResponse:
     """One more point of view, or one fewer.

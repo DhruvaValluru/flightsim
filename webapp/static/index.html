@@ -505,9 +505,54 @@ function renderCameraPicker() {
     row.appendChild(button);
   }
   holder.appendChild(row);
+  // Or say where the camera should be, in words.
+  const sentence = document.createElement("div");
+  sentence.style.marginTop = ".5rem";
+  sentence.innerHTML =
+    `<input id="cameraSentence" style="width:60%" maxlength="500" ` +
+    `placeholder="or describe it: behind and above both planes, about 300 m back">` +
+    ` <button id="cameraSentenceGo" class="opt">Place camera</button>`;
+  holder.appendChild(sentence);
+  $("cameraSentenceGo").addEventListener("click", placeCameraFromSentence);
+  $("cameraSentence").addEventListener("keydown", e => {
+    if (e.key === "Enter") placeCameraFromSentence();
+  });
   document.querySelectorAll(".cam-remove").forEach(button =>
     button.addEventListener("click", () =>
       changeCameras({remove: +button.dataset.remove})));
+}
+
+async function placeCameraFromSentence() {
+  // The sentence goes to the server's reader (a language model, or the rule
+  // parser when none is reachable); the server places the camera and widens
+  // the lens / pulls it back until every aircraft is in frame, and returns
+  // what it understood and did, which is shown as it is.
+  const text = $("cameraSentence").value.trim();
+  if (!text) return;
+  $("cameraState").textContent = "placing the camera...";
+  try {
+    const response = await fetch("/cameras/prompt", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({spec: editedSpecDict(), prompt: text}),
+    });
+    const payload = await response.json();
+    if (payload.error) {
+      $("cameraState").innerHTML = payload.refused
+        ? `<b>REFUSED [${payload.refused}]</b> ${payload.error}` : payload.error;
+      return;
+    }
+    const info = payload.camera_prompt;
+    // textContent, never innerHTML: the notes carry the model's own words.
+    $("cameraState").textContent =
+      `${payload.cameras.length} view(s): ` +
+      payload.cameras.map(c => c.camera_id).join(", ") +
+      ` -- ${info.camera_id}: ` + info.notes.join("; ") +
+      (info.model_skipped
+        ? ` (language model not used: ${info.model_skipped})` : "");
+    renderSpec({...compiled, spec: payload});
+  } catch (error) {
+    $("cameraState").textContent = `could not reach the server: ${error}`;
+  }
 }
 
 async function changeCameras(change) {
