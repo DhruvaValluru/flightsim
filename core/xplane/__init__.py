@@ -70,7 +70,20 @@ class WaterMask:
         path = _require(Path(path) if path else
                         DATA_DIR / "water" / "water_polygons.geojson")
         doc = json.loads(path.read_text(encoding="utf-8"))
-        tiles = {(int(t[:3]), int(t[3:])) for t in doc["tiles"]}
+        # The covered tiles: the geojson's own "tiles" list where the file
+        # carries one, else water_tiles.csv beside it (the extraction now
+        # writes the list there), else every tile a feature names.
+        names = doc.get("tiles")
+        if names is None:
+            listing = path.parent / "water_tiles.csv"
+            if listing.is_file():
+                import csv
+
+                with listing.open(encoding="utf-8", newline="") as handle:
+                    names = [row["tile"] for row in csv.DictReader(handle) if row.get("tile")]
+            else:
+                names = sorted({f["properties"]["tile"] for f in doc.get("features", [])})
+        tiles = {(int(t[:3]), int(t[3:])) for t in names}
         polygons: Dict[Tuple[int, int], List[List[np.ndarray]]] = {}
         for feature in doc["features"]:
             tile = feature["properties"]["tile"]

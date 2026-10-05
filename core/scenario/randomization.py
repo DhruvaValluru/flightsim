@@ -1570,8 +1570,8 @@ def sample_randomization(spec, config_dir: Optional[Path] = None,
             "the prompt asks for a variation the vocabulary cannot express: "
             + "; ".join(f'"{s}"' for s in sentences)
             + " -- the documented phrases are varied weather, different "
-              "times of day, dawn and dusk only, varied lighting, across the "
-              "<range>, mixed traffic, random viewpoints")
+              "times of day, dawn and dusk only, varied lighting, different "
+              "seasons, across the <range>, mixed traffic, random viewpoints")
     block = spec.randomization
     from copy import copy
 
