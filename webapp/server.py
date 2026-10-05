@@ -870,6 +870,32 @@ def run_camera_manifest(run_id: str, camera_id: str):
     return JSONResponse({**view, "run_id": run_id})
 
 
+@app.get("/runs/{run_id}/dataset.zip")
+def run_dataset_archive(run_id: str, format: str = "coco"):
+    """The whole run exported as a dataset: coco, kitti, webdataset, yolo,
+    voc, or all (one folder each), with the dataset card and presence.json.
+    The export's refusals stand, in words, as a 409; ``X-Dataset-Labels-Only:
+    1`` when the run has no engine-rendered picture."""
+    from core.dataset.export import ExportError
+    from webapp.capture import dataset_archive
+
+    out = manager.out_root / run_id
+    if not (out / "capture_manifest.json").is_file():
+        return JSONResponse({"error": "this run has no capture manifest (no "
+                                      "cameras were stated), so there is "
+                                      "nothing to export"}, status_code=404)
+    try:
+        result = dataset_archive(out, format)
+    except ExportError as exc:
+        return JSONResponse({"refused": exc.constraint, "error": exc.message},
+                            status_code=409)
+    response = FileResponse(result["archive"], media_type="application/zip",
+                            filename=f"{run_id}_dataset_{result['format']}.zip")
+    if result["labels_only"]:
+        response.headers["X-Dataset-Labels-Only"] = "1"
+    return response
+
+
 @app.get("/runs/{run_id}/cameras/{camera_id}/box3d.zip")
 def run_camera_box3d_archive(run_id: str, camera_id: str):
     """ONE view's 3-D boxes as a download: per frame the 3-D box picture

@@ -474,6 +474,12 @@ async function load() {
     `<b>download every frame with its labels (zip)</b></a> &middot; ` +
     `<a href="${base}/cameras/${encodeURIComponent(cameraId)}/box3d.zip">` +
     `<b>download the 3-D boxes (3D zip)</b></a> ` +
+    `&middot; dataset: <a href="${base}/dataset.zip?format=coco">COCO</a> ` +
+    `<a href="${base}/dataset.zip?format=kitti">KITTI</a> ` +
+    `<a href="${base}/dataset.zip?format=webdataset">WebDataset</a> ` +
+    `<a href="${base}/dataset.zip?format=yolo">YOLO</a> ` +
+    `<a href="${base}/dataset.zip?format=voc">Pascal VOC</a> ` +
+    `<a href="${base}/dataset.zip?format=all">all five</a> ` +
     `<span class="dim">(each frame three times: as rendered, with its 2-D ` +
     `boxes in boxed/, with its 3-D boxes in boxed3d/)</span> &middot; ` +
     `<a href="${url}" download="${esc(cameraId)}_manifest.json">` +

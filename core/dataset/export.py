@@ -1115,6 +1115,15 @@ def export_coco(samples: Sequence[Sample], out: Path, splits: Dict[str, str]
                 annotation["occluded_by"] = obj["occluded_by"]
             if obj.get("not_claimed"):
                 annotation["not_claimed"] = obj["not_claimed"]
+            # Truncation in full: the whole box (COCO [x, y, w, h], may run
+            # past the image) and the share of it inside the picture.
+            full = obj.get("bbox_2d_unclipped")
+            if full:
+                annotation["bbox_unclipped"] = [full[0], full[1], full[2] - full[0],
+                                                full[3] - full[1]]
+            if obj.get("fraction_in_frame") is not None:
+                annotation["fraction_in_frame"] = obj["fraction_in_frame"]
+            annotation["pose"] = voc_pose(obj)
             if obj.get("in_scene") is not None or obj.get("labelled") is not None:
                 annotation["in_scene"] = obj.get("in_scene")
                 annotation["labelled"] = obj.get("labelled")
@@ -1441,6 +1450,25 @@ def voc_bndbox(box: Sequence[float]) -> Dict[str, int]:
             "ymax": max(int(math.ceil(y1)), int(math.floor(y0)) + 1)}
 
 
+def voc_pose(obj: Dict[str, Any]) -> str:
+    """The VOC ``pose`` word from which way the plane faces the camera
+    (its body forward axis in camera coordinates, ``bbox_3d_camera``):
+    nose away from the camera -> Rear (its tail is seen), nose toward it
+    -> Frontal, nose to the image's right -> Left (its left side is seen),
+    to the left -> Right. Unspecified when the record has no 3-D box."""
+    box = obj.get("bbox_3d_camera")
+    axes = box.get("body_axes_in_camera") if isinstance(box, dict) else None
+    if not axes:
+        return "Unspecified"
+    f = [float(v) for v in axes[0]]
+    yaw = math.degrees(math.atan2(f[0], f[2]))
+    if abs(yaw) <= 45.0:
+        return "Rear"
+    if abs(yaw) >= 135.0:
+        return "Frontal"
+    return "Left" if yaw > 0.0 else "Right"
+
+
 def voc_annotation_xml(sample: Sample, names: Sequence[str]) -> str:
     root = ET.Element("annotation")
     ET.SubElement(root, "folder").text = "JPEGImages"
@@ -1461,7 +1489,7 @@ def voc_annotation_xml(sample: Sample, names: Sequence[str]) -> str:
         index = class_index(obj, names)        # refuses a class outside the taxonomy
         element = ET.SubElement(root, "object")
         ET.SubElement(element, "name").text = names[index]
-        ET.SubElement(element, "pose").text = "Unspecified"
+        ET.SubElement(element, "pose").text = voc_pose(obj)
         flags = voc_flags(obj)
         ET.SubElement(element, "truncated").text = str(flags["truncated"])
         ET.SubElement(element, "occluded").text = str(flags["occluded"])
@@ -1505,8 +1533,11 @@ WRITERS = {"coco": export_coco, "kitti": export_kitti,
 # -- the card --------------------------------------------------------------
 
 def parse_formats(fmt) -> List[str]:
-    """One name, a comma list or a sequence -> the ordered, de-duplicated
-    format list; an unknown name refuses ``export.format``."""
+    """One name, a comma list, a sequence, or ``all`` (every format) -> the
+    ordered, de-duplicated format list; an unknown name refuses
+    ``export.format``."""
+    if isinstance(fmt, str) and fmt.strip().lower() == "all":
+        return list(FORMATS)
     if isinstance(fmt, str):
         parts = [p.strip() for p in fmt.split(",")]
     else:

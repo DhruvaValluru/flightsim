@@ -617,6 +617,48 @@ def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
     return archive
 
 
+def dataset_archive(out: Path, fmt: str) -> Dict:
+    """ONE run exported as a dataset (core.dataset.export) in ``fmt`` --
+    coco, kitti, webdataset, yolo, voc, or ``all`` (each in its own
+    folder) -- and zipped with its card and presence.json. A run with no
+    engine-rendered frame exports its labels only (the engine-free
+    previews are not training pictures), and the card says so. The
+    export's own refusals (unverified, labels that changed since their
+    verdict, an unknown format) raise ExportError, in its words. Reused
+    while newer than the manifest and the verdict."""
+    import shutil
+    import zipfile
+
+    from core.dataset.export import export as export_dataset, parse_formats
+
+    formats = parse_formats(fmt)
+    name = "all" if len(formats) > 1 else formats[0]
+    manifest_path = out / "capture_manifest.json"
+    verdict = out / "verification.json"
+    archive = out / "downloads" / f"dataset_{name}.zip"
+    inputs = [p for p in (manifest_path, verdict) if p.is_file()]
+    if archive.is_file() and inputs and archive.stat().st_mtime >= max(
+            p.stat().st_mtime for p in inputs):
+        return {"archive": archive, "format": name,
+                "labels_only": (out / "downloads" / f"dataset_{name}.labels_only").is_file()}
+    rendered = any((out / "frames").glob("*/frame_[0-9][0-9][0-9][0-9].png"))
+    target = out / "dataset" / name
+    shutil.rmtree(target, ignore_errors=True)
+    export_dataset([out], target, ",".join(formats), labels_only=not rendered)
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    partial = archive.with_suffix(".zip.part")
+    with zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path in sorted(p for p in target.rglob("*") if p.is_file()):
+            zf.write(path, arcname=str(Path(name) / path.relative_to(target)))
+    partial.replace(archive)
+    marker = out / "downloads" / f"dataset_{name}.labels_only"
+    if rendered:
+        marker.unlink(missing_ok=True)
+    else:
+        marker.write_text("no engine-rendered frames: labels only\n", encoding="utf-8")
+    return {"archive": archive, "format": name, "labels_only": not rendered}
+
+
 def camera_view(manifest: Dict, camera_id: str,
                 checks: Optional[Dict[str, Dict]] = None) -> Optional[Dict]:
     """ONE camera's labels out of the whole-run manifest, or None when

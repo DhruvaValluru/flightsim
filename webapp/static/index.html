@@ -1450,6 +1450,20 @@ async function initGallery(runId, run) {
       schemaLink +
       `<a href="/runs/${runId}/card.json">run card</a> &middot; ` +
       `<a href="/runs/${runId}/provenance.json">provenance</a></div>`);
+    // The whole run as a training dataset, in any of the five label
+    // formats (or all of them, one folder each).
+    html.push(`<div style="margin-top:6px">download this run as a dataset: ` +
+      `<select id="runDatasetFormat">` +
+      `<option value="coco">COCO</option><option value="kitti">KITTI</option>` +
+      `<option value="webdataset">WebDataset</option><option value="yolo">YOLO</option>` +
+      `<option value="voc">Pascal VOC</option><option value="all">all five formats</option>` +
+      `</select> <a id="runDatasetLink" href="/runs/${runId}/dataset.zip?format=coco">` +
+      `download (zip)</a> <span class="dim">— boxes, masks where rendered, ` +
+      `3-D boxes, truncation, occlusion and the dataset card; presence.json in ` +
+      `every format` +
+      (run.capture && run.capture.headless
+        ? `; this run has no engine-rendered pictures, so it exports labels only`
+        : "") + `</span></div>`);
   }
 
   // Per camera: what it is, and the way in to ITS frames with ITS
@@ -1511,6 +1525,13 @@ async function initGallery(runId, run) {
     }
   }
   area.innerHTML = html.join("");
+  const datasetFormat = document.getElementById("runDatasetFormat");
+  if (datasetFormat) {
+    datasetFormat.addEventListener("change", () => {
+      document.getElementById("runDatasetLink").href =
+        `/runs/${runId}/dataset.zip?format=${encodeURIComponent(datasetFormat.value)}`;
+    });
+  }
 }
 
 function renderVerify(capture) {
