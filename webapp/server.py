@@ -567,11 +567,20 @@ def status_endpoint() -> JSONResponse:
     # discovering a fallback after a spin. platform/render_available are
     # the same pattern for the UE half: without the Windows host the page says so up front
     # and a run refuses ue.platform by name instead of 500ing.
+    from core.scenario.blocks import DEFAULT_CLASSES
     from core.util.platform import os_name, ue_available
 
+    # The class list is written down ahead of time (taxonomy.classes, the
+    # documented default unless a spec states its own): stated up front
+    # with its exact values, 0 reserved for sky / nothing, so the page
+    # never shows categories made up from what a scene happens to hold.
+    classes = [{"class_id": 0, "name": "sky"}] + [
+        {"class_id": i + 1, "name": name}
+        for i, name in enumerate(DEFAULT_CLASSES)]
     return JSONResponse({**manager.status(), "llm_available": llm_available(),
                          "platform": os_name(),
-                         "render_available": ue_available()})
+                         "render_available": ue_available(),
+                         "taxonomy": classes})
 
 
 @app.get("/runs/{run_id}")

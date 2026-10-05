@@ -1054,8 +1054,16 @@ def frame_sidecar(manifest: Dict, record: Dict) -> Dict:
     sample that needs nothing else."""
     cameras = {str(c.get("camera_id")): c
                for c in manifest.get("cameras", [])}
+    context = {key: manifest.get(key) for key in SIDECAR_CONTEXT_KEYS}
+    taxonomy = manifest.get("taxonomy")
+    if isinstance(taxonomy, list) and taxonomy:
+        # The stated class list with its ids written out, so a frame's
+        # class_id / class-mask value is read without counting a list:
+        # derived from the manifest's taxonomy, never from the scene.
+        context["class_ids"] = {"0": "sky", **{
+            str(i + 1): str(name) for i, name in enumerate(taxonomy)}}
     return {
-        "context": {key: manifest.get(key) for key in SIDECAR_CONTEXT_KEYS},
+        "context": context,
         "camera": cameras.get(str(record.get("camera_id"))),
         "frame": record,
     }

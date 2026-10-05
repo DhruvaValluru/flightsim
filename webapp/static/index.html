@@ -64,6 +64,8 @@ field's provenance, before anything runs. Impossible requests are refused by
 name. Rendered clips carry the telemetry panel; turbulence realisations are
 visual-only per host (measured).</p>
 
+<div id="taxonomyLine" class="dim"></div>
+
 <textarea id="prompt"
   placeholder="simulate a plane in rough wind conditions over mountains"></textarea>
 <p>
@@ -142,6 +144,14 @@ function provenanceNote(f) {
 (async () => {
   try {
     const status = await (await fetch("/status")).json();
+    if (status.taxonomy) {
+      $("taxonomyLine").textContent =
+        "Class taxonomy (fixed ahead of time; a spec may state its own " +
+        "taxonomy.classes, and every frame's labels carry the list in force): " +
+        status.taxonomy.map(c => c.class_id + " " + c.name).join(", ") +
+        ". 0 is sky / nothing; objects whose class is not listed are refused, " +
+        "never added.";
+    }
     $("llmState").textContent = (status.llm_available
       ? "compiler: llm available"
       : "compiler: offline regex (no ANTHROPIC_API_KEY in the server " +
