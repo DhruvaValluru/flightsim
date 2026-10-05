@@ -323,7 +323,24 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
     if not any(p.suffix == ".png" or p.suffix == ".json" for p in files):
         return None
     manifest_path = out / "capture_manifest.json"
-    inputs = files + ([manifest_path] if manifest_path.is_file() else [])
+    manifest: Dict = {}
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            manifest = {}
+    # The second version of every rendered frame: its 2-D boxes drawn on
+    # (core/capture/box_frames.py; reused while newer than the frame and
+    # the manifest, so only a changed frame or label is redrawn).
+    boxed: List[Path] = []
+    if manifest:
+        from core.capture.box_frames import draw_box_frames
+
+        try:
+            boxed = draw_box_frames(manifest, out, cameras=[camera_id])
+        except (OSError, ImportError):
+            boxed = []
+    inputs = files + boxed + ([manifest_path] if manifest_path.is_file() else [])
 
     archive = out / "downloads" / f"{camera_id}.zip"
     if archive.is_file():
@@ -332,18 +349,20 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
             return archive
     archive.parent.mkdir(parents=True, exist_ok=True)
 
-    camera_manifest = None
-    if manifest_path.is_file():
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            manifest = {}
-        camera_manifest = camera_view(manifest, camera_id)
+    camera_manifest = camera_view(manifest, camera_id) if manifest else None
 
     readme = (
         f"{camera_id}: one view of run {out.name}\n"
         f"\n"
-        f"frame_NNNN.png   the rendered frame\n"
+        f"frame_NNNN.png   the rendered frame, as rendered\n"
+        f"boxed/frame_NNNN_boxes.png\n"
+        f"                 the same frame with its 2-D boxes drawn on: solid\n"
+        f"                 green = the box from the engine's mask pixels\n"
+        f"                 (bbox_2d_tight), dashed amber = the predicted box\n"
+        f"                 from the geometry (bbox_2d), tagged with the object\n"
+        f"                 id and, when both exist, their IoU. Drawn from the\n"
+        f"                 same numbers as the .json; a run with no engine\n"
+        f"                 mask shows the predicted box only\n"
         f"frame_NNNN.json  that frame's labels: where the camera was, which\n"
         f"                 way it pointed, the lens; under 'state' every\n"
         f"                 channel the flight recorder logged at that instant\n"
@@ -404,6 +423,9 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
             zf.writestr(f"{camera_id}/manifest.json",
                         json.dumps(camera_manifest, indent=1),
                         compress_type=zipfile.ZIP_DEFLATED)
+        for path in boxed:
+            zf.write(path, arcname=f"{camera_id}/boxed/{path.name}",
+                     compress_type=zipfile.ZIP_STORED)
         zf.writestr(f"{camera_id}/README.txt", readme,
                     compress_type=zipfile.ZIP_DEFLATED)
     partial.replace(archive)
@@ -455,6 +477,11 @@ def finish(out: Path, max_overlays: Optional[int] = 24) -> Dict:
 
     manifest = read_capture_manifest(out / "capture_manifest.json")
     overlays = draw_overlays(manifest, out, max_frames=max_overlays)
+    # Every rendered frame again with its 2-D boxes drawn on (no cap: the
+    # page and the zip offer both versions of each frame).
+    from core.capture.box_frames import draw_box_frames
+
+    boxed = draw_box_frames(manifest, out)
     report = verify_run(out)
     # The SAME verdict under the one name every other path uses
     # (flightsim.verify writes it; flightsim.export refuses a run
@@ -469,6 +496,7 @@ def finish(out: Path, max_overlays: Optional[int] = 24) -> Dict:
         "checks": [{"name": c.name, "status": c.status, "detail": c.detail}
                    for c in report.checks],
         "overlays": len(overlays),
+        "boxed": len(boxed),
     }
     (out / "verify.json").write_text(json.dumps(summary, indent=1),
                                      encoding="utf-8")
@@ -520,6 +548,7 @@ def inventory(out: Path) -> Dict:
         "cameras": cameras,
         "frames": listing(out / "frames"),
         "overlays": listing(out / "overlays"),
+        "boxed": listing(out / "boxed"),
         "previews": listing(out / "previews"),
         "clips": clips,
         "has_manifest": manifest_path.is_file(),

@@ -387,14 +387,14 @@ async function load() {
   // Which images exist is read off the DIRECTORIES, not the manifest: a
   // frame the manifest names but the renderer never wrote must not
   // appear here as a broken image.
-  let inventory = {frames: {}, overlays: {}, previews: {}};
+  let inventory = {frames: {}, overlays: {}, boxed: {}, previews: {}};
   try {
     inventory = await (await fetch(`${base}/images`)).json();
   } catch (error) { /* the manifest alone still renders */ }
   const have = kind => new Set(
     ((inventory[kind] || {})[cameraId]) || []);
   const present = {frames: have("frames"), overlays: have("overlays"),
-                   previews: have("previews")};
+                   boxed: have("boxed"), previews: have("previews")};
 
   const camera = payload.camera || {};
   UNITS = payload.state_units || {};
@@ -424,7 +424,9 @@ async function load() {
     `</details>`;
   document.getElementById("links").innerHTML =
     `<a href="${base}/cameras/${encodeURIComponent(cameraId)}/frames.zip">` +
-    `<b>download every frame with its labels (zip)</b></a> &middot; ` +
+    `<b>download every frame with its labels (zip)</b></a> ` +
+    `<span class="dim">(each frame twice: as rendered, and with its 2-D ` +
+    `boxes drawn on, in boxed/)</span> &middot; ` +
     `<a href="${url}" download="${esc(cameraId)}_manifest.json">` +
     `this camera's manifest</a> &middot; ` +
     `<a href="${base}/capture_manifest.json">the whole run's</a> &middot; ` +
@@ -448,6 +450,9 @@ async function load() {
                                   "projection (circle) and the engine's " +
                                   "(cross)"],
                                  ["frames", "rendered frame"],
+                                 ["boxed:" + name.replace(/\.png$/, "_boxes.png"),
+                                  "with 2-D boxes — solid green from the mask " +
+                                  "pixels, dashed amber predicted"],
                                  ...derived.map(([suffix, text]) =>
                                    ["frames:" + name.replace(/\.png$/, suffix), text]),
                                  ["previews", "engine-free preview"]]) {
