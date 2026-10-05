@@ -170,3 +170,20 @@ environment") stops at their missing bodies:
 The `shaders/` folder this tree once carried was a byte-identical copy of
 `assets/physical_renders/Resources/shaders/` and was dropped on merge into
 `phase-2-testing` (2026-10-05); the one copy lives there.
+
+## Shader decode (`shader_decode.json`, 2026-10-05)
+
+The lighting, sky, and water logic is not in these listings. It lives in
+the compiled SPIR-V shaders under `assets/physical_renders/Resources/shaders/`.
+`shader_decode.json` records the formulas read out of six shader chains
+(sky, exposure, ocean waves, ocean shading, fog and clouds, lighting pass),
+each checked by an independent refuter: `surviving` holds the 59 that held
+up, `refuted` the 12 that did not, and each chain lists the CPU-set
+uniforms the shaders only read (with proposed values and their sources)
+and what could not be decoded. Seven lighting-pass checks and one fog
+check did not run (the run hit its usage limit), so the lighting-pass
+entries are the least verified. Ported so far: the atmosphere constants
+(`core/xplane/atmosphere.py`) and the water rules F1-F4 plus the JONSWAP
+spectrum inputs (`core/xplane/ocean.py`). Not ported: a water surface in
+the Unreal host (it has none; the sea is the drape's flat colour), the
+FFT wave cascades, and the exposure curve.

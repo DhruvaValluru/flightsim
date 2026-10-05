@@ -408,6 +408,28 @@ building collision, UE volumetric clouds + Niagara precipitation as
 LABELED VISUAL-ONLY (task 12), NOAA HRRR deferred; WRF and trueSKY
 refused (recorded).
 
+
+### Simulator terrain, sky, and water port (2026-10-05)
+
+- **Terrain materials.** The drape (v7) writes a base image, role weights,
+  monthly snow cover, and a water mask; `scripts/ue_create_materials.py`
+  builds a layered material from the same names and `FlightSimVisualScene`
+  applies it. All C++ is uncompiled; compile on Windows, rerun the
+  materials script, and rerun `scripts/extract_xplane.py` (2048 px pull,
+  normals, `.ter` directives), then re-measure the three pinned constants
+  the asset README names.
+- **Elevation.** `scripts/bake_terrain.py --source 3dep` bakes USGS 10 m
+  terrain for US places; `-triangle-budget=` keeps that posting in the
+  render. The engine cost of the larger mesh is unmeasured.
+- **Sky.** `core/xplane/atmosphere.py` is the simulator's Bruneton model
+  with its Earth constants; `FLIGHTSIM_XPLANE_SKY=tables` restores the
+  old sky tables.
+- **Water.** `core/xplane/ocean.py` holds the decoded water formulas.
+  Next step: a translucent water surface in the host using them.
+- **Decode record.** `assets/logic_reports/shader_decode.json`.
+- Nothing above has been run under pytest yet; run `tests/test_xplane.py`
+  and `tests/test_ocean.py` first.
+
 ## State
 
 | Phase | Gate | Status |
