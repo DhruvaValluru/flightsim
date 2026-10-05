@@ -1109,6 +1109,10 @@ def plan_water_surface(spec: ScenarioSpec) -> None:
       the same class as the sea; the basis string says so;
     * no extraction on this machine means no planning (the data is the
       user's own X-Plane install, never fetched).
+    * a planned water class is a derived surface, so the runner's
+      WorldCover roughness inference (infer_surface_for_spec, which only
+      acts on an unstated default) does not also run for that flight:
+      the point under the origin wins over the bake's dominant class.
     """
     if str(spec.surface.source) != "default":
         return

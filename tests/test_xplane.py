@@ -228,7 +228,7 @@ def test_compile_endpoint_applies_the_water_planner(lake_mask, monkeypatch):
 
     monkeypatch.setattr(
         server, "compile_prompt",
-        lambda prompt: _spec_at(prompt, 10.3, 20.3))
+        lambda prompt, **_: _spec_at(prompt, 10.3, 20.3))
     payload = TestClient(server.app).post("/compile", json={
         "prompt": "fly the c172p at 1000 m", "compiler": "regex"}).json()
     surface = next(f for f in payload["spec"]["fields"]
