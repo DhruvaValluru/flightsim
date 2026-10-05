@@ -8,6 +8,12 @@ core.xplane.drape (the terrain texture a georeferenced render wears). The
 terrain catalog has no consumer yet. Every loader refuses by name when the
 extraction has not been run, rather than returning an empty answer that
 would read as "no water here".
+
+Beside the extraction sit two committed trees this package also reads
+(core.xplane.physical): ``assets/physical_renders/Resources/``, the
+simulator's render assets in its own layout (:data:`RENDER_DIR`), and
+``assets/logic_reports/``, the decompiled function listings and code of
+the subsystems that consume them (:data:`LOGIC_DIR`).
 """
 
 from __future__ import annotations
@@ -23,6 +29,10 @@ from PIL import Image, ImageChops, ImageDraw
 
 REPO = Path(__file__).resolve().parents[2]
 DATA_DIR = REPO / "assets" / "xplane"
+#: The simulator's render assets, committed in its own Resources/ layout.
+RENDER_DIR = REPO / "assets" / "physical_renders" / "Resources"
+#: The decompiled logic reports (functions.txt + code.c per subsystem).
+LOGIC_DIR = REPO / "assets" / "logic_reports"
 
 
 class XPlaneDataError(Exception):

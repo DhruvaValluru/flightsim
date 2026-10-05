@@ -1,5 +1,32 @@
 # Resume here
 
+**Physical renders + logic reports merged (2026-10-05, `phase-2-testing`;
+NO tests run, owner's instruction).** LANDED: `origin/logic`
+(`assets/logic_reports/`: decompiled functions.txt + code.c per
+subsystem) and `origin/physical-renders` (`assets/physical_renders/
+Resources/`: the simulator's render assets in its own layout) merged;
+duplicates resolved to one copy each (the shader set under
+`logic_reports/shaders/` was byte-identical to `physical_renders/
+Resources/shaders/` and is gone; `sky_colors_*.png` + `lights.txt` live
+only in `assets/xplane/lighting/`, the extractor's output the code
+decodes). CONNECTED: `core/xplane/physical.py` -- `REPORTS` (which
+report governs which assets and drape roles, with each report's caveat),
+`SnowCover` (NASA NEO MOD10C1 monthly, palette index 255 = no data) and
+`WaterTiles` (the per-degree water texture `REN_degree::
+create_water_shader` loads; its mean RGB is the location's water
+colour). `core/xplane/drape.py` is DRAPE_VERSION 2: the spec's month
+(`webapp.runs.drape_month`, resolved as the sky plan resolves the date)
+seasons the snow class from the satellite cover, mapped water takes the
+tile's colour, one drape cached per terrain AND month, the sidecar
+records `snow_cover` / `water_colour_source` / `centre_lat_lon`. Tests
+added to `tests/test_xplane.py` (snow palette decode, tile-path formula,
+catalogue, the seasonal drape) and the stale `"Laminar"` assertion
+aligned to the merged wording -- ALL UNRUN. Run `.venv/bin/pytest -q
+tests/test_xplane.py` first; then the whole suite. OPEN: Earth Orbit
+Textures and the globe are catalogued, no consumer; the water tile's
+alpha is not decoded; the snow cover is 2025's months whatever the
+scene's year (stated in the sidecar).
+
 **The advancement addition (2026-09-29, same branch; docs/ADVANCEMENTS_
 BLUEPRINT.md is the plan, docs/ADVANCEMENTS_CONTRACTS.md and _REPORT.md
 the contracts and the report).** LANDED: the blueprint's implementation

@@ -1098,16 +1098,30 @@ def _water_mask():
 XPLANE_TERRAIN_ENV = "FLIGHTSIM_XPLANE_TERRAIN"
 
 
-def attach_xplane_drape(scene: Dict, report=None) -> Optional[str]:
+def drape_month(spec: ScenarioSpec) -> int:
+    """The calendar month the terrain drape reads its snow cover for: the
+    spec's own date, resolved exactly as the sky plan resolves it
+    (core.sky.plan.scene_date), so the snow and the sun agree."""
+    from core.sky.plan import scene_date
+
+    day, _ = scene_date(str(spec.time_of_day.value),
+                        str(spec.weather_date.value))
+    return day.month
+
+
+def attach_xplane_drape(scene: Dict, report=None,
+                        month: Optional[int] = None) -> Optional[str]:
     """Texture a terrain scene with X-Plane's ground textures.
 
     Owner's decision (2026-10-05): the X-Plane textures REPLACE whatever
     the scene would otherwise wear -- the Sentinel-2 drape of a curated
     bake included -- whenever the extracted textures are present. The
-    drape (core.xplane.drape) is built once per bake beside it and goes to
-    the commandlet through the existing -imagery= sidecar path, so the
-    engine is unchanged. Flat scenes have no terrain to drape. Returns
-    the sidecar path it set, or None when nothing changed (no terrain,
+    drape (core.xplane.drape) is built once per bake and month beside it
+    and goes to the commandlet through the existing -imagery= sidecar
+    path, so the engine is unchanged. ``month`` (drape_month(spec)) lets
+    the committed MODIS snow cover season the snow class; None keeps the
+    height rule alone. Flat scenes have no terrain to drape. Returns the
+    sidecar path it set, or None when nothing changed (no terrain,
     switched off, or no extracted textures).
     """
     import os
@@ -1121,15 +1135,17 @@ def attach_xplane_drape(scene: Dict, report=None) -> Optional[str]:
         return None
     if report is not None and not drape_paths(scene["terrain"])["sidecar"].is_file():
         report("building the X-Plane terrain texture for this scene "
-               "(one time per terrain)")
+               "(one time per terrain and month)")
     try:
-        sidecar = build_drape(scene["terrain"], water_mask=_water_mask())
+        sidecar = build_drape(scene["terrain"], water_mask=_water_mask(),
+                              month=month)
     except XPlaneDataError:
         return None
     scene["imagery"] = str(sidecar)
+    season = f", MODIS snow cover for month {month:02d}" if month else ""
     scene["label"] = (f"{scene.get('label', '')}; ground texture: X-Plane "
-                      f"12 textures by slope/height classification "
-                      f"(approximated)")
+                      f"12 textures by slope/height classification"
+                      f"{season} (approximated)")
     return str(sidecar)
 
 
@@ -2370,8 +2386,10 @@ class RunManager:
             return
         scene = pick_scene(spec)
         # X-Plane ground textures replace the scene's own texture when
-        # the extraction is present (attach_xplane_drape).
-        attach_xplane_drape(scene, lambda line: run.push("terrain", line))
+        # the extraction is present (attach_xplane_drape); the snow class
+        # follows the spec's month.
+        attach_xplane_drape(scene, lambda line: run.push("terrain", line),
+                            month=drape_month(spec))
         run.scene = scene
         # The render sun (visual plan V1). start() already refused a sun
         # the scene cannot show, so this resolves; it is recomputed here

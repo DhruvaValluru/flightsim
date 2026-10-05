@@ -432,7 +432,9 @@ def test_drape_classifies_flat_steep_and_snow(data, tmp_path):
     assert texel(45) == ROLE_COLOURS["rock"]
     assert texel(80) == ROLE_COLOURS["snow"]
     assert sidecar["texture"]["crs"] == "EPSG:32633"
-    assert "Laminar" in sidecar["attribution"]
+    assert "simulator-derived" in sidecar["attribution"]
+    # no month given: the height rule alone, and the sidecar says so
+    assert sidecar["snow_cover"] == {"month": None, "source": None}
     # a second call reuses the drape instead of rebuilding it
     stamp = sidecar_path.stat().st_mtime_ns
     assert build_drape(stem, data_dir=data) == sidecar_path
@@ -463,3 +465,157 @@ def test_attach_replaces_the_scenes_own_texture(data, tmp_path, monkeypatch):
 
     flat = {"key": "flat", "terrain": None, "imagery": None, "label": ""}
     assert runs.attach_xplane_drape(flat) is None
+
+
+# -- the physical render assets and the logic reports ---------------------
+
+def _neo_snow_png(path, fill, year=2025, month=1):
+    """A NEO-layout snow cover PNG: palette index everywhere = ``fill``
+    (0 bare, 254 full cover, 255 no data), except column band 0..1799
+    (the western hemisphere) which is no data."""
+    import numpy as np
+
+    from core.xplane.physical import SNOW_COVER_SIZE
+
+    index = np.full((SNOW_COVER_SIZE[1], SNOW_COVER_SIZE[0]), fill,
+                    dtype=np.uint8)
+    index[:, :1800] = 255
+    im = Image.frombuffer("P", SNOW_COVER_SIZE, index.tobytes(), "raw", "P",
+                          0, 1)
+    im.putpalette([0, 0, 0] * 256)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    im.save(path)
+
+
+@pytest.fixture
+def render_dir(tmp_path):
+    """A Resources/ tree with January full snow east of Greenwich, July
+    bare, and one water tile for the Alps (dark blue)."""
+    root = tmp_path / "Resources"
+    snow = root / "bitmaps" / "Snow Cover"
+    _neo_snow_png(snow / "MOD10C1_M_SNOW_2025-01.png", 254)
+    _neo_snow_png(snow / "MOD10C1_M_SNOW_2025-07.png", 0)
+    tile = root / "bitmaps" / "world" / "water" / "+40+000" / "+46+007.png"
+    tile.parent.mkdir(parents=True)
+    Image.new("RGBA", (256, 256), (20, 50, 60, 191)).save(tile)
+    return root
+
+
+def test_snow_cover_reads_the_palette_index_not_the_colour(render_dir):
+    from core.xplane.physical import SnowCover
+
+    january = SnowCover.load(1, render_dir)
+    assert january.fraction(46.0, 7.7) == 1.0        # full cover
+    assert january.fraction(46.0, -100.0) is None    # no data, not bare
+    assert SnowCover.load(7, render_dir).fraction(46.0, 7.7) == 0.0
+
+
+def test_snow_cover_month_out_of_range_and_missing_file_refuse_by_name(render_dir):
+    from core.xplane.physical import SnowCover
+
+    with pytest.raises(XPlaneDataError, match="1..12"):
+        SnowCover.load(13, render_dir)
+    with pytest.raises(XPlaneDataError, match="MOD10C1_M_SNOW_2025-02"):
+        SnowCover.load(2, render_dir)
+
+
+def test_water_tile_path_is_the_simulators_own_formula():
+    from core.xplane.physical import water_tile_relpath
+
+    # REN_degree::create_water_shader: "%sworld/water/%+03d%+04d/%+03d%+04d.png"
+    # with the folder floored to 10 degrees (negatives round away from 0).
+    assert str(water_tile_relpath(46.005, 7.72)) == "+40+000/+46+007.png"
+    assert str(water_tile_relpath(37.8, -119.5)) == "+30-120/+37-120.png"
+    assert str(water_tile_relpath(-3.2, -60.5)) == "-10-070/-04-061.png"
+    assert str(water_tile_relpath(0.5, 0.5)) == "+00+000/+00+000.png"
+
+
+def test_water_tiles_give_the_tiles_colour_and_none_elsewhere(render_dir):
+    from core.xplane.physical import WaterTiles
+
+    tiles = WaterTiles.load(render_dir)
+    assert tiles.tile_count() == 1
+    assert tiles.colour(46.005, 7.72) == (20, 50, 60)
+    assert tiles.covers(46.5, 7.0)
+    assert tiles.colour(37.8, -119.5) is None
+    with pytest.raises(XPlaneDataError, match="physical render assets"):
+        WaterTiles.load(render_dir / "nowhere")
+
+
+def test_catalogue_ties_every_report_to_committed_assets():
+    """The index names real files: each report's functions.txt exists and
+    every asset folder it cites is in the committed render tree."""
+    from core.xplane.physical import REPORTS, catalogue, logic_functions
+
+    index = catalogue()
+    assert set(index) == {"terrain_ocean", "lighting", "render_quality",
+                          "physics"}
+    for name, entry in index.items():
+        assert REPORTS[name].functions_path.is_file(), name
+        assert all(entry["assets"].values()), (name, entry["assets"])
+    # the water shader that names the per-tile path is in the terrain report
+    assert logic_functions("terrain_ocean", "create_water_shader")
+    with pytest.raises(XPlaneDataError, match="unknown logic report"):
+        logic_functions("cockpit")
+
+
+def test_drape_snow_follows_the_months_satellite_cover(data, render_dir, tmp_path):
+    """Gentle ground just below the snowline wears snow in the January
+    drape (full cover seen) and scrub in July (bare); a month is part of
+    the drape's cache key; the bake's own water tile colours the water."""
+    import json
+
+    import numpy as np
+
+    from core.xplane.drape import build_drape
+
+    # EPSG:32632 at this origin is the Alps near 46 N 7.7 E, flat at
+    # 2500 m: 600 m below the 3000 m snowline, inside the scrub band.
+    from core.terrain.heightfield import Georeference, Heightfield
+
+    field = Heightfield.from_elevations(
+        np.full((40, 40), 2500.0),
+        Georeference(crs="EPSG:32632", origin_x_m=400000.0,
+                     origin_y_m=5100000.0, pixel_size_m=30.0),
+        name="alps", provenance={"snowline_m_approx": 3000.0})
+    stem = tmp_path / "terrain" / "alps"
+    stem.parent.mkdir(parents=True, exist_ok=True)
+    field.write(stem)
+
+    def drape(month):
+        sidecar_path = build_drape(stem, data_dir=data, month=month,
+                                   render_dir=render_dir)
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        texture = np.asarray(Image.open(
+            sidecar_path.with_name(sidecar["texture"]["file"])).convert("RGB"))
+        k = sidecar["texture"]["texels_per_dem_pixel"]
+        return sidecar, tuple(int(c) for c in texture[20 * k, 20 * k])
+
+    january, texel = drape(1)
+    assert texel == ROLE_COLOURS["snow"]
+    assert january["snow_cover"]["month"] == 1
+    assert january["snow_cover"]["mean_cover"] == 1.0
+    assert "MOD10C1" in january["attribution"]
+    assert january["water_colour_source"].startswith("per-tile water texture")
+    assert january["water_colour_srgb8"] == [20, 50, 60]
+
+    july, texel = drape(7)
+    assert texel == ROLE_COLOURS["scrub"]
+    assert july["snow_cover"]["month"] == 7
+    assert "MOD10C1" not in july["attribution"]   # no snow used: no credit
+
+    # the same month is reused, a different month rebuilds
+    stamp = (stem.with_name("alps_xplane_drape.json")).stat().st_mtime_ns
+    build_drape(stem, data_dir=data, month=7, render_dir=render_dir)
+    assert stem.with_name("alps_xplane_drape.json").stat().st_mtime_ns == stamp
+
+
+def test_drape_month_is_the_sky_plans_date():
+    from datetime import date
+
+    from core.sky.plan import DEFAULT_DATE, scene_date
+
+    assert scene_date("noon", "2025-12-24") == (date(2025, 12, 24), "weather_date")
+    assert scene_date("2026-07-04T14:00", "none")[0] == date(2026, 7, 4)
+    assert scene_date("none", "none") == (DEFAULT_DATE,
+                                          "default (March 2026 equinox)")

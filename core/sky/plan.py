@@ -125,6 +125,16 @@ def _date_for(time_value: str, weather_date: Optional[str]) -> Tuple[date, str]:
     return DEFAULT_DATE, "default (March 2026 equinox)"
 
 
+def scene_date(time_value: str, weather_date: Optional[str]) -> Tuple[date, str]:
+    """The calendar date a spec's sky is planned for, and where it came
+    from: an ISO prefix on ``time_of_day``, else ``weather_date``, else
+    :data:`DEFAULT_DATE`. The same resolution the sky plan itself uses,
+    so the terrain's seasonal look (core.xplane.drape's snow cover) and
+    the sun agree on the month."""
+    return _date_for(" ".join(str(time_value).strip().lower().split()),
+                     weather_date)
+
+
 def _solar_midnight_utc(day: date, lon_deg: float) -> datetime:
     """00:00 local mean solar time of ``day`` at ``lon_deg``, as UTC."""
     start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)

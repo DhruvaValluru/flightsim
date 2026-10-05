@@ -14,13 +14,24 @@ no change to show them:
 * each class is X-Plane's texture for it, tiled at the ground size X-Plane
   itself projects it at (assets/xplane/terrain/drape/drape_textures.json);
 * where the X-Plane water mask has a polygon the texel is X-Plane's own
-  daytime water colour (the "water color" strip of sky_colors_clean).
+  water colour: the per-tile water texture of the committed render assets
+  (core.xplane.physical.WaterTiles, what the simulator's own water shader
+  loads for that degree) when the bake's tile has one, else the "water
+  color" strip of sky_colors_clean;
+* when the scene's calendar month is known, the MODIS monthly snow cover
+  of the committed render assets (core.xplane.physical.SnowCover, 10 km
+  cells) MODULATES the snow class: ground the rule already whitens thins
+  where the satellite saw bare ground that month, and the gentle high
+  ground just below the snowline whitens where it saw snow. The 30 m
+  shape still decides WHERE within a cell; the satellite decides whether
+  that month had snow there at all.
 
 What this is NOT: X-Plane's terrain. The SHAPE is the bake's (Copernicus
 GLO-30 or the synthesised ridge); the placement of each texture is this
 module's slope/height rule, not X-Plane's land-class data (its DSF tiles
-are not read); the water mask covers only the tiles the extraction had.
-The sidecar says "approximated" and names the textures it used.
+are not read); the water mask covers only the tiles the extraction had;
+the snow cover is one captured year's months, not the scene's year. The
+sidecar says "approximated" and names the textures and rasters it used.
 
 Texel grid: the bake's CRS, origin and extent, subdivided an integer number
 of times (core.terrain.imagery.TexelGrid), so the drape cannot drift off
@@ -39,17 +50,24 @@ from PIL import Image
 from ..terrain.glo30 import sha256_of
 from ..terrain.heightfield import Heightfield
 from ..terrain.imagery import TexelGrid
-from . import DATA_DIR, WaterMask, XPlaneDataError, _require, load_sky_tables
+from . import (DATA_DIR, RENDER_DIR, WaterMask, XPlaneDataError, _require,
+               load_sky_tables)
+from .physical import (SNOW_COVER_ATTRIBUTION, SNOW_COVER_DATASET,
+                       SNOW_COVER_YEAR, SnowCover, WaterTiles)
 
 #: Bump when the classification or compositing changes, so a cached drape
-#: from an older rule is rebuilt instead of reused.
-DRAPE_VERSION = 1
+#: from an older rule is rebuilt instead of reused. 2: MODIS snow cover
+#: modulates the snow class; the per-tile water colour.
+DRAPE_VERSION = 2
 ROLES = ("valley", "scrub", "rock", "cliff", "snow")
 #: DEM rows composited per step (bounds memory on an 8192-texel drape).
 _CHUNK_ROWS = 256
 
 LICENSE = "Local simulator-derived texture set"
 ATTRIBUTION = "Ground textures and water colour: local simulator-derived data"
+#: Snow-cover fraction at or above which a cell counts as "saw snow" for
+#: the sidecar's summary (the blend itself is continuous).
+SNOW_SEEN = 0.5
 
 
 def _smoothstep(low: float, high: float, value: np.ndarray) -> np.ndarray:
@@ -58,8 +76,17 @@ def _smoothstep(low: float, high: float, value: np.ndarray) -> np.ndarray:
 
 
 def classify(elevation_m: np.ndarray, pixel_size_m: float,
-             snowline_m: float) -> Dict[str, np.ndarray]:
-    """Per-pixel weight of each role (float32, summing to 1)."""
+             snowline_m: float,
+             snow_cover: Optional[np.ndarray] = None) -> Dict[str, np.ndarray]:
+    """Per-pixel weight of each role (float32, summing to 1).
+
+    ``snow_cover`` (same shape, fraction 0..1, NaN = unknown) is the
+    month's satellite snow cover: where it is known, the rule's snow is
+    scaled by ``0.25 + 0.75 * cover`` (bare ground seen from orbit thins
+    the snow but a north face above the line keeps a quarter), and the
+    gentle ground in the scrub band below the snowline gains ``cover``
+    worth of snow. Unknown cells keep the height rule alone.
+    """
     dz_dy, dz_dx = np.gradient(elevation_m, pixel_size_m)
     slope = np.degrees(np.arctan(np.hypot(dz_dx, dz_dy)))
     cliff = _smoothstep(50.0, 58.0, slope)
@@ -78,6 +105,16 @@ def classify(elevation_m: np.ndarray, pixel_size_m: float,
         high = _smoothstep(12.0, 25.0, slope)
         snow = np.zeros_like(slope)
     gentle = 1.0 - steep
+    if snow_cover is not None:
+        if snow_cover.shape != elevation_m.shape:
+            raise ValueError(
+                f"snow cover {snow_cover.shape} does not match the DEM "
+                f"{elevation_m.shape}")
+        known = np.isfinite(snow_cover)
+        cover = np.where(known, snow_cover, 0.0)
+        scrub_band = gentle * high * (1.0 - cliff)
+        seen = np.maximum(snow * (0.25 + 0.75 * cover), cover * scrub_band)
+        snow = np.where(known, seen, snow)
     weights = {
         "cliff": cliff,
         "rock": steep * (1.0 - cliff),
@@ -124,6 +161,39 @@ def water_colour(data_dir: Path) -> Optional[tuple]:
     return (int(colour[1:3], 16), int(colour[3:5], 16), int(colour[5:7], 16))
 
 
+def bake_centre_lat_lon(baked: Heightfield) -> Optional[tuple]:
+    """(lat, lon) of the bake's centre, or None when its CRS does not
+    project back (the all-default synthetic frame)."""
+    from pyproj import Transformer
+
+    g = baked.georeference
+    inverse = Transformer.from_crs(g.crs, "EPSG:4326", always_xy=True)
+    lon, lat = inverse.transform(g.origin_x_m + 0.5 * baked.width * g.pixel_size_m,
+                                 g.origin_y_m - 0.5 * baked.height * g.pixel_size_m)
+    if not (np.isfinite(lat) and np.isfinite(lon)):
+        return None
+    return float(lat), float(lon)
+
+
+def water_colour_for(data_dir: Path, render_dir: Path,
+                     centre: Optional[tuple]) -> tuple:
+    """(rgb, source) for a bake: the committed per-tile water texture's
+    colour when the bake's tile has one, else the sky table's water
+    strip; (None, None) with neither."""
+    if centre is not None:
+        try:
+            tiles = WaterTiles.load(render_dir)
+        except XPlaneDataError:
+            tiles = None
+        if tiles is not None:
+            colour = tiles.colour(*centre)
+            if colour is not None:
+                return colour, ("per-tile water texture "
+                                f"{tiles.path(*centre).relative_to(tiles.root)}")
+    colour = water_colour(data_dir)
+    return colour, ("sky_colors_clean water strip" if colour else None)
+
+
 def drape_paths(baked_path) -> Dict[str, Path]:
     stem = Path(baked_path)
     return {"png": stem.with_name(stem.name + "_xplane_drape.png"),
@@ -131,12 +201,18 @@ def drape_paths(baked_path) -> Dict[str, Path]:
 
 
 def build_drape(baked_path, data_dir: Optional[Path] = None,
-                water_mask: Optional[WaterMask] = None) -> Path:
+                water_mask: Optional[WaterMask] = None,
+                month: Optional[int] = None,
+                render_dir: Optional[Path] = None) -> Path:
     """Write ``<bake>_xplane_drape.png`` + ``.json`` beside the bake and
     return the sidecar path. A drape already built from this bake by this
-    version of the rule is reused. Raises XPlaneDataError when the
-    extracted textures are missing."""
+    version of the rule, for this ``month`` (None = the height rule
+    alone), is reused. Raises XPlaneDataError when the extracted textures
+    are missing; a missing snow-cover or water-tile raster is recorded in
+    the sidecar and the drape falls back to the extraction's own data."""
     data_dir = Path(data_dir) if data_dir else DATA_DIR
+    render_dir = Path(render_dir) if render_dir else RENDER_DIR
+    month = int(month) if month is not None else None
     baked_path = Path(baked_path)
     paths = drape_paths(baked_path)
     raster = baked_path.with_name(baked_path.name + ".r16")
@@ -147,7 +223,8 @@ def build_drape(baked_path, data_dir: Optional[Path] = None,
         except ValueError:
             previous = {}
         if (previous.get("drape_version") == DRAPE_VERSION
-                and previous.get("bake_sha256") == bake_sha):
+                and previous.get("bake_sha256") == bake_sha
+                and (previous.get("snow_cover") or {}).get("month") == month):
             return paths["sidecar"]
 
     baked = Heightfield.read(baked_path)
@@ -155,8 +232,39 @@ def build_drape(baked_path, data_dir: Optional[Path] = None,
     k = round(baked.georeference.pixel_size_m / grid.texel_size_m)
     loaded = _load_tiles(data_dir, grid.texel_size_m)
     snowline = float(baked.provenance.get("snowline_m_approx", 0.0) or 0.0)
+    centre = bake_centre_lat_lon(baked)
+
+    snow_cover = None
+    snow_record: Dict[str, Any] = {"month": month, "source": None}
+    if month is not None:
+        try:
+            cover = SnowCover.load(month, render_dir)
+        except XPlaneDataError as exc:
+            snow_record["missing"] = str(exc)
+        else:
+            g = baked.georeference
+            snow_cover = cover.rasterize_projected(
+                g.crs, g.origin_x_m, g.origin_y_m, g.pixel_size_m,
+                baked.width, baked.height)
+            known = np.isfinite(snow_cover)
+            snow_record.update({
+                "dataset": SNOW_COVER_DATASET,
+                "year": SNOW_COVER_YEAR,
+                "source": cover.source.name,
+                "cell_deg": 0.1,
+                "known_fraction": round(float(known.mean()), 4),
+                "mean_cover": (round(float(snow_cover[known].mean()), 4)
+                               if known.any() else None),
+                "seen_snow_fraction": (
+                    round(float((snow_cover[known] >= SNOW_SEEN).mean()), 4)
+                    if known.any() else None),
+                "rule": "rule snow x (0.25 + 0.75 cover); scrub band gains "
+                        "cover; unknown cells keep the height rule",
+            })
+            if not known.any():
+                snow_cover = None
     weights = classify(baked.elevations(), baked.georeference.pixel_size_m,
-                       snowline)
+                       snowline, snow_cover)
 
     texture = np.empty((grid.height, grid.width, 3), dtype=np.uint8)
     for row0 in range(0, baked.height, _CHUNK_ROWS):
@@ -178,7 +286,7 @@ def build_drape(baked_path, data_dir: Optional[Path] = None,
             block + 0.5, 0.0, 255.0).astype(np.uint8)
 
     water_texels = 0
-    colour = water_colour(data_dir)
+    colour, colour_source = water_colour_for(data_dir, render_dir, centre)
     if colour is not None:
         if water_mask is None:
             try:
@@ -200,18 +308,25 @@ def build_drape(baked_path, data_dir: Optional[Path] = None,
         "dataset": "Local simulator-derived ground textures, tiled by a "
                    "slope/height classification (approximated)",
         "license": LICENSE,
-        "attribution": ATTRIBUTION,
+        "attribution": (ATTRIBUTION + ("; " + SNOW_COVER_ATTRIBUTION
+                                       if snow_cover is not None else "")),
         "source_note": (
             "terrain SHAPE is the bake's, not X-Plane's; texture placement "
             "is this repository's slope/height rule (core/xplane/drape.py), "
             "not X-Plane land-class data; water is X-Plane's map-data "
-            "polygons, present only in the tiles that were extracted"),
+            "polygons, present only in the tiles that were extracted; snow "
+            "cover, when a month is known, is one captured year's MODIS "
+            "monthly product at 10 km, modulating the rule, not placing "
+            "snow by itself"),
         "drape_version": DRAPE_VERSION,
         "bake_sha256": bake_sha,
+        "centre_lat_lon": list(centre) if centre else None,
         "snowline_m_approx": snowline,
+        "snow_cover": snow_record,
         "class_fractions": fractions,
         "water_texels": water_texels,
         "water_colour_srgb8": list(colour) if colour else None,
+        "water_colour_source": colour_source,
         "textures": loaded["index"],
         "texture": {
             "file": paths["png"].name,

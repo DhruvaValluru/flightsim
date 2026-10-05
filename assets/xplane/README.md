@@ -22,6 +22,12 @@ Caveat: the source simulator has no literal "sea" or "mountain" terrain type. Se
 
 Caveat: the lookup layout is only partly decoded. The right-hand labels name sun elevation bands (-8° to +6°), plus sun, moon, water, cloud, ambient, and direct light columns. The sampled JSON is a rough summary. The PNGs are the reliable source. The `mount` and `clean` gradients sampled to nearly the same values, so I didn't confirm they differ.
 
+## Beside this folder
+- `assets/physical_renders/Resources/`: the simulator's render assets in its own layout (water tiles, monthly snow cover, shaders, clouds, weather decals, lights, moon, globe). The drape reads the per-tile water colour and the month's snow cover from there (`core/xplane/physical.py`).
+- `assets/logic_reports/`: the decompiled function listings and code of the subsystems that consume those assets; `core.xplane.physical.REPORTS` is the index.
+
+The `sky_colors_*.png` tables and `lights.txt` here are the single committed copies (the render tree does not repeat them).
+
 ## Source paths
 - Water: `Resources/map data/water/`
 - Terrain: `Resources/default scenery/1000 world terrain/` (`terrain*`, `textures*`)

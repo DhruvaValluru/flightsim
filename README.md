@@ -204,10 +204,19 @@ for priming a machine ahead of time rather than prerequisites.
   `python scripts/extract_xplane.py --xplane-root "<X-Plane 12 folder>"`
   (only needed again to refresh them). Used on every run:
   * terrain scenes wear the extracted ground textures, placed by slope and
-    height, with mapped water in the extracted water colour
+    height, with mapped water in the simulator's own per-tile water colour
     (`core/xplane/drape.py`, through the existing `-imagery=` path; it
     replaces the Sentinel-2 drape; `FLIGHTSIM_XPLANE_TERRAIN=off` restores
     the scene's own texture). The terrain SHAPE is still the GLO-30 bake.
+    The snow class follows the spec's month: the committed MODIS monthly
+    snow cover (`assets/physical_renders/`, read by
+    `core/xplane/physical.py`) thins snow where the satellite saw bare
+    ground that month and whitens the gentle ground below the snowline
+    where it saw snow; one drape is cached per terrain and month.
+  * `assets/physical_renders/` (the simulator's render resources in its own
+    layout) and `assets/logic_reports/` (the decompiled code that consumes
+    them) are committed; `core.xplane.physical.REPORTS` indexes which report
+    governs which assets and drape roles.
   * a place over mapped water with no stated ground cover gets the water
     surface class (`plan_water_surface`).
   * the legacy-look render takes its sun, sky-light and fog colours from
