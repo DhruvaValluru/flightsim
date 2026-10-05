@@ -159,6 +159,45 @@ def stale_manifest_reason(manifest_path: Path) -> Optional[str]:
         return (f"manifest version {version} carries no mesh_origin_actor_cm "
                 f"(got {origin!r}); the mesh would be attached at the "
                 f"structural datum")
+    return _unimportable_output_reason(Path(manifest_path), manifest)
+
+
+def _png_size(path: Path) -> Optional[tuple]:
+    """(width, height) from a PNG's IHDR, or None when it is not a PNG."""
+    with path.open("rb") as handle:
+        head = handle.read(24)
+    if len(head) < 24 or head[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+
+
+def _unimportable_output_reason(manifest_path: Path,
+                                manifest: Dict) -> Optional[str]:
+    """Converter output the Unreal import is measured to fail on.
+
+    Measured 2026-10-05 (UE 5.7, the A320): Interchange refused a
+    non-power-of-two texture, and renamed every "tex_<stem>" material
+    because it names the texture asset "TEX_<stem>" (asset names are
+    case-insensitive) -- after which the import commandlet asserted in
+    the content browser and every part still queued was lost. The
+    converter now writes neither; this sends an earlier conversion back
+    through it (no fetch, no network: the source is already pinned).
+    """
+    directory = manifest_path.parent
+    for part in manifest.get("parts", []):
+        mtl = directory / f"{part}.mtl"
+        if mtl.is_file() and any(
+                line.startswith("newmtl tex_")
+                for line in mtl.read_text(encoding="utf-8",
+                                          errors="replace").splitlines()):
+            return (f"{mtl.name} names materials 'tex_*', which collide with "
+                    f"Interchange's 'TEX_*' texture assets on import")
+    for texture in manifest.get("textures", []):
+        path = directory / texture
+        size = _png_size(path) if path.is_file() else None
+        if size and not all(n > 0 and n & (n - 1) == 0 for n in size):
+            return (f"texture {texture} is {size[0]}x{size[1]}; Unreal "
+                    f"refuses non-power-of-two texture imports")
     return None
 
 
@@ -260,10 +299,20 @@ def import_manifests(manifests: List[Path], report: Report = print) -> None:
         [(REPO / "scripts" / "ue_import_aircraft.py").as_posix()]
         + [Path(m).as_posix() for m in manifests])
     report(f"importing {len(manifests)} aircraft into the Unreal project")
-    imported = subprocess.run(
-        [str(editor), str(REPO / "ue" / "FlightSim.uproject"),
-         "-run=pythonscript", f"-script={script_arg}",
-         "-unattended", "-nopause", "-nosplash", "-stdout"], cwd=REPO)
+    imported = _run_import(editor, script_arg)
+
+    if len(manifests) > 1:
+        # An editor crash on one aircraft loses every part still queued
+        # behind it (measured 2026-10-05: the A320 took the whole DHC6
+        # with it). Retry what is missing one aircraft per editor run, so
+        # a failure is confined to the aircraft that causes it.
+        for manifest_path in manifests:
+            if missing_assets(Path(manifest_path)):
+                report(f"retrying {Path(manifest_path).parent.name} in its "
+                       f"own editor run")
+                imported = _run_import(editor, " ".join(
+                    [(REPO / "scripts" / "ue_import_aircraft.py").as_posix(),
+                     Path(manifest_path).as_posix()]))
 
     missing: List[str] = []
     for manifest_path in manifests:
@@ -279,6 +328,13 @@ def import_manifests(manifests: List[Path], report: Report = print) -> None:
         report(f"(the editor exited {imported.returncode}, but every "
                f"expected asset is on disk -- engine-level warnings, not "
                f"an import failure)")
+
+
+def _run_import(editor, script_arg: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [str(editor), str(REPO / "ue" / "FlightSim.uproject"),
+         "-run=pythonscript", f"-script={script_arg}",
+         "-unattended", "-nopause", "-nosplash", "-stdout"], cwd=REPO)
 
 
 def ensure_model(name: str, report: Report = print) -> Path:

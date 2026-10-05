@@ -226,6 +226,93 @@ def test_the_import_verifies_assets_not_the_editor_exit_code(
     assert any("exited 3" in line for line in lines)
 
 
+def test_a_crashing_aircraft_does_not_lose_the_others(tmp_path, monkeypatch):
+    """Measured 2026-10-05: the editor asserted mid-way through the A320
+    and every DHC6 part queued behind it in the same run was lost. What
+    the batch run leaves missing is retried one aircraft per editor run."""
+    import core.util.platform as platform_module
+
+    monkeypatch.setattr(importer, "REPO", tmp_path)
+    editor = tmp_path / "UnrealEditor-Cmd"
+    editor.write_bytes(b"#!/bin/sh\n")
+    monkeypatch.setattr(platform_module, "ue_editor_path", lambda: editor)
+    crashes, survives = write_manifest(tmp_path, "CRASH"), write_manifest(tmp_path, "OK")
+
+    def handler(cmd, **kw):
+        script = next(part for part in cmd if part.startswith("-script="))
+        if "CRASH" not in script:          # the retry of the survivor alone
+            place_assets(tmp_path, "OK")
+        return _Completed(3)
+
+    fake = FakeSubprocess(handler)
+    monkeypatch.setattr(importer, "subprocess", fake)
+    with pytest.raises(importer.AircraftAssetError) as caught:
+        importer.import_manifests([crashes, survives], report=lambda line: None)
+    assert len(fake.calls) == 3            # the batch, then one run each
+    assert "CRASH/fuselage" in caught.value.message
+    assert "OK/" not in caught.value.message
+
+
+def _textured_manifest(tmp_path: Path):
+    import struct
+    import zlib
+
+    manifest = write_manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data.update({"version": 3, "mesh_origin_actor_cm": [0.0, 0.0, 0.0],
+                 "textures": ["livery.png"]})
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    def png(width, height):
+        def chunk(kind, body):
+            return (struct.pack(">I", len(body)) + kind + body
+                    + struct.pack(">I", zlib.crc32(kind + body)))
+        rows = b"".join(b"\x00" + b"\x00" * width * 3 for _ in range(height))
+        (manifest.parent / "livery.png").write_bytes(
+            b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+    png(16, 16)
+    (manifest.parent / "fuselage.mtl").write_text(
+        "newmtl mat_livery\nmap_Kd livery.png\n", encoding="utf-8")
+    return manifest, png
+
+
+def test_output_unreal_cannot_import_is_stale(tmp_path):
+    """Measured 2026-10-05 (UE 5.7, the A320): a non-power-of-two texture
+    and "tex_*" material names (colliding with Interchange's "TEX_*"
+    textures) crashed the import. A conversion that wrote either is sent
+    back through the converter instead of to the editor."""
+    manifest, png = _textured_manifest(tmp_path)
+    assert importer.stale_manifest_reason(manifest) is None
+
+    (manifest.parent / "fuselage.mtl").write_text(
+        "newmtl tex_livery\nmap_Kd livery.png\n", encoding="utf-8")
+    assert "TEX_" in importer.stale_manifest_reason(manifest)
+
+    (manifest.parent / "fuselage.mtl").write_text(
+        "newmtl mat_livery\nmap_Kd livery.png\n", encoding="utf-8")
+    png(24, 16)
+    assert "24x16" in importer.stale_manifest_reason(manifest)
+
+
+def test_the_converter_writes_power_of_two_textures(tmp_path):
+    from assets_pipeline.convert import copy_texture, power_of_two
+
+    Image = pytest.importorskip("PIL.Image")
+    assert [power_of_two(n) for n in (1, 3, 1000, 1024, 1500, 1536, 3000)] == \
+        [1, 4, 1024, 1024, 1024, 2048, 2048]
+    Image.new("RGBA", (1000, 600), (10, 20, 30, 255)).save(tmp_path / "a.png")
+    assert copy_texture(tmp_path / "a.png", tmp_path / "b.png") == (1024, 512)
+    with Image.open(tmp_path / "b.png") as written:
+        assert written.size == (1024, 512) and written.mode == "RGBA"
+    # already power-of-two: byte-identical copy
+    Image.new("RGB", (64, 32)).save(tmp_path / "c.png")
+    copy_texture(tmp_path / "c.png", tmp_path / "d.png")
+    assert (tmp_path / "c.png").read_bytes() == (tmp_path / "d.png").read_bytes()
+
+
 def test_the_import_refuses_without_an_engine(tmp_path, monkeypatch):
     """No editor is a named refusal, not a crash mid-flow."""
     import core.util.platform as platform_module

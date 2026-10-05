@@ -44,8 +44,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import hashlib  # noqa: E402
 
 from assets_pipeline.convert import (  # noqa: E402
-    MESH_MANIFEST_VERSION, ConvertError, MeshExtents, _fdm_config_name,
-    _labelled_airframe, _model_origin_offset_actor_cm, fdm_vrp_actor_cm,
+    MESH_MANIFEST_VERSION, TEXTURED_MATERIAL_PREFIX, ConvertError, MeshExtents,
+    _fdm_config_name, _labelled_airframe, _model_origin_offset_actor_cm, fdm_vrp_actor_cm,
     measure_mesh_origin,
 )
 from core.capture.airframe import fdm_xml_path  # noqa: E402
@@ -158,11 +158,12 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
         out.write("\n".join(vt_lines) + "\n")
         out.write("\n".join(vn_lines) + "\n")
         for sheet in SHEETS:
-            out.write(f"usemtl tex_{sheet}\n")
+            out.write(f"usemtl {TEXTURED_MATERIAL_PREFIX}{sheet}\n")
             out.write("\n".join(by_material[sheet]) + "\n")
     with (out_dir / "body.mtl").open("w", encoding="utf-8") as out:
         for sheet in SHEETS:
-            out.write(f"newmtl tex_{sheet}\nKd 1.0000 1.0000 1.0000\n"
+            out.write(f"newmtl {TEXTURED_MATERIAL_PREFIX}{sheet}\n"
+                      "Kd 1.0000 1.0000 1.0000\n"
                       f"map_Kd {sheet}.png\n\n")
 
     # -- where the mesh sits: measured from what was just converted -----

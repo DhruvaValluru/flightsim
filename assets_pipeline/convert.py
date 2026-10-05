@@ -516,6 +516,43 @@ def measure_mesh_origin(extents: MeshExtents, airframe,
     return (round(origin_x, 4) + 0.0, 0.0, round(origin_z, 4) + 0.0), record
 
 
+#: Prefix of a textured material's name. NOT "tex_": Interchange names the
+#: texture asset of ``map_Kd wings_texture.png`` "TEX_wings_texture", UE
+#: asset names are case-insensitive, so a material "tex_wings_texture"
+#: collided with its own texture and was renamed on import (measured
+#: 2026-10-05 on the A320, UE 5.7: tex_A320 -> tex_A3201, and the
+#: commandlet then died in the content browser with no Slate app).
+TEXTURED_MATERIAL_PREFIX = "mat_"
+
+
+def power_of_two(n: int) -> int:
+    """The power of two nearest ``n`` (ties go up)."""
+    lower = 1 << (max(1, n).bit_length() - 1)
+    return lower if n - lower < lower * 2 - n else lower * 2
+
+
+def copy_texture(source: Path, destination: Path) -> Tuple[int, int]:
+    """Copy a texture, resampled to power-of-two sides when it is not.
+
+    UE's texture import refuses other sizes ("Cannot import texture with
+    non-power of two dimensions", measured 2026-10-05 on the A320 sheets),
+    and that refusal took the whole import commandlet down with it. UVs
+    are normalised, so a resample keeps every mapping. A texture already
+    power-of-two is copied byte for byte. Returns the written size.
+    """
+    from PIL import Image
+
+    with Image.open(source) as image:
+        size = image.size
+        target = (power_of_two(size[0]), power_of_two(size[1]))
+        if target == size:
+            shutil.copyfile(source, destination)
+            return size
+        image.load()
+        image.resize(target, Image.LANCZOS).save(destination, format="PNG")
+        return target
+
+
 class ObjWriter:
     """Accumulates triangles grouped by (texture, material colour)."""
 
@@ -527,7 +564,7 @@ class ObjWriter:
 
     def material_key(self, texture: Optional[str], rgb, transparency: float) -> str:
         if texture:
-            key = "tex_" + re.sub(r"[^A-Za-z0-9]+", "_", Path(texture).stem)
+            key = TEXTURED_MATERIAL_PREFIX + re.sub(r"[^A-Za-z0-9]+", "_", Path(texture).stem)
         else:
             key = "rgb_%02x%02x%02x" % tuple(int(max(0, min(1, c)) * 255) for c in rgb)
         if key not in self.materials:
@@ -705,7 +742,7 @@ def convert(config_path: Path, out_root: Path, repo_root: Path) -> Path:
 
     # Textures alongside the OBJs so the importer finds them by relative path.
     for texture_name, texture_path in textures_used.items():
-        shutil.copyfile(texture_path, out_dir / texture_name)
+        copy_texture(texture_path, out_dir / texture_name)
 
     manifest_surfaces = []
     for surface_name, surface in surface_defs.items():
