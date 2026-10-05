@@ -359,7 +359,8 @@ def test_lighting_flags_follow_the_look(monkeypatch):
     monkeypatch.setenv(XPLANE_LIGHTING_ENV, "on")
     tables = _flat_tables(evening=EVENING, morning=MORNING)
     tables["ocast"] = tables["hazy"] = tables["clean"]
-    default = xplane_lighting_flags(None, tables, source="tables")
+    default = xplane_lighting_flags(None, tables, source="tables",
+                                    compensate=False)
     assert default == ["-xplane-condition=clean",
                        "-xplane-direct=200:200:200",
                        "-xplane-ambient=200:200:200",
@@ -867,18 +868,23 @@ def test_lighting_flags_use_the_model_by_day_and_the_tables_otherwise(monkeypatc
     tables = _flat_tables(evening=EVENING, morning=MORNING)
     tables["ocast"] = tables["hazy"] = tables["clean"]
 
-    flags = xplane_lighting_flags(None, tables)            # the default look: sun 50 deg
+    flags = xplane_lighting_flags(None, tables, compensate=False)  # sun 50 deg
     assert flags[0] == "-xplane-condition=clean/model"
     direct = tuple(int(c) for c in flags[1].split("=")[1].split(":"))
     ambient = tuple(int(c) for c in flags[2].split("=")[1].split(":"))
     assert direct[0] == 255 and direct[0] >= direct[2]    # warm white sun
     assert ambient[2] == 255 and ambient[2] > ambient[0]  # blue sky light
+    # what the engine is sent: the engine's own atmosphere supplies those
+    # tints, so the model's colours go out (near) white
+    sent = xplane_lighting_flags(None, tables)
+    for flag in sent[1:3]:
+        assert min(int(c) for c in flag.split("=")[1].split(":")) >= 250
     # overcast, haze and twilight keep the simulator's measured tables
     assert xplane_lighting_flags(STORM_LOOK, tables)[0] == "-xplane-condition=ocast"
     hazy = {"sun_elev": 40.0, "sun_azim": 95.0, "fog_density": 0.010}
     assert xplane_lighting_flags(hazy, tables)[0] == "-xplane-condition=hazy"
     dusk = {"sun_elev": MODEL_SUN_ELEVATION_FLOOR_DEG - 1.0, "sun_azim": 270.0}
-    assert xplane_lighting_flags(dusk, tables) == [
+    assert xplane_lighting_flags(dusk, tables, compensate=False) == [
         "-xplane-condition=clean", "-xplane-direct=200:200:200",
         "-xplane-ambient=200:200:200", "-xplane-horizon=200:200:200"]
     monkeypatch.setenv(XPLANE_SKY_ENV, "tables")
@@ -886,6 +892,20 @@ def test_lighting_flags_use_the_model_by_day_and_the_tables_otherwise(monkeypatc
     monkeypatch.setenv(XPLANE_SKY_ENV, "nonsense")
     with pytest.raises(ValueError, match="FLIGHTSIM_XPLANE_SKY"):
         xplane_lighting_flags(None, tables)
+
+
+def test_engine_compensation_undoes_the_engine_atmosphere():
+    from core.xplane.atmosphere import engine_light_colours, sky_lighting as model
+
+    lit = model(10.0, 180.0)
+    sent = engine_light_colours({"direct": lit.direct, "ambient": lit.ambient,
+                                 "sky_horizon": lit.horizon}, 10.0, 180.0)
+    assert min(sent["direct"]) >= 250 and min(sent["ambient"]) >= 250
+    assert sent["sky_horizon"] == lit.horizon       # fog colour passes through
+    # a grey table sun at low elevation is sent bluer than grey: the
+    # engine's transmittance reddens it back
+    grey = engine_light_colours({"direct": (200, 200, 200)}, 5.0, 180.0)
+    assert grey["direct"][2] > grey["direct"][0]
 
 
 # -- the material maps the drape writes beside the composite ---------------
@@ -943,7 +963,7 @@ def test_drape_writes_the_material_maps_beside_the_composite(data, tmp_path):
     sidecar_path = build_drape(stem, data_dir=data)
     sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
     paths = drape_paths(stem)
-    assert sidecar["drape_version"] == DRAPE_VERSION == 7
+    assert sidecar["drape_version"] == DRAPE_VERSION == 8
     for key in ("png", "base", "roles", "snow", "water"):
         assert paths[key].is_file(), key
     assert paths["base"].name == "maps_xplane_base.png"

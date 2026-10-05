@@ -357,3 +357,55 @@ def sky_lighting(sun_elevation_deg: float, sun_azimuth_deg: float,
                        sun_elevation_deg=float(sun_elevation_deg),
                        sun_azimuth_deg=float(sun_azimuth_deg),
                        altitude_m=float(altitude_m), atmosphere=atm.record())
+
+
+# -- what the engine already applies -----------------------------------------
+
+def _srgb8_to_linear(colour: Sequence[int]) -> np.ndarray:
+    v = np.asarray(colour, dtype=float) / 255.0
+    return np.where(v <= 0.04045, v / 12.92, np.power((v + 0.055) / 1.055, 2.4))
+
+
+def engine_light_colours(colours: Dict[str, Sequence[int]],
+                         sun_elevation_deg: float, sun_azimuth_deg: float,
+                         altitude_m: float = 0.0,
+                         atm: Atmosphere = Atmosphere()) -> Dict[str, Tuple[int, int, int]]:
+    """Target light colours re-expressed as the colours to SET on engine
+    lights that already apply this atmosphere themselves.
+
+    The host's sun is an atmosphere sun light: the engine multiplies it by
+    the sky atmosphere's transmittance. Its sky light is a real-time
+    capture of that atmosphere, so it already carries the sky's colour.
+    Setting the light colours to the target colours counts the atmosphere
+    twice: a low sun reddened twice and the shade blued twice. This
+    divides each target by the model's estimate of what the engine adds
+    (the engine's sky atmosphere uses the same Earth constants as
+    :class:`Atmosphere`). The model's own colours come back white. The
+    horizon colour goes to the height fog's inscattering colour, which
+    the engine does not derive from the atmosphere, so it passes through.
+
+    Below ``MODEL_SUN_ELEVATION_FLOOR_DEG`` the model's estimate is taken
+    at the floor, and a channel the model puts below 1e-4 of its peak is
+    left uncompensated rather than divided by almost nothing.
+    """
+    elevation = max(float(sun_elevation_deg), MODEL_SUN_ELEVATION_FLOOR_DEG)
+    white = np.asarray(atm.solar_irradiance, dtype=float)
+    engine = {
+        "direct": sun_irradiance(atm, altitude_m, elevation) / white,
+        "ambient": sky_irradiance(atm, altitude_m, elevation, sun_azimuth_deg) / white,
+    }
+    out: Dict[str, Tuple[int, int, int]] = {}
+    for name, colour in colours.items():
+        if name not in engine:
+            out[name] = tuple(int(c) for c in colour)
+            continue
+        target = _srgb8_to_linear(colour)
+        applied = np.asarray(engine[name], dtype=float)
+        peak = float(np.max(applied))
+        if not peak > 0.0 or not float(np.max(target)) > 0.0:
+            out[name] = tuple(int(c) for c in colour)
+            continue
+        applied = applied / peak
+        ratio = np.where(applied > 1e-4, target / np.maximum(applied, 1e-4), target)
+        out[name] = _srgb8(ratio, np.ones(3))
+    return out

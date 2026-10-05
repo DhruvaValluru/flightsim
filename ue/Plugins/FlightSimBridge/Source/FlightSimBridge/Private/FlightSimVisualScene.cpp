@@ -761,7 +761,13 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 		XPlaneRecord->SetStringField(TEXT("applied_to"),
 			TEXT("sun light colour, sky light colour, height fog inscattering colour"));
 		XPlaneRecord->SetStringField(TEXT("source"),
-			TEXT("X-Plane 12 sky_colors lookup, extracted locally (scripts/extract_xplane.py)"));
+			Options.XPlaneCondition.EndsWith(TEXT("/model"))
+				? TEXT("atmosphere model (core/xplane/atmosphere.py)")
+				: TEXT("simulator sky_colors lookup, extracted locally (scripts/extract_xplane.py)"));
+		XPlaneRecord->SetStringField(TEXT("compensation"),
+			TEXT("sun and sky-light colours arrive divided by what this engine's sky "
+			     "atmosphere already applies (webapp.runs.xplane_lighting_flags): the "
+			     "sun is an atmosphere sun light, the sky light a real-time capture"));
 		LookApplied->SetObjectField(TEXT("xplane_lighting"), XPlaneRecord);
 	}
 

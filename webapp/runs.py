@@ -1212,7 +1212,8 @@ def xplane_sky_source(source: Optional[str] = None) -> str:
 
 def xplane_lighting_flags(look: Optional[Dict],
                           tables: Optional[Dict] = None,
-                          source: Optional[str] = None) -> List[str]:
+                          source: Optional[str] = None,
+                          compensate: bool = True) -> List[str]:
     """The -xplane-* render flags for a look, or [] when there is no
     extracted X-Plane lighting table on this machine.
 
@@ -1230,6 +1231,16 @@ def xplane_lighting_flags(look: Optional[Dict],
     for the sky light and the horizon sky colour for the fog
     inscattering. The commandlet applies them as COLOURS only --
     intensities, exposure and the fog density stay the look's.
+
+    With ``compensate`` (the default) the sun and sky-light colours are
+    divided by what the engine's own sky atmosphere already applies to
+    those lights (:func:`core.xplane.atmosphere.engine_light_colours`):
+    the sun is an atmosphere sun light and the sky light a real-time
+    capture, so sending the target colours as they are reddens a low sun
+    twice and blues the shade twice. The model's clear-sky colours come
+    out white (the engine computes the same atmosphere per pixel); a
+    table's colours come out as the tint that lands the lit result on
+    the table's colour.
     """
     import os
 
@@ -1262,6 +1273,12 @@ def xplane_lighting_flags(look: Optional[Dict],
             colours = sky_lighting(condition, sun_elev, sun_azim, tables=tables)
         except XPlaneDataError:
             return []
+
+    if compensate:
+        from core.xplane.atmosphere import engine_light_colours
+        colours = engine_light_colours(
+            {name: colours[name] for name in ("direct", "ambient", "sky_horizon")},
+            sun_elev, sun_azim)
 
     def triple(name: str) -> str:
         return ":".join(str(channel) for channel in colours[name])

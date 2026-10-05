@@ -426,9 +426,19 @@ refused (recorded).
   old sky tables.
 - **Water.** `core/xplane/ocean.py` holds the decoded water formulas.
   Next step: a translucent water surface in the host using them.
+- **Light colours.** The sun is an atmosphere sun light and the sky
+  light a real-time capture, so the engine's sky atmosphere already
+  tints both. `xplane_lighting_flags` now divides that out
+  (`engine_light_colours`): the model sky sends white, a table sky sends
+  the tint that lands on the table's colour. Before this, a low sun was
+  reddened twice and shade blued twice. Check a sunset render.
+- **Rock relief.** Every role now has a normal map derived from its own
+  texture (`scripts/derive_drape_normals.py`) until the extractor pulls
+  the real ones. Check a sunlit cliff for relief that looks lit from the
+  wrong side; if so, flip the green channel in `core/xplane/normals.py`.
 - **Decode record.** `assets/logic_reports/shader_decode.json`.
-- Nothing above has been run under pytest yet; run `tests/test_xplane.py`
-  and `tests/test_ocean.py` first.
+- Nothing above has been run under pytest yet; run `tests/test_xplane.py`,
+  `tests/test_normals.py` and `tests/test_ocean.py` first.
 
 ## State
 

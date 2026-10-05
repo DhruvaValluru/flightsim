@@ -78,8 +78,9 @@ that already has them. Every scalar in that block but DetailMetres*
 repository's constant (the simulator's uniform values are in no
 module). A role's detail normal is the one the extraction recorded
 (``index[role]["normal"]``, relative to terrain/drape/, when its .ter
-names a normal map); the committed index records none, so the material
-keeps its flat default.
+names a normal map); the committed index records none, so the drape
+falls back to ``<role>_nrm_derived.png`` (``core/xplane/normals.py``),
+and to the material's flat default when that is absent too.
 
 What this is NOT: X-Plane's terrain. The SHAPE is the bake's (Copernicus
 GLO-30 or the synthesised ridge); the placement of each texture is this
@@ -124,8 +125,9 @@ from .physical import (SNOW_COVER_ATTRIBUTION, SNOW_COVER_DATASET,
 #: the material maps (roles, snow level, water mask) written beside the
 #: composite and the sidecar's "material" block. 7: the base image (the
 #: role means, the water, no weather snow) the material's Imagery takes,
-#: listed as material.textures.imagery.
-DRAPE_VERSION = 7
+#: listed as material.textures.imagery. 8: a role without an extracted
+#: normal takes the one derived from its texture (core/xplane/normals.py).
+DRAPE_VERSION = 8
 ROLES = ("valley", "scrub", "rock", "cliff", "snow")
 #: The roles map's channels, R G B A in this order; snow is the remainder.
 ROLE_CHANNELS = ROLES[:4]
@@ -461,6 +463,20 @@ def material_scalars(index: Dict[str, Dict[str, Any]]) -> Dict[str, float]:
     return out
 
 
+
+def _role_normal(drape_dir: Path, role: str, entry: Dict) -> Dict[str, object]:
+    """``normal`` (absolute path or None) and ``normal_source`` for a role."""
+    from .normals import SUFFIX as DERIVED_SUFFIX
+
+    if entry.get("normal"):
+        return {"normal": str((drape_dir / entry["normal"]).resolve()),
+                "normal_source": "extracted"}
+    derived = drape_dir / f"{role}{DERIVED_SUFFIX}"
+    if derived.is_file():
+        return {"normal": str(derived.resolve()),
+                "normal_source": "derived from the albedo (core/xplane/normals.py)"}
+    return {"normal": None, "normal_source": None}
+
 def material_block(paths: Dict[str, Path], drape_dir: Path,
                    index: Dict[str, Dict[str, Any]],
                    render_dir: Path,
@@ -484,12 +500,12 @@ def material_block(paths: Dict[str, Path], drape_dir: Path,
             # The mean of the tile's 8-bit sRGB texels: the base image's
             # colour for this role where its weight is 1.
             "mean_srgb": [round(float(v), 2) for v in means[role]],
-            # The role's normal map when the extraction recorded one
+            # The role's normal map: the extraction's when it recorded one
             # (index[role]["normal"], relative to terrain/drape/, from a
-            # .ter that names a normal map); the committed index records
-            # none, and the material then keeps its flat default.
-            "normal": (str((drape_dir / entry["normal"]).resolve())
-                       if entry.get("normal") else None),
+            # .ter that names a normal map), else the stand-in derived
+            # from the texture (core/xplane/normals.py) when it is on
+            # disk, else None and the material keeps its flat default.
+            **_role_normal(drape_dir, role, entry),
         }
     return {
         "version": MATERIAL_VERSION,
