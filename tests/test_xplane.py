@@ -336,7 +336,7 @@ def test_lighting_flags_follow_the_look(monkeypatch):
     monkeypatch.setenv(XPLANE_LIGHTING_ENV, "on")
     tables = _flat_tables(evening=EVENING, morning=MORNING)
     tables["ocast"] = tables["hazy"] = tables["clean"]
-    default = xplane_lighting_flags(None, tables)
+    default = xplane_lighting_flags(None, tables, source="tables")
     assert default == ["-xplane-condition=clean",
                        "-xplane-direct=200:200:200",
                        "-xplane-ambient=200:200:200",
@@ -360,7 +360,9 @@ def test_lighting_flags_are_absent_when_off_or_unextracted(monkeypatch):
 
     monkeypatch.setenv(XPLANE_LIGHTING_ENV, "on")
     monkeypatch.setattr(xplane, "load_sky_tables", missing)
-    assert xplane_lighting_flags(None) == []
+    assert xplane_lighting_flags(None, source="tables") == []
+    # the model needs no extraction: the clear sky's colours still come
+    assert xplane_lighting_flags(None, source="model")[0] == "-xplane-condition=clean/model"
 
 
 def test_the_commandlet_parses_every_flag_the_web_app_sends():
@@ -784,3 +786,80 @@ def test_weather_snow_cov_is_weather_applys_shape():
     # the slope ramp halves the coverage: cov = saturate(2 * 0.5 - 1 + 0.6)
     half = np.full((1, 3), 0.5, dtype=np.float32)
     assert weather_snow_cov(white, cover, half, noise, alpha)[0, 2] == pytest.approx(0.6)
+
+
+# -- the atmosphere model (the simulator's sky, computed) -------------------
+
+def test_atmosphere_transmittance_falls_with_the_sun_and_is_zero_below_it():
+    import numpy as np
+
+    from core.xplane.atmosphere import Atmosphere, sun_transmittance
+
+    atm = Atmosphere()
+    high = sun_transmittance(atm, 0.0, 60.0)
+    low = sun_transmittance(atm, 0.0, 5.0)
+    assert np.all(high > low) and np.all(high < 1.0)
+    # the red band survives a low sun best (Rayleigh ~ 1/lambda^4)
+    assert low[0] > low[1] > low[2]
+    assert np.all(sun_transmittance(atm, 0.0, -2.0) == 0.0)
+    # from altitude the air mass is thinner
+    assert np.all(sun_transmittance(atm, 10000.0, 60.0) > high)
+
+
+def test_atmosphere_sky_is_blue_at_the_zenith_and_paler_at_the_horizon():
+    from core.xplane.atmosphere import Atmosphere, sky_radiance
+
+    atm = Atmosphere()
+    zenith = sky_radiance(atm, 0.0, 90.0, 0.0, 60.0, 180.0)
+    horizon = sky_radiance(atm, 0.0, 2.0, 0.0, 60.0, 180.0)
+    assert zenith[2] > zenith[0]                          # blue over red
+    assert horizon[0] / horizon[2] > zenith[0] / zenith[2]  # the horizon is whiter
+    assert horizon.sum() > zenith.sum()                   # and brighter
+
+
+def test_sky_lighting_colours_follow_the_sun():
+    from core.xplane.atmosphere import sky_lighting
+
+    noon = sky_lighting(60.0, 180.0)
+    low = sky_lighting(4.0, 270.0)
+    r, g, b = noon.direct
+    assert r >= g >= b and r == 255                       # a warm white sun
+    assert noon.ambient[2] == 255 and noon.ambient[2] > noon.ambient[0]   # a blue sky
+    assert low.direct[0] == 255 and low.direct[2] < noon.direct[2]        # a reddening sun
+    record = noon.record()
+    assert record["atmosphere"]["provenance"].startswith("Bruneton")
+    assert record["atmosphere"]["multiple_scattering"].startswith("not integrated")
+
+
+def test_lighting_flags_use_the_model_by_day_and_the_tables_otherwise(monkeypatch):
+    from core.xplane.atmosphere import MODEL_SUN_ELEVATION_FLOOR_DEG
+    from webapp.runs import (
+        STORM_LOOK, XPLANE_LIGHTING_ENV, XPLANE_SKY_ENV, xplane_lighting_flags,
+        xplane_sky_source,
+    )
+
+    monkeypatch.setenv(XPLANE_LIGHTING_ENV, "on")
+    monkeypatch.delenv(XPLANE_SKY_ENV, raising=False)
+    assert xplane_sky_source() == "model"
+    tables = _flat_tables(evening=EVENING, morning=MORNING)
+    tables["ocast"] = tables["hazy"] = tables["clean"]
+
+    flags = xplane_lighting_flags(None, tables)            # the default look: sun 50 deg
+    assert flags[0] == "-xplane-condition=clean/model"
+    direct = tuple(int(c) for c in flags[1].split("=")[1].split(":"))
+    ambient = tuple(int(c) for c in flags[2].split("=")[1].split(":"))
+    assert direct[0] == 255 and direct[0] >= direct[2]    # warm white sun
+    assert ambient[2] == 255 and ambient[2] > ambient[0]  # blue sky light
+    # overcast, haze and twilight keep the simulator's measured tables
+    assert xplane_lighting_flags(STORM_LOOK, tables)[0] == "-xplane-condition=ocast"
+    hazy = {"sun_elev": 40.0, "sun_azim": 95.0, "fog_density": 0.010}
+    assert xplane_lighting_flags(hazy, tables)[0] == "-xplane-condition=hazy"
+    dusk = {"sun_elev": MODEL_SUN_ELEVATION_FLOOR_DEG - 1.0, "sun_azim": 270.0}
+    assert xplane_lighting_flags(dusk, tables) == [
+        "-xplane-condition=clean", "-xplane-direct=200:200:200",
+        "-xplane-ambient=200:200:200", "-xplane-horizon=200:200:200"]
+    monkeypatch.setenv(XPLANE_SKY_ENV, "tables")
+    assert xplane_lighting_flags(None, tables)[0] == "-xplane-condition=clean"
+    monkeypatch.setenv(XPLANE_SKY_ENV, "nonsense")
+    with pytest.raises(ValueError, match="FLIGHTSIM_XPLANE_SKY"):
+        xplane_lighting_flags(None, tables)

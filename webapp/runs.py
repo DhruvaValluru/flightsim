@@ -1157,44 +1157,82 @@ XPLANE_HAZY_FOG_DENSITY = 0.010
 #: suite sets it so pinned render commands do not depend on whether this
 #: machine has an X-Plane extraction).
 XPLANE_LIGHTING_ENV = "FLIGHTSIM_XPLANE_LIGHTING"
+#: FLIGHTSIM_XPLANE_SKY chooses where the clear-sky colours come from:
+#: "model" (the default) computes them from the simulator's atmosphere
+#: model (core.xplane.atmosphere: Bruneton's parameter set, the one its
+#: atmosphere shader takes) for a sun high enough for single scattering
+#: to be trusted; "tables" reads the decoded sky_colors tables for every
+#: sun. Overcast (the storm look), haze and twilight always read the
+#: tables: the model has no clouds, no haze knob and no multiple
+#: scattering, and the tables were measured for exactly those.
+XPLANE_SKY_ENV = "FLIGHTSIM_XPLANE_SKY"
+XPLANE_SKY_SOURCES = ("model", "tables")
+
+
+def xplane_sky_source(source: Optional[str] = None) -> str:
+    """The clear-sky colour source: the argument, else the environment,
+    else "model"; an unknown word is refused by name."""
+    import os
+
+    chosen = (source or os.environ.get(XPLANE_SKY_ENV) or "model").lower()
+    if chosen not in XPLANE_SKY_SOURCES:
+        raise ValueError(f"{XPLANE_SKY_ENV}={chosen!r}: expected one of "
+                         f"{XPLANE_SKY_SOURCES}")
+    return chosen
 
 
 def xplane_lighting_flags(look: Optional[Dict],
-                          tables: Optional[Dict] = None) -> List[str]:
+                          tables: Optional[Dict] = None,
+                          source: Optional[str] = None) -> List[str]:
     """The -xplane-* render flags for a look, or [] when there is no
     extracted X-Plane lighting table on this machine.
 
     The sky condition follows the look: the storm look reads X-Plane's
-    overcast table, a hazy fog density the hazy table, anything else the
-    clean table. The sun position is the look's own (the default look
-    when none is stated). Three colours go to the commandlet as 8-bit
-    sRGB ``R:G:B`` (colon-separated: FParse stops at a comma): the direct
-    light colour for the sun, the ambient colour for the sky light and
-    the horizon sky colour for the fog inscattering. The commandlet
-    applies them as COLOURS only -- intensities, exposure and the fog
-    density stay the look's.
+    overcast table, a hazy fog density the hazy table, anything else is
+    the clear sky. The clear sky's colours come from the atmosphere
+    MODEL (core.xplane.atmosphere) when the source is "model" (the
+    default, see :data:`XPLANE_SKY_ENV`) and the sun is at or above
+    ``MODEL_SUN_ELEVATION_FLOOR_DEG``; otherwise from the clean table.
+    The condition flag names the source (``clean/model`` or ``clean``)
+    so render.json records it. The sun position is the look's own (the
+    default look when none is stated). Three colours go to the
+    commandlet as 8-bit sRGB ``R:G:B`` (colon-separated: FParse stops at
+    a comma): the direct light colour for the sun, the ambient colour
+    for the sky light and the horizon sky colour for the fog
+    inscattering. The commandlet applies them as COLOURS only --
+    intensities, exposure and the fog density stay the look's.
     """
     import os
 
     from core.render.flags import DEFAULT_LOOK
     from core.xplane import XPlaneDataError, sky_lighting
+    from core.xplane.atmosphere import MODEL_SUN_ELEVATION_FLOOR_DEG
+    from core.xplane.atmosphere import sky_lighting as model_lighting
 
     if os.environ.get(XPLANE_LIGHTING_ENV, "").lower() == "off":
         return []
     tod = dict(DEFAULT_LOOK)
     if look:
         tod.update({key: look[key] for key in DEFAULT_LOOK if key in look})
+    sun_elev, sun_azim = float(tod["sun_elev"]), float(tod["sun_azim"])
     if look == STORM_LOOK:
         condition = "ocast"
     elif float(tod["fog_density"]) >= XPLANE_HAZY_FOG_DENSITY:
         condition = "hazy"
     else:
         condition = "clean"
-    try:
-        colours = sky_lighting(condition, float(tod["sun_elev"]),
-                               float(tod["sun_azim"]), tables=tables)
-    except XPlaneDataError:
-        return []
+    use_model = (condition == "clean" and xplane_sky_source(source) == "model"
+                 and sun_elev >= MODEL_SUN_ELEVATION_FLOOR_DEG)
+    if use_model:
+        lighting = model_lighting(sun_elev, sun_azim)
+        colours = {"direct": lighting.direct, "ambient": lighting.ambient,
+                   "sky_horizon": lighting.horizon}
+        condition = "clean/model"
+    else:
+        try:
+            colours = sky_lighting(condition, sun_elev, sun_azim, tables=tables)
+        except XPlaneDataError:
+            return []
 
     def triple(name: str) -> str:
         return ":".join(str(channel) for channel in colours[name])
