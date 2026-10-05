@@ -248,8 +248,10 @@ def ue_runner_command(repo: Path, script_stem: str) -> List[str]:
     this instead of hardcoding the .sh path. Append the wrapper's own
     arguments to the returned list."""
     if os_name() == "windows":
-        return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                "-File", str(repo / "scripts" / f"{script_stem}.ps1")]
+        # -NonInteractive: PowerShell never stops for a prompt (an
+        # execution-policy question, a Read-Host) in an unattended run.
+        return ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
+                "Bypass", "-File", str(repo / "scripts" / f"{script_stem}.ps1")]
     return [str(repo / "scripts" / f"{script_stem}.sh")]
 
 
