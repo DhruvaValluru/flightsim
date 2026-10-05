@@ -142,3 +142,95 @@ def test_missing_extraction_is_a_named_refusal(tmp_path):
 def test_not_an_xplane_folder_is_a_named_refusal(tmp_path):
     with pytest.raises(XPlaneExtractError, match="Resources"):
         extract(tmp_path, tmp_path / "out")
+
+
+# -- the planner: mapped water under the flight plans the surface class --
+
+
+@pytest.fixture
+def lake_mask(data, monkeypatch):
+    import webapp.runs as runs
+
+    mask = WaterMask.load(data / "water" / "water_polygons.geojson")
+    monkeypatch.setattr(runs, "_WATER_MASK", mask)
+    return mask
+
+
+def _spec_at(prompt, lat, lon):
+    from core.nl.compiler import compile_prompt
+
+    spec = compile_prompt(prompt)
+    spec.set("latitude", lat, frm="stated place")
+    spec.set("longitude", lon, frm="stated place")
+    return spec
+
+
+def test_stated_place_over_mapped_water_plans_the_water_class(lake_mask):
+    from webapp.runs import plan_water_surface
+
+    spec = _spec_at("fly the c172p at 1000 m", 10.3, 20.3)
+    plan_water_surface(spec)
+    assert str(spec.surface.value) == "ocean"
+    assert str(spec.surface.source) == "derived"
+    assert "X-Plane" in spec.surface.frm
+    assert "not distinguished" in spec.surface.frm
+    digest = spec.digest()
+    plan_water_surface(spec)                    # /run plans again
+    assert spec.digest() == digest
+
+
+def test_land_and_uncovered_tiles_plan_nothing(lake_mask):
+    from webapp.runs import plan_water_surface
+
+    island = _spec_at("fly the c172p at 1000 m", 10.5, 20.5)
+    plan_water_surface(island)
+    assert str(island.surface.source) == "default"
+
+    elsewhere = _spec_at("fly the c172p at 1000 m", 11.5, 20.5)
+    plan_water_surface(elsewhere)               # no tile: unknown
+    assert str(elsewhere.surface.source) == "default"
+
+
+def test_a_stated_surface_is_never_moved(lake_mask):
+    from webapp.runs import plan_water_surface
+
+    spec = _spec_at("fly the c172p over the desert at 1000 m", 10.3, 20.3)
+    plan_water_surface(spec)
+    assert str(spec.surface.value) == "desert"
+
+
+def test_default_origin_is_not_a_place(lake_mask, monkeypatch):
+    from core.nl.compiler import compile_prompt
+    from webapp.runs import plan_water_surface
+
+    monkeypatch.setattr(lake_mask, "contains", lambda lat, lon: True)
+    spec = compile_prompt("fly the c172p at 1000 m")
+    plan_water_surface(spec)
+    assert str(spec.surface.source) == "default"
+
+
+def test_no_extraction_on_this_machine_plans_nothing(monkeypatch):
+    import webapp.runs as runs
+
+    monkeypatch.setattr(runs, "_WATER_MASK", False)
+    spec = _spec_at("fly the c172p at 1000 m", 10.3, 20.3)
+    runs.plan_water_surface(spec)
+    assert str(spec.surface.source) == "default"
+
+
+def test_compile_endpoint_applies_the_water_planner(lake_mask, monkeypatch):
+    """The review table shows the planned surface: /compile runs the
+    planner on whatever place the compiler resolved (the offline parser
+    reads no coordinates, so the resolved place is injected here)."""
+    from fastapi.testclient import TestClient
+
+    import webapp.server as server
+
+    monkeypatch.setattr(
+        server, "compile_prompt",
+        lambda prompt: _spec_at(prompt, 10.3, 20.3))
+    payload = TestClient(server.app).post("/compile", json={
+        "prompt": "fly the c172p at 1000 m", "compiler": "regex"}).json()
+    surface = next(f for f in payload["spec"]["fields"]
+                   if f["name"] == "surface")
+    assert surface["value"] == "ocean" and surface["source"] == "derived"
