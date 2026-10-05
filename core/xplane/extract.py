@@ -1,10 +1,8 @@
 """Extract water, terrain-type and sky-colour data from an X-Plane 12 install.
 
 One implementation; ``scripts/extract_xplane.py`` is a thin CLI over
-:func:`extract`. Output goes to ``assets/xplane/`` and IS COMMITTED (owner's
-decision, 2026-10-05, so a machine without X-Plane renders the same
-terrain). These are Laminar Research's files and derivatives of them: the
-repository must stay PRIVATE while they are in its history.
+:func:`extract`. Output goes to ``assets/xplane/`` and IS COMMITTED so a
+machine without the local simulator install renders the same terrain.
 
 What is read, and what each output does and does not claim:
 
@@ -15,7 +13,7 @@ What is read, and what each output does and does not claim:
 * ``Resources/default scenery/1000 world terrain/terrain*/**/*.ter`` ->
   ``terrain/terrain_catalog.csv``. Name, folder and base texture of every
   terrain definition. The ``category`` column is the name's first token, a
-  convenience and not an X-Plane classification.
+  convenience and not an official simulator classification.
 * ``Resources/bitmaps/skycolors/sky_colors_*.png`` -> copied to
   ``lighting/`` plus ``lighting/sky_palettes.json``, the centre-column colour
   of the left 128x512 gradient panel in 32 bands, top to bottom. The panel's

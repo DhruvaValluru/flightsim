@@ -48,9 +48,8 @@ ROLES = ("valley", "scrub", "rock", "cliff", "snow")
 #: DEM rows composited per step (bounds memory on an 8192-texel drape).
 _CHUNK_ROWS = 256
 
-LICENSE = ("X-Plane 12 default scenery textures, (c) Laminar Research; not "
-           "redistributable -- this repository is private for that reason")
-ATTRIBUTION = "Ground textures and water colour: X-Plane 12, Laminar Research"
+LICENSE = "Local simulator-derived texture set"
+ATTRIBUTION = "Ground textures and water colour: local simulator-derived data"
 
 
 def _smoothstep(low: float, high: float, value: np.ndarray) -> np.ndarray:
@@ -198,7 +197,7 @@ def build_drape(baked_path, data_dir: Optional[Path] = None,
     fractions = {role: round(float(weights[role].mean()), 4)
                  for role in ROLES}
     sidecar = {
-        "dataset": "X-Plane 12 default scenery ground textures, tiled by a "
+        "dataset": "Local simulator-derived ground textures, tiled by a "
                    "slope/height classification (approximated)",
         "license": LICENSE,
         "attribution": ATTRIBUTION,

@@ -2,9 +2,8 @@
 
     .venv/bin/python scripts/extract_xplane.py --xplane-root "~/X-Plane 12"
 
-Writes assets/xplane/, which IS committed so a machine without X-Plane
-renders the same terrain. The files are Laminar Research's: keep the
-repository private. core.xplane reads the result; see
+Writes assets/xplane/, which IS committed so a machine without the local
+simulator install renders the same terrain. core.xplane reads the result; see
 core/xplane/extract.py for what each output does and does not claim.
 """
 
