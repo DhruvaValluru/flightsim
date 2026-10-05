@@ -30,7 +30,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 REPO = Path(__file__).resolve().parents[1]
 import sys
@@ -827,6 +827,60 @@ def plan_scene_setting(spec: ScenarioSpec) -> None:
     spec.plan("latitude", location.origin_lat, frm=frm)
     spec.plan("longitude", location.origin_lon, frm=frm)
     spec.plan("terrain_elevation", LOCATION_TERRAIN_ELEVATION_M[key], frm=frm)
+
+
+#: The X-Plane water mask, loaded once per process. False = no extraction
+#: on this machine (scripts/extract_xplane.py never run), which attaches
+#: nothing rather than guessing.
+_WATER_MASK: Any = None
+
+
+def _water_mask():
+    global _WATER_MASK
+    if _WATER_MASK is None:
+        from core.xplane import WaterMask, XPlaneDataError
+
+        try:
+            _WATER_MASK = WaterMask.load()
+        except XPlaneDataError:
+            _WATER_MASK = False
+    return _WATER_MASK or None
+
+
+def plan_water_surface(spec: ScenarioSpec) -> None:
+    """A flight placed over mapped water gets the water surface class.
+
+    When nobody stated the ground cover (surface still source default)
+    and the spec's coordinates are a real place (not the all-default
+    origin) inside a tile the X-Plane water mask covers, a point that
+    falls in a water polygon plans surface -> "ocean": Davenport water
+    roughness for the log profile and no thermals, exactly what the word
+    does when a user types it. Deliberately narrow:
+
+    * a stated/inferred/model surface is never moved;
+    * outside the shipped tiles the mask answers None and nothing is
+      planned -- unknown is not dry, and not wet either;
+    * the polygons carry no attributes, so a lake or wide river plans
+      the same class as the sea; the basis string says so;
+    * no extraction on this machine means no planning (the data is the
+      user's own X-Plane install, never fetched).
+    """
+    if str(spec.surface.source) != "default":
+        return
+    if (str(spec.latitude.source) == "default"
+            and str(spec.longitude.source) == "default"):
+        return
+    mask = _water_mask()
+    if mask is None:
+        return
+    lat = float(spec.latitude.value)
+    lon = float(spec.longitude.value)
+    if mask.contains(lat, lon) is not True:
+        return
+    spec.plan("surface", "ocean",
+              frm=f"X-Plane map-data water polygon at ({lat:.4f}, "
+                  f"{lon:.4f}); open water (sea, lake and river are not "
+                  f"distinguished); state a surface to override")
 
 
 def plan_flyable_defaults(spec: ScenarioSpec) -> None:

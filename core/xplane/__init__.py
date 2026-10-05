@@ -1,7 +1,8 @@
 """Readers for the data ``scripts/extract_xplane.py`` writes to data/xplane/.
 
-Nothing here is wired into the scenario or render flow: these are loaders a
-planner or bake step can call. Every loader refuses by name when the
+The water mask feeds webapp.runs.plan_water_surface (mapped water under
+the flight plans the water surface class). The sky palettes and terrain
+catalog have no consumer yet. Every loader refuses by name when the
 extraction has not been run, rather than returning an empty answer that
 would read as "no water here".
 """

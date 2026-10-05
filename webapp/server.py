@@ -57,6 +57,7 @@ from webapp.runs import (  # noqa: E402
     plan_terrain_environment,
     plan_terrain_flight,
     plan_trim_recovery,
+    plan_water_surface,
     project_for_ue_host,
     refuse_placeholder_mesh,
 )
@@ -214,6 +215,7 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
     # recorded edit (source becomes ``derived``); stated values never
     # move. /run applies the same planners again: value-idempotent.
     plan_scene_setting(spec)
+    plan_water_surface(spec)
     apply_weather_event(spec)
     # Terrain-aware environment (cross-ridge wind, along-ridge heading):
     # shown in the review table when the scene's raster is already baked
@@ -265,6 +267,10 @@ def run_endpoint(request: RunRequest) -> JSONResponse:
     # source derived and is left alone), so the placement, bake check and
     # every later planner see the staged scene like any named one.
     plan_scene_setting(spec)
+    # Mapped water under the stated place plans the water surface class
+    # (X-Plane mask, when extracted on this machine): before placement,
+    # so the control ridge's arbitrary georeference is never looked up.
+    plan_water_surface(spec)
     unbaked = needs_dynamic_bake(spec)
     if unbaked is not None:
         return JSONResponse({"refused": "terrain.unbaked", **unbaked},

@@ -134,8 +134,11 @@ for priming a machine ahead of time rather than prerequisites.
   terrain-type catalog and the sky-colour lookups out of your own install
   into `data/xplane/` (gitignored: Laminar Research's files are not
   redistributed). `core.xplane` loads them (`WaterMask`,
-  `load_sky_palettes`, `load_terrain_catalog`). Not yet used by the
-  scenario or render flow.
+  `load_sky_palettes`, `load_terrain_catalog`). The water mask is used
+  on every compile and run: a place over mapped water with no stated
+  ground cover gets the water surface class (`plan_water_surface`,
+  recorded as a derived edit). The sky palettes and terrain catalog are
+  loadable but not used by the scenario or render flow.
 * **Real aircraft**: `python scripts/import_aircraft.py` fetches each
   configured model at its pinned commit (license verified on disk),
   converts it, and imports it into the Unreal project. Renders carry
