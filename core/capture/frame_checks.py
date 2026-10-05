@@ -70,6 +70,10 @@ def grade_frames(manifest: Dict, run_dir) -> Dict:
                     outcome = check(one, run_dir)
                     entry = {"status": outcome.status, "detail": outcome.detail,
                              "failure": outcome.failure}
+                from core.messages import is_catalogued, render
+
+                if is_catalogued(f"check.{check_name}"):
+                    entry["sentence"] = render(f"check.{check_name}")
                 result[check_name] = entry
                 counts.setdefault(check_name, {}).setdefault(entry["status"], 0)
                 counts[check_name][entry["status"]] += 1

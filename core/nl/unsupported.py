@@ -94,9 +94,10 @@ CARRIED: Tuple[Tuple[str, str, str, Callable], ...] = (
 )
 
 
-def unsupported_words(prompt: Optional[str], spec) -> List[Tuple[str, str]]:
-    """``[(constraint, sentence)]`` for every concept in the prompt the
-    compiled spec does not honour. Empty for no prompt."""
+def unsupported_words(prompt: Optional[str], spec) -> List[Tuple[str, str, str]]:
+    """``[(constraint, sentence, word)]`` for every concept in the prompt
+    the compiled spec does not honour (``word`` as the prompt wrote it,
+    for the plain-language sentence). Empty for no prompt."""
     text = " ".join(str(prompt or "").lower().split())
     if not text:
         return []
@@ -108,7 +109,8 @@ def unsupported_words(prompt: Optional[str], spec) -> List[Tuple[str, str]]:
                 PROMPT_UNSUPPORTED,
                 f'the prompt asks for "{match.group(0)}" ({what}), which this '
                 f"simulator does not model; remove it from the prompt"
-                + (f" (the nearest supported thing: {nearest})" if nearest else "")))
+                + (f" (the nearest supported thing: {nearest})" if nearest else ""),
+                match.group(0)))
     for pattern, what, field, is_set in CARRIED:
         match = re.search(pattern, text)
         if match:
@@ -122,5 +124,6 @@ def unsupported_words(prompt: Optional[str], spec) -> List[Tuple[str, str]]:
                     f'the prompt says "{match.group(0)}" ({what}) but the compiled '
                     f"spec does not set it -- it would fly without it. State it in "
                     f"the review table ({field}), or compile with the language "
-                    f"model, which reads it"))
+                    f"model, which reads it",
+                    match.group(0)))
     return out

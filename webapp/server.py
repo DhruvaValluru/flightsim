@@ -67,6 +67,47 @@ from webapp.runs import (  # noqa: E402
 )
 
 app = FastAPI(title="flightsim", docs_url=None, redoc_url=None)
+
+
+def _plain(refusal: Dict[str, Any]) -> Dict[str, Any]:
+    """A refusal dict with the plain-language sentence and hint added
+    (core/messages catalogue, via webapp.generate.words): ``sentence`` and
+    ``hint`` for the page to show first, ``details`` (rule name, technical
+    message) for the disclosure underneath. The original keys stay."""
+    from webapp.generate import words
+
+    rule = refusal.get("refused") or refusal.get("constraint")
+    if not isinstance(rule, str) or refusal.get("sentence"):
+        return refusal
+    message = refusal.get("message") or refusal.get("error") or ""
+    worded = words({"constraint": rule, "message": message,
+                    **{k: refusal[k] for k in ("actual", "limit", "unit") if k in refusal}})
+    return {**refusal, "sentence": worded["sentence"], "hint": worded["hint"],
+            "details": {**worded["details"], **(refusal.get("details") or {})}}
+
+
+@app.middleware("http")
+async def plain_language_refusals(request, call_next):
+    """Every refused answer this server gives (a 4xx JSON body naming a
+    rule) carries the plain sentence beside the rule name, so no page has
+    to show a rule name first."""
+    response = await call_next(request)
+    if response.status_code < 400 or not str(
+            response.headers.get("content-type", "")).startswith("application/json"):
+        return response
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    try:
+        data = json.loads(body)
+    except ValueError:
+        data = None
+    if isinstance(data, dict) and (data.get("refused") or data.get("constraint")):
+        data = _plain(data)
+        return JSONResponse(data, status_code=response.status_code)
+    from fastapi.responses import Response
+
+    headers = {k: v for k, v in response.headers.items() if k.lower() != "content-length"}
+    return Response(body, status_code=response.status_code, headers=headers,
+                    media_type=response.media_type)
 manager = RunManager()
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -205,10 +246,12 @@ def _validation_payload(spec: ScenarioSpec) -> Dict[str, Any]:
     report = validate(spec)
     return {
         "ok": report.ok,
-        "violations": [{
+        # Each violation in plain words first (sentence, hint), the rule
+        # name and the technical message beside it for the disclosure.
+        "violations": [_plain({
             "constraint": v.constraint, "message": v.message,
             "actual": v.actual, "limit": v.limit, "unit": v.unit,
-        } for v in report.violations],
+        }) for v in report.violations],
         "warnings": list(report.warnings),
         "derived_speeds": report.speeds.summary() if report.speeds else None,
     }
@@ -361,7 +404,7 @@ def compile_endpoint(request: CompileRequest) -> JSONResponse:
         # validate() already names an unmapped variation; do not say it twice.
         named = {v.get("constraint") for v in payload["validation"]["violations"]}
         if randomization_refusal.get("constraint") not in named:
-            payload["validation"]["violations"].append(randomization_refusal)
+            payload["validation"]["violations"].append(_plain(randomization_refusal))
     return JSONResponse(payload)
 
 

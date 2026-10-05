@@ -233,7 +233,7 @@ def scan_codebase() -> Dict[str, Set[str]]:
 
 def _check_names() -> Set[str]:
     text = (REPO / "core/capture/verify.py").read_text(encoding="utf-8")
-    return set(re.findall(r'Check\(\s*"([a-z_]+)"', text))
+    return set(re.findall(r'Check\(\s*"([a-z0-9_]+)"', text))
 
 
 # -- the scanner itself is measured -----------------------------------------

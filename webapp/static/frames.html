@@ -45,6 +45,7 @@
   .pres-yes { color: #7fd18b; } .pres-no { color: #e09a6f; }
   .pres-not-known { color: #c9b45c; }
   .presence-run { margin: .6rem 0; }
+  details.why { color: #8b98a5; font-size: .85em; }
   ul.limits { margin: .3rem 0 .3rem 1.1rem; padding: 0; font-size: .9em; }
   ul.limits li { margin: .15rem 0; color: #e6c98a; }
   .group > b { color: #b9c4cf; font-size: .85em; letter-spacing: .03em;
@@ -362,8 +363,10 @@ function frameChecks(checks) {
     const c = checks[k];
     const cls = c.status === "PASS" ? "pres-yes" : c.status === "FAIL" ? "pres-no"
                                                                       : "pres-not-known";
-    return `<tr><td>${esc(k)}</td><td class="${cls}">${esc(c.status)}</td>` +
-           `<td class="dim">${esc(c.detail || "")}</td></tr>`;
+    return `<tr><td>${esc(c.sentence || k)}<details class="why"><summary>why, in ` +
+           `the system's own terms</summary><code>${esc(k)}</code></details></td>` +
+           `<td class="${cls}">${esc(c.status === "PASS" ? "passed" : c.status === "FAIL"
+             ? "FAILED" : "not run")}</td><td class="dim">${esc(c.detail || "")}</td></tr>`;
   }).join("");
   return `<div class="group"><b>THIS FRAME'S CHECKS</b>` +
     `<table class="presence"><tbody>${rows}</tbody></table></div>`;

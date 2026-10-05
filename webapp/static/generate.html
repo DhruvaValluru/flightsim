@@ -93,6 +93,10 @@
                   color: var(--dim); font-family: "SF Mono", Menlo, monospace; white-space: nowrap;
                   overflow-x: auto; }
   footer.expert b { color: #9fb4c7; font-weight: 600; margin-right: .6rem; }
+  /* Plain language by default: the command-line equivalent is folded away
+     until asked for. */
+  footer.expert:not(.open) b, footer.expert:not(.open) #expert { display: none; }
+  footer.expert #expertToggle { padding: .15rem .5rem; font-size: .8em; margin-right: .6rem; }
   #toast { position: fixed; top: 1rem; right: 1rem; background: var(--panel); border: 1px solid var(--line);
            border-radius: 8px; padding: .6rem .9rem; display: none; max-width: 420px; }
 </style>
@@ -233,7 +237,7 @@
   </section>
 </main>
 
-<footer class="expert"><b>expert path</b><span id="expert">python -m flightsim.campaign "&lt;prompt&gt;" --images N --out campaigns/&lt;name&gt; --plan</span></footer>
+<footer class="expert" id="expertBar"><button class="quiet" id="expertToggle" type="button" aria-expanded="false">show the command line</button><b>expert path</b><span id="expert">python -m flightsim.campaign "&lt;prompt&gt;" --images N --out campaigns/&lt;name&gt; --plan</span></footer>
 <div id="toast"></div>
 
 <script>
@@ -255,6 +259,12 @@
     if (expert && expert.length) $('expert').textContent = expert.join('   ·   ');
     window.scrollTo(0, 0);
   }
+  $('expertToggle').onclick = () => {
+    const bar = $('expertBar'); const open = !bar.classList.contains('open');
+    bar.classList.toggle('open', open);
+    $('expertToggle').textContent = open ? 'hide the command line' : 'show the command line';
+    $('expertToggle').setAttribute('aria-expanded', String(open));
+  };
   function toast(text) {
     const t = $('toast'); t.textContent = text; t.style.display = 'block';
     clearTimeout(t._h); t._h = setTimeout(() => { t.style.display = 'none'; }, 4000);

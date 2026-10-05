@@ -101,10 +101,10 @@ randomization.vocabulary:
 # -- words in the request the scenario does not honour (core/nl/unsupported.py) --
 
 prompt.unsupported:
-  sentence: "The request asks for something this simulator does not model."
-  hint: "Remove it from the request; where there is a close supported option, the refusal names it."
+  sentence: "The request asks for “{actual}”, which this simulator does not model."
+  hint: "Remove it from the request; where there is a close supported option, the details name it."
 prompt.not_set:
-  sentence: "The request names a condition the scenario can carry, but the compiled scenario did not set it, so it would fly without it."
+  sentence: "The request says “{actual}”, but the scenario as interpreted does not include it, so it would fly without it."
   hint: "Set it in the review table, or interpret the request with the language model."
 randomization.location:
   sentence: "No terrain is prepared for that place, so the scene cannot be varied over it."
@@ -428,6 +428,8 @@ compile.unreachable:
 
 check.intrinsics_match_spec:
   sentence: "The camera's lens and picture size match what was asked for."
+check.label_geometry_3d:
+  sentence: "Each plane's 3-D box, how much of it is in the picture and what hides it agree with an independent re-derivation."
 check.pose_matches_spec:
   sentence: "The camera stayed at the station it was asked to hold."
 check.geometry_recovery:

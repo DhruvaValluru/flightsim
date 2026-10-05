@@ -325,8 +325,10 @@ def validate_prompt_words(spec) -> List[Violation]:
     check."""
     from ..nl.unsupported import unsupported_words
 
-    out = [Violation(constraint, sentence)
-           for constraint, sentence in unsupported_words(spec.prompt, spec)]
+    # ``actual`` carries the prompt's own word, so the plain sentence can
+    # say WHICH thing ("the request asks for “birds”"), not only that one.
+    out = [Violation(constraint, sentence, actual=word)
+           for constraint, sentence, word in unsupported_words(spec.prompt, spec)]
     policy = spec.randomization_policy
     unmapped = policy.detail.get("unmapped") if policy is not None else None
     if unmapped:

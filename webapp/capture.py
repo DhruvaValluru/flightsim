@@ -774,6 +774,14 @@ def headless_capture(spec, scene: Dict, out: Path, heightfield=None,
     return finish(out)
 
 
+def _check_sentence(name: str) -> Optional[str]:
+    """The message catalogue's plain sentence for a verifier check."""
+    from core.messages import is_catalogued, render
+
+    rule = f"check.{name}"
+    return render(rule) if is_catalogued(rule) else None
+
+
 def finish(out: Path, max_overlays: Optional[int] = 24) -> Dict:
     """Overlays over the rendered frames, then verification. Returns the
     summary the page shows."""
@@ -805,7 +813,10 @@ def finish(out: Path, max_overlays: Optional[int] = 24) -> Dict:
     write_verification(report, out)
     summary = {
         "ok": report.ok,
-        "checks": [{"name": c.name, "status": c.status, "detail": c.detail}
+        # Each check's plain sentence (what it measures) first; its name and
+        # the technical detail are for the disclosure.
+        "checks": [{"name": c.name, "status": c.status, "detail": c.detail,
+                    "sentence": _check_sentence(c.name)}
                    for c in report.checks],
         "overlays": len(overlays),
         "boxed": len(boxed),
