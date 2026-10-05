@@ -1099,6 +1099,35 @@ def _water_mask():
 XPLANE_TERRAIN_ENV = "FLIGHTSIM_XPLANE_TERRAIN"
 
 
+#: The triangle budget asked for when a bake is finer than GLO-30's 30 m
+#: (core/terrain/dem3dep.py): the count at stride 1, capped here. The cap
+#: is this repository's number (a 10 m Yosemite bake is 18.5 M at stride
+#: 1); what the engine makes of it is measured on Windows and the host
+#: records the posting it achieved (render.json ``terrain_posting_m``).
+TRIANGLE_BUDGET_MAX = 24_000_000
+TRIANGLE_BUDGET_FINE_POSTING_M = 30.0
+
+
+def terrain_triangle_budget(scene: Optional[Dict]) -> Optional[int]:
+    """The ``-triangle-budget=`` to ask for, or None: a bake posted finer
+    than 30 m gets the triangle count that keeps it at stride 1 (two per
+    cell), capped at :data:`TRIANGLE_BUDGET_MAX`; a 30 m bake, a flat
+    scene or an unreadable sidecar get nothing, so the pinned render
+    commands stand."""
+    if not scene or not scene.get("terrain"):
+        return None
+    try:
+        sidecar = json.loads(Path(str(scene["terrain"]) + ".json").read_text(
+            encoding="utf-8"))
+        pixel = float(sidecar["georeference"]["pixel_size_m"])
+        width, height = int(sidecar["width"]), int(sidecar["height"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if not pixel < TRIANGLE_BUDGET_FINE_POSTING_M:
+        return None
+    return int(min(2 * (width - 1) * (height - 1), TRIANGLE_BUDGET_MAX))
+
+
 def drape_month(spec: ScenarioSpec) -> int:
     """The calendar month the terrain drape reads its snow cover for: the
     spec's own date, resolved exactly as the sky plan resolves it
@@ -2196,6 +2225,9 @@ class RunManager:
             # The physical sky (write_sky_plan) replaces the calibrated
             # sun/exposure flags; None leaves the command unchanged.
             sky=sky,
+            # A bake finer than 30 m keeps its posting (dem3dep); a 30 m
+            # bake asks for nothing and the command is unchanged.
+            triangle_budget=terrain_triangle_budget(scene),
             # The SHARED recorder's own file (same component all three
             # hosts use), stamping the FDM's clock -- the aero panel
             # reads it verbatim, no resampling.

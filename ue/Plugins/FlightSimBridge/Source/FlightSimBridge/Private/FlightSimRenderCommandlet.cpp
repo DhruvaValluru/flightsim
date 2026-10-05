@@ -1006,7 +1006,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		            "[-passes=normal,velocity,albedo] [-width=960] [-height=540] "
 		            "[-calibration] [-sun-lux=<lux>] [-accumulate=<K>] [-velocity-check] "
 		            "[-normal-source=scs|material] [-scene=<scene document>] "
-		            "[-quality=measure|beauty] [-warmup=N]"));
+		            "[-quality=measure|beauty] [-warmup=N] [-triangle-budget=<n>]"));
 		return 1;
 	}
 	// Visual plan V0. "measure" is every render this project has
@@ -1384,6 +1384,20 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		SceneOptions.TerrainPath = TerrainPath;
 		SceneOptions.bDynamicShadows = !bNoShadows;
 		SceneOptions.FogDensity = static_cast<float>(FogDensity);
+		// -triangle-budget=<n> (core/render/flags.py TRIANGLE_BUDGET_PREFIX):
+		// the procedural terrain's triangle budget, asked for by webapp.runs
+		// only when the bake is finer than 30 m (a 10 m 3DEP bake would
+		// otherwise be decimated to stride 3). Absent or not a positive
+		// number: the default stands. The achieved posting is recorded as
+		// terrain_posting_m whatever was asked. UNCOMPILED here.
+		{
+			int64 TriangleBudget = 0;
+			if (FParse::Value(*Params, TEXT("triangle-budget="), TriangleBudget) && TriangleBudget > 0)
+			{
+				SceneOptions.TerrainTriangleBudget =
+					static_cast<int32>(FMath::Min<int64>(TriangleBudget, MAX_int32));
+			}
+		}
 		// X-Plane lighting colours (webapp.runs.xplane_lighting_flags):
 		// three 8-bit sRGB triples, colon-separated because FParse::Value
 		// stops at a comma. All three or none; a malformed triple is

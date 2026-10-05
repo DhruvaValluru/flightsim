@@ -125,6 +125,16 @@ ACCUMULATE_PREFIX = "-accumulate="
 #: pin in tests/test_ue_world_source.py), never on the void tier, so every
 #: list pinned before it is byte-identical.
 SCENE_PREFIX = "-scene="
+#: The procedural terrain's triangle budget (FlightSimVisualScene.h
+#: ``TerrainTriangleBudget``, 4 M by default): the host picks the
+#: smallest raster stride whose triangle count fits it, so a bake finer
+#: than 30 m (core/terrain/dem3dep.py, ~10 m) is decimated back to ~30 m
+#: posting under the default. ``-triangle-budget=<n>`` raises it for that
+#: render; emitted ONLY when asked, as the last token, so every pinned
+#: list is byte-identical. What the engine does with 20 M triangles
+#: (memory, the shadow cascades) is measured on Windows, not here; the
+#: host records the posting it achieved (``terrain_posting_m``).
+TRIANGLE_BUDGET_PREFIX = "-triangle-budget="
 
 
 def passes_flag(passes: Iterable[str]) -> Optional[str]:
@@ -182,7 +192,8 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
                  telemetry=None, extra: Iterable[str] = (),
                  passes: Iterable[str] = (), calibration: bool = False,
                  sun_lux=None, accumulate=None, scene_document=None,
-                 quality: Optional[str] = None, sky=None) -> List[str]:
+                 quality: Optional[str] = None, sky=None,
+                 triangle_budget=None) -> List[str]:
     """The ORDERED argument list for the FlightSimRender commandlet,
     after the ``<editor> <project> -run=FlightSimBridge.FlightSimRender``
     tokens.
@@ -244,6 +255,11 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
     :data:`SCENE_PREFIX` right after ``-imagery=``; None (the default)
     emits nothing, and the void tier never gets it. Forwarded verbatim;
     the commandlet checks it (and refuses without ``-GeorefTerrain``).
+
+    ``triangle_budget``: a whole number >= 1 adds
+    :data:`TRIANGLE_BUDGET_PREFIX` as the LAST token (never on the void
+    tier); None (the default) emits nothing, so every pinned list stands.
+    webapp.runs asks for one only when the bake is finer than 30 m.
 
     ``quality`` (visual plan V0): ``"beauty"`` adds ``-quality=beauty``
     (Lumen GI/reflections, TSR, virtual shadow maps and 16 warm-up
@@ -316,6 +332,13 @@ def render_flags(card, frames, *, scene: Optional[Mapping[str, Any]],
         flags.append(f"-mesh={mesh}")
     if telemetry is not None:
         flags.append(f"-telemetry={telemetry}")
+    if triangle_budget is not None:
+        if (isinstance(triangle_budget, bool) or int(triangle_budget) != triangle_budget
+                or int(triangle_budget) < 1):
+            raise ValueError(f"{TRIANGLE_BUDGET_PREFIX} takes a whole number of "
+                             f"triangles >= 1, not {triangle_budget!r}")
+        if not void:
+            flags.append(f"{TRIANGLE_BUDGET_PREFIX}{int(triangle_budget)}")
     return flags
 
 

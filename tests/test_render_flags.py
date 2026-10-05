@@ -419,3 +419,54 @@ def test_webapp_chase_flag_derives_from_mesh_for_an_untabled_airframe(
     assert float(forward) == pytest.approx(c172_forward / 2)
     assert float(right) == 0.0
     assert float(up) == pytest.approx(c172_up / 2)
+
+
+def test_the_triangle_budget_is_emitted_last_and_only_when_asked(tmp_path):
+    """-triangle-budget=<n> (the commandlet honours it; uncompiled here):
+    absent by default so every pinned list stands; the last token when
+    asked; never on the void tier; a non-count refuses."""
+    from pathlib import Path
+
+    from core.render.flags import TRIANGLE_BUDGET_PREFIX
+
+    default = _flags()
+    assert _flags(triangle_budget=None) == default
+    assert not [t for t in default if t.startswith(TRIANGLE_BUDGET_PREFIX)]
+    asked = _flags(triangle_budget=18_500_000)
+    assert asked[-1] == f"{TRIANGLE_BUDGET_PREFIX}18500000"
+    assert asked[:-1] == default
+    for bad in (0, -1, 2.5, True, "many"):
+        with pytest.raises((ValueError, TypeError)):
+            _flags(triangle_budget=bad)
+    source = (Path(__file__).resolve().parents[1] / "ue" / "Plugins"
+              / "FlightSimBridge" / "Source" / "FlightSimBridge" / "Private"
+              / "FlightSimRenderCommandlet.cpp").read_text(encoding="utf-8")
+    assert 'TEXT("triangle-budget=")' in source
+
+
+def test_the_web_app_asks_for_a_budget_only_for_a_fine_bake(tmp_path):
+    """A 10 m bake gets its stride-1 count (two triangles per cell), capped;
+    a 30 m bake, a flat scene and an unreadable sidecar get None."""
+    import json
+
+    from webapp.runs import (
+        TRIANGLE_BUDGET_MAX, terrain_triangle_budget,
+    )
+
+    def sidecar(name, pixel, width, height):
+        stem = tmp_path / name
+        stem.with_suffix(".json").write_text(json.dumps({
+            "width": width, "height": height,
+            "georeference": {"crs": "EPSG:32611", "origin_x_m": 0.0,
+                             "origin_y_m": 0.0, "pixel_size_m": pixel,
+                             "is_projected": True}}), encoding="utf-8")
+        return str(stem)
+
+    assert terrain_triangle_budget(None) is None
+    assert terrain_triangle_budget({"terrain": None}) is None
+    assert terrain_triangle_budget({"terrain": sidecar("g", 30.0, 1276, 905)}) is None
+    assert terrain_triangle_budget({"terrain": sidecar("f", 10.0, 3454, 2681)}) == \
+        2 * 3453 * 2680
+    assert terrain_triangle_budget({"terrain": sidecar("h", 2.0, 20000, 20000)}) == \
+        TRIANGLE_BUDGET_MAX
+    assert terrain_triangle_budget({"terrain": str(tmp_path / "missing")}) is None
