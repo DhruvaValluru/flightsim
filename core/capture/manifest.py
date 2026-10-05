@@ -262,7 +262,7 @@ from .labels import (
 )
 from .objects import (
     ROLE_PRIMARY, ROLE_TRAFFIC, compose_objects, mesh_manifest_path,
-    objects_block, taxonomy_classes,
+    class_presence, frame_presence, objects_block, taxonomy_classes,
 )
 from .profile import load_profile, sensor_labels
 from .radiometry import (
@@ -670,6 +670,11 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
                 f"where the telemetry has {len(columns['t'])}; refusing a "
                 f"track solved over a different flight")
     randomization = randomization_card_block(spec)
+    # Scene vs labelled, per taxonomy class (objects.class_presence): the
+    # manifest's ``presence`` and, per frame, ``labels.presence``.
+    presence = class_presence(spec, objects, landcover=landcover_block is not None,
+                              randomization=randomization)
+    class_of = {o.id: o.class_name for o in objects}
 
     def mesh_manifest_for(name: str) -> Optional[Dict]:
         if mesh_manifests is not None:
@@ -805,11 +810,16 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
             # scripted state; the terrain carries nulls. Engine-derived
             # keys are null with a basis until attach_engine_labels.
             axes = camera_axes(frames[-1]["quaternion_wxyz"])
-            frames[-1]["labels"]["objects"] = _object_records(
+            frames[-1]["labels"]["objects"] = _flag_records(objects, _object_records(
                 objects, frames[-1], state, airframe, axes,
                 terrain_elevation_m, randomization, primary_mesh,
                 traffic_objects, traffic_airframes, traffic_tracks,
-                traffic_meshes, sample_index)
+                traffic_meshes, sample_index))
+            # Scene vs labelled for this frame: per taxonomy class, was it
+            # in the scene, is it labelled, which of its objects are in
+            # this frame (core/capture/objects.py frame_presence).
+            frames[-1]["labels"]["presence"] = frame_presence(
+                presence, frames[-1]["labels"]["objects"], class_of)
             # The sensor model this frame was (or will be) passed
             # through: the profile's full parameters, the camera's
             # angular rate for the rolling shutter, and the labels
@@ -924,6 +934,7 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
         # are labelled against, and the traffic aircraft's provenance.
         "objects": objects_block(objects),
         "taxonomy": taxonomy_classes(spec),
+        "presence": presence,
         "traffic": [
             {
                 "id": obj.id, "int_id": obj.int_id,
@@ -980,6 +991,17 @@ def build_capture_manifest(spec, columns: Dict[str, Sequence[float]],
     return manifest
 
 
+def _flag_records(objects, records: List[Dict]) -> List[Dict]:
+    """Every per-frame object record carries its object's ``in_scene`` and
+    ``labelled`` flags, so a frame read on its own tells "not labelled"
+    from "not there"."""
+    flags = {o.id: (o.in_scene, o.labelled) for o in objects}
+    for entry in records:
+        in_scene, labelled = flags.get(str(entry.get("id")), (None, None))
+        entry["in_scene"], entry["labelled"] = in_scene, labelled
+    return records
+
+
 def _object_records(objects, record, primary_state, primary_airframe, axes,
                     terrain_elevation_m, randomization, primary_mesh,
                     traffic_objects, traffic_airframes, traffic_tracks,
@@ -1026,6 +1048,9 @@ SIDECAR_CONTEXT_KEYS = (
     # Version 6: the object list every per-object record resolves
     # through, the class list, and the traffic provenance.
     "objects", "taxonomy", "traffic",
+    # Scene vs labelled, per taxonomy class (the frame's own view of it is
+    # in frame.labels.presence).
+    "presence",
     # P10: the vertical datum and the applied-variable records; None in
     # a sidecar cut from a manifest written before they existed.
     "datum", "applied_variables",

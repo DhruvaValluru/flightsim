@@ -1674,6 +1674,27 @@ def attach_engine_labels(run_dir, write: bool = True) -> Dict:
                         entry["landcover_mask"] = {
                             "file": lc["file"], "codes": aggregate["codes"],
                             "encoding": "the land-cover image's pixels whose code is one of codes"}
+        # Scene vs labelled, now with the engine's evidence: an object is
+        # in this frame when the ID image carries its pixels (the record's
+        # tight box), and a class the land-cover image sees gets its share
+        # of the frame (water, which carries no id, is read only this way).
+        presence = (frame.get("labels") or {}).get("presence")
+        if isinstance(presence, list):
+            class_by_id = {str(o.get("id")): str(o.get("class")) for o in objects
+                           if isinstance(o, dict)}
+            seen: Dict[str, List[str]] = {}
+            for entry in entries:
+                if entry.get("bbox_2d_tight") is not None:
+                    seen.setdefault(class_by_id.get(str(entry.get("id")), ""), []).append(
+                        str(entry.get("id")))
+            shares = ((frame.get("labels") or {}).get("landcover") or {}).get(
+                "taxonomy_fractions") or {}
+            for item in presence:
+                item["in_frame_objects"] = seen.get(str(item.get("class")), [])
+                item["in_frame_unknown"] = []
+                item["in_frame_basis"] = "engine ID image (pixels carrying the object's int_id)"
+                if str(item.get("class")) in shares:
+                    item["landcover_share"] = float(shares[str(item["class"])])
         # I6: which ground-truth passes this frame's record declares, by
         # name (the files are not opened here; the verifier reads them).
         declared_passes = passes_declared(engine)

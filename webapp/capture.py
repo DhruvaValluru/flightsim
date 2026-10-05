@@ -379,6 +379,16 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
         f"and vegetation are ONE aggregate object each (the mask is 8-bit),\n"
         f"not one per building or tree.\n"
         f"\n"
+        f"Scene vs labelled: manifest.json 'presence' lists every taxonomy\n"
+        f"class with in_scene (true = something of it was in the scene,\n"
+        f"false = nothing was, null = not known when the scene was composed;\n"
+        f"'reason' says which) and labelled (it carries an instance id).\n"
+        f"Each object in 'objects' and in a frame's labels.objects[] carries\n"
+        f"the same in_scene / labelled flags, and each frame's\n"
+        f"labels.presence names which of a class's objects are in THAT\n"
+        f"frame. So 'not labelled' (in_scene true, labelled false, e.g.\n"
+        f"water or cloud) reads apart from 'not there' (in_scene false).\n"
+        f"\n"
         f"Positions are local north/east metres about the origin named in\n"
         f"context.frame, altitude in metres MSL. A consumer checks\n"
         f"manifest_version before parsing.\n")
@@ -416,6 +426,9 @@ CAMERA_VIEW_KEYS = (
     # labels.objects[] use, and the class list behind class_id: without
     # them a mask value cannot be read back to an object from the zip.
     "objects", "taxonomy",
+    # Scene vs labelled, per taxonomy class (each frame's own view is in
+    # its labels.presence).
+    "presence",
 )
 
 

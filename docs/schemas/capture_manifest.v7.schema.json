@@ -296,6 +296,23 @@
     "type": "string"
    }
   },
+  "presence": {
+   "description": "Optional. Scene vs labelled per taxonomy class: in_scene (true / false / null with a reason), labelled (carries an instance id), the composed objects and how the class is labelled. Each frame's labels.presence adds in_frame_objects.",
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": ["class", "class_id", "in_scene", "labelled"],
+    "properties": {
+     "class": {"type": "string"},
+     "class_id": {"type": "integer"},
+     "in_scene": {"type": ["boolean", "null"]},
+     "labelled": {"type": "boolean"},
+     "objects": {"type": "array", "items": {"type": "string"}},
+     "labelled_as": {"type": ["string", "null"]},
+     "reason": {"type": "string"}
+    }
+   }
+  },
   "traffic": {
    "type": "array",
    "items": {

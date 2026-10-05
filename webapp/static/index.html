@@ -31,6 +31,11 @@
   .src-edited   { color: #6fb3e0; }
   .verdict-ok      { color: #7fd08f; }
   .verdict-refused { color: #e07a6f; }
+  .infoBtn { border-radius: 50%; width: 1.6rem; height: 1.6rem; padding: 0;
+             font-style: italic; font-family: serif; }
+  .infoBox { margin: .5rem 0; padding: .5rem .7rem; background: #101820;
+             border: 1px solid #2b6c9a; border-radius: 6px; max-width: 46rem; }
+  .exampleChip { display: block; margin: .25rem 0; text-align: left; }
   .fleetBox { margin: .5rem 0; padding: .4rem .6rem; border-left: 3px solid #2b6c9a; }
   .fleetRow label { display: inline-block; margin: .2rem .8rem .2rem 0; }
   .fleetRow input[type=number] { width: 6.5rem; }
@@ -511,8 +516,46 @@ function renderCameraPicker() {
   sentence.innerHTML =
     `<input id="cameraSentence" style="width:60%" maxlength="500" ` +
     `placeholder="or describe it: behind and above both planes, about 300 m back">` +
-    ` <button id="cameraSentenceGo" class="opt">Place camera</button>`;
+    ` <button id="cameraSentenceGo" class="opt">Place camera</button>` +
+    ` <button id="cameraHelpBtn" class="opt infoBtn" type="button" ` +
+    `title="What can I type here?" aria-expanded="false" ` +
+    `aria-controls="cameraHelp">i</button>` +
+    `<div id="cameraHelp" class="infoBox" style="display:none">` +
+    `<b>Say where the camera should be, in your own words.</b> ` +
+    `Give a direction (behind, in front, left, right, above, below, ` +
+    `overhead) and, if you like, a distance (<i>300 m</i>, <i>1 km</i>, ` +
+    `<i>500 ft</i>) measured from the main aircraft. Say <i>both</i> or ` +
+    `<i>all aircraft</i> to centre the view on every aircraft; the lens ` +
+    `widens and the camera pulls back until they are all in frame. ` +
+    `<i>From the tower</i> or <i>from the ground</i> gives a fixed view.` +
+    `<div style="margin-top:.4rem">Click an example to use it:</div>` +
+    `<div id="cameraExamples"></div></div>`;
   holder.appendChild(sentence);
+  const examples = [
+    "behind and above both planes, about 300 m back",
+    "from the left side, 150 m away",
+    "directly overhead both aircraft, 1 km up",
+    "in front of the main aircraft, close, looking back at it",
+    "low behind the second plane, 80 m back",
+    "from the tower",
+  ];
+  for (const text of examples) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "opt exampleChip";
+    chip.textContent = text;
+    chip.addEventListener("click", () => {
+      $("cameraSentence").value = text;
+      $("cameraSentence").focus();
+    });
+    $("cameraExamples").appendChild(chip);
+  }
+  $("cameraHelpBtn").addEventListener("click", () => {
+    const box = $("cameraHelp");
+    const open = box.style.display === "none";
+    box.style.display = open ? "" : "none";
+    $("cameraHelpBtn").setAttribute("aria-expanded", String(open));
+  });
   $("cameraSentenceGo").addEventListener("click", placeCameraFromSentence);
   $("cameraSentence").addEventListener("keydown", e => {
     if (e.key === "Enter") placeCameraFromSentence();

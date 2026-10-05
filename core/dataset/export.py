@@ -802,6 +802,11 @@ def object_labels(run: Run, record: Dict[str, Any], labels: Dict[str, Any],
             "bbox_3d_camera": labels.get("bbox_3d_camera") if primary else entry.get("bbox_3d_camera"),
             "horizon": labels.get("horizon") if primary else entry.get("horizon"),
             "not_claimed": [str(n) for n in (entry.get("not_claimed") or [])],
+            # Scene vs labelled: the frame record's flags, else the
+            # manifest object's (a run composed before the frame records
+            # carried them).
+            "in_scene": entry.get("in_scene", top.get("in_scene")),
+            "labelled": entry.get("labelled", top.get("labelled")),
         })
     out.sort(key=lambda o: (o["role"] != "primary", o["int_id"] if o["int_id"] is not None else 1 << 30))
     return out
@@ -1078,6 +1083,8 @@ def export_coco(samples: Sequence[Sample], out: Path, splits: Dict[str, str]
             "spec_digest": sample.run.manifest["spec_digest"],
             "simulation_digest": sample.simulation_digest,
             "pixels": sample.labels["pixels"],
+            **({"presence": frame_presence_of(sample)} if frame_presence_of(sample)
+               else {}),
         })
         mask_path = label_file_path(sample.run, sample.record, "_mask.png")
         for obj in sample.objects:
@@ -1108,6 +1115,9 @@ def export_coco(samples: Sequence[Sample], out: Path, splits: Dict[str, str]
                 annotation["occluded_by"] = obj["occluded_by"]
             if obj.get("not_claimed"):
                 annotation["not_claimed"] = obj["not_claimed"]
+            if obj.get("in_scene") is not None or obj.get("labelled") is not None:
+                annotation["in_scene"] = obj.get("in_scene")
+                annotation["labelled"] = obj.get("labelled")
             if obj.get("int_id") is not None and mask_path.is_file():
                 rle = mask_rle(mask_path, int(obj["int_id"]))
                 if rle is not None:
@@ -2072,6 +2082,10 @@ def render_card(card: Dict[str, Any]) -> str:
         f"{', '.join(card.get('primary_aircraft', card['aircraft']))})",
         f"Sensor profiles: {', '.join(card['sensor_profiles'])}",
     ]
+    presence = card.get("presence")
+    if presence:
+        lines.append(f"Scene vs labelled: {presence['file']} (per class: in the "
+                     f"scene, labelled, and per frame which objects are in view)")
     boxes = card.get("box_source")
     if boxes:
         words = {BOX_MASK: "the ID mask", BOX_PROJECTED: "the projected geometry",
@@ -2148,6 +2162,48 @@ def render_card(card: Dict[str, Any]) -> str:
 
 # -- the whole thing -------------------------------------------------------
 
+#: Scene vs labelled, written beside every export whatever the format:
+#: YOLO, VOC and KITTI have no field for it, so the one file carries it.
+PRESENCE_JSON = "presence.json"
+
+
+def frame_presence_of(sample: "Sample") -> Optional[List[Dict[str, Any]]]:
+    """The frame's ``labels.presence`` (per taxonomy class: in the scene,
+    labelled, which objects are in this frame), or None for a run
+    composed before it was recorded."""
+    presence = (sample.record.get("labels") or {}).get("presence")
+    return presence if isinstance(presence, list) else None
+
+
+def presence_document(runs: Sequence[Run], samples: Sequence["Sample"]) -> Dict[str, Any]:
+    """``presence.json``: every run's per-class scene-vs-labelled list,
+    every object's flags, and each exported frame's own view, keyed by
+    the sample key the format's files are named by."""
+    return {
+        "about": ("Scene vs labelled. Per taxonomy class: in_scene true = "
+                  "something of the class was in the scene, false = nothing "
+                  "was, null = not known when the scene was composed (reason "
+                  "given); labelled = it carries an instance id in the ID "
+                  "image. Per frame: in_frame_objects = the class's labelled "
+                  "objects in this frame. So 'not labelled' (in_scene true, "
+                  "labelled false) reads apart from 'not there'."),
+        "runs": {run.name: {
+            "presence": run.manifest.get("presence"),
+            "objects": [{key: o.get(key) for key in
+                         ("id", "int_id", "class", "class_id", "in_scene", "labelled")}
+                        for o in run.manifest.get("objects") or []
+                        if isinstance(o, dict)],
+        } for run in runs},
+        "frames": {sample.key: {
+            "run": sample.run.name,
+            "presence": frame_presence_of(sample),
+            "objects": [{"id": o.get("id"), "in_scene": o.get("in_scene"),
+                         "labelled": o.get("labelled"), "in_frame": o.get("in_frame")}
+                        for o in sample.objects],
+        } for sample in sorted(samples, key=lambda s: s.key)},
+    }
+
+
 def export(paths: Sequence, out, fmt, fractions=DEFAULT_FRACTIONS,
            seed: int = 0, image: str = "ideal", labels_only: bool = False,
            shard_size: int = 1000, tabular: bool = False) -> Dict[str, Any]:
@@ -2191,6 +2247,12 @@ def export(paths: Sequence, out, fmt, fractions=DEFAULT_FRACTIONS,
                         seed, image, labels_only, formats=formats,
                         labels_shipped=labels_shipped, tabular=table,
                         licence_gate_result=gate_result)
+    (out / PRESENCE_JSON).write_text(
+        json.dumps(presence_document(runs, samples), indent=1), encoding="utf-8")
+    card["presence"] = {
+        "file": PRESENCE_JSON,
+        "runs": {run.name: run.manifest.get("presence") for run in runs},
+    }
     (out / CARD_JSON).write_text(json.dumps(card, indent=1), encoding="utf-8")
     (out / CARD_MD).write_text(render_card(card), encoding="utf-8")
     return card

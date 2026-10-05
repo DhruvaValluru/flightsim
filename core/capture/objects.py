@@ -312,6 +312,119 @@ def object_entries(spec, config_dir: Optional[Path] = None,
     return entries
 
 
+#: How a class's pixels are labelled, by class (``presence[].labelled_as``).
+LABELLED_AS = {
+    CLASS_AIRCRAFT: "instance id (ID image) + class image",
+    CLASS_TERRAIN: "instance id (ID image) + class image",
+    CLASS_BUILDING: "one aggregate id (building:all) + class image",
+    CLASS_VEGETATION: "one aggregate id (vegetation:all) + class image",
+}
+
+
+def class_presence(spec, objects: Sequence["SceneObject"], landcover: bool = False,
+                   randomization: Optional[Dict] = None) -> List[Dict]:
+    """Scene vs labelled, per taxonomy class: was anything of the class
+    in the scene, and did it get a label? One entry per class of
+    ``taxonomy.classes`` in class_id order, so "not labelled" (in_scene
+    true, labelled false) is told apart from "not there" (in_scene
+    false) and from "not known when the scene was composed" (in_scene
+    null, with the reason).
+
+    Each entry: ``class``, ``class_id``, ``in_scene`` (true / false /
+    null), ``labelled`` (an instance id in the ID image), ``objects``
+    (the composed ids of the class), ``labelled_as`` and ``reason``.
+    Decided from the spec and the composed objects only -- nothing the
+    engine reported; whether an object is IN VIEW in a given frame is the
+    frame's own ``labels.presence``.
+    """
+    classes = taxonomy_classes(spec)
+    by_class: Dict[str, List["SceneObject"]] = {}
+    for obj in objects:
+        by_class.setdefault(obj.class_name, []).append(obj)
+    surface = str(getattr(getattr(spec, "surface", None), "value", "") or "")
+    cloud_cover = (randomization or {}).get("cloud_cover")
+    out: List[Dict] = []
+    for index, name in enumerate(classes):
+        members = by_class.get(name, [])
+        entry = {"class": name, "class_id": index + 1,
+                 "objects": [o.id for o in members]}
+        if members:
+            entry.update(
+                in_scene=any(o.in_scene for o in members),
+                labelled=any(o.labelled and o.in_scene for o in members),
+                labelled_as=LABELLED_AS.get(name, "instance id (ID image)"),
+                reason=f"composed as {', '.join(o.id for o in members)}")
+        elif name in (CLASS_BUILDING, CLASS_VEGETATION):
+            entry.update(
+                in_scene=False, labelled=False, labelled_as=None,
+                reason=("no building footprint set and no land cover in this "
+                        "scene's bake, so none is drawn" if name == CLASS_BUILDING
+                        else "no land cover in this scene's bake, so no "
+                             "vegetation is drawn"))
+        elif name == "water":
+            if landcover:
+                entry.update(
+                    in_scene=None, labelled=False,
+                    labelled_as="land-cover class image only (no instance id)",
+                    reason="drawn wherever the land cover has water; how much "
+                           "is in view is each frame's labels.landcover")
+            elif surface == "water":
+                entry.update(
+                    in_scene=True, labelled=False, labelled_as=None,
+                    reason="the stated surface is water; it is drawn but "
+                           "carries no id and no class image")
+            else:
+                entry.update(in_scene=False, labelled=False, labelled_as=None,
+                             reason="no water surface and no land cover in "
+                                    "this scene")
+        elif name == "cloud":
+            if cloud_cover is None:
+                entry.update(
+                    in_scene=None, labelled=False,
+                    labelled_as="visibility record only (volumetrics write no id)",
+                    reason="no cloud cover was recorded for this run")
+            else:
+                there = float(cloud_cover) > 0.0
+                entry.update(
+                    in_scene=there, labelled=False,
+                    labelled_as=("visibility record only (volumetrics write no id)"
+                                 if there else None),
+                    reason=f"cloud cover {float(cloud_cover):g} recorded for "
+                           f"this run{'' if there else ': no clouds drawn'}")
+        else:
+            entry.update(in_scene=False, labelled=False, labelled_as=None,
+                         reason=f"no producer in this build composes a "
+                                f"{name!r} object")
+        out.append(entry)
+    return out
+
+
+def frame_presence(presence: Sequence[Dict], records: Sequence[Dict],
+                   class_of: Dict[str, str]) -> List[Dict]:
+    """One frame's scene-vs-labelled view: the run's per-class entry plus
+    which of the class's labelled objects are in this frame
+    (``in_frame_objects``) and which have no in-frame answer before the
+    engine's ID image is read (``in_frame_unknown``: a scene object such
+    as the terrain carries ``in_frame: null`` until then). So "in the
+    scene but out of this frame" reads differently from "not in the
+    scene". ``class_of`` maps object id -> class."""
+    in_frame: Dict[str, List[str]] = {}
+    unknown: Dict[str, List[str]] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        name = class_of.get(str(record.get("id")))
+        if record.get("in_frame") is None:
+            unknown.setdefault(str(name), []).append(str(record.get("id")))
+        elif record.get("in_frame"):
+            in_frame.setdefault(str(name), []).append(str(record.get("id")))
+    return [{"class": entry["class"], "class_id": entry["class_id"],
+             "in_scene": entry["in_scene"], "labelled": entry["labelled"],
+             "in_frame_objects": in_frame.get(entry["class"], []),
+             "in_frame_unknown": unknown.get(entry["class"], [])}
+            for entry in presence]
+
+
 def assign_int_ids(entries: Sequence[Dict]) -> List[SceneObject]:
     """Number the entries 1.. in the order given. Refuses by name
     (``annotation.identity``) a list the 8-bit stencil cannot carry and
