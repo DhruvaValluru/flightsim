@@ -358,12 +358,26 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
         f"                 the frames and the corner order\n"
         f"frame_NNNN_mask.png / _class.png / _depth.png\n"
         f"                 when the render pass was run with -labels: the\n"
-        f"                 engine's instance mask (aircraft = 1), class mask\n"
-        f"                 (0 sky, 1 aircraft, 2 terrain/other) and 16-bit\n"
-        f"                 depth (metres = value x depth_scale_m from that\n"
+        f"                 engine's instance mask (each pixel is an object's\n"
+        f"                 int_id, 0 = sky / nothing), class mask (each pixel\n"
+        f"                 is a class_id, 0 = sky / nothing) and 16-bit depth\n"
+        f"                 (metres = value x depth_scale_m from that\n"
         f"                 camera's render.json)\n"
         f"manifest.json    this camera's block, all of its frames, the scene's\n"
-        f"                 landmarks and the CRS the metres are expressed in\n"
+        f"                 landmarks and the CRS the metres are expressed in;\n"
+        f"                 'objects' and 'taxonomy' are the identity tables\n"
+        f"\n"
+        f"Object identity: every labelled object has a string id (for\n"
+        f"example aircraft:c172p:0, terrain, building:all, vegetation:all),\n"
+        f"an integer int_id (the value its pixels carry in the instance\n"
+        f"mask; the primary aircraft is always 1) and a class / class_id\n"
+        f"(the class's position in 'taxonomy' plus one). manifest.json\n"
+        f"'objects' maps id -> int_id -> class_id once; each frame's\n"
+        f"labels.objects[] repeats id, int_id and class_id beside that\n"
+        f"object's box and visibility. The mapping is the same in every\n"
+        f"frame, every camera and every re-run of the same spec. Buildings\n"
+        f"and vegetation are ONE aggregate object each (the mask is 8-bit),\n"
+        f"not one per building or tree.\n"
         f"\n"
         f"Positions are local north/east metres about the origin named in\n"
         f"context.frame, altitude in metres MSL. A consumer checks\n"
@@ -398,6 +412,10 @@ CAMERA_VIEW_KEYS = (
     # the frames page shows beside the pictures, so nothing a consumer
     # needs is only in the whole-run file.
     "airframe", "label_conventions", "assets", "randomization",
+    # The id -> integer map the mask pixels and every frame's
+    # labels.objects[] use, and the class list behind class_id: without
+    # them a mask value cannot be read back to an object from the zip.
+    "objects", "taxonomy",
 )
 
 
