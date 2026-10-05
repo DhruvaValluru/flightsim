@@ -39,6 +39,12 @@
          font-size: .88em; word-break: break-word; }
   h2 { font-size: .95rem; margin: 0 0 .4rem; }
   .group { margin-bottom: .6rem; }
+  table.presence { border-collapse: collapse; margin: .4rem 0; font-size: .9em; }
+  table.presence th, table.presence td { border: 1px solid #263240;
+    padding: .15rem .45rem; text-align: left; vertical-align: top; }
+  .pres-yes { color: #7fd18b; } .pres-no { color: #e09a6f; }
+  .pres-not-known { color: #c9b45c; }
+  .presence-run { margin: .6rem 0; }
   .group > b { color: #b9c4cf; font-size: .85em; letter-spacing: .03em;
                text-transform: uppercase; }
   #state { padding: 1rem 1.2rem; }
@@ -304,6 +310,48 @@ function runPanel(payload, camera, base, verify) {
          `<table>${rows(pairs)}</table></div>`;
 }
 
+// Scene vs labelled (manifest "presence", per frame labels.presence):
+// per taxonomy class, was anything of it in the scene, did it get a label,
+// and (per frame) which of its objects are in view. So "not labelled" reads
+// apart from "not there".
+function yesNo(value) {
+  return value === true ? "yes" : value === false ? "no" : "not known";
+}
+
+function presenceTable(presence) {
+  if (!Array.isArray(presence) || !presence.length) {
+    return `<div class="dim">This run was captured before scene-vs-labelled ` +
+           `was recorded; re-run it to see the table.</div>`;
+  }
+  return `<table class="presence"><thead><tr><th>class id</th><th>class</th>` +
+    `<th>in the scene</th><th>labelled (instance id)</th><th>objects</th>` +
+    `<th>how / why</th></tr></thead><tbody>` +
+    presence.map(p =>
+      `<tr><td>${esc(p.class_id)}</td><td>${esc(p.class)}</td>` +
+      `<td class="pres-${esc(yesNo(p.in_scene).replace(" ", "-"))}">${yesNo(p.in_scene)}</td>` +
+      `<td class="pres-${esc(yesNo(p.labelled).replace(" ", "-"))}">${yesNo(p.labelled)}</td>` +
+      `<td>${esc((p.objects || []).join(", ") || "—")}</td>` +
+      `<td class="dim">${esc([p.labelled_as, p.reason].filter(Boolean).join(" — "))}</td></tr>`
+    ).join("") + `</tbody></table>`;
+}
+
+function framePresence(presence) {
+  if (!Array.isArray(presence) || !presence.length) return "";
+  return `<div class="group"><b>SCENE VS LABELLED, THIS FRAME</b>` +
+    `<table class="presence"><thead><tr><th>class</th><th>in scene</th>` +
+    `<th>labelled</th><th>in this frame</th></tr></thead><tbody>` +
+    presence.map(p => {
+      const seen = (p.in_frame_objects || []).join(", ");
+      const unknown = (p.in_frame_unknown || []).join(", ");
+      const share = p.landcover_share !== undefined
+        ? ` (${(100 * p.landcover_share).toFixed(1)}% of the frame by land cover)` : "";
+      const inFrame = seen || (unknown ? `${unknown}: not known until the ID image is read`
+                                       : (p.in_scene === false ? "— (not in the scene)" : "none"));
+      return `<tr><td>${esc(p.class)}</td><td>${yesNo(p.in_scene)}</td>` +
+             `<td>${yesNo(p.labelled)}</td><td>${esc(inFrame + share)}</td></tr>`;
+    }).join("") + `</tbody></table></div>`;
+}
+
 function conditionsLine(conditions) {
   if (!conditions || typeof conditions !== "object") return "";
   const parts = [];
@@ -368,7 +416,12 @@ async function load() {
     if (reply.ok) verify = await reply.json();
   } catch (error) { /* the verdict is optional on the page */ }
   document.getElementById("runpanel-holder").innerHTML =
-    runPanel(payload, camera, base, verify);
+    runPanel(payload, camera, base, verify) +
+    `<details open class="presence-run"><summary><b>Scene vs labelled</b> ` +
+    `<span class="dim">— per class: in the scene, labelled, and the objects ` +
+    `composed for it. Also in every frame's .json (labels.presence) and in the ` +
+    `zip's manifest.json.</span></summary>` + presenceTable(payload.presence) +
+    `</details>`;
   document.getElementById("links").innerHTML =
     `<a href="${base}/cameras/${encodeURIComponent(cameraId)}/frames.zip">` +
     `<b>download every frame with its labels (zip)</b></a> &middot; ` +
@@ -388,8 +441,8 @@ async function load() {
     // masks and depth when a -labels pass wrote them. Same directory, own
     // suffixes.
     const derived = [["_sensor.png", "sensor-modelled frame (the camera profile applied)"],
-                     ["_mask.png", "engine instance mask (aircraft = 1)"],
-                     ["_class.png", "engine class mask (0 sky, 1 aircraft, 2 terrain/other)"],
+                     ["_mask.png", "engine instance mask (each pixel = an object's int_id, 0 = nothing)"],
+                     ["_class.png", "engine class mask (each pixel = a class_id, 0 = sky)"],
                      ["_depth.png", "engine depth, 16-bit"]];
     for (const [kind, label] of [["overlays", "overlay — the manifest's " +
                                   "projection (circle) and the engine's " +
@@ -441,7 +494,8 @@ async function load() {
         `renderer did not write (no engine on the machine that ran ` +
         `this, or the pass refused)</div>`}${labelLink}</div>` +
       `<div><h2>frame ${esc(record.index)} — t = ${num(record.t_s)} s</h2>` +
-      recordTable(record) + `</div>`;
+      recordTable(record) +
+      framePresence((record.labels || {}).presence) + `</div>`;
     main.appendChild(block);
   }
   document.getElementById("state").style.display = "none";
