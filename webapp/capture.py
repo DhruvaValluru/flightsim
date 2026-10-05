@@ -272,6 +272,33 @@ def traffic_tracks(spec, solved: Dict) -> List:
             for entry, obj in zip(spec.traffic, objects)]
 
 
+def card_scene_objects(spec, solved: Dict) -> Dict:
+    """What the run card must carry for the render host to draw and label
+    the scene the manifest describes, exactly as ``flightsim.capture``'s
+    card does: the labelled objects (the host sets each one's stencil from
+    them), the class list, and one block per other aircraft with its solved
+    track (without it the host never draws the second plane the labels
+    describe)."""
+    from core.capture.airframe import load_airframe
+    from core.capture.objects import (
+        compose_objects, mesh_manifest_path, objects_block, taxonomy_classes,
+    )
+    from core.capture.poses import traffic_card_block
+
+    objects = compose_objects(spec)
+    traffic_objects = [o for o in objects if o.role == "traffic"]
+    blocks = []
+    for entry, obj, track in zip(spec.traffic, traffic_objects,
+                                 traffic_tracks(spec, solved)):
+        name = str(entry.aircraft.value)
+        mesh = mesh_manifest_path(name)
+        blocks.append(traffic_card_block(
+            track, entry, obj, solved["frame"], load_airframe(name).cg_structural_in,
+            str(mesh) if mesh.is_file() else None))
+    return {"objects": objects_block(objects), "taxonomy": taxonomy_classes(spec),
+            "traffic": blocks or None}
+
+
 def write_manifest(spec, solved: Dict, out: Path, scene: Dict,
                    heightfield=None) -> Path:
     from core.capture.manifest import (
