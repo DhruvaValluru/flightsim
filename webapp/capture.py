@@ -299,7 +299,7 @@ def apply_sensor(out: Path, run_seed: int) -> Dict[str, int]:
 #: Everything a labelled set is, per view. The zip is rebuilt when any
 #: of these is newer than it, so a re-render or a re-verify refreshes
 #: the download and nothing else does.
-_ARCHIVE_PATTERNS = ("frame_*.png", "frame_*.json")
+_ARCHIVE_PATTERNS = ("frame_*.png", "frame_*.json", "frame_*.f32")
 
 
 def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
@@ -340,7 +340,10 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
             boxed = draw_box_frames(manifest, out, cameras=[camera_id])
         except (OSError, ImportError):
             boxed = []
-    inputs = files + boxed + ([manifest_path] if manifest_path.is_file() else [])
+    from core.capture.frame_checks import FRAME_CHECKS_JSON, read_frame_checks
+
+    checks_path = out / FRAME_CHECKS_JSON
+    inputs = files + boxed + [p for p in (manifest_path, checks_path) if p.is_file()]
 
     archive = out / "downloads" / f"{camera_id}.zip"
     if archive.is_file():
@@ -349,7 +352,8 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
             return archive
     archive.parent.mkdir(parents=True, exist_ok=True)
 
-    camera_manifest = camera_view(manifest, camera_id) if manifest else None
+    camera_manifest = (camera_view(manifest, camera_id, read_frame_checks(out))
+                       if manifest else None)
 
     readme = (
         f"{camera_id}: one view of run {out.name}\n"
@@ -365,6 +369,13 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
         f"                 (terrain, other aircraft, fog transmittance; cloud\n"
         f"                 is not measured) and change_from_previous (this\n"
         f"                 frame minus the same camera's previous frame)\n"
+        f"                 'checks' gives THIS frame's own verdict for\n"
+        f"                 box_vs_mask (mask box vs predicted box) and\n"
+        f"                 depth_vs_geometry (depth image vs predicted\n"
+        f"                 distance): PASS, FAIL with the reason, or NOT RUN\n"
+        f"                 (e.g. no engine render on this machine)\n"
+        f"frame_NNNN_depth.f32  when the engine wrote it: metric depth, raw\n"
+        f"                 little-endian float32, width x height\n"
         f"boxed/frame_NNNN_boxes.png\n"
         f"                 the same frame with its 2-D boxes drawn on: solid\n"
         f"                 green = the box from the engine's mask pixels\n"
@@ -464,7 +475,8 @@ CAMERA_VIEW_KEYS = (
 )
 
 
-def camera_view(manifest: Dict, camera_id: str) -> Optional[Dict]:
+def camera_view(manifest: Dict, camera_id: str,
+                checks: Optional[Dict[str, Dict]] = None) -> Optional[Dict]:
     """ONE camera's labels out of the whole-run manifest, or None when
     the run has no such camera. Shared by the manifest route and the
     zip, so the two cannot disagree about what a view contains."""
@@ -474,6 +486,11 @@ def camera_view(manifest: Dict, camera_id: str) -> Optional[Dict]:
         return None
     frames = [f for f in manifest.get("frames", [])
               if str(f.get("camera_id")) == camera_id]
+    if checks:
+        # Each frame's own box / depth verdict (core/capture/frame_checks.py),
+        # added to the view only -- the manifest file is never rewritten.
+        frames = [{**f, "checks": checks[str(f.get("file"))]}
+                  if str(f.get("file")) in checks else f for f in frames]
     shared = {key: manifest.get(key) for key in CAMERA_VIEW_KEYS}
     return {**shared, "camera": blocks[0], "frames": frames}
 
@@ -493,6 +510,12 @@ def finish(out: Path, max_overlays: Optional[int] = 24) -> Dict:
 
     boxed = draw_box_frames(manifest, out)
     report = verify_run(out)
+    # The box and depth checks again, frame by frame: every frame's own
+    # verdict in frame_checks.json and in its frame_NNNN.json.
+    from core.capture.frame_checks import grade_frames, write_frame_checks
+
+    frame_checks = grade_frames(manifest, out)
+    write_frame_checks(out, frame_checks)
     # The SAME verdict under the one name every other path uses
     # (flightsim.verify writes it; flightsim.export refuses a run
     # without it), so a web run exports like a CLI run -- bound to the
@@ -507,6 +530,8 @@ def finish(out: Path, max_overlays: Optional[int] = 24) -> Dict:
                    for c in report.checks],
         "overlays": len(overlays),
         "boxed": len(boxed),
+        "frame_checks": {"counts": frame_checks["counts"],
+                         "failed_frames": frame_checks["failed_frames"]},
     }
     (out / "verify.json").write_text(json.dumps(summary, indent=1),
                                      encoding="utf-8")

@@ -857,9 +857,11 @@ def run_camera_manifest(run_id: str, camera_id: str):
         return JSONResponse({"error": f"manifest unreadable: {exc}"},
                             status_code=500)
 
+    from core.capture.frame_checks import read_frame_checks
     from webapp.capture import camera_view
 
-    view = camera_view(manifest, camera_id)
+    view = camera_view(manifest, camera_id,
+                       read_frame_checks(manager.out_root / run_id))
     if view is None:
         return JSONResponse(
             {"error": f"this run has no camera {camera_id!r}; it states "

@@ -196,6 +196,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # card no longer says the verdict is unbound for a run checked here.
     bind_verification(args.run_dir)
     print(f"  recorded: {written}")
+    # The box and depth checks again, frame by frame (each frame's own
+    # verdict in frame_checks.json and its frame_NNNN.json).
+    from core.capture.frame_checks import grade_frames, write_frame_checks
+    from core.capture.manifest import read_capture_manifest
+
+    manifest_path = Path(args.run_dir) / "capture_manifest.json"
+    if manifest_path.is_file():
+        graded = grade_frames(read_capture_manifest(manifest_path), args.run_dir)
+        print(f"  per frame: {write_frame_checks(args.run_dir, graded)} "
+              f"({len(graded['failed_frames'])} frame(s) failing)")
     return 0 if report.ok else 1
 
 

@@ -352,6 +352,38 @@ function framePresence(presence) {
     }).join("") + `</tbody></table></div>`;
 }
 
+// Each frame's own box / depth verdict (frame_checks.json, merged into the
+// camera view by the server): PASS, FAIL with the reason, or NOT RUN.
+function frameChecks(checks) {
+  if (!checks) return "";
+  const rows = ["box_vs_mask", "depth_vs_geometry"].filter(k => checks[k]).map(k => {
+    const c = checks[k];
+    const cls = c.status === "PASS" ? "pres-yes" : c.status === "FAIL" ? "pres-no"
+                                                                      : "pres-not-known";
+    return `<tr><td>${esc(k)}</td><td class="${cls}">${esc(c.status)}</td>` +
+           `<td class="dim">${esc(c.detail || "")}</td></tr>`;
+  }).join("");
+  return `<div class="group"><b>THIS FRAME'S CHECKS</b>` +
+    `<table class="presence"><tbody>${rows}</tbody></table></div>`;
+}
+
+function checksSummary(frames) {
+  const graded = frames.filter(f => f.checks);
+  if (!graded.length) {
+    return `<div class="dim">Per-frame box / depth checks: not graded for this ` +
+           `run (re-verify it to see each frame's verdict).</div>`;
+  }
+  const failed = graded.filter(f => f.checks.ok === false);
+  const notRun = graded.filter(f => ["box_vs_mask", "depth_vs_geometry"]
+    .every(k => !f.checks[k] || f.checks[k].status === "NOT RUN"));
+  return `<div class="${failed.length ? "pres-no" : "dim"}">Per-frame box / depth ` +
+    `checks: ${failed.length} of ${graded.length} frame(s) failing` +
+    (failed.length ? ` (frames ${failed.map(f => esc(f.index)).join(", ")})` : "") +
+    (notRun.length === graded.length
+      ? ` — none could be measured: no engine render on the machine that ran this ` +
+        `(needs the Windows Unreal host)` : "") + `</div>`;
+}
+
 function conditionsLine(conditions) {
   if (!conditions || typeof conditions !== "object") return "";
   const parts = [];
@@ -421,7 +453,7 @@ async function load() {
     `<span class="dim">— per class: in the scene, labelled, and the objects ` +
     `composed for it. Also in every frame's .json (labels.presence) and in the ` +
     `zip's manifest.json.</span></summary>` + presenceTable(payload.presence) +
-    `</details>`;
+    `</details>` + checksSummary(payload.frames || []);
   document.getElementById("links").innerHTML =
     `<a href="${base}/cameras/${encodeURIComponent(cameraId)}/frames.zip">` +
     `<b>download every frame with its labels (zip)</b></a> ` +
@@ -500,6 +532,7 @@ async function load() {
         `this, or the pass refused)</div>`}${labelLink}</div>` +
       `<div><h2>frame ${esc(record.index)} — t = ${num(record.t_s)} s</h2>` +
       recordTable(record) +
+      frameChecks(record.checks) +
       framePresence((record.labels || {}).presence) + `</div>`;
     main.appendChild(block);
   }
