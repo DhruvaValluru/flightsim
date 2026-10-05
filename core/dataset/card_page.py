@@ -95,7 +95,11 @@ def summary_blocks(runs: Sequence, samples: Sequence) -> Dict[str, Any]:
             elif item.get("applies") is True:
                 entry["frames"] += 1
 
-    return {"images_per_camera": per_camera, "images_per_run": per_run,
+    from .realised import realised_for_export, realised_words
+
+    realised = realised_for_export(runs, samples)
+    return {"realised": realised, "realised_words": realised_words(realised),
+            "images_per_camera": per_camera, "images_per_run": per_run,
             "seeds": seeds, "checks": checks, "frame_checks": frame_checks,
             "failing_frames": failing_frames, "limits": limits,
             "frames_counted": len(samples)}
@@ -161,6 +165,34 @@ def render_card_html(card: Dict[str, Any]) -> str:
                      ("runs failing verification", failed),
                      ("frames failing a per-frame check", len(summary.get("failing_frames") or []))))
         + "</div>")
+
+    words = summary.get("realised_words") or {}
+    if words:
+        parts.append("<h2>Variety you actually got</h2>"
+                     f"<p class='{'warn' if words.get('narrow') else ''}'>"
+                     f"{_e(words.get('headline'))}</p>")
+        rows = []
+        for item in words.get("fields") or []:
+            hist = item.get("histogram") or {}
+            top = max(list(hist.values()) or [1]) or 1
+            bars = "".join(
+                f"<div title='{_e(k)}: {_e(v)}' style='display:inline-block;width:14px;"
+                f"margin-right:2px;vertical-align:bottom;height:{4 + 36.0 * v / top:.0f}px;"
+                f"background:{'var(--bar)' if v else 'var(--line)'}'></div>"
+                for k, v in list(hist.items())[:24])
+            cov = item.get("coverage")
+            cov_cell = (f"<span class='{'bad' if item.get('narrow') else 'ok'}'>"
+                        f"{100.0 * float(cov):.0f} %</span>"
+                        if cov is not None and item.get("requested") else
+                        "<span class='dim'>not asked for</span>")
+            rows.append((_e(item.get("sentence")),
+                         f"<div style='white-space:nowrap'>{bars}</div>", cov_cell))
+        if rows:
+            parts.append(_table(("what was asked, and what the exported frames hold",
+                                 "realised", "requested bins filled"), rows, raw=True))
+        parts.append("<p class='dim'>Counted over the frames in this export, from each "
+                     "run's recorded draws -- not from the request. A grey bar is a "
+                     "requested value no exported frame has.</p>")
 
     if choices:
         parts.append("<h2>What was chosen</h2>" + _table(

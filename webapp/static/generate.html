@@ -488,7 +488,12 @@
   function cardHtml(c) {
     const list = (title, lines) => lines && lines.length ? `<div style="margin:.5rem 0"><div class="dim">${esc(title)}</div><ul class="plain">${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></div>` : '';
     const d = c.details || {};
+    const v = c.variety || {};
     return list('In it', c.contents) + list('What is labelled', c.classes) +
+      (v.headline ? `<div style="margin:.5rem 0"><div class="dim">Variety you actually got ` +
+        `(counted over the exported pictures, not the request)</div>` +
+        `<p${v.narrow && v.narrow.length ? ' style="color:#d9bf63"' : ''}>${esc(v.headline)}</p>` +
+        `<ul class="plain">${(v.lines || []).map((l) => `<li>${esc(l)}</li>`).join('')}</ul></div>` : '') +
       list('Conditions the scenarios drew', c.conditions) +
       list('Checks', c.checks) + list('What this dataset does not claim', c.not_claimed) +
       `<p>Format: ${esc(c.format_words)}. ${esc(c.files)}</p>` +

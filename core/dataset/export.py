@@ -2161,6 +2161,10 @@ def render_card(card: Dict[str, Any]) -> str:
             + (f"; render: {', '.join(sorted(run['render']))}" if run.get("render")
                else f"; {run.get('render_note', 'no render record')}"))
     summary = card.get("summary") or {}
+    words = card.get("realised_words") or {}
+    if words:
+        lines += ["", "## Variety you actually got", "", words.get("headline", "")]
+        lines += [f"- {item['sentence']}" for item in words.get("fields") or []]
     if summary.get("checks"):
         lines += ["", "## Check results", ""]
         for name, c in sorted(summary["checks"].items()):
@@ -2342,6 +2346,11 @@ def export(paths: Sequence, out, fmt, fractions=DEFAULT_FRACTIONS,
     from .card_page import CARD_HTML, render_card_html, summary_blocks
 
     card["summary"] = summary_blocks(runs, samples)
+    # The variety the exported frames actually hold, beside the request
+    # (core/dataset/realised.py) -- top-level, so no reader mistakes the
+    # request for the dataset.
+    card["realised"] = card["summary"]["realised"]
+    card["realised_words"] = card["summary"]["realised_words"]
     (out / PRESENCE_JSON).write_text(
         json.dumps(presence_document(runs, samples), indent=1), encoding="utf-8")
     card["presence"] = {

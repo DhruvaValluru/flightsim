@@ -1020,6 +1020,12 @@ def card_words(card: Dict[str, Any], labels_only: Optional[bool] = None) -> Dict
         "verified": bool(scenarios) and len(passed_runs) == scenarios,
         "contents": contents, "classes": classes, "conditions": conditions,
         "checks": checks, "not_claimed": not_claimed,
+        # What the exported frames actually hold, beside what was asked
+        # (core/dataset/realised.py) -- the request alone is not the dataset.
+        "variety": {"headline": (card.get("realised_words") or {}).get("headline"),
+                    "lines": [item["sentence"] for item in
+                              (card.get("realised_words") or {}).get("fields") or []],
+                    "narrow": (card.get("realised_words") or {}).get("narrow") or []},
         "files": (f"The zip holds the dataset laid out as {format_words.split(':')[0]}, "
                   f"beside its card: a page to read and the same facts as data."),
         "details": {
@@ -1027,7 +1033,7 @@ def card_words(card: Dict[str, Any], labels_only: Optional[bool] = None) -> Dict
             "checks_not_run": sorted({str(name) for r in runs for name in r.get("not_run") or []}),
             "conditions": sampled,
             "class_order": card.get("class_order"),
-            "card_files": [CARD_JSON, "DATASET_CARD.md"],
+            "card_files": [CARD_JSON, "DATASET_CARD.md", "DATASET_CARD.html"],
         },
     }
 
