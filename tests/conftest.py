@@ -6,10 +6,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-# Pinned render commands must not depend on whether this machine has an
-# X-Plane extraction (webapp.runs.xplane_lighting_flags); the X-Plane
-# tests pass their own tables.
+# Pinned render commands and scenes must not change because the X-Plane
+# extraction is committed (webapp.runs.xplane_lighting_flags,
+# attach_xplane_drape); the X-Plane tests switch them on themselves.
 os.environ.setdefault("FLIGHTSIM_XPLANE_LIGHTING", "off")
+os.environ.setdefault("FLIGHTSIM_XPLANE_TERRAIN", "off")
 
 from core.util.platform import ue_available  # noqa: E402
 

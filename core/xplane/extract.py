@@ -1,10 +1,10 @@
 """Extract water, terrain-type and sky-colour data from an X-Plane 12 install.
 
 One implementation; ``scripts/extract_xplane.py`` is a thin CLI over
-:func:`extract`. Output goes to ``data/xplane/`` (gitignored): X-Plane's
-files are Laminar Research's and are regenerated from the user's own
-install rather than redistributed, the same way ``data/glo30/`` is fetched
-rather than committed.
+:func:`extract`. Output goes to ``assets/xplane/`` and IS COMMITTED (owner's
+decision, 2026-10-05, so a machine without X-Plane renders the same
+terrain). These are Laminar Research's files and derivatives of them: the
+repository must stay PRIVATE while they are in its history.
 
 What is read, and what each output does and does not claim:
 
@@ -31,6 +31,13 @@ What is read, and what each output does and does not claim:
   there. Sky zenith/horizon are the panel's top-centre and bottom-edge
   pixels of the row, read as zenith and horizon-away-from-sun: an
   interpretation of the gradient, not a documented layout.
+
+* five ``.ter`` definitions and the textures they name ->
+  ``terrain/drape/<role>.png`` + ``drape_textures.json``: the ground
+  textures core.xplane.drape tiles over a bake (valley grass, hill scrub,
+  steep rock, cliff, snow/ice), each downsampled to at most 512 px with the
+  ground size X-Plane projects it at (the .ter's own PROJECTED /
+  AUTO_SLOPE_CLIFF metres).
 
 The .shp reader is the ESRI polygon record layout read directly, so the
 extraction adds no dependency.
@@ -70,6 +77,20 @@ SKY_STRIPS = ("ambient", "direct", "sun", "moon", "water", "cloud_dark",
               "cloud_light", "moon_dir")
 SKY_STRIP_X0 = 129
 SKY_STRIP_PITCH = 5
+
+#: role -> (terrain10 .ter name, which line names the texture). The roles
+#: are the classes of FlightSimVisualScene's ClassifyVertex plus a cliff.
+DRAPE_TEXTURES = {
+    "valley": ("grass_cld_dry_fl", "PROJECTED"),
+    "scrub": ("shrb_cld_sdry_hill", "PROJECTED"),
+    "rock": ("rock_cld_dry_steep", "PROJECTED"),
+    "cliff": ("rock_cld_dry_steep", "AUTO_SLOPE_CLIFF"),
+    "snow": ("ice_cld_dry_hill", "PROJECTED"),
+}
+DRAPE_TEXTURE_MAX_PX = 512
+_PROJECTED = re.compile(r"^\s*PROJECTED\s+(\d+)\s+(\d+)", re.M)
+_CLIFF = re.compile(r"^\s*AUTO_SLOPE_CLIFF\s+(\d+)\s+(\d+)\s+\S+\s+\S+\s+(\S+)",
+                    re.M)
 
 _TILE = re.compile(r"^([+-]\d{2})([+-]\d{3})$")
 _BASE_TEX = re.compile(r"^\s*BASE_TEX\s+(\S+)", re.M)
@@ -252,6 +273,50 @@ def extract_sky(xplane_root: Path, out_dir: Path) -> Dict[str, int]:
     return {"conditions": len(palettes)}
 
 
+def extract_drape_textures(xplane_root: Path, out_dir: Path) -> Dict[str, int]:
+    src = xplane_root / TERRAIN_REL / "terrain10"
+    out = out_dir / "terrain" / "drape"
+    out.mkdir(parents=True, exist_ok=True)
+    index = {}
+    for role, (ter_name, line) in DRAPE_TEXTURES.items():
+        ter = src / f"{ter_name}.ter"
+        if not ter.is_file():
+            raise XPlaneExtractError(f"{ter} not found")
+        text = ter.read_bytes().decode("utf-8", errors="ignore")
+        if line == "AUTO_SLOPE_CLIFF":
+            match = _CLIFF.search(text)
+            if not match:
+                raise XPlaneExtractError(f"{ter.name} has no AUTO_SLOPE_CLIFF")
+            metres = (float(match.group(1)), float(match.group(2)))
+            texture_rel = match.group(3)
+        else:
+            size = _PROJECTED.search(text)
+            base = _BASE_TEX.search(text)
+            if not size or not base:
+                raise XPlaneExtractError(
+                    f"{ter.name} has no PROJECTED size or BASE_TEX")
+            metres = (float(size.group(1)), float(size.group(2)))
+            texture_rel = base.group(1)
+        texture = (ter.parent / texture_rel).resolve()
+        if not texture.is_file():
+            raise XPlaneExtractError(
+                f"{ter.name} names {texture_rel}, which this install lacks")
+        with Image.open(texture) as im:
+            rgb = im.convert("RGB")
+        scale = DRAPE_TEXTURE_MAX_PX / max(rgb.size)
+        if scale < 1.0:
+            rgb = rgb.resize((max(1, round(rgb.width * scale)),
+                              max(1, round(rgb.height * scale))),
+                             Image.LANCZOS)
+        rgb.save(out / f"{role}.png")
+        index[role] = {"file": f"{role}.png", "metres_x": metres[0],
+                       "metres_y": metres[1], "source_ter": ter.name,
+                       "source_texture": texture.name}
+    (out / "drape_textures.json").write_text(
+        json.dumps(index, indent=1), encoding="utf-8")
+    return {"textures": len(index)}
+
+
 def extract(xplane_root: Path, out_dir: Path) -> Dict[str, Dict[str, int]]:
     """Run all three extractions; returns the counts of what was written."""
     xplane_root = Path(xplane_root)
@@ -262,4 +327,5 @@ def extract(xplane_root: Path, out_dir: Path) -> Dict[str, Dict[str, int]]:
     out_dir = Path(out_dir)
     return {"water": extract_water(xplane_root, out_dir),
             "terrain": extract_terrain_catalog(xplane_root, out_dir),
+            "drape": extract_drape_textures(xplane_root, out_dir),
             "sky": extract_sky(xplane_root, out_dir)}

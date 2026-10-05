@@ -1,9 +1,11 @@
-"""Readers for the data ``scripts/extract_xplane.py`` writes to data/xplane/.
+"""Readers for the data ``scripts/extract_xplane.py`` writes to assets/xplane/.
 
 The water mask feeds webapp.runs.plan_water_surface (mapped water under
 the flight plans the water surface class). The decoded sky tables feed
 webapp.runs.xplane_lighting_flags (sun, sky-light and fog colours for the
-legacy-look render). The terrain catalog has no consumer yet. Every loader refuses by name when the
+legacy-look render). The ground textures and the water mask feed
+core.xplane.drape (the terrain texture a georeferenced render wears). The
+terrain catalog has no consumer yet. Every loader refuses by name when the
 extraction has not been run, rather than returning an empty answer that
 would read as "no water here".
 """
@@ -20,7 +22,7 @@ import numpy as np
 from PIL import Image, ImageChops, ImageDraw
 
 REPO = Path(__file__).resolve().parents[2]
-DATA_DIR = REPO / "data" / "xplane"
+DATA_DIR = REPO / "assets" / "xplane"
 
 
 class XPlaneDataError(Exception):
@@ -104,10 +106,48 @@ class WaterMask:
             return list(zip(((ring[:, 0] - west) * sx).tolist(),
                             ((north - ring[:, 1]) * sy).tolist()))
 
+        return self._fill(math.floor(south), math.ceil(north),
+                          math.floor(west), math.ceil(east),
+                          to_px, width, height)
+
+    def rasterize_projected(self, crs: str, origin_x_m: float,
+                            origin_y_m: float, texel_size_m: float,
+                            width: int, height: int) -> np.ndarray:
+        """Boolean water mask on a projected north-up grid (a bake's frame:
+        ``origin`` is the upper-left corner, rows increase southward).
+
+        Polygon vertices are projected lon/lat -> ``crs`` and filled on the
+        grid; only the tiles the grid's corners span are drawn. All False
+        where the mask has no tile.
+        """
+        from pyproj import Transformer
+
+        inverse = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+        forward = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+        xs = [origin_x_m, origin_x_m + width * texel_size_m]
+        ys = [origin_y_m, origin_y_m - height * texel_size_m]
+        lons, lats = inverse.transform(
+            [xs[0], xs[1], xs[0], xs[1]], [ys[0], ys[0], ys[1], ys[1]])
+        if not all(math.isfinite(v) for v in list(lons) + list(lats)):
+            return np.zeros((height, width), dtype=bool)
+
+        def to_px(ring: np.ndarray) -> List[Tuple[float, float]]:
+            x, y = forward.transform(ring[:, 0], ring[:, 1])
+            return list(zip(((np.asarray(x) - origin_x_m)
+                             / texel_size_m).tolist(),
+                            ((origin_y_m - np.asarray(y))
+                             / texel_size_m).tolist()))
+
+        return self._fill(math.floor(min(lats)), math.ceil(max(lats)),
+                          math.floor(min(lons)), math.ceil(max(lons)),
+                          to_px, width, height)
+
+    def _fill(self, south: int, north: int, west: int, east: int, to_px,
+              width: int, height: int) -> np.ndarray:
         mask = Image.new("1", (width, height), 0)
         draw = ImageDraw.Draw(mask)
-        for lat in range(math.floor(south), math.ceil(north)):
-            for lon in range(math.floor(west), math.ceil(east)):
+        for lat in range(south, north):
+            for lon in range(west, east):
                 for rings in self._polygons.get((lat, lon), ()):
                     if len(rings) == 1:
                         draw.polygon(to_px(rings[0]), fill=1)

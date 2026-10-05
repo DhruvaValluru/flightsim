@@ -19,6 +19,10 @@ from core.xplane.extract import (
     SKY_SIZE, XPlaneExtractError, extract, read_shp_polygons,
 )
 
+ROLE_COLOURS = {"valley": (20, 120, 20), "scrub": (90, 90, 30),
+                "rock": (100, 100, 100), "cliff": (60, 50, 40),
+                "snow": (240, 240, 250)}
+
 # A lake in tile +10+020 with an island in it. Shapefile winding: outer
 # ring clockwise, hole counter-clockwise.
 LAKE = [(20.2, 10.2), (20.2, 10.8), (20.8, 10.8), (20.8, 10.2), (20.2, 10.2)]
@@ -56,8 +60,23 @@ def install(tmp_path):
 
     terrain = root / "Resources" / "default scenery" / "1000 world terrain"
     (terrain / "terrain10").mkdir(parents=True)
+    soil = terrain / "textures10" / "soil"
+    soil.mkdir(parents=True)
+    # One flat-coloured texture per drape role (PNG bytes under the .dds
+    # name: the reader goes by content), so a drape's colours are checkable.
+    for name, colour in ROLE_COLOURS.items():
+        Image.new("RGB", (64, 64), colour).save(soil / f"{name}.dds",
+                                                format="PNG")
+    for ter, texture in (("grass_cld_dry_fl", "valley"),
+                         ("shrb_cld_sdry_hill", "scrub"),
+                         ("ice_cld_dry_hill", "snow")):
+        (terrain / "terrain10" / f"{ter}.ter").write_text(
+            f"A\n800\nTERRAIN\n\nBASE_TEX ../textures10/soil/{texture}.dds\n"
+            f"PROJECTED 1000 1000\n", encoding="utf-8")
     (terrain / "terrain10" / "rock_cld_dry_steep.ter").write_text(
-        "A\n800\nTERRAIN\n\nBASE_TEX ../textures10/soil/rock.dds\n",
+        "A\n800\nTERRAIN\n\nBASE_TEX ../textures10/soil/rock.dds\n"
+        "PROJECTED 1000 1000\n"
+        "AUTO_SLOPE_CLIFF 2000 500 57 62 ../textures10/soil/cliff.dds\n",
         encoding="utf-8")
 
     sky = root / "Resources" / "bitmaps" / "skycolors"
@@ -74,7 +93,8 @@ def data(install, tmp_path):
     out = tmp_path / "data"
     counts = extract(install, out)
     assert counts == {"water": {"tiles": 1, "polygons": 1},
-                      "terrain": {"definitions": 1},
+                      "terrain": {"definitions": 4},
+                      "drape": {"textures": 5},
                       "sky": {"conditions": 1}}
     return out
 
@@ -127,9 +147,10 @@ def test_sky_palette_samples_the_panel_not_the_fill(data):
 
 def test_terrain_catalog_reads_the_base_texture(data):
     rows = load_terrain_catalog(data / "terrain" / "terrain_catalog.csv")
-    assert rows == [{"folder": "terrain10", "name": "rock_cld_dry_steep",
-                     "category": "rock",
-                     "base_texture": "../textures10/soil/rock.dds"}]
+    assert {"folder": "terrain10", "name": "rock_cld_dry_steep",
+            "category": "rock",
+            "base_texture": "../textures10/soil/rock.dds"} in rows
+    assert len(rows) == 4
 
 
 def test_missing_extraction_is_a_named_refusal(tmp_path):
@@ -352,3 +373,93 @@ def test_the_commandlet_parses_every_flag_the_web_app_sends():
     for name in ("xplane-condition=", "xplane-direct=", "xplane-ambient=",
                  "xplane-horizon="):
         assert f'TEXT("{name}")' in source, name
+
+
+# -- terrain: the X-Plane ground-texture drape a render wears ------------
+
+
+def _bake(tmp_path, elevation, snowline=None, name="ridge"):
+    from core.terrain.heightfield import Georeference, Heightfield
+
+    field = Heightfield.from_elevations(
+        elevation, Georeference(crs="EPSG:32633", origin_x_m=400000.0,
+                                origin_y_m=5100000.0, pixel_size_m=30.0),
+        name=name,
+        provenance={"snowline_m_approx": snowline} if snowline else {})
+    stem = tmp_path / "terrain" / name
+    stem.parent.mkdir(parents=True, exist_ok=True)
+    field.write(stem)
+    return stem
+
+
+def test_drape_textures_carry_xplanes_own_ground_size(data):
+    import json
+
+    index = json.loads((data / "terrain" / "drape" / "drape_textures.json")
+                       .read_text(encoding="utf-8"))
+    assert set(index) == set(ROLE_COLOURS)
+    assert (index["rock"]["metres_x"], index["rock"]["metres_y"]) == (1000, 1000)
+    # the cliff comes from the rock definition's AUTO_SLOPE_CLIFF line
+    assert (index["cliff"]["metres_x"], index["cliff"]["metres_y"]) == (2000, 500)
+    assert index["cliff"]["source_texture"] == "cliff.dds"
+
+
+def test_drape_classifies_flat_steep_and_snow(data, tmp_path):
+    """Flat low ground wears the valley texture, a 45 degree face the
+    rock texture, flat ground above the snowline the snow texture."""
+    import json
+
+    import numpy as np
+
+    from core.xplane.drape import build_drape
+
+    elevation = np.full((60, 90), 500.0)
+    # columns 30..59: a 45 degree ramp (30 m rise per 30 m pixel)
+    elevation[:, 30:60] = 500.0 + 30.0 * np.arange(1, 31)
+    elevation[:, 60:] = 4000.0                    # a high flat plateau
+    stem = _bake(tmp_path, elevation, snowline=3000.0)
+    sidecar_path = build_drape(stem, data_dir=data)
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    texture = np.asarray(Image.open(
+        sidecar_path.with_name(sidecar["texture"]["file"])).convert("RGB"))
+    k = sidecar["texture"]["texels_per_dem_pixel"]
+    assert texture.shape[:2] == (60 * k, 90 * k)
+
+    def texel(column):
+        return tuple(int(c) for c in texture[30 * k, column * k])
+
+    assert texel(10) == ROLE_COLOURS["valley"]
+    assert texel(45) == ROLE_COLOURS["rock"]
+    assert texel(80) == ROLE_COLOURS["snow"]
+    assert sidecar["texture"]["crs"] == "EPSG:32633"
+    assert "Laminar" in sidecar["attribution"]
+    # a second call reuses the drape instead of rebuilding it
+    stamp = sidecar_path.stat().st_mtime_ns
+    assert build_drape(stem, data_dir=data) == sidecar_path
+    assert sidecar_path.stat().st_mtime_ns == stamp
+
+
+def test_attach_replaces_the_scenes_own_texture(data, tmp_path, monkeypatch):
+    import numpy as np
+
+    import core.xplane.drape as drape
+    import webapp.runs as runs
+
+    stem = _bake(tmp_path, np.full((40, 40), 500.0))
+    monkeypatch.setattr(drape, "DATA_DIR", data)
+    monkeypatch.setattr(runs, "_WATER_MASK", False)
+    scene = {"key": "x", "terrain": str(stem), "imagery": "/old/s2.json",
+             "label": "bake"}
+
+    monkeypatch.setenv(runs.XPLANE_TERRAIN_ENV, "off")
+    assert runs.attach_xplane_drape(dict(scene)) is None
+
+    monkeypatch.setenv(runs.XPLANE_TERRAIN_ENV, "on")
+    told = []
+    sidecar = runs.attach_xplane_drape(scene, told.append)
+    assert scene["imagery"] == sidecar
+    assert sidecar.endswith("_xplane_drape.json")
+    assert "X-Plane" in scene["label"] and len(told) == 1
+
+    flat = {"key": "flat", "terrain": None, "imagery": None, "label": ""}
+    assert runs.attach_xplane_drape(flat) is None

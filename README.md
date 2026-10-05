@@ -199,21 +199,22 @@ for priming a machine ahead of time rather than prerequisites.
   carry a fail-safe: a scene the SYSTEM chose never falls back to the
   featureless slab -- the control ridge is synthesised on first need --
   while a user-stated flat place stays honestly flat.
-* **X-Plane data (optional)**: `python scripts/extract_xplane.py
-  --xplane-root "<your X-Plane 12 folder>"` reads water polygons, the
-  terrain-type catalog and the sky-colour lookups out of your own install
-  into `data/xplane/` (gitignored: Laminar Research's files are not
-  redistributed). `core.xplane` loads them (`WaterMask`,
-  `load_sky_palettes`, `load_terrain_catalog`). The water mask is used
-  on every compile and run: a place over mapped water with no stated
-  ground cover gets the water surface class (`plan_water_surface`,
-  recorded as a derived edit). The decoded sky tables colour the
-  legacy-look render: sun light, sky light and fog colours for the look's
-  sun position and sky condition go to the commandlet as `-xplane-*`
-  flags (`xplane_lighting_flags`; `FLIGHTSIM_XPLANE_LIGHTING=off`
-  disables it; a physical sky plan is left alone). The engine half of
-  that was written without an Unreal build and is unverified until the
-  first build and render. The terrain catalog is loadable but unused.
+* **X-Plane look (committed in `assets/xplane/`; KEEP THIS REPOSITORY
+  PRIVATE -- the files are Laminar Research's)**: ground textures, water
+  polygons and sky-colour tables extracted from an X-Plane 12 install by
+  `python scripts/extract_xplane.py --xplane-root "<X-Plane 12 folder>"`
+  (only needed again to refresh them). Used on every run:
+  * terrain scenes wear X-Plane's ground textures, placed by slope and
+    height, with mapped water in X-Plane's water colour
+    (`core/xplane/drape.py`, through the existing `-imagery=` path; it
+    replaces the Sentinel-2 drape; `FLIGHTSIM_XPLANE_TERRAIN=off` restores
+    the scene's own texture). The terrain SHAPE is still the GLO-30 bake.
+  * a place over mapped water with no stated ground cover gets the water
+    surface class (`plan_water_surface`).
+  * the legacy-look render takes its sun, sky-light and fog colours from
+    X-Plane's sky tables (`-xplane-*` flags;
+    `FLIGHTSIM_XPLANE_LIGHTING=off` disables; a physical sky plan is left
+    alone). That engine code is unverified until the first Unreal build.
 * **Real aircraft**: `python scripts/import_aircraft.py` fetches each
   configured model at its pinned commit (license verified on disk),
   converts it, and imports it into the Unreal project. Renders carry

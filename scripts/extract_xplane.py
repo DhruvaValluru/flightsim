@@ -2,10 +2,10 @@
 
     .venv/bin/python scripts/extract_xplane.py --xplane-root "~/X-Plane 12"
 
-Writes data/xplane/ (gitignored -- the files are Laminar Research's and are
-regenerated from your own install, not redistributed). core.xplane reads
-the result; see core/xplane/extract.py for what each output does and does
-not claim.
+Writes assets/xplane/, which IS committed so a machine without X-Plane
+renders the same terrain. The files are Laminar Research's: keep the
+repository private. core.xplane reads the result; see
+core/xplane/extract.py for what each output does and does not claim.
 """
 
 import argparse
@@ -34,6 +34,7 @@ def main() -> int:
     print(f"water:   {counts['water']['polygons']} polygon records in "
           f"{counts['water']['tiles']} tiles")
     print(f"terrain: {counts['terrain']['definitions']} definitions")
+    print(f"drape:   {counts['drape']['textures']} ground textures")
     print(f"sky:     {counts['sky']['conditions']} conditions")
     print(f"written to {args.out}")
     return 0

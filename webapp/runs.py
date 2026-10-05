@@ -1092,6 +1092,47 @@ def _water_mask():
     return _WATER_MASK or None
 
 
+#: FLIGHTSIM_XPLANE_TERRAIN=off keeps the scene's own texture (Sentinel-2
+#: drape where one was baked, the engine's vertex classification
+#: otherwise). The test suite sets it.
+XPLANE_TERRAIN_ENV = "FLIGHTSIM_XPLANE_TERRAIN"
+
+
+def attach_xplane_drape(scene: Dict, report=None) -> Optional[str]:
+    """Texture a terrain scene with X-Plane's ground textures.
+
+    Owner's decision (2026-10-05): the X-Plane textures REPLACE whatever
+    the scene would otherwise wear -- the Sentinel-2 drape of a curated
+    bake included -- whenever the extracted textures are present. The
+    drape (core.xplane.drape) is built once per bake beside it and goes to
+    the commandlet through the existing -imagery= sidecar path, so the
+    engine is unchanged. Flat scenes have no terrain to drape. Returns
+    the sidecar path it set, or None when nothing changed (no terrain,
+    switched off, or no extracted textures).
+    """
+    import os
+
+    from core.xplane import XPlaneDataError
+    from core.xplane.drape import build_drape, drape_paths
+
+    if os.environ.get(XPLANE_TERRAIN_ENV, "").lower() == "off":
+        return None
+    if not scene.get("terrain"):
+        return None
+    if report is not None and not drape_paths(scene["terrain"])["sidecar"].is_file():
+        report("building the X-Plane terrain texture for this scene "
+               "(one time per terrain)")
+    try:
+        sidecar = build_drape(scene["terrain"], water_mask=_water_mask())
+    except XPlaneDataError:
+        return None
+    scene["imagery"] = str(sidecar)
+    scene["label"] = (f"{scene.get('label', '')}; ground texture: X-Plane "
+                      f"12 textures by slope/height classification "
+                      f"(approximated)")
+    return str(sidecar)
+
+
 #: Fog density at or above which the X-Plane "hazy" table is read (the
 #: showcase's hazy visibility); the storm look reads "ocast".
 XPLANE_HAZY_FOG_DENSITY = 0.010
@@ -2328,6 +2369,9 @@ class RunManager:
             run.push("failed", f"[{exc.constraint}] {exc.message}")
             return
         scene = pick_scene(spec)
+        # X-Plane ground textures replace the scene's own texture when
+        # the extraction is present (attach_xplane_drape).
+        attach_xplane_drape(scene, lambda line: run.push("terrain", line))
         run.scene = scene
         # The render sun (visual plan V1). start() already refused a sun
         # the scene cannot show, so this resolves; it is recomputed here
