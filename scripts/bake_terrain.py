@@ -54,6 +54,21 @@ def ensure_imagery(key: str, terrain_dir: Path, args) -> None:
     print(f"  {'':<18} imagery: {texture.name} (verified)")
 
 
+def wants_other_source(raw: Path, source: str) -> bool:
+    """True when a baked raster's provenance names a different dataset
+    than the one asked for (a GLO-30 bake under --source 3dep is re-baked,
+    not skipped); an unreadable sidecar counts as different."""
+    try:
+        import json
+
+        provenance = json.loads(raw.with_suffix(".json").read_text(
+            encoding="utf-8")).get("provenance", {})
+    except (OSError, ValueError):
+        return True
+    dataset = str(provenance.get("dataset", ""))
+    return ("3DEP" in dataset) != (source == "3dep")
+
+
 def has_datum(raw: Path) -> bool:
     """Whether the bake's sidecar carries the vertical-datum block."""
     from core.terrain.heightfield import Heightfield
@@ -98,6 +113,13 @@ def main(argv=None) -> int:
                     help="re-bake locations that are already baked")
     ap.add_argument("--no-imagery", action="store_true",
                     help="skip the Sentinel-2 imagery drape")
+    ap.add_argument("--source", choices=("glo30", "3dep"), default="glo30",
+                    help="the elevation source: Copernicus GLO-30 (30 m, "
+                         "worldwide) or USGS 3DEP 1/3 arc-second (~10 m, "
+                         "the United States only; core/terrain/dem3dep.py)")
+    ap.add_argument("--gsd", type=float, default=None,
+                    help="ground sample distance in metres (default: the "
+                         "source's own, 30 for GLO-30 and 10 for 3DEP)")
     args = ap.parse_args(argv)
 
     keys = list(args.keys) or list(DEFAULT_KEYS)
@@ -125,7 +147,8 @@ def main(argv=None) -> int:
             field.write(terrain_dir / "control_ridge")
             continue
         raw = terrain_dir / f"{key}.r16"
-        if raw.is_file() and not args.force and has_datum(raw):
+        if (raw.is_file() and not args.force and has_datum(raw)
+                and not wants_other_source(raw, args.source)):
             print(f"  {key:<18} already baked ({raw})")
             print(datum_line(key, raw))
             ensure_imagery(key, terrain_dir, args)
@@ -136,9 +159,19 @@ def main(argv=None) -> int:
             # the owner's machine), so it is re-baked, not skipped. The
             # downloaded tiles are cached, so this is ingest + verify only.
             print(f"  {key:<18} re-baking ({'--force' if args.force else 'no datum block in its sidecar'})")
+        elif args.source == "3dep":
+            print(f"  {key:<18} baking from USGS 3DEP 1/3 arc-second "
+                  f"(windowed fetch + ingest + verify)")
         else:
             print(f"  {key:<18} baking from GLO-30 (fetch + ingest + verify)")
-        bake(LOCATIONS[key], REPO / "data" / "glo30", terrain_dir)
+        if args.source == "3dep":
+            from core.terrain.dem3dep import NOMINAL_GSD_M, bake as bake_3dep
+
+            bake_3dep(LOCATIONS[key], REPO / "data" / "3dep", terrain_dir,
+                      ground_sample_distance_m=args.gsd or NOMINAL_GSD_M)
+        else:
+            bake(LOCATIONS[key], REPO / "data" / "glo30", terrain_dir,
+                 ground_sample_distance_m=args.gsd or 30.0)
         print(f"  {key:<18} done")
         print(datum_line(key, raw))
         ensure_imagery(key, terrain_dir, args)

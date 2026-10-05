@@ -5,6 +5,7 @@ __pycache__/
 runs/
 data/dem/
 data/glo30/
+data/3dep/
 data/worldcover/
 data/geoid/
 build/
