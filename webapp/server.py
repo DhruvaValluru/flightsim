@@ -870,6 +870,26 @@ def run_camera_manifest(run_id: str, camera_id: str):
     return JSONResponse({**view, "run_id": run_id})
 
 
+@app.get("/runs/{run_id}/cameras/{camera_id}/box3d.zip")
+def run_camera_box3d_archive(run_id: str, camera_id: str):
+    """ONE view's 3-D boxes as a download: per frame the 3-D box picture
+    and that frame's box_3d JSON. Declared before the generic image route
+    for the same reason the frames zip is."""
+    from webapp.capture import box3d_archive
+
+    if not _CAMERA_NAME.match(camera_id):
+        return JSONResponse({"error": "no such camera"}, status_code=404)
+    out = manager.out_root / run_id
+    if not out.is_dir():
+        return JSONResponse({"error": "no such run"}, status_code=404)
+    archive = box3d_archive(out, camera_id)
+    if archive is None:
+        return JSONResponse({"error": f"camera {camera_id!r} has no frames in "
+                                      f"this run"}, status_code=404)
+    return FileResponse(archive, media_type="application/zip",
+                        filename=f"{run_id}_{camera_id}_3d_boxes.zip")
+
+
 @app.get("/runs/{run_id}/cameras/{camera_id}/frames.zip")
 def run_camera_archive(run_id: str, camera_id: str):
     """ONE view as a download: every frame, each frame's own labels

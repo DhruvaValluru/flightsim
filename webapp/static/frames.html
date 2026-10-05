@@ -471,7 +471,9 @@ async function load() {
     `</details>` + checksSummary(payload.frames || []);
   document.getElementById("links").innerHTML =
     `<a href="${base}/cameras/${encodeURIComponent(cameraId)}/frames.zip">` +
-    `<b>download every frame with its labels (zip)</b></a> ` +
+    `<b>download every frame with its labels (zip)</b></a> &middot; ` +
+    `<a href="${base}/cameras/${encodeURIComponent(cameraId)}/box3d.zip">` +
+    `<b>download the 3-D boxes (3D zip)</b></a> ` +
     `<span class="dim">(each frame three times: as rendered, with its 2-D ` +
     `boxes in boxed/, with its 3-D boxes in boxed3d/)</span> &middot; ` +
     `<a href="${url}" download="${esc(cameraId)}_manifest.json">` +

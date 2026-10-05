@@ -518,6 +518,78 @@ CAMERA_VIEW_KEYS = (
 )
 
 
+def box3d_archive(out: Path, camera_id: str) -> Optional[Path]:
+    """A zip of ONE view's 3-D boxes: per frame the 3-D box picture and a
+    small JSON with just that frame's ``box_3d`` section (each plane's box
+    in camera coordinates, which way it faces, the rebuild recipe and its
+    check), plus a README. Built under ``downloads/<camera_id>_box3d.zip``
+    and reused while newer than what it packs; None when the view has no
+    frames."""
+    import zipfile
+
+    from core.capture.box3d import box3d_section
+    from core.capture.box_frames import box3d_name, draw_box_frames
+
+    manifest_path = out / "capture_manifest.json"
+    if not manifest_path.is_file():
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    records = [r for r in manifest.get("frames", [])
+               if str(r.get("camera_id")) == camera_id]
+    if not records:
+        return None
+    try:
+        draw_box_frames(manifest, out, cameras=[camera_id])
+    except (OSError, ImportError):
+        pass
+    pictures = sorted((out / "boxed3d" / camera_id).glob("*_box3d.png"))
+    archive = out / "downloads" / f"{camera_id}_box3d.zip"
+    inputs = pictures + [manifest_path]
+    if archive.is_file() and archive.stat().st_mtime >= max(
+            p.stat().st_mtime for p in inputs):
+        return archive
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    readme = (
+        f"{camera_id}: the 3-D boxes of run {out.name}\n"
+        f"\n"
+        f"frame_NNNN_box3d.png  the frame with each plane's 3-D box drawn\n"
+        f"                 (blue; red = nose face; yellow arrow = where the\n"
+        f"                 nose points), rebuilt from the JSON beside it\n"
+        f"frame_NNNN_box3d.json  that frame's box_3d: per plane centre_m,\n"
+        f"                 extents_m (length/width/height), body_axes_in_camera\n"
+        f"                 (forward/right/down), orientation (yaw/pitch/roll\n"
+        f"                 from the camera and a word), shape_box (measured\n"
+        f"                 from the mesh, when the machine had it), the recipe\n"
+        f"                 to rebuild the 8 corners from these numbers and the\n"
+        f"                 frame's intrinsic_matrix alone, and rebuild_check\n"
+        f"\n"
+        f"Camera coordinates: x right, y down, z forward along the view,\n"
+        f"metres. The full per-frame labels are in the frames zip.\n")
+    partial = archive.with_suffix(".zip.part")
+    with zipfile.ZipFile(partial, "w") as zf:
+        for record in records:
+            name = Path(str(record.get("file"))).name
+            stem = name[:-len(".png")] if name.endswith(".png") else name
+            picture = out / "boxed3d" / camera_id / box3d_name(name)
+            if picture.is_file():
+                zf.write(picture, arcname=f"{camera_id}_3d/{picture.name}",
+                         compress_type=zipfile.ZIP_STORED)
+            zf.writestr(f"{camera_id}_3d/{stem}_box3d.json",
+                        json.dumps({"camera_id": camera_id,
+                                    "frame_index": record.get("index"),
+                                    "t_s": record.get("t_s"),
+                                    "box_3d": box3d_section(manifest, record)},
+                                   indent=1),
+                        compress_type=zipfile.ZIP_DEFLATED)
+        zf.writestr(f"{camera_id}_3d/README.txt", readme,
+                    compress_type=zipfile.ZIP_DEFLATED)
+    partial.replace(archive)
+    return archive
+
+
 def camera_view(manifest: Dict, camera_id: str,
                 checks: Optional[Dict[str, Dict]] = None) -> Optional[Dict]:
     """ONE camera's labels out of the whole-run manifest, or None when

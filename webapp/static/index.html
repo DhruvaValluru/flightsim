@@ -1473,6 +1473,9 @@ async function initGallery(runId, run) {
       `this camera's manifest</a> <span class="dim">&middot;</span> ` +
       `<a href="/runs/${runId}/cameras/${id}/frames.zip">` +
       `download every frame with its labels (zip)</a>` +
+      ` <span class="dim">&middot;</span> ` +
+      `<a href="/runs/${runId}/cameras/${id}/box3d.zip">` +
+      `download the 3-D boxes (3D zip)</a>` +
       `</div>`);
     // The view's OWN clip: the flight from that angle, at the rate its
     // frames were taken. The page used to show one video for the whole
