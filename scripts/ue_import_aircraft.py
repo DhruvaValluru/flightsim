@@ -38,14 +38,15 @@ def section_triangles(mesh):
     return total
 
 
+def _set_if_present(struct, name, value):
+    """Set a property the running engine version may not expose."""
+    try:
+        struct.set_editor_property(name, value)
+    except Exception:
+        pass
+
+
 def import_part(obj_path, destination, part, expected_triangles):
-    task = unreal.AssetImportTask()
-    task.filename = obj_path
-    task.destination_path = destination
-    task.destination_name = part
-    task.automated = True
-    task.save = True
-    task.replace_existing = True
     # Nanite must be OFF at import time, in the pipeline options. Interchange
     # builds Nanite by default and a scene capture then draws the coarse
     # fallback (measured: 3563 of 24471 triangles); flipping the flag after
@@ -57,8 +58,25 @@ def import_part(obj_path, destination, part, expected_triangles):
         "build_nanite", False)
     override = unreal.InterchangePipelineStackOverride()
     override.add_pipeline(pipeline)
-    task.options = override
-    unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
+    # Straight to the Interchange manager, NOT AssetTools.import_asset_tasks:
+    # on UE 5.7 AssetTools' import-completion callback syncs the content
+    # browser, which asserts in a commandlet (no Slate application) right
+    # after the first part is saved -- measured 2026-10-05, every aircraft,
+    # even with an import that logged no error. The manager imports
+    # synchronously and calls nothing in the content browser.
+    params = unreal.ImportAssetParameters()
+    params.set_editor_property("is_automated", True)
+    params.set_editor_property(
+        "override_pipelines", override.get_editor_property("override_pipelines"))
+    _set_if_present(params, "replace_existing", True)
+    _set_if_present(params, "destination_name", part)
+    source = unreal.InterchangeManager.create_source_data(obj_path)
+    manager = unreal.InterchangeManager.get_interchange_manager_scripted()
+    if not manager.import_asset(destination, source, params):
+        FAILURES.append(f"{destination}/{part}: Interchange refused {obj_path}")
+        return
+    unreal.EditorAssetLibrary.save_directory(
+        destination, only_if_is_dirty=False, recursive=True)
     asset_path = f"{destination}/{part}"
     mesh = unreal.load_asset(asset_path)
     if mesh is None or not isinstance(mesh, unreal.StaticMesh):
@@ -106,8 +124,13 @@ def run():
             if not os.path.isfile(obj_path):
                 FAILURES.append(f"missing {obj_path}")
                 continue
-            import_part(obj_path, destination, part,
-                        manifest["triangles"][part])
+            # One part's scripting error is that part's failure, by name;
+            # the parts after it still import.
+            try:
+                import_part(obj_path, destination, part,
+                            manifest["triangles"][part])
+            except Exception as exc:
+                FAILURES.append(f"{destination}/{part}: {exc!r}")
 
 
 run()
