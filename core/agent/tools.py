@@ -675,6 +675,12 @@ class Tools:
                 "reason": payload.get("reason"), "yield": payload["yield"],
                 "coverage": payload.get("coverage"), "refusals": payload["refusals"],
                 "realised_fields": sorted((payload.get("realised") or {}).get("fields") or {}),
+                # Per requested condition, the share of its requested bins the
+                # verified frames hold -- what the controller's variety check reads.
+                "realised_coverage": {
+                    name: field.get("coverage")
+                    for name, field in ((payload.get("realised") or {}).get("fields") or {}).items()
+                    if field.get("requested") is not None},
                 "report_path": str(campaign.dir / "report.json"),
                 "not_claimed": payload.get("not_claimed")}
 

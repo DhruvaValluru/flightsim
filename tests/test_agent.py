@@ -394,7 +394,9 @@ def test_the_bake_tool_has_its_own_allowance(tmp_path, fake_bakes):
 def test_cooperative_agent_completes_a_tiny_headless_campaign_end_to_end(tmp_path):
     out = tmp_path / "demo"
     tools = _tools(out)
-    outcome = Controller(tools, preview=2).run(Request(PROMPT, images=IMAGES))
+    # min_coverage 0: this test is the end-to-end path to done; the
+    # variety rule has its own test below.
+    outcome = Controller(tools, preview=2).run(Request(PROMPT, images=IMAGES, min_coverage=0.0))
     assert outcome.state == "done", outcome.sentence
     assert outcome.campaign_id == "demo" and outcome.yield_frames >= IMAGES
     assert outcome.sentence.startswith(f"Done: {outcome.yield_frames} verified frames of {IMAGES} in 2 case(s)")
@@ -508,6 +510,24 @@ def test_the_controller_resamples_only_system_chosen_fields_and_escalates_by_nam
                for a in r["refused_attempts"])           # only the policy's leaf was drawn
 
 
+def test_the_controller_does_not_call_a_narrow_yield_done(tmp_path):
+    """The count met is not done when the request asked for variety and
+    the verified frames fill too little of it: the dataset is exported,
+    the outcome is 'narrow' by name (yield.variety), the narrow
+    conditions are named, and the image count -- the person's -- is not
+    raised to buy variety."""
+    tools = _tools(tmp_path / "n")
+    outcome = Controller(tools, preview=1).run(Request(PROMPT, images=IMAGES, min_coverage=1.0))
+    assert outcome.state == "narrow", outcome.sentence
+    assert outcome.rule == "yield.variety"
+    assert outcome.dataset_path and Path(outcome.dataset_path).is_dir()
+    assert "requested variety" in outcome.sentence and "narrow:" in outcome.sentence
+    record = json.loads((tmp_path / "n" / "campaign.json").read_text())
+    assert int(record["images_target"]) == IMAGES                # the count was not raised
+    rows = [json.loads(line) for line in Path(outcome.trace_path).read_text().splitlines()]
+    assert any((r.get("input") or {}).get("rule") == "yield.variety" for r in rows)
+
+
 def test_the_agent_cli_runs_a_request_and_exits_by_outcome(tmp_path, capsys):
     from flightsim.agent import main
 
@@ -519,7 +539,7 @@ def test_the_agent_cli_runs_a_request_and_exits_by_outcome(tmp_path, capsys):
     printed = capsys.readouterr().out
     assert "escalated: The scenario cannot run as stated" in printed
     assert main([PROMPT, "--images", str(IMAGES), "--out", str(tmp_path / "ok"),
-                 "--preview", "1", "--json"]) == 0
+                 "--preview", "1", "--json", "--min-coverage", "0"]) == 0
     outcome = json.loads(capsys.readouterr().out)
     assert outcome["state"] == "done" and outcome["yield_frames"] >= IMAGES
     assert Path(outcome["trace_path"]).is_file()
