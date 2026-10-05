@@ -195,7 +195,15 @@ for priming a machine ahead of time rather than prerequisites.
 
 * **Real terrain**: `python scripts/bake_terrain.py` bakes the showcase
   terrains (Matterhorn, Yosemite, the synthesised control ridge) into
-  `runs/terrain/`; `--all` bakes every curated location. Renders also
+  `runs/terrain/`; `--all` bakes every curated location. The default
+  source is Copernicus GLO-30 (30 m, worldwide); `--source 3dep` bakes
+  the places inside the United States (Yosemite, Grand Canyon, Flint
+  Hills) from the USGS 3DEP 1/3 arc-second bare-earth DEM at ~10 m
+  (`core/terrain/dem3dep.py`: the scene's box read windowed over HTTPS,
+  the same verification, summit identity and datum block; NAVD88
+  heights stated as unmodelled against EGM2008). The procedural mesh's
+  triangle budget may decimate a 10 m bake and the host records the
+  posting it achieved; the Landscape route carries it whole. Renders also
   carry a fail-safe: a scene the SYSTEM chose never falls back to the
   featureless slab -- the control ridge is synthesised on first need --
   while a user-stated flat place stays honestly flat.
