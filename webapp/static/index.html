@@ -818,8 +818,13 @@ async function poll() {
     $("clipArea").innerHTML =
       `<div class="clipRow"><div class="clipMain">` +
       `<div class="dim">scene: ${run.scene.label || run.scene.kind}</div>` +
-      `<video id="clipVideo" controls src="/runs/${activeRun}/clip.mp4">` +
-      `</video>` +
+      (run.capture && run.capture.headless
+        ? `<div class="dim">Captured headlessly (no Unreal host on this ` +
+          `machine): no video clip. Every frame has an engine-free picture ` +
+          `with its 2-D and 3-D boxes and its full labels — open the ` +
+          `frames below.</div>`
+        : `<video id="clipVideo" controls src="/runs/${activeRun}/clip.mp4">` +
+          `</video>`) +
       `<div class="dim"><a style="color:#6fb3e0" ` +
       `href="/runs/${activeRun}/provenance.json">provenance</a> · ` +
       `<a style="color:#6fb3e0" ` +
@@ -1016,7 +1021,9 @@ async function initAeroPanel(runId, run) {
     `coefficient tables), not validated aircraft performance (§2.1).</div>`;
 
   const canvas = $("aeroCanvas");
-  const video = $("clipVideo");
+  // A headless run has no clip: the panel then shows the first sample.
+  const video = $("clipVideo") ||
+    {currentTime: 0, paused: true, ended: true, addEventListener() {}};
 
   const sampleAt = t => {
     const interval = telemetry.interval_s || 0.1;

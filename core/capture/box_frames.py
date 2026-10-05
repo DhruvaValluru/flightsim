@@ -136,13 +136,20 @@ def draw_box_frames(manifest: Dict, run_dir, cameras: Optional[Iterable[str]] = 
         camera = str(record.get("camera_id"))
         if wanted is not None and camera not in wanted:
             continue
-        source = run_dir / str(record.get("file", ""))
+        frame_file = run_dir / str(record.get("file", ""))
+        source = frame_file
         if not source.is_file():
-            continue
+            # No engine render on this machine: draw on the engine-free
+            # shaded preview of the same frame (same pose, same intrinsics,
+            # full resolution), so the boxes still have a picture.
+            source = (run_dir / "previews" / camera
+                      / f"preview_{int(record.get('index', 0)):04d}.png")
+            if not source.is_file():
+                continue
         from .box3d import draw_box3d_frame
 
-        for subdir, name, draw in ((out_subdir, boxed_name(source.name), draw_box_frame),
-                                   (OUT_SUBDIR_3D, box3d_name(source.name),
+        for subdir, name, draw in ((out_subdir, boxed_name(frame_file.name), draw_box_frame),
+                                   (OUT_SUBDIR_3D, box3d_name(frame_file.name),
                                     draw_box3d_frame)):
             target = run_dir / subdir / camera / name
             if (target.is_file() and target.stat().st_mtime >= source.stat().st_mtime

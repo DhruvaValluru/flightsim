@@ -601,6 +601,59 @@ def hull_box_body_m(mesh_manifest: Optional[Dict], airframe: Airframe
     return {"forward": forward, "right": right, "down": down}, basis
 
 
+_MESH_BOX_CACHE: Dict[str, Optional[Dict[str, Tuple[float, float]]]] = {}
+
+
+def mesh_tight_box_body_m(aircraft: str) -> Optional[Dict[str, Tuple[float, float]]]:
+    """The airframe's own source mesh, measured: the tightest body-frame box
+    (forward, right, down; metres about the CG) around every vertex of
+    the triangles the preview and the engine draw. None when the source
+    mesh is not on this machine. Cached per airframe."""
+    if aircraft not in _MESH_BOX_CACHE:
+        box = None
+        try:
+            from .aircraft_mesh import load_triangles
+
+            triangles = load_triangles(aircraft)
+        except Exception:
+            triangles = None
+        if triangles:
+            points = [v for vertices, _ in triangles for v in vertices]
+            if points:
+                box = {name: (min(float(p[i]) for p in points),
+                              max(float(p[i]) for p in points))
+                       for i, name in enumerate(("forward", "right", "down"))}
+        _MESH_BOX_CACHE[aircraft] = box
+    return _MESH_BOX_CACHE[aircraft]
+
+
+def box3d_camera(record: Dict, state: Dict, box: Dict[str, Tuple[float, float]],
+                 axes) -> Dict:
+    """A body-frame box (forward, right, down extents about the CG) as the
+    labels' ``bbox_3d_camera`` shape: centre, extents, body axes and the
+    eight corners in camera coordinates (same corner order)."""
+    corners_cam = [to_camera(record, body_to_scene(c, state), axes)
+                   for c in _box_corners(box)]
+    origin = body_to_scene((0.0, 0.0, 0.0), state)
+    o = to_camera(record, origin, axes)
+    axes_cam = []
+    for unit in ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)):
+        t = to_camera(record, body_to_scene(unit, state), axes)
+        axes_cam.append([t[0] - o[0], t[1] - o[1], t[2] - o[2]])
+    centre_body = tuple((lo + hi) / 2.0 for lo, hi in
+                        (box["forward"], box["right"], box["down"]))
+    centre_cam = to_camera(record, body_to_scene(centre_body, state), axes)
+    return {
+        "centre_m": list(centre_cam),
+        "extents_m": [box["forward"][1] - box["forward"][0],
+                      box["right"][1] - box["right"][0],
+                      box["down"][1] - box["down"][0]],
+        "body_axes_in_camera": axes_cam,
+        "corners_m": [list(c) for c in corners_cam],
+        "cg_m": list(o),
+    }
+
+
 def _box_corners(box: Dict[str, Tuple[float, float]]) -> List[Vec]:
     return [(x, y, z) for x in box["forward"] for y in box["right"]
             for z in box["down"]]
@@ -700,6 +753,21 @@ def object_label_record(obj, record: Dict, state: Optional[Dict],
             entry["bbox_2d_hull"] = list(clipped) if clipped else None
         else:
             entry["bbox_2d_hull"] = None
+        # The airframe's MEASURED shape box, when this machine has it: the
+        # imported mesh's measured extent (mesh manifest), else the tightest
+        # box around the source mesh's own vertices. The stated-dimension
+        # box above stays the label of record; this one sits beside it.
+        shape, shape_basis = hull, hull_basis
+        if shape is None:
+            shape = mesh_tight_box_body_m(airframe.aircraft)
+            shape_basis = ("tightest box around every vertex of the airframe's "
+                           "source mesh" if shape is not None else
+                           "no mesh on this machine (neither the imported mesh "
+                           "manifest nor the source model): only the box from the "
+                           "airframe's stated length, span and height exists")
+        entry["bbox_3d_camera_shape"] = (box3d_camera(record, state, shape, axes)
+                                         if shape is not None else None)
+        basis["bbox_3d_camera_shape"] = shape_basis
         cg = labels["bbox_3d_camera"]["cg_m"]
         range_m = math.sqrt(sum(float(c) * float(c) for c in cg))
         transmittance, t_basis = atmospheric_transmittance(range_m, randomization)
@@ -715,7 +783,8 @@ def object_label_record(obj, record: Dict, state: Optional[Dict],
             "bbox_2d": None, "bbox_2d_unclipped": None, "truncation": None,
             "fraction_in_frame": None, "in_frame": None, "bbox_2d_hull": None,
             "atmospheric_transmittance": None, "depth_projected_m": None,
-            "bbox_3d_camera": None, "keypoints": {}, "horizon": None,
+            "bbox_3d_camera": None, "bbox_3d_camera_shape": None,
+            "keypoints": {}, "horizon": None,
             "not_claimed": not_claimed_for(obj.class_name, alone_pass=False),
         })
         basis["bbox_2d_hull"] = "a scene object has no airframe hull"

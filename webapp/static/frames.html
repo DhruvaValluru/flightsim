@@ -491,7 +491,10 @@ async function load() {
                                   "arrow = where the nose points"],
                                  ...derived.map(([suffix, text]) =>
                                    ["frames:" + name.replace(/\.png$/, suffix), text]),
-                                 ["previews", "engine-free preview"]]) {
+                                 ["previews:preview_" +
+                                  String(record.index).padStart(4, "0") + ".png",
+                                  "engine-free preview (no Unreal host on the " +
+                                  "machine that ran this; the boxes are drawn on it)"]]) {
       const [dirKind, fileName] = kind.includes(":") ? kind.split(":") : [kind, name];
       if (present[dirKind].has(fileName)) {
         const href = `${base}/${dirKind}/${encodeURIComponent(cameraId)}/` +

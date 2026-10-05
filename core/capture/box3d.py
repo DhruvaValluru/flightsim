@@ -72,6 +72,22 @@ def project(K: Sequence[Sequence[float]], p: Sequence[float]) -> Optional[Tuple[
     return (u / w, v / w)
 
 
+def clip_segment(a: Sequence[float], b: Sequence[float], near: float
+                 ) -> Optional[Tuple[Vec, Vec]]:
+    """The part of segment a-b in front of the near plane z = near, or
+    None when all of it is behind. An edge that passes behind the camera
+    is cut where it crosses the plane, so it is drawn up to the edge of
+    what the camera can see instead of being dropped."""
+    za, zb = float(a[2]), float(b[2])
+    if za < near and zb < near:
+        return None
+    if za >= near and zb >= near:
+        return tuple(a), tuple(b)
+    t = (near - za) / (zb - za)
+    cut = tuple(float(a[k]) + t * (float(b[k]) - float(a[k])) for k in range(3))
+    return (cut, tuple(b)) if za < near else (tuple(a), cut)
+
+
 def _intrinsics(record: Dict) -> Optional[List[List[float]]]:
     K = record.get("intrinsic_matrix")
     if isinstance(K, list) and len(K) == 3:
@@ -173,8 +189,25 @@ def box3d_section(manifest: Dict, record: Dict) -> Dict:
             out.append({"id": object_id, "box": None,
                         "note": "no 3-D box recorded for this plane in this frame"})
             continue
+        shape = entry.get("bbox_3d_camera_shape")
+        shape_basis = ((entry.get("basis") or {}).get("bbox_3d_camera_shape")
+                       or "not recorded for this frame")
+        shape_block = None
+        if isinstance(shape, dict) and shape.get("body_axes_in_camera"):
+            shape_block = {
+                "centre_m": shape.get("centre_m"),
+                "extents_m": {"length": shape["extents_m"][0],
+                              "width": shape["extents_m"][1],
+                              "height": shape["extents_m"][2]},
+                "basis": shape_basis,
+                "rebuild_check": rebuild_check(shape, record),
+            }
         out.append({
             "id": object_id,
+            "box_source": ("measured mesh box (shape_box) drawn; the stated-"
+                           "dimension box is the label of record" if shape_block
+                           else "stated length / span / height (" + shape_basis + ")"),
+            "shape_box": shape_block,
             "centre_m": box.get("centre_m"),
             "extents_m": {"length": box["extents_m"][0], "width": box["extents_m"][1],
                           "height": box["extents_m"][2]},
@@ -228,14 +261,31 @@ def draw_box3d_frame(record: Dict, source, target):
         box = entry.get("bbox_3d_camera") if isinstance(entry, dict) else None
         if K is None or not isinstance(box, dict) or not box.get("body_axes_in_camera"):
             continue
+        shape = entry.get("bbox_3d_camera_shape")
+        if isinstance(shape, dict) and shape.get("body_axes_in_camera"):
+            box = shape                      # the measured mesh box when there is one
         corners = rebuild_corners(box)
         pixels = [project(K, c) for c in corners]
+        near = max(float(record.get("near_m", 0.1) or 0.1), 0.01)
+        limit = 8.0 * max(width, height)
+
+        def segment(a, b, colour):
+            part = clip_segment(corners[a], corners[b], near)
+            if part is None:
+                return
+            pa, pb = project(K, part[0]), project(K, part[1])
+            if pa is None or pb is None:
+                return
+            # A point just past the near plane projects far off-image;
+            # keep the line's direction but bound its length for the drawer.
+            pa, pb = (tuple(max(-limit, min(limit, v)) for v in pa),
+                      tuple(max(-limit, min(limit, v)) for v in pb))
+            draw.line([pa, pb], fill=colour, width=2)
+
         for a, b in EDGES:
-            if pixels[a] is not None and pixels[b] is not None:
-                draw.line([pixels[a], pixels[b]], fill=BOX_EDGE, width=2)
+            segment(a, b, BOX_EDGE)
         for a, b in NOSE_FACE:
-            if pixels[a] is not None and pixels[b] is not None:
-                draw.line([pixels[a], pixels[b]], fill=NOSE_EDGE, width=2)
+            segment(a, b, NOSE_EDGE)
         centre = [float(v) for v in box["centre_m"]]
         forward = [float(v) for v in box["body_axes_in_camera"][0]]
         length = float(box["extents_m"][0])

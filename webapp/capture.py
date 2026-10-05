@@ -256,6 +256,22 @@ def render_passes(card: Path, frames_root: Path, camera_ids: List[str],
     return rendered
 
 
+def traffic_tracks(spec, solved: Dict) -> List:
+    """The spec's other aircraft, each solved over the same recorded flight
+    as the cameras (core/capture/poses.py solve_traffic_track), in spec
+    order -- what the manifest labels them from."""
+    if not spec.traffic:
+        return []
+    from core.capture.objects import compose_objects
+    from core.capture.poses import solve_traffic_track
+
+    objects = [o for o in compose_objects(spec) if o.role == "traffic"]
+    return [solve_traffic_track(solved["columns"], str(entry.track.value),
+                                float(entry.range_m.value), solved["frame"], obj.id,
+                                placement=entry.placement())
+            for entry, obj in zip(spec.traffic, objects)]
+
+
 def write_manifest(spec, solved: Dict, out: Path, scene: Dict,
                    heightfield=None) -> Path:
     from core.capture.manifest import (
@@ -266,6 +282,9 @@ def write_manifest(spec, solved: Dict, out: Path, scene: Dict,
     manifest = build_capture_manifest(
         spec, solved["columns"], solved["frame"], solved["tracks"],
         solved["schedules"],
+        # Every other aircraft's scripted track over the same flight: the
+        # manifest refuses a spec with traffic and no tracks.
+        traffic_tracks=traffic_tracks(spec, solved) or None,
         # Of the flight the labels were actually solved over: the
         # host's own when it flew first, the headless pre-run when the
         # engine was absent. The manifest says which either way.
@@ -320,6 +339,8 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
         return None
     files = sorted(p for pattern in _ARCHIVE_PATTERNS
                    for p in source.glob(pattern))
+    # A headless run's pictures: the engine-free preview of each frame.
+    previews = sorted((out / "previews" / camera_id).glob("preview_*.png"))
     if not any(p.suffix == ".png" or p.suffix == ".json" for p in files):
         return None
     manifest_path = out / "capture_manifest.json"
@@ -343,7 +364,8 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
     from core.capture.frame_checks import FRAME_CHECKS_JSON, read_frame_checks
 
     checks_path = out / FRAME_CHECKS_JSON
-    inputs = files + boxed + [p for p in (manifest_path, checks_path) if p.is_file()]
+    inputs = files + previews + boxed + [p for p in (manifest_path, checks_path)
+                                         if p.is_file()]
 
     archive = out / "downloads" / f"{camera_id}.zip"
     if archive.is_file():
@@ -359,6 +381,10 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
         f"{camera_id}: one view of run {out.name}\n"
         f"\n"
         f"frame_NNNN.png   the rendered frame, as rendered\n"
+        f"preview/preview_NNNN.png\n"
+        f"                 on a run with no Unreal host: the engine-free\n"
+        f"                 solid-shaded picture of frame NNNN (every aircraft,\n"
+        f"                 same pose and lens); the box pictures are drawn on it\n"
         f"                 'truncation' (top of each .json) lists every plane:\n"
         f"                 cut_box (clipped to the picture), full_box (may run\n"
         f"                 past the edge), fraction_inside / percent_inside,\n"
@@ -454,6 +480,9 @@ def frames_archive(out: Path, camera_id: str) -> Optional[Path]:
             zf.writestr(f"{camera_id}/manifest.json",
                         json.dumps(camera_manifest, indent=1),
                         compress_type=zipfile.ZIP_DEFLATED)
+        for path in previews:
+            zf.write(path, arcname=f"{camera_id}/preview/{path.name}",
+                     compress_type=zipfile.ZIP_STORED)
         for path in boxed:
             zf.write(path, arcname=f"{camera_id}/{path.parent.parent.name}/{path.name}",
                      compress_type=zipfile.ZIP_STORED)
@@ -503,6 +532,53 @@ def camera_view(manifest: Dict, camera_id: str,
                   if str(f.get("file")) in checks else f for f in frames]
     shared = {key: manifest.get(key) for key in CAMERA_VIEW_KEYS}
     return {**shared, "camera": blocks[0], "frames": frames}
+
+
+def headless_capture(spec, scene: Dict, out: Path, heightfield=None,
+                     terrain_ground=None, duration_s: Optional[float] = None,
+                     push: Optional[Callable[[str, str], None]] = None) -> Dict:
+    """A captured run with NO engine (Linux, macOS, or Windows without the
+    built Unreal host): everything a render run produces except the
+    photographic pixels.
+
+    Flies the scenario headlessly, solves every camera and every other
+    aircraft, writes the capture manifest and every frame's data file,
+    draws a solid-shaded engine-free picture of EVERY frame (all aircraft,
+    depth-sorted, at full resolution through the frame's own pose and
+    intrinsics), then the 2-D and 3-D box pictures over those, and the
+    verification and per-frame checks. The pictures say on their face
+    that they are previews, not renders.
+    """
+    from core.capture.manifest import read_capture_manifest
+    from core.capture.poses import traffic_state
+    from core.capture.preview import render_previews
+
+    say = push or (lambda status, detail: None)
+    say("cameras", f"solving {len(spec.cameras)} camera(s) and "
+                   f"{len(spec.traffic)} other aircraft over a headless flight")
+    solved = solve(spec, scene, heightfield=heightfield,
+                   terrain_ground=terrain_ground, duration_s=duration_s)
+    # The recorder's own file, as every other run writes it (the aero
+    # panel and the flight path read it).
+    solved["result"].telemetry.write_json(out / "telemetry.json")
+    say("manifest", "writing the capture manifest and every frame's data file")
+    write_manifest(spec, solved, out, scene, heightfield=heightfield)
+    manifest = read_capture_manifest(out / "capture_manifest.json")
+    tracks = traffic_tracks(spec, solved)
+    planes: Dict[int, List] = {}
+    if tracks:
+        for record in manifest.get("frames", []):
+            index = int(record["sample_index"])
+            planes[index] = [(str(entry.aircraft.value), traffic_state(track, index))
+                             for entry, track in zip(spec.traffic, tracks)]
+    say("previews", f"drawing an engine-free picture of each of "
+                    f"{len(manifest.get('frames', []))} frame(s)")
+    render_previews(manifest, out, heightfield=heightfield,
+                    scene_frame=solved["frame"],
+                    terrain_elevation_m=solved["terrain_elevation_m"],
+                    max_frames=None, traffic=planes)
+    say("checks", "drawing the 2-D / 3-D box pictures and verifying")
+    return finish(out)
 
 
 def finish(out: Path, max_overlays: Optional[int] = 24) -> Dict:
