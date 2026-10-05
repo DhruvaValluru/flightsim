@@ -1092,6 +1092,61 @@ def _water_mask():
     return _WATER_MASK or None
 
 
+#: Fog density at or above which the X-Plane "hazy" table is read (the
+#: showcase's hazy visibility); the storm look reads "ocast".
+XPLANE_HAZY_FOG_DENSITY = 0.010
+#: FLIGHTSIM_XPLANE_LIGHTING=off disables the lighting flags (the test
+#: suite sets it so pinned render commands do not depend on whether this
+#: machine has an X-Plane extraction).
+XPLANE_LIGHTING_ENV = "FLIGHTSIM_XPLANE_LIGHTING"
+
+
+def xplane_lighting_flags(look: Optional[Dict],
+                          tables: Optional[Dict] = None) -> List[str]:
+    """The -xplane-* render flags for a look, or [] when there is no
+    extracted X-Plane lighting table on this machine.
+
+    The sky condition follows the look: the storm look reads X-Plane's
+    overcast table, a hazy fog density the hazy table, anything else the
+    clean table. The sun position is the look's own (the default look
+    when none is stated). Three colours go to the commandlet as 8-bit
+    sRGB ``R:G:B`` (colon-separated: FParse stops at a comma): the direct
+    light colour for the sun, the ambient colour for the sky light and
+    the horizon sky colour for the fog inscattering. The commandlet
+    applies them as COLOURS only -- intensities, exposure and the fog
+    density stay the look's.
+    """
+    import os
+
+    from core.render.flags import DEFAULT_LOOK
+    from core.xplane import XPlaneDataError, sky_lighting
+
+    if os.environ.get(XPLANE_LIGHTING_ENV, "").lower() == "off":
+        return []
+    tod = dict(DEFAULT_LOOK)
+    if look:
+        tod.update({key: look[key] for key in DEFAULT_LOOK if key in look})
+    if look == STORM_LOOK:
+        condition = "ocast"
+    elif float(tod["fog_density"]) >= XPLANE_HAZY_FOG_DENSITY:
+        condition = "hazy"
+    else:
+        condition = "clean"
+    try:
+        colours = sky_lighting(condition, float(tod["sun_elev"]),
+                               float(tod["sun_azim"]), tables=tables)
+    except XPlaneDataError:
+        return []
+
+    def triple(name: str) -> str:
+        return ":".join(str(channel) for channel in colours[name])
+
+    return [f"-xplane-condition={condition}",
+            f"-xplane-direct={triple('direct')}",
+            f"-xplane-ambient={triple('ambient')}",
+            f"-xplane-horizon={triple('sky_horizon')}"]
+
+
 def plan_water_surface(spec: ScenarioSpec) -> None:
     """A flight placed over mapped water gets the water surface class.
 
@@ -1979,6 +2034,11 @@ class RunManager:
         frames.mkdir(parents=True, exist_ok=True)
         (frames / "render.json").unlink(missing_ok=True)
         extra = list(extra or ())
+        # X-Plane lighting colours (sun, sky light, fog) for the legacy
+        # look only: a physical sky plan lights the scene itself and is
+        # left alone. No extraction on this machine -> no flags.
+        if sky is None:
+            extra += xplane_lighting_flags(look)
         # Phase 2 (package A, contracts §9): the flag list comes from the
         # ONE builder the CLI also uses. Which passes get which flags:
         #   * a per-camera pass (the capture stage's loop hands in

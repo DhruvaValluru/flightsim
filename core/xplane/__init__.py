@@ -1,8 +1,9 @@
 """Readers for the data ``scripts/extract_xplane.py`` writes to data/xplane/.
 
 The water mask feeds webapp.runs.plan_water_surface (mapped water under
-the flight plans the water surface class). The sky palettes and terrain
-catalog have no consumer yet. Every loader refuses by name when the
+the flight plans the water surface class). The decoded sky tables feed
+webapp.runs.xplane_lighting_flags (sun, sky-light and fog colours for the
+legacy-look render). The terrain catalog has no consumer yet. Every loader refuses by name when the
 extraction has not been run, rather than returning an empty answer that
 would read as "no water here".
 """
@@ -142,6 +143,66 @@ def load_sky_palettes(path: Optional[Path] = None) -> Dict[str, List[str]]:
                     DATA_DIR / "lighting" / "sky_palettes.json")
     doc = json.loads(path.read_text(encoding="utf-8"))
     return {name: entry["bands_top_to_bottom"] for name, entry in doc.items()}
+
+
+#: Sun elevation of each table anchor, degrees. The +/-2/4/8 anchors and
+#: 0 (the image's "set"/"dawn" row) are the image's own labels. The two
+#: ends are ASSUMPTIONS: X-Plane prints "night" and "aft"/"morn" with no
+#: angle, so night is taken as the end of nautical twilight and full day
+#: as the first elevation comfortably past the +4 row.
+SKY_ANCHOR_ELEVATION_DEG = (("night", -12.0), ("-8", -8.0), ("-4", -4.0),
+                            ("-2", -2.0), ("0", 0.0), ("+2", 2.0),
+                            ("+4", 4.0), ("day", 10.0))
+SKY_QUANTITIES = ("ambient", "direct", "sun", "moon", "water", "cloud_dark",
+                  "cloud_light", "moon_dir", "sky_zenith", "sky_horizon")
+
+
+def load_sky_tables(path: Optional[Path] = None) -> Dict[str, Dict]:
+    """Condition -> {"evening"|"morning": {anchor: {quantity: "#rrggbb"}}}."""
+    path = _require(Path(path) if path else
+                    DATA_DIR / "lighting" / "sky_tables.json")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _rgb(hex_colour: str) -> Tuple[int, int, int]:
+    return (int(hex_colour[1:3], 16), int(hex_colour[3:5], 16),
+            int(hex_colour[5:7], 16))
+
+
+def sky_lighting(condition: str, sun_elevation_deg: float,
+                 sun_azimuth_deg: float,
+                 tables: Optional[Dict[str, Dict]] = None
+                 ) -> Dict[str, Tuple[int, int, int]]:
+    """X-Plane's lighting colours for a sky condition and sun position.
+
+    Returns every quantity of :data:`SKY_QUANTITIES` as an 8-bit sRGB
+    triple, linearly interpolated (in sRGB, as the lookup image itself
+    blends between its rows) between the two anchors bracketing the sun
+    elevation and clamped at the night and day ends. A sun east of south
+    (azimuth < 180) reads the morning half, otherwise the evening half.
+    Unknown conditions refuse by name.
+    """
+    tables = load_sky_tables() if tables is None else tables
+    if condition not in tables:
+        raise XPlaneDataError(
+            f"unknown sky condition {condition!r}; extracted: "
+            f"{sorted(tables)}")
+    half = tables[condition][
+        "morning" if (sun_azimuth_deg % 360.0) < 180.0 else "evening"]
+    anchors = SKY_ANCHOR_ELEVATION_DEG
+    elevation = min(max(float(sun_elevation_deg), anchors[0][1]),
+                    anchors[-1][1])
+    for (low, low_deg), (high, high_deg) in zip(anchors, anchors[1:]):
+        if elevation <= high_deg:
+            break
+    t = (elevation - low_deg) / (high_deg - low_deg)
+    result = {}
+    for quantity in SKY_QUANTITIES:
+        a = _rgb(half[low][quantity])
+        b = _rgb(half[high][quantity])
+        result[quantity] = tuple(
+            int(round(x + (y - x) * t)) for x, y in zip(a, b))
+    return result
 
 
 def load_terrain_catalog(path: Optional[Path] = None) -> List[Dict[str, str]]:

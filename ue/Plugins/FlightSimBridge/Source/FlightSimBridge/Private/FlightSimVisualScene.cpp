@@ -512,6 +512,36 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 	SkyComponent->SetRealTimeCapture(true);
 	SkyComponent->SetIntensity(1.0f);
 
+	// -- X-Plane lighting colours (opt-in, see the options' comment) --------
+	// Applied AFTER the physical sky so a plan's own colours are not
+	// silently overwritten earlier and then lost: the web app only sends
+	// these flags for the legacy look (no sky plan).
+	if (Options.bXPlaneLighting)
+	{
+		// FColor is 8-bit sRGB; FLinearColor(FColor) converts to linear.
+		const FLinearColor Direct(Options.XPlaneDirect);
+		const FLinearColor Ambient(Options.XPlaneAmbient);
+		const FLinearColor Horizon(Options.XPlaneHorizon);
+		SunLight->SetLightColor(Direct);
+		SkyComponent->SetLightColor(Ambient);
+		FogComponent->SetFogInscatteringColor(Horizon);
+
+		auto Srgb = [](const FColor& Colour) -> FString
+		{
+			return FString::Printf(TEXT("%d:%d:%d"), Colour.R, Colour.G, Colour.B);
+		};
+		TSharedPtr<FJsonObject> XPlaneRecord = NewRecord();
+		XPlaneRecord->SetStringField(TEXT("condition"), Options.XPlaneCondition);
+		XPlaneRecord->SetStringField(TEXT("direct_srgb8"), Srgb(Options.XPlaneDirect));
+		XPlaneRecord->SetStringField(TEXT("ambient_srgb8"), Srgb(Options.XPlaneAmbient));
+		XPlaneRecord->SetStringField(TEXT("horizon_srgb8"), Srgb(Options.XPlaneHorizon));
+		XPlaneRecord->SetStringField(TEXT("applied_to"),
+			TEXT("sun light colour, sky light colour, height fog inscattering colour"));
+		XPlaneRecord->SetStringField(TEXT("source"),
+			TEXT("X-Plane 12 sky_colors lookup, extracted locally (scripts/extract_xplane.py)"));
+		LookApplied->SetObjectField(TEXT("xplane_lighting"), XPlaneRecord);
+	}
+
 	// -- clouds (Phase 2, contracts §5.4 row 2) ------------------------------
 	if (!BuildClouds(World, Options, Error))
 	{

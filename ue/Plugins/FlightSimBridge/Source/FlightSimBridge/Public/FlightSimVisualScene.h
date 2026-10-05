@@ -187,6 +187,21 @@ struct FFlightSimVisualSceneOptions
 	// extinction clause to measure, not this file's to claim.
 	float FogDensity = 0.0025f;
 
+	// X-Plane lighting colours (-xplane-direct / -xplane-ambient /
+	// -xplane-horizon, from webapp.runs.xplane_lighting_flags): the sun's
+	// light colour, the sky light's colour and the height fog's
+	// inscattering colour, read from X-Plane's own sky lookup for the
+	// look's sun position and sky condition. COLOURS only: intensities,
+	// exposure and fog density are untouched. False = nothing is applied
+	// and the scene is exactly the one built without the flags. Recorded
+	// in look_applied.xplane_lighting. UNCOMPILED when written (no engine
+	// on the authoring machine); the first build verifies.
+	bool bXPlaneLighting = false;
+	FString XPlaneCondition;
+	FColor XPlaneDirect = FColor::White;
+	FColor XPlaneAmbient = FColor::White;
+	FColor XPlaneHorizon = FColor::White;
+
 	// -- Phase 2 Look lane (contracts §5.4, §10) ----------------------------
 	// Cloud layers from the card's look.clouds (or the -cloud-* probe flags).
 	// Empty = no volumetric cloud component is spawned (byte-identical to

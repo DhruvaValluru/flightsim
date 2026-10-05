@@ -207,8 +207,13 @@ for priming a machine ahead of time rather than prerequisites.
   `load_sky_palettes`, `load_terrain_catalog`). The water mask is used
   on every compile and run: a place over mapped water with no stated
   ground cover gets the water surface class (`plan_water_surface`,
-  recorded as a derived edit). The sky palettes and terrain catalog are
-  loadable but not used by the scenario or render flow.
+  recorded as a derived edit). The decoded sky tables colour the
+  legacy-look render: sun light, sky light and fog colours for the look's
+  sun position and sky condition go to the commandlet as `-xplane-*`
+  flags (`xplane_lighting_flags`; `FLIGHTSIM_XPLANE_LIGHTING=off`
+  disables it; a physical sky plan is left alone). The engine half of
+  that was written without an Unreal build and is unverified until the
+  first build and render. The terrain catalog is loadable but unused.
 * **Real aircraft**: `python scripts/import_aircraft.py` fetches each
   configured model at its pinned commit (license verified on disk),
   converts it, and imports it into the Unreal project. Renders carry

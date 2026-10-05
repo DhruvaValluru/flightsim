@@ -234,3 +234,121 @@ def test_compile_endpoint_applies_the_water_planner(lake_mask, monkeypatch):
     surface = next(f for f in payload["spec"]["fields"]
                    if f["name"] == "surface")
     assert surface["value"] == "ocean" and surface["source"] == "derived"
+
+
+# -- lighting: the decoded sky tables and the render flags they become --
+
+
+def _flat_tables(**halves):
+    """A one-condition table whose every quantity at an anchor is one grey
+    level, so interpolation is checkable by hand."""
+    from core.xplane import SKY_ANCHOR_ELEVATION_DEG, SKY_QUANTITIES
+
+    def half(levels):
+        return {anchor: {q: "#{0:02x}{0:02x}{0:02x}".format(level)
+                         for q in SKY_QUANTITIES}
+                for (anchor, _), level in zip(SKY_ANCHOR_ELEVATION_DEG, levels)}
+
+    return {"clean": {name: half(levels) for name, levels in halves.items()}}
+
+
+EVENING = (0, 10, 20, 30, 40, 50, 60, 200)
+MORNING = (5, 15, 25, 35, 45, 55, 65, 205)
+
+
+def test_sky_tables_decode_the_labelled_rows_and_strips(install, tmp_path):
+    """Row r of the image is painted grey level r in every strip: the
+    evening half must read rows 0..7 top-down, the morning half rows
+    15..8, and each strip its own column."""
+    from core.xplane import load_sky_tables
+    from core.xplane.extract import (
+        SKY_ANCHORS, SKY_ROW_PX, SKY_STRIP_PITCH, SKY_STRIP_X0, SKY_STRIPS,
+        extract_sky,
+    )
+
+    png = (install / "Resources" / "bitmaps" / "skycolors"
+           / "sky_colors_clean.png")
+    image = Image.new("RGB", SKY_SIZE, (0, 255, 0))
+    for row in range(16):
+        top = row * SKY_ROW_PX
+        image.paste((row, row, 100), (0, top, 128, top + SKY_ROW_PX))
+        for i in range(len(SKY_STRIPS)):
+            x = SKY_STRIP_X0 + SKY_STRIP_PITCH * i
+            image.paste((row, i, 0), (x, top, x + 4, top + SKY_ROW_PX))
+    image.save(png)
+    extract_sky(install, tmp_path / "out")
+    table = load_sky_tables(
+        tmp_path / "out" / "lighting" / "sky_tables.json")["clean"]
+    for index, anchor in enumerate(SKY_ANCHORS):
+        assert table["evening"][anchor]["direct"] == f"#{index:02x}0100"
+        assert table["morning"][anchor]["direct"] == f"#{15 - index:02x}0100"
+        assert table["evening"][anchor]["sky_zenith"] == \
+            f"#{index:02x}{index:02x}64"
+    assert table["evening"]["day"]["water"] == "#070400"
+
+
+def test_sky_lighting_interpolates_between_anchors_and_clamps():
+    from core.xplane import sky_lighting
+
+    tables = _flat_tables(evening=EVENING, morning=MORNING)
+    # +3 deg, afternoon: halfway between the +2 (50) and +4 (60) rows
+    assert sky_lighting("clean", 3.0, 250.0, tables)["direct"] == (55,) * 3
+    # the same sun in the morning reads the other half
+    assert sky_lighting("clean", 3.0, 100.0, tables)["direct"] == (60,) * 3
+    # clamped at both ends: high noon is the day row, deep night the night row
+    assert sky_lighting("clean", 50.0, 180.0, tables)["ambient"] == (200,) * 3
+    assert sky_lighting("clean", -40.0, 180.0, tables)["ambient"] == (0,) * 3
+
+
+def test_unknown_sky_condition_is_a_named_refusal():
+    from core.xplane import sky_lighting
+
+    with pytest.raises(XPlaneDataError, match="unknown sky condition"):
+        sky_lighting("purple", 10.0, 180.0, _flat_tables(evening=EVENING,
+                                                         morning=MORNING))
+
+
+def test_lighting_flags_follow_the_look(monkeypatch):
+    from webapp.runs import STORM_LOOK, XPLANE_LIGHTING_ENV, \
+        xplane_lighting_flags
+
+    monkeypatch.setenv(XPLANE_LIGHTING_ENV, "on")
+    tables = _flat_tables(evening=EVENING, morning=MORNING)
+    tables["ocast"] = tables["hazy"] = tables["clean"]
+    default = xplane_lighting_flags(None, tables)
+    assert default == ["-xplane-condition=clean",
+                       "-xplane-direct=200:200:200",
+                       "-xplane-ambient=200:200:200",
+                       "-xplane-horizon=200:200:200"]
+    assert xplane_lighting_flags(STORM_LOOK, tables)[0] == \
+        "-xplane-condition=ocast"
+    hazy = {"sun_elev": 8.0, "sun_azim": 95.0, "fog_density": 0.010}
+    assert xplane_lighting_flags(hazy, tables)[0] == "-xplane-condition=hazy"
+
+
+def test_lighting_flags_are_absent_when_off_or_unextracted(monkeypatch):
+    import core.xplane as xplane
+    from webapp.runs import XPLANE_LIGHTING_ENV, xplane_lighting_flags
+
+    tables = _flat_tables(evening=EVENING, morning=MORNING)
+    monkeypatch.setenv(XPLANE_LIGHTING_ENV, "off")
+    assert xplane_lighting_flags(None, tables) == []
+
+    def missing(path=None):
+        raise XPlaneDataError("not extracted")
+
+    monkeypatch.setenv(XPLANE_LIGHTING_ENV, "on")
+    monkeypatch.setattr(xplane, "load_sky_tables", missing)
+    assert xplane_lighting_flags(None) == []
+
+
+def test_the_commandlet_parses_every_flag_the_web_app_sends():
+    """The Python half and the engine half agree on the flag names."""
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "ue" / "Plugins"
+              / "FlightSimBridge" / "Source" / "FlightSimBridge" / "Private"
+              / "FlightSimRenderCommandlet.cpp").read_text(encoding="utf-8")
+    for name in ("xplane-condition=", "xplane-direct=", "xplane-ambient=",
+                 "xplane-horizon="):
+        assert f'TEXT("{name}")' in source, name

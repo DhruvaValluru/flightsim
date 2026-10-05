@@ -1384,6 +1384,56 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		SceneOptions.TerrainPath = TerrainPath;
 		SceneOptions.bDynamicShadows = !bNoShadows;
 		SceneOptions.FogDensity = static_cast<float>(FogDensity);
+		// X-Plane lighting colours (webapp.runs.xplane_lighting_flags):
+		// three 8-bit sRGB triples, colon-separated because FParse::Value
+		// stops at a comma. All three or none; a malformed triple is
+		// refused by name rather than rendered with a default colour.
+		{
+			FString XPlaneDirect, XPlaneAmbient, XPlaneHorizon;
+			const bool bDirect = FParse::Value(*Params, TEXT("xplane-direct="), XPlaneDirect);
+			const bool bAmbient = FParse::Value(*Params, TEXT("xplane-ambient="), XPlaneAmbient);
+			const bool bHorizon = FParse::Value(*Params, TEXT("xplane-horizon="), XPlaneHorizon);
+			FParse::Value(*Params, TEXT("xplane-condition="), SceneOptions.XPlaneCondition);
+			if (bDirect || bAmbient || bHorizon)
+			{
+				auto ParseSrgb = [](const FString& Text, FColor& Out) -> bool
+				{
+					TArray<FString> Parts;
+					Text.ParseIntoArray(Parts, TEXT(":"));
+					if (Parts.Num() != 3)
+					{
+						return false;
+					}
+					int32 Channels[3] = {0, 0, 0};
+					for (int32 Index = 0; Index < 3; ++Index)
+					{
+						if (!Parts[Index].IsNumeric())
+						{
+							return false;
+						}
+						Channels[Index] = FCString::Atoi(*Parts[Index]);
+						if (Channels[Index] < 0 || Channels[Index] > 255)
+						{
+							return false;
+						}
+					}
+					Out = FColor(static_cast<uint8>(Channels[0]),
+					             static_cast<uint8>(Channels[1]),
+					             static_cast<uint8>(Channels[2]), 255);
+					return true;
+				};
+				if (!(bDirect && bAmbient && bHorizon) ||
+				    !ParseSrgb(XPlaneDirect, SceneOptions.XPlaneDirect) ||
+				    !ParseSrgb(XPlaneAmbient, SceneOptions.XPlaneAmbient) ||
+				    !ParseSrgb(XPlaneHorizon, SceneOptions.XPlaneHorizon))
+				{
+					return Fail(TEXT("look.xplane_lighting: -xplane-direct, "
+					                 "-xplane-ambient and -xplane-horizon must all "
+					                 "be given as R:G:B with each channel 0..255"));
+				}
+				SceneOptions.bXPlaneLighting = true;
+			}
+		}
 		if (CardLook.IsValid())
 		{
 			double Value = 0.0;

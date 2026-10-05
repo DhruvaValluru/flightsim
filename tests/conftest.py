@@ -1,9 +1,15 @@
+import os
 import sys
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# Pinned render commands must not depend on whether this machine has an
+# X-Plane extraction (webapp.runs.xplane_lighting_flags); the X-Plane
+# tests pass their own tables.
+os.environ.setdefault("FLIGHTSIM_XPLANE_LIGHTING", "off")
 
 from core.util.platform import ue_available  # noqa: E402
 

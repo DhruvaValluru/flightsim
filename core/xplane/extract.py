@@ -19,8 +19,18 @@ What is read, and what each output does and does not claim:
 * ``Resources/bitmaps/skycolors/sky_colors_*.png`` -> copied to
   ``lighting/`` plus ``lighting/sky_palettes.json``, the centre-column colour
   of the left 128x512 gradient panel in 32 bands, top to bottom. The panel's
-  rows are sun-elevation bands by the image's own labels, but the exact
-  band-to-angle mapping has NOT been decoded here; the PNG is the source.
+  rows are sun-elevation bands by the image's own labels.
+  ``lighting/sky_tables.json`` is the same images decoded by those labels:
+  16 rows of 32 px (top to bottom: night, -8, -4, -2, set, +2, +4, aft,
+  then morn, +4, +2, dawn, -2, -4, -8, night) and, right of the panel,
+  eight 4 px strips (ambient light, direct light, sun color, moon color,
+  water color, cloud dark, cloud light, moon dir lit). Each cell is sampled
+  at its centre. The labels give the row ORDER and the +/-2/4/8 degree
+  anchors; the elevations of "night" and of full day ("aft"/"morn") are not
+  printed anywhere and are assumptions of the reader (core.xplane), stated
+  there. Sky zenith/horizon are the panel's top-centre and bottom-edge
+  pixels of the row, read as zenith and horizon-away-from-sun: an
+  interpretation of the gradient, not a documented layout.
 
 The .shp reader is the ESRI polygon record layout read directly, so the
 extraction adds no dependency.
@@ -51,6 +61,15 @@ _POLYGON_TYPES = (5, 15, 25)
 SKY_PANEL = (0, 0, 128, 512)
 SKY_SIZE = (256, 640)
 SKY_BANDS = 32
+#: The decoded layout (see the module docstring): row labels top to bottom
+#: for the evening half; the morning half is the same order bottom to top.
+SKY_ROW_PX = 32
+SKY_ANCHORS = ("night", "-8", "-4", "-2", "0", "+2", "+4", "day")
+#: The eight strips right of the panel, left to right, and their x origin.
+SKY_STRIPS = ("ambient", "direct", "sun", "moon", "water", "cloud_dark",
+              "cloud_light", "moon_dir")
+SKY_STRIP_X0 = 129
+SKY_STRIP_PITCH = 5
 
 _TILE = re.compile(r"^([+-]\d{2})([+-]\d{3})$")
 _BASE_TEX = re.compile(r"^\s*BASE_TEX\s+(\S+)", re.M)
@@ -171,6 +190,33 @@ def extract_terrain_catalog(xplane_root: Path, out_dir: Path) -> Dict[str, int]:
     return {"definitions": len(rows)}
 
 
+def _hex(pixel: Tuple[int, int, int]) -> str:
+    return "#{:02x}{:02x}{:02x}".format(*pixel)
+
+
+def _sky_row(rgb: Image.Image, row: int) -> Dict[str, str]:
+    top = row * SKY_ROW_PX
+    centre_y = top + SKY_ROW_PX // 2
+    cell = {name: _hex(rgb.getpixel((SKY_STRIP_X0 + SKY_STRIP_PITCH * i + 1,
+                                     centre_y)))
+            for i, name in enumerate(SKY_STRIPS)}
+    panel_width = SKY_PANEL[2]
+    cell["sky_zenith"] = _hex(rgb.getpixel((panel_width // 2, top + 1)))
+    cell["sky_horizon"] = _hex(rgb.getpixel((4, top + SKY_ROW_PX - 2)))
+    return cell
+
+
+def _sky_table(rgb: Image.Image) -> Dict[str, Dict[str, Dict[str, str]]]:
+    """One condition's lookup image as {half: {anchor: {quantity: hex}}}."""
+    last = 2 * len(SKY_ANCHORS) - 1
+    return {
+        "evening": {anchor: _sky_row(rgb, i)
+                    for i, anchor in enumerate(SKY_ANCHORS)},
+        "morning": {anchor: _sky_row(rgb, last - i)
+                    for i, anchor in enumerate(SKY_ANCHORS)},
+    }
+
+
 def extract_sky(xplane_root: Path, out_dir: Path) -> Dict[str, int]:
     src = xplane_root / SKY_REL
     pngs = sorted(src.glob("sky_colors_*.png"))
@@ -179,6 +225,7 @@ def extract_sky(xplane_root: Path, out_dir: Path) -> Dict[str, int]:
     out = out_dir / "lighting"
     out.mkdir(parents=True, exist_ok=True)
     palettes = {}
+    tables = {}
     for png in pngs:
         condition = png.stem[len("sky_colors_"):]
         with Image.open(png) as im:
@@ -186,7 +233,8 @@ def extract_sky(xplane_root: Path, out_dir: Path) -> Dict[str, int]:
                 raise XPlaneExtractError(
                     f"{png.name} is {im.size}, expected {SKY_SIZE}; the "
                     f"panel crop was only checked against that layout")
-            panel = im.convert("RGB").crop(SKY_PANEL)
+            rgb = im.convert("RGB")
+            panel = rgb.crop(SKY_PANEL)
         width, height = panel.size
         bands = []
         for i in range(SKY_BANDS):
@@ -195,9 +243,12 @@ def extract_sky(xplane_root: Path, out_dir: Path) -> Dict[str, int]:
             bands.append(f"#{r:02x}{g:02x}{b:02x}")
         palettes[condition] = {"source": png.name, "panel": list(SKY_PANEL),
                                "bands_top_to_bottom": bands}
+        tables[condition] = _sky_table(rgb)
         shutil.copy(png, out / png.name)
     (out / "sky_palettes.json").write_text(
         json.dumps(palettes, indent=1), encoding="utf-8")
+    (out / "sky_tables.json").write_text(
+        json.dumps(tables, indent=1), encoding="utf-8")
     return {"conditions": len(palettes)}
 
 
