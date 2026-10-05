@@ -97,6 +97,15 @@ randomization.unsampled:
   hint: "Run the planning step first."
 randomization.vocabulary:
   sentence: "A word in the request asks for a kind of variation the system does not have."
+
+# -- words in the request the scenario does not honour (core/nl/unsupported.py) --
+
+prompt.unsupported:
+  sentence: "The request asks for something this simulator does not model."
+  hint: "Remove it from the request; where there is a close supported option, the refusal names it."
+prompt.not_set:
+  sentence: "The request names a condition the scenario can carry, but the compiled scenario did not set it, so it would fly without it."
+  hint: "Set it in the review table, or interpret the request with the language model."
 randomization.location:
   sentence: "No terrain is prepared for that place, so the scene cannot be varied over it."
 randomization.infeasible:
@@ -390,6 +399,9 @@ authority.refusal_is_not_a_run:
   sentence: "A scenario carrying a refusal cannot be run."
 authority.budget:
   sentence: "The assistant used up its allowance of attempts or time for this request."
+yield.variety:
+  sentence: "The pictures meet the requested count but cover too little of the variety that was asked for, so the assistant did not call the request done."
+  hint: "Ask for more images, or accept the dataset as it is."
 
 # -- file versions and the compiler (ValueError / LLMCompileError sentences) --
 
@@ -1032,3 +1044,22 @@ check.points_vs_depth:
   sentence: "Every point of the cloud sits on its own pixel at that pixel's distance with that pixel's identity, once per visible surface pixel and never from the sky."
 check.amodal_contains_visible:
   sentence: "Each aircraft's whole-silhouette box and mask come from its unoccluded pass, contain what is visible of it, and give the visible fraction back."
+
+# -- added with the per-run dataset download, two-plane scenes and the
+#    unattended launcher --
+
+export.cameras:
+  sentence: "A camera picked for the export is not in the runs being exported."
+  hint: "Pick cameras the run has."
+traffic.placement:
+  sentence: "The second aircraft's position cannot be used: its offsets must be numbers, and it cannot sit on top of the first aircraft."
+  hint: "Give it at least a metre of distance ahead, to the side or above."
+render.stalled:
+  sentence: "The renderer stopped producing output for too long and was stopped, along with everything it had started, so the run could continue."
+  hint: "Its log holds its last words; raise FLIGHTSIM_STALL_SECONDS if a step is legitimately slow and silent."
+render.timeout:
+  sentence: "The renderer ran past the time limit set for one pass and was stopped, along with everything it had started."
+  hint: "Raise or unset FLIGHTSIM_RENDER_TIMEOUT_SECONDS."
+look.xplane_lighting:
+  sentence: "The lighting colours taken from the simulator's sky tables could not be applied to this render."
+

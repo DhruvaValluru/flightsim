@@ -27,6 +27,12 @@ from __future__ import annotations
 import re
 from typing import Callable, List, Optional, Tuple
 
+#: The two refusal names (the message catalogue's entries).
+REFUSAL_NAMES = {"unsupported": {"constraint": "prompt.unsupported"},
+                 "not_set": {"constraint": "prompt.not_set"}}
+PROMPT_UNSUPPORTED = REFUSAL_NAMES["unsupported"]["constraint"]
+PROMPT_NOT_SET = REFUSAL_NAMES["not_set"]["constraint"]
+
 #: (regex over the lowercased prompt, what it is, the nearest supported thing)
 NOT_MODELLED: Tuple[Tuple[str, str, Optional[str]], ...] = (
     (r"\b(?:birds?|flocks? of birds|geese|seagulls?|bird strikes?)\b",
@@ -99,7 +105,7 @@ def unsupported_words(prompt: Optional[str], spec) -> List[Tuple[str, str]]:
         match = re.search(pattern, text)
         if match:
             out.append((
-                "prompt.unsupported",
+                PROMPT_UNSUPPORTED,
                 f'the prompt asks for "{match.group(0)}" ({what}), which this '
                 f"simulator does not model; remove it from the prompt"
                 + (f" (the nearest supported thing: {nearest})" if nearest else "")))
@@ -112,7 +118,7 @@ def unsupported_words(prompt: Optional[str], spec) -> List[Tuple[str, str]]:
                 honoured = False
             if not honoured:
                 out.append((
-                    "prompt.not_set",
+                    PROMPT_NOT_SET,
                     f'the prompt says "{match.group(0)}" ({what}) but the compiled '
                     f"spec does not set it -- it would fly without it. State it in "
                     f"the review table ({field}), or compile with the language "

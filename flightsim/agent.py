@@ -59,6 +59,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         help="an answer to a clarifying question, id=text (repeatable)")
     parser.add_argument("--render", action="store_true",
                         help="ask each capture for pixels (needs an engine)")
+    parser.add_argument("--min-coverage", type=float, default=0.5,
+                        help="share of the requested variety the verified frames must "
+                             "fill before the agent says done (default 0.5); below it "
+                             "the dataset is exported and the outcome is 'narrow'")
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--preview", type=int, default=2,
                         help="slots run one at a time before the campaign runs to target")
@@ -93,7 +97,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     outcome = controller.run(Request(args.prompt, images=args.images, words=args.vary,
                                      format=args.format, seed=args.seed,
                                      answers=answers or None, render=args.render,
-                                     policy=policy))
+                                     policy=policy, min_coverage=args.min_coverage))
     if args.json:
         print(json.dumps(outcome.to_dict(), indent=1, default=str))
     else:

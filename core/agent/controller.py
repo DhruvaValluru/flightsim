@@ -49,6 +49,13 @@ class Request:
     #: request states none; planned as a recorded edit, never over a
     #: stated one.
     policy: Optional[Dict[str, Any]] = None
+    #: The share of the requested variety the verified frames must fill
+    #: before the loop says done (core/dataset/realised.py coverage: the
+    #: fraction of the policy's requested bins holding a frame). Below it
+    #: the dataset is still exported, but the outcome is ``narrow``, not
+    #: ``done`` -- the agent may not raise the image count to buy variety,
+    #: because the count is the person's.
+    min_coverage: float = 0.5
 
 
 @dataclass
@@ -149,8 +156,14 @@ class Controller:
                 f"(options: {options}; answer with --answer {q['id']}=<choice>).")
         if compiled["refusals"]:
             first = compiled["refusals"][0]
+            detail = first.get("message") or ""
             return self._escalate(f"The scenario cannot run as stated: {first['sentence']} "
-                                  f"({first['constraint']})", rule=first["constraint"])
+                                  f"({first['constraint']})"
+                                  # The prompt-word refusals name the exact word;
+                                  # say which one.
+                                  + (f" -- {detail}" if detail and str(
+                                      first["constraint"]).startswith("prompt.") else ""),
+                                  rule=first["constraint"])
         digest = compiled["spec_digest"]
 
         validated = call("validate", spec=compiled["spec"],
@@ -292,6 +305,26 @@ class Controller:
                         reason=f"Export the verified cases as {request.format} with the card.")
         if _refused(exported):
             return self._escalate(self._sentence(exported), campaign_id, rule=exported["refused"])
+        # Variety: a request that asked for variation is done only when the
+        # verified frames fill enough of it (coverage is None when nothing
+        # was asked to vary -- then there is no variety claim to check).
+        if (isinstance(coverage, (int, float))
+                and float(coverage) < float(request.min_coverage)):
+            narrow = sorted(name for name, share in (report.get("realised_coverage") or {}).items()
+                            if float(share or 0.0) < float(request.min_coverage))
+            sentence = (f"Not done: {got} verified frames of {images} were exported to "
+                        f"{exported['dataset_path']}, but they fill only {coverage:.0%} of the "
+                        f"requested variety (needed {float(request.min_coverage):.0%})"
+                        + (f"; narrow: {', '.join(narrow)}" if narrow else "")
+                        + ". The image count is yours, so the agent does not raise it: ask "
+                          "for more images, or accept the dataset as it is.")
+            self._decide(sentence, campaign_id=campaign_id, rule="yield.variety",
+                         constraint="yield.variety",
+                         coverage=coverage, needed=request.min_coverage, narrow=narrow)
+            return Outcome("narrow", sentence, campaign_id=campaign_id,
+                           trace_path=str(self.tools.trace.path), steps=list(self.steps),
+                           yield_frames=got, dataset_path=exported["dataset_path"],
+                           rule="yield.variety")
         sentence = (f"Done: {got} verified frames of {images} in "
                     f"{report['yield']['verified_cases']} case(s), exported as "
                     f"{request.format} to {exported['dataset_path']}"
