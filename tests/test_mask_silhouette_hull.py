@@ -79,3 +79,12 @@ def test_the_hull_is_the_projected_vertex_box_inside_the_corner_box():
     behind = verify._projected_hull(
         record, {"points": points - [0.0, 0.0, 95.0], "corners": corners, "cg": (0, 0, 1)})
     assert behind is None
+
+
+def test_a_mesh_hull_allows_a_pixel_per_edge_and_a_box_half_of_one():
+    """The tower frame that failed at 1.4 px on a 27 px vertex hull
+    passes under the mesh floor; a box keeps the 1 px floor; above 40 px
+    the 5 % fraction governs either way."""
+    assert verify._extent_floor_px({"points": np.zeros((3, 3))}) == 2.0
+    assert verify._extent_floor_px({"points": None}) == 1.0
+    assert verify.MASK_EXTENT_TOL_FRACTION * 40 == verify.MASK_TOL_PX_MESH

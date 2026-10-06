@@ -2236,6 +2236,16 @@ MASK_EXTENT_TOL_FRACTION = 0.05
 #: pixel and a centroid to within half of one, whatever the size. Below
 #: 20 px of span the floor, not the fraction, is the tolerance.
 MASK_TOL_PX = 1.0
+#: mask_vs_geometry: the extent floor when the hull is the projected MESH
+#: (its vertices), not a box. A box's edges are as thick as the box, so
+#: each loses at most half a pixel; a real silhouette's extremes are
+#: wingtips and fin tips that taper below a pixel, whose last sub-pixel
+#: sliver can cover no pixel centre at all -- up to one pixel per edge,
+#: two across. Measured on the owner's machine (UE 5.7.4, B747 from the
+#: tower at ~3 km): 26x23 px against a 27.4x24.4 px vertex hull, every
+#: other gate on the frame passing. Above 40 px of span the 5 % fraction,
+#: not this floor, is the tolerance.
+MASK_TOL_PX_MESH = 2.0
 #: box_vs_mask: IoU between the tight box and the projected hull box for
 #: an object whose hull spans at least BOX_IOU_LARGE_PX pixels ...
 BOX_IOU_MIN_LARGE = 0.8
@@ -2605,6 +2615,12 @@ def _object_geometry(manifest: Dict, record: Dict, entry: Dict, axes):
     }, ""
 
 
+def _extent_floor_px(geometry: Dict) -> float:
+    """The pixel floor under mask_vs_geometry's extent fraction: one pixel
+    per edge for a projected mesh, half of one for a box."""
+    return MASK_TOL_PX_MESH if geometry.get("points") is not None else MASK_TOL_PX
+
+
 def _projected_hull(record: Dict, geometry: Dict):
     """(unclipped box, clipped box, cg pixel) of the object's hull, or
     ``None`` when a point of it is behind the camera. The hull is the
@@ -2909,12 +2925,13 @@ def verify_mask_vs_geometry(manifest: Dict, run_dir=None) -> Check:
                 worst_extent = (extent, f"{where} ({tight_w:.0f}x{tight_h:.0f} px vs "
                                         f"hull {hull_w:.0f}x{hull_h:.0f})")
             graded += 1
-            if extent > MASK_EXTENT_TOL_FRACTION and extent_px > MASK_TOL_PX:
+            floor_px = _extent_floor_px(geometry)
+            if extent > MASK_EXTENT_TOL_FRACTION and extent_px > floor_px:
                 return Check("mask_vs_geometry", FAIL,
                              f"{where}: mask extent {tight_w:.0f}x{tight_h:.0f} px "
-                             f"against a projected hull of {hull_w:.0f}x{hull_h:.0f} "
+                             f"against a projected hull of {hull_w:.1f}x{hull_h:.1f} "
                              f"px ({extent * 100:.1f} % off, tol "
-                             f"{MASK_EXTENT_TOL_FRACTION * 100:.0f} % or {MASK_TOL_PX:g} "
+                             f"{MASK_EXTENT_TOL_FRACTION * 100:.0f} % or {floor_px:g} "
                              f"px); basis: "
                              f"{geometry['basis']}",
                              failure=FAIL_MASK_OFFSET)
