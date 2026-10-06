@@ -2399,6 +2399,79 @@ def _pinhole(record: Dict, cam) -> Optional[Tuple[float, float]]:
     return (cx + record["fx_px"] * x / z, cy + record["fy_px"] * y / z)
 
 
+@functools.lru_cache(maxsize=8)
+def _mesh_vertices_actor_m(path: str, sha: str):
+    """The unique vertices of every part OBJ beside a mesh manifest, in
+    actor-frame metres about the model origin (the frame the converter
+    measured ``mesh_extent_actor_m`` in, and wrote each part in place),
+    or None when a part is missing. ``sha`` keys the cache only."""
+    import numpy as np
+
+    manifest_path = Path(path)
+    try:
+        mesh = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    rows: List[List[str]] = []
+    for part in mesh.get("parts") or []:
+        obj = manifest_path.parent / f"{part}.obj"
+        if not obj.is_file():
+            return None
+        with obj.open(encoding="utf-8", errors="replace") as handle:
+            rows.extend(line.split()[1:4] for line in handle if line.startswith("v "))
+    if not rows:
+        return None
+    return np.unique(np.asarray(rows, dtype=float), axis=0) / 100.0
+
+
+def _mesh_points_body(manifest: Dict, airframe_block: Dict):
+    """(N x 3 array of the primary's mesh vertices in body metres about
+    the CG -- forward, right, down -- , basis), or (None, None).
+
+    The same citation, digest and re-basing as _hull_box_body's measured
+    extent, applied to every vertex instead of the extent's two ends:
+    the projected box of the vertices IS the tight box of the drawn
+    silhouette (a triangle's image is bounded by its corners' images),
+    where the projected extent box is not. Measured on the owner's
+    machine (UE 5.7.4, the B747 chase camera): an exactly placed mesh
+    covered 878x217 px of a 1138x350 px projected extent box -- the
+    box's corners stand off the wing and tail roots. Control surfaces
+    are taken at rest; their deflection moves a trailing edge by
+    centimetres."""
+    asset = (manifest.get("assets") or {}).get("mesh_manifest") or {}
+    path, sha = asset.get("path"), asset.get("sha256")
+    if not path or not sha:
+        return None, None
+    candidate = _REPO / str(path)
+    try:
+        raw = candidate.read_bytes()
+    except OSError:
+        return None, None
+    if hashlib.sha256(raw).hexdigest() != str(sha):
+        return None, None
+    try:
+        mesh = json.loads(raw.decode("utf-8"))
+    except ValueError:
+        return None, None
+    origin = mesh.get("mesh_origin_actor_cm")
+    version = mesh.get("version")
+    if not (isinstance(version, (int, float)) and version >= 3 and origin):
+        return None, None
+    vertices = _mesh_vertices_actor_m(str(candidate), str(sha))
+    if vertices is None:
+        return None, None
+    import numpy as np
+
+    ox, oy, oz = (float(v) / 100.0 for v in origin)
+    cx, cy, cz = (float(v) for v in airframe_block["cg_structural_in"])
+    cg = (-cx * 0.0254, cy * 0.0254, cz * 0.0254)
+    body = np.column_stack((ox + vertices[:, 0] - cg[0],
+                            oy + vertices[:, 1] - cg[1],
+                            -(oz + vertices[:, 2] - cg[2])))
+    return body, (f"silhouette from {len(body)} mesh vertices of {path} "
+                  f"(control surfaces at rest)")
+
+
 def _hull_box_body(manifest: Dict, airframe_block: Dict, primary: bool
                    ) -> Tuple[Dict[str, Tuple[float, float]], str]:
     """The box an object's pixels are graded against, in body metres
@@ -2511,13 +2584,22 @@ def _object_geometry(manifest: Dict, record: Dict, entry: Dict, axes):
 
     corners = [place((x, y, z)) for x in box["forward"] for y in box["right"]
                for z in box["down"]]
+    points = None
+    if entry.get("role") == "primary" or int_id == AIRCRAFT_INSTANCE_ID:
+        body_points, points_basis = _mesh_points_body(manifest, airframe)
+        if body_points is not None:
+            import numpy as np
+
+            points = (np.asarray(cg, dtype=float)
+                      + body_points @ np.asarray(body_axes, dtype=float))
+            basis = f"{basis}; {points_basis}"
     keypoints = {}
     for kp in airframe.get("keypoints") or []:
         if isinstance(kp, dict) and kp.get("name") and kp.get("body_m"):
             keypoints[str(kp["name"])] = place(tuple(float(v) for v in kp["body_m"]))
     return {
         "centre": place(centre_body), "axes": body_axes, "half": half,
-        "cg": cg, "corners": corners, "keypoints": keypoints,
+        "cg": cg, "corners": corners, "points": points, "keypoints": keypoints,
         "length_m": float(box["forward"][1] - box["forward"][0]),
         "basis": f"{basis}; placement: {placement}",
     }, ""
@@ -2525,13 +2607,24 @@ def _object_geometry(manifest: Dict, record: Dict, entry: Dict, axes):
 
 def _projected_hull(record: Dict, geometry: Dict):
     """(unclipped box, clipped box, cg pixel) of the object's hull, or
-    ``None`` when a corner is behind the camera."""
-    pixels = [_pinhole(record, c) for c in geometry["corners"]]
-    if any(p is None for p in pixels):
-        return None
-    us = [p[0] for p in pixels]
-    vs = [p[1] for p in pixels]
-    unclipped = (min(us), min(vs), max(us), max(vs))
+    ``None`` when a point of it is behind the camera. The hull is the
+    mesh's vertices where the geometry carries them (the primary with
+    its mesh manifest on this machine), else the box's corners."""
+    points = geometry.get("points")
+    if points is not None:
+        if float(points[:, 2].min()) <= 0.0:
+            return None
+        cx, cy = record["principal_point_px"]
+        us = cx + float(record["fx_px"]) * points[:, 0] / points[:, 2]
+        vs = cy + float(record["fy_px"]) * points[:, 1] / points[:, 2]
+        unclipped = (float(us.min()), float(vs.min()), float(us.max()), float(vs.max()))
+    else:
+        pixels = [_pinhole(record, c) for c in geometry["corners"]]
+        if any(p is None for p in pixels):
+            return None
+        us = [p[0] for p in pixels]
+        vs = [p[1] for p in pixels]
+        unclipped = (min(us), min(vs), max(us), max(vs))
     width, height = float(record["width_px"]), float(record["height_px"])
     clipped = (max(unclipped[0], 0.0), max(unclipped[1], 0.0),
                min(unclipped[2], width), min(unclipped[3], height))
