@@ -2246,6 +2246,14 @@ MASK_TOL_PX = 1.0
 #: other gate on the frame passing. Above 40 px of span the 5 % fraction,
 #: not this floor, is the tolerance.
 MASK_TOL_PX_MESH = 2.0
+#: mask_vs_geometry: the centre floor for a projected-mesh hull. Per axis
+#: the tight box's centre moves half of each edge's error: pixel-centre
+#: sampling puts an edge within half a pixel either way, and a sub-pixel
+#: tip can pull one edge in by a further pixel, so up to one pixel per
+#: axis, sqrt(2) across. Measured (the same tower camera, ~22 px span):
+#: 1.1 px, with the area centroid on the other side of the projected CG
+#: -- no common direction, so not a placement error.
+MASK_CENTRE_TOL_PX_MESH = math.sqrt(2.0)
 #: box_vs_mask: IoU between the tight box and the projected hull box for
 #: an object whose hull spans at least BOX_IOU_LARGE_PX pixels ...
 BOX_IOU_MIN_LARGE = 0.8
@@ -2948,7 +2956,9 @@ def verify_mask_vs_geometry(manifest: Dict, run_dir=None) -> Check:
                 if relative > worst_centroid[0]:
                     worst_centroid = (relative, f"{where} ({offset:.1f} px of "
                                                 f"{span:.0f} px span)")
-                if relative > MASK_CENTROID_TOL_FRACTION and offset > MASK_TOL_PX:
+                centre_floor = (MASK_CENTRE_TOL_PX_MESH if geometry.get("points") is not None
+                                else MASK_TOL_PX)
+                if relative > MASK_CENTROID_TOL_FRACTION and offset > centre_floor:
                     centroid = (float(xs.mean()) + 0.5, float(ys.mean()) + 0.5)
                     cg_text = (f"({cg_px[0]:.0f}, {cg_px[1]:.0f})"
                                if cg_px is not None else "behind the camera")
@@ -2959,7 +2969,7 @@ def verify_mask_vs_geometry(manifest: Dict, run_dir=None) -> Check:
                                  f"hull box ({centre_px[0]:.0f}, {centre_px[1]:.0f}) "
                                  f"-- {relative * 100:.1f} % of the {span:.0f} px hull "
                                  f"span, tol {MASK_CENTROID_TOL_FRACTION * 100:.0f} % "
-                                 f"or {MASK_TOL_PX:g} px (area centroid "
+                                 f"or {centre_floor:.2f} px (area centroid "
                                  f"({centroid[0]:.0f}, {centroid[1]:.0f}), projected "
                                  f"CG {cg_text}); the pixels of {source} are not "
                                  f"where the geometry puts the object; basis: "

@@ -88,3 +88,12 @@ def test_a_mesh_hull_allows_a_pixel_per_edge_and_a_box_half_of_one():
     assert verify._extent_floor_px({"points": np.zeros((3, 3))}) == 2.0
     assert verify._extent_floor_px({"points": None}) == 1.0
     assert verify.MASK_EXTENT_TOL_FRACTION * 40 == verify.MASK_TOL_PX_MESH
+
+
+def test_the_mesh_centre_floor_is_one_pixel_per_axis():
+    """Tower frame 22: 1.1 px between the mask's box centre and the vertex
+    hull's at a 22 px span; inside sqrt(2), outside a box's 1 px."""
+    import math
+
+    assert verify.MASK_CENTRE_TOL_PX_MESH == math.sqrt(2.0)
+    assert verify.MASK_TOL_PX < 1.1 < verify.MASK_CENTRE_TOL_PX_MESH
