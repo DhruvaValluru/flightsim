@@ -2311,8 +2311,19 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	UTextureRenderTarget2D* LabelDepthTarget = nullptr;
 	UTextureRenderTarget2D* LabelIdTarget = nullptr;
 	USceneCaptureComponent2D* LabelDepthAll = nullptr;
-	USceneCaptureComponent2D* LabelIdAll = nullptr;
 	TArray<FRenderLabelledObject> Labelled;
+	// The ID image is owned by depth (2026-10-06), not read from a
+	// post-process stencil float: one show-only SCS_SceneDepth capture per
+	// labelled int_id (the actors the stencil loop gives that id), and a
+	// pixel belongs to the id whose show-only depth equals the full scene's
+	// depth there. Measured on the owner's machine (UE 5.7.4, D3D11): the
+	// stencil route read 0.013..0.034 on empty pixels and terrain id 2 as
+	// 1.9 (chase) or 0.3 (tower), a per-view scale and offset the label
+	// capture's exposure pinning did not remove, so rounding erased all but
+	// a few pixels of every object. A depth capture runs no post-process
+	// chain: there is nothing to scale.
+	TMap<int32, TArray<AActor*>> LabelActorsOfId;
+	TMap<int32, USceneCaptureComponent2D*> LabelDepthOfId;
 	int32 LabelPrimaryIntId = 0;
 	int32 LabelTerrainIntId = 0;
 	FString LabelIdSource;
@@ -2580,6 +2591,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			{
 				continue;
 			}
+			LabelActorsOfId.FindOrAdd(IntId).AddUnique(*It);
 			TInlineComponentArray<UPrimitiveComponent*> Primitives;
 			It->GetComponents(Primitives);
 			for (UPrimitiveComponent* Primitive : Primitives)
@@ -2682,25 +2694,18 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Depth->RegisterComponent();
 			return Depth;
 		};
-		auto MakeIdCapture = [&](const TCHAR* Name) -> USceneCaptureComponent2D*
-		{
-			USceneCaptureComponent2D* Id =
-				NewObject<USceneCaptureComponent2D>(Director, Name);
-			Id->TextureTarget = LabelIdTarget;
-			// The post-process chain has to run for the blendable to
-			// replace the tonemapper; FinalColorHDR keeps its output
-			// linear and unquantised, so R is the stencil as a float.
-			Id->CaptureSource = ESceneCaptureSource::SCS_FinalColorHDR;
-			ConfigureLabelCapture(Id);
-			Id->ShowFlags.SetPostProcessing(true);
-			Id->PostProcessSettings.WeightedBlendables.Array.Add(
-				FWeightedBlendable(1.0f, StencilMaterial));
-			Id->PostProcessBlendWeight = 1.0f;
-			Id->RegisterComponent();
-			return Id;
-		};
 		LabelDepthAll = MakeDepthCapture(TEXT("LabelDepthAll"));
-		LabelIdAll = MakeIdCapture(TEXT("LabelIdAll"));
+		for (const TPair<int32, TArray<AActor*>>& Group : LabelActorsOfId)
+		{
+			USceneCaptureComponent2D* Only =
+				MakeDepthCapture(*FString::Printf(TEXT("LabelDepthOnly%d"), Group.Key));
+			Only->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
+			for (AActor* Actor : Group.Value)
+			{
+				Only->ShowOnlyActors.Add(Actor);
+			}
+			LabelDepthOfId.Add(Group.Key, Only);
+		}
 		// W5: the land-cover ID pass. M_LandcoverID (post-process, replacing
 		// the tonemapper) reconstructs each pixel's world position from its
 		// depth, carries it onto the bake grid with the registration the scene
@@ -2760,13 +2765,18 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			{
 				continue;   // scene objects get no alone pass (pixels_alone null)
 			}
-			Entry.Alone = MakeIdCapture(*FString::Printf(TEXT("LabelIdAlone%d"), Entry.IntId));
-			Entry.Alone->PrimitiveRenderMode =
-				ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList;
-			Entry.Alone->ShowOnlyActors.Add(Entry.Actor);
+			// The aircraft's alone pass IS its show-only depth capture.
+			USceneCaptureComponent2D** Only = LabelDepthOfId.Find(Entry.IntId);
+			if (Only == nullptr)
+			{
+				return Fail(FString::Printf(
+					TEXT("annotation.identity: aircraft '%s' (int_id %d) owns no actor in the ")
+					TEXT("world; its pixels could not be told apart"), *Entry.Id, Entry.IntId));
+			}
+			Entry.Alone = *Only;
 		}
 		UE_LOG(LogFlightSimRender, Display,
-		       TEXT("labels: ID image (custom stencil, %d objects, %s), class image, depth ")
+		       TEXT("labels: ID image (depth ownership, %d objects, %s), class image, depth ")
 		       TEXT("as float32 and 16-bit (%.2f m/unit, saturating at %.1f m), one alone ")
 		       TEXT("pass per aircraft; every label capture AA-free"),
 		       Labelled.Num(), *LabelIdSource, RenderLabelDepthScaleM,
@@ -3638,14 +3648,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			// camera (attached to it) and the same lens, re-copied because a
 			// keyframed focal move changes Capture->FOVAngle per frame.
 			LabelDepthAll->FOVAngle = Capture->FOVAngle;
-			LabelIdAll->FOVAngle = Capture->FOVAngle;
 			FTextureRenderTargetResource* DepthResource =
 				LabelDepthTarget->GameThread_GetRenderTargetResource();
-			FTextureRenderTargetResource* IdResource =
-				LabelIdTarget->GameThread_GetRenderTargetResource();
 			const FReadSurfaceDataFlags RawFloats(RCM_MinMax, CubeFace_MAX);
 			TArray<FLinearColor> DepthAll;
-			TArray<FLinearColor> IdAll;
 			LabelDepthAll->CaptureScene();
 			FlushRenderingCommands();
 			if (DepthResource == nullptr
@@ -3653,19 +3659,74 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			{
 				return Fail(TEXT("labels: could not read the scene depth back"));
 			}
-			LabelIdAll->CaptureScene();
-			FlushRenderingCommands();
-			if (IdResource == nullptr
-			    || !IdResource->ReadLinearColorPixels(IdAll, RawFloats))
-			{
-				return Fail(TEXT("labels: could not read the ID pass back"));
-			}
 			const int32 Count = Width * Height;
-			if (DepthAll.Num() != Count || IdAll.Num() != Count)
+			if (DepthAll.Num() != Count)
 			{
 				return Fail(FString::Printf(
-					TEXT("labels: depth and ID readbacks are %d and %d pixels for a %dx%d frame"),
-					DepthAll.Num(), IdAll.Num(), Width, Height));
+					TEXT("labels: the depth readback is %d pixels for a %dx%d frame"),
+					DepthAll.Num(), Width, Height));
+			}
+			// Depth ownership: each id's show-only depth against the full
+			// scene's. The same view drawing the same geometry writes the
+			// same depth, so an owned pixel agrees to rounding; anything in
+			// front of it (another id, or unlabelled geometry) is nearer by
+			// far more than the tolerance and keeps the pixel.
+			TArray<int32> OwnerId;
+			OwnerId.SetNumZeroed(Count);
+			TArray<float> OwnerCm;
+			OwnerCm.Init(TNumericLimits<float>::Max(), Count);
+			TMap<int32, TArray<uint8>> AloneOf;
+			for (const TPair<int32, USceneCaptureComponent2D*>& Group : LabelDepthOfId)
+			{
+				Group.Value->FOVAngle = Capture->FOVAngle;
+				TArray<FLinearColor> OnlyDepth;
+				Group.Value->CaptureScene();
+				FlushRenderingCommands();
+				if (!DepthResource->ReadLinearColorPixels(OnlyDepth, RawFloats)
+				    || OnlyDepth.Num() != Count)
+				{
+					return Fail(FString::Printf(
+						TEXT("labels: could not read the show-only depth of int_id %d back"),
+						Group.Key));
+				}
+				bool bKeepAlone = false;
+				for (const FRenderLabelledObject& Entry : Labelled)
+				{
+					bKeepAlone |= Entry.Alone == Group.Value;
+				}
+				TArray<uint8> Alone;
+				if (bKeepAlone)
+				{
+					Alone.SetNumZeroed(Count);
+				}
+				const uint8 GroupId = static_cast<uint8>(FMath::Clamp(Group.Key, 0, 255));
+				for (int32 i = 0; i < Count; ++i)
+				{
+					const float OnlyCm = OnlyDepth[i].R;
+					if (!(OnlyCm > 0.0f && OnlyCm < RenderLabelDepthSkyCm))
+					{
+						continue;
+					}
+					if (bKeepAlone)
+					{
+						Alone[i] = GroupId;
+					}
+					const float AllCm = DepthAll[i].R;
+					if (!(AllCm > 0.0f && AllCm < RenderLabelDepthSkyCm))
+					{
+						continue;
+					}
+					const float Tolerance = 0.5f + 1.0e-5f * AllCm;
+					if (FMath::Abs(OnlyCm - AllCm) <= Tolerance && OnlyCm < OwnerCm[i])
+					{
+						OwnerId[i] = GroupId;
+						OwnerCm[i] = OnlyCm;
+					}
+				}
+				if (bKeepAlone)
+				{
+					AloneOf.Add(Group.Key, MoveTemp(Alone));
+				}
 			}
 			TMap<int32, int32> ClassOfIntId;
 			for (const FRenderLabelledObject& Entry : Labelled)
@@ -3681,21 +3742,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			Depth16.SetNumZeroed(Count);
 			DepthMetres.SetNumZeroed(Count);
 			int32 UnlabelledGeometry = 0;
-			int32 NonIntegerIds = 0;
+			const int32 NonIntegerIds = 0;
 			for (int32 i = 0; i < Count; ++i)
 			{
 				const float AllCm = DepthAll[i].R;
 				const bool bAllGeometry = AllCm > 0.0f && AllCm < RenderLabelDepthSkyCm;
-				// The stencil comes back as a float; an AA-free pass gives
-				// whole numbers. A non-integer here is a measurement (a
-				// blend or a resample), counted and reported, never hidden
-				// by the rounding.
-				const float IdValue = IdAll[i].R;
-				const int32 IntId = FMath::Clamp(FMath::RoundToInt(IdValue), 0, 255);
-				if (FMath::Abs(IdValue - static_cast<float>(IntId)) > 1.0e-3f)
-				{
-					++NonIntegerIds;
-				}
+				// Integer by construction (depth ownership): NonIntegerIds
+				// stays 0 and is still reported, so the gate reads a count.
+				const int32 IntId = OwnerId[i];
 				Mask[i] = static_cast<uint8>(IntId);
 				if (IntId != 0)
 				{
@@ -3715,48 +3769,6 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 					FMath::RoundToInt(Metres / RenderLabelDepthScaleM), 0, 65535));
 			}
 			const FString Stem = FrameName.LeftChop(4);
-
-			// Diagnostic (the owner's first 5.7 label run: stray ids 44-49
-			// and an empty alone pass, from a log that said neither where nor
-			// how): every id value the pass wrote that no object owns, with
-			// its pixel count, the raw float range and one pixel location.
-			// Logged for the first frames that carry any, never silenced.
-			{
-				TMap<int32, int32> Stray;
-				TMap<int32, int32> StrayFirstPixel;
-				float RawMin = TNumericLimits<float>::Max();
-				float RawMax = TNumericLimits<float>::Lowest();
-				for (int32 i = 0; i < Count; ++i)
-				{
-					RawMin = FMath::Min(RawMin, IdAll[i].R);
-					RawMax = FMath::Max(RawMax, IdAll[i].R);
-					const int32 Value = static_cast<int32>(Mask[i]);
-					if (Value != 0 && !ClassOfIntId.Contains(Value))
-					{
-						Stray.FindOrAdd(Value)++;
-						if (!StrayFirstPixel.Contains(Value))
-						{
-							StrayFirstPixel.Add(Value, i);
-						}
-					}
-				}
-				static int32 StrayFramesLogged = 0;
-				if ((Stray.Num() > 0 || NonIntegerIds > 0) && StrayFramesLogged < 5)
-				{
-					++StrayFramesLogged;
-					FString Listing;
-					for (const TPair<int32, int32>& Pair : Stray)
-					{
-						const int32 At = StrayFirstPixel[Pair.Key];
-						Listing += FString::Printf(TEXT(" id %d x%d (first at %d,%d);"),
-						                           Pair.Key, Pair.Value, At % Width, At / Width);
-					}
-					UE_LOG(LogFlightSimRender, Warning,
-					       TEXT("labels.diagnostic %s: raw ID float range %.4f..%.4f, %d non-integer ")
-					       TEXT("pixel(s), %d id value(s) no object owns:%s"),
-					       *FrameName, RawMin, RawMax, NonIntegerIds, Stray.Num(), *Listing);
-				}
-			}
 
 			// Per object: pixels in the ID pass, the alone pass (aircraft
 			// only), visible fraction, who occludes it, depth under its mask.
@@ -3785,53 +3797,22 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 				ObjectJson->SetNumberField(TEXT("pixels"), ObjectPixels);
 				if (Entry.Alone != nullptr)
 				{
-					Entry.Alone->FOVAngle = Capture->FOVAngle;
-					TArray<FLinearColor> IdAlone;
-					Entry.Alone->CaptureScene();
-					FlushRenderingCommands();
-					if (!IdResource->ReadLinearColorPixels(IdAlone, RawFloats)
-					    || IdAlone.Num() != Count)
-					{
-						return Fail(FString::Printf(
-							TEXT("labels: could not read the alone pass of '%s' back"), *Entry.Id));
-					}
+					const TArray<uint8>* AloneOwned = AloneOf.Find(Entry.IntId);
 					TArray<uint8> AloneMask;
 					AloneMask.SetNumZeroed(Count);
 					int32 PixelsAlone = 0;
 					TSet<int32> Occluders;
-					for (int32 i = 0; i < Count; ++i)
+					for (int32 i = 0; AloneOwned != nullptr && i < Count; ++i)
 					{
-						const int32 Value = FMath::Clamp(FMath::RoundToInt(IdAlone[i].R), 0, 255);
-						if (Value == Entry.IntId)
+						if ((*AloneOwned)[i] != 0)
 						{
-							AloneMask[i] = static_cast<uint8>(Value);
+							AloneMask[i] = static_cast<uint8>(Entry.IntId);
 							++PixelsAlone;
 							if (Mask[i] != 0 && Mask[i] != Entry.IntId)
 							{
 								Occluders.Add(static_cast<int32>(Mask[i]));
 							}
 						}
-					}
-					if (PixelsAlone == 0 && ObjectPixels > 0)
-					{
-						// Diagnostic: an alone pass that lost the object the
-						// full pass sees. Nothing drawn reads as all zeros; a
-						// scaled stencil reads as some other non-zero value.
-						int32 NonZero = 0;
-						float AloneMax = 0.0f;
-						for (int32 i = 0; i < Count; ++i)
-						{
-							if (IdAlone[i].R != 0.0f)
-							{
-								++NonZero;
-								AloneMax = FMath::Max(AloneMax, IdAlone[i].R);
-							}
-						}
-						UE_LOG(LogFlightSimRender, Warning,
-						       TEXT("labels.diagnostic %s: the alone pass of '%s' holds no int_id %d ")
-						       TEXT("pixel while the full pass holds %d; %d non-zero alone pixel(s), ")
-						       TEXT("max raw value %.4f"),
-						       *FrameName, *Entry.Id, Entry.IntId, ObjectPixels, NonZero, AloneMax);
 					}
 					const FString AloneName = Stem + FString::Printf(TEXT("_alone_%d.png"), Entry.IntId);
 					if (!RenderWriteGrayPng(FPaths::Combine(OutputDirectory, AloneName),
@@ -3945,7 +3926,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			}
 			Labels->SetStringField(TEXT("classes"), Classes);
 			Labels->SetStringField(TEXT("method"),
-			                       TEXT("custom-stencil ID pass, AA off; alone pass per aircraft"));
+			                       TEXT("depth ownership: show-only depth per int_id against the scene depth; alone pass per aircraft"));
 			Labels->SetStringField(TEXT("depth_f32"), DepthF32Name);
 			Labels->SetStringField(TEXT("anti_aliasing"), TEXT("none"));
 			Labels->SetStringField(TEXT("id_source"), LabelIdSource);
