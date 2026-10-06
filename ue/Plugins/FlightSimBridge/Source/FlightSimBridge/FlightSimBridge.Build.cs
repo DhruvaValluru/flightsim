@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using UnrealBuildTool;
 
 public class FlightSimBridge : ModuleRules
@@ -35,5 +37,49 @@ public class FlightSimBridge : ModuleRules
 			// "Engine".
 			"Landscape",
 		});
+
+		// Google Photorealistic 3D Tiles (FlightSimGoogleTiles.cpp) ride the
+		// Cesium for Unreal plugin. It is optional: found -> compiled in and
+		// FLIGHTSIM_GOOGLE_TILES=on can use it; absent -> the same build as
+		// before, and asking for the tiles refuses by name.
+		// FLIGHTSIM_CESIUM=0 forces it out.
+		bool bCesium = System.Environment.GetEnvironmentVariable("FLIGHTSIM_CESIUM") != "0"
+			&& FindCesium(Target) != null;
+		if (bCesium)
+		{
+			PublicDependencyModuleNames.Add("CesiumRuntime");
+		}
+		PublicDefinitions.Add("WITH_FLIGHTSIM_CESIUM=" + (bCesium ? "1" : "0"));
+	}
+
+	private string FindCesium(ReadOnlyTargetRules Target)
+	{
+		var roots = new System.Collections.Generic.List<string>();
+		if (Target.ProjectFile != null)
+		{
+			roots.Add(Path.Combine(Target.ProjectFile.Directory.FullName, "Plugins"));
+		}
+		roots.Add(Path.Combine(EngineDirectory, "Plugins", "Marketplace"));
+		foreach (string root in roots)
+		{
+			if (!Directory.Exists(root))
+			{
+				continue;
+			}
+			try
+			{
+				string[] found = Directory.GetFiles(root, "CesiumForUnreal.uplugin",
+				                                    SearchOption.AllDirectories);
+				if (found.Length > 0)
+				{
+					return found[0];
+				}
+			}
+			catch (Exception)
+			{
+				// An unreadable folder is not a Cesium install.
+			}
+		}
+		return null;
 	}
 }

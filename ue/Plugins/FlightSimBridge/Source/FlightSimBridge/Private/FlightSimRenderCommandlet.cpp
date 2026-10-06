@@ -32,6 +32,7 @@
 #include "Modules/ModuleManager.h"
 #include "HAL/IConsoleManager.h"
 #include "GeoReferencingSystem.h"
+#include "FlightSimGoogleTiles.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
@@ -1284,6 +1285,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	// measurements depend on it, so it stays byte-for-byte as it was. Gate 6's
 	// is the §6.6 scene, behind -Visual.
 	FFlightSimVisualScene VisualScene;
+	// Google Photorealistic 3D Tiles as the visible ground (opt-in,
+	// FLIGHTSIM_GOOGLE_TILES=on; FlightSimGoogleTiles.h).
+	FFlightSimGoogleTiles GoogleTiles;
 	// -- Phase 2 Look lane: the card's look block (contracts §5.4) ---------
 	// The engine consumes what the CARD carries: `look` at the root, else
 	// `randomization.look` (where package F lands it, contracts §5.6). The
@@ -1617,6 +1621,26 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			SceneOptions.SkyPlan = &SkyPlan;
 		}
 		if (!VisualScene.Build(World, SceneOptions, Error)) { return Fail(Error); }
+		if (FFlightSimGoogleTiles::Requested())
+		{
+			// The geoid undulation at the origin is the card's (null on a
+			// flat or synthesised scene: then 0, recorded as used).
+			double UndulationM = 0.0;
+			const TSharedPtr<FJsonObject>* TilesGeoreference = nullptr;
+			if (WorldCardRoot.IsValid() &&
+			    WorldCardRoot->TryGetObjectField(TEXT("georeference"), TilesGeoreference) &&
+			    TilesGeoreference != nullptr)
+			{
+				(*TilesGeoreference)->TryGetNumberField(TEXT("undulation_origin_m"), UndulationM);
+			}
+			if (!GoogleTiles.Enable(World, Scenario.GeoReferencing, Card.LatitudeDegrees,
+			                        Card.LongitudeDegrees, Card.TerrainElevationMetres,
+			                        UndulationM, Error))
+			{
+				return Fail(Error);
+			}
+			GoogleTiles.HideOwnTerrain(World);
+		}
 	}
 	else
 	{
@@ -3533,6 +3557,14 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		// Component render-state updates are queued and flushed at end of
 		// frame. A hand-driven loop has to flush them itself, or the capture
 		// sees the scene from before the aircraft and its surfaces moved.
+		// Google tiles: this frame's camera selects and loads its tiles
+		// before ANY capture of the step, so every pass sees the same ground.
+		if (GoogleTiles.IsEnabled() &&
+		    !GoogleTiles.WaitForView(Capture->GetComponentLocation(), Capture->GetComponentRotation(),
+		                             Capture->FOVAngle, Width, Height, Error))
+		{
+			return Fail(Error);
+		}
 		World->SendAllEndOfFrameUpdates();
 		FlushRenderingCommands();
 		// I6: the velocity pass renders FIRST after the step, before the
@@ -5648,6 +5680,10 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		}
 		Georeference->SetField(TEXT("undulation_origin_m"), Undulation);
 		Root->SetObjectField(TEXT("georeference"), Georeference);
+	}
+	if (FFlightSimGoogleTiles::Requested())
+	{
+		Root->SetObjectField(TEXT("google_tiles"), GoogleTiles.Record());
 	}
 	// W5: world_applied -- what the scene level and the world look drew, the
 	// ten keys (landscape, imagery, land_cover, vegetation, buildings, runway,

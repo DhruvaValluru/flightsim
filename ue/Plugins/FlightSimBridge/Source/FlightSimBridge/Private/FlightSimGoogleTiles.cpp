@@ -1,0 +1,259 @@
+#include "FlightSimGoogleTiles.h"
+
+#include "Async/TaskGraphInterfaces.h"
+#include "Containers/Ticker.h"
+#include "Engine/World.h"
+#include "EngineUtils.h"
+#include "GameFramework/Actor.h"
+#include "GeoReferencingSystem.h"
+#include "HAL/PlatformMisc.h"
+#include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
+
+#ifndef WITH_FLIGHTSIM_CESIUM
+#define WITH_FLIGHTSIM_CESIUM 0
+#endif
+
+#if WITH_FLIGHTSIM_CESIUM
+#include "Cesium3DTileset.h"
+#include "CesiumCamera.h"
+#include "CesiumCameraManager.h"
+#include "CesiumGeoreference.h"
+#endif
+
+DEFINE_LOG_CATEGORY_STATIC(LogFlightSimGoogleTiles, Log, All);
+
+namespace
+{
+	const TCHAR* GoogleTilesRootUrl = TEXT("https://tile.googleapis.com/v1/3dtiles/root.json");
+	const TCHAR* TerrainTag = TEXT("FlightSim.terrain");
+	// Pump interval and how long the view must stay fully loaded: Cesium
+	// refines in steps (a loaded parent selects its children next tick), so
+	// one 100 % reading can precede the next level's requests.
+	constexpr float PumpSeconds = 1.0f / 30.0f;
+	constexpr int32 SettledPumps = 15;
+
+	double EnvNumber(const TCHAR* Name, double Default)
+	{
+		const FString Value = FPlatformMisc::GetEnvironmentVariable(Name).TrimStartAndEnd();
+		if (Value.IsEmpty() || !Value.IsNumeric())
+		{
+			return Default;
+		}
+		return FCString::Atod(*Value);
+	}
+}
+
+bool FFlightSimGoogleTiles::Requested()
+{
+	const FString Value =
+		FPlatformMisc::GetEnvironmentVariable(TEXT("FLIGHTSIM_GOOGLE_TILES")).TrimStartAndEnd().ToLower();
+	return Value == TEXT("1") || Value == TEXT("on") || Value == TEXT("true") || Value == TEXT("yes");
+}
+
+bool FFlightSimGoogleTiles::Available()
+{
+	return WITH_FLIGHTSIM_CESIUM != 0;
+}
+
+bool FFlightSimGoogleTiles::Enable(UWorld* World, AGeoReferencingSystem* GeoReferencing,
+                                   double LatitudeDeg, double LongitudeDeg,
+                                   double OrthometricHeightM, double InUndulationM,
+                                   FString& Error)
+{
+#if WITH_FLIGHTSIM_CESIUM
+	const FString Key =
+		FPlatformMisc::GetEnvironmentVariable(TEXT("GOOGLE_MAPS_API_KEY")).TrimStartAndEnd();
+	if (Key.IsEmpty())
+	{
+		Error = TEXT("terrain.google_tiles: FLIGHTSIM_GOOGLE_TILES is on but GOOGLE_MAPS_API_KEY ")
+		        TEXT("is empty; set it to a Google Maps Platform key with the Map Tiles API enabled");
+		return false;
+	}
+	if (World == nullptr || GeoReferencing == nullptr)
+	{
+		Error = TEXT("terrain.google_tiles: no world or georeference to place the tiles in");
+		return false;
+	}
+	// Cesium places tiles east-south-up in the engine frame. The scene's
+	// frame is the GeoReferencing plugin's; MEASURE its axes rather than
+	// assume them, and refuse a frame the tiles would be mirrored in.
+	FVector Origin, North, East;
+	GeoReferencing->GeographicToEngine(
+		FGeographicCoordinates(LongitudeDeg, LatitudeDeg, OrthometricHeightM), Origin);
+	GeoReferencing->GeographicToEngine(
+		FGeographicCoordinates(LongitudeDeg, LatitudeDeg + 0.001, OrthometricHeightM), North);
+	GeoReferencing->GeographicToEngine(
+		FGeographicCoordinates(LongitudeDeg + 0.001, LatitudeDeg, OrthometricHeightM), East);
+	if (!(North.Y < Origin.Y) || !(East.X > Origin.X))
+	{
+		Error = FString::Printf(
+			TEXT("terrain.google_tiles: the scene frame is not east-south-up (north moves Y by %.1f, ")
+			TEXT("east moves X by %.1f); Cesium's tiles would be mirrored in it"),
+			North.Y - Origin.Y, East.X - Origin.X);
+		return false;
+	}
+
+	MaximumScreenSpaceError = FMath::Clamp(EnvNumber(TEXT("FLIGHTSIM_GOOGLE_TILES_SSE"), 8.0), 1.0, 64.0);
+	TimeoutSeconds = FMath::Max(10.0, EnvNumber(TEXT("FLIGHTSIM_GOOGLE_TILES_TIMEOUT"), 180.0));
+	OriginLatitudeDeg = LatitudeDeg;
+	OriginLongitudeDeg = LongitudeDeg;
+	UndulationM = InUndulationM;
+	// Engine Z=0 is the orthometric terrain elevation at the origin; the
+	// tiles are in WGS84 ellipsoidal heights, so the same point sits the
+	// undulation higher on the ellipsoid.
+	OriginEllipsoidHeightM = OrthometricHeightM + InUndulationM;
+
+	ACesiumGeoreference* Georeference = ACesiumGeoreference::GetDefaultGeoreference(World);
+	if (Georeference == nullptr)
+	{
+		Error = TEXT("terrain.google_tiles: Cesium did not provide a georeference");
+		return false;
+	}
+	Georeference->SetOriginLongitudeLatitudeHeight(
+		FVector(LongitudeDeg, LatitudeDeg, OriginEllipsoidHeightM));
+
+	ACesium3DTileset* Tiles = World->SpawnActor<ACesium3DTileset>();
+	if (Tiles == nullptr)
+	{
+		Error = TEXT("terrain.google_tiles: could not spawn the Cesium 3D tileset");
+		return false;
+	}
+	Tiles->SetGeoreference(TSoftObjectPtr<ACesiumGeoreference>(Georeference));
+	Tiles->SetTilesetSource(ETilesetSource::FromUrl);
+	Tiles->SetUrl(FString::Printf(TEXT("%s?key=%s"), GoogleTilesRootUrl, *Key));
+	Tiles->SetMaximumScreenSpaceError(MaximumScreenSpaceError);
+	Tileset = Tiles;
+
+	ACesiumCameraManager* Cameras = ACesiumCameraManager::GetDefaultCameraManager(World);
+	if (Cameras == nullptr)
+	{
+		Error = TEXT("terrain.google_tiles: Cesium did not provide a camera manager");
+		return false;
+	}
+	CameraManager = Cameras;
+	FCesiumCamera Camera;
+	Camera.ViewportSize = FVector2D(1280.0, 720.0);
+	Camera.Location = FVector::ZeroVector;
+	Camera.Rotation = FRotator::ZeroRotator;
+	Camera.FieldOfViewDegrees = 60.0;
+	CameraId = Cameras->AddCamera(Camera);
+
+	bEnabled = true;
+	UE_LOG(LogFlightSimGoogleTiles, Display,
+	       TEXT("google tiles: origin %.6f, %.6f at %.1f m ellipsoidal (%.1f m orthometric + %.1f m ")
+	       TEXT("undulation), maximum screen-space error %.1f"),
+	       LatitudeDeg, LongitudeDeg, OriginEllipsoidHeightM, OrthometricHeightM, InUndulationM,
+	       MaximumScreenSpaceError);
+	return true;
+#else
+	Error = TEXT("terrain.google_tiles: FLIGHTSIM_GOOGLE_TILES is on but this build has no Cesium ")
+	        TEXT("for Unreal plugin; install it into the engine (Fab: \"Cesium for Unreal\") and ")
+	        TEXT("rebuild with scripts\\build_ue.ps1");
+	return false;
+#endif
+}
+
+int32 FFlightSimGoogleTiles::HideOwnTerrain(UWorld* World)
+{
+	HiddenActors = 0;
+	if (World == nullptr)
+	{
+		return 0;
+	}
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		if (It->ActorHasTag(FName(TerrainTag)))
+		{
+			It->SetActorHiddenInGame(true);
+			++HiddenActors;
+		}
+	}
+	UE_LOG(LogFlightSimGoogleTiles, Display,
+	       TEXT("google tiles: hid %d actor(s) of the scene's own ground"), HiddenActors);
+	return HiddenActors;
+}
+
+bool FFlightSimGoogleTiles::WaitForView(const FVector& Location, const FRotator& Rotation,
+                                        double FieldOfViewDeg, int32 Width, int32 Height,
+                                        FString& Error)
+{
+#if WITH_FLIGHTSIM_CESIUM
+	ACesium3DTileset* Tiles = Cast<ACesium3DTileset>(Tileset.Get());
+	ACesiumCameraManager* Cameras = Cast<ACesiumCameraManager>(CameraManager.Get());
+	if (!bEnabled || Tiles == nullptr || Cameras == nullptr)
+	{
+		Error = TEXT("terrain.google_tiles: the tileset is gone");
+		return false;
+	}
+	FCesiumCamera Camera;
+	Camera.ViewportSize = FVector2D(static_cast<double>(Width), static_cast<double>(Height));
+	Camera.Location = Location;
+	Camera.Rotation = Rotation;
+	Camera.FieldOfViewDegrees = FieldOfViewDeg;
+	Cameras->UpdateCamera(CameraId, Camera);
+
+	const double Start = FPlatformTime::Seconds();
+	int32 Settled = 0;
+	float Progress = 0.0f;
+	while (true)
+	{
+		// What a running engine loop does for the plugin each frame: the
+		// core ticker (the HTTP manager's completions), the game thread's
+		// queued tasks (Cesium's main-thread continuations) and the
+		// tileset's own tick (tile selection, loads, component creation).
+		FTSTicker::GetCoreTicker().Tick(PumpSeconds);
+		FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+		Tiles->Tick(PumpSeconds);
+		Progress = Tiles->GetLoadProgress();
+		Settled = Progress >= 99.99f ? Settled + 1 : 0;
+		if (Settled >= SettledPumps)
+		{
+			break;
+		}
+		const double Waited = FPlatformTime::Seconds() - Start;
+		if (Waited > TimeoutSeconds)
+		{
+			Error = FString::Printf(
+				TEXT("terrain.google_tiles: the view was still %.1f %% loaded after %.0f s ")
+				TEXT("(FLIGHTSIM_GOOGLE_TILES_TIMEOUT); check the key, the Map Tiles API and the ")
+				TEXT("network, or raise the timeout"), Progress, Waited);
+			return false;
+		}
+		FPlatformProcess::Sleep(0.005f);
+	}
+	const double Waited = FPlatformTime::Seconds() - Start;
+	++FramesWaited;
+	TotalWaitSeconds += Waited;
+	LongestWaitSeconds = FMath::Max(LongestWaitSeconds, Waited);
+	return true;
+#else
+	Error = TEXT("terrain.google_tiles: this build has no Cesium for Unreal plugin");
+	return false;
+#endif
+}
+
+TSharedPtr<FJsonObject> FFlightSimGoogleTiles::Record() const
+{
+	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
+	Out->SetBoolField(TEXT("enabled"), bEnabled);
+	Out->SetStringField(TEXT("source"), TEXT("Google Photorealistic 3D Tiles via Cesium for Unreal"));
+	Out->SetStringField(TEXT("url"), GoogleTilesRootUrl);   // never the key
+	Out->SetNumberField(TEXT("maximum_screen_space_error"), MaximumScreenSpaceError);
+	Out->SetNumberField(TEXT("origin_lat_deg"), OriginLatitudeDeg);
+	Out->SetNumberField(TEXT("origin_lon_deg"), OriginLongitudeDeg);
+	Out->SetNumberField(TEXT("origin_ellipsoidal_height_m"), OriginEllipsoidHeightM);
+	Out->SetNumberField(TEXT("undulation_used_m"), UndulationM);
+	Out->SetNumberField(TEXT("hidden_scene_ground_actors"), HiddenActors);
+	Out->SetNumberField(TEXT("frames_waited"), FramesWaited);
+	Out->SetNumberField(TEXT("longest_wait_s"), LongestWaitSeconds);
+	Out->SetNumberField(TEXT("total_wait_s"), TotalWaitSeconds);
+	Out->SetStringField(TEXT("attribution"),
+		TEXT("Imagery and 3D data: Google. Per-tile data-provider credits are shown by Cesium on ")
+		TEXT("screen and are not drawn into these frames; the Google Maps Platform terms govern ")
+		TEXT("display, attribution, caching and any derived use of these images."));
+	Out->SetStringField(TEXT("not_claimed"),
+		TEXT("the tiles' surface agrees with the baked heightfield the physics and the labels' ")
+		TEXT("geometry use; the ground in the pixels is Google's, the ground the checks use is the bake"));
+	return Out;
+}

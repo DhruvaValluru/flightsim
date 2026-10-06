@@ -830,6 +830,9 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 			return false;
 		}
 		AActor* Ground = World->SpawnActor<AActor>();
+		// The scene's own ground: hidden under external terrain tiles
+		// (FlightSimGoogleTiles.cpp), never otherwise.
+		Ground->Tags.Add(FName(TEXT("FlightSim.terrain")));
 		UStaticMeshComponent* GroundMesh =
 			NewObject<UStaticMeshComponent>(Ground, TEXT("VisibleGround"));
 		Ground->SetRootComponent(GroundMesh);
@@ -961,6 +964,7 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 		if (PlaneMesh != nullptr)
 		{
 			AActor* Backstop = World->SpawnActor<AActor>();
+			Backstop->Tags.Add(FName(TEXT("FlightSim.terrain")));
 			UStaticMeshComponent* BackstopMesh =
 				NewObject<UStaticMeshComponent>(Backstop, TEXT("DistantGround"));
 			Backstop->SetRootComponent(BackstopMesh);
@@ -1274,6 +1278,7 @@ bool FFlightSimVisualScene::BuildTerrainInstance(UWorld* World, const FString& N
 	}
 
 	AActor* TerrainActor = World->SpawnActor<AActor>();
+	TerrainActor->Tags.Add(FName(TEXT("FlightSim.terrain")));
 	UProceduralMeshComponent* Mesh =
 		NewObject<UProceduralMeshComponent>(TerrainActor, *Name);
 	TerrainActor->SetRootComponent(Mesh);
@@ -1553,6 +1558,7 @@ bool FFlightSimVisualScene::BuildGeoreferencedTerrain(
 	// component per tile under one scene root. Normals were computed from
 	// the full raster above, so shading is continuous across tile edges.
 	AActor* TerrainActor = World->SpawnActor<AActor>();
+	TerrainActor->Tags.Add(FName(TEXT("FlightSim.terrain")));
 	USceneComponent* Root =
 		NewObject<USceneComponent>(TerrainActor, TEXT("TerrainGeoreferenced"));
 	TerrainActor->SetRootComponent(Root);
