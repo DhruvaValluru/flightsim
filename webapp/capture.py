@@ -58,6 +58,48 @@ class CaptureError(RuntimeError):
         super().__init__(f"{constraint}: {message}")
 
 
+#: The ground-truth passes a web capture adds to every camera that states
+#: none (comma words): the engine's normal / velocity / albedo images and
+#: the derived optical flow, point clouds and whole-silhouette (amodal)
+#: masks (core/capture/passes.py). Unset: none, as before. Disparity is
+#: not offered: it needs a stated stereo rig.
+CAPTURE_PASSES_ENV = "FLIGHTSIM_CAPTURE_PASSES"
+CAPTURE_PASSES_ALL = ("normal", "velocity", "albedo", "flow", "points", "amodal")
+
+
+def requested_capture_passes(environ=None) -> List[str]:
+    """The words FLIGHTSIM_CAPTURE_PASSES asks for (``all`` for every
+    offered one), refusing an unknown word by name."""
+    import os
+
+    raw = (environ if environ is not None else os.environ).get(CAPTURE_PASSES_ENV, "")
+    words = [w.strip().lower() for w in raw.split(",") if w.strip()]
+    if words == ["all"]:
+        return list(CAPTURE_PASSES_ALL)
+    unknown = [w for w in words if w not in CAPTURE_PASSES_ALL]
+    if unknown:
+        raise CaptureError(
+            "sensing.pass",
+            f"{CAPTURE_PASSES_ENV} names {unknown}; the passes a web capture offers are "
+            f"{list(CAPTURE_PASSES_ALL)} (or 'all')")
+    return [w for w in CAPTURE_PASSES_ALL if w in words]
+
+
+def apply_capture_passes(spec, environ=None) -> List[str]:
+    """Give every camera that states no passes the requested ones, with
+    the environment as their provenance. A camera that states its own
+    keeps them. Returns the words applied."""
+    from core.scenario.fields import Quantity
+
+    words = requested_capture_passes(environ)
+    if not words:
+        return []
+    for camera in getattr(spec, "cameras", None) or []:
+        if camera.passes.value is None:
+            camera.passes = Quantity.inferred(list(words), frm=CAPTURE_PASSES_ENV)
+    return words
+
+
 def wants_capture(spec) -> bool:
     """True when the user actually stated cameras. A camera-less spec is
     left on the legacy path."""
