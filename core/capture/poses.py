@@ -14,11 +14,13 @@ The five presets are ported from
 
 * **chase** / **wingman** -- the offset is applied in a HEADING-ONLY
   frame (yaw from the aircraft, pitch and roll discarded; §1.5: using
-  the full rotation is precisely the historic failure), position and
-  aim exponentially smoothed with the C++ time constants
-  (:data:`POSITION_LAG_S`, :data:`AIM_LAG_S`; the wingman's
-  station-keeping is twice as tight). The look rotation never inherits
-  roll.
+  the full rotation is precisely the historic failure), smoothed with
+  the C++ time constants (:data:`POSITION_LAG_S`, :data:`AIM_LAG_S`;
+  the wingman's station-keeping is twice as tight): horizontally the
+  OFFSET from the aircraft is smoothed and the aim is the aircraft
+  itself (no steady trail of speed x tau), vertically the camera
+  height and the aim height are smoothed in the world. The look
+  rotation never inherits roll.
 * **ground** / **tower** -- world-anchored: the camera does not move;
   only the aim point is smoothed toward the aircraft. Roll stays zero.
 * **cockpit** -- body-fixed, no smoothing, FULL rotation applied: roll
@@ -522,25 +524,32 @@ def solve_pose_track(columns: Dict[str, Sequence[float]],
     if preset in ("chase", "wingman"):
         tau_pos = POSITION_LAG_S * (WINGMAN_POSITION_LAG_FACTOR
                                     if preset == "wingman" else 1.0)
-        sm_n = sm_e = sm_alt = None
-        aim_n = aim_e = aim_alt = None
-        prev_goal = prev_target = None
+        # Horizontally the lag acts on the OFFSET from the aircraft, not on
+        # the camera's world position: a world-position lag trails a
+        # steadily moving target by speed x tau (58 m at 250 kt), which
+        # dragged a side view off its station and the aircraft across the
+        # frame over the first second of every clip. The offset still
+        # swings smoothly through a turn (it rotates with the heading);
+        # vertically the lag stays on the world position, so a climb or a
+        # pitch bob still shows in the frame instead of being followed.
+        off_n = off_e = sm_alt = None
+        aim_alt = None
+        prev_off = prev_goal_alt = prev_target_alt = None
         for i in range(n):
             gn, ge, gup = _heading_only(air_yaw[i], *offset_at(t[i]))
-            goal = (air_n[i] + gn, air_e[i] + ge, air_alt[i] + gup)
-            target = (air_n[i], air_e[i], air_alt[i])
+            goal_alt = air_alt[i] + gup
             if i == 0:
-                sm_n, sm_e, sm_alt = goal          # start where it settles
-                aim_n, aim_e, aim_alt = target
+                off_n, off_e, sm_alt = gn, ge, goal_alt   # start where it settles
+                aim_alt = air_alt[i]
             else:
                 dt = t[i] - t[i - 1]
-                sm_n = lag_step(sm_n, prev_goal[0], goal[0], dt, tau_pos)
-                sm_e = lag_step(sm_e, prev_goal[1], goal[1], dt, tau_pos)
-                sm_alt = lag_step(sm_alt, prev_goal[2], goal[2], dt, tau_pos)
-                aim_n = lag_step(aim_n, prev_target[0], target[0], dt, AIM_LAG_S)
-                aim_e = lag_step(aim_e, prev_target[1], target[1], dt, AIM_LAG_S)
-                aim_alt = lag_step(aim_alt, prev_target[2], target[2], dt, AIM_LAG_S)
-            prev_goal, prev_target = goal, target
+                off_n = lag_step(off_n, prev_off[0], gn, dt, tau_pos)
+                off_e = lag_step(off_e, prev_off[1], ge, dt, tau_pos)
+                sm_alt = lag_step(sm_alt, prev_goal_alt, goal_alt, dt, tau_pos)
+                aim_alt = lag_step(aim_alt, prev_target_alt, air_alt[i], dt, AIM_LAG_S)
+            prev_off, prev_goal_alt, prev_target_alt = (gn, ge), goal_alt, air_alt[i]
+            sm_n, sm_e = air_n[i] + off_n, air_e[i] + off_e
+            aim_n, aim_e = air_n[i], air_e[i]
             y, p = look_angles(sm_n, sm_e, sm_alt, aim_n, aim_e, aim_alt)
             pos_n.append(sm_n)
             pos_e.append(sm_e)

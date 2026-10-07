@@ -390,3 +390,40 @@ def test_card_block_carries_a_stated_exposure_triple_as_numbers():
                                  "iso": 100.0}
     assert all(isinstance(v, float) for v in block["exposure"].values())
     assert list(block)[-2:] == ["poses", "capture_times_s"]
+
+
+def test_a_side_chase_holds_its_station_in_steady_flight():
+    """A chase camera stated 150 m to the left of an aircraft flying
+    straight and level at 130 m/s stays 150 m to its left, abeam, with
+    the aircraft on the camera's axis. A lag on the camera's WORLD
+    position trailed it by speed x tau (58 m) and dragged the aircraft
+    across the frame in the first second of every side-view clip."""
+    columns = make_columns(speed_mps=130.0)
+    camera = camera_for("chase")
+    camera.set("offset_forward_m", 0.0)
+    camera.set("offset_right_m", -150.0)
+    camera.set("offset_up_m", 0.0)
+    track = solve_pose_track(columns, camera, FRAME)
+    aircraft = aircraft_local_track(columns, FRAME)
+    for i in range(len(track)):
+        air_n, air_e = aircraft[i]["north_m"], aircraft[i]["east_m"]
+        assert track.north_m[i] - air_n == pytest.approx(0.0, abs=1e-6)
+        assert track.east_m[i] - air_e == pytest.approx(-150.0, abs=1e-6)
+        assert track.yaw_deg[i] % 360.0 == pytest.approx(90.0, abs=1e-6)
+
+
+def test_the_engine_director_follows_the_same_offset_model():
+    """The render host's chase and wingman (FlightSimCameraDirector.cpp)
+    smooth the horizontal OFFSET and aim at the aircraft horizontally,
+    the model this solver grades the rendered poses against."""
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "ue" / "Plugins" / "FlightSimBridge"
+              / "Source" / "FlightSimBridge" / "Private"
+              / "FlightSimCameraDirector.cpp").read_text(encoding="utf-8")
+    follow = source[source.index("void AFlightSimCameraDirector::FollowStation"):]
+    follow = follow[:follow.index("\n}\n")]
+    assert "SmoothedOffsetXY = SmoothTowards(SmoothedOffsetXY, GoalOffsetXY" in follow
+    assert "SmoothedAimPoint = FVector(AimPoint.X, AimPoint.Y, AimZ);" in follow
+    assert source.count("FollowStation(AimPoint, Goal, DeltaSeconds,") == 2
+    assert "SmoothedLocation = SmoothTowards(SmoothedLocation, Goal" not in source
