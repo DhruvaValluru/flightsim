@@ -12,7 +12,9 @@ class UWorld;
 //
 //   FLIGHTSIM_GOOGLE_TILES=on       ask for it
 //   GOOGLE_MAPS_API_KEY=<key>       a Google Maps Platform key with the
-//                                   Map Tiles API enabled
+//                                   Map Tiles API enabled, or
+//   CESIUM_ION_TOKEN=<token>        a Cesium ion access token: the same
+//                                   tiles through Cesium ion (asset 2275207)
 //   FLIGHTSIM_GOOGLE_TILES_SSE=8    Cesium's maximum screen-space error
 //                                   (lower is sharper and heavier; 8)
 //   FLIGHTSIM_GOOGLE_TILES_TIMEOUT=180   seconds a frame may wait for its
@@ -67,6 +69,7 @@ public:
 
 private:
 	bool bEnabled = false;
+	bool bViaIon = false;
 	TWeakObjectPtr<AActor> Tileset;
 	TWeakObjectPtr<AActor> CameraManager;
 	int32 CameraId = -1;

@@ -26,6 +26,9 @@ DEFINE_LOG_CATEGORY_STATIC(LogFlightSimGoogleTiles, Log, All);
 namespace
 {
 	const TCHAR* GoogleTilesRootUrl = TEXT("https://tile.googleapis.com/v1/3dtiles/root.json");
+	// The same Google Photorealistic 3D Tiles, served through Cesium ion
+	// (asset 2275207): a Cesium ion access token instead of a Google key.
+	constexpr int64 GoogleTilesIonAssetId = 2275207;
 	const TCHAR* TerrainTag = TEXT("FlightSim.terrain");
 	// Pump interval and how long the view must stay fully loaded: Cesium
 	// refines in steps (a loaded parent selects its children next tick), so
@@ -64,12 +67,18 @@ bool FFlightSimGoogleTiles::Enable(UWorld* World, AGeoReferencingSystem* GeoRefe
 #if WITH_FLIGHTSIM_CESIUM
 	const FString Key =
 		FPlatformMisc::GetEnvironmentVariable(TEXT("GOOGLE_MAPS_API_KEY")).TrimStartAndEnd();
-	if (Key.IsEmpty())
+	const FString IonToken =
+		FPlatformMisc::GetEnvironmentVariable(TEXT("CESIUM_ION_TOKEN")).TrimStartAndEnd();
+	if (Key.IsEmpty() && IonToken.IsEmpty())
 	{
-		Error = TEXT("terrain.google_tiles: FLIGHTSIM_GOOGLE_TILES is on but GOOGLE_MAPS_API_KEY ")
-		        TEXT("is empty; set it to a Google Maps Platform key with the Map Tiles API enabled");
+		Error = TEXT("terrain.google_tiles: FLIGHTSIM_GOOGLE_TILES is on but neither ")
+		        TEXT("GOOGLE_MAPS_API_KEY (a Google Maps Platform key with the Map Tiles API) nor ")
+		        TEXT("CESIUM_ION_TOKEN (a Cesium ion access token) is set");
 		return false;
 	}
+	// A Google key is used directly; otherwise the ion token reaches the
+	// same tiles through Cesium ion.
+	bViaIon = Key.IsEmpty();
 	if (World == nullptr || GeoReferencing == nullptr)
 	{
 		Error = TEXT("terrain.google_tiles: no world or georeference to place the tiles in");
@@ -120,8 +129,17 @@ bool FFlightSimGoogleTiles::Enable(UWorld* World, AGeoReferencingSystem* GeoRefe
 		return false;
 	}
 	Tiles->SetGeoreference(TSoftObjectPtr<ACesiumGeoreference>(Georeference));
-	Tiles->SetTilesetSource(ETilesetSource::FromUrl);
-	Tiles->SetUrl(FString::Printf(TEXT("%s?key=%s"), GoogleTilesRootUrl, *Key));
+	if (bViaIon)
+	{
+		Tiles->SetTilesetSource(ETilesetSource::FromCesiumIon);
+		Tiles->SetIonAssetID(GoogleTilesIonAssetId);
+		Tiles->SetIonAccessToken(IonToken);
+	}
+	else
+	{
+		Tiles->SetTilesetSource(ETilesetSource::FromUrl);
+		Tiles->SetUrl(FString::Printf(TEXT("%s?key=%s"), GoogleTilesRootUrl, *Key));
+	}
 	Tiles->SetMaximumScreenSpaceError(MaximumScreenSpaceError);
 	Tileset = Tiles;
 
@@ -238,7 +256,16 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::Record() const
 	TSharedPtr<FJsonObject> Out = MakeShared<FJsonObject>();
 	Out->SetBoolField(TEXT("enabled"), bEnabled);
 	Out->SetStringField(TEXT("source"), TEXT("Google Photorealistic 3D Tiles via Cesium for Unreal"));
-	Out->SetStringField(TEXT("url"), GoogleTilesRootUrl);   // never the key
+	// Never the key or the token.
+	Out->SetStringField(TEXT("route"), bViaIon ? TEXT("Cesium ion") : TEXT("Google Map Tiles API"));
+	if (bViaIon)
+	{
+		Out->SetNumberField(TEXT("ion_asset_id"), static_cast<double>(GoogleTilesIonAssetId));
+	}
+	else
+	{
+		Out->SetStringField(TEXT("url"), GoogleTilesRootUrl);
+	}
 	Out->SetNumberField(TEXT("maximum_screen_space_error"), MaximumScreenSpaceError);
 	Out->SetNumberField(TEXT("origin_lat_deg"), OriginLatitudeDeg);
 	Out->SetNumberField(TEXT("origin_lon_deg"), OriginLongitudeDeg);

@@ -35,8 +35,9 @@ def test_the_cesium_plugin_is_optional_everywhere():
 
 def test_the_key_comes_from_the_environment_and_is_never_recorded():
     assert 'GetEnvironmentVariable(TEXT("GOOGLE_MAPS_API_KEY"))' in TILES_CPP
+    assert 'GetEnvironmentVariable(TEXT("CESIUM_ION_TOKEN"))' in TILES_CPP
     record = TILES_CPP[TILES_CPP.index("FFlightSimGoogleTiles::Record()"):]
-    assert "Key" not in record
+    assert "*Key" not in record and "IonToken" not in record
     assert 'SetStringField(TEXT("url"), GoogleTilesRootUrl)' in record
 
 
