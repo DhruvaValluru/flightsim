@@ -2748,6 +2748,19 @@ class RunManager:
         capture_cameras = None
         capture_landmarks = None
         if wants_capture(spec):
+            # FLIGHTSIM_CAPTURE_PASSES: the extra ground-truth passes
+            # (normals, motion vectors, base colour, flow, points, amodal)
+            # on every camera that states none; unset changes nothing.
+            from webapp.capture import apply_capture_passes
+
+            try:
+                extra_passes = apply_capture_passes(spec)
+            except CaptureError as exc:
+                run.push("failed", f"[{exc.constraint}] {exc.message}")
+                return
+            if extra_passes:
+                run.push("cameras", "ground-truth passes asked for: "
+                                    + ", ".join(extra_passes))
             run.push("cameras", f"solving {len(spec.cameras)} camera "
                                 f"pose track(s) and capture schedule(s)")
             try:
@@ -2948,6 +2961,13 @@ class RunManager:
             run.push("rendering",
                      f"rendering {len(camera_ids)} camera pass(es): "
                      f"{', '.join(camera_ids)}")
+            # The engine words any camera's passes name (normal, velocity,
+            # albedo) ride -passes= on every camera's pass, as the CLI's.
+            from core.capture.passes import engine_words
+            from core.render.flags import passes_flag
+
+            pass_token = passes_flag(engine_words(spec.cameras))
+            pass_extra = [pass_token] if pass_token else []
             try:
                 capture_render_passes(
                     card, frames, camera_ids,
@@ -2961,7 +2981,7 @@ class RunManager:
                         # reported NOT RUN on every web run.
                         telemetry=telemetry,
                         look=render_look_for(spec, event_note),
-                        camera_flags=camera_flags, extra=extra,
+                        camera_flags=camera_flags, extra=list(extra) + pass_extra,
                         sky=sky))
             except CaptureError as exc:
                 # The render log for the pass that failed sits beside its
