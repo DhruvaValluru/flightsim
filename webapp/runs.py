@@ -194,9 +194,34 @@ def _dynamic_scenes(dynamic_dir: Path) -> List[Dict]:
     return scenes
 
 
+def looked_up_place(spec: ScenarioSpec) -> bool:
+    """True when the coordinates are a place name the compiler looked up
+    (core.nl.geocode): source inferred, and NOT a curated bake's origin
+    (whose absence keeps its own documented flat-datum behaviour,
+    pick_scene)."""
+    if {str(spec.latitude.source), str(spec.longitude.source)} != {"inferred"}:
+        return False
+    lat = float(spec.latitude.value)
+    lon = float(spec.longitude.value)
+    return not any(
+        abs(lat - location.origin_lat) <= LOCATION_TOLERANCE_DEG
+        and abs(lon - location.origin_lon) <= LOCATION_TOLERANCE_DEG
+        for location in LOCATIONS.values())
+
+
+def names_real_place(spec: ScenarioSpec) -> bool:
+    """True when the coordinates are a real place someone named: stated
+    (source user) or looked up from the prompt's words
+    (:func:`looked_up_place`)."""
+    if {str(spec.latitude.source), str(spec.longitude.source)} == {"user"}:
+        return True
+    return looked_up_place(spec)
+
+
 def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
-    """None, or the named refusal for USER-stated coordinates that no bake
-    covers yet.
+    """None, or the named refusal for coordinates someone named -- stated,
+    or a place name the compiler looked up (:func:`names_real_place`) --
+    that no bake covers yet.
 
     Stated coordinates mean "fly at that real place": defaulted and
     placed-on-scene coordinates never trigger (this runs BEFORE
@@ -224,8 +249,7 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
             "latitude": float(spec.latitude.value),
             "longitude": float(spec.longitude.value),
         }
-    if (str(spec.latitude.source) != "user"
-            or str(spec.longitude.source) != "user"):
+    if not names_real_place(spec):
         return None
     # The synthesised control ridge is NOT a place (the ERA5 doctrine):
     # stated coordinates that fall on no real bake refuse here even when
@@ -236,9 +260,11 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
         return None
     lat = float(spec.latitude.value)
     lon = float(spec.longitude.value)
+    what = ("stated coordinates" if str(spec.latitude.source) == "user"
+            else "coordinates of the place the prompt names")
     return {
         "constraint": "terrain.unbaked",
-        "message": f"no GLO-30 bake covers the stated coordinates "
+        "message": f"no GLO-30 bake covers the {what} "
                    f"({lat:.4f}, {lon:.4f}); POST /bake with them to fetch "
                    f"and verify that terrain (first fetch downloads tiles, "
                    f"a few minutes), then run again",
@@ -469,7 +495,9 @@ def _auto_scene(spec: ScenarioSpec) -> Dict:
         # 3299 m peaks under a "413 m" scene (measured: a 3000 m flight
         # refused terrain.clearance at -89.5 m AGL over "413 m staged
         # terrain" because the ridge had been substituted).
-        if baked(terrain_dir / "control_ridge"):
+        # Nor for a place the prompt named (core.nl.geocode): its own
+        # ground arrives with the on-demand bake.
+        if baked(terrain_dir / "control_ridge") and not looked_up_place(spec):
             return {
                 "key": "control", "kind": "synthesised control ridge",
                 "terrain": str(terrain_dir / "control_ridge"),

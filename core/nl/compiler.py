@@ -583,6 +583,14 @@ PLACE_WORDS: Tuple[Tuple[str, str], ...] = (
 )
 
 
+def _place_word(text: str) -> Optional[Tuple[str, str]]:
+    """(phrase, bake key) of the first curated place word the text holds."""
+    for phrase, key in PLACE_WORDS:
+        if _search(rf"\b{re.escape(phrase)}\b", text):
+            return phrase, key
+    return None
+
+
 def _place(text: str):
     """(latitude, longitude, terrain elevation) Quantities for a curated
     place the prompt names, or None. The coordinates are the bake's own
@@ -591,15 +599,67 @@ def _place(text: str):
     from ..terrain.glo30 import LOCATIONS
     from .llm_compiler import LOCATION_TERRAIN_ELEVATION_M
 
-    for phrase, key in PLACE_WORDS:
-        if _search(rf"\b{re.escape(phrase)}\b", text):
-            location = LOCATIONS[key]
-            frm = f"{phrase!r}: the {key} bake's origin ({location.title})"
-            return (Quantity.inferred(location.origin_lat, "deg", frm=frm),
-                    Quantity.inferred(location.origin_lon, "deg", frm=frm),
-                    Quantity.inferred(LOCATION_TERRAIN_ELEVATION_M[key], "m",
-                                      frm=f"{phrase!r}: the {key} bake's datum"))
-    return None
+    word = _place_word(text)
+    if word is None:
+        return None
+    phrase, key = word
+    location = LOCATIONS[key]
+    frm = f"{phrase!r}: the {key} bake's origin ({location.title})"
+    return (Quantity.inferred(location.origin_lat, "deg", frm=frm),
+            Quantity.inferred(location.origin_lon, "deg", frm=frm),
+            Quantity.inferred(LOCATION_TERRAIN_ELEVATION_M[key], "m",
+                              frm=f"{phrase!r}: the {key} bake's datum"))
+
+
+def named_place(prompt: str):
+    """The non-curated place the prompt names (core.nl.geocode), or None.
+
+    A curated place word wins -- its bake carries named summits and an
+    imagery drape -- unless the looked-up name CONTAINS it ("Kansas City"
+    is not the Flint Hills bake that "kansas" maps to).
+    """
+    from . import geocode
+
+    text = " ".join((prompt or "").lower().split())
+    curated = _place_word(text)
+    place = geocode.find_place(prompt, skip=[p for p, _ in PLACE_WORDS])
+    if place is None:
+        return None
+    if curated is not None and curated[0] not in place.phrase.lower():
+        return None
+    return place
+
+
+def apply_named_place(spec, place, note: bool = True) -> bool:
+    """Put a looked-up place on the spec: inferred coordinates (and the
+    list's approximate ground height as the terrain datum, when known).
+
+    Never moves a STATED location or ground height. The generic-ridge
+    datum the mountain words infer gives way to the place's own ground:
+    "mountains near Denver" is Denver's terrain, not a 2000 m slab.
+    Returns whether the coordinates were set.
+    """
+    if place is None:
+        return False
+    if str(spec.latitude.source) in ("user", "inferred") or \
+            str(spec.longitude.source) in ("user", "inferred"):
+        return False
+    frm = place.describe()
+    spec.latitude = Quantity.inferred(place.latitude, "deg", frm=frm)
+    spec.longitude = Quantity.inferred(place.longitude, "deg", frm=frm)
+    if place.elevation_m is not None and str(spec.terrain_elevation.source) \
+            in ("default", "inferred", "model"):
+        spec.terrain_elevation = Quantity.inferred(
+            float(place.elevation_m), "m",
+            frm=f"{place.phrase!r}: approximate ground height at "
+                f"{place.name} ({place.source}); the terrain bake is the "
+                f"physics ground")
+    if note:
+        spec.notes.append(
+            f"{place.phrase!r} is {place.display} ({place.latitude:.4f}, "
+            f"{place.longitude:.4f}), from the {place.source}: real terrain "
+            f"is fetched there on the first run (a few minutes, then cached)")
+    return True
 
 
 # -- cameras (Camera Phase 1; vocabulary completed in the gap closure) --
@@ -1196,7 +1256,8 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
             frm=f"typical cruise for the {model}")
         airspeed_kind = Quantity.default("cas")
     wind_speed, wind_direction = _wind(text, float(heading.value))
-    place = _place(text)
+    named = named_place(prompt)
+    place = None if named is not None else _place(text)
 
     spec = ScenarioSpec(
         name=name or _name_from(text),
@@ -1227,6 +1288,10 @@ def compile_prompt(prompt: str, name: Optional[str] = None,
         weather_event=_weather_event(text),
         time_of_day=_time_of_day(text),
     )
+
+    # A place outside the curated bakes ("over New York"): looked up, then
+    # baked on demand on the first run like stated coordinates.
+    apply_named_place(spec, named)
 
     if traffic:
         spec.traffic = traffic
