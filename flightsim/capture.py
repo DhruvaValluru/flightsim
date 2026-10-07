@@ -920,6 +920,15 @@ def _run(args: argparse.Namespace) -> int:
 
         heightfield = Heightfield.read(Path(terrain_stem))
         terrain_ground = TerrainGround(heightfield)
+    if args.render:
+        # Google's tiles draw the real place; the physics flies this run's
+        # ground. Over the slab or a synthesised raster they are different
+        # places, so the render refuses before any flight.
+        from core.scenario.card import google_tiles_terrain_refusal
+
+        tiles_refusal = google_tiles_terrain_refusal(heightfield)
+        if tiles_refusal is not None:
+            return _refuse([Violation("google_tiles.terrain", tiles_refusal)])
 
     frame = SceneFrame.for_spec(spec, heightfield)
     tornado = _tornado_hazard_block(spec)

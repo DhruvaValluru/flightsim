@@ -398,6 +398,19 @@ def _wind(text: str, heading: float) -> Tuple[Quantity, Quantity]:
     if m:
         direction = Quantity.user(float(m.group(1)), "deg", frm=m.group(0).strip())
         speed = Quantity.user(float(m.group(2)), "kt", frm=m.group(0).strip())
+    elif (m := _search(r"winds?\s+(?:blowing\s+)?(?:from|out of)\s+(?:the\s+)?"
+                       r"(\d{1,3}(?:\.\d+)?)(?:\s*(?:degrees|deg|°))?"
+                       r"(?![\d.]|\s*(?:kt|kts|knot|m\b|ft|%))"
+                       rf"(?:\s*(?:at|@)\s*{NUMBER}\s*(?:kt|kts|knots?)\b)?",
+                       text)) and float(m.group(1)) <= 360.0:
+        # "20 kt wind from 270" / "winds from 300 degrees at 10 kts": the
+        # bearing stated without the DDD/SS shape (measured: this wording
+        # used to fall through to the default 0, a direct headwind for a
+        # north heading).
+        direction = Quantity.user(float(m.group(1)) % 360.0, "deg",
+                                  frm=m.group(0).strip())
+        if m.group(2) is not None:
+            speed = Quantity.user(float(m.group(2)), "kt", frm=m.group(0).strip())
     else:
         for word, offset in WIND_RELATIVE.items():
             if word in text:

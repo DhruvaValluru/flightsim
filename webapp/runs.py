@@ -194,6 +194,26 @@ def _dynamic_scenes(dynamic_dir: Path) -> List[Dict]:
     return scenes
 
 
+def curated_key_at(lat: float, lon: float) -> Optional[str]:
+    """The curated location whose origin these coordinates sit on, or None."""
+    for key, location in LOCATIONS.items():
+        if (abs(float(lat) - location.origin_lat) <= LOCATION_TOLERANCE_DEG
+                and abs(float(lon) - location.origin_lon) <= LOCATION_TOLERANCE_DEG):
+            return key
+    return None
+
+
+def named_place(spec: ScenarioSpec) -> bool:
+    """True when the prompt NAMED a real place: the compiler maps a listed
+    place's name to its coordinates with source ``inferred`` (core/nl/
+    llm_compiler.py, geography rules). Such a spec means "fly at that real
+    place" exactly as stated coordinates do, so it is held to the same
+    bake rule -- never the flat slab or the synthesised ridge under the
+    place's name."""
+    return (str(spec.latitude.source) == "inferred"
+            and str(spec.longitude.source) == "inferred")
+
+
 def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
     """None, or the named refusal for USER-stated coordinates that no bake
     covers yet.
@@ -224,8 +244,8 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
             "latitude": float(spec.latitude.value),
             "longitude": float(spec.longitude.value),
         }
-    if (str(spec.latitude.source) != "user"
-            or str(spec.longitude.source) != "user"):
+    if not (named_place(spec) or (str(spec.latitude.source) == "user"
+                                  and str(spec.longitude.source) == "user")):
         return None
     # The synthesised control ridge is NOT a place (the ERA5 doctrine):
     # stated coordinates that fall on no real bake refuse here even when
@@ -236,6 +256,17 @@ def needs_dynamic_bake(spec: ScenarioSpec) -> Optional[Dict]:
         return None
     lat = float(spec.latitude.value)
     lon = float(spec.longitude.value)
+    curated = curated_key_at(lat, lon)
+    if curated is not None:
+        return {
+            "constraint": "terrain.unbaked",
+            "message": f"the {curated} terrain is not baked on this machine, so the "
+                       f"aircraft would fly over flat ground (or a synthesised ridge) "
+                       f"under a real place's name; POST /bake with these coordinates "
+                       f"(or run scripts/bake_terrain.py {curated}) to fetch and "
+                       f"verify it, then run again",
+            "latitude": lat, "longitude": lon,
+        }
     return {
         "constraint": "terrain.unbaked",
         "message": f"no GLO-30 bake covers the stated coordinates "
@@ -250,6 +281,9 @@ def bake_on_demand(lat: float, lon: float) -> Dict:
     """Fetch, bake and verify GLO-30 for arbitrary coordinates; register
     the scene. Raises (DEMError / URLError by name) rather than writing an
     unverified or empty bake -- open ocean has no tiles and says so."""
+    curated = curated_key_at(lat, lon)
+    if curated is not None:
+        return bake_curated(curated)
     location = dynamic_location(lat, lon)
     dynamic_dir = TERRAIN_DIR / "dynamic"
     raster = dynamic_dir / f"{location.key}.r16"
@@ -263,6 +297,34 @@ def bake_on_demand(lat: float, lon: float) -> Dict:
     sidecar.write_text(json.dumps(entry, indent=1), encoding="utf-8")
     entry["terrain"] = str(raster.with_suffix(""))
     return entry
+
+
+def bake_curated(key: str) -> Dict:
+    """Fetch, bake and verify a curated location (named summits checked),
+    plus its Sentinel-2 drape, into TERRAIN_DIR -- what scripts/
+    bake_terrain.py does for one key, reached from the page's on-demand
+    bake when a named place has no bake yet. A bake already on disk is
+    kept. The drape failing leaves the verified bake standing (the
+    terrain then renders untextured, and the scene says imagery null)."""
+    location = LOCATIONS[key]
+    raster = TERRAIN_DIR / f"{key}.r16"
+    if not raster.is_file():
+        TERRAIN_DIR.mkdir(parents=True, exist_ok=True)
+        bake(location, REPO / "data" / "glo30", TERRAIN_DIR)
+    imagery = "present"
+    if not (TERRAIN_DIR / f"{key}_imagery.json").is_file():
+        try:
+            from core.terrain.imagery import drape
+
+            drape(location, TERRAIN_DIR / key, REPO / "data" / "imagery_cache",
+                  TERRAIN_DIR)
+            imagery = "draped"
+        except Exception as exc:
+            imagery = f"FAILED ({type(exc).__name__}: {exc}); renders untextured"
+    return {"key": key, "title": location.title,
+            "origin_lat": location.origin_lat, "origin_lon": location.origin_lon,
+            "crs": location.crs, "identity": "named summits verified",
+            "imagery": imagery, "terrain": str(TERRAIN_DIR / key)}
 
 
 #: Guards the one-time control-ridge synthesis; concurrent runs must not
@@ -507,6 +569,13 @@ def place_on_scene(spec: ScenarioSpec) -> None:
     """
     scene = pick_scene(spec)
     if scene["key"] != "control":
+        return
+    if named_place(spec) or (str(spec.latitude.source) == "user"
+                             and str(spec.longitude.source) == "user"):
+        # A real place someone stated or named is never moved onto the
+        # synthesised ridge (measured: a named Everest flight moved to
+        # 0.138 N, 10.649 E). needs_dynamic_bake refuses it first on the
+        # web path; a caller that skipped that keeps the coordinates.
         return
     from pyproj import Transformer
 
@@ -2541,6 +2610,19 @@ class RunManager:
             run.push("failed", f"[{exc.constraint}] {exc.message}")
             return
         scene = pick_scene(spec)
+        # Google's tiles draw the real place; the physics flies this
+        # scene's ground. Over the slab or the synthesised ridge the two
+        # are different places, so the render refuses by name.
+        from core.scenario.card import (
+            GOOGLE_TILES_TERRAIN_CONSTRAINT, google_tiles_terrain_refusal,
+        )
+        from core.terrain.heightfield import Heightfield
+
+        tiles_refusal = google_tiles_terrain_refusal(
+            Heightfield.read(Path(scene["terrain"])) if scene.get("terrain") else None)
+        if tiles_refusal is not None:
+            run.push("failed", f"[{GOOGLE_TILES_TERRAIN_CONSTRAINT}] {tiles_refusal}")
+            return
         # X-Plane ground textures replace the scene's own texture when
         # the extraction is present (attach_xplane_drape); the snow class
         # follows the spec's month.

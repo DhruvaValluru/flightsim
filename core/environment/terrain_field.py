@@ -45,7 +45,7 @@ from __future__ import annotations
 import math
 from typing import Any, Callable, Dict, List, Optional
 
-from .base import Position, Term, WindNED, WindProvider
+from .base import LocalFrame, Position, Term, WindNED, WindProvider
 
 #: Slope beyond which linear theory is saturated rather than trusted.
 LINEAR_SLOPE_VALID = 0.35
@@ -128,8 +128,15 @@ class OrographicWind(WindProvider):
         wind_from_deg: float,
         decay_height_m: Optional[float] = None,
         enable_lee: bool = True,
+        frame: Optional[LocalFrame] = None,
     ) -> None:
         self.terrain = terrain
+        #: The frame ``terrain`` is defined in. None keeps the absolute
+        #: ``latitude x 111320 m`` frame (the analytic ridges); a baked
+        #: raster adapted about the scene origin (core.terrain.ground.
+        #: terrain_field_at) needs the frame of that origin, exactly as
+        #: the UE host samples it through LocalSceneCoords.
+        self.frame = frame
         self.wind_speed_mps = float(wind_speed_mps)
         self.wind_from_deg = float(wind_from_deg) % 360.0
         self.enable_lee = enable_lee
@@ -194,12 +201,18 @@ class OrographicWind(WindProvider):
 
     def wind_at(self, position: Position, time_s: float) -> WindNED:
         """Vertical contribution only; the horizontal field is the wind provider's."""
-        north_m, east_m = self._scene_coords(position)
+        north_m, east_m = self.local_coords(position)
         updraught = self.linear_updraught(north_m, east_m)
         sink = self.lee_sink(north_m, east_m)
         w_up = (updraught - sink) * self.decay(position.agl_m)
         # NED down is positive downward, so an updraught is negative down.
         return WindNED(0.0, 0.0, -w_up)
+
+    def local_coords(self, position: Position):
+        """(north, east) of a position in the frame the terrain is defined in."""
+        if self.frame is not None:
+            return self.frame.north_east(position.latitude_deg, position.longitude_deg)
+        return self._scene_coords(position)
 
     @staticmethod
     def _scene_coords(position: Position):
@@ -237,4 +250,5 @@ class OrographicWind(WindProvider):
                 "wind_speed_mps": self.wind_speed_mps,
                 "wind_from_deg": self.wind_from_deg,
                 "decay_height_m": self.decay_height_m,
-                "lee_enabled": self.enable_lee}
+                "lee_enabled": self.enable_lee,
+                "frame": None if self.frame is None else self.frame.provenance()}

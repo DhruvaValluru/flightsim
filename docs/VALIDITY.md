@@ -959,6 +959,23 @@ with `-NoOrographic` severing it, **0.00000 fps**. Every §2.8 caveat about
 the orographic model itself still applies — the port being faithful makes it
 exactly as crude as the original.
 
+**The same coupling in the headless host (2026-10-07).** Until this date
+`run_spec` over a raster flew the ground (elevation under the CG, span
+stations) but attached no orographic field and no lee rotor, so a windy
+terrain spec flew a different mountain headless than in the render path,
+and surface thermals were sampled in the absolute `latitude x 111320 m`
+frame (they sat near 0 N 0 E whatever the spec's place). Now
+`environment_for(..., terrain_ground=...)` attaches the orographic provider
+built from the run card's own numbers (`core.terrain.glo30.
+orographic_parameters`) and the lee-rotor turbulence riding it, and every
+position-coupled field samples in the card's frame about the spec origin
+(`core.environment.base.LocalFrame`, the UE host's `LocalSceneCoords`).
+Pinned by `tests/test_terrain_air_coupling.py` (calm vs 25 kt over a 600 m
+ridge: no vertical air vs lift and sink). Not measured here: the
+cross-host comparison of a windy terrain flight, which needs the Windows
+build. Still open: JSBSim's trim zeroes the wind (JSBSIM_CORRECTIONS 18),
+so a windy run starts as a step gust from a still-air trim.
+
 **Turbulence in the Unreal host, and an honest parity verdict.** The card
 carries the headless Dryden provider's EXACT property writes (turb-type,
 seed, severity, W20 — computed once in Python, applied once after trim, never

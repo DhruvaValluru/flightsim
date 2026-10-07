@@ -72,7 +72,53 @@ class UnimplementedConditionError(Exception):
     """
 
 
-def environment_for(spec: ScenarioSpec, landcover_json=None) -> EnvironmentStack:
+def scene_frame_for(spec: ScenarioSpec, terrain_ground=None):
+    """The local north/east frame every position-coupled provider samples
+    in: the spec origin projected into the raster's CRS over terrain, into
+    the origin's UTM zone otherwise -- the frame the webapp writes the run
+    card's blocks in (webapp.runs._projected_origin) and the UE host reads
+    them back through (LocalSceneCoords)."""
+    from ..environment.base import LocalFrame
+    from ..terrain.glo30 import utm_zone_crs
+
+    lat, lon = float(spec.latitude.value), float(spec.longitude.value)
+    crs = None
+    if terrain_ground is not None:
+        crs = terrain_ground.heightfield.georeference.crs
+    if not crs or str(crs).upper() in ("EPSG:4326", "OGC:CRS84"):
+        crs = utm_zone_crs(lat, lon)
+    return LocalFrame(crs, lat, lon)
+
+
+def orographic_for(spec: ScenarioSpec, terrain_ground):
+    """Ridge lift, lee sink and the rotor's field over the run's raster,
+    or None in calm air (orographic forcing is wind over terrain).
+
+    Built from the SAME numbers as the run card's ``orographic`` block
+    (core.terrain.glo30.orographic_parameters) and sampled in the same
+    frame, so the headless host flies the mountain the UE host flies.
+    The forcing wind is the spec's stated wind, as on the card.
+    """
+    wind_kt = float(spec.wind_speed.value)
+    if terrain_ground is None or wind_kt <= 0.0:
+        return None
+    from ..environment.terrain_field import OrographicWind
+    from ..terrain.glo30 import orographic_parameters
+    from ..terrain.ground import terrain_field_at
+
+    heightfield = terrain_ground.heightfield
+    frame = scene_frame_for(spec, terrain_ground)
+    params = orographic_parameters(heightfield, float(spec.latitude.value),
+                                   float(spec.longitude.value))
+    field = terrain_field_at(heightfield, params["origin_x_m"], params["origin_y_m"],
+                             wavelength_m=params["wavelength_m"])
+    return OrographicWind(field, wind_speed_mps=u.kt_to_mps(wind_kt),
+                          wind_from_deg=float(round(float(spec.wind_direction.value))),
+                          decay_height_m=params["decay_height_m"], frame=frame)
+
+
+def environment_for(spec: ScenarioSpec, landcover_json=None,
+                    terrain_ground=None) -> EnvironmentStack:
     """Build the provider stack a spec asks for.
 
     Turbulence is a real provider from Phase 3 onward, so it is no longer
@@ -88,8 +134,19 @@ def environment_for(spec: ScenarioSpec, landcover_json=None) -> EnvironmentStack
     overridden (provenance user beats inferred); a scene the map cannot
     read (no class holds half of it) infers nothing, flies the default
     surface, and says why in ``stack.notes``.
+
+    ``terrain_ground`` (the raster the run flies over): with wind, the
+    terrain shapes the air as it does in the UE host -- ridge lift and
+    lee sink as a wind provider, and the lee-rotor turbulence riding the
+    same field in place of plain Dryden (the spec's turbulence word is
+    its background floor). Position-coupled fields (the orographic field,
+    surface thermals) are sampled in the scene's local frame about the
+    spec origin (:func:`scene_frame_for`), the frame the run card uses.
     """
     stack = EnvironmentStack()
+    orographic = orographic_for(spec, terrain_ground)
+    if orographic is not None:
+        stack.add(orographic)
     from ..environment.surface import (
         InferredRoughnessWind, SurfaceInferenceError, infer_surface_for_spec, surface_class,
     )
@@ -203,7 +260,9 @@ def environment_for(spec: ScenarioSpec, landcover_json=None) -> EnvironmentStack
             wstar_mps=wstar, zi_m=zi,
             area_north_m=4000.0, area_east_m=4000.0,
             origin_north_m=-2000.0, origin_east_m=-2000.0,
-            seed=int(spec.seed.value)))
+            seed=int(spec.seed.value),
+            frame=(orographic.frame if orographic is not None
+                   else scene_frame_for(spec, terrain_ground))))
 
     event = str(spec.weather_event.value)
     if event in ("thunderstorm", "tornado"):
@@ -267,7 +326,16 @@ def environment_for(spec: ScenarioSpec, landcover_json=None) -> EnvironmentStack
     if stated_intensity is not None:
         intensity = str(stated_intensity)
     try:
-        stack.add(DrydenTurbulence(intensity, seed=seed))
+        if orographic is not None:
+            # The mountains shape the turbulence too: W20 follows the lee
+            # sink per step, floored at the spec's own word (the UE host's
+            # rotor block, webapp.runs).
+            from ..environment.rotor import LeeRotorTurbulence
+
+            stack.add(LeeRotorTurbulence(orographic, seed=seed,
+                                         background_intensity=intensity))
+        else:
+            stack.add(DrydenTurbulence(intensity, seed=seed))
     except ValueError as exc:
         raise UnimplementedConditionError(
             f"spec requests {intensity!r} turbulence, which no provider "
@@ -602,7 +670,8 @@ def run_spec(spec: ScenarioSpec, validate_first: bool = True,
     scene_datum = scene_datum_for(spec, terrain_ground)
 
     environment = environment_for(
-        spec, landcover_json if terrain_ground is not None else None)
+        spec, landcover_json if terrain_ground is not None else None,
+        terrain_ground=terrain_ground)
     fdm = configure_from_spec(spec, environment)
     contact = None
     if terrain_ground is not None:
