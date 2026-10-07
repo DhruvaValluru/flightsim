@@ -430,7 +430,8 @@ three four five six seven eight nine ten few many several each every no
 light heavy moderate severe strong gusty calm clear low high dense thick
 thin rough smooth bumpy windy stormy rainy snowy foggy hazy cloudy sunny
 dark bright night day morning evening afternoon dusk dawn noon midnight
-sunset sunrise twilight it them him her me us you formation
+sunset sunrise twilight it them him her me us you formation choppy gale
+golden varied various different mixed random all both every
 """.split())
 #: Words that make a phrase scenery or weather, not a named place.
 _GENERIC = frozenset("""
@@ -454,6 +455,8 @@ up down side behind ahead alongside overhead nearby level straight full
 cruise climb descent landing takeoff approach pattern circuit loop roll
 turn turns maneuver maneuvers manoeuvre manoeuvres doublet horizon sight
 distance max min minimum maximum sea-level show film record capture
+air force hour hours time times season seasons table file scenario row
+block conditions lighting precipitation
 """.split())
 #: Locatives that almost always introduce a place ("over", "near"); their
 #: phrases are tried first.

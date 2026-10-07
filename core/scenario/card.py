@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Dict, Optional, Sequence
 
 from core.scenario.spec import ScenarioSpec
+from core.scene.weather_look import weather_look_card_block
 
 #: Sampling period asked of the UE recorder. Must match the period the headless
 #: runner gives its own Recorder; gate5's main() checks that it does rather
@@ -553,6 +554,13 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # look.precipitation_particles or look.cloud_drift_parameter by
         # name when it cannot draw one exactly.
         card["look"] = look
+    weather_look = weather_look_card_block(spec)
+    if weather_look is not None:
+        # Visual only (absent-canonical): the ground word, the storm, the
+        # rain rate, the wetness, the ice and the seed the host's weather
+        # look draws from (core/scene/weather_look.py); a spec stating none
+        # of them writes no block.
+        card["weather_look"] = weather_look
     if reference_speeds:
         # Display-only (the HUD/panel stall-margin marks): the MODEL's own
         # measured Vs and CLmax with their basis string (§2.4), so the marks

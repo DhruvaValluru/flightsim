@@ -510,12 +510,16 @@ def camera_prompt_endpoint(request: CameraPromptRequest) -> JSONResponse:
     A language model (the rule parser when none is reachable) reads the
     sentence into an offset; the spec's own geometry then widens the lens
     and pulls the camera back until every aircraft is in frame, and says
-    so. The camera is added like any picked view, with the user's words
+    so. The reader sees the scene (aircraft, other aircraft, the cameras
+    already there), so a sentence may also EDIT a camera ("a bit closer",
+    "make the chase cam wider"), which replaces it in place. The camera
+    is added like any picked view, with the user's words
     as the provenance of every number, and refused by the validator's
     names if it is unusable.
     """
     from core.capture.validate import validate_cameras
-    from core.nl.camera_prompt import CameraPromptError, build_camera, read_intent
+    from core.nl.camera_prompt import (CameraPromptError, build_camera,
+                                       find_camera, read_intent)
 
     try:
         spec = ScenarioSpec.from_dict(request.spec)
@@ -532,13 +536,26 @@ def camera_prompt_endpoint(request: CameraPromptRequest) -> JSONResponse:
     except CameraPromptError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
 
-    taken = {str(c.camera_id.value) for c in spec.cameras}
-    camera_id, suffix = "prompt", 0
-    while camera_id in taken:
-        suffix += 1
-        camera_id = f"prompt{suffix}"
-    camera, notes = build_camera(spec, intent, camera_id)
-    spec.cameras.append(camera)
+    # An edit ("a bit closer", "make the chase cam wider") names the
+    # camera it changes; that camera is replaced in place, keeping its id
+    # (the directory its frames land in). Anything else is a new view.
+    index = find_camera(spec, intent.edit_camera_id)
+    if index is not None:
+        existing = spec.cameras[index]
+        camera_id = str(existing.camera_id.value)
+        camera, notes = build_camera(spec, intent, camera_id, existing=existing)
+        spec.cameras[index] = camera
+    else:
+        taken = {str(c.camera_id.value) for c in spec.cameras}
+        camera_id, suffix = "prompt", 0
+        while camera_id in taken:
+            suffix += 1
+            camera_id = f"prompt{suffix}"
+        camera, notes = build_camera(spec, intent, camera_id)
+        if intent.edit_camera_id:
+            notes.append(f"no camera is named {intent.edit_camera_id!r}; "
+                         f"added a new one")
+        spec.cameras.append(camera)
     violations = validate_cameras(spec)
     if violations:
         first = violations[0]
@@ -548,8 +565,8 @@ def camera_prompt_endpoint(request: CameraPromptRequest) -> JSONResponse:
             status_code=409)
     payload = _spec_payload(spec)
     payload["camera_prompt"] = {
-        "camera_id": camera_id, "intent": intent.to_dict(), "notes": notes,
-        "model_skipped": skipped}
+        "camera_id": camera_id, "edited": index is not None,
+        "intent": intent.to_dict(), "notes": notes, "model_skipped": skipped}
     return JSONResponse(payload)
 
 
@@ -1245,6 +1262,23 @@ def _generate_call(function, *args, **kwargs):
         return JSONResponse(function(*args, **kwargs))
     except generate_module.GenerateRefusal as exc:
         return JSONResponse(exc.payload, status_code=exc.status_code)
+
+
+@app.get("/lens_picker.js")
+def lens_picker_script() -> FileResponse:
+    """The lens picker both prompt pages mount: a sample frame and a
+    focal-length slider that writes "with a <n> mm lens" into the prompt."""
+    return FileResponse(STATIC / "lens_picker.js",
+                        media_type="application/javascript")
+
+
+@app.get("/conditions_list.js")
+def conditions_list_script() -> FileResponse:
+    """The conditions list both prompt pages mount beside the prompt box:
+    the weather and environment phrases the compiler turns into spec
+    fields, clickable into the prompt (tests/test_conditions_list.py)."""
+    return FileResponse(STATIC / "conditions_list.js",
+                        media_type="application/javascript")
 
 
 @app.get("/generate.html", response_class=HTMLResponse)

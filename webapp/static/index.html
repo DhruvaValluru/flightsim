@@ -9,6 +9,12 @@
          color: #d8dde2; max-width: 980px; margin: 2rem auto; padding: 0 1rem; }
   h1 { font-size: 1.1rem; letter-spacing: .12em; color: #9fb4c7; }
   small, .dim { color: #7d8a93; }
+  .promptRow { display: flex; gap: 1rem; align-items: flex-start; }
+  .promptRow textarea { flex: 1 1 auto; min-width: 0; height: 9rem; }
+  .promptRow aside { flex: 0 0 17rem; max-height: 18rem; overflow-y: auto;
+                     border: 1px solid #2c3947; border-radius: 6px; padding: .5rem .6rem; }
+  @media (max-width: 760px) { .promptRow { flex-direction: column; }
+    .promptRow aside { flex-basis: auto; width: 100%; box-sizing: border-box; } }
   textarea { width: 100%; height: 3.6rem; background: #171d24; color: #e6ecf1;
              border: 1px solid #2c3947; border-radius: 6px; padding: .6rem;
              font: inherit; resize: vertical; }
@@ -118,8 +124,16 @@ visual-only per host (measured).</p>
   <div id="fleetState" class="dim"></div>
 </div>
 
-<textarea id="prompt"
-  placeholder="simulate a plane in rough wind conditions over mountains"></textarea>
+<div class="promptRow">
+  <textarea id="prompt"
+    placeholder="simulate a plane in rough wind conditions over mountains"></textarea>
+  <aside id="conditionsList"></aside>
+</div>
+<script src="/conditions_list.js"></script>
+<script>ConditionsList.mount(document.getElementById("conditionsList"), document.getElementById("prompt"));</script>
+<div id="lensPicker"></div>
+<script src="/lens_picker.js"></script>
+<script>LensPicker.mount(document.getElementById("lensPicker"), document.getElementById("prompt"));</script>
 <p>
   <button id="compile">Interpret</button>
   <label class="dim" title="The clip is min(duration, 22 s); a shorter clip renders proportionally fewer frames. Overrides a duration stated in the prompt, shown as a user edit in the table.">
@@ -654,7 +668,8 @@ async function placeCameraFromSentence() {
     $("cameraState").textContent =
       `${payload.cameras.length} view(s): ` +
       payload.cameras.map(c => c.camera_id).join(", ") +
-      ` -- ${info.camera_id}: ` + info.notes.join("; ") +
+      ` -- ${info.edited ? "changed" : "added"} ${info.camera_id}: ` +
+      info.notes.join("; ") +
       (info.model_skipped
         ? ` (language model not used: ${info.model_skipped})` : "");
     renderSpec({...compiled, spec: payload});
@@ -1932,9 +1947,14 @@ function agDraw() {
     const g = agEl("g", {transform: `translate(${right - 46},${ya - 7})`});
     g.appendChild(agEl("path", {d: PLANE_PATH, fill: colour}));
     svg.appendChild(g);
+    const youText = `you: ${agFmt(AG.asked)} = ` + (agl < 0
+      ? `${agFmt(-agl)} UNDER the ground` : `${agFmt(agl)} above the ground`);
+    // A backing plate keeps the line legible over the landmark labels.
+    const plateW = youText.length * 6.8 + 8;
+    svg.appendChild(agEl("rect", {x: right - 52 - plateW + 4, y: ya - 19,
+      width: plateW, height: 17, rx: 3, fill: "#0d1217", opacity: .9}));
     svg.appendChild(agEl("text", {x: right - 52, y: ya - 6, "text-anchor": "end",
-      fill: colour}, `you: ${agFmt(AG.asked)} = ` + (agl < 0
-        ? `${agFmt(-agl)} UNDER the ground` : `${agFmt(agl)} above the ground`)));
+      fill: colour}, youText));
   }
   agTable();
   agReadout();

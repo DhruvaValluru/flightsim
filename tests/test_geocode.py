@@ -75,6 +75,25 @@ def test_scenery_and_weather_are_not_places(prompt):
     assert geocode.candidate_phrases(prompt) == []
 
 
+def test_no_conditions_list_phrase_is_sent_to_openstreetmap():
+    """Every phrase the page's conditions list adds to a prompt is either
+    a curated place (resolved before any lookup) or not a place at all."""
+    import re
+
+    from core.nl.compiler import PLACE_WORDS
+
+    source = (Path(__file__).resolve().parents[1] / "webapp" / "static" /
+              "conditions_list.js").read_text(encoding="utf-8")
+    phrases = re.findall(r'\["[^"]+",\s*"([^"]+)"\]', source)
+    assert phrases
+    curated = {p for p, _ in PLACE_WORDS}
+    for phrase in phrases:
+        prompt = f"fly the c172p {phrase}"
+        assert geocode.lookup_list(prompt) is None, phrase
+        for candidate in geocode.candidate_phrases(prompt):
+            assert candidate.lower() in curated, (phrase, candidate)
+
+
 def test_candidates_stop_at_the_next_clause_and_prefer_strong_words():
     assert geocode.candidate_phrases(
         "take off from springfield and fly over tulsa at 1000 ft") == \
