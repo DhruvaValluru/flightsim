@@ -23,6 +23,41 @@ to notes by name; move words the model drops still key the regex moves
 `point` / `bearing` aim (it still follows; only where it looks changes).
 Tests: `tests/test_camera_sentence.py`.
 
+**Rain physics (2026-10-07, `phase-2-testing`).** The stated rain rate
+(`environment.precipitation_rate_mmh`, W3's look) now has opt-in PHYSICS
+through a new spec-9 block `rain` (absent-canonical: no block, nothing
+changes, every committed example keeps its digest). LANDED:
+`core/environment/rain.py` -- the water from the fitted Marshall-Palmer
+DSD (LWC and the mass-weighted fall speed, closing `rho_w R = LWC v_m`
+exactly); the swept-up drops' momentum (inelastic capture, box projection
+over the frontal and wing areas) as a JSBSim `<external_reactions>` force
+in the BODY frame at the AERORP, direction and magnitude written every
+step; a STATED linear wetted-wing mapping in LWC (lift `1 - 0.15 phi`,
+drag `1 + 0.30 phi`, `phi = min(LWC / 46, 1)`, after NASA TP-3184's tested
+range; both penalties are spec fields); the runway through JSBSim's own
+`ground/static-friction-factor` (`dry` 1.0, `wet` the 14 CFR 25.109(c)(1)
+cubic over the airframe's dry coefficient, `standing_water` 0.05 above
+Horne's `9 sqrt(p)` kt). `core/control/derive.py` gains the `rain`
+injection (last in the order, suffix `-rain`: LIFT and DRAG functions
+wrapped like icing's, plus the force) and `core/control/systems/rain.xml`;
+`RainSpec` in blocks.py, plumbed through spec.py, validate.py
+(`rain.rate_missing` / `runway_condition` / `factor_range` /
+`airframe_data`, catalogued), runner.py (provider, injections, the
+`rain` manifest block, seven telemetry columns ONLY on a run with the
+block). `assets/aircraft_config/c172p.json` carries a `rain` block
+(frontal area 3.8 m^2 estimated, 29 psi from memory -- both marked
+unverified); every other airframe must state them or is refused by name.
+MEASURED (`experiments/rain_physics.py`, `tests/test_rain.py` 34 tests):
+neutral injection bit-identical to the stock c172p; every write reads
+back exactly; 300 mm/h costs 36 m over 20 s at 100 kt; full brakes from
+55 kt stop in 114 m dry, 140 m wet, 248 m on standing water (5.4 s
+hydroplaning). OPEN: the 25.109 coefficients and Horne's constant were
+cited from memory (the eCFR and NTRS are blocked here) -- check them;
+the spec runner flies airborne trims only, so the runway law is exercised
+by the test harness, not a spec (a ground-roll / landing scenario is the
+next step); engine water ingestion, the UE side (Niagara rain, wet
+materials) and NL-compiler words ("heavy rain") are not done.
+
 **The logic reports READ and BUILT FROM (2026-10-05, later the same day,
 `phase-2-testing`; NO tests run, owner's instruction).** The owner's
 point: the logic branch held the instructions on how the simulator
