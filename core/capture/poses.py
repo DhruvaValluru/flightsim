@@ -519,6 +519,33 @@ def solve_pose_track(columns: Dict[str, Sequence[float]],
                               float(camera.position_alt_m.value))
         return north, east, alt
 
+    aim_mode = str(camera.aim_mode.value)
+
+    def _stated_aim(cn: float, ce: float, calt: float, at_t: float):
+        """(yaw, pitch, quat) for a camera at (cn, ce, calt) whose aim
+        is a stated point or bearing (keyframable), not the aircraft."""
+        if aim_mode == "point":
+            pn = _keyframe_value(camera.moves, "aim_north_m", at_t,
+                                 float(camera.aim_north_m.value))
+            pe = _keyframe_value(camera.moves, "aim_east_m", at_t,
+                                 float(camera.aim_east_m.value))
+            palt = _keyframe_value(camera.moves, "aim_alt_m", at_t,
+                                   float(camera.aim_alt_m.value))
+            y, p = look_angles(cn, ce, calt, pn, pe, palt)
+            return y, p, euler_to_quat(0.0, p, y)
+        if aim_mode == "bearing":
+            q = _keyframed_bearing_quat(
+                camera.moves, at_t,
+                float(camera.aim_bearing_deg.value),
+                float(camera.aim_elevation_deg.value))
+            if q is None:
+                y = float(camera.aim_bearing_deg.value) % 360.0
+                p = float(camera.aim_elevation_deg.value)
+                return y, p, euler_to_quat(0.0, p, y)
+            y, p = _quat_yaw_pitch(q)
+            return y, p, q
+        raise PoseSolveError(f"camera.poses: unknown aim mode {aim_mode!r}")
+
     if preset in ("chase", "wingman"):
         tau_pos = POSITION_LAG_S * (WINGMAN_POSITION_LAG_FACTOR
                                     if preset == "wingman" else 1.0)
@@ -541,16 +568,22 @@ def solve_pose_track(columns: Dict[str, Sequence[float]],
                 aim_e = lag_step(aim_e, prev_target[1], target[1], dt, AIM_LAG_S)
                 aim_alt = lag_step(aim_alt, prev_target[2], target[2], dt, AIM_LAG_S)
             prev_goal, prev_target = goal, target
-            y, p = look_angles(sm_n, sm_e, sm_alt, aim_n, aim_e, aim_alt)
+            if aim_mode == "aircraft":
+                y, p = look_angles(sm_n, sm_e, sm_alt, aim_n, aim_e, aim_alt)
+                q = euler_to_quat(0.0, p, y)
+            else:
+                # A following camera that looks somewhere else: a stated
+                # point or a fixed bearing, solved exactly as the
+                # world-anchored presets solve it.
+                y, p, q = _stated_aim(sm_n, sm_e, sm_alt, t[i])
             pos_n.append(sm_n)
             pos_e.append(sm_e)
             pos_alt.append(sm_alt)
-            yaw.append(y)
+            yaw.append(y % 360.0 if aim_mode != "aircraft" else y)
             pitch.append(p)
             roll.append(0.0)                       # never inherit roll
-            quat.append(euler_to_quat(0.0, p, y))
+            quat.append(q)
     elif preset in ("ground", "tower", "explicit"):
-        aim_mode = str(camera.aim_mode.value)
         aim_n = aim_e = aim_alt = None
         for i in range(n):
             cn, ce, calt = _static_position(t[i])
@@ -570,29 +603,8 @@ def solve_pose_track(columns: Dict[str, Sequence[float]],
                 prev_target = target
                 y, p = look_angles(cn, ce, calt, aim_n, aim_e, aim_alt)
                 q = euler_to_quat(0.0, p, y)
-            elif aim_mode == "point":
-                pn = _keyframe_value(camera.moves, "aim_north_m", t[i],
-                                     float(camera.aim_north_m.value))
-                pe = _keyframe_value(camera.moves, "aim_east_m", t[i],
-                                     float(camera.aim_east_m.value))
-                palt = _keyframe_value(camera.moves, "aim_alt_m", t[i],
-                                       float(camera.aim_alt_m.value))
-                y, p = look_angles(cn, ce, calt, pn, pe, palt)
-                q = euler_to_quat(0.0, p, y)
-            elif aim_mode == "bearing":
-                q = _keyframed_bearing_quat(
-                    camera.moves, t[i],
-                    float(camera.aim_bearing_deg.value),
-                    float(camera.aim_elevation_deg.value))
-                if q is None:
-                    y = float(camera.aim_bearing_deg.value) % 360.0
-                    p = float(camera.aim_elevation_deg.value)
-                    q = euler_to_quat(0.0, p, y)
-                else:
-                    y, p = _quat_yaw_pitch(q)
             else:
-                raise PoseSolveError(
-                    f"camera.poses: unknown aim mode {aim_mode!r}")
+                y, p, q = _stated_aim(cn, ce, calt, t[i])
             pos_n.append(cn)
             pos_e.append(ce)
             pos_alt.append(calt)

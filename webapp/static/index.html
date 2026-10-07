@@ -588,7 +588,8 @@ async function placeCameraFromSentence() {
     $("cameraState").textContent =
       `${payload.cameras.length} view(s): ` +
       payload.cameras.map(c => c.camera_id).join(", ") +
-      ` -- ${info.camera_id}: ` + info.notes.join("; ") +
+      ` -- ${info.edited ? "changed" : "added"} ${info.camera_id}: ` +
+      info.notes.join("; ") +
       (info.model_skipped
         ? ` (language model not used: ${info.model_skipped})` : "");
     renderSpec({...compiled, spec: payload});
