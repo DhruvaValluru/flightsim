@@ -19,6 +19,10 @@ import sys
 
 import unreal
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(
+    globals().get("__file__") or sys.argv[0])))
+from ue_aircraft_materials import fix_materials  # noqa: E402
+
 FAILURES = []
 
 
@@ -131,6 +135,15 @@ def run():
                             manifest["triangles"][part])
             except Exception as exc:
                 FAILURES.append(f"{destination}/{part}: {exc!r}")
+        # Interchange leaves every textured material black with its texture
+        # unplugged (scripts/ue_aircraft_materials.py): wire each to the
+        # colour and texture its MTL states, once all parts are in.
+        try:
+            fixed, problems = fix_materials(destination, source_dir)
+            print(f"MATERIALS {destination}: {fixed} material(s) set")
+            FAILURES.extend(f"{destination}: {p}" for p in problems)
+        except Exception as exc:
+            FAILURES.append(f"{destination}: material wiring failed: {exc!r}")
 
 
 run()

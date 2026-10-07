@@ -34,7 +34,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..environment import sun as sun_model
 from ..fdm import units as u
@@ -662,6 +662,8 @@ ZOOM_FACTOR = 2.0
 DOLLY_FACTOR = 2.0
 ORBIT_SEGMENTS = 32
 OFFSET_PRESETS = ("chase", "wingman")
+#: The move kinds, each once, in vocabulary order: what an LLM may name.
+MOVE_KINDS: Tuple[str, ...] = tuple(dict.fromkeys(k for _, k in MOVE_WORDS))
 
 
 def camera_questions(prompt: str) -> List[Dict[str, Any]]:
@@ -756,6 +758,77 @@ def move_keyframes(kind: str, camera, duration_s: float) -> Optional[List[Dict]]
     raise ValueError(f"unknown move kind {kind!r}")
 
 
+def prompt_moves(text: str) -> List[Tuple[str, str]]:
+    """(phrase, kind) for every move phrase in ``text``, each kind once,
+    in vocabulary order."""
+    text = " ".join(text.lower().split())
+    moves: List[Tuple[str, str]] = []
+    for phrase, kind in MOVE_WORDS:
+        if _search(rf"\b{_inflected(phrase)}\b", text) \
+                and kind not in [k for _, k in moves]:
+            moves.append((phrase, kind))
+    return moves
+
+
+def _inflected(phrase: str) -> str:
+    """A move phrase's pattern with its verb in any simple inflection:
+    "zoom in" also matches "zooms in" / "zooming in", "orbit" also
+    "orbits" / "orbiting", "move closer" also "moving closer"."""
+    verb, _, rest = phrase.partition(" ")
+    stem = verb[:-1] if verb.endswith("e") else verb
+    pattern = rf"(?:{verb}|{stem}(?:es|s|ing|ed))"
+    return pattern + (rf"\s+{rest}" if rest else "")
+
+
+def apply_moves(camera, moves: Sequence[Tuple[str, str]], duration_s: float,
+                notes: List[str]) -> None:
+    """Key every (phrase, kind) move onto ``camera`` over the clip; a move
+    the view cannot make is reported in ``notes`` by name, never dropped
+    silently."""
+    preset = str(camera.preset.value)
+    for phrase, kind in moves:
+        keyframes = move_keyframes(kind, camera, duration_s)
+        if keyframes is None:
+            notes.append(
+                f"ignored move {phrase!r} for the {preset} view: only "
+                f"the chase and wingman views carry an offset to push, "
+                f"pull or orbit")
+            continue
+        camera.moves = _merge_moves(camera.moves, keyframes)
+        notes.append(f"move {phrase!r} -> {kind} keyframes over "
+                     f"{duration_s:g} s on the {preset} view")
+
+
+def describe_moves(moves: Sequence[Dict[str, Any]]) -> List[str]:
+    """The move kinds a camera's keyframes are, read back from the shapes
+    :func:`move_keyframes` writes (so an edit can re-key them on a new
+    offset). Keyframes of any other shape are reported as ``custom``."""
+    kinds: List[str] = []
+    focal = sorted((float(m["t_s"]), float(m["focal_length_mm"]))
+                   for m in moves if "focal_length_mm" in m)
+    if len(focal) >= 2 and focal[0][1] > 0:
+        ratio = focal[-1][1] / focal[0][1]
+        kinds.append("zoom_in" if ratio > 1.0 else "zoom_out"
+                     if ratio < 1.0 else "custom")
+    offset = sorted((float(m["t_s"]), m) for m in moves
+                    if "offset_forward_m" in m)
+    if len(offset) > 2:
+        kinds.append("orbit")
+    elif len(offset) == 2:
+        def length(m):
+            return math.sqrt(sum(float(m.get(k, 0.0)) ** 2 for k in (
+                "offset_forward_m", "offset_right_m", "offset_up_m")))
+        first, last = length(offset[0][1]), length(offset[-1][1])
+        kinds.append("push_in" if last < first else "pull_back"
+                     if last > first else "custom")
+    other = [m for m in moves
+             if not set(m) - {"t_s"} <= {"focal_length_mm", "offset_forward_m",
+                                          "offset_right_m", "offset_up_m"}]
+    if other:
+        kinds.append("custom")
+    return kinds
+
+
 def _cameras(text: str, aircraft: str, terrain_elevation_m: float,
              duration_s: float, answers=None):
     """Every camera the prompt (and a camera_view answer) speaks of, and
@@ -789,10 +862,7 @@ def _cameras(text: str, aircraft: str, terrain_elevation_m: float,
                                   f"mapping: wide angle 24 mm, telephoto "
                                   f"85 mm)")
                 break
-    moves: List[Tuple[str, str]] = []
-    for phrase, kind in MOVE_WORDS:
-        if _search(rf"\b{phrase}\b", text) and kind not in [k for _, k in moves]:
-            moves.append((phrase, kind))
+    moves = prompt_moves(text)
     imagery = any(_search(rf"\b{word}\b", text) for word in IMAGERY_WORDS)
     if not mentions and count is None and focal_quantity is None \
             and not moves and not imagery:
@@ -823,17 +893,7 @@ def _cameras(text: str, aircraft: str, terrain_elevation_m: float,
                                           "no count captures the whole clip")
         if focal_quantity is not None:
             camera.focal_length_mm = focal_quantity
-        for phrase_m, kind in moves:
-            keyframes = move_keyframes(kind, camera, duration_s)
-            if keyframes is None:
-                notes.append(
-                    f"ignored move {phrase_m!r} for the {preset} view: only "
-                    f"the chase and wingman views carry an offset to push, "
-                    f"pull or orbit")
-                continue
-            camera.moves = _merge_moves(camera.moves, keyframes)
-            notes.append(f"move {phrase_m!r} -> {kind} keyframes over "
-                         f"{duration_s:g} s on the {preset} view")
+        apply_moves(camera, moves, duration_s, notes)
         cameras.append(camera)
     return cameras, notes
 

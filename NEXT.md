@@ -1,5 +1,28 @@
 # Resume here
 
+**Camera control by language, widened (2026-10-07, `phase-2-testing`).**
+The camera-sentence box (`core/nl/camera_prompt.py`, `/cameras/prompt`)
+now tells the model the SCENE: the aircraft, a distance table scaled to
+its calibrated chase framing (`framing_distances`: close 0.6 D, default
+D, far 4 D, very far 10 D -- "behind the Cessna" is 28 m, not the old
+flat 150 m), the other aircraft and every existing camera. The intent
+gained optional `edit_camera_id` (the endpoint replaces that camera in
+place, keeping its id, lens, schedule and moves unless restated; moves
+are re-keyed on the new offset via `compiler.describe_moves`),
+`focal_length_mm` (a stated lens is never widened by the fit; the camera
+is pulled back instead), `aim` / `aim_bearing_deg` / `aim_elevation_deg`
+and `moves`, plus a `cockpit` view. The rule reader scales the same way,
+reads lens / compass aim / move words, and its `show_all` is no longer
+the constant `anchor_centre or True` ("only the main plane" is False).
+The main-prompt LLM compiler may now write `offset_*`, `aim_*` and
+`moves` per camera; the calibrated chase table is GENERATED into its
+system prompt from `CHASE_OFFSETS`; a field the view cannot honour goes
+to notes by name; move words the model drops still key the regex moves
+(`prompt_moves`, which now also matches "zooms in" / "orbiting").
+`core/capture/poses.py`: a chase / wingman camera honours a stated
+`point` / `bearing` aim (it still follows; only where it looks changes).
+Tests: `tests/test_camera_sentence.py`.
+
 **The logic reports READ and BUILT FROM (2026-10-05, later the same day,
 `phase-2-testing`; NO tests run, owner's instruction).** The owner's
 point: the logic branch held the instructions on how the simulator
