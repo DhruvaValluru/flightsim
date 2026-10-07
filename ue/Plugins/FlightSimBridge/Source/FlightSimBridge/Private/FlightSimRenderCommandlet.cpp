@@ -1057,6 +1057,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 	const bool bShadowShot = Shot == TEXT("shadow");
 	const bool bNoShadows = FParse::Param(*Params, TEXT("NoShadows"));
 	const bool bHideAircraft = FParse::Param(*Params, TEXT("HideAircraft"));
+	// The web app's solve pass: its frames are discarded, so it skips the
+	// Google tiles (FLIGHTSIM_GOOGLE_TILES) rather than stream them.
+	const bool bNoGoogleTiles = FParse::Param(*Params, TEXT("NoGoogleTiles"));
 	// Phase 10 labels: the engine half of the per-frame ground truth --
 	// an instance mask, a class mask, 16-bit depth and an occlusion
 	// fraction beside every delivered frame. Opt-in: without it this
@@ -1621,7 +1624,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 			SceneOptions.SkyPlan = &SkyPlan;
 		}
 		if (!VisualScene.Build(World, SceneOptions, Error)) { return Fail(Error); }
-		if (FFlightSimGoogleTiles::Requested())
+		if (FFlightSimGoogleTiles::Requested() && !bNoGoogleTiles)
 		{
 			// The geoid undulation at the origin: the capture datum's when it
 			// has one, else the card's google_tiles block (core/scenario/
@@ -5701,7 +5704,7 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		Georeference->SetField(TEXT("undulation_origin_m"), Undulation);
 		Root->SetObjectField(TEXT("georeference"), Georeference);
 	}
-	if (FFlightSimGoogleTiles::Requested())
+	if (FFlightSimGoogleTiles::Requested() && !bNoGoogleTiles)
 	{
 		Root->SetObjectField(TEXT("google_tiles"), GoogleTiles.Record());
 	}

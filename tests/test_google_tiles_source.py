@@ -87,9 +87,20 @@ def test_the_matterhorn_undulation_is_about_52_m():
 
 
 def test_the_commandlet_falls_back_to_the_cards_undulation_and_never_to_zero():
-    enable = COMMANDLET[COMMANDLET.index("if (FFlightSimGoogleTiles::Requested())"):]
+    enable = COMMANDLET[COMMANDLET.index("if (FFlightSimGoogleTiles::Requested() && !bNoGoogleTiles)"):]
     enable = enable[:enable.index("GoogleTiles.HideOwnTerrain(World);")]
     assert 'TEXT("undulation_origin_m")' in enable
     assert 'TEXT("google_tiles")' in enable and 'TEXT("geoid_undulation_m")' in enable
     assert "google_tiles.undulation_missing" in enable
     assert enable.index("google_tiles.undulation_missing") < enable.index("GoogleTiles.Enable(")
+
+
+def test_the_web_solve_pass_skips_the_tiles():
+    """The solve pass renders frames only to throw them away: streaming the
+    tiles for it would double a run's wait for nothing."""
+    runs = (REPO / "webapp" / "runs.py").read_text(encoding="utf-8")
+    fly_host = runs[runs.index("def _fly_host"):]
+    fly_host = fly_host[:fly_host.index("return telemetry.is_file()")]
+    assert 'extra=["-NoGoogleTiles"]' in fly_host
+    assert 'FParse::Param(*Params, TEXT("NoGoogleTiles"))' in COMMANDLET
+    assert COMMANDLET.count("FFlightSimGoogleTiles::Requested() && !bNoGoogleTiles") == 2

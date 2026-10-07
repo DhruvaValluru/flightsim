@@ -2406,8 +2406,12 @@ class RunManager:
             # design (eaa8bff). The telemetry and the log live outside it.
             scratch = telemetry.parent / "solve_frames"
             try:
+                # -NoGoogleTiles: the frames are discarded, so streaming
+                # Google's tiles for them (every frame waits for its view)
+                # would only double the run; the tiles are visual only.
                 self._render(card, scratch, scene, mesh or Path(""),
-                             aircraft, telemetry=telemetry)
+                             aircraft, telemetry=telemetry,
+                             extra=["-NoGoogleTiles"])
             finally:
                 shutil.rmtree(scratch, ignore_errors=True)
             return telemetry.is_file()
