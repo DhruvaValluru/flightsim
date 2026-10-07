@@ -247,6 +247,8 @@ and M_Landscape textures its layers from the committed bitmaps with no
 help from the scene script.
 """
 
+import math
+
 import unreal
 
 PATH = "/Game/FlightSim"
@@ -1674,6 +1676,418 @@ def create_terrain_imagery_night():
 # One material that fails (an engine API rename, measured on 5.7) must not
 # stop the ones after it: every creator runs, each failure is printed with
 # its traceback, and the script exits non-zero at the end if any failed.
+# -- the weather look (FlightSimVisualScene.cpp ApplyWeatherLook) -------------
+#
+# The materials the card's weather_look block draws with (core/scene/
+# weather_look.py). All procedural, so a machine without any download
+# renders every one; a ground surface whose Poly Haven textures were
+# fetched (scripts/fetch_ground_textures.py -> data/textures/polyhaven/
+# <surface>/{diffuse,normal,rough}.jpg) samples them instead of its
+# procedural pattern. Written without an engine (no build on the authoring
+# machine): the node names are this file's own idioms, the looks are not
+# measured against a photograph, and the first Windows run is their check.
+#
+# * M_Ground_<Surface> -- the flat scene's ground per surface word, world-
+#   aligned (the 100 km engine plane's own UVs would stretch one tile over
+#   the whole scene), a large-scale tint noise against tiling seen from the
+#   air, and the wet-ground coupling (WET_GROUND_PARAMETER; puddles in the
+#   low noise and ripples on them). The ocean is procedural water: two
+#   travelling waves' analytic normal, low roughness, no texture.
+# * M_LensDrops -- post-process on the beauty capture: rain on the lens,
+#   cells of the screen holding a drop that refracts the scene through
+#   itself; DropAmount 0 is the scene unchanged.
+# * M_RainShaft -- translucent, unlit, two-sided: the grey curtain under a
+#   storm cell, streaked and faded at its top and at the ground.
+# * M_Lightning -- unlit additive: the bolt, black (invisible) at
+#   FlashIntensity 0.
+# * M_IceOverlay -- translucent overlay (UMeshComponent::SetOverlayMaterial)
+#   on the airframe: frost on the forward-facing surfaces, IceAmount 0..1.
+
+WET_GROUND_PARAMETER = "Wetness"
+GROUND_TILE_M = 12.0
+GROUND_MACRO_M = 900.0
+#: surface -> (material, dry colour A, dry colour B, roughness, metres of the
+#: procedural pattern). The palettes are stated choices, not measurements.
+GROUND_SURFACES = {
+    "desert": ("M_Ground_Desert", (0.62, 0.48, 0.31), (0.78, 0.64, 0.44), 0.85, 60.0),
+    "forest": ("M_Ground_Forest", (0.05, 0.11, 0.04), (0.11, 0.19, 0.07), 0.9, 25.0),
+    "grassland": ("M_Ground_Grassland", (0.20, 0.30, 0.09), (0.36, 0.40, 0.14), 0.9, 40.0),
+    "snow": ("M_Ground_Snow", (0.80, 0.84, 0.90), (0.93, 0.95, 0.98), 0.6, 80.0),
+    "bare": ("M_Ground_Bare", (0.30, 0.27, 0.23), (0.47, 0.43, 0.37), 0.92, 30.0),
+    "city": ("M_Ground_City", (0.24, 0.24, 0.25), (0.42, 0.41, 0.39), 0.8, 90.0),
+    "ocean": ("M_Ground_Ocean", (0.01, 0.06, 0.10), (0.02, 0.12, 0.17), 0.04, 0.0),
+}
+#: The ocean's two travelling waves: (direction x, direction y, wavelength m,
+#: amplitude m, speed m/s). Deep-water speed sqrt(g L / 2 pi) for each.
+OCEAN_WAVES = ((1.0, 0.3, 40.0, 0.35, 7.9), (-0.4, 1.0, 13.0, 0.12, 4.5))
+WEATHER_PARAMETERS = {"drops": "DropAmount", "shaft": "ShaftOpacity",
+                      "flash": "FlashIntensity", "ice": "IceAmount"}
+
+
+def _weather_material(name):
+    """/Game/FlightSim/<name> once; None when it already exists (the world
+    list stays exactly the world's, like the sky's helper)."""
+    full = f"{PATH}/{name}"
+    if unreal.EditorAssetLibrary.does_asset_exist(full):
+        print(f"MATERIAL-EXISTS: {full}")
+        return None
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    material = tools.create_asset(name, PATH, unreal.Material, unreal.MaterialFactoryNew())
+    if material is None:
+        raise SystemExit(f"could not create material asset {full}")
+    return material
+
+
+def _world_xy_metres(material, lib, metres, x, y):
+    """The absolute world position's xy in units of `metres` (cm / 100 / m)."""
+    world = lib.create_material_expression(material, unreal.MaterialExpressionWorldPosition, x, y)
+    xy = mask(material, lib, world, "rg", x + 150, y)
+    return binary(material, lib, unreal.MaterialExpressionDivide, xy,
+                  constant(material, lib, metres * 100.0, x + 150, y + 80), x + 300, y)
+
+
+def _noise(material, lib, feature_m, x, y, levels=4):
+    """A 0..1 noise over world position with features of about `feature_m`."""
+    world = lib.create_material_expression(material, unreal.MaterialExpressionWorldPosition, x, y)
+    node = lib.create_material_expression(material, unreal.MaterialExpressionNoise, x + 150, y)
+    node.set_editor_property("scale", 1.0 / (feature_m * 100.0))
+    node.set_editor_property("levels", levels)
+    node.set_editor_property("output_min", 0.0)
+    node.set_editor_property("output_max", 1.0)
+    lib.connect_material_expressions(world, "", node, "Position")
+    return node
+
+
+def _wave_normal(material, lib, waves, x, y):
+    """The tangent-space normal of a sum of travelling sine waves h = sum A
+    sin(k (d . p) - w t): n = normalize(-dh/dx, -dh/dy, 1), dh/dx = sum A k
+    d_x cos(...). Positions in metres, time from the Time node."""
+    time = lib.create_material_expression(material, unreal.MaterialExpressionTime, x, y + 400)
+    slope_x = None
+    slope_y = None
+    for index, (dx, dy, wavelength, amplitude, speed) in enumerate(waves):
+        norm = math.hypot(dx, dy)
+        dx, dy = dx / norm, dy / norm
+        row = y + index * 200
+        p = _world_xy_metres(material, lib, 1.0, x, row)
+        along = lib.create_material_expression(material, unreal.MaterialExpressionDotProduct,
+                                               x + 450, row)
+        lib.connect_material_expressions(p, "", along, "A")
+        direction = lib.create_material_expression(material, unreal.MaterialExpressionConstant2Vector,
+                                                   x + 300, row + 100)
+        direction.set_editor_property("r", dx)
+        direction.set_editor_property("g", dy)
+        lib.connect_material_expressions(direction, "", along, "B")
+        travelled = binary(material, lib, unreal.MaterialExpressionSubtract, along,
+                           binary(material, lib, unreal.MaterialExpressionMultiply, time,
+                                  constant(material, lib, speed, x + 450, row + 150), x + 600, row + 100),
+                           x + 750, row)
+        cosine = lib.create_material_expression(material, unreal.MaterialExpressionCosine, x + 900, row)
+        cosine.set_editor_property("period", wavelength)
+        lib.connect_material_expressions(travelled, "", cosine, "")
+        k = 2.0 * math.pi / wavelength
+        sx = binary(material, lib, unreal.MaterialExpressionMultiply, cosine,
+                    constant(material, lib, -amplitude * k * dx, x + 900, row + 100), x + 1050, row)
+        sy = binary(material, lib, unreal.MaterialExpressionMultiply, cosine,
+                    constant(material, lib, -amplitude * k * dy, x + 900, row + 150), x + 1050, row + 80)
+        slope_x = sx if slope_x is None else binary(material, lib, unreal.MaterialExpressionAdd,
+                                                    slope_x, sx, x + 1200, row)
+        slope_y = sy if slope_y is None else binary(material, lib, unreal.MaterialExpressionAdd,
+                                                    slope_y, sy, x + 1200, row + 80)
+    xy = binary(material, lib, unreal.MaterialExpressionAppendVector, slope_x, slope_y, x + 1350, y)
+    xyz = binary(material, lib, unreal.MaterialExpressionAppendVector, xy,
+                 constant(material, lib, 1.0, x + 1350, y + 100), x + 1500, y)
+    return unary(material, lib, unreal.MaterialExpressionNormalize, xyz, x + 1650, y)
+
+
+def _ground_textures(surface):
+    """The fetched Poly Haven maps for a surface, imported once as
+    T_Ground_<Surface>_{D,N,R}; None when the checkout has none."""
+    files = {}
+    for key, file in (("D", "diffuse.jpg"), ("N", "normal.jpg"), ("R", "rough.jpg")):
+        path = _repo_file(f"data/textures/polyhaven/{surface}/{file}")
+        if path is None:
+            return None
+        files[key] = path
+    name = f"T_Ground_{surface.capitalize()}"
+    return {"D": import_texture(files["D"], f"{name}_D", True, False, False),
+            "N": import_texture(files["N"], f"{name}_N", False, True, False),
+            "R": import_texture(files["R"], f"{name}_R", False, False, False)}
+
+
+def _sample(material, lib, texture, uv, sampler, x, y):
+    node = lib.create_material_expression(material, unreal.MaterialExpressionTextureSample, x, y)
+    node.set_editor_property("texture", texture)
+    node.set_editor_property("sampler_type", sampler)
+    lib.connect_material_expressions(uv, "", node, "UVs")
+    return node
+
+
+def add_wet_ground(material, lib, colour, roughness, normal, x, colour_out="", rough_out="",
+                   normal_out=""):
+    """The wet ground: WET_GROUND_PARAMETER (0 dry) darkens the colour by up
+    to 35 %, lerps roughness to 0.25, and opens puddles where a 30 m noise
+    falls below the wetness -- mirror-smooth (0.03), darker, their normal
+    flat and rippled by small fast waves (the drops landing). Wires base
+    colour, roughness and normal."""
+    wet = scalar(material, lib, WET_GROUND_PARAMETER, 0.0, x, 600)
+    darken = unary(material, lib, unreal.MaterialExpressionOneMinus,
+                   binary(material, lib, unreal.MaterialExpressionMultiply, wet,
+                          constant(material, lib, 0.35, x, 700), x + 150, 650), x + 300, 650)
+    wet_colour = binary(material, lib, unreal.MaterialExpressionMultiply, colour, darken,
+                        x + 450, 0, a_out=colour_out)
+    wet_rough = lerp(material, lib, roughness, constant(material, lib, 0.25, x, 800), wet,
+                     x + 450, 200, a_out=rough_out)
+    low = _noise(material, lib, 30.0, x - 300, 900, levels=3)
+    # puddle = saturate((wetness - noise) * 6): none dry, the low ground first.
+    puddle = unary(material, lib, unreal.MaterialExpressionSaturate,
+                   binary(material, lib, unreal.MaterialExpressionMultiply,
+                          binary(material, lib, unreal.MaterialExpressionSubtract,
+                                 binary(material, lib, unreal.MaterialExpressionMultiply, wet,
+                                        constant(material, lib, 0.75, x, 1000), x + 150, 950),
+                                 low, x + 300, 950),
+                          constant(material, lib, 6.0, x + 300, 1050), x + 450, 950), x + 600, 950)
+    colour_out_node = lerp(material, lib, wet_colour,
+                           binary(material, lib, unreal.MaterialExpressionMultiply, wet_colour,
+                                  constant(material, lib, 0.55, x + 450, 100), x + 600, 50),
+                           puddle, x + 750, 0)
+    rough_out_node = lerp(material, lib, wet_rough, constant(material, lib, 0.03, x + 600, 250),
+                          puddle, x + 750, 200)
+    ripples = _wave_normal(material, lib, ((1.0, 0.0, 0.35, 0.004, 0.6),
+                                           (0.0, 1.0, 0.23, 0.003, 0.5)), x - 1800, 1300)
+    normal_node = lerp(material, lib, normal, ripples, puddle, x + 750, 400, a_out=normal_out)
+    lib.connect_material_property(colour_out_node, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    lib.connect_material_property(rough_out_node, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    lib.connect_material_property(normal_node, "", unreal.MaterialProperty.MP_NORMAL)
+
+
+def create_ground(surface, material):
+    """One flat-scene ground (GROUND_SURFACES[surface]); material is None
+    when the asset already exists."""
+    if material is None:
+        return
+    name, colour_a, colour_b, roughness, pattern_m = GROUND_SURFACES[surface]
+    lib = unreal.MaterialEditingLibrary
+    macro = _noise(material, lib, GROUND_MACRO_M, -2400, -400, levels=3)
+    tint = lerp(material, lib, constant(material, lib, 0.8, -2100, -300),
+                constant(material, lib, 1.15, -2100, -250), macro, -1950, -350)
+    if surface == "ocean":
+        water = lerp(material, lib, constant3(material, lib, colour_a, -1800, 0),
+                     constant3(material, lib, colour_b, -1800, 80), macro, -1650, 0)
+        normal = _wave_normal(material, lib, OCEAN_WAVES, -3600, 400)
+        material.set_editor_property("two_sided", False)
+        lib.connect_material_property(constant(material, lib, 0.5, -1300, 300), "",
+                                      unreal.MaterialProperty.MP_SPECULAR)
+        add_wet_ground(material, lib, water, constant(material, lib, roughness, -1300, 200),
+                       normal, -1100)
+        finish(material, name)
+        return
+    textures = _ground_textures(surface)
+    if textures is not None:
+        uv = _world_xy_metres(material, lib, GROUND_TILE_M, -2400, 0)
+        base = _sample(material, lib, textures["D"], uv,
+                       unreal.MaterialSamplerType.SAMPLERTYPE_COLOR, -2000, 0)
+        nrm = _sample(material, lib, textures["N"], uv,
+                      unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL, -2000, 300)
+        rough = _sample(material, lib, textures["R"], uv,
+                        unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR, -2000, 600)
+        colour = binary(material, lib, unreal.MaterialExpressionMultiply, base, tint, -1700, 0,
+                        a_out="RGB")
+        rough_r = mask(material, lib, rough, "r", -1700, 600, source_out="RGB")
+        add_wet_ground(material, lib, colour, rough_r, nrm, -1300, normal_out="RGB")
+        print(f"MATERIAL-NOTE: {name} samples the fetched Poly Haven textures (CC0)")
+    else:
+        detail = _noise(material, lib, pattern_m, -2400, 0, levels=5)
+        colour = lerp(material, lib, constant3(material, lib, colour_a, -2000, 0),
+                      constant3(material, lib, colour_b, -2000, 80), detail, -1850, 0)
+        if surface == "city":
+            # Street grid every 120 m: a darker band where frac(p) < 0.12 on x or y.
+            grid = _world_xy_metres(material, lib, 120.0, -2400, 300)
+            cell = unary(material, lib, unreal.MaterialExpressionFrac, grid, -2000, 300)
+            street_x = select_if(material, lib, mask(material, lib, cell, "r", -1900, 300),
+                                 constant(material, lib, 0.12, -1900, 380), 0.0, 0.0, 1.0, -1750, 300)
+            street_y = select_if(material, lib, mask(material, lib, cell, "g", -1900, 450),
+                                 constant(material, lib, 0.12, -1900, 530), 0.0, 0.0, 1.0, -1750, 450)
+            street = unary(material, lib, unreal.MaterialExpressionSaturate,
+                           binary(material, lib, unreal.MaterialExpressionAdd, street_x, street_y,
+                                  -1600, 350), -1450, 350)
+            colour = lerp(material, lib, colour, constant3(material, lib, (0.08, 0.08, 0.09),
+                                                           -1600, 450), street, -1300, 100)
+        colour = binary(material, lib, unreal.MaterialExpressionMultiply, colour, tint, -1150, 0)
+        flat = constant3(material, lib, (0.0, 0.0, 1.0), -1300, 500)
+        add_wet_ground(material, lib, colour, constant(material, lib, roughness, -1300, 200),
+                       flat, -1000)
+    finish(material, name)
+
+
+def create_ground_surfaces():
+    """The seven flat-scene grounds, one asset per surface word."""
+    create_ground("desert", _weather_material("M_Ground_Desert"))
+    create_ground("forest", _weather_material("M_Ground_Forest"))
+    create_ground("grassland", _weather_material("M_Ground_Grassland"))
+    create_ground("snow", _weather_material("M_Ground_Snow"))
+    create_ground("bare", _weather_material("M_Ground_Bare"))
+    create_ground("city", _weather_material("M_Ground_City"))
+    create_ground("ocean", _weather_material("M_Ground_Ocean"))
+
+
+def create_lens_drops():
+    """M_LensDrops: post-process (after DOF, before the tonemapper). The
+    screen is cut into cells of 1/18 of its height; a cell holds a drop
+    when its hash is below DropAmount * 0.45, and inside the drop's disc
+    the scene is sampled mirrored about the drop's centre (a lens of
+    water inverts what is behind it), darkened 15 % at the rim."""
+    material = _weather_material("M_LensDrops")
+    if material is None:
+        return
+    material.set_editor_property("material_domain", unreal.MaterialDomain.MD_POST_PROCESS)
+    material.set_editor_property(
+        "blendable_location",
+        getattr(unreal.BlendableLocation, "BL_SCENE_COLOR_AFTER_DOF", None)
+        or getattr(unreal.BlendableLocation, "BL_BEFORE_TONEMAPPING"))
+    lib = unreal.MaterialEditingLibrary
+    amount = scalar(material, lib, WEATHER_PARAMETERS["drops"], 0.0, -1600, 600)
+    screen = lib.create_material_expression(material, unreal.MaterialExpressionScreenPosition, -1600, 0)
+    uv = mask(material, lib, screen, "rg", -1450, 0, source_out="ViewportUV")
+    cells = binary(material, lib, unreal.MaterialExpressionMultiply, uv,
+                   constant(material, lib, 18.0, -1450, 100), -1300, 0)
+    cell = unary(material, lib, unreal.MaterialExpressionFloor, cells, -1150, 0)
+    within = unary(material, lib, unreal.MaterialExpressionFrac, cells, -1150, 100)
+    # hash = frac(sin(dot(cell, (12.9898, 78.233))) * 43758.5453)
+    seed = lib.create_material_expression(material, unreal.MaterialExpressionConstant2Vector, -1150, 200)
+    seed.set_editor_property("r", 12.9898)
+    seed.set_editor_property("g", 78.233)
+    dot = binary(material, lib, unreal.MaterialExpressionDotProduct, cell, seed, -1000, 150)
+    sine = unary(material, lib, unreal.MaterialExpressionSine, dot, -850, 150)
+    hashed = unary(material, lib, unreal.MaterialExpressionFrac,
+                   binary(material, lib, unreal.MaterialExpressionMultiply, sine,
+                          constant(material, lib, 43758.5453, -850, 250), -700, 150), -550, 150)
+    present = select_if(material, lib, hashed,
+                        binary(material, lib, unreal.MaterialExpressionMultiply, amount,
+                               constant(material, lib, 0.45, -850, 650), -700, 600),
+                        0.0, 0.0, 1.0, -400, 300)
+    centred = binary(material, lib, unreal.MaterialExpressionSubtract, within,
+                     constant(material, lib, 0.5, -1000, 350), -850, 350)
+    radius = lib.create_material_expression(material, unreal.MaterialExpressionLength, -700, 350)
+    lib.connect_material_expressions(centred, "", radius, "")
+    size = binary(material, lib, unreal.MaterialExpressionAdd,
+                  constant(material, lib, 0.18, -700, 450),
+                  binary(material, lib, unreal.MaterialExpressionMultiply, hashed,
+                         constant(material, lib, 0.5, -700, 500), -550, 450), -400, 450)
+    inside = select_if(material, lib, radius, size, 0.0, 0.0, 1.0, -250, 400)
+    drop = binary(material, lib, unreal.MaterialExpressionMultiply, inside, present, -100, 350)
+    # The mirrored sample: uv - 2 (within - 0.5) / 18 * 0.6.
+    mirror = binary(material, lib, unreal.MaterialExpressionSubtract, uv,
+                    binary(material, lib, unreal.MaterialExpressionMultiply, centred,
+                           constant(material, lib, 2.0 * 0.6 / 18.0, -850, 450), -700, 500),
+                    -550, 550)
+    scene = lib.create_material_expression(material, unreal.MaterialExpressionSceneTexture, -400, -200)
+    scene.set_editor_property("scene_texture_id", unreal.SceneTextureId.PPI_POST_PROCESS_INPUT0)
+    seen = lib.create_material_expression(material, unreal.MaterialExpressionSceneTexture, -400, 700)
+    seen.set_editor_property("scene_texture_id", unreal.SceneTextureId.PPI_POST_PROCESS_INPUT0)
+    lib.connect_material_expressions(mirror, "", seen, "UVs")
+    rim = unary(material, lib, unreal.MaterialExpressionOneMinus,
+                binary(material, lib, unreal.MaterialExpressionMultiply,
+                       binary(material, lib, unreal.MaterialExpressionDivide, radius, size, -250, 600),
+                       constant(material, lib, 0.15, -250, 700), -100, 650), 50, 650)
+    refracted = binary(material, lib, unreal.MaterialExpressionMultiply, seen, rim, 200, 650,
+                       a_out="Color")
+    out = lerp(material, lib, scene, refracted, drop, 400, 200, a_out="Color")
+    lib.connect_material_property(out, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    finish(material, "M_LensDrops")
+
+
+def create_rain_shaft():
+    """M_RainShaft: translucent unlit two-sided grey; opacity =
+    ShaftOpacity x vertical streaks (a noise stretched 40:1 in height) x
+    the mesh's V (1 at the cloud base, 0 at the ground: UV0.y) faded,
+    softened where it meets the ground (DepthFade)."""
+    material = _weather_material("M_RainShaft")
+    if material is None:
+        return
+    material.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    material.set_editor_property("two_sided", True)
+    lib = unreal.MaterialEditingLibrary
+    opacity = scalar(material, lib, WEATHER_PARAMETERS["shaft"], 0.0, -1200, 300)
+    world = lib.create_material_expression(material, unreal.MaterialExpressionWorldPosition, -1500, 0)
+    stretch = lib.create_material_expression(material, unreal.MaterialExpressionConstant3Vector, -1500, 100)
+    stretch.set_editor_property("constant", unreal.LinearColor(1.0, 1.0, 0.025, 1.0))
+    streaked = binary(material, lib, unreal.MaterialExpressionMultiply, world, stretch, -1350, 0)
+    streaks = lib.create_material_expression(material, unreal.MaterialExpressionNoise, -1200, 0)
+    streaks.set_editor_property("scale", 1.0 / 800.0)
+    streaks.set_editor_property("levels", 3)
+    streaks.set_editor_property("output_min", 0.35)
+    streaks.set_editor_property("output_max", 1.0)
+    lib.connect_material_expressions(streaked, "", streaks, "Position")
+    uv = lib.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate, -1200, 200)
+    height = mask(material, lib, uv, "g", -1050, 200)
+    alpha = binary(material, lib, unreal.MaterialExpressionMultiply,
+                   binary(material, lib, unreal.MaterialExpressionMultiply, opacity, streaks, -900, 100),
+                   height, -750, 150)
+    fade = lib.create_material_expression(material, unreal.MaterialExpressionDepthFade, -550, 150)
+    fade.set_editor_property("fade_distance_default", 20000.0)
+    lib.connect_material_expressions(alpha, "", fade, "Opacity")
+    lib.connect_material_property(constant3(material, lib, (0.30, 0.33, 0.37), -550, 0), "",
+                                  unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    lib.connect_material_property(fade, "", unreal.MaterialProperty.MP_OPACITY)
+    finish(material, "M_RainShaft")
+
+
+def create_lightning():
+    """M_Lightning: unlit additive two-sided, emissive (0.75, 0.8, 1.0) x
+    FlashIntensity x 60; black, so invisible, at 0."""
+    material = _weather_material("M_Lightning")
+    if material is None:
+        return
+    material.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_ADDITIVE)
+    material.set_editor_property("two_sided", True)
+    lib = unreal.MaterialEditingLibrary
+    flash = scalar(material, lib, WEATHER_PARAMETERS["flash"], 0.0, -600, 200)
+    glow = binary(material, lib, unreal.MaterialExpressionMultiply,
+                  constant3(material, lib, (0.75, 0.8, 1.0), -600, 0),
+                  binary(material, lib, unreal.MaterialExpressionMultiply, flash,
+                         constant(material, lib, 60.0, -600, 300), -450, 250), -300, 100)
+    lib.connect_material_property(glow, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    finish(material, "M_Lightning")
+
+
+def create_ice_overlay():
+    """M_IceOverlay: translucent, lit, rough-ish blue-white frost; opacity =
+    IceAmount x (0.25 + 0.75 x the forward-facing share of the surface: the
+    vertex normal in the airframe's own frame, x forward, saturated) x a
+    4 cm frost noise. Drawn as each airframe part's overlay material."""
+    material = _weather_material("M_IceOverlay")
+    if material is None:
+        return
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    lib = unreal.MaterialEditingLibrary
+    ice = scalar(material, lib, WEATHER_PARAMETERS["ice"], 0.0, -1200, 400)
+    normal = lib.create_material_expression(material, unreal.MaterialExpressionVertexNormalWS, -1500, 0)
+    local = lib.create_material_expression(material, unreal.MaterialExpressionTransform, -1350, 0)
+    local.set_editor_property("transform_source_type",
+                              unreal.MaterialVectorCoordTransformSource.TRANSFORMSOURCE_WORLD)
+    local.set_editor_property("transform_type", unreal.MaterialVectorCoordTransform.TRANSFORM_LOCAL)
+    lib.connect_material_expressions(normal, "", local, "")
+    forward = unary(material, lib, unreal.MaterialExpressionSaturate,
+                    mask(material, lib, local, "r", -1200, 0), -1050, 0)
+    facing = binary(material, lib, unreal.MaterialExpressionAdd,
+                    constant(material, lib, 0.25, -1050, 100),
+                    binary(material, lib, unreal.MaterialExpressionMultiply, forward,
+                           constant(material, lib, 0.75, -1050, 150), -900, 50), -750, 50)
+    frost = _noise(material, lib, 0.04, -1350, 200, levels=4)
+    alpha = binary(material, lib, unreal.MaterialExpressionMultiply,
+                   binary(material, lib, unreal.MaterialExpressionMultiply, ice, facing, -600, 200),
+                   frost, -450, 200)
+    lib.connect_material_property(constant3(material, lib, (0.82, 0.9, 0.97), -450, 0), "",
+                                  unreal.MaterialProperty.MP_BASE_COLOR)
+    lib.connect_material_property(constant(material, lib, 0.35, -450, 100), "",
+                                  unreal.MaterialProperty.MP_ROUGHNESS)
+    lib.connect_material_property(alpha, "", unreal.MaterialProperty.MP_OPACITY)
+    finish(material, "M_IceOverlay")
+
+
 _FAILED = []
 
 
@@ -1718,5 +2132,10 @@ create_runway()
 create_moon()
 create_star_emissive()
 create_terrain_imagery_night()
+create_ground_surfaces()
+create_lens_drops()
+create_rain_shaft()
+create_lightning()
+create_ice_overlay()
 if _FAILED:
     raise SystemExit(f"materials not created: {', '.join(_FAILED)}")

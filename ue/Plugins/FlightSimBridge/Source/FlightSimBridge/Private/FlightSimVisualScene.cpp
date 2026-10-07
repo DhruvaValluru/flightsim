@@ -843,6 +843,19 @@ bool FFlightSimVisualScene::Build(UWorld* World,
 		Ground->SetActorLocation(FVector(0.0, 0.0, 0.0));
 		// The engine plane is 1 m; 100 km on a side reaches past the far ridge.
 		Ground->SetActorScale3D(FVector(100000.0, 100000.0, 1.0));
+		FlatGround = GroundMesh;
+	}
+	else
+	{
+		FlatGround = nullptr;
+	}
+
+	// -- the weather look (FlightSimWeatherLook.cpp): the flat ground's
+	// surface material, the storm's shafts and lightning; a card without a
+	// weather_look block changes nothing.
+	if (!ApplyWeatherLook(World, Options, Error))
+	{
+		return false;
 	}
 
 	// Precipitation is applied to the georeferenced terrain material below;
@@ -2487,6 +2500,7 @@ void FFlightSimVisualScene::AdvanceWorld(double TimeSeconds)
 		// The streak pattern's phase is the FDM's time: deterministic per step.
 		RainInstance->SetScalarParameterValue(SceneRainPhaseParameter, static_cast<float>(TimeSeconds));
 	}
+	AdvanceWeather(TimeSeconds);
 }
 
 bool FFlightSimVisualScene::LoadSceneLevel(UWorld* World,
