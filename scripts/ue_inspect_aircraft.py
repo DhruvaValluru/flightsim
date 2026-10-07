@@ -14,17 +14,31 @@ the inner skin is lit from inside a closed hull) scores well below it and
 renders as a black silhouette. Every texture's size is printed too, so a
 texture that did not import (or imported black) shows by name.
 
-Read-only: nothing is saved. Every line starts with INSPECT so the output
-can be filtered out of the editor's log.
+Read-only for the project: nothing is saved. Every line starts with
+INSPECT and goes to the log as a warning (a commandlet's console shows
+nothing quieter, so a plain print never reaches it) and to
+runs/inspect_aircraft.txt beside the repository.
 """
 
+import os
 import sys
 
 import unreal
 
+# The script's own path: __file__ where the engine sets it, else argv[0]
+# (the -script= value's first word).
+_SCRIPT = globals().get("__file__") or sys.argv[0]
+REPORT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(_SCRIPT))),
+                      "runs", "inspect_aircraft.txt")
+os.makedirs(os.path.dirname(REPORT), exist_ok=True)
+open(REPORT, "w", encoding="utf-8").close()
+
 
 def say(text):
-    print(f"INSPECT {text}")
+    line = f"INSPECT {text}"
+    unreal.log_warning(line)
+    with open(REPORT, "a", encoding="utf-8") as out:
+        out.write(line + "\n")
 
 
 def _names(fn, material):
