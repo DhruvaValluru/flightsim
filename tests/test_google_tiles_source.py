@@ -104,3 +104,15 @@ def test_the_web_solve_pass_skips_the_tiles():
     assert 'extra=["-NoGoogleTiles"]' in fly_host
     assert 'FParse::Param(*Params, TEXT("NoGoogleTiles"))' in COMMANDLET
     assert COMMANDLET.count("FFlightSimGoogleTiles::Requested() && !bNoGoogleTiles") == 2
+
+
+def test_a_stuck_view_is_reloaded_before_the_timeout_refuses():
+    """Cesium never retries a failed tile request: one dropped connection
+    left a view at 0.0 % until the 180 s timeout. The wait reloads a view
+    whose progress has not moved, a bounded number of times."""
+    wait = TILES_CPP[TILES_CPP.index("bool FFlightSimGoogleTiles::WaitForView"):]
+    wait = wait[:wait.index("TSharedPtr<FJsonObject> FFlightSimGoogleTiles::Record()")]
+    assert "Tiles->RefreshTileset();" in wait
+    assert "Refreshes < MaxTileRefreshes" in wait
+    assert wait.index("Tiles->RefreshTileset();") < wait.index("Waited > TimeoutSeconds")
+    assert 'TEXT("tileset_reloads")' in TILES_CPP

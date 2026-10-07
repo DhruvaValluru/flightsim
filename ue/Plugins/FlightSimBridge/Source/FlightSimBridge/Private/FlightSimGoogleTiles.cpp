@@ -35,6 +35,13 @@ namespace
 	// one 100 % reading can precede the next level's requests.
 	constexpr float PumpSeconds = 1.0f / 30.0f;
 	constexpr int32 SettledPumps = 15;
+	// Cesium never retries a tile whose request failed (a dropped
+	// connection leaves the view stuck short of 100 % for good), so a view
+	// whose progress has not moved for this long is reloaded from scratch,
+	// at most MaxTileRefreshes times per frame. Long enough that a slow
+	// but live download of one large tile is not thrown away.
+	constexpr double StallRefreshSeconds = 30.0;
+	constexpr int32 MaxTileRefreshes = 4;
 
 	double EnvNumber(const TCHAR* Name, double Default)
 	{
@@ -214,6 +221,9 @@ bool FFlightSimGoogleTiles::WaitForView(const FVector& Location, const FRotator&
 	const double Start = FPlatformTime::Seconds();
 	int32 Settled = 0;
 	float Progress = 0.0f;
+	float LastProgress = -1.0f;
+	double LastMove = Start;
+	int32 Refreshes = 0;
 	while (true)
 	{
 		// What a running engine loop does for the plugin each frame: the
@@ -229,13 +239,32 @@ bool FFlightSimGoogleTiles::WaitForView(const FVector& Location, const FRotator&
 		{
 			break;
 		}
-		const double Waited = FPlatformTime::Seconds() - Start;
+		const double Now = FPlatformTime::Seconds();
+		if (Progress > LastProgress + 0.01f)
+		{
+			LastProgress = Progress;
+			LastMove = Now;
+		}
+		else if (Progress < 99.99f && Now - LastMove > StallRefreshSeconds &&
+		         Refreshes < MaxTileRefreshes)
+		{
+			++Refreshes;
+			++TileRefreshes;
+			UE_LOG(LogFlightSimGoogleTiles, Warning,
+			       TEXT("google tiles: the view has been stuck at %.1f %% for %.0f s (a failed ")
+			       TEXT("request is never retried by Cesium); reloading the tileset (%d of %d)"),
+			       Progress, Now - LastMove, Refreshes, MaxTileRefreshes);
+			Tiles->RefreshTileset();
+			LastProgress = -1.0f;
+			LastMove = Now;
+		}
+		const double Waited = Now - Start;
 		if (Waited > TimeoutSeconds)
 		{
 			Error = FString::Printf(
 				TEXT("terrain.google_tiles: the view was still %.1f %% loaded after %.0f s ")
-				TEXT("(FLIGHTSIM_GOOGLE_TILES_TIMEOUT); check the key, the Map Tiles API and the ")
-				TEXT("network, or raise the timeout"), Progress, Waited);
+				TEXT("(FLIGHTSIM_GOOGLE_TILES_TIMEOUT) and %d reload(s); check the key, the Map ")
+				TEXT("Tiles API and the network, or raise the timeout"), Progress, Waited, Refreshes);
 			return false;
 		}
 		FPlatformProcess::Sleep(0.005f);
@@ -275,6 +304,7 @@ TSharedPtr<FJsonObject> FFlightSimGoogleTiles::Record() const
 	Out->SetNumberField(TEXT("frames_waited"), FramesWaited);
 	Out->SetNumberField(TEXT("longest_wait_s"), LongestWaitSeconds);
 	Out->SetNumberField(TEXT("total_wait_s"), TotalWaitSeconds);
+	Out->SetNumberField(TEXT("tileset_reloads"), TileRefreshes);
 	Out->SetStringField(TEXT("attribution"),
 		TEXT("Imagery and 3D data: Google. Per-tile data-provider credits are shown by Cesium on ")
 		TEXT("screen and are not drawn into these frames; the Google Maps Platform terms govern ")

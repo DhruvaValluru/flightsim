@@ -55,7 +55,8 @@ public:
 
 	// Point Cesium's tile selection at this camera and pump the plugin
 	// (HTTP, game-thread tasks, tileset tick) until the view reports fully
-	// loaded and stays so, or the timeout passes (an error).
+	// loaded and stays so, or the timeout passes (an error). A view stuck
+	// for 30 s (a failed request Cesium never retries) is reloaded.
 	bool WaitForView(const FVector& Location, const FRotator& Rotation,
 	                 double FieldOfViewDeg, int32 Width, int32 Height,
 	                 FString& Error);
@@ -81,6 +82,7 @@ private:
 	double UndulationM = 0.0;
 	int32 HiddenActors = 0;
 	int32 FramesWaited = 0;
+	int32 TileRefreshes = 0;
 	double LongestWaitSeconds = 0.0;
 	double TotalWaitSeconds = 0.0;
 };
