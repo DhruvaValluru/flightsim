@@ -2993,6 +2993,23 @@ class RunManager:
                                  "overlays and the verification summary")
             capture_write_manifest(spec, capture_solved, out, scene,
                                    heightfield=capture_heightfield)
+            # Phase 2 (package C), as the CLI capture does it: complete
+            # every frame's object records from the bundle the engine just
+            # wrote (the tight box from the ID image, the visible fraction
+            # from the alone pass, occluded_by, the depth under the mask).
+            # Without it the records keep their nulls and the box, depth
+            # and visibility checks grade a record that was never filled.
+            from core.capture.labels import attach_engine_labels
+            from core.capture.passes import PassError
+
+            try:
+                attached = attach_engine_labels(out)
+            except PassError as exc:
+                run.push("failed", f"[{exc.constraint}] {exc.message}")
+                return
+            run.push("labels", f"engine labels attached on {attached['attached']} of "
+                               f"{attached['frames']} frame(s) "
+                               f"({attached['without_bundle']} without a bundle)")
             # Phase 10: the sensor model, as a seeded post-pass over the
             # rendered frames of every camera whose profile is not the
             # ideal pinhole. Reproducible from the spec's own seed.

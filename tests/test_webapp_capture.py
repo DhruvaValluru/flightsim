@@ -1470,3 +1470,18 @@ def test_the_expert_page_links_the_schema_of_the_manifest_version_it_shows():
     reply = TestClient(app).get(f"/schemas/capture_manifest.v{MANIFEST_VERSION}.schema.json")
     assert reply.status_code == 200
     assert reply.json()["properties"]["manifest_version"]["const"] == MANIFEST_VERSION
+
+
+def test_a_rendered_web_capture_completes_its_labels_before_it_is_verified():
+    """The web capture fills every frame's object records from the
+    engine's bundle (attach_engine_labels, as flightsim.capture does)
+    before the sensor post-pass and the verification: without it the
+    tight box, the visible fraction and the depth under the mask stay
+    null and box_vs_mask, depth_vs_geometry and visibility_vs_scene
+    grade a record that was never filled."""
+    source = (Path(__file__).resolve().parents[1] / "webapp" / "runs.py").read_text(
+        encoding="utf-8")
+    attach = source.index("attached = attach_engine_labels(out)")
+    assert source.index("capture_write_manifest(spec, capture_solved, out, scene,") < attach
+    assert attach < source.index("sensor_written = capture_apply_sensor(out,")
+    assert attach < source.index("run.capture = capture_finish(out)")
