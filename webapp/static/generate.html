@@ -120,6 +120,9 @@
     <h2 class="headline" id="h-ask">Describe the pictures you want.</h2>
     <div class="card">
       <textarea id="prompt" placeholder="photos of an A320 over the Alps in varied weather at different times of day, from a chase view"></textarea>
+      <div id="lensPicker"></div>
+      <script src="/lens_picker.js"></script>
+      <script>LensPicker.mount(document.getElementById("lensPicker"), document.getElementById("prompt"));</script>
       <div class="row examples" style="margin-top:.5rem">
         <span class="dim small">Try:</span>
         <button class="opt" data-ex="photos of an A320 over the Alps in varied weather at different times of day">Alps, varied weather</button>

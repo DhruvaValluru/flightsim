@@ -1233,6 +1233,14 @@ def _generate_call(function, *args, **kwargs):
         return JSONResponse(exc.payload, status_code=exc.status_code)
 
 
+@app.get("/lens_picker.js")
+def lens_picker_script() -> FileResponse:
+    """The lens picker both prompt pages mount: a sample frame and a
+    focal-length slider that writes "with a <n> mm lens" into the prompt."""
+    return FileResponse(STATIC / "lens_picker.js",
+                        media_type="application/javascript")
+
+
 @app.get("/generate.html", response_class=HTMLResponse)
 def generate_page() -> str:
     """The guided page: ask, clarify, preview, generate, review, download."""

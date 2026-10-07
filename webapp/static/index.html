@@ -93,6 +93,9 @@ visual-only per host (measured).</p>
 
 <textarea id="prompt"
   placeholder="simulate a plane in rough wind conditions over mountains"></textarea>
+<div id="lensPicker"></div>
+<script src="/lens_picker.js"></script>
+<script>LensPicker.mount(document.getElementById("lensPicker"), document.getElementById("prompt"));</script>
 <p>
   <button id="compile">Interpret</button>
   <label class="dim" title="The clip is min(duration, 22 s); a shorter clip renders proportionally fewer frames. Overrides a duration stated in the prompt, shown as a user edit in the table.">
