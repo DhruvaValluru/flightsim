@@ -1258,6 +1258,15 @@ def lens_picker_script() -> FileResponse:
                         media_type="application/javascript")
 
 
+@app.get("/conditions_list.js")
+def conditions_list_script() -> FileResponse:
+    """The conditions list both prompt pages mount beside the prompt box:
+    the weather and environment phrases the compiler turns into spec
+    fields, clickable into the prompt (tests/test_conditions_list.py)."""
+    return FileResponse(STATIC / "conditions_list.js",
+                        media_type="application/javascript")
+
+
 @app.get("/generate.html", response_class=HTMLResponse)
 def generate_page() -> str:
     """The guided page: ask, clarify, preview, generate, review, download."""

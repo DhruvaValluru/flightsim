@@ -33,6 +33,12 @@
           padding: 1.1rem 1.2rem; margin: .9rem 0; }
   .card.warn { border-color: #5a4a22; }
   .card.bad { border-color: #6a3a35; }
+  .promptRow { display: flex; gap: 1rem; align-items: flex-start; }
+  .promptRow textarea { flex: 1 1 auto; min-width: 0; min-height: 9rem; }
+  .promptRow aside { flex: 0 0 17rem; max-height: 18rem; overflow-y: auto; border: 1px solid var(--line);
+                     border-radius: 8px; padding: .5rem .6rem; }
+  @media (max-width: 760px) { .promptRow { flex-direction: column; }
+    .promptRow aside { flex-basis: auto; width: 100%; box-sizing: border-box; } }
   textarea { width: 100%; min-height: 5.2rem; background: var(--panel-2); color: var(--text);
              border: 1px solid var(--line); border-radius: 8px; padding: .8rem; font: inherit;
              resize: vertical; }
@@ -119,7 +125,12 @@
   <section class="state" id="s-ask">
     <h2 class="headline" id="h-ask">Describe the pictures you want.</h2>
     <div class="card">
-      <textarea id="prompt" placeholder="photos of an A320 over the Alps in varied weather at different times of day, from a chase view"></textarea>
+      <div class="promptRow">
+        <textarea id="prompt" placeholder="photos of an A320 over the Alps in varied weather at different times of day, from a chase view"></textarea>
+        <aside id="conditionsList"></aside>
+      </div>
+      <script src="/conditions_list.js"></script>
+      <script>ConditionsList.mount(document.getElementById("conditionsList"), document.getElementById("prompt"));</script>
       <div id="lensPicker"></div>
       <script src="/lens_picker.js"></script>
       <script>LensPicker.mount(document.getElementById("lensPicker"), document.getElementById("prompt"));</script>
