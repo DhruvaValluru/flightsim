@@ -15,6 +15,7 @@ name rather than approximating.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Dict, Optional, Sequence
 
@@ -351,6 +352,33 @@ def derived_aircraft_card_block(spec: ScenarioSpec) -> Optional[Dict[str, object
     return block
 
 
+GOOGLE_TILES_ENV = "FLIGHTSIM_GOOGLE_TILES"
+GOOGLE_TILES_ON = ("1", "on", "true", "yes")
+
+
+def google_tiles_requested() -> bool:
+    """FLIGHTSIM_GOOGLE_TILES is on: the same words the render host's
+    FFlightSimGoogleTiles::Requested accepts."""
+    return os.environ.get(GOOGLE_TILES_ENV, "").strip().lower() in GOOGLE_TILES_ON
+
+
+def google_tiles_card_block(latitude_deg: float, longitude_deg: float) -> Dict[str, object]:
+    """The ``google_tiles`` card block: the geoid undulation at the card's
+    origin, which places Cesium's georeference origin at ellipsoidal
+    height = terrain_elevation_m + N. Evaluated for EVERY scene, since a
+    flat or synthesised scene's datum block has no undulation (null) but
+    the tiles are still real Earth there: without it they sit ~N metres
+    off (+52 m at the Matterhorn). EGM2008 when its grid is cached,
+    else the committed EGM96 grid; the model is recorded."""
+    from core.terrain.geoid import grid_for_model
+
+    grid = grid_for_model("auto")
+    return {
+        "geoid_undulation_m": float(grid.undulation(float(latitude_deg), float(longitude_deg))),
+        "geoid_model": str(grid.model_key),
+    }
+
+
 def write_run_card(spec: ScenarioSpec, path: Path,
                    control_inputs: Sequence[Dict[str, float]] = (),
                    duration_s: Optional[float] = None,
@@ -630,6 +658,12 @@ def write_run_card(spec: ScenarioSpec, path: Path,
         # it into render.json beside its own vertical convention and derives
         # nothing; check.georeference grades the copy against the manifest.
         card["georeference"] = dict(georeference)
+    if google_tiles_requested():
+        # Visual only, and only when the render will draw Google's tiles:
+        # the host reads the undulation from here when the georeference
+        # block has none (a card without the env var is unchanged).
+        card["google_tiles"] = google_tiles_card_block(card["latitude_deg"],
+                                                       card["longitude_deg"])
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(card, indent=1), encoding="utf-8")
     return path

@@ -1623,15 +1623,35 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		if (!VisualScene.Build(World, SceneOptions, Error)) { return Fail(Error); }
 		if (FFlightSimGoogleTiles::Requested())
 		{
-			// The geoid undulation at the origin is the card's (null on a
-			// flat or synthesised scene: then 0, recorded as used).
+			// The geoid undulation at the origin: the capture datum's when it
+			// has one, else the card's google_tiles block (core/scenario/
+			// card.py evaluates it at the origin for every scene, since a
+			// flat or synthesised datum has none but the tiles are real
+			// Earth). Neither: refuse rather than draw the ground ~N m off.
 			double UndulationM = 0.0;
+			bool bHaveUndulation = false;
 			const TSharedPtr<FJsonObject>* TilesGeoreference = nullptr;
 			if (WorldCardRoot.IsValid() &&
 			    WorldCardRoot->TryGetObjectField(TEXT("georeference"), TilesGeoreference) &&
 			    TilesGeoreference != nullptr)
 			{
-				(*TilesGeoreference)->TryGetNumberField(TEXT("undulation_origin_m"), UndulationM);
+				bHaveUndulation =
+					(*TilesGeoreference)->TryGetNumberField(TEXT("undulation_origin_m"), UndulationM);
+			}
+			const TSharedPtr<FJsonObject>* TilesBlock = nullptr;
+			if (!bHaveUndulation && WorldCardRoot.IsValid() &&
+			    WorldCardRoot->TryGetObjectField(TEXT("google_tiles"), TilesBlock) &&
+			    TilesBlock != nullptr)
+			{
+				bHaveUndulation =
+					(*TilesBlock)->TryGetNumberField(TEXT("geoid_undulation_m"), UndulationM);
+			}
+			if (!bHaveUndulation)
+			{
+				return Fail(TEXT("google_tiles.undulation_missing: the card carries no geoid ")
+				            TEXT("undulation at the origin (georeference.undulation_origin_m or ")
+				            TEXT("google_tiles.geoid_undulation_m); write the card with ")
+				            TEXT("FLIGHTSIM_GOOGLE_TILES=on set so core/scenario/card.py adds it"));
 			}
 			if (!GoogleTiles.Enable(World, Scenario.GeoReferencing, Card.LatitudeDegrees,
 			                        Card.LongitudeDegrees, Card.TerrainElevationMetres,

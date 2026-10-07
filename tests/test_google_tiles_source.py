@@ -54,3 +54,42 @@ def test_only_the_scenes_own_ground_is_hidden():
     assert SCENE.count('Tags.Add(FName(TEXT("FlightSim.terrain")))') == 4
     assert 'ActorHasTag(FName(TerrainTag))' in TILES_CPP
     assert 'TerrainTag = TEXT("FlightSim.terrain")' in TILES_CPP
+
+
+# -- the geoid undulation the tiles are placed with ---------------------------
+
+def test_a_tiles_card_carries_the_geoid_undulation_at_its_origin(tmp_path, monkeypatch):
+    """A flat or synthesised scene's datum has no undulation (null), but the
+    tiles are real Earth: the card evaluates N at the origin itself, so
+    Cesium's origin sits at terrain_elevation_m + N, not N metres low."""
+    from experiments.gate5_ue_parity import reference_spec, write_run_card
+    from core.terrain.geoid import grid_for_model
+
+    spec = reference_spec("fly the 747 at 3000 m and 250 kt for 30 seconds")
+    monkeypatch.delenv("FLIGHTSIM_GOOGLE_TILES", raising=False)
+    plain = json.loads(write_run_card(spec, tmp_path / "plain.json").read_text(encoding="utf-8"))
+    assert "google_tiles" not in plain
+
+    monkeypatch.setenv("FLIGHTSIM_GOOGLE_TILES", "on")
+    card = json.loads(write_run_card(spec, tmp_path / "card.json").read_text(encoding="utf-8"))
+    block = card["google_tiles"]
+    grid = grid_for_model("auto")
+    assert block["geoid_model"] == grid.model_key
+    assert block["geoid_undulation_m"] == grid.undulation(card["latitude_deg"], card["longitude_deg"])
+    assert set(card) - set(plain) == {"google_tiles"}
+
+
+def test_the_matterhorn_undulation_is_about_52_m():
+    from core.scenario.card import google_tiles_card_block
+
+    block = google_tiles_card_block(45.9763, 7.6586)
+    assert 50.0 < block["geoid_undulation_m"] < 55.0
+
+
+def test_the_commandlet_falls_back_to_the_cards_undulation_and_never_to_zero():
+    enable = COMMANDLET[COMMANDLET.index("if (FFlightSimGoogleTiles::Requested())"):]
+    enable = enable[:enable.index("GoogleTiles.HideOwnTerrain(World);")]
+    assert 'TEXT("undulation_origin_m")' in enable
+    assert 'TEXT("google_tiles")' in enable and 'TEXT("geoid_undulation_m")' in enable
+    assert "google_tiles.undulation_missing" in enable
+    assert enable.index("google_tiles.undulation_missing") < enable.index("GoogleTiles.Enable(")
