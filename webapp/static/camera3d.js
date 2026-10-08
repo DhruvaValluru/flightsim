@@ -21,21 +21,22 @@
 // lowest terrain sample to keep float32 positions small.
 //
 // Public surface: CameraPlacer.open({container, getSpec, onPlaced,
-// edit}) where edit = {index, camera} reopens an existing camera.
+// edit}) where edit = {index, camera} reopens an existing camera; and
+// window.Flight3D, the WebGL helpers the lens picker draws with.
 
 window.CameraPlacer = (function () {
   const VS = `
 attribute vec3 aPos; attribute vec3 aNormal; attribute vec3 aColor;
 uniform mat4 uViewProj; uniform mat4 uModel; uniform vec3 uEye;
 uniform float uLit;
-varying vec3 vColor; varying float vDist;
+varying vec3 vColor; varying vec3 vWorld;
 void main() {
   vec4 world = uModel * vec4(aPos, 1.0);
   gl_Position = uViewProj * world;
   vec3 n = normalize((uModel * vec4(aNormal, 0.0)).xyz);
   float lambert = max(dot(n, normalize(vec3(-0.45, 0.8, 0.35))), 0.0);
   vColor = aColor * mix(1.0, 0.38 + 0.72 * lambert, uLit);
-  vDist = length(world.xyz - uEye);
+  vWorld = world.xyz;
 }`;
   const FS = `
 #ifdef GL_FRAGMENT_PRECISION_HIGH
@@ -43,10 +44,12 @@ precision highp float;
 #else
 precision mediump float;
 #endif
-varying vec3 vColor; varying float vDist;
-uniform vec3 uFog; uniform float uFogDist;
+varying vec3 vColor; varying vec3 vWorld;
+uniform vec3 uEye; uniform vec3 uFog; uniform float uFogDist;
 void main() {
-  float f = clamp(vDist / uFogDist, 0.0, 1.0);
+  // Fog by the fragment's own distance: a ground plane is one huge quad,
+  // and a per-vertex distance would fog all of it like its far corners.
+  float f = clamp(length(vWorld - uEye) / uFogDist, 0.0, 1.0);
   gl_FragColor = vec4(mix(vColor, uFog, f * f * 0.8), 1.0);
 }`;
 
@@ -305,8 +308,11 @@ void main() {
       gl.uniform1f(this.loc.uLit, lit === undefined ? 1 : lit);
       gl.drawArrays(gl.TRIANGLES, 0, item.count);
     }
-    lines(segments) {
-      // segments: [[p0, p1, colour], ...] in GL coordinates.
+    lines(segments, overlay) {
+      // segments: [[p0, p1, colour], ...] in GL coordinates. An overlay
+      // ignores depth (and writes none): lines ON a surface, like field
+      // boundaries on the ground, would otherwise fight it for depth at
+      // a grazing view and vanish in patches.
       if (!segments.length) return;
       const gl = this.gl, data = [];
       for (const [a, b, col] of segments)
@@ -316,7 +322,9 @@ void main() {
       this.bind(this.dynamic);
       gl.uniformMatrix4fv(this.loc.uModel, false, IDENTITY);
       gl.uniform1f(this.loc.uLit, 0);
+      if (overlay) { gl.disable(gl.DEPTH_TEST); gl.depthMask(false); }
       gl.drawArrays(gl.LINES, 0, segments.length * 2);
+      if (overlay) { gl.enable(gl.DEPTH_TEST); gl.depthMask(true); }
     }
   }
 
@@ -1064,6 +1072,12 @@ void main() {
     box.scrollIntoView({behavior: "smooth", block: "start"});
     return current;
   }
+
+  // The WebGL pieces, shared with the lens picker's 3D sample frame
+  // (webapp/static/lens_picker.js) so the two draw the same way.
+  window.Flight3D = {View, perspective, lookAt, mul, project, modelMatrix,
+                     IDENTITY, SKY, DEG, sub, add, scale, dot, cross, norm,
+                     pushTri, cameraBodyMesh};
 
   return {open, close: () => current && current.close()};
 })();
