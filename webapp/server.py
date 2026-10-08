@@ -211,6 +211,13 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
         "source": str(quantity.source), "from": quantity.frm,
         "std": quantity.std, "detail": quantity.detail,
     } for name, quantity in spec.randomization.quantities()]
+    # The lighting block (core/scene/lighting.py): the same shape, so the
+    # page's lighting panel and its table rows have entries to edit.
+    lighting = [{
+        "name": name, "value": quantity.value, "unit": quantity.unit,
+        "source": str(quantity.source), "from": quantity.frm,
+        "std": quantity.std, "detail": quantity.detail,
+    } for name, quantity in spec.lighting.quantities()]
     spec_dict = spec.to_dict()
     # The block's own dict (always present for the page) MERGED with the
     # policy the canonical form carries under the same key: the policy
@@ -229,6 +236,10 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
     if "policy" in canonical_section:
         randomization_section["policy"] = canonical_section["policy"]
     spec_dict["randomization"] = randomization_section
+    # The lighting section, always present for the page (the canonical form
+    # omits a default block; from_dict reads a default one back as absent,
+    # so the digest is unmoved).
+    spec_dict["lighting"] = spec.lighting.to_dict()
     # The time-of-day row's entry (omitted from the canonical form while
     # unstated; read back unstated, so the digest is unmoved).
     spec_dict.setdefault("environment", {}).setdefault(
@@ -238,8 +249,18 @@ def _spec_payload(spec: ScenarioSpec) -> Dict[str, Any]:
     return {"digest": spec.digest(), "name": spec.name,
             "prompt": spec.prompt, "notes": spec.notes,
             "fields": fields, "cameras": cameras,
-            "randomization": randomization, "dict": spec_dict,
+            "randomization": randomization, "lighting": lighting,
+            "lighting_presets": _lighting_presets(), "dict": spec_dict,
             "table": spec.render_table()}
+
+
+def _lighting_presets() -> Dict[str, Any]:
+    """The preset table and ranges for the page's lighting panel (one
+    source: core/scene/lighting.py)."""
+    from core.scene.lighting import PRESETS, RANGES
+
+    return {"presets": PRESETS,
+            "ranges": {name: list(bounds) for name, bounds in RANGES.items()}}
 
 
 def _validation_payload(spec: ScenarioSpec) -> Dict[str, Any]:
@@ -628,6 +649,20 @@ def cameras_endpoint(request: CameraRequest) -> JSONResponse:
         aircraft=str(spec.aircraft.value),
         terrain_elevation_m=float(spec.terrain_elevation.value),
         frm=f"added from the page as a {preset} view")
+    if preset == "explicit":
+        # "You state the position yourself": the documented default is an
+        # offset with no world anchor, which the pose solver refuses. Start
+        # it where the ground observer stands (planned, so an edit in the
+        # table wins) and let the user move it from there.
+        from core.scenario.camera import GROUND_OBSERVER_LOCAL
+
+        start = "starts at the ground observer's spot; edit the position rows"
+        camera.plan("position_mode", "scene", frm=start)
+        camera.plan("position_north_m", GROUND_OBSERVER_LOCAL["north_m"], frm=start)
+        camera.plan("position_east_m", GROUND_OBSERVER_LOCAL["east_m"], frm=start)
+        camera.plan("position_alt_m",
+                    float(spec.terrain_elevation.value) + GROUND_OBSERVER_LOCAL["up_m"],
+                    frm=start)
     spec.cameras.append(camera)
     frame_traffic(spec)
     spec.cameras.pop()

@@ -1625,6 +1625,18 @@ def compile_prompt_llm(prompt: str, name: Optional[str] = None,
     for index, block in enumerate(payload["cameras"]):
         preset_entry = block.get("preset")
         preset = str(preset_entry["value"]) if preset_entry else "chase"
+        if preset == "explicit":
+            # The schema gives the model no scene or geographic placement
+            # to state, so an "explicit" camera from it could only be an
+            # offset with no world anchor -- refused by the pose solver
+            # after the flight was built. Its placement words are offsets
+            # in the primary's frame: that is the chase view.
+            spec.notes.append(
+                f"camera {index}: the model chose the 'explicit' view, which "
+                f"needs a scene placement it cannot state; built as a chase "
+                f"(following) view so its offsets apply")
+            preset = "chase"
+            preset_entry["value"] = "chase"
         camera = CameraSpec.defaulted(
             camera_id=f"camera{index}", preset=preset,
             aircraft=str(spec.aircraft.value),

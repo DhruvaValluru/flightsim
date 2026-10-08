@@ -1351,3 +1351,26 @@ def test_an_empty_randomization_in_the_wrong_empty_shape_varies_nothing(empty):
         compile_prompt_llm("vary the rain", client=fake_client(
             {"fields": {}, "notes": [], "questions": [],
              "randomization": ["precipitation"]}))
+
+
+def test_a_model_explicit_view_is_built_as_a_chase_so_it_can_be_solved():
+    """The schema offers the model "explicit" but no scene placement, so
+    the camera came out as an offset with no world anchor and the pose
+    solver refused it after the flight was built (camera.poses, measured
+    on the owner's machine). It is the chase view, said in the notes."""
+    client = fake_client({
+        "fields": {}, "notes": [], "questions": [],
+        "cameras": [{
+            "preset": entry("explicit", "model", "camera to the right"),
+            "offset_right_m": entry(60.0, "inferred", "to the right"),
+        }],
+    })
+    spec = compile_prompt_llm("the 747 with the camera to the right",
+                              client=client).spec
+    camera = spec.cameras[0]
+    assert str(camera.preset.value) == "chase"
+    assert str(camera.position_mode.value) == "offset"
+    assert camera.offset_right_m.value == 60.0          # applied, not dropped
+    assert any("'explicit'" in note for note in spec.notes)
+    report = validate(spec, check_feasibility=False)
+    assert not any(v.constraint == "camera.preset" for v in report.violations)

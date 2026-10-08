@@ -72,6 +72,25 @@
   .formula { font-size: 11px; color: #7d8a93; margin-top: .4rem; }
   #status { white-space: pre-wrap; }
   ul { margin: .3rem 0 .3rem 1.2rem; padding: 0; }
+  /* lighting and camera-view panels */
+  .panel { background: #121921; border: 1px solid #232d38; border-radius: 8px;
+           padding: .8rem 1rem; margin: .8rem 0; }
+  .panel h3 { margin: 0 0 .4rem; font-size: 1rem; color: #9fb4c7; }
+  .panelRow { display: flex; gap: 1.2rem; flex-wrap: wrap; align-items: flex-start; }
+  .panelCol { flex: 1 1 260px; min-width: 240px; }
+  .ctl { margin: .3rem 0; }
+  .ctl label { display: inline-block; min-width: 9.5rem; color: #9fb4c7; }
+  .ctl input[type=number] { width: 5.5rem; background: #171d24; color: inherit;
+           border: 1px solid #2c3947; border-radius: 4px; font: inherit; padding: .1rem .3rem; }
+  .ctl input[type=range] { width: 11rem; vertical-align: middle; }
+  button.nudge { background: #1d2733; color: #d8dde2; padding: .2rem .55rem;
+                 margin: .1rem .15rem .1rem 0; }
+  button.nudge:hover, button.opt:hover { background: #2b5d8c; }
+  .dial { cursor: crosshair; background: #0d1217; border: 1px solid #232d38;
+          border-radius: 8px; }
+  .swatch { display: inline-block; width: 1rem; height: 1rem; border-radius: 3px;
+            vertical-align: middle; border: 1px solid #2c3947; }
+  .auto { color: #7d8a93; font-style: italic; }
   /* Altitude guide */
   #altGuide summary { cursor: pointer; color: #9fb4c7; }
   #altGuide .agControls { display: flex; flex-wrap: wrap; gap: .4rem 1.2rem;
@@ -207,6 +226,8 @@ visual-only per host (measured).</p>
     <tbody></tbody>
   </table>
   <div id="srcLegend" class="dim" style="margin:.4rem 0"></div>
+  <div id="lightingPanel" class="panel"></div>
+  <div id="viewPanel" class="panel"></div>
   <div id="cameraPicker" style="margin:.6rem 0"></div>
   <div id="cameraState" class="dim"></div>
   <div id="verdict"></div>
@@ -518,6 +539,28 @@ function renderSpec(payload) {
       body.appendChild(row);
     }
   }
+  // The lighting block (core/scene/lighting.py): editable rows like the
+  // others; the lighting panel below writes into these same inputs.
+  if (spec.lighting && spec.lighting.length) {
+    const head = document.createElement("tr");
+    head.innerHTML = `<td colspan="4"><b>lighting</b> ` +
+      `<span class="dim">render light: natural = the calibrated look, ` +
+      `unchanged (VISUAL only)</span></td>`;
+    body.appendChild(head);
+    for (const f of spec.lighting) {
+      const row = document.createElement("tr");
+      const key = `lighting.${f.name}`;
+      row.innerHTML =
+        `<td>&nbsp;&nbsp;${f.name}</td>` +
+        `<td><input data-name="${key}" data-block="lighting" ` +
+        `data-field="${f.name}" value="${f.value}">` +
+        `${f.unit ? " " + f.unit : ""}</td>` +
+        `<td class="${sourceClass(f.source)}" data-src="${key}">` +
+        `${f.source}</td>` +
+        `<td class="dim">${provenanceNote(f)}</td>`;
+      body.appendChild(row);
+    }
+  }
   renderCameraPicker();
   // Director's-notes legend: what each source means, in one line.
   $("srcLegend").innerHTML =
@@ -534,6 +577,9 @@ function renderSpec(payload) {
       cell.className = "src-edited";
     });
   });
+  lightingPresets = spec.lighting_presets || lightingPresets;
+  renderLightingPanel();
+  renderViewPanel();
   renderVerdict(payload.validation);
 }
 
@@ -551,6 +597,454 @@ function renderVerdict(v) {
       v.violations.map(x => `<li>${refusalHtml(x)}</li>`).join("") + `</ul>`;
     $("run").disabled = true;
   }
+}
+
+// ===================== lighting and camera-view panels =====================
+//
+// Two panels over the SAME table inputs: every button, dial click and
+// slider writes the value into its row in #specTable and fires that
+// input's change event, so the row turns "user (edited)" and the run
+// carries it exactly like a value typed into the table. Nothing here
+// talks to the server; /run re-parses and re-validates the whole spec.
+
+let lightingPresets = {presets: {}, ranges: {}};
+let lightStep = 5;
+let viewStep = 15;
+
+const LIGHTING_LABELS = {
+  natural: "Natural", sunny: "Sunny", super_bright: "Super bright",
+  soft: "Soft", hazy: "Hazy", overcast: "Overcast",
+  golden_hour: "Golden hour", dramatic: "Dramatic"};
+//: What an unstated engine knob is, with no preset naming it: the
+//: calibrated scene's own value (core/scene/lighting.py docstring).
+const LIGHTING_BASE = {brightness_ev: 0, sun_intensity: 1, sky_fill: 1,
+  color_temperature_k: 6500, shadow_softness_deg: 0.5357, haze: 0.0012};
+
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const wrap360 = v => ((v % 360) + 360) % 360;
+const rad = d => d * Math.PI / 180;
+const deg = r => r * 180 / Math.PI;
+const round = (v, digits) => +(+v).toFixed(digits);
+
+function rowInput(key) {
+  return document.querySelector(`#specTable input[data-name="${key}"]`);
+}
+
+function rowValue(key) {
+  const input = rowInput(key);
+  if (!input) return undefined;
+  const text = input.value.trim();
+  if (text === "" || text === "null") return null;
+  const n = Number(text);
+  return Number.isNaN(n) ? text : n;
+}
+
+function setRow(key, value) {
+  const input = rowInput(key);
+  if (!input) return;
+  const text = value === null ? "null"
+    : typeof value === "number" ? String(round(value, 4)) : String(value);
+  if (input.value === text) return;
+  input.value = text;
+  input.dispatchEvent(new Event("change"));
+}
+
+// Approximate sRGB of a black body (Tanner Helland's fit), for the swatch.
+function kelvinColour(k) {
+  const t = k / 100;
+  const r = t <= 66 ? 255 : 329.7 * Math.pow(t - 60, -0.1332);
+  const g = t <= 66 ? 99.47 * Math.log(t) - 161.12 : 288.12 * Math.pow(t - 60, -0.0755);
+  const b = t >= 66 ? 255 : t <= 19 ? 0 : 138.52 * Math.log(t - 10) - 305.04;
+  const c = v => Math.round(clamp(v, 0, 255));
+  return `rgb(${c(r)},${c(g)},${c(b)})`;
+}
+
+// -- lighting -------------------------------------------------------------
+
+function lightingKnob(name) {
+  // {value, auto}: a stated row wins; else the preset's; else the scene's.
+  const preset = String(rowValue("lighting.preset") || "natural");
+  const table = (lightingPresets.presets || {})[preset] || {};
+  const stated = rowValue(`lighting.${name}`);
+  const unstated = stated === null || stated === undefined ||
+    (name === "brightness_ev" && stated === 0);
+  if (!unstated) return {value: stated, auto: false};
+  return {value: table[name] ?? LIGHTING_BASE[name] ?? null, auto: true,
+          fromPreset: table[name] !== undefined};
+}
+
+function renderLightingPanel() {
+  const holder = $("lightingPanel");
+  if (!rowInput("lighting.preset")) { holder.style.display = "none"; return; }
+  holder.style.display = "";
+  const preset = String(rowValue("lighting.preset") || "natural");
+  const elevation = lightingKnob("sun_elevation_deg");
+  const azimuth = rowValue("lighting.sun_azimuth_deg");
+  const heading = Number(rowValue("heading")) || 0;
+  const timeOfDay = String(rowValue("time_of_day") ?? "none");
+  const autoNote = (knob, unit = "") => knob.auto
+    ? ` <span class="auto">auto${knob.fromPreset ? " (preset)" : ""}</span>` : "";
+
+  const presetButtons = Object.keys(lightingPresets.presets || LIGHTING_LABELS).map(name =>
+    `<button class="opt${name === preset ? " selected" : ""}" data-lpreset="${name}">` +
+    `${LIGHTING_LABELS[name] || name}</button>`).join("");
+
+  const compass = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"].map((label, i) =>
+    `<button class="nudge" data-laz="${i * 45}">${label}</button>`).join("");
+  const relative = [["ahead", 0], ["right", 90], ["behind", 180], ["left", 270]].map(
+    ([label, offset]) => `<button class="nudge" data-laz="${wrap360(heading + offset)}" ` +
+    `title="light coming from ${label} of the aircraft (heading ${heading}&deg;)">` +
+    `${label}</button>`).join("");
+  const steps = [1, 5, 15].map(s =>
+    `<button class="nudge${s === lightStep ? " selected" : ""}" data-lstep="${s}" ` +
+    `style="${s === lightStep ? "background:#2b5d8c" : ""}">${s}&deg;</button>`).join("");
+
+  const slider = (name, label, min, max, step, unit, digits) => {
+    const knob = lightingKnob(name);
+    const value = knob.value ?? LIGHTING_BASE[name];
+    const swatch = name === "color_temperature_k"
+      ? ` <span class="swatch" style="background:${kelvinColour(value)}"></span>` : "";
+    return `<div class="ctl"><label>${label}</label>` +
+      `<input type="range" min="${min}" max="${max}" step="${step}" value="${value}" ` +
+      `data-lknob="${name}"> <input type="number" min="${min}" max="${max}" ` +
+      `step="${step}" value="${round(value, digits)}" data-lknob="${name}">` +
+      `${unit}${swatch}${autoNote(knob)}` +
+      (knob.auto ? "" : ` <button class="nudge" data-lauto="${name}" ` +
+       `title="back to the preset's value">auto</button>`) + `</div>`;
+  };
+
+  holder.innerHTML =
+    `<h3>Lighting</h3>` +
+    `<div class="dim">Pick a look, then aim the sun: click the sky dial ` +
+    `(centre = straight overhead, edge = the horizon) or type exact degrees. ` +
+    `What you set here is written into the <b>lighting</b> rows of the table.</div>` +
+    `<div class="ctl">${presetButtons}</div>` +
+    `<div class="panelRow">` +
+    `<div class="panelCol" style="flex:0 0 220px">${sunDialSvg(azimuth, elevation, heading, timeOfDay)}</div>` +
+    `<div class="panelCol">` +
+    `<div class="ctl"><label>light comes from</label>` +
+    `<button class="nudge" data-laznudge="-1" title="swing the sun anticlockwise">&#9664;</button>` +
+    `<input type="number" min="0" max="360" step="0.1" id="lightAz" ` +
+    `value="${azimuth === null || azimuth === undefined ? "" : azimuth}" ` +
+    `placeholder="auto">&deg;` +
+    `<button class="nudge" data-laznudge="1" title="swing the sun clockwise">&#9654;</button>` +
+    (azimuth === null || azimuth === undefined
+      ? ` <span class="auto">auto (${timeOfDay === "none" ? "default look" : "time of day"})</span>`
+      : ` <button class="nudge" data-lauto="sun_azimuth_deg">auto</button>`) + `</div>` +
+    `<div class="ctl"><label>&nbsp;</label>${compass}</div>` +
+    `<div class="ctl"><label>relative to aircraft</label>${relative}</div>` +
+    `<div class="ctl"><label>sun height</label>` +
+    `<button class="nudge" data-lelnudge="-1" title="lower the sun">&#9660;</button>` +
+    `<input type="number" min="2" max="90" step="0.1" id="lightEl" ` +
+    `value="${elevation.auto ? "" : elevation.value}" ` +
+    `placeholder="${elevation.value ?? "auto"}">&deg; above the horizon` +
+    `<button class="nudge" data-lelnudge="1" title="raise the sun">&#9650;</button>` +
+    autoNote(elevation) +
+    (elevation.auto ? "" : ` <button class="nudge" data-lauto="sun_elevation_deg">auto</button>`) +
+    `</div>` +
+    `<div class="ctl"><label>arrow step</label>${steps}</div>` +
+    slider("brightness_ev", "brightness", -3, 3, 0.1, " EV", 1) +
+    `</div></div>` +
+    `<details${preset !== "natural" ? " open" : ""}><summary class="dim" ` +
+    `style="cursor:pointer">advanced light</summary>` +
+    slider("sun_intensity", "sun strength", 0.05, 3, 0.05, " &times;", 2) +
+    slider("color_temperature_k", "sun colour", 2000, 10000, 100, " K", 0) +
+    slider("shadow_softness_deg", "shadow softness", 0, 30, 0.05, "&deg;", 2) +
+    slider("sky_fill", "sky fill (shadows)", 0, 3, 0.05, " &times;", 2) +
+    slider("haze", "haze", 0, 0.02, 0.0001, "", 4) +
+    `<div class="dim">Preset numbers are a starting point chosen by eye, not ` +
+    `calibrated against the measured looks; every value is recorded with the run.</div>` +
+    `</details>`;
+
+  holder.querySelectorAll("[data-lpreset]").forEach(button =>
+    button.addEventListener("click", () => {
+      // A preset is the whole look: clear the knobs it names so it shows
+      // as picked (the sun's direction is kept -- no preset names one).
+      setRow("lighting.preset", button.dataset.lpreset);
+      for (const name of ["sun_elevation_deg", "sun_intensity", "color_temperature_k",
+                          "shadow_softness_deg", "sky_fill", "haze"]) {
+        setRow(`lighting.${name}`, null);
+      }
+      setRow("lighting.brightness_ev", 0);
+      renderLightingPanel();
+    }));
+  holder.querySelectorAll("[data-laz]").forEach(button =>
+    button.addEventListener("click", () => {
+      setRow("lighting.sun_azimuth_deg", wrap360(+button.dataset.laz));
+      renderLightingPanel();
+    }));
+  holder.querySelectorAll("[data-laznudge]").forEach(button =>
+    button.addEventListener("click", () => {
+      const now = rowValue("lighting.sun_azimuth_deg");
+      const start = now === null || now === undefined ? 270 : now;
+      setRow("lighting.sun_azimuth_deg",
+             wrap360(start + lightStep * +button.dataset.laznudge));
+      renderLightingPanel();
+    }));
+  holder.querySelectorAll("[data-lelnudge]").forEach(button =>
+    button.addEventListener("click", () => {
+      const start = lightingKnob("sun_elevation_deg").value ?? 50;
+      setRow("lighting.sun_elevation_deg",
+             clamp(start + lightStep * +button.dataset.lelnudge, 2, 90));
+      renderLightingPanel();
+    }));
+  holder.querySelectorAll("[data-lstep]").forEach(button =>
+    button.addEventListener("click", () => {
+      lightStep = +button.dataset.lstep;
+      renderLightingPanel();
+    }));
+  holder.querySelectorAll("[data-lauto]").forEach(button =>
+    button.addEventListener("click", () => {
+      const name = button.dataset.lauto;
+      setRow(`lighting.${name}`, name === "brightness_ev" ? 0 : null);
+      renderLightingPanel();
+    }));
+  holder.querySelectorAll("[data-lknob]").forEach(input => {
+    input.addEventListener("input", () => {
+      // Range and number stay in step while dragging.
+      holder.querySelectorAll(`[data-lknob="${input.dataset.lknob}"]`)
+        .forEach(other => { if (other !== input) other.value = input.value; });
+    });
+    input.addEventListener("change", () => {
+      if (input.value.trim() === "") return;
+      setRow(`lighting.${input.dataset.lknob}`, Number(input.value));
+      renderLightingPanel();
+    });
+  });
+  $("lightAz").addEventListener("change", e => {
+    const text = e.target.value.trim();
+    setRow("lighting.sun_azimuth_deg", text === "" ? null : wrap360(Number(text)));
+    renderLightingPanel();
+  });
+  $("lightEl").addEventListener("change", e => {
+    const text = e.target.value.trim();
+    setRow("lighting.sun_elevation_deg", text === "" ? null : clamp(Number(text), 2, 90));
+    renderLightingPanel();
+  });
+  const dial = $("sunDial");
+  dial.addEventListener("click", event => {
+    // Screen -> sky: angle from north (clockwise) is where the light comes
+    // FROM; distance from the centre is 90 deg minus the sun's height.
+    const box = dial.getBoundingClientRect();
+    const x = (event.clientX - box.left) * (200 / box.width) - 100;
+    const y = (event.clientY - box.top) * (200 / box.height) - 100;
+    const r = Math.min(Math.hypot(x, y), 88);
+    setRow("lighting.sun_azimuth_deg", Math.round(wrap360(deg(Math.atan2(x, -y)))));
+    setRow("lighting.sun_elevation_deg", Math.round(clamp(90 * (1 - r / 88), 2, 90)));
+    renderLightingPanel();
+  });
+}
+
+function sunDialSvg(azimuth, elevation, heading, timeOfDay) {
+  const cx = 100, cy = 100, R = 88;
+  const point = (az, el) => {
+    const r = R * (1 - clamp(el, 0, 90) / 90);
+    return [cx + r * Math.sin(rad(az)), cy - r * Math.cos(rad(az))];
+  };
+  const rings = [0, 30, 60].map(el =>
+    `<circle cx="${cx}" cy="${cy}" r="${R * (1 - el / 90)}" fill="none" ` +
+    `stroke="#232d38"/><text x="${cx + 3}" y="${cy - R * (1 - el / 90) + 11}" ` +
+    `fill="#4d5a66" font-size="9">${el}&deg;</text>`).join("");
+  const labels = [["N", 0], ["E", 90], ["S", 180], ["W", 270]].map(([t, az]) => {
+    const [x, y] = [cx + (R + 7) * Math.sin(rad(az)), cy - (R + 7) * Math.cos(rad(az))];
+    return `<text x="${x}" y="${y + 4}" fill="#7d8a93" font-size="11" ` +
+      `text-anchor="middle">${t}</text>`;
+  }).join("");
+  // The aircraft: an arrow along its heading, so the light reads against it.
+  const [nx, ny] = [cx + 22 * Math.sin(rad(heading)), cy - 22 * Math.cos(rad(heading))];
+  const plane = `<line x1="${cx}" y1="${cy}" x2="${nx}" y2="${ny}" stroke="#9fb4c7" ` +
+    `stroke-width="2"/><circle cx="${nx}" cy="${ny}" r="3" fill="#9fb4c7"/>`;
+  let sun = "";
+  const known = azimuth !== null && azimuth !== undefined;
+  // Unstated, the default look's sun is compass 270 (engine yaw 180).
+  const az = known ? azimuth : (timeOfDay === "none" ? 270 : null);
+  if (az !== null) {
+    const [sx, sy] = point(az, elevation.value ?? 50);
+    sun = `<line x1="${sx}" y1="${sy}" x2="${cx}" y2="${cy}" stroke="#e0b452" ` +
+      `stroke-dasharray="3 3" opacity=".7"/>` +
+      `<circle cx="${sx}" cy="${sy}" r="8" fill="${known ? "#e0b452" : "none"}" ` +
+      `stroke="#e0b452" stroke-width="2"/>`;
+  }
+  return `<svg id="sunDial" class="dial" viewBox="0 0 200 200" width="200" height="200" ` +
+    `role="img" aria-label="sun position dial">` +
+    `<circle cx="${cx}" cy="${cy}" r="${R}" fill="#111a24" stroke="#2c3947"/>` +
+    rings + labels + plane + sun + `</svg>` +
+    `<div class="dim" style="font-size:.85em">click to place the sun &middot; ` +
+    `arrow = aircraft heading</div>`;
+}
+
+// -- camera view & zoom ------------------------------------------------------
+
+function cameraOrbit(i) {
+  // Aircraft-relative offsets -> angle around the nose (0 = in front,
+  // 90 = right, 180 = behind), height angle and distance.
+  const f = Number(rowValue(`cameras[${i}].offset_forward_m`)) || 0;
+  const r = Number(rowValue(`cameras[${i}].offset_right_m`)) || 0;
+  const u = Number(rowValue(`cameras[${i}].offset_up_m`)) || 0;
+  const flat = Math.hypot(f, r);
+  return {bearing: wrap360(deg(Math.atan2(r, f))), elevation: deg(Math.atan2(u, flat)),
+          distance: Math.hypot(flat, u)};
+}
+
+function setCameraOrbit(i, bearing, elevation, distance) {
+  const d = clamp(distance || 50, 1, 20000);
+  const el = clamp(elevation, -85, 85);
+  setRow(`cameras[${i}].offset_forward_m`, round(d * Math.cos(rad(el)) * Math.cos(rad(bearing)), 1));
+  setRow(`cameras[${i}].offset_right_m`, round(d * Math.cos(rad(el)) * Math.sin(rad(bearing)), 1));
+  setRow(`cameras[${i}].offset_up_m`, round(d * Math.sin(rad(el)), 1));
+}
+
+function renderViewPanel() {
+  const holder = $("viewPanel");
+  const cameras = (compiled && compiled.spec.cameras) || [];
+  if (!cameras.length) {
+    holder.innerHTML = `<h3>Camera view &amp; zoom</h3><div class="dim">No camera in ` +
+      `the spec yet: add a view below (chase, wingman, ...) and its angle and zoom ` +
+      `controls appear here.</div>`;
+    return;
+  }
+  const steps = [1, 5, 15, 45].map(s =>
+    `<button class="nudge" data-vstep="${s}" ` +
+    `style="${s === viewStep ? "background:#2b5d8c" : ""}">${s}&deg;</button>`).join("");
+  holder.innerHTML = `<h3>Camera view &amp; zoom</h3>` +
+    `<div class="dim">Swing each camera around the aircraft and zoom it. ` +
+    `Angles are measured around the nose: 0&deg; in front, 90&deg; to the right, ` +
+    `180&deg; behind, 270&deg; to the left. Values land in the camera rows above.</div>` +
+    `<div class="ctl"><label>arrow step</label>${steps}</div>` +
+    cameras.map(cam => cameraViewHtml(cam)).join("");
+
+  holder.querySelectorAll("[data-vstep]").forEach(button =>
+    button.addEventListener("click", () => { viewStep = +button.dataset.vstep; renderViewPanel(); }));
+  holder.querySelectorAll("[data-vcam]").forEach(element => {
+    const i = +element.dataset.vcam;
+    const act = element.dataset.vact;
+    const handler = () => {
+      const o = cameraOrbit(i);
+      const focal = Number(rowValue(`cameras[${i}].focal_length_mm`)) || 35;
+      const sensor = Number(rowValue(`cameras[${i}].sensor_width_mm`)) || 36;
+      const v = Number(element.value);
+      if (act === "angle") setCameraOrbit(i, +element.dataset.vval, o.elevation, o.distance);
+      if (act === "height") setCameraOrbit(i, o.bearing, +element.dataset.vval, o.distance);
+      if (act === "left") setCameraOrbit(i, o.bearing + viewStep, o.elevation, o.distance);
+      if (act === "right") setCameraOrbit(i, o.bearing - viewStep, o.elevation, o.distance);
+      if (act === "up") setCameraOrbit(i, o.bearing, o.elevation + viewStep, o.distance);
+      if (act === "down") setCameraOrbit(i, o.bearing, o.elevation - viewStep, o.distance);
+      if (act === "closer") setCameraOrbit(i, o.bearing, o.elevation, o.distance / 1.25);
+      if (act === "farther") setCameraOrbit(i, o.bearing, o.elevation, o.distance * 1.25);
+      if (act === "bearing" && element.value !== "") setCameraOrbit(i, v, o.elevation, o.distance);
+      if (act === "elevation" && element.value !== "") setCameraOrbit(i, o.bearing, v, o.distance);
+      if (act === "distance" && element.value !== "") setCameraOrbit(i, o.bearing, o.elevation, v);
+      if (act === "zoomin") setRow(`cameras[${i}].focal_length_mm`, round(focal * 1.25, 1));
+      if (act === "zoomout") setRow(`cameras[${i}].focal_length_mm`, round(focal / 1.25, 1));
+      if (act === "focal" && element.value !== "") setRow(`cameras[${i}].focal_length_mm`, v);
+      if (act === "tochase") {
+        // A world-anchored view left with an offset placement cannot be
+        // solved; as a chase view the offsets mean "where it follows".
+        setRow(`cameras[${i}].preset`, "chase");
+        if (o.distance < 1) setCameraOrbit(i, 180, 10, 40);
+      }
+      if (act === "fov") setRow(`cameras[${i}].focal_length_mm`,
+        round(sensor / (2 * Math.tan(rad(+element.dataset.vval) / 2)), 1));
+      renderViewPanel();
+    };
+    element.addEventListener(element.tagName === "INPUT" ? "change" : "click", handler);
+  });
+  holder.querySelectorAll("svg[data-vdial]").forEach(svg =>
+    svg.addEventListener("click", event => {
+      const i = +svg.dataset.vdial;
+      const box = svg.getBoundingClientRect();
+      const x = (event.clientX - box.left) * (140 / box.width) - 70;
+      const y = (event.clientY - box.top) * (140 / box.height) - 70;
+      const o = cameraOrbit(i);
+      setCameraOrbit(i, Math.round(wrap360(deg(Math.atan2(x, -y)))), o.elevation, o.distance);
+      renderViewPanel();
+    }));
+}
+
+function cameraViewHtml(cam) {
+  const i = cam.index;
+  const mode = rowValue(`cameras[${i}].position_mode`);
+  const aim = rowValue(`cameras[${i}].aim_mode`);
+  const focal = Number(rowValue(`cameras[${i}].focal_length_mm`)) || 35;
+  const sensor = Number(rowValue(`cameras[${i}].sensor_width_mm`)) || 36;
+  const fov = 2 * deg(Math.atan(sensor / (2 * focal)));
+  const button = (act, label, title, value) =>
+    `<button class="nudge" data-vcam="${i}" data-vact="${act}"` +
+    (value !== undefined ? ` data-vval="${value}"` : "") +
+    (title ? ` title="${title}"` : "") + `>${label}</button>`;
+  const number = (act, value, step, unit) =>
+    `<input type="number" step="${step}" value="${value}" data-vcam="${i}" ` +
+    `data-vact="${act}">${unit}`;
+
+  const zoom = `<div class="ctl"><label>zoom</label>` +
+    button("zoomout", "&minus; out", "wider: focal length / 1.25") +
+    number("focal", round(focal, 1), 0.1, " mm") +
+    button("zoomin", "in +", "closer: focal length x 1.25") +
+    ` <span class="dim">${round(fov, 1)}&deg; across</span></div>` +
+    `<div class="ctl"><label>&nbsp;</label>` +
+    [["wide", 70], ["normal", 45], ["tele", 15], ["super tele", 5]].map(([label, f]) =>
+      button("fov", label, `${f}&deg; field of view`, f)).join("") + `</div>`;
+  const livePreset = String(rowValue(`cameras[${i}].preset`) || cam.preset);
+  const presetTag = livePreset !== cam.camera_id ? `${livePreset} &mdash; ` : "&mdash; ";
+  const movesNote = (cam.moves && cam.moves.length)
+    ? `<div class="dim">this camera has ${cam.moves.length} keyframed move(s); ` +
+      `they animate from the values set here</div>` : "";
+
+  const preset = livePreset;
+  if (mode === "offset" && !["chase", "wingman", "cockpit"].includes(preset)) {
+    return `<div class="panel"><b>${cam.camera_id}</b> <span class="verdict-refused">` +
+      `${preset} view with no position in the world: it cannot render (the run ` +
+      `refuses it).</span> <span class="dim">A ${preset} view stands somewhere in ` +
+      `the scene, but this one only has an offset from the aircraft.</span>` +
+      `<div class="ctl">${button("tochase", "make it a chase view",
+        "follow the aircraft; then swing it around with the orbit controls")}</div>` +
+      `${zoom}</div>`;
+  }
+  if (mode !== "offset" || aim !== "aircraft" || preset === "cockpit") {
+    return `<div class="panel"><b>${cam.camera_id}</b> <span class="dim">${presetTag}` +
+      (preset === "cockpit"
+        ? `rides in the cockpit, so only its zoom is adjustable here.`
+        : `placed in the scene (${mode}, aimed by ${aim}), so only its zoom ` +
+          `is adjustable here; its position is in the rows above.`) +
+      `</span>${zoom}${movesNote}</div>`;
+  }
+  const o = cameraOrbit(i);
+  const around = [["front", 0], ["front-right", 45], ["right", 90], ["rear-right", 135],
+                  ["behind", 180], ["rear-left", 225], ["left", 270], ["front-left", 315]]
+    .map(([label, b]) => button("angle", label, `${b}&deg; around the nose`, b)).join("");
+  const heights = [["below", -35], ["level", 0], ["slightly above", 12], ["high", 40],
+                   ["top-down", 80]]
+    .map(([label, e]) => button("height", label, `${e}&deg; height angle`, e)).join("");
+  // Top-down diagram: aircraft nose up, the camera where it sits.
+  const [px, py] = [70 + 52 * Math.sin(rad(o.bearing)), 70 - 52 * Math.cos(rad(o.bearing))];
+  const dial = `<svg data-vdial="${i}" class="dial" viewBox="0 0 140 140" width="140" ` +
+    `height="140" role="img" aria-label="camera position around the aircraft">` +
+    `<circle cx="70" cy="70" r="52" fill="none" stroke="#232d38"/>` +
+    `<path d="M70 52 L78 80 L70 75 L62 80 Z" fill="#9fb4c7"/>` +
+    `<text x="70" y="12" fill="#7d8a93" font-size="9" text-anchor="middle">nose</text>` +
+    `<line x1="${px}" y1="${py}" x2="70" y2="68" stroke="#6fb3e0" stroke-dasharray="3 3"/>` +
+    `<circle cx="${px}" cy="${py}" r="7" fill="#6fb3e0"/></svg>`;
+  return `<div class="panel"><b>${cam.camera_id}</b> <span class="dim">${presetTag}` +
+    `follows the aircraft</span>` +
+    `<div class="panelRow"><div class="panelCol" style="flex:0 0 150px">${dial}` +
+    `<div class="dim" style="font-size:.85em">click to move the camera</div></div>` +
+    `<div class="panelCol">` +
+    `<div class="ctl"><label>orbit</label>` +
+    button("left", "&#9664; left", "swing the camera to its left around the aircraft") +
+    button("right", "right &#9654;", "swing the camera to its right around the aircraft") +
+    button("up", "&#9650; up", "raise the camera") +
+    button("down", "&#9660; down", "lower the camera") + `</div>` +
+    `<div class="ctl"><label>angle around nose</label>` +
+    number("bearing", round(o.bearing, 1), 0.1, "&deg;") + `</div>` +
+    `<div class="ctl"><label>&nbsp;</label>${around}</div>` +
+    `<div class="ctl"><label>height angle</label>` +
+    number("elevation", round(o.elevation, 1), 0.1, "&deg;") + `</div>` +
+    `<div class="ctl"><label>&nbsp;</label>${heights}</div>` +
+    `<div class="ctl"><label>distance</label>` +
+    button("closer", "closer", "distance / 1.25") +
+    number("distance", round(o.distance, 1), 0.1, " m") +
+    button("farther", "farther", "distance x 1.25") + `</div>` +
+    zoom + movesNote + `</div></div></div>`;
 }
 
 // -- points of view ------------------------------------------------------
@@ -737,6 +1231,7 @@ function editedSpecDict() {
     // validator refuses a string there (a string "false" is truthy).
     const value = input.value === "true" ? true
       : input.value === "false" ? false
+      : text === "null" ? null
       : Number.isNaN(parsed) ? input.value : parsed;
     if (String(entry.value) !== String(value)) {
       entry.value = value;
@@ -1227,6 +1722,11 @@ async function initAeroPanel(runId, run) {
     if (conditions.sun) {
       // Visual plan V1: the render sun from place + date + time, stated.
       context.fillText(String(conditions.sun).slice(0, 58), 10, y);
+      y += 14;
+    }
+    if (conditions.lighting) {
+      // The lighting block: preset, exact sun, brightness, stated.
+      context.fillText(String(conditions.lighting).slice(0, 58), 10, y);
       y += 14;
     }
     y += 6;

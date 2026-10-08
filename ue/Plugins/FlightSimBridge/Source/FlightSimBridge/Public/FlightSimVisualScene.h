@@ -230,6 +230,21 @@ struct FFlightSimVisualSceneOptions
 	FColor XPlaneAmbient = FColor::White;
 	FColor XPlaneHorizon = FColor::White;
 
+	// The lighting block's engine knobs (core/scene/lighting.py, through
+	// -sun-intensity-scale= -sky-light-scale= -sun-temperature=
+	// -sun-source-angle=, core/render/flags.py LIGHTING_FLAGS): a factor on
+	// the sun's intensity and on the sky light's, the sun's colour
+	// temperature in kelvin, and the sun disc's angular diameter in degrees
+	// (shadow-edge softness). Negative (zero for the temperature) = not
+	// stated: the scene is exactly the one built without the flags. Applied
+	// after the physical sky and the X-Plane colours; recorded in
+	// look_applied.lighting. Preset values are uncalibrated against Gate 6.
+	// UNCOMPILED when written (no engine on the authoring machine).
+	double SunIntensityScale = -1.0;
+	double SkyLightScale = -1.0;
+	double SunTemperatureK = 0.0;
+	double SunSourceAngleDeg = -1.0;
+
 	// -- Phase 2 Look lane (contracts §5.4, §10) ----------------------------
 	// Cloud layers from the card's look.clouds (or the -cloud-* probe flags).
 	// Empty = no volumetric cloud component is spawned (byte-identical to

@@ -1007,7 +1007,9 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		            "[-passes=normal,velocity,albedo] [-width=960] [-height=540] "
 		            "[-calibration] [-sun-lux=<lux>] [-accumulate=<K>] [-velocity-check] "
 		            "[-normal-source=scs|material] [-scene=<scene document>] "
-		            "[-quality=measure|beauty] [-warmup=N] [-triangle-budget=<n>]"));
+		            "[-quality=measure|beauty] [-warmup=N] [-triangle-budget=<n>] "
+		            "[-sun-intensity-scale=<x>] [-sky-light-scale=<x>] [-sun-temperature=<K>] "
+		            "[-sun-source-angle=<deg>]"));
 		return 1;
 	}
 	// Visual plan V0. "measure" is every render this project has
@@ -1391,6 +1393,13 @@ int32 UFlightSimRenderCommandlet::Main(const FString& Params)
 		SceneOptions.TerrainPath = TerrainPath;
 		SceneOptions.bDynamicShadows = !bNoShadows;
 		SceneOptions.FogDensity = static_cast<float>(FogDensity);
+		// The lighting block's engine knobs (core/render/flags.py
+		// LIGHTING_FLAGS). Each is optional; an absent one keeps the
+		// options' "not stated" sentinel, so the scene is unchanged.
+		FParse::Value(*Params, TEXT("sun-intensity-scale="), SceneOptions.SunIntensityScale);
+		FParse::Value(*Params, TEXT("sky-light-scale="), SceneOptions.SkyLightScale);
+		FParse::Value(*Params, TEXT("sun-temperature="), SceneOptions.SunTemperatureK);
+		FParse::Value(*Params, TEXT("sun-source-angle="), SceneOptions.SunSourceAngleDeg);
 		// -triangle-budget=<n> (core/render/flags.py TRIANGLE_BUDGET_PREFIX):
 		// the procedural terrain's triangle budget, asked for by webapp.runs
 		// only when the bake is finer than 30 m (a 10 m 3DEP bake would

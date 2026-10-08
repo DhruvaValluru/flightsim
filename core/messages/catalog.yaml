@@ -1010,6 +1010,12 @@ buildings.unverified:
 buildings.ids:
   sentence: "A building in the footprint set has no stable identifier, repeats another's, or states a malformed outline or height."
   hint: "Take every identifier from the source, once each, and give each outline at least three corners."
+lighting.preset:
+  sentence: "The lighting preset is not one this build knows."
+  hint: "Choose natural, sunny, super bright, soft, hazy, overcast, golden hour or dramatic."
+lighting.range:
+  sentence: "A lighting value is outside what the render can show."
+  hint: "Keep the sun 2 to 90 degrees up and its direction 0 to 360 degrees, brightness within 5 stops, colour 1700 to 12000 K, shadow softness 0 to 45 degrees, sun and sky fill 0 to 10 times, and haze 0 to 0.05."
 runway.geometry:
   sentence: "The runway cannot be placed: its designator, threshold, heading, length or width is missing, out of range, or disagrees with the heading."
   hint: "State a designator that names the heading, a threshold latitude and longitude, a heading below 360 degrees, a length of 300 to 5500 metres and a width of 18 to 80 metres."
