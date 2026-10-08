@@ -2451,6 +2451,16 @@ bool FFlightSimVisualScene::ApplyRainToBeauty(USceneCaptureComponent2D* Beauty,
 	}
 	TSharedPtr<FJsonObject> Row = NewRecord();
 	Row->SetBoolField(TEXT("asked"), true);
+	if (DrawsRainParticles())
+	{
+		// The 3-D drops (FlightSimRainParticles.cpp) are the rain this
+		// camera sees; a screen-space streak over them would draw it twice.
+		Row->SetBoolField(TEXT("drawn"), false);
+		Row->SetStringField(TEXT("superseded_by"),
+			TEXT("look_applied.rain_particles: 3-D drops in the scene"));
+		WorldApplied->SetObjectField(TEXT("precipitation"), Row);
+		return true;
+	}
 	UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, SceneRainMaterialPath);
 	if (Material == nullptr || Beauty == nullptr)
 	{

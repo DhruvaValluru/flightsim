@@ -173,5 +173,12 @@ def test_the_commandlet_places_the_drops_with_this_frames_camera():
     assert "(PoseLocations[Upper] - PoseLocations[Upper - 1]) / Span" in velocity
 
 
+def test_the_drops_supersede_the_screen_space_streaks():
+    rain = SCENE_CPP[SCENE_CPP.index("bool FFlightSimVisualScene::ApplyRainToBeauty("):]
+    superseded = rain.index("if (DrawsRainParticles())")
+    assert superseded < rain.index("LoadObject<UMaterialInterface>(nullptr, SceneRainMaterialPath)")
+    assert 'TEXT("superseded_by")' in rain[superseded:superseded + 600]
+
+
 def test_a_wrapped_drop_is_teleported_not_blurred():
     assert "RainDrops->BatchUpdateInstancesTransforms(0, RainTransforms, true, false, true);" in RAIN_CPP

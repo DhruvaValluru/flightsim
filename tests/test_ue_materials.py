@@ -183,7 +183,9 @@ ALL_CREATED = {"M_VertexColor", "M_TerrainImagery", "M_VertexColorUnlit", "M_Cus
                # The weather look (FlightSimWeatherLook.cpp).
                "M_Ground_Desert", "M_Ground_Forest", "M_Ground_Grassland", "M_Ground_Snow",
                "M_Ground_Bare", "M_Ground_City", "M_Ground_Ocean", "M_LensDrops",
-               "M_RainShaft", "M_Lightning", "M_IceOverlay"}
+               "M_RainShaft", "M_Lightning", "M_IceOverlay",
+               # The 3-D rain (FlightSimRainParticles.cpp).
+               "M_RainDrop"}
 COMMANDLET_CPP = BRIDGE / "Private" / "FlightSimRenderCommandlet.cpp"
 
 
@@ -297,7 +299,15 @@ def test_the_world_parameters_the_cpp_sets_are_the_ones_the_script_exposes():
                                  "SceneRainDensityParameter", "SceneRainPhaseParameter")):
         assert f'{cpp} = TEXT("{value}");' in SCENE_CPP_TEXT, cpp
     streaks = _body(text, "create_rain_streaks")
-    assert "BL_SCENE_COLOR_AFTER_DOF" in streaks and "PPI_POST_PROCESS_INPUT0" in streaks
+    assert "after_tonemapping()" in streaks and "PPI_POST_PROCESS_INPUT0" in streaks
+    # The screen-space looks run after the tonemapper (the tan-border report),
+    # and a material built before the move is moved in place, not skipped.
+    for name, body in (("M_RainStreaks", streaks), ("M_LensDrops", _body(text, "create_lens_drops"))):
+        create = body.index("new_material(" if name == "M_RainStreaks" else "_weather_material(")
+        assert body.index(f'move_after_tonemapping("{name}")') < create
+        assert '"blendable_location", after_tonemapping()' in body
+    assert '"BL_SCENE_COLOR_AFTER_DOF"' not in text
+    assert 'getattr(unreal.BlendableLocation, "BL_SCENE_COLOR_AFTER_TONEMAPPING", None)' in text
     assert "length, direction, density, phase = RAIN_PARAMETERS" in streaks
     stars = _body(text, "create_starfield")
     assert "MSM_UNLIT" in stars and "BLEND_ADDITIVE" in stars and '"two_sided", True' in stars

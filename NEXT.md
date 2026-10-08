@@ -1,5 +1,32 @@
 # Resume here
 
+**3-D rain and the tan border (2026-10-08, `phase-2-testing`; UNCOMPILED
+-- no engine here).** The owner's "heavy rain" stills showed no rain and
+a blurred tan border round every frame. (1) A stated rain rate now writes
+a `rain_particles` card block (`core/scene/rain_particles.py`) and
+`FlightSimRainParticles.cpp` draws real drops: one instanced
+`/Engine/BasicShapes/Cylinder` per drop with `M_RainDrop` (lit
+translucent, per-instance coverage in custom float 0), 1,500-20,000 of
+them by rate in a 12 m world box ahead of the camera, falling at their
+Atlas speed on the FDM's time, streaked by their motion relative to the
+camera (the pose track's velocity, `PoseVelocityAtTime`) over a stated
+1/60 s, beauty-only. They supersede the screen-space `M_RainStreaks`
+when drawn. (2) The border: SUSPECTED (not measured) to be the two
+screen-space looks running at `BL_SCENE_COLOR_AFTER_DOF` (render
+resolution, before TSR); both now run after the tonemapper, and the
+materials script moves an existing asset's location in place
+(`move_after_tonemapping`). FIRST WINDOWS STEPS: `.\scripts\build_ue.ps1`,
+re-run `scripts/ue_create_materials.py` (watch for MATERIAL-UPDATED on
+M_RainStreaks / M_LensDrops and MATERIAL-CREATED on M_RainDrop), then
+`scripts\run_test_scenarios.py --still --only 7 8` and
+`scripts\inspect_run.py <id>` (look_applied.rain_particles: drawn,
+last_drawn, last_camera_speed_mps). If the border survives, try
+`Capture->ShowFlags.SetPostProcessMaterial(false)` on the beauty capture,
+then the lens flare (`LensFlareIntensity` 0). Known risks: the ISM API
+names (`BatchUpdateInstancesTransforms`, `SetNumCustomDataFloats`) and
+the PerInstanceCustomData node's `const_default_value` are from memory.
+Tests: `tests/test_rain_particles.py`, `tests/test_ue_materials.py`.
+
 **Weather visuals (2026-10-07, `phase-2-testing`; UNCOMPILED -- no engine
 here).** A new absent-canonical card block `weather_look`
 (`core/scene/weather_look.py`: surface, storm, rain rate, wetness, ice,

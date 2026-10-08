@@ -778,6 +778,40 @@ def create_grey_card():
 
 # -- W5: the world materials -----------------------------------------------------
 
+def after_tonemapping():
+    """Where the beauty capture's screen-space looks (M_RainStreaks,
+    M_LensDrops) run: after the tonemapper, at the output resolution. They
+    ran at BL_SCENE_COLOR_AFTER_DOF -- the render resolution, before TSR
+    and bloom -- and the owner's rain frames (2026-10-08) carried a blurred
+    tan border all round the image. Suspected, not measured: such a pass
+    writes only the view rect of a pooled texture larger than it, and TSR
+    and bloom blur the stale band beyond inward. After the tonemapper the
+    pass reads and writes the final image itself. UE 5.x names the
+    location BL_SCENE_COLOR_AFTER_TONEMAPPING; the old name is the fallback."""
+    return (getattr(unreal.BlendableLocation, "BL_SCENE_COLOR_AFTER_TONEMAPPING", None)
+            or getattr(unreal.BlendableLocation, "BL_AFTER_TONEMAPPING"))
+
+
+def move_after_tonemapping(name):
+    """True when /Game/FlightSim/<name> already exists: its graph is kept
+    and only its blendable location is moved to after_tonemapping() in
+    place (this script otherwise skips existing assets, so a machine that
+    built the material before the move would keep the old location)."""
+    full = f"{PATH}/{name}"
+    if not unreal.EditorAssetLibrary.does_asset_exist(full):
+        return False
+    material = unreal.EditorAssetLibrary.load_asset(full)
+    location = after_tonemapping()
+    if material.get_editor_property("blendable_location") == location:
+        print(f"MATERIAL-EXISTS: {full}")
+        return True
+    material.set_editor_property("blendable_location", location)
+    unreal.MaterialEditingLibrary.recompile_material(material)
+    unreal.EditorAssetLibrary.save_asset(full)
+    print(f"MATERIAL-UPDATED: {full} (blendable location: after the tonemapper)")
+    return True
+
+
 def new_material(name):
     """Create /Game/FlightSim/<name> once; None when it already exists."""
     full = f"{PATH}/{name}"
@@ -1430,19 +1464,16 @@ def create_starfield():
 
 
 def create_rain_streaks():
-    """W5: M_RainStreaks -- post-process before the tonemapper, the scene
-    colour raised by STREAK_GAIN where a streak lies (see the constants)."""
+    """W5: M_RainStreaks -- post-process after the tonemapper (see
+    after_tonemapping), the scene colour raised by STREAK_GAIN where a
+    streak lies (see the constants)."""
+    if move_after_tonemapping("M_RainStreaks"):
+        return
     material = new_material("M_RainStreaks")
     if material is None:
         return
     material.set_editor_property("material_domain", unreal.MaterialDomain.MD_POST_PROCESS)
-    # Before tonemapping. UE 5.x renamed BL_BEFORE_TONEMAPPING to
-    # BL_SCENE_COLOR_AFTER_DOF (measured on 5.7: AttributeError); the old
-    # name is kept as the fallback for an engine that still has it.
-    material.set_editor_property(
-        "blendable_location",
-        getattr(unreal.BlendableLocation, "BL_SCENE_COLOR_AFTER_DOF", None)
-        or getattr(unreal.BlendableLocation, "BL_BEFORE_TONEMAPPING"))
+    material.set_editor_property("blendable_location", after_tonemapping())
     lib = unreal.MaterialEditingLibrary
     length, direction, density, phase = RAIN_PARAMETERS
     screen = lib.create_material_expression(material, unreal.MaterialExpressionScreenPosition, -1600, 0)
@@ -1941,19 +1972,18 @@ def create_ground_surfaces():
 
 
 def create_lens_drops():
-    """M_LensDrops: post-process (after DOF, before the tonemapper). The
+    """M_LensDrops: post-process (after the tonemapper: after_tonemapping). The
     screen is cut into cells of 1/18 of its height; a cell holds a drop
     when its hash is below DropAmount * 0.45, and inside the drop's disc
     the scene is sampled mirrored about the drop's centre (a lens of
     water inverts what is behind it), darkened 15 % at the rim."""
+    if move_after_tonemapping("M_LensDrops"):
+        return
     material = _weather_material("M_LensDrops")
     if material is None:
         return
     material.set_editor_property("material_domain", unreal.MaterialDomain.MD_POST_PROCESS)
-    material.set_editor_property(
-        "blendable_location",
-        getattr(unreal.BlendableLocation, "BL_SCENE_COLOR_AFTER_DOF", None)
-        or getattr(unreal.BlendableLocation, "BL_BEFORE_TONEMAPPING"))
+    material.set_editor_property("blendable_location", after_tonemapping())
     lib = unreal.MaterialEditingLibrary
     amount = scalar(material, lib, WEATHER_PARAMETERS["drops"], 0.0, -1600, 600)
     screen = lib.create_material_expression(material, unreal.MaterialExpressionScreenPosition, -1600, 0)
