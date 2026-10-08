@@ -22,6 +22,7 @@
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "ProceduralMeshComponent.h"
+#include "RHI.h"
 #include "Sound/SoundWaveProcedural.h"
 
 #include <atomic>
@@ -1062,7 +1063,10 @@ bool FFlightSimWeather::BuildCell(UWorld* World, const TSharedPtr<FJsonObject>& 
 		{
 			Why = TEXT("its material domain is not Volume (re-run scripts/ue_create_materials.py)");
 		}
-		else if (FMaterialResource* Resource = Base->GetMaterialResource(World->GetFeatureLevel()))
+		// UE 5.7 keys material resources by shader platform (measured: the
+		// feature-level overload is gone); the platform of this world's level.
+		else if (FMaterialResource* Resource =
+		             Base->GetMaterialResource(GShaderPlatformForFeatureLevel[World->GetFeatureLevel()]))
 		{
 			Resource->FinishCompilation();
 			if (Resource->GetCompileErrors().Num() > 0)
